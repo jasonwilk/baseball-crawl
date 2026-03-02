@@ -1,0 +1,29 @@
+{
+  "name": "baseball-crawl",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu",
+  "features": {
+    "ghcr.io/devcontainers/features/node:1": {},
+    "ghcr.io/rocker-org/devcontainer-features/apt-packages:1": {
+      "packages": "git,curl,jq"
+    }
+  },
+  "postCreateCommand": "curl -fsSL https://claude.ai/install.sh | bash && npm i -g @openai/codex",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "Anthropic.claude-code",
+        "openai.chatgpt",
+        "ReprEng.csv"
+      ]
+    }
+  },
+  "remoteUser": "vscode",
+  "forwardPorts": [],
+  "mounts": [
+    "source=${localEnv:HOME}/.claude,target=/home/vscode/.claude,type=bind"
+  ],
+  "remoteEnv": {
+    "PATH": "${containerEnv:PATH}:/home/vscode/.local/bin"
+  },
+  "sshAgent": "local"
+}

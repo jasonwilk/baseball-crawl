@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# pytest
+.pytest_cache/
+
+# Environment / credentials
+.env
+.env.*
+secrets/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+
+# Data (local dev outputs)
+# Ignore the runtime database and any other generated files under data/,
+# but commit seed SQL files (data/seeds/ is source-controlled).
+data/
+!data/seeds/
+!data/seeds/**
+
+# Generated / aggregated files
+codebase.md
+
+# Ephemeral data directory -- safe zone for raw API responses and scratch data
+/ephemeral/*
+!/ephemeral/README.md
+!/ephemeral/scratch/
+/ephemeral/scratch/*
+!/ephemeral/scratch/.gitkeep

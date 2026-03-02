@@ -1,0 +1,45 @@
+services:
+  app:
+    build: .
+    env_file: .env
+    volumes:
+      # Host-mount the data directory so the SQLite database is visible on the
+      # filesystem at ./data/app.db. This allows direct inspection, backup
+      # verification, and migration dry-runs without entering the container.
+      - ./data:/app/data
+      # Host-mount migrations so schema changes take effect without rebuilding.
+      - ./migrations:/app/migrations
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.app.rule=Host(`baseball.localhost`)"
+      - "traefik.http.services.app.loadbalancer.server.port=8000"
+
+  traefik:
+    image: traefik:v3
+    command:
+      # Dev-only: exposes the Traefik dashboard without authentication.
+      # Remove --api.insecure=true in production; use Cloudflare Access instead.
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+    ports:
+      # App traffic: http://localhost:8000 -> Traefik -> FastAPI container
+      - "8000:80"
+      # Traefik dashboard (dev only): http://localhost:8080
+      - "8080:8080"
+    volumes:
+      # Traefik reads Docker labels to configure routing.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    # Traefik starts routing to the app only after the app health check passes.
+    # This prevents Traefik from forwarding requests to an app that is still
+    # running migrations or initializing.
+    depends_on:
+      app:
+        condition: service_healthy

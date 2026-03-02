@@ -1,0 +1,31 @@
+# baseball-crawl Python dependencies
+#
+# Install for local development:
+#   pip install -r requirements.txt
+#
+# The Docker image installs these automatically via the Dockerfile.
+
+# ---------------------------------------------------------------------------
+# HTTP client (existing -- gamechanger crawlers)
+# ---------------------------------------------------------------------------
+httpx==0.28.1
+respx==0.22.0
+
+# ---------------------------------------------------------------------------
+# API framework
+# ---------------------------------------------------------------------------
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+# starlette is a FastAPI dependency; pinned here for run_in_threadpool access.
+starlette==0.41.3
+
+# ---------------------------------------------------------------------------
+# Testing
+# ---------------------------------------------------------------------------
+pytest==8.3.4
+pytest-asyncio==0.25.0
+
+# ---------------------------------------------------------------------------
+# Environment variables
+# ---------------------------------------------------------------------------
+python-dotenv==1.0.1
