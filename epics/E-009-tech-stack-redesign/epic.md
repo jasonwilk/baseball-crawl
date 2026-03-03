@@ -146,6 +146,9 @@ complete, IDEA-001 should be marked DISCARDED with a reference to E-009.
 | E-009-R-02 | Research: API Layer Options for Each Deployment Path | DONE | None | - |
 | E-009-R-03 | Research: Dashboard Framework and Agent Browsability | DONE | None | - |
 | E-009-R-04 | Research: Option A vs Option B -- Infrastructure Comparison | DONE | None | - |
+| E-009-R-05 | Research: MCP Ecosystem as Agent Integration Layer | DONE | None | - |
+| E-009-R-06 | Research: Git and GitHub Integration: gh CLI vs. MCP | DONE | None | - |
+| E-009-R-07 | Research: apitap and Alternatives (Tool Category Investigation) | DONE | None | - |
 | E-009-01   | Technology Decision Record -- choose Option A or Option B | DONE | R-01, R-02, R-03, R-04 | PM |
 | E-009-02   | Docker Compose environment -- database + API (Option B) | DONE | E-009-01 | data-engineer |
 | E-009-03   | Docker Compose environment -- dashboard (Option B) | DONE | E-009-02 | general-dev |
@@ -153,10 +156,7 @@ complete, IDEA-001 should be marked DISCARDED with a reference to E-009.
 | E-009-05   | Database seeding and reset workflow | DONE | E-009-02; conflicts with E-009-04 (no parallel) | data-engineer |
 | E-009-06   | Agent browsability verification | DONE | E-009-03 | general-dev |
 | E-009-07   | Production deployment runbook | TODO | E-009-02, E-009-03, E-009-04, E-009-05 | general-dev |
-| E-009-08   | CLAUDE.md and E-004 update | TODO | E-009-07 (run last; all prior stories must be DONE) | PM |
-| E-009-R-05 | Research: MCP Ecosystem as Agent Integration Layer | DONE | None | - |
-| E-009-R-06 | Research: Git and GitHub Integration: gh CLI vs. MCP | DONE | None | - |
-| E-009-R-07 | Research: apitap and Alternatives (Tool Category Investigation) | DONE | None | - |
+| E-009-08   | CLAUDE.md and E-004 update | TODO | E-009-07 (run last; all prior stories must be DONE) | claude-architect |
 
 ## Technical Notes
 
@@ -395,29 +395,9 @@ migrations/                 # D1 SQL schema migrations (existing)
 9. ~~**Parallel dispatch constraint**~~: RESOLVED. E-009-04 and E-009-05 were dispatched
    sequentially. Both are now DONE.
 
-10. **Devcontainer configuration drift**: The `.devcontainer/devcontainer.json` was created
-    before the E-009 tech stack decision and does not reflect the current stack. It installs
-    Node.js but not Python; it has no Docker-in-Docker or Docker socket forwarding. Two
-    development workflows are possible:
-
-    **Workflow A -- Devcontainer for AI coding assistants only (Codespaces/Remote Containers)**:
-    The devcontainer needs Python 3.12 (for running tests without Docker), and Docker access
-    (for `docker compose up`). This requires either Docker-in-Docker or Docker socket
-    forwarding. Recommendation: use the `docker-in-docker` devcontainer feature. Update the
-    base image to include Python or add the Python devcontainer feature. Remove Node.js
-    (not used in this project).
-
-    **Workflow B -- Devcontainer not used for daily development**:
-    If the operator develops on the host machine (macOS) and the devcontainer is only used
-    for Codespaces CI or occasional remote development, then the devcontainer should be
-    updated to match the stack but is not blocking. The current devcontainer works for
-    Claude Code sessions (which run on the host, not in the container).
-
-    **PM recommendation**: Update the devcontainer to match the stack as a small cleanup
-    task (add Python feature, add Docker-in-Docker feature, remove Node.js, update
-    postCreateCommand to install Python deps). This is not blocking any E-009 story --
-    it should be captured as a note in E-009-08 or as a follow-on task. The user should
-    confirm which workflow they use before the devcontainer is modified.
+10. ~~**Devcontainer configuration drift**~~: RESOLVED. E-025 (Devcontainer Update) and
+    E-026 (Python Version Governance) updated the devcontainer to Python 3.13 with
+    Docker-in-Docker alongside Node.js. The devcontainer now matches the project stack.
 
 ## History
 - 2026-02-28: Created as DRAFT. Expert consultation synthesized by PM. Research spikes
@@ -473,3 +453,11 @@ migrations/                 # D1 SQL schema migrations (existing)
   question 10: devcontainer configuration drift (.devcontainer/devcontainer.json predates
   E-009 stack decision, missing Python and Docker features). Remaining TODO: E-009-07
   (production runbook) and E-009-08 (CLAUDE.md update).
+- 2026-03-03: **Spec review refinement.** Addressed findings from codex-spec-review:
+  P1: E-009-08 routing clarified (must go to claude-architect, not PM-executed, because
+  it modifies CLAUDE.md). P2: E-009-07 ACs 3/5/6 labeled (Operator-verified); two-phase
+  execution note added; AC-8 override/profiles mismatch fixed; E-009-08 AC-4 WebFetch
+  reference corrected to curl per E-009-06 findings; AC-1 updated to verify current
+  CLAUDE.md before editing. P3: Stories table reordered, OQ-10 resolved (E-025/E-026),
+  E-009-02 DoD checkboxes fixed, AC-6/AC-8 scope clarified. Deferred: stale macOS paths
+  in DONE research spikes (frozen historical records).

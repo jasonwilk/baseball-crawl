@@ -41,7 +41,7 @@ Admins get two access paths:
 1. **Magic link, not passwords.** Coaches will not remember yet another password. Email magic link is the simplest auth that does not require password management, reset flows, or bcrypt.
 2. **Passkeys as optional upgrade.** After magic link login, coaches can register a passkey on their device for faster future access. This is additive, not required.
 3. **SQLite sessions table, not signed cookies.** A `sessions` table avoids needing a cookie-signing secret (`itsdangerous`) and makes session revocation trivial (delete the row). The session cookie contains only a random token; the server looks up the session in DB.
-4. **Mailgun for email, stdout in dev.** Mailgun API via plain `requests` (no SDK). When `MAILGUN_API_KEY` is not set, the magic link is logged to stdout so local dev works without email infrastructure.
+4. **Mailgun for email, stdout in dev.** Mailgun API via `httpx` (already in `requirements.txt`; no SDK). When `MAILGUN_API_KEY` is not set, the magic link is logged to stdout so local dev works without email infrastructure.
 5. **Admin route protection via Cloudflare, not the app.** Cloudflare Access policy requires WARP to reach `/admin/*`. The app does NOT inspect Cloudflare headers. Once a request reaches `/admin`, the app trusts it and only checks the session cookie + `is_admin` flag (same session system as coaches). This keeps the app's auth model unified -- one session system for all users.
 6. **No auth frameworks.** No Flask-Login, no FastAPI-Users, no Authlib. Just middleware + DB queries.
 7. **`DEV_USER_EMAIL` bypass.** When `DEV_USER_EMAIL` is set, the auth middleware skips the login page entirely and auto-creates a session for that email. This keeps local dev frictionless.
@@ -70,7 +70,7 @@ Admins get two access paths:
 - A coach assigned to both JV and Freshman sees a team selector and can switch between them
 - An admin (Jason) sees all teams on the dashboard and can access the admin page (admin page requires WARP at the network layer + session + is_admin in the app)
 - An unauthenticated request to the dashboard redirects to the login page
-- An unrecognized email (not in the users table) sees a "Contact your administrator" message after attempting magic link login
+- An unrecognized email (not in the users table) sees the same "If this email is registered, you will receive a login link" message as a recognized email (no enumeration)
 - Local dev works with `DEV_USER_EMAIL` and no Mailgun/Cloudflare
 - Magic link tokens expire after 15 minutes and cannot be reused
 - Sessions expire after 7 days
@@ -149,11 +149,11 @@ CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
 Coach -> GET /auth/login (login page with email form)
 Coach -> POST /auth/login (email submitted)
   -> Server looks up email in users table
-  -> If not found: render "Contact your administrator" message
+  -> If not found: render "If this email is registered, you will receive a login link." (same page as found case, to prevent enumeration)
   -> If found: generate 32-byte random token, hash with SHA-256, store in magic_link_tokens
   -> Send email via Mailgun with link: /auth/verify?token=<raw_token>
   -> (Dev mode: log the link to stdout instead)
-  -> Render "Check your email" confirmation page
+  -> Render "If this email is registered, you will receive a login link." confirmation page
 Coach -> GET /auth/verify?token=<raw_token>
   -> Server hashes the token, looks up in magic_link_tokens
   -> Validates: exists, not expired (< 15 min), not already used
@@ -231,13 +231,13 @@ When `DEV_USER_EMAIL` environment variable is set:
 - This means local dev works immediately after running the migration -- no Mailgun, no WARP, no login page
 
 ### Email sending
-- **Production**: Mailgun API via plain HTTP `requests` (no SDK). The endpoint is `https://api.mailgun.net/v3/{MAILGUN_DOMAIN}/messages`. Auth is HTTP Basic with `api:MAILGUN_API_KEY`.
+- **Production**: Mailgun API via `httpx` (already in `requirements.txt`; no SDK). The endpoint is `https://api.mailgun.net/v3/{MAILGUN_DOMAIN}/messages`. Auth is HTTP Basic with `api:MAILGUN_API_KEY`.
 - **Dev mode**: When `MAILGUN_API_KEY` is not set, log the full magic link URL to stdout at INFO level.
 - Environment variables: `MAILGUN_API_KEY`, `MAILGUN_DOMAIN`, `MAILGUN_FROM_EMAIL` (defaults to `noreply@{MAILGUN_DOMAIN}`).
 
 ### Dependencies (Python packages)
 - `py_webauthn` -- WebAuthn/passkey registration and authentication. Well-maintained, wraps the W3C spec.
-- No other new dependencies. Mailgun is called via plain `requests` (already in the project). Token generation uses `secrets` (stdlib). Hashing uses `hashlib` (stdlib).
+- No other new dependencies. Mailgun is called via `httpx` (already in `requirements.txt`). Token generation uses `secrets` (stdlib). Hashing uses `hashlib` (stdlib).
 
 ### Session cookie details
 - Name: `session`
@@ -255,6 +255,7 @@ src/api/routes/admin.py                          -- Admin CRUD routes
 src/api/email.py                                 -- Mailgun email sending
 src/api/templates/auth/login.html                -- Login page (email + passkey)
 src/api/templates/auth/check_email.html          -- "Check your email" confirmation
+src/api/templates/auth/passkey_prompt.html        -- Post-login interstitial with passkey CTA
 src/api/templates/auth/passkey_register.html     -- Passkey registration page
 src/api/templates/admin/users.html               -- Admin user list page
 src/api/templates/admin/edit_user.html           -- Admin edit user page
@@ -279,7 +280,7 @@ requirements.txt                                 -- Add py_webauthn
 - E-023-02 (magic link) depends on E-023-01 (needs tables). Creates `src/api/auth.py`, `src/api/routes/auth.py`, `src/api/email.py`, and modifies `src/api/main.py`.
 - E-023-03 (passkeys) depends on E-023-02 (needs session infrastructure). Modifies `src/api/routes/auth.py` and `src/api/templates/auth/login.html`.
 - E-023-04 (dashboard) depends on E-023-02 (needs session middleware). Modifies `src/api/routes/dashboard.py` and dashboard templates.
-- E-023-03 and E-023-04 CAN run in parallel (no file conflicts -- E-023-03 touches auth routes/templates, E-023-04 touches dashboard routes/templates).
+- E-023-03 and E-023-04 CAN run in parallel (no file conflicts -- E-023-03 touches auth routes/templates only, E-023-04 touches dashboard routes/templates). The passkey registration CTA is shown on a dedicated post-verification interstitial page (`src/api/templates/auth/passkey_prompt.html`), NOT on the dashboard template, to avoid file conflicts with E-023-04.
 - E-023-05 (admin) depends on E-023-02 and E-023-04. Creates `src/api/routes/admin.py` and admin templates. Also modifies `src/api/main.py` (register admin router) and `src/api/templates/dashboard/team_stats.html` (admin link). The template file conflict with E-023-04 requires sequential execution: E-023-04 first, then E-023-05. Admin routes use the same session middleware as dashboard routes (no separate CF JWT auth in the app).
 
 ### RP_ID and origin for WebAuthn
@@ -293,3 +294,15 @@ None. The user provided a complete architecture specification.
 - 2026-03-02: Created as READY with Cloudflare Access JWT-based auth design.
 - 2026-03-03: Full rewrite. Replaced Cloudflare Access JWT auth with magic link + passkey for coaches. Cloudflare WARP retained only for Jason's admin access. Added Mailgun for email, py_webauthn for passkeys, SQLite sessions table. Stories restructured from 4 to 5.
 - 2026-03-03: Architecture clarification pass. Removed app-level CF JWT header inspection for admin routes. Admin route protection is now two layers: (1) Cloudflare Access policy at the network level (WARP required), (2) app-level session + is_admin guard. The app has one unified auth system (magic link + passkey + session) for all users. Admins can also access the dashboard via the same magic link/passkey flow without WARP.
+- 2026-03-03: **Codex spec review refinement.** Reviewed 11 findings (4 P1, 6 P2, 1 P3). Accepted 9, rejected 2.
+  - **Finding 1 (P1, ACCEPTED)**: Fixed login UX contract. AC-3 wins: both known and unknown emails render the same "If this email is registered..." response. Updated epic Success Criteria and magic link flow description. Updated E-023-02 AC-2 to explicitly render the same page as AC-3.
+  - **Finding 2 (P1, ACCEPTED)**: Clarified passkey register endpoint. E-023-03 AC-2 now specifies: the route renders an HTML page that embeds registration options as JSON and includes inline JS to call navigator.credentials.create(). Not a separate JSON endpoint.
+  - **Finding 3 (P1, ACCEPTED)**: Fixed bootstrap SQL one-liner in E-023-05 AC-11. Changed `user_email` to `email` to match the schema definition in E-023-01 AC-1.
+  - **Finding 4 (P1, ACCEPTED)**: Fixed parallel execution claim for E-023-03/E-023-04. Added `src/api/templates/auth/passkey_prompt.html` as a dedicated post-login interstitial to E-023-03. The passkey CTA lives on this new template, not on the dashboard, eliminating the file conflict. Updated E-023-03 AC-1 accordingly.
+  - **Finding 5 (P2, ACCEPTED)**: Resolved WebAuthn challenge storage ambiguity in E-023-03. Removed "temporary cookie" option from technical approach. AC-11 now explicitly says server-side storage only. Technical approach clarified: session row for registration challenges, ephemeral DB table or in-memory dict for login challenges.
+  - **Finding 6 (P2, ACCEPTED)**: Added `src/api/templates/errors/forbidden.html` to E-023-05 file list and updated technical approach to render it instead of raising bare HTTPException(403).
+  - **Finding 7 (P2, ACCEPTED)**: Added `tests/test_dashboard.py` to E-023-02 modified files list. Existing unauthenticated dashboard tests will break when auth middleware is added; E-023-02 must update them to provide valid sessions. Also added to E-023-04 notes.
+  - **Finding 8 (P2, REJECTED)**: E-023-02 is large but coherent. Splitting would create artificial dependencies between login, session, and email concerns that are tightly coupled. Acknowledged size in story notes.
+  - **Finding 9 (P2, ACCEPTED)**: Fixed HTTP library reference. Changed `requests` to `httpx` throughout epic Technical Notes and E-023-02 AC-11. `httpx` is already in requirements.txt; `requests` is not.
+  - **Finding 10 (P2, ACCEPTED)**: Added coordination note to E-023-01 about E-003-01 dependency risk. E-003-01 is rewriting 001_initial_schema.sql (ACTIVE). If E-003-01 changes the `teams` table structure, `user_team_access` FKs may need adjustment.
+  - **Finding 11 (P3, REJECTED)**: Boilerplate DoD lines are conventional scaffolding. Story-specific acceptance criteria are the real contract for implementing agents. Not worth the churn to remove.

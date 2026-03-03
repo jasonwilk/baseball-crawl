@@ -14,7 +14,7 @@
 - See CLAUDE.md for full project conventions
 
 ## Active Epics (Summary)
-- E-002 (ACTIVE): Data Ingestion Pipeline -- 8 stories all TODO. Crawl stories blocked on E-001-02+E-001-03 (both now DONE via E-001 completion). Load stories blocked on E-003-01.
+- E-002 (READY): Data Ingestion Pipeline -- REFINED 2026-03-03. Research spike E-002-R-01 TODO (discover stats endpoints). E-002-01 TODO (roster crawl, no blockers), E-002-02 TODO (schedule+game-summaries, blocked on 01), E-002-03 BLOCKED (game stats, on R-01+02), E-002-04 BLOCKED (player stats, on R-01+01), E-002-05 TODO (opponent, on 02), E-002-06 TODO (roster load, on 01+E-003-01), E-002-07a BLOCKED (game load, on 03+E-003-01), E-002-07b BLOCKED (stats load, on 04+E-003-01), E-002-08 TODO (orchestrator, on 01+02+05). Old E-002-07 ABANDONED (split). Dispatchable now: R-01, 01.
 - E-003 (READY): Data Model and Storage Schema -- REFINED 2026-03-03. E-003-01 TODO (rewrite 001_initial_schema.sql: seasons, crawl config, pitching, expanded splits), E-003-02 TODO (coaching_assignments migration 004, blocked on E-003-01 + E-023-01), E-003-03 ABANDONED, E-003-04 TODO (seed data + query tests, blocked on E-003-01). E-003-01 has NO blockers. E-003-01 and E-003-04 can run sequentially without E-023. E-003-02 cross-epic dep on E-023-01.
 - E-004 (DRAFT): Coaching Dashboard -- no stories yet, blocked on E-002 + E-003. Still references old Cloudflare stack (E-009-08 will fix).
 - E-005 (ACTIVE): HTTP Request Discipline -- 4/5 DONE. E-005-03 TODO (blocker E-001-02 now DONE -- ready for dispatch).
