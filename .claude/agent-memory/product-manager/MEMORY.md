@@ -1,8 +1,8 @@
 # Product Manager -- Agent Memory
 
 ## Numbering State
-- Next available epic number: E-022
-- Epics created: E-001 through E-021 (E-006, E-007, E-008, E-011, E-012, E-013, E-014, E-015, E-016, E-017, E-018, E-019, E-020 archived)
+- Next available epic number: E-024
+- Epics created: E-001 through E-023 (E-006, E-007, E-008, E-011, E-012, E-013, E-014, E-015, E-016, E-017, E-018, E-019, E-020, E-021 archived)
 - Next available idea number: IDEA-005
 - Ideas created: IDEA-001 through IDEA-004
 
@@ -21,7 +21,8 @@
 - E-005 (ACTIVE): HTTP Request Discipline -- 4/5 DONE. E-005-03 TODO (blocked on E-001-02).
 - E-009 (ACTIVE): Tech Stack Redesign -- 02/03/04/05/06 DONE. 07 TODO (production runbook), 08 TODO (CLAUDE.md update, blocked on 07). All research spikes DONE.
 - E-010 (ACTIVE): Intent/Context Layer -- Phase 1 DONE (01/02/03). Phase 2 BLOCKED on E-002+E-003.
-- E-021 (READY): Agent Workflow Guardrails -- 3 stories (01/02/03), all TODO, all independent. Fixes PM tool restrictions, assumption verification, and dispatch failure protocol.
+- E-022 (READY): Safety Scan Hardening -- 4 stories. 01/02/03 TODO (parallel). 04 TODO (blocked on 01). Adds scan confirmation output, hardens hook intercept pattern, CLAUDE.md reminder, integration tests.
+- E-023 (READY): Auth and Team-Level Permissions -- 4 stories. 01 TODO (schema), 02 TODO (middleware, blocked on 01), 03+04 TODO (dashboard + admin, blocked on 02, parallel). CF Access = authn, app = authz only.
 
 ## Archived Epics
 - E-006 (ABANDONED): PII Protection -- demoted to IDEA-004. Revisit when E-002 produces real data.
@@ -46,6 +47,7 @@
 - HTTP layer: src/http/headers.py + src/http/session.py. Chrome 131/macOS fingerprint.
 - ip_outs: innings pitched stored as integer outs (1 IP = 3 outs)
 - Soft referential integrity in stats tables (orphaned player IDs accepted with WARNING)
+- Auth model: CF Access = authentication (email via JWT in Cf-Access-Jwt-Assertion header), app = authorization (users + user_team_access tables). No passwords, no session tokens. Dev bypass via DEV_USER_EMAIL env var.
 
 ## User Preferences
 - Build it right, no rush

@@ -146,6 +146,24 @@ Every status change touches multiple files atomically. Follow these checklists e
 
 Dispatch Mode fires when the user says "start epic E-NNN", "execute story E-NNN-SS", "dispatch stories", or any equivalent directive to begin execution.
 
+### Your Role: Standing Team Coordinator
+
+You are not a fire-and-forget dispatcher. When you create a dispatch team, you join it as the standing coordinator and stay active for the duration. Specialist agents implement; you manage state and verify quality.
+
+**You own during dispatch:**
+- All status updates (story files and epic table, atomically)
+- Acceptance criteria verification before marking anything DONE
+- Dependency tracking -- dispatching newly unblocked stories as predecessors complete
+- Epic table sync -- the table always reflects current reality
+- History -- recording what happened and when in the epic file
+- Team lifecycle -- spawning implementers, sending them back if criteria are unmet, shutting them down when done
+
+**Implementers own during dispatch:**
+- Satisfying acceptance criteria for their assigned story
+- Reporting completion back to you
+
+Implementers do NOT update story statuses or the epic table. That is your job.
+
 ### Dispatch Procedure
 
 1. **Read the epic.** Read `/epics/E-NNN-slug/epic.md`. Scan the Stories table first (titles and statuses). Then open story files ONLY for `Status: TODO` stories whose dependencies are satisfied.
@@ -154,8 +172,10 @@ Dispatch Mode fires when the user says "start epic E-NNN", "execute story E-NNN-
 4. **Update statuses.** Mark each eligible story `IN_PROGRESS` in both story file and epic table. If first dispatch, set epic to `ACTIVE`.
 5. **Create a team.** Use `TeamCreate` to create a dispatch team for the epic.
 6. **Spawn implementing agents.** For each eligible story, use the `Agent` tool with `team_name` to spawn a teammate. Use `subagent_type: general-purpose` for implementation work, `subagent_type: claude-architect` for infrastructure work. Include the full context block (see below). **Spawn stories in parallel when they have no file conflicts.**
-7. **Monitor and verify.** As teammates complete, verify acceptance criteria are met.
-8. **Close.** Mark verified stories `DONE`. Check for newly unblocked stories. Repeat from step 3. When all stories are done, shut down teammates and delete the team.
+7. **Monitor and verify.** Stay active in the team. As each implementer reports completion, verify all acceptance criteria are met. If criteria are not met, send the implementer back with specific feedback.
+8. **Update on completion.** Mark verified stories `DONE` in both story file and epic table.
+9. **Cascade.** Check for newly unblocked stories. If any, update their status and dispatch them (repeat from step 3).
+10. **Close.** When all stories are done, mark the epic `COMPLETED`, shut down teammates, and delete the team.
 
 ### Context Block Format
 
@@ -169,7 +189,7 @@ Context from parent epic Technical Notes:
 [Full Technical Notes section from epic.md]
 Completed dependencies:
 - E-NNN-01: [title] -- DONE
-Read the story file, satisfy all acceptance criteria, and update the story Status to DONE when complete.
+Satisfy all acceptance criteria and report back when complete. Do NOT update story status files -- the PM handles all status updates.
 ```
 
 ## Decision Gates

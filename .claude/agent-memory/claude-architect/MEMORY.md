@@ -51,6 +51,11 @@ Only when a user request requires specialized capability that existing agents ca
   - `.claude/agents/orchestrator.md` (routing examples for idea capture intent)
 - Orchestrator routes "capture for later" / "someday" / "idea" intent to PM
 - Any agent identifying future work should flag to PM, not create speculative epics
+- Dispatch pattern: PM is a standing team coordinator (not fire-and-forget)
+  - PM joins every dispatch team, stays active throughout, manages all state
+  - Implementers do NOT update story statuses or epic tables -- PM owns that
+  - PM verifies acceptance criteria before marking DONE, cascades to unblocked stories
+  - Encoded in: `dispatch-pattern.md` (rule), `product-manager.md` (Dispatch Mode), `CLAUDE.md` (Workflow Contract #5)
 
 ## User Preferences (Jason)
 - "Simple first" is a guiding principle for FUTURE decisions, not a deletion tool
