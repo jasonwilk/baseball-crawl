@@ -2,7 +2,7 @@
 # E-001: GameChanger API Foundation
 
 ## Status
-`ACTIVE`
+`COMPLETED`
 
 ## Overview
 Establish the foundational layer for all GameChanger API access: credential extraction from user-provided curl commands, a rotating-credential management system, an authenticated HTTP client utility, and a living API specification document. Every other epic in this project depends on this foundation being solid.
@@ -82,3 +82,4 @@ All original open questions have been answered through API discovery (E-001-03).
 - 2026-03-03: Refinement audit -- updated stale technical notes (auth scheme, rate limiting, credential rotation, dependencies all confirmed), resolved all 5 original open questions, corrected API spec path references to canonical `docs/gamechanger-api.md`, added E-005 session factory and vendor-typed Accept header notes, updated E-001-02 and E-001-04 stories with corrected ACs and technical approaches
 - 2026-03-03: E-001-02 DONE -- GameChangerClient with 4 exception types, 17 unit tests, all 8 ACs verified by PM. E-001-04 now unblocked.
 - 2026-03-03: E-001-04 DONE (code-complete) -- smoke test script at scripts/smoke_test.py, all 7 ACs verified by PM. Awaiting user validation against live API before epic can be marked COMPLETED.
+- 2026-03-03: User validated smoke test against live API (15 teams, 14 games, 25 players). Epic COMPLETED and archived.
