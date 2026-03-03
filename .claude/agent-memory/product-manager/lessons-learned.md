@@ -32,12 +32,23 @@ Detailed notes on patterns and lessons from past epics. MEMORY.md links here.
 - **E-019 routing error**: E-019-02 (`.claude/hooks/`, `.claude/settings.json`, `.claude/rules/`) and the CLAUDE.md edit in E-019-04 were dispatched to `general-dev`. These are `claude-architect` domain. The dispatch-pattern table is clear: "Agent config, CLAUDE.md, rules, skills" → `claude-architect`. For future epics touching `.claude/` infrastructure or `CLAUDE.md`, route those stories to `claude-architect`, not `general-dev`.
 
 ## E-019 Dispatch Lessons
-- Agent Teams spawn tool was not available in PM's tool set during this session. PM executed all 4 stories directly. This worked fine for a 4-story epic with clear specs -- PM has all the tools needed (Read/Write/Edit/Bash). For larger epics, investigate why Agent tool was unavailable.
+- Agent Teams spawn tool was not available in PM's tool set during this session. PM executed all 4 stories directly. **This was a workflow violation** -- the PM should never execute implementation stories directly. The root cause was the PM agent having no `tools` field in frontmatter, giving it all tools by default including Bash. E-021 addresses this by adding explicit tool restrictions to PM frontmatter.
+- The E-019 lesson that "PM has all the tools needed (Read/Write/Edit/Bash)" was itself wrong -- the PM should NOT have Bash. Bash enables code execution and test running, which are implementation tasks, not PM tasks.
 - Scanner source files containing pattern descriptions (regexes, examples) triggered the scanner itself. Fixed by adding `synthetic-test-data` marker to `pii_patterns.py` and `pii_scanner.py`. Any file that documents PII patterns needs this marker.
 - Relative imports in `pii_scanner.py` fail when run as standalone script from hook (`python3 src/safety/pii_scanner.py`). Fixed with try/except fallback to absolute import. Any module called both as package import (tests) and standalone script (hooks) needs this pattern.
 - Test data containing long hex strings (e.g., `abcdef1234567890`) can false-positive on the phone regex. Use obviously non-numeric fake values in test data.
 - `Path(".env").suffix` returns `""` not `".env"`. Dotfile handling requires checking the filename itself when suffix is empty.
 - Git repository must exist for hook verification. E-019 stories assume git init has already happened. The project root had no `.git/` -- had to initialize for testing.
+
+## Workflow Violation Root Causes (E-021)
+
+Three recurring violations identified in 2026-03-02 audit:
+
+1. **PM tool gap**: PM agent frontmatter had no `tools` field -- only agent in the ecosystem without one. Got all tools by default. Prose prohibition ("do NOT write code") is not enforceable without tool restrictions.
+2. **Assumption propagation**: Research spike findings about user infrastructure (VPS/Hetzner) were promoted to epic Technical Notes without user verification. No checkpoint in PM workflow requires user confirmation for infrastructure assumptions.
+3. **Orchestrator improvisation**: When PM dispatch failed, orchestrator had no defined fallback -- improvised workarounds (direct dispatch, telling PM to implement) that violated routing rules. Needs an explicit "dispatch failure protocol" that escalates to user.
+
+**Key lesson**: Prose prohibitions without technical enforcement are insufficient. If an agent should not do X, restrict the tools that enable X.
 
 ## MCP Research
 - See mcp-research.md for full findings. No MCP servers recommended today. github/github-mcp-server worth adopting when GitHub remote established. GitNexus worth revisiting at ~100 Python files.

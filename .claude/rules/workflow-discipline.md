@@ -28,3 +28,11 @@ These agents may be invoked directly without PM intermediation:
 - **api-scout**: Exploratory API work, endpoint discovery, credential management.
 - **baseball-coach**: Domain consultation, coaching requirements, stat validation.
 - **claude-architect**: Agent infrastructure, CLAUDE.md edits, rules, skills.
+
+## Dispatch Failure Protocol
+
+When dispatch fails (Agent tool unavailable, team creation fails, no eligible stories, PM reports inability to proceed), any agent in the routing chain must follow this protocol:
+
+1. **Report the failure to the user** with the specific reason.
+2. **Ask the user how to proceed.** The user decides the next step.
+3. **Never improvise a workaround** -- do not dispatch directly, do not ask PM to implement, do not attempt a different routing path. This is an escalation, not a retry.
