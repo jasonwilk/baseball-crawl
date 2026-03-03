@@ -1,8 +1,8 @@
 # Product Manager -- Agent Memory
 
 ## Numbering State
-- Next available epic number: E-025
-- Epics created: E-001 through E-024 (E-006, E-007, E-008, E-011, E-012, E-013, E-014, E-015, E-016, E-017, E-018, E-019, E-020, E-021, E-022 archived)
+- Next available epic number: E-027
+- Epics created: E-001 through E-026 (E-006, E-007, E-008, E-011, E-012, E-013, E-014, E-015, E-016, E-017, E-018, E-019, E-020, E-021, E-022 archived)
 - Next available idea number: IDEA-005
 - Ideas created: IDEA-001 through IDEA-004
 
@@ -21,8 +21,10 @@
 - E-005 (ACTIVE): HTTP Request Discipline -- 4/5 DONE. E-005-03 TODO (blocked on E-001-02).
 - E-009 (ACTIVE): Tech Stack Redesign -- 02/03/04/05/06 DONE. 07 TODO (production runbook), 08 TODO (CLAUDE.md update, blocked on 07). All research spikes DONE.
 - E-010 (ACTIVE): Intent/Context Layer -- Phase 1 DONE (01/02/03). Phase 2 BLOCKED on E-002+E-003.
-- E-023 (READY): Auth and Team-Level Permissions -- 4 stories. 01 TODO (schema), 02 TODO (middleware, blocked on 01), 03 TODO (dashboard, blocked on 02), 04 TODO (admin, blocked on 02+03). Sequential: 01->02->03->04. CF Access = authn, app = authz only.
+- E-023 (READY): Auth and Team-Level Permissions -- 5 stories. 01 TODO (schema), 02 TODO (magic link login, blocked on 01), 03 TODO (passkeys, blocked on 02), 04 TODO (dashboard scoping, blocked on 02), 05 TODO (admin, blocked on 02+04). 03 and 04 can run parallel. ALL users auth = magic link + passkey + SQLite sessions (unified). Admin routes = session + is_admin guard (app) + Cloudflare Access policy on /admin (network). No CF JWT header parsing in app. Mailgun for email (stdout in dev).
 - E-024 (READY): Epic Archive Enforcement -- 2 stories, both TODO, no deps (parallel). Hook + PM protocol fix to prevent completed epics lingering in /epics/.
+- E-025 (READY): Devcontainer Update -- 2 stories (01 config update, 02 verification). Sequential: 01->02. Adds Python 3.12 + Docker-in-Docker alongside existing Node.js (kept for Codex CLI).
+- E-026 (READY): Python Version Governance -- 2 stories, both TODO, no deps (parallel). Migrate 3.12->3.13, establish .python-version as source of truth, create pyproject.toml, document version policy.
 
 ## Archived Epics
 - E-006 (ABANDONED): PII Protection -- demoted to IDEA-004. Revisit when E-002 produces real data.
@@ -49,7 +51,7 @@
 - HTTP layer: src/http/headers.py + src/http/session.py. Chrome 131/macOS fingerprint.
 - ip_outs: innings pitched stored as integer outs (1 IP = 3 outs)
 - Soft referential integrity in stats tables (orphaned player IDs accepted with WARNING)
-- Auth model: CF Access = authentication (email via JWT in Cf-Access-Jwt-Assertion header), app = authorization (users + user_team_access tables). No passwords, no session tokens. Dev bypass via DEV_USER_EMAIL env var.
+- Auth model (revised 2026-03-03): ALL users (coaches + admins) = magic link email + optional passkey (py_webauthn) + SQLite sessions table. No separate admin login path. Admin routes protected by two layers: (1) Cloudflare Access policy requires WARP to reach /admin/* (network-level, external to app), (2) app session middleware + is_admin flag. App does NOT inspect Cf-Access-Jwt-Assertion or any CF headers. No passwords. Mailgun for email (MAILGUN_API_KEY env var; stdout fallback in dev). Dev bypass via DEV_USER_EMAIL env var. Migration 003_auth.sql (002 reserved for E-003-02 stats schema).
 
 ## User Preferences
 - Build it right, no rush

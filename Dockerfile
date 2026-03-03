@@ -8,7 +8,7 @@
 # then starts uvicorn. The ./data directory is host-mounted at runtime
 # so the database is visible on the host filesystem.
 
-FROM python:3.12-slim
+FROM python:3.13-slim
 
 # System dependencies: curl is required for the Docker health check.
 RUN apt-get update \

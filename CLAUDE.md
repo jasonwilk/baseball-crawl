@@ -43,10 +43,28 @@ This guides our data-source decisions:
 - **Web scraping** (fallback): Screen-scrape when the API does not cover a data point, but only for data already visible in the UI.
 
 ## Tech Stack
-- Python for data extraction and processing scripts
+- Python (version governed by `.python-version` -- Dockerfile, devcontainer.json, and pyproject.toml must stay in sync with it) for data extraction and processing scripts
 - Cloudflare D1 (SQLite) for structured data storage
 - Cloudflare Workers for API endpoints and scheduled jobs
 - TypeScript/JavaScript for Workers and Pages (when dashboard phase begins)
+
+## Python Version Policy
+
+- **Source of truth**: `.python-version` (pyenv). All other locations must match it.
+- **Also specified in**: `pyproject.toml` (`requires-python`), `Dockerfile` (`FROM` tag), `.devcontainer/devcontainer.json` (Python feature version).
+- **Current version**: 3.13 -- chosen over 3.14 (httpx/jinja2 lack official 3.14 support markers) and over 3.12 (all deps support 3.13, extending the EOL window).
+
+**When to consider upgrading:**
+- Annually, when a new stable Python release has been out 6+ months and key dependencies support it.
+- Immediately, when a dependency drops support for the current version.
+
+**How to verify before upgrading:**
+- Check dep compatibility at pyreadiness.org or via per-package PyPI classifiers.
+- Run `pip install -r requirements.txt` on the new version.
+- Run `pytest` and confirm no failures.
+- Check for deprecation warnings in test output.
+
+**When you update the version**, change it in all four locations atomically and reference the story in the commit.
 
 ## Key Metrics We Track
 These are the statistics and dimensions that matter for coaching decisions:

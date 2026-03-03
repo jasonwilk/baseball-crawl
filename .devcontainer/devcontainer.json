@@ -2,15 +2,23 @@
   "name": "baseball-crawl",
   "image": "mcr.microsoft.com/devcontainers/base:ubuntu",
   "features": {
+    "ghcr.io/devcontainers/features/python:1": {
+      "version": "3.13"
+    },
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {
+      "moby": false
+    },
     "ghcr.io/devcontainers/features/node:1": {},
     "ghcr.io/rocker-org/devcontainer-features/apt-packages:1": {
       "packages": "git,curl,jq"
     }
   },
-  "postCreateCommand": "curl -fsSL https://claude.ai/install.sh | bash && npm i -g @openai/codex",
+  "postCreateCommand": "curl -fsSL https://claude.ai/install.sh | bash && npm i -g @openai/codex && pip install -r requirements.txt",
   "customizations": {
     "vscode": {
       "extensions": [
+        "ms-python.python",
+        "ms-python.debugpy",
         "Anthropic.claude-code",
         "openai.chatgpt",
         "ReprEng.csv"
@@ -18,7 +26,7 @@
     }
   },
   "remoteUser": "vscode",
-  "forwardPorts": [],
+  "forwardPorts": [8000, 8080],
   "mounts": [
     "source=${localEnv:HOME}/.claude,target=/home/vscode/.claude,type=bind"
   ],
