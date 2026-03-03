@@ -62,8 +62,13 @@ def test_sec_ch_ua_mobile_and_platform() -> None:
     assert BROWSER_HEADERS["sec-ch-ua-platform"] == '"macOS"'
 
 
-def test_accept_encoding_includes_zstd() -> None:
-    assert "zstd" in BROWSER_HEADERS["Accept-Encoding"]
+def test_accept_encoding_supported_only() -> None:
+    """Accept-Encoding advertises only encodings httpx handles natively."""
+    encoding = BROWSER_HEADERS["Accept-Encoding"]
+    assert "gzip" in encoding
+    assert "deflate" in encoding
+    assert "br" not in encoding
+    assert "zstd" not in encoding
 
 
 def test_exactly_ten_headers() -> None:
