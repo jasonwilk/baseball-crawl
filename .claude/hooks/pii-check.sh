@@ -24,7 +24,7 @@ fi
 SCANNER="$CLAUDE_PROJECT_DIR/src/safety/pii_scanner.py"
 
 if [ ! -f "$SCANNER" ]; then
-  # Scanner not yet installed (E-019-03 pending); allow commit
+  # Scanner not found at expected path; allow commit (fail open)
   exit 0
 fi
 

@@ -25,7 +25,7 @@ Load this skill when you are about to:
 
 Every agent session's context window contains four types of content:
 
-1. **System prompt / ambient rules**: The project's root CLAUDE.md, all `.claude/rules/*.md` files, and the agent's definition from `.claude/agents/<agent>.md`. This loads automatically at session start. In baseball-crawl, this is approximately 600-700 lines of text before any task-specific content is added.
+1. **System prompt / ambient rules**: The project's root CLAUDE.md, all `.claude/rules/*.md` files, and the agent's definition from `.claude/agents/<agent>.md`. This loads automatically at session start. In baseball-crawl, this is approximately 1,000-1,270 lines of text before any task-specific content is added.
 
 2. **Conversation history**: The turn-by-turn exchange between the user and the agent, including all tool calls and tool results. This grows throughout the session. Long sessions with many file reads, bash commands, and edit operations accumulate substantial conversation history.
 
@@ -71,17 +71,17 @@ When a session's context window approaches its limit, Claude Code automatically 
 
 ### Baseball-Crawl's Context Budget
 
-Every baseball-crawl agent session starts with approximately **600-700 lines of ambient context** before any task-specific content is loaded:
+Every baseball-crawl agent session starts with approximately **1,000-1,270 lines of ambient context** before any task-specific content is loaded:
 
 | Source | Approximate Size | Notes |
 |--------|-----------------|-------|
-| Root `CLAUDE.md` | ~232 lines | Project conventions, architecture, security rules, HTTP discipline |
-| `.claude/rules/*.md` files (6 files) | ~212 lines total | Workflow discipline, and other rules |
-| Agent definition (`.claude/agents/<agent>.md`) | ~100-200 lines | Varies by agent |
-| Agent `MEMORY.md` (`.claude/agent-memory/<agent>/MEMORY.md`) | Variable | PM memory is ~200 lines; others vary |
-| **Total ambient** | **~600-700 lines** | Before any task begins |
+| Root `CLAUDE.md` | ~297 lines | Project conventions, architecture, security rules, HTTP discipline |
+| `.claude/rules/*.md` files (10 files) | ~546 lines total | Workflow discipline, dispatch pattern, documentation, ideas, devcontainer, python-style, testing, crawling, project-management, and other rules |
+| Agent definition (`.claude/agents/<agent>.md`) | ~139-327 lines | Varies by agent; PM is largest (327), baseball-coach smallest (139) |
+| Agent `MEMORY.md` (`.claude/agent-memory/<agent>/MEMORY.md`) | ~12-97 lines | Varies; PM ~97, architect ~97, docs-writer ~12 |
+| **Total ambient** | **~1,000-1,270 lines** | Before any task begins |
 
-These are approximations based on the E-008 recommendation document (2026-02-28). Check the actual files if precision matters for a specific decision.
+These are actuals measured during the 2026-03-03 context-layer review (`/.project/research/context-layer-review-2026-03-03.md`). Check the actual files if precision matters for a specific decision.
 
 ### Task-Specific Context (Loaded on Demand)
 
@@ -96,7 +96,7 @@ Beyond the ambient baseline, task-specific context is loaded per task. Approxima
 | Raw API responses / log excerpts | Variable (can be large) | On demand during debugging |
 | Dependency story files | 50-150 lines each | When implementing agent needs to understand what a dependency delivered |
 
-A typical story dispatch adds **200-400 lines** of task-specific context (story file + epic Technical Notes). A research-heavy session might add another **400-800 lines** across multiple artifacts. In a complex E-002 or E-003 story with multiple dependencies and multiple research artifacts, total context (ambient + task-specific) could easily reach 1,500-2,000 lines before any code is written.
+A typical story dispatch adds **200-400 lines** of task-specific context (story file + epic Technical Notes). A research-heavy session might add another **400-800 lines** across multiple artifacts. In a complex E-002 or E-003 story with multiple dependencies and multiple research artifacts, total context (ambient + task-specific) could easily reach 1,800-2,500 lines before any code is written.
 
 ### The Three Context Management Decisions
 
@@ -148,13 +148,13 @@ Here is a worked example for a general-dev story in E-006:
 
 ```
 Session start (ambient):
-  CLAUDE.md:                     232 lines
+  CLAUDE.md:                     ~297 lines
   workflow-discipline.md:         ~40 lines
-  other rules files (5):         ~172 lines
+  other rules files (9):         ~506 lines
   general-dev.md agent def:      ~150 lines
-  general-dev MEMORY.md:          ~60 lines
+  general-dev MEMORY.md:          ~87 lines
   ----------------------------------------
-  Ambient subtotal:              ~654 lines
+  Ambient subtotal:             ~1,080 lines
 
 Task start (story dispatch):
   E-006-04.md (story file):      ~120 lines
@@ -168,7 +168,7 @@ During task (demand-loaded):
   ----------------------------------------
   Demand subtotal:               ~200 lines
 
-Total:                         ~1,204 lines (~20-25% of a 128k context window)
+Total:                         ~1,630 lines (~25-30% of a 128k context window)
 ```
 
 This is a healthy context load. There is ample room for tool outputs (bash commands, file reads of code files) and conversation history before approaching yellow territory.

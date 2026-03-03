@@ -17,13 +17,14 @@ IMPORTANT -- This is the governing design principle for the entire project.
 - State: Active development -- src/http/ module exists (headers, session factory), multiple epics completed
 
 ## Agent Ecosystem (Current)
-Six agents in `.claude/agents/`:
+Seven agents in `.claude/agents/`:
 - **claude-architect** (opus, yellow): Meta-agent. Designs/manages agents, CLAUDE.md, rules.
 - **product-manager** (opus, green): Product Manager and entry point. Epics, stories, dispatch via Agent Teams. No code.
 - **baseball-coach** (sonnet, red): Domain expert. Coaching needs -> technical requirements.
 - **api-scout** (sonnet, orange): GameChanger API exploration, documentation, credential patterns.
 - **data-engineer** (sonnet, blue): Database schema, SQL migrations, ETL pipelines, query optimization.
 - **general-dev** (sonnet, blue): Python implementation. Crawlers, parsers, loaders, utilities, tests.
+- **docs-writer** (sonnet, purple): Documentation specialist. Admin and coaching docs.
 
 ### When to Create New Agents
 Only when a user request requires specialized capability that existing agents cannot handle AND the work is recurring.
@@ -36,7 +37,7 @@ Only when a user request requires specialized capability that existing agents ca
   - Scanner: `src/safety/pii_scanner.py` (stdlib only, shared by both hooks)
   - No agent/skill created for scanning (deterministic check, not reasoning)
 - Product-manager has full template content inline (comprehensive operational manual)
-- Tech stack: Python end-to-end. FastAPI+Jinja2 serving layer. Docker Compose + Cloudflare Tunnel. SQLite (WAL mode + Litestream). Hetzner CX11 VPS. Decision finalized in E-009.
+- Tech stack: Python end-to-end. FastAPI+Jinja2 serving layer. Docker Compose + Cloudflare Tunnel. SQLite (WAL mode). Home Linux server. Simple file backup via scripts/backup_db.py. Decision finalized in E-009.
 - Docker Compose stack (3 services): app (FastAPI, localhost:8001 direct / localhost:8000 via Traefik), traefik (reverse proxy, dashboard at :8080), cloudflared (tunnel). E-027 established devcontainer-to-compose networking.
 - App troubleshooting section in CLAUDE.md covers: stack management, health check, logs, rebuild after changes, unreachable diagnosis. Agents should rebuild + health-check after modifying src/, migrations/, Dockerfile, docker-compose.yml, or requirements.txt.
 - CLAUDE.md has Core Principle section at top, followed by full project context

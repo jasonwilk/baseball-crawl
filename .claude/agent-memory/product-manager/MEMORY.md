@@ -1,24 +1,23 @@
 # Product Manager -- Agent Memory
 
 ## Numbering State
-- Next available epic number: E-035
-- Epics created: E-001 through E-034 (E-006, E-007, E-008, E-010, E-011, E-012, E-013, E-014, E-015, E-016, E-017, E-018, E-019, E-020, E-021, E-022, E-024, E-025, E-026, E-027, E-029, E-030, E-031, E-032, E-033 archived)
+- Next available epic number: E-036
+- Epics created: E-001 through E-035 (E-001, E-006, E-007, E-008, E-010, E-011, E-012, E-013, E-014, E-015, E-016, E-017, E-018, E-019, E-020, E-021, E-022, E-024, E-025, E-026, E-027, E-028, E-029, E-030, E-031, E-032, E-033, E-034, E-035 archived)
 - Next available idea number: IDEA-007
 - Ideas created: IDEA-001 through IDEA-006
 
 ## Project Context
 - Project: baseball-crawl -- GameChanger API -> database -> coaching dashboard
 - Tech stack: Python end-to-end. FastAPI+Jinja2 serving layer. Docker Compose + Cloudflare Tunnel. SQLite.
-- Architecture: src/gamechanger/ for source, src/api/ for FastAPI app, tests/ for tests, data/raw/ for crawl output, migrations/ for SQL
+- Architecture: src/ for source (gamechanger/, api/, http/, safety/), tests/ for tests, data/ for local dev outputs, migrations/ for SQL
 - Credentials: short-lived, user provides curl commands, scripts/refresh_credentials.py handles extraction
 - See CLAUDE.md for full project conventions
 
 ## Active Epics (Summary)
-- E-001 (ACTIVE): GameChanger API Foundation -- E-001-01 DONE, E-001-03 DONE, E-001-02 TODO, E-001-04 TODO (blocked on E-001-02).
-- E-002 (ACTIVE): Data Ingestion Pipeline -- 8 stories all TODO. Crawl stories blocked on E-001-02+E-001-03 (E-001-03 now DONE). Load stories blocked on E-003-01.
+- E-002 (ACTIVE): Data Ingestion Pipeline -- 8 stories all TODO. Crawl stories blocked on E-001-02+E-001-03 (both now DONE via E-001 completion). Load stories blocked on E-003-01.
 - E-003 (READY): Data Model and Storage Schema -- REFINED 2026-03-03. E-003-01 TODO (rewrite 001_initial_schema.sql: seasons, crawl config, pitching, expanded splits), E-003-02 TODO (coaching_assignments migration 004, blocked on E-003-01 + E-023-01), E-003-03 ABANDONED, E-003-04 TODO (seed data + query tests, blocked on E-003-01). E-003-01 has NO blockers. E-003-01 and E-003-04 can run sequentially without E-023. E-003-02 cross-epic dep on E-023-01.
 - E-004 (DRAFT): Coaching Dashboard -- no stories yet, blocked on E-002 + E-003. Still references old Cloudflare stack (E-009-08 will fix).
-- E-005 (ACTIVE): HTTP Request Discipline -- 4/5 DONE. E-005-03 TODO (blocked on E-001-02).
+- E-005 (ACTIVE): HTTP Request Discipline -- 4/5 DONE. E-005-03 TODO (blocker E-001-02 now DONE -- ready for dispatch).
 - E-009 (ACTIVE): Tech Stack Redesign -- 02/03/04/05/06 DONE. 07 TODO (production runbook), 08 TODO (CLAUDE.md update, blocked on 07). All research spikes DONE.
 - E-023 (READY): Auth and Team-Level Permissions -- 5 stories. 01 TODO (schema), 02 TODO (magic link login, blocked on 01), 03 TODO (passkeys, blocked on 02), 04 TODO (dashboard scoping, blocked on 02), 05 TODO (admin, blocked on 02+04). 03 and 04 can run parallel. ALL users auth = magic link + passkey + SQLite sessions (unified). Admin routes = session + is_admin guard (app) + Cloudflare Access policy on /admin (network). No CF JWT header parsing in app. Mailgun for email (stdout in dev).
 ## Archived Epics
@@ -49,6 +48,8 @@
 - E-032 (COMPLETED): Agent Log Access and Troubleshooting Verification -- validated E-027 troubleshooting workflow end-to-end. No blocking gaps. Recommendation: add grep-based log filtering to CLAUDE.md troubleshooting section.
 - E-033 (COMPLETED): Project Hygiene -- aligned docs and tests with current reality. CLAUDE.md stack sections corrected, hardcoded paths fixed in 16 context-layer + story files, TestClient lifecycle fixed, pytest-timeout added, migration comment corrected.
 - E-034 (COMPLETED): Codex Review Integration -- two review lanes (code + spec). Artifacts: `.project/codex-review.md`, `scripts/codex-review.sh`, `.project/codex-spec-review.md`, `scripts/codex-spec-review.sh`. CLAUDE.md Commands section updated. PM agent def updated with optional spec-review step. No follow-up work identified.
+- E-001 (COMPLETED): GameChanger API Foundation -- credential parser, API client, endpoint docs, smoke test. All 4 stories DONE. Archived 2026-03-03.
+- E-035 (COMPLETED): Context Layer Staleness Fixes -- fixed P1 (misleading agent count, stale deployment details, wrong budget numbers), P2 (stale references in hooks/skills/rules), P3 (memory file duplication). 10 context-layer files updated. No follow-up work.
 
 ## Key Architectural Decisions
 - Storage: SQLite (WAL mode). Host-mounted at ./data/app.db. Simple file backup via scripts/backup_db.py (no Litestream).

@@ -1,8 +1,3 @@
----
-paths:
-  - "**"
----
-
 # Workflow Discipline
 
 ## Epic READY Gate

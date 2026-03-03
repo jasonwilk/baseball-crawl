@@ -47,14 +47,8 @@ These five rules are non-negotiable, every session:
 5. Strip authentication headers from all stored raw API responses.
 
 ## HTTP Request Discipline
-
-All GameChanger requests must present as a normal browser user:
-- Realistic User-Agent (Chrome/Firefox, not python-requests)
-- Standard browser headers (Accept, Accept-Language, Accept-Encoding, Referer/Origin)
-- Maintain cookie jars across requests within a session
+See CLAUDE.md HTTP Request Discipline section.
 - Canonical header set lives in `src/http/headers.py`
-- Rate limiting: 1-2 second delays between requests, exponential backoff on errors, jitter on timing
-- Access resources in human-plausible order (list page before detail page)
 
 ## Agent Interactions
 

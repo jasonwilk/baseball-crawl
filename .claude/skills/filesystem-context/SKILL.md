@@ -193,7 +193,7 @@ When creating a new file that will serve as deferred context:
 ### Source Material
 - **E-008-R-02 Research Summary**: `/.project/research/E-008-R-02-agent-skills-summary.md` -- Documents the muratcankoylan Agent Skills for Context Engineering repository, including the SKILL.md format and the progressive disclosure mechanism. The recommendation to adopt `filesystem-context`, `multi-agent-patterns`, and `context-fundamentals` specifically originated in this research.
 - **E-008 Recommendation**: `/.project/research/E-008-intent-context-layer-recommendation.md` -- The Phase 1 implementation sketch that specified how each skill should be adapted for baseball-crawl.
-- **E-010 Epic**: `epics/E-010-intent-context-layer-implementation/epic.md` -- Parent epic for all three Phase 1 skill files. Technical Notes section contains the canonical SKILL.md format description.
+- **E-010 Epic** (archived/abandoned): `/.project/archive/E-010-intent-context-layer-implementation/epic.md` -- Parent epic for all three Phase 1 skill files. Technical Notes section contains the canonical SKILL.md format description.
 
 ### External Reference
 - muratcankoylan Agent Skills for Context Engineering: https://github.com/muratcankoylan/Agent-Skills-for-Context-Engineering (12.8k stars as of 2026-02-28). Baseball-crawl adopts 3 of the 13 skills from this repository, adapted to project-specific conventions. The plugin install (`/plugin marketplace add muratcankoylan/...`) is NOT used -- skills are written and maintained directly.

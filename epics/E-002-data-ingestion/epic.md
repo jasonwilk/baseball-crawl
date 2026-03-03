@@ -1,7 +1,7 @@
 # E-002: GameChanger Data Ingestion Pipeline
 
 ## Status
-`ACTIVE`
+`READY`
 
 ## Overview
 Build the pipeline that crawls GameChanger API endpoints, stores raw JSON responses on disk, and loads normalized records into the SQLite database. When this epic is complete, coaches will have up-to-date game and player stats for their teams -- and their opponents -- persisted in a queryable database.
@@ -16,7 +16,7 @@ Keeping these separate means: if the database schema changes, we can re-process 
 
 Scope for this epic covers Lincoln Standing Bear High School teams (Freshman, JV, Reserve, Varsity) and the opponents they play. Legion teams are explicitly out of scope but the design should not prevent adding them later.
 
-**This epic is DRAFT until E-001-03 (API spec) is complete.** Stories will be finalized once the exact endpoint shapes are known.
+E-001 is COMPLETED (all stories DONE, archived 2026-03-03). The API spec at `docs/gamechanger-api.md` documents five confirmed endpoints. However, no per-player stats or team-level season stats endpoint has been discovered -- stories E-002-03 and E-002-04 are BLOCKED pending api-scout research (see E-002-R-01).
 
 ## Goals
 - A crawl script that fetches team roster, schedule, and game stats for all configured teams and writes raw JSON to `data/raw/`
@@ -42,14 +42,16 @@ Scope for this epic covers Lincoln Standing Bear High School teams (Freshman, JV
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-002-01 | Crawl team roster and write raw JSON | TODO | E-001-02, E-001-03 | - |
-| E-002-02 | Crawl game schedule and write raw JSON | TODO | E-001-02, E-001-03 | - |
-| E-002-03 | Crawl game stats (box score) and write raw JSON | TODO | E-002-02 | - |
-| E-002-04 | Crawl player season stats and write raw JSON | TODO | E-002-01 | - |
+| E-002-R-01 | Research: Discover game stats and player stats endpoints | TODO | None | - |
+| E-002-01 | Crawl team roster and write raw JSON | TODO | None | - |
+| E-002-02 | Crawl game schedule and write raw JSON | TODO | E-002-01 | - |
+| E-002-03 | Crawl game stats (box score) and write raw JSON | BLOCKED | E-002-02, E-002-R-01 | - |
+| E-002-04 | Crawl player season stats and write raw JSON | BLOCKED | E-002-01, E-002-R-01 | - |
 | E-002-05 | Crawl opponent team data for all scheduled games | TODO | E-002-02 | - |
 | E-002-06 | Load raw roster JSON into database | TODO | E-002-01, E-003-01 | - |
-| E-002-07 | Load raw game and stats JSON into database | TODO | E-002-03, E-003-01 | - |
-| E-002-08 | Write crawl manifest and orchestration script | TODO | E-002-01, E-002-02, E-002-03, E-002-04, E-002-05 | - |
+| E-002-07a | Load raw game JSON into database | BLOCKED | E-002-03, E-003-01 | - |
+| E-002-07b | Load raw player stats JSON into database | BLOCKED | E-002-04, E-003-01 | - |
+| E-002-08 | Write crawl manifest and orchestration script | TODO | E-002-01, E-002-02, E-002-05 | - |
 
 ## Technical Notes
 
