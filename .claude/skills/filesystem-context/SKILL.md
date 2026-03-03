@@ -187,7 +187,7 @@ When creating a new file that will serve as deferred context:
 ## References and Related Skills
 
 ### Related Skills in This Project
-- **`multi-agent-patterns`** (`.claude/skills/multi-agent-patterns/SKILL.md`): How filesystem-context integrates with multi-agent dispatch. The dispatch context block (story file + epic Technical Notes) is the primary instance of filesystem-context in the orchestrator -> PM -> implementing agent chain. Load this skill when coordinating context delivery across multiple agents.
+- **`multi-agent-patterns`** (`.claude/skills/multi-agent-patterns/SKILL.md`): How filesystem-context integrates with multi-agent dispatch. The dispatch context block (story file + epic Technical Notes) is the primary instance of filesystem-context in the user -> PM -> implementing agent chain. Load this skill when coordinating context delivery across multiple agents.
 - **`context-fundamentals`** (`.claude/skills/context-fundamentals/SKILL.md`): The foundational framework for understanding context windows, token budgets, and the mechanics of why filesystem-context works. Load this skill before beginning complex multi-file tasks where context budget decisions are critical.
 
 ### Source Material

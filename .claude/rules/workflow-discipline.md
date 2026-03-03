@@ -15,7 +15,7 @@ Implementing agents MUST NOT begin any implementation work without a referenced 
 
 ## Workflow Routing Rule
 
-All work-initiation requests travel through the `orchestrator -> product-manager -> implementing agent` pipeline. The PM dispatches implementation work using Agent Teams (see `/.claude/rules/dispatch-pattern.md`).
+All work-initiation requests travel through the `user -> product-manager -> implementing agent` pipeline. The PM dispatches implementation work using Agent Teams (see `/.claude/rules/dispatch-pattern.md`).
 
 ## PM Task Types
 
@@ -28,6 +28,10 @@ These agents may be invoked directly without PM intermediation:
 - **api-scout**: Exploratory API work, endpoint discovery, credential management.
 - **baseball-coach**: Domain consultation, coaching requirements, stat validation.
 - **claude-architect**: Agent infrastructure, CLAUDE.md edits, rules, skills.
+
+## Documentation Assessment Gate
+
+Epic completion requires a documentation impact assessment per `.claude/rules/documentation.md`. The PM MUST review the epic's scope against documentation update triggers after all stories are DONE and before archiving the epic. If any trigger fires, docs-writer is dispatched before the epic can be archived.
 
 ## Dispatch Failure Protocol
 

@@ -242,20 +242,19 @@ Stories can only be dispatched when the parent epic is `READY` or `ACTIVE`. PM s
 
 ## Agent Ecosystem
 
-This project uses specialized agents coordinated by an orchestrator:
+This project uses specialized agents coordinated by the product-manager:
 
 | Agent | Role |
 |-------|------|
-| **orchestrator** | Smart router with file-reading capability -- reads project state (epic status, story files) before making routing decisions |
 | **claude-architect** | Designs and manages agents, CLAUDE.md, rules, skills |
 | **product-manager** | Product Manager -- owns what to build, why, and in what order. Discovers requirements, plans epics, delegates implementation to specialists. |
 | **baseball-coach** | Domain expert -- translates coaching needs into technical requirements |
 | **api-scout** | Explores GameChanger API, maintains API spec, manages credential patterns |
 | **data-engineer** | Database schema design, ETL pipelines, SQLite architecture |
 | **general-dev** | Python implementation, testing, general coding work |
+| **docs-writer** | Documentation specialist for admin/developer and coaching staff audiences. Writes and maintains human-readable documentation in `docs/admin/` and `docs/coaching/`. |
 
 ### How Agents Collaborate
-- **orchestrator** reads project state (epic status, story files) to make informed routing decisions, then delegates to the correct agent
 - **baseball-coach** produces domain requirements that inform stories and data models
 - **api-scout** maintains `docs/gamechanger-api.md` -- the single source of truth for API knowledge
 - **data-engineer** designs schemas informed by both baseball-coach requirements and api-scout discoveries
@@ -267,7 +266,7 @@ This project uses specialized agents coordinated by an orchestrator:
 
 All routed work follows this contract:
 
-1. **Orchestrator routes to PM.** All work-initiation requests go to product-manager first.
+1. **User requests work from PM.** All work-initiation requests go to product-manager.
 2. **PM consults experts during formation.** Before writing stories, PM consults domain experts as needed. When not required, PM notes the reason.
 3. **PM marks the epic `READY` when refinement is complete.** `DRAFT` epics are not dispatchable.
 4. **"Ready for dev" = `Status: TODO` in a `READY` epic.** No story file means no implementation work begins.

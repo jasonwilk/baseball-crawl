@@ -1,8 +1,8 @@
 # Product Manager -- Agent Memory
 
 ## Numbering State
-- Next available epic number: E-030
-- Epics created: E-001 through E-029 (E-006, E-007, E-008, E-011, E-012, E-013, E-014, E-015, E-016, E-017, E-018, E-019, E-020, E-021, E-022, E-024, E-025, E-026, E-027, E-029 archived)
+- Next available epic number: E-033
+- Epics created: E-001 through E-032 (E-006, E-007, E-008, E-011, E-012, E-013, E-014, E-015, E-016, E-017, E-018, E-019, E-020, E-021, E-022, E-024, E-025, E-026, E-027, E-029, E-030, E-031 archived)
 - Next available idea number: IDEA-005
 - Ideas created: IDEA-001 through IDEA-004
 
@@ -22,7 +22,8 @@
 - E-009 (ACTIVE): Tech Stack Redesign -- 02/03/04/05/06 DONE. 07 TODO (production runbook), 08 TODO (CLAUDE.md update, blocked on 07). All research spikes DONE.
 - E-010 (ACTIVE): Intent/Context Layer -- Phase 1 DONE (01/02/03). Phase 2 BLOCKED on E-002+E-003.
 - E-023 (READY): Auth and Team-Level Permissions -- 5 stories. 01 TODO (schema), 02 TODO (magic link login, blocked on 01), 03 TODO (passkeys, blocked on 02), 04 TODO (dashboard scoping, blocked on 02), 05 TODO (admin, blocked on 02+04). 03 and 04 can run parallel. ALL users auth = magic link + passkey + SQLite sessions (unified). Admin routes = session + is_admin guard (app) + Cloudflare Access policy on /admin (network). No CF JWT header parsing in app. Mailgun for email (stdout in dev).
-- E-028 (READY): Documentation System -- 5 stories. 01 TODO (agent def), 02 TODO (rules), 03 TODO (admin docs, blocked on 01), 04 TODO (coaching docs, blocked on 01), 05 TODO (CLAUDE.md+orchestrator updates, blocked on 01). 01+02 parallel; then 03+04+05 parallel.
+- E-028 (READY): Documentation System -- 5 stories. 01 TODO (agent def), 02 TODO (rules), 03 TODO (admin docs, blocked on 01), 04 TODO (coaching docs, blocked on 01), 05 TODO (CLAUDE.md+workflow updates, blocked on 01+02). 01+02 parallel; then 03+04+05 parallel. Revised per E-030 to remove all orchestrator references.
+- E-032 (READY): Agent Log Access and Troubleshooting Verification -- 2 stories. 01 TODO (verify log access + health check), 02 TODO (verify error diagnosis from logs, blocked on 01). Validation epic proving E-027 troubleshooting workflow works end-to-end.
 ## Archived Epics
 - E-006 (ABANDONED): PII Protection -- demoted to IDEA-004. Revisit when E-002 produces real data.
 - E-007 (COMPLETED): Orchestrator Workflow Discipline -- refined PM modes, READY gate, Decision Gates
@@ -44,6 +45,8 @@
 - E-026 (COMPLETED): Python Version Governance -- migrated 3.12->3.13, .python-version as source of truth, pyproject.toml.
 - E-027 (COMPLETED): Devcontainer-to-Compose Networking -- port 8001 mapping for app access from devcontainer, troubleshooting docs in CLAUDE.md.
 - E-029 (COMPLETED): Context-Layer Routing Enforcement -- explicit context-layer file paths in dispatch-pattern.md routing table + PM dispatch pre-check step. Closes recurring mis-routing pattern from E-019/E-027.
+- E-030 (COMPLETED): Remove Orchestrator Agent -- deleted orchestrator.md, updated CLAUDE.md/rules/agent defs/skills/memory to reflect user->PM->implementing agent model. E-028 stories revised. Agent ecosystem now 6 agents.
+- E-031 (COMPLETED): Dispatch Closure Sequence -- expanded dispatch closure in dispatch-pattern.md and product-manager.md into a 7-step sequence (validate, update, archive, memory, ideas, summary, commit offer).
 
 ## Key Architectural Decisions
 - Storage: SQLite (WAL mode). Host-mounted at ./data/app.db. Simple file backup via scripts/backup_db.py (no Litestream).
@@ -53,6 +56,7 @@
 - HTTP layer: src/http/headers.py + src/http/session.py. Chrome 131/macOS fingerprint.
 - ip_outs: innings pitched stored as integer outs (1 IP = 3 outs)
 - Soft referential integrity in stats tables (orphaned player IDs accepted with WARNING)
+- Routing model (2026-03-03): Orchestrator removed (E-030). PM is the direct entry point for all work. User talks to PM or direct-routing exceptions. Simplifies architecture, eliminates telephone game relay.
 - Auth model (revised 2026-03-03): ALL users (coaches + admins) = magic link email + optional passkey (py_webauthn) + SQLite sessions table. No separate admin login path. Admin routes protected by two layers: (1) Cloudflare Access policy requires WARP to reach /admin/* (network-level, external to app), (2) app session middleware + is_admin flag. App does NOT inspect Cf-Access-Jwt-Assertion or any CF headers. No passwords. Mailgun for email (MAILGUN_API_KEY env var; stdout fallback in dev). Dev bypass via DEV_USER_EMAIL env var. Migration 003_auth.sql (002 reserved for E-003-02 stats schema).
 
 ## User Preferences
@@ -69,12 +73,14 @@
 | IDEA-004 | Hard Data Boundaries and PII Protection | PROMOTED | 2026-03-02 | Promoted to E-019. Consolidated 6 stories to 4, added credential scanning. |
 
 ## Key Workflow Contract
+- Routing model: user -> PM -> implementing agent (no orchestrator; removed in E-030)
 - PM modes: Refinement (form epics) / Decision Gates (evaluation synthesis) / Dispatch (execute stories)
 - Epic lifecycle: DRAFT -> READY -> ACTIVE -> COMPLETED (or BLOCKED / ABANDONED)
 - READY gate: must be READY/ACTIVE before dispatch. PM sets READY explicitly.
 - Dispatch: PM uses Agent Teams (TeamCreate + Agent tool). See /.claude/rules/dispatch-pattern.md.
 - Direct-routing exceptions (no PM needed): api-scout, baseball-coach, claude-architect
 - Implementing agents needing work auth: general-dev, data-engineer, docs-writer
+- Agent ecosystem: 6 agents (claude-architect, product-manager, baseball-coach, api-scout, data-engineer, general-dev)
 - Before assigning epic numbers: ALWAYS ls /epics/ to avoid numbering collisions
 
 ## Detailed Notes (Separate Files)

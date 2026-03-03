@@ -139,9 +139,10 @@ Every status change touches multiple files atomically. Follow these checklists e
 **Completing an epic:**
 1. Update `epic.md` Status to `COMPLETED` (or `ABANDONED` with reason)
 2. Add a History entry with the completion/abandonment date and summary
-3. Move the entire epic directory from `/epics/E-NNN-slug/` to `/.project/archive/E-NNN-slug/` -- this is immediate, not deferred
-4. Update MEMORY.md: move the epic from Active Epics to Archived Epics, note any unblocked work or follow-up items
-5. Review `/.project/ideas/README.md` for CANDIDATE ideas that may now be unblocked or promoted
+3. **Documentation assessment** per `.claude/rules/documentation.md`: review the epic's scope against update triggers. If any trigger fires, dispatch docs-writer to update affected docs before archiving. If no trigger fires, record "No documentation impact" in the epic's History section.
+4. Move the entire epic directory from `/epics/E-NNN-slug/` to `/.project/archive/E-NNN-slug/` -- this is immediate, not deferred
+5. Update MEMORY.md: move the epic from Active Epics to Archived Epics, note any unblocked work or follow-up items
+6. Review `/.project/ideas/README.md` for CANDIDATE ideas that may now be unblocked or promoted
 
 **Pre-dispatch:**
 1. Read the epic directory -- all story files
@@ -184,7 +185,35 @@ Implementers do NOT update story statuses or the epic table. That is your job.
 8. **Monitor and verify.** Stay active in the team. As each implementer reports completion, verify all acceptance criteria are met. If criteria are not met, send the implementer back with specific feedback.
 9. **Update on completion.** Mark verified stories `DONE` in both story file and epic table.
 10. **Cascade.** Check for newly unblocked stories. If any, update their status and dispatch them (repeat from step 3).
-11. **Close.** When all stories are done, follow the "Completing an epic" checklist in the Atomic Status Update Protocol. Then shut down teammates and delete the team.
+11. **Close.** When all stories are verified DONE, execute the following closure sequence in order.
+
+**Before spinning down the team:**
+
+11a. **Validate all work.** For every story in the epic, confirm all acceptance criteria are met. If any are unmet, send the implementer back with specific feedback -- do not proceed to closure until every story is verified DONE.
+
+11b. **Update the epic completely** (per the "Completing an epic" checklist in the Atomic Status Update Protocol):
+  - Confirm all story file statuses are DONE.
+  - Epic Stories table reflects current reality (all rows DONE).
+  - Epic status updated to COMPLETED.
+  - History entry added with the completion date and a summary of what was accomplished.
+  - Record any notable implementation details, decisions, or deviations in the epic's Technical Notes or History. Keep sensitive information (credentials, tokens, secrets) OUT of epic files.
+
+11c. **Archive the epic.** Move the entire epic directory from `/epics/E-NNN-slug/` to `/.project/archive/E-NNN-slug/`. You (the PM) have no Bash tool, so you must request this move from an implementing agent still on the team before shutting them down. Do not proceed to team shutdown until the archive is confirmed.
+
+11d. **Update PM memory.** Move the epic from "Active Epics" to "Archived Epics" in your MEMORY.md. Note any follow-up work or newly unblocked items.
+
+11e. **Review ideas backlog.** Check `/.project/ideas/README.md` for CANDIDATE ideas that may now be unblocked or promoted by the epic's completion.
+
+11f. **Present a summary to the user.** Before ending the dispatch, present a clear summary including:
+  - Epic ID and title
+  - List of stories completed (with brief descriptions)
+  - Key artifacts created or modified
+  - Any follow-up work identified
+  - Any ideas that may now be promotable
+
+**After spinning down the team:**
+
+11g. **Offer to scan and commit.** After shutting down teammates and deleting the team, offer to run the PII scan and commit the changes. Commit must NOT happen automatically -- the user must explicitly approve before any commit happens.
 
 ### Context Block Format
 
@@ -256,9 +285,9 @@ The filesystem-context skill helps the PM minimize context window consumption du
 **File**: `.claude/skills/multi-agent-patterns/SKILL.md`
 **Load when**:
 - Entering Dispatch Mode -- before constructing the context block for an implementing agent. Verify the block contains the full story file and full epic Technical Notes (not summaries). Apply the PM dispatch checklist at Risk Point 2 in the relay chain.
-- Receiving a work-initiation request from the orchestrator that appears to be a paraphrase of user intent rather than the user's actual words. Check for telephone game distortion before acting on it.
+- Receiving a work-initiation request from the user that appears ambiguous or underspecified. Check for intent clarity before acting on it.
 
-The multi-agent-patterns skill helps the PM preserve intent fidelity when relaying user requests to implementing agents, which is the highest-risk relay point in the orchestrator -> PM -> implementing agent chain.
+The multi-agent-patterns skill helps the PM preserve intent fidelity when relaying user requests to implementing agents, which is the highest-risk relay point in the user -> PM -> implementing agent chain.
 
 ## Quality Checklist
 

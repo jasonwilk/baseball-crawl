@@ -10,30 +10,27 @@
 Load this skill when you are about to:
 
 - **Dispatch a story via Agent Teams** and need to verify the context block is complete
-- **Route a request through multiple agents** (orchestrator -> PM -> implementing agent)
+- **Route a request through multiple agents** (user -> PM -> implementing agent)
 - **Debug an implementing agent that completed a task incorrectly**
 
 ---
 
 ## The Telephone Game Problem
 
-When a request passes through multiple agents, each relay risks losing information. The orchestrator paraphrases, the PM summarizes, the implementing agent builds against a distortion of the original intent.
+When a request passes through multiple agents, each relay risks losing information. The PM summarizes, the implementing agent builds against a distortion of the original intent.
 
 ### Mitigation: Verbatim Relay
 
 Pass original content at every relay point. Never summarize.
 
-**Orchestrator -> PM**: Pass the user's request verbatim. If it's ambiguous, ask the user — don't guess.
-
 **PM -> Implementing Agent**: Include the **full story file text** and **full epic Technical Notes** in every dispatch. Not a summary. Every acceptance criterion, file path, and constraint.
+
+In this project, there is only one relay point (PM -> implementing agent), which minimizes telephone game risk. The PM receives the user's request directly, so the primary risk is in how the PM packages context for dispatch.
 
 ## Baseball-Crawl's Routing Chain
 
 ```
 User
-  |
-  v
-orchestrator          (routes all requests)
   |
   +-- direct: api-scout        (no PM needed)
   +-- direct: baseball-coach   (no PM needed)
@@ -58,7 +55,7 @@ Before spawning a teammate for a story:
 
 ## When to Shorten the Chain
 
-If the request is consultative (not implementation), skip the PM:
+If the request is consultative (not implementation), the user can invoke agents directly:
 - API exploration -> api-scout directly
 - Domain questions -> baseball-coach directly
 - Agent infrastructure -> claude-architect directly
@@ -70,6 +67,6 @@ If the request produces code, schema, or tests -> route through PM.
 If an implementing agent's output doesn't match intent:
 1. Did it receive the full story file, or a summary?
 2. Did the story accurately reflect the user's requirement?
-3. Did the orchestrator pass the request verbatim, or paraphrase?
+3. Did the PM package the full context, or paraphrase?
 
-Work backward through the chain. The problem is usually at the first relay where a summary replaced the original.
+Work backward through the chain. The problem is usually at the relay where a summary replaced the original.

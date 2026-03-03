@@ -17,17 +17,16 @@ IMPORTANT -- This is the governing design principle for the entire project.
 - State: Active development -- src/http/ module exists (headers, session factory), multiple epics completed
 
 ## Agent Ecosystem (Current)
-All seven agents in `.claude/agents/`:
-- **orchestrator** (sonnet, cyan): Smart router with file-reading. Read/Glob/Grep/Task tools. No memory.
+Six agents in `.claude/agents/`:
 - **claude-architect** (opus, yellow): Meta-agent. Designs/manages agents, CLAUDE.md, rules.
-- **product-manager** (opus, green): Product Manager. Epics, stories, dispatch via Agent Teams. No code.
+- **product-manager** (opus, green): Product Manager and entry point. Epics, stories, dispatch via Agent Teams. No code.
 - **baseball-coach** (sonnet, red): Domain expert. Coaching needs -> technical requirements.
 - **api-scout** (sonnet, orange): GameChanger API exploration, documentation, credential patterns.
 - **data-engineer** (sonnet, blue): Database schema, SQL migrations, ETL pipelines, query optimization.
 - **general-dev** (sonnet, blue): Python implementation. Crawlers, parsers, loaders, utilities, tests.
 
 ### When to Create New Agents
-Only when a user request requires specialized capability that existing agents cannot handle AND the work is recurring. When created, MUST update orchestrator routing.
+Only when a user request requires specialized capability that existing agents cannot handle AND the work is recurring.
 
 ## Key Architectural Decisions
 - PII safety system: two-layer defense (Git pre-commit hook + Claude Code PreToolUse hook)
@@ -36,7 +35,6 @@ Only when a user request requires specialized capability that existing agents ca
   - Claude Code hook: `.claude/hooks/pii-check.sh` (PreToolUse, Bash matcher)
   - Scanner: `src/safety/pii_scanner.py` (stdlib only, shared by both hooks)
   - No agent/skill created for scanning (deterministic check, not reasoning)
-- Orchestrator lists all agents that have .md files
 - Product-manager has full template content inline (comprehensive operational manual)
 - Tech stack: Python end-to-end. FastAPI+Jinja2 serving layer. Docker Compose + Cloudflare Tunnel. SQLite (WAL mode + Litestream). Hetzner CX11 VPS. Decision finalized in E-009.
 - Docker Compose stack (3 services): app (FastAPI, localhost:8001 direct / localhost:8000 via Traefik), traefik (reverse proxy, dashboard at :8080), cloudflared (tunnel). E-027 established devcontainer-to-compose networking.
@@ -50,8 +48,7 @@ Only when a user request requires specialized capability that existing agents ca
   - `.claude/rules/ideas-workflow.md` (scoped rule, paths: .project/ideas/**)
   - `.claude/agents/product-manager.md` (Ideas Workflow section + System of Work flow)
   - `.claude/agent-memory/product-manager/MEMORY.md` (idea numbering state)
-  - `.claude/agents/orchestrator.md` (routing examples for idea capture intent)
-- Orchestrator routes "capture for later" / "someday" / "idea" intent to PM
+- PM handles "capture for later" / "someday" / "idea" intent directly
 - Any agent identifying future work should flag to PM, not create speculative epics
 - Dispatch pattern: PM is a standing team coordinator (not fire-and-forget)
   - PM joins every dispatch team, stays active throughout, manages all state
