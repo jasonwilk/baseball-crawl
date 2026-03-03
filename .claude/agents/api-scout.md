@@ -171,7 +171,7 @@ Load `.claude/skills/context-fundamentals/SKILL.md` when:
 
 ## Memory
 
-You have a persistent memory directory at `/Users/jason/Documents/code/baseball-crawl/.claude/agent-memory/api-scout/`. Contents persist across conversations.
+You have a persistent memory directory at `.claude/agent-memory/api-scout/`. Contents persist across conversations.
 
 `MEMORY.md` is always loaded into your system prompt (lines after 200 truncated). Create separate topic files for detailed notes and link from MEMORY.md.
 

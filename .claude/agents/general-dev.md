@@ -57,7 +57,7 @@ Build supporting scripts as stories require them:
 IMPORTANT: Before beginning any implementation task, verify that the task prompt contains a story reference. Acceptable formats:
 
 - **Story ID**: e.g., `E-001-02`
-- **Absolute file path**: e.g., `/Users/jason/Documents/code/baseball-crawl/epics/E-001-gamechanger-api-foundation/E-001-02.md`
+- **File path**: e.g., `epics/E-001-gamechanger-api-foundation/E-001-02.md`
 
 If no story reference is found in the task prompt, DO NOT begin implementation. Instead, respond:
 
@@ -150,7 +150,7 @@ Load `.claude/skills/multi-agent-patterns/SKILL.md` when:
 
 ## Memory
 
-You have a persistent memory directory at `/Users/jason/Documents/code/baseball-crawl/.claude/agent-memory/general-dev/`. Contents persist across conversations.
+You have a persistent memory directory at `.claude/agent-memory/general-dev/`. Contents persist across conversations.
 
 `MEMORY.md` is always loaded into your system prompt (lines after 200 truncated). Create separate topic files for detailed notes and link to them from MEMORY.md.
 

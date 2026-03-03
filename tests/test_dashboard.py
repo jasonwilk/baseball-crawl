@@ -192,7 +192,8 @@ def seeded_client(tmp_path: Path) -> TestClient:
     """
     db_path = _make_seeded_db(tmp_path)
     with patch.dict("os.environ", {"DATABASE_PATH": str(db_path)}):
-        yield TestClient(app)
+        with TestClient(app) as client:
+            yield client
 
 
 # ---------------------------------------------------------------------------
@@ -297,8 +298,8 @@ class TestDashboardEndpoint:
         """GET /health still returns 200 after dashboard router registration (AC-7)."""
         db_path = _make_seeded_db(tmp_path)
         with patch.dict("os.environ", {"DATABASE_PATH": str(db_path)}):
-            client = TestClient(app)
-            response = client.get("/health")
+            with TestClient(app) as client:
+                response = client.get("/health")
         assert response.status_code == 200
         assert response.json()["status"] == "ok"
 

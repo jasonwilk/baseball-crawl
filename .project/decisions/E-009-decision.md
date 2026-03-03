@@ -168,10 +168,10 @@ This decision stands until one of the following occurs:
 
 All research findings that informed this decision are at:
 
-- `/Users/jason/Documents/code/baseball-crawl/.project/research/E-009-R-01-database-options.md`
-- `/Users/jason/Documents/code/baseball-crawl/.project/research/E-009-R-02-api-layer-options.md`
-- `/Users/jason/Documents/code/baseball-crawl/.project/research/E-009-R-03-dashboard-framework.md`
-- `/Users/jason/Documents/code/baseball-crawl/.project/research/E-009-R-04-option-comparison.md`
+- `.project/research/E-009-R-01-database-options.md`
+- `.project/research/E-009-R-02-api-layer-options.md`
+- `.project/research/E-009-R-03-dashboard-framework.md`
+- `.project/research/E-009-R-04-option-comparison.md`
 
 ---
 

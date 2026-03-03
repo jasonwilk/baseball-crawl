@@ -62,7 +62,7 @@ memory: project
 
 ## data-engineer
 
-**When to create**: First time a user wants to design a database schema, build an ETL pipeline, or work with Cloudflare D1/storage infrastructure.
+**When to create**: First time a user wants to design a database schema, build an ETL pipeline, or work with SQLite/storage infrastructure.
 
 **Frontmatter**:
 ```yaml
@@ -74,7 +74,7 @@ memory: project
 ```
 
 **Key system prompt elements**:
-- Start with SQLite locally; Cloudflare D1 when deployment matters
+- SQLite (host-mounted, WAL mode) for all environments
 - Core entities: Team, Player, PlayerTeamSeason, Game, Lineup, PlateAppearance, PitchingAppearance
 - Player identity across teams is the hard problem (same player on multiple teams)
 - Store events (plate appearances), compute aggregates on read

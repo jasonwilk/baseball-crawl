@@ -73,8 +73,8 @@ class TestHealthEndpoint:
         db_path = _make_initialized_db(tmp_path)
 
         with patch.dict("os.environ", {"DATABASE_PATH": str(db_path)}):
-            client = TestClient(app)
-            response = client.get("/health")
+            with TestClient(app) as client:
+                response = client.get("/health")
 
         assert response.status_code == 200
         body = response.json()
@@ -86,8 +86,8 @@ class TestHealthEndpoint:
         missing_path = tmp_path / "nonexistent" / "app.db"
 
         with patch.dict("os.environ", {"DATABASE_PATH": str(missing_path)}):
-            client = TestClient(app)
-            response = client.get("/health")
+            with TestClient(app) as client:
+                response = client.get("/health")
 
         assert response.status_code == 503
         body = response.json()
@@ -104,8 +104,8 @@ class TestHealthEndpoint:
         conn.close()
 
         with patch.dict("os.environ", {"DATABASE_PATH": str(db_path)}):
-            client = TestClient(app)
-            response = client.get("/health")
+            with TestClient(app) as client:
+                response = client.get("/health")
 
         assert response.status_code == 503
         body = response.json()
@@ -116,8 +116,8 @@ class TestHealthEndpoint:
         db_path = _make_initialized_db(tmp_path)
 
         with patch.dict("os.environ", {"DATABASE_PATH": str(db_path)}):
-            client = TestClient(app)
-            response = client.get("/health")
+            with TestClient(app) as client:
+                response = client.get("/health")
 
         body = response.json()
         assert set(body.keys()) == {"status", "db"}

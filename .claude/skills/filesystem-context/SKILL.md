@@ -90,7 +90,7 @@ Baseball-crawl uses the filesystem-context pattern pervasively. The following na
 
 When `general-dev` or `data-engineer` receives a task, the standard context block always includes the full story file contents. The agent's first action is to confirm it has read and understood all acceptance criteria before touching any code.
 
-File location: `/Users/jason/Documents/code/baseball-crawl/epics/E-NNN-slug/E-NNN-SS.md`
+File location: `epics/E-NNN-slug/E-NNN-SS.md`
 
 The story file is not ambient -- it is not loaded at session start. It is loaded per-task, when the PM dispatches the story. This keeps baseline session tokens low across the many stories in a project, while ensuring the implementing agent has full context for the specific story it is executing.
 
@@ -104,8 +104,8 @@ Before the `product-manager` dispatches any story, it reads:
 3. The story files for any completed dependencies (to understand what those stories delivered)
 
 File locations:
-- Epic: `/Users/jason/Documents/code/baseball-crawl/epics/E-NNN-slug/epic.md`
-- Stories: `/Users/jason/Documents/code/baseball-crawl/epics/E-NNN-slug/E-NNN-SS.md`
+- Epic: `epics/E-NNN-slug/epic.md`
+- Stories: `epics/E-NNN-slug/E-NNN-SS.md`
 
 This is a deliberate load sequence, not an accident. The PM does not rely on memory alone for dependency statuses -- it reads the actual story files to confirm current status. Memory can be stale; the file is the source of truth.
 
@@ -114,7 +114,7 @@ This is a deliberate load sequence, not an accident. The PM does not rely on mem
 #### Example 3: Agent Memory Files Are Loaded at Session Start
 
 Each agent has a persistent memory file at:
-`/Users/jason/Documents/code/baseball-crawl/.claude/agent-memory/<agent-name>/MEMORY.md`
+`.claude/agent-memory/<agent-name>/MEMORY.md`
 
 This file loads automatically when the agent starts a session. It provides:
 - Numbering state (next available epic or idea number)
@@ -142,7 +142,7 @@ File location pattern: `/.project/research/<E-NNN-slug>-<topic>.md`
 #### Example 5: API Spec Loaded by API-Touching Agents
 
 The GameChanger API spec lives at:
-`/Users/jason/Documents/code/baseball-crawl/docs/gamechanger-api.md`
+`docs/gamechanger-api.md`
 
 This is deferred context for most agents. `api-scout` loads it when exploring endpoints. `general-dev` loads it when implementing API client code. It is not ambient -- it changes frequently and is not relevant to every task.
 
@@ -193,7 +193,7 @@ When creating a new file that will serve as deferred context:
 ### Source Material
 - **E-008-R-02 Research Summary**: `/.project/research/E-008-R-02-agent-skills-summary.md` -- Documents the muratcankoylan Agent Skills for Context Engineering repository, including the SKILL.md format and the progressive disclosure mechanism. The recommendation to adopt `filesystem-context`, `multi-agent-patterns`, and `context-fundamentals` specifically originated in this research.
 - **E-008 Recommendation**: `/.project/research/E-008-intent-context-layer-recommendation.md` -- The Phase 1 implementation sketch that specified how each skill should be adapted for baseball-crawl.
-- **E-010 Epic**: `/Users/jason/Documents/code/baseball-crawl/epics/E-010-intent-context-layer-implementation/epic.md` -- Parent epic for all three Phase 1 skill files. Technical Notes section contains the canonical SKILL.md format description.
+- **E-010 Epic**: `epics/E-010-intent-context-layer-implementation/epic.md` -- Parent epic for all three Phase 1 skill files. Technical Notes section contains the canonical SKILL.md format description.
 
 ### External Reference
 - muratcankoylan Agent Skills for Context Engineering: https://github.com/muratcankoylan/Agent-Skills-for-Context-Engineering (12.8k stars as of 2026-02-28). Baseball-crawl adopts 3 of the 13 skills from this repository, adapted to project-specific conventions. The plugin install (`/plugin marketplace add muratcankoylan/...`) is NOT used -- skills are written and maintained directly.

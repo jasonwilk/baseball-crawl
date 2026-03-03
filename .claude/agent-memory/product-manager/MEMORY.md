@@ -1,8 +1,8 @@
 # Product Manager -- Agent Memory
 
 ## Numbering State
-- Next available epic number: E-033
-- Epics created: E-001 through E-032 (E-006, E-007, E-008, E-010, E-011, E-012, E-013, E-014, E-015, E-016, E-017, E-018, E-019, E-020, E-021, E-022, E-024, E-025, E-026, E-027, E-029, E-030, E-031, E-032 archived)
+- Next available epic number: E-034
+- Epics created: E-001 through E-033 (E-006, E-007, E-008, E-010, E-011, E-012, E-013, E-014, E-015, E-016, E-017, E-018, E-019, E-020, E-021, E-022, E-024, E-025, E-026, E-027, E-029, E-030, E-031, E-032, E-033 archived)
 - Next available idea number: IDEA-006
 - Ideas created: IDEA-001 through IDEA-005
 
@@ -16,7 +16,7 @@
 ## Active Epics (Summary)
 - E-001 (ACTIVE): GameChanger API Foundation -- E-001-01 DONE, E-001-03 DONE, E-001-02 TODO, E-001-04 TODO (blocked on E-001-02).
 - E-002 (ACTIVE): Data Ingestion Pipeline -- 8 stories all TODO. Crawl stories blocked on E-001-02+E-001-03 (E-001-03 now DONE). Load stories blocked on E-003-01.
-- E-003 (ACTIVE): Data Model and Storage Schema -- E-003-01 TODO, E-003-02 TODO (blocked on 01), E-003-03 ABANDONED, E-003-04 TODO (blocked on 02+E-009-02).
+- E-003 (READY): Data Model and Storage Schema -- REFINED 2026-03-03. E-003-01 TODO (rewrite 001_initial_schema.sql: seasons, crawl config, pitching, expanded splits), E-003-02 TODO (coaching_assignments migration 004, blocked on E-003-01 + E-023-01), E-003-03 ABANDONED, E-003-04 TODO (seed data + query tests, blocked on E-003-01). E-003-01 has NO blockers. E-003-01 and E-003-04 can run sequentially without E-023. E-003-02 cross-epic dep on E-023-01.
 - E-004 (DRAFT): Coaching Dashboard -- no stories yet, blocked on E-002 + E-003. Still references old Cloudflare stack (E-009-08 will fix).
 - E-005 (ACTIVE): HTTP Request Discipline -- 4/5 DONE. E-005-03 TODO (blocked on E-001-02).
 - E-009 (ACTIVE): Tech Stack Redesign -- 02/03/04/05/06 DONE. 07 TODO (production runbook), 08 TODO (CLAUDE.md update, blocked on 07). All research spikes DONE.
@@ -47,6 +47,7 @@
 - E-010 (ABANDONED): Intent/Context Layer -- Phase 1 DONE (3 skill files delivered and in use). Phase 2 abandoned: blockers (E-002+E-003) distant, epic text stale (orchestrator refs from pre-E-030). Phase 2 concept captured as IDEA-005.
 - E-028 (COMPLETED): Documentation System -- docs-writer agent, documentation maintenance rules, admin docs (architecture, getting-started, operations, agent-guide), coaching docs (stats glossary, scouting reports), workflow integration (dispatch-pattern.md, workflow-discipline.md, PM agent def).
 - E-032 (COMPLETED): Agent Log Access and Troubleshooting Verification -- validated E-027 troubleshooting workflow end-to-end. No blocking gaps. Recommendation: add grep-based log filtering to CLAUDE.md troubleshooting section.
+- E-033 (COMPLETED): Project Hygiene -- aligned docs and tests with current reality. CLAUDE.md stack sections corrected, hardcoded paths fixed in 16 context-layer + story files, TestClient lifecycle fixed, pytest-timeout added, migration comment corrected.
 
 ## Key Architectural Decisions
 - Storage: SQLite (WAL mode). Host-mounted at ./data/app.db. Simple file backup via scripts/backup_db.py (no Litestream).
@@ -56,13 +57,17 @@
 - HTTP layer: src/http/headers.py + src/http/session.py. Chrome 131/macOS fingerprint.
 - ip_outs: innings pitched stored as integer outs (1 IP = 3 outs)
 - Soft referential integrity in stats tables (orphaned player IDs accepted with WARNING)
+- Data model (revised 2026-03-03): seasons = first-class entity (season_id TEXT PK, type-based filtering). teams have crawl config (source, is_active, last_synced). All season references are FKs to seasons table. player_season_pitching added. Expanded splits on batting (hr, bb, so per split group). coaching_assignments = domain table (not auth), FKs to users+teams+seasons. Migration numbering: 001=data model, 003=auth, 004=coaching_assignments. Slot 002 unused.
 - Routing model (2026-03-03): Orchestrator removed (E-030). PM is the direct entry point for all work. User talks to PM or direct-routing exceptions. Simplifies architecture, eliminates telephone game relay.
-- Auth model (revised 2026-03-03): ALL users (coaches + admins) = magic link email + optional passkey (py_webauthn) + SQLite sessions table. No separate admin login path. Admin routes protected by two layers: (1) Cloudflare Access policy requires WARP to reach /admin/* (network-level, external to app), (2) app session middleware + is_admin flag. App does NOT inspect Cf-Access-Jwt-Assertion or any CF headers. No passwords. Mailgun for email (MAILGUN_API_KEY env var; stdout fallback in dev). Dev bypass via DEV_USER_EMAIL env var. Migration 003_auth.sql (002 reserved for E-003-02 stats schema).
+- Auth model (revised 2026-03-03): ALL users (coaches + admins) = magic link email + optional passkey (py_webauthn) + SQLite sessions table. No separate admin login path. Admin routes protected by two layers: (1) Cloudflare Access policy requires WARP to reach /admin/* (network-level, external to app), (2) app session middleware + is_admin flag. App does NOT inspect Cf-Access-Jwt-Assertion or any CF headers. No passwords. Mailgun for email (MAILGUN_API_KEY env var; stdout fallback in dev). Dev bypass via DEV_USER_EMAIL env var. Migration 003_auth.sql.
 
 ## User Preferences
 - Build it right, no rush
 - Coaches see dashboards; user (operator) runs the system
 - Multi-team (4 Lincoln levels), multi-season, player tracking across orgs
+- CLAUDE.md and shipped code comments describe current implemented reality, NOT future planned state
+- Epics/stories describe future work until that work is done
+- Archived files are frozen historical records -- do not modify
 
 ## Ideas Backlog
 | ID | Title | Status | Review By | Notes |

@@ -9,7 +9,7 @@ IMPORTANT -- This is the governing design principle for the entire project.
 - CRITICAL LESSON: The principle guides FUTURE decisions. It does NOT justify deleting existing working context, architectural details, or agent configs. Existing documentation has value.
 
 ## Project: baseball-crawl
-- Project root: `/Users/jason/Documents/code/baseball-crawl/`
+- Project root: repository root (workspace-relative paths used throughout)
 - Purpose: Coaching analytics for Lincoln Standing Bear HS baseball (GameChanger data)
 - Teams: Freshman, JV, Varsity, Reserve (Legion later)
 - Users: Jason (operator), coaching staff (consumers)

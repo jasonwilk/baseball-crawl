@@ -30,7 +30,10 @@ Coaching analytics platform for **Lincoln Standing Bear High School** baseball p
 A queryable database containing team and opponent statistics, sufficient for scouting reports and game prep. Dashboards come after the data layer is solid.
 
 ### Deployment Target
-- **Cloudflare**: D1 (SQLite database), Workers (API/ETL), Pages (dashboards when ready), KV/R2 (caching/raw storage as needed)
+- **Docker Compose** on a home Linux server (same compose file for local dev and production)
+- **SQLite** (WAL mode, host-mounted at `./data/app.db`) for structured storage
+- **FastAPI + Jinja2** (Python) serving layer -- server-rendered HTML
+- **Cloudflare Tunnel + Zero Trust Access** for network ingress and authentication (no exposed ports)
 
 ## Data Philosophy
 
@@ -43,10 +46,11 @@ This guides our data-source decisions:
 - **Web scraping** (fallback): Screen-scrape when the API does not cover a data point, but only for data already visible in the UI.
 
 ## Tech Stack
-- Python (version governed by `.python-version` -- Dockerfile, devcontainer.json, and pyproject.toml must stay in sync with it) for data extraction and processing scripts
-- Cloudflare D1 (SQLite) for structured data storage
-- Cloudflare Workers for API endpoints and scheduled jobs
-- TypeScript/JavaScript for Workers and Pages (when dashboard phase begins)
+- Python end-to-end (version governed by `.python-version` -- Dockerfile, devcontainer.json, and pyproject.toml must stay in sync with it) -- crawlers, API, dashboard, migrations, and tests
+- FastAPI + Jinja2 for the serving layer (server-rendered HTML)
+- SQLite (WAL mode, host-mounted Docker volume at `./data/app.db`) for structured storage
+- Docker Compose for local development and production deployment
+- Cloudflare Tunnel + Zero Trust Access for network ingress and authentication
 
 ## Python Version Policy
 
@@ -98,7 +102,8 @@ docker compose ps              # show running containers and ports
 
 **Health check**
 ```bash
-curl -s http://localhost:8001/health   # expect 200 OK
+curl -s http://localhost:8001/health   # direct (expect 200 OK)
+curl -s -H "Host: baseball.localhost" http://localhost:8000/health  # via Traefik
 ```
 
 **Logs**
@@ -106,7 +111,7 @@ curl -s http://localhost:8001/health   # expect 200 OK
 docker compose logs app            # full log history
 docker compose logs -f app         # follow live logs (Ctrl-C to exit)
 docker compose logs --tail=50 app  # last 50 lines
-docker compose logs app 2>/dev/null | grep -A 10 "ERROR\|Traceback"  # errors and tracebacks only
+docker compose logs app 2>&1 | grep -A 10 "ERROR\|Traceback"  # errors and tracebacks only
 ```
 
 **After changing source code or migrations**: Rebuild and restart the app container so changes take effect.
@@ -136,12 +141,12 @@ docker compose up -d --build app   # rebuild image and restart app
 - Extraction should be idempotent -- re-running should not duplicate data
 - All HTTP requests should include proper error handling, retries, and rate limiting
 - Store raw API responses before transforming (raw -> processed pipeline)
-- Credential management: environment variables for local dev, Cloudflare secrets for production
+- Credential management: environment variables via .env files (local dev and production; Docker Compose reads .env automatically)
 
 ## Security Rules
 - IMPORTANT: Credentials and tokens MUST NEVER appear in code, logs, commit history, or agent output
 - Use `.env` files locally (always in `.gitignore`)
-- Use Cloudflare secrets/environment variables for production
+- Use environment variables via .env files for production (Docker Compose reads .env; files are git-ignored)
 - When agents work with API responses, strip or redact auth headers before storing raw responses
 - Treat GameChanger session tokens as sensitive data at all times
 

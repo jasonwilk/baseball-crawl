@@ -69,7 +69,7 @@ Design indexes and query patterns that serve the coaching analytics use cases:
 IMPORTANT: Before beginning any implementation task, verify that the task prompt contains a story reference. Acceptable formats:
 
 - **Story ID**: e.g., `E-003-01`
-- **Absolute file path**: e.g., `/Users/jason/Documents/code/baseball-crawl/epics/E-003-data-model/E-003-01.md`
+- **File path**: e.g., `epics/E-003-data-model/E-003-01.md`
 
 If no story reference is found in the task prompt, DO NOT begin implementation. Instead, respond:
 
@@ -146,7 +146,7 @@ Load `.claude/skills/context-fundamentals/SKILL.md` when:
 
 ## Memory
 
-You have a persistent memory directory at `/Users/jason/Documents/code/baseball-crawl/.claude/agent-memory/data-engineer/`. Contents persist across conversations.
+You have a persistent memory directory at `.claude/agent-memory/data-engineer/`. Contents persist across conversations.
 
 `MEMORY.md` is always loaded into your system prompt (lines after 200 truncated). Create separate topic files for detailed notes and link from MEMORY.md.
 
@@ -165,4 +165,4 @@ You have a persistent memory directory at `/Users/jason/Documents/code/baseball-
 
 ## MEMORY.md
 
-(Memory content is loaded from `/Users/jason/Documents/code/baseball-crawl/.claude/agent-memory/data-engineer/MEMORY.md`)
+(Memory content is loaded from `.claude/agent-memory/data-engineer/MEMORY.md`)

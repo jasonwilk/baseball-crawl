@@ -1,7 +1,7 @@
 -- Migration 001: Initial schema
 --
 -- Creates all core tables for baseball-crawl.
--- Schema designed per E-003 (Data Model) spec.
+-- Initial schema (will be rewritten by E-003-01).
 -- WAL mode is enabled by apply_migrations.py before this file runs.
 --
 -- Naming conventions:
