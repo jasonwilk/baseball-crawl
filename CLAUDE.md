@@ -106,6 +106,7 @@ curl -s http://localhost:8001/health   # expect 200 OK
 docker compose logs app            # full log history
 docker compose logs -f app         # follow live logs (Ctrl-C to exit)
 docker compose logs --tail=50 app  # last 50 lines
+docker compose logs app 2>/dev/null | grep -A 10 "ERROR\|Traceback"  # errors and tracebacks only
 ```
 
 **After changing source code or migrations**: Rebuild and restart the app container so changes take effect.

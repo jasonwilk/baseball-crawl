@@ -1,7 +1,7 @@
 # E-010: Intent/Context Layer Implementation
 
 ## Status
-`ACTIVE`
+`ABANDONED`
 
 ## Overview
 Implements the hybrid intent/context layer recommended by E-008: three project-adapted skill files in Phase 1 (immediate), followed by directory-scoped intent nodes at `src/` module boundaries in Phase 2 (triggered when E-002 and E-003 are DONE). The goal is to reduce the amount of contextual scaffolding that story authors must repeat in every Technical Approach section by placing invariants closer to where agents actually work.
@@ -56,9 +56,9 @@ Phase 2 stories are listed here for planning purposes but are NOT dispatchable. 
 
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-010-04 | Write intent nodes for `src/` module boundaries | BLOCKED | E-002 DONE, E-003 DONE | claude-architect |
-| E-010-05 | Write intent nodes for `epics/` and `tests/` | BLOCKED | E-002 DONE, E-003 DONE | claude-architect |
-| E-010-06 | Integration -- agent definitions + DoD template update | BLOCKED | E-010-04, E-010-05 | claude-architect |
+| E-010-04 | Write intent nodes for `src/` module boundaries | ABANDONED | E-002 DONE, E-003 DONE | claude-architect |
+| E-010-05 | Write intent nodes for `epics/` and `tests/` | ABANDONED | E-002 DONE, E-003 DONE | claude-architect |
+| E-010-06 | Integration -- agent definitions + DoD template update | ABANDONED | E-010-04, E-010-05 | claude-architect |
 
 ## Technical Notes
 
@@ -125,3 +125,4 @@ The recommendation (E-008) specifically calls out the risk that skill files get 
 ## History
 - 2026-02-28: Created following E-008-03 APPROVED decision. Authorized by E-008 decision log entry 2026-02-28. Phase 1 stories (E-010-01, 02, 03) are READY and dispatchable immediately. Phase 2 stories (E-010-04, 05, 06) are BLOCKED pending E-002 and E-003 completion.
 - 2026-02-28: Phase 1 COMPLETE. E-010-01, E-010-02, E-010-03 all DONE. Three skill files created: `.claude/skills/filesystem-context/SKILL.md` (199 lines), `.claude/skills/multi-agent-patterns/SKILL.md` (211 lines), `.claude/skills/context-fundamentals/SKILL.md` (193 lines). Epic remains ACTIVE pending Phase 2 (blocked on E-002 + E-003).
+- 2026-03-03: ABANDONED. Phase 1 (3/3 stories) is fully delivered and the skill files are in active use across agent definitions. Phase 2 (E-010-04/05/06) remains blocked on E-002 + E-003, which are both still ACTIVE with significant remaining work -- the blockers are not close to clearing. Additionally, the epic text is stale: Goals, Success Criteria, story descriptions, and Technical Notes all reference the orchestrator agent, which was deleted in E-030. The integration story (E-010-06) specifically names "orchestrator, general-dev, and data-engineer" as targets. Keeping a stale epic ACTIVE with no dispatchable stories and distant blockers adds confusion. The Phase 2 concept (directory-scoped CLAUDE.md intent nodes at src/ module boundaries) remains valid and has been captured as IDEA-005 for future promotion when E-002 and E-003 complete. At promotion time, the idea should be planned against the current architecture (no orchestrator, 6-agent ecosystem, docs-writer exists, documentation rules from E-028 in place).

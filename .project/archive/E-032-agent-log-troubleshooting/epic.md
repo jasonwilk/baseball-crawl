@@ -1,7 +1,7 @@
 # E-032: Agent Log Access and Troubleshooting Verification
 
 ## Status
-`READY`
+`COMPLETED`
 <!-- Lifecycle: DRAFT -> READY -> ACTIVE -> COMPLETED (or BLOCKED / ABANDONED) -->
 <!-- PM sets READY explicitly after: expert consultation done, all stories have testable ACs, quality checklist passed. -->
 <!-- Only READY and ACTIVE epics can be dispatched. -->
@@ -41,8 +41,8 @@ No expert consultation required before story writing -- this is infrastructure v
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-032-01 | Verify agent log access and health check workflow | TODO | None | - |
-| E-032-02 | Verify agent error diagnosis from logs | TODO | E-032-01 | - |
+| E-032-01 | Verify agent log access and health check workflow | DONE | None | - |
+| E-032-02 | Verify agent error diagnosis from logs | DONE | E-032-01 | - |
 
 ## Technical Notes
 
@@ -91,3 +91,7 @@ These findings will be reviewed by PM after the epic completes. If context layer
 
 ## History
 - 2026-03-03: Created. Two-story verification epic. READY -- no expert consultation needed (infrastructure verification).
+- 2026-03-03: Dispatch started. Epic set to ACTIVE. E-032-01 dispatched (IN_PROGRESS).
+- 2026-03-03: E-032-01 verified DONE (all 5 ACs passed). E-032-02 unblocked, set to IN_PROGRESS.
+- 2026-03-03: E-032-02 verified DONE (all 5 ACs passed). Agent triggered DB removal error, diagnosed root cause from logs alone, proposed correct fix, reverted changes, app left healthy. One recommendation: add grep-based log filtering examples to CLAUDE.md troubleshooting section.
+- 2026-03-03: Epic COMPLETED. Both stories DONE. E-027 troubleshooting workflow validated end-to-end. No blocking gaps found. Minor recommendation (grep log filtering) noted for future CLAUDE.md update. Archived to /.project/archive/E-032-agent-log-troubleshooting/.
