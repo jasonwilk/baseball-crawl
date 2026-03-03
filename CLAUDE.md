@@ -182,6 +182,7 @@ Stories can only be dispatched when the parent epic is `READY` or `ACTIVE`. PM s
 - Write descriptive commit messages explaining the "why"
 - Keep PRs focused on a single concern
 - Reference story IDs in commit messages when working on stories
+- After committing, verify the `[pii-scan]` confirmation appears in the output -- if it is missing, the safety scan may not have run; investigate before proceeding
 
 ## Agent Ecosystem
 
@@ -214,7 +215,7 @@ All routed work follows this contract:
 2. **PM consults experts during formation.** Before writing stories, PM consults domain experts as needed. When not required, PM notes the reason.
 3. **PM marks the epic `READY` when refinement is complete.** `DRAFT` epics are not dispatchable.
 4. **"Ready for dev" = `Status: TODO` in a `READY` epic.** No story file means no implementation work begins.
-5. **PM dispatches via Agent Teams.** PM creates a team, spawns implementing agents as teammates, and coordinates work. See `/.claude/rules/dispatch-pattern.md`.
+5. **PM dispatches via Agent Teams.** PM joins every dispatch team as the standing coordinator -- managing story statuses, verifying acceptance criteria, and dispatching newly unblocked stories as predecessors complete. See `/.claude/rules/dispatch-pattern.md`.
 6. **Implementing agents require a story reference.** Must receive a story file path or story ID before beginning any task.
 
 **Enforcement Boundary**: The user always retains override authority to invoke any agent directly; this contract governs the normal orchestrated path.

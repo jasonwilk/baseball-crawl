@@ -193,6 +193,25 @@ def report_violations(violations: list[Violation]) -> None:
     )
 
 
+def _count_scannable(file_paths: list[str]) -> int:
+    """Count files that will actually be scanned (not skipped).
+
+    A file is scannable if it is not in a skip path, has a scannable
+    extension, and exists on disk.
+    """
+    count = 0
+    for file_path in file_paths:
+        fp = file_path.strip()
+        if should_skip_path(fp):
+            continue
+        if not is_scannable(fp):
+            continue
+        if not Path(fp).exists():
+            continue
+        count += 1
+    return count
+
+
 def main() -> int:
     """Main entry point for the PII scanner CLI.
 
@@ -243,6 +262,14 @@ def main() -> int:
     if violations:
         report_violations(violations)
         return 1
+
+    # Print success confirmation if any files were actually scanned
+    scanned = _count_scannable(file_paths)
+    if scanned > 0:
+        print(
+            f"[pii-scan] Scanned {scanned} file(s), 0 violations.",
+            file=sys.stderr,
+        )
 
     return 0
 

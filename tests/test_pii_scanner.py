@@ -19,8 +19,10 @@ import pytest
 
 from src.safety.pii_scanner import (
     Violation,
+    _count_scannable,
     has_synthetic_marker,
     is_scannable,
+    main,
     scan_file,
     scan_files,
     should_skip_path,
@@ -428,3 +430,42 @@ class TestReportViolations:
         assert "[PII BLOCKED] path/to/file.json:42: matched 'email' pattern" in captured.err
         assert "[PII BLOCKED] path/to/file.json:87: matched 'bearer_token' pattern" in captured.err
         assert "2 violation(s) found in 1 file(s)." in captured.err
+
+
+# ---------------------------------------------------------------------------
+# Tests: success confirmation output (E-022-01)
+# ---------------------------------------------------------------------------
+
+class TestSuccessConfirmation:
+    """E-022-01: Scanner prints confirmation on clean scans."""
+
+    def test_confirmation_on_clean_scan(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+        """AC-1/AC-6: Confirmation line printed for clean scans."""
+        p1 = _write_file(tmp_path, "a.py", "x = 1\n")
+        p2 = _write_file(tmp_path, "b.py", "y = 2\n")
+        monkeypatch.setattr("sys.argv", ["pii_scanner", p1, p2])
+        exit_code = main()
+        captured = capsys.readouterr()
+        assert exit_code == 0
+        assert "[pii-scan] Scanned 2 file(s), 0 violations." in captured.err
+
+    def test_no_confirmation_on_empty_file_list(self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+        """AC-2: No confirmation when no files to scan."""
+        monkeypatch.setattr("sys.argv", ["pii_scanner", "--staged"])
+        monkeypatch.setattr(
+            "src.safety.pii_scanner.get_staged_files", lambda: []
+        )
+        exit_code = main()
+        captured = capsys.readouterr()
+        assert exit_code == 0
+        assert "[pii-scan]" not in captured.err
+
+    def test_no_confirmation_on_violations(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+        """AC-3: No confirmation when violations are found."""
+        dirty = _write_file(tmp_path, "dirty.json", '{"email": "test@example.com"}\n')
+        monkeypatch.setattr("sys.argv", ["pii_scanner", dirty])
+        exit_code = main()
+        captured = capsys.readouterr()
+        assert exit_code == 1
+        assert "[PII BLOCKED]" in captured.err
+        assert "[pii-scan] Scanned" not in captured.err

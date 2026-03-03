@@ -16,7 +16,7 @@ INPUT=$(cat)
 COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command // ""')
 
 # Only intercept git commit commands
-if ! echo "$COMMAND" | grep -qE '^git\s+commit'; then
+if ! echo "$COMMAND" | grep -qE '(^|[;&|]\s*)git\s+commit'; then
   exit 0
 fi
 
