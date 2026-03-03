@@ -106,27 +106,21 @@ Mount the host user's `~/.claude` directory into the container so Claude Code pi
 
 Devcontainers handles UID/GID mapping and SSH socket forwarding automatically -- no special configuration needed beyond the `remoteEnv` entry above.
 
-## What We Do NOT Use (Yet)
+## Docker Compose Stack
 
-- **Dockerfile**: Not needed. The base image plus features covers our current requirements.
-- **docker-compose.yml**: Not needed. We have a single container with no service dependencies.
-- **Multi-stage builds**: Not needed. We are not building production artifacts in the devcontainer.
-- **Custom base images**: Not needed. Microsoft's images are well-maintained and sufficient.
+The project runs a three-service stack via `docker-compose.yml`:
 
-## When to Add Complexity
+| Service | Purpose | Port |
+|---------|---------|------|
+| **app** | FastAPI application (Python, uvicorn) | `localhost:8001` (direct), `localhost:8000` (via Traefik) |
+| **traefik** | Reverse proxy, dashboard at `localhost:8080` | `localhost:8000` (app traffic), `localhost:8080` (dashboard) |
+| **cloudflared** | Cloudflare Tunnel for production access | No host port (outbound only) |
 
-Move to a Dockerfile or docker-compose only when there is a real, documented purpose. Examples that would justify it:
+The devcontainer and the compose stack are separate concerns:
+- The **devcontainer** is the development environment (editor, CLI tools, Claude Code).
+- The **compose stack** runs the application services. Agents interact with it via `docker compose` commands from the devcontainer shell.
 
-- A system dependency that no devcontainer feature can install
-- A service dependency (e.g., a local database) that must run alongside the dev container
-- Build steps that are too slow or complex for postCreateCommand
-- Reproducibility requirements that demand exact version pinning beyond what features offer
-
-**When that time comes:**
-1. Document the specific problem that drove the decision
-2. Record the rationale in the project's design docs or agent memory
-3. Keep the Dockerfile/compose as minimal as possible -- the same "simple first" principle applies
-4. Update this rule file to reflect the new baseline
+See the "App Troubleshooting" section in CLAUDE.md for operational commands (health checks, logs, rebuild after changes).
 
 ## Maintenance
 

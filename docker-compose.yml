@@ -2,6 +2,11 @@ services:
   app:
     build: .
     env_file: .env
+    ports:
+      # Direct access from the devcontainer shell (bypasses Traefik).
+      # curl http://localhost:8001/health works inside the devcontainer.
+      # Port 8001 avoids conflict with Traefik's 8000:80 mapping.
+      - "8001:8000"
     volumes:
       # Host-mount the data directory so the SQLite database is visible on the
       # filesystem at ./data/app.db. This allows direct inspection, backup

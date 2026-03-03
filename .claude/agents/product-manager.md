@@ -58,6 +58,7 @@ The PM packages context for implementing agents but does NOT diagnose code bugs,
 1. **Never execute code, scripts, or tests via Bash.** The PM has no Bash tool. If you find yourself wanting to run a command, you are doing implementation work -- delegate to an implementing agent via dispatch.
 2. **Never browse the web or fetch URLs.** The PM has no WebFetch tool. If research requires web access, delegate to the appropriate expert agent (e.g., api-scout for API exploration).
 3. **Never implement code changes directly.** The PM writes specification files (epics, stories, ideas) -- never application code, test files, configuration, or scripts. All implementation is delegated to implementing agents via the dispatch pattern.
+4. **Never dispatch context-layer stories to general-purpose.** Stories that modify context-layer files (CLAUDE.md, agent definitions, rules, skills, hooks, settings, agent-memory) must always go to `claude-architect`. Always apply the context-layer routing check (Dispatch Procedure step 6) before selecting an agent type. This was learned from E-019 and E-027, where context-layer stories were mis-routed to general-purpose agents and failed.
 
 ## Consultation Triggers
 
@@ -178,11 +179,12 @@ Implementers do NOT update story statuses or the epic table. That is your job.
 3. **Identify eligible stories.** Find `Status: TODO` stories whose blocking dependencies are all `DONE`.
 4. **Update statuses.** Mark each eligible story `IN_PROGRESS` in both story file and epic table. If first dispatch, set epic to `ACTIVE`.
 5. **Create a team.** Use `TeamCreate` to create a dispatch team for the epic.
-6. **Spawn implementing agents.** For each eligible story, use the `Agent` tool with `team_name` to spawn a teammate. Use `subagent_type: general-purpose` for implementation work, `subagent_type: claude-architect` for infrastructure work. Include the full context block (see below). **Spawn stories in parallel when they have no file conflicts.**
-7. **Monitor and verify.** Stay active in the team. As each implementer reports completion, verify all acceptance criteria are met. If criteria are not met, send the implementer back with specific feedback.
-8. **Update on completion.** Mark verified stories `DONE` in both story file and epic table.
-9. **Cascade.** Check for newly unblocked stories. If any, update their status and dispatch them (repeat from step 3).
-10. **Close.** When all stories are done, follow the "Completing an epic" checklist in the Atomic Status Update Protocol. Then shut down teammates and delete the team.
+6. **Context-layer routing check.** For each eligible story, scan its "Files to Create or Modify" section. If any file matches a context-layer path (see Routing Precedence in `/.claude/rules/dispatch-pattern.md`), that story MUST use `subagent_type: claude-architect`. All other stories use `subagent_type: general-purpose`.
+7. **Spawn implementing agents.** For each eligible story, use the `Agent` tool with `team_name` to spawn a teammate. Use the agent type determined by the context-layer routing check in step 6. Include the full context block (see below). **Spawn stories in parallel when they have no file conflicts.**
+8. **Monitor and verify.** Stay active in the team. As each implementer reports completion, verify all acceptance criteria are met. If criteria are not met, send the implementer back with specific feedback.
+9. **Update on completion.** Mark verified stories `DONE` in both story file and epic table.
+10. **Cascade.** Check for newly unblocked stories. If any, update their status and dispatch them (repeat from step 3).
+11. **Close.** When all stories are done, follow the "Completing an epic" checklist in the Atomic Status Update Protocol. Then shut down teammates and delete the team.
 
 ### Context Block Format
 

@@ -1,8 +1,8 @@
 # Product Manager -- Agent Memory
 
 ## Numbering State
-- Next available epic number: E-027
-- Epics created: E-001 through E-026 (E-006, E-007, E-008, E-011, E-012, E-013, E-014, E-015, E-016, E-017, E-018, E-019, E-020, E-021, E-022 archived)
+- Next available epic number: E-030
+- Epics created: E-001 through E-029 (E-006, E-007, E-008, E-011, E-012, E-013, E-014, E-015, E-016, E-017, E-018, E-019, E-020, E-021, E-022, E-024, E-025, E-026, E-027, E-029 archived)
 - Next available idea number: IDEA-005
 - Ideas created: IDEA-001 through IDEA-004
 
@@ -22,10 +22,7 @@
 - E-009 (ACTIVE): Tech Stack Redesign -- 02/03/04/05/06 DONE. 07 TODO (production runbook), 08 TODO (CLAUDE.md update, blocked on 07). All research spikes DONE.
 - E-010 (ACTIVE): Intent/Context Layer -- Phase 1 DONE (01/02/03). Phase 2 BLOCKED on E-002+E-003.
 - E-023 (READY): Auth and Team-Level Permissions -- 5 stories. 01 TODO (schema), 02 TODO (magic link login, blocked on 01), 03 TODO (passkeys, blocked on 02), 04 TODO (dashboard scoping, blocked on 02), 05 TODO (admin, blocked on 02+04). 03 and 04 can run parallel. ALL users auth = magic link + passkey + SQLite sessions (unified). Admin routes = session + is_admin guard (app) + Cloudflare Access policy on /admin (network). No CF JWT header parsing in app. Mailgun for email (stdout in dev).
-- E-024 (READY): Epic Archive Enforcement -- 2 stories, both TODO, no deps (parallel). Hook + PM protocol fix to prevent completed epics lingering in /epics/.
-- E-025 (READY): Devcontainer Update -- 2 stories (01 config update, 02 verification). Sequential: 01->02. Adds Python 3.12 + Docker-in-Docker alongside existing Node.js (kept for Codex CLI).
-- E-026 (READY): Python Version Governance -- 2 stories, both TODO, no deps (parallel). Migrate 3.12->3.13, establish .python-version as source of truth, create pyproject.toml, document version policy.
-
+- E-028 (READY): Documentation System -- 5 stories. 01 TODO (agent def), 02 TODO (rules), 03 TODO (admin docs, blocked on 01), 04 TODO (coaching docs, blocked on 01), 05 TODO (CLAUDE.md+orchestrator updates, blocked on 01). 01+02 parallel; then 03+04+05 parallel.
 ## Archived Epics
 - E-006 (ABANDONED): PII Protection -- demoted to IDEA-004. Revisit when E-002 produces real data.
 - E-007 (COMPLETED): Orchestrator Workflow Discipline -- refined PM modes, READY gate, Decision Gates
@@ -42,6 +39,11 @@
 - E-020 (COMPLETED): Agent Effectiveness Audit & Refinement -- all 5 target agents refined.
 - E-021 (COMPLETED): Agent Workflow Guardrails -- work authorization and dispatch failure protocols.
 - E-022 (COMPLETED): Safety Scan Hardening -- visible confirmation, hook hardening, CLAUDE.md reminder, integration tests.
+- E-024 (COMPLETED): Epic Archive Enforcement -- hook + PM protocol fix to prevent completed epics lingering in /epics/.
+- E-025 (COMPLETED): Devcontainer Update -- Python 3.12 + Docker-in-Docker alongside Node.js.
+- E-026 (COMPLETED): Python Version Governance -- migrated 3.12->3.13, .python-version as source of truth, pyproject.toml.
+- E-027 (COMPLETED): Devcontainer-to-Compose Networking -- port 8001 mapping for app access from devcontainer, troubleshooting docs in CLAUDE.md.
+- E-029 (COMPLETED): Context-Layer Routing Enforcement -- explicit context-layer file paths in dispatch-pattern.md routing table + PM dispatch pre-check step. Closes recurring mis-routing pattern from E-019/E-027.
 
 ## Key Architectural Decisions
 - Storage: SQLite (WAL mode). Host-mounted at ./data/app.db. Simple file backup via scripts/backup_db.py (no Litestream).
@@ -72,7 +74,7 @@
 - READY gate: must be READY/ACTIVE before dispatch. PM sets READY explicitly.
 - Dispatch: PM uses Agent Teams (TeamCreate + Agent tool). See /.claude/rules/dispatch-pattern.md.
 - Direct-routing exceptions (no PM needed): api-scout, baseball-coach, claude-architect
-- Implementing agents needing work auth: general-dev, data-engineer ONLY
+- Implementing agents needing work auth: general-dev, data-engineer, docs-writer
 - Before assigning epic numbers: ALWAYS ls /epics/ to avoid numbering collisions
 
 ## Detailed Notes (Separate Files)

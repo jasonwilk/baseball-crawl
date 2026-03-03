@@ -39,6 +39,8 @@ Only when a user request requires specialized capability that existing agents ca
 - Orchestrator lists all agents that have .md files
 - Product-manager has full template content inline (comprehensive operational manual)
 - Tech stack: Python end-to-end. FastAPI+Jinja2 serving layer. Docker Compose + Cloudflare Tunnel. SQLite (WAL mode + Litestream). Hetzner CX11 VPS. Decision finalized in E-009.
+- Docker Compose stack (3 services): app (FastAPI, localhost:8001 direct / localhost:8000 via Traefik), traefik (reverse proxy, dashboard at :8080), cloudflared (tunnel). E-027 established devcontainer-to-compose networking.
+- App troubleshooting section in CLAUDE.md covers: stack management, health check, logs, rebuild after changes, unreachable diagnosis. Agents should rebuild + health-check after modifying src/, migrations/, Dockerfile, docker-compose.yml, or requirements.txt.
 - CLAUDE.md has Core Principle section at top, followed by full project context
 - Ideas workflow in `/.project/ideas/` for pre-epic tracking (IDEA-NNN numbering)
 - Ideas rule: if acceptance criteria cannot be written, it is not an epic -- capture as idea

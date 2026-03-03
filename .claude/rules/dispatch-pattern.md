@@ -60,7 +60,9 @@ Implementing agents do NOT update story statuses or epic tables. That is the PM'
 | Python implementation, crawlers, parsers, tests | `general-purpose` |
 | Database schema, SQL migrations, ETL | `general-purpose` (data-engineer role in prompt) |
 | API exploration, endpoint docs | `general-purpose` (api-scout role in prompt) |
-| Agent config, CLAUDE.md, rules, skills | `claude-architect` |
+| Context-layer files: `CLAUDE.md`, `.claude/agents/*.md`, `.claude/rules/*.md`, `.claude/skills/**`, `.claude/hooks/**`, `.claude/settings.json`, `.claude/settings.local.json`, `.claude/agent-memory/**` | `claude-architect` |
+
+**Routing Precedence**: If a story's "Files to Create or Modify" includes any context-layer path listed above, route to `claude-architect` regardless of the story's primary domain. The only exception is the PM updating its own memory files (`.claude/agent-memory/product-manager/`) during normal status-update work.
 
 ## Task Tool vs. Agent Teams
 
