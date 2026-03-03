@@ -40,9 +40,9 @@ A collaboratively maintained API spec document (`/.project/research/gamechanger-
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-001-01 | Extract credentials from curl and write credential parser | IN_PROGRESS | None | general-dev |
+| E-001-01 | Extract credentials from curl and write credential parser | DONE | None | general-dev |
 | E-001-02 | Build authenticated GameChanger HTTP client | TODO | E-001-01 | - |
-| E-001-03 | Write GameChanger API spec document | IN_PROGRESS | None | general-dev |
+| E-001-03 | Write GameChanger API spec document | DONE | None | general-dev |
 | E-001-04 | Smoke test: verify client against live API | TODO | E-001-02, E-001-03 | - |
 
 ## Technical Notes
