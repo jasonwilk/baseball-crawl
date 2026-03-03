@@ -135,6 +135,13 @@ Every status change touches multiple files atomically. Follow these checklists e
 4. If findings involve user infrastructure, deployment environment, hosting preferences, or any decision that depends on the user's specific setup -- verify with the user before promoting to epic Technical Notes. Research spikes evaluate options; the user decides.
 5. Update MEMORY.md with summary of findings and artifact location
 
+**Completing an epic:**
+1. Update `epic.md` Status to `COMPLETED` (or `ABANDONED` with reason)
+2. Add a History entry with the completion/abandonment date and summary
+3. Move the entire epic directory from `/epics/E-NNN-slug/` to `/.project/archive/E-NNN-slug/` -- this is immediate, not deferred
+4. Update MEMORY.md: move the epic from Active Epics to Archived Epics, note any unblocked work or follow-up items
+5. Review `/.project/ideas/README.md` for CANDIDATE ideas that may now be unblocked or promoted
+
 **Pre-dispatch:**
 1. Read the epic directory -- all story files
 2. Verify epic status is `READY` or `ACTIVE`
@@ -175,7 +182,7 @@ Implementers do NOT update story statuses or the epic table. That is your job.
 7. **Monitor and verify.** Stay active in the team. As each implementer reports completion, verify all acceptance criteria are met. If criteria are not met, send the implementer back with specific feedback.
 8. **Update on completion.** Mark verified stories `DONE` in both story file and epic table.
 9. **Cascade.** Check for newly unblocked stories. If any, update their status and dispatch them (repeat from step 3).
-10. **Close.** When all stories are done, mark the epic `COMPLETED`, shut down teammates, and delete the team.
+10. **Close.** When all stories are done, follow the "Completing an epic" checklist in the Atomic Status Update Protocol. Then shut down teammates and delete the team.
 
 ### Context Block Format
 

@@ -1,8 +1,8 @@
 # Product Manager -- Agent Memory
 
 ## Numbering State
-- Next available epic number: E-024
-- Epics created: E-001 through E-023 (E-006, E-007, E-008, E-011, E-012, E-013, E-014, E-015, E-016, E-017, E-018, E-019, E-020, E-021, E-022 archived)
+- Next available epic number: E-025
+- Epics created: E-001 through E-024 (E-006, E-007, E-008, E-011, E-012, E-013, E-014, E-015, E-016, E-017, E-018, E-019, E-020, E-021, E-022 archived)
 - Next available idea number: IDEA-005
 - Ideas created: IDEA-001 through IDEA-004
 
@@ -22,6 +22,7 @@
 - E-009 (ACTIVE): Tech Stack Redesign -- 02/03/04/05/06 DONE. 07 TODO (production runbook), 08 TODO (CLAUDE.md update, blocked on 07). All research spikes DONE.
 - E-010 (ACTIVE): Intent/Context Layer -- Phase 1 DONE (01/02/03). Phase 2 BLOCKED on E-002+E-003.
 - E-023 (READY): Auth and Team-Level Permissions -- 4 stories. 01 TODO (schema), 02 TODO (middleware, blocked on 01), 03 TODO (dashboard, blocked on 02), 04 TODO (admin, blocked on 02+03). Sequential: 01->02->03->04. CF Access = authn, app = authz only.
+- E-024 (READY): Epic Archive Enforcement -- 2 stories, both TODO, no deps (parallel). Hook + PM protocol fix to prevent completed epics lingering in /epics/.
 
 ## Archived Epics
 - E-006 (ABANDONED): PII Protection -- demoted to IDEA-004. Revisit when E-002 produces real data.

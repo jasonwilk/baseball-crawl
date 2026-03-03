@@ -21,6 +21,7 @@ Detailed notes on patterns and lessons from past epics. MEMORY.md links here.
 - E-009 failure: status updates drifted out of sync. E-011 addresses with atomic status update protocol.
 - Numbering collision (2026-02-28): before assigning a new epic number, ALWAYS ls /epics/ -- do not rely solely on memory's "next available" number.
 - E-011 pattern: process-domain research spikes can be resolved by PM directly (no expert consultation).
+- E-022 archive gap (2026-03-02): the PM's Atomic Status Update Protocol had checklists for completing stories and spikes, but NOT for completing epics. E-022 was marked COMPLETED but never archived. E-024 fixes by adding an explicit "Completing an epic" checklist and a PreToolUse hook. Pattern: every status transition that triggers downstream work needs its own checklist, not just a mention in a flow description.
 
 ## Platform Constraints
 - Agent Teams (`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`) is the dispatch mechanism. PM uses TeamCreate + Agent tool with team_name to spawn implementing agents. No nesting limit.

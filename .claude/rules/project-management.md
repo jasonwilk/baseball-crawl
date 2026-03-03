@@ -16,6 +16,7 @@ paths:
 - Every story MUST list the files it will create or modify
 - Stories that touch the same files MUST have explicit dependency ordering
 - NEVER delete an epic directory -- archive it to `/.project/archive/`
+- COMPLETED or ABANDONED epics MUST be archived (moved from `/epics/E-NNN-slug/` to `/.project/archive/E-NNN-slug/`) before the next commit -- archiving is immediate, not deferred
 - NEVER reuse an epic or story number
 - Keep the story table in `epic.md` in sync with individual story file statuses
 - Update the PM memory file (`/.claude/agent-memory/product-manager/MEMORY.md`) when creating or closing epics

@@ -160,3 +160,55 @@ Configured in `.claude/settings.json` under `hooks.PreToolUse`:
 
 This hook cannot be bypassed by an agent. Only a human can disable it by
 removing the hook from `.claude/settings.json` or setting `"disableAllHooks": true`.
+
+---
+
+## Epic Archive Check (`epic-archive-check.sh`)
+
+A Claude Code PreToolUse hook that intercepts `git commit` commands and blocks
+them if any completed or abandoned epics remain in the `/epics/` directory.
+Epics with status `COMPLETED` or `ABANDONED` must be archived to
+`/.project/archive/` before committing.
+
+### When It Fires
+
+Before any `Bash` tool call in Claude Code. The script checks whether the
+command is a `git commit`. If not, it exits immediately with no overhead. If it
+is a git commit, the script scans all `epics/*/epic.md` files for backtick-wrapped
+`COMPLETED` or `ABANDONED` status markers.
+
+### What It Does
+
+- **No stale epics found**: Exits silently, commit proceeds.
+- **Stale epics found**: Outputs a JSON denial response that blocks the tool call
+  and lists the epic directories that need to be archived.
+- **No `/epics/` directory**: Exits silently (nothing to check).
+- **`jq` not available**: Exits silently (fail open -- `jq` is required to parse
+  the input JSON).
+
+### Configuration
+
+Configured in `.claude/settings.json` under `hooks.PreToolUse`, as a second
+entry in the `Bash` matcher's hooks array:
+
+```json
+{
+  "type": "command",
+  "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/epic-archive-check.sh",
+  "timeout": 10,
+  "statusMessage": "Checking for unarchived completed epics..."
+}
+```
+
+### Dependencies
+
+| Dependency | Purpose                              | Install                          |
+|------------|--------------------------------------|----------------------------------|
+| `bash`     | Script interpreter                   | Included in all Linux/macOS      |
+| `jq`       | JSON parsing (input from Claude Code) | `apt install jq` or `brew install jq` |
+| `grep`     | Scanning epic.md files for status    | Included in all Linux/macOS      |
+
+### Bypass
+
+This hook cannot be bypassed by an agent. Only a human can disable it by
+removing the hook from `.claude/settings.json` or setting `"disableAllHooks": true`.
