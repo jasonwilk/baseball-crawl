@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+
+{% block title %}Register Passkey — LSB Baseball{% endblock %}
+
+{% block content %}
+<div class="min-h-screen flex items-start justify-center pt-16 px-4">
+  <div class="w-full max-w-sm text-center">
+    <div class="mb-6 text-5xl">&#x1f511;</div>
+    <h1 class="text-2xl font-bold text-gray-900 mb-3">Register a passkey</h1>
+    <p class="text-gray-600 mb-8">
+      Your browser will prompt you to save a passkey using biometrics or a PIN.
+    </p>
+
+    <div id="status" class="hidden mb-4 p-3 rounded text-sm"></div>
+
+    <button
+      id="register-btn"
+      class="block w-full bg-blue-700 hover:bg-blue-800 text-white font-semibold py-3 px-6 rounded-lg text-base transition-colors mb-3"
+    >
+      Register this device
+    </button>
+    <a
+      href="/dashboard"
+      class="block w-full bg-white hover:bg-gray-50 text-gray-700 font-semibold py-3 px-6 rounded-lg text-base transition-colors border border-gray-300"
+    >
+      Cancel
+    </a>
+  </div>
+</div>
+
+<script id="webauthn-options" type="application/json">
+{{ options_json | safe }}
+</script>
+
+<script>
+(function () {
+  "use strict";
+
+  // Decode base64url to Uint8Array
+  function base64urlToBuffer(base64url) {
+    var base64 = base64url.replace(/-/g, "+").replace(/_/g, "/");
+    var padded = base64.padEnd(base64.length + (4 - (base64.length % 4)) % 4, "=");
+    var binary = atob(padded);
+    var buffer = new Uint8Array(binary.length);
+    for (var i = 0; i < binary.length; i++) {
+      buffer[i] = binary.charCodeAt(i);
+    }
+    return buffer;
+  }
+
+  // Encode ArrayBuffer to base64url
+  function bufferToBase64url(buffer) {
+    var bytes = new Uint8Array(buffer);
+    var str = "";
+    for (var i = 0; i < bytes.byteLength; i++) {
+      str += String.fromCharCode(bytes[i]);
+    }
+    return btoa(str).replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
+  }
+
+  function showStatus(message, isError) {
+    var el = document.getElementById("status");
+    el.textContent = message;
+    el.className = isError
+      ? "mb-4 p-3 rounded text-sm bg-red-50 border border-red-200 text-red-700"
+      : "mb-4 p-3 rounded text-sm bg-green-50 border border-green-200 text-green-700";
+    el.classList.remove("hidden");
+  }
+
+  document.getElementById("register-btn").addEventListener("click", async function () {
+    var btn = this;
+    btn.disabled = true;
+    btn.textContent = "Waiting for device...";
+
+    try {
+      var optionsEl = document.getElementById("webauthn-options");
+      var options = JSON.parse(optionsEl.textContent);
+
+      // Convert base64url-encoded fields to ArrayBuffers
+      options.challenge = base64urlToBuffer(options.challenge);
+      options.user.id = base64urlToBuffer(options.user.id);
+      if (options.excludeCredentials) {
+        options.excludeCredentials = options.excludeCredentials.map(function (c) {
+          return Object.assign({}, c, { id: base64urlToBuffer(c.id) });
+        });
+      }
+
+      var credential = await navigator.credentials.create({ publicKey: options });
+
+      // Encode the response for the server
+      var body = {
+        id: credential.id,
+        rawId: bufferToBase64url(credential.rawId),
+        type: credential.type,
+        response: {
+          attestationObject: bufferToBase64url(credential.response.attestationObject),
+          clientDataJSON: bufferToBase64url(credential.response.clientDataJSON),
+        }
+      };
+
+      var resp = await fetch("/auth/passkey/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+      if (resp.redirected) {
+        window.location.href = resp.url;
+        return;
+      }
+      if (resp.ok) {
+        var data = await resp.json();
+        if (data.redirect) {
+          window.location.href = data.redirect;
+        } else {
+          showStatus("Device registered successfully!", false);
+        }
+      } else {
+        var err = await resp.json().catch(function () { return {}; });
+        showStatus(err.detail || "Registration failed. Please try again.", true);
+        btn.disabled = false;
+        btn.textContent = "Register this device";
+      }
+    } catch (e) {
+      if (e.name === "NotAllowedError") {
+        showStatus("Registration was cancelled or timed out.", true);
+      } else {
+        showStatus("Registration failed: " + e.message, true);
+      }
+      btn.disabled = false;
+      btn.textContent = "Register this device";
+    }
+  });
+})();
+</script>
+{% endblock %}

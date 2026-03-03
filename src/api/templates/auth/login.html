@@ -1,0 +1,163 @@
+{# synthetic-test-data #}
+{% extends "base.html" %}
+
+{% block title %}Log In — LSB Baseball{% endblock %}
+
+{% block content %}
+<div class="min-h-screen flex items-start justify-center pt-16 px-4">
+  <div class="w-full max-w-sm">
+    <h1 class="text-2xl font-bold text-gray-900 mb-2">Log in to LSB Baseball</h1>
+    <p class="text-gray-600 mb-8 text-sm">Enter your email address and we'll send you a login link.</p>
+
+    {% if error %}
+    <div class="mb-4 p-3 rounded bg-red-50 border border-red-200 text-red-700 text-sm">
+      {{ error }}
+    </div>
+    {% endif %}
+
+    <div id="passkey-error" class="hidden mb-4 p-3 rounded bg-red-50 border border-red-200 text-red-700 text-sm"></div>
+
+    <form method="post" action="/auth/login" class="space-y-4">
+      <div>
+        <label for="email" class="block text-sm font-medium text-gray-700 mb-1">Email address</label>
+        <input
+          type="email"
+          id="email"
+          name="email"
+          autocomplete="email"
+          required
+          placeholder="coach@example.com"
+          class="w-full px-4 py-3 border border-gray-300 rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+        >
+      </div>
+      <button
+        type="submit"
+        class="w-full bg-blue-700 hover:bg-blue-800 text-white font-semibold py-3 px-4 rounded-lg text-base transition-colors"
+      >
+        Send magic link
+      </button>
+    </form>
+
+    <div class="mt-4 relative">
+      <div class="absolute inset-0 flex items-center">
+        <div class="w-full border-t border-gray-300"></div>
+      </div>
+      <div class="relative flex justify-center text-sm">
+        <span class="px-2 bg-gray-50 text-gray-500">or</span>
+      </div>
+    </div>
+
+    <button
+      id="passkey-btn"
+      class="mt-4 w-full bg-white hover:bg-gray-50 text-gray-700 font-semibold py-3 px-4 rounded-lg text-base transition-colors border border-gray-300"
+    >
+      Sign in with passkey
+    </button>
+  </div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  // Decode base64url to Uint8Array
+  function base64urlToBuffer(base64url) {
+    var base64 = base64url.replace(/-/g, "+").replace(/_/g, "/");
+    var padded = base64.padEnd(base64.length + (4 - (base64.length % 4)) % 4, "=");
+    var binary = atob(padded);
+    var buffer = new Uint8Array(binary.length);
+    for (var i = 0; i < binary.length; i++) {
+      buffer[i] = binary.charCodeAt(i);
+    }
+    return buffer;
+  }
+
+  // Encode ArrayBuffer to base64url
+  function bufferToBase64url(buffer) {
+    var bytes = new Uint8Array(buffer);
+    var str = "";
+    for (var i = 0; i < bytes.byteLength; i++) {
+      str += String.fromCharCode(bytes[i]);
+    }
+    return btoa(str).replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
+  }
+
+  function showError(message) {
+    var el = document.getElementById("passkey-error");
+    el.textContent = message;
+    el.classList.remove("hidden");
+  }
+
+  document.getElementById("passkey-btn").addEventListener("click", async function () {
+    var btn = this;
+    btn.disabled = true;
+    btn.textContent = "Waiting for device...";
+
+    var errorEl = document.getElementById("passkey-error");
+    errorEl.classList.add("hidden");
+
+    try {
+      // Fetch authentication options from the server
+      var optResp = await fetch("/auth/passkey/login/options");
+      if (!optResp.ok) {
+        throw new Error("Failed to get authentication options");
+      }
+      var options = await optResp.json();
+
+      // Convert base64url challenge to ArrayBuffer
+      options.challenge = base64urlToBuffer(options.challenge);
+      if (options.allowCredentials) {
+        options.allowCredentials = options.allowCredentials.map(function (c) {
+          return Object.assign({}, c, { id: base64urlToBuffer(c.id) });
+        });
+      }
+
+      var credential = await navigator.credentials.get({ publicKey: options });
+
+      // Encode assertion for the server
+      var body = {
+        id: credential.id,
+        rawId: bufferToBase64url(credential.rawId),
+        type: credential.type,
+        response: {
+          authenticatorData: bufferToBase64url(credential.response.authenticatorData),
+          clientDataJSON: bufferToBase64url(credential.response.clientDataJSON),
+          signature: bufferToBase64url(credential.response.signature),
+          userHandle: credential.response.userHandle
+            ? bufferToBase64url(credential.response.userHandle)
+            : null,
+        }
+      };
+
+      var verifyResp = await fetch("/auth/passkey/login/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+      if (verifyResp.redirected) {
+        window.location.href = verifyResp.url;
+        return;
+      }
+
+      var data = await verifyResp.json().catch(function () { return {}; });
+      if (verifyResp.ok && data.redirect) {
+        window.location.href = data.redirect;
+      } else {
+        showError(data.detail || "Passkey authentication failed. Please try again or use email login.");
+        btn.disabled = false;
+        btn.textContent = "Sign in with passkey";
+      }
+    } catch (e) {
+      if (e.name === "NotAllowedError") {
+        showError("Authentication was cancelled or timed out.");
+      } else {
+        showError("Passkey authentication failed. Please try again or use email login.");
+      }
+      btn.disabled = false;
+      btn.textContent = "Sign in with passkey";
+    }
+  });
+})();
+</script>
+{% endblock %}

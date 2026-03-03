@@ -6,8 +6,14 @@ It is the entrypoint referenced by the Dockerfile:
     uvicorn src.api.main:app --host 0.0.0.0 --port 8000
 
 Route structure (current):
-    GET /health      -- Database and API health check (see routes/health.py)
-    GET /dashboard   -- Team batting stats dashboard (see routes/dashboard.py)
+    GET  /health         -- Database and API health check (see routes/health.py)
+    GET  /dashboard      -- Team batting stats dashboard (see routes/dashboard.py)
+    GET  /auth/login     -- Login page (see routes/auth.py)
+    POST /auth/login     -- Magic link issuance (see routes/auth.py)
+    GET  /auth/verify    -- Magic link verification (see routes/auth.py)
+    GET  /auth/logout    -- Session logout (see routes/auth.py)
+    GET  /admin/users    -- Admin user list (see routes/admin.py)
+    POST /admin/users    -- Create user (see routes/admin.py)
 """
 
 from __future__ import annotations
@@ -21,6 +27,9 @@ from typing import AsyncGenerator
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
+from src.api.auth import SessionMiddleware
+from src.api.routes.admin import router as admin_router
+from src.api.routes.auth import router as auth_router
 from src.api.routes.health import router as health_router
 from src.api.routes.dashboard import router as dashboard_router
 
@@ -72,6 +81,12 @@ app = FastAPI(
 )
 
 # ---------------------------------------------------------------------------
+# Middleware (registered before route handlers)
+# ---------------------------------------------------------------------------
+
+app.add_middleware(SessionMiddleware)
+
+# ---------------------------------------------------------------------------
 # Static files and templates
 # ---------------------------------------------------------------------------
 
@@ -86,4 +101,6 @@ app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
 # ---------------------------------------------------------------------------
 
 app.include_router(health_router)
+app.include_router(auth_router)
 app.include_router(dashboard_router)
+app.include_router(admin_router)

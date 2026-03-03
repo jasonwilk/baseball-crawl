@@ -1,3 +1,4 @@
+# synthetic-test-data
 """Tests for GET /dashboard endpoint (E-009-03).
 
 Uses a temporary SQLite database seeded with the same player/stats data as
@@ -41,6 +42,37 @@ _SCHEMA_SQL = """
     );
     INSERT OR IGNORE INTO _migrations (filename)
         VALUES ('001_initial_schema.sql');
+
+    -- Auth tables (003_auth.sql) required for SessionMiddleware
+    CREATE TABLE IF NOT EXISTS users (
+        user_id      INTEGER PRIMARY KEY AUTOINCREMENT,
+        email        TEXT    NOT NULL UNIQUE,
+        display_name TEXT    NOT NULL,
+        is_admin     INTEGER NOT NULL DEFAULT 0,
+        created_at   TEXT    NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE TABLE IF NOT EXISTS user_team_access (
+        id       INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id  INTEGER NOT NULL REFERENCES users(user_id),
+        team_id  TEXT    NOT NULL REFERENCES teams(team_id),
+        UNIQUE(user_id, team_id)
+    );
+    CREATE TABLE IF NOT EXISTS magic_link_tokens (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        token_hash TEXT    NOT NULL UNIQUE,
+        user_id    INTEGER NOT NULL REFERENCES users(user_id),
+        expires_at TEXT    NOT NULL,
+        used_at    TEXT,
+        created_at TEXT    NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE TABLE IF NOT EXISTS sessions (
+        id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_token_hash  TEXT    NOT NULL UNIQUE,
+        user_id             INTEGER NOT NULL REFERENCES users(user_id),
+        expires_at          TEXT    NOT NULL,
+        challenge           TEXT,
+        created_at          TEXT    NOT NULL DEFAULT (datetime('now'))
+    );
 
     CREATE TABLE IF NOT EXISTS players (
         player_id   TEXT PRIMARY KEY,
@@ -184,6 +216,9 @@ def _make_seeded_db(tmp_path: Path) -> Path:
 def seeded_client(tmp_path: Path) -> TestClient:
     """Return a TestClient backed by a seeded in-process SQLite database.
 
+    Sets DEV_USER_EMAIL so the session middleware auto-creates an admin session,
+    allowing unauthenticated test requests to reach the dashboard.
+
     Args:
         tmp_path: pytest tmp_path fixture (injected by pytest).
 
@@ -191,7 +226,11 @@ def seeded_client(tmp_path: Path) -> TestClient:
         FastAPI TestClient configured to use the seeded database.
     """
     db_path = _make_seeded_db(tmp_path)
-    with patch.dict("os.environ", {"DATABASE_PATH": str(db_path)}):
+    env_overrides = {
+        "DATABASE_PATH": str(db_path),
+        "DEV_USER_EMAIL": "testdev@example.com",
+    }
+    with patch.dict("os.environ", env_overrides):
         with TestClient(app) as client:
             yield client
 
@@ -297,7 +336,11 @@ class TestDashboardEndpoint:
     def test_health_endpoint_unaffected(self, tmp_path: Path) -> None:
         """GET /health still returns 200 after dashboard router registration (AC-7)."""
         db_path = _make_seeded_db(tmp_path)
-        with patch.dict("os.environ", {"DATABASE_PATH": str(db_path)}):
+        env_overrides = {
+            "DATABASE_PATH": str(db_path),
+            "DEV_USER_EMAIL": "testdev@example.com",
+        }
+        with patch.dict("os.environ", env_overrides):
             with TestClient(app) as client:
                 response = client.get("/health")
         assert response.status_code == 200

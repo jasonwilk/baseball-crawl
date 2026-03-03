@@ -96,6 +96,31 @@ def get_team_batting_stats(
         return []
 
 
+def get_teams_by_ids(team_ids: list[str]) -> list[dict[str, Any]]:
+    """Return team display names for the given list of team_ids.
+
+    Args:
+        team_ids: List of team_id strings to look up.
+
+    Returns:
+        List of dicts with keys: team_id, name.
+        Returns an empty list if team_ids is empty or on DB error.
+    """
+    if not team_ids:
+        return []
+    placeholders = ",".join("?" for _ in team_ids)
+    query = f"SELECT team_id, name FROM teams WHERE team_id IN ({placeholders})"
+    try:
+        with closing(get_connection()) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.execute(query, team_ids)
+            rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+    except sqlite3.Error:
+        logger.exception("Failed to fetch teams by ids")
+        return []
+
+
 def check_connection() -> bool:
     """Verify that the database is accessible and the schema is initialized.
 

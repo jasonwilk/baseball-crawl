@@ -1,7 +1,7 @@
 # E-023: Authentication and Team-Level Permissions
 
 ## Status
-`READY`
+`COMPLETED`
 <!-- Lifecycle: DRAFT -> READY -> ACTIVE -> COMPLETED (or BLOCKED / ABANDONED) -->
 
 ## Overview
@@ -78,11 +78,11 @@ Admins get two access paths:
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-023-01 | Auth schema migration | TODO | None | - |
-| E-023-02 | Magic link login flow | TODO | E-023-01 | - |
-| E-023-03 | Passkey registration and login | TODO | E-023-02 | - |
-| E-023-04 | Team-scoped dashboard | TODO | E-023-02 | - |
-| E-023-05 | Admin page for managing coaches | TODO | E-023-02, E-023-04 | - |
+| E-023-01 | Auth schema migration | DONE | None | general-dev |
+| E-023-02 | Magic link login flow | DONE | E-023-01 | general-dev |
+| E-023-03 | Passkey registration and login | DONE | E-023-02 | general-dev |
+| E-023-04 | Team-scoped dashboard | DONE | E-023-02 | general-dev |
+| E-023-05 | Admin page for managing coaches | DONE | E-023-02, E-023-04 | general-dev |
 
 ## Technical Notes
 
@@ -306,3 +306,4 @@ None. The user provided a complete architecture specification.
   - **Finding 9 (P2, ACCEPTED)**: Fixed HTTP library reference. Changed `requests` to `httpx` throughout epic Technical Notes and E-023-02 AC-11. `httpx` is already in requirements.txt; `requests` is not.
   - **Finding 10 (P2, ACCEPTED)**: Added coordination note to E-023-01 about E-003-01 dependency risk. E-003-01 is rewriting 001_initial_schema.sql (ACTIVE). If E-003-01 changes the `teams` table structure, `user_team_access` FKs may need adjustment.
   - **Finding 11 (P3, REJECTED)**: Boilerplate DoD lines are conventional scaffolding. Story-specific acceptance criteria are the real contract for implementing agents. Not worth the churn to remove.
+- 2026-03-03: **Epic COMPLETED.** All 5 stories dispatched and verified. Wave execution: 01 (schema) → 02 (magic link) → 03+04 (passkeys + dashboard, parallel) → 05 (admin). Full test suite: 385 passed, 0 failures. Key artifacts: migrations/003_auth.sql, src/api/auth.py (session middleware), src/api/routes/auth.py (magic link + passkey routes), src/api/routes/admin.py (admin CRUD), src/api/email.py (Mailgun helper), 6 HTML templates, 4 test files. Added python-multipart and webauthn to requirements.txt. No documentation impact (no existing docs affected by auth addition).

@@ -1,0 +1,864 @@
+"""Auth routes for the baseball-crawl FastAPI application.
+
+Provides magic link login, verification, logout, and passkey (WebAuthn)
+registration and authentication flows.
+
+Routes:
+    GET  /auth/login                  -- Render login page (or redirect if already logged in)
+    POST /auth/login                  -- Accept email form, issue magic link
+    GET  /auth/verify                 -- Verify magic link token, create session
+    GET  /auth/logout                 -- Clear session cookie and session DB row
+    GET  /auth/passkey/register       -- Render passkey registration page with WebAuthn options
+    POST /auth/passkey/register       -- Verify attestation and store passkey credential
+    GET  /auth/passkey/login/options  -- Return WebAuthn authentication options as JSON
+    POST /auth/passkey/login/verify   -- Verify assertion and create session
+    GET  /auth/passkey/prompt         -- Post-login passkey registration CTA (interstitial)
+"""
+
+from __future__ import annotations
+
+import base64
+import logging
+import os
+import secrets
+import sqlite3
+import time
+from contextlib import closing
+from pathlib import Path
+from typing import Any
+
+from fastapi import APIRouter, Form, Request
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.templating import Jinja2Templates
+from webauthn import (
+    generate_authentication_options,
+    generate_registration_options,
+    options_to_json,
+    verify_authentication_response,
+    verify_registration_response,
+)
+from webauthn.helpers.structs import (
+    AuthenticatorAssertionResponse,
+    AuthenticatorAttestationResponse,
+    AuthenticatorSelectionCriteria,
+    AuthenticationCredential,
+    RegistrationCredential,
+    ResidentKeyRequirement,
+    UserVerificationRequirement,
+)
+
+from src.api.auth import create_session, hash_token
+from src.api.db import get_connection
+from src.api.email import send_magic_link_email
+
+logger = logging.getLogger(__name__)
+
+_TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
+templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
+
+router = APIRouter(prefix="/auth")
+
+_SESSION_COOKIE_NAME = "session"
+_SESSION_MAX_AGE = 604800  # 7 days in seconds
+_APP_URL_DEFAULT = "http://localhost:8000"
+
+# In-memory challenge store for passkey login (no session exists yet).
+# Maps challenge_b64 -> expiry timestamp (unix seconds).
+# Entries expire after 5 minutes.
+_PASSKEY_LOGIN_CHALLENGES: dict[str, float] = {}
+_PASSKEY_CHALLENGE_TTL = 300  # seconds
+
+
+def _get_app_url() -> str:
+    """Return the base application URL from the environment.
+
+    Returns:
+        APP_URL env var, or ``http://localhost:8000`` as default.
+    """
+    return os.environ.get("APP_URL", _APP_URL_DEFAULT).rstrip("/")
+
+
+def _is_dev_mode() -> bool:
+    """Return True when running in non-production mode.
+
+    Returns:
+        True if APP_ENV is not 'production'.
+    """
+    return os.environ.get("APP_ENV", "development") != "production"
+
+
+def _get_webauthn_rp_id() -> str:
+    """Return the WebAuthn relying party ID from environment.
+
+    Returns:
+        WEBAUTHN_RP_ID env var, or 'localhost' as default.
+    """
+    return os.environ.get("WEBAUTHN_RP_ID", "localhost")
+
+
+def _get_webauthn_origin() -> str:
+    """Return the WebAuthn expected origin from environment.
+
+    Returns:
+        WEBAUTHN_ORIGIN env var, or 'http://localhost:8000' as default.
+    """
+    return os.environ.get("WEBAUTHN_ORIGIN", "http://localhost:8000")
+
+
+def _set_session_cookie(response: RedirectResponse, raw_token: str) -> None:
+    """Attach the session cookie to the response.
+
+    Args:
+        response: Response object to modify in place.
+        raw_token: Raw session token value to store in the cookie.
+    """
+    response.set_cookie(
+        key=_SESSION_COOKIE_NAME,
+        value=raw_token,
+        max_age=_SESSION_MAX_AGE,
+        httponly=True,
+        secure=not _is_dev_mode(),
+        samesite="lax",
+        path="/",
+    )
+
+
+def _get_authenticated_user(
+    request: Request,
+) -> dict[str, Any] | None:
+    """Return the authenticated user from the session cookie, or None.
+
+    Auth routes are excluded from session middleware, so passkey registration
+    routes must manually validate the session cookie.
+
+    Args:
+        request: The incoming HTTP request.
+
+    Returns:
+        User dict with user_id, email, display_name, is_admin if authenticated;
+        None if no valid session.
+    """
+    # Check if middleware already resolved the user (non-auth routes).
+    user = getattr(request.state, "user", None)
+    if user:
+        return user
+
+    # /auth/* routes are excluded from session middleware -- validate manually.
+    cookie_value = request.cookies.get(_SESSION_COOKIE_NAME, "")
+    if not cookie_value:
+        return None
+
+    token_hash = hash_token(cookie_value)
+    try:
+        with closing(get_connection()) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.execute(
+                """
+                SELECT s.user_id
+                FROM sessions s
+                WHERE s.session_token_hash = ?
+                  AND s.expires_at > datetime('now')
+                """,
+                (token_hash,),
+            )
+            session_row = cursor.fetchone()
+            if not session_row:
+                return None
+
+            cursor = conn.execute(
+                "SELECT user_id, email, display_name, is_admin FROM users WHERE user_id = ?",
+                (session_row["user_id"],),
+            )
+            user_row = cursor.fetchone()
+            if not user_row:
+                return None
+
+            return dict(user_row)
+    except sqlite3.Error:
+        logger.exception("DB error in _get_authenticated_user")
+        return None
+
+
+def _user_has_passkeys(conn: sqlite3.Connection, user_id: int) -> bool:
+    """Return True if the user has at least one registered passkey.
+
+    Args:
+        conn: Open SQLite connection.
+        user_id: User database ID.
+
+    Returns:
+        True if the user has a passkey credential row.
+    """
+    cursor = conn.execute(
+        "SELECT 1 FROM passkey_credentials WHERE user_id = ? LIMIT 1",
+        (user_id,),
+    )
+    return cursor.fetchone() is not None
+
+
+def _purge_expired_challenges() -> None:
+    """Remove expired entries from the in-memory passkey challenge store."""
+    now = time.time()
+    expired = [k for k, exp in _PASSKEY_LOGIN_CHALLENGES.items() if exp < now]
+    for k in expired:
+        _PASSKEY_LOGIN_CHALLENGES.pop(k, None)
+
+
+def _base64url_decode(value: str) -> bytes:
+    """Decode a base64url string to bytes.
+
+    Args:
+        value: Base64url-encoded string (no padding required).
+
+    Returns:
+        Decoded bytes.
+    """
+    padding = 4 - len(value) % 4
+    if padding != 4:
+        value += "=" * padding
+    return base64.urlsafe_b64decode(value)
+
+
+@router.get("/login", response_class=HTMLResponse, response_model=None)
+async def get_login(request: Request) -> HTMLResponse | RedirectResponse:
+    """Render the login page, or redirect to /dashboard if already authenticated.
+
+    Args:
+        request: The incoming HTTP request.
+
+    Returns:
+        HTMLResponse with the login form, or a redirect to /dashboard.
+    """
+    # If session middleware already attached a user, redirect to dashboard.
+    user = getattr(request.state, "user", None)
+    if user:
+        return RedirectResponse(url="/dashboard", status_code=302)
+
+    # Also check cookie directly for the "already logged in" case.
+    cookie_value = request.cookies.get(_SESSION_COOKIE_NAME, "")
+    if cookie_value:
+        token_hash = hash_token(cookie_value)
+        try:
+            with closing(get_connection()) as conn:
+                cursor = conn.execute(
+                    """
+                    SELECT 1 FROM sessions
+                    WHERE session_token_hash = ?
+                      AND expires_at > datetime('now')
+                    """,
+                    (token_hash,),
+                )
+                if cursor.fetchone():
+                    return RedirectResponse(url="/dashboard", status_code=302)
+        except sqlite3.Error:
+            pass  # Gracefully fall through to login page
+
+    return templates.TemplateResponse(request, "auth/login.html", {})
+
+
+@router.post("/login", response_class=HTMLResponse, response_model=None)
+async def post_login(
+    request: Request,
+    email: str = Form(...),
+) -> HTMLResponse:
+    """Handle email form submission and issue a magic link.
+
+    Looks up the email in ``users``.  For both known and unknown emails,
+    renders the same "If this email is registered..." confirmation page to
+    prevent user enumeration.
+
+    Args:
+        request: The incoming HTTP request.
+        email: Email address submitted via form.
+
+    Returns:
+        HTMLResponse with the check_email confirmation page.
+    """
+    email = email.strip().lower()
+
+    try:
+        with closing(get_connection()) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.execute(
+                "SELECT user_id FROM users WHERE email = ?",
+                (email,),
+            )
+            user_row = cursor.fetchone()
+
+            if user_row:
+                raw_token = secrets.token_urlsafe(32)
+                token_hash = hash_token(raw_token)
+                conn.execute(
+                    """
+                    INSERT INTO magic_link_tokens (token_hash, user_id, expires_at)
+                    VALUES (?, ?, datetime('now', '+15 minutes'))
+                    """,
+                    (token_hash, user_row["user_id"]),
+                )
+                conn.commit()
+
+                app_url = _get_app_url()
+                magic_link_url = f"{app_url}/auth/verify?token={raw_token}"
+                await send_magic_link_email(email, magic_link_url)
+    except sqlite3.Error:
+        logger.exception("DB error during magic link issuance for %s", email)
+
+    return templates.TemplateResponse(request, "auth/check_email.html", {})
+
+
+@router.get("/verify", response_class=HTMLResponse, response_model=None)
+async def verify_token(
+    request: Request,
+    token: str = "",
+) -> HTMLResponse | RedirectResponse:
+    """Verify a magic link token and create an authenticated session.
+
+    After successful verification, checks whether the user has registered
+    passkeys.  If not, redirects to the passkey prompt interstitial.  If
+    they do, redirects directly to /dashboard.
+
+    Args:
+        request: The incoming HTTP request.
+        token: Raw magic link token from the query string.
+
+    Returns:
+        RedirectResponse on success, or error HTMLResponse.
+    """
+    if not token:
+        return templates.TemplateResponse(
+            request, "auth/verify_error.html", {}, status_code=400
+        )
+
+    token_hash = hash_token(token)
+
+    try:
+        with closing(get_connection()) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.execute(
+                """
+                SELECT id, user_id, expires_at, used_at
+                FROM magic_link_tokens
+                WHERE token_hash = ?
+                """,
+                (token_hash,),
+            )
+            row = cursor.fetchone()
+
+            if not row:
+                logger.warning("Magic link token not found: hash=%s...", token_hash[:8])
+                return templates.TemplateResponse(
+                    request, "auth/verify_error.html", {}, status_code=400
+                )
+
+            if row["used_at"] is not None:
+                logger.warning("Magic link token already used: id=%d", row["id"])
+                return templates.TemplateResponse(
+                    request, "auth/verify_error.html", {}, status_code=400
+                )
+
+            # Check expiry via DB comparison for accuracy.
+            cursor = conn.execute(
+                """
+                SELECT (expires_at > datetime('now')) AS valid
+                FROM magic_link_tokens
+                WHERE id = ?
+                """,
+                (row["id"],),
+            )
+            validity = cursor.fetchone()
+            if not validity or not validity["valid"]:
+                logger.warning("Magic link token expired: id=%d", row["id"])
+                return templates.TemplateResponse(
+                    request, "auth/verify_error.html", {}, status_code=400
+                )
+
+            # Atomically mark as used -- the WHERE used_at IS NULL guard
+            # prevents a concurrent request from also consuming this token.
+            cursor = conn.execute(
+                "UPDATE magic_link_tokens SET used_at = datetime('now') "
+                "WHERE id = ? AND used_at IS NULL",
+                (row["id"],),
+            )
+            conn.commit()
+
+            if cursor.rowcount == 0:
+                # Another request consumed the token between our SELECT and UPDATE.
+                logger.warning("Magic link token race: id=%d already consumed", row["id"])
+                return templates.TemplateResponse(
+                    request, "auth/verify_error.html", {}, status_code=400
+                )
+
+            user_id = row["user_id"]
+            has_passkeys = _user_has_passkeys(conn, user_id)
+
+    except sqlite3.Error:
+        logger.exception("DB error during token verification")
+        return templates.TemplateResponse(
+            request, "auth/verify_error.html", {}, status_code=500
+        )
+
+    # Create session (uses its own connection internally).
+    raw_session_token = create_session(user_id)
+
+    # Redirect to passkey prompt if no passkeys registered, else dashboard.
+    redirect_url = "/dashboard" if has_passkeys else "/auth/passkey/prompt"
+    response = RedirectResponse(url=redirect_url, status_code=302)
+    _set_session_cookie(response, raw_session_token)
+    return response
+
+
+@router.get("/logout")
+async def logout(request: Request) -> RedirectResponse:
+    """Clear the session cookie and delete the session from the DB.
+
+    Args:
+        request: The incoming HTTP request.
+
+    Returns:
+        RedirectResponse to /auth/login.
+    """
+    cookie_value = request.cookies.get(_SESSION_COOKIE_NAME, "")
+    if cookie_value:
+        token_hash = hash_token(cookie_value)
+        try:
+            with closing(get_connection()) as conn:
+                conn.execute(
+                    "DELETE FROM sessions WHERE session_token_hash = ?",
+                    (token_hash,),
+                )
+                conn.commit()
+        except sqlite3.Error:
+            logger.exception("DB error during logout")
+
+    response = RedirectResponse(url="/auth/login", status_code=302)
+    response.delete_cookie(
+        key=_SESSION_COOKIE_NAME,
+        path="/",
+    )
+    return response
+
+
+# ---------------------------------------------------------------------------
+# Passkey interstitial
+# ---------------------------------------------------------------------------
+
+
+@router.get("/passkey/prompt", response_class=HTMLResponse, response_model=None)
+async def get_passkey_prompt(request: Request) -> HTMLResponse | RedirectResponse:
+    """Render the post-login passkey registration CTA interstitial.
+
+    Requires an active session.  If not authenticated, redirects to login.
+
+    Args:
+        request: The incoming HTTP request.
+
+    Returns:
+        HTMLResponse with the passkey_prompt page.
+    """
+    user = _get_authenticated_user(request)
+    if not user:
+        return RedirectResponse(url="/auth/login", status_code=302)
+    return templates.TemplateResponse(request, "auth/passkey_prompt.html", {})
+
+
+# ---------------------------------------------------------------------------
+# Passkey registration
+# ---------------------------------------------------------------------------
+
+
+@router.get("/passkey/register", response_class=HTMLResponse, response_model=None)
+async def get_passkey_register(request: Request) -> HTMLResponse | RedirectResponse:
+    """Render the passkey registration page with embedded WebAuthn options.
+
+    Requires an active session.  Generates registration options server-side,
+    stores the challenge in the DB (sessions.challenge column), and embeds
+    the options as JSON in the rendered page.
+
+    Args:
+        request: The incoming HTTP request.
+
+    Returns:
+        HTMLResponse with embedded registration options and inline JS.
+    """
+    user = _get_authenticated_user(request)
+    if not user:
+        return RedirectResponse(url="/auth/login", status_code=302)
+
+    user_id: int = user["user_id"]
+    email: str = user["email"]
+
+    rp_id = _get_webauthn_rp_id()
+
+    # Fetch existing credentials to exclude from registration options.
+    existing_creds: list[bytes] = []
+    try:
+        with closing(get_connection()) as conn:
+            cursor = conn.execute(
+                "SELECT credential_id FROM passkey_credentials WHERE user_id = ?",
+                (user_id,),
+            )
+            existing_creds = [row[0] for row in cursor.fetchall()]
+    except sqlite3.Error:
+        logger.exception("DB error fetching existing passkey credentials for user %d", user_id)
+
+    registration_options = generate_registration_options(
+        rp_id=rp_id,
+        rp_name="LSB Baseball",
+        user_name=email,
+        user_id=str(user_id).encode(),
+        user_display_name=user.get("display_name", email),
+        authenticator_selection=AuthenticatorSelectionCriteria(
+            resident_key=ResidentKeyRequirement.PREFERRED,
+            user_verification=UserVerificationRequirement.PREFERRED,
+        ),
+    )
+
+    # Store challenge in the session row (base64-encoded bytes).
+    challenge_b64 = base64.b64encode(registration_options.challenge).decode()
+    cookie_value = request.cookies.get(_SESSION_COOKIE_NAME, "")
+    if cookie_value:
+        token_hash = hash_token(cookie_value)
+        try:
+            with closing(get_connection()) as conn:
+                conn.execute(
+                    "UPDATE sessions SET challenge = ? WHERE session_token_hash = ?",
+                    (challenge_b64, token_hash),
+                )
+                conn.commit()
+        except sqlite3.OperationalError as exc:
+            if "no such column" in str(exc).lower():
+                logger.error(
+                    "sessions.challenge column missing -- "
+                    "run the passkey challenge migration before registering passkeys"
+                )
+            else:
+                raise
+
+    options_json_str = options_to_json(registration_options)
+    return templates.TemplateResponse(
+        request,
+        "auth/passkey_register.html",
+        {"options_json": options_json_str},
+    )
+
+
+@router.post("/passkey/register", response_model=None)
+async def post_passkey_register(
+    request: Request,
+) -> JSONResponse | RedirectResponse | HTMLResponse:
+    """Verify the attestation response and store the new passkey credential.
+
+    Reads the challenge from the session row, verifies via py_webauthn, and
+    stores the credential in ``passkey_credentials``.
+
+    Args:
+        request: The incoming HTTP request.
+
+    Returns:
+        RedirectResponse to /dashboard on success, or error response.
+    """
+    user = _get_authenticated_user(request)
+    if not user:
+        return JSONResponse({"detail": "Not authenticated"}, status_code=401)
+
+    user_id: int = user["user_id"]
+
+    # Parse JSON body.
+    try:
+        body: dict[str, Any] = await request.json()
+    except Exception:
+        return JSONResponse({"detail": "Invalid JSON body"}, status_code=400)
+
+    # Retrieve and clear challenge from session row.
+    cookie_value = request.cookies.get(_SESSION_COOKIE_NAME, "")
+    if not cookie_value:
+        return JSONResponse({"detail": "Session cookie missing"}, status_code=401)
+
+    token_hash = hash_token(cookie_value)
+    challenge_bytes: bytes | None = None
+    try:
+        with closing(get_connection()) as conn:
+            cursor = conn.execute(
+                "SELECT challenge FROM sessions WHERE session_token_hash = ?",
+                (token_hash,),
+            )
+            row = cursor.fetchone()
+            if row and row[0]:
+                challenge_bytes = base64.b64decode(row[0])
+                # Clear the challenge after reading.
+                conn.execute(
+                    "UPDATE sessions SET challenge = NULL WHERE session_token_hash = ?",
+                    (token_hash,),
+                )
+                conn.commit()
+    except sqlite3.Error:
+        logger.exception("DB error retrieving passkey registration challenge")
+        return JSONResponse({"detail": "Server error"}, status_code=500)
+
+    if not challenge_bytes:
+        logger.warning("No passkey registration challenge found for user %d", user_id)
+        return JSONResponse(
+            {"detail": "Registration session expired. Please try again."},
+            status_code=400,
+        )
+
+    # Build the RegistrationCredential from the browser response.
+    try:
+        raw_id_bytes = _base64url_decode(body.get("rawId", ""))
+        response_data = body.get("response", {})
+        attestation_bytes = _base64url_decode(response_data.get("attestationObject", ""))
+        client_data_bytes = _base64url_decode(response_data.get("clientDataJSON", ""))
+
+        credential = RegistrationCredential(
+            id=body.get("id", ""),
+            raw_id=raw_id_bytes,
+            response=AuthenticatorAttestationResponse(
+                client_data_json=client_data_bytes,
+                attestation_object=attestation_bytes,
+            ),
+            type=body.get("type", "public-key"),
+        )
+    except Exception:
+        logger.exception("Failed to parse registration credential from browser response")
+        return templates.TemplateResponse(
+            request,
+            "auth/passkey_error.html",
+            {"error": "Invalid registration response from browser."},
+            status_code=400,
+        )
+
+    # Verify the attestation.
+    try:
+        verified = verify_registration_response(
+            credential=credential,
+            expected_challenge=challenge_bytes,
+            expected_rp_id=_get_webauthn_rp_id(),
+            expected_origin=_get_webauthn_origin(),
+        )
+    except Exception as exc:
+        logger.warning("Passkey registration verification failed for user %d: %s", user_id, exc)
+        return templates.TemplateResponse(
+            request,
+            "auth/passkey_error.html",
+            {"error": "Registration verification failed. Please try again."},
+            status_code=400,
+        )
+
+    # Store the credential.
+    try:
+        with closing(get_connection()) as conn:
+            conn.execute(
+                """
+                INSERT INTO passkey_credentials
+                    (user_id, credential_id, public_key, sign_count)
+                VALUES (?, ?, ?, ?)
+                """,
+                (
+                    user_id,
+                    verified.credential_id,
+                    verified.credential_public_key,
+                    verified.sign_count,
+                ),
+            )
+            conn.commit()
+    except sqlite3.IntegrityError:
+        logger.warning("Duplicate passkey credential for user %d", user_id)
+        return JSONResponse({"detail": "Credential already registered."}, status_code=409)
+    except sqlite3.Error:
+        logger.exception("DB error storing passkey credential for user %d", user_id)
+        return JSONResponse({"detail": "Server error storing credential."}, status_code=500)
+
+    logger.info("Passkey registered for user %d", user_id)
+    return JSONResponse({"redirect": "/dashboard?msg=Device+registered+for+quick+login"})
+
+
+# ---------------------------------------------------------------------------
+# Passkey login
+# ---------------------------------------------------------------------------
+
+
+@router.get("/passkey/login/options")
+async def get_passkey_login_options() -> JSONResponse:
+    """Return WebAuthn authentication options as JSON.
+
+    Uses discoverable credentials (allow_credentials=[]) so the browser's
+    credential manager can present any registered passkey for this RP.
+
+    Returns:
+        JSONResponse with WebAuthn authentication options.
+    """
+    _purge_expired_challenges()
+
+    auth_options = generate_authentication_options(
+        rp_id=_get_webauthn_rp_id(),
+        allow_credentials=[],
+    )
+
+    # Store challenge in the in-memory dict for verification step.
+    challenge_b64 = base64.b64encode(auth_options.challenge).decode()
+    _PASSKEY_LOGIN_CHALLENGES[challenge_b64] = time.time() + _PASSKEY_CHALLENGE_TTL
+
+    import json
+    options_dict = json.loads(options_to_json(auth_options))
+    return JSONResponse(options_dict)
+
+
+@router.post("/passkey/login/verify", response_model=None)
+async def post_passkey_login_verify(request: Request) -> JSONResponse | RedirectResponse:
+    """Verify a passkey assertion and create a session.
+
+    Looks up the credential in the DB, verifies via py_webauthn, updates
+    sign_count, creates a session (same path as magic link), and returns a
+    redirect URL to the client.
+
+    Args:
+        request: The incoming HTTP request.
+
+    Returns:
+        JSONResponse with redirect URL on success, or error on failure.
+    """
+    try:
+        body: dict[str, Any] = await request.json()
+    except Exception:
+        return JSONResponse({"detail": "Invalid JSON body"}, status_code=400)
+
+    response_data = body.get("response", {})
+
+    # Parse the credential from the browser assertion.
+    try:
+        raw_id_bytes = _base64url_decode(body.get("rawId", ""))
+        authenticator_data_bytes = _base64url_decode(
+            response_data.get("authenticatorData", "")
+        )
+        client_data_bytes = _base64url_decode(response_data.get("clientDataJSON", ""))
+        signature_bytes = _base64url_decode(response_data.get("signature", ""))
+        user_handle_raw = response_data.get("userHandle")
+        user_handle_bytes = _base64url_decode(user_handle_raw) if user_handle_raw else None
+
+        credential = AuthenticationCredential(
+            id=body.get("id", ""),
+            raw_id=raw_id_bytes,
+            response=AuthenticatorAssertionResponse(
+                client_data_json=client_data_bytes,
+                authenticator_data=authenticator_data_bytes,
+                signature=signature_bytes,
+                user_handle=user_handle_bytes,
+            ),
+            type=body.get("type", "public-key"),
+        )
+    except Exception:
+        logger.exception("Failed to parse authentication credential from browser response")
+        return JSONResponse(
+            {"detail": "Invalid passkey response. Please try again or use email login."},
+            status_code=400,
+        )
+
+    # Look up the passkey credential in the DB.
+    try:
+        with closing(get_connection()) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.execute(
+                """
+                SELECT id, user_id, credential_id, public_key, sign_count
+                FROM passkey_credentials
+                WHERE credential_id = ?
+                """,
+                (raw_id_bytes,),
+            )
+            cred_row = cursor.fetchone()
+    except sqlite3.Error:
+        logger.exception("DB error looking up passkey credential")
+        return JSONResponse({"detail": "Server error"}, status_code=500)
+
+    if not cred_row:
+        logger.warning("Passkey credential not found: id=%s...", body.get("id", "")[:16])
+        return JSONResponse(
+            {"detail": "Passkey authentication failed. Please try again or use email login."},
+            status_code=401,
+        )
+
+    # Retrieve and validate the stored challenge.
+    _purge_expired_challenges()
+
+    # Find the matching challenge from the client data.
+    # We accept any unexpired challenge in our store -- the WebAuthn library
+    # checks the challenge embedded in clientDataJSON against expected_challenge.
+    # We try each candidate and let py_webauthn do the cryptographic check.
+    verified_challenge: str | None = None
+    import base64 as _base64
+    import json as _json
+
+    # Decode clientDataJSON to extract the challenge the browser used.
+    try:
+        client_data = _json.loads(client_data_bytes.decode())
+        browser_challenge_b64 = client_data.get("challenge", "")
+        # Normalize to standard base64 for lookup (webauthn may use base64url)
+        padding = 4 - len(browser_challenge_b64) % 4
+        if padding != 4:
+            browser_challenge_b64 += "=" * padding
+        browser_challenge_bytes = _base64.urlsafe_b64decode(browser_challenge_b64)
+        lookup_key = _base64.b64encode(browser_challenge_bytes).decode()
+        if lookup_key in _PASSKEY_LOGIN_CHALLENGES:
+            verified_challenge = lookup_key
+    except Exception:
+        pass
+
+    if not verified_challenge:
+        logger.warning("No valid challenge found for passkey login attempt")
+        return JSONResponse(
+            {"detail": "Passkey authentication failed. Please try again or use email login."},
+            status_code=401,
+        )
+
+    expected_challenge = _base64.b64decode(verified_challenge)
+
+    # Verify the assertion.
+    try:
+        verified = verify_authentication_response(
+            credential=credential,
+            expected_challenge=expected_challenge,
+            expected_rp_id=_get_webauthn_rp_id(),
+            expected_origin=_get_webauthn_origin(),
+            credential_public_key=bytes(cred_row["public_key"]),
+            credential_current_sign_count=cred_row["sign_count"],
+        )
+    except Exception as exc:
+        logger.warning("Passkey authentication verification failed: %s", exc)
+        return JSONResponse(
+            {"detail": "Passkey authentication failed. Please try again or use email login."},
+            status_code=401,
+        )
+
+    # Remove the used challenge.
+    _PASSKEY_LOGIN_CHALLENGES.pop(verified_challenge, None)
+
+    # Update sign_count in DB.
+    user_id: int = cred_row["user_id"]
+    try:
+        with closing(get_connection()) as conn:
+            conn.execute(
+                "UPDATE passkey_credentials SET sign_count = ? WHERE id = ?",
+                (verified.new_sign_count, cred_row["id"]),
+            )
+            conn.commit()
+    except sqlite3.Error:
+        logger.exception("DB error updating passkey sign_count for credential %d", cred_row["id"])
+        # Non-fatal -- session still gets created.
+
+    # Create a session (same path as magic link verify).
+    raw_session_token = create_session(user_id)
+
+    logger.info("Passkey login successful for user %d", user_id)
+
+    # Return redirect info as JSON -- the client JS handles the redirect.
+    response = JSONResponse({"redirect": "/dashboard"})
+    response.set_cookie(
+        key=_SESSION_COOKIE_NAME,
+        value=raw_session_token,
+        max_age=_SESSION_MAX_AGE,
+        httponly=True,
+        secure=not _is_dev_mode(),
+        samesite="lax",
+        path="/",
+    )
+    return response
