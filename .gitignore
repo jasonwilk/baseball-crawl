@@ -27,6 +27,9 @@ data/
 !data/seeds/
 !data/seeds/**
 
+# Database backups (created by scripts/backup_db.py)
+data/backups/
+
 # Generated / aggregated files
 codebase.md
 

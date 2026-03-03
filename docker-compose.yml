@@ -19,6 +19,7 @@ services:
       - "traefik.enable=true"
       - "traefik.http.routers.app.rule=Host(`baseball.localhost`)"
       - "traefik.http.services.app.loadbalancer.server.port=8000"
+    restart: unless-stopped
 
   traefik:
     image: traefik:v3
@@ -43,3 +44,16 @@ services:
     depends_on:
       app:
         condition: service_healthy
+    restart: unless-stopped
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    command: tunnel --no-autoupdate run
+    environment:
+      # Tunnel token from Cloudflare Zero Trust dashboard -> Networks -> Tunnels.
+      # Set CLOUDFLARE_TUNNEL_TOKEN in .env. Never hardcode the token here.
+      - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}
+    depends_on:
+      app:
+        condition: service_healthy
+    restart: unless-stopped

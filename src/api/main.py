@@ -6,12 +6,8 @@ It is the entrypoint referenced by the Dockerfile:
     uvicorn src.api.main:app --host 0.0.0.0 --port 8000
 
 Route structure (current):
-    GET /health     -- Database and API health check (see routes/health.py)
-
-Route structure (planned -- E-009-03):
-    # Dashboard routes will be mounted here when E-009-03 is implemented.
-    # Use a Jinja2 router or APIRouter with HTML responses.
-    # Example: app.include_router(dashboard_router, prefix="")
+    GET /health      -- Database and API health check (see routes/health.py)
+    GET /dashboard   -- Team batting stats dashboard (see routes/dashboard.py)
 """
 
 from __future__ import annotations
@@ -19,11 +15,14 @@ from __future__ import annotations
 import logging
 import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import AsyncGenerator
 
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 
 from src.api.routes.health import router as health_router
+from src.api.routes.dashboard import router as dashboard_router
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -73,12 +72,18 @@ app = FastAPI(
 )
 
 # ---------------------------------------------------------------------------
+# Static files and templates
+# ---------------------------------------------------------------------------
+
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+_STATIC_DIR = _PROJECT_ROOT / "src" / "api" / "static"
+_TEMPLATES_DIR = _PROJECT_ROOT / "src" / "api" / "templates"
+
+app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
+
+# ---------------------------------------------------------------------------
 # Route registration
 # ---------------------------------------------------------------------------
 
 app.include_router(health_router)
-
-# E-009-03: Dashboard routes will be registered here.
-# When implementing E-009-03, add:
-#   from src.api.routes.dashboard import router as dashboard_router
-#   app.include_router(dashboard_router)
+app.include_router(dashboard_router)

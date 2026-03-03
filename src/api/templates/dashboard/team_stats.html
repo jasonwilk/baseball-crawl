@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+
+{% block title %}Team Stats -- {{ team_name }}{% endblock %}
+
+{% block content %}
+<h1 class="text-xl font-bold mb-4">{{ team_name }} &mdash; Batting Stats</h1>
+<div class="overflow-x-auto">
+  <table class="min-w-full text-sm bg-white rounded shadow">
+    <thead class="bg-blue-900 text-white">
+      <tr>
+        <th class="text-left py-2 px-3">Player</th>
+        <th class="py-2 px-3 text-center">AB</th>
+        <th class="py-2 px-3 text-center">H</th>
+        <th class="py-2 px-3 text-center">BB</th>
+        <th class="py-2 px-3 text-center">K</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for player in players %}
+      <tr class="border-b border-gray-200 {% if loop.index is even %}bg-gray-50{% endif %}">
+        <td class="py-2 px-3 font-medium">{{ player.name }}</td>
+        <td class="py-2 px-3 text-center">{{ player.ab }}</td>
+        <td class="py-2 px-3 text-center">{{ player.h }}</td>
+        <td class="py-2 px-3 text-center">{{ player.bb }}</td>
+        <td class="py-2 px-3 text-center">{{ player.so }}</td>
+      </tr>
+      {% else %}
+      <tr>
+        <td colspan="5" class="py-4 px-3 text-center text-gray-500">No stats available.</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

@@ -76,8 +76,7 @@ proven in production:
 - Lean privilege: separate database users per service where applicable
 
 Deployment procedure: clone repo, run `./setup.sh`, edit `.env`, run `docker compose up -d`.
-No platform vendor lock-in. Works on any Linux server with Docker (Hetzner, DigitalOcean,
-VPS, bare metal).
+No platform vendor lock-in. Works on any Linux server with Docker.
 
 **Why this matters**: Option B is not speculative. It is a proven architecture the user
 already understands and operates. If research confirms it fits baseball-crawl, the implementation
@@ -125,7 +124,7 @@ complete, IDEA-001 should be marked DISCARDED with a reference to E-009.
 - Building any actual dashboard views (that is E-004's job once the stack is decided).
 - Multi-region or CDN optimization beyond what Cloudflare provides by default.
 - Hosting on AWS, Azure, Fly.io, Render, or Railway. The only hosting options are:
-  Native Cloudflare (Option A) or a Linux VPS with Docker + Cloudflare Tunnel (Option B).
+  Native Cloudflare (Option A) or a Linux server with Docker + Cloudflare Tunnel (Option B).
 
 ## Success Criteria
 
@@ -149,10 +148,10 @@ complete, IDEA-001 should be marked DISCARDED with a reference to E-009.
 | E-009-R-04 | Research: Option A vs Option B -- Infrastructure Comparison | DONE | None | - |
 | E-009-01   | Technology Decision Record -- choose Option A or Option B | DONE | R-01, R-02, R-03, R-04 | PM |
 | E-009-02   | Docker Compose environment -- database + API (Option B) | DONE | E-009-01 | data-engineer |
-| E-009-03   | Docker Compose environment -- dashboard (Option B) | TODO | E-009-02 | general-dev |
-| E-009-04   | Cloudflare Tunnel + Zero Trust Access configuration (Option B) | TODO | E-009-02; conflicts with E-009-05 (no parallel) | general-dev |
-| E-009-05   | Database seeding and reset workflow | TODO | E-009-02; conflicts with E-009-04 (no parallel) | data-engineer |
-| E-009-06   | Agent browsability verification | TODO | E-009-03 | general-dev |
+| E-009-03   | Docker Compose environment -- dashboard (Option B) | DONE | E-009-02 | general-dev |
+| E-009-04   | Cloudflare Tunnel + Zero Trust Access configuration (Option B) | DONE | E-009-02; conflicts with E-009-05 (no parallel) | general-dev |
+| E-009-05   | Database seeding and reset workflow | DONE | E-009-02; conflicts with E-009-04 (no parallel) | data-engineer |
+| E-009-06   | Agent browsability verification | DONE | E-009-03 | general-dev |
 | E-009-07   | Production deployment runbook | TODO | E-009-02, E-009-03, E-009-04, E-009-05 | general-dev |
 | E-009-08   | CLAUDE.md and E-004 update | TODO | E-009-07 (run last; all prior stories must be DONE) | PM |
 | E-009-R-05 | Research: MCP Ecosystem as Agent Integration Layer | DONE | None | - |
@@ -189,7 +188,7 @@ Cons:
 #### Option B -- Docker + Cloudflare Access (n8n-wilk-io Pattern)
 ```
 Local dev:   docker compose up (same stack as production)
-Production:  docker compose up on a Linux VPS (Hetzner, DigitalOcean, etc.)
+Production:  docker compose up on a Linux server (home server or any machine with Docker)
 Access:      Cloudflare Tunnel (cloudflared) + Zero Trust Access
 Database:    SQLite in a Docker volume (or Postgres if justified by research)
 API:         FastAPI (Python) -- same language as crawlers
@@ -208,7 +207,6 @@ Pros:
 - Works on any Linux server with Docker. No vendor lock-in for compute.
 
 Cons:
-- Requires a VPS ($4-10/month, Hetzner or DigitalOcean).
 - Requires managing one Linux server (updates, backups, health monitoring).
 - More initial setup than Option A (Traefik config, Cloudflare Tunnel setup, .env wiring).
 
@@ -371,8 +369,8 @@ migrations/                 # D1 SQL schema migrations (existing)
 
 1. ~~**Option A local dev story**~~: RESOLVED. Option B selected; this question is moot.
 
-2. ~~**Option B server cost**~~: RESOLVED. Hetzner CX11 (2 vCPU, 2GB RAM, ~3.49-4.15 EUR/month)
-   confirmed in E-009-01 decision record. Documented in E-009-07 runbook.
+2. ~~**Option B server cost**~~: RESOLVED. No hosting cost -- user runs Docker on home
+   servers. Cloudflare Tunnel provides inbound access without exposed ports.
 
 3. ~~**Cloudflare Tunnel authentication for crawlers**~~: RESOLVED. Service token pattern
    documented in E-009-04 (CF-Access-Client-Id / CF-Access-Client-Secret headers).
@@ -391,13 +389,35 @@ migrations/                 # D1 SQL schema migrations (existing)
 
 ### New Questions (from refinement review, 2026-03-02)
 
-8. **`restart: unless-stopped` missing from E-009-02**: The current docker-compose.yml does
-   not set `restart: unless-stopped` on the `app` or `traefik` services. E-009-04 should
-   add this when modifying the compose file. If missed, E-009-07 must catch it.
+8. ~~**`restart: unless-stopped` missing from E-009-02**~~: RESOLVED. E-009-04 added
+   `restart: unless-stopped` to all services. Verified in current `docker-compose.yml`.
 
-9. **Parallel dispatch constraint**: E-009-04 and E-009-05 both modify `docker-compose.yml`
-   and `.env.example`. They MUST be dispatched sequentially, not in parallel. Both story
-   files now document this constraint.
+9. ~~**Parallel dispatch constraint**~~: RESOLVED. E-009-04 and E-009-05 were dispatched
+   sequentially. Both are now DONE.
+
+10. **Devcontainer configuration drift**: The `.devcontainer/devcontainer.json` was created
+    before the E-009 tech stack decision and does not reflect the current stack. It installs
+    Node.js but not Python; it has no Docker-in-Docker or Docker socket forwarding. Two
+    development workflows are possible:
+
+    **Workflow A -- Devcontainer for AI coding assistants only (Codespaces/Remote Containers)**:
+    The devcontainer needs Python 3.12 (for running tests without Docker), and Docker access
+    (for `docker compose up`). This requires either Docker-in-Docker or Docker socket
+    forwarding. Recommendation: use the `docker-in-docker` devcontainer feature. Update the
+    base image to include Python or add the Python devcontainer feature. Remove Node.js
+    (not used in this project).
+
+    **Workflow B -- Devcontainer not used for daily development**:
+    If the operator develops on the host machine (macOS) and the devcontainer is only used
+    for Codespaces CI or occasional remote development, then the devcontainer should be
+    updated to match the stack but is not blocking. The current devcontainer works for
+    Claude Code sessions (which run on the host, not in the container).
+
+    **PM recommendation**: Update the devcontainer to match the stack as a small cleanup
+    task (add Python feature, add Docker-in-Docker feature, remove Node.js, update
+    postCreateCommand to install Python deps). This is not blocking any E-009 story --
+    it should be captured as a note in E-009-08 or as a follow-on task. The user should
+    confirm which workflow they use before the devcontainer is modified.
 
 ## History
 - 2026-02-28: Created as DRAFT. Expert consultation synthesized by PM. Research spikes
@@ -436,8 +456,20 @@ migrations/                 # D1 SQL schema migrations (existing)
   - E-009-06: Broadened AC-1 to allow Bash curl fallback. Added curl as primary fallback
     before mcp__ide__executeCode. Clarified baseball-coach invocation pattern.
   - E-009-07: Added Litestream profile to startup command. Added restart policy verification.
-    Added user dependency note (VPS must be provisioned by operator).
+    Added user dependency note (server must be available to operator).
   - E-009-08: Fixed dependency (E-009-07, not E-009-01). Fixed hardcoded date in AC-6.
     Added Litestream profile command to CLAUDE.md Commands spec.
   - Open Questions: Closed all 7 original questions as RESOLVED. Added 2 new questions
     (restart policy gap, parallel dispatch constraint).
+- 2026-03-02: **Hosting target correction.** User clarified that production hosting is on
+  home Linux servers, NOT a VPS (Hetzner, DigitalOcean, etc.). The VPS assumption originated
+  from E-009-R-04 research but does not reflect the user's actual deployment environment.
+  Corrected all references in epic.md, E-009-07, E-009-08, E-009-04. The deployment target
+  is: user's home server running Docker, with Cloudflare Tunnel for inbound traffic. No VPS
+  needed. No hosting cost. The technical architecture (Docker + Cloudflare Tunnel) is unchanged.
+- 2026-03-02: **Status sync.** Updated Stories table to reflect actual story file statuses:
+  E-009-03 DONE, E-009-04 DONE, E-009-05 DONE, E-009-06 DONE. Resolved open questions 8
+  (restart policy -- already fixed) and 9 (parallel dispatch -- completed). Added open
+  question 10: devcontainer configuration drift (.devcontainer/devcontainer.json predates
+  E-009 stack decision, missing Python and Docker features). Remaining TODO: E-009-07
+  (production runbook) and E-009-08 (CLAUDE.md update).
