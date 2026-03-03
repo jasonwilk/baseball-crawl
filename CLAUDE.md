@@ -87,6 +87,8 @@ These are the statistics and dimensions that matter for coaching decisions:
 
 ## Commands
 - `./scripts/install-hooks.sh` -- one-time setup for PII pre-commit hook (run after cloning)
+- `./scripts/codex-review.sh <mode>` -- code review of repository changes; modes: `uncommitted`, `base <branch>`, `commit <sha>`. Rubric: `.project/codex-review.md`
+- `./scripts/codex-spec-review.sh <epic-dir>` -- spec review of epic/story files in a directory; optional `--note` flag. Rubric: `.project/codex-spec-review.md`
 
 ## App Troubleshooting
 

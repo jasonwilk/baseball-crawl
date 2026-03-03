@@ -1,10 +1,10 @@
 # Product Manager -- Agent Memory
 
 ## Numbering State
-- Next available epic number: E-034
-- Epics created: E-001 through E-033 (E-006, E-007, E-008, E-010, E-011, E-012, E-013, E-014, E-015, E-016, E-017, E-018, E-019, E-020, E-021, E-022, E-024, E-025, E-026, E-027, E-029, E-030, E-031, E-032, E-033 archived)
-- Next available idea number: IDEA-006
-- Ideas created: IDEA-001 through IDEA-005
+- Next available epic number: E-035
+- Epics created: E-001 through E-034 (E-006, E-007, E-008, E-010, E-011, E-012, E-013, E-014, E-015, E-016, E-017, E-018, E-019, E-020, E-021, E-022, E-024, E-025, E-026, E-027, E-029, E-030, E-031, E-032, E-033 archived)
+- Next available idea number: IDEA-007
+- Ideas created: IDEA-001 through IDEA-006
 
 ## Project Context
 - Project: baseball-crawl -- GameChanger API -> database -> coaching dashboard
@@ -48,6 +48,7 @@
 - E-028 (COMPLETED): Documentation System -- docs-writer agent, documentation maintenance rules, admin docs (architecture, getting-started, operations, agent-guide), coaching docs (stats glossary, scouting reports), workflow integration (dispatch-pattern.md, workflow-discipline.md, PM agent def).
 - E-032 (COMPLETED): Agent Log Access and Troubleshooting Verification -- validated E-027 troubleshooting workflow end-to-end. No blocking gaps. Recommendation: add grep-based log filtering to CLAUDE.md troubleshooting section.
 - E-033 (COMPLETED): Project Hygiene -- aligned docs and tests with current reality. CLAUDE.md stack sections corrected, hardcoded paths fixed in 16 context-layer + story files, TestClient lifecycle fixed, pytest-timeout added, migration comment corrected.
+- E-034 (COMPLETED): Codex Review Integration -- two review lanes (code + spec). Artifacts: `.project/codex-review.md`, `scripts/codex-review.sh`, `.project/codex-spec-review.md`, `scripts/codex-spec-review.sh`. CLAUDE.md Commands section updated. PM agent def updated with optional spec-review step. No follow-up work identified.
 
 ## Key Architectural Decisions
 - Storage: SQLite (WAL mode). Host-mounted at ./data/app.db. Simple file backup via scripts/backup_db.py (no Litestream).
@@ -77,6 +78,7 @@
 | IDEA-003 | Work Management as Agent Interface | CANDIDATE | 2026-05-29 | Promote when file-based system causes friction |
 | IDEA-004 | Hard Data Boundaries and PII Protection | PROMOTED | 2026-03-02 | Promoted to E-019. Consolidated 6 stories to 4, added credential scanning. |
 | IDEA-005 | Directory-Scoped Intent Nodes at src/ Module Boundaries | CANDIDATE | 2026-06-01 | Phase 2 of abandoned E-010. Promote when E-002+E-003 complete. |
+| IDEA-006 | Epic Lanes Convention for Multi-Workstream Epics | CANDIDATE | 2026-06-01 | Formalize lane-style Technical Notes headers. Promote when 6+ story epics are common AND agents report TN scoping confusion. |
 
 ## Key Workflow Contract
 - Routing model: user -> PM -> implementing agent (no orchestrator; removed in E-030)

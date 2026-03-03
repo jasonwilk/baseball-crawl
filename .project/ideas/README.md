@@ -24,6 +24,7 @@ Review this list every 90 days, or when completing an epic. Ask:
 | [IDEA-003](IDEA-003-github-epics.md) | Work Management as Agent Interface | CANDIDATE | 2026-05-29 |
 | [IDEA-004](IDEA-004-pii-protection.md) | Hard Data Boundaries and PII Protection | PROMOTED | 2026-03-02 -- promoted to E-019 |
 | [IDEA-005](IDEA-005-intent-nodes.md) | Directory-Scoped Intent Nodes at src/ Module Boundaries | CANDIDATE | 2026-06-01 |
+| [IDEA-006](IDEA-006-epic-lanes-convention.md) | Epic Lanes Convention for Multi-Workstream Epics | CANDIDATE | 2026-06-01 |
 
 ## Status Definitions
 

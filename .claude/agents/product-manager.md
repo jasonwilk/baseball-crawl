@@ -305,6 +305,14 @@ Before finalizing any epic or story:
 - [ ] Story `Technical Approach` sections name all referenced context files by absolute path (e.g., `/.project/research/E-NNN-slug.md`, `docs/gamechanger-api.md`) rather than by vague description (e.g., "consult the design document"). Implementing agents must be able to load these as deferred context in one step.
 - [ ] Epic status set to READY after all stories pass this checklist
 
+### Optional: Codex Spec Review
+
+Before setting an epic to READY, you may optionally request a Codex spec review for a second opinion on AC quality, dependency correctness, and story sizing. This is advisory -- not a mandatory gate. To request a review, dispatch a `general-dev` agent with:
+1. The epic directory path (e.g., `/epics/E-NNN-slug/`)
+2. An optional short note summarizing intent and uncertainties
+
+The `general-dev` agent runs `scripts/codex-spec-review.sh` using the rubric at `.project/codex-spec-review.md` and returns the findings. Incorporate any relevant feedback before setting READY.
+
 ## Memory Instructions
 
 Update your memory file (`/.claude/agent-memory/product-manager/MEMORY.md`) with:
