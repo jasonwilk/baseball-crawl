@@ -1,0 +1,26 @@
+# Admin & Developer Documentation
+
+This directory contains documentation for system operators and developers working on the baseball-crawl project.
+
+## Contents
+
+| Document | Description |
+|----------|-------------|
+| [Architecture](architecture.md) | System overview, components, data flow, directory structure, and tech stack. |
+| [Getting Started](getting-started.md) | Prerequisites, setup, running the stack, seeding the database, and running tests. |
+| [Operations](operations.md) | Deployment, credential rotation, backups, troubleshooting, and monitoring. |
+| [Agent Guide](agent-guide.md) | The AI agent ecosystem: what it is, how to work with it, and how to request work. |
+
+## Related Documentation
+
+These documents live outside `docs/admin/` but are referenced throughout:
+
+- [GameChanger API Spec](../gamechanger-api.md) -- Endpoint reference for the GameChanger API (maintained by api-scout).
+- [HTTP Integration Guide](../http-integration-guide.md) -- How to use the shared HTTP session factory.
+- [Cloudflare Access Setup](../cloudflare-access-setup.md) -- One-time Cloudflare Tunnel and Zero Trust configuration.
+- [Database Backup & Restore](../database-restore.md) -- Backup and restore procedures for the SQLite database.
+- [Safe Data Handling](../safe-data-handling.md) -- PII scanning and credential safety policies.
+
+---
+
+*Last updated: 2026-03-03 | Story: E-028-03*
