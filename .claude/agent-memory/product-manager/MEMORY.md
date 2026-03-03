@@ -2,7 +2,7 @@
 
 ## Numbering State
 - Next available epic number: E-024
-- Epics created: E-001 through E-023 (E-006, E-007, E-008, E-011, E-012, E-013, E-014, E-015, E-016, E-017, E-018, E-019, E-020, E-021 archived)
+- Epics created: E-001 through E-023 (E-006, E-007, E-008, E-011, E-012, E-013, E-014, E-015, E-016, E-017, E-018, E-019, E-020, E-021, E-022 archived)
 - Next available idea number: IDEA-005
 - Ideas created: IDEA-001 through IDEA-004
 
@@ -21,8 +21,7 @@
 - E-005 (ACTIVE): HTTP Request Discipline -- 4/5 DONE. E-005-03 TODO (blocked on E-001-02).
 - E-009 (ACTIVE): Tech Stack Redesign -- 02/03/04/05/06 DONE. 07 TODO (production runbook), 08 TODO (CLAUDE.md update, blocked on 07). All research spikes DONE.
 - E-010 (ACTIVE): Intent/Context Layer -- Phase 1 DONE (01/02/03). Phase 2 BLOCKED on E-002+E-003.
-- E-022 (READY): Safety Scan Hardening -- 4 stories. 01/02/03 TODO (parallel). 04 TODO (blocked on 01). Adds scan confirmation output, hardens hook intercept pattern, CLAUDE.md reminder, integration tests.
-- E-023 (READY): Auth and Team-Level Permissions -- 4 stories. 01 TODO (schema), 02 TODO (middleware, blocked on 01), 03+04 TODO (dashboard + admin, blocked on 02, parallel). CF Access = authn, app = authz only.
+- E-023 (READY): Auth and Team-Level Permissions -- 4 stories. 01 TODO (schema), 02 TODO (middleware, blocked on 01), 03 TODO (dashboard, blocked on 02), 04 TODO (admin, blocked on 02+03). Sequential: 01->02->03->04. CF Access = authn, app = authz only.
 
 ## Archived Epics
 - E-006 (ABANDONED): PII Protection -- demoted to IDEA-004. Revisit when E-002 produces real data.
@@ -38,6 +37,8 @@
 - E-018 (COMPLETED): Agent Frontmatter Refinement -- follow-on = E-020.
 - E-019 (COMPLETED): Pre-Commit Safety Gates -- two-layer pre-commit defense.
 - E-020 (COMPLETED): Agent Effectiveness Audit & Refinement -- all 5 target agents refined.
+- E-021 (COMPLETED): Agent Workflow Guardrails -- work authorization and dispatch failure protocols.
+- E-022 (COMPLETED): Safety Scan Hardening -- visible confirmation, hook hardening, CLAUDE.md reminder, integration tests.
 
 ## Key Architectural Decisions
 - Storage: SQLite (WAL mode). Host-mounted at ./data/app.db. Simple file backup via scripts/backup_db.py (no Litestream).
