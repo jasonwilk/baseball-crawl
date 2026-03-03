@@ -1,7 +1,7 @@
 # E-003: Data Model and Storage Schema
 
 ## Status
-`READY`
+`ACTIVE`
 
 ## Overview
 Design and implement the SQLite database schema that stores all baseball data ingested from GameChanger. The schema must support multi-team, multi-season, and player tracking across organizations -- a player's history should be queryable regardless of which teams they played for and in which years. Seasons are first-class entities with type-based filtering (spring HS, summer legion, fall). Teams carry crawl configuration so the ingestion pipeline knows what to fetch.
@@ -52,10 +52,10 @@ The data model has some non-obvious complexity:
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-003-01 | Rewrite core schema migration with seasons, crawl config, and pitching | TODO | None | - |
+| E-003-01 | Rewrite core schema migration with seasons, crawl config, and pitching | DONE | None | - |
 | E-003-02 | Coaching assignments migration | TODO | E-003-01, E-023-01 | - |
 | E-003-03 | Write migration tooling and local dev setup | ABANDONED | - | - |
-| E-003-04 | Seed data and query validation tests | TODO | E-003-01 | - |
+| E-003-04 | Seed data and query validation tests | DONE | E-003-01 | - |
 
 ## Technical Notes
 
@@ -246,3 +246,9 @@ None. All design decisions have been made by the user.
 - 2026-02-28: Architecture superseded by E-009 decision (Docker + SQLite replaces Cloudflare D1).
 - 2026-03-01: Clarify pass -- replaced all Cloudflare D1/Wrangler references with SQLite per E-009 tech stack decision. Migration tooling references updated to apply_migrations.py. E-003-03 ABANDONED in favor of E-009-02. Title updated.
 - 2026-03-03: Major refinement. Incorporated comprehensive data model decisions: seasons as first-class entity, teams crawl configuration, season_id FKs replacing season TEXT, player_season_pitching table, expanded splits, coaching_assignments (cross-epic dep on E-023). Rewrote all stories. Removed E-001-03 blocker (now DONE). Status set to READY.
+- 2026-03-03: Spec review refinement. (1) P2 fix: Added `scripts/reset_dev_db.py` to E-003-01 Reference files -- AC-14 references this script for seed verification but the implementing agent would not have known to read it. (2) P3 deferred: E-003-01 sizing (15 ACs, 4 files) acknowledged but not split -- seed alignment must stay in the same story as the migration rewrite because `reset_dev_db.py` couples them (migrations then seed load; broken seed = broken dev reset). Data-engineer consultation not performed (Task tool unavailable); PM analysis confirmed no additional schema or migration concerns.
+- 2026-03-03: Dispatch started. Epic set to ACTIVE. E-003-01 dispatched to general-purpose agent. E-003-02 remains BLOCKED (cross-epic dep on E-023-01). E-003-04 will dispatch after E-003-01 completes.
+- 2026-03-03: Data-engineer consultation. Two P3 findings reviewed. (1) Finding: `tests/test_seed.py` missing from E-003-01 Reference files -- DEFERRED (already present at line 55 with explicit note about `_CORE_TABLES`; data-engineer finding was incorrect). (2) Finding: E-003-04 `seeded_db` fixture uses relative `Path("migrations")` instead of `_PROJECT_ROOT` pattern from existing `test_seed.py` -- REFINED, updated fixture example to use `_PROJECT_ROOT = Path(__file__).resolve().parent.parent`. Data-engineer confirmed: E-003-01 sizing correct (no split needed), schema model solid, `tests/fixtures/` creation obvious, E-003-02 cross-epic blocker correctly captured.
+- 2026-03-03: E-003-01 DONE. Schema rewrite complete -- 15/15 ACs met. 214 tests pass (68 new schema/FK/crawl-config tests, 146 existing). Files: `migrations/001_initial_schema.sql` (rewritten), `data/seeds/seed_dev.sql` (updated), `tests/test_schema.py` (new), `tests/test_seed.py` (updated).
+- 2026-03-03: E-003-04 DONE. Seed data and query validation complete -- 12/12 ACs met. 258 tests pass (44 new query tests, 214 existing). Files: `tests/fixtures/seed.sql` (new), `tests/test_schema_queries.py` (new). All coaching queries validated: batting avg/OBP/K-rate, roster by OBP, W-L record, home/away splits, K/9 leaderboard, crawl config, season type filtering. All queries under 100ms.
+- 2026-03-03: E-003-02 remains TODO, blocked on E-023-01 (auth schema). Epic stays ACTIVE until E-003-02 can be dispatched.

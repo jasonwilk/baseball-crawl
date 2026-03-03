@@ -48,16 +48,19 @@ _SEED_FILE = _PROJECT_ROOT / "data" / "seeds" / "seed_dev.sql"
 # Expected minimum row counts per AC-2.
 # These must match or exceed what seed_dev.sql inserts.
 _MIN_ROW_COUNTS: dict[str, int] = {
-    "teams": 2,           # AC-2: at least 2 teams (1 Lincoln + 1 opponent)
-    "players": 10,        # AC-2: at least 10 players
-    "games": 5,           # AC-2: at least 5 games
+    "seasons": 1,               # AC-2: at least 1 season
+    "teams": 2,                 # AC-2: at least 2 teams (1 Lincoln + 1 opponent)
+    "players": 10,              # AC-2: at least 10 players
+    "games": 5,                 # AC-2: at least 5 games
     "player_game_batting": 5,   # AC-2: batting rows for games
     "player_game_pitching": 2,  # AC-2: pitching rows (1-2 pitchers per game)
     "player_season_batting": 5, # AC-2: season aggregates for Lincoln players
+    "player_season_pitching": 1, # AC-2: pitching season aggregates
 }
 
 # All core tables that must exist after migration + seed.
 _CORE_TABLES = {
+    "seasons",
     "players",
     "teams",
     "team_rosters",
@@ -65,6 +68,7 @@ _CORE_TABLES = {
     "player_game_batting",
     "player_game_pitching",
     "player_season_batting",
+    "player_season_pitching",
 }
 
 
