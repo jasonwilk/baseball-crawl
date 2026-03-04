@@ -1,7 +1,7 @@
 # E-003: Data Model and Storage Schema
 
 ## Status
-`ACTIVE`
+`COMPLETED`
 
 ## Overview
 Design and implement the SQLite database schema that stores all baseball data ingested from GameChanger. The schema must support multi-team, multi-season, and player tracking across organizations -- a player's history should be queryable regardless of which teams they played for and in which years. Seasons are first-class entities with type-based filtering (spring HS, summer legion, fall). Teams carry crawl configuration so the ingestion pipeline knows what to fetch.
@@ -53,7 +53,7 @@ The data model has some non-obvious complexity:
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
 | E-003-01 | Rewrite core schema migration with seasons, crawl config, and pitching | DONE | None | - |
-| E-003-02 | Coaching assignments migration | TODO | E-003-01, E-023-01 | - |
+| E-003-02 | Coaching assignments migration | DONE | E-003-01, E-023-01 | - |
 | E-003-03 | Write migration tooling and local dev setup | ABANDONED | - | - |
 | E-003-04 | Seed data and query validation tests | DONE | E-003-01 | - |
 
@@ -252,3 +252,6 @@ None. All design decisions have been made by the user.
 - 2026-03-03: E-003-01 DONE. Schema rewrite complete -- 15/15 ACs met. 214 tests pass (68 new schema/FK/crawl-config tests, 146 existing). Files: `migrations/001_initial_schema.sql` (rewritten), `data/seeds/seed_dev.sql` (updated), `tests/test_schema.py` (new), `tests/test_seed.py` (updated).
 - 2026-03-03: E-003-04 DONE. Seed data and query validation complete -- 12/12 ACs met. 258 tests pass (44 new query tests, 214 existing). Files: `tests/fixtures/seed.sql` (new), `tests/test_schema_queries.py` (new). All coaching queries validated: batting avg/OBP/K-rate, roster by OBP, W-L record, home/away splits, K/9 leaderboard, crawl config, season type filtering. All queries under 100ms.
 - 2026-03-03: E-003-02 remains TODO, blocked on E-023-01 (auth schema). Epic stays ACTIVE until E-003-02 can be dispatched.
+- 2026-03-04: Status audit. E-023 is COMPLETED (all stories DONE, archived). E-003-02's cross-epic dependency on E-023-01 is now satisfied. Both E-003-02 dependencies (E-003-01 DONE, E-023-01 DONE) are met. E-003-02 is now dispatchable. Updated E-003-02 reference path to archived E-023 location.
+- 2026-03-04: E-003-02 DONE. Coaching assignments migration complete -- 10/10 ACs met. 394 tests pass (8 new coaching_assignments tests, 386 existing). Files: `migrations/004_coaching_assignments.sql` (new), `tests/test_coaching_assignments.py` (new). coaching_assignments table with FK enforcement to users/teams/seasons, UNIQUE constraint, two indexes (user_id and team_id+season_id). All three migration files (001+003+004) apply cleanly in sequence.
+- 2026-03-04: Epic COMPLETED. All actionable stories DONE (E-003-01, E-003-02, E-003-04). E-003-03 ABANDONED (absorbed by E-009-02). Full data model schema delivered: 10 data tables, 2 auth tables, 1 domain table (coaching_assignments), with FK enforcement, split columns, crawl config, and coaching assignments. No documentation impact -- schema is internal infrastructure with no user-facing docs to update.

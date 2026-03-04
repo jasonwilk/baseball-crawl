@@ -11,7 +11,7 @@ The system is designed for a small-scale deployment: 4 teams (Freshman, JV, Vars
 | Component | Technology | Purpose |
 |-----------|-----------|---------|
 | **FastAPI app** | Python 3.13, FastAPI 0.115, Uvicorn | Serves the web dashboard (Jinja2 templates) and a JSON health endpoint. Runs inside a Docker container on port 8000. |
-| **SQLite database** | SQLite with WAL mode | Stores players, teams, rosters, games, and per-game/per-season batting and pitching stats. Located at `data/app.db` (host-mounted volume). |
+| **SQLite database** | SQLite with WAL mode | Stores players, teams, rosters, games, per-game/per-season batting and pitching stats, and coaching assignments. Located at `data/app.db` (host-mounted volume). |
 | **Docker Compose stack** | Docker Compose | Orchestrates three services: the FastAPI app, Traefik (reverse proxy), and cloudflared (Cloudflare Tunnel). |
 | **Traefik** | Traefik v3 | Reverse proxy that routes requests by `Host` header. In development, accessible at `http://localhost:8000`. Waits for the app health check before accepting traffic. |
 | **Cloudflare Tunnel** | cloudflared | Exposes the stack to the internet through Cloudflare's network. Handles SSL termination and integrates with Cloudflare Zero Trust for access control. |
@@ -96,4 +96,4 @@ baseball-crawl/
 
 ---
 
-*Last updated: 2026-03-03 | Story: E-028-03*
+*Last updated: 2026-03-04 | Story: E-003-02*
