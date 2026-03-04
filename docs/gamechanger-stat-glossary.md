@@ -76,6 +76,7 @@ Cross-reference: `docs/gamechanger-api.md` (Schema: season-stats) maps these abb
 | GS | Games started |
 | BF | Total batters faced |
 | #P | Total pitches |
+| TS | Total strikes thrown |
 | W | Wins |
 | L | Losses |
 | SV | Saves |

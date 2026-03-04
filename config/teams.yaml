@@ -1,0 +1,35 @@
+# Lincoln Standing Bear High School -- GameChanger team configuration
+#
+# This file is committed to version control.
+# It contains NO credentials -- only team metadata.
+#
+# season: used as the directory label under data/raw/{season}/
+# owned_teams: the LSB teams we have coaching access to.
+#
+# To add a team, append an entry with:
+#   id:    GameChanger team UUID (from GET /me/teams or the GC web URL)
+#   name:  Human-readable display name
+#   level: Program level (freshman | jv | varsity | reserve | legion)
+
+season: "2025"
+owned_teams:
+  # -----------------------------------------------------------------------
+  # Replace the placeholder IDs below with real team UUIDs obtained from
+  # the LSB coaching account via: python scripts/refresh_credentials.py
+  # then: GET /me/teams?include=user_team_associations
+  # -----------------------------------------------------------------------
+  - id: "REPLACE_WITH_LSB_FRESHMAN_TEAM_ID"
+    name: "Lincoln Standing Bear Freshman"
+    level: "freshman"
+
+  - id: "REPLACE_WITH_LSB_JV_TEAM_ID"
+    name: "Lincoln Standing Bear JV"
+    level: "jv"
+
+  - id: "REPLACE_WITH_LSB_VARSITY_TEAM_ID"
+    name: "Lincoln Standing Bear Varsity"
+    level: "varsity"
+
+  - id: "REPLACE_WITH_LSB_RESERVE_TEAM_ID"
+    name: "Lincoln Standing Bear Reserve"
+    level: "reserve"

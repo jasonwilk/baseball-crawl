@@ -30,14 +30,14 @@ Before executing this workflow, verify:
 
 1. **`secrets/gamechanger-curl.txt` exists and is non-empty.** Read the file to confirm. If missing or empty, ask the user to provide the curl command.
 2. **The curl command contains a valid URL.** Parse the URL to identify the endpoint path. Do NOT display or echo the `gc-token` or `gc-device-id` header values -- these are sensitive credentials.
-3. **Credentials are time-sensitive.** GameChanger tokens expire within approximately 1 hour. Phase 1 (api-scout) must execute the curl promptly. Do not delay with extensive planning.
+3. **Curl commands are time-sensitive.** GameChanger tokens last 14 days, but POST requests include a `gc-signature` header that expires within minutes. Execute curl commands promptly regardless of token lifetime. Phase 1 (api-scout) must execute the curl without delay. Do not delay with extensive planning.
 
 ---
 
 ## Phase 1: API Scout -- Endpoint Execution and Documentation
 
 **Agent**: api-scout (direct-routing exception -- no PM intermediation needed)
-**Time-sensitive**: Yes -- credentials expire within ~1 hour
+**Time-sensitive**: Yes -- curl commands should be executed promptly (gc-signature headers expire within minutes)
 
 Spawn api-scout with the following instructions. Include the full curl file path and the endpoint URL (redacted) in the prompt.
 
@@ -45,7 +45,7 @@ Spawn api-scout with the following instructions. Include the full curl file path
 
 ```
 Read the curl command from `secrets/gamechanger-curl.txt`. This contains a live GameChanger API
-call captured from browser traffic. Credentials are short-lived (~1 hour), so execute promptly.
+call captured from browser traffic. Execute promptly -- gc-signature headers expire within minutes.
 
 SECURITY: NEVER display, log, or include gc-token or gc-device-id values in any output or file.
 
@@ -229,7 +229,7 @@ If the research spike file has been archived or deleted, skip the research relev
 
 ## Anti-Patterns
 
-1. **Do not delay Phase 1.** Credentials expire quickly. Do not spend time planning, reading extensive context, or consulting other agents before executing the curl. Parse, execute, save, then document.
+1. **Do not delay Phase 1.** Curl commands contain time-sensitive headers (gc-signature expires within minutes). Do not spend time planning, reading extensive context, or consulting other agents before executing the curl. Parse, execute, save, then document.
 2. **Do not run both phases in parallel.** Phase 2 depends on Phase 1's findings summary. Wait for api-scout to complete before spawning claude-architect.
 3. **Do not skip Phase 2.** Even if the endpoint was already documented, the context layer integration check ensures agent memory stays current with the latest verification dates and any schema changes.
 4. **Do not modify the curl file.** The file in `secrets/gamechanger-curl.txt` is the user's input. Read it; do not edit it.

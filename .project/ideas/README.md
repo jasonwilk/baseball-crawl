@@ -26,6 +26,8 @@ Review this list every 90 days, or when completing an epic. Ask:
 | [IDEA-005](IDEA-005-intent-nodes.md) | Directory-Scoped Intent Nodes at src/ Module Boundaries | CANDIDATE | 2026-06-01 |
 | [IDEA-006](IDEA-006-epic-lanes-convention.md) | Epic Lanes Convention for Multi-Workstream Epics | CANDIDATE | 2026-06-01 |
 | [IDEA-007](IDEA-007-dispatch-coordinator-guardrail.md) | Dispatch Coordinator Guardrail -- Prevent Team-Lead-as-PM Bypass | CANDIDATE | 2026-06-02 |
+| [IDEA-008](IDEA-008-plays-and-line-scores.md) | Pitch-by-Pitch Plays and Inning Line Scores Crawling | CANDIDATE | 2026-06-02 |
+| [IDEA-009](IDEA-009-per-player-game-stats-spray-charts.md) | Per-Player Per-Game Stats and Spray Charts | CANDIDATE | 2026-06-02 |
 
 ## Status Definitions
 

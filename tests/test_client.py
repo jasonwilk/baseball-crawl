@@ -15,6 +15,7 @@ import respx
 from src.gamechanger.client import (
     ConfigurationError,
     CredentialExpiredError,
+    ForbiddenError,
     GameChangerAPIError,
     GameChangerClient,
     RateLimitError,
@@ -103,6 +104,73 @@ def test_credential_expired_error_on_401_403(
     assert "/teams/abc/game-summaries" in msg
     assert str(status_code) in msg
     assert "python scripts/refresh_credentials.py" in msg
+
+
+# ---------------------------------------------------------------------------
+# AC-1 (E-002-11): 401 raises CredentialExpiredError; 403 raises ForbiddenError
+# ---------------------------------------------------------------------------
+
+
+@respx.mock
+def test_get_401_raises_credential_expired_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """HTTP 401 raises CredentialExpiredError (not ForbiddenError)."""
+    respx.get(f"{_BASE_URL}/teams/abc/game-summaries").mock(
+        return_value=httpx.Response(401)
+    )
+    client = _make_client(monkeypatch)
+    with pytest.raises(CredentialExpiredError) as exc_info:
+        client.get("/teams/abc/game-summaries")
+    assert not isinstance(exc_info.value, ForbiddenError)
+
+
+@respx.mock
+def test_get_403_raises_forbidden_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """HTTP 403 raises ForbiddenError."""
+    respx.get(f"{_BASE_URL}/teams/abc/game-summaries").mock(
+        return_value=httpx.Response(403)
+    )
+    client = _make_client(monkeypatch)
+    with pytest.raises(ForbiddenError):
+        client.get("/teams/abc/game-summaries")
+
+
+@respx.mock
+def test_forbidden_error_is_subclass_of_credential_expired_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ForbiddenError is a subclass of CredentialExpiredError (backward compat)."""
+    respx.get(f"{_BASE_URL}/teams/abc/game-summaries").mock(
+        return_value=httpx.Response(403)
+    )
+    client = _make_client(monkeypatch)
+    # An except CredentialExpiredError clause must still catch 403.
+    with pytest.raises(CredentialExpiredError):
+        client.get("/teams/abc/game-summaries")
+
+
+@respx.mock
+def test_get_paginated_401_raises_credential_expired_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """HTTP 401 on get_paginated raises CredentialExpiredError (not ForbiddenError) -- AC-4."""
+    respx.get(f"{_BASE_URL}/teams/abc/game-summaries").mock(
+        return_value=httpx.Response(401)
+    )
+    client = _make_client(monkeypatch)
+    with pytest.raises(CredentialExpiredError) as exc_info:
+        client.get_paginated("/teams/abc/game-summaries")
+    assert not isinstance(exc_info.value, ForbiddenError)
+
+
+@respx.mock
+def test_get_paginated_403_raises_forbidden_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """HTTP 403 on get_paginated raises ForbiddenError -- AC-4."""
+    respx.get(f"{_BASE_URL}/teams/abc/game-summaries").mock(
+        return_value=httpx.Response(403)
+    )
+    client = _make_client(monkeypatch)
+    with pytest.raises(ForbiddenError):
+        client.get_paginated("/teams/abc/game-summaries")
 
 
 # ---------------------------------------------------------------------------
@@ -387,3 +455,149 @@ def test_content_type_header_set_on_get(monkeypatch: pytest.MonkeyPatch) -> None
 
     request = route.calls.last.request
     assert "application/vnd.gc.com.none+json" in request.headers.get("content-type", "")
+
+
+# ---------------------------------------------------------------------------
+# get_paginated() 5xx retry tests (E-002-10)
+# ---------------------------------------------------------------------------
+
+
+@respx.mock
+def test_paginated_5xx_retries_and_succeeds_on_second_attempt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """5xx on first paginated attempt, 200 on second attempt -- pagination continues."""
+    sleep_calls: list[float] = []
+    monkeypatch.setattr("src.gamechanger.client.time.sleep", lambda s: sleep_calls.append(s))
+
+    attempts = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            return httpx.Response(500)
+        return httpx.Response(200, json=[{"id": "game-1"}])
+
+    respx.get(f"{_BASE_URL}/teams/abc/game-summaries").mock(side_effect=handler)
+    client = _make_client(monkeypatch)
+    result = client.get_paginated("/teams/abc/game-summaries")
+    assert result == [{"id": "game-1"}]
+    assert attempts == 2
+    meaningful_sleeps = [s for s in sleep_calls if s > 0]
+    assert meaningful_sleeps == [1]
+
+
+@respx.mock
+def test_paginated_5xx_exhausts_retries_and_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """5xx on all 3 paginated attempts raises GameChangerAPIError."""
+    sleep_calls: list[float] = []
+    monkeypatch.setattr("src.gamechanger.client.time.sleep", lambda s: sleep_calls.append(s))
+
+    call_count = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal call_count
+        call_count += 1
+        return httpx.Response(503)
+
+    respx.get(f"{_BASE_URL}/teams/abc/game-summaries").mock(side_effect=handler)
+    client = _make_client(monkeypatch)
+
+    with pytest.raises(GameChangerAPIError):
+        client.get_paginated("/teams/abc/game-summaries")
+
+    assert call_count == 3
+    meaningful_sleeps = [s for s in sleep_calls if s > 0]
+    assert meaningful_sleeps == [1, 2]
+
+
+@respx.mock
+def test_paginated_non_5xx_error_raises_immediately(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Non-5xx, non-200, non-401/403, non-429 status (e.g. 418) raises immediately without retrying."""
+    call_count = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal call_count
+        call_count += 1
+        return httpx.Response(418)
+
+    respx.get(f"{_BASE_URL}/teams/abc/game-summaries").mock(side_effect=handler)
+    client = _make_client(monkeypatch)
+
+    with pytest.raises(GameChangerAPIError):
+        client.get_paginated("/teams/abc/game-summaries")
+
+    assert call_count == 1
+
+
+@respx.mock
+def test_paginated_5xx_retry_logs_warning(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """5xx retry attempt is logged at WARNING level with status, URL, attempt, and backoff."""
+    import logging
+
+    monkeypatch.setattr("src.gamechanger.client.time.sleep", lambda s: None)
+
+    attempts = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            return httpx.Response(502)
+        return httpx.Response(200, json=[])
+
+    respx.get(f"{_BASE_URL}/teams/abc/game-summaries").mock(side_effect=handler)
+    client = _make_client(monkeypatch)
+
+    with caplog.at_level(logging.WARNING, logger="src.gamechanger.client"):
+        client.get_paginated("/teams/abc/game-summaries")
+
+    warning_messages = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert any("502" in m for m in warning_messages)
+    assert any("game-summaries" in m or "api.team-manager.gc.com" in m for m in warning_messages)
+
+
+@respx.mock
+def test_paginated_5xx_retries_same_page_not_entire_sequence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """5xx on page 2 retries page 2 only -- page 1 data is preserved."""
+    monkeypatch.setattr("src.gamechanger.client.time.sleep", lambda s: None)
+
+    page2_url = f"{_BASE_URL}/teams/abc/page2"
+    page2_attempts = 0
+    page1_calls = 0
+
+    def page1_handler(request: httpx.Request) -> httpx.Response:
+        nonlocal page1_calls
+        page1_calls += 1
+        return httpx.Response(
+            200,
+            json=[{"id": "game-1"}],
+            headers={"x-next-page": page2_url},
+        )
+
+    def page2_handler(request: httpx.Request) -> httpx.Response:
+        nonlocal page2_attempts
+        page2_attempts += 1
+        if page2_attempts == 1:
+            return httpx.Response(500)
+        return httpx.Response(200, json=[{"id": "game-2"}])
+
+    respx.get(f"{_BASE_URL}/teams/abc/game-summaries").mock(side_effect=page1_handler)
+    respx.get(page2_url).mock(side_effect=page2_handler)
+
+    client = _make_client(monkeypatch)
+    result = client.get_paginated("/teams/abc/game-summaries")
+
+    assert result == [{"id": "game-1"}, {"id": "game-2"}]
+    # Page 1 fetched exactly once -- retry was on page 2 only.
+    assert page1_calls == 1
+    assert page2_attempts == 2

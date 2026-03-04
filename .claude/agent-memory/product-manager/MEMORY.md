@@ -3,8 +3,8 @@
 ## Numbering State
 - Next available epic number: E-039
 - Epics created: E-001 through E-038 (E-001, E-003, E-005, E-006, E-007, E-008, E-010, E-011, E-012, E-013, E-014, E-015, E-016, E-017, E-018, E-019, E-020, E-021, E-022, E-024, E-025, E-026, E-027, E-028, E-029, E-030, E-031, E-032, E-033, E-034, E-035, E-036, E-037, E-038 archived)
-- Next available idea number: IDEA-008
-- Ideas created: IDEA-001 through IDEA-007
+- Next available idea number: IDEA-010
+- Ideas created: IDEA-001 through IDEA-009
 
 ## Project Context
 - Project: baseball-crawl -- GameChanger API -> database -> coaching dashboard
@@ -14,8 +14,7 @@
 - See CLAUDE.md for full project conventions
 
 ## Active Epics (Summary)
-- E-002 (ACTIVE): Data Ingestion Pipeline -- R-01 DONE (season-stats endpoint confirmed 2026-03-04). E-002-01 TODO (roster crawl, no blockers), E-002-02 TODO (schedule+game-summaries, dep on 01), E-002-03 BLOCKED (game stats -- no box-score endpoint discovered; dep on 02), E-002-04 TODO (player stats, dep on 01; R-01 resolved), E-002-05 TODO (opponent, dep on 02), E-002-06 TODO (roster load, dep on 01+E-003-01 DONE), E-002-07a BLOCKED (game load, dep on 03+E-003-01 DONE), E-002-07b BLOCKED (stats load, dep on 04+E-003-01 DONE), E-002-08 TODO (orchestrator, dep on 01+02+05). Old E-002-07 ABANDONED (split). Dispatchable now: 01.
-- E-004 (DRAFT): Coaching Dashboard -- no stories yet, blocked on E-002 + E-003. Still references old Cloudflare stack (E-009-08 will fix).
+- E-004 (DRAFT): Coaching Dashboard -- no stories yet, blocked on E-003 (now DONE). E-002 now DONE. Still references old Cloudflare stack (E-009-08 will fix). **Unblocked by E-002 completion -- ready for refinement.**
 - E-009 (ACTIVE): Tech Stack Redesign -- R-01 through R-07 DONE, 01/02/03/04/05/06 DONE. 07 TODO (production runbook, no blockers), 08 TODO (CLAUDE.md update, dep on 07). Dispatchable now: 07.
 ## Archived Epics
 - E-005 (COMPLETED): HTTP Request Discipline -- all 5 stories DONE. Shared HTTP session layer: src/http/headers.py (BROWSER_HEADERS), src/http/session.py (create_session()), GameChangerClient verified using gc-token auth. 27 tests. docs/http-integration-guide.md. Follow-up needed: Chrome 131->145 update + DNT/Referer/Origin headers in BROWSER_HEADERS.
@@ -52,7 +51,8 @@
 - E-036 (COMPLETED): Fix Codex Code-Review Wrapper -- `codex review` cannot combine [PROMPT] with diff-scope flags. Replaced with `codex exec --ephemeral -` + assembled rubric+diff prompt. User-facing interface unchanged. No follow-up work.
 - E-037 (COMPLETED): Codex Review Remediation -- 4 stories. Fixed dashboard query (season->season_id column+format), rewrote E-002 loader orphan-player ACs to stub-player pattern, added E-002-06 soft dep to E-002-08, updated 6 context-layer files from "soft referential integrity" to FK-safe stub-player language. 385 tests pass. No follow-up work.
 - E-038 (COMPLETED): Fix PII Pre-Commit Hook Silent Failure -- changed core.hooksPath from absolute to relative path (.githooks). Added auto-setup to devcontainer postCreateCommand. No follow-up work.
-- E-003 (COMPLETED): Data Model and Storage Schema -- all actionable stories DONE (E-003-01: core schema rewrite, E-003-02: coaching_assignments migration 004, E-003-04: seed data + query validation). E-003-03 ABANDONED (absorbed by E-009-02). 394 tests total. Full schema: 10 data tables + 5 auth tables + 1 domain table (coaching_assignments). Migration sequence: 001->003->004. IDEA-005 trigger partially met (E-003 complete, E-002 still in progress).
+- E-002 (COMPLETED): Data Ingestion Pipeline -- all 13 stories DONE (1 research spike + 5 crawlers + 3 loaders + 1 orchestrator + 3 codex remediation). 615 tests total. Crawlers: roster, schedule, game-stats, player-stats, opponent (src/gamechanger/crawlers/). Loaders: roster, game, season-stats (src/gamechanger/loaders/). Orchestration: scripts/crawl.py + scripts/load.py (all 3 loaders wired). Client: get_paginated() with 5xx retry, ForbiddenError/CredentialExpiredError split. Config: config/teams.yaml. IDEA-005 trigger fully met (E-002+E-003 both complete). IDEA-008/009 promotable after dashboard work.
+- E-003 (COMPLETED): Data Model and Storage Schema -- all actionable stories DONE (E-003-01: core schema rewrite, E-003-02: coaching_assignments migration 004, E-003-04: seed data + query validation). E-003-03 ABANDONED (absorbed by E-009-02). 394 tests total. Full schema: 10 data tables + 5 auth tables + 1 domain table (coaching_assignments). Migration sequence: 001->003->004.
 
 ## Key Architectural Decisions
 - Storage: SQLite (WAL mode). Host-mounted at ./data/app.db. Simple file backup via scripts/backup_db.py (no Litestream).
@@ -81,9 +81,11 @@
 | IDEA-002 | Web Scraping Fallback Strategy | CANDIDATE | 2026-05-29 | Promote when API data gap discovered |
 | IDEA-003 | Work Management as Agent Interface | CANDIDATE | 2026-05-29 | Promote when file-based system causes friction |
 | IDEA-004 | Hard Data Boundaries and PII Protection | PROMOTED | 2026-03-02 | Promoted to E-019. Consolidated 6 stories to 4, added credential scanning. |
-| IDEA-005 | Directory-Scoped Intent Nodes at src/ Module Boundaries | CANDIDATE | 2026-06-01 | Phase 2 of abandoned E-010. Promote when E-002+E-003 complete. |
+| IDEA-005 | Directory-Scoped Intent Nodes at src/ Module Boundaries | CANDIDATE | 2026-06-01 | Phase 2 of abandoned E-010. **Trigger met**: E-002+E-003 both complete. Ready for promotion review. |
 | IDEA-006 | Epic Lanes Convention for Multi-Workstream Epics | CANDIDATE | 2026-06-01 | Formalize lane-style Technical Notes headers. Promote when 6+ story epics are common AND agents report TN scoping confusion. |
 | IDEA-007 | Dispatch Coordinator Guardrail | CANDIDATE | 2026-06-02 | Prevent team-lead-as-PM bypass in dispatch. Root cause: E-037 team lead created dispatch team directly instead of spawning PM first. Promote at next multi-story dispatch. |
+| IDEA-008 | Plays and Line Scores Crawling | CANDIDATE | 2026-06-02 | Pitch-by-pitch plays + inning line scores. Promote after E-002-03 DONE and coaches need pitch-level data. |
+| IDEA-009 | Per-Player Game Stats + Spray Charts | CANDIDATE | 2026-06-02 | Per-player per-game stats + spray chart x/y data. Promote after E-002 complete and dashboard ready for trends. |
 
 ## Key Workflow Contract
 - Routing model: user -> PM -> implementing agent (no orchestrator; removed in E-030)

@@ -75,6 +75,8 @@ These are the statistics and dimensions that matter for coaching decisions:
 - **Batting**: OBP, strikeout rate, home/away splits, left/right pitcher splits
 - **Pitching**: K/9, BB/9, left/right batter splits, home/away splits
 - **Per-game splits**: Game-by-game batting and pitching lines for streak detection, recent form, and workload tracking
+- **Box scores**: Per-player batting and pitching lines for both teams per game, including batting order, pitch counts, strike counts, and defensive positions -- from a single API call per game
+- **Pitch-by-pitch plays**: Full pitch sequence per at-bat (balls, strikes, fouls, in-play), contact quality descriptions, baserunner events, fielder identity on outs, and in-game substitutions -- from a single API call per game via the plays endpoint
 - **Spray charts**: Ball-in-play direction (x/y coordinates), play type, play result, fielder position -- for batting tendency analysis and defensive positioning
 - **Players**: Key player identification (aces, closers, leadoff), lineup position history
 - **Opponents**: Lineup patterns and changes, tendencies, roster composition
@@ -83,11 +85,12 @@ These are the statistics and dimensions that matter for coaching decisions:
 The authoritative data dictionary mapping all GameChanger stat abbreviations to their definitions is at `docs/gamechanger-stat-glossary.md`. It includes batting, pitching, fielding, catcher, and positional innings stats, plus an API field name mapping table for cases where the API uses different abbreviations than the UI.
 
 ## GameChanger API
-- Credentials have short lifespans -- rotation is frequent
+- Token lifetime is 14 days (confirmed from JWT `exp - iat`). Tokens come from browser captures; programmatic refresh is not yet possible (requires unknown `gc-signature` signing key). Plan credential rotation at ~2-week intervals, not hourly.
 - NEVER log, commit, display, or hardcode credentials in source code
 - The API is undocumented; we maintain our own spec at `docs/gamechanger-api.md`
 - API limitations are discovered iteratively -- document everything
-- All API interactions must handle auth expiration gracefully
+- **Authenticated endpoints** (`/teams/*`, `/me/*`) require `gc-token` + `gc-device-id` headers and must handle auth expiration gracefully. Includes a **UUID-to-public_id bridge** (`GET /teams/{team_id}/public-team-profile-id`) that returns the `public_id` slug for any team UUID -- enabling programmatic access to all public endpoints for opponents discovered via authenticated data (schedule `opponent_id`, opponents `progenitor_team_id`).
+- **Public endpoints** require NO authentication -- no `gc-token`, no `gc-device-id`. Four confirmed under `/public/*`: `GET /public/teams/{public_id}` (name, location, record, staff), `GET /public/teams/{public_id}/games` (game schedule with final scores, opponents, home/away), `GET /public/teams/{public_id}/games/preview` (near-duplicate of `/games` -- same data minus `has_videos_available`, uses `event_id` instead of `id`; prefer `/games`), and `GET /public/game-stream-processing/{game_stream_id}/details?include=line_scores` (per-game inning-by-inning scoring, R/H/E totals; same `game_stream_id` as authenticated boxscore -- complementary views of the same game). One additional public-path endpoint uses an **inverted URL pattern**: `GET /teams/public/{public_id}/players` (roster -- NOT `/public/teams/`). Both path structures coexist in the API; do not assume all public endpoints follow `/public/*`. Public endpoints use `public_id` slugs (not UUIDs) except game details which uses `game_stream_id` from game-summaries, and may have different field names than authenticated equivalents (see API spec for details).
 
 ## Commands
 - `./scripts/install-hooks.sh` -- one-time setup for PII pre-commit hook (run after cloning)
@@ -95,7 +98,7 @@ The authoritative data dictionary mapping all GameChanger stat abbreviations to 
 - `./scripts/codex-spec-review.sh <epic-dir>` -- spec review of epic/story files in a directory; optional `--note` flag. Rubric: `.project/codex-spec-review.md`
 
 ## Workflows
-- **Ingest endpoint**: When the user says "ingest endpoint" (or similar -- "curl is ready", "new endpoint to analyze"), load `.claude/skills/ingest-endpoint/SKILL.md` and follow its two-phase workflow. The user has placed a curl command in `secrets/gamechanger-curl.txt` and expects api-scout to execute it (time-sensitive -- credentials expire in ~1 hour), then claude-architect to integrate findings into the context layer.
+- **Ingest endpoint**: When the user says "ingest endpoint" (or similar -- "curl is ready", "new endpoint to analyze"), load `.claude/skills/ingest-endpoint/SKILL.md` and follow its two-phase workflow. The user has placed a curl command in `secrets/gamechanger-curl.txt` and expects api-scout to execute it (time-sensitive -- the `gc-signature` header in POST requests expires within minutes, and curl commands should be executed promptly regardless of token lifetime), then claude-architect to integrate findings into the context layer.
 
 ## App Troubleshooting
 

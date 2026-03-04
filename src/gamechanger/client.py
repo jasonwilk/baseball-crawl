@@ -43,7 +43,17 @@ _GC_CONTENT_TYPE = "application/vnd.gc.com.none+json; version=undefined"
 
 
 class CredentialExpiredError(Exception):
-    """Raised when the API returns 401 or 403 (credentials have expired)."""
+    """Raised when the API returns 401 (token has expired or is invalid)."""
+
+
+class ForbiddenError(CredentialExpiredError):
+    """Raised when the API returns 403 (per-resource access denial).
+
+    Subclass of ``CredentialExpiredError`` for backward compatibility -- existing
+    ``except CredentialExpiredError`` clauses will still catch 403 responses.
+    Use ``except ForbiddenError`` before ``except CredentialExpiredError`` to
+    distinguish per-resource denial from token expiry.
+    """
 
 
 class RateLimitError(Exception):
@@ -81,6 +91,132 @@ class GameChangerClient:
         self._session.headers["gc-app-name"] = self._credentials.get(
             "GAMECHANGER_APP_NAME", "web"
         )
+
+    def get_paginated(
+        self,
+        path: str,
+        params: dict[str, Any] | None = None,
+        timeout: int = 30,
+        accept: str | None = None,
+    ) -> list[Any]:
+        """Fetch all pages of a paginated endpoint and return the combined list.
+
+        Sends ``x-pagination: true`` on every request and follows ``x-next-page``
+        response headers until the header is absent (last page).  Each page must
+        return a JSON array; pages are concatenated in order.
+
+        Args:
+            path: API path for the first page (e.g. ``"/teams/abc/game-summaries"``).
+            params: Optional query parameters for the first page.
+            timeout: Request timeout in seconds (default: 30).
+            accept: Optional endpoint-specific ``Accept`` header.
+
+        Returns:
+            Flat list of all records across all pages.
+
+        Raises:
+            CredentialExpiredError: On 401 or 403 responses.
+            RateLimitError: On 429 responses.
+            GameChangerAPIError: On 5xx responses after retries.
+        """
+        records: list[Any] = []
+        base_url = self._base_url
+        url: str = f"{base_url}{path}"
+        extra_headers: dict[str, str] = {"x-pagination": "true"}
+        if accept is not None:
+            extra_headers["Accept"] = accept
+        extra_headers["Content-Type"] = _GC_CONTENT_TYPE
+
+        current_params = params
+        backoff_delays = [1, 2, 4]
+
+        while True:
+            logger.debug("GET paginated %s", url)
+
+            # Retry each page individually on 5xx -- does not restart pagination.
+            last_error: GameChangerAPIError | None = None
+            page_response: httpx.Response | None = None
+
+            for attempt, backoff in enumerate(backoff_delays):
+                logger.debug("GET paginated %s (attempt %d)", url, attempt + 1)
+                response = self._session.get(
+                    url, params=current_params, timeout=timeout, headers=extra_headers
+                )
+                logger.debug("GET paginated %s -> %d", url, response.status_code)
+
+                if response.status_code == 200:
+                    page_response = response
+                    break
+
+                if response.status_code == 401:
+                    raise CredentialExpiredError(
+                        f"Credentials rejected for {url} "
+                        f"(HTTP {response.status_code}). "
+                        "Refresh by running: python scripts/refresh_credentials.py"
+                    )
+
+                if response.status_code == 403:
+                    raise ForbiddenError(
+                        f"Access denied for {url} "
+                        f"(HTTP {response.status_code}). "
+                        "Refresh by running: python scripts/refresh_credentials.py"
+                    )
+
+                if response.status_code == 429:
+                    retry_after = int(response.headers.get("Retry-After", "60"))
+                    logger.warning(
+                        "Rate limit hit on %s (HTTP 429). Waiting %ds before raising.",
+                        url,
+                        retry_after,
+                    )
+                    time.sleep(retry_after)
+                    raise RateLimitError(
+                        f"Rate limit exceeded for {url} (HTTP 429). "
+                        f"Waited {retry_after}s."
+                    )
+
+                if 500 <= response.status_code < 600:
+                    last_error = GameChangerAPIError(
+                        f"Server error for {url} "
+                        f"(HTTP {response.status_code}) after {attempt + 1} attempt(s)."
+                    )
+                    if attempt < len(backoff_delays) - 1:
+                        logger.warning(
+                            "Server error %d on paginated %s -- retrying in %ds (attempt %d/3)",
+                            response.status_code,
+                            url,
+                            backoff,
+                            attempt + 1,
+                        )
+                        time.sleep(backoff)
+                        continue
+
+                else:
+                    # Non-5xx, non-200, non-401/403, non-429 -- raise immediately.
+                    raise GameChangerAPIError(
+                        f"Unexpected status {response.status_code} for {url}."
+                    )
+
+            if page_response is None:
+                assert last_error is not None
+                raise last_error
+
+            page_data = page_response.json()
+            if isinstance(page_data, list):
+                records.extend(page_data)
+            else:
+                records.append(page_data)
+
+            next_page_url = page_response.headers.get("x-next-page")
+            if not next_page_url:
+                break
+
+            # Next page URL is absolute -- use it directly, no params needed.
+            url = next_page_url
+            current_params = None
+
+        logger.info("Paginated fetch complete: %d total records from %s", len(records), path)
+        return records
 
     def get(
         self,
@@ -154,9 +290,16 @@ class GameChangerClient:
             if response.status_code == 200:
                 return response.json()
 
-            if response.status_code in (401, 403):
+            if response.status_code == 401:
                 raise CredentialExpiredError(
                     f"Credentials rejected for {path} "
+                    f"(HTTP {response.status_code}). "
+                    "Refresh by running: python scripts/refresh_credentials.py"
+                )
+
+            if response.status_code == 403:
+                raise ForbiddenError(
+                    f"Access denied for {path} "
                     f"(HTTP {response.status_code}). "
                     "Refresh by running: python scripts/refresh_credentials.py"
                 )
