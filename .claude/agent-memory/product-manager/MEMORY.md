@@ -14,10 +14,10 @@
 - See CLAUDE.md for full project conventions
 
 ## Active Epics (Summary)
-- E-004 (DRAFT): Coaching Dashboard -- no stories yet, blocked on E-003 (now DONE). E-002 now DONE. Still references old Cloudflare stack (E-009-08 will fix). **Unblocked by E-002 completion -- ready for refinement.**
-- E-009 (ACTIVE): Tech Stack Redesign -- R-01 through R-07 DONE, 01/02/03/04/05/06 DONE. 07 TODO (production runbook, no blockers), 08 TODO (CLAUDE.md update, dep on 07). Dispatchable now: 07.
+- E-004 (DRAFT): Coaching Dashboard -- no stories yet. E-002 and E-003 both DONE. Technical Notes updated by E-009-08 to target FastAPI + Jinja2 on Docker. **Ready for refinement.**
 - E-039 (READY): mitmproxy Credential Sync and API Discovery -- 1 research spike + 6 stories. R-01 researches addon ecosystem, 01 sets up Docker Compose service, 02/03/04 are parallel addons (credentials, headers, endpoints), 05 consolidates source tagging, 06 adds CLI/docs. Dispatch: R-01 first, then 01, then 02/03/04 parallel, then 05, then 06. E-039-06 touches CLAUDE.md -> routes to claude-architect at dispatch.
 ## Archived Epics
+- E-009 (COMPLETED): Tech Stack Redesign -- all 16 stories/spikes DONE. Option B selected (Docker + Cloudflare Access). Key artifacts: docker-compose.yml, Dockerfile, FastAPI+Jinja2 app, production runbook (docs/production-deployment.md), docker-compose.override.yml.example. CLAUDE.md and E-004 updated. E-009-07 operator verification (AC-3/4/5/6) deferred to user. Codex review: 5 fixes applied.
 - E-005 (COMPLETED): HTTP Request Discipline -- all 5 stories DONE. Shared HTTP session layer: src/http/headers.py (BROWSER_HEADERS), src/http/session.py (create_session()), GameChangerClient verified using gc-token auth. 27 tests. docs/http-integration-guide.md. Follow-up needed: Chrome 131->145 update + DNT/Referer/Origin headers in BROWSER_HEADERS.
 - E-023 (COMPLETED): Auth and Team-Level Permissions -- all 5 stories DONE. Magic link + passkey auth, team-scoped dashboard, admin CRUD. 385 tests. Key files: migrations/003_auth.sql, src/api/auth.py, src/api/routes/auth.py, src/api/routes/admin.py, src/api/email.py. Added webauthn + python-multipart to requirements.txt. E-003-02 cross-epic dependency on E-023-01 is now satisfied.
 - E-006 (ABANDONED): PII Protection -- demoted to IDEA-004. Revisit when E-002 produces real data.

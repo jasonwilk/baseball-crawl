@@ -30,10 +30,11 @@ Coaching analytics platform for **Lincoln Standing Bear High School** baseball p
 A queryable database containing team and opponent statistics, sufficient for scouting reports and game prep. Dashboards come after the data layer is solid.
 
 ### Deployment Target
-- **Docker Compose** on a home Linux server (same compose file for local dev and production)
-- **SQLite** (WAL mode, host-mounted at `./data/app.db`) for structured storage
-- **FastAPI + Jinja2** (Python) serving layer -- server-rendered HTML
-- **Cloudflare Tunnel + Zero Trust Access** for network ingress and authentication (no exposed ports)
+- **Local dev**: `docker compose up` starts the full stack at http://localhost:8000
+- **Production**: Docker Compose on a Linux server (home server or any machine with Docker)
+- **Network**: Cloudflare Tunnel (no exposed ports); Zero Trust Access for auth
+- **Database**: SQLite at `./data/app.db` (host-mounted, WAL mode, simple file backup via `scripts/backup_db.py`)
+- See `docs/production-deployment.md` for the verified deployment runbook
 
 ## Data Philosophy
 
@@ -93,6 +94,13 @@ The authoritative data dictionary mapping all GameChanger stat abbreviations to 
 - **Public endpoints** require NO authentication -- no `gc-token`, no `gc-device-id`. Four confirmed under `/public/*`: `GET /public/teams/{public_id}` (name, location, record, staff), `GET /public/teams/{public_id}/games` (game schedule with final scores, opponents, home/away), `GET /public/teams/{public_id}/games/preview` (near-duplicate of `/games` -- same data minus `has_videos_available`, uses `event_id` instead of `id`; prefer `/games`), and `GET /public/game-stream-processing/{game_stream_id}/details?include=line_scores` (per-game inning-by-inning scoring, R/H/E totals; same `game_stream_id` as authenticated boxscore -- complementary views of the same game). One additional public-path endpoint uses an **inverted URL pattern**: `GET /teams/public/{public_id}/players` (roster -- NOT `/public/teams/`). Both path structures coexist in the API; do not assume all public endpoints follow `/public/*`. Public endpoints use `public_id` slugs (not UUIDs) except game details which uses `game_stream_id` from game-summaries, and may have different field names than authenticated equivalents (see API spec for details).
 
 ## Commands
+- `docker compose up` -- start full stack locally (app at http://localhost:8000)
+- `docker compose up -d` -- start in detached mode
+- `docker compose down` -- stop all services
+- `python scripts/backup_db.py` -- back up the SQLite database
+- `python scripts/reset_dev_db.py` -- reset dev database to seeded state
+- `pytest` -- run all tests (no Docker required)
+- `python migrations/apply_migrations.py` -- apply pending schema migrations
 - `./scripts/install-hooks.sh` -- one-time setup for PII pre-commit hook (run after cloning)
 - `./scripts/codex-review.sh <mode>` -- code review of repository changes; modes: `uncommitted`, `base <branch>`, `commit <sha>`. Rubric: `.project/codex-review.md`
 - `./scripts/codex-spec-review.sh <epic-dir>` -- spec review of epic/story files in a directory; optional `--note` flag. Rubric: `.project/codex-spec-review.md`

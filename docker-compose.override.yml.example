@@ -1,0 +1,18 @@
+# docker-compose.override.yml.example
+#
+# Copy this file to docker-compose.override.yml for local development.
+# This moves the cloudflared service behind a Docker Compose profile so it
+# does not start when you run `docker compose up` without a profile flag.
+#
+# Usage:
+#   cp docker-compose.override.yml.example docker-compose.override.yml
+#   docker compose up -d          # starts app and traefik only
+#   docker compose --profile production-only up -d  # starts all services
+#
+# In production, do NOT use this file -- docker-compose.yml runs cloudflared
+# unconditionally, which is the correct production behavior.
+
+services:
+  cloudflared:
+    profiles:
+      - production-only

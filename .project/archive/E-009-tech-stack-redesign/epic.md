@@ -1,7 +1,7 @@
 # E-009: Tech Stack Redesign -- Portable, Agent-Browsable, Cloudflare-Integrated
 
 ## Status
-`ACTIVE`
+`COMPLETED`
 
 ## Overview
 Decide and implement the right serving-layer stack for baseball-crawl: either fully native
@@ -155,8 +155,8 @@ complete, IDEA-001 should be marked DISCARDED with a reference to E-009.
 | E-009-04   | Cloudflare Tunnel + Zero Trust Access configuration (Option B) | DONE | E-009-02; conflicts with E-009-05 (no parallel) | software-engineer |
 | E-009-05   | Database seeding and reset workflow | DONE | E-009-02; conflicts with E-009-04 (no parallel) | data-engineer |
 | E-009-06   | Agent browsability verification | DONE | E-009-03 | software-engineer |
-| E-009-07   | Production deployment runbook | TODO | E-009-02, E-009-03, E-009-04, E-009-05 | software-engineer |
-| E-009-08   | CLAUDE.md and E-004 update | TODO | E-009-07 (run last; all prior stories must be DONE) | claude-architect |
+| E-009-07   | Production deployment runbook | DONE | E-009-02, E-009-03, E-009-04, E-009-05 | software-engineer |
+| E-009-08   | CLAUDE.md and E-004 update | DONE | E-009-07 (run last; all prior stories must be DONE) | claude-architect |
 
 ## Technical Notes
 
@@ -461,3 +461,14 @@ migrations/                 # D1 SQL schema migrations (existing)
   CLAUDE.md before editing. P3: Stories table reordered, OQ-10 resolved (E-025/E-026),
   E-009-02 DoD checkboxes fixed, AC-6/AC-8 scope clarified. Deferred: stale macOS paths
   in DONE research spikes (frozen historical records).
+- 2026-03-04: **Epic COMPLETED.** All 16 stories/spikes DONE (7 research spikes + 1 decision
+  record + 8 implementation stories). Option B (Docker + Cloudflare Access) selected and
+  fully implemented. Key deliverables: docker-compose.yml (app+traefik+cloudflared),
+  Dockerfile, FastAPI+Jinja2 app, SQLite with WAL mode, Cloudflare Tunnel+Zero Trust
+  config, database seeding/reset scripts, agent browsability via curl, production deployment
+  runbook (docs/production-deployment.md), docker-compose.override.yml.example. CLAUDE.md
+  and E-004 Technical Notes updated to reflect confirmed stack. Codex review applied: 5
+  remediation fixes (profile flag order, migration step order, health status clarity,
+  credential exposure, authenticated curl example). E-009-07 operator verification
+  (AC-3/4/5/6) deferred to user -- runbook has placeholder verification table.
+  No documentation impact beyond what E-009-08 already addressed.
