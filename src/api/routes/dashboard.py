@@ -81,12 +81,12 @@ async def team_stats(request: Request) -> Response:
     else:
         active_team_id = permitted_teams[0]
 
-    # AC-6: season defaults to current year
-    season = str(datetime.date.today().year)
+    # AC-6: season_id defaults to current year spring HS season
+    season_id = f"{datetime.date.today().year}-spring-hs"
 
     # Fetch batting stats and team display names in parallel threadpool calls
     players, team_infos = await _fetch_dashboard_data(
-        active_team_id, season, permitted_teams
+        active_team_id, season_id, permitted_teams
     )
 
     team_name = next(
@@ -95,7 +95,7 @@ async def team_stats(request: Request) -> Response:
     )
 
     logger.debug(
-        "Dashboard: team=%s season=%s players=%d", active_team_id, season, len(players)
+        "Dashboard: team=%s season_id=%s players=%d", active_team_id, season_id, len(players)
     )
 
     return templates.TemplateResponse(
@@ -114,19 +114,19 @@ async def team_stats(request: Request) -> Response:
 
 async def _fetch_dashboard_data(
     active_team_id: str,
-    season: str,
+    season_id: str,
     permitted_teams: list[str],
 ) -> tuple[list, list]:
     """Fetch batting stats and team display names concurrently.
 
     Args:
         active_team_id: The team_id whose stats to fetch.
-        season: The season year string.
+        season_id: The season slug (e.g. ``"2026-spring-hs"``).
         permitted_teams: All team_ids the user can access (for selector).
 
     Returns:
         Tuple of (players list, team_infos list).
     """
-    players = await run_in_threadpool(db.get_team_batting_stats, active_team_id, season)
+    players = await run_in_threadpool(db.get_team_batting_stats, active_team_id, season_id)
     team_infos = await run_in_threadpool(db.get_teams_by_ids, permitted_teams)
     return players, team_infos

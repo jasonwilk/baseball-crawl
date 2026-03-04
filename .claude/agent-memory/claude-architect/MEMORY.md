@@ -93,6 +93,10 @@ Only when a user request requires specialized capability that existing agents ca
 ## Epic History (Agent Ecosystem)
 - E-013 (COMPLETED 2026-03-02): Agent Buildout -- completed data-engineer and general-dev from stubs to full operational manuals, seeded memory directories for api-scout, baseball-coach, general-dev, and data-engineer, wired skill references into all agent definitions. Absorbed E-012 and E-014.
 
+## Domain Reference Documents
+- `docs/gamechanger-api.md` -- API spec (owned by api-scout)
+- `docs/gamechanger-stat-glossary.md` -- stat abbreviation data dictionary (owned by api-scout, created 2026-03-04). Referenced from: CLAUDE.md (Key Metrics), api-scout agent def + memory, data-engineer agent def + memory, general-dev agent def + memory, baseball-coach agent def + memory. Integration audit completed 2026-03-04.
+
 ## Known Hallucination Traps
 - `ghcr.io/devcontainers/features/apt:1` DOES NOT EXIST. The official devcontainers/features registry has no apt installer feature. Real apt features are from rocker-org and devcontainers-extra. See `.claude/rules/devcontainer.md` for correct identifiers.
 - General rule: always verify devcontainer feature identifiers against https://containers.dev/features before referencing them in rules or configs.

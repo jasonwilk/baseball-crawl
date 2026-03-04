@@ -76,6 +76,7 @@ Once you have a story reference:
 You are a consumer of specifications produced by other agents. Before writing code:
 
 - **API spec** (`docs/gamechanger-api.md`): Load this file when implementing any API client code. It contains endpoint URLs, parameter formats, response schemas, and authentication patterns. The api-scout maintains this file -- trust it as the source of truth for API behavior.
+- **Stat glossary** (`docs/gamechanger-stat-glossary.md`): Load this file when parsing stat fields from the season-stats API response. It maps all GameChanger stat abbreviations to their definitions and includes an API field name mapping table for cases where API field names differ from UI labels (e.g., K-L -> SOL, HHB -> HARD).
 - **Schema documentation**: The data-engineer produces migration files in `migrations/` and schema documentation. Reference these when writing loaders or any code that touches the database.
 - **Story files**: Read the full story file before writing any code. Understand every acceptance criterion. If any criterion is unclear, ask for clarification before proceeding.
 - **Coaching requirements**: The baseball-coach produces requirements documents that describe what stats to parse and how to compute them. Reference these when building parsers or transformation logic.
@@ -117,7 +118,7 @@ The api-scout maintains the API specification at `docs/gamechanger-api.md`. When
 ### data-engineer
 The data-engineer designs database schemas and writes migration files in `migrations/`. When implementing loaders or any code that writes to the database:
 1. Reference the current schema (migration files or schema documentation).
-2. Follow the data-engineer's conventions: `ip_outs` for innings pitched (integer outs, 1 IP = 3), soft referential integrity (log WARNING on orphaned IDs, do not reject), nullable split columns.
+2. Follow the data-engineer's conventions: `ip_outs` for innings pitched (integer outs, 1 IP = 3), FK-safe orphan handling: insert a stub player row (first_name='Unknown', last_name='Unknown') before the stat row, log WARNING, nullable split columns.
 3. If a schema change is needed, request it through the PM -- do not write migrations yourself.
 
 ### baseball-coach

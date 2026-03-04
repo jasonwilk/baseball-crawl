@@ -11,6 +11,7 @@ Run with:
 
 from __future__ import annotations
 
+import datetime
 import sqlite3
 import sys
 from pathlib import Path
@@ -28,6 +29,9 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from src.api.main import app  # noqa: E402
+
+# Derive season_id the same way the route does, so tests stay valid across years.
+_CURRENT_SEASON_ID = f"{datetime.date.today().year}-spring-hs"
 
 
 # ---------------------------------------------------------------------------
@@ -145,7 +149,7 @@ _SCHEMA_SQL = """
         id        INTEGER PRIMARY KEY AUTOINCREMENT,
         player_id TEXT NOT NULL,
         team_id   TEXT NOT NULL,
-        season    TEXT NOT NULL,
+        season_id TEXT NOT NULL,
         games     INTEGER,
         ab        INTEGER,
         h         INTEGER,
@@ -164,11 +168,11 @@ _SCHEMA_SQL = """
         vs_lhp_h  INTEGER,
         vs_rhp_ab INTEGER,
         vs_rhp_h  INTEGER,
-        UNIQUE(player_id, team_id, season)
+        UNIQUE(player_id, team_id, season_id)
     );
 """
 
-_SEED_SQL = """
+_SEED_SQL = f"""
     INSERT OR IGNORE INTO teams (team_id, name, level, is_owned) VALUES
         ('lsb-varsity-2026', 'LSB Varsity 2026', 'varsity', 1);
 
@@ -180,12 +184,12 @@ _SEED_SQL = """
         ('gc-p-005', 'Isaiah',  'Eagleheart');
 
     INSERT OR IGNORE INTO player_season_batting
-        (player_id, team_id, season, games, ab, h, bb, so) VALUES
-        ('gc-p-001', 'lsb-varsity-2026', '2026', 2, 6,  3, 2, 1),
-        ('gc-p-002', 'lsb-varsity-2026', '2026', 2, 8,  2, 1, 2),
-        ('gc-p-003', 'lsb-varsity-2026', '2026', 2, 8,  4, 0, 1),
-        ('gc-p-004', 'lsb-varsity-2026', '2026', 2, 6,  1, 2, 3),
-        ('gc-p-005', 'lsb-varsity-2026', '2026', 2, 7,  3, 0, 2);
+        (player_id, team_id, season_id, games, ab, h, bb, so) VALUES
+        ('gc-p-001', 'lsb-varsity-2026', '{_CURRENT_SEASON_ID}', 2, 6,  3, 2, 1),
+        ('gc-p-002', 'lsb-varsity-2026', '{_CURRENT_SEASON_ID}', 2, 8,  2, 1, 2),
+        ('gc-p-003', 'lsb-varsity-2026', '{_CURRENT_SEASON_ID}', 2, 8,  4, 0, 1),
+        ('gc-p-004', 'lsb-varsity-2026', '{_CURRENT_SEASON_ID}', 2, 6,  1, 2, 3),
+        ('gc-p-005', 'lsb-varsity-2026', '{_CURRENT_SEASON_ID}', 2, 7,  3, 0, 2);
 """
 
 

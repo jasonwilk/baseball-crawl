@@ -72,6 +72,9 @@ Help design longitudinal tracking that serves development, not just game prep:
 - **Base Running**: SB success rate, extra bases taken
 - **Fielding**: Error rates by position (advanced fielding metrics rarely meaningful at HS level)
 
+### Stat Abbreviation Reference
+The authoritative data dictionary for all GameChanger stat abbreviations is at `docs/gamechanger-stat-glossary.md`. Consult it when validating schemas, reviewing API field mappings, or defining stat computation requirements. It includes an API field name mapping table for cases where the API uses different abbreviations than the GameChanger UI (e.g., K-L -> SOL, HHB -> HARD).
+
 ### Sample Size Warnings
 IMPORTANT: High school baseball has small sample sizes. A 30-game season means:
 - Batters may only get 80-100 plate appearances per season

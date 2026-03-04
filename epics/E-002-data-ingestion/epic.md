@@ -1,7 +1,7 @@
 # E-002: GameChanger Data Ingestion Pipeline
 
 ## Status
-`READY`
+`ACTIVE`
 
 ## Overview
 Build the pipeline that crawls GameChanger API endpoints, stores raw JSON responses on disk, and loads normalized records into the SQLite database. When this epic is complete, coaches will have up-to-date game and player stats for their teams -- and their opponents -- persisted in a queryable database.
@@ -42,11 +42,11 @@ E-001 is COMPLETED (all stories DONE, archived 2026-03-03). The API spec at `doc
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-002-R-01 | Research: Discover game stats and player stats endpoints | TODO | None | - |
+| E-002-R-01 | Research: Discover game stats and player stats endpoints | DONE | None | - |
 | E-002-01 | Crawl team roster and write raw JSON | TODO | None | - |
 | E-002-02 | Crawl game schedule and game summaries, write raw JSON | TODO | E-002-01 | - |
 | E-002-03 | Crawl game stats (box score) and write raw JSON | BLOCKED | E-002-02, E-002-R-01 | - |
-| E-002-04 | Crawl player season stats and write raw JSON | BLOCKED | E-002-01, E-002-R-01 | - |
+| E-002-04 | Crawl player season stats and write raw JSON | TODO | E-002-01, E-002-R-01 | - |
 | E-002-05 | Crawl opponent team data for all scheduled games | TODO | E-002-02 | - |
 | E-002-06 | Load raw roster JSON into database | TODO | E-002-01, E-003-01 | - |
 | E-002-07a | Load raw game JSON into database | BLOCKED | E-002-03, E-003-01 | - |
@@ -62,7 +62,9 @@ The following endpoints are confirmed and available for crawl stories:
 - `GET /teams/{team_id}/game-summaries` -- returns scored game summaries with opponent_id, scores, game_status. Supports pagination.
 - `GET /teams/{team_id}/players` -- returns roster (works for opponent teams too via opponent_id)
 
-**NOT yet confirmed**: No per-game box score endpoint, no per-player stats endpoint, no team-level season stats endpoint. The game-summaries endpoint returns game-level scores and metadata but NOT per-player batting/pitching lines. Stories E-002-03 and E-002-04 are BLOCKED until api-scout confirms whether these endpoints exist (see E-002-R-01).
+**Confirmed 2026-03-04 (E-002-R-01 DONE)**: `GET /teams/{team_id}/season-stats` returns full per-player season batting, pitching, and fielding aggregates. Players are keyed by UUID; cross-reference with `/players` for names. Defense merges pitching and fielding -- use `GP:P` and `GP:F` to determine role. Full schema in `docs/gamechanger-api.md`.
+
+**NOT yet confirmed**: No per-game box score endpoint. The game-summaries endpoint returns game-level scores and metadata but NOT per-player batting/pitching lines. Story E-002-03 remains BLOCKED. To discover the box-score endpoint, user must capture traffic from a specific completed game's detail page on `web.gc.com`.
 
 ### Schema Table Names (from E-003-01)
 Load stories must use the table names defined in E-003-01:
@@ -111,9 +113,9 @@ owned_teams:
 Load stories (E-002-06, E-002-07a, E-002-07b) depend on the database schema being established in E-003-01. The crawl stories (E-002-01 through E-002-05) can proceed independently of E-003.
 
 ## Open Questions
-- **CRITICAL (E-002-R-01)**: Does GameChanger expose per-game box score data (per-player batting/pitching lines)? The game-summaries endpoint returns scores and game_status but NOT player stats. A separate endpoint (e.g., `/games/{game_id}/stats` or similar) may exist but has not been captured yet.
-- **CRITICAL (E-002-R-01)**: Does GameChanger expose per-player or per-team season aggregate stats? No such endpoint has been discovered.
-- Are all opponent team stats visible, or only stats from games where our team was involved? (The `/players` endpoint works with opponent team UUIDs -- confirmed. Stats endpoints are unknown.)
+- **CRITICAL**: Does GameChanger expose per-game box score data (per-player batting/pitching lines)? The game-summaries endpoint returns scores and game_status but NOT player stats. A separate endpoint (e.g., `/games/{game_id}/stats` or similar) may exist but has not been captured yet. To discover it, user must capture browser traffic from a specific completed game's detail page. (E-002-R-01 did not resolve this -- only team season stats were captured.)
+- **RESOLVED (2026-03-04)**: Season aggregate stats endpoint confirmed. `GET /teams/{team_id}/season-stats` returns full per-player batting, pitching, and fielding season aggregates. E-002-04 unblocked.
+- Does the season-stats endpoint work for opponent team UUIDs, or only for teams the authenticated user belongs to? Not yet tested.
 - What seasons of historical data are available? (One season back? Multiple?)
 - Does GameChanger provide play-by-play data, or only aggregate game stats?
 
@@ -135,3 +137,4 @@ Load stories (E-002-06, E-002-07a, E-002-07b) depend on the database schema bein
   - E-002-08 dependencies trimmed: only depends on confirmed-endpoint crawlers (01, 02, 05). BLOCKED crawlers (03, 04) are not required for orchestrator MVP.
   - No baseball-coach consultation required -- this epic is pure data pipeline infrastructure. Coaching stat requirements are expressed via E-003 schema, which E-002 loaders consume.
   - No api-scout consultation performed yet for stats endpoints -- captured as E-002-R-01 research spike.
+- 2026-03-04: E-002-R-01 DONE. Season-stats endpoint confirmed: `GET /teams/{team_id}/season-stats` returns full per-player batting, pitching, and fielding season aggregates. Full schema documented in `docs/gamechanger-api.md` (Schema: season-stats). E-002-04 unblocked (BLOCKED -> TODO). E-002-03 remains BLOCKED -- no per-game box-score endpoint was captured from the team stats page traffic. Next step: user must capture traffic from a specific game's detail page to discover the per-game endpoint.

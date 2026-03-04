@@ -56,7 +56,7 @@ def get_connection() -> sqlite3.Connection:
 
 def get_team_batting_stats(
     team_id: str = "lsb-varsity-2026",
-    season: str = "2026",
+    season_id: str = "2026-spring-hs",
 ) -> list[dict[str, Any]]:
     """Return season batting stats for all players on a team.
 
@@ -65,8 +65,9 @@ def get_team_batting_stats(
     by player last name.
 
     Args:
-        team_id: The team identifier to query.  Defaults to LSB Varsity 2026.
-        season:  The season year string.  Defaults to ``"2026"``.
+        team_id:   The team identifier to query.  Defaults to LSB Varsity 2026.
+        season_id: The season slug (e.g. ``"2026-spring-hs"``).  Defaults to
+                   ``"2026-spring-hs"``.
 
     Returns:
         List of dicts with keys: name, ab, h, bb, so.
@@ -82,13 +83,13 @@ def get_team_batting_stats(
             psb.so
         FROM player_season_batting psb
         JOIN players p ON p.player_id = psb.player_id
-        WHERE psb.team_id = ? AND psb.season = ?
+        WHERE psb.team_id = ? AND psb.season_id = ?
         ORDER BY p.last_name
     """
     try:
         with closing(get_connection()) as conn:
             conn.row_factory = sqlite3.Row
-            cursor = conn.execute(query, (team_id, season))
+            cursor = conn.execute(query, (team_id, season_id))
             rows = cursor.fetchall()
         return [dict(row) for row in rows]
     except sqlite3.Error:

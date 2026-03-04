@@ -24,6 +24,7 @@ See CLAUDE.md Code Style section and `.claude/rules/python-style.md`.
 - `data/` -- local dev data outputs, SQLite database (`data/app.db`)
 - `docs/` -- API specs and documentation
 - `docs/gamechanger-api.md` -- THE single source of truth for GameChanger API knowledge
+- `docs/gamechanger-stat-glossary.md` -- authoritative data dictionary for all GameChanger stat abbreviations (batting, pitching, fielding, catcher, positional innings). Includes API field name mapping table for abbreviations that differ between UI and API. Reference when parsing season-stats response fields.
 
 ### Project Management
 - `epics/` -- active epics and story files
@@ -41,7 +42,7 @@ See CLAUDE.md HTTP Request Discipline section.
 
 ## Database Conventions (from data-engineer)
 - `ip_outs`: Innings pitched as integer outs (1 IP = 3 outs). Always.
-- Soft referential integrity: log WARNING on orphaned player IDs, do not reject
+- FK-safe orphan handling: when a player_id is not in `players`, insert a stub row (first_name='Unknown', last_name='Unknown') before writing the stat row. Log a WARNING for operator backfill.
 - Splits: nullable columns (home_obp, away_obp, vs_lhp_obp, vs_rhp_obp), not separate rows
 - Local dev DB path: `data/app.db`
 

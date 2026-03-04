@@ -3,8 +3,8 @@
 ## Numbering State
 - Next available epic number: E-039
 - Epics created: E-001 through E-038 (E-001, E-006, E-007, E-008, E-010, E-011, E-012, E-013, E-014, E-015, E-016, E-017, E-018, E-019, E-020, E-021, E-022, E-024, E-025, E-026, E-027, E-028, E-029, E-030, E-031, E-032, E-033, E-034, E-035, E-036 archived)
-- Next available idea number: IDEA-007
-- Ideas created: IDEA-001 through IDEA-006
+- Next available idea number: IDEA-008
+- Ideas created: IDEA-001 through IDEA-007
 
 ## Project Context
 - Project: baseball-crawl -- GameChanger API -> database -> coaching dashboard
@@ -19,7 +19,6 @@
 - E-004 (DRAFT): Coaching Dashboard -- no stories yet, blocked on E-002 + E-003. Still references old Cloudflare stack (E-009-08 will fix).
 - E-005 (ACTIVE): HTTP Request Discipline -- 4/5 DONE. E-005-03 TODO (blocker E-001-02 now DONE -- ready for dispatch).
 - E-009 (ACTIVE): Tech Stack Redesign -- 02/03/04/05/06 DONE. 07 TODO (production runbook), 08 TODO (CLAUDE.md update, blocked on 07). All research spikes DONE.
-- E-037 (READY): Codex Review Remediation -- 4 stories, all TODO, no deps between them. 01=fix dashboard query column+season_id (code), 02=fix E-002 loader FK conflict in ACs (spec), 03=add E-002-08 soft dep (spec), 04=update context-layer refs to stub-player pattern (context-layer). All dispatchable now. 01 routes to general-purpose, 02+03 route to general-purpose, 04 routes to claude-architect.
 ## Archived Epics
 - E-023 (COMPLETED): Auth and Team-Level Permissions -- all 5 stories DONE. Magic link + passkey auth, team-scoped dashboard, admin CRUD. 385 tests. Key files: migrations/003_auth.sql, src/api/auth.py, src/api/routes/auth.py, src/api/routes/admin.py, src/api/email.py. Added webauthn + python-multipart to requirements.txt. E-003-02 cross-epic dependency on E-023-01 is now satisfied.
 - E-006 (ABANDONED): PII Protection -- demoted to IDEA-004. Revisit when E-002 produces real data.
@@ -52,6 +51,7 @@
 - E-001 (COMPLETED): GameChanger API Foundation -- credential parser, API client, endpoint docs, smoke test. All 4 stories DONE. Archived 2026-03-03.
 - E-035 (COMPLETED): Context Layer Staleness Fixes -- fixed P1 (misleading agent count, stale deployment details, wrong budget numbers), P2 (stale references in hooks/skills/rules), P3 (memory file duplication). 10 context-layer files updated. No follow-up work.
 - E-036 (COMPLETED): Fix Codex Code-Review Wrapper -- `codex review` cannot combine [PROMPT] with diff-scope flags. Replaced with `codex exec --ephemeral -` + assembled rubric+diff prompt. User-facing interface unchanged. No follow-up work.
+- E-037 (COMPLETED): Codex Review Remediation -- 4 stories. Fixed dashboard query (season->season_id column+format), rewrote E-002 loader orphan-player ACs to stub-player pattern, added E-002-06 soft dep to E-002-08, updated 6 context-layer files from "soft referential integrity" to FK-safe stub-player language. 385 tests pass. No follow-up work.
 - E-038 (COMPLETED): Fix PII Pre-Commit Hook Silent Failure -- changed core.hooksPath from absolute to relative path (.githooks). Added auto-setup to devcontainer postCreateCommand. No follow-up work.
 
 ## Key Architectural Decisions
@@ -83,6 +83,7 @@
 | IDEA-004 | Hard Data Boundaries and PII Protection | PROMOTED | 2026-03-02 | Promoted to E-019. Consolidated 6 stories to 4, added credential scanning. |
 | IDEA-005 | Directory-Scoped Intent Nodes at src/ Module Boundaries | CANDIDATE | 2026-06-01 | Phase 2 of abandoned E-010. Promote when E-002+E-003 complete. |
 | IDEA-006 | Epic Lanes Convention for Multi-Workstream Epics | CANDIDATE | 2026-06-01 | Formalize lane-style Technical Notes headers. Promote when 6+ story epics are common AND agents report TN scoping confusion. |
+| IDEA-007 | Dispatch Coordinator Guardrail | CANDIDATE | 2026-06-02 | Prevent team-lead-as-PM bypass in dispatch. Root cause: E-037 team lead created dispatch team directly instead of spawning PM first. Promote at next multi-story dispatch. |
 
 ## Key Workflow Contract
 - Routing model: user -> PM -> implementing agent (no orchestrator; removed in E-030)

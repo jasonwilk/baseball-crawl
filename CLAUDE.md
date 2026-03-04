@@ -78,6 +78,8 @@ These are the statistics and dimensions that matter for coaching decisions:
 - **Opponents**: Lineup patterns and changes, tendencies, roster composition
 - **Longitudinal**: Player development across seasons, teams, and levels
 
+The authoritative data dictionary mapping all GameChanger stat abbreviations to their definitions is at `docs/gamechanger-stat-glossary.md`. It includes batting, pitching, fielding, catcher, and positional innings stats, plus an API field name mapping table for cases where the API uses different abbreviations than the UI.
+
 ## GameChanger API
 - Credentials have short lifespans -- rotation is frequent
 - NEVER log, commit, display, or hardcode credentials in source code
@@ -280,6 +282,8 @@ All routed work follows this contract:
 4. **"Ready for dev" = `Status: TODO` in a `READY` epic.** No story file means no implementation work begins.
 5. **PM dispatches via Agent Teams.** PM joins every dispatch team as the standing coordinator -- managing story statuses, verifying acceptance criteria, and dispatching newly unblocked stories as predecessors complete. See `/.claude/rules/dispatch-pattern.md`.
 6. **Implementing agents require a story reference.** Must receive a story file path or story ID before beginning any task.
+
+**Team Lead Boundary**: The team lead (user-facing agent) MUST NOT create dispatch teams, spawn implementers, or update story/epic statuses. On dispatch requests, the team lead spawns PM and relays the request -- PM coordinates from there. See `/.claude/rules/dispatch-pattern.md`.
 
 **Enforcement Boundary**: The user always retains override authority to invoke any agent directly; this contract governs the normal orchestrated path.
 

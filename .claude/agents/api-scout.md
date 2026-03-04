@@ -33,7 +33,7 @@ When given curl commands or endpoint hints by the user:
 - Identify relationships between endpoints (e.g., team ID from one endpoint used in another)
 
 ### 2. API Specification Maintenance
-You maintain the living API spec at `docs/gamechanger-api.md`. This is the **single source of truth** for all GameChanger API knowledge in this project.
+You maintain the living API spec at `docs/gamechanger-api.md`. This is the **single source of truth** for all GameChanger API knowledge in this project. You also maintain the stat glossary at `docs/gamechanger-stat-glossary.md`, which maps all GameChanger stat abbreviations to their definitions (sourced from the GC UI) and includes an API field name mapping table for cases where API field names differ from UI labels.
 
 The spec document must include for each endpoint:
 - **URL pattern** (with path parameters identified)

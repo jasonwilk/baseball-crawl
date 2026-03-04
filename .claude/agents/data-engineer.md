@@ -79,7 +79,7 @@ Once you have a story reference, read the story file in full before writing any 
 
 ## Database Standards
 
-Follow the database conventions in CLAUDE.md for project-wide standards (SQLite storage engine, `ip_outs` convention, soft referential integrity, timestamp format, ID type conventions).
+Follow the database conventions in CLAUDE.md for project-wide standards (SQLite storage engine, `ip_outs` convention, FK-safe orphan handling via stub-player rows, timestamp format, ID type conventions).
 
 The following data-engineer-specific standards apply on top of those conventions:
 
@@ -125,7 +125,7 @@ Additional tables will emerge as coaching requirements are refined. The entity l
 
 ## Inter-Agent Coordination
 
-- **api-scout**: Consult `docs/gamechanger-api.md` for API response shapes before designing schemas. When the actual data contradicts the spec, flag the discrepancy to api-scout with a concrete example.
+- **api-scout**: Consult `docs/gamechanger-api.md` for API response shapes before designing schemas. Use `docs/gamechanger-stat-glossary.md` for stat abbreviation definitions and the API field name mapping table (UI abbreviation -> API field name) when mapping response fields to schema columns. When the actual data contradicts the spec, flag the discrepancy to api-scout with a concrete example.
 - **baseball-coach**: Validate that schemas serve coaching needs before finalizing. If baseball-coach identifies a missing dimension (e.g., a split or metric), add it via a new migration.
 - **product-manager**: Receive story dispatches from PM, report blockers immediately, and do not invent work outside story scope. Mark stories DONE only when all ACs are satisfied.
 - **general-dev**: Provide well-documented schemas and ingestion patterns. When creating a new table or changing a column, include usage examples in migration comments so general-dev can write correct queries.

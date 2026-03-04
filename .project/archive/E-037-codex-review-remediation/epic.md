@@ -1,7 +1,7 @@
 # E-037: Codex Review Remediation
 
 ## Status
-`READY`
+`COMPLETED`
 
 ## Overview
 Fix bugs and spec inconsistencies discovered by Codex code review of commits 321c592 (E-003 schema) and a7bc374 (E-002 refinement). Two code bugs silently break the dashboard on migrated databases. Two spec bugs make loader stories impossible to implement under FK enforcement. One minor spec clarification improves dependency clarity. Stale "soft referential integrity" language in context-layer files is corrected to match the actual FK-enforced schema.
@@ -43,10 +43,10 @@ No expert consultation required -- these are straightforward bug fixes and spec 
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-037-01 | Fix dashboard query column name and season_id format | TODO | None | - |
-| E-037-02 | Fix E-002 loader stories FK conflict in orphan-player ACs | TODO | None | - |
-| E-037-03 | Add E-002-06 soft dependency to E-002-08 | TODO | None | - |
-| E-037-04 | Update context-layer references from "soft referential integrity" to stub-player pattern | TODO | None | - |
+| E-037-01 | Fix dashboard query column name and season_id format | DONE | None | general-dev |
+| E-037-02 | Fix E-002 loader stories FK conflict in orphan-player ACs | DONE | None | general-dev |
+| E-037-03 | Add E-002-06 soft dependency to E-002-08 | DONE | None | general-dev |
+| E-037-04 | Update context-layer references from "soft referential integrity" to stub-player pattern | DONE | None | claude-architect |
 
 ## Technical Notes
 
@@ -79,3 +79,10 @@ None.
 
 ## History
 - 2026-03-03: Created from Codex review findings. PM validated 4 valid, 1 partially valid, 1 false positive. Set to READY.
+- 2026-03-04: All 4 stories dispatched in parallel (no inter-story dependencies). All completed and verified.
+  - E-037-01 (DONE): Fixed `psb.season` -> `psb.season_id` in db.py query, changed season default from `"2026"` to `f"{year}-spring-hs"` in dashboard route. Updated 2 test files. 385 tests pass.
+  - E-037-02 (DONE): Rewrote AC-4 in E-002-07a and E-002-07b from impossible "soft write" to FK-safe stub-player pattern. Updated DoD test descriptions.
+  - E-037-03 (DONE): Added soft dependency note for E-002-06 to E-002-08 Dependencies section.
+  - E-037-04 (DONE): Updated 6 context-layer files (2 agent defs, 4 agent memory files) from "soft referential integrity" to stub-player pattern. Grep verification confirms zero stale matches. Also updated ABANDONED E-002-07.md.
+  - No documentation impact (no new features, no architecture changes, no schema changes, no new agents).
+  - Epic set to COMPLETED and archived.

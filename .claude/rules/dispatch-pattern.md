@@ -5,6 +5,25 @@ paths:
 
 # Dispatch Pattern -- Agent Teams
 
+## CRITICAL: Team Lead Dispatch Boundary
+
+**The team lead (user-facing agent) MUST NOT act as dispatch coordinator.** When the user requests epic or story execution, the team lead's only job is:
+
+1. **Spawn the product-manager (PM) as a teammate.**
+2. **Relay the user's request to the PM verbatim.**
+3. **Step back and let the PM coordinate.**
+
+The team lead MUST NOT:
+- Create dispatch teams or spawn implementing agents directly
+- Mark story statuses (`IN_PROGRESS`, `DONE`, etc.)
+- Update epic tables or story files
+- Verify acceptance criteria
+- Make routing decisions about which agent handles which story
+
+All of these are the PM's responsibilities. If the team lead performs any of them, it is a routing violation -- even if the end result is correct. The PM exists precisely to own this coordination, and bypassing it creates state management gaps and accountability confusion.
+
+**If the PM is unavailable or spawn fails**, follow the Dispatch Failure Protocol in `workflow-discipline.md`: report to the user and ask how to proceed. Do not improvise.
+
 ## How Dispatch Works
 
 This project uses **Agent Teams** (`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`) for dispatching stories. Teams let any agent spawn teammates, who can in turn spawn other teammates -- no nesting limits.

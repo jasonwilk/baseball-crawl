@@ -10,6 +10,10 @@ Lincoln Standing Bear High School baseball program:
 - Jason is the system operator; coaching staff are the end consumers
 - Coaches see dashboards and reports -- they do not interact with the system directly
 
+## Key Reference Documents
+
+- **Stat glossary**: `docs/gamechanger-stat-glossary.md` -- authoritative data dictionary mapping all GameChanger stat abbreviations to definitions (batting, pitching, fielding, catcher, positional innings). Includes API field name mapping table for cases where API abbreviations differ from UI labels (e.g., K-L -> SOL, HHB -> HARD, SAC -> SHB). Use this when validating schemas or consulting on field mappings.
+
 ## Established Stat Priorities
 
 ### Batting (ranked)
@@ -75,5 +79,5 @@ These are the actual decisions coaches make that this system should support:
 Decisions established with data-engineer:
 - Innings pitched stored as integer outs (ip_outs): 1 IP = 3 outs. Always.
 - Splits stored as nullable columns (home_obp, away_obp, vs_lhp_obp, vs_rhp_obp), not separate rows
-- Soft referential integrity: orphaned player IDs in stats tables accepted with WARNING, not rejected
+- FK-safe orphan handling: when a player_id is not in `players`, insert a stub row (first_name='Unknown', last_name='Unknown') before writing the stat row. Log a WARNING for operator backfill.
 - Key entities: Team, Player, PlayerTeamSeason, Game, Lineup, PlateAppearance, PitchingAppearance

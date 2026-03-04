@@ -2,7 +2,7 @@
 
 This document is the single source of truth for GameChanger API knowledge. It is maintained by the `api-scout` agent and updated whenever new endpoints or behaviors are confirmed from live traffic captures.
 
-**Last updated:** 2026-03-01
+**Last updated:** 2026-03-04
 **Status of each endpoint is noted inline.**
 
 ---
@@ -20,8 +20,10 @@ This document is the single source of truth for GameChanger API knowledge. It is
    - [GET /teams/{team_id}/game-summaries](#get-teamsteam_idgame-summaries)
    - [GET /teams/{team_id}/players](#get-teamsteam_idplayers)
    - [GET /teams/{team_id}/video-stream/assets](#get-teamsteam_idvideo-streamassets)
+   - [GET /teams/{team_id}/season-stats](#get-teamsteam_idseason-stats)
 7. [Response Schemas](#response-schemas)
    - [game-summaries](#schema-game-summaries)
+   - [season-stats](#schema-season-stats)
 8. [Key Observations](#key-observations)
 9. [Header Quick Reference](#header-quick-reference)
 10. [Notes for Implementers](#notes-for-implementers)
@@ -404,6 +406,64 @@ A list of video asset metadata objects. Response schema not yet documented — u
 
 ---
 
+### GET /teams/{team_id}/season-stats
+
+**Status:** CONFIRMED LIVE -- 200 OK, 10+ player records returned. Discovered 2026-03-04.
+
+Returns season-aggregate statistics for all players on a team. Includes per-player batting, pitching, and fielding stats, team aggregate totals, and hot/cold streak data.
+
+```
+GET https://api.team-manager.gc.com/teams/{team_id}/season-stats
+```
+
+#### Path Parameters
+
+| Parameter  | Description          |
+|------------|----------------------|
+| `team_id`  | Team UUID            |
+
+#### Query Parameters
+
+None observed. No pagination headers were sent or returned -- the response appears to be a single object containing all players.
+
+#### Headers
+
+```
+gc-token: {GC_TOKEN}
+gc-device-id: {GC_DEVICE_ID}
+gc-app-name: web
+Accept: application/vnd.gc.com.team_season_stats+json; version=0.2.0
+Content-Type: application/vnd.gc.com.none+json; version=undefined
+gc-user-action: data_loading:team_stats
+gc-user-action-id: {UUID}
+cache-control: no-cache
+pragma: no-cache
+priority: u=1, i
+origin: https://web.gc.com
+sec-fetch-dest: empty
+sec-fetch-mode: cors
+sec-fetch-site: same-site
+DNT: 1
+Referer: https://web.gc.com/
+User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36
+```
+
+**New gc-user-action value:** `data_loading:team_stats` -- not seen on any previously documented endpoint.
+
+#### Response
+
+See [Schema: season-stats](#schema-season-stats).
+
+#### Known Limitations
+
+- **No player names in response** -- players are keyed by UUID only. Cross-reference with `/teams/{team_id}/players` to resolve names.
+- **Season scope is unclear** -- no date range or season year is embedded in the response. Observed GP values of 84-92 suggest a full season. Whether season-scoping query parameters exist is unknown.
+- **Defense merges pitching and fielding** -- a player who both pitches and plays the field will have pitcher stats (ERA, IP, K, BB) and fielder stats (PO, A, E, `IP:POS`) combined in the same `defense` object.
+- **Many fields consistently 0** -- approximately 15+ fields (`CH%`, `OS%`, `FB%`, `SL%`, `KC%`, `KB%`, `CB%`, `DC%`, `DB%`, `RB%`, `SC%`, `CT%`, `GITP`, `OSSM`, `OSSW`) were 0 for every player in this capture. May be for future features or other sports.
+- **Opponent teams untested** -- unknown whether this endpoint returns stats when called with an opponent's team UUID.
+
+---
+
 ## Response Schemas
 
 ### Schema: game-summaries
@@ -474,6 +534,293 @@ Returned by `GET /teams/{team_id}/game-summaries`. Each element in the array rep
 
 ---
 
+### Schema: season-stats
+
+Returned by `GET /teams/{team_id}/season-stats`. The response is a single JSON object (not an array).
+
+For authoritative stat abbreviation definitions sourced from the GameChanger UI, see [`docs/gamechanger-stat-glossary.md`](gamechanger-stat-glossary.md).
+
+```json
+{
+  "id": "<team_uuid>",
+  "team_id": "<team_uuid>",
+  "stats_data": {
+    "players": {
+      "<player_uuid>": {
+        "stats": {
+          "offense": { ... },
+          "defense": { ... },
+          "general": { "GP": 84 }
+        }
+      }
+    },
+    "streaks": {
+      "<player_uuid>": {
+        "streak_H": {
+          "offense": { ... },
+          "defense": { ... },
+          "general": { "GP": 2 }
+        }
+      }
+    },
+    "stats": {
+      "offense": { ... },
+      "defense": { ... },
+      "general": { "GP": 92 }
+    }
+  }
+}
+```
+
+#### Top-Level Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | UUID | Team UUID (same as `team_id`) |
+| `team_id` | UUID | Team UUID |
+| `stats_data.players` | object | Per-player stats keyed by player UUID |
+| `stats_data.streaks` | object | Hot/cold streak data keyed by player UUID. Only players currently on a streak are included. |
+| `stats_data.stats` | object | Team aggregate stats (same structure as a player's stats) |
+
+#### Offense (Batting) Fields
+
+These fields appear in `stats.offense` for both individual players and the team aggregate.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `AB` | int | At bats |
+| `PA` | int | Plate appearances |
+| `H` | int | Hits |
+| `1B` | int | Singles |
+| `2B` | int | Doubles |
+| `3B` | int | Triples |
+| `HR` | int | Home runs |
+| `TB` | int | Total bases |
+| `XBH` | int | Extra base hits |
+| `BB` | int | Walks |
+| `SO` | int | Strikeouts |
+| `SOL` | int | Strikeouts looking |
+| `HBP` | int | Hit by pitch |
+| `SHB` | int | Sacrifice bunts |
+| `SHF` | int | Sacrifice flies |
+| `GIDP` | int | Grounded into double play |
+| `ROE` | int | Reached on error |
+| `FC` | int | Fielder's choice |
+| `CI` | int | Catcher's interference |
+| `PIK` | int | Picked off |
+| `R` | int | Runs scored |
+| `RBI` | int | Runs batted in |
+| `GSHR` | int | Grand slam home runs |
+| `2OUTRBI` | int | RBI with 2 outs |
+| `SB` | int | Stolen bases |
+| `CS` | int | Caught stealing |
+| `LOB` | int | Left on base |
+| `3OUTLOB` | int | Left on base with 3 outs |
+| `OB` | int | Times on base |
+| `AVG` | float | Batting average |
+| `OBP` | float | On-base percentage |
+| `SLG` | float | Slugging percentage |
+| `OPS` | float | On-base plus slugging |
+| `BABIP` | float | Batting average on balls in play |
+| `BA/RISP` | float | Batting average with runners in scoring position |
+| `HRISP` | int | Hits with RISP |
+| `ABRISP` | int | At bats with RISP |
+| `SB%` | float | Stolen base success rate |
+| `AB/HR` | float | At bats per home run. **Present only when HR > 0** |
+| `QAB` | int | Quality at bats |
+| `QAB%` | float | Quality at bat percentage |
+| `BB/K` | float | Walk to strikeout ratio |
+| `PS` | int | Pitches seen |
+| `PS/PA` | float | Pitches per plate appearance |
+| `PA/BB` | float | Plate appearances per walk |
+| `SW` | int | Swings |
+| `SW%` | float | Swing percentage |
+| `SM` | int | Swinging misses |
+| `SM%` | float | Swinging miss percentage |
+| `C%` | float | Contact percentage |
+| `BABIP` | float | BABIP |
+| `GB` | int | Ground balls |
+| `GB%` | float | Ground ball percentage |
+| `FLB` | int | Fly balls |
+| `FLB%` | float | Fly ball percentage |
+| `HARD` | int | Hard contact count |
+| `WEAK` | int | Weak contact count |
+| `FULL` | int | Full count plate appearances |
+| `2STRIKES` | int | Plate appearances reaching a 2-strike count |
+| `2S+3` | int | Plate appearances where a 2-strike count went 3+ pitches |
+| `2S+3%` | float | Percentage form of 2S+3 |
+| `6+` | int | Plate appearances lasting 6+ pitches |
+| `6+%` | float | Percentage of PAs going 6+ pitches |
+| `INP` | int | In play count (balls put in play) |
+| `LND` | int | Line drives |
+| `LND%` | float | Line drive percentage |
+| `LOBB` | int | Leadoff base on balls (batting context -- times batter drew a leadoff walk) |
+| `GP` | int | Games played |
+| `TS` | int | Total swings |
+
+#### Defense (Pitching) Fields
+
+These fields in `stats.defense` reflect pitching performance. All apply to the player's innings as a pitcher.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `ERA` | float | Earned run average |
+| `IP` | float | Innings pitched |
+| `ER` | int | Earned runs |
+| `H` | int | Hits allowed |
+| `BB` | int | Walks allowed |
+| `SO` | int | Strikeouts |
+| `HR` | int | Home runs allowed |
+| `BK` | int | Balks |
+| `WP` | int | Wild pitches |
+| `HBP` | int | Hit batters |
+| `GS` | int | Games started (pitching) |
+| `SVO` | int | Save opportunities |
+| `WHIP` | float | Walks plus hits per inning pitched |
+| `FIP` | float | Fielding independent pitching |
+| `BAA` | float | Batting average against |
+| `K/G` | float | Strikeouts per 9 innings |
+| `K/BB` | float | Strikeout to walk ratio |
+| `K/BF` | float | Strikeouts per batter faced |
+| `BB/INN` | float | Walks per inning |
+| `BF` | int | Batters faced |
+| `GO` | int | Ground outs recorded (pitching) |
+| `AO` | int | Air outs recorded (pitching) |
+| `GO/AO` | float | Ground out to air out ratio |
+| `P/BF` | float | Pitches per batter faced |
+| `P/IP` | float | Pitches per inning pitched |
+| `#P` | int | Total pitches thrown |
+| `S%` | float | Strike percentage |
+| `LOO` | int | Opponent runners left on base (pitcher's LOB) |
+| `LOO%` | float | LOO percentage |
+| `LOB%` | float | Opponent LOB percentage |
+| `LOB` | int | Opponent left on base |
+| `0BBINN` | int | Innings without a walk |
+| `123INN` | int | 1-2-3 innings retired |
+| `123INN%` | float | Percentage of innings that were 1-2-3 |
+| `FPS` | int | First pitch strikes thrown |
+| `FPS%` | float | First pitch strike percentage |
+| `FPSO` | int | Batters retired after first pitch strike |
+| `FPSO%` | float | Percentage of FPS leading to out |
+| `FPSH` | int | Batters reaching hit after first pitch strike |
+| `FPSH%` | float | Percentage of FPS leading to hit |
+| `FPSW` | int | Walks issued after first pitch strike |
+| `FPSW%` | float | Percentage of FPS leading to walk |
+| `LBFPN` | int | Last batter faced pitch number (cumulative pitch count at last batter) |
+| `SB` | int | Stolen bases allowed (pitcher) |
+| `CS` | int | Caught stealing charged to pitcher |
+| `SB%` | float | Opponent stolen base success rate (pitcher) |
+| `PIK` | int | Pickoffs |
+| `BBS` | int | Walks that score (base on balls that result in a run scoring) |
+| `LOBBS` | int | Leadoff walk that scored (1st batter of inning walked and later scored) |
+| `SW` | int | Swings against (pitching) |
+| `SM` | int | Swinging misses induced |
+| `SM%` | float | Swinging miss percentage (pitching) |
+| `GB` | int | Ground balls allowed |
+| `FLB` | int | Fly balls allowed |
+| `FLY` | int | Air balls (fly balls + line drives?) |
+| `GB%` | float | Ground ball percentage allowed |
+| `FLB%` | float | Fly ball percentage allowed |
+| `FLY%` | float | Fly ball percentage |
+| `HARD` | int | Hard contact hits allowed |
+| `HARD%` | float | Hard contact hit percentage |
+| `WEAK` | int | Weak contact hits allowed |
+| `WEAK%` | float | Weak contact percentage |
+| `BABIP` | float | BABIP against (pitching) |
+| `BA/RISP` | float | Batting average against with RISP |
+| `HRISP` | int | Hits allowed with RISP |
+| `ABRISP` | int | At bats against with RISP |
+| `2STRIKES` | int | Batters reaching a 2-strike count (pitching) |
+| `FULL` | int | Full count at bats against |
+| `1ST2OUT` | int | Innings with first 2 batters out |
+| `1ST2OUT%` | float | Percentage of innings with first 2 batters out |
+| `LND` | int | Line drives allowed |
+| `LND%` | float | Line drive percentage allowed |
+| `LOBB` | int | Leadoff walk allowed (1st batter of inning walked) |
+| `<3` | int | Batters retired in fewer than 3 pitches |
+| `<3%` | float | Percentage of batters retired in under 3 pitches |
+| `<13` | int | Innings of 13 pitches or fewer |
+| `<13%` | float | Percentage of innings with 13 pitches or fewer |
+| `DP:P` | int | Double plays turned as pitcher |
+| `TB` | int | Total bases allowed |
+| `R` | int | Runs allowed |
+| `AB` | int | At bats against |
+| `2B` | int | Doubles allowed |
+| `3B` | int | Triples allowed |
+| `1B` | int | Singles allowed |
+| `FC` | int | Fielder's choices against |
+| `SHB` | int | Sacrifice bunts against |
+| `SHF` | int | Sacrifice flies against |
+| `CI` | int | Catcher's interference against |
+| `SOL` | int | Strikeouts looking (from pitcher's view) |
+| `GP:P` | int | Games played as pitcher |
+
+#### Defense (Fielding) Fields
+
+Fielding stats co-reside in `stats.defense` alongside pitching stats.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `PO` | int | Putouts |
+| `A` | int | Assists |
+| `E` | int | Errors |
+| `TC` | int | Total chances |
+| `FPCT` | float | Fielding percentage |
+| `DP` | int | Double plays |
+| `IF` | int | Infield fly outs |
+| `GP:F` | int | Games played in the field (non-pitcher) |
+| `GP:C` | int | Games played as catcher |
+| `outs` | int | Total outs recorded across all positions |
+| `outs:F` | int | Outs recorded while playing field positions |
+| `outs:C` | int | Outs recorded while catching |
+| `outs-P` | int | Outs recorded while pitching |
+| `outs-1B` | int | Outs recorded while playing 1B |
+| `outs-2B` | int | Outs recorded while playing 2B |
+| `outs-3B` | int | Outs recorded while playing 3B |
+| `outs-SS` | int | Outs recorded while playing SS |
+| `outs-LF` | int | Outs recorded while playing LF |
+| `outs-CF` | int | Outs recorded while playing CF |
+| `outs-RF` | int | Outs recorded while playing RF |
+| `outs-C` | int | Outs recorded while catching |
+| `IP:1B` | float | Innings played at 1B (fractional thirds) |
+| `IP:2B` | float | Innings played at 2B |
+| `IP:3B` | float | Innings played at 3B |
+| `IP:SS` | float | Innings played at SS |
+| `IP:LF` | float | Innings played at LF |
+| `IP:CF` | float | Innings played at CF |
+| `IP:RF` | float | Innings played at RF |
+| `IP:F` | float | Total innings played in field positions |
+| `IC:C` | float | Innings caught (catcher) |
+| `CI` | int | Catcher's interference |
+| `CI:C` | int | Catcher's interference committed as catcher |
+| `PB:C` | int | Passed balls (catcher) |
+| `SB:C` | int | Stolen bases allowed (catcher) |
+| `CS:C` | int | Caught stealing (catcher) |
+| `SB:C%` | float | Opponent stolen base percentage (catcher) |
+| `CS:C%` | float | Caught stealing percentage (catcher) |
+| `PIK:C` | int | Pickoffs (catcher) |
+| `SBATT:C` | int | Stolen base attempts against catcher |
+
+**Note on `IP:POS` values:** These represent innings played at a position as fractional thirds. A value of `218.67` = 218 full innings + 2 outs. Divide by 3 to get full inning equivalents, or use `floor(val) + (val % 1) / 0.333` for precise conversion.
+
+#### Streaks Object
+
+The `streaks` key holds current hot/cold streak data. Only players actively on a streak appear here. The key format is `streak_H` (hot streak). A cold streak key `streak_C` is inferred but not yet observed.
+
+```json
+"streaks": {
+  "<player_uuid>": {
+    "streak_H": {
+      "offense": { /* same fields as player offense */ },
+      "defense": { /* same fields as player defense */ },
+      "general": { "GP": 2 }   // number of games in the streak
+    }
+  }
+}
+```
+
+---
+
 ## Key Observations
 
 ### Opponents Are First-Class Teams
@@ -488,6 +835,10 @@ The recommended flow for finding team UUIDs without hardcoding:
 GET /me/teams?include=user_team_associations
   -> extract team UUIDs
 
+GET /teams/{team_id}/season-stats
+  -> full season batting/pitching/fielding aggregates per player
+  -> players keyed by UUID; no names -- cross-reference with /players
+
 GET /teams/{team_id}/game-summaries
   -> extract opponent_id values per game
 
@@ -497,11 +848,12 @@ GET /teams/{opponent_id}/players
 
 ### gc-user-action Values Observed
 
-| Value                  | Seen on endpoint             |
-|------------------------|------------------------------|
-| `data_loading:events`  | game-summaries (paginated), video-stream/assets |
-| `data_loading:event`   | game-summaries (first page)  |
-| `data_loading:team`    | schedule                     |
+| Value                   | Seen on endpoint             |
+|-------------------------|------------------------------|
+| `data_loading:events`   | game-summaries (paginated), video-stream/assets |
+| `data_loading:event`    | game-summaries (first page)  |
+| `data_loading:team`     | schedule                     |
+| `data_loading:team_stats` | season-stats               |
 
 The difference between `event` and `events` (singular vs. plural) on the same endpoint across pages may be intentional client behavior or incidental. Monitor for any API-side significance.
 
@@ -585,6 +937,7 @@ Never hardcode or log these values. Load from environment variables locally; fro
 | `/teams/{id}/game-summaries`         | `application/vnd.gc.com.game_summary:list+json; version=0.1.0`             |
 | `/teams/{id}/players`                | `application/vnd.gc.com.player:list+json; version=0.1.0`                   |
 | `/teams/{id}/video-stream/assets`    | `application/vnd.gc.com.video_stream_asset_metadata:list+json; version=0.0.0` |
+| `/teams/{id}/season-stats`           | `application/vnd.gc.com.team_season_stats+json; version=0.2.0`             |
 
 ### Pagination Loop Pattern
 

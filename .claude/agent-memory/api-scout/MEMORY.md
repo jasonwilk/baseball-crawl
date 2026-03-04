@@ -25,16 +25,40 @@ All discoveries go into the spec immediately. Do not accumulate findings in memo
 
 ## Exploration Status
 
-As of 2026-02-28 -- API is undocumented. Exploration has not formally begun (E-001 credential parser is the first active story). All API knowledge is empirical -- discovered by running curl commands provided by the user.
+As of 2026-03-04. All API knowledge is empirical -- discovered by running curl commands provided by the user.
 
-Areas not yet explored:
+### Confirmed Endpoints
+
+| Endpoint | Status | Discovered |
+|----------|--------|------------|
+| `GET /me/teams` | Confirmed from capture | Pre-2026-03-01 |
+| `GET /teams/{id}/schedule` | Confirmed from capture | Pre-2026-03-01 |
+| `GET /teams/{id}/game-summaries` | Confirmed LIVE, 34 records | Pre-2026-03-01 |
+| `GET /teams/{id}/players` | Confirmed from capture | Pre-2026-03-01 |
+| `GET /teams/{id}/video-stream/assets` | Confirmed, 3 pages | Pre-2026-03-01 |
+| `GET /teams/{id}/season-stats` | Confirmed LIVE, 200 OK | 2026-03-04 |
+
+### Season-Stats Key Facts (2026-03-04)
+
+- Returns full-season batting/pitching/fielding aggregates for all players on a team
+- Response is a single object (not array), no pagination observed
+- Players keyed by UUID only -- no names; must join with /players endpoint
+- Defense section merges pitching AND fielding into one object (use GP:P / GP:F to split)
+- `IP:POS` fields (IP:1B, IP:2B, etc.) are in fractional thirds (218.67 = 218 innings + 2 outs)
+- `AB/HR` field only appears when HR > 0
+- New gc-user-action value: `data_loading:team_stats`
+- Accept header: `application/vnd.gc.com.team_season_stats+json; version=0.2.0`
+- **Stat glossary**: `docs/gamechanger-stat-glossary.md` created alongside this endpoint. Maps all GC stat abbreviations to definitions (sourced from GC UI). Includes API field name mapping table for abbreviations that differ between UI and API (e.g., K-L -> SOL, HHB -> HARD). The API spec's season-stats schema cross-references this glossary.
+
+### Areas Not Yet Explored
+
 - Authentication flow (token acquisition, refresh, expiration behavior)
-- Team endpoints (roster, schedule, stats)
 - Game endpoints (box scores, play-by-play)
-- Player endpoints (stats, profiles)
-- Opponent data availability
+- Player endpoints (individual stats, profiles)
+- Opponent season-stats availability (does /season-stats work for opponent team UUIDs?)
+- Season scoping (query params for filtering by season/year)
 - Rate limiting behavior
-- Pagination patterns
+- Cold streak data (`streak_C`) -- only hot streak `streak_H` confirmed
 
 ## Security Rules
 
@@ -60,6 +84,7 @@ See CLAUDE.md HTTP Request Discipline section.
 ## Key File Paths
 
 - API spec: `docs/gamechanger-api.md`
+- Stat glossary: `docs/gamechanger-stat-glossary.md` (cross-referenced from API spec's season-stats schema)
 - Credential extraction: `scripts/refresh_credentials.py`
 - HTTP headers module: `src/http/headers.py`
 - HTTP session module: `src/http/session.py`

@@ -24,9 +24,9 @@
 - To display: `ip_outs // 3` for full innings, `ip_outs % 3` for partial
 
 ### Referential Integrity
-- Soft referential integrity: orphaned player IDs in stats tables accepted with WARNING log, not rejected
-- Foreign keys declared for documentation but `PRAGMA foreign_keys` may be OFF during ingestion
-- A separate reconciliation process can resolve orphans later
+- FK-safe orphan handling: when a player_id is not in `players`, insert a stub row (first_name='Unknown', last_name='Unknown') before writing the stat row. Log a WARNING for operator backfill.
+- Foreign keys declared and enforced (`PRAGMA foreign_keys = ON`)
+- Stub rows ensure FK constraints are never violated during ingestion
 
 ### Splits
 - Home/away and L/R splits stored as nullable columns in season stats tables
@@ -70,5 +70,8 @@
 - Migrations: `migrations/`
 - Database: `./data/app.db`
 - API spec (source of truth for response shapes): `docs/gamechanger-api.md`
+- Stat glossary (authoritative stat abbreviation definitions): `docs/gamechanger-stat-glossary.md`
+  - Includes API field name mapping table (UI abbreviation -> API field name) -- critical for mapping season-stats API fields to schema columns
+  - Covers: batting (standard + advanced), pitching (standard + advanced), pitch types, fielding, catcher, positional innings
 - Source code: `src/`
 - Tests: `tests/`

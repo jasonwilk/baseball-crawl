@@ -12,6 +12,8 @@ Implementing agents MUST NOT begin any implementation work without a referenced 
 
 All work-initiation requests travel through the `user -> product-manager -> implementing agent` pipeline. The PM dispatches implementation work using Agent Teams (see `/.claude/rules/dispatch-pattern.md`).
 
+**Team lead boundary**: The team lead (user-facing agent) relays dispatch requests to the PM and nothing more. The team lead MUST NOT create teams, spawn implementers, update story/epic statuses, or verify acceptance criteria. See the "Team Lead Dispatch Boundary" section in `dispatch-pattern.md`.
+
 ## PM Task Types
 
 The PM operates in five modes: **discover**, **plan**, **clarify**, **triage**, and **close**.
