@@ -8,7 +8,7 @@ set -e
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 
 echo "Configuring Git to use .githooks/ directory..."
-git config core.hooksPath "$REPO_ROOT/.githooks"
+git config core.hooksPath .githooks
 
 echo "Verifying hook is executable..."
 chmod +x "$REPO_ROOT/.githooks/pre-commit"
