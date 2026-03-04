@@ -1,7 +1,7 @@
 # E-036: Fix Codex Code-Review Wrapper
 
 ## Status
-`READY`
+`COMPLETED`
 
 ## Overview
 The `scripts/codex-review.sh` wrapper created in E-034 does not work. The `codex review` CLI (v0.107.0+) does not allow combining the `[PROMPT]` argument with `--uncommitted`, `--base`, or `--commit` flags. All three review modes fail on invocation. This epic fixes the wrapper so code review actually works with our project-specific rubric.
@@ -45,9 +45,9 @@ A research spike is needed to determine whether Codex offers any alternative mec
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-036-R-01 | Research: how to pass custom rubric to codex review | TODO | None | general-dev |
-| E-036-01 | Fix codex-review.sh to work with project rubric | TODO | E-036-R-01 | general-dev |
-| E-036-02 | Update CLAUDE.md Commands section if interface changed | TODO | E-036-01 | claude-architect |
+| E-036-R-01 | Research: how to pass custom rubric to codex review | DONE | None | general-dev |
+| E-036-01 | Fix codex-review.sh to work with project rubric | DONE | E-036-R-01 | general-dev |
+| E-036-02 | Update CLAUDE.md Commands section if interface changed | DONE | E-036-01 | claude-architect |
 
 ## Technical Notes
 
@@ -90,3 +90,5 @@ No file conflicts between stories. E-036-R-01 and E-036-01 are sequential (depen
 
 ## History
 - 2026-03-03: Created. Two failures identified in codex-review.sh: (1) PROMPT argument incompatible with review flags, (2) no known mechanism to inject project rubric. Research spike to find the rubric delivery mechanism, then fix story, then optional CLAUDE.md update.
+- 2026-03-03: Dispatch started. E-036-R-01 dispatched first (no blockers).
+- 2026-03-03: COMPLETED. All 3 stories verified DONE. Key finding: `codex review` has no mechanism for custom instructions alongside diff-scope flags. Solution: replaced `codex review` with `codex exec --ephemeral -` using assembled rubric + diff prompts (same pattern as spec-review wrapper). User-facing interface unchanged (same modes, same syntax). CLAUDE.md Commands entry verified accurate, no update needed. No documentation impact.
