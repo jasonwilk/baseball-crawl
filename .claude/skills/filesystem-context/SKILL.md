@@ -88,7 +88,7 @@ Baseball-crawl uses the filesystem-context pattern pervasively. The following na
 
 #### Example 1: Implementing Agents Load Story Files Before Starting Work
 
-When `general-dev` or `data-engineer` receives a task, the standard context block always includes the full story file contents. The agent's first action is to confirm it has read and understood all acceptance criteria before touching any code.
+When `software-engineer` or `data-engineer` receives a task, the standard context block always includes the full story file contents. The agent's first action is to confirm it has read and understood all acceptance criteria before touching any code.
 
 File location: `epics/E-NNN-slug/E-NNN-SS.md`
 
@@ -133,7 +133,7 @@ Research spikes produce artifacts in `/.project/research/`. These files are not 
 
 - `/.project/research/E-008-R-02-agent-skills-summary.md` -- loaded by claude-architect when evaluating skill adoption decisions
 - `/.project/research/E-008-intent-context-layer-recommendation.md` -- loaded by the PM when writing E-010 stories
-- `/.project/research/E-006-precommit-design.md` -- loaded by general-dev when implementing the PII scanner
+- `/.project/research/E-006-precommit-design.md` -- loaded by software-engineer when implementing the PII scanner
 
 File location pattern: `/.project/research/<E-NNN-slug>-<topic>.md`
 
@@ -144,7 +144,7 @@ File location pattern: `/.project/research/<E-NNN-slug>-<topic>.md`
 The GameChanger API spec lives at:
 `docs/gamechanger-api.md`
 
-This is deferred context for most agents. `api-scout` loads it when exploring endpoints. `general-dev` loads it when implementing API client code. It is not ambient -- it changes frequently and is not relevant to every task.
+This is deferred context for most agents. `api-scout` loads it when exploring endpoints. `software-engineer` loads it when implementing API client code. It is not ambient -- it changes frequently and is not relevant to every task.
 
 **Pattern in practice**: Any story that involves making GameChanger API calls should explicitly reference `docs/gamechanger-api.md` in its Technical Approach section. The implementing agent then loads it at task start.
 

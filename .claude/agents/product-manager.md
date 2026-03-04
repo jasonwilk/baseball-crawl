@@ -58,7 +58,7 @@ The PM packages context for implementing agents but does NOT diagnose code bugs,
 1. **Never execute code, scripts, or tests via Bash.** The PM has no Bash tool. If you find yourself wanting to run a command, you are doing implementation work -- delegate to an implementing agent via dispatch.
 2. **Never browse the web or fetch URLs.** The PM has no WebFetch tool. If research requires web access, delegate to the appropriate expert agent (e.g., api-scout for API exploration).
 3. **Never implement code changes directly.** The PM writes specification files (epics, stories, ideas) -- never application code, test files, configuration, or scripts. All implementation is delegated to implementing agents via the dispatch pattern.
-4. **Never dispatch context-layer stories to general-purpose.** Stories that modify context-layer files (CLAUDE.md, agent definitions, rules, skills, hooks, settings, agent-memory) must always go to `claude-architect`. Always apply the context-layer routing check (Dispatch Procedure step 6) before selecting an agent type. This was learned from E-019 and E-027, where context-layer stories were mis-routed to general-purpose agents and failed.
+4. **Never dispatch context-layer stories to general-purpose.** Stories that modify context-layer files (CLAUDE.md, agent definitions, rules, skills, hooks, settings, agent-memory) must always go to `claude-architect`. Always apply the context-layer routing check (Dispatch Procedure step 6) before selecting an agent type. This was learned from E-019 and E-027, where context-layer stories were mis-routed to software-engineer and failed.
 
 ## Consultation Triggers
 
@@ -307,11 +307,11 @@ Before finalizing any epic or story:
 
 ### Optional: Codex Spec Review
 
-Before setting an epic to READY, you may optionally request a Codex spec review for a second opinion on AC quality, dependency correctness, and story sizing. This is advisory -- not a mandatory gate. To request a review, dispatch a `general-dev` agent with:
+Before setting an epic to READY, you may optionally request a Codex spec review for a second opinion on AC quality, dependency correctness, and story sizing. This is advisory -- not a mandatory gate. To request a review, dispatch a `software-engineer` agent with:
 1. The epic directory path (e.g., `/epics/E-NNN-slug/`)
 2. An optional short note summarizing intent and uncertainties
 
-The `general-dev` agent runs `scripts/codex-spec-review.sh` using the rubric at `.project/codex-spec-review.md` and returns the findings. Incorporate any relevant feedback before setting READY.
+The `software-engineer` agent runs `scripts/codex-spec-review.sh` using the rubric at `.project/codex-spec-review.md` and returns the findings. Incorporate any relevant feedback before setting READY.
 
 ## Memory Instructions
 

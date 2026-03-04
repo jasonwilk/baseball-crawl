@@ -108,7 +108,7 @@ When all stories are verified DONE, the PM executes the following closure sequen
 
 | Story Domain | Agent Type |
 |-------------|-----------|
-| Python implementation, crawlers, parsers, tests | `general-purpose` |
+| Python implementation, crawlers, parsers, tests | `general-purpose` (software-engineer role in prompt) |
 | Database schema, SQL migrations, ETL | `general-purpose` (data-engineer role in prompt) |
 | API exploration, endpoint docs | `general-purpose` (api-scout role in prompt) |
 | Context-layer files: `CLAUDE.md`, `.claude/agents/*.md`, `.claude/rules/*.md`, `.claude/skills/**`, `.claude/hooks/**`, `.claude/settings.json`, `.claude/settings.local.json`, `.claude/agent-memory/**` | `claude-architect` |

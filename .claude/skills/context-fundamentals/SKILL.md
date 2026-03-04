@@ -144,15 +144,15 @@ The statusline at `.claude/hooks/statusline.sh` displays a color-coded context w
 
 ### Context Budget for a Typical Story
 
-Here is a worked example for a general-dev story in E-006:
+Here is a worked example for a software-engineer story in E-006:
 
 ```
 Session start (ambient):
   CLAUDE.md:                     ~297 lines
   workflow-discipline.md:         ~40 lines
   other rules files (9):         ~506 lines
-  general-dev.md agent def:      ~150 lines
-  general-dev MEMORY.md:          ~87 lines
+  software-engineer.md agent def: ~150 lines
+  software-engineer MEMORY.md:    ~87 lines
   ----------------------------------------
   Ambient subtotal:             ~1,080 lines
 

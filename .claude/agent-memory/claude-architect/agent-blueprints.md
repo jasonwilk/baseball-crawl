@@ -1,6 +1,6 @@
 # Agent Blueprints -- Historical Agent Designs
 
-These blueprints were used as reference during agent creation. `data-engineer` and `general-dev` were created from these blueprints via E-007 (initial stubs) and E-013 (complete buildout). `baseball-coach` and `api-scout` evolved organically but their blueprints here remain useful as creation templates. The blueprints below are preserved as historical record. If these agents need to be rebuilt from scratch, use the actual files in `.claude/agents/` as the authoritative source.
+These blueprints were used as reference during agent creation. `data-engineer` and `software-engineer` were created from these blueprints via E-007 (initial stubs) and E-013 (complete buildout). `baseball-coach` and `api-scout` evolved organically but their blueprints here remain useful as creation templates. The blueprints below are preserved as historical record. If these agents need to be rebuilt from scratch, use the actual files in `.claude/agents/` as the authoritative source.
 
 ---
 
@@ -55,7 +55,7 @@ memory: project
   - Flag credentials found in non-.env files as security issues
 - API spec structure: Overview, auth pattern, endpoints (URL, method, params, response schema, example, limitations, discovery date), known limitations, changelog
 - Discovery methodology: Start from known endpoints, document as you go, test edge cases, track unknowns
-- Interaction pattern: Produces API spec that data-engineer and general-dev consume
+- Interaction pattern: Produces API spec that data-engineer and software-engineer consume
 - Memory: Track auth patterns, API quirks, exploration status, endpoint relationships
 
 ---
@@ -84,13 +84,13 @@ memory: project
 
 ---
 
-## general-dev
+## software-engineer
 
 **When to create**: First time a user wants to write code, implement features, fix bugs, write tests, or set up project tooling.
 
 **Frontmatter**:
 ```yaml
-name: general-dev
+name: software-engineer
 description: "Python/TypeScript developer for implementation work. Use for writing code, implementing features, fixing bugs, writing tests, project setup, or deployment."
 model: sonnet
 color: purple

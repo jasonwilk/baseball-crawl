@@ -1,4 +1,4 @@
-# General Dev -- Agent Memory
+# Software Engineer -- Agent Memory
 
 ## Project Code Conventions
 

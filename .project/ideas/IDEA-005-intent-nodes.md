@@ -22,7 +22,7 @@ After E-002 (Data Ingestion Pipeline) and E-003 (Data Model and Storage Schema) 
 - What is the exact path for the database module as delivered by E-003? E-010 tentatively used `src/db/` but E-003 may deliver a different path.
 - Should `tests/CLAUDE.md` and `epics/CLAUDE.md` be included? E-010 planned 7 target directories; assess whether all 7 still make sense given the current project structure.
 - The integration aspect (wiring skills + intent nodes into agent definitions, adding intent node maintenance to the Definition of Done) should be scoped at promotion time. E-028 already established documentation maintenance rules (`.claude/rules/documentation.md`), and skills are already wired into the PM definition. Assess what incremental integration work remains.
-- E-010 originally targeted "orchestrator, general-dev, and data-engineer" for skill references. The orchestrator is deleted (E-030). At promotion time, decide which agents need explicit intent node references in their definitions.
+- E-010 originally targeted "orchestrator, software-engineer, and data-engineer" for skill references. The orchestrator is deleted (E-030). At promotion time, decide which agents need explicit intent node references in their definitions.
 
 ## Notes
 - **Origin**: Phase 2 of E-010 (Intent/Context Layer Implementation). E-010 was abandoned 2026-03-03 with Phase 1 DONE and Phase 2 BLOCKED/stale. See `/.project/archive/E-010-intent-context-layer-implementation/epic.md` for full history.

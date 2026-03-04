@@ -151,11 +151,11 @@ complete, IDEA-001 should be marked DISCARDED with a reference to E-009.
 | E-009-R-07 | Research: apitap and Alternatives (Tool Category Investigation) | DONE | None | - |
 | E-009-01   | Technology Decision Record -- choose Option A or Option B | DONE | R-01, R-02, R-03, R-04 | PM |
 | E-009-02   | Docker Compose environment -- database + API (Option B) | DONE | E-009-01 | data-engineer |
-| E-009-03   | Docker Compose environment -- dashboard (Option B) | DONE | E-009-02 | general-dev |
-| E-009-04   | Cloudflare Tunnel + Zero Trust Access configuration (Option B) | DONE | E-009-02; conflicts with E-009-05 (no parallel) | general-dev |
+| E-009-03   | Docker Compose environment -- dashboard (Option B) | DONE | E-009-02 | software-engineer |
+| E-009-04   | Cloudflare Tunnel + Zero Trust Access configuration (Option B) | DONE | E-009-02; conflicts with E-009-05 (no parallel) | software-engineer |
 | E-009-05   | Database seeding and reset workflow | DONE | E-009-02; conflicts with E-009-04 (no parallel) | data-engineer |
-| E-009-06   | Agent browsability verification | DONE | E-009-03 | general-dev |
-| E-009-07   | Production deployment runbook | TODO | E-009-02, E-009-03, E-009-04, E-009-05 | general-dev |
+| E-009-06   | Agent browsability verification | DONE | E-009-03 | software-engineer |
+| E-009-07   | Production deployment runbook | TODO | E-009-02, E-009-03, E-009-04, E-009-05 | software-engineer |
 | E-009-08   | CLAUDE.md and E-004 update | TODO | E-009-07 (run last; all prior stories must be DONE) | claude-architect |
 
 ## Technical Notes
@@ -316,15 +316,15 @@ infrastructure, and report findings without making recommendations or commitment
 
 Recommendation: No, not at this stage. The dashboard is a simple data-display application:
 tables, stat cards, mobile layout. The baseball-coach agent fills the UX feedback role.
-A general-dev agent following Jinja2 templates + a minimal CSS approach can produce an
+A software-engineer agent following Jinja2 templates + a minimal CSS approach can produce an
 adequate coaching dashboard.
 
 When to create a frontend-designer agent:
 - The dashboard requires custom data visualizations (charts, heat maps, spray charts)
 - The user specifically says visual design quality is unsatisfactory
-- The general-dev agent consistently produces dashboards the baseball-coach agent finds hard to use
+- The software-engineer agent consistently produces dashboards the baseball-coach agent finds hard to use
 
-Until any of these triggers fire, general-dev handles frontend, and baseball-coach handles
+Until any of these triggers fire, software-engineer handles frontend, and baseball-coach handles
 UX feedback via the browsability mechanism.
 
 ### File Conventions (Option B -- Expected Shape)

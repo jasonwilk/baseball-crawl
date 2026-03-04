@@ -1,7 +1,7 @@
 # E-039: mitmproxy Credential Sync and API Discovery
 
 ## Status
-`DRAFT`
+`READY`
 <!-- Lifecycle: DRAFT -> READY -> ACTIVE -> COMPLETED (or BLOCKED / ABANDONED) -->
 <!-- PM sets READY explicitly after: expert consultation done, all stories have testable ACs, quality checklist passed. -->
 <!-- Only READY and ACTIVE epics can be dispatched. -->

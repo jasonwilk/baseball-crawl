@@ -16,7 +16,7 @@ Detailed notes on patterns and lessons from past epics. MEMORY.md links here.
 - E-012 pattern: when a Phase 2 story is BLOCKED on unrelated deps, extract the unblocked subset into a separate focused epic that can ship immediately.
 
 ## Process Patterns
-- E-007: general-dev.md and data-engineer.md were created from scratch (did not exist before E-007-05).
+- E-007: software-engineer.md and data-engineer.md were created from scratch (did not exist before E-007-05).
 - E-007 Dispatch Mode execution: PM can execute infrastructure stories directly without Task tool when PM is the coordinating agent in a single session.
 - Decision Gates pattern (E-007-09): Evaluation epics need a gate story as their final story. PM executes it directly. Criteria must be in Technical Notes before stories are written. Three outcomes: APPROVED, REJECTED, DEFERRED.
 - E-009 failure: status updates drifted out of sync. E-011 addresses with atomic status update protocol.
@@ -31,8 +31,8 @@ Detailed notes on patterns and lessons from past epics. MEMORY.md links here.
 
 ## Agent Routing Lessons
 
-- **E-019 routing error**: E-019-02 (`.claude/hooks/`, `.claude/settings.json`, `.claude/rules/`) and the CLAUDE.md edit in E-019-04 were dispatched to `general-dev`. These are `claude-architect` domain. The dispatch-pattern table is clear: "Agent config, CLAUDE.md, rules, skills" → `claude-architect`. For future epics touching `.claude/` infrastructure or `CLAUDE.md`, route those stories to `claude-architect`, not `general-dev`.
-- **E-027 routing error (recurring)**: E-027-02 added a troubleshooting section to CLAUDE.md, dispatched to general-dev. Same class of error as E-019. The memory note from E-019 was insufficient -- the PM forgot to check. Root cause: no procedural step in dispatch flow that forces a file-path scan before agent selection. E-029 addresses this by (1) enumerating context-layer paths explicitly in dispatch-pattern.md, (2) adding a mandatory pre-check step to the PM dispatch procedure. Key insight: memory notes and domain descriptions are not enforceable; procedural checklists are.
+- **E-019 routing error**: E-019-02 (`.claude/hooks/`, `.claude/settings.json`, `.claude/rules/`) and the CLAUDE.md edit in E-019-04 were dispatched to `software-engineer`. These are `claude-architect` domain. The dispatch-pattern table is clear: "Agent config, CLAUDE.md, rules, skills" → `claude-architect`. For future epics touching `.claude/` infrastructure or `CLAUDE.md`, route those stories to `claude-architect`, not `software-engineer`.
+- **E-027 routing error (recurring)**: E-027-02 added a troubleshooting section to CLAUDE.md, dispatched to software-engineer. Same class of error as E-019. The memory note from E-019 was insufficient -- the PM forgot to check. Root cause: no procedural step in dispatch flow that forces a file-path scan before agent selection. E-029 addresses this by (1) enumerating context-layer paths explicitly in dispatch-pattern.md, (2) adding a mandatory pre-check step to the PM dispatch procedure. Key insight: memory notes and domain descriptions are not enforceable; procedural checklists are.
 
 ## E-019 Dispatch Lessons
 - Agent Teams spawn tool was not available in PM's tool set during this session. PM executed all 4 stories directly. **This was a workflow violation** -- the PM should never execute implementation stories directly. The root cause was the PM agent having no `tools` field in frontmatter, giving it all tools by default including Bash. E-021 addresses this by adding explicit tool restrictions to PM frontmatter.

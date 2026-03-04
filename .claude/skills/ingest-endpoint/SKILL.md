@@ -138,7 +138,7 @@ Check each of the following areas and update if the findings warrant it:
    - `.claude/agent-memory/api-scout/MEMORY.md` -- new endpoint in exploration status table,
      key facts, areas not yet explored
    - `.claude/agent-memory/data-engineer/MEMORY.md` -- if new schema-relevant fields discovered
-   - `.claude/agent-memory/general-dev/MEMORY.md` -- if new implementation-relevant details
+   - `.claude/agent-memory/software-engineer/MEMORY.md` -- if new implementation-relevant details
    - `.claude/agent-memory/baseball-coach/MEMORY.md` -- if new coaching-relevant stats discovered
 
 2. AGENT DEFINITIONS -- Check whether any agent definition files need updates:

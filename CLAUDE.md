@@ -262,21 +262,21 @@ Stories can only be dispatched when the parent epic is `READY` or `ACTIVE`. PM s
 
 This project uses specialized agents coordinated by the product-manager:
 
-| Agent | Role |
-|-------|------|
-| **claude-architect** | Designs and manages agents, CLAUDE.md, rules, skills |
-| **product-manager** | Product Manager -- owns what to build, why, and in what order. Discovers requirements, plans epics, delegates implementation to specialists. |
-| **baseball-coach** | Domain expert -- translates coaching needs into technical requirements |
-| **api-scout** | Explores GameChanger API, maintains API spec, manages credential patterns |
-| **data-engineer** | Database schema design, ETL pipelines, SQLite architecture |
-| **general-dev** | Python implementation, testing, general coding work |
-| **docs-writer** | Documentation specialist for admin/developer and coaching staff audiences. Writes and maintains human-readable documentation in `docs/admin/` and `docs/coaching/`. |
+| Agent | Alias | Role |
+|-------|-------|------|
+| **claude-architect** | | Designs and manages agents, CLAUDE.md, rules, skills |
+| **product-manager** | PM | Product Manager -- owns what to build, why, and in what order. Discovers requirements, plans epics, delegates implementation to specialists. |
+| **baseball-coach** | coach | Domain expert -- translates coaching needs into technical requirements |
+| **api-scout** | | Explores GameChanger API, maintains API spec, manages credential patterns |
+| **data-engineer** | DE | Database schema design, ETL pipelines, SQLite architecture |
+| **software-engineer** | SE | Python implementation, testing, general coding work |
+| **docs-writer** | | Documentation specialist for admin/developer and coaching staff audiences. Writes and maintains human-readable documentation in `docs/admin/` and `docs/coaching/`. |
 
 ### How Agents Collaborate
 - **baseball-coach** produces domain requirements that inform stories and data models
 - **api-scout** maintains `docs/gamechanger-api.md` -- the single source of truth for API knowledge
 - **data-engineer** designs schemas informed by both baseball-coach requirements and api-scout discoveries
-- **general-dev** implements stories, referencing specs produced by other agents
+- **software-engineer** implements stories, referencing specs produced by other agents
 - **product-manager** discovers requirements, consults domain experts, writes epics and stories, dispatches implementation work, and closes completed work
 - Any agent that identifies future work should flag it to the PM for idea capture rather than creating speculative epics
 

@@ -38,7 +38,7 @@ For every story in the epic, check each item and report findings:
 
 ### 5. Agent-Routing Correctness
 - Per the routing table in `dispatch-pattern.md`: context-layer files (CLAUDE.md, `.claude/agents/*.md`, `.claude/rules/*.md`, `.claude/skills/**`, `.claude/hooks/**`, `.claude/settings.json`, `.claude/agent-memory/**`) must route to `claude-architect`.
-- Python implementation, crawlers, parsers, tests, utility scripts route to `general-dev`.
+- Python implementation, crawlers, parsers, tests, utility scripts route to `software-engineer`.
 - Database schema, SQL migrations, ETL route to a data-engineer-roled agent.
 - Are any stories routed to the wrong agent type given their "Files to Create or Modify"?
 

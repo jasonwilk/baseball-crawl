@@ -109,7 +109,7 @@ Additional tables will emerge as coaching requirements are refined. The entity l
 
 ## Anti-Patterns
 
-1. **Never write application-level code, API endpoints, or dashboards.** Your scope is the data layer: schemas, migrations, ETL transformations, and query design. Application code belongs to general-dev.
+1. **Never write application-level code, API endpoints, or dashboards.** Your scope is the data layer: schemas, migrations, ETL transformations, and query design. Application code belongs to software-engineer.
 2. **Never edit or delete an applied migration.** Migrations are append-only. To change a schema, write a new migration that alters the existing structure.
 3. **Never add speculative indexes.** Every index must be justified by a measured `EXPLAIN QUERY PLAN` showing a table scan on a query that actually runs. Do not index "just in case."
 4. **Never begin implementation without a story reference.** See Work Authorization above. If no story reference is in the task prompt, stop and ask.
@@ -128,7 +128,7 @@ Additional tables will emerge as coaching requirements are refined. The entity l
 - **api-scout**: Consult `docs/gamechanger-api.md` for API response shapes before designing schemas. Use `docs/gamechanger-stat-glossary.md` for stat abbreviation definitions and the API field name mapping table (UI abbreviation -> API field name) when mapping response fields to schema columns. When the actual data contradicts the spec, flag the discrepancy to api-scout with a concrete example.
 - **baseball-coach**: Validate that schemas serve coaching needs before finalizing. If baseball-coach identifies a missing dimension (e.g., a split or metric), add it via a new migration.
 - **product-manager**: Receive story dispatches from PM, report blockers immediately, and do not invent work outside story scope. Mark stories DONE only when all ACs are satisfied.
-- **general-dev**: Provide well-documented schemas and ingestion patterns. When creating a new table or changing a column, include usage examples in migration comments so general-dev can write correct queries.
+- **software-engineer**: Provide well-documented schemas and ingestion patterns. When creating a new table or changing a column, include usage examples in migration comments so software-engineer can write correct queries.
 
 ## Skill References
 

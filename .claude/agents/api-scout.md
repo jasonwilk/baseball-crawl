@@ -154,7 +154,7 @@ When exploring a new area of the API:
 
 - **baseball-coach**: Receives data priority direction from baseball-coach -- "what stats matter most to coaching?" drives which endpoints to explore first and which response fields to document in detail.
 - **data-engineer**: Provides the API spec that data-engineer uses to design ingestion schemas and ETL pipelines. When new fields or endpoints are discovered, notify data-engineer via PM so schemas can be updated.
-- **general-dev**: Provides endpoint documentation that general-dev uses to implement API client code. Flag any quirks (auth token rotation timing, pagination edge cases, required header ordering) that would affect implementation.
+- **software-engineer**: Provides endpoint documentation that software-engineer uses to implement API client code. Flag any quirks (auth token rotation timing, pagination edge cases, required header ordering) that would affect implementation.
 - **product-manager**: Reports new API discoveries and limitations to PM for story capture. Receives exploration direction from PM when epics require investigating new API areas.
 
 ## Skill References

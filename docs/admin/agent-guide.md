@@ -10,15 +10,15 @@ Agent definitions live in `.claude/agents/`. Rules governing their behavior live
 
 ## Agents
 
-| Agent | Model | Role |
-|-------|-------|------|
-| **product-manager** | Opus | Owns what to build, why, and in what order. Creates epics and stories, prioritizes the backlog, dispatches implementation work, and closes completed work. Never writes code. |
-| **claude-architect** | Opus | Designs and manages agents, `CLAUDE.md`, rules, skills, and hooks. Maintains the agent ecosystem itself. |
-| **baseball-coach** | Sonnet | Domain expert. Translates coaching needs into technical requirements, validates schemas against real coaching use cases, and defines what statistics matter. |
-| **api-scout** | Sonnet | Explores the GameChanger API, documents endpoints in `docs/gamechanger-api.md`, and guides credential rotation. |
-| **data-engineer** | Sonnet | Designs database schemas, SQL migrations, and ETL pipelines. Informs the data layer from both domain requirements and API discoveries. |
-| **general-dev** | Sonnet | Implements Python code: crawlers, parsers, loaders, tests, utilities. Works from specifications produced by other agents. |
-| **docs-writer** | Sonnet | Writes and maintains human-readable documentation for admin/developer and coaching staff audiences. |
+| Agent | Alias | Model | Role |
+|-------|-------|-------|------|
+| **product-manager** | PM | Opus | Owns what to build, why, and in what order. Creates epics and stories, prioritizes the backlog, dispatches implementation work, and closes completed work. Never writes code. |
+| **claude-architect** | | Opus | Designs and manages agents, `CLAUDE.md`, rules, skills, and hooks. Maintains the agent ecosystem itself. |
+| **baseball-coach** | coach | Sonnet | Domain expert. Translates coaching needs into technical requirements, validates schemas against real coaching use cases, and defines what statistics matter. |
+| **api-scout** | | Sonnet | Explores the GameChanger API, documents endpoints in `docs/gamechanger-api.md`, and guides credential rotation. |
+| **data-engineer** | DE | Sonnet | Designs database schemas, SQL migrations, and ETL pipelines. Informs the data layer from both domain requirements and API discoveries. |
+| **software-engineer** | SE | Sonnet | Implements Python code: crawlers, parsers, loaders, tests, utilities. Works from specifications produced by other agents. |
+| **docs-writer** | | Sonnet | Writes and maintains human-readable documentation for admin/developer and coaching staff audiences. |
 
 ## How to Work with Agents
 
@@ -30,7 +30,7 @@ For most work, start by talking to the **product-manager**. The PM is the coordi
 - The PM discovers requirements, writes epics and stories with acceptance criteria, and dispatches work to specialist agents.
 - The PM manages story statuses and verifies acceptance criteria when work is complete.
 
-**Example**: "I want a scouting report that shows the opposing pitcher's K/9 and BB/9 splits." The PM would consult the baseball-coach for requirements, check with data-engineer on schema readiness, and write stories for general-dev to implement.
+**Example**: "I want a scouting report that shows the opposing pitcher's K/9 and BB/9 splits." The PM would consult the baseball-coach for requirements, check with data-engineer on schema readiness, and write stories for software-engineer to implement.
 
 ### Direct-Routing Exceptions
 
@@ -104,4 +104,4 @@ Agent definitions are markdown files with YAML frontmatter that specify the agen
 
 ---
 
-*Last updated: 2026-03-03 | Story: E-028-03*
+*Last updated: 2026-03-04 | Rename: general-dev -> software-engineer + agent aliases*

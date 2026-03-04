@@ -40,7 +40,7 @@ User
 product-manager       (plans, dispatches via Agent Teams)
   |
   v
-implementing agents   (general-dev, data-engineer -- require story reference)
+implementing agents   (software-engineer, data-engineer -- require story reference)
 ```
 
 ## PM Dispatch Checklist
