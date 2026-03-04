@@ -221,7 +221,59 @@ class TestNormalResponseHandling:
         assert response.json() == {"batting_avg": 0.312}
 
 
-# AC-6: SKIP -- E-005-03 (GameChanger client retrofit) is not yet complete.
-# When E-005-03 is DONE, add a test here that verifies GameChangerClient
-# sends both the Authorization header AND all required browser headers
-# on a single request. See E-005-04.md AC-6 for the full specification.
+# AC-6 / AC-7: GameChangerClient integration -- gc-token + all browser headers.
+# Verifies that GameChangerClient sends gc-token, gc-device-id, gc-app-name
+# AND all 10 required browser headers from BROWSER_HEADERS on every request.
+
+
+_FAKE_CREDENTIALS = {
+    "GAMECHANGER_AUTH_TOKEN": "fake-jwt-token",
+    "GAMECHANGER_DEVICE_ID": "abcdef1234567890abcdef1234567890",
+    "GAMECHANGER_BASE_URL": "https://api.team-manager.gc.com",
+    "GAMECHANGER_APP_NAME": "web",
+}
+
+
+class TestGameChangerClientHeaderIntegration:
+    """AC-7: GameChangerClient sends gc-token + all 10 browser headers together."""
+
+    @respx.mock
+    def test_gc_client_sends_auth_and_browser_headers(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """GameChangerClient.get() carries gc-token, gc-device-id, gc-app-name,
+        and all 10 browser headers from BROWSER_HEADERS in a single request."""
+        from src.gamechanger.client import GameChangerClient
+
+        monkeypatch.setattr(
+            "src.gamechanger.client.dotenv_values",
+            lambda: _FAKE_CREDENTIALS,
+        )
+
+        route = respx.get("https://api.team-manager.gc.com/me/teams").mock(
+            return_value=httpx.Response(200, json=[])
+        )
+        client = GameChangerClient(min_delay_ms=0, jitter_ms=0)
+        client.get("/me/teams")
+
+        request = route.calls.last.request
+
+        # GameChanger-specific auth headers
+        assert request.headers["gc-token"] == "fake-jwt-token"
+        assert request.headers["gc-device-id"] == "abcdef1234567890abcdef1234567890"
+        assert request.headers["gc-app-name"] == "web"
+
+        # All 10 browser headers from BROWSER_HEADERS (non-Accept headers)
+        # Accept may be overridden per-request; check remaining 9 non-Accept headers
+        non_accept_browser_headers = {
+            k: v for k, v in BROWSER_HEADERS.items() if k != "Accept"
+        }
+        for key, value in non_accept_browser_headers.items():
+            actual = request.headers.get(key.lower())
+            assert actual is not None, f"Missing required browser header: {key}"
+            assert actual == value, (
+                f"Browser header {key}: expected {value!r}, got {actual!r}"
+            )
+
+        # Accept header: default from BROWSER_HEADERS when not overridden
+        assert request.headers.get("accept") == BROWSER_HEADERS["Accept"]

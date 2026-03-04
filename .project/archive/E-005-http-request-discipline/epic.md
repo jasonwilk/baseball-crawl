@@ -2,7 +2,7 @@
 # E-005: HTTP Request Discipline
 
 ## Status
-`ACTIVE`
+`COMPLETED`
 
 ## Overview
 Build a centralized HTTP session layer that enforces consistent, browser-realistic request behavior across all GameChanger API calls (and any future integrations). Without this layer, every new crawler or client will reinvent headers, reinvent rate limiting, and risk presenting as a Python script rather than a real browser -- increasing the chance of blocks and making the codebase fragile to maintain.
@@ -32,7 +32,7 @@ This epic builds the shared HTTP infrastructure first, then retrofits E-001-02 t
 - `src/http/session.py` exports a `create_session()` factory that returns an httpx client pre-loaded with the canonical header set and cookie jar
 - `src/http/headers.py` exports `BROWSER_HEADERS: dict[str, str]` containing at minimum: `User-Agent`, `Accept`, `Accept-Language`, `Accept-Encoding`, `sec-ch-ua`, `sec-ch-ua-mobile`, `sec-ch-ua-platform`, `sec-fetch-site`, `sec-fetch-mode`, `sec-fetch-dest`
 - Running `pytest tests/test_http_session.py` passes, covering: headers present on request, auth token not logged at any log level, minimum delay between sequential requests, jitter applied (second request does not arrive at exactly delay_ms after first)
-- `GameChangerClient` (E-001-02) uses `create_session()` -- confirmed by grep showing no bare `httpx.Client()` call in `src/gamechanger/client.py`
+- `GameChangerClient` (E-001-02) uses `create_session()` -- confirmed by grep showing no bare `httpx.Client()` call in `src/gamechanger/client.py`. Auth uses `gc-token` header (not `Authorization: Bearer`).
 - `docs/http-integration-guide.md` exists and covers: how to use `create_session()`, how to override specific headers, how to add auth, and the rate limiting contract
 
 ## Stories
@@ -40,7 +40,7 @@ This epic builds the shared HTTP infrastructure first, then retrofits E-001-02 t
 |----|-------|--------|-------------|----------|
 | E-005-01 | Build canonical browser header configuration | DONE | None | - |
 | E-005-02 | Build HTTP session factory with rate limiting and jitter | DONE | E-005-01 | - |
-| E-005-03 | Retrofit GameChanger client to use session factory | TODO | E-005-02, E-001-02 | - |
+| E-005-03 | Verify GameChanger client session factory integration | DONE | E-005-02, E-001-02 | - |
 | E-005-04 | Write header discipline tests | DONE | E-005-02 | - |
 | E-005-05 | Write HTTP integration guide | DONE | E-005-02 | - |
 
@@ -76,13 +76,17 @@ sec-fetch-dest: empty
 The Chrome version in User-Agent and sec-ch-ua should stay in sync. The macOS platform profile is intentional and consistent with the project operator's environment.
 
 ### Auth Injection Pattern
-Auth credentials (bearer token, cookies) are NOT part of `BROWSER_HEADERS` -- they are injected by the consuming client (e.g., `GameChangerClient`) on top of the base session. This keeps the session factory reusable for unauthenticated requests and ensures credentials are never baked into shared config.
+Auth credentials are NOT part of `BROWSER_HEADERS` -- they are injected by the consuming client (e.g., `GameChangerClient`) on top of the base session. This keeps the session factory reusable for unauthenticated requests and ensures credentials are never baked into shared config.
 
-Pattern:
+**GameChanger-specific pattern** (confirmed via API discovery -- see `docs/gamechanger-api.md`):
 ```python
 session = create_session()
-session.headers["Authorization"] = f"Bearer {token}"  # injected by GameChangerClient
+session.headers["gc-token"] = credentials["GAMECHANGER_AUTH_TOKEN"]     # NOT Authorization: Bearer
+session.headers["gc-device-id"] = credentials["GAMECHANGER_DEVICE_ID"]  # 32-char hex, stable per device
+session.headers["gc-app-name"] = "web"                                  # fixed value
 ```
+
+GameChanger does NOT use `Authorization: Bearer`. Auth is carried in the custom `gc-token` header. The `gc-device-id` is a persistent device identifier that should be stored alongside credentials and reused across sessions.
 
 ### Rate Limiting Contract
 `create_session()` accepts `min_delay_ms: int = 1000` and `jitter_ms: int = 500`. Between each request, the session sleeps for `min_delay_ms + random.uniform(0, jitter_ms)` milliseconds. This is enforced via a custom httpx event hook, not by the caller.
@@ -99,15 +103,24 @@ It must NOT log:
 - Any query parameter values
 - Any response body content
 
-This is enforced in tests by asserting that no log record at any level contains the string "Bearer" or "Cookie".
+This is enforced in tests by asserting that no log record at any level contains credential-pattern strings such as "Bearer", "Cookie", or the `gc-token` value.
 
 ### Relationship to E-001
 E-005-03 depends on E-001-02 being done (or being done in coordination). The cleanest approach is to write E-001-02 and E-005 in sequence: finish E-001-02 with its current bare httpx approach, then E-005-03 retrofits it. Alternatively, if E-001-02 has not yet been started, it can be written directly against `create_session()` -- in that case E-005-03 becomes a no-op and can be abandoned.
 
 ## Open Questions
-- What Chrome version does the current GameChanger curl example show? (Inform E-005-01's exact version strings.) -- Answered: Chrome 131, macOS, from the user's example.
-- Does GameChanger send `Origin` or `Referer` headers that should also be in the canonical set? -- To be confirmed when the user provides the full curl dump. For now, leave them out; they can be added in E-005-01 without breaking anything.
-- Should `create_session()` support a context manager protocol (`with create_session() as s:`)? httpx.Client already supports this; just ensure the factory passes it through.
+- What Chrome version does the current GameChanger curl example show? -- **Answered**: Chrome 131 from the original capture (2026-02-28). Updated captures (2026-03-04) show Chrome 145. `src/http/headers.py` still has Chrome 131 -- a header refresh is needed (see Gaps below).
+- Does GameChanger send `Origin` or `Referer` headers that should also be in the canonical set? -- **Answered**: Yes. `Referer: https://web.gc.com/` and `origin: https://web.gc.com` appear in multiple endpoint captures. `DNT: 1` also appears consistently. These are not yet in `BROWSER_HEADERS`. See Gaps below.
+- Should `create_session()` support a context manager protocol? -- **Answered**: Yes, httpx.Client already supports this. `create_session()` returns an httpx.Client directly, so context manager usage works. Confirmed in E-005-02 AC-7.
+
+## Gaps Identified During Refinement (2026-03-04)
+These are outside E-005 scope but should be tracked:
+
+1. **Chrome version stale in `src/http/headers.py`**: Headers show Chrome 131, but API captures from 2026-03-04 show Chrome 145. The integration guide documents the update process. This should be a small follow-up task.
+2. **Missing headers in `BROWSER_HEADERS`**: `DNT: 1`, `Referer: https://web.gc.com/`, and `origin: https://web.gc.com` are present in API captures but not in the canonical header set. These could be added to `BROWSER_HEADERS` or handled per-request.
+3. ~~**Integration guide examples use `Authorization: Bearer`**~~: **RESOLVED** (2026-03-04). Guide updated to use `gc-token` as the primary example with a note that the session factory is generic.
 
 ## History
 - 2026-02-28: Created. Prompted by addition of HTTP Request Discipline section to CLAUDE.md and user providing a real GameChanger curl example.
+- 2026-03-04: Refined E-005-03 based on API discovery progress. The GameChanger client was written directly against `create_session()` (not retrofitted), so E-005-03 changed from a retrofit story to a verification story. Updated epic Technical Notes to reflect `gc-token` auth pattern (not `Authorization: Bearer`), updated logging safety rule, resolved open questions, and documented three gaps for follow-up: Chrome version staleness in headers.py, missing DNT/Referer/Origin headers, and integration guide examples showing Bearer auth.
+- 2026-03-04: **COMPLETED.** All 5 stories DONE (E-005-01 through E-005-05, with E-005-03 completing last as verification). Codex spec review remediation applied before final dispatch: corrected `Authorization: Bearer` to `gc-token` in E-005-04 AC-6, E-005-05 Technical Approach, and `docs/http-integration-guide.md`. Added AC-7 to E-005-03 to close the gap from E-005-04's skipped AC-6. 27 tests pass across `test_client.py` and `test_http_discipline.py`. Remaining gaps (Chrome 131->145, missing DNT/Referer/Origin) are tracked for follow-up. No documentation impact beyond the integration guide updates already applied during this dispatch.

@@ -59,6 +59,21 @@ my-skill/
 - `disable-model-invocation: true` = zero context cost until you invoke
 - In subagents, preloaded skills are fully injected at startup
 
+### Project Skills (Current)
+| Skill | Category | Purpose |
+|-------|----------|---------|
+| context-fundamentals | Foundational | Context window mechanics, budget management |
+| filesystem-context | Architectural | File-based context delivery, progressive disclosure |
+| multi-agent-patterns | Architectural | Telephone game mitigation, dispatch checklist |
+| ingest-endpoint | Workflow | Two-phase GameChanger API endpoint ingestion (api-scout then claude-architect) |
+
+### Workflow Skills Pattern (ingest-endpoint)
+- Workflow skills automate multi-agent sequences that the user has done manually 2+ times
+- No YAML frontmatter -- the skill is loaded by the team lead when triggered by user intent
+- CLAUDE.md Workflows section provides the discovery mechanism (team lead reads CLAUDE.md, sees trigger phrases, loads the SKILL.md)
+- Both api-scout and claude-architect are direct-routing exceptions, so no PM intermediation needed
+- Phase ordering matters: time-sensitive work (credential-bearing API calls) goes first
+
 ### Invocation Control Matrix
 | Setting                          | User invoke | Claude invoke | Context cost |
 |----------------------------------|------------|---------------|-------------|

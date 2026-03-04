@@ -93,9 +93,19 @@ Only when a user request requires specialized capability that existing agents ca
 ## Epic History (Agent Ecosystem)
 - E-013 (COMPLETED 2026-03-02): Agent Buildout -- completed data-engineer and general-dev from stubs to full operational manuals, seeded memory directories for api-scout, baseball-coach, general-dev, and data-engineer, wired skill references into all agent definitions. Absorbed E-012 and E-014.
 
+## Skills Index
+Four skills in `.claude/skills/`:
+- **context-fundamentals** -- Context window mechanics, budget management, load/defer decisions
+- **filesystem-context** -- File-based context delivery, progressive disclosure, ambient vs. deferred
+- **multi-agent-patterns** -- Telephone game problem, verbatim relay, dispatch checklist
+- **ingest-endpoint** -- Workflow automation: two-phase GameChanger API endpoint ingestion (api-scout -> claude-architect). Created 2026-03-04. Referenced from: CLAUDE.md (Workflows section). Replaces manual workflow used for season-stats and game-summaries endpoints.
+
 ## Domain Reference Documents
 - `docs/gamechanger-api.md` -- API spec (owned by api-scout)
 - `docs/gamechanger-stat-glossary.md` -- stat abbreviation data dictionary (owned by api-scout, created 2026-03-04). Referenced from: CLAUDE.md (Key Metrics), api-scout agent def + memory, data-engineer agent def + memory, general-dev agent def + memory, baseball-coach agent def + memory. Integration audit completed 2026-03-04.
+
+## Ingest-Endpoint Workflow Executions
+- **player-stats** (2026-03-04): Third successful execution of the ingest-endpoint skill. Phase 2 updates: data-engineer memory (spray chart schema implications, per-game stat structure), general-dev memory (raw sample path, endpoint parsing notes), baseball-coach memory (coaching value of per-game stats and spray charts), CLAUDE.md Key Metrics (added per-game splits and spray charts). No new stat abbreviations -- all fields already in glossary.
 
 ## Known Hallucination Traps
 - `ghcr.io/devcontainers/features/apt:1` DOES NOT EXIST. The official devcontainers/features registry has no apt installer feature. Real apt features are from rocker-org and devcontainers-extra. See `.claude/rules/devcontainer.md` for correct identifiers.

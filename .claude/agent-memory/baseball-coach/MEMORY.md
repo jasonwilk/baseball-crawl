@@ -64,6 +64,25 @@ Players must be tracked across teams and seasons:
 - Longitudinal tracking enables: development trajectories, regression detection, promotion readiness
 - The data model must support this from day one -- retrofitting cross-team identity is painful
 
+## Per-Game Player Stats and Spray Charts (discovered 2026-03-04)
+
+The GameChanger API has a player-stats endpoint that provides **per-game stat lines** for every game a player appeared in. This is a major upgrade from season-stats (which only had aggregates).
+
+### What this unlocks for coaches:
+- **Game-by-game performance tracking**: See a player's batting line for every game, not just season totals. Identify hot/cold streaks, performance after rest days, multi-hit games vs. hitless stretches.
+- **Per-game pitching lines**: IP, ER, K, BB, pitch count for each outing. Track workload, recovery patterns, and performance trends.
+- **Spray chart data**: Ball-in-play direction with x/y field coordinates, play type (ground ball, line drive, fly ball), play result (hit, out), and fielder position. This is **unique data not available in season-stats**.
+  - **Batting tendencies**: Where does this hitter put the ball? Pull-heavy? Opposite field? Ground ball tendency?
+  - **Fielding positioning**: Where should we play our defenders against this batter?
+  - **Opponent scouting**: If this works for opponent player IDs (untested), spray charts become a scouting weapon.
+- **Rolling cumulative stats**: See how a player's season line evolved over time (performance trajectory).
+
+### Priority for coaching:
+- **MUST HAVE**: Per-game batting lines (streak detection, recent form for lineup decisions)
+- **MUST HAVE**: Per-game pitching lines (workload tracking, arm health compliance)
+- **SHOULD HAVE**: Spray chart analysis (batting tendencies, fielding positioning)
+- **NICE TO HAVE**: Cumulative trend visualization (development tracking over season)
+
 ## Coaching Decisions This System Serves
 
 These are the actual decisions coaches make that this system should support:

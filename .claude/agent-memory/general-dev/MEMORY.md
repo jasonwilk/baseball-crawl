@@ -22,9 +22,29 @@ See CLAUDE.md Code Style section and `.claude/rules/python-style.md`.
 
 ### Data and Docs
 - `data/` -- local dev data outputs, SQLite database (`data/app.db`)
+- `data/raw/` -- raw API response samples (gitignored). game-summaries: `game-summaries-sample.json` (page 1, 50 records), `game-summaries-page2-sample.json` (page 2, 42 records). me-teams: `me-teams-sample.json` (15 teams, 18 KB). player-stats: `player-stats-sample.json` (80 per-game records, 387 KB)
 - `docs/` -- API specs and documentation
 - `docs/gamechanger-api.md` -- THE single source of truth for GameChanger API knowledge
 - `docs/gamechanger-stat-glossary.md` -- authoritative data dictionary for all GameChanger stat abbreviations (batting, pitching, fielding, catcher, positional innings). Includes API field name mapping table for abbreviations that differ between UI and API. Reference when parsing season-stats response fields.
+
+### API Parsing Quirks
+- `/me/teams` `ngb` field: **JSON-encoded string**, not a native JSON array. Must double-parse: `json.loads(team["ngb"])`. The outer response is JSON, but this particular field's value is a string containing another JSON structure.
+
+### Pagination Pattern (confirmed 2026-03-04)
+- game-summaries uses cursor-based pagination: `x-pagination: true` request header, `x-next-page` response header with full URL
+- End of data: `x-next-page` header absent (NOT empty body)
+- Page size: 50 max; final page may have fewer records
+- Working Python pagination loop in `docs/gamechanger-api.md` (Notes for Implementers section) -- use as reference implementation
+
+### Player-Stats Endpoint (confirmed 2026-03-04)
+- `GET /teams/{team_id}/players/{player_id}/stats` -- per-game stats for one player
+- Returns bare JSON array; 80 records / 387 KB observed for a full season
+- No pagination observed (single response with all games)
+- **Player-centric**: Must call once per player to build a full game box score (e.g., 12 calls for a 12-player roster)
+- `event_id` joins to game-summaries `game_stream.game_id` for per-game filtering
+- `player_stats.stats.offense` (84 fields) absent for pitcher-only games; `defense` (34-129 fields) absent for DH-only games -- parse defensively
+- Spray chart data: `offensive_spray_charts` / `defensive_spray_charts` -- arrays of ball-in-play events with x/y coordinates, play type/result, fielder position. Unique to this endpoint (not in season-stats)
+- `cumulative_stats` = rolling season totals; records NOT in chronological order
 
 ### Project Management
 - `epics/` -- active epics and story files

@@ -74,6 +74,8 @@ This guides our data-source decisions:
 These are the statistics and dimensions that matter for coaching decisions:
 - **Batting**: OBP, strikeout rate, home/away splits, left/right pitcher splits
 - **Pitching**: K/9, BB/9, left/right batter splits, home/away splits
+- **Per-game splits**: Game-by-game batting and pitching lines for streak detection, recent form, and workload tracking
+- **Spray charts**: Ball-in-play direction (x/y coordinates), play type, play result, fielder position -- for batting tendency analysis and defensive positioning
 - **Players**: Key player identification (aces, closers, leadoff), lineup position history
 - **Opponents**: Lineup patterns and changes, tendencies, roster composition
 - **Longitudinal**: Player development across seasons, teams, and levels
@@ -91,6 +93,9 @@ The authoritative data dictionary mapping all GameChanger stat abbreviations to 
 - `./scripts/install-hooks.sh` -- one-time setup for PII pre-commit hook (run after cloning)
 - `./scripts/codex-review.sh <mode>` -- code review of repository changes; modes: `uncommitted`, `base <branch>`, `commit <sha>`. Rubric: `.project/codex-review.md`
 - `./scripts/codex-spec-review.sh <epic-dir>` -- spec review of epic/story files in a directory; optional `--note` flag. Rubric: `.project/codex-spec-review.md`
+
+## Workflows
+- **Ingest endpoint**: When the user says "ingest endpoint" (or similar -- "curl is ready", "new endpoint to analyze"), load `.claude/skills/ingest-endpoint/SKILL.md` and follow its two-phase workflow. The user has placed a curl command in `secrets/gamechanger-curl.txt` and expects api-scout to execute it (time-sensitive -- credentials expire in ~1 hour), then claude-architect to integrate findings into the context layer.
 
 ## App Troubleshooting
 

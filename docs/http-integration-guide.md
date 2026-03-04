@@ -13,8 +13,10 @@ from src.http.session import create_session
 # 1. Create a session
 session = create_session()
 
-# 2. Inject auth credentials
-session.headers["Authorization"] = f"Bearer {token}"
+# 2. Inject auth credentials (GameChanger uses gc-token, not Authorization: Bearer)
+session.headers["gc-token"] = token
+session.headers["gc-device-id"] = device_id
+session.headers["gc-app-name"] = "web"
 
 # 3. Make requests -- rate limiting happens automatically
 response = session.get("https://api.gc.com/teams/123")
@@ -25,7 +27,9 @@ The session is an `httpx.Client`. Use it as you would any httpx client: `.get()`
 
 ```python
 with create_session() as session:
-    session.headers["Authorization"] = f"Bearer {token}"
+    session.headers["gc-token"] = token
+    session.headers["gc-device-id"] = device_id
+    session.headers["gc-app-name"] = "web"
     response = session.get("https://api.gc.com/teams/123")
 ```
 
@@ -83,17 +87,20 @@ session = create_session(min_delay_ms=500, jitter_ms=200)
 
 ## Auth Injection Pattern
 
-Auth credentials are never baked into the session factory. Inject them after creating the session:
+Auth credentials are never baked into the session factory. Inject them after creating the session.
+
+**GameChanger** uses custom headers (not `Authorization: Bearer`):
 
 ```python
 session = create_session()
 
-# Bearer token (GameChanger API)
-session.headers["Authorization"] = f"Bearer {token}"
-
-# Multiple headers
-session.headers["X-Custom-Header"] = "value"
+# GameChanger auth headers
+session.headers["gc-token"] = credentials["GAMECHANGER_AUTH_TOKEN"]
+session.headers["gc-device-id"] = credentials["GAMECHANGER_DEVICE_ID"]
+session.headers["gc-app-name"] = "web"
 ```
+
+The session factory is generic -- other integrations may use different auth patterns (e.g., `Authorization: Bearer`). The pattern above is specific to GameChanger, which is currently the only consumer.
 
 Keep credentials out of logs and source code (per CLAUDE.md "Security Rules").
 
@@ -133,13 +140,15 @@ from src.http.session import create_session
 
 def test_my_integration():
     def handler(request: httpx.Request) -> httpx.Response:
-        assert "Authorization" in request.headers
+        assert "gc-token" in request.headers
         return httpx.Response(200, json={"team": "LSB Varsity"})
 
     session = create_session(min_delay_ms=0, jitter_ms=0)
     session._transport = httpx.MockTransport(handler)
 
-    session.headers["Authorization"] = "Bearer test-token"
+    session.headers["gc-token"] = "test-token"
+    session.headers["gc-device-id"] = "abc123"
+    session.headers["gc-app-name"] = "web"
     response = session.get("https://api.gc.com/teams/123")
 
     assert response.status_code == 200
@@ -191,8 +200,8 @@ logger.info("GET %s -> %d", response.request.url.path, response.status_code)
 
 ```python
 # WRONG -- shared across all sessions, appears in source code
-BROWSER_HEADERS["Authorization"] = f"Bearer {token}"
+BROWSER_HEADERS["gc-token"] = token
 
 # RIGHT -- inject on the session instance
-session.headers["Authorization"] = f"Bearer {token}"
+session.headers["gc-token"] = token
 ```

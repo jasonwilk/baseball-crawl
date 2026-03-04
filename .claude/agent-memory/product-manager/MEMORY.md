@@ -2,7 +2,7 @@
 
 ## Numbering State
 - Next available epic number: E-039
-- Epics created: E-001 through E-038 (E-001, E-006, E-007, E-008, E-010, E-011, E-012, E-013, E-014, E-015, E-016, E-017, E-018, E-019, E-020, E-021, E-022, E-024, E-025, E-026, E-027, E-028, E-029, E-030, E-031, E-032, E-033, E-034, E-035, E-036 archived)
+- Epics created: E-001 through E-038 (E-001, E-005, E-006, E-007, E-008, E-010, E-011, E-012, E-013, E-014, E-015, E-016, E-017, E-018, E-019, E-020, E-021, E-022, E-024, E-025, E-026, E-027, E-028, E-029, E-030, E-031, E-032, E-033, E-034, E-035, E-036, E-037, E-038 archived)
 - Next available idea number: IDEA-008
 - Ideas created: IDEA-001 through IDEA-007
 
@@ -17,9 +17,9 @@
 - E-002 (READY): Data Ingestion Pipeline -- REFINED 2026-03-03. Research spike E-002-R-01 TODO (discover stats endpoints). E-002-01 TODO (roster crawl, no blockers), E-002-02 TODO (schedule+game-summaries, blocked on 01), E-002-03 BLOCKED (game stats, on R-01+02), E-002-04 BLOCKED (player stats, on R-01+01), E-002-05 TODO (opponent, on 02), E-002-06 TODO (roster load, on 01+E-003-01), E-002-07a BLOCKED (game load, on 03+E-003-01), E-002-07b BLOCKED (stats load, on 04+E-003-01), E-002-08 TODO (orchestrator, on 01+02+05). Old E-002-07 ABANDONED (split). Dispatchable now: R-01, 01.
 - E-003 (READY): Data Model and Storage Schema -- REFINED 2026-03-03. E-003-01 TODO (rewrite 001_initial_schema.sql: seasons, crawl config, pitching, expanded splits), E-003-02 TODO (coaching_assignments migration 004, blocked on E-003-01 + E-023-01), E-003-03 ABANDONED, E-003-04 TODO (seed data + query tests, blocked on E-003-01). E-003-01 has NO blockers. E-003-01 and E-003-04 can run sequentially without E-023. E-003-02 cross-epic dep on E-023-01.
 - E-004 (DRAFT): Coaching Dashboard -- no stories yet, blocked on E-002 + E-003. Still references old Cloudflare stack (E-009-08 will fix).
-- E-005 (ACTIVE): HTTP Request Discipline -- 4/5 DONE. E-005-03 TODO (blocker E-001-02 now DONE -- ready for dispatch).
 - E-009 (ACTIVE): Tech Stack Redesign -- 02/03/04/05/06 DONE. 07 TODO (production runbook), 08 TODO (CLAUDE.md update, blocked on 07). All research spikes DONE.
 ## Archived Epics
+- E-005 (COMPLETED): HTTP Request Discipline -- all 5 stories DONE. Shared HTTP session layer: src/http/headers.py (BROWSER_HEADERS), src/http/session.py (create_session()), GameChangerClient verified using gc-token auth. 27 tests. docs/http-integration-guide.md. Follow-up needed: Chrome 131->145 update + DNT/Referer/Origin headers in BROWSER_HEADERS.
 - E-023 (COMPLETED): Auth and Team-Level Permissions -- all 5 stories DONE. Magic link + passkey auth, team-scoped dashboard, admin CRUD. 385 tests. Key files: migrations/003_auth.sql, src/api/auth.py, src/api/routes/auth.py, src/api/routes/admin.py, src/api/email.py. Added webauthn + python-multipart to requirements.txt. E-003-02 cross-epic dependency on E-023-01 is now satisfied.
 - E-006 (ABANDONED): PII Protection -- demoted to IDEA-004. Revisit when E-002 produces real data.
 - E-007 (COMPLETED): Orchestrator Workflow Discipline -- refined PM modes, READY gate, Decision Gates
