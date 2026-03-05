@@ -113,6 +113,7 @@ When all stories are verified DONE, the PM executes the following closure sequen
 | API exploration, endpoint docs | `general-purpose` (api-scout role in prompt) |
 | Context-layer files: `CLAUDE.md`, `.claude/agents/*.md`, `.claude/rules/*.md`, `.claude/skills/**`, `.claude/hooks/**`, `.claude/settings.json`, `.claude/settings.local.json`, `.claude/agent-memory/**` | `claude-architect` |
 | Documentation (`docs/admin/`, `docs/coaching/`) | `docs-writer` |
+| UI/UX design: wireframes, layout specs, component inventories, user flows | `ux-designer` |
 
 **Routing Precedence**: If a story's "Files to Create or Modify" includes any context-layer path listed above, route to `claude-architect` regardless of the story's primary domain. The only exception is the PM updating its own memory files (`.claude/agent-memory/product-manager/`) during normal status-update work.
 

@@ -17,7 +17,7 @@ IMPORTANT -- This is the governing design principle for the entire project.
 - State: Active development -- src/http/ module exists (headers, session factory), multiple epics completed
 
 ## Agent Ecosystem (Current)
-Seven agents in `.claude/agents/`:
+Eight agents in `.claude/agents/`:
 - **claude-architect** (opus, yellow): Meta-agent. Designs/manages agents, CLAUDE.md, rules.
 - **product-manager** (opus, green): Product Manager and entry point. Epics, stories, dispatch via Agent Teams. No code.
 - **baseball-coach** (sonnet, red): Domain expert. Coaching needs -> technical requirements.
@@ -25,6 +25,7 @@ Seven agents in `.claude/agents/`:
 - **data-engineer** (sonnet, blue): Database schema, SQL migrations, ETL pipelines, query optimization.
 - **software-engineer** (sonnet, blue): Python implementation. Crawlers, parsers, loaders, utilities, tests.
 - **docs-writer** (sonnet, purple): Documentation specialist. Admin and coaching docs.
+- **ux-designer** (sonnet, cyan): UX/interface designer. Layouts, wireframes, user flows for coaching dashboard (Jinja2 + Tailwind). Created via E-040.
 
 ### When to Create New Agents
 Only when a user request requires specialized capability that existing agents cannot handle AND the work is recurring.

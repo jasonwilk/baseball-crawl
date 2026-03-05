@@ -282,6 +282,7 @@ This project uses specialized agents coordinated by the product-manager:
 | **data-engineer** | DE | Database schema design, ETL pipelines, SQLite architecture |
 | **software-engineer** | SE | Python implementation, testing, general coding work |
 | **docs-writer** | | Documentation specialist for admin/developer and coaching staff audiences. Writes and maintains human-readable documentation in `docs/admin/` and `docs/coaching/`. |
+| **ux-designer** | | UX/interface designer for coaching dashboard and UI work. Designs layouts, wireframes, component structure, and user flows for server-rendered HTML (Jinja2 + Tailwind). |
 
 ### How Agents Collaborate
 - **baseball-coach** produces domain requirements that inform stories and data models
