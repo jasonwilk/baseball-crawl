@@ -141,6 +141,23 @@ Shows a deduplicated table of every unique (method, path) seen, with hit count a
 - Check your host LAN IP (see "Finding Your LAN IP" above) -- not the container IP from `hostname -I`
 - Confirm mitmproxy is running: `./scripts/proxy.sh status`
 - Check that port 8080 is not blocked by a firewall
+- Check for devcontainer port-forwarding conflicts (see "Traefik dashboard appears instead of mitm.it" below)
+
+### Traefik dashboard appears instead of mitm.it
+
+If you configure your iPhone proxy to `<host-ip>:8080` and visit `mitm.it` in Safari but see the Traefik dashboard instead of the mitmproxy certificate installer, VS Code's devcontainer port forwarding is conflicting with Docker's port mapping.
+
+**Symptoms**: Visiting `http://mitm.it` shows the Traefik dashboard page. Running `lsof -i :8080` on the host shows two processes (e.g., OrbStack and VS Code) both listening on port 8080.
+
+**Cause**: The `devcontainer.json` `forwardPorts` array included port 8080, so VS Code created its own forwarding tunnel on the host. This races with Docker Compose's `0.0.0.0:8080:8080` binding for the mitmproxy container. The iPhone connects to whichever listener wins the bind -- often VS Code's tunnel, which routes to Traefik instead of mitmproxy.
+
+**Fix**:
+1. Open `.devcontainer/devcontainer.json`
+2. Remove `8080` and `8081` from the `forwardPorts` array (keep `8000` and `8180`)
+3. Rebuild the devcontainer (VS Code: "Rebuild Container")
+4. Verify with `lsof -i :8080` on the host -- only one process should be listening
+
+This has already been fixed in the project. If it recurs after a devcontainer config change, check `forwardPorts` first.
 
 ### Certificate not trusted
 

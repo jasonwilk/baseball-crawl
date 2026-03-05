@@ -27,7 +27,11 @@
     }
   },
   "remoteUser": "vscode",
-  "forwardPorts": [8000, 8080, 8081, 8180],
+  // Ports 8080 (mitmproxy) and 8081 (mitmweb) are excluded from forwardPorts
+  // because Docker Compose maps them to 0.0.0.0 for LAN access. VS Code
+  // forwarding would conflict with Docker's binding, causing devices on the
+  // LAN to reach VS Code's tunnel instead of the mitmproxy container.
+  "forwardPorts": [8000, 8180],
   "mounts": [
     "source=${localEnv:HOME}/.claude,target=/home/vscode/.claude,type=bind"
   ],

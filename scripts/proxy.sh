@@ -48,6 +48,20 @@ cmd_stop() {
 
 cmd_status() {
     docker compose ps mitmproxy
+    echo
+    echo "Port 8080 listeners (proxy):"
+    if command -v lsof &>/dev/null; then
+        lsof -i :8080 2>/dev/null || echo "  No listeners on port 8080"
+    else
+        echo "  lsof not available -- check port conflicts from the host"
+    fi
+    echo
+    echo "Port 8081 listeners (mitmweb UI):"
+    if command -v lsof &>/dev/null; then
+        lsof -i :8081 2>/dev/null || echo "  No listeners on port 8081"
+    else
+        echo "  lsof not available -- check port conflicts from the host"
+    fi
 }
 
 case "${1:-}" in

@@ -68,6 +68,8 @@ services:
       - PYTHONPATH=/app
     ports:
       # Proxy listener -- bound to 0.0.0.0 so iPhone on LAN can reach it.
+      # Do NOT add 8080 or 8081 to devcontainer.json forwardPorts -- VS Code
+      # forwarding conflicts with Docker's 0.0.0.0 binding and breaks LAN access.
       - "0.0.0.0:8080:8080"
       # mitmweb UI -- accessible from host browser.
       - "0.0.0.0:8081:8081"
