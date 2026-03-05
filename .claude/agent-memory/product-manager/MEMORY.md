@@ -1,8 +1,8 @@
 # Product Manager -- Agent Memory
 
 ## Numbering State
-- Next available epic number: E-040
-- Epics created: E-001 through E-039 (E-001, E-003, E-005, E-006, E-007, E-008, E-010, E-011, E-012, E-013, E-014, E-015, E-016, E-017, E-018, E-019, E-020, E-021, E-022, E-024, E-025, E-026, E-027, E-028, E-029, E-030, E-031, E-032, E-033, E-034, E-035, E-036, E-037, E-038 archived)
+- Next available epic number: E-041
+- Epics created: E-001 through E-040 (E-001, E-003, E-005, E-006, E-007, E-008, E-010, E-011, E-012, E-013, E-014, E-015, E-016, E-017, E-018, E-019, E-020, E-021, E-022, E-024, E-025, E-026, E-027, E-028, E-029, E-030, E-031, E-032, E-033, E-034, E-035, E-036, E-037, E-038 archived)
 - Next available idea number: IDEA-010
 - Ideas created: IDEA-001 through IDEA-009
 
@@ -14,8 +14,8 @@
 - See CLAUDE.md for full project conventions
 
 ## Active Epics (Summary)
-- E-004 (DRAFT): Coaching Dashboard -- no stories yet. E-002 and E-003 both DONE. Technical Notes updated by E-009-08 to target FastAPI + Jinja2 on Docker. **Ready for refinement.**
-- E-039 (READY): mitmproxy Credential Sync and API Discovery -- 1 research spike + 6 stories. R-01 researches addon ecosystem, 01 sets up Docker Compose service, 02/03/04 are parallel addons (credentials, headers, endpoints), 05 consolidates source tagging, 06 adds CLI/docs. Dispatch: R-01 first, then 01, then 02/03/04 parallel, then 05, then 06. E-039-06 touches CLAUDE.md -> routes to claude-architect at dispatch.
+- E-004 (READY): Coaching Dashboard -- 6 stories (01 nav shell -> 02-06 parallel views: batting, pitching, games, opponents, player profile). All blocked on 01. Stories 02-06 share db.py/dashboard.py/test files, so sequential dispatch recommended after 01. Existing /dashboard route gets enhanced, not replaced.
+- E-040 (READY): UX Designer Agent -- 1 story. Creates ux-designer agent definition + updates CLAUDE.md and dispatch-pattern.md. All context-layer files -> routes to claude-architect.
 ## Archived Epics
 - E-009 (COMPLETED): Tech Stack Redesign -- all 16 stories/spikes DONE. Option B selected (Docker + Cloudflare Access). Key artifacts: docker-compose.yml, Dockerfile, FastAPI+Jinja2 app, production runbook (docs/production-deployment.md), docker-compose.override.yml.example. CLAUDE.md and E-004 updated. E-009-07 operator verification (AC-3/4/5/6) deferred to user. Codex review: 5 fixes applied.
 - E-005 (COMPLETED): HTTP Request Discipline -- all 5 stories DONE. Shared HTTP session layer: src/http/headers.py (BROWSER_HEADERS), src/http/session.py (create_session()), GameChangerClient verified using gc-token auth. 27 tests. docs/http-integration-guide.md. Follow-up needed: Chrome 131->145 update + DNT/Referer/Origin headers in BROWSER_HEADERS.
@@ -54,6 +54,7 @@
 - E-038 (COMPLETED): Fix PII Pre-Commit Hook Silent Failure -- changed core.hooksPath from absolute to relative path (.githooks). Added auto-setup to devcontainer postCreateCommand. No follow-up work.
 - E-002 (COMPLETED): Data Ingestion Pipeline -- all 13 stories DONE (1 research spike + 5 crawlers + 3 loaders + 1 orchestrator + 3 codex remediation). 615 tests total. Crawlers: roster, schedule, game-stats, player-stats, opponent (src/gamechanger/crawlers/). Loaders: roster, game, season-stats (src/gamechanger/loaders/). Orchestration: scripts/crawl.py + scripts/load.py (all 3 loaders wired). Client: get_paginated() with 5xx retry, ForbiddenError/CredentialExpiredError split. Config: config/teams.yaml. IDEA-005 trigger fully met (E-002+E-003 both complete). IDEA-008/009 promotable after dashboard work.
 - E-003 (COMPLETED): Data Model and Storage Schema -- all actionable stories DONE (E-003-01: core schema rewrite, E-003-02: coaching_assignments migration 004, E-003-04: seed data + query validation). E-003-03 ABANDONED (absorbed by E-009-02). 394 tests total. Full schema: 10 data tables + 5 auth tables + 1 domain table (coaching_assignments). Migration sequence: 001->003->004.
+- E-039 (COMPLETED): mitmproxy Credential Sync and API Discovery -- 1 research spike + 5 implementation stories. Passive HTTPS proxy for credential extraction, header capture, and API endpoint discovery. Key artifacts: proxy/addons/ (gc_filter, credential_extractor, header_capture, endpoint_logger, loader), Docker Compose mitmproxy service (profile: proxy), scripts/proxy.sh + proxy-report.sh + proxy-endpoints.sh, docs/admin/mitmproxy-guide.md. Codex review: namespace collision fixed (mitmproxy/ -> proxy/). 706 tests. Traefik dashboard moved 8080->8180.
 
 ## Key Architectural Decisions
 - Storage: SQLite (WAL mode). Host-mounted at ./data/app.db. Simple file backup via scripts/backup_db.py (no Litestream).

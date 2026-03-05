@@ -104,6 +104,9 @@ The authoritative data dictionary mapping all GameChanger stat abbreviations to 
 - `./scripts/install-hooks.sh` -- one-time setup for PII pre-commit hook (run after cloning)
 - `./scripts/codex-review.sh <mode>` -- code review of repository changes; modes: `uncommitted`, `base <branch>`, `commit <sha>`. Rubric: `.project/codex-review.md`
 - `./scripts/codex-spec-review.sh <epic-dir>` -- spec review of epic/story files in a directory; optional `--note` flag. Rubric: `.project/codex-spec-review.md`
+- `./scripts/proxy.sh {start|stop|status}` -- manage the mitmproxy proxy (start with `--profile proxy`, stop only mitmproxy, check status)
+- `./scripts/proxy-report.sh` -- print human-readable header parity report from `data/mitmproxy/header-report.json`
+- `./scripts/proxy-endpoints.sh` -- print deduplicated endpoint summary from `data/mitmproxy/endpoint-log.jsonl`
 
 ## Workflows
 - **Ingest endpoint**: When the user says "ingest endpoint" (or similar -- "curl is ready", "new endpoint to analyze"), load `.claude/skills/ingest-endpoint/SKILL.md` and follow its two-phase workflow. The user has placed a curl command in `secrets/gamechanger-curl.txt` and expects api-scout to execute it (time-sensitive -- the `gc-signature` header in POST requests expires within minutes, and curl commands should be executed promptly regardless of token lifetime), then claude-architect to integrate findings into the context layer.
