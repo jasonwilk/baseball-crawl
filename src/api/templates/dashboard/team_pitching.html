@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% from "dashboard/_team_selector.html" import team_selector %}
+
+{% set active_nav = "pitching" %}
+
+{% block title %}Pitching Stats{% if team_name %} -- {{ team_name }}{% endif %}{% endblock %}
+
+{% block header_extras %}
+<div class="ml-auto flex items-center gap-4 text-sm">
+  {% if user and user.display_name %}
+  <span class="text-blue-200">{{ user.display_name }}</span>
+  {% endif %}
+  {% if user and user.is_admin %}
+  <a href="/admin/users" class="text-blue-200 hover:text-white">Admin</a>
+  {% endif %}
+  <a href="/auth/logout" class="text-blue-200 hover:text-white">Logout</a>
+</div>
+{% endblock %}
+
+{% block content %}
+
+{% if no_assignments %}
+<p class="text-gray-600 mt-4">You have no team assignments. Contact your administrator.</p>
+{% else %}
+
+{{ team_selector(permitted_team_infos, active_team_id, "/dashboard/pitching") }}
+
+<h1 class="text-xl font-bold mb-4">{{ team_name }} &mdash; Pitching Stats</h1>
+<div class="overflow-x-auto">
+  <table class="min-w-full text-sm bg-white rounded shadow">
+    <thead class="bg-blue-900 text-white sticky top-0">
+      <tr>
+        <th class="text-left py-2 px-3">Player</th>
+        <th class="py-2 px-3 text-center">ERA</th>
+        <th class="py-2 px-3 text-center">K/9</th>
+        <th class="py-2 px-3 text-center">BB/9</th>
+        <th class="py-2 px-3 text-center">WHIP</th>
+        <th class="py-2 px-3 text-center">GP</th>
+        <th class="py-2 px-3 text-center">IP</th>
+        <th class="py-2 px-3 text-center">H</th>
+        <th class="py-2 px-3 text-center">ER</th>
+        <th class="py-2 px-3 text-center">BB</th>
+        <th class="py-2 px-3 text-center">SO</th>
+        <th class="py-2 px-3 text-center">HR</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for pitcher in pitchers %}
+      <tr class="border-b border-gray-200 {% if loop.index is even %}bg-gray-50{% endif %}">
+        <td class="py-2 px-3 font-medium">
+          <a href="/dashboard/players/{{ pitcher.player_id }}" class="text-blue-900 hover:underline">
+            {% if pitcher.jersey_number %}#{{ pitcher.jersey_number }} {% endif %}{{ pitcher.name }}
+          </a>
+        </td>
+        <td class="py-2 px-3 text-center">{{ pitcher.era }}</td>
+        <td class="py-2 px-3 text-center">{{ pitcher.k9 }}</td>
+        <td class="py-2 px-3 text-center">{{ pitcher.bb9 }}</td>
+        <td class="py-2 px-3 text-center">{{ pitcher.whip }}</td>
+        <td class="py-2 px-3 text-center">{{ pitcher.games }}</td>
+        <td class="py-2 px-3 text-center">{{ pitcher.ip_outs | ip_display }}</td>
+        <td class="py-2 px-3 text-center">{{ pitcher.h }}</td>
+        <td class="py-2 px-3 text-center">{{ pitcher.er }}</td>
+        <td class="py-2 px-3 text-center">{{ pitcher.bb }}</td>
+        <td class="py-2 px-3 text-center">{{ pitcher.so }}</td>
+        <td class="py-2 px-3 text-center">{{ pitcher.hr }}</td>
+      </tr>
+      {% else %}
+      <tr>
+        <td colspan="12" class="py-4 px-3 text-center text-gray-600">No pitching stats available.</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% endif %}
+{% endblock %}

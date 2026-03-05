@@ -1,11 +1,14 @@
 {% extends "base.html" %}
+{% from "dashboard/_team_selector.html" import team_selector %}
+
+{% set active_nav = "batting" %}
 
 {% block title %}Team Stats{% if team_name %} -- {{ team_name }}{% endif %}{% endblock %}
 
 {% block header_extras %}
 <div class="ml-auto flex items-center gap-4 text-sm">
   {% if user and user.display_name %}
-  <span class="text-blue-200">Logged in as {{ user.display_name }}</span>
+  <span class="text-blue-200">{{ user.display_name }}</span>
   {% endif %}
   {% if user and user.is_admin %}
   <a href="/admin/users" class="text-blue-200 hover:text-white">Admin</a>
@@ -20,46 +23,56 @@
 <p class="text-gray-600 mt-4">You have no team assignments. Contact your administrator.</p>
 {% else %}
 
-{% if permitted_team_infos|length > 1 %}
-<div class="mb-4 flex flex-wrap gap-2">
-  {% for team in permitted_team_infos %}
-  <a
-    href="/dashboard?team_id={{ team.team_id }}"
-    class="px-3 py-1 rounded text-sm font-medium
-      {% if team.team_id == active_team_id %}
-        bg-blue-900 text-white
-      {% else %}
-        bg-white text-blue-900 border border-blue-900 hover:bg-blue-50
-      {% endif %}"
-  >{{ team.name }}</a>
-  {% endfor %}
-</div>
-{% endif %}
+{{ team_selector(permitted_team_infos, active_team_id, "/dashboard") }}
 
 <h1 class="text-xl font-bold mb-4">{{ team_name }} &mdash; Batting Stats</h1>
 <div class="overflow-x-auto">
   <table class="min-w-full text-sm bg-white rounded shadow">
-    <thead class="bg-blue-900 text-white">
+    <thead class="bg-blue-900 text-white sticky top-0">
       <tr>
         <th class="text-left py-2 px-3">Player</th>
-        <th class="py-2 px-3 text-center">AB</th>
-        <th class="py-2 px-3 text-center">H</th>
+        <th class="py-2 px-3 text-center">AVG</th>
+        <th class="py-2 px-3 text-center">OBP</th>
+        <th class="py-2 px-3 text-center">GP</th>
         <th class="py-2 px-3 text-center">BB</th>
-        <th class="py-2 px-3 text-center">K</th>
+        <th class="py-2 px-3 text-center">SO</th>
+        <th class="py-2 px-3 text-center">SLG</th>
+        <th class="py-2 px-3 text-center">H</th>
+        <th class="py-2 px-3 text-center">AB</th>
+        <th class="py-2 px-3 text-center">2B</th>
+        <th class="py-2 px-3 text-center">3B</th>
+        <th class="py-2 px-3 text-center">HR</th>
+        <th class="py-2 px-3 text-center">SB</th>
+        <th class="py-2 px-3 text-center">RBI</th>
       </tr>
     </thead>
     <tbody>
       {% for player in players %}
+      {# Compute rate stats: AVG = h/ab, OBP = (h+bb)/(ab+bb), SLG = (h+2B+2*3B+3*HR)/ab #}
+      {# format_avg filter: format_avg(numerator, denominator) -> ".333" or "-" #}
       <tr class="border-b border-gray-200 {% if loop.index is even %}bg-gray-50{% endif %}">
-        <td class="py-2 px-3 font-medium">{{ player.name }}</td>
-        <td class="py-2 px-3 text-center">{{ player.ab }}</td>
-        <td class="py-2 px-3 text-center">{{ player.h }}</td>
+        <td class="py-2 px-3 font-medium whitespace-nowrap">
+          <a href="/dashboard/players/{{ player.player_id }}" class="text-blue-700 hover:underline">
+            {% if player.jersey_number %}#{{ player.jersey_number }} {% endif %}{{ player.name }}
+          </a>
+        </td>
+        <td class="py-2 px-3 text-center">{{ player.h | format_avg(player.ab) }}</td>
+        <td class="py-2 px-3 text-center">{{ (player.h + player.bb) | format_avg(player.ab + player.bb) }}</td>
+        <td class="py-2 px-3 text-center">{{ player.games }}</td>
         <td class="py-2 px-3 text-center">{{ player.bb }}</td>
         <td class="py-2 px-3 text-center">{{ player.so }}</td>
+        <td class="py-2 px-3 text-center">{{ (player.h + player.doubles + 2 * player.triples + 3 * player.hr) | format_avg(player.ab) }}</td>
+        <td class="py-2 px-3 text-center">{{ player.h }}</td>
+        <td class="py-2 px-3 text-center">{{ player.ab }}</td>
+        <td class="py-2 px-3 text-center">{{ player.doubles }}</td>
+        <td class="py-2 px-3 text-center">{{ player.triples }}</td>
+        <td class="py-2 px-3 text-center">{{ player.hr }}</td>
+        <td class="py-2 px-3 text-center">{{ player.sb }}</td>
+        <td class="py-2 px-3 text-center">{{ player.rbi }}</td>
       </tr>
       {% else %}
       <tr>
-        <td colspan="5" class="py-4 px-3 text-center text-gray-500">No stats available.</td>
+        <td colspan="14" class="py-4 px-3 text-center text-gray-600">No stats available.</td>
       </tr>
       {% endfor %}
     </tbody>

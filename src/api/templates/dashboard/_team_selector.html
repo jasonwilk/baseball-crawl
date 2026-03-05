@@ -1,0 +1,17 @@
+{% macro team_selector(permitted_team_infos, active_team_id, base_url) %}
+{% if permitted_team_infos|length > 1 %}
+<div class="mb-4 flex flex-wrap gap-2">
+  {% for team in permitted_team_infos %}
+  <a
+    href="{{ base_url }}?team_id={{ team.team_id }}"
+    class="px-3 py-2 rounded text-sm font-medium
+      {% if team.team_id == active_team_id %}
+        bg-blue-900 text-white
+      {% else %}
+        bg-white text-blue-900 border border-blue-900 hover:bg-blue-50
+      {% endif %}"
+  >{{ team.name }}</a>
+  {% endfor %}
+</div>
+{% endif %}
+{% endmacro %}

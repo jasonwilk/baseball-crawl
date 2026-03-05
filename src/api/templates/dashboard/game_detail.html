@@ -1,0 +1,148 @@
+{% extends "base.html" %}
+
+{% set active_nav = "games" %}
+
+{% block title %}
+Game Detail{% if game %} -- {{ game.game_date }}{% endif %}
+{% endblock %}
+
+{% block header_extras %}
+<div class="ml-auto flex items-center gap-4 text-sm">
+  {% if user and user.display_name %}
+  <span class="text-blue-200">{{ user.display_name }}</span>
+  {% endif %}
+  {% if user and user.is_admin %}
+  <a href="/admin/users" class="text-blue-200 hover:text-white">Admin</a>
+  {% endif %}
+  <a href="/auth/logout" class="text-blue-200 hover:text-white">Logout</a>
+</div>
+{% endblock %}
+
+{% block content %}
+
+<div class="mb-4">
+  <a href="/dashboard/games" class="text-blue-900 hover:underline text-sm">&larr; Back to Games</a>
+</div>
+
+{% if game %}
+  {# Determine home/away score label for header #}
+  {% set home_score = game.home_score %}
+  {% set away_score = game.away_score %}
+  <div class="mb-4">
+    <h1 class="text-xl font-bold">{{ game.game_date }}</h1>
+    <p class="text-gray-600 text-sm mt-1">
+      {{ game.home_team_name }} {{ home_score if home_score is not none else '-' }}
+      &ndash;
+      {{ away_score if away_score is not none else '-' }} {{ game.away_team_name }}
+    </p>
+  </div>
+
+  {% for team in teams %}
+    {# Open the user's active team section; collapse the opponent #}
+    {% if team.team_id == active_team_id %}
+      <details open class="mb-4 border border-gray-200 rounded bg-white shadow">
+    {% else %}
+      <details class="mb-4 border border-gray-200 rounded bg-white shadow">
+    {% endif %}
+      <summary class="cursor-pointer select-none py-3 px-4 font-bold text-blue-900 bg-blue-50 rounded-t">
+        {{ team.team_name }}
+        {% if team.team_id == game.home_team_id %}
+          &mdash; {{ home_score if home_score is not none else '-' }} (Home)
+        {% else %}
+          &mdash; {{ away_score if away_score is not none else '-' }} (Away)
+        {% endif %}
+      </summary>
+
+      <div class="p-3">
+
+        {# Batting table #}
+        <h2 class="text-sm font-semibold text-gray-700 mb-1 mt-2">Batting</h2>
+        {% if team.batting_lines %}
+        <div class="overflow-x-auto mb-4">
+          <table class="min-w-full text-sm">
+            <thead class="bg-blue-900 text-white sticky top-0">
+              <tr>
+                <th class="text-left py-2 px-3">Player</th>
+                <th class="py-2 px-3 text-center">AB</th>
+                <th class="py-2 px-3 text-center">H</th>
+                <th class="py-2 px-3 text-center">2B</th>
+                <th class="py-2 px-3 text-center">3B</th>
+                <th class="py-2 px-3 text-center">HR</th>
+                <th class="py-2 px-3 text-center">RBI</th>
+                <th class="py-2 px-3 text-center">BB</th>
+                <th class="py-2 px-3 text-center">SO</th>
+                <th class="py-2 px-3 text-center">SB</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for batter in team.batting_lines %}
+              <tr class="border-b border-gray-200 {% if loop.index is even %}bg-gray-50{% endif %}">
+                <td class="py-2 px-3 font-medium">
+                  <a href="/dashboard/players/{{ batter.player_id }}" class="text-blue-900 hover:underline">
+                    {{ batter.name }}
+                  </a>
+                </td>
+                <td class="py-2 px-3 text-center">{{ batter.ab }}</td>
+                <td class="py-2 px-3 text-center">{{ batter.h }}</td>
+                <td class="py-2 px-3 text-center">{{ batter.doubles }}</td>
+                <td class="py-2 px-3 text-center">{{ batter.triples }}</td>
+                <td class="py-2 px-3 text-center">{{ batter.hr }}</td>
+                <td class="py-2 px-3 text-center">{{ batter.rbi }}</td>
+                <td class="py-2 px-3 text-center">{{ batter.bb }}</td>
+                <td class="py-2 px-3 text-center">{{ batter.so }}</td>
+                <td class="py-2 px-3 text-center">{{ batter.sb }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <p class="text-gray-600 text-sm mb-4">No batting data.</p>
+        {% endif %}
+
+        {# Pitching table #}
+        <h2 class="text-sm font-semibold text-gray-700 mb-1">Pitching</h2>
+        {% if team.pitching_lines %}
+        <div class="overflow-x-auto">
+          <table class="min-w-full text-sm">
+            <thead class="bg-blue-900 text-white sticky top-0">
+              <tr>
+                <th class="text-left py-2 px-3">Player</th>
+                <th class="py-2 px-3 text-center">IP</th>
+                <th class="py-2 px-3 text-center">H</th>
+                <th class="py-2 px-3 text-center">ER</th>
+                <th class="py-2 px-3 text-center">BB</th>
+                <th class="py-2 px-3 text-center">SO</th>
+                <th class="py-2 px-3 text-center">HR</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for pitcher in team.pitching_lines %}
+              <tr class="border-b border-gray-200 {% if loop.index is even %}bg-gray-50{% endif %}">
+                <td class="py-2 px-3 font-medium">
+                  <a href="/dashboard/players/{{ pitcher.player_id }}" class="text-blue-900 hover:underline">
+                    {{ pitcher.name }}
+                  </a>
+                </td>
+                <td class="py-2 px-3 text-center">{{ pitcher.ip_outs | ip_display }}</td>
+                <td class="py-2 px-3 text-center">{{ pitcher.h }}</td>
+                <td class="py-2 px-3 text-center">{{ pitcher.er }}</td>
+                <td class="py-2 px-3 text-center">{{ pitcher.bb }}</td>
+                <td class="py-2 px-3 text-center">{{ pitcher.so }}</td>
+                <td class="py-2 px-3 text-center">{{ pitcher.hr }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <p class="text-gray-600 text-sm">No pitching data.</p>
+        {% endif %}
+
+      </div>
+    </details>
+  {% endfor %}
+
+{% endif %}
+
+{% endblock %}

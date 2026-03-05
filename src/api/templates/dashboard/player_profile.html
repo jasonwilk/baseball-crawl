@@ -1,0 +1,194 @@
+{% extends "base.html" %}
+
+{# No active nav -- player profile is a detail page, not a main section #}
+
+{% block title %}
+{{ player.first_name }} {{ player.last_name }} &mdash; Player Profile
+{% endblock %}
+
+{% block header_extras %}
+<div class="ml-auto flex items-center gap-4 text-sm">
+  {% if user and user.display_name %}
+  <span class="text-blue-200">{{ user.display_name }}</span>
+  {% endif %}
+  {% if user and user.is_admin %}
+  <a href="/admin/users" class="text-blue-200 hover:text-white">Admin</a>
+  {% endif %}
+  <a href="/auth/logout" class="text-blue-200 hover:text-white">Logout</a>
+</div>
+{% endblock %}
+
+{% block content %}
+
+<div class="mb-4">
+  <a href="javascript:history.back()" class="text-blue-900 hover:underline text-sm">&larr; Back</a>
+</div>
+
+{# Page header: player name + jersey number #}
+<div class="mb-4">
+  <h1 class="text-xl font-bold text-gray-900">
+    {{ player.first_name }} {{ player.last_name }}
+    {% if player.jersey_number %}
+    <span class="text-gray-600 font-normal text-base ml-1">#{{ player.jersey_number }}</span>
+    {% endif %}
+  </h1>
+</div>
+
+{# Current Season Summary card #}
+<div class="mb-4 bg-white rounded shadow border border-gray-200 p-4">
+  <h2 class="text-base font-bold text-blue-900 mb-3">Current Season Summary</h2>
+  {% if current_batting or current_pitching %}
+  <div class="grid gap-4 {% if current_batting and current_pitching %}grid-cols-2{% endif %}">
+    {% if current_batting %}
+    <div>
+      <p class="text-xs text-gray-600 uppercase tracking-wide mb-1">Batting ({{ current_batting.season_name }})</p>
+      <div class="flex flex-wrap gap-4 text-sm">
+        <span><span class="text-gray-600">GP</span> <span class="font-medium">{{ current_batting.games }}</span></span>
+        <span><span class="text-gray-600">AVG</span> <span class="font-medium">{{ current_batting.h | format_avg(current_batting.ab) }}</span></span>
+        <span><span class="text-gray-600">OBP</span> <span class="font-medium">{{ (current_batting.h + current_batting.bb) | format_avg(current_batting.ab + current_batting.bb) }}</span></span>
+        <span><span class="text-gray-600">SLG</span> <span class="font-medium">{{ (current_batting.h + current_batting.doubles + 2 * current_batting.triples + 3 * current_batting.hr) | format_avg(current_batting.ab) }}</span></span>
+        <span><span class="text-gray-600">HR</span> <span class="font-medium">{{ current_batting.hr }}</span></span>
+        <span><span class="text-gray-600">RBI</span> <span class="font-medium">{{ current_batting.rbi }}</span></span>
+      </div>
+    </div>
+    {% endif %}
+    {% if current_pitching %}
+    <div>
+      <p class="text-xs text-gray-600 uppercase tracking-wide mb-1">Pitching ({{ current_pitching.season_name }})</p>
+      <div class="flex flex-wrap gap-4 text-sm">
+        <span><span class="text-gray-600">GP</span> <span class="font-medium">{{ current_pitching.games }}</span></span>
+        <span><span class="text-gray-600">IP</span> <span class="font-medium">{{ current_pitching.ip_outs | ip_display }}</span></span>
+        <span><span class="text-gray-600">ERA</span> <span class="font-medium">{{ current_pitching.era }}</span></span>
+        <span><span class="text-gray-600">K/9</span> <span class="font-medium">{{ current_pitching.k9 }}</span></span>
+        <span><span class="text-gray-600">WHIP</span> <span class="font-medium">{{ current_pitching.whip }}</span></span>
+      </div>
+    </div>
+    {% endif %}
+  </div>
+  {% else %}
+  <p class="text-gray-600 text-sm">No stats recorded yet.</p>
+  {% endif %}
+</div>
+
+{# Batting by Season table #}
+<h2 class="text-base font-bold mb-2">Batting by Season</h2>
+{% if batting_seasons %}
+<div class="overflow-x-auto mb-6">
+  <table class="min-w-full text-sm bg-white rounded shadow">
+    <thead class="bg-blue-900 text-white sticky top-0">
+      <tr>
+        <th class="text-left py-2 px-3">Season</th>
+        <th class="text-left py-2 px-3">Team</th>
+        <th class="py-2 px-3 text-center">AVG</th>
+        <th class="py-2 px-3 text-center">OBP</th>
+        <th class="py-2 px-3 text-center">GP</th>
+        <th class="py-2 px-3 text-center">BB</th>
+        <th class="py-2 px-3 text-center">SO</th>
+        <th class="py-2 px-3 text-center">SLG</th>
+        <th class="py-2 px-3 text-center">H</th>
+        <th class="py-2 px-3 text-center">AB</th>
+        <th class="py-2 px-3 text-center">2B</th>
+        <th class="py-2 px-3 text-center">3B</th>
+        <th class="py-2 px-3 text-center">HR</th>
+        <th class="py-2 px-3 text-center">SB</th>
+        <th class="py-2 px-3 text-center">RBI</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in batting_seasons %}
+      <tr class="border-b border-gray-200 {% if loop.index is even %}bg-gray-50{% endif %}">
+        <td class="py-2 px-3 whitespace-nowrap">{{ row.season_name }}</td>
+        <td class="py-2 px-3 whitespace-nowrap">{{ row.team_name }}</td>
+        <td class="py-2 px-3 text-center">{{ row.h | format_avg(row.ab) }}</td>
+        <td class="py-2 px-3 text-center">{{ (row.h + row.bb) | format_avg(row.ab + row.bb) }}</td>
+        <td class="py-2 px-3 text-center">{{ row.games }}</td>
+        <td class="py-2 px-3 text-center">{{ row.bb }}</td>
+        <td class="py-2 px-3 text-center">{{ row.so }}</td>
+        <td class="py-2 px-3 text-center">{{ (row.h + row.doubles + 2 * row.triples + 3 * row.hr) | format_avg(row.ab) }}</td>
+        <td class="py-2 px-3 text-center">{{ row.h }}</td>
+        <td class="py-2 px-3 text-center">{{ row.ab }}</td>
+        <td class="py-2 px-3 text-center">{{ row.doubles }}</td>
+        <td class="py-2 px-3 text-center">{{ row.triples }}</td>
+        <td class="py-2 px-3 text-center">{{ row.hr }}</td>
+        <td class="py-2 px-3 text-center">{{ row.sb }}</td>
+        <td class="py-2 px-3 text-center">{{ row.rbi }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<p class="text-gray-600 mb-6">No batting stats.</p>
+{% endif %}
+
+{# Pitching by Season table #}
+<h2 class="text-base font-bold mb-2">Pitching by Season</h2>
+{% if pitching_seasons %}
+<div class="overflow-x-auto mb-6">
+  <table class="min-w-full text-sm bg-white rounded shadow">
+    <thead class="bg-blue-900 text-white sticky top-0">
+      <tr>
+        <th class="text-left py-2 px-3">Season</th>
+        <th class="text-left py-2 px-3">Team</th>
+        <th class="py-2 px-3 text-center">ERA</th>
+        <th class="py-2 px-3 text-center">K/9</th>
+        <th class="py-2 px-3 text-center">WHIP</th>
+        <th class="py-2 px-3 text-center">GP</th>
+        <th class="py-2 px-3 text-center">IP</th>
+        <th class="py-2 px-3 text-center">H</th>
+        <th class="py-2 px-3 text-center">ER</th>
+        <th class="py-2 px-3 text-center">BB</th>
+        <th class="py-2 px-3 text-center">SO</th>
+        <th class="py-2 px-3 text-center">HR</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in pitching_seasons %}
+      <tr class="border-b border-gray-200 {% if loop.index is even %}bg-gray-50{% endif %}">
+        <td class="py-2 px-3 whitespace-nowrap">{{ row.season_name }}</td>
+        <td class="py-2 px-3 whitespace-nowrap">{{ row.team_name }}</td>
+        <td class="py-2 px-3 text-center">{{ row.era }}</td>
+        <td class="py-2 px-3 text-center">{{ row.k9 }}</td>
+        <td class="py-2 px-3 text-center">{{ row.whip }}</td>
+        <td class="py-2 px-3 text-center">{{ row.games }}</td>
+        <td class="py-2 px-3 text-center">{{ row.ip_outs | ip_display }}</td>
+        <td class="py-2 px-3 text-center">{{ row.h }}</td>
+        <td class="py-2 px-3 text-center">{{ row.er }}</td>
+        <td class="py-2 px-3 text-center">{{ row.bb }}</td>
+        <td class="py-2 px-3 text-center">{{ row.so }}</td>
+        <td class="py-2 px-3 text-center">{{ row.hr }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<p class="text-gray-600 mb-6">No pitching stats.</p>
+{% endif %}
+
+{# Recent Games section #}
+<h2 class="text-base font-bold mb-2">Recent Games</h2>
+{% if recent_games %}
+<div class="bg-white rounded shadow border border-gray-200 overflow-hidden mb-6">
+  {% for game in recent_games %}
+  <a href="/dashboard/games/{{ game.game_id }}"
+     class="flex items-center gap-3 px-4 border-b border-gray-200 last:border-b-0 hover:bg-gray-50 min-h-[44px]">
+    <span class="text-gray-600 text-sm whitespace-nowrap w-20">
+      {{ game.game_date | format_date }}
+    </span>
+    <span class="text-gray-900 text-sm flex-1 truncate">{{ game.opponent_name or 'Unknown' }}</span>
+    <span class="text-sm font-medium whitespace-nowrap">
+      {% if game.appearance_type == 'batting' and game.ab is not none %}
+        {{ game.h }}-for-{{ game.ab }}{% if game.hr %} &middot; {{ game.hr }} HR{% endif %}{% if game.rbi %} &middot; {{ game.rbi }} RBI{% endif %}
+      {% elif game.appearance_type == 'pitching' and game.ip_outs is not none %}
+        {{ game.ip_outs | ip_display }} IP &middot; {{ game.er }} ER &middot; {{ game.so_pitched }} SO
+      {% endif %}
+    </span>
+  </a>
+  {% endfor %}
+</div>
+{% else %}
+<p class="text-gray-600 mb-6">No recent games.</p>
+{% endif %}
+
+{% endblock %}
