@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "bright-data": {
+      "command": "npx",
+      "args": [
+        "mcp-remote",
+        "https://mcp.brightdata.com/mcp?token=${BRIGHT_DATA_TOKEN}"
+      ]
+    },
+    "cloudflare-api": {
+      "type": "http",
+      "url": "https://mcp.cloudflare.com/mcp"
+    }
+  }
+}
