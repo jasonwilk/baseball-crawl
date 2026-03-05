@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-LOG_PATH = Path("/app/data/mitmproxy/endpoint-log.jsonl")
+LOG_PATH = Path("/app/proxy/data/endpoint-log.jsonl")
 
 
 class EndpointLogger:

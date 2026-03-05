@@ -104,9 +104,12 @@ The authoritative data dictionary mapping all GameChanger stat abbreviations to 
 - `./scripts/install-hooks.sh` -- one-time setup for PII pre-commit hook (run after cloning)
 - `./scripts/codex-review.sh <mode>` -- code review of repository changes; modes: `uncommitted`, `base <branch>`, `commit <sha>`. Rubric: `.project/codex-review.md`
 - `./scripts/codex-spec-review.sh <epic-dir>` -- spec review of epic/story files in a directory; optional `--note` flag. Rubric: `.project/codex-spec-review.md`
-- `./scripts/proxy.sh {start|stop|status}` -- manage the mitmproxy proxy (start with `--profile proxy`, stop only mitmproxy, check status)
-- `./scripts/proxy-report.sh` -- print human-readable header parity report from `data/mitmproxy/header-report.json`
-- `./scripts/proxy-endpoints.sh` -- print deduplicated endpoint summary from `data/mitmproxy/endpoint-log.jsonl`
+- `cd proxy && ./start.sh` -- launch mitmproxy on the Mac host (detached)
+- `cd proxy && ./stop.sh` -- shut down mitmproxy
+- `cd proxy && ./status.sh` -- check mitmproxy containers and port listeners
+- `cd proxy && ./logs.sh` -- follow live mitmproxy log output
+- `./scripts/proxy-report.sh` -- print human-readable header parity report from `proxy/data/header-report.json`
+- `./scripts/proxy-endpoints.sh` -- print deduplicated endpoint summary from `proxy/data/endpoint-log.jsonl`
 
 ## Workflows
 - **Implement**: When the user says "implement E-NNN" (or similar -- "start epic", "execute E-NNN", "dispatch E-NNN", "kick off E-NNN"), load `.claude/skills/implement/SKILL.md` and follow its workflow. The team lead reads the epic for team composition, spawns the PM, and relays the request. Supports an "and review" modifier to chain a code review after implementation completes.

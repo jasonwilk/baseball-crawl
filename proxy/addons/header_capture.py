@@ -5,7 +5,7 @@ credential headers), groups headers by traffic source (ios/web/unknown), and
 writes a JSON parity report comparing captured headers against the project's
 canonical ``BROWSER_HEADERS`` in ``src.http.headers``.
 
-The report is written to ``/app/data/mitmproxy/header-report.json`` and is
+The report is written to ``proxy/data/header-report.json`` and is
 overwritten on each update (latest snapshot only).
 """
 
@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any
 
 # Ensure the project root is on sys.path so we can import from src/
-_PROJECT_ROOT = Path(__file__).resolve().parents[3]
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
@@ -59,7 +59,7 @@ _SKIP_DIFF_HEADERS: frozenset[str] = frozenset(
     }
 )
 
-_REPORT_PATH = Path("/app/data/mitmproxy/header-report.json")
+_REPORT_PATH = Path("/app/proxy/data/header-report.json")
 
 
 # ---------------------------------------------------------------------------

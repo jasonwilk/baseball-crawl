@@ -4,33 +4,46 @@
 
 mitmproxy sits between your devices (iPhone, web browser) and GameChanger's servers. When you use GameChanger normally, mitmproxy passively captures:
 
-- **Credentials** (`gc-token`, `gc-device-id`) -- written to `.env` automatically
+- **Credentials** (`gc-token`, `gc-device-id`) -- written to the project root `.env` automatically
 - **Headers** -- compared against the project's `BROWSER_HEADERS` to detect drift
 - **API endpoints** -- every GameChanger URL hit is logged for API discovery
 
 This replaces the manual "copy curl from DevTools" workflow. Open GameChanger on your phone or browser, and credentials flow into the project automatically.
 
+## Architecture
+
+mitmproxy runs directly on the Mac host in its own Docker container (under `proxy/`). It is completely separate from the project's Docker Compose stack (app, traefik, cloudflared) which runs inside the devcontainer.
+
+This architecture means:
+- iPhone reaches the proxy directly over LAN at `<mac-lan-ip>:8080` -- no VS Code port forwarding needed
+- The mitmweb UI is at `http://localhost:8081` on the Mac
+- The devcontainer can reach the proxy via `host.docker.internal:8080`
+
+See `proxy/README.md` for the quick-start guide.
+
 ## Starting and Stopping
 
-Start the proxy (app stack starts too if not already running):
+All proxy commands run from the `proxy/` directory on the Mac host (not inside the devcontainer):
 
 ```bash
-./scripts/proxy.sh start
+cd proxy
+./start.sh      # launch mitmproxy (detached); prints LAN IP and mitmweb URL
+./status.sh     # check containers and port listeners
+./logs.sh       # follow live log output
+./stop.sh       # shut down mitmproxy
 ```
 
-This prints the proxy address, mitmweb UI URL, and iPhone setup reminder.
+### Optional: set a mitmweb password
 
-Stop only mitmproxy (app stack keeps running):
+Copy `.env.example` to `.env` inside `proxy/` and set `MITMWEB_PASSWORD`:
 
 ```bash
-./scripts/proxy.sh stop
+cd proxy
+cp .env.example .env
+# Edit .env and set MITMWEB_PASSWORD=yourpassword
 ```
 
-Check mitmproxy status:
-
-```bash
-./scripts/proxy.sh status
-```
+When `MITMWEB_PASSWORD` is unset or empty, mitmweb generates a token-based URL and prints it to the logs. Check `./logs.sh` for the URL.
 
 ## iPhone Proxy Configuration
 
@@ -40,7 +53,7 @@ Check mitmproxy status:
 2. Tap the **(i)** next to your connected network
 3. Scroll to **Configure Proxy** > **Manual**
 4. Set:
-   - **Server**: Your computer's LAN IP (see "Finding Your LAN IP" below)
+   - **Server**: Your Mac's LAN IP (printed by `./start.sh`, or see "Finding Your LAN IP" below)
    - **Port**: `8080`
 5. Tap **Save**
 
@@ -53,11 +66,11 @@ Check mitmproxy status:
 5. Go to **Settings > General > About > Certificate Trust Settings**
 6. Toggle **mitmproxy** to enabled
 
-The certificate only needs to be installed once. It persists until you remove it or delete the `mitmproxy-certs` Docker volume.
+The certificate is stored in `proxy/certs/` and persists across proxy restarts. You only need to install it once per iPhone. Deleting `proxy/certs/` invalidates all installed certs -- you would need to repeat these steps.
 
 ### 3. Verify
 
-Open the GameChanger app. You should see requests appearing in the mitmweb UI at `http://localhost:8081`.
+Open the GameChanger app. You should see requests appearing in the mitmweb UI at `http://localhost:8081` on the Mac.
 
 ### 4. When Done
 
@@ -67,7 +80,7 @@ Turn off the proxy on the iPhone:
 
 ## Finding Your LAN IP
 
-Since the devcontainer has its own network, `hostname -I` inside it returns the container IP -- not your host's LAN IP. Find your real IP on the **host machine**:
+The `./start.sh` script prints your Mac's LAN IP. You can also find it manually:
 
 - **macOS**: `ipconfig getifaddr en0` (Wi-Fi) or `ipconfig getifaddr en1` (Ethernet)
 - **Windows**: `ipconfig` -- look for "IPv4 Address" under your active adapter
@@ -105,15 +118,31 @@ Firefox has its own proxy settings:
 5. Click **OK**
 6. Visit `mitm.it` in Firefox to install the CA certificate
 
+## Devcontainer Access
+
+From inside the devcontainer, the host proxy is reachable via Docker's built-in DNS alias:
+
+```bash
+curl -sx http://host.docker.internal:8080 http://mitm.it
+```
+
+A non-empty HTML response confirms the devcontainer-to-host-proxy path is working. To route project HTTP requests through the proxy, set:
+
+```
+http_proxy=http://host.docker.internal:8080
+https_proxy=http://host.docker.internal:8080
+```
+
 ## Where Data Goes
 
-| File | Contents |
+| Path | Contents |
 |------|----------|
-| `.env` | Credentials (`GAMECHANGER_AUTH_TOKEN`, `GAMECHANGER_DEVICE_ID`) -- updated live |
-| `data/mitmproxy/header-report.json` | Header parity report (latest snapshot per source) |
-| `data/mitmproxy/endpoint-log.jsonl` | Append-only log of every GameChanger API request |
+| Project root `.env` | Credentials (`GAMECHANGER_AUTH_TOKEN`, `GAMECHANGER_DEVICE_ID`) -- updated live |
+| `proxy/data/header-report.json` | Header parity report (latest snapshot per source) |
+| `proxy/data/endpoint-log.jsonl` | Append-only log of every GameChanger API request |
+| `proxy/certs/` | mitmproxy CA certificate (persists across restarts) |
 
-The `data/mitmproxy/` directory is git-ignored (under the `data/` rule). The `.env` file is also git-ignored.
+Both `proxy/data/` and `proxy/certs/` are gitignored (via `proxy/.gitignore`). The `.env` file is also gitignored at the project root.
 
 ## Reading Reports
 
@@ -137,43 +166,35 @@ Shows a deduplicated table of every unique (method, path) seen, with hit count a
 
 ### Proxy unreachable from iPhone
 
-- Verify your computer and iPhone are on the same Wi-Fi network
-- Check your host LAN IP (see "Finding Your LAN IP" above) -- not the container IP from `hostname -I`
-- Confirm mitmproxy is running: `./scripts/proxy.sh status`
-- Check that port 8080 is not blocked by a firewall
-- Check for devcontainer port-forwarding conflicts (see "Traefik dashboard appears instead of mitm.it" below)
+- Verify your Mac and iPhone are on the same Wi-Fi network
+- Check your Mac's LAN IP (printed by `./start.sh`, or see "Finding Your LAN IP" above)
+- Confirm mitmproxy is running: `cd proxy && ./status.sh`
+- Check that port 8080 is not blocked by macOS firewall (**System Settings > Network > Firewall**)
+- Run `./status.sh` and confirm the container is `Up` and port 8080 has a listener
 
-### Traefik dashboard appears instead of mitm.it
+### Port 8080 already in use
 
-If you configure your iPhone proxy to `<host-ip>:8080` and visit `mitm.it` in Safari but see the Traefik dashboard instead of the mitmproxy certificate installer, VS Code's devcontainer port forwarding is conflicting with Docker's port mapping.
+```bash
+cd proxy && ./status.sh   # shows what is listening on 8080
+```
 
-**Symptoms**: Visiting `http://mitm.it` shows the Traefik dashboard page. Running `lsof -i :8080` on the host shows two processes (e.g., OrbStack and VS Code) both listening on port 8080.
-
-**Cause**: The `devcontainer.json` `forwardPorts` array included port 8080, so VS Code created its own forwarding tunnel on the host. This races with Docker Compose's `0.0.0.0:8080:8080` binding for the mitmproxy container. The iPhone connects to whichever listener wins the bind -- often VS Code's tunnel, which routes to Traefik instead of mitmproxy.
-
-**Fix**:
-1. Open `.devcontainer/devcontainer.json`
-2. Remove `8080` and `8081` from the `forwardPorts` array (keep `8000` and `8180`)
-3. Rebuild the devcontainer (VS Code: "Rebuild Container")
-4. Verify with `lsof -i :8080` on the host -- only one process should be listening
-
-This has already been fixed in the project. If it recurs after a devcontainer config change, check `forwardPorts` first.
+Stop the conflicting process or change the port in `proxy/docker-compose.yml`. Changing the port also requires reconfiguring the iPhone proxy settings.
 
 ### Certificate not trusted
 
 - Make sure you completed **both** certificate steps: installing the profile (VPN & Device Management) AND enabling trust (Certificate Trust Settings)
 - If you see SSL errors, the cert may have been regenerated. Remove the old profile from the iPhone and reinstall via `mitm.it`
-- Deleting the `mitmproxy-certs` Docker volume invalidates all installed certs
+- Deleting `proxy/certs/` invalidates all installed certs -- repeat the install steps
 
 ### No traffic captured
 
 - Verify the iPhone/browser proxy is set to the correct IP and port 8080
 - Check that the CA certificate is installed and trusted
-- Open `http://localhost:8081` (mitmweb UI) to see if any traffic is flowing
+- Open the mitmweb UI (URL printed by `./start.sh` or in `./logs.sh` output) to see if any traffic is flowing
 - Only GameChanger domains are captured -- other traffic is passed through but not logged
 
 ### mitmproxy won't start
 
 - Check for port conflicts: `lsof -i :8080` and `lsof -i :8081`
-- Review logs: `docker compose logs mitmproxy`
+- Review logs: `cd proxy && ./logs.sh`
 - Ensure Docker is running: `docker info`

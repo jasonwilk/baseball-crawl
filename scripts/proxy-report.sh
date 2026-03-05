@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # Print a human-readable summary of the mitmproxy header parity report.
-# Reads data/mitmproxy/header-report.json (produced by header_capture.py).
+# Reads proxy/data/header-report.json (produced by header_capture.py).
 set -euo pipefail
 
-REPORT_FILE="data/mitmproxy/header-report.json"
+REPORT_FILE="proxy/data/header-report.json"
 
 if [ ! -f "$REPORT_FILE" ]; then
     echo "No traffic captured yet. Start the proxy and generate some traffic."
     echo
-    echo "  ./scripts/proxy.sh start"
+    echo "  proxy/start.sh"
     echo "  Then browse GameChanger through the proxy."
     exit 0
 fi

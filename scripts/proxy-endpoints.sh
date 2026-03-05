@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # Print a summary table of unique GameChanger API endpoints from the mitmproxy log.
-# Reads data/mitmproxy/endpoint-log.jsonl (produced by endpoint_logger.py).
+# Reads proxy/data/endpoint-log.jsonl (produced by endpoint_logger.py).
 set -euo pipefail
 
-LOG_FILE="data/mitmproxy/endpoint-log.jsonl"
+LOG_FILE="proxy/data/endpoint-log.jsonl"
 
 if [ ! -f "$LOG_FILE" ]; then
     echo "No endpoints captured yet. Start the proxy and generate some traffic."
     echo
-    echo "  ./scripts/proxy.sh start"
+    echo "  proxy/start.sh"
     echo "  Then browse GameChanger through the proxy."
     exit 0
 fi

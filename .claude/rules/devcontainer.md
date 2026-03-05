@@ -113,7 +113,7 @@ The project runs a three-service stack via `docker-compose.yml`:
 | Service | Purpose | Port |
 |---------|---------|------|
 | **app** | FastAPI application (Python, uvicorn) | `127.0.0.1:8001` (direct, loopback only), `localhost:8000` (via Traefik) |
-| **traefik** | Reverse proxy, dashboard at `localhost:8080` | `localhost:8000` (app traffic), `localhost:8080` (dashboard) |
+| **traefik** | Reverse proxy, dashboard at `localhost:8180` | `localhost:8000` (app traffic), `localhost:8180` (dashboard) |
 | **cloudflared** | Cloudflare Tunnel for production access | No host port (outbound only) |
 
 The devcontainer and the compose stack are separate concerns:

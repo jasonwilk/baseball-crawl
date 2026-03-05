@@ -57,7 +57,7 @@ This builds the app image (if not cached), runs database migrations, and starts 
 |-----|---------|-------|
 | `http://localhost:8001` | FastAPI app (direct) | Bypasses Traefik. Use for health checks and debugging. |
 | `http://localhost:8000` | Traefik -> FastAPI | Routes by Host header. |
-| `http://localhost:8080` | Traefik dashboard | Dev-only admin UI for Traefik. |
+| `http://localhost:8180` | Traefik dashboard | Dev-only admin UI for Traefik. |
 
 ### Verify the Stack
 

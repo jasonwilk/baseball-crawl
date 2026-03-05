@@ -1,0 +1,26 @@
+services:
+  mitmproxy:
+    image: mitmproxy/mitmproxy
+    entrypoint: ["mitmweb"]
+    command:
+      - "--web-host"
+      - "0.0.0.0"
+      - "--scripts"
+      - "/app/proxy/addons/loader.py"
+      - "--set"
+      - "web_password=${MITMWEB_PASSWORD:-}"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      - PYTHONPATH=/app
+    ports:
+      # Proxy listener -- 0.0.0.0 so iPhone on LAN can reach it.
+      - "0.0.0.0:8080:8080"
+      # mitmweb UI -- localhost only.
+      - "127.0.0.1:8081:8081"
+    volumes:
+      # CA certs persist so the iPhone trust persists across restarts.
+      - ./certs:/home/mitmproxy/.mitmproxy
+      # Project root so addons can import src.* and write to .env and proxy/data/.
+      - ..:/app

@@ -39,7 +39,6 @@ services:
       # App traffic: http://localhost:8000 -> Traefik -> FastAPI container
       - "8000:80"
       # Traefik dashboard (dev only): http://localhost:8180
-      # Moved from 8080 to 8180 to free 8080 for mitmproxy.
       - "8180:8080"
     volumes:
       # Traefik reads Docker labels to configure routing.
@@ -52,39 +51,6 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
-  mitmproxy:
-    image: mitmproxy/mitmproxy
-    # Use mitmweb for the web UI; override the default mitmproxy terminal entrypoint.
-    entrypoint: ["mitmweb"]
-    command:
-      - "--web-host"
-      - "0.0.0.0"
-      - "--scripts"
-      - "/app/proxy/addons/loader.py"
-    profiles:
-      - proxy
-    environment:
-      # Required so addon scripts can import project modules (src.*, etc.)
-      - PYTHONPATH=/app
-    ports:
-      # Proxy listener -- bound to 0.0.0.0 so iPhone on LAN can reach it.
-      # Do NOT add 8080 or 8081 to devcontainer.json forwardPorts -- VS Code
-      # forwarding conflicts with Docker's 0.0.0.0 binding and breaks LAN access.
-      - "0.0.0.0:8080:8080"
-      # mitmweb UI -- accessible from host browser.
-      - "0.0.0.0:8081:8081"
-    volumes:
-      # CA certificates persist across restarts so the iPhone trusts the cert once.
-      - mitmproxy-certs:/home/mitmproxy/.mitmproxy
-      # Project root mounted so addons can import src.* and write to .env and data/.
-      - .:/app
-    healthcheck:
-      test: ["CMD", "python3", "-c", "import socket; s=socket.create_connection(('localhost',8081),2); s.close()"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
-
   cloudflared:
     image: cloudflare/cloudflared:latest
     command: tunnel --no-autoupdate run
@@ -96,8 +62,3 @@ services:
       app:
         condition: service_healthy
     restart: unless-stopped
-
-volumes:
-  # Persists mitmproxy CA certificates across container restarts.
-  # The iPhone trusts the cert once; deleting this volume invalidates that trust.
-  mitmproxy-certs:

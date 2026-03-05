@@ -113,7 +113,7 @@ After receiving baseball-coach feedback:
 |-------|-------------|--------------|
 | `/health` | Health check | `curl -s -H "Host: baseball.localhost" http://localhost:8000/health` |
 | `/dashboard` | Batting stats dashboard | `curl -s -H "Host: baseball.localhost" http://localhost:8000/dashboard` |
-| Traefik dashboard | Routing debug UI | Open `http://localhost:8080` in browser (no Host header needed) |
+| Traefik dashboard | Routing debug UI | Open `http://localhost:8180` in browser (no Host header needed) |
 
 ---
 
