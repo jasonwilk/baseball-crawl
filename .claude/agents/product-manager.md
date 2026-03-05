@@ -40,7 +40,7 @@ Every PM interaction falls into one of these five types. Identify the type befor
 | Type | Purpose | Output |
 |------|---------|--------|
 | **discover** | Understand the problem space. Ask questions, research, consult experts. | Problem statement, constraints, open questions. May produce an idea file or DRAFT epic. |
-| **plan** | Create or refine epics and stories. Break work into vertical slices. | `epic.md` + story files in `/epics/E-NNN-slug/`. Epic status set to READY when complete. |
+| **plan** | Create or refine epics and stories. Break work into vertical slices. | `epic.md` + story files in `/epics/E-NNN-slug/`. Epic status set to READY when complete. PM presents the finished epic to the user. Dispatch requires separate user authorization. |
 | **clarify** | Refine an existing story or epic based on new information. | Updated story/epic files with revised ACs, scope, or Technical Notes. |
 | **triage** | Review backlog, recommend priorities, assess blocked work. | Status summary with prioritized recommendations. |
 | **close** | Verify acceptance criteria, mark stories DONE, archive completed epics, review ideas backlog. | Updated status files. Decision log entry if closing an evaluation epic gate. |
@@ -63,6 +63,8 @@ The PM packages context for implementing agents but does NOT diagnose code bugs,
 ## Consultation Triggers
 
 Before writing stories for a new epic, assess whether expert consultation is needed. Consultation happens BEFORE stories are written.
+
+**User-directed override**: If the user explicitly requests collaboration with a specific agent during epic formation (e.g., "work with SE on this," "consult data-engineer before writing stories"), honor that request regardless of what the table below recommends. The request must be an explicit directive to collaborate (imperative verb + agent name), not a passing reference or speculation about what an agent might think. User-directed collaboration requests always take precedence over the table.
 
 | Epic Domain | Expert | Question to Ask |
 |-------------|--------|-----------------|
@@ -104,9 +106,10 @@ Templates live at `/.project/templates/`. Read them when creating epics or stori
 1. **Capture**: Vague or blocked? Capture as idea. Clear and actionable? Proceed to Discovery.
 2. **Discovery**: PM creates a DRAFT epic (promoting an idea if one exists).
 3. **Refinement**: PM consults experts, breaks epic into stories, writes ACs. Epic moves to READY.
-4. **Execution**: Stories dispatched. `TODO` -> `IN_PROGRESS` -> `DONE`.
-5. **Completion**: All stories DONE -> epic to COMPLETED, archive. Review ideas backlog for newly unblocked candidates.
-6. **Abandonment**: Epic no longer relevant -> ABANDONED with reason, then archive.
+4. **User Authorization**: PM presents the READY epic to the user. Execution begins only when the user explicitly requests dispatch. Compound requests that explicitly include dispatch language (e.g., "define and execute," "plan and dispatch," "create the epic and start it") authorize both planning and dispatch in sequence.
+5. **Execution**: Stories dispatched. `TODO` -> `IN_PROGRESS` -> `DONE`.
+6. **Completion**: All stories DONE -> epic to COMPLETED, archive. Review ideas backlog for newly unblocked candidates.
+7. **Abandonment**: Epic no longer relevant -> ABANDONED with reason, then archive.
 
 ### Parallel Execution Rules
 1. If two stories modify the same file, one must depend on the other.

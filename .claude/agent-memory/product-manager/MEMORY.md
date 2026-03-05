@@ -1,8 +1,8 @@
 # Product Manager -- Agent Memory
 
 ## Numbering State
-- Next available epic number: E-046
-- Epics created: E-001 through E-045 (E-001, E-003, E-005, E-006, E-007, E-008, E-010, E-011, E-012, E-013, E-014, E-015, E-016, E-017, E-018, E-019, E-020, E-021, E-022, E-024, E-025, E-026, E-027, E-028, E-029, E-030, E-031, E-032, E-033, E-034, E-035, E-036, E-037, E-038, E-044 archived)
+- Next available epic number: E-048
+- Epics created: E-001 through E-047 (E-001, E-003, E-005, E-006, E-007, E-008, E-010, E-011, E-012, E-013, E-014, E-015, E-016, E-017, E-018, E-019, E-020, E-021, E-022, E-024, E-025, E-026, E-027, E-028, E-029, E-030, E-031, E-032, E-033, E-034, E-035, E-036, E-037, E-038, E-044 archived)
 - Next available idea number: IDEA-010
 - Ideas created: IDEA-001 through IDEA-009
 
@@ -16,7 +16,7 @@
 ## Active Epics (Summary)
 - E-041 (DRAFT): Evaluate json-render -- research epic. 1 spike (R-01: fit assessment) + 1 decision gate (99). Needs expert consultation (UX designer, software engineer) before READY.
 - E-042 (READY): Admin Interface and Team Management -- 6 stories. URL-based team onboarding (paste GC URL, resolve via public API), admin CRUD for teams (two-section list: Lincoln Program / Tracked Opponents), opponent auto-discovery from public schedule, DB-driven crawl config. Expert consultation done (UX, DE, SE). Migration 005 (public_id on teams). Dispatch order: 01 first, then 02+06 parallel, then 03, then 04+05 parallel (or sequential if file conflicts).
-- E-045 (READY): Resolve mitmproxy Port Conflict -- 2 stories. Remove 8080/8081 from devcontainer forwardPorts, update docs/scripts with troubleshooting for the conflict. Dispatch order: 01 then 02 (sequential). SE review confirmed all ACs accurate.
+- E-046 (READY): Upstream Proxy Support -- 2 stories. PROXY_ENABLED + PROXY_URL env vars control both Python crawlers (create_session() proxy kwarg) and mitmproxy Docker service (--mode upstream). No file conflicts, parallel dispatch OK.
 ## Archived Epics
 - E-004 (COMPLETED): Coaching Dashboard -- all 6 stories DONE. 7 routes: /dashboard (batting), /dashboard/pitching, /dashboard/games, /dashboard/games/{id}, /dashboard/opponents, /dashboard/opponents/{id}, /dashboard/players/{id}. 123 tests. Key artifacts: src/api/helpers.py (ip_display, format_avg, format_date), src/api/templates/dashboard/ (8 templates), src/api/db.py (8 query functions added), src/api/routes/dashboard.py (7 routes). Codex review: 3 findings fixed (context passthrough, date formatting, placeholder tests). Mobile-first with bottom nav, 44px touch targets, sticky headers. IDEA-008/009 now promotable (dashboard ready for trends).
 - E-043 (COMPLETED): Dev Environment Auth and Networking Fix -- 1 story. Changed APP_URL, WEBAUTHN_ORIGIN, WEBAUTHN_RP_ID defaults from localhost:8000 to baseball.localhost:8001. Updated .env.example. No follow-up work.
@@ -59,7 +59,9 @@
 - E-003 (COMPLETED): Data Model and Storage Schema -- all actionable stories DONE (E-003-01: core schema rewrite, E-003-02: coaching_assignments migration 004, E-003-04: seed data + query validation). E-003-03 ABANDONED (absorbed by E-009-02). 394 tests total. Full schema: 10 data tables + 5 auth tables + 1 domain table (coaching_assignments). Migration sequence: 001->003->004.
 - E-040 (COMPLETED): UX Designer Agent -- 1 story. Created .claude/agents/ux-designer.md (sonnet, cyan, memory: project). Updated CLAUDE.md Agent Ecosystem table, dispatch-pattern.md routing table, claude-architect.md agent list (7->8 agents). No follow-up work.
 - E-044 (COMPLETED): Workflow Trigger Phrases -- 5 stories. Three workflow skills (spec-review, review-epic, implement) + Dispatch Team section in epic template + CLAUDE.md Workflows entries. All context-layer work via claude-architect. Key artifacts: `.claude/skills/spec-review/SKILL.md`, `.claude/skills/review-epic/SKILL.md`, `.claude/skills/implement/SKILL.md`, updated `/.project/templates/epic-template.md`, updated `/.claude/rules/dispatch-pattern.md`, updated `CLAUDE.md` Workflows section. No follow-up work.
+- E-045 (COMPLETED): Resolve mitmproxy Port Conflict -- 2 stories. Removed 8080/8081 from devcontainer forwardPorts, added warning comments to docker-compose.yml, added troubleshooting subsection to mitmproxy-guide.md, enhanced proxy.sh status with lsof port-conflict detection. No follow-up work.
 - E-039 (COMPLETED): mitmproxy Credential Sync and API Discovery -- 1 research spike + 5 implementation stories. Passive HTTPS proxy for credential extraction, header capture, and API endpoint discovery. Key artifacts: proxy/addons/ (gc_filter, credential_extractor, header_capture, endpoint_logger, loader), Docker Compose mitmproxy service (profile: proxy), scripts/proxy.sh + proxy-report.sh + proxy-endpoints.sh, docs/admin/mitmproxy-guide.md. Codex review: namespace collision fixed (mitmproxy/ -> proxy/). 706 tests. Traefik dashboard moved 8080->8180.
+- E-047 (COMPLETED): PM Workflow Bugs -- 3 stories. Fixed (1) user-directed consultation override rule in PM agent def, (2) dispatch authorization gate in 3 files (product-manager.md, dispatch-pattern.md, workflow-discipline.md), (3) spec-review skill Phase 1 timeout/foreground/duration guidance. All context-layer work via claude-architect. No follow-up work.
 
 ## Key Architectural Decisions
 - Storage: SQLite (WAL mode). Host-mounted at ./data/app.db. Simple file backup via scripts/backup_db.py (no Litestream).

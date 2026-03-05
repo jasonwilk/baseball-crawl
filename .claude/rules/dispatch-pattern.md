@@ -61,7 +61,7 @@ Implementing agents do NOT update story statuses or epic tables. That is the PM'
 
 ## The Dispatch Flow
 
-1. User requests dispatch ("start epic X", "execute story X", "dispatch stories").
+1. User requests dispatch ("start epic X", "execute story X", "dispatch stories"). Dispatch MUST be initiated by an explicit user request. The PM MUST NOT self-initiate dispatch after completing epic formation -- "define the epic" and "execute the epic" are separate user actions. Compound requests that explicitly include dispatch language (e.g., "define and execute," "plan and dispatch," "create the epic and start it") authorize both planning and dispatch in sequence.
 2. PM reads the epic, identifies eligible stories (TODO with satisfied dependencies).
 3. PM marks eligible stories `IN_PROGRESS` in both story files and epic table.
 4. PM creates a team (`TeamCreate`) and spawns implementing agents as teammates.
