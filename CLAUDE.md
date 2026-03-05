@@ -109,7 +109,10 @@ The authoritative data dictionary mapping all GameChanger stat abbreviations to 
 - `./scripts/proxy-endpoints.sh` -- print deduplicated endpoint summary from `data/mitmproxy/endpoint-log.jsonl`
 
 ## Workflows
+- **Implement**: When the user says "implement E-NNN" (or similar -- "start epic", "execute E-NNN", "dispatch E-NNN", "kick off E-NNN"), load `.claude/skills/implement/SKILL.md` and follow its workflow. The team lead reads the epic for team composition, spawns the PM, and relays the request. Supports an "and review" modifier to chain a code review after implementation completes.
 - **Ingest endpoint**: When the user says "ingest endpoint" (or similar -- "curl is ready", "new endpoint to analyze"), load `.claude/skills/ingest-endpoint/SKILL.md` and follow its two-phase workflow. The user has placed a curl command in `secrets/gamechanger-curl.txt` and expects api-scout to execute it (time-sensitive -- the `gc-signature` header in POST requests expires within minutes, and curl commands should be executed promptly regardless of token lifetime), then claude-architect to integrate findings into the context layer.
+- **Review epic**: When the user says "review epic" (or similar -- "codex review epic E-NNN", "post-dev review", "code review epic"), load `.claude/skills/review-epic/SKILL.md` and follow its workflow. Runs a codex code review on an epic's implementation changes, then spawns the implementing team to review findings together.
+- **Spec review**: When the user says "spec review" (or similar -- "review the spec for E-NNN", "codex spec review", "run spec review on E-NNN"), load `.claude/skills/spec-review/SKILL.md` and follow its two-phase workflow. Phase 1 runs the codex spec review script to generate findings. Phase 2 spawns a PM-led review team with domain experts to triage the findings.
 
 ## App Troubleshooting
 

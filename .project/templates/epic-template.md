@@ -27,6 +27,17 @@
 |----|-------|--------|-------------|----------|
 | E-NNN-01 | Story title | TODO | None | - |
 
+## Dispatch Team
+<!-- Which agents should be on the dispatch team for this epic's stories.
+     PM is always included automatically -- do not list it here.
+     This section is advisory: the PM still makes final routing decisions
+     based on story domains and the Agent Selection table in dispatch-pattern.md.
+     When this section is present, PM should prefer it over inferring agents
+     from each story's domain. When absent or empty, PM falls back to the
+     routing table. -->
+- software-engineer
+- data-engineer
+
 ## Technical Notes
 <!-- Architectural decisions, technology choices, or constraints across all stories. -->
 

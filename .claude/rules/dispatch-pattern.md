@@ -115,6 +115,8 @@ When all stories are verified DONE, the PM executes the following closure sequen
 | Documentation (`docs/admin/`, `docs/coaching/`) | `docs-writer` |
 | UI/UX design: wireframes, layout specs, component inventories, user flows | `ux-designer` |
 
+**Dispatch Team metadata**: Epics may include a `## Dispatch Team` section (between Stories and Technical Notes) that explicitly lists the agents needed for the epic. When this section is present and non-empty, the PM should prefer it over inferring agents from story domains using the table above. When the section is absent or empty, the PM falls back to the routing table. The PM always retains final routing authority -- the Dispatch Team section is advisory.
+
 **Routing Precedence**: If a story's "Files to Create or Modify" includes any context-layer path listed above, route to `claude-architect` regardless of the story's primary domain. The only exception is the PM updating its own memory files (`.claude/agent-memory/product-manager/`) during normal status-update work.
 
 ## Task Tool vs. Agent Teams
