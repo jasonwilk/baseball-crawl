@@ -129,7 +129,7 @@
 <div class="mt-8 p-4 bg-gray-100 rounded text-xs text-gray-600 max-w-lg">
   <strong>First admin bootstrap:</strong> Since the admin page requires an admin account,
   the first admin must be seeded directly via SQLite:
-  <pre class="mt-2 bg-white rounded p-2 overflow-x-auto">sqlite3 data/app.db "INSERT INTO users (email, display_name, is_admin) VALUES ('[CONFIGURE: admin address]', 'Jason', 1);"</pre>
+  <pre class="mt-2 bg-white rounded p-2 overflow-x-auto">docker compose exec app sqlite3 /app/data/app.db "INSERT INTO users (email, display_name, is_admin) VALUES ('your-email AT example.com', 'Jason', 1);"</pre>
   Set <code>ADMIN_EMAIL</code> in your <code>.env</code> file to record the address.
 </div>
 {% endblock %}

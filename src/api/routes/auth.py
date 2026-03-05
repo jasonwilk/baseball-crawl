@@ -60,7 +60,7 @@ router = APIRouter(prefix="/auth")
 
 _SESSION_COOKIE_NAME = "session"
 _SESSION_MAX_AGE = 604800  # 7 days in seconds
-_APP_URL_DEFAULT = "http://localhost:8000"
+_APP_URL_DEFAULT = "http://baseball.localhost:8001"
 
 # In-memory challenge store for passkey login (no session exists yet).
 # Maps challenge_b64 -> expiry timestamp (unix seconds).
@@ -76,7 +76,7 @@ def _get_app_url() -> str:
     """Return the base application URL from the environment.
 
     Returns:
-        APP_URL env var, or ``http://localhost:8000`` as default.
+        APP_URL env var, or ``http://baseball.localhost:8001`` as default.
     """
     return os.environ.get("APP_URL", _APP_URL_DEFAULT).rstrip("/")
 
@@ -94,18 +94,18 @@ def _get_webauthn_rp_id() -> str:
     """Return the WebAuthn relying party ID from environment.
 
     Returns:
-        WEBAUTHN_RP_ID env var, or 'localhost' as default.
+        WEBAUTHN_RP_ID env var, or 'baseball.localhost' as default.
     """
-    return os.environ.get("WEBAUTHN_RP_ID", "localhost")
+    return os.environ.get("WEBAUTHN_RP_ID", "baseball.localhost")
 
 
 def _get_webauthn_origin() -> str:
     """Return the WebAuthn expected origin from environment.
 
     Returns:
-        WEBAUTHN_ORIGIN env var, or 'http://localhost:8000' as default.
+        WEBAUTHN_ORIGIN env var, or 'http://baseball.localhost:8001' as default.
     """
-    return os.environ.get("WEBAUTHN_ORIGIN", "http://localhost:8000")
+    return os.environ.get("WEBAUTHN_ORIGIN", "http://baseball.localhost:8001")
 
 
 def _set_session_cookie(response: RedirectResponse, raw_token: str) -> None:

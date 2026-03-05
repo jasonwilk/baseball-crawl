@@ -12,7 +12,7 @@ FROM python:3.13-slim
 
 # System dependencies: curl is required for the Docker health check.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends curl \
+    && apt-get install -y --no-install-recommends curl sqlite3 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
