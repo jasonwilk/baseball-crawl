@@ -1,19 +1,15 @@
 services:
   mitmproxy:
     image: mitmproxy/mitmproxy
-    entrypoint: ["mitmweb"]
-    command:
-      - "--web-host"
-      - "0.0.0.0"
-      - "--scripts"
-      - "/app/proxy/addons/loader.py"
-      - "--set"
-      - "web_password=${MITMWEB_PASSWORD:-}"
+    entrypoint: ["/app/proxy/proxy-entrypoint.sh"]
     env_file:
+      - path: ../.env
+        required: false
       - path: .env
         required: false
     environment:
       - PYTHONPATH=/app
+      - MITMPROXY_PROFILE=${MITMPROXY_PROFILE:-mobile}
     ports:
       # Proxy listener -- 0.0.0.0 so iPhone on LAN can reach it.
       - "0.0.0.0:8080:8080"
