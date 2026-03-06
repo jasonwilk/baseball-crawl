@@ -106,6 +106,10 @@ The authoritative data dictionary mapping all GameChanger stat abbreviations to 
 - `./scripts/codex-spec-review.sh <epic-dir>` -- spec review of epic/story files in a directory; optional `--note` flag. Rubric: `.project/codex-spec-review.md`
 - `./scripts/proxy-report.sh` -- print human-readable header parity report from `proxy/data/header-report.json`
 - `./scripts/proxy-endpoints.sh` -- print deduplicated endpoint summary from `proxy/data/endpoint-log.jsonl`
+- `python scripts/proxy-refresh-headers.py` -- dry-run: preview what would change in `src/http/headers.py` based on latest mitmproxy capture
+- `python scripts/proxy-refresh-headers.py --apply` -- write updated `src/http/headers.py` from latest capture and print summary of changes
+- `python scripts/check_credentials.py [--profile web|mobile]` -- verify GameChanger credentials in `.env` are present and valid
+- `python scripts/bootstrap.py [--profile web|mobile] [--check-only] [--dry-run]` -- bootstrap or validate the full credential and session setup
 
 ### Proxy Commands (Mac Host Only -- NOT runnable from devcontainer)
 - `cd proxy && ./start.sh` -- launch mitmproxy (detached)

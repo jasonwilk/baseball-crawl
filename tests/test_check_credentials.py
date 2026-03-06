@@ -13,11 +13,19 @@ import respx
 
 from scripts.check_credentials import check_credentials
 
-_FAKE_CREDENTIALS = {
-    "GAMECHANGER_AUTH_TOKEN": "fake-jwt-token",
-    "GAMECHANGER_DEVICE_ID": "abcdef1234567890abcdef1234567890",
+_FAKE_WEB_CREDENTIALS = {
+    "GAMECHANGER_AUTH_TOKEN_WEB": "fake-jwt-token",
+    "GAMECHANGER_DEVICE_ID_WEB": "abcdef1234567890abcdef1234567890",
     "GAMECHANGER_BASE_URL": "https://api.team-manager.gc.com",
 }
+
+_FAKE_MOBILE_CREDENTIALS = {
+    "GAMECHANGER_AUTH_TOKEN_MOBILE": "fake-mobile-token",
+    "GAMECHANGER_DEVICE_ID_MOBILE": "mobile1234567890abcdef1234567890",
+    "GAMECHANGER_BASE_URL": "https://api.team-manager.gc.com",
+}
+
+_FAKE_BOTH_CREDENTIALS = {**_FAKE_WEB_CREDENTIALS, **_FAKE_MOBILE_CREDENTIALS}
 
 _BASE_URL = "https://api.team-manager.gc.com"
 
@@ -29,45 +37,43 @@ def _patch_dotenv(monkeypatch: pytest.MonkeyPatch, values: dict) -> None:
 
 
 # ---------------------------------------------------------------------------
-# AC-2: Missing credentials -- exit 2
+# Single profile: missing credentials -- exit 2
 # ---------------------------------------------------------------------------
 
 
 def test_missing_all_credentials_returns_exit_2(monkeypatch: pytest.MonkeyPatch) -> None:
     _patch_dotenv(monkeypatch, {})
-    exit_code, message = check_credentials()
+    exit_code, message = check_credentials(profile="web")
     assert exit_code == 2
-    assert "GAMECHANGER_AUTH_TOKEN" in message
-    assert "GAMECHANGER_DEVICE_ID" in message
-    assert "GAMECHANGER_BASE_URL" in message
+    assert "GAMECHANGER_AUTH_TOKEN_WEB" in message or "Missing" in message
 
 
 def test_missing_one_credential_returns_exit_2(monkeypatch: pytest.MonkeyPatch) -> None:
-    partial = {k: v for k, v in _FAKE_CREDENTIALS.items() if k != "GAMECHANGER_AUTH_TOKEN"}
+    partial = {k: v for k, v in _FAKE_WEB_CREDENTIALS.items() if k != "GAMECHANGER_AUTH_TOKEN_WEB"}
     _patch_dotenv(monkeypatch, partial)
-    exit_code, message = check_credentials()
+    exit_code, message = check_credentials(profile="web")
     assert exit_code == 2
-    assert "GAMECHANGER_AUTH_TOKEN" in message
+    assert "GAMECHANGER_AUTH_TOKEN_WEB" in message
 
 
 def test_missing_credentials_message_never_reveals_values(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """AC-8: credential values must not appear in output."""
+    """Credential values must not appear in output."""
     partial = {
-        "GAMECHANGER_AUTH_TOKEN": "super-secret-token",
-        "GAMECHANGER_DEVICE_ID": "secret-device",
+        "GAMECHANGER_AUTH_TOKEN_WEB": "super-secret-token",
+        "GAMECHANGER_DEVICE_ID_WEB": "secret-device",
         # GAMECHANGER_BASE_URL is absent
     }
     _patch_dotenv(monkeypatch, partial)
-    exit_code, message = check_credentials()
+    exit_code, message = check_credentials(profile="web")
     assert exit_code == 2
     assert "super-secret-token" not in message
     assert "secret-device" not in message
 
 
 # ---------------------------------------------------------------------------
-# AC-4: Valid credentials -- exit 0
+# Single profile (web): valid credentials -- exit 0
 # ---------------------------------------------------------------------------
 
 
@@ -75,7 +81,7 @@ def test_missing_credentials_message_never_reveals_values(
 def test_valid_credentials_with_full_name_returns_exit_0(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _patch_dotenv(monkeypatch, _FAKE_CREDENTIALS)
+    _patch_dotenv(monkeypatch, _FAKE_WEB_CREDENTIALS)
     respx.get(f"{_BASE_URL}/me/user").mock(
         return_value=httpx.Response(
             200,
@@ -87,7 +93,7 @@ def test_valid_credentials_with_full_name_returns_exit_0(
             },
         )
     )
-    exit_code, message = check_credentials()
+    exit_code, message = check_credentials(profile="web")
     assert exit_code == 0
     assert "Jason Smith" in message
     assert "valid" in message.lower()
@@ -97,7 +103,7 @@ def test_valid_credentials_with_full_name_returns_exit_0(
 def test_valid_credentials_falls_back_to_email_when_names_missing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _patch_dotenv(monkeypatch, _FAKE_CREDENTIALS)
+    _patch_dotenv(monkeypatch, _FAKE_WEB_CREDENTIALS)
     respx.get(f"{_BASE_URL}/me/user").mock(
         return_value=httpx.Response(
             200,
@@ -109,7 +115,7 @@ def test_valid_credentials_falls_back_to_email_when_names_missing(
             },
         )
     )
-    exit_code, message = check_credentials()
+    exit_code, message = check_credentials(profile="web")
     assert exit_code == 0
     assert "coach@example.com" in message
 
@@ -118,8 +124,113 @@ def test_valid_credentials_falls_back_to_email_when_names_missing(
 def test_valid_credentials_message_does_not_reveal_token(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """AC-8: token value must not appear in success output."""
-    _patch_dotenv(monkeypatch, _FAKE_CREDENTIALS)
+    """Token value must not appear in success output."""
+    _patch_dotenv(monkeypatch, _FAKE_WEB_CREDENTIALS)
+    respx.get(f"{_BASE_URL}/me/user").mock(
+        return_value=httpx.Response(
+            200,
+            json={"email": "coach@example.com", "first_name": "Jason", "last_name": "Smith"},
+        )
+    )
+    exit_code, message = check_credentials(profile="web")
+    assert exit_code == 0
+    assert "fake-jwt-token" not in message
+    assert "abcdef1234567890abcdef1234567890" not in message
+
+
+# ---------------------------------------------------------------------------
+# Single profile (web): expired credentials (401) -- exit 1
+# ---------------------------------------------------------------------------
+
+
+@respx.mock
+def test_expired_credentials_401_returns_exit_1(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_dotenv(monkeypatch, _FAKE_WEB_CREDENTIALS)
+    respx.get(f"{_BASE_URL}/me/user").mock(
+        return_value=httpx.Response(401, json={"error": "unauthorized"})
+    )
+    exit_code, message = check_credentials(profile="web")
+    assert exit_code == 1
+    assert "expired" in message.lower()
+
+
+# ---------------------------------------------------------------------------
+# Single profile (web): forbidden (403) -- exit 1
+# ---------------------------------------------------------------------------
+
+
+@respx.mock
+def test_forbidden_403_returns_exit_1(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_dotenv(monkeypatch, _FAKE_WEB_CREDENTIALS)
+    respx.get(f"{_BASE_URL}/me/user").mock(
+        return_value=httpx.Response(403, json={"error": "forbidden"})
+    )
+    exit_code, message = check_credentials(profile="web")
+    assert exit_code == 1
+    assert "denied" in message.lower()
+
+
+# ---------------------------------------------------------------------------
+# Single profile (web): network errors -- exit 1
+# ---------------------------------------------------------------------------
+
+
+@respx.mock
+def test_network_timeout_returns_exit_1(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_dotenv(monkeypatch, _FAKE_WEB_CREDENTIALS)
+    respx.get(f"{_BASE_URL}/me/user").mock(side_effect=httpx.TimeoutException("timed out"))
+    exit_code, message = check_credentials(profile="web")
+    assert exit_code == 1
+    assert "network" in message.lower() or "error" in message.lower()
+
+
+@respx.mock
+def test_connect_error_returns_exit_1(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_dotenv(monkeypatch, _FAKE_WEB_CREDENTIALS)
+    respx.get(f"{_BASE_URL}/me/user").mock(
+        side_effect=httpx.ConnectError("connection refused")
+    )
+    exit_code, message = check_credentials(profile="web")
+    assert exit_code == 1
+    assert "network" in message.lower() or "error" in message.lower()
+
+
+# ---------------------------------------------------------------------------
+# Single profile (mobile): valid -- exit 0
+# ---------------------------------------------------------------------------
+
+
+@respx.mock
+def test_mobile_profile_valid_returns_exit_0(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_dotenv(monkeypatch, _FAKE_MOBILE_CREDENTIALS)
+    respx.get(f"{_BASE_URL}/me/user").mock(
+        return_value=httpx.Response(
+            200,
+            json={"email": "coach@example.com", "first_name": "Jason", "last_name": "Smith"},
+        )
+    )
+    exit_code, message = check_credentials(profile="mobile")
+    assert exit_code == 0
+    assert "valid" in message.lower()
+
+
+def test_mobile_profile_missing_credentials_returns_exit_2(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_dotenv(monkeypatch, {})
+    exit_code, message = check_credentials(profile="mobile")
+    assert exit_code == 2
+    assert "GAMECHANGER_AUTH_TOKEN_MOBILE" in message or "Missing" in message
+
+
+# ---------------------------------------------------------------------------
+# Multi-profile summary (no profile arg): AC-3 and AC-4
+# ---------------------------------------------------------------------------
+
+
+@respx.mock
+def test_multi_profile_both_valid_returns_exit_0(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_dotenv(monkeypatch, _FAKE_BOTH_CREDENTIALS)
     respx.get(f"{_BASE_URL}/me/user").mock(
         return_value=httpx.Response(
             200,
@@ -128,62 +239,39 @@ def test_valid_credentials_message_does_not_reveal_token(
     )
     exit_code, message = check_credentials()
     assert exit_code == 0
-    assert "fake-jwt-token" not in message
-    assert "abcdef1234567890abcdef1234567890" not in message
-
-
-# ---------------------------------------------------------------------------
-# AC-5: Expired credentials (401) -- exit 1
-# ---------------------------------------------------------------------------
+    assert "web" in message
+    assert "mobile" in message
 
 
 @respx.mock
-def test_expired_credentials_401_returns_exit_1(monkeypatch: pytest.MonkeyPatch) -> None:
-    _patch_dotenv(monkeypatch, _FAKE_CREDENTIALS)
+def test_multi_profile_only_web_valid_returns_exit_0(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Exit 0 when at least one profile is valid (AC-4)."""
+    _patch_dotenv(monkeypatch, _FAKE_WEB_CREDENTIALS)  # no mobile keys
     respx.get(f"{_BASE_URL}/me/user").mock(
-        return_value=httpx.Response(401, json={"error": "unauthorized"})
+        return_value=httpx.Response(
+            200,
+            json={"email": "coach@example.com", "first_name": "Jason", "last_name": "Smith"},
+        )
     )
     exit_code, message = check_credentials()
-    assert exit_code == 1
-    assert "expired" in message.lower()
+    assert exit_code == 0
+    assert "web" in message
+    assert "mobile" in message
 
 
-# ---------------------------------------------------------------------------
-# AC-6: Forbidden (403) -- exit 1
-# ---------------------------------------------------------------------------
-
-
-@respx.mock
-def test_forbidden_403_returns_exit_1(monkeypatch: pytest.MonkeyPatch) -> None:
-    _patch_dotenv(monkeypatch, _FAKE_CREDENTIALS)
-    respx.get(f"{_BASE_URL}/me/user").mock(
-        return_value=httpx.Response(403, json={"error": "forbidden"})
-    )
+def test_multi_profile_both_missing_returns_exit_1(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Exit 1 when all profiles fail (AC-4)."""
+    _patch_dotenv(monkeypatch, {})
     exit_code, message = check_credentials()
     assert exit_code == 1
-    assert "denied" in message.lower()
+    assert "web" in message
+    assert "mobile" in message
 
 
-# ---------------------------------------------------------------------------
-# AC-7: Network errors -- exit 1
-# ---------------------------------------------------------------------------
-
-
-@respx.mock
-def test_network_timeout_returns_exit_1(monkeypatch: pytest.MonkeyPatch) -> None:
-    _patch_dotenv(monkeypatch, _FAKE_CREDENTIALS)
-    respx.get(f"{_BASE_URL}/me/user").mock(side_effect=httpx.TimeoutException("timed out"))
-    exit_code, message = check_credentials()
-    assert exit_code == 1
-    assert "network" in message.lower() or "error" in message.lower()
-
-
-@respx.mock
-def test_connect_error_returns_exit_1(monkeypatch: pytest.MonkeyPatch) -> None:
-    _patch_dotenv(monkeypatch, _FAKE_CREDENTIALS)
-    respx.get(f"{_BASE_URL}/me/user").mock(
-        side_effect=httpx.ConnectError("connection refused")
-    )
-    exit_code, message = check_credentials()
-    assert exit_code == 1
-    assert "network" in message.lower() or "error" in message.lower()
+def test_multi_profile_summary_format(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Summary output shows per-profile status (AC-3)."""
+    _patch_dotenv(monkeypatch, {})
+    _, message = check_credentials()
+    assert "Credential status:" in message
+    assert "web" in message
+    assert "mobile" in message

@@ -162,6 +162,72 @@ Shows, for each traffic source (ios/web), which headers are missing, extra, or d
 
 Shows a deduplicated table of every unique (method, path) seen, with hit count and most recent status code.
 
+## Refreshing Header Fingerprints
+
+The `proxy-refresh-headers.py` script reads the latest mitmproxy capture report and rewrites `src/http/headers.py` to match the real headers seen in traffic. Run it after any mitmproxy capture session where you want to update the project's header fingerprints.
+
+### End-to-End Workflow
+
+1. **Capture traffic** using mitmproxy (iPhone or browser -- see sections above). The `header_capture` addon writes `proxy/data/header-report.json` automatically as requests flow through.
+
+2. **Preview the diff** (dry-run, no files changed):
+
+   ```bash
+   python scripts/proxy-refresh-headers.py
+   ```
+
+   This reads the header report and prints a unified diff showing exactly what would change in `src/http/headers.py`. No files are written.
+
+3. **Apply the update:**
+
+   ```bash
+   python scripts/proxy-refresh-headers.py --apply
+   ```
+
+   This writes the updated `src/http/headers.py` and prints a summary of which dicts were updated (`BROWSER_HEADERS`, `MOBILE_HEADERS`, or both).
+
+4. **Review and commit:**
+
+   ```bash
+   git diff src/http/headers.py
+   git add src/http/headers.py
+   git commit -m "chore: refresh header fingerprints from mitmproxy capture YYYY-MM-DD"
+   ```
+
+### Source-to-Dict Mapping
+
+| Captured from | Updates |
+|---------------|---------|
+| Web browser traffic (`web` source) | `BROWSER_HEADERS` |
+| iOS app traffic (`ios` source) | `MOBILE_HEADERS` |
+| Unknown source | Ignored |
+
+If the capture contains only one source (e.g., you only captured iOS traffic), only the corresponding dict is updated. The other dict is preserved from the existing `headers.py`.
+
+### Headers Excluded from Auto-Update
+
+The script never writes these header categories to `headers.py`, even if they appear in the capture:
+
+| Category | Headers | Reason |
+|----------|---------|--------|
+| **Credential headers** | `gc-token`, `gc-device-id`, `gc-signature`, `gc-app-name`, `cookie` | Auth secrets -- injected by `GameChangerClient`, never in session defaults |
+| **Per-request headers** | `content-type`, `accept`, `gc-user-action-id`, `gc-user-action`, `x-pagination` | Vary per API call -- set by the caller, not the session |
+| **Connection-level headers** | `host`, `connection`, `content-length`, `transfer-encoding`, `te`, `trailer`, `upgrade`, `proxy-authorization`, `proxy-authenticate` | Managed by the HTTP library, not fingerprint-relevant |
+
+### Report Path
+
+The script tries `proxy/data/current/header-report.json` first (session-aware path, written by E-052 session management). If that file does not exist, it falls back to `proxy/data/header-report.json` (flat path written directly by the `header_capture` addon).
+
+### Error: No capture data found
+
+If you see:
+
+```
+No capture data found. Run mitmproxy and capture GameChanger traffic first.
+```
+
+Neither report path exists. Run mitmproxy and navigate GameChanger on your iPhone or browser to generate traffic. The report is written automatically after the first request.
+
 ## Mobile Credential Capture
 
 This section explains how to capture mobile app credentials from the iOS GameChanger (Odyssey) app for use with the `mobile` header profile in `src/http/session.py`.

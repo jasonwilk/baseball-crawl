@@ -1,7 +1,7 @@
 # E-053: Profile-Scoped Credentials
 
 ## Status
-`READY`
+`COMPLETED`
 <!-- Lifecycle: DRAFT -> READY -> ACTIVE -> COMPLETED (or BLOCKED / ABANDONED) -->
 <!-- PM sets READY explicitly after: expert consultation done, all stories have testable ACs, quality checklist passed. -->
 <!-- Only READY and ACTIVE epics can be dispatched. -->
@@ -43,10 +43,10 @@ No expert consultation required -- this is a well-understood credential routing 
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-053-01 | Profile-scoped credential extractor | TODO | None | - |
-| E-053-02 | Profile-aware credential loading in GameChangerClient | TODO | None | - |
-| E-053-03 | Profile-aware check_credentials and bootstrap | TODO | E-053-02 | - |
-| E-053-04 | Update .env.example and documentation | TODO | E-053-01, E-053-02 | - |
+| E-053-01 | Profile-scoped credential extractor | DONE | None | se-053 |
+| E-053-02 | Profile-aware credential loading in GameChangerClient | DONE | None | se-053 |
+| E-053-03 | Profile-aware check_credentials and bootstrap | DONE | E-053-02 | se-054 |
+| E-053-04 | Update .env.example and documentation | DONE | E-053-01, E-053-02 | se-053 |
 
 ## Dispatch Team
 - software-engineer
@@ -114,3 +114,4 @@ None -- all resolved during refinement (see History).
 - 2026-03-06: Created (DRAFT). No expert consultation required -- credential routing follows existing profile-scoped patterns (PROXY_URL_WEB/PROXY_URL_MOBILE from E-046).
 - 2026-03-06: Refined to READY. Resolved: (1) `refresh_credentials.py` stays flat-key, web-only -- not worth the scope. (2) Flat keys removed entirely -- no backward compatibility fallback. Profile-scoped keys only. Clean break while there is one operator.
 - 2026-03-06: Applied holistic review triage findings: (1) P1-2: Added AC-0 to E-053-01 for Odyssey UA detection fix in gc_filter.py. (2) P1-3: E-053-02 updated to include refresh_credentials.py writing `_WEB` keys. Non-Goals and Migration Notes amended. (3) P2-3: Fixed test file paths to match `tests/test_proxy/` layout.
+- 2026-03-06: COMPLETED. All 4 stories done. Profile-scoped credential keys implemented end-to-end: proxy extractor writes _WEB/_MOBILE keys, GameChangerClient reads them with no fallback, check_credentials supports --profile flag, bootstrap passes profile to credential check, .env.example updated. Flat keys removed (clean break). 930 tests passing. No documentation impact beyond what was already handled in E-053-04 and E-054-02.

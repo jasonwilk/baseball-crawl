@@ -43,7 +43,7 @@ def detect_source(user_agent: str) -> str:
 
     # iOS patterns -- checked BEFORE web patterns (Safari-on-iOS contains "Safari/")
     # Includes both native app markers and iOS device platform strings.
-    ios_patterns = ("gamechanger/", "cfnetwork/", "darwin/", "iphone", "ipad")
+    ios_patterns = ("gamechanger/", "cfnetwork/", "darwin/", "iphone", "ipad", "odyssey/", "alamofire/")
     for pattern in ios_patterns:
         if pattern in ua:
             return "ios"

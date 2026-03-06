@@ -26,10 +26,10 @@ from src.gamechanger.client import (
 # ---------------------------------------------------------------------------
 
 _FAKE_CREDENTIALS = {
-    "GAMECHANGER_AUTH_TOKEN": "fake-jwt-token",
-    "GAMECHANGER_DEVICE_ID": "abcdef1234567890abcdef1234567890",
+    "GAMECHANGER_AUTH_TOKEN_WEB": "fake-jwt-token",
+    "GAMECHANGER_DEVICE_ID_WEB": "abcdef1234567890abcdef1234567890",
     "GAMECHANGER_BASE_URL": "https://api.team-manager.gc.com",
-    "GAMECHANGER_APP_NAME": "web",
+    "GAMECHANGER_APP_NAME_WEB": "web",
 }
 
 _BASE_URL = "https://api.team-manager.gc.com"
@@ -316,8 +316,8 @@ def test_missing_all_credentials_raises_configuration_error(
         GameChangerClient(min_delay_ms=0, jitter_ms=0)
 
     msg = str(exc_info.value)
-    assert "GAMECHANGER_AUTH_TOKEN" in msg
-    assert "GAMECHANGER_DEVICE_ID" in msg
+    assert "GAMECHANGER_AUTH_TOKEN_WEB" in msg
+    assert "GAMECHANGER_DEVICE_ID_WEB" in msg
     assert "GAMECHANGER_BASE_URL" in msg
 
 
@@ -326,8 +326,8 @@ def test_missing_single_credential_raises_configuration_error(
 ) -> None:
     """One missing required key raises ConfigurationError mentioning that key."""
     partial_creds = {
-        "GAMECHANGER_AUTH_TOKEN": "fake-token",
-        "GAMECHANGER_DEVICE_ID": "fake-device-id",
+        "GAMECHANGER_AUTH_TOKEN_WEB": "fake-token",
+        "GAMECHANGER_DEVICE_ID_WEB": "fake-device-id",
         # GAMECHANGER_BASE_URL intentionally absent
     }
     monkeypatch.setattr("src.gamechanger.client.dotenv_values", lambda: partial_creds)
@@ -611,10 +611,23 @@ def test_paginated_5xx_retries_same_page_not_entire_sequence(
 # ---------------------------------------------------------------------------
 
 _FAKE_CREDENTIALS_NO_APP_NAME = {
-    "GAMECHANGER_AUTH_TOKEN": "fake-jwt-token",
-    "GAMECHANGER_DEVICE_ID": "abcdef1234567890abcdef1234567890",
+    "GAMECHANGER_AUTH_TOKEN_WEB": "fake-jwt-token",
+    "GAMECHANGER_DEVICE_ID_WEB": "abcdef1234567890abcdef1234567890",
     "GAMECHANGER_BASE_URL": "https://api.team-manager.gc.com",
-    # GAMECHANGER_APP_NAME intentionally absent
+    # GAMECHANGER_APP_NAME_WEB intentionally absent
+}
+
+_FAKE_CREDENTIALS_MOBILE = {
+    "GAMECHANGER_AUTH_TOKEN_MOBILE": "fake-mobile-jwt-token",
+    "GAMECHANGER_DEVICE_ID_MOBILE": "mobiledeviceid1234567890abcdef",
+    "GAMECHANGER_BASE_URL": "https://api.team-manager.gc.com",
+}
+
+_FAKE_CREDENTIALS_MOBILE_NO_APP_NAME = {
+    "GAMECHANGER_AUTH_TOKEN_MOBILE": "fake-mobile-jwt-token",
+    "GAMECHANGER_DEVICE_ID_MOBILE": "mobiledeviceid1234567890abcdef",
+    "GAMECHANGER_BASE_URL": "https://api.team-manager.gc.com",
+    # GAMECHANGER_APP_NAME_MOBILE intentionally absent
 }
 
 
@@ -652,19 +665,19 @@ def test_mobile_profile_uses_mobile_user_agent(monkeypatch: pytest.MonkeyPatch) 
     route = respx.get(f"{_BASE_URL}/me/teams").mock(
         return_value=httpx.Response(200, json=[])
     )
-    client = _make_client_with_profile(monkeypatch, "mobile")
+    client = _make_client_with_profile(monkeypatch, "mobile", _FAKE_CREDENTIALS_MOBILE)
     client.get("/me/teams")
 
     request = route.calls.last.request
     assert request.headers["user-agent"] == MOBILE_HEADERS["User-Agent"]
 
 
-def test_invalid_profile_raises_value_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    """profile='invalid' raises ValueError (propagated from create_session())."""
+def test_invalid_profile_raises_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """profile='invalid' raises an error (ConfigurationError for unknown profile credentials)."""
     monkeypatch.setattr(
         "src.gamechanger.client.dotenv_values", lambda: _FAKE_CREDENTIALS
     )
-    with pytest.raises(ValueError):
+    with pytest.raises((ValueError, ConfigurationError)):
         GameChangerClient(min_delay_ms=0, jitter_ms=0, profile="invalid")
 
 
@@ -686,7 +699,7 @@ def test_profile_parameter_forwarded_to_create_session(
 
     monkeypatch.setattr("src.gamechanger.client.create_session", fake_create_session)
     monkeypatch.setattr(
-        "src.gamechanger.client.dotenv_values", lambda: _FAKE_CREDENTIALS
+        "src.gamechanger.client.dotenv_values", lambda: _FAKE_CREDENTIALS_MOBILE
     )
 
     GameChangerClient(min_delay_ms=0, jitter_ms=0, profile="mobile")
@@ -694,32 +707,42 @@ def test_profile_parameter_forwarded_to_create_session(
 
 
 @respx.mock
-def test_gc_app_name_from_env_var_used_regardless_of_profile(
+def test_gc_app_name_from_env_var_used_for_web_profile(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """When GAMECHANGER_APP_NAME is set in .env, it is used for all profiles."""
-    creds_with_app_name = {**_FAKE_CREDENTIALS_NO_APP_NAME, "GAMECHANGER_APP_NAME": "custom-app"}
+    """When GAMECHANGER_APP_NAME_WEB is set in .env, it is used for web profile."""
+    creds_with_app_name = {**_FAKE_CREDENTIALS_NO_APP_NAME, "GAMECHANGER_APP_NAME_WEB": "custom-app"}
 
     route = respx.get(f"{_BASE_URL}/me/teams").mock(
         return_value=httpx.Response(200, json=[])
     )
 
-    # Web profile with env var
     client_web = _make_client_with_profile(monkeypatch, "web", creds_with_app_name)
     client_web.get("/me/teams")
     assert route.calls.last.request.headers["gc-app-name"] == "custom-app"
 
-    # Mobile profile with env var
+
+@respx.mock
+def test_gc_app_name_from_env_var_used_for_mobile_profile(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When GAMECHANGER_APP_NAME_MOBILE is set in .env, it is used for mobile profile."""
+    creds_with_app_name = {**_FAKE_CREDENTIALS_MOBILE_NO_APP_NAME, "GAMECHANGER_APP_NAME_MOBILE": "custom-mobile-app"}
+
+    route = respx.get(f"{_BASE_URL}/me/teams").mock(
+        return_value=httpx.Response(200, json=[])
+    )
+
     client_mobile = _make_client_with_profile(monkeypatch, "mobile", creds_with_app_name)
     client_mobile.get("/me/teams")
-    assert route.calls.last.request.headers["gc-app-name"] == "custom-app"
+    assert route.calls.last.request.headers["gc-app-name"] == "custom-mobile-app"
 
 
 @respx.mock
 def test_gc_app_name_defaults_to_web_when_env_absent_and_profile_web(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Without GAMECHANGER_APP_NAME, web profile defaults gc-app-name to 'web'."""
+    """Without GAMECHANGER_APP_NAME_WEB, web profile defaults gc-app-name to 'web'."""
     route = respx.get(f"{_BASE_URL}/me/teams").mock(
         return_value=httpx.Response(200, json=[])
     )
@@ -733,11 +756,73 @@ def test_gc_app_name_defaults_to_web_when_env_absent_and_profile_web(
 def test_gc_app_name_omitted_when_env_absent_and_profile_mobile(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Without GAMECHANGER_APP_NAME, mobile profile omits gc-app-name entirely."""
+    """Without GAMECHANGER_APP_NAME_MOBILE, mobile profile omits gc-app-name entirely."""
     route = respx.get(f"{_BASE_URL}/me/teams").mock(
         return_value=httpx.Response(200, json=[])
     )
-    client = _make_client_with_profile(monkeypatch, "mobile", _FAKE_CREDENTIALS_NO_APP_NAME)
+    client = _make_client_with_profile(monkeypatch, "mobile", _FAKE_CREDENTIALS_MOBILE_NO_APP_NAME)
     client.get("/me/teams")
 
     assert "gc-app-name" not in route.calls.last.request.headers
+
+
+# ---------------------------------------------------------------------------
+# Profile-scoped credential loading (E-053-02)
+# ---------------------------------------------------------------------------
+
+
+def test_web_profile_loads_web_scoped_keys(monkeypatch: pytest.MonkeyPatch) -> None:
+    """AC-1: GameChangerClient(profile='web') reads _WEB suffixed keys."""
+    monkeypatch.setattr("src.gamechanger.client.dotenv_values", lambda: _FAKE_CREDENTIALS)
+    client = GameChangerClient(min_delay_ms=0, jitter_ms=0, profile="web")
+    assert client._session.headers["gc-token"] == "fake-jwt-token"
+    assert client._session.headers["gc-device-id"] == "abcdef1234567890abcdef1234567890"
+
+
+def test_web_profile_missing_web_key_raises_no_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AC-2: Missing _WEB key raises ConfigurationError even if flat key exists."""
+    creds_with_flat_only = {
+        "GAMECHANGER_AUTH_TOKEN": "flat-token",  # flat key -- should NOT be used
+        "GAMECHANGER_DEVICE_ID": "flat-device",
+        "GAMECHANGER_BASE_URL": "https://api.team-manager.gc.com",
+    }
+    monkeypatch.setattr("src.gamechanger.client.dotenv_values", lambda: creds_with_flat_only)
+
+    with pytest.raises(ConfigurationError) as exc_info:
+        GameChangerClient(min_delay_ms=0, jitter_ms=0, profile="web")
+
+    assert "GAMECHANGER_AUTH_TOKEN_WEB" in str(exc_info.value)
+
+
+def test_mobile_profile_loads_mobile_scoped_keys(monkeypatch: pytest.MonkeyPatch) -> None:
+    """AC-3: GameChangerClient(profile='mobile') reads _MOBILE suffixed keys."""
+    monkeypatch.setattr("src.gamechanger.client.dotenv_values", lambda: _FAKE_CREDENTIALS_MOBILE)
+    client = GameChangerClient(min_delay_ms=0, jitter_ms=0, profile="mobile")
+    assert client._session.headers["gc-token"] == "fake-mobile-jwt-token"
+    assert client._session.headers["gc-device-id"] == "mobiledeviceid1234567890abcdef"
+
+
+def test_mobile_profile_missing_mobile_key_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AC-4: Missing _MOBILE key raises ConfigurationError naming the expected key."""
+    creds_missing_mobile = {
+        "GAMECHANGER_DEVICE_ID_MOBILE": "some-device",
+        "GAMECHANGER_BASE_URL": "https://api.team-manager.gc.com",
+        # GAMECHANGER_AUTH_TOKEN_MOBILE intentionally absent
+    }
+    monkeypatch.setattr("src.gamechanger.client.dotenv_values", lambda: creds_missing_mobile)
+
+    with pytest.raises(ConfigurationError) as exc_info:
+        GameChangerClient(min_delay_ms=0, jitter_ms=0, profile="mobile")
+
+    assert "GAMECHANGER_AUTH_TOKEN_MOBILE" in str(exc_info.value)
+
+
+def test_base_url_remains_unsuffixed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """AC-5: GAMECHANGER_BASE_URL is not profile-scoped (same for both profiles)."""
+    monkeypatch.setattr("src.gamechanger.client.dotenv_values", lambda: _FAKE_CREDENTIALS)
+    client = GameChangerClient(min_delay_ms=0, jitter_ms=0, profile="web")
+    assert client._base_url == "https://api.team-manager.gc.com"

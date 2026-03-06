@@ -151,8 +151,10 @@ class TestBuildReport:
         captured_by_source = {
             "web": {"Accept": "text/html", "User-Agent": "Chrome/131"},
         }
-        browser_headers = {"Accept": "application/json", "User-Agent": "Chrome/131"}
-        report = build_report(captured_by_source, browser_headers)
+        canonical_by_source = {
+            "web": {"Accept": "application/json", "User-Agent": "Chrome/131"},
+        }
+        report = build_report(captured_by_source, canonical_by_source)
 
         assert "generated_at" in report
         assert "sources" in report
@@ -171,12 +173,16 @@ class TestBuildReport:
             "web": {"Accept": "text/html"},
             "ios": {"Accept": "application/json"},
         }
-        report = build_report(captured_by_source, {"Accept": "application/json"})
+        canonical_by_source = {
+            "web": {"Accept": "application/json"},
+            "ios": {"Accept": "application/json"},
+        }
+        report = build_report(captured_by_source, canonical_by_source)
         sources = {s["source"] for s in report["sources"]}
         assert sources == {"web", "ios"}
 
     def test_empty_captured_produces_no_sources(self) -> None:
-        report = build_report({}, {"Accept": "application/json"})
+        report = build_report({}, {"web": {"Accept": "application/json"}})
         assert report["sources"] == []
 
     def test_generated_at_is_iso8601(self) -> None:
@@ -185,6 +191,60 @@ class TestBuildReport:
         # Should parse without error
         dt = datetime.fromisoformat(report["generated_at"].replace("Z", "+00:00"))
         assert dt is not None
+
+    def test_web_source_uses_browser_headers(self) -> None:
+        """web source diffs against BROWSER_HEADERS (not MOBILE_HEADERS)."""
+        browser_canonical = {"Accept-Language": "en-US,en;q=0.9", "DNT": "1"}
+        mobile_canonical = {"Accept-Language": "en-US;q=1.0", "gc-app-version": "2026.7.0.0"}
+        canonical_by_source = {"web": browser_canonical, "ios": mobile_canonical}
+        captured_by_source = {"web": {"Accept-Language": "en-US,en;q=0.9"}}
+
+        report = build_report(captured_by_source, canonical_by_source)
+        web_entry = next(s for s in report["sources"] if s["source"] == "web")
+
+        # The canonical dict stored in the report should be browser_canonical
+        assert web_entry["browser_headers"] == browser_canonical
+
+    def test_ios_source_uses_mobile_headers(self) -> None:
+        """ios source diffs against MOBILE_HEADERS (not BROWSER_HEADERS)."""
+        browser_canonical = {"Accept-Language": "en-US,en;q=0.9", "DNT": "1"}
+        mobile_canonical = {"Accept-Language": "en-US;q=1.0", "gc-app-version": "2026.7.0.0"}
+        canonical_by_source = {"web": browser_canonical, "ios": mobile_canonical}
+        captured_by_source = {"ios": {"Accept-Language": "en-US;q=1.0"}}
+
+        report = build_report(captured_by_source, canonical_by_source)
+        ios_entry = next(s for s in report["sources"] if s["source"] == "ios")
+
+        # The canonical dict stored in the report should be mobile_canonical
+        assert ios_entry["browser_headers"] == mobile_canonical
+
+    def test_ios_diff_uses_mobile_canonical_values(self) -> None:
+        """value_differences for ios reflects drift from MOBILE_HEADERS, not BROWSER_HEADERS."""
+        browser_canonical = {"Accept-Language": "en-US,en;q=0.9"}
+        mobile_canonical = {"Accept-Language": "en-US;q=1.0"}
+        canonical_by_source = {"web": browser_canonical, "ios": mobile_canonical}
+        # ios capture matches mobile_canonical exactly
+        captured_by_source = {"ios": {"Accept-Language": "en-US;q=1.0"}}
+
+        report = build_report(captured_by_source, canonical_by_source)
+        ios_entry = next(s for s in report["sources"] if s["source"] == "ios")
+
+        # No drift -- ios capture matches MOBILE_HEADERS
+        assert ios_entry["value_differences"] == []
+        assert ios_entry["missing_in_captured"] == []
+
+    def test_unknown_source_falls_back_to_web_canonical(self) -> None:
+        """unknown source falls back to the web canonical dict."""
+        browser_canonical = {"DNT": "1"}
+        mobile_canonical = {"gc-app-version": "2026.7.0.0"}
+        canonical_by_source = {"web": browser_canonical, "ios": mobile_canonical}
+        captured_by_source = {"unknown": {"DNT": "1"}}
+
+        report = build_report(captured_by_source, canonical_by_source)
+        unknown_entry = next(s for s in report["sources"] if s["source"] == "unknown")
+
+        # Falls back to web canonical
+        assert unknown_entry["browser_headers"] == browser_canonical
 
 
 # ---------------------------------------------------------------------------

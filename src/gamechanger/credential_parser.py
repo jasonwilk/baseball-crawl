@@ -5,10 +5,10 @@ with ``shlex.split()``, and extracts the headers and URL that carry persistent
 auth credentials.  The output is a flat ``dict[str, str]`` mapping .env key
 names to values -- ready to be merged into a ``.env`` file.
 
-Header-to-.env key mapping (per the project spec):
-    gc-token        -> GAMECHANGER_AUTH_TOKEN    (primary JWT, required)
-    gc-device-id    -> GAMECHANGER_DEVICE_ID
-    gc-app-name     -> GAMECHANGER_APP_NAME
+Header-to-.env key mapping (curl-paste path is web-only):
+    gc-token        -> GAMECHANGER_AUTH_TOKEN_WEB    (primary JWT, required)
+    gc-device-id    -> GAMECHANGER_DEVICE_ID_WEB
+    gc-app-name     -> GAMECHANGER_APP_NAME_WEB
     Cookie / -b     -> GAMECHANGER_COOKIE_<NAME> (one entry per cookie)
     URL (base)      -> GAMECHANGER_BASE_URL
 
@@ -26,10 +26,11 @@ from urllib.parse import urlparse
 logger = logging.getLogger(__name__)
 
 # Headers that carry persistent credentials and the .env key to store them under.
+# The curl-paste path is inherently web-only, so keys use the _WEB suffix.
 _CREDENTIAL_HEADERS: dict[str, str] = {
-    "gc-token": "GAMECHANGER_AUTH_TOKEN",
-    "gc-device-id": "GAMECHANGER_DEVICE_ID",
-    "gc-app-name": "GAMECHANGER_APP_NAME",
+    "gc-token": "GAMECHANGER_AUTH_TOKEN_WEB",
+    "gc-device-id": "GAMECHANGER_DEVICE_ID_WEB",
+    "gc-app-name": "GAMECHANGER_APP_NAME_WEB",
 }
 
 # Headers that should be silently skipped (per-request, not credentials).
@@ -66,7 +67,7 @@ def parse_curl(curl_command: str) -> dict[str, str]:
     """Parse a raw curl command string and return extracted credentials as a dict.
 
     The returned dict maps .env variable names to their values.  At minimum,
-    ``GAMECHANGER_AUTH_TOKEN`` and ``GAMECHANGER_BASE_URL`` are required; the
+    ``GAMECHANGER_AUTH_TOKEN_WEB`` and ``GAMECHANGER_BASE_URL`` are required; the
     function raises ``CurlParseError`` if either is absent.
 
     Args:
@@ -172,7 +173,7 @@ def parse_curl(curl_command: str) -> dict[str, str]:
     credentials["GAMECHANGER_BASE_URL"] = f"{parsed.scheme}://{parsed.netloc}"
 
     # Enforce that the primary auth credential is present.
-    if "GAMECHANGER_AUTH_TOKEN" not in credentials:
+    if "GAMECHANGER_AUTH_TOKEN_WEB" not in credentials:
         raise CurlParseError(
             "Required credential 'gc-token' header not found in curl command.\n"
             "Make sure you are copying the full curl command from the GameChanger "

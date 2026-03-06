@@ -33,11 +33,37 @@ from src.http.session import create_session
 
 logger = logging.getLogger(__name__)
 
-_REQUIRED_KEYS: tuple[str, ...] = (
+# Profile suffix mapping for credential keys.
+_PROFILE_SUFFIXES: dict[str, str] = {
+    "web": "_WEB",
+    "mobile": "_MOBILE",
+}
+
+# Credential key base names that are profile-scoped (suffix applied per profile).
+_PROFILE_SCOPED_KEYS: tuple[str, ...] = (
     "GAMECHANGER_AUTH_TOKEN",
     "GAMECHANGER_DEVICE_ID",
-    "GAMECHANGER_BASE_URL",
+    "GAMECHANGER_APP_NAME",
+    "GAMECHANGER_SIGNATURE",
 )
+
+
+def _required_keys(profile: str) -> tuple[str, ...]:
+    """Return the required env key names for the given profile.
+
+    Args:
+        profile: The credential profile (``"web"`` or ``"mobile"``).
+
+    Returns:
+        Tuple of required env key names with the appropriate profile suffix.
+        ``GAMECHANGER_BASE_URL`` is always required and remains unsuffixed.
+    """
+    suffix = _PROFILE_SUFFIXES.get(profile, f"_{profile.upper()}")
+    return (
+        f"GAMECHANGER_AUTH_TOKEN{suffix}",
+        f"GAMECHANGER_DEVICE_ID{suffix}",
+        "GAMECHANGER_BASE_URL",
+    )
 
 _GC_CONTENT_TYPE = "application/vnd.gc.com.none+json; version=undefined"
 
@@ -92,19 +118,20 @@ class GameChangerClient:
     def __init__(
         self, min_delay_ms: int = 1000, jitter_ms: int = 500, profile: str = "web"
     ) -> None:
-        self._credentials = self._load_credentials()
+        self._credentials = self._load_credentials(profile)
         self._base_url = self._credentials["GAMECHANGER_BASE_URL"].rstrip("/")
         self._session = create_session(
             min_delay_ms=min_delay_ms, jitter_ms=jitter_ms, profile=profile
         )
-        self._session.headers["gc-token"] = self._credentials["GAMECHANGER_AUTH_TOKEN"]
-        self._session.headers["gc-device-id"] = self._credentials["GAMECHANGER_DEVICE_ID"]
-        app_name = self._credentials.get("GAMECHANGER_APP_NAME")
+        suffix = _PROFILE_SUFFIXES.get(profile, f"_{profile.upper()}")
+        self._session.headers["gc-token"] = self._credentials[f"GAMECHANGER_AUTH_TOKEN{suffix}"]
+        self._session.headers["gc-device-id"] = self._credentials[f"GAMECHANGER_DEVICE_ID{suffix}"]
+        app_name = self._credentials.get(f"GAMECHANGER_APP_NAME{suffix}")
         if app_name:
             self._session.headers["gc-app-name"] = app_name
         elif profile == "web":
             self._session.headers["gc-app-name"] = "web"
-        # mobile profile with no GAMECHANGER_APP_NAME: omit gc-app-name entirely
+        # mobile profile with no GAMECHANGER_APP_NAME_MOBILE: omit gc-app-name entirely
 
     def get_paginated(
         self,
@@ -355,20 +382,26 @@ class GameChangerClient:
         assert last_error is not None  # appease mypy; loop always sets this before here
         raise last_error
 
-    def _load_credentials(self) -> dict[str, str]:
-        """Load credentials from the .env file.
+    def _load_credentials(self, profile: str) -> dict[str, str]:
+        """Load profile-scoped credentials from the .env file.
 
         Reads the .env file (if present) using python-dotenv and validates that
-        all required keys are present.
+        all required profile-scoped keys are present. No fallback to flat
+        (unsuffixed) keys -- if the profile-scoped key is absent, raises
+        ``ConfigurationError`` naming the expected key.
+
+        Args:
+            profile: The credential profile (``"web"`` or ``"mobile"``).
 
         Returns:
             Dict mapping env variable names to their values.
 
         Raises:
-            ConfigurationError: If any required key is missing.
+            ConfigurationError: If any required profile-scoped key is missing.
         """
         env_values = dotenv_values()
-        missing = [key for key in _REQUIRED_KEYS if not env_values.get(key)]
+        required = _required_keys(profile)
+        missing = [key for key in required if not env_values.get(key)]
         if missing:
             raise ConfigurationError(
                 f"Missing required environment variable(s): {', '.join(missing)}. "

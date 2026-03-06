@@ -91,7 +91,7 @@ def run(
     # Stage 1: Credential check
     # ------------------------------------------------------------------
     print("Checking credentials...")
-    cred_code, cred_msg = check_credentials()
+    cred_code, cred_msg = check_credentials(profile=profile)
     print(f"  {cred_msg}")
     summary["credentials"] = "valid" if cred_code == 0 else "expired/error"
 

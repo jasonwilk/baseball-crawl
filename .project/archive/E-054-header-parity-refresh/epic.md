@@ -1,7 +1,7 @@
 # E-054: Header Parity Refresh from MITM Captures
 
 ## Status
-`READY`
+`COMPLETED`
 <!-- Lifecycle: DRAFT -> READY -> ACTIVE -> COMPLETED (or BLOCKED / ABANDONED) -->
 <!-- PM sets READY explicitly after: expert consultation done, all stories have testable ACs, quality checklist passed. -->
 <!-- Only READY and ACTIVE epics can be dispatched. -->
@@ -44,8 +44,8 @@ No expert consultation required -- this is a well-understood sync pipeline. The 
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-054-01 | Header refresh script | TODO | None | - |
-| E-054-02 | Operator integration and workflow docs | TODO | E-054-01 | - |
+| E-054-01 | Header refresh script | DONE | None | se-054 |
+| E-054-02 | Operator integration and workflow docs | DONE | E-054-01 | se-054 |
 
 ## Dispatch Team
 - software-engineer
@@ -116,3 +116,4 @@ None -- all resolved during refinement (see History).
 - 2026-03-06: Created (DRAFT). No expert consultation required -- header sync pipeline built on existing capture infrastructure.
 - 2026-03-06: Refined to READY. Resolved: (1) Dry-run default with `--apply` confirmed. (2) `header_capture.py` parity fix included in E-054-01 (diff each source against correct canonical dict). (3) E-052 interaction handled via path fallback (try session-aware first, then flat).
 - 2026-03-06: Applied holistic review triage findings: P2-3: Fixed test file paths in E-054-01 to match `tests/test_proxy/` layout.
+- 2026-03-06: COMPLETED. Both stories done. Header refresh script (proxy-refresh-headers.py) reads capture data and rewrites headers.py with dry-run default. header_capture.py parity fix (each source diffs against correct canonical dict). Workflow documented in CLAUDE.md and mitmproxy-guide.md. 57 new tests. No follow-up work.

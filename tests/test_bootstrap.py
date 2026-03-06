@@ -81,6 +81,30 @@ def test_successful_full_run_passes_profile_to_crawl() -> None:
     assert call_kwargs.kwargs.get("profile") == "mobile" or call_kwargs.args[1] == "mobile" or "mobile" in str(call_kwargs)
 
 
+def test_bootstrap_passes_profile_to_check_credentials() -> None:
+    """AC-5: bootstrap passes --profile to check_credentials so the right profile is validated."""
+    with (
+        patch("scripts.bootstrap.check_credentials", return_value=(0, "Credentials valid -- logged in as Jason Smith")) as mock_creds,
+        patch("scripts.bootstrap.load_config", return_value=_VALID_CONFIG),
+        patch("scripts.bootstrap.crawl_module.run", return_value=0),
+        patch("scripts.bootstrap.load_module.run", return_value=0),
+    ):
+        run(profile="mobile")
+    mock_creds.assert_called_once_with(profile="mobile")
+
+
+def test_bootstrap_default_profile_passes_web_to_check_credentials() -> None:
+    """Default profile is web -- check_credentials receives profile='web'."""
+    with (
+        patch("scripts.bootstrap.check_credentials", return_value=(0, "Credentials valid -- logged in as Jason Smith")) as mock_creds,
+        patch("scripts.bootstrap.load_config", return_value=_VALID_CONFIG),
+        patch("scripts.bootstrap.crawl_module.run", return_value=0),
+        patch("scripts.bootstrap.load_module.run", return_value=0),
+    ):
+        run()
+    mock_creds.assert_called_once_with(profile="web")
+
+
 def test_successful_full_run_passes_dry_run_to_crawl_and_load() -> None:
     with (
         patch("scripts.bootstrap.check_credentials", return_value=(0, "Credentials valid -- logged in as Jason Smith")),

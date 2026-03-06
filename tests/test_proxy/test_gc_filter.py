@@ -108,6 +108,19 @@ class TestDetectSource:
     def test_unknown_user_agent(self) -> None:
         assert detect_source("curl/7.81.0") == "unknown"
 
+    # Odyssey app (iOS) -- AC-0 regression test
+    def test_ios_odyssey_app(self) -> None:
+        ua = "Odyssey/2026.7.0 (com.gc.teammanager; build:0; iOS 26.3.0) Alamofire/5.9.0"
+        assert detect_source(ua) == "ios"
+
+    def test_ios_alamofire_alone(self) -> None:
+        ua = "SomeApp/1.0 Alamofire/5.9.0"
+        assert detect_source(ua) == "ios"
+
+    def test_ios_odyssey_alone(self) -> None:
+        ua = "Odyssey/2026.7.0"
+        assert detect_source(ua) == "ios"
+
     # Case-insensitivity spot-check
     def test_ios_case_insensitive(self) -> None:
         assert detect_source("GAMECHANGER/1234") == "ios"

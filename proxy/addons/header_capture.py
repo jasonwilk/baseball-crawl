@@ -3,7 +3,12 @@
 For each GameChanger request, this addon captures the full header set (minus
 credential headers), groups headers by traffic source (ios/web/unknown), and
 writes a JSON parity report comparing captured headers against the project's
-canonical ``BROWSER_HEADERS`` in ``src.http.headers``.
+canonical header dicts in ``src.http.headers``.
+
+Each source is diffed against the correct canonical dict:
+  - ``"web"`` -> ``BROWSER_HEADERS``
+  - ``"ios"`` -> ``MOBILE_HEADERS``
+  - ``"unknown"`` -> ``BROWSER_HEADERS`` (best guess)
 
 The report is written to ``proxy/data/header-report.json`` and is
 overwritten on each update (latest snapshot only).
@@ -24,7 +29,7 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from proxy.addons.gc_filter import detect_source, is_gamechanger_domain
-from src.http.headers import BROWSER_HEADERS
+from src.http.headers import BROWSER_HEADERS, MOBILE_HEADERS
 
 log = logging.getLogger(__name__)
 
@@ -120,25 +125,34 @@ def compute_header_diff(
 
 def build_report(
     captured_by_source: dict[str, dict[str, str]],
-    browser_headers: dict[str, str],
+    canonical_by_source: dict[str, dict[str, str]],
 ) -> dict[str, Any]:
     """Build the full parity report dict from per-source captured headers.
 
+    Each source is diffed against the correct canonical dict:
+    - ``"web"`` -> ``BROWSER_HEADERS``
+    - ``"ios"`` -> ``MOBILE_HEADERS``
+    - ``"unknown"`` -> ``BROWSER_HEADERS`` (best guess)
+
     Args:
         captured_by_source: Mapping of source name -> latest captured headers dict.
-        browser_headers: The canonical BROWSER_HEADERS to diff against.
+        canonical_by_source: Mapping of source name -> canonical dict to diff against.
+            Must include at least the sources present in ``captured_by_source``.
+            Unknown sources fall back to ``BROWSER_HEADERS``.
 
     Returns:
-        Report dict matching the AC-3 JSON schema.
+        Report dict with ``generated_at`` and ``sources`` list.
     """
+    fallback = canonical_by_source.get("web", BROWSER_HEADERS)
     sources: list[dict[str, Any]] = []
     for source, captured in captured_by_source.items():
-        diff = compute_header_diff(captured, browser_headers)
+        canonical = canonical_by_source.get(source, fallback)
+        diff = compute_header_diff(captured, canonical)
         sources.append(
             {
                 "source": source,
                 "captured_headers": captured,
-                "browser_headers": browser_headers,
+                "browser_headers": canonical,
                 "missing_in_captured": diff["missing_in_captured"],
                 "extra_in_captured": diff["extra_in_captured"],
                 "value_differences": diff["value_differences"],
@@ -191,7 +205,12 @@ class HeaderCapture:
 
     def _write_report(self) -> None:
         """Generate and write the parity report JSON to disk."""
-        report = build_report(self._captured_by_source, BROWSER_HEADERS)
+        canonical_by_source = {
+            "web": BROWSER_HEADERS,
+            "ios": MOBILE_HEADERS,
+            "unknown": BROWSER_HEADERS,
+        }
+        report = build_report(self._captured_by_source, canonical_by_source)
 
         try:
             _REPORT_PATH.parent.mkdir(parents=True, exist_ok=True)

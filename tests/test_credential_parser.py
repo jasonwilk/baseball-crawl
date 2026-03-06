@@ -61,11 +61,11 @@ FULL_GC_CURL = textwrap.dedent(
 
 
 class TestParseCurlHappyPath:
-    """AC-1: Minimal curl with gc-token extracts GAMECHANGER_AUTH_TOKEN."""
+    """AC-1: Minimal curl with gc-token extracts GAMECHANGER_AUTH_TOKEN_WEB."""
 
     def test_extracts_auth_token(self) -> None:
         result = parse_curl(MINIMAL_CURL)
-        assert result["GAMECHANGER_AUTH_TOKEN"] == (
+        assert result["GAMECHANGER_AUTH_TOKEN_WEB"] == (
             "eyJhbGciOiJIUzI1NiJ9.payload.signature"
         )
 
@@ -83,11 +83,11 @@ class TestParseCurlHappyPath:
 
     def test_full_gc_curl_extracts_all_credential_headers(self) -> None:
         result = parse_curl(FULL_GC_CURL)
-        assert result["GAMECHANGER_AUTH_TOKEN"] == (
+        assert result["GAMECHANGER_AUTH_TOKEN_WEB"] == (
             "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.test.sig"
         )
-        assert result["GAMECHANGER_APP_NAME"] == "web"
-        assert result["GAMECHANGER_DEVICE_ID"] == "7b615e8c124f5d44575d4e6736ae1a82"
+        assert result["GAMECHANGER_APP_NAME_WEB"] == "web"
+        assert result["GAMECHANGER_DEVICE_ID_WEB"] == "7b615e8c124f5d44575d4e6736ae1a82"
         assert result["GAMECHANGER_BASE_URL"] == "https://api.team-manager.gc.com"
 
     def test_full_gc_curl_skips_per_request_headers(self) -> None:
@@ -212,16 +212,16 @@ class TestMergeEnvFile:
     def test_new_file_written_when_none_exists(self, tmp_path: Path) -> None:
         env_path = tmp_path / ".env"
         assert not env_path.exists()
-        merged = merge_env_file(str(env_path), {"GAMECHANGER_AUTH_TOKEN": "tok"})
-        assert merged["GAMECHANGER_AUTH_TOKEN"] == "tok"
+        merged = merge_env_file(str(env_path), {"GAMECHANGER_AUTH_TOKEN_WEB": "tok"})
+        assert merged["GAMECHANGER_AUTH_TOKEN_WEB"] == "tok"
 
     def test_existing_credentials_replaced(self, tmp_path: Path) -> None:
         env_path = tmp_path / ".env"
-        env_path.write_text("GAMECHANGER_AUTH_TOKEN=old_token\n", encoding="utf-8")
+        env_path.write_text("GAMECHANGER_AUTH_TOKEN_WEB=old_token\n", encoding="utf-8")
         merged = merge_env_file(
-            str(env_path), {"GAMECHANGER_AUTH_TOKEN": "new_token"}
+            str(env_path), {"GAMECHANGER_AUTH_TOKEN_WEB": "new_token"}
         )
-        assert merged["GAMECHANGER_AUTH_TOKEN"] == "new_token"
+        assert merged["GAMECHANGER_AUTH_TOKEN_WEB"] == "new_token"
 
     def test_non_credential_keys_preserved(self, tmp_path: Path) -> None:
         env_path = tmp_path / ".env"
@@ -230,27 +230,27 @@ class TestMergeEnvFile:
             encoding="utf-8",
         )
         merged = merge_env_file(
-            str(env_path), {"GAMECHANGER_AUTH_TOKEN": "tok"}
+            str(env_path), {"GAMECHANGER_AUTH_TOKEN_WEB": "tok"}
         )
         assert merged["UNRELATED_KEY"] == "some_value"
         assert merged["ANOTHER_KEY"] == "another_value"
-        assert merged["GAMECHANGER_AUTH_TOKEN"] == "tok"
+        assert merged["GAMECHANGER_AUTH_TOKEN_WEB"] == "tok"
 
     def test_mixed_update_preserves_and_adds(self, tmp_path: Path) -> None:
         env_path = tmp_path / ".env"
         env_path.write_text(
-            "UNRELATED_KEY=keep_me\nGAMECHANGER_AUTH_TOKEN=old\n",
+            "UNRELATED_KEY=keep_me\nGAMECHANGER_AUTH_TOKEN_WEB=old\n",
             encoding="utf-8",
         )
         merged = merge_env_file(
             str(env_path),
             {
-                "GAMECHANGER_AUTH_TOKEN": "new",
+                "GAMECHANGER_AUTH_TOKEN_WEB": "new",
                 "GAMECHANGER_BASE_URL": "https://api.example.com",
             },
         )
         assert merged["UNRELATED_KEY"] == "keep_me"
-        assert merged["GAMECHANGER_AUTH_TOKEN"] == "new"
+        assert merged["GAMECHANGER_AUTH_TOKEN_WEB"] == "new"
         assert merged["GAMECHANGER_BASE_URL"] == "https://api.example.com"
 
     def test_comments_preserved_in_env_file(self, tmp_path: Path) -> None:
@@ -268,19 +268,48 @@ class TestMergeEnvFile:
     def test_multiple_runs_do_not_duplicate_keys(self, tmp_path: Path) -> None:
         """Running merge twice does not create duplicate entries."""
         env_path = tmp_path / ".env"
-        merge_env_file(str(env_path), {"GAMECHANGER_AUTH_TOKEN": "tok1"})
+        merge_env_file(str(env_path), {"GAMECHANGER_AUTH_TOKEN_WEB": "tok1"})
         merged = merge_env_file(
-            str(env_path), {"GAMECHANGER_AUTH_TOKEN": "tok2"}
+            str(env_path), {"GAMECHANGER_AUTH_TOKEN_WEB": "tok2"}
         )
         # Only one occurrence of the key.
         content = env_path.read_text(encoding="utf-8")
-        assert content.count("GAMECHANGER_AUTH_TOKEN=") == 1
-        assert merged["GAMECHANGER_AUTH_TOKEN"] == "tok2"
+        assert content.count("GAMECHANGER_AUTH_TOKEN_WEB=") == 1
+        assert merged["GAMECHANGER_AUTH_TOKEN_WEB"] == "tok2"
 
 
 # ---------------------------------------------------------------------------
 # Integration: parse_curl -> merge_env_file round-trip
 # ---------------------------------------------------------------------------
+
+
+class TestWebSuffixedKeys:
+    """AC-9 (E-053-02): parse_curl outputs _WEB suffixed credential keys."""
+
+    def test_parse_curl_uses_web_suffix_for_token(self) -> None:
+        result = parse_curl(MINIMAL_CURL)
+        assert "GAMECHANGER_AUTH_TOKEN_WEB" in result
+        assert "GAMECHANGER_AUTH_TOKEN" not in result
+
+    def test_parse_curl_uses_web_suffix_for_device_id(self) -> None:
+        curl = (
+            "curl 'https://api.team-manager.gc.com/data' "
+            "-H 'gc-token: tok' "
+            "-H 'gc-device-id: device123'"
+        )
+        result = parse_curl(curl)
+        assert "GAMECHANGER_DEVICE_ID_WEB" in result
+        assert "GAMECHANGER_DEVICE_ID" not in result
+
+    def test_parse_curl_uses_web_suffix_for_app_name(self) -> None:
+        curl = (
+            "curl 'https://api.team-manager.gc.com/data' "
+            "-H 'gc-token: tok' "
+            "-H 'gc-app-name: web'"
+        )
+        result = parse_curl(curl)
+        assert "GAMECHANGER_APP_NAME_WEB" in result
+        assert "GAMECHANGER_APP_NAME" not in result
 
 
 class TestRoundTrip:
@@ -293,10 +322,10 @@ class TestRoundTrip:
         credentials = parse_curl(FULL_GC_CURL)
         merged = merge_env_file(str(env_path), credentials)
 
-        assert merged["GAMECHANGER_AUTH_TOKEN"] == (
+        assert merged["GAMECHANGER_AUTH_TOKEN_WEB"] == (
             "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.test.sig"
         )
-        assert merged["GAMECHANGER_APP_NAME"] == "web"
-        assert merged["GAMECHANGER_DEVICE_ID"] == "7b615e8c124f5d44575d4e6736ae1a82"
+        assert merged["GAMECHANGER_APP_NAME_WEB"] == "web"
+        assert merged["GAMECHANGER_DEVICE_ID_WEB"] == "7b615e8c124f5d44575d4e6736ae1a82"
         assert merged["GAMECHANGER_BASE_URL"] == "https://api.team-manager.gc.com"
         assert merged["MY_OTHER_VAR"] == "keep_me"

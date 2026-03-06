@@ -227,10 +227,10 @@ class TestNormalResponseHandling:
 
 
 _FAKE_CREDENTIALS = {
-    "GAMECHANGER_AUTH_TOKEN": "fake-jwt-token",
-    "GAMECHANGER_DEVICE_ID": "abcdef1234567890abcdef1234567890",
+    "GAMECHANGER_AUTH_TOKEN_WEB": "fake-jwt-token",
+    "GAMECHANGER_DEVICE_ID_WEB": "abcdef1234567890abcdef1234567890",
     "GAMECHANGER_BASE_URL": "https://api.team-manager.gc.com",
-    "GAMECHANGER_APP_NAME": "web",
+    "GAMECHANGER_APP_NAME_WEB": "web",
 }
 
 
