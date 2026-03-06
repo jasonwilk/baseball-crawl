@@ -2,7 +2,7 @@
 
 ## Numbering State
 - Next available epic number: E-057
-- Epics created: E-001 through E-056 (E-001, E-003, E-005, E-006, E-007, E-008, E-010, E-011, E-012, E-013, E-014, E-015, E-016, E-017, E-018, E-019, E-020, E-021, E-022, E-024, E-025, E-026, E-027, E-028, E-029, E-030, E-031, E-032, E-033, E-034, E-035, E-036, E-037, E-038, E-044, E-046, E-048, E-049, E-050 archived)
+- Epics created: E-001 through E-056 (E-001, E-003, E-005, E-006, E-007, E-008, E-010, E-011, E-012, E-013, E-014, E-015, E-016, E-017, E-018, E-019, E-020, E-021, E-022, E-024, E-025, E-026, E-027, E-028, E-029, E-030, E-031, E-032, E-033, E-034, E-035, E-036, E-037, E-038, E-044, E-046, E-048, E-049, E-050, E-056 archived)
 - Next available idea number: IDEA-013
 - Ideas created: IDEA-001 through IDEA-012
 
@@ -14,7 +14,6 @@
 - See CLAUDE.md for full project conventions
 
 ## Active Epics (Summary)
-- E-056 (READY): Fix Dispatch Pattern -- Team Lead as Spawner -- 5 stories. CRITICAL: Agent Teams teammates cannot spawn other teammates; dispatch-pattern.md incorrectly has PM spawning agents. Fix: team lead spawns all agents, PM coordinates via SendMessage. All context-layer, dispatch team: claude-architect. Dep chain: 01 first, then 02+03+04+05 parallel.
 - E-041 (DRAFT): Evaluate json-render -- research epic. 1 spike (R-01: fit assessment) + 1 decision gate (99). Needs expert consultation (UX designer, software engineer) before READY.
 - E-042 (READY): Admin Interface and Team Management -- 6 stories. URL-based team onboarding (paste GC URL, resolve via public API), admin CRUD for teams (two-section list: Lincoln Program / Tracked Opponents), opponent auto-discovery from public schedule, DB-driven crawl config. Expert consultation done (UX, DE, SE). Migration 005 (public_id on teams). Dispatch order: 01 first, then 02+06 parallel, then 03, then 04+05 parallel (or sequential if file conflicts).
 - E-053 (READY): Profile-Scoped Credentials -- 4 stories. Profile-scoped env keys for web/mobile credentials (GAMECHANGER_AUTH_TOKEN_WEB/_MOBILE, etc.), profile-aware GameChangerClient credential loading (NO flat-key fallback -- clean break), profile-aware check_credentials/bootstrap, .env.example + CLAUDE.md docs. Dep chain: 01+02 parallel, then 03 (needs 02), 04 (needs 01+02). No expert consultation needed. refresh_credentials.py stays flat-key web-only (not in scope).
@@ -71,6 +70,7 @@
 - E-046 (COMPLETED): Upstream Proxy Support -- 2 stories. Dual-zone Bright Data proxy (residential for web profile, mobile for mobile profile). Python: get_proxy_config(profile) + auto-wired create_session() proxy_url param + trust_env=False. mitmproxy: proxy-entrypoint.sh wrapper, start.sh --profile mobile|web, status.sh upstream display. .env.example updated. 35 session tests. Codex review: 2 findings fixed (case-insensitive PROXY_ENABLED in bash, trust_env test). Follow-up: docs/admin/mitmproxy-guide.md needs --profile and upstream proxy docs (deferred to separate docs-writer dispatch).
 - E-050 (COMPLETED): Credential Validation and Crawl Bootstrap -- 4 stories. Credential health check script (`scripts/check_credentials.py`, 10 tests), profile-aware GameChangerClient (`profile` param, gc-app-name logic, 7 new tests), bootstrap pipeline (`scripts/bootstrap.py`, 14 tests), operator bootstrap guide (`docs/admin/bootstrap-guide.md`). `scripts/crawl.py` modified (profile param added to `run()`). Follow-up: CLAUDE.md Commands section needs `python scripts/check_credentials.py` and `python scripts/bootstrap.py` entries (context-layer update for claude-architect). IDEA-012 E-050 blocker now cleared (E-042 remains).
 - E-051 (COMPLETED): Fix mitmproxy CA Certificate Persistence -- 1 story. Container runs as root (user: "0:0"), entrypoint chowns cert dir to mitmproxy user, drops privileges via su-exec before exec'ing mitmweb. start.sh mkdir uses -m 777. No follow-up work.
+- E-056 (COMPLETED): Fix Dispatch Pattern -- Team Lead as Spawner -- 5 stories. Rewrote dispatch-pattern.md, PM agent def, implement skill, review-epic skill, CLAUDE.md, and workflow-discipline.md. Team lead now spawns all agents (PM + implementers); PM coordinates via SendMessage. IDEA-007 partially addressed (dispatch pattern now structurally correct). No follow-up work.
 
 ## Key Architectural Decisions
 - Storage: SQLite (WAL mode). Host-mounted at ./data/app.db. Simple file backup via scripts/backup_db.py (no Litestream).
@@ -113,7 +113,7 @@
 - PM modes: Refinement (form epics) / Decision Gates (evaluation synthesis) / Dispatch (execute stories)
 - Epic lifecycle: DRAFT -> READY -> ACTIVE -> COMPLETED (or BLOCKED / ABANDONED)
 - READY gate: must be READY/ACTIVE before dispatch. PM sets READY explicitly.
-- Dispatch: PM uses Agent Teams (TeamCreate + Agent tool). See /.claude/rules/dispatch-pattern.md.
+- Dispatch: Team lead creates team and spawns PM + implementers. PM coordinates via SendMessage. See /.claude/rules/dispatch-pattern.md.
 - Direct-routing exceptions (no PM needed): api-scout, baseball-coach, claude-architect
 - Implementing agents needing work auth: software-engineer, data-engineer, docs-writer
 - Agent ecosystem: 8 agents (claude-architect, product-manager, baseball-coach, api-scout, data-engineer, software-engineer, docs-writer, ux-designer)
