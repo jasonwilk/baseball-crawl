@@ -1,7 +1,7 @@
 # E-055: Unified Operator CLI
 
 ## Status
-`DRAFT`
+`READY`
 <!-- Lifecycle: DRAFT -> READY -> ACTIVE -> COMPLETED (or BLOCKED / ABANDONED) -->
 <!-- PM sets READY explicitly after: expert consultation done, all stories have testable ACs, quality checklist passed. -->
 <!-- Only READY and ACTIVE epics can be dispatched. -->
@@ -76,11 +76,18 @@ The SE recommends **Typer** over Click or raw argparse:
 - Windows support
 
 ## Epic-Level Dependencies
-This epic MUST execute after E-052, E-053, and E-054 because it wraps their final script interfaces. E-051 is independent (no script interface changes).
+This epic MUST execute after E-042, E-052, E-053, and E-054 because it wraps their final script interfaces:
+- **E-042** (Admin Interface and Team Management): E-042-06 adds `--source db|yaml` flag to `scripts/crawl.py` and `scripts/load.py`. The CLI must expose this flag on `bb data crawl` and `bb data load`.
+- **E-052** (Proxy Data Lifecycle): Adds session flags (`--session`, `--all`, `--unreviewed`) to proxy report/endpoint scripts.
+- **E-053** (Profile-Scoped Credentials): Adds `--profile` to credential check.
+- **E-054** (Header Parity Refresh): Creates `scripts/proxy-refresh-headers.py`.
+
+E-051 is independent (no script interface changes).
 
 **Recommended execution order:**
 ```
 E-051 (cert persistence)       ─┐
+E-042 (admin + team mgmt)      ─┤
 E-053 (profile-scoped creds)   ─┼── parallel
 E-054 (header parity refresh)  ─┘
 E-052 (proxy data lifecycle)   ─── after E-051
@@ -133,8 +140,8 @@ src/cli/
 |-------------|-------|-------|
 | `bb creds refresh` | `scripts/refresh_credentials.py` | Same flags: `--curl`, `--file` |
 | `bb creds check` | `scripts/check_credentials.py` | Flag: `--profile` (validate specific profile or all) |
-| `bb data crawl` | `scripts/crawl.py` | Flags: `--dry-run`, `--crawler NAME`, `--profile` |
-| `bb data load` | `scripts/load.py` | Flags: `--dry-run`, `--loader NAME` |
+| `bb data crawl` | `scripts/crawl.py` | Flags: `--dry-run`, `--crawler NAME`, `--profile`, `--source db\|yaml` (default: yaml, per E-042-06) |
+| `bb data load` | `scripts/load.py` | Flags: `--dry-run`, `--loader NAME`, `--source db\|yaml` (default: yaml, per E-042-06) |
 | `bb data sync` | `scripts/bootstrap.py` | Flags: `--check-only`, `--profile`, `--dry-run`. Alias for bootstrap (validate + crawl + load). |
 | `bb proxy report` | `scripts/proxy-report.sh` | Flags: `--session`, `--all`. Shells out to bash. No `--unreviewed` (header reports are point-in-time snapshots). |
 | `bb proxy endpoints` | `scripts/proxy-endpoints.sh` | Flags: `--session`, `--all`, `--unreviewed`. Shells out to bash. |
@@ -238,6 +245,9 @@ Story 01 creates `src/cli/__init__.py` with **all sub-app mounts pre-wired** and
 - Do not re-test business logic already covered by existing tests -- only test the CLI layer.
 - Each story creates its own test file (`tests/test_cli_*.py`) to avoid file conflicts during parallel execution.
 
+### Scripts Excluded from CLI Scope
+`smoke_test.py` and `seed_dev.py` are intentionally NOT wrapped by the CLI. `seed_dev.py` is already covered by `bb db reset` (which calls `reset_dev_db.py`, itself a superset of seeding). `smoke_test.py` could be a future addition (e.g., `bb status --smoke`) but is out of scope for E-055.
+
 ## Open Questions
 - None -- all questions resolved during expert consultation.
 
@@ -246,3 +256,5 @@ Story 01 creates `src/cli/__init__.py` with **all sub-app mounts pre-wired** and
 - 2026-03-06: Refined E-055-01 installation/PATH story. SE consultation identified gotchas: (1) pyproject.toml needs `version` field for editable install, (2) Dockerfile needs `COPY pyproject.toml .` and `pip install .` (not `-e .` for production), (3) `pip install -e .` and `pip install -r requirements.txt` are complementary (order: deps first, then package). Added AC-3 version requirement, AC-6 Dockerfile specifics, AC-11 `__main__.py` fallback. Updated Technical Notes with full installation details.
 - 2026-03-06: Applied holistic review triage findings: (1) P1-4: Removed `--unreviewed` from `bb proxy report` (header reports are point-in-time snapshots). (2) P1-5: Removed Dockerfile install -- CLI is devcontainer-only. Added to Non-Goals. (3) P2-1: Clarified `status` as top-level `@app.command()`, not a sub-app.
 - 2026-03-06: Revised based on review findings. (1) Removed proxy lifecycle commands (start/stop/status/logs) -- proxy runs on Mac host, not inside devcontainer. (2) Added `bb proxy refresh-headers` (wraps E-054's `proxy-refresh-headers.py`), `bb proxy review` (wraps E-052's `proxy-review.sh`). (3) Added E-052 session flags (`--session`, `--all`, `--unreviewed`) to `bb proxy report` and `bb proxy endpoints`. (4) Added `--profile` flag to `bb creds check` per E-053. (5) Added epic-level dependencies on E-052, E-053, E-054. (6) Updated E-055-04 to remove lifecycle commands, add new analysis commands. (7) Updated E-055-06 to remove proxy detection, add per-profile creds and latest proxy session. (8) Updated E-055-07 to remove proxy lifecycle command docs. (9) Added non-goal for proxy lifecycle management.
+- 2026-03-06: Added E-042 as epic-level dependency. E-042-06 adds `--source db|yaml` flag to `scripts/crawl.py` and `scripts/load.py`. Updated Command Map and E-055-03 ACs to expose `--source` on `bb data crawl` and `bb data load`. Updated execution order diagram. Set to READY after quality checklist passed. Note: dispatch blocked until E-042, E-052, E-053, and E-054 are COMPLETED.
+- 2026-03-06: Implementation notes refinement pass (SE corner case analysis). Added advisory notes to stories -- no AC or status changes. (1) E-055-01: logging.basicConfig() import-order hazard and fix. (2) E-055-03: `bb data sync` intentionally has no `--source` flag (deferred to IDEA-012). (3) E-055-04: `cwd=PROJECT_ROOT` required in all subprocess.run() calls for bash scripts. (4) E-055-05: `backup_database()` raises FileNotFoundError, CLI must catch and convert. (5) Epic Technical Notes: `smoke_test.py` and `seed_dev.py` excluded from CLI scope.

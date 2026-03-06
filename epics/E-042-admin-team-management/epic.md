@@ -47,7 +47,7 @@ The current team configuration is a static YAML file (`config/teams.yaml`) that 
 - An admin can mark a team as owned (Lincoln program) or tracked (opponent/scouting target)
 - An admin can deactivate a team to stop it from being crawled
 - An admin can see which opponents have been discovered from a team's schedule
-- The crawl pipeline (`scripts/crawl.py`) reads active teams from the database when `config/teams.yaml` is absent or when a `--db` flag is used
+- The crawl pipeline (`scripts/crawl.py`) reads active teams from the database when the `--source db` flag is used (YAML remains the default)
 - All admin team management pages are protected by the existing admin auth guard
 
 ## Stories
@@ -57,7 +57,7 @@ The current team configuration is a static YAML file (`config/teams.yaml`) that 
 | E-042-02 | URL parser and public API team resolver | TODO | None | - |
 | E-042-03 | Admin team list and add-team page | TODO | E-042-01, E-042-02 | - |
 | E-042-04 | Admin team edit and deactivate | TODO | E-042-03 | - |
-| E-042-05 | Opponent auto-discovery from public schedule | TODO | E-042-03 | - |
+| E-042-05 | Opponent auto-discovery from public schedule | TODO | E-042-02, E-042-03 | - |
 | E-042-06 | Database-driven crawl configuration | TODO | E-042-01 | - |
 
 ## Technical Notes
@@ -117,7 +117,7 @@ Follow the existing admin UI patterns from E-023:
 - `POST /admin/teams` -- Add team (accepts URL or public_id)
 - `GET /admin/teams/{team_id}/edit` -- Edit team form
 - `POST /admin/teams/{team_id}/edit` -- Update team
-- `POST /admin/teams/{team_id}/deactivate` -- Toggle is_active
+- `POST /admin/teams/{team_id}/toggle-active` -- Toggle is_active
 - `POST /admin/teams/{team_id}/discover-opponents` -- Trigger opponent discovery for a team
 
 ### URL Parser Notes (SE consultation)
@@ -193,3 +193,10 @@ All resolved during expert consultation. See History.
   - **Open questions resolved**: (1) URL pattern: parser is liberal, accepts any `/teams/{slug}` URL. (2) Opponent discovery: explicit admin action (button click). (3) Discovered opponents: `is_active=0` default (admin enables manually).
   - **Known limitation documented**: Same team could exist as two rows if added via URL (public_id as team_id) and later via authenticated crawl (UUID as team_id). Out of scope -- merge/dedup is a future concern if the project returns to authenticated crawling.
 - 2026-03-05: Set to READY after quality checklist passed.
+- 2026-03-06: **Codex spec review triage.** 6 findings (3 P1, 3 P2). Fixed 5, deferred 1:
+  - FIXED P1: E-042-06 AC-5 `DB_PATH` -> `DATABASE_PATH` (matches canonical env var in src/api/db.py).
+  - FIXED P1: E-042-05 missing dependency on E-042-02 (team_resolver.py created by 02, extended by 05). Added to story and epic table.
+  - DEFERRED P1: bootstrap.py DB mode -- bootstrap.py is out of scope for this epic. It wraps crawl.py/load.py which get `--source db`. Bootstrap DB-mode support is a future enhancement (IDEA-012 scope).
+  - FIXED P2: Epic success criteria `--db flag` -> `--source db` (aligns with E-042-06 AC-4 contract).
+  - FIXED P2: Epic route map `/deactivate` -> `/toggle-active` (aligns with E-042-04 AC-8 -- route both activates and deactivates).
+  - FIXED P2: E-042-01 Blocks list removed E-042-02 (URL parser/resolver are DB-independent; E-042-02 creates new files only, no schema dependency). E-042-02 remains correctly listed as having no dependencies in both story and epic table.
