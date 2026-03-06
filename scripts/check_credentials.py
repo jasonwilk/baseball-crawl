@@ -74,15 +74,15 @@ def check_credentials() -> tuple[int, str]:
 
     try:
         user = client.get("/me/user", accept=_ME_USER_ACCEPT)
-    except CredentialExpiredError:
-        return (
-            1,
-            "Credentials expired -- refresh via proxy capture or scripts/refresh_credentials.py",
-        )
     except ForbiddenError:
         return (
             1,
             "Access denied -- credentials may be expired or revoked",
+        )
+    except CredentialExpiredError:
+        return (
+            1,
+            "Credentials expired -- refresh via proxy capture or scripts/refresh_credentials.py",
         )
     except (httpx.ConnectError, httpx.TimeoutException) as exc:
         return (1, f"Network error reaching GameChanger API: {exc}")

@@ -228,7 +228,7 @@ Network error reaching GameChanger API: ...
 
 Check:
 - Your internet connection is working
-- `GAMECHANGER_BASE_URL` in `.env` is correct (typically `https://api.sportninja.com`)
+- `GAMECHANGER_BASE_URL` in `.env` is correct (typically `https://api.team-manager.gc.com`)
 - The GameChanger API is not down (try opening [web.gc.com](https://web.gc.com) in a browser)
 
 ---

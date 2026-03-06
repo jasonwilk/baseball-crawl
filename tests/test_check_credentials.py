@@ -161,7 +161,7 @@ def test_forbidden_403_returns_exit_1(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     exit_code, message = check_credentials()
     assert exit_code == 1
-    assert "denied" in message.lower() or "expired" in message.lower()
+    assert "denied" in message.lower()
 
 
 # ---------------------------------------------------------------------------
