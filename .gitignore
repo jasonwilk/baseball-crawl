@@ -37,8 +37,6 @@ data/
 # Database backups (created by scripts/backup_db.py)
 data/backups/
 
-# Generated / aggregated files
-codebase.md
 
 # Ephemeral data directory -- safe zone for raw API responses and scratch data
 /ephemeral/*
