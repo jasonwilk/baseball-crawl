@@ -53,18 +53,20 @@ If the epic's changes have already been committed but not merged, `base main` is
 
 ### Execute the review
 
-Run the codex review script via Bash:
+Run the codex review script via Bash with a 10-minute timeout:
 
 ```
-./scripts/codex-review.sh <mode> [args]
+timeout 600 ./scripts/codex-review.sh <mode> [args]
 ```
 
 Examples:
-- `./scripts/codex-review.sh uncommitted`
-- `./scripts/codex-review.sh base main`
-- `./scripts/codex-review.sh commit abc1234`
+- `timeout 600 ./scripts/codex-review.sh uncommitted`
+- `timeout 600 ./scripts/codex-review.sh base main`
+- `timeout 600 ./scripts/codex-review.sh commit abc1234`
 
 Capture the full output. This is the codex findings report that the team will review in Phase 2.
+
+If the command exits with code 124, codex timed out after 10 minutes. Report the timeout to the user and ask how to proceed. Do not retry automatically.
 
 ### Evaluate the output
 
