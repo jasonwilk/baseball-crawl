@@ -1,8 +1,8 @@
 # Product Manager -- Agent Memory
 
 ## Numbering State
-- Next available epic number: E-051
-- Epics created: E-001 through E-050 (E-001, E-003, E-005, E-006, E-007, E-008, E-010, E-011, E-012, E-013, E-014, E-015, E-016, E-017, E-018, E-019, E-020, E-021, E-022, E-024, E-025, E-026, E-027, E-028, E-029, E-030, E-031, E-032, E-033, E-034, E-035, E-036, E-037, E-038, E-044, E-046, E-048, E-049, E-050 archived)
+- Next available epic number: E-056
+- Epics created: E-001 through E-054 (E-001, E-003, E-005, E-006, E-007, E-008, E-010, E-011, E-012, E-013, E-014, E-015, E-016, E-017, E-018, E-019, E-020, E-021, E-022, E-024, E-025, E-026, E-027, E-028, E-029, E-030, E-031, E-032, E-033, E-034, E-035, E-036, E-037, E-038, E-044, E-046, E-048, E-049, E-050 archived)
 - Next available idea number: IDEA-013
 - Ideas created: IDEA-001 through IDEA-012
 
@@ -16,6 +16,10 @@
 ## Active Epics (Summary)
 - E-041 (DRAFT): Evaluate json-render -- research epic. 1 spike (R-01: fit assessment) + 1 decision gate (99). Needs expert consultation (UX designer, software engineer) before READY.
 - E-042 (READY): Admin Interface and Team Management -- 6 stories. URL-based team onboarding (paste GC URL, resolve via public API), admin CRUD for teams (two-section list: Lincoln Program / Tracked Opponents), opponent auto-discovery from public schedule, DB-driven crawl config. Expert consultation done (UX, DE, SE). Migration 005 (public_id on teams). Dispatch order: 01 first, then 02+06 parallel, then 03, then 04+05 parallel (or sequential if file conflicts).
+- E-053 (READY): Profile-Scoped Credentials -- 4 stories. Profile-scoped env keys for web/mobile credentials (GAMECHANGER_AUTH_TOKEN_WEB/_MOBILE, etc.), profile-aware GameChangerClient credential loading (NO flat-key fallback -- clean break), profile-aware check_credentials/bootstrap, .env.example + CLAUDE.md docs. Dep chain: 01+02 parallel, then 03 (needs 02), 04 (needs 01+02). No expert consultation needed. refresh_credentials.py stays flat-key web-only (not in scope).
+- E-054 (READY): Header Parity Refresh from MITM Captures -- 2 stories. Python script reads proxy header-report.json, rewrites src/http/headers.py to match real captures. Dry-run by default, --apply to write. Excluded headers (credentials, per-request, connection-level). Includes header_capture.py parity fix (diff each source against correct canonical dict). Workflow docs in mitmproxy-guide.md. E-052 session-aware path fallback. No expert consultation needed.
+- E-052 (DRAFT): Proxy Data Lifecycle -- 5 stories. Session-scoped proxy capture dirs, addon output routing, review tracking (`proxy-review.sh`), session-aware report scripts (`--unreviewed`), stop-time summary. No expert consultation needed (pure proxy infra). Dep chain: 01 first, then 02+03 parallel, then 04 (needs both), 05 (needs 02). Independent of E-051 (cert persistence).
+- E-055 (DRAFT): Unified Operator CLI -- 7 stories. Single `bb` entry point via Typer. Command groups: creds, data, proxy, db, status. Wraps existing scripts as library code. `bb status` = operator health dashboard. Dep chain: 01 first, then 02+03+04+05 parallel, then 06 (needs 02+04), then 07 (needs all). UX+SE consulted.
 ## Archived Epics
 - E-004 (COMPLETED): Coaching Dashboard -- all 6 stories DONE. 7 routes: /dashboard (batting), /dashboard/pitching, /dashboard/games, /dashboard/games/{id}, /dashboard/opponents, /dashboard/opponents/{id}, /dashboard/players/{id}. 123 tests. Key artifacts: src/api/helpers.py (ip_display, format_avg, format_date), src/api/templates/dashboard/ (8 templates), src/api/db.py (8 query functions added), src/api/routes/dashboard.py (7 routes). Codex review: 3 findings fixed (context passthrough, date formatting, placeholder tests). Mobile-first with bottom nav, 44px touch targets, sticky headers. IDEA-008/009 now promotable (dashboard ready for trends).
 - E-043 (COMPLETED): Dev Environment Auth and Networking Fix -- 1 story. Changed APP_URL, WEBAUTHN_ORIGIN, WEBAUTHN_RP_ID defaults from localhost:8000 to baseball.localhost:8001. Updated .env.example. No follow-up work.
