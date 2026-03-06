@@ -326,10 +326,10 @@ All routed work follows this contract:
 2. **PM consults experts during formation.** Before writing stories, PM consults domain experts as needed. When not required, PM notes the reason.
 3. **PM marks the epic `READY` when refinement is complete.** `DRAFT` epics are not dispatchable.
 4. **"Ready for dev" = `Status: TODO` in a `READY` epic.** No story file means no implementation work begins.
-5. **PM dispatches via Agent Teams.** PM joins every dispatch team as the standing coordinator -- managing story statuses, verifying acceptance criteria, and dispatching newly unblocked stories as predecessors complete. See `/.claude/rules/dispatch-pattern.md`.
+5. **Team lead creates the dispatch team and spawns PM + implementing agents.** PM joins as the standing coordinator -- assigning stories via messaging, managing statuses, verifying acceptance criteria, and requesting additional spawns from the team lead for newly unblocked stories. See `/.claude/rules/dispatch-pattern.md`.
 6. **Implementing agents require a story reference.** Must receive a story file path or story ID before beginning any task.
 
-**Team Lead Boundary**: The team lead (user-facing agent) MUST NOT create dispatch teams, spawn implementers, or update story/epic statuses. On dispatch requests, the team lead spawns PM and relays the request -- PM coordinates from there. See `/.claude/rules/dispatch-pattern.md`.
+**Team Lead Boundary**: The team lead (user-facing agent) creates the dispatch team and spawns all agents (PM + implementers), but MUST NOT assign stories, verify acceptance criteria, update story/epic statuses, or make routing decisions. Those are PM's coordination responsibilities. See `/.claude/rules/dispatch-pattern.md`.
 
 **Enforcement Boundary**: The user always retains override authority to invoke any agent directly; this contract governs the normal orchestrated path.
 

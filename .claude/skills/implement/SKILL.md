@@ -22,9 +22,9 @@ Load this skill when the user says any of:
 
 ## Purpose
 
-Codify the full workflow for dispatching an epic when the user requests implementation. The team lead reads the epic to extract team composition, spawns the product-manager (PM), and relays the request. The PM coordinates all dispatch, status management, and closure per `/.claude/rules/dispatch-pattern.md`.
+Codify the full workflow for dispatching an epic when the user requests implementation. The team lead reads the epic to extract team composition, creates the team, spawns PM and all implementing agents, and remains available for additional spawn requests. PM coordinates all dispatch, status management, and closure via `SendMessage` per `/.claude/rules/dispatch-pattern.md`.
 
-This skill is deliberately thin. The coordination logic lives in dispatch-pattern.md and the PM agent definition. This skill handles trigger recognition, prerequisite checks, team composition extraction, and correct PM handoff.
+This skill is deliberately thin. The coordination logic lives in dispatch-pattern.md and the PM agent definition. This skill handles trigger recognition, prerequisite checks, team composition extraction, and correct team spawning.
 
 ---
 
@@ -47,14 +47,20 @@ Before spawning PM, verify:
 
 Read the epic's `## Dispatch Team` section.
 
-- **If present and non-empty**: Note the listed agents. These are the agents PM should prefer when spawning implementers.
-- **If absent or empty**: Note "no team composition specified -- PM will determine agents from story domains." The PM will fall back to the Agent Selection table in `/.claude/rules/dispatch-pattern.md`.
-
-The team composition is advisory information passed to PM. The team lead does NOT use it to spawn agents directly.
+- **If present and non-empty**: Note the listed agents. These are the agents the team lead will spawn alongside PM.
+- **If absent or empty**: Note "no team composition specified." The team lead will spawn PM only; PM will determine required agents from story domains and message the team lead to spawn them.
 
 ---
 
 ## Phase 2: Dispatch
+
+Create the team and spawn all agents. The team lead is the only agent that can spawn teammates.
+
+### Step 1: Create the team
+
+Use `TeamCreate` to create a dispatch team for the epic.
+
+### Step 2: Spawn PM
 
 Spawn the product-manager (PM) as a teammate with the following context:
 
@@ -64,21 +70,36 @@ Dispatch epic E-NNN.
 Epic directory: /epics/E-NNN-slug/
 Epic file: /epics/E-NNN-slug/epic.md
 
-Team composition from Dispatch Team section: [list agents from Phase 1, or "not specified -- use routing table"]
+Teammates spawned: [list of agent types spawned from Phase 1, or "none yet -- no Dispatch Team section found. Determine required agents and message me to spawn them."]
 
 [If "and review" modifier was specified]:
 After all stories are DONE and before the closure sequence, chain into the review-epic workflow at `.claude/skills/review-epic/SKILL.md`.
 
-Coordinate per `/.claude/rules/dispatch-pattern.md`. Read the epic, identify eligible stories, and dispatch.
+Coordinate per `/.claude/rules/dispatch-pattern.md`. Read the epic, identify eligible stories, and assign to teammates via messaging.
 ```
 
-After spawning PM, **step back**. The team lead's job is done. PM coordinates everything from here:
-- Reading story files and making routing decisions
-- Spawning implementing agents
-- Updating story and epic statuses
-- Verifying acceptance criteria
-- Running the closure sequence
-- Presenting the final summary
+### Step 3: Spawn implementing agents
+
+If the Dispatch Team section listed agents in Phase 1, spawn each one with the following context:
+
+```
+You are [agent-type] on the dispatch team for epic E-NNN.
+Epic directory: /epics/E-NNN-slug/
+
+The PM (product-manager) will assign your stories via messaging. Wait for the PM's instructions before starting work.
+```
+
+If no Dispatch Team section was found, skip this step -- PM will determine required agents and message the team lead to spawn them.
+
+### Step 4: Remain available
+
+After spawning all agents, the team lead **remains available for spawn requests from PM**. If PM messages requesting an additional agent for a newly unblocked story, the team lead spawns it promptly and notifies PM.
+
+The team lead does NOT:
+- Assign stories to implementers (PM does this via messaging)
+- Update story or epic statuses
+- Verify acceptance criteria
+- Make routing decisions
 
 ---
 
@@ -113,13 +134,15 @@ Phase 1: Read epic's Dispatch Team section
   - Extract team composition (or note "not specified")
   |
   v
-Phase 2: Spawn PM with epic path, team composition, and review flag
+Phase 2: Create team, spawn PM + implementing agents
+  - PM gets: epic path, teammate roster, review flag
+  - Implementers get: epic path, "wait for PM"
   |
   v
-Team lead steps back -- PM coordinates from here
+Team lead remains available for spawn requests from PM
   |
   v
-PM dispatches stories per dispatch-pattern.md
+PM coordinates via messaging per dispatch-pattern.md
   |
   v
 [If "and review": PM chains into review-epic skill before closure]
@@ -150,11 +173,14 @@ If the review chain runs but there are no uncommitted changes to review, the rev
 ### PM Spawn Fails
 Follow the Dispatch Failure Protocol in `/.claude/rules/workflow-discipline.md`: report the failure to the user with the specific reason and ask how to proceed. Do not improvise a workaround.
 
+### Implementer Spawn Fails
+If spawning an implementing agent fails, report the failure to PM via `SendMessage` and to the user. PM and the user decide how to proceed. Do not silently skip the agent or attempt a different agent type.
+
 ---
 
 ## Anti-Patterns
 
-1. **Do not bypass PM.** The team lead is a relay, not a coordinator. The team lead spawns PM and provides context -- it does NOT create dispatch teams, spawn implementing agents, update statuses, or verify acceptance criteria. This is the Team Lead Dispatch Boundary defined in `/.claude/rules/dispatch-pattern.md`.
+1. **Do not bypass PM.** The team lead spawns agents but does NOT assign stories, update statuses, or verify acceptance criteria. Those are PM's coordination responsibilities. See `/.claude/rules/dispatch-pattern.md`.
 2. **Do not read story files to make routing decisions.** The team lead reads only the epic file (for status and Dispatch Team section). Story-level routing is PM's job.
 3. **Do not start implementing before PM has updated statuses.** Implementation begins only after PM marks stories `IN_PROGRESS`.
 4. **Do not invoke the review-epic skill directly.** If the "and review" modifier is specified, pass it as a flag to PM. PM chains into the review skill at the right point in the closure sequence.

@@ -76,12 +76,18 @@ Capture the full output. This is the codex findings report that the team will re
 
 ## Phase 2: Team Review of Codex Findings
 
-**Agents**: PM (coordinator) + implementing agents
+**Agents**: Team lead (spawner) + PM (coordinator) + implementing agents
 **Time-sensitive**: No
 
-Spawn PM as a teammate with the following context block. Include ALL of the listed items -- do not summarize.
+### Step 1: Determine team composition
 
-### Context block for PM
+Read the epic's `## Dispatch Team` section. If present and non-empty, note the listed agents. If absent or empty, determine agents from the epic's stories using the Agent Selection table in `/.claude/rules/dispatch-pattern.md`.
+
+### Step 2: Create team and spawn all agents
+
+Create the team (`TeamCreate`) and spawn PM + all implementing agents.
+
+**Context block for PM:**
 
 ```
 POST-DEV REVIEW: The user requested a codex code review of epic E-NNN.
@@ -89,15 +95,16 @@ POST-DEV REVIEW: The user requested a codex code review of epic E-NNN.
 EPIC ID: E-NNN
 EPIC DIRECTORY: /epics/E-NNN-slug/ (or /.project/archive/E-NNN-slug/ if archived)
 
+Teammates spawned: [list of agent types spawned alongside PM]
+
 CODEX FINDINGS:
 [Paste the full codex output here]
 
 INSTRUCTIONS:
-1. Read the epic file to identify the implementing agents. Check the Dispatch Team
-   section first. If it is missing or empty, determine agents from the epic's stories
-   using the Agent Selection table in /.claude/rules/dispatch-pattern.md.
+1. The team lead has spawned implementing agents alongside you. Assign review tasks
+   to them via SendMessage.
 
-2. Spawn the implementing agents as teammates. Provide each agent with:
+2. Provide each implementing agent with:
    - The full codex findings
    - The epic ID and directory path
    - Their role: review findings relevant to their domain, propose fixes or
@@ -117,6 +124,22 @@ INSTRUCTIONS:
      epic/idea reference if applicable).
    - Report the summary back: how many findings were fixed, dismissed, and deferred.
 ```
+
+**Context block for each implementing agent:**
+
+```
+You are [agent-type] on a review team for epic E-NNN.
+Epic directory: /epics/E-NNN-slug/ (or /.project/archive/E-NNN-slug/ if archived)
+
+CODEX FINDINGS:
+[Paste the full codex output here]
+
+The PM (product-manager) will assign your review tasks via messaging. Wait for the PM's instructions before starting work.
+```
+
+### Step 3: Remain available
+
+After spawning all agents, the team lead remains available for additional spawn requests from PM (e.g., if PM identifies findings that need a different agent type).
 
 ### What to do with review results
 
@@ -147,13 +170,13 @@ Phase 1: Team lead runs codex-review.sh
   +---> No findings? -> Report "clean review" and stop.
   |
   v
-Phase 2: Team lead spawns PM
-  - PM reads epic, identifies implementing agents
-  - PM spawns implementing agents
+Phase 2: Team lead spawns PM + implementing agents
+  - PM coordinates review via messaging
   - Team reviews each finding: fix, dismiss, or defer
   - Implementing agents apply fixes
   - PM tracks dispositions
   - PM documents deferred findings in epic
+  - Team lead remains available for additional spawn requests
   |
   v
 Team lead presents review summary to user

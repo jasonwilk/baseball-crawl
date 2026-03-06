@@ -14,9 +14,9 @@ Implementing agents MUST NOT begin any implementation work without a referenced 
 
 ## Workflow Routing Rule
 
-All work-initiation requests travel through the `user -> product-manager -> implementing agent` pipeline. The PM dispatches implementation work using Agent Teams (see `/.claude/rules/dispatch-pattern.md`).
+All work-initiation requests travel through the `user -> team lead -> PM -> implementing agent` pipeline. The team lead creates the dispatch team and spawns all agents (PM + implementers). PM coordinates via messaging (see `/.claude/rules/dispatch-pattern.md`).
 
-**Team lead boundary**: The team lead (user-facing agent) relays dispatch requests to the PM and nothing more. The team lead MUST NOT create teams, spawn implementers, update story/epic statuses, or verify acceptance criteria. See the "Team Lead Dispatch Boundary" section in `dispatch-pattern.md`.
+**Team lead boundary**: The team lead (user-facing agent) creates the dispatch team and spawns all agents, but MUST NOT assign stories, verify acceptance criteria, update story/epic statuses, or make routing decisions. Those are PM's coordination responsibilities. The team lead remains available for additional spawn requests from PM. See the "Team Lead Spawning Responsibility" section in `dispatch-pattern.md`.
 
 ## PM Task Types
 
