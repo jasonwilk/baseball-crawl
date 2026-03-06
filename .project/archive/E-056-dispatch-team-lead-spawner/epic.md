@@ -1,7 +1,7 @@
 # E-056: Fix Dispatch Pattern -- Team Lead as Spawner
 
 ## Status
-`READY`
+`COMPLETED`
 
 ## Overview
 The dispatch pattern is architecturally broken. It instructs PM to spawn implementing agents via `TeamCreate` and the `Agent` tool, but PM runs as a teammate and **teammates cannot spawn other teammates** -- only the team lead can manage team membership. This epic restructures the dispatch pattern so the team lead spawns all agents and PM coordinates via messaging.
@@ -38,11 +38,11 @@ No expert consultation required -- this is pure process/workflow fixing a docume
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-056-01 | Rewrite dispatch-pattern.md for team-lead-as-spawner | TODO | None | claude-architect |
-| E-056-02 | Update PM agent definition dispatch procedure | TODO | E-056-01 | claude-architect |
-| E-056-03 | Update implement skill for team lead spawning | TODO | E-056-01 | claude-architect |
-| E-056-04 | Update review-epic skill for team lead spawning | TODO | E-056-01 | claude-architect |
-| E-056-05 | Align CLAUDE.md and workflow-discipline.md | TODO | E-056-01 | claude-architect |
+| E-056-01 | Rewrite dispatch-pattern.md for team-lead-as-spawner | DONE | None | claude-architect |
+| E-056-02 | Update PM agent definition dispatch procedure | DONE | E-056-01 | claude-architect |
+| E-056-03 | Update implement skill for team lead spawning | DONE | E-056-01 | claude-architect |
+| E-056-04 | Update review-epic skill for team lead spawning | DONE | E-056-01 | claude-architect |
+| E-056-05 | Align CLAUDE.md and workflow-discipline.md | DONE | E-056-01 | claude-architect |
 
 ## Dispatch Team
 - claude-architect
@@ -97,3 +97,4 @@ None -- the constraint is documented and the fix is straightforward.
 
 ## History
 - 2026-03-06: Created. Critical fix for broken dispatch pattern discovered during E-051 execution.
+- 2026-03-06: COMPLETED. All 5 stories done. Rewrote dispatch-pattern.md, PM agent def, implement skill, review-epic skill, CLAUDE.md, and workflow-discipline.md to reflect team-lead-as-spawner model. No documentation impact (all changes are context-layer files, not user-facing docs).
