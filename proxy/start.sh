@@ -53,8 +53,9 @@ esac
 
 export MITMPROXY_PROFILE
 
-# Create certs dir if it doesn't exist.
-mkdir -p certs
+# Create certs dir if it doesn't exist. Use permissive mode so the container's
+# mitmproxy user (UID 1000) can write CA certs regardless of host UID.
+mkdir -p -m 777 certs
 
 docker compose up -d
 

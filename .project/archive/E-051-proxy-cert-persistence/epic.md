@@ -1,7 +1,7 @@
 # E-051: Fix mitmproxy CA Certificate Persistence
 
 ## Status
-`READY`
+`COMPLETED`
 
 ## Overview
 mitmproxy CA certificates do not survive container recreation. Each time the proxy container is stopped and restarted, new certificates are generated, forcing the operator to reinstall the CA cert on the iPhone. The volume mount exists but is ineffective due to a permissions mismatch between the host directory and the container's `mitmproxy` user.
@@ -31,7 +31,7 @@ No expert consultation required -- this is a straightforward infrastructure bug 
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-051-01 | Fix cert directory permissions in proxy entrypoint | TODO | None | - |
+| E-051-01 | Fix cert directory permissions in proxy entrypoint | DONE | None | software-engineer |
 
 ## Dispatch Team
 - software-engineer
@@ -59,3 +59,4 @@ None -- the diagnosis is clear and the fix is small.
 
 ## History
 - 2026-03-06: Created. Bug reported by user: certs regenerate on every container restart, requiring iPhone CA reinstall.
+- 2026-03-06: COMPLETED. Fix: container runs as root (user: "0:0"), entrypoint chowns cert dir to mitmproxy user, then drops privileges via su-exec before exec'ing mitmweb. start.sh mkdir uses -m 777 as belt-and-suspenders. No documentation impact -- README already described the correct workflow.

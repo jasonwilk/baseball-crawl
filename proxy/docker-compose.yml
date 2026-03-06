@@ -1,6 +1,7 @@
 services:
   mitmproxy:
     image: mitmproxy/mitmproxy
+    user: "0:0"
     entrypoint: ["/app/proxy/proxy-entrypoint.sh"]
     env_file:
       - path: ../.env
