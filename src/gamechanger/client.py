@@ -80,17 +80,31 @@ class GameChangerClient:
             Forwarded to ``create_session()``.
         jitter_ms: Maximum additional random jitter in milliseconds.
             Forwarded to ``create_session()``.
+        profile: Header profile to use.  ``"web"`` (default) selects the
+            Chrome 145 browser fingerprint; ``"mobile"`` selects the iOS
+            Odyssey app fingerprint.  Forwarded to ``create_session()``,
+            which raises ``ValueError`` for unknown profiles.  The profile
+            also controls ``gc-app-name`` when the ``GAMECHANGER_APP_NAME``
+            env var is absent: ``"web"`` defaults the header to ``"web"``,
+            ``"mobile"`` omits the header entirely (iOS app does not send it).
     """
 
-    def __init__(self, min_delay_ms: int = 1000, jitter_ms: int = 500) -> None:
+    def __init__(
+        self, min_delay_ms: int = 1000, jitter_ms: int = 500, profile: str = "web"
+    ) -> None:
         self._credentials = self._load_credentials()
         self._base_url = self._credentials["GAMECHANGER_BASE_URL"].rstrip("/")
-        self._session = create_session(min_delay_ms=min_delay_ms, jitter_ms=jitter_ms)
+        self._session = create_session(
+            min_delay_ms=min_delay_ms, jitter_ms=jitter_ms, profile=profile
+        )
         self._session.headers["gc-token"] = self._credentials["GAMECHANGER_AUTH_TOKEN"]
         self._session.headers["gc-device-id"] = self._credentials["GAMECHANGER_DEVICE_ID"]
-        self._session.headers["gc-app-name"] = self._credentials.get(
-            "GAMECHANGER_APP_NAME", "web"
-        )
+        app_name = self._credentials.get("GAMECHANGER_APP_NAME")
+        if app_name:
+            self._session.headers["gc-app-name"] = app_name
+        elif profile == "web":
+            self._session.headers["gc-app-name"] = "web"
+        # mobile profile with no GAMECHANGER_APP_NAME: omit gc-app-name entirely
 
     def get_paginated(
         self,

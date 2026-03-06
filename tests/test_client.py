@@ -345,15 +345,18 @@ def test_missing_single_credential_raises_configuration_error(
 
 def test_min_delay_and_jitter_forwarded_to_session(monkeypatch: pytest.MonkeyPatch) -> None:
     """Constructor forwards min_delay_ms and jitter_ms to create_session()."""
-    captured_kwargs: dict[str, int] = {}
+    captured_kwargs: dict[str, object] = {}
 
     original_create_session = __import__(
         "src.http.session", fromlist=["create_session"]
     ).create_session
 
-    def fake_create_session(min_delay_ms: int = 1000, jitter_ms: int = 500) -> object:
+    def fake_create_session(
+        min_delay_ms: int = 1000, jitter_ms: int = 500, profile: str = "web"
+    ) -> object:
         captured_kwargs["min_delay_ms"] = min_delay_ms
         captured_kwargs["jitter_ms"] = jitter_ms
+        captured_kwargs["profile"] = profile
         return original_create_session(min_delay_ms=0, jitter_ms=0)
 
     monkeypatch.setattr("src.gamechanger.client.create_session", fake_create_session)
@@ -601,3 +604,140 @@ def test_paginated_5xx_retries_same_page_not_entire_sequence(
     # Page 1 fetched exactly once -- retry was on page 2 only.
     assert page1_calls == 1
     assert page2_attempts == 2
+
+
+# ---------------------------------------------------------------------------
+# Profile-aware GameChangerClient (E-050-02)
+# ---------------------------------------------------------------------------
+
+_FAKE_CREDENTIALS_NO_APP_NAME = {
+    "GAMECHANGER_AUTH_TOKEN": "fake-jwt-token",
+    "GAMECHANGER_DEVICE_ID": "abcdef1234567890abcdef1234567890",
+    "GAMECHANGER_BASE_URL": "https://api.team-manager.gc.com",
+    # GAMECHANGER_APP_NAME intentionally absent
+}
+
+
+def _make_client_with_profile(
+    monkeypatch: pytest.MonkeyPatch,
+    profile: str,
+    credentials: dict | None = None,
+) -> GameChangerClient:
+    """Return a GameChangerClient with the given profile and zero delays."""
+    creds = credentials if credentials is not None else _FAKE_CREDENTIALS
+    monkeypatch.setattr("src.gamechanger.client.dotenv_values", lambda: creds)
+    return GameChangerClient(min_delay_ms=0, jitter_ms=0, profile=profile)
+
+
+@respx.mock
+def test_default_profile_uses_web_user_agent(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Default profile (web) uses Chrome browser User-Agent on outgoing requests."""
+    from src.http.headers import BROWSER_HEADERS
+
+    route = respx.get(f"{_BASE_URL}/me/teams").mock(
+        return_value=httpx.Response(200, json=[])
+    )
+    client = _make_client(monkeypatch)
+    client.get("/me/teams")
+
+    request = route.calls.last.request
+    assert request.headers["user-agent"] == BROWSER_HEADERS["User-Agent"]
+
+
+@respx.mock
+def test_mobile_profile_uses_mobile_user_agent(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Explicit profile='mobile' uses iOS Odyssey User-Agent on outgoing requests."""
+    from src.http.headers import MOBILE_HEADERS
+
+    route = respx.get(f"{_BASE_URL}/me/teams").mock(
+        return_value=httpx.Response(200, json=[])
+    )
+    client = _make_client_with_profile(monkeypatch, "mobile")
+    client.get("/me/teams")
+
+    request = route.calls.last.request
+    assert request.headers["user-agent"] == MOBILE_HEADERS["User-Agent"]
+
+
+def test_invalid_profile_raises_value_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """profile='invalid' raises ValueError (propagated from create_session())."""
+    monkeypatch.setattr(
+        "src.gamechanger.client.dotenv_values", lambda: _FAKE_CREDENTIALS
+    )
+    with pytest.raises(ValueError):
+        GameChangerClient(min_delay_ms=0, jitter_ms=0, profile="invalid")
+
+
+def test_profile_parameter_forwarded_to_create_session(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Constructor forwards the profile argument to create_session()."""
+    original_create_session = __import__(
+        "src.http.session", fromlist=["create_session"]
+    ).create_session
+
+    captured: dict[str, object] = {}
+
+    def fake_create_session(
+        min_delay_ms: int = 1000, jitter_ms: int = 500, profile: str = "web"
+    ) -> object:
+        captured["profile"] = profile
+        return original_create_session(min_delay_ms=0, jitter_ms=0, profile=profile)
+
+    monkeypatch.setattr("src.gamechanger.client.create_session", fake_create_session)
+    monkeypatch.setattr(
+        "src.gamechanger.client.dotenv_values", lambda: _FAKE_CREDENTIALS
+    )
+
+    GameChangerClient(min_delay_ms=0, jitter_ms=0, profile="mobile")
+    assert captured["profile"] == "mobile"
+
+
+@respx.mock
+def test_gc_app_name_from_env_var_used_regardless_of_profile(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When GAMECHANGER_APP_NAME is set in .env, it is used for all profiles."""
+    creds_with_app_name = {**_FAKE_CREDENTIALS_NO_APP_NAME, "GAMECHANGER_APP_NAME": "custom-app"}
+
+    route = respx.get(f"{_BASE_URL}/me/teams").mock(
+        return_value=httpx.Response(200, json=[])
+    )
+
+    # Web profile with env var
+    client_web = _make_client_with_profile(monkeypatch, "web", creds_with_app_name)
+    client_web.get("/me/teams")
+    assert route.calls.last.request.headers["gc-app-name"] == "custom-app"
+
+    # Mobile profile with env var
+    client_mobile = _make_client_with_profile(monkeypatch, "mobile", creds_with_app_name)
+    client_mobile.get("/me/teams")
+    assert route.calls.last.request.headers["gc-app-name"] == "custom-app"
+
+
+@respx.mock
+def test_gc_app_name_defaults_to_web_when_env_absent_and_profile_web(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Without GAMECHANGER_APP_NAME, web profile defaults gc-app-name to 'web'."""
+    route = respx.get(f"{_BASE_URL}/me/teams").mock(
+        return_value=httpx.Response(200, json=[])
+    )
+    client = _make_client_with_profile(monkeypatch, "web", _FAKE_CREDENTIALS_NO_APP_NAME)
+    client.get("/me/teams")
+
+    assert route.calls.last.request.headers["gc-app-name"] == "web"
+
+
+@respx.mock
+def test_gc_app_name_omitted_when_env_absent_and_profile_mobile(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Without GAMECHANGER_APP_NAME, mobile profile omits gc-app-name entirely."""
+    route = respx.get(f"{_BASE_URL}/me/teams").mock(
+        return_value=httpx.Response(200, json=[])
+    )
+    client = _make_client_with_profile(monkeypatch, "mobile", _FAKE_CREDENTIALS_NO_APP_NAME)
+    client.get("/me/teams")
+
+    assert "gc-app-name" not in route.calls.last.request.headers

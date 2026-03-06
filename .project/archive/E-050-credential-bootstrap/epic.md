@@ -1,7 +1,7 @@
 # E-050: Credential Validation and Crawl Bootstrap
 
 ## Status
-`READY`
+`COMPLETED`
 <!-- Lifecycle: DRAFT -> READY -> ACTIVE -> COMPLETED (or BLOCKED / ABANDONED) -->
 
 ## Overview
@@ -14,11 +14,11 @@ Two credential ingest paths already exist and work:
 
 What is missing is the step between "credentials are in `.env`" and "data is flowing." Today, the operator has no way to verify credentials are valid without attempting a crawl and hitting a `CredentialExpiredError`. There is also no single command to run the full pipeline (crawl + load) as a unit.
 
-**Dependency on E-049-05**: The dual-header system (E-049-05) adds `MOBILE_HEADERS` and a `profile` parameter to `create_session()`. This epic builds on that by making `GameChangerClient` profile-aware, so the bootstrap can use whichever credential type the operator captured (web or mobile). E-049-05 is a soft dependency -- stories 01 and 03 work without it (they use web profile by default), but story 02 requires the dual-header infrastructure to exist.
+**E-049-05 (DONE)**: The dual-header system (E-049-05) added `MOBILE_HEADERS` and a `profile` parameter to `create_session()`. This epic builds on that by making `GameChangerClient` profile-aware, so the bootstrap can use whichever credential type the operator captured (web or mobile). E-049-05 is complete -- all infrastructure is in place.
 
 **Dependency on E-042**: E-042 (Admin Team Management) moves team configuration from `config/teams.yaml` into the database and admin UI. This epic does NOT depend on E-042 -- it works with whichever team config source is active (YAML today, DB after E-042-06). The bootstrap script reports whether teams are configured but does not configure them -- that is the admin UI's job (E-042).
 
-**Expert consultation**: User directed collaboration with software-engineer. PM reviewed the codebase thoroughly in lieu of live SE consultation (no Task tool available): `scripts/crawl.py`, `scripts/load.py`, `src/gamechanger/client.py`, `src/http/session.py`, `src/http/headers.py`, `proxy/addons/credential_extractor.py`, `scripts/refresh_credentials.py`, and `config/teams.yaml`. The implementation approach is straightforward and builds on well-understood patterns.
+**Expert consultation**: User directed collaboration with software-engineer. PM reviewed the codebase thoroughly in lieu of live SE consultation (no Task tool available): `scripts/crawl.py`, `scripts/load.py`, `src/gamechanger/client.py`, `src/http/session.py`, `src/http/headers.py`, `proxy/addons/credential_extractor.py`, `scripts/refresh_credentials.py`, and `config/teams.yaml`. The implementation approach is straightforward and builds on well-understood patterns. No api-scout consultation required -- all API behavior referenced (`/me/user` response schema, Accept headers, auth header semantics) is already documented in `docs/gamechanger-api.md`.
 
 ## Goals
 - Operator can verify credential validity with a single command before starting a crawl
@@ -43,10 +43,10 @@ What is missing is the step between "credentials are in `.env`" and "data is flo
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-050-01 | Credential health check script | TODO | None | - |
-| E-050-02 | Profile-aware GameChangerClient | TODO | E-049-05 | - |
-| E-050-03 | Bootstrap pipeline script | TODO | E-050-01 | - |
-| E-050-04 | Operator bootstrap guide | TODO | E-050-01, E-050-03 | - |
+| E-050-01 | Credential health check script | DONE | None | software-engineer |
+| E-050-02 | Profile-aware GameChangerClient | DONE | None | software-engineer |
+| E-050-03 | Bootstrap pipeline script | DONE | E-050-01 | software-engineer |
+| E-050-04 | Operator bootstrap guide | DONE | E-050-01, E-050-03 | docs-writer |
 
 ## Dispatch Team
 - software-engineer (stories 01, 02, 03)
@@ -58,7 +58,7 @@ What is missing is the step between "credentials are in `.env`" and "data is flo
 The cheapest API call for validation is `GET /me/user` -- it returns minimal data (user profile) and is already documented in `docs/gamechanger-api.md`. The check script:
 - Reads `.env` via `dotenv_values()` (same pattern as `GameChangerClient._load_credentials()`)
 - Verifies required keys are present (`GAMECHANGER_AUTH_TOKEN`, `GAMECHANGER_DEVICE_ID`, `GAMECHANGER_BASE_URL`)
-- Makes a single `GET /me/user` request
+- Makes a single `GET /me/user` request (with vendor Accept header: `application/vnd.gc.com.user+json; version=0.3.0`)
 - Reports: valid (with user email/name), expired (401/403), or missing credentials
 - Exit code: 0 = valid, 1 = expired/error, 2 = missing credentials
 
@@ -66,7 +66,7 @@ The cheapest API call for validation is `GET /me/user` -- it returns minimal dat
 After E-049-05 lands, `create_session()` accepts `profile: Literal["web", "mobile"]`. The `GameChangerClient` change is minimal:
 - Add `profile: str = "web"` parameter to `__init__`
 - Pass `profile` to `create_session()`
-- The `gc-app-name` header behavior may differ by profile: web sends `gc-app-name: web`, mobile may send a different value or omit it. The credential extractor already captures `gc-app-name` from traffic, so whatever the proxy captured goes into `.env` as `GAMECHANGER_APP_NAME` and gets used.
+- The `gc-app-name` header logic: if `GAMECHANGER_APP_NAME` is set in `.env`, use that value; if absent and profile is `"web"`, default to `"web"`; if absent and profile is `"mobile"`, omit the header. The credential extractor already captures `gc-app-name` from traffic, so whatever the proxy captured goes into `.env` as `GAMECHANGER_APP_NAME` and gets used.
 
 ### Bootstrap Pipeline Design
 The bootstrap script chains existing scripts with validation gates:
@@ -107,3 +107,5 @@ None -- all resolved during discovery.
 
 ## History
 - 2026-03-06: Created. User confirmed scope split: small bootstrap epic now (E-050), broader crawl orchestration captured as IDEA-012. User confirmed team management belongs in admin UI (E-042), not in bootstrap scripts.
+- 2026-03-06: Refinement pass -- triaged 18 findings from SE review + Codex spec review. 12 INCLUDED, 6 DISMISSED. Key changes: (1) E-050-02 unblocked (E-049-05 DONE), test file corrected to `tests/test_client.py`, AC-6 gc-app-name logic clarified, AC-9 updated to acknowledge mock signature change. (2) E-050-01 AC-4 field priority specified (first+last, fallback email), Accept header corrected to vendor format, timeout exception added. (3) E-050-03 AC-4 FileNotFoundError handling added, AC-8 states defined, AC-10 rewritten to single implementation path (crawl.run profile param), AC-13 expanded. (4) E-050-04 DoD contradiction fixed. (5) Epic dependencies updated.
+- 2026-03-06: COMPLETED. All 4 stories DONE. Delivered: credential health check script (10 tests), profile-aware GameChangerClient (7 new tests, 34 total), bootstrap pipeline script (14 tests), and operator bootstrap guide. Documentation assessment: trigger 1 fires (new feature). E-050-04 (bootstrap-guide.md) is the documentation deliverable. Follow-up: CLAUDE.md Commands section should be updated to include `python scripts/check_credentials.py` and `python scripts/bootstrap.py` (context-layer update for claude-architect).

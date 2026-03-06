@@ -135,6 +135,7 @@ def run(
     dry_run: bool = False,
     crawler_filter: str | None = None,
     data_root: Path = _DATA_ROOT,
+    profile: str = "web",
 ) -> int:
     """Execute the crawl orchestration.
 
@@ -142,6 +143,8 @@ def run(
         dry_run: If True, print plan and return without calling the API.
         crawler_filter: If set, run only the named crawler.
         data_root: Override the raw data root (used in tests).
+        profile: Header profile for the HTTP session ("web" or "mobile").
+            Passed to ``GameChangerClient``.  Defaults to ``"web"``.
 
     Returns:
         Exit code: 0 if all crawlers completed, 1 if any raised an exception.
@@ -167,7 +170,7 @@ def run(
             print(f"  {name}")
         return 0
 
-    client = GameChangerClient()
+    client = GameChangerClient(profile=profile)
     crawl_results: dict[str, CrawlResult] = {}
     had_exception = False
 
