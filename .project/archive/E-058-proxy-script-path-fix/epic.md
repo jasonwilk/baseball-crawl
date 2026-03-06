@@ -1,7 +1,7 @@
 # E-058: Fix Relative Path Bug in Proxy Scripts
 
 ## Status
-`READY`
+`COMPLETED`
 
 ## Overview
 Three proxy scripts (`proxy-review.sh`, `proxy-report.sh`, `proxy-endpoints.sh`) use hardcoded relative paths that resolve incorrectly when the scripts are invoked from any directory other than the repo root. This causes "does not exist" errors even when session data is present.
@@ -29,7 +29,7 @@ SE consulted on fix approach (see History). Confirmed `BASH_SOURCE[0]` pattern o
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-058-01 | Fix relative paths in proxy scripts | TODO | None | - |
+| E-058-01 | Fix relative paths in proxy scripts | DONE | None | SE |
 
 ## Dispatch Team
 - software-engineer
@@ -67,3 +67,4 @@ None.
 ## History
 - 2026-03-06: Created from user bug report
 - 2026-03-06: SE consultation completed. Feedback: (1) use `${BASH_SOURCE[0]}` not `$0` to match existing project convention in codex-review.sh/codex-spec-review.sh and handle sourcing edge case; (2) `collect-endpoints.sh` also has relative paths but is out of scope (one-off script); (3) no other concerns with approach -- variable declarations stay before `usage()`, `readlink` calls work correctly with absolute paths
+- 2026-03-06: E-058-01 DONE. All three proxy scripts fixed with SCRIPT_DIR/REPO_ROOT preamble. 967 tests passing (10 pre-existing failures unrelated). No documentation impact. Epic COMPLETED.

@@ -11,8 +11,11 @@
 # file with a `reviewed` field. The `current` symlink marks the most recent session.
 set -euo pipefail
 
-SESSIONS_DIR="proxy/data/sessions"
-CURRENT_LINK="proxy/data/current"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+SESSIONS_DIR="${REPO_ROOT}/proxy/data/sessions"
+CURRENT_LINK="${REPO_ROOT}/proxy/data/current"
 
 # ---------------------------------------------------------------------------
 # Usage
@@ -28,7 +31,7 @@ Subcommands:
   mark --all         Mark all closed sessions as reviewed
   --help             Show this help message
 
-Session data is stored in ${SESSIONS_DIR}/.
+Session data is stored in proxy/data/sessions/.
 EOF
 }
 
@@ -38,7 +41,7 @@ EOF
 
 cmd_list() {
     if [ ! -d "${SESSIONS_DIR}" ]; then
-        echo "No sessions found (${SESSIONS_DIR}/ does not exist)."
+        echo "No sessions found (proxy/data/sessions/ does not exist)."
         return 0
     fi
 
@@ -110,7 +113,7 @@ _mark_session() {
     local session_json="${session_dir}/session.json"
 
     if [ ! -d "${session_dir}" ]; then
-        echo "Error: session '${session_id}' does not exist at ${session_dir}" >&2
+        echo "Error: session '${session_id}' does not exist at proxy/data/sessions/${session_id}" >&2
         exit 1
     fi
 
@@ -125,7 +128,7 @@ _mark_session() {
 
 _mark_all() {
     if [ ! -d "${SESSIONS_DIR}" ]; then
-        echo "No sessions found (${SESSIONS_DIR}/ does not exist)."
+        echo "No sessions found (proxy/data/sessions/ does not exist)."
         return 0
     fi
 

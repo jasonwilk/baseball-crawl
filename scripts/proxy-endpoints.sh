@@ -9,8 +9,11 @@
 #   proxy-endpoints.sh --help           -- show this help
 set -euo pipefail
 
-SESSIONS_DIR="proxy/data/sessions"
-CURRENT_LINK="proxy/data/current"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+SESSIONS_DIR="${REPO_ROOT}/proxy/data/sessions"
+CURRENT_LINK="${REPO_ROOT}/proxy/data/current"
 
 # ---------------------------------------------------------------------------
 # Usage
@@ -21,7 +24,7 @@ usage() {
 Usage: $(basename "$0") [--session <id> | --all | --unreviewed | --help]
 
 Options:
-  (none)            Read from the current session (${CURRENT_LINK}/)
+  (none)            Read from the current session (proxy/data/current/)
   --session <id>    Read from a specific session directory
   --all             Aggregate endpoints across all sessions
   --unreviewed      Aggregate endpoints from sessions not yet reviewed
@@ -70,7 +73,7 @@ _no_data_message() {
 
 mode_current() {
     if [ ! -L "${CURRENT_LINK}" ]; then
-        echo "Error: no current session found (${CURRENT_LINK} symlink does not exist)." >&2
+        echo "Error: no current session found (proxy/data/current symlink does not exist)." >&2
         echo "Start the proxy with:  cd proxy && ./start.sh" >&2
         exit 1
     fi
@@ -89,13 +92,13 @@ mode_session() {
     local session_dir="${SESSIONS_DIR}/${session_id}"
 
     if [ ! -d "${session_dir}" ]; then
-        echo "Error: session '${session_id}' does not exist at ${session_dir}" >&2
+        echo "Error: session '${session_id}' does not exist at proxy/data/sessions/${session_id}" >&2
         exit 1
     fi
 
     local log_file="${session_dir}/endpoint-log.jsonl"
     if [ ! -f "${log_file}" ]; then
-        echo "No endpoint data for session '${session_id}' (file not found: ${log_file})." >&2
+        echo "No endpoint data for session '${session_id}' (file not found: proxy/data/sessions/${session_id}/endpoint-log.jsonl)." >&2
         exit 1
     fi
 
@@ -104,7 +107,7 @@ mode_session() {
 
 mode_all() {
     if [ ! -d "${SESSIONS_DIR}" ]; then
-        echo "No sessions found (${SESSIONS_DIR}/ does not exist)."
+        echo "No sessions found (proxy/data/sessions/ does not exist)."
         exit 0
     fi
 
@@ -121,7 +124,7 @@ mode_all() {
 
 mode_unreviewed() {
     if [ ! -d "${SESSIONS_DIR}" ]; then
-        echo "No sessions found (${SESSIONS_DIR}/ does not exist)."
+        echo "No sessions found (proxy/data/sessions/ does not exist)."
         exit 0
     fi
 

@@ -8,8 +8,11 @@
 #   proxy-report.sh --help           -- show this help
 set -euo pipefail
 
-SESSIONS_DIR="proxy/data/sessions"
-CURRENT_LINK="proxy/data/current"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+SESSIONS_DIR="${REPO_ROOT}/proxy/data/sessions"
+CURRENT_LINK="${REPO_ROOT}/proxy/data/current"
 
 # ---------------------------------------------------------------------------
 # Usage
@@ -20,7 +23,7 @@ usage() {
 Usage: $(basename "$0") [--session <id> | --all | --help]
 
 Options:
-  (none)            Read from the current session (${CURRENT_LINK}/)
+  (none)            Read from the current session (proxy/data/current/)
   --session <id>    Read from a specific session directory
   --all             Read from the most recent closed session that has a header report
   --help            Show this help message
@@ -67,7 +70,7 @@ _print_report() {
 
 mode_current() {
     if [ ! -L "${CURRENT_LINK}" ]; then
-        echo "Error: no current session found (${CURRENT_LINK} symlink does not exist)." >&2
+        echo "Error: no current session found (proxy/data/current symlink does not exist)." >&2
         echo "Start the proxy with:  cd proxy && ./start.sh" >&2
         exit 1
     fi
@@ -88,13 +91,13 @@ mode_session() {
     local session_dir="${SESSIONS_DIR}/${session_id}"
 
     if [ ! -d "${session_dir}" ]; then
-        echo "Error: session '${session_id}' does not exist at ${session_dir}" >&2
+        echo "Error: session '${session_id}' does not exist at proxy/data/sessions/${session_id}" >&2
         exit 1
     fi
 
     local report_file="${session_dir}/header-report.json"
     if [ ! -f "${report_file}" ]; then
-        echo "No header report for session '${session_id}' (file not found: ${report_file})." >&2
+        echo "No header report for session '${session_id}' (file not found: proxy/data/sessions/${session_id}/header-report.json)." >&2
         exit 1
     fi
 
@@ -105,7 +108,7 @@ mode_all() {
     # "All" means the most recent closed session that has a header-report.json.
     # Header reports are point-in-time snapshots -- not aggregatable.
     if [ ! -d "${SESSIONS_DIR}" ]; then
-        echo "No sessions found (${SESSIONS_DIR}/ does not exist)." >&2
+        echo "No sessions found (proxy/data/sessions/ does not exist)." >&2
         exit 1
     fi
 
