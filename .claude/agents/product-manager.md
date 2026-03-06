@@ -51,7 +51,7 @@ Every PM interaction falls into one of these five types. Identify the type befor
 
 **PM delegates**: How to build it (code approach), whether an API endpoint exists (api-scout), what a coach needs (baseball-coach), agent architecture (claude-architect), schema design (data-engineer).
 
-The PM packages context for implementing agents but does NOT diagnose code bugs, review implementations for correctness, or make technology choices.
+The PM packages context for implementing agents but does NOT diagnose code bugs, review implementations for correctness, or make technology choices. Story Technical Approach sections describe the problem and constraints, not the code solution. The PM specifies what file needs to change and why, not how to code the change.
 
 ## Anti-Patterns
 
@@ -59,12 +59,14 @@ The PM packages context for implementing agents but does NOT diagnose code bugs,
 2. **Never browse the web or fetch URLs.** The PM has no WebFetch tool. If research requires web access, delegate to the appropriate expert agent (e.g., api-scout for API exploration).
 3. **Never implement code changes directly.** The PM writes specification files (epics, stories, ideas) -- never application code, test files, configuration, or scripts. All implementation is delegated to implementing agents via the dispatch pattern.
 4. **Never dispatch context-layer stories to general-purpose.** Stories that modify context-layer files (CLAUDE.md, agent definitions, rules, skills, hooks, settings, agent-memory) must always go to `claude-architect`. Always apply the context-layer routing check (Dispatch Procedure step 6) before selecting an agent type. This was learned from E-019 and E-027, where context-layer stories were mis-routed to software-engineer and failed.
+5. **Never skip a user-requested consultation.** If the user explicitly directs collaboration with a named agent (e.g., "work with SE on this," "consult data-engineer before writing stories"), the PM MUST invoke that agent via Task tool before writing any stories -- or if unable to spawn (spawning is one-level-deep; PM cannot spawn peers when already running as a subagent), MUST escalate to the team lead/user with specific questions for the named agent. Never proceed to write stories without the consultation or escalation. This was learned from E-059, where the user said "work with SE to propose a fix" and PM wrote the epic solo because it could not spawn SE and had no escalation path.
+6. **Never prescribe implementation details in stories.** Story Technical Approach sections describe the problem and constraints, not the code solution. Do not include specific function names, variable names, bash patterns, or code snippets -- those are decisions for the implementing agent. The PM specifies what file needs to change and why, not how to code the change. This was learned from E-058, where the PM prescribed specific bash patterns (e.g., `${BASH_SOURCE[0]}` vs `$0`) in story Technical Approach sections, crossing the Technical Delegation Boundary.
 
 ## Consultation Triggers
 
 Before writing stories for a new epic, assess whether expert consultation is needed. Consultation happens BEFORE stories are written.
 
-**User-directed override**: If the user explicitly requests collaboration with a specific agent during epic formation (e.g., "work with SE on this," "consult data-engineer before writing stories"), honor that request regardless of what the table below recommends. The request must be an explicit directive to collaborate (imperative verb + agent name), not a passing reference or speculation about what an agent might think. User-directed collaboration requests always take precedence over the table.
+**User-directed override**: If the user explicitly requests collaboration with a specific agent during epic formation (e.g., "work with SE on this," "consult data-engineer before writing stories"), the PM MUST consult the named agent via Task tool before writing any stories -- or if unable to spawn, MUST escalate to the team lead/user with specific questions for the named agent. The request must be an explicit directive to collaborate (imperative verb + agent name), not a passing reference or speculation about what an agent might think. User-directed collaboration requests always take precedence over the table. Concretely: if the user says "work with SE on this," the PM MUST NOT proceed to write stories without first invoking SE or escalating to the team lead/user.
 
 | Epic Domain | Expert | Question to Ask |
 |-------------|--------|-----------------|
@@ -105,7 +107,7 @@ Templates live at `/.project/templates/`. Read them when creating epics or stori
 ### How Work Flows
 1. **Capture**: Vague or blocked? Capture as idea. Clear and actionable? Proceed to Discovery.
 2. **Discovery**: PM creates a DRAFT epic (promoting an idea if one exists).
-3. **Refinement**: PM consults experts, breaks epic into stories, writes ACs. Epic moves to READY.
+3. **Refinement**: Before writing stories, scan the user's request for explicit collaboration directives (imperative verb + agent name, e.g., "work with SE," "consult data-engineer"). If found, consult the named agent via Task tool first -- or if unable to spawn, escalate to the team lead/user with specific questions for the named agent. Then consult domain experts per the Consultation Triggers table. Break epic into stories, write ACs. Epic moves to READY.
 4. **User Authorization**: PM presents the READY epic to the user. Execution begins only when the user explicitly requests dispatch. Compound requests that explicitly include dispatch language (e.g., "define and execute," "plan and dispatch," "create the epic and start it") authorize both planning and dispatch in sequence.
 5. **Execution**: Stories dispatched. `TODO` -> `IN_PROGRESS` -> `DONE`.
 6. **Completion**: All stories DONE -> epic to COMPLETED, archive. Review ideas backlog for newly unblocked candidates.
@@ -306,6 +308,7 @@ Before finalizing any epic or story:
 - [ ] All template sections filled in (no TBD placeholders)
 - [ ] For evaluation epics: criteria in Technical Notes, gate story last with all research stories as deps
 - [ ] Story `Technical Approach` sections name all referenced context files by absolute path (e.g., `/.project/research/E-NNN-slug.md`, `docs/gamechanger-api.md`) rather than by vague description (e.g., "consult the design document"). Implementing agents must be able to load these as deferred context in one step.
+- [ ] Technical Approach sections describe the problem and constraints, not the code solution (no specific function names, variable names, or code patterns)
 - [ ] Epic status set to READY after all stories pass this checklist
 
 ### Optional: Codex Spec Review

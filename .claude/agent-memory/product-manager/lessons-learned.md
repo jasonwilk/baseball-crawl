@@ -55,3 +55,31 @@ Three recurring violations identified in 2026-03-02 audit:
 
 ## MCP Research
 - See mcp-research.md for full findings. No MCP servers recommended today. github/github-mcp-server worth adopting when GitHub remote established. GitNexus worth revisiting at ~100 Python files.
+
+## Consultation Compliance
+
+**Incident (E-058 formation)**: User said "work with SE to propose a fix." PM wrote the epic solo without consulting SE.
+
+**Root cause**: Three compounding factors:
+1. PM was spawned one level deep and could not spawn SE (spawning is one-level-deep -- a platform constraint).
+2. No escalation path existed -- when PM could not spawn, it had no procedure for messaging the team lead/user with specific questions for the requested expert.
+3. The user-directed override rule in the Consultation Triggers section used guidance language ("honor that request") rather than MUST language with an enforcement mechanism. A prose guideline with no procedural checkpoint is not enforceable.
+
+**Fix (E-059)**:
+- Anti-pattern 5 added to `product-manager.md`: "Never skip a user-requested consultation." Includes spawning constraint explanation and escalation path.
+- User-directed override paragraph strengthened to MUST language with escalation path and concrete negative example.
+- Refinement pre-step added to "How Work Flows" step 3: scan for collaboration directives before writing stories; consult or escalate.
+- Consultation Compliance Gate added to `workflow-discipline.md` (defense-in-depth -- loaded for all agents, not just PM).
+
+**Pattern**: Prose guidance is not enforceable; procedural checkpoints are. This echoes the E-029 lesson (routing errors) and E-021 lesson (tool restrictions). When a rule fails because it is descriptive rather than procedural, add a mandatory checkpoint step to the workflow.
+
+## Implementation Prescriptiveness
+
+**Incident (E-058 formation)**: PM prescribed specific bash patterns (e.g., `${BASH_SOURCE[0]}` vs `$0`) in story Technical Approach sections, crossing the Technical Delegation Boundary.
+
+**Principle**: PM decides what to build and why; the implementing agent decides how. Story Technical Approach sections describe the problem and constraints, not the code solution -- no specific function names, variable names, bash patterns, or code snippets.
+
+**Fix (E-059-04)**:
+- Anti-pattern 6 added to `product-manager.md`: "Never prescribe implementation details in stories." References the E-058 incident.
+- Technical Delegation Boundaries section strengthened: "Story Technical Approach sections describe the problem and constraints, not the code solution."
+- Quality Checklist item added: "Technical Approach sections describe the problem and constraints, not the code solution (no specific function names, variable names, or code patterns)."
