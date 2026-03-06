@@ -15,8 +15,8 @@ Usage::
         accept="application/vnd.gc.com.game_summary:list+json; version=0.1.0",
     )
 
-Credentials are loaded from a .env file (see GAMECHANGER_AUTH_TOKEN,
-GAMECHANGER_DEVICE_ID, GAMECHANGER_BASE_URL).  Missing credentials
+Credentials are loaded from a .env file (see GAMECHANGER_AUTH_TOKEN_WEB,
+GAMECHANGER_DEVICE_ID_WEB, GAMECHANGER_BASE_URL).  Missing credentials
 raise ``ConfigurationError`` at instantiation time.
 """
 
@@ -110,8 +110,9 @@ class GameChangerClient:
             Chrome 145 browser fingerprint; ``"mobile"`` selects the iOS
             Odyssey app fingerprint.  Forwarded to ``create_session()``,
             which raises ``ValueError`` for unknown profiles.  The profile
-            also controls ``gc-app-name`` when the ``GAMECHANGER_APP_NAME``
-            env var is absent: ``"web"`` defaults the header to ``"web"``,
+            also controls ``gc-app-name`` when the profile-scoped app name env var
+            (``GAMECHANGER_APP_NAME_WEB`` or ``GAMECHANGER_APP_NAME_MOBILE``) is
+            absent: ``"web"`` defaults the header to ``"web"``,
             ``"mobile"`` omits the header entirely (iOS app does not send it).
     """
 

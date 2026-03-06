@@ -496,6 +496,140 @@ class TestRunReportPathFallback:
         exec(compile(content, "<test>", "exec"), ns)  # noqa: S102
         assert ns["BROWSER_HEADERS"]["DNT"] == "SESSION"
 
+    def test_accept_header_preserved_after_web_refresh(self, tmp_path: Path) -> None:
+        """Accept in the existing BROWSER_HEADERS is preserved when a web capture arrives.
+
+        Regression test for the Accept-header-drop bug: Accept is in
+        _PER_REQUEST_HEADERS so it is stripped from captures, but it is a
+        stable fingerprint value in headers.py that must survive a refresh cycle.
+        """
+        existing = textwrap.dedent(
+            """\
+            from __future__ import annotations
+            BROWSER_HEADERS: dict[str, str] = {
+                "Accept": "application/json, text/plain, */*",
+                "Accept-Language": "en-US,en;q=0.9",
+                "DNT": "1",
+            }
+            MOBILE_HEADERS: dict[str, str] = {
+                "Accept": "*/*",
+                "Accept-Language": "en-US;q=1.0",
+            }
+            """
+        )
+        # Capture includes a new DNT value but no Accept (it was filtered at capture time)
+        report = _make_report(
+            [{"source": "web", "captured_headers": {"DNT": "0", "Accept-Language": "en-GB"}}]
+        )
+        report_file = tmp_path / "header-report.json"
+        report_file.write_text(json.dumps(report), encoding="utf-8")
+
+        headers_file = tmp_path / "headers.py"
+        headers_file.write_text(existing, encoding="utf-8")
+
+        with (
+            patch.object(_mod, "_REPORT_PATH_SESSION", tmp_path / "no-session.json"),
+            patch.object(_mod, "_REPORT_PATH_FLAT", report_file),
+            patch.object(_mod, "_HEADERS_PATH", headers_file),
+        ):
+            exit_code = run(apply=True)
+
+        assert exit_code == 0
+        content = headers_file.read_text(encoding="utf-8")
+        ns: dict = {}
+        exec(compile(content, "<test>", "exec"), ns)  # noqa: S102
+        # Accept must be preserved from the existing dict
+        assert ns["BROWSER_HEADERS"]["Accept"] == "application/json, text/plain, */*"
+        # New captured values must be applied
+        assert ns["BROWSER_HEADERS"]["DNT"] == "0"
+        assert ns["BROWSER_HEADERS"]["Accept-Language"] == "en-GB"
+        # MOBILE_HEADERS not in capture -- Accept must be untouched
+        assert ns["MOBILE_HEADERS"]["Accept"] == "*/*"
+
+    def test_accept_header_preserved_after_ios_refresh(self, tmp_path: Path) -> None:
+        """Accept in the existing MOBILE_HEADERS is preserved when an ios capture arrives."""
+        existing = textwrap.dedent(
+            """\
+            from __future__ import annotations
+            BROWSER_HEADERS: dict[str, str] = {"Accept": "application/json", "DNT": "1"}
+            MOBILE_HEADERS: dict[str, str] = {
+                "Accept": "*/*",
+                "Accept-Language": "en-US;q=1.0",
+                "gc-app-version": "2026.7.0.0",
+            }
+            """
+        )
+        report = _make_report(
+            [{"source": "ios", "captured_headers": {"gc-app-version": "2027.1.0.0"}}]
+        )
+        report_file = tmp_path / "header-report.json"
+        report_file.write_text(json.dumps(report), encoding="utf-8")
+
+        headers_file = tmp_path / "headers.py"
+        headers_file.write_text(existing, encoding="utf-8")
+
+        with (
+            patch.object(_mod, "_REPORT_PATH_SESSION", tmp_path / "no-session.json"),
+            patch.object(_mod, "_REPORT_PATH_FLAT", report_file),
+            patch.object(_mod, "_HEADERS_PATH", headers_file),
+        ):
+            exit_code = run(apply=True)
+
+        assert exit_code == 0
+        content = headers_file.read_text(encoding="utf-8")
+        ns: dict = {}
+        exec(compile(content, "<test>", "exec"), ns)  # noqa: S102
+        assert ns["MOBILE_HEADERS"]["Accept"] == "*/*"
+        assert ns["MOBILE_HEADERS"]["gc-app-version"] == "2027.1.0.0"
+        # BROWSER_HEADERS not in capture -- unchanged
+        assert ns["BROWSER_HEADERS"]["Accept"] == "application/json"
+
+    def test_captured_accept_wins_over_existing(self, tmp_path: Path) -> None:
+        """If a capture somehow includes Accept (e.g., in a future non-filtered scenario),
+        the captured value takes precedence over the existing value."""
+        existing = textwrap.dedent(
+            """\
+            from __future__ import annotations
+            BROWSER_HEADERS: dict[str, str] = {"Accept": "old-value", "DNT": "1"}
+            MOBILE_HEADERS: dict[str, str] = {}
+            """
+        )
+        # Simulate a future scenario where Accept reaches the captured dict
+        # (e.g., if _PER_REQUEST_HEADERS is changed).  We inject it directly
+        # into the captured_by_source dict by bypassing extract_headers_by_source.
+        report = _make_report(
+            [{"source": "web", "captured_headers": {"accept": "new-value", "DNT": "1"}}]
+        )
+        report_file = tmp_path / "header-report.json"
+        report_file.write_text(json.dumps(report), encoding="utf-8")
+
+        headers_file = tmp_path / "headers.py"
+        headers_file.write_text(existing, encoding="utf-8")
+
+        # Patch extract_headers_by_source to pass Accept through
+        original_extract = _mod.extract_headers_by_source
+
+        def patched_extract(report_data: dict) -> dict:
+            result = original_extract(report_data)
+            if "web" in result:
+                result["web"]["Accept"] = "new-value"
+            return result
+
+        with (
+            patch.object(_mod, "_REPORT_PATH_SESSION", tmp_path / "no-session.json"),
+            patch.object(_mod, "_REPORT_PATH_FLAT", report_file),
+            patch.object(_mod, "_HEADERS_PATH", headers_file),
+            patch.object(_mod, "extract_headers_by_source", patched_extract),
+        ):
+            exit_code = run(apply=True)
+
+        assert exit_code == 0
+        content = headers_file.read_text(encoding="utf-8")
+        ns: dict = {}
+        exec(compile(content, "<test>", "exec"), ns)  # noqa: S102
+        # Captured value wins
+        assert ns["BROWSER_HEADERS"]["Accept"] == "new-value"
+
     def test_flat_path_used_when_session_missing(self, tmp_path: Path) -> None:
         flat_report = _make_report(
             [{"source": "web", "captured_headers": {"DNT": "FLAT"}}]

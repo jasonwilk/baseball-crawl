@@ -280,13 +280,35 @@ def run(*, apply: bool) -> int:
     existing_text = _HEADERS_PATH.read_text(encoding="utf-8")
     existing_dicts = parse_existing_headers(existing_text)
 
-    # Determine final header dicts: prefer captured, fall back to existing
-    browser_headers = captured_by_source.get(
-        "web", existing_dicts["BROWSER_HEADERS"]
-    )
-    mobile_headers = captured_by_source.get(
-        "ios", existing_dicts["MOBILE_HEADERS"]
-    )
+    # Determine final header dicts: prefer captured, fall back to existing.
+    # When a capture source is present, merge back any _PER_REQUEST_HEADERS keys
+    # (e.g., Accept) that existed in the prior dict but were stripped during
+    # capture filtering.  This preserves intentionally-set stable values while
+    # still filtering volatile per-request headers from the capture.
+    def _merge_preserved(
+        captured: dict[str, str],
+        existing: dict[str, str],
+    ) -> dict[str, str]:
+        preserved = {
+            k: v
+            for k, v in existing.items()
+            if k.lower() in _PER_REQUEST_HEADERS and k.lower() not in {ck.lower() for ck in captured}
+        }
+        return {**preserved, **captured}
+
+    if "web" in captured_by_source:
+        browser_headers = _merge_preserved(
+            captured_by_source["web"], existing_dicts["BROWSER_HEADERS"]
+        )
+    else:
+        browser_headers = existing_dicts["BROWSER_HEADERS"]
+
+    if "ios" in captured_by_source:
+        mobile_headers = _merge_preserved(
+            captured_by_source["ios"], existing_dicts["MOBILE_HEADERS"]
+        )
+    else:
+        mobile_headers = existing_dicts["MOBILE_HEADERS"]
 
     today = date.today().isoformat()
     new_text = generate_headers_file(browser_headers, mobile_headers, today)
