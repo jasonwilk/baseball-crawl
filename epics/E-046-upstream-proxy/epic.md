@@ -11,7 +11,7 @@ GameChanger may throttle or block requests from known datacenter/home IP ranges.
 
 Two outbound paths exist:
 1. **Python crawlers** -- `create_session()` in `src/http/session.py` produces `httpx.Client` instances used by all crawlers and the GameChanger client.
-2. **mitmproxy Docker service** -- runs as a profile-activated service for credential capture and API discovery.
+2. **Host-based mitmproxy** -- runs as a standalone Docker Compose stack in `proxy/` on the Mac host (migrated from the project Docker Compose stack by E-048).
 
 Both must respect the same proxy configuration. When `PROXY_ENABLED` is unset or `false`, current behavior is preserved (no proxy).
 
@@ -55,14 +55,18 @@ No expert consultation required -- this is pure infrastructure plumbing with wel
 - `httpx.Client(proxy="http://...")` -- singular `proxy` kwarg (string). Routes all traffic through the proxy.
 - When `proxy` is `None` (default), no proxy is used. This is the current behavior.
 
-### mitmproxy Upstream Mode
+### mitmproxy Upstream Mode (Host-Based Stack)
+- E-048 migrated mitmproxy to a standalone `proxy/` directory on the Mac host. The proxy stack has its own `proxy/docker-compose.yml`, start/stop/status scripts, and `.env` file.
 - `mitmweb --mode upstream:http://proxy-url:port` starts mitmproxy in upstream proxy mode, forwarding all traffic through the specified proxy.
 - When no `--mode` is specified, mitmproxy runs as a regular intercepting proxy (current behavior).
-- Docker Compose can conditionally include the `--mode` argument. Since Compose does not support conditional command args natively, the story should use a wrapper approach (entrypoint script or shell command) that checks `PROXY_ENABLED` at container start.
+- A wrapper entrypoint script (`proxy/proxy-entrypoint.sh`) replaces the static `mitmweb` entrypoint and conditionally adds `--mode upstream:${PROXY_URL}` based on env vars. This avoids Docker Compose variable interpolation in `command:`, which would inline credentials into `docker compose config` output.
+
+### `.env` Path Resolution
+The proxy stack reads `proxy/.env` via its `env_file` directive (relative to `proxy/docker-compose.yml`). However, `PROXY_ENABLED` and `PROXY_URL` are documented in the project root `.env.example`. To avoid requiring the operator to duplicate vars into two `.env` files, E-046-02 should add `../.env` to the `env_file` list in `proxy/docker-compose.yml` so the proxy container inherits vars from both the root `.env` and `proxy/.env`. The `proxy/.env` should take precedence (listed second) for any overrides.
 
 ### File Ownership (Parallel Safety)
 - **E-046-01** modifies: `src/http/session.py`, `tests/test_http_session.py`, `.env.example`
-- **E-046-02** modifies: `docker-compose.yml`, `scripts/proxy.sh`
+- **E-046-02** modifies: `proxy/docker-compose.yml`, `proxy/status.sh`; creates: `proxy/proxy-entrypoint.sh`
 - No file conflicts -- stories can be dispatched in parallel.
 
 ## Open Questions
@@ -70,3 +74,4 @@ None.
 
 ## History
 - 2026-03-05: Created. Set to READY.
+- 2026-03-06: Refined to account for E-048 (host proxy migration). E-046-02 fully rewritten -- all file references, commands, and technical approach updated for the standalone `proxy/` stack. SE consulted on approach; wrapper entrypoint recommended over Docker Compose variable substitution for credential safety.

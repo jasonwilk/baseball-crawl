@@ -1,7 +1,7 @@
 # E-048: Migrate mitmproxy to Host-Based Standalone Proxy
 
 ## Status
-`ACTIVE`
+`COMPLETED`
 
 ## Overview
 Move mitmproxy out of the project's Docker Compose stack and into a self-contained `proxy/` folder that runs directly on the Mac host. This eliminates all Docker-in-Docker + VS Code port forwarding complexity that has caused persistent networking issues (see MITM-TROUBLESHOOTING.md), and creates a clean operational boundary: proxy runs on the Mac, app runs in the devcontainer, they communicate via `host.docker.internal`.
@@ -48,13 +48,13 @@ Expert consultation: Architecture validated by the user through hands-on testing
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-048-01 | Create proxy/ infrastructure | IN_PROGRESS | None | software-engineer |
-| E-048-02 | Update addon output paths | IN_PROGRESS | None | software-engineer |
-| E-048-03 | Update report scripts | TODO | E-048-02 | - |
-| E-048-04 | Remove mitmproxy from project docker-compose.yml | IN_PROGRESS | None | software-engineer |
-| E-048-05 | Clean up devcontainer.json | IN_PROGRESS | None | claude-architect |
-| E-048-06 | Update CLAUDE.md and documentation | TODO | E-048-01, E-048-03, E-048-04 | claude-architect |
-| E-048-07 | Delete prototype and obsolete files | TODO | E-048-01, E-048-06 | - |
+| E-048-01 | Create proxy/ infrastructure | DONE | None | software-engineer |
+| E-048-02 | Update addon output paths | DONE | None | software-engineer |
+| E-048-03 | Update report scripts | DONE | E-048-02 | software-engineer |
+| E-048-04 | Remove mitmproxy from project docker-compose.yml | DONE | None | software-engineer |
+| E-048-05 | Clean up devcontainer.json | DONE | None | claude-architect |
+| E-048-06 | Update CLAUDE.md and documentation | DONE | E-048-01, E-048-03, E-048-04 | claude-architect |
+| E-048-07 | Delete prototype and obsolete files | DONE | E-048-01, E-048-06 | software-engineer |
 
 ## Dispatch Team
 - software-engineer
@@ -114,3 +114,4 @@ None -- architecture validated by operator testing.
 - 2026-03-05: Created. Architecture validated via hands-on testing (host.docker.internal confirmed, iPhone direct access confirmed, prototype at proxy-host/ working).
 - 2026-03-05: Spec review triage. 5 findings reviewed: 1 ACCEPTED (Finding 5 -- added AC-11 to E-048-01 for devcontainer-to-host-proxy validation via `curl -sx http://host.docker.internal:8080 http://mitm.it`), 4 REJECTED as false positives (Finding 1: scripts/proxy.sh already in E-048-07 AC-3; Finding 2: DinD and Mac host are separate Docker engines, no port conflict; Finding 3: mitmweb auth already in E-048-01 AC-2; Finding 4: MITM-TROUBLESHOOTING.md is obsolete, git history preserves it). Epic remains READY.
 - 2026-03-05: Dispatch started. Epic set to ACTIVE. Wave 1 dispatched: E-048-01 (SE), E-048-02 (SE), E-048-04 (SE), E-048-05 (claude-architect). All in parallel -- no file conflicts.
+- 2026-03-06: Dispatch resumed. All 7 stories verified DONE against codebase (implementation completed in commit 18dd8d8). Status updates applied retroactively -- prior dispatch was interrupted before status bookkeeping completed. No documentation impact (mitmproxy-guide.md already rewritten in E-048-06). Epic COMPLETED and archived.
