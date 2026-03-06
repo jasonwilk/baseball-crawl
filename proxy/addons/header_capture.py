@@ -11,7 +11,7 @@ Each source is diffed against the correct canonical dict:
   - ``"unknown"`` -> ``BROWSER_HEADERS`` (best guess)
 
 The report is written to the session directory (or ``proxy/data/`` as fallback)
-and is overwritten on each update (latest snapshot only).
+and is overwritten on each update (first-seen-wins aggregated snapshot per source).
 """
 
 from __future__ import annotations
@@ -175,8 +175,11 @@ def build_report(
 class HeaderCapture:
     """mitmproxy addon that captures GameChanger request headers per source.
 
-    Stores the *latest* seen header set per traffic source and rewrites the
-    parity report to disk after each GameChanger request.
+    Aggregates headers across multiple requests per traffic source using a
+    first-seen-wins strategy: new keys are added to the captured set, but
+    existing keys retain their first-seen value. Conflicting values (same key,
+    different value in a later request) are logged at WARNING level. The parity
+    report is rewritten to disk after each GameChanger request.
     """
 
     def __init__(self) -> None:
@@ -205,8 +208,20 @@ class HeaderCapture:
             if name.lower() not in _CREDENTIAL_HEADERS
         }
 
-        # Overwrite previous capture for this source (latest snapshot)
-        self._captured_by_source[source] = headers
+        # Merge into existing capture for this source (first-seen-wins per key)
+        if source not in self._captured_by_source:
+            self._captured_by_source[source] = headers
+        else:
+            existing = self._captured_by_source[source]
+            for key, value in headers.items():
+                if key not in existing:
+                    existing[key] = value
+                elif existing[key] != value:
+                    log.warning(
+                        "header_capture: conflict for source=%s key=%r: "
+                        "keeping %r, ignoring %r",
+                        source, key, existing[key], value,
+                    )
         log.debug("header_capture: recorded %d headers from source=%s", len(headers), source)
 
         self._write_report()

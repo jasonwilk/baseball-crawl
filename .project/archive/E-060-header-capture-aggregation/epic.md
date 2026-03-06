@@ -1,7 +1,7 @@
 # E-060: Stabilize Header-Capture Aggregation
 
 ## Status
-`READY`
+`COMPLETED`
 
 ## Overview
 Replace the "latest request wins" overwrite in `HeaderCapture.request()` with deterministic first-seen-wins aggregation so that `proxy-refresh-headers.py` output is independent of request order. This eliminates a race condition where the final header snapshot depends on whichever GameChanger request happened to arrive last.
@@ -29,7 +29,7 @@ The user explicitly requested this fix to prevent race conditions. No expert con
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-060-01 | First-seen-wins header aggregation with conflict logging | TODO | None | - |
+| E-060-01 | First-seen-wins header aggregation with conflict logging | DONE | None | SE |
 
 ## Dispatch Team
 - software-engineer
@@ -77,3 +77,4 @@ None.
 ## History
 - 2026-03-06: Created. Straight to READY -- small, well-scoped, no expert consultation needed.
 - 2026-03-06: SE review refinements applied. (1) Fixed test file path to `tests/test_proxy/test_header_capture.py`. (2) AC-6 updated: `test_latest_headers_overwrite_previous` asserts old overwrite behavior and must be updated/replaced. (3) AC-2 rewritten to focus on set-equality + first-seen-wins invariant instead of misleading dict literal. Epic remains READY.
+- 2026-03-06: E-060-01 DONE. SE replaced single-line overwrite with first-seen-wins merge loop (~13 lines). 4 new tests added (exceeds AC-5 minimum of 3). `test_latest_headers_overwrite_previous` replaced with `test_first_seen_wins_on_conflicting_values`. Module and class docstrings updated. All 36 tests pass. No documentation impact. Epic COMPLETED.

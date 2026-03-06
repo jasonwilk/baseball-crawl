@@ -302,7 +302,7 @@ class TestHeaderCaptureAddon:
         captured_lower = {k.lower() for k in captured}
         assert "gc-token" not in captured_lower
 
-    def test_latest_headers_overwrite_previous(self, tmp_path: Path) -> None:
+    def test_first_seen_wins_on_conflicting_values(self, tmp_path: Path) -> None:
         addon = HeaderCapture()
         addon.report_path = tmp_path / "report.json"
         headers1 = {"Accept": "text/html", "user-agent": "Chrome/131 Safari/537.36"}
@@ -313,7 +313,65 @@ class TestHeaderCaptureAddon:
         addon.request(flow2)
 
         captured = addon._captured_by_source["web"]
+        # First-seen wins: flow1's Accept value is retained
+        assert captured["Accept"] == "text/html"
+
+    def test_union_aggregation_no_conflicts(self, tmp_path: Path) -> None:
+        """Keys from both requests appear in result when there are no conflicting values."""
+        addon = HeaderCapture()
+        addon.report_path = tmp_path / "report.json"
+        ua = "Chrome/131 Safari/537.36"
+        headers1 = {"Accept": "application/json", "user-agent": ua}
+        headers2 = {"DNT": "1", "user-agent": ua}
+        flow1 = _make_flow("api.gc.com", ua, headers1)
+        flow2 = _make_flow("api.gc.com", ua, headers2)
+        addon.request(flow1)
+        addon.request(flow2)
+
+        captured = addon._captured_by_source["web"]
         assert captured["Accept"] == "application/json"
+        assert captured["DNT"] == "1"
+
+    def test_conflict_emits_warning_log(self, tmp_path: Path, caplog: object) -> None:
+        """A WARNING is logged when the same key has different values across requests."""
+        import logging
+        addon = HeaderCapture()
+        addon.report_path = tmp_path / "report.json"
+        ua = "Chrome/131 Safari/537.36"
+        headers1 = {"Accept": "text/html", "user-agent": ua}
+        headers2 = {"Accept": "application/json", "user-agent": ua}
+        flow1 = _make_flow("api.gc.com", ua, headers1)
+        flow2 = _make_flow("api.gc.com", ua, headers2)
+
+        with caplog.at_level(logging.WARNING, logger="proxy.addons.header_capture"):
+            addon.request(flow1)
+            addon.request(flow2)
+
+        assert any(
+            "conflict" in record.message and "Accept" in record.message
+            for record in caplog.records
+            if record.levelno == logging.WARNING
+        )
+
+    def test_order_independence_same_key_set(self, tmp_path: Path) -> None:
+        """Same two requests in two different orders produce the same set of keys."""
+        ua = "Chrome/131 Safari/537.36"
+        headers_a = {"Accept": "text/html", "user-agent": ua}
+        headers_b = {"Accept": "application/json", "DNT": "1", "user-agent": ua}
+
+        addon_ab = HeaderCapture()
+        addon_ab.report_path = tmp_path / "report_ab.json"
+        addon_ab.request(_make_flow("api.gc.com", ua, headers_a))
+        addon_ab.request(_make_flow("api.gc.com", ua, headers_b))
+
+        addon_ba = HeaderCapture()
+        addon_ba.report_path = tmp_path / "report_ba.json"
+        addon_ba.request(_make_flow("api.gc.com", ua, headers_b))
+        addon_ba.request(_make_flow("api.gc.com", ua, headers_a))
+
+        keys_ab = set(addon_ab._captured_by_source["web"].keys())
+        keys_ba = set(addon_ba._captured_by_source["web"].keys())
+        assert keys_ab == keys_ba
 
     def test_ios_source_detected(self, tmp_path: Path) -> None:
         addon = HeaderCapture()

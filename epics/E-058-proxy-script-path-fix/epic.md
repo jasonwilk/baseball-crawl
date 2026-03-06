@@ -19,6 +19,7 @@ SE consulted on fix approach (see History). Confirmed `BASH_SOURCE[0]` pattern o
 ## Non-Goals
 - Changing script behavior, output format, or flags
 - Modifying the proxy addons or proxy lifecycle scripts (those run on the Mac host and are not affected)
+- Fixing `scripts/collect-endpoints.sh` -- SE confirmed it has relative paths (lines 8, 12) but it is a one-off script with hardcoded UUIDs, not an operator tool. Known issue, out of scope.
 
 ## Success Criteria
 - Running `scripts/proxy-review.sh list` from the `scripts/` directory (or any other directory) correctly finds `proxy/data/sessions/` relative to the repo root
@@ -60,5 +61,9 @@ The `usage()` functions in `proxy-report.sh` and `proxy-review.sh` reference the
 ## Open Questions
 None.
 
+### Known issue: collect-endpoints.sh
+`scripts/collect-endpoints.sh` also has relative paths (lines 8, 12) but is a one-off script with hardcoded UUIDs -- not an operator tool. Flagged by SE, intentionally excluded from this epic's scope.
+
 ## History
 - 2026-03-06: Created from user bug report
+- 2026-03-06: SE consultation completed. Feedback: (1) use `${BASH_SOURCE[0]}` not `$0` to match existing project convention in codex-review.sh/codex-spec-review.sh and handle sourcing edge case; (2) `collect-endpoints.sh` also has relative paths but is out of scope (one-off script); (3) no other concerns with approach -- variable declarations stay before `usage()`, `readlink` calls work correctly with absolute paths
