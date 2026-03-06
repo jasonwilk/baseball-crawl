@@ -68,7 +68,7 @@ proxy/data/
       session.json              # Session metadata (see below)
     2026-03-06_160511/
       ...
-  current -> sessions/2026-03-06_160511   # Symlink to active session (removed on stop)
+  current -> sessions/2026-03-06_160511   # Symlink to latest session (always present; updated by start.sh, never removed)
 ```
 
 ### Session Metadata (`session.json`)
@@ -142,8 +142,8 @@ This does NOT automate the api-scout step. It just tracks what has been looked a
 | `scripts/proxy-report.sh` | 04 |
 | `scripts/proxy-review.sh` (new) | 03 |
 | `proxy/data/sessions/` (new dir) | 01 |
-| `tests/test_endpoint_logger.py` | 02 |
-| `tests/test_header_capture.py` | 02 |
+| `tests/test_proxy/test_endpoint_logger.py` | 02 |
+| `tests/test_proxy/test_header_capture.py` | 02 |
 
 ## Open Questions
 - Should we set a retention policy (auto-delete sessions older than N days)? Leaning no -- disk is cheap and session count will be low (a few per week at most). Revisit if it becomes a problem.
@@ -151,3 +151,4 @@ This does NOT automate the api-scout step. It just tracks what has been looked a
 
 ## History
 - 2026-03-06: Created (DRAFT). No expert consultation required -- pure proxy infrastructure tooling.
+- 2026-03-06: Applied holistic review triage findings: (1) P1-1: `current` symlink persists after stop, status tracked in session.json. (2) P2-2: Duration optional in E-052-05 AC-1. (3) P2-3: Fixed test file paths to match `tests/test_proxy/` layout in E-052-02.

@@ -72,6 +72,7 @@ The SE recommends **Typer** over Click or raw argparse:
 - Shell completion installation (Typer supports it, but auto-install is out of scope)
 - Changing proxy bash scripts to Python (they manage Docker Compose and must run on the Mac host)
 - Managing proxy lifecycle (start/stop/status/logs) -- the proxy runs on the Mac host, not inside the devcontainer where the CLI runs
+- Installing the CLI in the production Docker image (the production container runs the API server only; operator CLI is devcontainer-only)
 - Windows support
 
 ## Epic-Level Dependencies
@@ -124,7 +125,7 @@ src/cli/
     data.py          # bb data crawl, bb data load, bb data sync
     proxy.py         # bb proxy report, bb proxy endpoints, bb proxy refresh-headers, bb proxy review
     db.py            # bb db backup, bb db reset
-    status.py        # bb status
+    status.py        # bb status (top-level command via @app.command(), not a sub-app)
 ```
 
 ### Command Map
@@ -135,7 +136,7 @@ src/cli/
 | `bb data crawl` | `scripts/crawl.py` | Flags: `--dry-run`, `--crawler NAME`, `--profile` |
 | `bb data load` | `scripts/load.py` | Flags: `--dry-run`, `--loader NAME` |
 | `bb data sync` | `scripts/bootstrap.py` | Flags: `--check-only`, `--profile`, `--dry-run`. Alias for bootstrap (validate + crawl + load). |
-| `bb proxy report` | `scripts/proxy-report.sh` | Flags: `--session`, `--all`, `--unreviewed`. Shells out to bash. |
+| `bb proxy report` | `scripts/proxy-report.sh` | Flags: `--session`, `--all`. Shells out to bash. No `--unreviewed` (header reports are point-in-time snapshots). |
 | `bb proxy endpoints` | `scripts/proxy-endpoints.sh` | Flags: `--session`, `--all`, `--unreviewed`. Shells out to bash. |
 | `bb proxy refresh-headers` | `scripts/proxy-refresh-headers.py` | Flag: `--apply` (dry-run by default). Wraps Python script. |
 | `bb proxy review` | `scripts/proxy-review.sh` | Marks sessions as reviewed. Shells out to bash. |
@@ -175,7 +176,6 @@ app = typer.Typer(help="Proxy analysis commands.")
 def report(
     session: str = typer.Option(None, help="Session ID to report on."),
     all: bool = typer.Option(False, "--all", help="Report across all sessions."),
-    unreviewed: bool = typer.Option(False, "--unreviewed", help="Only unreviewed sessions."),
 ):
     """Show header parity report from proxy captures."""
     cmd = ["scripts/proxy-report.sh"]
@@ -183,8 +183,6 @@ def report(
         cmd.extend(["--session", session])
     if all:
         cmd.append("--all")
-    if unreviewed:
-        cmd.append("--unreviewed")
     result = subprocess.run(cmd, check=False)
     raise SystemExit(result.returncode)
 ```
@@ -212,9 +210,9 @@ app()
 
 **Devcontainer (`postCreateCommand`):** Append `&& pip install -e .` after `pip install -r requirements.txt`. Editable mode means code changes are live immediately -- no reinstall needed after editing CLI modules. The devcontainer PATH already includes `/home/vscode/.local/bin` (where pip installs entry points), so `bb` will be on PATH after install.
 
-**Dockerfile (production):** Use `pip install .` (NOT `-e .` -- editable installs are for dev only). Must `COPY pyproject.toml .` before the install step so pip can find the package metadata. The install goes after `pip install -r requirements.txt` and after `COPY src/ ./src/`.
+**Production Docker image:** The CLI is NOT installed in the production image. The production container runs `uvicorn` only. The `bb` CLI is an operator tool available only in the devcontainer.
 
-**Order of operations:** `pip install -r requirements.txt` first (installs deps), then `pip install -e .` / `pip install .` (registers the entry point). The two are complementary, not redundant.
+**Order of operations (devcontainer):** `pip install -r requirements.txt` first (installs deps), then `pip install -e .` (registers the entry point). The two are complementary, not redundant.
 
 **Why editable mode in dev?** `pip install -e .` creates a `.egg-link` that points back to the source directory. Any changes to `src/cli/` modules take effect immediately without re-running `pip install`. This is critical for the iterative development cycle.
 
@@ -246,4 +244,5 @@ Story 01 creates `src/cli/__init__.py` with **all sub-app mounts pre-wired** and
 ## History
 - 2026-03-06: Created. UX designer and SE consulted for CLI design and implementation approach.
 - 2026-03-06: Refined E-055-01 installation/PATH story. SE consultation identified gotchas: (1) pyproject.toml needs `version` field for editable install, (2) Dockerfile needs `COPY pyproject.toml .` and `pip install .` (not `-e .` for production), (3) `pip install -e .` and `pip install -r requirements.txt` are complementary (order: deps first, then package). Added AC-3 version requirement, AC-6 Dockerfile specifics, AC-11 `__main__.py` fallback. Updated Technical Notes with full installation details.
+- 2026-03-06: Applied holistic review triage findings: (1) P1-4: Removed `--unreviewed` from `bb proxy report` (header reports are point-in-time snapshots). (2) P1-5: Removed Dockerfile install -- CLI is devcontainer-only. Added to Non-Goals. (3) P2-1: Clarified `status` as top-level `@app.command()`, not a sub-app.
 - 2026-03-06: Revised based on review findings. (1) Removed proxy lifecycle commands (start/stop/status/logs) -- proxy runs on Mac host, not inside devcontainer. (2) Added `bb proxy refresh-headers` (wraps E-054's `proxy-refresh-headers.py`), `bb proxy review` (wraps E-052's `proxy-review.sh`). (3) Added E-052 session flags (`--session`, `--all`, `--unreviewed`) to `bb proxy report` and `bb proxy endpoints`. (4) Added `--profile` flag to `bb creds check` per E-053. (5) Added epic-level dependencies on E-052, E-053, E-054. (6) Updated E-055-04 to remove lifecycle commands, add new analysis commands. (7) Updated E-055-06 to remove proxy detection, add per-profile creds and latest proxy session. (8) Updated E-055-07 to remove proxy lifecycle command docs. (9) Added non-goal for proxy lifecycle management.

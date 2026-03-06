@@ -115,3 +115,4 @@ None -- all resolved during refinement (see History).
 ## History
 - 2026-03-06: Created (DRAFT). No expert consultation required -- header sync pipeline built on existing capture infrastructure.
 - 2026-03-06: Refined to READY. Resolved: (1) Dry-run default with `--apply` confirmed. (2) `header_capture.py` parity fix included in E-054-01 (diff each source against correct canonical dict). (3) E-052 interaction handled via path fallback (try session-aware first, then flat).
+- 2026-03-06: Applied holistic review triage findings: P2-3: Fixed test file paths in E-054-01 to match `tests/test_proxy/` layout.

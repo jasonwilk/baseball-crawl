@@ -30,7 +30,7 @@ No expert consultation required -- this is a well-understood credential routing 
 - Auto-detecting which profile to use for crawling (operator still passes `--profile` explicitly)
 - Multi-credential rotation or expiry tracking (future work, see IDEA-012)
 - Changes to the proxy addon architecture or session lifecycle (see E-052)
-- Making `refresh_credentials.py` (curl paste workflow) profile-aware -- that path remains web-only and writes flat keys; the proxy capture is the primary credential path now
+- Adding `--profile` flag or multi-profile support to `refresh_credentials.py` -- `refresh_credentials.py` is updated to write `_WEB` suffixed keys (it is inherently web-only), but no profile selection is added
 
 ## Success Criteria
 - Capturing web traffic through mitmproxy writes `GAMECHANGER_AUTH_TOKEN_WEB`, `GAMECHANGER_DEVICE_ID_WEB`, etc.
@@ -82,7 +82,7 @@ Follows the existing `PROXY_URL_WEB`/`PROXY_URL_MOBILE` pattern. No flat (unsuff
 
 Existing `.env` files with flat keys (`GAMECHANGER_AUTH_TOKEN`, etc.) will stop working after this epic. The operator must re-capture credentials through the proxy (which now writes profile-scoped keys) or manually rename keys in `.env`. Since there is only one operator and the proxy is the primary credential path, this is a clean break.
 
-`refresh_credentials.py` (curl paste workflow) continues to write flat keys. It is a web-only manual fallback. If the operator uses it, they must manually rename the keys or accept that only `--profile web` will work by setting the `_WEB` suffixed keys. This is documented but not automated -- keeping the manual path simple.
+`refresh_credentials.py` (curl paste workflow) is updated to write `_WEB` suffixed keys directly (e.g., `GAMECHANGER_AUTH_TOKEN_WEB`). This is semantically correct -- the curl-paste path is inherently web-only. No manual key renaming is needed after refresh.
 
 ### E-055 Note
 
@@ -94,13 +94,16 @@ The scripts modified by this epic (`check_credentials.py`, `bootstrap.py`) will 
 |------|---------|
 | `proxy/addons/credential_extractor.py` | 01 |
 | `src/gamechanger/client.py` | 02 |
-| `src/gamechanger/credential_parser.py` | 01 (env key mapping update) |
+| `src/gamechanger/credential_parser.py` | 02 (`_WEB` suffix for curl-paste path) |
+| `scripts/refresh_credentials.py` | 02 (`_WEB` suffix output) |
 | `scripts/check_credentials.py` | 03 |
 | `scripts/bootstrap.py` | 03 |
 | `.env.example` | 04 |
-| `tests/test_credential_extractor.py` | 01 |
+| `proxy/addons/gc_filter.py` | 01 |
+| `tests/test_proxy/test_gc_filter.py` | 01 |
+| `tests/test_proxy/test_credential_extractor.py` | 01 |
 | `tests/test_client.py` | 02 |
-| `tests/test_credential_parser.py` | 01 |
+| `tests/test_credential_parser.py` | 02 |
 | `tests/test_check_credentials.py` | 03 |
 | `tests/test_bootstrap.py` | 03 |
 
@@ -110,3 +113,4 @@ None -- all resolved during refinement (see History).
 ## History
 - 2026-03-06: Created (DRAFT). No expert consultation required -- credential routing follows existing profile-scoped patterns (PROXY_URL_WEB/PROXY_URL_MOBILE from E-046).
 - 2026-03-06: Refined to READY. Resolved: (1) `refresh_credentials.py` stays flat-key, web-only -- not worth the scope. (2) Flat keys removed entirely -- no backward compatibility fallback. Profile-scoped keys only. Clean break while there is one operator.
+- 2026-03-06: Applied holistic review triage findings: (1) P1-2: Added AC-0 to E-053-01 for Odyssey UA detection fix in gc_filter.py. (2) P1-3: E-053-02 updated to include refresh_credentials.py writing `_WEB` keys. Non-Goals and Migration Notes amended. (3) P2-3: Fixed test file paths to match `tests/test_proxy/` layout.
