@@ -1,5 +1,7 @@
 # mitmproxy Proxy Guide
 
+<!-- Last updated: 2026-03-06 | Source: E-052 -->
+
 ## What It Does
 
 mitmproxy sits between your devices (iPhone, web browser) and GameChanger's servers. When you use GameChanger normally, mitmproxy passively captures:
@@ -135,32 +137,78 @@ https_proxy=http://host.docker.internal:8080
 
 ## Where Data Goes
 
+Each `start.sh` invocation creates a timestamped session directory. All addon output lands in that session directory, not flat files in `proxy/data/`.
+
 | Path | Contents |
 |------|----------|
 | Project root `.env` | Credentials (`GAMECHANGER_AUTH_TOKEN`, `GAMECHANGER_DEVICE_ID`) -- updated live |
-| `proxy/data/header-report.json` | Header parity report (latest snapshot per source) |
-| `proxy/data/endpoint-log.jsonl` | Append-only log of every GameChanger API request |
+| `proxy/data/sessions/<id>/header-report.json` | Header parity report for that session |
+| `proxy/data/sessions/<id>/endpoint-log.jsonl` | Endpoint log for that session |
+| `proxy/data/sessions/<id>/session.json` | Session metadata (started_at, stopped_at, endpoint_count, reviewed) |
+| `proxy/data/current` | Symlink to the latest session directory -- always present after first start |
 | `proxy/certs/` | mitmproxy CA certificate (persists across restarts) |
 
 Both `proxy/data/` and `proxy/certs/` are gitignored (via `proxy/.gitignore`). The `.env` file is also gitignored at the project root.
+
+## Session Management
+
+Every `start.sh` / `stop.sh` cycle is a discrete session. Sessions accumulate in `proxy/data/sessions/` and the `current` symlink always points to the most recent one.
+
+### Session lifecycle
+
+- **`start.sh`**: creates a timestamped session directory, writes `session.json` with `status: "active"`, updates the `current` symlink, and starts the proxy container with `PROXY_SESSION_DIR` pointing to the new directory.
+- **`stop.sh`**: stops the container, finalizes `session.json` (`stopped_at`, `endpoint_count`, `status: "closed"`), and prints a summary with next-steps guidance.
+
+### Listing sessions
+
+```bash
+./scripts/proxy-review.sh list
+```
+
+Prints a table of all sessions: ID, profile, status (the current session is marked with `*`), endpoint count, and reviewed status.
+
+### Marking sessions reviewed
+
+After reviewing a session's endpoint discoveries and feeding findings to api-scout, mark the session as reviewed:
+
+```bash
+./scripts/proxy-review.sh mark <session-id>   # mark one session
+./scripts/proxy-review.sh mark --all           # mark all closed sessions
+```
+
+### Operator workflow
+
+1. `cd proxy && ./start.sh` -- start a capture session
+2. Browse GameChanger on your iPhone or browser
+3. `cd proxy && ./stop.sh` -- finalize the session (prints summary)
+4. `./scripts/proxy-endpoints.sh --unreviewed` -- see new endpoint discoveries across all unreviewed sessions
+5. Review findings; feed interesting ones to api-scout
+6. `./scripts/proxy-review.sh mark <session-id>` -- mark the session reviewed
 
 ## Reading Reports
 
 ### Header Parity Report
 
 ```bash
-./scripts/proxy-report.sh
+./scripts/proxy-report.sh                  # current session (default)
+./scripts/proxy-report.sh --session <id>   # specific session
+./scripts/proxy-report.sh --all            # most recent closed session with a report
 ```
 
 Shows, for each traffic source (ios/web), which headers are missing, extra, or different compared to the project's `BROWSER_HEADERS` in `src/http/headers.py`.
 
+Note: header reports are point-in-time snapshots, not aggregatable. `--all` returns the most recent closed session that has a report, not a merge of all sessions.
+
 ### Endpoint Discovery Log
 
 ```bash
-./scripts/proxy-endpoints.sh
+./scripts/proxy-endpoints.sh                      # current session (default)
+./scripts/proxy-endpoints.sh --session <id>       # specific session
+./scripts/proxy-endpoints.sh --all                # aggregate across all sessions
+./scripts/proxy-endpoints.sh --unreviewed         # aggregate across unreviewed sessions only
 ```
 
-Shows a deduplicated table of every unique (method, path) seen, with hit count and most recent status code.
+Shows a deduplicated table of every unique (method, path) seen, with hit count and most recent status code. Use `--unreviewed` as your default post-capture query to see only new discoveries.
 
 ## Refreshing Header Fingerprints
 
@@ -168,7 +216,7 @@ The `proxy-refresh-headers.py` script reads the latest mitmproxy capture report 
 
 ### End-to-End Workflow
 
-1. **Capture traffic** using mitmproxy (iPhone or browser -- see sections above). The `header_capture` addon writes `proxy/data/header-report.json` automatically as requests flow through.
+1. **Capture traffic** using mitmproxy (iPhone or browser -- see sections above). The `header_capture` addon writes `header-report.json` into the active session directory automatically as requests flow through.
 
 2. **Preview the diff** (dry-run, no files changed):
 

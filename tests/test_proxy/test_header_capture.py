@@ -10,11 +10,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
 
 from proxy.addons.header_capture import (
     HeaderCapture,
     _CREDENTIAL_HEADERS,
+    _REPORT_PATH,
     _SKIP_DIFF_HEADERS,
     build_report,
     compute_header_diff,
@@ -261,14 +261,15 @@ class TestHeaderCaptureAddon:
 
     def test_gc_domain_captured(self, tmp_path: Path) -> None:
         addon = HeaderCapture()
+        addon.report_path = tmp_path / "report.json"
         headers = {"Accept": "application/json", "user-agent": "Chrome/131 Safari/537.36"}
         flow = _make_flow("api.gc.com", "Chrome/131", headers)
-        with patch("proxy.addons.header_capture._REPORT_PATH", tmp_path / "report.json"):
-            addon.request(flow)
+        addon.request(flow)
         assert "web" in addon._captured_by_source
 
     def test_credential_headers_excluded(self, tmp_path: Path) -> None:
         addon = HeaderCapture()
+        addon.report_path = tmp_path / "report.json"
         headers = {
             "Accept": "application/json",
             "gc-token": "super-secret-token",
@@ -279,8 +280,7 @@ class TestHeaderCaptureAddon:
             "user-agent": "Chrome/131 Safari/537.36",
         }
         flow = _make_flow("api.gc.com", "Chrome/131", headers)
-        with patch("proxy.addons.header_capture._REPORT_PATH", tmp_path / "report.json"):
-            addon.request(flow)
+        addon.request(flow)
 
         captured = addon._captured_by_source.get("web", {})
         captured_lower = {k.lower() for k in captured}
@@ -289,14 +289,14 @@ class TestHeaderCaptureAddon:
 
     def test_credential_headers_case_insensitive_exclusion(self, tmp_path: Path) -> None:
         addon = HeaderCapture()
+        addon.report_path = tmp_path / "report.json"
         headers = {
             "GC-TOKEN": "super-secret-token",
             "Accept": "application/json",
             "user-agent": "Chrome/131 Safari/537.36",
         }
         flow = _make_flow("api.gc.com", "Chrome/131", headers)
-        with patch("proxy.addons.header_capture._REPORT_PATH", tmp_path / "report.json"):
-            addon.request(flow)
+        addon.request(flow)
 
         captured = addon._captured_by_source.get("web", {})
         captured_lower = {k.lower() for k in captured}
@@ -304,34 +304,33 @@ class TestHeaderCaptureAddon:
 
     def test_latest_headers_overwrite_previous(self, tmp_path: Path) -> None:
         addon = HeaderCapture()
+        addon.report_path = tmp_path / "report.json"
         headers1 = {"Accept": "text/html", "user-agent": "Chrome/131 Safari/537.36"}
         headers2 = {"Accept": "application/json", "user-agent": "Chrome/131 Safari/537.36"}
         flow1 = _make_flow("api.gc.com", "Chrome/131", headers1)
         flow2 = _make_flow("api.gc.com", "Chrome/131", headers2)
-        report_path = tmp_path / "report.json"
-        with patch("proxy.addons.header_capture._REPORT_PATH", report_path):
-            addon.request(flow1)
-            addon.request(flow2)
+        addon.request(flow1)
+        addon.request(flow2)
 
         captured = addon._captured_by_source["web"]
         assert captured["Accept"] == "application/json"
 
     def test_ios_source_detected(self, tmp_path: Path) -> None:
         addon = HeaderCapture()
+        addon.report_path = tmp_path / "report.json"
         ios_ua = "GameChanger/1234 CFNetwork/1410.0.3 Darwin/22.6.0"
         headers = {"Accept": "application/json", "user-agent": ios_ua}
         flow = _make_flow("api.gc.com", ios_ua, headers)
-        with patch("proxy.addons.header_capture._REPORT_PATH", tmp_path / "report.json"):
-            addon.request(flow)
+        addon.request(flow)
         assert "ios" in addon._captured_by_source
 
     def test_report_file_written(self, tmp_path: Path) -> None:
         addon = HeaderCapture()
+        report_path = tmp_path / "report.json"
+        addon.report_path = report_path
         headers = {"Accept": "application/json", "user-agent": "Chrome/131 Safari/537.36"}
         flow = _make_flow("api.gc.com", "Chrome/131", headers)
-        report_path = tmp_path / "report.json"
-        with patch("proxy.addons.header_capture._REPORT_PATH", report_path):
-            addon.request(flow)
+        addon.request(flow)
         assert report_path.exists()
         content = json.loads(report_path.read_text())
         assert "generated_at" in content
@@ -340,34 +339,34 @@ class TestHeaderCaptureAddon:
     def test_report_overwritten_not_appended(self, tmp_path: Path) -> None:
         addon = HeaderCapture()
         report_path = tmp_path / "report.json"
+        addon.report_path = report_path
         headers = {"Accept": "application/json", "user-agent": "Chrome/131 Safari/537.36"}
         flow = _make_flow("api.gc.com", "Chrome/131", headers)
-        with patch("proxy.addons.header_capture._REPORT_PATH", report_path):
-            addon.request(flow)
-            first_size = report_path.stat().st_size
-            addon.request(flow)
-            second_size = report_path.stat().st_size
+        addon.request(flow)
+        first_size = report_path.stat().st_size
+        addon.request(flow)
+        second_size = report_path.stat().st_size
         # Overwrite means the file size stays the same (not growing)
         assert second_size == first_size
 
     def test_unknown_user_agent_source(self, tmp_path: Path) -> None:
         addon = HeaderCapture()
+        addon.report_path = tmp_path / "report.json"
         headers = {"Accept": "application/json", "user-agent": "curl/7.81.0"}
         flow = _make_flow("api.gc.com", "curl/7.81.0", headers)
-        with patch("proxy.addons.header_capture._REPORT_PATH", tmp_path / "report.json"):
-            addon.request(flow)
+        addon.request(flow)
         assert "unknown" in addon._captured_by_source
 
     def test_multiple_sources_separate_entries(self, tmp_path: Path) -> None:
         addon = HeaderCapture()
+        report_path = tmp_path / "report.json"
+        addon.report_path = report_path
         ios_ua = "GameChanger/1234 CFNetwork/1410.0.3 Darwin/22.6.0"
         web_ua = "Mozilla/5.0 Chrome/131.0 Safari/537.36"
         ios_flow = _make_flow("api.gc.com", ios_ua, {"Accept": "app/json", "user-agent": ios_ua})
         web_flow = _make_flow("api.gc.com", web_ua, {"Accept": "text/html", "user-agent": web_ua})
-        report_path = tmp_path / "report.json"
-        with patch("proxy.addons.header_capture._REPORT_PATH", report_path):
-            addon.request(ios_flow)
-            addon.request(web_flow)
+        addon.request(ios_flow)
+        addon.request(web_flow)
 
         assert "ios" in addon._captured_by_source
         assert "web" in addon._captured_by_source
@@ -379,8 +378,27 @@ class TestHeaderCaptureAddon:
     def test_report_dir_created_if_missing(self, tmp_path: Path) -> None:
         addon = HeaderCapture()
         nested_path = tmp_path / "nested" / "dir" / "report.json"
+        addon.report_path = nested_path
         headers = {"Accept": "application/json", "user-agent": "Chrome/131 Safari/537.36"}
         flow = _make_flow("api.gc.com", "Chrome/131", headers)
-        with patch("proxy.addons.header_capture._REPORT_PATH", nested_path):
-            addon.request(flow)
+        addon.request(flow)
         assert nested_path.exists()
+
+    def test_session_dir_env_var_routes_output(self, tmp_path: Path, monkeypatch: object) -> None:
+        """AC-7: when PROXY_SESSION_DIR is set, report goes to session dir."""
+        monkeypatch.setenv("PROXY_SESSION_DIR", str(tmp_path))
+        addon = HeaderCapture()
+        headers = {"Accept": "application/json", "user-agent": "Chrome/131 Safari/537.36"}
+        flow = _make_flow("api.gc.com", "Chrome/131", headers)
+        addon.request(flow)
+
+        expected = tmp_path / "header-report.json"
+        assert expected.exists()
+        content = json.loads(expected.read_text())
+        assert "sources" in content
+
+    def test_fallback_path_used_when_no_session_dir(self, monkeypatch: object) -> None:
+        """AC-2 fallback: without PROXY_SESSION_DIR, report_path is _REPORT_PATH."""
+        monkeypatch.delenv("PROXY_SESSION_DIR", raising=False)
+        addon = HeaderCapture()
+        assert addon.report_path == _REPORT_PATH

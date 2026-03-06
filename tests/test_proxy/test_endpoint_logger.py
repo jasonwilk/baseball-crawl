@@ -8,9 +8,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
 
-from proxy.addons.endpoint_logger import EndpointLogger, _build_entry, _append_entry
+from proxy.addons.endpoint_logger import EndpointLogger, _build_entry, _append_entry, LOG_PATH
 
 
 # ---------------------------------------------------------------------------
@@ -165,8 +164,8 @@ class TestEndpointLoggerResponse:
         log_file = tmp_path / "endpoint-log.jsonl"
 
         addon = EndpointLogger()
-        with patch("proxy.addons.endpoint_logger.LOG_PATH", log_file):
-            addon.response(flow)
+        addon.log_path = log_file
+        addon.response(flow)
 
         assert log_file.exists()
         lines = log_file.read_text().strip().splitlines()
@@ -179,18 +178,18 @@ class TestEndpointLoggerResponse:
         log_file = tmp_path / "endpoint-log.jsonl"
 
         addon = EndpointLogger()
-        with patch("proxy.addons.endpoint_logger.LOG_PATH", log_file):
-            addon.response(flow)
+        addon.log_path = log_file
+        addon.response(flow)
 
         assert not log_file.exists()
 
     def test_multiple_requests_all_appended(self, tmp_path: Path) -> None:
         log_file = tmp_path / "endpoint-log.jsonl"
         addon = EndpointLogger()
+        addon.log_path = log_file
 
-        with patch("proxy.addons.endpoint_logger.LOG_PATH", log_file):
-            for _ in range(3):
-                addon.response(_make_flow())
+        for _ in range(3):
+            addon.response(_make_flow())
 
         lines = log_file.read_text().strip().splitlines()
         assert len(lines) == 3
@@ -199,10 +198,10 @@ class TestEndpointLoggerResponse:
         """AC-4: No deduplication -- each occurrence is logged."""
         log_file = tmp_path / "endpoint-log.jsonl"
         addon = EndpointLogger()
+        addon.log_path = log_file
 
-        with patch("proxy.addons.endpoint_logger.LOG_PATH", log_file):
-            addon.response(_make_flow())
-            addon.response(_make_flow())
+        addon.response(_make_flow())
+        addon.response(_make_flow())
 
         lines = log_file.read_text().strip().splitlines()
         assert len(lines) == 2
@@ -213,18 +212,18 @@ class TestEndpointLoggerResponse:
         assert not log_file.exists()
 
         addon = EndpointLogger()
-        with patch("proxy.addons.endpoint_logger.LOG_PATH", log_file):
-            addon.response(_make_flow())
+        addon.log_path = log_file
+        addon.response(_make_flow())
 
         assert log_file.exists()
 
     def test_each_line_is_valid_json(self, tmp_path: Path) -> None:
         log_file = tmp_path / "endpoint-log.jsonl"
         addon = EndpointLogger()
+        addon.log_path = log_file
 
-        with patch("proxy.addons.endpoint_logger.LOG_PATH", log_file):
-            addon.response(_make_flow(url="https://api.gc.com/me/user"))
-            addon.response(_make_flow(url="https://api.gc.com/me/teams"))
+        addon.response(_make_flow(url="https://api.gc.com/me/user"))
+        addon.response(_make_flow(url="https://api.gc.com/me/teams"))
 
         for line in log_file.read_text().strip().splitlines():
             entry = json.loads(line)  # must not raise
@@ -237,11 +236,28 @@ class TestEndpointLoggerResponse:
         log_file = tmp_path / "endpoint-log.jsonl"
 
         addon = EndpointLogger()
-        with patch("proxy.addons.endpoint_logger.LOG_PATH", log_file):
-            addon.response(flow)
+        addon.log_path = log_file
+        addon.response(flow)
 
         entry = json.loads(log_file.read_text().strip())
         assert entry["source"] == "ios"
+
+    def test_session_dir_env_var_routes_output(self, tmp_path: Path, monkeypatch: object) -> None:
+        """AC-6: when PROXY_SESSION_DIR is set, output goes to session dir."""
+        monkeypatch.setenv("PROXY_SESSION_DIR", str(tmp_path))
+        addon = EndpointLogger()
+        addon.response(_make_flow())
+
+        expected = tmp_path / "endpoint-log.jsonl"
+        assert expected.exists()
+        entry = json.loads(expected.read_text().strip())
+        assert entry["host"] == "api.gc.com"
+
+    def test_fallback_path_used_when_no_session_dir(self, tmp_path: Path, monkeypatch: object) -> None:
+        """AC-1 fallback: without PROXY_SESSION_DIR, log_path is LOG_PATH."""
+        monkeypatch.delenv("PROXY_SESSION_DIR", raising=False)
+        addon = EndpointLogger()
+        assert addon.log_path == LOG_PATH
 
 
 # ---------------------------------------------------------------------------
@@ -252,16 +268,20 @@ class TestEndpointLoggerResponse:
 class TestAppendEntry:
     def test_creates_parent_directory(self, tmp_path: Path) -> None:
         log_file = tmp_path / "nested" / "dir" / "log.jsonl"
-        with patch("proxy.addons.endpoint_logger.LOG_PATH", log_file):
-            _append_entry({"key": "value"})
+        _append_entry({"key": "value"}, log_file)
         assert log_file.exists()
 
     def test_appends_newline_delimited_json(self, tmp_path: Path) -> None:
         log_file = tmp_path / "log.jsonl"
-        with patch("proxy.addons.endpoint_logger.LOG_PATH", log_file):
-            _append_entry({"a": 1})
-            _append_entry({"b": 2})
+        _append_entry({"a": 1}, log_file)
+        _append_entry({"b": 2}, log_file)
 
         lines = log_file.read_text().splitlines()
         assert json.loads(lines[0]) == {"a": 1}
         assert json.loads(lines[1]) == {"b": 2}
+
+    def test_defaults_to_LOG_PATH_when_path_not_provided(self, monkeypatch: object) -> None:
+        """_append_entry() without explicit path uses LOG_PATH (module constant)."""
+        # We just verify the attribute -- don't actually write to /app/proxy/data/
+        import proxy.addons.endpoint_logger as mod
+        assert mod.LOG_PATH == Path("/app/proxy/data/endpoint-log.jsonl")

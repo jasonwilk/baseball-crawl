@@ -1,7 +1,7 @@
 # E-052: Proxy Data Lifecycle
 
 ## Status
-`DRAFT`
+`COMPLETED`
 <!-- Lifecycle: DRAFT -> READY -> ACTIVE -> COMPLETED (or BLOCKED / ABANDONED) -->
 <!-- PM sets READY explicitly after: expert consultation done, all stories have testable ACs, quality checklist passed. -->
 <!-- Only READY and ACTIVE epics can be dispatched. -->
@@ -46,11 +46,11 @@ The user's stated goal: "make it intentional."
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-052-01 | Session directory structure and start/stop lifecycle | TODO | None | - |
-| E-052-02 | Route addon output to active session | TODO | E-052-01 | - |
-| E-052-03 | Session manifest and review tracking | TODO | E-052-01 | - |
-| E-052-04 | Migrate report scripts to session-aware mode | TODO | E-052-02, E-052-03 | - |
-| E-052-05 | Stop-time session summary | TODO | E-052-02 | - |
+| E-052-01 | Session directory structure and start/stop lifecycle | DONE | None | se |
+| E-052-02 | Route addon output to active session | DONE | E-052-01 | se |
+| E-052-03 | Session manifest and review tracking | DONE | E-052-01 | se |
+| E-052-04 | Migrate report scripts to session-aware mode | DONE | E-052-02, E-052-03 | se |
+| E-052-05 | Stop-time session summary | DONE | E-052-01, E-052-02, E-052-03 | se |
 
 ## Dispatch Team
 - software-engineer
@@ -117,8 +117,8 @@ Lightweight by design. The operator's flow:
 
 1. Run `proxy-endpoints.sh --unreviewed` to see new endpoint discoveries
 2. Review and feed interesting findings to api-scout (existing manual workflow)
-3. Mark sessions as reviewed: `proxy-review.sh <session-id>` (sets `reviewed: true` in `session.json`)
-4. Or mark all: `proxy-review.sh --all`
+3. Mark sessions as reviewed: `proxy-review.sh mark <session-id>` (sets `reviewed: true` in `session.json`)
+4. Or mark all: `proxy-review.sh mark --all`
 
 This does NOT automate the api-scout step. It just tracks what has been looked at.
 
@@ -152,3 +152,5 @@ This does NOT automate the api-scout step. It just tracks what has been looked a
 ## History
 - 2026-03-06: Created (DRAFT). No expert consultation required -- pure proxy infrastructure tooling.
 - 2026-03-06: Applied holistic review triage findings: (1) P1-1: `current` symlink persists after stop, status tracked in session.json. (2) P2-2: Duration optional in E-052-05 AC-1. (3) P2-3: Fixed test file paths to match `tests/test_proxy/` layout in E-052-02.
+- 2026-03-06: Applied codex spec review triage. 8 findings triaged: 6 REFINED, 1 DISMISSED, 1 resolved by another fix. Key changes: (1) E-052-02 AC-8 reworded -- flat files are gitignored, only tracked references need updating. (2) E-052-03 AC-3 clarified -- `*` marker is symlink-based, not status-based. (3) E-052-04 AC-7 tightened -- must be closed session with header-report.json. (4) E-052-05 dependencies expanded -- now blocks on E-052-01 (shared file), E-052-03 (review command reference). (5) Epic Review Workflow section aligned to `proxy-review.sh mark <id>` subcommand syntax. Set to READY.
+- 2026-03-06: COMPLETED. All 5 stories DONE. Session-scoped proxy data lifecycle fully implemented: session dirs with start/stop lifecycle, addon output routing via PROXY_SESSION_DIR, review tracking via proxy-review.sh, session-aware report scripts (--session/--all/--unreviewed), stop-time summary with next-steps guidance. No documentation impact (proxy tooling is internal operator infrastructure, not user-facing docs).

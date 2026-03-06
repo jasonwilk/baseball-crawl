@@ -104,8 +104,9 @@ The authoritative data dictionary mapping all GameChanger stat abbreviations to 
 - `./scripts/install-hooks.sh` -- one-time setup for PII pre-commit hook (run after cloning)
 - `./scripts/codex-review.sh <mode>` -- code review of repository changes; modes: `uncommitted`, `base <branch>`, `commit <sha>`. Rubric: `.project/codex-review.md`
 - `./scripts/codex-spec-review.sh <epic-dir>` -- spec review of epic/story files in a directory; optional `--note` flag. Rubric: `.project/codex-spec-review.md`
-- `./scripts/proxy-report.sh` -- print human-readable header parity report from `proxy/data/header-report.json`
-- `./scripts/proxy-endpoints.sh` -- print deduplicated endpoint summary from `proxy/data/endpoint-log.jsonl`
+- `./scripts/proxy-report.sh` -- print human-readable header parity report from current proxy session (reads `proxy/data/current/`)
+- `./scripts/proxy-endpoints.sh` -- print deduplicated endpoint summary from current proxy session; supports `--session <id>`, `--all`, `--unreviewed`
+- `./scripts/proxy-review.sh <subcommand>` -- manage proxy session review status; subcommands: `list`, `mark <session-id>`, `mark --all`
 - `python scripts/proxy-refresh-headers.py` -- dry-run: preview what would change in `src/http/headers.py` based on latest mitmproxy capture
 - `python scripts/proxy-refresh-headers.py --apply` -- write updated `src/http/headers.py` from latest capture and print summary of changes
 - `python scripts/check_credentials.py [--profile web|mobile]` -- verify GameChanger credentials in `.env` are present and valid

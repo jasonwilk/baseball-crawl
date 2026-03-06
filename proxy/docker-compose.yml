@@ -11,6 +11,7 @@ services:
     environment:
       - PYTHONPATH=/app
       - MITMPROXY_PROFILE=${MITMPROXY_PROFILE:-mobile}
+      - PROXY_SESSION_DIR=${PROXY_SESSION_DIR:-}
     ports:
       # Proxy listener -- 0.0.0.0 so iPhone on LAN can reach it.
       - "0.0.0.0:8080:8080"

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -23,11 +24,19 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Fallback path used when PROXY_SESSION_DIR is not set.
 LOG_PATH = Path("/app/proxy/data/endpoint-log.jsonl")
 
 
 class EndpointLogger:
     """Append a JSONL entry to the endpoint log for every GameChanger response."""
+
+    def __init__(self) -> None:
+        session_dir = os.environ.get("PROXY_SESSION_DIR")
+        if session_dir:
+            self.log_path = Path(session_dir) / "endpoint-log.jsonl"
+        else:
+            self.log_path = LOG_PATH
 
     def response(self, flow: http.HTTPFlow) -> None:
         """Hook called after a response is received.
@@ -42,7 +51,7 @@ class EndpointLogger:
         source = gc_filter.detect_source(user_agent)
 
         entry = _build_entry(flow, host, source)
-        _append_entry(entry)
+        _append_entry(entry, self.log_path)
 
 
 def _build_entry(flow: http.HTTPFlow, host: str, source: str) -> dict[str, Any]:
@@ -75,9 +84,15 @@ def _build_entry(flow: http.HTTPFlow, host: str, source: str) -> dict[str, Any]:
     }
 
 
-def _append_entry(entry: dict[str, Any]) -> None:
-    """Append a single JSONL entry to the log file, creating it if needed."""
-    LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with LOG_PATH.open("a", encoding="utf-8") as fh:
+def _append_entry(entry: dict[str, Any], path: Path | None = None) -> None:
+    """Append a single JSONL entry to the log file, creating it if needed.
+
+    Args:
+        entry: Dict to serialise as a JSONL line.
+        path: Output file path. Defaults to LOG_PATH when not provided.
+    """
+    target = path if path is not None else LOG_PATH
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with target.open("a", encoding="utf-8") as fh:
         fh.write(json.dumps(entry) + "\n")
-    logger.debug("endpoint_logger: appended entry to %s", LOG_PATH)
+    logger.debug("endpoint_logger: appended entry to %s", target)

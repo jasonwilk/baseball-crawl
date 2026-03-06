@@ -10,14 +10,15 @@ Each source is diffed against the correct canonical dict:
   - ``"ios"`` -> ``MOBILE_HEADERS``
   - ``"unknown"`` -> ``BROWSER_HEADERS`` (best guess)
 
-The report is written to ``proxy/data/header-report.json`` and is
-overwritten on each update (latest snapshot only).
+The report is written to the session directory (or ``proxy/data/`` as fallback)
+and is overwritten on each update (latest snapshot only).
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -64,6 +65,7 @@ _SKIP_DIFF_HEADERS: frozenset[str] = frozenset(
     }
 )
 
+# Fallback path used when PROXY_SESSION_DIR is not set.
 _REPORT_PATH = Path("/app/proxy/data/header-report.json")
 
 
@@ -181,6 +183,12 @@ class HeaderCapture:
         # source -> latest captured headers (credential headers excluded)
         self._captured_by_source: dict[str, dict[str, str]] = {}
 
+        session_dir = os.environ.get("PROXY_SESSION_DIR")
+        if session_dir:
+            self.report_path = Path(session_dir) / "header-report.json"
+        else:
+            self.report_path = _REPORT_PATH
+
     def request(self, flow: Any) -> None:  # noqa: ANN401
         """Hook called by mitmproxy for every client request."""
         host = flow.request.pretty_host
@@ -213,11 +221,11 @@ class HeaderCapture:
         report = build_report(self._captured_by_source, canonical_by_source)
 
         try:
-            _REPORT_PATH.parent.mkdir(parents=True, exist_ok=True)
-            _REPORT_PATH.write_text(json.dumps(report, indent=2), encoding="utf-8")
-            log.debug("header_capture: wrote report to %s", _REPORT_PATH)
+            self.report_path.parent.mkdir(parents=True, exist_ok=True)
+            self.report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
+            log.debug("header_capture: wrote report to %s", self.report_path)
         except OSError:
-            log.exception("header_capture: failed to write report to %s", _REPORT_PATH)
+            log.exception("header_capture: failed to write report to %s", self.report_path)
 
 
 addons = [HeaderCapture()]

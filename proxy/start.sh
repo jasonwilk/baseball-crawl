@@ -57,14 +57,60 @@ export MITMPROXY_PROFILE
 # mitmproxy user (UID 1000) can write CA certs regardless of host UID.
 mkdir -p -m 777 certs
 
+# --- Session lifecycle ---
+
+# Warn if a current session is still active (unclean shutdown).
+# A closed session leaves the symlink in place by design -- only warn for active ones.
+if [ -L data/current ]; then
+    PREV_SESSION_JSON="data/$(readlink data/current)/session.json"
+    if [ -f "${PREV_SESSION_JSON}" ]; then
+        PREV_STATUS=$(jq -r '.status' "${PREV_SESSION_JSON}")
+        if [ "${PREV_STATUS}" = "active" ]; then
+            echo "Warning: a previous session is still active (data/current symlink exists)." >&2
+            echo "         The previous session will remain status 'active' as a signal of unclean shutdown." >&2
+        fi
+    fi
+fi
+
+# Create session directory.
+SESSION_ID=$(date -u +%Y-%m-%d_%H%M%S)
+SESSION_DIR="data/sessions/${SESSION_ID}"
+mkdir -p "${SESSION_DIR}"
+
+# Write session.json metadata.
+STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+jq -n \
+    --arg session_id "${SESSION_ID}" \
+    --arg profile "${MITMPROXY_PROFILE}" \
+    --arg started_at "${STARTED_AT}" \
+    '{
+        session_id: $session_id,
+        profile: $profile,
+        started_at: $started_at,
+        stopped_at: null,
+        status: "active",
+        endpoint_count: 0,
+        reviewed: false,
+        review_notes: ""
+    }' > "${SESSION_DIR}/session.json"
+
+# Create (or update) the current symlink to point to the new session.
+# Use a relative path so it works both on the host and inside the container.
+ln -sfn "sessions/${SESSION_ID}" data/current
+
+# Export PROXY_SESSION_DIR for the mitmproxy container.
+# The container mounts the project root at /app, so proxy/data maps to /app/proxy/data.
+export PROXY_SESSION_DIR="/app/proxy/data/sessions/${SESSION_ID}"
+
 docker compose up -d
 
 echo
 echo "mitmproxy is running on the host."
 echo
-echo "  Profile:   ${MITMPROXY_PROFILE}"
-echo "  Proxy:     0.0.0.0:8080"
-echo "  mitmweb:   http://localhost:8081"
+echo "  Profile:    ${MITMPROXY_PROFILE}"
+echo "  Session:    ${SESSION_ID}"
+echo "  Proxy:      0.0.0.0:8080"
+echo "  mitmweb:    http://localhost:8081"
 echo
 
 # Try to detect LAN IP (macOS).
