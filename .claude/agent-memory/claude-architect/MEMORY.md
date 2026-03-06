@@ -41,6 +41,7 @@ Only when a user request requires specialized capability that existing agents ca
 - Tech stack: Python end-to-end. FastAPI+Jinja2 serving layer. Docker Compose + Cloudflare Tunnel. SQLite (WAL mode). Home Linux server. Simple file backup via scripts/backup_db.py. Decision finalized in E-009.
 - Docker Compose stack (3 services): app (FastAPI, localhost:8001 direct / localhost:8000 via Traefik), traefik (reverse proxy, dashboard at :8180), cloudflared (tunnel). E-027 established devcontainer-to-compose networking.
 - App troubleshooting section in CLAUDE.md covers: stack management, health check, logs, rebuild after changes, unreachable diagnosis. Agents should rebuild + health-check after modifying src/, migrations/, Dockerfile, docker-compose.yml, or requirements.txt.
+- Proxy boundary: mitmproxy runs on Mac host, NOT in the devcontainer. Agents must not attempt proxy lifecycle commands (start/stop/status/logs). Agents CAN read proxy data from `proxy/data/` and credentials from `.env`. Documented in CLAUDE.md "Proxy Boundary" section + Commands subsection separation + `.claude/rules/proxy-boundary.md` (glob-triggered on `proxy/**`). See `docs/admin/mitmproxy-guide.md` for full details.
 - CLAUDE.md has Core Principle section at top, followed by full project context
 - Ideas workflow in `/.project/ideas/` for pre-epic tracking (IDEA-NNN numbering)
 - Ideas rule: if acceptance criteria cannot be written, it is not an epic -- capture as idea
@@ -70,6 +71,7 @@ Only when a user request requires specialized capability that existing agents ca
 - `skills-and-hooks.md` -- Skills system, hooks patterns
 - `semantic-layer.md` -- Intent routing, layering strategy
 - `agent-blueprints.md` -- Historical blueprints for agents (data-engineer, software-engineer built via E-013; baseball-coach, api-scout for reference)
+- `boundaries.md` -- Operational boundary catalog (host vs container, auth vs public, PII, hallucinated identifiers)
 
 ## Claude Code Platform Facts
 - CLAUDE.md loaded every session; keep concise

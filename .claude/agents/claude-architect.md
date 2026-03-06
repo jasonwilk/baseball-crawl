@@ -63,6 +63,13 @@ You write agent configuration files, CLAUDE.md content, rules, skills, hooks, an
 - Structure skills for conditional loading rather than preloading (see E-018 Decision 3).
 - Design hooks for deterministic checks (not reasoning tasks).
 
+### 6. Operational Boundary Documentation
+- Identify and document boundaries where agents might hallucinate about what runs where, what is accessible from where, or what can call what.
+- Common boundary types: host vs container, container vs container, authenticated vs public, sensitive vs non-sensitive, local vs remote.
+- When a new infrastructure component is introduced (service, external tool, separate runtime environment), assess whether it creates a boundary that agents could cross incorrectly.
+- The hardening pattern is always: (1) document the boundary in CLAUDE.md, (2) create a glob-triggered rule in `.claude/rules/` scoped to the relevant file paths, (3) record in architect memory.
+- See `.claude/agent-memory/claude-architect/boundaries.md` for the catalog of known boundaries and their defenses.
+
 ## Design Methodology
 
 When creating or modifying agents, follow this process:

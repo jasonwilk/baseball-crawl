@@ -104,12 +104,14 @@ The authoritative data dictionary mapping all GameChanger stat abbreviations to 
 - `./scripts/install-hooks.sh` -- one-time setup for PII pre-commit hook (run after cloning)
 - `./scripts/codex-review.sh <mode>` -- code review of repository changes; modes: `uncommitted`, `base <branch>`, `commit <sha>`. Rubric: `.project/codex-review.md`
 - `./scripts/codex-spec-review.sh <epic-dir>` -- spec review of epic/story files in a directory; optional `--note` flag. Rubric: `.project/codex-spec-review.md`
-- `cd proxy && ./start.sh` -- launch mitmproxy on the Mac host (detached)
+- `./scripts/proxy-report.sh` -- print human-readable header parity report from `proxy/data/header-report.json`
+- `./scripts/proxy-endpoints.sh` -- print deduplicated endpoint summary from `proxy/data/endpoint-log.jsonl`
+
+### Proxy Commands (Mac Host Only -- NOT runnable from devcontainer)
+- `cd proxy && ./start.sh` -- launch mitmproxy (detached)
 - `cd proxy && ./stop.sh` -- shut down mitmproxy
 - `cd proxy && ./status.sh` -- check mitmproxy containers and port listeners
 - `cd proxy && ./logs.sh` -- follow live mitmproxy log output
-- `./scripts/proxy-report.sh` -- print human-readable header parity report from `proxy/data/header-report.json`
-- `./scripts/proxy-endpoints.sh` -- print deduplicated endpoint summary from `proxy/data/endpoint-log.jsonl`
 
 ## Workflows
 - **Implement**: When the user says "implement E-NNN" (or similar -- "start epic", "execute E-NNN", "dispatch E-NNN", "kick off E-NNN"), load `.claude/skills/implement/SKILL.md` and follow its workflow. The team lead reads the epic for team composition, spawns the PM, and relays the request. Supports an "and review" modifier to chain a code review after implementation completes.
@@ -156,6 +158,24 @@ docker compose up -d --build app   # rebuild image and restart app
 5. `docker compose restart app` -- then re-curl.
 
 **When to check app health**: After any change to files in `src/`, `migrations/`, `Dockerfile`, `docker-compose.yml`, or `requirements.txt`, rebuild and verify the health check passes before marking work as done.
+
+## Proxy Boundary (Host vs. Container)
+
+The mitmproxy traffic-capture tool runs on the **Mac host machine**, completely outside the devcontainer. This is an architectural boundary that agents must respect.
+
+**What runs on the Mac host (NOT in the devcontainer):**
+- Proxy lifecycle commands: `cd proxy && ./start.sh`, `./stop.sh`, `./status.sh`, `./logs.sh`
+- The mitmproxy Docker container itself (under `proxy/docker-compose.yml`, separate from the project's `docker-compose.yml`)
+- The mitmweb UI at `http://localhost:8081` on the Mac
+
+**What runs inside the devcontainer (where agents operate):**
+- Scripts that READ proxy output: `./scripts/proxy-report.sh`, `./scripts/proxy-endpoints.sh` -- these read files from `proxy/data/` which is a mounted volume accessible from both environments
+- The `.env` file with credentials captured by the proxy -- accessible from the container
+- All project code, tests, and the app stack (app, traefik, cloudflared)
+
+**The rule:** Agents MUST NOT attempt to start, stop, or manage the proxy. If proxy management is needed, tell the user to run the command on the Mac host. Agents CAN read proxy data files in `proxy/data/` and use credentials from `.env`.
+
+See `docs/admin/mitmproxy-guide.md` for the full proxy setup and usage guide.
 
 ## Code Style
 - Use type hints for all function signatures
