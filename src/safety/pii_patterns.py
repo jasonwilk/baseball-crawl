@@ -53,7 +53,7 @@ PATTERNS: list[dict[str, str]] = [
     },
     {
         "name": "us_phone",
-        "regex": r'(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}',
+        "regex": r'(?<!\d)(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}(?!\d)',
         "description": "US phone numbers in common formats",
     },
     # Credential patterns

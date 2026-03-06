@@ -7,17 +7,18 @@ import logging
 import time
 
 import httpx
+import pytest
 import respx
 
-from src.http.headers import BROWSER_HEADERS
+from src.http.headers import BROWSER_HEADERS, MOBILE_HEADERS
 from src.http.session import create_session
 
 
-class TestBrowserHeaders:
-    """Verify the session sends all required browser headers."""
+class TestHeaderProfiles:
+    """Verify the session sends the correct headers for each profile."""
 
     @respx.mock
-    def test_all_browser_headers_present(self) -> None:
+    def test_default_profile_uses_browser_headers(self) -> None:
         route = respx.get("https://example.com/test").mock(
             return_value=httpx.Response(200, json={})
         )
@@ -28,6 +29,56 @@ class TestBrowserHeaders:
             assert request.headers[key.lower()] == value, (
                 f"Header {key} expected {value!r}, got {request.headers.get(key.lower())!r}"
             )
+
+    @respx.mock
+    def test_web_profile_uses_browser_headers(self) -> None:
+        route = respx.get("https://example.com/test").mock(
+            return_value=httpx.Response(200, json={})
+        )
+        session = create_session(min_delay_ms=0, jitter_ms=0, profile="web")
+        session.get("https://example.com/test")
+        request = route.calls.last.request
+        for key, value in BROWSER_HEADERS.items():
+            assert request.headers[key.lower()] == value, (
+                f"Header {key} expected {value!r}, got {request.headers.get(key.lower())!r}"
+            )
+
+    @respx.mock
+    def test_mobile_profile_uses_mobile_headers(self) -> None:
+        route = respx.get("https://example.com/test").mock(
+            return_value=httpx.Response(200, json={})
+        )
+        session = create_session(min_delay_ms=0, jitter_ms=0, profile="mobile")
+        session.get("https://example.com/test")
+        request = route.calls.last.request
+        for key, value in MOBILE_HEADERS.items():
+            assert request.headers[key.lower()] == value, (
+                f"Header {key} expected {value!r}, got {request.headers.get(key.lower())!r}"
+            )
+
+    @respx.mock
+    def test_web_profile_user_agent_is_chrome_145(self) -> None:
+        route = respx.get("https://example.com/test").mock(
+            return_value=httpx.Response(200, json={})
+        )
+        session = create_session(min_delay_ms=0, jitter_ms=0, profile="web")
+        session.get("https://example.com/test")
+        ua = route.calls.last.request.headers["user-agent"]
+        assert "Chrome/145.0.0.0" in ua
+
+    @respx.mock
+    def test_mobile_profile_user_agent_is_odyssey(self) -> None:
+        route = respx.get("https://example.com/test").mock(
+            return_value=httpx.Response(200, json={})
+        )
+        session = create_session(min_delay_ms=0, jitter_ms=0, profile="mobile")
+        session.get("https://example.com/test")
+        ua = route.calls.last.request.headers["user-agent"]
+        assert "Odyssey/2026.7.0" in ua
+
+    def test_invalid_profile_raises_value_error(self) -> None:
+        with pytest.raises(ValueError, match="Unknown header profile"):
+            create_session(min_delay_ms=0, jitter_ms=0, profile="invalid")  # type: ignore[arg-type]
 
 
 class TestRateLimiting:

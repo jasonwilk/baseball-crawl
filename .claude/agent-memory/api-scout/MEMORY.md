@@ -24,7 +24,14 @@ All discoveries go into the spec immediately. Do not accumulate findings in memo
 
 ## Exploration Status
 
-As of 2026-03-04. All API knowledge is empirical -- discovered by running curl commands provided by the user.
+As of 2026-03-05. All API knowledge is empirical -- discovered by running curl commands provided by the user, plus proxy capture analysis.
+
+### iOS App Identity (confirmed 2026-03-05)
+
+- **Odyssey app UA:** `Odyssey/2026.7.0 (com.gc.teammanager; build:0; iOS 26.3.0) Alamofire/5.9.0`
+- **gc-app-version on iOS:** `2026.7.0.0` (not `0.0.0` -- that is the web app value)
+- **Our browser headers confirmed correct** for api.team-manager.gc.com. No changes needed.
+- **Media CDN hostnames discovered:** `media-service.gc.com` (signed image delivery) and `vod-archive.gc.com` (AWS IVS video archive).
 
 ### Confirmed Endpoints
 
@@ -41,6 +48,7 @@ As of 2026-03-04. All API knowledge is empirical -- discovered by running curl c
 | `GET /teams/{id}/season-stats` | CONFIRMED LIVE, 200 OK | 2026-03-04 |
 | `GET /teams/{id}/associations` | CONFIRMED, 244 records, single page | 2026-03-04 |
 | `GET /teams/{id}/players/{player_id}/stats` | CONFIRMED, 80 records, per-game + spray charts | 2026-03-04 |
+| `GET /teams/{team_id}/schedule/events/{event_id}/player-stats` | CONFIRMED LIVE, 200 OK. 106 KB, 25 players (both teams). Three sections: player_stats (this-game), cumulative_player_stats (season for own team, single-game for opponents), spray_chart_data (x/y coordinates). No player names -- join needed. Accept: `application/json, text/plain, */*` (unique -- not vendor-typed). stream_id returned inline. Raw sample: `data/raw/player-stats-sample.json`. | 2026-03-05 |
 | `GET /public/teams/{public_id}` | CONFIRMED, NO AUTH REQUIRED | 2026-03-04 |
 | `GET /public/teams/{public_id}/games` | CONFIRMED, NO AUTH REQUIRED, 32 games | 2026-03-04 |
 | `GET /public/teams/{public_id}/games/preview` | CONFIRMED, NO AUTH REQUIRED, sibling of /games | 2026-03-04 |
@@ -52,6 +60,17 @@ As of 2026-03-04. All API knowledge is empirical -- discovered by running curl c
 | `GET /teams/{id}/users` | **CONFIRMED LIVE, 200 OK.** Team user roster. PAGE 2 ONLY (start_at=100), 33 records. HEAVY PII: id (UUID), first_name, last_name, email, status. No role field. status values: "active" (majority), "active-confirmed" (2/33). gc-user-action: data_loading:team. Accept: `team_user:list+json; version=0.0.0`. Team UUID cb67372e (unidentified, not primary LSB team). | 2026-03-04 |
 | `GET /teams/{id}/public-team-profile-id` | **CONFIRMED LIVE, 200 OK. UUID-to-public_id BRIDGE.** Returns single JSON object `{"id": "<slug>"}`. team UUID cb67372e -> public_id `KCRUFIkaHGXI`. Auth required (gc-token present in capture). gc-user-action: data_loading:team. Accept: `team_public_profile_id+json; version=0.0.0`. **Critical: opponent UUID behavior unverified -- highest priority follow-up.** Enables full opponent public API access from schedule opponent_id. | 2026-03-04 |
 | `POST /auth` | **HTTP 400 received (stale gc-signature, ~6.2 hrs old). Endpoint confirmed to exist.** First POST endpoint. Body: `{"type":"refresh"}`. New headers: `gc-signature` (time-bound HMAC, format: `{b64}.{b64}`), `gc-timestamp` (Unix seconds, server validates freshness), `gc-client-id` (UUID = JWT `cid` field), `gc-app-version` (`"0.0.0"`). Accept: `*/*`. No gc-user-action. Successful response schema UNKNOWN -- cannot replicate (signing key unknown). Annotated sample at `data/raw/auth-refresh-sample.json`. | 2026-03-04 |
+
+### Proxy-Observed Endpoints (2026-03-05, schema unknown)
+
+50 new endpoint patterns observed in iOS mitmproxy capture. Full details in spec section "Proxy-Discovered Endpoints (2026-03-05)". Key patterns:
+- `/organizations/{uuid}/*` -- teams, events, game-summaries, standings, opponents, users, etc.
+- `/teams/{uuid}/opponents/players` -- bulk opponent roster (paginated, 24 hits)
+- `/teams/{uuid}/schedule/events/{uuid}/player-stats` -- CRITICAL (72 hits, may replace boxscore flow)
+- `/me/archived-teams`, `/me/schedule`, `/me/associated-players`, `/me/teams-summary`
+- `/game-streams/gamestream-viewer-payload-lite/{uuid}`, `/game-streams/gamestream-recap-story/{uuid}`
+- `/clips/{uuid}`, `POST /clips/search`, `GET /users/{uuid}`, `GET /places/{place_id}`
+- `PATCH /me/user`, `POST /teams/{uuid}/follow`
 
 ### Boxscore Endpoint Critical Facts (confirmed 2026-03-04)
 
@@ -77,21 +96,27 @@ As of 2026-03-04. All API knowledge is empirical -- discovered by running curl c
 
 Detailed per-endpoint facts moved to `endpoint-notes.md` to keep this file under 200 lines.
 
-### Areas Not Yet Explored
+### Areas Not Yet Explored / High-Priority Follow-Ups
 
-- **AUTH FLOW PARTIAL**: `POST /auth` endpoint confirmed (400 received -- stale signature). Successful response schema unknown. Programmatic refresh blocked by unknown signing key. See spec for full analysis.
-- Token acquisition flow, player profile endpoint, season scoping query params
+**CRITICAL PRIORITY:**
+- **`GET /teams/{uuid}/schedule/events/{uuid}/player-stats`**: CONFIRMED 2026-03-05. Returns both teams' per-game + cumulative stats + spray charts in one call. No game_stream_id needed. Accept: `application/json, text/plain, */*`. stream_id returned inline. No player names (join needed). This IS the optimal ingestion path. Full doc in API spec and `data/raw/player-stats-sample.json`.
+- **`GET /organizations/{uuid}/game-summaries`**: If available on LSB coaching account, returns all org games in one call vs. per-team pagination. Execute with LSB org UUID when LSB coaching credentials are available.
+- **`GET /teams/{uuid}/opponents/players`**: Bulk opponent player endpoint -- 24 hits in proxy. May be the most efficient way to load all opponent rosters. Schema unknown.
+
+**HIGH PRIORITY:**
+- LSB coaching account gc-token -- all current credentials are travel ball account. LSB HS teams not visible.
+- `GET /organizations/{uuid}/teams` -- may return all LSB teams (Freshman, JV, Varsity, Reserve) in one call if LSB has an org UUID.
+- PUBLIC-TEAM-PROFILE-ID with opponent UUIDs -- does `/teams/{opponent_uuid}/public-team-profile-id` work? Unlocks all public API endpoints for opponents.
+- `GET /me/archived-teams` -- historical season data.
+
+**ONGOING:**
+- AUTH FLOW PARTIAL: `POST /auth` confirmed (400 received). Successful response schema unknown. Signing key unknown.
 - Opponent endpoint access: `/teams/{opponent_id}/season-stats`, game-summaries, boxscore
 - `streak_C` (cold streak, unconfirmed); `total_outs` semantics; ETag conditional requests
-- **HIGH PRIORITY**: LSB coaching account -- need gc-token with coach role on LSB HS teams
-- **BOXSCORE FOLLOW-UPS**: Does `game_stream_id` for opponent (viewing their game-summaries) also work?
-- **PUBLIC GAME DETAILS FOLLOW-UPS**: Behavior when `game_status` is not "completed" (in-progress/scheduled games); does `opponent_team` ever include `avatar_url`?
-- **PUBLIC API FOLLOW-UPS**: Other `/public/` endpoints? Does opponent `public_id` exist in boxscore response?
-- **PLAYS FOLLOW-UPS**: Does a public (unauthenticated) `/public/game-stream-processing/{id}/plays` endpoint exist? What does `messages` contain when non-empty? How does the endpoint behave for extra-innings games? Is there pitch speed or location data in a different endpoint?
-- **ROSTER FOLLOW-UPS**: Does `GET /teams/public/{public_id}/players` work without gc-token (fully public)? Do other LSB teams (Varsity, Freshman, Reserve) return full first names vs initials? Does authenticated `/teams/{team_id}/players` return full names? Do both endpoints return the same player IDs for the same team?
-- **BEST-GAME-STREAM-ID FOLLOW-UPS**: Does this endpoint work for future/scheduled games? Does it work for opponent event_ids? Is there a public (unauthenticated) variant? Does it always return the same game_stream_id as game-summaries `game_stream.id`?
-- **USERS FOLLOW-UPS**: Page 1 of /teams/{id}/users not yet captured (cursor start_at=100 confirms page 2; page 1 has unknown record count). Does page 1 reveal additional status values (invited, pending, inactive)? Does "active-confirmed" correlate with coach/staff roles? Team UUID cb67372e-b75d-472d-83e3-4d39b6d85eb2 not yet identified (not in /me/teams response). Does /teams/{id}/users work for LSB coaching account teams?
-- **PUBLIC-TEAM-PROFILE-ID FOLLOW-UPS (HIGH PRIORITY)**: Does this endpoint work with opponent UUIDs from schedule `pregame_data.opponent_id`? If yes, this unlocks the full opponent public API surface for all scheduled opponents. Does it work without gc-token (fully public)? What does the team UUID `cb67372e-b75d-472d-83e3-4d39b6d85eb2` resolve to (the `KCRUFIkaHGXI` public_id can be looked up on web.gc.com).
+- BOXSCORE: Does game_stream_id for opponent's own game-summaries work in boxscore?
+- PLAYS: Public unauthenticated variant? Extra-innings behavior? Pitch speed/location data?
+- ROSTER: Does `/teams/public/{public_id}/players` work without gc-token?
+- BEST-GAME-STREAM-ID: Works for future/scheduled games? Opponent event_ids?
 
 ## JWT Payload Fields (Confirmed 2026-03-04)
 

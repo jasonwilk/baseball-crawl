@@ -162,6 +162,111 @@ Shows, for each traffic source (ios/web), which headers are missing, extra, or d
 
 Shows a deduplicated table of every unique (method, path) seen, with hit count and most recent status code.
 
+## Mobile Credential Capture
+
+This section explains how to capture mobile app credentials from the iOS GameChanger (Odyssey) app for use with the `mobile` header profile in `src/http/session.py`.
+
+### Why Mobile Credentials?
+
+Some GameChanger API endpoints behave differently with web browser headers vs. mobile app headers. The `create_session(profile="mobile")` function in `src/http/session.py` sends iOS Odyssey headers, but you also need credentials extracted from mobile app traffic. The `gc-token` JWT format is the same for both web and mobile, but the `gc-device-id` may differ.
+
+### End-to-End Workflow
+
+1. **Start mitmproxy on the Mac host:**
+
+   ```bash
+   cd proxy
+   ./start.sh
+   ```
+
+   The script prints the Mac's LAN IP address and the mitmweb UI URL.
+
+2. **Configure the iOS device to use the proxy:**
+
+   - Open **Settings > Wi-Fi** > tap **(i)** on your connected network
+   - Scroll to **Configure Proxy > Manual**
+   - Set **Server** to your Mac's LAN IP, **Port** to `8080`
+   - Tap **Save**
+
+   (Full details in the [iPhone Proxy Configuration](#iphone-proxy-configuration) section above.)
+
+3. **Install the mitmproxy CA certificate on the device:**
+
+   - Open **Safari** and navigate to **mitm.it**
+   - Tap the Apple logo to download the profile
+   - Go to **Settings > General > VPN & Device Management** > install the mitmproxy profile
+   - Go to **Settings > General > About > Certificate Trust Settings** > toggle mitmproxy to **enabled**
+
+   (You only need to do this once per device, unless `proxy/certs/` is deleted.)
+
+4. **Open the GameChanger app and sign in:**
+
+   Open the GameChanger app on the iPhone. Navigate to any team or game page to generate API traffic. The `credential_extractor` addon (`proxy/addons/credential_extractor.py`) automatically detects `gc-token` and `gc-device-id` headers in the proxied requests and writes them to the project root `.env` file.
+
+5. **Verify credentials were captured:**
+
+   Check the proxy logs for a "Credentials updated" message:
+
+   ```bash
+   cd proxy
+   ./logs.sh
+   ```
+
+   Confirm the `.env` file was updated with `GAMECHANGER_AUTH_TOKEN` and `GAMECHANGER_DEVICE_ID`.
+
+### Headers to Extract
+
+The credential extractor addon captures these headers automatically:
+
+| Header | .env Variable | Notes |
+|--------|--------------|-------|
+| `gc-token` | `GAMECHANGER_AUTH_TOKEN` | JWT auth token. Same format as web token. 14-day lifetime. |
+| `gc-device-id` | `GAMECHANGER_DEVICE_ID` | 32-char hex device identifier. May differ from the web device ID. |
+| `gc-app-name` | `GAMECHANGER_APP_NAME` | Not observed in iOS traffic (web-specific: `web`). |
+| `gc-signature` | `GAMECHANGER_SIGNATURE` | Only on POST /auth requests. |
+
+Optionally note the mobile-specific `gc-app-version` value (`2026.7.0.0` vs web's `0.0.0`). This value is not extracted to `.env` by the addon -- it is hardcoded in `MOBILE_HEADERS` in `src/http/headers.py`.
+
+### Storing Mobile Credentials
+
+The credential extractor writes to the same `.env` variables regardless of traffic source (web or mobile). This means:
+
+- If you capture **mobile credentials after web credentials**, the `.env` file is overwritten with the mobile values
+- The `gc-token` is interchangeable (same JWT, same server) -- either web or mobile token works for API calls
+- The `gc-device-id` **may differ** between web and mobile. Whether the server ties the device ID to the request profile is **unverified** -- test when both credential sets are available
+- If you need to maintain separate credential sets, manually copy the mobile values before switching back to web capture
+
+### Web vs Mobile Credential Capture
+
+| Aspect | Web Browser | Mobile (iOS) |
+|--------|------------|--------------|
+| **Source** | Chrome DevTools (copy as curl) or mitmproxy browser capture | mitmproxy iOS capture |
+| **Auth token** | `gc-token` JWT | `gc-token` JWT (same format) |
+| **Device ID** | `gc-device-id` (32-char hex) | `gc-device-id` (32-char hex, may differ) |
+| **Token lifetime** | 14 days (from JWT `exp - iat`) | 14 days (same JWT format) |
+| **App version** | `gc-app-version: 0.0.0` (POST /auth only) | `gc-app-version: 2026.7.0.0` (on all requests) |
+| **Setup required** | Browser proxy or DevTools | iPhone proxy + CA cert |
+| **Extraction** | Manual (curl) or automatic (mitmproxy) | Automatic (mitmproxy credential_extractor addon) |
+
+### Security Considerations
+
+**Warning: Remove the mitmproxy CA certificate after capture.**
+
+Installing the mitmproxy CA certificate on your iOS device enables man-in-the-middle interception of **all** HTTPS traffic on that device -- not just GameChanger. While the proxy is running and the certificate is trusted:
+
+- All HTTPS connections from the device are decryptable by mitmproxy
+- Banking apps, messaging apps, and all other network traffic could be intercepted
+- Any other machine on the same network running the same mitmproxy instance could see this traffic
+
+**After you have captured the credentials you need:**
+
+1. Stop the proxy: `cd proxy && ./stop.sh`
+2. Turn off the iPhone proxy: **Settings > Wi-Fi > [network] > Configure Proxy > Off**
+3. Remove the CA certificate trust: **Settings > General > About > Certificate Trust Settings** > toggle mitmproxy to **disabled**
+4. Optionally remove the profile entirely: **Settings > General > VPN & Device Management** > mitmproxy > **Remove Profile**
+
+The documented workflow used iOS 26.x (based on the 2026-03-05 capture). Certificate trust settings paths may differ on older iOS versions.
+
 ## Troubleshooting
 
 ### Proxy unreachable from iPhone

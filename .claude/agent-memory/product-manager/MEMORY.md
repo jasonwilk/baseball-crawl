@@ -1,10 +1,10 @@
 # Product Manager -- Agent Memory
 
 ## Numbering State
-- Next available epic number: E-049
-- Epics created: E-001 through E-048 (E-001, E-003, E-005, E-006, E-007, E-008, E-010, E-011, E-012, E-013, E-014, E-015, E-016, E-017, E-018, E-019, E-020, E-021, E-022, E-024, E-025, E-026, E-027, E-028, E-029, E-030, E-031, E-032, E-033, E-034, E-035, E-036, E-037, E-038, E-044 archived)
-- Next available idea number: IDEA-011
-- Ideas created: IDEA-001 through IDEA-010
+- Next available epic number: E-051
+- Epics created: E-001 through E-050 (E-001, E-003, E-005, E-006, E-007, E-008, E-010, E-011, E-012, E-013, E-014, E-015, E-016, E-017, E-018, E-019, E-020, E-021, E-022, E-024, E-025, E-026, E-027, E-028, E-029, E-030, E-031, E-032, E-033, E-034, E-035, E-036, E-037, E-038, E-044, E-049 archived)
+- Next available idea number: IDEA-013
+- Ideas created: IDEA-001 through IDEA-012
 
 ## Project Context
 - Project: baseball-crawl -- GameChanger API -> database -> coaching dashboard
@@ -17,7 +17,8 @@
 - E-041 (DRAFT): Evaluate json-render -- research epic. 1 spike (R-01: fit assessment) + 1 decision gate (99). Needs expert consultation (UX designer, software engineer) before READY.
 - E-042 (READY): Admin Interface and Team Management -- 6 stories. URL-based team onboarding (paste GC URL, resolve via public API), admin CRUD for teams (two-section list: Lincoln Program / Tracked Opponents), opponent auto-discovery from public schedule, DB-driven crawl config. Expert consultation done (UX, DE, SE). Migration 005 (public_id on teams). Dispatch order: 01 first, then 02+06 parallel, then 03, then 04+05 parallel (or sequential if file conflicts).
 - E-046 (READY): Upstream Proxy Support -- 2 stories.
-- E-048 (READY): Host Proxy Migration -- 7 stories. Move mitmproxy from Docker-in-Docker compose profile to self-contained proxy/ folder running on Mac host. Eliminates VS Code port forwarding complexity. Dispatch order: 01+02+04+05 parallel, then 03 (after 02), then 06 (after 01+03+04), 07 can go after 01. PROXY_ENABLED + PROXY_URL env vars control both Python crawlers (create_session() proxy kwarg) and mitmproxy Docker service (--mode upstream). No file conflicts, parallel dispatch OK.
+- E-048 (READY): Host Proxy Migration
+- E-050 (READY): Credential Validation and Crawl Bootstrap -- 4 stories. Credential health check script, profile-aware GameChangerClient, bootstrap pipeline script, operator bootstrap guide. E-050-02 blocked by E-049-05 (dual-header system) -- NOW UNBLOCKED (E-049-05 DONE). Dispatch order: 01 first, then 02+03 parallel, then 04 (after 01+03). IDEA-012 captured for broader crawl orchestration/scheduling.
 ## Archived Epics
 - E-004 (COMPLETED): Coaching Dashboard -- all 6 stories DONE. 7 routes: /dashboard (batting), /dashboard/pitching, /dashboard/games, /dashboard/games/{id}, /dashboard/opponents, /dashboard/opponents/{id}, /dashboard/players/{id}. 123 tests. Key artifacts: src/api/helpers.py (ip_display, format_avg, format_date), src/api/templates/dashboard/ (8 templates), src/api/db.py (8 query functions added), src/api/routes/dashboard.py (7 routes). Codex review: 3 findings fixed (context passthrough, date formatting, placeholder tests). Mobile-first with bottom nav, 44px touch targets, sticky headers. IDEA-008/009 now promotable (dashboard ready for trends).
 - E-043 (COMPLETED): Dev Environment Auth and Networking Fix -- 1 story. Changed APP_URL, WEBAUTHN_ORIGIN, WEBAUTHN_RP_ID defaults from localhost:8000 to baseball.localhost:8001. Updated .env.example. No follow-up work.
@@ -63,13 +64,14 @@
 - E-045 (COMPLETED): Resolve mitmproxy Port Conflict -- 2 stories. Removed 8080/8081 from devcontainer forwardPorts, added warning comments to docker-compose.yml, added troubleshooting subsection to mitmproxy-guide.md, enhanced proxy.sh status with lsof port-conflict detection. No follow-up work.
 - E-039 (COMPLETED): mitmproxy Credential Sync and API Discovery -- 1 research spike + 5 implementation stories. Passive HTTPS proxy for credential extraction, header capture, and API endpoint discovery. Key artifacts: proxy/addons/ (gc_filter, credential_extractor, header_capture, endpoint_logger, loader), proxy/ scripts (start/stop/status/logs), proxy-report.sh + proxy-endpoints.sh, docs/admin/mitmproxy-guide.md. Codex review: namespace collision fixed (mitmproxy/ -> proxy/). 706 tests. Traefik dashboard moved 8080->8180. (E-048 later migrated proxy from Docker Compose profile to standalone host-based proxy/.)
 - E-047 (COMPLETED): PM Workflow Bugs -- 3 stories. Fixed (1) user-directed consultation override rule in PM agent def, (2) dispatch authorization gate in 3 files (product-manager.md, dispatch-pattern.md, workflow-discipline.md), (3) spec-review skill Phase 1 timeout/foreground/duration guidance. All context-layer work via claude-architect. No follow-up work.
+- E-049 (COMPLETED): API Endpoint Documentation and Dual-Header System -- 6 active stories (E-049-04 ABANDONED). Full schema docs for 37 bulk-collected payloads in gamechanger-api.md. Dual-header system (BROWSER_HEADERS + MOBILE_HEADERS) in src/http/headers.py; Chrome 131->145 update. Mobile credential capture workflow in docs/admin/mitmproxy-guide.md. Endpoint Priority Matrix with 4 tiers and top-5 integration recommendations. Three HTTP 500 endpoints documented but unresolved (IDEA-011). E-050-02 cross-epic dependency now satisfied. Follow-up: E-005 note about Chrome 131->145 + DNT/Referer is now resolved.
 
 ## Key Architectural Decisions
 - Storage: SQLite (WAL mode). Host-mounted at ./data/app.db. Simple file backup via scripts/backup_db.py (no Litestream).
 - Serving layer: FastAPI + Jinja2 (Python). Single monolithic app. No TypeScript.
 - Deployment: Docker Compose (local + prod). Home Linux server (no VPS, no hosting cost). Cloudflare Tunnel + Zero Trust.
 - Migrations: numbered SQL scripts (migrations/001_*.sql). No Alembic. apply_migrations.py at startup.
-- HTTP layer: src/http/headers.py + src/http/session.py. Chrome 131/macOS fingerprint.
+- HTTP layer: src/http/headers.py + src/http/session.py. Dual-header system: BROWSER_HEADERS (Chrome 145/macOS) + MOBILE_HEADERS (iOS Odyssey). create_session(profile="web"|"mobile").
 - ip_outs: innings pitched stored as integer outs (1 IP = 3 outs)
 - FK-safe orphan handling: unknown player_ids get a stub row (first_name='Unknown', last_name='Unknown') inserted before the stat row; WARNING logged for operator backfill
 - Data model (revised 2026-03-03): seasons = first-class entity (season_id TEXT PK, type-based filtering). teams have crawl config (source, is_active, last_synced). All season references are FKs to seasons table. player_season_pitching added. Expanded splits on batting (hr, bb, so per split group). coaching_assignments = domain table (not auth), FKs to users+teams+seasons. Migration numbering: 001=data model, 003=auth, 004=coaching_assignments. Slot 002 unused.
@@ -97,6 +99,8 @@
 | IDEA-008 | Plays and Line Scores Crawling | CANDIDATE | 2026-06-02 | Pitch-by-pitch plays + inning line scores. **Trigger met**: E-002+E-004 complete, dashboard ready. Promotable when coaches need pitch-level data. |
 | IDEA-009 | Per-Player Game Stats + Spray Charts | CANDIDATE | 2026-06-02 | Per-player per-game stats + spray chart x/y data. **Trigger met**: E-002+E-004 complete, dashboard ready for trends. Promotable. |
 | IDEA-010 | Docs Port Map Consistency for Devcontainer + Compose | CANDIDATE | 2026-06-03 | Patch stale docs port references (notably Traefik dashboard `8180` vs old `8080`) to match current compose/devcontainer networking. |
+| IDEA-011 | Investigate HTTP 500 Endpoint Failures | CANDIDATE | 2026-06-04 | Three endpoints return 500 with web headers, succeeded in iOS proxy capture. Root cause unknown. Extracted from E-049-04 (ABANDONED). Blocked by E-049 completion + mobile credentials. |
+| IDEA-012 | Crawl Orchestration and Scheduling System | CANDIDATE | 2026-06-06 | Recurring crawl scheduling, credential rotation awareness, run history, alerting. Trigger: operator has run bootstrap 5+ times manually OR season starts. Blocked by E-050 + E-042. |
 
 ## Key Workflow Contract
 - Routing model: user -> PM -> implementing agent (no orchestrator; removed in E-030)

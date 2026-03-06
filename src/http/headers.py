@@ -1,32 +1,53 @@
 """
-Canonical browser header profile for all HTTP requests.
+Dual header profiles for all HTTP requests to GameChanger.
 
-Source: Real GameChanger API curl command captured 2026-02-28.
-Chrome 131 on macOS. Update this profile when GameChanger's
-expected fingerprint changes or when the Chrome version is
-significantly outdated (>2 major versions behind current stable).
+Two profiles are available:
 
-To update: replace the header values below with those from a fresh
-curl command captured from a real browser session. Keep the User-Agent
-and sec-ch-ua version numbers in sync with each other.
+- **BROWSER_HEADERS** (web): Chrome 145 on macOS fingerprint, used by default.
+  Matches the header set observed in web browser captures of web.gc.com.
+  Source: Real GameChanger API curl commands captured 2026-02-28 through 2026-03-05.
 
-IMPORTANT: Do NOT add credentials (Authorization, Cookie, etc.) here.
+- **MOBILE_HEADERS** (mobile): iOS Odyssey app fingerprint.
+  Matches the header set observed in mitmproxy capture of the iOS GameChanger
+  (Odyssey) app on 2026-03-05.
+
+Select the profile via ``create_session(profile="web")`` or
+``create_session(profile="mobile")`` in ``src.http.session``.
+
+IMPORTANT: Neither profile includes credentials (gc-token, gc-device-id, etc.).
 Auth headers are injected by the consuming client (e.g., GameChangerClient).
 """
+
+from __future__ import annotations
 
 BROWSER_HEADERS: dict[str, str] = {
     "User-Agent": (
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/131.0.0.0 Safari/537.36"
+        "Chrome/145.0.0.0 Safari/537.36"
     ),
     "Accept": "application/json, text/plain, */*",
     "Accept-Language": "en-US,en;q=0.9",
     "Accept-Encoding": "gzip, deflate",
-    "sec-ch-ua": '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
+    "sec-ch-ua": '"Not:A-Brand";v="99", "Google Chrome";v="145", "Chromium";v="145"',
     "sec-ch-ua-mobile": "?0",
     "sec-ch-ua-platform": '"macOS"',
     "sec-fetch-site": "same-site",
     "sec-fetch-mode": "cors",
     "sec-fetch-dest": "empty",
+    "DNT": "1",
+    "Referer": "https://web.gc.com/",
+}
+
+MOBILE_HEADERS: dict[str, str] = {
+    "User-Agent": (
+        "Odyssey/2026.7.0 (com.gc.teammanager; build:0; iOS 26.3.0) "
+        "Alamofire/5.9.0"
+    ),
+    "Accept": "*/*",
+    "Accept-Language": "en-US;q=1.0",
+    "Accept-Encoding": "br;q=1.0, gzip;q=0.9, deflate;q=0.8",
+    "gc-app-version": "2026.7.0.0",
+    "x-gc-features": "lazy-sync",
+    "x-gc-application-state": "foreground",
 }
