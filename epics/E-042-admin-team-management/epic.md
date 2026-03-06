@@ -25,7 +25,7 @@ The current team configuration is a static YAML file (`config/teams.yaml`) that 
 - Opponent auto-discovery from team schedules via public games endpoint
 - Crawl orchestration reads team config from the database instead of YAML
 
-**Expert consultation completed:** UX designer (admin UI layout, team list visual hierarchy, URL input flow), data-engineer (migration 005 validation, public_id-as-team_id soundness, opponent model, season derivation), software-engineer (URL parser feasibility, file conflict assessment, sync API call pattern, crawl script integration).
+**Expert consultation completed:** UX designer (admin UI layout, team list visual hierarchy, URL input flow), data-engineer (migration 005 validation, public_id-as-team_id soundness, opponent model, season derivation), software-engineer (URL parser feasibility, file conflict assessment, sync API call pattern, crawl script integration), api-scout (confirmed public games endpoint lacks opponent identifiers -- name-only discovery, added during codex spec review triage 2026-03-06).
 
 ## Goals
 - Admin can add a team by pasting a GameChanger URL and selecting whether it is an owned (Lincoln) team or a tracked opponent
@@ -57,8 +57,8 @@ The current team configuration is a static YAML file (`config/teams.yaml`) that 
 | E-042-02 | URL parser and public API team resolver | TODO | None | - |
 | E-042-03 | Admin team list and add-team page | TODO | E-042-01, E-042-02 | - |
 | E-042-04 | Admin team edit and deactivate | TODO | E-042-03 | - |
-| E-042-05 | Opponent auto-discovery from public schedule | TODO | E-042-02, E-042-03 | - |
-| E-042-06 | Database-driven crawl configuration | TODO | E-042-01 | - |
+| E-042-05 | Opponent auto-discovery from public schedule | TODO | E-042-02, E-042-03, E-042-04 | - |
+| E-042-06 | Database-driven crawl configuration | TODO | None | - |
 
 ## Technical Notes
 
@@ -92,9 +92,11 @@ Team resolution uses `GET /public/teams/{public_id}` (no auth required). Returns
 - When adding a team via URL, we use the `public_id` as `team_id` in our database (since the UUID is not available from public endpoints). This is safe because `public_id` is unique and stable.
 
 Opponent discovery uses `GET /public/teams/{public_id}/games` (no auth required). Returns:
-- Game list with `opponent_team` object containing `name` and `public_team_profile_id` (the opponent's `public_id`)
+- Game list with `opponent_team` object containing `name` (always present) and optionally `avatar_url`. **No opponent identifier is available** -- no `public_id`, no UUID (confirmed API limitation, see `docs/gamechanger-api.md` Known Limitations).
 - `game_stream_id` for box score access
 - `home_team`/`away_team` indicator, final scores
+
+**Implication for opponent discovery (E-042-05)**: Opponents are discovered by name only. E-042-05 creates placeholder records (`public_id=NULL`, `source='discovered'`). The admin pastes opponent URLs via the add-team form to fully onboard them with a `public_id`.
 
 ### Admin UI Patterns
 Follow the existing admin UI patterns from E-023:
@@ -140,7 +142,7 @@ The flat `teams` table with `is_owned=0` is sufficient. No explicit `team_oppone
 
 ### Crawl Configuration Migration
 Currently `scripts/crawl.py` reads `config/teams.yaml` via `src/gamechanger/config.py`. The new flow:
-- Add a `load_config_from_db()` function that queries `SELECT * FROM teams WHERE is_active = 1`
+- Add a `load_config_from_db()` function that queries `SELECT team_id, name, level FROM teams WHERE is_active = 1 AND is_owned = 1`
 - `scripts/crawl.py` accepts a `--source db|yaml` flag (default: `yaml` for backward compat)
 - When `--source db`: load team config from SQLite, build `CrawlConfig` equivalent
 - `config/teams.yaml` remains as a bootstrap/seed mechanism but is no longer the primary source
@@ -155,17 +157,17 @@ Currently `scripts/crawl.py` reads `config/teams.yaml` via `src/gamechanger/conf
 - **Tests**: `tests/test_admin_teams.py` (new), `tests/test_url_parser.py` (new), `tests/test_team_resolver.py` (new)
 
 ### Existing Admin Integration
-The teams list in the user management page (`/admin/users`) shows team checkboxes from `_get_owned_teams()`. After this epic, that function should show all managed teams (owned + tracked with `is_active = 1`), not just `is_owned = 1`. This is a minor update to the existing user management flow.
+The teams list in the user management page (`/admin/users`) shows team checkboxes from `_get_owned_teams()`. Currently it only shows `is_owned = 1` teams. **Follow-up (not in scope for this epic):** Once team management is battle-tested, consider expanding this function to show all managed teams (owned + tracked with `is_active = 1`) so coaches can be granted access to opponent scouting data. No story in this epic modifies `_get_owned_teams()`.
 
 ### Execution Order and File Conflicts (SE consultation)
 Stories 03, 04, and 05 all modify `src/api/routes/admin.py`, `src/api/db.py`, and `src/api/templates/admin/teams.html`. To avoid merge conflicts:
 
-1. **E-042-01** first (no file conflicts).
-2. **E-042-02 + E-042-06 in parallel** -- E-042-02 creates new files only (`url_parser.py`, `team_resolver.py`); E-042-06 modifies `config.py` and scripts. No overlap.
-3. **E-042-03** next -- creates `teams.html`, extends `admin.py` and `db.py`.
-4. **E-042-04 + E-042-05 in parallel** -- both modify `admin.py`, `db.py`, and `teams.html`, BUT: E-042-04 adds edit/toggle routes (append pattern), E-042-05 adds discover route (append pattern). Both append new functions at END of each file. Safe for parallel if agents follow append discipline. **If agents struggle with parallel edits, dispatch sequentially: 04 then 05.**
+1. **E-042-01 + E-042-02 + E-042-06 in parallel** -- E-042-01 creates migration 005 (new file). E-042-02 creates new files only (`url_parser.py`, `team_resolver.py`). E-042-06 modifies `config.py` and scripts. No overlap between any of these three.
+2. **E-042-03** next -- creates `teams.html`, extends `admin.py` and `db.py`. Blocked by E-042-01 (schema) and E-042-02 (resolver).
+3. **E-042-04** next -- extends `admin.py`, `db.py`, `teams.html`. Blocked by E-042-03.
+4. **E-042-05** last -- extends `admin.py`, `db.py`, `teams.html`, `team_resolver.py`. Blocked by E-042-04 (file conflict on shared files) and E-042-02 (team_resolver.py).
 
-E-042-05's dependency was updated from (01, 02) to (03) because it modifies `teams.html` which E-042-03 creates, and it needs the team list infrastructure to render the discover button.
+E-042-04 and E-042-05 are now sequential (not parallel) because both modify the same four files (`admin.py`, `db.py`, `teams.html`, `test_admin_teams.py`). This eliminates merge conflict risk.
 
 ### Synchronous API Calls in Admin Routes (SE consultation)
 The POST handler for adding a team calls `resolve_team()` synchronously inside `run_in_threadpool`. This is acceptable:
@@ -200,3 +202,20 @@ All resolved during expert consultation. See History.
   - FIXED P2: Epic success criteria `--db flag` -> `--source db` (aligns with E-042-06 AC-4 contract).
   - FIXED P2: Epic route map `/deactivate` -> `/toggle-active` (aligns with E-042-04 AC-8 -- route both activates and deactivates).
   - FIXED P2: E-042-01 Blocks list removed E-042-02 (URL parser/resolver are DB-independent; E-042-02 creates new files only, no schema dependency). E-042-02 remains correctly listed as having no dependencies in both story and epic table.
+- 2026-03-06: **Codex spec review triage #2.** 11 sub-findings across 9 categories. api-scout consulted. Decisions:
+  - **REFINE (7 changes applied):**
+    - E-042-02: Added AC-11 (malformed 200 response raises `GameChangerAPIError`), renumbered AC-12 (tests). Closes Finding 1a.
+    - E-042-06 AC-8: Clarified which ACs load.py mirrors (AC-4 through AC-7). Closes Finding 1b.
+    - E-042-03 Blocks: Added E-042-05 (asymmetric dependency fix). Closes Finding 2a.
+    - E-042-06: Removed E-042-01 dependency (load_config_from_db doesn't use public_id). E-042-01 Blocks updated. Epic table updated. Closes Finding 2b.
+    - E-042-04+05: Made sequential (05 blocked by 04) due to shared file conflicts on admin.py, db.py, teams.html, test_admin_teams.py. Epic execution order rewritten. Closes Finding 3.
+    - E-042-05: **Major revision** -- rewrote story for name-only opponent discovery. API spec confirms `opponent_team` contains only `name` + optional `avatar_url`; no opponent identifier available. Discovered opponents are now placeholders (`public_id=NULL`, `source='discovered'`). Admin pastes opponent URLs to fully onboard. Epic Technical Notes corrected. Closes Finding 7.
+    - Epic Technical Notes: Crawl config query corrected to `WHERE is_active = 1 AND is_owned = 1`. `_get_owned_teams()` expansion marked as follow-up. Closes Findings 9a, 9b.
+  - **DISMISS (2 findings):**
+    - Finding 1c (E-042-01 AC-8/AC-4 testability): AC-4 is the functional requirement, AC-8 is the test approach. Standard migration test pattern. No ambiguity.
+    - Finding 4 (E-042-03 AC-4 edit links): Rendering a link to a future route is normal incremental development. Story is a complete vertical slice.
+  - **New dispatch order:** 01+02+06 parallel -> 03 -> 04 -> 05 (fully sequential for shared-file stories).
+- 2026-03-06: **Codex code review fixes.** 3 findings (P1, P2, P5):
+  - FIXED P1: E-042-03 add-team handler now checks for discovered placeholders (name match, `source='discovered'`, `public_id IS NULL`) and upgrades the existing row instead of creating a duplicate. AC-9 and AC-14 updated.
+  - FIXED P2: E-042-03 AC-17 now includes a test for the placeholder-to-resolved upgrade path.
+  - FIXED P5: PM memory dispatch order corrected to match current epic (01+02+06 parallel -> 03 -> 04 -> 05).
