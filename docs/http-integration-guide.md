@@ -95,8 +95,8 @@ Auth credentials are never baked into the session factory. Inject them after cre
 session = create_session()
 
 # GameChanger auth headers
-session.headers["gc-token"] = credentials["GAMECHANGER_AUTH_TOKEN"]
-session.headers["gc-device-id"] = credentials["GAMECHANGER_DEVICE_ID"]
+session.headers["gc-token"] = credentials["GAMECHANGER_REFRESH_TOKEN_WEB"]  # used to obtain access token
+session.headers["gc-device-id"] = credentials["GAMECHANGER_DEVICE_ID_WEB"]
 session.headers["gc-app-name"] = "web"
 ```
 

@@ -6,7 +6,7 @@ auth: required
 profiles:
   web:
     status: confirmed
-    notes: Full schema documented. 319 events. Discovered 2026-03-07.
+    notes: Full schema documented. 368 events from second game capture. Discovered 2026-03-07.
   mobile:
     status: unverified
     notes: Not captured from mobile profile.
@@ -15,8 +15,8 @@ gc_user_action: null
 query_params: []
 pagination: false
 response_shape: object
-response_sample: null
-raw_sample_size: "319 events (6-inning game)"
+response_sample: data/raw/gamestream-viewer-payload-lite-sample.json
+raw_sample_size: "368 events (second capture, 2026-03-07)"
 discovered: "2026-03-07"
 last_confirmed: "2026-03-07"
 tags: [games, events]
@@ -37,7 +37,7 @@ see_also:
 
 # GET /game-streams/gamestream-viewer-payload-lite/{event_id}
 
-**Status:** CONFIRMED LIVE -- 200 OK. 319 events. Last verified: 2026-03-07.
+**Status:** CONFIRMED LIVE -- 200 OK. 368 events in second capture (2026-03-07). Last verified: 2026-03-07.
 
 Returns the lightweight game viewer payload for a completed game. Contains the same event stream as `GET /game-streams/{game_stream_id}/events` but with additional fields and a summary structure.
 
@@ -60,7 +60,7 @@ GET https://api.team-manager.gc.com/game-streams/gamestream-viewer-payload-lite/
 | `stream_id` | UUID | The resolved game stream UUID (= `game_stream.id` from game-summaries) |
 | `latest_events` | array | Event records with 5 fields per record (see below) |
 | `all_event_data_ids` | array | Array of inner event UUIDs (the `id` from inside parsed `event_data`) |
-| `marker` | string or null | Cursor for incremental polling. For completed games: string of last sequence_number (e.g., `"318"` for 319-event stream) |
+| `marker` | string or null | Cursor for incremental polling. For completed games: string of last sequence_number (e.g., `"367"` for 368-event stream -- confirmed from sample) |
 
 ### `latest_events` Record Fields
 

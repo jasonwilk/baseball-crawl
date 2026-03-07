@@ -15,7 +15,7 @@ gc_user_action: null
 query_params: []
 pagination: false
 response_shape: object
-response_sample: null
+response_sample: data/raw/me-associated-players-sample.json
 raw_sample_size: "13 player records across 13 teams"
 discovered: "2026-03-07"
 last_confirmed: "2026-03-07"

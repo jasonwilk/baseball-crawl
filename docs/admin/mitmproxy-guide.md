@@ -141,7 +141,7 @@ Each `start.sh` invocation creates a timestamped session directory. All addon ou
 
 | Path | Contents |
 |------|----------|
-| Project root `.env` | Credentials (`GAMECHANGER_AUTH_TOKEN`, `GAMECHANGER_DEVICE_ID`) -- updated live |
+| Project root `.env` | Credentials (`GAMECHANGER_REFRESH_TOKEN_WEB`, `GAMECHANGER_DEVICE_ID_WEB`) -- updated live |
 | `proxy/data/sessions/<id>/header-report.json` | Header parity report for that session |
 | `proxy/data/sessions/<id>/endpoint-log.jsonl` | Endpoint log for that session |
 | `proxy/data/sessions/<id>/session.json` | Session metadata (started_at, stopped_at, endpoint_count, reviewed) |
@@ -333,7 +333,7 @@ Some GameChanger API endpoints behave differently with web browser headers vs. m
    ./logs.sh
    ```
 
-   Confirm the `.env` file was updated with `GAMECHANGER_AUTH_TOKEN` and `GAMECHANGER_DEVICE_ID`.
+   Confirm the `.env` file was updated with `GAMECHANGER_REFRESH_TOKEN_WEB` and `GAMECHANGER_DEVICE_ID_WEB`.
 
 ### Headers to Extract
 
@@ -341,10 +341,10 @@ The credential extractor addon captures these headers automatically:
 
 | Header | .env Variable | Notes |
 |--------|--------------|-------|
-| `gc-token` | `GAMECHANGER_AUTH_TOKEN` | JWT auth token. Same format as web token. 14-day lifetime. |
-| `gc-device-id` | `GAMECHANGER_DEVICE_ID` | 32-char hex device identifier. May differ from the web device ID. |
-| `gc-app-name` | `GAMECHANGER_APP_NAME` | Not observed in iOS traffic (web-specific: `web`). |
-| `gc-signature` | `GAMECHANGER_SIGNATURE` | Only on POST /auth requests. |
+| `gc-token` | `GAMECHANGER_REFRESH_TOKEN_WEB` / `_MOBILE` | JWT token. If captured from POST /auth response, this is a refresh token (14-day lifetime). If captured from a standard API request, this is an access token (~60-minute lifetime). Store the refresh token; access tokens are generated programmatically. |
+| `gc-device-id` | `GAMECHANGER_DEVICE_ID_WEB` / `_MOBILE` | 32-char hex device identifier. May differ between web and mobile. |
+| `gc-app-name` | `GAMECHANGER_APP_NAME_WEB` / `_MOBILE` | `web` for browser, `iOS` for mobile app. |
+| `gc-signature` | (computed) | Generated programmatically via HMAC-SHA256. No longer stored in `.env`. See `docs/api/auth.md`. |
 
 Optionally note the mobile-specific `gc-app-version` value (`2026.7.0.0` vs web's `0.0.0`). This value is not extracted to `.env` by the addon -- it is hardcoded in `MOBILE_HEADERS` in `src/http/headers.py`.
 
@@ -364,7 +364,7 @@ The credential extractor writes to the same `.env` variables regardless of traff
 | **Source** | Chrome DevTools (copy as curl) or mitmproxy browser capture | mitmproxy iOS capture |
 | **Auth token** | `gc-token` JWT | `gc-token` JWT (same format) |
 | **Device ID** | `gc-device-id` (32-char hex) | `gc-device-id` (32-char hex, may differ) |
-| **Token lifetime** | 14 days (from JWT `exp - iat`) | 14 days (same JWT format) |
+| **Token lifetime** | Access token ~60 min; refresh token 14 days | Same JWT format; same lifetime rules |
 | **App version** | `gc-app-version: 0.0.0` (POST /auth only) | `gc-app-version: 2026.7.0.0` (on all requests) |
 | **Setup required** | Browser proxy or DevTools | iPhone proxy + CA cert |
 | **Extraction** | Manual (curl) or automatic (mitmproxy) | Automatic (mitmproxy credential_extractor addon) |

@@ -36,12 +36,14 @@ See CLAUDE.md Code Style section and `.claude/rules/python-style.md`.
 - Also contains subscription info (`has_subscription`, `access_level`, `subscription_source`) -- useful for validating account tier
 - Raw sample: `data/raw/me-user-sample.json` (PII redacted)
 
-### Token Lifetime and Credential Management (confirmed 2026-03-04)
-- **Token lifetime is 14 days** (JWT `exp - iat = 1,209,600 seconds`). Previous assumption of ~1 hour was wrong.
-- **Programmatic token refresh NOT possible**: `POST /auth` requires a `gc-signature` HMAC header computed with an unknown signing key embedded in browser JavaScript. Until the signing algorithm is reversed, tokens must come from browser captures.
-- **JWT payload fields**: `id` (compound: `{session_uuid}:{refresh_token_uuid}`), `cid` (= gc-client-id header), `uid` (user UUID), `email`, `iat`, `exp`. Previously documented fields `type`, `userId`, `rtkn` were NOT observed -- consider them incorrect.
+### Token Lifetime and Credential Management (updated 2026-03-07)
+- **Two-token architecture confirmed**: GC uses two distinct JWT types. Access token (~61 min) is what `gc-token` carries on all standard API calls. Refresh token (14 days) is only sent as `gc-token` in `POST /auth` refresh calls.
+- **Access token JWT payload**: `type` (="user"), `cid`, `email`, `userId` (camelCase), `rtkn`, `iat`, `exp` (`exp - iat ≈ 3,672` = ~61 min)
+- **Refresh token JWT payload**: `id` (compound: `{session_uuid}:{refresh_token_uuid}`), `cid`, `uid` (not `userId`), `email`, `iat`, `exp` (`exp - iat = 1,209,600` = 14 days)
+- **How to distinguish**: `exp - iat < 10,000` → access token; `exp - iat > 1,000,000` → refresh token
+- **Programmatic token refresh NOT possible**: `POST /auth` requires a `gc-signature` HMAC header with an unknown signing key. Access tokens must come from browser captures (~61 min window after capture).
 - **New credential headers discovered**: `gc-signature` (time-bound HMAC), `gc-timestamp` (Unix seconds), `gc-client-id` (stable UUID), `gc-app-version` (`"0.0.0"`). These are used by `POST /auth` but NOT by GET endpoints.
-- **Implementation impact**: Batch ingestion pipelines can run for days under a single token. Pre-flight health check (`GET /me/user`) should check token validity before starting, but mid-run expiration is much less likely than previously assumed.
+- **Implementation impact**: Access token captured from browser expires within ~61 minutes. Run `GET /me/user` health check before every ingestion run (not just long ones). Do NOT rely on 14-day window for access token rotation planning.
 - Raw sample: `data/raw/auth-refresh-sample.json` (annotated schema, no live tokens)
 
 ### API Parsing Quirks

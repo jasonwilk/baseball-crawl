@@ -15,8 +15,8 @@ gc_user_action: null
 query_params: []
 pagination: false
 response_shape: object
-response_sample: null
-raw_sample_size: null
+response_sample: data/raw/event-highlight-reel-sample.json
+raw_sample_size: "13 playlist entries (1 game, 609 second duration)"
 discovered: "2026-03-05"
 last_confirmed: "2026-03-07"
 tags: [games, video]

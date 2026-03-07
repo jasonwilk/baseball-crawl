@@ -15,8 +15,8 @@ gc_user_action: null
 query_params: []
 pagination: false
 response_shape: object
-response_sample: null
-raw_sample_size: null
+response_sample: data/raw/announcements-read-status-sample.json
+raw_sample_size: "single object: {read_status: 'read'}"
 discovered: "2026-03-05"
 last_confirmed: "2026-03-07"
 tags: [user, auth]

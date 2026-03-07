@@ -6,7 +6,7 @@ auth: required
 profiles:
   web:
     status: confirmed
-    notes: 319 events for a 6-inning game. Full schema documented. Discovered 2026-03-07.
+    notes: 368 events for a different game captured 2026-03-07. Second capture confirms schema.
   mobile:
     status: unverified
     notes: Not captured from mobile profile.
@@ -15,8 +15,8 @@ gc_user_action: null
 query_params: []
 pagination: false
 response_shape: array
-response_sample: null
-raw_sample_size: "319 events (6-inning game)"
+response_sample: data/raw/game-stream-events-sample.json
+raw_sample_size: "368 events (second game capture, 2026-03-07)"
 discovered: "2026-03-07"
 last_confirmed: "2026-03-07"
 tags: [games, events]
@@ -41,7 +41,7 @@ see_also:
 
 # GET /game-streams/{game_stream_id}/events
 
-**Status:** CONFIRMED LIVE -- 200 OK. 319 events for a 6-inning game. Last verified: 2026-03-07.
+**Status:** CONFIRMED LIVE -- 200 OK. 368 events for second game confirmed 2026-03-07 (previously: 319 events for first game). Last verified: 2026-03-07.
 
 Returns the raw event stream for a completed game. This is the low-level event log from which all higher-level game data (boxscore, plays, stats) is derived.
 
@@ -81,18 +81,51 @@ Bare JSON array of event objects.
 
 ### Observed Event Codes
 
-| Code | Description |
-|------|-------------|
-| `set_teams` | Game initialization -- sets home team UUID (`homeId`) and away team UUID (`awayId`) |
-| `fill_lineup_index` | Assigns a player to a lineup slot by index. Attributes: `teamId`, `playerId`, `index`. |
-| `reorder_lineup` | Reorders the batting lineup |
-| `fill_position` | Assigns a player to a field position |
-| `sub_players` | Substitution event |
-| `pitch` | A single pitch recorded |
-| `transaction` | At-bat transaction (hit, out, walk, etc.) |
-| `base_running` | Baserunning event (stolen base, advance, out on bases) |
-| `edit_group` | Batch edit/correction to prior events |
-| `replace_runner` | Courtesy runner substitution |
-| `undo` | Undo of a prior event |
+Confirmed codes from 368-event sample (2026-03-07):
 
-**Discovered:** 2026-03-07. **Confirmed:** 2026-03-07.
+| Code | Attributes | Description |
+|------|-----------|-------------|
+| `set_teams` | `homeId`, `awayId`, `aniFT` | Game initialization -- sets home and away team UUIDs |
+| `fill_lineup_index` | `teamId`, `playerId`, `index` | Assigns a player to a lineup slot by index |
+| `fill_position` | `teamId`, `playerId`, `position` | Assigns a player to a field position |
+| `message` | `content`, `sender` | In-game message or note from scorekeeper |
+| `pitch` | `result`, `advancesRunners`, `advancesCount` | A single pitch recorded |
+| `transaction` | (none -- contains nested `events` array) | At-bat completion event. Contains a nested `events` array with sub-events. |
+| `base_running` | varies | Baserunning event (stolen base, advance, out on bases) |
+| `replace_runner` | varies | Courtesy runner substitution |
+| `undo` | varies | Undo of a prior event |
+| `edit_group` | varies | Batch edit/correction to prior events |
+
+### transaction Event -- Nested Events and Spray Chart Data
+
+`transaction` events use the `events` array (NOT `attributes`) for their payload. The nested array can contain:
+- `fill_position` -- fielding assignments (position + teamId + playerId)
+- `fill_lineup_index` -- batting order assignments
+- `ball_in_play` -- **SOURCE OF SPRAY CHART DATA** (see below)
+
+**`ball_in_play` sub-event attributes:**
+```json
+{
+  "playResult": "fielders_choice",
+  "defenders": [
+    {
+      "error": false,
+      "position": "2B",
+      "location": {"x": 205.0, "y": 132.4}
+    }
+  ],
+  "playType": "ground_ball"
+}
+```
+
+| Attribute | Type | Description |
+|-----------|------|-------------|
+| `playResult` | string | Outcome: `"fielders_choice"`, `"single"`, `"out"`, `"home_run"`, etc. |
+| `playType` | string | Contact type: `"ground_ball"`, `"line_drive"`, `"fly_ball"`, `"pop_up"`, etc. |
+| `defenders` | array | Fielders involved in the play |
+| `defenders[].position` | string | Fielder's position (`"2B"`, `"SS"`, `"1B"`, etc.) |
+| `defenders[].location.x` | float | Fielder x-coordinate on the spray chart canvas |
+| `defenders[].location.y` | float | Fielder y-coordinate on the spray chart canvas |
+| `defenders[].error` | boolean | Whether the fielder committed an error |
+
+**Discovered:** 2026-03-07. **368-event sample confirmed:** 2026-03-07.

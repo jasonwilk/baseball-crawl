@@ -57,10 +57,10 @@ Follow the iPhone setup steps printed by `./start.sh`, or see the full instructi
 
 **4. Verify credentials were captured**:
 
-Check that `.env` contains the key `GAMECHANGER_AUTH_TOKEN` (do not display the value):
+Check that `.env` contains the key `GAMECHANGER_REFRESH_TOKEN_WEB` (do not display the value):
 
 ```bash
-grep -q GAMECHANGER_AUTH_TOKEN .env && echo "Key present" || echo "Key missing"
+grep -q GAMECHANGER_REFRESH_TOKEN_WEB .env && echo "Key present" || echo "Key missing"
 ```
 
 Or check the proxy logs for a "Credentials updated" message:
@@ -174,22 +174,31 @@ Loading data...
 
 ## Credential Lifecycle
 
-### Token Lifetime
+### Token Architecture
 
-GameChanger credentials last **14 days** from the time they were issued. The `gc-token` is a JWT; the expiry is encoded in its `exp` claim. You do not need to decode the token -- just plan to refresh credentials approximately every two weeks.
+GameChanger uses a three-tier credential system with different lifetimes:
+
+| Credential | Lifetime | Notes |
+|-----------|----------|-------|
+| **Client ID + Client Key** | Permanent (until app redeploy) | Static secret from the app bundle. Stored in `.env`. Only changes when GC deploys a new app version. |
+| **Refresh token** | 14 days (self-renewing) | Each programmatic refresh call returns a new refresh token -- effectively self-sustaining as long as you refresh before expiry. |
+| **Access token** | ~60 minutes | Generated on demand via `POST /auth {"type":"refresh"}`. Not stored -- derived from the refresh token as needed. |
+
+**Programmatic refresh is now available.** The project can generate a fresh access token from the refresh token at any time without browser interaction. The `gc-signature` signing algorithm was fully reverse-engineered on 2026-03-07. See `docs/api/auth.md` for the complete auth architecture.
 
 ### When to Refresh
 
-- **Proactively**: Refresh every ~2 weeks before the current credentials expire.
-- **Reactively**: Run `python scripts/bootstrap.py --check-only` (or `bb data sync --check-only`) to check credential status. If it reports "Credentials expired", recapture credentials using either the proxy or curl path above.
+- **Access tokens** expire in ~60 minutes. The bootstrap process and crawlers generate fresh access tokens automatically from the stored refresh token -- you do not need to manage this manually.
+- **Refresh tokens** last 14 days. The refresh process returns a new refresh token each time it runs, so regular crawl runs keep the refresh token current automatically.
+- **Manual re-capture** is only needed if the refresh token expires (e.g., no crawl has run for 14+ days) or if the client key changes due to a GC app deploy. Re-capture via proxy or curl paths described above.
 
 The health check output is clear:
 
 ```
-Credentials valid -- logged in as Jason Smith       # exit code 0, good to go
-Credentials expired -- refresh via proxy capture    # exit code 1, recapture needed
+Credentials valid -- logged in as Jason Smith           # exit code 0, good to go
+Credentials expired -- refresh via proxy capture        # exit code 1, recapture needed
   or scripts/refresh_credentials.py
-Missing required credential(s): GAMECHANGER_AUTH_TOKEN  # exit code 2, never captured
+Missing required credential(s): GAMECHANGER_REFRESH_TOKEN_WEB  # exit code 2, never captured
 ```
 
 ### What Happens When Credentials Expire Mid-Crawl
@@ -211,7 +220,7 @@ No credentials have been captured yet, or the `.env` file is missing required ke
 
 ### "Credentials expired"
 
-The captured credentials have passed their 14-day lifetime. Recapture using either path above. The proxy path is faster (automated extraction); the curl path works without the proxy running.
+The stored refresh token has passed its 14-day lifetime (or the access token has expired and programmatic refresh is failing). Recapture using either path above. The proxy path is faster (automated extraction); the curl path works without the proxy running.
 
 ### "No teams configured"
 

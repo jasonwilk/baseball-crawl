@@ -1,12 +1,12 @@
 ---
 method: GET
 path: /me/permissions/bulk
-status: OBSERVED
+status: CONFIRMED
 auth: required
 profiles:
   web:
-    status: unverified
-    notes: Not captured from web profile.
+    status: confirmed
+    notes: HTTP 200 with plain text "No permissions provided" response when called without query params. Captured 2026-03-07.
   mobile:
     status: observed
     notes: 4 hits, status 200 and 304. Discovered 2026-03-05.
@@ -30,11 +30,11 @@ query_params:
     required: unknown
     description: Comma-separated list of permissions to check.
 pagination: false
-response_shape: object
-response_sample: null
-raw_sample_size: null
+response_shape: string
+response_sample: data/raw/me-permissions-bulk-sample.json
+raw_sample_size: "plain text: 'No permissions provided'"
 discovered: "2026-03-05"
-last_confirmed: null
+last_confirmed: "2026-03-07"
 tags: [me, permissions]
 caveats:
   - >
@@ -67,6 +67,14 @@ GET https://api.team-manager.gc.com/me/permissions/bulk
 
 ## Response
 
-Schema not captured. Status 200 and 304 observed.
+When called without query parameters, returns plain text (not JSON):
 
-**Discovered:** 2026-03-05.
+```
+No permissions provided
+```
+
+This suggests the endpoint expects specific query parameters to return meaningful permission data. The 200 status with this message is consistent with the endpoint being functional but requiring `childType`, `parentId`, `parentType`, and `permissions` query parameters to return a real permission result.
+
+**Response content-type when no params provided:** plain text (not JSON).
+
+**Discovered:** 2026-03-05. **No-param response confirmed:** 2026-03-07.

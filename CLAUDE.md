@@ -113,7 +113,7 @@ These are the statistics and dimensions that matter for coaching decisions:
 The authoritative data dictionary mapping all GameChanger stat abbreviations to their definitions is at `docs/gamechanger-stat-glossary.md`. It includes batting, pitching, fielding, catcher, and positional innings stats, plus an API field name mapping table for cases where the API uses different abbreviations than the UI.
 
 ## GameChanger API
-- Token lifetime is 14 days (confirmed from JWT `exp - iat`). Tokens come from browser captures; programmatic refresh is not yet possible (requires unknown `gc-signature` signing key). Plan credential rotation at ~2-week intervals, not hourly.
+- **Three-token architecture (confirmed 2026-03-07):** CLIENT token (~10 min, anonymous session during login). ACCESS token (~60 min, sent as `gc-token` on all API calls). REFRESH token (14 days, sent as `gc-token` in `POST /auth` refresh calls). The `gc-signature` signing algorithm was fully reverse-engineered on 2026-03-07 -- programmatic token refresh from Python is now confirmed working. The refresh token is self-renewing (each refresh call returns a new refresh token). Credentials in `.env` are now: `GAMECHANGER_REFRESH_TOKEN_WEB`, `GAMECHANGER_CLIENT_ID_WEB`, `GAMECHANGER_CLIENT_KEY_WEB`, `GAMECHANGER_DEVICE_ID_WEB`, `GAMECHANGER_USER_EMAIL`, `GAMECHANGER_USER_PASSWORD`. See `docs/api/auth.md` for the complete auth architecture.
 - NEVER log, commit, display, or hardcode credentials in source code
 - The API is undocumented; we maintain our own spec at `docs/api/README.md` (index) and per-endpoint files in `docs/api/endpoints/`
 - API limitations are discovered iteratively -- document everything

@@ -22,7 +22,7 @@ query_params:
 pagination: true
 response_shape: array
 response_sample: data/raw/game-summaries-sample.json
-raw_sample_size: "50 records (page 1); page2: data/raw/game-summaries-page2-sample.json (42 records)"
+raw_sample_size: "50 records (page 1); page2: data/raw/game-summaries-page2-sample.json (42 records); refresh: data/raw/game-summaries-refresh-sample.json"
 discovered: "2026-03-04"
 last_confirmed: "2026-03-04"
 tags: [games, team]

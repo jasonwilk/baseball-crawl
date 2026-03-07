@@ -15,8 +15,8 @@ gc_user_action: null
 query_params: []
 pagination: false
 response_shape: array
-response_sample: null
-raw_sample_size: "8 archived team records"
+response_sample: data/raw/me-archived-teams-sample.json
+raw_sample_size: "8 archived team records (2019-2023, ages 8U-13U)"
 discovered: "2026-03-07"
 last_confirmed: "2026-03-07"
 tags: [me, team]
@@ -73,4 +73,8 @@ Bare JSON array of archived team objects. Same schema as active teams in `GET /m
 | `archived` | boolean | Always `true` in this response |
 | `record` | object | Season record: `{"wins": int, "losses": int, "ties": int}` |
 
-**Discovered:** 2026-03-07. **Confirmed:** 2026-03-07.
+**Additional fields observed in actual sample (2026-03-07):**
+- `paid_access_level`: optional string, value `"premium"` on older teams (2019-2021); absent on newer records (2022+). Likely migrated to subscription system.
+- `team_avatar_image`: may be absent on some teams (seen absent on 2 of 8 records in sample -- older teams from 2021 and before).
+
+**Discovered:** 2026-03-07. **Confirmed with raw sample:** 2026-03-07.

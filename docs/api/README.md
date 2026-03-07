@@ -37,7 +37,8 @@ Endpoints are grouped by domain. Within each group, sorted alphabetically by pat
 
 | Method | Path | Status | Auth | Description |
 |--------|------|--------|------|-------------|
-| POST | [/auth](endpoints/post-auth.md) | PARTIAL | req | Exchange credentials for gc-token (gc-signature signing key unknown) |
+| POST | [/auth](endpoints/post-auth.md) | CONFIRMED | req | Full auth lifecycle: login (4 steps), token refresh, logout. Three-token architecture (client/access/refresh). gc-signature algorithm cracked 2026-03-07; programmatic refresh confirmed working from Python. |
+| POST | [/me/tokens/braze](endpoints/post-me-tokens-braze.md) | CONFIRMED | req | Third-party Braze push notification JWT (not relevant for data ingestion) |
 
 ---
 
@@ -51,7 +52,7 @@ Endpoints are grouped by domain. Within each group, sorted alphabetically by pat
 | GET | [/me/external-calendar-sync-url/team/{team_id}](endpoints/get-me-external-calendar-sync-url-team-team_id.md) | OBSERVED | req | iCal/Google Calendar subscription URL for a team |
 | GET | [/me/organizations](endpoints/get-me-organizations.md) | CONFIRMED | req | Organizations the user belongs to (requires pagination params) |
 | GET | [/me/permissions](endpoints/get-me-permissions.md) | CONFIRMED | req | Permissions for a specific entity (requires entityId + entityType params) |
-| GET | [/me/permissions/bulk](endpoints/get-me-permissions-bulk.md) | OBSERVED | req | Bulk permission check for child entities under a parent |
+| GET | [/me/permissions/bulk](endpoints/get-me-permissions-bulk.md) | CONFIRMED | req | Bulk permission check for child entities under a parent (plain text "No permissions provided" when called without params) |
 | GET | [/me/related-organizations](endpoints/get-me-related-organizations.md) | CONFIRMED | req | Organizations accessible via team membership (requires pagination params) |
 | GET | [/me/schedule](endpoints/get-me-schedule.md) | CONFIRMED | req | Cross-team unified schedule for all user teams |
 | GET | [/me/subscription-information](endpoints/get-me-subscription-information.md) | CONFIRMED | req | Subscription tier summary (best_subscription + access_level) |
@@ -225,8 +226,8 @@ These URL patterns return HTTP 404 on `api.team-manager.gc.com`. They are web ap
 
 | Count | Source |
 |-------|--------|
-| **89** | Files in `docs/api/endpoints/` |
-| **89** | Rows in this index (88 endpoint entries + 1 web-routes reference) |
+| **90** | Files in `docs/api/endpoints/` |
+| **90** | Rows in this index (89 endpoint entries + 1 web-routes reference) |
 | **89** | E-062-R-01 spike inventory count (88 endpoints + 1 web-routes reference file) |
 
-Three-way match confirmed. No orphan files.
+Note: 1 new endpoint (`POST /me/tokens/braze`) added 2026-03-07. E-062 baseline was 89.

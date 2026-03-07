@@ -180,8 +180,12 @@ Key variables in `.env`:
 | `DATABASE_PATH` | Path to the SQLite database file. Defaults to `./data/app.db`. |
 | `APP_ENV` | Runtime environment (`development` or `production`). |
 | `LOG_LEVEL` | Logging level for the FastAPI app (`DEBUG`, `INFO`, `WARNING`, `ERROR`). |
-| `GAMECHANGER_AUTH_TOKEN` | GameChanger API auth token (written by `refresh_credentials.py`). |
-| `GAMECHANGER_DEVICE_ID` | GameChanger device identifier (written by `refresh_credentials.py`). |
+| `GAMECHANGER_REFRESH_TOKEN_WEB` | GameChanger refresh token JWT (14-day, self-renewing). See `docs/api/auth.md`. |
+| `GAMECHANGER_CLIENT_ID_WEB` | GameChanger client ID (static, from app bundle). |
+| `GAMECHANGER_CLIENT_KEY_WEB` | GameChanger HMAC signing key (static, from app bundle). **Secret.** |
+| `GAMECHANGER_DEVICE_ID_WEB` | GameChanger device identifier (stable hex string). |
+| `GAMECHANGER_USER_EMAIL` | GameChanger account email. **PII.** |
+| `GAMECHANGER_USER_PASSWORD` | GameChanger account password. **Secret.** |
 | `GAMECHANGER_BASE_URL` | GameChanger API base URL (written by `refresh_credentials.py`). |
 | `CLOUDFLARE_TUNNEL_TOKEN` | Cloudflare Tunnel token (production only). |
 | `CF_ACCESS_CLIENT_ID` | Cloudflare Access service token client ID (production only). |

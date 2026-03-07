@@ -2,17 +2,35 @@
 
 ## Credential Lifecycle
 
-**Token lifetime: 14 days** (confirmed 2026-03-04 from decoded JWT payload: exp - iat = 1,209,600 seconds). Previous 1-hour estimate was wrong.
+**Three-token architecture confirmed 2026-03-07. Programmatic refresh CONFIRMED WORKING.**
 
-Credentials from browser captures are valid for up to 14 days. The `scripts/refresh_credentials.py` script extracts and stores them in `.env`.
+**gc-signature CRACKED 2026-03-07.** Algorithm: `{nonce}.{hmac}` where nonce=Base64(32 random bytes) and hmac=HMAC-SHA256(clientKey, timestamp|nonce_bytes|sorted_body_values[|prevSig_bytes]). Body values extracted recursively with keys sorted alphabetically. clientKey is static app-wide Base64 secret from JS bundle as `clientId:clientKey`. Full details: `data/raw/gc-signature-algorithm.md`, `docs/api/auth.md`.
 
-**Token validity check**: `GET /me/user` returns 200 OK if the token is valid, 401 if expired. Use as a lightweight auth check before long ingestion runs.
+**Three token types:**
+- **CLIENT token** (exp-iat = 600s = 10 min): JWT fields: `type:"client"`, `sid`, `cid`, `iat`, `exp`. Anonymous session token. Used as gc-token in steps 3-4 of full login flow.
+- **ACCESS token** (exp-iat = ~3,672s = ~61 minutes): JWT fields: `type:"user"`, `cid`, `email`, `userId` (camelCase), `rtkn`, `iat`, `exp`. Sent as gc-token in all authenticated API requests.
+- **REFRESH token** (exp-iat = 1,209,600s = 14 days): JWT fields: `id` (uuid:uuid), `cid`, `uid`, `email`, `iat`, `exp`. No `type` field, different `kid`. Sent as gc-token in `POST /auth {"type":"refresh"}`. Self-renewing (each refresh returns a new refresh token).
 
-**gc-signature freshness**: When the user provides a curl for `POST /auth` (token refresh), the `gc-signature`/`gc-timestamp` headers are time-bound. A signature 22,316 seconds (~6.2 hours) old was rejected with HTTP 400. Execute auth curl commands immediately -- within minutes, not hours.
+**Credential tiers:**
+1. Client ID + Client Key -- static (only changes on app deploys)
+2. Refresh token -- 14 days, self-renewing with each use
+3. Access token -- ~61 min, generated on demand; do NOT store
 
-**Programmatic refresh: NOT YET POSSIBLE.** The `POST /auth` endpoint requires a `gc-signature` computed with an unknown signing key. Until the signing algorithm is known, fresh tokens must come from browser captures.
+**.env variables (updated 2026-03-07):**
+- `GAMECHANGER_REFRESH_TOKEN_WEB` -- refresh token JWT (14-day, self-renewing)
+- `GAMECHANGER_CLIENT_ID_WEB` -- stable UUID (`clientId` from bundle)
+- `GAMECHANGER_CLIENT_KEY_WEB` -- Base64 HMAC key (`clientKey` from bundle) **SECRET**
+- `GAMECHANGER_DEVICE_ID` -- stable 32-char hex device identifier
+- `GAMECHANGER_USER_EMAIL` -- email (PII) for full login flow fallback
+- `GAMECHANGER_USER_PASSWORD` -- password (sensitive) for full login flow fallback
 
-**gc-client-id**: New credential field discovered 2026-03-04. Stable UUID matching the `cid` field in the JWT payload. Store alongside `gc-device-id` in `.env`.
+**Deprecated:** `GAMECHANGER_AUTH_TOKEN_WEB` (renamed to `GAMECHANGER_REFRESH_TOKEN_WEB`), `GAMECHANGER_SIGNATURE_WEB` (now computed programmatically).
+
+**Token validity check**: `GET /me/user` returns 200 OK if the access token is valid, 401 if expired.
+
+**Five POST /auth body types:** `logout`, `client-auth` (no gc-token!), `user-auth`, `password`, `refresh`. Full login flow is steps 1-4 in that order. Refresh flow is just `{"type":"refresh"}` with the refresh token.
+
+**Signature chaining in login flow:** Steps 3-4 chain the server's response gc-signature (after the dot) as `previousSignature` in the next request. `client-auth` explicitly uses `usePreviousSignature: false`. Standalone refresh calls omit previousSignature.
 
 Credentials are NEVER logged, committed, or displayed. Redact to `{AUTH_TOKEN}` in all documentation and output.
 
@@ -44,7 +62,7 @@ As of 2026-03-07. All API knowledge is empirical -- discovered by running curl c
 - `/bats-starting-lineups/latest/{team_id}` -- actual coach-entered lineup. latest_lineup wrapper with entries[] array (order = batting order). DH fields present but null when not used.
 - `/bats-starting-lineups/{event_id}` -- HTTP 403 for away game event. Try home game event_id.
 - `/player-attributes/{player_id}/bats` -- {player_id, throwing_hand, batting_side}. Prefer /opponents/players for bulk.
-- `/game-streams/{game_stream_id}/events` -- 319 events, 10 codes (set_teams, fill_lineup_index, reorder_lineup, fill_position, sub_players, pitch, transaction, base_running, edit_group, replace_runner, undo). event_data is JSON-encoded STRING -- must JSON.parse it.
+- `/game-streams/{game_stream_id}/events` -- 368 events in second sample (2026-03-07, different game). 10 codes: set_teams, fill_lineup_index, fill_position, message, pitch, transaction, base_running, replace_runner, undo, edit_group. event_data is JSON-encoded STRING -- must JSON.parse it. CRITICAL: `transaction` events contain NESTED events array including `ball_in_play` sub-events with x/y spray chart coordinates, defender positions, and playType. This is the source of spray chart data.
 - `/game-streams/gamestream-viewer-payload-lite/{event_id}` -- accepts event_id (NOT game_stream_id). Returns stream_id, latest_events (319), all_event_data_ids, marker.
 - `/events/{event_id}` -- two-key object: event{} + pregame_data{}. pregame_data.lineup_id links to bats-starting-lineups.
 - `/me/schedule` -- 26 teams, 71 events, config{max_future_days:180, max_past_days:90, max_teams:150}. Events include RSVPs and video status inline. expire_in_seconds:30.
@@ -147,17 +165,28 @@ As of 2026-03-07. All API knowledge is empirical -- discovered by running curl c
 - PUBLIC-TEAM-PROFILE-ID with opponent UUIDs -- does `/teams/{opponent_uuid}/public-team-profile-id` work? Unlocks public API access for opponents.
 
 **ONGOING:**
-- AUTH FLOW PARTIAL: `POST /auth` confirmed (400 received). Successful response schema unknown. Signing key unknown.
+- AUTH FLOW: `POST /auth` three-token architecture + gc-signature algorithm fully cracked 2026-03-07. Programmatic refresh confirmed working from Python. All five body types documented. See `docs/api/auth.md` and `docs/api/endpoints/post-auth.md`.
 - Opponent endpoint access: `/teams/{opponent_id}/season-stats`, game-summaries, boxscore
 - `streak_C` (cold streak, unconfirmed); `total_outs` semantics; ETag conditional requests
 - BOXSCORE: Does game_stream_id for opponent's own game-summaries work in boxscore?
 - PLAYS: Public unauthenticated variant? Extra-innings behavior? Pitch speed/location data?
 
-## JWT Payload Fields (Confirmed 2026-03-04)
+## JWT Payload Fields (Updated 2026-03-07)
 
-Actual fields: `id` (compound `{session_uuid}:{refresh_token_uuid}`), `cid` (= gc-client-id header), `uid` (user UUID), `email`, `iat`, `exp`. Previous docs listed `type`, `userId`, `rtkn` -- these were NOT observed. Consider them unconfirmed/incorrect until re-verified.
+**Three token types -- CLIENT, ACCESS, and REFRESH:**
 
-**NEW 2026-03-07:** The JWT `type` field observed in `/subscription/details` response (value: `"team_manager"`) refers to the subscription type, NOT the JWT payload type. The JWT payload does not contain a `type` field in our captures.
+**CLIENT token** (10 min, used as gc-token in steps 3-4 of login flow):
+Fields: `type:"client"`, `sid` (session UUID), `cid`, `iat`, `exp`. No user identity.
+
+**ACCESS token** (~61 minutes, sent as gc-token in all standard API calls):
+Fields: `type:"user"`, `cid`, `email`, `userId` (camelCase, user UUID), `rtkn` (refresh token UUID pair), `iat`, `exp`.
+
+**REFRESH token** (14 days, sent as gc-token in POST /auth refresh/logout calls):
+Fields: `id` (compound `{session_uuid}:{refresh_token_uuid}`), `cid`, `uid` (user UUID), `email`, `iat`, `exp`. No `type` field in payload. Different JWT `kid` than client/access tokens.
+
+The `/subscription/details` response `type: "team_manager"` field is subscription metadata, not JWT payload type.
+
+**Decode tip:** `exp-iat < 1000` = client token (10 min). `exp-iat < 10000` = access token (~61 min). `exp-iat > 1000000` = refresh token (14 days).
 
 ## Security Rules
 

@@ -65,7 +65,7 @@ Key differences from the web profile:
 
 | Header | Required | Description |
 |--------|----------|-------------|
-| `gc-token` | Yes (auth endpoints) | 14-day JWT. See `auth.md` for structure and rotation. |
+| `gc-token` | Yes (auth endpoints) | Access token JWT (~60 min lifetime). See `auth.md` for full three-token architecture. |
 | `gc-device-id` | Yes (auth endpoints) | Stable 32-character hex string. Unique per device. Store alongside gc-token. |
 | `gc-app-name` | Yes | Always `"web"` for the web profile. |
 
@@ -92,10 +92,10 @@ These headers are used exclusively by `POST /auth` and are not required for any 
 
 | Header | Description |
 |--------|-------------|
-| `gc-signature` | Time-bound HMAC signature. Signing key is unknown. |
-| `gc-timestamp` | Unix timestamp in seconds at signing time. |
-| `gc-client-id` | Stable UUID matching the `cid` field in the JWT payload. |
-| `gc-app-version` | Always `"0.0.0"` (web profile). |
+| `gc-signature` | HMAC-SHA256 signature computed from `clientKey`. Format: `{nonce}.{hmac}` where nonce is Base64(random 32 bytes) and hmac is HMAC-SHA256(clientKey, timestamp\|nonce_bytes\|sorted_body_values[\|previousSig_bytes]). Algorithm fully reverse-engineered 2026-03-07. See `auth.md` for full details. |
+| `gc-timestamp` | Unix timestamp in seconds at signing time. Must be current -- stale timestamps (~6+ hours) are rejected with HTTP 400. |
+| `gc-client-id` | Stable UUID matching the `cid` field in the JWT payload. The `clientId` half of the app bundle's `clientId:clientKey` string. |
+| `gc-app-version` | Always `"0.0.0"` (web profile). Absent on GET endpoints; present on POST /auth. |
 
 ### Pagination Request Header
 

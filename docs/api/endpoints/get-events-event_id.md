@@ -15,8 +15,8 @@ gc_user_action: null
 query_params: []
 pagination: false
 response_shape: object
-response_sample: null
-raw_sample_size: null
+response_sample: data/raw/event-detail-sample.json
+raw_sample_size: "single event object with pregame_data"
 discovered: "2026-03-07"
 last_confirmed: "2026-03-07"
 tags: [games, events]
@@ -66,6 +66,8 @@ Single JSON object with two top-level keys: `event` and `pregame_data`.
 | `start.datetime` | string (ISO 8601) | Game start time in UTC |
 | `end.datetime` | string (ISO 8601) | Scheduled end time in UTC |
 | `arrive.datetime` | string (ISO 8601) | Requested arrival time in UTC |
+| `location` | object | Location of the event. Contains `name` string. |
+| `location.name` | string | Human-readable location name (e.g., `"Ballard"`) |
 | `timezone` | string | IANA timezone (e.g., `"America/Chicago"`) |
 
 ### `pregame_data` Object

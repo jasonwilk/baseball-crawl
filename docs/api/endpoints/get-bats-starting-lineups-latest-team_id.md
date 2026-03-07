@@ -15,8 +15,8 @@ gc_user_action: null
 query_params: []
 pagination: false
 response_shape: object
-response_sample: null
-raw_sample_size: null
+response_sample: data/raw/bats-starting-lineups-latest-sample.json
+raw_sample_size: "9-player lineup (1 game)"
 discovered: "2026-03-07"
 last_confirmed: "2026-03-07"
 tags: [team, lineup]

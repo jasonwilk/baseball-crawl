@@ -96,7 +96,7 @@ def check_token_health(session) -> bool:
     return response.status_code == 200
 ```
 
-Run this before starting any long ingestion run. Token lifetime is 14 days (see `auth.md`).
+Run this before starting any long ingestion run. Pass the access token (not the refresh token). Access token lifetime is ~60 minutes; use `POST /auth {"type":"refresh"}` to generate a fresh one programmatically (see `auth.md`).
 
 The `id` field in the response matches the `uid` field in the decoded JWT payload, confirming the token belongs to the expected account.
 
@@ -105,6 +105,6 @@ The `id` field in the response matches the `uid` field in the decoded JWT payloa
 - All fields are PII (email, first_name, last_name). Redact in all stored files and logs.
 - `subscription_information.best_subscription` may be null for free accounts.
 - `subscription_source` can be null.
-- Token lifetime is 14 days -- call this endpoint before long runs to confirm the token is still valid.
+- Access token lifetime is ~60 minutes. Call this endpoint before long runs to confirm the token is still valid. Refresh programmatically via `POST /auth {"type":"refresh"}` when expired.
 
 **Discovered:** 2026-03-04. **Last confirmed:** 2026-03-04.

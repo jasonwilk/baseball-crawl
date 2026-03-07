@@ -8,7 +8,7 @@
 | 204 No Content | CORS preflight (OPTIONS requests). Not a real API response. |
 | 304 Not Modified | Cached response (ETag match). Occurs when `If-None-Match` is used; response body is empty. |
 | 400 Bad Request | Malformed request. Most commonly seen on `POST /auth` with an expired or invalid `gc-signature`. |
-| 401 Unauthorized | Authentication required or expired. The `gc-token` is missing, expired (14-day TTL), or invalid. Run `GET /me/user` to check token validity. |
+| 401 Unauthorized | Authentication required or expired. The `gc-token` is missing, expired (~61-minute access token TTL), or invalid. Run `GET /me/user` to check token validity. Refresh programmatically via `POST /auth {"type":"refresh"}`. |
 | 403 Forbidden | Authenticated but not authorized. Common case: `GET /bats-starting-lineups/{event_id}` returns 403 for away games where the authenticated user's team was not the primary scorer. |
 | 404 Not Found | Endpoint does not exist, or the resource does not exist for this entity. Some 404s indicate premium/gated features (e.g., batting insight endpoints returned 404). |
 | 500 Internal Server Error | Server-side error. A known pattern: endpoints requiring pagination parameters (`?page_size=50` + `x-pagination: true` header) return HTTP 500 when those parameters are missing. See Pagination 500 Errors below. |

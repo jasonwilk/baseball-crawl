@@ -1,15 +1,17 @@
 ---
 method: POST
 path: /auth
-status: PARTIAL
+status: CONFIRMED
 auth: required
 profiles:
   web:
-    status: partial
+    status: confirmed
     notes: >
-      HTTP 400 received due to expired gc-signature (gc-timestamp was ~6.2 hours stale).
-      Endpoint existence confirmed. Success response schema NOT YET CAPTURED.
-      Discovered 2026-03-04.
+      Three-token architecture fully documented 2026-03-07. gc-signature algorithm
+      fully reverse-engineered 2026-03-07. Programmatic refresh confirmed working
+      from Python. All five body types documented. Browser refresh pattern (401->200
+      retry) observed and recorded. Success response schema confirmed from proxy
+      session 2026-03-07_171705.
   mobile:
     status: unverified
     notes: Not captured from mobile profile.
@@ -21,27 +23,29 @@ response_shape: object
 response_sample: null
 raw_sample_size: null
 discovered: "2026-03-04"
-last_confirmed: "2026-03-04"
+last_confirmed: "2026-03-07"
 tags: [auth, user]
 caveats:
   - >
-    SUCCESS RESPONSE SCHEMA UNKNOWN: HTTP 400 was received before a valid response
-    could be captured. The response schema is inferred from context -- likely returns
-    a new gc-token JWT, but field name and structure are unconfirmed.
+    SIGNATURE CHAINING IN LOGIN FLOW: Steps 2-4 of the full login flow require
+    chaining the server's response gc-signature into the next request. The
+    previousSignature is the part after the dot in the response gc-signature header.
+    Step 2 (client-auth) explicitly uses usePreviousSignature: false.
   - >
-    PROGRAMMATIC REFRESH NOT POSSIBLE: The gc-signature header requires a secret
-    signing key embedded in browser JavaScript. Without the signing algorithm, this
-    endpoint cannot be called programmatically. Fresh gc-token values must be
-    obtained via browser traffic capture.
+    TWO TOKEN TYPES IN gc-token HEADER: For refresh calls, gc-token must contain
+    the REFRESH token JWT (14-day lifetime). Using an expired ACCESS token in the
+    header results in 401; the browser then retries with the refresh token.
   - >
-    GC-SIGNATURE FRESHNESS WINDOW UNKNOWN: A gc-timestamp 22,316 seconds (~6.2 hours)
-    stale was rejected with HTTP 400. The actual freshness window may be shorter.
-    Browser signatures should be used immediately after capture.
+    CLIENT-AUTH HAS NO gc-token HEADER: Step 2 (client-auth) is the only
+    POST /auth call that sends no gc-token. All other body types require gc-token.
   - >
     ACCEPT HEADER EXCEPTION: Uses Accept: "*/*" -- NOT a vendor-typed header.
-    This is the only endpoint in the API with this Accept value. All GET endpoints
-    use application/vnd.gc.com.* vendor types.
-related_schemas: []
+    This is the only endpoint in the API with this Accept value.
+  - >
+    RESPONSE SCHEMA INFERRED FOR SOME STEPS: The success response for client-auth,
+    user-auth, password, and logout has not been independently confirmed via direct
+    curl. Observed from browser proxy session patterns. Refresh response schema
+    (new access + refresh tokens) is confirmed.
 see_also:
   - path: /me/user
     reason: Lightweight token health check (GET /me/user returns 200 if token is valid, 401 if expired) -- use as pre-flight before long ingestion runs
@@ -49,75 +53,226 @@ see_also:
 
 # POST /auth
 
-**Status:** PARTIALLY CONFIRMED -- endpoint exists and responds. HTTP 400 received due to expired `gc-signature`. Success response schema not yet captured. Last attempt: 2026-03-04.
+**Status:** CONFIRMED -- endpoint exists and responds. Programmatic refresh confirmed working from Python (2026-03-07). gc-signature algorithm fully reverse-engineered (2026-03-07). Last confirmed via direct curl/Python: 2026-03-07.
 
-This is the **only POST endpoint** documented in this API. All other endpoints are GET requests. This is the token refresh flow -- used by the browser to extend the authenticated session without requiring the user to log in again.
-
-**Practical note:** With a 14-day token lifetime, programmatic refresh is rarely needed. The immediate priority is using the token before it expires rather than refreshing it.
+This is the **only POST endpoint** documented in this API. All other endpoints are GET requests. It handles the full authentication lifecycle: login, refresh, and logout.
 
 ```
 POST https://api.team-manager.gc.com/auth
 ```
 
-## Request Body
+## Three-Token Architecture
+
+GameChanger uses three distinct JWT token types. All are transmitted via the `gc-token` header, but for different steps:
+
+| Token Type | `type` field | Lifetime | JWT Fields | Used As gc-token For |
+|-----------|-------------|----------|------------|----------------------|
+| **Client token** | `"client"` | 10 minutes | `type`, `sid`, `cid`, `iat`, `exp` | Steps 3 and 4 of full login flow |
+| **Access token** | `"user"` | ~60 minutes (3,600s) | `type`, `cid`, `email`, `userId`, `rtkn`, `iat`, `exp` | All standard API requests; NOT for POST /auth |
+| **Refresh token** | (none) | 14 days (1,209,600s) | `id`, `cid`, `uid`, `email`, `iat`, `exp` | POST /auth refresh and logout calls |
+
+**Key differences in JWT payload fields:**
+- Access token uses `userId` (camelCase), `type: "user"`, and `rtkn` (refresh token link)
+- Refresh token uses `uid` (not `userId`), no `type` field, and `id` (format: `{session_uuid}:{refresh_token_uuid}`)
+- Client token uses `sid` (session ID), `type: "client"`, and has no user identity fields
+- All three tokens contain `cid`, which matches the `gc-client-id` header value
+
+## Request Headers
+
+All `POST /auth` calls share this header structure (regardless of body type):
+
+```
+gc-device-id:    {GC_DEVICE_ID}
+gc-client-id:    {GC_CLIENT_ID}
+gc-signature:    {GENERATED_SIGNATURE}
+gc-timestamp:    {UNIX_SECONDS}
+gc-app-name:     web
+gc-app-version:  0.0.0
+Accept:          */*
+Content-Type:    application/json; charset=utf-8
+User-Agent:      Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36
+```
+
+**gc-token is also required for all body types EXCEPT client-auth.** See per-step documentation below.
+
+**Key differences from GET endpoints:**
+- `Accept: */*` -- not vendor-typed (all GET endpoints use `application/vnd.gc.com.*`)
+- `Content-Type: application/json; charset=utf-8` -- required for POST body
+- No `gc-user-action` or `gc-user-action-id` headers
+- Three extra headers: `gc-signature`, `gc-timestamp`, `gc-client-id`
+- `gc-app-version: 0.0.0` -- constant for the web app
+- `gc-app-version` is absent on GET endpoints; present on POST /auth
+
+## gc-signature Algorithm
+
+The `gc-signature` header is now fully understood and can be generated programmatically. Full documentation: `docs/api/auth.md` and `data/raw/gc-signature-algorithm.md`.
+
+### Format
+
+```
+gc-signature: {nonce}.{hmac}
+```
+
+- **nonce**: `Base64(random 32 bytes)` -- fresh per request
+- **hmac**: `HMAC-SHA256(clientKey, message)` as Base64
+
+### HMAC Message
+
+```
+{timestamp}|{nonce_raw_bytes}|{sorted_body_values}[|{previousSig_raw_bytes}]
+```
+
+- `nonce` and `previousSignature` are appended as **raw bytes** (parsed from Base64), not Base64 strings
+- Body values are extracted recursively with keys sorted alphabetically
+- `previousSignature` is the HMAC component (after the `.`) from the server's last response header; omitted for standalone calls
+
+### Client Key
+
+`clientKey` is a static Base64-encoded 32-byte secret hardcoded in the web app bundle as `{clientId}:{clientKey}`. Same for all users; store as `GAMECHANGER_CLIENT_KEY_WEB` in `.env`.
+
+**Freshness:** The `gc-timestamp` must be current. A timestamp 22,316 seconds (~6.2 hours) stale was rejected with HTTP 400.
+
+## Five Body Types
+
+### 1. `client-auth` -- Establish Anonymous Session
+
+Part of the full login flow (step 2).
+
+```json
+{"type": "client-auth", "client_id": "{CLIENT_ID}"}
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `type` | Yes | `"client-auth"` |
+| `client_id` | Yes | The GC client UUID. Matches `gc-client-id` header. |
+
+**gc-token:** NOT sent. This is the only body type with no gc-token header.
+
+**gc-signature:** Generated with `usePreviousSignature: false` (no chaining -- first call in the chain).
+
+**Response (200 OK):** Returns a client token JWT (`type: "client"`, 10-minute lifetime). Use as gc-token in steps 3 and 4.
+
+### 2. `user-auth` -- Identify User
+
+Part of the full login flow (step 3).
+
+```json
+{"type": "user-auth", "email": "{EMAIL}"}
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `type` | Yes | `"user-auth"` |
+| `email` | Yes | User's email address. **PII -- never log.** |
+
+**gc-token:** Client token from step 2.
+
+**gc-signature:** Generated with previousSignature chained from step 2 response.
+
+**Purpose:** Identifies the user within the anonymous client session. Does not authenticate -- just declares intent. No credentials validated yet.
+
+### 3. `password` -- Authenticate
+
+Part of the full login flow (step 4).
+
+```json
+{"type": "password", "password": "{PASSWORD}"}
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `type` | Yes | `"password"` |
+| `password` | Yes | User's password. **Sensitive -- never log.** |
+
+**gc-token:** Client token from step 2 (same token as step 3).
+
+**gc-signature:** Generated with previousSignature chained from step 3 response.
+
+**Response (200 OK):** Returns access token + refresh token on success.
+
+### 4. `refresh` -- Exchange Refresh Token for New Access Token
+
+The standard day-to-day programmatic flow. Confirmed working from Python (2026-03-07).
 
 ```json
 {"type": "refresh"}
 ```
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `type` | string | Yes | Refresh type. Observed value: `"refresh"`. Other values unknown. |
+| Field | Required | Description |
+|-------|----------|-------------|
+| `type` | Yes | `"refresh"` |
 
-## Headers (Web Profile)
+**gc-token:** Refresh token JWT (14-day lifetime). Using an expired access token here results in 401.
 
+**gc-signature:** Generated fresh, no previousSignature needed for standalone refresh calls.
+
+**Response (200 OK):**
+
+```json
+{
+  "type": "token",
+  "access": {"data": "<access-token-jwt>", "expires": "<unix-timestamp>"},
+  "refresh": {"data": "<refresh-token-jwt>", "expires": "<unix-timestamp>"}
+}
 ```
-gc-token: {GC_TOKEN}
-gc-device-id: {GC_DEVICE_ID}
-gc-client-id: {GC_CLIENT_ID}
-gc-signature: {GC_SIGNATURE}
-gc-timestamp: {GC_TIMESTAMP}
-gc-app-name: web
-gc-app-version: 0.0.0
-Accept: */*
-Content-Type: application/json; charset=utf-8
-User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36
-```
-
-**Key differences from GET endpoints:**
-- `Accept: */*` -- not vendor-typed (all GET endpoints use `application/vnd.gc.com.*`)
-- `Content-Type: application/json; charset=utf-8` -- not the vendor-typed `application/vnd.gc.com.none+json` used by GET requests
-- No `gc-user-action` or `gc-user-action-id` headers
-- Three extra headers: `gc-signature`, `gc-timestamp`, `gc-client-id`
-- `gc-app-version: 0.0.0` -- not observed on any GET endpoint
-
-## gc-signature Mechanics
-
-The `gc-signature` and `gc-timestamp` headers implement request signing.
-
-| Header | Format | Notes |
-|--------|--------|-------|
-| `gc-signature` | Two base64 segments joined by `.` (e.g., `{b64}={period}{b64}=`) | HMAC computed by browser JavaScript |
-| `gc-timestamp` | Unix seconds string | Time the signature was computed |
-| `gc-client-id` | UUID | Matches `cid` field in the JWT payload. Likely an input to the signature. |
-
-**Freshness window:** A gc-timestamp 22,316 seconds (~6.2 hours) stale was rejected with HTTP 400. Actual window may be shorter.
-
-**Cannot be replicated programmatically:** The signing algorithm and secret key are embedded in the GameChanger browser JavaScript bundle. The key is not publicly documented and has not been extracted.
-
-## Response Schema (Successful -- NOT YET CAPTURED)
-
-The successful response schema has not been confirmed. Based on request structure, the expected response is a new gc-token JWT.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `token` | string (inferred) | New gc-token JWT. **Field name is speculative -- must be confirmed.** |
+| `type` | string | Always `"token"` for successful auth responses |
+| `access.data` | string | New access token JWT (~60 minutes) |
+| `access.expires` | number | Unix timestamp when the access token expires |
+| `refresh.data` | string | New refresh token JWT (~14 days). Replace in `.env`. |
+| `refresh.expires` | number | Unix timestamp when the refresh token expires |
 
-Additional fields (expiry, user context, refresh token) may be present.
+Both tokens are returned as nested objects. Store `refresh.data` in `.env` as `GAMECHANGER_REFRESH_TOKEN_WEB`. The access token (`access.data`) is used for all API calls until it expires.
 
-## Error Response (HTTP 400 -- Confirmed)
+### 5. `logout` -- Invalidate Session
 
-When `gc-signature` is stale:
+Part of the full login flow (step 1), or for explicit logout.
+
+```json
+{"type": "logout"}
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `type` | Yes | `"logout"` |
+
+**gc-token:** Refresh token of the session to invalidate.
+
+**gc-signature:** Required.
+
+**Response (200 OK):** Session invalidated. No body (or empty body).
+
+## Complete Login Flow
+
+For full programmatic login from email/password when no valid refresh token exists:
+
+1. `POST /auth {"type":"logout"}` with old refresh token -- invalidate previous session
+2. `POST /auth {"type":"client-auth","client_id":"{id}"}` -- no gc-token, get client token
+3. `POST /auth {"type":"user-auth","email":"{email}"}` with client token -- identify user
+4. `POST /auth {"type":"password","password":"{pw}"}` with client token -- authenticate, get access + refresh tokens
+
+See `docs/api/auth.md` for full details and `data/raw/auth-login-flow-findings.json` for the captured request sequence.
+
+## Browser 401->200 Retry Pattern
+
+The browser implements automatic token refresh when the access token expires. Observed sequence from proxy session `2026-03-07_171705`:
+
+```
+17:19:28 POST /auth -> 200 (initial session auth with refresh token)
+17:19:29 POST /auth -> 200 (second team auth)
+17:19:49 POST /auth -> 401 (expired access token used as gc-token)
+17:19:49 POST /auth -> 200 (immediate retry with refresh token)
+17:19:51 POST /auth -> 401 (another expired access token attempt)
+17:19:52 POST /auth -> 200 (retry with refresh token)
+18:11:06 POST /auth -> 200 (periodic refresh ~51 minutes later)
+```
+
+## Error Responses
+
+### HTTP 400 -- Stale Signature
 
 ```
 HTTP/2 400
@@ -128,23 +283,23 @@ gc-timestamp: <current-unix-seconds>
 Bad Request
 ```
 
-Error body is plain text `"Bad Request"` (11 bytes), not JSON. Note the server returns `gc-timestamp` in response headers (its current Unix time).
+Body is plain text `"Bad Request"` (not JSON). Server returns its current `gc-timestamp` in response headers -- useful for detecting clock skew.
 
-## Implications for Programmatic Auth
+### HTTP 401 -- Wrong Token Type
 
-**Current status:** Programmatic token refresh is NOT possible. The `gc-signature` requires a key and algorithm embedded in browser JavaScript that are not yet known.
+When the access token (not refresh token) is sent as `gc-token` for a refresh call:
 
-**Practical consequence:** Fresh `gc-token` values must be obtained by capturing browser traffic. Token lifetime is 14 days (`exp - iat = 1,209,600 seconds`), so manual rotation is needed approximately every 2 weeks.
+```
+HTTP/2 401
+```
 
-**gc-client-id:** The `gc-client-id` request header matches the `cid` field in the JWT payload. This is a stable client identifier (not session-specific) that should be stored alongside `gc-device-id` in the `.env` file.
-
-**Future investigation:** The signing algorithm could potentially be reverse-engineered from the GameChanger web app JavaScript bundle. This would enable fully programmatic token refresh and eliminate browser captures entirely.
+The browser immediately retries with the refresh token.
 
 ## Token Health Check Alternative
 
-Instead of refresh, use `GET /me/user` as a lightweight pre-flight check:
-- Returns `200 OK` if the `gc-token` is valid
+Use `GET /me/user` as a lightweight pre-flight check:
+- Returns `200 OK` if the access `gc-token` is valid
 - Returns `401` if expired
 - Use before long ingestion runs to detect stale credentials early
 
-**Discovered:** 2026-03-04.
+**Discovered:** 2026-03-04. **gc-signature algorithm cracked / programmatic refresh confirmed:** 2026-03-07.

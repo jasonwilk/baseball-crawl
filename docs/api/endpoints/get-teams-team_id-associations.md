@@ -15,10 +15,10 @@ gc_user_action: null
 query_params: []
 pagination: false
 response_shape: array
-response_sample: null
-raw_sample_size: "244 records"
+response_sample: data/raw/team-associations-sample.json
+raw_sample_size: "170+ records (2026-03-07 capture)"
 discovered: "2026-03-04"
-last_confirmed: "2026-03-04"
+last_confirmed: "2026-03-07"
 tags: [team, user]
 related_schemas: []
 see_also:
@@ -58,9 +58,9 @@ No `gc-user-action` observed for this endpoint.
 
 ## Response
 
-Bare JSON array of association records. 244 records returned in a single response (no pagination triggered).
+Bare JSON array of association records. No pagination observed (170+ records returned in a single response in the 2026-03-07 capture; 244 records in the 2026-03-04 capture -- same team at a later date may reflect member churn).
 
-**Distribution observed (2026-03-04):** 156 fans, 83 family members, 3 managers, 2 players.
+**Distribution observed (2026-03-07 sample):** majority `family` and `fan`, with `manager` and `player` entries present. Association types confirmed from actual data: `manager`, `family`, `fan`, `player`.
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -102,4 +102,4 @@ Bare JSON array of association records. 244 records returned in a single respons
 - This endpoint has no PII (name, email) -- use `GET /teams/{team_id}/users` for those fields.
 - `gc-user-action` was absent from the observed capture -- may not be required.
 
-**Discovered:** 2026-03-04. **Schema confirmed:** 2026-03-04.
+**Discovered:** 2026-03-04. **Schema confirmed:** 2026-03-04. **Raw sample updated:** 2026-03-07.

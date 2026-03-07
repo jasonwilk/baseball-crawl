@@ -32,6 +32,7 @@ Review this list every 90 days, or when completing an epic. Ask:
 | [IDEA-011](IDEA-011-investigate-500-endpoints.md) | Investigate HTTP 500 Endpoint Failures | CANDIDATE | 2026-06-04 |
 | [IDEA-012](IDEA-012-crawl-orchestration-system.md) | Crawl Orchestration and Scheduling System | CANDIDATE | 2026-06-06 |
 | [IDEA-013](IDEA-013-cmux-evaluation.md) | cmux Evaluation for Agent Teams | CANDIDATE | 2026-06-07 |
+| [IDEA-014](IDEA-014-mobile-web-api-doc-split.md) | Mobile vs. Web API Documentation Split | CANDIDATE | 2026-06-05 |
 
 ## Status Definitions
 
