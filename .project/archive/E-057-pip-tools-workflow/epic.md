@@ -1,7 +1,7 @@
 # E-057: pip-tools Dependency Management
 
 ## Status
-`READY`
+`COMPLETED`
 <!-- Lifecycle: DRAFT -> READY -> ACTIVE -> COMPLETED (or BLOCKED / ABANDONED) -->
 
 ## Overview
@@ -38,8 +38,8 @@ The project has 14 direct dependencies in `requirements.txt` with exact pins (e.
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-057-01 | Create .in files and compile pinned outputs | TODO | None | - |
-| E-057-02 | Update project docs and developer workflow | TODO | E-057-01 | - |
+| E-057-01 | Create .in files and compile pinned outputs | DONE | None | SE |
+| E-057-02 | Update project docs and developer workflow | DONE | E-057-01 | architect |
 
 ## Dispatch Team
 - software-engineer
@@ -90,8 +90,9 @@ pip-compile requirements-dev.in --output-file=requirements-dev.txt --strip-extra
 The `--generate-hashes` flag adds integrity verification. If it causes issues with any package (some packages lack hashes on PyPI), drop it and note the reason. The `--strip-extras` flag keeps the output clean.
 
 ## Open Questions
-- Whether `--generate-hashes` works cleanly for all 14 direct deps and their transitives. If any package lacks hashes, the story should document which ones and proceed without hashes rather than blocking.
+- ~~Whether `--generate-hashes` works cleanly for all 14 direct deps and their transitives.~~ **Resolved**: `--generate-hashes` works for all packages. Both compiled files include integrity hashes.
 
 ## History
 - 2026-03-06: Created. pip-tools selected over Poetry/PDM/uv based on project scale, simplicity principle, and zero Dockerfile install-command impact.
 - 2026-03-06: Spec review triage. Fixed 6 findings: (P1) added claude-architect consultation rationale for CLAUDE.md changes; (P2) tightened AC-3 baseline to `git show HEAD:requirements.txt`; (P2) removed implementer epic-file edits from AC-8 -- hash fallback reporting goes to PM via completion message; (P2) fixed DoD wording in both stories to remove internal contradiction; (P3) made AC-1 comment format concrete with examples; (P3) made AC-3/AC-4 in E-057-02 specify required content points instead of vague line counts. Epic re-verified as READY.
+- 2026-03-07: COMPLETED. Both stories DONE. pip-tools workflow fully operational with `--generate-hashes` and `--strip-extras`. Notable implementation detail: `-c requirements.txt` constraint in `requirements-dev.in` ensures dev/prod version parity (discovered during AC verification when initial compilation produced version drift). No documentation impact (CLAUDE.md was updated as part of E-057-02). No follow-up work identified.

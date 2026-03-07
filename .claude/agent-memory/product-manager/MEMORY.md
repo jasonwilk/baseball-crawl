@@ -2,7 +2,7 @@
 
 ## Numbering State
 - Next available epic number: E-061
-- Epics created: E-001 through E-060 (E-001, E-003, E-005, E-006, E-007, E-008, E-010, E-011, E-012, E-013, E-014, E-015, E-016, E-017, E-018, E-019, E-020, E-021, E-022, E-024, E-025, E-026, E-027, E-028, E-029, E-030, E-031, E-032, E-033, E-034, E-035, E-036, E-037, E-038, E-044, E-046, E-048, E-049, E-050, E-052, E-053, E-054, E-056, E-058, E-059, E-060 archived)
+- Epics created: E-001 through E-060 (E-001, E-003, E-005, E-006, E-007, E-008, E-010, E-011, E-012, E-013, E-014, E-015, E-016, E-017, E-018, E-019, E-020, E-021, E-022, E-024, E-025, E-026, E-027, E-028, E-029, E-030, E-031, E-032, E-033, E-034, E-035, E-036, E-037, E-038, E-044, E-046, E-048, E-049, E-050, E-052, E-053, E-054, E-056, E-057, E-058, E-059, E-060 archived)
 - Next available idea number: IDEA-013
 - Ideas created: IDEA-001 through IDEA-012
 
@@ -73,6 +73,7 @@
 - E-059 (COMPLETED): Consultation Compliance Guardrails -- 4 stories. Added anti-patterns 5 (skip consultation) and 6 (prescribe implementation details) to PM agent def, Refinement pre-step for collaboration directives, Consultation Compliance Gate to workflow-discipline.md, lessons-learned entries. Context-layer only, no code changes. No follow-up work.
 - E-060 (COMPLETED): Stabilize Header-Capture Aggregation -- 1 story. Replaced "latest request wins" overwrite in HeaderCapture.request() with first-seen-wins per-key aggregation + conflict logging. 4 new tests, 36 total passing. No follow-up work.
 - E-058 (COMPLETED): Fix Relative Path Bug in Proxy Scripts -- 1 story. Fixed hardcoded relative paths in proxy-review.sh, proxy-report.sh, proxy-endpoints.sh (SCRIPT_DIR/REPO_ROOT preamble using BASH_SOURCE[0]). No follow-up work.
+- E-057 (COMPLETED): pip-tools Dependency Management -- 2 stories. pip-tools two-file workflow (`.in` for humans, `.txt` for machines). `--generate-hashes` and `--strip-extras` flags work for all packages. `-c requirements.txt` constraint in `requirements-dev.in` ensures dev/prod version parity. CLAUDE.md updated with Dependency Management section and pip-compile commands. devcontainer.json updated (`pip install pip-tools` + `requirements-dev.txt`). No follow-up work.
 - E-052 (COMPLETED): Proxy Data Lifecycle -- 5 stories. Session-scoped proxy capture dirs (`proxy/data/sessions/`), addon output routing via `PROXY_SESSION_DIR` env var, review tracking (`scripts/proxy-review.sh`), session-aware report scripts (`--session`/`--all`/`--unreviewed`), stop-time summary. Key artifacts: proxy/start.sh (session creation), proxy/stop.sh (finalization + summary), proxy/docker-compose.yml (env var), proxy/addons/endpoint_logger.py + header_capture.py (session-aware paths), scripts/proxy-review.sh (new), scripts/proxy-endpoints.sh + proxy-report.sh (session flags). 4 new tests. Docs updated: mitmproxy-guide.md, CLAUDE.md Commands. E-055 epic-level dep now satisfied.
 
 ## Key Architectural Decisions
@@ -81,6 +82,7 @@
 - Deployment: Docker Compose (local + prod). Home Linux server (no VPS, no hosting cost). Cloudflare Tunnel + Zero Trust.
 - Migrations: numbered SQL scripts (migrations/001_*.sql). No Alembic. apply_migrations.py at startup.
 - HTTP layer: src/http/headers.py + src/http/session.py. Dual-header system: BROWSER_HEADERS (Chrome 145/macOS) + MOBILE_HEADERS (iOS Odyssey). create_session(profile="web"|"mobile"). Profile-aware proxy: PROXY_ENABLED + PROXY_URL_WEB/PROXY_URL_MOBILE env vars, get_proxy_config(profile), trust_env=False. Bright Data dual-zone (residential for web, mobile for mobile).
+- Dependency management: pip-tools. `.in` files (human-edited, `~=` ranges) -> `.txt` files (pip-compile output, exact pins + hashes). `-c requirements.txt` constraint in dev .in ensures version parity. pip-tools is a build tool only (not in any .in file). Chosen over Poetry/PDM/uv for simplicity.
 - ip_outs: innings pitched stored as integer outs (1 IP = 3 outs)
 - FK-safe orphan handling: unknown player_ids get a stub row (first_name='Unknown', last_name='Unknown') inserted before the stat row; WARNING logged for operator backfill
 - Data model (revised 2026-03-03): seasons = first-class entity (season_id TEXT PK, type-based filtering). teams have crawl config (source, is_active, last_synced). All season references are FKs to seasons table. player_season_pitching added. Expanded splits on batting (hr, bb, so per split group). coaching_assignments = domain table (not auth), FKs to users+teams+seasons. Migration numbering: 001=data model, 003=auth, 004=coaching_assignments. Slot 002 unused.

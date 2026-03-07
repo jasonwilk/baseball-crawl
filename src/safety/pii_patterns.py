@@ -94,4 +94,10 @@ SCANNABLE_EXTENSIONS: set[str] = {
 
 # Path prefixes to always skip, relative to repo root. Any file whose path
 # starts with one of these prefixes is skipped without being read.
-SKIP_PATHS: set[str] = {".git/", ".claude/", "node_modules/", "__pycache__/"}
+SKIP_PATHS: set[str] = {
+    ".git/", ".claude/", "node_modules/", "__pycache__/",
+    # pip-compile generated lockfiles contain SHA256 hashes that trigger
+    # the us_phone pattern (10-digit sequences inside hex strings).
+    "requirements.txt",
+    "requirements-dev.txt",
+}

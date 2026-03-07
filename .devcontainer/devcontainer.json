@@ -14,7 +14,7 @@
       "packages": "git,curl,jq"
     }
   },
-  "postCreateCommand": "curl -fsSL https://claude.ai/install.sh | bash && npm i -g @openai/codex && pip install -r requirements.txt && ./scripts/install-hooks.sh && .devcontainer/post-create-env.sh",
+  "postCreateCommand": "curl -fsSL https://claude.ai/install.sh | bash && npm i -g @openai/codex && pip install pip-tools && pip install -r requirements-dev.txt && ./scripts/install-hooks.sh && .devcontainer/post-create-env.sh",
   "customizations": {
     "vscode": {
       "settings": {
