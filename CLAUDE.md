@@ -121,27 +121,52 @@ The authoritative data dictionary mapping all GameChanger stat abbreviations to 
 - **Public endpoints** require NO authentication -- no `gc-token`, no `gc-device-id`. Four confirmed under `/public/*`: `GET /public/teams/{public_id}` (name, location, record, staff), `GET /public/teams/{public_id}/games` (game schedule with final scores, opponents, home/away), `GET /public/teams/{public_id}/games/preview` (near-duplicate of `/games` -- same data minus `has_videos_available`, uses `event_id` instead of `id`; prefer `/games`), and `GET /public/game-stream-processing/{game_stream_id}/details?include=line_scores` (per-game inning-by-inning scoring, R/H/E totals; same `game_stream_id` as authenticated boxscore -- complementary views of the same game). One additional public-path endpoint uses an **inverted URL pattern**: `GET /teams/public/{public_id}/players` (roster -- NOT `/public/teams/`). Both path structures coexist in the API; do not assume all public endpoints follow `/public/*`. Public endpoints use `public_id` slugs (not UUIDs) except game details which uses `game_stream_id` from game-summaries, and may have different field names than authenticated equivalents (see API spec for details).
 
 ## Commands
+
+The `bb` CLI is the primary operator interface. Run `bb --help` to see all available commands.
+
+### CLI Commands
+
+- `bb --help` -- show all available commands and flags
+- `bb status` -- composite status check: credentials, last crawl, DB info, latest proxy session
+- `bb creds check` -- verify GameChanger credentials in `.env` are present and valid (`--profile web|mobile`)
+- `bb creds refresh` -- refresh GameChanger credentials (`--curl`, `--file`)
+- `bb data sync` -- full bootstrap: validate credentials, crawl, and load (`--check-only`, `--profile`, `--dry-run`)
+- `bb data crawl` -- run data crawlers (`--dry-run`, `--crawler NAME`, `--profile`, `--source db|yaml`)
+- `bb data load` -- run data loaders (`--dry-run`, `--loader NAME`, `--source db|yaml`)
+- `bb proxy report` -- print header parity report from proxy session (`--session`, `--all`)
+- `bb proxy endpoints` -- print deduplicated endpoint summary (`--session`, `--all`, `--unreviewed`)
+- `bb proxy refresh-headers` -- preview header changes from latest proxy capture (`--apply` to write)
+- `bb proxy review` -- manage proxy session review status
+- `bb db backup` -- back up the SQLite database (`--db-path`)
+- `bb db reset` -- reset dev database to seeded state (`--db-path`, `--force`)
+
+### Script Aliases
+
+The underlying scripts still work directly. The `bb` commands above are preferred.
+
 - `docker compose up` -- start full stack locally (app at http://localhost:8000)
 - `docker compose up -d` -- start in detached mode
 - `docker compose down` -- stop all services
-- `python scripts/backup_db.py` -- back up the SQLite database
-- `python scripts/reset_dev_db.py` -- reset dev database to seeded state
 - `pytest` -- run all tests (no Docker required)
 - `python migrations/apply_migrations.py` -- apply pending schema migrations
 - `./scripts/install-hooks.sh` -- one-time setup for PII pre-commit hook (run after cloning)
 - `./scripts/codex-review.sh <mode>` -- code review of repository changes; modes: `uncommitted`, `base <branch>`, `commit <sha>`. Rubric: `.project/codex-review.md`
 - `./scripts/codex-spec-review.sh <epic-dir>` -- spec review of epic/story files in a directory; optional `--note` flag. Rubric: `.project/codex-spec-review.md`
-- `./scripts/proxy-report.sh` -- print human-readable header parity report from current proxy session (reads `proxy/data/current/`)
-- `./scripts/proxy-endpoints.sh` -- print deduplicated endpoint summary from current proxy session; supports `--session <id>`, `--all`, `--unreviewed`
-- `./scripts/proxy-review.sh <subcommand>` -- manage proxy session review status; subcommands: `list`, `mark <session-id>`, `mark --all`
-- `python scripts/proxy-refresh-headers.py` -- dry-run: preview what would change in `src/http/headers.py` based on latest mitmproxy capture
-- `python scripts/proxy-refresh-headers.py --apply` -- write updated `src/http/headers.py` from latest capture and print summary of changes
-- `python scripts/check_credentials.py [--profile web|mobile]` -- verify GameChanger credentials in `.env` are present and valid
-- `python scripts/bootstrap.py [--profile web|mobile] [--check-only] [--dry-run]` -- bootstrap or validate the full credential and session setup
+- `python scripts/backup_db.py` -- back up the SQLite database (also available via `bb db backup`)
+- `python scripts/reset_dev_db.py` -- reset dev database to seeded state (also available via `bb db reset`)
+- `python scripts/check_credentials.py [--profile web|mobile]` -- verify credentials (also available via `bb creds check`)
+- `python scripts/bootstrap.py [--profile web|mobile] [--check-only] [--dry-run]` -- bootstrap or validate setup (also available via `bb data sync`)
+- `./scripts/proxy-report.sh` -- header parity report (also available via `bb proxy report`)
+- `./scripts/proxy-endpoints.sh` -- endpoint summary; supports `--session <id>`, `--all`, `--unreviewed` (also available via `bb proxy endpoints`)
+- `./scripts/proxy-review.sh <subcommand>` -- manage proxy session review status (also available via `bb proxy review`)
+- `python scripts/proxy-refresh-headers.py [--apply]` -- preview/write header changes (also available via `bb proxy refresh-headers`)
 - `pip-compile requirements.in -o requirements.txt --strip-extras --generate-hashes` -- regenerate runtime dependency pins
 - `pip-compile requirements-dev.in -o requirements-dev.txt --strip-extras --generate-hashes` -- regenerate dev dependency pins
 
-### Proxy Commands (Mac Host Only -- NOT runnable from devcontainer)
+### Proxy Lifecycle Commands (Mac Host Only -- NOT runnable from devcontainer)
+
+These commands manage the mitmproxy process and must be run on the Mac host, not via `bb`.
+
 - `cd proxy && ./start.sh` -- launch mitmproxy (detached)
 - `cd proxy && ./stop.sh` -- shut down mitmproxy
 - `cd proxy && ./status.sh` -- check mitmproxy containers and port listeners

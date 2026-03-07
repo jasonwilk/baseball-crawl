@@ -1,6 +1,6 @@
 # mitmproxy Proxy Guide
 
-<!-- Last updated: 2026-03-06 | Source: E-052 -->
+<!-- Last updated: 2026-03-07 | Source: E-055 (unified CLI), E-052 -->
 
 ## What It Does
 
@@ -163,6 +163,7 @@ Every `start.sh` / `stop.sh` cycle is a discrete session. Sessions accumulate in
 
 ```bash
 ./scripts/proxy-review.sh list
+# also: bb proxy review list
 ```
 
 Prints a table of all sessions: ID, profile, status (the current session is marked with `*`), endpoint count, and reviewed status.
@@ -174,6 +175,8 @@ After reviewing a session's endpoint discoveries and feeding findings to api-sco
 ```bash
 ./scripts/proxy-review.sh mark <session-id>   # mark one session
 ./scripts/proxy-review.sh mark --all           # mark all closed sessions
+# also: bb proxy review mark <session-id>
+# also: bb proxy review mark --all
 ```
 
 ### Operator workflow
@@ -181,9 +184,9 @@ After reviewing a session's endpoint discoveries and feeding findings to api-sco
 1. `cd proxy && ./start.sh` -- start a capture session
 2. Browse GameChanger on your iPhone or browser
 3. `cd proxy && ./stop.sh` -- finalize the session (prints summary)
-4. `./scripts/proxy-endpoints.sh --unreviewed` -- see new endpoint discoveries across all unreviewed sessions
+4. `./scripts/proxy-endpoints.sh --unreviewed` (or `bb proxy endpoints --unreviewed`) -- see new endpoint discoveries across all unreviewed sessions
 5. Review findings; feed interesting ones to api-scout
-6. `./scripts/proxy-review.sh mark <session-id>` -- mark the session reviewed
+6. `./scripts/proxy-review.sh mark <session-id>` (or `bb proxy review mark <session-id>`) -- mark the session reviewed
 
 ## Reading Reports
 
@@ -193,6 +196,7 @@ After reviewing a session's endpoint discoveries and feeding findings to api-sco
 ./scripts/proxy-report.sh                  # current session (default)
 ./scripts/proxy-report.sh --session <id>   # specific session
 ./scripts/proxy-report.sh --all            # most recent closed session with a report
+# also: bb proxy report [--session <id>] [--all]
 ```
 
 Shows, for each traffic source (ios/web), which headers are missing, extra, or different compared to the project's `BROWSER_HEADERS` in `src/http/headers.py`.
@@ -206,6 +210,7 @@ Note: header reports are point-in-time snapshots, not aggregatable. `--all` retu
 ./scripts/proxy-endpoints.sh --session <id>       # specific session
 ./scripts/proxy-endpoints.sh --all                # aggregate across all sessions
 ./scripts/proxy-endpoints.sh --unreviewed         # aggregate across unreviewed sessions only
+# also: bb proxy endpoints [--session <id>] [--all] [--unreviewed]
 ```
 
 Shows a deduplicated table of every unique (method, path) seen, with hit count and most recent status code. Use `--unreviewed` as your default post-capture query to see only new discoveries.
@@ -222,6 +227,7 @@ The `proxy-refresh-headers.py` script reads the latest mitmproxy capture report 
 
    ```bash
    python scripts/proxy-refresh-headers.py
+   # also: bb proxy refresh-headers
    ```
 
    This reads the header report and prints a unified diff showing exactly what would change in `src/http/headers.py`. No files are written.
@@ -230,6 +236,7 @@ The `proxy-refresh-headers.py` script reads the latest mitmproxy capture report 
 
    ```bash
    python scripts/proxy-refresh-headers.py --apply
+   # also: bb proxy refresh-headers --apply
    ```
 
    This writes the updated `src/http/headers.py` and prints a summary of which dicts were updated (`BROWSER_HEADERS`, `MOBILE_HEADERS`, or both).

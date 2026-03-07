@@ -94,6 +94,8 @@ python scripts/crawl.py --source db
 python scripts/load.py --source db
 ```
 
+Also available as `bb data crawl --source db` and `bb data load --source db`.
+
 With `--source db`, both scripts query:
 ```sql
 SELECT team_id, name, level FROM teams WHERE is_active = 1 AND is_owned = 1
@@ -119,6 +121,8 @@ GameChanger credentials expire frequently. When API calls start failing with aut
 ```bash
 python scripts/refresh_credentials.py
 ```
+
+Also available as `bb creds refresh`.
 
 5. Verify with the smoke test:
 
@@ -154,6 +158,8 @@ Create a timestamped copy of the database:
 python scripts/backup_db.py
 ```
 
+Also available as `bb db backup`.
+
 This copies `data/app.db` to `data/backups/app-<timestamp>.db`. The backups directory is created automatically and is git-ignored.
 
 ### Restore
@@ -187,6 +193,8 @@ For local development, drop and recreate the database with seed data:
 python scripts/reset_dev_db.py
 ```
 
+Also available as `bb db reset`.
+
 This script has a production safety guard: if `APP_ENV=production`, the `--force` flag is required.
 
 For full details, see [docs/database-restore.md](../database-restore.md).
@@ -215,7 +223,7 @@ The health endpoint (`GET /health`) returns 503 when the database is unreachable
 
 ### GameChanger API errors
 
-- **Credential expired**: Run `python scripts/refresh_credentials.py` and then `python scripts/smoke_test.py`.
+- **Credential expired**: Run `python scripts/refresh_credentials.py` (or `bb creds refresh`) and then `python scripts/smoke_test.py`.
 - **Rate limited**: The HTTP session factory handles rate limiting automatically with 1--1.5 second delays between requests. If you hit rate limits, increase the delay: adjust `min_delay_ms` and `jitter_ms` in `src/http/session.py`.
 - **Unknown endpoint error**: Check [docs/gamechanger-api.md](../gamechanger-api.md) for the current endpoint documentation.
 
@@ -231,7 +239,7 @@ The health endpoint (`GET /health`) returns 503 when the database is unreachable
 1. Backup the current state (even if corrupted): `cp data/app.db data/app.db.corrupted`
 2. Check integrity: `sqlite3 data/app.db "PRAGMA integrity_check;"`
 3. If integrity check fails, restore from a backup (see above).
-4. If no backup exists, reset the database: `python scripts/reset_dev_db.py`
+4. If no backup exists, reset the database: `python scripts/reset_dev_db.py` (or `bb db reset`)
 
 ## Monitoring
 
@@ -278,4 +286,4 @@ For the expected data volume (~30 games x 4 teams x a few seasons), the database
 
 ---
 
-*Last updated: 2026-03-07 | Source: E-042 (admin team management), E-028-03 (original)*
+*Last updated: 2026-03-07 | Source: E-055 (unified CLI), E-042 (admin team management), E-028-03 (original)*

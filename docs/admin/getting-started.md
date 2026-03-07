@@ -104,6 +104,8 @@ Alternatively, use the reset script to drop the database, re-run migrations, and
 python scripts/reset_dev_db.py
 ```
 
+Also available as `bb db reset`.
+
 After seeding, visit `http://localhost:8001/dashboard` to see the batting stats dashboard with sample data.
 
 **Note**: If the app is running in Docker, you may need to restart it after seeding so it picks up the new data:
@@ -149,6 +151,8 @@ GameChanger API credentials are short-lived and must be refreshed frequently. Cr
 python scripts/refresh_credentials.py
 ```
 
+Also available as `bb creds refresh`.
+
 Or pass the cURL command inline:
 
 ```bash
@@ -185,4 +189,4 @@ Key variables in `.env`:
 
 ---
 
-*Last updated: 2026-03-07 | Source: E-042 (team onboarding via admin UI), E-028-03 (original)*
+*Last updated: 2026-03-07 | Source: E-055 (unified CLI), E-042 (team onboarding via admin UI), E-028-03 (original)*

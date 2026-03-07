@@ -12,3 +12,4 @@ python-multipart~=0.0.20  # Form parsing (required for FastAPI Form() parameters
 webauthn~=2.2        # WebAuthn / passkey support
 python-dotenv~=1.0   # Environment variable loading from .env files
 pyyaml~=6.0          # YAML config parsing (teams.yaml)
+typer[all]>=0.9      # CLI framework for operator commands (rich + shellingham extras)

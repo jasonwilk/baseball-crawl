@@ -1,7 +1,7 @@
 # E-055: Unified Operator CLI
 
 ## Status
-`READY`
+`COMPLETED`
 <!-- Lifecycle: DRAFT -> READY -> ACTIVE -> COMPLETED (or BLOCKED / ABANDONED) -->
 <!-- PM sets READY explicitly after: expert consultation done, all stories have testable ACs, quality checklist passed. -->
 <!-- Only READY and ACTIVE epics can be dispatched. -->
@@ -105,13 +105,13 @@ E-055 (unified CLI)            ─── LAST
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-055-01 | CLI skeleton with Typer and entry point | TODO | None | - |
-| E-055-02 | Credential commands (`bb creds`) | TODO | E-055-01 | - |
-| E-055-03 | Data pipeline commands (`bb data`) | TODO | E-055-01 | - |
-| E-055-04 | Proxy commands (`bb proxy`) | TODO | E-055-01 | - |
-| E-055-05 | Database commands (`bb db`) | TODO | E-055-01 | - |
-| E-055-06 | Status dashboard command (`bb status`) | TODO | E-055-02 | - |
-| E-055-07 | CLAUDE.md commands section update | TODO | E-055-01 through E-055-06 | - |
+| E-055-01 | CLI skeleton with Typer and entry point | DONE | None | se-01 |
+| E-055-02 | Credential commands (`bb creds`) | DONE | E-055-01 | se-02 |
+| E-055-03 | Data pipeline commands (`bb data`) | DONE | E-055-01 | se-03 |
+| E-055-04 | Proxy commands (`bb proxy`) | DONE | E-055-01 | se-04 |
+| E-055-05 | Database commands (`bb db`) | DONE | E-055-01 | se-05 |
+| E-055-06 | Status dashboard command (`bb status`) | DONE | E-055-02 | se-06 |
+| E-055-07 | CLAUDE.md commands section update | DONE | E-055-01 through E-055-06 | architect |
 
 ## Dispatch Team
 - software-engineer
@@ -266,4 +266,5 @@ Story 01 creates `src/cli/__init__.py` with **all sub-app mounts pre-wired** and
 - 2026-03-06: Implementation notes refinement pass (SE corner case analysis). Added advisory notes to stories -- no AC or status changes. (1) E-055-01: logging.basicConfig() import-order hazard and fix. (2) E-055-03: `bb data sync` intentionally has no `--source` flag (deferred to IDEA-012). (3) E-055-04: `cwd=PROJECT_ROOT` required in all subprocess.run() calls for bash scripts. (4) E-055-05: `backup_database()` raises FileNotFoundError, CLI must catch and convert. (5) Epic Technical Notes: `smoke_test.py` and `seed_dev.py` excluded from CLI scope.
 - 2026-03-06: Post-dependency refinement pass. SE analysis of E-053/E-054 deliverables confirmed script interfaces match E-055 assumptions (no AC changes needed). Added `collect-endpoints.sh` to Scripts Excluded from CLI Scope -- one-off API surface discovery tool with hardcoded UUIDs, not an operator workflow.
 - 2026-03-06: Full refinement pass against current codebase. Verified all script function signatures. Key fixes: (1) E-055-02: clarified `refresh` must import library functions from `credential_parser.py` directly -- `refresh_credentials.main()` is not callable (uses argparse internally). (2) E-055-04: `proxy-refresh-headers.py` has importable `run(*, apply) -> int` -- changed from subprocess to direct import. (3) E-055-05: clarified `reset_database()` returns `tuple[int, int]`, not exit code; `backup_database()` takes `Path | None`. (4) E-055-03: annotated current vs. post-E-042-06 function signatures for crawl.py and load.py. (5) Fixed `all` builtin shadow in proxy example code (use `all_sessions` parameter name). (6) Fixed example output header in E-055-06 ("bb status" not "baseball-crawl status"). (7) Added E-052 session directory layout reference to E-055-06. (8) Clarified proxy command pattern: bash scripts use subprocess, Python scripts use direct import.
+- 2026-03-07: All 7 stories DONE. Epic COMPLETED. Unified `bb` CLI fully operational with 5 command groups (creds, data, proxy, db, status), 12 commands total, 125+ tests across 6 test files. Key artifacts: `src/cli/` package (7 modules), `pyproject.toml` entry point, devcontainer editable install, CLAUDE.md Commands restructured. Documentation impact: Triggers 1 and 5 fire -- new feature shipped, operator interaction pattern changed. `docs/admin/operations.md`, `docs/admin/getting-started.md`, `docs/admin/bootstrap-guide.md`, and `docs/admin/mitmproxy-guide.md` reference `python scripts/*` invocations that should note `bb` equivalents. Docs-writer dispatched and completed -- 4 admin docs updated with bb CLI equivalents.
 - 2026-03-06: SE + UXD validation pass. Applied 9 refinements across 5 story files and epic Technical Notes. **Fix Now**: (1) E-055-04: added hyphenated filename import note -- `proxy-refresh-headers.py` cannot be imported normally, recommends `importlib.util.spec_from_file_location()`. Updated AC-4, AC-7, Technical Approach, and epic Command Map. (2) E-055-04: corrected `--all` semantics in AC-2 and Notes to match E-052-04 ("latest closed session's header report", not "aggregates across sessions"). (3) E-055-05: added AC-5 requiring `typer.confirm()` confirmation prompt on `bb db reset` in ALL environments (not just production). `--force` skips prompt. Renumbered subsequent ACs. (4) E-055-02: added AC-7 requiring `bb creds refresh` to print credential key names written (never values) and total `.env` key count. Renumbered subsequent ACs. (5) Epic Technical Notes: added `codex-review.sh`, `codex-spec-review.sh`, `install-hooks.sh` to Scripts Excluded from CLI Scope (developer/agent tooling). **Should Fix**: (6) E-055-03: added advisory note that `bb data sync` help text should guide operators to use `crawl --source db` and `load --source db` separately. (7) E-055-06: revised AC-7 exit code semantics -- missing database is yellow warning (exit 0), not error (exit 1). Only expired/missing creds trigger exit 1. (8) E-055-06: updated AC-2 and AC-4 with inline remediation hints (e.g., "expired -> run: bb creds refresh", "not found -> run: bb data sync"). Updated example output. **Notes**: (9) E-055-02: added implementation note that `merge_env_file(env_path: str)` takes `str`, not `Path`.

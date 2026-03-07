@@ -11,13 +11,15 @@ Three steps to get data flowing:
 **1. Capture credentials** -- Choose one path:
 
 - **Proxy (iPhone)**: Start mitmproxy on your Mac, configure your iPhone to use it, open GameChanger on the phone. Credentials are written to `.env` automatically. See [Credential Capture: Proxy](#credential-capture-proxy) below.
-- **Curl (browser)**: Copy a request from Chrome DevTools, save it to `secrets/gamechanger-curl.txt`, and run `python scripts/refresh_credentials.py`. See [Credential Capture: Curl](#credential-capture-curl) below.
+- **Curl (browser)**: Copy a request from Chrome DevTools, save it to `secrets/gamechanger-curl.txt`, and run `python scripts/refresh_credentials.py` (or `bb creds refresh`). See [Credential Capture: Curl](#credential-capture-curl) below.
 
 **2. Run the bootstrap command**:
 
 ```bash
 python scripts/bootstrap.py
 ```
+
+Also available as `bb data sync`.
 
 This validates credentials, checks team configuration, crawls data from the GameChanger API, and loads it into the database.
 
@@ -102,13 +104,15 @@ Paste the copied command into `secrets/gamechanger-curl.txt`. The file should co
 python scripts/refresh_credentials.py
 ```
 
+Also available as `bb creds refresh`.
+
 This reads `secrets/gamechanger-curl.txt`, extracts the `gc-token` and `gc-device-id` headers, and writes them to `.env`.
 
 ---
 
 ## Bootstrap Command
 
-`python scripts/bootstrap.py` runs four stages in order:
+`python scripts/bootstrap.py` (also available as `bb data sync`) runs four stages in order:
 
 1. **Credential check** -- validates `.env` credentials against the API (`GET /me/user`)
 2. **Team config check** -- verifies `config/teams.yaml` has at least one real team ID
@@ -132,15 +136,19 @@ If either pre-flight check fails, the pipeline exits early with a clear message.
 ```bash
 # Validate only -- confirm credentials and team config before crawling
 python scripts/bootstrap.py --check-only
+# also: bb data sync --check-only
 
 # Full pipeline with browser credentials (default)
 python scripts/bootstrap.py
+# also: bb data sync
 
 # Full pipeline with credentials captured from iPhone
 python scripts/bootstrap.py --profile mobile
+# also: bb data sync --profile mobile
 
 # Preview what would run without making any real calls or writes
 python scripts/bootstrap.py --dry-run
+# also: bb data sync --dry-run
 ```
 
 ### Reading the Output
@@ -173,7 +181,7 @@ GameChanger credentials last **14 days** from the time they were issued. The `gc
 ### When to Refresh
 
 - **Proactively**: Refresh every ~2 weeks before the current credentials expire.
-- **Reactively**: Run `python scripts/bootstrap.py --check-only` to check credential status. If it reports "Credentials expired", recapture credentials using either the proxy or curl path above.
+- **Reactively**: Run `python scripts/bootstrap.py --check-only` (or `bb data sync --check-only`) to check credential status. If it reports "Credentials expired", recapture credentials using either the proxy or curl path above.
 
 The health check output is clear:
 
@@ -188,7 +196,7 @@ Missing required credential(s): GAMECHANGER_AUTH_TOKEN  # exit code 2, never cap
 
 If credentials expire while a crawl is in progress, crawlers report a `CredentialExpiredError` and stop making API calls. Any data that was already fetched and written to disk is still loaded into the database in the load stage. The bootstrap summary will show `crawl: warning (errors)` and `load: success`.
 
-After recapturing credentials, re-run the full bootstrap to fill in any data that was missed.
+After recapturing credentials, re-run the full bootstrap (`python scripts/bootstrap.py` or `bb data sync`) to fill in any data that was missed.
 
 ---
 
@@ -241,4 +249,4 @@ Check:
 
 ---
 
-*Last updated: 2026-03-06 | Story: E-050-04*
+*Last updated: 2026-03-07 | Story: E-055 (unified CLI), E-050-04*

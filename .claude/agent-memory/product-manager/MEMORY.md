@@ -2,23 +2,24 @@
 
 ## Numbering State
 - Next available epic number: E-064
-- Epics created: E-001 through E-063 (E-001, E-003, E-005, E-006, E-007, E-008, E-010, E-011, E-012, E-013, E-014, E-015, E-016, E-017, E-018, E-019, E-020, E-021, E-022, E-024, E-025, E-026, E-027, E-028, E-029, E-030, E-031, E-032, E-033, E-034, E-035, E-036, E-037, E-038, E-042, E-044, E-046, E-048, E-049, E-050, E-052, E-053, E-054, E-056, E-057, E-058, E-059, E-060, E-061 archived)
+- Epics created: E-001 through E-063 (E-001, E-003, E-005, E-006, E-007, E-008, E-010, E-011, E-012, E-013, E-014, E-015, E-016, E-017, E-018, E-019, E-020, E-021, E-022, E-024, E-025, E-026, E-027, E-028, E-029, E-030, E-031, E-032, E-033, E-034, E-035, E-036, E-037, E-038, E-042, E-044, E-046, E-048, E-049, E-050, E-052, E-053, E-054, E-056, E-057, E-058, E-055, E-059, E-060, E-061 archived)
 - Next available idea number: IDEA-013
 - Ideas created: IDEA-001 through IDEA-012
 
 ## Project Context
 - Project: baseball-crawl -- GameChanger API -> database -> coaching dashboard
 - Tech stack: Python end-to-end. FastAPI+Jinja2 serving layer. Docker Compose + Cloudflare Tunnel. SQLite.
-- Architecture: src/ for source (gamechanger/, api/, http/, safety/), tests/ for tests, data/ for local dev outputs, migrations/ for SQL
+- Architecture: src/ for source (gamechanger/, api/, http/, safety/, cli/), tests/ for tests, data/ for local dev outputs, migrations/ for SQL
+- Operator CLI: `bb` command (Typer) -- unified entry point for all operator scripts. src/cli/ package. Entry point in pyproject.toml. Devcontainer-only (not in production image).
 - Credentials: short-lived, profile-scoped (_WEB/_MOBILE env keys). Two capture paths: mitmproxy extractor (auto-detects web/ios) or scripts/refresh_credentials.py (web-only curl paste). No flat-key fallback.
 - See CLAUDE.md for full project conventions
 
 ## Active Epics (Summary)
 - E-041 (DRAFT): Evaluate json-render -- research epic. 1 spike (R-01: fit assessment) + 1 decision gate (99). Needs expert consultation (UX designer, software engineer) before READY.
-- E-055 (READY): Unified Operator CLI -- 7 stories. Single `bb` entry point via Typer. Command groups: creds, data, proxy, db, status. Wraps existing scripts as library code. `bb status` = operator health dashboard. Dep chain: 01 first, then 02+03+04+05 parallel, then 06 (needs 02+04), then 07 (needs all). UX+SE consulted. Epic-level deps: ~~E-042~~, ~~E-052~~, ~~E-053~~, ~~E-054~~. All epic-level deps now COMPLETED. **Dispatch unblocked.**
 - E-062 (DRAFT): Split API Documentation into Per-Endpoint Files -- 1 research spike + 5 stories. Replace monolithic gamechanger-api.md (7,693 lines, 79 endpoints) with per-endpoint files under docs/api/endpoints/ with YAML frontmatter. Spike prototypes format; stories migrate global refs, fully-documented endpoints, partial/minimal endpoints, build index + remove monolith, update context-layer refs. Dep chain: R-01 first, then 01+02+03 parallel, then 04, then 05. No expert consultation required (doc structure decision).
-- E-063 (READY): Dashboard Auth Hardening -- 6 stories. DEV_USER_EMAIL production guard, root route redirect, auth page template + error pages (base_auth.html, 403 rework, new 404/500), stale magic link invalidation, magic link rate limiting, fail closed on missing auth tables (503). SE+UXD consulted. Codex spec review triaged. Dep chain: 01+02+04 parallel (wave 1), then 03 (needs 02) + 05 (needs 04) + 06 (needs 01) parallel (wave 2). All software-engineer work.
 ## Archived Epics
+- E-055 (COMPLETED): Unified Operator CLI -- 7 stories. Single `bb` entry point via Typer with 5 command groups (creds, data, proxy, db, status), 12 commands total, 125+ tests. Key artifacts: src/cli/ package (7 modules), pyproject.toml entry point, devcontainer editable install, CLAUDE.md Commands restructured. 4 admin docs updated with bb equivalents. No follow-up work.
+- E-063 (COMPLETED): Dashboard Auth Hardening -- 6 stories. DEV_USER_EMAIL production guard (RuntimeError on startup), root redirect (GET / -> /dashboard), base_auth.html template (nav-free auth/error pages, 403 rework, new 404/500), stale magic link invalidation (used_at on prior tokens), magic link rate limiting (60s cooldown), fail closed on missing auth tables (503 instead of passthrough). Notable: fixed subtle bug where _handle_dev_bypass caught sqlite3.Error before dispatch could see OperationalError. No follow-up work.
 - E-004 (COMPLETED): Coaching Dashboard -- all 6 stories DONE. 7 routes: /dashboard (batting), /dashboard/pitching, /dashboard/games, /dashboard/games/{id}, /dashboard/opponents, /dashboard/opponents/{id}, /dashboard/players/{id}. 123 tests. Key artifacts: src/api/helpers.py (ip_display, format_avg, format_date), src/api/templates/dashboard/ (8 templates), src/api/db.py (8 query functions added), src/api/routes/dashboard.py (7 routes). Codex review: 3 findings fixed (context passthrough, date formatting, placeholder tests). Mobile-first with bottom nav, 44px touch targets, sticky headers. IDEA-008/009 now promotable (dashboard ready for trends).
 - E-043 (COMPLETED): Dev Environment Auth and Networking Fix -- 1 story. Changed APP_URL, WEBAUTHN_ORIGIN, WEBAUTHN_RP_ID defaults from localhost:8000 to baseball.localhost:8001. Updated .env.example. No follow-up work.
 - E-009 (COMPLETED): Tech Stack Redesign -- all 16 stories/spikes DONE. Option B selected (Docker + Cloudflare Access). Key artifacts: docker-compose.yml, Dockerfile, FastAPI+Jinja2 app, production runbook (docs/production-deployment.md), docker-compose.override.yml.example. CLAUDE.md and E-004 updated. E-009-07 operator verification (AC-3/4/5/6) deferred to user. Codex review: 5 fixes applied.
