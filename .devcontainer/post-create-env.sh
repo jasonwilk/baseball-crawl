@@ -1,22 +1,20 @@
 #!/usr/bin/env bash
-# Inject MCP token exports into .bashrc so Claude Code's .mcp.json can
-# expand ${VAR} references. This block runs BEFORE the interactive guard
-# so non-interactive shells (Claude Code's Bash tool) also get the vars.
+# Inject MCP token exports into .bashrc and .zshrc so Claude Code's .mcp.json
+# can expand ${VAR} references. The .bashrc block runs BEFORE the interactive
+# guard so non-interactive shells (Claude Code's Bash tool) also get the vars.
 #
 # Called from devcontainer.json postCreateCommand.
 set -euo pipefail
 
 MARKER="# --- baseball-crawl MCP env export ---"
 BASHRC="$HOME/.bashrc"
+ZSHRC="$HOME/.zshrc"
 
-# Skip if already injected (idempotent).
-if grep -qF "$MARKER" "$BASHRC" 2>/dev/null; then
-    exit 0
-fi
+# Ensure .zshrc exists before checking (it may not exist yet).
+touch "$ZSHRC"
 
-# Prepend the export block before the existing content.
-TMPFILE=$(mktemp)
-cat > "$TMPFILE" <<'BLOCK'
+# The export block content (same for both shells).
+read -r -d '' EXPORT_BLOCK <<'BLOCK' || true
 # --- baseball-crawl MCP env export ---
 # Export tokens from .env so Claude Code's .mcp.json ${VAR} expansion works.
 # Must run before the interactive-shell guard (non-interactive shells need this).
@@ -28,5 +26,19 @@ fi
 # --- end baseball-crawl MCP env export ---
 
 BLOCK
-cat "$BASHRC" >> "$TMPFILE"
-mv "$TMPFILE" "$BASHRC"
+
+# Inject into .bashrc if not already present (prepend before existing content).
+if ! grep -qF "$MARKER" "$BASHRC" 2>/dev/null; then
+    TMPFILE=$(mktemp)
+    printf '%s' "$EXPORT_BLOCK" > "$TMPFILE"
+    cat "$BASHRC" >> "$TMPFILE"
+    mv "$TMPFILE" "$BASHRC"
+fi
+
+# Inject into .zshrc if not already present (prepend before existing content).
+if ! grep -qF "$MARKER" "$ZSHRC" 2>/dev/null; then
+    TMPFILE=$(mktemp)
+    printf '%s' "$EXPORT_BLOCK" > "$TMPFILE"
+    cat "$ZSHRC" >> "$TMPFILE"
+    mv "$TMPFILE" "$ZSHRC"
+fi

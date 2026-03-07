@@ -10,6 +10,7 @@ This directory contains documentation for system operators and developers workin
 | [Getting Started](getting-started.md) | Prerequisites, setup, running the stack, seeding the database, and running tests. |
 | [Operations](operations.md) | Deployment, credential rotation, backups, troubleshooting, and monitoring. |
 | [Agent Guide](agent-guide.md) | The AI agent ecosystem: what it is, how to work with it, and how to request work. |
+| [Terminal Guide](terminal-guide.md) | ZSH and tmux setup: what changed, ZSH for bash users, tmux key bindings, connecting from iTerm2, and operating modes. |
 
 ## Related Documentation
 
@@ -23,4 +24,4 @@ These documents live outside `docs/admin/` but are referenced throughout:
 
 ---
 
-*Last updated: 2026-03-03 | Story: E-028-03*
+*Last updated: 2026-03-07 | Story: E-066-05*

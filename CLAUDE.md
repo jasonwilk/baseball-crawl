@@ -236,6 +236,33 @@ The mitmproxy traffic-capture tool runs on the **Mac host machine**, completely 
 
 See `docs/admin/mitmproxy-guide.md` for the full proxy setup and usage guide.
 
+## Terminal Modes
+
+Three operating modes depending on session complexity:
+
+| Mode | Environment | Shell | Agent Teams | When to use |
+|------|-------------|-------|-------------|-------------|
+| **Solo** | VS Code terminal | ZSH | None | Single-agent work, no teams |
+| **Coordinated** | VS Code terminal | ZSH | In-process | Agent Teams within VS Code (current default) |
+| **Heavy** | Host terminal + tmux | ZSH | tmux mode | Large Agent Teams sessions needing dedicated resources |
+
+**Heavy mode setup** (Mac host):
+1. Start a tmux session: `tmux new-session -s baseball`
+2. Attach into the devcontainer: `docker exec -it -u vscode <container> zsh` (the `-u vscode` flag is required -- without it you land as root and miss the vscode user's env setup)
+3. Set `teammateMode` to `tmux` in Claude Code settings
+4. Run Claude Code inside the tmux session
+
+The host/container split in Heavy mode follows the same boundary as the Proxy Boundary section above -- the tmux session runs on the Mac host, Claude Code runs inside the devcontainer.
+
+## Shell Environment
+
+This devcontainer has two shells with distinct roles:
+
+- **ZSH**: Default interactive shell (set via `chsh`). Oh My Zsh with `devcontainers` theme. Used by the operator in VS Code and host-terminal sessions.
+- **Bash**: Automation shell. Claude Code's Bash tool runs bash. All hook scripts (`.claude/hooks/statusline.sh`, `.claude/hooks/pii-check.sh`, `.claude/hooks/epic-archive-check.sh`) use bash shebangs intentionally -- this is by design, not an oversight. All scripts in `scripts/` use bash shebangs.
+
+**Dual-injection pattern**: `.devcontainer/post-create-env.sh` injects environment variables into both `.bashrc` and `.zshrc` (prepending the same export block to each). When adding new environment variables to the post-create script, this dual-injection pattern must be maintained so both shells see the same env.
+
 ## Code Style
 - Use type hints for all function signatures
 - Write docstrings for public functions and classes
@@ -250,6 +277,9 @@ See `docs/admin/mitmproxy-guide.md` for the full proxy setup and usage guide.
 - All HTTP requests should include proper error handling, retries, and rate limiting
 - Store raw API responses before transforming (raw -> processed pipeline)
 - Credential management: environment variables via .env files (local dev and production; Docker Compose reads .env automatically)
+- **Import boundary**: `src/` modules MUST NOT import from `scripts/`. `scripts/` contains standalone operator tools that import from `src/`; the reverse direction is not allowed. Reusable logic always lives in `src/`, with scripts as thin wrappers.
+- **Repo-root resolution**: Modules in `src/` use `Path(__file__).resolve().parents[N]` to derive repo-root-relative paths (e.g., `parents[2]` for a module three levels deep like `src/db/reset.py`). Never use cwd-relative paths or `sys.path.insert()` in `src/` modules.
+- **`migrations/` is a Python package**: It has `__init__.py` and is included in `pyproject.toml` `[tool.setuptools.packages]` because `src/db/reset.py` imports from it. Do not remove `migrations/__init__.py` or the pyproject.toml include without understanding this dependency.
 
 ## Security Rules
 - IMPORTANT: Credentials and tokens MUST NEVER appear in code, logs, commit history, or agent output
