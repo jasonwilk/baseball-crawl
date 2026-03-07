@@ -34,7 +34,13 @@
      based on story domains and the Agent Selection table in dispatch-pattern.md.
      When this section is present, PM should prefer it over inferring agents
      from each story's domain. When absent or empty, PM falls back to the
-     routing table. -->
+     routing table.
+
+     Deriving the team: PM should build this list from the union of Agent Hint
+     values across all stories. For stories that lack an Agent Hint, PM uses
+     file-path inference (the Agent Selection table in dispatch-pattern.md) and
+     includes the inferred agent type in the union. The resulting list is still
+     advisory -- PM retains final routing authority. -->
 - software-engineer
 - data-engineer
 

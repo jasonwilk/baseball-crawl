@@ -45,7 +45,9 @@ Every dispatch team has three roles:
 
 **At team creation**: The team lead reads the epic's Dispatch Team section and spawns PM + all listed implementers in one batch. If no Dispatch Team section exists, the team lead spawns PM only and tells PM: "No Dispatch Team section found. Determine required agents and message me to spawn them."
 
-**Mid-dispatch (cascading)**: When PM identifies newly unblocked stories that need an agent type not already on the team, PM messages the team lead: "Please spawn [agent-type] for story E-NNN-SS." The team lead spawns the agent and notifies PM.
+**Pre-spawn communication (multi-wave epics)**: At dispatch start, PM reviews the full dependency graph and messages the team lead with all agent types needed across all waves -- not just the first. The team lead spawns wave-1 agents immediately; PM signals when to spawn later-wave agents as their dependencies complete. For single-wave epics (no inter-story dependencies), the existing "At team creation" batch spawn is unchanged -- all agents are spawned at once.
+
+**Mid-dispatch (cascading)**: A fallback for truly unexpected agent needs discovered mid-dispatch -- when a story reveals a requirement that was not anticipated during planning. When PM identifies such a need for an agent type not already on the team, PM messages the team lead: "Please spawn [agent-type] for story E-NNN-SS." The team lead spawns the agent and notifies PM. For planned multi-wave spawning, prefer the pre-spawn communication pattern above.
 
 ## PM Responsibilities During Dispatch
 
@@ -131,7 +133,9 @@ When all stories are verified DONE, the PM executes the following closure sequen
 
 **Dispatch Team metadata**: Epics may include a `## Dispatch Team` section (between Stories and Technical Notes) that explicitly lists the agents needed for the epic. When this section is present and non-empty, the team lead should prefer it over inferring agents from story domains using the table above. When the section is absent or empty, the team lead spawns PM only and PM determines required agents via the routing table, messaging the team lead to spawn them. The PM always retains final routing authority -- the Dispatch Team section is advisory.
 
-**Routing Precedence**: If a story's "Files to Create or Modify" includes any context-layer path listed above, route to `claude-architect` regardless of the story's primary domain. The only exception is the PM updating its own memory files (`.claude/agent-memory/product-manager/`) during normal status-update work.
+**Agent Hint**: Stories may carry an optional `## Agent Hint` field that declares which agent type should implement the story. When an Agent Hint is present, PM should prefer it over file-path inference from the routing table above. The hint is advisory -- PM retains final routing authority and may override it based on team composition, agent availability, or other factors.
+
+**Routing Precedence**: If a story's "Files to Create or Modify" includes any context-layer path listed above, route to `claude-architect` regardless of the story's primary domain or Agent Hint value. The only exception is the PM updating its own memory files (`.claude/agent-memory/product-manager/`) during normal status-update work.
 
 ## Task Tool vs. Agent Teams
 
@@ -143,3 +147,5 @@ The PM chooses the appropriate mechanism based on the task. Consultation = Task 
 ## Context Packaging
 
 Every teammate dispatch MUST include the full story file text and full epic Technical Notes. Never summarize -- implementing agents need every acceptance criterion, file path, and constraint verbatim.
+
+When assigning a story that has completed upstream dependencies, PM should check the upstream stories for Handoff Context declarations. If any upstream story declares artifacts produced for the current story, PM includes those declared artifacts (file paths and descriptions) in the context block alongside the full story file and Technical Notes.

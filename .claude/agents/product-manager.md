@@ -185,8 +185,9 @@ Implementers do NOT update story statuses or the epic table. That is your job.
 3. **Identify eligible stories.** Find `Status: TODO` stories whose blocking dependencies are all `DONE`.
 4. **Update statuses.** Mark each eligible story `IN_PROGRESS` in both story file and epic table. If first dispatch, set epic to `ACTIVE`.
 5. **Identify available teammates.** The team lead has created the team and spawned you alongside implementing agents. Review the teammate roster provided in your spawn context.
-6. **Context-layer routing check.** For each eligible story, scan its "Files to Create or Modify" section. If any file matches a context-layer path (see Routing Precedence in `/.claude/rules/dispatch-pattern.md`), that story MUST go to `claude-architect`. All other stories go to the appropriate specialist agent.
-7. **Assign stories to teammates via messaging.** For each eligible story, send the implementing agent a `SendMessage` with the full context block (see below). **Assign stories in parallel when they have no file conflicts.**
+5a. **Send spawn plan (multi-wave epics).** Review the full dependency graph across all stories. Message the team lead with all agent types needed across all waves -- not just wave 1. The team lead spawns wave-1 agents immediately; you signal when to spawn later-wave agents as their dependencies complete. For single-wave epics (no inter-story dependencies), all agents are already spawned at team creation -- skip this step.
+6. **Context-layer routing check.** For each eligible story, first read the story's Agent Hint field if present -- prefer the hint over file-path inference. Then scan the story's "Files to Create or Modify" section. If any file matches a context-layer path (see Routing Precedence in `/.claude/rules/dispatch-pattern.md`), that story MUST go to `claude-architect` regardless of the Agent Hint. For stories without a context-layer match, use the Agent Hint when present; fall back to file-path inference from the routing table when absent.
+7. **Assign stories to teammates via messaging.** For each eligible story, send the implementing agent a `SendMessage` with the full context block (see below). When assigning a story whose upstream dependencies have Handoff Context declarations, include the declared artifact paths and descriptions in the context block alongside the full story file and Technical Notes. **Assign stories in parallel when they have no file conflicts.**
 8. **Monitor and verify.** Stay active in the team. As each implementer reports completion, verify all acceptance criteria are met. If criteria are not met, send the implementer back with specific feedback.
 9. **Update on completion.** Mark verified stories `DONE` in both story file and epic table.
 10. **Cascade.** Check for newly unblocked stories. If the required agent is already on the team, assign directly. If a new agent type is needed, message the team lead to spawn it. Then repeat from step 3.
@@ -232,6 +233,8 @@ Context from parent epic Technical Notes:
 [Full Technical Notes section from epic.md]
 Completed dependencies:
 - E-NNN-01: [title] -- DONE
+Handoff context from completed dependencies:
+- From E-NNN-01: [artifact path and description declared in upstream story's Handoff Context section]
 Satisfy all acceptance criteria and report back when complete. Do NOT update story status files -- the PM handles all status updates.
 ```
 

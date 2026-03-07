@@ -26,6 +26,21 @@
 ## Files to Create or Modify
 <!-- List every file this story is expected to touch. Mandatory for parallel execution. -->
 
+## Agent Hint
+<!-- Optional. Routing hint for PM -- declares which agent type should implement this story.
+     Valid values are agent names as they appear in .claude/agents/ filenames:
+     software-engineer, data-engineer, claude-architect, docs-writer, ux-designer, api-scout.
+     If the hint disagrees with the routing table in dispatch-pattern.md, the routing table wins.
+     Omit this field entirely for stories with no routing preference. -->
+
+## Handoff Context
+<!-- Optional. Declares what artifacts this story produces for downstream stories.
+     Use a bulleted list where each bullet names a downstream story ID and describes what it needs.
+     Omit this section entirely for stories with no downstream consumers.
+     Example:
+     - **Produces for E-NNN-SS**: Description of artifact and what the downstream story needs from it.
+-->
+
 ## Definition of Done
 - [ ] All acceptance criteria pass
 - [ ] Tests written and passing
