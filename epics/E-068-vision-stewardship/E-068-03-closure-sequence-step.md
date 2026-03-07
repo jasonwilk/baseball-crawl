@@ -37,7 +37,7 @@ claude-architect
 
 ## Definition of Done
 - [ ] All acceptance criteria pass
-- [ ] Step numbering is consistent across both files
+- [ ] Step numbering is correct within each file after insertion (each file uses its own numbering convention)
 - [ ] No regressions in existing tests
 
 ## Notes

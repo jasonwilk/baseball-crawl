@@ -16,12 +16,12 @@ This story depends on all other E-068 stories being complete so that CLAUDE.md r
 
 ## Acceptance Criteria
 - [ ] **AC-1**: The Workflows section of `CLAUDE.md` includes a "Curate the vision" entry following the pattern of existing workflow entries. It should state the trigger phrase, name the PM as the responsible agent, and briefly describe what happens (review signals, discuss with user, refine vision document).
-- [ ] **AC-2**: `docs/VISION.md` and `docs/vision-signals.md` are referenced somewhere in CLAUDE.md where agents would look for project documentation paths (e.g., the Key Directories section under Project Management, or a similar discoverable location).
+- [ ] **AC-2**: `docs/VISION.md` and `docs/vision-signals.md` are referenced in the `## Project Management > ### Key Directories` section of CLAUDE.md.
 - [ ] **AC-3**: The Workflows entry follows the structure of existing entries (trigger phrase, agent/skill reference, brief description). The docs reference is a single line or table row, not a multi-paragraph explanation. Total additions are under 15 lines.
 - [ ] **AC-4**: No existing CLAUDE.md content is removed or altered beyond the targeted additions.
 
 ## Technical Approach
-Two targeted additions to `CLAUDE.md`. The Workflows section already has four entries with a consistent format (trigger phrase, skill/agent reference, brief description). Add a fifth entry for "curate the vision" following the same pattern. For file discoverability, find the most natural place to mention the vision files -- likely near the Project Management key directories list or the docs references. Read CLAUDE.md fully to identify the right insertion points.
+Two targeted additions to `CLAUDE.md`. The Workflows section already has four entries with a consistent format (trigger phrase, skill/agent reference, brief description). Add a fifth entry for "curate the vision" following the same pattern. For file discoverability, add the vision files to the Key Directories table in the Project Management section of CLAUDE.md.
 
 ## Dependencies
 - **Blocked by**: E-068-01, E-068-02, E-068-03, E-068-04
