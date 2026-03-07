@@ -8,7 +8,7 @@
 Establish a lightweight system for capturing, curating, and refining the project's evolving vision. Vision signals -- statements about what the project will become or how it will be used -- are captured in a parking lot file by any agent in any session, then periodically curated into the polished vision document during epic closure or on user request. The PM's role expands to include long-horizon product thinking as a vision steward.
 
 ## Background & Context
-The user (Jason) wants AI agents to play a larger role in shaping the project's direction, not just implementing what he tells them. Conversations regularly produce vision signals -- statements about the project's future direction, new capabilities, or user scenarios -- that currently evaporate when the session ends. Example: Jason mentioned wanting an LLM-powered chat agent built into the dashboard where coaches can ask questions about matchups and get strategy insights. That signal was never captured anywhere.
+The user (Jason) wants AI agents to play a larger role in shaping the project's direction, not just implementing what he tells them. Conversations regularly produce vision signals -- statements about the project's future direction, new capabilities, or user scenarios -- that currently evaporate when the session ends. Example: Jason mentioned wanting an LLM-powered chat agent built into the dashboard where coaches can ask questions about matchups and get strategy insights. That signal already appears in `docs/VISION.md` (Layer 5: Conversational Intelligence) but is not in any lightweight parking lot that agents can append to during normal work.
 
 Two artifacts already exist or are ready to be created:
 - `docs/VISION.md` -- the polished guiding light (already created)
@@ -16,14 +16,14 @@ Two artifacts already exist or are ready to be created:
 
 This epic introduces the trigger phrase "curate the vision" to activate the refinement workflow.
 
-**Expert consultation**: No separate consultation required. While this epic touches context-layer files (rules, agent definitions, dispatch pattern, CLAUDE.md), all architectural decisions (two-artifact model, closure sequence integration, PM ownership) were made collaboratively with Jason before this epic was formed. Additionally, claude-architect is the implementing agent for all five stories via the Dispatch Team -- the architect will apply its own judgment during implementation. A pre-implementation consultation would be circular.
+**Expert consultation**: The PM Consultation Triggers table flags "Agent infrastructure, CLAUDE.md, rules, skills" epics for claude-architect consultation. This epic touches those files, but a separate pre-story consultation is not warranted because: (1) all architectural decisions (two-artifact model, closure sequence integration, PM ownership) were made collaboratively with Jason before this epic was formed -- these are user-directed design choices, not open questions for the architect; (2) claude-architect is the sole implementing agent for all five stories (Dispatch Team section), so the architect will apply its own structural judgment during implementation; (3) a pre-implementation architectural review was completed (see History entry for 2026-03-07 refinement review), confirming all insertion points, step numbering, and file locations are correct. A separate consultation would be circular.
 
 ## Goals
 - Any agent in any session can append a vision signal to the parking lot with near-zero friction
 - Epic closure includes a vision signal review step that prompts the user about curation
 - The trigger phrase "curate the vision" is introduced and activates a refinement workflow
 - The PM agent definition includes vision stewardship as a core responsibility
-- The first vision signal (LLM-powered coaching chat agent) is captured so it does not get lost
+- The first vision signal (LLM-powered coaching chat agent) is backfilled into the parking lot from `docs/VISION.md` as a seed entry
 
 ## Non-Goals
 - Creating a new agent for vision work (PM owns this)
@@ -96,7 +96,7 @@ Two sections of CLAUDE.md need updates:
 | E-068-04 | `.claude/agents/product-manager.md` |
 | E-068-05 | `CLAUDE.md` |
 
-No file conflicts between stories 01-04 (all touch different files). Stories 02 and 03 depend on 01 (the parking lot file must exist before rules or closure steps reference it). Story 04 is independent. Story 05 depends on all others being complete so CLAUDE.md references are accurate. Dispatch waves: wave 1 = E-068-01; wave 2 = E-068-02, E-068-03, E-068-04 (parallel); wave 3 = E-068-05.
+No file conflicts between stories 01-04 (all touch different files). Stories 02 and 03 depend on 01 (the parking lot file must exist before rules or closure steps reference it). Story 04 is independent. Story 05 depends on all others being complete so CLAUDE.md references are accurate. Dispatch waves: wave 1 = E-068-01, E-068-04 (parallel, no file conflicts); wave 2 = E-068-02, E-068-03 (parallel, unblocked by 01); wave 3 = E-068-05.
 
 ## Open Questions
 - None
@@ -105,3 +105,4 @@ No file conflicts between stories 01-04 (all touch different files). Stories 02 
 - 2026-03-07: Created as DRAFT. No expert consultation required -- pure process/workflow epic with architectural decisions pre-made by the user.
 - 2026-03-07: Codex spec review triaged. 5 findings: 2 REFINED (dependency gaps for 02/03 on 01, subjective ACs tightened), 1 partially REFINED (unprocessed signals definition, trigger phrase wording), 1 DISMISSED (consultation -- architect is the implementer), 1 partially REFINED (future-state language corrected).
 - 2026-03-07: Architectural refinement review. Verified: (1) rule file frontmatter pattern matches existing rules (paths key with `**` glob, same as dispatch-pattern.md), (2) dispatch-pattern.md closure step numbering confirmed (Step 14 = ideas, Step 15 = summary -- story correctly targets insertion between them), (3) implement/SKILL.md uses Phase 5 internal numbering (Steps 1-9) with Step 6 = ideas and Step 7 = summary -- story Notes already warn about different numbering conventions, (4) PM agent def sections confirmed (Atomic Status Update Protocol > Completing an epic checklist at 6 steps, vision review would be Step 7 after ideas review), (5) CLAUDE.md Key Directories section at line 329 and Workflows section at line 175 confirmed as correct insertion targets. No corrections needed. Epic set to READY.
+- 2026-03-07: Second codex spec review triaged. 7 findings: (1) P1 ACCEPTED -- hardened 01 AC-4 to require exact `## Signals` heading (downstream 03 AC-1 keys off it); (2) P2 ACCEPTED -- corrected epic background and story 01 context to acknowledge LLM chat signal already exists in VISION.md Layer 5, parking lot entry is a backfill not first capture; (3) P2 ACCEPTED -- pinned 05 AC-2 to Key Directories section (was vague "somewhere agents would look"); (4) P2 ACCEPTED -- fixed 03 DoD from "consistent across both files" to "correct within each file" since the two files use different numbering conventions; (5) P2 PARTIALLY ACCEPTED -- strengthened consultation justification to explicitly acknowledge Consultation Triggers table flag and cite the architectural refinement review as evidence, but maintained "no separate consultation" conclusion since architect is the sole implementer and all design decisions were user-directed; (6) P3 ACCEPTED -- added E-068-02 and E-068-03 to story 01 Blocks field (were missing despite epic table showing the dependency); (7) P3 ACCEPTED -- moved E-068-04 to wave 1 (no dependencies, no file conflicts with 01).
