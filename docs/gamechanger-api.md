@@ -2,7 +2,7 @@
 
 This document is the single source of truth for GameChanger API knowledge. It is maintained by the `api-scout` agent and updated whenever new endpoints or behaviors are confirmed from live traffic captures.
 
-**Last updated:** 2026-03-05 (CONFIRMED: `GET /teams/{team_id}/schedule/events/{event_id}/player-stats` -- HTTP 200, full schema documented; both teams + cumulative + spray charts in one call; 106 KB response for 25 players; PROXY CAPTURE: 50 new endpoint patterns from iOS Odyssey mitmproxy capture; `/organizations/*` family discovered; iOS header analysis complete)
+**Last updated:** 2026-03-07 (BULK RAW-JSON DOCUMENTATION SESSION: Full schema documentation added from raw JSON files captured in data/raw/bulk-20260307-040838/. Key updates: `/me/permissions` upgraded from HTTP 501 to CONFIRMED -- requires `?entityId={uuid}&entityType=team`; `/me/organizations` upgraded from HTTP 500 to CONFIRMED -- requires `?page_size=50` + `x-pagination: true`; `/me/related-organizations` upgraded from HTTP 500 to CONFIRMED -- requires `?page_starts_at=0&page_size=50` + `x-pagination: true`; `/organizations/{org_id}/teams` upgraded from HTTP 500 to CONFIRMED -- requires `?page_starts_at=0&page_size=50` + `x-pagination: true`; `/me/associated-players` `associations` schema completed -- bare array with `relation` + `player_id`; HTTP 500 Endpoints section updated to reflect 3 of 4 endpoints now resolved; Priority Matrix updated. Prior update: LIVE PROBE SESSION: 64 endpoints executed via curl; 50 returned HTTP 200; all org, me, subscription, search, and sync endpoints CONFIRMED)
 **Status of each endpoint is noted inline.**
 
 ---
@@ -44,7 +44,8 @@ This document is the single source of truth for GameChanger API knowledge. It is
    - [season-stats](#schema-season-stats)
    - [associations](#schema-associations)
    - [player-stats](#schema-player-stats)
-8. [Proxy-Discovered Endpoints (2026-03-05)](#proxy-discovered-endpoints-2026-03-05)
+8. [Confirmed Endpoints (2026-03-07 Live Probe Session)](#confirmed-endpoints-2026-03-07-live-probe-session)
+9. [Proxy-Discovered Endpoints (2026-03-05)](#proxy-discovered-endpoints-2026-03-05)
    - [Sync / Realtime](#sync--realtime)
    - [Announcements](#announcements)
    - [Subscription](#subscription)
@@ -58,10 +59,20 @@ This document is the single source of truth for GameChanger API knowledge. It is
    - [Places](#places)
    - [Search](#search)
    - [Media CDN Hosts](#media-cdn-hosts)
-9. [Endpoint Priority Matrix](#endpoint-priority-matrix)
-10. [Key Observations](#key-observations)
-11. [Header Quick Reference](#header-quick-reference)
-12. [Notes for Implementers](#notes-for-implementers)
+10. [Proxy-Discovered Endpoints (2026-03-07)](#proxy-discovered-endpoints-2026-03-07)
+   - [Teams -- Per-Opponent Scouting](#teams----per-opponent-scouting)
+   - [Bats / Starting Lineups](#bats--starting-lineups)
+   - [Player Attributes](#player-attributes)
+   - [Events (standalone)](#events-standalone)
+   - [Organizations (additional)](#organizations-additional)
+   - [Teams -- Additional (2026-03-07)](#teams----additional-2026-03-07)
+   - [Web-Route Public Endpoints](#web-route-public-endpoints)
+   - [Me -- Additional (2026-03-07)](#me----additional-2026-03-07)
+   - [Write Operations Catalog](#write-operations-catalog)
+10. [Endpoint Priority Matrix](#endpoint-priority-matrix)
+11. [Key Observations](#key-observations)
+12. [Header Quick Reference](#header-quick-reference)
+13. [Notes for Implementers](#notes-for-implementers)
 
 ---
 
@@ -2857,10 +2868,11 @@ Each user object has 5 fields:
 
 | Value              | Description |
 |--------------------|-------------|
-| `"active"`         | Standard active account. The majority of users (31/33 on page 2). |
-| `"active-confirmed"` | Active account with email confirmation explicitly recorded. Observed on 2/33 records. May indicate a separate confirmation step, perhaps for coaches or staff roles. |
+| `"active"`         | Standard active account. The majority of users. |
+| `"active-confirmed"` | Active account with email confirmation explicitly recorded. May indicate a separate confirmation step, perhaps for coaches or staff roles. |
+| `"invited"` | User has been invited but has not yet accepted / set up their account. Confirmed in 2026-03-07 capture of team `72bb77d8` (Lincoln Rebels 14U). |
 
-Other values (e.g., `"invited"`, `"inactive"`, `"pending"`) may exist on page 1 or other teams but were not observed in this capture.
+Other values (e.g., `"inactive"`, `"pending"`, `"removed"`) may exist but were not observed.
 
 #### Example Response (PII fully redacted)
 
@@ -2887,9 +2899,9 @@ Other values (e.g., `"invited"`, `"inactive"`, `"pending"`) may exist on page 1 
 
 - **PII-dense endpoint** -- every record contains a real name, email, and user UUID. This is among the most sensitive endpoints in the API. Raw responses must never be stored without full redaction. The sample file at `data/raw/team-users-sample.json` has all PII replaced with placeholders.
 - **No role information** -- the response does not indicate whether a user is a coach, player, parent, or fan. Role information is not available from this endpoint alone. Cross-reference with `/teams/{team_id}/associations` or `/me/teams?include=user_team_associations` for role context.
-- **Page 2 only confirmed** -- this capture was page 2 (`start_at=100`). Page 1 behavior (field set, status distribution, pagination header format) has not been independently confirmed from a live capture. The schema is inferred to be identical.
-- **Single team confirmed** -- team UUID `cb67372e-b75d-472d-83e3-4d39b6d85eb2` (unidentified team, not a primary LSB team). Schema may vary for teams with different membership configurations.
-- **Total user count unconfirmed** -- 33 records on page 2, cursor started at 100. If page size is 50 (as observed on game-summaries), page 1 might have 50 records, not 100. The `start_at=100` cursor does not necessarily imply 100 records on page 1 -- the cursor is a sequence number, not an offset count. Total count is unconfirmed.
+- **Page 1 confirmed (2026-03-07)** -- A full (unsegmented) page-1 call to team `72bb77d8` (Lincoln Rebels 14U) returned 100 records in the bulk crawl. Combined with `/users/count` confirming 243 total users, this team requires at least 3 pages. Page-1 schema confirmed identical to page-2.
+- **Multiple teams confirmed** -- originally captured from unidentified team `cb67372e`. Re-confirmed 2026-03-07 against Lincoln Rebels 14U (`72bb77d8`), 243 total users. Schema consistent across teams.
+- **Total user count** -- cross-reference with `GET /teams/{team_id}/users/count` for exact totals before paginating.
 - **`active-confirmed` semantics unclear** -- observed on 2 of 33 records. The distinction from `"active"` is undocumented. May relate to email verification, coach/staff confirmation, or a separate invite-acceptance flow.
 - **Other status values not observed** -- values like `"invited"`, `"pending"`, `"inactive"`, `"removed"` may exist. Do not assume this enum is exhaustive from this single-page capture.
 - **Response size** -- 33 records on page 2: approximately 3.5 KB. Full dataset for this team (~133 users across 2 pages) would be approximately 14 KB.
@@ -3437,6 +3449,1878 @@ Very high. This is potentially the most efficient single API call for comprehens
 
 ---
 
+## Confirmed Endpoints (2026-03-07 Live Probe Session)
+
+All endpoints in this section were confirmed via live curl calls on 2026-03-07. Where prior sections listed these as "PROXY CAPTURE" or "OBSERVED", this section upgrades their status to CONFIRMED with full schema documentation.
+
+---
+
+### GET /teams/{team_id}/opponent/{opponent_id}
+
+**Status: CONFIRMED LIVE -- 200 OK. Discovered 2026-03-07.**
+
+Returns the opponent entry record for a specific opponent within a team's opponent registry. This is the per-opponent lookup complement to `GET /teams/{team_id}/opponents` (the paginated list).
+
+**Note on URL structure:** This endpoint uses `/opponent/` (singular), not `/opponents/` (plural). Both coexist: the plural form returns the full list, the singular form returns a specific opponent.
+
+#### Path Parameters
+
+| Parameter     | Type | Description |
+|---------------|------|-------------|
+| `team_id`     | UUID | The owning team's UUID |
+| `opponent_id` | UUID | The opponent's `root_team_id` from `GET /teams/{team_id}/opponents` (NOT the `progenitor_team_id`) |
+
+#### Response Schema
+
+Single JSON object (not an array).
+
+| Field                | Type    | Description |
+|----------------------|---------|-------------|
+| `root_team_id`       | UUID    | The local opponent registry ID (matches the `opponent_id` path parameter) |
+| `owning_team_id`     | UUID    | UUID of the requesting team |
+| `name`               | string  | Opponent display name (e.g., `"Blackhawks 14U"`) |
+| `is_hidden`          | boolean | Whether this opponent is hidden from the UI |
+| `progenitor_team_id` | UUID    | The canonical GameChanger team UUID for this opponent -- use this for other team endpoints |
+
+#### Example Response
+
+```json
+{
+  "root_team_id": "6e898958-c6e3-48c7-a97e-e281a35cfc50",
+  "owning_team_id": "72bb77d8-REDACTED",
+  "name": "Blackhawks 14U",
+  "is_hidden": false,
+  "progenitor_team_id": "f0e73e42-f248-402b-8171-524b4e56a535"
+}
+```
+
+**Confirmed:** 2026-03-07.
+
+---
+
+### GET /teams/{team_id}/opponents/players
+
+**Status: CONFIRMED LIVE -- 200 OK. 758 records, 61 unique opponent teams. Discovered 2026-03-07.**
+
+Returns all players from all opponent teams for the owning team in a single response. This is the most efficient way to bulk-load opponent rosters without iterating per-opponent team.
+
+#### Path Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `team_id` | UUID | The owning team's UUID |
+
+#### Response Schema
+
+Bare JSON array of player records.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `team_id` | UUID | The opponent team's UUID (the team this player belongs to) |
+| `player_id` | UUID | The player's UUID |
+| `person` | object | Player identity |
+| `person.id` | UUID | Same as `player_id` |
+| `person.first_name` | string | First name |
+| `person.last_name` | string | Last name |
+| `attributes` | object | Player attributes |
+| `attributes.player_number` | string | Jersey number (string, not integer) |
+| `attributes.status` | string | `"active"` or `"removed"`. Removed players are included in the response. |
+| `bats` | object or null | Batting/throwing attributes. `null` for removed players who never had handedness set. |
+| `bats.batting_side` | string or null | `"left"`, `"right"`, `"both"`, or `null` if not set |
+| `bats.throwing_hand` | string or null | `"left"`, `"right"`, or `null` if not set |
+
+#### Example Record
+
+```json
+{
+  "team_id": "6e898958-c6e3-48c7-a97e-e281a35cfc50",
+  "player_id": "68396d70-111c-4593-9df0-849051e1e96a",
+  "person": {
+    "id": "68396d70-111c-4593-9df0-849051e1e96a",
+    "first_name": "Jackson",
+    "last_name": "Dowling"
+  },
+  "attributes": {
+    "player_number": "10",
+    "status": "active"
+  },
+  "bats": {
+    "batting_side": "right",
+    "throwing_hand": "right"
+  }
+}
+```
+
+**Key Observations:**
+- Returns 758 records across 61 opponent teams for the Lincoln Rebels 14U team.
+- Includes `bats.batting_side` and `bats.throwing_hand` -- same fields as `/player-attributes/{player_id}/bats` but inline in the roster record. This is the most efficient way to get handedness for all opponents at once.
+- **Removed players are included** -- `attributes.status = "removed"` records appear in the response. Filter to `"active"` only when building scouting rosters.
+- **`bats` can be `null`** -- 30 of 758 records had null `bats` (all were `"removed"` status). Handle null `bats` before accessing `batting_side` or `throwing_hand`.
+- **`batting_side` can be `"both"`** -- observed value in addition to `"left"`, `"right"`, and `null`. Treat `"both"` as equivalent to `"switch"` (switch hitter).
+- No pagination observed in this response (758 records returned in one call). May paginate for larger datasets -- monitor `x-next-page` response header.
+- **Coaching relevance: CRITICAL.** One call gives full opponent roster including handedness for all 61 opponent teams. No per-opponent iteration required.
+
+**Confirmed:** 2026-03-07.
+
+---
+
+### GET /teams/{team_id}/lineup-recommendation
+
+**Status: CONFIRMED LIVE -- 200 OK. Full schema documented. Discovered 2026-03-07.**
+
+Returns GameChanger's algorithmically-generated batting order and fielding assignment recommendation for the team.
+
+#### Path Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `team_id` | UUID | Team UUID |
+
+#### Response Schema
+
+Single JSON object with `lineup` array and `metadata` object.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `lineup` | array | Recommended lineup entries (9 players observed -- standard starting lineup) |
+| `lineup[].player_id` | UUID | Player UUID |
+| `lineup[].field_position` | string | Recommended field position (e.g., `"C"`, `"1B"`, `"P"`, `"CF"`, `"LF"`, `"RF"`, `"2B"`, `"3B"`, `"SS"`) |
+| `lineup[].batting_order` | integer | Batting order position (1 = leadoff) |
+| `metadata` | object | Generation metadata |
+| `metadata.generated_at` | string (ISO 8601) | When this recommendation was generated |
+| `metadata.team_id` | UUID | The team UUID |
+
+#### Example Response
+
+```json
+{
+  "lineup": [
+    {"player_id": "11ceb5ee-REDACTED", "field_position": "C", "batting_order": 1},
+    {"player_id": "8119312c-REDACTED", "field_position": "1B", "batting_order": 2},
+    {"player_id": "879a99fd-REDACTED", "field_position": "RF", "batting_order": 3},
+    {"player_id": "d5645a1b-REDACTED", "field_position": "P", "batting_order": 4},
+    {"player_id": "e8534cc3-REDACTED", "field_position": "LF", "batting_order": 5},
+    {"player_id": "996c48ba-REDACTED", "field_position": "SS", "batting_order": 6},
+    {"player_id": "3050e40b-REDACTED", "field_position": "3B", "batting_order": 7},
+    {"player_id": "77c74470-REDACTED", "field_position": "2B", "batting_order": 8},
+    {"player_id": "b7790d88-REDACTED", "field_position": "CF", "batting_order": 9}
+  ],
+  "metadata": {
+    "generated_at": "2026-03-07T04:09:32.884Z",
+    "team_id": "72bb77d8-REDACTED"
+  }
+}
+```
+
+**Key Observations:**
+- Returns exactly 9 players (standard starting 9, not a full roster).
+- `generated_at` timestamp changes on each request (recommendation is recalculated live, not cached).
+- Field positions use standard baseball position abbreviations.
+- Player UUIDs match those in `GET /teams/{team_id}/players`.
+- **Coaching relevance: HIGH.** The GC recommendation serves as a data-driven baseline for lineup construction. Comparing this recommendation to the coach's actual lineup reveals which players GC ranks higher/lower.
+
+**Confirmed:** 2026-03-07.
+
+---
+
+### GET /bats-starting-lineups/{event_id}
+
+**Status: CONFIRMED LIVE -- 200 OK. Full schema documented. Discovered 2026-03-07 (confirmed via retry with home game event_id).**
+
+Returns the stored starting lineup for a specific game event. Returns HTTP 403 if the authenticated user is not the scorer for that event (e.g., an away game where the opponent managed scoring).
+
+**Auth note:** HTTP 403 was returned for event `e3471c3b-8c6d-450c-9541-dd20107e9ace` (away game). A retry with a home game event_id returned 200 OK with the full lineup. Access is restricted to events where the authenticated user's team was the scorer.
+
+#### Path Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `event_id` | UUID | Schedule event UUID. Must be for a game where the authenticated team was the primary scorer. |
+
+#### Response Schema
+
+Single JSON object (no wrapper -- the lineup object directly, unlike `/latest/{team_id}` which wraps in `latest_lineup`).
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | UUID | Unique ID for this lineup record. Same `id` is referenced as `pregame_data.lineup_id` in `GET /events/{event_id}`. |
+| `dh` | UUID or null | DH player UUID (null when not using DH) |
+| `dh_batting_for` | UUID or null | UUID of the player the DH bats for (null when not using DH) |
+| `creator` | UUID | User UUID who created this lineup (PII -- redact in stored files) |
+| `entries` | array | Lineup entries. Array order = batting order (first entry = leadoff). |
+| `entries[].player_id` | UUID | Player UUID |
+| `entries[].fielding_position` | string | Field position (e.g., `"CF"`, `"P"`, `"RF"`, `"LF"`, `"1B"`, `"3B"`, `"C"`, `"2B"`, `"SS"`) |
+
+#### Example Response
+
+```json
+{
+  "id": "65b1ba56-cbef-41cf-bb2f-e8be239c2bf1",
+  "dh": null,
+  "dh_batting_for": null,
+  "creator": "e07b2d06-REDACTED",
+  "entries": [
+    {"player_id": "d5645a1b-REDACTED", "fielding_position": "CF"},
+    {"player_id": "11ceb5ee-REDACTED", "fielding_position": "P"},
+    {"player_id": "879a99fd-REDACTED", "fielding_position": "RF"},
+    {"player_id": "e8534cc3-REDACTED", "fielding_position": "LF"},
+    {"player_id": "8119312c-REDACTED", "fielding_position": "1B"},
+    {"player_id": "3050e40b-REDACTED", "fielding_position": "3B"},
+    {"player_id": "e9a04fc5-REDACTED", "fielding_position": "C"},
+    {"player_id": "77c74470-REDACTED", "fielding_position": "2B"},
+    {"player_id": "996c48ba-REDACTED", "fielding_position": "SS"}
+  ]
+}
+```
+
+**Key Observations:**
+- The response is the lineup object directly (no `latest_lineup` wrapper). This differs from `GET /bats-starting-lineups/latest/{team_id}` which wraps the same object in `{"latest_lineup": {...}}`.
+- The lineup `id` matches `pregame_data.lineup_id` in `GET /events/{event_id}` -- enabling navigation from event to lineup directly.
+- Array order corresponds to batting order.
+- DH fields present but null when not using designated hitter.
+- Access limited to events where the authenticated user's team was the scorer. Returns HTTP 403 for away games where the opponent managed scoring.
+
+**Confirmed:** 2026-03-07 (confirmed with home game event_id after initial 403 on away game event_id).
+
+---
+
+### GET /bats-starting-lineups/latest/{team_id}
+
+**Status: CONFIRMED LIVE -- 200 OK. Full schema documented. Discovered 2026-03-07.**
+
+Returns the most recently entered starting lineup for a team, identified by batting-order position and fielding assignment.
+
+#### Path Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `team_id` | UUID | Team UUID |
+
+#### Response Schema
+
+Single JSON object with `latest_lineup` wrapper.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `latest_lineup` | object | The lineup object |
+| `latest_lineup.id` | UUID | Unique ID for this lineup record |
+| `latest_lineup.dh` | UUID or null | DH player UUID (null when not using DH) |
+| `latest_lineup.dh_batting_for` | UUID or null | UUID of the player the DH bats for (null when not using DH) |
+| `latest_lineup.creator` | UUID | User UUID who created this lineup |
+| `latest_lineup.entries` | array | Lineup entries (one per player in the starting lineup) |
+| `latest_lineup.entries[].player_id` | UUID | Player UUID |
+| `latest_lineup.entries[].fielding_position` | string | Field position (e.g., `"CF"`, `"P"`, `"RF"`, `"LF"`, `"1B"`, `"3B"`, `"C"`, `"2B"`, `"SS"`) |
+
+**Note:** The `entries` array order corresponds to batting order -- first entry = leadoff, etc.
+
+#### Example Response
+
+```json
+{
+  "latest_lineup": {
+    "id": "65b1ba56-cbef-41cf-bb2f-e8be239c2bf1",
+    "dh": null,
+    "dh_batting_for": null,
+    "creator": "e07b2d06-REDACTED",
+    "entries": [
+      {"player_id": "d5645a1b-REDACTED", "fielding_position": "CF"},
+      {"player_id": "11ceb5ee-REDACTED", "fielding_position": "P"},
+      {"player_id": "879a99fd-REDACTED", "fielding_position": "RF"},
+      {"player_id": "e8534cc3-REDACTED", "fielding_position": "LF"},
+      {"player_id": "8119312c-REDACTED", "fielding_position": "1B"},
+      {"player_id": "3050e40b-REDACTED", "fielding_position": "3B"},
+      {"player_id": "e9a04fc5-REDACTED", "fielding_position": "C"},
+      {"player_id": "77c74470-REDACTED", "fielding_position": "2B"},
+      {"player_id": "996c48ba-REDACTED", "fielding_position": "SS"}
+    ]
+  }
+}
+```
+
+**Key Observations:**
+- Returns the actual batting order as entered by the coach (as opposed to `/lineup-recommendation` which is GC's algorithm).
+- DH fields present but null when not using designated hitter.
+- `creator` field is a user UUID (PII -- redact in stored files).
+- Compare with `/lineup-recommendation` to see where the coach deviated from GC's algorithm.
+
+**Confirmed:** 2026-03-07.
+
+---
+
+### GET /game-streams/{game_stream_id}/events
+
+**Status: CONFIRMED LIVE -- 200 OK. 319 events, 10 unique event codes. Discovered 2026-03-07.**
+
+Returns the raw event stream for a completed game. This is the low-level event log from which all higher-level game data (boxscore, plays, stats) is derived.
+
+#### Path Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `game_stream_id` | UUID | The `game_stream.id` from game-summaries |
+
+#### Response Schema
+
+Bare JSON array of event objects.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | UUID | Event record UUID |
+| `stream_id` | UUID | The game stream UUID (matches path parameter) |
+| `sequence_number` | integer | Ordering position (0-based). Events are ordered by this field. |
+| `event_data` | string | **JSON-encoded string** containing the actual event payload. Must be JSON-parsed separately. |
+
+**`event_data` inner object fields (after JSON-parsing the string):**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `code` | string | Event type code (see below) |
+| `id` | UUID | Event UUID |
+| `createdAt` | integer | Unix timestamp in milliseconds |
+| `attributes` | object | Code-specific attributes |
+| `compactorAttributes` | object | Stream compaction metadata. `stream` field: `"head"` or `"main"`. |
+| `events` | array | For batched events -- array of individual event objects (same shape) |
+
+**Observed event codes:**
+
+| Code | Description |
+|------|-------------|
+| `set_teams` | Game initialization -- sets home team UUID (`homeId`) and away team UUID (`awayId`) |
+| `fill_lineup_index` | Assigns a player to a lineup slot by index. Attributes: `teamId`, `playerId`, `index`. |
+| `reorder_lineup` | Reorders the batting lineup. |
+| `fill_position` | Assigns a player to a field position. Attributes: `teamId`, `playerId`, field position code. |
+| `sub_players` | Substitution event. |
+| `pitch` | A single pitch recorded. Attributes include pitch result, count, and related context. |
+| `transaction` | At-bat transaction (hit, out, walk, etc.). |
+| `base_running` | Baserunning event (stolen base, advance, out on bases). |
+| `edit_group` | Batch edit/correction to prior events. |
+| `replace_runner` | Courtesy runner substitution. |
+| `undo` | Undo of a prior event. |
+
+**Key Observations:**
+- Total of 319 events for a 6-inning game (game_stream `5f54ba22-c23f-4301-bf0f-85e0f947a1ff`).
+- The `event_data` field is a **JSON string, not an object**. Must call `JSON.parse(event.event_data)` to access inner fields.
+- Some events use `events` array inside `event_data` (batched multi-event records) rather than a single `code`/`attributes` object.
+- This is the raw data that the boxscore and plays endpoints are derived from. Use the higher-level endpoints for most coaching use cases.
+- The `gamestream-viewer-payload-lite` endpoint (below) returns the same events array with one additional field (`created_at` timestamp) per record.
+
+**Coaching Relevance:** Low for direct use. This is raw event stream data -- use `GET /game-stream-processing/{id}/plays` (processed play-by-play) or `GET /game-stream-processing/{id}/boxscore` instead.
+
+**Confirmed:** 2026-03-07.
+
+---
+
+### GET /game-streams/gamestream-viewer-payload-lite/{event_id}
+
+**Status: CONFIRMED LIVE -- 200 OK. Schema documented. Discovered 2026-03-07.**
+
+Returns the lightweight game viewer payload for a completed game. Contains the same event stream as `GET /game-streams/{game_stream_id}/events` but with additional fields and a summary structure.
+
+**Note on path:** Despite the name including `event_id`, this endpoint accepts the `event_id` from the schedule (UUID) directly -- it resolves to the game stream internally. The event_id used (`e3471c3b-8c6d-450c-9541-dd20107e9ace`) is a schedule event UUID, not a game_stream_id.
+
+#### Path Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `event_id` | UUID | Schedule event UUID (from `GET /teams/{team_id}/schedule`) |
+
+#### Response Schema
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `stream_id` | UUID | The resolved game stream UUID (= `game_stream.id` from game-summaries) |
+| `latest_events` | array | Event records with 5 fields: `id`, `stream_id`, `created_at` (ISO 8601 string), `event_data` (JSON-encoded string), `sequence_number`. One additional field vs `/game-streams/{id}/events`: `created_at` replaces the inner `createdAt` (ms timestamp). |
+| `all_event_data_ids` | array | Array of inner event UUIDs (the `id` field inside parsed `event_data`, not the outer record `id`) |
+| `marker` | string or null | Cursor for incremental polling. For completed games, observed as the last `sequence_number` string (e.g., `"318"` for a 319-event stream). For live games, likely `null` or a cursor token until the game is complete. |
+
+**Observed counts:**
+- `latest_events`: 319 events (same count as `/game-streams/{stream_id}/events`)
+- `all_event_data_ids`: 319 UUIDs (same events, just the inner event_data UUIDs, not the wrapper record UUIDs)
+- `marker`: `"318"` (string of last sequence number for this completed game)
+
+**Confirmed:** 2026-03-07.
+
+---
+
+### GET /game-streams/gamestream-recap-story/{event_id}
+
+**Status: HTTP 404 for event `1e0f8dfc-a7cb-46ce-9d3e-671e9110ece6`. Schema documented in 2026-03-05 proxy section above.**
+
+The endpoint exists and was confirmed via proxy capture, but returned 404 for the event_id tested on 2026-03-07. The recap may not be generated for all games -- it may require a game to have been processed and scored completely.
+
+**Confirmed schema:** See the `gamestream-recap-story` entry in the Proxy-Discovered Endpoints (2026-03-05) section above.
+
+**Discovered:** 2026-03-07 (404 confirmed for this event).
+
+---
+
+### GET /game-streams/insight-story/bats/{event_id}
+
+**Status: HTTP 404 -- endpoint does not return data for this event. Discovered 2026-03-07.**
+
+Returned 404 for event `e3471c3b-8c6d-450c-9541-dd20107e9ace`. Consistent with prior proxy observation of 404.
+
+---
+
+### GET /game-streams/player-insights/bats/{event_id}
+
+**Status: HTTP 404 -- endpoint does not return data for this event. Discovered 2026-03-07.**
+
+Returned 404 for event `e3471c3b-8c6d-450c-9541-dd20107e9ace`. Consistent with prior proxy observation of 404.
+
+---
+
+### GET /player-attributes/{player_id}/bats
+
+**Status: CONFIRMED LIVE -- 200 OK. Full schema documented. Discovered 2026-03-07.**
+
+Returns batting/throwing handedness attributes for a player.
+
+#### Path Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `player_id` | UUID | Player UUID (from `GET /teams/{team_id}/players`) |
+
+#### Response Schema
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `player_id` | UUID | The player UUID (matches path parameter) |
+| `throwing_hand` | string | `"right"` or `"left"` |
+| `batting_side` | string | `"right"`, `"left"`, or `"switch"` |
+
+#### Example Response
+
+```json
+{
+  "player_id": "879a99fd-ef90-4cce-9794-4ec0f78224bb",
+  "throwing_hand": "right",
+  "batting_side": "left"
+}
+```
+
+**Note:** The same fields appear inline in `GET /teams/{team_id}/opponents/players` responses. For bulk opponent handedness, prefer the opponents/players bulk call. Use this endpoint for individual player lookups or for own-team players.
+
+**Confirmed:** 2026-03-07.
+
+---
+
+### GET /organizations/{org_id}/standings
+
+**Status: CONFIRMED LIVE -- 200 OK. Full schema documented. Discovered 2026-03-07.**
+
+Returns win/loss standings for all teams in an organization.
+
+#### Path Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `org_id` | UUID | Organization UUID |
+
+#### Response Schema
+
+Bare JSON array. Each element is a team standing record.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `team_id` | UUID | Team UUID |
+| `home` | object | Home game record |
+| `home.wins` | integer | Home wins |
+| `home.losses` | integer | Home losses |
+| `home.ties` | integer | Home ties |
+| `away` | object | Away game record (same shape as `home`) |
+| `overall` | object | Overall record (same shape as `home`) |
+| `last10` | object | Last 10 games record (same shape as `home`) |
+| `winning_pct` | float | Overall winning percentage (0.0 to 1.0) |
+| `runs` | object | Run differential data |
+| `runs.scored` | integer | Total runs scored |
+| `runs.allowed` | integer | Total runs allowed |
+| `runs.differential` | integer | `scored - allowed` |
+| `streak` | object | Current win/loss streak |
+| `streak.count` | integer | Length of current streak |
+| `streak.type` | string | `"win"` or `"loss"` |
+
+**Note:** The org used for testing (`87452e66-ac31-4d72-8cda-467cce2fe832`) returned 6 teams with all zeros. This is likely a travel ball org without active league standings. The schema is fully populated for org types that track standings (e.g., high school leagues with scheduled in-conference games).
+
+**Confirmed:** 2026-03-07.
+
+---
+
+### GET /organizations/{org_id}/team-records
+
+**Status: CONFIRMED LIVE -- 200 OK. Same schema as `/standings`. Discovered 2026-03-07.**
+
+Returns season win/loss records for all teams in an organization. Response schema is identical to `GET /organizations/{org_id}/standings` -- same fields, same structure.
+
+**Relationship to `/standings`:** The two endpoints appear to return the same data from the same org. The distinction may be that `/standings` is for league/conference standings context (includes home/away/last10/streak) while `/team-records` is a raw record view. Both were identical in this test. Use either; they serve the same data.
+
+**Confirmed:** 2026-03-07.
+
+---
+
+### GET /organizations/{org_id}/pitch-count-report
+
+**Status: CONFIRMED LIVE -- 200 OK. CSV format response. Discovered 2026-03-07.**
+
+Returns a pitch count report for all pitchers in the organization for the past week. Unlike other endpoints, the response is **CSV format** (not JSON).
+
+#### Path Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `org_id` | UUID | Organization UUID |
+
+#### Response Schema
+
+The response is a **CSV string** (content-type likely `text/csv` or `text/plain`). Columns (confirmed from header row):
+
+| Column | Description |
+|--------|-------------|
+| `Game Date` | Date of the game |
+| `Start Time` | Game start time |
+| `Pitcher` | Pitcher name |
+| `Team` | Pitcher's team name |
+| `Opponent` | Opposing team |
+| `Pitch Count` | Total pitches thrown |
+| `Last Batter, First Pitch #` | Pitch number of the first pitch to the last batter faced |
+| `Innings Pitched` | Innings pitched |
+| `Innings Caught` | Innings the pitcher caught (if they also caught) |
+| `Final Score` | Final game score |
+| `Scored By` | Who recorded the scoring |
+
+#### Example Response
+
+```
+Game Date,Start Time,Pitcher,Team,Opponent,Pitch Count,"Last Batter, First Pitch #",Innings Pitched,Innings Caught,Final Score,Scored By
+No games with pitcher data were found in the past week.
+```
+
+**Notes:**
+- The response body is a CSV string, not JSON. This is the only non-JSON API response documented in this spec.
+- "No games with pitcher data were found in the past week." message returned when no recent games exist.
+- The report appears to cover the past 7 days by default. Query parameter for date range not yet confirmed.
+- The `org_id` used (`8881846c-7a9c-4230-ac17-09627aac7f59`) returned the "no games" message, confirming the endpoint works but the org had no recent games.
+- **Coaching relevance: HIGH.** Pitch count tracking is a safety and regulatory requirement. This endpoint provides org-wide pitch counts in one call vs. per-game aggregation.
+
+**Confirmed:** 2026-03-07.
+
+---
+
+### GET /organizations/{org_id}/events
+
+**Status: CONFIRMED LIVE -- 200 OK. Empty array for travel ball org. Discovered 2026-03-07.**
+
+Returns events (scheduled games/practices) for an organization. Returned `[]` for the travel ball org (`87452e66-...`). This endpoint likely has data for organized league orgs (e.g., high school programs with league game calendars).
+
+**Confirmed:** 2026-03-07.
+
+---
+
+### GET /organizations/{org_id}/game-summaries
+
+**Status: CONFIRMED LIVE -- 200 OK. Empty array for travel ball org. Discovered 2026-03-07.**
+
+Returns game summaries for an organization. Returned `[]` for the travel ball org. Likely populated for league/school program orgs where the organization manages the game schedule directly.
+
+**Confirmed:** 2026-03-07.
+
+---
+
+### GET /organizations/{org_id}/scoped-features
+
+**Status: CONFIRMED LIVE -- 200 OK. Empty features object. Discovered 2026-03-07.**
+
+Returns feature flags scoped to the organization. Returned `{"scoped_features": {}}` -- no features enabled for this org.
+
+**Confirmed:** 2026-03-07.
+
+---
+
+### GET /organizations/{org_id}/teams
+
+**Status: CONFIRMED LIVE -- 200 OK. Full schema documented. Previously returned HTTP 500 with web headers due to missing pagination parameters. CONFIRMED 2026-03-07 with required parameters.**
+
+Returns all teams belonging to an organization. Requires `?page_starts_at=0&page_size=50` query parameters and the `x-pagination: true` request header.
+
+#### Path Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `org_id` | UUID | Organization UUID |
+
+#### Required Query Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `page_starts_at` | integer | YES | Pagination offset. Use `0` for first page. |
+| `page_size` | integer | YES | Page size. Use `50`. |
+
+#### Required Headers (in addition to standard auth headers)
+
+| Header | Value | Description |
+|--------|-------|-------------|
+| `x-pagination` | `true` | Must be present; server returns HTTP 500 without it |
+
+#### Response Schema
+
+Bare JSON array of team objects. 7 teams observed for the Lincoln Rebels travel ball organization.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `root_team_id` | UUID | The team's root UUID (use for `/teams/{id}` calls) |
+| `organization_id` | UUID | Organization UUID |
+| `status` | string | Team status: `"active"`, `"org_invite"` |
+| `name` | string | Team display name |
+| `sport` | string | Sport (e.g., `"baseball"`) |
+| `season_name` | string | Season name (e.g., `"summer"`, `"spring"`) |
+| `season_year` | integer | Season year |
+| `city` | string | City |
+| `state` | string | State/province |
+| `country` | string | Country |
+| `staff_ids` | array | Array of user UUIDs for team staff (populated for org_invite teams, empty for active) |
+| `proxy_team_id` | UUID or null | Internal proxy team ID (null for `"org_invite"` status teams) |
+| `age_group` | string | Age group (e.g., `"14U"`, `"9U"`) |
+| `team_public_id` | string | Public ID slug for the team |
+
+#### Example Response
+
+```json
+[
+  {
+    "root_team_id": "cb67372e-REDACTED",
+    "organization_id": "87452e66-REDACTED",
+    "status": "active",
+    "name": "Lincoln Rebels 9U",
+    "sport": "baseball",
+    "season_name": "summer",
+    "season_year": 2026,
+    "city": "Lincoln",
+    "state": "NE",
+    "country": "United States",
+    "staff_ids": [],
+    "proxy_team_id": "3d0e3553-REDACTED",
+    "age_group": "9U",
+    "team_public_id": "KCRUFIkaHGXI"
+  }
+]
+```
+
+**Key Observations:**
+- `root_team_id` is the primary team UUID for use with `/teams/{team_id}` and all team-scoped endpoints.
+- `team_public_id` enables public endpoint access without additional UUID-to-public_id bridge calls.
+- Teams with `status: "org_invite"` have `proxy_team_id: null` -- invited but not yet fully provisioned.
+- **Coaching relevance: HIGH.** Single call enumerates all teams in an organization; replaces per-team discovery.
+
+**Confirmed:** 2026-03-07. Required params: `?page_starts_at=0&page_size=50` + `x-pagination: true` header.
+
+---
+
+### GET /events/{event_id}
+
+**Status: CONFIRMED LIVE -- 200 OK. Full schema documented. Discovered 2026-03-07.**
+
+Returns full details for a single scheduled event. Contains both the base event metadata and pre-game data (opponent, home/away, lineup).
+
+#### Path Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `event_id` | UUID | Schedule event UUID |
+
+#### Response Schema
+
+Single JSON object with two top-level keys.
+
+**`event` object:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | UUID | Event UUID (matches path parameter) |
+| `event_type` | string | `"game"`, `"practice"`, or other event type |
+| `sub_type` | array | Sub-type tags (empty array `[]` observed for standard games) |
+| `status` | string | `"scheduled"`, `"completed"`, etc. |
+| `full_day` | boolean | Whether this is an all-day event |
+| `team_id` | UUID | The team this event belongs to |
+| `start.datetime` | string (ISO 8601) | Game start time in UTC |
+| `end.datetime` | string (ISO 8601) | Scheduled end time in UTC |
+| `arrive.datetime` | string (ISO 8601) | Requested arrival time in UTC |
+| `timezone` | string | IANA timezone (e.g., `"America/Chicago"`) |
+
+**`pregame_data` object:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | UUID | Same as `event.id` |
+| `game_id` | UUID | Same as `event.id` (redundant field) |
+| `opponent_name` | string | Opponent team display name |
+| `opponent_id` | UUID | Opponent team UUID (= `progenitor_team_id` for opponent lookup) |
+| `home_away` | string | `"home"` or `"away"` perspective of the team |
+| `lineup_id` | UUID | UUID of the pre-game lineup entry (links to bats-starting-lineups) |
+
+#### Example Response
+
+```json
+{
+  "event": {
+    "id": "e3471c3b-8c6d-450c-9541-dd20107e9ace",
+    "event_type": "game",
+    "sub_type": [],
+    "status": "scheduled",
+    "full_day": false,
+    "team_id": "72bb77d8-REDACTED",
+    "start": {"datetime": "2025-04-06T19:00:00.000Z"},
+    "end": {"datetime": "2025-04-06T21:00:00.000Z"},
+    "arrive": {"datetime": "2025-04-06T19:00:00.000Z"},
+    "timezone": "America/Chicago"
+  },
+  "pregame_data": {
+    "id": "e3471c3b-8c6d-450c-9541-dd20107e9ace",
+    "game_id": "e3471c3b-8c6d-450c-9541-dd20107e9ace",
+    "opponent_name": "Nebraska Prime Gold 14u",
+    "opponent_id": "f00549a8-84b1-4c9f-97e9-79942531d13b",
+    "home_away": "away",
+    "lineup_id": "a39fbbeb-05bd-4b2c-b7cc-b249a3d17a6c"
+  }
+}
+```
+
+**Key Observations:**
+- `pregame_data.lineup_id` links to the `id` field in `GET /bats-starting-lineups/{event_id}` -- enables resolving from event to lineup directly.
+- This endpoint provides the same data as an individual event in the schedule list, but as a single-object lookup without needing to paginate through the full schedule.
+
+**Confirmed:** 2026-03-07.
+
+---
+
+### GET /events/{event_id}/highlight-reel
+
+**Status: CONFIRMED LIVE -- 200 OK. Full schema documented below. Discovered 2026-03-05, confirmed 2026-03-07.**
+
+Returns a structured highlight reel for a completed game event. The playlist interleaves inning-transition plates with actual play clips, each linked to a play-by-play event via `pbp_id`.
+
+#### Path Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `event_id` | UUID | Schedule event UUID |
+
+#### Response Schema
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `multi_asset_video_id` | UUID | Multi-asset video identifier (matches `event_id`) |
+| `event_id` | UUID | Event UUID (matches path parameter) |
+| `status` | string | Highlight reel status. Observed: `"finalized"` |
+| `type` | string | Asset type. Observed: `"event"` |
+| `playlist` | array | Ordered list of video segments |
+| `playlist[].media_type` | string | `"video"` |
+| `playlist[].url` | string (URL) | HLS (.m3u8) CloudFront-signed video URL |
+| `playlist[].is_transition` | boolean | `true` for inning marker plates, `false` for play clips |
+| `playlist[].clip_id` | UUID (optional) | Clip identifier -- absent on transition plates |
+| `playlist[].pbp_id` | UUID (optional) | Play-by-play ID -- links to `id` in `/game-stream-processing/{id}/plays`. Absent on transitions. |
+| `playlist[].cookies` | object | CloudFront signed cookies: `CloudFront-Key-Pair-Id`, `CloudFront-Signature`, `CloudFront-Policy` |
+| `duration` | integer | Total highlight reel duration in seconds |
+| `thumbnail_url` | string (URL) | CloudFront-signed thumbnail URL |
+| `small_thumbnail_url` | string | Small thumbnail URL (observed: empty string `""`) |
+
+**Key Observations:**
+- Transition plates use static `vod-archive.gc.com/static-content/startplate-transitions/baseball/inning_N.m3u8` paths.
+- Play clips use IVS paths: `vod-archive.gc.com/ivs/v1/{account_id}/{channel_id}/clips/{timestamp}.m3u8`.
+- `pbp_id` enables cross-reference between video clips and play-by-play data.
+- All video URLs require CloudFront signed cookies for playback.
+
+**Coaching Relevance:** Low for stat analytics. Not needed for data ingestion.
+
+**Confirmed:** 2026-03-07.
+
+---
+
+### Web-Route Season-Slug Endpoints
+
+**Status: ALL HTTP 404 -- route pattern does not resolve on `api.team-manager.gc.com`. Discovered 2026-03-07.**
+
+The following endpoints from the 2026-03-07 proxy section all returned HTTP 404 when tested:
+
+- `GET /teams/{public_id}/{season-slug}/opponents`
+- `GET /teams/{public_id}/{season-slug}/schedule/{event_id}/plays`
+- `GET /teams/{public_id}/{season-slug}/season-stats`
+- `GET /teams/{public_id}/{season-slug}/team`
+- `GET /teams/{public_id}/{season-slug}/tools`
+- `GET /teams/{public_id}/players/{player_id}`
+- `GET /public/teams/{public_id}/live`
+
+**Interpretation:** These URL patterns may be served by the **web app** (`https://web.gc.com`) rather than the API (`https://api.team-manager.gc.com`). The proxy capture may have captured web-frontend navigation requests rather than API calls. These endpoints are NOT available on the API domain.
+
+**Action:** Re-test against `https://web.gc.com` if these patterns are needed. For stat data, use the authenticated endpoints which are confirmed to work on the API domain.
+
+---
+
+### GET /teams/public/{public_id}/access-level
+
+**Status: CONFIRMED LIVE -- 200 OK. Full schema documented. Discovered 2026-03-07.**
+
+**AUTH REQUIRED:** Despite the `/public/` path segment, this endpoint requires `gc-token` authentication. Requests without a valid token return HTTP 401 with: `{"message":"The request was missing user authentication, please try again with valid token(s)","missing_authentication":["user"]}`. Do not confuse this with the truly public `/public/teams/` endpoints which require no auth.
+
+Returns the paid access level for a team's public profile.
+
+#### Path Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `public_id` | string | Team public ID slug (e.g., `"a1GFM9Ku0BbF"`) |
+
+#### Headers
+
+```
+gc-token: {GC_TOKEN}
+gc-device-id: {GC_DEVICE_ID}
+```
+
+#### Response Schema
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `paid_access_level` | string or null | Access tier. Observed: `null` for this team. May be `"premium"`, `"plus"`, or other tier strings when the team has paid access. |
+
+#### Example Response (authenticated)
+
+```json
+{"paid_access_level": null}
+```
+
+#### Error Response (unauthenticated -- HTTP 401)
+
+```json
+{
+  "message": "The request was missing user authentication, please try again with valid token(s)",
+  "missing_authentication": ["user"]
+}
+```
+
+**Confirmed:** 2026-03-07.
+
+---
+
+### GET /teams/public/{public_id}/id
+
+**Status: CONFIRMED LIVE -- 200 OK. Full schema documented. Discovered 2026-03-07.**
+
+**AUTH REQUIRED:** Despite the `/public/` path segment, this endpoint requires `gc-token` authentication. Requests without a valid token return HTTP 401 with: `{"message":"The request was missing user authentication, please try again with valid token(s)","missing_authentication":["user"]}`. Do not confuse this with the truly public `/public/teams/` endpoints which require no auth.
+
+**Reverse bridge: public_id slug -> team UUID.** This is the reverse of `GET /teams/{team_id}/public-team-profile-id` (which resolves UUID -> public_id slug).
+
+#### Path Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `public_id` | string | Team public ID slug |
+
+#### Headers
+
+```
+gc-token: {GC_TOKEN}
+gc-device-id: {GC_DEVICE_ID}
+```
+
+#### Response Schema
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | UUID | The team's internal UUID |
+
+#### Example Response (authenticated)
+
+```json
+{"id": "72bb77d8-54ca-42d2-8547-9da4880d0cb4"}
+```
+
+#### Error Response (unauthenticated -- HTTP 401)
+
+```json
+{
+  "message": "The request was missing user authentication, please try again with valid token(s)",
+  "missing_authentication": ["user"]
+}
+```
+
+**Confirmed:** The public_id `a1GFM9Ku0BbF` resolves to UUID `72bb77d8-54ca-42d2-8547-9da4880d0cb4` (Lincoln Rebels 14U). This confirms the symmetry between the two bridge endpoints.
+
+**Confirmed:** 2026-03-07.
+
+---
+
+### GET /teams/{team_id}/users/count
+
+**Status: CONFIRMED LIVE -- 200 OK. Full schema documented. Discovered 2026-03-07.**
+
+Returns the count of users associated with a team without loading the full user list.
+
+#### Response Schema
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `count` | integer | Total number of users on the team |
+
+#### Example Response
+
+```json
+{"count": 243}
+```
+
+**Confirmed:** 2026-03-07.
+
+---
+
+### GET /teams/{team_id}/relationships
+
+**Status: CONFIRMED LIVE -- 200 OK. Previously documented in proxy section -- status upgraded. Confirmed 2026-03-07.**
+
+Returns user-to-player relationship mappings for the team. Links parent/guardian GameChanger accounts to their associated player records. Contains PII -- user UUIDs should not be stored or logged without appropriate access controls.
+
+#### Path Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `team_id` | UUID | Team UUID |
+
+#### Response Schema
+
+Bare JSON array of relationship objects.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `team_id` | UUID | Team UUID (same as path parameter) |
+| `user_id` | UUID | GameChanger user UUID (PII -- handle with care) |
+| `player_id` | UUID | Player UUID on this team |
+| `relationship` | string | Relationship type. Observed values: `"primary"` (parent/guardian), `"self"` (player's own account) |
+
+**Key observations:**
+- Multiple `user_id` values can map to the same `player_id` (e.g., both parents linked to the same player).
+- `"self"` relationship indicates the user IS the player (player has their own GameChanger account).
+- `"primary"` relationship indicates the user is a parent/guardian of the player.
+- 243 total users on this team (from `/users/count`), relationships list has 86+ records for a subset of players.
+
+**Confirmed:** 2026-03-07.
+
+---
+
+### GET /teams/{team_id}/relationships/requests
+
+**Status: CONFIRMED LIVE -- 200 OK. Returns empty array `[]`. Discovered 2026-03-07.**
+
+No pending relationship requests for this team. Schema unknown (no records in response).
+
+**Confirmed:** 2026-03-07.
+
+---
+
+### GET /teams/{team_id}/scoped-features
+
+**Status: CONFIRMED LIVE -- 200 OK. Returns empty features. Confirmed 2026-03-07.**
+
+```json
+{"scoped_features": {}}
+```
+
+**Confirmed:** 2026-03-07.
+
+---
+
+### GET /teams/{team_id}/team-notification-setting
+
+**Status: CONFIRMED LIVE -- 200 OK. Previously documented in proxy section -- status upgraded. Confirmed 2026-03-07.**
+
+```json
+{"team_id": "72bb77d8-REDACTED", "event_reminder_setting": "never"}
+```
+
+**Confirmed:** 2026-03-07.
+
+---
+
+### GET /teams/{team_id}/web-widgets
+
+**Status: CONFIRMED LIVE -- 200 OK. Full schema documented. Discovered 2026-03-07.**
+
+Returns the web widget configurations for a team.
+
+#### Response Schema
+
+Bare JSON array of widget objects.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | UUID | Widget UUID |
+| `type` | string | Widget type. Observed: `"schedule"` |
+
+#### Example Response
+
+```json
+[{"id": "5417dbce-11ad-44d3-afc4-244147272961", "type": "schedule"}]
+```
+
+**Confirmed:** 2026-03-07.
+
+---
+
+### GET /teams/{team_id}/external-associations
+
+**Status: CONFIRMED LIVE -- 200 OK. Returns empty array `[]`. Previously documented in proxy section -- confirmed. Discovered 2026-03-07.**
+
+No external system associations for this team. Schema unknown from this response (empty array).
+
+**Confirmed:** 2026-03-07.
+
+---
+
+### GET /teams/{team_id}/avatar-image
+
+**Status: CONFIRMED LIVE -- 200 OK. Returns signed CloudFront URL. Discovered 2026-03-07.**
+
+Returns a signed URL for the team's avatar/logo image.
+
+#### Response Schema
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `full_media_url` | string (URL) | Time-limited signed CloudFront URL to the team avatar image |
+
+The URL follows the pattern: `https://media-service.gc.com/{image-uuid}?Policy={base64}&Key-Pair-Id={id}&Signature={sig}`
+
+**Confirmed:** 2026-03-07.
+
+---
+
+### GET /teams/{team_id}/video-stream/videos
+
+**Status: CONFIRMED LIVE -- 200 OK. Returns empty array `[]`. Discovered 2026-03-07.**
+
+No standalone videos for this team (distinct from per-event video stream assets).
+
+**Confirmed:** 2026-03-07.
+
+---
+
+### GET /teams/{team_id}/schedule/events/{event_id}/video-stream
+
+**Status: CONFIRMED LIVE -- 200 OK. Full schema documented. Discovered 2026-03-07.**
+
+Returns the video stream configuration and metadata for a specific game event. Contains both the live stream setup info and post-game status.
+
+#### Response Schema
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `stream_id` | UUID | Video stream UUID (different from `game_stream.id`) |
+| `schedule_event_id` | UUID | Event UUID (matches path parameter) |
+| `disabled` | boolean | Whether streaming is disabled for this event |
+| `is_muted` | boolean | Whether stream audio is muted |
+| `team_id` | UUID | Team UUID |
+| `user_id` | UUID | User who configured the stream (PII -- redact) |
+| `viewer_count` | integer | Current viewer count (0 for completed games) |
+| `audience_type` | string | `"players_family"` or other audience restriction |
+| `is_playable` | boolean | Whether the stream is currently playable |
+| `thumbnail_url` | string or null | Thumbnail URL |
+| `playable_at` | string or null | When playback becomes available (null for past games) |
+| `live_at` | string or null | When the stream went live |
+| `status` | string | Stream status. Observed: `"ended"` |
+| `publish_url` | string | RTMPS ingest URL (contains stream key -- treat as credential) |
+| `shared_by_opponent` | boolean | Whether opponent shared their stream |
+| `aws_ivs_account_id` | string | AWS IVS account identifier |
+| `associated_external_camera` | object or null | External camera configuration |
+| `ingest_endpoints` | array | Available ingest protocols (RTMPS, SRT) |
+
+**Security note:** `publish_url` and `ingest_endpoints[].stream_key` contain live stream credentials. Do not log or store these values.
+
+**Confirmed:** 2026-03-07.
+
+---
+
+### GET /teams/{team_id}/schedule/events/{event_id}/video-stream/assets
+
+**Status: CONFIRMED LIVE -- 200 OK. Full schema documented. Confirmed 2026-03-07.**
+
+Returns the list of video recording segments for a specific game event. Three assets observed for a 2025-07-15 game. This is the event-scoped equivalent of `GET /teams/{team_id}/video-stream/assets` (which returns team-wide assets with pagination).
+
+#### Path Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `team_id` | UUID | Team UUID |
+| `event_id` | UUID | Schedule event UUID |
+
+#### Response Schema
+
+Bare JSON array of asset objects.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | UUID | Asset UUID |
+| `stream_id` | UUID | Parent video stream UUID (matches `stream_id` in the `/video-stream` response) |
+| `team_id` | UUID | Team UUID |
+| `schedule_event_id` | UUID | Event UUID (matches path parameter) |
+| `created_at` | string (ISO 8601) | When recording started |
+| `audience_type` | string | Audience restriction. Observed: `"players_family"` |
+| `duration` | integer or null | Recording duration in seconds. `null` for very short/interrupted segments; integer for complete recordings (e.g., `3848` = ~64-minute main game recording) |
+| `ended_at` | string (ISO 8601) | When recording ended |
+| `thumbnail_url` | string (URL) | Thumbnail hosted at `vod-archive.gc.com` CDN |
+| `user_id` | UUID | User who created the recording (PII -- redact) |
+| `uploaded` | boolean | Whether the recording has been uploaded to external storage |
+| `is_processing` | boolean | Whether the recording is still being processed |
+
+#### Example Response (PII redacted, 2 of 3 assets shown)
+
+```json
+[
+  {
+    "id": "27e27ea8-f82d-4a68-a13d-dd099e3d4575",
+    "stream_id": "660727ab-f035-4df0-a327-a8d0e2dbd892",
+    "team_id": "72bb77d8-54ca-42d2-8547-9da4880d0cb4",
+    "schedule_event_id": "1e0f8dfc-a7cb-46ce-9d3e-671e9110ece6",
+    "created_at": "2025-07-15T17:58:02.698Z",
+    "audience_type": "players_family",
+    "duration": null,
+    "ended_at": "2025-07-15T18:00:28.768Z",
+    "thumbnail_url": "https://vod-archive.gc.com/ivs/v1/...",
+    "user_id": "{REDACTED_USER_UUID}",
+    "uploaded": false,
+    "is_processing": false
+  },
+  {
+    "id": "6a5b023f-1d4c-401f-82df-4da651c32698",
+    "stream_id": "660727ab-f035-4df0-a327-a8d0e2dbd892",
+    "team_id": "72bb77d8-54ca-42d2-8547-9da4880d0cb4",
+    "schedule_event_id": "1e0f8dfc-a7cb-46ce-9d3e-671e9110ece6",
+    "created_at": "2025-07-15T18:19:26.497Z",
+    "audience_type": "players_family",
+    "duration": 3848,
+    "ended_at": "2025-07-15T19:20:27.662Z",
+    "thumbnail_url": "https://vod-archive.gc.com/ivs/v1/...",
+    "user_id": "{REDACTED_USER_UUID}",
+    "uploaded": false,
+    "is_processing": false
+  }
+]
+```
+
+**Confirmed:** 2026-03-07.
+
+---
+
+### GET /teams/{team_id}/schedule/events/{event_id}/video-stream/live-status
+
+**Status: CONFIRMED LIVE -- 200 OK. Discovered 2026-03-07.**
+
+Returns whether a game event currently has an active live stream.
+
+#### Response Schema
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `isLive` | boolean | `true` if streaming is currently live, `false` otherwise |
+
+#### Example Response
+
+```json
+{"isLive": false}
+```
+
+**Confirmed:** 2026-03-07.
+
+---
+
+### GET /teams/{team_id}/schedule/events/{event_id}/rsvp-responses
+
+**Status: CONFIRMED LIVE -- 200 OK. Returns empty array `[]`. Discovered 2026-03-07.**
+
+No RSVPs for this event. Schema unknown from empty response.
+
+**Confirmed:** 2026-03-07.
+
+---
+
+### GET /teams/{team_id}/schedule/event-series/{series_id}
+
+**Status: HTTP 404 -- series not found. Discovered 2026-03-07.**
+
+Returned 404 for series UUID `40b6a03f-c666-4448-9c36-f33764eb3442`. The series may not exist for this team, or the series UUID may be from a different team's scope.
+
+---
+
+### GET /me/permissions
+
+**Status: CONFIRMED LIVE -- 200 OK. Full schema documented. Previously returned HTTP 501 (Not Implemented) without required parameters. CONFIRMED 2026-03-07 with required parameters.**
+
+Returns the authenticated user's permissions for a specific entity (team, organization, etc.). Requires `entityId` and `entityType` query parameters.
+
+#### Required Query Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `entityId` | UUID | YES | UUID of the entity to check permissions for |
+| `entityType` | string | YES | Type of entity. Observed: `"team"` |
+
+#### Response Schema
+
+Single JSON object with one key.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `results` | array | Array of permission result objects |
+| `results[].permissions` | array of strings | List of permission strings granted to the user |
+| `results[].entity` | object | The entity this permission applies to |
+| `results[].entity.type` | string | Entity type (e.g., `"team"`) |
+| `results[].entity.id` | UUID | Entity UUID |
+
+#### Observed Permission Values
+
+Full set observed for a team admin user:
+`can_view_team_details`, `can_view_team_relationships`, `can_manage_team`, `can_view_video`,
+`can_view_team_announcements`, `can_manage_lineup`, `can_invite_fans`, `can_manage_opponent`,
+`can_manage_player`, `can_view_stats`, `can_view_team_schedule`, `can_view_lineup`,
+`can_receive_player_alerts`, `can_manage_event_video`, `can_view_event_rsvps`,
+`can_manage_messaging`, `can_purchase_team_pass`, `can_manage_game_scorekeeping`
+
+#### Example Response
+
+```json
+{
+  "results": [
+    {
+      "permissions": ["can_view_team_details", "can_manage_team", "can_view_stats"],
+      "entity": {
+        "type": "team",
+        "id": "72bb77d8-REDACTED"
+      }
+    }
+  ]
+}
+```
+
+**Key Observations:**
+- Without `?entityId=<uuid>&entityType=team`, server returns HTTP 501 `"Not Implemented"`.
+- The 18 permissions observed indicate full admin access to the team.
+- **Coaching relevance: LOW** for data ingestion. Useful for understanding what access a given token has before attempting data pulls.
+
+**Confirmed:** 2026-03-07. Required params: `?entityId={team_uuid}&entityType=team`.
+
+---
+
+### GET /me/organizations
+
+**Status: CONFIRMED LIVE -- 200 OK (empty array). Previously returned HTTP 500 with web headers due to missing pagination parameters. CONFIRMED 2026-03-07 with required parameters.**
+
+Returns organizations the authenticated user is directly a member of (as opposed to `/me/related-organizations` which returns organizations associated via team membership). Returns an empty array for accounts where organization membership is via team associations only.
+
+#### Required Query Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `page_size` | integer | YES | Page size. Use `50`. |
+
+#### Required Headers (in addition to standard auth headers)
+
+| Header | Value | Description |
+|--------|-------|-------------|
+| `x-pagination` | `true` | Must be present; server returns HTTP 500 without it |
+
+#### Response Schema
+
+Bare JSON array of organization objects. Empty array `[]` observed (no direct org memberships for this account).
+
+**Key Observations:**
+- Without `?page_size=50` and `x-pagination: true`, server returns HTTP 500.
+- Returns empty array for accounts where org access is via team membership rather than direct org membership.
+- Distinct from `/me/related-organizations` which returned 2 orgs via team associations.
+- **Coaching relevance: LOW** for this account. May be relevant if the user is an org admin.
+
+**Confirmed:** 2026-03-07. Required params: `?page_size=50` + `x-pagination: true` header.
+
+---
+
+### GET /me/schedule
+
+**Status: CONFIRMED LIVE -- 200 OK. Full schema documented. Discovered 2026-03-07.**
+
+Returns a unified cross-team schedule for all teams the authenticated user belongs to. Very high coaching value -- a single call returns upcoming and recent events across all 26 active teams.
+
+#### Response Schema
+
+Single JSON object with 5 top-level keys.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `teams` | object | Map of team UUIDs to team metadata objects. 26 teams observed. |
+| `teams.<uuid>.name` | string | Team display name |
+| `teams.<uuid>.sport` | string | Sport (e.g., `"baseball"`). Present for newer teams only. |
+| `teams.<uuid>.createdAt` | string (ISO 8601) | Team creation date. Present for newer teams only. |
+| `organizations` | object | Map of organization UUIDs to org metadata (empty `{}` in this capture) |
+| `config` | object | Schedule query configuration |
+| `config.max_teams` | integer | Maximum teams returned (observed: `150`) |
+| `config.max_future_days` | integer | How many days ahead events are returned (observed: `180`) |
+| `config.max_past_days` | integer | How many days back events are returned (observed: `90`) |
+| `expire_in_seconds` | integer | Cache TTL for this response (observed: `30`) |
+| `events` | array | Flat array of upcoming/recent events across all teams. 71 events observed. |
+
+**`events` array item schema:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | UUID | Event UUID |
+| `team_id` | UUID | Which team this event belongs to |
+| `kind` | string | Event type: `"game"`, `"practice"`, etc. |
+| `notes` | string | Coach notes for this event |
+| `is_all_day` | boolean | Whether the event spans the full day |
+| `start_time` | string (ISO 8601) | Event start in UTC |
+| `end_time` | string (ISO 8601) | Event end in UTC |
+| `arrive_by_time` | string (ISO 8601) | Requested arrival time in UTC |
+| `timezone` | string | IANA timezone |
+| `opponent_id` | UUID or null | Opponent team UUID (for games) |
+| `is_home_game` | boolean | Whether this is a home game |
+| `location_name` | string | Venue name |
+| `rsvps` | array | RSVP responses for this event |
+| `rsvps[].attending_status` | string | `"going"`, `"not_going"`, `"maybe"` |
+| `rsvps[].attendee_user_id` | UUID | User or player UUID who RSVPed |
+| `rsvps[].attending_id_type` | string | `"user"` or `"player"` |
+| `video` | object | Video availability summary |
+| `video.is_live` | boolean | Whether stream is currently live |
+| `video.has_videos` | boolean | Whether recorded videos exist |
+| `video.is_test_stream` | boolean | Whether this was a test stream |
+
+**Key Observations:**
+- Returns events from the past 90 days through the next 180 days across all teams.
+- RSVPs are embedded inline (no separate API call needed for RSVP data).
+- `expire_in_seconds: 30` -- very short cache TTL; this endpoint likely reflects near-real-time event status.
+- **Coaching relevance: HIGH.** Single call gives the full schedule picture across all teams, with RSVP status and video availability inline.
+
+**Confirmed:** 2026-03-07.
+
+---
+
+### GET /me/associated-players
+
+**Status: CONFIRMED LIVE -- 200 OK. Full schema documented. Discovered 2026-03-07.**
+
+Returns all player records associated with the authenticated user across all teams and seasons. Key endpoint for longitudinal player tracking.
+
+#### Response Schema
+
+Single JSON object with 3 top-level keys.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `teams` | object | Map of team UUIDs to team metadata. 13 teams observed. |
+| `teams.<uuid>.name` | string | Team display name |
+| `teams.<uuid>.sport` | string | Sport |
+| `players` | object | Map of player UUIDs to player identity + team reference. 13 players observed (one per team). |
+| `players.<player_uuid>.first_name` | string | Player first name |
+| `players.<player_uuid>.last_name` | string | Player last name |
+| `players.<player_uuid>.team_id` | UUID | The team this player record belongs to |
+| `associations` | array | Array of player-user relationship objects. One entry per player record. |
+| `associations[].relation` | string | Relationship type. Observed: `"primary"` (indicates primary family/guardian relationship) |
+| `associations[].player_id` | UUID | Player UUID (links to `players` map keys) |
+
+#### Example (redacted)
+
+```json
+{
+  "teams": {
+    "72bb77d8-REDACTED": {"name": "Lincoln Rebels 14U", "sport": "baseball"}
+  },
+  "players": {
+    "9e5faf37-REDACTED": {
+      "first_name": "Reid",
+      "last_name": "Wilkinson",
+      "team_id": "103e1cb5-REDACTED"
+    }
+  }
+}
+```
+
+**Key Observations:**
+- Returns 13 player records across 13 teams, one per team-player combination.
+- All observed players are the same person (Reid Wilkinson) across different season teams -- this is the player identity timeline.
+- The `team_id` on each player record links back to the `teams` map in this response.
+- **Coaching relevance: HIGH.** This is the primary endpoint for longitudinal player tracking -- seeing a player's UUID on each team they've played for, enabling stat aggregation across seasons.
+
+**Confirmed:** 2026-03-07.
+
+---
+
+### GET /me/teams-summary
+
+**Status: CONFIRMED LIVE -- 200 OK. Schema documented in Proxy-Discovered section above -- status upgraded to CONFIRMED. Discovered 2026-03-07.**
+
+```json
+{"archived_teams": {"count": 8, "range": {"from_year": 2019, "to_year": 2023}}}
+```
+
+**Confirmed:** 2026-03-07.
+
+---
+
+### GET /me/widgets
+
+**Status: CONFIRMED LIVE -- 200 OK. Returns empty widgets array. Discovered 2026-03-07.**
+
+```json
+{"widgets": []}
+```
+
+**Confirmed:** 2026-03-07.
+
+---
+
+### GET /me/archived-teams
+
+**Status: CONFIRMED LIVE -- 200 OK. Full schema documented. Discovered 2026-03-07.**
+
+Returns the list of archived (prior season) teams the authenticated user was associated with.
+
+#### Response Schema
+
+Bare JSON array of archived team objects. 8 records observed. Schema is identical to `GET /me/teams` response objects.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | UUID | Team UUID |
+| `name` | string | Team display name |
+| `team_type` | string | Role of the authenticated user: `"admin"`, etc. |
+| `city` | string | City |
+| `state` | string | State/province |
+| `country` | string | Country |
+| `age_group` | string | Age group (e.g., `"13U"`) |
+| `competition_level` | string | `"club_travel"`, `"school"`, `"recreational"` |
+| `sport` | string | Sport |
+| `season_year` | integer | Season year |
+| `season_name` | string | Season name (`"summer"`, `"fall"`) |
+| `stat_access_level` | string | Stat visibility setting |
+| `scorekeeping_access_level` | string | Scorekeeping permission level |
+| `streaming_access_level` | string | Streaming permission level |
+| `organizations` | array | Organization memberships |
+| `ngb` | string | National Governing Body (JSON-encoded string e.g., `"[\"usssa\"]"`) |
+| `user_team_associations` | array | User's roles on this team (e.g., `["family", "manager"]`) |
+| `team_avatar_image` | string (URL) | Signed CloudFront avatar URL |
+| `created_at` | string (ISO 8601) | Team creation date |
+| `public_id` | string | Public ID slug for this archived team |
+| `archived` | boolean | Always `true` in this response |
+| `record` | object | Season record: `{"wins": int, "losses": int, "ties": int}` |
+
+**Observed seasons:** 8 archived teams from 2019 through 2023, including:
+- Nebraska Connect 13U (fall 2023, 8-6 record)
+- Lincoln Rebels 12U (summer 2023)
+- Nebraska Connect 14U (summer 2024)
+- Other travel ball teams from 2019-2023
+
+**Key Observations:**
+- `ngb` field is a JSON-encoded string (double-serialized), not a native array. Parse with `JSON.parse(team.ngb)` to get the list.
+- `archived: true` is always set in this response.
+- Same schema as active teams in `GET /me/teams` -- they can be processed by the same code.
+- **Coaching relevance: HIGH.** Gives access to historical season team objects for multi-season longitudinal analysis.
+
+**Confirmed:** 2026-03-07.
+
+---
+
+### GET /me/advertising/metadata
+
+**Status: CONFIRMED LIVE -- 200 OK. Full schema documented. Discovered 2026-03-07.**
+
+Returns advertising and targeting metadata for the authenticated user.
+
+#### Response Schema
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `ppid` | string | Publisher Provided ID -- a hashed identifier for ad targeting. Not PII directly but derived from user identity. |
+| `do_not_sell` | boolean | Whether the user has opted out of data selling |
+| `is_staff` | boolean | Whether the user is a GameChanger staff member (observed: `true` for this account) |
+| `targeting` | object | Ad targeting key-value pairs |
+| `targeting.gc_ppid_v1` | string | Same as `ppid` |
+| `targeting.gc_user-id_v1` | UUID | User UUID (PII -- redact) |
+| `targeting.gc_age-groups_v1` | string | Comma-separated list of age groups the user coaches (e.g., `"Under 13,Between 13 - 18"`) |
+| `targeting.gc_comp-levels_v1` | string | Comma-separated competition levels (e.g., `"club_travel,school,recreational"`) |
+| `targeting.gc_teams-sports_v1` | string | Sports involved (e.g., `"baseball"`) |
+| `targeting.gc_subscription-type` | string | Subscription tier (e.g., `"premium"`) |
+
+**Security note:** Contains user UUID in targeting fields -- treat as PII.
+
+**Confirmed:** 2026-03-07.
+
+---
+
+### GET /me/subscription-information
+
+**Status: CONFIRMED LIVE -- 200 OK. Full schema documented. Discovered 2026-03-07.**
+
+Returns subscription summary for the authenticated user. Higher-level view than `GET /subscription/details`.
+
+#### Response Schema
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `best_subscription` | object | The user's best (highest tier) active subscription |
+| `best_subscription.type` | string | Subscription type. Observed: `"team_manager"` |
+| `best_subscription.provider_type` | string | Billing provider. Observed: `"recurly"` |
+| `best_subscription.is_gc_classic` | boolean | Whether this is a legacy GC Classic subscription |
+| `best_subscription.is_trial` | boolean | Whether this is a free trial |
+| `best_subscription.end_date` | string (ISO 8601) | Subscription expiration date |
+| `best_subscription.access_level` | string | Access tier. Observed: `"premium"` |
+| `best_subscription.billing_cycle` | string | Billing frequency. Observed: `"year"` |
+| `best_subscription.amount_in_cents` | integer | Amount charged per cycle in cents (9999 = $99.99) |
+| `best_subscription.provider_details` | object | Provider-specific renewal/cancellation state |
+| `best_subscription.provider_details.will_renew` | boolean | Whether the subscription auto-renews |
+| `best_subscription.provider_details.was_terminated_by_provider` | boolean | |
+| `best_subscription.provider_details.was_terminated_by_staff` | boolean | |
+| `highest_access_level` | string | The overall highest access level across all subscriptions |
+| `is_free_trial_eligible` | boolean | Whether the user can start a free trial |
+
+**Confirmed:** 2026-03-07.
+
+---
+
+### GET /me/team-tile/{team_id}
+
+**Status: CONFIRMED LIVE -- 200 OK. Full schema documented. Discovered 2026-03-07.**
+
+Returns a compact team summary for the specified team -- the "tile" used in the app's team list UI.
+
+#### Path Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `team_id` | UUID | Team UUID |
+
+#### Response Schema
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | UUID | Team UUID |
+| `name` | string | Team display name |
+| `team_type` | string | User's role (`"admin"`, etc.) |
+| `sport` | string | Sport |
+| `season_year` | integer | Current season year |
+| `season_name` | string | Season name |
+| `stat_access_level` | string | Stat visibility |
+| `streaming_access_level` | string | Streaming permission |
+| `organizations` | array | Organization memberships |
+| `ngb` | string | NGB (JSON-encoded string) |
+| `user_team_associations` | array | User's roles on this team |
+| `team_avatar_image` | string or null | Avatar URL (null if no avatar set) |
+| `created_at` | string (ISO 8601) | Team creation date |
+| `public_id` | string | Public ID slug |
+| `archived` | boolean | Whether team is archived |
+| `record` | object | `{"wins": int, "losses": int, "ties": int}` |
+| `badge_count` | integer | Count of notification badges (e.g., pending actions) |
+
+#### Example Response
+
+```json
+{
+  "id": "72bb77d8-REDACTED",
+  "name": "Lincoln Rebels 14U",
+  "sport": "baseball",
+  "season_year": 2025,
+  "season_name": "summer",
+  "stat_access_level": "confirmed_full",
+  "archived": false,
+  "record": {"wins": 61, "losses": 29, "ties": 2},
+  "badge_count": 0
+}
+```
+
+**Confirmed:** 2026-03-07.
+
+---
+
+### GET /me/related-organizations
+
+**Status: CONFIRMED LIVE -- 200 OK. Full schema documented. Previously returned HTTP 500 with web headers due to missing pagination parameters. CONFIRMED 2026-03-07 with required parameters.**
+
+Returns organizations that the authenticated user is associated with via team membership (as opposed to direct org membership in `/me/organizations`). 2 organizations observed.
+
+#### Required Query Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `page_starts_at` | integer | YES | Pagination offset. Use `0` for first page. |
+| `page_size` | integer | YES | Page size. Use `50`. |
+
+#### Required Headers (in addition to standard auth headers)
+
+| Header | Value | Description |
+|--------|-------|-------------|
+| `x-pagination` | `true` | Must be present; server returns HTTP 500 without it |
+
+#### Response Schema
+
+Bare JSON array of organization objects. 2 organizations observed.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | UUID | Organization UUID |
+| `city` | string | City |
+| `country` | string | Country |
+| `end_date` | string (ISO 8601) or null | Organization/season end date |
+| `name` | string | Organization display name |
+| `ngb` | string | National Governing Body (JSON-encoded string, e.g., `"[\"usssa\"]"`) |
+| `season_name` | string | Season name (e.g., `"fall"`, `"summer"`) |
+| `season_year` | integer | Season year |
+| `sport` | string | Sport |
+| `start_date` | string (ISO 8601) or null | Organization/season start date |
+| `state` | string | State/province |
+| `status` | string | Organization status (e.g., `"active"`) |
+| `type` | string | Organization type: `"tournament"`, `"travel"`, `"league"` |
+| `public_id` | string | Public ID slug |
+
+#### Example Response
+
+```json
+[
+  {
+    "id": "8881846c-REDACTED",
+    "city": "Lincoln",
+    "country": "United States",
+    "end_date": null,
+    "name": "Lincoln Rebels",
+    "ngb": "["usssa"]",
+    "season_name": "summer",
+    "season_year": 2025,
+    "sport": "baseball",
+    "start_date": null,
+    "state": "NE",
+    "status": "active",
+    "type": "travel",
+    "public_id": "8uNxSKmeevE0"
+  }
+]
+```
+
+**Key Observations:**
+- Without `?page_starts_at=0&page_size=50` and `x-pagination: true`, server returns HTTP 500.
+- Returns organizations accessed via team membership; compare with `/me/organizations` (direct membership).
+- 2 orgs observed: a tournament org (USA Prime Prodigy Fall Tourney) and a travel ball org (Lincoln Rebels).
+- `ngb` is a JSON-encoded string (double-serialized) -- parse with `JSON.parse(org.ngb)`.
+- `public_id` slug can be used with `/organizations/{public_id}` or related org endpoints.
+- **Coaching relevance: MEDIUM.** Org discovery endpoint -- use to find org UUIDs for subsequent org-level calls.
+
+**Confirmed:** 2026-03-07. Required params: `?page_starts_at=0&page_size=50` + `x-pagination: true` header.
+
+---
+
+### GET /users/{user_id}
+
+**Status: CONFIRMED LIVE -- 200 OK. Full schema documented. Discovered 2026-03-07.**
+
+Returns profile data for any GameChanger user by UUID. This is the same data visible on public team rosters.
+
+#### Path Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `user_id` | UUID | User UUID (PII -- treat as sensitive) |
+
+#### Response Schema
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | UUID | User UUID |
+| `status` | string | `"active"` or `"inactive"` |
+| `first_name` | string | First name (PII) |
+| `last_name` | string | Last name (PII) |
+| `email` | string | Email address (PII -- redact in all storage) |
+
+**Security:** All fields in this response are PII. Do not log, store, or display without appropriate access controls.
+
+**Confirmed:** 2026-03-07.
+
+---
+
+### GET /users/{user_id}/profile-photo
+
+**Status: HTTP 404 -- no profile photo found. Discovered 2026-03-07.**
+
+Returned 404 with message: `"No profile photo found for user: <uuid>"`. User had no profile photo set.
+
+---
+
+### GET /players/{player_id}/profile-photo
+
+**Status: HTTP 404 -- no profile photo found. Discovered 2026-03-07.**
+
+Returned 404 with message: `"No profile photo found for player: <uuid>"`. Player had no profile photo set.
+
+---
+
+### GET /subscription/details
+
+**Status: CONFIRMED LIVE -- 200 OK. Full schema documented. Previously observed in proxy -- status upgraded. Discovered 2026-03-07.**
+
+Returns detailed subscription information for the authenticated user.
+
+#### Response Schema
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `highest_tier` | string | User's highest subscription tier. Observed: `"premium"` |
+| `is_free_trial_eligible` | boolean | Whether the user can start a free trial |
+| `subscriptions` | array | Array of active subscription objects |
+| `subscriptions[].id` | UUID | Subscription UUID |
+| `subscriptions[].plan` | object | Plan details |
+| `subscriptions[].plan.provider` | string | Billing provider (`"recurly"`) |
+| `subscriptions[].plan.code` | string | Plan code (e.g., `"premium_year"`) |
+| `subscriptions[].plan.level` | integer | Tier level number (3 for premium) |
+| `subscriptions[].plan.tier` | string | Tier name (`"premium"`) |
+| `subscriptions[].plan.max_allowed_members` | integer | Max users on this subscription |
+| `subscriptions[].status` | object | Billing status flags |
+| `subscriptions[].status.is_billing` | boolean | Whether billing is active |
+| `subscriptions[].status.is_in_free_trial` | boolean | |
+| `subscriptions[].status.is_canceled` | boolean | |
+| `subscriptions[].status.is_paused` | boolean | |
+| `subscriptions[].status.is_expired` | boolean | |
+| `subscriptions[].status.is_unpaid` | boolean | |
+| `subscriptions[].billing_info` | object | Billing amounts |
+| `subscriptions[].billing_info.amount_in_cents` | integer | Amount in cents |
+| `subscriptions[].billing_info.currency` | string | Currency code (`"USD"`) |
+| `subscriptions[].billing_info.cycle` | string | `"yearly"` or `"monthly"` |
+| `subscriptions[].dates.start` | string (ISO 8601) | Subscription start date |
+| `subscriptions[].dates.end` | string (ISO 8601) | Subscription end/renewal date |
+| `subscriptions[].is_owner` | boolean | Whether this user owns the subscription |
+| `subscriptions[].is_gc_classic` | boolean | Legacy subscription flag |
+| `subscriptions[].members` | array | Shared subscription members |
+
+**Confirmed:** 2026-03-07.
+
+---
+
+### GET /subscription/recurly/plans
+
+**Status: CONFIRMED LIVE -- 200 OK. Full schema documented. Discovered 2026-03-07.**
+
+Returns all available subscription plans offered by GameChanger via Recurly.
+
+#### Response Schema
+
+Bare JSON array of plan objects. 6 plans observed.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | UUID | Plan UUID |
+| `name` | string | Plan display name |
+| `code` | string | Plan code (e.g., `"premium_year"`, `"plus_month"`) |
+| `tier` | string | Tier name: `"plus"` or `"premium"` |
+| `level` | integer | Tier level (1=plus, 3=premium solo, 7=premium shared) |
+| `maximum_allowed_members` | integer | Max users on shared plan |
+| `provider` | string | `"recurly"` |
+| `billing.interval` | integer | Billing interval count |
+| `billing.interval_unit` | string | `"months"` |
+| `billing.price_in_cents` | integer | Price per cycle in cents |
+| `billing.currency` | string | `"USD"` |
+| `free_trial.length_in_days` | integer | Free trial length |
+| `free_trial.is_user_eligible` | boolean | Whether this user can start a trial for this plan |
+
+**Observed plans (2026-03-07):**
+- Premium Yearly Shared Plan: $179.99/yr, up to 4 users
+- Premium Monthly Shared Plan: $24.99/mo, up to 4 users
+- Plus Monthly Plan: $9.99/mo, 1 user
+- Plus Yearly Plan: $39.99/yr, 1 user
+- Premium Yearly Plan: $99.99/yr, 1 user
+- Premium Monthly Plan: $14.99/mo, 1 user
+
+**Confirmed:** 2026-03-07.
+
+---
+
+### GET /search/history
+
+**Status: CONFIRMED LIVE -- 200 OK. Full schema documented. Discovered 2026-03-07.**
+
+Returns the authenticated user's recent search history. Contains team search results with public metadata.
+
+#### Response Schema
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `max_results` | integer | Maximum history entries (observed: `10`) |
+| `history` | array | Ordered list of recent searches (most recent first) |
+| `history[].type` | string | Result type. Observed: `"team"` |
+| `history[].result` | object | The search result object |
+
+**`result` object (when `type = "team"`):**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | UUID | Team UUID |
+| `public_id` | string | Team public ID slug |
+| `name` | string | Team display name |
+| `sport` | string | Sport |
+| `season` | object | `{"name": "summer", "year": 2019}` |
+| `location` | object | `{"city": "...", "state": "...", "country": "..."}` |
+| `staff` | array of strings | Coach/staff names for this team |
+| `number_of_players` | integer | Player count on the team |
+| `avatar_url` | string (URL, optional) | Signed CloudFront avatar URL |
+
+**Note:** The `staff` array contains plain name strings, not UUIDs. No PII beyond publicly-visible team staff names.
+
+**Coaching relevance:** Low for analytics. High for discovering team UUIDs from team names when a user has searched for those teams. The `public_id` and `id` fields enable bridging to all other endpoints.
+
+**Confirmed:** 2026-03-07.
+
+---
+
+### GET /announcements/user/read-status
+
+**Status: CONFIRMED LIVE -- 200 OK. Full schema documented. Discovered 2026-03-07.**
+
+Returns the read status of in-app announcements for the authenticated user.
+
+#### Response Schema
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `read_status` | string | `"read"` if all announcements have been read, `"unread"` otherwise |
+
+#### Example Response
+
+```json
+{"read_status": "read"}
+```
+
+**Confirmed:** 2026-03-07.
+
+---
+
+### GET /sync-topics/me/updated-topics
+
+**Status: CONFIRMED LIVE -- 200 OK. Full schema documented. Previously observed in proxy -- status upgraded. Discovered 2026-03-07.**
+
+Returns the real-time sync state for the authenticated user. Used by the app's live sync mechanism.
+
+#### Response Schema
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `status` | string | Sync status. Observed: `"update-all"` |
+| `updates` | array | Array of specific topic updates (empty array when status is `"update-all"`) |
+| `next_cursor` | string | Cursor for the next poll. Format: `v2_{sequence}_{timestamp}_{user_id}_{counter}_{uuid}` |
+
+#### Example Response
+
+```json
+{
+  "status": "update-all",
+  "updates": [],
+  "next_cursor": "v2_72081_1750259143790_e07b2d06-REDACTED_0_5e87d41c-REDACTED"
+}
+```
+
+**Note:** `"update-all"` status means the client should refresh all data rather than process incremental updates. The `next_cursor` contains the user UUID -- treat as PII.
+
+**Confirmed:** 2026-03-07.
+
+---
+
 ## Proxy-Discovered Endpoints (2026-03-05)
 
 The following endpoints were observed in mitmproxy traffic captures from the GameChanger iOS app ("Odyssey") on 2026-03-05. These are **observed but not yet fully documented** -- response schemas are not confirmed, Accept headers are not captured, and behavior has not been verified via independent curl calls. Each entry documents what was learned from the traffic log alone: HTTP method, path pattern, observed query keys, status codes, and request Content-Type.
@@ -3455,10 +5339,11 @@ The following endpoints were observed in mitmproxy traffic captures from the Gam
 
 #### GET /sync-topics/me/updated-topics
 
-**Status:** OBSERVED (proxy log, 22 hits, status 200 and 304). Long-poll / server-sent-events mechanism for the app's real-time sync system.
+**Status:** CONFIRMED LIVE -- 200 OK (2026-03-07). Full schema in Confirmed Endpoints section.
 
+- **Response:** `{"status": "update-all", "updates": [], "next_cursor": "v2_..."}` -- real-time sync cursor for incremental polling.
 - **Query keys observed:** `cursor`, `timeout`
-- **Notes:** The `cursor` parameter is likely a sequence position, `timeout` likely the long-poll timeout in seconds. This endpoint appears to be the app's heartbeat -- called repeatedly throughout the session. Not relevant to data ingestion.
+- **Notes:** The `cursor` parameter is likely a sequence position, `timeout` likely the long-poll timeout in seconds. This endpoint is the app's heartbeat. Not relevant to data ingestion.
 - **Discovered:** 2026-03-05
 
 #### POST /sync-topics/updates
@@ -3483,10 +5368,10 @@ The following endpoints were observed in mitmproxy traffic captures from the Gam
 
 #### GET /announcements/user/read-status
 
-**Status:** OBSERVED (proxy log, 8 hits, status 304 only). In-app announcements read-status for the authenticated user.
+**Status:** CONFIRMED LIVE -- 200 OK (2026-03-07). Previously observed with 304 only in proxy capture.
 
+- **Response:** `{"read_status": "read"}` -- see full schema in Confirmed Endpoints (2026-03-07) section.
 - **Query keys observed:** none
-- **Notes:** Always returned 304 (Not Modified) in this capture session -- the app checks this on load but the resource has not changed. Not relevant to data ingestion.
 - **Discovered:** 2026-03-05
 
 ---
@@ -3495,18 +5380,18 @@ The following endpoints were observed in mitmproxy traffic captures from the Gam
 
 #### GET /subscription/details
 
-**Status:** OBSERVED (proxy log, 2 hits, status 304 only). Subscription details for the authenticated user.
+**Status:** CONFIRMED LIVE -- 200 OK (2026-03-07). Previously observed with 304 only in proxy capture.
 
+- **Response:** Full subscription object with plan details, status flags, billing info, and dates. See full schema in Confirmed Endpoints (2026-03-07) section.
 - **Query keys observed:** none
-- **Notes:** Redundant with `GET /me/user` which returns subscription information inline. Use `/me/user` instead.
 - **Discovered:** 2026-03-05
 
 #### GET /me/subscription-information
 
-**Status:** OBSERVED (proxy log, 1 hit, status 200). Alternative subscription information endpoint under `/me/`.
+**Status:** CONFIRMED LIVE -- 200 OK (2026-03-07). Full schema documented in Confirmed Endpoints section.
 
+- **Response:** `best_subscription` object + `highest_access_level` + `is_free_trial_eligible`. Different structure from `GET /subscription/details` -- more concise.
 - **Query keys observed:** none
-- **Notes:** Likely returns the same `subscription_information` object embedded in `/me/user`. Schema not captured.
 - **Discovered:** 2026-03-05
 
 ---
@@ -3674,16 +5559,15 @@ Key fields per team object:
 
 #### GET /me/related-organizations
 
-**Status:** HTTP 500 (web headers). Succeeded via iOS app proxy capture.
+**Status:** CONFIRMED (2026-03-07). Previously HTTP 500 (web headers). Fixed with `?page_starts_at=0&page_size=50` + `x-pagination: true` header.
 
-Returns organizations the authenticated user is associated with. **Returns HTTP 500 with web browser headers.**
+Returns organizations the authenticated user is associated with via team membership. Full schema documented in the Confirmed Endpoints section above.
 
 - **Accept header:** not yet confirmed
-- **Error response:** `{"error":"Cannot read properties of undefined (reading 'page_starts_at')"}`
-- **Proxy log:** 3 hits (status 200 and 304 in iOS proxy capture)
-- **Notes:** Server-side error when called with web headers. The error message suggests a missing pagination parameter that the mobile app provides. See IDEA-011 for investigation. Schema not available from web capture.
+- **Required query params:** `?page_starts_at=0&page_size=50`
+- **Required header:** `x-pagination: true`
 - **Discovered:** 2026-03-05
-- **Coaching relevance:** Medium. Organization membership data could help discover all teams under an org (e.g., all LSB program teams). Blocked by HTTP 500 until root cause is resolved.
+- **Coaching relevance:** Medium. Organization membership data for org discovery. 2 orgs returned for this account.
 
 #### GET /me/schedule
 
@@ -3724,10 +5608,10 @@ Bare JSON array of event objects. Each event represents a game, practice, or oth
 
 #### GET /me/permissions
 
-**Status:** OBSERVED (proxy log, 50 hits, status 200 and 304). Per-entity permission check.
+**Status:** CONFIRMED (2026-03-07). Previously returned HTTP 501 "Not Implemented" without query params. Works with `?entityId={uuid}&entityType=team`. Full schema in Confirmed Endpoints section.
 
-- **Query keys observed:** `entityId`, `entityType`
-- **Notes:** High-frequency endpoint -- the app calls this 50 times per session across many entities (clips, events, teams, etc.). Parameters `entityId` (UUID) and `entityType` (likely enum: "team", "event", "clip", etc.) specify what permission is being checked. Returns the authenticated user's permissions on that entity. Not directly useful for data ingestion.
+- **Required query params:** `?entityId={entity_uuid}&entityType={entity_type}`
+- **Notes:** High-frequency endpoint -- app calls this across many entities. Returns all permissions the authenticated user has for a specific entity. 18 permissions observed for a team admin.
 - **Discovered:** 2026-03-05
 
 #### GET /me/permissions/bulk
@@ -3818,15 +5702,14 @@ The `/organizations/{org_id}` path family was entirely new in this capture. An o
 
 #### GET /organizations/{org_id}/teams
 
-**Status:** HTTP 500 (web headers). Succeeded via iOS app proxy capture.
+**Status:** CONFIRMED (2026-03-07). Previously HTTP 500 (web headers). Fixed with `?page_starts_at=0&page_size=50` + `x-pagination: true` header.
 
-Returns all teams in an organization. **Returns HTTP 500 with web browser headers.**
+Returns all teams in an organization. Full schema documented in the Confirmed Endpoints section above. 7 teams observed.
 
 - **Accept header:** not yet confirmed
-- **Error response:** `{"error":"Cannot read properties of undefined (reading 'page_starts_at')"}`
-- **Proxy log:** 1 hit (status 200 in iOS proxy capture)
-- **Notes:** Server-side error with same `page_starts_at` message as `GET /me/related-organizations`. See IDEA-011 for investigation. Schema not available from web capture.
-- **Priority:** HIGH -- if resolvable, this could return all LSB teams in one call.
+- **Required query params:** `?page_starts_at=0&page_size=50`
+- **Required header:** `x-pagination: true`
+- **Priority:** HIGH -- confirmed working; can enumerate all org teams in one call.
 - **Coaching relevance:** High. Discovery of all teams under an org eliminates per-team iteration.
 - **Discovered:** 2026-03-05
 
@@ -4062,35 +5945,14 @@ These team-scoped endpoints were observed in the proxy log but are not yet in th
 
 #### GET /teams/{team_id}/opponents/players
 
-**Status:** CONFIRMED (web headers, schema documented). **HIGH VALUE** -- opponent player roster aggregated across all opponents of a team. Paginated.
+**Status:** CONFIRMED LIVE -- 200 OK (2026-03-07). Full schema in Confirmed Endpoints section. 758 records, 61 opponent teams.
 
-- **Accept header:** not yet confirmed
-- **Query keys observed:** `start_at` (pagination cursor)
+- **Query keys observed:** `start_at` (pagination cursor -- not required; full 758-record response received without pagination params in bulk probe)
+- **Confirmed:** 2026-03-07
 - **Discovered:** 2026-03-05
-
-**Response Schema:**
-
-Bare JSON array of player objects. Observed: 102K+ tokens (hundreds of player records across multiple pages). The per-player schema follows the same structure as `GET /teams/{team_id}/players` with the addition of opponent team context.
-
-Due to the payload size (102K+ tokens), only the schema structure was captured from the first portion of the file:
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `id` | string (UUID) | Player UUID |
-| `first_name` | string | Player first name. **PII -- redact.** |
-| `last_name` | string | Player last name. **PII -- redact.** |
-| `team_id` | string (UUID) | The opponent team this player belongs to |
-| `number` | string or null | Jersey number |
-| `status` | string | Player status (e.g., `"active"`) |
-| `positions` | array of strings | Positions played |
-| `bats` | string or null | Batting hand (`"right"`, `"left"`, `"switch"`) |
-| `throws` | string or null | Throwing hand (`"right"`, `"left"`) |
-
-**Key Observations:**
-- Very large paginated response -- the bulk payload (102K+ tokens) likely contains hundreds of players from all opponents.
-- Uses `start_at` cursor-based pagination (same pattern as other paginated endpoints).
-- The response is a flat array of player records; opponent team identity comes from the `team_id` field on each player.
-- **Priority:** HIGH -- the most efficient way to bulk-load all opponent player records. One paginated endpoint vs. iterating per-opponent team.
+- **Schema:** See Confirmed Endpoints section for full field table. Key difference from proxy capture: fields are `team_id`, `player_id`, `person{id, first_name, last_name}`, `attributes{player_number, status}`, `bats{batting_side, throwing_hand}` -- NOT the old `id`/`number`/`positions`/`bats`/`throws` flat schema.
+- **Status values:** `"active"` and `"removed"`. Filter to `"active"` only for scouting.
+- **`bats` nullability:** `null` for 30 removed players; `batting_side`/`throwing_hand` can also be individually `null` if not entered. `batting_side` `"both"` observed (= switch hitter).
 - **Coaching relevance:** Critical (Tier 1). Bulk opponent player data is foundational for scouting reports.
 
 #### GET /teams/{team_id}/avatar-image
@@ -4224,10 +6086,10 @@ Bare JSON array of relationship objects. Maps users (parents/guardians) to playe
 
 #### GET /events/{event_id}/highlight-reel
 
-**Status:** CONFIRMED (web headers, schema documented). Highlight reel for a completed game event.
+**Status:** CONFIRMED LIVE -- 200 OK (2026-03-07). Full schema in Confirmed Endpoints section (`GET /events/{event_id}/highlight-reel`).
 
-- **Accept header:** not yet confirmed
 - **Path parameters:** `event_id` (UUID from schedule)
+- **Confirmed:** 2026-03-07
 - **Discovered:** 2026-03-05
 
 **Response Schema:**
@@ -4381,23 +6243,27 @@ The `/game-streams/` path family (distinct from `/game-stream-processing/`) prov
 
 #### GET /game-streams/{game_stream_id}/events
 
-**Status:** OBSERVED (proxy log, 12 hits, status 200 and 304, paginated). Live game event stream (pitch-by-pitch for live viewing). Schema not captured in bulk collection (payload too large -- 72K+ tokens).
+**Status:** CONFIRMED LIVE -- 200 OK (2026-03-07). Full schema documented in Confirmed Endpoints section. 319 events for a 6-inning game. 10 unique event codes observed.
 
 - **Path parameters:** `game_stream_id` (UUID -- same as in boxscore/plays endpoints)
 - **Query keys observed:** `initial`, `start_at`
-- **Notes:** Low-level event stream for live game viewing. `initial` param likely requests the full initial event list; `start_at` enables polling for new events. Different from `GET /game-stream-processing/{id}/plays` which is a processed/summarized view. This is likely the raw event log. Not needed for historical stat ingestion (use `/plays` instead).
+- **Notes:** Low-level raw event stream. `event_data` field is a JSON-encoded string that must be parsed separately. Full schema and event code documentation in the Confirmed Endpoints section. Not needed for historical stat ingestion (use `/plays` instead).
+- **Confirmed:** 2026-03-07
 - **Discovered:** 2026-03-05
 - **Coaching relevance:** Low for historical analysis (use `/plays` instead). Could be useful for real-time game monitoring.
 
 #### GET /game-streams/gamestream-viewer-payload-lite/{game_stream_id}
 
-**Status:** OBSERVED (proxy log, 4 hits, status 200). Lightweight game viewer payload. Schema not captured in bulk collection (payload too large -- 72K+ tokens).
+**Status:** CONFIRMED LIVE -- 200 OK (2026-03-07). Schema in Confirmed Endpoints section.
 
-- **Path parameters:** `game_stream_id` (UUID, embedded in path after the fixed slug `gamestream-viewer-payload-lite/`)
+Lightweight game viewer payload. Accepts `event_id` (not game_stream_id) in the path.
+
+- **Path parameters:** `event_id` (UUID -- schedule event UUID, NOT game_stream_id despite the name)
 - **Query keys observed:** `include_stat_edits`, `marker`, `stream_id`
-- **Notes:** Unusual path structure -- the game_stream_id UUID appears after a fixed slug rather than as a pure path parameter. `stream_id` in query keys suggests the UUID may actually be a template ID and the actual stream is identified via `?stream_id=`. `marker` is likely a sequence cursor for incremental loads. `include_stat_edits` enables including stat corrections. This is the viewer payload for the in-app game recap/live view.
+- **Schema:** `{"stream_id": UUID, "latest_events": [...319 events with created_at added...], "all_event_data_ids": [...319 inner event UUIDs...], "marker": "318"}` (marker = last sequence_number string for completed game)
+- **Notes:** The path accepts a schedule `event_id` directly (unlike boxscore/plays which require `game_stream.id`). Returns the same event stream as `GET /game-streams/{stream_id}/events` but with additional fields and the `stream_id` resolved for you.
 - **Discovered:** 2026-03-05
-- **Coaching relevance:** Medium. The full viewer payload likely contains comprehensive game state, but the size (72K+) suggests it overlaps heavily with data available from other endpoints (boxscore, plays, player-stats).
+- **Coaching relevance:** Medium. Same event data as `/game-streams/{id}/events` -- use the processed `/plays` and `/boxscore` endpoints instead for coaching analytics.
 
 #### GET /game-streams/gamestream-recap-story/{game_stream_id}
 
@@ -4557,29 +6423,27 @@ Three segment types are used:
 
 #### GET /users/{user_id}
 
-**Status:** OBSERVED (proxy log, 1 hit, status 200). Public user profile lookup.
+**Status:** CONFIRMED LIVE -- 200 OK (2026-03-07). Full schema in Confirmed Endpoints section.
 
 - **Path parameters:** `user_id` (UUID)
-- **Query keys observed:** none
-- **Notes:** Returns profile data for any GameChanger user by UUID. Used by the app when displaying team member profiles. PII endpoint -- likely returns name and avatar at minimum. Schema not captured. Different from `GET /me/user` which is restricted to the authenticated user's own profile.
+- **Schema:** `{"id": UUID, "status": string, "first_name": string, "last_name": string, "email": string}` -- all fields PII.
+- **Notes:** Returns the same 5 fields as `GET /teams/{team_id}/users` list. Confirmed with the authenticated user's own UUID.
 - **Discovered:** 2026-03-05
 
 #### GET /users/{user_id}/profile-photo
 
-**Status:** OBSERVED (proxy log, 6 hits, **status 404**). User profile photo.
+**Status:** HTTP 404 -- confirmed in both proxy log (2026-03-05) and live test (2026-03-07).
 
 - **Path parameters:** `user_id` (UUID)
-- **Query keys observed:** none
-- **Notes:** Returned 404 for all 6 UUIDs observed. Users in this capture had no profile photos set. Endpoint pattern exists but resource was absent. Not relevant to stat ingestion.
+- **Notes:** No profile photos set for observed users. Endpoint pattern exists; 404 response body: `"No profile photo found for user: <uuid>"`.
 - **Discovered:** 2026-03-05
 
 #### GET /players/{player_id}/profile-photo
 
-**Status:** OBSERVED (proxy log, 6 hits, **status 404**). Player profile photo (distinct from user profile photo).
+**Status:** HTTP 404 -- confirmed in both proxy log (2026-03-05) and live test (2026-03-07).
 
 - **Path parameters:** `player_id` (UUID)
-- **Query keys observed:** none
-- **Notes:** Player-scoped profile photo (vs. user-scoped). All 404s -- no profile photos set for observed players. Not relevant to stat ingestion.
+- **Notes:** No profile photos set for observed players. Response body: `"No profile photo found for player: <uuid>"`.
 - **Discovered:** 2026-03-05
 
 ---
@@ -4651,6 +6515,382 @@ Two additional hostnames were observed in the proxy log (beyond `api.team-manage
 **Source "ios" -- Raw CFNetwork (`GameChanger/0 CFNetwork/3860.400.51 Darwin/25.3.0`):**
 
 This source makes requests with a very minimal header set -- `accept: */*`, CFNetwork UA, `accept-language`, `accept-encoding`, `priority`. These are likely direct media download requests (CloudFront signed URLs, video segments) that bypass the Odyssey app layer. No `gc-token` observed -- consistent with CloudFront signed URL delivery not requiring GC auth.
+
+---
+
+## Proxy-Discovered Endpoints (2026-03-07)
+
+These endpoints were catalogued from a second proxy capture session on 2026-03-07. All entries have status **PROXY CAPTURE** unless otherwise noted -- traffic was observed but response bodies were not directly captured. Schema fields are TBD unless stated otherwise. All entries are dated 2026-03-07.
+
+> **Note on status codes:** All GETs in this capture returned 200 or 304 (cached) unless explicitly noted. OPTIONS requests returned 204 (CORS preflight). 404s on batting-insight and player-insight endpoints are documented and suggest premium or subscription-gated features.
+
+---
+
+### Teams -- Per-Opponent Scouting
+
+#### GET /teams/{team_id}/opponent/{opponent_id}
+
+**Status:** CONFIRMED LIVE -- 200 OK (2026-03-07). Full schema in Confirmed Endpoints section.
+
+Returns the opponent registry entry for a specific opponent. Note: this is the team record, not per-opponent stats. The 50+ unique opponent hits in the proxy capture are the iOS app loading team metadata for each scheduled opponent.
+
+- **Path parameters:** `team_id` (UUID), `opponent_id` (UUID -- use `root_team_id` from opponents list as path param)
+- **Schema:** 5 fields -- `root_team_id`, `owning_team_id`, `name`, `is_hidden`, `progenitor_team_id`. Full schema in Confirmed Endpoints section.
+- **Relationship:** `opponent_id` path param = `root_team_id` in the response. `progenitor_team_id` is the canonical UUID for accessing other team endpoints.
+- **Coaching relevance:** Tier 2. Useful for resolving opponent names and canonical UUIDs, but does not contain aggregate scouting stats. Per-opponent stats come from boxscore/plays/season-stats endpoints.
+- **Confirmed:** 2026-03-07
+- **Discovered:** 2026-03-07
+
+---
+
+### Bats / Starting Lineups
+
+The `/bats-starting-lineups/` path family provides GameChanger's BATS (Baseball Analytics Tracking System) lineup data. These endpoints are distinct from the general schedule/event system.
+
+#### GET /bats-starting-lineups/{event_id}
+
+**Status:** CONFIRMED LIVE -- 200 OK (2026-03-07, confirmed via retry with home game event_id). Full schema in Confirmed Endpoints section.
+
+Starting lineup for a specific game event. Returns the batting order and field positions as entered by the scoring team for the given event.
+
+- **Path parameters:** `event_id` (UUID -- from schedule or game-summaries)
+- **Schema:** Same fields as `/latest/{team_id}` but **no `latest_lineup` wrapper** -- the lineup object is returned directly. Fields: `id`, `dh`, `dh_batting_for`, `creator`, `entries[]` (player_id + fielding_position, array order = batting order). Full schema in Confirmed Endpoints section.
+- **403 behavior:** Returns HTTP 403 for away games where the authenticated user's team was not the primary scorer. Use home game event_ids or events where the user's team managed scoring.
+- **Coaching relevance:** High (Tier 2). Starting lineup data enables batting order analysis, lineup tendency research, and position tracking across the season.
+- **Confirmed:** 2026-03-07
+- **Discovered:** 2026-03-07
+
+#### GET /bats-starting-lineups/latest/{team_id}
+
+**Status:** CONFIRMED LIVE -- 200 OK (2026-03-07). Full schema in Confirmed Endpoints section.
+
+Latest starting lineup for a team. Returns the most recently entered lineup -- useful for displaying the current or most recent game's batting order without knowing a specific event_id.
+
+- **Path parameters:** `team_id` (UUID)
+- **Schema:** `latest_lineup` object with `id`, `dh`, `dh_batting_for`, `creator`, `entries[]` (player_id + fielding_position per entry, array order = batting order).
+- **Coaching relevance:** High (Tier 2). Quick access to the team's current lineup without event_id lookup.
+- **Discovered:** 2026-03-07
+
+---
+
+### Teams -- Lineup Recommendation
+
+#### GET /teams/{team_id}/lineup-recommendation
+
+**Status:** CONFIRMED LIVE -- 200 OK (2026-03-07). Full schema in Confirmed Endpoints section.
+
+GameChanger's automated lineup recommendation engine. Returns an algorithmically generated batting order and fielding assignment based on the team's historical performance data.
+
+- **Path parameters:** `team_id` (UUID)
+- **Schema:** `{"lineup": [{"player_id": UUID, "field_position": string, "batting_order": int}, ...], "metadata": {"generated_at": ISO8601, "team_id": UUID}}`. 9 entries (standard starting 9).
+- **Coaching relevance:** High (Tier 2). Direct access to GC's recommendation engine could surface data-driven lineup suggestions. Compare with `/bats-starting-lineups/latest/{team_id}` to see where the coach deviated from the algorithm.
+- **Notes:** `generated_at` changes on each request -- recommendation is recalculated live, not cached.
+- **Discovered:** 2026-03-07
+
+---
+
+### Player Attributes
+
+#### GET /player-attributes/{player_id}/bats
+
+**Status:** CONFIRMED LIVE -- 200 OK (2026-03-07). Full schema in Confirmed Endpoints section.
+
+Player batting attributes including handedness and throwing hand.
+
+- **Path parameters:** `player_id` (UUID -- from `GET /teams/{team_id}/players`)
+- **Schema:** `{"player_id": UUID, "throwing_hand": "right"|"left", "batting_side": "right"|"left"|"switch"}`
+- **Note:** `GET /teams/{team_id}/opponents/players` returns the same handedness data in bulk for all opponents. Use this endpoint for individual own-team player lookups only.
+- **Related write endpoint:** `PATCH /player-attributes/{player_id}/bats/` (documented in Write Operations Catalog below).
+- **Coaching relevance:** High (Tier 2). But prefer the bulk opponents/players endpoint for opponent handedness data.
+- **Discovered:** 2026-03-07
+
+#### PATCH /player-attributes/{player_id}/bats/
+
+**Status:** PROXY CAPTURE -- write operation observed.
+
+Updates batting attributes for a player. See [Write Operations Catalog](#write-operations-catalog).
+
+- **Discovered:** 2026-03-07
+
+---
+
+### Events (standalone)
+
+#### GET /events/{event_id}
+
+**Status:** CONFIRMED LIVE -- 200 OK (2026-03-07). Full schema in Confirmed Endpoints section.
+
+Standalone event detail endpoint. Returns full details for a single scheduled event by UUID.
+
+- **Path parameters:** `event_id` (UUID -- from schedule)
+- **Schema:** Two-key JSON object: `event` (id, event_type, sub_type, status, full_day, team_id, start/end/arrive datetimes, timezone) + `pregame_data` (id, game_id, opponent_name, opponent_id, home_away, lineup_id).
+- **Key field:** `pregame_data.lineup_id` links directly to `GET /bats-starting-lineups/{event_id}`.
+- **Coaching relevance:** Medium (Tier 3). Useful for resolving an event_id to full event metadata. Prefer `GET /events/{event_id}/best-game-stream-id` for game_stream_id resolution.
+- **Discovered:** 2026-03-07
+
+---
+
+### Organizations (additional)
+
+These endpoints extend the Organizations section documented in the 2026-03-05 capture.
+
+#### GET /organizations/{org_id}/pitch-count-report
+
+**Status:** CONFIRMED LIVE -- 200 OK (2026-03-07). **CSV format -- not JSON.**
+
+Pitch count report at the organization level. Returns a CSV string with per-pitcher pitch counts for the past week.
+
+- **Path parameters:** `org_id` (UUID -- organization identifier)
+- **Schema:** CSV string with columns: `Game Date, Start Time, Pitcher, Team, Opponent, Pitch Count, "Last Batter, First Pitch #", Innings Pitched, Innings Caught, Final Score, Scored By`
+- **Note:** Response is CSV, not JSON. This is the only non-JSON endpoint in the spec.
+- **Empty response:** Returns `"No games with pitcher data were found in the past week."` as the CSV row content when no recent games exist.
+- **Coaching relevance:** High (Tier 2). Org-level pitch count tracking is critical for pitcher health management across multiple teams. High school programs with JV/Varsity sharing pitchers would use this to enforce pitch count rules and rest requirements.
+- **Discovered:** 2026-03-07
+
+---
+
+### Teams -- Additional (2026-03-07)
+
+These team-scoped endpoints are new additions from the 2026-03-07 capture. See the 2026-03-05 "Teams (additional)" section for entries documented in the prior session.
+
+#### GET /teams/{team_id}/web-widgets
+
+**Status:** CONFIRMED LIVE -- 200 OK (2026-03-07). Full schema in Confirmed Endpoints section.
+
+Web widget configuration for a specific team.
+
+- **Path parameters:** `team_id` (UUID)
+- **Schema:** Bare JSON array of `{"id": UUID, "type": string}` objects. Observed: `[{"id": "...", "type": "schedule"}]`.
+- **Coaching relevance:** None. Widget configuration -- no coaching analytics value.
+- **Discovered:** 2026-03-07
+
+#### GET /teams/public/{public_id}/access-level
+
+**Status:** CONFIRMED LIVE -- 200 OK (2026-03-07). Full schema in Confirmed Endpoints section.
+
+**AUTH REQUIRED:** Despite the `/public/` path segment, this endpoint requires `gc-token`. Unauthenticated requests return HTTP 401. See the full entry in the Confirmed Endpoints section for error response details.
+
+Returns the paid access level for a team's public profile.
+
+- **Path parameters:** `public_id` (alphanumeric slug)
+- **Schema:** `{"paid_access_level": string|null}`. Returned `null` for the test team.
+- **Coaching relevance:** Low. Operational -- useful for pre-flight checks before attempting to fetch opponent data via public endpoints.
+- **Discovered:** 2026-03-07
+
+#### GET /teams/public/{public_id}/id
+
+**Status:** CONFIRMED LIVE -- 200 OK (2026-03-07). Full schema in Confirmed Endpoints section.
+
+**AUTH REQUIRED:** Despite the `/public/` path segment, this endpoint requires `gc-token`. Unauthenticated requests return HTTP 401. See the full entry in the Confirmed Endpoints section for error response details.
+
+**Reverse bridge: public_id slug -> team UUID.** Confirmed symmetry with `GET /teams/{team_id}/public-team-profile-id`.
+
+- **Path parameters:** `public_id` (alphanumeric slug)
+- **Schema:** `{"id": UUID}`. Confirmed: `a1GFM9Ku0BbF` -> `72bb77d8-54ca-42d2-8547-9da4880d0cb4`.
+- **Coaching relevance:** Medium (Tier 3). When starting from a public_id (e.g., from a shared link), enables resolving back to the UUID for authenticated endpoints.
+- **Discovered:** 2026-03-07
+
+#### GET /public/teams/{public_id}/live
+
+**Status:** PROXY CAPTURE -- **HTTP 404 observed** (no active game at time of capture).
+
+Live game status for a public team profile. Returns the currently-live game stream for a team, if one exists.
+
+- **Path parameters:** `public_id` (alphanumeric slug)
+- **URL note:** Uses the `/public/teams/` prefix (standard public endpoint pattern -- no auth required).
+- **Query keys observed:** none confirmed
+- **Schema:** TBD -- 404 received when no game was live; response body for a live game not yet captured
+- **Expected content (when game is live):** Likely returns the `game_stream_id` and basic game state (inning, score, home/away) for the active game
+- **Auth requirement:** Likely no auth required (consistent with other `/public/teams/` endpoints)
+- **Coaching relevance:** Low. Live game monitoring -- not needed for historical data ingestion. Could be useful for detecting when a game has just finished (transition from live to completed) as an ingestion trigger.
+- **Discovered:** 2026-03-07
+
+---
+
+### Web-Route Public Endpoints
+
+These endpoints follow a **season-slug URL pattern** distinct from all previously documented endpoints. They were observed in iOS proxy capture and thought to be served under `https://api.team-manager.gc.com`.
+
+**CONFIRMED HTTP 404 ON API DOMAIN (2026-03-07):** All season-slug endpoints returned HTTP 404 when tested against `api.team-manager.gc.com`. These URL patterns appear to be served by the **web app** (`https://web.gc.com`) rather than the API domain. The proxy capture likely captured web-frontend navigation requests, not API calls.
+
+**Status for all entries in this section:** PROXY CAPTURE (observed), HTTP 404 on API domain (confirmed 2026-03-07). These routes are NOT available at `https://api.team-manager.gc.com`. Re-test against `https://web.gc.com` if needed.
+
+#### GET /teams/{public_id}/{season-slug}/opponents
+
+Returns opponents for a team in a specific season, accessed via the public_id and season slug. Likely equivalent to `GET /teams/{team_id}/opponents` but scoped to a single season via the slug rather than returning all-time opponents.
+
+- **Path parameters:** `public_id` (alphanumeric slug), `season-slug` (string, format TBD)
+- **Schema:** TBD -- proxy traffic observed, response body not yet captured
+- **Coaching relevance:** High (Tier 2). Season-scoped opponent list without needing a team UUID -- accessible from a shared link or public profile.
+
+#### GET /teams/{public_id}/{season-slug}/schedule/{event_id}/plays
+
+Returns pitch-by-pitch play data for a specific event, accessible via public_id and season slug. Likely equivalent to `GET /game-stream-processing/{game_stream_id}/plays` but routed via the web URL pattern.
+
+- **Path parameters:** `public_id` (alphanumeric slug), `season-slug` (string), `event_id` (UUID)
+- **Schema:** TBD -- proxy traffic observed, response body not yet captured
+- **Notes:** If this endpoint returns plays without authentication, it would be a significant discovery -- pitch-by-pitch data for any public team without needing a gc-token. **High-priority verification target.**
+- **Coaching relevance:** Critical (Tier 1) if unauthenticated. Pitch-by-pitch plays for any opponent without credentials enables comprehensive opponent scouting.
+
+#### GET /teams/{public_id}/{season-slug}/season-stats
+
+Returns season stats for a team via the public/season-slug route. Likely equivalent to `GET /teams/{team_id}/season-stats` but accessible without authentication.
+
+- **Path parameters:** `public_id` (alphanumeric slug), `season-slug` (string)
+- **Schema:** TBD -- proxy traffic observed, response body not yet captured
+- **Notes:** If unauthenticated access is confirmed, this is a major capability -- season-level batting/pitching/fielding aggregates for any opponent visible via their public profile.
+- **Coaching relevance:** Critical (Tier 1) if unauthenticated. Opponent season stats for scouting without credential dependency.
+
+#### GET /teams/{public_id}/{season-slug}/team
+
+Returns team information for a specific season via the public/season-slug route. Likely equivalent to `GET /public/teams/{public_id}` but season-scoped.
+
+- **Path parameters:** `public_id` (alphanumeric slug), `season-slug` (string)
+- **Schema:** TBD -- proxy traffic observed, response body not yet captured
+- **Coaching relevance:** Low. Team metadata -- name, location, season info. Duplicate of `GET /public/teams/{public_id}` with season scoping.
+
+#### GET /teams/{public_id}/{season-slug}/tools
+
+Returns tools/features available for a team in a specific season. Likely a feature-flag or capability check -- which GameChanger features are enabled for this team/season combination.
+
+- **Path parameters:** `public_id` (alphanumeric slug), `season-slug` (string)
+- **Schema:** TBD -- proxy traffic observed, response body not yet captured
+- **Coaching relevance:** None. Feature/capability metadata -- no coaching analytics value.
+
+#### GET /teams/{public_id}/players/{player_id}
+
+Returns a single player record for a team identified by `public_id`. This is the individual-player variant of `GET /teams/public/{public_id}/players` (which returns the full roster).
+
+- **Path parameters:** `public_id` (alphanumeric slug), `player_id` (UUID)
+- **URL note:** Uses `/{public_id}/players/{player_id}` directly under `/teams/` -- no `public/` infix and no season slug. Compare with the roster endpoint `GET /teams/public/{public_id}/players` which uses the `public/` infix.
+- **Schema:** TBD -- proxy traffic observed, response body not yet captured
+- **Expected content:** Single player object -- likely same 5-field schema as `GET /teams/public/{public_id}/players` (`id`, `first_name`, `last_name`, `number`, `avatar_url`)
+- **Coaching relevance:** Low. Individual player lookup -- roster endpoint returns all players more efficiently.
+- **Discovered:** 2026-03-07
+
+---
+
+### Me -- Additional (2026-03-07)
+
+These `/me/` endpoints are new additions from the 2026-03-07 capture. See the 2026-03-05 "Me (additional)" section for entries documented in the prior session.
+
+#### GET /me/organizations
+
+**Status:** CONFIRMED (2026-03-07) -- returns empty array for this account. Previously HTTP 500 due to missing pagination params. Fixed with `?page_size=50` + `x-pagination: true` header. Full schema in Confirmed Endpoints section.
+
+- **Required query params:** `?page_size=50`
+- **Required header:** `x-pagination: true`
+- **Notes:** Returns empty array for accounts where org access is via team membership (not direct org membership). Compare with `/me/related-organizations` which returned 2 orgs.
+- **Coaching relevance:** Medium (Tier 3). Organization discovery -- useful if the user has direct org membership.
+- **Discovered:** 2026-03-07
+
+#### GET /me/team-tile/{team_id}
+
+**Status:** CONFIRMED LIVE -- 200 OK (2026-03-07). Full schema in Confirmed Endpoints section.
+
+Returns the "team tile" summary card for a specific team. Same fields as `GET /me/teams` but for a single team.
+
+- **Path parameters:** `team_id` (UUID)
+- **Schema:** Same shape as team objects in `/me/teams` + `badge_count` integer field. `team_avatar_image` may be null.
+- **Coaching relevance:** None. App UI component -- no coaching analytics value beyond what `/me/teams` provides.
+- **Discovered:** 2026-03-07
+
+---
+
+### Write Operations Catalog
+
+This section documents write endpoints (POST, PATCH, PUT, DELETE) observed in the 2026-03-07 proxy capture. These are **not needed for read-only data ingestion** but are documented here for completeness and to support potential future roster management or lineup submission features.
+
+**Status for all entries:** PROXY CAPTURE -- traffic observed. Request/response bodies not captured unless noted.
+
+#### POST /search
+
+Global search endpoint. Returns search results across teams, players, games, and other entities.
+
+- **Notes:** Distinct from `POST /clips/search` (video clips only). The global search is likely used for the app's search bar. Request body probably contains a query string and optional filters. Not needed for data ingestion.
+- **Discovered:** 2026-03-07
+
+#### POST /me/tokens/braze
+
+Registers a Braze push notification token for the authenticated user.
+
+- **Notes:** Mobile push notification infrastructure. Not relevant to data ingestion.
+- **Discovered:** 2026-03-07
+
+#### POST /me/tokens/firebase
+
+Registers a Firebase Cloud Messaging (FCM) push notification token for the authenticated user.
+
+- **Notes:** Mobile push notification infrastructure. Not relevant to data ingestion.
+- **Discovered:** 2026-03-07
+
+#### POST /me/tokens/stream-chat
+
+Obtains or registers a Stream Chat token for the authenticated user. Stream Chat is the third-party in-app messaging service used by GameChanger.
+
+- **Notes:** In-app chat infrastructure. Not relevant to data ingestion.
+- **Discovered:** 2026-03-07
+
+#### POST /me/tokens/stream-chat/revoke
+
+Revokes the authenticated user's Stream Chat token (e.g., on sign-out).
+
+- **Notes:** In-app chat infrastructure. Not relevant to data ingestion.
+- **Discovered:** 2026-03-07
+
+#### POST /teams/{team_id}/players/
+
+Creates a new player on a team. Note the trailing slash in the URL pattern.
+
+- **Path parameters:** `team_id` (UUID)
+- **Notes:** Write endpoint for roster management -- adds a player record to a team. Request body likely contains `first_name`, `last_name`, `number`, `positions`, `bats`, `throws`. Not needed for read-only ingestion but relevant if roster sync features are built.
+- **Discovered:** 2026-03-07
+
+#### PATCH /me/user
+
+Updates the authenticated user's profile. Already documented in the 2026-03-05 Me (additional) section. Listed here for completeness in the write-operations catalog.
+
+- **Discovered:** 2026-03-05
+
+#### PATCH /players/{player_id}
+
+Updates a player's profile fields.
+
+- **Path parameters:** `player_id` (UUID)
+- **Notes:** Write endpoint for roster management -- updates player metadata (name, number, etc.). Distinct from `PATCH /player-attributes/{player_id}/bats/` which handles batting-stance-specific attributes.
+- **Discovered:** 2026-03-07
+
+#### PATCH /player-attributes/{player_id}/bats/
+
+Updates a player's batting attributes (handedness, stance). Note the trailing slash.
+
+- **Path parameters:** `player_id` (UUID)
+- **Notes:** Write counterpart to `GET /player-attributes/{player_id}/bats`. Updates `bats` (left/right/switch) and `throws` fields.
+- **Discovered:** 2026-03-07
+
+#### DELETE /players/{player_id}
+
+Deletes a player record.
+
+- **Path parameters:** `player_id` (UUID)
+- **Notes:** Destructive roster management operation. Not relevant to read-only ingestion.
+- **Discovered:** 2026-03-07
+
+#### PUT /teams/{team_id}/managers/
+
+Adds a manager/coach to a team. Note the trailing slash.
+
+- **Path parameters:** `team_id` (UUID)
+- **Notes:** Team management write operation. Not relevant to read-only ingestion.
+- **Discovered:** 2026-03-07
+
+#### DELETE /teams/{team_id}/managers/{user_id}
+
+Removes a manager/coach from a team.
+
+- **Path parameters:** `team_id` (UUID), `user_id` (UUID)
+- **Notes:** Team management write operation. Not relevant to read-only ingestion.
+- **Discovered:** 2026-03-07
 
 ---
 
@@ -5403,13 +7643,16 @@ Endpoints that directly enable scouting reports, lineup decisions, or game prepa
 
 | Endpoint | Status | Coaching Use Case |
 |----------|--------|-------------------|
-| `GET /teams/{team_id}/opponents/players` | CONFIRMED | Bulk opponent roster for all opponents of a team -- scouting prep without per-opponent crawling |
-| `GET /organizations/{org_id}/standings` | CONFIRMED | League standings with home/away/last10/streak/run-differential for conference positioning |
-| `GET /me/associated-players` | CONFIRMED | Cross-team player tracking -- longitudinal analysis of players across seasons, teams, and levels |
-| `GET /game-streams/gamestream-recap-story/{id}` | CONFIRMED | Structured game narrative with player UUIDs, names, RBI/hit details -- automated scouting report generation |
+| `GET /teams/{team_id}/opponent/{opponent_id}` | CONFIRMED (2026-03-07) | Per-opponent record lookup -- name, is_hidden, progenitor_team_id for further queries |
+| `GET /teams/{team_id}/opponents/players` | CONFIRMED (758 records, 61 teams) | Bulk opponent roster with handedness for ALL opponents in one call -- most efficient scouting prep |
+| `GET /organizations/{org_id}/standings` | CONFIRMED (2026-03-07) | League standings with home/away/last10/streak/run-differential for conference positioning |
+| `GET /me/associated-players` | CONFIRMED (2026-03-07) | Cross-team player tracking -- longitudinal analysis of players across seasons, teams, and levels |
+| `GET /game-streams/gamestream-recap-story/{id}` | CONFIRMED (schema documented; 404 for some events) | Structured game narrative with player UUIDs, names, RBI/hit details -- automated scouting report generation |
 | `GET /game-stream-processing/{game_stream_id}/plays` | CONFIRMED | Pitch-by-pitch play data -- pitch sequences, stolen bases, contact quality, lineup changes. See IDEA-008. |
 | `GET /teams/{team_id}/players/{player_id}/stats` | CONFIRMED | Per-player per-game stats with spray charts (x/y coordinates) and rolling cumulative totals. See IDEA-009. |
 | `GET /teams/{team_id}/schedule/events/{event_id}/player-stats` | CONFIRMED | Both teams' player stats + spray charts in a single call per game -- most efficient box score source |
+| `GET /teams/{public_id}/{season-slug}/season-stats` | PROXY CAPTURE | Season stats via public/season-slug route -- if unauthenticated, enables opponent stat ingestion without credentials |
+| `GET /teams/{public_id}/{season-slug}/schedule/{event_id}/plays` | PROXY CAPTURE | Pitch-by-pitch plays via public route -- if unauthenticated, enables pitch sequence analysis for any opponent |
 
 ### Tier 2 -- High
 
@@ -5422,9 +7665,15 @@ Endpoints that enhance analysis but are not blocking core scouting or game-prep 
 | `GET /me/schedule` | CONFIRMED | Cross-team schedule in a single call -- useful for multi-team coordination and schedule overlap detection |
 | `GET /organizations/{org_id}/opponents` | CONFIRMED | Org-level opponent list with root/progenitor/owning team IDs -- discover opponents without per-team iteration |
 | `GET /organizations/{org_id}/opponent-players` | HTTP 500 | Bulk opponent roster at org level -- high value but blocked by HTTP 500 with web headers. See IDEA-011. |
-| `GET /organizations/{org_id}/teams` | HTTP 500 | All teams in an org in one call -- high value but blocked by HTTP 500 with web headers. See IDEA-011. |
-| `GET /me/related-organizations` | HTTP 500 | Organization discovery -- high value but blocked by HTTP 500 with web headers. See IDEA-011. |
+| `GET /organizations/{org_id}/teams` | CONFIRMED (2026-03-07) | All teams in an org in one call -- requires `?page_starts_at=0&page_size=50` + `x-pagination: true` header |
+| `GET /me/related-organizations` | CONFIRMED (2026-03-07) | Organization discovery -- requires `?page_starts_at=0&page_size=50` + `x-pagination: true` header |
 | `GET /teams/{team_id}/relationships` | CONFIRMED | User-to-player mapping ("primary", "self" associations) -- links coaches/parents to specific players |
+| `GET /bats-starting-lineups/{event_id}` | CONFIRMED (2026-03-07) -- 403 on away game, 200 on home game | Per-game starting lineup: batting order + field positions for lineup tendency analysis |
+| `GET /bats-starting-lineups/latest/{team_id}` | CONFIRMED (2026-03-07) | Latest starting lineup for a team: batting order and field positions |
+| `GET /teams/{team_id}/lineup-recommendation` | CONFIRMED (2026-03-07) | GC's algorithmic lineup recommendation: 9-player batting order + field positions |
+| `GET /player-attributes/{player_id}/bats` | CONFIRMED (2026-03-07) | Batter handedness (L/R/switch) -- but `/opponents/players` returns same data in bulk |
+| `GET /organizations/{org_id}/pitch-count-report` | CONFIRMED (2026-03-07) -- CSV format | Org-level pitcher pitch counts as CSV -- arm health tracking and pitch count rule enforcement |
+| `GET /teams/{public_id}/{season-slug}/opponents` | HTTP 404 -- not on API domain | Season-scoped opponent list -- route may exist on web.gc.com, not api.team-manager.gc.com |
 
 ### Tier 3 -- Medium
 
@@ -5437,11 +7686,14 @@ Nice-to-have data for secondary analysis or operational convenience.
 | `GET /organizations/{org_id}/events` | CONFIRMED (empty) | Org-level event calendar -- returned empty for travel ball org, may have data for school program orgs |
 | `GET /organizations/{org_id}/game-summaries` | CONFIRMED (empty) | Org-level game summaries -- returned empty, may have data for school program orgs |
 | `GET /events/{event_id}/best-game-stream-id` | CONFIRMED | Resolves event_id to game_stream_id -- utility for boxscore/plays pipeline |
+| `GET /events/{event_id}` | CONFIRMED (2026-03-07) | Standalone event detail -- full event + pregame_data including lineup_id |
 | `GET /teams/{team_id}/public-team-profile-id` | CONFIRMED | UUID-to-public_id bridge -- enables public endpoint access for any discovered opponent |
+| `GET /teams/public/{public_id}/id` | CONFIRMED (2026-03-07) -- **AUTH REQUIRED** despite `/public/` path | Reverse bridge: public_id -> UUID -- confirmed symmetry with forward bridge |
 | `GET /me/teams-summary` | CONFIRMED | Lightweight team count/date range -- quick check for account scope |
-| `GET /events/{event_id}/highlight-reel` | CONFIRMED | Game highlight clips with CloudFront URLs -- potential for game recap visuals |
-| `GET /game-streams/{game_stream_id}/events` | OBSERVED | Live game event stream -- large payload (72K+), schema not captured |
-| `GET /game-streams/gamestream-viewer-payload-lite/{id}` | OBSERVED | Lightweight game viewer data -- large payload (72K+), schema not captured |
+| `GET /me/organizations` | CONFIRMED (2026-03-07) -- empty | Organization membership list -- requires `?page_size=50` + `x-pagination: true`; returns empty array for this account |
+| `GET /events/{event_id}/highlight-reel` | CONFIRMED (2026-03-07) | Game highlight clips with CloudFront URLs -- potential for game recap visuals |
+| `GET /game-streams/{game_stream_id}/events` | CONFIRMED (2026-03-07) | Raw event stream -- 319 events, 10 event codes, `event_data` is JSON-encoded string |
+| `GET /game-streams/gamestream-viewer-payload-lite/{id}` | CONFIRMED (2026-03-07) | Lightweight game viewer -- same 319 events as /events plus `created_at`, marker, all_event_data_ids |
 
 ### Tier 4 -- Low / None
 
@@ -5449,12 +7701,21 @@ Infrastructure, config, video, or app-only endpoints with no coaching analytics 
 
 | Endpoint | Status | Coaching Use Case |
 |----------|--------|-------------------|
-| `GET /me/widgets` | CONFIRMED | App widget configuration -- no coaching value |
-| `GET /me/subscription` | OBSERVED | Subscription/billing status -- no coaching value |
-| `GET /teams/{team_id}/scoped-features` | CONFIRMED | Feature flags -- no coaching value |
-| `GET /teams/{team_id}/team-notification-setting` | CONFIRMED | Notification preferences -- no coaching value |
-| `GET /teams/{team_id}/external-associations` | CONFIRMED | External system links (returned empty) -- no coaching value |
-| `GET /organizations/{org_id}/scoped-features` | CONFIRMED | Org feature flags -- no coaching value |
+| `GET /me/widgets` | CONFIRMED (2026-03-07) -- returns `{"widgets":[]}` | App widget configuration -- no coaching value |
+| `GET /me/team-tile/{team_id}` | CONFIRMED (2026-03-07) | Compact team tile with record and badge_count -- no additional coaching value beyond /me/teams |
+| `GET /me/subscription-information` | CONFIRMED (2026-03-07) | Subscription details with provider_details -- no coaching value |
+| `GET /subscription/details` | CONFIRMED (2026-03-07) | Detailed subscription with plan levels and billing -- no coaching value |
+| `GET /subscription/recurly/plans` | CONFIRMED (2026-03-07) | Available plans with pricing -- no coaching value |
+| `GET /me/advertising/metadata` | CONFIRMED (2026-03-07) | Ad targeting data -- no coaching value |
+| `GET /announcements/user/read-status` | CONFIRMED (2026-03-07) -- `{"read_status":"read"}` | In-app announcements read status -- no coaching value |
+| `GET /sync-topics/me/updated-topics` | CONFIRMED (2026-03-07) | Real-time sync cursor -- no coaching value for historical ingestion |
+| `GET /teams/{team_id}/scoped-features` | CONFIRMED (2026-03-07) -- empty | Feature flags -- no coaching value |
+| `GET /teams/{team_id}/team-notification-setting` | CONFIRMED (2026-03-07) | Notification preferences -- no coaching value |
+| `GET /teams/{team_id}/external-associations` | CONFIRMED (2026-03-07) -- empty | External system links -- no coaching value |
+| `GET /teams/{team_id}/web-widgets` | CONFIRMED (2026-03-07) -- `[{"type":"schedule"}]` | Team web widget config -- no coaching value |
+| `GET /teams/public/{public_id}/access-level` | CONFIRMED (2026-03-07) -- `{"paid_access_level":null}` | **AUTH REQUIRED** despite `/public/` path. Access level check -- operational |
+| `GET /public/teams/{public_id}/live` | HTTP 404 when no active game | Live game status -- 404 when no active game; not for historical ingestion |
+| `GET /organizations/{org_id}/scoped-features` | CONFIRMED (2026-03-07) -- empty | Org feature flags -- no coaching value |
 | `GET /organizations/{org_id}/avatar` | OBSERVED | Org logo image -- no coaching value |
 | `GET /teams/{team_id}/avatar` | OBSERVED | Team logo image -- no coaching value |
 | `GET /teams/{team_id}/videos` | OBSERVED | Team video list -- video infrastructure, not stat data |
@@ -5469,6 +7730,9 @@ Infrastructure, config, video, or app-only endpoints with no coaching analytics 
 | `GET /teams/{team_id}/users-count` | OBSERVED | User count -- operational |
 | `POST /teams/{team_id}/follow` | OBSERVED | Follow a team -- app feature |
 | `GET /teams/{team_id}/team-calendar` | OBSERVED | Calendar sync URL -- operational |
+| `GET /teams/{public_id}/{season-slug}/team` | PROXY CAPTURE | Season-scoped team info via public route -- duplicate of public team profile |
+| `GET /teams/{public_id}/{season-slug}/tools` | PROXY CAPTURE | Feature flags via public route -- no coaching value |
+| `GET /teams/{public_id}/players/{player_id}` | PROXY CAPTURE | Single player lookup via public_id -- roster endpoint more efficient |
 | `PUT /users/{user_id}` | OBSERVED | Update user profile -- user management |
 | `GET /sync-topics/{topic_id}/events` | OBSERVED | Real-time sync events -- infrastructure |
 | `POST /sync-topics/{topic_id}/events` | OBSERVED | Push sync updates -- infrastructure |
@@ -5487,6 +7751,17 @@ Infrastructure, config, video, or app-only endpoints with no coaching analytics 
 | `GET /players/{player_id}/avatar` | OBSERVED (404) | Player profile photo -- media |
 | `GET /users/{user_id}/search-history` | OBSERVED | Search history -- app feature |
 | `POST /users/{user_id}/search-history` | OBSERVED | Add search entry -- app feature |
+| `POST /search` | PROXY CAPTURE | Global search -- app feature, not ingestion |
+| `POST /me/tokens/braze` | PROXY CAPTURE | Push notification token -- mobile infrastructure |
+| `POST /me/tokens/firebase` | PROXY CAPTURE | Push notification token -- mobile infrastructure |
+| `POST /me/tokens/stream-chat` | PROXY CAPTURE | Chat token -- in-app messaging infrastructure |
+| `POST /me/tokens/stream-chat/revoke` | PROXY CAPTURE | Revoke chat token -- in-app messaging infrastructure |
+| `POST /teams/{team_id}/players/` | PROXY CAPTURE | Create player -- roster management write operation |
+| `PATCH /players/{player_id}` | PROXY CAPTURE | Update player -- roster management write operation |
+| `PATCH /player-attributes/{player_id}/bats/` | PROXY CAPTURE | Update batting stance -- roster management write operation |
+| `DELETE /players/{player_id}` | PROXY CAPTURE | Delete player -- roster management write operation |
+| `PUT /teams/{team_id}/managers/` | PROXY CAPTURE | Add team manager -- team management write operation |
+| `DELETE /teams/{team_id}/managers/{user_id}` | PROXY CAPTURE | Remove team manager -- team management write operation |
 | `GET /places/{place_id}` | OBSERVED | Venue details -- operational |
 | `GET /game-streams/gamestream-batting-insight-story/{id}` | OBSERVED (404) | Batting insights -- returned 404, may not exist for all games |
 | `GET /game-streams/gamestream-batting-insight-story/{id}/players/{pid}` | OBSERVED (404) | Player batting insights -- returned 404 |
@@ -5494,33 +7769,38 @@ Infrastructure, config, video, or app-only endpoints with no coaching analytics 
 
 ### Top 5 Endpoints to Integrate Next
 
-After the existing E-002 pipeline (roster, schedule, game-summaries, boxscore, season-stats, opponents), these five endpoints offer the highest coaching value with reasonable implementation feasibility:
+After the existing E-002 pipeline (roster, schedule, game-summaries, boxscore, season-stats, opponents), these five endpoints offer the highest coaching value with reasonable implementation feasibility. Updated 2026-03-07 to reflect live probe results.
 
-1. **`GET /teams/{team_id}/opponents/players`** -- Aggregated opponent roster across all opponents. One paginated call replaces N per-opponent roster calls. Enables bulk scouting report preparation. Already CONFIRMED with full schema.
+1. **`GET /teams/{team_id}/opponents/players`** -- Aggregated opponent roster across all opponents INCLUDING handedness. 758 records, 61 teams in a single call. One endpoint replaces N per-opponent roster calls AND N per-player bats calls. CONFIRMED with full schema 2026-03-07. Zero ambiguity about implementation.
 
 2. **`GET /game-stream-processing/{game_stream_id}/plays`** -- Pitch-by-pitch play data for advanced scouting: pitch sequences, stolen base attempts, contact quality, lineup changes. Uses the same `game_stream_id` already captured by E-002. See IDEA-008 for the full epic concept.
 
 3. **`GET /teams/{team_id}/players/{player_id}/stats`** -- Per-player per-game stats with spray chart coordinates. Enables batting tendency analysis, defensive positioning recommendations, and player development tracking across seasons. See IDEA-009 for the full epic concept.
 
-4. **`GET /organizations/{org_id}/standings`** -- Full league standings with run differential, streaks, home/away splits, and last-10 records. One call provides the competitive landscape for game preparation. Requires knowing the org UUID for the LSB program.
+4. **`GET /organizations/{org_id}/standings`** -- Full league standings with run differential, streaks, home/away splits, and last-10 records. CONFIRMED with full schema 2026-03-07 (returned zeros for travel ball org -- will have data for school program orgs with conference standings). Requires the LSB program's org UUID.
 
-5. **`GET /game-streams/gamestream-recap-story/{game_stream_id}`** -- Structured game narrative with typed segments referencing players by UUID and name. Could power automated scouting report generation or post-game summaries for coaching staff.
+5. **`GET /bats-starting-lineups/{event_id}` + `GET /bats-starting-lineups/latest/{team_id}` + `GET /teams/{team_id}/lineup-recommendation`** -- Per-event starting lineup (event-specific), latest lineup snapshot, and GC's algorithmic recommendation. All three CONFIRMED with full schemas 2026-03-07. Together they enable: (a) per-game lineup history, (b) comparison of coach decisions vs. GC algorithm, (c) batting order consistency analysis. Note: `/bats-starting-lineups/{event_id}` returns HTTP 403 for away games where the authenticated user's team was not the scorer -- only accessible for home games or games where the user's team managed scoring.
 
 ### HTTP 500 Endpoints -- Integration Blocked
 
-Three high-value endpoints currently return HTTP 500 with web browser headers but succeeded via iOS app proxy capture. These cannot have crawlers built until the root cause is resolved. See IDEA-011 for the investigation plan.
+~~Four high-value endpoints previously returned HTTP 500 with web browser headers.~~ **UPDATE 2026-03-07: Three of these four endpoints are now CONFIRMED WORKING.** The required pagination query parameters and `x-pagination: true` header were identified. One endpoint remains blocked.
 
-| Endpoint | Error | Coaching Value |
-|----------|-------|----------------|
-| `GET /me/related-organizations` | `page_starts_at` undefined | Organization discovery -- find all orgs a user belongs to |
-| `GET /organizations/{org_id}/teams` | `page_starts_at` undefined | All teams in an org in one call |
-| `GET /organizations/{org_id}/opponent-players` | `page_size` undefined | Bulk opponent roster at org level |
+The error pattern was `"Cannot read properties of undefined (reading 'page_starts_at')"` or `"Cannot read properties of undefined (reading 'page_size')"` -- the server-side pagination handler requires query parameters not sent by default web client requests.
+
+| Endpoint | Previous Status | Current Status | Resolution |
+|----------|----------------|----------------|------------|
+| `GET /me/related-organizations` | HTTP 500 | **CONFIRMED** | Add `?page_starts_at=0&page_size=50` + `x-pagination: true` header |
+| `GET /me/organizations` | HTTP 500 | **CONFIRMED** (empty response) | Add `?page_size=50` + `x-pagination: true` header |
+| `GET /organizations/{org_id}/teams` | HTTP 500 | **CONFIRMED** | Add `?page_starts_at=0&page_size=50` + `x-pagination: true` header |
+| `GET /organizations/{org_id}/opponent-players` | HTTP 500 | Still blocked | Needs investigation -- `page_size` undefined |
+
+**Workaround confirmed (2026-03-07):** Appending pagination parameters and `x-pagination: true` header resolves the 500s for the three organization/me endpoints above. The same approach should be tried for `GET /organizations/{org_id}/opponent-players`.
 
 ### Related Backlog Items
 
 - **IDEA-008** (Plays and Line Scores): Covers `GET /game-stream-processing/{game_stream_id}/plays` (Tier 1) and `GET /public/game-stream-processing/{game_stream_id}/details` (Tier 2). Trigger met -- E-002 and E-004 complete.
 - **IDEA-009** (Per-Player Game Stats and Spray Charts): Covers `GET /teams/{team_id}/players/{player_id}/stats` (Tier 1). Trigger met -- E-002 and E-004 complete.
-- **IDEA-011** (Investigate HTTP 500 Endpoints): Covers the three HTTP 500 endpoints in Tier 2. Blocked by mobile credential availability.
+- **IDEA-011** (Investigate HTTP 500 Endpoints): Partially resolved 2026-03-07. Three of four endpoints now confirmed. Remaining: `GET /organizations/{org_id}/opponent-players`.
 
 ---
 
@@ -5780,6 +8060,8 @@ This API is undocumented. Every value in this document was confirmed from live b
 
 | Date | Change |
 |------|--------|
+| 2026-03-07 | BULK CRAWL (50/64 endpoints confirmed 200 OK): Full schema documentation added for team management endpoints (`/users`, `/users/count`, `/relationships`, `/relationships/requests`, `/scoped-features`, `/team-notification-setting`, `/web-widgets`, `/external-associations`, `/avatar-image`), video endpoints (`/video-stream/videos`, `/schedule/events/{event_id}/video-stream`, `/schedule/events/{event_id}/video-stream/assets` full schema, `/video-stream/live-status`, `/rsvp-responses`), public-path endpoints (`/teams/public/{public_id}/access-level` and `/id` -- both REQUIRE AUTH despite path), user endpoints (`/users/{user_id}` full schema confirmed, `/users/{user_id}/profile-photo` 404, `/players/{player_id}/profile-photo` 404), `"invited"` status value confirmed in `/teams/{team_id}/users`. **CONFIRMED non-endpoints:** All season-slug URL patterns (`/teams/{public_id}/{season-slug}/*`) return HTTP 404 on api.team-manager.gc.com -- these are web app frontend routes at web.gc.com, NOT API endpoints. HTTP 500 pagination bug confirmed for `/me/organizations`, `/me/related-organizations`, `/organizations/{org_id}/teams`. |
+| 2026-03-07 | PROXY CAPTURE (second session): 75 endpoint patterns catalogued. New high-value discoveries: `GET /teams/{team_id}/opponent/{opponent_id}` (singular `/opponent/` -- per-opponent scouting, 50+ opponents hit -- Tier 1); `GET /bats-starting-lineups/{event_id}` and `GET /bats-starting-lineups/latest/{team_id}` (BATS starting lineup data -- Tier 2); `GET /teams/{team_id}/lineup-recommendation` (GC's algorithmic lineup engine -- Tier 2); `GET /player-attributes/{player_id}/bats` (batter handedness for L/R splits -- Tier 2); `GET /organizations/{org_id}/pitch-count-report` (org-level pitcher pitch counts -- Tier 2); `GET /events/{event_id}` (standalone event detail -- Tier 3); `GET /me/organizations` (org membership discovery -- Tier 3); reverse bridge `GET /teams/public/{public_id}/id` (public_id -> UUID). New URL pattern family documented: **web-route public endpoints** using `GET /teams/{public_id}/{season-slug}/*` (6 endpoints) -- season-slug pattern mirrors web app routing and may provide unauthenticated access to opponent stats/plays (high-priority verification targets). Write operations catalog added: 15 write endpoints (POST/PATCH/PUT/DELETE) covering player management, roster editing, token registration, and team management. New sections in spec: "Proxy-Discovered Endpoints (2026-03-07)", "Bats / Starting Lineups", "Player Attributes", "Events (standalone)", "Organizations (additional)", "Teams -- Additional (2026-03-07)", "Web-Route Public Endpoints", "Me -- Additional (2026-03-07)", "Write Operations Catalog". Priority matrix and ToC updated. |
 | 2026-03-05 | CONFIRMED: `GET /teams/{team_id}/schedule/events/{event_id}/player-stats` -- HTTP 200, full schema documented. Response is a single JSON object (~106 KB for a 25-player game) with 6 top-level fields: `stream_id` (game_stream_id UUID, returned inline), `team_id`, `event_id`, `player_stats` (per-game per-player stats), `cumulative_player_stats` (season-to-date for own team; single-game for opponents), `spray_chart_data` (ball-in-play x/y coordinates, play type, play result). Both own-team (GP 60-90) and opponent (GP=1) players are keyed by UUID in the same response. Per-player stats: ~80 offense fields (AB, H, BB, SO, RBI, R, OBP, SLG, OPS, HR, 2B, 3B, SB, CS, PA, TB, ...) and ~26 fielding/pitching fields (IP, ERA, SO, BB, ER, BF, WP, HBP). Cumulative defense: ~149 fields including WHIP, FIP, K/BF, K/BB, K/G, BB/INN, #P, TS. Spray chart: `code: "ball_in_play"`, `attributes.playResult` (single/double/triple/home_run/out/error), `attributes.playType` (hard_ground_ball/ground_ball/line_drive/fly_ball/bunt), `attributes.defenders[].position` (fielder position), `attributes.defenders[].location.x/y` (field coordinates). Accept header: `application/json, text/plain, */*` (not vendor-typed -- unique among confirmed endpoints). No player names or batting order in this endpoint -- join to /players or boxscore for those. `stream_id` returned inline eliminates need for separate ID resolution step. Proxy-discovered entry updated to CONFIRMED. Raw sample: `data/raw/player-stats-sample.json`. |
 | 2026-03-05 | PROXY CAPTURE ANALYSIS: 62 unique endpoints observed across `api.team-manager.gc.com`, `media-service.gc.com`, and `vod-archive.gc.com` via mitmproxy intercept of iOS Odyssey app traffic. 12 endpoints already in spec confirmed live. 50 new endpoint patterns discovered including: `/organizations/{uuid}/*` family (teams, events, game-summaries, standings, opponents, users, etc.), `/teams/{uuid}/opponents/players` (bulk opponent roster -- high value), `GET /teams/{uuid}/schedule/events/{uuid}/player-stats` (72 hits -- CRITICAL, may replace game_stream_id resolution), `/me/archived-teams`, `/me/schedule`, `/me/associated-players`, `/game-streams/gamestream-viewer-payload-lite/{uuid}`, `/game-streams/gamestream-recap-story/{uuid}`, `/clips/*`, `/users/{uuid}`, `/places/{place_id}`, `/sync-topics/*`. All added to spec in new "Proxy-Discovered Endpoints" section. iOS header analysis: our canonical browser headers confirmed correct; `gc-app-version: 2026.7.0.0` is iOS app version (our `0.0.0` is web-specific). Two new media CDN hostnames documented: `media-service.gc.com` (signed image/avatar delivery) and `vod-archive.gc.com` (AWS IVS video archive). |
 | 2026-03-04 | NEW endpoint: `POST /auth` -- **FIRST POST ENDPOINT. Token refresh flow.** HTTP 400 received (stale gc-signature, not expired gc-token). Request body `{"type":"refresh"}`. New headers discovered: `gc-signature` (HMAC request signature, time-bound), `gc-timestamp` (signing time), `gc-client-id` (stable UUID matching JWT `cid` field), `gc-app-version` (always `"0.0.0"`). `Accept: */*` (not vendor-typed, unlike all other endpoints). JWT payload schema corrected from decoded token: actual fields are `id` (compound `{session_uuid}:{refresh_token_uuid}`), `cid`, `uid`, `email`, `iat`, `exp`. **Token lifetime corrected: 14 days** (exp - iat = 1,209,600 seconds) -- previous 1-hour estimate was wrong. Successful response schema not yet captured -- programmatic refresh is NOT currently possible (signing key unknown). Raw sample (annotated, no live tokens) at `data/raw/auth-refresh-sample.json`. Token Lifecycle section and JWT Structure section updated. |
