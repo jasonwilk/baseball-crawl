@@ -289,20 +289,53 @@ async def post_login(
             user_row = cursor.fetchone()
 
             if user_row:
-                raw_token = secrets.token_urlsafe(32)
-                token_hash = hash_token(raw_token)
-                conn.execute(
+                # Rate limit: skip issuance if a link was sent within the last
+                # 60 seconds.  Show the same confirmation page either way so
+                # that timing cannot be used to enumerate registered emails.
+                cursor = conn.execute(
                     """
-                    INSERT INTO magic_link_tokens (token_hash, user_id, expires_at)
-                    VALUES (?, ?, datetime('now', '+15 minutes'))
+                    SELECT (julianday('now') - julianday(created_at)) * 86400.0
+                        AS seconds_since
+                    FROM magic_link_tokens
+                    WHERE user_id = ?
+                    ORDER BY created_at DESC
+                    LIMIT 1
                     """,
-                    (token_hash, user_row["user_id"]),
+                    (user_row["user_id"],),
                 )
-                conn.commit()
+                recent = cursor.fetchone()
+                if recent is not None and recent["seconds_since"] < 60:
+                    logger.info(
+                        "Magic link rate limit hit for user %d (%.1fs ago)",
+                        user_row["user_id"],
+                        recent["seconds_since"],
+                    )
+                else:
+                    raw_token = secrets.token_urlsafe(32)
+                    token_hash = hash_token(raw_token)
+                    # Invalidate all prior unused tokens for this user before
+                    # inserting the new one.  Both statements run in the same
+                    # transaction so the invalidation and insertion are atomic.
+                    conn.execute(
+                        """
+                        UPDATE magic_link_tokens
+                        SET used_at = datetime('now')
+                        WHERE user_id = ? AND used_at IS NULL
+                        """,
+                        (user_row["user_id"],),
+                    )
+                    conn.execute(
+                        """
+                        INSERT INTO magic_link_tokens (token_hash, user_id, expires_at)
+                        VALUES (?, ?, datetime('now', '+15 minutes'))
+                        """,
+                        (token_hash, user_row["user_id"]),
+                    )
+                    conn.commit()
 
-                app_url = _get_app_url()
-                magic_link_url = f"{app_url}/auth/verify?token={raw_token}"
-                await send_magic_link_email(email, magic_link_url)
+                    app_url = _get_app_url()
+                    magic_link_url = f"{app_url}/auth/verify?token={raw_token}"
+                    await send_magic_link_email(email, magic_link_url)
     except sqlite3.Error:
         logger.exception("DB error during magic link issuance for %s", email)
 

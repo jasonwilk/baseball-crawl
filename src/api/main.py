@@ -6,6 +6,7 @@ It is the entrypoint referenced by the Dockerfile:
     uvicorn src.api.main:app --host 0.0.0.0 --port 8000
 
 Route structure (current):
+    GET  /               -- Root redirect to /dashboard
     GET  /health         -- Database and API health check (see routes/health.py)
     GET  /dashboard      -- Team batting stats dashboard (see routes/dashboard.py)
     GET  /auth/login     -- Login page (see routes/auth.py)
@@ -24,8 +25,10 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import AsyncGenerator
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 
 from src.api.auth import SessionMiddleware
 from src.api.routes.admin import router as admin_router
@@ -96,9 +99,44 @@ _TEMPLATES_DIR = _PROJECT_ROOT / "src" / "api" / "templates"
 
 app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
 
+_templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
+
+# ---------------------------------------------------------------------------
+# Exception handlers
+# ---------------------------------------------------------------------------
+
+
+@app.exception_handler(404)
+async def not_found_handler(request: Request, exc: Exception) -> HTMLResponse:
+    """Render the 404 error page."""
+    return _templates.TemplateResponse(
+        "errors/404.html", {"request": request}, status_code=404
+    )
+
+
+@app.exception_handler(500)
+async def server_error_handler(request: Request, exc: Exception) -> HTMLResponse:
+    """Render the 500 error page."""
+    return _templates.TemplateResponse(
+        "errors/500.html", {"request": request}, status_code=500
+    )
+
+
 # ---------------------------------------------------------------------------
 # Route registration
 # ---------------------------------------------------------------------------
+
+
+@app.get("/")
+async def root_redirect() -> RedirectResponse:
+    """Redirect root URL to the dashboard.
+
+    Coaches who bookmark the app expect to land on the dashboard.
+    The auth middleware handles the unauthenticated case by redirecting
+    to /auth/login.
+    """
+    return RedirectResponse(url="/dashboard", status_code=302)
+
 
 app.include_router(health_router)
 app.include_router(auth_router)

@@ -14,7 +14,7 @@ Dev bypass:
     that email on every request, creating the user in the DB if needed.
 
 Excluded paths (no session check):
-    /auth/*  /health  /static/*
+    /  /auth/*  /health  /static/*
 """
 
 from __future__ import annotations
@@ -42,6 +42,8 @@ _SESSION_MAX_AGE = 604800  # 7 days in seconds
 
 # Paths excluded from session validation
 _EXCLUDED_PREFIXES = ("/auth/", "/health", "/static/")
+# Exact paths excluded from session validation (matched before prefix check)
+_EXCLUDED_EXACT = ("/",)
 
 
 def hash_token(raw_token: str) -> str:
@@ -63,8 +65,10 @@ def _is_excluded_path(path: str) -> bool:
         path: URL path to test.
 
     Returns:
-        True when path starts with any excluded prefix.
+        True when path matches an excluded exact path or starts with an excluded prefix.
     """
+    if path in _EXCLUDED_EXACT:
+        return True
     # Normalise to ensure /auth (without trailing slash) is also excluded.
     normalized = path if path.endswith("/") else path + "/"
     return any(
@@ -222,6 +226,10 @@ def _handle_dev_bypass(email: str) -> dict[str, Any] | None:
                 user = _create_dev_user(conn, email)
             permitted_teams = _get_permitted_teams(conn, user)
             return {"user": user, "permitted_teams": permitted_teams}
+    except sqlite3.OperationalError:
+        # Let OperationalError propagate so dispatch() can handle schema errors
+        # (e.g., "no such table") with a 503 response.
+        raise
     except sqlite3.Error:
         logger.exception("DB error in dev bypass for %s", email)
         return None
@@ -244,6 +252,12 @@ class SessionMiddleware(BaseHTTPMiddleware):
         super().__init__(app)
         dev_email = os.environ.get("DEV_USER_EMAIL", "")
         if dev_email:
+            app_env = os.environ.get("APP_ENV", "")
+            if app_env.lower() == "production":
+                raise RuntimeError(
+                    "DEV_USER_EMAIL must not be set in production (APP_ENV=production). "
+                    "Remove DEV_USER_EMAIL from the environment before starting the app."
+                )
             logger.info("[DEV] Auth bypass active for: %s", dev_email)
 
     async def dispatch(self, request: Request, call_next: Any) -> Response:
@@ -273,14 +287,36 @@ class SessionMiddleware(BaseHTTPMiddleware):
                 if "no such table" in str(exc).lower():
                     logger.warning(
                         "Auth table missing (migration not applied?); "
-                        "allowing request through: %s",
+                        "returning 503: %s",
                         path,
                     )
-                    return await call_next(request)
+                    from starlette.responses import PlainTextResponse
+                    return PlainTextResponse(
+                        "Service temporarily unavailable", status_code=503
+                    )
                 raise
 
         cookie_value = request.cookies.get(_SESSION_COOKIE_NAME, "")
         if not cookie_value:
+            # Fail closed: check auth tables exist before redirecting to login.
+            # If tables are missing, return 503 so the error is visible rather
+            # than silently sending an unauthenticated user to the login page
+            # against a broken schema.
+            try:
+                with closing(get_connection()) as conn:
+                    conn.execute("SELECT 1 FROM sessions LIMIT 1")
+            except sqlite3.OperationalError as exc:
+                if "no such table" in str(exc).lower():
+                    logger.warning(
+                        "Auth table missing (migration not applied?); "
+                        "returning 503: %s",
+                        path,
+                    )
+                    from starlette.responses import PlainTextResponse
+                    return PlainTextResponse(
+                        "Service temporarily unavailable", status_code=503
+                    )
+                raise
             from starlette.responses import RedirectResponse
             return RedirectResponse(url="/auth/login", status_code=302)
 
@@ -290,10 +326,13 @@ class SessionMiddleware(BaseHTTPMiddleware):
             if "no such table" in str(exc).lower():
                 logger.warning(
                     "Auth table missing (migration not applied?); "
-                    "allowing request through: %s",
+                    "returning 503: %s",
                     path,
                 )
-                return await call_next(request)
+                from starlette.responses import PlainTextResponse
+                return PlainTextResponse(
+                    "Service temporarily unavailable", status_code=503
+                )
             raise
 
         if not state:

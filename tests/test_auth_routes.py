@@ -245,6 +245,7 @@ def _insert_magic_token(
     user_id: int,
     expired: bool = False,
     used: bool = False,
+    created_seconds_ago: int = 0,
 ) -> str:
     """Insert a magic link token and return the raw token.
 
@@ -253,6 +254,8 @@ def _insert_magic_token(
         user_id: User to associate with this token.
         expired: If True, sets expires_at in the past.
         used: If True, sets used_at to now.
+        created_seconds_ago: How many seconds in the past to set created_at.
+            Useful for testing rate limiting (pass 61 to bypass the 60s cooldown).
 
     Returns:
         Raw token string (URL-safe base64, 43 chars).
@@ -261,12 +264,52 @@ def _insert_magic_token(
     token_hash = hash_token(raw_token)
     expires_offset = "-1 hour" if expired else "+15 minutes"
     used_at_expr = "datetime('now')" if used else "NULL"
+    created_at_expr = (
+        f"datetime('now', '-{created_seconds_ago} seconds')"
+        if created_seconds_ago > 0
+        else "datetime('now')"
+    )
 
     conn = sqlite3.connect(str(db_path))
     conn.execute(
         f"""
-        INSERT INTO magic_link_tokens (token_hash, user_id, expires_at, used_at)
-        VALUES (?, ?, datetime('now', '{expires_offset}'), {used_at_expr})
+        INSERT INTO magic_link_tokens (token_hash, user_id, expires_at, used_at, created_at)
+        VALUES (?, ?, datetime('now', '{expires_offset}'), {used_at_expr}, {created_at_expr})
+        """,
+        (token_hash, user_id),
+    )
+    conn.commit()
+    conn.close()
+    return raw_token
+
+
+def _insert_magic_token_with_age(
+    db_path: Path,
+    user_id: int,
+    seconds_ago: int,
+) -> str:
+    """Insert a magic link token with a specific created_at age and return the raw token.
+
+    Args:
+        db_path: Path to the database.
+        user_id: User to associate with this token.
+        seconds_ago: How many seconds in the past to set created_at.
+
+    Returns:
+        Raw token string (URL-safe base64, 43 chars).
+    """
+    raw_token = secrets.token_urlsafe(32)
+    token_hash = hash_token(raw_token)
+    conn = sqlite3.connect(str(db_path))
+    conn.execute(
+        f"""
+        INSERT INTO magic_link_tokens (token_hash, user_id, expires_at, created_at)
+        VALUES (
+            ?,
+            ?,
+            datetime('now', '+15 minutes'),
+            datetime('now', '-{seconds_ago} seconds')
+        )
         """,
         (token_hash, user_id),
     )
@@ -715,3 +758,287 @@ class TestSessionCookieProperties:
 
         set_cookie = response.headers.get("set-cookie", "").lower()
         assert "samesite=lax" in set_cookie
+
+
+# ---------------------------------------------------------------------------
+# Stale token invalidation tests (E-063-04)
+# ---------------------------------------------------------------------------
+
+
+class TestStaleMagicLinkInvalidation:
+    """Issuing a new magic link invalidates all prior unused tokens (E-063-04)."""
+
+    def test_prior_unused_token_marked_used_when_new_link_issued(self, db: Path) -> None:
+        """AC-1: Prior unused token gets used_at set when new link is issued."""
+        email = "staletoken@example.com"
+        user_id = _insert_user(db, email)
+        # Insert a prior unused token that is old enough to bypass the rate limiter.
+        prior_raw = _insert_magic_token(db, user_id, created_seconds_ago=61)
+        prior_hash = hash_token(prior_raw)
+
+        # Request a new magic link -- this should invalidate the prior token.
+        with patch.dict("os.environ", {"DATABASE_PATH": str(db)}):
+            with patch(
+                "src.api.routes.auth.send_magic_link_email",
+                new_callable=AsyncMock,
+                return_value=True,
+            ):
+                with TestClient(app) as client:
+                    client.post("/auth/login", data={"email": email})
+
+        conn = sqlite3.connect(str(db))
+        cursor = conn.execute(
+            "SELECT used_at FROM magic_link_tokens WHERE token_hash = ?",
+            (prior_hash,),
+        )
+        row = cursor.fetchone()
+        conn.close()
+        assert row is not None
+        assert row[0] is not None  # used_at is set -- token is invalidated
+
+    def test_old_token_fails_verification_after_new_link_issued(self, db: Path) -> None:
+        """AC-2: Verifying the older token fails after a new link is issued."""
+        email = "oldfails@example.com"
+        user_id = _insert_user(db, email)
+        # Old enough to bypass rate limiter when the new link is requested.
+        prior_raw = _insert_magic_token(db, user_id, created_seconds_ago=61)
+
+        # Issue a second magic link, invalidating the first.
+        with patch.dict("os.environ", {"DATABASE_PATH": str(db)}):
+            with patch(
+                "src.api.routes.auth.send_magic_link_email",
+                new_callable=AsyncMock,
+                return_value=True,
+            ):
+                with TestClient(app) as client:
+                    client.post("/auth/login", data={"email": email})
+
+        # Attempting to verify the prior (now-invalidated) token must fail.
+        with patch.dict("os.environ", {"DATABASE_PATH": str(db)}):
+            with TestClient(app) as client:
+                response = client.get(f"/auth/verify?token={prior_raw}")
+
+        assert "invalid or has expired" in response.text.lower()
+
+    def test_new_token_succeeds_after_prior_invalidated(self, db: Path) -> None:
+        """AC-3: The newest token still verifies successfully after prior tokens are invalidated."""
+        email = "newworks@example.com"
+        user_id = _insert_user(db, email)
+        # Old enough to bypass rate limiter when the new link is requested.
+        _insert_magic_token(db, user_id, created_seconds_ago=61)
+
+        captured_url: list[str] = []
+
+        async def capture_email(to_email: str, magic_link_url: str) -> None:
+            captured_url.append(magic_link_url)
+
+        # Issue a new link (invalidates the prior one) and capture the new token.
+        with patch.dict("os.environ", {"DATABASE_PATH": str(db)}):
+            with patch(
+                "src.api.routes.auth.send_magic_link_email",
+                side_effect=capture_email,
+            ):
+                with TestClient(app) as client:
+                    client.post("/auth/login", data={"email": email})
+
+        assert len(captured_url) == 1
+        new_token = captured_url[0].split("token=")[-1]
+
+        # The new token must verify successfully.
+        with patch.dict("os.environ", {"DATABASE_PATH": str(db)}):
+            with TestClient(app, follow_redirects=False) as client:
+                response = client.get(f"/auth/verify?token={new_token}")
+
+        assert response.status_code == 302
+        location = response.headers["location"]
+        assert "/dashboard" in location or "/auth/passkey/prompt" in location
+
+    def test_issue_token_a_then_b_verify_a_fails_b_succeeds(self, db: Path) -> None:
+        """AC-4: Issue token A, issue token B; verify A fails, verify B succeeds."""
+        email = "ab_tokens@example.com"
+        user_id = _insert_user(db, email)
+        # Token A: old enough to bypass rate limiter when B is requested.
+        token_a_raw = _insert_magic_token(db, user_id, created_seconds_ago=61)
+
+        captured_url: list[str] = []
+
+        async def capture_email(to_email: str, magic_link_url: str) -> None:
+            captured_url.append(magic_link_url)
+
+        # Issue token B via POST /auth/login (invalidates token A).
+        with patch.dict("os.environ", {"DATABASE_PATH": str(db)}):
+            with patch(
+                "src.api.routes.auth.send_magic_link_email",
+                side_effect=capture_email,
+            ):
+                with TestClient(app) as client:
+                    client.post("/auth/login", data={"email": email})
+
+        assert len(captured_url) == 1
+        token_b_raw = captured_url[0].split("token=")[-1]
+
+        with patch.dict("os.environ", {"DATABASE_PATH": str(db)}):
+            with TestClient(app) as client:
+                # Verify A -- must fail (invalidated by B issuance).
+                response_a = client.get(f"/auth/verify?token={token_a_raw}")
+            assert "invalid or has expired" in response_a.text.lower()
+
+            with TestClient(app, follow_redirects=False) as client:
+                # Verify B -- must succeed.
+                response_b = client.get(f"/auth/verify?token={token_b_raw}")
+            assert response_b.status_code == 302
+
+    def test_already_used_tokens_not_double_invalidated(self, db: Path) -> None:
+        """Tokens already marked used are unaffected by the invalidation UPDATE."""
+        email = "doubleinv@example.com"
+        user_id = _insert_user(db, email)
+        # Insert one already-used token that is old enough to bypass the rate limiter.
+        _insert_magic_token(db, user_id, used=True, created_seconds_ago=61)
+
+        with patch.dict("os.environ", {"DATABASE_PATH": str(db)}):
+            with patch(
+                "src.api.routes.auth.send_magic_link_email",
+                new_callable=AsyncMock,
+                return_value=True,
+            ):
+                with TestClient(app) as client:
+                    client.post("/auth/login", data={"email": email})
+
+        # Two rows total: the pre-used one and the newly issued one.
+        conn = sqlite3.connect(str(db))
+        cursor = conn.execute(
+            "SELECT COUNT(*) FROM magic_link_tokens WHERE user_id = ?", (user_id,)
+        )
+        total = cursor.fetchone()[0]
+        cursor = conn.execute(
+            "SELECT COUNT(*) FROM magic_link_tokens WHERE user_id = ? AND used_at IS NULL",
+            (user_id,),
+        )
+        unused_count = cursor.fetchone()[0]
+        conn.close()
+        assert total == 2
+        # Only the newest token should be unused.
+        assert unused_count == 1
+
+
+# ---------------------------------------------------------------------------
+# Magic link rate limiting tests (E-063-05)
+# ---------------------------------------------------------------------------
+
+
+class TestMagicLinkRateLimiting:
+    """POST /auth/login enforces a 60-second per-user cooldown (E-063-05)."""
+
+    def test_first_request_issues_link(self, db: Path) -> None:
+        """AC-5a: First magic link request issues a link and calls send_magic_link_email."""
+        email = "ratelimit_first@example.com"
+        _insert_user(db, email)
+
+        with patch.dict("os.environ", {"DATABASE_PATH": str(db)}):
+            with patch(
+                "src.api.routes.auth.send_magic_link_email",
+                new_callable=AsyncMock,
+                return_value=True,
+            ) as mock_send:
+                with TestClient(app) as client:
+                    response = client.post("/auth/login", data={"email": email})
+
+        assert response.status_code == 200
+        assert "If this email is registered" in response.text
+        mock_send.assert_called_once()
+
+        conn = sqlite3.connect(str(db))
+        cursor = conn.execute(
+            "SELECT COUNT(*) FROM magic_link_tokens WHERE user_id = ("
+            "SELECT user_id FROM users WHERE email = ?)",
+            (email,),
+        )
+        assert cursor.fetchone()[0] == 1
+        conn.close()
+
+    def test_second_request_within_cooldown_suppressed(self, db: Path) -> None:
+        """AC-1 & AC-5b: Second request within 60s sends no email and adds no token row."""
+        email = "ratelimit_suppress@example.com"
+        user_id = _insert_user(db, email)
+        # Simulate a recent prior token (10 seconds ago -- well within cooldown).
+        _insert_magic_token_with_age(db, user_id, seconds_ago=10)
+
+        with patch.dict("os.environ", {"DATABASE_PATH": str(db)}):
+            with patch(
+                "src.api.routes.auth.send_magic_link_email",
+                new_callable=AsyncMock,
+                return_value=True,
+            ) as mock_send:
+                with TestClient(app) as client:
+                    response = client.post("/auth/login", data={"email": email})
+
+        # Same confirmation page shown regardless.
+        assert response.status_code == 200
+        assert "If this email is registered" in response.text
+        # No email sent.
+        mock_send.assert_not_called()
+        # No new token inserted -- still just the one we seeded.
+        conn = sqlite3.connect(str(db))
+        cursor = conn.execute(
+            "SELECT COUNT(*) FROM magic_link_tokens WHERE user_id = ?", (user_id,)
+        )
+        assert cursor.fetchone()[0] == 1
+        conn.close()
+
+    def test_request_after_cooldown_issues_new_link(self, db: Path) -> None:
+        """AC-2 & AC-5c: Request after 60s cooldown issues a new link normally."""
+        email = "ratelimit_after@example.com"
+        user_id = _insert_user(db, email)
+        # Seed a token that is 61 seconds old -- just past the cooldown boundary.
+        _insert_magic_token_with_age(db, user_id, seconds_ago=61)
+
+        with patch.dict("os.environ", {"DATABASE_PATH": str(db)}):
+            with patch(
+                "src.api.routes.auth.send_magic_link_email",
+                new_callable=AsyncMock,
+                return_value=True,
+            ) as mock_send:
+                with TestClient(app) as client:
+                    response = client.post("/auth/login", data={"email": email})
+
+        assert response.status_code == 200
+        assert "If this email is registered" in response.text
+        mock_send.assert_called_once()
+        # A second token row should now exist.
+        conn = sqlite3.connect(str(db))
+        cursor = conn.execute(
+            "SELECT COUNT(*) FROM magic_link_tokens WHERE user_id = ?", (user_id,)
+        )
+        assert cursor.fetchone()[0] == 2
+        conn.close()
+
+    def test_unknown_email_still_shows_confirmation_page(self, db: Path) -> None:
+        """AC-3: Unknown email returns the same check_email page (no enumeration)."""
+        with patch.dict("os.environ", {"DATABASE_PATH": str(db)}):
+            with TestClient(app) as client:
+                response = client.post(
+                    "/auth/login", data={"email": "nobody@example.com"}
+                )
+
+        assert response.status_code == 200
+        assert "If this email is registered" in response.text
+
+    def test_cooldown_boundary_at_exactly_60_seconds_allows_issuance(
+        self, db: Path
+    ) -> None:
+        """AC-2: A token created exactly 60 seconds ago is NOT rate-limited (boundary is strict <)."""
+        email = "ratelimit_boundary@example.com"
+        user_id = _insert_user(db, email)
+        # 60 seconds ago is equal to the cooldown -- should be allowed through.
+        _insert_magic_token_with_age(db, user_id, seconds_ago=60)
+
+        with patch.dict("os.environ", {"DATABASE_PATH": str(db)}):
+            with patch(
+                "src.api.routes.auth.send_magic_link_email",
+                new_callable=AsyncMock,
+                return_value=True,
+            ) as mock_send:
+                with TestClient(app) as client:
+                    client.post("/auth/login", data={"email": email})
+
+        mock_send.assert_called_once()

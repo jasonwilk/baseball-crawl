@@ -483,3 +483,172 @@ class TestExcludedPaths:
             with TestClient(app) as client:
                 response = client.get("/auth/login")
         assert response.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# DEV_USER_EMAIL production guard tests (E-063-01)
+# ---------------------------------------------------------------------------
+
+
+from src.api.auth import SessionMiddleware  # noqa: E402
+
+
+class TestDevUserEmailProductionGuard:
+    """DEV_USER_EMAIL raises RuntimeError when APP_ENV=production (E-063-01)."""
+
+    def test_production_with_dev_email_raises(self) -> None:
+        """DEV_USER_EMAIL set + APP_ENV=production -> RuntimeError on init (AC-1)."""
+        env = {"DEV_USER_EMAIL": "admin@example.com", "APP_ENV": "production"}
+        with patch.dict("os.environ", env, clear=False):
+            with pytest.raises(RuntimeError, match="DEV_USER_EMAIL"):
+                SessionMiddleware(app=None)  # type: ignore[arg-type]
+
+    def test_development_with_dev_email_does_not_raise(self) -> None:
+        """DEV_USER_EMAIL set + APP_ENV=development -> no error on init (AC-2)."""
+        env = {"DEV_USER_EMAIL": "admin@example.com", "APP_ENV": "development"}
+        with patch.dict("os.environ", env, clear=False):
+            # Should not raise; dev bypass is expected in development
+            middleware = SessionMiddleware(app=None)  # type: ignore[arg-type]
+            assert middleware is not None
+
+    def test_production_mixed_case_with_dev_email_raises(self) -> None:
+        """DEV_USER_EMAIL set + APP_ENV=Production (mixed case) -> RuntimeError (AC-1)."""
+        env = {"DEV_USER_EMAIL": "admin@example.com", "APP_ENV": "Production"}
+        with patch.dict("os.environ", env, clear=False):
+            with pytest.raises(RuntimeError, match="DEV_USER_EMAIL"):
+                SessionMiddleware(app=None)  # type: ignore[arg-type]
+
+    def test_production_uppercase_with_dev_email_raises(self) -> None:
+        """DEV_USER_EMAIL set + APP_ENV=PRODUCTION (all caps) -> RuntimeError (AC-1)."""
+        env = {"DEV_USER_EMAIL": "admin@example.com", "APP_ENV": "PRODUCTION"}
+        with patch.dict("os.environ", env, clear=False):
+            with pytest.raises(RuntimeError, match="DEV_USER_EMAIL"):
+                SessionMiddleware(app=None)  # type: ignore[arg-type]
+
+    def test_dev_email_unset_env_does_not_raise(self) -> None:
+        """DEV_USER_EMAIL unset + APP_ENV=production -> no error on init (AC-3)."""
+        env = {"APP_ENV": "production"}
+        # Ensure DEV_USER_EMAIL is absent from the environment
+        with patch.dict("os.environ", env, clear=False):
+            os_environ_no_dev = {k: v for k, v in os.environ.items() if k != "DEV_USER_EMAIL"}
+            with patch.dict("os.environ", os_environ_no_dev, clear=True):
+                middleware = SessionMiddleware(app=None)  # type: ignore[arg-type]
+                assert middleware is not None
+
+
+# ---------------------------------------------------------------------------
+# Fail closed on missing auth tables tests (E-063-06)
+# ---------------------------------------------------------------------------
+
+_SCHEMA_SQL_NO_AUTH = """
+    CREATE TABLE IF NOT EXISTS players (
+        player_id  TEXT PRIMARY KEY,
+        first_name TEXT NOT NULL,
+        last_name  TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS teams (
+        team_id    TEXT PRIMARY KEY,
+        name       TEXT NOT NULL,
+        level      TEXT,
+        is_owned   INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+"""
+
+
+def _make_no_auth_db(tmp_path: Path) -> Path:
+    """Create a database WITHOUT auth tables (simulates missing migrations).
+
+    Args:
+        tmp_path: pytest tmp_path fixture directory.
+
+    Returns:
+        Path to the database file.
+    """
+    db_path = tmp_path / "test_no_auth.db"
+    conn = sqlite3.connect(str(db_path))
+    conn.executescript(_SCHEMA_SQL_NO_AUTH)
+    conn.commit()
+    conn.close()
+    return db_path
+
+
+class TestFailClosedMissingAuthTables:
+    """Missing auth tables return 503 instead of allowing requests through (E-063-06)."""
+
+    def test_missing_tables_cookie_path_returns_503(self, tmp_path: Path) -> None:
+        """No auth tables + session cookie -> 503, not pass-through (AC-1, AC-2)."""
+        db_path = _make_no_auth_db(tmp_path)
+        env = {"DATABASE_PATH": str(db_path)}
+        with patch.dict("os.environ", env, clear=False):
+            os_env_no_dev = {k: v for k, v in os.environ.items() if k != "DEV_USER_EMAIL"}
+            with patch.dict("os.environ", os_env_no_dev, clear=True):
+                with TestClient(
+                    app,
+                    follow_redirects=False,
+                    cookies={"session": "sometoken"},
+                ) as client:
+                    response = client.get("/dashboard")
+        assert response.status_code == 503
+        assert "unavailable" in response.text.lower()
+
+    def test_missing_tables_dev_bypass_path_returns_503(self, tmp_path: Path) -> None:
+        """No auth tables + DEV_USER_EMAIL -> 503, not pass-through (AC-1, AC-2)."""
+        db_path = _make_no_auth_db(tmp_path)
+        env = {"DATABASE_PATH": str(db_path), "DEV_USER_EMAIL": "dev@example.com"}
+        with patch.dict("os.environ", env, clear=False):
+            with TestClient(app, follow_redirects=False) as client:
+                response = client.get("/dashboard")
+        assert response.status_code == 503
+        assert "unavailable" in response.text.lower()
+
+    def test_normal_auth_unchanged_when_tables_exist(self, auth_db: Path) -> None:
+        """Normal session validation still works when tables exist (AC-3)."""
+        user_id = _insert_user(auth_db, "normal@example.com")
+        raw_token = _insert_session(auth_db, user_id)
+
+        env = {"DATABASE_PATH": str(auth_db)}
+        with patch.dict("os.environ", env, clear=False):
+            os_env_no_dev = {k: v for k, v in os.environ.items() if k != "DEV_USER_EMAIL"}
+            with patch.dict("os.environ", os_env_no_dev, clear=True):
+                with TestClient(app, cookies={"session": raw_token}) as client:
+                    response = client.get("/dashboard")
+        assert response.status_code == 200
+
+    def test_missing_tables_no_cookie_returns_503(self, tmp_path: Path) -> None:
+        """No auth tables + no session cookie -> 503, not redirect to login (AC-1)."""
+        db_path = _make_no_auth_db(tmp_path)
+        env = {"DATABASE_PATH": str(db_path)}
+        with patch.dict("os.environ", env, clear=False):
+            os_env_no_dev = {k: v for k, v in os.environ.items() if k != "DEV_USER_EMAIL"}
+            with patch.dict("os.environ", os_env_no_dev, clear=True):
+                with TestClient(
+                    app,
+                    follow_redirects=False,
+                ) as client:
+                    response = client.get("/dashboard")
+        assert response.status_code == 503
+        assert "unavailable" in response.text.lower()
+
+    def test_non_table_operational_error_propagates(self, auth_db: Path) -> None:
+        """OperationalErrors that are not 'no such table' are re-raised (AC-4)."""
+        from unittest.mock import patch as mock_patch
+
+        other_error = sqlite3.OperationalError("database is locked")
+        with mock_patch(
+            "src.api.auth._resolve_session_from_cookie", side_effect=other_error
+        ):
+            env = {"DATABASE_PATH": str(auth_db)}
+            with patch.dict("os.environ", env, clear=False):
+                os_env_no_dev = {k: v for k, v in os.environ.items() if k != "DEV_USER_EMAIL"}
+                with patch.dict("os.environ", os_env_no_dev, clear=True):
+                    with TestClient(
+                        app,
+                        follow_redirects=False,
+                        raise_server_exceptions=True,
+                        cookies={"session": "sometoken"},
+                    ) as client:
+                        with pytest.raises(sqlite3.OperationalError, match="database is locked"):
+                            client.get("/dashboard")
