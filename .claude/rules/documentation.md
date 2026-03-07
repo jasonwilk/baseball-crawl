@@ -18,7 +18,7 @@ paths:
 | Docs | Owner |
 |------|-------|
 | `docs/admin/`, `docs/coaching/` | docs-writer |
-| `docs/gamechanger-api.md` | api-scout |
+| `docs/api/**` | api-scout |
 | Other `docs/` root files | The agent that created them |
 | Agent definitions, CLAUDE.md, rules, skills | claude-architect |
 

@@ -92,7 +92,7 @@ Beyond the ambient baseline, task-specific context is loaded per task. Approxima
 | Story file | 50-150 lines | At task start, always |
 | Epic Technical Notes section | 50-200 lines | At task start, always |
 | Research artifact (`.project/research/`) | 100-400 lines per file | When story references it |
-| API spec (`docs/gamechanger-api.md`) | Variable (grows over time) | When story involves API calls |
+| API endpoint files (`docs/api/endpoints/*.md`) | 50-200 lines each | When story involves API calls (load only relevant endpoints) |
 | Raw API responses / log excerpts | Variable (can be large) | On demand during debugging |
 | Dependency story files | 50-150 lines each | When implementing agent needs to understand what a dependency delivered |
 

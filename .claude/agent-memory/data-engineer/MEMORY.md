@@ -251,13 +251,13 @@ The `GET /teams/{team_id}/public-team-profile-id` endpoint returns a single JSON
 - End-of-pagination signal: `x-next-page` header absent from response (do NOT check for empty body)
 - Page size: 50 records max; final page may have fewer
 - Full season for one team: 92 game records across 2 pages
-- Working pagination loop pattern with code is in `docs/gamechanger-api.md` (Notes for Implementers section)
+- Working pagination loop pattern with code is in `docs/api/pagination.md`
 
 ## Project File Paths
 
 - Migrations: `migrations/`
 - Database: `./data/app.db`
-- API spec (source of truth for response shapes): `docs/gamechanger-api.md`
+- API spec (source of truth for response shapes): `docs/api/README.md` (index), `docs/api/endpoints/` (per-endpoint files)
 - Stat glossary (authoritative stat abbreviation definitions): `docs/gamechanger-stat-glossary.md`
   - Includes API field name mapping table (UI abbreviation -> API field name) -- critical for mapping season-stats API fields to schema columns
   - Covers: batting (standard + advanced), pitching (standard + advanced), pitch types, fielding, catcher, positional innings

@@ -115,7 +115,7 @@ The authoritative data dictionary mapping all GameChanger stat abbreviations to 
 ## GameChanger API
 - Token lifetime is 14 days (confirmed from JWT `exp - iat`). Tokens come from browser captures; programmatic refresh is not yet possible (requires unknown `gc-signature` signing key). Plan credential rotation at ~2-week intervals, not hourly.
 - NEVER log, commit, display, or hardcode credentials in source code
-- The API is undocumented; we maintain our own spec at `docs/gamechanger-api.md`
+- The API is undocumented; we maintain our own spec at `docs/api/README.md` (index) and per-endpoint files in `docs/api/endpoints/`
 - API limitations are discovered iteratively -- document everything
 - **Authenticated endpoints** (`/teams/*`, `/me/*`) require `gc-token` + `gc-device-id` headers and must handle auth expiration gracefully. Includes a **UUID-to-public_id bridge** (`GET /teams/{team_id}/public-team-profile-id`) that returns the `public_id` slug for any team UUID -- enabling programmatic access to all public endpoints for opponents discovered via authenticated data (schedule `opponent_id`, opponents `progenitor_team_id`).
 - **Public endpoints** require NO authentication -- no `gc-token`, no `gc-device-id`. Four confirmed under `/public/*`: `GET /public/teams/{public_id}` (name, location, record, staff), `GET /public/teams/{public_id}/games` (game schedule with final scores, opponents, home/away), `GET /public/teams/{public_id}/games/preview` (near-duplicate of `/games` -- same data minus `has_videos_available`, uses `event_id` instead of `id`; prefer `/games`), and `GET /public/game-stream-processing/{game_stream_id}/details?include=line_scores` (per-game inning-by-inning scoring, R/H/E totals; same `game_stream_id` as authenticated boxscore -- complementary views of the same game). One additional public-path endpoint uses an **inverted URL pattern**: `GET /teams/public/{public_id}/players` (roster -- NOT `/public/teams/`). Both path structures coexist in the API; do not assume all public endpoints follow `/public/*`. Public endpoints use `public_id` slugs (not UUIDs) except game details which uses `game_stream_id` from game-summaries, and may have different field names than authenticated equivalents (see API spec for details).
@@ -371,7 +371,7 @@ This project uses specialized agents coordinated by the product-manager:
 
 ### How Agents Collaborate
 - **baseball-coach** produces domain requirements that inform stories and data models
-- **api-scout** maintains `docs/gamechanger-api.md` -- the single source of truth for API knowledge
+- **api-scout** maintains the `docs/api/` directory structure -- the single source of truth for API knowledge
 - **data-engineer** designs schemas informed by both baseball-coach requirements and api-scout discoveries
 - **software-engineer** implements stories, referencing specs produced by other agents
 - **product-manager** discovers requirements, consults domain experts, writes epics and stories, dispatches implementation work, and closes completed work

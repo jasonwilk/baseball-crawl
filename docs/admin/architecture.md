@@ -131,7 +131,7 @@ Both modules use the shared HTTP session factory (`src/http/session.py`) with a 
 
 ## Cross-References
 
-- **GameChanger API**: Full endpoint documentation in [docs/gamechanger-api.md](../gamechanger-api.md).
+- **GameChanger API**: Full endpoint documentation in [docs/api/README.md](../api/README.md) (index) and per-endpoint files in `docs/api/endpoints/`.
 - **HTTP discipline**: Session factory, rate limiting, and header profile in [docs/http-integration-guide.md](../http-integration-guide.md).
 - **Cloudflare setup**: Tunnel creation, Zero Trust policies, and DNS configuration in [docs/cloudflare-access-setup.md](../cloudflare-access-setup.md).
 

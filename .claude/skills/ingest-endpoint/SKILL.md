@@ -70,39 +70,47 @@ Execute the following steps in order:
      into the response body.
    - If credentials appear in the response, strip them immediately and re-save.
 
-4. DOCUMENT the endpoint in `docs/gamechanger-api.md`:
+4. DOCUMENT the endpoint in `docs/api/endpoints/`:
 
-   a. CHECK if this endpoint is already documented in the API spec.
+   a. DETERMINE the endpoint filename using the naming convention:
+      {method}-{path-segments-with-params-as-words}.md
+      - All lowercase. Hyphens between segments. Path params as words (no curly braces).
+      - Examples: get-me-teams.md, get-teams-team_id-schedule.md, post-auth.md
 
-   b. If ALREADY DOCUMENTED:
-      - Compare the fresh response against the existing schema documentation.
+   b. CHECK if a file for this endpoint already exists in `docs/api/endpoints/`.
+
+   c. If ALREADY EXISTS:
+      - Read the existing file.
+      - Compare the fresh response against the documented schema.
       - Extend the schema with any new fields not previously documented.
       - Correct any fields whose types or descriptions do not match the fresh response.
-      - Update the discovery/verification date.
-      - Add a changelog entry noting what was validated or updated.
+      - Update `last_confirmed` in frontmatter to today's date.
+      - Add notes about what was validated or updated.
 
-   c. If NEW endpoint:
-      - Add a complete endpoint section following the existing format in the spec:
-        URL pattern, HTTP method, required headers (with {PLACEHOLDER} for credentials),
-        query parameters, response schema with types and descriptions, example response
-        (redacted), known limitations, discovery date.
-      - Add the endpoint to the Table of Contents.
-      - Add a Response Schema section if the response is complex.
+   d. If NEW endpoint:
+      - Create a new file in `docs/api/endpoints/` with YAML frontmatter and markdown body
+        following the format spec below.
 
-   d. For ALL endpoints (new or existing):
+   e. For ALL endpoints (new or existing):
+      - Ensure YAML frontmatter includes all required fields.
       - Document any URL query parameters observed in the curl command.
-      - Update the Accept headers table (Header Quick Reference section) if a new
-        Accept header value is observed.
-      - Update the gc-user-action table if a new action value is observed.
-      - Document pagination behavior if pagination headers are present
-        (x-pagination request header, x-next-page response header).
+      - Document pagination behavior if pagination headers are present.
 
-5. CHECK research spike relevance:
+5. VALIDATE frontmatter:
+   - Run `python scripts/validate_api_docs.py` against the endpoint file.
+   - Fix any ERROR-level findings before completing.
+
+6. UPDATE README INDEX (new endpoints only):
+   - If this is a new endpoint, add a row to `docs/api/README.md` in the appropriate
+     domain group (see the existing groups in the index).
+   - Include: method, path, filename link, status, auth, and a 6-10 word description.
+
+7. CHECK research spike relevance:
    - Read `epics/E-002-data-ingestion/E-002-R-01.md` (if it exists).
    - If this endpoint discovery answers any open research questions or unblocks any
      stories mentioned in the findings, note the specific impact.
 
-6. SUMMARIZE findings:
+8. SUMMARIZE findings:
    - Endpoint path and HTTP method
    - Whether this was a new or existing endpoint
    - Key fields and their types (high-level, not exhaustive)
@@ -110,6 +118,166 @@ Execute the following steps in order:
    - Any research questions answered or stories unblocked
    - Any follow-up explorations suggested by the response
 ```
+
+### Endpoint File Format Spec (Embedded)
+
+#### YAML Frontmatter Schema
+
+```yaml
+---
+method: GET | POST | PATCH | PUT | DELETE
+path: /path/{param}/subpath           # Full path template with {placeholders}
+status: CONFIRMED | OBSERVED | PARTIAL | UNTESTED | DEPRECATED
+auth: required | none
+profiles:
+  web:
+    status: confirmed | unverified | not_applicable
+    notes: >                           # Optional -- when behavior differs from mobile
+  mobile:
+    status: confirmed | unverified | not_applicable
+    notes: >                           # Optional
+accept: "application/vnd.gc.com.{resource_type}:{cardinality}+json; version={semver}"
+         # null when not yet confirmed or when endpoint uses Accept: */*
+gc_user_action: "data_loading:{context}"   # null when not observed/required
+query_params:
+  - name: param_name
+    required: true | false | unknown
+    description: >
+      Single-line or multi-line description.
+pagination: true | false | unknown
+response_shape: array | object | string   # "string" for CSV responses
+response_sample: data/raw/filename.json   # relative path, or null
+raw_sample_size: "N records, K KB"        # human-readable, or null
+discovered: "YYYY-MM-DD"
+last_confirmed: "YYYY-MM-DD"             # null if never independently confirmed
+tags: [tag1, tag2]                        # 2-5 tags from controlled vocabulary
+caveats:                                  # Omit entirely when no caveats
+  - >
+    Free-text caveat description.
+see_also:
+  - path: /other/endpoint
+    reason: One-line cross-reference reason
+---
+```
+
+**Status values:** CONFIRMED (live 200 OK, schema documented), OBSERVED (seen but unverified), PARTIAL (works only with specific params, see caveats), UNTESTED (path known, no response), DEPRECATED (was confirmed, no longer active).
+
+**Profile status values:** confirmed (captured from this profile), unverified (not tested), not_applicable (e.g., public endpoints).
+
+#### Tag Vocabulary
+
+| Tag | Use for |
+|-----|---------|
+| `schedule` | Event scheduling, calendar, RSVP |
+| `games` | Game results, scores, game-level data |
+| `team` | Team metadata, roster, settings |
+| `player` | Individual player identity or stats |
+| `stats` | Statistical data (batting, pitching, fielding) |
+| `season` | Season-aggregate or season-scoped data |
+| `organization` | Org-level data (standings, teams, opponents at org scope) |
+| `opponent` | Opponent scouting data |
+| `video` | Video streaming, highlight reels, recordings |
+| `lineup` | Batting order, fielding positions, lineup management |
+| `public` | No-auth public endpoints |
+| `auth` | Authentication, token management |
+| `subscription` | Subscription and billing data |
+| `user` | User profile, PII-containing endpoints |
+| `sync` | Real-time sync and WebSocket-adjacent endpoints |
+| `coaching` | Coaching tools (recommendation, pitch count, etc.) |
+| `spray-chart` | Ball-in-play coordinate data |
+| `events` | Event-level game stream data (boxscore, plays, game streams) |
+| `bridge` | ID-resolution bridge endpoints (UUID to public_id, etc.) |
+| `bulk` | High-value bulk data endpoints |
+
+Conventions: 2-5 tags per endpoint. `public` always accompanies relevant domain tags for unauthenticated endpoints. `bridge` applies to endpoints whose primary purpose is ID resolution.
+
+#### Markdown Body Template
+
+```markdown
+---
+{YAML frontmatter}
+---
+
+# {METHOD} {path}
+
+**Status:** {One-line status description with date}
+
+{1-2 paragraph summary. For public endpoints: "AUTHENTICATION: NOT REQUIRED."}
+
+\```
+{HTTP_METHOD} https://api.team-manager.gc.com{path}
+\```
+
+## Path Parameters          <- Omit if no path params
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+
+## Query Parameters          <- Omit if none observed
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+
+## Headers ({Profile} Profile)
+
+\```
+{header block}
+\```
+
+{Notes on Accept, gc-user-action, x-pagination, etc.}
+
+## Pagination Response Header     <- Only when pagination=true
+
+\```
+x-next-page: {full URL template}
+\```
+
+## Response
+
+{Description of overall response shape}
+
+### {Sub-object Name}
+
+| Field | Type | Notes |
+|-------|------|-------|
+
+## Example Response
+
+\```json
+{redacted example}
+\```
+
+## Known Limitations
+
+- {Edge cases, unconfirmed behavior, implementation gotchas}
+
+**Discovered:** {date}. **Last confirmed:** {date}.
+```
+
+Section ordering rules:
+1. Always: frontmatter, title, status line, summary, URL, Response, Known Limitations
+2. Path Parameters when path has params
+3. Query Parameters when at least one observed
+4. Separate Headers sections per profile only when profiles differ materially
+5. Pagination Response Header only for paginated endpoints
+6. Known Limitations is always last before the trailing Discovered line
+
+#### File Naming Convention
+
+`{method}-{path-segments-with-params-as-words}.md`
+
+All lowercase. Hyphens between segments. Path params rendered as their name (no curly braces). Path separators become hyphens.
+
+| API Path | Filename |
+|----------|----------|
+| `GET /me/teams` | `get-me-teams.md` |
+| `GET /teams/{team_id}` | `get-teams-team_id.md` |
+| `GET /teams/{team_id}/schedule` | `get-teams-team_id-schedule.md` |
+| `POST /auth` | `post-auth.md` |
+| `GET /public/teams/{public_id}` | `get-public-teams-public_id.md` |
+| `GET /teams/public/{public_id}/players` | `get-teams-public-public_id-players.md` |
+
+The inverted URL pattern (`/teams/public/` vs `/public/teams/`) is preserved in the filename to flag the path structure difference.
 
 ### What to do with api-scout results
 
@@ -174,7 +342,9 @@ Phase 1: Spawn api-scout
   - Execute curl (TIME-SENSITIVE)
   - Save raw response to data/raw/
   - Verify no credential leaks
-  - Document endpoint in docs/gamechanger-api.md
+  - Create/update endpoint file in docs/api/endpoints/
+  - Validate frontmatter with scripts/validate_api_docs.py
+  - Update docs/api/README.md index (new endpoints only)
   - Check E-002-R-01 research impact
   - Return findings summary
   |
@@ -203,7 +373,7 @@ These apply throughout the entire workflow -- both phases, all agents:
 - **NEVER** display, log, echo, or include `gc-token` or `gc-device-id` values in any output, file, or conversation
 - `secrets/` directory is gitignored -- curl files with credentials live there and must never leave
 - Raw responses go to `data/raw/` (also gitignored) -- strip any auth headers before saving
-- In `docs/gamechanger-api.md`, credential values are always `{AUTH_TOKEN}`, `{DEVICE_ID}`, or similar placeholders
+- In endpoint files, credential values are always `{AUTH_TOKEN}`, `{DEVICE_ID}`, or similar placeholders
 - The PII pre-commit hook provides a safety net, but do not rely on it -- prevent leaks at the source
 
 ---

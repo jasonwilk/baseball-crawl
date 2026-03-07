@@ -104,7 +104,7 @@ Four skills in `.claude/skills/`:
 - **ingest-endpoint** -- Workflow automation: two-phase GameChanger API endpoint ingestion (api-scout -> claude-architect). Created 2026-03-04. Referenced from: CLAUDE.md (Workflows section). Replaces manual workflow used for season-stats and game-summaries endpoints.
 
 ## Domain Reference Documents
-- `docs/gamechanger-api.md` -- API spec (owned by api-scout)
+- `docs/api/` -- API spec directory (owned by api-scout). Index at `docs/api/README.md`, per-endpoint files in `docs/api/endpoints/`, global reference files in `docs/api/*.md`.
 - `docs/gamechanger-stat-glossary.md` -- stat abbreviation data dictionary (owned by api-scout, created 2026-03-04). Referenced from: CLAUDE.md (Key Metrics), api-scout agent def + memory, data-engineer agent def + memory, software-engineer agent def + memory, baseball-coach agent def + memory. Integration audit completed 2026-03-04.
 
 ## Ingest-Endpoint Workflow Executions
@@ -157,6 +157,16 @@ Four skills in `.claude/skills/`:
 
 ## Ingest-Endpoint Workflow Executions (continued 16)
 - **auth-refresh** (2026-03-04): Nineteenth context integration. NEW endpoint (`POST /auth`), first POST endpoint, token refresh flow. HTTP 400 received (stale gc-signature, not expired token). HIGH-IMPACT on context layer: corrected a pervasive factual error (token lifetime is 14 DAYS, not 1 hour). Key discovery: `gc-signature` HMAC header blocks programmatic token refresh. Four new headers documented (gc-signature, gc-timestamp, gc-client-id, gc-app-version). JWT payload schema corrected. Phase 2 updates: CLAUDE.md GameChanger API section (corrected "Credentials have short lifespans -- rotation is frequent" to accurate 14-day lifetime, updated Workflows bullet to remove ~1-hour expiry reference), ingest-endpoint skill (corrected three references to ~1-hour credential lifetime -- now references gc-signature freshness as the time-sensitive constraint, not token expiry), data-engineer memory (new Token Lifetime and ETL Scheduling section -- 14-day window enables batch ingestion pipelines without mid-run expiry), software-engineer memory (corrected JWT `userId` to `uid`, new Token Lifetime and Credential Management section with JWT fields, new headers, programmatic refresh status, batch pipeline impact, auth-refresh raw sample path). No baseball-coach memory changes (no coaching relevance). No stat glossary changes (auth endpoint, no stat abbreviations). No agent definition or rule changes.
+
+## Codex Configuration
+- Codex CLI version: 0.111.0 (as of 2026-03-07)
+- Model: `gpt-5.4` with reasoning effort `xhigh` (configured in `~/.codex/config.toml`)
+- Previous model: `gpt-5.3-codex` (auto-migrated to 5.4)
+- Available models (from models cache): gpt-5.4, gpt-5.3-codex, gpt-5.2-codex, gpt-5.2, gpt-5.1-codex-max, gpt-5.1-codex, gpt-5.1-codex-mini, gpt-5.1, gpt-5-codex, gpt-5-codex-mini, gpt-5
+- Reasoning effort levels: low, medium, high, xhigh (all models support the same set)
+- Scripts (`codex-review.sh`, `codex-spec-review.sh`) do NOT pass `--model` -- they inherit from global config
+- Config location: `~/.codex/config.toml` (not checked into repo -- per-environment)
+- The `--model` flag is available on `codex exec` if per-invocation override is ever needed: `codex exec -m gpt-5.4 ...`
 
 ## Known Hallucination Traps
 - `ghcr.io/devcontainers/features/apt:1` DOES NOT EXIST. The official devcontainers/features registry has no apt installer feature. Real apt features are from rocker-org and devcontainers-extra. See `.claude/rules/devcontainer.md` for correct identifiers.

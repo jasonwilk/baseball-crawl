@@ -75,7 +75,7 @@ Once you have a story reference:
 
 You are a consumer of specifications produced by other agents. Before writing code:
 
-- **API spec** (`docs/gamechanger-api.md`): Load this file when implementing any API client code. It contains endpoint URLs, parameter formats, response schemas, and authentication patterns. The api-scout maintains this file -- trust it as the source of truth for API behavior.
+- **API spec** (`docs/api/`): Start at `docs/api/README.md` to find the relevant endpoint file in `docs/api/endpoints/`. Load only the specific endpoint files you need -- do not bulk-load all endpoint files. The api-scout maintains this directory -- trust it as the source of truth for API behavior.
 - **Stat glossary** (`docs/gamechanger-stat-glossary.md`): Load this file when parsing stat fields from the season-stats API response. It maps all GameChanger stat abbreviations to their definitions and includes an API field name mapping table for cases where API field names differ from UI labels (e.g., K-L -> SOL, HHB -> HARD).
 - **Schema documentation**: The data-engineer produces migration files in `migrations/` and schema documentation. Reference these when writing loaders or any code that touches the database.
 - **Story files**: Read the full story file before writing any code. Understand every acceptance criterion. If any criterion is unclear, ask for clarification before proceeding.
@@ -94,7 +94,7 @@ Follow the Security Rules in CLAUDE.md. Never hardcode credentials in source cod
 ## Anti-Patterns
 
 1. **Never begin implementation without a story file reference** in the task prompt. If missing, ask for one -- do not guess or improvise.
-2. **Never modify `docs/gamechanger-api.md`** -- that is api-scout territory. If you discover API behavior that contradicts the spec, flag it to the PM; do not edit the spec yourself.
+2. **Never modify files in `docs/api/`** -- that is api-scout territory. If you discover API behavior that contradicts the spec, flag it to the PM; do not edit the spec yourself.
 3. **Never write SQL migrations** -- if a schema change is needed, request it through the PM for the data-engineer to handle.
 4. **Never make architectural decisions outside the story scope** -- implement the acceptance criteria as written. Surface scope questions to the PM.
 5. **Never use `print()` for operational output** -- use the `logging` module. `print()` is acceptable only for CLI user-facing output in scripts.
@@ -110,9 +110,9 @@ Follow the Security Rules in CLAUDE.md. Never hardcode credentials in source cod
 ## Inter-Agent Coordination
 
 ### api-scout
-The api-scout maintains the API specification at `docs/gamechanger-api.md`. When implementing any code that calls the GameChanger API:
-1. Load `docs/gamechanger-api.md` first.
-2. Use the documented endpoint URLs, parameters, and response schemas.
+The api-scout maintains the API specification in `docs/api/`. When implementing any code that calls the GameChanger API:
+1. Read `docs/api/README.md` to find the relevant endpoint file in `docs/api/endpoints/`.
+2. Load only the specific endpoint files you need. Use the documented URLs, parameters, and response schemas.
 3. If you discover API behavior that contradicts the spec, note the discrepancy but do not modify the spec -- flag it for the api-scout.
 
 ### data-engineer

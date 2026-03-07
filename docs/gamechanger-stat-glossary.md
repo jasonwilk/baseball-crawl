@@ -2,7 +2,7 @@
 
 Source: GameChanger web UI stat definitions. This is the authoritative reference for all stat abbreviations used in the season-stats API response.
 
-Cross-reference: `docs/gamechanger-api.md` (Schema: season-stats) maps these abbreviations to their JSON field names and types.
+Cross-reference: `docs/api/endpoints/get-teams-team_id-season-stats.md` (Schema: season-stats) maps these abbreviations to their JSON field names and types.
 
 ---
 

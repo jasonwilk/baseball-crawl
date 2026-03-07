@@ -28,7 +28,7 @@ Not every boundary needs all three layers. Use judgment: if agents rarely touch 
 ### 3. Authenticated vs. Public API
 - **What**: GameChanger has two API tiers with different auth requirements, different URL patterns, and different field names.
 - **Risk**: Agents might send auth headers to public endpoints or omit them from authenticated ones, or assume URL patterns are consistent across tiers.
-- **Defenses**: CLAUDE.md "GameChanger API" section (authenticated vs public bullets), `docs/gamechanger-api.md` (full spec), agent memory files for api-scout/software-engineer/data-engineer.
+- **Defenses**: CLAUDE.md "GameChanger API" section (authenticated vs public bullets), `docs/api/` directory (per-endpoint files with auth field in frontmatter), agent memory files for api-scout/software-engineer/data-engineer.
 - **Date hardened**: 2026-03-04 (public-team-profile ingest)
 
 ### 4. Sensitive vs. Non-Sensitive Data (PII)

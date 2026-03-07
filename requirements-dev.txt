@@ -676,6 +676,7 @@ pyyaml==6.0.2 \
     --hash=sha256:ff3824dc5261f50c9b0dfb3be22b4567a6f938ccce4587b38952d85fd9e9afe4
     # via
     #   -c requirements.txt
+    #   -r requirements-dev.in
     #   -r requirements.in
     #   uvicorn
 respx==0.22.0 \

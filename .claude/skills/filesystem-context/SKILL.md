@@ -55,7 +55,7 @@ In baseball-crawl, progressive disclosure appears at multiple levels:
 - Story files
 - Epic `Technical Notes` sections
 - Research artifacts from `/.project/research/`
-- API specs from `docs/gamechanger-api.md`
+- API specs from `docs/api/` (per-endpoint files in `docs/api/endpoints/`)
 - Raw API responses or log excerpts
 
 The distinction matters: ambient context is available without cost at session start. Deferred context has to be deliberately fetched. Missing deferred context is a common failure mode -- the agent starts work without the full picture.
@@ -141,12 +141,12 @@ File location pattern: `/.project/research/<E-NNN-slug>-<topic>.md`
 
 #### Example 5: API Spec Loaded by API-Touching Agents
 
-The GameChanger API spec lives at:
-`docs/gamechanger-api.md`
+The GameChanger API spec lives in:
+`docs/api/` (index at `docs/api/README.md`, per-endpoint files in `docs/api/endpoints/`)
 
-This is deferred context for most agents. `api-scout` loads it when exploring endpoints. `software-engineer` loads it when implementing API client code. It is not ambient -- it changes frequently and is not relevant to every task.
+This is deferred context for most agents. `api-scout` loads endpoint files when exploring endpoints. `software-engineer` loads specific endpoint files when implementing API client code. The per-endpoint split means agents load only the endpoints they need, not the entire spec.
 
-**Pattern in practice**: Any story that involves making GameChanger API calls should explicitly reference `docs/gamechanger-api.md` in its Technical Approach section. The implementing agent then loads it at task start.
+**Pattern in practice**: Any story that involves making GameChanger API calls should explicitly reference `docs/api/README.md` in its Technical Approach section. The implementing agent reads the index to find the relevant endpoint file, then loads only that file.
 
 ### Decision Guide: What to Load and When
 
@@ -164,7 +164,7 @@ Task start (always load):
 Task start (load if story references it):
   [conditional] Dependency story files (for understanding what they delivered)
   [conditional] Research artifacts from /.project/research/
-  [conditional] API spec: docs/gamechanger-api.md
+  [conditional] API spec: docs/api/README.md (then specific endpoint files as needed)
   [conditional] Design documents referenced in story Notes section
 
 During task (load on demand):

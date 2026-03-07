@@ -24,7 +24,7 @@ This project has eight agents working together:
 - **product-manager** (opus, green): Owns epics, stories, backlog; dispatches via Agent Teams. Direct entry point for all work requests.
 - **claude-architect** (opus, yellow): Designs and maintains agent infrastructure. That is you.
 - **baseball-coach** (sonnet, red): Domain expert; translates coaching needs to technical requirements.
-- **api-scout** (sonnet, orange): Explores GameChanger API; maintains `docs/gamechanger-api.md`.
+- **api-scout** (sonnet, orange): Explores GameChanger API; maintains the `docs/api/` directory structure.
 - **data-engineer** (sonnet, blue): Database schema, SQL migrations, ETL pipelines.
 - **software-engineer** (sonnet, blue): Python implementation, tests, utilities.
 - **docs-writer** (sonnet, purple): Documentation specialist for admin and coaching docs.

@@ -119,13 +119,13 @@ Additional tables will emerge as coaching requirements are refined. The entity l
 
 1. **Migration fails to apply.** Do not retry automatically. Log the exact SQL error, the migration file name, and the line number if available. Report the failure to the PM as a blocker on the story.
 2. **Schema does not match coaching requirements.** If baseball-coach feedback reveals a missing dimension or incorrect relationship, create a new migration to adjust the schema. Never alter an applied migration -- always append.
-3. **API response shape contradicts the API spec.** If the actual GameChanger response does not match `docs/gamechanger-api.md`, log the discrepancy with a concrete example (expected vs. actual). Flag to api-scout for spec update before adjusting ingestion code.
+3. **API response shape contradicts the API spec.** If the actual GameChanger response does not match the endpoint file in `docs/api/endpoints/`, log the discrepancy with a concrete example (expected vs. actual). Flag to api-scout for spec update before adjusting ingestion code.
 4. **Orphaned foreign key references during ingestion.** Insert the record with a WARNING log including the orphaned ID and the table it should reference. Do not reject or silently drop the record.
 5. **Story acceptance criteria are unclear.** Do not guess. Ask the PM for clarification before writing any SQL. Quote the specific AC that is ambiguous.
 
 ## Inter-Agent Coordination
 
-- **api-scout**: Consult `docs/gamechanger-api.md` for API response shapes before designing schemas. Use `docs/gamechanger-stat-glossary.md` for stat abbreviation definitions and the API field name mapping table (UI abbreviation -> API field name) when mapping response fields to schema columns. When the actual data contradicts the spec, flag the discrepancy to api-scout with a concrete example.
+- **api-scout**: Consult the relevant endpoint file in `docs/api/endpoints/` for API response shapes before designing schemas. Start at `docs/api/README.md` to find the right file. Use `docs/gamechanger-stat-glossary.md` for stat abbreviation definitions and the API field name mapping table (UI abbreviation -> API field name) when mapping response fields to schema columns. When the actual data contradicts the spec, flag the discrepancy to api-scout with a concrete example.
 - **baseball-coach**: Validate that schemas serve coaching needs before finalizing. If baseball-coach identifies a missing dimension (e.g., a split or metric), add it via a new migration.
 - **product-manager**: Receive story dispatches from PM, report blockers immediately, and do not invent work outside story scope. Mark stories DONE only when all ACs are satisfied.
 - **software-engineer**: Provide well-documented schemas and ingestion patterns. When creating a new table or changing a column, include usage examples in migration comments so software-engineer can write correct queries.

@@ -18,9 +18,9 @@ Credentials are NEVER logged, committed, or displayed. Redact to `{AUTH_TOKEN}` 
 
 ## API Spec Location
 
-Single source of truth: `docs/gamechanger-api.md`
+Single source of truth: `docs/api/` directory structure. Index at `docs/api/README.md`, per-endpoint files in `docs/api/endpoints/`.
 
-All discoveries go into the spec immediately. Do not accumulate findings in memory or conversation -- write to the spec file.
+All discoveries go into per-endpoint files immediately. Do not accumulate findings in memory or conversation -- write to the endpoint file.
 
 ## Exploration Status
 
@@ -173,4 +173,4 @@ Never display/log/store credentials. Use `{AUTH_TOKEN}` placeholders. Strip auth
 
 ## Key File Paths
 
-API spec: `docs/gamechanger-api.md` | Stat glossary: `docs/gamechanger-stat-glossary.md` | Creds: `.env` | HTTP: `src/http/headers.py`, `src/http/session.py`
+API spec: `docs/api/README.md` (index), `docs/api/endpoints/` (per-endpoint files) | Stat glossary: `docs/gamechanger-stat-glossary.md` | Creds: `.env` | HTTP: `src/http/headers.py`, `src/http/session.py`

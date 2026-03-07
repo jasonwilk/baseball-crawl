@@ -15,7 +15,7 @@ This directory contains documentation for system operators and developers workin
 
 These documents live outside `docs/admin/` but are referenced throughout:
 
-- [GameChanger API Spec](../gamechanger-api.md) -- Endpoint reference for the GameChanger API (maintained by api-scout).
+- [GameChanger API Spec](../api/README.md) -- Endpoint reference for the GameChanger API (maintained by api-scout). Per-endpoint files in `docs/api/endpoints/`.
 - [HTTP Integration Guide](../http-integration-guide.md) -- How to use the shared HTTP session factory.
 - [Cloudflare Access Setup](../cloudflare-access-setup.md) -- One-time Cloudflare Tunnel and Zero Trust configuration.
 - [Database Backup & Restore](../database-restore.md) -- Backup and restore procedures for the SQLite database.

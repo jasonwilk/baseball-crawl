@@ -25,7 +25,7 @@ See CLAUDE.md Code Style section and `.claude/rules/python-style.md`.
 - `data/raw/` -- raw API response samples (gitignored). game-summaries: `game-summaries-sample.json` (page 1, 50 records), `game-summaries-page2-sample.json` (page 2, 42 records). me-teams: `me-teams-sample.json` (15 teams, 18 KB). me-user: `me-user-sample.json` (PII-redacted user profile, subscription info). player-stats: `player-stats-sample.json` (80 per-game records, 387 KB). schedule: `schedule-sample.json` (228 events, 134 KB). team-detail: `team-detail-sample.json` (own team, 910 bytes), `team-detail-opponent-sample.json` (opponent team via opponent_id, same schema). boxscore: `boxscore-sample.json` (13 KB, both teams' batting and pitching lines, game_stream_id-keyed). game-plays: `game-plays-sample.json` (37 KB, 58 plays, pitch-by-pitch play log for both teams, same game_stream_id as boxscore). public-team-profile: `public-team-profile-sample.json` (unauthenticated, ~1.2 KB). public-team-games: `public-team-games-sample.json` (unauthenticated, 32 game records, 25.7 KB, team `QTiLIb2Lui3b`). public-team-games-preview: `public-team-games-preview-sample.json` (unauthenticated, 32 records, near-duplicate of `/games` -- uses `event_id` instead of `id`, no `has_videos_available`; prefer `/games` sample for implementation). opponents: `opponents-sample.json` (70 records across 2 pages combined, 17 KB). public-game-details: `public-game-details-sample.json` (unauthenticated, single game object with inning-by-inning line score, ~500 bytes)
 - `data/raw/` also includes: `players-roster-sample.json` (20 players, LSB JV roster, 2.3 KB, bare JSON array of 5-field objects), `best-game-stream-id-sample.json` (single-field response: `{"game_stream_id": "<UUID>"}`, 58 bytes), `team-users-sample.json` (33 user records, PII-redacted, bare JSON array of 5-field objects: id/status/first_name/last_name/email; admin/auth plumbing -- no coaching or schema value), `public-team-profile-id-sample.json` (single-field response: `{"id": "<slug>"}`, ~20 bytes; UUID-to-public_id bridge)
 - `docs/` -- API specs and documentation
-- `docs/gamechanger-api.md` -- THE single source of truth for GameChanger API knowledge
+- `docs/api/README.md` -- API documentation index; per-endpoint files in `docs/api/endpoints/`
 - `docs/gamechanger-stat-glossary.md` -- authoritative data dictionary for all GameChanger stat abbreviations (batting, pitching, fielding, catcher, positional innings). Includes API field name mapping table for abbreviations that differ between UI and API. Reference when parsing season-stats response fields.
 
 ### Token Health Check (confirmed 2026-03-04)
@@ -60,7 +60,7 @@ See CLAUDE.md Code Style section and `.claude/rules/python-style.md`.
 - game-summaries uses cursor-based pagination: `x-pagination: true` request header, `x-next-page` response header with full URL
 - End of data: `x-next-page` header absent (NOT empty body)
 - Page size: 50 max; final page may have fewer records
-- Working Python pagination loop in `docs/gamechanger-api.md` (Notes for Implementers section) -- use as reference implementation
+- Working Python pagination loop in `docs/api/pagination.md` -- use as reference implementation
 
 ### Player-Stats Endpoint (confirmed 2026-03-04)
 - `GET /teams/{team_id}/players/{player_id}/stats` -- per-game stats for one player

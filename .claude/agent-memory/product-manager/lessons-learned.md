@@ -73,6 +73,10 @@ Three recurring violations identified in 2026-03-02 audit:
 
 **Pattern**: Prose guidance is not enforceable; procedural checkpoints are. This echoes the E-029 lesson (routing errors) and E-021 lesson (tool restrictions). When a rule fails because it is descriptive rather than procedural, add a mandatory checkpoint step to the workflow.
 
+**Incident (E-064 formation)**: User said "consult with SE on the root cause and fix approach." PM rationalized skipping consultation because "the root cause is unambiguous from code reading" and wrote the epic solo. This is exactly anti-pattern 5 again -- substituting PM judgment for the requested expert's input. SE consultation revealed additional issues (private symbol coupling, print() vs logging, duplicated production guard, deferred imports that can become top-level) and a better fix approach (Option C instead of PM's initial "constraints, not prescription" non-answer). The consultation materially improved the epic.
+
+**Reinforcement**: "Root cause is clear" does not excuse skipping consultation. The user asks for expert input because the expert may see things the PM doesn't. In this case, SE's Option C recommendation was architecturally superior to PM's non-committal approach, and SE flagged 4 additional issues PM missed. Always consult when directed -- even when you think you already know the answer.
+
 ## Implementation Prescriptiveness
 
 **Incident (E-058 formation)**: PM prescribed specific bash patterns (e.g., `${BASH_SOURCE[0]}` vs `$0`) in story Technical Approach sections, crossing the Technical Delegation Boundary.

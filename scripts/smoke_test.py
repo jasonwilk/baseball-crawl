@@ -38,7 +38,7 @@ from src.gamechanger.client import (
 # Suppress DEBUG/INFO noise from the HTTP client during smoke test output.
 logging.basicConfig(level=logging.WARNING)
 
-# Accept headers per docs/gamechanger-api.md "Accept Headers by Endpoint" table.
+# Accept headers per docs/api/ endpoint files (YAML frontmatter 'accept' field).
 _ACCEPT_TEAMS = "application/vnd.gc.com.team:list+json; version=0.10.0"
 _ACCEPT_GAME_SUMMARIES = "application/vnd.gc.com.game_summary:list+json; version=0.1.0"
 _ACCEPT_PLAYERS = "application/vnd.gc.com.player:list+json; version=0.1.0"

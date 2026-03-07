@@ -310,7 +310,7 @@ Before finalizing any epic or story:
 - [ ] Numbering correct and sequential
 - [ ] All template sections filled in (no TBD placeholders)
 - [ ] For evaluation epics: criteria in Technical Notes, gate story last with all research stories as deps
-- [ ] Story `Technical Approach` sections name all referenced context files by absolute path (e.g., `/.project/research/E-NNN-slug.md`, `docs/gamechanger-api.md`) rather than by vague description (e.g., "consult the design document"). Implementing agents must be able to load these as deferred context in one step.
+- [ ] Story `Technical Approach` sections name all referenced context files by absolute path (e.g., `/.project/research/E-NNN-slug.md`, `docs/api/README.md`) rather than by vague description (e.g., "consult the design document"). Implementing agents must be able to load these as deferred context in one step.
 - [ ] Technical Approach sections describe the problem and constraints, not the code solution (no specific function names, variable names, or code patterns)
 - [ ] Epic status set to READY after all stories pass this checklist
 

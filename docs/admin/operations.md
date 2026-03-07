@@ -225,7 +225,7 @@ The health endpoint (`GET /health`) returns 503 when the database is unreachable
 
 - **Credential expired**: Run `python scripts/refresh_credentials.py` (or `bb creds refresh`) and then `python scripts/smoke_test.py`.
 - **Rate limited**: The HTTP session factory handles rate limiting automatically with 1--1.5 second delays between requests. If you hit rate limits, increase the delay: adjust `min_delay_ms` and `jitter_ms` in `src/http/session.py`.
-- **Unknown endpoint error**: Check [docs/gamechanger-api.md](../gamechanger-api.md) for the current endpoint documentation.
+- **Unknown endpoint error**: Check [docs/api/README.md](../api/README.md) for the current endpoint documentation.
 
 ### Cloudflare Tunnel not connecting
 

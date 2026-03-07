@@ -15,7 +15,7 @@ Agent definitions live in `.claude/agents/`. Rules governing their behavior live
 | **product-manager** | PM | Opus | Owns what to build, why, and in what order. Creates epics and stories, prioritizes the backlog, dispatches implementation work, and closes completed work. Never writes code. |
 | **claude-architect** | | Opus | Designs and manages agents, `CLAUDE.md`, rules, skills, and hooks. Maintains the agent ecosystem itself. |
 | **baseball-coach** | coach | Sonnet | Domain expert. Translates coaching needs into technical requirements, validates schemas against real coaching use cases, and defines what statistics matter. |
-| **api-scout** | | Sonnet | Explores the GameChanger API, documents endpoints in `docs/gamechanger-api.md`, and guides credential rotation. |
+| **api-scout** | | Sonnet | Explores the GameChanger API, documents endpoints in `docs/api/endpoints/`, and guides credential rotation. |
 | **data-engineer** | DE | Sonnet | Designs database schemas, SQL migrations, and ETL pipelines. Informs the data layer from both domain requirements and API discoveries. |
 | **software-engineer** | SE | Sonnet | Implements Python code: crawlers, parsers, loaders, tests, utilities. Works from specifications produced by other agents. |
 | **docs-writer** | | Sonnet | Writes and maintains human-readable documentation for admin/developer and coaching staff audiences. |
