@@ -282,6 +282,51 @@ def test_missing_stats_file_skipped_gracefully(tmp_path: Path) -> None:
     mock_loader.load_file.assert_not_called()
 
 
+# ---------------------------------------------------------------------------
+# DB source mode
+# ---------------------------------------------------------------------------
+
+def test_source_db_uses_same_path_for_config_and_writes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """When source='db', both config reads and DB writes target the resolved_db path."""
+    resolved_db = tmp_path / "override.db"
+    default_db = tmp_path / "app.db"
+
+    monkeypatch.setenv("DATABASE_PATH", str(resolved_db))
+
+    with patch("scripts.load.load_config_from_db", return_value=_make_mock_config()) as mock_cfg:
+        with patch("scripts.load.sqlite3") as mock_sqlite:
+            mock_sqlite.connect.return_value.__enter__ = lambda s: s
+            mock_sqlite.connect.return_value.__exit__ = MagicMock(return_value=False)
+            mock_sqlite.connect.return_value.execute = MagicMock()
+            # Patch _LOADERS to empty so the loader loop doesn't run
+            with patch("scripts.load._LOADERS", []):
+                run(source="db", data_root=tmp_path, db_path=default_db)
+
+    # Config was loaded from the resolved DB path
+    mock_cfg.assert_called_once_with(resolved_db)
+    # sqlite3.connect was called with the same resolved path (not the default)
+    mock_sqlite.connect.assert_called_once_with(str(resolved_db))
+
+
+def test_source_db_dry_run_shows_resolved_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Dry run with source='db' prints the DATABASE_PATH-resolved path."""
+    resolved_db = tmp_path / "override.db"
+    default_db = tmp_path / "app.db"
+
+    monkeypatch.setenv("DATABASE_PATH", str(resolved_db))
+
+    with patch("scripts.load.load_config_from_db", return_value=_make_mock_config()):
+        run(dry_run=True, source="db", data_root=tmp_path, db_path=default_db)
+
+    captured = capsys.readouterr()
+    assert str(resolved_db) in captured.out
+    assert str(default_db) not in captured.out
+
+
 def test_all_three_loaders_run_in_order(tmp_path: Path) -> None:
     """When no filter is set, all three loaders run and results are aggregated."""
     call_order: list[str] = []

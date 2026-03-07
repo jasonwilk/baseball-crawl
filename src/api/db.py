@@ -761,6 +761,64 @@ def get_player_profile(player_id: str) -> dict[str, Any]:
     }
 
 
+def bulk_create_opponents(names: list[str]) -> int:
+    """Insert discovered opponent placeholder rows for names not already in the DB.
+
+    Skips any name that already exists in the ``teams`` table (case-insensitive
+    match on the ``name`` column).  New rows are inserted with:
+    - ``team_id``: lowercase-hyphenated slug from the name, suffixed with 6
+      random hex chars to ensure uniqueness (max 50 chars total).
+    - ``public_id = NULL``
+    - ``is_owned = 0``
+    - ``is_active = 0``
+    - ``source = 'discovered'``
+
+    Uses ``INSERT OR IGNORE`` as a secondary safety net for any race conditions.
+
+    Args:
+        names: List of opponent display names to insert.
+
+    Returns:
+        Count of newly inserted rows.
+    """
+    import re
+    import secrets as _secrets
+
+    inserted = 0
+    try:
+        with closing(get_connection()) as conn:
+            conn.row_factory = sqlite3.Row
+            # Fetch existing names once, lowercase, for fast O(1) lookups
+            existing_rows = conn.execute("SELECT LOWER(name) AS lname FROM teams").fetchall()
+            existing_lower: set[str] = {row["lname"] for row in existing_rows}
+
+            for name in names:
+                if name.lower() in existing_lower:
+                    continue
+                # Build slug: keep only alphanumeric and spaces, hyphenate, truncate
+                # Reserve 7 chars for "-" + 6 hex suffix so truncation never cuts the suffix
+                slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:43]
+                suffix = _secrets.token_hex(3)  # 6 hex chars
+                team_id = f"{slug}-{suffix}"
+
+                result = conn.execute(
+                    """
+                    INSERT OR IGNORE INTO teams
+                        (team_id, name, public_id, level, is_owned, is_active, source)
+                    VALUES (?, ?, NULL, NULL, 0, 0, 'discovered')
+                    """,
+                    (team_id, name),
+                )
+                existing_lower.add(name.lower())
+                if result.rowcount:
+                    inserted += 1
+
+            conn.commit()
+    except sqlite3.Error:
+        logger.exception("Failed to bulk-create opponent placeholders")
+    return inserted
+
+
 def check_connection() -> bool:
     """Verify that the database is accessible and the schema is initialized.
 

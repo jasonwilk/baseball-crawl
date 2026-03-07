@@ -88,6 +88,47 @@ baseball-crawl/
 | **Tunnel** | Cloudflare Tunnel (cloudflared) | Secure exposure without opening ports. Handles SSL and integrates with Zero Trust access policies. |
 | **Container** | Docker Compose | Single `docker-compose.yml` defines all services. The app container runs migrations on startup. |
 
+## Schema Changes
+
+### Migration 005: `public_id` on `teams` (E-042)
+
+Migration 005 adds a `public_id` column to the `teams` table:
+
+```sql
+ALTER TABLE teams ADD COLUMN public_id TEXT;
+CREATE UNIQUE INDEX idx_teams_public_id ON teams(public_id) WHERE public_id IS NOT NULL;
+```
+
+`public_id` is the short alphanumeric slug used by the GameChanger public API and web UI (e.g., `a1GFM9Ku0BbF`). It is nullable because opponents discovered by name from a team's schedule have no public ID until an admin pastes their URL. The partial unique index allows multiple NULL values while enforcing uniqueness across non-NULL values.
+
+For URL-added teams, `team_id` equals `public_id` (the UUID is not available from public API endpoints).
+
+## Admin Interface
+
+### Team Management Routes (E-042)
+
+All routes are under `/admin/` and require an admin session. The team management pages were added alongside the existing user management pages from E-023.
+
+| Route | Method | Description |
+|-------|--------|-------------|
+| `/admin/teams` | GET | Team list (Lincoln Program + Tracked Opponents) with Add Team form |
+| `/admin/teams` | POST | Add a team by GameChanger URL or bare public ID |
+| `/admin/teams/{team_id}/edit` | GET | Edit team form (name, level, type) |
+| `/admin/teams/{team_id}/edit` | POST | Update team metadata |
+| `/admin/teams/{team_id}/toggle-active` | POST | Toggle `is_active` between 0 and 1 |
+| `/admin/teams/{team_id}/discover-opponents` | POST | Auto-discover opponents from team's public schedule |
+
+Sub-navigation links Users and Teams pages across all admin views.
+
+### New Modules (E-042)
+
+| Module | Purpose |
+|--------|---------|
+| `src/gamechanger/url_parser.py` | Extracts `public_id` from GameChanger team URLs or bare slugs. Accepts any URL containing `/teams/{public_id}` in the path. |
+| `src/gamechanger/team_resolver.py` | Calls `GET /public/teams/{public_id}` (no auth) to resolve a team name, location, and metadata. Also provides `discover_opponents()` which calls `GET /public/teams/{public_id}/games` to extract opponent names. |
+
+Both modules use the shared HTTP session factory (`src/http/session.py`) with a 10-second timeout. No authentication headers are sent -- these are public GameChanger API endpoints.
+
 ## Cross-References
 
 - **GameChanger API**: Full endpoint documentation in [docs/gamechanger-api.md](../gamechanger-api.md).
@@ -96,4 +137,4 @@ baseball-crawl/
 
 ---
 
-*Last updated: 2026-03-04 | Story: E-003-02*
+*Last updated: 2026-03-07 | Source: E-042 (schema migration 005, admin team management, url_parser, team_resolver), E-003-02 (original)*

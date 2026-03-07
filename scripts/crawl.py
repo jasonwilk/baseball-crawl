@@ -28,8 +28,10 @@ from pathlib import Path
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_PROJECT_ROOT))
 
+import os  # noqa: E402 (needed here for env var read at runtime)
+
 from src.gamechanger.client import GameChangerClient  # noqa: E402
-from src.gamechanger.config import load_config  # noqa: E402
+from src.gamechanger.config import load_config, load_config_from_db  # noqa: E402
 from src.gamechanger.crawlers import CrawlResult  # noqa: E402
 from src.gamechanger.crawlers.roster import RosterCrawler  # noqa: E402
 from src.gamechanger.crawlers.schedule import ScheduleCrawler  # noqa: E402
@@ -128,6 +130,12 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         choices=_CRAWLER_NAMES,
         help=f"Run only one crawler. Choices: {', '.join(_CRAWLER_NAMES)}",
     )
+    parser.add_argument(
+        "--source",
+        choices=["yaml", "db"],
+        default="yaml",
+        help="Config source: 'yaml' (default) reads config/teams.yaml; 'db' reads from SQLite.",
+    )
     return parser
 
 
@@ -136,6 +144,8 @@ def run(
     crawler_filter: str | None = None,
     data_root: Path = _DATA_ROOT,
     profile: str = "web",
+    source: str = "yaml",
+    db_path: Path | None = None,
 ) -> int:
     """Execute the crawl orchestration.
 
@@ -145,11 +155,20 @@ def run(
         data_root: Override the raw data root (used in tests).
         profile: Header profile for the HTTP session ("web" or "mobile").
             Passed to ``GameChangerClient``.  Defaults to ``"web"``.
+        source: Config source -- ``"yaml"`` (default) or ``"db"``.
+        db_path: Override the database path (used in tests; only relevant when
+            ``source="db"``).  Defaults to ``DATABASE_PATH`` env var or
+            ``./data/app.db``.
 
     Returns:
         Exit code: 0 if all crawlers completed, 1 if any raised an exception.
     """
-    config = load_config()
+    logger.info("Loading team config from %s", source)
+    if source == "db":
+        resolved_db = db_path or Path(os.environ.get("DATABASE_PATH", "./data/app.db"))
+        config = load_config_from_db(resolved_db)
+    else:
+        config = load_config()
 
     # Build crawler list lazily so module-level patches in tests take effect.
     all_crawlers = _build_crawlers()
@@ -201,7 +220,7 @@ def main() -> None:
     """Entry point for ``python scripts/crawl.py``."""
     parser = _build_arg_parser()
     args = parser.parse_args()
-    sys.exit(run(dry_run=args.dry_run, crawler_filter=args.crawler))
+    sys.exit(run(dry_run=args.dry_run, crawler_filter=args.crawler, source=args.source))
 
 
 if __name__ == "__main__":

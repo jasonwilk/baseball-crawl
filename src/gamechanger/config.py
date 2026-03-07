@@ -4,6 +4,10 @@ Reads ``config/teams.yaml`` and exposes a ``CrawlConfig`` dataclass that
 downstream crawlers consume.  The YAML file is committed to version control and
 contains no credentials.
 
+A database-driven loader ``load_config_from_db()`` is also provided.  It reads
+active owned teams from the ``teams`` table and derives the current season from
+the most recent row in the ``seasons`` table.
+
 Example YAML::
 
     season: "2025"
@@ -17,7 +21,7 @@ Example YAML::
 
 Usage::
 
-    from src.gamechanger.config import CrawlConfig, load_config
+    from src.gamechanger.config import CrawlConfig, load_config, load_config_from_db
 
     config = load_config()
     for team in config.owned_teams:
@@ -27,6 +31,8 @@ Usage::
 from __future__ import annotations
 
 import logging
+import sqlite3
+from contextlib import closing
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -111,3 +117,51 @@ def load_config(path: Path = _DEFAULT_CONFIG_PATH) -> CrawlConfig:
         "Loaded config: season=%s, %d owned teams", raw["season"], len(teams)
     )
     return CrawlConfig(season=str(raw["season"]), owned_teams=teams)
+
+
+def load_config_from_db(db_path: Path) -> CrawlConfig:
+    """Load crawl configuration from the SQLite database.
+
+    Queries active owned teams and derives the current season from the most
+    recent entry in the ``seasons`` table.
+
+    Args:
+        db_path: Path to the SQLite database file.
+
+    Returns:
+        A populated ``CrawlConfig`` instance.  If no active owned teams are
+        found, ``owned_teams`` will be an empty list (not an error).
+
+    Raises:
+        ValueError: If no seasons exist in the database.
+        sqlite3.Error: If the database cannot be opened or queried.
+    """
+    with closing(sqlite3.connect(str(db_path))) as conn:
+        conn.execute("PRAGMA journal_mode=WAL;")
+        conn.execute("PRAGMA foreign_keys=ON;")
+        conn.row_factory = sqlite3.Row
+
+        season_row = conn.execute(
+            "SELECT season_id FROM seasons ORDER BY year DESC LIMIT 1"
+        ).fetchone()
+        if season_row is None:
+            raise ValueError("No seasons found in database")
+        season_id: str = season_row["season_id"]
+
+        team_rows = conn.execute(
+            "SELECT team_id, name, level FROM teams WHERE is_active = 1 AND is_owned = 1"
+        ).fetchall()
+
+    teams = [
+        TeamEntry(
+            id=row["team_id"],
+            name=row["name"],
+            level=row["level"] or "",
+        )
+        for row in team_rows
+    ]
+
+    logger.debug(
+        "Loaded DB config: season=%s, %d owned teams", season_id, len(teams)
+    )
+    return CrawlConfig(season=season_id, owned_teams=teams)

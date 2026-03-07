@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+
+{% block title %}Admin -- Edit Team{% endblock %}
+
+{% block header_extras %}
+<div class="ml-auto flex items-center gap-4 text-sm">
+  {% if admin_user and admin_user.display_name %}
+  <span class="text-blue-200">{{ admin_user.display_name }}</span>
+  {% endif %}
+  <a href="/admin/teams" class="text-blue-200 hover:text-white">Back to Teams</a>
+  <a href="/auth/logout" class="text-blue-200 hover:text-white">Logout</a>
+</div>
+{% endblock %}
+
+{% block content %}
+<h1 class="text-xl font-bold mb-4">Edit Team</h1>
+
+<div class="bg-white rounded shadow p-6 max-w-lg">
+
+  <!-- Read-only info -->
+  <div class="mb-4">
+    <p class="text-sm font-medium text-gray-700 mb-1">Public ID</p>
+    <p class="text-sm font-mono text-gray-600 py-1">{{ edit_team.public_id or "—" }}</p>
+  </div>
+
+  <div class="mb-4 flex gap-6">
+    <div>
+      <p class="text-sm font-medium text-gray-700 mb-1">Status</p>
+      <p class="text-sm py-1">
+        {% if edit_team.is_active %}
+          <span class="text-green-700 font-medium">Active</span>
+        {% else %}
+          <span class="text-gray-500">Inactive</span>
+        {% endif %}
+      </p>
+    </div>
+    <div>
+      <p class="text-sm font-medium text-gray-700 mb-1">Last Synced</p>
+      <p class="text-sm text-gray-600 py-1">{{ edit_team.last_synced or "—" }}</p>
+    </div>
+  </div>
+
+  <!-- Editable fields -->
+  <form method="post" action="/admin/teams/{{ edit_team.team_id }}/edit">
+    <div class="mb-4">
+      <label class="block text-sm font-medium text-gray-700 mb-1" for="name">
+        Name <span class="text-red-600">*</span>
+      </label>
+      <input
+        type="text"
+        id="name"
+        name="name"
+        required
+        value="{{ edit_team.name }}"
+        class="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
+      >
+    </div>
+
+    <div class="mb-4">
+      <label class="block text-sm font-medium text-gray-700 mb-1" for="level">
+        Level <span class="text-gray-400 font-normal">(optional)</span>
+      </label>
+      <select
+        id="level"
+        name="level"
+        class="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
+      >
+        <option value="">-- select level --</option>
+        <option value="freshman" {% if edit_team.level == 'freshman' %}selected{% endif %}>Freshman</option>
+        <option value="jv" {% if edit_team.level == 'jv' %}selected{% endif %}>JV</option>
+        <option value="varsity" {% if edit_team.level == 'varsity' %}selected{% endif %}>Varsity</option>
+        <option value="reserve" {% if edit_team.level == 'reserve' %}selected{% endif %}>Reserve</option>
+        <option value="legion" {% if edit_team.level == 'legion' %}selected{% endif %}>Legion</option>
+        <option value="other" {% if edit_team.level == 'other' %}selected{% endif %}>Other</option>
+      </select>
+    </div>
+
+    <div class="mb-4">
+      <p class="block text-sm font-medium text-gray-700 mb-1">Type</p>
+      <label class="flex items-center gap-2 text-sm text-gray-700 mb-1 cursor-pointer">
+        <input type="radio" name="team_type" value="tracked"
+               {% if not edit_team.is_owned %}checked{% endif %}>
+        Tracked (opponent)
+      </label>
+      <label class="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+        <input type="radio" name="team_type" value="owned"
+               {% if edit_team.is_owned %}checked{% endif %}>
+        Owned (Lincoln program)
+      </label>
+    </div>
+
+    <div class="flex gap-3">
+      <button
+        type="submit"
+        class="bg-blue-900 text-white px-4 py-2 rounded text-sm hover:bg-blue-800"
+      >
+        Save Changes
+      </button>
+      <a
+        href="/admin/teams"
+        class="px-4 py-2 rounded text-sm border border-gray-300 text-gray-700 hover:bg-gray-50"
+      >
+        Cancel
+      </a>
+    </div>
+  </form>
+</div>
+{% endblock %}

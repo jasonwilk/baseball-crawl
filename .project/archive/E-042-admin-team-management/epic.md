@@ -1,7 +1,7 @@
 # E-042: Admin Interface and Team Management
 
 ## Status
-`READY`
+`COMPLETED`
 
 ## Overview
 Give admins the ability to add and manage teams through the web interface by pasting GameChanger public URLs, replacing the static `config/teams.yaml` approach. Once a team is added, its schedule reveals opponents that can also be tracked -- all using public (no-auth) API endpoints.
@@ -53,12 +53,12 @@ The current team configuration is a static YAML file (`config/teams.yaml`) that 
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-042-01 | Schema migration: add public_id to teams | TODO | None | - |
-| E-042-02 | URL parser and public API team resolver | TODO | None | - |
-| E-042-03 | Admin team list and add-team page | TODO | E-042-01, E-042-02 | - |
-| E-042-04 | Admin team edit and deactivate | TODO | E-042-03 | - |
-| E-042-05 | Opponent auto-discovery from public schedule | TODO | E-042-02, E-042-03, E-042-04 | - |
-| E-042-06 | Database-driven crawl configuration | TODO | None | - |
+| E-042-01 | Schema migration: add public_id to teams | DONE | None | - |
+| E-042-02 | URL parser and public API team resolver | DONE | None | - |
+| E-042-03 | Admin team list and add-team page | DONE | E-042-01, E-042-02 | - |
+| E-042-04 | Admin team edit and deactivate | DONE | E-042-03 | - |
+| E-042-05 | Opponent auto-discovery from public schedule | DONE | E-042-02, E-042-03, E-042-04 | - |
+| E-042-06 | Database-driven crawl configuration | DONE | None | - |
 
 ## Technical Notes
 
@@ -219,3 +219,4 @@ All resolved during expert consultation. See History.
   - FIXED P1: E-042-03 add-team handler now checks for discovered placeholders (name match, `source='discovered'`, `public_id IS NULL`) and upgrades the existing row instead of creating a duplicate. AC-9 and AC-14 updated.
   - FIXED P2: E-042-03 AC-17 now includes a test for the placeholder-to-resolved upgrade path.
   - FIXED P5: PM memory dispatch order corrected to match current epic (01+02+06 parallel -> 03 -> 04 -> 05).
+- 2026-03-07: **Epic COMPLETED.** All 6 stories DONE. Dispatch executed: 01+02+06 in parallel, then 03, 04, 05 sequentially. Key artifacts: migration 005 (public_id column), url_parser.py + team_resolver.py (URL-to-team pipeline), admin team management pages (list, add, edit, toggle-active, discover opponents), DB-driven crawl config (--source db flag on crawl.py and load.py). No documentation impact (admin UI is internal, no user-facing docs needed). No follow-up work identified beyond existing ideas (IDEA-012 crawl scheduling).

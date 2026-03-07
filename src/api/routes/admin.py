@@ -4,11 +4,16 @@ Provides server-rendered HTML views for managing user accounts and team
 assignments.  All routes require an active session with ``is_admin=1``.
 
 Routes:
-    GET  /admin/users                    -- List all users
-    POST /admin/users                    -- Create new user
-    GET  /admin/users/{user_id}/edit     -- Edit user form
-    POST /admin/users/{user_id}/edit     -- Update user
-    POST /admin/users/{user_id}/delete   -- Delete user (cascade)
+    GET  /admin/users                          -- List all users
+    POST /admin/users                          -- Create new user
+    GET  /admin/users/{user_id}/edit           -- Edit user form
+    POST /admin/users/{user_id}/edit           -- Update user
+    POST /admin/users/{user_id}/delete         -- Delete user (cascade)
+    GET  /admin/teams                          -- List all teams with add-team form
+    POST /admin/teams                          -- Add team via GameChanger URL or public_id
+    GET  /admin/teams/{team_id}/edit           -- Edit team form
+    POST /admin/teams/{team_id}/edit           -- Update team metadata
+    POST /admin/teams/{team_id}/toggle-active  -- Toggle team is_active flag
 """
 
 from __future__ import annotations
@@ -25,7 +30,14 @@ from fastapi.templating import Jinja2Templates
 from starlette.concurrency import run_in_threadpool
 from starlette.responses import Response
 
-from src.api.db import get_connection
+from src.api.db import bulk_create_opponents, get_connection
+from src.gamechanger.team_resolver import (
+    GameChangerAPIError,
+    TeamNotFoundError,
+    discover_opponents,
+    resolve_team,
+)
+from src.gamechanger.url_parser import parse_team_url
 
 logger = logging.getLogger(__name__)
 
@@ -457,4 +469,535 @@ async def delete_user(request: Request, user_id: int) -> Response:
 
     return RedirectResponse(
         url="/admin/users?msg=User+deleted+successfully", status_code=303
+    )
+
+
+# ---------------------------------------------------------------------------
+# Team management DB helpers (synchronous -- called via run_in_threadpool)
+# ---------------------------------------------------------------------------
+
+
+def _get_all_teams_split() -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Return teams split into owned (Lincoln) and opponent lists.
+
+    Returns:
+        Tuple of (owned_teams, opponent_teams), each a list of dicts with keys:
+        team_id, name, level, is_active, public_id, last_synced.
+    """
+    with closing(get_connection()) as conn:
+        conn.row_factory = sqlite3.Row
+        owned_rows = conn.execute(
+            "SELECT team_id, name, level, is_owned, is_active, public_id, last_synced "
+            "FROM teams WHERE is_owned = 1 ORDER BY name"
+        ).fetchall()
+        opponent_rows = conn.execute(
+            "SELECT team_id, name, level, is_owned, is_active, public_id, last_synced "
+            "FROM teams WHERE is_owned = 0 ORDER BY name"
+        ).fetchall()
+    return [dict(r) for r in owned_rows], [dict(r) for r in opponent_rows]
+
+
+def _find_discovered_placeholder(name: str) -> dict[str, Any] | None:
+    """Look up an existing team row that is a discovered placeholder matching the given name.
+
+    A placeholder is a row where ``source='discovered'`` and ``public_id IS NULL``.
+    Matching is case-insensitive on the ``name`` column.
+
+    Args:
+        name: Team name to match (case-insensitive).
+
+    Returns:
+        Team dict (team_id, name, ...) if a placeholder exists, else None.
+    """
+    with closing(get_connection()) as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT team_id, name, source FROM teams "
+            "WHERE LOWER(name) = LOWER(?) AND source = 'discovered' AND public_id IS NULL",
+            (name,),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def _team_id_exists(team_id: str) -> bool:
+    """Check whether a team with the given team_id already exists.
+
+    Args:
+        team_id: The team_id to look up.
+
+    Returns:
+        True if a row exists, False otherwise.
+    """
+    with closing(get_connection()) as conn:
+        row = conn.execute(
+            "SELECT 1 FROM teams WHERE team_id = ?", (team_id,)
+        ).fetchone()
+    return row is not None
+
+
+def _team_is_discovered_placeholder(team_id: str) -> bool:
+    """Return True if the team with team_id is a discovered placeholder (not yet a real add).
+
+    A placeholder has ``source='discovered'`` and ``public_id IS NULL``.
+
+    Args:
+        team_id: The team_id to check.
+
+    Returns:
+        True if the team is a discovered placeholder, False otherwise.
+    """
+    with closing(get_connection()) as conn:
+        row = conn.execute(
+            "SELECT 1 FROM teams WHERE team_id = ? AND source = 'discovered' AND public_id IS NULL",
+            (team_id,),
+        ).fetchone()
+    return row is not None
+
+
+def _upgrade_placeholder_team(
+    old_team_id: str,
+    new_team_id: str,
+    name: str,
+    public_id: str,
+    level: str | None,
+    is_owned: int,
+) -> None:
+    """Upgrade a discovered placeholder team row with resolved data.
+
+    Updates team_id, public_id, name, level, is_owned, source, is_active on the
+    matching placeholder row.
+
+    Args:
+        old_team_id: The existing placeholder's team_id to update.
+        new_team_id: The resolved public_id (used as the new team_id).
+        name: Team name from the API.
+        public_id: The GameChanger public_id slug.
+        level: Level string or None.
+        is_owned: 1 for owned, 0 for tracked.
+    """
+    with closing(get_connection()) as conn:
+        conn.execute(
+            """
+            UPDATE teams
+            SET team_id   = ?,
+                name      = ?,
+                public_id = ?,
+                level     = ?,
+                is_owned  = ?,
+                source    = 'gamechanger',
+                is_active = 1
+            WHERE team_id = ?
+            """,
+            (new_team_id, name, public_id, level or None, is_owned, old_team_id),
+        )
+        conn.commit()
+
+
+def _insert_team(
+    team_id: str,
+    name: str,
+    public_id: str,
+    level: str | None,
+    is_owned: int,
+) -> None:
+    """Insert a new team row.
+
+    Args:
+        team_id: Primary key (equals public_id for URL-added teams).
+        name: Team name from the API.
+        public_id: The GameChanger public_id slug.
+        level: Level string or None.
+        is_owned: 1 for owned, 0 for tracked.
+    """
+    with closing(get_connection()) as conn:
+        conn.execute(
+            """
+            INSERT INTO teams (team_id, name, public_id, level, is_owned, source, is_active)
+            VALUES (?, ?, ?, ?, ?, 'gamechanger', 1)
+            """,
+            (team_id, name, public_id, level or None, is_owned),
+        )
+        conn.commit()
+
+
+# ---------------------------------------------------------------------------
+# Team management routes
+# ---------------------------------------------------------------------------
+
+
+@router.get("/teams", response_model=None)
+async def list_teams(request: Request) -> Response:
+    """Render the team management page.
+
+    Requires admin session.  Shows Lincoln-owned teams and tracked opponents
+    in separate tables, plus an Add Team form.
+
+    Args:
+        request: The incoming HTTP request.
+
+    Returns:
+        HTMLResponse with team list and form, or auth redirect/403.
+    """
+    guard = await _require_admin(request)
+    if isinstance(guard, Response):
+        return guard
+
+    msg = request.query_params.get("msg", "")
+    error = request.query_params.get("error", "")
+
+    owned_teams, opponent_teams = await run_in_threadpool(_get_all_teams_split)
+
+    return templates.TemplateResponse(
+        request,
+        "admin/teams.html",
+        {
+            "owned_teams": owned_teams,
+            "opponent_teams": opponent_teams,
+            "msg": msg,
+            "error": error,
+            "admin_user": guard,
+        },
+    )
+
+
+@router.post("/teams", response_model=None)
+async def add_team(
+    request: Request,
+    url_input: str = Form(...),
+    level: str = Form(default=""),
+    team_type: str = Form(default="tracked"),
+) -> Response:
+    """Add a team by GameChanger URL or public_id.
+
+    Parses the URL input, resolves the team profile from the public API, and
+    either upgrades an existing discovered placeholder or inserts a new row.
+
+    Args:
+        request: The incoming HTTP request.
+        url_input: GameChanger URL or bare public_id.
+        level: Optional level value (freshman/jv/varsity/reserve/legion/other).
+        team_type: "owned" for Lincoln teams, "tracked" for opponents.
+
+    Returns:
+        Redirect on success, or HTMLResponse with error on failure.
+    """
+    guard = await _require_admin(request)
+    if isinstance(guard, Response):
+        return guard
+
+    is_owned = 1 if team_type == "owned" else 0
+    level_value = level.strip() or None
+
+    # --- Parse URL ---
+    try:
+        public_id = parse_team_url(url_input.strip())
+    except ValueError as exc:
+        return await _render_teams_error(request, guard, str(exc), url_input, level_value, team_type)
+
+    # --- Check for exact team_id duplicate that is NOT a discovered placeholder ---
+    already_exists = await run_in_threadpool(_team_id_exists, public_id)
+    if already_exists:
+        is_placeholder = await run_in_threadpool(_team_is_discovered_placeholder, public_id)
+        if not is_placeholder:
+            return await _render_teams_error(
+                request, guard,
+                "This team is already in the system.",
+                url_input, level_value, team_type,
+            )
+
+    # --- Resolve team via public API ---
+    try:
+        profile = await run_in_threadpool(resolve_team, public_id)
+    except TeamNotFoundError:
+        return await _render_teams_error(
+            request, guard,
+            "Team not found on GameChanger. Check the URL and try again.",
+            url_input, level_value, team_type,
+        )
+    except GameChangerAPIError:
+        return await _render_teams_error(
+            request, guard,
+            "Could not reach GameChanger API. Try again later.",
+            url_input, level_value, team_type,
+        )
+
+    # --- Upgrade placeholder or insert new row ---
+    placeholder = await run_in_threadpool(_find_discovered_placeholder, profile.name)
+    if placeholder:
+        await run_in_threadpool(
+            _upgrade_placeholder_team,
+            placeholder["team_id"],
+            public_id,
+            profile.name,
+            public_id,
+            level_value,
+            is_owned,
+        )
+    else:
+        await run_in_threadpool(
+            _insert_team,
+            public_id,
+            profile.name,
+            public_id,
+            level_value,
+            is_owned,
+        )
+
+    # Build success message with location if available
+    location_parts = [p for p in (profile.city, profile.state) if p]
+    if location_parts:
+        location_str = ", ".join(location_parts)
+        msg = f"Team added: {profile.name} ({location_str})"
+    else:
+        msg = f"Team added: {profile.name}"
+
+    from urllib.parse import quote_plus
+    return RedirectResponse(
+        url=f"/admin/teams?msg={quote_plus(msg)}", status_code=303
+    )
+
+
+def _get_team_by_id(team_id: str) -> dict[str, Any] | None:
+    """Fetch a single team row by team_id.
+
+    Args:
+        team_id: The team's primary key.
+
+    Returns:
+        Team dict with all columns, or None if not found.
+    """
+    with closing(get_connection()) as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT team_id, name, level, is_owned, is_active, public_id, last_synced "
+            "FROM teams WHERE team_id = ?",
+            (team_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def _update_team(team_id: str, name: str, level: str | None, is_owned: int) -> None:
+    """Update a team's name, level, and is_owned flag.
+
+    Args:
+        team_id: The team's primary key.
+        name: New team name.
+        level: Level string or None.
+        is_owned: 1 for owned (Lincoln), 0 for tracked opponent.
+    """
+    with closing(get_connection()) as conn:
+        conn.execute(
+            "UPDATE teams SET name = ?, level = ?, is_owned = ? WHERE team_id = ?",
+            (name, level or None, is_owned, team_id),
+        )
+        conn.commit()
+
+
+def _toggle_team_active(team_id: str) -> int:
+    """Toggle a team's is_active flag between 0 and 1.
+
+    Args:
+        team_id: The team's primary key.
+
+    Returns:
+        The new is_active value after toggling (0 or 1).
+    """
+    with closing(get_connection()) as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT is_active FROM teams WHERE team_id = ?", (team_id,)
+        ).fetchone()
+        if row is None:
+            return 0
+        new_value = 0 if row["is_active"] else 1
+        conn.execute(
+            "UPDATE teams SET is_active = ? WHERE team_id = ?", (new_value, team_id)
+        )
+        conn.commit()
+        return new_value
+
+
+async def _render_teams_error(
+    request: Request,
+    guard: dict[str, Any],
+    error: str,
+    form_url_input: str,
+    form_level: str | None,
+    form_team_type: str,
+) -> Response:
+    """Re-render the teams page with an error message.
+
+    Args:
+        request: The incoming HTTP request.
+        guard: Admin user dict from _require_admin.
+        error: Error message to display.
+        form_url_input: The submitted URL/public_id value to repopulate.
+        form_level: The submitted level value to repopulate.
+        form_team_type: The submitted team_type value to repopulate.
+
+    Returns:
+        HTMLResponse with the teams page and error banner.
+    """
+    owned_teams, opponent_teams = await run_in_threadpool(_get_all_teams_split)
+    return templates.TemplateResponse(
+        request,
+        "admin/teams.html",
+        {
+            "owned_teams": owned_teams,
+            "opponent_teams": opponent_teams,
+            "msg": "",
+            "error": error,
+            "admin_user": guard,
+            "form_url_input": form_url_input,
+            "form_level": form_level or "",
+            "form_team_type": form_team_type,
+        },
+    )
+
+
+@router.get("/teams/{team_id}/edit", response_model=None)
+async def edit_team_form(request: Request, team_id: str) -> Response:
+    """Render the edit team form.
+
+    Pre-fills Name, Level, Type, and shows read-only Public ID, status, and
+    last_synced.
+
+    Args:
+        request: The incoming HTTP request.
+        team_id: The team's primary key from the URL path.
+
+    Returns:
+        HTMLResponse with the edit form, or a 404/auth response.
+    """
+    guard = await _require_admin(request)
+    if isinstance(guard, Response):
+        return guard
+
+    team = await run_in_threadpool(_get_team_by_id, team_id)
+    if not team:
+        return HTMLResponse(content="Team not found", status_code=404)
+
+    return templates.TemplateResponse(
+        request,
+        "admin/edit_team.html",
+        {
+            "edit_team": team,
+            "admin_user": guard,
+        },
+    )
+
+
+@router.post("/teams/{team_id}/edit", response_model=None)
+async def update_team(
+    request: Request,
+    team_id: str,
+    name: str = Form(...),
+    level: str = Form(default=""),
+    team_type: str = Form(default="tracked"),
+) -> Response:
+    """Update a team's name, level, and is_owned flag.
+
+    Args:
+        request: The incoming HTTP request.
+        team_id: The team's primary key from the URL path.
+        name: New team name (required).
+        level: Level value (optional).
+        team_type: "owned" for Lincoln teams, "tracked" for opponents.
+
+    Returns:
+        Redirect on success, or 404/auth response.
+    """
+    guard = await _require_admin(request)
+    if isinstance(guard, Response):
+        return guard
+
+    team = await run_in_threadpool(_get_team_by_id, team_id)
+    if not team:
+        return HTMLResponse(content="Team not found", status_code=404)
+
+    is_owned = 1 if team_type == "owned" else 0
+    level_value = level.strip() or None
+    await run_in_threadpool(_update_team, team_id, name.strip(), level_value, is_owned)
+
+    return RedirectResponse(url="/admin/teams?msg=Team+updated", status_code=303)
+
+
+@router.post("/teams/{team_id}/toggle-active", response_model=None)
+async def toggle_team_active(request: Request, team_id: str) -> Response:
+    """Toggle a team's is_active status between active and inactive.
+
+    Args:
+        request: The incoming HTTP request.
+        team_id: The team's primary key from the URL path.
+
+    Returns:
+        Redirect to /admin/teams with an appropriate flash message.
+    """
+    guard = await _require_admin(request)
+    if isinstance(guard, Response):
+        return guard
+
+    team = await run_in_threadpool(_get_team_by_id, team_id)
+    if not team:
+        return HTMLResponse(content="Team not found", status_code=404)
+
+    new_active = await run_in_threadpool(_toggle_team_active, team_id)
+    verb = "activated" if new_active else "deactivated"
+
+    from urllib.parse import quote_plus
+    return RedirectResponse(
+        url=f"/admin/teams?msg=Team+{quote_plus(verb)}", status_code=303
+    )
+
+
+@router.post("/teams/{team_id}/discover-opponents", response_model=None)
+async def discover_team_opponents(request: Request, team_id: str) -> Response:
+    """Trigger opponent auto-discovery from a team's public game schedule.
+
+    Fetches ``GET /public/teams/{public_id}/games``, extracts unique opponent
+    names, and inserts placeholder team rows for any opponents not already in
+    the database.  Requires the team to have a ``public_id``.
+
+    Args:
+        request: The incoming HTTP request.
+        team_id: The team's primary key from the URL path.
+
+    Returns:
+        Redirect to /admin/teams with a success or error flash message.
+    """
+    from urllib.parse import quote_plus
+
+    guard = await _require_admin(request)
+    if isinstance(guard, Response):
+        return guard
+
+    team = await run_in_threadpool(_get_team_by_id, team_id)
+    if not team:
+        return HTMLResponse(content="Team not found", status_code=404)
+
+    public_id = team.get("public_id")
+    if not public_id:
+        return RedirectResponse(
+            url="/admin/teams?error="
+            + quote_plus("Cannot discover opponents: team has no public ID."),
+            status_code=303,
+        )
+
+    try:
+        discovered = await run_in_threadpool(discover_opponents, public_id)
+    except GameChangerAPIError as exc:
+        logger.warning("Opponent discovery failed for team %s: %s", team_id, exc)
+        return RedirectResponse(
+            url="/admin/teams?error="
+            + quote_plus("Could not reach GameChanger API. Try again later."),
+            status_code=303,
+        )
+
+    names = [opp.name for opp in discovered]
+    count = await run_in_threadpool(bulk_create_opponents, names)
+
+    team_name = team.get("name", team_id)
+    msg = f"Discovered {count} new opponent{'s' if count != 1 else ''} for {team_name}"
+    return RedirectResponse(
+        url=f"/admin/teams?msg={quote_plus(msg)}", status_code=303
     )

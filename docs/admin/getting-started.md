@@ -73,6 +73,21 @@ Expected response:
 
 If the health check fails, see [Operations: Troubleshooting](operations.md#troubleshooting).
 
+## Add Teams
+
+Teams are configured through the admin UI, not by editing configuration files directly.
+
+1. Start the stack and visit `http://localhost:8001/admin/teams`.
+2. Paste a GameChanger team URL for each LSB team (Freshman, JV, Varsity, Reserve) and select **Lincoln Program** as the team type.
+3. Click **Discover Opponents** on each Lincoln team to populate tracked opponents from their schedules.
+4. Activate any opponents you want to track.
+
+The admin UI calls the public GameChanger API (no credentials required) to resolve the team name and location from the URL.
+
+**Note on `config/teams.yaml`**: The YAML file remains available as a bootstrap mechanism, but it is no longer the primary team configuration path. The admin UI and the `--source db` flag on `scripts/crawl.py` / `scripts/load.py` are the recommended workflow for ongoing operation. See [Operations: Admin Team Management](operations.md#admin-team-management) for the full workflow.
+
+---
+
 ## Seed the Development Database
 
 The database is created empty by migrations. To load sample data for development:
@@ -170,4 +185,4 @@ Key variables in `.env`:
 
 ---
 
-*Last updated: 2026-03-03 | Story: E-028-03*
+*Last updated: 2026-03-07 | Source: E-042 (team onboarding via admin UI), E-028-03 (original)*

@@ -39,6 +39,72 @@ docker compose up -d --build app
 
 For the full Cloudflare Tunnel and Zero Trust Access setup, see [docs/cloudflare-access-setup.md](../cloudflare-access-setup.md).
 
+## Admin Team Management
+
+The admin interface at `/admin/teams` is the primary way to add and manage teams. Access requires an admin account.
+
+### Adding a Team
+
+1. Navigate to `/admin/teams`.
+2. Paste a GameChanger team URL (e.g., `https://web.gc.com/teams/a1GFM9Ku0BbF/2025-lincoln-varsity`) or a bare public ID slug into the URL input field.
+3. Select the team type: **Lincoln Program** (an LSB-owned team) or **Tracked Opponent**.
+4. Optionally set a level (freshman, jv, varsity, reserve, legion, other).
+5. Submit. The system calls `GET /public/teams/{public_id}` (no authentication required) to resolve the team name and location, then stores the record.
+
+The success flash message includes the resolved team name and location (e.g., "Team added: Lincoln Rebels (Omaha, NE)"). If the name or location looks wrong, use the Edit button to correct it.
+
+**What the URL parser accepts**:
+- Full GameChanger web URL: `https://web.gc.com/teams/{public_id}/any-slug`
+- Mobile share URLs or any URL containing `/teams/{public_id}` in the path
+- A bare public ID slug: `a1GFM9Ku0BbF`
+
+**Discovered placeholder upgrade**: If a team was previously auto-discovered from an opponent's schedule (name-only, no public ID), pasting its URL will upgrade that existing placeholder record rather than creating a duplicate row.
+
+### Team List Layout
+
+The teams page shows two sections:
+
+| Section | Contents |
+|---------|---------|
+| **Lincoln Program** | Teams with `is_owned = 1` -- LSB Freshman, JV, Varsity, Reserve, and any other owned teams. |
+| **Tracked Opponents** | Teams with `is_owned = 0` -- opponents added manually or discovered via schedule. |
+
+Newly discovered opponents appear in Tracked Opponents with status Inactive. An admin must activate them before they are included in crawls.
+
+### Editing a Team
+
+From either team table, click **Edit** on any team row to open the edit form at `/admin/teams/{team_id}/edit`. Editable fields: Name, Level, and Type (owned vs. tracked). Public ID and last-synced date are shown read-only.
+
+### Activating and Deactivating Teams
+
+The **Activate/Deactivate** button on each team row calls `POST /admin/teams/{team_id}/toggle-active`. Active teams (`is_active = 1`) are included when crawling with `--source db`. Deactivated teams are preserved in the database but excluded from crawls.
+
+### Discovering Opponents
+
+For any Lincoln Program team that has a public ID, click **Discover Opponents** to trigger automatic opponent discovery. The system calls `GET /public/teams/{public_id}/games`, extracts unique opponent names from the schedule, and inserts placeholder records for any opponents not already in the database.
+
+**Important limitation**: The public games endpoint returns opponent names only -- no public ID or other identifier. Discovered opponents are stored as placeholders (`source = 'discovered'`, `public_id = NULL`, `is_active = 0`). To fully onboard a discovered opponent, paste their GameChanger URL via the Add Team form.
+
+### Database-Driven Crawl Configuration
+
+By default, `scripts/crawl.py` and `scripts/load.py` read team configuration from `config/teams.yaml`. Pass `--source db` to read active owned teams directly from the database instead:
+
+```bash
+python scripts/crawl.py --source db
+python scripts/load.py --source db
+```
+
+With `--source db`, both scripts query:
+```sql
+SELECT team_id, name, level FROM teams WHERE is_active = 1 AND is_owned = 1
+```
+
+The database path defaults to `./data/app.db` or the `DATABASE_PATH` environment variable.
+
+`config/teams.yaml` remains functional as a bootstrap and seed mechanism. YAML is still the default to preserve backward compatibility; once all teams are in the database, switching to `--source db` is the recommended workflow.
+
+---
+
 ## Credential Rotation
 
 ### GameChanger API Tokens
@@ -212,4 +278,4 @@ For the expected data volume (~30 games x 4 teams x a few seasons), the database
 
 ---
 
-*Last updated: 2026-03-03 | Story: E-028-03*
+*Last updated: 2026-03-07 | Source: E-042 (admin team management), E-028-03 (original)*

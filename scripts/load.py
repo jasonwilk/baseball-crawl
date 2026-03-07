@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sqlite3
 import sys
 from pathlib import Path
@@ -29,7 +30,7 @@ from pathlib import Path
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_PROJECT_ROOT))
 
-from src.gamechanger.config import load_config  # noqa: E402
+from src.gamechanger.config import load_config, load_config_from_db  # noqa: E402
 from src.gamechanger.loaders import LoadResult  # noqa: E402
 from src.gamechanger.loaders.game_loader import GameLoader  # noqa: E402
 from src.gamechanger.loaders.roster import RosterLoader  # noqa: E402
@@ -171,6 +172,12 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         choices=_LOADER_NAMES,
         help=f"Run only one loader. Choices: {', '.join(_LOADER_NAMES)}",
     )
+    parser.add_argument(
+        "--source",
+        choices=["yaml", "db"],
+        default="yaml",
+        help="Config source: 'yaml' (default) reads config/teams.yaml; 'db' reads from SQLite.",
+    )
     return parser
 
 
@@ -179,6 +186,7 @@ def run(
     loader_filter: str | None = None,
     data_root: Path = _DATA_ROOT,
     db_path: Path = _DB_PATH,
+    source: str = "yaml",
 ) -> int:
     """Execute the load orchestration.
 
@@ -187,11 +195,18 @@ def run(
         loader_filter: If set, run only the named loader.
         data_root: Override the raw data root (used in tests).
         db_path: Override the database path (used in tests).
+        source: Config source -- ``"yaml"`` (default) or ``"db"``.
 
     Returns:
         Exit code: 0 if all loaders completed, 1 if any raised an exception.
     """
-    config = load_config()
+    logger.info("Loading team config from %s", source)
+    if source == "db":
+        resolved_db = Path(os.environ.get("DATABASE_PATH", str(db_path)))
+        config = load_config_from_db(resolved_db)
+        db_path = resolved_db
+    else:
+        config = load_config()
 
     selected = [
         (name, runner)
@@ -251,7 +266,7 @@ def main() -> None:
     """Entry point for ``python scripts/load.py``."""
     parser = _build_arg_parser()
     args = parser.parse_args()
-    sys.exit(run(dry_run=args.dry_run, loader_filter=args.loader))
+    sys.exit(run(dry_run=args.dry_run, loader_filter=args.loader, source=args.source))
 
 
 if __name__ == "__main__":
