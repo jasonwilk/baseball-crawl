@@ -1,8 +1,8 @@
 # Product Manager -- Agent Memory
 
 ## Numbering State
-- Next available epic number: E-070
-- Epics created: E-001 through E-069 (E-001, E-003, E-005, E-006, E-007, E-008, E-010, E-011, E-012, E-013, E-014, E-015, E-016, E-017, E-018, E-019, E-020, E-021, E-022, E-024, E-025, E-026, E-027, E-028, E-029, E-030, E-031, E-032, E-033, E-034, E-035, E-036, E-037, E-038, E-042, E-044, E-046, E-048, E-049, E-050, E-052, E-053, E-054, E-056, E-057, E-058, E-055, E-059, E-060, E-061 archived)
+- Next available epic number: E-072
+- Epics created: E-001 through E-071 (E-001, E-003, E-005, E-006, E-007, E-008, E-010, E-011, E-012, E-013, E-014, E-015, E-016, E-017, E-018, E-019, E-020, E-021, E-022, E-024, E-025, E-026, E-027, E-028, E-029, E-030, E-031, E-032, E-033, E-034, E-035, E-036, E-037, E-038, E-042, E-044, E-046, E-048, E-049, E-050, E-052, E-053, E-054, E-056, E-057, E-058, E-055, E-059, E-060, E-061 archived)
 - Next available idea number: IDEA-014
 - Ideas created: IDEA-001 through IDEA-013
 
@@ -19,6 +19,8 @@
 - E-067 (READY): Context-Layer Assessment Gate -- 1 story. Add mandatory context-layer assessment to epic closure sequence. Every epic closure evaluates 6 triggers with explicit per-trigger verdicts before archival. Parallel to Documentation Assessment Gate. CA consulted: separate rule file, Step 3a position, Option D (per-trigger verdicts, spawn architect when triggers fire). 5 context-layer files updated + 1 new rule file.
 - E-068 (READY): Vision Stewardship -- 5 stories. Vision signal parking lot (docs/vision-signals.md), recognition rule (.claude/rules/vision-signals.md), dispatch closure sequence step, PM agent def expansion, CLAUDE.md references. All context-layer work via claude-architect. Waves: 01 -> 02+03+04 parallel -> 05. Architectural review confirmed all step numbers, section names, and file locations match current reality.
 - E-069 (READY): Fix E-064 Residual Bugs -- 2 stories. Double production guard in `bb db reset`, root logger mutation on import of apply_migrations, standalone script subprocess smoke tests. Pure SE work. Wave: 01 -> 02.
+- E-070 (READY): RTK Token Optimization Integration -- 1 story. Add rtk binary install + hook init to devcontainer postCreateCommand. Reduces token consumption 60-90% on common dev commands. Pure SE work, single file change (devcontainer.json).
+- E-071 (READY): Code Review Agent -- 2 stories. Dedicated code-reviewer agent (sonnet, Read/Glob/Grep/Bash only) with adversarial stance, embedded rubric, structured findings format, circuit breaker (max 2 rounds). Integrates into dispatch workflow: implementer completes -> reviewer examines -> findings loop -> DONE. Two-layer defense in depth (Layer 1: per-story automatic review, Layer 2: existing codex review). All context-layer work via claude-architect. Wave: 01 -> 02. CA consulted.
 ## Archived Epics
 - E-066 (COMPLETED): Devcontainer Terminal Setup -- 5 stories. ZSH default shell via chsh + dual rc env injection + 4 Oh My Zsh plugins (01), tmux install + VS Code-compatible .tmux.conf (03), VS Code terminal profiles with icons/colors (02), CLAUDE.md dual-shell contract + terminal modes sections (04, claude-architect), operator terminal guide at docs/admin/terminal-guide.md (05, docs-writer). IDEA-013 blocker cleared (E-066 complete). No follow-up work.
 - E-064 (COMPLETED): Fix bb CLI Import Crash -- 2 stories. Moved reusable logic from scripts/ to src/ (3 new packages: src/db/, src/pipeline/, src/gamechanger/credentials.py). Scripts became thin wrappers. migrations/ became a proper package. Subprocess smoke test for bb entry point. Rich Console output for bootstrap (per UXD). 5 lessons codified in context layer (CLAUDE.md, testing.md, python-style.md, SE agent def). Follow-up: E-069 (double guard, logger mutation, standalone script tests).
