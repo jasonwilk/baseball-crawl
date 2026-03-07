@@ -9,9 +9,9 @@ from pathlib import Path
 import typer
 from rich.console import Console
 
-from scripts.check_credentials import _check_single_profile  # type: ignore[import]
+from src.gamechanger.credentials import check_single_profile
 
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _DATA_ROOT = _PROJECT_ROOT / "data"
 _DB_PATH = _DATA_ROOT / "app.db"
 _RAW_DATA_ROOT = _DATA_ROOT / "raw"
@@ -38,7 +38,7 @@ def _get_credential_status() -> dict[str, tuple[int, str]]:
     """
     results: dict[str, tuple[int, str]] = {}
     for profile in _PROFILES:
-        results[profile] = _check_single_profile(profile)
+        results[profile] = check_single_profile(profile)
     return results
 
 

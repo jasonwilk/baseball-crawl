@@ -7,6 +7,10 @@ from typing import Optional
 
 import typer
 
+from src.pipeline import bootstrap as bootstrap_module
+from src.pipeline import crawl as crawl_module
+from src.pipeline import load as load_module
+
 app = typer.Typer(help="Data pipeline commands.")
 
 _CRAWLER_CHOICES = ["roster", "schedule", "opponent", "player-stats", "game-stats"]
@@ -43,9 +47,7 @@ def sync(
     team config, use `bb data crawl --source db` and `bb data load --source db`
     separately.
     """
-    from scripts.bootstrap import run
-
-    raise SystemExit(run(check_only=check_only, profile=profile, dry_run=dry_run))
+    raise SystemExit(bootstrap_module.run(check_only=check_only, profile=profile, dry_run=dry_run))
 
 
 @app.command()
@@ -79,10 +81,8 @@ def crawl(
         )
         raise SystemExit(1)
 
-    from scripts.crawl import run
-
     raise SystemExit(
-        run(
+        crawl_module.run(
             dry_run=dry_run,
             crawler_filter=crawler,
             profile=profile,
@@ -118,10 +118,8 @@ def load(
         )
         raise SystemExit(1)
 
-    from scripts.load import run
-
     raise SystemExit(
-        run(
+        load_module.run(
             dry_run=dry_run,
             loader_filter=loader,
             source=source.value,

@@ -11,7 +11,7 @@ import httpx
 import pytest
 import respx
 
-from scripts.check_credentials import check_credentials
+from src.gamechanger.credentials import check_credentials
 
 _FAKE_WEB_CREDENTIALS = {
     "GAMECHANGER_AUTH_TOKEN_WEB": "fake-jwt-token",
@@ -31,9 +31,8 @@ _BASE_URL = "https://api.team-manager.gc.com"
 
 
 def _patch_dotenv(monkeypatch: pytest.MonkeyPatch, values: dict) -> None:
-    """Patch dotenv_values in both the client module and the check_credentials module."""
+    """Patch dotenv_values in the client module so credentials are injected."""
     monkeypatch.setattr("src.gamechanger.client.dotenv_values", lambda: values)
-    monkeypatch.setattr("scripts.check_credentials.dotenv_values", lambda: values)
 
 
 # ---------------------------------------------------------------------------

@@ -12,7 +12,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from scripts.bootstrap import run
+from src.pipeline.bootstrap import run
 from src.gamechanger.config import CrawlConfig, TeamEntry
 
 # ---------------------------------------------------------------------------
@@ -35,9 +35,9 @@ def _patch_all(
 ):
     """Return a context manager stack that patches all external dependencies."""
     patches = [
-        patch("scripts.bootstrap.check_credentials", return_value=cred_result),
-        patch("scripts.bootstrap.crawl_module.run", return_value=crawl_code),
-        patch("scripts.bootstrap.load_module.run", return_value=load_code),
+        patch("src.pipeline.bootstrap.check_credentials", return_value=cred_result),
+        patch("src.pipeline.bootstrap.crawl_module.run", return_value=crawl_code),
+        patch("src.pipeline.bootstrap.load_module.run", return_value=load_code),
     ]
     if config_missing:
         patches.append(
@@ -47,7 +47,7 @@ def _patch_all(
             )
         )
     else:
-        patches.append(patch("scripts.bootstrap.load_config", return_value=config))
+        patches.append(patch("src.pipeline.bootstrap.load_config", return_value=config))
     return patches
 
 
@@ -58,10 +58,10 @@ def _patch_all(
 
 def test_successful_full_run_returns_0() -> None:
     with (
-        patch("scripts.bootstrap.check_credentials", return_value=(0, "Credentials valid -- logged in as Jason Smith")),
-        patch("scripts.bootstrap.load_config", return_value=_VALID_CONFIG),
-        patch("scripts.bootstrap.crawl_module.run", return_value=0) as mock_crawl,
-        patch("scripts.bootstrap.load_module.run", return_value=0) as mock_load,
+        patch("src.pipeline.bootstrap.check_credentials", return_value=(0, "Credentials valid -- logged in as Jason Smith")),
+        patch("src.pipeline.bootstrap.load_config", return_value=_VALID_CONFIG),
+        patch("src.pipeline.bootstrap.crawl_module.run", return_value=0) as mock_crawl,
+        patch("src.pipeline.bootstrap.load_module.run", return_value=0) as mock_load,
     ):
         result = run()
     assert result == 0
@@ -71,10 +71,10 @@ def test_successful_full_run_returns_0() -> None:
 
 def test_successful_full_run_passes_profile_to_crawl() -> None:
     with (
-        patch("scripts.bootstrap.check_credentials", return_value=(0, "Credentials valid -- logged in as Jason Smith")),
-        patch("scripts.bootstrap.load_config", return_value=_VALID_CONFIG),
-        patch("scripts.bootstrap.crawl_module.run", return_value=0) as mock_crawl,
-        patch("scripts.bootstrap.load_module.run", return_value=0),
+        patch("src.pipeline.bootstrap.check_credentials", return_value=(0, "Credentials valid -- logged in as Jason Smith")),
+        patch("src.pipeline.bootstrap.load_config", return_value=_VALID_CONFIG),
+        patch("src.pipeline.bootstrap.crawl_module.run", return_value=0) as mock_crawl,
+        patch("src.pipeline.bootstrap.load_module.run", return_value=0),
     ):
         run(profile="mobile")
     call_kwargs = mock_crawl.call_args
@@ -84,10 +84,10 @@ def test_successful_full_run_passes_profile_to_crawl() -> None:
 def test_bootstrap_passes_profile_to_check_credentials() -> None:
     """AC-5: bootstrap passes --profile to check_credentials so the right profile is validated."""
     with (
-        patch("scripts.bootstrap.check_credentials", return_value=(0, "Credentials valid -- logged in as Jason Smith")) as mock_creds,
-        patch("scripts.bootstrap.load_config", return_value=_VALID_CONFIG),
-        patch("scripts.bootstrap.crawl_module.run", return_value=0),
-        patch("scripts.bootstrap.load_module.run", return_value=0),
+        patch("src.pipeline.bootstrap.check_credentials", return_value=(0, "Credentials valid -- logged in as Jason Smith")) as mock_creds,
+        patch("src.pipeline.bootstrap.load_config", return_value=_VALID_CONFIG),
+        patch("src.pipeline.bootstrap.crawl_module.run", return_value=0),
+        patch("src.pipeline.bootstrap.load_module.run", return_value=0),
     ):
         run(profile="mobile")
     mock_creds.assert_called_once_with(profile="mobile")
@@ -96,10 +96,10 @@ def test_bootstrap_passes_profile_to_check_credentials() -> None:
 def test_bootstrap_default_profile_passes_web_to_check_credentials() -> None:
     """Default profile is web -- check_credentials receives profile='web'."""
     with (
-        patch("scripts.bootstrap.check_credentials", return_value=(0, "Credentials valid -- logged in as Jason Smith")) as mock_creds,
-        patch("scripts.bootstrap.load_config", return_value=_VALID_CONFIG),
-        patch("scripts.bootstrap.crawl_module.run", return_value=0),
-        patch("scripts.bootstrap.load_module.run", return_value=0),
+        patch("src.pipeline.bootstrap.check_credentials", return_value=(0, "Credentials valid -- logged in as Jason Smith")) as mock_creds,
+        patch("src.pipeline.bootstrap.load_config", return_value=_VALID_CONFIG),
+        patch("src.pipeline.bootstrap.crawl_module.run", return_value=0),
+        patch("src.pipeline.bootstrap.load_module.run", return_value=0),
     ):
         run()
     mock_creds.assert_called_once_with(profile="web")
@@ -107,10 +107,10 @@ def test_bootstrap_default_profile_passes_web_to_check_credentials() -> None:
 
 def test_successful_full_run_passes_dry_run_to_crawl_and_load() -> None:
     with (
-        patch("scripts.bootstrap.check_credentials", return_value=(0, "Credentials valid -- logged in as Jason Smith")),
-        patch("scripts.bootstrap.load_config", return_value=_VALID_CONFIG),
-        patch("scripts.bootstrap.crawl_module.run", return_value=0) as mock_crawl,
-        patch("scripts.bootstrap.load_module.run", return_value=0) as mock_load,
+        patch("src.pipeline.bootstrap.check_credentials", return_value=(0, "Credentials valid -- logged in as Jason Smith")),
+        patch("src.pipeline.bootstrap.load_config", return_value=_VALID_CONFIG),
+        patch("src.pipeline.bootstrap.crawl_module.run", return_value=0) as mock_crawl,
+        patch("src.pipeline.bootstrap.load_module.run", return_value=0) as mock_load,
     ):
         run(dry_run=True)
     assert mock_crawl.call_args.kwargs.get("dry_run") is True
@@ -124,10 +124,10 @@ def test_successful_full_run_passes_dry_run_to_crawl_and_load() -> None:
 
 def test_credential_failure_exits_without_crawl() -> None:
     with (
-        patch("scripts.bootstrap.check_credentials", return_value=(1, "Credentials expired -- refresh via proxy capture")),
-        patch("scripts.bootstrap.load_config", return_value=_VALID_CONFIG),
-        patch("scripts.bootstrap.crawl_module.run", return_value=0) as mock_crawl,
-        patch("scripts.bootstrap.load_module.run", return_value=0) as mock_load,
+        patch("src.pipeline.bootstrap.check_credentials", return_value=(1, "Credentials expired -- refresh via proxy capture")),
+        patch("src.pipeline.bootstrap.load_config", return_value=_VALID_CONFIG),
+        patch("src.pipeline.bootstrap.crawl_module.run", return_value=0) as mock_crawl,
+        patch("src.pipeline.bootstrap.load_module.run", return_value=0) as mock_load,
     ):
         result = run()
     assert result == 1
@@ -137,10 +137,10 @@ def test_credential_failure_exits_without_crawl() -> None:
 
 def test_credential_missing_exits_with_code_1() -> None:
     with (
-        patch("scripts.bootstrap.check_credentials", return_value=(2, "Missing required credential(s): GAMECHANGER_AUTH_TOKEN")),
-        patch("scripts.bootstrap.load_config", return_value=_VALID_CONFIG),
-        patch("scripts.bootstrap.crawl_module.run", return_value=0) as mock_crawl,
-        patch("scripts.bootstrap.load_module.run", return_value=0) as mock_load,
+        patch("src.pipeline.bootstrap.check_credentials", return_value=(2, "Missing required credential(s): GAMECHANGER_AUTH_TOKEN")),
+        patch("src.pipeline.bootstrap.load_config", return_value=_VALID_CONFIG),
+        patch("src.pipeline.bootstrap.crawl_module.run", return_value=0) as mock_crawl,
+        patch("src.pipeline.bootstrap.load_module.run", return_value=0) as mock_load,
     ):
         result = run()
     assert result == 1
@@ -155,10 +155,10 @@ def test_credential_missing_exits_with_code_1() -> None:
 
 def test_placeholder_team_ids_exits_without_crawl() -> None:
     with (
-        patch("scripts.bootstrap.check_credentials", return_value=(0, "Credentials valid -- logged in as Jason Smith")),
-        patch("scripts.bootstrap.load_config", return_value=_PLACEHOLDER_CONFIG),
-        patch("scripts.bootstrap.crawl_module.run", return_value=0) as mock_crawl,
-        patch("scripts.bootstrap.load_module.run", return_value=0) as mock_load,
+        patch("src.pipeline.bootstrap.check_credentials", return_value=(0, "Credentials valid -- logged in as Jason Smith")),
+        patch("src.pipeline.bootstrap.load_config", return_value=_PLACEHOLDER_CONFIG),
+        patch("src.pipeline.bootstrap.crawl_module.run", return_value=0) as mock_crawl,
+        patch("src.pipeline.bootstrap.load_module.run", return_value=0) as mock_load,
     ):
         result = run()
     assert result == 1
@@ -168,10 +168,10 @@ def test_placeholder_team_ids_exits_without_crawl() -> None:
 
 def test_empty_team_list_exits_without_crawl() -> None:
     with (
-        patch("scripts.bootstrap.check_credentials", return_value=(0, "Credentials valid -- logged in as Jason Smith")),
-        patch("scripts.bootstrap.load_config", return_value=_EMPTY_CONFIG),
-        patch("scripts.bootstrap.crawl_module.run", return_value=0) as mock_crawl,
-        patch("scripts.bootstrap.load_module.run", return_value=0) as mock_load,
+        patch("src.pipeline.bootstrap.check_credentials", return_value=(0, "Credentials valid -- logged in as Jason Smith")),
+        patch("src.pipeline.bootstrap.load_config", return_value=_EMPTY_CONFIG),
+        patch("src.pipeline.bootstrap.crawl_module.run", return_value=0) as mock_crawl,
+        patch("src.pipeline.bootstrap.load_module.run", return_value=0) as mock_load,
     ):
         result = run()
     assert result == 1
@@ -186,10 +186,10 @@ def test_empty_team_list_exits_without_crawl() -> None:
 
 def test_missing_teams_yaml_exits_without_crawl() -> None:
     with (
-        patch("scripts.bootstrap.check_credentials", return_value=(0, "Credentials valid -- logged in as Jason Smith")),
-        patch("scripts.bootstrap.load_config", side_effect=FileNotFoundError("not found")),
-        patch("scripts.bootstrap.crawl_module.run", return_value=0) as mock_crawl,
-        patch("scripts.bootstrap.load_module.run", return_value=0) as mock_load,
+        patch("src.pipeline.bootstrap.check_credentials", return_value=(0, "Credentials valid -- logged in as Jason Smith")),
+        patch("src.pipeline.bootstrap.load_config", side_effect=FileNotFoundError("not found")),
+        patch("src.pipeline.bootstrap.crawl_module.run", return_value=0) as mock_crawl,
+        patch("src.pipeline.bootstrap.load_module.run", return_value=0) as mock_load,
     ):
         result = run()
     assert result == 1
@@ -204,10 +204,10 @@ def test_missing_teams_yaml_exits_without_crawl() -> None:
 
 def test_check_only_skips_crawl_and_load() -> None:
     with (
-        patch("scripts.bootstrap.check_credentials", return_value=(0, "Credentials valid -- logged in as Jason Smith")),
-        patch("scripts.bootstrap.load_config", return_value=_VALID_CONFIG),
-        patch("scripts.bootstrap.crawl_module.run", return_value=0) as mock_crawl,
-        patch("scripts.bootstrap.load_module.run", return_value=0) as mock_load,
+        patch("src.pipeline.bootstrap.check_credentials", return_value=(0, "Credentials valid -- logged in as Jason Smith")),
+        patch("src.pipeline.bootstrap.load_config", return_value=_VALID_CONFIG),
+        patch("src.pipeline.bootstrap.crawl_module.run", return_value=0) as mock_crawl,
+        patch("src.pipeline.bootstrap.load_module.run", return_value=0) as mock_load,
     ):
         result = run(check_only=True)
     assert result == 0
@@ -217,10 +217,10 @@ def test_check_only_skips_crawl_and_load() -> None:
 
 def test_check_only_with_bad_credentials_returns_1() -> None:
     with (
-        patch("scripts.bootstrap.check_credentials", return_value=(1, "Credentials expired")),
-        patch("scripts.bootstrap.load_config", return_value=_VALID_CONFIG),
-        patch("scripts.bootstrap.crawl_module.run", return_value=0) as mock_crawl,
-        patch("scripts.bootstrap.load_module.run", return_value=0) as mock_load,
+        patch("src.pipeline.bootstrap.check_credentials", return_value=(1, "Credentials expired")),
+        patch("src.pipeline.bootstrap.load_config", return_value=_VALID_CONFIG),
+        patch("src.pipeline.bootstrap.crawl_module.run", return_value=0) as mock_crawl,
+        patch("src.pipeline.bootstrap.load_module.run", return_value=0) as mock_load,
     ):
         result = run(check_only=True)
     assert result == 1
@@ -235,10 +235,10 @@ def test_check_only_with_bad_credentials_returns_1() -> None:
 
 def test_crawl_failure_does_not_skip_load() -> None:
     with (
-        patch("scripts.bootstrap.check_credentials", return_value=(0, "Credentials valid -- logged in as Jason Smith")),
-        patch("scripts.bootstrap.load_config", return_value=_VALID_CONFIG),
-        patch("scripts.bootstrap.crawl_module.run", return_value=1),
-        patch("scripts.bootstrap.load_module.run", return_value=0) as mock_load,
+        patch("src.pipeline.bootstrap.check_credentials", return_value=(0, "Credentials valid -- logged in as Jason Smith")),
+        patch("src.pipeline.bootstrap.load_config", return_value=_VALID_CONFIG),
+        patch("src.pipeline.bootstrap.crawl_module.run", return_value=1),
+        patch("src.pipeline.bootstrap.load_module.run", return_value=0) as mock_load,
     ):
         result = run()
     mock_load.assert_called_once()
@@ -248,10 +248,10 @@ def test_crawl_failure_does_not_skip_load() -> None:
 
 def test_crawl_failure_with_load_success_returns_1() -> None:
     with (
-        patch("scripts.bootstrap.check_credentials", return_value=(0, "Credentials valid -- logged in as Jason Smith")),
-        patch("scripts.bootstrap.load_config", return_value=_VALID_CONFIG),
-        patch("scripts.bootstrap.crawl_module.run", return_value=1),
-        patch("scripts.bootstrap.load_module.run", return_value=0),
+        patch("src.pipeline.bootstrap.check_credentials", return_value=(0, "Credentials valid -- logged in as Jason Smith")),
+        patch("src.pipeline.bootstrap.load_config", return_value=_VALID_CONFIG),
+        patch("src.pipeline.bootstrap.crawl_module.run", return_value=1),
+        patch("src.pipeline.bootstrap.load_module.run", return_value=0),
     ):
         result = run()
     assert result == 1
@@ -264,10 +264,10 @@ def test_crawl_failure_with_load_success_returns_1() -> None:
 
 def test_dry_run_passes_to_crawl() -> None:
     with (
-        patch("scripts.bootstrap.check_credentials", return_value=(0, "Credentials valid -- logged in as Jason Smith")),
-        patch("scripts.bootstrap.load_config", return_value=_VALID_CONFIG),
-        patch("scripts.bootstrap.crawl_module.run", return_value=0) as mock_crawl,
-        patch("scripts.bootstrap.load_module.run", return_value=0),
+        patch("src.pipeline.bootstrap.check_credentials", return_value=(0, "Credentials valid -- logged in as Jason Smith")),
+        patch("src.pipeline.bootstrap.load_config", return_value=_VALID_CONFIG),
+        patch("src.pipeline.bootstrap.crawl_module.run", return_value=0) as mock_crawl,
+        patch("src.pipeline.bootstrap.load_module.run", return_value=0),
     ):
         run(dry_run=True)
     assert mock_crawl.call_args.kwargs.get("dry_run") is True
@@ -275,10 +275,10 @@ def test_dry_run_passes_to_crawl() -> None:
 
 def test_dry_run_passes_to_load() -> None:
     with (
-        patch("scripts.bootstrap.check_credentials", return_value=(0, "Credentials valid -- logged in as Jason Smith")),
-        patch("scripts.bootstrap.load_config", return_value=_VALID_CONFIG),
-        patch("scripts.bootstrap.crawl_module.run", return_value=0),
-        patch("scripts.bootstrap.load_module.run", return_value=0) as mock_load,
+        patch("src.pipeline.bootstrap.check_credentials", return_value=(0, "Credentials valid -- logged in as Jason Smith")),
+        patch("src.pipeline.bootstrap.load_config", return_value=_VALID_CONFIG),
+        patch("src.pipeline.bootstrap.crawl_module.run", return_value=0),
+        patch("src.pipeline.bootstrap.load_module.run", return_value=0) as mock_load,
     ):
         run(dry_run=True)
     assert mock_load.call_args.kwargs.get("dry_run") is True

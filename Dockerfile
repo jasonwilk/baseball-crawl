@@ -24,6 +24,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application source.
 COPY src/ ./src/
 COPY migrations/ ./migrations/
+COPY pyproject.toml .
+
+# Install the package so console scripts (bb) are available on PATH.
+RUN pip install --no-cache-dir --no-deps -e .
 
 # Create the data directory inside the image as a mount point fallback.
 # At runtime, docker compose mounts ./data here, shadowing this directory.

@@ -93,7 +93,7 @@ app.add_middleware(SessionMiddleware)
 # Static files and templates
 # ---------------------------------------------------------------------------
 
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _STATIC_DIR = _PROJECT_ROOT / "src" / "api" / "static"
 _TEMPLATES_DIR = _PROJECT_ROOT / "src" / "api" / "templates"
 

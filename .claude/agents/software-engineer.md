@@ -51,6 +51,7 @@ Build supporting scripts as stories require them:
 - Data inspection and debugging tools
 - One-off migration helpers or data fixup scripts
 - Place scripts in `scripts/` with clear docstrings explaining usage.
+- **Import boundary**: Scripts import from `src/`, and CLI modules (e.g., `src/cli/`) import from `src/`, but `src/` modules MUST NOT import from `scripts/`. Reusable logic always belongs in `src/`; scripts are thin wrappers that orchestrate `src/` functionality.
 
 ## Work Authorization
 

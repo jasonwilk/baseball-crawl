@@ -8,7 +8,7 @@ from typing import Optional
 import typer
 from rich.console import Console
 
-from scripts.check_credentials import check_credentials  # type: ignore[import]
+from src.gamechanger.credentials import check_credentials
 from src.gamechanger.credential_parser import CurlParseError, merge_env_file, parse_curl
 
 app = typer.Typer(help="Manage GameChanger credentials.")
@@ -16,7 +16,7 @@ app = typer.Typer(help="Manage GameChanger credentials.")
 _console = Console()
 _err_console = Console(stderr=True)
 
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _DEFAULT_CURL_FILE = _PROJECT_ROOT / "secrets" / "gamechanger-curl.txt"
 _ENV_FILE = _PROJECT_ROOT / ".env"
 

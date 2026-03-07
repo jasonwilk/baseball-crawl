@@ -43,6 +43,9 @@ logger = logging.getLogger(__name__)
 
 _MIGRATIONS_DIR = Path(__file__).resolve().parent
 
+# Repo root: migrations/apply_migrations.py is 1 level deep, so .parents[1] is the repo root.
+_PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
 # Load DATABASE_PATH from .env if python-dotenv is available.
 try:
     from dotenv import load_dotenv
@@ -53,7 +56,7 @@ try:
 except ImportError:
     pass  # dotenv is optional; env vars may be injected directly (Docker)
 
-_DEFAULT_DB_PATH = Path("./data/app.db")
+_DEFAULT_DB_PATH = _PROJECT_ROOT / "data" / "app.db"
 
 # ---------------------------------------------------------------------------
 # Migrations tracking table DDL
@@ -76,9 +79,14 @@ def get_db_path() -> Path:
     """Return the resolved path to the SQLite database file.
 
     Reads DATABASE_PATH from the environment, falling back to the default.
+    Relative paths are resolved against the repo root, not the current working
+    directory.
     """
-    raw = os.environ.get("DATABASE_PATH", str(_DEFAULT_DB_PATH))
-    return Path(raw).resolve()
+    env_db = os.environ.get("DATABASE_PATH")
+    if env_db is not None:
+        env_path = Path(env_db)
+        return env_path if env_path.is_absolute() else _PROJECT_ROOT / env_path
+    return _DEFAULT_DB_PATH
 
 
 def collect_migration_files() -> list[Path]:

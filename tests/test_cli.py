@@ -1,12 +1,17 @@
 """Tests for the CLI skeleton (E-055-01).
 
 Uses typer.testing.CliRunner -- no real network calls, no subprocesses.
+Also includes a subprocess-based smoke test for the actual bb console script
+entry point, which catches ModuleNotFoundError failures that CliRunner misses.
 """
 
 from __future__ import annotations
 
+import shutil
+import subprocess
 from unittest.mock import patch
 
+import pytest
 from typer.testing import CliRunner
 
 from src.cli import app
@@ -68,7 +73,7 @@ def test_status_command_runs() -> None:
     """bb status runs and exits with code 0 when all credentials are valid."""
     with (
         patch(
-            "src.cli.status._check_single_profile",
+            "src.cli.status.check_single_profile",
             return_value=(0, "valid -- logged in as Jason Smith"),
         ),
         patch("src.cli.status._get_last_crawl", return_value=("2026-03-05T14:30:00Z", 47)),
@@ -77,3 +82,77 @@ def test_status_command_runs() -> None:
     ):
         result = runner.invoke(app, ["status"])
     assert result.exit_code == 0
+
+
+# ---------------------------------------------------------------------------
+# Subprocess smoke test -- verifies the actual bb console script entry point
+# ---------------------------------------------------------------------------
+
+
+_bb_installed = pytest.mark.skipif(shutil.which("bb") is None, reason="bb not installed")
+
+
+@_bb_installed
+def test_bb_help_subprocess() -> None:
+    """bb --help works as a console script entry point (exit code 0).
+
+    This test catches ModuleNotFoundError failures at import time that
+    CliRunner tests miss, because CliRunner runs in-process and inherits
+    pytest's sys.path (which includes the project root).  When bb runs as
+    a real console script, only site-packages and the editable install
+    finder are on sys.path -- not the project root.
+    """
+    result = subprocess.run(
+        ["bb", "--help"],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, (
+        f"bb --help failed with exit code {result.returncode}\n"
+        f"stdout: {result.stdout}\n"
+        f"stderr: {result.stderr}"
+    )
+
+
+@_bb_installed
+def test_bb_status_help_subprocess() -> None:
+    """bb status --help works as a console script (exercises status import chain)."""
+    result = subprocess.run(["bb", "status", "--help"], capture_output=True, text=True)
+    assert result.returncode == 0, (
+        f"bb status --help failed with exit code {result.returncode}\n"
+        f"stdout: {result.stdout}\n"
+        f"stderr: {result.stderr}"
+    )
+
+
+@_bb_installed
+def test_bb_creds_help_subprocess() -> None:
+    """bb creds --help works as a console script (exercises creds import chain)."""
+    result = subprocess.run(["bb", "creds", "--help"], capture_output=True, text=True)
+    assert result.returncode == 0, (
+        f"bb creds --help failed with exit code {result.returncode}\n"
+        f"stdout: {result.stdout}\n"
+        f"stderr: {result.stderr}"
+    )
+
+
+@_bb_installed
+def test_bb_db_help_subprocess() -> None:
+    """bb db --help works as a console script (exercises db import chain)."""
+    result = subprocess.run(["bb", "db", "--help"], capture_output=True, text=True)
+    assert result.returncode == 0, (
+        f"bb db --help failed with exit code {result.returncode}\n"
+        f"stdout: {result.stdout}\n"
+        f"stderr: {result.stderr}"
+    )
+
+
+@_bb_installed
+def test_bb_data_help_subprocess() -> None:
+    """bb data --help works as a console script (exercises data import chain)."""
+    result = subprocess.run(["bb", "data", "--help"], capture_output=True, text=True)
+    assert result.returncode == 0, (
+        f"bb data --help failed with exit code {result.returncode}\n"
+        f"stdout: {result.stdout}\n"
+        f"stderr: {result.stderr}"
+    )

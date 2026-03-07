@@ -2,15 +2,14 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Optional
 
 import typer
 from rich.console import Console
 
-from scripts.backup_db import backup_database
-from scripts.reset_dev_db import reset_database
+from src.db.backup import backup_database
+from src.db.reset import check_production_guard, reset_database
 
 app = typer.Typer(help="Database operations.")
 
@@ -54,9 +53,11 @@ def reset(
     ),
 ) -> None:
     """Drop and recreate the database. All data will be lost."""
-    # Production guard fires BEFORE the confirmation prompt (AC-4, AC-5).
-    app_env = os.environ.get("APP_ENV", "development").lower()
-    if app_env == "production" and not force:
+    # Production guard fires BEFORE the confirmation prompt.
+    # Logic lives in src/db/reset.py (single authoritative location).
+    try:
+        check_production_guard(force=force)
+    except SystemExit:
         err_console.print(
             "[red]APP_ENV=production detected. "
             "Pass --force to confirm reset. "
@@ -64,7 +65,7 @@ def reset(
         )
         raise typer.Exit(code=1)
 
-    # Interactive confirmation for all environments unless --force (AC-5).
+    # Interactive confirmation for all environments unless --force.
     if not force:
         typer.confirm(
             "This will destroy and recreate the database. Confirm?",
@@ -74,7 +75,6 @@ def reset(
     try:
         tables, rows = reset_database(db_path=db_path, force=force)
     except SystemExit as exc:
-        # Production guard inside reset_database (belt-and-suspenders).
         code = exc.code if isinstance(exc.code, int) else 1
         raise typer.Exit(code=code) from exc
     except FileNotFoundError as exc:

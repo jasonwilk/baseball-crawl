@@ -8,7 +8,7 @@ bb = "src.cli:app"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["src*"]
+include = ["src*", "migrations*"]
 
 [tool.pytest.ini_options]
 timeout = 30

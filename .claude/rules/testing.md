@@ -15,3 +15,4 @@ paths:
 - Name test functions as `test_<behavior_being_tested>`
 - Prefer specific assertions (`assert result == expected`) over generic (`assert result`)
 - Include edge cases: empty data, malformed input, missing fields
+- **Subprocess smoke tests for console script entry points**: Entry points like `bb` must have at least one test that invokes the command via `subprocess.run()` (e.g., `subprocess.run(["bb", "--help"], ...)`). In-process test runners (`typer.testing.CliRunner`, pytest) add the project root to `sys.path`, which masks packaging and import errors that only surface when the entry point runs as an installed console script. Subprocess tests catch these real-world failures.

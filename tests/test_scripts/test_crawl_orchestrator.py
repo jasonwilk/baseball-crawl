@@ -1,4 +1,4 @@
-"""Tests for scripts/crawl.py orchestrator.
+"""Tests for the crawl pipeline orchestrator (src/pipeline/crawl.py).
 
 All crawlers are mocked -- no real network requests or file I/O to data/.
 Tests use tmp_path for manifest output.
@@ -13,12 +13,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-# Ensure scripts/ is importable as a module by adding the project root.
-_PROJECT_ROOT = Path(__file__).resolve().parents[2]
-if str(_PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(_PROJECT_ROOT))
-
-from scripts.crawl import run, _write_manifest, _CRAWLER_NAMES
+from src.pipeline.crawl import run, _write_manifest, _CRAWLER_NAMES
 from src.gamechanger.crawlers import CrawlResult
 
 
@@ -61,7 +56,7 @@ def _all_crawler_patches(
     game_stats_cls: type | None = None,
     called: list[str] | None = None,
 ) -> dict[str, object]:
-    """Build a patches dict for patch.multiple('scripts.crawl', ...)."""
+    """Build a patches dict for patch.multiple('src.pipeline.crawl', ...)."""
     c = called if called is not None else []
 
     def _cls(name: str, override: type | None) -> type:
@@ -86,7 +81,7 @@ def test_run_calls_all_crawlers(tmp_path: Path) -> None:
     """run() calls all 5 crawlers when no filter is set."""
     called: list[str] = []
 
-    with patch.multiple("scripts.crawl", **_all_crawler_patches(called=called)):
+    with patch.multiple("src.pipeline.crawl",**_all_crawler_patches(called=called)):
         exit_code = run(data_root=tmp_path)
 
     assert exit_code == 0
@@ -97,7 +92,7 @@ def test_run_roster_before_schedule_before_game_stats(tmp_path: Path) -> None:
     """Crawlers run in the mandated dependency order."""
     order: list[str] = []
 
-    with patch.multiple("scripts.crawl", **_all_crawler_patches(called=order)):
+    with patch.multiple("src.pipeline.crawl",**_all_crawler_patches(called=order)):
         run(data_root=tmp_path)
 
     schedule_idx = order.index("schedule")
@@ -111,8 +106,8 @@ def test_run_roster_before_schedule_before_game_stats(tmp_path: Path) -> None:
 
 def test_dry_run_returns_zero_and_no_client(tmp_path: Path) -> None:
     """Dry run exits 0 and never instantiates GameChangerClient."""
-    with patch("scripts.crawl.load_config", return_value=_make_mock_config()):
-        with patch("scripts.crawl.GameChangerClient") as mock_client_cls:
+    with patch("src.pipeline.crawl.load_config", return_value=_make_mock_config()):
+        with patch("src.pipeline.crawl.GameChangerClient") as mock_client_cls:
             exit_code = run(dry_run=True, data_root=tmp_path)
 
     assert exit_code == 0
@@ -121,8 +116,8 @@ def test_dry_run_returns_zero_and_no_client(tmp_path: Path) -> None:
 
 def test_dry_run_no_manifest_written(tmp_path: Path) -> None:
     """Dry run does not write manifest.json."""
-    with patch("scripts.crawl.load_config", return_value=_make_mock_config()):
-        with patch("scripts.crawl.GameChangerClient"):
+    with patch("src.pipeline.crawl.load_config", return_value=_make_mock_config()):
+        with patch("src.pipeline.crawl.GameChangerClient"):
             run(dry_run=True, data_root=tmp_path)
 
     manifest = tmp_path / "2025" / "manifest.json"
@@ -131,8 +126,8 @@ def test_dry_run_no_manifest_written(tmp_path: Path) -> None:
 
 def test_dry_run_prints_crawlers(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     """Dry run prints all crawler names."""
-    with patch("scripts.crawl.load_config", return_value=_make_mock_config()):
-        with patch("scripts.crawl.GameChangerClient"):
+    with patch("src.pipeline.crawl.load_config", return_value=_make_mock_config()):
+        with patch("src.pipeline.crawl.GameChangerClient"):
             run(dry_run=True, data_root=tmp_path)
 
     captured = capsys.readouterr()
@@ -148,7 +143,7 @@ def test_crawler_filter_runs_only_roster(tmp_path: Path) -> None:
     """--crawler roster runs only RosterCrawler."""
     called: list[str] = []
 
-    with patch.multiple("scripts.crawl", **_all_crawler_patches(called=called)):
+    with patch.multiple("src.pipeline.crawl",**_all_crawler_patches(called=called)):
         exit_code = run(crawler_filter="roster", data_root=tmp_path)
 
     assert exit_code == 0
@@ -159,7 +154,7 @@ def test_crawler_filter_schedule(tmp_path: Path) -> None:
     """--crawler schedule runs only ScheduleCrawler."""
     called: list[str] = []
 
-    with patch.multiple("scripts.crawl", **_all_crawler_patches(called=called)):
+    with patch.multiple("src.pipeline.crawl",**_all_crawler_patches(called=called)):
         exit_code = run(crawler_filter="schedule", data_root=tmp_path)
 
     assert exit_code == 0
@@ -170,7 +165,7 @@ def test_crawler_filter_opponent(tmp_path: Path) -> None:
     """--crawler opponent runs only OpponentCrawler."""
     called: list[str] = []
 
-    with patch.multiple("scripts.crawl", **_all_crawler_patches(called=called)):
+    with patch.multiple("src.pipeline.crawl",**_all_crawler_patches(called=called)):
         exit_code = run(crawler_filter="opponent", data_root=tmp_path)
 
     assert exit_code == 0
@@ -204,7 +199,7 @@ def test_manifest_written_after_run(tmp_path: Path) -> None:
         "load_config": lambda: _make_mock_config(season="2025"),
     }
 
-    with patch.multiple("scripts.crawl", **patches):
+    with patch.multiple("src.pipeline.crawl",**patches):
         run(data_root=tmp_path)
 
     manifest_path = tmp_path / "2025" / "manifest.json"
@@ -238,7 +233,7 @@ def test_manifest_includes_skipped_and_errors(tmp_path: Path) -> None:
         "load_config": lambda: _make_mock_config(),
     }
 
-    with patch.multiple("scripts.crawl", **patches):
+    with patch.multiple("src.pipeline.crawl",**patches):
         run(data_root=tmp_path)
 
     manifest = json.loads((tmp_path / "2025" / "manifest.json").read_text())
@@ -265,7 +260,7 @@ def test_unhandled_exception_continues_to_next_crawler(tmp_path: Path) -> None:
 
     patches = _all_crawler_patches(called=called, roster_cls=_BadRoster)
 
-    with patch.multiple("scripts.crawl", **patches):
+    with patch.multiple("src.pipeline.crawl",**patches):
         exit_code = run(data_root=tmp_path)
 
     # All crawlers after roster still ran.
@@ -301,7 +296,7 @@ def test_exit_code_0_when_all_crawlers_succeed(tmp_path: Path) -> None:
         "load_config": lambda: _make_mock_config(),
     }
 
-    with patch.multiple("scripts.crawl", **patches):
+    with patch.multiple("src.pipeline.crawl",**patches):
         exit_code = run(data_root=tmp_path)
 
     assert exit_code == 0
@@ -319,7 +314,7 @@ def test_exit_code_1_when_crawler_raises(tmp_path: Path) -> None:
 
     patches = _all_crawler_patches(opponent_cls=_BadOpponent)
 
-    with patch.multiple("scripts.crawl", **patches):
+    with patch.multiple("src.pipeline.crawl",**patches):
         exit_code = run(data_root=tmp_path)
 
     assert exit_code == 1

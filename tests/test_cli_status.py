@@ -41,7 +41,7 @@ def _invoke_status(
         return cred_map[profile]
 
     with (
-        patch("src.cli.status._check_single_profile", side_effect=fake_check_single),
+        patch("src.cli.status.check_single_profile", side_effect=fake_check_single),
         patch(
             "src.cli.status._get_last_crawl", return_value=(crawled_at, total_files)
         ),

@@ -17,21 +17,12 @@ from __future__ import annotations
 
 import os
 import sqlite3
-import sys
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
-# ---------------------------------------------------------------------------
-# Path setup -- allow running from project root without install
-# ---------------------------------------------------------------------------
-
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent
-if str(_PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(_PROJECT_ROOT))
-
-from scripts.reset_dev_db import (  # noqa: E402
+from src.db.reset import (
     check_production_guard,
     delete_database,
     get_db_path,
@@ -43,6 +34,7 @@ from scripts.reset_dev_db import (  # noqa: E402
 # Constants
 # ---------------------------------------------------------------------------
 
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _SEED_FILE = _PROJECT_ROOT / "data" / "seeds" / "seed_dev.sql"
 
 # Expected minimum row counts per AC-2.
