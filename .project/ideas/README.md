@@ -25,12 +25,13 @@ Review this list every 90 days, or when completing an epic. Ask:
 | [IDEA-004](IDEA-004-pii-protection.md) | Hard Data Boundaries and PII Protection | PROMOTED | 2026-03-02 -- promoted to E-019 |
 | [IDEA-005](IDEA-005-intent-nodes.md) | Directory-Scoped Intent Nodes at src/ Module Boundaries | CANDIDATE | 2026-06-01 |
 | [IDEA-006](IDEA-006-epic-lanes-convention.md) | Epic Lanes Convention for Multi-Workstream Epics | CANDIDATE | 2026-06-01 |
-| [IDEA-007](IDEA-007-dispatch-coordinator-guardrail.md) | Dispatch Coordinator Guardrail -- Prevent Team-Lead-as-PM Bypass | CANDIDATE | 2026-06-02 |
+| [IDEA-007](IDEA-007-dispatch-coordinator-guardrail.md) | Dispatch Coordinator Guardrail -- Prevent Team-Lead-as-PM Bypass | DISCARDED | 2026-03-07 -- resolved by E-065 |
 | [IDEA-008](IDEA-008-plays-and-line-scores.md) | Pitch-by-Pitch Plays and Inning Line Scores Crawling | CANDIDATE | 2026-06-02 |
 | [IDEA-009](IDEA-009-per-player-game-stats-spray-charts.md) | Per-Player Per-Game Stats and Spray Charts | CANDIDATE | 2026-06-02 |
 | [IDEA-010](IDEA-010-docs-port-map-consistency.md) | Docs Port Map Consistency for Devcontainer + Compose | CANDIDATE | 2026-06-03 |
 | [IDEA-011](IDEA-011-investigate-500-endpoints.md) | Investigate HTTP 500 Endpoint Failures | CANDIDATE | 2026-06-04 |
 | [IDEA-012](IDEA-012-crawl-orchestration-system.md) | Crawl Orchestration and Scheduling System | CANDIDATE | 2026-06-06 |
+| [IDEA-013](IDEA-013-cmux-evaluation.md) | cmux Evaluation for Agent Teams | CANDIDATE | 2026-06-07 |
 
 ## Status Definitions
 

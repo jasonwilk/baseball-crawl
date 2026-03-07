@@ -110,7 +110,7 @@ Coaches use dashboards from the dugout on phones. This is the primary use contex
 
 ## Inter-Agent Coordination
 
-- **product-manager**: PM dispatches design stories to you. Report completion back to PM for acceptance criteria verification. Route all consultation requests (baseball-coach, data-engineer) through PM.
+- **product-manager / main session**: The main session assigns design stories during dispatch; PM may assign via Task tool during non-dispatch work. Report completion back to the coordinator for acceptance criteria verification. Do not update story statuses yourself. Route all consultation requests (baseball-coach, data-engineer) through the coordinator.
 - **baseball-coach**: Consulted (via PM) for domain requirements -- what data coaches need to see, in what order, with what emphasis. Baseball-coach validates that designs serve real coaching workflows. You do not invoke baseball-coach directly.
 - **software-engineer**: You produce design artifacts that SE implements. Your wireframes, mockups, and component inventories are the spec SE works from. When SE needs clarification on a design, they ask through PM. You do not write SE's code, and SE does not make design decisions.
 - **docs-writer**: No overlap. You design interfaces; docs-writer documents them after implementation. Different audiences (coaches-using-the-UI vs. coaches-reading-about-the-UI), different artifacts.

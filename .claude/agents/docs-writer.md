@@ -115,7 +115,7 @@ Follow the Code Style and project conventions in CLAUDE.md. Additionally:
 
 ## Inter-Agent Coordination
 
-- **product-manager**: PM dispatches documentation stories to you. Report completion back to PM for acceptance criteria verification. Route all consultation requests (baseball-coach, software-engineer) through PM.
+- **product-manager / main session**: The main session assigns documentation stories during dispatch; PM may assign via Task tool during non-dispatch work. Report completion back to the coordinator for acceptance criteria verification. Do not update story statuses yourself. Route all consultation requests (baseball-coach, software-engineer) through the coordinator.
 - **baseball-coach**: Consulted (via PM) for coaching content accuracy -- stat definitions, scouting report interpretation, coaching terminology, sample size thresholds. Baseball-coach validates that end-user documentation serves real coaching needs.
 - **api-scout**: Owns the `docs/api/` directory (endpoint files and global reference files). You may read and reference the API spec to inform your documentation, but you never modify it. If you find the API spec incomplete or inaccurate, flag to PM for api-scout to address.
 - **data-engineer**: Read migration files and schema documentation to produce accurate database and data flow documentation. If schema documentation is missing or unclear, flag to PM.

@@ -173,7 +173,7 @@ These commands manage the mitmproxy process and must be run on the Mac host, not
 - `cd proxy && ./logs.sh` -- follow live mitmproxy log output
 
 ## Workflows
-- **Implement**: When the user says "implement E-NNN" (or similar -- "start epic", "execute E-NNN", "dispatch E-NNN", "kick off E-NNN"), load `.claude/skills/implement/SKILL.md` and follow its workflow. The team lead reads the epic for team composition, spawns the PM, and relays the request. Supports an "and review" modifier to chain a code review after implementation completes.
+- **Implement**: When the user says "implement E-NNN" (or similar -- "start epic", "execute E-NNN", "dispatch E-NNN", "kick off E-NNN"), load `.claude/skills/implement/SKILL.md` and follow its workflow. The main session reads the epic for team composition and spawns implementers directly. Supports an "and review" modifier to chain a code review after implementation completes.
 - **Ingest endpoint**: When the user says "ingest endpoint" (or similar -- "curl is ready", "new endpoint to analyze"), load `.claude/skills/ingest-endpoint/SKILL.md` and follow its two-phase workflow. The user has placed a curl command in `secrets/gamechanger-curl.txt` and expects api-scout to execute it (time-sensitive -- the `gc-signature` header in POST requests expires within minutes, and curl commands should be executed promptly regardless of token lifetime), then claude-architect to integrate findings into the context layer.
 - **Review epic**: When the user says "review epic" (or similar -- "codex review epic E-NNN", "post-dev review", "code review epic"), load `.claude/skills/review-epic/SKILL.md` and follow its workflow. Runs a codex code review on an epic's implementation changes, then spawns the implementing team to review findings together.
 - **Spec review**: When the user says "spec review" (or similar -- "review the spec for E-NNN", "codex spec review", "run spec review on E-NNN"), load `.claude/skills/spec-review/SKILL.md` and follow its two-phase workflow. Phase 1 runs the codex spec review script to generate findings. Phase 2 spawns a PM-led review team with domain experts to triage the findings.
@@ -374,7 +374,7 @@ This project uses specialized agents coordinated by the product-manager:
 - **api-scout** maintains the `docs/api/` directory structure -- the single source of truth for API knowledge
 - **data-engineer** designs schemas informed by both baseball-coach requirements and api-scout discoveries
 - **software-engineer** implements stories, referencing specs produced by other agents
-- **product-manager** discovers requirements, consults domain experts, writes epics and stories, dispatches implementation work, and closes completed work
+- **product-manager** discovers requirements, consults domain experts, writes epics and stories, and closes completed work. During dispatch, the main session coordinates implementers directly.
 - Any agent that identifies future work should flag it to the PM for idea capture rather than creating speculative epics
 
 ### Workflow Contract
@@ -385,10 +385,8 @@ All routed work follows this contract:
 2. **PM consults experts during formation.** Before writing stories, PM consults domain experts as needed. When not required, PM notes the reason.
 3. **PM marks the epic `READY` when refinement is complete.** `DRAFT` epics are not dispatchable.
 4. **"Ready for dev" = `Status: TODO` in a `READY` epic.** No story file means no implementation work begins.
-5. **Team lead creates the dispatch team and spawns PM + implementing agents.** PM joins as the standing coordinator -- assigning stories via messaging, managing statuses, verifying acceptance criteria, and requesting additional spawns from the team lead for newly unblocked stories. See `/.claude/rules/dispatch-pattern.md`.
+5. **Main session creates the dispatch team and spawns implementers directly.** The main session acts as both spawner and coordinator during dispatch -- assigning stories, managing statuses, verifying acceptance criteria, and cascading to newly unblocked stories. PM is not spawned as a teammate during dispatch. See `/.claude/rules/dispatch-pattern.md`.
 6. **Implementing agents require a story reference.** Must receive a story file path or story ID before beginning any task.
-
-**Team Lead Boundary**: The team lead (user-facing agent) creates the dispatch team and spawns all agents (PM + implementers), but MUST NOT assign stories, verify acceptance criteria, update story/epic statuses, or make routing decisions. Those are PM's coordination responsibilities. See `/.claude/rules/dispatch-pattern.md`.
 
 **Enforcement Boundary**: The user always retains override authority to invoke any agent directly; this contract governs the normal orchestrated path.
 

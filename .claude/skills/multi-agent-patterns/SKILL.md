@@ -10,22 +10,22 @@
 Load this skill when you are about to:
 
 - **Dispatch a story via Agent Teams** and need to verify the context block is complete
-- **Route a request through multiple agents** (user -> PM -> implementing agent)
+- **Route a request through agents** (main session -> implementing agent)
 - **Debug an implementing agent that completed a task incorrectly**
 
 ---
 
 ## The Telephone Game Problem
 
-When a request passes through multiple agents, each relay risks losing information. The PM summarizes, the implementing agent builds against a distortion of the original intent.
+When a request passes through multiple agents, each relay risks losing information. An intermediary summarizes, the implementing agent builds against a distortion of the original intent.
 
 ### Mitigation: Verbatim Relay
 
 Pass original content at every relay point. Never summarize.
 
-**PM -> Implementing Agent**: Include the **full story file text** and **full epic Technical Notes** in every dispatch. Not a summary. Every acceptance criterion, file path, and constraint.
+**Main Session -> Implementing Agent**: Include the **full story file text** and **full epic Technical Notes** in every dispatch. Not a summary. Every acceptance criterion, file path, and constraint.
 
-In this project, there is only one relay point (PM -> implementing agent), which minimizes telephone game risk. The PM receives the user's request directly, so the primary risk is in how the PM packages context for dispatch.
+In this project, the main session dispatches directly to implementing agents (no PM intermediary during dispatch), which minimizes telephone game risk. The primary risk is in how the main session packages context for dispatch.
 
 ## Baseball-Crawl's Routing Chain
 
@@ -36,16 +36,17 @@ User
   +-- direct: baseball-coach   (no PM needed)
   +-- direct: claude-architect  (no PM needed)
   |
-  v
-product-manager       (plans, dispatches via Agent Teams)
+  +-- planning: product-manager  (plans epics, refines stories)
+  |
+  +-- dispatch: main session     (spawns + coordinates implementers directly)
   |
   v
 implementing agents   (software-engineer, data-engineer -- require story reference)
 ```
 
-## PM Dispatch Checklist
+## Main Session Dispatch Checklist
 
-Before spawning a teammate for a story:
+Before spawning an implementer for a story:
 
 - [ ] Read the story file in full
 - [ ] Read the epic Technical Notes in full
@@ -60,13 +61,13 @@ If the request is consultative (not implementation), the user can invoke agents 
 - Domain questions -> baseball-coach directly
 - Agent infrastructure -> claude-architect directly
 
-If the request produces code, schema, or tests -> route through PM.
+If the request produces code, schema, or tests -> PM plans, main session dispatches.
 
 ## Diagnosing Failures
 
 If an implementing agent's output doesn't match intent:
 1. Did it receive the full story file, or a summary?
 2. Did the story accurately reflect the user's requirement?
-3. Did the PM package the full context, or paraphrase?
+3. Did the main session package the full context, or paraphrase?
 
-Work backward through the chain. The problem is usually at the relay where a summary replaced the original.
+Work backward through the chain. The problem is usually at the point where a summary replaced the original.

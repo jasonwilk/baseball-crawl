@@ -1,10 +1,10 @@
 # IDEA-007: Dispatch Coordinator Guardrail -- Prevent Team-Lead-as-PM Bypass
 
 ## Status
-`CANDIDATE`
+`DISCARDED`
 
 ## Summary
-Add an explicit rule preventing the team lead (or any non-PM agent) from creating dispatch teams and marking stories IN_PROGRESS directly. The PM must always be the first agent spawned in a dispatch, and it must be the one to create the team and dispatch implementers.
+~~Add an explicit rule preventing the team lead (or any non-PM agent) from creating dispatch teams and marking stories IN_PROGRESS directly.~~ **Resolved by E-065**: The three-role dispatch model (team lead / PM / implementers) was replaced with a two-role model (main session / implementers). The main session now acts as both spawner and coordinator during dispatch. The bypass scenario this idea addressed is no longer possible.
 
 ## Why It Matters
 During E-037 dispatch, the team lead bypassed the PM by directly creating the dispatch team, marking all four stories IN_PROGRESS, and spawning implementing agents. The PM was only brought in after the fact as a verification agent rather than as the standing coordinator from the start. This violates the dispatch-pattern.md contract where PM is the coordinator throughout the full lifecycle.

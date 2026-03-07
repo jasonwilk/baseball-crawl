@@ -6,15 +6,15 @@ An epic MUST have status `READY` or `ACTIVE` before any of its stories can be di
 
 ## Dispatch Authorization Gate
 
-Marking an epic READY and dispatching it are separate actions. After the PM sets an epic to READY, the PM MUST present the epic to the user and wait for explicit dispatch authorization. The PM MUST NOT chain plan mode into dispatch mode automatically. Phrases like "define the epic," "create the epic," "plan the epic," and "write stories for X" are plan-mode requests -- they do NOT authorize dispatch. Compound requests that explicitly include dispatch language (e.g., "define and execute," "plan and dispatch," "create the epic and start it") authorize both planning and dispatch in sequence.
+Marking an epic READY and dispatching it are separate actions. After the PM sets an epic to READY, the PM MUST present the epic to the user and wait for explicit dispatch authorization. Planning and dispatch MUST NOT chain automatically. Phrases like "define the epic," "create the epic," "plan the epic," and "write stories for X" are plan-mode requests -- they do NOT authorize dispatch. Compound requests that explicitly include dispatch language (e.g., "define and execute," "plan and dispatch," "create the epic and start it") authorize both planning and dispatch in sequence.
 
 ## Consultation Compliance Gate
 
-When the user explicitly requests that PM collaborate with a specific agent during epic formation (e.g., "work with SE on this," "consult data-engineer before writing stories"), the PM MUST invoke that agent via Task tool and incorporate their input before writing stories. If the PM cannot spawn the requested agent (spawning is one-level-deep -- a platform constraint), the PM MUST escalate to the team lead/user with specific questions for the named agent. The PM MUST NOT substitute its own judgment for the requested expert's input. The PM MUST NOT skip the consultation because spawning is unavailable. The PM MUST NOT set the epic to READY until the requested consultation is complete.
+When the user explicitly requests that PM collaborate with a specific agent during epic formation (e.g., "work with SE on this," "consult data-engineer before writing stories"), the PM MUST invoke that agent via Task tool and incorporate their input before writing stories. If the PM cannot spawn the requested agent (spawning is one-level-deep -- a platform constraint), the PM MUST escalate to the user with specific questions for the named agent. The PM MUST NOT substitute its own judgment for the requested expert's input. The PM MUST NOT skip the consultation because spawning is unavailable. The PM MUST NOT set the epic to READY until the requested consultation is complete.
 
 This gate applies to explicit user directives only -- not to the domain-triggered consultations in the PM's Consultation Triggers table, which are advisory.
 
-This gate exists in workflow-discipline.md (loaded for all agents) in addition to the PM agent definition (loaded only for PM), so the team lead can also flag violations. This is intentional defense-in-depth.
+This gate exists in workflow-discipline.md (loaded for all agents) in addition to the PM agent definition (loaded only for PM), so the main session can also flag violations. This is intentional defense-in-depth.
 
 ## Work Authorization Gate
 
@@ -22,9 +22,7 @@ Implementing agents MUST NOT begin any implementation work without a referenced 
 
 ## Workflow Routing Rule
 
-All work-initiation requests travel through the `user -> team lead -> PM -> implementing agent` pipeline. The team lead creates the dispatch team and spawns all agents (PM + implementers). PM coordinates via messaging (see `/.claude/rules/dispatch-pattern.md`).
-
-**Team lead boundary**: The team lead (user-facing agent) creates the dispatch team and spawns all agents, but MUST NOT assign stories, verify acceptance criteria, update story/epic statuses, or make routing decisions. Those are PM's coordination responsibilities. The team lead remains available for additional spawn requests from PM. See the "Team Lead Spawning Responsibility" section in `dispatch-pattern.md`.
+Work-initiation requests follow two phases: **planning** (`user -> PM`) and **dispatch** (`user/main session -> implementing agent`). PM plans epics and refines stories. When the user authorizes dispatch, the main session creates the dispatch team, spawns implementers directly, assigns stories, verifies acceptance criteria, and manages all statuses. PM is not spawned as a teammate during dispatch. See `/.claude/rules/dispatch-pattern.md`.
 
 ## PM Task Types
 
@@ -40,11 +38,11 @@ These agents may be invoked directly without PM intermediation:
 
 ## Documentation Assessment Gate
 
-Epic completion requires a documentation impact assessment per `.claude/rules/documentation.md`. The PM MUST review the epic's scope against documentation update triggers after all stories are DONE and before archiving the epic. If any trigger fires, docs-writer is dispatched before the epic can be archived.
+Epic completion requires a documentation impact assessment per `.claude/rules/documentation.md`. The main session MUST review the epic's scope against documentation update triggers after all stories are DONE and before archiving the epic. If any trigger fires, docs-writer is dispatched before the epic can be archived.
 
 ## Dispatch Failure Protocol
 
-When dispatch fails (Agent tool unavailable, team creation fails, no eligible stories, PM reports inability to proceed), any agent in the routing chain must follow this protocol:
+When dispatch fails (Agent tool unavailable, team creation fails, no eligible stories), the main session must follow this protocol:
 
 1. **Report the failure to the user** with the specific reason.
 2. **Ask the user how to proceed.** The user decides the next step.

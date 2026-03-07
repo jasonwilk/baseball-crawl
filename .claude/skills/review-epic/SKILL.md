@@ -20,7 +20,7 @@ Load this skill when the user says any of:
 
 ## Purpose
 
-Run a codex code review on an epic's implementation changes, then spawn the implementing team to review findings together. Fixes are applied by the appropriate implementing agent. The PM tracks which findings are addressed, dismissed, or deferred and documents deferred findings in the epic.
+Run a codex code review on an epic's implementation changes, then spawn implementing agents to review findings together. Fixes are applied by the appropriate implementing agent. The main session tracks which findings are addressed, dismissed, or deferred and documents deferred findings in the epic.
 
 This is a **post-dev** review -- it reviews code that has been written. It is distinct from "spec review" (pre-implementation review of epic/story specifications).
 
@@ -78,54 +78,16 @@ If the command exits with code 124, codex timed out after 10 minutes. Report the
 
 ## Phase 2: Team Review of Codex Findings
 
-**Agents**: Team lead (spawner) + PM (coordinator) + implementing agents
+**Agents**: Main session (coordinator) + implementing agents
 **Time-sensitive**: No
 
 ### Step 1: Determine team composition
 
 Read the epic's `## Dispatch Team` section. If present and non-empty, note the listed agents. If absent or empty, determine agents from the epic's stories using the Agent Selection table in `/.claude/rules/dispatch-pattern.md`.
 
-### Step 2: Create team and spawn all agents
+### Step 2: Create team and spawn implementing agents
 
-Create the team (`TeamCreate`) and spawn PM + all implementing agents.
-
-**Context block for PM:**
-
-```
-POST-DEV REVIEW: The user requested a codex code review of epic E-NNN.
-
-EPIC ID: E-NNN
-EPIC DIRECTORY: /epics/E-NNN-slug/ (or /.project/archive/E-NNN-slug/ if archived)
-
-Teammates spawned: [list of agent types spawned alongside PM]
-
-CODEX FINDINGS:
-[Paste the full codex output here]
-
-INSTRUCTIONS:
-1. The team lead has spawned implementing agents alongside you. Assign review tasks
-   to them via SendMessage.
-
-2. Provide each implementing agent with:
-   - The full codex findings
-   - The epic ID and directory path
-   - Their role: review findings relevant to their domain, propose fixes or
-     dismissals with rationale for each finding
-
-3. Coordinate the review:
-   - Each implementing agent reviews findings in their domain and either:
-     (a) Applies a fix (code change)
-     (b) Recommends dismissal with rationale (false positive, acceptable tradeoff, etc.)
-     (c) Recommends deferral with rationale (valid finding but out of scope for this epic)
-   - You (PM) track the disposition of every finding: fixed, dismissed, or deferred.
-   - Implementing agents apply code fixes. PM does NOT implement fixes.
-
-4. After all findings are reviewed:
-   - Document deferred findings in the epic's Technical Notes or History section
-     (include the finding description, rationale for deferral, and any follow-up
-     epic/idea reference if applicable).
-   - Report the summary back: how many findings were fixed, dismissed, and deferred.
-```
+Create the team (`TeamCreate`) and spawn implementing agents directly. The main session acts as coordinator -- no PM teammate is spawned for the review.
 
 **Context block for each implementing agent:**
 
@@ -136,16 +98,25 @@ Epic directory: /epics/E-NNN-slug/ (or /.project/archive/E-NNN-slug/ if archived
 CODEX FINDINGS:
 [Paste the full codex output here]
 
-The PM (product-manager) will assign your review tasks via messaging. Wait for the PM's instructions before starting work.
+The main session will assign your review tasks via messaging. For each finding in your domain:
+  (a) Apply a fix (code change), OR
+  (b) Recommend dismissal with rationale (false positive, acceptable tradeoff, etc.), OR
+  (c) Recommend deferral with rationale (valid finding but out of scope for this epic)
+
+Report your dispositions back to the main session when complete.
 ```
 
-### Step 3: Remain available
+### Step 3: Coordinate the review
 
-After spawning all agents, the team lead remains available for additional spawn requests from PM (e.g., if PM identifies findings that need a different agent type).
+The main session assigns findings to implementing agents by domain, monitors their work, and tracks the disposition of every finding: fixed, dismissed, or deferred.
 
-### What to do with review results
+After all findings are reviewed:
+- Document deferred findings in the epic's Technical Notes or History section (include the finding description, rationale for deferral, and any follow-up epic/idea reference if applicable).
+- If a finding needs an agent type not yet on the team, spawn the additional agent.
 
-When PM reports the review summary, present it to the user:
+### Step 4: Present results
+
+Present the review summary to the user:
 - Number of findings fixed, dismissed, and deferred
 - Brief description of any deferred findings
 - Any follow-up work identified
@@ -172,13 +143,12 @@ Phase 1: Team lead runs codex-review.sh
   +---> No findings? -> Report "clean review" and stop.
   |
   v
-Phase 2: Team lead spawns PM + implementing agents
-  - PM coordinates review via messaging
+Phase 2: Main session spawns implementing agents
+  - Main session coordinates review directly
   - Team reviews each finding: fix, dismiss, or defer
   - Implementing agents apply fixes
-  - PM tracks dispositions
-  - PM documents deferred findings in epic
-  - Team lead remains available for additional spawn requests
+  - Main session tracks dispositions
+  - Main session documents deferred findings in epic
   |
   v
 Team lead presents review summary to user

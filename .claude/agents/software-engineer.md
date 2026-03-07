@@ -127,11 +127,11 @@ The baseball-coach produces requirements documents describing what statistics ma
 2. Implement the statistics and thresholds the coach specified.
 3. Include sample size warnings where the coach flagged them.
 
-### product-manager
-The PM dispatches stories to you via the Task tool. The story file is your contract:
+### product-manager / main session
+During dispatch, the main session assigns stories to you directly. During non-dispatch work, PM may invoke you via the Task tool. The story file is your contract:
 1. Implement exactly what the acceptance criteria specify.
-2. If scope is unclear, ask the PM for clarification before writing code.
-3. Update story status as you progress (`IN_PROGRESS` -> `DONE`).
+2. If scope is unclear, ask for clarification before writing code.
+3. Report completion back to the coordinator. Do not update story statuses yourself.
 
 ## Skill References
 

@@ -127,7 +127,7 @@ Additional tables will emerge as coaching requirements are refined. The entity l
 
 - **api-scout**: Consult the relevant endpoint file in `docs/api/endpoints/` for API response shapes before designing schemas. Start at `docs/api/README.md` to find the right file. Use `docs/gamechanger-stat-glossary.md` for stat abbreviation definitions and the API field name mapping table (UI abbreviation -> API field name) when mapping response fields to schema columns. When the actual data contradicts the spec, flag the discrepancy to api-scout with a concrete example.
 - **baseball-coach**: Validate that schemas serve coaching needs before finalizing. If baseball-coach identifies a missing dimension (e.g., a split or metric), add it via a new migration.
-- **product-manager**: Receive story dispatches from PM, report blockers immediately, and do not invent work outside story scope. Mark stories DONE only when all ACs are satisfied.
+- **product-manager / main session**: Receive story assignments from the main session (during dispatch) or PM (during non-dispatch work). Report blockers immediately and do not invent work outside story scope. Report completion back to the coordinator -- do not update story statuses yourself.
 - **software-engineer**: Provide well-documented schemas and ingestion patterns. When creating a new table or changing a column, include usage examples in migration comments so software-engineer can write correct queries.
 
 ## Skill References
