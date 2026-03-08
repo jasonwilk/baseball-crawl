@@ -187,6 +187,10 @@ For every story in the epic, confirm all acceptance criteria are met. This is a 
 
 Review the epic's scope against the update triggers in `.claude/rules/documentation.md`. If any trigger fires, spawn docs-writer (if not already on the team) to update affected docs before archiving. If no trigger fires, record "No documentation impact" in the epic's History section. The epic MUST NOT be archived until this assessment is complete and any required doc updates are done.
 
+### Step 3a: Context-layer assessment
+
+Evaluate the epic's impact on the context layer per `.claude/rules/context-layer-assessment.md`. Assess each of the six triggers with an explicit yes/no verdict and record all verdicts in the epic's History section. If any trigger fires, spawn claude-architect (if not already on the team) to codify the findings before archiving. The epic MUST NOT be archived until this assessment is complete and any required codification is done.
+
 ### Step 4: Archive the epic
 
 Move the entire epic directory from `/epics/E-NNN-slug/` to `/.project/archive/E-NNN-slug/`. Instruct an implementing agent still on the team to perform this move. Do not proceed to team shutdown until the archive is confirmed.
@@ -260,6 +264,7 @@ Phase 5: Closure sequence
   - Validate all work (final AC check)
   - Update epic to COMPLETED with history entry
   - Documentation assessment (spawn docs-writer if needed)
+  - Context-layer assessment (spawn claude-architect if needed)
   - Archive epic to /.project/archive/
   - Update PM memory
   - Review ideas backlog
@@ -301,3 +306,4 @@ If the review chain runs but there are no uncommitted changes to review, the rev
 5. **Do not skip the documentation assessment.** The epic cannot be archived until the documentation impact is evaluated per `.claude/rules/documentation.md`.
 6. **Do not commit automatically.** The closure sequence offers to commit -- the user must explicitly approve.
 7. **Do not spawn a PM teammate.** The main session coordinates directly. There is no PM role during dispatch.
+8. **Do not skip the context-layer assessment.** The epic cannot be archived until the context-layer impact is evaluated per `.claude/rules/context-layer-assessment.md`.

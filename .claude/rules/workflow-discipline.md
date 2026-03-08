@@ -40,6 +40,10 @@ These agents may be invoked directly without PM intermediation:
 
 Epic completion requires a documentation impact assessment per `.claude/rules/documentation.md`. The main session MUST review the epic's scope against documentation update triggers after all stories are DONE and before archiving the epic. If any trigger fires, docs-writer is dispatched before the epic can be archived.
 
+## Context-Layer Assessment Gate
+
+Epic completion requires a context-layer impact assessment per `.claude/rules/context-layer-assessment.md`. The main session MUST evaluate all six triggers with explicit per-trigger yes/no verdicts after all stories are DONE and before archiving the epic. All verdicts are recorded in the epic's History section. If any trigger fires, claude-architect is dispatched to codify the findings before the epic can be archived.
+
 ## Dispatch Failure Protocol
 
 When dispatch fails (Agent tool unavailable, team creation fails, no eligible stories), the main session must follow this protocol:

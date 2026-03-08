@@ -145,9 +145,10 @@ Every status change touches multiple files atomically. Follow these checklists e
 1. Update `epic.md` Status to `COMPLETED` (or `ABANDONED` with reason)
 2. Add a History entry with the completion/abandonment date and summary
 3. **Documentation assessment** per `.claude/rules/documentation.md`: review the epic's scope against update triggers. If any trigger fires, dispatch docs-writer to update affected docs before archiving. If no trigger fires, record "No documentation impact" in the epic's History section.
-4. Move the entire epic directory from `/epics/E-NNN-slug/` to `/.project/archive/E-NNN-slug/` -- this is immediate, not deferred
-5. Update MEMORY.md: move the epic from Active Epics to Archived Epics, note any unblocked work or follow-up items
-6. Review `/.project/ideas/README.md` for CANDIDATE ideas that may now be unblocked or promoted
+4. **Context-layer assessment** per `.claude/rules/context-layer-assessment.md`: evaluate each of the six triggers with an explicit yes/no verdict and record all verdicts in the epic's History section. If any trigger fires, dispatch claude-architect to codify findings before archiving. A blanket "no context-layer impact" without per-trigger verdicts is not sufficient. The epic MUST NOT be archived until this assessment is complete.
+5. Move the entire epic directory from `/epics/E-NNN-slug/` to `/.project/archive/E-NNN-slug/` -- this is immediate, not deferred
+6. Update MEMORY.md: move the epic from Active Epics to Archived Epics, note any unblocked work or follow-up items
+7. Review `/.project/ideas/README.md` for CANDIDATE ideas that may now be unblocked or promoted
 
 **Pre-close verification:**
 1. Read the epic directory -- all story files

@@ -76,13 +76,15 @@ When all stories are verified DONE, the main session executes the following clos
 
 11. **Documentation assessment.** Review the epic's scope against the update triggers in `.claude/rules/documentation.md`. If any trigger fires, spawn docs-writer (if not already on the team) to update affected docs before archiving. If no trigger fires, record "No documentation impact" in the epic's History section. The epic MUST NOT be archived until this assessment is complete and any required doc updates are done.
 
-12. **Archive the epic.** Move the entire epic directory from `/epics/E-NNN-slug/` to `/.project/archive/E-NNN-slug/`. The main session instructs an implementer still on the team to perform this move.
+12. **Context-layer assessment.** Evaluate the epic's impact on the context layer per `.claude/rules/context-layer-assessment.md`. Assess each of the six triggers with an explicit yes/no verdict and record all verdicts in the epic's History section. If any trigger fires, spawn claude-architect (if not already on the team) to codify the findings before archiving. The epic MUST NOT be archived until this assessment is complete and any required codification is done.
 
-13. **Update PM memory.** Move the epic from "Active Epics" to "Archived Epics" in the PM's MEMORY.md. Note any follow-up work or newly unblocked items.
+13. **Archive the epic.** Move the entire epic directory from `/epics/E-NNN-slug/` to `/.project/archive/E-NNN-slug/`. The main session instructs an implementer still on the team to perform this move.
 
-14. **Review ideas backlog.** Check `/.project/ideas/README.md` for CANDIDATE ideas that may now be unblocked or promoted by the epic's completion.
+14. **Update PM memory.** Move the epic from "Active Epics" to "Archived Epics" in the PM's MEMORY.md. Note any follow-up work or newly unblocked items.
 
-15. **Present a summary to the user.** Before ending the dispatch, present a clear summary including:
+15. **Review ideas backlog.** Check `/.project/ideas/README.md` for CANDIDATE ideas that may now be unblocked or promoted by the epic's completion.
+
+16. **Present a summary to the user.** Before ending the dispatch, present a clear summary including:
     - Epic ID and title
     - List of stories completed (with brief descriptions)
     - Key artifacts created or modified
@@ -91,11 +93,11 @@ When all stories are verified DONE, the main session executes the following clos
 
 ### Team Teardown
 
-16. **Shut down all teammates.** Send a `shutdown_request` to each implementing agent on the team. Wait for shutdown confirmations. Delete the team.
+17. **Shut down all teammates.** Send a `shutdown_request` to each implementing agent on the team. Wait for shutdown confirmations. Delete the team.
 
 **After spinning down the team:**
 
-17. **Offer to scan and commit.** After shutting down teammates and deleting the team, the main session offers to run the PII scan and commit the changes. Commit must NOT happen automatically -- the user must explicitly approve before any commit happens.
+18. **Offer to scan and commit.** After shutting down teammates and deleting the team, the main session offers to run the PII scan and commit the changes. Commit must NOT happen automatically -- the user must explicitly approve before any commit happens.
 
 ## Agent Selection for Dispatch
 
