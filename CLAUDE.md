@@ -113,7 +113,7 @@ These are the statistics and dimensions that matter for coaching decisions:
 The authoritative data dictionary mapping all GameChanger stat abbreviations to their definitions is at `docs/gamechanger-stat-glossary.md`. It includes batting, pitching, fielding, catcher, and positional innings stats, plus an API field name mapping table for cases where the API uses different abbreviations than the UI.
 
 ## GameChanger API
-- **Three-token architecture (confirmed 2026-03-07):** CLIENT token (~10 min, anonymous session during login). ACCESS token (~60 min, sent as `gc-token` on all API calls). REFRESH token (14 days, sent as `gc-token` in `POST /auth` refresh calls). The `gc-signature` signing algorithm was fully reverse-engineered on 2026-03-07 -- programmatic token refresh from Python is now confirmed working. The refresh token is self-renewing (each refresh call returns a new refresh token). Credentials in `.env` are now: `GAMECHANGER_REFRESH_TOKEN_WEB`, `GAMECHANGER_CLIENT_ID_WEB`, `GAMECHANGER_CLIENT_KEY_WEB`, `GAMECHANGER_DEVICE_ID_WEB`, `GAMECHANGER_USER_EMAIL`, `GAMECHANGER_USER_PASSWORD`. See `docs/api/auth.md` for the complete auth architecture.
+- **Three-token architecture (confirmed 2026-03-07):** CLIENT token (~10 min, anonymous session during login). ACCESS token (~60 min on web, ~12 hours on mobile, sent as `gc-token` on all API calls). REFRESH token (14 days, sent as `gc-token` in `POST /auth` refresh calls). The `gc-signature` signing algorithm was fully reverse-engineered on 2026-03-07 -- programmatic token refresh from Python is now confirmed working for the web profile. The refresh token is self-renewing (each refresh call returns a new refresh token). Credentials in `.env` are now: `GAMECHANGER_REFRESH_TOKEN_WEB`, `GAMECHANGER_CLIENT_ID_WEB`, `GAMECHANGER_CLIENT_KEY_WEB`, `GAMECHANGER_DEVICE_ID_WEB`, `GAMECHANGER_USER_EMAIL`, `GAMECHANGER_USER_PASSWORD`. **Mobile profile note (2026-03-08):** The mobile (iOS) client ID is different from web (`0f18f027-...` vs `07cb985d-...`); the mobile client key has NOT been extracted from the iOS binary, so programmatic mobile token refresh is not yet possible. See `docs/api/auth.md` for the complete auth architecture.
 - NEVER log, commit, display, or hardcode credentials in source code
 - The API is undocumented; we maintain our own spec at `docs/api/README.md` (index) and per-endpoint files in `docs/api/endpoints/`
 - API limitations are discovered iteratively -- document everything
@@ -177,6 +177,8 @@ These commands manage the mitmproxy process and must be run on the Mac host, not
 - **Ingest endpoint**: When the user says "ingest endpoint" (or similar -- "curl is ready", "new endpoint to analyze"), load `.claude/skills/ingest-endpoint/SKILL.md` and follow its two-phase workflow. The user has placed a curl command in `secrets/gamechanger-curl.txt` and expects api-scout to execute it (time-sensitive -- the `gc-signature` header in POST requests expires within minutes, and curl commands should be executed promptly regardless of token lifetime), then claude-architect to integrate findings into the context layer.
 - **Review epic**: When the user says "review epic" (or similar -- "codex review epic E-NNN", "post-dev review", "code review epic"), load `.claude/skills/review-epic/SKILL.md` and follow its workflow. Runs a codex code review on an epic's implementation changes, then spawns the implementing team to review findings together.
 - **Spec review**: When the user says "spec review" (or similar -- "review the spec for E-NNN", "codex spec review", "run spec review on E-NNN"), load `.claude/skills/spec-review/SKILL.md` and follow its two-phase workflow. Phase 1 runs the codex spec review script to generate findings. Phase 2 spawns a PM-led review team with domain experts to triage the findings.
+- **Codex code review prompt**: When the user says "codex review prompt" (or similar -- "generate codex review prompt", "code review prompt", "build me a codex review prompt"), load `.claude/skills/codex-prompt-code/SKILL.md` and follow its workflow. Assembles a self-contained code review prompt (diff + rubric + agent roster) for the user to copy-paste into Codex.
+- **Codex spec review prompt**: When the user says "codex spec review prompt" (or similar -- "generate codex spec review prompt", "spec review prompt for E-NNN", "build me a spec review prompt"), load `.claude/skills/codex-prompt-spec/SKILL.md` and follow its workflow. Assembles a self-contained spec review prompt (epic/story files + rubric + agent roster) for the user to copy-paste into Codex.
 
 ## App Troubleshooting
 
@@ -398,6 +400,7 @@ This project uses specialized agents coordinated by the product-manager:
 | **software-engineer** | SE | Python implementation, testing, general coding work |
 | **docs-writer** | | Documentation specialist for admin/developer and coaching staff audiences. Writes and maintains human-readable documentation in `docs/admin/` and `docs/coaching/`. |
 | **ux-designer** | | UX/interface designer for coaching dashboard and UI work. Designs layouts, wireframes, component structure, and user flows for server-rendered HTML (Jinja2 + Tailwind). |
+| **code-reviewer** | | Adversarial code reviewer -- verifies ACs and code quality before stories are marked DONE during dispatch. Spawned automatically by the implement skill; does not write or edit code. |
 
 ### How Agents Collaborate
 - **baseball-coach** produces domain requirements that inform stories and data models
@@ -405,7 +408,17 @@ This project uses specialized agents coordinated by the product-manager:
 - **data-engineer** designs schemas informed by both baseball-coach requirements and api-scout discoveries
 - **software-engineer** implements stories, referencing specs produced by other agents
 - **product-manager** discovers requirements, consults domain experts, writes epics and stories, and closes completed work. During dispatch, the main session coordinates implementers directly.
+- **code-reviewer** reviews every code story during dispatch before it can be marked DONE. Routes MUST FIX findings back through the main session to implementers. SHOULD FIX findings are recorded in epic History during closure, not relayed to implementers.
 - Any agent that identifies future work should flag it to the PM for idea capture rather than creating speculative epics
+
+### Main Session Compliance
+
+When the user explicitly names agents, the main session MUST follow the procedural checkpoints in `.claude/rules/agent-team-compliance.md`:
+- **Explicit Team Request**: User names 2+ agents -- MUST use TeamCreate and spawn each named agent.
+- **Explicit Consultation Directive**: User names a specific agent to consult -- MUST spawn that agent and use their actual response.
+- **Anti-Fabrication Rule**: A spawned agent cannot reach another agent -- MUST spawn the missing agent directly rather than answering on their behalf.
+
+These patterns apply to explicit agent naming only, not to domain-implied advisory consultation.
 
 ### Workflow Contract
 
@@ -415,7 +428,7 @@ All routed work follows this contract:
 2. **PM consults experts during formation.** Before writing stories, PM consults domain experts as needed. When not required, PM notes the reason.
 3. **PM marks the epic `READY` when refinement is complete.** `DRAFT` epics are not dispatchable.
 4. **"Ready for dev" = `Status: TODO` in a `READY` epic.** No story file means no implementation work begins.
-5. **Main session creates the dispatch team and spawns implementers directly.** The main session acts as both spawner and coordinator during dispatch -- assigning stories, managing statuses, verifying acceptance criteria, and cascading to newly unblocked stories. PM is not spawned as a teammate during dispatch. See `/.claude/rules/dispatch-pattern.md`.
+5. **Main session creates the dispatch team and spawns implementers + code-reviewer directly.** The main session acts as both spawner and coordinator during dispatch -- assigning stories, routing completed code stories through the code-reviewer for AC verification and quality review, managing statuses, and cascading to newly unblocked stories. PM is not spawned as a teammate during dispatch. See `/.claude/rules/dispatch-pattern.md`.
 6. **Implementing agents require a story reference.** Must receive a story file path or story ID before beginning any task.
 
 **Enforcement Boundary**: The user always retains override authority to invoke any agent directly; this contract governs the normal orchestrated path.

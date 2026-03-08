@@ -3,8 +3,8 @@
 ## Numbering State
 - Next available epic number: E-077
 - Epics created: E-001 through E-076 (E-001, E-003, E-005, E-006, E-007, E-008, E-010, E-011, E-012, E-013, E-014, E-015, E-016, E-017, E-018, E-019, E-020, E-021, E-022, E-024, E-025, E-026, E-027, E-028, E-029, E-030, E-031, E-032, E-033, E-034, E-035, E-036, E-037, E-038, E-042, E-044, E-046, E-048, E-049, E-050, E-052, E-053, E-054, E-056, E-057, E-058, E-055, E-059, E-060, E-061 archived)
-- Next available idea number: IDEA-015
-- Ideas created: IDEA-001 through IDEA-014
+- Next available idea number: IDEA-016
+- Ideas created: IDEA-001 through IDEA-015
 
 ## Project Context
 - Project: baseball-crawl -- GameChanger API -> database -> coaching dashboard
@@ -18,14 +18,14 @@
 - E-041 (DRAFT): Evaluate json-render -- research epic. 1 spike (R-01: fit assessment) + 1 decision gate (99). Needs expert consultation (UX designer, software engineer) before READY.
 - E-068 (READY): Vision Stewardship -- 5 stories. Vision signal parking lot (docs/vision-signals.md), recognition rule (.claude/rules/vision-signals.md), dispatch closure sequence step, PM agent def expansion, CLAUDE.md references. All context-layer work via claude-architect. Waves: 01 -> 02+03+04 parallel -> 05. Architectural review confirmed all step numbers, section names, and file locations match current reality.
 - E-070 (READY): RTK Token Optimization Integration -- 1 story. Add rtk binary install + hook init to devcontainer postCreateCommand. Reduces token consumption 60-90% on common dev commands. Pure SE work, single file change (devcontainer.json).
-- E-071 (READY): Code Review Agent -- 2 stories. Dedicated code-reviewer agent (sonnet, Read/Glob/Grep/Bash only) with adversarial stance, embedded rubric, structured findings format, circuit breaker (max 2 rounds). Integrates into dispatch workflow: implementer completes -> reviewer examines -> findings loop -> DONE. Two-layer defense in depth (Layer 1: per-story automatic review, Layer 2: existing codex review). All context-layer work via claude-architect. Wave: 01 -> 02. CA consulted.
 - E-072 (READY): Proxy Session Ingestion Skill -- 2 stories. New workflow skill at .claude/skills/ingest-session/SKILL.md. Processes mitmproxy sessions: reads endpoint-log JSONL, compares against docs/api/endpoints/ to find unknowns, auto-detects web/mobile profile, guides operator through selective raw data capture, references ingest-endpoint for single-endpoint follow-up. CLAUDE.md Workflows entry. All context-layer work via claude-architect. Wave: 01 -> 02.
 - E-073 (READY): API Documentation Validation Sweep -- 5 stories. Systematic validation of all 90 endpoint docs against proxy captures and live API calls. Frontmatter validation script (01), web profile live endpoint validation (02), auth flow programmatic validation with gc-signature (03), mobile proxy capture analysis (04), documentation correction sweep (05). Wave: 01+02+03 parallel -> 04 (soft dep on 02) -> 05 (depends on 01+02+03). SE + api-scout dispatch team. No expert consultation required.
-- E-074 (READY): Codex Review Prompt Generator Skill -- 3 stories. Two separate skill files: .claude/skills/codex-prompt-code/SKILL.md (code review) and .claude/skills/codex-prompt-spec/SKILL.md (spec review). Static agent roster table (not dynamic reads). Untracked file content inclusion. Three-tier size thresholds. Two CLAUDE.md Workflows entries. All context-layer work via claude-architect. Wave: 01+02 parallel -> 03. CA + SE consulted.
 - E-075 (ACTIVE): Mobile Profile Credential Capture and Validation -- 1 research spike + 3 stories. Research mobile auth flow (R-01), align credential env var names (01), add gc-client-id + response body capture to proxy addon (02), mobile credential validation script (03). Wave 1: R-01 + 01 parallel. Wave 2: 02 + 03 parallel (both depend on R-01 + 01). SE + api-scout dispatch team. No expert consultation required.
 - E-076 (READY): Main Session Compliance Guardrails -- 2 stories. New `.claude/rules/agent-team-compliance.md` with 3 pattern-action checkpoints (Explicit Team Request, Explicit Consultation Directive, Anti-Fabrication Rule) using trigger/required/prohibited format. Cross-references from workflow-discipline.md and CLAUDE.md. All context-layer work via claude-architect. Wave: 01 -> 02. CA consulted: confirmed 3-file scope, recommended 3 patterns (not 2), trigger/required/prohibited format, rationale section.
 
 ## Archived Epics
+- E-074 (COMPLETED): Codex Review Prompt Generator Skill -- 3 stories. Two new skills (codex-prompt-code, codex-prompt-spec) for generating copy-paste Codex review prompts. Static agent roster, size thresholds, untracked file contents. Two CLAUDE.md Workflows entries. All context-layer work via claude-architect. No follow-up work.
+- E-071 (COMPLETED): Code Review Agent -- 2 stories. New code-reviewer agent (sonnet, Read/Glob/Grep/Bash only, magenta) with adversarial stance, embedded 7-priority rubric, structured findings format, circuit breaker (max 2 rounds). Integrated into dispatch workflow: implementer completes with Files Changed -> context-layer check -> reviewer examines -> findings loop -> DONE. Two-layer defense in depth preserved (Layer 1: per-story automatic, Layer 2: existing codex review). All context-layer work via claude-architect. Key artifacts: .claude/agents/code-reviewer.md, updated implement SKILL.md, dispatch-pattern.md, workflow-discipline.md, CLAUDE.md. No follow-up work.
 - E-069 (COMPLETED): Fix E-064 Residual Bugs -- 2 stories. `_skip_guard` parameter on `reset_database()` to eliminate double production guard in `bb db reset`. Moved `logging.basicConfig()` inside `if __name__ == "__main__"` in `apply_migrations.py` to fix root logger mutation on import. 8 subprocess smoke tests for standalone scripts. New test files: `tests/test_db_reset_guards.py` (14 tests), `tests/test_script_entry_points.py` (8 tests). No follow-up work.
 - E-067 (COMPLETED): Context-Layer Assessment Gate -- 1 story. Added mandatory context-layer assessment gate to epic closure sequence. New rule file (.claude/rules/context-layer-assessment.md) with 6 triggers and per-trigger verdict procedure. Updated dispatch-pattern.md, implement SKILL.md, workflow-discipline.md, product-manager.md. No follow-up work.
 - E-066 (COMPLETED): Devcontainer Terminal Setup -- 5 stories. ZSH default shell via chsh + dual rc env injection + 4 Oh My Zsh plugins (01), tmux install + VS Code-compatible .tmux.conf (03), VS Code terminal profiles with icons/colors (02), CLAUDE.md dual-shell contract + terminal modes sections (04, claude-architect), operator terminal guide at docs/admin/terminal-guide.md (05, docs-writer). IDEA-013 blocker cleared (E-066 complete). No follow-up work.
@@ -132,6 +132,7 @@
 | IDEA-012 | Crawl Orchestration and Scheduling System | CANDIDATE | 2026-06-06 | Recurring crawl scheduling, credential rotation awareness, run history, alerting. Trigger: operator has run bootstrap 5+ times manually OR season starts. E-050 blocker cleared; E-042 blocker cleared. All blockers resolved -- promotable. |
 | IDEA-013 | cmux Evaluation for Agent Teams | CANDIDATE | 2026-06-07 | Phase 5 of terminal setup consensus. Blocked by E-066 + operator experience with iTerm2+tmux Heavy mode. |
 | IDEA-014 | Mobile vs. Web API Documentation Split | CANDIDATE | 2026-06-05 | Refine docs/api/endpoints/ to better differentiate mobile vs. web behavior. Related to E-072 and IDEA-011. Trigger: 3+ endpoints with meaningfully divergent per-profile behavior. |
+| IDEA-015 | Programmatic Auth Module | CANDIDATE | 2026-06-06 | Productionize gc-signature + token refresh + auto-refresh in GameChangerClient. Hard dep for IDEA-012 (crawl scheduling). Sequenced after E-075 + auth script refresh. |
 
 ## Key Workflow Contract
 - Routing model: planning (user -> PM), dispatch (user/main session -> implementers directly). PM plans and closes; main session dispatches. (E-065 merged roles)
@@ -141,7 +142,7 @@
 - Dispatch: Main session creates team, spawns implementers directly (no PM teammate), assigns stories, verifies ACs, runs closure sequence. See /.claude/rules/dispatch-pattern.md.
 - Direct-routing exceptions (no PM needed): api-scout, baseball-coach, claude-architect
 - Implementing agents needing work auth: software-engineer, data-engineer, docs-writer
-- Agent ecosystem: 8 agents (claude-architect, product-manager, baseball-coach, api-scout, data-engineer, software-engineer, docs-writer, ux-designer)
+- Agent ecosystem: 9 agents (claude-architect, product-manager, baseball-coach, api-scout, data-engineer, software-engineer, docs-writer, ux-designer, code-reviewer)
 - Before assigning epic numbers: ALWAYS ls /epics/ to avoid numbering collisions
 
 ## Detailed Notes (Separate Files)
