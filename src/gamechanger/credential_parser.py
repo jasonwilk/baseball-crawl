@@ -6,7 +6,7 @@ auth credentials.  The output is a flat ``dict[str, str]`` mapping .env key
 names to values -- ready to be merged into a ``.env`` file.
 
 Header-to-.env key mapping (curl-paste path is web-only):
-    gc-token        -> GAMECHANGER_REFRESH_TOKEN_WEB    (primary JWT, required)
+    gc-token        -> GAMECHANGER_REFRESH_TOKEN_WEB    (refresh token only; access tokens are rejected)
     gc-device-id    -> GAMECHANGER_DEVICE_ID_WEB
     gc-app-name     -> GAMECHANGER_APP_NAME_WEB
     Cookie / -b     -> GAMECHANGER_COOKIE_<NAME> (one entry per cookie)
@@ -19,11 +19,41 @@ Headers that are skipped (per-request, not persistent credentials):
 
 from __future__ import annotations
 
+import base64
+import json
 import logging
 import shlex
 from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
+
+
+def _decode_jwt_type(token: str) -> str | None:
+    """Decode the JWT payload and return the ``type`` field, or None if absent.
+
+    The JWT spec uses three dot-separated Base64url segments: header.payload.signature.
+    We only need segment 1 (the payload).  Missing or malformed tokens return None
+    rather than raising -- callers handle the ambiguous case with a warning.
+
+    Args:
+        token: Raw JWT string.
+
+    Returns:
+        The ``type`` field value (e.g. ``"user"`` for access tokens), or ``None``
+        if the field is absent (refresh tokens have no ``type`` field) or the token
+        cannot be decoded.
+    """
+    try:
+        parts = token.split(".")
+        if len(parts) < 2:
+            return None
+        # Base64url: replace URL-safe chars and add padding.
+        payload_b64 = parts[1].replace("-", "+").replace("_", "/")
+        payload_b64 += "=" * (4 - len(payload_b64) % 4)
+        payload = json.loads(base64.b64decode(payload_b64))
+        return payload.get("type")
+    except Exception:
+        return None
 
 # Headers that carry persistent credentials and the .env key to store them under.
 # The curl-paste path is inherently web-only, so keys use the _WEB suffix.
@@ -209,6 +239,29 @@ def _process_header(header_raw: str, credentials: dict[str, str]) -> None:
     # Credential headers with an explicit mapping.
     if name_lower in _CREDENTIAL_HEADERS:
         env_key = _CREDENTIAL_HEADERS[name_lower]
+        # For gc-token, verify it is a refresh token (no 'type' field in payload).
+        # Access tokens (type == "user") must NOT be saved as GAMECHANGER_REFRESH_TOKEN_*.
+        if name_lower == "gc-token":
+            token_type = _decode_jwt_type(value)
+            if token_type == "user":
+                logger.warning(
+                    "gc-token header contains an access token (type='user'), not a refresh token. "
+                    "Access tokens expire in ~60 minutes and cannot be used for programmatic refresh. "
+                    "To capture a refresh token, copy a curl command from a POST /auth request in "
+                    "browser dev tools (Network tab -> filter by 'auth' -> right-click -> Copy as cURL). "
+                    "Skipping -- %s will NOT be updated.",
+                    env_key,
+                )
+                return
+            if token_type is not None:
+                # Unknown type field (e.g. "client") -- also skip with a warning.
+                logger.warning(
+                    "gc-token header contains an unexpected token type=%r. "
+                    "Expected a refresh token (no 'type' field). Skipping -- %s will NOT be updated.",
+                    token_type,
+                    env_key,
+                )
+                return
         credentials[env_key] = value
         logger.debug("Extracted %s from header %r", env_key, name)
         return

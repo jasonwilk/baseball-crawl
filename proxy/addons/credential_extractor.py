@@ -17,7 +17,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from proxy.addons import gc_filter
-from src.gamechanger.credential_parser import merge_env_file
+from src.gamechanger.credential_parser import _decode_jwt_type, merge_env_file
 
 if TYPE_CHECKING:
     from mitmproxy import http
@@ -113,8 +113,23 @@ class CredentialExtractor:
         credentials: dict[str, str] = {}
         for header_name, env_key in header_to_env_key.items():
             value = flow.request.headers.get(header_name)
-            if value:
-                credentials[env_key] = value
+            if not value:
+                continue
+            # For gc-token, verify it is a refresh token (no 'type' field in payload).
+            # Standard API requests carry an access token (type='user'); only POST /auth
+            # refresh calls carry a refresh token.  Saving an access token in the refresh
+            # slot would cause programmatic refresh to fail.
+            if header_name == "gc-token":
+                token_type = _decode_jwt_type(value)
+                if token_type is not None:
+                    logger.warning(
+                        "gc-token header contains a %r token, not a refresh token -- skipping %s. "
+                        "Only POST /auth requests carry refresh tokens.",
+                        token_type,
+                        env_key,
+                    )
+                    continue
+            credentials[env_key] = value
 
         if not credentials:
             return

@@ -242,11 +242,9 @@ class GameChangerClient:
                     break
 
                 if response.status_code == 401:
-                    try:
-                        new_token = self._token_manager.force_refresh()
-                        self._session.headers["gc-token"] = new_token
-                    except (AuthSigningError, CredentialExpiredError):
-                        pass
+                    # Re-raise immediately if refresh fails -- don't retry with stale token.
+                    new_token = self._token_manager.force_refresh()
+                    self._session.headers["gc-token"] = new_token
                     retry_response = self._session.get(
                         url, params=current_params, timeout=timeout, headers=extra_headers
                     )
@@ -398,11 +396,9 @@ class GameChangerClient:
                 return response.json()
 
             if response.status_code == 401:
-                try:
-                    new_token = self._token_manager.force_refresh()
-                    self._session.headers["gc-token"] = new_token
-                except (AuthSigningError, CredentialExpiredError):
-                    pass
+                # Re-raise immediately if refresh fails -- don't retry with stale token.
+                new_token = self._token_manager.force_refresh()
+                self._session.headers["gc-token"] = new_token
                 retry_response = self._session.get(
                     url, params=params, timeout=timeout, headers=headers
                 )

@@ -295,6 +295,47 @@ class TestEnvWriteBack:
 
 
 class TestMobileFallback:
+    def test_force_refresh_without_client_key_raises_auth_signing_error(
+        self, tmp_path: Path
+    ) -> None:
+        """force_refresh() on mobile no-key profile raises AuthSigningError immediately."""
+        manual_token = "eyJMANUAL.access.token"
+        tm = TokenManager(
+            profile="mobile",
+            client_id=None,
+            client_key=None,
+            refresh_token=None,
+            device_id=_DEVICE_ID,
+            base_url=_BASE_URL,
+            access_token=manual_token,
+            env_path=tmp_path / ".env",
+        )
+        with pytest.raises(AuthSigningError, match="client key"):
+            tm.force_refresh()
+
+    def test_force_refresh_without_client_key_not_assertion_error(
+        self, tmp_path: Path
+    ) -> None:
+        """force_refresh() on mobile no-key profile raises AuthSigningError, not AssertionError."""
+        manual_token = "eyJMANUAL.access.token"
+        tm = TokenManager(
+            profile="mobile",
+            client_id=None,
+            client_key=None,
+            refresh_token=None,
+            device_id=_DEVICE_ID,
+            base_url=_BASE_URL,
+            access_token=manual_token,
+            env_path=tmp_path / ".env",
+        )
+        try:
+            tm.force_refresh()
+            pytest.fail("Expected AuthSigningError to be raised")
+        except AuthSigningError:
+            pass  # expected
+        except AssertionError:
+            pytest.fail("force_refresh() raised AssertionError -- no-key guard missing")
+
     def test_manual_access_token_returned_directly(self, tmp_path: Path) -> None:
         manual_token = "eyJMANUAL.access.token"
         tm = TokenManager(

@@ -207,14 +207,16 @@ class TokenManager:
             A new valid access token JWT string.
 
         Raises:
-            CredentialExpiredError: If mobile profile has no client key (cannot
-                refresh programmatically), or if POST /auth returns HTTP 401.
-            AuthSigningError: If POST /auth returns HTTP 400 (bad signature).
+            AuthSigningError: If no client key is available (mobile no-key path),
+                or if POST /auth returns HTTP 400 (bad signature).
+            CredentialExpiredError: If POST /auth returns HTTP 401 (bad token).
         """
         if self._client_key is None:
-            raise CredentialExpiredError(
-                "Mobile profile cannot refresh programmatically -- client key not available. "
-                "Capture a new access token manually and set GAMECHANGER_ACCESS_TOKEN_MOBILE in .env."
+            raise AuthSigningError(
+                f"Programmatic token refresh is not available for the {self._profile} profile "
+                "because the client key has not been configured. "
+                f"Capture a fresh access token manually and set "
+                f"GAMECHANGER_ACCESS_TOKEN_{self._profile.upper()} in .env."
             )
         logger.debug("Force-refreshing access token for %s profile", self._profile)
         return self._do_refresh()
