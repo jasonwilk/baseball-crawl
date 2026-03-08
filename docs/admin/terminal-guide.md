@@ -94,7 +94,9 @@ The standard session name for this project is `baseball`.
 | Close pane | `exit` or `Ctrl+D` | |
 | Zoom pane (full screen) | `Ctrl+A z` *(default: `Ctrl+B z`)* | Press again to unzoom |
 
-### Windows
+### Windows (tmux's version of tabs)
+
+tmux "windows" are the equivalent of browser tabs or iTerm2 tabs. Each window is a full-screen workspace inside a session. The window list appears in the tmux status bar at the bottom.
 
 | Action | Key |
 |--------|-----|
@@ -103,6 +105,31 @@ The standard session name for this project is `baseball`.
 | Previous window | `Ctrl+A p` *(default: `Ctrl+B p`)* |
 | Select window by number | `Ctrl+A 1`, `Ctrl+A 2`, etc. |
 | Rename window | `Ctrl+A ,` *(default: `Ctrl+B ,`)* |
+| List windows interactively | `Ctrl+A w` *(default: `Ctrl+B w`)* |
+| Close window | `exit` in the last pane, or `Ctrl+A &` to force-kill *(default: `Ctrl+B &`)* |
+
+**Typical workflow**: Open a window per concern -- one for Claude Code, one for tests, one for logs. Use `Ctrl+A 1`/`2`/`3` to jump directly, or `Ctrl+A n`/`p` to cycle. Rename windows with `Ctrl+A ,` so the status bar shows meaningful names instead of "1:zsh".
+
+#### VS Code Integrated Terminal
+
+`Ctrl+A` conflicts with VS Code's "Select All" binding. Two workarounds:
+
+1. **Remap VS Code's Select All** so it does not intercept `Ctrl+A` inside the terminal. In VS Code settings, add a keybinding that disables `Ctrl+A` when the terminal is focused.
+2. **Use the default tmux prefix instead.** If you only use tmux from VS Code, you can change the prefix back to `Ctrl+B` by editing `~/.tmux.conf` and commenting out the `set -g prefix C-a` line.
+
+If neither workaround appeals, use the command-line equivalents:
+
+```bash
+tmux new-window              # same as Ctrl+A c
+tmux select-window -t 1     # same as Ctrl+A 1
+tmux next-window             # same as Ctrl+A n
+tmux previous-window         # same as Ctrl+A p
+tmux rename-window "logs"    # same as Ctrl+A ,
+```
+
+#### iTerm2 (Heavy Mode)
+
+No conflicts -- `Ctrl+A` passes through cleanly to tmux. All keybindings in the table above work as written. iTerm2's own tab system (`Cmd+T`, `Cmd+1`/`2`/`3`) is separate from tmux windows. When running tmux inside iTerm2, use tmux windows for multiplexing and ignore iTerm2 tabs (or use iTerm2 tabs for entirely separate sessions outside the devcontainer).
 
 ### Project Configuration Summary
 
