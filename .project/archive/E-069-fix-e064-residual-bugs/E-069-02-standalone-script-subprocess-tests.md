@@ -4,7 +4,7 @@
 [E-069: Fix E-064 Residual Bugs](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, all standalone operator scripts in `scripts/` will have subprocess smoke tests that verify they can be invoked directly without import errors or side effects. This closes the testing gap that allowed the E-064 logging regression to ship undetected.
@@ -21,6 +21,8 @@ E-064 added subprocess smoke tests for the `bb` console script entry point (e.g.
 - [ ] **AC-6**: `scripts/reset_dev_db.py --help` exits with code 0 in a subprocess test.
 - [ ] **AC-7**: Each test uses `subprocess.run()` with `capture_output=True` and asserts on `returncode`, following the pattern established in `tests/test_cli.py` for `bb` subprocess tests.
 - [ ] **AC-8**: All existing tests continue to pass.
+- [ ] **AC-9**: `scripts/refresh_credentials.py --help` exits with code 0 in a subprocess test.
+- [ ] **AC-10**: `scripts/smoke_test.py --help` exits with code 0 in a subprocess test.
 
 ## Technical Approach
 
@@ -31,7 +33,7 @@ The tests should go in a new test file or a new section of an existing test file
 **Reference**: `/workspaces/baseball-crawl/tests/test_cli.py` lines 92-158 for the existing `bb` subprocess smoke test pattern.
 
 ## Dependencies
-- **Blocked by**: E-069-01 (the logging fix ensures `reset_dev_db.py --help` produces clean output)
+- **Blocked by**: E-069-01 (logical ordering dependency -- the `--help` subprocess tests would pass even without the logging fix since `basicConfig()` installs a handler but does not produce visible output, but the dependency ensures correct sequencing and makes the test suite more meaningful)
 - **Blocks**: None
 
 ## Files to Create or Modify
@@ -49,3 +51,4 @@ software-engineer
 ## Notes
 - Scripts that require credentials or database access should still exit 0 on `--help` since help display does not trigger business logic.
 - `scripts/proxy-refresh-headers.py` and the bash scripts (`proxy-report.sh`, etc.) are out of scope -- this story covers only the Python scripts that import from `src/`.
+- Additional Python scripts in `scripts/` (`seed_dev.py`, `validate_api_docs.py`) are out of scope because they do not support `--help` (no argparse/click/typer).

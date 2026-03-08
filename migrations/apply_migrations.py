@@ -30,11 +30,6 @@ from pathlib import Path
 # Logging
 # ---------------------------------------------------------------------------
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s [migrations] %(message)s",
-    datefmt="%Y-%m-%dT%H:%M:%S",
-)
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -191,6 +186,11 @@ def run_migrations(db_path: Path | None = None) -> None:
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s [migrations] %(message)s",
+        datefmt="%Y-%m-%dT%H:%M:%S",
+    )
     try:
         run_migrations()
     except Exception as exc:

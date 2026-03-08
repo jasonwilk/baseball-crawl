@@ -53,17 +53,16 @@ def reset(
     ),
 ) -> None:
     """Drop and recreate the database. All data will be lost."""
-    # Production guard fires BEFORE the confirmation prompt.
-    # Logic lives in src/db/reset.py (single authoritative location).
+    # Production guard fires BEFORE the confirmation prompt so the user is
+    # never asked to confirm a reset that will be blocked anyway.
+    # check_production_guard() calls sys.exit(1) on failure; catch and convert
+    # to a clean Typer exit.  On success, pass _skip_guard=True to
+    # reset_database() so the guard does not fire a second time.
     try:
         check_production_guard(force=force)
-    except SystemExit:
-        err_console.print(
-            "[red]APP_ENV=production detected. "
-            "Pass --force to confirm reset. "
-            "This is a destructive operation.[/red]"
-        )
-        raise typer.Exit(code=1)
+    except SystemExit as exc:
+        code = exc.code if isinstance(exc.code, int) else 1
+        raise typer.Exit(code=code) from exc
 
     # Interactive confirmation for all environments unless --force.
     if not force:
@@ -73,10 +72,7 @@ def reset(
         )
 
     try:
-        tables, rows = reset_database(db_path=db_path, force=force)
-    except SystemExit as exc:
-        code = exc.code if isinstance(exc.code, int) else 1
-        raise typer.Exit(code=code) from exc
+        tables, rows = reset_database(db_path=db_path, force=force, _skip_guard=True)
     except FileNotFoundError as exc:
         err_console.print(f"[red]Seed file error: {exc}[/red]")
         raise typer.Exit(code=1) from exc

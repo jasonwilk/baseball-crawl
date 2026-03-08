@@ -81,7 +81,7 @@ class TestDbReset:
         with patch("src.cli.db.reset_database", return_value=(5, 42)) as mock_fn:
             result = runner.invoke(app, ["db", "reset", "--force"])
         assert result.exit_code == 0
-        mock_fn.assert_called_once_with(db_path=None, force=True)
+        mock_fn.assert_called_once_with(db_path=None, force=True, _skip_guard=True)
 
     def test_reset_prints_summary_on_success(self) -> None:
         """Output contains tables created and rows inserted counts."""
@@ -96,7 +96,7 @@ class TestDbReset:
         with patch("src.cli.db.reset_database", return_value=(3, 10)) as mock_fn:
             result = runner.invoke(app, ["db", "reset", "--force", "--db-path", str(db_file)])
         assert result.exit_code == 0
-        mock_fn.assert_called_once_with(db_path=db_file, force=True)
+        mock_fn.assert_called_once_with(db_path=db_file, force=True, _skip_guard=True)
 
     def test_reset_without_force_triggers_confirmation_prompt(self) -> None:
         """Without --force, the confirmation prompt appears."""
@@ -127,12 +127,17 @@ class TestDbReset:
         assert result.exit_code == 1
         mock_fn.assert_not_called()
 
-    def test_reset_production_guard_fires_before_prompt(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Production guard output appears; confirmation prompt does NOT."""
+    def test_reset_production_guard_fires_before_prompt(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Production guard logs an error; confirmation prompt does NOT appear."""
+        import logging
+
         monkeypatch.setenv("APP_ENV", "production")
         with patch("src.cli.db.reset_database", return_value=(5, 42)):
-            result = runner.invoke(app, ["db", "reset"])
-        assert "production" in result.output.lower() or "APP_ENV" in result.output
+            with caplog.at_level(logging.ERROR, logger="src.db.reset"):
+                result = runner.invoke(app, ["db", "reset"])
+        assert any("production" in r.message.lower() for r in caplog.records)
         assert "Confirm?" not in result.output
 
     def test_reset_production_with_force_succeeds(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -141,7 +146,7 @@ class TestDbReset:
         with patch("src.cli.db.reset_database", return_value=(5, 42)) as mock_fn:
             result = runner.invoke(app, ["db", "reset", "--force"])
         assert result.exit_code == 0
-        mock_fn.assert_called_once_with(db_path=None, force=True)
+        mock_fn.assert_called_once_with(db_path=None, force=True, _skip_guard=True)
 
     def test_reset_file_not_found_exits_1(self) -> None:
         """FileNotFoundError (missing seed file) exits 1."""

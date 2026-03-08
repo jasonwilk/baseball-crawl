@@ -153,27 +153,39 @@ def load_seed(db_path: Path, seed_file: Path) -> int:
     return total_rows
 
 
-def reset_database(db_path: Path | None = None, force: bool = False) -> tuple[int, int]:
+def reset_database(
+    db_path: Path | None = None,
+    force: bool = False,
+    _skip_guard: bool = False,
+) -> tuple[int, int]:
     """Orchestrate a full database reset: delete, migrate, seed.
 
     This is the public entry point for programmatic use (e.g., from the CLI).
-    The production guard is handled here; callers do not need to call it separately.
+    The production guard runs internally unless ``_skip_guard=True`` is passed.
+    Direct callers (e.g., scripts) should leave ``_skip_guard`` at its default
+    so the guard still protects them.  The CLI passes ``_skip_guard=True`` after
+    calling ``check_production_guard()`` directly for correct sequencing (guard
+    before confirmation prompt).
 
     Args:
         db_path: Path to the database file.  Uses ``get_db_path()`` if None.
-        force: If True, bypasses the production guard.
+        force: If True, bypasses the production guard (only used when
+            ``_skip_guard`` is False).
+        _skip_guard: Internal flag.  When True, the internal
+            ``check_production_guard()`` call is skipped.  Default False.
 
     Returns:
         Tuple of (tables_created, rows_inserted).
 
     Raises:
-        SystemExit: If APP_ENV=production and force is False.
+        SystemExit: If APP_ENV=production, force is False, and _skip_guard is False.
         FileNotFoundError: If the seed file is missing.
     """
     if db_path is None:
         db_path = get_db_path()
 
-    check_production_guard(force=force)
+    if not _skip_guard:
+        check_production_guard(force=force)
 
     logger.info("Resetting database at: %s", db_path)
 
