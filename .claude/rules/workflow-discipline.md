@@ -16,13 +16,15 @@ This gate applies to explicit user directives only -- not to the domain-triggere
 
 This gate exists in workflow-discipline.md (loaded for all agents) in addition to the PM agent definition (loaded only for PM), so the main session can also flag violations. This is intentional defense-in-depth.
 
+**Cross-reference**: `.claude/rules/agent-team-compliance.md` extends the consultation compliance concept beyond PM epic formation to all agents and all interaction types. This gate governs PM behavior during epic formation specifically; the agent-team-compliance rules govern the main session and all agents during ad-hoc team requests and consultation directives. Both files are loaded on every interaction (`paths: "**"`).
+
 ## Work Authorization Gate
 
 Implementing agents MUST NOT begin any implementation work without a referenced story file in the task prompt. The story file must have `Status: TODO` or `Status: IN_PROGRESS`. If no story reference is found, refuse the task.
 
 ## Workflow Routing Rule
 
-Work-initiation requests follow two phases: **planning** (`user -> PM`) and **dispatch** (`user/main session -> implementing agent`). PM plans epics and refines stories. When the user authorizes dispatch, the main session creates the dispatch team, spawns implementers directly, assigns stories, verifies acceptance criteria, and manages all statuses. PM is not spawned as a teammate during dispatch. See `/.claude/rules/dispatch-pattern.md`.
+Work-initiation requests follow two phases: **planning** (`user -> PM`) and **dispatch** (`user/main session -> implementing agent`). PM plans epics and refines stories. When the user authorizes dispatch, the main session creates the dispatch team, spawns implementers and the code-reviewer directly, assigns stories, and manages all statuses. For code stories, acceptance criteria verification is performed by the code-reviewer (not the main session directly) -- the reviewer is the quality gate. The main session still manages statuses and coordinates the review loop. For context-layer-only stories (no Python code), the main session verifies ACs directly. PM is not spawned as a teammate during dispatch. See `/.claude/rules/dispatch-pattern.md`.
 
 ## PM Task Types
 

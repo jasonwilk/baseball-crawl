@@ -7,14 +7,14 @@ paths:
 
 ## Main Session Dispatch Responsibility
 
-**The main session (user-facing agent) acts as both spawner and coordinator during dispatch.** It creates teams, spawns implementers, assigns stories, verifies acceptance criteria, manages statuses, and runs the closure sequence. There is no separate PM teammate during dispatch.
+**The main session (user-facing agent) acts as both spawner and coordinator during dispatch.** It creates teams, spawns implementers and the code-reviewer, assigns stories, routes completed work through the review loop, manages statuses, and runs the closure sequence. There is no separate PM teammate during dispatch.
 
 When the user requests epic or story execution, the main session:
 
 1. **Reads the epic** to determine team composition (from the Dispatch Team section or the routing table).
-2. **Creates the team** via `TeamCreate` and spawns all implementing agents listed in the epic's Dispatch Team section.
+2. **Creates the team** via `TeamCreate` and spawns all implementing agents listed in the epic's Dispatch Team section, plus the code-reviewer (spawned automatically).
 3. **Assigns stories** directly to implementers with full context blocks (story file text + Technical Notes).
-4. **Monitors completion**, verifies acceptance criteria, manages statuses, and cascades to newly unblocked stories.
+4. **Monitors completion**, routes code stories through the code-reviewer, manages statuses, and cascades to newly unblocked stories.
 
 **If an implementer spawn fails**, follow the Dispatch Failure Protocol in `workflow-discipline.md`: report to the user and ask how to proceed. Do not improvise.
 
@@ -24,11 +24,13 @@ This project uses **Agent Teams** (`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`) for
 
 ## Team Composition
 
-Every dispatch team has two roles:
+Every dispatch team has three roles:
 
-1. **Main session (spawner + coordinator)** -- The user-facing agent. Creates the team, spawns implementers, assigns stories with full context blocks, verifies acceptance criteria, manages all status updates, and runs the closure sequence. Combines the spawning and coordination responsibilities into a single role.
+1. **Main session (spawner + coordinator)** -- The user-facing agent. Creates the team, spawns implementers and the code-reviewer, assigns stories with full context blocks, routes completed work to the reviewer, manages all status updates, and runs the closure sequence.
 
 2. **Specialist agents (implementers)** -- Spawned by the main session based on the epic's Dispatch Team section (or the routing table). These do the actual work: writing code, designing schemas, configuring agents, etc. The main session assigns their stories directly.
+
+3. **Code-reviewer (quality gate)** -- Persistent per-epic, spawned automatically by the implement skill alongside implementers. Reviews every code story before it can be marked DONE. Not listed in the epic's Dispatch Team section -- it is infrastructure. See `.claude/agents/code-reviewer.md` for the agent definition.
 
 ### Spawning Scenarios
 
@@ -54,10 +56,11 @@ Implementing agents do NOT update story statuses or epic tables. That is the mai
 2. Main session reads the epic, identifies the Dispatch Team section (or falls back to the routing table).
 3. Main session creates the team (`TeamCreate`) and spawns all implementing agents.
 4. Main session identifies eligible stories (TODO with satisfied dependencies), marks them `IN_PROGRESS`, and assigns them to implementers with full context blocks (story file text + Technical Notes).
-5. Implementing agents work on their assigned stories and report completion to the main session.
-6. As each implementer reports completion, the main session verifies acceptance criteria. If criteria are not met, the main session sends the implementer back with specific feedback.
-7. Main session marks verified stories `DONE` in both story files and epic table.
-8. Main session checks for newly unblocked stories. If the required agent is on the team, it assigns directly. If a new agent type is needed, it spawns the agent and assigns the story (repeat from step 5).
+5. Implementing agents work on their assigned stories and report completion (with `## Files Changed`) to the main session.
+6. As each implementer reports completion, the main session checks the context-layer-only skip condition: if the story modifies ONLY context-layer files and no Python code, the main session verifies ACs directly and marks DONE. Otherwise, the main session routes the work to the code-reviewer.
+7. The code-reviewer examines the implementation and returns APPROVED or NOT APPROVED with structured findings. If APPROVED, the main session marks the story DONE. If NOT APPROVED (MUST FIX findings), the main session routes MUST FIX items to the implementer for fixes. After fixes, the reviewer re-reviews (max 2 rounds). If the 2nd review still has MUST FIX findings, the main session escalates to the user.
+8. Main session marks reviewer-approved stories `DONE` in both story files and epic table.
+9. Main session checks for newly unblocked stories. If the required agent is on the team, it assigns directly. If a new agent type is needed, it spawns the agent and assigns the story (repeat from step 5).
 
 ### Closure Sequence
 
@@ -65,7 +68,7 @@ When all stories are verified DONE, the main session executes the following clos
 
 **Before spinning down the team:**
 
-9. **Validate all work.** For every story in the epic, confirm all acceptance criteria are met. If any are unmet, send the implementer back with specific feedback -- do not proceed to closure.
+9. **Validate all work.** Confirm all stories are DONE. Per-story validation was performed by the code-reviewer during the dispatch loop (for code stories) or by the main session directly (for context-layer-only stories). This step confirms completion status, not a re-review of all code.
 
 10. **Update the epic completely.**
     - Confirm all story file statuses are DONE.
@@ -109,6 +112,7 @@ When all stories are verified DONE, the main session executes the following clos
 | Context-layer files: `CLAUDE.md`, `.claude/agents/*.md`, `.claude/rules/*.md`, `.claude/skills/**`, `.claude/hooks/**`, `.claude/settings.json`, `.claude/settings.local.json`, `.claude/agent-memory/**` | `claude-architect` |
 | Documentation (`docs/admin/`, `docs/coaching/`) | `docs-writer` |
 | UI/UX design: wireframes, layout specs, component inventories, user flows | `ux-designer` |
+| Code review (automatic -- not routed by story domain) | `code-reviewer` (spawned automatically by the implement skill for every dispatch; not assigned stories) |
 
 **Dispatch Team metadata**: Epics may include a `## Dispatch Team` section (between Stories and Technical Notes) that explicitly lists the agents needed for the epic. When this section is present and non-empty, the main session should prefer it over inferring agents from story domains using the table above. When the section is absent or empty, the main session determines required agents from the routing table. The main session retains final routing authority -- the Dispatch Team section is advisory.
 

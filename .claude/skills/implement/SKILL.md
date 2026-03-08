@@ -67,7 +67,7 @@ Create the team and spawn implementers. The main session spawns implementers dir
 
 Use `TeamCreate` to create a dispatch team for the epic.
 
-### Step 2: Spawn implementing agents
+### Step 2: Spawn implementing agents and code-reviewer
 
 Spawn each implementing agent with the following context:
 
@@ -76,6 +76,12 @@ You are a [agent-type] agent on the [team-name] team. Wait for the main session 
 ```
 
 If this is a multi-wave epic, spawn only wave-1 agents now. Later-wave agents are spawned during Phase 3 as dependencies complete.
+
+**Spawn the code-reviewer** alongside the implementing agents. The code-reviewer is infrastructure, not a story-specific implementer -- it is NOT listed in the epic's Dispatch Team section. The implement skill spawns it automatically for every dispatch that includes implementing agents. Spawn context:
+
+```
+You are the code-reviewer agent on the [team-name] team. Wait for review assignments from the main session via SendMessage. Do not self-initiate reviews. Each review assignment will include a story ID, the full story file text, epic Technical Notes, and the implementer's Files Changed list.
+```
 
 ### Step 3: Set epic to ACTIVE
 
@@ -125,6 +131,14 @@ Handoff context from completed dependencies:
 - From E-NNN-01: [artifact path and description declared in upstream story's Handoff Context section]
 
 Satisfy all acceptance criteria and report back when complete. Do NOT update story status files -- the main session handles all status updates.
+
+IMPORTANT: When reporting completion, include a `## Files Changed` section listing ALL files you created, modified, or deleted, with absolute paths and status annotations. Include files across all directories (src/, tests/, scripts/, migrations/, docs/, etc.) -- not just source files. Example:
+
+## Files Changed
+- /workspaces/baseball-crawl/src/crawlers/roster.py (modified)
+- /workspaces/baseball-crawl/tests/test_roster.py (new)
+- /workspaces/baseball-crawl/src/crawlers/old_module.py (deleted)
+- /workspaces/baseball-crawl/src/crawlers/new_name.py (renamed from /workspaces/baseball-crawl/src/crawlers/old_name.py)
 ```
 
 **Context block requirements** (per `/.claude/rules/dispatch-pattern.md`):
@@ -134,13 +148,61 @@ Satisfy all acceptance criteria and report back when complete. Do NOT update sto
 
 Assign stories in parallel when they have no file conflicts.
 
-### Step 5: Monitor and verify
+### Step 5: Monitor, review, and verify
 
-Stay active in the team. As each implementer reports completion:
+Stay active in the team. As each implementer reports completion (with `## Files Changed`):
 
-1. **Verify all acceptance criteria** for the reported story. Read the story file to confirm each criterion is satisfied.
-2. **If criteria are met**: Mark the story `DONE` in both the story file and epic Stories table.
-3. **If criteria are not met**: Send the implementer back with specific feedback identifying which criteria failed and why. Do not proceed to marking DONE.
+1. **Check context-layer-only skip condition.** If the story modifies ONLY context-layer files (`.claude/agents/`, `.claude/rules/`, `.claude/skills/`, `.claude/hooks/`, `.claude/settings.json`, `.claude/settings.local.json`, `.claude/agent-memory/`, `CLAUDE.md`) and no Python code, the main session verifies ACs directly and marks DONE. The code-reviewer is skipped for context-layer-only stories. Proceed to Step 6.
+
+2. **Route code stories to the code-reviewer.** For stories that touch Python code or any non-context-layer files, send the work to the code-reviewer using this template:
+
+```
+Review story E-NNN-SS: [Title]
+
+Story file: /absolute/path/to/E-NNN-SS.md
+[Full story file text]
+
+Epic Technical Notes:
+[Full Technical Notes]
+
+Implementer-reported files changed:
+[Files Changed section from implementer's completion message]
+
+Review round: 1 of 2 (circuit breaker)
+
+Review this story's implementation against all acceptance criteria and the review rubric. The implementer's Files Changed list is the primary scope. Cross-reference it against the story's "Files to Create or Modify" section to flag any missing or unexpected files (divergence is a SHOULD FIX finding -- implementers may legitimately touch unlisted files, but it should be called out). Note: `git diff --name-only` is repo-wide and may include changes from parallel stories or untracked files -- use it as advisory context, not as the authoritative scope for this story. Report findings using the structured format.
+```
+
+3. **If the reviewer returns APPROVED** (no MUST FIX findings): Mark the story `DONE` in both the story file and epic Stories table. Any SHOULD FIX findings from the reviewer are recorded in the epic's History section during closure -- they are NOT relayed to the implementer.
+
+4. **If the reviewer returns NOT APPROVED** (MUST FIX findings): Route ONLY the MUST FIX findings to the implementer with the review round number (e.g., "Round 1 of 2 -- MUST FIX items below"). Do NOT include SHOULD FIX items in the feedback to implementers. The implementer fixes the issues and reports completion again (with updated `## Files Changed`). Send the updated work back to the reviewer for Round 2 using an expanded template that includes the prior findings:
+
+```
+Review story E-NNN-SS: [Title] (Round 2)
+
+Story file: /absolute/path/to/E-NNN-SS.md
+[Full story file text]
+
+Epic Technical Notes:
+[Full Technical Notes]
+
+Implementer-reported files changed:
+[Updated Files Changed section from implementer's round-2 completion message]
+
+Round 1 MUST FIX findings:
+[Paste the MUST FIX findings from the round-1 review verbatim]
+
+Review round: 2 of 2 (circuit breaker)
+
+This is a round-2 re-review. The implementer was asked to fix the Round 1 MUST FIX findings listed above. Perform a full re-review of all changed files, but focus on whether the Round 1 MUST FIX items are resolved and whether the fixes introduced any new issues. Report findings using the structured format.
+```
+
+5. **Circuit breaker.** Max 2 review rounds per story. If the 2nd review still has MUST FIX findings, escalate to the user with the findings summary and present options:
+   - (a) Fix it themselves
+   - (b) Tell the implementer to try again (resets the circuit breaker)
+   - (c) Override the reviewer and mark DONE (explicit user override -- the user assumes responsibility for unresolved findings)
+   - (d) Abandon the story
+   The main session does NOT mark the story DONE and does NOT loop further without user direction.
 
 ### Step 6: Cascade
 
@@ -173,7 +235,7 @@ When all stories are verified DONE (and the optional review chain is complete), 
 
 ### Step 1: Validate all work
 
-For every story in the epic, confirm all acceptance criteria are met. This is a final check -- if any are unmet, send the implementer back with specific feedback. Do not proceed to closure until every story is verified DONE.
+Confirm all stories are DONE. Per-story validation was performed by the code-reviewer during Phase 3 (for code stories) or by the main session directly (for context-layer-only stories). This step confirms reviewer APPROVED status for code stories and main-session verification for context-layer-only stories -- it is not a re-review of all code.
 
 ### Step 2: Update the epic completely
 
@@ -244,7 +306,8 @@ Phase 1: Read epic's Dispatch Team section
   - Plan multi-wave spawning if dependencies exist
   |
   v
-Phase 2: Create team, spawn implementers directly
+Phase 2: Create team, spawn implementers + code-reviewer
+  - Code-reviewer spawned automatically (not in Dispatch Team)
   - Set epic to ACTIVE if currently READY
   |
   v
@@ -252,8 +315,35 @@ Phase 3: Coordination loop
   - Identify eligible stories (TODO + deps satisfied)
   - Route to agent type (Agent Hint > context-layer check > routing table)
   - Mark stories IN_PROGRESS, assign with full context blocks
-  - Monitor completion, verify ACs, send back if unmet
-  - Mark verified stories DONE, cascade to newly unblocked stories
+  - Implementer reports completion with ## Files Changed
+      |
+      v
+    Context-layer-only? --YES--> Main session verifies ACs, marks DONE
+      |
+      NO
+      |
+      v
+    Send to code-reviewer (round 1 of 2)
+      |
+      v
+    APPROVED? --YES--> Mark DONE (SHOULD FIX -> epic History)
+      |
+      NO (MUST FIX)
+      |
+      v
+    Route MUST FIX to implementer, implementer fixes
+      |
+      v
+    Send to code-reviewer (round 2 of 2)
+      |
+      v
+    APPROVED? --YES--> Mark DONE
+      |
+      NO
+      |
+      v
+    Escalate to user (circuit breaker)
+  - Cascade to newly unblocked stories
   - Spawn later-wave agents as dependencies complete
   |
   v
@@ -261,7 +351,7 @@ Phase 3: Coordination loop
   |
   v
 Phase 5: Closure sequence
-  - Validate all work (final AC check)
+  - Validate all work (confirm DONE + reviewer approved)
   - Update epic to COMPLETED with history entry
   - Documentation assessment (spawn docs-writer if needed)
   - Context-layer assessment (spawn claude-architect if needed)
@@ -295,6 +385,9 @@ Follow the Dispatch Failure Protocol in `/.claude/rules/workflow-discipline.md`:
 ### "And Review" With No Uncommitted Changes
 If the review chain runs but there are no uncommitted changes to review, the review-epic skill handles this gracefully. No special handling needed here.
 
+### Code-Reviewer Context Window Fills
+If the code-reviewer's context window fills during a large epic (8+ stories), the main session may shut down and respawn the reviewer. No state is lost because each review assignment is self-contained -- the reviewer reads the story file and changed files fresh for every assignment.
+
 ---
 
 ## Anti-Patterns
@@ -307,3 +400,5 @@ If the review chain runs but there are no uncommitted changes to review, the rev
 6. **Do not commit automatically.** The closure sequence offers to commit -- the user must explicitly approve.
 7. **Do not spawn a PM teammate.** The main session coordinates directly. There is no PM role during dispatch.
 8. **Do not skip the context-layer assessment.** The epic cannot be archived until the context-layer impact is evaluated per `.claude/rules/context-layer-assessment.md`.
+9. **Do not mark stories DONE without code-reviewer approval** (except context-layer-only stories) unless the user explicitly overrides via the circuit breaker escalation. The reviewer is the quality gate -- the main session does not bypass it by verifying ACs directly.
+10. **Do not relay SHOULD FIX findings to implementers.** The fix loop is exclusively for MUST FIX items. Record SHOULD FIX in epic History during closure.
