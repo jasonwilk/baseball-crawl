@@ -19,6 +19,7 @@
     "vscode": {
       "settings": {
         // Per-port binding defaults for forwarded ports.
+        "remote.restoreForwardedPorts": false,
         "remote.portsAttributes": {
           "8000": {
             "localPortHost": "localhost"
