@@ -978,3 +978,103 @@ def test_mobile_manual_access_token_fallback(monkeypatch: pytest.MonkeyPatch) ->
 
     assert result["email"] == "coach@example.com"
     assert client._session.headers["gc-token"] == manual_token
+
+
+# ---------------------------------------------------------------------------
+# Regression: 401 retry -- force_refresh() error propagation (Finding 4)
+# ---------------------------------------------------------------------------
+
+
+@respx.mock
+def test_401_force_refresh_auth_signing_error_propagates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AuthSigningError from force_refresh() propagates -- not swallowed by except: pass."""
+    from unittest.mock import MagicMock
+    from src.gamechanger.token_manager import AuthSigningError
+
+    mock_tm = MagicMock()
+    mock_tm.get_access_token.return_value = _FAKE_ACCESS_TOKEN
+    mock_tm.force_refresh.side_effect = AuthSigningError("bad signature")
+    monkeypatch.setattr("src.gamechanger.client.TokenManager", lambda **_kw: mock_tm)
+    monkeypatch.setattr("src.gamechanger.client.dotenv_values", lambda: _FAKE_CREDENTIALS)
+
+    respx.get(f"{_BASE_URL}/me/teams").mock(return_value=httpx.Response(401))
+    client = GameChangerClient(min_delay_ms=0, jitter_ms=0)
+
+    with pytest.raises(AuthSigningError):
+        client.get("/me/teams")
+
+    mock_tm.force_refresh.assert_called_once()
+
+
+@respx.mock
+def test_401_force_refresh_credential_expired_error_propagates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """CredentialExpiredError from force_refresh() propagates -- not swallowed by except: pass."""
+    from unittest.mock import MagicMock
+
+    mock_tm = MagicMock()
+    mock_tm.get_access_token.return_value = _FAKE_ACCESS_TOKEN
+    mock_tm.force_refresh.side_effect = CredentialExpiredError("refresh token expired")
+    monkeypatch.setattr("src.gamechanger.client.TokenManager", lambda **_kw: mock_tm)
+    monkeypatch.setattr("src.gamechanger.client.dotenv_values", lambda: _FAKE_CREDENTIALS)
+
+    respx.get(f"{_BASE_URL}/me/teams").mock(return_value=httpx.Response(401))
+    client = GameChangerClient(min_delay_ms=0, jitter_ms=0)
+
+    with pytest.raises(CredentialExpiredError, match="refresh token expired"):
+        client.get("/me/teams")
+
+    mock_tm.force_refresh.assert_called_once()
+
+
+@respx.mock
+def test_401_post_refresh_403_raises_forbidden_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """After successful force_refresh(), a 403 on the retry raises ForbiddenError (not CredentialExpiredError)."""
+    from unittest.mock import MagicMock
+
+    fresh_token = "refreshed-access-token"
+    mock_tm = MagicMock()
+    mock_tm.get_access_token.return_value = _FAKE_ACCESS_TOKEN
+    mock_tm.force_refresh.return_value = fresh_token
+    monkeypatch.setattr("src.gamechanger.client.TokenManager", lambda **_kw: mock_tm)
+    monkeypatch.setattr("src.gamechanger.client.dotenv_values", lambda: _FAKE_CREDENTIALS)
+
+    # First request 401 -> force_refresh -> retry gets 403
+    respx.get(f"{_BASE_URL}/me/teams").mock(
+        side_effect=[
+            httpx.Response(401),
+            httpx.Response(403),
+        ]
+    )
+    client = GameChangerClient(min_delay_ms=0, jitter_ms=0)
+
+    with pytest.raises(ForbiddenError):
+        client.get("/me/teams")
+
+
+@respx.mock
+def test_paginated_401_force_refresh_auth_signing_error_propagates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AuthSigningError from force_refresh() propagates in get_paginated() -- not swallowed."""
+    from unittest.mock import MagicMock
+    from src.gamechanger.token_manager import AuthSigningError
+
+    mock_tm = MagicMock()
+    mock_tm.get_access_token.return_value = _FAKE_ACCESS_TOKEN
+    mock_tm.force_refresh.side_effect = AuthSigningError("bad signature")
+    monkeypatch.setattr("src.gamechanger.client.TokenManager", lambda **_kw: mock_tm)
+    monkeypatch.setattr("src.gamechanger.client.dotenv_values", lambda: _FAKE_CREDENTIALS)
+
+    respx.get(f"{_BASE_URL}/teams/abc/game-summaries").mock(return_value=httpx.Response(401))
+    client = GameChangerClient(min_delay_ms=0, jitter_ms=0)
+
+    with pytest.raises(AuthSigningError):
+        client.get_paginated("/teams/abc/game-summaries")
+
+    mock_tm.force_refresh.assert_called_once()
