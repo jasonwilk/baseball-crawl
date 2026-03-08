@@ -4,7 +4,7 @@ Entry point: bb (registered via pyproject.toml [project.scripts]).
 Fallback: python -m src.cli
 
 Sub-command groups:
-  bb creds   -- credential management (refresh, check)
+  bb creds   -- credential management (import, check)
   bb data    -- data crawl, load, sync
   bb proxy   -- proxy report, endpoints, refresh-headers, review
   bb db      -- database backup, reset

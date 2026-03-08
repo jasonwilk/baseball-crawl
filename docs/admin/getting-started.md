@@ -151,7 +151,7 @@ GameChanger API credentials are short-lived and must be refreshed frequently. Cr
 python scripts/refresh_credentials.py
 ```
 
-Also available as `bb creds refresh`.
+Also available as `bb creds import`.
 
 Or pass the cURL command inline:
 

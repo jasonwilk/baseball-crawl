@@ -62,7 +62,7 @@ No observed users had profile photos set. The endpoint pattern exists; 404 is ex
 
 ## Retry Behavior
 
-- **401 Unauthorized:** Do not retry. The token is expired. Rotate credentials via the browser capture workflow (`bb creds refresh`) and restart the session.
+- **401 Unauthorized:** Do not retry. The token is expired. Rotate credentials via the browser capture workflow (`bb creds import`) and restart the session.
 - **400 Bad Request:** Do not retry with the same request. Diagnose the malformed parameter or header.
 - **500 Internal Server Error:** Check if pagination parameters are missing. If it is a one-off 500 (not a pagination issue), wait and retry with exponential backoff.
 - **Rate limiting:** No `429 Too Many Requests` responses observed in captures. Follow the rate limiting and timing guidelines in `CLAUDE.md` (1-2 second delays between sequential requests, exponential backoff on errors).

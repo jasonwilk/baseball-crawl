@@ -159,12 +159,12 @@ def run() -> None:
             console.print(f"  {label:<{label_width}} [green]{display}[/green]")
         elif code == 2:
             console.print(
-                f"  {label:<{label_width}} [red]missing -> run: bb creds refresh[/red]"
+                f"  {label:<{label_width}} [red]missing -> run: bb creds import[/red]"
             )
             creds_failed = True
         else:
             console.print(
-                f"  {label:<{label_width}} [red]expired -> run: bb creds refresh[/red]"
+                f"  {label:<{label_width}} [red]expired -> run: bb creds import[/red]"
             )
             creds_failed = True
 

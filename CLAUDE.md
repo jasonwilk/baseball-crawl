@@ -129,7 +129,8 @@ The `bb` CLI is the primary operator interface. Run `bb --help` to see all avail
 - `bb --help` -- show all available commands and flags
 - `bb status` -- composite status check: credentials, last crawl, DB info, latest proxy session
 - `bb creds check` -- verify GameChanger credentials in `.env` are present and valid (`--profile web|mobile`)
-- `bb creds refresh` -- refresh GameChanger credentials (`--curl`, `--file`)
+- `bb creds import` -- import GameChanger credentials from curl command (`--curl`, `--file`)
+- `bb creds refresh` -- programmatic token refresh via POST /auth (`--profile web|mobile`)
 - `bb data sync` -- full bootstrap: validate credentials, crawl, and load (`--check-only`, `--profile`, `--dry-run`)
 - `bb data crawl` -- run data crawlers (`--dry-run`, `--crawler NAME`, `--profile`, `--source db|yaml`)
 - `bb data load` -- run data loaders (`--dry-run`, `--loader NAME`, `--source db|yaml`)
@@ -154,6 +155,7 @@ The underlying scripts still work directly. The `bb` commands above are preferre
 - `./scripts/codex-spec-review.sh <epic-dir>` -- spec review of epic/story files in a directory; optional `--note` flag. Rubric: `.project/codex-spec-review.md`
 - `python scripts/backup_db.py` -- back up the SQLite database (also available via `bb db backup`)
 - `python scripts/reset_dev_db.py` -- reset dev database to seeded state (also available via `bb db reset`)
+- `python scripts/refresh_credentials.py` -- import credentials from curl command (also available via `bb creds import`)
 - `python scripts/check_credentials.py [--profile web|mobile]` -- verify credentials (also available via `bb creds check`)
 - `python scripts/bootstrap.py [--profile web|mobile] [--check-only] [--dry-run]` -- bootstrap or validate setup (also available via `bb data sync`)
 - `./scripts/proxy-report.sh` -- header parity report (also available via `bb proxy report`)

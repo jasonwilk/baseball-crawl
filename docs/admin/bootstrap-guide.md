@@ -11,7 +11,7 @@ Three steps to get data flowing:
 **1. Capture credentials** -- Choose one path:
 
 - **Proxy (iPhone)**: Start mitmproxy on your Mac, configure your iPhone to use it, open GameChanger on the phone. Credentials are written to `.env` automatically. See [Credential Capture: Proxy](#credential-capture-proxy) below.
-- **Curl (browser)**: Copy a request from Chrome DevTools, save it to `secrets/gamechanger-curl.txt`, and run `python scripts/refresh_credentials.py` (or `bb creds refresh`). See [Credential Capture: Curl](#credential-capture-curl) below.
+- **Curl (browser)**: Copy a request from Chrome DevTools, save it to `secrets/gamechanger-curl.txt`, and run `python scripts/refresh_credentials.py` (or `bb creds import`). See [Credential Capture: Curl](#credential-capture-curl) below.
 
 **2. Run the bootstrap command**:
 
@@ -104,7 +104,7 @@ Paste the copied command into `secrets/gamechanger-curl.txt`. The file should co
 python scripts/refresh_credentials.py
 ```
 
-Also available as `bb creds refresh`.
+Also available as `bb creds import`.
 
 This reads `secrets/gamechanger-curl.txt`, extracts the `gc-token` and `gc-device-id` headers, and writes them to `.env`.
 

@@ -74,14 +74,14 @@ class TestCredentialDisplay:
         assert "valid (logged in as Coach Lee)" in result.output
 
     def test_expired_credentials_show_remediation_hint(self) -> None:
-        """Expired creds show 'expired -> run: bb creds refresh'."""
+        """Expired creds show 'expired -> run: bb creds import'."""
         result = _invoke_status(web_result=(1, "Credentials expired"))
-        assert "expired -> run: bb creds refresh" in result.output
+        assert "expired -> run: bb creds import" in result.output
 
     def test_missing_credentials_show_remediation_hint(self) -> None:
-        """Missing creds show 'missing -> run: bb creds refresh'."""
+        """Missing creds show 'missing -> run: bb creds import'."""
         result = _invoke_status(web_result=(2, "Missing required credential(s)"))
-        assert "missing -> run: bb creds refresh" in result.output
+        assert "missing -> run: bb creds import" in result.output
 
     def test_both_profiles_shown(self) -> None:
         """Both 'web' and 'mobile' profiles appear in output."""
