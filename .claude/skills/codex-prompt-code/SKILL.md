@@ -21,7 +21,7 @@ The discriminator is the word "code" (or the absence of "spec"). If the user say
 
 ## Purpose
 
-Generate a self-contained code review prompt that the user can copy-paste into Codex. The prompt includes the diff (with full untracked file contents), the project's code review rubric, and a static agent roster so Codex can recommend a review team.
+Generate a code review prompt that the user can copy-paste into Codex. The prompt includes the diff (with full untracked file contents), a path reference to the project's code review rubric, and a static agent roster so Codex can recommend a review team. Codex reads the rubric file itself using its repository access.
 
 This skill does NOT execute the review. It assembles the prompt and presents it to the user in a fenced code block.
 
@@ -32,7 +32,7 @@ This skill does NOT execute the review. It assembles the prompt and presents it 
 Before executing this workflow, verify:
 
 1. **You are in the baseball-crawl repository.** The rubric file and agent ecosystem must be accessible.
-2. **The rubric file exists.** Confirm `/workspaces/baseball-crawl/.project/codex-review.md` is present (you will read it in Step 4).
+2. **The rubric file exists.** Confirm `/workspaces/baseball-crawl/.project/codex-review.md` is present.
 
 ---
 
@@ -128,9 +128,9 @@ Count the total number of lines in the assembled diff content (including full un
 
 ---
 
-## Step 4: Read the Rubric
+## Step 4: Verify the Rubric Path
 
-Use Read to load the contents of `/workspaces/baseball-crawl/.project/codex-review.md`. Do NOT embed the rubric content in this skill file -- it must be read fresh at execution time so the prompt always reflects the current rubric.
+Confirm that `/workspaces/baseball-crawl/.project/codex-review.md` exists (e.g., via Glob or Bash `test -f`). Do NOT Read its contents -- the generated prompt will instruct Codex to read the rubric itself.
 
 If the file does not exist, report the error to the user and stop.
 
@@ -166,7 +166,10 @@ Assemble the complete prompt using the template below. Present it to the user in
 ======================================================================
 CODE-REVIEW RUBRIC
 ======================================================================
-<full rubric content from Step 4>
+Read the rubric at: /workspaces/baseball-crawl/.project/codex-review.md
+
+Apply the rubric's Review Priorities in order when reviewing the
+changes below.
 
 ======================================================================
 CHANGES TO REVIEW (mode: <mode label>)
@@ -209,7 +212,7 @@ and PM should decide together which feedback to refine into the epic,
 which code to fix, and which to defer.
 ```
 
-Replace `<full rubric content from Step 4>`, `<full diff content from Step 2>`, and `<mode label>` with the actual content gathered in previous steps. The mode label should be one of: `uncommitted`, `base <branch>`, or `commit <sha>`.
+Replace `<full diff content from Step 2>` and `<mode label>` with the actual content gathered in previous steps. The mode label should be one of: `uncommitted`, `base <branch>`, or `commit <sha>`.
 
 If the size warning from Step 3 applies (5,000-10,000 lines), include the warning text BEFORE the fenced code block, not inside it.
 
@@ -238,7 +241,7 @@ Step 3: Size check
   +---> 5,000-10,000 lines? -> Warn user, continue
   |
   v
-Step 4: Read rubric from .project/codex-review.md
+Step 4: Verify rubric exists at .project/codex-review.md
   |
   v
 Step 5: Verify agent roster against CLAUDE.md
@@ -272,6 +275,6 @@ If `git ls-files --others --exclude-standard` returns nothing, simply omit the "
 
 1. **Do not execute the prompt.** This skill generates a prompt for copy-paste into Codex. It does NOT run codex, invoke any review tool, or apply any review findings. The user takes the output and pastes it elsewhere.
 2. **Do not modify the rubric file.** The rubric at `.project/codex-review.md` is a shared project artifact. This skill reads it; it never writes to it.
-3. **Do not embed rubric content in this skill file.** The rubric must be read fresh at execution time via Read. Embedding it would cause the prompt to use stale rubric content when the rubric is updated.
+3. **Do not embed rubric content in this skill file or in the generated prompt.** The rubric is referenced by absolute path; Codex reads it directly.
 4. **Do not summarize the diff.** The prompt must contain the complete diff content. Codex needs the full code to perform a meaningful review.
 5. **Do not dynamically read agent definition files.** The roster table is static and verified against CLAUDE.md (ambient context). Reading 9 agent files at execution time wastes context for information that rarely changes.

@@ -21,7 +21,7 @@ The keyword "spec" is the discriminator. If the user says "codex review prompt" 
 
 ## Purpose
 
-Generate a self-contained spec review prompt that the user can copy-paste into Codex. The prompt includes the full content of all epic/story markdown files, the spec review rubric, a static agent roster table, and instructions for Codex to recommend a collaborative triage team.
+Generate a lean spec review prompt that the user can copy-paste into Codex. The prompt contains file paths (not file contents), an inlined agent roster table, and review instructions. Codex reads the files itself using its repository access.
 
 This is a **parallel** path to the existing `spec-review` skill (which runs codex in-process via `codex-spec-review.sh`). This skill generates a prompt; that skill executes the review. Both remain available -- the user chooses based on preference.
 
@@ -39,17 +39,17 @@ Before executing this workflow, verify:
 
 ## Workflow
 
-### Step 1: Gather epic/story file contents
+### Step 1: Resolve the epic directory path
 
-Use Glob to find all `*.md` files in the epic directory (top level only -- no recursive descent into subdirectories).
+Resolve the epic directory to an absolute path (e.g., `/workspaces/baseball-crawl/epics/E-080-lean-codex-spec-prompt/`). Confirm the directory exists and contains `epic.md`.
 
-Use Read to gather the full content of each file. Preserve the filename in the assembled output using `--- FILE: {filename} ---` headers.
+Do NOT Glob or Read individual files in the directory. The prompt will give Codex the directory path and let it read the files itself.
 
-### Step 2: Read the rubric
+### Step 2: Confirm the rubric file exists
 
-Use Read to load the full content of `/workspaces/baseball-crawl/.project/codex-spec-review.md`. This is the spec review rubric that Codex will evaluate the planning artifacts against.
+Confirm that `/workspaces/baseball-crawl/.project/codex-spec-review.md` exists.
 
-Do NOT embed the rubric content in this skill file. Always read it fresh at execution time so the prompt reflects the current rubric.
+Do NOT Read its contents. The prompt will give Codex the rubric path and let it read the file itself.
 
 ### Step 3: Verify the agent roster
 
@@ -71,25 +71,22 @@ Before assembling, compare the static roster table below against the CLAUDE.md A
 
 ### Step 4: Assemble the prompt
 
-Build the complete prompt by combining the gathered content in the following order:
+Build the complete prompt by combining paths, the roster, and instructions:
 
 ```
 ======================================================================
-SPEC-REVIEW RUBRIC
-======================================================================
-{Full rubric content from .project/codex-spec-review.md}
-
-======================================================================
-PLANNING ARTIFACTS TO REVIEW (epic directory: {epic-dir})
+SPEC REVIEW REQUEST
 ======================================================================
 
---- FILE: {filename1} ---
-{Full content of file 1}
+Review the planning artifacts in the epic directory below against the
+spec-review rubric. Read both locations yourself -- do not ask for
+their contents.
 
---- FILE: {filename2} ---
-{Full content of file 2}
+Rubric: {absolute rubric path}
+Epic directory: {absolute epic directory path}
 
-... (all .md files in the epic directory)
+Read all .md files in the epic directory (top level only, no
+subdirectories). Evaluate them against the rubric.
 
 ======================================================================
 AGENT ROSTER (for team composition recommendations)
@@ -103,7 +100,6 @@ REVIEW INSTRUCTIONS
 ======================================================================
 Begin your response with "This is peer feedback from Codex".
 
-Review the planning artifacts above against the spec-review rubric.
 Follow the rubric's Evaluation Checklist exactly.
 Cite story ID and AC label for each finding.
 If the spec is clean, state: "No findings. This epic is ready to mark READY."
@@ -140,16 +136,16 @@ Resolve epic directory (ask user if ambiguous)
 Verify prerequisites (directory exists, epic.md present, rubric exists)
   |
   v
-Step 1: Glob *.md in epic dir, Read each file
+Step 1: Resolve epic directory to absolute path (no file reads)
   |
   v
-Step 2: Read rubric from .project/codex-spec-review.md
+Step 2: Confirm rubric file exists (no file reads)
   |
   v
 Step 3: Verify agent roster against CLAUDE.md Agent Ecosystem
   |
   v
-Step 4: Assemble prompt (rubric + files + roster + instructions)
+Step 4: Assemble prompt (paths + roster + instructions)
   |
   v
 Step 5: Present in fenced code block for copy-paste
@@ -163,13 +159,13 @@ Step 5: Present in fenced code block for copy-paste
 If the epic ID does not match any directory under `epics/` or `/.project/archive/`, report the error with the paths checked and stop. Do not guess or create a directory.
 
 ### No `.md` files in the epic directory
-If Glob returns no markdown files, report this to the user and stop. An epic directory with no `.md` files has nothing to review.
+If the directory exists but contains no `.md` files (verified by a quick Glob check), report this to the user and stop. An epic directory with no `.md` files has nothing to review.
 
 ### Scratch or draft files in the directory
-Epic directories may contain scratch files, draft notes, or work-in-progress artifacts alongside the canonical epic and story files. Note to the user that the PM should clean up the directory before review if non-canonical files are present -- all `.md` files in the directory will be included in the prompt.
+Epic directories may contain scratch files, draft notes, or work-in-progress artifacts alongside the canonical epic and story files. Note to the user that the PM should clean up the directory before review if non-canonical files are present -- Codex will read all `.md` files in the directory.
 
 ### Stories referencing external documents
-Stories may reference external documents (stat glossary, API specs, architecture docs) that are outside the epic directory. These will NOT be auto-included in the generated prompt. Note to the user that they may need to manually append referenced external documents to the prompt if Codex needs that context for a thorough review.
+The generated prompt scopes Codex to the epic directory and the rubric file. Stories may reference external documents (stat glossary, API specs, architecture docs) that are outside the epic directory. If the user knows that referenced external documents are critical for a thorough review, they may need to add those paths to the prompt manually before pasting into Codex.
 
 ### Epic is archived
 If the epic is found in `/.project/archive/` rather than `epics/`, proceed normally. Note to the user that the epic is archived -- the review may surface learnings but cannot change completed work.
@@ -180,5 +176,6 @@ If the epic is found in `/.project/archive/` rather than `epics/`, proceed norma
 
 1. **Do not execute the prompt.** This skill generates a prompt for the user to copy-paste into Codex manually. Do not run it through codex, do not spawn agents to review it, do not pipe it to any tool.
 2. **Do not modify the rubric file.** The rubric at `.project/codex-spec-review.md` is a shared project artifact. Read it; never edit it as part of this workflow.
-3. **Do not embed rubric content in this skill file.** The rubric is read fresh at execution time so the generated prompt always reflects the current rubric. Embedding would create a stale copy.
-4. **Do not auto-include external referenced documents.** Keep scope to the epic directory's `.md` files. If stories reference external docs, note this to the user rather than crawling the repo for referenced files.
+3. **Do not embed rubric content or planning artifact content in this skill file.** The skill resolves paths and confirms existence; it does not read or cache file contents. Embedding would create stale copies that diverge from the source files.
+4. **Do not expand the prompt's file-read scope.** Keep the prompt scoped to the epic directory and rubric path. Do not add extra paths for externally referenced documents -- if the user needs those included, they add the paths manually.
+5. **Do not dynamically read agent definition files.** The roster table is static and verified against CLAUDE.md (ambient context). Reading 9 agent files at execution time wastes context for information that rarely changes.

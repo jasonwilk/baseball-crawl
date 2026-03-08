@@ -4,8 +4,9 @@
 # CLI mode verified against installed codex version (2026-03-03):
 #   `codex exec` is used (not `codex review`) because spec review is NOT diff-centric.
 #   It evaluates planning artifacts (epic and story markdown files) against workflow contracts.
-#   The assembled prompt (rubric + file contents + optional runtime note) is passed via stdin
-#   using `-` as the PROMPT argument to `codex exec`.
+#   The assembled prompt contains file paths and review instructions (not file contents).
+#   Codex reads the rubric and epic files itself via its repository access.
+#   The prompt (plus optional runtime note) is passed via stdin using `-` as the PROMPT argument.
 #
 # Usage:
 #   codex-spec-review.sh <epic-dir> [--note "text"] [--note-file /path/to/file]
@@ -139,48 +140,35 @@ if [[ ! -f "${RUBRIC_FILE}" ]]; then
 fi
 
 # ---------------------------------------------------------------------------
-# Assemble prompt (rubric + epic file contents + optional runtime note)
-# No files are created or persisted -- everything is assembled in memory.
+# Assemble prompt (file paths + review instructions + optional runtime note)
+# No file contents are embedded -- Codex reads the rubric and epic files itself.
 # ---------------------------------------------------------------------------
 assemble_prompt() {
-    echo "======================================================================"
-    echo "SPEC-REVIEW RUBRIC"
-    echo "======================================================================"
-    cat "${RUBRIC_FILE}"
-
-    echo ""
-    echo "======================================================================"
-    echo "PLANNING ARTIFACTS TO REVIEW (epic directory: ${EPIC_DIR})"
-    echo "======================================================================"
-
-    local found_files=0
-    while IFS= read -r -d '' md_file; do
-        echo ""
-        echo "--- FILE: ${md_file} ---"
-        cat "${md_file}"
-        found_files=1
-    done < <(find "${EPIC_DIR}" -maxdepth 1 -name "*.md" -print0 | sort -z)
-
-    if [[ "${found_files}" -eq 0 ]]; then
+    # Warn if the epic directory has no .md files (likely a misconfigured path).
+    local md_count
+    md_count=$(find "${EPIC_DIR}" -maxdepth 1 -name "*.md" | wc -l)
+    if [[ "${md_count}" -eq 0 ]]; then
         echo "Warning: no .md files found in ${EPIC_DIR}" >&2
     fi
 
+    echo "SPEC-REVIEW REQUEST"
+    echo ""
+    echo "Rubric: ${RUBRIC_FILE}"
+    echo "Planning artifacts: ${EPIC_DIR}/ (all *.md files)"
+
     if [[ -n "${RUNTIME_NOTE}" ]]; then
         echo ""
-        echo "======================================================================"
         echo "RUNTIME CONTEXT NOTE FROM PM"
-        echo "======================================================================"
         echo "${RUNTIME_NOTE}"
     fi
 
     echo ""
-    echo "======================================================================"
-    echo "REVIEW REQUEST"
-    echo "======================================================================"
-    echo "Please review the planning artifacts above against the spec-review rubric."
-    echo "Follow the rubric's Evaluation Checklist exactly."
-    echo "Cite story ID and AC label for each finding."
-    echo "If the spec is clean, state: \"No findings. This epic is ready to mark READY.\""
+    echo "Instructions:"
+    echo "1. Read the rubric at the path above."
+    echo "2. Read all .md files in the planning artifacts directory above."
+    echo "3. Review the planning artifacts against the rubric. Follow its Evaluation Checklist exactly."
+    echo "4. Cite story ID and AC label for each finding."
+    echo "5. If the spec is clean, state: \"No findings. This epic is ready to mark READY.\""
 }
 
 # ---------------------------------------------------------------------------
