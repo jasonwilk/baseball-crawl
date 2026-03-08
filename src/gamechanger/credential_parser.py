@@ -6,7 +6,7 @@ auth credentials.  The output is a flat ``dict[str, str]`` mapping .env key
 names to values -- ready to be merged into a ``.env`` file.
 
 Header-to-.env key mapping (curl-paste path is web-only):
-    gc-token        -> GAMECHANGER_AUTH_TOKEN_WEB    (primary JWT, required)
+    gc-token        -> GAMECHANGER_REFRESH_TOKEN_WEB    (primary JWT, required)
     gc-device-id    -> GAMECHANGER_DEVICE_ID_WEB
     gc-app-name     -> GAMECHANGER_APP_NAME_WEB
     Cookie / -b     -> GAMECHANGER_COOKIE_<NAME> (one entry per cookie)
@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 # Headers that carry persistent credentials and the .env key to store them under.
 # The curl-paste path is inherently web-only, so keys use the _WEB suffix.
 _CREDENTIAL_HEADERS: dict[str, str] = {
-    "gc-token": "GAMECHANGER_AUTH_TOKEN_WEB",
+    "gc-token": "GAMECHANGER_REFRESH_TOKEN_WEB",
     "gc-device-id": "GAMECHANGER_DEVICE_ID_WEB",
     "gc-app-name": "GAMECHANGER_APP_NAME_WEB",
 }
@@ -67,7 +67,7 @@ def parse_curl(curl_command: str) -> dict[str, str]:
     """Parse a raw curl command string and return extracted credentials as a dict.
 
     The returned dict maps .env variable names to their values.  At minimum,
-    ``GAMECHANGER_AUTH_TOKEN_WEB`` and ``GAMECHANGER_BASE_URL`` are required; the
+    ``GAMECHANGER_REFRESH_TOKEN_WEB`` and ``GAMECHANGER_BASE_URL`` are required; the
     function raises ``CurlParseError`` if either is absent.
 
     Args:
@@ -173,7 +173,7 @@ def parse_curl(curl_command: str) -> dict[str, str]:
     credentials["GAMECHANGER_BASE_URL"] = f"{parsed.scheme}://{parsed.netloc}"
 
     # Enforce that the primary auth credential is present.
-    if "GAMECHANGER_AUTH_TOKEN_WEB" not in credentials:
+    if "GAMECHANGER_REFRESH_TOKEN_WEB" not in credentials:
         raise CurlParseError(
             "Required credential 'gc-token' header not found in curl command.\n"
             "Make sure you are copying the full curl command from the GameChanger "
@@ -246,6 +246,46 @@ def _extract_cookies(cookie_str: str, credentials: dict[str, str]) -> None:
         logger.debug("Extracted cookie %r -> %s", cname, env_key)
 
 
+def _build_merged_lines(env_path: str, new_values: dict[str, str]) -> list[str]:
+    """Read an existing .env file and return merged lines with *new_values* applied.
+
+    Existing keys present in *new_values* are updated in place.  New keys are
+    appended.  Lines starting with ``#`` and blank lines are preserved unchanged.
+
+    Args:
+        env_path: Absolute path to the .env file (may not exist yet).
+        new_values: New credential key-value pairs to merge in.
+
+    Returns:
+        List of merged lines (each ending with ``\\n``).
+    """
+    from pathlib import Path
+
+    path = Path(env_path)
+    existing_lines: list[str] = []
+    existing_keys: dict[str, int] = {}  # key -> line index
+
+    if path.exists():
+        with path.open("r", encoding="utf-8") as fh:
+            existing_lines = fh.readlines()
+        for idx, line in enumerate(existing_lines):
+            stripped = line.rstrip("\n")
+            if stripped.startswith("#") or not stripped.strip():
+                continue
+            if "=" in stripped:
+                key, _, _ = stripped.partition("=")
+                existing_keys[key.strip()] = idx
+
+    # Update lines in place for existing keys; append new ones.
+    for key, value in new_values.items():
+        if key in existing_keys:
+            existing_lines[existing_keys[key]] = f"{key}={value}\n"
+        else:
+            existing_lines.append(f"{key}={value}\n")
+
+    return existing_lines
+
+
 def merge_env_file(env_path: str, new_values: dict[str, str]) -> dict[str, str]:
     """Read an existing .env file, merge new values, write it back, and return the merged dict.
 
@@ -265,35 +305,71 @@ def merge_env_file(env_path: str, new_values: dict[str, str]) -> dict[str, str]:
     """
     from pathlib import Path
 
-    path = Path(env_path)
-    existing_lines: list[str] = []
-    existing_keys: dict[str, int] = {}  # key -> line index
-
-    if path.exists():
-        with path.open("r", encoding="utf-8") as fh:
-            existing_lines = fh.readlines()
-        for idx, line in enumerate(existing_lines):
-            stripped = line.rstrip("\n")
-            if stripped.startswith("#") or not stripped.strip():
-                continue
-            if "=" in stripped:
-                key, _, _ = stripped.partition("=")
-                existing_keys[key.strip()] = idx
-
-    # Update lines in place for existing keys.
-    for key, value in new_values.items():
-        if key in existing_keys:
-            existing_lines[existing_keys[key]] = f"{key}={value}\n"
-        else:
-            existing_lines.append(f"{key}={value}\n")
+    merged_lines = _build_merged_lines(env_path, new_values)
 
     # Write the merged content back to disk.
-    with path.open("w", encoding="utf-8") as fh:
-        fh.writelines(existing_lines)
+    with Path(env_path).open("w", encoding="utf-8") as fh:
+        fh.writelines(merged_lines)
 
     # Reconstruct merged dict for the caller (used for confirmation output).
     merged: dict[str, str] = {}
-    for line in existing_lines:
+    for line in merged_lines:
+        stripped = line.rstrip("\n")
+        if stripped.startswith("#") or not stripped.strip():
+            continue
+        if "=" in stripped:
+            k, _, v = stripped.partition("=")
+            merged[k.strip()] = v
+
+    return merged
+
+
+def atomic_merge_env_file(env_path: str, new_values: dict[str, str]) -> dict[str, str]:
+    """Read an existing .env file, merge new values, and write back atomically.
+
+    Identical to ``merge_env_file()`` in merge semantics, but uses a temporary
+    file and ``os.replace()`` for the write step.  This prevents data loss if
+    the process crashes mid-write -- the original file is left intact until the
+    rename succeeds.
+
+    Use this function wherever write-back failure could be catastrophic (e.g.,
+    persisting a rotated refresh token that has already been invalidated
+    server-side).
+
+    Args:
+        env_path: Absolute path to the .env file (may not exist yet).
+        new_values: New credential key-value pairs to merge in.
+
+    Returns:
+        The merged dict (existing non-credential keys + new values).
+
+    Raises:
+        OSError: If the temporary file cannot be written or the rename fails.
+            Callers should catch this and handle gracefully (e.g., log warning).
+    """
+    import os
+    import tempfile
+    from pathlib import Path
+
+    merged_lines = _build_merged_lines(env_path, new_values)
+
+    env_dir = str(Path(env_path).parent)
+    fd, tmp_path = tempfile.mkstemp(dir=env_dir, prefix=".env.tmp.")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.writelines(merged_lines)
+        os.replace(tmp_path, env_path)
+    except Exception:
+        # Clean up the temp file if rename failed.
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
+
+    # Reconstruct merged dict for the caller.
+    merged: dict[str, str] = {}
+    for line in merged_lines:
         stripped = line.rstrip("\n")
         if stripped.startswith("#") or not stripped.strip():
             continue

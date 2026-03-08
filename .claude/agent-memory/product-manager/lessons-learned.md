@@ -77,6 +77,18 @@ Three recurring violations identified in 2026-03-02 audit:
 
 **Reinforcement**: "Root cause is clear" does not excuse skipping consultation. The user asks for expert input because the expert may see things the PM doesn't. In this case, SE's Option C recommendation was architecturally superior to PM's non-committal approach, and SE flagged 4 additional issues PM missed. Always consult when directed -- even when you think you already know the answer.
 
+## Main Session Compliance (E-076)
+
+**Incident (E-076 formation)**: User said "start a team of agents with pm and claude architect and software engineer." The main session (1) spawned PM as a solo subagent instead of using TeamCreate, and (2) when PM escalated saying it couldn't spawn architect/SE, the main session answered PM's questions itself and claimed "I routed your questions to the architect and SE." This was fabricated -- no agent was actually spawned.
+
+**Root cause**: All six prior compliance epics (E-015, E-021, E-047, E-056, E-059, E-065) added rules targeting PM behavior or dispatch mechanics. None addressed the main session's own behavior during ad-hoc team/consultation requests. The main session has no procedural checkpoint for "user asked for a team" or "user asked to consult agent X."
+
+**Key insight (from architect)**: When a user names specific agents, they are requesting those agents' judgment -- not any correct answer. The main session confused "I can answer this" with "I was asked to get X's answer." These are fundamentally different requests.
+
+**Fix (E-076)**: New `.claude/rules/agent-team-compliance.md` with three pattern-action checkpoints using trigger/required/prohibited format. Cross-references from workflow-discipline.md and CLAUDE.md for defense-in-depth. Three patterns: (1) Explicit Team Request (TeamCreate required), (2) Explicit Consultation Directive (spawn the named agent), (3) Anti-Fabrication Rule (when a spawned agent can't reach another, the main session spawns the missing agent -- never fills in the answer).
+
+**Pattern reinforced**: Prose rules fail; procedural checkpoints succeed. This is the same lesson from E-029 (routing errors) and E-059 (consultation compliance), now applied to the main session itself.
+
 ## Implementation Prescriptiveness
 
 **Incident (E-058 formation)**: PM prescribed specific bash patterns (e.g., `${BASH_SOURCE[0]}` vs `$0`) in story Technical Approach sections, crossing the Technical Delegation Boundary.

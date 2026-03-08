@@ -9,7 +9,7 @@ Usage:
     python scripts/smoke_test.py --team-id <UUID>
 
 Requires valid credentials in .env. If credentials are expired, run:
-    python scripts/refresh_credentials.py
+    bb creds check
 """
 
 from __future__ import annotations
@@ -89,9 +89,11 @@ def run_smoke_test(team_id: str | None = None) -> bool:
         client = GameChangerClient()
     except ConfigurationError as exc:
         print(f"\nConfiguration error: {exc}")
-        print("Ensure GAMECHANGER_AUTH_TOKEN, GAMECHANGER_DEVICE_ID, and")
-        print("GAMECHANGER_BASE_URL are set in your .env file.")
-        print("Refresh by running: python scripts/refresh_credentials.py")
+        print("Ensure the following are set in your .env file:")
+        print("  GAMECHANGER_REFRESH_TOKEN_WEB, GAMECHANGER_CLIENT_ID_WEB,")
+        print("  GAMECHANGER_CLIENT_KEY_WEB, GAMECHANGER_DEVICE_ID_WEB,")
+        print("  GAMECHANGER_BASE_URL")
+        print("Run: bb creds check")
         return False
 
     _print_header()
@@ -122,7 +124,7 @@ def run_smoke_test(team_id: str | None = None) -> bool:
                 summary = "0 teams returned"
             _print_row(path, "OK", elapsed_ms, summary)
         except CredentialExpiredError:
-            print("\nCredentials expired. Refresh by running: python scripts/refresh_credentials.py")
+            print("\nCredentials expired. Re-capture via proxy or run: bb creds check")
             return False
         except (RateLimitError, GameChangerAPIError) as exc:
             _print_row(path, "FAIL", 0, str(exc))
@@ -143,7 +145,7 @@ def run_smoke_test(team_id: str | None = None) -> bool:
         count = len(data) if isinstance(data, list) else "?"
         _print_row(path, "OK", elapsed_ms, f"{count} game(s) found")
     except CredentialExpiredError:
-        print("\nCredentials expired. Refresh by running: python scripts/refresh_credentials.py")
+        print("\nCredentials expired. Re-capture via proxy or run: bb creds check")
         return False
     except (RateLimitError, GameChangerAPIError) as exc:
         _print_row(path, "FAIL", 0, str(exc))
@@ -158,7 +160,7 @@ def run_smoke_test(team_id: str | None = None) -> bool:
         count = len(data) if isinstance(data, list) else "?"
         _print_row(path, "OK", elapsed_ms, f"{count} player(s) on roster")
     except CredentialExpiredError:
-        print("\nCredentials expired. Refresh by running: python scripts/refresh_credentials.py")
+        print("\nCredentials expired. Re-capture via proxy or run: bb creds check")
         return False
     except (RateLimitError, GameChangerAPIError) as exc:
         _print_row(path, "FAIL", 0, str(exc))
@@ -190,7 +192,7 @@ def main() -> None:
     try:
         passed = run_smoke_test(team_id=args.team_id)
     except CredentialExpiredError:
-        print("\nCredentials expired. Refresh by running: python scripts/refresh_credentials.py")
+        print("\nCredentials expired. Re-capture via proxy or run: bb creds check")
         sys.exit(1)
 
     sys.exit(0 if passed else 1)

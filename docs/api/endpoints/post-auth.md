@@ -13,8 +13,17 @@ profiles:
       retry) observed and recorded. Success response schema confirmed from proxy
       session 2026-03-07_171705.
   mobile:
-    status: unverified
-    notes: Not captured from mobile profile.
+    status: observed
+    notes: >
+      POST /auth response confirmed from mobile proxy session (mitmweb, 2026-03-08).
+      Response shape identical to web: {"type":"token","access":{...},"refresh":{...}}.
+      Access token lifetime ~12 hours (vs ~60 min on web). Mobile client ID confirmed
+      different from web (0f18f027-... vs 07cb985d-...). Mobile client KEY not yet
+      extracted (in iOS binary). Content-Type differs: mobile uses
+      application/vnd.gc.com.post_eden_auth+json; version=1.0.0 instead of
+      application/json; charset=utf-8. JWT kid values same as web. JWT payload
+      fields identical to web. gc-client-id capture gap -- not confirmed sent on
+      mobile POST /auth (proxy addon did not record it).
 accept: "*/*"
 gc_user_action: null
 query_params: []
@@ -294,6 +303,23 @@ HTTP/2 401
 ```
 
 The browser immediately retries with the refresh token.
+
+## Mobile Profile Notes (Confirmed 2026-03-08)
+
+| Dimension | Web | Mobile (iOS) |
+|-----------|-----|-------------|
+| `Content-Type` on request | `application/json; charset=utf-8` | `application/vnd.gc.com.post_eden_auth+json; version=1.0.0` |
+| Response shape | `{"type":"token","access":{...},"refresh":{...}}` | Identical (confirmed) |
+| Access token lifetime | ~3,600s (~60 min) | ~43,997s (~12 hours) |
+| Refresh token lifetime | 1,209,600s (14 days) | 1,209,600s (14 days) |
+| JWT `kid` values | `fd4b4904-...` / `b3503b45-...` | Same (confirmed) |
+| JWT payload fields | `type`, `cid`, `email`, `userId`, `rtkn`, `iat`, `exp` | Identical (confirmed) |
+| `gc-client-id` value | `07cb985d-ff6c-429d-992c-b8a0d44e6fc3` | `0f18f027-c51e-4122-a330-9d537beb83e0` (DIFFERENT) |
+| Client key status | Extracted from JS bundle | NOT YET EXTRACTED (iOS binary) |
+
+**Important:** Because the mobile client ID differs from web, the mobile client key almost certainly also differs. Do not use `GAMECHANGER_CLIENT_KEY_WEB` to compute `gc-signature` for mobile POST /auth calls. The mobile client key must be extracted from the iOS binary before programmatic mobile token refresh is possible.
+
+The mobile `eden_auth` content-type may indicate a different auth protocol version. Response bodies confirm the same schema, but whether request body format (e.g., `{"type":"refresh"}`) also matches web has not been independently confirmed from a captured request body. See `epics/E-075-mobile-credential-capture/R-01-findings.md` for open questions.
 
 ## Token Health Check Alternative
 

@@ -3,9 +3,12 @@
 
 All HTTP calls are mocked -- no real network requests are made.
 Credentials are injected via monkeypatching dotenv_values.
+TokenManager is mocked so no real POST /auth calls are made.
 """
 
 from __future__ import annotations
+
+from unittest.mock import MagicMock
 
 import httpx
 import pytest
@@ -13,14 +16,18 @@ import respx
 
 from src.gamechanger.credentials import check_credentials
 
+_FAKE_ACCESS_TOKEN = "fake-access-token"
+
 _FAKE_WEB_CREDENTIALS = {
-    "GAMECHANGER_AUTH_TOKEN_WEB": "fake-jwt-token",
+    "GAMECHANGER_REFRESH_TOKEN_WEB": "fake-jwt-token",
+    "GAMECHANGER_CLIENT_ID_WEB": "fake-client-id",
+    "GAMECHANGER_CLIENT_KEY_WEB": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
     "GAMECHANGER_DEVICE_ID_WEB": "abcdef1234567890abcdef1234567890",
     "GAMECHANGER_BASE_URL": "https://api.team-manager.gc.com",
 }
 
 _FAKE_MOBILE_CREDENTIALS = {
-    "GAMECHANGER_AUTH_TOKEN_MOBILE": "fake-mobile-token",
+    "GAMECHANGER_ACCESS_TOKEN_MOBILE": "fake-mobile-access-token",
     "GAMECHANGER_DEVICE_ID_MOBILE": "mobile1234567890abcdef1234567890",
     "GAMECHANGER_BASE_URL": "https://api.team-manager.gc.com",
 }
@@ -35,6 +42,14 @@ def _patch_dotenv(monkeypatch: pytest.MonkeyPatch, values: dict) -> None:
     monkeypatch.setattr("src.gamechanger.client.dotenv_values", lambda: values)
 
 
+def _mock_token_manager(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Patch TokenManager so no real POST /auth calls are made during tests."""
+    mock_tm = MagicMock()
+    mock_tm.get_access_token.return_value = _FAKE_ACCESS_TOKEN
+    mock_tm.force_refresh.return_value = _FAKE_ACCESS_TOKEN
+    monkeypatch.setattr("src.gamechanger.client.TokenManager", lambda **_kw: mock_tm)
+
+
 # ---------------------------------------------------------------------------
 # Single profile: missing credentials -- exit 2
 # ---------------------------------------------------------------------------
@@ -44,15 +59,15 @@ def test_missing_all_credentials_returns_exit_2(monkeypatch: pytest.MonkeyPatch)
     _patch_dotenv(monkeypatch, {})
     exit_code, message = check_credentials(profile="web")
     assert exit_code == 2
-    assert "GAMECHANGER_AUTH_TOKEN_WEB" in message or "Missing" in message
+    assert "GAMECHANGER_REFRESH_TOKEN_WEB" in message or "Missing" in message
 
 
 def test_missing_one_credential_returns_exit_2(monkeypatch: pytest.MonkeyPatch) -> None:
-    partial = {k: v for k, v in _FAKE_WEB_CREDENTIALS.items() if k != "GAMECHANGER_AUTH_TOKEN_WEB"}
+    partial = {k: v for k, v in _FAKE_WEB_CREDENTIALS.items() if k != "GAMECHANGER_REFRESH_TOKEN_WEB"}
     _patch_dotenv(monkeypatch, partial)
     exit_code, message = check_credentials(profile="web")
     assert exit_code == 2
-    assert "GAMECHANGER_AUTH_TOKEN_WEB" in message
+    assert "GAMECHANGER_REFRESH_TOKEN_WEB" in message
 
 
 def test_missing_credentials_message_never_reveals_values(
@@ -60,9 +75,10 @@ def test_missing_credentials_message_never_reveals_values(
 ) -> None:
     """Credential values must not appear in output."""
     partial = {
-        "GAMECHANGER_AUTH_TOKEN_WEB": "super-secret-token",
+        "GAMECHANGER_REFRESH_TOKEN_WEB": "super-secret-token",
+        "GAMECHANGER_CLIENT_ID_WEB": "secret-client-id",
         "GAMECHANGER_DEVICE_ID_WEB": "secret-device",
-        # GAMECHANGER_BASE_URL is absent
+        # GAMECHANGER_CLIENT_KEY_WEB and GAMECHANGER_BASE_URL absent
     }
     _patch_dotenv(monkeypatch, partial)
     exit_code, message = check_credentials(profile="web")
@@ -81,6 +97,7 @@ def test_valid_credentials_with_full_name_returns_exit_0(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _patch_dotenv(monkeypatch, _FAKE_WEB_CREDENTIALS)
+    _mock_token_manager(monkeypatch)
     respx.get(f"{_BASE_URL}/me/user").mock(
         return_value=httpx.Response(
             200,
@@ -103,6 +120,7 @@ def test_valid_credentials_falls_back_to_email_when_names_missing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _patch_dotenv(monkeypatch, _FAKE_WEB_CREDENTIALS)
+    _mock_token_manager(monkeypatch)
     respx.get(f"{_BASE_URL}/me/user").mock(
         return_value=httpx.Response(
             200,
@@ -125,6 +143,7 @@ def test_valid_credentials_message_does_not_reveal_token(
 ) -> None:
     """Token value must not appear in success output."""
     _patch_dotenv(monkeypatch, _FAKE_WEB_CREDENTIALS)
+    _mock_token_manager(monkeypatch)
     respx.get(f"{_BASE_URL}/me/user").mock(
         return_value=httpx.Response(
             200,
@@ -145,6 +164,7 @@ def test_valid_credentials_message_does_not_reveal_token(
 @respx.mock
 def test_expired_credentials_401_returns_exit_1(monkeypatch: pytest.MonkeyPatch) -> None:
     _patch_dotenv(monkeypatch, _FAKE_WEB_CREDENTIALS)
+    _mock_token_manager(monkeypatch)
     respx.get(f"{_BASE_URL}/me/user").mock(
         return_value=httpx.Response(401, json={"error": "unauthorized"})
     )
@@ -161,6 +181,7 @@ def test_expired_credentials_401_returns_exit_1(monkeypatch: pytest.MonkeyPatch)
 @respx.mock
 def test_forbidden_403_returns_exit_1(monkeypatch: pytest.MonkeyPatch) -> None:
     _patch_dotenv(monkeypatch, _FAKE_WEB_CREDENTIALS)
+    _mock_token_manager(monkeypatch)
     respx.get(f"{_BASE_URL}/me/user").mock(
         return_value=httpx.Response(403, json={"error": "forbidden"})
     )
@@ -177,6 +198,7 @@ def test_forbidden_403_returns_exit_1(monkeypatch: pytest.MonkeyPatch) -> None:
 @respx.mock
 def test_network_timeout_returns_exit_1(monkeypatch: pytest.MonkeyPatch) -> None:
     _patch_dotenv(monkeypatch, _FAKE_WEB_CREDENTIALS)
+    _mock_token_manager(monkeypatch)
     respx.get(f"{_BASE_URL}/me/user").mock(side_effect=httpx.TimeoutException("timed out"))
     exit_code, message = check_credentials(profile="web")
     assert exit_code == 1
@@ -186,6 +208,7 @@ def test_network_timeout_returns_exit_1(monkeypatch: pytest.MonkeyPatch) -> None
 @respx.mock
 def test_connect_error_returns_exit_1(monkeypatch: pytest.MonkeyPatch) -> None:
     _patch_dotenv(monkeypatch, _FAKE_WEB_CREDENTIALS)
+    _mock_token_manager(monkeypatch)
     respx.get(f"{_BASE_URL}/me/user").mock(
         side_effect=httpx.ConnectError("connection refused")
     )
@@ -202,6 +225,7 @@ def test_connect_error_returns_exit_1(monkeypatch: pytest.MonkeyPatch) -> None:
 @respx.mock
 def test_mobile_profile_valid_returns_exit_0(monkeypatch: pytest.MonkeyPatch) -> None:
     _patch_dotenv(monkeypatch, _FAKE_MOBILE_CREDENTIALS)
+    _mock_token_manager(monkeypatch)
     respx.get(f"{_BASE_URL}/me/user").mock(
         return_value=httpx.Response(
             200,
@@ -219,7 +243,7 @@ def test_mobile_profile_missing_credentials_returns_exit_2(
     _patch_dotenv(monkeypatch, {})
     exit_code, message = check_credentials(profile="mobile")
     assert exit_code == 2
-    assert "GAMECHANGER_AUTH_TOKEN_MOBILE" in message or "Missing" in message
+    assert "GAMECHANGER_DEVICE_ID_MOBILE" in message or "Missing" in message
 
 
 # ---------------------------------------------------------------------------
@@ -230,6 +254,7 @@ def test_mobile_profile_missing_credentials_returns_exit_2(
 @respx.mock
 def test_multi_profile_both_valid_returns_exit_0(monkeypatch: pytest.MonkeyPatch) -> None:
     _patch_dotenv(monkeypatch, _FAKE_BOTH_CREDENTIALS)
+    _mock_token_manager(monkeypatch)
     respx.get(f"{_BASE_URL}/me/user").mock(
         return_value=httpx.Response(
             200,
@@ -246,6 +271,7 @@ def test_multi_profile_both_valid_returns_exit_0(monkeypatch: pytest.MonkeyPatch
 def test_multi_profile_only_web_valid_returns_exit_0(monkeypatch: pytest.MonkeyPatch) -> None:
     """Exit 0 when at least one profile is valid (AC-4)."""
     _patch_dotenv(monkeypatch, _FAKE_WEB_CREDENTIALS)  # no mobile keys
+    _mock_token_manager(monkeypatch)
     respx.get(f"{_BASE_URL}/me/user").mock(
         return_value=httpx.Response(
             200,

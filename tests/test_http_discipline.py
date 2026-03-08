@@ -226,8 +226,12 @@ class TestNormalResponseHandling:
 # AND all 10 required browser headers from BROWSER_HEADERS on every request.
 
 
+_FAKE_ACCESS_TOKEN = "fake-access-token"
+
 _FAKE_CREDENTIALS = {
-    "GAMECHANGER_AUTH_TOKEN_WEB": "fake-jwt-token",
+    "GAMECHANGER_REFRESH_TOKEN_WEB": "fake-refresh-token",
+    "GAMECHANGER_CLIENT_ID_WEB": "fake-client-id",
+    "GAMECHANGER_CLIENT_KEY_WEB": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
     "GAMECHANGER_DEVICE_ID_WEB": "abcdef1234567890abcdef1234567890",
     "GAMECHANGER_BASE_URL": "https://api.team-manager.gc.com",
     "GAMECHANGER_APP_NAME_WEB": "web",
@@ -243,12 +247,18 @@ class TestGameChangerClientHeaderIntegration:
     ) -> None:
         """GameChangerClient.get() carries gc-token, gc-device-id, gc-app-name,
         and all 10 browser headers from BROWSER_HEADERS in a single request."""
+        from unittest.mock import MagicMock
+
         from src.gamechanger.client import GameChangerClient
 
         monkeypatch.setattr(
             "src.gamechanger.client.dotenv_values",
             lambda: _FAKE_CREDENTIALS,
         )
+        mock_tm = MagicMock()
+        mock_tm.get_access_token.return_value = _FAKE_ACCESS_TOKEN
+        mock_tm.force_refresh.return_value = _FAKE_ACCESS_TOKEN
+        monkeypatch.setattr("src.gamechanger.client.TokenManager", lambda **_kw: mock_tm)
 
         route = respx.get("https://api.team-manager.gc.com/me/teams").mock(
             return_value=httpx.Response(200, json=[])
@@ -259,7 +269,7 @@ class TestGameChangerClientHeaderIntegration:
         request = route.calls.last.request
 
         # GameChanger-specific auth headers
-        assert request.headers["gc-token"] == "fake-jwt-token"
+        assert request.headers["gc-token"] == _FAKE_ACCESS_TOKEN
         assert request.headers["gc-device-id"] == "abcdef1234567890abcdef1234567890"
         assert request.headers["gc-app-name"] == "web"
 

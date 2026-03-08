@@ -4,7 +4,7 @@
 [E-070: RTK Token Optimization Integration](./epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, every devcontainer rebuild will automatically install the rtk binary and configure the Claude Code PreToolUse hook for token-optimized Bash output. No manual setup required.
@@ -20,7 +20,7 @@ RTK is a CLI proxy that reduces LLM token consumption by rewriting common dev co
 - [ ] **AC-5**: Given a freshly built devcontainer, when the user inspects the project-level `.claude/settings.json`, then it is unchanged (PII scan and epic archive hooks intact, no rtk entries added).
 - [ ] **AC-6**: Given the rtk install script or `rtk init` fails (e.g., network error, binary not found), when the postCreateCommand continues, then all subsequent steps in the chain still execute -- rtk failure does not cascade.
 - [ ] **AC-7**: Given `rtk init -g --auto-patch` has already been run once, when it runs a second time, then no duplicate hook entries appear in `~/.claude/settings.json`.
-- [ ] **AC-8**: The `postCreateCommand` string before the rtk append point is character-for-character identical to the current value in the repository. Verification: `pytest` passes with no regressions.
+- [ ] **AC-8**: The `postCreateCommand` string before the rtk append point is character-for-character identical to the current value in the repository. Verification: (a) visual diff of the `postCreateCommand` line confirms only the rtk subshell was appended at the tail, and (b) `pytest` passes with no regressions.
 
 ## Technical Approach
 A single non-blocking subshell is appended at the tail of the existing `postCreateCommand` chain in `.devcontainer/devcontainer.json`, after the final `pip install -e .`. The subshell is separated by `;` (not `&&`) so that rtk failure cannot cascade to block the critical install chain. Inside the subshell, the install and init are chained with `&&` (init only runs if install succeeds), and the entire subshell has an `|| echo` fallback for graceful degradation.
@@ -44,7 +44,7 @@ software-engineer
 ## Definition of Done
 - [ ] All acceptance criteria pass
 - [ ] Existing pytest suite passes with no regressions (no new test files expected -- ACs are verified by manual container rebuild + code inspection)
-- [ ] Code follows project style (see CLAUDE.md)
+- [ ] Modified JSON is valid and follows existing devcontainer.json formatting conventions
 
 ## Notes
 - The rtk install script auto-detects OS and architecture. Confirmed working on linux aarch64.

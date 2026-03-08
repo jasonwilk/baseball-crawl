@@ -25,7 +25,7 @@ class TestCredsRefresh:
     """Argument mapping tests for ``bb creds refresh``."""
 
     _FAKE_CREDENTIALS = {
-        "GAMECHANGER_AUTH_TOKEN_WEB": "tok_abc",
+        "GAMECHANGER_REFRESH_TOKEN_WEB": "tok_abc",
         "GAMECHANGER_DEVICE_ID_WEB": "dev_xyz",
         "GAMECHANGER_BASE_URL": "https://api.gc.com",
     }
@@ -81,7 +81,7 @@ class TestCredsRefresh:
         assert result.exit_code != 0
 
     def test_output_contains_key_names_not_values(self) -> None:
-        """Output lists key names (e.g., GAMECHANGER_AUTH_TOKEN_WEB) but not their values."""
+        """Output lists key names (e.g., GAMECHANGER_REFRESH_TOKEN_WEB) but not their values."""
         result, _, _ = self._invoke(["creds", "refresh"])
         assert result.exit_code == 0
         output = result.output

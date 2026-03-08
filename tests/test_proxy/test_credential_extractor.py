@@ -96,8 +96,8 @@ class TestWebSourcePath:
             extractor.request(flow)
 
         credentials = mock_merge.call_args[0][1]
-        assert credentials["GAMECHANGER_AUTH_TOKEN_WEB"] == "jwt.web.tok"
-        assert "GAMECHANGER_AUTH_TOKEN" not in credentials
+        assert credentials["GAMECHANGER_REFRESH_TOKEN_WEB"] == "jwt.web.tok"
+        assert "GAMECHANGER_REFRESH_TOKEN" not in credentials
 
     def test_web_device_id_writes_to_web_key(self) -> None:
         extractor = CredentialExtractor()
@@ -118,7 +118,8 @@ class TestWebSourcePath:
         credentials = mock_merge.call_args[0][1]
         assert credentials["GAMECHANGER_DEVICE_ID_WEB"] == "device-web"
 
-    def test_web_all_four_credentials_use_web_suffix(self) -> None:
+    def test_web_three_credentials_use_web_suffix(self) -> None:
+        """gc-token, gc-device-id, gc-app-name are captured; gc-signature is NOT (computed at runtime)."""
         extractor = CredentialExtractor()
         flow = _make_flow(
             "api.gc.com",
@@ -126,7 +127,7 @@ class TestWebSourcePath:
                 "gc-token": "jwt.tok",
                 "gc-device-id": "dev-id",
                 "gc-app-name": "appname",
-                "gc-signature": "sigvalue",
+                "gc-signature": "sigvalue",  # present in traffic but not captured
                 "user-agent": "Chrome/120",
             },
         )
@@ -137,12 +138,13 @@ class TestWebSourcePath:
             extractor.request(flow)
 
         credentials = mock_merge.call_args[0][1]
-        assert credentials["GAMECHANGER_AUTH_TOKEN_WEB"] == "jwt.tok"
+        assert credentials["GAMECHANGER_REFRESH_TOKEN_WEB"] == "jwt.tok"
         assert credentials["GAMECHANGER_DEVICE_ID_WEB"] == "dev-id"
         assert credentials["GAMECHANGER_APP_NAME_WEB"] == "appname"
-        assert credentials["GAMECHANGER_SIGNATURE_WEB"] == "sigvalue"
+        # gc-signature is no longer captured -- computed at runtime from CLIENT_KEY
+        assert "GAMECHANGER_SIGNATURE_WEB" not in credentials
         # No unsuffixed keys
-        assert "GAMECHANGER_AUTH_TOKEN" not in credentials
+        assert "GAMECHANGER_REFRESH_TOKEN" not in credentials
         assert "GAMECHANGER_DEVICE_ID" not in credentials
 
 
@@ -165,8 +167,8 @@ class TestIosSourcePath:
             extractor.request(flow)
 
         credentials = mock_merge.call_args[0][1]
-        assert credentials["GAMECHANGER_AUTH_TOKEN_MOBILE"] == "jwt.mobile.tok"
-        assert "GAMECHANGER_AUTH_TOKEN" not in credentials
+        assert credentials["GAMECHANGER_REFRESH_TOKEN_MOBILE"] == "jwt.mobile.tok"
+        assert "GAMECHANGER_REFRESH_TOKEN" not in credentials
 
     def test_ios_cfnetwork_writes_to_mobile_key(self) -> None:
         extractor = CredentialExtractor()
@@ -185,7 +187,7 @@ class TestIosSourcePath:
             extractor.request(flow)
 
         credentials = mock_merge.call_args[0][1]
-        assert credentials["GAMECHANGER_AUTH_TOKEN_MOBILE"] == "jwt.cfnet.tok"
+        assert credentials["GAMECHANGER_REFRESH_TOKEN_MOBILE"] == "jwt.cfnet.tok"
         assert credentials["GAMECHANGER_DEVICE_ID_MOBILE"] == "mobile-device"
 
 
@@ -286,8 +288,8 @@ class TestDeduplication:
         with patch(
             "proxy.addons.credential_extractor.merge_env_file"
         ) as mock_merge:
-            extractor.request(web_flow)   # writes GAMECHANGER_AUTH_TOKEN_WEB=tok
-            extractor.request(ios_flow)   # writes GAMECHANGER_AUTH_TOKEN_MOBILE=tok (different key)
+            extractor.request(web_flow)   # writes GAMECHANGER_REFRESH_TOKEN_WEB=tok
+            extractor.request(ios_flow)   # writes GAMECHANGER_REFRESH_TOKEN_MOBILE=tok (different key)
 
         # Both should have triggered a write (different env keys)
         assert mock_merge.call_count == 2
@@ -385,7 +387,7 @@ class TestSourceLogging:
             with caplog.at_level("INFO", logger="proxy.addons.credential_extractor"):
                 extractor.request(flow)
 
-        assert "GAMECHANGER_AUTH_TOKEN_WEB" in caplog.text
+        assert "GAMECHANGER_REFRESH_TOKEN_WEB" in caplog.text
         assert token_value not in caplog.text
 
 

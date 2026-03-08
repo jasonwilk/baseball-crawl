@@ -8,8 +8,8 @@
 
 **Three token types:**
 - **CLIENT token** (exp-iat = 600s = 10 min): JWT fields: `type:"client"`, `sid`, `cid`, `iat`, `exp`. Anonymous session token. Used as gc-token in steps 3-4 of full login flow.
-- **ACCESS token** (exp-iat = ~3,672s = ~61 minutes): JWT fields: `type:"user"`, `cid`, `email`, `userId` (camelCase), `rtkn`, `iat`, `exp`. Sent as gc-token in all authenticated API requests.
-- **REFRESH token** (exp-iat = 1,209,600s = 14 days): JWT fields: `id` (uuid:uuid), `cid`, `uid`, `email`, `iat`, `exp`. No `type` field, different `kid`. Sent as gc-token in `POST /auth {"type":"refresh"}`. Self-renewing (each refresh returns a new refresh token).
+- **ACCESS token** (exp-iat = ~3,672s = ~61 min on WEB; ~43,997s = ~12 hours on MOBILE): JWT fields: `type:"user"`, `cid`, `email`, `userId` (camelCase), `rtkn`, `iat`, `exp`. Sent as gc-token in all authenticated API requests.
+- **REFRESH token** (exp-iat = 1,209,600s = 14 days, same for web and mobile): JWT fields: `id` (uuid:uuid), `cid`, `uid`, `email`, `iat`, `exp`. No `type` field, different `kid`. Sent as gc-token in `POST /auth {"type":"refresh"}`. Self-renewing (each refresh returns a new refresh token).
 
 **Credential tiers:**
 1. Client ID + Client Key -- static (only changes on app deploys)
@@ -25,6 +25,8 @@
 - `GAMECHANGER_USER_PASSWORD` -- password (sensitive) for full login flow fallback
 
 **Deprecated:** `GAMECHANGER_AUTH_TOKEN_WEB` (renamed to `GAMECHANGER_REFRESH_TOKEN_WEB`), `GAMECHANGER_SIGNATURE_WEB` (now computed programmatically).
+
+**Mobile profile (confirmed 2026-03-08):** Mobile client ID `0f18f027-...` -- DIFFERENT from web `07cb985d-...`. Mobile client key UNKNOWN (in iOS binary). POST /auth response shape identical to web. Access token ~12 hours (vs ~61 min web). JWT kid/fields identical across profiles. `gc-app-name` on mobile UNRESOLVED. Programmatic mobile refresh NOT POSSIBLE until client key extracted. Do NOT use web client key for mobile signing.
 
 **Token validity check**: `GET /me/user` returns 200 OK if the access token is valid, 401 if expired.
 
@@ -178,7 +180,7 @@ As of 2026-03-07. All API knowledge is empirical -- discovered by running curl c
 **CLIENT token** (10 min, used as gc-token in steps 3-4 of login flow):
 Fields: `type:"client"`, `sid` (session UUID), `cid`, `iat`, `exp`. No user identity.
 
-**ACCESS token** (~61 minutes, sent as gc-token in all standard API calls):
+**ACCESS token** (~61 min web / ~12 hours mobile, sent as gc-token in all standard API calls):
 Fields: `type:"user"`, `cid`, `email`, `userId` (camelCase, user UUID), `rtkn` (refresh token UUID pair), `iat`, `exp`.
 
 **REFRESH token** (14 days, sent as gc-token in POST /auth refresh/logout calls):
@@ -186,7 +188,7 @@ Fields: `id` (compound `{session_uuid}:{refresh_token_uuid}`), `cid`, `uid` (use
 
 The `/subscription/details` response `type: "team_manager"` field is subscription metadata, not JWT payload type.
 
-**Decode tip:** `exp-iat < 1000` = client token (10 min). `exp-iat < 10000` = access token (~61 min). `exp-iat > 1000000` = refresh token (14 days).
+**Decode tip:** `exp-iat < 1000` = client token (10 min). `exp-iat < 50000` = access token (~61 min web OR ~12 hours mobile -- old threshold of 10000 too narrow for mobile). `exp-iat > 1000000` = refresh token (14 days).
 
 ## Security Rules
 
@@ -199,6 +201,10 @@ Never display/log/store credentials. Use `{AUTH_TOKEN}` placeholders. Strip auth
 - `/me/advertising/metadata` -- `targeting.gc_user-id_v1` is the user UUID
 - `/sync-topics/me/updated-topics` -- `next_cursor` contains user UUID
 - `/teams/{team_id}/schedule/events/{event_id}/video-stream` -- `publish_url` and `stream_key` are live stream credentials
+
+## Mobile Auth (E-075, 2026-03-08)
+
+Mobile proxy session `2026-03-06_211209` analyzed. 744 iOS requests, 6 POST /auth (all 200). Key finding: mobile POST /auth uses `application/vnd.gc.com.post_eden_auth+json; version=1.0.0` (web uses `application/json; charset=utf-8`). gc-client-id NOT captured -- addon gap. Client key parity unknown -- decode `GAMECHANGER_REFRESH_TOKEN_MOBILE` from `.env` and compare `cid` to `GAMECHANGER_CLIENT_ID_WEB`. E-075-01 naming rename appears ALREADY COMPLETE in code. Full notes: `.claude/agent-memory/api-scout/mobile-auth-notes.md`.
 
 ## Key File Paths
 

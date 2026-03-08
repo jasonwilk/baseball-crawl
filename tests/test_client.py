@@ -25,8 +25,11 @@ from src.gamechanger.client import (
 # Helpers
 # ---------------------------------------------------------------------------
 
+_FAKE_ACCESS_TOKEN = "fake-access-token"
 _FAKE_CREDENTIALS = {
-    "GAMECHANGER_AUTH_TOKEN_WEB": "fake-jwt-token",
+    "GAMECHANGER_REFRESH_TOKEN_WEB": "fake-refresh-token",
+    "GAMECHANGER_CLIENT_ID_WEB": "07cb985d-ff6c-429d-992c-b8a0d44e6fc3",
+    "GAMECHANGER_CLIENT_KEY_WEB": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
     "GAMECHANGER_DEVICE_ID_WEB": "abcdef1234567890abcdef1234567890",
     "GAMECHANGER_BASE_URL": "https://api.team-manager.gc.com",
     "GAMECHANGER_APP_NAME_WEB": "web",
@@ -35,12 +38,22 @@ _FAKE_CREDENTIALS = {
 _BASE_URL = "https://api.team-manager.gc.com"
 
 
+def _mock_token_manager(monkeypatch: pytest.MonkeyPatch, access_token: str = _FAKE_ACCESS_TOKEN) -> None:
+    """Patch TokenManager so tests do not trigger real POST /auth flows."""
+    from unittest.mock import MagicMock
+    mock_tm = MagicMock()
+    mock_tm.get_access_token.return_value = access_token
+    mock_tm.force_refresh.return_value = access_token
+    monkeypatch.setattr("src.gamechanger.client.TokenManager", lambda **kwargs: mock_tm)
+
+
 def _make_client(monkeypatch: pytest.MonkeyPatch) -> GameChangerClient:
     """Return a GameChangerClient with fake credentials and zero delays."""
     monkeypatch.setattr(
         "src.gamechanger.client.dotenv_values",
         lambda: _FAKE_CREDENTIALS,
     )
+    _mock_token_manager(monkeypatch)
     return GameChangerClient(min_delay_ms=0, jitter_ms=0)
 
 
@@ -103,7 +116,7 @@ def test_credential_expired_error_on_401_403(
     msg = str(exc_info.value)
     assert "/teams/abc/game-summaries" in msg
     assert str(status_code) in msg
-    assert "python scripts/refresh_credentials.py" in msg
+    assert "bb creds check" in msg or "check .env" in msg
 
 
 # ---------------------------------------------------------------------------
@@ -316,8 +329,7 @@ def test_missing_all_credentials_raises_configuration_error(
         GameChangerClient(min_delay_ms=0, jitter_ms=0)
 
     msg = str(exc_info.value)
-    assert "GAMECHANGER_AUTH_TOKEN_WEB" in msg
-    assert "GAMECHANGER_DEVICE_ID_WEB" in msg
+    assert "GAMECHANGER_REFRESH_TOKEN_WEB" in msg
     assert "GAMECHANGER_BASE_URL" in msg
 
 
@@ -326,7 +338,9 @@ def test_missing_single_credential_raises_configuration_error(
 ) -> None:
     """One missing required key raises ConfigurationError mentioning that key."""
     partial_creds = {
-        "GAMECHANGER_AUTH_TOKEN_WEB": "fake-token",
+        "GAMECHANGER_REFRESH_TOKEN_WEB": "fake-token",
+        "GAMECHANGER_CLIENT_ID_WEB": "07cb985d-ff6c-429d-992c-b8a0d44e6fc3",
+        "GAMECHANGER_CLIENT_KEY_WEB": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
         "GAMECHANGER_DEVICE_ID_WEB": "fake-device-id",
         # GAMECHANGER_BASE_URL intentionally absent
     }
@@ -364,6 +378,7 @@ def test_min_delay_and_jitter_forwarded_to_session(monkeypatch: pytest.MonkeyPat
         "src.gamechanger.client.dotenv_values",
         lambda: _FAKE_CREDENTIALS,
     )
+    _mock_token_manager(monkeypatch)
 
     GameChangerClient(min_delay_ms=2000, jitter_ms=750)
 
@@ -437,7 +452,7 @@ def test_auth_headers_injected(monkeypatch: pytest.MonkeyPatch) -> None:
     client.get("/me/teams")
 
     request = route.calls.last.request
-    assert request.headers["gc-token"] == "fake-jwt-token"
+    assert request.headers["gc-token"] == _FAKE_ACCESS_TOKEN
     assert request.headers["gc-device-id"] == "abcdef1234567890abcdef1234567890"
     assert request.headers["gc-app-name"] == "web"
 
@@ -611,22 +626,25 @@ def test_paginated_5xx_retries_same_page_not_entire_sequence(
 # ---------------------------------------------------------------------------
 
 _FAKE_CREDENTIALS_NO_APP_NAME = {
-    "GAMECHANGER_AUTH_TOKEN_WEB": "fake-jwt-token",
+    "GAMECHANGER_REFRESH_TOKEN_WEB": "fake-refresh-token",
+    "GAMECHANGER_CLIENT_ID_WEB": "07cb985d-ff6c-429d-992c-b8a0d44e6fc3",
+    "GAMECHANGER_CLIENT_KEY_WEB": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
     "GAMECHANGER_DEVICE_ID_WEB": "abcdef1234567890abcdef1234567890",
     "GAMECHANGER_BASE_URL": "https://api.team-manager.gc.com",
     # GAMECHANGER_APP_NAME_WEB intentionally absent
 }
 
 _FAKE_CREDENTIALS_MOBILE = {
-    "GAMECHANGER_AUTH_TOKEN_MOBILE": "fake-mobile-jwt-token",
     "GAMECHANGER_DEVICE_ID_MOBILE": "mobiledeviceid1234567890abcdef",
     "GAMECHANGER_BASE_URL": "https://api.team-manager.gc.com",
+    # Mobile manual fallback path -- no client key, access token provided directly
+    "GAMECHANGER_ACCESS_TOKEN_MOBILE": "fake-mobile-access-token",
 }
 
 _FAKE_CREDENTIALS_MOBILE_NO_APP_NAME = {
-    "GAMECHANGER_AUTH_TOKEN_MOBILE": "fake-mobile-jwt-token",
     "GAMECHANGER_DEVICE_ID_MOBILE": "mobiledeviceid1234567890abcdef",
     "GAMECHANGER_BASE_URL": "https://api.team-manager.gc.com",
+    "GAMECHANGER_ACCESS_TOKEN_MOBILE": "fake-mobile-access-token",
     # GAMECHANGER_APP_NAME_MOBILE intentionally absent
 }
 
@@ -639,6 +657,7 @@ def _make_client_with_profile(
     """Return a GameChangerClient with the given profile and zero delays."""
     creds = credentials if credentials is not None else _FAKE_CREDENTIALS
     monkeypatch.setattr("src.gamechanger.client.dotenv_values", lambda: creds)
+    _mock_token_manager(monkeypatch)
     return GameChangerClient(min_delay_ms=0, jitter_ms=0, profile=profile)
 
 
@@ -701,6 +720,7 @@ def test_profile_parameter_forwarded_to_create_session(
     monkeypatch.setattr(
         "src.gamechanger.client.dotenv_values", lambda: _FAKE_CREDENTIALS_MOBILE
     )
+    _mock_token_manager(monkeypatch)
 
     GameChangerClient(min_delay_ms=0, jitter_ms=0, profile="mobile")
     assert captured["profile"] == "mobile"
@@ -772,11 +792,32 @@ def test_gc_app_name_omitted_when_env_absent_and_profile_mobile(
 
 
 def test_web_profile_loads_web_scoped_keys(monkeypatch: pytest.MonkeyPatch) -> None:
-    """AC-1: GameChangerClient(profile='web') reads _WEB suffixed keys."""
+    """AC-1: GameChangerClient(profile='web') reads _WEB suffixed keys.
+
+    gc-token is set lazily on first API call; device-id is set eagerly.
+    """
     monkeypatch.setattr("src.gamechanger.client.dotenv_values", lambda: _FAKE_CREDENTIALS)
+    _mock_token_manager(monkeypatch)
     client = GameChangerClient(min_delay_ms=0, jitter_ms=0, profile="web")
-    assert client._session.headers["gc-token"] == "fake-jwt-token"
+    # device-id is set eagerly at construction time
     assert client._session.headers["gc-device-id"] == "abcdef1234567890abcdef1234567890"
+    # gc-token is NOT set at construction; set lazily on first API call
+    assert "gc-token" not in client._session.headers
+
+
+def test_web_profile_gc_token_set_on_first_api_call(monkeypatch: pytest.MonkeyPatch) -> None:
+    """gc-token is set to the access token (not refresh token) on first API call."""
+    import respx as _respx
+    import httpx as _httpx
+
+    monkeypatch.setattr("src.gamechanger.client.dotenv_values", lambda: _FAKE_CREDENTIALS)
+    _mock_token_manager(monkeypatch, access_token=_FAKE_ACCESS_TOKEN)
+
+    with _respx.mock:
+        _respx.get(f"{_BASE_URL}/me/teams").mock(return_value=_httpx.Response(200, json=[]))
+        client = GameChangerClient(min_delay_ms=0, jitter_ms=0, profile="web")
+        client.get("/me/teams")
+        assert client._session.headers["gc-token"] == _FAKE_ACCESS_TOKEN
 
 
 def test_web_profile_missing_web_key_raises_no_fallback(
@@ -784,7 +825,7 @@ def test_web_profile_missing_web_key_raises_no_fallback(
 ) -> None:
     """AC-2: Missing _WEB key raises ConfigurationError even if flat key exists."""
     creds_with_flat_only = {
-        "GAMECHANGER_AUTH_TOKEN": "flat-token",  # flat key -- should NOT be used
+        "GAMECHANGER_REFRESH_TOKEN": "flat-token",  # flat key -- should NOT be used
         "GAMECHANGER_DEVICE_ID": "flat-device",
         "GAMECHANGER_BASE_URL": "https://api.team-manager.gc.com",
     }
@@ -793,36 +834,147 @@ def test_web_profile_missing_web_key_raises_no_fallback(
     with pytest.raises(ConfigurationError) as exc_info:
         GameChangerClient(min_delay_ms=0, jitter_ms=0, profile="web")
 
-    assert "GAMECHANGER_AUTH_TOKEN_WEB" in str(exc_info.value)
+    assert "GAMECHANGER_REFRESH_TOKEN_WEB" in str(exc_info.value)
 
 
 def test_mobile_profile_loads_mobile_scoped_keys(monkeypatch: pytest.MonkeyPatch) -> None:
-    """AC-3: GameChangerClient(profile='mobile') reads _MOBILE suffixed keys."""
+    """AC-3: GameChangerClient(profile='mobile') reads _MOBILE suffixed keys.
+
+    For mobile without client key, the manual access token fallback is used.
+    device-id is set eagerly; gc-token is lazy.
+    """
     monkeypatch.setattr("src.gamechanger.client.dotenv_values", lambda: _FAKE_CREDENTIALS_MOBILE)
+    _mock_token_manager(monkeypatch)
     client = GameChangerClient(min_delay_ms=0, jitter_ms=0, profile="mobile")
-    assert client._session.headers["gc-token"] == "fake-mobile-jwt-token"
     assert client._session.headers["gc-device-id"] == "mobiledeviceid1234567890abcdef"
+    # gc-token is NOT set at construction; set lazily on first API call
+    assert "gc-token" not in client._session.headers
 
 
-def test_mobile_profile_missing_mobile_key_raises(
+def test_mobile_profile_missing_device_id_raises(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """AC-4: Missing _MOBILE key raises ConfigurationError naming the expected key."""
-    creds_missing_mobile = {
-        "GAMECHANGER_DEVICE_ID_MOBILE": "some-device",
+    """AC-4: Missing GAMECHANGER_DEVICE_ID_MOBILE raises ConfigurationError."""
+    creds_missing_device_id = {
         "GAMECHANGER_BASE_URL": "https://api.team-manager.gc.com",
-        # GAMECHANGER_AUTH_TOKEN_MOBILE intentionally absent
+        # GAMECHANGER_DEVICE_ID_MOBILE intentionally absent
     }
-    monkeypatch.setattr("src.gamechanger.client.dotenv_values", lambda: creds_missing_mobile)
+    monkeypatch.setattr("src.gamechanger.client.dotenv_values", lambda: creds_missing_device_id)
 
     with pytest.raises(ConfigurationError) as exc_info:
         GameChangerClient(min_delay_ms=0, jitter_ms=0, profile="mobile")
 
-    assert "GAMECHANGER_AUTH_TOKEN_MOBILE" in str(exc_info.value)
+    assert "GAMECHANGER_DEVICE_ID_MOBILE" in str(exc_info.value)
 
 
 def test_base_url_remains_unsuffixed(monkeypatch: pytest.MonkeyPatch) -> None:
     """AC-5: GAMECHANGER_BASE_URL is not profile-scoped (same for both profiles)."""
     monkeypatch.setattr("src.gamechanger.client.dotenv_values", lambda: _FAKE_CREDENTIALS)
+    _mock_token_manager(monkeypatch)
     client = GameChangerClient(min_delay_ms=0, jitter_ms=0, profile="web")
     assert client._base_url == "https://api.team-manager.gc.com"
+
+
+# ---------------------------------------------------------------------------
+# AC-8: 401 retry logic, double-401, token expiry between requests,
+# and mobile fallback with manual access token.
+# ---------------------------------------------------------------------------
+
+
+@respx.mock
+def test_401_triggers_force_refresh_and_retry_succeeds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AC-8a: 401 triggers force_refresh() and a single retry that succeeds."""
+    from unittest.mock import MagicMock
+
+    fresh_token = "refreshed-access-token"
+    mock_tm = MagicMock()
+    mock_tm.get_access_token.return_value = _FAKE_ACCESS_TOKEN
+    mock_tm.force_refresh.return_value = fresh_token
+    monkeypatch.setattr("src.gamechanger.client.TokenManager", lambda **_kw: mock_tm)
+    monkeypatch.setattr("src.gamechanger.client.dotenv_values", lambda: _FAKE_CREDENTIALS)
+
+    # First call returns 401; retry (after force_refresh) returns 200.
+    route = respx.get(f"{_BASE_URL}/me/teams").mock(
+        side_effect=[
+            httpx.Response(401),
+            httpx.Response(200, json=["team-a"]),
+        ]
+    )
+    client = GameChangerClient(min_delay_ms=0, jitter_ms=0)
+    result = client.get("/me/teams")
+
+    assert result == ["team-a"]
+    mock_tm.force_refresh.assert_called_once()
+    # Session gc-token updated to the fresh token after refresh.
+    assert client._session.headers["gc-token"] == fresh_token
+    assert route.call_count == 2
+
+
+@respx.mock
+def test_double_401_raises_credential_expired_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AC-8b: If both the initial request and the retry return 401, raises CredentialExpiredError."""
+    monkeypatch.setattr("src.gamechanger.client.dotenv_values", lambda: _FAKE_CREDENTIALS)
+    _mock_token_manager(monkeypatch)
+
+    respx.get(f"{_BASE_URL}/me/teams").mock(return_value=httpx.Response(401))
+    client = GameChangerClient(min_delay_ms=0, jitter_ms=0)
+
+    with pytest.raises(CredentialExpiredError):
+        client.get("/me/teams")
+
+
+@respx.mock
+def test_token_refresh_between_requests(monkeypatch: pytest.MonkeyPatch) -> None:
+    """AC-8c: Access token is refreshed between requests when TokenManager signals expiry."""
+    from unittest.mock import MagicMock
+
+    first_token = "first-access-token"
+    second_token = "second-access-token"
+    mock_tm = MagicMock()
+    # First call returns first_token; second call (simulating expiry) returns second_token.
+    mock_tm.get_access_token.side_effect = [first_token, second_token]
+    mock_tm.force_refresh.return_value = second_token
+    monkeypatch.setattr("src.gamechanger.client.TokenManager", lambda **_kw: mock_tm)
+    monkeypatch.setattr("src.gamechanger.client.dotenv_values", lambda: _FAKE_CREDENTIALS)
+
+    respx.get(f"{_BASE_URL}/me/teams").mock(return_value=httpx.Response(200, json=[]))
+    client = GameChangerClient(min_delay_ms=0, jitter_ms=0)
+
+    # First API call uses first_token.
+    client.get("/me/teams")
+    assert client._session.headers["gc-token"] == first_token
+
+    # Second API call: TokenManager returns second_token (simulates post-expiry refresh).
+    client.get("/me/teams")
+    assert client._session.headers["gc-token"] == second_token
+
+    assert mock_tm.get_access_token.call_count == 2
+
+
+@respx.mock
+def test_mobile_manual_access_token_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    """AC-8d: Mobile profile with manual access token (no client key) works end-to-end."""
+    from unittest.mock import MagicMock
+
+    manual_token = "fake-mobile-access-token"
+    mock_tm = MagicMock()
+    mock_tm.get_access_token.return_value = manual_token
+    mock_tm.force_refresh.return_value = manual_token
+    monkeypatch.setattr("src.gamechanger.client.TokenManager", lambda **_kw: mock_tm)
+    monkeypatch.setattr(
+        "src.gamechanger.client.dotenv_values",
+        lambda: _FAKE_CREDENTIALS_MOBILE,
+    )
+
+    respx.get(f"{_BASE_URL}/me/user").mock(
+        return_value=httpx.Response(200, json={"email": "coach@example.com"})
+    )
+    client = GameChangerClient(min_delay_ms=0, jitter_ms=0, profile="mobile")
+    result = client.get("/me/user")
+
+    assert result["email"] == "coach@example.com"
+    assert client._session.headers["gc-token"] == manual_token

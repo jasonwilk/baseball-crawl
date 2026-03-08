@@ -47,17 +47,24 @@ pragma: no-cache
 
 ### Mobile Profile (iOS -- Observed)
 
-Used by the GameChanger iOS Odyssey app. Observed via mitmproxy capture (2026-03-05). Not implemented as a code profile -- documented for reference.
+Used by the GameChanger iOS Odyssey app. Observed via mitmproxy capture (2026-03-05, 2026-03-06). Not implemented as a code profile -- documented for reference.
 
 Key differences from the web profile:
 
 | Header | Web Value | iOS Value |
 |--------|-----------|-----------|
-| `gc-app-name` | `web` | `mobile` (inferred) |
-| `gc-app-version` | (absent) | `2026.7.0.0` (iOS app version) |
-| `User-Agent` | Chrome/145 UA | `GameChanger/2026.7.0.0 iOS/18.3.1` style |
+| `gc-client-id` | `07cb985d-ff6c-429d-992c-b8a0d44e6fc3` | `0f18f027-c51e-4122-a330-9d537beb83e0` (CONFIRMED 2026-03-08 -- different from web) |
+| `gc-app-name` | `web` | UNRESOLVED -- `.env.example` says `iOS`; `headers.md` previously said `mobile` (inferred); client.py comment says the iOS app "does not send it". Actual value not captured from proxy. See R-01 findings. |
+| `gc-app-version` | `0.0.0` (on POST /auth only) | `2026.7.0.0` (on all requests, confirmed 2026-03-05) |
+| `User-Agent` | Chrome/145 UA | `Odyssey/2026.7.0 (com.gc.teammanager; build:0; iOS 26.3.0) Alamofire/5.9.0` |
+| `Content-Type` on POST /auth | `application/json; charset=utf-8` | `application/vnd.gc.com.post_eden_auth+json; version=1.0.0` (confirmed 2026-03-06) |
+| `Content-Type` on GET requests | `application/vnd.gc.com.none+json; version=undefined` | `application/vnd.gc.com.none+json; version=0.0.0` |
+| `x-gc-features` | (absent) | `lazy-sync` (observed on sync endpoints) |
+| `x-gc-application-state` | (absent) | `foreground` (observed on sync endpoints) |
 | `x-gc-origin` | (absent) | `sync` (on sync endpoints only) |
 | `x-datadog-origin` | (absent) | `rum` (Datadog RUM telemetry) |
+
+**Mobile client key status:** The mobile client key (`GAMECHANGER_CLIENT_KEY_MOBILE`) has NOT been extracted. Because the mobile client ID differs from web, the client key almost certainly also differs -- it is embedded in the iOS binary alongside the client ID. Binary analysis would be required to extract it. Do not use the web client key for mobile signature computation.
 
 ## GC-Specific Headers
 
@@ -65,7 +72,7 @@ Key differences from the web profile:
 
 | Header | Required | Description |
 |--------|----------|-------------|
-| `gc-token` | Yes (auth endpoints) | Access token JWT (~60 min lifetime). See `auth.md` for full three-token architecture. |
+| `gc-token` | Yes (auth endpoints) | Access token JWT (~60 min lifetime on web; ~12 hours on mobile). See `auth.md` for full three-token architecture. |
 | `gc-device-id` | Yes (auth endpoints) | Stable 32-character hex string. Unique per device. Store alongside gc-token. |
 | `gc-app-name` | Yes | Always `"web"` for the web profile. |
 

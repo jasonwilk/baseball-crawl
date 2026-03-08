@@ -53,6 +53,7 @@ Only when a user request requires specialized capability that existing agents ca
   - `.claude/agent-memory/product-manager/MEMORY.md` (idea numbering state)
 - PM handles "capture for later" / "someday" / "idea" intent directly
 - Any agent identifying future work should flag to PM, not create speculative epics
+- Auth module architecture (E-077): `src/gamechanger/exceptions.py` (shared exceptions to break circular imports), `signing.py` (gc-signature HMAC-SHA256), `token_manager.py` (POST /auth refresh, caching, .env write-back via `atomic_merge_env_file()`), `client.py` (lazy token fetch, 401 retry). TokenManager uses standalone httpx client (NOT `create_session()`). `dotenv_values()` used throughout (does NOT populate `os.environ`). HTTP 400 on POST /auth = signing error (`AuthSigningError`); HTTP 401 = token error (`CredentialExpiredError`).
 - Dispatch pattern: PM is a standing team coordinator (not fire-and-forget)
   - PM joins every dispatch team, stays active throughout, manages all state
   - Implementers do NOT update story statuses or epic tables -- PM owns that

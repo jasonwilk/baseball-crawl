@@ -9,14 +9,14 @@ GC uses three distinct JWT types with different lifetimes and purposes:
 | Token | `type` field | JWT `kid` | Lifetime | JWT Fields | Purpose |
 |-------|-------------|-----------|----------|------------|---------|
 | **Client token** | `"client"` | `fd4b4904-...` | 10 minutes | `type`, `sid`, `cid`, `iat`, `exp` | Anonymous session token; used as `gc-token` during steps 3 and 4 of the login flow |
-| **Access token** | `"user"` | `fd4b4904-...` | ~60 minutes | `type`, `cid`, `email`, `userId`, `rtkn`, `iat`, `exp` | Authenticates all standard API requests (`gc-token` header) |
+| **Access token** | `"user"` | `fd4b4904-...` | ~60 minutes (web); ~12 hours (mobile) | `type`, `cid`, `email`, `userId`, `rtkn`, `iat`, `exp` | Authenticates all standard API requests (`gc-token` header) |
 | **Refresh token** | (none) | `b3503b45-...` | 14 days | `id`, `cid`, `uid`, `email`, `iat`, `exp` | Obtains a new access+refresh token pair via `POST /auth {type:"refresh"}` |
 
 **How to distinguish token types by decoding the JWT:**
 - `type == "client"` → client token (has `sid` field, no user identity)
-- `type == "user"` → access token (~60 min)
+- `type == "user"` → access token (~60 min web, ~12 hours mobile)
 - No `type` field (and different `kid`) → refresh token (14 days)
-- Quick heuristic without decoding: `exp - iat < 10,000` → access token; `exp - iat > 1,000,000` → refresh token
+- Quick heuristic without decoding: `exp - iat < 50,000` → access token (covers both web ~3,600s and mobile ~43,997s); `exp - iat > 1,000,000` → refresh token. Note: the old threshold of `< 10,000` is too narrow for mobile access tokens.
 
 **Credential tier durability (most to least durable):**
 1. **Client ID + Client Key** -- static app-wide secret; only changes on app deploys (potentially months or years)
@@ -35,7 +35,7 @@ GC uses three distinct JWT types with different lifetimes and purposes:
 | `userId` | UUID | Authenticated user's UUID (camelCase -- note difference from refresh token's `uid`). |
 | `rtkn` | string | Refresh token identifier (format: `{uuid}:{uuid}`). |
 | `iat` | int | Token issued-at (Unix seconds) |
-| `exp` | int | Token expiry (Unix seconds). `exp - iat ≈ 3,600` (~60 minutes). |
+| `exp` | int | Token expiry (Unix seconds). `exp - iat ≈ 3,600` (~60 minutes) for web profile; `exp - iat ≈ 43,997` (~12 hours) for mobile profile. |
 
 ### Refresh Token Payload
 
@@ -313,6 +313,68 @@ The `/teams/public/` path prefix (note: `teams` before `public`) is an authentic
 - **Use environment variables** for production (Docker Compose reads `.env` automatically)
 - Strip or redact auth headers before storing raw API response samples
 - **The client key is a shared app secret.** It is not per-user. Compromising it could affect all GC users. Handle it with the same care as a personal token.
+
+## Mobile Profile Differences (Confirmed 2026-03-08)
+
+The mobile (iOS) profile uses a distinct client identity and has a significantly longer access token lifetime. These differences were confirmed from a live POST /auth refresh response captured via mitmweb on 2026-03-08.
+
+### Mobile Client ID
+
+The mobile client ID is **different from the web client ID**:
+
+| Profile | Client ID (`gc-client-id` / JWT `cid`) |
+|---------|----------------------------------------|
+| Web | `07cb985d-ff6c-429d-992c-b8a0d44e6fc3` |
+| Mobile (iOS) | `0f18f027-c51e-4122-a330-9d537beb83e0` |
+
+Because the client ID differs, the mobile client **key** almost certainly also differs (the key is bundled alongside the client ID in the app binary as `{clientId}:{clientKey}`). The mobile client key has NOT yet been extracted -- it is embedded in the iOS binary and would require binary analysis to obtain. Do not assume the web client key works for mobile signing.
+
+Store as `GAMECHANGER_CLIENT_ID_MOBILE` in `.env`. The corresponding `GAMECHANGER_CLIENT_KEY_MOBILE` is unknown; leave commented out until extracted.
+
+### Mobile Token Lifetimes
+
+| Token | Web Lifetime | Mobile Lifetime |
+|-------|-------------|-----------------|
+| Access token | ~3,600s (~60 minutes) | ~43,997s (~12 hours) |
+| Refresh token | 1,209,600s (14 days) | 1,209,600s (14 days) |
+
+The mobile access token lifetime (~12 hours) is approximately 12x longer than the web access token. This affects how frequently programmatic token refresh is needed for mobile-profile sessions.
+
+**Distinguish-by-lifetime heuristic update for mobile access tokens:** `exp - iat ≈ 43,997` for mobile access tokens. The `type == "user"` field is still present and authoritative; do not rely solely on lifetime for type detection across profiles.
+
+### Mobile JWT Structure
+
+Despite the different client ID and token lifetime, the mobile JWT payload structure is **identical to web**:
+
+| Token | JWT `kid` | `type` field | Payload Fields |
+|-------|-----------|-------------|----------------|
+| Access token | `fd4b4904-39e0-48ca-a932-59d1e45aca30` | `"user"` | `type`, `cid`, `email`, `userId`, `rtkn`, `iat`, `exp` |
+| Refresh token | `b3503b45-e2aa-4e86-918c-54bf6dea87b9` | (none) | `id`, `cid`, `uid`, `email`, `iat`, `exp` |
+
+The JWT `kid` values are the same across web and mobile profiles.
+
+### Mobile POST /auth Response Shape
+
+The POST /auth response shape is **identical** between web and mobile:
+
+```json
+{
+  "type": "token",
+  "access": {"data": "<jwt>", "expires": <unix-ts>},
+  "refresh": {"data": "<jwt>", "expires": <unix-ts>}
+}
+```
+
+### Mobile POST /auth Content-Type Difference
+
+Mobile uses a different `Content-Type` for POST /auth requests:
+
+| Profile | Content-Type |
+|---------|-------------|
+| Web | `application/json; charset=utf-8` |
+| Mobile (iOS) | `application/vnd.gc.com.post_eden_auth+json; version=1.0.0` |
+
+The `post_eden_auth` vendor type is mobile-specific. Despite this header difference, the response schema is confirmed identical. Whether the request body format also differs is not yet confirmed -- see `epics/E-075-mobile-credential-capture/R-01-findings.md` for open questions.
 
 ## Source Materials
 

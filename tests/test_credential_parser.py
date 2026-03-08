@@ -1,7 +1,7 @@
 """Unit tests for src/gamechanger/credential_parser.py.
 
 Coverage:
-- Happy path: gc-token extracted as GAMECHANGER_AUTH_TOKEN
+- Happy path: gc-token extracted as GAMECHANGER_REFRESH_TOKEN
 - Full header set from a real-style GameChanger curl command
 - Cookie extraction via -H 'Cookie: ...' header
 - Cookie extraction via -b flag
@@ -20,6 +20,7 @@ import pytest
 
 from src.gamechanger.credential_parser import (
     CurlParseError,
+    atomic_merge_env_file,
     merge_env_file,
     parse_curl,
 )
@@ -61,11 +62,11 @@ FULL_GC_CURL = textwrap.dedent(
 
 
 class TestParseCurlHappyPath:
-    """AC-1: Minimal curl with gc-token extracts GAMECHANGER_AUTH_TOKEN_WEB."""
+    """AC-1: Minimal curl with gc-token extracts GAMECHANGER_REFRESH_TOKEN_WEB."""
 
     def test_extracts_auth_token(self) -> None:
         result = parse_curl(MINIMAL_CURL)
-        assert result["GAMECHANGER_AUTH_TOKEN_WEB"] == (
+        assert result["GAMECHANGER_REFRESH_TOKEN_WEB"] == (
             "eyJhbGciOiJIUzI1NiJ9.payload.signature"
         )
 
@@ -83,7 +84,7 @@ class TestParseCurlHappyPath:
 
     def test_full_gc_curl_extracts_all_credential_headers(self) -> None:
         result = parse_curl(FULL_GC_CURL)
-        assert result["GAMECHANGER_AUTH_TOKEN_WEB"] == (
+        assert result["GAMECHANGER_REFRESH_TOKEN_WEB"] == (
             "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.test.sig"
         )
         assert result["GAMECHANGER_APP_NAME_WEB"] == "web"
@@ -212,16 +213,16 @@ class TestMergeEnvFile:
     def test_new_file_written_when_none_exists(self, tmp_path: Path) -> None:
         env_path = tmp_path / ".env"
         assert not env_path.exists()
-        merged = merge_env_file(str(env_path), {"GAMECHANGER_AUTH_TOKEN_WEB": "tok"})
-        assert merged["GAMECHANGER_AUTH_TOKEN_WEB"] == "tok"
+        merged = merge_env_file(str(env_path), {"GAMECHANGER_REFRESH_TOKEN_WEB": "tok"})
+        assert merged["GAMECHANGER_REFRESH_TOKEN_WEB"] == "tok"
 
     def test_existing_credentials_replaced(self, tmp_path: Path) -> None:
         env_path = tmp_path / ".env"
-        env_path.write_text("GAMECHANGER_AUTH_TOKEN_WEB=old_token\n", encoding="utf-8")
+        env_path.write_text("GAMECHANGER_REFRESH_TOKEN_WEB=old_token\n", encoding="utf-8")
         merged = merge_env_file(
-            str(env_path), {"GAMECHANGER_AUTH_TOKEN_WEB": "new_token"}
+            str(env_path), {"GAMECHANGER_REFRESH_TOKEN_WEB": "new_token"}
         )
-        assert merged["GAMECHANGER_AUTH_TOKEN_WEB"] == "new_token"
+        assert merged["GAMECHANGER_REFRESH_TOKEN_WEB"] == "new_token"
 
     def test_non_credential_keys_preserved(self, tmp_path: Path) -> None:
         env_path = tmp_path / ".env"
@@ -230,27 +231,27 @@ class TestMergeEnvFile:
             encoding="utf-8",
         )
         merged = merge_env_file(
-            str(env_path), {"GAMECHANGER_AUTH_TOKEN_WEB": "tok"}
+            str(env_path), {"GAMECHANGER_REFRESH_TOKEN_WEB": "tok"}
         )
         assert merged["UNRELATED_KEY"] == "some_value"
         assert merged["ANOTHER_KEY"] == "another_value"
-        assert merged["GAMECHANGER_AUTH_TOKEN_WEB"] == "tok"
+        assert merged["GAMECHANGER_REFRESH_TOKEN_WEB"] == "tok"
 
     def test_mixed_update_preserves_and_adds(self, tmp_path: Path) -> None:
         env_path = tmp_path / ".env"
         env_path.write_text(
-            "UNRELATED_KEY=keep_me\nGAMECHANGER_AUTH_TOKEN_WEB=old\n",
+            "UNRELATED_KEY=keep_me\nGAMECHANGER_REFRESH_TOKEN_WEB=old\n",
             encoding="utf-8",
         )
         merged = merge_env_file(
             str(env_path),
             {
-                "GAMECHANGER_AUTH_TOKEN_WEB": "new",
+                "GAMECHANGER_REFRESH_TOKEN_WEB": "new",
                 "GAMECHANGER_BASE_URL": "https://api.example.com",
             },
         )
         assert merged["UNRELATED_KEY"] == "keep_me"
-        assert merged["GAMECHANGER_AUTH_TOKEN_WEB"] == "new"
+        assert merged["GAMECHANGER_REFRESH_TOKEN_WEB"] == "new"
         assert merged["GAMECHANGER_BASE_URL"] == "https://api.example.com"
 
     def test_comments_preserved_in_env_file(self, tmp_path: Path) -> None:
@@ -260,7 +261,7 @@ class TestMergeEnvFile:
             "# This is a comment\nUNRELATED=val\n",
             encoding="utf-8",
         )
-        merged = merge_env_file(str(env_path), {"GAMECHANGER_AUTH_TOKEN": "tok"})
+        merged = merge_env_file(str(env_path), {"GAMECHANGER_REFRESH_TOKEN": "tok"})
         # The comment should not appear as a key.
         assert "# This is a comment" not in merged
         assert merged["UNRELATED"] == "val"
@@ -268,14 +269,14 @@ class TestMergeEnvFile:
     def test_multiple_runs_do_not_duplicate_keys(self, tmp_path: Path) -> None:
         """Running merge twice does not create duplicate entries."""
         env_path = tmp_path / ".env"
-        merge_env_file(str(env_path), {"GAMECHANGER_AUTH_TOKEN_WEB": "tok1"})
+        merge_env_file(str(env_path), {"GAMECHANGER_REFRESH_TOKEN_WEB": "tok1"})
         merged = merge_env_file(
-            str(env_path), {"GAMECHANGER_AUTH_TOKEN_WEB": "tok2"}
+            str(env_path), {"GAMECHANGER_REFRESH_TOKEN_WEB": "tok2"}
         )
         # Only one occurrence of the key.
         content = env_path.read_text(encoding="utf-8")
-        assert content.count("GAMECHANGER_AUTH_TOKEN_WEB=") == 1
-        assert merged["GAMECHANGER_AUTH_TOKEN_WEB"] == "tok2"
+        assert content.count("GAMECHANGER_REFRESH_TOKEN_WEB=") == 1
+        assert merged["GAMECHANGER_REFRESH_TOKEN_WEB"] == "tok2"
 
 
 # ---------------------------------------------------------------------------
@@ -288,8 +289,8 @@ class TestWebSuffixedKeys:
 
     def test_parse_curl_uses_web_suffix_for_token(self) -> None:
         result = parse_curl(MINIMAL_CURL)
-        assert "GAMECHANGER_AUTH_TOKEN_WEB" in result
-        assert "GAMECHANGER_AUTH_TOKEN" not in result
+        assert "GAMECHANGER_REFRESH_TOKEN_WEB" in result
+        assert "GAMECHANGER_REFRESH_TOKEN" not in result
 
     def test_parse_curl_uses_web_suffix_for_device_id(self) -> None:
         curl = (
@@ -322,10 +323,78 @@ class TestRoundTrip:
         credentials = parse_curl(FULL_GC_CURL)
         merged = merge_env_file(str(env_path), credentials)
 
-        assert merged["GAMECHANGER_AUTH_TOKEN_WEB"] == (
+        assert merged["GAMECHANGER_REFRESH_TOKEN_WEB"] == (
             "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.test.sig"
         )
         assert merged["GAMECHANGER_APP_NAME_WEB"] == "web"
         assert merged["GAMECHANGER_DEVICE_ID_WEB"] == "7b615e8c124f5d44575d4e6736ae1a82"
         assert merged["GAMECHANGER_BASE_URL"] == "https://api.team-manager.gc.com"
         assert merged["MY_OTHER_VAR"] == "keep_me"
+
+
+# ---------------------------------------------------------------------------
+# atomic_merge_env_file -- crash-safe write
+# ---------------------------------------------------------------------------
+
+
+class TestAtomicMergeEnvFile:
+    """atomic_merge_env_file shares merge semantics but writes atomically."""
+
+    def test_new_file_written_when_none_exists(self, tmp_path: Path) -> None:
+        env_path = tmp_path / ".env"
+        assert not env_path.exists()
+        merged = atomic_merge_env_file(str(env_path), {"GAMECHANGER_REFRESH_TOKEN_WEB": "tok"})
+        assert merged["GAMECHANGER_REFRESH_TOKEN_WEB"] == "tok"
+        assert env_path.exists()
+
+    def test_existing_credentials_replaced(self, tmp_path: Path) -> None:
+        env_path = tmp_path / ".env"
+        env_path.write_text("GAMECHANGER_REFRESH_TOKEN_WEB=old_token\n", encoding="utf-8")
+        merged = atomic_merge_env_file(
+            str(env_path), {"GAMECHANGER_REFRESH_TOKEN_WEB": "new_token"}
+        )
+        assert merged["GAMECHANGER_REFRESH_TOKEN_WEB"] == "new_token"
+
+    def test_non_credential_keys_preserved(self, tmp_path: Path) -> None:
+        env_path = tmp_path / ".env"
+        env_path.write_text("UNRELATED_KEY=some_value\nANOTHER_KEY=another_value\n", encoding="utf-8")
+        merged = atomic_merge_env_file(
+            str(env_path), {"GAMECHANGER_REFRESH_TOKEN_WEB": "tok"}
+        )
+        assert merged["UNRELATED_KEY"] == "some_value"
+        assert merged["ANOTHER_KEY"] == "another_value"
+        assert merged["GAMECHANGER_REFRESH_TOKEN_WEB"] == "tok"
+
+    def test_no_duplicate_keys_on_repeated_writes(self, tmp_path: Path) -> None:
+        env_path = tmp_path / ".env"
+        atomic_merge_env_file(str(env_path), {"GAMECHANGER_REFRESH_TOKEN_WEB": "tok1"})
+        atomic_merge_env_file(str(env_path), {"GAMECHANGER_REFRESH_TOKEN_WEB": "tok2"})
+        content = env_path.read_text(encoding="utf-8")
+        assert content.count("GAMECHANGER_REFRESH_TOKEN_WEB=") == 1
+
+    def test_comments_preserved(self, tmp_path: Path) -> None:
+        env_path = tmp_path / ".env"
+        env_path.write_text("# Comment line\nUNRELATED=val\n", encoding="utf-8")
+        merged = atomic_merge_env_file(str(env_path), {"NEW_KEY": "val"})
+        assert "# Comment line" not in merged  # comments not in returned dict
+        assert merged["UNRELATED"] == "val"
+        assert merged["NEW_KEY"] == "val"
+        # But comment still in file
+        assert "# Comment line" in env_path.read_text(encoding="utf-8")
+
+    def test_original_file_intact_after_write(self, tmp_path: Path) -> None:
+        """After a successful write the file must be complete and correct."""
+        env_path = tmp_path / ".env"
+        env_path.write_text("EXISTING=value\n", encoding="utf-8")
+        atomic_merge_env_file(str(env_path), {"NEW_KEY": "new_value"})
+        content = env_path.read_text(encoding="utf-8")
+        assert "EXISTING=value" in content
+        assert "NEW_KEY=new_value" in content
+
+    def test_merge_env_file_still_works_unchanged(self, tmp_path: Path) -> None:
+        """Verify the existing merge_env_file is unchanged after the refactor."""
+        env_path = tmp_path / ".env"
+        env_path.write_text("OLD_KEY=old_value\n", encoding="utf-8")
+        merged = merge_env_file(str(env_path), {"NEW_KEY": "new_value"})
+        assert merged["OLD_KEY"] == "old_value"
+        assert merged["NEW_KEY"] == "new_value"

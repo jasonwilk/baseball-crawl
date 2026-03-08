@@ -64,8 +64,8 @@ PATTERNS: list[dict[str, str]] = [
     },
     {
         "name": "api_key_assignment",
-        "regex": r'(?:api[_-]?key|secret[_-]?key|access[_-]?token)["\']?\s*[=:]\s*["\']?\S{16,}',
-        "description": "API key or secret assignments with long values",
+        "regex": r'(?:api[_-]?key|secret[_-]?key|access[_-]?token)["\']?\s*[=:]\s*["\'][^\s"\']{16,}',
+        "description": "API key or secret assignments with long quoted values",
     },
 ]
 

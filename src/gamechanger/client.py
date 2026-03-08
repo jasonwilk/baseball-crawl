@@ -15,20 +15,30 @@ Usage::
         accept="application/vnd.gc.com.game_summary:list+json; version=0.1.0",
     )
 
-Credentials are loaded from a .env file (see GAMECHANGER_AUTH_TOKEN_WEB,
-GAMECHANGER_DEVICE_ID_WEB, GAMECHANGER_BASE_URL).  Missing credentials
-raise ``ConfigurationError`` at instantiation time.
+Credentials are loaded from a .env file (see GAMECHANGER_REFRESH_TOKEN_WEB,
+GAMECHANGER_CLIENT_ID_WEB, GAMECHANGER_CLIENT_KEY_WEB, GAMECHANGER_DEVICE_ID_WEB,
+GAMECHANGER_BASE_URL).  Missing credentials raise ``ConfigurationError`` at
+instantiation time.
 """
 
 from __future__ import annotations
 
 import logging
 import time
+from pathlib import Path
 from typing import Any
 
 import httpx
 from dotenv import dotenv_values
 
+from src.gamechanger.exceptions import (  # noqa: F401 -- re-exported for callers
+    ConfigurationError,
+    CredentialExpiredError,
+    ForbiddenError,
+    GameChangerAPIError,
+    RateLimitError,
+)
+from src.gamechanger.token_manager import AuthSigningError, TokenManager
 from src.http.session import create_session
 
 logger = logging.getLogger(__name__)
@@ -39,67 +49,51 @@ _PROFILE_SUFFIXES: dict[str, str] = {
     "mobile": "_MOBILE",
 }
 
-# Credential key base names that are profile-scoped (suffix applied per profile).
-_PROFILE_SCOPED_KEYS: tuple[str, ...] = (
-    "GAMECHANGER_AUTH_TOKEN",
-    "GAMECHANGER_DEVICE_ID",
-    "GAMECHANGER_APP_NAME",
-    "GAMECHANGER_SIGNATURE",
-)
+_GC_CONTENT_TYPE = "application/vnd.gc.com.none+json; version=undefined"
+
+# Default .env path: two levels up from src/gamechanger/.
+_DEFAULT_ENV_PATH = Path(__file__).resolve().parents[2] / ".env"
 
 
 def _required_keys(profile: str) -> tuple[str, ...]:
-    """Return the required env key names for the given profile.
+    """Return the unconditionally required env key names for the given profile.
+
+    For web profile, all signing credentials are required. For mobile, only
+    device_id and base_url are unconditionally required -- client_key and
+    refresh_token are optional (manual access token fallback path). The
+    TokenManager validates the conditional requirements at construction time.
 
     Args:
         profile: The credential profile (``"web"`` or ``"mobile"``).
 
     Returns:
-        Tuple of required env key names with the appropriate profile suffix.
+        Tuple of required env key names.
         ``GAMECHANGER_BASE_URL`` is always required and remains unsuffixed.
     """
     suffix = _PROFILE_SUFFIXES.get(profile, f"_{profile.upper()}")
+    if profile == "web":
+        return (
+            f"GAMECHANGER_REFRESH_TOKEN{suffix}",
+            f"GAMECHANGER_CLIENT_ID{suffix}",
+            f"GAMECHANGER_CLIENT_KEY{suffix}",
+            f"GAMECHANGER_DEVICE_ID{suffix}",
+            "GAMECHANGER_BASE_URL",
+        )
+    # Mobile: only device_id and base_url are unconditionally required.
     return (
-        f"GAMECHANGER_AUTH_TOKEN{suffix}",
         f"GAMECHANGER_DEVICE_ID{suffix}",
         "GAMECHANGER_BASE_URL",
     )
-
-_GC_CONTENT_TYPE = "application/vnd.gc.com.none+json; version=undefined"
-
-
-class CredentialExpiredError(Exception):
-    """Raised when the API returns 401 (token has expired or is invalid)."""
-
-
-class ForbiddenError(CredentialExpiredError):
-    """Raised when the API returns 403 (per-resource access denial).
-
-    Subclass of ``CredentialExpiredError`` for backward compatibility -- existing
-    ``except CredentialExpiredError`` clauses will still catch 403 responses.
-    Use ``except ForbiddenError`` before ``except CredentialExpiredError`` to
-    distinguish per-resource denial from token expiry.
-    """
-
-
-class RateLimitError(Exception):
-    """Raised when the API returns 429 (rate limit hit)."""
-
-
-class GameChangerAPIError(Exception):
-    """Raised when the API returns a 5xx error after all retries are exhausted."""
-
-
-class ConfigurationError(Exception):
-    """Raised at instantiation when required environment variables are missing."""
 
 
 class GameChangerClient:
     """Authenticated HTTP client for the GameChanger API.
 
-    Loads credentials from the .env file and injects them as custom headers
-    on every request.  Rate limiting and browser-realistic headers are
-    delegated to the session factory.
+    Loads credentials from the .env file and uses a ``TokenManager`` to obtain
+    short-lived access tokens.  The first API call triggers the token fetch
+    lazily; subsequent calls reuse the cached token until it expires (the
+    TokenManager manages expiry and refresh transparently).  On 401 responses,
+    the client calls ``force_refresh()`` and retries once.
 
     Args:
         min_delay_ms: Minimum delay in milliseconds between requests.
@@ -110,22 +104,22 @@ class GameChangerClient:
             Chrome 145 browser fingerprint; ``"mobile"`` selects the iOS
             Odyssey app fingerprint.  Forwarded to ``create_session()``,
             which raises ``ValueError`` for unknown profiles.  The profile
-            also controls ``gc-app-name`` when the profile-scoped app name env var
-            (``GAMECHANGER_APP_NAME_WEB`` or ``GAMECHANGER_APP_NAME_MOBILE``) is
-            absent: ``"web"`` defaults the header to ``"web"``,
-            ``"mobile"`` omits the header entirely (iOS app does not send it).
+            also controls ``gc-app-name`` when the profile-scoped app name env
+            var is absent.
     """
 
     def __init__(
         self, min_delay_ms: int = 1000, jitter_ms: int = 500, profile: str = "web"
     ) -> None:
+        self._profile = profile
         self._credentials = self._load_credentials(profile)
         self._base_url = self._credentials["GAMECHANGER_BASE_URL"].rstrip("/")
         self._session = create_session(
             min_delay_ms=min_delay_ms, jitter_ms=jitter_ms, profile=profile
         )
         suffix = _PROFILE_SUFFIXES.get(profile, f"_{profile.upper()}")
-        self._session.headers["gc-token"] = self._credentials[f"GAMECHANGER_AUTH_TOKEN{suffix}"]
+
+        # Set device-id and app-name on the session (non-sensitive, set eagerly).
         self._session.headers["gc-device-id"] = self._credentials[f"GAMECHANGER_DEVICE_ID{suffix}"]
         app_name = self._credentials.get(f"GAMECHANGER_APP_NAME{suffix}")
         if app_name:
@@ -133,6 +127,60 @@ class GameChangerClient:
         elif profile == "web":
             self._session.headers["gc-app-name"] = "web"
         # mobile profile with no GAMECHANGER_APP_NAME_MOBILE: omit gc-app-name entirely
+
+        # Build the token manager. Token fetch is lazy -- happens on first API call.
+        self._token_manager = self._build_token_manager(profile, suffix)
+
+    def _build_token_manager(self, profile: str, suffix: str) -> TokenManager:
+        """Construct a TokenManager from loaded credentials.
+
+        Args:
+            profile: The credential profile (``"web"`` or ``"mobile"``).
+            suffix: Profile suffix (e.g. ``"_WEB"``).
+
+        Returns:
+            A configured ``TokenManager`` instance.
+
+        Raises:
+            ConfigurationError: If the TokenManager rejects the credential set.
+        """
+        creds = self._credentials
+        client_id = creds.get(f"GAMECHANGER_CLIENT_ID{suffix}") or None
+        client_key = creds.get(f"GAMECHANGER_CLIENT_KEY{suffix}") or None
+        refresh_token = creds.get(f"GAMECHANGER_REFRESH_TOKEN{suffix}") or None
+        device_id = creds[f"GAMECHANGER_DEVICE_ID{suffix}"]
+        access_token = creds.get(f"GAMECHANGER_ACCESS_TOKEN{suffix}") or None
+        app_name_mobile = (
+            creds.get(f"GAMECHANGER_APP_NAME{suffix}") if profile == "mobile" else None
+        )
+        try:
+            return TokenManager(
+                profile=profile,
+                client_id=client_id,
+                client_key=client_key,
+                refresh_token=refresh_token,
+                device_id=device_id,
+                base_url=self._base_url,
+                access_token=access_token,
+                app_name_mobile=app_name_mobile,
+                env_path=_DEFAULT_ENV_PATH,
+            )
+        except ConfigurationError:
+            raise
+        except Exception as exc:
+            # Re-wrap TokenManager's ConfigurationError (imported from client module
+            # by token_manager) so callers see our ConfigurationError type.
+            raise ConfigurationError(str(exc)) from exc
+
+    def _ensure_access_token(self) -> None:
+        """Obtain a valid access token and set it as gc-token on the session.
+
+        Called before every API request. The TokenManager caches the token and
+        handles expiry internally -- this method only triggers a network call when
+        the token is absent or expired.
+        """
+        token = self._token_manager.get_access_token()
+        self._session.headers["gc-token"] = token
 
     def get_paginated(
         self,
@@ -147,6 +195,8 @@ class GameChangerClient:
         response headers until the header is absent (last page).  Each page must
         return a JSON array; pages are concatenated in order.
 
+        On 401, performs a single token refresh and retries the failing page.
+
         Args:
             path: API path for the first page (e.g. ``"/teams/abc/game-summaries"``).
             params: Optional query parameters for the first page.
@@ -157,10 +207,12 @@ class GameChangerClient:
             Flat list of all records across all pages.
 
         Raises:
-            CredentialExpiredError: On 401 or 403 responses.
+            CredentialExpiredError: On 401 or 403 responses (after retry on 401).
             RateLimitError: On 429 responses.
             GameChangerAPIError: On 5xx responses after retries.
         """
+        self._ensure_access_token()
+
         records: list[Any] = []
         base_url = self._base_url
         url: str = f"{base_url}{path}"
@@ -175,7 +227,6 @@ class GameChangerClient:
         while True:
             logger.debug("GET paginated %s", url)
 
-            # Retry each page individually on 5xx -- does not restart pagination.
             last_error: GameChangerAPIError | None = None
             page_response: httpx.Response | None = None
 
@@ -191,17 +242,32 @@ class GameChangerClient:
                     break
 
                 if response.status_code == 401:
-                    raise CredentialExpiredError(
-                        f"Credentials rejected for {url} "
-                        f"(HTTP {response.status_code}). "
-                        "Refresh by running: python scripts/refresh_credentials.py"
+                    try:
+                        new_token = self._token_manager.force_refresh()
+                        self._session.headers["gc-token"] = new_token
+                    except (AuthSigningError, CredentialExpiredError):
+                        pass
+                    retry_response = self._session.get(
+                        url, params=current_params, timeout=timeout, headers=extra_headers
                     )
+                    if retry_response.status_code == 200:
+                        page_response = retry_response
+                        break
+                    if retry_response.status_code == 401:
+                        raise CredentialExpiredError(
+                            f"Credentials rejected for {url} "
+                            f"(HTTP {retry_response.status_code}). "
+                            "Credentials may be expired -- check .env or run: bb creds check"
+                        )
+                    # Route the retry response through the same error handling so
+                    # 403, 429, and 5xx are surfaced with the correct exception type.
+                    response = retry_response
 
                 if response.status_code == 403:
                     raise ForbiddenError(
                         f"Access denied for {url} "
                         f"(HTTP {response.status_code}). "
-                        "Refresh by running: python scripts/refresh_credentials.py"
+                        "Credentials may be expired -- check .env or run: bb creds check"
                     )
 
                 if response.status_code == 429:
@@ -234,7 +300,6 @@ class GameChangerClient:
                         continue
 
                 else:
-                    # Non-5xx, non-200, non-401/403, non-429 -- raise immediately.
                     raise GameChangerAPIError(
                         f"Unexpected status {response.status_code} for {url}."
                     )
@@ -253,7 +318,6 @@ class GameChangerClient:
             if not next_page_url:
                 break
 
-            # Next page URL is absolute -- use it directly, no params needed.
             url = next_page_url
             current_params = None
 
@@ -277,16 +341,17 @@ class GameChangerClient:
             accept: Optional endpoint-specific ``Accept`` header value.  When
                 provided, overrides the session default for this request.
                 Required for most GameChanger endpoints.
-            timeout: Request timeout in seconds.
 
         Returns:
             Parsed JSON response (dict or list depending on the endpoint).
 
         Raises:
-            CredentialExpiredError: On 401 or 403 responses.
+            CredentialExpiredError: On 401 (after refresh retry) or 403.
             RateLimitError: On 429 responses (after waiting Retry-After).
             GameChangerAPIError: On 5xx responses after 3 retries.
         """
+        self._ensure_access_token()
+
         url = f"{self._base_url}{path}"
         headers: dict[str, str] = {
             "Content-Type": _GC_CONTENT_TYPE,
@@ -304,7 +369,7 @@ class GameChangerClient:
         timeout: int,
         headers: dict[str, str],
     ) -> Any:
-        """Execute GET with up to 3 retries on 5xx (exponential backoff).
+        """Execute GET with up to 3 retries on 5xx and a single retry on 401.
 
         Args:
             url: Full URL to request.
@@ -317,7 +382,7 @@ class GameChangerClient:
             Parsed JSON response body.
 
         Raises:
-            CredentialExpiredError: On 401 or 403.
+            CredentialExpiredError: On 401 (after refresh retry) or 403.
             RateLimitError: On 429 (after waiting).
             GameChangerAPIError: On 5xx after all retries exhausted.
         """
@@ -333,17 +398,31 @@ class GameChangerClient:
                 return response.json()
 
             if response.status_code == 401:
-                raise CredentialExpiredError(
-                    f"Credentials rejected for {path} "
-                    f"(HTTP {response.status_code}). "
-                    "Refresh by running: python scripts/refresh_credentials.py"
+                try:
+                    new_token = self._token_manager.force_refresh()
+                    self._session.headers["gc-token"] = new_token
+                except (AuthSigningError, CredentialExpiredError):
+                    pass
+                retry_response = self._session.get(
+                    url, params=params, timeout=timeout, headers=headers
                 )
+                if retry_response.status_code == 200:
+                    return retry_response.json()
+                if retry_response.status_code == 401:
+                    raise CredentialExpiredError(
+                        f"Credentials rejected for {path} "
+                        f"(HTTP {retry_response.status_code}). "
+                        "Credentials may be expired -- check .env or run: bb creds check"
+                    )
+                # Route the retry response through the same error handling so
+                # 403, 429, and 5xx are surfaced with the correct exception type.
+                response = retry_response
 
             if response.status_code == 403:
                 raise ForbiddenError(
                     f"Access denied for {path} "
                     f"(HTTP {response.status_code}). "
-                    "Refresh by running: python scripts/refresh_credentials.py"
+                    "Credentials may be expired -- check .env or run: bb creds check"
                 )
 
             if response.status_code == 429:
@@ -387,9 +466,9 @@ class GameChangerClient:
         """Load profile-scoped credentials from the .env file.
 
         Reads the .env file (if present) using python-dotenv and validates that
-        all required profile-scoped keys are present. No fallback to flat
-        (unsuffixed) keys -- if the profile-scoped key is absent, raises
-        ``ConfigurationError`` naming the expected key.
+        always-required profile-scoped keys are present. Conditional requirements
+        (e.g., client_key vs. access_token for mobile) are validated by the
+        TokenManager at construction time.
 
         Args:
             profile: The credential profile (``"web"`` or ``"mobile"``).
@@ -398,7 +477,7 @@ class GameChangerClient:
             Dict mapping env variable names to their values.
 
         Raises:
-            ConfigurationError: If any required profile-scoped key is missing.
+            ConfigurationError: If any unconditionally required key is missing.
         """
         env_values = dotenv_values()
         required = _required_keys(profile)
@@ -408,6 +487,4 @@ class GameChangerClient:
                 f"Missing required environment variable(s): {', '.join(missing)}. "
                 "Ensure they are set in your .env file."
             )
-        # Cast to dict[str, str] -- dotenv_values returns dict[str, str | None]
-        # but we've already validated all required keys are non-empty.
         return {k: v for k, v in env_values.items() if v is not None}

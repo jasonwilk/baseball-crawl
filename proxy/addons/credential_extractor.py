@@ -6,8 +6,8 @@ from GameChanger domains; ignores all other hosts. Deduplicates writes so the
 ``.env`` file is only updated when the token value changes.
 
 Credentials are written to profile-scoped env keys:
-  - Web browser traffic  -> ``_WEB``  suffix (e.g. ``GAMECHANGER_AUTH_TOKEN_WEB``)
-  - iOS app traffic      -> ``_MOBILE`` suffix (e.g. ``GAMECHANGER_AUTH_TOKEN_MOBILE``)
+  - Web browser traffic  -> ``_WEB``  suffix (e.g. ``GAMECHANGER_REFRESH_TOKEN_WEB``)
+  - iOS app traffic      -> ``_MOBILE`` suffix (e.g. ``GAMECHANGER_REFRESH_TOKEN_MOBILE``)
   - Unknown traffic      -> logged as WARNING and dropped (no write)
 """
 
@@ -29,11 +29,12 @@ _ENV_PATH = "/app/.env"
 
 # Base header-to-env-key mapping (without profile suffix).
 # The suffix is applied at runtime based on the detected traffic source.
+# Note: gc-signature is NOT captured here -- signatures are computed at runtime
+# from GAMECHANGER_CLIENT_KEY_* and do not need to be stored.
 _BASE_CREDENTIAL_HEADERS: dict[str, str] = {
-    "gc-token": "GAMECHANGER_AUTH_TOKEN",
+    "gc-token": "GAMECHANGER_REFRESH_TOKEN",
     "gc-device-id": "GAMECHANGER_DEVICE_ID",
     "gc-app-name": "GAMECHANGER_APP_NAME",
-    "gc-signature": "GAMECHANGER_SIGNATURE",
 }
 
 # Mapping from detect_source() return values to env key suffixes.
