@@ -1,8 +1,8 @@
 # Product Manager -- Agent Memory
 
 ## Numbering State
-- Next available epic number: E-084
-- Epics created: E-001 through E-083 (E-001, E-003, E-005, E-006, E-007, E-008, E-010, E-011, E-012, E-013, E-014, E-015, E-016, E-017, E-018, E-019, E-020, E-021, E-022, E-024, E-025, E-026, E-027, E-028, E-029, E-030, E-031, E-032, E-033, E-034, E-035, E-036, E-037, E-038, E-042, E-044, E-046, E-048, E-049, E-050, E-052, E-053, E-054, E-056, E-057, E-058, E-055, E-059, E-060, E-061 archived)
+- Next available epic number: E-085
+- Epics created: E-001 through E-084 (E-001, E-003, E-005, E-006, E-007, E-008, E-010, E-011, E-012, E-013, E-014, E-015, E-016, E-017, E-018, E-019, E-020, E-021, E-022, E-024, E-025, E-026, E-027, E-028, E-029, E-030, E-031, E-032, E-033, E-034, E-035, E-036, E-037, E-038, E-042, E-044, E-046, E-048, E-049, E-050, E-052, E-053, E-054, E-056, E-057, E-058, E-055, E-059, E-060, E-061 archived)
 - Next available idea number: IDEA-017
 - Ideas created: IDEA-001 through IDEA-016
 
@@ -23,8 +23,10 @@
 
 - E-081 (READY): Codex Context and Agent Bootstrap -- 5 stories. Establish checked-in Codex entry points (`AGENTS.md`, `.codex/config.toml`), bootstrap a gitignored project-local `CODEX_HOME` in the devcontainer, add one lightweight watchful-partner repo skill under `.agents/skills/`, document the operator model, and align `CLAUDE.md` with the implemented Codex split. Baseline intentionally avoids spawned agents and other experimental Codex features. Wave: 01+02 parallel -> 03 -> 04 -> 05. CA + SE + docs-writer dispatch team.
 - E-082 (READY): Codex RTK Project-Level Integration -- 4 stories. Install RTK into a gitignored repo-local tool path, expose it to Codex from checked-in project config or absolute-path guidance, add explicit `rtk <command>` guidance (no transparent hook assumptions), add a Python smoke-check utility, and document the Codex RTK model. Depends on E-081 bootstrap and on E-081-04 for the shared operator doc file. Wave: 01 -> 02+03 parallel -> 04. CA + SE + docs-writer dispatch team. Research conclusion: Codex does not need Claude's host-level RTK pattern, but it also does not expose a documented Claude-style automatic rewrite hook.
+- E-084 (READY): Fix resolve_proxy_from_dict None Value Crash -- 1 story. AttributeError when dotenv_values() returns None for valueless .env keys. Two-line fix in src/http/session.py + tests. From E-080 Codex code review F2. SE dispatch.
 
 ## Archived Epics
+- E-084 (COMPLETED): Fix resolve_proxy_from_dict None Value Crash -- 1 story. Two-line fix for `AttributeError` when `dotenv_values()` returns `None` for valueless `.env` keys. 3 new tests. Discovered as F2 during E-080 Codex code review. No follow-up work.
 - E-083 (COMPLETED): Bright Data Sticky Proxy Sessions -- 2 stories. Automatic sticky session support for Bright Data proxy URLs (session ID injected into username via `_inject_session_id()`). Per-GameChangerClient instance session ID (`secrets.token_hex(8)`). `bb proxy check` continues with rotating IPs. CLAUDE.md documented. SHOULD FIX: `tests/test_client.py:1213` return type annotation. No follow-up work.
 - E-080 (COMPLETED): Lean Codex Review Prompts -- 6 stories. Converted 4 review artifacts to path-based prompts (01-04), then consolidated 4 skills into 2 (codex-spec-review, codex-review) each supporting headless + prompt-gen paths (05), deleted old skills and updated references (06). Target state achieved: 2 skills + 2 scripts, lean format, flow state. No follow-up work.
 - E-068 (COMPLETED): Vision Stewardship -- 5 stories. Vision signal parking lot (`docs/vision-signals.md`), recognition rule (`.claude/rules/vision-signals.md`), dispatch closure sequence step (dispatch-pattern.md + implement SKILL.md), PM agent def expansion (vision stewardship section + curate task type), CLAUDE.md references (Workflows + Key Directories). All context-layer work via claude-architect. PM modes updated: six types (added curate). No follow-up work.

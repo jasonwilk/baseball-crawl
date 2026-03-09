@@ -34,6 +34,7 @@ Review this list every 90 days, or when completing an epic. Ask:
 | [IDEA-013](IDEA-013-cmux-evaluation.md) | cmux Evaluation for Agent Teams | CANDIDATE | 2026-06-07 |
 | [IDEA-014](IDEA-014-mobile-web-api-doc-split.md) | Mobile vs. Web API Documentation Split | CANDIDATE | 2026-06-05 |
 | [IDEA-015](IDEA-015-programmatic-auth-module.md) | Programmatic Auth Module | PROMOTED | 2026-03-08 -- promoted to E-077 |
+| [IDEA-016](IDEA-016-codex-hardening-and-validation.md) | Codex Hardening and Validation Trail Map | CANDIDATE | 2026-06-07 |
 
 ## Status Definitions
 
