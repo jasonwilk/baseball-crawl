@@ -4,7 +4,7 @@
 [E-079: Fix Bright Data Proxy Routing](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the operator can run `bb proxy check` to verify that API requests are routing through the Bright Data proxy. The command makes HTTP requests through each profile's proxy session and one direct request, compares the returned IP addresses, and reports whether proxy routing is working. This is a diagnostic tool -- it always exits 0 and does not gate other operations.
@@ -37,7 +37,7 @@ Relevant context:
 
 ## Dependencies
 - **Blocked by**: E-079-01 (proxy routing must work before it can be checked)
-- **Blocks**: None
+- **Blocks**: E-079-03 (docs describe the new command)
 
 ## Files to Create or Modify
 - `src/http/proxy_check.py` -- new module with check logic (HTTP-layer, not GameChanger-specific)

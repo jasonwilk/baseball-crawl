@@ -239,11 +239,170 @@ class TestProxyReview:
 
 
 class TestProxyHelp:
-    def test_help_lists_all_four_commands(self) -> None:
-        """``bb proxy --help`` lists all four sub-commands."""
+    def test_help_lists_all_five_commands(self) -> None:
+        """``bb proxy --help`` lists all five sub-commands."""
         result = runner.invoke(app, ["proxy", "--help"])
         assert result.exit_code == 0
         assert "report" in result.output
         assert "endpoints" in result.output
         assert "refresh-headers" in result.output
         assert "review" in result.output
+        assert "check" in result.output
+
+
+# ---------------------------------------------------------------------------
+# bb proxy check
+# ---------------------------------------------------------------------------
+
+
+class TestProxyCheck:
+    """Tests for ``bb proxy check`` command."""
+
+    def _invoke_check(
+        self,
+        direct_ip: str | None,
+        profile_results: dict[str, object],
+    ):
+        """Invoke ``bb proxy check`` with mocked check logic.
+
+        Args:
+            direct_ip: Return value for ``get_direct_ip()``.
+            profile_results: Maps profile name to ``ProxyCheckResult`` to return
+                from ``check_proxy_routing()``.
+        """
+        from src.http.proxy_check import ProxyCheckOutcome, ProxyCheckResult
+
+        def fake_check(profile: str, direct_ip_arg: str | None) -> ProxyCheckResult:
+            return profile_results.get(
+                profile,
+                ProxyCheckResult(
+                    profile=profile, outcome=ProxyCheckOutcome.NOT_CONFIGURED
+                ),
+            )
+
+        with (
+            patch("src.cli.proxy.get_direct_ip", return_value=direct_ip),
+            patch("src.cli.proxy.check_proxy_routing", side_effect=fake_check),
+        ):
+            return runner.invoke(app, ["proxy", "check"])
+
+    def test_check_always_exits_zero(self) -> None:
+        """AC-5: ``bb proxy check`` always exits with code 0."""
+        from src.http.proxy_check import ProxyCheckOutcome, ProxyCheckResult
+
+        results = {
+            "web": ProxyCheckResult(profile="web", outcome=ProxyCheckOutcome.FAIL),
+            "mobile": ProxyCheckResult(profile="mobile", outcome=ProxyCheckOutcome.ERROR, error="refused"),
+        }
+        result = self._invoke_check("1.2.3.4", results)
+        assert result.exit_code == 0
+
+    def test_check_shows_pass_outcome(self) -> None:
+        """AC-2: PASS outcome is displayed with both IPs."""
+        from src.http.proxy_check import ProxyCheckOutcome, ProxyCheckResult
+
+        results = {
+            "web": ProxyCheckResult(
+                profile="web",
+                outcome=ProxyCheckOutcome.PASS,
+                proxy_ip="5.6.7.8",
+                direct_ip="1.2.3.4",
+            ),
+            "mobile": ProxyCheckResult(profile="mobile", outcome=ProxyCheckOutcome.NOT_CONFIGURED),
+        }
+        result = self._invoke_check("1.2.3.4", results)
+        assert result.exit_code == 0
+        assert "PASS" in result.output
+        assert "5.6.7.8" in result.output
+
+    def test_check_shows_fail_outcome(self) -> None:
+        """AC-2: FAIL outcome is displayed when proxy IP matches direct IP."""
+        from src.http.proxy_check import ProxyCheckOutcome, ProxyCheckResult
+
+        results = {
+            "web": ProxyCheckResult(
+                profile="web",
+                outcome=ProxyCheckOutcome.FAIL,
+                proxy_ip="1.2.3.4",
+                direct_ip="1.2.3.4",
+            ),
+            "mobile": ProxyCheckResult(profile="mobile", outcome=ProxyCheckOutcome.NOT_CONFIGURED),
+        }
+        result = self._invoke_check("1.2.3.4", results)
+        assert result.exit_code == 0
+        assert "FAIL" in result.output
+
+    def test_check_shows_error_outcome(self) -> None:
+        """AC-2, AC-7: ERROR outcome is displayed with descriptive message (not stack trace)."""
+        from src.http.proxy_check import ProxyCheckOutcome, ProxyCheckResult
+
+        results = {
+            "web": ProxyCheckResult(
+                profile="web",
+                outcome=ProxyCheckOutcome.ERROR,
+                error="connection refused",
+            ),
+            "mobile": ProxyCheckResult(profile="mobile", outcome=ProxyCheckOutcome.NOT_CONFIGURED),
+        }
+        result = self._invoke_check("1.2.3.4", results)
+        assert result.exit_code == 0
+        assert "ERROR" in result.output
+        assert "connection refused" in result.output
+        assert "Traceback" not in result.output
+
+    def test_check_shows_pass_unverified_outcome(self) -> None:
+        """AC-2: PASS-UNVERIFIED outcome is displayed when direct baseline is unavailable."""
+        from src.http.proxy_check import ProxyCheckOutcome, ProxyCheckResult
+
+        results = {
+            "web": ProxyCheckResult(
+                profile="web",
+                outcome=ProxyCheckOutcome.PASS_UNVERIFIED,
+                proxy_ip="5.6.7.8",
+            ),
+            "mobile": ProxyCheckResult(profile="mobile", outcome=ProxyCheckOutcome.NOT_CONFIGURED),
+        }
+        result = self._invoke_check(None, results)
+        assert result.exit_code == 0
+        assert "PASS-UNVERIFIED" in result.output
+        assert "5.6.7.8" in result.output
+
+    def test_check_shows_not_configured_when_proxy_disabled(self) -> None:
+        """AC-3: NOT CONFIGURED is shown when proxy is not enabled."""
+        from src.http.proxy_check import ProxyCheckOutcome, ProxyCheckResult
+
+        results = {
+            "web": ProxyCheckResult(profile="web", outcome=ProxyCheckOutcome.NOT_CONFIGURED),
+            "mobile": ProxyCheckResult(profile="mobile", outcome=ProxyCheckOutcome.NOT_CONFIGURED),
+        }
+        result = self._invoke_check("1.2.3.4", results)
+        assert result.exit_code == 0
+        assert "NOT CONFIGURED" in result.output
+
+    def test_check_shows_direct_ip_on_success(self) -> None:
+        """AC-1: Direct IP is displayed when the baseline request succeeds."""
+        from src.http.proxy_check import ProxyCheckOutcome, ProxyCheckResult
+
+        results = {
+            "web": ProxyCheckResult(profile="web", outcome=ProxyCheckOutcome.NOT_CONFIGURED),
+            "mobile": ProxyCheckResult(profile="mobile", outcome=ProxyCheckOutcome.NOT_CONFIGURED),
+        }
+        result = self._invoke_check("1.2.3.4", results)
+        assert "1.2.3.4" in result.output
+
+    def test_check_handles_direct_ip_failure(self) -> None:
+        """AC-2: If direct request fails, proxy results still displayed."""
+        from src.http.proxy_check import ProxyCheckOutcome, ProxyCheckResult
+
+        results = {
+            "web": ProxyCheckResult(
+                profile="web",
+                outcome=ProxyCheckOutcome.PASS_UNVERIFIED,
+                proxy_ip="5.6.7.8",
+            ),
+            "mobile": ProxyCheckResult(profile="mobile", outcome=ProxyCheckOutcome.NOT_CONFIGURED),
+        }
+        result = self._invoke_check(None, results)
+        assert result.exit_code == 0
+        assert "FAILED" in result.output or "network error" in result.output.lower()
+        assert "PASS-UNVERIFIED" in result.output

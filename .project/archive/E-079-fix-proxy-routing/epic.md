@@ -1,7 +1,7 @@
 # E-079: Fix Bright Data Proxy Routing
 
 ## Status
-`READY`
+`COMPLETED`
 
 ## Overview
 All GameChanger API requests from GameChangerClient bypass the Bright Data residential proxy and go direct, exposing the user's home IP address. This is a critical privacy and operational risk. The proxy configuration was implemented in E-046 but never actually worked due to an environment variable loading gap between `dotenv_values()` (dict) and `os.environ` (where `get_proxy_config()` reads from).
@@ -37,9 +37,9 @@ Additionally, Bright Data's residential proxy uses a self-signed certificate in 
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-079-01 | Fix env var gap and SSL behavior in GameChangerClient | TODO | None | - |
-| E-079-02 | Add bb proxy check diagnostic command | TODO | E-079-01 | - |
-| E-079-03 | Update CLAUDE.md proxy documentation | TODO | E-079-01, E-079-02 | - |
+| E-079-01 | Fix env var gap and SSL behavior in GameChangerClient | DONE | None | SE |
+| E-079-02 | Add bb proxy check diagnostic command | DONE | E-079-01 | SE |
+| E-079-03 | Update CLAUDE.md proxy documentation | DONE | E-079-01, E-079-02 | CA |
 
 ## Dispatch Team
 - software-engineer
@@ -94,4 +94,8 @@ None -- root cause confirmed, fix approach agreed, consultations complete.
 ## History
 - 2026-03-08: Created. Mandatory consultations completed with software-engineer (fix approach, story breakdown, risk assessment) and claude-architect (context-layer impact analysis). Set to READY.
 - 2026-03-08: Codex spec review (gpt-5.4, xhigh reasoning). 1 P1, 3 P2, 2 P3 findings. PM+SE triage: ACCEPT P1 (result matrix for AC-2), ACCEPT P2-2 (add test_cli_proxy.py to file list), ACCEPT P2-3 (rename "Existing Callers" section), DEFER P2-1 (shared resolution -- SE decides at implementation), REJECT P3-4 (overview correctly scoped), ACCEPT P3-5 (docs-only DoD). Softened "private" in E-079-01 file list per P2-1 deferral. Spec reviewed -- all findings resolved.
+- 2026-03-08: Second codex spec review triage (PM-led). 0 P1, 2 P2, 2 P3 findings. Decisions: REFINE P2-1 (AC-7 reworded from "remains unchanged" to behavior-preservation allowing internal refactoring), REFINE P2-2 (E-079-02 Blocks field updated to include E-079-03 for dependency symmetry), REFINE P3-1 (AC-9 test file changed from `test_gamechanger_client.py` to existing `test_client.py`), REFINE P3-2 (AC-5 in E-079-03 tightened from "accurate and complete" to explicit content-preservation language). All findings resolved.
 - 2026-03-08: Refinement with PM and SE. Findings applied: (1) Fixed E-079-03 dependency in epic table (was missing E-079-02); (2) Corrected wave structure to sequential 01→02→03; (3) Moved `proxy_check.py` from `src/gamechanger/` to `src/http/` (HTTP-layer, not GC-specific); (4) Clarified AC-4/AC-5 in E-079-01 to reference "after sentinel evaluation"; (5) Fixed AC-8 in E-079-01 (removed reference to non-existent test file); (6) Split AC-9 test targets by file; (7) Added `team_resolver.py` note to E-079-01; (8) Rewrote AC-1/AC-2 in E-079-02 for partial config and explicit pass/fail definitions; (9) Added shared proxy resolution note to Technical Notes; (10) Added AC-10 (rate-limit override) to E-079-02; (11) Added SSL rationale and credential sensitivity notes to E-079-03 ACs; (12) Reduced Technical Approach prescription in E-079-01 per PM anti-pattern 6.
+- 2026-03-08: **COMPLETED.** All 3 stories implemented and verified. E-079-01 and E-079-02 approved by code-reviewer (both on round 2 after minor fixes: stale module docstring, overly broad exception handling). E-079-03 verified directly by main session (context-layer-only). Key artifacts: `resolve_proxy_from_dict()` shared helper in `session.py`, `src/http/proxy_check.py` new module, `bb proxy check` CLI command, CLAUDE.md restructured Proxy Boundary section. SHOULD FIX items from code reviews: brittle mock pattern in test_client.py, missing sentinel-path SSL coverage in test_http_session.py, permissive log-safety assertion in test_proxy_check.py, undocumented _PROFILES list in proxy.py.
+  - **Documentation assessment**: No additional documentation impact. CLAUDE.md already updated in E-079-03 (Proxy Boundary restructured, `bb proxy check` added to Commands). No `docs/admin/` or `docs/coaching/` updates needed.
+  - **Context-layer assessment**: (1) New convention/pattern: YES -- dual-path proxy resolution (`get_proxy_config()` + `resolve_proxy_from_dict()`); codified in CLAUDE.md by E-079-03. (2) Architectural decision: NO. (3) Footgun/boundary: YES -- `dotenv_values()` vs `os.environ` gap; codified in CLAUDE.md by E-079-03. (4) Agent behavior change: NO. (5) Domain knowledge: NO. (6) New CLI command: YES -- `bb proxy check`; codified in CLAUDE.md by E-079-03. All triggered items already codified -- no additional architect work needed.

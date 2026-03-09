@@ -4,7 +4,7 @@
 [E-079: Fix Bright Data Proxy Routing](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, `GameChangerClient` will read proxy configuration from its already-loaded dotenv dict and pass the proxy URL explicitly to `create_session()`, eliminating the gap where proxy env vars exist in the dict but not in `os.environ`. When a proxy URL is configured, `create_session()` will automatically disable SSL verification (required by Bright Data's self-signed CONNECT tunnel certificate) and log a warning.
@@ -21,9 +21,9 @@ Additionally, Bright Data's residential proxy requires `verify=False` on the htt
 - [ ] **AC-4**: Given the resolved proxy URL (after sentinel evaluation in `create_session()`) is a non-None string, when the httpx client is created, then `verify=False` is passed to the client constructor.
 - [ ] **AC-5**: Given the resolved proxy URL (after sentinel evaluation) is None, when the httpx client is created, then `verify` is not set to False (default SSL verification applies).
 - [ ] **AC-6**: Given a proxy URL is resolved, when the session is created, then a WARNING-level log message is emitted indicating SSL verification is disabled and including the profile name (e.g., "SSL verification disabled: proxy configured for web profile"). The log message MUST NOT contain the proxy URL itself.
-- [ ] **AC-7**: The existing `get_proxy_config()` function in `src/http/session.py` remains unchanged (it still reads `os.environ` for any future callers that set env vars there).
+- [ ] **AC-7**: The existing `get_proxy_config()` function in `src/http/session.py` preserves its current behavior: it reads proxy config from `os.environ` and returns either a proxy URL string or None. Its signature, return semantics, and `os.environ`-based resolution logic must not change. (Internal refactoring such as extracting shared helpers is fine as long as the function's external behavior is identical.)
 - [ ] **AC-8**: All existing tests in `tests/test_http_session.py` continue to pass without modification (unless a test explicitly tests the old broken behavior).
-- [ ] **AC-9**: New unit tests: AC-1, AC-2, AC-3 (proxy forwarding) in a new `tests/test_gamechanger_client.py`; AC-4, AC-5, AC-6 (SSL/verify behavior) in `tests/test_http_session.py`.
+- [ ] **AC-9**: New unit tests: AC-1, AC-2, AC-3 (proxy forwarding) in the existing `tests/test_client.py` (the established GameChangerClient test module); AC-4, AC-5, AC-6 (SSL/verify behavior) in `tests/test_http_session.py`.
 
 ## Technical Approach
 The core problem is that `GameChangerClient.__init__()` has proxy config available in its `self._credentials` dict but does not forward it to `create_session()`. The `create_session()` function already accepts an explicit `proxy_url` parameter with an `_UNSET` sentinel -- this parameter was designed for exactly this use case.
@@ -46,7 +46,7 @@ Relevant context:
 ## Files to Create or Modify
 - `src/gamechanger/client.py` -- add proxy resolution method, pass proxy_url to create_session()
 - `src/http/session.py` -- add verify=False when proxy is configured, add warning log
-- `tests/test_gamechanger_client.py` -- new tests for proxy forwarding
+- `tests/test_client.py` -- new tests for proxy forwarding (existing GameChangerClient test module)
 - `tests/test_http_session.py` -- new tests for SSL behavior with proxy
 
 ## Agent Hint

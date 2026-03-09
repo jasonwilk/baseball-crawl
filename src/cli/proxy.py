@@ -1,4 +1,17 @@
-"""bb proxy -- mitmproxy session commands (report, endpoints, refresh-headers, review)."""
+"""bb proxy -- proxy analysis and diagnostics commands.
+
+Covers two distinct proxy systems:
+
+- **mitmproxy** (traffic capture): ``report``, ``endpoints``, ``refresh-headers``,
+  and ``review`` commands analyse captured sessions from the Mac-host mitmproxy
+  process.  These commands read files from ``proxy/data/`` and run shell scripts;
+  they cannot be run from inside the devcontainer.
+
+- **Bright Data** (IP anonymization): ``check`` verifies that outgoing API
+  requests are routing through the configured Bright Data residential proxy.
+  Reads ``PROXY_ENABLED``, ``PROXY_URL_WEB``, and ``PROXY_URL_MOBILE`` from
+  ``.env`` and does not require GameChanger credentials.
+"""
 
 from __future__ import annotations
 
@@ -8,6 +21,12 @@ from pathlib import Path
 from typing import Optional
 
 import typer
+
+from src.http.proxy_check import (
+    ProxyCheckOutcome,
+    check_proxy_routing,
+    get_direct_ip,
+)
 
 app = typer.Typer(help="Proxy analysis commands.")
 
@@ -76,3 +95,69 @@ def review(ctx: typer.Context) -> None:
     cmd = ["scripts/proxy-review.sh", *ctx.args]
     result = subprocess.run(cmd, cwd=_PROJECT_ROOT, check=False)
     raise SystemExit(result.returncode)
+
+
+_PROFILES = ["web", "mobile"]
+
+_OUTCOME_LABELS = {
+    ProxyCheckOutcome.PASS: "PASS",
+    ProxyCheckOutcome.FAIL: "FAIL",
+    ProxyCheckOutcome.ERROR: "ERROR",
+    ProxyCheckOutcome.PASS_UNVERIFIED: "PASS-UNVERIFIED",
+    ProxyCheckOutcome.NOT_CONFIGURED: "NOT CONFIGURED",
+}
+
+
+@app.command()
+def check() -> None:
+    """Verify Bright Data proxy routing for each configured profile.
+
+    Makes one direct request (no proxy) plus one request per profile that has a
+    configured proxy URL, hits an IP-echo service, and compares the returned IP
+    addresses.  PASS means the proxy is routing correctly (proxy IP differs from
+    direct IP).
+
+    Always exits with code 0 -- this is a diagnostic tool, not a gate.
+    Proxy URLs are never displayed (they contain credentials).
+    """
+    typer.echo("Checking Bright Data proxy routing...")
+    typer.echo("")
+
+    typer.echo("  Fetching direct IP (no proxy)... ", nl=False)
+    direct_ip = get_direct_ip()
+    if direct_ip:
+        typer.echo(f"{direct_ip}")
+    else:
+        typer.echo("FAILED (network error -- proxy results will not be compared)")
+    typer.echo("")
+
+    for profile in _PROFILES:
+        result = check_proxy_routing(profile, direct_ip)
+        label = _OUTCOME_LABELS.get(result.outcome, result.outcome.value)
+
+        if result.outcome == ProxyCheckOutcome.NOT_CONFIGURED:
+            typer.echo(f"  [{profile}] {label} -- proxy not enabled or URL not set")
+
+        elif result.outcome == ProxyCheckOutcome.ERROR:
+            typer.echo(f"  [{profile}] {label} -- {result.error}")
+
+        elif result.outcome == ProxyCheckOutcome.PASS:
+            typer.echo(
+                f"  [{profile}] {label} -- proxy IP {result.proxy_ip} "
+                f"differs from direct IP {result.direct_ip}"
+            )
+
+        elif result.outcome == ProxyCheckOutcome.FAIL:
+            typer.echo(
+                f"  [{profile}] {label} -- proxy IP {result.proxy_ip} "
+                f"matches direct IP {result.direct_ip} (not routing through proxy)"
+            )
+
+        elif result.outcome == ProxyCheckOutcome.PASS_UNVERIFIED:
+            typer.echo(
+                f"  [{profile}] {label} -- proxy returned IP {result.proxy_ip} "
+                "(direct baseline unavailable, cannot compare)"
+            )
+
+    typer.echo("")
+    typer.echo("Done.")

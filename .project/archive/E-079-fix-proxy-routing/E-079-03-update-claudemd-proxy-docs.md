@@ -4,7 +4,7 @@
 [E-079: Fix Bright Data Proxy Routing](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, CLAUDE.md accurately documents both proxy systems (mitmproxy for traffic capture, Bright Data for IP anonymization), the `bb proxy check` command, and the environment variables that control Bright Data proxy routing. The current "Proxy Boundary" section only covers mitmproxy -- it needs restructuring to distinguish the two proxy systems.
@@ -17,7 +17,7 @@ E-046 added Bright Data proxy support but the CLAUDE.md documentation was not up
 - [ ] **AC-2**: The Bright Data subsection documents the three env vars (`PROXY_ENABLED`, `PROXY_URL_WEB`, `PROXY_URL_MOBILE`) with brief descriptions of each. Notes that `PROXY_URL_*` values contain embedded credentials (username:password) and are treated as secrets (same handling as tokens -- never log, commit, or display).
 - [ ] **AC-3**: The Bright Data subsection notes that SSL verification is automatically disabled when proxy is configured, with the reason (Bright Data uses a self-signed certificate in the CONNECT tunnel), so agents do not treat `verify=False` as a generic pattern.
 - [ ] **AC-4**: The CLAUDE.md Commands section includes `bb proxy check` with a brief description consistent with the existing command entry format.
-- [ ] **AC-5**: The existing mitmproxy documentation in the Proxy Boundary section remains accurate and complete -- only the structure changes, not the mitmproxy content.
+- [ ] **AC-5**: The existing mitmproxy content from the Proxy Boundary section is preserved under the new subheading -- same rules, same boundary descriptions, same examples. Only the heading structure changes (content moves under a mitmproxy-specific subheading), not the mitmproxy text itself.
 - [ ] **AC-6**: No other CLAUDE.md sections are modified beyond Proxy Boundary and Commands.
 
 ## Technical Approach
