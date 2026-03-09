@@ -35,6 +35,11 @@ Review this list every 90 days, or when completing an epic. Ask:
 | [IDEA-014](IDEA-014-mobile-web-api-doc-split.md) | Mobile vs. Web API Documentation Split | CANDIDATE | 2026-06-05 |
 | [IDEA-015](IDEA-015-programmatic-auth-module.md) | Programmatic Auth Module | PROMOTED | 2026-03-08 -- promoted to E-077 |
 | [IDEA-016](IDEA-016-codex-hardening-and-validation.md) | Codex Hardening and Validation Trail Map | CANDIDATE | 2026-06-07 |
+| [IDEA-017](IDEA-017-api-relationship-documentation.md) | API Relationship and Chain Documentation | CANDIDATE | 2026-06-07 |
+| [IDEA-018](IDEA-018-fuzzy-llm-opponent-resolution.md) | Fuzzy LLM Opponent Resolution | CANDIDATE | 2026-06-07 |
+| [IDEA-019](IDEA-019-retroactive-opponent-stat-crawling.md) | Retroactive Opponent Stat Crawling | CANDIDATE | 2026-06-07 |
+| [IDEA-020](IDEA-020-public-endpoint-opponent-ingestion.md) | Public Endpoint Opponent Data Ingestion | CANDIDATE | 2026-06-07 |
+| [IDEA-021](IDEA-021-database-migration-process.md) | Database Migration Process Definition | CANDIDATE | 2026-06-07 |
 
 ## Status Definitions
 

@@ -1,10 +1,10 @@
 # Product Manager -- Agent Memory
 
 ## Numbering State
-- Next available epic number: E-085
-- Epics created: E-001 through E-084 (E-001, E-003, E-005, E-006, E-007, E-008, E-010, E-011, E-012, E-013, E-014, E-015, E-016, E-017, E-018, E-019, E-020, E-021, E-022, E-024, E-025, E-026, E-027, E-028, E-029, E-030, E-031, E-032, E-033, E-034, E-035, E-036, E-037, E-038, E-042, E-044, E-046, E-048, E-049, E-050, E-052, E-053, E-054, E-056, E-057, E-058, E-055, E-059, E-060, E-061, E-081 archived)
-- Next available idea number: IDEA-017
-- Ideas created: IDEA-001 through IDEA-016
+- Next available epic number: E-088
+- Epics created: E-001 through E-087 (E-001, E-003, E-005, E-006, E-007, E-008, E-010, E-011, E-012, E-013, E-014, E-015, E-016, E-017, E-018, E-019, E-020, E-021, E-022, E-024, E-025, E-026, E-027, E-028, E-029, E-030, E-031, E-032, E-033, E-034, E-035, E-036, E-037, E-038, E-042, E-044, E-046, E-048, E-049, E-050, E-052, E-053, E-054, E-056, E-057, E-058, E-055, E-059, E-060, E-061, E-081 archived)
+- Next available idea number: IDEA-022
+- Ideas created: IDEA-001 through IDEA-021
 
 ## Project Context
 - Project: baseball-crawl -- GameChanger API -> database -> coaching dashboard
@@ -22,6 +22,9 @@
 - E-076 (READY): Main Session Compliance Guardrails -- 2 stories. New `.claude/rules/agent-team-compliance.md` with 3 pattern-action checkpoints (Explicit Team Request, Explicit Consultation Directive, Anti-Fabrication Rule) using trigger/required/prohibited format. Cross-references from workflow-discipline.md and CLAUDE.md. All context-layer work via claude-architect. Wave: 01 -> 02. CA consulted: confirmed 3-file scope, recommended 3 patterns (not 2), trigger/required/prohibited format, rationale section.
 
 - E-082 (READY): Codex RTK Project-Level Integration -- 4 stories. Install RTK into a gitignored repo-local tool path, expose it to Codex from checked-in project config or absolute-path guidance, add explicit `rtk <command>` guidance (no transparent hook assumptions), add a Python smoke-check utility, and document the Codex RTK model. Depends on E-081 bootstrap (now COMPLETED) and on E-081-04 for the shared operator doc file (now DONE). Wave: 01 -> 02+03 parallel -> 04. CA + SE + docs-writer dispatch team. Research conclusion: Codex does not need Claude's host-level RTK pattern, but it also does not expose a documented Claude-style automatic rewrite hook.
+- E-085 (DRAFT): Credential Resilience and Diagnostic Improvements -- 4 stories. TokenManager login fallback (auto-recover from expired refresh tokens via 3-step login flow with `LoginFailedError` subclass), enhanced `bb creds check` (multi-section diagnostic with `[OK]`/`[!!]`/`[XX]`/`[--]` visual language), `bb status` proxy connectivity section, context-layer docs update. Web profile only (mobile client key unknown). Wave: 01+02+03 parallel -> 04 (depends on 01). SE + CA dispatch team. All four consultations completed (CA, UXD, api-scout, SE). Key: `force_refresh()` does NOT trigger login fallback.
+- E-086 (DRAFT): Mobile Credential Capture -- 4 stories. Proxy addon upgrade (gc-client-id + POST /auth response body capture), `bb creds import --profile mobile` (curl-paste path), `bb creds capture --profile mobile` (proxy session scanning with inline guidance), context-layer docs. Absorbs remaining E-075 stories (02+03). Wave: 01+02 parallel -> 03 (depends on 01) -> 04 (depends on 02+03). SE + CA dispatch team. All four consultations completed.
+- E-087 (READY): Full Payload Capture in Endpoint Logger -- 2 stories. Extend endpoint_logger.py to capture complete request/response payloads (bodies inline, headers auth-stripped via denylist, full query params). 512KB body cap with truncation sentinel. Binary content types skipped. Plus API doc standards evolution: PII-safe placeholder taxonomy in api-docs.md, request body example guidance, ingest-endpoint skill redaction step. Wave: 01+02 parallel (no deps). SE + CA dispatch team. SE consulted on storage format.
 - E-084 (READY): Fix resolve_proxy_from_dict None Value Crash -- 1 story. AttributeError when dotenv_values() returns None for valueless .env keys. Two-line fix in src/http/session.py + tests. From E-080 Codex code review F2. SE dispatch.
 
 ## Archived Epics
