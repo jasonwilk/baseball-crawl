@@ -36,7 +36,7 @@ The code-reviewer's Step 1 currently says: "For large test suites, target change
 
 ## Success Criteria
 - `testing.md` contains a test scope discovery rule with a concrete grep pattern
-- The SE agent definition references the rule or includes equivalent guidance
+- The SE and DE agent definitions reference the rule or include equivalent guidance
 - The code-reviewer's review procedure includes a step to verify test scope covers all importers
 - An agent modifying `src/gamechanger/credentials.py` would, by following these rules, discover and run `tests/test_check_credentials.py` even if that file is not in the story's "Files to Create or Modify"
 
@@ -67,18 +67,19 @@ One category grep misses: subprocess-based tests (e.g., `test_script_entry_point
 A full `pytest` run is too blunt as a hard gate. Pre-existing failures in unrelated files create noise that muddies the signal. The grep-based targeted approach gives a cleaner signal: "these tests import from modules I changed; they pass or fail because of my changes." Optional guidance: if discovery reveals 10+ files, consider a full run instead of listing them all.
 
 ### Affected Files
-- `/.claude/rules/testing.md` -- add the test scope discovery rule
+- `/.claude/rules/testing.md` -- add the test scope discovery rule, expand frontmatter paths to include `src/**`
 - `/.claude/agents/software-engineer.md` -- add a reference or note about broader test discovery
+- `/.claude/agents/data-engineer.md` -- add a reference or note about broader test discovery
 - `/.claude/agents/code-reviewer.md` -- update Step 1 of the Review Procedure to include test scope verification
 
 ### Why Not Full pytest?
 A full `pytest` run would also catch this, but it is a blunt instrument. The project has 900+ tests and growing. Requiring a full run for every story would slow dispatch and pre-existing failures in unrelated files create noise. The grep-based discovery approach is targeted: it catches exactly the cross-file dependencies that scoped runs miss, without the overhead of running unrelated tests. SE confirmed this assessment: grep gives a cleaner signal ("these tests import from modules I changed") than a full run.
 
-### Frontmatter Glob Consideration
-SE noted that `testing.md` currently triggers on `tests/**` and `**/*test*.py` -- but the test scope discovery rule is about modifying *source* modules. Adding `src/**` to the frontmatter glob would ensure the rule auto-loads when agents modify source files without touching test files. This is mitigated by the SE agent def cross-reference (AC-2 of E-089-01), so it's optional -- CA's discretion during implementation.
+### Frontmatter Glob Expansion (Required)
+SE noted that `testing.md` currently triggers on `tests/**` and `**/*test*.py` -- but the test scope discovery rule is about modifying *source* modules. Adding `src/**` to the frontmatter glob ensures the rule auto-loads when agents modify source files without touching test files. This is required (AC-5 of E-089-01), not optional.
 
 ### Parallel Safety
-E-089-01 modifies `testing.md` and `software-engineer.md`. E-089-02 modifies `code-reviewer.md`. No file conflicts -- stories can execute in parallel.
+E-089-01 modifies `testing.md`, `software-engineer.md`, and `data-engineer.md`. E-089-02 modifies `code-reviewer.md`. No file conflicts -- stories can execute in parallel.
 
 ## Open Questions
 None remaining. SE consultation resolved the discovery method question (grep-for-imports, leave invocation to the agent).
@@ -88,3 +89,4 @@ None remaining. SE consultation resolved the discovery method question (grep-for
 - 2026-03-09: CA consultation completed (relayed by user). Confirmed two-story scope and testing.md placement.
 - 2026-03-09: SE consultation completed (relayed by user). Confirmed grep-for-imports as the right tool, identified subprocess edge case, recommended against full-pytest hard gate, fixed AC-3 drafting ambiguity in E-089-02. Findings incorporated into Technical Notes.
 - 2026-03-09: Team refinement session (PM + SE + CA). Both agents confirmed no blocking concerns. SE suggested testing.md frontmatter glob expansion to `src/**` (added to Technical Notes as optional). CA confirmed self-contained Step 1 approach with parenthetical cross-reference to testing.md. Epic set to READY.
+- 2026-03-09: Codex spec review triage. Three refinements applied: (1) AC-4 revised to permit frontmatter expansion, (2) new AC-5 makes frontmatter `src/**` expansion required, (3) AC-2 expanded to include `data-engineer.md`. Technical Notes and Affected Files updated accordingly.
