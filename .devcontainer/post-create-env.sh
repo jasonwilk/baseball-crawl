@@ -18,6 +18,7 @@ read -r -d '' EXPORT_BLOCK <<'BLOCK' || true
 # --- baseball-crawl MCP env export ---
 # Export tokens from .env so Claude Code's .mcp.json ${VAR} expansion works.
 # Must run before the interactive-shell guard (non-interactive shells need this).
+export LANG=en_US.UTF-8
 if [ -f /workspaces/baseball-crawl/.env ]; then
     _tok=$(grep -m1 '^BRIGHT_DATA_TOKEN=' /workspaces/baseball-crawl/.env 2>/dev/null | cut -d= -f2-)
     [ -n "$_tok" ] && export BRIGHT_DATA_TOKEN="$_tok"
