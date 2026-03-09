@@ -4,7 +4,7 @@
 [E-081: Codex Context and Agent Bootstrap](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, Codex runtime state will live in a gitignored project-local directory inside the workspace rather than defaulting to host-global `~/.codex`. This gives the project a durable local Codex home for trust, auth, sessions, and caches without committing those artifacts to git.
@@ -15,13 +15,13 @@ Official Codex docs and local CLI behavior show two distinct layers: checked-in 
 Project-scoped `.codex/config.toml` only loads for trusted repos, so the local runtime bootstrap must also seed a minimal user-level config with a trust entry for `/workspaces/baseball-crawl`. That trust entry belongs in the local runtime layer, not in checked-in files.
 
 ## Acceptance Criteria
-- [ ] **AC-1**: The devcontainer bootstrap sets `CODEX_HOME` to a gitignored project-local directory inside `/workspaces/baseball-crawl` using the existing `.devcontainer/post-create-env.sh` dual-injection pattern so both bash and zsh sessions see the same value, rather than relying on host-global `~/.codex`.
-- [ ] **AC-2**: Devcontainer bootstrap creates the `CODEX_HOME` directory if it does not exist.
-- [ ] **AC-3**: Devcontainer bootstrap creates or updates a minimal `${CODEX_HOME}/config.toml` using the actual trust-entry TOML structure verified against the installed Codex CLI so `/workspaces/baseball-crawl` is trusted and can load the checked-in `.codex/config.toml`.
-- [ ] **AC-4**: The bootstrap is idempotent. Re-running post-create setup does not duplicate trust entries or overwrite existing auth/session artifacts.
-- [ ] **AC-5**: `.gitignore` excludes the local Codex runtime directory and its contents.
-- [ ] **AC-6**: Running `codex --version` and `codex exec --help` inside the devcontainer works with the project-local `CODEX_HOME` path in place.
-- [ ] **AC-7**: The existing global `codex` binary install remains unchanged; this story only relocates runtime state, not the executable itself.
+- [x] **AC-1**: The devcontainer bootstrap sets `CODEX_HOME` to a gitignored project-local directory inside `/workspaces/baseball-crawl` using the existing `.devcontainer/post-create-env.sh` dual-injection pattern so both bash and zsh sessions see the same value, rather than relying on host-global `~/.codex`.
+- [x] **AC-2**: Devcontainer bootstrap creates the `CODEX_HOME` directory if it does not exist.
+- [x] **AC-3**: Devcontainer bootstrap creates or updates a minimal `${CODEX_HOME}/config.toml` using the actual trust-entry TOML structure verified against the installed Codex CLI so `/workspaces/baseball-crawl` is trusted and can load the checked-in `.codex/config.toml`.
+- [x] **AC-4**: The bootstrap is idempotent. Re-running post-create setup does not duplicate trust entries or overwrite existing auth/session artifacts.
+- [x] **AC-5**: `.gitignore` excludes the local Codex runtime directory and its contents.
+- [x] **AC-6**: Running `codex --version` and `codex exec --help` inside the devcontainer works with the project-local `CODEX_HOME` path in place.
+- [x] **AC-7**: The existing global `codex` binary install remains unchanged; this story only relocates runtime state, not the executable itself.
 
 ## Technical Approach
 The bootstrap should use `.devcontainer/post-create-env.sh` (or a helper script called from it) so the existing dual-shell injection pattern remains the single source of truth for environment variables. `remoteEnv` may still be used for editor ergonomics, but it is not sufficient by itself for shell tools and automation.
@@ -49,9 +49,9 @@ software-engineer
 - **Produces for E-081-05**: The actual `CODEX_HOME` path and shell-injection pattern that `CLAUDE.md` must describe.
 
 ## Definition of Done
-- [ ] All acceptance criteria pass
-- [ ] Local Codex runtime state is project-local and gitignored
-- [ ] Bootstrap is idempotent and does not overwrite user secrets
+- [x] All acceptance criteria pass
+- [x] Local Codex runtime state is project-local and gitignored
+- [x] Bootstrap is idempotent and does not overwrite user secrets
 
 ## Notes
 - The runtime directory is local state, not versioned state. Treat its contents as sensitive.

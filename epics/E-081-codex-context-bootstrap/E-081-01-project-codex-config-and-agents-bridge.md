@@ -4,7 +4,7 @@
 [E-081: Codex Context and Agent Bootstrap](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the repo will contain the minimum checked-in Codex entry points: a real root `AGENTS.md` file and a project `.codex/config.toml`. Together they define how Codex should work in this repository, with Codex framed as a secondary/watchful partner to Claude rather than a second primary orchestration system.
@@ -13,11 +13,11 @@ After this story is complete, the repo will contain the minimum checked-in Codex
 The repo currently has Codex review scripts and prompt-generation workflows, but it does not have an actual Codex project context layer. The current session receives AGENTS instructions externally, which is not the same as having a checked-in repo `AGENTS.md` that future Codex sessions can discover automatically. Official Codex docs support both `AGENTS.md` and project-scoped `.codex/config.toml`, so those should become the project's durable, versioned Codex entry points.
 
 ## Acceptance Criteria
-- [ ] **AC-1**: A root-level `AGENTS.md` file exists and explicitly defines Codex's role in this repo as a secondary/watchful partner to Claude, prioritizing verification, review, bounded implementation, and context integrity over product ownership.
-- [ ] **AC-2**: The `AGENTS.md` guidance tells Codex to consult `CLAUDE.md`, the active epic/story files, and only the task-relevant `.claude/` files instead of bulk-loading the entire Claude context tree.
-- [ ] **AC-3**: A checked-in `.codex/config.toml` file exists and contains only project-owned defaults. It must not contain credentials, tokens, auth artifacts, session IDs, or paths outside the workspace.
-- [ ] **AC-4**: The checked-in Codex files do not require a host `~/.codex` mount or host-global config to function; they are valid repo-local inputs on their own.
-- [ ] **AC-5**: The checked-in config parses as valid TOML and does not cause `codex --help` or `codex exec --help` to fail when run from the repo.
+- [x] **AC-1**: A root-level `AGENTS.md` file exists and explicitly defines Codex's role in this repo as a secondary/watchful partner to Claude, prioritizing verification, review, bounded implementation, and context integrity over product ownership.
+- [x] **AC-2**: The `AGENTS.md` guidance tells Codex to consult `CLAUDE.md`, the active epic/story files, and only the task-relevant `.claude/` files instead of bulk-loading the entire Claude context tree.
+- [x] **AC-3**: A checked-in `.codex/config.toml` file exists and contains only project-owned defaults. It must not contain credentials, tokens, auth artifacts, session IDs, or paths outside the workspace.
+- [x] **AC-4**: The checked-in Codex files do not require a host `~/.codex` mount or host-global config to function; they are valid repo-local inputs on their own.
+- [x] **AC-5**: The checked-in config parses as valid TOML and does not cause `codex --help` or `codex exec --help` to fail when run from the repo.
 
 ## Technical Approach
 This story creates the durable, versioned Codex layer only. It should not create or seed local runtime state such as trust entries, auth files, session history, or caches. Those belong to the gitignored project-local runtime directory handled by E-081-02.
@@ -41,9 +41,9 @@ claude-architect
 - **Produces for E-081-05**: The canonical repo-owned Codex layer that `CLAUDE.md` must summarize accurately.
 
 ## Definition of Done
-- [ ] All acceptance criteria pass
-- [ ] `AGENTS.md` is clear and scoped to Codex
-- [ ] `.codex/config.toml` is valid TOML with no secrets or host-specific paths
+- [x] All acceptance criteria pass
+- [x] `AGENTS.md` is clear and scoped to Codex
+- [x] `.codex/config.toml` is valid TOML with no secrets or host-specific paths
 
 ## Notes
 - Keep this story lean. The goal is a real Codex project entry point, not a second full context framework.

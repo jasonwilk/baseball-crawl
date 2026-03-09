@@ -1,7 +1,7 @@
 # E-081: Codex Context and Agent Bootstrap
 
 ## Status
-`READY`
+`DONE`
 
 ## Overview
 Bootstrap a very light, project-owned Codex layer that can operate inside the devcontainer without depending on host-global Codex state. Codex remains secondary to Claude: a watchful partner for verification, review, and bounded implementation, not a parallel product-management system.
@@ -50,11 +50,11 @@ No Claude-agent consultation required. This epic is Codex-native configuration w
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-081-01 | Add project Codex config and repo AGENTS bridge | TODO | None | - |
-| E-081-02 | Bootstrap project-local CODEX_HOME in the devcontainer | TODO | None | - |
-| E-081-03 | Add a lightweight watchful-partner bridge skill | TODO | E-081-01 | - |
-| E-081-04 | Document the Codex operator model and smoke checks | TODO | E-081-01, E-081-02, E-081-03 | - |
-| E-081-05 | Update CLAUDE.md for the Codex bootstrap model | TODO | E-081-01, E-081-02, E-081-03, E-081-04 | - |
+| E-081-01 | Add project Codex config and repo AGENTS bridge | DONE | None | - |
+| E-081-02 | Bootstrap project-local CODEX_HOME in the devcontainer | DONE | None | - |
+| E-081-03 | Add a lightweight watchful-partner bridge skill | DONE | E-081-01 | - |
+| E-081-04 | Document the Codex operator model and smoke checks | DONE | E-081-01, E-081-02, E-081-03 | - |
+| E-081-05 | Update CLAUDE.md for the Codex bootstrap model | DONE | E-081-01, E-081-02, E-081-03, E-081-04 | - |
 
 ## Dispatch Team
 - claude-architect
@@ -111,3 +111,4 @@ None. The project-local bootstrap shape is clear from the documented Codex surfa
 ## History
 - 2026-03-08: Created from direct Codex research. Research findings incorporated: project-scoped `.codex/config.toml`, repo `AGENTS.md`, repo skills under `.agents/skills/`, project-registered spawned agents, `CODEX_HOME` override support, and `--ephemeral` non-interactive mode. Set to READY.
 - 2026-03-09: Refined to the safe documented baseline. Removed spawned-agent dependence from E-081-03 because `multi_agent` is experimental and disabled by default in local Codex CLI inspection. Kept `.agents/skills/` as the repo skill path, added docs-writer for the operator-guide story, added E-081-05 for the missing `CLAUDE.md` update, and tightened the runtime bootstrap notes around dual-shell `CODEX_HOME` injection.
+- 2026-03-09: Verified the checked-in Codex layer, project-local `CODEX_HOME` bootstrap, bridge skill, operator guide, and `CLAUDE.md` alignment against the live repo. Confirmed `codex --help`, `codex --version`, and `codex exec --help` succeed with `CODEX_HOME=/workspaces/baseball-crawl/.codex-home`, and marked the epic DONE.

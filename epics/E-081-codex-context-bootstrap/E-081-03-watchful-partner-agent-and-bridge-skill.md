@@ -4,7 +4,7 @@
 [E-081: Codex Context and Agent Bootstrap](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, Codex will have one lightweight repo-scoped skill that helps it act as Claude's watchful partner. The result is a small, explicit Codex support layer for review and verification without cloning the full Claude ecosystem or depending on experimental Codex features.
@@ -17,12 +17,12 @@ Official Codex docs support repo-scoped skills under `.agents/skills/`. Local CL
 - selective use of the existing Claude context, not duplication of it
 
 ## Acceptance Criteria
-- [ ] **AC-1**: A repo-scoped Codex skill exists under `.agents/skills/` and teaches Codex how to bridge into the existing Claude/project context using progressive disclosure.
-- [ ] **AC-2**: The skill explicitly frames Codex's role as a watchful partner focused on review, verification, risk detection, and context integrity.
-- [ ] **AC-3**: The skill instructs Codex to load only the minimum relevant Claude artifacts for the current task rather than bulk-reading `.claude/`.
-- [ ] **AC-4**: The checked-in Codex layer does not require a spawned agent, the `multi_agent` feature flag, or any other experimental Codex feature to use the bridge skill.
-- [ ] **AC-5**: Neither the skill nor the surrounding Codex guidance duplicates the Claude PM workflow or recreates the full Claude agent roster inside Codex.
-- [ ] **AC-6**: The checked-in skill is purely project-local. It does not depend on host-global Codex skill directories or user-home agent files.
+- [x] **AC-1**: A repo-scoped Codex skill exists under `.agents/skills/` and teaches Codex how to bridge into the existing Claude/project context using progressive disclosure.
+- [x] **AC-2**: The skill explicitly frames Codex's role as a watchful partner focused on review, verification, risk detection, and context integrity.
+- [x] **AC-3**: The skill instructs Codex to load only the minimum relevant Claude artifacts for the current task rather than bulk-reading `.claude/`.
+- [x] **AC-4**: The checked-in Codex layer does not require a spawned agent, the `multi_agent` feature flag, or any other experimental Codex feature to use the bridge skill.
+- [x] **AC-5**: Neither the skill nor the surrounding Codex guidance duplicates the Claude PM workflow or recreates the full Claude agent roster inside Codex.
+- [x] **AC-6**: The checked-in skill is purely project-local. It does not depend on host-global Codex skill directories or user-home agent files.
 
 ## Technical Approach
 The bridge skill should be useful on day one for the specific role the user described: Codex as a watchful partner to Claude. Keep the skill concrete, but avoid building a mini-ecosystem. The safe baseline is a repo skill plus checked-in guidance, not a spawned-agent system.
@@ -45,9 +45,9 @@ claude-architect
 - **Produces for E-081-05**: The bridge-skill role and path that `CLAUDE.md` must describe.
 
 ## Definition of Done
-- [ ] All acceptance criteria pass
-- [ ] The bridge skill stays intentionally narrow
-- [ ] No second PM system, duplicated Claude roster, or experimental Codex dependency is introduced
+- [x] All acceptance criteria pass
+- [x] The bridge skill stays intentionally narrow
+- [x] No second PM system, duplicated Claude roster, or experimental Codex dependency is introduced
 
 ## Notes
 - "Very light" is the core constraint for this story. If the implementation starts expanding into multiple skills or reintroduces spawned agents, it has missed the point.
