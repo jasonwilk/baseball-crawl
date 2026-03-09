@@ -19,19 +19,20 @@ The RTK story for Codex is materially different from the Claude story in E-070. 
 - [ ] **AC-4**: The document records the smoke-check command/path from E-082-03 and the expected success/failure signals.
 - [ ] **AC-5**: The document explains the fallback rule: when RTK does not support or improve a command, Codex uses the raw command directly.
 - [ ] **AC-6**: The document describes the implemented binary location and confirms that it is gitignored local state, not a committed project artifact.
+- [ ] **AC-7**: The document explains coexistence with the existing Claude RTK lane: Claude may still use a host/global RTK install and hook-based integration, while the Codex lane uses a project-local binary and explicit invocation.
 
 ## Technical Approach
 This documentation can extend the Codex operator guide from E-081 or create a clearly linked companion section if that keeps the structure cleaner. The important thing is that the final docs describe implemented reality only and clearly separate the Codex RTK lane from the Claude RTK lane.
 
 ## Dependencies
-- **Blocked by**: E-082-01, E-082-02, E-082-03
+- **Blocked by**: E-081-04, E-082-01, E-082-02, E-082-03
 - **Blocks**: None
 
 ## Files to Create or Modify
 - `docs/admin/codex-guide.md`
 
 ## Agent Hint
-claude-architect
+docs-writer
 
 ## Definition of Done
 - [ ] All acceptance criteria pass

@@ -1,4 +1,4 @@
-# E-082-03: Add a Codex RTK smoke-check path
+# E-082-03: Add a Codex RTK smoke-check utility
 
 ## Epic
 [E-082: Codex RTK Project-Level Integration](epic.md)
@@ -21,14 +21,14 @@ Project-local tools need fast verification. Once RTK is installed into a repo-lo
 - [ ] **AC-6**: Automated tests cover the smoke-check path or its command-resolution logic without requiring live network access.
 
 ## Technical Approach
-This can be a small shell script or a thin Python utility, whichever fits the existing repo patterns best. The key is deterministic verification of the project-local binary path and one representative RTK command. Keep it offline and self-contained.
+This should be a thin Python utility plus tests so the command-resolution logic is easy to exercise under pytest. The key is deterministic verification of the project-local binary path and one representative RTK command. Keep it offline and self-contained.
 
 ## Dependencies
 - **Blocked by**: E-082-01
 - **Blocks**: E-082-04
 
 ## Files to Create or Modify
-- `scripts/check_codex_rtk.sh`
+- `scripts/check_codex_rtk.py`
 - `tests/test_check_codex_rtk.py`
 
 ## Agent Hint

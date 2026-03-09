@@ -26,7 +26,7 @@ The `AGENTS.md` file should be intentionally small and directional. It should ex
 
 ## Dependencies
 - **Blocked by**: None
-- **Blocks**: E-081-03, E-081-04
+- **Blocks**: E-081-03, E-081-04, E-081-05
 
 ## Files to Create or Modify
 - `AGENTS.md`
@@ -36,8 +36,9 @@ The `AGENTS.md` file should be intentionally small and directional. It should ex
 claude-architect
 
 ## Handoff Context
-- **Produces for E-081-03**: The checked-in config file that will register the lightweight spawned agent and any repo skill defaults.
+- **Produces for E-081-03**: The checked-in Codex entry points that the repo bridge skill will extend.
 - **Produces for E-081-04**: The canonical checked-in Codex entry points that the operator guide must describe.
+- **Produces for E-081-05**: The canonical repo-owned Codex layer that `CLAUDE.md` must summarize accurately.
 
 ## Definition of Done
 - [ ] All acceptance criteria pass
