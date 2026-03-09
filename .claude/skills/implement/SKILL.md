@@ -219,7 +219,7 @@ After marking a story DONE, check for newly unblocked stories (stories whose blo
 
 If the user specified the "and review" modifier (e.g., "implement E-NNN and review"):
 
-- After all stories are verified DONE, chain into the review-epic workflow at `.claude/skills/review-epic/SKILL.md`.
+- After all stories are verified DONE, chain into the code review workflow at `.claude/skills/codex-review/SKILL.md` (headless path).
 - Run the review before proceeding to the closure sequence (Phase 5).
 - The main session invokes the review skill directly.
 
@@ -351,7 +351,7 @@ Phase 3: Coordination loop
   - Spawn later-wave agents as dependencies complete
   |
   v
-[If "and review": Phase 4 -- chain into review-epic skill]
+[If "and review": Phase 4 -- chain into codex-review skill (headless)]
   |
   v
 Phase 5: Closure sequence
@@ -388,7 +388,7 @@ If all remaining stories are BLOCKED (waiting on incomplete dependencies) or all
 Follow the Dispatch Failure Protocol in `/.claude/rules/workflow-discipline.md`: report the failure to the user with the specific reason and ask how to proceed. Do not improvise a workaround.
 
 ### "And Review" With No Uncommitted Changes
-If the review chain runs but there are no uncommitted changes to review, the review-epic skill handles this gracefully. No special handling needed here.
+If the review chain runs but there are no uncommitted changes to review, the codex-review skill handles this gracefully. No special handling needed here.
 
 ### Code-Reviewer Context Window Fills
 If the code-reviewer's context window fills during a large epic (8+ stories), the main session may shut down and respawn the reviewer. No state is lost because each review assignment is self-contained -- the reviewer reads the story file and changed files fresh for every assignment.
