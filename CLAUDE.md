@@ -138,6 +138,7 @@ The `bb` CLI is the primary operator interface. Run `bb --help` to see all avail
 - `bb proxy endpoints` -- print deduplicated endpoint summary (`--session`, `--all`, `--unreviewed`)
 - `bb proxy refresh-headers` -- preview header changes from latest proxy capture (`--apply` to write)
 - `bb proxy review` -- manage proxy session review status
+- `bb proxy check` -- verify Bright Data proxy connectivity and IP anonymization
 - `bb db backup` -- back up the SQLite database (`--db-path`)
 - `bb db reset` -- reset dev database to seeded state (`--db-path`, `--force`)
 
@@ -181,6 +182,7 @@ These commands manage the mitmproxy process and must be run on the Mac host, not
 - **Spec review**: When the user says "spec review" (or similar -- "review the spec for E-NNN", "codex spec review", "run spec review on E-NNN"), load `.claude/skills/spec-review/SKILL.md` and follow its two-phase workflow. Phase 1 runs the codex spec review script to generate findings. Phase 2 spawns a PM-led review team with domain experts to triage the findings.
 - **Codex code review prompt**: When the user says "codex review prompt" (or similar -- "generate codex review prompt", "code review prompt", "build me a codex review prompt"), load `.claude/skills/codex-prompt-code/SKILL.md` and follow its workflow. Assembles a self-contained code review prompt (diff + rubric + agent roster) for the user to copy-paste into Codex.
 - **Codex spec review prompt**: When the user says "codex spec review prompt" (or similar -- "generate codex spec review prompt", "spec review prompt for E-NNN", "build me a spec review prompt"), load `.claude/skills/codex-prompt-spec/SKILL.md` and follow its workflow. Assembles a self-contained spec review prompt (epic/story files + rubric + agent roster) for the user to copy-paste into Codex.
+- **Curate the vision**: When the user says "curate the vision", invoke the product-manager in curate mode. PM reviews accumulated signals in `docs/vision-signals.md` with the user, discusses which belong in `docs/VISION.md`, updates the vision document, and clears processed signals.
 
 ## App Troubleshooting
 
@@ -224,6 +226,10 @@ docker compose up -d --build app   # rebuild image and restart app
 
 ## Proxy Boundary (Host vs. Container)
 
+This project uses two distinct proxy systems for different purposes. Agents must understand the distinction.
+
+### mitmproxy (Traffic Capture)
+
 The mitmproxy traffic-capture tool runs on the **Mac host machine**, completely outside the devcontainer. This is an architectural boundary that agents must respect.
 
 **What runs on the Mac host (NOT in the devcontainer):**
@@ -236,9 +242,23 @@ The mitmproxy traffic-capture tool runs on the **Mac host machine**, completely 
 - The `.env` file with credentials captured by the proxy -- accessible from the container
 - All project code, tests, and the app stack (app, traefik, cloudflared)
 
-**The rule:** Agents MUST NOT attempt to start, stop, or manage the proxy. If proxy management is needed, tell the user to run the command on the Mac host. Agents CAN read proxy data files in `proxy/data/` and use credentials from `.env`.
+**The rule:** Agents MUST NOT attempt to start, stop, or manage mitmproxy. If proxy management is needed, tell the user to run the command on the Mac host. Agents CAN read proxy data files in `proxy/data/` and use credentials from `.env`.
 
 See `docs/admin/mitmproxy-guide.md` for the full proxy setup and usage guide.
+
+### Bright Data (IP Anonymization)
+
+Bright Data is a residential proxy service used by `GameChangerClient` to anonymize outbound API requests. It runs inside the devcontainer as part of the normal HTTP session -- no host boundary issues.
+
+**Environment variables** (all in `.env`, git-ignored):
+- `PROXY_ENABLED` -- set to `true` to route GameChanger API requests through Bright Data; any other value or absent means disabled
+- `PROXY_URL_WEB` -- Bright Data proxy URL for the web profile
+- `PROXY_URL_MOBILE` -- Bright Data proxy URL for the mobile profile
+- `PROXY_URL_*` values contain embedded credentials (username:password in the URL) and are treated as secrets -- same handling as tokens (never log, commit, or display)
+
+**SSL behavior**: When a Bright Data proxy is configured, SSL verification is automatically disabled (`verify=False` on `httpx.Client`). This is required because Bright Data uses a self-signed certificate in the CONNECT tunnel. Do not treat `verify=False` as a general pattern -- it is specific to the Bright Data proxy path.
+
+**Diagnostics**: Run `bb proxy check` to verify proxy connectivity and confirm IP anonymization is working.
 
 ## Terminal Modes
 
@@ -337,6 +357,8 @@ This project uses a structured epic/story system managed by the **product-manage
 - `/.project/research/` -- Standalone research, POCs, and query artifacts
 - `/.project/templates/` -- Canonical templates for epics, stories, and research spikes
 - `/docs/` -- API specifications, architecture docs, domain reference
+- `/docs/VISION.md` -- Curated product vision document
+- `/docs/vision-signals.md` -- Raw vision signal parking lot (reviewed during epic closure and "curate the vision" sessions)
 
 ### Numbering Scheme
 - Epics: `E-NNN` (e.g., E-001, E-002)

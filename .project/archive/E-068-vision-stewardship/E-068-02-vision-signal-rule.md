@@ -4,7 +4,7 @@
 [E-068: Vision Stewardship](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, a new rule file at `.claude/rules/vision-signals.md` will instruct all agents to recognize vision signals during conversations and append them to the parking lot at `docs/vision-signals.md`. The rule should be concise, explain what a vision signal is, and make capture as frictionless as possible.

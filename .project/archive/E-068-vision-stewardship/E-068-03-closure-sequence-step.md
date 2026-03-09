@@ -4,7 +4,7 @@
 [E-068: Vision Stewardship](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the dispatch closure sequence will include a new advisory step that reviews accumulated vision signals after the ideas backlog review. When unprocessed signals exist, the step mentions them in the summary and asks the user if they want to "curate the vision." This is a prompt, not a blocking gate -- it does not prevent archival.

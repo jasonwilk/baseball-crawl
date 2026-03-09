@@ -265,7 +265,11 @@ Move the epic from "Active Epics" to "Archived Epics" in the PM's MEMORY.md (`.c
 
 Check `/.project/ideas/README.md` for CANDIDATE ideas that may now be unblocked or promoted by the epic's completion.
 
-### Step 7: Present a summary to the user
+### Step 7: Review vision signals
+
+Check whether `docs/vision-signals.md` has any content after the `## Signals` heading. If unprocessed signals exist, mention them in the closure summary and ask the user if they want to "curate the vision." This is advisory, not blocking -- the closure sequence proceeds regardless of the user's answer.
+
+### Step 8: Present a summary to the user
 
 Before ending the dispatch, present a clear summary including:
 - Epic ID and title
@@ -274,13 +278,13 @@ Before ending the dispatch, present a clear summary including:
 - Any follow-up work identified
 - Any ideas that may now be promotable
 
-### Step 8: Shut down all teammates
+### Step 9: Shut down all teammates
 
 Send a `shutdown_request` to each implementing agent on the team. Wait for shutdown confirmations. Delete the team.
 
 **After spinning down the team:**
 
-### Step 9: Offer to scan and commit
+### Step 10: Offer to scan and commit
 
 After shutting down teammates and deleting the team, offer to run the PII scan and commit the changes. Commit must NOT happen automatically -- the user must explicitly approve before any commit happens.
 
@@ -358,6 +362,7 @@ Phase 5: Closure sequence
   - Archive epic to /.project/archive/
   - Update PM memory
   - Review ideas backlog
+  - Review vision signals (advisory)
   - Present summary to user
   - Shut down team
   - Offer to scan and commit

@@ -87,7 +87,9 @@ When all stories are verified DONE, the main session executes the following clos
 
 15. **Review ideas backlog.** Check `/.project/ideas/README.md` for CANDIDATE ideas that may now be unblocked or promoted by the epic's completion.
 
-16. **Present a summary to the user.** Before ending the dispatch, present a clear summary including:
+16. **Review vision signals.** Check whether `docs/vision-signals.md` has any content after the `## Signals` heading. If unprocessed signals exist, mention them in the closure summary and ask the user if they want to "curate the vision." This is advisory, not blocking -- the closure sequence proceeds regardless of the user's answer.
+
+17. **Present a summary to the user.** Before ending the dispatch, present a clear summary including:
     - Epic ID and title
     - List of stories completed (with brief descriptions)
     - Key artifacts created or modified
@@ -96,11 +98,11 @@ When all stories are verified DONE, the main session executes the following clos
 
 ### Team Teardown
 
-17. **Shut down all teammates.** Send a `shutdown_request` to each implementing agent on the team. Wait for shutdown confirmations. Delete the team.
+18. **Shut down all teammates.** Send a `shutdown_request` to each implementing agent on the team. Wait for shutdown confirmations. Delete the team.
 
 **After spinning down the team:**
 
-18. **Offer to scan and commit.** After shutting down teammates and deleting the team, the main session offers to run the PII scan and commit the changes. Commit must NOT happen automatically -- the user must explicitly approve before any commit happens.
+19. **Offer to scan and commit.** After shutting down teammates and deleting the team, the main session offers to run the PII scan and commit the changes. Commit must NOT happen automatically -- the user must explicitly approve before any commit happens.
 
 ## Agent Selection for Dispatch
 

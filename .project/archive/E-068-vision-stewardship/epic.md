@@ -1,7 +1,7 @@
 # E-068: Vision Stewardship
 
 ## Status
-`READY`
+`COMPLETED`
 <!-- Lifecycle: DRAFT -> READY -> ACTIVE -> COMPLETED (or BLOCKED / ABANDONED) -->
 
 ## Overview
@@ -41,11 +41,11 @@ This epic introduces the trigger phrase "curate the vision" to activate the refi
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-068-01 | Create vision signals parking lot and seed first signal | TODO | None | - |
-| E-068-02 | Create vision signal recognition rule | TODO | E-068-01 | - |
-| E-068-03 | Add vision signal review to dispatch closure sequence | TODO | E-068-01 | - |
-| E-068-04 | Add vision stewardship to PM agent definition | TODO | None | - |
-| E-068-05 | Update CLAUDE.md with vision system references | TODO | E-068-01, E-068-02, E-068-03, E-068-04 | - |
+| E-068-01 | Create vision signals parking lot and seed first signal | DONE | None | claude-architect |
+| E-068-02 | Create vision signal recognition rule | DONE | E-068-01 | claude-architect |
+| E-068-03 | Add vision signal review to dispatch closure sequence | DONE | E-068-01 | claude-architect |
+| E-068-04 | Add vision stewardship to PM agent definition | DONE | None | claude-architect |
+| E-068-05 | Update CLAUDE.md with vision system references | DONE | E-068-01, E-068-02, E-068-03, E-068-04 | claude-architect |
 
 ## Dispatch Team
 - claude-architect
@@ -105,4 +105,5 @@ No file conflicts between stories 01-04 (all touch different files). Stories 02 
 - 2026-03-07: Created as DRAFT. No expert consultation required -- pure process/workflow epic with architectural decisions pre-made by the user.
 - 2026-03-07: Codex spec review triaged. 5 findings: 2 REFINED (dependency gaps for 02/03 on 01, subjective ACs tightened), 1 partially REFINED (unprocessed signals definition, trigger phrase wording), 1 DISMISSED (consultation -- architect is the implementer), 1 partially REFINED (future-state language corrected).
 - 2026-03-07: Architectural refinement review. Verified: (1) rule file frontmatter pattern matches existing rules (paths key with `**` glob, same as dispatch-pattern.md), (2) dispatch-pattern.md closure step numbering confirmed (Step 14 = ideas, Step 15 = summary -- story correctly targets insertion between them), (3) implement/SKILL.md uses Phase 5 internal numbering (Steps 1-9) with Step 6 = ideas and Step 7 = summary -- story Notes already warn about different numbering conventions, (4) PM agent def sections confirmed (Atomic Status Update Protocol > Completing an epic checklist at 6 steps, vision review would be Step 7 after ideas review), (5) CLAUDE.md Key Directories section at line 329 and Workflows section at line 175 confirmed as correct insertion targets. No corrections needed. Epic set to READY.
+- 2026-03-09: Epic COMPLETED. All 5 stories implemented by claude-architect agents and verified by main session (all context-layer-only). Artifacts: `docs/vision-signals.md` (parking lot with seed signal), `.claude/rules/vision-signals.md` (capture rule), closure sequence updated in `dispatch-pattern.md` and `implement/SKILL.md`, PM agent definition updated with vision stewardship, CLAUDE.md updated with workflow trigger and Key Directories entries. Documentation assessment: No documentation impact (no CLI commands, API endpoints, or coaching-facing features). Context-layer assessment: (1) New convention — no; (2) Architectural decision — no; (3) Footgun/boundary — no; (4) Agent behavior change — yes, self-codified by E-068-02 (rule), E-068-03 (closure sequence), E-068-04 (PM definition); (5) Domain knowledge — no; (6) New workflow — yes, self-codified by E-068-04 and E-068-05 (CLAUDE.md). No additional codification needed.
 - 2026-03-07: Second codex spec review triaged. 7 findings: (1) P1 ACCEPTED -- hardened 01 AC-4 to require exact `## Signals` heading (downstream 03 AC-1 keys off it); (2) P2 ACCEPTED -- corrected epic background and story 01 context to acknowledge LLM chat signal already exists in VISION.md Layer 5, parking lot entry is a backfill not first capture; (3) P2 ACCEPTED -- pinned 05 AC-2 to Key Directories section (was vague "somewhere agents would look"); (4) P2 ACCEPTED -- fixed 03 DoD from "consistent across both files" to "correct within each file" since the two files use different numbering conventions; (5) P2 PARTIALLY ACCEPTED -- strengthened consultation justification to explicitly acknowledge Consultation Triggers table flag and cite the architectural refinement review as evidence, but maintained "no separate consultation" conclusion since architect is the sole implementer and all design decisions were user-directed; (6) P3 ACCEPTED -- added E-068-02 and E-068-03 to story 01 Blocks field (were missing despite epic table showing the dependency); (7) P3 ACCEPTED -- moved E-068-04 to wave 1 (no dependencies, no file conflicts with 01).

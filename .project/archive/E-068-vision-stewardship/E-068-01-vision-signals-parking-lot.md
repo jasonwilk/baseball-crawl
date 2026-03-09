@@ -4,7 +4,7 @@
 [E-068: Vision Stewardship](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, `docs/vision-signals.md` will exist as an ultra-lightweight parking lot for raw vision signals. It will contain a brief header explaining the file's purpose and format, plus one seed signal capturing the LLM-powered coaching chat agent idea that Jason mentioned in conversation. The format is intentionally minimal -- no frontmatter, no template, no ceremony.

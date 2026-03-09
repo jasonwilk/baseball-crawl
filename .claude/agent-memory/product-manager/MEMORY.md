@@ -1,7 +1,7 @@
 # Product Manager -- Agent Memory
 
 ## Numbering State
-- Next available epic number: E-081
+- Next available epic number: E-083
 - Epics created: E-001 through E-080 (E-001, E-003, E-005, E-006, E-007, E-008, E-010, E-011, E-012, E-013, E-014, E-015, E-016, E-017, E-018, E-019, E-020, E-021, E-022, E-024, E-025, E-026, E-027, E-028, E-029, E-030, E-031, E-032, E-033, E-034, E-035, E-036, E-037, E-038, E-042, E-044, E-046, E-048, E-049, E-050, E-052, E-053, E-054, E-056, E-057, E-058, E-055, E-059, E-060, E-061 archived)
 - Next available idea number: IDEA-016
 - Ideas created: IDEA-001 through IDEA-015
@@ -16,15 +16,18 @@
 
 ## Active Epics (Summary)
 - E-041 (DRAFT): Evaluate json-render -- research epic. 1 spike (R-01: fit assessment) + 1 decision gate (99). Needs expert consultation (UX designer, software engineer) before READY.
-- E-068 (READY): Vision Stewardship -- 5 stories. Vision signal parking lot (docs/vision-signals.md), recognition rule (.claude/rules/vision-signals.md), dispatch closure sequence step, PM agent def expansion, CLAUDE.md references. All context-layer work via claude-architect. Waves: 01 -> 02+03+04 parallel -> 05. Architectural review confirmed all step numbers, section names, and file locations match current reality.
 - E-072 (READY): Proxy Session Ingestion Skill -- 2 stories. New workflow skill at .claude/skills/ingest-session/SKILL.md. Processes mitmproxy sessions: reads endpoint-log JSONL, compares against docs/api/endpoints/ to find unknowns, auto-detects web/mobile profile, guides operator through selective raw data capture, references ingest-endpoint for single-endpoint follow-up. CLAUDE.md Workflows entry. All context-layer work via claude-architect. Wave: 01 -> 02.
 - E-073 (READY): API Documentation Validation Sweep -- 5 stories. Systematic validation of all 90 endpoint docs against proxy captures and live API calls. Frontmatter validation script (01), web profile live endpoint validation (02), auth flow programmatic validation with gc-signature (03), mobile proxy capture analysis (04), documentation correction sweep (05). Wave: 01+02+03 parallel -> 04 (soft dep on 02) -> 05 (depends on 01+02+03). SE + api-scout dispatch team. No expert consultation required.
 - E-075 (ACTIVE): Mobile Profile Credential Capture and Validation -- 1 research spike + 3 stories. R-01 (DONE) + 01 (DONE). Key finding: mobile client key CONFIRMED DIFFERENT from web (web key tested -> 401). iOS app is purely native (no JS bundles). Workaround: mobile tokens work directly as gc-token for GET endpoints (14-day refresh, ~12-hour access). Programmatic mobile refresh blocked on unknown client key (IPA binary analysis needed). Wave 2 unblocked: 02 (addon upgrade) + 03 (validation) can proceed with reduced scope. SE + api-scout dispatch team.
 - E-076 (READY): Main Session Compliance Guardrails -- 2 stories. New `.claude/rules/agent-team-compliance.md` with 3 pattern-action checkpoints (Explicit Team Request, Explicit Consultation Directive, Anti-Fabrication Rule) using trigger/required/prohibited format. Cross-references from workflow-discipline.md and CLAUDE.md. All context-layer work via claude-architect. Wave: 01 -> 02. CA consulted: confirmed 3-file scope, recommended 3 patterns (not 2), trigger/required/prohibited format, rationale section.
-- E-079 (READY): Fix Bright Data Proxy Routing
+
 - E-080 (ACTIVE): Lean Codex Review Prompts -- 4 stories (01-03 DONE, 04 TODO). Rewrites all 4 review prompt artifacts to use path-based rubric references instead of embedding file contents. Stories 01-03 completed (codex-prompt-spec skill, codex-spec-review.sh, codex-review.sh). Story 04 adds codex-prompt-code skill (was incorrectly excluded in Non-Goals). CA + SE dispatch team.
+- E-081 (READY): Codex Context and Agent Bootstrap -- 4 stories. Establish checked-in Codex entry points (`AGENTS.md`, `.codex/config.toml`), bootstrap a gitignored project-local `CODEX_HOME` in the devcontainer, add one lightweight watchful-partner agent plus one repo bridge skill, and document the operator model. Codex remains secondary to Claude. Wave: 01+02 parallel -> 03 -> 04. CA + SE dispatch team. No Claude-agent consultation required; based on official Codex docs plus local CLI inspection.
+- E-082 (READY): Codex RTK Project-Level Integration -- 4 stories. Install RTK into a gitignored repo-local tool path, expose it to Codex from checked-in project config, add explicit `rtk <command>` guidance (no transparent hook assumptions), add a smoke-check path, and document the Codex RTK model. Depends on E-081 bootstrap. Wave: 01 -> 02+03 parallel -> 04. CA + SE dispatch team. Research conclusion: Codex does not need Claude's host-level RTK pattern, but it also does not expose a documented Claude-style automatic rewrite hook.
 
 ## Archived Epics
+- E-068 (COMPLETED): Vision Stewardship -- 5 stories. Vision signal parking lot (`docs/vision-signals.md`), recognition rule (`.claude/rules/vision-signals.md`), dispatch closure sequence step (dispatch-pattern.md + implement SKILL.md), PM agent def expansion (vision stewardship section + curate task type), CLAUDE.md references (Workflows + Key Directories). All context-layer work via claude-architect. PM modes updated: six types (added curate). No follow-up work.
+- E-079 (COMPLETED): Fix Bright Data Proxy Routing -- 3 stories. Fixed dotenv_values() vs os.environ gap in GameChangerClient proxy routing. Added `resolve_proxy_from_dict()` shared helper, `verify=False` SSL behavior, `bb proxy check` diagnostic command, CLAUDE.md proxy docs restructured. 46+ new tests. SHOULD FIX items: brittle mock pattern, missing sentinel-path SSL coverage, permissive log-safety assertion, undocumented _PROFILES list. No follow-up work.
 - E-078 (COMPLETED): Reorganize bb creds CLI Commands -- 3 stories. Renamed curl-parsing `bb creds refresh` to `bb creds import`, created new `bb creds refresh` wrapping TokenManager.force_refresh(), updated CLAUDE.md + 5 admin/API docs. 68 tests. 1 SHOULD FIX (vacuous test fallback condition in test_mobile_profile_exits_nonzero). No follow-up work.
 - E-077 (COMPLETED): Programmatic Token Refresh -- Fix Broken GameChangerClient -- 3 stories. gc-signature signing module (signing.py), token manager (token_manager.py with atomic .env write-back), GameChangerClient auth integration (lazy token fetch, 401 retry, conditional mobile fallback). Also: shared exceptions.py module, atomic_merge_env_file() in credential_parser.py. 166 tests. Promotes IDEA-015. BLOCKING issue resolved: GameChangerClient now obtains access tokens programmatically. Follow-up: 5 SHOULD FIX items recorded in epic History.
 - E-070 (COMPLETED): RTK Token Optimization Integration -- 1 story. Added rtk binary install + hook init to devcontainer postCreateCommand. Reduces token consumption 60-90% on common dev commands. Single file change (devcontainer.json). No follow-up work.
@@ -141,7 +144,7 @@
 
 ## Key Workflow Contract
 - Routing model: planning (user -> PM), dispatch (user/main session -> implementers directly). PM plans and closes; main session dispatches. (E-065 merged roles)
-- PM modes: discover, plan, clarify, triage, close (no dispatch mode -- removed in E-065)
+- PM modes: discover, plan, clarify, triage, close, curate (no dispatch mode -- removed in E-065; curate added in E-068)
 - Epic lifecycle: DRAFT -> READY -> ACTIVE -> COMPLETED (or BLOCKED / ABANDONED)
 - READY gate: must be READY/ACTIVE before dispatch. PM sets READY explicitly.
 - Dispatch: Main session creates team, spawns implementers directly (no PM teammate), assigns stories, verifies ACs, runs closure sequence. See /.claude/rules/dispatch-pattern.md.

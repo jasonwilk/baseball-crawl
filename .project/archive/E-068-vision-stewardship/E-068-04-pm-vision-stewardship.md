@@ -4,7 +4,7 @@
 [E-068: Vision Stewardship](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the PM agent definition will include vision stewardship as a core responsibility. The PM becomes the project's vision steward -- responsible for long-horizon product thinking, capturing and curating vision signals, and being curious and opinionated about where the project should go. The "curate the vision" trigger phrase will be documented as a PM workflow.

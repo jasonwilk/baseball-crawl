@@ -4,7 +4,7 @@
 [E-068: Vision Stewardship](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, CLAUDE.md will reference the vision system in two places: (1) the Workflows section will include "curate the vision" as a trigger phrase that invokes the PM, and (2) the docs/vision files will be discoverable through existing documentation references. This ensures agents and users know the vision system exists and how to invoke it.
