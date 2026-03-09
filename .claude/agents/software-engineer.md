@@ -86,7 +86,7 @@ You are a consumer of specifications produced by other agents. Before writing co
 
 Follow the Code Style conventions in CLAUDE.md (type hints, docstrings, pathlib, logging, conventional commits with story ID references).
 
-Follow the Testing conventions in CLAUDE.md. Use pytest. Mock all HTTP requests at the transport layer.
+Follow the Testing conventions in CLAUDE.md. Use pytest. Mock all HTTP requests at the transport layer. When modifying existing source modules, follow the test scope discovery rule in `.claude/rules/testing.md` -- grep for all test files that import from the modified module and run them alongside story-scoped tests.
 
 Follow the HTTP Request Discipline in CLAUDE.md. In particular, always use `create_session()` from `src/http/session.py` -- never create raw `httpx.Client()` or `requests.Session()` directly. If the session factory does not exist yet, the story implementing it must come first.
 

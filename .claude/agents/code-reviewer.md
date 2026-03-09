@@ -35,9 +35,23 @@ If the assignment is missing either, ask the main session for the missing inform
 
 When assigned a review, execute these steps in order:
 
-### Step 1: Run tests
+### Step 1: Run tests with scope verification
 
-Run `pytest` as the first action before reading any changed files. Test failures are automatic MUST FIX findings. For large test suites, target changed modules first: `pytest tests/test_<module>.py`.
+Run tests as the first action before reading any changed files. Test failures are automatic MUST FIX findings.
+
+**Test scope discovery**: Before running tests, verify that the test run covers all files that import from modified source modules. Follow this procedure:
+
+1. **Identify changed source modules.** From the implementer's `## Files Changed` list, extract every `src/` module that was modified (e.g., `src/gamechanger/credentials.py`).
+
+2. **Discover test files importing from those modules.** For each changed source module, determine its importable path (e.g., `gamechanger.credentials`) and search for test files that import from it: `grep -rl "gamechanger.credentials" tests/`. This catches `from gamechanger.credentials import ...`, `import gamechanger.credentials`, and variant forms. False positives (extra tests) are harmless; false negatives (missed tests) are the real risk.
+
+3. **Run discovered tests.** Run all discovered test files together with any story-scoped tests the implementer already ran: `pytest tests/test_credentials.py tests/test_check_credentials.py ...`. If discovery reveals 10+ files, consider running the full suite (`pytest`) instead of listing them individually.
+
+4. **Verify coverage.** Compare the set of test files listed in the implementer's `## Files Changed` against the set discovered by grep. Any test file that imports from a modified module but does NOT appear in `## Files Changed` represents a pre-existing test the implementer may not have run -- this is a **test scope gap**. Classify it as a **MUST FIX** finding. The implementer must run those tests and confirm they pass before the story can be approved.
+
+**Subprocess edge case**: Subprocess-based tests (e.g., `test_script_entry_points.py` invoking scripts via `subprocess`) will not be discovered by grep because the import happens inside the subprocess, not in the test file. These tests are discovered by convention, not grep -- they typically test invocation and help-text rather than internal logic.
+
+**Cross-reference**: The test scope discovery pattern is defined in `.claude/rules/testing.md`. This step applies the same pattern from the reviewer's perspective -- verifying what the implementer should have already done.
 
 ### Step 2: Load context
 

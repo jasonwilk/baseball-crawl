@@ -1,7 +1,7 @@
 # E-089: Test Scope Discovery Rule
 
 ## Status
-`READY`
+`COMPLETED`
 <!-- Lifecycle: DRAFT -> READY -> ACTIVE -> COMPLETED (or BLOCKED / ABANDONED) -->
 <!-- PM sets READY explicitly after: expert consultation done, all stories have testable ACs, quality checklist passed. -->
 <!-- Only READY and ACTIVE epics can be dispatched. -->
@@ -43,8 +43,8 @@ The code-reviewer's Step 1 currently says: "For large test suites, target change
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-089-01 | Add test scope discovery rule to testing.md and SE agent definition | TODO | None | - |
-| E-089-02 | Update code-reviewer review procedure with test scope verification | TODO | None | - |
+| E-089-01 | Add test scope discovery rule to testing.md and SE agent definition | DONE | None | claude-architect |
+| E-089-02 | Update code-reviewer review procedure with test scope verification | DONE | None | claude-architect |
 
 ## Dispatch Team
 - claude-architect
@@ -90,3 +90,4 @@ None remaining. SE consultation resolved the discovery method question (grep-for
 - 2026-03-09: SE consultation completed (relayed by user). Confirmed grep-for-imports as the right tool, identified subprocess edge case, recommended against full-pytest hard gate, fixed AC-3 drafting ambiguity in E-089-02. Findings incorporated into Technical Notes.
 - 2026-03-09: Team refinement session (PM + SE + CA). Both agents confirmed no blocking concerns. SE suggested testing.md frontmatter glob expansion to `src/**` (added to Technical Notes as optional). CA confirmed self-contained Step 1 approach with parenthetical cross-reference to testing.md. Epic set to READY.
 - 2026-03-09: Codex spec review triage. Three refinements applied: (1) AC-4 revised to permit frontmatter expansion, (2) new AC-5 makes frontmatter `src/**` expansion required, (3) AC-2 expanded to include `data-engineer.md`. Technical Notes and Affected Files updated accordingly.
+- 2026-03-09: Epic COMPLETED. Both stories dispatched in parallel to claude-architect agents. E-089-01 added the test scope discovery rule to `testing.md` (with `src/**` frontmatter expansion) and cross-references in SE and DE agent definitions. E-089-02 replaced the narrow "target changed modules first" guidance in code-reviewer Step 1 with a full test scope verification procedure including grep-based discovery and MUST FIX classification for scope gaps. No documentation impact. Context-layer assessment (per-trigger verdicts): (1) New convention/pattern? **Yes** -- the test scope discovery rule is itself a new convention, but it was codified as the epic's direct deliverable (testing.md, agent defs). No additional codification needed. (2) Architectural decision? **No**. (3) Footgun/failure mode discovered? **Yes** -- the narrow test scoping blind spot, but this is documented in the epic's Background and in the new testing.md section. No additional codification needed. (4) Agent behavior/routing change? **Yes** -- code-reviewer Step 1 and SE/DE agent defs updated as the epic's deliverable. No additional codification needed. (5) Domain knowledge? **No**. (6) New CLI/workflow/procedure? **No**.

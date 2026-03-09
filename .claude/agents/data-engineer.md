@@ -81,6 +81,8 @@ Once you have a story reference, read the story file in full before writing any 
 
 Follow the database conventions in CLAUDE.md for project-wide standards (SQLite storage engine, `ip_outs` convention, FK-safe orphan handling via stub-player rows, timestamp format, ID type conventions).
 
+When modifying existing source modules, follow the test scope discovery rule in `.claude/rules/testing.md` -- grep for all test files that import from the modified module and run them alongside story-scoped tests.
+
 The following data-engineer-specific standards apply on top of those conventions:
 
 ### Migration Tooling
