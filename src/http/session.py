@@ -125,12 +125,12 @@ def resolve_proxy_from_dict(
     Returns:
         The proxy URL string when enabled and valid, or ``None``.
     """
-    enabled = env_dict.get("PROXY_ENABLED", "").strip().lower()
+    enabled = (env_dict.get("PROXY_ENABLED") or "").strip().lower()
     if enabled != "true":
         return None
 
     url_var = f"PROXY_URL_{profile.upper()}"
-    url = env_dict.get(url_var, "").strip()
+    url = (env_dict.get(url_var) or "").strip()
 
     if not url:
         logger.warning(

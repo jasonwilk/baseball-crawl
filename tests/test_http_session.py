@@ -494,6 +494,26 @@ class TestResolveProxyFromDict:
             assert secret_url not in msg
             assert "s3cr3t" not in msg
 
+    def test_proxy_enabled_none_returns_none(self) -> None:
+        """AC-1: PROXY_ENABLED mapped to None returns None without raising."""
+        env: dict[str, str | None] = {"PROXY_ENABLED": None}
+        assert resolve_proxy_from_dict(env, "web") is None  # type: ignore[arg-type]
+
+    def test_proxy_enabled_true_url_none_returns_none_with_warning(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """AC-2: PROXY_ENABLED=true and PROXY_URL_WEB=None returns None with warning."""
+        env: dict[str, str | None] = {"PROXY_ENABLED": "true", "PROXY_URL_WEB": None}
+        with caplog.at_level(logging.WARNING):
+            result = resolve_proxy_from_dict(env, "web")  # type: ignore[arg-type]
+        assert result is None
+        assert any("PROXY_URL_WEB" in r.getMessage() for r in caplog.records)
+
+    def test_both_proxy_enabled_and_url_none_returns_none(self) -> None:
+        """AC-3: Both PROXY_ENABLED and PROXY_URL_WEB mapped to None returns None without raising."""
+        env: dict[str, str | None] = {"PROXY_ENABLED": None, "PROXY_URL_WEB": None}
+        assert resolve_proxy_from_dict(env, "web") is None  # type: ignore[arg-type]
+
 
 class TestProxyMalformedUrl:
     """AC-11: Malformed proxy URL (bad scheme) logs WARNING and returns None."""
