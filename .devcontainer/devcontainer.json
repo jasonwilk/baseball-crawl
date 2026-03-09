@@ -65,7 +65,8 @@
   ],
   "remoteEnv": {
     "PATH": "${containerEnv:PATH}:/home/vscode/.local/bin",
-    "LANG": "en_US.UTF-8"
+    "LANG": "en_US.UTF-8",
+    "CODEX_HOME": "/workspaces/baseball-crawl/.codex-home"
   },
   "sshAgent": "local"
 }

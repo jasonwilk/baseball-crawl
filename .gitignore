@@ -21,6 +21,9 @@ secrets/
 # Claude Code local settings (per-machine permissions)
 .claude/settings.local.json
 
+# Codex local runtime state
+.codex-home/
+
 # Docker Compose local overrides (copy from .example)
 docker-compose.override.yml
 
