@@ -366,7 +366,7 @@ def test_min_delay_and_jitter_forwarded_to_session(monkeypatch: pytest.MonkeyPat
     ).create_session
 
     def fake_create_session(
-        min_delay_ms: int = 1000, jitter_ms: int = 500, profile: str = "web"
+        min_delay_ms: int = 1000, jitter_ms: int = 500, profile: str = "web", **kwargs: object
     ) -> object:
         captured_kwargs["min_delay_ms"] = min_delay_ms
         captured_kwargs["jitter_ms"] = jitter_ms
@@ -711,7 +711,7 @@ def test_profile_parameter_forwarded_to_create_session(
     captured: dict[str, object] = {}
 
     def fake_create_session(
-        min_delay_ms: int = 1000, jitter_ms: int = 500, profile: str = "web"
+        min_delay_ms: int = 1000, jitter_ms: int = 500, profile: str = "web", **kwargs: object
     ) -> object:
         captured["profile"] = profile
         return original_create_session(min_delay_ms=0, jitter_ms=0, profile=profile)
@@ -1057,6 +1057,76 @@ def test_401_post_refresh_403_raises_forbidden_error(
         client.get("/me/teams")
 
 
+# ---------------------------------------------------------------------------
+# E-079-01: Proxy forwarding from dotenv dict (AC-1, AC-2, AC-3)
+# ---------------------------------------------------------------------------
+
+
+def test_proxy_forwarded_to_session_when_enabled_web(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AC-1: PROXY_ENABLED=true + PROXY_URL_WEB in dotenv dict routes web session through proxy."""
+    from unittest.mock import patch as _patch
+
+    creds_with_proxy = {
+        **_FAKE_CREDENTIALS,
+        "PROXY_ENABLED": "true",
+        "PROXY_URL_WEB": "http://proxy.example.com:1234",
+    }
+    monkeypatch.setattr("src.gamechanger.client.dotenv_values", lambda: creds_with_proxy)
+    _mock_token_manager(monkeypatch)
+
+    with _patch("src.http.session.httpx.Client") as mock_client:
+        mock_client.return_value = mock_client  # make it usable as a session
+        mock_client.headers = {}
+        GameChangerClient(min_delay_ms=0, jitter_ms=0, profile="web")
+
+    _, kwargs = mock_client.call_args
+    assert kwargs.get("proxy") == "http://proxy.example.com:1234"
+
+
+def test_proxy_forwarded_to_session_when_enabled_mobile(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AC-2: PROXY_ENABLED=true + PROXY_URL_MOBILE in dotenv dict routes mobile session through proxy."""
+    from unittest.mock import patch as _patch
+
+    creds_with_proxy = {
+        **_FAKE_CREDENTIALS_MOBILE,
+        "PROXY_ENABLED": "true",
+        "PROXY_URL_MOBILE": "http://proxy.example.com:5678",
+    }
+    monkeypatch.setattr("src.gamechanger.client.dotenv_values", lambda: creds_with_proxy)
+    _mock_token_manager(monkeypatch)
+
+    with _patch("src.http.session.httpx.Client") as mock_client:
+        mock_client.return_value = mock_client
+        mock_client.headers = {}
+        GameChangerClient(min_delay_ms=0, jitter_ms=0, profile="mobile")
+
+    _, kwargs = mock_client.call_args
+    assert kwargs.get("proxy") == "http://proxy.example.com:5678"
+
+
+def test_no_proxy_when_proxy_disabled_in_dotenv(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AC-3: PROXY_ENABLED absent from dotenv dict -- no proxy configured on session."""
+    from unittest.mock import patch as _patch
+
+    # _FAKE_CREDENTIALS has no PROXY_ENABLED key -- proxy must be None
+    monkeypatch.setattr("src.gamechanger.client.dotenv_values", lambda: _FAKE_CREDENTIALS)
+    _mock_token_manager(monkeypatch)
+
+    with _patch("src.http.session.httpx.Client") as mock_client:
+        mock_client.return_value = mock_client
+        mock_client.headers = {}
+        GameChangerClient(min_delay_ms=0, jitter_ms=0, profile="web")
+
+    _, kwargs = mock_client.call_args
+    assert kwargs.get("proxy") is None
+
+
 @respx.mock
 def test_paginated_401_force_refresh_auth_signing_error_propagates(
     monkeypatch: pytest.MonkeyPatch,
@@ -1078,3 +1148,99 @@ def test_paginated_401_force_refresh_auth_signing_error_propagates(
         client.get_paginated("/teams/abc/game-summaries")
 
     mock_tm.force_refresh.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# AC-4, AC-5: GameChangerClient session ID generation
+# ---------------------------------------------------------------------------
+
+
+class TestClientStickySessionId:
+    """AC-4, AC-5: client generates a unique alphanumeric session ID per instance."""
+
+    def test_client_has_session_id(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """AC-4: GameChangerClient instance has a session_id attribute."""
+        client = _make_client(monkeypatch)
+        assert hasattr(client, "_session_id")
+        assert isinstance(client._session_id, str)
+        assert len(client._session_id) > 0
+
+    def test_session_id_is_alphanumeric(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """AC-4: session ID contains only alphanumeric characters (hex digits)."""
+        client = _make_client(monkeypatch)
+        assert client._session_id.isalnum(), (
+            f"session_id {client._session_id!r} contains non-alphanumeric characters"
+        )
+
+    def test_session_id_is_16_chars(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """AC-4: token_hex(8) produces a 16-character hex string."""
+        client = _make_client(monkeypatch)
+        assert len(client._session_id) == 16
+
+    def test_two_instances_have_different_session_ids(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """AC-5: Two GameChangerClient instances in the same process have different IDs."""
+        client1 = _make_client(monkeypatch)
+        client2 = _make_client(monkeypatch)
+        assert client1._session_id != client2._session_id
+
+    def test_session_id_logged_at_debug(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """AC-4: session ID is logged at DEBUG level during client construction."""
+        import logging
+        with caplog.at_level(logging.DEBUG, logger="src.gamechanger.client"):
+            client = _make_client(monkeypatch)
+        session_id = client._session_id
+        messages = " ".join(r.getMessage() for r in caplog.records)
+        assert session_id in messages, (
+            f"Expected session_id {session_id!r} in DEBUG log, got: {messages!r}"
+        )
+
+    def test_session_id_passed_to_resolve_proxy(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """AC-4: client passes its session_id to resolve_proxy_from_dict()."""
+        from unittest.mock import patch, MagicMock
+
+        captured_kwargs: dict = {}
+
+        original_resolve = __import__(
+            "src.http.session", fromlist=["resolve_proxy_from_dict"]
+        ).resolve_proxy_from_dict
+
+        def capturing_resolve(env_dict: dict, profile: str, session_id: str | None = None) -> None:
+            captured_kwargs["session_id"] = session_id
+            return original_resolve(env_dict, profile, session_id=session_id)
+
+        monkeypatch.setattr("src.gamechanger.client.resolve_proxy_from_dict", capturing_resolve)
+        monkeypatch.setattr("src.gamechanger.client.dotenv_values", lambda: _FAKE_CREDENTIALS)
+        _mock_token_manager(monkeypatch)
+        client = GameChangerClient(min_delay_ms=0, jitter_ms=0)
+
+        assert captured_kwargs.get("session_id") == client._session_id
+
+    def test_client_session_id_not_in_proxy_url_log(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """AC-7: proxy URL with injected session ID must not appear in log output."""
+        import logging
+
+        creds_with_proxy = dict(_FAKE_CREDENTIALS)
+        creds_with_proxy["PROXY_ENABLED"] = "true"
+        creds_with_proxy["PROXY_URL_WEB"] = "http://brd-user:s3cr3t@proxy.example.com:1234"
+
+        monkeypatch.setattr("src.gamechanger.client.dotenv_values", lambda: creds_with_proxy)
+        _mock_token_manager(monkeypatch)
+
+        with caplog.at_level(logging.DEBUG):
+            client = GameChangerClient(min_delay_ms=0, jitter_ms=0)
+
+        session_id = client._session_id
+        for record in caplog.records:
+            msg = record.getMessage()
+            # The raw proxy URL or injected URL must never appear
+            assert "s3cr3t" not in msg, f"Proxy credentials leaked into log: {msg!r}"
+            injected_user = f"brd-user-session-{session_id}"
+            assert injected_user not in msg, f"Injected proxy URL leaked into log: {msg!r}"

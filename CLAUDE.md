@@ -178,10 +178,8 @@ These commands manage the mitmproxy process and must be run on the Mac host, not
 ## Workflows
 - **Implement**: When the user says "implement E-NNN" (or similar -- "start epic", "execute E-NNN", "dispatch E-NNN", "kick off E-NNN"), load `.claude/skills/implement/SKILL.md` and follow its workflow. The main session reads the epic for team composition and spawns implementers directly. Supports an "and review" modifier to chain a code review after implementation completes.
 - **Ingest endpoint**: When the user says "ingest endpoint" (or similar -- "curl is ready", "new endpoint to analyze"), load `.claude/skills/ingest-endpoint/SKILL.md` and follow its two-phase workflow. The user has placed a curl command in `secrets/gamechanger-curl.txt` and expects api-scout to execute it (time-sensitive -- the `gc-signature` header in POST requests expires within minutes, and curl commands should be executed promptly regardless of token lifetime), then claude-architect to integrate findings into the context layer.
-- **Review epic**: When the user says "review epic" (or similar -- "codex review epic E-NNN", "post-dev review", "code review epic"), load `.claude/skills/review-epic/SKILL.md` and follow its workflow. Runs a codex code review on an epic's implementation changes, then spawns the implementing team to review findings together.
-- **Spec review**: When the user says "spec review" (or similar -- "review the spec for E-NNN", "codex spec review", "run spec review on E-NNN"), load `.claude/skills/spec-review/SKILL.md` and follow its two-phase workflow. Phase 1 runs the codex spec review script to generate findings. Phase 2 spawns a PM-led review team with domain experts to triage the findings.
-- **Codex code review prompt**: When the user says "codex review prompt" (or similar -- "generate codex review prompt", "code review prompt", "build me a codex review prompt"), load `.claude/skills/codex-prompt-code/SKILL.md` and follow its workflow. Assembles a self-contained code review prompt (diff + rubric + agent roster) for the user to copy-paste into Codex.
-- **Codex spec review prompt**: When the user says "codex spec review prompt" (or similar -- "generate codex spec review prompt", "spec review prompt for E-NNN", "build me a spec review prompt"), load `.claude/skills/codex-prompt-spec/SKILL.md` and follow its workflow. Assembles a self-contained spec review prompt (epic/story files + rubric + agent roster) for the user to copy-paste into Codex.
+- **Spec review**: When the user says "spec review" (or similar -- "spec review E-NNN", "codex spec review", "spec review prompt", "codex spec review prompt"), load `.claude/skills/codex-spec-review/SKILL.md` and follow its workflow. Supports two execution paths: headless (default -- runs Codex via script, presents findings, offers advisory triage) and prompt generation (trigger phrase contains "prompt" -- assembles lean prompt for copy-paste).
+- **Code review**: When the user says "codex review" (or similar -- "review with codex", "code review", "review epic", "codex review prompt", "code review prompt", "post-dev review"), load `.claude/skills/codex-review/SKILL.md` and follow its workflow. Supports two execution paths: headless (default -- runs Codex via script, presents findings, offers advisory triage) and prompt generation (trigger phrase contains "prompt" -- assembles lean prompt for copy-paste).
 - **Curate the vision**: When the user says "curate the vision", invoke the product-manager in curate mode. PM reviews accumulated signals in `docs/vision-signals.md` with the user, discusses which belong in `docs/VISION.md`, updates the vision document, and clears processed signals.
 
 ## App Troubleshooting
@@ -258,6 +256,8 @@ Bright Data is a residential proxy service used by `GameChangerClient` to anonym
 
 **SSL behavior**: When a Bright Data proxy is configured, SSL verification is automatically disabled (`verify=False` on `httpx.Client`). This is required because Bright Data uses a self-signed certificate in the CONNECT tunnel. Do not treat `verify=False` as a general pattern -- it is specific to the Bright Data proxy path.
 
+**Sticky sessions**: When the proxy is enabled, each `GameChangerClient` instance automatically uses a sticky session -- all requests from that client route through the same Bright Data peer IP for the duration of the session. This happens transparently: `GameChangerClient.__init__` generates a session ID (`secrets.token_hex(8)`) and injects it into the proxy URL username via `_inject_session_id()` in `src/http/session.py`. No caller configuration is needed. The sticky peer has a 5-minute idle timeout on Bright Data's side; since crawl requests are spaced seconds apart, no keep-alive mechanism is necessary. If a sticky peer becomes unavailable (502), Bright Data auto-assigns a new peer on the next request using the same session ID -- the existing retry logic handles this. Note: `bb proxy check` does NOT use sticky sessions; it tests raw proxy connectivity with a rotating IP, which is the correct behavior for a diagnostic command.
+
 **Diagnostics**: Run `bb proxy check` to verify proxy connectivity and confirm IP anonymization is working.
 
 ## Terminal Modes
@@ -286,6 +286,18 @@ This devcontainer has two shells with distinct roles:
 - **Bash**: Automation shell. Claude Code's Bash tool runs bash. All hook scripts (`.claude/hooks/statusline.sh`, `.claude/hooks/pii-check.sh`, `.claude/hooks/epic-archive-check.sh`) use bash shebangs intentionally -- this is by design, not an oversight. All scripts in `scripts/` use bash shebangs.
 
 **Dual-injection pattern**: `.devcontainer/post-create-env.sh` injects environment variables into both `.bashrc` and `.zshrc` (prepending the same export block to each). When adding new environment variables to the post-create script, this dual-injection pattern must be maintained so both shells see the same env.
+
+## Codex Bootstrap
+
+This repo now carries a small checked-in Codex layer plus a gitignored runtime layer.
+
+- **Checked in**: `AGENTS.md`, `.codex/config.toml`, `.agents/skills/`
+- **Local runtime**: `CODEX_HOME=/workspaces/baseball-crawl/.codex-home` with local `config.toml`, auth artifacts, session history, caches, and other mutable Codex state
+- **Bootstrap path**: `.devcontainer/post-create-env.sh` injects `CODEX_HOME` into both `.bashrc` and `.zshrc` and seeds the local trust entry for `/workspaces/baseball-crawl`
+- **Default workflow**: host `~/.codex` mapping is optional and not required
+- **Baseline scope**: no spawned agents, `multi_agent`, or other experimental Codex features
+
+See `docs/admin/codex-guide.md` for operator-facing setup details and smoke checks.
 
 ## Code Style
 - Use type hints for all function signatures

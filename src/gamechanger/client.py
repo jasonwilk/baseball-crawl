@@ -24,6 +24,7 @@ instantiation time.
 from __future__ import annotations
 
 import logging
+import secrets
 import time
 from pathlib import Path
 from typing import Any
@@ -39,7 +40,7 @@ from src.gamechanger.exceptions import (  # noqa: F401 -- re-exported for caller
     RateLimitError,
 )
 from src.gamechanger.token_manager import AuthSigningError, TokenManager
-from src.http.session import create_session
+from src.http.session import create_session, resolve_proxy_from_dict
 
 logger = logging.getLogger(__name__)
 
@@ -114,8 +115,12 @@ class GameChangerClient:
         self._profile = profile
         self._credentials = self._load_credentials(profile)
         self._base_url = self._credentials["GAMECHANGER_BASE_URL"].rstrip("/")
+        self._session_id = secrets.token_hex(8)
+        logger.debug("GameChangerClient session ID: %s", self._session_id)
+        proxy_url = resolve_proxy_from_dict(self._credentials, profile, session_id=self._session_id)
         self._session = create_session(
-            min_delay_ms=min_delay_ms, jitter_ms=jitter_ms, profile=profile
+            min_delay_ms=min_delay_ms, jitter_ms=jitter_ms, profile=profile,
+            proxy_url=proxy_url,
         )
         suffix = _PROFILE_SUFFIXES.get(profile, f"_{profile.upper()}")
 

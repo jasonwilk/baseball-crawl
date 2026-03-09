@@ -13,7 +13,12 @@ import respx
 from unittest.mock import patch
 
 from src.http.headers import BROWSER_HEADERS, MOBILE_HEADERS
-from src.http.session import create_session, get_proxy_config
+from src.http.session import (
+    _inject_session_id,
+    create_session,
+    get_proxy_config,
+    resolve_proxy_from_dict,
+)
 
 
 class TestHeaderProfiles:
@@ -390,6 +395,106 @@ class TestProxyProfileIsolation:
         assert kwargs.get("proxy") != "http://web-proxy.example.com:8080"
 
 
+class TestSslVerifyBehavior:
+    """AC-4, AC-5, AC-6: verify=False when proxy configured; warning logged; URL not logged."""
+
+    def test_verify_false_when_proxy_url_provided(self) -> None:
+        """AC-4: verify=False is passed to httpx.Client when proxy URL is resolved."""
+        with patch("src.http.session.httpx.Client") as mock_client:
+            create_session(min_delay_ms=0, jitter_ms=0, profile="web", proxy_url="http://proxy.example.com:1234")
+        _, kwargs = mock_client.call_args
+        assert kwargs.get("verify") is False
+
+    def test_verify_not_false_when_no_proxy(self) -> None:
+        """AC-5: verify is not False when no proxy is configured."""
+        with patch("src.http.session.httpx.Client") as mock_client:
+            create_session(min_delay_ms=0, jitter_ms=0, profile="web", proxy_url=None)
+        _, kwargs = mock_client.call_args
+        assert kwargs.get("verify") is not False
+
+    def test_warning_logged_when_proxy_configured(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """AC-6: WARNING emitted when proxy is configured; message includes profile name."""
+        with caplog.at_level(logging.WARNING):
+            create_session(min_delay_ms=0, jitter_ms=0, profile="web", proxy_url="http://proxy.example.com:1234")
+        warning_messages = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+        assert any("SSL verification disabled" in msg for msg in warning_messages), (
+            f"Expected SSL warning, got: {warning_messages}"
+        )
+        assert any("web" in msg for msg in warning_messages), (
+            f"Expected profile name 'web' in warning, got: {warning_messages}"
+        )
+
+    def test_warning_not_logged_when_no_proxy(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """No SSL warning emitted when no proxy configured."""
+        with caplog.at_level(logging.WARNING):
+            create_session(min_delay_ms=0, jitter_ms=0, profile="web", proxy_url=None)
+        warning_messages = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+        assert not any("SSL verification disabled" in msg for msg in warning_messages)
+
+    def test_proxy_url_not_in_ssl_warning_log(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """AC-6: SSL warning log must NOT contain the proxy URL."""
+        secret_url = "http://user:s3cr3t@brd.superproxy.io:33335"
+        with caplog.at_level(logging.WARNING):
+            create_session(min_delay_ms=0, jitter_ms=0, profile="web", proxy_url=secret_url)
+        for record in caplog.records:
+            msg = record.getMessage()
+            assert secret_url not in msg, f"Proxy URL leaked into SSL warning: {msg!r}"
+            assert "s3cr3t" not in msg, f"Proxy credentials leaked into SSL warning: {msg!r}"
+
+
+class TestResolveProxyFromDict:
+    """Tests for the resolve_proxy_from_dict() shared helper."""
+
+    def test_returns_web_url_when_enabled(self) -> None:
+        """Returns PROXY_URL_WEB when PROXY_ENABLED=true for web profile."""
+        env = {"PROXY_ENABLED": "true", "PROXY_URL_WEB": "http://proxy.example.com:1234"}
+        assert resolve_proxy_from_dict(env, "web") == "http://proxy.example.com:1234"
+
+    def test_returns_mobile_url_when_enabled(self) -> None:
+        """Returns PROXY_URL_MOBILE when PROXY_ENABLED=true for mobile profile."""
+        env = {"PROXY_ENABLED": "true", "PROXY_URL_MOBILE": "http://proxy.example.com:5678"}
+        assert resolve_proxy_from_dict(env, "mobile") == "http://proxy.example.com:5678"
+
+    def test_returns_none_when_disabled(self) -> None:
+        """Returns None when PROXY_ENABLED is false."""
+        env = {"PROXY_ENABLED": "false", "PROXY_URL_WEB": "http://proxy.example.com:1234"}
+        assert resolve_proxy_from_dict(env, "web") is None
+
+    def test_returns_none_when_proxy_enabled_absent(self) -> None:
+        """Returns None when PROXY_ENABLED is absent from dict."""
+        env = {"PROXY_URL_WEB": "http://proxy.example.com:1234"}
+        assert resolve_proxy_from_dict(env, "web") is None
+
+    def test_returns_none_when_url_missing(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Returns None and logs WARNING when PROXY_URL_WEB is missing."""
+        env = {"PROXY_ENABLED": "true"}
+        with caplog.at_level(logging.WARNING):
+            result = resolve_proxy_from_dict(env, "web")
+        assert result is None
+        assert any("PROXY_URL_WEB" in r.getMessage() for r in caplog.records)
+
+    def test_proxy_url_not_logged(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Proxy URL value must not appear in any log output."""
+        secret_url = "http://user:s3cr3t@brd.superproxy.io:33335"
+        env = {"PROXY_ENABLED": "true", "PROXY_URL_WEB": secret_url}
+        with caplog.at_level(logging.DEBUG):
+            resolve_proxy_from_dict(env, "web")
+        for record in caplog.records:
+            msg = record.getMessage()
+            assert secret_url not in msg
+            assert "s3cr3t" not in msg
+
+
 class TestProxyMalformedUrl:
     """AC-11: Malformed proxy URL (bad scheme) logs WARNING and returns None."""
 
@@ -437,3 +542,71 @@ class TestProxyMalformedUrl:
             msg = record.getMessage()
             assert bad_url not in msg
             assert "secret" not in msg
+
+
+class TestInjectSessionId:
+    """AC-1, AC-3: _inject_session_id() and resolve_proxy_from_dict() session ID support."""
+
+    def test_inject_appends_session_suffix_to_username(self) -> None:
+        """AC-1: session ID is appended to the username, password/host/port unchanged."""
+        url = "http://brd-customer-XXX-zone-YYY:s3cr3t@zproxy.lum-superproxy.io:22225"
+        result = _inject_session_id(url, "abc123")
+        assert "brd-customer-XXX-zone-YYY-session-abc123" in result
+        assert "s3cr3t" in result  # password preserved (percent-encoded but still present)
+        assert "zproxy.lum-superproxy.io" in result
+        assert "22225" in result
+
+    def test_inject_preserves_port(self) -> None:
+        """Port number is unchanged after session injection."""
+        url = "http://user:pass@proxy.example.com:1234"
+        result = _inject_session_id(url, "deadbeef")
+        assert ":1234" in result
+
+    def test_inject_url_format(self) -> None:
+        """Reconstructed URL starts with http:// and contains @."""
+        url = "http://user:pass@proxy.example.com:1234"
+        result = _inject_session_id(url, "deadbeef")
+        assert result.startswith("http://")
+        assert "@" in result
+
+    def test_resolve_proxy_from_dict_with_session_id(self) -> None:
+        """AC-1: resolve_proxy_from_dict() injects session ID when provided."""
+        env = {"PROXY_ENABLED": "true", "PROXY_URL_WEB": "http://user:pass@proxy.example.com:1234"}
+        result = resolve_proxy_from_dict(env, "web", session_id="abc123")
+        assert result is not None
+        assert "user-session-abc123" in result
+        assert "proxy.example.com" in result
+        assert "1234" in result
+
+    def test_resolve_proxy_from_dict_no_session_id_backward_compatible(self) -> None:
+        """AC-3: resolve_proxy_from_dict() without session_id returns URL unmodified."""
+        proxy_url = "http://user:pass@proxy.example.com:1234"
+        env = {"PROXY_ENABLED": "true", "PROXY_URL_WEB": proxy_url}
+        result = resolve_proxy_from_dict(env, "web")
+        assert result == proxy_url
+
+    def test_resolve_proxy_from_dict_session_id_none_backward_compatible(self) -> None:
+        """AC-3: resolve_proxy_from_dict(session_id=None) returns URL unmodified."""
+        proxy_url = "http://user:pass@proxy.example.com:1234"
+        env = {"PROXY_ENABLED": "true", "PROXY_URL_WEB": proxy_url}
+        result = resolve_proxy_from_dict(env, "web", session_id=None)
+        assert result == proxy_url
+
+    def test_resolve_proxy_disabled_returns_none_with_session_id(self) -> None:
+        """AC-3: Returns None when proxy disabled regardless of session_id."""
+        env = {"PROXY_ENABLED": "false", "PROXY_URL_WEB": "http://user:pass@proxy.example.com:1234"}
+        result = resolve_proxy_from_dict(env, "web", session_id="abc123")
+        assert result is None
+
+    def test_session_injected_url_not_logged(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """AC-7: The session-injected proxy URL must not appear in any log output."""
+        env = {"PROXY_ENABLED": "true", "PROXY_URL_WEB": "http://user:s3cr3t@proxy.example.com:1234"}
+        with caplog.at_level(logging.DEBUG):
+            result = resolve_proxy_from_dict(env, "web", session_id="abc123")
+        assert result is not None
+        for record in caplog.records:
+            msg = record.getMessage()
+            assert "s3cr3t" not in msg, f"Proxy credentials leaked into log: {msg!r}"
+            assert "user-session-abc123" not in msg, f"Injected proxy URL leaked into log: {msg!r}"

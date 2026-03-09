@@ -11,10 +11,22 @@ Every outgoing request automatically carries the selected header profile,
 maintains a persistent cookie jar, and sleeps between requests to enforce
 rate-limiting with jitter.
 
-Proxy support is profile-aware and controlled exclusively by environment
-variables (``PROXY_ENABLED``, ``PROXY_URL_WEB``, ``PROXY_URL_MOBILE``).
-System proxy environment variables (``HTTP_PROXY``, ``HTTPS_PROXY``) are
-intentionally ignored (``trust_env=False``).
+Proxy support is profile-aware and uses one of two resolution paths:
+
+- **Default path** (``create_session()`` with no explicit ``proxy_url``): reads
+  ``PROXY_ENABLED`` and ``PROXY_URL_{PROFILE}`` from ``os.environ`` via
+  ``get_proxy_config()``.
+- **Dict path** (callers with a dotenv dict not merged into ``os.environ``):
+  call ``resolve_proxy_from_dict(env_dict, profile)`` first, then pass the
+  result as ``proxy_url=...`` to ``create_session()``.  Used by
+  ``GameChangerClient``, which loads credentials via ``dotenv_values()``
+  (returns a dict) rather than ``load_dotenv()`` (mutates ``os.environ``).
+
+When a proxy URL is resolved, ``create_session()`` automatically sets
+``verify=False`` on the httpx client (required by Bright Data's self-signed
+CONNECT tunnel certificate) and emits a WARNING-level log.  System proxy
+environment variables (``HTTP_PROXY``, ``HTTPS_PROXY``) are intentionally
+ignored (``trust_env=False``).
 
 Usage::
 
@@ -32,6 +44,7 @@ import logging
 import os
 import random
 import time
+import urllib.parse
 from typing import Any, Literal
 
 import httpx
@@ -48,6 +61,95 @@ _PROFILES: dict[str, dict[str, str]] = {
 # Sentinel object used as default for proxy_url to distinguish "not provided"
 # from explicitly passed None.
 _UNSET: Any = object()
+
+
+def _inject_session_id(proxy_url: str, session_id: str) -> str:
+    """Inject a Bright Data sticky session ID into the proxy URL username.
+
+    Appends ``-session-<id>`` to the username component of the URL.
+    The returned URL contains credentials and must never be logged.
+
+    Args:
+        proxy_url: Proxy URL in the format ``http://USERNAME:PASS@HOST:PORT``.
+        session_id: Alphanumeric session identifier (e.g., from
+            ``secrets.token_hex(8)``).
+
+    Returns:
+        The proxy URL with the session suffix appended to the username.
+    """
+    parsed = urllib.parse.urlparse(proxy_url)
+    if not parsed.username:
+        # No username present (bare proxy URL) -- cannot inject; return unmodified.
+        return proxy_url
+    new_username = f"{parsed.username}-session-{session_id}"
+    password = urllib.parse.quote(parsed.password or "", safe="")
+    netloc = f"{new_username}:{password}@{parsed.hostname}"
+    if parsed.port:
+        netloc = f"{netloc}:{parsed.port}"
+    return urllib.parse.urlunparse(parsed._replace(netloc=netloc))
+
+
+def resolve_proxy_from_dict(
+    env_dict: dict[str, str],
+    profile: str,
+    session_id: str | None = None,
+) -> str | None:
+    """Resolve proxy configuration from an explicit env dict for the given profile.
+
+    Reads ``PROXY_ENABLED`` and ``PROXY_URL_{profile.upper()}`` from *env_dict*.
+    Returns the proxy URL string when proxy is enabled and the URL is valid;
+    returns ``None`` when proxy is disabled, the URL is unset, or the URL has
+    an unsupported scheme.
+
+    When *session_id* is provided, injects ``-session-<id>`` into the proxy URL
+    username to enable Bright Data sticky sessions.  The injected URL is never
+    logged -- only the session ID itself may be logged by callers.
+
+    Proxy URL values are never logged.  Only the env var name appears in
+    WARNING messages.
+
+    This function mirrors ``get_proxy_config()`` but reads from a supplied dict
+    instead of ``os.environ``.  Use it when proxy config lives in a dotenv dict
+    that has not been merged into ``os.environ`` (e.g., ``dotenv_values()``).
+
+    Args:
+        env_dict: Dict of environment variable names to values (e.g. from
+            ``dotenv_values()``).
+        profile: Session profile (``"web"`` or ``"mobile"``).  Determines
+            which ``PROXY_URL_*`` key is read.
+        session_id: Optional alphanumeric Bright Data sticky session identifier.
+            When provided, appended as ``-session-<id>`` to the proxy URL
+            username.  When ``None`` (default), the URL is returned unmodified
+            (rotating IP behavior).
+
+    Returns:
+        The proxy URL string when enabled and valid, or ``None``.
+    """
+    enabled = env_dict.get("PROXY_ENABLED", "").strip().lower()
+    if enabled != "true":
+        return None
+
+    url_var = f"PROXY_URL_{profile.upper()}"
+    url = env_dict.get(url_var, "").strip()
+
+    if not url:
+        logger.warning(
+            "PROXY_ENABLED is true but %s is not set",
+            url_var,
+        )
+        return None
+
+    if not (url.startswith("http://") or url.startswith("https://")):
+        logger.warning(
+            "PROXY_ENABLED is true but %s has an invalid scheme (must be http:// or https://)",
+            url_var,
+        )
+        return None
+
+    if session_id is not None:
+        url = _inject_session_id(url, session_id)
+
+    return url
 
 
 def get_proxy_config(profile: str) -> str | None:
@@ -168,10 +270,17 @@ def create_session(
     else:
         resolved_proxy = proxy_url  # type: ignore[assignment]
 
+    if resolved_proxy is not None:
+        logger.warning(
+            "SSL verification disabled: proxy configured for %s profile",
+            profile,
+        )
+
     return httpx.Client(
         headers=dict(headers),
         cookies=httpx.Cookies(),
         event_hooks={"response": [_make_rate_limit_hook(min_delay_ms, jitter_ms)]},
         proxy=resolved_proxy,
         trust_env=False,
+        verify=resolved_proxy is None,
     )
