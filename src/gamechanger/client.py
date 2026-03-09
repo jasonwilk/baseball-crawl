@@ -37,6 +37,7 @@ from src.gamechanger.exceptions import (  # noqa: F401 -- re-exported for caller
     CredentialExpiredError,
     ForbiddenError,
     GameChangerAPIError,
+    LoginFailedError,
     RateLimitError,
 )
 from src.gamechanger.token_manager import AuthSigningError, TokenManager
@@ -158,6 +159,9 @@ class GameChangerClient:
         app_name_mobile = (
             creds.get(f"GAMECHANGER_APP_NAME{suffix}") if profile == "mobile" else None
         )
+        # Login fallback credentials (optional -- web profile only)
+        email = creds.get("GAMECHANGER_USER_EMAIL") or None
+        password = creds.get("GAMECHANGER_USER_PASSWORD") or None
         try:
             return TokenManager(
                 profile=profile,
@@ -169,6 +173,8 @@ class GameChangerClient:
                 access_token=access_token,
                 app_name_mobile=app_name_mobile,
                 env_path=_DEFAULT_ENV_PATH,
+                email=email,
+                password=password,
             )
         except ConfigurationError:
             raise

@@ -205,6 +205,8 @@ Authenticates with password. Returns access token + refresh token on success.
 
 The preferred day-to-day flow. Requires only the refresh token and client key -- no password needed.
 
+**Login fallback:** `TokenManager` automatically recovers from expired refresh tokens (HTTP 401 on refresh) by performing the full login flow (steps 2-4 above: client-auth, user-auth, password). This is web profile only and requires `GAMECHANGER_USER_EMAIL` and `GAMECHANGER_USER_PASSWORD` in `.env`. If login credentials are absent, `CredentialExpiredError` is raised as before. The fallback is only triggered from the `get_access_token()` path -- `force_refresh()` does not attempt login. On login failure, `LoginFailedError` is raised with diagnostic context.
+
 ```
 POST /auth
 Body:         {"type": "refresh"}

@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import json
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -12,11 +13,19 @@ import httpx
 import typer
 from dotenv import dotenv_values
 from rich.console import Console
+from rich.panel import Panel
+from rich.text import Text
 
-from src.gamechanger.credentials import check_credentials
+from src.gamechanger.credentials import (
+    ProfileCheckResult,
+    _ALL_PROFILES,
+    check_credentials,
+    check_profile_detailed,
+)
 from src.gamechanger.credential_parser import CurlParseError, merge_env_file, parse_curl
 from src.gamechanger.exceptions import ConfigurationError, CredentialExpiredError
 from src.gamechanger.token_manager import AuthSigningError, TokenManager
+from src.http.proxy_check import ProxyCheckOutcome
 
 app = typer.Typer(help="Manage GameChanger credentials.")
 
@@ -26,6 +35,9 @@ _err_console = Console(stderr=True)
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _DEFAULT_CURL_FILE = _PROJECT_ROOT / "secrets" / "gamechanger-curl.txt"
 _ENV_FILE = _PROJECT_ROOT / ".env"
+
+# Test endpoint displayed in the API health section (AC-6)
+_ME_USER_ENDPOINT = "GET /me/user"
 
 
 @app.command(name="import")
@@ -185,6 +197,91 @@ def refresh(
     _console.print("TokenManager wrote rotated refresh token to .env (check logs if write-back failed).")
 
 
+def _indicator(style: str) -> Text:
+    """Return a status indicator Text with the given Rich style."""
+    labels = {"green": "[OK]", "yellow": "[!!]", "red": "[XX]", "dim": "[--]"}
+    return Text(labels[style], style=style)
+
+
+def _append_row(t: Text, style: str, rest: str) -> None:
+    """Append one indicator row (indicator + two spaces + text + newline)."""
+    t.append_text(_indicator(style))
+    t.append(f"  {rest}\n")
+
+
+def _render_credentials_section(t: Text, result: ProfileCheckResult) -> None:
+    """Append the Credentials section to *t*."""
+    t.append("Credentials\n", style="bold")
+    for key in result.presence.keys_present:
+        _append_row(t, "green", key)
+    for key in result.presence.keys_missing:
+        _append_row(t, "red", f"{key}  (missing)")
+    t.append("\n")
+
+
+def _render_token_section(t: Text, result: ProfileCheckResult) -> None:
+    """Append the Refresh Token section to *t*."""
+    t.append("Refresh Token\n", style="bold")
+    th = result.token_health
+    if th is None:
+        _append_row(t, "red", "Token key not present in .env")
+    elif th.exp is None:
+        _append_row(t, "yellow", "Token present but could not be decoded")
+    else:
+        exp_date = datetime.fromtimestamp(th.exp).strftime("%Y-%m-%d")
+        now = int(time.time())
+        is_mobile = result.profile == "mobile"
+        if th.is_expired:
+            days_ago = max(0, (now - th.exp) // 86400)
+            _append_row(t, "yellow" if is_mobile else "red", f"Expired {days_ago} day(s) ago ({exp_date})")
+        else:
+            days_left = max(0, (th.exp - now) // 86400)
+            suffix = " -- no auto-refresh for mobile profile" if is_mobile else ""
+            _append_row(t, "yellow" if is_mobile else "green", f"Expires in {days_left} day(s) ({exp_date}){suffix}")
+    t.append("\n")
+
+
+def _render_api_section(t: Text, result: ProfileCheckResult) -> None:
+    """Append the API Health section to *t*."""
+    t.append("API Health  ", style="bold")
+    t.append(f"({_ME_USER_ENDPOINT})\n", style="dim")
+    ar = result.api_result
+    style = "green" if ar.exit_code == 0 else ("dim" if ar.exit_code == 2 else "red")
+    _append_row(t, style, ar.message)
+    t.append("\n")
+
+
+def _render_proxy_section(t: Text, result: ProfileCheckResult) -> None:
+    """Append the Proxy (Bright Data) section to *t*."""
+    t.append("Proxy (Bright Data)\n", style="bold")
+    outcome = result.proxy_result.outcome
+    if outcome == ProxyCheckOutcome.NOT_CONFIGURED:
+        _append_row(t, "dim", "Not configured (direct connection)")
+    elif outcome == ProxyCheckOutcome.PASS:
+        _append_row(t, "green", "Routing correctly via Bright Data")
+    elif outcome == ProxyCheckOutcome.PASS_UNVERIFIED:
+        _append_row(t, "yellow", "Routing unverified (direct baseline unavailable)")
+    elif outcome == ProxyCheckOutcome.FAIL:
+        _append_row(t, "red", "Not routing -- proxy IP matches direct IP")
+    elif outcome == ProxyCheckOutcome.ERROR:
+        _append_row(t, "red", f"Proxy error: {result.proxy_result.error or 'unknown error'}")
+
+
+def _render_profile_report(result: ProfileCheckResult) -> Text:
+    """Build a Rich Text object for one profile's diagnostic report.
+
+    Sections: Credentials, Refresh Token, API Health, Proxy (Bright Data).
+    Status indicators: [OK] green, [!!] yellow, [XX] red, [--] dim.
+    No credential values are included -- only key names and decoded metadata.
+    """
+    t = Text()
+    _render_credentials_section(t, result)
+    _render_token_section(t, result)
+    _render_api_section(t, result)
+    _render_proxy_section(t, result)
+    return Text(t.plain.rstrip("\n"), spans=t._spans)
+
+
 @app.command()
 def check(
     profile: Optional[str] = typer.Option(
@@ -195,13 +292,16 @@ def check(
     ),
 ) -> None:
     """Validate GameChanger credentials stored in .env."""
-    exit_code, message = check_credentials(profile=profile)
+    if profile is not None:
+        result = check_profile_detailed(profile)
+        _console.print(
+            Panel(_render_profile_report(result), title=f"Profile: {result.profile}", expand=False)
+        )
+        raise typer.Exit(code=result.exit_code)
 
-    if exit_code == 0:
-        _console.print(f"[green]{message}[/green]")
-    elif exit_code == 2:
-        _console.print(f"[yellow]{message}[/yellow]")
-    else:
-        _console.print(f"[red]{message}[/red]")
-
-    raise typer.Exit(code=exit_code)
+    # Multi-profile: check all profiles, exit 0 if any valid
+    results = [check_profile_detailed(p) for p in _ALL_PROFILES]
+    for r in results:
+        _console.print(Panel(_render_profile_report(r), title=f"Profile: {r.profile}", expand=False))
+    any_valid = any(r.exit_code == 0 for r in results)
+    raise typer.Exit(code=0 if any_valid else 1)

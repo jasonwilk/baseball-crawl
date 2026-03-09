@@ -15,6 +15,7 @@ from typer.testing import CliRunner
 
 from src.cli import app
 from src.cli import status as status_module
+from src.http.proxy_check import ProxyCheckOutcome, ProxyCheckResult
 
 runner = CliRunner()
 
@@ -22,6 +23,11 @@ runner = CliRunner()
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+_NOT_CONFIGURED_PROXY = {
+    "web": ProxyCheckResult(profile="web", outcome=ProxyCheckOutcome.NOT_CONFIGURED),
+    "mobile": ProxyCheckResult(profile="mobile", outcome=ProxyCheckOutcome.NOT_CONFIGURED),
+}
 
 
 def _invoke_status(
@@ -33,6 +39,7 @@ def _invoke_status(
     db_exists: bool = True,
     db_display: str = "data/app.db (2.4 MB)",
     sessions: dict | None = None,
+    proxy_results: dict | None = None,
 ):
     """Invoke ``bb status`` with all external dependencies mocked."""
     cred_map = {"web": web_result, "mobile": mobile_result}
@@ -50,6 +57,10 @@ def _invoke_status(
         ),
         patch(
             "src.cli.status._get_proxy_sessions", return_value=sessions
+        ),
+        patch(
+            "src.cli.status._get_proxy_connectivity",
+            return_value=proxy_results if proxy_results is not None else _NOT_CONFIGURED_PROXY,
         ),
     ):
         return runner.invoke(app, ["status"])
@@ -216,6 +227,204 @@ class TestProxySessionDisplay:
         """'Proxy sessions:' label always appears."""
         result = _invoke_status()
         assert "Proxy sessions:" in result.output
+
+
+# ---------------------------------------------------------------------------
+# Proxy connectivity display (AC-1 through AC-6 for story E-085-03)
+# ---------------------------------------------------------------------------
+
+
+class TestProxyConnectivityDisplay:
+    """Tests for the Bright Data proxy connectivity section in bb status."""
+
+    def test_proxy_section_label_present(self) -> None:
+        """AC-1: Proxy section label appears for each profile."""
+        result = _invoke_status()
+        assert "Proxy (web):" in result.output
+        assert "Proxy (mobile):" in result.output
+
+    def test_proxy_not_configured_shows_informational(self) -> None:
+        """AC-3/AC-4: Not-configured proxy shows '[--] not configured'."""
+        result = _invoke_status(proxy_results=_NOT_CONFIGURED_PROXY)
+        assert "[--]" in result.output
+        assert "not configured" in result.output
+        assert result.exit_code == 0
+
+    def test_proxy_pass_shows_ok_indicator(self) -> None:
+        """AC-2: PASS outcome shows [OK] indicator."""
+        proxy_results = {
+            "web": ProxyCheckResult(
+                profile="web",
+                outcome=ProxyCheckOutcome.PASS,
+                proxy_ip="5.6.7.8",
+                direct_ip="1.2.3.4",
+            ),
+            "mobile": ProxyCheckResult(profile="mobile", outcome=ProxyCheckOutcome.NOT_CONFIGURED),
+        }
+        result = _invoke_status(proxy_results=proxy_results)
+        assert "[OK]" in result.output
+        assert "routing correctly" in result.output
+
+    def test_proxy_fail_shows_xx_indicator(self) -> None:
+        """AC-2: FAIL outcome shows [XX] indicator."""
+        proxy_results = {
+            "web": ProxyCheckResult(
+                profile="web",
+                outcome=ProxyCheckOutcome.FAIL,
+                proxy_ip="1.2.3.4",
+                direct_ip="1.2.3.4",
+            ),
+            "mobile": ProxyCheckResult(profile="mobile", outcome=ProxyCheckOutcome.NOT_CONFIGURED),
+        }
+        result = _invoke_status(proxy_results=proxy_results)
+        assert "[XX]" in result.output
+        assert "not routing" in result.output
+
+    def test_proxy_error_shows_xx_indicator(self) -> None:
+        """AC-2 / AC-5: ERROR outcome shows [XX] with brief description; status still completes."""
+        proxy_results = {
+            "web": ProxyCheckResult(
+                profile="web",
+                outcome=ProxyCheckOutcome.ERROR,
+                error="connection refused",
+            ),
+            "mobile": ProxyCheckResult(profile="mobile", outcome=ProxyCheckOutcome.NOT_CONFIGURED),
+        }
+        result = _invoke_status(proxy_results=proxy_results)
+        assert "[XX]" in result.output
+        assert "error" in result.output.lower()
+        # The rest of the status output is still present (AC-5)
+        assert "Last crawl:" in result.output
+        assert "Database:" in result.output
+
+    def test_proxy_pass_unverified_shows_warn_indicator(self) -> None:
+        """AC-2: PASS_UNVERIFIED outcome shows [!!] indicator."""
+        proxy_results = {
+            "web": ProxyCheckResult(
+                profile="web",
+                outcome=ProxyCheckOutcome.PASS_UNVERIFIED,
+                proxy_ip="5.6.7.8",
+            ),
+            "mobile": ProxyCheckResult(profile="mobile", outcome=ProxyCheckOutcome.NOT_CONFIGURED),
+        }
+        result = _invoke_status(proxy_results=proxy_results)
+        assert "[!!]" in result.output
+        assert "unverified" in result.output
+
+    def test_proxy_output_no_proxy_url(self) -> None:
+        """AC-6: Proxy URLs never appear in output."""
+        proxy_results = {
+            "web": ProxyCheckResult(
+                profile="web",
+                outcome=ProxyCheckOutcome.PASS,
+                proxy_ip="5.6.7.8",
+                direct_ip="1.2.3.4",
+            ),
+            "mobile": ProxyCheckResult(profile="mobile", outcome=ProxyCheckOutcome.NOT_CONFIGURED),
+        }
+        result = _invoke_status(proxy_results=proxy_results)
+        # Proxy URL patterns must not appear
+        assert "zproxy.lum-superproxy.io" not in result.output
+        assert "brd.superproxy.io" not in result.output
+
+    def test_proxy_section_after_credentials(self) -> None:
+        """AC-1: Proxy section appears after credentials in the output."""
+        result = _invoke_status()
+        cred_pos = result.output.find("Credentials (web):")
+        proxy_pos = result.output.find("Proxy (web):")
+        assert cred_pos < proxy_pos
+
+    def test_proxy_error_does_not_affect_exit_code(self) -> None:
+        """AC-5: Proxy error does not change exit code (creds determine exit)."""
+        proxy_results = {
+            "web": ProxyCheckResult(profile="web", outcome=ProxyCheckOutcome.ERROR, error="timeout"),
+            "mobile": ProxyCheckResult(profile="mobile", outcome=ProxyCheckOutcome.ERROR, error="timeout"),
+        }
+        result = _invoke_status(proxy_results=proxy_results)
+        # Creds are valid, so exit should be 0 despite proxy errors
+        assert result.exit_code == 0
+
+
+class TestGetProxyConnectivity:
+    """Unit tests for _get_proxy_connectivity() helper."""
+
+    def test_calls_get_direct_ip_once(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """get_direct_ip() is called exactly once regardless of profile count."""
+        call_count = {"n": 0}
+
+        def fake_direct() -> str | None:
+            call_count["n"] += 1
+            return "1.2.3.4"
+
+        def fake_routing(profile: str, direct_ip: str | None) -> ProxyCheckResult:
+            return ProxyCheckResult(profile=profile, outcome=ProxyCheckOutcome.NOT_CONFIGURED)
+
+        monkeypatch.setattr(status_module, "get_direct_ip", fake_direct)
+        monkeypatch.setattr(status_module, "check_proxy_routing", fake_routing)
+
+        result = status_module._get_proxy_connectivity()
+        assert call_count["n"] == 1
+        assert set(result.keys()) == {"web", "mobile"}
+
+    def test_returns_result_for_each_profile(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Returns a ProxyCheckResult for each profile in _PROFILES."""
+        monkeypatch.setattr(status_module, "get_direct_ip", lambda: None)
+        monkeypatch.setattr(
+            status_module,
+            "check_proxy_routing",
+            lambda profile, direct_ip: ProxyCheckResult(
+                profile=profile, outcome=ProxyCheckOutcome.NOT_CONFIGURED
+            ),
+        )
+        result = status_module._get_proxy_connectivity()
+        assert "web" in result
+        assert "mobile" in result
+        assert all(isinstance(v, ProxyCheckResult) for v in result.values())
+
+
+class TestFormatProxyLine:
+    """Unit tests for _format_proxy_line() helper."""
+
+    def test_not_configured_returns_dim_with_indicator(self) -> None:
+        r = ProxyCheckResult(profile="web", outcome=ProxyCheckOutcome.NOT_CONFIGURED)
+        style, text = status_module._format_proxy_line(r)
+        assert style == "dim"
+        assert "[--]" in text
+        assert "not configured" in text
+
+    def test_pass_returns_green_ok(self) -> None:
+        r = ProxyCheckResult(profile="web", outcome=ProxyCheckOutcome.PASS, proxy_ip="5.6.7.8", direct_ip="1.2.3.4")
+        style, text = status_module._format_proxy_line(r)
+        assert style == "green"
+        assert "[OK]" in text
+        assert "5.6.7.8" in text
+
+    def test_fail_returns_red_xx(self) -> None:
+        r = ProxyCheckResult(profile="web", outcome=ProxyCheckOutcome.FAIL, proxy_ip="1.2.3.4", direct_ip="1.2.3.4")
+        style, text = status_module._format_proxy_line(r)
+        assert style == "red"
+        assert "[XX]" in text
+
+    def test_pass_unverified_returns_yellow_warn(self) -> None:
+        r = ProxyCheckResult(profile="web", outcome=ProxyCheckOutcome.PASS_UNVERIFIED, proxy_ip="5.6.7.8")
+        style, text = status_module._format_proxy_line(r)
+        assert style == "yellow"
+        assert "[!!]" in text
+        assert "unverified" in text
+
+    def test_error_returns_red_xx_with_detail(self) -> None:
+        r = ProxyCheckResult(profile="web", outcome=ProxyCheckOutcome.ERROR, error="connection refused")
+        style, text = status_module._format_proxy_line(r)
+        assert style == "red"
+        assert "[XX]" in text
+        assert "connection refused" in text
+
+    def test_no_proxy_url_in_output(self) -> None:
+        """Proxy URL must never appear in formatted output."""
+        r = ProxyCheckResult(profile="web", outcome=ProxyCheckOutcome.PASS, proxy_ip="5.6.7.8", direct_ip="1.2.3.4")
+        _, text = status_module._format_proxy_line(r)
+        assert "brd.superproxy.io" not in text
+        assert "lum-superproxy.io" not in text
 
 
 # ---------------------------------------------------------------------------

@@ -134,7 +134,7 @@ def test_valid_credentials_falls_back_to_email_when_names_missing(
     )
     exit_code, message = check_credentials(profile="web")
     assert exit_code == 0
-    assert "coach@example.com" in message
+    assert "(authenticated user)" in message
 
 
 @respx.mock

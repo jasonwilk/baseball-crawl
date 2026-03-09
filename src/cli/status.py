@@ -10,6 +10,12 @@ import typer
 from rich.console import Console
 
 from src.gamechanger.credentials import check_single_profile
+from src.http.proxy_check import (
+    ProxyCheckOutcome,
+    ProxyCheckResult,
+    check_proxy_routing,
+    get_direct_ip,
+)
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _DATA_ROOT = _PROJECT_ROOT / "data"
@@ -85,6 +91,38 @@ def _get_db_info() -> tuple[bool, str]:
         return (False, "")
     size = _DB_PATH.stat().st_size
     return (True, f"{_DB_PATH.relative_to(_PROJECT_ROOT)} ({_human_size(size)})")
+
+
+def _get_proxy_connectivity() -> dict[str, ProxyCheckResult]:
+    """Return per-profile Bright Data proxy routing results.
+
+    Calls the IP-echo service once for the direct baseline, then once per
+    profile.  Never raises -- network errors are captured in the results.
+
+    Returns:
+        Mapping of profile name to :class:`ProxyCheckResult`.
+    """
+    direct_ip = get_direct_ip()
+    return {profile: check_proxy_routing(profile, direct_ip) for profile in _PROFILES}
+
+
+def _format_proxy_line(result: ProxyCheckResult) -> tuple[str, str]:
+    """Return ``(rich_style, text)`` for one proxy check result line.
+
+    Proxy URLs are never included in the output.
+    """
+    outcome = result.outcome
+    if outcome == ProxyCheckOutcome.NOT_CONFIGURED:
+        return ("dim", "[--] not configured")
+    if outcome == ProxyCheckOutcome.PASS:
+        return ("green", f"[OK] routing correctly (proxy IP {result.proxy_ip})")
+    if outcome == ProxyCheckOutcome.PASS_UNVERIFIED:
+        return ("yellow", f"[!!] routing unverified (direct baseline unavailable, proxy IP {result.proxy_ip})")
+    if outcome == ProxyCheckOutcome.FAIL:
+        return ("red", f"[XX] not routing -- proxy IP matches direct IP ({result.proxy_ip})")
+    # ERROR
+    error_detail = result.error or "unknown error"
+    return ("red", f"[XX] error: {error_detail}")
 
 
 def _get_proxy_sessions() -> dict | None:
@@ -167,6 +205,13 @@ def run() -> None:
                 f"  {label:<{label_width}} [red]expired -> run: bb creds import[/red]"
             )
             creds_failed = True
+
+    # --- Proxy (Bright Data) ---
+    proxy_results = _get_proxy_connectivity()
+    for profile, result in proxy_results.items():
+        label = f"Proxy ({profile}):"
+        style, text = _format_proxy_line(result)
+        console.print(f"  {label:<{label_width}} [{style}]{text}[/{style}]")
 
     # --- Last crawl ---
     crawled_at, total_files = _get_last_crawl()

@@ -1,7 +1,7 @@
 # E-085: Credential Resilience and Diagnostic Improvements
 
 ## Status
-`READY`
+`COMPLETED`
 <!-- Lifecycle: DRAFT -> READY -> ACTIVE -> COMPLETED (or BLOCKED / ABANDONED) -->
 
 ## Overview
@@ -36,10 +36,10 @@ Meanwhile, `bb creds check` currently calls `GET /me/user` but provides minimal 
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-085-01 | TokenManager Login Fallback | TODO | None | - |
-| E-085-02 | Enhanced `bb creds check` Output | TODO | None | - |
-| E-085-03 | `bb status` Proxy Connectivity Section | TODO | E-085-02 | - |
-| E-085-04 | Context-Layer Documentation Update | TODO | E-085-01, E-085-02, E-085-03 | - |
+| E-085-01 | TokenManager Login Fallback | DONE | None | SE |
+| E-085-02 | Enhanced `bb creds check` Output | DONE | None | SE |
+| E-085-03 | `bb status` Proxy Connectivity Section | DONE | E-085-02 | SE |
+| E-085-04 | Context-Layer Documentation Update | DONE | E-085-01, E-085-02, E-085-03 | CA |
 
 ## Dispatch Team
 - software-engineer
@@ -130,3 +130,7 @@ All open questions resolved via consultation (2026-03-09). See Technical Notes f
 - 2026-03-09: Created. Full login flow confirmed working programmatically earlier today.
 - 2026-03-09: All four consultations completed (CA, UXD, api-scout, SE). Key findings: `LoginFailedError` subclass pattern, `[OK]`/`[!!]`/`[XX]`/`[--]` visual language, `force_refresh()` should not trigger login fallback, `GET /me/user` only accepts access tokens, client-auth response shape needs assertion. Open Questions resolved. Technical Notes updated. Stories updated with consultation-informed refinements.
 - 2026-03-09: Codex spec review triage (5 findings). All refined: (1) P1: E-085-04 deps expanded to include 02+03 (docs must describe implemented reality). (2) P1: E-085-03 now depends on 02 (file conflict via check_single_profile return type change). (3) P2: PASS_UNVERIFIED proxy outcome explicitly mapped to `[!!]` yellow in both 02 and 03 notes. (4) P2: E-085-04 AC-1 narrowed to behavioral change (env vars already in CLAUDE.md). (5) P3: E-085-04 DoD replaced with docs-specific verification. Epic wave updated: 01+02 parallel -> 03 (depends on 02) -> 04 (depends on 01+02+03).
+- 2026-03-09: All 4 stories completed and verified. E-085-01: TokenManager login fallback implemented with 3-step login flow (client-auth, user-auth, password), `LoginFailedError` exception, and `force_refresh()` boundary. E-085-02: `bb creds check` enhanced with multi-section Rich diagnostic (credential presence, token expiry, API health, proxy status) using `[OK]`/`[!!]`/`[XX]`/`[--]` indicators. E-085-03: `bb status` now includes Proxy (Bright Data) section with per-profile routing status. E-085-04: CLAUDE.md and docs/api/auth.md updated to reflect all implemented changes.
+- SHOULD FIX items (recorded for future reference): (1) E-085-01: `data2["token"]` access after type validation lacks KeyError guard -- raw KeyError escapes on malformed server response instead of descriptive LoginFailedError. (2) E-085-02: `_decode_jwt_exp()` duplicated between `creds.py` and `credentials.py`. (3) E-085-02: `t._spans` accesses Rich private attribute, could break across versions.
+- Documentation assessment: Trigger 1 fires (new feature: login fallback, enhanced CLI output). E-085-04 (context-layer story) already updated CLAUDE.md and docs/api/auth.md. No additional docs-writer dispatch needed -- the context-layer updates cover the documentation scope. No `docs/admin/` or `docs/coaching/` impact.
+- Context-layer assessment: (1) New convention/pattern: NO -- login fallback follows existing TokenManager patterns. (2) Architectural decision: NO -- login fallback is a behavioral enhancement, not an architectural change. (3) Footgun/boundary discovered: NO -- the `force_refresh()` boundary is documented in CLAUDE.md via E-085-04. (4) Agent behavior change: NO -- no changes to agent routing or coordination. (5) Domain knowledge: NO -- no new baseball domain insights. (6) New CLI command/workflow: NO -- existing commands enhanced, no new commands added. All triggers NO -- no claude-architect codification needed beyond E-085-04's CLAUDE.md updates.

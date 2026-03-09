@@ -25,6 +25,19 @@ class ForbiddenError(CredentialExpiredError):
     """
 
 
+class LoginFailedError(CredentialExpiredError):
+    """Raised when the 3-step login fallback flow fails.
+
+    Subclass of ``CredentialExpiredError`` for backward compatibility -- existing
+    ``except CredentialExpiredError`` clauses will still catch login failures.
+    Use ``except LoginFailedError`` before ``except CredentialExpiredError`` to
+    distinguish login failures from token expiry.
+
+    Recovery: check email/password in .env (distinct from
+    ``CredentialExpiredError``'s "run bb creds import" message).
+    """
+
+
 class RateLimitError(Exception):
     """Raised when the API returns 429 (rate limit hit)."""
 

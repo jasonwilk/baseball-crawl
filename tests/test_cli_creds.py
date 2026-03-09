@@ -117,60 +117,131 @@ class TestCredsImport:
 # ---------------------------------------------------------------------------
 
 
-class TestCredsCheck:
-    """Argument mapping tests for ``bb creds check``."""
+def _make_profile_result(
+    profile: str = "web",
+    exit_code: int = 0,
+    keys_present: list[str] | None = None,
+    keys_missing: list[str] | None = None,
+) -> "ProfileCheckResult":
+    """Build a minimal ProfileCheckResult for CLI tests."""
+    import time
 
-    def _invoke_check(self, args: list[str], exit_code: int = 0, message: str = "valid"):
-        with patch("src.cli.creds.check_credentials", return_value=(exit_code, message)) as mock_fn:
+    from src.gamechanger.credentials import (
+        ApiCheckResult,
+        CredentialPresence,
+        ProfileCheckResult,
+        TokenHealth,
+    )
+    from src.http.proxy_check import ProxyCheckOutcome, ProxyCheckResult
+
+    api_msg = "200 OK, logged in as Jason Smith" if exit_code == 0 else "Credentials expired"
+    return ProfileCheckResult(
+        profile=profile,
+        presence=CredentialPresence(
+            keys_present=keys_present or ["GAMECHANGER_BASE_URL"],
+            keys_missing=keys_missing or [],
+        ),
+        token_health=TokenHealth(exp=int(time.time()) + 86400, is_expired=False),
+        api_result=ApiCheckResult(
+            exit_code=exit_code,
+            display_name="Jason Smith" if exit_code == 0 else None,
+            message=api_msg,
+        ),
+        proxy_result=ProxyCheckResult(profile=profile, outcome=ProxyCheckOutcome.NOT_CONFIGURED),
+        exit_code=exit_code,
+    )
+
+
+class TestCredsCheck:
+    """Argument mapping and output format tests for ``bb creds check``."""
+
+    def _invoke_check(self, args: list[str], exit_code: int = 0, profile: str = "web"):
+        result_obj = _make_profile_result(profile=profile, exit_code=exit_code)
+        with patch(
+            "src.cli.creds.check_profile_detailed", return_value=result_obj
+        ) as mock_fn:
             result = runner.invoke(app, args)
         return result, mock_fn
 
-    def test_check_no_profile_passes_none(self) -> None:
-        """``bb creds check`` with no --profile passes profile=None."""
-        result, mock_fn = self._invoke_check(["creds", "check"])
+    def test_check_single_profile_calls_check_profile_detailed(self) -> None:
+        """``bb creds check --profile web`` calls check_profile_detailed with 'web'."""
+        result, mock_fn = self._invoke_check(["creds", "check", "--profile", "web"])
         assert result.exit_code == 0
-        mock_fn.assert_called_once_with(profile=None)
-
-    def test_check_web_profile(self) -> None:
-        """``bb creds check --profile web`` passes profile='web'."""
-        result, mock_fn = self._invoke_check(
-            ["creds", "check", "--profile", "web"],
-            exit_code=0,
-            message="Credentials valid",
-        )
-        assert result.exit_code == 0
-        mock_fn.assert_called_once_with(profile="web")
+        mock_fn.assert_called_once_with("web")
 
     def test_check_mobile_profile(self) -> None:
-        """``bb creds check --profile mobile`` passes profile='mobile'."""
+        """``bb creds check --profile mobile`` calls check_profile_detailed with 'mobile'."""
         result, mock_fn = self._invoke_check(
-            ["creds", "check", "--profile", "mobile"],
-            exit_code=0,
-            message="Credentials valid",
+            ["creds", "check", "--profile", "mobile"], profile="mobile"
         )
         assert result.exit_code == 0
-        mock_fn.assert_called_once_with(profile="mobile")
+        mock_fn.assert_called_once_with("mobile")
 
     def test_check_expired_exits_1(self) -> None:
         """Expired credentials: exit code 1."""
-        result, _ = self._invoke_check(
-            ["creds", "check"], exit_code=1, message="Credentials expired"
-        )
+        result, _ = self._invoke_check(["creds", "check", "--profile", "web"], exit_code=1)
         assert result.exit_code == 1
 
     def test_check_missing_exits_2(self) -> None:
         """Missing credentials: exit code 2."""
-        result, _ = self._invoke_check(
-            ["creds", "check"], exit_code=2, message="Missing required credentials"
-        )
+        missing_result = _make_profile_result(exit_code=2, keys_missing=["GAMECHANGER_BASE_URL"])
+        with patch("src.cli.creds.check_profile_detailed", return_value=missing_result):
+            result = runner.invoke(app, ["creds", "check", "--profile", "web"])
         assert result.exit_code == 2
 
-    def test_check_prints_message(self) -> None:
-        """Output contains the message returned by check_credentials."""
-        result, _ = self._invoke_check(
-            ["creds", "check"], exit_code=0, message="Credentials valid -- logged in as Jason"
-        )
-        assert "Credentials valid -- logged in as Jason" in result.output
+    def test_check_output_shows_status_indicators(self) -> None:
+        """Output contains Rich status indicator text."""
+        result, _ = self._invoke_check(["creds", "check", "--profile", "web"])
+        # Rich strips markup but the literal bracket text is rendered
+        assert "[OK]" in result.output or "OK" in result.output
+
+    def test_check_output_shows_profile_name(self) -> None:
+        """Panel title contains the profile name."""
+        result, _ = self._invoke_check(["creds", "check", "--profile", "web"])
+        assert "web" in result.output
+
+    def test_check_output_shows_test_endpoint(self) -> None:
+        """AC-6: Output displays the test endpoint used."""
+        result, _ = self._invoke_check(["creds", "check", "--profile", "web"])
+        assert "/me/user" in result.output
+
+    def test_check_output_no_credential_values(self) -> None:
+        """AC-9: Credential values (tokens, proxy URLs) never appear in output."""
+        secret_token = "super-secret-token-value"
+        result_obj = _make_profile_result()
+        with patch("src.cli.creds.check_profile_detailed", return_value=result_obj):
+            result = runner.invoke(app, ["creds", "check", "--profile", "web"])
+        assert secret_token not in result.output
+
+    def test_check_no_profile_calls_each_profile(self) -> None:
+        """``bb creds check`` (no --profile) calls check_profile_detailed for each profile."""
+        web_result = _make_profile_result(profile="web", exit_code=0)
+        mobile_result = _make_profile_result(profile="mobile", exit_code=1)
+        with patch(
+            "src.cli.creds.check_profile_detailed", side_effect=[web_result, mobile_result]
+        ) as mock_fn:
+            result = runner.invoke(app, ["creds", "check"])
+        assert mock_fn.call_count == 2
+
+    def test_check_no_profile_exit_0_if_any_valid(self) -> None:
+        """Multi-profile: exit 0 when at least one profile valid."""
+        web_result = _make_profile_result(profile="web", exit_code=0)
+        mobile_result = _make_profile_result(profile="mobile", exit_code=1)
+        with patch(
+            "src.cli.creds.check_profile_detailed", side_effect=[web_result, mobile_result]
+        ):
+            result = runner.invoke(app, ["creds", "check"])
+        assert result.exit_code == 0
+
+    def test_check_no_profile_exit_1_if_all_fail(self) -> None:
+        """Multi-profile: exit 1 when all profiles fail."""
+        web_result = _make_profile_result(profile="web", exit_code=1)
+        mobile_result = _make_profile_result(profile="mobile", exit_code=1)
+        with patch(
+            "src.cli.creds.check_profile_detailed", side_effect=[web_result, mobile_result]
+        ):
+            result = runner.invoke(app, ["creds", "check"])
+        assert result.exit_code == 1
 
 
 # ---------------------------------------------------------------------------

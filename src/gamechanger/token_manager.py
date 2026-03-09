@@ -34,7 +34,7 @@ from typing import Any
 
 import httpx
 
-from src.gamechanger.exceptions import ConfigurationError, CredentialExpiredError
+from src.gamechanger.exceptions import ConfigurationError, CredentialExpiredError, LoginFailedError
 from src.gamechanger.credential_parser import atomic_merge_env_file
 from src.gamechanger.signing import build_signature_headers
 
@@ -113,6 +113,8 @@ class TokenManager:
         access_token: str | None = None,
         app_name_mobile: str | None = None,
         env_path: Path | None = None,
+        email: str | None = None,
+        password: str | None = None,
     ) -> None:
         self._profile = profile
         self._client_id = client_id
@@ -124,6 +126,8 @@ class TokenManager:
         self._access_token_expires_at: int = 0  # Unix timestamp
         self._app_name_mobile = app_name_mobile
         self._env_path = str(env_path or _DEFAULT_ENV_PATH)
+        self._email = email
+        self._password = password
 
         self._validate_credentials()
 
@@ -189,7 +193,7 @@ class TokenManager:
             )
             return self._access_token
 
-        return self._do_refresh()
+        return self._do_refresh(allow_login_fallback=True)
 
     def force_refresh(self) -> str:
         """Unconditionally refresh the access token, bypassing the cache.
@@ -219,20 +223,40 @@ class TokenManager:
                 f"GAMECHANGER_ACCESS_TOKEN_{self._profile.upper()} in .env."
             )
         logger.debug("Force-refreshing access token for %s profile", self._profile)
-        return self._do_refresh()
+        return self._do_refresh(allow_login_fallback=False)
 
-    def _do_refresh(self) -> str:
+    def _do_refresh(self, allow_login_fallback: bool = False) -> str:
         """Perform a POST /auth token refresh and update internal state.
+
+        Args:
+            allow_login_fallback: When True and the profile is web, a HTTP 401
+                response triggers the 3-step login flow if email/password are
+                configured.  When False (``force_refresh`` path), 401 raises
+                ``CredentialExpiredError`` without attempting login.
 
         Returns:
             The new access token JWT string.
 
         Raises:
             AuthSigningError: On HTTP 400 (signature rejected).
-            CredentialExpiredError: On HTTP 401 (refresh token invalid/expired).
+            CredentialExpiredError: On HTTP 401 without login fallback capability.
+            LoginFailedError: If login fallback is attempted but any step fails.
         """
         logger.debug("Refreshing access token for %s profile", self._profile)
+        response = self._post_refresh_request()
 
+        if response.status_code == 401 and allow_login_fallback and self._profile == "web":
+            return self._handle_401_with_fallback()
+
+        self._handle_auth_error(response)
+        return self._apply_refresh_response(response)
+
+    def _post_refresh_request(self) -> httpx.Response:
+        """Build and POST the refresh request to POST /auth.
+
+        Returns:
+            The raw httpx Response from POST /auth.
+        """
         body: dict[str, Any] = {"type": "refresh"}
         assert self._client_key is not None
         assert self._client_id is not None
@@ -243,7 +267,6 @@ class TokenManager:
             client_key_b64=self._client_key,
             body=body,
         )
-
         profile_hdrs = _PROFILE_HEADERS.get(self._profile, _PROFILE_HEADERS["web"])
         headers: dict[str, str] = {
             "Accept": "*/*",
@@ -252,24 +275,47 @@ class TokenManager:
             "gc-device-id": self._device_id,
             "gc-token": self._refresh_token,
         }
-
-        # Mobile: optionally include gc-app-name if configured.
         if self._profile == "mobile" and self._app_name_mobile:
             headers["gc-app-name"] = self._app_name_mobile
 
         url = f"{self._base_url}{_AUTH_PATH}"
-
         with httpx.Client(timeout=30, trust_env=False) as client:
-            response = client.post(url, json=body, headers=headers)
+            return client.post(url, json=body, headers=headers)
 
-        self._handle_auth_error(response)
+    def _handle_401_with_fallback(self) -> str:
+        """Handle a 401 on refresh by attempting the login fallback flow.
 
+        Returns:
+            New access token from the login flow.
+
+        Raises:
+            CredentialExpiredError: If email/password are not configured.
+            LoginFailedError: If the login flow fails.
+        """
+        if self._email and self._password:
+            logger.info("Refresh token expired (HTTP 401); attempting login fallback")
+            return self._do_login_fallback()
+        raise CredentialExpiredError(
+            "Refresh token expired (HTTP 401). "
+            "Auto-recovery requires GAMECHANGER_USER_EMAIL and "
+            "GAMECHANGER_USER_PASSWORD in .env. "
+            "Set login credentials for automatic recovery, or re-import: bb creds import"
+        )
+
+    def _apply_refresh_response(self, response: httpx.Response) -> str:
+        """Extract tokens from a successful refresh response and persist state.
+
+        Args:
+            response: A 200 OK response from POST /auth.
+
+        Returns:
+            The new access token JWT string.
+        """
         data = response.json()
         new_access_token: str = data["access"]["data"]
         new_access_expires: int = int(data["access"]["expires"])
         new_refresh_token: str = data["refresh"]["data"]
 
-        # Update in-memory state.
         self._access_token = new_access_token
         self._access_token_expires_at = new_access_expires
         self._refresh_token = new_refresh_token
@@ -278,10 +324,7 @@ class TokenManager:
         logger.debug(
             "Access token refreshed for %s profile, expires in %ds", self._profile, remaining
         )
-
-        # Persist the rotated refresh token back to .env atomically.
         self._persist_refresh_token(new_refresh_token)
-
         return new_access_token
 
     def _handle_auth_error(self, response: httpx.Response) -> None:
@@ -317,6 +360,253 @@ class TokenManager:
             f"POST /auth returned unexpected status {response.status_code}. "
             "Check credentials and try again."
         )
+
+    def _extract_chain_sig(self, response: httpx.Response, step_name: str) -> str | None:
+        """Extract the HMAC part of the gc-signature response header for chaining.
+
+        Args:
+            response: The httpx Response from a POST /auth step.
+            step_name: Step name for warning message (e.g., ``"client-auth"``).
+
+        Returns:
+            The HMAC part (after the dot) for use as ``previous_signature_b64``,
+            or ``None`` if the header is absent.
+        """
+        sig = response.headers.get("gc-signature")
+        if sig is None:
+            logger.warning(
+                "gc-signature response header absent after login step %s; "
+                "signature chaining contract may have changed",
+                step_name,
+            )
+            return None
+        return sig.split(".", 1)[1] if "." in sig else sig
+
+    def _check_login_step_status(
+        self, response: httpx.Response, step_num: int, step_name: str
+    ) -> None:
+        """Raise appropriate errors for a failed login step.
+
+        Args:
+            response: The httpx Response from a POST /auth step.
+            step_num: Step number (2, 3, or 4) for error messages.
+            step_name: Step name (e.g., ``"client-auth"``) for error messages.
+
+        Raises:
+            AuthSigningError: If status is 400 (clock skew or bad signature).
+            LoginFailedError: If status is non-200 (and not 400).
+        """
+        if response.status_code == 400:
+            server_ts = response.headers.get("gc-timestamp", "(not present)")
+            raise AuthSigningError(
+                f"Login step {step_num} ({step_name}) signature rejected (HTTP 400). "
+                f"Server gc-timestamp: {server_ts}. "
+                "This may indicate clock skew or a stale signature."
+            )
+        if response.status_code != 200:
+            raise LoginFailedError(
+                f"Login step {step_num} ({step_name}) failed with HTTP {response.status_code}. "
+                "Check email/password in .env."
+            )
+
+    def _validate_client_auth_response(self, data: dict[str, Any]) -> str:
+        """Validate step 2 response shape and extract the client token.
+
+        Args:
+            data: Parsed JSON body from the step 2 POST /auth response.
+
+        Returns:
+            The client token string.
+
+        Raises:
+            LoginFailedError: If type is not ``"client-token"`` or token is absent.
+        """
+        if data.get("type") != "client-token":
+            logger.error(
+                "Login step 2 returned unexpected response type %r (expected 'client-token'). "
+                "Response keys: %s",
+                data.get("type"),
+                list(data.keys()),
+            )
+            raise LoginFailedError(
+                f"Login step 2 response has unexpected type {data.get('type')!r} "
+                "(expected 'client-token'). Check email/password in .env."
+            )
+        client_token = data.get("token")
+        if client_token is None:
+            logger.error(
+                "Login step 2 response missing 'token' field. Response keys: %s",
+                list(data.keys()),
+            )
+            raise LoginFailedError(
+                "Login step 2 response missing 'token' field "
+                "(type was 'client-token' but no token value returned). "
+                "Check email/password in .env."
+            )
+        return client_token
+
+    def _login_step2_client_auth(
+        self,
+        client: httpx.Client,
+        url: str,
+        profile_hdrs: dict[str, str],
+    ) -> tuple[str, str | None]:
+        """POST /auth step 2: establish anonymous client session (no gc-token).
+
+        Args:
+            client: Shared httpx.Client for the login chain.
+            url: Full POST /auth URL.
+            profile_hdrs: Profile-specific Content-Type and app headers.
+
+        Returns:
+            Tuple of ``(client_token, previous_signature_b64_or_none)``.
+
+        Raises:
+            AuthSigningError: On HTTP 400 (clock skew).
+            LoginFailedError: On non-200 or unexpected response shape.
+        """
+        assert self._client_id is not None
+        assert self._client_key is not None
+        body: dict[str, Any] = {"type": "client-auth", "client_id": self._client_id}
+        sig = build_signature_headers(
+            client_id=self._client_id,
+            client_key_b64=self._client_key,
+            body=body,
+            # No previous_signature_b64 (usePreviousSignature: false)
+        )
+        headers: dict[str, str] = {"Accept": "*/*", **profile_hdrs, **sig, "gc-device-id": self._device_id}
+        response = client.post(url, json=body, headers=headers)
+        self._check_login_step_status(response, step_num=2, step_name="client-auth")
+        client_token = self._validate_client_auth_response(response.json())
+        return client_token, self._extract_chain_sig(response, step_name="client-auth")
+
+    def _login_step3_user_auth(
+        self,
+        client: httpx.Client,
+        url: str,
+        profile_hdrs: dict[str, str],
+        client_token: str,
+        prev_sig: str | None,
+    ) -> str | None:
+        """POST /auth step 3: identify user by email (uses client token from step 2).
+
+        Args:
+            client: Shared httpx.Client.
+            url: Full POST /auth URL.
+            profile_hdrs: Profile-specific headers.
+            client_token: Client token returned by step 2.
+            prev_sig: gc-signature HMAC from step 2 for chaining.
+
+        Returns:
+            gc-signature HMAC from this response for chaining to step 4.
+
+        Raises:
+            AuthSigningError: On HTTP 400.
+            LoginFailedError: On non-200.
+        """
+        assert self._client_id is not None
+        assert self._client_key is not None
+        assert self._email is not None
+        body: dict[str, Any] = {"type": "user-auth", "email": self._email}
+        sig = build_signature_headers(
+            client_id=self._client_id,
+            client_key_b64=self._client_key,
+            body=body,
+            previous_signature_b64=prev_sig,
+        )
+        headers: dict[str, str] = {
+            "Accept": "*/*", **profile_hdrs, **sig,
+            "gc-device-id": self._device_id, "gc-token": client_token,
+        }
+        response = client.post(url, json=body, headers=headers)
+        self._check_login_step_status(response, step_num=3, step_name="user-auth")
+        return self._extract_chain_sig(response, step_name="user-auth")
+
+    def _login_step4_password(
+        self,
+        client: httpx.Client,
+        url: str,
+        profile_hdrs: dict[str, str],
+        client_token: str,
+        prev_sig: str | None,
+    ) -> tuple[str, int, str]:
+        """POST /auth step 4: authenticate with password; returns tokens.
+
+        Args:
+            client: Shared httpx.Client.
+            url: Full POST /auth URL.
+            profile_hdrs: Profile-specific headers.
+            client_token: Client token from step 2 (same token used for step 3).
+            prev_sig: gc-signature HMAC from step 3 for chaining.
+
+        Returns:
+            Tuple of ``(access_token, access_expires_unix, refresh_token)``.
+
+        Raises:
+            AuthSigningError: On HTTP 400.
+            LoginFailedError: On non-200.
+        """
+        assert self._client_id is not None
+        assert self._client_key is not None
+        assert self._password is not None
+        body: dict[str, Any] = {"type": "password", "password": self._password}
+        sig = build_signature_headers(
+            client_id=self._client_id,
+            client_key_b64=self._client_key,
+            body=body,
+            previous_signature_b64=prev_sig,
+        )
+        headers: dict[str, str] = {
+            "Accept": "*/*", **profile_hdrs, **sig,
+            "gc-device-id": self._device_id, "gc-token": client_token,
+        }
+        response = client.post(url, json=body, headers=headers)
+        self._check_login_step_status(response, step_num=4, step_name="password")
+        self._extract_chain_sig(response, step_name="password")  # warn if absent
+        data = response.json()
+        return data["access"]["data"], int(data["access"]["expires"]), data["refresh"]["data"]
+
+    def _do_login_fallback(self) -> str:
+        """Execute the 3-step login flow (steps 2-4) as fallback for an expired refresh token.
+
+        Delegates each step to a dedicated helper.  Called when ``_do_refresh()``
+        receives HTTP 401 and email/password are configured (web profile only).
+
+        Returns:
+            New access token JWT string.
+
+        Raises:
+            AuthSigningError: If any step returns 400 (clock skew).
+            LoginFailedError: If any step returns non-200 or step 2 shape is wrong.
+        """
+        logger.info("Attempting 3-step login fallback for %s profile", self._profile)
+        assert self._client_key is not None
+        assert self._client_id is not None
+        assert self._email is not None
+        assert self._password is not None
+
+        profile_hdrs = _PROFILE_HEADERS.get(self._profile, _PROFILE_HEADERS["web"])
+        url = f"{self._base_url}{_AUTH_PATH}"
+
+        with httpx.Client(timeout=30, trust_env=False) as client:
+            client_token, prev_sig2 = self._login_step2_client_auth(client, url, profile_hdrs)
+            prev_sig3 = self._login_step3_user_auth(client, url, profile_hdrs, client_token, prev_sig2)
+            new_access_token, new_access_expires, new_refresh_token = self._login_step4_password(
+                client, url, profile_hdrs, client_token, prev_sig3
+            )
+
+        self._access_token = new_access_token
+        self._access_token_expires_at = new_access_expires
+        self._refresh_token = new_refresh_token
+
+        remaining = new_access_expires - int(time.time())
+        logger.info(
+            "Login fallback succeeded for %s profile, access token expires in %ds",
+            self._profile,
+            remaining,
+        )
+        self._persist_refresh_token(new_refresh_token)
+        return new_access_token
 
     def _persist_refresh_token(self, new_refresh_token: str) -> None:
         """Write the rotated refresh token back to .env atomically.
