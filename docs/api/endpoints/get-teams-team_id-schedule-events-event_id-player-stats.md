@@ -10,8 +10,11 @@ profiles:
       HTTP 200. Both teams' players, three data sections in one call. No game_stream_id
       resolution needed. Confirmed 2026-03-05.
   mobile:
-    status: unverified
-    notes: Not captured from mobile profile.
+    status: observed
+    notes: >
+      55 hits, all HTTP 200. Observed 2026-03-09 (session 063531). All calls used
+      opponent progenitor_team_id (14fd6cb6) as the path team_id, CONFIRMING this
+      endpoint works with opponent team IDs from search. See caveats update.
 accept: "application/json, text/plain, */*"
 gc_user_action: null
 query_params: []
@@ -41,8 +44,11 @@ caveats:
     IP IN FRACTIONAL THIRDS: Innings pitched is a float where 1 1/3 IP = 1.333...
     (not 1.1). Convert with: full_innings + (fraction * 3) / 10 for display.
   - >
-    TEAM_ID SCOPE: The path team_id must be a team the authenticated user manages.
-    Using an opponent team UUID as the path team_id may return 403 -- not yet tested.
+    TEAM_ID SCOPE CONFIRMED BROAD (2026-03-09): Contrary to earlier assumption, this
+    endpoint DOES work with opponent team IDs. In session 063531, 55 calls were made
+    using the Nighthawks progenitor_team_id (14fd6cb6) as the path team_id, all
+    returning HTTP 200. This means the mobile app (and likely the web app) can fetch
+    any team's per-game player-stats using that team's progenitor_team_id.
 related_schemas: []
 see_also:
   - path: /teams/{team_id}/schedule
@@ -75,7 +81,7 @@ GET https://api.team-manager.gc.com/teams/{team_id}/schedule/events/{event_id}/p
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `team_id` | UUID | Team UUID. Must be a team the authenticated user manages. |
+| `team_id` | UUID | Team UUID. Works with own teams AND opponent `progenitor_team_id` values (confirmed 2026-03-09). |
 | `event_id` | UUID | Event UUID from the schedule (`GET /teams/{team_id}/schedule` event `id` field). |
 
 ## Headers (Web Profile)

@@ -4,208 +4,143 @@
 
 **Three-token architecture confirmed 2026-03-07. Programmatic refresh CONFIRMED WORKING.**
 
-**gc-signature CRACKED 2026-03-07.** Algorithm: `{nonce}.{hmac}` where nonce=Base64(32 random bytes) and hmac=HMAC-SHA256(clientKey, timestamp|nonce_bytes|sorted_body_values[|prevSig_bytes]). Body values extracted recursively with keys sorted alphabetically. clientKey is static app-wide Base64 secret from JS bundle as `clientId:clientKey`. Full details: `data/raw/gc-signature-algorithm.md`, `docs/api/auth.md`.
+**gc-signature CRACKED 2026-03-07.** Algorithm: `{nonce}.{hmac}` where nonce=Base64(32 random bytes) and hmac=HMAC-SHA256(clientKey, timestamp|nonce_bytes|sorted_body_values[|prevSig_bytes]). Full details: `data/raw/gc-signature-algorithm.md`, `docs/api/auth.md`.
 
 **Three token types:**
-- **CLIENT token** (exp-iat = 600s = 10 min): JWT fields: `type:"client"`, `sid`, `cid`, `iat`, `exp`. Anonymous session token. Used as gc-token in steps 3-4 of full login flow.
-- **ACCESS token** (exp-iat = ~3,672s = ~61 min on WEB; ~43,997s = ~12 hours on MOBILE): JWT fields: `type:"user"`, `cid`, `email`, `userId` (camelCase), `rtkn`, `iat`, `exp`. Sent as gc-token in all authenticated API requests.
-- **REFRESH token** (exp-iat = 1,209,600s = 14 days, same for web and mobile): JWT fields: `id` (uuid:uuid), `cid`, `uid`, `email`, `iat`, `exp`. No `type` field, different `kid`. Sent as gc-token in `POST /auth {"type":"refresh"}`. Self-renewing (each refresh returns a new refresh token).
+- **CLIENT token** (exp-iat = 600s = 10 min): `type:"client"`, `sid`, `cid`, `iat`, `exp`. Anonymous session token.
+- **ACCESS token** (~61 min web / ~12 hours mobile): `type:"user"`, `cid`, `email`, `userId`, `rtkn`, `iat`, `exp`. Sent as gc-token in all standard API calls.
+- **REFRESH token** (14 days, self-renewing): `id` (uuid:uuid), `cid`, `uid`, `email`, `iat`, `exp`. No `type` field, different `kid`. Sent as gc-token in POST /auth refresh calls.
 
-**Credential tiers:**
-1. Client ID + Client Key -- static (only changes on app deploys)
-2. Refresh token -- 14 days, self-renewing with each use
-3. Access token -- ~61 min, generated on demand; do NOT store
+**.env variables:** `GAMECHANGER_REFRESH_TOKEN_WEB`, `GAMECHANGER_CLIENT_ID_WEB`, `GAMECHANGER_CLIENT_KEY_WEB` (SECRET), `GAMECHANGER_DEVICE_ID`, `GAMECHANGER_USER_EMAIL`, `GAMECHANGER_USER_PASSWORD`.
 
-**.env variables (updated 2026-03-07):**
-- `GAMECHANGER_REFRESH_TOKEN_WEB` -- refresh token JWT (14-day, self-renewing)
-- `GAMECHANGER_CLIENT_ID_WEB` -- stable UUID (`clientId` from bundle)
-- `GAMECHANGER_CLIENT_KEY_WEB` -- Base64 HMAC key (`clientKey` from bundle) **SECRET**
-- `GAMECHANGER_DEVICE_ID` -- stable 32-char hex device identifier
-- `GAMECHANGER_USER_EMAIL` -- email (PII) for full login flow fallback
-- `GAMECHANGER_USER_PASSWORD` -- password (sensitive) for full login flow fallback
+**Mobile profile:** Mobile client ID `0f18f027-...` differs from web `07cb985d-...`. Mobile client key UNKNOWN (iOS binary). Programmatic mobile refresh NOT POSSIBLE.
 
-**Deprecated:** `GAMECHANGER_AUTH_TOKEN_WEB` (renamed to `GAMECHANGER_REFRESH_TOKEN_WEB`), `GAMECHANGER_SIGNATURE_WEB` (now computed programmatically).
+**Token validity check**: `GET /me/user` returns 200 OK (valid) or 401 (expired).
 
-**Mobile profile (confirmed 2026-03-08):** Mobile client ID `0f18f027-...` -- DIFFERENT from web `07cb985d-...`. Mobile client key UNKNOWN (in iOS binary). POST /auth response shape identical to web. Access token ~12 hours (vs ~61 min web). JWT kid/fields identical across profiles. `gc-app-name` on mobile UNRESOLVED. Programmatic mobile refresh NOT POSSIBLE until client key extracted. Do NOT use web client key for mobile signing.
+**REFRESH TOKEN EXPIRED (2026-03-09)** -- programmatic refresh failed. User must re-capture via proxy.
 
-**Token validity check**: `GET /me/user` returns 200 OK if the access token is valid, 401 if expired.
-
-**Five POST /auth body types:** `logout`, `client-auth` (no gc-token!), `user-auth`, `password`, `refresh`. Full login flow is steps 1-4 in that order. Refresh flow is just `{"type":"refresh"}` with the refresh token.
-
-**Signature chaining in login flow:** Steps 3-4 chain the server's response gc-signature (after the dot) as `previousSignature` in the next request. `client-auth` explicitly uses `usePreviousSignature: false`. Standalone refresh calls omit previousSignature.
-
-Credentials are NEVER logged, committed, or displayed. Redact to `{AUTH_TOKEN}` in all documentation and output.
+Credentials are NEVER logged, committed, or displayed. Redact to `{AUTH_TOKEN}` in all docs.
 
 ## API Spec Location
 
-Single source of truth: `docs/api/` directory structure. Index at `docs/api/README.md`, per-endpoint files in `docs/api/endpoints/`.
-
-All discoveries go into per-endpoint files immediately. Do not accumulate findings in memory or conversation -- write to the endpoint file.
+Single source of truth: `docs/api/` -- index at `docs/api/README.md`, per-endpoint files in `docs/api/endpoints/` (104 files as of 2026-03-09).
 
 ## Exploration Status
 
-As of 2026-03-07. All API knowledge is empirical -- discovered by running curl commands provided by the user, plus proxy capture analysis.
+As of 2026-03-09. See `docs/api/README.md` for full endpoint index.
 
-### iOS App Identity (confirmed 2026-03-05)
+### iOS App Identity (updated 2026-03-09)
 
-- **Odyssey app UA:** `Odyssey/2026.7.0 (com.gc.teammanager; build:0; iOS 26.3.0) Alamofire/5.9.0`
-- **gc-app-version on iOS:** `2026.7.0.0` (not `0.0.0` -- that is the web app value)
-- **Our browser headers confirmed correct** for api.team-manager.gc.com. No changes needed.
-- **Media CDN hostnames discovered:** `media-service.gc.com` (signed image delivery) and `vod-archive.gc.com` (AWS IVS video archive).
+- **Odyssey app UA (UPDATED):** `Odyssey/2026.8.0 (com.gc.teammanager; build:0; iOS 26.3.0) Alamofire/5.9.0` (was 2026.7.0 prior to session 2026-03-09_062610)
+- **gc-app-version on iOS (UPDATED):** `2026.8.0.0` (was `2026.7.0.0`; web app value is `0.0.0`)
+- **Media CDN hostnames:** `media-service.gc.com` (signed image delivery) and `vod-archive.gc.com` (AWS IVS video archive).
 
-### Live Probe Session (2026-03-07) -- Key Findings
+### Opponent ID Hierarchy (CONFIRMED AND EXPANDED 2026-03-09)
 
-50 of 64 endpoints returned 200 OK. Key discoveries:
+Three IDs per opponent from `GET /teams/{team_id}/opponents`, each used with DIFFERENT endpoints:
 
-**NEW CONFIRMED ENDPOINTS:**
-- `/teams/{team_id}/opponents/players` -- 758 records, 61 teams. Includes handedness (batting_side, throwing_hand) inline. Best bulk opponent data call.
-- `/teams/{team_id}/opponent/{opponent_id}` -- singular form. 5 fields: root_team_id, owning_team_id, name, is_hidden, progenitor_team_id.
-- `/teams/{team_id}/lineup-recommendation` -- GC algorithm. Returns 9 players with field_position and batting_order. generated_at changes each call (live calculation).
-- `/bats-starting-lineups/latest/{team_id}` -- actual coach-entered lineup. latest_lineup wrapper with entries[] array (order = batting order). DH fields present but null when not used.
-- `/bats-starting-lineups/{event_id}` -- HTTP 403 for away game event. Try home game event_id.
-- `/player-attributes/{player_id}/bats` -- {player_id, throwing_hand, batting_side}. Prefer /opponents/players for bulk.
-- `/game-streams/{game_stream_id}/events` -- 368 events in second sample (2026-03-07, different game). 10 codes: set_teams, fill_lineup_index, fill_position, message, pitch, transaction, base_running, replace_runner, undo, edit_group. event_data is JSON-encoded STRING -- must JSON.parse it. CRITICAL: `transaction` events contain NESTED events array including `ball_in_play` sub-events with x/y spray chart coordinates, defender positions, and playType. This is the source of spray chart data.
-- `/game-streams/gamestream-viewer-payload-lite/{event_id}` -- accepts event_id (NOT game_stream_id). Returns stream_id, latest_events (319), all_event_data_ids, marker.
-- `/events/{event_id}` -- two-key object: event{} + pregame_data{}. pregame_data.lineup_id links to bats-starting-lineups.
-- `/me/schedule` -- 26 teams, 71 events, config{max_future_days:180, max_past_days:90, max_teams:150}. Events include RSVPs and video status inline. expire_in_seconds:30.
-- `/me/associated-players` -- cross-team player tracking. teams{}, players{}, associations{}. Shows same player UUID per team across seasons (longitudinal tracking).
-- `/me/archived-teams` -- 8 archived teams (2019-2023). Same schema as /me/teams. ngb field is double-serialized JSON string.
-- `/me/advertising/metadata` -- ppid, do_not_sell, is_staff, targeting{age-groups, comp-levels, sports, subscription-type}.
-- `/me/subscription-information` -- best_subscription{type, provider_type, end_date, access_level, billing_cycle, amount_in_cents, provider_details{will_renew}}, highest_access_level, is_free_trial_eligible.
-- `/me/team-tile/{team_id}` -- compact team + record + badge_count.
-- `/subscription/details` -- full subscription with plan{provider, code, level, tier, max_allowed_members}, status flags, billing_info, dates{start, end}, is_owner.
-- `/subscription/recurly/plans` -- 6 plans (plus-month $9.99, plus-year $39.99, premium-month $14.99, premium-year $99.99, premium-shared-month $24.99, premium-shared-year $179.99).
-- `/search/history` -- max_results:10. Each result: type:"team" with id, public_id, name, sport, season, location, staff[], number_of_players.
-- `/announcements/user/read-status` -- {"read_status": "read"}.
-- `/sync-topics/me/updated-topics` -- {"status":"update-all", "updates":[], "next_cursor":"v2_{seq}_{ts}_{user_id}_{n}_{uuid}"}.
-- `/organizations/{org_id}/standings` -- array per team: home/away/overall/last10 W-L-T, winning_pct, runs{scored/allowed/differential}, streak{count/type}.
-- `/organizations/{org_id}/team-records` -- same schema as /standings (identical response structure).
-- `/organizations/{org_id}/pitch-count-report` -- CSV STRING (not JSON). Columns: Game Date, Start Time, Pitcher, Team, Opponent, Pitch Count, "Last Batter First Pitch #", IP, IC, Final Score, Scored By.
-- `/organizations/{org_id}/events` and `/game-summaries` -- return [] for travel ball org.
-- `/organizations/{org_id}/scoped-features` -- {"scoped_features": {}}.
-- `/teams/public/{public_id}/id` -- {"id": UUID}. Reverse bridge confirmed: a1GFM9Ku0BbF -> 72bb77d8-...
-- `/teams/public/{public_id}/access-level` -- {"paid_access_level": null}.
-- `/teams/{team_id}/users` -- FULL user list with PII (id, status, first_name, last_name, email).
-- `/teams/{team_id}/users/count` -- {"count": 243}.
-- `/teams/{team_id}/avatar-image` -- {"full_media_url": "https://media-service.gc.com/..."}.
-- `/teams/{team_id}/team-notification-setting` -- {team_id, event_reminder_setting:"never"}.
-- `/teams/{team_id}/web-widgets` -- [{id, type:"schedule"}].
-- `/teams/{team_id}/scoped-features` -- {"scoped_features": {}}.
-- `/teams/{team_id}/relationships` -- [{team_id, user_id, player_id, relationship:"primary"|"self"}].
-- `/teams/{team_id}/relationships/requests` -- [].
-- `/teams/{team_id}/external-associations` -- [].
-- `/teams/{team_id}/video-stream/videos` -- [].
-- `/teams/{team_id}/schedule/events/{event_id}/video-stream` -- stream config with publish_url (SENSITIVE), ingest_endpoints, status:"ended".
-- `/teams/{team_id}/schedule/events/{event_id}/video-stream/assets` -- 3 assets with duration, thumbnail_url.
-- `/teams/{team_id}/schedule/events/{event_id}/video-stream/live-status` -- {"isLive": false}.
-- `/teams/{team_id}/schedule/events/{event_id}/rsvp-responses` -- [].
-- `/users/{user_id}` -- {id, status, first_name, last_name, email}. PII -- redact all.
-- `/events/{event_id}/highlight-reel` -- multi_asset_video_id, status:"finalized", playlist[] with CloudFront-signed HLS URLs.
+| ID | Used With |
+|----|-----------|
+| `root_team_id` | /opponent/{id}, /teams/{root_team_id}/players, /teams/{root_team_id}/avatar-image |
+| `progenitor_team_id` | GET /teams/{progenitor_team_id} -- FULL access to ALL /teams/{id}/* endpoints |
+| `public_id` | All /public/teams/{public_id} endpoints |
 
-**HTTP 500 (pagination bugs -- blocked):**
-- `/organizations/{org_id}/teams` -- "page_starts_at undefined"
-- `/me/organizations` -- "page_size undefined"
-- `/me/related-organizations` -- "page_starts_at undefined"
-- **Workaround to test:** Try `?page_size=50` or `?start_at=0` query params.
+**KEY DISCOVERY (session 2026-03-09_063531):** `progenitor_team_id` gives FULL access to the opponent's team data via all `/teams/{team_id}/*` endpoints:
+- `/teams/{progenitor_team_id}` -- team metadata
+- `/teams/{progenitor_team_id}/game-summaries` -- all their games
+- `/teams/{progenitor_team_id}/schedule` -- full schedule
+- `/teams/{progenitor_team_id}/schedule/events/{event_id}/player-stats` -- per-game player stats (55 calls all 200!)
+- `/teams/{progenitor_team_id}/season-stats` -- season aggregates
+- `/teams/{progenitor_team_id}/players` -- roster
+- `/teams/{progenitor_team_id}/opponents` -- their opponents
+- `/teams/{progenitor_team_id}/opponents/players` -- all their opponent player data
+- `/teams/{progenitor_team_id}/users` -- team users
+- `/teams/{progenitor_team_id}/associations` -- org memberships
 
-**HTTP 403:**
-- `/bats-starting-lineups/{event_id}` with away game event_id. Try home game event_id.
+This means: by obtaining an opponent's `progenitor_team_id` from search results or our own opponents list, we have the SAME data access for any team as we do for our own teams. This is the foundation of the entire scouting data pipeline.
 
-**HTTP 404 (route does not exist on API domain):**
-- All `/teams/{public_id}/{season-slug}/*` endpoints -- these are web app routes, not API routes.
-- `/public/teams/{public_id}/live` -- 404 when no active game.
-- `/game-streams/insight-story/bats/{event_id}` and `/player-insights/bats/{event_id}` -- feature not available.
+**Nighthawks Navy AAA 14U example:** root=`bd05f3d5-...`, progenitor=`14fd6cb6-...`, public_id=`smgRExWHuBJJ`
 
-**HTTP 501:**
-- `/me/permissions` -- Not Implemented server-side.
+**CORRECTION (2026-03-09):** Previous docs incorrectly said "use progenitor_team_id for /players and /avatar-image". That is WRONG. Use `root_team_id` for both. Endpoint files updated.
 
-### Previously Confirmed Endpoints (pre-2026-03-07)
+### 2026-03-09 Key Findings (session 2026-03-09_061156)
 
-| Endpoint | Status | Discovered |
-|----------|--------|------------|
-| `GET /me/user` | CONFIRMED LIVE, 12 fields. Token validity check. | 2026-03-04 |
-| `GET /me/teams` | Schema FULLY DOCUMENTED, 15 teams, 27 fields | 2026-03-04 |
-| `GET /teams/{id}` | Schema FULLY DOCUMENTED, 25 fields. Opponent UUID confirmed. | 2026-03-04 |
-| `GET /teams/{id}/schedule` | FULLY DOCUMENTED, 228 events (103 games) | 2026-03-04 |
-| `GET /teams/{id}/game-summaries` | CONFIRMED, 92 total records, 2 pages | 2026-03-04 |
-| `GET /teams/{id}/players` | Schema CONFIRMED (5 fields: id, first_name, last_name, number, avatar_url). | 2026-03-04 |
-| `GET /teams/public/{public_id}/players` | CONFIRMED LIVE. 20 players. URL uses `/teams/public/` NOT `/public/teams/`. | 2026-03-04 |
-| `GET /teams/{id}/video-stream/assets` | Confirmed, 3 pages | Pre-2026-03-01 |
-| `GET /teams/{id}/season-stats` | CONFIRMED LIVE | 2026-03-04 |
-| `GET /teams/{id}/associations` | CONFIRMED, 244 records | 2026-03-04 |
-| `GET /teams/{id}/players/{player_id}/stats` | CONFIRMED, 80 records, per-game + spray charts | 2026-03-04 |
-| `GET /teams/{team_id}/schedule/events/{event_id}/player-stats` | CONFIRMED, 106 KB, 25 players both teams, spray charts | 2026-03-05 |
-| `GET /public/teams/{public_id}` | CONFIRMED, NO AUTH REQUIRED | 2026-03-04 |
-| `GET /public/teams/{public_id}/games` | CONFIRMED, NO AUTH REQUIRED | 2026-03-04 |
-| `GET /teams/{id}/opponents` | CONFIRMED, 70 records, 2 pages | 2026-03-04 |
-| `GET /game-stream-processing/{game_stream_id}/boxscore` | CONFIRMED LIVE. Asymmetric keys: own=public_id, opp=UUID. | 2026-03-04 |
-| `GET /game-stream-processing/{game_stream_id}/plays` | CONFIRMED LIVE. 58 plays, 6-inning game. | 2026-03-04 |
-| `GET /public/game-stream-processing/{game_stream_id}/details` | CONFIRMED, NO AUTH REQUIRED. include=line_scores for per-inning. | 2026-03-04 |
-| `GET /events/{event_id}/best-game-stream-id` | CONFIRMED. Returns {"game_stream_id": UUID}. | 2026-03-04 |
-| `GET /teams/{id}/public-team-profile-id` | CONFIRMED. UUID -> public_id bridge. | 2026-03-04 |
-| `POST /auth` | HTTP 400 (stale signature). Endpoint exists. Signing key unknown. | 2026-03-04 |
+- **NEW: `POST /clips/search/v2`** -- video clip search POST body query. CT: `application/vnd.gc.com.video_clip_search_query+json; version=0.0.0`. Body/response schema unknown.
+- **NEW: `PATCH /players/{player_id}`** -- update player attributes. CT: `application/vnd.gc.com.patch_player+json; version=0.1.0`. Body/response schema unknown.
+- **NEW: `GET /game-streams/{game_stream_id}/game-stat-edit-collection/{collection_id}`** -- HTTP 404 only. Route registered; purpose unclear (stat correction tracking?).
+- **`/public/game-stream-processing/{id}/details` accepts event_id directly** -- confirmed 200 OK with event_id. No need for /best-game-stream-id lookup when using this endpoint.
+- **`/teams/{id}/avatar-image` returns HTTP 404** (not 200 with null) when team has no avatar set.
+- **`/bats-starting-lineups/{event_id}` confirmed 200 OK** for home game event_id `387c28f7-...` (2026-03-09).
 
-### Boxscore Endpoint Critical Facts (confirmed 2026-03-04)
+### 2026-03-09 Key Findings (session 2026-03-09_062610, MOBILE)
+
+**App version update:** iOS app upgraded to `2026.8.0` / `gc-app-version: 2026.8.0.0`. All mobile UA strings and header examples updated in `docs/api/headers.md`.
+
+**Opponent Import Flow (fully documented):**
+1. `GET /search/opponent-import` (search-as-you-type, 3 calls per user interaction)
+2. `GET /teams/{opponent_uuid}/import-summary` (check available stats -- NEW endpoint)
+3. `POST /teams/{my_team_id}/opponent/import` (create association -- NEW endpoint, HTTP 201)
+4. `GET /teams/{my_team_id}/opponent/{opponent_id}` (fetch result)
+5. `GET /teams/{opponent_id}/players` + `GET /player-attributes/{id}/bats` ×11 (populate roster)
+
+**Game Creation Flow:** `POST /teams/{team_id}/schedule/events` (HTTP 201, NEW) followed within 8 seconds by `PATCH /teams/{team_id}/schedule/events/{event_id}` (HTTP 200, NEW) -- create-then-patch pattern.
+
+**Mobile-only third-party token endpoints (startup sequence, not relevant for ingestion):**
+- `POST /me/tokens/stream-chat` -- Stream.io chat JWT (HTTP 200)
+- `POST /me/tokens/firebase` -- Firebase push notification device token (HTTP 204, no body)
+
+**Mobile clip search:** iOS uses `POST /clips/search` (no /v2 suffix); web uses `POST /clips/search/v2`. Same content-type. Both documented.
+
+**Write endpoint content-types confirmed:**
+- `POST /opponent/import`: `application/vnd.gc.com.post_opponent_team_import+json; version=0.0.0`
+- `PATCH /opponent/{id}`: `application/vnd.gc.com.patch_opponent_team+json; version=0.0.0` (resp: text/plain)
+- `POST /schedule/events`: `application/vnd.gc.com.post_event+json; version=0.3.0`
+- `PATCH /schedule/events/{id}`: `application/vnd.gc.com.patch_event+json; version=0.6.0` (resp: JSON)
+
+### HTTP 500 (pagination bugs)
+- `/organizations/{org_id}/teams`, `/me/organizations`, `/me/related-organizations` -- try `?page_size=50` or `?start_at=0`.
+
+### Confirmed HTTP 404 / 403 patterns
+- `/bats-starting-lineups/{event_id}` -- HTTP 403 for away game event_id (scorer access only)
+- `/teams/{team_id}/avatar-image` -- HTTP 404 when team has no avatar (not an error -- treat as "no avatar")
+- `/teams/{team_id}/public-team-profile-id` -- HTTP 403 for opponent team UUIDs (own-team only)
+- `/teams/public/{public_id}/id` -- HTTP 403 for opponent public_ids (own-team only)
+- `/game-streams/insight-story/bats/{event_id}` and `/player-insights/bats/{event_id}` -- feature not available
+
+### 2026-03-09 Key Findings (session 2026-03-09_063531, MOBILE SEARCH + OPPONENT NAVIGATION)
+
+**NEW: `POST /search`** -- Main mobile GC app search. Content-type: `application/vnd.gc.com.post-search+json; version=0.0.0`. Query param: `start_at_page`. 6 hits (search-as-you-type for "nighthawks"). Body/response schema unknown.
+
+**NEW: `POST /search/history`** -- Records a user's search selection. Content-type: `application/vnd.gc.com.add_search_history+json; version=0.0.0`. Response is text/plain HTTP 200. Called after user taps a result.
+
+**MOBILE SEARCH FLOW confirmed:** `GET /search/history` (on open) → `POST /search` (repeated as user types) → `POST /search/history` (on selection) → navigate to team.
+
+**OPPONENT FULL ACCESS via progenitor_team_id CONFIRMED:** The mobile app navigates into the Nighthawks team using `progenitor_team_id` (`14fd6cb6`) and calls ALL the same `/teams/{id}/*` endpoints as it does for own teams. 55 calls to `/schedule/events/{event_id}/player-stats` all returned HTTP 200. This is the core scouting data access pattern.
+
+### Areas Not Yet Explored / High-Priority
+
+- **`POST /search` BODY SCHEMA** -- request body and response body not captured. Live curl needed to see query field names and response structure.
+- **`GET /search/opponent-import` RESPONSE BODY** -- endpoint confirmed 200 OK (both mobile and web profiles) but proxy only captures metadata, not JSON. Live curl needed.
+- **`GET /teams/{team_id}/import-summary` RESPONSE BODY** -- endpoint confirmed 200 OK but body not captured. Schema unknown.
+- **LSB coaching account credentials** -- current credentials are travel ball only. LSB HS teams not visible.
+- **`POST /clips/search` and `/v2` schemas** -- body and response format unknown for both.
+- **`PATCH /players/{player_id}` schema** -- body and response format unknown.
+- **`GET /organizations/{uuid}/game-summaries`** -- test with LSB org UUID when credentials available.
+- **DELETE /teams/{team_id}/schedule/events/{event_id}** -- user "deleted a game" in this session but no DELETE was observed; either it uses a PATCH with a cancel/delete field or was not captured.
+
+### Boxscore Endpoint Critical Facts
 
 - **URL param is `game_stream.id` from game-summaries** (NOT `event_id` or `game_stream.game_id`)
 - **Asymmetric team key format**: own team key = public_id slug; opponent key = UUID
-- **Player names included** in `players` array (id, first_name, last_name, number)
 - **Groups**: `"lineup"` (batting: AB/R/H/RBI/BB/SO) and `"pitching"` (IP/H/R/ER/BB/SO)
-- **Sparse extras (lineup)**: 2B, 3B, HR, TB, HBP, SB, CS, E -- only non-zero players listed
-- **Batting order**: implicit -- list order = batting order
 - Accept: `application/vnd.gc.com.event_box_score+json; version=0.0.0`
 
-### Areas Not Yet Explored / High-Priority Follow-Ups
+## JWT Payload Decode Tips
 
-**CRITICAL PRIORITY:**
-- **`GET /bats-starting-lineups/{event_id}` with home game event_id** -- previous test returned 403 with away game event. Test with home game where user's team was scorer.
-- **`?page_size=50` workaround for HTTP 500 endpoints** -- test `/me/organizations`, `/me/related-organizations`, and `/organizations/{org_id}/teams` with this parameter to bypass pagination bug.
-- **LSB coaching account gc-token** -- all current credentials are travel ball account. LSB HS teams not visible.
-
-**HIGH PRIORITY:**
-- `GET /organizations/{uuid}/game-summaries` -- likely returns data for school program orgs. Test with LSB org UUID when credentials available.
-- PUBLIC-TEAM-PROFILE-ID with opponent UUIDs -- does `/teams/{opponent_uuid}/public-team-profile-id` work? Unlocks public API access for opponents.
-
-**ONGOING:**
-- AUTH FLOW: `POST /auth` three-token architecture + gc-signature algorithm fully cracked 2026-03-07. Programmatic refresh confirmed working from Python. All five body types documented. See `docs/api/auth.md` and `docs/api/endpoints/post-auth.md`.
-- Opponent endpoint access: `/teams/{opponent_id}/season-stats`, game-summaries, boxscore
-- `streak_C` (cold streak, unconfirmed); `total_outs` semantics; ETag conditional requests
-- BOXSCORE: Does game_stream_id for opponent's own game-summaries work in boxscore?
-- PLAYS: Public unauthenticated variant? Extra-innings behavior? Pitch speed/location data?
-
-## JWT Payload Fields (Updated 2026-03-07)
-
-**Three token types -- CLIENT, ACCESS, and REFRESH:**
-
-**CLIENT token** (10 min, used as gc-token in steps 3-4 of login flow):
-Fields: `type:"client"`, `sid` (session UUID), `cid`, `iat`, `exp`. No user identity.
-
-**ACCESS token** (~61 min web / ~12 hours mobile, sent as gc-token in all standard API calls):
-Fields: `type:"user"`, `cid`, `email`, `userId` (camelCase, user UUID), `rtkn` (refresh token UUID pair), `iat`, `exp`.
-
-**REFRESH token** (14 days, sent as gc-token in POST /auth refresh/logout calls):
-Fields: `id` (compound `{session_uuid}:{refresh_token_uuid}`), `cid`, `uid` (user UUID), `email`, `iat`, `exp`. No `type` field in payload. Different JWT `kid` than client/access tokens.
-
-The `/subscription/details` response `type: "team_manager"` field is subscription metadata, not JWT payload type.
-
-**Decode tip:** `exp-iat < 1000` = client token (10 min). `exp-iat < 50000` = access token (~61 min web OR ~12 hours mobile -- old threshold of 10000 too narrow for mobile). `exp-iat > 1000000` = refresh token (14 days).
+`exp-iat < 1000` = client (10 min). `exp-iat < 50000` = access (~61 min web OR ~12 hours mobile). `exp-iat > 1000000` = refresh (14 days).
 
 ## Security Rules
 
 Never display/log/store credentials. Use `{AUTH_TOKEN}` placeholders. Strip auth headers from raw responses.
 
-**PII hotspots identified 2026-03-07:**
-- `/teams/{team_id}/users` -- full user list with emails
-- `/users/{user_id}` -- name + email
-- `/me/associated-players` -- player names across teams
-- `/me/advertising/metadata` -- `targeting.gc_user-id_v1` is the user UUID
-- `/sync-topics/me/updated-topics` -- `next_cursor` contains user UUID
-- `/teams/{team_id}/schedule/events/{event_id}/video-stream` -- `publish_url` and `stream_key` are live stream credentials
-
-## Mobile Auth (E-075, 2026-03-08)
-
-Mobile proxy session `2026-03-06_211209` analyzed. 744 iOS requests, 6 POST /auth (all 200). Key finding: mobile POST /auth uses `application/vnd.gc.com.post_eden_auth+json; version=1.0.0` (web uses `application/json; charset=utf-8`). gc-client-id NOT captured -- addon gap. Client key parity unknown -- decode `GAMECHANGER_REFRESH_TOKEN_MOBILE` from `.env` and compare `cid` to `GAMECHANGER_CLIENT_ID_WEB`. E-075-01 naming rename appears ALREADY COMPLETE in code. Full notes: `.claude/agent-memory/api-scout/mobile-auth-notes.md`.
-
-## Key File Paths
-
-API spec: `docs/api/README.md` (index), `docs/api/endpoints/` (per-endpoint files) | Stat glossary: `docs/gamechanger-stat-glossary.md` | Creds: `.env` | HTTP: `src/http/headers.py`, `src/http/session.py`
+**PII hotspots:** `/teams/{team_id}/users` (emails), `/users/{user_id}` (name+email), `/me/associated-players` (player names across teams).

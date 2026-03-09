@@ -9,7 +9,9 @@ profiles:
     notes: Not captured from web profile.
   mobile:
     status: observed
-    notes: 1 hit, status 200. Discovered 2026-03-05.
+    notes: >
+      2 hits total (1 hit 2026-03-05, 1 hit 2026-03-09 session 063531). Both HTTP 200.
+      Second hit used opponent progenitor_team_id (14fd6cb6). Response schema still unknown.
 accept: null
 gc_user_action: null
 query_params: []

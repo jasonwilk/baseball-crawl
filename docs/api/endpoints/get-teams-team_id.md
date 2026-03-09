@@ -8,8 +8,11 @@ profiles:
     status: confirmed
     notes: Full schema documented. Tested with both own team and opponent UUIDs.
   mobile:
-    status: unverified
-    notes: Not captured from mobile profile.
+    status: observed
+    notes: >
+      9 hits (7x 200, 2x 304). Observed 2026-03-09 (session 063531). Called repeatedly
+      with opponent progenitor_team_id (14fd6cb6) -- confirming endpoint works for
+      opponent teams. High hit count suggests polling/refresh behavior in mobile app.
 accept: "application/vnd.gc.com.team+json; version=0.10.0"
 gc_user_action: "data_loading:team"
 query_params: []
@@ -151,5 +154,18 @@ Single JSON object. Same 25-field schema as team objects in `GET /me/teams` (wit
 - `organizations` and `ngb` may be empty arrays for opponent teams -- this reflects actual data, not access restrictions.
 - `team_player_count` is always null observed.
 - Opponent team access confirmed for `pregame_data.opponent_id` from schedule. Usability with season-stats, players, and game-summaries endpoints is structurally consistent but not all variants have been independently confirmed.
+- **progenitor_team_id for metadata:** Confirmed 2026-03-09. When viewing an opponent's page, the GC app calls `GET /teams/{progenitor_team_id}` (using the canonical GC UUID from the opponent registry) to load team metadata (name, record, settings, public_id). This is distinct from using `root_team_id` for `/teams/{id}/players` and `/teams/{id}/avatar-image`. See the opponent ID hierarchy note below.
 
-**Discovered:** 2026-03-04. **Opponent validation confirmed:** 2026-03-04.
+## Opponent Team ID Hierarchy (Confirmed 2026-03-09)
+
+When navigating to an opponent in the GC web app, three different team IDs are used with different endpoints:
+
+| ID Type | Source | Used With |
+|---------|--------|-----------|
+| `root_team_id` | `GET /teams/{team_id}/opponents` | `/teams/{root_team_id}/players`, `/teams/{root_team_id}/avatar-image`, `/teams/{team_id}/opponent/{root_team_id}` |
+| `progenitor_team_id` | `GET /teams/{team_id}/opponents` | `GET /teams/{progenitor_team_id}` (this endpoint -- for team metadata, public_id, record) |
+| `public_id` | `GET /teams/{progenitor_team_id}` response `.public_id` | `/public/teams/{public_id}`, `/teams/public/{public_id}/players`, etc. |
+
+The relationship chain: `root_team_id` (local registry) → lookup `progenitor_team_id` (from opponents list) → `GET /teams/{progenitor_team_id}` returns `public_id` → use `public_id` for public endpoints.
+
+**Discovered:** 2026-03-04. **Opponent validation confirmed:** 2026-03-04. **progenitor_team_id for metadata, full ID hierarchy:** 2026-03-09.

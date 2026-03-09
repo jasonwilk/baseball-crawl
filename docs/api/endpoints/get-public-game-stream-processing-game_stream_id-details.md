@@ -6,7 +6,11 @@ auth: none
 profiles:
   web:
     status: confirmed
-    notes: No auth required. Line scores confirmed with include=line_scores param.
+    notes: >
+      No auth required. Line scores confirmed with include=line_scores param.
+      Also confirmed: endpoint accepts event_id directly in the path (not just
+      game_stream_id). GC web app used event_id 07c39def-7720-49d8-83e7-c08c6055a557
+      and received HTTP 200 (2026-03-09).
   mobile:
     status: not_applicable
     notes: Public endpoint -- no auth profile distinction.
@@ -23,9 +27,17 @@ response_shape: object
 response_sample: data/raw/public-game-details-sample.json
 raw_sample_size: "~500 bytes"
 discovered: "2026-03-04"
-last_confirmed: "2026-03-04"
+last_confirmed: "2026-03-09"
 tags: [games, events, public]
 caveats:
+  - >
+    ACCEPTS EITHER event_id OR game_stream_id: Confirmed 2026-03-09. The GC web app
+    passed event_id (07c39def-7720-49d8-83e7-c08c6055a557) directly and received
+    HTTP 200 with ?include=line_scores. The same game has game_stream_id
+    aad088a2-df87-4c0f-b39a-cf42e8c8f24a which was used in other game-stream
+    endpoints in the same session. Both IDs appear to resolve to the same game.
+    This eliminates the need to call /events/{event_id}/best-game-stream-id first
+    when using this public endpoint.
   - >
     line_score field is CONDITIONAL: only present when ?include=line_scores query param
     is included. Without the param, the field is absent entirely.
@@ -143,4 +155,4 @@ Single JSON object with 12 fields.
 - `line_score.team` and `line_score.opponent_team` have the same structure but which is "team" vs "opponent" depends on whose perspective the `home_away` field reflects.
 - `scores` array length equals innings played -- a 7-inning game with a last-inning rally will have 7 elements.
 
-**Discovered:** 2026-03-04. **Confirmed no-auth with line scores:** 2026-03-04.
+**Discovered:** 2026-03-04. **Confirmed no-auth with line scores:** 2026-03-04. **event_id accepted directly in path (no game_stream_id lookup needed):** 2026-03-09.

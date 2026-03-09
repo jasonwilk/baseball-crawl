@@ -39,6 +39,8 @@ Endpoints are grouped by domain. Within each group, sorted alphabetically by pat
 |--------|------|--------|------|-------------|
 | POST | [/auth](endpoints/post-auth.md) | CONFIRMED | req | Full auth lifecycle: login (4 steps), token refresh, logout. Three-token architecture (client/access/refresh). gc-signature algorithm cracked 2026-03-07; programmatic refresh confirmed working from Python. |
 | POST | [/me/tokens/braze](endpoints/post-me-tokens-braze.md) | CONFIRMED | req | Third-party Braze push notification JWT (not relevant for data ingestion) |
+| POST | [/me/tokens/firebase](endpoints/post-me-tokens-firebase.md) | CONFIRMED | req | Firebase push notification token registration -- HTTP 204, mobile only (not relevant for data ingestion) |
+| POST | [/me/tokens/stream-chat](endpoints/post-me-tokens-stream-chat.md) | CONFIRMED | req | Stream Chat JWT for team messaging feature (not relevant for data ingestion) |
 
 ---
 
@@ -91,6 +93,8 @@ Endpoints are grouped by domain. Within each group, sorted alphabetically by pat
 | Method | Path | Status | Auth | Description |
 |--------|------|--------|------|-------------|
 | GET | [/teams/{team_id}/game-summaries](endpoints/get-teams-team_id-game-summaries.md) | CONFIRMED | req | Paginated game summaries with game_stream_id and scores |
+| PATCH | [/teams/{team_id}/schedule/events/{event_id}](endpoints/patch-teams-team_id-schedule-events-event_id.md) | CONFIRMED | req | Update event details (opponent, time, location) -- write operation |
+| POST | [/teams/{team_id}/schedule/events](endpoints/post-teams-team_id-schedule-events.md) | CONFIRMED | req | Create a new game or practice event (HTTP 201) -- write operation |
 | GET | [/teams/{team_id}/schedule](endpoints/get-teams-team_id-schedule.md) | CONFIRMED | req | Full event schedule: games, practices, other events |
 | GET | [/teams/{team_id}/schedule/event-series/{series_id}](endpoints/get-teams-team_id-schedule-event-series-series_id.md) | OBSERVED | req | Event series details (HTTP 404 observed) |
 | GET | [/teams/{team_id}/schedule/events/{event_id}/player-stats](endpoints/get-teams-team_id-schedule-events-event_id-player-stats.md) | CONFIRMED | req | Per-game per-player stats + spray charts for both teams (~106 KB) |
@@ -107,10 +111,13 @@ Endpoints are grouped by domain. Within each group, sorted alphabetically by pat
 
 | Method | Path | Status | Auth | Description |
 |--------|------|--------|------|-------------|
+| GET | [/teams/{team_id}/import-summary](endpoints/get-teams-team_id-import-summary.md) | CONFIRMED | req | Summary of importable stats for a team (checked before adding opponent) |
 | GET | [/teams/{team_id}/lineup-recommendation](endpoints/get-teams-team_id-lineup-recommendation.md) | CONFIRMED | req | GC algorithm-generated batting order and field positions |
 | GET | [/teams/{team_id}/opponent/{opponent_id}](endpoints/get-teams-team_id-opponent-opponent_id.md) | CONFIRMED | req | Single opponent registry entry by root_team_id |
 | GET | [/teams/{team_id}/opponents](endpoints/get-teams-team_id-opponents.md) | CONFIRMED | req | Paginated opponent registry for a team |
 | GET | [/teams/{team_id}/opponents/players](endpoints/get-teams-team_id-opponents-players.md) | CONFIRMED | req | Bulk opponent player roster with handedness (758 records observed) |
+| PATCH | [/teams/{team_id}/opponent/{opponent_id}](endpoints/patch-teams-team_id-opponent-opponent_id.md) | CONFIRMED | req | Update opponent record (name, visibility) -- write operation |
+| POST | [/teams/{team_id}/opponent/import](endpoints/post-teams-team_id-opponent-import.md) | CONFIRMED | req | Import an opponent team into the registry (HTTP 201) -- write operation |
 | GET | [/teams/{team_id}/players](endpoints/get-teams-team_id-players.md) | CONFIRMED | req | Team player roster: name, number, avatar |
 | GET | [/teams/{team_id}/players/{player_id}/stats](endpoints/get-teams-team_id-players-player_id-stats.md) | CONFIRMED | req | Per-game stats for one player across the season |
 
@@ -136,7 +143,8 @@ Endpoints are grouped by domain. Within each group, sorted alphabetically by pat
 | GET | [/game-stream-processing/{game_stream_id}/boxscore](endpoints/get-game-stream-processing-game_stream_id-boxscore.md) | CONFIRMED | req | Per-player batting and pitching lines for both teams |
 | GET | [/game-stream-processing/{game_stream_id}/plays](endpoints/get-game-stream-processing-game_stream_id-plays.md) | CONFIRMED | req | Pitch-by-pitch play log with player UUID template resolution |
 | GET | [/game-streams/{game_stream_id}/events](endpoints/get-game-streams-game_stream_id-events.md) | CONFIRMED | req | Raw game event stream (event_data is JSON-encoded string) |
-| GET | [/game-streams/gamestream-recap-story/{event_id}](endpoints/get-game-streams-gamestream-recap-story-event_id.md) | OBSERVED | req | Structured game narrative with typed team/player segments |
+| GET | [/game-streams/{game_stream_id}/game-stat-edit-collection/{collection_id}](endpoints/get-game-streams-game_stream_id-game-stat-edit-collection-collection_id.md) | OBSERVED | req | Stat edit collection for a game (HTTP 404 observed -- route registered, no data returned) |
+| GET | [/game-streams/gamestream-recap-story/{event_id}](endpoints/get-game-streams-gamestream-recap-story-event_id.md) | CONFIRMED | req | Game narrative recap (200 OK for some games; 404 for others). Accepts game_stream_id and team_id query params. |
 | GET | [/game-streams/gamestream-viewer-payload-lite/{event_id}](endpoints/get-game-streams-gamestream-viewer-payload-lite-event_id.md) | CONFIRMED | req | Viewer event payload with stream_id resolved from event_id |
 | GET | [/game-streams/insight-story/bats/{event_id}](endpoints/get-game-streams-insight-story-bats-event_id.md) | OBSERVED | req | Batting insight story (HTTP 404 observed) |
 | GET | [/game-streams/player-insights/bats/{event_id}](endpoints/get-game-streams-player-insights-bats-event_id.md) | OBSERVED | req | Per-player batting insights (HTTP 404 observed) |
@@ -161,7 +169,7 @@ These endpoints use `public_id` slugs and require **no** gc-token or gc-device-i
 | Method | Path | Status | Auth | Description |
 |--------|------|--------|------|-------------|
 | GET | [/teams/public/{public_id}/access-level](endpoints/get-teams-public-public_id-access-level.md) | CONFIRMED | req | Paid access tier for a team by public_id (AUTH REQUIRED) |
-| GET | [/teams/public/{public_id}/id](endpoints/get-teams-public-public_id-id.md) | CONFIRMED | req | Reverse bridge: public_id slug → team UUID (AUTH REQUIRED) |
+| GET | [/teams/public/{public_id}/id](endpoints/get-teams-public-public_id-id.md) | PARTIAL | req | Reverse bridge: public_id slug → team UUID. **Own teams only -- HTTP 403 for opponent public_ids (confirmed 2026-03-09).** |
 | GET | [/teams/public/{public_id}/players](endpoints/get-teams-public-public_id-players.md) | CONFIRMED | req | Player roster by public_id -- note inverted URL pattern (auth unverified) |
 
 ---
@@ -171,6 +179,7 @@ These endpoints use `public_id` slugs and require **no** gc-token or gc-device-i
 | Method | Path | Status | Auth | Description |
 |--------|------|--------|------|-------------|
 | GET | [/players/{player_id}/profile-photo](endpoints/get-players-player_id-profile-photo.md) | OBSERVED | req | Player profile photo URL (HTTP 404 when no photo set) |
+| PATCH | [/players/{player_id}](endpoints/patch-players-player_id.md) | OBSERVED | req | Update player attributes (batting side, throwing hand, jersey number -- write operation) |
 | GET | [/users/{user_id}](endpoints/get-users-user_id.md) | CONFIRMED | req | User profile: id, status, first_name, last_name, email (PII) |
 | GET | [/users/{user_id}/profile-photo](endpoints/get-users-user_id-profile-photo.md) | OBSERVED | req | User profile photo URL (HTTP 404 when no photo set) |
 
@@ -213,6 +222,18 @@ These endpoints use `public_id` slugs and require **no** gc-token or gc-device-i
 | Method | Path | Status | Auth | Description |
 |--------|------|--------|------|-------------|
 | GET | [/search/history](endpoints/get-search-history.md) | CONFIRMED | req | Recent team search history with UUID and public_id values |
+| GET | [/search/opponent-import](endpoints/get-search-opponent-import.md) | CONFIRMED | req | Team search for opponent import -- search-as-you-type, returns team UUIDs. CRITICAL for automated opponent discovery. |
+| POST | [/search](endpoints/post-search.md) | CONFIRMED | req | Main mobile app team search (search-as-you-type). Body/response schema unknown -- mobile only, 6 hits observed. |
+| POST | [/search/history](endpoints/post-search-history.md) | CONFIRMED | req | Record a search history entry (called when user selects a search result). Mobile only, schema unknown. |
+
+---
+
+### Video & Clips
+
+| Method | Path | Status | Auth | Description |
+|--------|------|--------|------|-------------|
+| POST | [/clips/search](endpoints/post-clips-search.md) | CONFIRMED | req | Video clip search -- mobile iOS app version (3 hits; identical content-type to /v2) |
+| POST | [/clips/search/v2](endpoints/post-clips-search-v2.md) | OBSERVED | req | Video clip search -- web app version (schema unknown; mobile uses /clips/search) |
 
 ---
 
@@ -226,8 +247,12 @@ These URL patterns return HTTP 404 on `api.team-manager.gc.com`. They are web ap
 
 | Count | Source |
 |-------|--------|
-| **90** | Files in `docs/api/endpoints/` |
-| **90** | Rows in this index (89 endpoint entries + 1 web-routes reference) |
+| **104** | Files in `docs/api/endpoints/` (103 endpoint files + web-routes-not-api.md reference) |
+| **104** | Endpoint rows in this index |
 | **89** | E-062-R-01 spike inventory count (88 endpoints + 1 web-routes reference file) |
 
-Note: 1 new endpoint (`POST /me/tokens/braze`) added 2026-03-07. E-062 baseline was 89.
+Notes:
+- 1 new endpoint (`POST /me/tokens/braze`) added 2026-03-07. E-062 baseline was 89.
+- 4 new endpoints added 2026-03-09 (session 2026-03-09_061156): `GET /search/opponent-import`, `POST /clips/search/v2`, `PATCH /players/{player_id}`, `GET /game-streams/{game_stream_id}/game-stat-edit-collection/{collection_id}`.
+- 8 new endpoints added 2026-03-09 (session 2026-03-09_062610, mobile): `POST /teams/{team_id}/opponent/import`, `PATCH /teams/{team_id}/opponent/{opponent_id}`, `GET /teams/{team_id}/import-summary`, `POST /teams/{team_id}/schedule/events`, `PATCH /teams/{team_id}/schedule/events/{event_id}`, `POST /me/tokens/firebase`, `POST /me/tokens/stream-chat`, `POST /clips/search`.
+- 2 new endpoints added 2026-03-09 (session 2026-03-09_063531, mobile search): `POST /search`, `POST /search/history`.

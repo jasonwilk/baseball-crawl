@@ -8,8 +8,10 @@ profiles:
     status: confirmed
     notes: HTTP 200. Returns empty array []. Discovered 2026-03-07.
   mobile:
-    status: unverified
-    notes: Not captured from mobile profile.
+    status: observed
+    notes: >
+      3 hits (200 + 304). Observed 2026-03-09 (session 063531). Called with opponent
+      progenitor_team_id (14fd6cb6).
 accept: null
 gc_user_action: null
 query_params: []

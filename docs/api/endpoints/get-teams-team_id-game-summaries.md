@@ -8,8 +8,11 @@ profiles:
     status: confirmed
     notes: Full schema documented. 92 records across 2 pages confirmed 2026-03-04.
   mobile:
-    status: unverified
-    notes: Not captured from mobile profile.
+    status: observed
+    notes: >
+      2 hits, HTTP 200. Observed 2026-03-09 (session 063531). Called with opponent
+      progenitor_team_id (14fd6cb6), confirming this endpoint works for opponent teams.
+      Both paginated (no query_keys, then start_at).
 accept: "application/vnd.gc.com.game_summary:list+json; version=0.1.0"
 gc_user_action: "data_loading:events"
 query_params:

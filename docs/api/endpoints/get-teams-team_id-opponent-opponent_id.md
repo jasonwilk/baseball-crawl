@@ -26,8 +26,12 @@ caveats:
     form returns a specific opponent; the plural form (/opponents) returns the paginated list.
   - >
     opponent_id IS root_team_id: The path parameter opponent_id must be the root_team_id
-    from GET /teams/{team_id}/opponents -- NOT the progenitor_team_id. Use progenitor_team_id
-    for all other team endpoints.
+    from GET /teams/{team_id}/opponents -- NOT the progenitor_team_id.
+  - >
+    ID USAGE HIERARCHY (confirmed 2026-03-09): root_team_id is for /opponent/{id},
+    /players, and /avatar-image. progenitor_team_id is for GET /teams/{id} (metadata).
+    public_id (from GET /teams/{progenitor_team_id} response) is for public endpoints.
+    See GET /teams/{team_id} for the full ID hierarchy table.
 related_schemas: []
 see_also:
   - path: /teams/{team_id}/opponents

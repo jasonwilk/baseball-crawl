@@ -7,8 +7,11 @@ profiles:
   web:
     status: confirmed
     notes: >
-      Single-field response confirmed 2026-03-04 with gc-token. One team confirmed
-      (cb67372e -> KCRUFIkaHGXI). Opponent UUID behavior unverified.
+      Single-field response confirmed 2026-03-04 with gc-token. One own-team confirmed
+      (cb67372e -> KCRUFIkaHGXI). OPPONENT UUID RETURNS 403: tested 2026-03-09 with
+      progenitor_team_id 14fd6cb6-43ab-4c61-a26c-5486c949e7b5 (Nighthawks Navy AAA 14U).
+      Credentials confirmed valid (GET /me/user returned 200). Access is restricted
+      to teams the authenticated user is a member of -- opponents are blocked.
   mobile:
     status: unverified
     notes: Not captured from mobile profile.
@@ -25,13 +28,15 @@ tags: [team, bridge]
 caveats:
   - >
     AUTH CONFIRMED (standard pattern): gc-token present in confirmed capture. Like all
-    other `/teams/{team_id}/*` endpoints, auth is required. Unauthenticated access not
-    explicitly tested but not expected to work given the path pattern.
+    other `/teams/{team_id}/*` endpoints, auth is required.
   - >
-    OPPONENT UUID BEHAVIOR UNVERIFIED: If this endpoint works for opponent team UUIDs
-    (from schedule pregame_data.opponent_id or opponents progenitor_team_id), it would
-    enable full public API access for all opponents without needing opponents in the
-    authenticated user's team list. This is the highest-priority follow-up verification.
+    OPPONENT UUID RETURNS 403 (CONFIRMED 2026-03-09): Tested with opponent progenitor_team_id
+    14fd6cb6-43ab-4c61-a26c-5486c949e7b5 (Nighthawks Navy AAA 14U) -- HTTP 403 Forbidden.
+    Credentials confirmed valid via /me/user. Access is restricted to teams the
+    authenticated user is a member of. The "ID chain" from UUID to public endpoints
+    does NOT work for opponents via this endpoint. Alternative routes to opponent
+    public_ids must be found (e.g., scraping the GC web app URL, or checking if the
+    public API exposes the team slug directly).
 related_schemas: []
 see_also:
   - path: /teams/public/{public_id}/id
@@ -48,11 +53,11 @@ see_also:
 
 # GET /teams/{team_id}/public-team-profile-id
 
-**Status:** CONFIRMED LIVE -- 200 OK. Single-field response confirmed. Last verified: 2026-03-04.
+**Status:** CONFIRMED LIVE -- 200 OK for own teams. **HTTP 403 for opponent UUIDs (confirmed 2026-03-09).** Last verified: 2026-03-09.
 
 UUID-to-`public_id` bridge. Resolves a team's internal UUID to its `public_id` slug. This is the bridge endpoint between the authenticated API (which identifies teams by UUID) and the public API (which identifies teams by `public_id` slug).
 
-Without this endpoint, the only way to obtain a team's `public_id` is from the `GET /me/teams` or `GET /teams/{team_id}` response -- which only covers teams the authenticated user belongs to. This endpoint makes it possible to resolve any team UUID (including opponents) to a `public_id` for use with public endpoints.
+**CRITICAL LIMITATION:** This endpoint returns 403 Forbidden when called with an opponent team UUID. It only works for teams the authenticated user is a member of. The "ID chain" from opponent UUID to public API data via this bridge does NOT work. Alternative approaches to obtaining opponent `public_id` values are required (e.g., the GC web URL for the team contains the slug, or the boxscore `game_stream_id` is already usable without needing the public_id for per-game detail calls).
 
 ```
 GET https://api.team-manager.gc.com/teams/{team_id}/public-team-profile-id
@@ -62,7 +67,7 @@ GET https://api.team-manager.gc.com/teams/{team_id}/public-team-profile-id
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `team_id` | UUID | Team UUID to resolve. Expected to work with own team, opponent, or any team UUID. |
+| `team_id` | UUID | Team UUID to resolve. Returns 200 for own teams (user is a member). Returns 403 for opponent/external team UUIDs (confirmed 2026-03-09). |
 
 ## Headers (Web Profile)
 
@@ -98,16 +103,22 @@ Single JSON object with one field.
 
 ## ID Chain: UUID to Public API
 
-This endpoint completes the chain for accessing public data about any team whose UUID is known:
+**This chain works only for own teams (user is a member). Opponent UUIDs return 403.**
 
+For own teams:
 ```
-schedule pregame_data.opponent_id (UUID)
-  -> GET /teams/{opponent_id}/public-team-profile-id
+own team UUID (from /me/teams)
+  -> GET /teams/{team_id}/public-team-profile-id
   -> {"id": "<public_id>"}
   -> GET /public/teams/{public_id}           (team profile, no auth)
   -> GET /public/teams/{public_id}/games     (game schedule/scores, no auth)
   -> GET /public/game-stream-processing/{game_stream_id}/details  (line scores, no auth)
 ```
+
+For opponent teams, this bridge is blocked. Alternatives:
+- The GC web app URL for a team contains the public_id slug (e.g., `https://web.gc.com/teams/smgRExWHuBJJ`).
+- Per-game line scores are accessible via `game_stream_id` from game-summaries without needing the opponent public_id.
+- The boxscore endpoint uses the game_stream_id directly, not the public_id.
 
 ## Cross-References
 
@@ -120,8 +131,9 @@ schedule pregame_data.opponent_id (UUID)
 
 ## Known Limitations
 
-- **Auth required:** `gc-token` confirmed present. Unauthenticated access not tested.
-- **Single team confirmed:** Only team `cb67372e` verified. Opponent UUID behavior (using `pregame_data.opponent_id` or opponents `progenitor_team_id` as the path `team_id`) not yet verified. If it works, this enables bulk opponent public API resolution.
+- **Auth required:** `gc-token` required. Unauthenticated access not tested.
+- **Own-team only:** Returns 200 only for teams where the authenticated user is a member. Returns HTTP 403 for opponent/external team UUIDs. Tested 2026-03-09 with progenitor_team_id `14fd6cb6-43ab-4c61-a26c-5486c949e7b5` (Nighthawks Navy AAA 14U -- expected public_id `smgRExWHuBJJ`).
+- **Cannot bridge opponents to public API via this endpoint.** Use `game_stream_id` from game-summaries to access per-game data for any team without needing a `public_id`.
 - **Minimal response:** Under 100 bytes. No pagination.
 
-**Discovered:** 2026-03-04. **Confirmed:** 2026-03-04.
+**Discovered:** 2026-03-04. **Confirmed:** 2026-03-04. **Opponent 403 confirmed:** 2026-03-09.

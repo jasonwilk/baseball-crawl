@@ -8,8 +8,10 @@ profiles:
     status: confirmed
     notes: 244-record live capture confirmed 2026-03-04.
   mobile:
-    status: unverified
-    notes: Not captured from mobile profile.
+    status: observed
+    notes: >
+      1 hit, HTTP 200. Observed 2026-03-09 (session 063531). Called with opponent
+      progenitor_team_id (14fd6cb6).
 accept: "application/vnd.gc.com.team_associations:list+json; version=0.0.0"
 gc_user_action: null
 query_params: []

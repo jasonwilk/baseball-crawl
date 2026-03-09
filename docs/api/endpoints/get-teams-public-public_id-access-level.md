@@ -8,7 +8,9 @@ profiles:
     status: confirmed
     notes: >
       AUTH REQUIRED despite /public/ path. HTTP 401 without token. Full schema documented.
-      Discovered 2026-03-07.
+      Confirmed 2026-03-07. Also confirmed for OPPONENT team public_id (smgRExWHuBJJ,
+      3 hits returning 304/Not Modified, 2026-03-09) -- works for both own and opponent
+      teams. Contrast with /teams/public/{public_id}/id which returns 403 for opponents.
   mobile:
     status: unverified
     notes: Not captured from mobile profile.

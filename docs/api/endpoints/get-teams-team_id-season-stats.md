@@ -8,8 +8,11 @@ profiles:
     status: confirmed
     notes: Full schema documented. Complete batting/pitching/fielding field tables confirmed.
   mobile:
-    status: unverified
-    notes: Not captured from mobile profile.
+    status: observed
+    notes: >
+      1 hit, HTTP 200. Observed 2026-03-09 (session 063531). Called with opponent
+      progenitor_team_id (14fd6cb6), confirming this endpoint works for opponent teams
+      accessed via search -- not just own teams.
 accept: "application/vnd.gc.com.team_season_stats+json; version=0.2.0"
 gc_user_action: "data_loading:team_stats"
 query_params: []

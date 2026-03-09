@@ -8,8 +8,10 @@ profiles:
     status: confirmed
     notes: Full schema documented. 228 events returned in a single response.
   mobile:
-    status: unverified
-    notes: Not captured in iOS proxy session; assumed to work given standard team path.
+    status: observed
+    notes: >
+      3 hits, HTTP 200. Observed 2026-03-09 (session 063531). Called with opponent
+      progenitor_team_id (14fd6cb6). Query key start_at used for pagination.
 accept: "application/vnd.gc.com.event:list+json; version=0.2.0"
 gc_user_action: "data_loading:team"
 query_params:

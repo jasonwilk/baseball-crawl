@@ -8,8 +8,8 @@ profiles:
     status: confirmed
     notes: Full schema documented. Discovered 2026-03-07.
   mobile:
-    status: unverified
-    notes: Not captured from mobile profile.
+    status: observed
+    notes: 1 hit, HTTP 200. Confirmed 2026-03-09 (session 063531). Called at app launch before user begins typing in search bar.
 accept: null
 gc_user_action: null
 query_params: []

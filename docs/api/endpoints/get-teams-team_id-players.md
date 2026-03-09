@@ -8,8 +8,10 @@ profiles:
     status: confirmed
     notes: "Full schema documented from 20-player capture. Auth requirement: captured with gc-token."
   mobile:
-    status: unverified
-    notes: Not captured from mobile profile.
+    status: observed
+    notes: >
+      2 hits (200 + 304). Observed 2026-03-09 (session 063531). Called with opponent
+      progenitor_team_id (14fd6cb6) -- confirms the endpoint works for opponent teams.
 accept: "application/vnd.gc.com.player:list+json; version=0.1.0"
 gc_user_action: null
 query_params: []
@@ -93,6 +95,17 @@ Bare JSON array of player objects. 20 players returned in a single response (no 
 ]
 ```
 
+## Opponent Team Access: root_team_id vs. progenitor_team_id
+
+**Confirmed 2026-03-09:** When viewing an opponent's player roster, the GC web app calls this endpoint using the `root_team_id` (from `GET /teams/{team_id}/opponents`), NOT the `progenitor_team_id`. This was observed with the Nighthawks Navy AAA 14U:
+
+- `root_team_id`: `bd05f3d5-1dfb-47c1-8e81-93c0660eaaef` (local opponent registry ID)
+- `progenitor_team_id`: `14fd6cb6-43ab-4c61-a26c-5486c949e7b5` (canonical GC UUID)
+
+The app called `GET /teams/bd05f3d5-.../players` (23+ hits, all 304/200) and simultaneously `GET /teams/14fd6cb6...` (the progenitor) separately for team metadata.
+
+**Implication:** Use `root_team_id` for `/teams/{id}/players` and `/teams/{id}/avatar-image` when fetching opponent roster and avatar. Use `progenitor_team_id` for `/teams/{id}` (team metadata). Both IDs are available from `GET /teams/{team_id}/opponents`.
+
 ## Known Limitations
 
 - `first_name` may be initials only -- LSB JV returned single-letter first names ("A", "B"). This is a data-entry pattern on that team, not an API limitation.
@@ -101,4 +114,4 @@ Bare JSON array of player objects. 20 players returned in a single response (no 
 - No pagination observed for 20-player roster. Behavior for larger rosters unknown.
 - Auth requirement: captured with gc-token. Whether it works without auth is untested.
 
-**Discovered:** 2026-03-04. **Schema confirmed:** 2026-03-04.
+**Discovered:** 2026-03-04. **Schema confirmed:** 2026-03-04. **root_team_id for opponents confirmed:** 2026-03-09.

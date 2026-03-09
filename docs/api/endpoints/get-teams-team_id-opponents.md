@@ -8,8 +8,10 @@ profiles:
     status: confirmed
     notes: 70 records across 2 pages confirmed 2026-03-04.
   mobile:
-    status: unverified
-    notes: Not captured from mobile profile.
+    status: observed
+    notes: >
+      2 hits, HTTP 200. Observed 2026-03-09 (session 063531). Called with opponent
+      progenitor_team_id (14fd6cb6) -- confirms the endpoint works for opponent teams.
 accept: "application/vnd.gc.com.opponent_team:list+json; version=0.0.0"
 gc_user_action: "data_loading:opponents"
 query_params:
@@ -26,10 +28,16 @@ tags: [team, opponent]
 caveats:
   - >
     Three UUID fields with DIFFERENT semantics -- CRITICAL: root_team_id is the local
-    registry key (use in the path param for GET /teams/{team_id}/opponent/{opponent_id});
-    owning_team_id always equals the path team_id; progenitor_team_id is the CANONICAL
-    GC team UUID to use with all other team endpoints (/teams/{id}, /season-stats, /players, etc.)
-    DO NOT use root_team_id as team_id in other endpoints.
+    registry key. owning_team_id always equals the path team_id (informational only).
+    progenitor_team_id is the CANONICAL GC team UUID.
+  - >
+    ID USAGE BY ENDPOINT (confirmed 2026-03-09):
+    root_team_id: use with GET /teams/{team_id}/opponent/{id},
+    GET /teams/{root_team_id}/players, GET /teams/{root_team_id}/avatar-image.
+    progenitor_team_id: use with GET /teams/{progenitor_team_id} (team metadata, public_id, record).
+    public_id (from GET /teams/{progenitor_team_id} response): use with all /public/ endpoints.
+    The pattern root_team_id for roster/avatar, progenitor_team_id for metadata was
+    confirmed by observing GC web app traffic against Nighthawks Navy AAA 14U.
 related_schemas: []
 see_also:
   - path: /teams/{team_id}/opponent/{opponent_id}
@@ -48,10 +56,10 @@ see_also:
 
 Returns the complete opponent registry for a team. Each record represents one opponent team that this team has played against. Paginated with page size 50 (same cursor pattern as game-summaries).
 
-**CRITICAL -- Three UUID fields with different semantics:**
-- `root_team_id`: Local registry key. Use ONLY with `GET /teams/{team_id}/opponent/{root_team_id}`.
-- `owning_team_id`: Always equals the path `team_id`. Informational only.
-- `progenitor_team_id`: **Canonical GC team UUID.** Use THIS with all other team endpoints (`/teams/{id}`, `/season-stats`, `/players`, etc.).
+**CRITICAL -- Three UUID fields with different semantics (confirmed 2026-03-09):**
+- `root_team_id`: Local registry key. Use with: `GET /teams/{team_id}/opponent/{root_team_id}`, `GET /teams/{root_team_id}/players`, `GET /teams/{root_team_id}/avatar-image`.
+- `owning_team_id`: Always equals the path `team_id`. Informational only -- never use as a team_id parameter elsewhere.
+- `progenitor_team_id`: **Canonical GC team UUID.** Use with: `GET /teams/{progenitor_team_id}` (returns team metadata including `public_id`). The `public_id` from that response is then used for all `/public/teams/{public_id}` endpoints.
 
 ```
 GET https://api.team-manager.gc.com/teams/{team_id}/opponents

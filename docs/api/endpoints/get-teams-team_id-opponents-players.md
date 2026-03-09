@@ -8,8 +8,10 @@ profiles:
     status: confirmed
     notes: 758 records across 61 opponent teams. Full schema documented 2026-03-07.
   mobile:
-    status: unverified
-    notes: Not captured from mobile profile.
+    status: observed
+    notes: >
+      6 hits, HTTP 200. Observed 2026-03-09 (session 063531). Called with opponent
+      progenitor_team_id (14fd6cb6) across multiple pages (start_at pagination).
 accept: null
 gc_user_action: null
 query_params: []

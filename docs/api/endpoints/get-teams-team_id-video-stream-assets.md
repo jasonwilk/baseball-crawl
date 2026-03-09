@@ -8,8 +8,10 @@ profiles:
     status: confirmed
     notes: Schema partially documented from capture. Coaching relevance is none.
   mobile:
-    status: unverified
-    notes: Not captured from mobile profile.
+    status: observed
+    notes: >
+      6 hits (200 + 304). Observed 2026-03-09 (session 063531). Called with opponent
+      progenitor_team_id (14fd6cb6) including paginated call (start_at query key).
 accept: "application/vnd.gc.com.video_stream_asset_metadata:list+json; version=0.0.0"
 gc_user_action: "data_loading:events"
 query_params:
