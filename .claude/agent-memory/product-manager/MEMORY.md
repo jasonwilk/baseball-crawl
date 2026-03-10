@@ -1,8 +1,8 @@
 # Product Manager -- Agent Memory
 
 ## Numbering State
-- Next available epic number: E-092
-- Epics created: E-001 through E-091 (E-001, E-003, E-005, E-006, E-007, E-008, E-010, E-011, E-012, E-013, E-014, E-015, E-016, E-017, E-018, E-019, E-020, E-021, E-022, E-024, E-025, E-026, E-027, E-028, E-029, E-030, E-031, E-032, E-033, E-034, E-035, E-036, E-037, E-038, E-042, E-044, E-046, E-048, E-049, E-050, E-052, E-053, E-054, E-056, E-057, E-058, E-055, E-059, E-060, E-061, E-075, E-081, E-084, E-087, E-088, E-089, E-090, E-091 archived)
+- Next available epic number: E-094
+- Epics created: E-001 through E-093 (E-001, E-003, E-005, E-006, E-007, E-008, E-010, E-011, E-012, E-013, E-014, E-015, E-016, E-017, E-018, E-019, E-020, E-021, E-022, E-024, E-025, E-026, E-027, E-028, E-029, E-030, E-031, E-032, E-033, E-034, E-035, E-036, E-037, E-038, E-042, E-044, E-046, E-048, E-049, E-050, E-052, E-053, E-054, E-056, E-057, E-058, E-055, E-059, E-060, E-061, E-075, E-081, E-084, E-087, E-088, E-089, E-090, E-091 archived; E-092, E-093 active)
 - Next available idea number: IDEA-022
 - Ideas created: IDEA-001 through IDEA-021
 
@@ -24,6 +24,7 @@
 - E-091 (READY): Fix E-088 Opponent Data Model Defects -- 3 stories. Codex code review fixes: guard connect endpoint against overwriting auto-resolved links (01), store hidden opponents with is_hidden=1 instead of skipping (02), scope duplicate public_id check to our_team_id (03). All independent, single-wave parallel. No schema changes. SE + DE triaged. SE-only dispatch team.
 
 ## Archived Epics
+- E-093 (COMPLETED): E-088 Code Review Cleanup -- 3 stories. Convention violations: shrink bulk_create_opponents + fix lazy imports, shrink resolve_opponents CLI, fix test_listing_requires_admin DEV_USER_EMAIL leak + remove dead code. Codex review deferred finding: `bb data resolve-opponents` CLI has no test coverage (pre-existing gap, not introduced by E-093).
 - E-088 (COMPLETED): Opponent Data Model and Resolution -- 4 stories. Bridge table (opponent_links), automated resolver crawler (~86% auto via progenitor_team_id chain), admin opponents page with manual URL-paste linking, context-layer updates (migrations rule, API flow doc, CLAUDE.md). 109 new tests. Unblocks IDEA-019 (opponent stat crawling) and IDEA-020 (public endpoint ingestion). SHOULD FIX notes recorded in epic History.
 - E-090 (COMPLETED): Auto-Rename tmux Window on Epic Dispatch -- 1 story. Added Phase 0 (tmux rename-window) to implement SKILL.md between Prerequisites and Phase 1. Single guarded one-liner, completely silent failure. Workflow Summary diagram updated. No follow-up work.
 - E-087 (COMPLETED): Full Payload Capture in Endpoint Logger -- 2 stories. Extended endpoint_logger.py with full request/response payloads (bodies inline, headers unfiltered by default, full query params). 2MB body cap with truncation sentinel. Binary content types skipped. Configurable via PROXY_CAPTURE_BODIES, PROXY_STRIP_AUTH_HEADERS, MAX_BODY_BYTES env vars. PII-safe placeholder taxonomy added to api-docs.md + ingest-endpoint skill redaction step. 57 tests. SHOULD FIX: _build_entry at 50 lines (1 over strict limit). No follow-up work beyond docs update (completed during closure).

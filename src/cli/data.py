@@ -137,6 +137,25 @@ def load(
     )
 
 
+def _echo_dry_run_config(config: object) -> None:
+    """Print dry-run summary of loaded config and exit."""
+    typer.echo("Dry run -- no API calls or DB writes will be performed.")
+    typer.echo(f"Season: {config.season}")  # type: ignore[attr-defined]
+    typer.echo(f"Owned teams ({len(config.owned_teams)}):")  # type: ignore[attr-defined]
+    for team in config.owned_teams:  # type: ignore[attr-defined]
+        typer.echo(f"  {team.name} ({team.id})")
+    raise SystemExit(0)
+
+
+def _resolve_db_path() -> Path:
+    """Return DB path from DATABASE_PATH env var or the project default."""
+    env_db = os.environ.get("DATABASE_PATH")
+    if env_db is not None:
+        env_path = Path(env_db)
+        return env_path if env_path.is_absolute() else _PROJECT_ROOT / env_path
+    return _DEFAULT_DB_PATH
+
+
 @app.command(name="resolve-opponents")
 def resolve_opponents(
     dry_run: bool = typer.Option(
@@ -164,28 +183,15 @@ def resolve_opponents(
     from src.gamechanger.crawlers.opponent_resolver import OpponentResolver
 
     config = load_config()
-
     if dry_run:
-        typer.echo("Dry run -- no API calls or DB writes will be performed.")
-        typer.echo(f"Season: {config.season}")
-        typer.echo(f"Owned teams ({len(config.owned_teams)}):")
-        for team in config.owned_teams:
-            typer.echo(f"  {team.name} ({team.id})")
-        raise SystemExit(0)
+        _echo_dry_run_config(config)
 
-    env_db = os.environ.get("DATABASE_PATH")
-    if env_db is not None:
-        env_path = Path(env_db)
-        db_path = env_path if env_path.is_absolute() else _PROJECT_ROOT / env_path
-    else:
-        db_path = _DEFAULT_DB_PATH
-
+    db_path = _resolve_db_path()
     client = GameChangerClient(profile=profile)
 
     with closing(sqlite3.connect(str(db_path))) as conn:
         conn.execute("PRAGMA journal_mode=WAL;")
         conn.execute("PRAGMA foreign_keys=ON;")
-
         resolver = OpponentResolver(client, config, conn)
         try:
             result = resolver.resolve()
@@ -194,11 +200,5 @@ def resolve_opponents(
             typer.echo(f"Error: {exc}", err=True)
             raise SystemExit(1) from exc
 
-    typer.echo(
-        f"Opponent resolution complete: "
-        f"resolved={result.resolved} "
-        f"unlinked={result.unlinked} "
-        f"skipped_hidden={result.skipped_hidden} "
-        f"errors={result.errors}"
-    )
+    typer.echo(f"Opponent resolution complete: resolved={result.resolved} unlinked={result.unlinked} skipped_hidden={result.skipped_hidden} errors={result.errors}")
     raise SystemExit(1 if result.errors else 0)

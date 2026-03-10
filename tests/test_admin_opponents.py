@@ -306,7 +306,7 @@ class TestOpponentListing:
 
     def test_listing_requires_admin(self, opp_db: Path) -> None:
         """Unauthenticated request to /admin/opponents redirects to login."""
-        with patch.dict("os.environ", {"DATABASE_PATH": str(opp_db)}):
+        with patch.dict("os.environ", {"DATABASE_PATH": str(opp_db), "DEV_USER_EMAIL": ""}):
             with TestClient(app, follow_redirects=False) as client:
                 response = client.get("/admin/opponents")
         assert response.status_code == 302

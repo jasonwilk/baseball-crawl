@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import logging
 import os
+import re
+import secrets
 import sqlite3
 from contextlib import closing
 from pathlib import Path
@@ -761,6 +763,18 @@ def get_player_profile(player_id: str) -> dict[str, Any]:
     }
 
 
+def _generate_opponent_team_id(name: str) -> str:
+    """Generate a unique team_id slug for a discovered opponent.
+
+    Builds a lowercase-hyphenated slug from the name, truncated to 43 chars to
+    reserve room for the "-" separator and 6-char hex suffix, giving a total
+    team_id of at most 50 characters.
+    """
+    slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:43]
+    suffix = secrets.token_hex(3)  # 6 hex chars
+    return f"{slug}-{suffix}"
+
+
 def bulk_create_opponents(names: list[str]) -> int:
     """Insert discovered opponent placeholder rows for names not already in the DB.
 
@@ -781,9 +795,6 @@ def bulk_create_opponents(names: list[str]) -> int:
     Returns:
         Count of newly inserted rows.
     """
-    import re
-    import secrets as _secrets
-
     inserted = 0
     try:
         with closing(get_connection()) as conn:
@@ -795,12 +806,7 @@ def bulk_create_opponents(names: list[str]) -> int:
             for name in names:
                 if name.lower() in existing_lower:
                     continue
-                # Build slug: keep only alphanumeric and spaces, hyphenate, truncate
-                # Reserve 7 chars for "-" + 6 hex suffix so truncation never cuts the suffix
-                slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:43]
-                suffix = _secrets.token_hex(3)  # 6 hex chars
-                team_id = f"{slug}-{suffix}"
-
+                team_id = _generate_opponent_team_id(name)
                 result = conn.execute(
                     """
                     INSERT OR IGNORE INTO teams
@@ -970,34 +976,6 @@ def is_owned_team_public_id(public_id: str) -> bool:
         return row is not None
     except sqlite3.Error:
         logger.exception("Failed to check owned team public_id %s", public_id)
-        return False
-
-
-def is_duplicate_opponent_public_id(public_id: str, exclude_id: int | None = None) -> bool:
-    """Return True if any opponent_links row already uses this public_id.
-
-    Args:
-        public_id: The public_id slug to check.
-        exclude_id: opponent_links.id to exclude from the check (for updates).
-
-    Returns:
-        True if a duplicate exists (other than exclude_id).
-    """
-    try:
-        with closing(get_connection()) as conn:
-            if exclude_id is not None:
-                row = conn.execute(
-                    "SELECT 1 FROM opponent_links WHERE public_id = ? AND id != ?",
-                    (public_id, exclude_id),
-                ).fetchone()
-            else:
-                row = conn.execute(
-                    "SELECT 1 FROM opponent_links WHERE public_id = ?",
-                    (public_id,),
-                ).fetchone()
-        return row is not None
-    except sqlite3.Error:
-        logger.exception("Failed to check duplicate public_id %s", public_id)
         return False
 
 
