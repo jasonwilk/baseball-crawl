@@ -9,10 +9,16 @@ Credentials are written to profile-scoped env keys:
   - Web browser traffic  -> ``_WEB``  suffix (e.g. ``GAMECHANGER_REFRESH_TOKEN_WEB``)
   - iOS app traffic      -> ``_MOBILE`` suffix (e.g. ``GAMECHANGER_REFRESH_TOKEN_MOBILE``)
   - Unknown traffic      -> logged as WARNING and dropped (no write)
+
+The ``response()`` handler additionally captures access + refresh tokens from
+POST /auth response bodies (``{type: "token", access: {data: "..."}, refresh:
+{data: "..."}}``). Only ``type == "token"`` responses are processed; client-auth
+responses (``type == "client-token"``) are ignored.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import TYPE_CHECKING
 
@@ -35,6 +41,7 @@ _BASE_CREDENTIAL_HEADERS: dict[str, str] = {
     "gc-token": "GAMECHANGER_REFRESH_TOKEN",
     "gc-device-id": "GAMECHANGER_DEVICE_ID",
     "gc-app-name": "GAMECHANGER_APP_NAME",
+    "gc-client-id": "GAMECHANGER_CLIENT_ID",
 }
 
 # Mapping from detect_source() return values to env key suffixes.
@@ -66,7 +73,8 @@ def _suffix_keys(source: str) -> dict[str, str] | None:
 class CredentialExtractor:
     """mitmproxy addon that extracts GameChanger credentials from live traffic.
 
-    Hooks into ``request()`` to inspect headers on every proxied request.
+    Hooks into ``request()`` to inspect headers on every proxied request and
+    ``response()`` to capture tokens from POST /auth response bodies.
     Non-GameChanger requests are ignored immediately. When a ``gc-token`` header
     is seen for the first time (or its value changes), all present credential
     headers are written to ``.env`` via ``merge_env_file()``.
@@ -150,4 +158,83 @@ class CredentialExtractor:
         written_keys = ", ".join(sorted(credentials.keys()))
         logger.info(
             "Credentials updated from %s source: %s", source, written_keys
+        )
+
+    def response(self, flow: http.HTTPFlow) -> None:
+        """Process POST /auth responses to capture fresh access and refresh tokens.
+
+        Ignores all responses except POST /auth on GameChanger domains. Parses the
+        JSON response body and extracts tokens only when ``type == "token"``
+        (the final step of the auth flow). Client-auth responses
+        (``type == "client-token"``) and all other shapes are ignored.
+
+        Access token is written to ``GAMECHANGER_ACCESS_TOKEN_{PROFILE}`` and
+        refresh token is written to ``GAMECHANGER_REFRESH_TOKEN_{PROFILE}``.
+
+        Args:
+            flow: The mitmproxy HTTP flow for this response.
+        """
+        # Only process POST /auth on GameChanger domains.
+        host = flow.request.host
+        if not gc_filter.is_gamechanger_domain(host):
+            return
+        if flow.request.method.upper() != "POST":
+            return
+        if flow.request.path.rstrip("/") != "/auth":
+            return
+
+        # Detect traffic source from request User-Agent (available on response flows too).
+        user_agent = flow.request.headers.get("user-agent", "")
+        source = gc_filter.detect_source(user_agent)
+        suffix = _SOURCE_TO_SUFFIX.get(source)
+        if suffix is None:
+            logger.warning(
+                "POST /auth response from unknown source -- tokens dropped. "
+                "User-Agent snippet: %r",
+                user_agent[:80],
+            )
+            return
+
+        # Parse the JSON response body.
+        try:
+            body = json.loads(flow.response.content)
+        except (ValueError, AttributeError):
+            logger.warning("POST /auth response body is not valid JSON -- skipping.")
+            return
+
+        # Only process type=="token" responses (step 3/4 of auth flow).
+        # type=="client-token" (step 2) does not contain user access/refresh tokens.
+        if body.get("type") != "token":
+            return
+
+        try:
+            access_token: str = body["access"]["data"]
+            refresh_token: str = body["refresh"]["data"]
+        except (KeyError, TypeError):
+            logger.warning(
+                "POST /auth token response missing expected fields -- skipping."
+            )
+            return
+
+        credentials: dict[str, str] = {
+            f"GAMECHANGER_ACCESS_TOKEN{suffix}": access_token,
+            f"GAMECHANGER_REFRESH_TOKEN{suffix}": refresh_token,
+        }
+
+        # Deduplicate: skip write if nothing has changed.
+        if credentials == {k: self._cache.get(k) for k in credentials}:
+            return
+
+        # Write updated credentials to .env.
+        try:
+            merge_env_file(_ENV_PATH, credentials)
+        except OSError as exc:
+            logger.error("Failed to write auth response tokens to %s: %s", _ENV_PATH, exc)
+            return
+
+        # Update cache and log -- never log credential values.
+        self._cache.update(credentials)
+        written_keys = ", ".join(sorted(credentials.keys()))
+        logger.info(
+            "Auth response tokens captured from %s source: %s", source, written_keys
         )
