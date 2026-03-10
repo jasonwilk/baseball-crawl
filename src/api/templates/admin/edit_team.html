@@ -15,6 +15,16 @@
 {% block content %}
 <h1 class="text-xl font-bold mb-4">Edit Team</h1>
 
+<!-- Admin sub-navigation -->
+<nav class="mb-6 flex gap-4 border-b border-gray-300 pb-2 text-sm">
+  <a href="/admin/users"
+     class="font-medium text-gray-600 hover:text-blue-900">Users</a>
+  <a href="/admin/teams"
+     class="font-bold underline text-blue-900">Teams</a>
+  <a href="/admin/opponents"
+     class="font-medium text-gray-600 hover:text-blue-900">Opponents</a>
+</nav>
+
 <div class="bg-white rounded shadow p-6 max-w-lg">
 
   <!-- Read-only info -->
@@ -104,5 +114,15 @@
       </a>
     </div>
   </form>
+</div>
+
+<!-- Opponent connections summary -->
+<div class="mt-6 bg-white rounded shadow p-4 max-w-lg flex items-center gap-4 text-sm">
+  <span class="text-gray-700">
+    <strong>{{ opponent_link_count }}</strong>
+    opponent connection{{ 's' if opponent_link_count != 1 else '' }}
+  </span>
+  <a href="/admin/opponents?team_id={{ edit_team.team_id }}"
+     class="text-blue-700 hover:underline">Manage connections →</a>
 </div>
 {% endblock %}

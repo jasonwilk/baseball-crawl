@@ -1,0 +1,160 @@
+{% extends "base.html" %}
+
+{% block title %}Admin -- Connect Opponent{% endblock %}
+
+{% block header_extras %}
+<div class="ml-auto flex items-center gap-4 text-sm">
+  {% if admin_user and admin_user.display_name %}
+  <span class="text-blue-200">{{ admin_user.display_name }}</span>
+  {% endif %}
+  <a href="/admin/opponents" class="text-blue-200 hover:text-white">Back to Opponents</a>
+  <a href="/auth/logout" class="text-blue-200 hover:text-white">Logout</a>
+</div>
+{% endblock %}
+
+{% block content %}
+<h1 class="text-xl font-bold mb-4">Connect Opponent</h1>
+
+<!-- Admin sub-navigation -->
+<nav class="mb-6 flex gap-4 border-b border-gray-300 pb-2 text-sm">
+  <a href="/admin/users"
+     class="font-medium text-gray-600 hover:text-blue-900">Users</a>
+  <a href="/admin/teams"
+     class="font-medium text-gray-600 hover:text-blue-900">Teams</a>
+  <a href="/admin/opponents"
+     class="font-bold underline text-blue-900">Opponents</a>
+</nav>
+
+<div class="mb-4 text-sm text-gray-600">
+  Linking opponent: <strong>{{ link.opponent_name }}</strong>
+  <span class="text-gray-400">({{ link.our_team_name }})</span>
+</div>
+
+{% if mode == 'form' %}
+<!-- URL-paste form -->
+<div class="bg-white rounded shadow p-6 max-w-lg">
+  <h2 class="text-lg font-semibold mb-4">Paste a GameChanger Team URL</h2>
+  <p class="text-sm text-gray-600 mb-4">
+    Find the team on GameChanger, copy the URL from your browser, and paste it below.
+  </p>
+  <form method="GET" action="/admin/opponents/{{ link.id }}/connect/confirm">
+    <div class="mb-4">
+      <label class="block text-sm font-medium text-gray-700 mb-1" for="url">
+        GameChanger URL or Public ID <span class="text-red-600">*</span>
+      </label>
+      <input
+        type="text"
+        id="url"
+        name="url"
+        required
+        placeholder="https://web.gc.com/teams/a1GFM9Ku0BbF/... or a1GFM9Ku0BbF"
+        class="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
+      >
+    </div>
+    <div class="flex gap-3">
+      <button
+        type="submit"
+        class="bg-blue-900 text-white px-4 py-2 rounded text-sm hover:bg-blue-800"
+      >
+        Look up team
+      </button>
+      <a
+        href="/admin/opponents"
+        class="px-4 py-2 rounded text-sm border border-gray-300 text-gray-700 hover:bg-gray-50"
+      >
+        Cancel
+      </a>
+    </div>
+  </form>
+</div>
+
+{% elif mode == 'error' %}
+<!-- Error state: URL parsing failed or API error -->
+<div class="bg-white rounded shadow p-6 max-w-lg">
+  <div class="mb-4 p-3 bg-red-100 text-red-800 rounded border border-red-300">
+    {{ error }}
+  </div>
+  <a
+    href="/admin/opponents/{{ link.id }}/connect"
+    class="inline-block px-4 py-2 rounded text-sm bg-blue-900 text-white hover:bg-blue-800"
+  >
+    Try again
+  </a>
+  <a
+    href="/admin/opponents"
+    class="inline-block ml-3 px-4 py-2 rounded text-sm border border-gray-300 text-gray-700 hover:bg-gray-50"
+  >
+    Cancel
+  </a>
+</div>
+
+{% elif mode == 'confirm' %}
+<!-- Confirmation page: show fetched team info -->
+<div class="bg-white rounded shadow p-6 max-w-lg">
+  <h2 class="text-lg font-semibold mb-4">Confirm Connection</h2>
+
+  {% if duplicate_name %}
+  <div class="mb-4 p-3 bg-yellow-100 text-yellow-800 rounded border border-yellow-300 text-sm">
+    <strong>Warning:</strong> This URL is already linked to <strong>{{ duplicate_name }}</strong>. Proceeding will create a duplicate link.
+  </div>
+  {% endif %}
+
+  <div class="mb-4 bg-gray-50 rounded border border-gray-200 p-4">
+    <div class="mb-2">
+      <span class="text-sm font-medium text-gray-700">Team name:</span>
+      <span class="text-sm text-gray-900 ml-2">{{ profile.name }}</span>
+    </div>
+    {% if profile.city or profile.state %}
+    <div class="mb-2">
+      <span class="text-sm font-medium text-gray-700">Location:</span>
+      <span class="text-sm text-gray-900 ml-2">
+        {{ [profile.city, profile.state] | select | join(', ') }}
+      </span>
+    </div>
+    {% endif %}
+    {% if profile.age_group %}
+    <div class="mb-2">
+      <span class="text-sm font-medium text-gray-700">Age group:</span>
+      <span class="text-sm text-gray-900 ml-2">{{ profile.age_group }}</span>
+    </div>
+    {% endif %}
+    {% if profile.record_wins is not none or profile.record_losses is not none %}
+    <div class="mb-2">
+      <span class="text-sm font-medium text-gray-700">Record:</span>
+      <span class="text-sm text-gray-900 ml-2">
+        {{ profile.record_wins or 0 }}-{{ profile.record_losses or 0 }}
+      </span>
+    </div>
+    {% endif %}
+    <div>
+      <span class="text-sm font-medium text-gray-700">Public ID:</span>
+      <span class="text-sm font-mono text-gray-600 ml-2">{{ public_id }}</span>
+    </div>
+  </div>
+
+  <form method="POST" action="/admin/opponents/{{ link.id }}/connect">
+    <input type="hidden" name="public_id" value="{{ public_id }}">
+    <div class="flex gap-3">
+      <button
+        type="submit"
+        class="bg-blue-900 text-white px-4 py-2 rounded text-sm hover:bg-blue-800"
+      >
+        Confirm connection
+      </button>
+      <a
+        href="/admin/opponents/{{ link.id }}/connect"
+        class="px-4 py-2 rounded text-sm border border-gray-300 text-gray-700 hover:bg-gray-50"
+      >
+        Try again
+      </a>
+      <a
+        href="/admin/opponents"
+        class="px-4 py-2 rounded text-sm border border-gray-300 text-gray-700 hover:bg-gray-50"
+      >
+        Cancel
+      </a>
+    </div>
+  </form>
+</div>
+{% endif %}
+{% endblock %}

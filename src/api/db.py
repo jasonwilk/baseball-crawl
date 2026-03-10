@@ -819,6 +819,323 @@ def bulk_create_opponents(names: list[str]) -> int:
     return inserted
 
 
+_OPPONENT_LINKS_BASE_SQL = """
+    SELECT
+        ol.id,
+        ol.our_team_id,
+        t.name AS our_team_name,
+        ol.opponent_name,
+        ol.resolved_team_id,
+        ol.public_id,
+        ol.resolution_method,
+        ol.resolved_at,
+        ol.is_hidden
+    FROM opponent_links ol
+    JOIN teams t ON t.team_id = ol.our_team_id
+    WHERE {where}
+    ORDER BY t.name, ol.opponent_name
+"""
+
+
+def _opponent_links_where(
+    our_team_id: str | None, filter: str | None
+) -> tuple[str, list[Any]]:
+    """Build WHERE clause and params for opponent_links queries."""
+    conditions: list[str] = ["ol.is_hidden = 0"]
+    params: list[Any] = []
+    if our_team_id:
+        conditions.append("ol.our_team_id = ?")
+        params.append(our_team_id)
+    if filter == "full":
+        conditions.append("ol.public_id IS NOT NULL")
+    elif filter == "scoresheet":
+        conditions.append("ol.public_id IS NULL")
+    return " AND ".join(conditions), params
+
+
+def get_opponent_links(
+    our_team_id: str | None = None,
+    filter: str | None = None,
+) -> list[dict[str, Any]]:
+    """Return opponent_links rows with optional team_id and resolution-state filter.
+
+    Args:
+        our_team_id: Scope to a specific owned team. None returns all teams.
+        filter: ``'full'`` for resolved, ``'scoresheet'`` for unlinked, None for all.
+
+    Returns:
+        List of dicts with keys: id, our_team_id, our_team_name, opponent_name,
+        resolved_team_id, public_id, resolution_method, resolved_at, is_hidden.
+    """
+    where, params = _opponent_links_where(our_team_id, filter)
+    query = _OPPONENT_LINKS_BASE_SQL.format(where=where)
+    try:
+        with closing(get_connection()) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(query, params).fetchall()
+        return [dict(r) for r in rows]
+    except sqlite3.Error:
+        logger.exception("Failed to fetch opponent links")
+        return []
+
+
+def get_opponent_link_counts(our_team_id: str | None = None) -> dict[str, int]:
+    """Return total, full_stats, and scoresheet_only counts for opponent links.
+
+    Args:
+        our_team_id: Scope to a specific team, or None for all teams.
+
+    Returns:
+        Dict with keys: total, full_stats, scoresheet_only.
+    """
+    conditions: list[str] = ["is_hidden = 0"]
+    params: list[Any] = []
+    if our_team_id:
+        conditions.append("our_team_id = ?")
+        params.append(our_team_id)
+    where = " AND ".join(conditions)
+    query = f"""
+        SELECT
+            COUNT(*) AS total,
+            SUM(CASE WHEN public_id IS NOT NULL THEN 1 ELSE 0 END) AS full_stats,
+            SUM(CASE WHEN public_id IS NULL THEN 1 ELSE 0 END) AS scoresheet_only
+        FROM opponent_links
+        WHERE {where}
+    """
+    try:
+        with closing(get_connection()) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(query, params).fetchone()
+        if row:
+            r = dict(row)
+            return {
+                "total": r["total"] or 0,
+                "full_stats": r["full_stats"] or 0,
+                "scoresheet_only": r["scoresheet_only"] or 0,
+            }
+    except sqlite3.Error:
+        logger.exception("Failed to count opponent links")
+    return {"total": 0, "full_stats": 0, "scoresheet_only": 0}
+
+
+def get_opponent_link_by_id(link_id: int) -> dict[str, Any] | None:
+    """Fetch a single opponent_links row by id.
+
+    Args:
+        link_id: The opponent_links primary key.
+
+    Returns:
+        Dict with link data, or None if not found.
+    """
+    query = """
+        SELECT
+            ol.id,
+            ol.our_team_id,
+            t.name AS our_team_name,
+            ol.opponent_name,
+            ol.resolved_team_id,
+            ol.public_id,
+            ol.resolution_method,
+            ol.resolved_at,
+            ol.is_hidden
+        FROM opponent_links ol
+        JOIN teams t ON t.team_id = ol.our_team_id
+        WHERE ol.id = ?
+    """
+    try:
+        with closing(get_connection()) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(query, (link_id,)).fetchone()
+        return dict(row) if row else None
+    except sqlite3.Error:
+        logger.exception("Failed to fetch opponent link %s", link_id)
+        return None
+
+
+def is_owned_team_public_id(public_id: str) -> bool:
+    """Return True if the public_id belongs to an owned (LSB) team.
+
+    Args:
+        public_id: The public_id slug to check.
+
+    Returns:
+        True if an owned team has this public_id.
+    """
+    try:
+        with closing(get_connection()) as conn:
+            row = conn.execute(
+                "SELECT 1 FROM teams WHERE public_id = ? AND is_owned = 1",
+                (public_id,),
+            ).fetchone()
+        return row is not None
+    except sqlite3.Error:
+        logger.exception("Failed to check owned team public_id %s", public_id)
+        return False
+
+
+def is_duplicate_opponent_public_id(public_id: str, exclude_id: int | None = None) -> bool:
+    """Return True if any opponent_links row already uses this public_id.
+
+    Args:
+        public_id: The public_id slug to check.
+        exclude_id: opponent_links.id to exclude from the check (for updates).
+
+    Returns:
+        True if a duplicate exists (other than exclude_id).
+    """
+    try:
+        with closing(get_connection()) as conn:
+            if exclude_id is not None:
+                row = conn.execute(
+                    "SELECT 1 FROM opponent_links WHERE public_id = ? AND id != ?",
+                    (public_id, exclude_id),
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    "SELECT 1 FROM opponent_links WHERE public_id = ?",
+                    (public_id,),
+                ).fetchone()
+        return row is not None
+    except sqlite3.Error:
+        logger.exception("Failed to check duplicate public_id %s", public_id)
+        return False
+
+
+def get_duplicate_opponent_name(public_id: str, exclude_id: int | None = None) -> str | None:
+    """Return the opponent_name of an existing row that already uses this public_id.
+
+    Args:
+        public_id: The public_id slug to check.
+        exclude_id: opponent_links.id to exclude (for updates).
+
+    Returns:
+        The opponent_name string if a duplicate exists, else None.
+    """
+    try:
+        with closing(get_connection()) as conn:
+            if exclude_id is not None:
+                row = conn.execute(
+                    "SELECT opponent_name FROM opponent_links WHERE public_id = ? AND id != ?",
+                    (public_id, exclude_id),
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    "SELECT opponent_name FROM opponent_links WHERE public_id = ?",
+                    (public_id,),
+                ).fetchone()
+        return row[0] if row else None
+    except sqlite3.Error:
+        logger.exception("Failed to fetch duplicate opponent name for %s", public_id)
+        return None
+
+
+def save_manual_opponent_link(link_id: int, public_id: str) -> None:
+    """Set public_id and resolution_method='manual' on an opponent_links row.
+
+    Sets resolved_team_id=NULL (manual links cannot obtain a UUID via the
+    reverse bridge endpoint, which returns 403 for opponent teams).
+    Callers must set updated_at explicitly (no trigger on this table).
+
+    Args:
+        link_id: The opponent_links primary key.
+        public_id: The GameChanger public_id slug.
+    """
+    with closing(get_connection()) as conn:
+        conn.execute(
+            """
+            UPDATE opponent_links
+            SET public_id          = ?,
+                resolution_method  = 'manual',
+                resolved_team_id   = NULL,
+                resolved_at        = datetime('now'),
+                updated_at         = datetime('now')
+            WHERE id = ?
+            """,
+            (public_id, link_id),
+        )
+        conn.commit()
+
+
+def disconnect_opponent_link(link_id: int) -> bool:
+    """Remove a manual link from an opponent_links row.
+
+    Only removes links where resolution_method='manual'.  Returns False if the
+    link is auto-resolved (which would be re-created by the resolver) or if the
+    row does not exist.
+
+    Args:
+        link_id: The opponent_links primary key.
+
+    Returns:
+        True if successfully disconnected, False if not a manual link or not found.
+    """
+    try:
+        with closing(get_connection()) as conn:
+            row = conn.execute(
+                "SELECT resolution_method FROM opponent_links WHERE id = ?",
+                (link_id,),
+            ).fetchone()
+            if row is None:
+                return False
+            if row[0] != "manual":
+                return False
+            conn.execute(
+                """
+                UPDATE opponent_links
+                SET public_id         = NULL,
+                    resolution_method = NULL,
+                    resolved_team_id  = NULL,
+                    resolved_at       = NULL,
+                    updated_at        = datetime('now')
+                WHERE id = ?
+                """,
+                (link_id,),
+            )
+            conn.commit()
+        return True
+    except sqlite3.Error:
+        logger.exception("Failed to disconnect opponent link %s", link_id)
+        return False
+
+
+def count_all_opponent_links() -> int:
+    """Return total non-hidden opponent_links row count across all teams.
+
+    Returns:
+        Integer count.
+    """
+    try:
+        with closing(get_connection()) as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) FROM opponent_links WHERE is_hidden = 0"
+            ).fetchone()
+        return row[0] if row else 0
+    except sqlite3.Error:
+        logger.exception("Failed to count all opponent links")
+        return 0
+
+
+def get_opponent_link_count_for_team(our_team_id: str) -> int:
+    """Return the non-hidden opponent_links count for a specific owned team.
+
+    Args:
+        our_team_id: The team_id to count for.
+
+    Returns:
+        Integer count.
+    """
+    try:
+        with closing(get_connection()) as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) FROM opponent_links WHERE our_team_id = ? AND is_hidden = 0",
+                (our_team_id,),
+            ).fetchone()
+        return row[0] if row else 0
+    except sqlite3.Error:
+        logger.exception("Failed to count opponent links for team %s", our_team_id)
+        return 0
+
+
 def check_connection() -> bool:
     """Verify that the database is accessible and the schema is initialized.
 

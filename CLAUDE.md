@@ -139,6 +139,7 @@ The `bb` CLI is the primary operator interface. Run `bb --help` to see all avail
 - `bb proxy refresh-headers` -- preview header changes from latest proxy capture (`--apply` to write)
 - `bb proxy review` -- manage proxy session review status
 - `bb proxy check` -- verify Bright Data proxy connectivity and IP anonymization
+- `bb data resolve-opponents` -- resolve opponent public_ids via the GameChanger API (`--dry-run`, `--profile`)
 - `bb db backup` -- back up the SQLite database (`--db-path`)
 - `bb db reset` -- reset dev database to seeded state (`--db-path`, `--force`)
 

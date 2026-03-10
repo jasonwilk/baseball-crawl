@@ -224,6 +224,21 @@ _SCHEMA_SQL = """
         created_at TEXT    NOT NULL DEFAULT (datetime('now')),
         UNIQUE(user_id, team_id, season_id)
     );
+
+    CREATE TABLE IF NOT EXISTS opponent_links (
+        id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+        our_team_id         TEXT    NOT NULL REFERENCES teams(team_id),
+        root_team_id        TEXT    NOT NULL,
+        opponent_name       TEXT    NOT NULL,
+        resolved_team_id    TEXT    REFERENCES teams(team_id),
+        public_id           TEXT,
+        resolution_method   TEXT CHECK (resolution_method IN ('auto', 'manual') OR resolution_method IS NULL),
+        resolved_at         TEXT,
+        is_hidden           INTEGER NOT NULL DEFAULT 0,
+        created_at          TEXT    NOT NULL DEFAULT (datetime('now')),
+        updated_at          TEXT    NOT NULL DEFAULT (datetime('now')),
+        UNIQUE(our_team_id, root_team_id)
+    );
 """
 
 _SEED_SQL = """
@@ -429,25 +444,25 @@ class TestTeamListDisplay:
                 response = client.get("/admin/teams")
         assert "Lincoln Program" in response.text
 
-    def test_page_shows_tracked_opponents_section(self, admin_db: Path) -> None:
-        """Page contains 'Tracked Opponents' section heading."""
+    def test_page_shows_opponent_connections_section(self, admin_db: Path) -> None:
+        """Page contains 'Opponent Connections' summary section."""
         user_id = _insert_user(admin_db, "admin4@example.com", is_admin=1)
         token = _insert_session(admin_db, user_id)
 
         with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db)}):
             with TestClient(app, cookies={"session": token}) as client:
                 response = client.get("/admin/teams")
-        assert "Tracked Opponents" in response.text
+        assert "Opponent Connections" in response.text or "Manage connections" in response.text
 
-    def test_empty_opponents_shows_placeholder(self, admin_db: Path) -> None:
-        """When no opponents, placeholder message appears in Tracked Opponents table."""
+    def test_opponent_section_links_to_opponents_page(self, admin_db: Path) -> None:
+        """Opponent connections section links to /admin/opponents."""
         user_id = _insert_user(admin_db, "admin5@example.com", is_admin=1)
         token = _insert_session(admin_db, user_id)
 
         with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db)}):
             with TestClient(app, cookies={"session": token}) as client:
                 response = client.get("/admin/teams")
-        assert "No opponents tracked yet" in response.text
+        assert "/admin/opponents" in response.text
 
     def test_active_team_shows_active_status(self, admin_db: Path) -> None:
         """Active team shows 'Active' in status column."""

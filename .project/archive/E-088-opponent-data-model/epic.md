@@ -1,7 +1,7 @@
 # E-088: Opponent Data Model and Resolution
 
 ## Status
-`READY`
+`COMPLETED`
 
 ## Overview
 Bridge local opponent entries to real GameChanger teams so coaches can access full scouting data for upcoming opponents. This epic creates the `opponent_links` table, an automated resolution crawler that chains authenticated API calls to resolve ~86% of opponents automatically, an admin UI for manually linking the remaining ~14%, and context-layer documentation for migration conventions and the opponent resolution API flow.
@@ -37,10 +37,10 @@ Expert consultations completed: baseball-coach (coaching requirements, `.project
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-088-01 | opponent_links Migration and Seed Data | TODO | None | - |
-| E-088-02 | Automated Opponent Resolution Crawler | TODO | E-088-01 | - |
-| E-088-03 | Admin Opponents Page with Manual URL-Paste Linking | TODO | E-088-01 | - |
-| E-088-04 | Context-Layer Updates (Migration Rule + Flow Doc + API Docs) | TODO | None | - |
+| E-088-01 | opponent_links Migration and Seed Data | DONE | None | data-engineer |
+| E-088-02 | Automated Opponent Resolution Crawler | DONE | E-088-01 | se-resolver |
+| E-088-03 | Admin Opponents Page with Manual URL-Paste Linking | DONE | E-088-01 | se-admin-ui |
+| E-088-04 | Context-Layer Updates (Migration Rule + Flow Doc + API Docs) | DONE | None | claude-architect |
 
 ## Dispatch Team
 - data-engineer (story 01)
@@ -201,3 +201,4 @@ Auto-resolved links cannot be manually overridden in this epic. `POST /admin/opp
 ## History
 - 2026-03-09: Created. Expert consultations with baseball-coach, data-engineer, software-engineer, api-scout, ux-designer, and claude-architect completed during formation. Schema divergence (bridge table vs. columns on teams) resolved in favor of bridge table. Search-based manual association deferred due to unknown search endpoint response schema.
 - 2026-03-10: DE spec review triaged by full team (PM, SE, DE, CA, DW). 17 refinements accepted across all 4 stories and epic Technical Notes: removed redundant index, added CHECK constraint on resolution_method, added root_team_id non-FK comment, added updated_at caller-obligation comment, added TN-11 (discovered stubs duality) and TN-12 (wrong auto-link MVP limitation), clarified {id} parameter as opponent_links.id, added field-mapping note and is_hidden handling to E-088-02, added --dry-run flag to CLI, added duplicate public_id and own-team URL guards to E-088-03, added multi-team seed row requirement, added datetime format note and CLAUDE.md update to E-088-04. 3 rejected (seed_dev.sql exists, slot 002 gap archaeology, parse_team_url regex). 1 deferred (public_id divergence).
+- 2026-03-10: Epic COMPLETED. All 4 stories implemented, reviewed, and verified. Code review SHOULD FIX notes: (E-088-01) seed resolved_at timestamps used ISO 8601 format instead of SQLite datetime format -- fixed during closure. (E-088-02) --help test doesn't check for resolve-opponents; no CLI-level tests for resolve-opponents wiring; is_hidden flag always 0 since hidden opponents are skipped before upsert. (E-088-03) `filter` param shadows builtin; unnecessary sys.path.insert in test; urllib imports inside function bodies; pre-existing test_admin.py failure (test_non_admin_forbidden_page_has_dashboard_link expects /dashboard but page now links /auth/login). Documentation assessment: No documentation impact -- admin/coaching docs not affected by this schema+UI addition. Context-layer assessment: All triggers evaluated -- migrations rule (AC-1), API flow doc (AC-2), API docs index (AC-3), api-docs rule (AC-4), CLAUDE.md CLI entry (AC-5) all completed as E-088-04.

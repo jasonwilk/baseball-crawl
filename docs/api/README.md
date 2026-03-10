@@ -243,6 +243,16 @@ These URL patterns return HTTP 404 on `api.team-manager.gc.com`. They are web ap
 
 ---
 
+## Flows
+
+Multi-endpoint integration guides documenting how endpoints chain together for common tasks.
+
+| Flow | Description |
+|------|-------------|
+| [opponent-resolution.md](flows/opponent-resolution.md) | Resolve opponents from the authenticated API to public_id slugs for unauthenticated access |
+
+---
+
 ## Completeness Check
 
 | Count | Source |
