@@ -22,6 +22,8 @@ When the user requests epic or story execution, the main session:
 
 This project uses **Agent Teams** (`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`) for dispatching stories. The main session creates teams (`TeamCreate`) and spawns implementers (`Agent` tool). Implementers communicate with the main session via `SendMessage` but cannot add new members to the team.
 
+**Worktree isolation is the default for implementing agents.** Unless a story qualifies for the context-layer exception (see below), implementing agents are spawned with `isolation: "worktree"`, which gives each agent an isolated copy of the repository via `git worktree`. This prevents concurrent stories from interfering with each other's working trees. The main session merges each agent's work back into the main checkout after review approval.
+
 ## Team Composition
 
 Every dispatch team has three roles:
@@ -30,15 +32,15 @@ Every dispatch team has three roles:
 
 2. **Specialist agents (implementers)** -- Spawned by the main session based on the epic's Dispatch Team section (or the routing table). These do the actual work: writing code, designing schemas, configuring agents, etc. The main session assigns their stories directly.
 
-3. **Code-reviewer (quality gate)** -- Persistent per-epic, spawned automatically by the implement skill alongside implementers. Reviews every code story before it can be marked DONE. Not listed in the epic's Dispatch Team section -- it is infrastructure. See `.claude/agents/code-reviewer.md` for the agent definition.
+3. **Code-reviewer (quality gate)** -- Persistent per-epic, spawned automatically by the implement skill alongside implementers. Reviews every code story before it can be marked DONE. Not listed in the epic's Dispatch Team section -- it is infrastructure. The code-reviewer is NOT spawned with `isolation: "worktree"` -- it reads directly from implementers' worktree paths when reviewing their work. See `.claude/agents/code-reviewer.md` for the agent definition.
 
 ### Spawning Scenarios
 
-**At team creation**: The main session reads the epic's Dispatch Team section and spawns all listed implementers. If no Dispatch Team section exists, the main session uses the Agent Selection routing table to determine which agent types are needed based on story domains, and spawns them.
+**At team creation**: The main session reads the epic's Dispatch Team section and spawns all listed implementers. If no Dispatch Team section exists, the main session uses the Agent Selection routing table to determine which agent types are needed based on story domains, and spawns them. Each implementer is spawned with `isolation: "worktree"` unless the context-layer exception applies.
 
-**Multi-wave epics**: The main session reviews the full dependency graph at dispatch start. It spawns wave-1 agents immediately, then spawns later-wave agents directly as their dependencies complete. For single-wave epics (no inter-story dependencies), all agents are spawned at once.
+**Multi-wave epics**: The main session reviews the full dependency graph at dispatch start. It spawns wave-1 agents immediately, then spawns later-wave agents directly as their dependencies complete. For single-wave epics (no inter-story dependencies), all agents are spawned at once. Each spawn uses `isolation: "worktree"` by default.
 
-**Mid-dispatch (cascading)**: A fallback for truly unexpected agent needs discovered mid-dispatch -- when a story reveals a requirement that was not anticipated during planning. The main session spawns the additional agent type directly and assigns the story.
+**Mid-dispatch (cascading)**: A fallback for truly unexpected agent needs discovered mid-dispatch -- when a story reveals a requirement that was not anticipated during planning. The main session spawns the additional agent type directly (with `isolation: "worktree"`) and assigns the story.
 
 ## Implementing Agent Responsibilities During Dispatch
 
@@ -54,13 +56,71 @@ Implementing agents do NOT update story statuses or epic tables. That is the mai
 
 1. User requests dispatch ("start epic X", "execute story X", "dispatch stories"). Dispatch MUST be initiated by an explicit user request. Dispatch MUST NOT self-initiate after completing epic formation -- "define the epic" and "execute the epic" are separate user actions. Compound requests that explicitly include dispatch language (e.g., "define and execute," "plan and dispatch," "create the epic and start it") authorize both planning and dispatch in sequence.
 2. Main session reads the epic, identifies the Dispatch Team section (or falls back to the routing table).
-3. Main session creates the team (`TeamCreate`) and spawns all implementing agents.
-4. Main session identifies eligible stories (TODO with satisfied dependencies), marks them `IN_PROGRESS`, and assigns them to implementers with full context blocks (story file text + Technical Notes).
-5. Implementing agents work on their assigned stories and report completion (with `## Files Changed`) to the main session.
-6. As each implementer reports completion, the main session checks the context-layer-only skip condition: if the story modifies ONLY context-layer files and no Python code, the main session verifies ACs directly and marks DONE. Otherwise, the main session routes the work to the code-reviewer.
-7. The code-reviewer examines the implementation and returns APPROVED or NOT APPROVED with structured findings. If APPROVED, the main session marks the story DONE. If NOT APPROVED (MUST FIX findings), the main session routes MUST FIX items to the implementer for fixes. After fixes, the reviewer re-reviews (max 2 rounds). If the 2nd review still has MUST FIX findings, the main session escalates to the user.
-8. Main session marks reviewer-approved stories `DONE` in both story files and epic table.
-9. Main session checks for newly unblocked stories. If the required agent is on the team, it assigns directly. If a new agent type is needed, it spawns the agent and assigns the story (repeat from step 5).
+3. Main session creates the team (`TeamCreate`) and spawns all implementing agents (with `isolation: "worktree"` by default; see Worktree Dispatch below for exceptions).
+4. Main session identifies eligible stories (TODO with satisfied dependencies), marks them `IN_PROGRESS`, and assigns them to implementers with full context blocks (story file text + Technical Notes). Before assigning concurrent stories to parallel worktrees, the main session checks for overlapping "Files to Create or Modify" sections -- overlapping stories are serialized (see Worktree Dispatch below).
+5. Implementing agents work in their worktrees and report completion (with `## Files Changed` using worktree-absolute paths) to the main session.
+6. As each implementer reports completion, the main session checks the context-layer-only skip condition: if the story modifies ONLY context-layer files and no Python code, the main session verifies ACs directly and marks DONE. Otherwise, the main session routes the work to the code-reviewer (which reads from the implementer's worktree path).
+7. The code-reviewer examines the implementation and returns APPROVED or NOT APPROVED with structured findings. If NOT APPROVED (MUST FIX findings), the main session routes MUST FIX items to the implementer for fixes in the same worktree. After fixes, the reviewer re-reviews (max 2 rounds). If the 2nd review still has MUST FIX findings, the main session escalates to the user.
+8. If APPROVED, the main session runs the merge-back sequence: `git merge --no-ff <branch>` from the main checkout -> remove worktree -> delete branch -> mark story `DONE` in both story files and epic table. If merge conflicts, see the Worktree Dispatch section for escalation. A story is NOT marked DONE until its branch is successfully merged.
+9. Main session checks for newly unblocked stories. Merge must happen BEFORE cascade, because cascaded stories may depend on the merged changes. If the required agent is on the team, it assigns directly. If a new agent type is needed, it spawns the agent (with `isolation: "worktree"`) and assigns the story (repeat from step 5).
+
+### Worktree Dispatch
+
+Implementing agents are spawned with `isolation: "worktree"` by default, giving each agent an isolated copy of the repository. This section documents the full worktree lifecycle: spawning, tracking, merge-back, conflict escalation, and exceptions.
+
+#### Spawning with Isolation
+
+When the main session spawns an implementing agent, it passes `isolation: "worktree"` in the Agent tool call. Claude Code automatically creates a git worktree and branch for the agent. The `isolation` parameter is per-spawn, not per-agent-definition -- the same agent type can be spawned with or without isolation depending on context.
+
+The main session tracks the following per story:
+- **Worktree path**: Returned in the Agent tool result (e.g., `/tmp/.worktrees/baseball-crawl-abc123/`)
+- **Branch name**: The worktree branch created by Claude Code
+- **Agent ID**: For routing review feedback and merge-back
+
+#### Context-Layer Exception
+
+Stories that modify ONLY context-layer files are spawned WITHOUT `isolation: "worktree"`. These run in the main checkout because context-layer files are shared infrastructure that must be immediately visible to all agents. The routing rule: if a story's "Files to Create or Modify" includes only paths matching the context-layer pattern (`CLAUDE.md`, `.claude/agents/*.md`, `.claude/rules/*.md`, `.claude/skills/**`, `.claude/hooks/**`, `.claude/settings.json`, `.claude/settings.local.json`, `.claude/agent-memory/**`), route to `claude-architect` and spawn without worktree isolation. Context-layer stories run serially in the main checkout.
+
+#### Merge-Back Protocol
+
+After the code-reviewer approves a story, the main session runs the merge-back sequence from the main checkout:
+
+1. `git merge --no-ff <worktree-branch>` -- creates a merge commit preserving story history
+2. If merge succeeds:
+   - Remove the worktree: `git worktree remove <path>` (retry with `--force` if it fails due to untracked files)
+   - Delete the branch: `git branch -d <branch>` (safe because the branch is fully merged)
+   - Mark the story `DONE` in both the story file and the epic table
+   - Proceed to cascade (check for newly unblocked stories)
+3. If merge conflicts:
+   - The story remains `IN_PROGRESS`
+   - Cascade is blocked for dependent stories only (non-dependent stories can proceed)
+   - The worktree stays active for inspection
+   - The main session escalates to the user with conflict details
+   - The user resolves the conflict in the main checkout (not the worktree)
+   - After resolution, the main session removes the worktree, deletes the branch, marks the story `DONE`, and proceeds to cascade
+
+A story is NOT marked DONE until its branch is successfully merged. Merge must happen BEFORE cascade, because cascaded stories may depend on the merged changes.
+
+#### Overlap Prevention
+
+The main session SHOULD NOT assign concurrent stories with overlapping "Files to Create or Modify" sections to parallel worktrees. Before routing stories to parallel agents, the main session compares file lists. If overlap is detected, those stories are serialized (assigned sequentially, not concurrently). This is prevention-first: file-ownership declarations in stories prevent conflicts at planning time; the merge conflict escalation is the safety net.
+
+#### Migration Serialization
+
+Migration stories (typically assigned to data-engineer) must never run concurrently, even if they have no explicit file overlap. Concurrent migrations cause numbering conflicts (two migrations may claim the same sequence number). The main session serializes all stories whose "Files to Create or Modify" include paths under `migrations/`.
+
+#### Error Paths
+
+| Error | When | Handling |
+|-------|------|----------|
+| Agent crashes mid-work | During implementation | Claude Code auto-cleans worktrees for agents that exit without changes. If partial changes exist, worktree persists. Main session runs `git worktree list --porcelain` to identify orphan, `git worktree remove --force <path>` to clean it, `git branch -D <branch>` to delete the unmerged branch, then escalates to user. |
+| Merge conflict | After review approval | Escalate to user with conflict details. Worktree stays active for inspection. User resolves or abandons. Main session cleans up after resolution. |
+| Review rejects (max rounds) | Circuit breaker | Existing escalation to user. Worktree stays active until user decides. If story abandoned, main session cleans up worktree without merging. |
+| Worktree cleanup fails | After merge | `git worktree remove` can fail if directory is in use or has untracked files. Retry with `--force`. If even `--force` fails, log warning and continue -- worktree is inert after branch is merged. Closure sweep with `git worktree prune` catches stale registrations. |
+
+#### File Paths in Reports
+
+Implementing agents report `## Files Changed` with worktree-absolute paths. The main session and code-reviewer use these paths for review. After merge, paths map back to the main checkout naturally.
 
 ### Closure Sequence
 
@@ -68,7 +128,7 @@ When all stories are verified DONE, the main session executes the following clos
 
 **Before spinning down the team:**
 
-9. **Validate all work.** Confirm all stories are DONE. Per-story validation was performed by the code-reviewer during the dispatch loop (for code stories) or by the main session directly (for context-layer-only stories). This step confirms completion status, not a re-review of all code.
+9. **Validate all work.** Confirm all stories are DONE. Per-story validation was performed by the code-reviewer during the dispatch loop (for code stories) or by the main session directly (for context-layer-only stories). This step confirms completion status, not a re-review of all code. Additionally, verify all worktree branches have been merged: run `git branch` to confirm no worktree branches remain unmerged, then run `git worktree list --porcelain` as a safety-net sweep for orphaned worktrees from error paths. If any are found, force-remove them (`git worktree remove --force <path>`, then `git branch -D <branch>` for unmerged branches). Run `git worktree prune` as a final cleanup for stale registrations.
 
 10. **Update the epic completely.**
     - Confirm all story file statuses are DONE.

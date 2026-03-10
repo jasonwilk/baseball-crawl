@@ -89,18 +89,20 @@ Use `TeamCreate` to create a dispatch team for the epic.
 
 ### Step 2: Spawn implementing agents and code-reviewer
 
-Spawn each implementing agent with the following context:
+Spawn each implementing agent with `isolation: "worktree"` (unless the context-layer exception applies -- see Phase 3 Step 2). This gives each agent an isolated copy of the repository via `git worktree`, preventing concurrent stories from interfering with each other's working trees.
+
+Spawn context:
 
 ```
 You are a [agent-type] agent on the [team-name] team. Wait for the main session to assign you a story via SendMessage. Do not begin work until you receive your story assignment with the full story file text and Technical Notes.
 ```
 
-If this is a multi-wave epic, spawn only wave-1 agents now. Later-wave agents are spawned during Phase 3 as dependencies complete.
+If this is a multi-wave epic, spawn only wave-1 agents now. Later-wave agents are spawned during Phase 3 as dependencies complete (each with `isolation: "worktree"` by default).
 
-**Spawn the code-reviewer** alongside the implementing agents. The code-reviewer is infrastructure, not a story-specific implementer -- it is NOT listed in the epic's Dispatch Team section. The implement skill spawns it automatically for every dispatch that includes implementing agents. Spawn context:
+**Spawn the code-reviewer** alongside the implementing agents. The code-reviewer is infrastructure, not a story-specific implementer -- it is NOT listed in the epic's Dispatch Team section. The implement skill spawns it automatically for every dispatch that includes implementing agents. The code-reviewer is NOT spawned with `isolation: "worktree"` -- it needs to access any implementer's worktree path to read their changed files and run `git diff`. Spawn context:
 
 ```
-You are the code-reviewer agent on the [team-name] team. Wait for review assignments from the main session via SendMessage. Do not self-initiate reviews. Each review assignment will include a story ID, the full story file text, epic Technical Notes, and the implementer's Files Changed list.
+You are the code-reviewer agent on the [team-name] team. Wait for review assignments from the main session via SendMessage. Do not self-initiate reviews. Each review assignment will include a story ID, the full story file text, epic Technical Notes, and the implementer's Files Changed list. When the implementer worked in a worktree, the assignment will include the worktree path -- use it when reading files and running git diff.
 ```
 
 ### Step 3: Set epic to ACTIVE
@@ -122,7 +124,7 @@ Find stories with `Status: TODO` whose blocking dependencies are all `DONE`.
 For each eligible story:
 
 1. **Check Agent Hint.** If the story has an `## Agent Hint` field, prefer that agent type.
-2. **Check context-layer routing.** Scan the story's "Files to Create or Modify" section. If any file matches a context-layer path (see Routing Precedence in `/.claude/rules/dispatch-pattern.md`), that story MUST go to `claude-architect` regardless of the Agent Hint.
+2. **Check context-layer routing.** Scan the story's "Files to Create or Modify" section. If **any** file matches a context-layer path (see Routing Precedence in `/.claude/rules/dispatch-pattern.md`), that story MUST go to `claude-architect` regardless of the Agent Hint. **Isolation depends on file mix:** if the story modifies ONLY context-layer files, spawn WITHOUT `isolation: "worktree"` (runs in the main checkout because these files are shared infrastructure that must be immediately visible to all agents). If the story is mixed (context-layer + code files), spawn `claude-architect` WITH `isolation: "worktree"` -- the architect edits both context-layer and code files from the worktree.
 3. **Fall back to routing table.** If no Agent Hint and no context-layer match, use the Agent Selection table in `/.claude/rules/dispatch-pattern.md` to determine the agent type from file paths and story domain.
 
 ### Step 3: Update statuses
@@ -150,16 +152,24 @@ Completed dependencies:
 Handoff context from completed dependencies:
 - From E-NNN-01: [artifact path and description declared in upstream story's Handoff Context section]
 
+You are working in a git worktree (an isolated copy of the repository). Review `.claude/rules/worktree-isolation.md` for constraints on what you can and cannot do in a worktree. Key constraints: no Docker commands, no `bb` CLI, no `.env` or `data/` access. You CAN run pytest and edit tracked files.
+
 Satisfy all acceptance criteria and report back when complete. Do NOT update story status files -- the main session handles all status updates.
 
-IMPORTANT: When reporting completion, include a `## Files Changed` section listing ALL files you created, modified, or deleted, with absolute paths and status annotations. Include files across all directories (src/, tests/, scripts/, migrations/, docs/, etc.) -- not just source files. Example:
+IMPORTANT: When reporting completion, include a `## Files Changed` section listing ALL files you created, modified, or deleted, with absolute paths and status annotations. Use your worktree-absolute paths (e.g., `/tmp/.worktrees/baseball-crawl-abc123/src/foo.py`). Include files across all directories (src/, tests/, scripts/, migrations/, docs/, etc.) -- not just source files.
+
+Also include a `## Test Results` section reporting: the pytest command you ran, the pass/fail count, and any failure details. Example: `pytest tests/test_foo.py -- 12 passed, 0 failed`. If you ran no tests, state why.
+
+Example:
 
 ## Files Changed
-- /workspaces/baseball-crawl/src/crawlers/roster.py (modified)
-- /workspaces/baseball-crawl/tests/test_roster.py (new)
-- /workspaces/baseball-crawl/src/crawlers/old_module.py (deleted)
-- /workspaces/baseball-crawl/src/crawlers/new_name.py (renamed from /workspaces/baseball-crawl/src/crawlers/old_name.py)
+- /tmp/.worktrees/baseball-crawl-abc123/src/crawlers/roster.py (modified)
+- /tmp/.worktrees/baseball-crawl-abc123/tests/test_roster.py (new)
+- /tmp/.worktrees/baseball-crawl-abc123/src/crawlers/old_module.py (deleted)
+- /tmp/.worktrees/baseball-crawl-abc123/src/crawlers/new_name.py (renamed from /tmp/.worktrees/baseball-crawl-abc123/src/crawlers/old_name.py)
 ```
+
+**Context-layer stories** (spawned without worktree isolation): Omit the worktree paragraph from the context block. Use main-checkout paths in the Files Changed example instead.
 
 **Context block requirements** (per `/.claude/rules/dispatch-pattern.md`):
 - Include the **full story file text** verbatim. Never summarize.
@@ -185,17 +195,25 @@ Story file: /absolute/path/to/E-NNN-SS.md
 Epic Technical Notes:
 [Full Technical Notes]
 
+Implementer worktree path: [worktree path, e.g. /tmp/.worktrees/baseball-crawl-abc123/]
+(Use this path to read changed files and run `git diff`. Run `cd <worktree-path> && git diff main..HEAD` to see changes. Do NOT run pytest from the worktree -- verify ACs through file inspection. See `.claude/agents/code-reviewer.md` Worktree Review section.)
+
 Implementer-reported files changed:
-[Files Changed section from implementer's completion message]
+[Files Changed section from implementer's completion message -- paths will be worktree-absolute]
+
+Implementer-reported test results:
+[Test Results section from implementer's completion message -- pytest command, pass/fail count, failures]
 
 Review round: 1 of 2 (circuit breaker)
 
 Review this story's implementation against all acceptance criteria and the review rubric. The implementer's Files Changed list is the primary scope. Cross-reference it against the story's "Files to Create or Modify" section to flag any missing or unexpected files (divergence is a SHOULD FIX finding -- implementers may legitimately touch unlisted files, but it should be called out). Note: `git diff --name-only` is repo-wide and may include changes from parallel stories or untracked files -- use it as advisory context, not as the authoritative scope for this story. Report findings using the structured format.
 ```
 
-3. **If the reviewer returns APPROVED** (no MUST FIX findings): Mark the story `DONE` in both the story file and epic Stories table. Any SHOULD FIX findings from the reviewer are recorded in the epic's History section during closure -- they are NOT relayed to the implementer.
+When the implementer did NOT work in a worktree (context-layer stories that touch non-context files, or stories spawned without isolation for other reasons), omit the "Implementer worktree path" paragraph.
 
-4. **If the reviewer returns NOT APPROVED** (MUST FIX findings): Route ONLY the MUST FIX findings to the implementer with the review round number (e.g., "Round 1 of 2 -- MUST FIX items below"). Do NOT include SHOULD FIX items in the feedback to implementers. The implementer fixes the issues and reports completion again (with updated `## Files Changed`). Send the updated work back to the reviewer for Round 2 using an expanded template that includes the prior findings:
+3. **If the reviewer returns APPROVED** (no MUST FIX findings): Run the merge-back sequence (see Step 5a below), then mark the story `DONE` in both the story file and epic Stories table. Any SHOULD FIX findings from the reviewer are recorded in the epic's History section during closure -- they are NOT relayed to the implementer.
+
+4. **If the reviewer returns NOT APPROVED** (MUST FIX findings): Route ONLY the MUST FIX findings to the implementer with the review round number (e.g., "Round 1 of 2 -- MUST FIX items below"). Do NOT include SHOULD FIX items in the feedback to implementers. The implementer fixes the issues in the same worktree and reports completion again (with updated `## Files Changed`). Send the updated work back to the reviewer for Round 2 using an expanded template that includes the prior findings:
 
 ```
 Review story E-NNN-SS: [Title] (Round 2)
@@ -206,8 +224,14 @@ Story file: /absolute/path/to/E-NNN-SS.md
 Epic Technical Notes:
 [Full Technical Notes]
 
+Implementer worktree path: [worktree path]
+(Same instructions as round 1 -- read files and run git diff from this path.)
+
 Implementer-reported files changed:
 [Updated Files Changed section from implementer's round-2 completion message]
+
+Implementer-reported test results:
+[Test Results section from implementer's round-2 completion message]
 
 Round 1 MUST FIX findings:
 [Paste the MUST FIX findings from the round-1 review verbatim]
@@ -223,6 +247,28 @@ This is a round-2 re-review. The implementer was asked to fix the Round 1 MUST F
    - (c) Override the reviewer and mark DONE (explicit user override -- the user assumes responsibility for unresolved findings)
    - (d) Abandon the story
    The main session does NOT mark the story DONE and does NOT loop further without user direction.
+
+### Step 5a: Merge-back (worktree stories only)
+
+After the code-reviewer approves a story that was implemented in a worktree, the main session runs the merge-back sequence from the main checkout BEFORE marking DONE or cascading. A story is NOT marked DONE until its branch is successfully merged.
+
+**Merge-back sequence:**
+
+1. `git merge --no-ff <worktree-branch>` from the main checkout -- creates a merge commit preserving story history.
+2. **If merge succeeds:**
+   - Remove the worktree: `git worktree remove <path>` (retry with `--force` if it fails due to untracked files).
+   - Delete the branch: `git branch -d <branch>` (safe because the branch is fully merged).
+   - Mark the story `DONE` (Step 6).
+   - Proceed to cascade (Step 6).
+3. **If merge conflicts:**
+   - The story remains `IN_PROGRESS`.
+   - Cascade is blocked for dependent stories only (non-dependent stories can proceed).
+   - The worktree stays active for inspection.
+   - Escalate to the user with conflict details: which files conflict and between which stories.
+   - The user resolves the conflict in the main checkout (not the worktree).
+   - After resolution, the main session removes the worktree, deletes the branch, marks DONE, and proceeds to cascade.
+
+For stories that were NOT implemented in a worktree (context-layer stories), skip this step -- proceed directly to marking DONE.
 
 ### Step 6: Cascade
 
@@ -256,6 +302,8 @@ When all stories are verified DONE (and the optional review chain is complete), 
 ### Step 1: Validate all work
 
 Confirm all stories are DONE. Per-story validation was performed by the code-reviewer during Phase 3 (for code stories) or by the main session directly (for context-layer-only stories). This step confirms reviewer APPROVED status for code stories and main-session verification for context-layer-only stories -- it is not a re-review of all code.
+
+**Worktree verification:** Verify all worktree branches have been merged into the current branch. Run `git branch` to confirm no worktree branches remain unmerged. Then run `git worktree list --porcelain` as a safety-net sweep for orphaned worktrees from error paths. If any orphans are found, force-remove them (`git worktree remove --force <path>`, then `git branch -D <branch>` for unmerged branches). Run `git worktree prune` as a final cleanup for stale registrations. Per-story worktree cleanup happens at merge-back time (Phase 3 Step 5a) -- this closure check catches only orphans from error paths.
 
 ### Step 2: Update the epic completely
 
@@ -333,16 +381,18 @@ Phase 1: Read epic's Dispatch Team section
   - Plan multi-wave spawning if dependencies exist
   |
   v
-Phase 2: Create team, spawn implementers + code-reviewer
-  - Code-reviewer spawned automatically (not in Dispatch Team)
+Phase 2: Create team, spawn implementers (with isolation: "worktree") + code-reviewer (no worktree)
+  - Context-layer stories: spawned WITHOUT worktree isolation
+  - Code-reviewer spawned automatically (not in Dispatch Team, no worktree)
   - Set epic to ACTIVE if currently READY
   |
   v
 Phase 3: Coordination loop
   - Identify eligible stories (TODO + deps satisfied)
   - Route to agent type (Agent Hint > context-layer check > routing table)
-  - Mark stories IN_PROGRESS, assign with full context blocks
-  - Implementer reports completion with ## Files Changed
+  - Context-layer stories -> claude-architect, no worktree
+  - Mark stories IN_PROGRESS, assign with full context blocks (+ worktree notice)
+  - Implementer reports completion with ## Files Changed (worktree-absolute paths)
       |
       v
     Context-layer-only? --YES--> Main session verifies ACs, marks DONE
@@ -350,35 +400,36 @@ Phase 3: Coordination loop
       NO
       |
       v
-    Send to code-reviewer (round 1 of 2)
+    Send to code-reviewer (round 1 of 2, include worktree path)
       |
       v
-    APPROVED? --YES--> Mark DONE (SHOULD FIX -> epic History)
-      |
-      NO (MUST FIX)
+    APPROVED? --YES--> Merge-back: git merge --no-ff -> remove worktree -> delete branch -> Mark DONE
+      |                  (SHOULD FIX -> epic History)
+      NO (MUST FIX)      [If merge conflict: escalate to user, block dependent cascade only]
       |
       v
-    Route MUST FIX to implementer, implementer fixes
+    Route MUST FIX to implementer, implementer fixes in same worktree
       |
       v
     Send to code-reviewer (round 2 of 2)
       |
       v
-    APPROVED? --YES--> Mark DONE
+    APPROVED? --YES--> Merge-back -> Mark DONE
       |
       NO
       |
       v
     Escalate to user (circuit breaker)
-  - Cascade to newly unblocked stories
-  - Spawn later-wave agents as dependencies complete
+  - Cascade to newly unblocked stories (merge MUST complete before cascade)
+  - Spawn later-wave agents as dependencies complete (with isolation: "worktree")
   |
   v
 [If "and review": Phase 4 -- chain into codex-review skill (headless)]
   |
   v
 Phase 5: Closure sequence
-  - Validate all work (confirm DONE + reviewer approved)
+  - Validate all work (confirm DONE + reviewer approved + all branches merged)
+  - Sweep for orphaned worktrees (git worktree list --porcelain; force-remove; prune)
   - Update epic to COMPLETED with history entry
   - Documentation assessment (spawn docs-writer if needed)
   - Context-layer assessment (spawn claude-architect if needed)
@@ -430,3 +481,4 @@ If the code-reviewer's context window fills during a large epic (8+ stories), th
 8. **Do not skip the context-layer assessment.** The epic cannot be archived until the context-layer impact is evaluated per `.claude/rules/context-layer-assessment.md`.
 9. **Do not mark stories DONE without code-reviewer approval** (except context-layer-only stories) unless the user explicitly overrides via the circuit breaker escalation. The reviewer is the quality gate -- the main session does not bypass it by verifying ACs directly.
 10. **Do not relay SHOULD FIX findings to implementers.** The fix loop is exclusively for MUST FIX items. Record SHOULD FIX in epic History during closure.
+11. **Do not spawn context-layer stories with worktree isolation.** Context-layer files (CLAUDE.md, `.claude/agents/`, `.claude/rules/`, `.claude/skills/`, etc.) are shared infrastructure. Stories modifying only these files must run in the main checkout without `isolation: "worktree"`.

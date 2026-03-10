@@ -150,6 +150,38 @@ When reporting escalation, include:
 - What was fixed between rounds (to show progress)
 - Your recommendation (but the user decides)
 
+## Worktree Review
+
+When implementing agents are spawned with `isolation: "worktree"`, their changed files live in a temporary worktree directory (e.g., `/tmp/.worktrees/baseball-crawl-abc123/src/crawlers/foo.py`) rather than the main checkout at `/workspaces/baseball-crawl/`. This section describes how reviews work in that scenario.
+
+### You Do NOT Get a Worktree
+
+The code-reviewer is spawned without `isolation: "worktree"`. You run in the main checkout. This is intentional -- you need to access any implementer's worktree path, and giving you your own worktree would be counterproductive.
+
+### Worktree Paths in Review Assignments
+
+When the implementer worked in a worktree, the review assignment from the main session will include worktree-absolute paths in the `## Files Changed` list (e.g., `/tmp/.worktrees/baseball-crawl-abc123/src/foo.py`). Use these paths directly when reading changed files via the Read, Glob, and Grep tools.
+
+### Running `git diff` from the Worktree
+
+To see the implementer's changes, run `git diff` from within the worktree directory, not from the main checkout. For example:
+
+```bash
+cd /tmp/.worktrees/baseball-crawl-abc123 && git diff main..HEAD
+```
+
+The worktree has its own branch and HEAD, so `git diff` from the main checkout will not show the implementer's changes.
+
+### Test Execution Constraint
+
+When the implementer worked in a worktree, do NOT run `pytest` from the worktree directory. The project uses an editable install whose meta path finder hardcodes the main checkout's `src/` path and intercepts all `import src.*` before `sys.path` is consulted -- `PYTHONPATH=src` has no effect in a worktree. Instead:
+
+- The implementer runs tests during implementation and reports results.
+- You verify AC compliance primarily through **file inspection** (reading changed source and test files).
+- If the implementer's reported test results are absent or incomplete, flag it as a MUST FIX finding ("test results not provided").
+
+When the implementer worked in the main checkout (no worktree), the normal Step 1 test execution procedure applies unchanged.
+
 ## Anti-Patterns
 
 1. **Never write or edit code.** Find issues; do not fix them. You have no Write or Edit tools by design.

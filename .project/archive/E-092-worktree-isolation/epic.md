@@ -1,7 +1,7 @@
 # E-092: Git Worktree Isolation for Agent Teams
 
 ## Status
-`READY`
+`COMPLETED`
 <!-- Lifecycle: DRAFT → READY → ACTIVE → COMPLETED (or BLOCKED / ABANDONED) -->
 <!-- PM sets READY explicitly after: expert consultation done, all stories have testable ACs, quality checklist passed. -->
 <!-- Only READY and ACTIVE epics can be dispatched. -->
@@ -42,11 +42,11 @@ Claude Code's Agent tool supports an `isolation: "worktree"` parameter that crea
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-092-01 | Create worktree isolation rule | TODO | None | - |
-| E-092-02 | Update dispatch pattern for worktree dispatch | TODO | None | - |
-| E-092-03 | Update implement skill for worktree lifecycle | TODO | E-092-01, E-092-02 | - |
-| E-092-04 | Update code-reviewer for worktree-aware review | TODO | None | - |
-| E-092-05 | Fix dotenv_values() path resolution for worktrees | TODO | None | - |
+| E-092-01 | Create worktree isolation rule | DONE | None | claude-architect |
+| E-092-02 | Update dispatch pattern for worktree dispatch | DONE | None | claude-architect |
+| E-092-03 | Update implement skill for worktree lifecycle | DONE | E-092-01, E-092-02 | claude-architect |
+| E-092-04 | Update code-reviewer for worktree-aware review | DONE | None | claude-architect |
+| E-092-05 | Fix dotenv_values() path resolution for worktrees | DONE | None | software-engineer |
 
 ## Dispatch Team
 - claude-architect
@@ -119,3 +119,7 @@ Implementing agents report `## Files Changed` with worktree-absolute paths. The 
 ## History
 - 2026-03-10: Created. SE and CA consultations completed during planning.
 - 2026-03-10: Multi-agent review: SE (2 rounds -- project mechanics + concrete code bugs), CA (2 rounds -- context-layer scope + coordination/cleanup analysis), code-reviewer (spec review -- 5 MUST FIX resolved). Two Codex spec reviews: round 1 (4 findings -- resolved open question, dependency fix, AC language fix, test expectation fix), round 2 (3 findings -- review template gap, monkeypatch signature breakage, test file list). All findings resolved. Set to READY.
+- 2026-03-10: Dispatched. Wave 1: E-092-01 (architect-01), E-092-02 (architect-02), E-092-04 (architect-04), E-092-05 (se-05). Wave 2: E-092-03 (architect-04, after 01+02 completed). E-092-05 reviewed by code-reviewer (APPROVED, no findings). All 5 stories DONE.
+- 2026-03-10: Documentation assessment: No documentation impact (internal agent dispatch mechanics only).
+- 2026-03-10: Context-layer assessment: (1) New convention -- YES, codified by E-092-01 (worktree-isolation.md). (2) Architectural decision -- YES, codified by E-092-02 (dispatch-pattern.md). (3) Footgun/boundary -- YES, codified by E-092-01 (worktree constraints). (4) Agent behavior change -- YES, codified by E-092-02/03/04 (dispatch, skill, reviewer). (5) Domain knowledge -- NO. (6) New CLI/workflow -- NO. All firing triggers already codified by the epic's own stories; no additional context-layer work needed.
+- 2026-03-10: COMPLETED.
