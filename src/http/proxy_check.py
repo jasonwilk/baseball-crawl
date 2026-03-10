@@ -17,6 +17,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from enum import Enum
+from pathlib import Path
 
 import httpx
 from dotenv import dotenv_values
@@ -24,6 +25,8 @@ from dotenv import dotenv_values
 from src.http.session import create_session, resolve_proxy_from_dict
 
 logger = logging.getLogger(__name__)
+
+_ENV_PATH = Path(__file__).resolve().parents[2] / ".env"
 
 _IP_ECHO_URL = "https://api.ipify.org?format=json"
 _CHECK_TIMEOUT = 10  # seconds -- short, it's a diagnostic
@@ -105,7 +108,7 @@ def check_proxy_routing(profile: str, direct_ip: str | None) -> ProxyCheckResult
     Returns:
         A ``ProxyCheckResult`` describing the outcome for this profile.
     """
-    env = dotenv_values()
+    env = dotenv_values(_ENV_PATH)
     proxy_url = resolve_proxy_from_dict(env, profile)
 
     if proxy_url is None:

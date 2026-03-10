@@ -60,8 +60,8 @@ def _make_jwt(exp_offset: int = 3600) -> str:
 
 
 def _patch_dotenv(monkeypatch: pytest.MonkeyPatch, values: dict) -> None:
-    monkeypatch.setattr("src.gamechanger.client.dotenv_values", lambda: values)
-    monkeypatch.setattr("src.gamechanger.credentials.dotenv_values", lambda: values)
+    monkeypatch.setattr("src.gamechanger.client.dotenv_values", lambda *_a, **_kw: values)
+    monkeypatch.setattr("src.gamechanger.credentials.dotenv_values", lambda *_a, **_kw: values)
 
 
 def _mock_token_manager(monkeypatch: pytest.MonkeyPatch, token: str = "fake-access") -> None:
@@ -459,3 +459,26 @@ def test_check_profile_detailed_api_display_name_not_in_keys(
     # Token value must not appear anywhere in the result
     assert "fake-access" not in repr(result)
     assert "abcdef1234567890abcdef1234567890" not in repr(result)
+
+
+# ---------------------------------------------------------------------------
+# AC-7: __file__-relative .env path resolution
+# ---------------------------------------------------------------------------
+
+
+def test_credentials_env_path_resolves_to_repo_root() -> None:
+    """AC-7: _ENV_PATH in credentials.py resolves to <repo-root>/.env regardless of cwd."""
+    from src.gamechanger.credentials import _ENV_PATH
+
+    assert _ENV_PATH.name == ".env"
+    repo_root = _ENV_PATH.parent
+    assert (repo_root / "pyproject.toml").exists(), (
+        f"Expected repo root at {repo_root!r} but pyproject.toml not found there"
+    )
+
+
+def test_credentials_env_path_is_absolute() -> None:
+    """AC-7: _ENV_PATH in credentials.py is an absolute path (not cwd-relative)."""
+    from src.gamechanger.credentials import _ENV_PATH
+
+    assert _ENV_PATH.is_absolute()

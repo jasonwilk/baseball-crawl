@@ -70,7 +70,7 @@ class TestProxyNotConfigured:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """AC-3: Returns NOT_CONFIGURED when PROXY_ENABLED is absent."""
-        monkeypatch.setattr("src.http.proxy_check.dotenv_values", lambda: _NO_PROXY_ENV)
+        monkeypatch.setattr("src.http.proxy_check.dotenv_values", lambda *_a, **_kw: _NO_PROXY_ENV)
         result = check_proxy_routing("web", _REAL_IP)
         assert result.outcome == ProxyCheckOutcome.NOT_CONFIGURED
 
@@ -80,7 +80,7 @@ class TestProxyNotConfigured:
         """AC-3: Returns NOT_CONFIGURED when PROXY_ENABLED=false."""
         monkeypatch.setattr(
             "src.http.proxy_check.dotenv_values",
-            lambda: {"PROXY_ENABLED": "false", "PROXY_URL_WEB": "http://proxy:1234"},
+            lambda *_a, **_kw: {"PROXY_ENABLED": "false", "PROXY_URL_WEB": "http://proxy:1234"},
         )
         result = check_proxy_routing("web", _REAL_IP)
         assert result.outcome == ProxyCheckOutcome.NOT_CONFIGURED
@@ -91,7 +91,7 @@ class TestProxyNotConfigured:
         """AC-4: Returns NOT_CONFIGURED when PROXY_ENABLED=true but URL is absent."""
         monkeypatch.setattr(
             "src.http.proxy_check.dotenv_values",
-            lambda: {"PROXY_ENABLED": "true"},
+            lambda *_a, **_kw: {"PROXY_ENABLED": "true"},
         )
         result = check_proxy_routing("web", _REAL_IP)
         assert result.outcome == ProxyCheckOutcome.NOT_CONFIGURED
@@ -108,7 +108,7 @@ class TestProxyPass:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """AC-1, AC-2: PASS when proxy IP differs from direct IP."""
-        monkeypatch.setattr("src.http.proxy_check.dotenv_values", lambda: _PROXY_ENV)
+        monkeypatch.setattr("src.http.proxy_check.dotenv_values", lambda *_a, **_kw: _PROXY_ENV)
         respx.get(_IP_ECHO_URL).mock(
             return_value=httpx.Response(200, json={"ip": _PROXY_IP})
         )
@@ -122,7 +122,7 @@ class TestProxyPass:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """AC-1: PASS for mobile profile when proxy IP differs."""
-        monkeypatch.setattr("src.http.proxy_check.dotenv_values", lambda: _PROXY_ENV)
+        monkeypatch.setattr("src.http.proxy_check.dotenv_values", lambda *_a, **_kw: _PROXY_ENV)
         respx.get(_IP_ECHO_URL).mock(
             return_value=httpx.Response(200, json={"ip": _PROXY_IP})
         )
@@ -142,7 +142,7 @@ class TestProxyFail:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """AC-2: FAIL when proxy IP matches direct IP (not routing through proxy)."""
-        monkeypatch.setattr("src.http.proxy_check.dotenv_values", lambda: _PROXY_ENV)
+        monkeypatch.setattr("src.http.proxy_check.dotenv_values", lambda *_a, **_kw: _PROXY_ENV)
         respx.get(_IP_ECHO_URL).mock(
             return_value=httpx.Response(200, json={"ip": _REAL_IP})
         )
@@ -163,7 +163,7 @@ class TestProxyError:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """AC-7: ERROR with descriptive message when proxy connection fails."""
-        monkeypatch.setattr("src.http.proxy_check.dotenv_values", lambda: _PROXY_ENV)
+        monkeypatch.setattr("src.http.proxy_check.dotenv_values", lambda *_a, **_kw: _PROXY_ENV)
         respx.get(_IP_ECHO_URL).mock(side_effect=httpx.ConnectError("connection refused"))
         result = check_proxy_routing("web", _REAL_IP)
         assert result.outcome == ProxyCheckOutcome.ERROR
@@ -175,7 +175,7 @@ class TestProxyError:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """AC-7: ERROR when proxy request times out."""
-        monkeypatch.setattr("src.http.proxy_check.dotenv_values", lambda: _PROXY_ENV)
+        monkeypatch.setattr("src.http.proxy_check.dotenv_values", lambda *_a, **_kw: _PROXY_ENV)
         respx.get(_IP_ECHO_URL).mock(side_effect=httpx.TimeoutException("timeout"))
         result = check_proxy_routing("web", _REAL_IP)
         assert result.outcome == ProxyCheckOutcome.ERROR
@@ -185,7 +185,7 @@ class TestProxyError:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """ERROR when proxy request succeeds but returns no IP in the body."""
-        monkeypatch.setattr("src.http.proxy_check.dotenv_values", lambda: _PROXY_ENV)
+        monkeypatch.setattr("src.http.proxy_check.dotenv_values", lambda *_a, **_kw: _PROXY_ENV)
         respx.get(_IP_ECHO_URL).mock(
             return_value=httpx.Response(200, json={})
         )
@@ -204,7 +204,7 @@ class TestProxyPassUnverified:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """AC-2: PASS-UNVERIFIED when proxy succeeds but direct baseline is None."""
-        monkeypatch.setattr("src.http.proxy_check.dotenv_values", lambda: _PROXY_ENV)
+        monkeypatch.setattr("src.http.proxy_check.dotenv_values", lambda *_a, **_kw: _PROXY_ENV)
         respx.get(_IP_ECHO_URL).mock(
             return_value=httpx.Response(200, json={"ip": _PROXY_IP})
         )
@@ -227,7 +227,7 @@ class TestProxyCheckLogSafety:
         """AC-6: Proxy URL (with credentials) must not appear in any log output."""
         import logging
 
-        monkeypatch.setattr("src.http.proxy_check.dotenv_values", lambda: _PROXY_ENV)
+        monkeypatch.setattr("src.http.proxy_check.dotenv_values", lambda *_a, **_kw: _PROXY_ENV)
         respx.get(_IP_ECHO_URL).mock(
             return_value=httpx.Response(200, json={"ip": _PROXY_IP})
         )
@@ -248,7 +248,7 @@ class TestProxyCheckLogSafety:
         """AC-6: Proxy URL must not appear in log output on network error."""
         import logging
 
-        monkeypatch.setattr("src.http.proxy_check.dotenv_values", lambda: _PROXY_ENV)
+        monkeypatch.setattr("src.http.proxy_check.dotenv_values", lambda *_a, **_kw: _PROXY_ENV)
         respx.get(_IP_ECHO_URL).mock(side_effect=httpx.ConnectError("refused"))
         with caplog.at_level(logging.DEBUG):
             check_proxy_routing("web", _REAL_IP)
@@ -285,7 +285,7 @@ class TestProxyCheckNoStickySession:
         monkeypatch.setattr(
             "src.http.proxy_check.resolve_proxy_from_dict", capturing_resolve
         )
-        monkeypatch.setattr("src.http.proxy_check.dotenv_values", lambda: _PROXY_ENV)
+        monkeypatch.setattr("src.http.proxy_check.dotenv_values", lambda *_a, **_kw: _PROXY_ENV)
 
         check_proxy_routing("web", _REAL_IP)
 
@@ -293,3 +293,26 @@ class TestProxyCheckNoStickySession:
             f"proxy check passed session_id={captured_kwargs.get('session_id')!r} "
             "but should use rotating IPs (no session ID)"
         )
+
+
+# ---------------------------------------------------------------------------
+# AC-7: __file__-relative .env path resolution
+# ---------------------------------------------------------------------------
+
+
+def test_proxy_check_env_path_resolves_to_repo_root() -> None:
+    """AC-7: _ENV_PATH in proxy_check.py resolves to <repo-root>/.env regardless of cwd."""
+    from src.http.proxy_check import _ENV_PATH
+
+    assert _ENV_PATH.name == ".env"
+    repo_root = _ENV_PATH.parent
+    assert (repo_root / "pyproject.toml").exists(), (
+        f"Expected repo root at {repo_root!r} but pyproject.toml not found there"
+    )
+
+
+def test_proxy_check_env_path_is_absolute() -> None:
+    """AC-7: _ENV_PATH in proxy_check.py is an absolute path (not cwd-relative)."""
+    from src.http.proxy_check import _ENV_PATH
+
+    assert _ENV_PATH.is_absolute()

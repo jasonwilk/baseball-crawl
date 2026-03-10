@@ -486,7 +486,7 @@ class GameChangerClient:
         Raises:
             ConfigurationError: If any unconditionally required key is missing.
         """
-        env_values = dotenv_values()
+        env_values = dotenv_values(_DEFAULT_ENV_PATH)
         required = _required_keys(profile)
         missing = [key for key in required if not env_values.get(key)]
         if missing:

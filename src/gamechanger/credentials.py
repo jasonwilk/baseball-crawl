@@ -21,6 +21,7 @@ import json
 import logging
 import time
 from dataclasses import dataclass
+from pathlib import Path
 
 import httpx
 from dotenv import dotenv_values
@@ -35,6 +36,8 @@ from src.gamechanger.client import (
 from src.http.proxy_check import ProxyCheckResult, check_proxy_routing, get_direct_ip
 
 logger = logging.getLogger(__name__)
+
+_ENV_PATH = Path(__file__).resolve().parents[2] / ".env"
 
 _ME_USER_ACCEPT = "application/vnd.gc.com.user+json; version=0.3.0"
 _ME_USER_ENDPOINT = "/me/user"
@@ -234,7 +237,7 @@ def check_profile_detailed(profile: str) -> ProfileCheckResult:
         ``exit_code`` mirrors :func:`check_single_profile` semantics:
         0 = valid, 1 = expired / network error, 2 = missing credentials.
     """
-    env = dotenv_values()
+    env = dotenv_values(_ENV_PATH)
     presence = _check_presence(profile, env)
     token_health = _check_token_health(profile, env)
     api_result, exit_code = _check_api(profile, presence.keys_missing)

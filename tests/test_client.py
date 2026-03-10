@@ -51,7 +51,7 @@ def _make_client(monkeypatch: pytest.MonkeyPatch) -> GameChangerClient:
     """Return a GameChangerClient with fake credentials and zero delays."""
     monkeypatch.setattr(
         "src.gamechanger.client.dotenv_values",
-        lambda: _FAKE_CREDENTIALS,
+        lambda *_a, **_kw: _FAKE_CREDENTIALS,
     )
     _mock_token_manager(monkeypatch)
     return GameChangerClient(min_delay_ms=0, jitter_ms=0)
@@ -323,7 +323,7 @@ def test_missing_all_credentials_raises_configuration_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """No .env file (or empty env) raises ConfigurationError listing missing keys."""
-    monkeypatch.setattr("src.gamechanger.client.dotenv_values", lambda: {})
+    monkeypatch.setattr("src.gamechanger.client.dotenv_values", lambda *_a, **_kw: {})
 
     with pytest.raises(ConfigurationError) as exc_info:
         GameChangerClient(min_delay_ms=0, jitter_ms=0)
@@ -344,7 +344,7 @@ def test_missing_single_credential_raises_configuration_error(
         "GAMECHANGER_DEVICE_ID_WEB": "fake-device-id",
         # GAMECHANGER_BASE_URL intentionally absent
     }
-    monkeypatch.setattr("src.gamechanger.client.dotenv_values", lambda: partial_creds)
+    monkeypatch.setattr("src.gamechanger.client.dotenv_values", lambda *_a, **_kw: partial_creds)
 
     with pytest.raises(ConfigurationError) as exc_info:
         GameChangerClient(min_delay_ms=0, jitter_ms=0)
@@ -376,7 +376,7 @@ def test_min_delay_and_jitter_forwarded_to_session(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr("src.gamechanger.client.create_session", fake_create_session)
     monkeypatch.setattr(
         "src.gamechanger.client.dotenv_values",
-        lambda: _FAKE_CREDENTIALS,
+        lambda *_a, **_kw: _FAKE_CREDENTIALS,
     )
     _mock_token_manager(monkeypatch)
 
@@ -656,7 +656,7 @@ def _make_client_with_profile(
 ) -> GameChangerClient:
     """Return a GameChangerClient with the given profile and zero delays."""
     creds = credentials if credentials is not None else _FAKE_CREDENTIALS
-    monkeypatch.setattr("src.gamechanger.client.dotenv_values", lambda: creds)
+    monkeypatch.setattr("src.gamechanger.client.dotenv_values", lambda *_a, **_kw: creds)
     _mock_token_manager(monkeypatch)
     return GameChangerClient(min_delay_ms=0, jitter_ms=0, profile=profile)
 
@@ -694,7 +694,7 @@ def test_mobile_profile_uses_mobile_user_agent(monkeypatch: pytest.MonkeyPatch) 
 def test_invalid_profile_raises_error(monkeypatch: pytest.MonkeyPatch) -> None:
     """profile='invalid' raises an error (ConfigurationError for unknown profile credentials)."""
     monkeypatch.setattr(
-        "src.gamechanger.client.dotenv_values", lambda: _FAKE_CREDENTIALS
+        "src.gamechanger.client.dotenv_values", lambda *_a, **_kw: _FAKE_CREDENTIALS
     )
     with pytest.raises((ValueError, ConfigurationError)):
         GameChangerClient(min_delay_ms=0, jitter_ms=0, profile="invalid")
@@ -718,7 +718,7 @@ def test_profile_parameter_forwarded_to_create_session(
 
     monkeypatch.setattr("src.gamechanger.client.create_session", fake_create_session)
     monkeypatch.setattr(
-        "src.gamechanger.client.dotenv_values", lambda: _FAKE_CREDENTIALS_MOBILE
+        "src.gamechanger.client.dotenv_values", lambda *_a, **_kw: _FAKE_CREDENTIALS_MOBILE
     )
     _mock_token_manager(monkeypatch)
 
@@ -796,7 +796,7 @@ def test_web_profile_loads_web_scoped_keys(monkeypatch: pytest.MonkeyPatch) -> N
 
     gc-token is set lazily on first API call; device-id is set eagerly.
     """
-    monkeypatch.setattr("src.gamechanger.client.dotenv_values", lambda: _FAKE_CREDENTIALS)
+    monkeypatch.setattr("src.gamechanger.client.dotenv_values", lambda *_a, **_kw: _FAKE_CREDENTIALS)
     _mock_token_manager(monkeypatch)
     client = GameChangerClient(min_delay_ms=0, jitter_ms=0, profile="web")
     # device-id is set eagerly at construction time
@@ -810,7 +810,7 @@ def test_web_profile_gc_token_set_on_first_api_call(monkeypatch: pytest.MonkeyPa
     import respx as _respx
     import httpx as _httpx
 
-    monkeypatch.setattr("src.gamechanger.client.dotenv_values", lambda: _FAKE_CREDENTIALS)
+    monkeypatch.setattr("src.gamechanger.client.dotenv_values", lambda *_a, **_kw: _FAKE_CREDENTIALS)
     _mock_token_manager(monkeypatch, access_token=_FAKE_ACCESS_TOKEN)
 
     with _respx.mock:
@@ -829,7 +829,7 @@ def test_web_profile_missing_web_key_raises_no_fallback(
         "GAMECHANGER_DEVICE_ID": "flat-device",
         "GAMECHANGER_BASE_URL": "https://api.team-manager.gc.com",
     }
-    monkeypatch.setattr("src.gamechanger.client.dotenv_values", lambda: creds_with_flat_only)
+    monkeypatch.setattr("src.gamechanger.client.dotenv_values", lambda *_a, **_kw: creds_with_flat_only)
 
     with pytest.raises(ConfigurationError) as exc_info:
         GameChangerClient(min_delay_ms=0, jitter_ms=0, profile="web")
@@ -843,7 +843,7 @@ def test_mobile_profile_loads_mobile_scoped_keys(monkeypatch: pytest.MonkeyPatch
     For mobile without client key, the manual access token fallback is used.
     device-id is set eagerly; gc-token is lazy.
     """
-    monkeypatch.setattr("src.gamechanger.client.dotenv_values", lambda: _FAKE_CREDENTIALS_MOBILE)
+    monkeypatch.setattr("src.gamechanger.client.dotenv_values", lambda *_a, **_kw: _FAKE_CREDENTIALS_MOBILE)
     _mock_token_manager(monkeypatch)
     client = GameChangerClient(min_delay_ms=0, jitter_ms=0, profile="mobile")
     assert client._session.headers["gc-device-id"] == "mobiledeviceid1234567890abcdef"
@@ -859,7 +859,7 @@ def test_mobile_profile_missing_device_id_raises(
         "GAMECHANGER_BASE_URL": "https://api.team-manager.gc.com",
         # GAMECHANGER_DEVICE_ID_MOBILE intentionally absent
     }
-    monkeypatch.setattr("src.gamechanger.client.dotenv_values", lambda: creds_missing_device_id)
+    monkeypatch.setattr("src.gamechanger.client.dotenv_values", lambda *_a, **_kw: creds_missing_device_id)
 
     with pytest.raises(ConfigurationError) as exc_info:
         GameChangerClient(min_delay_ms=0, jitter_ms=0, profile="mobile")
@@ -869,7 +869,7 @@ def test_mobile_profile_missing_device_id_raises(
 
 def test_base_url_remains_unsuffixed(monkeypatch: pytest.MonkeyPatch) -> None:
     """AC-5: GAMECHANGER_BASE_URL is not profile-scoped (same for both profiles)."""
-    monkeypatch.setattr("src.gamechanger.client.dotenv_values", lambda: _FAKE_CREDENTIALS)
+    monkeypatch.setattr("src.gamechanger.client.dotenv_values", lambda *_a, **_kw: _FAKE_CREDENTIALS)
     _mock_token_manager(monkeypatch)
     client = GameChangerClient(min_delay_ms=0, jitter_ms=0, profile="web")
     assert client._base_url == "https://api.team-manager.gc.com"
@@ -893,7 +893,7 @@ def test_401_triggers_force_refresh_and_retry_succeeds(
     mock_tm.get_access_token.return_value = _FAKE_ACCESS_TOKEN
     mock_tm.force_refresh.return_value = fresh_token
     monkeypatch.setattr("src.gamechanger.client.TokenManager", lambda **_kw: mock_tm)
-    monkeypatch.setattr("src.gamechanger.client.dotenv_values", lambda: _FAKE_CREDENTIALS)
+    monkeypatch.setattr("src.gamechanger.client.dotenv_values", lambda *_a, **_kw: _FAKE_CREDENTIALS)
 
     # First call returns 401; retry (after force_refresh) returns 200.
     route = respx.get(f"{_BASE_URL}/me/teams").mock(
@@ -917,7 +917,7 @@ def test_double_401_raises_credential_expired_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """AC-8b: If both the initial request and the retry return 401, raises CredentialExpiredError."""
-    monkeypatch.setattr("src.gamechanger.client.dotenv_values", lambda: _FAKE_CREDENTIALS)
+    monkeypatch.setattr("src.gamechanger.client.dotenv_values", lambda *_a, **_kw: _FAKE_CREDENTIALS)
     _mock_token_manager(monkeypatch)
 
     respx.get(f"{_BASE_URL}/me/teams").mock(return_value=httpx.Response(401))
@@ -939,7 +939,7 @@ def test_token_refresh_between_requests(monkeypatch: pytest.MonkeyPatch) -> None
     mock_tm.get_access_token.side_effect = [first_token, second_token]
     mock_tm.force_refresh.return_value = second_token
     monkeypatch.setattr("src.gamechanger.client.TokenManager", lambda **_kw: mock_tm)
-    monkeypatch.setattr("src.gamechanger.client.dotenv_values", lambda: _FAKE_CREDENTIALS)
+    monkeypatch.setattr("src.gamechanger.client.dotenv_values", lambda *_a, **_kw: _FAKE_CREDENTIALS)
 
     respx.get(f"{_BASE_URL}/me/teams").mock(return_value=httpx.Response(200, json=[]))
     client = GameChangerClient(min_delay_ms=0, jitter_ms=0)
@@ -967,7 +967,7 @@ def test_mobile_manual_access_token_fallback(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setattr("src.gamechanger.client.TokenManager", lambda **_kw: mock_tm)
     monkeypatch.setattr(
         "src.gamechanger.client.dotenv_values",
-        lambda: _FAKE_CREDENTIALS_MOBILE,
+        lambda *_a, **_kw: _FAKE_CREDENTIALS_MOBILE,
     )
 
     respx.get(f"{_BASE_URL}/me/user").mock(
@@ -997,7 +997,7 @@ def test_401_force_refresh_auth_signing_error_propagates(
     mock_tm.get_access_token.return_value = _FAKE_ACCESS_TOKEN
     mock_tm.force_refresh.side_effect = AuthSigningError("bad signature")
     monkeypatch.setattr("src.gamechanger.client.TokenManager", lambda **_kw: mock_tm)
-    monkeypatch.setattr("src.gamechanger.client.dotenv_values", lambda: _FAKE_CREDENTIALS)
+    monkeypatch.setattr("src.gamechanger.client.dotenv_values", lambda *_a, **_kw: _FAKE_CREDENTIALS)
 
     respx.get(f"{_BASE_URL}/me/teams").mock(return_value=httpx.Response(401))
     client = GameChangerClient(min_delay_ms=0, jitter_ms=0)
@@ -1019,7 +1019,7 @@ def test_401_force_refresh_credential_expired_error_propagates(
     mock_tm.get_access_token.return_value = _FAKE_ACCESS_TOKEN
     mock_tm.force_refresh.side_effect = CredentialExpiredError("refresh token expired")
     monkeypatch.setattr("src.gamechanger.client.TokenManager", lambda **_kw: mock_tm)
-    monkeypatch.setattr("src.gamechanger.client.dotenv_values", lambda: _FAKE_CREDENTIALS)
+    monkeypatch.setattr("src.gamechanger.client.dotenv_values", lambda *_a, **_kw: _FAKE_CREDENTIALS)
 
     respx.get(f"{_BASE_URL}/me/teams").mock(return_value=httpx.Response(401))
     client = GameChangerClient(min_delay_ms=0, jitter_ms=0)
@@ -1042,7 +1042,7 @@ def test_401_post_refresh_403_raises_forbidden_error(
     mock_tm.get_access_token.return_value = _FAKE_ACCESS_TOKEN
     mock_tm.force_refresh.return_value = fresh_token
     monkeypatch.setattr("src.gamechanger.client.TokenManager", lambda **_kw: mock_tm)
-    monkeypatch.setattr("src.gamechanger.client.dotenv_values", lambda: _FAKE_CREDENTIALS)
+    monkeypatch.setattr("src.gamechanger.client.dotenv_values", lambda *_a, **_kw: _FAKE_CREDENTIALS)
 
     # First request 401 -> force_refresh -> retry gets 403
     respx.get(f"{_BASE_URL}/me/teams").mock(
@@ -1073,7 +1073,7 @@ def test_proxy_forwarded_to_session_when_enabled_web(
         "PROXY_ENABLED": "true",
         "PROXY_URL_WEB": "http://proxy.example.com:1234",
     }
-    monkeypatch.setattr("src.gamechanger.client.dotenv_values", lambda: creds_with_proxy)
+    monkeypatch.setattr("src.gamechanger.client.dotenv_values", lambda *_a, **_kw: creds_with_proxy)
     _mock_token_manager(monkeypatch)
 
     with _patch("src.http.session.httpx.Client") as mock_client:
@@ -1096,7 +1096,7 @@ def test_proxy_forwarded_to_session_when_enabled_mobile(
         "PROXY_ENABLED": "true",
         "PROXY_URL_MOBILE": "http://proxy.example.com:5678",
     }
-    monkeypatch.setattr("src.gamechanger.client.dotenv_values", lambda: creds_with_proxy)
+    monkeypatch.setattr("src.gamechanger.client.dotenv_values", lambda *_a, **_kw: creds_with_proxy)
     _mock_token_manager(monkeypatch)
 
     with _patch("src.http.session.httpx.Client") as mock_client:
@@ -1115,7 +1115,7 @@ def test_no_proxy_when_proxy_disabled_in_dotenv(
     from unittest.mock import patch as _patch
 
     # _FAKE_CREDENTIALS has no PROXY_ENABLED key -- proxy must be None
-    monkeypatch.setattr("src.gamechanger.client.dotenv_values", lambda: _FAKE_CREDENTIALS)
+    monkeypatch.setattr("src.gamechanger.client.dotenv_values", lambda *_a, **_kw: _FAKE_CREDENTIALS)
     _mock_token_manager(monkeypatch)
 
     with _patch("src.http.session.httpx.Client") as mock_client:
@@ -1139,7 +1139,7 @@ def test_paginated_401_force_refresh_auth_signing_error_propagates(
     mock_tm.get_access_token.return_value = _FAKE_ACCESS_TOKEN
     mock_tm.force_refresh.side_effect = AuthSigningError("bad signature")
     monkeypatch.setattr("src.gamechanger.client.TokenManager", lambda **_kw: mock_tm)
-    monkeypatch.setattr("src.gamechanger.client.dotenv_values", lambda: _FAKE_CREDENTIALS)
+    monkeypatch.setattr("src.gamechanger.client.dotenv_values", lambda *_a, **_kw: _FAKE_CREDENTIALS)
 
     respx.get(f"{_BASE_URL}/teams/abc/game-summaries").mock(return_value=httpx.Response(401))
     client = GameChangerClient(min_delay_ms=0, jitter_ms=0)
@@ -1215,7 +1215,7 @@ class TestClientStickySessionId:
             return original_resolve(env_dict, profile, session_id=session_id)
 
         monkeypatch.setattr("src.gamechanger.client.resolve_proxy_from_dict", capturing_resolve)
-        monkeypatch.setattr("src.gamechanger.client.dotenv_values", lambda: _FAKE_CREDENTIALS)
+        monkeypatch.setattr("src.gamechanger.client.dotenv_values", lambda *_a, **_kw: _FAKE_CREDENTIALS)
         _mock_token_manager(monkeypatch)
         client = GameChangerClient(min_delay_ms=0, jitter_ms=0)
 
@@ -1231,7 +1231,7 @@ class TestClientStickySessionId:
         creds_with_proxy["PROXY_ENABLED"] = "true"
         creds_with_proxy["PROXY_URL_WEB"] = "http://brd-user:s3cr3t@proxy.example.com:1234"
 
-        monkeypatch.setattr("src.gamechanger.client.dotenv_values", lambda: creds_with_proxy)
+        monkeypatch.setattr("src.gamechanger.client.dotenv_values", lambda *_a, **_kw: creds_with_proxy)
         _mock_token_manager(monkeypatch)
 
         with caplog.at_level(logging.DEBUG):
@@ -1244,3 +1244,28 @@ class TestClientStickySessionId:
             assert "s3cr3t" not in msg, f"Proxy credentials leaked into log: {msg!r}"
             injected_user = f"brd-user-session-{session_id}"
             assert injected_user not in msg, f"Injected proxy URL leaked into log: {msg!r}"
+
+
+# ---------------------------------------------------------------------------
+# AC-7: __file__-relative .env path resolution
+# ---------------------------------------------------------------------------
+
+
+def test_default_env_path_resolves_to_repo_root() -> None:
+    """AC-7: _DEFAULT_ENV_PATH resolves to <repo-root>/.env regardless of cwd."""
+    from src.gamechanger.client import _DEFAULT_ENV_PATH
+
+    # The path must end with ".env" and its parent must be the repo root.
+    assert _DEFAULT_ENV_PATH.name == ".env"
+    # The parent of _DEFAULT_ENV_PATH should be the repo root, which contains pyproject.toml.
+    repo_root = _DEFAULT_ENV_PATH.parent
+    assert (repo_root / "pyproject.toml").exists(), (
+        f"Expected repo root at {repo_root!r} but pyproject.toml not found there"
+    )
+
+
+def test_default_env_path_is_absolute() -> None:
+    """AC-7: _DEFAULT_ENV_PATH is an absolute path (not cwd-relative)."""
+    from src.gamechanger.client import _DEFAULT_ENV_PATH
+
+    assert _DEFAULT_ENV_PATH.is_absolute()

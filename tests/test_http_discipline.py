@@ -253,7 +253,7 @@ class TestGameChangerClientHeaderIntegration:
 
         monkeypatch.setattr(
             "src.gamechanger.client.dotenv_values",
-            lambda: _FAKE_CREDENTIALS,
+            lambda *_a, **_kw: _FAKE_CREDENTIALS,
         )
         mock_tm = MagicMock()
         mock_tm.get_access_token.return_value = _FAKE_ACCESS_TOKEN
