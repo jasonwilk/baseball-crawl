@@ -4,7 +4,8 @@
 [E-075: Mobile Profile Credential Capture and Validation](epic.md)
 
 ## Status
-`TODO`
+`ABANDONED`
+<!-- Superseded by E-086-03 (bb creds capture --profile mobile) -->
 
 ## Description
 After this story is complete, `bb creds check --profile mobile` will validate mobile credentials by calling GET /me/user with mobile-profile headers, and will report detailed presence/absence of each mobile credential individually. If the client key is available, the output will note that programmatic token refresh is possible.

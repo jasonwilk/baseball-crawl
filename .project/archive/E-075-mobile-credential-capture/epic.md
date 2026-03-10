@@ -1,7 +1,7 @@
 # E-075: Mobile Profile Credential Capture and Validation
 
 ## Status
-`ACTIVE`
+`COMPLETED`
 
 ## Overview
 Establish a complete mobile credential pipeline -- from proxy capture through programmatic token refresh -- so the project can make authenticated API calls as the iOS GameChanger app. This epic starts with research to resolve key unknowns (client key parity, auth flow differences) before modifying any code.
@@ -43,8 +43,8 @@ No expert consultation required -- this is operator tooling and credential infra
 |----|-------|--------|-------------|----------|
 | E-075-R-01 | Mobile Auth Flow Reconnaissance | DONE | None | api-scout |
 | E-075-01 | Align Credential Env Var Names | DONE | None | software-engineer |
-| E-075-02 | Add gc-client-id and Response Body Capture to Proxy Addon | TODO | E-075-R-01, E-075-01 | - |
-| E-075-03 | Mobile Credential Validation Script | TODO | E-075-R-01, E-075-01 | - |
+| E-075-02 | Add gc-client-id and Response Body Capture to Proxy Addon | ABANDONED | E-075-R-01, E-075-01 | - |
+| E-075-03 | Mobile Credential Validation Script | ABANDONED | E-075-R-01, E-075-01 | - |
 
 ## Dispatch Team
 - software-engineer
@@ -103,3 +103,12 @@ Story E-075-02 adds a `response()` handler and `gc-client-id` capture. This depe
 ## History
 - 2026-03-08: Created
 - 2026-03-08: R-01 and 01 completed. Key finding: mobile client key is CONFIRMED DIFFERENT from web (401 on direct test). iOS app is purely native (no JS bundles). Workaround: mobile tokens work directly as gc-token for GET endpoints. Wave 2 (02 + 03) unblocked.
+- 2026-03-10: COMPLETED. Stories 02 and 03 ABANDONED -- superseded by E-086 (Mobile Credential Capture), which absorbs their scope into a richer integrated workflow. R-01 (research) and 01 (env var naming alignment) delivered their value. Key findings from R-01 (mobile client key differs from web, mobile tokens work directly as gc-token) are preserved in E-086's Background & Context and in MEMORY.md.
+  - **Documentation assessment**: No documentation impact. R-01 findings were already captured in epic Technical Notes and MEMORY.md. E-075-01 (naming alignment) was a code-only change with no doc surface. Remaining stories were abandoned before implementation.
+  - **Context-layer assessment**:
+    - New agent, rule, skill, or hook introduced? No.
+    - Existing context-layer file rendered stale? No.
+    - New workflow or process pattern emerged? No.
+    - New architectural decision or constraint discovered? No -- the mobile client key finding was already recorded in MEMORY.md during R-01 completion.
+    - Recurring mistake or anti-pattern observed? No.
+    - New file convention or project structure change? No.

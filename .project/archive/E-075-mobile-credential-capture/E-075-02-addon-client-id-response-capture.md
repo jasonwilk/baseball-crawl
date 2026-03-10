@@ -4,7 +4,8 @@
 [E-075: Mobile Profile Credential Capture and Validation](epic.md)
 
 ## Status
-`TODO`
+`ABANDONED`
+<!-- Superseded by E-086-01 (Proxy Addon: gc-client-id and Response Body Capture) -->
 
 ## Description
 After this story is complete, the proxy credential extractor addon will capture two additional credential sources: the `gc-client-id` request header (written to `GAMECHANGER_CLIENT_ID_*` env vars) and the refresh token from POST /auth response bodies (written to `GAMECHANGER_REFRESH_TOKEN_*` env vars, overriding any stale request-header value). This enables automatic mobile credential capture during proxy sessions.

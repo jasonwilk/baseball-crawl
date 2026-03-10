@@ -43,6 +43,26 @@ Before dispatch, verify:
 
 ---
 
+## Phase 0: tmux Window Rename
+
+If the session is running inside tmux, rename the current window to the epic ID for easy identification during Heavy mode dispatch. Run this via the Bash tool **before** team creation begins.
+
+**Command** (substitute the actual parsed epic ID for the placeholder -- e.g., `"E-090"`, not the literal string `"E-NNN"`):
+
+```bash
+{ [ -n "$TMUX" ] && command -v tmux >/dev/null 2>&1 && tmux rename-window "E-NNN" 2>/dev/null; } || true
+```
+
+This step is completely silent and non-blocking:
+- If `$TMUX` is not set (not in tmux), the guard short-circuits before invoking `tmux`.
+- If the `tmux` binary is not on PATH, the second guard short-circuits.
+- If `tmux rename-window` fails at runtime (stale socket, permission error), stderr is suppressed via `2>/dev/null`.
+- The trailing `|| true` guarantees exit code 0 on all paths.
+
+Do not report the result to the user or treat a failure as an error. Proceed to Phase 1 regardless.
+
+---
+
 ## Phase 1: Team Composition
 
 Read the epic's `## Dispatch Team` section.
@@ -303,6 +323,9 @@ Prerequisites: verify epic exists, status is READY or ACTIVE
   |
   v
 [If DRAFT/COMPLETED/ABANDONED/BLOCKED: refuse and stop]
+  |
+  v
+Phase 0: tmux rename-window "E-NNN" (silent, non-blocking)
   |
   v
 Phase 1: Read epic's Dispatch Team section
