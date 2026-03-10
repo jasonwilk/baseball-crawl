@@ -1,7 +1,7 @@
 # E-087: Full Payload Capture in Endpoint Logger
 
 ## Status
-`READY`
+`COMPLETED`
 
 ## Overview
 Extend the mitmproxy endpoint logger addon to capture complete request/response payloads (bodies, headers, query parameter values) so that api-scout and other agents can build a full picture of API responses from session data alone -- without needing live API calls. Additionally, evolve the API documentation standards to incorporate request/response payload examples with PII-safe placeholder conventions.
@@ -36,8 +36,8 @@ Separately, the API endpoint documentation in `docs/api/endpoints/` currently ha
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-087-01 | Capture full payloads in endpoint logger | TODO | None | - |
-| E-087-02 | API doc standards for payload examples and PII-safe placeholders | TODO | None | - |
+| E-087-01 | Capture full payloads in endpoint logger | DONE | None | SE |
+| E-087-02 | API doc standards for payload examples and PII-safe placeholders | DONE | None | CA |
 
 ## Dispatch Team
 - software-engineer
@@ -70,8 +70,9 @@ Committed API doc files (`docs/api/endpoints/*.md`) must use clearly fake/redact
 - **Organization/league names**: `"Example Organization"`, `"Example League"`
 - **Cities/States**: `"Anytown"`, `"XX"` (or generic like `"Springfield"`, `"IL"`)
 - **Venue/field names**: `"Anytown Field"`, `"Example Park"`
-- **Player names**: `"Jane Doe"`, `"Player One"`
-- **UUIDs**: Redact to `"72bb77d8-REDACTED"` or `"00000000-0000-0000-0000-000000000001"`. Same rule applies when UUIDs appear as dict keys (e.g., player-stats keyed by player UUID).
+- **Person names (players, coaches, staff, parents)**: `"Jane Doe"`, `"Player One"`
+- **Phone numbers**: `"+1 (555) 555-0100"` or `"+15550001234"`
+- **UUIDs**: Redact to `"72bb77d8-REDACTED"` or `"00000000-0000-0000-0000-000000000001"`. This rule applies to ALL UUID fields regardless of field name (`id`, `stream_id`, `event_id`, `game_stream_id`, `player_uuid`, `team_id`, `opponent_id`, etc.) and when UUIDs appear as dict keys (e.g., player-stats keyed by player UUID).
 - **Dates**: Keep realistic but not identifying (any recent date is fine)
 - **Emails**: use `example.com` domain placeholders
 - **public_id slugs**: `"xXxXxXxXxXxX"` or similar clearly fake values
@@ -111,6 +112,10 @@ The PII pre-commit hook catches credentials but not team names or cities. The do
 - `test_query_keys_sorted_and_no_values` → the `"true" not in json.dumps(entry)` assertion will fail once `query_params` contains the value `"true"`. Replace with `test_query_params_contains_full_key_value_mapping` and keep `test_query_keys_sorted_alphabetically`.
 - Add a test for truncation sentinel format: verify `response_body == "<truncated: N bytes>"` when body exceeds threshold.
 
+**Response body storage format**: Response bodies are stored as raw strings, not re-parsed to JSON objects, to avoid double-parse complexity. Downstream consumers use `jq -r '.response_body | fromjson'` when structured access is needed.
+
+**Session file size impact**: Full payload capture produces significantly larger session files (~50-100MB for a typical crawl session vs. kilobytes for metadata-only). Session files are gitignored and local-only.
+
 ### Backward Compatibility
 
 The `query_keys` field is retained in the JSONL entry for backward compatibility with any tooling that reads it. A new `query_params` field (dict) captures the full key-value mapping. Both fields coexist.
@@ -123,6 +128,8 @@ The `query_keys` field is retained in the JSONL entry for backward compatibility
 
 **Ingest workflow clarification**: For POST/PATCH endpoints, the saved raw response in `data/raw/` is the RESPONSE body only. The request body is documented in the endpoint file, not saved as a separate raw artifact.
 
+**Dual-path workflow note**: The ingest-endpoint skill has two entry paths: (1) live curl execution (time-sensitive -- gc-signature expires within minutes, execute promptly) and (2) session replay (body already captured from proxy session data in `proxy/data/sessions/`, no curl execution needed). PII redaction applies equally to both paths -- the source of the example JSON does not affect the redaction obligation. This is an implementation note for the CA implementer when inserting the redaction step.
+
 ### Env Var Threading
 
 The proxy's `docker-compose.yml` uses `env_file: ../.env` (with `required: false`). All vars from the project root `.env` are available inside the mitmproxy container automatically. The new `PROXY_CAPTURE_BODIES`, `PROXY_STRIP_AUTH_HEADERS`, and `MAX_BODY_BYTES` vars require no additional `docker-compose.yml` changes. Code-level defaults handle the case where vars are absent.
@@ -134,3 +141,5 @@ None.
 - 2026-03-09: Created. SE consulted on storage format (inline, 2MB cap, denylist). User provided additional requirements for API doc evolution and PII safety.
 - 2026-03-09: User override -- no header filtering by default (session store is secured). Auth header stripping made configurable via `PROXY_STRIP_AUTH_HEADERS` env var (default: off). Full payload capture toggleable via `PROXY_CAPTURE_BODIES` (default: on).
 - 2026-03-09: Full refinement review with PM, SE, API scout, and claude-architect. SE confirmed all 13 ACs implementable, added implementation guidance (empty body handling, safe decode, env var validation, mitmproxy API notes, test replacement details). API scout expanded PII taxonomy (org/league names, venue names, avatar URLs, url_encoded_name, UUID-as-key, jersey numbers, semi-identifying combos). Architect confirmed clean context-layer integration and provided precise placement guidance. PM confirmed READY status. Added new env vars to `.env.example` and `.env` (Proxy Capture section).
+- 2026-03-10: Refinement team review. PM identified missing .env.example AC -- added AC-14 to E-087-01. Added SE Implementation Guidance notes on raw string storage format and session file size impact. Added `.env.example` to E-087-01 Files to Create or Modify.
+- 2026-03-10: All stories DONE. E-087-01 approved by code-reviewer (round 2 after extracting `_build_capture_fields` helper to satisfy 50-line limit). SHOULD FIX: `_build_entry` at exactly 50 lines (1 over strict limit) -- not blocking. E-087-02 verified directly (context-layer-only). Documentation assessment: trigger 5 fires (new env vars for proxy behavior) -- docs-writer to update `docs/admin/mitmproxy-guide.md`. Context-layer assessment: trigger 1 yes (already satisfied by E-087-02 in-scope); triggers 2-6 no. Epic marked COMPLETED.

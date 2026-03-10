@@ -1,6 +1,6 @@
 # mitmproxy Proxy Guide
 
-<!-- Last updated: 2026-03-07 | Source: E-055 (unified CLI), E-052 -->
+<!-- Last updated: 2026-03-10 | Source: E-055 (unified CLI), E-052, E-087 (full payload capture) -->
 
 ## What It Does
 
@@ -214,6 +214,50 @@ Note: header reports are point-in-time snapshots, not aggregatable. `--all` retu
 ```
 
 Shows a deduplicated table of every unique (method, path) seen, with hit count and most recent status code. Use `--unreviewed` as your default post-capture query to see only new discoveries.
+
+## Full Payload Capture
+
+<!-- Last verified: 2026-03-10 | Source: E-087 -->
+
+By default, the endpoint logger captures full request and response payloads for every GameChanger API call -- not just metadata. This gives api-scout complete data to work with when analyzing new endpoints, without requiring a second capture session.
+
+### What Gets Captured
+
+In default (full-capture) mode, each JSONL entry in `endpoint-log.jsonl` includes:
+
+- All request and response **headers** (key-value pairs)
+- Full **query parameter values** (not just keys)
+- Full **request and response bodies** as UTF-8 strings
+- Truncation sentinels for oversized bodies (see `MAX_BODY_BYTES` below)
+- `null` body for binary content types (`image/*`, `video/*`, `application/octet-stream`)
+
+In metadata-only mode (`PROXY_CAPTURE_BODIES=false`), entries include only method, host, path, query parameter keys (not values), content types, status code, and traffic source -- the same fields captured before E-087.
+
+### Configuration
+
+Three environment variables control payload capture behavior. Set them in `proxy/.env` before starting the proxy (or stop/restart to pick up changes):
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PROXY_CAPTURE_BODIES` | `true` | Enables full payload capture. Set to `false` to revert to metadata-only mode (query keys, no headers or bodies). |
+| `PROXY_STRIP_AUTH_HEADERS` | `false` | When `true`, strips sensitive headers from captured data: `gc-token`, `gc-device-id`, `authorization`, `gc-signature`, `cookie`, `set-cookie`. Useful if session files will be shared or stored outside the gitignored `proxy/data/` directory. |
+| `MAX_BODY_BYTES` | `2097152` (2 MB) | Bodies exceeding this size are replaced with the sentinel string `"<truncated: N bytes>"` rather than stored in full. Binary content types always produce a `null` body regardless of this limit. |
+
+### Storage Impact
+
+Session files are significantly larger with full capture enabled. A typical crawl session produces **50--100 MB** of JSONL data in full-capture mode, compared to kilobytes in metadata-only mode.
+
+`proxy/data/` is gitignored -- session files never enter version control. Disk space is the primary constraint. If storage is a concern:
+
+- Set `MAX_BODY_BYTES` to a lower value (e.g., `524288` for 512 KB) to cap individual body sizes.
+- Set `PROXY_CAPTURE_BODIES=false` to disable body capture entirely and return to metadata-only mode.
+- Old sessions accumulate in `proxy/data/sessions/`. Delete them manually when no longer needed -- the proxy does not prune them automatically.
+
+### Auth Header Handling
+
+By default (`PROXY_STRIP_AUTH_HEADERS=false`), auth headers including `gc-token` and `gc-device-id` are present in captured data. This is intentional: session files are in `proxy/data/` which is gitignored, so the data is secured locally.
+
+If you need to share a session file (e.g., for debugging with a collaborator), set `PROXY_STRIP_AUTH_HEADERS=true` before the capture session. This strips the six sensitive headers from the JSONL output -- the data is then safe to share without exposing credentials.
 
 ## Refreshing Header Fingerprints
 

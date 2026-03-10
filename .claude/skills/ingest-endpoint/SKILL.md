@@ -70,7 +70,16 @@ Execute the following steps in order:
      into the response body.
    - If credentials appear in the response, strip them immediately and re-save.
 
-4. DOCUMENT the endpoint in `docs/api/endpoints/`:
+4. REDACT PII in example JSON:
+   - Before documenting, redact all PII in BOTH request body AND response body examples
+     per the PII-safe placeholder taxonomy in `/.claude/rules/api-docs.md` (see the
+     "Example JSON Safety" section).
+   - This applies regardless of how the data was obtained (live curl execution or session
+     replay from proxy data).
+   - Keep numeric stats, dates, jersey numbers, boolean flags, and enum values as-is --
+     these are explicitly NOT PII.
+
+5. DOCUMENT the endpoint in `docs/api/endpoints/`:
 
    a. DETERMINE the endpoint filename using the naming convention:
       {method}-{path-segments-with-params-as-words}.md
@@ -96,21 +105,21 @@ Execute the following steps in order:
       - Document any URL query parameters observed in the curl command.
       - Document pagination behavior if pagination headers are present.
 
-5. VALIDATE frontmatter:
+6. VALIDATE frontmatter:
    - Run `python scripts/validate_api_docs.py` against the endpoint file.
    - Fix any ERROR-level findings before completing.
 
-6. UPDATE README INDEX (new endpoints only):
+7. UPDATE README INDEX (new endpoints only):
    - If this is a new endpoint, add a row to `docs/api/README.md` in the appropriate
      domain group (see the existing groups in the index).
    - Include: method, path, filename link, status, auth, and a 6-10 word description.
 
-7. CHECK research spike relevance:
+8. CHECK research spike relevance:
    - Read `epics/E-002-data-ingestion/E-002-R-01.md` (if it exists).
    - If this endpoint discovery answers any open research questions or unblocks any
      stories mentioned in the findings, note the specific impact.
 
-8. SUMMARIZE findings:
+9. SUMMARIZE findings:
    - Endpoint path and HTTP method
    - Whether this was a new or existing endpoint
    - Key fields and their types (high-level, not exhaustive)
@@ -226,6 +235,12 @@ Conventions: 2-5 tags per endpoint. `public` always accompanies relevant domain 
 
 {Notes on Accept, gc-user-action, x-pagination, etc.}
 
+## Example Request Body          <- Omit if method is GET or no request body
+
+\```json
+{PII-redacted request body example}
+\```
+
 ## Pagination Response Header     <- Only when pagination=true
 
 \```
@@ -259,8 +274,9 @@ Section ordering rules:
 2. Path Parameters when path has params
 3. Query Parameters when at least one observed
 4. Separate Headers sections per profile only when profiles differ materially
-5. Pagination Response Header only for paginated endpoints
-6. Known Limitations is always last before the trailing Discovered line
+5. Example Request Body for POST/PATCH/PUT/DELETE with a JSON body (omit for GET or no body)
+6. Pagination Response Header only for paginated endpoints
+7. Known Limitations is always last before the trailing Discovered line
 
 #### File Naming Convention
 
@@ -342,6 +358,7 @@ Phase 1: Spawn api-scout
   - Execute curl (TIME-SENSITIVE)
   - Save raw response to data/raw/
   - Verify no credential leaks
+  - Redact PII in examples per /.claude/rules/api-docs.md
   - Create/update endpoint file in docs/api/endpoints/
   - Validate frontmatter with scripts/validate_api_docs.py
   - Update docs/api/README.md index (new endpoints only)

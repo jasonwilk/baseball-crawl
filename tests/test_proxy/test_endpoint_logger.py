@@ -9,7 +9,13 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
-from proxy.addons.endpoint_logger import EndpointLogger, _build_entry, _append_entry, LOG_PATH
+from proxy.addons.endpoint_logger import (
+    EndpointLogger,
+    _build_entry,
+    _append_entry,
+    LOG_PATH,
+    _DEFAULT_MAX_BODY_BYTES,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -26,27 +32,37 @@ def _make_flow(
     response_content_type: str = "application/json",
     status_code: int = 200,
     user_agent: str = "GameChanger/1234 CFNetwork/1410.0.3 Darwin/22.6.0",
+    request_body: bytes = b"",
+    response_body: bytes = b"",
+    request_headers: dict[str, str] | None = None,
+    response_headers: dict[str, str] | None = None,
 ) -> SimpleNamespace:
     """Build a minimal mock mitmproxy flow for testing."""
-    request_headers = {}
+    req_headers: dict[str, str] = {}
     if request_content_type:
-        request_headers["content-type"] = request_content_type
+        req_headers["content-type"] = request_content_type
     if user_agent:
-        request_headers["user-agent"] = user_agent
+        req_headers["user-agent"] = user_agent
+    if request_headers:
+        req_headers.update(request_headers)
 
-    response_headers = {}
+    resp_headers: dict[str, str] = {}
     if response_content_type:
-        response_headers["content-type"] = response_content_type
+        resp_headers["content-type"] = response_content_type
+    if response_headers:
+        resp_headers.update(response_headers)
 
     request = SimpleNamespace(
         pretty_host=host,
         pretty_url=url,
         method=method,
-        headers=request_headers,
+        headers=req_headers,
+        content=request_body,
     )
     response = SimpleNamespace(
         status_code=status_code,
-        headers=response_headers,
+        headers=resp_headers,
+        content=response_body,
     )
     return SimpleNamespace(request=request, response=response)
 
@@ -76,23 +92,31 @@ class TestBuildEntry:
         dt = datetime.fromisoformat(entry["timestamp"])
         assert dt.tzinfo is not None
 
-    def test_query_keys_sorted_and_no_values(self) -> None:
-        flow = _make_flow(url="https://api.gc.com/teams?fetch_place_details=true&page=2&token=secret")
+    def test_query_keys_sorted_alphabetically(self) -> None:
+        flow = _make_flow(url="https://api.gc.com/search?z=1&a=2&m=3")
         entry = _build_entry(flow, "api.gc.com", "web")
-        assert entry["query_keys"] == ["fetch_place_details", "page", "token"]
-        # Values must NOT be present in the entry
-        assert "secret" not in json.dumps(entry)
-        assert "true" not in json.dumps(entry)
+        assert entry["query_keys"] == ["a", "m", "z"]
 
     def test_query_keys_empty_when_no_query(self) -> None:
         flow = _make_flow(url="https://api.gc.com/me/user")
         entry = _build_entry(flow, "api.gc.com", "unknown")
         assert entry["query_keys"] == []
 
-    def test_query_keys_sorted_alphabetically(self) -> None:
-        flow = _make_flow(url="https://api.gc.com/search?z=1&a=2&m=3")
+    def test_query_params_contains_full_key_value_mapping(self) -> None:
+        flow = _make_flow(url="https://api.gc.com/teams?fetch_place_details=true&page=2&token=secret")
         entry = _build_entry(flow, "api.gc.com", "web")
-        assert entry["query_keys"] == ["a", "m", "z"]
+        assert entry["query_params"] == {
+            "fetch_place_details": "true",
+            "page": "2",
+            "token": "secret",
+        }
+        # query_keys still present for backward compatibility
+        assert entry["query_keys"] == ["fetch_place_details", "page", "token"]
+
+    def test_query_params_empty_dict_when_no_query(self) -> None:
+        flow = _make_flow(url="https://api.gc.com/me/user")
+        entry = _build_entry(flow, "api.gc.com", "web")
+        assert entry["query_params"] == {}
 
     def test_request_content_type_captured(self) -> None:
         flow = _make_flow(request_content_type="application/json")
@@ -135,22 +159,225 @@ class TestBuildEntry:
         entry = _build_entry(flow, "api.gc.com", "unknown")
         assert entry["source"] == "unknown"
 
-    def test_entry_contains_exactly_expected_keys(self) -> None:
+    # --- Key-set tests: two variants (AC-11) ---
+
+    def test_entry_contains_exactly_expected_keys_capture_mode(self) -> None:
         flow = _make_flow()
-        entry = _build_entry(flow, "api.gc.com", "ios")
+        entry = _build_entry(flow, "api.gc.com", "ios", capture_bodies=True)
+        expected_keys = {
+            "timestamp", "method", "host", "path", "query_keys",
+            "request_content_type", "response_content_type", "status_code", "source",
+            "query_params", "request_headers", "response_headers",
+            "request_body", "response_body",
+        }
+        assert set(entry.keys()) == expected_keys
+
+    def test_entry_contains_exactly_expected_keys_metadata_mode(self) -> None:
+        flow = _make_flow()
+        entry = _build_entry(flow, "api.gc.com", "ios", capture_bodies=False)
         expected_keys = {
             "timestamp", "method", "host", "path", "query_keys",
             "request_content_type", "response_content_type", "status_code", "source",
         }
         assert set(entry.keys()) == expected_keys
 
-    def test_no_body_data_in_entry(self) -> None:
-        """Request and response bodies must NOT appear in the log entry."""
-        flow = _make_flow()
+    # --- Body capture tests ---
+
+    def test_body_null_for_get_request(self) -> None:
+        """GET requests have no body; request_body must be null."""
+        flow = _make_flow(method="GET", request_body=b"")
         entry = _build_entry(flow, "api.gc.com", "ios")
-        assert "body" not in entry
-        assert "content" not in entry
-        assert "data" not in entry
+        assert entry["request_body"] is None
+
+    def test_body_captured_for_post_request(self) -> None:
+        """POST requests with a JSON body are captured as a string."""
+        payload = b'{"username": "test"}'
+        flow = _make_flow(
+            method="POST",
+            url="https://api.gc.com/auth",
+            request_content_type="application/json",
+            request_body=payload,
+        )
+        entry = _build_entry(flow, "api.gc.com", "web")
+        assert entry["request_body"] == '{"username": "test"}'
+
+    def test_response_body_captured_as_string(self) -> None:
+        payload = b'{"id": "abc", "name": "Test Team"}'
+        flow = _make_flow(response_body=payload)
+        entry = _build_entry(flow, "api.gc.com", "web")
+        assert entry["response_body"] == '{"id": "abc", "name": "Test Team"}'
+
+    def test_response_body_null_for_empty_response(self) -> None:
+        flow = _make_flow(response_body=b"")
+        entry = _build_entry(flow, "api.gc.com", "web")
+        assert entry["response_body"] is None
+
+    # --- Truncation tests (AC-7) ---
+
+    def test_truncation_sentinel_for_oversized_response_body(self) -> None:
+        large_body = b"x" * 10
+        flow = _make_flow(response_body=large_body)
+        entry = _build_entry(flow, "api.gc.com", "web", max_body_bytes=5)
+        assert entry["response_body"] == "<truncated: 10 bytes>"
+
+    def test_truncation_sentinel_for_oversized_request_body(self) -> None:
+        large_body = b"y" * 10
+        flow = _make_flow(
+            method="POST",
+            request_content_type="application/json",
+            request_body=large_body,
+        )
+        entry = _build_entry(flow, "api.gc.com", "web", max_body_bytes=5)
+        assert entry["request_body"] == "<truncated: 10 bytes>"
+
+    def test_truncation_sentinel_includes_original_byte_count(self) -> None:
+        body = b"a" * 3_000_000
+        flow = _make_flow(response_body=body)
+        entry = _build_entry(flow, "api.gc.com", "web", max_body_bytes=_DEFAULT_MAX_BODY_BYTES)
+        assert entry["response_body"] == "<truncated: 3000000 bytes>"
+
+    def test_body_at_exact_size_limit_is_not_truncated(self) -> None:
+        body = b"x" * 5
+        flow = _make_flow(response_body=body)
+        entry = _build_entry(flow, "api.gc.com", "web", max_body_bytes=5)
+        assert entry["response_body"] == "xxxxx"
+
+    # --- Binary content type tests (AC-8) ---
+
+    def test_binary_image_response_body_is_null(self) -> None:
+        flow = _make_flow(
+            response_content_type="image/png",
+            response_body=b"\x89PNG\r\n",
+        )
+        entry = _build_entry(flow, "api.gc.com", "web")
+        assert entry["response_body"] is None
+
+    def test_binary_video_response_body_is_null(self) -> None:
+        flow = _make_flow(
+            response_content_type="video/mp4",
+            response_body=b"\x00\x00\x00\x18",
+        )
+        entry = _build_entry(flow, "api.gc.com", "web")
+        assert entry["response_body"] is None
+
+    def test_octet_stream_body_is_null(self) -> None:
+        flow = _make_flow(
+            response_content_type="application/octet-stream",
+            response_body=b"\xde\xad\xbe\xef",
+        )
+        entry = _build_entry(flow, "api.gc.com", "web")
+        assert entry["response_body"] is None
+
+    def test_binary_request_body_is_null(self) -> None:
+        flow = _make_flow(
+            method="POST",
+            request_content_type="image/jpeg",
+            request_body=b"\xff\xd8\xff",
+        )
+        entry = _build_entry(flow, "api.gc.com", "web")
+        assert entry["request_body"] is None
+
+    # --- Header capture tests ---
+
+    def test_headers_captured_in_capture_mode(self) -> None:
+        flow = _make_flow(
+            request_headers={"gc-token": "tok123", "accept": "application/json"},
+        )
+        entry = _build_entry(flow, "api.gc.com", "web", strip_auth_headers=False)
+        assert "gc-token" in entry["request_headers"]
+        assert entry["request_headers"]["gc-token"] == "tok123"
+
+    def test_auth_headers_stripped_when_enabled(self) -> None:
+        flow = _make_flow(
+            request_headers={
+                "gc-token": "tok123",
+                "gc-device-id": "dev456",
+                "authorization": "REDACTED_TEST_VALUE",
+                "gc-signature": "sig",
+                "cookie": "session=x",
+                "accept": "application/json",
+            },
+        )
+        entry = _build_entry(flow, "api.gc.com", "web", strip_auth_headers=True)
+        req_headers = entry["request_headers"]
+        for sensitive in ("gc-token", "gc-device-id", "authorization", "gc-signature", "cookie"):
+            assert sensitive not in req_headers
+        assert "accept" in req_headers
+
+    def test_auth_headers_present_when_stripping_disabled(self) -> None:
+        flow = _make_flow(request_headers={"gc-token": "tok123", "accept": "application/json"})
+        entry = _build_entry(flow, "api.gc.com", "web", strip_auth_headers=False)
+        assert "gc-token" in entry["request_headers"]
+
+    def test_response_headers_stripped_when_enabled(self) -> None:
+        flow = _make_flow(response_headers={"set-cookie": "session=x", "content-length": "42"})
+        entry = _build_entry(flow, "api.gc.com", "web", strip_auth_headers=True)
+        assert "set-cookie" not in entry["response_headers"]
+        assert "content-length" in entry["response_headers"]
+
+    # --- capture_bodies=False tests (AC-5, AC-12) ---
+
+    def test_capture_bodies_false_omits_payload_fields(self) -> None:
+        flow = _make_flow(response_body=b'{"key": "value"}')
+        entry = _build_entry(flow, "api.gc.com", "web", capture_bodies=False)
+        for field in ("request_body", "response_body", "request_headers", "response_headers", "query_params"):
+            assert field not in entry
+
+    def test_capture_bodies_false_retains_query_keys(self) -> None:
+        flow = _make_flow(url="https://api.gc.com/teams?page=2&sort=asc")
+        entry = _build_entry(flow, "api.gc.com", "web", capture_bodies=False)
+        assert entry["query_keys"] == ["page", "sort"]
+
+    # --- Non-UTF-8 body decode (graceful handling) ---
+
+    def test_non_utf8_body_decoded_with_replacement(self) -> None:
+        bad_bytes = b"\xff\xfe some text"
+        flow = _make_flow(response_body=bad_bytes)
+        entry = _build_entry(flow, "api.gc.com", "web")
+        # Must not raise; replacement chars used for invalid bytes
+        assert isinstance(entry["response_body"], str)
+
+
+# ---------------------------------------------------------------------------
+# EndpointLogger.__init__() -- env var reading (AC-9, AC-12)
+# ---------------------------------------------------------------------------
+
+
+class TestEndpointLoggerInit:
+    def test_capture_bodies_defaults_to_true(self, monkeypatch: object) -> None:
+        monkeypatch.delenv("PROXY_CAPTURE_BODIES", raising=False)
+        addon = EndpointLogger()
+        assert addon.capture_bodies is True
+
+    def test_capture_bodies_false_when_env_set(self, monkeypatch: object) -> None:
+        monkeypatch.setenv("PROXY_CAPTURE_BODIES", "false")
+        addon = EndpointLogger()
+        assert addon.capture_bodies is False
+
+    def test_strip_auth_headers_defaults_to_false(self, monkeypatch: object) -> None:
+        monkeypatch.delenv("PROXY_STRIP_AUTH_HEADERS", raising=False)
+        addon = EndpointLogger()
+        assert addon.strip_auth_headers is False
+
+    def test_strip_auth_headers_true_when_env_set(self, monkeypatch: object) -> None:
+        monkeypatch.setenv("PROXY_STRIP_AUTH_HEADERS", "true")
+        addon = EndpointLogger()
+        assert addon.strip_auth_headers is True
+
+    def test_max_body_bytes_custom_value(self, monkeypatch: object) -> None:
+        monkeypatch.setenv("MAX_BODY_BYTES", "1048576")
+        addon = EndpointLogger()
+        assert addon.max_body_bytes == 1_048_576
+
+    def test_max_body_bytes_invalid_value_falls_back_to_default(self, monkeypatch: object) -> None:
+        monkeypatch.setenv("MAX_BODY_BYTES", "not-a-number")
+        addon = EndpointLogger()
+        assert addon.max_body_bytes == _DEFAULT_MAX_BODY_BYTES
+
+    def test_max_body_bytes_defaults_to_2mb(self, monkeypatch: object) -> None:
+        monkeypatch.delenv("MAX_BODY_BYTES", raising=False)
+        addon = EndpointLogger()
+        assert addon.max_body_bytes == _DEFAULT_MAX_BODY_BYTES
 
 
 # ---------------------------------------------------------------------------
@@ -195,7 +422,7 @@ class TestEndpointLoggerResponse:
         assert len(lines) == 3
 
     def test_same_endpoint_appended_each_time(self, tmp_path: Path) -> None:
-        """AC-4: No deduplication -- each occurrence is logged."""
+        """No deduplication -- each occurrence is logged."""
         log_file = tmp_path / "endpoint-log.jsonl"
         addon = EndpointLogger()
         addon.log_path = log_file
@@ -207,7 +434,7 @@ class TestEndpointLoggerResponse:
         assert len(lines) == 2
 
     def test_file_created_on_first_write(self, tmp_path: Path) -> None:
-        """AC-7: File does not need to exist beforehand."""
+        """File does not need to exist beforehand."""
         log_file = tmp_path / "subdir" / "endpoint-log.jsonl"
         assert not log_file.exists()
 
@@ -243,7 +470,7 @@ class TestEndpointLoggerResponse:
         assert entry["source"] == "ios"
 
     def test_session_dir_env_var_routes_output(self, tmp_path: Path, monkeypatch: object) -> None:
-        """AC-6: when PROXY_SESSION_DIR is set, output goes to session dir."""
+        """When PROXY_SESSION_DIR is set, output goes to session dir."""
         monkeypatch.setenv("PROXY_SESSION_DIR", str(tmp_path))
         addon = EndpointLogger()
         addon.response(_make_flow())
@@ -254,10 +481,54 @@ class TestEndpointLoggerResponse:
         assert entry["host"] == "api.gc.com"
 
     def test_fallback_path_used_when_no_session_dir(self, tmp_path: Path, monkeypatch: object) -> None:
-        """AC-1 fallback: without PROXY_SESSION_DIR, log_path is LOG_PATH."""
+        """Without PROXY_SESSION_DIR, log_path is LOG_PATH."""
         monkeypatch.delenv("PROXY_SESSION_DIR", raising=False)
         addon = EndpointLogger()
         assert addon.log_path == LOG_PATH
+
+    def test_response_writes_bodies_in_capture_mode(self, tmp_path: Path, monkeypatch: object) -> None:
+        """In capture mode, response hook writes body fields to log."""
+        monkeypatch.setenv("PROXY_CAPTURE_BODIES", "true")
+        monkeypatch.delenv("PROXY_STRIP_AUTH_HEADERS", raising=False)
+
+        flow = _make_flow(response_body=b'{"ok": true}')
+        log_file = tmp_path / "endpoint-log.jsonl"
+        addon = EndpointLogger()
+        addon.log_path = log_file
+        addon.response(flow)
+
+        entry = json.loads(log_file.read_text().strip())
+        assert entry["response_body"] == '{"ok": true}'
+        assert "request_headers" in entry
+
+    def test_response_omits_bodies_in_metadata_mode(self, tmp_path: Path, monkeypatch: object) -> None:
+        """In metadata-only mode, response hook omits body/header fields."""
+        monkeypatch.setenv("PROXY_CAPTURE_BODIES", "false")
+
+        flow = _make_flow(response_body=b'{"ok": true}')
+        log_file = tmp_path / "endpoint-log.jsonl"
+        addon = EndpointLogger()
+        addon.log_path = log_file
+        addon.response(flow)
+
+        entry = json.loads(log_file.read_text().strip())
+        assert "response_body" not in entry
+        assert "request_headers" not in entry
+
+    def test_auth_headers_stripped_via_env(self, tmp_path: Path, monkeypatch: object) -> None:
+        """Auth header stripping works end-to-end via env var."""
+        monkeypatch.setenv("PROXY_STRIP_AUTH_HEADERS", "true")
+        monkeypatch.setenv("PROXY_CAPTURE_BODIES", "true")
+
+        flow = _make_flow(request_headers={"gc-token": "tok123", "accept": "application/json"})
+        log_file = tmp_path / "endpoint-log.jsonl"
+        addon = EndpointLogger()
+        addon.log_path = log_file
+        addon.response(flow)
+
+        entry = json.loads(log_file.read_text().strip())
+        assert "gc-token" not in entry["request_headers"]
+        assert "accept" in entry["request_headers"]
 
 
 # ---------------------------------------------------------------------------

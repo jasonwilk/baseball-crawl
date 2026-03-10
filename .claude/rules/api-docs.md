@@ -18,6 +18,8 @@ docs/api/
   content-type.md    # Vendor-typed Accept header pattern
   base-url.md        # Base URL and subdomain conventions
   error-handling.md  # Common HTTP error codes in GC API context
+  flows/             # Multi-endpoint integration guides
+    opponent-resolution.md
   endpoints/         # One file per endpoint (89 files)
     get-me-teams.md
     get-teams-team_id-schedule.md
@@ -31,12 +33,14 @@ docs/api/
 - **MUST NOT** glob-read or bulk-load all files in `docs/api/endpoints/`. There are 89 endpoint files totaling thousands of lines -- loading them all wastes context window budget.
 - **MUST** load only the specific endpoint files relevant to the current task.
 - **Exception**: The ingest-endpoint skill workflow (api-scout already knows which file to create/update and does not need the index).
+- Load `docs/api/flows/` docs by name when working on multi-endpoint integration tasks; do NOT bulk-load all flow docs.
 
 ## Accuracy Standard
 
 - The `last_confirmed` frontmatter field MUST only be updated after live verification (executing a curl against the endpoint and confirming the response matches the documented schema).
 - Do NOT update `last_confirmed` during migrations, edits, or changes that do not re-verify the endpoint against live data.
 - Accept headers, auth requirements, and status values in frontmatter must match live verification evidence.
+- All example JSON in endpoint files must use PII-safe placeholder values -- see the Example JSON Safety section below.
 
 ## File Naming Convention
 
@@ -148,3 +152,48 @@ see_also:
 | `write` | Mutation endpoints (PATCH, POST for data changes other than auth/sync) |
 
 Tag conventions: 2-5 tags per endpoint. `public` always accompanies relevant domain tags for unauthenticated endpoints.
+
+## Example JSON Safety
+
+Committed API doc files (`docs/api/endpoints/*.md`) must use clearly fake/redacted data in all example JSON -- both request body and response body examples. The PII pre-commit hook catches credentials (tokens, passwords) but not team names, cities, or other identifying data. These rules are the enforcement point for that broader concern.
+
+### PII-Safe Placeholder Taxonomy
+
+Use these approved placeholder values when writing or updating example JSON:
+
+| Category | Placeholder Values |
+|----------|-------------------|
+| Team names | `"Example Team 14U"`, `"Anytown Eagles 12U"` |
+| Organization/league names | `"Example Organization"`, `"Example League"` |
+| Cities/States | `"Anytown"`, `"XX"` (or generic like `"Springfield"`, `"IL"`) |
+| Venue/field names | `"Anytown Field"`, `"Example Park"` |
+| Person names (players, coaches, staff, parents) | `"Jane Doe"`, `"Player One"` |
+| Phone numbers | `"+1 (555) 555-0100"`, `"+15550001234"` |
+| UUIDs | `"72bb77d8-REDACTED"` or `"00000000-0000-0000-0000-000000000001"` |
+| Emails | `"user@example.com"` (use `example.com` domain) |
+| public_id slugs | `"xXxXxXxXxXxX"` or similar clearly fake values |
+| url_encoded_name | `"2024-spring-example-team-14u"` |
+| Avatar/media URLs | `"https://media-service.gc.com/example-avatar-url"` |
+
+**UUID scope**: The UUID redaction rule applies to ALL UUID fields regardless of field name (`id`, `stream_id`, `event_id`, `game_stream_id`, `player_uuid`, `team_id`, `opponent_id`, etc.) and when UUIDs appear as dict keys (e.g., player-stats keyed by player UUID).
+
+### NOT PII -- Keep As-Is
+
+The following categories are NOT PII and may be kept as-is from real responses:
+
+- **Numeric stats** (batting averages, pitch counts, ERAs, etc.)
+- **Dates** (keep realistic but not identifying -- any recent date is fine)
+- **Jersey numbers** (visible on any game broadcast)
+- **Boolean flags** (`true`/`false` values)
+- **Enum values** (status codes, competition levels, etc.)
+
+### Semi-Identifying Combinations
+
+Even non-PII fields can become identifying when combined:
+
+- **Win-loss records**: Avoid preserving exact records (e.g., `"61-29-2"`) that could identify a specific team. Use generic records (e.g., `{"wins": 12, "losses": 8, "ties": 0}`).
+- **Season + age group + competition level**: Avoid combining a specific `season_year + age_group + competition_level` that matches a real team's history -- replace with a generic recent year.
+
+## Example Request Body Guidance
+
+Endpoint files SHOULD include an "Example Request Body" section (between Headers and Response sections) for POST, PATCH, PUT, and DELETE endpoints that accept a JSON body. The example request body follows the same PII-safe placeholder rules as response examples. Omit this section for GET endpoints or endpoints with no request body.

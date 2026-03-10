@@ -1,10 +1,14 @@
 """mitmproxy addon: API endpoint discovery log.
 
 Logs every GameChanger API request/response pair to an append-only JSONL file.
-Each entry records the method, host, path, query parameter names (not values),
-content-types, status code, timestamp, and traffic source.
+Each entry records the method, host, path, query parameter keys, content-types,
+status code, timestamp, and traffic source.
 
-Bodies and query parameter values are NOT logged.
+When PROXY_CAPTURE_BODIES=true (the default), each entry also includes the full
+request/response bodies (as strings), all headers, and query parameter values.
+Bodies exceeding MAX_BODY_BYTES are replaced with a truncation sentinel.
+Binary content types (image/*, video/*, application/octet-stream) produce a null
+body field. Auth header stripping is configurable via PROXY_STRIP_AUTH_HEADERS.
 """
 
 from __future__ import annotations
@@ -15,7 +19,7 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse, parse_qs, parse_qsl
 
 from proxy.addons import gc_filter
 
@@ -26,6 +30,51 @@ logger = logging.getLogger(__name__)
 
 # Fallback path used when PROXY_SESSION_DIR is not set.
 LOG_PATH = Path("/app/proxy/data/endpoint-log.jsonl")
+
+# Default body size cap (2 MB). Override via MAX_BODY_BYTES env var.
+_DEFAULT_MAX_BODY_BYTES = 2 * 1024 * 1024
+
+# Headers stripped when PROXY_STRIP_AUTH_HEADERS=true (lowercase, already normalised by mitmproxy).
+_SENSITIVE_HEADERS: frozenset[str] = frozenset({
+    "gc-token",
+    "gc-device-id",
+    "authorization",
+    "gc-signature",
+    "cookie",
+    "set-cookie",
+})
+
+# Content-type prefixes/exact values indicating binary data (body capture skipped).
+_BINARY_CT_PREFIXES = ("image/", "video/")
+_BINARY_CT_EXACT = "application/octet-stream"
+
+
+def _is_binary_content_type(content_type: str) -> bool:
+    """Return True if the content type indicates non-text binary data."""
+    ct = content_type.lower().split(";")[0].strip()
+    return ct == _BINARY_CT_EXACT or any(ct.startswith(p) for p in _BINARY_CT_PREFIXES)
+
+
+def _extract_body(content: bytes, content_type: str, max_bytes: int) -> str | None:
+    """Extract a request or response body as a string.
+
+    Args:
+        content: Raw bytes from flow.request.content or flow.response.content.
+        content_type: Content-Type header value (used to detect binary payloads).
+        max_bytes: Body size cap; exceeded bodies become a truncation sentinel.
+
+    Returns:
+        None for empty bodies or binary content types.
+        A truncation sentinel string for oversized bodies.
+        The decoded body string otherwise.
+    """
+    if not content:
+        return None
+    if _is_binary_content_type(content_type):
+        return None
+    if len(content) > max_bytes:
+        return f"<truncated: {len(content)} bytes>"
+    return content.decode("utf-8", errors="replace")
 
 
 class EndpointLogger:
@@ -38,10 +87,28 @@ class EndpointLogger:
         else:
             self.log_path = LOG_PATH
 
+        self.capture_bodies: bool = (
+            os.environ.get("PROXY_CAPTURE_BODIES", "true").lower() == "true"
+        )
+        self.strip_auth_headers: bool = (
+            os.environ.get("PROXY_STRIP_AUTH_HEADERS", "false").lower() == "true"
+        )
+
+        raw_max = os.environ.get("MAX_BODY_BYTES", str(_DEFAULT_MAX_BODY_BYTES))
+        try:
+            self.max_body_bytes: int = int(raw_max)
+        except (ValueError, TypeError):
+            logger.warning(
+                "endpoint_logger: invalid MAX_BODY_BYTES value %r; using default %d",
+                raw_max,
+                _DEFAULT_MAX_BODY_BYTES,
+            )
+            self.max_body_bytes = _DEFAULT_MAX_BODY_BYTES
+
     def response(self, flow: http.HTTPFlow) -> None:
         """Hook called after a response is received.
 
-        Filters to GameChanger domains and logs request/response metadata.
+        Filters to GameChanger domains and logs the request/response pair.
         """
         host = flow.request.pretty_host
         if not gc_filter.is_gamechanger_domain(host):
@@ -50,28 +117,72 @@ class EndpointLogger:
         user_agent = flow.request.headers.get("user-agent", "")
         source = gc_filter.detect_source(user_agent)
 
-        entry = _build_entry(flow, host, source)
+        entry = _build_entry(
+            flow,
+            host,
+            source,
+            capture_bodies=self.capture_bodies,
+            strip_auth_headers=self.strip_auth_headers,
+            max_body_bytes=self.max_body_bytes,
+        )
         _append_entry(entry, self.log_path)
 
 
-def _build_entry(flow: http.HTTPFlow, host: str, source: str) -> dict[str, Any]:
+def _build_capture_fields(
+    flow: http.HTTPFlow,
+    query: str,
+    request_content_type: str,
+    response_content_type: str,
+    *,
+    strip_auth_headers: bool,
+    max_body_bytes: int,
+) -> dict[str, Any]:
+    """Build the capture-mode fields (bodies, headers, query values).
+
+    Called only when PROXY_CAPTURE_BODIES=true.
+    """
+    req_headers = dict(flow.request.headers)
+    resp_headers = dict(flow.response.headers)
+    if strip_auth_headers:
+        req_headers = {k: v for k, v in req_headers.items() if k not in _SENSITIVE_HEADERS}
+        resp_headers = {k: v for k, v in resp_headers.items() if k not in _SENSITIVE_HEADERS}
+    return {
+        "query_params": dict(parse_qsl(query, keep_blank_values=True)),
+        "request_headers": req_headers,
+        "response_headers": resp_headers,
+        "request_body": _extract_body(flow.request.content, request_content_type, max_body_bytes),
+        "response_body": _extract_body(flow.response.content, response_content_type, max_body_bytes),
+    }
+
+
+def _build_entry(
+    flow: http.HTTPFlow,
+    host: str,
+    source: str,
+    *,
+    capture_bodies: bool = True,
+    strip_auth_headers: bool = False,
+    max_body_bytes: int = _DEFAULT_MAX_BODY_BYTES,
+) -> dict[str, Any]:
     """Build a log dict from a mitmproxy flow object.
 
     Args:
         flow: mitmproxy flow with .request and .response populated.
-        host: pre-resolved hostname (gc domain, already validated).
-        source: traffic source string from gc_filter.detect_source().
+        host: Pre-resolved hostname (GC domain, already validated).
+        source: Traffic source string from gc_filter.detect_source().
+        capture_bodies: When True, include bodies, headers, and query values.
+        strip_auth_headers: When True, exclude sensitive auth headers.
+        max_body_bytes: Body size cap; exceeded bodies become truncation sentinels.
 
     Returns:
         Dict suitable for JSON serialisation.
     """
     parsed = urlparse(flow.request.pretty_url)
     query_keys = sorted(parse_qs(parsed.query, keep_blank_values=True).keys())
-
     request_content_type = flow.request.headers.get("content-type", "")
     response_content_type = flow.response.headers.get("content-type", "")
 
-    return {
+    entry: dict[str, Any] = {
         "timestamp": datetime.now(tz=timezone.utc).isoformat(),
         "method": flow.request.method,
         "host": host,
@@ -82,6 +193,18 @@ def _build_entry(flow: http.HTTPFlow, host: str, source: str) -> dict[str, Any]:
         "status_code": flow.response.status_code,
         "source": source,
     }
+
+    if capture_bodies:
+        entry.update(_build_capture_fields(
+            flow,
+            parsed.query,
+            request_content_type,
+            response_content_type,
+            strip_auth_headers=strip_auth_headers,
+            max_body_bytes=max_body_bytes,
+        ))
+
+    return entry
 
 
 def _append_entry(entry: dict[str, Any], path: Path | None = None) -> None:
