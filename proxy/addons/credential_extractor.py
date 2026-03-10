@@ -70,6 +70,33 @@ def _suffix_keys(source: str) -> dict[str, str] | None:
     return {header: f"{base_key}{suffix}" for header, base_key in _BASE_CREDENTIAL_HEADERS.items()}
 
 
+def _parse_auth_response_tokens(content: bytes) -> tuple[str, str] | None:
+    """Parse a POST /auth response body and return (access_token, refresh_token).
+
+    Returns ``None`` if the body is not valid JSON, is not a ``type=="token"``
+    response, or is missing the expected ``access.data`` / ``refresh.data`` fields.
+    Callers are responsible for logging any warnings.
+
+    Args:
+        content: Raw response body bytes.
+
+    Returns:
+        ``(access_token, refresh_token)`` strings, or ``None``.
+    """
+    try:
+        body = json.loads(content)
+    except (ValueError, AttributeError):
+        return None
+
+    if body.get("type") != "token":
+        return None
+
+    try:
+        return body["access"]["data"], body["refresh"]["data"]
+    except (KeyError, TypeError):
+        return None
+
+
 class CredentialExtractor:
     """mitmproxy addon that extracts GameChanger credentials from live traffic.
 
@@ -88,6 +115,37 @@ class CredentialExtractor:
         # In-memory cache: suffixed_env_key -> last-written value.
         # Keyed by suffixed names so web and mobile credentials are tracked independently.
         self._cache: dict[str, str] = {}
+
+    def _write_credentials(
+        self, credentials: dict[str, str], source: str, context: str
+    ) -> bool:
+        """Write credentials to ``.env``, update the cache, and log key names.
+
+        Skips the write if all values are already cached (deduplication).
+        On OSError the error is logged and ``False`` is returned without updating
+        the cache (so the next call will retry).
+
+        Args:
+            credentials: Mapping of suffixed env key names to values.
+            source: Traffic source label used in the success log message.
+            context: Short description of the capture context (e.g.
+                ``"request headers"`` or ``"auth response"``) for log messages.
+
+        Returns:
+            ``True`` if the write succeeded (or was skipped as a duplicate),
+            ``False`` if an ``OSError`` occurred.
+        """
+        if credentials == {k: self._cache.get(k) for k in credentials}:
+            return True
+        try:
+            merge_env_file(_ENV_PATH, credentials)
+        except OSError as exc:
+            logger.error("Failed to write %s credentials to %s: %s", context, _ENV_PATH, exc)
+            return False
+        self._cache.update(credentials)
+        written_keys = ", ".join(sorted(credentials.keys()))
+        logger.info("Credentials captured from %s %s: %s", source, context, written_keys)
+        return True
 
     def request(self, flow: http.HTTPFlow) -> None:
         """Process each proxied request.
@@ -142,23 +200,7 @@ class CredentialExtractor:
         if not credentials:
             return
 
-        # Deduplicate: skip write if nothing has changed.
-        if credentials == {k: self._cache.get(k) for k in credentials}:
-            return
-
-        # Write updated credentials to .env.
-        try:
-            merge_env_file(_ENV_PATH, credentials)
-        except OSError as exc:
-            logger.error("Failed to write credentials to %s: %s", _ENV_PATH, exc)
-            return
-
-        # Update cache and log -- never log credential values.
-        self._cache.update(credentials)
-        written_keys = ", ".join(sorted(credentials.keys()))
-        logger.info(
-            "Credentials updated from %s source: %s", source, written_keys
-        )
+        self._write_credentials(credentials, source, "request headers")
 
     def response(self, flow: http.HTTPFlow) -> None:
         """Process POST /auth responses to capture fresh access and refresh tokens.
@@ -195,46 +237,15 @@ class CredentialExtractor:
             )
             return
 
-        # Parse the JSON response body.
-        try:
-            body = json.loads(flow.response.content)
-        except (ValueError, AttributeError):
-            logger.warning("POST /auth response body is not valid JSON -- skipping.")
+        # Parse access + refresh tokens from the response body.
+        # Returns None for non-JSON bodies, type!="token" responses, and missing fields.
+        tokens = _parse_auth_response_tokens(flow.response.content)
+        if tokens is None:
             return
-
-        # Only process type=="token" responses (step 3/4 of auth flow).
-        # type=="client-token" (step 2) does not contain user access/refresh tokens.
-        if body.get("type") != "token":
-            return
-
-        try:
-            access_token: str = body["access"]["data"]
-            refresh_token: str = body["refresh"]["data"]
-        except (KeyError, TypeError):
-            logger.warning(
-                "POST /auth token response missing expected fields -- skipping."
-            )
-            return
+        access_token, refresh_token = tokens
 
         credentials: dict[str, str] = {
             f"GAMECHANGER_ACCESS_TOKEN{suffix}": access_token,
             f"GAMECHANGER_REFRESH_TOKEN{suffix}": refresh_token,
         }
-
-        # Deduplicate: skip write if nothing has changed.
-        if credentials == {k: self._cache.get(k) for k in credentials}:
-            return
-
-        # Write updated credentials to .env.
-        try:
-            merge_env_file(_ENV_PATH, credentials)
-        except OSError as exc:
-            logger.error("Failed to write auth response tokens to %s: %s", _ENV_PATH, exc)
-            return
-
-        # Update cache and log -- never log credential values.
-        self._cache.update(credentials)
-        written_keys = ", ".join(sorted(credentials.keys()))
-        logger.info(
-            "Auth response tokens captured from %s source: %s", source, written_keys
-        )
+        self._write_credentials(credentials, source, "auth response")
