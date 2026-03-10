@@ -55,20 +55,18 @@ Expert consultations completed: baseball-coach (coaching requirements, `.project
 CREATE TABLE IF NOT EXISTS opponent_links (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
     our_team_id         TEXT    NOT NULL REFERENCES teams(team_id),
-    root_team_id        TEXT    NOT NULL,
+    root_team_id        TEXT    NOT NULL,  -- intentionally NOT a FK to teams; this is GC's local opponent registry key, not a canonical team UUID
     opponent_name       TEXT    NOT NULL,
     resolved_team_id    TEXT    REFERENCES teams(team_id),
     public_id           TEXT,
-    resolution_method   TEXT,
+    resolution_method   TEXT CHECK (resolution_method IN ('auto', 'manual') OR resolution_method IS NULL),
     resolved_at         TEXT,
     is_hidden           INTEGER NOT NULL DEFAULT 0,
     created_at          TEXT    NOT NULL DEFAULT (datetime('now')),
-    updated_at          TEXT    NOT NULL DEFAULT (datetime('now')),
+    updated_at          TEXT    NOT NULL DEFAULT (datetime('now')),  -- no trigger; callers must set updated_at = datetime('now') on every UPDATE
     UNIQUE(our_team_id, root_team_id)
 );
 
-CREATE INDEX IF NOT EXISTS idx_opponent_links_our_team
-    ON opponent_links(our_team_id);
 CREATE INDEX IF NOT EXISTS idx_opponent_links_resolved
     ON opponent_links(resolved_team_id)
     WHERE resolved_team_id IS NOT NULL;
@@ -151,7 +149,7 @@ Yellow communicates a data limitation, not an error. Never expose raw API IDs (U
 
 | ID | Source | Purpose |
 |----|--------|---------|
-| `root_team_id` | Our scorekeeper's opponent entry | Local identifier; unique per our-team + opponent pair |
+| `root_team_id` | Our scorekeeper's opponent entry | Local identifier from GC's opponent registry; unique per our-team + opponent pair. Intentionally NOT a FK to teams -- it references GC's local opponent entries, not canonical team UUIDs |
 | `progenitor_team_id` | GC opponent metadata | Canonical GC team UUID; nullable (~14% missing) |
 | `public_id` | GC team metadata response | Public slug for unauthenticated endpoints (e.g., `lincoln-eagles-ne`) |
 
@@ -189,8 +187,17 @@ These priorities inform future work (IDEA-019, IDEA-020) but are not directly im
 
 **Confirm page error handling**: If the public API call on the confirm page fails (network error, 404, timeout), show an error message with a "try again" link rather than silently failing.
 
+### 11. Discovered Stubs vs. opponent_links Duality
+
+The `discover_team_opponents()` function in admin routes creates placeholder `teams` rows with `source='discovered'` from public schedule data (matched by name). The `OpponentResolver` (E-088-02) creates `opponent_links` rows from the authenticated opponents endpoint (keyed by `root_team_id`). These are parallel structures serving different purposes: discovery creates team stubs for display, while resolution creates bridge rows for scouting data access. They are not reconciled in this epic.
+
+### 12. Wrong Auto-Link Limitation (MVP)
+
+Auto-resolved links cannot be manually overridden in this epic. `POST /admin/opponents/{id}/disconnect` returns 400 for auto-resolved opponents because the next resolver run would immediately re-create the link. If an auto-link is wrong, corrective action requires a direct SQL fix or a future "override" feature. This is a known MVP limitation.
+
 ## Open Questions
 - None remaining. All questions resolved during expert consultation.
 
 ## History
 - 2026-03-09: Created. Expert consultations with baseball-coach, data-engineer, software-engineer, api-scout, ux-designer, and claude-architect completed during formation. Schema divergence (bridge table vs. columns on teams) resolved in favor of bridge table. Search-based manual association deferred due to unknown search endpoint response schema.
+- 2026-03-10: DE spec review triaged by full team (PM, SE, DE, CA, DW). 17 refinements accepted across all 4 stories and epic Technical Notes: removed redundant index, added CHECK constraint on resolution_method, added root_team_id non-FK comment, added updated_at caller-obligation comment, added TN-11 (discovered stubs duality) and TN-12 (wrong auto-link MVP limitation), clarified {id} parameter as opponent_links.id, added field-mapping note and is_hidden handling to E-088-02, added --dry-run flag to CLI, added duplicate public_id and own-team URL guards to E-088-03, added multi-team seed row requirement, added datetime format note and CLAUDE.md update to E-088-04. 3 rejected (seed_dev.sql exists, slot 002 gap archaeology, parse_team_url regex). 1 deferred (public_id divergence).
