@@ -5,12 +5,14 @@ with ``shlex.split()``, and extracts the headers and URL that carry persistent
 auth credentials.  The output is a flat ``dict[str, str]`` mapping .env key
 names to values -- ready to be merged into a ``.env`` file.
 
-Header-to-.env key mapping (curl-paste path is web-only):
-    gc-token        -> GAMECHANGER_REFRESH_TOKEN_WEB    (refresh token only; access tokens are rejected)
-    gc-device-id    -> GAMECHANGER_DEVICE_ID_WEB
-    gc-app-name     -> GAMECHANGER_APP_NAME_WEB
-    Cookie / -b     -> GAMECHANGER_COOKIE_<NAME> (one entry per cookie)
-    URL (base)      -> GAMECHANGER_BASE_URL
+Header-to-.env key mapping (profile-aware; keys use _WEB or _MOBILE suffix):
+    gc-token (refresh)  -> GAMECHANGER_REFRESH_TOKEN_WEB / GAMECHANGER_REFRESH_TOKEN_MOBILE
+    gc-token (access)   -> GAMECHANGER_ACCESS_TOKEN_MOBILE  (mobile only; web rejects access tokens)
+    gc-device-id        -> GAMECHANGER_DEVICE_ID_WEB / GAMECHANGER_DEVICE_ID_MOBILE
+    gc-app-name         -> GAMECHANGER_APP_NAME_WEB / GAMECHANGER_APP_NAME_MOBILE
+    gc-client-id        -> GAMECHANGER_CLIENT_ID_WEB / GAMECHANGER_CLIENT_ID_MOBILE
+    Cookie / -b         -> GAMECHANGER_COOKIE_<NAME> (one entry per cookie)
+    URL (base)          -> GAMECHANGER_BASE_URL
 
 Headers that are skipped (per-request, not persistent credentials):
     gc-user-action-id, gc-user-action, x-pagination, and all standard
@@ -55,13 +57,25 @@ def _decode_jwt_type(token: str) -> str | None:
     except Exception:
         return None
 
-# Headers that carry persistent credentials and the .env key to store them under.
-# The curl-paste path is inherently web-only, so keys use the _WEB suffix.
-_CREDENTIAL_HEADERS: dict[str, str] = {
-    "gc-token": "GAMECHANGER_REFRESH_TOKEN_WEB",
-    "gc-device-id": "GAMECHANGER_DEVICE_ID_WEB",
-    "gc-app-name": "GAMECHANGER_APP_NAME_WEB",
-}
+def _non_token_credential_keys(profile: str) -> dict[str, str]:
+    """Return the header -> env_key mapping for non-gc-token credential headers.
+
+    ``gc-token`` is handled separately because its routing depends on token type
+    and profile.  All other credential headers follow the simple ``_PROFILE``
+    suffix pattern.
+
+    Args:
+        profile: ``"web"`` or ``"mobile"``.
+
+    Returns:
+        Dict mapping lowercase header name to the corresponding .env key.
+    """
+    suffix = f"_{profile.upper()}"
+    return {
+        "gc-device-id": f"GAMECHANGER_DEVICE_ID{suffix}",
+        "gc-app-name": f"GAMECHANGER_APP_NAME{suffix}",
+        "gc-client-id": f"GAMECHANGER_CLIENT_ID{suffix}",
+    }
 
 # Headers that should be silently skipped (per-request, not credentials).
 _SKIP_HEADERS: frozenset[str] = frozenset(
@@ -93,17 +107,23 @@ class CurlParseError(ValueError):
     """Raised when the curl command is malformed or missing required credentials."""
 
 
-def parse_curl(curl_command: str) -> dict[str, str]:
+def parse_curl(curl_command: str, profile: str = "web") -> dict[str, str]:
     """Parse a raw curl command string and return extracted credentials as a dict.
 
-    The returned dict maps .env variable names to their values.  At minimum,
-    ``GAMECHANGER_REFRESH_TOKEN_WEB`` and ``GAMECHANGER_BASE_URL`` are required; the
-    function raises ``CurlParseError`` if either is absent.
+    The returned dict maps .env variable names to their values.  The profile
+    determines the env key suffix (``_WEB`` or ``_MOBILE``) and token handling:
+    - web (default): refresh tokens only; access tokens are rejected.
+    - mobile: access tokens saved to ``GAMECHANGER_ACCESS_TOKEN_MOBILE``;
+      refresh tokens saved to ``GAMECHANGER_REFRESH_TOKEN_MOBILE``.
+
+    At minimum, one gc-token credential and ``GAMECHANGER_BASE_URL`` must be
+    present; the function raises ``CurlParseError`` if either is absent.
 
     Args:
         curl_command: The full curl command string, including the ``curl`` prefix,
             as copied from browser dev tools (may span multiple lines with
             backslash continuations).
+        profile: Credential profile -- ``"web"`` (default) or ``"mobile"``.
 
     Returns:
         A dict mapping .env key names to credential values.
@@ -141,7 +161,7 @@ def parse_curl(curl_command: str) -> dict[str, str]:
                     f"Flag {token!r} at position {i} is missing its value."
                 )
             header_raw = tokens[i + 1]
-            _process_header(header_raw, credentials)
+            _process_header(header_raw, credentials, profile=profile)
             i += 2
             continue
 
@@ -203,7 +223,9 @@ def parse_curl(curl_command: str) -> dict[str, str]:
     credentials["GAMECHANGER_BASE_URL"] = f"{parsed.scheme}://{parsed.netloc}"
 
     # Enforce that the primary auth credential is present.
-    if "GAMECHANGER_REFRESH_TOKEN_WEB" not in credentials:
+    _suffix = f"_{profile.upper()}"
+    _token_keys = {f"GAMECHANGER_REFRESH_TOKEN{_suffix}", f"GAMECHANGER_ACCESS_TOKEN{_suffix}"}
+    if not _token_keys & credentials.keys():
         raise CurlParseError(
             "Required credential 'gc-token' header not found in curl command.\n"
             "Make sure you are copying the full curl command from the GameChanger "
@@ -215,12 +237,17 @@ def parse_curl(curl_command: str) -> dict[str, str]:
     return credentials
 
 
-def _process_header(header_raw: str, credentials: dict[str, str]) -> None:
+def _process_header(
+    header_raw: str,
+    credentials: dict[str, str],
+    profile: str = "web",
+) -> None:
     """Parse a single ``Name: Value`` header string and update *credentials*.
 
     Args:
         header_raw: The raw header string, e.g. ``'gc-token: eyJ...'``.
         credentials: The dict to update in-place.
+        profile: ``"web"`` or ``"mobile"``; governs key suffix and gc-token routing.
     """
     if ":" not in header_raw:
         logger.debug("Skipping malformed header (no colon): %r", header_raw)
@@ -236,14 +263,14 @@ def _process_header(header_raw: str, credentials: dict[str, str]) -> None:
         _extract_cookies(value, credentials)
         return
 
-    # Credential headers with an explicit mapping.
-    if name_lower in _CREDENTIAL_HEADERS:
-        env_key = _CREDENTIAL_HEADERS[name_lower]
-        # For gc-token, verify it is a refresh token (no 'type' field in payload).
-        # Access tokens (type == "user") must NOT be saved as GAMECHANGER_REFRESH_TOKEN_*.
-        if name_lower == "gc-token":
-            token_type = _decode_jwt_type(value)
+    # gc-token: routing depends on token type and profile.
+    if name_lower == "gc-token":
+        suffix = f"_{profile.upper()}"
+        token_type = _decode_jwt_type(value)
+        if profile == "web":
+            # Web profile: only refresh tokens are useful (no type field).
             if token_type == "user":
+                env_key = f"GAMECHANGER_REFRESH_TOKEN{suffix}"
                 logger.warning(
                     "gc-token header contains an access token (type='user'), not a refresh token. "
                     "Access tokens expire in ~60 minutes and cannot be used for programmatic refresh. "
@@ -254,7 +281,8 @@ def _process_header(header_raw: str, credentials: dict[str, str]) -> None:
                 )
                 return
             if token_type is not None:
-                # Unknown type field (e.g. "client") -- also skip with a warning.
+                # Unknown type field (e.g. "client") -- skip with a warning.
+                env_key = f"GAMECHANGER_REFRESH_TOKEN{suffix}"
                 logger.warning(
                     "gc-token header contains an unexpected token type=%r. "
                     "Expected a refresh token (no 'type' field). Skipping -- %s will NOT be updated.",
@@ -262,6 +290,26 @@ def _process_header(header_raw: str, credentials: dict[str, str]) -> None:
                     env_key,
                 )
                 return
+            env_key = f"GAMECHANGER_REFRESH_TOKEN{suffix}"
+        else:
+            # Mobile profile: access tokens go to ACCESS_TOKEN; refresh tokens to REFRESH_TOKEN.
+            if token_type == "user":
+                env_key = f"GAMECHANGER_ACCESS_TOKEN{suffix}"
+            elif token_type is None:
+                env_key = f"GAMECHANGER_REFRESH_TOKEN{suffix}"
+            else:
+                logger.warning(
+                    "gc-token header contains an unexpected token type=%r. Skipping.", token_type
+                )
+                return
+        credentials[env_key] = value
+        logger.debug("Extracted gc-token (%s profile) -> %s", profile, env_key)
+        return
+
+    # Other credential headers with profile-aware key mapping.
+    cred_keys = _non_token_credential_keys(profile)
+    if name_lower in cred_keys:
+        env_key = cred_keys[name_lower]
         credentials[env_key] = value
         logger.debug("Extracted %s from header %r", env_key, name)
         return

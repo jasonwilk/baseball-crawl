@@ -57,6 +57,12 @@ def import_creds(
             f"Defaults to {_DEFAULT_CURL_FILE} when neither --curl nor --file is given."
         ),
     ),
+    profile: str = typer.Option(
+        "web",
+        "--profile",
+        metavar="PROFILE",
+        help="Credential profile: web (default) or mobile.",
+    ),
 ) -> None:
     """Extract credentials from a curl command and write them to .env."""
     if curl is not None and file is not None:
@@ -78,7 +84,7 @@ def import_creds(
         curl_command = source_path.read_text(encoding="utf-8")
 
     try:
-        new_credentials = parse_curl(curl_command)
+        new_credentials = parse_curl(curl_command, profile=profile)
     except CurlParseError as exc:
         _err_console.print(f"[red]Error:[/red] {exc}")
         raise typer.Exit(code=1)
@@ -91,6 +97,7 @@ def import_creds(
     _console.print(
         f"({len(new_credentials)} keys written, {len(merged)} total keys in .env)"
     )
+    _print_token_info(new_credentials)
 
 
 def _decode_jwt_exp(token: str) -> int | None:
@@ -107,6 +114,38 @@ def _decode_jwt_exp(token: str) -> int | None:
         return int(payload["exp"])
     except Exception:  # noqa: BLE001
         return None
+
+
+def _print_token_info(credentials: dict[str, str]) -> None:
+    """Print token type and remaining lifetime for any tokens in *credentials*.
+
+    Never shows credential values -- only key names and decoded timing metadata.
+    """
+    _token_labels = {
+        "GAMECHANGER_ACCESS_TOKEN_MOBILE": "Access token (mobile)",
+        "GAMECHANGER_REFRESH_TOKEN_MOBILE": "Refresh token (mobile)",
+        "GAMECHANGER_REFRESH_TOKEN_WEB": "Refresh token (web)",
+    }
+    now = int(time.time())
+    for key, label in _token_labels.items():
+        token = credentials.get(key)
+        if not token:
+            continue
+        exp = _decode_jwt_exp(token)
+        if exp is None:
+            continue
+        remaining = exp - now
+        if remaining <= 0:
+            _console.print(f"  {label}: [yellow]already expired[/yellow]")
+        elif remaining < 3600:
+            mins = remaining // 60
+            _console.print(f"  {label}: [yellow]valid for ~{mins} minute(s)[/yellow]")
+        elif remaining < 86400:
+            hours = remaining // 3600
+            _console.print(f"  {label}: [green]valid for ~{hours} hour(s)[/green]")
+        else:
+            days = remaining // 86400
+            _console.print(f"  {label}: [green]expires in {days} day(s)[/green]")
 
 
 @app.command()

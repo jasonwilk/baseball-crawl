@@ -13,7 +13,10 @@ Coverage:
 
 from __future__ import annotations
 
+import base64
+import json
 import textwrap
+import time
 from pathlib import Path
 
 import pytest
@@ -24,6 +27,24 @@ from src.gamechanger.credential_parser import (
     merge_env_file,
     parse_curl,
 )
+
+
+def _make_access_token() -> str:
+    """Build a minimal JWT with type='user' (access token)."""
+    payload = {"type": "user", "exp": int(time.time()) + 3600, "iat": int(time.time())}
+    payload_b64 = (
+        base64.urlsafe_b64encode(json.dumps(payload).encode()).rstrip(b"=").decode()
+    )
+    return f"eyJhbGciOiJIUzI1NiJ9.{payload_b64}.sig"
+
+
+def _make_refresh_token() -> str:
+    """Build a minimal JWT with no type field (refresh token)."""
+    payload = {"id": "uuid:uuid", "exp": int(time.time()) + 1209600, "iat": int(time.time())}
+    payload_b64 = (
+        base64.urlsafe_b64encode(json.dumps(payload).encode()).rstrip(b"=").decode()
+    )
+    return f"eyJhbGciOiJIUzI1NiJ9.{payload_b64}.sig"
 
 
 # ---------------------------------------------------------------------------
@@ -398,3 +419,90 @@ class TestAtomicMergeEnvFile:
         merged = merge_env_file(str(env_path), {"NEW_KEY": "new_value"})
         assert merged["OLD_KEY"] == "old_value"
         assert merged["NEW_KEY"] == "new_value"
+
+
+# ---------------------------------------------------------------------------
+# parse_curl -- mobile profile (AC-1 through AC-7)
+# ---------------------------------------------------------------------------
+
+
+class TestMobileProfile:
+    """parse_curl(profile='mobile') tests."""
+
+    def _curl(self, token: str, extra_headers: str = "") -> str:
+        return (
+            f"curl 'https://api.team-manager.gc.com/teams/abc/game-summaries' "
+            f"-H 'gc-token: {token}' {extra_headers}"
+        )
+
+    # AC-2: access token (type=='user') saved to GAMECHANGER_ACCESS_TOKEN_MOBILE
+    def test_access_token_saved_to_mobile_key(self) -> None:
+        token = _make_access_token()
+        result = parse_curl(self._curl(token), profile="mobile")
+        assert result["GAMECHANGER_ACCESS_TOKEN_MOBILE"] == token
+        assert "GAMECHANGER_REFRESH_TOKEN_MOBILE" not in result
+
+    # AC-3: refresh token (no type field) saved to GAMECHANGER_REFRESH_TOKEN_MOBILE
+    def test_refresh_token_saved_to_mobile_key(self) -> None:
+        token = _make_refresh_token()
+        result = parse_curl(self._curl(token), profile="mobile")
+        assert result["GAMECHANGER_REFRESH_TOKEN_MOBILE"] == token
+        assert "GAMECHANGER_ACCESS_TOKEN_MOBILE" not in result
+
+    # AC-1: _MOBILE suffix on all credential keys
+    def test_mobile_suffix_on_device_id(self) -> None:
+        token = _make_access_token()
+        curl = self._curl(token, "-H 'gc-device-id: dev123'")
+        result = parse_curl(curl, profile="mobile")
+        assert result["GAMECHANGER_DEVICE_ID_MOBILE"] == "dev123"
+        assert "GAMECHANGER_DEVICE_ID_WEB" not in result
+
+    def test_mobile_suffix_on_app_name(self) -> None:
+        token = _make_access_token()
+        curl = self._curl(token, "-H 'gc-app-name: gc'")
+        result = parse_curl(curl, profile="mobile")
+        assert result["GAMECHANGER_APP_NAME_MOBILE"] == "gc"
+        assert "GAMECHANGER_APP_NAME_WEB" not in result
+
+    # AC-7: gc-client-id captured for mobile
+    def test_client_id_captured_for_mobile(self) -> None:
+        token = _make_access_token()
+        curl = self._curl(token, "-H 'gc-client-id: 0f18f027-c51e-4122-a330-9d537beb83e0'")
+        result = parse_curl(curl, profile="mobile")
+        assert result["GAMECHANGER_CLIENT_ID_MOBILE"] == "0f18f027-c51e-4122-a330-9d537beb83e0"
+
+    # AC-7: gc-client-id captured for web too
+    def test_client_id_captured_for_web(self) -> None:
+        curl = (
+            "curl 'https://api.team-manager.gc.com/data' "
+            "-H 'gc-token: eyJhbGciOiJIUzI1NiJ9.payload.sig' "
+            "-H 'gc-client-id: 07cb985d-0000-0000-0000-000000000000'"
+        )
+        result = parse_curl(curl)  # default web profile
+        assert result["GAMECHANGER_CLIENT_ID_WEB"] == "07cb985d-0000-0000-0000-000000000000"
+
+    # AC-4: web profile still rejects access tokens
+    def test_web_profile_rejects_access_token(self) -> None:
+        token = _make_access_token()
+        curl = self._curl(token)
+        with pytest.raises(CurlParseError, match="gc-token"):
+            parse_curl(curl, profile="web")
+
+    # AC-5 / AC-6: web profile (explicit or default) has same behavior
+    def test_web_explicit_same_as_default(self) -> None:
+        curl = (
+            "curl 'https://api.team-manager.gc.com/data' "
+            "-H 'gc-token: eyJhbGciOiJIUzI1NiJ9.payload.sig'"
+        )
+        result_default = parse_curl(curl)
+        result_web = parse_curl(curl, profile="web")
+        assert result_default == result_web
+
+    # Missing gc-token raises for mobile too
+    def test_missing_gc_token_raises_for_mobile(self) -> None:
+        curl = (
+            "curl 'https://api.team-manager.gc.com/data' "
+            "-H 'gc-device-id: dev123'"
+        )
+        with pytest.raises(CurlParseError, match="gc-token"):
+            parse_curl(curl, profile="mobile")

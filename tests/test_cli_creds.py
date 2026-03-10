@@ -51,7 +51,7 @@ class TestCredsImport:
         mock_parse.assert_called_once()
 
     def test_curl_flag_passes_inline_string(self) -> None:
-        """--curl flag passes the inline string directly to parse_curl."""
+        """--curl flag passes the inline string directly to parse_curl with profile='web'."""
         inline = "curl 'https://api.gc.com' -H 'gc-token: tok'"
         with (
             patch("src.cli.creds.parse_curl", return_value=self._FAKE_CREDENTIALS) as mock_parse,
@@ -59,7 +59,7 @@ class TestCredsImport:
         ):
             result = runner.invoke(app, ["creds", "import", "--curl", inline])
         assert result.exit_code == 0
-        mock_parse.assert_called_once_with(inline)
+        mock_parse.assert_called_once_with(inline, profile="web")
 
     def test_file_flag_reads_from_path(self, tmp_path: Path) -> None:
         """--file flag reads from the given path."""
@@ -110,6 +110,76 @@ class TestCredsImport:
             mock_default.__str__ = lambda _: "secrets/gamechanger-curl.txt"
             result = runner.invoke(app, ["creds", "import"])
         assert result.exit_code != 0
+
+    def test_profile_mobile_passes_to_parse_curl(self) -> None:
+        """--profile mobile is forwarded to parse_curl."""
+        inline = "curl 'https://api.gc.com' -H 'gc-token: tok'"
+        mobile_creds = {
+            "GAMECHANGER_ACCESS_TOKEN_MOBILE": "access_tok",
+            "GAMECHANGER_BASE_URL": "https://api.gc.com",
+        }
+        with (
+            patch("src.cli.creds.parse_curl", return_value=mobile_creds) as mock_parse,
+            patch("src.cli.creds.merge_env_file", return_value=mobile_creds),
+        ):
+            result = runner.invoke(app, ["creds", "import", "--profile", "mobile", "--curl", inline])
+        assert result.exit_code == 0
+        mock_parse.assert_called_once_with(inline, profile="mobile")
+
+    def test_profile_web_explicit_same_as_default(self) -> None:
+        """--profile web explicit behaves identically to no-flag (default)."""
+        inline = "curl 'https://api.gc.com' -H 'gc-token: tok'"
+        with (
+            patch("src.cli.creds.parse_curl", return_value=self._FAKE_CREDENTIALS) as mock_parse,
+            patch("src.cli.creds.merge_env_file", return_value=self._MERGED),
+        ):
+            result = runner.invoke(app, ["creds", "import", "--profile", "web", "--curl", inline])
+        assert result.exit_code == 0
+        mock_parse.assert_called_once_with(inline, profile="web")
+
+    def test_output_shows_mobile_key_names(self) -> None:
+        """Output lists MOBILE-suffixed key names when --profile mobile is used."""
+        mobile_creds = {
+            "GAMECHANGER_ACCESS_TOKEN_MOBILE": "access_tok",
+            "GAMECHANGER_BASE_URL": "https://api.gc.com",
+        }
+        inline = "curl 'https://api.gc.com' -H 'gc-token: tok'"
+        with (
+            patch("src.cli.creds.parse_curl", return_value=mobile_creds),
+            patch("src.cli.creds.merge_env_file", return_value=mobile_creds),
+        ):
+            result = runner.invoke(app, ["creds", "import", "--profile", "mobile", "--curl", inline])
+        assert result.exit_code == 0
+        assert "GAMECHANGER_ACCESS_TOKEN_MOBILE" in result.output
+        # Actual token values must NOT appear.
+        assert "access_tok" not in result.output
+
+    def test_token_metadata_shown_for_valid_jwt(self) -> None:
+        """AC-8: After import a token lifetime line appears in output for a real JWT."""
+        import base64
+        import json
+        import time
+
+        exp = int(time.time()) + 43200  # ~12 hours
+        payload = {"exp": exp}
+        payload_b64 = (
+            base64.urlsafe_b64encode(json.dumps(payload).encode()).rstrip(b"=").decode()
+        )
+        real_token = f"header.{payload_b64}.sig"
+        creds_with_real_token = {
+            "GAMECHANGER_REFRESH_TOKEN_WEB": real_token,
+            "GAMECHANGER_BASE_URL": "https://api.gc.com",
+        }
+        with (
+            patch("src.cli.creds.parse_curl", return_value=creds_with_real_token),
+            patch("src.cli.creds.merge_env_file", return_value=creds_with_real_token),
+        ):
+            result = runner.invoke(app, ["creds", "import"])
+        assert result.exit_code == 0
+        # Some kind of lifetime info should appear.
+        assert "hour" in result.output or "day" in result.output or "minute" in result.output
+        # The raw token value must NOT appear.
+        assert real_token not in result.output
 
 
 # ---------------------------------------------------------------------------
