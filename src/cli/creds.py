@@ -90,7 +90,11 @@ def import_creds(
         raise typer.Exit(code=1)
 
     merged = merge_env_file(str(_ENV_FILE), new_credentials)
+    _print_import_summary(new_credentials, merged)
 
+
+def _print_import_summary(new_credentials: dict[str, str], merged: dict[str, str]) -> None:
+    """Print the post-import summary: key names written and token lifetime metadata."""
     _console.print(f"Credentials written to [bold]{_ENV_FILE}[/bold]:")
     for key in sorted(new_credentials.keys()):
         _console.print(f"  [green]{key}[/green]")

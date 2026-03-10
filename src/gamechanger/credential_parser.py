@@ -237,6 +237,70 @@ def parse_curl(curl_command: str, profile: str = "web") -> dict[str, str]:
     return credentials
 
 
+def _resolve_web_token_key(token_type: str | None, suffix: str) -> str | None:
+    """Return the env_key for a web-profile gc-token, or ``None`` to discard.
+
+    Access tokens (``type == "user"``) and unknown types are logged as warnings
+    and return ``None``.  Refresh tokens (no ``type`` field) return the key.
+    """
+    if token_type == "user":
+        env_key = f"GAMECHANGER_REFRESH_TOKEN{suffix}"
+        logger.warning(
+            "gc-token header contains an access token (type='user'), not a refresh token. "
+            "Access tokens expire in ~60 minutes and cannot be used for programmatic refresh. "
+            "To capture a refresh token, copy a curl command from a POST /auth request in "
+            "browser dev tools (Network tab -> filter by 'auth' -> right-click -> Copy as cURL). "
+            "Skipping -- %s will NOT be updated.",
+            env_key,
+        )
+        return None
+    if token_type is not None:
+        env_key = f"GAMECHANGER_REFRESH_TOKEN{suffix}"
+        logger.warning(
+            "gc-token header contains an unexpected token type=%r. "
+            "Expected a refresh token (no 'type' field). Skipping -- %s will NOT be updated.",
+            token_type,
+            env_key,
+        )
+        return None
+    return f"GAMECHANGER_REFRESH_TOKEN{suffix}"
+
+
+def _route_gc_token(value: str, profile: str, credentials: dict[str, str]) -> None:
+    """Resolve a ``gc-token`` header value to the correct .env key and store it.
+
+    Delegates web-profile validation to ``_resolve_web_token_key``.  For mobile,
+    access tokens go to ``GAMECHANGER_ACCESS_TOKEN_MOBILE`` and refresh tokens
+    go to ``GAMECHANGER_REFRESH_TOKEN_MOBILE``; unknown types are discarded.
+
+    Args:
+        value: The raw JWT string from the ``gc-token`` header.
+        profile: ``"web"`` or ``"mobile"``.
+        credentials: The dict to update in-place.
+    """
+    suffix = f"_{profile.upper()}"
+    token_type = _decode_jwt_type(value)
+
+    if profile == "web":
+        env_key = _resolve_web_token_key(token_type, suffix)
+    else:
+        # Mobile: access tokens -> ACCESS_TOKEN; refresh tokens -> REFRESH_TOKEN.
+        if token_type == "user":
+            env_key = f"GAMECHANGER_ACCESS_TOKEN{suffix}"
+        elif token_type is None:
+            env_key = f"GAMECHANGER_REFRESH_TOKEN{suffix}"
+        else:
+            logger.warning(
+                "gc-token header contains an unexpected token type=%r. Skipping.", token_type
+            )
+            return
+
+    if env_key is None:
+        return
+    credentials[env_key] = value
+    logger.debug("Extracted gc-token (%s profile) -> %s", profile, env_key)
+
+
 def _process_header(
     header_raw: str,
     credentials: dict[str, str],
@@ -265,45 +329,7 @@ def _process_header(
 
     # gc-token: routing depends on token type and profile.
     if name_lower == "gc-token":
-        suffix = f"_{profile.upper()}"
-        token_type = _decode_jwt_type(value)
-        if profile == "web":
-            # Web profile: only refresh tokens are useful (no type field).
-            if token_type == "user":
-                env_key = f"GAMECHANGER_REFRESH_TOKEN{suffix}"
-                logger.warning(
-                    "gc-token header contains an access token (type='user'), not a refresh token. "
-                    "Access tokens expire in ~60 minutes and cannot be used for programmatic refresh. "
-                    "To capture a refresh token, copy a curl command from a POST /auth request in "
-                    "browser dev tools (Network tab -> filter by 'auth' -> right-click -> Copy as cURL). "
-                    "Skipping -- %s will NOT be updated.",
-                    env_key,
-                )
-                return
-            if token_type is not None:
-                # Unknown type field (e.g. "client") -- skip with a warning.
-                env_key = f"GAMECHANGER_REFRESH_TOKEN{suffix}"
-                logger.warning(
-                    "gc-token header contains an unexpected token type=%r. "
-                    "Expected a refresh token (no 'type' field). Skipping -- %s will NOT be updated.",
-                    token_type,
-                    env_key,
-                )
-                return
-            env_key = f"GAMECHANGER_REFRESH_TOKEN{suffix}"
-        else:
-            # Mobile profile: access tokens go to ACCESS_TOKEN; refresh tokens to REFRESH_TOKEN.
-            if token_type == "user":
-                env_key = f"GAMECHANGER_ACCESS_TOKEN{suffix}"
-            elif token_type is None:
-                env_key = f"GAMECHANGER_REFRESH_TOKEN{suffix}"
-            else:
-                logger.warning(
-                    "gc-token header contains an unexpected token type=%r. Skipping.", token_type
-                )
-                return
-        credentials[env_key] = value
-        logger.debug("Extracted gc-token (%s profile) -> %s", profile, env_key)
+        _route_gc_token(value, profile, credentials)
         return
 
     # Other credential headers with profile-aware key mapping.
