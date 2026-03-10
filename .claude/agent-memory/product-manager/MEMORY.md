@@ -1,8 +1,8 @@
 # Product Manager -- Agent Memory
 
 ## Numbering State
-- Next available epic number: E-094
-- Epics created: E-001 through E-093 (E-001, E-003, E-005, E-006, E-007, E-008, E-010, E-011, E-012, E-013, E-014, E-015, E-016, E-017, E-018, E-019, E-020, E-021, E-022, E-024, E-025, E-026, E-027, E-028, E-029, E-030, E-031, E-032, E-033, E-034, E-035, E-036, E-037, E-038, E-042, E-044, E-046, E-048, E-049, E-050, E-052, E-053, E-054, E-056, E-057, E-058, E-055, E-059, E-060, E-061, E-075, E-081, E-084, E-087, E-088, E-089, E-090, E-091 archived; E-092, E-093 active)
+- Next available epic number: E-095
+- Epics created: E-001 through E-094 (E-001, E-003, E-005, E-006, E-007, E-008, E-010, E-011, E-012, E-013, E-014, E-015, E-016, E-017, E-018, E-019, E-020, E-021, E-022, E-024, E-025, E-026, E-027, E-028, E-029, E-030, E-031, E-032, E-033, E-034, E-035, E-036, E-037, E-038, E-042, E-044, E-046, E-048, E-049, E-050, E-052, E-053, E-054, E-056, E-057, E-058, E-055, E-059, E-060, E-061, E-075, E-081, E-084, E-087, E-088, E-089, E-090, E-091 archived; E-092, E-093, E-094 active)
 - Next available idea number: IDEA-022
 - Ideas created: IDEA-001 through IDEA-021
 
@@ -22,6 +22,7 @@
 - E-082 (READY): Codex RTK Project-Level Integration -- 4 stories. Install RTK into a gitignored repo-local tool path, expose it to Codex from checked-in project config or absolute-path guidance, add explicit `rtk <command>` guidance (no transparent hook assumptions), add a Python smoke-check utility, and document the Codex RTK model. Depends on E-081 bootstrap (now COMPLETED) and on E-081-04 for the shared operator doc file (now DONE). Wave: 01 -> 02+03 parallel -> 04. CA + SE + docs-writer dispatch team. Research conclusion: Codex does not need Claude's host-level RTK pattern, but it also does not expose a documented Claude-style automatic rewrite hook.
 - E-086 (READY): Mobile Credential Capture -- 4 stories. Proxy addon upgrade (gc-client-id + POST /auth response body capture), `bb creds import --profile mobile` (curl-paste path), `bb creds capture --profile mobile` (proxy session scanning with inline guidance), context-layer docs. Absorbs and supersedes E-075 remaining stories (02+03). Wave: 01+02 parallel -> 03 (depends on 01+02) -> 04 (depends on 02+03). SE + CA dispatch team. All four consultations completed.
 - E-091 (READY): Fix E-088 Opponent Data Model Defects -- 3 stories. Codex code review fixes: guard connect endpoint against overwriting auto-resolved links (01), store hidden opponents with is_hidden=1 instead of skipping (02), scope duplicate public_id check to our_team_id (03). All independent, single-wave parallel. No schema changes. SE + DE triaged. SE-only dispatch team.
+- E-094 (READY): Fix Team ID Resolution in Import and Crawl Pipeline -- 3 stories. Bug fix: team import stores public_id as team_id, breaking --source db crawl. URL parser accepts UUIDs (01), admin import resolves UUID via reverse bridge for owned teams (02), crawl config adds is_owned field (03). Wave: 01 -> 02, 03 independent. SE-only dispatch team. No expert consultation required.
 
 ## Archived Epics
 - E-093 (COMPLETED): E-088 Code Review Cleanup -- 3 stories. Convention violations: shrink bulk_create_opponents + fix lazy imports, shrink resolve_opponents CLI, fix test_listing_requires_admin DEV_USER_EMAIL leak + remove dead code. Codex review deferred finding: `bb data resolve-opponents` CLI has no test coverage (pre-existing gap, not introduced by E-093).
