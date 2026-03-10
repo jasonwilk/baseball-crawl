@@ -12,7 +12,7 @@ The web profile has a fully automatic credential chain: programmatic token refre
 
 What the mobile profile DOES have:
 - **Access tokens**: ~12 hours lifetime (vs ~60 min web). Long enough for any crawl session.
-- **Refresh tokens**: 14 days lifetime. Work directly as `gc-token` for GET endpoints without signing.
+- **Refresh tokens**: 14 days lifetime. Sent as `gc-token` in POST /auth refresh calls. Usability for general GET endpoints is unverified.
 - **Proxy capture**: mitmproxy captures all iOS traffic including auth headers and POST /auth response bodies.
 
 The gap: there is no automated path from "proxy captured mobile traffic" to "credentials in `.env` ready to use." Today the operator would need to manually find tokens in mitmweb, copy them, and paste them into `.env`. E-086 closes that gap.
@@ -73,9 +73,9 @@ Story 01 adds:
 1. `gc-client-id` header capture in `request()` handler (simple addition to `_BASE_CREDENTIAL_HEADERS`)
 2. A `response()` handler for POST /auth responses that extracts access and refresh tokens from the response body
 
-The `response()` handler parses `{type: "token", access: {token: "..."}, refresh: {token: "..."}}` and writes:
-- Access token -> `GAMECHANGER_ACCESS_TOKEN_{PROFILE}` (NEW env key for mobile)
-- Refresh token -> `GAMECHANGER_REFRESH_TOKEN_{PROFILE}` (existing key, updated with fresh value)
+The `response()` handler parses `{type: "token", access: {data: "..."}, refresh: {data: "..."}}` and writes:
+- Access token (from `access.data`) -> `GAMECHANGER_ACCESS_TOKEN_{PROFILE}` (NEW env key for mobile)
+- Refresh token (from `refresh.data`) -> `GAMECHANGER_REFRESH_TOKEN_{PROFILE}` (existing key, updated with fresh value)
 
 For web profile, the refresh token from response bodies is the most valuable capture (enables self-renewing chain). For mobile profile, the access token is critical (direct API access for ~12 hours).
 
@@ -87,7 +87,7 @@ For web profile, the refresh token from response bodies is the most valuable cap
 
 Key difference: for mobile, access tokens MUST be saved (not rejected). The current logic rejects tokens with `type == "user"` (access tokens) and only saves refresh tokens. For mobile, both token types are valuable:
 - Access tokens -> `GAMECHANGER_ACCESS_TOKEN_MOBILE` (direct API access, ~12 hours)
-- Refresh tokens -> `GAMECHANGER_REFRESH_TOKEN_MOBILE` (14-day, works as gc-token for GET endpoints)
+- Refresh tokens -> `GAMECHANGER_REFRESH_TOKEN_MOBILE` (14-day, used in POST /auth refresh calls)
 
 The `bb creds import` CLI command also needs the `--profile` flag.
 
@@ -119,7 +119,7 @@ Mobile access tokens expire in ~12 hours. The system must communicate this hones
 - `bb creds capture` output: "Access token valid for ~N hours"
 - `bb creds check --profile mobile`: Token health shows `[!!]` yellow with countdown
 - No promise of auto-refresh -- the operator knows to recapture when needed
-- The 14-day refresh token works as a longer-lived fallback for GET endpoints
+- The 14-day refresh token is available for POST /auth refresh calls (usability for general GET endpoints is unverified)
 
 ### File Ownership Map
 
@@ -132,7 +132,9 @@ Mobile access tokens expire in ~12 hours. The system must communicate this hones
 | `tests/test_credential_parser.py` | 02 | Tests for mobile profile parsing |
 | `tests/test_cli_creds.py` | 02, 03 | CLI tests |
 | `CLAUDE.md` | 04 | Mobile credential workflow, new commands |
-| `docs/admin/mitmproxy-guide.md` | 04 | Mobile capture workflow section |
+| `docs/admin/mitmproxy-guide.md` | 04 | Replace existing mobile capture section with updated proxy-based workflow |
+| `docs/admin/getting-started.md` | 04 | Update credential section for mobile env vars and commands |
+| `docs/admin/bootstrap-guide.md` | 04 | Update proxy workflow section and credential lifecycle table for mobile |
 
 ### Wave Structure
 - **Wave 1** (parallel): E-086-01 (addon upgrade) + E-086-02 (import --profile mobile). No file conflicts.
@@ -145,3 +147,4 @@ Mobile access tokens expire in ~12 hours. The system must communicate this hones
 ## History
 - 2026-03-09: Created. Absorbs remaining E-075 stories (02 + 03) into a richer, integrated mobile credential workflow. All four consultations completed (CA, UXD, api-scout, SE).
 - 2026-03-09: Codex spec review triage -- 6 findings, all accepted. Fixes: (P1-1) added E-086-03 dependency on E-086-02 for shared file conflict, (P1-2) clarified proxy session fallback as detection+guidance only (endpoint log has no credential values), fixed `current-session` -> `current` symlink reference, (P2-1) AC-10 changed from ambiguous "offers to run" to "prints a suggestion", (P2-2) fixed test file path to `tests/test_proxy/test_credential_extractor.py`, (P2-3) removed E-085 login fallback claim (still DRAFT), (P3-1) replaced contradictory DoD in E-086-04 with docs-specific verification.
+- 2026-03-10: All-agent refinement review. Fixes: (CRIT) corrected POST /auth response field name from `token` to `data` in epic TN + E-086-01 (api-scout), (P1) removed unverified refresh-token-for-GET-endpoints claim (api-scout), (P1) expanded E-086-04 scope to include getting-started.md + bootstrap-guide.md and clarified mitmproxy-guide.md replacement (docs-writer), (P2) added Mac-host callout to E-086-03 AC-5 (ux-designer). Agents consulted: PM, baseball-coach, api-scout, data-engineer, software-engineer, docs-writer, ux-designer, claude-architect.
