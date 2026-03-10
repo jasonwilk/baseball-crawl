@@ -475,3 +475,230 @@ class TestCredsRefresh:
         assert result.exit_code != 0
         # The specific status code from the exception must appear in the output.
         assert "503" in result.output
+
+
+# ---------------------------------------------------------------------------
+# bb creds capture
+# ---------------------------------------------------------------------------
+
+
+_MOBILE_ENV = {
+    "GAMECHANGER_ACCESS_TOKEN_MOBILE": _make_fake_token(43200),  # ~12 hours
+    "GAMECHANGER_REFRESH_TOKEN_MOBILE": _make_fake_token(1209600),  # 14 days
+    "GAMECHANGER_DEVICE_ID_MOBILE": "device-mobile-id",
+    "GAMECHANGER_CLIENT_ID_MOBILE": "client-mobile-id",
+    "GAMECHANGER_BASE_URL": "https://api.gc.com",
+}
+
+
+def _make_api_result(exit_code: int = 0) -> "ApiCheckResult":
+    """Build a minimal ApiCheckResult for capture tests."""
+    from src.gamechanger.credentials import ApiCheckResult
+
+    if exit_code == 0:
+        return ApiCheckResult(exit_code=0, display_name="Jason Smith", message="200 OK, logged in as Jason Smith")
+    return ApiCheckResult(exit_code=1, display_name=None, message="Credentials expired -- refresh via proxy capture")
+
+
+class TestCredsCapture:
+    """Tests for ``bb creds capture --profile mobile``."""
+
+    def _invoke_with_creds(self, creds: dict, api_exit: int = 0):
+        """Invoke capture with mocked .env credentials and API result."""
+        with (
+            patch("src.cli.creds.dotenv_values", return_value=creds),
+            patch("src.cli.creds._run_api_check", return_value=_make_api_result(api_exit)),
+        ):
+            return runner.invoke(app, ["creds", "capture", "--profile", "mobile"])
+
+    def _invoke_no_creds(self, sessions_dir_path: str | None = None, has_ios: bool = False):
+        """Invoke capture with no mobile creds, optionally faking session dir scanning."""
+        from unittest.mock import MagicMock
+
+        def fake_find_most_recent(sessions_dir):
+            if sessions_dir_path is None:
+                return None
+            mock_session = MagicMock()
+            mock_session.name = "2026-03-09_062059"
+            return mock_session
+
+        with (
+            patch("src.cli.creds.dotenv_values", return_value={}),
+            patch("src.cli.creds._find_most_recent_session", side_effect=fake_find_most_recent),
+            patch("src.cli.creds._has_ios_traffic", return_value=has_ios),
+        ):
+            return runner.invoke(app, ["creds", "capture", "--profile", "mobile"])
+
+    # AC-1: checks .env for mobile credentials
+    def test_all_credentials_present_exits_0(self) -> None:
+        """All mobile creds present: exit 0."""
+        result = self._invoke_with_creds(_MOBILE_ENV)
+        assert result.exit_code == 0
+
+    def test_present_credentials_show_ok_indicators(self) -> None:
+        """AC-7: Each present key shows [OK] indicator."""
+        result = self._invoke_with_creds(_MOBILE_ENV)
+        assert "[OK]" in result.output or "OK" in result.output
+
+    def test_present_credentials_show_key_names(self) -> None:
+        """AC-1: Key names (not values) appear in output."""
+        result = self._invoke_with_creds(_MOBILE_ENV)
+        for key in ("GAMECHANGER_ACCESS_TOKEN_MOBILE", "GAMECHANGER_REFRESH_TOKEN_MOBILE",
+                    "GAMECHANGER_DEVICE_ID_MOBILE", "GAMECHANGER_CLIENT_ID_MOBILE"):
+            assert key in result.output
+
+    # AC-8: access token always [!!] yellow
+    def test_access_token_uses_yellow_indicator(self) -> None:
+        """AC-8: Mobile access token health uses [!!] (yellow) indicator."""
+        result = self._invoke_with_creds(_MOBILE_ENV)
+        assert "[!!]" in result.output or "!!" in result.output
+
+    def test_access_token_shows_hours_remaining(self) -> None:
+        """AC-2/AC-8: Output includes human-readable remaining lifetime."""
+        result = self._invoke_with_creds(_MOBILE_ENV)
+        assert "hour" in result.output or "minute" in result.output
+
+    # AC-3: expired access token
+    def test_expired_access_token_shows_yellow_not_green(self) -> None:
+        """AC-3/AC-8: Expired access token still uses [!!], not [XX]."""
+        expired_env = {**_MOBILE_ENV, "GAMECHANGER_ACCESS_TOKEN_MOBILE": _make_fake_token(-60)}
+        result = self._invoke_with_creds(expired_env)
+        assert "[!!]" in result.output or "!!" in result.output
+        assert "[XX]" not in result.output
+
+    # AC-9: no credential values in output
+    def test_no_credential_values_in_output(self) -> None:
+        """AC-9: Actual token/ID values never appear in output."""
+        result = self._invoke_with_creds(_MOBILE_ENV)
+        for value in ("device-mobile-id", "client-mobile-id"):
+            assert value not in result.output
+
+    # AC-2: API validation call
+    def test_api_validation_called_for_mobile_profile(self) -> None:
+        """AC-2: _run_api_check is called with 'mobile' profile."""
+        with (
+            patch("src.cli.creds.dotenv_values", return_value=_MOBILE_ENV),
+            patch("src.cli.creds._run_api_check", return_value=_make_api_result()) as mock_api,
+        ):
+            runner.invoke(app, ["creds", "capture", "--profile", "mobile"])
+        mock_api.assert_called_once_with("mobile")
+
+    def test_api_success_message_in_output(self) -> None:
+        """AC-2: API success message (200 OK) appears in output."""
+        result = self._invoke_with_creds(_MOBILE_ENV)
+        assert "200" in result.output or "OK" in result.output or "logged in" in result.output
+
+    # AC-10: suggest bb creds check
+    def test_suggests_bb_creds_check_after_success(self) -> None:
+        """AC-10: After successful capture, output suggests bb creds check."""
+        result = self._invoke_with_creds(_MOBILE_ENV)
+        assert "bb creds check" in result.output or "creds check" in result.output
+
+    # AC-4/AC-5: no proxy sessions
+    def test_no_sessions_prints_setup_guide(self) -> None:
+        """AC-5: No proxy sessions → inline numbered setup guide."""
+        result = self._invoke_no_creds(sessions_dir_path=None)
+        assert result.exit_code != 0
+        # Should include multiple numbered steps
+        assert "1." in result.output
+        assert "mitmproxy" in result.output.lower() or "proxy" in result.output.lower()
+
+    def test_no_sessions_mentions_mitmproxy_guide(self) -> None:
+        """AC-5: Setup guide references mitmproxy-guide.md."""
+        result = self._invoke_no_creds(sessions_dir_path=None)
+        assert "mitmproxy-guide.md" in result.output
+
+    # AC-6: sessions exist but no iOS traffic
+    def test_sessions_no_ios_traffic_suggests_force_quit(self) -> None:
+        """AC-6: Sessions with no iOS traffic → suggest force-quit and reopen."""
+        result = self._invoke_no_creds(sessions_dir_path="/some/session", has_ios=False)
+        assert result.exit_code != 0
+        output_lower = result.output.lower()
+        assert "force" in output_lower or "quit" in output_lower or "reopen" in output_lower
+
+    def test_sessions_with_ios_traffic_gives_ios_guidance(self) -> None:
+        """iOS traffic detected but no creds → guidance to force-quit app."""
+        result = self._invoke_no_creds(sessions_dir_path="/some/session", has_ios=True)
+        assert result.exit_code != 0
+        output_lower = result.output.lower()
+        assert "ios" in output_lower or "force" in output_lower
+
+    # Profile validation
+    def test_non_mobile_profile_exits_error(self) -> None:
+        """Only mobile profile is supported by capture."""
+        result = runner.invoke(app, ["creds", "capture", "--profile", "web"])
+        assert result.exit_code != 0
+        assert "mobile" in result.output.lower()
+
+    # Partial credentials
+    def test_partial_creds_still_shows_result(self) -> None:
+        """Partial mobile creds (e.g. only access + refresh) still validate and show output."""
+        partial_env = {
+            "GAMECHANGER_ACCESS_TOKEN_MOBILE": _MOBILE_ENV["GAMECHANGER_ACCESS_TOKEN_MOBILE"],
+            "GAMECHANGER_REFRESH_TOKEN_MOBILE": _MOBILE_ENV["GAMECHANGER_REFRESH_TOKEN_MOBILE"],
+        }
+        result = self._invoke_with_creds(partial_env)
+        assert result.exit_code == 0
+        # Missing keys shown with dim indicator
+        assert "GAMECHANGER_DEVICE_ID_MOBILE" in result.output
+        assert "GAMECHANGER_CLIENT_ID_MOBILE" in result.output
+
+
+class TestCredsCaptureSessionScanning:
+    """Unit tests for the proxy session scanning helpers."""
+
+    def test_find_most_recent_session_returns_latest(self, tmp_path: Path) -> None:
+        """_find_most_recent_session returns the directory with the latest timestamp name."""
+        from src.cli.creds import _find_most_recent_session
+
+        (tmp_path / "2026-03-06_204244").mkdir()
+        (tmp_path / "2026-03-09_062059").mkdir()
+        (tmp_path / "2026-03-07_171705").mkdir()
+        result = _find_most_recent_session(tmp_path)
+        assert result is not None
+        assert result.name == "2026-03-09_062059"
+
+    def test_find_most_recent_session_empty_dir_returns_none(self, tmp_path: Path) -> None:
+        """Empty sessions directory returns None."""
+        from src.cli.creds import _find_most_recent_session
+
+        result = _find_most_recent_session(tmp_path)
+        assert result is None
+
+    def test_find_most_recent_session_nonexistent_dir_returns_none(self, tmp_path: Path) -> None:
+        """Non-existent sessions directory returns None."""
+        from src.cli.creds import _find_most_recent_session
+
+        result = _find_most_recent_session(tmp_path / "nonexistent")
+        assert result is None
+
+    def test_has_ios_traffic_detects_ios_source(self, tmp_path: Path) -> None:
+        """_has_ios_traffic returns True when any entry has source='ios'."""
+        import json as _json
+        from src.cli.creds import _has_ios_traffic
+
+        log = tmp_path / "endpoint-log.jsonl"
+        log.write_text(
+            _json.dumps({"method": "GET", "path": "/me/teams", "source": "web"}) + "\n"
+            + _json.dumps({"method": "POST", "path": "/auth", "source": "ios"}) + "\n",
+            encoding="utf-8",
+        )
+        assert _has_ios_traffic(tmp_path) is True
+
+    def test_has_ios_traffic_returns_false_for_web_only(self, tmp_path: Path) -> None:
+        """_has_ios_traffic returns False when all entries are web source."""
+        import json as _json
+        from src.cli.creds import _has_ios_traffic
+
+        log = tmp_path / "endpoint-log.jsonl"
+        log.write_text(
+            _json.dumps({"method": "GET", "path": "/me/teams", "source": "web"}) + "\n",
+            encoding="utf-8",
+        )
+        assert _has_ios_traffic(tmp_path) is False
+
+    def test_has_ios_traffic_returns_false_when_no_log(self, tmp_path: Path) -> None:
+        """_has_ios_traffic returns False when endpoint-log.jsonl doesn't exist."""
+        from src.cli.creds import _has_ios_traffic
+
+        assert _has_ios_traffic(tmp_path) is False

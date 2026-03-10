@@ -19,6 +19,7 @@ from rich.text import Text
 from src.gamechanger.credentials import (
     ProfileCheckResult,
     _ALL_PROFILES,
+    _run_api_check,
     check_credentials,
     check_profile_detailed,
 )
@@ -38,6 +39,17 @@ _ENV_FILE = _PROJECT_ROOT / ".env"
 
 # Test endpoint displayed in the API health section (AC-6)
 _ME_USER_ENDPOINT = "GET /me/user"
+
+# Mobile credential keys written by the proxy addon during capture sessions.
+_MOBILE_CRED_KEYS: tuple[str, ...] = (
+    "GAMECHANGER_ACCESS_TOKEN_MOBILE",
+    "GAMECHANGER_REFRESH_TOKEN_MOBILE",
+    "GAMECHANGER_DEVICE_ID_MOBILE",
+    "GAMECHANGER_CLIENT_ID_MOBILE",
+)
+
+# Proxy sessions directory -- scan this to detect recent iOS traffic.
+_SESSIONS_DIR = _PROJECT_ROOT / "proxy" / "data" / "sessions"
 
 
 @app.command(name="import")
@@ -348,3 +360,167 @@ def check(
         _console.print(Panel(_render_profile_report(r), title=f"Profile: {r.profile}", expand=False))
     any_valid = any(r.exit_code == 0 for r in results)
     raise typer.Exit(code=0 if any_valid else 1)
+
+
+# ---------------------------------------------------------------------------
+# bb creds capture
+# ---------------------------------------------------------------------------
+
+
+def _find_most_recent_session(sessions_dir: Path) -> Path | None:
+    """Return the most recent proxy session directory, or None if none exist."""
+    if not sessions_dir.is_dir():
+        return None
+    sessions = sorted(
+        [d for d in sessions_dir.iterdir() if d.is_dir()],
+        key=lambda d: d.name,
+        reverse=True,
+    )
+    return sessions[0] if sessions else None
+
+
+def _has_ios_traffic(session_dir: Path) -> bool:
+    """Return True if the endpoint log contains any iOS-sourced requests."""
+    log_path = session_dir / "endpoint-log.jsonl"
+    if not log_path.exists():
+        return False
+    try:
+        with log_path.open(encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                    if entry.get("source") == "ios":
+                        return True
+                except json.JSONDecodeError:
+                    continue
+    except OSError:
+        pass
+    return False
+
+
+def _append_access_token_health(t: Text, access_token: str) -> None:
+    """Append access token lifetime row -- always [!!] yellow for mobile (AC-8)."""
+    key = "GAMECHANGER_ACCESS_TOKEN_MOBILE"
+    if not access_token:
+        _append_row(t, "red", f"{key}  (missing)")
+        return
+    exp = _decode_jwt_exp(access_token)
+    now = int(time.time())
+    if exp is None:
+        _append_row(t, "yellow", f"{key}  -- present but could not be decoded")
+        return
+    remaining = exp - now
+    if remaining <= 0:
+        _append_row(t, "yellow", f"{key}  -- expired  [recapture needed]")
+        return
+    hours = remaining // 3600
+    mins = (remaining % 3600) // 60
+    lifetime = f"~{hours} hour(s)" if remaining >= 3600 else f"~{mins} minute(s)"
+    _append_row(t, "yellow", f"{key}  -- valid for {lifetime}  [no auto-refresh]")
+
+
+def _print_capture_result(creds: dict[str, str], profile: str) -> None:
+    """Display capture success: credential presence, API validation, token health."""
+    t = Text()
+    t.append("Captured Credentials\n", style="bold")
+    for key in _MOBILE_CRED_KEYS:
+        if key in creds:
+            _append_row(t, "green", key)
+        else:
+            _append_row(t, "dim", f"{key}  (not captured)")
+    t.append("\n")
+
+    t.append("API Validation  ", style="bold")
+    t.append("(GET /me/user)\n", style="dim")
+    api = _run_api_check(profile)
+    api_style = "green" if api.exit_code == 0 else ("dim" if api.exit_code == 2 else "red")
+    _append_row(t, api_style, api.message)
+    t.append("\n")
+
+    t.append("Access Token Health\n", style="bold")
+    _append_access_token_health(t, creds.get("GAMECHANGER_ACCESS_TOKEN_MOBILE", ""))
+
+    _console.print(
+        Panel(Text(t.plain.rstrip("\n"), spans=t._spans), title="Profile: mobile", expand=False)
+    )
+    _console.print(
+        "Next: run [bold]bb creds check --profile mobile[/bold] for a full diagnostic."
+    )
+
+
+def _print_setup_guide() -> None:
+    """Print the inline numbered setup guide when no proxy sessions exist."""
+    _console.print(
+        "[dim][--][/dim]  No proxy sessions found.\n"
+        "\n"
+        "  To capture mobile credentials:\n"
+        "  1. Start mitmproxy (run on Mac host -- not from devcontainer):\n"
+        "         cd proxy && ./start.sh\n"
+        "  2. Configure your iPhone proxy settings to point to this machine.\n"
+        "  3. Force-quit the GameChanger app, then reopen it\n"
+        "         (the app sends POST /auth on cold start, not resume).\n"
+        "  4. Stop the proxy:  cd proxy && ./stop.sh\n"
+        "  5. Re-run: bb creds capture --profile mobile\n"
+        "\n"
+        "  See docs/admin/mitmproxy-guide.md for detailed setup instructions."
+    )
+
+
+def _print_capture_guidance(sessions_dir: Path) -> None:
+    """Guide operator when no mobile credentials are present in .env."""
+    _console.print("[yellow][!!][/yellow]  No mobile credentials found in .env.\n")
+
+    session = _find_most_recent_session(sessions_dir)
+    if session is None:
+        _print_setup_guide()
+        return
+
+    _console.print(f"Most recent proxy session: [dim]{session.name}[/dim]")
+    if _has_ios_traffic(session):
+        _console.print(
+            "[yellow][!!][/yellow]  iOS traffic was detected but credentials were not "
+            "written to .env.\n"
+            "      The app may have resumed without triggering POST /auth. Try:\n"
+            "      1. Force-quit the GameChanger app on your iPhone.\n"
+            "      2. Reopen it while the proxy is running.\n"
+            "      3. Re-run: bb creds capture --profile mobile"
+        )
+    else:
+        _console.print(
+            "[yellow][!!][/yellow]  No iOS traffic found in the most recent proxy session.\n"
+            "      Verify your iPhone is configured to use this proxy, then:\n"
+            "      1. Force-quit the GameChanger app on your iPhone.\n"
+            "      2. Reopen it while the proxy is running.\n"
+            "      3. Re-run: bb creds capture --profile mobile"
+        )
+
+
+@app.command()
+def capture(
+    profile: str = typer.Option(
+        "mobile",
+        "--profile",
+        metavar="PROFILE",
+        help="Credential profile to capture: mobile (default).",
+    ),
+) -> None:
+    """Scan .env for proxy-captured credentials and validate them."""
+    if profile != "mobile":
+        _err_console.print(
+            "[red]Error:[/red] bb creds capture currently supports --profile mobile only.\n"
+            "For web credentials, use: bb creds import"
+        )
+        raise typer.Exit(code=1)
+
+    env = dotenv_values(str(_ENV_FILE))
+    creds = {k: env[k] for k in _MOBILE_CRED_KEYS if env.get(k)}
+
+    if creds:
+        _print_capture_result(creds, profile)
+        raise typer.Exit(code=0)
+
+    _print_capture_guidance(_SESSIONS_DIR)
+    raise typer.Exit(code=1)
