@@ -566,6 +566,24 @@ class TestCredsCapture:
         assert "[!!]" in result.output or "!!" in result.output
         assert "[XX]" not in result.output
 
+    def test_expired_access_shows_refresh_token_days(self) -> None:
+        """AC-3: When access token expired, output shows refresh token remaining days."""
+        expired_env = {
+            **_MOBILE_ENV,
+            "GAMECHANGER_ACCESS_TOKEN_MOBILE": _make_fake_token(-60),  # expired
+            "GAMECHANGER_REFRESH_TOKEN_MOBILE": _make_fake_token(14 * 86400),  # 14 days
+        }
+        result = self._invoke_with_creds(expired_env)
+        assert "GAMECHANGER_REFRESH_TOKEN_MOBILE" in result.output
+        # Should mention days remaining
+        assert "day" in result.output
+
+    def test_valid_access_does_not_show_refresh_lifetime(self) -> None:
+        """Refresh token lifetime row only appears when access token is expired."""
+        result = self._invoke_with_creds(_MOBILE_ENV)
+        # Access token is valid (~12h), so no "recapture to get fresh access token" line
+        assert "recapture to get fresh access token" not in result.output
+
     # AC-9: no credential values in output
     def test_no_credential_values_in_output(self) -> None:
         """AC-9: Actual token/ID values never appear in output."""

@@ -401,6 +401,27 @@ def _has_ios_traffic(session_dir: Path) -> bool:
     return False
 
 
+def _append_refresh_token_row(t: Text, refresh_token: str) -> None:
+    """Append refresh token remaining lifetime row (shown when access token is expired).
+
+    Gives the operator an honest picture: how long the refresh token is still
+    valid and a clear message that recapture is needed to get a fresh access token.
+    """
+    if not refresh_token:
+        return
+    exp = _decode_jwt_exp(refresh_token)
+    if exp is None:
+        return
+    now = int(time.time())
+    remaining = exp - now
+    key = "GAMECHANGER_REFRESH_TOKEN_MOBILE"
+    if remaining <= 0:
+        _append_row(t, "yellow", f"{key}  -- expired  [recapture needed]")
+    else:
+        days = max(remaining // 86400, 1)
+        _append_row(t, "yellow", f"{key}  -- valid for ~{days} day(s)  [recapture to get fresh access token]")
+
+
 def _append_access_token_health(t: Text, access_token: str) -> None:
     """Append access token lifetime row -- always [!!] yellow for mobile (AC-8)."""
     key = "GAMECHANGER_ACCESS_TOKEN_MOBILE"
@@ -441,7 +462,12 @@ def _print_capture_result(creds: dict[str, str], profile: str) -> None:
     t.append("\n")
 
     t.append("Access Token Health\n", style="bold")
-    _append_access_token_health(t, creds.get("GAMECHANGER_ACCESS_TOKEN_MOBILE", ""))
+    access_token = creds.get("GAMECHANGER_ACCESS_TOKEN_MOBILE", "")
+    _append_access_token_health(t, access_token)
+    # AC-3: when access token is expired, show refresh token remaining lifetime.
+    access_exp = _decode_jwt_exp(access_token) if access_token else None
+    if access_exp is not None and access_exp < int(time.time()):
+        _append_refresh_token_row(t, creds.get("GAMECHANGER_REFRESH_TOKEN_MOBILE", ""))
 
     _console.print(
         Panel(Text(t.plain.rstrip("\n"), spans=t._spans), title="Profile: mobile", expand=False)
