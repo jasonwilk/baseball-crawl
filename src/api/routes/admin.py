@@ -1139,6 +1139,25 @@ async def _fetch_team_profile(
         )
 
 
+async def _get_duplicate_name_for_link(
+    link: dict, public_id: str, link_id: int
+) -> str | None:
+    """Look up any existing opponent link that already uses the given public_id.
+
+    Args:
+        link: The opponent link row dict (must contain ``our_team_id``).
+        public_id: The GameChanger public_id slug to check for duplicates.
+        link_id: The current link's primary key, excluded from the duplicate search.
+
+    Returns:
+        The name of the duplicate opponent if one exists, otherwise None.
+    """
+    our_team_id = link["our_team_id"]
+    return await run_in_threadpool(
+        get_duplicate_opponent_name, public_id, our_team_id, link_id
+    )
+
+
 @router.get("/opponents/{link_id}/connect/confirm", response_model=None)
 async def connect_opponent_confirm(request: Request, link_id: int) -> Response:
     """Render the confirmation page for a manual opponent link.
@@ -1171,10 +1190,7 @@ async def connect_opponent_confirm(request: Request, link_id: int) -> Response:
             "This URL belongs to a Lincoln program team. You cannot link an opponent to an owned team.",
         )
 
-    our_team_id = link["our_team_id"]
-    duplicate_name = await run_in_threadpool(
-        get_duplicate_opponent_name, public_id, our_team_id, link_id
-    )
+    duplicate_name = await _get_duplicate_name_for_link(link, public_id, link_id)
     profile, err = await _fetch_team_profile(request, link, guard, public_id)
     if err is not None:
         return err
