@@ -315,6 +315,150 @@ class TestCredsCheck:
 
 
 # ---------------------------------------------------------------------------
+# Client Key Validation rendering tests
+# ---------------------------------------------------------------------------
+
+
+def _make_profile_result_with_client_key(
+    status: str,
+    message: str,
+    skew_seconds: int | None = None,
+) -> "ProfileCheckResult":
+    """Build a ProfileCheckResult with a specific client_key_result for rendering tests."""
+    import time
+
+    from src.gamechanger.credentials import (
+        ApiCheckResult,
+        ClientKeyCheckResult,
+        CredentialPresence,
+        ProfileCheckResult,
+        TokenHealth,
+    )
+    from src.http.proxy_check import ProxyCheckOutcome, ProxyCheckResult
+
+    return ProfileCheckResult(
+        profile="web",
+        presence=CredentialPresence(keys_present=["GAMECHANGER_BASE_URL"], keys_missing=[]),
+        token_health=TokenHealth(exp=int(time.time()) + 86400, is_expired=False),
+        api_result=ApiCheckResult(exit_code=0, display_name="Coach", message="200 OK"),
+        proxy_result=ProxyCheckResult(profile="web", outcome=ProxyCheckOutcome.NOT_CONFIGURED),
+        exit_code=0,
+        client_key_result=ClientKeyCheckResult(
+            status=status, message=message, skew_seconds=skew_seconds
+        ),
+    )
+
+
+class TestClientKeyRendering:
+    """Tests for _render_client_key_section output in bb creds check."""
+
+    def _invoke_with_key_result(self, status: str, message: str, skew_seconds: int | None = None):
+        result_obj = _make_profile_result_with_client_key(status, message, skew_seconds)
+        with patch("src.cli.creds.check_profile_detailed", return_value=result_obj):
+            return runner.invoke(app, ["creds", "check", "--profile", "web"])
+
+    def test_valid_key_shows_ok_indicator(self) -> None:
+        """AC-5: valid status → [OK] indicator."""
+        result = self._invoke_with_key_result(
+            "valid", "Client key verified (POST /auth client-auth succeeded)"
+        )
+        assert "[OK]" in result.output or "OK" in result.output
+        assert "verified" in result.output.lower() or "succeeded" in result.output.lower()
+
+    def test_invalid_key_shows_xx_indicator(self) -> None:
+        """AC-6: invalid status → [XX] indicator."""
+        result = self._invoke_with_key_result(
+            "invalid", "Client key rejected -- update via: bb creds extract-key"
+        )
+        assert "[XX]" in result.output or "XX" in result.output
+        assert "extract-key" in result.output
+
+    def test_clock_skew_shows_warning_indicator(self) -> None:
+        """AC-7: clock_skew status → [!!] indicator."""
+        result = self._invoke_with_key_result(
+            "clock_skew",
+            "Possible clock skew (95 seconds difference) -- check system clock",
+            skew_seconds=95,
+        )
+        assert "[!!]" in result.output or "!!" in result.output
+        assert "clock" in result.output.lower() or "skew" in result.output.lower()
+
+    def test_error_shows_warning_indicator(self) -> None:
+        """AC-9a: error status → [!!] indicator (cannot confirm key is bad)."""
+        result = self._invoke_with_key_result(
+            "error", "Client key validation failed (network error: connection refused)"
+        )
+        assert "[!!]" in result.output or "!!" in result.output
+        assert "network" in result.output.lower() or "error" in result.output.lower()
+
+    def test_skipped_missing_key_shows_dim_indicator(self) -> None:
+        """AC-8: skipped status (missing key) → [--] indicator."""
+        result = self._invoke_with_key_result(
+            "skipped", "Client key not configured (GAMECHANGER_CLIENT_KEY_WEB)"
+        )
+        assert "[--]" in result.output or "--" in result.output
+        assert "GAMECHANGER_CLIENT_KEY_WEB" in result.output
+
+    def test_skipped_mobile_shows_dim_indicator(self) -> None:
+        """AC-9: skipped status (mobile) → [--] indicator."""
+        from src.gamechanger.credentials import (
+            ApiCheckResult,
+            ClientKeyCheckResult,
+            CredentialPresence,
+            ProfileCheckResult,
+            TokenHealth,
+        )
+        from src.http.proxy_check import ProxyCheckOutcome, ProxyCheckResult
+        import time
+
+        result_obj = ProfileCheckResult(
+            profile="mobile",
+            presence=CredentialPresence(keys_present=[], keys_missing=[]),
+            token_health=TokenHealth(exp=int(time.time()) + 86400, is_expired=False),
+            api_result=ApiCheckResult(exit_code=0, display_name=None, message="ok"),
+            proxy_result=ProxyCheckResult(profile="mobile", outcome=ProxyCheckOutcome.NOT_CONFIGURED),
+            exit_code=0,
+            client_key_result=ClientKeyCheckResult(
+                status="skipped", message="Client key not available for mobile profile"
+            ),
+        )
+        with patch("src.cli.creds.check_profile_detailed", return_value=result_obj):
+            result = runner.invoke(app, ["creds", "check", "--profile", "mobile"])
+        assert "[--]" in result.output or "--" in result.output
+        assert "mobile" in result.output.lower()
+
+    def test_none_client_key_result_shows_dim_indicator(self) -> None:
+        """AC-15: client_key_result=None → [--] dim indicator (legacy result)."""
+        result_obj = _make_profile_result()  # client_key_result defaults to None
+        with patch("src.cli.creds.check_profile_detailed", return_value=result_obj):
+            result = runner.invoke(app, ["creds", "check", "--profile", "web"])
+        assert "[--]" in result.output or "--" in result.output
+
+    def test_client_key_section_heading_present(self) -> None:
+        """AC-4: 'Client Key Validation' section heading appears in output."""
+        result = self._invoke_with_key_result(
+            "valid", "Client key verified (POST /auth client-auth succeeded)"
+        )
+        assert "Client Key" in result.output
+
+    def test_client_key_section_between_token_and_api(self) -> None:
+        """AC-4: Client Key Validation section appears between Refresh Token and API Health."""
+        result = self._invoke_with_key_result(
+            "valid", "Client key verified"
+        )
+        output = result.output
+        token_pos = output.find("Refresh Token")
+        key_pos = output.find("Client Key")
+        api_pos = output.find("API Health")
+        assert token_pos != -1, "Refresh Token section not found"
+        assert key_pos != -1, "Client Key section not found"
+        assert api_pos != -1, "API Health section not found"
+        assert token_pos < key_pos < api_pos, (
+            "Client Key section must appear between Refresh Token and API Health"
+        )
+
+
+# ---------------------------------------------------------------------------
 # bb creds --help
 # ---------------------------------------------------------------------------
 
@@ -720,3 +864,263 @@ class TestCredsCaptureSessionScanning:
         from src.cli.creds import _has_ios_traffic
 
         assert _has_ios_traffic(tmp_path) is False
+
+
+# ---------------------------------------------------------------------------
+# bb creds extract-key
+# ---------------------------------------------------------------------------
+
+_FAKE_CLIENT_ID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+_FAKE_CLIENT_KEY = "abcdefghijklmnopqrstuvwxyz01234567890123456="
+
+
+def _make_extracted_key(
+    client_id: str = _FAKE_CLIENT_ID,
+    client_key: str = _FAKE_CLIENT_KEY,
+):
+    """Build a minimal ExtractedKey for CLI tests."""
+    from src.gamechanger.key_extractor import ExtractedKey
+
+    return ExtractedKey(
+        client_id=client_id,
+        client_key=client_key,
+        bundle_url="https://web.gc.com/static/js/index.abc123.js",
+    )
+
+
+_CURRENT_ENV_MATCHING = {
+    "GAMECHANGER_CLIENT_ID_WEB": _FAKE_CLIENT_ID,
+    "GAMECHANGER_CLIENT_KEY_WEB": _FAKE_CLIENT_KEY,
+}
+_CURRENT_ENV_DIFFERENT = {
+    "GAMECHANGER_CLIENT_ID_WEB": "old-client-id",
+    "GAMECHANGER_CLIENT_KEY_WEB": "old-client-key-value-that-does-not-match==",
+}
+
+
+class TestCredsExtractKey:
+    """Tests for ``bb creds extract-key``."""
+
+    def _invoke(
+        self,
+        args: list[str],
+        extracted=None,
+        side_effect=None,
+        current_env: dict | None = None,
+        write_ok: bool = True,
+    ):
+        extracted = extracted or _make_extracted_key()
+        current_env = current_env if current_env is not None else _CURRENT_ENV_MATCHING
+
+        patches = [
+            patch(
+                "src.cli.creds.extract_client_key",
+                return_value=extracted if side_effect is None else None,
+                side_effect=side_effect,
+            ),
+            patch("src.cli.creds.dotenv_values", return_value=current_env),
+        ]
+        if not write_ok:
+            patches.append(
+                patch(
+                    "src.cli.creds.atomic_merge_env_file",
+                    side_effect=OSError("disk full"),
+                )
+            )
+
+        ctx = [p.__enter__() for p in patches]
+        try:
+            result = runner.invoke(app, args)
+        finally:
+            for i, p in enumerate(reversed(patches)):
+                p.__exit__(None, None, None)
+
+        return result
+
+    # ---- helper that uses context managers properly ----
+
+    def _run(
+        self,
+        args: list[str],
+        extracted=None,
+        side_effect=None,
+        current_env: dict | None = None,
+    ):
+        """Run via context managers (clean approach)."""
+        extracted = extracted or _make_extracted_key()
+        current_env = current_env if current_env is not None else _CURRENT_ENV_MATCHING
+
+        with (
+            patch(
+                "src.cli.creds.extract_client_key",
+                return_value=extracted if side_effect is None else None,
+                side_effect=side_effect,
+            ),
+            patch("src.cli.creds.dotenv_values", return_value=current_env),
+            patch("src.cli.creds.atomic_merge_env_file", return_value=current_env) as mock_write,
+        ):
+            result = runner.invoke(app, args)
+        return result, mock_write
+
+    # AC-4a: dry-run banner
+    def test_dry_run_shows_banner(self) -> None:
+        """Default (no --apply) shows dry-run banner."""
+        result, _ = self._run(["creds", "extract-key"])
+        assert "dry run" in result.output.lower() or "Dry run" in result.output
+
+    # AC-2: dry run does not write .env
+    def test_dry_run_does_not_write_env(self) -> None:
+        """Default mode: atomic_merge_env_file is NOT called."""
+        result, mock_write = self._run(
+            ["creds", "extract-key"],
+            current_env=_CURRENT_ENV_DIFFERENT,
+        )
+        assert result.exit_code == 0
+        mock_write.assert_not_called()
+
+    # AC-4: unchanged key
+    def test_key_unchanged_shows_no_update_needed(self) -> None:
+        """When key matches .env, output says key is current."""
+        result, _ = self._run(
+            ["creds", "extract-key"],
+            current_env=_CURRENT_ENV_MATCHING,
+        )
+        assert result.exit_code == 0
+        assert "no update needed" in result.output.lower() or "current" in result.output.lower()
+
+    # AC-4: changed key
+    def test_key_changed_shows_changed(self) -> None:
+        """When key differs from .env, output says key changed."""
+        result, _ = self._run(
+            ["creds", "extract-key"],
+            current_env=_CURRENT_ENV_DIFFERENT,
+        )
+        assert result.exit_code == 0
+        assert "[changed]" in result.output or "changed" in result.output.lower()
+
+    # AC-4: client ID display
+    def test_unchanged_client_id_shows_unchanged(self) -> None:
+        """Unchanged client_id shows '[unchanged]' in output."""
+        same_id_env = {
+            "GAMECHANGER_CLIENT_ID_WEB": _FAKE_CLIENT_ID,
+            "GAMECHANGER_CLIENT_KEY_WEB": "different-key-value-so-we-keep-going==",
+        }
+        result, _ = self._run(
+            ["creds", "extract-key"],
+            current_env=same_id_env,
+        )
+        assert "unchanged" in result.output.lower()
+
+    def test_changed_client_id_shows_old_and_new(self) -> None:
+        """Changed client_id shows old -> new in output."""
+        result, _ = self._run(
+            ["creds", "extract-key"],
+            current_env=_CURRENT_ENV_DIFFERENT,
+        )
+        assert "->" in result.output
+
+    # AC-3: --apply writes .env
+    def test_apply_writes_env(self) -> None:
+        """--apply calls atomic_merge_env_file with updated keys."""
+        result, mock_write = self._run(
+            ["creds", "extract-key", "--apply"],
+            current_env=_CURRENT_ENV_DIFFERENT,
+        )
+        assert result.exit_code == 0
+        mock_write.assert_called_once()
+        call_args = mock_write.call_args[0]
+        new_values = call_args[1]
+        assert "GAMECHANGER_CLIENT_KEY_WEB" in new_values
+        assert "GAMECHANGER_CLIENT_ID_WEB" in new_values
+
+    # AC-4b: after --apply shows confirmation and next steps
+    def test_apply_shows_confirmation(self) -> None:
+        """After --apply, output includes confirmation message."""
+        result, _ = self._run(
+            ["creds", "extract-key", "--apply"],
+            current_env=_CURRENT_ENV_DIFFERENT,
+        )
+        assert result.exit_code == 0
+        output_lower = result.output.lower()
+        assert "updated" in output_lower
+        assert "gamechanger_client_key_web" in output_lower
+
+    def test_apply_shows_next_steps(self) -> None:
+        """After --apply, output includes next-step guidance."""
+        result, _ = self._run(
+            ["creds", "extract-key", "--apply"],
+            current_env=_CURRENT_ENV_DIFFERENT,
+        )
+        assert result.exit_code == 0
+        assert "creds check" in result.output or "bb creds" in result.output
+        assert "creds refresh" in result.output or "refresh" in result.output
+
+    # AC-5: HTML fetch failure
+    def test_html_fetch_failure_exits_1(self) -> None:
+        """Network error from extract_client_key exits with code 1."""
+        from src.gamechanger.key_extractor import KeyExtractionError
+
+        result, _ = self._run(
+            ["creds", "extract-key"],
+            side_effect=KeyExtractionError("Network error fetching https://web.gc.com: refused"),
+        )
+        assert result.exit_code == 1
+        assert "Error" in result.output or "error" in result.output.lower()
+
+    # AC-6: bundle URL not found
+    def test_bundle_url_not_found_exits_1(self) -> None:
+        """KeyExtractionError for missing bundle URL exits 1."""
+        from src.gamechanger.key_extractor import KeyExtractionError
+
+        result, _ = self._run(
+            ["creds", "extract-key"],
+            side_effect=KeyExtractionError("Could not find JS bundle URL"),
+        )
+        assert result.exit_code == 1
+
+    # AC-7: EDEN_AUTH_CLIENT_KEY not found
+    def test_eden_key_not_found_exits_1(self) -> None:
+        """KeyExtractionError for missing EDEN_AUTH_CLIENT_KEY exits 1."""
+        from src.gamechanger.key_extractor import KeyExtractionError
+
+        result, _ = self._run(
+            ["creds", "extract-key"],
+            side_effect=KeyExtractionError("EDEN_AUTH_CLIENT_KEY not found in the JS bundle"),
+        )
+        assert result.exit_code == 1
+        assert "EDEN_AUTH_CLIENT_KEY" in result.output
+
+    # AC-12: key value never printed
+    def test_client_key_value_never_printed(self) -> None:
+        """The actual client_key value NEVER appears in output (AC-12)."""
+        result, _ = self._run(
+            ["creds", "extract-key"],
+            current_env=_CURRENT_ENV_DIFFERENT,
+        )
+        assert _FAKE_CLIENT_KEY not in result.output
+
+    def test_client_key_value_never_printed_on_apply(self) -> None:
+        """The actual client_key value NEVER appears in output even with --apply."""
+        result, _ = self._run(
+            ["creds", "extract-key", "--apply"],
+            current_env=_CURRENT_ENV_DIFFERENT,
+        )
+        assert _FAKE_CLIENT_KEY not in result.output
+
+    # OSError path: _write_env_update fails
+    def test_apply_oserror_exits_1(self) -> None:
+        """When atomic_merge_env_file raises OSError, exit code is 1 with error message."""
+        result = self._invoke(
+            ["creds", "extract-key", "--apply"],
+            current_env=_CURRENT_ENV_DIFFERENT,
+            write_ok=False,
+        )
+        assert result.exit_code == 1
+        assert "disk full" in result.output.lower() or "error" in result.output.lower()
+
+    # help text
+    def test_extract_key_in_help(self) -> None:
+        """``bb creds --help`` lists extract-key sub-command."""
+        result = runner.invoke(app, ["creds", "--help"])
+        assert result.exit_code == 0
+        assert "extract-key" in result.output

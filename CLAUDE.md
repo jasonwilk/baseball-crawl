@@ -132,6 +132,7 @@ The `bb` CLI is the primary operator interface. Run `bb --help` to see all avail
 - `bb creds capture` -- extract and validate mobile credentials from proxy session (`--profile mobile`)
 - `bb creds import` -- import GameChanger credentials from curl command (`--curl`, `--file`, `--profile web|mobile`)
 - `bb creds refresh` -- programmatic token refresh via POST /auth (`--profile web|mobile`)
+- `bb creds extract-key` -- fetch current client key from GC JS bundle and update `.env` (`--apply` to write; dry-run by default)
 - `bb data sync` -- full bootstrap: validate credentials, crawl, and load (`--check-only`, `--profile`, `--dry-run`)
 - `bb data crawl` -- run data crawlers (`--dry-run`, `--crawler NAME`, `--profile`, `--source db|yaml`)
 - `bb data load` -- run data loaders (`--dry-run`, `--loader NAME`, `--source db|yaml`)

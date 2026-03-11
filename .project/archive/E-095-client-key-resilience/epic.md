@@ -1,7 +1,7 @@
 # E-095: Client Key Credential Resilience
 
 ## Status
-`READY`
+`COMPLETED`
 
 ## Overview
 When GameChanger rotates the client key embedded in their JavaScript bundle, all authentication silently fails -- refresh, login fallback, and every POST /auth call return bare HTTP 401 with no indication that the HMAC signing key is wrong. This epic adds active client key validation to diagnostics, improves error guidance to mention the client key as a likely cause, documents the extraction process with the exact JS bundle variable name (`EDEN_AUTH_CLIENT_KEY`), and adds an automated extraction command (`bb creds extract-key`) that fetches the current key from the publicly accessible GC JS bundle.
@@ -42,10 +42,10 @@ The actual fix was simple: download the GC JS bundle (publicly accessible, no au
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-095-01 | Improve AuthSigningError messages to mention client key | TODO | None | - |
-| E-095-02 | Add client key validation to bb creds check | TODO | None | - |
-| E-095-03 | Document client key extraction process | TODO | E-095-02, E-095-04 | - |
-| E-095-04 | Automated client key extraction command | TODO | None | - |
+| E-095-01 | Improve AuthSigningError messages to mention client key | DONE | None | SE-01 |
+| E-095-02 | Add client key validation to bb creds check | DONE | None | SE-02 |
+| E-095-03 | Document client key extraction process | DONE | E-095-02, E-095-04 | api-scout |
+| E-095-04 | Automated client key extraction command | DONE | None | SE-04 |
 
 ## Dispatch Team
 - software-engineer
@@ -114,3 +114,6 @@ None.
 - 2026-03-11: Created. Prompted by operator losing crawl capability due to stale client key with no diagnostic path to identify the root cause.
 - 2026-03-11: Refined with complete root cause findings. Expanded scope to include automated client key extraction (E-095-04). Updated HTTP status code understanding: stale key returns 401 (not 400). Added EDEN_AUTH_CLIENT_KEY details and JS bundle extraction strategy. Reordered stories: E-095-03 now depends on E-095-04.
 - 2026-03-11: Specialist refinement (api-scout, SE, UXD). Key changes: (1) Clock skew detection uses HTTP `Date` header, not `gc-timestamp` (unconfirmed in responses). (2) E-095-01 error message ordering revised -- client key check before proxy recapture advice. (3) E-095-04 gains dry-run banner, post-apply confirmation, and next-step prompt ACs. (4) E-095-02 section renamed "Client Key Validation"; ProfileCheckResult field needs default value; absent Date header treated as stale key. (5) E-095-03 adds notes about no previousSignature and fresh HTML fetch requirement.
+- 2026-03-11: COMPLETED. All 4 stories implemented and reviewed. Key artifacts: improved error messages in token_manager.py and cli/creds.py (E-095-01), client key validation via step-2 client-auth call in credentials.py (E-095-02), automated key extraction command `bb creds extract-key` with key_extractor.py module (E-095-04), and Client Key Extraction documentation in docs/api/auth.md (E-095-03). Code review findings: E-095-02 and E-095-04 both required function length refactoring (resolved in round 2). SHOULD FIX from E-095-04 review: untested OSError path in `--apply` write-failure handler.
+- 2026-03-11: Documentation assessment: Trigger fired (new feature). Primary docs handled by E-095-03 (docs/api/auth.md). CLAUDE.md updated with `bb creds extract-key` command. Minor follow-up: admin docs (docs/admin/operations.md) could mention extract-key in troubleshooting.
+- 2026-03-11: Context-layer assessment: (1) New convention? No. (2) Architectural decision? No. (3) Footgun discovered? Yes -- stale client key returns HTTP 401 indistinguishable from expired refresh token; documented in docs/api/auth.md. (4) Agent behavior change? No. (5) Domain knowledge? Yes -- EDEN_AUTH_CLIENT_KEY variable, composite format, JS bundle extraction; documented in docs/api/auth.md. (6) New CLI command? Yes -- `bb creds extract-key`; added to CLAUDE.md. All codification already complete via E-095-03 and CLAUDE.md update; no additional claude-architect dispatch needed.

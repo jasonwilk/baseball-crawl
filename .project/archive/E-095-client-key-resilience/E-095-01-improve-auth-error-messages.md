@@ -4,7 +4,7 @@
 [E-095: Client Key Credential Resilience](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, every error path in `token_manager.py` that fires when POST /auth fails will explicitly name "stale client key" and the `GAMECHANGER_CLIENT_KEY_WEB` env var as a likely cause. The `bb creds refresh` command's catch blocks will also surface the client key as a recovery action. This ensures the operator gets actionable guidance instead of the current generic messages when the real problem is a rotated client key.

@@ -21,6 +21,7 @@ import json
 import logging
 import time
 from dataclasses import dataclass
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 
 import httpx
@@ -33,7 +34,9 @@ from src.gamechanger.client import (
     GameChangerClient,
     _required_keys,
 )
+from src.gamechanger.signing import build_signature_headers
 from src.http.proxy_check import ProxyCheckResult, check_proxy_routing, get_direct_ip
+from src.http.session import resolve_proxy_from_dict
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +98,20 @@ class TokenHealth:
 
 
 @dataclass
+class ClientKeyCheckResult:
+    """Result of the step-2 client-auth POST /auth validation call."""
+
+    status: str
+    """One of: 'valid', 'invalid', 'clock_skew', 'error', 'skipped'."""
+
+    message: str
+    """Human-readable status description."""
+
+    skew_seconds: int | None = None
+    """Clock skew magnitude in seconds; only set when ``status == 'clock_skew'``."""
+
+
+@dataclass
 class ApiCheckResult:
     """Result of a GET /me/user health check."""
 
@@ -120,6 +137,9 @@ class ProfileCheckResult:
     proxy_result: ProxyCheckResult
     exit_code: int
     """0 = valid, 1 = expired / error, 2 = missing credentials."""
+    client_key_result: ClientKeyCheckResult | None = None
+    """Result of the client-auth POST /auth validation.  ``None`` when the check
+    has not been performed (e.g., legacy call sites)."""
 
 
 # ---------------------------------------------------------------------------
@@ -221,6 +241,139 @@ def _check_api(profile: str, keys_missing: list[str]) -> tuple[ApiCheckResult, i
     return result, result.exit_code
 
 
+_AUTH_PATH = "/auth"
+_CLIENT_AUTH_BODY_TYPE = "client-auth"
+
+# Maximum clock-skew tolerance in seconds before attributing non-200 to skew.
+_CLOCK_SKEW_THRESHOLD_SECONDS = 30
+
+# Web profile headers for POST /auth (step-2 client-auth call).
+_WEB_AUTH_HEADERS = {
+    "Accept": "*/*",
+    "Content-Type": "application/json; charset=utf-8",
+    "gc-app-name": "web",
+    "gc-app-version": "0.0.0",
+}
+
+
+def _make_client_auth_request(
+    client_id: str,
+    client_key: str,
+    device_id: str,
+    base_url: str,
+    proxy_url: str | None,
+) -> tuple[httpx.Response, int] | ClientKeyCheckResult:
+    """Build and POST the step-2 client-auth request.
+
+    Returns either ``(response, local_ts)`` on success or a
+    :class:`ClientKeyCheckResult` with ``status='error'`` on failure.
+    """
+    body = {"type": _CLIENT_AUTH_BODY_TYPE, "client_id": client_id}
+    try:
+        sig_headers = build_signature_headers(
+            client_id=client_id,
+            client_key_b64=client_key,
+            body=body,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return ClientKeyCheckResult(
+            status="error",
+            message=f"Client key validation failed (signature error: {exc})",
+        )
+
+    local_ts = int(sig_headers["gc-timestamp"])
+    headers = {**_WEB_AUTH_HEADERS, **sig_headers, "gc-device-id": device_id}
+
+    try:
+        with httpx.Client(trust_env=False, verify=proxy_url is None, proxy=proxy_url, timeout=30) as client:
+            response = client.post(f"{base_url.rstrip('/')}{_AUTH_PATH}", json=body, headers=headers)
+    except Exception as exc:  # noqa: BLE001
+        return ClientKeyCheckResult(
+            status="error",
+            message=f"Client key validation failed (network error: {exc})",
+        )
+
+    return response, local_ts
+
+
+def _classify_auth_response(response: httpx.Response, local_ts: int) -> ClientKeyCheckResult:
+    """Map a non-200 POST /auth response to a :class:`ClientKeyCheckResult`.
+
+    Checks the HTTP ``Date`` header to distinguish clock skew from a stale
+    client key.  Fails closed (returns ``'invalid'``) when the header is
+    absent or unparseable.
+    """
+    if response.status_code == 200:
+        return ClientKeyCheckResult(
+            status="valid",
+            message="Client key verified (POST /auth client-auth succeeded)",
+        )
+
+    date_header = response.headers.get("Date") or response.headers.get("date")
+    if date_header:
+        try:
+            server_ts = int(parsedate_to_datetime(date_header).timestamp())
+            skew = abs(local_ts - server_ts)
+            if skew > _CLOCK_SKEW_THRESHOLD_SECONDS:
+                return ClientKeyCheckResult(
+                    status="clock_skew",
+                    message=(
+                        f"Possible clock skew ({skew} seconds difference) -- "
+                        "check system clock before blaming the client key"
+                    ),
+                    skew_seconds=skew,
+                )
+        except Exception:  # noqa: BLE001
+            pass  # Unparseable Date header -- fail closed below.
+
+    return ClientKeyCheckResult(
+        status="invalid",
+        message="Client key rejected -- update via: bb creds extract-key",
+    )
+
+
+def _check_client_key(profile: str, env: dict) -> ClientKeyCheckResult:
+    """Validate the web client key via a step-2 POST /auth client-auth call.
+
+    Makes a standalone HTTP POST -- does NOT use ``TokenManager`` to avoid
+    login-fallback or token-persistence side effects.  The returned client
+    token (when the call succeeds) is discarded.  Never raises.
+
+    Args:
+        profile: The credential profile (``"web"`` or ``"mobile"``).
+        env: ``.env`` key/value dict from :func:`dotenv_values`.
+
+    Returns:
+        A :class:`ClientKeyCheckResult` with status one of: ``'valid'``,
+        ``'invalid'``, ``'clock_skew'``, ``'error'``, or ``'skipped'``.
+    """
+    if profile == "mobile":
+        return ClientKeyCheckResult(status="skipped", message="Client key not available for mobile profile")
+
+    client_key = env.get("GAMECHANGER_CLIENT_KEY_WEB")
+    if not client_key:
+        return ClientKeyCheckResult(status="skipped", message="Client key not configured (GAMECHANGER_CLIENT_KEY_WEB)")
+
+    client_id = env.get("GAMECHANGER_CLIENT_ID_WEB")
+    device_id = env.get("GAMECHANGER_DEVICE_ID_WEB")
+    base_url = env.get("GAMECHANGER_BASE_URL")
+
+    missing = [k for k, v in [
+        ("GAMECHANGER_CLIENT_ID_WEB", client_id),
+        ("GAMECHANGER_DEVICE_ID_WEB", device_id),
+        ("GAMECHANGER_BASE_URL", base_url),
+    ] if not v]
+    if missing:
+        return ClientKeyCheckResult(status="skipped", message=f"Skipped (missing: {', '.join(missing)})")
+
+    proxy_url = resolve_proxy_from_dict(env, "web")
+    outcome = _make_client_auth_request(client_id, client_key, device_id, base_url, proxy_url)  # type: ignore[arg-type]
+    if isinstance(outcome, ClientKeyCheckResult):
+        return outcome
+    response, local_ts = outcome
+    return _classify_auth_response(response, local_ts)
+
+
 def check_profile_detailed(profile: str) -> ProfileCheckResult:
     """Run a comprehensive credential diagnostic for one profile.
 
@@ -242,6 +395,14 @@ def check_profile_detailed(profile: str) -> ProfileCheckResult:
     token_health = _check_token_health(profile, env)
     api_result, exit_code = _check_api(profile, presence.keys_missing)
     proxy_result = check_proxy_routing(profile, get_direct_ip())
+    client_key_result = _check_client_key(profile, env)
+
+    # Incorporate client key status into exit code: a rejected key (invalid)
+    # should produce exit_code=1 even if the API health check passed (the
+    # access token may still be unexpired while the signing key is stale).
+    if client_key_result and client_key_result.status == "invalid" and exit_code == 0:
+        exit_code = 1
+
     return ProfileCheckResult(
         profile=profile,
         presence=presence,
@@ -249,6 +410,7 @@ def check_profile_detailed(profile: str) -> ProfileCheckResult:
         api_result=api_result,
         proxy_result=proxy_result,
         exit_code=exit_code,
+        client_key_result=client_key_result,
     )
 
 

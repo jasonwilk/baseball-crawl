@@ -4,7 +4,7 @@
 [E-095: Client Key Credential Resilience](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, `bb creds check --profile web` will include a new "Client Key" diagnostic section that actively validates the client key by attempting a step-2 client-auth POST /auth call. A stale key produces a clear `[XX]` indicator with actionable guidance, a valid key shows `[OK]`, and a missing key shows `[--]`. This transforms `bb creds check` from a passive presence check into a comprehensive credential health diagnostic that catches the most insidious failure mode (stale client key returning misleading 401s everywhere).

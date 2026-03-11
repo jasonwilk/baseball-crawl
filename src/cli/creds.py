@@ -17,14 +17,21 @@ from rich.panel import Panel
 from rich.text import Text
 
 from src.gamechanger.credentials import (
+    ClientKeyCheckResult,
     ProfileCheckResult,
     _ALL_PROFILES,
     _run_api_check,
     check_credentials,
     check_profile_detailed,
 )
-from src.gamechanger.credential_parser import CurlParseError, merge_env_file, parse_curl
+from src.gamechanger.credential_parser import (
+    CurlParseError,
+    atomic_merge_env_file,
+    merge_env_file,
+    parse_curl,
+)
 from src.gamechanger.exceptions import ConfigurationError, CredentialExpiredError
+from src.gamechanger.key_extractor import ExtractedKey, KeyExtractionError, extract_client_key
 from src.gamechanger.token_manager import AuthSigningError, TokenManager
 from src.http.proxy_check import ProxyCheckOutcome
 
@@ -227,13 +234,17 @@ def refresh(
     except CredentialExpiredError as exc:
         _err_console.print(
             f"[red]Error:[/red] {exc}\n"
-            "Re-capture credentials via the proxy and run: bb creds import"
+            "Run `bb creds check --profile web` -- if Client Key Validation shows [XX], "
+            "run `bb creds extract-key` to update it.\n"
+            "If the key is valid, re-capture credentials via the proxy and run `bb creds import`."
         )
         raise typer.Exit(code=1)
     except AuthSigningError:
         _err_console.print(
-            "[red]Error:[/red] Signature rejected by server (possible clock skew).\n"
-            "Check your system clock and try again."
+            "[red]Error:[/red] Signature rejected. "
+            "Run `bb creds check --profile web` to diagnose. "
+            "If Client Key shows [XX], run `bb creds extract-key` to update it. "
+            "If clock skew is suspected, check your system clock."
         )
         raise typer.Exit(code=1)
     except Exception as exc:  # noqa: BLE001
@@ -296,6 +307,31 @@ def _render_token_section(t: Text, result: ProfileCheckResult) -> None:
     t.append("\n")
 
 
+def _render_client_key_section(t: Text, result: ProfileCheckResult) -> None:
+    """Append the Client Key Validation section to *t*.
+
+    Placed between Refresh Token and API Health so operators see the key
+    validation result before the API health check outcome.
+    """
+    t.append("Client Key Validation  ", style="bold")
+    t.append("(POST /auth client-auth)\n", style="dim")
+    ck = result.client_key_result
+    if ck is None:
+        _append_row(t, "dim", "Client key validation not available")
+    elif ck.status == "valid":
+        _append_row(t, "green", ck.message)
+    elif ck.status == "invalid":
+        _append_row(t, "red", ck.message)
+    elif ck.status == "clock_skew":
+        _append_row(t, "yellow", ck.message)
+    elif ck.status == "error":
+        _append_row(t, "yellow", ck.message)
+    else:
+        # "skipped" and any future status
+        _append_row(t, "dim", ck.message)
+    t.append("\n")
+
+
 def _render_api_section(t: Text, result: ProfileCheckResult) -> None:
     """Append the API Health section to *t*."""
     t.append("API Health  ", style="bold")
@@ -325,13 +361,15 @@ def _render_proxy_section(t: Text, result: ProfileCheckResult) -> None:
 def _render_profile_report(result: ProfileCheckResult) -> Text:
     """Build a Rich Text object for one profile's diagnostic report.
 
-    Sections: Credentials, Refresh Token, API Health, Proxy (Bright Data).
+    Sections: Credentials, Refresh Token, Client Key Validation, API Health,
+    Proxy (Bright Data).
     Status indicators: [OK] green, [!!] yellow, [XX] red, [--] dim.
     No credential values are included -- only key names and decoded metadata.
     """
     t = Text()
     _render_credentials_section(t, result)
     _render_token_section(t, result)
+    _render_client_key_section(t, result)
     _render_api_section(t, result)
     _render_proxy_section(t, result)
     return Text(t.plain.rstrip("\n"), spans=t._spans)
@@ -522,6 +560,97 @@ def _print_capture_guidance(sessions_dir: Path) -> None:
             "      2. Reopen it while the proxy is running.\n"
             "      3. Re-run: bb creds capture --profile mobile"
         )
+
+
+def _write_env_update(extracted: ExtractedKey) -> None:
+    """Write the extracted client key to .env and print confirmation + next steps.
+
+    Args:
+        extracted: The :class:`~src.gamechanger.key_extractor.ExtractedKey` to persist.
+
+    Raises:
+        typer.Exit: With code 1 if the atomic write fails.
+    """
+    new_values: dict[str, str] = {
+        "GAMECHANGER_CLIENT_ID_WEB": extracted.client_id,
+        "GAMECHANGER_CLIENT_KEY_WEB": extracted.client_key,
+    }
+    try:
+        atomic_merge_env_file(str(_ENV_FILE), new_values)
+    except OSError as exc:
+        _err_console.print(f"[red]Error:[/red] Failed to write .env: {exc}")
+        raise typer.Exit(code=1)
+
+    _console.print("")
+    _console.print(
+        "[green]Updated GAMECHANGER_CLIENT_KEY_WEB and GAMECHANGER_CLIENT_ID_WEB in .env[/green]"
+    )
+    _console.print(
+        "Next: run [bold]bb creds check --profile web[/bold] to verify, "
+        "then [bold]bb creds refresh --profile web[/bold] to test token refresh."
+    )
+
+
+@app.command(name="extract-key")
+def extract_key(
+    apply: bool = typer.Option(
+        False,
+        "--apply",
+        help="Write updated keys to .env (default: dry run -- print diff only).",
+    ),
+) -> None:
+    """Fetch the current GameChanger client key from the public JS bundle.
+
+    Compares the extracted key against .env and shows what would change.
+    Pass --apply to write updated values to .env.
+    """
+    # Dry-run banner (AC-4a)
+    if not apply:
+        _console.print("[dim]Dry run -- pass --apply to write to .env[/dim]")
+        _console.print("")
+
+    _console.print("Fetching client key from GC JS bundle...")
+    try:
+        extracted = extract_client_key()
+    except KeyExtractionError as exc:
+        _err_console.print(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(code=1)
+
+    # Load current .env values for comparison.
+    env = dotenv_values(str(_ENV_FILE))
+    current_client_id = env.get("GAMECHANGER_CLIENT_ID_WEB") or ""
+    current_client_key = env.get("GAMECHANGER_CLIENT_KEY_WEB") or ""
+
+    id_changed = extracted.client_id != current_client_id
+    key_changed = extracted.client_key != current_client_key
+
+    # AC-4: show diff (never expose key values; UUID client_id is shown)
+    _console.print("")
+    if id_changed:
+        _console.print(
+            f"Client ID: {current_client_id or '(not set)'} -> {extracted.client_id}"
+        )
+    else:
+        _console.print(f"Client ID: \\[unchanged] ({extracted.client_id})")
+
+    if key_changed:
+        _console.print("Client Key: \\[changed]")
+    else:
+        _console.print("Client key is current (no update needed).")
+
+    if not key_changed and not id_changed:
+        # Nothing to update -- exit cleanly.
+        raise typer.Exit(code=0)
+
+    if not apply:
+        # Dry run: show what would happen but don't write.
+        _console.print("")
+        _console.print(
+            "Run [bold]bb creds extract-key --apply[/bold] to write the updated key to .env."
+        )
+        raise typer.Exit(code=0)
+
+    _write_env_update(extracted)
 
 
 @app.command()

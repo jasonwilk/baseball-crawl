@@ -4,7 +4,7 @@
 [E-095: Client Key Credential Resilience](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, running `bb creds extract-key` will automatically fetch the current GameChanger client key from the publicly accessible GC JavaScript bundle, compare it against the current `.env` value, and update `.env` if the key has changed. This makes GC key rotation a non-event -- the operator runs one command instead of manually navigating DevTools, finding the bundle, and grepping for the key.

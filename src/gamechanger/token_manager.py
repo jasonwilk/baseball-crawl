@@ -345,15 +345,18 @@ class TokenManager:
             raise AuthSigningError(
                 f"POST /auth signature rejected by server (HTTP 400). "
                 f"Server gc-timestamp: {server_ts}. "
-                "This may indicate clock skew or a stale signature. "
-                "Check system clock and regenerate credentials if needed."
+                "Possible causes: clock skew, or stale client key (GAMECHANGER_CLIENT_KEY_WEB). "
+                "Run `bb creds check --profile web` to validate the client key. "
+                "Also check your system clock if skew is suspected."
             )
 
         if response.status_code == 401:
             raise CredentialExpiredError(
                 "Refresh token rejected by server (HTTP 401). "
                 f"The {self._profile} refresh token may be expired or invalid. "
-                "Re-capture credentials via the proxy or mitmweb."
+                "If this persists after re-importing credentials, the client key "
+                "(GAMECHANGER_CLIENT_KEY_WEB) may be stale -- "
+                "run `bb creds check --profile web`."
             )
 
         raise CredentialExpiredError(
@@ -401,7 +404,8 @@ class TokenManager:
             raise AuthSigningError(
                 f"Login step {step_num} ({step_name}) signature rejected (HTTP 400). "
                 f"Server gc-timestamp: {server_ts}. "
-                "This may indicate clock skew or a stale signature."
+                "Possible causes: clock skew, or stale client key (GAMECHANGER_CLIENT_KEY_WEB). "
+                "Run `bb creds check --profile web` to validate the client key."
             )
         if response.status_code != 200:
             raise LoginFailedError(

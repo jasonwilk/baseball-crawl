@@ -26,9 +26,11 @@ import pytest
 import respx
 
 from src.gamechanger.credentials import (
+    ClientKeyCheckResult,
     CredentialPresence,
     ProfileCheckResult,
     TokenHealth,
+    _check_client_key,
     _extract_display_name,
     check_profile_detailed,
     decode_jwt_exp,
@@ -164,6 +166,7 @@ def test_check_profile_detailed_all_ok(monkeypatch: pytest.MonkeyPatch) -> None:
         "src.gamechanger.credentials.check_proxy_routing",
         lambda profile, direct_ip: _not_configured_proxy(),
     )
+    respx.post(f"{_BASE_URL}/auth").mock(return_value=httpx.Response(200, json={}))
     respx.get(f"{_BASE_URL}/me/user").mock(
         return_value=httpx.Response(
             200,
@@ -259,6 +262,7 @@ def test_check_profile_detailed_expired_token_still_attempts_api(
         "src.gamechanger.credentials.check_proxy_routing",
         lambda profile, direct_ip: _not_configured_proxy(),
     )
+    respx.post(f"{_BASE_URL}/auth").mock(return_value=httpx.Response(200, json={}))
     respx.get(f"{_BASE_URL}/me/user").mock(
         return_value=httpx.Response(
             200,
@@ -276,6 +280,7 @@ def test_check_profile_detailed_expired_token_still_attempts_api(
     assert result.exit_code == 0
 
 
+@respx.mock
 def test_check_profile_detailed_expired_token_no_api(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -294,6 +299,7 @@ def test_check_profile_detailed_expired_token_no_api(
         "src.gamechanger.credentials.check_proxy_routing",
         lambda profile, direct_ip: _not_configured_proxy(),
     )
+    respx.post(f"{_BASE_URL}/auth").mock(return_value=httpx.Response(200, json={}))
 
     result = check_profile_detailed("web")
 
@@ -371,6 +377,7 @@ def test_check_profile_detailed_proxy_not_configured(monkeypatch: pytest.MonkeyP
 # ---------------------------------------------------------------------------
 
 
+@respx.mock
 def test_check_profile_detailed_undecodable_token(monkeypatch: pytest.MonkeyPatch) -> None:
     """Undecodable token: exp=None, is_expired=None."""
     env = {**_FAKE_WEB_CREDENTIALS, "GAMECHANGER_REFRESH_TOKEN_WEB": "not.a.jwt"}
@@ -381,6 +388,8 @@ def test_check_profile_detailed_undecodable_token(monkeypatch: pytest.MonkeyPatc
         "src.gamechanger.credentials.check_proxy_routing",
         lambda profile, direct_ip: _not_configured_proxy(),
     )
+    respx.post(f"{_BASE_URL}/auth").mock(return_value=httpx.Response(200, json={}))
+    respx.get(f"{_BASE_URL}/me/user").mock(return_value=httpx.Response(200, json={}))
 
     result = check_profile_detailed("web")
 
@@ -389,6 +398,7 @@ def test_check_profile_detailed_undecodable_token(monkeypatch: pytest.MonkeyPatc
     assert result.token_health.is_expired is None
 
 
+@respx.mock
 def test_check_profile_detailed_no_refresh_token_key(monkeypatch: pytest.MonkeyPatch) -> None:
     """When refresh token key is absent, token_health is None."""
     env = {k: v for k, v in _FAKE_WEB_CREDENTIALS.items() if k != "GAMECHANGER_REFRESH_TOKEN_WEB"}
@@ -398,6 +408,7 @@ def test_check_profile_detailed_no_refresh_token_key(monkeypatch: pytest.MonkeyP
         "src.gamechanger.credentials.check_proxy_routing",
         lambda profile, direct_ip: _not_configured_proxy(),
     )
+    respx.post(f"{_BASE_URL}/auth").mock(return_value=httpx.Response(200, json={}))
 
     result = check_profile_detailed("web")
 
@@ -420,6 +431,7 @@ def test_check_profile_detailed_api_network_error(monkeypatch: pytest.MonkeyPatc
         "src.gamechanger.credentials.check_proxy_routing",
         lambda profile, direct_ip: _not_configured_proxy(),
     )
+    respx.post(f"{_BASE_URL}/auth").mock(return_value=httpx.Response(200, json={}))
     respx.get(f"{_BASE_URL}/me/user").mock(
         side_effect=httpx.ConnectError("connection refused")
     )
@@ -447,6 +459,7 @@ def test_check_profile_detailed_api_display_name_not_in_keys(
         "src.gamechanger.credentials.check_proxy_routing",
         lambda profile, direct_ip: _not_configured_proxy(),
     )
+    respx.post(f"{_BASE_URL}/auth").mock(return_value=httpx.Response(200, json={}))
     respx.get(f"{_BASE_URL}/me/user").mock(
         return_value=httpx.Response(
             200,
@@ -482,3 +495,221 @@ def test_credentials_env_path_is_absolute() -> None:
     from src.gamechanger.credentials import _ENV_PATH
 
     assert _ENV_PATH.is_absolute()
+
+
+# ---------------------------------------------------------------------------
+# _check_client_key tests (AC-1 through AC-14 in E-095-02)
+# ---------------------------------------------------------------------------
+
+
+def _web_env_for_key_check(overrides: dict | None = None) -> dict:
+    """Return a minimal web-profile env dict for client key validation tests."""
+    base = {
+        "GAMECHANGER_CLIENT_ID_WEB": "fake-client-id",
+        "GAMECHANGER_CLIENT_KEY_WEB": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+        "GAMECHANGER_DEVICE_ID_WEB": "abcdef1234567890abcdef1234567890",
+        "GAMECHANGER_BASE_URL": _BASE_URL,
+    }
+    if overrides:
+        base.update(overrides)
+    return base
+
+
+@respx.mock
+def test_check_client_key_valid_key_returns_valid() -> None:
+    """AC-1 / AC-5: 200 response → status='valid', [OK] indicator."""
+    respx.post(f"{_BASE_URL}/auth").mock(return_value=httpx.Response(200, json={}))
+    result = _check_client_key("web", _web_env_for_key_check())
+    assert result.status == "valid"
+    assert "verified" in result.message.lower() or "succeeded" in result.message.lower()
+
+
+@respx.mock
+def test_check_client_key_stale_401_close_timestamps() -> None:
+    """AC-1 / AC-6: 401 with close server timestamp → status='invalid'."""
+    import time as _time
+
+    now = int(_time.time())
+    # Server timestamp matches local (within 30s) → stale key, not clock skew.
+    date_header = "Mon, 11 Mar 2026 00:00:00 GMT"  # won't be parsed as "now" but skew check needs divergence
+    # Use a mock that returns 401 with a Date header very close to now.
+    from email.utils import formatdate
+    close_date = formatdate(now, usegmt=True)
+    respx.post(f"{_BASE_URL}/auth").mock(
+        return_value=httpx.Response(401, headers={"Date": close_date})
+    )
+    result = _check_client_key("web", _web_env_for_key_check())
+    assert result.status == "invalid"
+    assert "rejected" in result.message.lower()
+    assert "extract-key" in result.message
+
+
+@respx.mock
+def test_check_client_key_stale_400_close_timestamps() -> None:
+    """AC-1 / AC-6: 400 with close server timestamp → status='invalid'."""
+    import time as _time
+    from email.utils import formatdate
+
+    now = int(_time.time())
+    close_date = formatdate(now, usegmt=True)
+    respx.post(f"{_BASE_URL}/auth").mock(
+        return_value=httpx.Response(400, headers={"Date": close_date})
+    )
+    result = _check_client_key("web", _web_env_for_key_check())
+    assert result.status == "invalid"
+
+
+@respx.mock
+def test_check_client_key_clock_skew_detected() -> None:
+    """AC-1 / AC-7: Non-200 with server Date header >30s skewed → status='clock_skew'."""
+    from email.utils import formatdate
+
+    # Server timestamp is 120 seconds in the past relative to local clock.
+    stale_ts = int(time.time()) - 120
+    skewed_date = formatdate(stale_ts, usegmt=True)
+    respx.post(f"{_BASE_URL}/auth").mock(
+        return_value=httpx.Response(400, headers={"Date": skewed_date})
+    )
+    result = _check_client_key("web", _web_env_for_key_check())
+    assert result.status == "clock_skew"
+    assert result.skew_seconds is not None
+    assert result.skew_seconds > 30
+    assert "clock" in result.message.lower() or "skew" in result.message.lower()
+
+
+@respx.mock
+def test_check_client_key_absent_date_header_treated_as_stale() -> None:
+    """AC-1 / AC-3: Non-200 with no Date header → status='invalid' (fail closed)."""
+    respx.post(f"{_BASE_URL}/auth").mock(
+        return_value=httpx.Response(401, headers={})
+    )
+    result = _check_client_key("web", _web_env_for_key_check())
+    assert result.status == "invalid"
+
+
+@respx.mock
+def test_check_client_key_unparseable_date_header_treated_as_stale() -> None:
+    """AC-3: Unparseable Date header → status='invalid' (fail closed)."""
+    respx.post(f"{_BASE_URL}/auth").mock(
+        return_value=httpx.Response(401, headers={"Date": "not-a-real-date"})
+    )
+    result = _check_client_key("web", _web_env_for_key_check())
+    assert result.status == "invalid"
+
+
+@respx.mock
+def test_check_client_key_network_error_returns_error() -> None:
+    """AC-1 / AC-9a: Network error → status='error', [!!] indicator."""
+    respx.post(f"{_BASE_URL}/auth").mock(
+        side_effect=httpx.ConnectError("connection refused")
+    )
+    result = _check_client_key("web", _web_env_for_key_check())
+    assert result.status == "error"
+    assert "network" in result.message.lower() or "error" in result.message.lower()
+
+
+def test_check_client_key_missing_key_returns_skipped() -> None:
+    """AC-1 / AC-8: Missing client key → status='skipped' with key name in message."""
+    env = _web_env_for_key_check({"GAMECHANGER_CLIENT_KEY_WEB": ""})
+    result = _check_client_key("web", env)
+    assert result.status == "skipped"
+    assert "GAMECHANGER_CLIENT_KEY_WEB" in result.message
+
+
+def test_check_client_key_mobile_profile_returns_skipped() -> None:
+    """AC-1 / AC-9: Mobile profile → status='skipped'."""
+    result = _check_client_key("mobile", {})
+    assert result.status == "skipped"
+    assert "mobile" in result.message.lower()
+
+
+def test_check_client_key_missing_prerequisites_returns_skipped() -> None:
+    """AC-14: Missing client_id, device_id, or base_url → skipped, lists which prereqs."""
+    env = {"GAMECHANGER_CLIENT_KEY_WEB": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="}
+    result = _check_client_key("web", env)
+    assert result.status == "skipped"
+    assert "GAMECHANGER_CLIENT_ID_WEB" in result.message
+    assert "GAMECHANGER_DEVICE_ID_WEB" in result.message
+    assert "GAMECHANGER_BASE_URL" in result.message
+
+
+def test_check_client_key_never_logs_key_value() -> None:
+    """AC-13: Key value must not appear in the returned message."""
+    key_value = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+    # Missing prereqs so no HTTP call is made; still verify message is clean.
+    env = {"GAMECHANGER_CLIENT_KEY_WEB": key_value}
+    result = _check_client_key("web", env)
+    assert key_value not in result.message
+
+
+def test_check_profile_detailed_includes_client_key_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AC-15: ProfileCheckResult.client_key_result is populated after check_profile_detailed."""
+    _patch_dotenv(monkeypatch, {})
+    monkeypatch.setattr("src.gamechanger.credentials.get_direct_ip", lambda: None)
+    monkeypatch.setattr(
+        "src.gamechanger.credentials.check_proxy_routing",
+        lambda profile, direct_ip: _not_configured_proxy(),
+    )
+
+    result = check_profile_detailed("web")
+
+    # With empty env, client_key_result should be "skipped" (key absent).
+    assert result.client_key_result is not None
+    assert result.client_key_result.status == "skipped"
+
+
+def test_invalid_client_key_sets_exit_code_1(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Exit code reflects invalid client key even when API health check passes.
+
+    When check_profile_detailed() gets a passing API result (exit_code=0) but
+    the client key validation returns 'invalid', the overall exit_code should
+    be 1 -- not 0.
+    """
+    env = {**_FAKE_WEB_CREDENTIALS, "GAMECHANGER_REFRESH_TOKEN_WEB": _make_jwt(3600)}
+    _patch_dotenv(monkeypatch, env)
+    _mock_token_manager(monkeypatch)
+    monkeypatch.setattr("src.gamechanger.credentials.get_direct_ip", lambda: None)
+    monkeypatch.setattr(
+        "src.gamechanger.credentials.check_proxy_routing",
+        lambda profile, direct_ip: _not_configured_proxy(),
+    )
+    # Mock the client key check to return 'invalid'
+    monkeypatch.setattr(
+        "src.gamechanger.credentials._check_client_key",
+        lambda profile, env: ClientKeyCheckResult(
+            status="invalid",
+            message="Client key rejected -- update via: bb creds extract-key",
+        ),
+    )
+
+    with respx.mock:
+        respx.get(f"{_BASE_URL}/me/user").mock(
+            return_value=httpx.Response(200, json={"first_name": "Jason", "last_name": "Smith"})
+        )
+        result = check_profile_detailed("web")
+
+    assert result.api_result.exit_code == 0, "API check itself should pass"
+    assert result.client_key_result is not None
+    assert result.client_key_result.status == "invalid"
+    assert result.exit_code == 1, "Overall exit code should be 1 due to invalid client key"
+
+
+def test_profile_check_result_default_client_key_none() -> None:
+    """AC-15: ProfileCheckResult can be constructed without client_key_result (default None)."""
+    from src.gamechanger.credentials import ApiCheckResult, CredentialPresence, TokenHealth
+    from src.http.proxy_check import ProxyCheckOutcome, ProxyCheckResult
+
+    result = ProfileCheckResult(
+        profile="web",
+        presence=CredentialPresence(keys_present=[], keys_missing=[]),
+        token_health=None,
+        api_result=ApiCheckResult(exit_code=2, display_name=None, message="skipped"),
+        proxy_result=ProxyCheckResult(profile="web", outcome=ProxyCheckOutcome.NOT_CONFIGURED),
+        exit_code=2,
+        # client_key_result NOT provided -- should default to None
+    )
+    assert result.client_key_result is None

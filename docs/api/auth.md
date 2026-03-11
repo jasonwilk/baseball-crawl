@@ -155,6 +155,8 @@ The JS splits this on `:` and passes the two parts to the `AuthClient` construct
 
 Store in `.env` as `GAMECHANGER_CLIENT_KEY_WEB`. Store the `clientId` as `GAMECHANGER_CLIENT_ID_WEB`.
 
+For step-by-step extraction and recovery procedures, see [Client Key Extraction](#client-key-extraction).
+
 ## Complete Login Flow (4 Steps)
 
 For full programmatic login from credentials only (no existing tokens). Discovered from Chrome Network tab capture 2026-03-07.
@@ -263,6 +265,96 @@ Updated credential architecture as of 2026-03-07. The `gc-signature` field is no
 | `GAMECHANGER_SIGNATURE_WEB` | (none -- computed) | Signature is now generated programmatically; no longer needs to be captured and stored |
 
 See `headers.md` for how these values map to request headers.
+
+## Client Key Extraction
+
+The client key (`GAMECHANGER_CLIENT_KEY_WEB`) is embedded in the GameChanger web JavaScript bundle. It must be re-extracted whenever GC redeploys their bundle. This section documents how to detect a stale key and how to extract a fresh one -- automatically or manually.
+
+**Key characteristics:**
+- The client key is **app-wide** -- the same value for all GC users, not per-user or per-session
+- `GAMECHANGER_CLIENT_ID_WEB` may also change at the same time -- both values come from the same composite string in the bundle
+- The variable name in the JS bundle is `EDEN_AUTH_CLIENT_KEY`, in the format `clientId:clientKey`
+- The JS bundle URL pattern is `https://web.gc.com/static/js/index.{hash}.js` -- the hash changes with each deployment
+- Rotations are unpredictable (potentially months apart), but always coincide with a GC web bundle redeployment
+- **Never cache the bundle URL between extraction runs** -- always fetch the HTML page fresh, since the hash changes on every GC deployment
+
+### How to Know the Key Is Stale
+
+**Symptom:** All authentication fails. `bb creds refresh` reports "Credentials expired" or a signature-rejected error. `bb creds check` shows `[XX]` on the Client Key section.
+
+**Cause:** GC redeployed their JavaScript bundle with a new `EDEN_AUTH_CLIENT_KEY` value. The `gc-signature` HMAC is being computed with the wrong (stale) key.
+
+**The misleading diagnostic path:** The refresh token appears valid and the presence check passes, but every `POST /auth` call fails with HTTP 401. This looks identical to an expired refresh token because the server returns the same HTTP 401 status code for both a stale client key and an expired refresh token. The current code maps HTTP 401 to `CredentialExpiredError` -- but in the stale-key scenario, the same error path is hit, producing a misleading "Refresh token rejected" / "Credentials expired" message.
+
+**How to distinguish:** If `bb creds check` shows the refresh token is within its 14-day window but refresh calls still fail, suspect a stale client key before concluding the refresh token is invalid. Run `bb creds extract-key` to check whether the bundle contains a different key than what is in `.env`.
+
+### Automated Extraction
+
+Use the `bb creds extract-key` command to fetch the current client key from the live JS bundle and compare it against `.env`.
+
+**Dry-run (default):** Shows what would change without writing anything:
+
+```
+$ bb creds extract-key
+Fetching bundle from https://web.gc.com...
+Parsing EDEN_AUTH_CLIENT_KEY from index.{hash}.js...
+
+Client ID:  {current-value} -> {new-value}
+Client Key: [changed]
+
+Run with --apply to update .env
+```
+
+**Apply mode:** Writes updated values to `.env`:
+
+```
+$ bb creds extract-key --apply
+Fetching bundle from https://web.gc.com...
+Parsing EDEN_AUTH_CLIENT_KEY from index.{hash}.js...
+
+Client ID:  [unchanged]
+Client Key: [changed]
+
+.env updated. Run `bb creds check --profile web` to verify, then `bb creds refresh --profile web`.
+```
+
+**If the key is already current:**
+
+```
+$ bb creds extract-key
+Client key is current (no update needed).
+```
+
+**Error exits (exit code 1):**
+- HTML page fetch failed
+- Bundle script URL not found in the HTML page
+- `EDEN_AUTH_CLIENT_KEY` not found in the bundle
+
+**Note on validation:** The `bb creds check` client key validation uses the step-2 client-auth call (`POST /auth {"type": "client-auth", ...}`). This call is ideal for validation because it requires no `previousSignature` -- it is always the first call in any login sequence -- so it can be executed independently at any time without depending on a prior response in the chain.
+
+### Manual Extraction (Browser DevTools)
+
+Use this procedure if `bb creds extract-key` is unavailable or fails.
+
+1. Open `https://web.gc.com` in Google Chrome and wait for the page to fully load.
+2. Open Chrome DevTools (F12, or Cmd+Option+I on macOS).
+3. Go to the **Sources** tab.
+4. Press Cmd+Shift+F (macOS) or Ctrl+Shift+F (Windows/Linux) to open the global search across all loaded files.
+5. Search for `EDEN_AUTH_CLIENT_KEY`.
+6. Open the matching result -- it will be in a file like `index.{hash}.js` under `web.gc.com/static/js/`.
+7. The value is a composite string in the format `clientId:clientKey`, for example: `EDEN_AUTH_CLIENT_KEY:"{uuid}:{base64-string}"`.
+8. Copy the full composite value (everything inside the quotes, not including the quotes themselves).
+9. Split on the **first** `:` to separate the two parts:
+   - Left side = UUID → `GAMECHANGER_CLIENT_ID_WEB`
+   - Right side = base64 string → `GAMECHANGER_CLIENT_KEY_WEB`
+10. Update `.env` with the new values for `GAMECHANGER_CLIENT_ID_WEB` and `GAMECHANGER_CLIENT_KEY_WEB`.
+
+### Verification
+
+After updating `.env` (via either method):
+
+1. Run `bb creds check --profile web` and confirm the Client Key section shows `[OK]`.
+2. Run `bb creds refresh --profile web` to confirm the token refresh succeeds end-to-end.
 
 ## Token Health Check
 

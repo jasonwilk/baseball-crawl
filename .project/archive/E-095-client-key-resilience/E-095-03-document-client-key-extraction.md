@@ -4,7 +4,7 @@
 [E-095: Client Key Credential Resilience](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, `docs/api/auth.md` will contain a "Client Key Extraction" section documenting both the automated (`bb creds extract-key`) and manual (browser DevTools) processes for obtaining a fresh client key from the GameChanger web JavaScript bundle. The section will include the exact JS variable name (`EDEN_AUTH_CLIENT_KEY`), the composite format, staleness symptoms, and verification steps. The operator will be able to recover from a stale client key by following documented procedures instead of reverse-engineering the extraction process from scratch.
