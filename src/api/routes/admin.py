@@ -1201,6 +1201,19 @@ def _build_connect_success_msg(opponent_name: str, duplicate_name: str | None) -
     return quote_plus(f"Linked {opponent_name} successfully.")
 
 
+def _check_already_resolved(link: dict) -> HTMLResponse | None:
+    """Return a 400 response if the link already has a public_id, else None."""
+    if link.get("public_id") is not None:
+        return HTMLResponse(
+            content=(
+                "This opponent is already resolved and cannot be manually linked. "
+                "Disconnect the existing link first."
+            ),
+            status_code=400,
+        )
+    return None
+
+
 @router.post("/opponents/{link_id}/connect", response_model=None)
 async def connect_opponent(
     request: Request,
@@ -1226,6 +1239,10 @@ async def connect_opponent(
     link = await run_in_threadpool(get_opponent_link_by_id, link_id)
     if not link:
         return HTMLResponse(content="Opponent link not found", status_code=404)
+
+    already_resolved = _check_already_resolved(link)
+    if already_resolved is not None:
+        return already_resolved
 
     is_own_team = await run_in_threadpool(is_owned_team_public_id, public_id)
     if is_own_team:
