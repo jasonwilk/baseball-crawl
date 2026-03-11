@@ -918,3 +918,98 @@ class TestTeamsEditSimplified:
         # varsity has 2 opponent links (Northside auto + Ridgecrest unlinked)
         assert "Manage connections" in response.text
         assert "lsb-varsity-2026" in response.text  # in the manage link URL
+
+
+# ---------------------------------------------------------------------------
+# E-091-01: Guard connect endpoint against overwriting resolved links
+# ---------------------------------------------------------------------------
+
+
+class TestConnectGuardAgainstResolved:
+    """POST /connect rejects already-resolved links (E-091-01)."""
+
+    def test_connect_already_resolved_auto_returns_400(self, opp_db: Path) -> None:
+        """POST /connect on an auto-resolved link returns HTTP 400 (AC-1)."""
+        admin_id = _insert_user(opp_db, "guard1@test", is_admin=1)
+        token = _insert_session(opp_db, admin_id)
+
+        # Northside Eagles is auto-resolved (public_id='a1GFM9Ku0BbF')
+        auto_id = _get_link_id_by_name(opp_db, "Northside Eagles")
+        assert auto_id is not None
+
+        with patch.dict("os.environ", {"DATABASE_PATH": str(opp_db)}):
+            with TestClient(app, follow_redirects=False, cookies={"session": token}) as client:
+                response = client.post(
+                    f"/admin/opponents/{auto_id}/connect",
+                    data={"public_id": "SomeOtherTeam1"},
+                )
+        assert response.status_code == 400
+        assert "already resolved" in response.text.lower() or "resolved" in response.text.lower()
+
+    def test_connect_already_resolved_link_is_unchanged(self, opp_db: Path) -> None:
+        """POST /connect on a resolved link leaves the existing link data intact (AC-1)."""
+        admin_id = _insert_user(opp_db, "guard2@test", is_admin=1)
+        token = _insert_session(opp_db, admin_id)
+
+        auto_id = _get_link_id_by_name(opp_db, "Northside Eagles")
+        assert auto_id is not None
+
+        # Capture the row before the attempted POST
+        before = _get_link_row(opp_db, auto_id)
+        assert before is not None
+
+        with patch.dict("os.environ", {"DATABASE_PATH": str(opp_db)}):
+            with TestClient(app, follow_redirects=False, cookies={"session": token}) as client:
+                client.post(
+                    f"/admin/opponents/{auto_id}/connect",
+                    data={"public_id": "SomeOtherTeam1"},
+                )
+
+        after = _get_link_row(opp_db, auto_id)
+        assert after is not None
+        # Link must be unchanged
+        assert after["public_id"] == before["public_id"]
+        assert after["resolution_method"] == before["resolution_method"]
+        assert after["resolved_team_id"] == before["resolved_team_id"]
+
+    def test_connect_already_resolved_manual_returns_400(self, opp_db: Path) -> None:
+        """POST /connect on a manually-resolved link also returns HTTP 400 (AC-1).
+
+        AC-1 states 'any non-NULL public_id, regardless of resolution method'.
+        """
+        admin_id = _insert_user(opp_db, "guard3@test", is_admin=1)
+        token = _insert_session(opp_db, admin_id)
+
+        # Westview Tigers is manually resolved (public_id='QTiLIb2Lui3b')
+        manual_id = _get_link_id_by_name(opp_db, "Westview Tigers")
+        assert manual_id is not None
+
+        with patch.dict("os.environ", {"DATABASE_PATH": str(opp_db)}):
+            with TestClient(app, follow_redirects=False, cookies={"session": token}) as client:
+                response = client.post(
+                    f"/admin/opponents/{manual_id}/connect",
+                    data={"public_id": "SomeOtherTeam2"},
+                )
+        assert response.status_code == 400
+
+    def test_connect_unresolved_link_is_accepted(self, opp_db: Path) -> None:
+        """POST /connect on an unresolved link saves successfully (AC-2)."""
+        admin_id = _insert_user(opp_db, "guard4@test", is_admin=1)
+        token = _insert_session(opp_db, admin_id)
+
+        # Ridgecrest Rockets is unresolved (public_id=NULL)
+        unresolved_id = _get_link_id_by_name(opp_db, "Ridgecrest Rockets")
+        assert unresolved_id is not None
+
+        with patch.dict("os.environ", {"DATABASE_PATH": str(opp_db)}):
+            with TestClient(app, follow_redirects=False, cookies={"session": token}) as client:
+                response = client.post(
+                    f"/admin/opponents/{unresolved_id}/connect",
+                    data={"public_id": "NewTeamSlug1"},
+                )
+        assert response.status_code == 303
+
+        row = _get_link_row(opp_db, unresolved_id)
+        assert row is not None
+        assert row["public_id"] == "NewTeamSlug1"
+        assert row["resolution_method"] == "manual"

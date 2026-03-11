@@ -1227,6 +1227,15 @@ async def connect_opponent(
     if not link:
         return HTMLResponse(content="Opponent link not found", status_code=404)
 
+    if link.get("public_id") is not None:
+        return HTMLResponse(
+            content=(
+                "This opponent is already resolved and cannot be manually linked. "
+                "Disconnect the existing link first."
+            ),
+            status_code=400,
+        )
+
     is_own_team = await run_in_threadpool(is_owned_team_public_id, public_id)
     if is_own_team:
         return HTMLResponse(
