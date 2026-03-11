@@ -53,26 +53,33 @@ Follow the iPhone setup steps printed by `./start.sh`, or see the full instructi
 - Set **Server** to the Mac's LAN IP, **Port** to `8080`
 - Install the mitmproxy CA certificate at `mitm.it` (one-time, per device)
 
-**3. Open GameChanger on the iPhone** and navigate to any team or game page. The proxy's credential extractor detects GameChanger traffic and writes credentials to the project root `.env` automatically.
+**3. Open GameChanger on the iPhone** and navigate to any team or game page. The proxy's `credential_extractor` addon detects GameChanger traffic and writes credentials directly to the project root `.env` via `merge_env_file()`.
 
-**4. Verify credentials were captured**:
-
-Check that `.env` contains the key `GAMECHANGER_REFRESH_TOKEN_WEB` (do not display the value):
-
-```bash
-grep -q GAMECHANGER_REFRESH_TOKEN_WEB .env && echo "Key present" || echo "Key missing"
-```
-
-Or check the proxy logs for a "Credentials updated" message:
-
-```bash
-cd proxy && ./logs.sh
-```
-
-**5. When done**, turn off the iPhone proxy (**Settings > Wi-Fi > [network] > Configure Proxy > Off**) and stop mitmproxy:
+**4. Stop the proxy and disable the iPhone proxy:**
 
 ```bash
 cd proxy && ./stop.sh
+```
+
+On the iPhone: **Settings > Wi-Fi > [network] > Configure Proxy > Off**.
+
+**5. Validate credentials:**
+
+For **mobile** credentials (~12-hour access token, no auto-refresh):
+
+```bash
+bb creds capture --profile mobile
+```
+
+This reads `.env` to check if mobile credentials are present (the addon wrote them in step 3), then validates the access token against `GET /me/user`. If credentials are missing from `.env`, it prints fallback guidance using session metadata.
+
+For **web** credentials captured via proxy, the addon writes them to `.env` automatically in step 3. Verify with `bb creds check`.
+
+**6. Verify credentials:**
+
+```bash
+bb creds check                   # web profile
+bb creds check --profile mobile  # mobile profile
 ```
 
 For complete proxy setup, certificate management, browser capture, and troubleshooting, see [docs/admin/mitmproxy-guide.md](mitmproxy-guide.md).
@@ -178,19 +185,25 @@ Loading data...
 
 GameChanger uses a three-tier credential system with different lifetimes:
 
-| Credential | Lifetime | Notes |
-|-----------|----------|-------|
-| **Client ID + Client Key** | Permanent (until app redeploy) | Static secret from the app bundle. Stored in `.env`. Only changes when GC deploys a new app version. |
-| **Refresh token** | 14 days (self-renewing) | Each programmatic refresh call returns a new refresh token -- effectively self-sustaining as long as you refresh before expiry. |
-| **Access token** | ~60 minutes | Generated on demand via `POST /auth {"type":"refresh"}`. Not stored -- derived from the refresh token as needed. |
+| Credential | Web | Mobile | Notes |
+|-----------|-----|--------|-------|
+| **Client ID + Client Key** | Permanent | Permanent (ID only) | Static from the app bundle. Mobile client key is NOT extracted -- only the client ID is captured via proxy. |
+| **Refresh token** | 14 days (self-renewing) | 14 days (not usable) | Web refreshes programmatically. Mobile refresh token is captured but cannot be used (missing client key for signing). |
+| **Access token** | ~60 min (auto-generated) | ~12 hours (proxy-captured) | Web generates on demand. Mobile must be recaptured via proxy when expired. |
 
 **Programmatic refresh is now available.** The project can generate a fresh access token from the refresh token at any time without browser interaction. The `gc-signature` signing algorithm was fully reverse-engineered on 2026-03-07. See `docs/api/auth.md` for the complete auth architecture.
 
 ### When to Refresh
 
+**Web profile:**
 - **Access tokens** expire in ~60 minutes. The bootstrap process and crawlers generate fresh access tokens automatically from the stored refresh token -- you do not need to manage this manually.
 - **Refresh tokens** last 14 days. The refresh process returns a new refresh token each time it runs, so regular crawl runs keep the refresh token current automatically.
 - **Manual re-capture** is only needed if the refresh token expires (e.g., no crawl has run for 14+ days) or if the client key changes due to a GC app deploy. Re-capture via proxy or curl paths described above.
+
+**Mobile profile:**
+- **Access tokens** last ~12 hours. When expired, recapture via a new proxy session (`bb creds capture --profile mobile`).
+- **Programmatic refresh is not available.** The iOS client key has not been extracted, so the signing algorithm cannot generate the headers needed for `POST /auth`.
+- Plan mobile capture sessions at the start of a work day -- the ~12-hour window covers a full day of crawl operations.
 
 The health check output is clear:
 
@@ -258,4 +271,4 @@ Check:
 
 ---
 
-*Last updated: 2026-03-07 | Story: E-055 (unified CLI), E-050-04*
+*Last updated: 2026-03-10 | Story: E-086 (mobile credentials), E-055 (unified CLI), E-050-04*

@@ -137,39 +137,54 @@ All tests mock HTTP requests at the transport layer -- no network calls are made
 
 ## Credential Management
 
-GameChanger API credentials are short-lived and must be refreshed frequently. Credentials are stored in `.env` (git-ignored) and never committed.
+GameChanger API credentials are stored in `.env` (git-ignored) and never committed. Two credential profiles are supported:
 
-### Refresh Credentials
+### Web Profile (auto-refreshing)
 
 1. Log in to [web.gc.com](https://web.gc.com) in a browser.
 2. Open DevTools (F12) -> Network tab.
 3. Trigger any GameChanger API request (e.g., navigate to a team page).
 4. Right-click the request -> Copy -> Copy as cURL.
-5. Save the cURL command to `secrets/gamechanger-curl.txt`, then run:
+5. Import credentials:
 
 ```bash
-python scripts/refresh_credentials.py
+bb creds import --curl "curl 'https://...' -H 'gc-token: ...'"
 ```
 
-Also available as `bb creds import`.
+Or save the cURL command to `secrets/gamechanger-curl.txt` and run `bb creds import`.
 
-Or pass the cURL command inline:
+Web credentials refresh programmatically (`bb creds refresh`). With login fallback (E-085), the web profile requires no manual recapture beyond the initial setup.
+
+### Mobile Profile (proxy-assisted)
+
+Mobile credentials are captured via mitmproxy from the iOS GameChanger app:
+
+1. Start mitmproxy on the Mac host (`cd proxy && ./start.sh`)
+2. Configure your iPhone to use the proxy (see [mitmproxy guide](mitmproxy-guide.md#iphone-proxy-configuration))
+3. Open GameChanger on the iPhone and navigate to any page
+4. Stop the proxy (`cd proxy && ./stop.sh`) and disable the iPhone proxy
+5. Extract credentials:
 
 ```bash
-python scripts/refresh_credentials.py --curl "curl 'https://...' -H 'gc-token: ...'"
+bb creds capture --profile mobile
 ```
 
-The script extracts auth tokens from the cURL command and writes them to `.env`, preserving any existing non-credential values.
+Or import from a curl command with the mobile profile flag:
+
+```bash
+bb creds import --profile mobile --curl "curl 'https://...' -H 'gc-token: ...'"
+```
+
+The mobile access token lasts ~12 hours. Programmatic refresh is not available -- recapture via proxy when it expires. See [mitmproxy guide](mitmproxy-guide.md#mobile-credential-capture) for the full workflow.
 
 ### Verify API Access
 
-After refreshing credentials, run the smoke test to verify end-to-end API connectivity:
+After capturing credentials, verify connectivity:
 
 ```bash
-python scripts/smoke_test.py
+bb creds check                   # web profile (default)
+bb creds check --profile mobile  # mobile profile
 ```
-
-This calls three GameChanger endpoints (`/me/teams`, game summaries, and players) and prints a summary table. All endpoints should show `OK`.
 
 ## Environment Variables
 
@@ -184,6 +199,10 @@ Key variables in `.env`:
 | `GAMECHANGER_CLIENT_ID_WEB` | GameChanger client ID (static, from app bundle). |
 | `GAMECHANGER_CLIENT_KEY_WEB` | GameChanger HMAC signing key (static, from app bundle). **Secret.** |
 | `GAMECHANGER_DEVICE_ID_WEB` | GameChanger device identifier (stable hex string). |
+| `GAMECHANGER_ACCESS_TOKEN_MOBILE` | Mobile access token (~12-hour lifetime, proxy-captured). |
+| `GAMECHANGER_REFRESH_TOKEN_MOBILE` | Mobile refresh token (14-day lifetime, proxy-captured). |
+| `GAMECHANGER_CLIENT_ID_MOBILE` | Mobile client ID (from iOS app, proxy-captured). |
+| `GAMECHANGER_DEVICE_ID_MOBILE` | Mobile device identifier (proxy-captured). |
 | `GAMECHANGER_USER_EMAIL` | GameChanger account email. **PII.** |
 | `GAMECHANGER_USER_PASSWORD` | GameChanger account password. **Secret.** |
 | `GAMECHANGER_BASE_URL` | GameChanger API base URL (written by `refresh_credentials.py`). |
@@ -193,4 +212,4 @@ Key variables in `.env`:
 
 ---
 
-*Last updated: 2026-03-07 | Source: E-055 (unified CLI), E-042 (team onboarding via admin UI), E-028-03 (original)*
+*Last updated: 2026-03-10 | Source: E-086 (mobile credentials), E-055 (unified CLI), E-042 (team onboarding via admin UI), E-028-03 (original)*

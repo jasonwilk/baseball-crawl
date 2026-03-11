@@ -329,89 +329,82 @@ Neither report path exists. Run mitmproxy and navigate GameChanger on your iPhon
 
 ## Mobile Credential Capture
 
-This section explains how to capture mobile app credentials from the iOS GameChanger (Odyssey) app for use with the `mobile` header profile in `src/http/session.py`.
-
-### Why Mobile Credentials?
-
-Some GameChanger API endpoints behave differently with web browser headers vs. mobile app headers. The `create_session(profile="mobile")` function in `src/http/session.py` sends iOS Odyssey headers, but you also need credentials extracted from mobile app traffic. The `gc-token` JWT format is the same for both web and mobile, but the `gc-device-id` may differ.
+Mobile credentials allow API requests with iOS app headers via `create_session(profile="mobile")` in `src/http/session.py`. The mobile access token lasts ~12 hours (vs ~60 min on web), but programmatic refresh is not available -- the iOS client key has not been extracted from the app binary. When the access token expires, recapture via another proxy session.
 
 ### End-to-End Workflow
 
-1. **Start mitmproxy on the Mac host:**
+**1. Start mitmproxy on the Mac host** (not inside the devcontainer):
 
-   ```bash
-   cd proxy
-   ./start.sh
-   ```
+```bash
+cd proxy
+./start.sh
+```
 
-   The script prints the Mac's LAN IP address and the mitmweb UI URL.
+The script prints the Mac's LAN IP address and the mitmweb UI URL.
 
-2. **Configure the iOS device to use the proxy:**
+**2. Configure the iPhone to use the proxy:**
 
-   - Open **Settings > Wi-Fi** > tap **(i)** on your connected network
-   - Scroll to **Configure Proxy > Manual**
-   - Set **Server** to your Mac's LAN IP, **Port** to `8080`
-   - Tap **Save**
+- Open **Settings > Wi-Fi** > tap **(i)** on your connected network
+- Set **Configure Proxy** to **Manual**
+- Set **Server** to your Mac's LAN IP, **Port** to `8080`
+- Tap **Save**
 
-   (Full details in the [iPhone Proxy Configuration](#iphone-proxy-configuration) section above.)
+(Full details in the [iPhone Proxy Configuration](#iphone-proxy-configuration) section above. Install the CA certificate if this is your first time -- one-time per device.)
 
-3. **Install the mitmproxy CA certificate on the device:**
+**3. Open GameChanger on the iPhone** and navigate to any team or game page. The proxy's `credential_extractor` addon detects iOS traffic and writes credentials directly to the project root `.env` via `merge_env_file()`.
 
-   - Open **Safari** and navigate to **mitm.it**
-   - Tap the Apple logo to download the profile
-   - Go to **Settings > General > VPN & Device Management** > install the mitmproxy profile
-   - Go to **Settings > General > About > Certificate Trust Settings** > toggle mitmproxy to **enabled**
+**4. Stop the proxy and disable the iPhone proxy:**
 
-   (You only need to do this once per device, unless `proxy/certs/` is deleted.)
+```bash
+cd proxy && ./stop.sh
+```
 
-4. **Open the GameChanger app and sign in:**
+On the iPhone: **Settings > Wi-Fi > [network] > Configure Proxy > Off**.
 
-   Open the GameChanger app on the iPhone. Navigate to any team or game page to generate API traffic. The `credential_extractor` addon (`proxy/addons/credential_extractor.py`) automatically detects `gc-token` and `gc-device-id` headers in the proxied requests and writes them to the project root `.env` file.
+**5. Extract and validate credentials:**
 
-5. **Verify credentials were captured:**
+```bash
+bb creds capture --profile mobile
+```
 
-   Check the proxy logs for a "Credentials updated" message:
+This reads `.env` to check if the four mobile credential keys (`GAMECHANGER_ACCESS_TOKEN_MOBILE`, `GAMECHANGER_REFRESH_TOKEN_MOBILE`, `GAMECHANGER_CLIENT_ID_MOBILE`, `GAMECHANGER_DEVICE_ID_MOBILE`) are present (the addon wrote them in step 3), then validates the access token against `GET /me/user`. If credentials are missing from `.env`, it prints fallback guidance using session metadata from `proxy/data/sessions/`.
 
-   ```bash
-   cd proxy
-   ./logs.sh
-   ```
+**6. Verify:**
 
-   Confirm the `.env` file was updated with `GAMECHANGER_REFRESH_TOKEN_WEB` and `GAMECHANGER_DEVICE_ID_WEB`.
+```bash
+bb creds check --profile mobile
+```
 
-### Headers to Extract
+### Credential Renewal
 
-The credential extractor addon captures these headers automatically:
+The mobile access token expires after ~12 hours. When it expires:
 
-| Header | .env Variable | Notes |
-|--------|--------------|-------|
-| `gc-token` | `GAMECHANGER_REFRESH_TOKEN_WEB` / `_MOBILE` | JWT token. If captured from POST /auth response, this is a refresh token (14-day lifetime). If captured from a standard API request, this is an access token (~60-minute lifetime). Store the refresh token; access tokens are generated programmatically. |
-| `gc-device-id` | `GAMECHANGER_DEVICE_ID_WEB` / `_MOBILE` | 32-char hex device identifier. May differ between web and mobile. |
-| `gc-app-name` | `GAMECHANGER_APP_NAME_WEB` / `_MOBILE` | `web` for browser, `iOS` for mobile app. |
-| `gc-signature` | (computed) | Generated programmatically via HMAC-SHA256. No longer stored in `.env`. See `docs/api/auth.md`. |
+1. Repeat steps 1--5 above (start proxy, use app, stop proxy, run capture)
+2. The capture command overwrites the expired credentials in `.env` with fresh ones
 
-Optionally note the mobile-specific `gc-app-version` value (`2026.7.0.0` vs web's `0.0.0`). This value is not extracted to `.env` by the addon -- it is hardcoded in `MOBILE_HEADERS` in `src/http/headers.py`.
+There is no way to programmatically refresh mobile credentials. The ~12-hour window is sufficient for a day's crawl operations. Plan capture sessions accordingly.
 
-### Storing Mobile Credentials
+### Mobile Credentials in `.env`
 
-The credential extractor writes to the same `.env` variables regardless of traffic source (web or mobile). This means:
+| Variable | Source | Lifetime |
+|----------|--------|----------|
+| `GAMECHANGER_ACCESS_TOKEN_MOBILE` | POST /auth response body | ~12 hours |
+| `GAMECHANGER_REFRESH_TOKEN_MOBILE` | POST /auth response body | 14 days |
+| `GAMECHANGER_CLIENT_ID_MOBILE` | `gc-client-id` request header | Permanent (until app redeploy) |
+| `GAMECHANGER_DEVICE_ID_MOBILE` | `gc-device-id` request header | Stable per device |
 
-- If you capture **mobile credentials after web credentials**, the `.env` file is overwritten with the mobile values
-- The `gc-token` is interchangeable (same JWT, same server) -- either web or mobile token works for API calls
-- The `gc-device-id` **may differ** between web and mobile. Whether the server ties the device ID to the request profile is **unverified** -- test when both credential sets are available
-- If you need to maintain separate credential sets, manually copy the mobile values before switching back to web capture
+Web and mobile credentials coexist in `.env` with separate suffixes (`_WEB` / `_MOBILE`). Capturing mobile credentials does not overwrite web credentials.
 
-### Web vs Mobile Credential Capture
+### Web vs Mobile Credential Comparison
 
-| Aspect | Web Browser | Mobile (iOS) |
-|--------|------------|--------------|
-| **Source** | Chrome DevTools (copy as curl) or mitmproxy browser capture | mitmproxy iOS capture |
-| **Auth token** | `gc-token` JWT | `gc-token` JWT (same format) |
-| **Device ID** | `gc-device-id` (32-char hex) | `gc-device-id` (32-char hex, may differ) |
-| **Token lifetime** | Access token ~60 min; refresh token 14 days | Same JWT format; same lifetime rules |
-| **App version** | `gc-app-version: 0.0.0` (POST /auth only) | `gc-app-version: 2026.7.0.0` (on all requests) |
-| **Setup required** | Browser proxy or DevTools | iPhone proxy + CA cert |
-| **Extraction** | Manual (curl) or automatic (mitmproxy) | Automatic (mitmproxy credential_extractor addon) |
+| Aspect | Web | Mobile (iOS) |
+|--------|-----|--------------|
+| **Capture method** | Curl from DevTools or mitmproxy | mitmproxy only |
+| **Extract command** | `bb creds import` | `bb creds capture --profile mobile` |
+| **Access token lifetime** | ~60 min | ~12 hours |
+| **Programmatic refresh** | Yes (`bb creds refresh`) | No (recapture required) |
+| **Auto-login fallback** | Yes (E-085) | No |
+| **Setup required** | Browser or browser proxy | iPhone proxy + CA cert |
 
 ### Security Considerations
 

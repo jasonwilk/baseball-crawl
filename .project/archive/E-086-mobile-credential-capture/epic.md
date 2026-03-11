@@ -1,7 +1,7 @@
 # E-086: Mobile Credential Capture
 
 ## Status
-`READY`
+`COMPLETED`
 <!-- Lifecycle: DRAFT -> READY -> ACTIVE -> COMPLETED (or BLOCKED / ABANDONED) -->
 
 ## Overview
@@ -50,10 +50,10 @@ The gap: there is no automated path from "proxy captured mobile traffic" to "cre
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-086-01 | Proxy Addon: gc-client-id and Response Body Capture | TODO | None | - |
-| E-086-02 | `bb creds import --profile mobile` | TODO | None | - |
-| E-086-03 | `bb creds capture --profile mobile` | TODO | E-086-01, E-086-02 | - |
-| E-086-04 | Context-Layer Mobile Credential Workflow | TODO | E-086-02, E-086-03 | - |
+| E-086-01 | Proxy Addon: gc-client-id and Response Body Capture | DONE | None | SE |
+| E-086-02 | `bb creds import --profile mobile` | DONE | None | SE |
+| E-086-03 | `bb creds capture --profile mobile` | DONE | E-086-01, E-086-02 | SE |
+| E-086-04 | Context-Layer Mobile Credential Workflow | DONE | E-086-02, E-086-03 | CA |
 
 ## Dispatch Team
 - software-engineer
@@ -147,4 +147,5 @@ Mobile access tokens expire in ~12 hours. The system must communicate this hones
 ## History
 - 2026-03-09: Created. Absorbs remaining E-075 stories (02 + 03) into a richer, integrated mobile credential workflow. All four consultations completed (CA, UXD, api-scout, SE).
 - 2026-03-09: Codex spec review triage -- 6 findings, all accepted. Fixes: (P1-1) added E-086-03 dependency on E-086-02 for shared file conflict, (P1-2) clarified proxy session fallback as detection+guidance only (endpoint log has no credential values), fixed `current-session` -> `current` symlink reference, (P2-1) AC-10 changed from ambiguous "offers to run" to "prints a suggestion", (P2-2) fixed test file path to `tests/test_proxy/test_credential_extractor.py`, (P2-3) removed E-085 login fallback claim (still DRAFT), (P3-1) replaced contradictory DoD in E-086-04 with docs-specific verification.
+- 2026-03-10: COMPLETED. All 4 stories implemented, reviewed, and merged. Proxy addon captures gc-client-id and POST /auth response tokens (01). `bb creds import --profile mobile` supports manual curl-paste path (02). `bb creds capture --profile mobile` provides the automated proxy-to-.env workflow with full decision tree guidance (03). CLAUDE.md, mitmproxy-guide.md, getting-started.md, and bootstrap-guide.md updated with mobile credential workflow (04). Code review findings: response() and _process_header() refactored to extract helpers for function length compliance; import_creds() accepted at exactly 50 lines via user override. SHOULD FIX noted: _run_api_check private import across module boundary (deferred), parse_curl() at 128 lines (predates this epic, deferred).
 - 2026-03-10: All-agent refinement review. Fixes: (CRIT) corrected POST /auth response field name from `token` to `data` in epic TN + E-086-01 (api-scout), (P1) removed unverified refresh-token-for-GET-endpoints claim (api-scout), (P1) expanded E-086-04 scope to include getting-started.md + bootstrap-guide.md and clarified mitmproxy-guide.md replacement (docs-writer), (P2) added Mac-host callout to E-086-03 AC-5 (ux-designer). Agents consulted: PM, baseball-coach, api-scout, data-engineer, software-engineer, docs-writer, ux-designer, claude-architect.
