@@ -1,7 +1,7 @@
 # E-091: Fix E-088 Opponent Data Model Defects
 
 ## Status
-`READY`
+`COMPLETED`
 
 ## Overview
 Fix three confirmed defects in the E-088 Opponent Data Model implementation identified by Codex code review and validated by SE and DE triage. All fixes are small, application-level only, with no schema changes required.
@@ -28,9 +28,9 @@ Codex code review of E-088 (Opponent Data Model and Resolution) identified 4 fin
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-091-01 | Guard connect endpoint against overwriting resolved links | TODO | None | - |
-| E-091-02 | Store hidden opponents instead of skipping them | TODO | None | - |
-| E-091-03 | Scope duplicate public_id check to our_team_id | TODO | E-091-01 | - |
+| E-091-01 | Guard connect endpoint against overwriting resolved links | DONE | None | SE-1 |
+| E-091-02 | Store hidden opponents instead of skipping them | DONE | None | SE-2 |
+| E-091-03 | Scope duplicate public_id check to our_team_id | DONE | E-091-01 | SE-3 |
 
 ## Dispatch Team
 - software-engineer
@@ -49,3 +49,4 @@ None.
 - 2026-03-10: Created from Codex code review of E-088. SE and DE triage consensus: fix F1 (P2), F2 (P2), F4 (P5); defer F3. All three stories are independent, single-wave parallel dispatch.
 - 2026-03-10: PM + SE refinement pass. Two findings applied: (1) E-091-02 story updated to address `ResolveResult.skipped_hidden` counter becoming dead code after the early-return removal -- rename to `stored_hidden`. (2) E-091-03 story updated to note `is_duplicate_opponent_public_id` is dead code (zero callers) -- SE may fix or delete. E-091-01 passed clean.
 - 2026-03-10: Codex spec review triage (4 findings). F1 (file conflict): serialized E-091-01 → E-091-03 since both touch admin.py and test_admin_opponents.py; wave is now 01+02 parallel → 03. F2 (title ambiguity): renamed E-091-01 title from "Auto-Resolved" to "Resolved", added "regardless of resolution method" to AC-1. F3 (counter rename gap): added AC-5 to E-091-02 covering `skipped_hidden` → `stored_hidden` rename. F4 (confirm page path): revised E-091-03 AC-1/AC-2 to cover both confirm GET and save POST paths, AC-3 notes both call sites use the same scoped function.
+- 2026-03-11: All three stories completed and merged. Code-reviewer caught function-length violations in E-091-01 (connect_opponent 50 lines) and E-091-03 (connect_opponent_confirm 51 lines) -- both fixed by extracting helpers (_check_already_resolved, _get_duplicate_name_for_link). Code-reviewer also caught stored_hidden incrementing on error path in E-091-02 -- fixed by moving increment inside try block. Dead code is_duplicate_opponent_public_id deleted in E-091-03. 1671 tests pass, 14 pre-existing failures unrelated to E-091. No documentation impact. No context-layer impact.
