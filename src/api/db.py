@@ -979,27 +979,37 @@ def is_owned_team_public_id(public_id: str) -> bool:
         return False
 
 
-def get_duplicate_opponent_name(public_id: str, exclude_id: int | None = None) -> str | None:
+def get_duplicate_opponent_name(
+    public_id: str,
+    our_team_id: str,
+    exclude_id: int | None = None,
+) -> str | None:
     """Return the opponent_name of an existing row that already uses this public_id.
+
+    The check is scoped to ``our_team_id`` so that different teams sharing the
+    same opponent ``public_id`` do not produce spurious duplicate warnings.
 
     Args:
         public_id: The public_id slug to check.
+        our_team_id: The owning team -- only rows for this team are checked.
         exclude_id: opponent_links.id to exclude (for updates).
 
     Returns:
-        The opponent_name string if a duplicate exists, else None.
+        The opponent_name string if a duplicate exists within the same team, else None.
     """
     try:
         with closing(get_connection()) as conn:
             if exclude_id is not None:
                 row = conn.execute(
-                    "SELECT opponent_name FROM opponent_links WHERE public_id = ? AND id != ?",
-                    (public_id, exclude_id),
+                    "SELECT opponent_name FROM opponent_links"
+                    " WHERE public_id = ? AND our_team_id = ? AND id != ?",
+                    (public_id, our_team_id, exclude_id),
                 ).fetchone()
             else:
                 row = conn.execute(
-                    "SELECT opponent_name FROM opponent_links WHERE public_id = ?",
-                    (public_id,),
+                    "SELECT opponent_name FROM opponent_links"
+                    " WHERE public_id = ? AND our_team_id = ?",
+                    (public_id, our_team_id),
                 ).fetchone()
         return row[0] if row else None
     except sqlite3.Error:
