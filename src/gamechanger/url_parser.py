@@ -1,44 +1,77 @@
-"""URL parser for extracting public_id from GameChanger team URLs.
+"""URL parser for extracting team identifiers from GameChanger team URLs.
 
-Accepts full GameChanger team URLs or bare public_id slugs.  Returns the
-public_id string in either case.
+Accepts full GameChanger team URLs, bare public_id slugs, or bare UUIDs.
+Returns a structured result indicating the identifier type.
 
 Example::
 
     from src.gamechanger.url_parser import parse_team_url
 
-    public_id = parse_team_url("https://web.gc.com/teams/a1GFM9Ku0BbF/2025-rebels-14u")
-    # Returns: "a1GFM9Ku0BbF"
+    result = parse_team_url("https://web.gc.com/teams/a1GFM9Ku0BbF/2025-rebels-14u")
+    # result.value == "a1GFM9Ku0BbF", result.id_type == "public_id"
 
-    public_id = parse_team_url("a1GFM9Ku0BbF")
-    # Returns: "a1GFM9Ku0BbF"
+    result = parse_team_url("a1GFM9Ku0BbF")
+    # result.value == "a1GFM9Ku0BbF", result.id_type == "public_id"
+
+    result = parse_team_url("72bb77d8-54ca-42d2-8547-9da4880d0cb4")
+    # result.value == "72bb77d8-54ca-42d2-8547-9da4880d0cb4", result.id_type == "uuid"
 """
 
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from urllib.parse import urlparse
 
 _PUBLIC_ID_RE = re.compile(r"^[A-Za-z0-9]{6,20}$")
+_UUID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+    re.IGNORECASE,
+)
 
 
-def parse_team_url(input: str) -> str:
-    """Extract a GameChanger team public_id from a URL or bare slug.
+@dataclass(frozen=True)
+class TeamIdResult:
+    """Result of parsing a GameChanger team identifier.
+
+    Attributes:
+        value: The extracted identifier string (public_id slug or UUID).
+        id_type: Either ``"public_id"`` or ``"uuid"``.
+    """
+
+    value: str
+    id_type: str
+
+    @property
+    def is_uuid(self) -> bool:
+        """Return True if this result holds a UUID."""
+        return self.id_type == "uuid"
+
+    @property
+    def is_public_id(self) -> bool:
+        """Return True if this result holds a public_id slug."""
+        return self.id_type == "public_id"
+
+
+def parse_team_url(input: str) -> TeamIdResult:
+    """Extract a GameChanger team identifier from a URL, bare slug, or bare UUID.
 
     Accepts:
     - Full GC URL: ``https://web.gc.com/teams/{public_id}/some-slug``
-    - Any URL with a ``/teams/{public_id}`` path (mobile share links, etc.)
+    - Full GC URL with UUID: ``https://web.gc.com/teams/{uuid}/some-slug``
+    - Any URL with a ``/teams/{id}`` path (mobile share links, etc.)
     - Bare ``public_id`` slug (e.g. ``"a1GFM9Ku0BbF"``)
+    - Bare UUID (e.g. ``"72bb77d8-54ca-42d2-8547-9da4880d0cb4"``)
 
     Args:
-        input: A GameChanger team URL or bare public_id string.
+        input: A GameChanger team URL, bare public_id string, or bare UUID.
 
     Returns:
-        The extracted ``public_id`` slug.
+        A :class:`TeamIdResult` with the extracted identifier and its type.
 
     Raises:
         ValueError: If the input is empty, contains no ``/teams/`` segment,
-            or the extracted public_id fails alphanumeric validation.
+            or the extracted value fails both UUID and public_id validation.
     """
     value = input.strip()
     if not value:
@@ -46,14 +79,11 @@ def parse_team_url(input: str) -> str:
 
     parsed = urlparse(value)
 
-    # If no scheme and no netloc, treat as a bare public_id (or relative path)
+    # If no scheme and no netloc, treat as a bare identifier (no path separators)
     if not parsed.scheme and not parsed.netloc:
-        # Could be a bare public_id slug -- validate directly
         candidate = value.split("?")[0].split("#")[0].strip("/")
-        # If it looks like a bare slug with no path separators, validate it
         if "/" not in candidate:
-            _validate_public_id(candidate)
-            return candidate
+            return _classify(candidate)
 
     # It has a scheme/netloc (or looks like a URL) -- extract from path
     path = parsed.path
@@ -68,23 +98,24 @@ def parse_team_url(input: str) -> str:
         )
 
     candidate = match.group(1).strip("/")
-    _validate_public_id(candidate)
-    return candidate
+    return _classify(candidate)
 
 
-def _validate_public_id(value: str) -> None:
-    """Raise ValueError if value is not a valid public_id.
-
-    A valid public_id is alphanumeric (letters and digits only), 6-20 chars.
+def _classify(candidate: str) -> TeamIdResult:
+    """Return a TeamIdResult for the given candidate string.
 
     Args:
-        value: The candidate public_id string.
+        candidate: A potential public_id or UUID string.
 
     Raises:
-        ValueError: If the value does not match the expected format.
+        ValueError: If the candidate matches neither format.
     """
-    if not _PUBLIC_ID_RE.match(value):
-        raise ValueError(
-            f"Invalid public_id {value!r}: must be alphanumeric (letters and digits only), "
-            "6-20 characters. Got a URL with an unexpected path segment or an invalid slug."
-        )
+    if _UUID_RE.match(candidate):
+        return TeamIdResult(value=candidate, id_type="uuid")
+    if _PUBLIC_ID_RE.match(candidate):
+        return TeamIdResult(value=candidate, id_type="public_id")
+    raise ValueError(
+        f"Invalid team identifier {candidate!r}: must be a UUID "
+        "(xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx) or an alphanumeric public_id "
+        "(letters and digits only, 6-20 characters)."
+    )

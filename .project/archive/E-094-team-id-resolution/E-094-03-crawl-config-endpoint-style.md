@@ -4,7 +4,7 @@
 [E-094: Fix Team ID Resolution in Import and Crawl Pipeline](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, `TeamEntry` in `config.py` will carry an `is_owned` flag loaded from the database, allowing the crawl orchestrator and individual crawlers to distinguish owned teams (use authenticated UUID-based endpoints) from non-owned teams (use public slug-based endpoints). The `load_config_from_db()` function will populate this field from the `teams.is_owned` column.
@@ -19,7 +19,7 @@ This story only adds the `is_owned` field and populates it from the DB. It does 
 
 ## Acceptance Criteria
 - [ ] **AC-1**: `TeamEntry` dataclass has an `is_owned` boolean field (default `True` for backward compatibility with YAML config).
-- [ ] **AC-2**: `load_config_from_db()` populates `is_owned` from the `teams.is_owned` column for each team entry.
+- [ ] **AC-2**: `load_config_from_db()` includes `is_owned` in the SQL SELECT column list and passes the value to the `TeamEntry` constructor for each team entry.
 - [ ] **AC-3**: `load_config()` (YAML path) sets `is_owned=True` on all entries (YAML config is for owned teams only).
 - [ ] **AC-4**: The `load_config_from_db()` query still filters to `is_active = 1 AND is_owned = 1` (no change to which teams are loaded -- this story only adds the field).
 - [ ] **AC-5**: Existing tests in `tests/test_config.py` pass. New tests verify `is_owned` is populated correctly from both YAML and DB paths.

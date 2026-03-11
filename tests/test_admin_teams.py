@@ -582,26 +582,31 @@ class TestAddTeamSuccess:
         assert team["source"] == "gamechanger"
 
     def test_owned_team_sets_is_owned_1(self, admin_db: Path) -> None:
-        """team_type=owned sets is_owned=1 on the inserted row."""
+        """team_type=owned resolves UUID via reverse bridge and sets is_owned=1."""
         user_id = _insert_user(admin_db, "addteam3@example.com", is_admin=1)
         token = _insert_session(admin_db, user_id)
+        resolved_uuid = "00000000-0000-0000-0000-000000000001"
 
         with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db)}):
-            with patch(
-                "src.api.routes.admin.resolve_team", return_value=_SAMPLE_PROFILE
-            ):
-                with TestClient(app, cookies={"session": token}) as client:
-                    client.post(
-                        "/admin/teams",
-                        data={
-                            "url_input": "abc123def456",
-                            "level": "varsity",
-                            "team_type": "owned",
-                        },
-                    )
-        team = _get_team(admin_db, "abc123def456")
+            with patch("src.api.routes.admin.resolve_team", return_value=_SAMPLE_PROFILE):
+                with patch(
+                    "src.api.routes.admin.resolve_public_id_to_uuid",
+                    return_value=resolved_uuid,
+                ):
+                    with TestClient(app, cookies={"session": token}) as client:
+                        client.post(
+                            "/admin/teams",
+                            data={
+                                "url_input": "abc123def456",
+                                "level": "varsity",
+                                "team_type": "owned",
+                            },
+                        )
+        # Owned team: team_id is the resolved UUID, not the public_id slug
+        team = _get_team(admin_db, resolved_uuid)
         assert team is not None
         assert team["is_owned"] == 1
+        assert team["public_id"] == "abc123def456"
 
     def test_success_message_includes_location(self, admin_db: Path) -> None:
         """Success redirect URL includes team name and city/state."""
@@ -723,6 +728,173 @@ class TestAddTeamErrors:
                     "/admin/teams",
                     data={"url_input": "existingpublicid1", "team_type": "tracked"},
                 )
+        assert response.status_code == 200
+        assert "already in the system" in response.text
+
+
+# ---------------------------------------------------------------------------
+# POST /admin/teams -- UUID resolution paths (AC-7)
+# ---------------------------------------------------------------------------
+
+_OWNED_UUID = "00000000-0000-0000-0000-000000000042"
+_OWNED_PUBLIC_ID = "abc123def456"
+_OWNED_PROFILE = TeamProfile(
+    public_id=_OWNED_PUBLIC_ID,
+    name="Riverside Tigers",
+    sport="baseball",
+    city="Riverside",
+    state="CA",
+)
+
+
+class TestUuidResolution:
+    """POST /admin/teams UUID resolution for owned teams (AC-7)."""
+
+    def test_owned_team_public_id_input_resolves_uuid_as_team_id(
+        self, admin_db: Path
+    ) -> None:
+        """AC-1: owned team added via public_id slug stores UUID as team_id."""
+        user_id = _insert_user(admin_db, "uuid1@example.com", is_admin=1)
+        token = _insert_session(admin_db, user_id)
+
+        with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db)}):
+            with patch("src.api.routes.admin.resolve_team", return_value=_OWNED_PROFILE):
+                with patch(
+                    "src.api.routes.admin.resolve_public_id_to_uuid",
+                    return_value=_OWNED_UUID,
+                ):
+                    with TestClient(app, cookies={"session": token}) as client:
+                        response = client.post(
+                            "/admin/teams",
+                            data={
+                                "url_input": _OWNED_PUBLIC_ID,
+                                "level": "varsity",
+                                "team_type": "owned",
+                            },
+                            follow_redirects=False,
+                        )
+        assert response.status_code == 303
+        team = _get_team(admin_db, _OWNED_UUID)
+        assert team is not None
+        assert team["team_id"] == _OWNED_UUID
+        assert team["public_id"] == _OWNED_PUBLIC_ID
+        assert team["is_owned"] == 1
+
+    def test_owned_team_uuid_input_uses_uuid_as_team_id(self, admin_db: Path) -> None:
+        """AC-2: owned team added via UUID input stores UUID as team_id."""
+        user_id = _insert_user(admin_db, "uuid2@example.com", is_admin=1)
+        token = _insert_session(admin_db, user_id)
+
+        with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db)}):
+            with patch("src.api.routes.admin.resolve_team", return_value=_OWNED_PROFILE):
+                with patch(
+                    "src.api.routes.admin.resolve_uuid_to_public_id",
+                    return_value=_OWNED_PUBLIC_ID,
+                ):
+                    with TestClient(app, cookies={"session": token}) as client:
+                        response = client.post(
+                            "/admin/teams",
+                            data={
+                                "url_input": _OWNED_UUID,
+                                "level": "varsity",
+                                "team_type": "owned",
+                            },
+                            follow_redirects=False,
+                        )
+        assert response.status_code == 303
+        team = _get_team(admin_db, _OWNED_UUID)
+        assert team is not None
+        assert team["team_id"] == _OWNED_UUID
+        assert team["public_id"] == _OWNED_PUBLIC_ID
+        assert team["is_owned"] == 1
+
+    def test_non_owned_team_uses_slug_as_team_id(self, admin_db: Path) -> None:
+        """AC-3: non-owned (tracked) team stores public_id as team_id, no bridge call."""
+        user_id = _insert_user(admin_db, "uuid3@example.com", is_admin=1)
+        token = _insert_session(admin_db, user_id)
+
+        with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db)}):
+            with patch("src.api.routes.admin.resolve_team", return_value=_OWNED_PROFILE):
+                with patch(
+                    "src.api.routes.admin.resolve_public_id_to_uuid"
+                ) as mock_bridge:
+                    with TestClient(app, cookies={"session": token}) as client:
+                        response = client.post(
+                            "/admin/teams",
+                            data={
+                                "url_input": _OWNED_PUBLIC_ID,
+                                "team_type": "tracked",
+                            },
+                            follow_redirects=False,
+                        )
+        assert response.status_code == 303
+        # Bridge should NOT be called for non-owned teams
+        mock_bridge.assert_not_called()
+        team = _get_team(admin_db, _OWNED_PUBLIC_ID)
+        assert team is not None
+        assert team["team_id"] == _OWNED_PUBLIC_ID
+        assert team["public_id"] == _OWNED_PUBLIC_ID
+        assert team["is_owned"] == 0
+
+    def test_non_owned_uuid_input_rejected(self, admin_db: Path) -> None:
+        """AC-3.5: UUID input for non-owned team shows clear error."""
+        user_id = _insert_user(admin_db, "uuid4@example.com", is_admin=1)
+        token = _insert_session(admin_db, user_id)
+
+        with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db)}):
+            with TestClient(app, cookies={"session": token}) as client:
+                response = client.post(
+                    "/admin/teams",
+                    data={"url_input": _OWNED_UUID, "team_type": "tracked"},
+                )
+        assert response.status_code == 200
+        assert "uuid" in response.text.lower() or "non-owned" in response.text.lower()
+
+    def test_owned_reverse_bridge_403_shows_error(self, admin_db: Path) -> None:
+        """AC-4: 403 from reverse bridge shows clear 'not on your account' error."""
+        from src.gamechanger.bridge import BridgeForbiddenError
+
+        user_id = _insert_user(admin_db, "uuid5@example.com", is_admin=1)
+        token = _insert_session(admin_db, user_id)
+
+        with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db)}):
+            with patch(
+                "src.api.routes.admin.resolve_public_id_to_uuid",
+                side_effect=BridgeForbiddenError("403 Forbidden"),
+            ):
+                with TestClient(app, cookies={"session": token}) as client:
+                    response = client.post(
+                        "/admin/teams",
+                        data={"url_input": _OWNED_PUBLIC_ID, "team_type": "owned"},
+                    )
+        assert response.status_code == 200
+        assert "not found" in response.text.lower() or "account" in response.text.lower()
+
+    def test_owned_uuid_duplicate_check_by_team_id(self, admin_db: Path) -> None:
+        """AC-5: re-adding owned team (UUID already in team_id) shows already-exists error."""
+        # Pre-insert the owned team with UUID as team_id
+        conn = sqlite3.connect(str(admin_db))
+        conn.execute(
+            "INSERT INTO teams (team_id, name, public_id, is_owned, source, is_active) "
+            "VALUES (?, ?, ?, 1, 'gamechanger', 1)",
+            (_OWNED_UUID, "Riverside Tigers", _OWNED_PUBLIC_ID),
+        )
+        conn.commit()
+        conn.close()
+
+        user_id = _insert_user(admin_db, "uuid6@example.com", is_admin=1)
+        token = _insert_session(admin_db, user_id)
+
+        with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db)}):
+            with patch(
+                "src.api.routes.admin.resolve_public_id_to_uuid",
+                return_value=_OWNED_UUID,
+            ):
+                with TestClient(app, cookies={"session": token}) as client:
+                    response = client.post(
+                        "/admin/teams",
+                        data={"url_input": _OWNED_PUBLIC_ID, "team_type": "owned"},
+                    )
         assert response.status_code == 200
         assert "already in the system" in response.text
 

@@ -1,4 +1,4 @@
-"""Tests for load_config_from_db() in src/gamechanger/config.py (E-042-06).
+"""Tests for load_config_from_db() in src/gamechanger/config.py (E-042-06, E-094-03).
 
 Uses in-memory SQLite databases -- no file I/O, no network calls.
 
@@ -20,7 +20,7 @@ _MIGRATION_FILE = _PROJECT_ROOT / "migrations" / "001_initial_schema.sql"
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-from src.gamechanger.config import CrawlConfig, TeamEntry, load_config_from_db  # noqa: E402
+from src.gamechanger.config import CrawlConfig, TeamEntry, load_config, load_config_from_db  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -194,3 +194,47 @@ def test_load_config_from_db_null_level_becomes_empty_string(tmp_path: Path) -> 
 
     assert len(config.owned_teams) == 1
     assert config.owned_teams[0].level == ""
+
+
+# ---------------------------------------------------------------------------
+# Tests: is_owned field (E-094-03)
+# ---------------------------------------------------------------------------
+
+
+def test_load_config_from_db_sets_is_owned_true(tmp_path: Path) -> None:
+    """load_config_from_db sets is_owned=True on returned TeamEntry rows."""
+    db_file = _make_db(tmp_path)
+    _seed(db_file, [_SEASON], [_OWNED_ACTIVE])
+
+    config = load_config_from_db(db_file)
+
+    assert len(config.owned_teams) == 1
+    assert config.owned_teams[0].is_owned is True
+
+
+def test_team_entry_is_owned_default_true() -> None:
+    """TeamEntry.is_owned defaults to True when not supplied."""
+    entry = TeamEntry(id="abc", name="Test", level="jv")
+    assert entry.is_owned is True
+
+
+def test_load_config_yaml_sets_is_owned_true(tmp_path: Path) -> None:
+    """load_config (YAML path) sets is_owned=True on all TeamEntry instances."""
+    yaml_content = (
+        "season: '2026'\n"
+        "owned_teams:\n"
+        "  - id: team-abc\n"
+        "    name: Lincoln Varsity\n"
+        "    level: varsity\n"
+        "  - id: team-def\n"
+        "    name: Lincoln JV\n"
+        "    level: jv\n"
+    )
+    yaml_file = tmp_path / "teams.yaml"
+    yaml_file.write_text(yaml_content)
+
+    config = load_config(yaml_file)
+
+    assert len(config.owned_teams) == 2
+    for team in config.owned_teams:
+        assert team.is_owned is True

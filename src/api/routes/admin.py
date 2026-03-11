@@ -48,13 +48,19 @@ from src.api.db import (
     is_owned_team_public_id,
     save_manual_opponent_link,
 )
+from src.gamechanger.bridge import (
+    BridgeForbiddenError,
+    resolve_public_id_to_uuid,
+    resolve_uuid_to_public_id,
+)
+from src.gamechanger.exceptions import ConfigurationError, CredentialExpiredError
 from src.gamechanger.team_resolver import (
     GameChangerAPIError,
     TeamNotFoundError,
     discover_opponents,
     resolve_team,
 )
-from src.gamechanger.url_parser import parse_team_url
+from src.gamechanger.url_parser import TeamIdResult, parse_team_url
 
 logger = logging.getLogger(__name__)
 
@@ -552,6 +558,76 @@ def _team_id_exists(team_id: str) -> bool:
     return row is not None
 
 
+def _public_id_exists(public_id: str) -> bool:
+    """Check whether any team row has the given public_id in the public_id column.
+
+    Discovered placeholders have ``public_id IS NULL`` so they are never matched.
+
+    Args:
+        public_id: The public_id slug to look up.
+
+    Returns:
+        True if any team row has this public_id, False otherwise.
+    """
+    with closing(get_connection()) as conn:
+        row = conn.execute(
+            "SELECT 1 FROM teams WHERE public_id = ?", (public_id,)
+        ).fetchone()
+    return row is not None
+
+
+def _check_team_duplicate(team_id: str, public_id: str) -> bool:
+    """Return True if team_id or public_id already exists as a non-placeholder.
+
+    For owned teams team_id is a UUID and public_id is a slug, so both columns
+    are checked.  For non-owned teams team_id == public_id and the first check
+    is sufficient.
+
+    Args:
+        team_id: The resolved team primary key (UUID for owned, slug for non-owned).
+        public_id: The public_id slug.
+
+    Returns:
+        True if a non-placeholder match is found in either column.
+    """
+    if _team_id_exists(team_id) and not _team_is_discovered_placeholder(team_id):
+        return True
+    if team_id != public_id:
+        return _public_id_exists(public_id)
+    return False
+
+
+def _resolve_team_ids(id_result: TeamIdResult, is_owned: int) -> tuple[str, str]:
+    """Resolve the final (team_id, public_id) pair from parsed input and team type.
+
+    Non-owned teams: returns (slug, slug) -- no bridge calls needed.
+    Owned + UUID input: calls the forward bridge to get public_id.
+    Owned + public_id input: calls the reverse bridge to get UUID.
+
+    Args:
+        id_result: Parsed TeamIdResult from parse_team_url().
+        is_owned: 1 for owned (Lincoln) teams, 0 for tracked opponents.
+
+    Returns:
+        Tuple of (team_id, public_id_slug).
+
+    Raises:
+        BridgeForbiddenError: If the bridge API returns 403.
+        CredentialExpiredError: If authentication fails.
+        ConfigurationError: If GC credentials are not configured in .env.
+    """
+    if not is_owned:
+        # Non-owned: public_id slug doubles as team_id (UUID case rejected by caller)
+        return id_result.value, id_result.value
+    if id_result.is_uuid:
+        # Owned + UUID input: resolve UUID -> public_id via forward bridge
+        slug = resolve_uuid_to_public_id(id_result.value)
+        return id_result.value, slug
+    # Owned + public_id input: resolve public_id -> UUID via reverse bridge
+    team_uuid = resolve_public_id_to_uuid(id_result.value)
+    return team_uuid, id_result.value
+
+
 def _team_is_discovered_placeholder(team_id: str) -> bool:
     """Return True if the team with team_id is a discovered placeholder (not yet a real add).
 
@@ -586,7 +662,7 @@ def _upgrade_placeholder_team(
 
     Args:
         old_team_id: The existing placeholder's team_id to update.
-        new_team_id: The resolved public_id (used as the new team_id).
+        new_team_id: The resolved team_id (UUID for owned teams, public_id slug for non-owned).
         name: Team name from the API.
         public_id: The GameChanger public_id slug.
         level: Level string or None.
@@ -620,7 +696,7 @@ def _insert_team(
     """Insert a new team row.
 
     Args:
-        team_id: Primary key (equals public_id for URL-added teams).
+        team_id: Primary key (UUID for owned teams; equals public_id for non-owned teams).
         name: Team name from the API.
         public_id: The GameChanger public_id slug.
         level: Level string or None.
@@ -686,14 +762,15 @@ async def add_team(
     level: str = Form(default=""),
     team_type: str = Form(default="tracked"),
 ) -> Response:
-    """Add a team by GameChanger URL or public_id.
+    """Add a team by GameChanger URL, public_id slug, or UUID.
 
-    Parses the URL input, resolves the team profile from the public API, and
-    either upgrades an existing discovered placeholder or inserts a new row.
+    Parses the URL input, resolves team_id and public_id (calling bridge APIs
+    for owned teams), fetches the public team profile, then either upgrades an
+    existing discovered placeholder or inserts a new row.
 
     Args:
         request: The incoming HTTP request.
-        url_input: GameChanger URL or bare public_id.
+        url_input: GameChanger URL, bare public_id slug, or UUID.
         level: Optional level value (freshman/jv/varsity/reserve/legion/other).
         team_type: "owned" for Lincoln teams, "tracked" for opponents.
 
@@ -707,24 +784,51 @@ async def add_team(
     is_owned = 1 if team_type == "owned" else 0
     level_value = level.strip() or None
 
-    # --- Parse URL ---
     try:
-        public_id = parse_team_url(url_input.strip())
+        id_result = parse_team_url(url_input.strip())
     except ValueError as exc:
         return await _render_teams_error(request, guard, str(exc), url_input, level_value, team_type)
 
-    # --- Check for exact team_id duplicate that is NOT a discovered placeholder ---
-    already_exists = await run_in_threadpool(_team_id_exists, public_id)
-    if already_exists:
-        is_placeholder = await run_in_threadpool(_team_is_discovered_placeholder, public_id)
-        if not is_placeholder:
-            return await _render_teams_error(
-                request, guard,
-                "This team is already in the system.",
-                url_input, level_value, team_type,
-            )
+    # AC-3.5: UUID input is only valid for owned teams (no path to resolve non-owned UUIDs)
+    if id_result.is_uuid and not is_owned:
+        return await _render_teams_error(
+            request, guard,
+            "Non-owned (tracked) teams require a GameChanger URL or public_id, not a UUID.",
+            url_input, level_value, team_type,
+        )
 
-    # --- Resolve team via public API ---
+    # Resolve final team_id (UUID for owned) and public_id slug (may need bridge calls)
+    try:
+        team_id, public_id = await run_in_threadpool(_resolve_team_ids, id_result, is_owned)
+    except BridgeForbiddenError:
+        return await _render_teams_error(
+            request, guard,
+            "Team not found on your GameChanger account. "
+            "If you selected 'owned', verify the URL belongs to a team you manage.",
+            url_input, level_value, team_type,
+        )
+    except (CredentialExpiredError, ConfigurationError) as exc:
+        return await _render_teams_error(
+            request, guard,
+            f"GameChanger credentials error: {exc}. Run: bb creds check",
+            url_input, level_value, team_type,
+        )
+    except GameChangerAPIError:
+        return await _render_teams_error(
+            request, guard,
+            "Could not reach GameChanger API to resolve team ID. Try again later.",
+            url_input, level_value, team_type,
+        )
+
+    # Duplicate check on team_id (UUID or slug) and public_id slug columns
+    if await run_in_threadpool(_check_team_duplicate, team_id, public_id):
+        return await _render_teams_error(
+            request, guard,
+            "This team is already in the system.",
+            url_input, level_value, team_type,
+        )
+
+    # Fetch public team profile (name, city, sport, etc.)
     try:
         profile = await run_in_threadpool(resolve_team, public_id)
     except TeamNotFoundError:
@@ -740,40 +844,26 @@ async def add_team(
             url_input, level_value, team_type,
         )
 
-    # --- Upgrade placeholder or insert new row ---
+    # Upgrade discovered placeholder or insert new row
+    # Placeholders have no child rows (no stats imported yet), so PK update is safe.
     placeholder = await run_in_threadpool(_find_discovered_placeholder, profile.name)
     if placeholder:
         await run_in_threadpool(
             _upgrade_placeholder_team,
-            placeholder["team_id"],
-            public_id,
-            profile.name,
-            public_id,
-            level_value,
-            is_owned,
+            placeholder["team_id"], team_id, profile.name, public_id, level_value, is_owned,
         )
     else:
         await run_in_threadpool(
-            _insert_team,
-            public_id,
-            profile.name,
-            public_id,
-            level_value,
-            is_owned,
+            _insert_team, team_id, profile.name, public_id, level_value, is_owned,
         )
 
-    # Build success message with location if available
     location_parts = [p for p in (profile.city, profile.state) if p]
-    if location_parts:
-        location_str = ", ".join(location_parts)
-        msg = f"Team added: {profile.name} ({location_str})"
-    else:
-        msg = f"Team added: {profile.name}"
-
-    from urllib.parse import quote_plus
-    return RedirectResponse(
-        url=f"/admin/teams?msg={quote_plus(msg)}", status_code=303
+    msg = (
+        f"Team added: {profile.name} ({', '.join(location_parts)})"
+        if location_parts else f"Team added: {profile.name}"
     )
+    from urllib.parse import quote_plus
+    return RedirectResponse(url=f"/admin/teams?msg={quote_plus(msg)}", status_code=303)
 
 
 def _get_team_by_id(team_id: str) -> dict[str, Any] | None:
@@ -1179,9 +1269,15 @@ async def connect_opponent_confirm(request: Request, link_id: int) -> Response:
 
     url_input = request.query_params.get("url", "").strip()
     try:
-        public_id = parse_team_url(url_input)
+        id_result = parse_team_url(url_input)
     except ValueError as exc:
         return _render_connect_error(request, link, guard, str(exc))
+    if id_result.is_uuid:
+        return _render_connect_error(
+            request, link, guard,
+            "Opponent teams require a GameChanger URL or public_id, not a UUID.",
+        )
+    public_id = id_result.value
 
     is_own_team = await run_in_threadpool(is_owned_team_public_id, public_id)
     if is_own_team:

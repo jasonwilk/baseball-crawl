@@ -48,14 +48,20 @@ class TeamEntry:
     """A single team entry from the YAML config.
 
     Attributes:
-        id: GameChanger team UUID.
+        id: GameChanger team UUID (owned teams) or public_id slug (non-owned teams).
         name: Human-readable team name.
         level: Program level (e.g. ``"freshman"``, ``"jv"``, ``"varsity"``).
+        is_owned: Whether this is an LSB-owned team.  Owned teams use
+            authenticated, UUID-based API endpoints.  Non-owned (opponent)
+            teams use public, slug-based endpoints.  Defaults to ``True`` for
+            backward compatibility with YAML config (all YAML entries are
+            owned teams).
     """
 
     id: str
     name: str
     level: str
+    is_owned: bool = True
 
 
 @dataclass
@@ -109,6 +115,7 @@ def load_config(path: Path = _DEFAULT_CONFIG_PATH) -> CrawlConfig:
             id=str(entry["id"]),
             name=str(entry.get("name", "")),
             level=str(entry.get("level", "")),
+            is_owned=True,
         )
         for entry in raw["owned_teams"]
     ]
@@ -149,7 +156,7 @@ def load_config_from_db(db_path: Path) -> CrawlConfig:
         season_id: str = season_row["season_id"]
 
         team_rows = conn.execute(
-            "SELECT team_id, name, level FROM teams WHERE is_active = 1 AND is_owned = 1"
+            "SELECT team_id, name, level, is_owned FROM teams WHERE is_active = 1 AND is_owned = 1"
         ).fetchall()
 
     teams = [
@@ -157,6 +164,7 @@ def load_config_from_db(db_path: Path) -> CrawlConfig:
             id=row["team_id"],
             name=row["name"],
             level=row["level"] or "",
+            is_owned=bool(row["is_owned"]),
         )
         for row in team_rows
     ]

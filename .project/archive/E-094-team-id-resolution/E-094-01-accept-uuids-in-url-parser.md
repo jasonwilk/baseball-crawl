@@ -4,7 +4,7 @@
 [E-094: Fix Team ID Resolution in Import and Crawl Pipeline](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, `parse_team_url()` will accept GameChanger UUIDs (e.g., `72bb77d8-54ca-42d2-8547-9da4880d0cb4`) as valid input in addition to public_id slugs and full URLs. The function will return a result that indicates what type of identifier was provided, enabling callers to handle each type appropriately.
@@ -15,7 +15,7 @@ Currently `parse_team_url()` only returns a `public_id` string. It validates tha
 ## Acceptance Criteria
 - [ ] **AC-1**: Given a bare UUID string (e.g., `"72bb77d8-54ca-42d2-8547-9da4880d0cb4"`), `parse_team_url()` returns a result indicating the value is a UUID and provides the UUID string.
 - [ ] **AC-2**: Given a bare public_id slug (e.g., `"a1GFM9Ku0BbF"`), `parse_team_url()` returns a result indicating the value is a public_id and provides the slug string.
-- [ ] **AC-3**: Given a full GameChanger URL containing a public_id (e.g., `"https://web.gc.com/teams/a1GFM9Ku0BbF/2025-rebels-14u"`), the function returns a public_id result with the extracted slug.
+- [ ] **AC-3**: Given a full GameChanger URL containing a public_id (e.g., `"https://web.gc.com/teams/a1GFM9Ku0BbF/2025-rebels-14u"`), the function returns a public_id result with the extracted slug. Given a URL with a UUID in the `/teams/` segment (e.g., `"https://web.gc.com/teams/72bb77d8-54ca-42d2-8547-9da4880d0cb4/..."`), the function returns a UUID result with the extracted UUID.
 - [ ] **AC-4**: Given an invalid input (empty string, random text, URL with no `/teams/` segment), `ValueError` is raised as before.
 - [ ] **AC-5**: The return type is a structured result (dataclass or similar) with fields for the identifier value and its type, not a plain string. Existing callers that expect a plain string must be updated or the API change must be backward-compatible.
 - [ ] **AC-6**: All existing `test_url_parser.py` tests pass (updated as needed for the new return type).
@@ -48,4 +48,4 @@ software-engineer
 
 ## Notes
 - The UUID regex should validate the 8-4-4-4-12 hex format, not just "contains dashes." A string like `"abc-def"` should not be treated as a UUID.
-- Consider whether URLs could contain UUIDs in the path (e.g., `https://web.gc.com/teams/72bb77d8-54ca-42d2-8547-9da4880d0cb4/...`). If so, the URL extraction path should also detect UUID format in the `/teams/` segment.
+- URLs with UUIDs in the `/teams/` path segment are covered by AC-3 (required, not optional).
