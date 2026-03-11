@@ -43,7 +43,16 @@ fi
 proxy_enabled=$(echo "${PROXY_ENABLED:-}" | tr '[:upper:]' '[:lower:]' | xargs)
 if [[ "$proxy_enabled" == "true" ]]; then
     if [[ -n "$proxy_url" ]]; then
-        exec $run_as mitmweb "${base_args[@]}" --mode "upstream:${proxy_url}"
+        # mitmproxy doesn't support embedded credentials in upstream URLs.
+        # Split http://user:pass@host:port into --mode upstream:http://host:port
+        # and --upstream-auth user:pass.
+        upstream_host=$(echo "$proxy_url" | sed 's|://[^@]*@|://|')
+        upstream_auth=$(echo "$proxy_url" | sed -n 's|.*://\([^@]*\)@.*|\1|p')
+        upstream_args=("--mode" "upstream:${upstream_host}" "--ssl-insecure")
+        if [[ -n "$upstream_auth" ]]; then
+            upstream_args+=("--upstream-auth" "$upstream_auth")
+        fi
+        exec $run_as mitmweb "${base_args[@]}" "${upstream_args[@]}"
     else
         echo "WARNING: PROXY_ENABLED is true but ${proxy_var} is not set -- starting without upstream mode" >&2
         exec $run_as mitmweb "${base_args[@]}"
