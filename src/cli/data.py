@@ -200,5 +200,5 @@ def resolve_opponents(
             typer.echo(f"Error: {exc}", err=True)
             raise SystemExit(1) from exc
 
-    typer.echo(f"Opponent resolution complete: resolved={result.resolved} unlinked={result.unlinked} skipped_hidden={result.skipped_hidden} errors={result.errors}")
+    typer.echo(f"Opponent resolution complete: resolved={result.resolved} unlinked={result.unlinked} stored_hidden={result.stored_hidden} errors={result.errors}")
     raise SystemExit(1 if result.errors else 0)
