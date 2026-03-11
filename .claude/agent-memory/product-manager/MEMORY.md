@@ -1,8 +1,8 @@
 # Product Manager -- Agent Memory
 
 ## Numbering State
-- Next available epic number: E-095
-- Epics created: E-001 through E-094 (E-001, E-003, E-005, E-006, E-007, E-008, E-010, E-011, E-012, E-013, E-014, E-015, E-016, E-017, E-018, E-019, E-020, E-021, E-022, E-024, E-025, E-026, E-027, E-028, E-029, E-030, E-031, E-032, E-033, E-034, E-035, E-036, E-037, E-038, E-042, E-044, E-046, E-048, E-049, E-050, E-052, E-053, E-054, E-056, E-057, E-058, E-055, E-059, E-060, E-061, E-075, E-081, E-084, E-087, E-088, E-089, E-090, E-091, E-092 archived; E-093, E-094 active; E-095 deleted/reusable)
+- Next available epic number: E-096
+- Epics created: E-001 through E-095 (E-001, E-003, E-005, E-006, E-007, E-008, E-010, E-011, E-012, E-013, E-014, E-015, E-016, E-017, E-018, E-019, E-020, E-021, E-022, E-024, E-025, E-026, E-027, E-028, E-029, E-030, E-031, E-032, E-033, E-034, E-035, E-036, E-037, E-038, E-042, E-044, E-046, E-048, E-049, E-050, E-052, E-053, E-054, E-056, E-057, E-058, E-055, E-059, E-060, E-061, E-075, E-081, E-084, E-087, E-088, E-089, E-090, E-091, E-092 archived; E-093, E-094 active; E-095 active)
 - Next available idea number: IDEA-022
 - Ideas created: IDEA-001 through IDEA-021
 
@@ -23,7 +23,7 @@
 - E-086 (COMPLETED): Mobile Credential Capture -- 4 stories. See Archived Epics.
 - E-091 (COMPLETED): Fix E-088 Opponent Data Model Defects -- see Archived Epics.
 - E-094 (COMPLETED): Fix Team ID Resolution in Import and Crawl Pipeline -- see Archived Epics.
-- E-095: DELETED by user request. Number reusable. Was: Fix Codex Review Triage Workflow (dual triage modes, separate triage skill). Deleted before dispatch.
+- E-095 (READY): Client Key Credential Resilience -- 4 stories. Improve AuthSigningError messages to mention stale client key (01), add active client key validation to bb creds check via step-2 client-auth call (02), document client key extraction from GC JS bundle in docs/api/auth.md (03), automated client key extraction command `bb creds extract-key` (04). Wave 1: 01+02+04 parallel. Wave 2: 03 (depends on 02+04). SE + api-scout dispatch team. No expert consultation required.
 
 ## Archived Epics
 - E-092 (COMPLETED): Git Worktree Isolation for Agent Teams -- 5 stories. Worktree-native dispatch: implementing agents spawned with `isolation: "worktree"` by default, context-layer exception (no worktree for claude-architect), merge-back protocol after review approval, code-reviewer worktree-aware review, dotenv_values() path fix for worktree cwd. Key artifacts: `.claude/rules/worktree-isolation.md` (new), updated `dispatch-pattern.md`, `implement/SKILL.md`, `code-reviewer.md`. No follow-up work.
