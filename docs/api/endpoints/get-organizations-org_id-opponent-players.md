@@ -1,53 +1,49 @@
 ---
 method: GET
 path: /organizations/{org_id}/opponent-players
-status: PARTIAL
+status: OBSERVED
 auth: required
 profiles:
   web:
-    status: partial
-    notes: HTTP 500 returned with web headers. Proxy log shows 200 from iOS (paginated). Discovered 2026-03-05.
+    status: observed
+    notes: >
+      HTTP 200 observed in web proxy session 2026-03-11 (107 players, ~32KB).
+      Previously returned HTTP 500 with web headers (2026-03-05 session). The
+      HTTP 500 "page_size" bug appears to have been resolved server-side.
   mobile:
     status: observed
-    notes: 2 hits, status 200. Paginated. Discovered 2026-03-05.
-accept: null
+    notes: 2 hits, status 200, paginated. Discovered 2026-03-05. Schema not captured from mobile.
+accept: "application/vnd.gc.com.player:list+json; version=0.1.0"
 gc_user_action: null
-query_params:
-  - name: start_at
-    type: string
-    required: false
-    description: Pagination cursor (observed in proxy log).
-pagination: true
+query_params: []
+pagination: false
 response_shape: array
 response_sample: null
-raw_sample_size: null
+raw_sample_size: "107 players, ~32KB (web, 2026-03-11)"
 discovered: "2026-03-05"
 last_confirmed: null
 tags: [organization, opponent, player, bulk]
 caveats:
   - >
-    HTTP 500 FROM WEB HEADERS: Returns {"error":"Cannot read properties of undefined
-    (reading 'page_size')"} when called without required pagination parameters. The
-    `start_at` cursor or a `page_size` parameter may be required. See IDEA-011.
+    HTTP 500 RESOLVED: Previously returned HTTP 500 with web headers due to missing
+    pagination parameter. As of 2026-03-11 web proxy session, returns HTTP 200 without
+    pagination parameters. The server-side bug appears fixed. If HTTP 500 recurs,
+    try adding `?page_size=50` or `?start_at=0`.
   - >
-    iOS ONLY: Works with iOS Odyssey app headers (2 hits, status 200, paginated).
-    Web browser headers return HTTP 500. Response schema not captured from either profile.
-  - >
-    BLOCKED FOR IMPLEMENTATION: Do not use until HTTP 500 is resolved. Use
-    /teams/{team_id}/opponents/players for team-level bulk opponent player data instead.
-related_schemas: []
+    STATUS UPDATE 2026-03-11: Changed from PARTIAL to OBSERVED. Schema now documented
+    from live web proxy data. Previous "iOS only" limitation no longer observed.
 see_also:
   - path: /teams/{team_id}/opponents/players
-    reason: Team-level bulk opponent player roster (confirmed, 758 records) -- use this instead
+    reason: Team-level bulk opponent player roster (confirmed, 758 records) -- team scope
   - path: /organizations/{org_id}/opponents
-    reason: Org-level opponent list (for opponent UUIDs)
+    reason: Org-level opponent list (for team names and UUIDs)
 ---
 
 # GET /organizations/{org_id}/opponent-players
 
-**Status:** OBSERVED (proxy log + web headers). HTTP 500 with web headers; iOS proxy log shows 200 (paginated). Schema not captured.
+**Status:** OBSERVED -- HTTP 200 in web proxy session 2026-03-11. 107 players. Schema based on observed data.
 
-Returns opponent player rosters at the organization level. **Currently returns HTTP 500 with web headers** due to a missing pagination parameter.
+Returns opponent player rosters at the organization level. As of 2026-03-11, the previously-documented HTTP 500 bug with web headers appears resolved -- the endpoint returns HTTP 200 without requiring explicit pagination parameters.
 
 ```
 GET https://api.team-manager.gc.com/organizations/{org_id}/opponent-players
@@ -59,24 +55,67 @@ GET https://api.team-manager.gc.com/organizations/{org_id}/opponent-players
 |-----------|------|-------------|
 | `org_id` | UUID | Organization identifier |
 
-## Query Parameters
+## Request Headers
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `start_at` | string | Unknown | Pagination cursor (observed in iOS traffic) |
-
-## Error Response (Web Headers)
-
-```json
-{"error": "Cannot read properties of undefined (reading 'page_size')"}
+```
+gc-token: {AUTH_TOKEN}
+gc-device-id: {GC_DEVICE_ID}
+Accept: application/vnd.gc.com.player:list+json; version=0.1.0
 ```
 
-HTTP 500. Indicates a missing or malformed pagination parameter.
+## Response
 
-## Investigation Status
+**HTTP 200.** JSON array of player objects.
 
-Schema not confirmed. iOS proxy log shows 2 hits with status 200 and pagination, but response body was not captured. The correct pagination parameter combination is unknown.
+| Field | Type | Description |
+|-------|------|-------------|
+| `[].id` | UUID | Player UUID |
+| `[].team_id` | UUID | The opponent team this player belongs to |
+| `[].status` | string | Player status. Observed: `"active"`. |
+| `[].first_name` | string | Player first name |
+| `[].last_name` | string | Player last name (may be abbreviated) |
+| `[].number` | string | Jersey number as string |
+| `[].bats` | object | Batting/throwing handedness (may be partially populated) |
+| `[].bats.player_id` | UUID | Player UUID (repeated within bats object) |
+| `[].bats.throwing_hand` | string | Throwing hand. Observed: `"right"`. (May be absent) |
+| `[].bats.batting_side` | string | Batting side. Observed: `"right"`. (May be absent) |
+| `[].person_id` | UUID | Person UUID |
 
-**Alternative:** Use `GET /teams/{team_id}/opponents/players` (confirmed, 758 records, 61 teams) instead.
+## Example Response (truncated)
 
-**Discovered:** 2026-03-05.
+```json
+[
+  {
+    "id": "00000000-REDACTED",
+    "team_id": "00000000-REDACTED",
+    "status": "active",
+    "first_name": "Player",
+    "last_name": "A",
+    "number": "99",
+    "bats": {
+      "player_id": "00000000-REDACTED"
+    },
+    "person_id": "00000000-REDACTED"
+  },
+  {
+    "id": "00000000-REDACTED",
+    "team_id": "00000000-REDACTED",
+    "status": "active",
+    "first_name": "Player",
+    "last_name": "B",
+    "number": "7",
+    "bats": {
+      "throwing_hand": "right",
+      "batting_side": "right",
+      "player_id": "00000000-REDACTED"
+    },
+    "person_id": "00000000-REDACTED"
+  }
+]
+```
+
+**Coaching relevance: HIGH.** Bulk opponent player roster at org scope. Useful for building a comprehensive scouting database of all players the org's teams have faced. The `bats` object provides handedness when populated.
+
+**Previously documented as PARTIAL (HTTP 500 from web).**  Status updated to OBSERVED 2026-03-11 after web proxy session confirmed HTTP 200.
+
+**Discovered:** 2026-03-05. Status updated: 2026-03-11.

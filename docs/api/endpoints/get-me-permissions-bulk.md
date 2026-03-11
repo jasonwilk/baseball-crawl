@@ -10,7 +10,7 @@ profiles:
   mobile:
     status: observed
     notes: 4 hits, status 200 and 304. Discovered 2026-03-05.
-accept: null
+accept: "application/vnd.gc.com.permissions+json; version=0.0.0"
 gc_user_action: null
 query_params:
   - name: childType

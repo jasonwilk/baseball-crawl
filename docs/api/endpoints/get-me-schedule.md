@@ -10,7 +10,7 @@ profiles:
   mobile:
     status: unverified
     notes: Not captured from mobile profile.
-accept: null
+accept: "application/vnd.gc.com.all_events_schedule+json; version=0.2.0"
 gc_user_action: null
 query_params: []
 pagination: false

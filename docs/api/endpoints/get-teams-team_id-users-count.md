@@ -10,7 +10,7 @@ profiles:
   mobile:
     status: unverified
     notes: Not captured from mobile profile.
-accept: null
+accept: "application/vnd.gc.com.team_users_count+json; version=0.0.0"
 gc_user_action: null
 query_params: []
 pagination: false

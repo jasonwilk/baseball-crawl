@@ -87,11 +87,16 @@ Observed `gc-user-action` values:
 
 | Value | Seen on endpoint |
 |-------|-----------------|
-| `data_loading:events` | game-summaries, video-stream/assets |
-| `data_loading:team` | team detail, schedule, users, public-team-profile-id |
-| `data_loading:opponents` | team detail for opponent teams, opponents list |
-| `data_loading:team_stats` | season-stats |
-| `data_loading:player_stats` | players/{player_id}/stats |
+| `data_loading:events` | game-summaries, video-stream/assets, schedule |
+| `data_loading:event` | /events/{event_id}, /schedule/events/{event_id}/video-stream, /schedule/events/{event_id}/rsvp-responses, avatar-image |
+| `data_loading:event_game_stats` | /events/{event_id}/best-game-stream-id, /game-streams/{id}/events, /game-streams/{id}/game-stat-edit-collection, /teams/{id}/players (when loading game stats) |
+| `data_loading:team` | team detail, schedule, users, public-team-profile-id, associations |
+| `data_loading:teams` | /me/teams, /me/organizations, /bats-starting-lineups/latest |
+| `data_loading:opponents` | team detail for opponent teams, opponents list, avatar-image (opponent context) |
+| `data_loading:team_stats` | season-stats, players list (when loading team stats page) |
+| `data_loading:player_stats` | players/{player_id}/stats, game-summaries (player stats context), schedule |
+| `data_saving:opponents` | POST /teams/{team_id}/opponent/import |
+| `search:opponent` | GET /search/opponent-import |
 
 ### Signature Headers (POST /auth Only)
 
@@ -139,6 +144,10 @@ Quick reference table:
 | `GET /events/{event_id}/best-game-stream-id` | `application/vnd.gc.com.game_stream_id+json; version=0.0.2` |
 | `GET /teams/{id}/users` | `application/vnd.gc.com.team_user:list+json; version=0.0.0` |
 | `GET /teams/{id}/public-team-profile-id` | `application/vnd.gc.com.team_public_profile_id+json; version=0.0.0` |
+| `GET /teams/{id}/schedule/events/{event_id}/video-stream` | `application/vnd.gc.com.schedule_event_video_stream+json; version=0.0.0` |
+| `GET /me/organizations` | `application/vnd.gc.com.organization_with_role:list+json; version=0.3.2` |
+| `GET /teams/public/{public_id}/access-level` | `application/vnd.gc.com.team_access_level+json; version=0.0.0` |
+| `GET /teams/public/{public_id}/id` | `application/vnd.gc.com.team_id+json; version=0.0.0` |
 | `POST /auth` | `*/*` (not vendor-typed -- unique exception) |
 
 ## Implementation Notes

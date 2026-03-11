@@ -17,17 +17,17 @@
 
 **Token validity check**: `GET /me/user` returns 200 OK (valid) or 401 (expired).
 
-**REFRESH TOKEN EXPIRED (2026-03-09)** -- programmatic refresh failed. User must re-capture via proxy.
+**REFRESH TOKEN STATUS**: Last known expired 2026-03-09. Session 2026-03-11_032625 captured new web session data -- credentials must have been refreshed between 2026-03-09 and 2026-03-11.
 
 Credentials are NEVER logged, committed, or displayed. Redact to `{AUTH_TOKEN}` in all docs.
 
 ## API Spec Location
 
-Single source of truth: `docs/api/` -- index at `docs/api/README.md`, per-endpoint files in `docs/api/endpoints/` (104 files as of 2026-03-09).
+Single source of truth: `docs/api/` -- index at `docs/api/README.md`, per-endpoint files in `docs/api/endpoints/` (116 files as of 2026-03-11).
 
 ## Exploration Status
 
-As of 2026-03-09. See `docs/api/README.md` for full endpoint index.
+As of 2026-03-11. See `docs/api/README.md` for full endpoint index.
 
 ### iOS App Identity (updated 2026-03-09)
 
@@ -117,13 +117,54 @@ This means: by obtaining an opponent's `progenitor_team_id` from search results 
 
 **OPPONENT FULL ACCESS via progenitor_team_id CONFIRMED:** The mobile app navigates into the Nighthawks team using `progenitor_team_id` (`14fd6cb6`) and calls ALL the same `/teams/{id}/*` endpoints as it does for own teams. 55 calls to `/schedule/events/{event_id}/player-stats` all returned HTTP 200. This is the core scouting data access pattern.
 
+### 2026-03-11 Key Findings (session 2026-03-11_032625, WEB, full request+response)
+
+**E-094 API constraints CONFIRMED again from this session:**
+- `GET /teams/public/a1GFM9Ku0BbF/id` -- HTTP 200 (or 304, 200 on first hit) -- owned team (`a1GFM9Ku0BbF` = Lincoln Rebels 14U). Accept: `application/vnd.gc.com.team_id+json; version=0.0.0`
+- `GET /teams/public/smgRExWHuBJJ/id` -- HTTP 403, body: "Forbidden" -- opponent/non-owned team (Nighthawks). Same Accept header. 8 separate calls, ALL returned Forbidden.
+- This confirms: the reverse bridge returns 403 for non-owned teams. E-094's Technical Notes are correct.
+
+**New gc-user-action values confirmed (added to headers.md):**
+- `data_loading:event` -- used on /events/{id}, /schedule/events/{id}/video-stream, /rsvp-responses
+- `data_loading:event_game_stats` -- used on /best-game-stream-id, /game-streams/{id}/events
+- `data_loading:teams` -- used on /me/teams, /me/organizations, /bats-starting-lineups/latest
+- `data_saving:opponents` -- used on POST /teams/{id}/opponent/import
+- `search:opponent` -- used on GET /search/opponent-import
+
+**video-stream Accept header confirmed:** `application/vnd.gc.com.schedule_event_video_stream+json; version=0.0.0`. Two new fields: `person_id` (string, empty), `active_asset_playback_url` (string, empty on ended streams).
+
+**me/organizations Accept header:** Two versions in use simultaneously: `version=0.3.1` (no gc-user-action) and `version=0.3.2` (gc-user-action: data_loading:teams). Both return 401 without auth or 304 with fresh auth. Updated spec to 0.3.2.
+
+**All other observed endpoints already documented.** This session confirmed existing spec rather than revealing new endpoints. The spec is comprehensive for the web profile.
+
+### 2026-03-11 Key Findings (session 2026-03-11_034739, WEB)
+
+**10 new endpoint files created** -- athlete-profile (4), places, ics-calendar, me/scoped-features, me/person-external-associations, players/{id}, post-teams-follow.
+
+**SPEC CORRECTION: `POST /clips/search` body schema CONFIRMED.** Full request/response schema documented. The web app calls /clips/search (not /v2 as previously assumed). Two search modes: `select.kind: "event"` (team+event filter) and `select.kind: "player"` (player across games). Accept header is version=0.3.0 (not 0.0.0). `play_summary` and `perspective` fields use `${player_uuid}` placeholders requiring roster resolution.
+
+**HTTP 500 bug resolved: `GET /organizations/{org_id}/opponent-players`** now returns HTTP 200 with web headers. 107 players observed. Previously required iOS headers to avoid 500.
+
+**Athlete profile hierarchy:** `GET /me/athlete-profile` (list) → `GET /athlete-profile/{id}` (metadata) → `/career-stats` (31KB full career) or `/career-stats-association` (ID list only) or `/players` (team roster cards).
+
+**Accept headers backfilled** for 15+ existing endpoints that previously had `accept: null`.
+
+**`POST /teams/{team_id}/follow`** -- HTTP 204 No Content, no body. Both Accept and Content-Type are `vnd.gc.com.none+json; version=0.0.0`.
+
+**`GET /places/{place_id}`** -- Google Places ID lookup. Returns address, lat/long, location_name, types[]. Used for venue display.
+
+**`GET /ics-calendar-documents/user/{user_id}.ics`** -- Non-JSON endpoint. Accept: `text/calendar`. Returns RFC 5545 VCALENDAR. X-PUBLISHED-TTL: PT18000S (5 hours).
+
+**`GET /me/scoped-features`** -- Returns `{"scoped_features": {}}`. Same schema as team/org scoped-features.
+
+**`GET /me/person-external-associations`** -- Maps person_id to legacy MongoDB `external_id` with `external_organization: "gamechanger"`.
+
 ### Areas Not Yet Explored / High-Priority
 
 - **`POST /search` BODY SCHEMA** -- request body and response body not captured. Live curl needed to see query field names and response structure.
 - **`GET /search/opponent-import` RESPONSE BODY** -- endpoint confirmed 200 OK (both mobile and web profiles) but proxy only captures metadata, not JSON. Live curl needed.
 - **`GET /teams/{team_id}/import-summary` RESPONSE BODY** -- endpoint confirmed 200 OK but body not captured. Schema unknown.
 - **LSB coaching account credentials** -- current credentials are travel ball only. LSB HS teams not visible.
-- **`POST /clips/search` and `/v2` schemas** -- body and response format unknown for both.
 - **`PATCH /players/{player_id}` schema** -- body and response format unknown.
 - **`GET /organizations/{uuid}/game-summaries`** -- test with LSB org UUID when credentials available.
 - **DELETE /teams/{team_id}/schedule/events/{event_id}** -- user "deleted a game" in this session but no DELETE was observed; either it uses a PATCH with a cancel/delete field or was not captured.

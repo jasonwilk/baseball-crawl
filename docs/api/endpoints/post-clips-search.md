@@ -5,17 +5,17 @@ status: CONFIRMED
 auth: required
 profiles:
   web:
-    status: unverified
-    notes: Not captured from web profile. The web app uses /clips/search/v2 (observed 2026-03-09).
+    status: observed
+    notes: >
+      Captured from web proxy session 2026-03-11. Full request and response body
+      documented. The web app also calls this path (not /v2) -- the original
+      assumption that web uses /v2 only is INCORRECT. Both profiles use /clips/search.
   mobile:
     status: confirmed
     notes: >
       Captured from iOS app (session 2026-03-09_062610). 3 hits, all HTTP 200.
-      Content-Type: application/vnd.gc.com.video_clip_search_query+json; version=0.0.0.
-      Fired when viewing a game event (event_id ba140306-34a7-43a9-833c-eecb4353628d)
-      and when viewing an existing game (event_id 07c39def). The version-less path
-      appears to be the mobile client's clip search endpoint, while /v2 is the web client's.
-accept: null
+      Confirmed same Content-Type as web.
+accept: "application/vnd.gc.com.video_clip_search_results+json; version=0.3.0"
 gc_user_action: null
 query_params: []
 pagination: false
@@ -23,80 +23,188 @@ response_shape: object
 response_sample: null
 raw_sample_size: null
 discovered: "2026-03-09"
-last_confirmed: "2026-03-09"
-tags: [video, search, games]
+last_confirmed: "2026-03-11"
+tags: [video, search, games, player]
 caveats:
   - >
-    VERSION SPLIT: The mobile iOS app calls /clips/search (no version suffix) while
-    the web app calls /clips/search/v2. Both use identical Content-Type:
-    application/vnd.gc.com.video_clip_search_query+json; version=0.0.0.
-    The two paths may return different response schemas or be identical -- not yet
-    confirmed. For new implementations, prefer /clips/search/v2 if targeting web
-    behavior, or /clips/search for mobile behavior.
+    SPEC CORRECTION 2026-03-11: Previous docs stated "web app uses /clips/search/v2,
+    not /clips/search." This is WRONG. The web app calls /clips/search (this path)
+    extensively. The /v2 path was observed only once in an earlier mobile session.
+    Prefer /clips/search for implementations targeting either profile.
   - >
-    REQUEST BODY UNKNOWN: Body schema not captured (proxy logs metadata only).
-    Content-Type suggests a structured query body (filters by team_id, event_id,
-    player_id, clip type, date range). Same content-type as /v2 endpoint.
+    ACCEPT HEADER VERSION: Accept header is version=0.3.0 (not 0.0.0). This differs
+    from Content-Type (version=0.0.0 for request body).
   - >
-    RESPONSE BODY UNKNOWN: HTTP 200 observed. Body not captured.
-  - >
-    3 HITS IN SESSION: Called at 06:27:29, 06:27:30, and 06:30:10 during the session --
-    once when viewing game event 07c39def (twice in quick succession suggesting pagination
-    or parallel requests), and once when navigating to the newly-created game ba140306.
+    TWO SEARCH MODES: The request body `select.kind` field determines the search mode:
+    "event" (search within a game event) or "player" (search by player across games).
+    The sort strategy differs between modes.
 see_also:
   - path: /clips/search/v2
-    reason: Web profile equivalent -- same content-type, /v2 suffix. Compare schemas when both are captured.
+    reason: Web app version (v2 suffix) -- observed once but full schema now confirmed on /clips/search
   - path: /events/{event_id}/highlight-reel
-    reason: Structured highlight playlist for a game -- may overlap with clip search results
+    reason: Structured highlight playlist for a game -- alternative source for game highlights
   - path: /teams/{team_id}/video-stream/assets
     reason: Full video recording assets (different from short clips)
 ---
 
 # POST /clips/search
 
-**Status:** CONFIRMED (mobile proxy, 3 hits, HTTP 200). Request/response bodies not captured. Last verified: 2026-03-09.
+**Status:** CONFIRMED -- HTTP 200 in web proxy session 2026-03-11. Full request and response schema documented.
 
-Searches for video highlight clips using a POST request body as a search query. This is the mobile app's version of the clip search endpoint; the web app uses `/clips/search/v2`.
+Searches for video highlight clips using a POST request body as a structured query. Supports two search modes: game-event clips (filtered by team + event) and player clips (filtered by player across games). Returns clip metadata with thumbnail URLs and play context.
 
 ```
 POST https://api.team-manager.gc.com/clips/search
 Content-Type: application/vnd.gc.com.video_clip_search_query+json; version=0.0.0
+Accept: application/vnd.gc.com.video_clip_search_results+json; version=0.3.0
 ```
 
 ## Request Headers
 
 ```
-gc-token: {GC_TOKEN}
+gc-token: {AUTH_TOKEN}
 gc-device-id: {GC_DEVICE_ID}
 Content-Type: application/vnd.gc.com.video_clip_search_query+json; version=0.0.0
-User-Agent: Odyssey/2026.8.0 (com.gc.teammanager; build:0; iOS 26.3.0) Alamofire/5.9.0
-gc-app-version: 2026.8.0.0
-Accept-Language: en-US;q=1.0
-Accept-Encoding: br;q=1.0, gzip;q=0.9, deflate;q=0.8
+Accept: application/vnd.gc.com.video_clip_search_results+json; version=0.3.0
 ```
 
 ## Request Body
 
-Not captured. Based on the vendor content-type `video_clip_search_query`, expected to contain search filters. Likely same structure as `/clips/search/v2`:
+JSON object with the following fields:
 
-- `event_id` or `game_stream_id` -- filter to a specific game
-- `team_id` -- filter to a specific team
-- `player_id` -- filter to a specific player
-- `clip_type` -- filter by play type
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `match_all` | object | yes | Filter criteria -- all conditions must match |
+| `match_all.team_id` | UUID | conditional | Required for event-mode searches |
+| `match_all.event_id` | UUID | conditional | Game event UUID -- use for game-scoped search |
+| `match_all.player_id` | UUID | conditional | Player UUID -- use for player-scoped search |
+| `match_all.play_type` | array of string | no | Filter by play types. Values: `"single"`, `"double"`, `"triple"`, `"home_run"`, `"strikeout"`, `"walk"`, `"fielders_choice"`, `"error"`, etc. |
+| `select` | object | yes | Response shape configuration |
+| `select.kind` | string | yes | Search mode: `"event"` (game scope) or `"player"` (player scope) |
+| `select.include_totals` | boolean | no | Include `total_count` in response when true |
+| `sort` | array | yes | Sort specification (see below) |
+| `sort[].by` | string | yes | Field to sort by: `"timestamp"`, `"event_id"` |
+| `sort[].order` | string | yes | Sort direction: `"asc"`, `"desc"`, or `"custom"` |
+| `sort[].custom` | array of UUID | conditional | Ordered list of event_ids for custom sort order (used in player-mode) |
+| `paging` | string | yes | Pagination mode. Observed: `"page"`. |
+| `offset` | integer | yes | Pagination offset (0-based) |
+| `limit` | integer | yes | Maximum results to return. Observed: 50. |
+
+## Example Request Body (Event Mode)
+
+```json
+{
+  "sort": [{"by": "timestamp", "order": "asc"}],
+  "paging": "page",
+  "select": {"kind": "event", "include_totals": true},
+  "match_all": {
+    "team_id": "00000000-REDACTED",
+    "event_id": "00000000-REDACTED"
+  },
+  "offset": 0,
+  "limit": 50
+}
+```
+
+## Example Request Body (Player Mode)
+
+```json
+{
+  "select": {"kind": "player", "include_totals": true},
+  "paging": "page",
+  "offset": 0,
+  "limit": 50,
+  "match_all": {"player_id": "00000000-REDACTED"},
+  "sort": [
+    {
+      "by": "event_id",
+      "order": "custom",
+      "custom": ["00000000-REDACTED", "00000000-REDACTED"]
+    }
+  ]
+}
+```
 
 ## Response
 
-**HTTP 200.** Body not captured. Expected to return clip objects with thumbnail URLs, video URLs, and play metadata.
+**HTTP 200.** JSON object.
 
-## Relationship to /clips/search/v2
+| Field | Type | Description |
+|-------|------|-------------|
+| `hits` | array | Array of clip objects. Empty array when no clips match. |
+| `total_count` | integer | Total count of matching clips (only present when `include_totals: true`). |
+| `hits[].clip_metadata_id` | UUID | Unique clip ID |
+| `hits[].hidden` | boolean | Whether clip is hidden from audience |
+| `hits[].audience_type` | string | Who can view this clip. Observed: `"players_family"`, `"players_family_fans"`. |
+| `hits[].last_edited_by` | UUID or null | User who last edited the clip |
+| `hits[].last_updated_at` | ISO8601 | Clip metadata last update timestamp |
+| `hits[].related_ids` | object | Cross-reference IDs |
+| `hits[].related_ids.event_id` | UUID | Game event UUID |
+| `hits[].related_ids.team_id` | UUID | Team UUID |
+| `hits[].related_ids.stream_id` | UUID | Game stream UUID |
+| `hits[].sport` | string | Sport. Observed: `"bats"` (baseball). |
+| `hits[].duration` | number | Clip duration in seconds |
+| `hits[].timestamp` | ISO8601 | When the clip was created |
+| `hits[].thumbnail_url` | string | CDN URL for clip thumbnail image (vod-archive.gc.com) |
+| `hits[].play_summary` | string or null | Human-readable play description with `${player_uuid}` template placeholders |
+| `hits[].player_metadata` | object or null | Player context (present in player-mode results) |
+| `hits[].player_metadata.player_id` | UUID | Player UUID |
+| `hits[].player_metadata.player_role` | string | Role: `"batter"`, `"pitcher"` |
+| `hits[].player_metadata.perspective` | string | Play description from player's perspective (with `${uuid}` placeholders) |
+| `hits[].play_metadata` | object | Play type metadata |
+| `hits[].play_metadata.type` | string | Play engine. Observed: `"sabertooth"`. |
+| `hits[].play_metadata.pbp_id` | UUID or null | Pitch-by-pitch play UUID (null for some plays) |
+| `hits[].play_metadata.play_type` | string | Play type. Observed: `"single"`, `"double"`, `"strikeout"`, `"walk"`, `"fielders_choice"`, `"error"`, etc. |
+| `hits[].sport_metadata` | object | Sport context |
+| `hits[].sport_metadata.type` | string | Sport. Observed: `"bats"`. |
+| `hits[].sport_metadata.inning` | integer | Inning number |
+| `hits[].sport_metadata.inning_half` | string | `"top"` or `"bottom"` |
+| `hits[].cv_generated` | boolean | Whether clip was computer-vision generated |
+| `hits[].exceptional_play` | boolean | Whether this is flagged as an exceptional/highlight play |
 
-| Attribute | /clips/search (mobile) | /clips/search/v2 (web) |
-|-----------|----------------------|----------------------|
-| Profile | iOS mobile | Web browser |
-| Content-Type | `video_clip_search_query+json; version=0.0.0` | `video_clip_search_query+json; version=0.0.0` |
-| Response schema | Unknown | Unknown |
-| Status | 200 (3 observations) | 200 (1 observation) |
+## Example Response (truncated)
 
-The identical content-type suggests these may accept the same request body schema. Whether the response schemas differ is unknown -- both need body capture.
+```json
+{
+  "hits": [
+    {
+      "clip_metadata_id": "00000000-REDACTED",
+      "hidden": false,
+      "audience_type": "players_family",
+      "last_edited_by": null,
+      "last_updated_at": "2025-05-04T19:23:55.403Z",
+      "related_ids": {
+        "event_id": "00000000-REDACTED",
+        "team_id": "00000000-REDACTED",
+        "stream_id": "00000000-REDACTED"
+      },
+      "sport": "bats",
+      "play_summary": "${00000000-REDACTED} singles on a ground ball to third baseman ${00000000-REDACTED}",
+      "duration": 51.701,
+      "timestamp": "2025-05-04T19:23:51.473Z",
+      "thumbnail_url": "https://vod-archive.gc.com/example-thumbnail-url",
+      "play_metadata": {
+        "type": "sabertooth",
+        "pbp_id": "00000000-REDACTED",
+        "play_type": "single"
+      },
+      "sport_metadata": {
+        "type": "bats",
+        "inning": 1,
+        "inning_half": "top"
+      },
+      "cv_generated": false,
+      "exceptional_play": false
+    }
+  ],
+  "total_count": 23
+}
+```
 
-**Discovered:** 2026-03-09. Session: 2026-03-09_062610 (mobile/iOS).
+**Note:** The `${uuid}` placeholders in `play_summary` and `perspective` fields must be resolved to player names using the roster data from `/teams/{team_id}/players`.
+
+**Coaching relevance: MEDIUM.** Enables video clip browsing per game event or per player. The `play_type` filter is useful for finding specific play types (hits, strikeouts). The `pbp_id` cross-references to `/game-stream-processing/{game_stream_id}/plays` for full pitch sequence context.
+
+**Previously documented:** Body schema unknown. Both web and response schemas were completely undocumented prior to 2026-03-11. **Schema updated 2026-03-11** from web proxy session 2026-03-11_034739.
+
+**Discovered:** 2026-03-09. Schema fully documented: 2026-03-11.

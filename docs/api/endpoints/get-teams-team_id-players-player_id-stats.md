@@ -18,7 +18,7 @@ response_shape: array
 response_sample: data/raw/player-stats-sample.json
 raw_sample_size: "80 records, 387 KB"
 discovered: "2026-03-04"
-last_confirmed: "2026-03-04"
+last_confirmed: "2026-03-11"
 tags: [player, stats, season, spray-chart]
 related_schemas: []
 see_also:
@@ -34,7 +34,7 @@ see_also:
 
 # GET /teams/{team_id}/players/{player_id}/stats
 
-**Status:** CONFIRMED LIVE -- 200 OK. 80 records, 387 KB. Last verified: 2026-03-04.
+**Status:** CONFIRMED LIVE -- 200 OK. 68-80 records, 362-387 KB. Last verified: 2026-03-11.
 
 Returns per-game statistics for one player across all games in the season. Includes batting, pitching/fielding stats per game, rolling cumulative season totals, and spray chart data (ball-in-play coordinates). Must be called once per player to build a full team box score.
 
@@ -150,8 +150,8 @@ Each item in `offensive_spray_charts` or `defensive_spray_charts`:
 | `attributes.playResult` | string | Outcome: `"batter_out"`, `"batter_out_advance_runners"`, `"single"`, `"double"`, `"triple"`, `"home_run"`, `"fielders_choice"`, `"error"`, `"sacrifice_bunt"`, `"sacrifice_fly"`, `"other_out"` |
 | `attributes.defenders` | array | Fielder(s) involved (usually 1, occasionally 2 for double plays) |
 | `attributes.defenders[].position` | string | Position code: `"1B"`, `"2B"`, `"3B"`, `"SS"`, `"LF"`, `"CF"`, `"RF"`, `"P"`, `"C"` |
-| `attributes.defenders[].location.x` | int | X coordinate on field diagram. Origin/scale unconfirmed. |
-| `attributes.defenders[].location.y` | int | Y coordinate on field diagram. Origin/scale unconfirmed. |
+| `attributes.defenders[].location.x` | float | X coordinate on field diagram. Origin/scale unconfirmed. |
+| `attributes.defenders[].location.y` | float | Y coordinate on field diagram. Origin/scale unconfirmed. |
 | `attributes.defenders[].error` | boolean | Whether this defender committed an error |
 | `compactorAttributes.stream` | string | Always `"main"` observed |
 

@@ -12,7 +12,7 @@ profiles:
   mobile:
     status: unverified
     notes: Not captured from mobile profile.
-accept: null
+accept: "application/vnd.gc.com.organization_team:list+json; version=0.1.0"
 gc_user_action: null
 query_params:
   - name: page_starts_at

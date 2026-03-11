@@ -55,8 +55,10 @@ Endpoints are grouped by domain. Within each group, sorted alphabetically by pat
 | GET | [/me/organizations](endpoints/get-me-organizations.md) | CONFIRMED | req | Organizations the user belongs to (requires pagination params) |
 | GET | [/me/permissions](endpoints/get-me-permissions.md) | CONFIRMED | req | Permissions for a specific entity (requires entityId + entityType params) |
 | GET | [/me/permissions/bulk](endpoints/get-me-permissions-bulk.md) | CONFIRMED | req | Bulk permission check for child entities under a parent (plain text "No permissions provided" when called without params) |
+| GET | [/me/person-external-associations](endpoints/get-me-person-external-associations.md) | OBSERVED | req | External system associations for the user (legacy GC MongoDB IDs) |
 | GET | [/me/related-organizations](endpoints/get-me-related-organizations.md) | CONFIRMED | req | Organizations accessible via team membership (requires pagination params) |
 | GET | [/me/schedule](endpoints/get-me-schedule.md) | CONFIRMED | req | Cross-team unified schedule for all user teams |
+| GET | [/me/scoped-features](endpoints/get-me-scoped-features.md) | OBSERVED | req | Feature flags scoped to the authenticated user (empty observed) |
 | GET | [/me/subscription-information](endpoints/get-me-subscription-information.md) | CONFIRMED | req | Subscription tier summary (best_subscription + access_level) |
 | GET | [/me/team-tile/{team_id}](endpoints/get-me-team-tile-team_id.md) | CONFIRMED | req | Compact team summary with notification badge count |
 | GET | [/me/teams](endpoints/get-me-teams.md) | CONFIRMED | req | Active teams for the authenticated user |
@@ -174,10 +176,22 @@ These endpoints use `public_id` slugs and require **no** gc-token or gc-device-i
 
 ---
 
+### Athlete Profiles (`/athlete-profile/{athlete_profile_id}`)
+
+| Method | Path | Status | Auth | Description |
+|--------|------|--------|------|-------------|
+| GET | [/athlete-profile/{athlete_profile_id}](endpoints/get-athlete-profile-athlete_profile_id.md) | OBSERVED | req | Athlete profile metadata: name, handle, graduation year, positions |
+| GET | [/athlete-profile/{athlete_profile_id}/career-stats](endpoints/get-athlete-profile-athlete_profile_id-career-stats.md) | OBSERVED | req | Cross-team career stats (31KB, longitudinal player tracking across all seasons) |
+| GET | [/athlete-profile/{athlete_profile_id}/career-stats-association](endpoints/get-athlete-profile-athlete_profile_id-career-stats-association.md) | OBSERVED | req | Maps athlete profile to all player_ids across teams (lightweight ID map) |
+| GET | [/athlete-profile/{athlete_profile_id}/players](endpoints/get-athlete-profile-athlete_profile_id-players.md) | OBSERVED | req | Player identities linked to athlete profile across teams (team name, jersey, games played) |
+
+---
+
 ### Players & Users
 
 | Method | Path | Status | Auth | Description |
 |--------|------|--------|------|-------------|
+| GET | [/players/{player_id}](endpoints/get-players-player_id.md) | OBSERVED | req | Individual player metadata: name, number, status, person_id |
 | GET | [/players/{player_id}/profile-photo](endpoints/get-players-player_id-profile-photo.md) | OBSERVED | req | Player profile photo URL (HTTP 404 when no photo set) |
 | PATCH | [/players/{player_id}](endpoints/patch-players-player_id.md) | OBSERVED | req | Update player attributes (batting side, throwing hand, jersey number -- write operation) |
 | GET | [/users/{user_id}](endpoints/get-users-user_id.md) | CONFIRMED | req | User profile: id, status, first_name, last_name, email (PII) |
@@ -192,7 +206,7 @@ These endpoints use `public_id` slugs and require **no** gc-token or gc-device-i
 | GET | [/organizations/{org_id}/avatar-image](endpoints/get-organizations-org_id-avatar-image.md) | OBSERVED | req | Organization avatar/logo image URL |
 | GET | [/organizations/{org_id}/events](endpoints/get-organizations-org_id-events.md) | CONFIRMED | req | Cross-team event schedule at org level (empty for travel ball) |
 | GET | [/organizations/{org_id}/game-summaries](endpoints/get-organizations-org_id-game-summaries.md) | CONFIRMED | req | Aggregated game summaries across org teams (empty observed) |
-| GET | [/organizations/{org_id}/opponent-players](endpoints/get-organizations-org_id-opponent-players.md) | OBSERVED | req | Bulk opponent player roster at org level (HTTP 500 -- blocked) |
+| GET | [/organizations/{org_id}/opponent-players](endpoints/get-organizations-org_id-opponent-players.md) | OBSERVED | req | Bulk opponent player roster at org level (107 players observed; HTTP 500 bug resolved as of 2026-03-11) |
 | GET | [/organizations/{org_id}/opponents](endpoints/get-organizations-org_id-opponents.md) | OBSERVED | req | Opponent registry at organization level |
 | GET | [/organizations/{org_id}/pitch-count-report](endpoints/get-organizations-org_id-pitch-count-report.md) | CONFIRMED | req | Pitcher pitch counts as CSV (not JSON) for the past 7 days |
 | GET | [/organizations/{org_id}/scoped-features](endpoints/get-organizations-org_id-scoped-features.md) | CONFIRMED | req | Feature flags scoped to organization (empty observed) |
@@ -232,8 +246,25 @@ These endpoints use `public_id` slugs and require **no** gc-token or gc-device-i
 
 | Method | Path | Status | Auth | Description |
 |--------|------|--------|------|-------------|
-| POST | [/clips/search](endpoints/post-clips-search.md) | CONFIRMED | req | Video clip search -- mobile iOS app version (3 hits; identical content-type to /v2) |
-| POST | [/clips/search/v2](endpoints/post-clips-search-v2.md) | OBSERVED | req | Video clip search -- web app version (schema unknown; mobile uses /clips/search) |
+| POST | [/clips/search](endpoints/post-clips-search.md) | CONFIRMED | req | Video clip search -- full request/response schema documented 2026-03-11. Supports event and player search modes. |
+| POST | [/clips/search/v2](endpoints/post-clips-search-v2.md) | OBSERVED | req | Video clip search /v2 path (observed once; /clips/search now confirmed for both web and mobile) |
+
+---
+
+### Places & Calendar
+
+| Method | Path | Status | Auth | Description |
+|--------|------|--------|------|-------------|
+| GET | [/places/{place_id}](endpoints/get-places-place_id.md) | OBSERVED | req | Google Places-style venue lookup: address, lat/long, location name |
+| GET | [/ics-calendar-documents/user/{user_id}.ics](endpoints/get-ics-calendar-documents-user-user_id-ics.md) | OBSERVED | req | iCal (RFC 5545) export of user's full schedule across all teams (non-JSON response) |
+
+---
+
+### Write Operations (Teams)
+
+| Method | Path | Status | Auth | Description |
+|--------|------|--------|------|-------------|
+| POST | [/teams/{team_id}/follow](endpoints/post-teams-team_id-follow.md) | OBSERVED | req | Follow a team as the authenticated user (HTTP 204 No Content) |
 
 ---
 

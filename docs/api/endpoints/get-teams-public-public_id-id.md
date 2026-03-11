@@ -1,19 +1,19 @@
 ---
 method: GET
 path: /teams/public/{public_id}/id
-status: PARTIAL
+status: CONFIRMED
 auth: required
 profiles:
   web:
-    status: partial
+    status: confirmed
     notes: >
-      HTTP 200 for OWN team public_id (a1GFM9Ku0BbF -> UUID confirmed 2026-03-07).
-      HTTP 403 for OPPONENT team public_id (smgRExWHuBJJ returned 403, 4 hits,
-      2026-03-09). Access appears restricted to teams the authenticated user belongs to.
+      HTTP 200 for OWN team public_id (two teams confirmed via HAR 2026-03-11).
+      HTTP 403 for OPPONENT team public_id (smgRExWHuBJJ returned 403, 8+ hits,
+      2026-03-11). Access restricted to teams the authenticated user belongs to.
   mobile:
     status: unverified
     notes: Not captured from mobile profile.
-accept: null
+accept: "application/vnd.gc.com.team_id+json; version=0.0.0"
 gc_user_action: null
 query_params: []
 pagination: false
@@ -21,7 +21,7 @@ response_shape: object
 response_sample: null
 raw_sample_size: null
 discovered: "2026-03-07"
-last_confirmed: "2026-03-09"
+last_confirmed: "2026-03-11"
 tags: [team, bridge]
 caveats:
   - >
@@ -49,7 +49,7 @@ see_also:
 
 # GET /teams/public/{public_id}/id
 
-**Status:** PARTIAL -- 200 OK for own teams only. HTTP 403 for opponent teams. Last verified: 2026-03-09.
+**Status:** CONFIRMED -- 200 OK for own teams, 403 for opponent teams. Last verified: 2026-03-11.
 
 Reverse bridge: resolves a team's `public_id` slug to its internal UUID. **Access is restricted to teams the authenticated user belongs to.** Opponent team public_ids return HTTP 403 Forbidden.
 
@@ -65,6 +65,15 @@ GET https://api.team-manager.gc.com/teams/public/{public_id}/id
 |-----------|------|-------------|
 | `public_id` | string | Team public ID slug |
 
+## Headers (Web Profile)
+
+```
+gc-token: {GC_TOKEN}
+gc-device-id: {GC_DEVICE_ID}
+gc-app-name: web
+Accept: application/vnd.gc.com.team_id+json; version=0.0.0
+```
+
 ## Response (200 -- own teams only)
 
 | Field | Type | Description |
@@ -74,10 +83,12 @@ GET https://api.team-manager.gc.com/teams/public/{public_id}/id
 ## Example Response (authenticated, own team)
 
 ```json
-{"id": "72bb77d8-54ca-42d2-8547-9da4880d0cb4"}
+{"id": "00000000-0000-0000-0000-000000000001"}
 ```
 
-Confirmed symmetry: public_id `a1GFM9Ku0BbF` resolves to UUID `72bb77d8-54ca-42d2-8547-9da4880d0cb4` (own team). This is the reverse of `GET /teams/{team_id}/public-team-profile-id`.
+Content-Length: 45 bytes. Single JSON object with one field.
+
+Confirmed on two distinct owned teams (HAR capture 2026-03-11). This is the reverse of `GET /teams/{team_id}/public-team-profile-id`.
 
 ## Error Response (HTTP 403 -- opponent team)
 
@@ -89,7 +100,7 @@ Returned when querying the public_id of a team the authenticated user does NOT b
 }
 ```
 
-Observed: opponent `smgRExWHuBJJ` (Nighthawks Navy AAA 14U) returned 403 on 2026-03-09. Four separate attempts, all 403.
+Observed: opponent public_id returned 403 on 2026-03-11. Eight consecutive attempts in proxy session, all 403. Body is the bare string `"Forbidden"` (not a JSON object).
 
 ## Error Response (HTTP 401 -- unauthenticated)
 
@@ -112,4 +123,4 @@ Observed: opponent `smgRExWHuBJJ` (Nighthawks Navy AAA 14U) returned 403 on 2026
 
 Use `GET /search/opponent-import?name={team_name}&sport=baseball` to find opponent team UUIDs programmatically. The search endpoint does not require team membership and returns UUID in its results.
 
-**Discovered:** 2026-03-07. **403 for opponent confirmed:** 2026-03-09.
+**Discovered:** 2026-03-07. **Full 200 response confirmed:** 2026-03-11 (HAR capture, two owned teams). **403 for opponent confirmed:** 2026-03-11 (proxy session, 8 consecutive 403s).
