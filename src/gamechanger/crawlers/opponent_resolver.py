@@ -98,13 +98,13 @@ class ResolveResult:
     Attributes:
         resolved: Opponents successfully resolved to a canonical team ID.
         unlinked: Opponents inserted as unlinked (no progenitor_team_id).
-        skipped_hidden: Opponents skipped because is_hidden is True.
+        stored_hidden: Opponents stored with is_hidden=1.
         errors: Opponents where a skippable error was encountered.
     """
 
     resolved: int = field(default=0)
     unlinked: int = field(default=0)
-    skipped_hidden: int = field(default=0)
+    stored_hidden: int = field(default=0)
     errors: int = field(default=0)
 
 
@@ -147,7 +147,7 @@ class OpponentResolver:
                 team_result = self._resolve_team(team.id)
                 result.resolved += team_result.resolved
                 result.unlinked += team_result.unlinked
-                result.skipped_hidden += team_result.skipped_hidden
+                result.stored_hidden += team_result.stored_hidden
                 result.errors += team_result.errors
             except CredentialExpiredError:
                 raise
@@ -159,10 +159,10 @@ class OpponentResolver:
 
         logger.info(
             "Opponent resolution complete -- "
-            "resolved=%d unlinked=%d skipped_hidden=%d errors=%d",
+            "resolved=%d unlinked=%d stored_hidden=%d errors=%d",
             result.resolved,
             result.unlinked,
-            result.skipped_hidden,
+            result.stored_hidden,
             result.errors,
         )
         return result
@@ -218,11 +218,6 @@ class OpponentResolver:
         name: str = opponent.get("name", "")
         progenitor_team_id: str | None = opponent.get("progenitor_team_id")
 
-        if is_hidden:
-            result.skipped_hidden += 1
-            logger.debug("Skipping hidden opponent '%s' (%s)", name, root_team_id)
-            return
-
         if progenitor_team_id:
             self._process_with_progenitor(
                 our_team_id, root_team_id, name, progenitor_team_id, is_hidden, result
@@ -235,6 +230,10 @@ class OpponentResolver:
                 is_hidden=is_hidden,
             )
             result.unlinked += 1
+
+        if is_hidden:
+            result.stored_hidden += 1
+            logger.debug("Stored hidden opponent '%s' (%s)", name, root_team_id)
 
     def _process_with_progenitor(
         self,

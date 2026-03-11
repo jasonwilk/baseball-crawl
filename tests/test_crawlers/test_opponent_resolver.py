@@ -157,7 +157,7 @@ def test_resolve_returns_resolve_result(db: sqlite3.Connection) -> None:
     assert isinstance(result, ResolveResult)
     assert hasattr(result, "resolved")
     assert hasattr(result, "unlinked")
-    assert hasattr(result, "skipped_hidden")
+    assert hasattr(result, "stored_hidden")
     assert hasattr(result, "errors")
 
 
@@ -536,8 +536,8 @@ def test_resolve_is_idempotent(db: sqlite3.Connection) -> None:
     assert len(links) == 2  # exactly one per opponent, no duplicates
 
 
-def test_resolve_hidden_opponents_counted(db: sqlite3.Connection) -> None:
-    """Hidden opponents increment skipped_hidden, not resolved or errors."""
+def test_resolve_hidden_opponent_with_progenitor_stored(db: sqlite3.Connection) -> None:
+    """Hidden opponent with progenitor_team_id is stored with is_hidden=1."""
     _insert_own_team(db)
     client = _make_client(
         paginated_return=[_OPPONENT_HIDDEN],
@@ -549,15 +549,64 @@ def test_resolve_hidden_opponents_counted(db: sqlite3.Connection) -> None:
     with patch("src.gamechanger.crawlers.opponent_resolver.time.sleep"):
         result = resolver.resolve()
 
-    assert result.skipped_hidden == 1
-    assert result.resolved == 0
+    assert result.stored_hidden == 1
+    assert result.resolved == 1
     assert result.unlinked == 0
     assert result.errors == 0
-    assert _fetch_links(db) == []
+
+    links = _fetch_links(db)
+    assert len(links) == 1
+    assert links[0]["is_hidden"] == 1
+    assert links[0]["root_team_id"] == _OPPONENT_HIDDEN["root_team_id"]
+
+
+def test_resolve_hidden_opponent_without_progenitor_stored(db: sqlite3.Connection) -> None:
+    """Hidden opponent without progenitor_team_id is stored as unlinked with is_hidden=1."""
+    hidden_no_progenitor = {
+        "root_team_id": "root-hidden-no-prog",
+        "owning_team_id": _OWN_TEAM_ID,
+        "name": "Hidden No Progenitor",
+        "is_hidden": True,
+    }
+    _insert_own_team(db)
+    client = _make_client(paginated_return=[hidden_no_progenitor])
+    config = _make_config()
+    resolver = OpponentResolver(client, config, db)
+
+    with patch("src.gamechanger.crawlers.opponent_resolver.time.sleep"):
+        result = resolver.resolve()
+
+    assert result.stored_hidden == 1
+    assert result.unlinked == 1
+    assert result.resolved == 0
+    assert result.errors == 0
+
+    links = _fetch_links(db)
+    assert len(links) == 1
+    assert links[0]["is_hidden"] == 1
+    assert links[0]["resolved_team_id"] is None
+
+
+def test_resolve_non_hidden_opponent_stored_hidden_zero(db: sqlite3.Connection) -> None:
+    """Non-hidden opponent is stored with is_hidden=0 (existing behavior preserved)."""
+    _insert_own_team(db)
+    client = _make_client(
+        paginated_return=[_OPPONENT_WITH_PROGENITOR],
+        get_return=_TEAM_DETAIL,
+    )
+    config = _make_config()
+    resolver = OpponentResolver(client, config, db)
+
+    with patch("src.gamechanger.crawlers.opponent_resolver.time.sleep"):
+        result = resolver.resolve()
+
+    assert result.stored_hidden == 0
+    links = _fetch_links(db)
+    assert links[0]["is_hidden"] == 0
 
 
 def test_resolve_copies_is_hidden_flag(db: sqlite3.Connection) -> None:
-    """is_hidden is copied from the API response into opponent_links."""
+    """is_hidden is copied from the API response into opponent_links on update."""
     hidden_with_progenitor = {
         "root_team_id": "root-hidden-progenitor",
         "owning_team_id": _OWN_TEAM_ID,
@@ -566,7 +615,7 @@ def test_resolve_copies_is_hidden_flag(db: sqlite3.Connection) -> None:
         "progenitor_team_id": _PROGENITOR_ID,
     }
     _insert_own_team(db)
-    # Process as visible first so the upsert has something to update
+    # Process as visible first
     visible = dict(hidden_with_progenitor, is_hidden=False)
     client = _make_client(
         paginated_return=[visible],
@@ -576,20 +625,21 @@ def test_resolve_copies_is_hidden_flag(db: sqlite3.Connection) -> None:
     resolver = OpponentResolver(client, config, db)
 
     with patch("src.gamechanger.crawlers.opponent_resolver.time.sleep"):
-        resolver.resolve()
+        result1 = resolver.resolve()
 
+    assert result1.stored_hidden == 0
     link = _fetch_links(db)[0]
     assert link["is_hidden"] == 0
 
-    # Now re-run with is_hidden=True -- should update the flag
+    # Re-run with is_hidden=True -- upsert should update the flag
     client2 = _make_client(
         paginated_return=[hidden_with_progenitor],
         get_return=_TEAM_DETAIL,
     )
     resolver2 = OpponentResolver(client2, config, db)
     with patch("src.gamechanger.crawlers.opponent_resolver.time.sleep"):
-        # Hidden opponents are skipped (not resolved), so is_hidden won't be updated
-        # via the auto-resolve path. This tests that hidden flag is skipped correctly.
         result2 = resolver2.resolve()
 
-    assert result2.skipped_hidden == 1
+    assert result2.stored_hidden == 1
+    link2 = _fetch_links(db)[0]
+    assert link2["is_hidden"] == 1
