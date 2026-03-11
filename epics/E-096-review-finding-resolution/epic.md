@@ -1,7 +1,7 @@
 # E-096: Resolve All Review Findings During Stories
 
 ## Status
-`DRAFT`
+`READY`
 <!-- Lifecycle: DRAFT -> READY -> ACTIVE -> COMPLETED (or BLOCKED / ABANDONED) -->
 <!-- PM sets READY explicitly after: expert consultation done, all stories have testable ACs, quality checklist passed. -->
 <!-- Only READY and ACTIVE epics can be dispatched. -->
@@ -16,14 +16,15 @@ User feedback (2026-03-11):
 
 The current review loop has a structural flaw: the main session only relays MUST FIX findings to implementers and records SHOULD FIX findings in epic History for "later." In practice, "later" means "never" -- the SHOULD FIX items accumulate as acknowledged debt across every epic (see archived epics listing multiple SHOULD FIX items that were never addressed). The main session also avoids engaging with cosmetic findings, deferring them as low-priority rather than making a fix/dismiss decision.
 
-The fix requires changes to three context-layer files that define the review loop behavior:
+The fix requires changes to four context-layer files that define the review loop behavior:
 - `.claude/agents/code-reviewer.md` -- finding categories and structured format
 - `.claude/rules/dispatch-pattern.md` -- review routing and finding handling
 - `.claude/skills/implement/SKILL.md` -- Phase 3 review step behavior
+- `CLAUDE.md` -- Agent Ecosystem code-reviewer description
 
 Additionally, the user suggests exploring whether Codex could be used conversationally (not just batch review) to discuss findings. This is speculative and needs a research spike before any planning.
 
-**Expert consultation required**: claude-architect (context-layer changes affecting dispatch workflow). Consultation pending -- epic remains DRAFT.
+**Expert consultation complete**: claude-architect confirmed four-file scope, recommended folding triage into existing APPROVED/NOT APPROVED handling (no new step), and validated the structural approach.
 
 ## Goals
 - Every review finding reaches a terminal state (FIXED or DISMISSED) during the story -- no deferral to epic History
@@ -38,8 +39,8 @@ Additionally, the user suggests exploring whether Codex could be used conversati
 - Implementing Codex interactive review (that depends on the research spike outcome)
 
 ## Success Criteria
-- The dispatch-pattern, implement skill, and code-reviewer agent def all describe the same resolution-first model
-- No mention of "record SHOULD FIX in epic History" or "defer" in any of the three files
+- The dispatch-pattern, implement skill, code-reviewer agent def, and CLAUDE.md all describe the same resolution-first model
+- No mention of "record SHOULD FIX in epic History" or "defer" in any of the four files
 - Every finding category has a clear path to a terminal state (FIXED or DISMISSED)
 - The research spike produces a clear feasibility answer for interactive Codex review
 
@@ -63,14 +64,18 @@ Additionally, the user suggests exploring whether Codex could be used conversati
 - SHOULD FIX: "recommended, does not block DONE"
 - Anti-pattern 6: "Never escalate a SHOULD FIX to MUST FIX between rounds"
 
-**Dispatch-pattern** (`dispatch-pattern.md`), Step 6/7:
-- APPROVED: "Any SHOULD FIX findings from the reviewer are recorded in the epic's History section during closure -- they are NOT relayed to the implementer."
-- NOT APPROVED: "Route ONLY the MUST FIX findings to the implementer... Do NOT include SHOULD FIX items in the feedback to implementers."
+**Dispatch-pattern** (`dispatch-pattern.md`), Step 7:
+- Describes routing MUST FIX items to the implementer but is silent on SHOULD FIX handling -- no explicit deferral or triage guidance exists. Needs a small addition for the triage step.
 
 **Implement skill** (`SKILL.md`), Phase 3 Step 5:
 - Point 3: "SHOULD FIX -> epic History"
 - Point 4: "Route ONLY the MUST FIX findings... Do NOT include SHOULD FIX items"
+- APPROVED path (line 214): "Any SHOULD FIX findings from the reviewer are recorded in the epic's History section during closure -- they are NOT relayed to the implementer."
+- NOT APPROVED path (line 216): "Route ONLY the MUST FIX findings to the implementer... Do NOT include SHOULD FIX items in the feedback to implementers."
 - Anti-pattern 10: "Do not relay SHOULD FIX findings to implementers."
+
+**CLAUDE.md** (Agent Ecosystem section, line 450):
+- "SHOULD FIX findings are recorded in epic History during closure, not relayed to implementers."
 
 ### Target Behavior (What It Becomes)
 
@@ -88,13 +93,9 @@ The code-reviewer continues to classify findings as MUST FIX or SHOULD FIX -- th
 
 ### Triage Heuristics for the Main Session
 
-The main session should apply these heuristics when triaging SHOULD FIX items:
-
-- **Convention alignment**: If a SHOULD FIX item moves code closer to documented conventions, accept it.
-- **Small fix, clear value**: If the fix is a few lines and the improvement is obvious, accept it.
-- **Subjective style preference**: If the reviewer and the codebase conventions don't mandate a particular style, dismiss it with reason.
-- **Out-of-scope cleanup**: If the finding is about pre-existing code not modified by the story, dismiss it (scope guardrail applies).
-- **When uncertain**: Accept it. The bias should be toward fixing, not deferring.
+- For each SHOULD FIX: if the main session agrees it improves the code, accept it (route to implementer). If not, dismiss with a one-line reason.
+- When uncertain, accept -- bias toward fixing.
+- Findings about pre-existing code not modified by the story should be dismissed (scope guardrail).
 
 ### Codex Interactive Review (Research)
 
@@ -106,8 +107,11 @@ The user suggested testing whether Codex can be used conversationally during rev
 This research is independent of the main stories -- the resolution-first model does not depend on Codex interactive review.
 
 ## Open Questions
-- **CA consultation pending**: What is the right way to structure the triage step in the review loop? Should it be a new explicit step, or folded into the existing APPROVED/NOT APPROVED handling? CA should advise on the structural approach before stories are finalized.
 - **Codex interactive feasibility**: Unknown until research spike completes. If feasible, a follow-up epic could integrate it.
+
+### Resolved
+- **Triage step structure** (resolved via CA consultation): Fold triage into the existing APPROVED/NOT APPROVED handling -- no new step number needed. After receiving findings, the main session triages ALL findings before any merge/status decisions.
 
 ## History
 - 2026-03-11: Created. DRAFT pending claude-architect consultation on context-layer approach.
+- 2026-03-11: Refinement session (PM, SE, CA). CA consultation complete. PM caught misattribution of SHOULD FIX deferral text to dispatch-pattern.md (actually in SKILL.md); SE verified line-by-line. Corrections: misattributions fixed, CLAUDE.md added as fourth target file, triage heuristics simplified, open question resolved (fold triage into existing APPROVED/NOT APPROVED handling). Set READY.
