@@ -1171,7 +1171,10 @@ async def connect_opponent_confirm(request: Request, link_id: int) -> Response:
             "This URL belongs to a Lincoln program team. You cannot link an opponent to an owned team.",
         )
 
-    duplicate_name = await run_in_threadpool(get_duplicate_opponent_name, public_id, link_id)
+    our_team_id = link["our_team_id"]
+    duplicate_name = await run_in_threadpool(
+        get_duplicate_opponent_name, public_id, our_team_id, link_id
+    )
     profile, err = await _fetch_team_profile(request, link, guard, public_id)
     if err is not None:
         return err
@@ -1251,10 +1254,11 @@ async def connect_opponent(
             status_code=400,
         )
 
-    duplicate_name = await run_in_threadpool(get_duplicate_opponent_name, public_id, link_id)
-    await run_in_threadpool(save_manual_opponent_link, link_id, public_id)
-
     our_team_id = link["our_team_id"]
+    duplicate_name = await run_in_threadpool(
+        get_duplicate_opponent_name, public_id, our_team_id, link_id
+    )
+    await run_in_threadpool(save_manual_opponent_link, link_id, public_id)
     msg = _build_connect_success_msg(link["opponent_name"], duplicate_name)
     return RedirectResponse(
         url=f"/admin/opponents?team_id={quote_plus(our_team_id)}&msg={msg}",

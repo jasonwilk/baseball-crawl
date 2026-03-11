@@ -806,6 +806,152 @@ class TestConnectPost:
 
 
 # ---------------------------------------------------------------------------
+# E-091-03: Duplicate public_id check scoped to our_team_id
+# ---------------------------------------------------------------------------
+
+
+def _insert_opponent_link(
+    db_path: Path,
+    our_team_id: str,
+    root_team_id: str,
+    opponent_name: str,
+    public_id: str | None = None,
+    resolution_method: str | None = None,
+) -> int:
+    """Insert an opponent_links row and return its id."""
+    conn = sqlite3.connect(str(db_path))
+    cursor = conn.execute(
+        "INSERT INTO opponent_links"
+        " (our_team_id, root_team_id, opponent_name, public_id, resolution_method)"
+        " VALUES (?, ?, ?, ?, ?)",
+        (our_team_id, root_team_id, opponent_name, public_id, resolution_method),
+    )
+    conn.commit()
+    link_id = cursor.lastrowid
+    conn.close()
+    return link_id
+
+
+class TestDuplicatePublicIdScopedToTeam:
+    """Duplicate public_id check is scoped to our_team_id (E-091-03).
+
+    AC-1: Cross-team reuse of the same public_id produces no duplicate warning.
+    AC-2: Same-team duplicate produces the expected warning.
+    AC-3: Both save POST and confirm GET use the same scoped function.
+    """
+
+    def test_cross_team_same_public_id_no_warning_on_save_post(
+        self, opp_db: Path
+    ) -> None:
+        """POST /connect on JV team does not warn when Varsity already uses the same public_id.
+
+        Scenario: lsb-varsity-2026 has Northside Eagles at a1GFM9Ku0BbF (auto).
+        Now lsb-jv-2026 has a different unlinked opponent row (gc-root-jv-x01).
+        Linking it to a1GFM9Ku0BbF should succeed without a duplicate warning --
+        because no *JV* row already uses that public_id.
+        """
+        admin_id = _insert_user(opp_db, "e091cross1@test", is_admin=1)
+        token = _insert_session(opp_db, admin_id)
+
+        # Insert an unlinked JV opponent
+        link_id = _insert_opponent_link(
+            opp_db,
+            our_team_id="lsb-jv-2026",
+            root_team_id="gc-root-jv-x01",
+            opponent_name="Northside Eagles JV",
+        )
+
+        # a1GFM9Ku0BbF is used by lsb-varsity-2026 / Northside Eagles (auto), but not JV
+        with patch.dict("os.environ", {"DATABASE_PATH": str(opp_db)}):
+            with TestClient(app, follow_redirects=False, cookies={"session": token}) as client:
+                response = client.post(
+                    f"/admin/opponents/{link_id}/connect",
+                    data={"public_id": "a1GFM9Ku0BbF"},
+                )
+
+        assert response.status_code == 303
+        location = response.headers["location"]
+        # No "note:" warning in the redirect message
+        assert "note" not in location.lower()
+
+        # Link should be saved
+        row = _get_link_row(opp_db, link_id)
+        assert row is not None
+        assert row["public_id"] == "a1GFM9Ku0BbF"
+
+    def test_same_team_duplicate_public_id_warns_on_save_post(
+        self, opp_db: Path
+    ) -> None:
+        """POST /connect warns when the same team already uses the public_id.
+
+        Scenario: lsb-varsity-2026 has Northside Eagles at a1GFM9Ku0BbF (auto).
+        Linking a second Varsity row to the same public_id should warn.
+        """
+        admin_id = _insert_user(opp_db, "e091same1@test", is_admin=1)
+        token = _insert_session(opp_db, admin_id)
+        link_id = _get_link_id_by_name(opp_db, "Ridgecrest Rockets")
+        assert link_id is not None  # belongs to lsb-varsity-2026, unlinked
+
+        # a1GFM9Ku0BbF already used by Northside Eagles on the *same* team (lsb-varsity-2026)
+        with patch.dict("os.environ", {"DATABASE_PATH": str(opp_db)}):
+            with TestClient(app, follow_redirects=False, cookies={"session": token}) as client:
+                response = client.post(
+                    f"/admin/opponents/{link_id}/connect",
+                    data={"public_id": "a1GFM9Ku0BbF"},
+                )
+
+        assert response.status_code == 303
+        location = response.headers["location"]
+        # Warning message must mention the existing opponent's name
+        assert "Northside" in location
+
+        # Link still saved
+        row = _get_link_row(opp_db, link_id)
+        assert row is not None
+        assert row["public_id"] == "a1GFM9Ku0BbF"
+
+    def test_cross_team_same_public_id_no_warning_on_confirm_get(
+        self, opp_db: Path
+    ) -> None:
+        """Confirm page does not show duplicate warning for a cross-team reuse.
+
+        Scenario: lsb-jv-2026 is confirming a link to a1GFM9Ku0BbF, which is
+        only used by lsb-varsity-2026 -- a different team. No warning expected.
+        """
+        from src.gamechanger.team_resolver import TeamProfile
+
+        admin_id = _insert_user(opp_db, "e091cross2@test", is_admin=1)
+        token = _insert_session(opp_db, admin_id)
+
+        # Insert an unlinked JV opponent
+        link_id = _insert_opponent_link(
+            opp_db,
+            our_team_id="lsb-jv-2026",
+            root_team_id="gc-root-jv-x02",
+            opponent_name="Northside Eagles JV Confirm",
+        )
+
+        mock_profile = TeamProfile(
+            public_id="a1GFM9Ku0BbF",
+            name="Northside Eagles",
+            sport="baseball",
+        )
+
+        with patch.dict("os.environ", {"DATABASE_PATH": str(opp_db)}):
+            with patch("src.api.routes.admin.resolve_team", return_value=mock_profile):
+                with TestClient(app, cookies={"session": token}) as client:
+                    response = client.get(
+                        f"/admin/opponents/{link_id}/connect/confirm",
+                        params={"url": "https://web.gc.com/teams/a1GFM9Ku0BbF/slug"},
+                    )
+
+        assert response.status_code == 200
+        # No duplicate warning -- cross-team reuse is fine
+        assert "Warning" not in response.text
+        assert "duplicate" not in response.text.lower()
+
+
+# ---------------------------------------------------------------------------
 # AC-9: Disconnect only for manual links; 400 for auto
 # ---------------------------------------------------------------------------
 
