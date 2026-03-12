@@ -197,6 +197,8 @@ def refresh(
     refresh_token = env.get(f"GAMECHANGER_REFRESH_TOKEN{suffix}") or None
     device_id = env.get(f"GAMECHANGER_DEVICE_ID{suffix}") or None
     base_url = env.get("GAMECHANGER_BASE_URL") or None
+    email = env.get("GAMECHANGER_USER_EMAIL") or None
+    password = env.get("GAMECHANGER_USER_PASSWORD") or None
 
     missing = []
     if not client_id:
@@ -226,8 +228,10 @@ def refresh(
             device_id=device_id,  # type: ignore[arg-type]
             base_url=base_url,  # type: ignore[arg-type]
             env_path=_ENV_FILE,
+            email=email,
+            password=password,
         )
-        access_token = tm.force_refresh()
+        access_token = tm.force_refresh(allow_login_fallback=True)
     except ConfigurationError as exc:
         _err_console.print(f"[red]Error:[/red] {exc}")
         raise typer.Exit(code=1)

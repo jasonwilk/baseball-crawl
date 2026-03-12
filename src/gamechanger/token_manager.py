@@ -195,7 +195,7 @@ class TokenManager:
 
         return self._do_refresh(allow_login_fallback=True)
 
-    def force_refresh(self) -> str:
+    def force_refresh(self, allow_login_fallback: bool = False) -> str:
         """Unconditionally refresh the access token, bypassing the cache.
 
         Used by the GameChangerClient for 401 retry logic -- when the server
@@ -207,13 +207,22 @@ class TokenManager:
         a meaningful message rather than hitting an ``AssertionError`` inside
         ``_do_refresh()``.
 
+        Args:
+            allow_login_fallback: When True and the profile is web, a HTTP 401
+                response (expired refresh token) triggers the 3-step login flow
+                if email/password are configured.  Defaults to False for the
+                GameChangerClient 401-retry path; set True from the CLI refresh
+                command so an expired refresh token auto-recovers via login.
+
         Returns:
             A new valid access token JWT string.
 
         Raises:
             AuthSigningError: If no client key is available (mobile no-key path),
                 or if POST /auth returns HTTP 400 (bad signature).
-            CredentialExpiredError: If POST /auth returns HTTP 401 (bad token).
+            CredentialExpiredError: If POST /auth returns HTTP 401 (bad token)
+                and login fallback is disabled or credentials are absent.
+            LoginFailedError: If login fallback is attempted but any step fails.
         """
         if self._client_key is None:
             raise AuthSigningError(
@@ -223,7 +232,7 @@ class TokenManager:
                 f"GAMECHANGER_ACCESS_TOKEN_{self._profile.upper()} in .env."
             )
         logger.debug("Force-refreshing access token for %s profile", self._profile)
-        return self._do_refresh(allow_login_fallback=False)
+        return self._do_refresh(allow_login_fallback=allow_login_fallback)
 
     def _do_refresh(self, allow_login_fallback: bool = False) -> str:
         """Perform a POST /auth token refresh and update internal state.

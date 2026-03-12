@@ -80,7 +80,9 @@ All sections should show `[OK]`. Done.
 
 ## Path B: Token Refresh (Programmatic)
 
-The normal day-to-day flow. Requires a valid client key and a non-expired refresh token (14-day lifetime). No browser interaction needed.
+The normal day-to-day flow. Requires a valid client key. No browser interaction needed.
+
+If the refresh token is still valid (within 14 days), it refreshes normally. If the refresh token is expired, the command automatically falls back to the full login flow using `GAMECHANGER_USER_EMAIL` and `GAMECHANGER_USER_PASSWORD` from `.env`.
 
 ### Steps
 
@@ -90,7 +92,7 @@ The normal day-to-day flow. Requires a valid client key and a non-expired refres
 bb creds refresh --profile web
 ```
 
-This calls `POST /auth {type:"refresh"}` using the stored refresh token and client key. On success, it writes a new access token and a new refresh token to `.env`.
+This calls `POST /auth {type:"refresh"}` using the stored refresh token and client key. If the refresh token is expired and email + password are in `.env`, it automatically performs the full login flow instead. On success, it writes a new access token and a new refresh token to `.env`.
 
 **2. Verify:**
 
@@ -100,13 +102,11 @@ bb creds check --profile web
 
 If this fails with a signature error, the client key may be stale -- go to **Path A**.
 
-If this fails with "Credentials expired," the refresh token has passed its 14-day window -- go to **Path C**.
-
 ---
 
 ## Path C: Full Re-Capture (Browser)
 
-Use this when the refresh token has expired (no crawl ran for 14+ days) and programmatic refresh fails. You need to capture fresh credentials from a browser session.
+Use this only when Path B fails **and** login fallback also fails (e.g., email/password not in `.env`, or password changed). This should be rare.
 
 ### Steps
 
