@@ -22,17 +22,21 @@ last_confirmed: "2026-03-12"
 tags: [games, events, player, stats]
 caveats:
   - >
-    CRITICAL ID MAPPING: The URL parameter is game_stream.id from game-summaries,
-    NOT event_id, NOT game_stream.game_id. These are three different UUIDs for the
-    same game. Must crawl game-summaries first to get game_stream.id.
+    CRITICAL ID MAPPING: The URL parameter is the game_stream_id -- NOT event_id,
+    NOT game_stream.game_id. Two sources for this UUID: (1) preferred: `id` field
+    from GET /public/teams/{public_id}/games (no auth, confirmed 2026-03-12); (2)
+    fallback: game_stream.id from GET /teams/{team_id}/game-summaries (requires auth
+    + UUID). For the scouting chain, use the public /games path -- no bridge call needed.
   - >
     ASYMMETRIC TOP-LEVEL KEYS: Own team key is the public_id slug (short alphanumeric,
     no dashes); opponent key is a UUID (with dashes). Detect via regex or match against
     known public_id from /me/teams.
 related_schemas: []
 see_also:
+  - path: /public/teams/{public_id}/games
+    reason: Preferred game_stream_id source -- `id` field IS the game_stream_id (no auth, no bridge call)
   - path: /teams/{team_id}/game-summaries
-    reason: Required first -- provides game_stream.id needed for this endpoint's path
+    reason: Authenticated fallback game_stream_id source -- provides game_stream.id (requires UUID)
   - path: /game-stream-processing/{game_stream_id}/plays
     reason: Pitch-by-pitch play data using the same game_stream_id
   - path: /public/game-stream-processing/{game_stream_id}/details
@@ -47,13 +51,21 @@ see_also:
 
 Returns the per-player box score for both teams (home and away) in a single response. Includes batting lines, pitching lines, batting order, positions, and player names. This is the primary source for per-player game stats (alongside the event player-stats endpoint).
 
-**ID chain for this endpoint:**
+**ID chain for this endpoint (two sources for game_stream_id):**
+
+Preferred (no auth for step 1):
+```
+GET /public/teams/{public_id}/games -> id  (this IS the game_stream_id)
+  -> GET /game-stream-processing/{game_stream_id}/boxscore (this endpoint)
+```
+
+Authenticated fallback (requires UUID):
 ```
 GET /teams/{team_id}/game-summaries -> game_stream.id
   -> GET /game-stream-processing/{game_stream_id}/boxscore (this endpoint)
 ```
 
-Use `game_stream.id` (NOT `game_stream.game_id`, NOT `event_id`). See [game-summaries](get-teams-team_id-game-summaries.md).
+The `id` field from `/public/teams/{public_id}/games` and `game_stream.id` from `game-summaries` are the same UUID (confirmed 2026-03-12). Use the public path when available -- no bridge call needed. NOT `game_stream.game_id`, NOT `event_id`. See [public games](get-public-teams-public_id-games.md) or [game-summaries](get-teams-team_id-game-summaries.md).
 
 ```
 GET https://api.team-manager.gc.com/game-stream-processing/{game_stream_id}/boxscore

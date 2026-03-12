@@ -134,6 +134,13 @@ class GameChangerClient:
             self._session.headers["gc-app-name"] = "web"
         # mobile profile with no GAMECHANGER_APP_NAME_MOBILE: omit gc-app-name entirely
 
+        # Public session: same network config as the main session but NO auth headers.
+        # Used by get_public() for unauthenticated GameChanger public API endpoints.
+        self._public_session = create_session(
+            min_delay_ms=min_delay_ms, jitter_ms=jitter_ms, profile=profile,
+            proxy_url=proxy_url,
+        )
+
         # Build the token manager. Token fetch is lazy -- happens on first API call.
         self._token_manager = self._build_token_manager(profile, suffix)
 
@@ -369,6 +376,90 @@ class GameChangerClient:
             headers["Accept"] = accept
 
         return self._get_with_retries(url, path, params, timeout, headers)
+
+    def get_public(
+        self,
+        path: str,
+        params: dict[str, Any] | None = None,
+        timeout: int = 30,
+        accept: str | None = None,
+    ) -> Any:
+        """Make a public (unauthenticated) GET request and return the parsed JSON response.
+
+        Does NOT inject ``gc-token`` or ``gc-device-id`` headers.  Used for
+        GameChanger public API endpoints that require no authentication (e.g.
+        ``GET /public/teams/{public_id}/games``).  Rate limiting and retry
+        behaviour are consistent with ``get()``.
+
+        Args:
+            path: API path (e.g. ``"/public/teams/abc/games"``).  Must start
+                with ``/``.
+            params: Optional query parameters dict.
+            timeout: Request timeout in seconds (default: 30).
+            accept: Optional endpoint-specific ``Accept`` header value.
+
+        Returns:
+            Parsed JSON response (dict or list depending on the endpoint).
+
+        Raises:
+            RateLimitError: On 429 responses (after waiting Retry-After).
+            GameChangerAPIError: On 5xx responses after 3 retries.
+        """
+        url = f"{self._base_url}{path}"
+        headers: dict[str, str] = {
+            "Content-Type": _GC_CONTENT_TYPE,
+        }
+        if accept is not None:
+            headers["Accept"] = accept
+
+        backoff_delays = [1, 2, 4]
+        last_error: GameChangerAPIError | None = None
+
+        for attempt, backoff in enumerate(backoff_delays):
+            logger.debug("GET public %s (attempt %d)", url, attempt + 1)
+            response = self._public_session.get(
+                url, params=params, timeout=timeout, headers=headers
+            )
+            logger.debug("GET public %s -> %d", path, response.status_code)
+
+            if response.status_code == 200:
+                return response.json()
+
+            if response.status_code == 429:
+                retry_after = int(response.headers.get("Retry-After", "60"))
+                logger.warning(
+                    "Rate limit hit on %s (HTTP 429). Waiting %ds before raising.",
+                    path,
+                    retry_after,
+                )
+                time.sleep(retry_after)
+                raise RateLimitError(
+                    f"Rate limit exceeded for {path} (HTTP 429). "
+                    f"Waited {retry_after}s."
+                )
+
+            if 500 <= response.status_code < 600:
+                last_error = GameChangerAPIError(
+                    f"Server error for {path} "
+                    f"(HTTP {response.status_code}) after {attempt + 1} attempt(s)."
+                )
+                if attempt < len(backoff_delays) - 1:
+                    logger.warning(
+                        "Server error %d on public %s -- retrying in %ds (attempt %d/3)",
+                        response.status_code,
+                        path,
+                        backoff,
+                        attempt + 1,
+                    )
+                    time.sleep(backoff)
+                    continue
+            else:
+                raise GameChangerAPIError(
+                    f"Unexpected status {response.status_code} for {path}."
+                )
+
+        assert last_error is not None
+        raise last_error
 
     def _get_with_retries(
         self,

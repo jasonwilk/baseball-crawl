@@ -270,7 +270,7 @@ These endpoints use `public_id` slugs and require **no** gc-token or gc-device-i
 
 | Method | Path | Status | Auth | Description |
 |--------|------|--------|------|-------------|
-| POST | [/teams/{team_id}/follow](endpoints/post-teams-team_id-follow.md) | OBSERVED | req | Follow a team as the authenticated user (HTTP 204). **CRITICAL:** Following a team unlocks the reverse bridge (GET /teams/public/{public_id}/id) for that team. Without following, the bridge returns HTTP 403. Prerequisite for the opponent scouting pipeline. (Confirmed 2026-03-12, two independent tests.) |
+| POST | [/teams/{team_id}/follow](endpoints/post-teams-team_id-follow.md) | OBSERVED | req | Follow a team as the authenticated user (HTTP 204). Following unlocks the reverse bridge (GET /teams/public/{public_id}/id) for that team -- without following, the bridge returns HTTP 403 (confirmed 2026-03-12, two independent tests). **NOT required for the scouting pipeline** -- the public-endpoint scouting chain (schedule, roster, boxscores) works without following (confirmed 2026-03-12). |
 
 See also: `DELETE /teams/{team_id}/users/{user_id}` and `DELETE /me/relationship-requests/{team_id}` under Teams -- Core and My Account respectively (the unfollow sequence).
 
@@ -289,6 +289,7 @@ Multi-endpoint integration guides documenting how endpoints chain together for c
 | Flow | Description |
 |------|-------------|
 | [opponent-resolution.md](flows/opponent-resolution.md) | Resolve opponents from the authenticated API to public_id slugs for unauthenticated access |
+| [opponent-scouting.md](flows/opponent-scouting.md) | **Primary scouting path**: public_id → schedule (no auth) + roster + boxscores (gc-token) + local season aggregates. No UUIDs, no following required. |
 
 ---
 

@@ -23,7 +23,7 @@ from pathlib import Path
 import pytest
 
 from src.gamechanger.loaders import LoadResult
-from src.gamechanger.loaders.game_loader import GameLoader, _GameSummaryEntry
+from src.gamechanger.loaders.game_loader import GameLoader, GameSummaryEntry as _GameSummaryEntry
 
 # ---------------------------------------------------------------------------
 # Schema fixture
@@ -779,6 +779,52 @@ def test_ip_zero_converts_to_zero_ip_outs(db: sqlite3.Connection, tmp_path: Path
     ).fetchone()
     assert row is not None
     assert row[0] == 0
+
+
+def test_ip_one_third_converts_to_one_out(db: sqlite3.Connection, tmp_path: Path) -> None:
+    """IP=3.333... (3⅓ innings = 10 outs) converts correctly via round(float*3).
+
+    The old int() truncation would have given 3*3=9 outs (wrong).
+    """
+    boxscore = _make_boxscore(
+        own_pitching=[
+            {"player_id": _PLAYER_OWN_P1, "stats": {"IP": 3.3333333333333335, "H": 3, "R": 1, "ER": 1, "BB": 1, "SO": 4}}
+        ]
+    )
+    team_dir = _write_team_dir(tmp_path, boxscores={_GAME_STREAM_ID: boxscore})
+    loader = _make_loader(db)
+
+    loader.load_all(team_dir)
+
+    row = db.execute(
+        "SELECT ip_outs FROM player_game_pitching WHERE player_id = ? AND game_id = ?;",
+        (_PLAYER_OWN_P1, _EVENT_ID),
+    ).fetchone()
+    assert row is not None
+    assert row[0] == 10, f"3⅓ IP should be 10 outs, got {row[0]}"
+
+
+def test_ip_two_thirds_converts_to_two_outs(db: sqlite3.Connection, tmp_path: Path) -> None:
+    """IP=3.666... (3⅔ innings = 11 outs) converts correctly via round(float*3).
+
+    The old int() truncation would have given 3*3=9 outs (wrong).
+    """
+    boxscore = _make_boxscore(
+        own_pitching=[
+            {"player_id": _PLAYER_OWN_P1, "stats": {"IP": 3.6666666666666665, "H": 2, "R": 0, "ER": 0, "BB": 0, "SO": 5}}
+        ]
+    )
+    team_dir = _write_team_dir(tmp_path, boxscores={_GAME_STREAM_ID: boxscore})
+    loader = _make_loader(db)
+
+    loader.load_all(team_dir)
+
+    row = db.execute(
+        "SELECT ip_outs FROM player_game_pitching WHERE player_id = ? AND game_id = ?;",
+        (_PLAYER_OWN_P1, _EVENT_ID),
+    ).fetchone()
+    assert row is not None
+    assert row[0] == 11, f"3⅔ IP should be 11 outs, got {row[0]}"
 
 
 def test_multiple_games_in_one_team_dir(db: sqlite3.Connection, tmp_path: Path) -> None:

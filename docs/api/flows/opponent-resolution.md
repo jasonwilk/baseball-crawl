@@ -45,7 +45,7 @@ Both bridges only work for **teams the authenticated user follows** (operator-re
 
 **Do NOT use either bridge endpoint for opponent resolution.** The chain above (opponents list -> team detail via progenitor_team_id -> public_id from team metadata) is the correct path -- it requires no follow association.
 
-**Note:** Following can be automated via [`POST /teams/{team_id}/follow`](../endpoints/post-teams-team_id-follow.md) (204 No Content, "follow as fan"). This unlocks bridge endpoints and other authenticated team data for the followed team. However, following is not needed for resolution itself -- it is a prerequisite for the **scouting pipeline** (fetching player rosters, boxscores, and stats post-resolution).
+**Note:** Following can be automated via [`POST /teams/{team_id}/follow`](../endpoints/post-teams-team_id-follow.md) (204 No Content, "follow as fan"). This unlocks bridge endpoints and other follow-gated authenticated data. However, following is not needed for resolution itself, and it is also **not required for the scouting pipeline** -- the public-endpoint scouting chain (schedule, roster, boxscores) works without any follow association (confirmed on unfollowed team, 2026-03-12). See [opponent-scouting.md](opponent-scouting.md#following-not-required).
 
 ## Null-Progenitor Fallback
 
@@ -67,3 +67,7 @@ These numbers are from a single team's opponent registry (70 total opponents). T
 | `root_team_id` | `GET /teams/{team_id}/opponents` | Local identifier from GC's opponent registry |
 | `progenitor_team_id` | `GET /teams/{team_id}/opponents` | Canonical GC team UUID; nullable (~14% missing) |
 | `public_id` | `GET /teams/{progenitor_team_id}` response | Public slug for unauthenticated endpoints |
+
+## See Also
+
+- [opponent-scouting.md](opponent-scouting.md) -- How to use `public_id` to retrieve game schedules, player rosters, per-game boxscores, and compute season aggregates

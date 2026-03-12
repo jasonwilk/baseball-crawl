@@ -21,8 +21,9 @@ Key data decisions
   The game-summaries index is required to resolve this mapping.
 - **Asymmetric boxscore keys**: own team key = public_id slug (alphanumeric, no
   dashes); opponent key = UUID (lowercase hex with dashes, 36 chars).
-- **IP to ip_outs**: boxscore stores IP as an integer number of full innings.
-  The schema stores ``ip_outs`` (1 IP = 3 outs).  Convert: ``ip_outs = IP * 3``.
+- **IP to ip_outs**: boxscore stores IP as float decimal innings (e.g. 3.333...
+  = 3⅓ innings = 10 outs).  The schema stores ``ip_outs`` (integer outs).
+  Convert: ``ip_outs = round(float(IP) * 3)``.
 - **Sparse extras**: the ``extra[]`` array in each group contains only non-zero
   player values.  Missing values default to 0.
 - **Stub players**: unknown player_ids get a stub row (first_name='Unknown',
@@ -106,7 +107,7 @@ _PITCHING_EXTRAS_SKIP_DEBUG = {"WP", "HBP", "#P", "TS", "BF", "HR"}
 
 
 @dataclass
-class _GameSummaryEntry:
+class GameSummaryEntry:
     """Parsed entry from a game-summaries file.
 
     Attributes:
@@ -245,11 +246,11 @@ class GameLoader:
         return total
 
     def load_file(
-        self, boxscore_path: Path, summary: _GameSummaryEntry
+        self, boxscore_path: Path, summary: GameSummaryEntry
     ) -> LoadResult:
         """Load a single boxscore file.
 
-        Public for testing.  Callers must supply a matching ``_GameSummaryEntry``
+        Public for testing.  Callers must supply a matching ``GameSummaryEntry``
         with the resolved ``event_id``, ``home_away``, and score data.
 
         Args:
@@ -269,8 +270,8 @@ class GameLoader:
 
     def _build_summaries_index(
         self, team_dir: Path
-    ) -> dict[str, _GameSummaryEntry] | None:
-        """Build a ``game_stream_id -> _GameSummaryEntry`` mapping.
+    ) -> dict[str, GameSummaryEntry] | None:
+        """Build a ``game_stream_id -> GameSummaryEntry`` mapping.
 
         Reads ``game_summaries.json`` from ``team_dir`` and parses each record.
 
@@ -303,7 +304,7 @@ class GameLoader:
             )
             return None
 
-        index: dict[str, _GameSummaryEntry] = {}
+        index: dict[str, GameSummaryEntry] = {}
         for record in raw:
             entry = self._parse_summary_record(record)
             if entry is not None:
@@ -316,8 +317,8 @@ class GameLoader:
         )
         return index
 
-    def _parse_summary_record(self, record: dict) -> _GameSummaryEntry | None:
-        """Parse one game-summaries record into a ``_GameSummaryEntry``.
+    def _parse_summary_record(self, record: dict) -> GameSummaryEntry | None:
+        """Parse one game-summaries record into a ``GameSummaryEntry``.
 
         Args:
             record: Raw dict from game_summaries.json array.
@@ -335,7 +336,7 @@ class GameLoader:
             )
             return None
 
-        return _GameSummaryEntry(
+        return GameSummaryEntry(
             event_id=str(event_id),
             game_stream_id=str(game_stream_id),
             home_away=record.get("home_away"),
@@ -350,7 +351,7 @@ class GameLoader:
     # ------------------------------------------------------------------
 
     def _load_boxscore_file(
-        self, path: Path, summary: _GameSummaryEntry
+        self, path: Path, summary: GameSummaryEntry
     ) -> LoadResult:
         """Parse and load a single boxscore JSON file.
 
@@ -645,7 +646,7 @@ class GameLoader:
                     )
             # IP -> ip_outs conversion (1 IP = 3 outs)
             if "IP" in raw_stats:
-                pitching.ip_outs = int(raw_stats["IP"]) * 3
+                pitching.ip_outs = round(float(raw_stats["IP"]) * 3)
             for api_key in _PITCHING_EXTRAS_SKIP_DEBUG:
                 if api_key in player_extras:
                     logger.debug(
