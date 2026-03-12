@@ -1,7 +1,7 @@
 # E-098: Fix Scouting Pipeline Bugs
 
 ## Status
-`ACTIVE`
+`COMPLETED`
 
 ## Overview
 Fix confirmed bugs in the opponent scouting pipeline (E-097) before scouting reports are used for game prep. Two data-correctness bugs (cross-season stat bleed, silent load failures), two test gaps that allowed them, and three crawler status-lifecycle bugs (freshness gate missing season scope, premature 'completed' marking, zero-boxscore crawls marked successful).
@@ -79,3 +79,6 @@ None.
 - 2026-03-12: Added E-098-03 (crawler status lifecycle and freshness gate) after second Codex code review found 3 additional P1 bugs in the same area. SE and DE both assessed and recommended FIX. Single story because all three touch the same state machine. Epic scope expanded from 4 to 7 bugs total.
 - 2026-03-12: Added E-098-04 (completed_at timestamp fix) after final Codex code review. P2 finding: `_upsert_run_end()` sets `completed_at` unconditionally, including for 'running' rows. Also triaged P1 (GameSummaryEntry wrong ID) as DISMISS and P3 (flow doc vs schema mismatch) as DEFER to IDEA-022.
 - 2026-03-12: Added E-098-05 (roster-fail commit gap, load-path completed_at, test assertions) after Codex review of E-098-03/04 implementation. Three findings: missing commit on roster-fail path (P1-A), `update_run_load_status()` missing `completed_at` (P1-B), load-phase tests missing timestamp assertions (P2). SE and DE both confirmed FIX.
+- 2026-03-12: All 5 stories DONE. 100 scouting tests passing. Epic marked COMPLETED.
+- 2026-03-12: Documentation assessment: No triggers fired. No new features, no schema changes, no deployment changes, no user-facing behavior changes. Bug fixes only. No documentation impact.
+- 2026-03-12: Context-layer assessment: (1) New convention/pattern? No. (2) Architectural decision? No. (3) Footgun/boundary discovered? No -- gotchas are code-level and already fixed. (4) Agent behavior change? No. (5) Domain knowledge? No. (6) New CLI command/workflow? No. No context-layer codification required.
