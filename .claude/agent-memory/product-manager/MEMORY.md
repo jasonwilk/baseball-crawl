@@ -1,8 +1,8 @@
 # Product Manager -- Agent Memory
 
 ## Numbering State
-- Next available epic number: E-097
-- Epics created: E-001 through E-096 (E-001, E-003, E-005, E-006, E-007, E-008, E-010, E-011, E-012, E-013, E-014, E-015, E-016, E-017, E-018, E-019, E-020, E-021, E-022, E-024, E-025, E-026, E-027, E-028, E-029, E-030, E-031, E-032, E-033, E-034, E-035, E-036, E-037, E-038, E-042, E-044, E-046, E-048, E-049, E-050, E-052, E-053, E-054, E-056, E-057, E-058, E-055, E-059, E-060, E-061, E-075, E-081, E-084, E-087, E-088, E-089, E-090, E-091, E-092 archived; E-093, E-094, E-095 archived; E-096 active)
+- Next available epic number: E-098
+- Epics created: E-001 through E-097 (E-001, E-003, E-005, E-006, E-007, E-008, E-010, E-011, E-012, E-013, E-014, E-015, E-016, E-017, E-018, E-019, E-020, E-021, E-022, E-024, E-025, E-026, E-027, E-028, E-029, E-030, E-031, E-032, E-033, E-034, E-035, E-036, E-037, E-038, E-042, E-044, E-046, E-048, E-049, E-050, E-052, E-053, E-054, E-056, E-057, E-058, E-055, E-059, E-060, E-061, E-075, E-081, E-084, E-087, E-088, E-089, E-090, E-091, E-092 archived; E-093, E-094, E-095 archived; E-096 active; E-097 active)
 - Next available idea number: IDEA-022
 - Ideas created: IDEA-001 through IDEA-021
 
@@ -25,6 +25,7 @@
 - E-094 (COMPLETED): Fix Team ID Resolution in Import and Crawl Pipeline -- see Archived Epics.
 - E-095 (COMPLETED): Client Key Credential Resilience -- see Archived Epics.
 - E-096 (DRAFT): Resolve All Review Findings During Stories -- 1 research spike + 2 stories. Changes the dispatch review loop so every finding (MUST FIX and SHOULD FIX) reaches a terminal state (FIXED or DISMISSED) during the story. No deferral to epic History. Main session triages ALL findings. Research spike on interactive Codex review conversations. All context-layer work via claude-architect. Wave: R-01 independent; 01 -> 02. CA consultation pending.
+- E-097 (READY): Opponent Scouting Data Pipeline -- 4 stories. End-to-end opponent scouting: API flow doc (01, api-scout), scouting_runs schema migration 007 with fetch timestamps (02, DE), scouting crawler + loader + season-aggregate computation + `bb data scout` CLI (03, DE), context-layer updates (04, CA). Promotes IDEA-019 + IDEA-020. Revised chain: resolved opponent UUID -> players + game-summaries + boxscores (season-stats is Forbidden for non-owned teams; aggregates computed from boxscores). Fetch timestamps (first_fetched/last_checked) on scouting_runs for re-fetch support. Reuses existing data tables. Wave: 01+02 parallel -> 03 -> 04.
 
 ## Archived Epics
 - E-092 (COMPLETED): Git Worktree Isolation for Agent Teams -- 5 stories. Worktree-native dispatch: implementing agents spawned with `isolation: "worktree"` by default, context-layer exception (no worktree for claude-architect), merge-back protocol after review approval, code-reviewer worktree-aware review, dotenv_values() path fix for worktree cwd. Key artifacts: `.claude/rules/worktree-isolation.md` (new), updated `dispatch-pattern.md`, `implement/SKILL.md`, `code-reviewer.md`. No follow-up work.
@@ -159,6 +160,8 @@
 | IDEA-014 | Mobile vs. Web API Documentation Split | CANDIDATE | 2026-06-05 | Refine docs/api/endpoints/ to better differentiate mobile vs. web behavior. Related to E-072 and IDEA-011. Trigger: 3+ endpoints with meaningfully divergent per-profile behavior. |
 | IDEA-015 | Programmatic Auth Module | PROMOTED | 2026-03-08 | Promoted to E-077 (scoped to token refresh + client integration). Full login flow and bb creds refresh migration deferred. |
 | IDEA-016 | Codex Hardening and Validation Trail Map | CANDIDATE | 2026-06-07 | Preserve a later path to harden the safe Codex lane after E-081/E-082: bootstrap validation, trust/config shape, RTK path exposure, and optional re-evaluation of experimental Codex features. |
+| IDEA-019 | Retroactive Opponent Stat Crawling | PROMOTED | 2026-03-12 | Promoted to E-097 (Opponent Scouting Data Pipeline). |
+| IDEA-020 | Public Endpoint Opponent Data Ingestion | PROMOTED | 2026-03-12 | Promoted to E-097 (Opponent Scouting Data Pipeline). |
 
 ## Key Workflow Contract
 - Routing model: planning (user -> PM), dispatch (user/main session -> implementers directly). PM plans and closes; main session dispatches. (E-065 merged roles)

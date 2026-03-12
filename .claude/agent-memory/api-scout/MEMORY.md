@@ -23,16 +23,34 @@ Credentials are NEVER logged, committed, or displayed. Redact to `{AUTH_TOKEN}` 
 
 ## API Spec Location
 
-Single source of truth: `docs/api/` -- index at `docs/api/README.md`, per-endpoint files in `docs/api/endpoints/` (116 files as of 2026-03-11).
+Single source of truth: `docs/api/` -- index at `docs/api/README.md`, per-endpoint files in `docs/api/endpoints/` (120 endpoint files + web-routes reference = 121 total as of 2026-03-12).
 
 ## Exploration Status
 
-As of 2026-03-11. See `docs/api/README.md` for full endpoint index.
+As of 2026-03-12. See `docs/api/README.md` for full endpoint index.
 
-### iOS App Identity (updated 2026-03-09)
+### 2026-03-12 Key Findings (session 2026-03-12_034919, MOBILE)
 
-- **Odyssey app UA (UPDATED):** `Odyssey/2026.8.0 (com.gc.teammanager; build:0; iOS 26.3.0) Alamofire/5.9.0` (was 2026.7.0 prior to session 2026-03-09_062610)
-- **gc-app-version on iOS (UPDATED):** `2026.8.0.0` (was `2026.7.0.0`; web app value is `0.0.0`)
+**CRITICAL: Follow-gating CONFIRMED (two independent tests, 2026-03-12).** `POST /teams/{team_id}/follow` is a prerequisite for the reverse bridge:
+- Reverse bridge WITHOUT following → HTTP 403 Forbidden
+- Reverse bridge AFTER following as fan → HTTP 200 OK with UUID
+
+This means the opponent scouting pipeline must call `POST /teams/{team_id}/follow` before resolving an opponent's public_id via `GET /teams/public/{public_id}/id`.
+
+**Unfollow is a two-step sequence:**
+1. `DELETE /teams/{team_id}/users/{user_id}` (HTTP 204) -- self-removal; Accept = `vnd.gc.com.none+json; version=0.0.0`
+2. `DELETE /me/relationship-requests/{team_id}` (HTTP 200, body "OK", text/plain) -- cancels pending request
+
+**Accept headers and schemas confirmed for previously-incomplete endpoints:**
+- `GET /teams/{team_id}/share-with-opponent/opt-outs`: `vnd.gc.com.share_with_opponent_opt_outs+json; version=0.0.0`. Response is `[]` when empty.
+- `PATCH /me/team-notification-settings/{team_id}`: Content-Type = `vnd.gc.com.patch_user_team_notification_settings+json; version=0.0.0`. Uses `{"updates":{...}}` per-field wrapper. Response echoes full settings object with all boolean/null notification fields.
+
+**iOS app version bumped to 2026.9.0** (was 2026.8.0, iOS 26.3.0 → 26.3.1). Updated `docs/api/headers.md`.
+
+### iOS App Identity (updated 2026-03-12)
+
+- **Odyssey app UA (UPDATED):** `Odyssey/2026.9.0 (com.gc.teammanager; build:0; iOS 26.3.1) Alamofire/5.9.0` (was 2026.8.0/iOS 26.3.0 prior to session 2026-03-12_034919)
+- **gc-app-version on iOS (UPDATED):** `2026.9.0.0` (was `2026.8.0.0`; web app value is `0.0.0`)
 - **Media CDN hostnames:** `media-service.gc.com` (signed image delivery) and `vod-archive.gc.com` (AWS IVS video archive).
 
 ### Opponent ID Hierarchy (CONFIRMED AND EXPANDED 2026-03-09)
@@ -158,6 +176,25 @@ This means: by obtaining an opponent's `progenitor_team_id` from search results 
 **`GET /me/scoped-features`** -- Returns `{"scoped_features": {}}`. Same schema as team/org scoped-features.
 
 **`GET /me/person-external-associations`** -- Maps person_id to legacy MongoDB `external_id` with `external_organization: "gamechanger"`.
+
+### 2026-03-12 Key Findings (session 2026-03-12_034919, WEB + MOBILE, followed team browsing)
+
+**6 NEW endpoints documented** -- unfollow lifecycle (2 DELETEs), per-user notification settings (GET + PATCH), share-with-opponent opt-outs, org base metadata.
+
+**UNFOLLOW SEQUENCE CONFIRMED (2-step):**
+1. `DELETE /teams/{team_id}/users/{user_id}` (HTTP 204) -- self-removes from team. `accept: vnd.gc.com.none+json; version=0.0.0`.
+2. `DELETE /me/relationship-requests/{team_id}` (HTTP 200, body: "OK" text/plain) -- cancels relationship request. `accept: vnd.gc.com.none+json; version=0.0.0`.
+Then optionally: `POST /teams/{team_id}/follow` (HTTP 204) -- re-associates as fan.
+
+**NOTIFICATION SETTINGS (per-user, per-team):**
+- `GET /me/team-notification-settings/{team_id}` (3 hits, 304) -- per-user prefs (distinct from `/teams/{team_id}/team-notification-setting`, which is team-admin view).
+- `PATCH /me/team-notification-settings/{team_id}` (12 hits web, 2 hits mobile) -- accept: `application/json; charset=utf-8` (unusual -- most GC endpoints use vendor type). Uses `{"updates": {...}}` wrapper body. Full schema in endpoint file.
+
+**SHARE-WITH-OPPONENT OPT-OUTS:** `GET /teams/{team_id}/share-with-opponent/opt-outs` -- accept: `vnd.gc.com.share_with_opponent_opt_outs+json; version=0.0.0`. Response was `[]` (empty array). Item schema unknown. Moderate coaching relevance (explains missing stat data when opponents opt out of sharing).
+
+**`GET /organizations/{org_id}` BASE ENDPOINT:** HTTP 304 (3 hits). Schema unknown. Org UUID in session: `04dc5d56-59ae-4257-9d66-bfd43ded50cc`.
+
+**Session context:** operator browsed a followed non-owned team (UUID `468c0fe0-...`), unfollowed via the 2-step DELETE sequence, then re-followed. 363 total requests, 82 unique endpoints -- most already documented.
 
 ### Areas Not Yet Explored / High-Priority
 

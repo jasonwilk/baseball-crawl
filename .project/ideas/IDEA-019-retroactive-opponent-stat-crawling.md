@@ -1,7 +1,9 @@
 # IDEA-019: Retroactive Opponent Stat Crawling
 
 ## Status
-`CANDIDATE`
+`PROMOTED`
+
+**Promoted to**: E-097 (Opponent Scouting Data Pipeline) on 2026-03-12. Combined with IDEA-020.
 
 ## Summary
 Once opponents are resolved to real GC teams (via the opponent data model), crawl their full stat profiles -- season stats, game summaries, player stats, box scores -- using the authenticated API. This is the payoff of the resolution chain: scouting reports built from the opponent's own data, not your scorekeeper's version.

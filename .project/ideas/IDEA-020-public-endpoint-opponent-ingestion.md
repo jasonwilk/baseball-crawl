@@ -1,7 +1,9 @@
 # IDEA-020: Public Endpoint Opponent Data Ingestion
 
 ## Status
-`CANDIDATE`
+`PROMOTED`
+
+**Promoted to**: E-097 (Opponent Scouting Data Pipeline) on 2026-03-12. Combined with IDEA-019.
 
 ## Summary
 Ingest opponent data via the public API endpoints (no auth required) as a complement or fallback to authenticated crawling. Four confirmed public endpoints provide team profile, game schedule with scores, game details with line scores, and roster -- all accessible with just a `public_id` slug.
