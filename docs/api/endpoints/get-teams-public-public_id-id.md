@@ -7,9 +7,11 @@ profiles:
   web:
     status: confirmed
     notes: >
-      HTTP 200 for OWN team public_id (two teams confirmed via HAR 2026-03-11).
-      HTTP 403 for OPPONENT team public_id (smgRExWHuBJJ returned 403, 8+ hits,
-      2026-03-11). Access restricted to teams the authenticated user belongs to.
+      HTTP 200 for OWN team public_id -- two teams confirmed via HAR 2026-03-11;
+      independently re-confirmed via direct curl 2026-03-12 (public_id DolZd7TTaXj5,
+      gc-app-name: web). HTTP 403 for OPPONENT team public_id (smgRExWHuBJJ returned
+      403, 8+ hits, 2026-03-11). Access restricted to teams the authenticated user
+      belongs to.
   mobile:
     status: unverified
     notes: Not captured from mobile profile.
@@ -21,7 +23,7 @@ response_shape: object
 response_sample: null
 raw_sample_size: null
 discovered: "2026-03-07"
-last_confirmed: "2026-03-11"
+last_confirmed: "2026-03-12"
 tags: [team, bridge]
 caveats:
   - >
@@ -34,6 +36,15 @@ caveats:
     public_id smgRExWHuBJJ (Nighthawks Navy AAA 14U) -- 4 hits, all 403. Only returns
     the UUID for teams the authenticated user has membership in. This endpoint CANNOT
     be used to resolve arbitrary opponent public_ids to UUIDs.
+  - >
+    ACCESS MODEL REFINEMENT (operator-reported 2026-03-12): The companion forward bridge
+    (GET /teams/{team_id}/public-team-profile-id) has the same restriction pattern. The
+    operator characterized both bridges as restricted to "teams the user follows," which
+    is more precise than "teams the user is a member of." The exact association types
+    (coaching staff, admin, explicitly followed, bookmarked) that permit access have not
+    been independently verified for this endpoint, but the 403 behavioral outcome is
+    confirmed 2026-03-09/2026-03-11 via proxy capture and curl. Needs re-verification
+    to confirm whether "follows" includes non-admin followed teams or only coaching/admin roles.
   - >
     ALTERNATIVE: Use GET /search/opponent-import to find opponent team UUIDs by name.
     The search endpoint returns team UUIDs without requiring membership.
@@ -49,7 +60,7 @@ see_also:
 
 # GET /teams/public/{public_id}/id
 
-**Status:** CONFIRMED -- 200 OK for own teams, 403 for opponent teams. Last verified: 2026-03-11.
+**Status:** CONFIRMED -- 200 OK for own teams, 403 for opponent teams. Last verified: 2026-03-12 (direct curl).
 
 Reverse bridge: resolves a team's `public_id` slug to its internal UUID. **Access is restricted to teams the authenticated user belongs to.** Opponent team public_ids return HTTP 403 Forbidden.
 
@@ -123,4 +134,4 @@ Observed: opponent public_id returned 403 on 2026-03-11. Eight consecutive attem
 
 Use `GET /search/opponent-import?name={team_name}&sport=baseball` to find opponent team UUIDs programmatically. The search endpoint does not require team membership and returns UUID in its results.
 
-**Discovered:** 2026-03-07. **Full 200 response confirmed:** 2026-03-11 (HAR capture, two owned teams). **403 for opponent confirmed:** 2026-03-11 (proxy session, 8 consecutive 403s).
+**Discovered:** 2026-03-07. **Full 200 response confirmed:** 2026-03-11 (HAR capture, two owned teams). **403 for opponent confirmed:** 2026-03-11 (proxy session, 8 consecutive 403s). **Re-confirmed via direct curl:** 2026-03-12 (public_id DolZd7TTaXj5, gc-app-name: web). **Access model refinement (operator-reported):** 2026-03-12 -- restriction is specifically "teams the user follows," not arbitrary authenticated access; same restriction as the forward bridge. Exact association types (coaching staff, admin, followed, bookmarked) not yet independently verified.

@@ -37,6 +37,15 @@ caveats:
     does NOT work for opponents via this endpoint. Alternative routes to opponent
     public_ids must be found (e.g., scraping the GC web app URL, or checking if the
     public API exposes the team slug directly).
+  - >
+    ACCESS MODEL REFINEMENT (operator-reported 2026-03-12): The restriction is more
+    precisely described as "teams the authenticated user follows." Teams the user is an
+    active coaching/admin member of are accessible; arbitrary team UUIDs (opponents,
+    followed-but-not-joined teams that may not be covered, or any team without an
+    association) return 403. The exact association types that grant access (coaching
+    staff, team admin, bookmarked, explicitly followed) have not been independently
+    verified -- "follows" is the operator's characterization. The behavioral outcome
+    (403 for opponent UUIDs) is confirmed 2026-03-09 via direct curl.
 related_schemas: []
 see_also:
   - path: /teams/public/{public_id}/id
@@ -57,7 +66,7 @@ see_also:
 
 UUID-to-`public_id` bridge. Resolves a team's internal UUID to its `public_id` slug. This is the bridge endpoint between the authenticated API (which identifies teams by UUID) and the public API (which identifies teams by `public_id` slug).
 
-**CRITICAL LIMITATION:** This endpoint returns 403 Forbidden when called with an opponent team UUID. It only works for teams the authenticated user is a member of. The "ID chain" from opponent UUID to public API data via this bridge does NOT work. Alternative approaches to obtaining opponent `public_id` values are required (e.g., the GC web URL for the team contains the slug, or the boxscore `game_stream_id` is already usable without needing the public_id for per-game detail calls).
+**CRITICAL LIMITATION:** This endpoint returns 403 Forbidden when called with an opponent team UUID. It only works for teams the authenticated user follows or is a member of (operator-reported 2026-03-12: the restriction is specifically "teams the user follows" -- not just coaching/admin membership). The "ID chain" from opponent UUID to public API data via this bridge does NOT work. Alternative approaches to obtaining opponent `public_id` values are required (e.g., the GC web URL for the team contains the slug, or the boxscore `game_stream_id` is already usable without needing the public_id for per-game detail calls).
 
 ```
 GET https://api.team-manager.gc.com/teams/{team_id}/public-team-profile-id
@@ -132,8 +141,8 @@ For opponent teams, this bridge is blocked. Alternatives:
 ## Known Limitations
 
 - **Auth required:** `gc-token` required. Unauthenticated access not tested.
-- **Own-team only:** Returns 200 only for teams where the authenticated user is a member. Returns HTTP 403 for opponent/external team UUIDs. Tested 2026-03-09 with progenitor_team_id `14fd6cb6-43ab-4c61-a26c-5486c949e7b5` (Nighthawks Navy AAA 14U -- expected public_id `smgRExWHuBJJ`).
+- **Requires team association (follows/membership):** Returns 200 only for teams the authenticated user follows or is a member of. Returns HTTP 403 for opponent/external team UUIDs. Tested 2026-03-09 with progenitor_team_id `14fd6cb6-43ab-4c61-a26c-5486c949e7b5` (Nighthawks Navy AAA 14U -- expected public_id `smgRExWHuBJJ`). Operator-reported 2026-03-12: restriction is specifically "teams the user follows" -- not arbitrary authenticated access.
 - **Cannot bridge opponents to public API via this endpoint.** Use `game_stream_id` from game-summaries to access per-game data for any team without needing a `public_id`.
 - **Minimal response:** Under 100 bytes. No pagination.
 
-**Discovered:** 2026-03-04. **Confirmed:** 2026-03-04. **Opponent 403 confirmed:** 2026-03-09.
+**Discovered:** 2026-03-04. **Confirmed:** 2026-03-04. **Opponent 403 confirmed:** 2026-03-09. **Access model refined (operator-reported):** 2026-03-12.

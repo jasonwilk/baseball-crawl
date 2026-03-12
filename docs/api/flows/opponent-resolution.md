@@ -34,11 +34,18 @@ With the `public_id` from step 2, the following unauthenticated endpoints become
 - [`GET /public/teams/{public_id}/games`](../endpoints/get-public-teams-public_id-games.md) -- game schedule with scores
 - [`GET /public/game-stream-processing/{game_stream_id}/details`](../endpoints/get-public-game-stream-processing-game_stream_id-details.md) -- inning-by-inning line scores
 
-## WARNING: `/public-team-profile-id` Returns 403 for Opponents
+## WARNING: Bridge Endpoints Restricted to "Followed" Teams Only
 
-[`GET /teams/{team_id}/public-team-profile-id`](../endpoints/get-teams-team_id-public-team-profile-id.md) is a UUID-to-public_id bridge, but it **returns HTTP 403 for opponent UUIDs** (confirmed 2026-03-09). It only works for teams the authenticated user is a member of.
+Both bridge endpoints are restricted and **cannot be used for opponent resolution**:
 
-**Do NOT use this endpoint for opponent resolution.** The chain above (opponents -> team detail -> public_id) is the correct path.
+- [`GET /teams/{team_id}/public-team-profile-id`](../endpoints/get-teams-team_id-public-team-profile-id.md) -- UUID to public_id. Returns HTTP 403 for opponent UUIDs (confirmed 2026-03-09).
+- [`GET /teams/public/{public_id}/id`](../endpoints/get-teams-public-public_id-id.md) -- public_id to UUID. Returns HTTP 403 for opponent public_ids (confirmed 2026-03-11).
+
+Both bridges only work for **teams the authenticated user follows** (operator-reported 2026-03-12). The exact association types that permit access (coaching/admin membership, explicitly followed, bookmarked) have not been independently verified, but the 403 behavioral outcome for opponent teams is confirmed via curl and proxy capture.
+
+**Do NOT use either bridge endpoint for opponent resolution.** The chain above (opponents list -> team detail via progenitor_team_id -> public_id from team metadata) is the correct path -- it requires no follow association.
+
+**Note:** Following can be automated via [`POST /teams/{team_id}/follow`](../endpoints/post-teams-team_id-follow.md) (204 No Content, "follow as fan"). This unlocks bridge endpoints and other authenticated team data for the followed team. However, following is not needed for resolution itself -- it is a prerequisite for the **scouting pipeline** (fetching player rosters, boxscores, and stats post-resolution).
 
 ## Null-Progenitor Fallback
 
