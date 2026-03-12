@@ -23,6 +23,7 @@ All migrations MUST be idempotent:
 - Use `CREATE INDEX IF NOT EXISTS` for index creation.
 - Use `INSERT OR IGNORE` or `INSERT ... ON CONFLICT DO NOTHING` for seed data.
 - Re-running a migration must not fail or duplicate data.
+- **ALTER TABLE exception**: SQLite has no `ALTER TABLE ADD COLUMN IF NOT EXISTS` syntax. `ALTER TABLE ADD COLUMN` migrations are safe without DDL-level idempotency because `apply_migrations.py` tracks applied migrations in `_migrations` and runs each exactly once. Precedent: migration 005 (`ALTER TABLE teams ADD COLUMN public_id TEXT`).
 
 ## Seed Data
 
