@@ -8,6 +8,7 @@ This directory contains documentation for system operators and developers workin
 |----------|-------------|
 | [Architecture](architecture.md) | System overview, components, data flow, directory structure, and tech stack. |
 | [Getting Started](getting-started.md) | Prerequisites, setup, running the stack, seeding the database, and running tests. |
+| [Credential Refresh](credential-refresh.md) | Step-by-step guide for fixing expired or broken GameChanger credentials. Start here when auth fails. |
 | [Operations](operations.md) | Deployment, credential rotation, backups, troubleshooting, and monitoring. |
 | [Agent Guide](agent-guide.md) | The AI agent ecosystem: what it is, how to work with it, and how to request work. |
 | [Codex Guide](codex-guide.md) | Project-local Codex bootstrap, runtime-state split, trust model, and smoke checks. |
