@@ -107,7 +107,7 @@ These are the statistics and dimensions that matter for coaching decisions:
 - **Pitch-by-pitch plays**: Full pitch sequence per at-bat (balls, strikes, fouls, in-play), contact quality descriptions, baserunner events, fielder identity on outs, and in-game substitutions -- from a single API call per game via the plays endpoint
 - **Spray charts**: Ball-in-play direction (x/y coordinates), play type, play result, fielder position -- for batting tendency analysis and defensive positioning
 - **Players**: Key player identification (aces, closers, leadoff), lineup position history
-- **Opponents**: Lineup patterns and changes, tendencies, roster composition
+- **Opponents**: Lineup patterns and changes, tendencies, roster composition, opponent season stats and boxscores (via scouting pipeline)
 - **Longitudinal**: Player development across seasons, teams, and levels
 
 The authoritative data dictionary mapping all GameChanger stat abbreviations to their definitions is at `docs/gamechanger-stat-glossary.md`. It includes batting, pitching, fielding, catcher, and positional innings stats, plus an API field name mapping table for cases where the API uses different abbreviations than the UI.
@@ -119,6 +119,7 @@ The authoritative data dictionary mapping all GameChanger stat abbreviations to 
 - API limitations are discovered iteratively -- document everything
 - **Authenticated endpoints** (`/teams/*`, `/me/*`) require `gc-token` + `gc-device-id` headers and must handle auth expiration gracefully. Includes a **UUID-to-public_id bridge** (`GET /teams/{team_id}/public-team-profile-id`) that returns the `public_id` slug for any team UUID -- enabling programmatic access to all public endpoints for opponents discovered via authenticated data (schedule `opponent_id`, opponents `progenitor_team_id`).
 - **Public endpoints** require NO authentication -- no `gc-token`, no `gc-device-id`. Four confirmed under `/public/*`: `GET /public/teams/{public_id}` (name, location, record, staff), `GET /public/teams/{public_id}/games` (game schedule with final scores, opponents, home/away), `GET /public/teams/{public_id}/games/preview` (near-duplicate of `/games` -- same data minus `has_videos_available`, uses `event_id` instead of `id`; prefer `/games`), and `GET /public/game-stream-processing/{game_stream_id}/details?include=line_scores` (per-game inning-by-inning scoring, R/H/E totals; same `game_stream_id` as authenticated boxscore -- complementary views of the same game). One additional public-path endpoint uses an **inverted URL pattern**: `GET /teams/public/{public_id}/players` (roster -- NOT `/public/teams/`). Both path structures coexist in the API; do not assume all public endpoints follow `/public/*`. Public endpoints use `public_id` slugs (not UUIDs) except game details which uses `game_stream_id` from game-summaries, and may have different field names than authenticated equivalents (see API spec for details).
+- **Opponent scouting pipeline**: Uses opponent `public_id` to fetch schedules and rosters via public endpoints, then per-game boxscores via authenticated endpoint; season aggregates are computed from boxscores (season-stats endpoint is Forbidden for non-owned teams). No UUID or following required. See `docs/api/flows/opponent-scouting.md`.
 
 ## Commands
 
@@ -142,6 +143,7 @@ The `bb` CLI is the primary operator interface. Run `bb --help` to see all avail
 - `bb proxy review` -- manage proxy session review status
 - `bb proxy check` -- verify Bright Data proxy connectivity and IP anonymization
 - `bb data resolve-opponents` -- resolve opponent public_ids via the GameChanger API (`--dry-run`, `--profile`)
+- `bb data scout` -- scout opponent teams: fetch schedule, roster, and boxscores (`--dry-run`, `--team PUBLIC_ID`, `--season SEASON_ID`, `--profile`)
 - `bb db backup` -- back up the SQLite database (`--db-path`)
 - `bb db reset` -- reset dev database to seeded state (`--db-path`, `--force`)
 
@@ -319,6 +321,7 @@ See `docs/admin/codex-guide.md` for operator-facing setup details and smoke chec
 - **Import boundary**: `src/` modules MUST NOT import from `scripts/`. `scripts/` contains standalone operator tools that import from `src/`; the reverse direction is not allowed. Reusable logic always lives in `src/`, with scripts as thin wrappers.
 - **Repo-root resolution**: Modules in `src/` use `Path(__file__).resolve().parents[N]` to derive repo-root-relative paths (e.g., `parents[2]` for a module three levels deep like `src/db/reset.py`). Never use cwd-relative paths or `sys.path.insert()` in `src/` modules.
 - **`migrations/` is a Python package**: It has `__init__.py` and is included in `pyproject.toml` `[tool.setuptools.packages]` because `src/db/reset.py` imports from it. Do not remove `migrations/__init__.py` or the pyproject.toml include without understanding this dependency.
+- **Scouting pipeline**: `src/gamechanger/crawlers/scouting.py` (crawler) and `src/gamechanger/loaders/scouting_loader.py` (loader) implement the opponent scouting data flow. The crawler fetches opponent schedules, rosters, and boxscores; the loader aggregates boxscores into season stats and writes to the database. Entry point: `bb data scout`.
 
 ## Security Rules
 - IMPORTANT: Credentials and tokens MUST NEVER appear in code, logs, commit history, or agent output

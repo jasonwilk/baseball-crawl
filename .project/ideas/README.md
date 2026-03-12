@@ -40,6 +40,7 @@ Review this list every 90 days, or when completing an epic. Ask:
 | [IDEA-019](IDEA-019-retroactive-opponent-stat-crawling.md) | Retroactive Opponent Stat Crawling | PROMOTED | 2026-03-12 -- promoted to E-097 |
 | [IDEA-020](IDEA-020-public-endpoint-opponent-ingestion.md) | Public Endpoint Opponent Data Ingestion | PROMOTED | 2026-03-12 -- promoted to E-097 |
 | [IDEA-021](IDEA-021-database-migration-process.md) | Database Migration Process Definition | CANDIDATE | 2026-06-07 |
+| [IDEA-022](IDEA-022-scouting-flow-doc-schema-mismatch.md) | Scouting Flow Doc / Schema Stat Mismatch | CANDIDATE | 2026-06-12 |
 
 ## Status Definitions
 
