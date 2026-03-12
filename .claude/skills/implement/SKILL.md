@@ -211,9 +211,16 @@ Review this story's implementation against all acceptance criteria and the revie
 
 When the implementer did NOT work in a worktree (context-layer stories that touch non-context files, or stories spawned without isolation for other reasons), omit the "Implementer worktree path" paragraph.
 
-3. **If the reviewer returns APPROVED** (no MUST FIX findings): Run the merge-back sequence (see Step 5a below), then mark the story `DONE` in both the story file and epic Stories table. Any SHOULD FIX findings from the reviewer are recorded in the epic's History section during closure -- they are NOT relayed to the implementer.
+3. **Triage ALL findings.** Before any merge or routing decision, the main session reads every finding (MUST FIX and SHOULD FIX) and triages each SHOULD FIX item:
+   - **Accept (fix it)**: The finding improves code touched by the story. Route to the implementer alongside MUST FIX items.
+   - **Dismiss (close it)**: The finding targets pre-existing code not modified by the story, or the main session disagrees with the recommendation. Record a one-line dismissal reason. The finding is closed -- it is NOT deferred to epic History or recorded anywhere else.
+   - **When uncertain, bias toward accepting** -- prefer fixing over dismissing.
 
-4. **If the reviewer returns NOT APPROVED** (MUST FIX findings): Route ONLY the MUST FIX findings to the implementer with the review round number (e.g., "Round 1 of 2 -- MUST FIX items below"). Do NOT include SHOULD FIX items in the feedback to implementers. The implementer fixes the issues in the same worktree and reports completion again (with updated `## Files Changed`). Send the updated work back to the reviewer for Round 2 using an expanded template that includes the prior findings:
+   Every finding reaches a terminal state during the story: FIXED or DISMISSED. No deferral path exists.
+
+4. **If the reviewer returns APPROVED** (no MUST FIX findings): Triage any SHOULD FIX findings per step 3 above. If all SHOULD FIX items are dismissed (or there are none), run the merge-back sequence (see Step 5a below), then mark the story `DONE`. If any SHOULD FIX items are accepted, route them to the implementer before merge-back. After the implementer fixes them, send the updated work back to the reviewer for re-review.
+
+5. **If the reviewer returns NOT APPROVED** (MUST FIX findings): Triage SHOULD FIX findings per step 3 above. Route MUST FIX items plus any accepted SHOULD FIX items to the implementer with the review round number (e.g., "Round 1 of 2 -- items to fix below"). The implementer fixes the issues in the same worktree and reports completion again (with updated `## Files Changed`). Send the updated work back to the reviewer for Round 2 using an expanded template that includes the prior findings:
 
 ```
 Review story E-NNN-SS: [Title] (Round 2)
@@ -233,15 +240,15 @@ Implementer-reported files changed:
 Implementer-reported test results:
 [Test Results section from implementer's round-2 completion message]
 
-Round 1 MUST FIX findings:
-[Paste the MUST FIX findings from the round-1 review verbatim]
+Round 1 findings routed to implementer:
+[Paste the MUST FIX findings and accepted SHOULD FIX findings from round 1 verbatim]
 
 Review round: 2 of 2 (circuit breaker)
 
-This is a round-2 re-review. The implementer was asked to fix the Round 1 MUST FIX findings listed above. Perform a full re-review of all changed files, but focus on whether the Round 1 MUST FIX items are resolved and whether the fixes introduced any new issues. Report findings using the structured format.
+This is a round-2 re-review. The implementer was asked to fix the Round 1 findings listed above (MUST FIX items plus any SHOULD FIX items accepted by the main session during triage). Perform a full re-review of all changed files, but focus on whether the Round 1 MUST FIX items are resolved and whether the fixes introduced any new issues. Report findings using the structured format.
 ```
 
-5. **Circuit breaker.** Max 2 review rounds per story. If the 2nd review still has MUST FIX findings, escalate to the user with the findings summary and present options:
+6. **Circuit breaker.** Max 2 review rounds per story. If the 2nd review still has MUST FIX findings, escalate to the user with the findings summary and present options:
    - (a) Fix it themselves
    - (b) Tell the implementer to try again (resets the circuit breaker)
    - (c) Override the reviewer and mark DONE (explicit user override -- the user assumes responsibility for unresolved findings)
@@ -403,20 +410,26 @@ Phase 3: Coordination loop
     Send to code-reviewer (round 1 of 2, include worktree path)
       |
       v
-    APPROVED? --YES--> Merge-back: git merge --no-ff -> remove worktree -> delete branch -> Mark DONE
-      |                  (SHOULD FIX -> epic History)
-      NO (MUST FIX)      [If merge conflict: escalate to user, block dependent cascade only]
+    Main session triages ALL findings:
+      - MUST FIX: always routed to implementer
+      - SHOULD FIX: accept (route to implementer) or dismiss (one-line reason, closed)
+      - No deferral path -- every finding ends FIXED or DISMISSED
       |
       v
-    Route MUST FIX to implementer, implementer fixes in same worktree
+    Items to fix? --NO--> Merge-back: git merge --no-ff -> remove worktree -> delete branch -> Mark DONE
+      |                     [If merge conflict: escalate to user, block dependent cascade only]
+      YES
+      |
+      v
+    Route MUST FIX + accepted SHOULD FIX to implementer, implementer fixes in same worktree
       |
       v
     Send to code-reviewer (round 2 of 2)
       |
       v
-    APPROVED? --YES--> Merge-back -> Mark DONE
+    Items to fix? --NO--> Merge-back -> Mark DONE
       |
-      NO
+      YES
       |
       v
     Escalate to user (circuit breaker)
@@ -480,5 +493,5 @@ If the code-reviewer's context window fills during a large epic (8+ stories), th
 7. **Do not spawn a PM teammate.** The main session coordinates directly. There is no PM role during dispatch.
 8. **Do not skip the context-layer assessment.** The epic cannot be archived until the context-layer impact is evaluated per `.claude/rules/context-layer-assessment.md`.
 9. **Do not mark stories DONE without code-reviewer approval** (except context-layer-only stories) unless the user explicitly overrides via the circuit breaker escalation. The reviewer is the quality gate -- the main session does not bypass it by verifying ACs directly.
-10. **Do not relay SHOULD FIX findings to implementers.** The fix loop is exclusively for MUST FIX items. Record SHOULD FIX in epic History during closure.
+10. **Do not defer SHOULD FIX findings to epic History.** Every finding must reach a terminal state (FIXED or DISMISSED) during the story. The main session triages each SHOULD FIX item: accept it (route to implementer alongside MUST FIX items) or dismiss it (record a one-line reason). There is no deferral path.
 11. **Do not spawn context-layer stories with worktree isolation.** Context-layer files (CLAUDE.md, `.claude/agents/`, `.claude/rules/`, `.claude/skills/`, etc.) are shared infrastructure. Stories modifying only these files must run in the main checkout without `isolation: "worktree"`.

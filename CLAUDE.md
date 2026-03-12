@@ -450,7 +450,7 @@ This project uses specialized agents coordinated by the product-manager:
 - **data-engineer** designs schemas informed by both baseball-coach requirements and api-scout discoveries
 - **software-engineer** implements stories, referencing specs produced by other agents
 - **product-manager** discovers requirements, consults domain experts, writes epics and stories, and closes completed work. During dispatch, the main session coordinates implementers directly.
-- **code-reviewer** reviews every code story during dispatch before it can be marked DONE. Routes MUST FIX findings back through the main session to implementers. SHOULD FIX findings are recorded in epic History during closure, not relayed to implementers.
+- **code-reviewer** reviews every code story during dispatch before it can be marked DONE. Routes MUST FIX findings back through the main session to implementers. The main session triages each SHOULD FIX finding: accept (route to implementer for fixing) or dismiss (record one-line reason, finding closed). Every finding reaches a terminal state (FIXED or DISMISSED) during the story -- no findings are deferred to epic History.
 - Any agent that identifies future work should flag it to the PM for idea capture rather than creating speculative epics
 
 ### Main Session Compliance

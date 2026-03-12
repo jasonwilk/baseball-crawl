@@ -1,7 +1,7 @@
 # E-096: Resolve All Review Findings During Stories
 
 ## Status
-`READY`
+`COMPLETED`
 <!-- Lifecycle: DRAFT -> READY -> ACTIVE -> COMPLETED (or BLOCKED / ABANDONED) -->
 <!-- PM sets READY explicitly after: expert consultation done, all stories have testable ACs, quality checklist passed. -->
 <!-- Only READY and ACTIVE epics can be dispatched. -->
@@ -47,9 +47,9 @@ Additionally, the user suggests exploring whether Codex could be used conversati
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-096-R-01 | Research: Interactive Codex Review Conversation | TODO | None | - |
-| E-096-01 | Revise code-reviewer finding categories and output format | TODO | None | - |
-| E-096-02 | Update dispatch review loop in dispatch-pattern and implement skill | TODO | E-096-01 | - |
+| E-096-R-01 | Research: Interactive Codex Review Conversation | DONE | None | claude-architect |
+| E-096-01 | Revise code-reviewer finding categories and output format | DONE | None | claude-architect |
+| E-096-02 | Update dispatch review loop in dispatch-pattern and implement skill | DONE | E-096-01 | claude-architect |
 
 ## Dispatch Team
 - claude-architect
@@ -115,3 +115,4 @@ This research is independent of the main stories -- the resolution-first model d
 ## History
 - 2026-03-11: Created. DRAFT pending claude-architect consultation on context-layer approach.
 - 2026-03-11: Refinement session (PM, SE, CA). CA consultation complete. PM caught misattribution of SHOULD FIX deferral text to dispatch-pattern.md (actually in SKILL.md); SE verified line-by-line. Corrections: misattributions fixed, CLAUDE.md added as fourth target file, triage heuristics simplified, open question resolved (fold triage into existing APPROVED/NOT APPROVED handling). Set READY.
+- 2026-03-12: Dispatch completed. All 3 stories DONE. E-096-01: Updated code-reviewer.md SHOULD FIX header and anti-pattern 6 to reflect resolution-first model. E-096-02: Updated dispatch-pattern.md (triage step in Step 7), implement SKILL.md (triage in Phase 3 Step 5, anti-pattern 10, workflow diagram), and CLAUDE.md (Agent Ecosystem description). E-096-R-01: Research spike found interactive Codex review is technically feasible (codex exec --ephemeral + resume pattern) but recommends DEFER -- integration not justified until resolution-first model is in production and real triage cases emerge. No documentation impact. Context-layer assessment: all changes were the epic's direct deliverables (context-layer files were the target), no additional codification needed.

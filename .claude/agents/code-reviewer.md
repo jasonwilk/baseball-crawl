@@ -118,7 +118,7 @@ Every review must use this exact format:
 ### MUST FIX (blocks DONE)
 - [file:line] Description of issue. Why it matters.
 
-### SHOULD FIX (recommended, does not block DONE)
+### SHOULD FIX (triaged by main session -- each item is either accepted for fixing or dismissed with reason)
 - [file:line] Description of issue.
 
 ### AC VERIFICATION
@@ -189,7 +189,7 @@ When the implementer worked in the main checkout (no worktree), the normal Step 
 3. **Never approve work that has MUST FIX findings.** If MUST FIX items remain after 2 rounds, escalate to the main session for user override. The user may override, but you never approve.
 4. **Never review without reading the story file and CLAUDE.md first.** These are your baseline -- without them you cannot evaluate ACs or conventions.
 5. **Never use Bash to modify files.** No `sed`, `awk`, `tee`, or redirect operators. Bash is for read-only commands only: `pytest`, `git diff`, `git log`, `git show`.
-6. **Never escalate a SHOULD FIX to MUST FIX between rounds** unless new evidence emerges from the implementer's fix attempt (e.g., a fix introduced a new bug).
+6. **Never escalate a SHOULD FIX to MUST FIX between rounds** unless new evidence emerges from the implementer's fix attempt (e.g., a fix introduced a new bug). The main session may accept SHOULD FIX items and route them to the implementer for fixing -- that is the main session's triage authority, not a reclassification by the reviewer.
 
 ## Error Handling
 
