@@ -18,7 +18,7 @@ response_shape: object
 response_sample: data/raw/boxscore-sample.json
 raw_sample_size: "13 KB, both teams' batting and pitching lines"
 discovered: "2026-03-04"
-last_confirmed: "2026-03-04"
+last_confirmed: "2026-03-12"
 tags: [games, events, player, stats]
 caveats:
   - >
@@ -89,19 +89,20 @@ Detect which key is which: check if the key matches UUID format (contains dashes
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `players` | array | Roster of players appearing in this game |
-| `players[].id` | UUID | Player UUID |
+| `players` | array | Roster of all players in the game (identity lookup table -- names not in stat entries) |
+| `players[].id` | UUID | Player UUID. Matches `player_id` in stat entries. |
 | `players[].first_name` | string | First name |
 | `players[].last_name` | string | Last name |
 | `players[].number` | string | Jersey number (string) |
 | `groups` | array | Stat groups: `[{category: "lineup"}, {category: "pitching"}]` |
-| `team_stats` | object | Aggregate team totals for validation |
 
 ### `groups` Array
 
 Two groups per team: `category: "lineup"` (batting) and `category: "pitching"`.
 
 Each group contains:
+- `category` (string): `"lineup"` or `"pitching"`.
+- `team_stats` (object): Aggregate team totals for validation (AB, R, H, RBI, BB, SO for lineup; IP, H, R, ER, BB, SO for pitching). **`team_stats` is a per-group field, not a top-level team field.**
 - `stats` (array): Per-player stat lines. Array order = batting order for lineup group.
 - `extra` (array): Sparse non-zero stats. Only players with non-zero values listed.
 
@@ -122,7 +123,7 @@ Each group contains:
 
 | Stat | Type |
 |------|------|
-| `IP` | int (outs -- 1 IP = 3) |
+| `IP` | float (decimal innings -- 3⅓ IP stored as 3.3333..., 3⅔ IP as 3.6666...) |
 | `H` | int |
 | `R` | int |
 | `ER` | int |
@@ -157,7 +158,7 @@ Each group contains:
 ## Known Limitations
 
 - Asymmetric top-level keys require detection logic. Match against known `public_id` from `/me/teams` or detect by UUID regex.
-- `IP` is stored as integer outs in boxscore (different from float innings in season-stats and player-stats).
+- `IP` is stored as **float decimal innings** (e.g., `3.3333...` for 3⅓ IP, `3.6666...` for 3⅔ IP). CORRECTION: earlier docs incorrectly stated IP was stored as integer outs. Confirmed float from /tmp/lsw-boxscore.json (2026-03-12).
 - `is_primary` field is only in the lineup group, not pitching group.
 - `player_text` encoding may be empty for subs.
 - No `gc-user-action` observed -- may be optional for this endpoint.

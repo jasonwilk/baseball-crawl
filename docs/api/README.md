@@ -60,11 +60,14 @@ Endpoints are grouped by domain. Within each group, sorted alphabetically by pat
 | GET | [/me/schedule](endpoints/get-me-schedule.md) | CONFIRMED | req | Cross-team unified schedule for all user teams |
 | GET | [/me/scoped-features](endpoints/get-me-scoped-features.md) | OBSERVED | req | Feature flags scoped to the authenticated user (empty observed) |
 | GET | [/me/subscription-information](endpoints/get-me-subscription-information.md) | CONFIRMED | req | Subscription tier summary (best_subscription + access_level) |
+| GET | [/me/team-notification-settings/{team_id}](endpoints/get-me-team-notification-settings-team_id.md) | OBSERVED | req | Per-user notification preferences for a specific team |
 | GET | [/me/team-tile/{team_id}](endpoints/get-me-team-tile-team_id.md) | CONFIRMED | req | Compact team summary with notification badge count |
 | GET | [/me/teams](endpoints/get-me-teams.md) | CONFIRMED | req | Active teams for the authenticated user |
 | GET | [/me/teams-summary](endpoints/get-me-teams-summary.md) | CONFIRMED | req | Lightweight archived team count and year range |
 | GET | [/me/user](endpoints/get-me-user.md) | CONFIRMED | req | Authenticated user profile and subscription info |
 | GET | [/me/widgets](endpoints/get-me-widgets.md) | CONFIRMED | req | App home screen widget configuration (live stream info) |
+| DELETE | [/me/relationship-requests/{team_id}](endpoints/delete-me-relationship-requests-team_id.md) | OBSERVED | req | Unfollow a team / cancel a pending relationship request |
+| PATCH | [/me/team-notification-settings/{team_id}](endpoints/patch-me-team-notification-settings-team_id.md) | OBSERVED | req | Update per-user notification preferences for a specific team. Per-field patching via {"updates":{...}} wrapper. Full schema confirmed 2026-03-12. |
 | PATCH | [/me/user](endpoints/patch-me-user.md) | OBSERVED | req | Update authenticated user profile (write operation) |
 
 ---
@@ -83,10 +86,11 @@ Endpoints are grouped by domain. Within each group, sorted alphabetically by pat
 | GET | [/teams/{team_id}/relationships/requests](endpoints/get-teams-team_id-relationships-requests.md) | CONFIRMED | req | Pending relationship requests for a team |
 | GET | [/teams/{team_id}/scoped-features](endpoints/get-teams-team_id-scoped-features.md) | CONFIRMED | req | Feature flags scoped to a team (empty observed) |
 | GET | [/teams/{team_id}/season-stats](endpoints/get-teams-team_id-season-stats.md) | CONFIRMED | req | Aggregate season stats for all players on a team |
-| GET | [/teams/{team_id}/team-notification-setting](endpoints/get-teams-team_id-team-notification-setting.md) | CONFIRMED | req | Team event reminder notification setting |
+| GET | [/teams/{team_id}/team-notification-setting](endpoints/get-teams-team_id-team-notification-setting.md) | CONFIRMED | req | Team event reminder notification setting (admin/team-wide view) |
 | GET | [/teams/{team_id}/users](endpoints/get-teams-team_id-users.md) | CONFIRMED | req | Team user roster: id, status, name, email (no role field) |
 | GET | [/teams/{team_id}/users/count](endpoints/get-teams-team_id-users-count.md) | CONFIRMED | req | Count of users on a team |
 | GET | [/teams/{team_id}/web-widgets](endpoints/get-teams-team_id-web-widgets.md) | CONFIRMED | req | Widget configuration for the team web view |
+| DELETE | [/teams/{team_id}/users/{user_id}](endpoints/delete-teams-team_id-users-user_id.md) | OBSERVED | req | Remove a user from a team / leave a team (self-removal confirmed, HTTP 204) |
 
 ---
 
@@ -118,6 +122,7 @@ Endpoints are grouped by domain. Within each group, sorted alphabetically by pat
 | GET | [/teams/{team_id}/opponent/{opponent_id}](endpoints/get-teams-team_id-opponent-opponent_id.md) | CONFIRMED | req | Single opponent registry entry by root_team_id |
 | GET | [/teams/{team_id}/opponents](endpoints/get-teams-team_id-opponents.md) | CONFIRMED | req | Paginated opponent registry for a team |
 | GET | [/teams/{team_id}/opponents/players](endpoints/get-teams-team_id-opponents-players.md) | CONFIRMED | req | Bulk opponent player roster with handedness (758 records observed) |
+| GET | [/teams/{team_id}/share-with-opponent/opt-outs](endpoints/get-teams-team_id-share-with-opponent-opt-outs.md) | OBSERVED | req | Teams/games opted out of the "share stats with opponent" feature |
 | PATCH | [/teams/{team_id}/opponent/{opponent_id}](endpoints/patch-teams-team_id-opponent-opponent_id.md) | CONFIRMED | req | Update opponent record (name, visibility) -- write operation |
 | POST | [/teams/{team_id}/opponent/import](endpoints/post-teams-team_id-opponent-import.md) | CONFIRMED | req | Import an opponent team into the registry (HTTP 201) -- write operation |
 | GET | [/teams/{team_id}/players](endpoints/get-teams-team_id-players.md) | CONFIRMED | req | Team player roster: name, number, avatar |
@@ -171,7 +176,7 @@ These endpoints use `public_id` slugs and require **no** gc-token or gc-device-i
 | Method | Path | Status | Auth | Description |
 |--------|------|--------|------|-------------|
 | GET | [/teams/public/{public_id}/access-level](endpoints/get-teams-public-public_id-access-level.md) | CONFIRMED | req | Paid access tier for a team by public_id (AUTH REQUIRED) |
-| GET | [/teams/public/{public_id}/id](endpoints/get-teams-public-public_id-id.md) | PARTIAL | req | Reverse bridge: public_id slug → team UUID. **Own teams only -- HTTP 403 for opponent public_ids (confirmed 2026-03-09).** |
+| GET | [/teams/public/{public_id}/id](endpoints/get-teams-public-public_id-id.md) | CONFIRMED | req | Reverse bridge: public_id slug → team UUID. **Own teams only -- HTTP 403 for opponent public_ids (confirmed 2026-03-09).** |
 | GET | [/teams/public/{public_id}/players](endpoints/get-teams-public-public_id-players.md) | CONFIRMED | req | Player roster by public_id -- note inverted URL pattern (auth unverified) |
 
 ---
@@ -203,6 +208,7 @@ These endpoints use `public_id` slugs and require **no** gc-token or gc-device-i
 
 | Method | Path | Status | Auth | Description |
 |--------|------|--------|------|-------------|
+| GET | [/organizations/{org_id}](endpoints/get-organizations-org_id.md) | OBSERVED | req | Organization metadata (base endpoint; schema unknown -- 304 responses only) |
 | GET | [/organizations/{org_id}/avatar-image](endpoints/get-organizations-org_id-avatar-image.md) | OBSERVED | req | Organization avatar/logo image URL |
 | GET | [/organizations/{org_id}/events](endpoints/get-organizations-org_id-events.md) | CONFIRMED | req | Cross-team event schedule at org level (empty for travel ball) |
 | GET | [/organizations/{org_id}/game-summaries](endpoints/get-organizations-org_id-game-summaries.md) | CONFIRMED | req | Aggregated game summaries across org teams (empty observed) |
@@ -264,7 +270,9 @@ These endpoints use `public_id` slugs and require **no** gc-token or gc-device-i
 
 | Method | Path | Status | Auth | Description |
 |--------|------|--------|------|-------------|
-| POST | [/teams/{team_id}/follow](endpoints/post-teams-team_id-follow.md) | OBSERVED | req | Follow a team as the authenticated user (HTTP 204 No Content) |
+| POST | [/teams/{team_id}/follow](endpoints/post-teams-team_id-follow.md) | OBSERVED | req | Follow a team as the authenticated user (HTTP 204). **CRITICAL:** Following a team unlocks the reverse bridge (GET /teams/public/{public_id}/id) for that team. Without following, the bridge returns HTTP 403. Prerequisite for the opponent scouting pipeline. (Confirmed 2026-03-12, two independent tests.) |
+
+See also: `DELETE /teams/{team_id}/users/{user_id}` and `DELETE /me/relationship-requests/{team_id}` under Teams -- Core and My Account respectively (the unfollow sequence).
 
 ---
 
@@ -288,8 +296,8 @@ Multi-endpoint integration guides documenting how endpoints chain together for c
 
 | Count | Source |
 |-------|--------|
-| **104** | Files in `docs/api/endpoints/` (103 endpoint files + web-routes-not-api.md reference) |
-| **104** | Endpoint rows in this index |
+| **121** | Files in `docs/api/endpoints/` (120 endpoint files + web-routes-not-api.md reference) |
+| **121** | Endpoint rows in this index |
 | **89** | E-062-R-01 spike inventory count (88 endpoints + 1 web-routes reference file) |
 
 Notes:
@@ -297,3 +305,4 @@ Notes:
 - 4 new endpoints added 2026-03-09 (session 2026-03-09_061156): `GET /search/opponent-import`, `POST /clips/search/v2`, `PATCH /players/{player_id}`, `GET /game-streams/{game_stream_id}/game-stat-edit-collection/{collection_id}`.
 - 8 new endpoints added 2026-03-09 (session 2026-03-09_062610, mobile): `POST /teams/{team_id}/opponent/import`, `PATCH /teams/{team_id}/opponent/{opponent_id}`, `GET /teams/{team_id}/import-summary`, `POST /teams/{team_id}/schedule/events`, `PATCH /teams/{team_id}/schedule/events/{event_id}`, `POST /me/tokens/firebase`, `POST /me/tokens/stream-chat`, `POST /clips/search`.
 - 2 new endpoints added 2026-03-09 (session 2026-03-09_063531, mobile search): `POST /search`, `POST /search/history`.
+- 6 new endpoints added 2026-03-12 (session 2026-03-12_034919, web + mobile follow/unfollow flow): `DELETE /me/relationship-requests/{team_id}`, `DELETE /teams/{team_id}/users/{user_id}`, `GET /me/team-notification-settings/{team_id}`, `PATCH /me/team-notification-settings/{team_id}`, `GET /teams/{team_id}/share-with-opponent/opt-outs`, `GET /organizations/{org_id}`.
