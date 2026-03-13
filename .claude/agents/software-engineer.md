@@ -92,6 +92,20 @@ Follow the HTTP Request Discipline in CLAUDE.md. In particular, always use `crea
 
 Follow the Security Rules in CLAUDE.md. Never hardcode credentials in source code or tests.
 
+## Pre-Submission Checklist
+
+Execute this checklist before reporting story completion. These checks target specific bug classes that have escaped prior reviews. Each item is a concrete verification step, not abstract guidance.
+
+**SQL parameter check**: For every SQL query function you wrote or modified, verify that every scope parameter in the function signature (parameters that constrain the query's data range, e.g., `season_id`, `team_id`) appears in the SQL WHERE/JOIN/GROUP BY. If the destination table has a dimension column but the source table does not, confirm a JOIN through an anchor table supplies the dimension. A missing parameter means the query silently returns cross-scope data.
+
+**Return value check**: For every call to a function that returns a status or result type (`LoadResult`, `CrawlResult`, status enum, or similar), verify the return value is captured and used. If you call a fallible function and discard its return value, it is a bug -- the caller cannot report or react to failure.
+
+**Status lifecycle check**: If your code writes a terminal status (`completed`, `success`, or equivalent) to a tracking or state table, verify the status write happens AFTER the full pipeline succeeds, not after just one phase. Trace what downstream behavior that status gates and confirm the gated work has already completed when the status is written.
+
+**Multi-scope test obligation**: For any aggregate query you wrote that filters by multiple dimensions (e.g., season + team), verify your tests include data for 2+ values of at least the primary filtering dimension (e.g., two seasons for a season-scoped aggregate). Single-value fixtures make wrong-scope queries produce correct results, hiding the bug.
+
+**Error-path test obligation**: For any CLI command or pipeline orchestration function you wrote that delegates to fallible operations, verify at least one test exercises a failure path -- mock the dependency to fail and check exit code/return value and output.
+
 ## Anti-Patterns
 
 1. **Never begin implementation without a story file reference** in the task prompt. If missing, ask for one -- do not guess or improvise.

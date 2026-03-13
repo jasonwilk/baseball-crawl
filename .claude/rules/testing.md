@@ -48,3 +48,27 @@ This rule requires **targeted discovery**, not a full `pytest` run. You are look
 ### Subprocess Edge Case
 
 Subprocess-based tests (e.g., `test_script_entry_points.py` invokes scripts via `subprocess.run()` that internally import from modified modules) are not discovered by grep because the import happens in a child process. These tests check invocation and help-text, not internal logic -- they will still pass when you change a function's behavior. Subprocess-based tests are discovered by convention, not grep.
+
+## Error-Path Testing
+
+When code calls a function that can fail -- returns an error, raises an exception, or returns a status object indicating failure -- write at least one test where that function fails. Verify the caller handles the failure correctly: propagates the error, sets an appropriate status, returns a non-zero exit code, or surfaces the failure to the operator. The caller must NOT print a misleading success message or exit 0 when a dependency failed.
+
+### Primary Scope: Orchestration Code
+
+This requirement is most critical for orchestration code -- CLI commands, pipeline runners, and any function that chains multiple steps together where a failure in one step must be visible to the operator. These are the paths where silent failure causes the most damage: the operator believes the pipeline succeeded when it did not.
+
+### Example Pattern
+
+```python
+def test_scout_command_surfaces_loader_failure(tmp_path, monkeypatch):
+    """When the loader fails, the CLI must exit non-zero and report the error."""
+    monkeypatch.setattr(
+        "gamechanger.loaders.scouting_loader.load_team",
+        Mock(side_effect=Exception("DB write failed")),
+    )
+    result = runner.invoke(app, ["data", "scout", "--team", "test-team"])
+    assert result.exit_code != 0
+    assert "DB write failed" in result.output
+```
+
+Mock the fallible dependency to raise or return a failure indicator. Assert the caller's exit code and output reflect the failure.

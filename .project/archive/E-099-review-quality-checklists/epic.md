@@ -1,7 +1,7 @@
 # E-099: Targeted Review Quality Checklists
 
 ## Status
-`READY`
+`COMPLETED`
 
 ## Overview
 Add concrete bug-pattern checklists to the code-reviewer and software-engineer agent definitions, and an error-path testing requirement to `testing.md`, so the specific failure classes that escaped E-097 review are caught systematically in future dispatches. E-098 fixes the bugs themselves; this epic prevents the class from recurring.
@@ -41,8 +41,8 @@ Consultation: All four relevant experts (SE, CR, DE, CA) provided root-cause ana
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-099-01 | Add bug-pattern checklists to CR and SE agent definitions | TODO | None | claude-architect |
-| E-099-02 | Add error-path testing requirement to testing.md | TODO | None | claude-architect |
+| E-099-01 | Add bug-pattern checklists to CR and SE agent definitions | DONE | None | claude-architect |
+| E-099-02 | Add error-path testing requirement to testing.md | DONE | None | claude-architect |
 
 ## Dispatch Team
 - claude-architect
@@ -100,3 +100,4 @@ None.
 
 ## History
 - 2026-03-12: Created. Synthesized from root-cause analyses by SE, CR, DE, and CA on the E-097 post-dev review findings. All four experts consulted; recommendations converged on targeted checklist additions to existing agent definitions. No expert consultation required beyond the team inputs already received.
+- 2026-03-12: COMPLETED. Both stories implemented by claude-architect. Bug Pattern Checklist added to code-reviewer.md (SQL query scope, return value consumption, status lifecycle). Pre-Submission Checklist added to software-engineer.md (same three bug classes + two test obligations). Error-Path Testing section added to testing.md. All context-layer-only -- no code-reviewer needed. Documentation assessment: No documentation impact. Context-layer assessment: (1) New convention -- yes (the deliverables ARE the context-layer additions; no further codification needed), (2) Architectural decision -- no, (3) Footgun discovered -- no (already codified by the stories), (4) Agent behavior change -- yes (CR and SE definitions modified; this IS the deliverable), (5) Domain knowledge -- no, (6) New CLI/workflow -- no.

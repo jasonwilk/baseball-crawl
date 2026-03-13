@@ -84,9 +84,23 @@ Does the code satisfy every acceptance criterion in the story file? Check each A
 
 Logic errors, off-by-ones, wrong defaults, silent failures, exception swallowing, race conditions. All are MUST FIX.
 
+### Bug Pattern Checklist
+
+These checks target specific bug classes that have escaped prior reviews. Apply them to every changed file during Step 3. Violations are MUST FIX -- they are concrete instances of Priority 2 patterns.
+
+**SQL query scope**: For every SQL query in changed code, cross-reference the function's scope parameters (parameters that constrain the query's data range, e.g., `season_id`, `team_id`) against the WHERE/JOIN/GROUP BY clauses. Every scope parameter in the function signature must appear in the query. A missing scope parameter means the query returns cross-scope data silently. Sub-pattern: when the destination table has a dimension column (e.g., `season_id` on `player_season_batting`) but the source table does not (e.g., `player_game_batting`), a JOIN through an anchor table (e.g., `games`) is required to supply the dimension -- flag missing JOINs. Severity amplifier: when a wrong-scope query feeds an upsert (`ON CONFLICT DO UPDATE`), the error compounds on every re-run -- each execution overwrites with an ever-growing cross-scope total.
+
+**Return value consumption**: For every call to a fallible operation (loader, crawler, DB write, HTTP call) in changed code, verify the return value is captured and failure states affect control flow. If a function returns a `LoadResult`, `CrawlResult`, status enum, or similar result type and the caller discards it (does not assign it or check it), flag it. Callers that print "success" or exit 0 regardless of the return value are bugs.
+
+**Status lifecycle**: When changed code writes a terminal status (`completed`, `success`, or equivalent) to a tracking or state table, trace what downstream behavior that status gates. Verify the status is written only AFTER all gated downstream work succeeds. If the status write precedes operations that could fail (and whose failure would make the status stale), flag it as premature status marking.
+
 ### Priority 3: Missing or Inadequate Tests
 
 Untested code paths, tests that do not actually verify the AC they claim to, missing edge case coverage, tests that pass vacuously. MUST FIX when testing rules in `.claude/rules/testing.md` or CLAUDE.md require coverage for the code in question.
+
+**Multi-scope aggregate tests**: For any aggregate query that filters by multiple dimensions (e.g., season + team), verify a test includes data for 2+ values of at least the primary filtering dimension (e.g., two seasons for a season-scoped aggregate). Single-value test fixtures make wrong-scope queries produce correct results, hiding the bug. MUST FIX when missing.
+
+**Error-path tests for orchestration code**: For any new CLI command or pipeline orchestration function that delegates to fallible operations (loaders, crawlers, external calls), verify at least one test exercises a failure path -- mock the dependency to fail and check exit code/return value and output. MUST FIX when missing.
 
 ### Priority 4: Credential and Security Risks
 
