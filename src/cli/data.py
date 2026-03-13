@@ -25,7 +25,19 @@ logger = logging.getLogger(__name__)
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _DEFAULT_DB_PATH = _PROJECT_ROOT / "data" / "app.db"
 
-app = typer.Typer(help="Data pipeline commands.")
+app = typer.Typer(
+    help="Data pipeline commands.",
+    invoke_without_command=True,
+    epilog="Run 'bb data COMMAND --help' for more information on a command.",
+)
+
+
+@app.callback()
+def _data_group(ctx: typer.Context) -> None:
+    """Data pipeline commands."""
+    if ctx.invoked_subcommand is None:
+        typer.echo(ctx.get_help())
+        raise typer.Exit()
 
 _CRAWLER_CHOICES = ["roster", "schedule", "opponent", "player-stats", "game-stats"]
 _LOADER_CHOICES = ["roster", "game", "season-stats"]

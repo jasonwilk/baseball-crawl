@@ -29,6 +29,7 @@ app = typer.Typer(
     help="baseball-crawl operator CLI",
     add_completion=False,
     invoke_without_command=True,
+    epilog="Run 'bb COMMAND --help' for more information on a command.",
 )
 
 app.add_typer(creds.app, name="creds")
@@ -43,3 +44,4 @@ def main(ctx: typer.Context) -> None:
     """baseball-crawl operator CLI"""
     if ctx.invoked_subcommand is None:
         typer.echo(ctx.get_help())
+        raise typer.Exit()

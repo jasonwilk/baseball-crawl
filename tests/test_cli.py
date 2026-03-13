@@ -85,6 +85,131 @@ def test_status_command_runs() -> None:
 
 
 # ---------------------------------------------------------------------------
+# AC-1 through AC-4: bare sub-group invocation shows help and exits 0
+# ---------------------------------------------------------------------------
+
+
+def test_creds_bare_exits_zero() -> None:
+    """bb creds (no subcommand) prints help and exits 0 (AC-1)."""
+    result = runner.invoke(app, ["creds"])
+    assert result.exit_code == 0
+    assert "credential" in result.output.lower()
+
+
+def test_data_bare_exits_zero() -> None:
+    """bb data (no subcommand) prints help and exits 0 (AC-2)."""
+    result = runner.invoke(app, ["data"])
+    assert result.exit_code == 0
+    assert "pipeline" in result.output.lower()
+
+
+def test_proxy_bare_exits_zero() -> None:
+    """bb proxy (no subcommand) prints help and exits 0 (AC-3)."""
+    result = runner.invoke(app, ["proxy"])
+    assert result.exit_code == 0
+    assert "proxy" in result.output.lower()
+
+
+def test_db_bare_exits_zero() -> None:
+    """bb db (no subcommand) prints help and exits 0 (AC-4)."""
+    result = runner.invoke(app, ["db"])
+    assert result.exit_code == 0
+    assert "database" in result.output.lower()
+
+
+# ---------------------------------------------------------------------------
+# AC-5 and AC-6: epilog footers in --help output
+# ---------------------------------------------------------------------------
+
+
+def test_root_help_includes_epilog() -> None:
+    """bb --help includes the root epilog (AC-5)."""
+    result = runner.invoke(app, ["--help"])
+    assert result.exit_code == 0
+    assert "Run 'bb COMMAND --help' for more information on a command." in result.output
+
+
+def test_creds_help_includes_epilog() -> None:
+    """bb creds --help includes the creds epilog (AC-6)."""
+    result = runner.invoke(app, ["creds", "--help"])
+    assert result.exit_code == 0
+    assert "Run 'bb creds COMMAND --help' for more information on a command." in result.output
+
+
+def test_data_help_includes_epilog() -> None:
+    """bb data --help includes the data epilog (AC-6)."""
+    result = runner.invoke(app, ["data", "--help"])
+    assert result.exit_code == 0
+    assert "Run 'bb data COMMAND --help' for more information on a command." in result.output
+
+
+def test_proxy_help_includes_epilog() -> None:
+    """bb proxy --help includes the proxy epilog (AC-6)."""
+    result = runner.invoke(app, ["proxy", "--help"])
+    assert result.exit_code == 0
+    assert "Run 'bb proxy COMMAND --help' for more information on a command." in result.output
+
+
+def test_db_help_includes_epilog() -> None:
+    """bb db --help includes the db epilog (AC-6)."""
+    result = runner.invoke(app, ["db", "--help"])
+    assert result.exit_code == 0
+    assert "Run 'bb db COMMAND --help' for more information on a command." in result.output
+
+
+# ---------------------------------------------------------------------------
+# AC-7: sub-group description is preserved after adding callback (docstring)
+# ---------------------------------------------------------------------------
+
+
+def test_creds_help_preserves_description() -> None:
+    """bb creds --help includes 'Manage GameChanger credentials.' (AC-7)."""
+    result = runner.invoke(app, ["creds", "--help"])
+    assert result.exit_code == 0
+    assert "Manage GameChanger credentials." in result.output
+
+
+def test_data_help_preserves_description() -> None:
+    """bb data --help includes 'Data pipeline commands.' (AC-7)."""
+    result = runner.invoke(app, ["data", "--help"])
+    assert result.exit_code == 0
+    assert "Data pipeline commands." in result.output
+
+
+def test_proxy_help_preserves_description() -> None:
+    """bb proxy --help includes 'Proxy analysis commands.' (AC-7)."""
+    result = runner.invoke(app, ["proxy", "--help"])
+    assert result.exit_code == 0
+    assert "Proxy analysis commands." in result.output
+
+
+def test_db_help_preserves_description() -> None:
+    """bb db --help includes 'Database operations.' (AC-7)."""
+    result = runner.invoke(app, ["db", "--help"])
+    assert result.exit_code == 0
+    assert "Database operations." in result.output
+
+
+# ---------------------------------------------------------------------------
+# AC-8 and AC-9: deep --help shows boolean flag options (regression check)
+# ---------------------------------------------------------------------------
+
+
+def test_creds_extract_key_help_shows_apply_flag() -> None:
+    """bb creds extract-key --help shows --apply option (AC-8)."""
+    result = runner.invoke(app, ["creds", "extract-key", "--help"])
+    assert result.exit_code == 0
+    assert "--apply" in result.output
+
+
+def test_proxy_refresh_headers_help_shows_apply_flag() -> None:
+    """bb proxy refresh-headers --help shows --apply option (AC-9)."""
+    result = runner.invoke(app, ["proxy", "refresh-headers", "--help"])
+    assert result.exit_code == 0
+    assert "--apply" in result.output
+
+
+# ---------------------------------------------------------------------------
 # Subprocess smoke test -- verifies the actual bb console script entry point
 # ---------------------------------------------------------------------------
 

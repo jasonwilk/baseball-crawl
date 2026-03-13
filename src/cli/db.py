@@ -11,7 +11,19 @@ from rich.console import Console
 from src.db.backup import backup_database
 from src.db.reset import check_production_guard, reset_database
 
-app = typer.Typer(help="Database operations.")
+app = typer.Typer(
+    help="Database operations.",
+    invoke_without_command=True,
+    epilog="Run 'bb db COMMAND --help' for more information on a command.",
+)
+
+
+@app.callback()
+def _db_group(ctx: typer.Context) -> None:
+    """Database operations."""
+    if ctx.invoked_subcommand is None:
+        typer.echo(ctx.get_help())
+        raise typer.Exit()
 
 console = Console()
 err_console = Console(stderr=True)

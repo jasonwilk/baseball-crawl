@@ -35,7 +35,19 @@ from src.gamechanger.key_extractor import ExtractedKey, KeyExtractionError, extr
 from src.gamechanger.token_manager import AuthSigningError, TokenManager
 from src.http.proxy_check import ProxyCheckOutcome
 
-app = typer.Typer(help="Manage GameChanger credentials.")
+app = typer.Typer(
+    help="Manage GameChanger credentials.",
+    invoke_without_command=True,
+    epilog="Run 'bb creds COMMAND --help' for more information on a command.",
+)
+
+
+@app.callback()
+def _creds_group(ctx: typer.Context) -> None:
+    """Manage GameChanger credentials."""
+    if ctx.invoked_subcommand is None:
+        typer.echo(ctx.get_help())
+        raise typer.Exit()
 
 _console = Console()
 _err_console = Console(stderr=True)

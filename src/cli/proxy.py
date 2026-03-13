@@ -28,7 +28,19 @@ from src.http.proxy_check import (
     get_direct_ip,
 )
 
-app = typer.Typer(help="Proxy analysis commands.")
+app = typer.Typer(
+    help="Proxy analysis commands.",
+    invoke_without_command=True,
+    epilog="Run 'bb proxy COMMAND --help' for more information on a command.",
+)
+
+
+@app.callback()
+def _proxy_group(ctx: typer.Context) -> None:
+    """Proxy analysis commands."""
+    if ctx.invoked_subcommand is None:
+        typer.echo(ctx.get_help())
+        raise typer.Exit()
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
