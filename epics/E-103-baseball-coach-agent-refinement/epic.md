@@ -15,12 +15,13 @@ During a vision curation session on 2026-03-13, Jason articulated how coaches ac
 4. **Own-team improvement first, opponents second.** "Give the coach any and all insights into what their team is doing and how to improve their own play. Then, secondarily, give them insights into the opponents."
 5. **Rate stats are mandatory.** K/9, BB/9, OBP, K%, ERA, SB%. Counting stats alone are unusable for coaching decisions.
 6. **Proactive flags are non-negotiable.** Short rest, high pitch count, hot/cold streaks, high walk rate. Coaches should not have to calculate these.
-7. **Printable one-pager for bench use.** PDF, B&W, plain English. This is how coaches consume data on game day.
-8. **Multi-program is real but simple.** USSSA (youth) coaches will use the platform too. A 9U coach has one team through a season -- same mental model.
-9. **Three named coach personas.** The platform serves three distinct types: USSSA youth coaches (9U-14U, age-grouped travel ball), high school coaches (varsity/JV/freshman/reserve, spring season), and Legion coaches (post-HS summer, same-region players). Each has one team through a season. The mental model is identical across all three.
-10. **Cross-season player and opponent intersection.** The same kid may appear as a USSSA player in fall, an HS player in spring, and a Legion player in summer. An opponent pitcher from HS reappears on a different Legion team three weeks later. The coach agent must understand this reality — player and opponent identity transcends the team context for any given season.
-11. **Fresh-start philosophy.** Each season is a fresh start. Same kid, new team, new opportunities. Past data is context, not conclusion. The system focuses on THIS team, THIS season. Prior seasons are available when asked, never leading. This is a coaching principle, not just a display preference.
-12. **Relevance decay framework and pull-based history.** Historical data relevance degrades by age and competitive-tier gap: same season = act on it; prior season same level = moderate-high, use with small-sample caveats; 2 seasons ago = context only, flag the age; 3+ seasons ago = curiosity, not evidence; different competitive tier (e.g., 12U rec → HS varsity) = flag prominently with age/level context. Display default: current season only. Prior data surfaces as a quiet indicator ("prior data available"), tap to expand. For opponents, "Familiar Faces" ("you have prior data on 3 of these hitters") is a sidebar note, not a featured section — slightly more visible for opponents than own-team, because coaches know their own players daily but may not recognize opponent names.
+7. **Insights bubble up, never push.** The system's tone is "I noticed this" -- not "do this." Safety flags (rest days, pitch counts) can push because they're compliance. Performance insights (streaks, splits, matchup patterns) bubble up quietly and let the coach interpret. Never prescriptive. The system observes; the coach decides. The goal is to get the coach into a flow state with the data, not make them feel managed or chaotic.
+8. **Printable one-pager for bench use.** PDF, B&W, plain English. This is how coaches consume data on game day.
+9. **Multi-program is real but simple.** USSSA (youth) coaches will use the platform too. A 9U coach has one team through a season -- same mental model.
+10. **Three named coach personas.** The platform serves three distinct types: USSSA youth coaches (9U-14U, age-grouped travel ball), high school coaches (varsity/JV/freshman/reserve, spring season), and Legion coaches (post-HS summer, same-region players). Each has one team through a season. The mental model is identical across all three.
+11. **Cross-season player and opponent intersection.** The same kid may appear as a USSSA player in fall, an HS player in spring, and a Legion player in summer. An opponent pitcher from HS reappears on a different Legion team three weeks later. The coach agent must understand this reality — player and opponent identity transcends the team context for any given season.
+12. **Fresh-start philosophy.** Each season is a fresh start. Same kid, new team, new opportunities. Past data is context, not conclusion. The system focuses on THIS team, THIS season. Prior seasons are available when asked, never leading. This is a coaching principle, not just a display preference.
+13. **Relevance decay framework and pull-based history.** Historical data relevance degrades by age and competitive-tier gap: same season = act on it; prior season same level = moderate-high, use with small-sample caveats; 2 seasons ago = context only, flag the age; 3+ seasons ago = curiosity, not evidence; different competitive tier (e.g., 12U rec → HS varsity) = flag prominently with age/level context. Display default: current season only. Prior data surfaces as a quiet indicator ("prior data available"), tap to expand. For opponents, "Familiar Faces" ("you have prior data on 3 of these hitters") is a sidebar note, not a featured section — slightly more visible for opponents than own-team, because coaches know their own players daily but may not recognize opponent names.
 
 The current agent definition has good bones (statistics knowledge, sample size awareness, anti-patterns) but lacks the coaching persona, the Lincoln-specific context, and the emphasis on proactive data delivery over passive query.
 
@@ -41,7 +42,7 @@ No expert consultation required -- the input came directly from the head coach d
 
 ## Success Criteria
 - The refined agent definition, when read by a new user, communicates that this agent thinks like a high school baseball coach focused on their team this season -- not a sabermetrics analyst
-- All twelve coaching insights from the vision session and E-100 review session are reflected in the agent definition
+- All thirteen coaching insights from the vision session and E-100 review session are reflected in the agent definition
 - Existing strengths (sample size awareness, anti-patterns, inter-agent coordination, output standards) are preserved
 - The agent definition remains concise and scannable (not bloated with prose)
 
@@ -56,7 +57,7 @@ No expert consultation required -- the input came directly from the head coach d
 ## Technical Notes
 - **Single file change**: `.claude/agents/baseball-coach.md`. This is a context-layer file, routed to claude-architect.
 - **Preserve, don't replace**: The current definition has good structural bones. The refinement should reshape the framing, add Lincoln-specific context, and shift emphasis -- not rewrite from scratch.
-- **Coaching concepts to embed** (from Background & Context, insights 1–12): team-first frame, sequential seasons, recency-weighted history, own-team-first priority, rate stats mandatory, proactive flags non-negotiable, printable one-pager, multi-program simplicity, no separate front doors, three named coach personas (USSSA/HS/Legion), cross-season player/opponent intersection, fresh-start philosophy + relevance decay + pull-based history (Familiar Faces).
+- **Coaching concepts to embed** (from Background & Context, insights 1–13): team-first frame, sequential seasons, recency-weighted history, own-team-first priority, rate stats mandatory, proactive flags non-negotiable, bubble-up tone ("I noticed this" not "do this"), printable one-pager, multi-program simplicity, no separate front doors, three named coach personas (USSSA/HS/Legion), cross-season player/opponent intersection, fresh-start philosophy + relevance decay + pull-based history (Familiar Faces).
 - **Context-layer only**: No Python code, no tests. Definition of Done does not require test passage (context-layer story).
 
 ## Open Questions
@@ -65,3 +66,4 @@ None.
 ## History
 - 2026-03-13: Created. Input from vision session with Jason (head coach). No expert consultation required -- direct user requirements.
 - 2026-03-13: Four additional coaching concepts added from E-100 domain review session (baseball-coach agent as reviewer): three named coach personas (USSSA/HS/Legion), cross-season player/opponent intersection, fresh-start philosophy, relevance decay framework + pull-based history + Familiar Faces pattern. Background & Context expanded to 12 insights.
+- 2026-03-13: Added insight #7 "bubble up, never push" — system tone for surfacing insights. Safety flags push (compliance); performance insights bubble up ("I noticed this"). Never prescriptive. Goal is coach flow state, not chaos. 13 insights total.
