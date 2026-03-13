@@ -11,6 +11,8 @@ Sub-command groups:
   bb status  -- system health check (top-level command)
 """
 
+from __future__ import annotations
+
 import logging
 
 # Initialize logging BEFORE any script imports so this config wins (basicConfig is
