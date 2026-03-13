@@ -1,8 +1,8 @@
-# Vision: LSB Baseball Analytics
+# Vision: Baseball Analytics Platform
 
 ## The One-Liner
 
-Give Lincoln Standing Bear High School baseball coaches a competitive advantage that most high school programs don't have: data-driven scouting, lineup decisions, and player development -- powered by the same information every GameChanger user can already see, organized so it's actually useful.
+Give baseball coaches a competitive advantage that most programs don't have: data-driven scouting, lineup decisions, and player development -- powered by the same information every GameChanger user can already see, organized so it's actually useful. Lincoln Standing Bear High School is the first program. It won't be the last.
 
 ## The Problem
 
@@ -37,27 +37,33 @@ A queryable SQLite database that organizes the raw data into tables designed for
 ### Layer 3: Coaching Dashboard
 A server-rendered web application where coaches can pull up scouting reports, player stats, opponent analysis, and game prep information without touching a spreadsheet or asking Jason to run a query. Simple, fast, focused on the questions coaches actually ask.
 
+The primary frame is one coach, one team, one season. A coach opens the dashboard and lands on their team's current season -- that's the world they live in. Own-team improvement comes first: how are my players developing, where are the weak spots, who's trending up. Opponent scouting is the second priority: what should I know about Friday's opponent. Both matter, but "how do we get better" always comes before "how do we exploit their weaknesses."
+
+Historical context is available but tapers naturally. Early in a Legion season, the HS numbers from the same players fill in the picture -- most of the roster carried over. As the current season's games accumulate, that team's own data takes over. The system does not hard-wall seasons; it lets recency do the work.
+
 ### Layer 4: Longitudinal Intelligence
 Player tracking across seasons, teams, and levels. Development arcs over time. Trend detection -- who's improving, who's regressing, who's streaking. The kind of institutional memory that a coaching staff accumulates over years, but structured so it doesn't walk out the door when an assistant coach moves on.
 
 ## Scope and Scale
 
-This is a system for one high school program:
+The system serves any coach with a team on GameChanger. Lincoln Standing Bear High School is the first user and the proving ground, but the target state includes Legion summer ball, USSSA youth, and travel ball programs. A 9U USSSA coach has one team through one season -- and the system works for that coach the same way it works for a varsity coach with four years of history.
 
-- **4 teams**: Freshman, JV, Varsity, Reserve (Legion later)
-- **12-15 players per team**
-- **~30 games per team per season**
-- **1 operator** (Jason) who manages the system
-- **A handful of coaches** who consume the dashboards
+**What this means concretely:**
 
-The scale is small by design. SQLite is the right database. Docker Compose on a home server is the right deployment. Cloudflare Tunnel is the right network layer. There is no need for cloud infrastructure, horizontal scaling, or microservices. The system should be simple enough that one person can operate it, maintain it, and explain it.
+- **Teams**: Lincoln HS (Freshman, JV, Varsity, Reserve), Legion summer ball, USSSA travel teams -- any team scored on GameChanger.
+- **Per team**: 12-15 players, ~30 games per season.
+- **Seasons are sequential, not parallel.** HS ends, Legion starts. The roster carries over ~80%. The system tracks players across these transitions, but each season is its own context.
+- **Operator**: Jason manages the system. Coaches consume the dashboards.
+- **Growth model**: Add teams by onboarding them, not by deploying new infrastructure.
+
+The scale stays small even as teams are added. SQLite is the right database. Docker Compose on a home server is the right deployment. Cloudflare Tunnel is the right network layer. There is no need for cloud infrastructure, horizontal scaling, or microservices. The system should be simple enough that one person can operate it, maintain it, and explain it -- whether it serves one team or twenty.
 
 ## What We Don't Do
 
 - **We don't access hidden data.** Every piece of information comes from GameChanger's normal UI or API -- the same data any parent in the stands can see.
 - **We don't build proprietary models.** The stats we track (OBP, K/9, BABIP, FIP) are well-established baseball metrics. We compute them; we don't invent them.
 - **We don't over-engineer.** A script is better than a pipeline. A dict is better than a class. One file is better than a framework. Complexity is added only when a real problem demands it.
-- **We don't design for scale we'll never need.** Four teams, 120 games a season, a few dozen players. The system should reflect that.
+- **We don't design for scale we'll never need.** A handful of programs, a few hundred games a season, a few dozen players per program. The system should reflect that.
 
 ### Layer 5: Conversational Intelligence
 

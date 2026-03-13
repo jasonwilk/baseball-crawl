@@ -1,10 +1,10 @@
-# E-100: Team Model Overhaul — Multi-Program Platform
+# E-100: Team Model Overhaul — Team-First Data Model
 
 ## Status
 `READY`
 
 ## Overview
-Generalize the LSB-centric team data model into a multi-program platform supporting high school, USSSA (youth travel ball), and Legion programs. Introduces programs as a first-class entity, replaces the owned/opponent binary with member/tracked membership types, adds a unified "Division" classification, and redesigns the admin team management UI with a two-phase add-team flow and program-grouped team list.
+Clean up the LSB-centric team data model into a team-first architecture where one coach works with one team in one season. Replaces the owned/opponent binary with system-detected member/tracked membership, adds INTEGER PK for stable team identity, introduces a unified "Division" classification, and streamlines the admin team management UI with a two-phase add-team flow. Programs exist as lightweight organizational metadata for grouping teams — not as navigation frames or primary entities.
 
 ## Background & Context
 The current model hardcodes Lincoln Standing Bear assumptions: `is_owned` distinguishes "our" teams from opponents, `level` stores HS-specific values (varsity/JV/freshman/reserve), and the admin UI splits teams into "Lincoln Program" and "Tracked Opponents." The user's GameChanger account actually spans 19 teams across travel ball (8U-14U, 2019-2025), high school (6 teams, 2026 spring), and Legion — none of which fit cleanly into the current model.
@@ -17,13 +17,14 @@ The user intends to make this system available to youth (USSSA) coaches as well,
 - **UX Designer**: Designed two-phase add-team flow (URL input → confirm page with auto-detected membership), program-grouped accordion team list, "Division" as universal label, optgroup division dropdown, sub-page for inline program creation. Coach interview surfaced scouting report, rate stats, proactive flags, and PDF export requirements — all scoped out of E-100 into separate future epics.
 
 ## Goals
-- Programs as a first-class entity grouping teams by organization and type
+- Clean schema with INTEGER PK for teams, eliminating the gc_uuid/public_id identity duality
 - Member/tracked distinction is system-computed (via GC bridge auto-detect), not operator-declared
-- Admin team management UI supports multiple programs with program-grouped display
-- Two-phase add-team flow resolves team from GC URL, auto-detects membership, pre-populates program and division
+- Programs as lightweight organizational metadata for grouping teams (not a navigation frame)
+- Two-phase add-team flow resolves team from GC URL, auto-detects membership, pre-populates division
+- Admin team list displays all teams with program/division columns and membership badges
 - Opponents remain inside teams via a clean junction table (team_opponents)
 - Clean schema rewrite (user confirmed no data preservation needed) — no deprecated columns
-- Season model gains program awareness via program_id FK
+- Season model gains optional program_id FK
 
 ## Non-Goals
 - **Multi-credential per program**: Different GC accounts for HS vs USSSA programs. Deferred to a later epic. This epic assumes all member teams are accessible from a single GC account. (SE confirmed: no technical debt if credential_profile is NOT stored on programs.)
@@ -31,14 +32,14 @@ The user intends to make this system available to youth (USSSA) coaches as well,
 - **Opponent page redesign**: The `/admin/opponents` page stays as-is. Only per-team opponent counts with filtered links are added to the team list.
 - **Dashboard program-awareness**: Dashboard navigation by program is a separate epic. E-100 updates dashboard code for INTEGER PK compatibility but does not add program-based navigation or filtering.
 - **Scouting report redesign**: Coach interview surfaced rate stats, proactive flags, PDF export, schedule-as-scouting-entry, and matchup suggestions. All captured as vision signals and scoped for separate future epics.
-- **Program-first dashboard navigation**: Coach wants programs as "separate front doors." Separate epic after team model is in place.
+- **Program-first dashboard navigation**: Explicitly rejected. The user confirmed "separate front doors is NOT worth it." Team-and-season is the primary lens; programs are organizational metadata, not navigation frames.
 
 ## Success Criteria
 - `programs` table exists with at least one seeded program (Lincoln Standing Bear HS)
 - `teams` table has INTEGER AUTOINCREMENT PK (`id`), plus `program_id`, `membership_type`, `classification`, `gc_uuid`, and `public_id` columns
 - `team_opponents` junction table exists
 - All existing crawlers, loaders, CLI commands, db.py, auth.py, admin routes, and dashboard routes use INTEGER team PKs and `membership_type` instead of `is_owned`
-- Admin team list displays teams grouped by program with member/tracked badges and division labels
+- Admin team list displays all teams in a flat list with program, division, and membership columns
 - Adding a team via GC URL auto-detects membership and pre-populates program/division on a confirm page
 - All existing tests pass; new tests cover the migration, model changes, and admin flows
 
@@ -48,7 +49,7 @@ The user intends to make this system available to youth (USSSA) coaches as well,
 | E-100-01 | Schema rewrite: programs, teams, team_opponents, seasons | TODO | None | - |
 | E-100-02 | Data layer INTEGER PK: db.py + auth.py | TODO | E-100-01 | - |
 | E-100-03 | Pipeline: is_owned → membership_type + TeamRef + INTEGER PK | TODO | E-100-02 | - |
-| E-100-04 | Admin UI: programs, team list, division, INTEGER URLs | TODO | E-100-02 | - |
+| E-100-04 | Admin UI: team list, division, INTEGER URLs | TODO | E-100-02 | - |
 | E-100-05 | Dashboard routes + templates INTEGER PK | TODO | E-100-02 | - |
 | E-100-06 | Admin UI: two-phase add-team flow with auto-detect | TODO | E-100-03, E-100-04 | - |
 | E-100-07 | Context-layer updates | TODO | E-100-01 through E-100-06 | - |
@@ -125,6 +126,15 @@ seasons
   created_at    TEXT NOT NULL DEFAULT (datetime('now'))
 ```
 
+**Updated: `players`** (gc_athlete_profile_id added)
+```
+players
+  ... (existing columns unchanged)
+  gc_athlete_profile_id  TEXT     -- cross-team identity anchor; prior-season data
+                                  -- available via this link but not the primary query path.
+                                  -- No UNIQUE constraint, no index (deliberately secondary).
+```
+
 **Kept: `opponent_links`** (FK references updated: `our_team_id INTEGER`, `resolved_team_id INTEGER`)
 
 **Classification CHECK constraint:**
@@ -160,13 +170,15 @@ The existing reverse bridge (`GET /teams/public/{slug}/id`) returns 403 for non-
 3. Show confirm page with auto-detected membership_type
 4. On confirm: INSERT into teams (INTEGER PK auto-assigned, gc_uuid and public_id stored in their respective columns)
 
-### Admin UI Design (UXD Consensus)
-- **Two-phase add-team**: Phase 1 = URL input (current page, simplified). Phase 2 = confirm page (`/admin/teams/confirm`) showing resolved team info, auto-detected membership, pre-populated program (matched by name) and division (inferred from team name), editable dropdowns.
-- **Program creation**: "＋ Create new program" in dropdown routes to `/admin/programs/new?return_team=<public_id>` sub-page. On save, redirects back to confirm with new program pre-selected.
-- **Team list**: Program-grouped accordion sections. Per-program: team name, membership badge (● Member green / ○ Tracked gray), division, active/inactive, sync/edit actions. "Unassigned" section for teams without a program.
+### Admin UI Design (Team-First, Revised)
+- **Two-phase add-team**: Phase 1 = URL input (current page, simplified). Phase 2 = confirm page (`/admin/teams/confirm`) showing resolved team info, auto-detected membership, optional program dropdown and division dropdown.
+- **Team list**: Flat table of all teams (no accordion, no program-grouped sections). Columns: team name, program (if assigned), division (classification), membership badge (● Member green / ○ Tracked gray), active/inactive, opponent count, edit link. Sortable by any column. Programs are metadata, not the visual hierarchy.
 - **Division dropdown**: Single optgroup dropdown (HS group: varsity/JV/freshman/reserve; USSSA group: 8U-14U; Other: legion). No cascading dependency on program type.
-- **Edit page**: Program assignment, division, name override, active toggle all editable. Membership is display-only (system-computed).
-- **Import placeholder**: Disabled "Import from GC" button reserved in team list header for Phase 2.
+- **Edit page**: Program assignment (dropdown of existing programs), division, name override, active toggle all editable. Membership is display-only (system-computed). Program creation deferred — programs are created via the edit page dropdown or a future admin programs page, not via a dedicated sub-page flow.
+- **Program creation on confirm page**: Deferred. The confirm page offers a program dropdown for existing programs only. If no program matches, the team is created without a program — the operator can assign one later via the edit page.
+
+### Fresh Start Philosophy
+The user's guiding principle: "Each season is a fresh start. Same kid, new team, new opportunities." Current season is the primary lens. Historical data (prior seasons, cross-team player identity) is available but subordinate — never leading, always supporting. The schema enables cross-team queries (via `gc_athlete_profile_id`, `program_id` FK on seasons) but the UX will never lead with historical data. Current season stats are the main story; prior seasons are footnotes, available when asked for, not pushed. This shapes all future dashboard and scouting work, not just E-100.
 
 ### Season Slug Parameterization
 `_derive_season_id()` in `scouting.py` hardcodes `"-spring-hs"` suffix. Add a `season_suffix` parameter threaded through `ScoutingCrawler.__init__()`. Default to `"spring-hs"` for backward compatibility. Future: derive suffix from program's season_type.
@@ -210,3 +222,4 @@ Dashboard routes use `?team_id=` query params and compare against `permitted_tea
 - 2026-03-13: DE delivered full clean 001 DDL (20 tables, TEXT PK version).
 - 2026-03-13: User directive: "Do not let scope concerns compromise the architecture." Both DE and SE confirmed INTEGER AUTOINCREMENT PK for `teams` table is architecturally correct. SE designed TeamRef dataclass pattern. INTEGER PK applies to teams only (not programs/seasons/players).
 - 2026-03-13: Codex spec review of E-102 (pipeline INTEGER PK migration) revealed structural issue: no valid intermediate state between INTEGER PK schema and TEXT-based code. db.py (~30 query functions), auth.py, dashboard.py, and 12 templates all use TEXT team_id. E-102 absorbed into E-100. Epic restructured from 5 to 7 stories. Non-Goals updated (dashboard code changes now in scope for INTEGER PK compatibility). E-102 abandoned.
+- 2026-03-13: Vision pivot — reframed from "multi-program platform" to "team-first data model." User confirmed: one coach, one team, one season is the primary frame. Programs are organizational metadata, not navigation frames. "Separate front doors" explicitly rejected. "Fresh start" philosophy: current season is the main story, historical data is available but subordinate. Epic retitled, overview rewritten, Non-Goals updated (program-first nav: deferred → rejected), Admin UI simplified (flat team list replaces accordion, program creation sub-page deferred), E-100-06 softened (program assignment optional on confirm page). `gc_athlete_profile_id` added to players DDL (cross-team identity anchor, deliberately secondary query path).
