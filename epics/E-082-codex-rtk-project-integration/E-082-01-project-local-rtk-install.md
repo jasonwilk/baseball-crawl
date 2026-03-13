@@ -21,6 +21,7 @@ This story depends on E-081-02 because the project-local Codex runtime/home stra
 - [ ] **AC-4**: The chosen install path is under `/workspaces/baseball-crawl` (workspace-mounted), not under `$HOME` or another container-local directory.
 - [ ] **AC-5**: The bootstrap is idempotent and non-blocking: if RTK install fails, the rest of the devcontainer setup still completes.
 - [ ] **AC-6**: The project records the RTK version or release source explicitly so future updates are deliberate rather than implicit.
+- [ ] **AC-7**: The existing global RTK install and `rtk init -g --auto-patch` command in `devcontainer.json` postCreateCommand (the Claude RTK lane from E-070) MUST remain unchanged.
 
 ## Technical Approach
 Because the upstream RTK install path is global-oriented, the implementation will likely need to fetch a pinned release artifact directly rather than using the global quick-start installer unchanged. The binary should be placed in a repo-local tool cache directory and marked executable during devcontainer setup.

@@ -16,7 +16,7 @@ This story depends on E-081's Codex bootstrap because it extends the checked-in 
 
 ## Acceptance Criteria
 - [ ] **AC-1**: The checked-in Codex layer provides a deterministic way for Codex to resolve the project-local RTK binary without relying on user shell dotfiles. Acceptable implementations are: (a) checked-in Codex config exposes the repo-local RTK directory to Codex shell commands, or (b) checked-in Codex guidance uses the absolute repo-local RTK binary path.
-- [ ] **AC-2**: Repo Codex guidance documents when Codex should prefer `rtk <command>` for supported high-token shell operations.
+- [ ] **AC-2**: Repo Codex guidance documents when Codex should prefer `rtk <command>`, naming at minimum `git status`, `git diff`, and `git log` as high-token commands where RTK is preferred.
 - [ ] **AC-3**: The guidance explicitly states that Codex does not use a transparent Claude-style RTK hook in this repo, so RTK usage is intentional and explicit.
 - [ ] **AC-4**: The guidance explicitly defines the fallback path: if RTK does not support or clarify a command, Codex uses the raw command directly.
 - [ ] **AC-5**: No command-shadowing aliases, wrapper binaries, or PATH shims are introduced for core commands such as `git`, `ls`, or `cat`.

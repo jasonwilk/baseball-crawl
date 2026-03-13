@@ -15,7 +15,7 @@ The RTK story for Codex is materially different from the Claude story in E-070. 
 ## Acceptance Criteria
 - [ ] **AC-1**: A project document explains the Codex RTK model: project-local binary install, checked-in Codex guidance, and explicit `rtk <command>` usage.
 - [ ] **AC-2**: The document explicitly states that the Codex lane does not rely on a Claude-style automatic RTK hook or `rtk init -g` flow.
-- [ ] **AC-3**: The document explains that host `~/.codex` mapping is optional and is not required for the default Codex RTK workflow.
+- [ ] **AC-3**: The document explains that the Codex RTK lane adds no host `~/.codex` requirement beyond the existing optional mapping.
 - [ ] **AC-4**: The document records the smoke-check command/path from E-082-03 and the expected success/failure signals.
 - [ ] **AC-5**: The document explains the fallback rule: when RTK does not support or improve a command, Codex uses the raw command directly.
 - [ ] **AC-6**: The document describes the implemented binary location and confirms that it is gitignored local state, not a committed project artifact.

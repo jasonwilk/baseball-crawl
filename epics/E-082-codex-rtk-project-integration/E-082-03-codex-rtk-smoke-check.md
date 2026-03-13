@@ -14,7 +14,7 @@ Project-local tools need fast verification. Once RTK is installed into a repo-lo
 
 ## Acceptance Criteria
 - [ ] **AC-1**: The repo provides a smoke-check command or script that verifies the project-local RTK binary exists and is executable.
-- [ ] **AC-2**: The smoke check verifies `rtk --version` and at least one supported RTK command from within the repo context.
+- [ ] **AC-2**: The smoke check verifies `rtk --version` succeeds and `rtk git status` produces output without error from within the repo context.
 - [ ] **AC-3**: The smoke check exits nonzero when the project-local RTK binary is missing or unusable.
 - [ ] **AC-4**: The smoke check does not require host-global PATH setup or a host `~/.codex` mount.
 - [ ] **AC-5**: The smoke check does not print secrets, proxy credentials, or auth artifacts.
