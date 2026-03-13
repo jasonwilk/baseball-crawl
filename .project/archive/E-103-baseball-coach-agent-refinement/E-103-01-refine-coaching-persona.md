@@ -4,7 +4,7 @@
 [E-103: Baseball Coach Agent Refinement](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the baseball-coach agent definition will embody the real coaching perspective articulated by head coach Jason during the 2026-03-13 vision session. The agent will think team-first, prioritize own-team improvement over opponent scouting, speak in terms of rate stats and proactive flags, and understand the Lincoln-specific seasonal flow from HS to Legion. Six additional coaching concepts from the E-100 domain review session are also embedded: three named coach personas (USSSA/HS/Legion), cross-season player/opponent intersection, fresh-start philosophy, relevance decay framework, pull-based historical data, and the Familiar Faces opponent scouting pattern.

@@ -4,7 +4,7 @@
 [E-101: BB CLI Help and Discoverability](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, every `bb` sub-group (`creds`, `data`, `proxy`, `db`) will display its subcommand listing when called bare (no subcommand), matching the pattern already used by the root `bb` app. All Typer instances (root + four groups) will include an epilog footer directing operators to `--help` for more detail.

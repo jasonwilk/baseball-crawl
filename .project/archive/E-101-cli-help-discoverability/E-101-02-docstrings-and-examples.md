@@ -4,7 +4,7 @@
 [E-101: BB CLI Help and Discoverability](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, every CLI command will have a crisp single-sentence first line in its docstring (used by Typer as the short description in group listings), and the most complex commands will include usage examples visible in `--help` output. The help output will feel polished and standard.

@@ -1,7 +1,7 @@
 # E-101: BB CLI Help and Discoverability
 
 ## Status
-`READY`
+`COMPLETED`
 
 ## Overview
 Make the `bb` CLI behave like a standard CLI tool: sub-groups show help when called bare, `--help` works at every depth, and the help format follows docker/git/kubectl conventions. This is a polish pass to improve operator discoverability, not a rewrite.
@@ -40,8 +40,8 @@ Note: Deep `--help` (e.g., `bb creds extract-key --help`) already works correctl
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-101-01 | Add bare-group help and epilog to all CLI sub-groups | TODO | None | - |
-| E-101-02 | Tighten docstrings and add examples to complex commands | TODO | E-101-01 | - |
+| E-101-01 | Add bare-group help and epilog to all CLI sub-groups | DONE | None | se-101 |
+| E-101-02 | Tighten docstrings and add examples to complex commands | DONE | E-101-01 | se-101 |
 
 ## Dispatch Team
 - software-engineer
@@ -85,3 +85,4 @@ Note: Deep `--help` (e.g., `bb creds extract-key --help`) already works correctl
 
 ## History
 - 2026-03-13: Created. UX Designer consulted before story writing.
+- 2026-03-13: COMPLETED. Both stories implemented and reviewed. E-101-01 added bare-group help callbacks and epilog footers to all CLI sub-groups. E-101-02 tightened docstrings and added usage examples to complex commands. 322 CLI tests passing, 0 regressions. No documentation impact (polish pass on existing CLI, no new features/endpoints/schema). Context-layer assessment: (1) new convention — no, (2) architectural decision — no, (3) footgun/boundary — no, (4) agent behavior — no, (5) domain knowledge — no, (6) new CLI command/workflow — no. No context-layer codification needed.

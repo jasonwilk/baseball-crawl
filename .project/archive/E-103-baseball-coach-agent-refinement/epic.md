@@ -1,7 +1,7 @@
 # E-103: Baseball Coach Agent Refinement
 
 ## Status
-`READY`
+`COMPLETED`
 
 ## Overview
 Refine the baseball-coach agent definition to embody the real coaching perspective that emerged from the 2026-03-13 vision session with Jason (head coach). The current agent reads as a generic baseball analytics expert; it should think like a Lincoln coach sitting in the dugout -- team-first, rate-stat-driven, flag-oriented, and aware of the HS-to-Legion seasonal flow.
@@ -49,7 +49,7 @@ No expert consultation required -- the input came directly from the head coach d
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-103-01 | Refine baseball-coach agent definition with coaching persona | TODO | None | claude-architect |
+| E-103-01 | Refine baseball-coach agent definition with coaching persona | DONE | None | claude-architect |
 
 ## Dispatch Team
 - claude-architect
@@ -67,3 +67,19 @@ None.
 - 2026-03-13: Created. Input from vision session with Jason (head coach). No expert consultation required -- direct user requirements.
 - 2026-03-13: Four additional coaching concepts added from E-100 domain review session (baseball-coach agent as reviewer): three named coach personas (USSSA/HS/Legion), cross-season player/opponent intersection, fresh-start philosophy, relevance decay framework + pull-based history + Familiar Faces pattern. Background & Context expanded to 12 insights.
 - 2026-03-13: Added insight #7 "bubble up, never push" — system tone for surfacing insights. Safety flags push (compliance); performance insights bubble up ("I noticed this"). Never prescriptive. Goal is coach flow state, not chaos. 13 insights total.
+- 2026-03-13: **COMPLETED.** E-103-01 implemented by claude-architect (no worktree, context-layer exception). All 12 ACs verified by main session. File refined from 143 to 142 lines. Identity shifted from "baseball analytics domain expert" to "high school baseball coach who understands data." All 13 coaching insights embedded. Existing structural strengths preserved (anti-patterns, inter-agent coordination, output standards, stat reference, skills, memory).
+
+### Documentation Assessment
+- Trigger 1 (new feature/endpoint): No
+- Trigger 2 (architecture/deployment): No
+- Trigger 3 (agent materially modified): Yes -- baseball-coach persona refined. However, changes are to framing/emphasis only; tools, coordination contracts, and capabilities unchanged. CLAUDE.md agent table summary ("Domain expert -- translates coaching needs into technical requirements") still accurate. No admin/coaching docs reference the agent's internal persona framing. **No documentation update required.**
+- Trigger 4 (schema changes): No
+- Trigger 5 (epic changes system/user interaction): No
+
+### Context-Layer Assessment
+- Trigger 1 (new convention/pattern): No
+- Trigger 2 (architectural decision): No
+- Trigger 3 (footgun/boundary discovered): No
+- Trigger 4 (agent behavior/routing/coordination change): No -- inter-agent coordination contracts preserved verbatim; dispatch routing unchanged
+- Trigger 5 (domain knowledge for future epics): Yes -- 13 coaching insights now embedded, but codification IS the story itself (`.claude/agents/baseball-coach.md` is a context-layer file). No additional codification needed.
+- Trigger 6 (new CLI/workflow/procedure): No
