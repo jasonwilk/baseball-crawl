@@ -28,6 +28,10 @@ Codex is a watchful partner in this repo:
 - For agent memory or archived context, read only the single file the task names or clearly requires.
 - Do not scan, summarize, or mirror the whole `.claude/` tree.
 
+## RTK (Token Optimization)
+
+This repo includes a project-local RTK binary at `.tools/rtk/rtk`. For high-token shell commands (`git status`, `git diff`, `git log`), prefer `.tools/rtk/rtk <command>` for condensed output. There is no transparent hook -- RTK usage is explicit. If RTK does not support a command, use the raw command directly. See `AGENTS.md` "RTK Usage" for details.
+
 ## Avoid
 
 - duplicating the Claude agent roster inside Codex-owned files or outputs

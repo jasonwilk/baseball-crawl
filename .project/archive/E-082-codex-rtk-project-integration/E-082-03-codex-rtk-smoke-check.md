@@ -4,7 +4,7 @@
 [E-082: Codex RTK Project-Level Integration](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the repo will provide a concrete smoke-check path that confirms the project-local RTK binary is present and usable from the project context. The check gives the operator a fast way to verify the Codex RTK lane without relying on host-global setup or manual guesswork.

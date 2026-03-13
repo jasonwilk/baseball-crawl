@@ -81,6 +81,73 @@ Expected results:
 - the `grep` command shows a trust entry for `/workspaces/baseball-crawl`
 - `codex features list` and `codex exec --help` complete without TOML or config errors
 
+## RTK Integration (Codex Lane)
+
+RTK (Rust Token Killer) reduces token usage for high-output shell commands. The Codex lane has its own RTK operating model that differs materially from the Claude RTK lane.
+
+### Operating Model
+
+The Codex RTK integration is explicit, not transparent:
+
+- Codex uses the full path `.tools/rtk/rtk <command>` directly -- e.g., `.tools/rtk/rtk git status`, `.tools/rtk/rtk git diff`.
+- There is no automatic command-rewriting hook in the Codex lane. Every RTK call is intentional.
+- The AGENTS.md guidance lists the commands where RTK is preferred and explains the fallback rule.
+
+**Fallback rule**: when RTK does not support a command or a raw command is clearer, Codex uses the raw command directly. Using `rtk` is an optimization, not a requirement.
+
+### Binary Location
+
+The RTK binary is installed at:
+
+```
+/workspaces/baseball-crawl/.tools/rtk/rtk
+```
+
+This path is:
+
+- Inside the project directory -- no global PATH addition is needed.
+- Gitignored -- it is local state, not a committed project artifact.
+- Installed at devcontainer bootstrap time by `.devcontainer/post-create-env.sh` (idempotent, non-blocking if it fails).
+
+The bootstrap script pins the version via `RTK_CODEX_VERSION` and selects the correct architecture at install time (AMD64 or ARM64). Current pinned version: `v0.29.0`.
+
+### What This Lane Does NOT Use
+
+- **No `rtk init -g` or `--auto-patch`**: Those commands patch Claude's global settings/hook system. The Codex lane does not write to `~/.claude/settings.json` or any Claude hook.
+- **No PATH shims**: `git`, `ls`, `cat`, and similar binaries are not shadowed. The Codex lane uses the full binary path (`.tools/rtk/rtk <command>`), not bare `rtk`.
+- **No additional `~/.codex` requirement**: The Codex RTK lane adds nothing to the existing `~/.codex` optional mapping. Host-global setup is not required or assumed.
+
+### Coexistence with the Claude RTK Lane
+
+Claude (the Claude Code CLI) uses a separate RTK lane established in E-070:
+
+- **Claude lane**: host/global RTK install, hook-based automatic command rewriting, `rtk init -g`.
+- **Codex lane**: project-local binary at `.tools/rtk/rtk`, checked-in AGENTS.md guidance, explicit invocation.
+
+Both lanes can be active at the same time. They are independent and do not interfere with each other. An operator who has completed Claude RTK setup does not need to undo anything for the Codex lane to work -- and an operator who has only the Codex lane set up does not need to run `rtk init -g`.
+
+### RTK Smoke Check
+
+To verify the Codex RTK setup, run:
+
+```bash
+python scripts/check_codex_rtk.py
+```
+
+Expected output when all checks pass:
+
+```
+[OK  ] binary present: /workspaces/baseball-crawl/.tools/rtk/rtk
+[OK  ] rtk --version: rtk 0.29.0
+[OK  ] rtk git status: <first line of git status output>
+```
+
+Exit code is `0` on success. Any `[FAIL]` line means that check did not pass; exit code is `1`. Common failure causes:
+
+- Binary not present: devcontainer bootstrap did not complete, or RTK install failed (non-blocking -- check bootstrap logs).
+- Version mismatch: `RTK_CODEX_VERSION` in `post-create-env.sh` and the installed binary differ.
+- `rtk git status` fails: the binary is present but not executable, or RTK has a bug with the current git state.
+
 ## Notes
 
 - The global `codex` binary is still installed the same way in the devcontainer. This setup only changes runtime state placement and checked-in project guidance.

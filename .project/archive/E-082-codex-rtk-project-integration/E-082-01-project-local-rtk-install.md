@@ -4,7 +4,7 @@
 [E-082: Codex RTK Project-Level Integration](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, RTK will be installed into a gitignored project-local directory inside the workspace so Codex can use it without relying on host-global install paths. The install lives with the project and survives devcontainer rebuilds because it is stored in the workspace, not the container home.

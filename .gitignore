@@ -24,6 +24,9 @@ secrets/
 # Codex local runtime state
 .codex-home/
 
+# Project-local tool cache (gitignored binaries -- e.g. RTK for Codex lane)
+.tools/
+
 # Docker Compose local overrides (copy from .example)
 docker-compose.override.yml
 

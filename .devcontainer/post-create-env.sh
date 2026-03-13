@@ -123,3 +123,69 @@ elif grep -qF '[projects."/workspaces/baseball-crawl"]' "$CODEX_CONFIG_PATH"; th
 else
     append_managed_block "$CODEX_CONFIG_PATH" "$TRUST_START_MARKER" "$TRUST_END_MARKER" "$TRUST_BLOCK"
 fi
+
+# ---- Project-local RTK install for Codex lane (E-082-01) ----
+# Pins RTK to a specific release so upgrades are deliberate.
+# To upgrade: update RTK_CODEX_VERSION below and rebuild the devcontainer.
+# This is separate from the global Claude RTK lane in devcontainer.json postCreateCommand.
+RTK_CODEX_VERSION="v0.29.0"
+RTK_CODEX_DIR="${PROJECT_ROOT}/.tools/rtk"
+
+_install_rtk_codex() {
+    local version="$1"
+    local install_dir="$2"
+
+    # Idempotent: skip if the correct version is already installed.
+    if [ -x "${install_dir}/rtk" ]; then
+        local installed_ver
+        installed_ver=$("${install_dir}/rtk" --version 2>/dev/null | awk '{if (NF>=2) print "v" $2; else print ""}')
+        if [ "$installed_ver" = "$version" ]; then
+            echo "rtk-codex: ${version} already installed at ${install_dir}/rtk"
+            return 0
+        fi
+    fi
+
+    # Detect Linux architecture and map to the RTK release target triple.
+    # Triples confirmed against v0.29.0 release assets: x86_64 uses musl (static),
+    # aarch64 uses gnu -- the asymmetry is intentional upstream.
+    local arch
+    case "$(uname -m)" in
+        x86_64|amd64)  arch="x86_64-unknown-linux-musl";;
+        arm64|aarch64) arch="aarch64-unknown-linux-gnu";;
+        *) echo "rtk-codex: unsupported architecture $(uname -m) -- skipping"; return 1;;
+    esac
+
+    local url="https://github.com/rtk-ai/rtk/releases/download/${version}/rtk-${arch}.tar.gz"
+    local tmpdir
+    tmpdir=$(mktemp -d)
+
+    echo "rtk-codex: downloading ${version} (${arch})..."
+    if ! curl -fsSL "$url" -o "${tmpdir}/rtk.tar.gz" 2>/dev/null; then
+        echo "rtk-codex: download failed -- skipping"
+        rm -rf "$tmpdir"
+        return 1
+    fi
+
+    if ! tar -xzf "${tmpdir}/rtk.tar.gz" -C "$tmpdir" 2>/dev/null; then
+        echo "rtk-codex: extraction failed -- skipping"
+        rm -rf "$tmpdir"
+        return 1
+    fi
+
+    # RTK release tarball contains a single top-level `rtk` binary (no subdirectory).
+    mkdir -p "$install_dir"
+    if ! mv "${tmpdir}/rtk" "${install_dir}/rtk"; then
+        echo "rtk-codex: mv failed -- skipping"
+        rm -rf "$tmpdir"
+        return 1
+    fi
+    if ! chmod +x "${install_dir}/rtk"; then
+        echo "rtk-codex: chmod failed -- skipping"
+        rm -rf "$tmpdir"
+        return 1
+    fi
+    rm -rf "$tmpdir"
+    echo "rtk-codex: installed ${version} -> ${install_dir}/rtk"
+}
+
+_install_rtk_codex "$RTK_CODEX_VERSION" "$RTK_CODEX_DIR" || echo "rtk-codex install failed -- rest of devcontainer setup continues"

@@ -4,7 +4,7 @@
 [E-082: Codex RTK Project-Level Integration](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, Codex will be able to resolve the project-local RTK binary and will have explicit repo guidance for when to use `rtk <command>`. The Codex lane will gain intentional RTK usage without pretending there is a transparent Claude-style hook layer.

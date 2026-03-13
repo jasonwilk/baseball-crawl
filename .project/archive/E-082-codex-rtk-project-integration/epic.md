@@ -1,7 +1,7 @@
 # E-082: Codex RTK Project-Level Integration
 
 ## Status
-`READY`
+`COMPLETED`
 
 ## Overview
 Integrate RTK into the Codex workflow in a project-local way, without relying on host-global installs or Claude-specific hook wiring. The design target is explicit Codex usage of a project-local RTK binary, not transparent command interception.
@@ -48,10 +48,10 @@ No Claude-agent consultation required. This epic is based on Codex-native docs/b
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-082-01 | Install RTK into a project-local devcontainer path | TODO | E-081-02 | - |
-| E-082-02 | Expose project-local RTK to Codex and add explicit usage guidance | TODO | E-081-01, E-081-03, E-082-01 | - |
-| E-082-03 | Add a Codex RTK smoke-check utility | TODO | E-082-01 | - |
-| E-082-04 | Document the Codex RTK operating model | TODO | E-081-04, E-082-01, E-082-02, E-082-03 | - |
+| E-082-01 | Install RTK into a project-local devcontainer path | DONE | E-081-02 | SE |
+| E-082-02 | Expose project-local RTK to Codex and add explicit usage guidance | DONE | E-081-01, E-081-03, E-082-01 | CA |
+| E-082-03 | Add a Codex RTK smoke-check utility | DONE | E-082-01 | SE |
+| E-082-04 | Document the Codex RTK operating model | DONE | E-081-04, E-082-01, E-082-02, E-082-03 | DW |
 
 ## Dispatch Team
 - software-engineer
@@ -106,3 +106,6 @@ None. The research outcome is clear: project-local Codex RTK integration is feas
 - 2026-03-08: Created from Codex + RTK research. Key conclusion: Codex does not require the same host-level integration pattern as Claude, but current public Codex surfaces also do not expose a Claude-style automatic rewrite hook. Epic scoped to project-local RTK install plus explicit Codex usage guidance. Set to READY.
 - 2026-03-09: Refined after Codex planning review. Added docs-writer to the dispatch team, added the missing cross-epic dependency from E-082-04 to E-081-04 because both modify `docs/admin/codex-guide.md`, and tightened the technical notes around RTK artifact acquisition, deterministic path resolution, and coexistence with the existing Claude RTK lane.
 - 2026-03-13: Team refinement (PM + SE + CA) confirmed READY. Codex spec review returned 6 findings; 4 accepted, 2 dismissed. Fixes applied: E-082-01 AC-7 added (preserve existing Claude RTK install), E-082-02 AC-2 tightened (named concrete commands: git status/diff/log), E-082-03 AC-2 tightened (named specific smoke-check command: rtk git status), E-082-04 AC-3 scoped to RTK-specific delta (no host ~/.codex requirement beyond existing optional mapping). Dismissed: P1-2 (feasibility resolved by SE confirming RTK_INSTALL_DIR support), P2-3 (Codex files are not Claude context-layer files; CA already consulted).
+- 2026-03-13: Epic COMPLETED. All 4 stories dispatched across 3 waves, implemented, reviewed, and approved. Key artifacts: project-local RTK binary at `.tools/rtk/rtk` (v0.29.0, pinned in `post-create-env.sh`), Codex RTK guidance in `AGENTS.md`, smoke-check script at `scripts/check_codex_rtk.py` (16 tests), operator docs in `docs/admin/codex-guide.md`. Review findings: E-082-01 had 3 SHOULD FIX (2 accepted — triple verification + tarball comment, 1 dismissed — devcontainer.json divergence); E-082-02 had 1 SHOULD FIX (accepted — wrong GitHub URL); E-082-03 had 1 MUST FIX (print→logging) and 1 SHOULD FIX (dismissed — sys.path in tests); E-082-04 had no findings.
+- 2026-03-13: Documentation assessment: triggers 1 and 5 fire but handled by E-082-04 (docs story). No additional doc work needed.
+- 2026-03-13: Context-layer assessment: (1) New convention — No (Codex-specific, in AGENTS.md). (2) Architectural decision — No (two-lane model doesn't affect Claude agents). (3) Footgun/boundary — No (documented in code comments). (4) Agent behavior change — No. (5) Domain knowledge — No (infrastructure, not baseball). (6) New CLI command — No (Codex-specific smoke-check, documented in Codex guide, not needed in CLAUDE.md). No context-layer codification required.

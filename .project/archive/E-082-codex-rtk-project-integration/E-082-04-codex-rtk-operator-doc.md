@@ -4,7 +4,7 @@
 [E-082: Codex RTK Project-Level Integration](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the operator will have a clear explanation of how RTK works in the Codex lane: where the binary lives, why the integration is explicit instead of transparent, how to verify it, and why no host-global setup is required by default.

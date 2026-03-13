@@ -2,3 +2,7 @@
 # Trust, auth, sessions, and caches belong in CODEX_HOME, not in this file.
 
 model_reasoning_effort = "high"
+
+# RTK (Rust Token Killer) -- project-local binary for token-optimized shell output.
+# Binary lives at .tools/rtk/rtk (gitignored, installed by post-create-env.sh).
+# See AGENTS.md "RTK Usage" section for when and how to use it.
