@@ -91,7 +91,12 @@ def endpoints(
 def refresh_headers(
     apply: bool = typer.Option(False, "--apply", help="Write changes to src/http/headers.py (default: dry-run)."),
 ) -> None:
-    """Refresh src/http/headers.py from the latest mitmproxy capture (dry-run by default)."""
+    """Refresh src/http/headers.py from the latest mitmproxy capture (dry-run by default).
+
+    Examples:
+        bb proxy refresh-headers           # preview changes without writing
+        bb proxy refresh-headers --apply   # write updated headers to src/http/headers.py
+    """
     module = _load_refresh_headers_module()
     exit_code = module.run(apply=apply)
     raise SystemExit(exit_code)
@@ -99,10 +104,14 @@ def refresh_headers(
 
 @app.command(context_settings={"allow_extra_args": True, "allow_interspersed_args": False})
 def review(ctx: typer.Context) -> None:
-    """Manage proxy session review status (list, mark).
+    """Manage proxy session review status.
 
     Forwards all arguments to scripts/proxy-review.sh.
-    Examples: bb proxy review list, bb proxy review mark <session-id>, bb proxy review mark --all
+
+    Examples:
+        bb proxy review list                    # list all sessions with review status
+        bb proxy review mark <session-id>       # mark one session as reviewed
+        bb proxy review mark --all              # mark all sessions as reviewed
     """
     cmd = ["scripts/proxy-review.sh", *ctx.args]
     result = subprocess.run(cmd, cwd=_PROJECT_ROOT, check=False)

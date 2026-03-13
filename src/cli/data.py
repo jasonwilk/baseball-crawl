@@ -185,6 +185,11 @@ def scout(
 
     Season is derived automatically from the game schedule unless --season is
     provided.
+
+    Examples:
+        bb data scout                           # scout all opponents
+        bb data scout --team QTiLIb2Lui3b      # scout one opponent by public_id
+        bb data scout --dry-run                 # show what would be scouted
     """
     if dry_run:
         _scout_dry_run(profile=profile, team=team, season=season)

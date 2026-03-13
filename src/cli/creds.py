@@ -400,7 +400,13 @@ def check(
         help="Credential profile to check: web or mobile. Checks all profiles if omitted.",
     ),
 ) -> None:
-    """Validate GameChanger credentials stored in .env."""
+    """Validate GameChanger credentials stored in .env.
+
+    Examples:
+        bb creds check                     # check all profiles
+        bb creds check --profile web       # check web profile only
+        bb creds check --profile mobile    # check mobile profile only
+    """
     if profile is not None:
         result = check_profile_detailed(profile)
         _console.print(
@@ -619,6 +625,10 @@ def extract_key(
 
     Compares the extracted key against .env and shows what would change.
     Pass --apply to write updated values to .env.
+
+    Examples:
+        bb creds extract-key               # dry run: show diff without writing
+        bb creds extract-key --apply       # write updated key to .env
     """
     # Dry-run banner (AC-4a)
     if not apply:

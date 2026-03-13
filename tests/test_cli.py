@@ -191,6 +191,44 @@ def test_db_help_preserves_description() -> None:
 
 
 # ---------------------------------------------------------------------------
+# E-101-02 AC-2/AC-3: Examples blocks visible in --help output
+# ---------------------------------------------------------------------------
+
+
+def test_creds_check_help_includes_examples() -> None:
+    """bb creds check --help includes an Examples block (AC-2)."""
+    result = runner.invoke(app, ["creds", "check", "--help"])
+    assert result.exit_code == 0
+    assert "Examples:" in result.output
+    assert "--profile web" in result.output
+    assert "--profile mobile" in result.output
+
+
+def test_creds_extract_key_help_includes_examples() -> None:
+    """bb creds extract-key --help includes an Examples block (AC-2)."""
+    result = runner.invoke(app, ["creds", "extract-key", "--help"])
+    assert result.exit_code == 0
+    assert "Examples:" in result.output
+    assert "--apply" in result.output
+
+
+def test_proxy_refresh_headers_help_includes_examples() -> None:
+    """bb proxy refresh-headers --help includes an Examples block (AC-2)."""
+    result = runner.invoke(app, ["proxy", "refresh-headers", "--help"])
+    assert result.exit_code == 0
+    assert "Examples:" in result.output
+    assert "--apply" in result.output
+
+
+def test_data_scout_help_includes_examples() -> None:
+    """bb data scout --help includes an Examples block (AC-2)."""
+    result = runner.invoke(app, ["data", "scout", "--help"])
+    assert result.exit_code == 0
+    assert "Examples:" in result.output
+    assert "--dry-run" in result.output
+
+
+# ---------------------------------------------------------------------------
 # AC-8 and AC-9: deep --help shows boolean flag options (regression check)
 # ---------------------------------------------------------------------------
 

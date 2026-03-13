@@ -64,7 +64,7 @@ def reset(
         help="Skip confirmation prompt (for scripted use).",
     ),
 ) -> None:
-    """Drop and recreate the database. All data will be lost."""
+    """Drop and recreate the database (destroys all existing data)."""
     # Production guard fires BEFORE the confirmation prompt so the user is
     # never asked to confirm a reset that will be blocked anyway.
     # check_production_guard() calls sys.exit(1) on failure; catch and convert
