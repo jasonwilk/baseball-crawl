@@ -41,6 +41,8 @@ Review this list every 90 days, or when completing an epic. Ask:
 | [IDEA-020](IDEA-020-public-endpoint-opponent-ingestion.md) | Public Endpoint Opponent Data Ingestion | PROMOTED | 2026-03-12 -- promoted to E-097 |
 | [IDEA-021](IDEA-021-database-migration-process.md) | Database Migration Process Definition | CANDIDATE | 2026-06-07 |
 | [IDEA-022](IDEA-022-scouting-flow-doc-schema-mismatch.md) | Scouting Flow Doc / Schema Stat Mismatch | CANDIDATE | 2026-06-12 |
+| [IDEA-023](IDEA-023-env-and-db-backup-automation.md) | Automated .env and app.db Backup | CANDIDATE | 2026-06-13 |
+| [IDEA-024](IDEA-024-postcreatecommand-refactor.md) | Refactor postCreateCommand into Bootstrap Script | CANDIDATE | 2026-06-13 |
 
 ## Status Definitions
 
