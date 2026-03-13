@@ -1,10 +1,10 @@
 # Product Manager -- Agent Memory
 
 ## Numbering State
-- Next available epic number: E-103
-- Epics created: E-001 through E-102 (E-001, E-003, E-005, E-006, E-007, E-008, E-010, E-011, E-012, E-013, E-014, E-015, E-016, E-017, E-018, E-019, E-020, E-021, E-022, E-024, E-025, E-026, E-027, E-028, E-029, E-030, E-031, E-032, E-033, E-034, E-035, E-036, E-037, E-038, E-042, E-044, E-046, E-048, E-049, E-050, E-052, E-053, E-054, E-056, E-057, E-058, E-055, E-059, E-060, E-061, E-075, E-081, E-084, E-087, E-088, E-089, E-090, E-091, E-092 archived; E-093, E-094, E-095 archived; E-096 archived; E-097 archived; E-098 archived; E-099 archived; E-100 active; E-101 active; E-102 active)
-- Next available idea number: IDEA-023
-- Ideas created: IDEA-001 through IDEA-022
+- Next available epic number: E-105
+- Epics created: E-001 through E-104 (E-001, E-003, E-005, E-006, E-007, E-008, E-010, E-011, E-012, E-013, E-014, E-015, E-016, E-017, E-018, E-019, E-020, E-021, E-022, E-024, E-025, E-026, E-027, E-028, E-029, E-030, E-031, E-032, E-033, E-034, E-035, E-036, E-037, E-038, E-042, E-044, E-046, E-048, E-049, E-050, E-052, E-053, E-054, E-056, E-057, E-058, E-055, E-059, E-060, E-061, E-075, E-081, E-084, E-087, E-088, E-089, E-090, E-091, E-092 archived; E-093, E-094, E-095 archived; E-096 archived; E-097 archived; E-098 archived; E-099 archived; E-100 active; E-101 active; E-102 active; E-103 active; E-104 active)
+- Next available idea number: IDEA-025
+- Ideas created: IDEA-001 through IDEA-024
 
 ## Project Context
 - Project: baseball-crawl -- GameChanger API -> database -> coaching dashboard
@@ -29,7 +29,9 @@
 - E-097 (COMPLETED): Opponent Scouting Data Pipeline -- see Archived Epics.
 - E-098 (COMPLETED): Fix Scouting Pipeline Bugs -- see Archived Epics.
 - E-099 (COMPLETED): Targeted Review Quality Checklists -- see Archived Epics.
-- E-101 (READY): BB CLI Help and Discoverability -- 2 stories. Fix bare sub-group silent behavior (add invoke_without_command + callback to creds/data/proxy/db), add epilog footers, verify --apply flag visibility, tighten docstrings, add examples to complex commands. SE dispatch. UXD consulted.
+- E-104 (READY): Athlete Profile Endpoint Probe -- Opponent Player Access -- 2 stories. api-scout probes four athlete-profile endpoints for opponent player access. Confirm endpoints independently (01), document player_id->athlete_profile_id lookup path (02). Wave: 01 -> 02. Pure API exploration, no code changes. Motivated by cross-team player identity discovery during 2026-03-13 vision session. E-100 adding gc_athlete_profile_id column; this epic determines how to populate it.
+- E-101 (READY): BB CLI Help and Discoverability
+- E-103 (READY): Baseball Coach Agent Refinement -- 1 story. Refine baseball-coach agent definition with coaching persona from 2026-03-13 vision session. Team-first mental model, own-team-first priority, rate stats emphasis, proactive flags, Lincoln-specific seasonal knowledge, game-day consumption patterns. Single context-layer file (.claude/agents/baseball-coach.md). claude-architect dispatch. No expert consultation required. -- 2 stories. Fix bare sub-group silent behavior (add invoke_without_command + callback to creds/data/proxy/db), add epilog footers, verify --apply flag visibility, tighten docstrings, add examples to complex commands. SE dispatch. UXD consulted.
 
 ## Archived Epics
 - E-099 (COMPLETED): Targeted Review Quality Checklists -- 2 stories. Bug Pattern Checklist added to code-reviewer.md (SQL query scope, return value consumption, status lifecycle) + Priority 3 items (multi-scope tests, error-path tests). Pre-Submission Checklist added to software-engineer.md (same 3 bug classes + 2 test obligations). Error-Path Testing section added to testing.md. Prevents E-097-class review escapes. All context-layer work via claude-architect. No follow-up work.
@@ -172,6 +174,8 @@
 | IDEA-019 | Retroactive Opponent Stat Crawling | PROMOTED | 2026-03-12 | Promoted to E-097 (Opponent Scouting Data Pipeline). |
 | IDEA-020 | Public Endpoint Opponent Data Ingestion | PROMOTED | 2026-03-12 | Promoted to E-097 (Opponent Scouting Data Pipeline). |
 | IDEA-022 | Scouting Flow Doc / Schema Stat Mismatch | CANDIDATE | 2026-06-12 | Flow doc lists stats not in schema. Fix doc or expand schema. Discovered during E-098 Codex review. |
+| IDEA-023 | Automated .env and app.db Backup | CANDIDATE | 2026-06-13 | Only precious state without automated backup. Surfaced from infra review (2026-03-13). |
+| IDEA-024 | Refactor postCreateCommand into Bootstrap Script | CANDIDATE | 2026-06-13 | Extract monolithic one-liner into debuggable script. Trigger: next devcontainer addition. Surfaced from infra review (2026-03-13). |
 
 ## Key Workflow Contract
 - Routing model: planning (user -> PM), dispatch (user/main session -> implementers directly). PM plans and closes; main session dispatches. (E-065 merged roles)
