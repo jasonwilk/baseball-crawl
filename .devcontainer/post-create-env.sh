@@ -103,6 +103,7 @@ read -r -d '' ALIAS_BLOCK <<'BLOCK' || true
 # --- baseball-crawl aliases ---
 alias tbb='d=$(tmux ls -F "#{session_name} #{?session_attached,attached,detached}" 2>/dev/null | grep "^baseball" | grep detached | head -1 | cut -d" " -f1); if [ -n "$d" ]; then tmux attach-session -t "$d"; else n=0; s=baseball; while tmux has-session -t "$s" 2>/dev/null; do n=$((n+1)); s="baseball-$n"; done; tmux new-session -s "$s"; fi'
 alias cbb='claude --dangerously-skip-permissions'
+cd /workspaces/baseball-crawl 2>/dev/null
 # --- end baseball-crawl aliases ---
 
 BLOCK
