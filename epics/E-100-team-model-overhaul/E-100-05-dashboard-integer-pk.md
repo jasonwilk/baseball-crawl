@@ -14,13 +14,13 @@ Dashboard routes currently receive TEXT team_id strings from `get_permitted_team
 
 ## Acceptance Criteria
 - [ ] **AC-1**: All dashboard route handlers use INTEGER team_id values when calling db.py functions and comparing against `permitted_teams`.
-- [ ] **AC-2**: The `?team_id=` query parameter is parsed as `int`. Invalid values (non-numeric, negative, non-existent ID) return HTTP 400.
+- [ ] **AC-2**: The `?team_id=` query parameter is parsed as `int`. Non-numeric values return HTTP 400. Non-existent or unpermitted team IDs return HTTP 403 (do not distinguish "doesn't exist" from "not permitted" — consistent with current dashboard behavior).
 - [ ] **AC-3**: `permitted_teams` (from `get_permitted_teams()`) is `list[int]`. All `in` comparisons use integer values.
 - [ ] **AC-4**: Helper functions (`_compute_wl()`, `_check_opponent_authorization()`, etc.) work with INTEGER team_id.
 - [ ] **AC-5**: All dashboard templates render INTEGER team IDs in links, form values, and selectors (e.g., `?team_id={{ team.id }}`).
 - [ ] **AC-6**: `_team_selector.html` partial renders INTEGER team IDs in dropdown options.
 - [ ] **AC-7**: Any `is_owned` references in dashboard code replaced with `membership_type`.
-- [ ] **AC-8**: Tests verify: (a) dashboard routes accept INTEGER team_id query params, (b) permitted_teams filtering works with integers, (c) game detail renders correct INTEGER team references.
+- [ ] **AC-8**: Tests verify: (a) dashboard routes accept INTEGER team_id query params, (b) permitted_teams filtering works with integers, (c) game detail renders correct INTEGER team references, (d) non-numeric team_id query param returns HTTP 400, (e) unpermitted or non-existent INTEGER team_id returns HTTP 403.
 - [ ] **AC-9**: All dashboard test suites pass: `tests/test_dashboard.py`, `tests/test_dashboard_auth.py`.
 
 ## Technical Approach
@@ -38,6 +38,7 @@ The changes are mechanical: update parameter types, parse query params as int, u
 - `src/api/templates/dashboard/game_detail.html`
 - `src/api/templates/dashboard/opponent_list.html`
 - `src/api/templates/dashboard/opponent_detail.html`
+- `src/api/templates/dashboard/player_profile.html`
 - `src/api/templates/dashboard/_team_selector.html`
 - `tests/test_dashboard.py`
 - `tests/test_dashboard_auth.py`

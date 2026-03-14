@@ -15,9 +15,9 @@ Final story in the epic — ensures the context layer accurately describes the i
 ## Acceptance Criteria
 - [ ] **AC-1**: `CLAUDE.md` data model references updated: `is_owned` -> `membership_type`, `level` -> `classification`/Division, programs documented, team_opponents documented, INTEGER PK for teams documented, TeamRef pattern noted, enriched columns (game_stream_id, batting_order, pitches/strikes, bats/throws, split columns, spray_charts) documented.
 - [ ] **AC-2**: `CLAUDE.md` admin UI references reflect the two-phase add-team flow and flat team list.
-- [ ] **AC-3**: `/.claude/rules/migrations.md` updated to reflect the clean schema rewrite (migration 001 is the complete schema; old 001-008 archived).
-- [ ] **AC-4**: Any agent definitions or rules referencing `is_owned`, `level`, or the old team model are updated.
-- [ ] **AC-5**: The PM's MEMORY.md "Key Architectural Decisions" section updated with programs/membership_type/classification model, team_opponents, INTEGER PK, enriched stat columns.
+- [ ] **AC-3**: `/.claude/rules/migrations.md` updated to reflect the clean schema rewrite: migration 001 is the complete schema, old 001-008 archived, next migration number is `002`, unused-slot language removed.
+- [ ] **AC-4**: Run `grep -rn 'is_owned\|\.level\b\|is_owned_team' CLAUDE.md .claude/agents/ .claude/rules/` and update every match that describes the old team model (`teams.is_owned`, `teams.level`, `is_owned_team_public_id`, TEXT PK convention). Agent memory files (`.claude/agent-memory/`) are excluded — historical context in completed-epic entries does not need updating. The AC is done when the grep returns no matches in the named paths.
+- [ ] **AC-5**: The PM's MEMORY.md updated: (a) "Key Architectural Decisions" section updated with programs/membership_type/classification model, team_opponents, INTEGER PK, enriched stat columns; (b) "Active Epics" E-100 entry updated to reflect the completed implementation.
 
 ## Technical Approach
 Read all context-layer files referencing team model concepts and update to reflect the new reality. CLAUDE.md describes current implemented state, not future plans.

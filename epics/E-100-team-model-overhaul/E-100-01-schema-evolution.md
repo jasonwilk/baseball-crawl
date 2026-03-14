@@ -7,7 +7,7 @@
 `TODO`
 
 ## Description
-After this story is complete, the database schema will be a single `001_initial_schema.sql` containing the complete DDL: programs, INTEGER PK teams, team_opponents junction, all non-computed stats from the GameChanger glossary on per-game and season stat tables, provenance columns, spray_charts with pitcher_id, and all auth tables. Old migrations are archived. The seed/reset script produces a valid seeded database against the new schema. Tests verify schema correctness.
+After this story is complete, the database schema will be a single `001_initial_schema.sql` containing the complete DDL: programs, INTEGER PK teams, team_opponents junction, all non-computed stats available from the boxscore endpoint on per-game stat tables, all non-computed stats available from the season-stats endpoint on season stat tables, provenance columns, spray_charts with pitcher_id, and all auth tables. Old migrations are archived. The seed/reset script produces a valid seeded database against the new schema. Tests verify schema correctness.
 
 ## Context
 Fresh-start rewrite — user authorized dropping all data. The existing `migrations/001_initial_schema.sql` on main is the OLD E-003 schema (250 lines, TEXT PK teams, is_owned, level). This story writes the complete new DDL from scratch, archives old migrations, updates the seed/reset script, and writes schema verification tests. All tables (data + auth) are in a single migration file — one file, one source of truth.
@@ -15,10 +15,10 @@ Fresh-start rewrite — user authorized dropping all data. The existing `migrati
 ## Acceptance Criteria
 
 ### Migration Structure
-- [ ] **AC-1**: Old migration files (001-008) are archived in `.project/archive/migrations-pre-E100/`. The `migrations/` directory contains only `001_initial_schema.sql` plus `__init__.py` and `apply_migrations.py`.
+- [ ] **AC-1**: Old migration files (001, 003-008) are archived in `.project/archive/migrations-pre-E100/`. The `migrations/` directory contains only `001_initial_schema.sql` plus `__init__.py` and `apply_migrations.py`.
 - [ ] **AC-2**: A fresh `python migrations/apply_migrations.py` on a new `data/app.db` creates all tables successfully. All FK constraints are valid.
 - [ ] **AC-3**: Migration comment block documents the INTEGER PK convention per the epic Technical Notes.
-- [ ] **AC-4**: All auth tables (users, sessions, magic_link_tokens, user_credentials, coaching_assignments) are included in `001_initial_schema.sql`. Single migration file is the complete schema.
+- [ ] **AC-4**: All auth tables (users, user_team_access, magic_link_tokens, passkey_credentials, sessions, coaching_assignments) are included in `001_initial_schema.sql`. Single migration file is the complete schema.
 
 ### Core Tables
 - [ ] **AC-5**: `programs` table exists with columns: `program_id TEXT PK`, `name TEXT NOT NULL`, `program_type TEXT NOT NULL CHECK(program_type IN ('hs', 'usssa', 'legion'))`, `org_name TEXT`, `created_at`. One seed row: `('lsb-hs', 'Lincoln Standing Bear HS', 'hs', 'Lincoln Standing Bear')`.
@@ -31,37 +31,47 @@ Fresh-start rewrite — user authorized dropping all data. The existing `migrati
 ### Enriched Columns
 - [ ] **AC-11**: `players` table has `bats TEXT`, `throws TEXT`, and `gc_athlete_profile_id TEXT` columns.
 - [ ] **AC-12**: `games` table has `game_stream_id TEXT` column.
-- [ ] **AC-13**: `player_game_batting` has all columns listed in the epic Technical Notes "Complete Stat Column Reference — player_game_batting" section. This includes structural columns (batting_order, positions_played, is_primary, stat_completeness), main stats (ab, r, h, rbi, bb, so), extra stats (singles, doubles, triples, hr, tb, hbp, shf, sb, cs, e), and enrichment stats (pitches, strikes, pa).
-- [ ] **AC-14**: `player_game_pitching` has all columns listed in the epic Technical Notes "Complete Stat Column Reference — player_game_pitching" section. This includes structural columns (decision, stat_completeness), main stats (ip_outs, h, r, er, bb, so), extra stats (wp, hbp, hr), and enrichment stats (pitches, strikes, bf).
+- [ ] **AC-13**: `player_game_batting` has all columns listed in the epic Technical Notes "Complete Stat Column Reference — player_game_batting" section. This includes structural columns (batting_order, positions_played, is_primary, stat_completeness), main stats (ab, r, h, rbi, bb, so), and extra stats (doubles, triples, hr, tb, hbp, shf, sb, cs, e). Note: singles (1B), PA, pitches seen (#P), and strikes seen (TS) are NOT in the boxscore batting response and are excluded.
+- [ ] **AC-14**: `player_game_pitching` has all columns listed in the epic Technical Notes "Complete Stat Column Reference — player_game_pitching" section. This includes structural columns (decision, stat_completeness), main stats (ip_outs, h, r, er, bb, so), and extra stats (wp, hbp, pitches, total_strikes, bf). Note: HR allowed is not in the boxscore pitching extras and is excluded from this table.
 - [ ] **AC-15**: `player_season_batting` has all columns listed in the epic Technical Notes "Complete Stat Column Reference — player_season_batting" section. This includes structural columns (stat_completeness, games_tracked), all standard batting stats (26+), advanced batting stats (countable only), and nullable split columns (home/away, vs_lhp/vs_rhp).
 - [ ] **AC-16**: `player_season_pitching` has all columns listed in the epic Technical Notes "Complete Stat Column Reference — player_season_pitching" section. This includes structural columns (stat_completeness, games_tracked), all standard pitching stats (35+), advanced pitching stats (countable only), and nullable split columns (home/away, vs_lhb/vs_rhb).
-- [ ] **AC-17**: `spray_charts` table exists with columns: `id INTEGER PK`, `game_id TEXT FK`, `player_id TEXT FK`, `team_id INTEGER FK`, `pitcher_id TEXT FK -> players(player_id)` (nullable), `chart_type TEXT CHECK(IN ('offensive', 'defensive'))`, `play_type TEXT`, `play_result TEXT`, `x REAL`, `y REAL`, `fielder_position TEXT`, `error INTEGER DEFAULT 0`.
+- [ ] **AC-17**: `spray_charts` table exists with columns: `id INTEGER PK AUTOINCREMENT`, `game_id TEXT FK`, `player_id TEXT FK`, `team_id INTEGER FK`, `pitcher_id TEXT FK -> players(player_id)` (nullable), `chart_type TEXT CHECK(chart_type IN ('offensive', 'defensive'))`, `play_type TEXT`, `play_result TEXT`, `x REAL`, `y REAL`, `fielder_position TEXT`, `error INTEGER DEFAULT 0`.
 
 ### Remaining Tables
-- [ ] **AC-18**: All other tables (team_rosters, auth tables, coaching_assignments) exist with correct schema. All FK references to teams use `teams(id)` (INTEGER).
+- [ ] **AC-18**: All remaining tables exist with correct schema and INTEGER FK references to `teams(id)` where applicable. Specifically: (a) `users` table exists with `id INTEGER PK AUTOINCREMENT`, `email`, `hashed_password`, `created_at`; (b) `user_team_access` table exists with `user_id INTEGER FK -> users(id)`, `team_id INTEGER FK -> teams(id)`, UNIQUE(user_id, team_id); (c) `magic_link_tokens` table exists with `token TEXT PK`, `user_id INTEGER FK -> users(id)`, `expires_at`; (d) `passkey_credentials` table exists with `credential_id TEXT PK`, `user_id INTEGER FK -> users(id)`, `public_key`, `sign_count`; (e) `sessions` table exists with `session_id TEXT PK`, `user_id INTEGER FK -> users(id)`, `expires_at`; (f) `coaching_assignments` table exists with `id INTEGER PK`, `user_id INTEGER FK -> users(id)`, `team_id INTEGER FK -> teams(id)`, `role`; (g) no `team_id TEXT` column exists anywhere — all cross-table team references are `INTEGER FK -> teams(id)`.
 
 ### Seed and Tests
 - [ ] **AC-19**: `scripts/reset_dev_db.py` (and `bb db reset`) works with the new schema — seed data uses `membership_type` and `classification`, not `is_owned` or `level`. Seed data for INTEGER PK teams uses subquery references (not hardcoded IDs).
-- [ ] **AC-20**: Tests verify: (a) migrations apply on fresh DB, (b) programs table seeded correctly, (c) teams table has correct columns and constraints, (d) team_opponents constraints work, (e) all stat table columns exist per the Complete Stat Column Reference, (f) stat_completeness column exists on all four stat tables with correct CHECK constraints, (g) games_tracked column exists on both season stat tables, (h) spray_charts table exists with pitcher_id FK, (i) reset script produces a valid seeded database, (j) auth tables exist with correct schema.
+- [ ] **AC-20**: Tests verify: (a) migrations apply on fresh DB, (b) programs table seeded correctly, (c) teams table has correct columns and constraints, (d) team_opponents constraints work, (e) all stat table columns exist per the Complete Stat Column Reference, (f) stat_completeness column exists on all four stat tables with correct CHECK constraints, (g) games_tracked column exists on both season stat tables, (h) spray_charts table exists with pitcher_id FK, (i) reset script produces a valid seeded database, (j) auth tables exist with correct schema, (k) UNIQUE constraints on stat tables enforce no-duplicate rows (game_id+player_id on per-game tables, player_id+team_id+season_id on season tables).
 
 ## Technical Approach
-Write the complete DDL from scratch in `migrations/001_initial_schema.sql`. Archive existing migration files (001-008) to `.project/archive/migrations-pre-E100/`. The DDL must include all tables (data + auth) in FK dependency order. Use `docs/gamechanger-stat-glossary.md` as the authoritative source for stat column names — cross-reference the "Complete Stat Column Reference" section in the epic Technical Notes for the exact stat list per table. Update `src/db/reset.py` seed data for the new schema. Write schema verification tests. The migration must follow conventions in `/.claude/rules/migrations.md`.
+Write the complete DDL from scratch in `migrations/001_initial_schema.sql`. Archive existing migration files (001-008) to `.project/archive/migrations-pre-E100/`. The DDL must include all tables (data + auth) in FK dependency order. Use `docs/gamechanger-stat-glossary.md` as the authoritative source for stat column names and definitions. The scope of each stat table is bounded by the relevant endpoint: per-game tables (player_game_batting, player_game_pitching) include stats from the boxscore endpoint only; season tables (player_season_batting, player_season_pitching) include stats from the season-stats endpoint only. Cross-reference the "Complete Stat Column Reference" section in the epic Technical Notes for the exact stat list per table. Update `src/db/reset.py` seed data for the new schema. Write schema verification tests. The migration follows conventions in `/.claude/rules/migrations.md` EXCEPT where the epic Technical Notes "Schema Strategy: Fresh-Start Rewrite" section explicitly overrides them (the append-only rule is overridden by user authorization to drop all data and rewrite from scratch).
 
 ## Dependencies
 - **Blocked by**: None
 - **Blocks**: E-100-02, E-100-03, E-100-04, E-100-05, E-100-06
 
 ## Files to Create or Modify
+- `.project/archive/migrations-pre-E100/` (CREATE directory — archive target)
+- `.project/archive/migrations-pre-E100/001_initial_schema.sql` (ARCHIVE — copy of old E-003 schema before rewrite)
 - `migrations/001_initial_schema.sql` (REWRITE — replace old E-003 schema with complete new DDL)
 - `migrations/003_auth.sql` (ARCHIVE — content folded into 001)
 - `migrations/004_coaching_assignments.sql` (ARCHIVE — content folded into 001)
 - `migrations/005_teams_public_id.sql` (ARCHIVE — content folded into 001)
 - `migrations/006_opponent_links.sql` (ARCHIVE — content folded into 001)
-- `migrations/007_scouting_uuid.sql` (ARCHIVE — content folded into 001)
-- `migrations/008_scouting_timestamps.sql` (ARCHIVE — content folded into 001)
-- `src/db/reset.py` (MODIFY — update seed data)
+- `migrations/007_scouting_runs.sql` (ARCHIVE — content folded into 001)
+- `migrations/008_teams_gc_uuid.sql` (ARCHIVE — content folded into 001)
+- `src/db/reset.py` (MODIFY — update reset logic if needed)
+- `data/seeds/seed_dev.sql` (MODIFY — update seed data for new schema)
 - `tests/test_seed.py` (MODIFY — update for new schema)
-- Tests for schema verification (CREATE)
+- `tests/test_migration_003.py` (DELETE or REWRITE — auth schema verification folded into new schema tests)
+- `tests/test_coaching_assignments.py` (REWRITE — schema assumptions tied to old migration layout; break when 003/004 are archived)
+- `tests/fixtures/seed.sql` (REWRITE — uses is_owned, level, TEXT team_id)
+- `tests/test_schema_queries.py` (REWRITE — applies old migration + old seed)
+- `tests/test_migrations.py` (REWRITE or DELETE — tests old migration sequence)
+- `tests/test_schema.py` (REWRITE or DELETE — tests old schema)
+- `tests/test_scouting_schema.py` (REWRITE — tests scouting tables with old FK pattern)
+- `tests/test_e100_schema.py` (CREATE — new schema verification tests for AC-20)
 
 ## Agent Hint
 data-engineer
