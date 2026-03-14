@@ -10,6 +10,10 @@ Lincoln Standing Bear High School baseball program:
 - Jason is the system operator; coaching staff are the end consumers
 - Coaches see dashboards and reports -- they do not interact with the system directly
 
+## Epic Consultations
+
+- [E-100 coaching review (2026-03-14)](e100_coaching_review.md) -- Schema gaps, domain corrections, and cleared items from E-100 team model overhaul review
+
 ## Key Reference Documents
 
 - **Stat glossary**: `docs/gamechanger-stat-glossary.md` -- authoritative data dictionary mapping all GameChanger stat abbreviations to definitions (batting, pitching, fielding, catcher, positional innings). Includes API field name mapping table for cases where API abbreviations differ from UI labels (e.g., K-L -> SOL, HHB -> HARD, SAC -> SHB). Use this when validating schemas or consulting on field mappings.

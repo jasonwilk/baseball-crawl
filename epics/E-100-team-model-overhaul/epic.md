@@ -4,23 +4,27 @@
 `READY`
 
 ## Overview
-Fresh-start rebuild of the team data model into a team-first architecture. Drops all existing data (user confirmed), rewrites the schema from scratch with INTEGER PK for teams, programs as organizational metadata, membership_type replacing is_owned, and enriched stat columns from coaching consultation. All application code (db.py, auth.py, pipeline, admin, dashboard) is updated in one coordinated epic with no backward-compatibility concerns.
+Fresh-start rebuild of the team data model into a team-first architecture. Drops all existing data (user confirmed), rewrites the schema from scratch with INTEGER PK for teams, programs as organizational metadata, membership_type replacing is_owned, and complete stat coverage per the GameChanger stat glossary. All application code (db.py, auth.py, pipeline, admin, dashboard) is updated in one coordinated epic with no backward-compatibility concerns.
 
 ## Background & Context
 The current model hardcodes Lincoln Standing Bear assumptions: `is_owned` distinguishes "our" teams from opponents, `level` stores HS-specific values, and the admin UI splits teams into "Lincoln Program" and "Tracked Opponents." The user's GameChanger account spans 19 teams across travel ball (8U-14U), high school, and Legion — none fit the current model.
 
 **Fresh-start authorization (2026-03-14):** User authorized dropping all data and rebuilding from scratch. No migration compatibility, no xfail patterns, no intermediate broken states. Each story writes clean code and clean tests against the new schema. Data will be re-seeded after the epic completes.
 
-**Expert consultation completed (two rounds):**
-- **Data Engineer (round 1)**: Clean rewrite of migration 001, programs table, team_opponents junction, INTEGER AUTOINCREMENT PK for teams only. 17-table refined schema delivered.
+**Standing design principle (2026-03-14):** Store every stat that GameChanger tracks. The schema includes columns for every non-computed stat in `docs/gamechanger-stat-glossary.md`. If it's in the glossary, it belongs in the schema. Computed stats (rates, percentages, ratios like AVG, OBP, ERA, WHIP) are derived at query time and do not need columns.
+
+**Expert consultation completed (three rounds):**
+- **Data Engineer (round 1)**: Clean rewrite of migration 001, programs table, team_opponents junction, INTEGER AUTOINCREMENT PK for teams only.
 - **Data Engineer (round 2)**: Enriched schema with coach's requirements: game_stream_id on games, batting_order/pitches/strikes on player_game_batting, bats/throws on players, nullable split columns on season stats tables, spray_charts table. Nullable columns confirmed over split_type discriminator rows.
+- **Data Engineer (round 3)**: Cross-referenced full glossary against schema. All non-computed batting stats (26+), pitching stats (35+) mapped to columns. Provenance model: `stat_completeness` + `games_tracked` on season tables, `data_source` on per-game tables. Fielding/catcher/pitch type tables deferred (purely additive, no FK deps).
 - **Software Engineer**: Mapped full code surface (~30 db.py functions, auth.py, 2 route files, 2 loaders, crawl config, 12 templates, ~12 test files). Confirmed Wave 3 parallelism is safe. Identified 10 simplifications from dropping backward compat: `_generate_opponent_team_id`, `_resolve_team_ids`, placeholder rename pattern all deleted.
 - **Baseball Coach**: Defined three circles of data (my team, opponents, longitudinal). Confirmed structural decisions in E-100, data population in follow-ups. Key schema additions: game lines for both teams (game_stream_id enables public boxscore access), player handedness (bats/throws), batting order per game, nullable split columns. Spray charts, streak flags, and L/R data population are follow-up epics.
 - **UX Designer**: Two-phase add-team flow, flat team list, division optgroup dropdown, membership auto-detect. Coach interview surfaced scouting report, rate stats, proactive flags — all scoped out.
 
 ## Goals
 - Clean schema with INTEGER PK for teams, eliminating the gc_uuid/public_id identity duality
-- Enriched stat columns (game_stream_id, batting_order, pitches/strikes, bats/throws, nullable split columns, spray_charts table) — structure only, populated by follow-up epics
+- Complete stat columns per GC glossary: all non-computed batting stats on per-game and season tables, all non-computed pitching stats on per-game and season tables, spray_charts table with pitcher_id — structure only, populated by follow-up epics
+- Stat provenance tracking: `stat_completeness` on all four stat tables, `games_tracked` on season tables
 - Member/tracked distinction is system-computed (via GC bridge auto-detect), not operator-declared
 - Programs as lightweight organizational metadata for grouping teams (not a navigation frame)
 - Two-phase add-team flow resolves team from GC URL, auto-detects membership, pre-populates division
@@ -29,9 +33,10 @@ The current model hardcodes Lincoln Standing Bear assumptions: `is_owned` distin
 - Clean tests throughout — no xfail markers, no fixture-splitting between stories
 
 ## Non-Goals
-- **Populating enriched columns**: game_stream_id, batting_order, pitches/strikes, bats/throws, spray_charts, and split columns are added to the DDL but NOT populated by any E-100 story. Population is follow-up epic scope.
+- **Populating enriched columns**: New stat columns, game_stream_id, batting_order, bats/throws, spray_charts, and split columns are added to the DDL but NOT populated by any E-100 story. Population is follow-up epic scope.
 - **Multi-credential per program**: Different GC accounts for HS vs USSSA programs. Deferred.
 - **Bulk import from /me/teams**: Batch onboarding of all 19 teams. Deferred.
+- **Program CRUD admin page**: No admin UI for creating/editing programs in E-100. Programs are created via direct SQL or a follow-up epic. The add-team confirm page has a dropdown for existing programs only.
 - **Opponent page redesign**: `/admin/opponents` stays as-is. Only opponent counts with filtered links added to team list.
 - **Dashboard program-awareness**: No program-based navigation or filtering. INTEGER PK compatibility only.
 - **Scouting report redesign**: Rate stats, proactive flags, PDF export — all follow-up epics.
@@ -39,12 +44,17 @@ The current model hardcodes Lincoln Standing Bear assumptions: `is_owned` distin
 - **Program-first dashboard navigation**: Explicitly rejected. Team-and-season is the primary lens.
 - **L/R split data population**: Schema supports nullable split columns; population is follow-up.
 - **Spray chart ingestion pipeline**: spray_charts table created; crawler + loader are follow-up.
+- **Fielding, catcher, and pitch type tables**: Deferred. Purely additive (no FK references from other tables), doesn't block anything. Add in a follow-up when a loader exists.
+- **Travel ball tier/division column**: Not needed at this time. Follow-up if needed (USSSA, AA, AAA, Majors).
+- **Stat blending logic**: Loaders that merge API season stats with boxscore-derived stats are follow-up scope. E-100 creates the provenance columns; population strategy is deferred.
 
 ## Success Criteria
 - `programs` table exists with at least one seeded program (Lincoln Standing Bear HS)
 - `teams` table has INTEGER AUTOINCREMENT PK (`id`), plus `program_id`, `membership_type`, `classification`, `gc_uuid`, and `public_id` columns
 - `team_opponents` junction table exists
-- Enriched columns exist: `game_stream_id` on games, `batting_order`/`pitches`/`strikes` on player_game_batting, `bats`/`throws` on players, nullable split columns on season stats, `spray_charts` table
+- All non-computed stats from `docs/gamechanger-stat-glossary.md` have corresponding columns in the appropriate stat tables (see Complete Stat Column Reference in Technical Notes)
+- Provenance columns exist: `stat_completeness` on all four stat tables, `games_tracked` on season stat tables
+- `spray_charts` table exists with `pitcher_id` FK
 - All crawlers, loaders, CLI commands, db.py, auth.py, admin routes, and dashboard routes use INTEGER team PKs and `membership_type` instead of `is_owned`
 - Admin team list displays all teams in a flat list with program, division, and membership columns
 - Adding a team via GC URL auto-detects membership and pre-populates program/division on a confirm page
@@ -53,7 +63,7 @@ The current model hardcodes Lincoln Standing Bear assumptions: `is_owned` distin
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-100-01 | Schema rewrite: enriched 17-table DDL | TODO | None | - |
+| E-100-01 | Schema rewrite: complete DDL with full stat coverage | TODO | None | - |
 | E-100-02 | Data layer: db.py + auth.py INTEGER PK | TODO | E-100-01 | - |
 | E-100-03 | Pipeline: membership_type + TeamRef + INTEGER PK | TODO | E-100-02 | - |
 | E-100-04 | Admin UI: team list + add-team flow + INTEGER URLs | TODO | E-100-02 | - |
@@ -71,11 +81,9 @@ The current model hardcodes Lincoln Standing Bear assumptions: `is_owned` distin
 
 User authorized dropping all data ("drop everything, rebuild from scratch"). This is NOT a migration — it is a complete schema replacement.
 
-**Current state (as of 2026-03-14):** The migration DDL (`migrations/001_initial_schema.sql`, 563 lines) and migration archival (`.project/archive/migrations-pre-E100/`) already exist on disk from a prior DE session. The DDL includes all coach/DE enrichments. E-100-01 validates the existing DDL, updates the seed/reset script, and writes schema verification tests.
-
 **Approach:**
-1. ~~Archive all existing migration files (001-008)~~ *(already done)*
-2. ~~Write a single new `migrations/001_initial_schema.sql`~~ *(already done — 17 tables in dependency order)*
+1. Archive all existing migration files (001-008) to `.project/archive/migrations-pre-E100/`
+2. Write a single new `migrations/001_initial_schema.sql` — complete DDL for all tables (data + auth) in dependency order
 3. User deletes `data/app.db` and runs `python migrations/apply_migrations.py` to get the new schema
 4. Update seed data script for new schema
 5. Write schema verification tests
@@ -150,21 +158,6 @@ games
   game_stream_id  TEXT     -- GC game stream ID for public endpoint access to game details
 ```
 
-**Updated: `player_game_batting`** (batting_order, pitches, strikes added)
-```
-player_game_batting
-  ... (existing columns)
-  batting_order  INTEGER   -- lineup position (1-9)
-  pitches        INTEGER   -- total pitches seen
-  strikes        INTEGER   -- total strikes seen
-```
-
-**Updated: `player_season_batting` and `player_season_pitching`** (nullable split columns)
-Split data uses nullable columns (not discriminator rows). Columns for vs_lhp/vs_rhp/home/away variants of key stats. Only 'overall' rows are populated in E-100; split columns remain NULL until follow-up epics populate them. DE's refined DDL specifies the exact column set.
-
-**New table: `spray_charts`**
-Ball-in-play direction data (x/y coordinates, play type, result, fielder). Table created in E-100; ingestion pipeline is a follow-up epic (aligns with IDEA-009).
-
 **Kept: `opponent_links`** (FK references updated to INTEGER)
 
 **Classification CHECK constraint:**
@@ -187,6 +180,78 @@ CHECK(classification IS NULL OR classification IN (
 ```
 
 **Seed data in migration:** One program row: `('lsb-hs', 'Lincoln Standing Bear HS', 'hs', 'Lincoln Standing Bear')`
+
+### Complete Stat Column Reference
+
+Derived from `docs/gamechanger-stat-glossary.md`. Only non-computed stats (countable values) are stored as columns. Computed stats (rates, percentages, ratios) are derived at query time. Column naming is DE's decision; stat names below are from the glossary.
+
+#### player_game_batting
+Per-player per-game batting stats from boxscore endpoint.
+
+**Structural columns:** game_id FK, player_id FK, team_id INTEGER FK, batting_order INTEGER, positions_played TEXT, is_primary INTEGER (1=starter, 0=sub), stat_completeness TEXT CHECK('full','supplemented','boxscore_only')
+
+**Main stats (always present in boxscore):** ab, r, h, rbi, bb, so
+
+**Extra stats (sparse in boxscore — non-zero only):** singles (1B), doubles (2B), triples (3B), hr, tb, hbp, shf (sac flies), sb, cs, e (errors)
+
+**Enrichment (from boxscore extras):** pitches (#P — pitches seen), strikes (TS — strikes seen)
+
+**Also available:** pa (plate appearances — can be computed from ab+bb+hbp+shf+hbp but also tracked directly)
+
+#### player_game_pitching
+Per-player per-game pitching stats from boxscore endpoint.
+
+**Structural columns:** game_id FK, player_id FK, team_id INTEGER FK, decision TEXT CHECK('W','L','SV') nullable, stat_completeness TEXT CHECK('full','supplemented','boxscore_only')
+
+**Main stats (always present in boxscore):** ip_outs INTEGER (total outs — 3 outs = 1 IP), h, r, er, bb, so
+
+**Extra stats (sparse in boxscore — non-zero only):** wp, hbp, hr
+
+**Enrichment (from boxscore extras):** pitches (#P — pitch count), strikes (TS — total strikes), bf (batters faced)
+
+#### player_season_batting
+Per-player per-season aggregate batting stats. All non-computed batting stats from the glossary.
+
+**Structural columns:** player_id FK, team_id INTEGER FK, season_id FK, stat_completeness TEXT CHECK('full','supplemented','boxscore_only'), games_tracked INTEGER
+
+**Standard batting (26+ stats):** gp, pa, ab, h, singles (1B), doubles (2B), triples (3B), hr, rbi, r, bb, so, sol (K looking), hbp, shb (sac bunts), shf (sac flies), roe, fc, sb, cs, pik, tb, xbh, lob, two_out_rbi (2OUTRBI), gidp, gitp, ci
+
+**Advanced batting (countable only):** qab, hard (HHB count), lnd (line drives), flb (fly balls), gb (ground balls), ps (pitches seen), two_s_plus_3 (2S+3), six_plus (6+)
+
+**Split columns (nullable — populated by follow-up epics):**
+- Home/away for key stats: home_ab, home_h, home_hr, home_bb, home_so, away_ab, away_h, away_hr, away_bb, away_so
+- vs LHP/RHP for key stats: vs_lhp_ab, vs_lhp_h, vs_lhp_hr, vs_lhp_bb, vs_lhp_so, vs_rhp_ab, vs_rhp_h, vs_rhp_hr, vs_rhp_bb, vs_rhp_so
+
+#### player_season_pitching
+Per-player per-season aggregate pitching stats. All non-computed pitching stats from the glossary.
+
+**Structural columns:** player_id FK, team_id INTEGER FK, season_id FK, stat_completeness TEXT CHECK('full','supplemented','boxscore_only'), games_tracked INTEGER
+
+**Standard pitching (35+ stats):** gp, gs, ip_outs, bf, pitches (#P), total_strikes (TS), total_balls (TB), w, l, sv, svo, bs, h, r, er, bb, so, sol (K looking), hbp, lob, bk, pik, cs, sb, wp, hr
+
+**Advanced pitching (countable only):** lbfpn (LBFP#), lt_3 (<3 pitch batters), loo (leadoff outs), first_2_out (1ST2OUT), inn_123 (123INN), lt_13 (<13 pitch innings), zero_bb_inn (0BBINN), bbs (walks that score), lobb (leadoff walks), lobbs (leadoff walks that score), sm (swings and misses), sw (total swings), go (ground outs), ao (air outs), weak (WHB count), hard (HHB count), lnd (line drives), fb (fly balls), gb (ground balls)
+
+**Split columns (nullable — populated by follow-up epics):**
+- Home/away for key stats: home_ip_outs, home_h, home_er, home_bb, home_so, away_ip_outs, away_h, away_er, away_bb, away_so
+- vs LHB/RHB for key stats: vs_lhb_ab, vs_lhb_h, vs_lhb_hr, vs_lhb_bb, vs_lhb_so, vs_rhb_ab, vs_rhb_h, vs_rhb_hr, vs_rhb_bb, vs_rhb_so
+
+#### spray_charts
+Ball-in-play direction data. Table created in E-100; ingestion pipeline is a follow-up.
+
+**Columns:** id INTEGER PK, game_id TEXT FK, player_id TEXT FK, team_id INTEGER FK, pitcher_id TEXT FK -> players(player_id) nullable, chart_type TEXT CHECK('offensive','defensive'), play_type TEXT, play_result TEXT, x REAL, y REAL, fielder_position TEXT, error INTEGER DEFAULT 0
+
+### Provenance Model
+
+**All four stat tables** get `stat_completeness`:
+- `stat_completeness TEXT NOT NULL DEFAULT 'boxscore_only'` — CHECK('full', 'supplemented', 'boxscore_only')
+  - `full`: all columns populated from the team's own API endpoint (season-stats or per-game)
+  - `supplemented`: API data canonical, supplemented with boxscore data for gaps
+  - `boxscore_only`: all stats derived from boxscore aggregation (typical for opponents)
+
+**Season stat tables** (`player_season_batting`, `player_season_pitching`) additionally get:
+- `games_tracked INTEGER` — number of games used to derive the stats (for boxscore_only/supplemented rows)
+
+E-100 creates these columns with defaults. Loaders that set non-default values are follow-up scope.
 
 ### Opponent Model Split
 - `opponent_links` stays as-is: GC registry resolution queue. FK references updated to INTEGER.
@@ -261,3 +326,4 @@ With no backward compatibility:
 - 2026-03-13: User confirmed no data preservation needed. INTEGER PK for teams confirmed. E-102 absorbed. Vision pivot to team-first model.
 - 2026-03-13: Multi-expert review completed. 4 MUST FIX, 5 SHOULD FIX, 4 ADVISORY items applied.
 - 2026-03-14: Fresh-start redesign. User authorized dropping all data and rebuilding. Second-round expert consultation: coach defined three circles of data and 7 schema gaps; DE delivered enriched 17-table DDL (game_stream_id, batting_order, pitches/strikes, bats/throws, nullable split columns, spray_charts); SE confirmed 10 simplifications from dropping backward compat. Coach confirmed nullable columns over split_type discriminator. Epic restructured from 7 stories / 5 waves to 6 stories / 4 waves (merged admin UI + add-team flow into one story, eliminated 04->06 serialization, removed xfail pattern).
+- 2026-03-14: Final refinement round. Standing design principle established: "store every stat GC tracks." Third DE consultation: glossary cross-reference, provenance model (three-state stat_completeness + games_tracked), fielding/catcher/pitch type tables deferred. Schema expanded to include all non-computed batting (26+) and pitching (35+) stats from glossary. spray_charts gains pitcher_id. Program CRUD deferred. DDL rescoped as full creation work (prior DE branch not on main). Three unassigned test files (test_seed.py, test_coaching_assignments.py, test_passkey.py) assigned to stories. Auth tables folded into single 001_initial_schema.sql.

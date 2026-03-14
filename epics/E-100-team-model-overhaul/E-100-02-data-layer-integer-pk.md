@@ -27,7 +27,7 @@ Fresh-start simplification: no xfail dance, no fixture-splitting across stories.
 - [ ] **AC-10**: Stub-INSERT patterns use `membership_type='tracked'` instead of `is_owned=0` and let SQLite auto-assign the INTEGER PK.
 - [ ] **AC-11**: `auth.py` `get_permitted_teams()` returns `list[int]`. Uses `membership_type='member'` instead of `is_owned=1`.
 - [ ] **AC-12**: `get_player_detail()` uses INTEGER team references.
-- [ ] **AC-13**: All tests in `tests/test_auth.py`, `tests/test_auth_routes.py`, `tests/test_schema_queries.py` are updated and pass cleanly. No xfail markers.
+- [ ] **AC-13**: All tests in `tests/test_auth.py`, `tests/test_auth_routes.py`, `tests/test_coaching_assignments.py`, `tests/test_passkey.py` are updated and pass cleanly. No xfail markers.
 
 ## Technical Approach
 Refer to the epic Technical Notes "db.py + auth.py INTEGER PK Migration" section. The changes are mechanical: update SQL JOIN patterns, change parameter types from `str` to `int`, update stub-INSERT patterns, delete `_generate_opponent_team_id()`. This story modifies ONLY `src/api/db.py`, `src/api/auth.py`, and their direct test files. It does NOT modify routes, templates, pipeline code, or route-level test files.
@@ -41,7 +41,8 @@ Refer to the epic Technical Notes "db.py + auth.py INTEGER PK Migration" section
 - `src/api/auth.py`
 - `tests/test_auth.py`
 - `tests/test_auth_routes.py`
-- `tests/test_schema_queries.py`
+- `tests/test_coaching_assignments.py`
+- `tests/test_passkey.py`
 
 ## Agent Hint
 software-engineer
