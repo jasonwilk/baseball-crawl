@@ -37,4 +37,4 @@ claude-architect
 
 ## Notes
 - The rubric is used by both Codex (headless) and human reviewers. Keep language tool-agnostic.
-- The "Reporting" section at the bottom should remain as-is -- it already covers finding format and priority ratings.
+- The "Reporting" section: preserve the finding format, priority rating descriptions, and "No findings" phrasing -- but update the category count to reflect the new total (12, not 9).

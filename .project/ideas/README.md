@@ -43,6 +43,7 @@ Review this list every 90 days, or when completing an epic. Ask:
 | [IDEA-022](IDEA-022-scouting-flow-doc-schema-mismatch.md) | Scouting Flow Doc / Schema Stat Mismatch | CANDIDATE | 2026-06-12 |
 | [IDEA-023](IDEA-023-env-and-db-backup-automation.md) | Automated .env and app.db Backup | CANDIDATE | 2026-06-13 |
 | [IDEA-024](IDEA-024-postcreatecommand-refactor.md) | Refactor postCreateCommand into Bootstrap Script | CANDIDATE | 2026-06-13 |
+| [IDEA-025](IDEA-025-test-fixture-migration-driven.md) | Migration-Driven Test Fixtures | CANDIDATE | 2026-06-14 |
 
 ## Status Definitions
 

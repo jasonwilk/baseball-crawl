@@ -12,9 +12,9 @@
 - Migration runner: `apply_migrations.py` (runs at app startup, applies unapplied migrations in order)
 - Migration files: `migrations/001_*.sql`, `migrations/002_*.sql`, etc.
   - Three-digit prefix, underscore, descriptive slug, `.sql` extension
-  - Example: `migrations/001_initial_schema.sql`, `migrations/002_add_splits.sql`
 - Migrations are append-only. Never edit an applied migration.
 - Track applied state in a `_migrations` metadata table
+- **Post-E-100-01 state (2026-03-14)**: `migrations/` contains only `001_initial_schema.sql`. Old migrations (002–006) archived to `.project/archive/migrations-pre-E100/`. Next migration: `002`.
 
 ## Schema Conventions
 
