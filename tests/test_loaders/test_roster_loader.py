@@ -136,10 +136,11 @@ def test_load_file_upserts_team_roster_rows(db: sqlite3.Connection, tmp_path: Pa
 
     rows = _roster_rows(db)
     assert len(rows) == 2
+    team_pk = db.execute("SELECT id FROM teams WHERE gc_uuid = ?", (_TEAM_ID,)).fetchone()[0]
     team_ids = {r[0] for r in rows}
     player_ids = {r[1] for r in rows}
     season_ids = {r[2] for r in rows}
-    assert team_ids == {_TEAM_ID}
+    assert team_ids == {team_pk}
     assert player_ids == {"player-aaa-001", "player-bbb-002"}
     assert season_ids == {_SEASON_ID}
 
@@ -364,7 +365,7 @@ def test_teams_row_created_automatically(db: sqlite3.Connection, tmp_path: Path)
     loader.load_file(path)
 
     row = db.execute(
-        "SELECT team_id FROM teams WHERE team_id = ?;", (_TEAM_ID,)
+        "SELECT gc_uuid FROM teams WHERE gc_uuid = ?;", (_TEAM_ID,)
     ).fetchone()
     assert row is not None, f"Expected teams row for {_TEAM_ID}"
 
@@ -402,8 +403,8 @@ def test_existing_team_row_not_overwritten(db: sqlite3.Connection, tmp_path: Pat
     """AC-6: If a teams row already exists, _ensure_team_row does not overwrite it."""
     # Pre-insert a teams row with enriched data.
     db.execute(
-        "INSERT INTO teams (team_id, name, level, is_owned, is_active) VALUES (?, ?, ?, 1, 1);",
-        (_TEAM_ID, "Lincoln JV", "jv"),
+        "INSERT INTO teams (gc_uuid, name, membership_type, is_active) VALUES (?, ?, 'member', 1);",
+        (_TEAM_ID, "Lincoln JV"),
     )
     db.commit()
 
@@ -413,13 +414,12 @@ def test_existing_team_row_not_overwritten(db: sqlite3.Connection, tmp_path: Pat
     loader.load_file(path)
 
     row = db.execute(
-        "SELECT name, level, is_owned FROM teams WHERE team_id = ?;", (_TEAM_ID,)
+        "SELECT name, membership_type FROM teams WHERE gc_uuid = ?;", (_TEAM_ID,)
     ).fetchone()
     assert row is not None
     # Enriched values should be preserved.
     assert row[0] == "Lincoln JV"
-    assert row[1] == "jv"
-    assert row[2] == 1  # is_owned stays 1
+    assert row[1] == "member"  # membership_type stays 'member'
 
 
 def test_existing_season_row_not_overwritten(db: sqlite3.Connection, tmp_path: Path) -> None:
@@ -508,5 +508,7 @@ def test_path_inference_from_conventional_path(db: sqlite3.Connection, tmp_path:
         "SELECT team_id, season_id FROM team_rosters WHERE player_id = 'player-aaa-001';"
     ).fetchone()
     assert row is not None
-    assert row[0] == team_id
+    # team_rosters.team_id is now INTEGER FK -- resolve via gc_uuid lookup
+    team_pk = db.execute("SELECT id FROM teams WHERE gc_uuid = ?", (team_id,)).fetchone()[0]
+    assert row[0] == team_pk
     assert row[1] == season

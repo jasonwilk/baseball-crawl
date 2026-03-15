@@ -30,7 +30,7 @@ def _make_mock_config(season: str = "2025", team_ids: list[str] | None = None) -
     config = MagicMock()
     config.season = season
     ids = team_ids or ["team-001"]
-    config.owned_teams = [MagicMock(id=tid) for tid in ids]
+    config.member_teams = [MagicMock(id=tid) for tid in ids]
     return config
 
 
@@ -52,14 +52,16 @@ def test_dry_run_returns_zero(tmp_path: Path) -> None:
     mock_sqlite.connect.assert_not_called()
 
 
-def test_dry_run_prints_loaders(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    """Dry run prints all loader names."""
-    with patch("src.pipeline.load.load_config", return_value=_make_mock_config()):
-        run(dry_run=True, data_root=tmp_path, db_path=tmp_path / "app.db")
+def test_dry_run_prints_loaders(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    """Dry run logs all loader names."""
+    import logging
 
-    captured = capsys.readouterr()
+    with caplog.at_level(logging.INFO, logger="src.pipeline.load"):
+        with patch("src.pipeline.load.load_config", return_value=_make_mock_config()):
+            run(dry_run=True, data_root=tmp_path, db_path=tmp_path / "app.db")
+
     for name in _LOADER_NAMES:
-        assert name in captured.out
+        assert name in caplog.text
 
 
 # ---------------------------------------------------------------------------
@@ -192,7 +194,7 @@ def test_loader_filter_runs_only_game(tmp_path: Path) -> None:
 
 
 def test_game_loader_constructs_with_correct_season_and_team(tmp_path: Path) -> None:
-    """GameLoader is constructed with season_id and owned_team_id from config."""
+    """GameLoader is constructed with season_id and owned_team_ref from config."""
     team_dir = tmp_path / "2025" / "teams" / "team-abc"
     team_dir.mkdir(parents=True)
 
@@ -206,11 +208,10 @@ def test_game_loader_constructs_with_correct_season_and_team(tmp_path: Path) -> 
 
             run(loader_filter="game", data_root=tmp_path, db_path=tmp_path / "app.db")
 
-    mock_loader_cls.assert_called_once_with(
-        mock_loader_cls.call_args[0][0],  # db positional arg
-        season_id="2025",
-        owned_team_id="team-abc",
-    )
+    mock_loader_cls.assert_called_once()
+    _, kwargs = mock_loader_cls.call_args
+    assert kwargs["season_id"] == "2025"
+    assert kwargs["owned_team_ref"].gc_uuid == "team-abc"
 
 
 def test_missing_game_team_dir_skipped_gracefully(tmp_path: Path) -> None:
@@ -306,20 +307,22 @@ def test_source_db_uses_same_path_for_config_and_writes(tmp_path: Path, monkeypa
 def test_source_db_dry_run_shows_resolved_path(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Dry run with source='db' prints the DATABASE_PATH-resolved path."""
+    """Dry run with source='db' logs the DATABASE_PATH-resolved path."""
+    import logging
+
     resolved_db = tmp_path / "override.db"
     default_db = tmp_path / "app.db"
 
     monkeypatch.setenv("DATABASE_PATH", str(resolved_db))
 
-    with patch("src.pipeline.load.load_config_from_db", return_value=_make_mock_config()):
-        run(dry_run=True, source="db", data_root=tmp_path, db_path=default_db)
+    with caplog.at_level(logging.INFO, logger="src.pipeline.load"):
+        with patch("src.pipeline.load.load_config_from_db", return_value=_make_mock_config()):
+            run(dry_run=True, source="db", data_root=tmp_path, db_path=default_db)
 
-    captured = capsys.readouterr()
-    assert str(resolved_db) in captured.out
-    assert str(default_db) not in captured.out
+    assert str(resolved_db) in caplog.text
+    assert str(default_db) not in caplog.text
 
 
 def test_all_three_loaders_run_in_order(tmp_path: Path) -> None:

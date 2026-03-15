@@ -90,7 +90,7 @@ class GameStatsCrawler:
             errors encountered.
         """
         result = CrawlResult()
-        for team in self._config.owned_teams:
+        for team in self._config.member_teams:
             team_result = self._crawl_team(team.id, self._config.season)
             result.files_written += team_result.files_written
             result.files_skipped += team_result.files_skipped

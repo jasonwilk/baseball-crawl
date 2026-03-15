@@ -72,8 +72,8 @@ def _make_config(
 ) -> CrawlConfig:
     """Build a CrawlConfig with given team IDs (or a single default team)."""
     ids = owned_team_ids if owned_team_ids is not None else [_OWNED_TEAM_ID]
-    teams = [TeamEntry(id=tid, name=f"Team {tid}", level="jv") for tid in ids]
-    return CrawlConfig(season=_SEASON, owned_teams=teams)
+    teams = [TeamEntry(id=tid, name=f"Team {tid}", classification="jv") for tid in ids]
+    return CrawlConfig(season=_SEASON, member_teams=teams)
 
 
 def _make_client(

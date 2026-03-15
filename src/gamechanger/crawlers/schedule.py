@@ -73,7 +73,7 @@ class ScheduleCrawler:
     def crawl_all(self) -> CrawlResult:
         """Crawl schedule and game-summaries for all configured owned teams.
 
-        Iterates over every entry in ``config.owned_teams``.  For each team,
+        Iterates over every entry in ``config.member_teams``.  For each team,
         both endpoints are attempted.  API errors for individual teams are
         caught, logged, and counted -- they do not abort the overall crawl.
 
@@ -82,7 +82,7 @@ class ScheduleCrawler:
             errors encountered.
         """
         result = CrawlResult()
-        for team in self._config.owned_teams:
+        for team in self._config.member_teams:
             for crawl_fn in (self._crawl_schedule, self._crawl_game_summaries):
                 try:
                     path = crawl_fn(team.id, self._config.season)

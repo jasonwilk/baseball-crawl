@@ -165,7 +165,7 @@ def test_load_file_creates_teams_row(db: sqlite3.Connection, tmp_path: Path) -> 
 
     SeasonStatsLoader(db).load_file(path)
 
-    row = db.execute("SELECT team_id FROM teams WHERE team_id = ?", (_TEAM_ID,)).fetchone()
+    row = db.execute("SELECT gc_uuid FROM teams WHERE gc_uuid = ?", (_TEAM_ID,)).fetchone()
     assert row is not None
 
 
@@ -184,7 +184,7 @@ def test_load_file_creates_seasons_row(db: sqlite3.Connection, tmp_path: Path) -
 def test_load_file_does_not_duplicate_existing_teams_row(db: sqlite3.Connection, tmp_path: Path) -> None:
     """Existing teams row is not modified or duplicated."""
     db.execute(
-        "INSERT INTO teams (team_id, name, is_owned) VALUES (?, 'Lincoln JV', 1)",
+        "INSERT INTO teams (gc_uuid, name, membership_type, is_active) VALUES (?, 'Lincoln JV', 'member', 1)",
         (_TEAM_ID,),
     )
     db.commit()
@@ -194,7 +194,7 @@ def test_load_file_does_not_duplicate_existing_teams_row(db: sqlite3.Connection,
 
     SeasonStatsLoader(db).load_file(path)
 
-    rows = db.execute("SELECT name FROM teams WHERE team_id = ?", (_TEAM_ID,)).fetchall()
+    rows = db.execute("SELECT name FROM teams WHERE gc_uuid = ?", (_TEAM_ID,)).fetchall()
     assert len(rows) == 1
     assert rows[0][0] == "Lincoln JV"  # original name preserved
 
@@ -212,13 +212,14 @@ def test_load_file_upserts_batting_row(db: sqlite3.Connection, tmp_path: Path) -
     result = SeasonStatsLoader(db).load_file(path)
 
     assert result.loaded == 1
+    team_pk = db.execute("SELECT id FROM teams WHERE gc_uuid = ?", (_TEAM_ID,)).fetchone()[0]
     row = db.execute(
-        "SELECT ab, h, doubles, triples, hr, rbi, bb, so, sb, games "
+        "SELECT ab, h, doubles, triples, hr, rbi, bb, so, sb, gp "
         "FROM player_season_batting WHERE player_id = ? AND team_id = ? AND season_id = ?",
-        (_PLAYER_A, _TEAM_ID, _SEASON_ID),
+        (_PLAYER_A, team_pk, _SEASON_ID),
     ).fetchone()
     assert row is not None
-    ab, h, doubles, triples, hr, rbi, bb, so, sb, games = row
+    ab, h, doubles, triples, hr, rbi, bb, so, sb, gp = row
     assert ab == 60
     assert h == 18
     assert doubles == 4
@@ -228,7 +229,7 @@ def test_load_file_upserts_batting_row(db: sqlite3.Connection, tmp_path: Path) -
     assert bb == 8
     assert so == 12
     assert sb == 3
-    assert games == 20
+    assert gp == 20
 
 
 def test_load_file_batting_split_columns_are_null(db: sqlite3.Connection, tmp_path: Path) -> None:
@@ -262,14 +263,15 @@ def test_load_file_upserts_pitching_row(db: sqlite3.Connection, tmp_path: Path) 
     result = SeasonStatsLoader(db).load_file(path)
 
     assert result.loaded == 2  # 1 batting + 1 pitching
+    team_pk = db.execute("SELECT id FROM teams WHERE gc_uuid = ?", (_TEAM_ID,)).fetchone()[0]
     row = db.execute(
-        "SELECT games, ip_outs, h, er, bb, so, hr, pitches, strikes "
+        "SELECT gp_pitcher, ip_outs, h, er, bb, so, hr, pitches, total_strikes "
         "FROM player_season_pitching WHERE player_id = ? AND team_id = ? AND season_id = ?",
-        (_PLAYER_A, _TEAM_ID, _SEASON_ID),
+        (_PLAYER_A, team_pk, _SEASON_ID),
     ).fetchone()
     assert row is not None
-    games, ip_outs, h, er, bb, so, hr, pitches, strikes = row
-    assert games == 8
+    gp_pitcher, ip_outs, h, er, bb, so, hr, pitches, total_strikes = row
+    assert gp_pitcher == 8
     assert ip_outs == 60   # 20.0 * 3
     assert h == 15
     assert er == 7
@@ -277,7 +279,7 @@ def test_load_file_upserts_pitching_row(db: sqlite3.Connection, tmp_path: Path) 
     assert so == 22
     assert hr == 1
     assert pitches == 300
-    assert strikes == 200
+    assert total_strikes == 200
 
 
 def test_load_file_ip_fractional_conversion(db: sqlite3.Connection, tmp_path: Path) -> None:
@@ -331,9 +333,10 @@ def test_load_file_is_idempotent_batting(db: sqlite3.Connection, tmp_path: Path)
     SeasonStatsLoader(db).load_file(path)
     SeasonStatsLoader(db).load_file(path)
 
+    team_pk = db.execute("SELECT id FROM teams WHERE gc_uuid = ?", (_TEAM_ID,)).fetchone()[0]
     count = db.execute(
         "SELECT COUNT(*) FROM player_season_batting WHERE player_id = ? AND team_id = ? AND season_id = ?",
-        (_PLAYER_A, _TEAM_ID, _SEASON_ID),
+        (_PLAYER_A, team_pk, _SEASON_ID),
     ).fetchone()[0]
     assert count == 1
 
@@ -643,9 +646,10 @@ def test_load_file_infers_team_and_season_from_path(
 
     SeasonStatsLoader(db).load_file(path)
 
+    custom_team_pk = db.execute("SELECT id FROM teams WHERE gc_uuid = ?", (custom_team,)).fetchone()[0]
     row = db.execute(
         "SELECT player_id FROM player_season_batting WHERE team_id = ? AND season_id = ?",
-        (custom_team, custom_season),
+        (custom_team_pk, custom_season),
     ).fetchone()
     assert row is not None
     assert row[0] == _PLAYER_A

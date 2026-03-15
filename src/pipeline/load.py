@@ -16,6 +16,7 @@ from src.gamechanger.loaders import LoadResult
 from src.gamechanger.loaders.game_loader import GameLoader
 from src.gamechanger.loaders.roster import RosterLoader
 from src.gamechanger.loaders.season_stats_loader import SeasonStatsLoader
+from src.gamechanger.types import TeamRef
 
 logger = logging.getLogger(__name__)
 
@@ -26,11 +27,11 @@ _DB_PATH = _PROJECT_ROOT / "data" / "app.db"
 
 
 def _run_roster_loader(db: sqlite3.Connection, config: object, data_root: Path) -> LoadResult:
-    """Run the roster loader for all owned teams.
+    """Run the roster loader for all member teams.
 
     Args:
         db: Open SQLite connection.
-        config: Parsed CrawlConfig (season + owned_teams).
+        config: Parsed CrawlConfig (season + member_teams).
         data_root: Raw data root directory.
 
     Returns:
@@ -39,7 +40,7 @@ def _run_roster_loader(db: sqlite3.Connection, config: object, data_root: Path) 
     loader = RosterLoader(db)
     combined = LoadResult()
 
-    for team in config.owned_teams:
+    for team in config.member_teams:
         roster_path = data_root / config.season / "teams" / team.id / "roster.json"
         if not roster_path.exists():
             logger.warning(
@@ -55,11 +56,11 @@ def _run_roster_loader(db: sqlite3.Connection, config: object, data_root: Path) 
 
 
 def _run_game_loader(db: sqlite3.Connection, config: object, data_root: Path) -> LoadResult:
-    """Run the game loader for all owned teams.
+    """Run the game loader for all member teams.
 
     Args:
         db: Open SQLite connection.
-        config: Parsed CrawlConfig (season + owned_teams).
+        config: Parsed CrawlConfig (season + member_teams).
         data_root: Raw data root directory.
 
     Returns:
@@ -67,9 +68,14 @@ def _run_game_loader(db: sqlite3.Connection, config: object, data_root: Path) ->
     """
     combined = LoadResult()
 
-    for team in config.owned_teams:
+    for team in config.member_teams:
         team_dir = data_root / config.season / "teams" / team.id
-        loader = GameLoader(db, season_id=config.season, owned_team_id=team.id)
+        team_ref = TeamRef(
+            id=team.internal_id or 0,
+            gc_uuid=team.id,
+            public_id=None,
+        )
+        loader = GameLoader(db, season_id=config.season, owned_team_ref=team_ref)
         if not team_dir.is_dir():
             logger.warning(
                 "Team directory not found for team %s at %s; skipping.", team.id, team_dir
@@ -84,11 +90,11 @@ def _run_game_loader(db: sqlite3.Connection, config: object, data_root: Path) ->
 
 
 def _run_season_stats_loader(db: sqlite3.Connection, config: object, data_root: Path) -> LoadResult:
-    """Run the season stats loader for all owned teams.
+    """Run the season stats loader for all member teams.
 
     Args:
         db: Open SQLite connection.
-        config: Parsed CrawlConfig (season + owned_teams).
+        config: Parsed CrawlConfig (season + member_teams).
         data_root: Raw data root directory.
 
     Returns:
@@ -97,7 +103,7 @@ def _run_season_stats_loader(db: sqlite3.Connection, config: object, data_root: 
     loader = SeasonStatsLoader(db)
     combined = LoadResult()
 
-    for team in config.owned_teams:
+    for team in config.member_teams:
         stats_path = data_root / config.season / "teams" / team.id / "stats.json"
         if not stats_path.exists():
             logger.warning(

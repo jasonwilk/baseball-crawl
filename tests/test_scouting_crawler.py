@@ -1,4 +1,4 @@
-"""Tests for src/gamechanger/crawlers/scouting.py (E-097-03).
+"""Tests for src/gamechanger/crawlers/scouting.py (E-097-03, E-100-03).
 
 Covers:
 - AC-12: Single-team scouting with mocked API responses
@@ -104,6 +104,67 @@ def _setup_client_happy_path(mock_client: MagicMock) -> None:
         _ROSTER_RESPONSE,
         _BOXSCORE_RESPONSE,
     ]
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _insert_team_with_public_id(conn: sqlite3.Connection, public_id: str) -> int:
+    """Insert a tracked team row and return its INTEGER PK."""
+    cursor = conn.execute(
+        "INSERT OR IGNORE INTO teams (name, membership_type, public_id, is_active) "
+        "VALUES (?, 'tracked', ?, 0)",
+        (public_id, public_id),
+    )
+    if cursor.lastrowid:
+        conn.commit()
+        return cursor.lastrowid
+    row = conn.execute("SELECT id FROM teams WHERE public_id = ?", (public_id,)).fetchone()
+    conn.commit()
+    return row[0]
+
+
+def _insert_member_team(conn: sqlite3.Connection, name: str, gc_uuid: str) -> int:
+    """Insert a member team row and return its INTEGER PK."""
+    cursor = conn.execute(
+        "INSERT OR IGNORE INTO teams (name, membership_type, gc_uuid, is_active) "
+        "VALUES (?, 'member', ?, 1)",
+        (name, gc_uuid),
+    )
+    if cursor.lastrowid:
+        conn.commit()
+        return cursor.lastrowid
+    row = conn.execute("SELECT id FROM teams WHERE gc_uuid = ?", (gc_uuid,)).fetchone()
+    conn.commit()
+    return row[0]
+
+
+def _insert_season(conn: sqlite3.Connection, season_id: str) -> None:
+    """Ensure a seasons row exists."""
+    conn.execute(
+        "INSERT INTO seasons (season_id, name, season_type, year) VALUES (?, ?, 'unknown', 2025) "
+        "ON CONFLICT DO NOTHING",
+        (season_id, season_id),
+    )
+    conn.commit()
+
+
+def _insert_scouting_run(
+    conn: sqlite3.Connection,
+    team_id: int,
+    season_id: str,
+    status: str,
+    last_checked: str,
+) -> None:
+    """Insert a scouting_runs row."""
+    conn.execute(
+        "INSERT INTO scouting_runs (team_id, season_id, run_type, started_at, status, last_checked) "
+        "VALUES (?, ?, 'full', ?, ?, ?)",
+        (team_id, season_id, last_checked, status, last_checked),
+    )
+    conn.commit()
 
 
 # ---------------------------------------------------------------------------
@@ -234,6 +295,20 @@ def test_scouting_run_created_with_running_status(
     assert players_found == 2  # two players in _ROSTER_RESPONSE
 
 
+def test_scouting_run_has_integer_team_id(
+    crawler: ScoutingCrawler, mock_client: MagicMock, db: sqlite3.Connection
+) -> None:
+    """scouting_runs.team_id is an INTEGER PK referencing teams.id."""
+    _setup_client_happy_path(mock_client)
+    crawler.scout_team(_PUBLIC_ID, season_id="2025-spring-hs")
+
+    row = db.execute(
+        "SELECT sr.team_id, t.id FROM scouting_runs sr JOIN teams t ON sr.team_id = t.id LIMIT 1"
+    ).fetchone()
+    assert row is not None
+    assert row[0] == row[1]  # team_id matches an actual teams.id
+
+
 def test_first_fetched_preserved_on_rerun(
     crawler: ScoutingCrawler, mock_client: MagicMock, db: sqlite3.Connection
 ) -> None:
@@ -296,8 +371,7 @@ def test_credential_error_on_roster_marks_run_failed(
     result = crawler.scout_team(_PUBLIC_ID, season_id="2025-spring-hs")
     assert result.errors == 1
 
-    # Use a fresh connection to verify the 'failed' status was actually committed
-    # (not just visible on the same uncommitted connection).
+    # Use a fresh connection to verify the 'failed' status was actually committed.
     db_path = tmp_path / "test.db"
     with sqlite3.connect(str(db_path)) as fresh_conn:
         row = fresh_conn.execute(
@@ -327,37 +401,24 @@ def test_boxscore_error_skips_game_continues_run(
 # ---------------------------------------------------------------------------
 
 
-def _insert_team_and_season(conn: sqlite3.Connection, team_id: str, season_id: str) -> None:
-    conn.execute("INSERT INTO teams (team_id, name) VALUES (?, ?) ON CONFLICT DO NOTHING", (team_id, team_id))
-    conn.execute(
-        "INSERT INTO seasons (season_id, name, season_type, year) VALUES (?, ?, 'unknown', 2025) ON CONFLICT DO NOTHING",
-        (season_id, season_id),
-    )
-    conn.commit()
-
-
 def test_scout_all_skips_recently_scouted(
     crawler: ScoutingCrawler, mock_client: MagicMock, db: sqlite3.Connection, tmp_path: Path
 ) -> None:
     """scout_all() skips opponents with a recent completed scouting run."""
-    # Insert an opponent_link with public_id.
+    # Insert an owned member team.
+    owned_id = _insert_member_team(db, "My Team", "owned-team-gc-uuid")
+    # Insert the opponent team with public_id.
+    opp_id = _insert_team_with_public_id(db, _PUBLIC_ID)
+    # Insert opponent_link.
     db.execute(
-        "INSERT INTO teams (team_id, name, is_owned, is_active) VALUES (?, ?, 0, 0) ON CONFLICT DO NOTHING",
-        ("owned-team-id", "My Team"),
+        "INSERT INTO opponent_links (our_team_id, root_team_id, opponent_name, public_id) "
+        "VALUES (?, ?, ?, ?)",
+        (owned_id, "root-001", "Test Opponent", _PUBLIC_ID),
     )
-    db.execute(
-        "INSERT INTO opponent_links (our_team_id, root_team_id, opponent_name, public_id) VALUES (?, ?, ?, ?)",
-        ("owned-team-id", "root-001", "Test Opponent", _PUBLIC_ID),
-    )
-    # Insert a recent completed scouting run for this team.
-    _insert_team_and_season(db, _PUBLIC_ID, "2025-spring-hs")
+    _insert_season(db, "2025-spring-hs")
+    # Insert a recent completed scouting run.
     recent_ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
-    db.execute(
-        "INSERT INTO scouting_runs (team_id, season_id, run_type, started_at, status, last_checked) "
-        "VALUES (?, ?, 'full', ?, 'completed', ?)",
-        (_PUBLIC_ID, "2025-spring-hs", recent_ts, recent_ts),
-    )
-    db.commit()
+    _insert_scouting_run(db, opp_id, "2025-spring-hs", "completed", recent_ts)
 
     result = crawler.scout_all(season_id="2025-spring-hs")
     # Should skip (no API calls).
@@ -369,27 +430,20 @@ def test_scout_all_scouts_stale_opponents(
     crawler: ScoutingCrawler, mock_client: MagicMock, db: sqlite3.Connection
 ) -> None:
     """scout_all() scouts opponents whose last_checked is older than freshness_hours."""
+    owned_id = _insert_member_team(db, "My Team", "owned-team-gc-uuid")
+    opp_id = _insert_team_with_public_id(db, _PUBLIC_ID)
     db.execute(
-        "INSERT INTO teams (team_id, name) VALUES (?, ?) ON CONFLICT DO NOTHING",
-        ("owned-team-id", "My Team"),
+        "INSERT INTO opponent_links (our_team_id, root_team_id, opponent_name, public_id) "
+        "VALUES (?, ?, ?, ?)",
+        (owned_id, "root-001", "Test Opponent", _PUBLIC_ID),
     )
-    db.execute(
-        "INSERT INTO opponent_links (our_team_id, root_team_id, opponent_name, public_id) VALUES (?, ?, ?, ?)",
-        ("owned-team-id", "root-001", "Test Opponent", _PUBLIC_ID),
-    )
-    db.commit()
+    _insert_season(db, "2025-spring-hs")
 
     # Set up a stale scouting run (25 hours ago).
-    _insert_team_and_season(db, _PUBLIC_ID, "2025-spring-hs")
     stale_ts = (datetime.now(timezone.utc) - timedelta(hours=25)).strftime(
         "%Y-%m-%dT%H:%M:%S.000Z"
     )
-    db.execute(
-        "INSERT INTO scouting_runs (team_id, season_id, run_type, started_at, status, last_checked) "
-        "VALUES (?, ?, 'full', ?, 'completed', ?)",
-        (_PUBLIC_ID, "2025-spring-hs", stale_ts, stale_ts),
-    )
-    db.commit()
+    _insert_scouting_run(db, opp_id, "2025-spring-hs", "completed", stale_ts)
 
     mock_client.get_public.return_value = _GAMES_RESPONSE
     mock_client.get.side_effect = [_ROSTER_RESPONSE, _BOXSCORE_RESPONSE]
@@ -431,26 +485,29 @@ def test_derive_season_id_fallback_on_missing_ts() -> None:
     assert result == f"{current_year}-spring-hs"
 
 
+def test_derive_season_id_uses_season_suffix() -> None:
+    """_derive_season_id uses the season_suffix parameter."""
+    games = [{"id": "g1", "start_ts": "2025-04-10T18:00:00Z"}]
+    assert _derive_season_id(games, season_suffix="fall-legion") == "2025-fall-legion"
+
+
 # ---------------------------------------------------------------------------
 # AC-16: UUID opportunism
 # ---------------------------------------------------------------------------
 
 
-def test_uuid_opportunism_updates_gc_uuid(
+def test_uuid_opportunism_creates_stub_row(
     crawler: ScoutingCrawler, mock_client: MagicMock, db: sqlite3.Connection
 ) -> None:
-    """When a UUID is found as a boxscore key, gc_uuid is updated for that team."""
+    """When a UUID is found as a boxscore key, a stub teams row is created."""
     uuid_key = "aaaabbbb-cccc-dddd-eeee-ffff00001111"
-    # Insert the team row with gc_uuid=NULL.
-    db.execute("INSERT INTO teams (team_id, name, gc_uuid) VALUES (?, ?, NULL)", (uuid_key, "Opp"))
-    db.commit()
 
     _setup_client_happy_path(mock_client)
     crawler.scout_team(_PUBLIC_ID, season_id="2025-spring-hs")
 
-    row = db.execute("SELECT gc_uuid FROM teams WHERE team_id = ?", (uuid_key,)).fetchone()
-    assert row is not None
-    assert row[0] == uuid_key, f"Expected gc_uuid={uuid_key}, got {row[0]}"
+    row = db.execute("SELECT id, gc_uuid FROM teams WHERE gc_uuid = ?", (uuid_key,)).fetchone()
+    assert row is not None, f"Expected teams stub row for gc_uuid={uuid_key}"
+    assert row[1] == uuid_key
 
 
 # ---------------------------------------------------------------------------
@@ -462,51 +519,39 @@ def test_freshness_gate_explicit_season_id_does_not_skip_different_season(
     crawler: ScoutingCrawler, db: sqlite3.Connection
 ) -> None:
     """AC-7a: A completed run for season A does not block scouting for season B."""
-    _insert_team_and_season(db, _PUBLIC_ID, "2025-spring-hs")
-    _insert_team_and_season(db, _PUBLIC_ID, "2026-spring-hs")
+    opp_id = _insert_team_with_public_id(db, _PUBLIC_ID)
+    _insert_season(db, "2025-spring-hs")
+    _insert_season(db, "2026-spring-hs")
     recent_ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
-    db.execute(
-        "INSERT INTO scouting_runs (team_id, season_id, run_type, started_at, status, last_checked) "
-        "VALUES (?, ?, 'full', ?, 'completed', ?)",
-        (_PUBLIC_ID, "2025-spring-hs", recent_ts, recent_ts),
-    )
-    db.commit()
+    _insert_scouting_run(db, opp_id, "2025-spring-hs", "completed", recent_ts)
 
     # Should NOT be considered fresh for a different season.
-    assert not crawler._is_scouted_recently(_PUBLIC_ID, season_id="2026-spring-hs")
+    assert not crawler._is_scouted_recently(opp_id, season_id="2026-spring-hs")
 
 
 def test_freshness_gate_explicit_season_id_skips_same_season(
     crawler: ScoutingCrawler, db: sqlite3.Connection
 ) -> None:
     """AC-7a: A completed run for season A blocks scouting for season A."""
-    _insert_team_and_season(db, _PUBLIC_ID, "2025-spring-hs")
+    opp_id = _insert_team_with_public_id(db, _PUBLIC_ID)
+    _insert_season(db, "2025-spring-hs")
     recent_ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
-    db.execute(
-        "INSERT INTO scouting_runs (team_id, season_id, run_type, started_at, status, last_checked) "
-        "VALUES (?, ?, 'full', ?, 'completed', ?)",
-        (_PUBLIC_ID, "2025-spring-hs", recent_ts, recent_ts),
-    )
-    db.commit()
+    _insert_scouting_run(db, opp_id, "2025-spring-hs", "completed", recent_ts)
 
-    assert crawler._is_scouted_recently(_PUBLIC_ID, season_id="2025-spring-hs")
+    assert crawler._is_scouted_recently(opp_id, season_id="2025-spring-hs")
 
 
 def test_freshness_gate_none_season_uses_team_only(
     crawler: ScoutingCrawler, db: sqlite3.Connection
 ) -> None:
     """AC-7b: season_id=None freshness check passes for any season's completed run."""
-    _insert_team_and_season(db, _PUBLIC_ID, "2025-spring-hs")
+    opp_id = _insert_team_with_public_id(db, _PUBLIC_ID)
+    _insert_season(db, "2025-spring-hs")
     recent_ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
-    db.execute(
-        "INSERT INTO scouting_runs (team_id, season_id, run_type, started_at, status, last_checked) "
-        "VALUES (?, ?, 'full', ?, 'completed', ?)",
-        (_PUBLIC_ID, "2025-spring-hs", recent_ts, recent_ts),
-    )
-    db.commit()
+    _insert_scouting_run(db, opp_id, "2025-spring-hs", "completed", recent_ts)
 
     # Should be fresh because team was recently scouted (any season).
-    assert crawler._is_scouted_recently(_PUBLIC_ID, season_id=None)
+    assert crawler._is_scouted_recently(opp_id, season_id=None)
 
 
 # ---------------------------------------------------------------------------

@@ -101,6 +101,8 @@ class ScoutingCrawler:
             ``scout_all()``.  Defaults to 24.
         data_root: Root directory for raw data output.  Defaults to
             ``data/raw/`` relative to the project root.
+        season_suffix: Suffix used when deriving season IDs from game timestamps.
+            Defaults to ``"spring-hs"``.
     """
 
     def __init__(
@@ -109,11 +111,13 @@ class ScoutingCrawler:
         db: sqlite3.Connection,
         freshness_hours: int = 24,
         data_root: Path = _DATA_ROOT,
+        season_suffix: str = "spring-hs",
     ) -> None:
         self._client = client
         self._db = db
         self._freshness_hours = freshness_hours
         self._data_root = data_root
+        self._season_suffix = season_suffix
 
     # ------------------------------------------------------------------
     # Public API
@@ -134,11 +138,10 @@ class ScoutingCrawler:
             return CrawlResult(files_skipped=1)
 
         if season_id is None:
-            season_id = _derive_season_id(completed_games)
+            season_id = _derive_season_id(completed_games, self._season_suffix)
             logger.info("Derived season_id=%s for public_id=%s", season_id, public_id)
 
-        team_id = self._resolve_team_id(public_id)
-        self._ensure_team_row(team_id, public_id)
+        team_id = self._ensure_team_row(public_id=public_id)
         self._ensure_season_row(season_id)
         self._upsert_run_start(team_id, season_id, now_str, len(completed_games))
 
@@ -164,17 +167,13 @@ class ScoutingCrawler:
 
     def _finalize_crawl_result(
         self,
-        team_id: str,
+        team_id: int,
         season_id: str,
         completed_games: list[dict[str, Any]],
         games_crawled: int,
         roster_size: int,
     ) -> CrawlResult:
-        """Write the end-of-crawl scouting_run status and return a CrawlResult.
-
-        AC-5: total boxscore failure (games_crawled==0) is marked 'failed'.
-        AC-1: partial or full success is marked 'running' (CLI owns final transition).
-        """
+        """Write the end-of-crawl scouting_run status and return a CrawlResult."""
         games_found = len(completed_games)
         if games_crawled == 0:
             self._upsert_run_end(team_id, season_id, "failed", games_found, 0, roster_size, "All boxscore fetches failed")
@@ -189,14 +188,7 @@ class ScoutingCrawler:
     # ------------------------------------------------------------------
 
     def _fetch_schedule(self, public_id: str) -> list[dict[str, Any]] | None:
-        """Fetch the game schedule via the public endpoint.
-
-        Args:
-            public_id: Opponent public_id slug.
-
-        Returns:
-            List of game dicts on success, ``None`` on any error.
-        """
+        """Fetch the game schedule via the public endpoint."""
         try:
             games_data = self._client.get_public(
                 f"/public/teams/{public_id}/games",
@@ -217,15 +209,7 @@ class ScoutingCrawler:
     def _fetch_and_write_roster(
         self, public_id: str, scouting_dir: Path
     ) -> list[dict[str, Any]] | None:
-        """Fetch the roster and write ``roster.json``.
-
-        Args:
-            public_id: Opponent public_id slug.
-            scouting_dir: Directory to write ``roster.json`` into.
-
-        Returns:
-            List of player dicts on success, ``None`` on any error.
-        """
+        """Fetch the roster and write ``roster.json``."""
         try:
             roster_data = self._client.get(
                 f"/teams/public/{public_id}/players",
@@ -247,16 +231,7 @@ class ScoutingCrawler:
         completed_games: list[dict[str, Any]],
         boxscores_dir: Path,
     ) -> int:
-        """Fetch and write a boxscore file for each completed game.
-
-        Args:
-            public_id: Opponent public_id (used for log messages).
-            completed_games: List of completed game dicts from the schedule.
-            boxscores_dir: Directory to write ``{game_stream_id}.json`` files.
-
-        Returns:
-            Number of boxscores successfully written.
-        """
+        """Fetch and write a boxscore file for each completed game."""
         games_crawled = 0
         for game in completed_games:
             game_stream_id = game.get("id")
@@ -289,20 +264,15 @@ class ScoutingCrawler:
         return games_crawled
 
     def update_run_load_status(
-        self, team_id: str, season_id: str, status: str
+        self, team_id: int, season_id: str, status: str
     ) -> None:
         """Update scouting_runs.status after the load phase completes.
 
         Called by the CLI layer to transition from ``'running'`` (post-crawl)
         to ``'completed'`` (full pipeline success) or ``'failed'`` (load failure).
-        The CHECK constraint on the column permits only ``'running'``,
-        ``'completed'``, and ``'failed'``.
-
-        Sets ``completed_at`` to the current UTC timestamp when ``status`` is
-        ``'completed'``, or ``NULL`` when ``status`` is ``'failed'``.
 
         Args:
-            team_id: Team primary key.
+            team_id: Team INTEGER primary key (``teams.id``).
             season_id: Season slug.
             status: New status string -- either ``'completed'`` or ``'failed'``.
         """
@@ -348,7 +318,6 @@ class ScoutingCrawler:
 
         for (pub_id,) in rows:
             team_id = self._resolve_team_id(pub_id)
-            # AC-4: pass season_id when explicit so freshness gate checks the right season.
             if self._is_scouted_recently(team_id, season_id=season_id):
                 logger.info(
                     "Skipping public_id=%s: scouted within %dh.", pub_id, self._freshness_hours
@@ -373,51 +342,73 @@ class ScoutingCrawler:
     # DB helpers
     # ------------------------------------------------------------------
 
-    def _resolve_team_id(self, public_id: str) -> str:
-        """Return the teams.team_id for a given public_id slug.
+    def _resolve_team_id(self, public_id: str) -> int | None:
+        """Return the teams.id (INTEGER) for a given public_id slug, or None.
 
-        Queries the ``teams`` table for a row with ``public_id = ?``.  If
-        found, returns that row's ``team_id``.  Otherwise returns the
-        ``public_id`` itself (will be used as the team_id when a stub row is
-        inserted later).
+        SELECT-only; does not create any rows.
 
         Args:
             public_id: The opponent's public_id slug.
 
         Returns:
-            Resolved ``team_id`` string.
+            INTEGER ``teams.id`` if found, else ``None``.
         """
         row = self._db.execute(
-            "SELECT team_id FROM teams WHERE public_id = ? LIMIT 1",
+            "SELECT id FROM teams WHERE public_id = ? LIMIT 1",
             (public_id,),
         ).fetchone()
-        if row is not None:
-            return row[0]
-        return public_id
+        return row[0] if row is not None else None
 
-    def _ensure_team_row(self, team_id: str, public_id: str | None = None) -> None:
-        """Ensure a ``teams`` row exists for ``team_id``.
+    def _ensure_team_row(
+        self,
+        public_id: str | None = None,
+        gc_uuid: str | None = None,
+    ) -> int:
+        """Ensure a ``teams`` row exists and return its INTEGER primary key.
+
+        Inserts a stub tracked row if none exists.  Uses the partial unique
+        index on ``public_id`` or ``gc_uuid`` to detect an existing row.
 
         Args:
-            team_id: The team's primary key in the ``teams`` table.
-            public_id: Optional public_id slug to store alongside the row.
+            public_id: The opponent's public_id slug (preferred lookup key).
+            gc_uuid: The opponent's GC UUID (fallback lookup key).
+
+        Returns:
+            INTEGER ``teams.id`` for the row.
+
+        Raises:
+            ValueError: If both ``public_id`` and ``gc_uuid`` are ``None``.
         """
-        self._db.execute(
-            """
-            INSERT INTO teams (team_id, name, public_id, is_owned, is_active)
-            VALUES (?, ?, ?, 0, 0)
-            ON CONFLICT(team_id) DO UPDATE SET
-                public_id = COALESCE(teams.public_id, excluded.public_id)
-            """,
-            (team_id, team_id, public_id),
-        )
+        if public_id is not None:
+            cursor = self._db.execute(
+                "INSERT OR IGNORE INTO teams (name, membership_type, public_id, is_active) "
+                "VALUES (?, 'tracked', ?, 0)",
+                (public_id, public_id),
+            )
+            if cursor.rowcount:
+                return cursor.lastrowid
+            row = self._db.execute(
+                "SELECT id FROM teams WHERE public_id = ? LIMIT 1", (public_id,)
+            ).fetchone()
+            return row[0]
+
+        if gc_uuid is not None:
+            cursor = self._db.execute(
+                "INSERT OR IGNORE INTO teams (name, membership_type, gc_uuid, is_active) "
+                "VALUES (?, 'tracked', ?, 0)",
+                (gc_uuid, gc_uuid),
+            )
+            if cursor.rowcount:
+                return cursor.lastrowid
+            row = self._db.execute(
+                "SELECT id FROM teams WHERE gc_uuid = ? LIMIT 1", (gc_uuid,)
+            ).fetchone()
+            return row[0]
+
+        raise ValueError("_ensure_team_row requires at least one of public_id or gc_uuid")
 
     def _ensure_season_row(self, season_id: str) -> None:
-        """Ensure a ``seasons`` row exists for ``season_id``.
-
-        Args:
-            season_id: Season slug (e.g. ``"2025-spring-hs"``).
-        """
+        """Ensure a ``seasons`` row exists for ``season_id``."""
         parts = season_id.split("-")
         year = 0
         for part in parts:
@@ -433,17 +424,12 @@ class ScoutingCrawler:
             (season_id, season_id, year),
         )
 
-    def _is_scouted_recently(self, team_id: str, season_id: str | None = None) -> bool:
-        """Return True if this team has a completed scouting run within freshness_hours.
-
-        Args:
-            team_id: The team's primary key in the ``teams`` table.
-            season_id: When provided, the query also filters on ``season_id``.
-                When ``None``, only ``team_id`` is filtered (any season).
-
-        Returns:
-            ``True`` if the last completed scouting run is fresh.
-        """
+    def _is_scouted_recently(
+        self, team_id: int | None, season_id: str | None = None
+    ) -> bool:
+        """Return True if this team has a completed scouting run within freshness_hours."""
+        if team_id is None:
+            return False
         if season_id is not None:
             row = self._db.execute(
                 "SELECT last_checked FROM scouting_runs "
@@ -469,21 +455,12 @@ class ScoutingCrawler:
 
     def _upsert_run_start(
         self,
-        team_id: str,
+        team_id: int,
         season_id: str,
         started_at: str,
         games_found: int,
     ) -> None:
-        """Upsert a scouting_runs row with status='running'.
-
-        Preserves ``first_fetched`` on conflict.
-
-        Args:
-            team_id: Team primary key.
-            season_id: Season slug.
-            started_at: ISO 8601 timestamp for this run start.
-            games_found: Total number of completed games found in the schedule.
-        """
+        """Upsert a scouting_runs row with status='running'."""
         self._db.execute(
             """
             INSERT INTO scouting_runs
@@ -504,7 +481,7 @@ class ScoutingCrawler:
 
     def _upsert_run_end(
         self,
-        team_id: str,
+        team_id: int,
         season_id: str,
         status: str,
         games_found: int | None,
@@ -512,18 +489,7 @@ class ScoutingCrawler:
         players_found: int | None,
         error_message: str | None,
     ) -> None:
-        """Update the scouting_run row with final status and counts.
-
-        Args:
-            team_id: Team primary key.
-            season_id: Season slug.
-            status: Run status -- ``'running'`` (crawl done, load pending),
-                ``'completed'`` (fully done), or ``'failed'``.
-            games_found: Total completed games found.
-            games_crawled: Games successfully fetched.
-            players_found: Roster size (None on failure).
-            error_message: Error message if status='failed'.
-        """
+        """Update the scouting_run row with final status and counts."""
         now = _utcnow_iso()
         completed_at = None if status == "running" else now
         self._db.execute(
@@ -546,11 +512,11 @@ class ScoutingCrawler:
         )
 
     def _record_uuid_from_boxscore(self, boxscore: dict[str, Any]) -> None:
-        """Update teams.gc_uuid for any team UUID discovered in the boxscore keys.
+        """Ensure a stub teams row exists for any UUID key discovered in the boxscore.
 
-        When a boxscore response contains a UUID top-level key, and the
-        corresponding team row in ``teams`` has ``gc_uuid IS NULL``, this
-        method updates ``gc_uuid`` with the discovered UUID.
+        When a boxscore response contains a UUID top-level key, this method
+        inserts a stub tracked row for that UUID if one does not already exist.
+        This is best-effort; errors are silently ignored.
 
         Args:
             boxscore: Top-level boxscore dict (keys are team identifiers).
@@ -558,10 +524,11 @@ class ScoutingCrawler:
         for key in boxscore:
             if _UUID_RE.match(key):
                 self._db.execute(
-                    "UPDATE teams SET gc_uuid = ? WHERE team_id = ? AND gc_uuid IS NULL",
+                    "INSERT OR IGNORE INTO teams (name, membership_type, gc_uuid, is_active) "
+                    "VALUES (?, 'tracked', ?, 0)",
                     (key, key),
                 )
-                logger.debug("UUID opportunism: gc_uuid=%s for team_id=%s", key, key)
+                logger.debug("UUID opportunism: ensured stub row for gc_uuid=%s", key)
 
 
 # ---------------------------------------------------------------------------
@@ -569,15 +536,19 @@ class ScoutingCrawler:
 # ---------------------------------------------------------------------------
 
 
-def _derive_season_id(games: list[dict[str, Any]]) -> str:
+def _derive_season_id(
+    games: list[dict[str, Any]],
+    season_suffix: str = "spring-hs",
+) -> str:
     """Derive a season_id from the earliest game's start timestamp.
 
     Extracts the year from each game's ``start_ts`` field and returns
-    ``"{year}-spring-hs"``.  Falls back to the current year if no valid
+    ``"{year}-{season_suffix}"``.  Falls back to the current year if no valid
     timestamp is found.
 
     Args:
         games: List of completed game dicts from the public games endpoint.
+        season_suffix: Suffix appended to the year (default ``"spring-hs"``).
 
     Returns:
         Season slug (e.g. ``"2025-spring-hs"``).
@@ -585,20 +556,15 @@ def _derive_season_id(games: list[dict[str, Any]]) -> str:
     years: list[int] = []
     for game in games:
         ts = game.get("start_ts") or game.get("end_ts") or ""
-        # Timestamps are ISO 8601; extract the leading 4-digit year.
         if ts and len(ts) >= 4 and ts[:4].isdigit():
             years.append(int(ts[:4]))
     if years:
-        return f"{min(years)}-spring-hs"
+        return f"{min(years)}-{season_suffix}"
     fallback_year = datetime.now(timezone.utc).year
     logger.warning("No valid start_ts found in games; falling back to year=%d.", fallback_year)
-    return f"{fallback_year}-spring-hs"
+    return f"{fallback_year}-{season_suffix}"
 
 
 def _utcnow_iso() -> str:
-    """Return the current UTC time as an ISO 8601 string.
-
-    Returns:
-        String in ``"YYYY-MM-DDTHH:MM:SS.000Z"`` format.
-    """
+    """Return the current UTC time as an ISO 8601 string."""
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")

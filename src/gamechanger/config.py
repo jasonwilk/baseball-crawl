@@ -5,26 +5,26 @@ downstream crawlers consume.  The YAML file is committed to version control and
 contains no credentials.
 
 A database-driven loader ``load_config_from_db()`` is also provided.  It reads
-active owned teams from the ``teams`` table and derives the current season from
+active member teams from the ``teams`` table and derives the current season from
 the most recent row in the ``seasons`` table.
 
 Example YAML::
 
     season: "2025"
-    owned_teams:
+    member_teams:
       - id: "abc123"
         name: "Lincoln Freshman"
-        level: "freshman"
+        classification: "freshman"
       - id: "def456"
         name: "Lincoln Varsity"
-        level: "varsity"
+        classification: "varsity"
 
 Usage::
 
     from src.gamechanger.config import CrawlConfig, load_config, load_config_from_db
 
     config = load_config()
-    for team in config.owned_teams:
+    for team in config.member_teams:
         print(team.id, team.name)
 """
 
@@ -45,23 +45,21 @@ _DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[2] / "config" / "teams.y
 
 @dataclass
 class TeamEntry:
-    """A single team entry from the YAML config.
+    """A single team entry from the YAML config or database.
 
     Attributes:
-        id: GameChanger team UUID (owned teams) or public_id slug (non-owned teams).
+        id: GameChanger team UUID (member teams) or public_id slug (tracked teams).
         name: Human-readable team name.
-        level: Program level (e.g. ``"freshman"``, ``"jv"``, ``"varsity"``).
-        is_owned: Whether this is an LSB-owned team.  Owned teams use
-            authenticated, UUID-based API endpoints.  Non-owned (opponent)
-            teams use public, slug-based endpoints.  Defaults to ``True`` for
-            backward compatibility with YAML config (all YAML entries are
-            owned teams).
+        classification: Program level (e.g. ``"freshman"``, ``"jv"``, ``"varsity"``).
+        internal_id: INTEGER primary key from ``teams.id``.  Populated when the
+            config is loaded from the database or when a ``db_path`` is supplied
+            to ``load_config()``.  ``None`` when loaded from YAML without a DB lookup.
     """
 
     id: str
     name: str
-    level: str
-    is_owned: bool = True
+    classification: str
+    internal_id: int | None = None
 
 
 @dataclass
@@ -70,33 +68,39 @@ class CrawlConfig:
 
     Attributes:
         season: Season label used as the top-level directory under ``data/raw/``.
-        owned_teams: List of LSB teams to crawl.
+        member_teams: List of LSB member teams to crawl.
     """
 
     season: str
-    owned_teams: list[TeamEntry] = field(default_factory=list)
+    member_teams: list[TeamEntry] = field(default_factory=list)
 
 
-def load_config(path: Path = _DEFAULT_CONFIG_PATH) -> CrawlConfig:
+def load_config(
+    path: Path = _DEFAULT_CONFIG_PATH,
+    db_path: Path | None = None,
+) -> CrawlConfig:
     """Load and parse the teams YAML config file.
 
     Args:
         path: Path to the YAML config file.  Defaults to
             ``config/teams.yaml`` relative to the project root.
+        db_path: Optional path to the SQLite database.  When supplied,
+            each team entry's ``internal_id`` is populated via a
+            ``SELECT id FROM teams WHERE gc_uuid = ?`` lookup.
 
     Returns:
         A populated ``CrawlConfig`` instance.
 
     Raises:
         FileNotFoundError: If the config file does not exist.
-        ValueError: If required top-level keys (``season``, ``owned_teams``) are
+        ValueError: If required top-level keys (``season``, ``member_teams``) are
             missing.
     """
     if not path.exists():
         raise FileNotFoundError(
             f"Config file not found: {path}. "
             "Create config/teams.yaml with at minimum a 'season' key and "
-            "an 'owned_teams' list."
+            "a 'member_teams' list."
         )
 
     with path.open() as fh:
@@ -107,37 +111,75 @@ def load_config(path: Path = _DEFAULT_CONFIG_PATH) -> CrawlConfig:
 
     if "season" not in raw:
         raise ValueError("Config file is missing required key: 'season'")
-    if "owned_teams" not in raw:
-        raise ValueError("Config file is missing required key: 'owned_teams'")
+    if "member_teams" not in raw:
+        raise ValueError("Config file is missing required key: 'member_teams'")
 
-    teams = [
+    teams = _parse_member_teams(raw["member_teams"])
+
+    # Optionally populate internal_id from the database.
+    if db_path is not None:
+        _populate_internal_ids(teams, db_path)
+
+    logger.debug(
+        "Loaded config: season=%s, %d member teams", raw["season"], len(teams)
+    )
+    return CrawlConfig(season=str(raw["season"]), member_teams=teams)
+
+
+def _parse_member_teams(raw_entries: list) -> list[TeamEntry]:
+    """Build a list of ``TeamEntry`` objects from raw YAML entries.
+
+    Args:
+        raw_entries: List of dicts from the ``member_teams`` YAML key.
+
+    Returns:
+        List of ``TeamEntry`` instances.
+    """
+    return [
         TeamEntry(
             id=str(entry["id"]),
             name=str(entry.get("name", "")),
-            level=str(entry.get("level", "")),
-            is_owned=True,
+            classification=str(entry.get("classification", "")),
         )
-        for entry in raw["owned_teams"]
+        for entry in raw_entries
     ]
 
-    logger.debug(
-        "Loaded config: season=%s, %d owned teams", raw["season"], len(teams)
-    )
-    return CrawlConfig(season=str(raw["season"]), owned_teams=teams)
+
+def _populate_internal_ids(teams: list[TeamEntry], db_path: Path) -> None:
+    """Populate ``TeamEntry.internal_id`` from the database for each team.
+
+    Args:
+        teams: List of ``TeamEntry`` instances to update in-place.
+        db_path: Path to the SQLite database.
+    """
+    with closing(sqlite3.connect(str(db_path))) as conn:
+        conn.row_factory = sqlite3.Row
+        for team in teams:
+            row = conn.execute(
+                "SELECT id FROM teams WHERE gc_uuid = ? LIMIT 1",
+                (team.id,),
+            ).fetchone()
+            if row is not None:
+                team.internal_id = row["id"]
+            else:
+                logger.debug(
+                    "No teams row found for gc_uuid=%s; internal_id remains None.",
+                    team.id,
+                )
 
 
 def load_config_from_db(db_path: Path) -> CrawlConfig:
     """Load crawl configuration from the SQLite database.
 
-    Queries active owned teams and derives the current season from the most
+    Queries active member teams and derives the current season from the most
     recent entry in the ``seasons`` table.
 
     Args:
         db_path: Path to the SQLite database file.
 
     Returns:
-        A populated ``CrawlConfig`` instance.  If no active owned teams are
-        found, ``owned_teams`` will be an empty list (not an error).
+        A populated ``CrawlConfig`` instance.  If no active member teams are
+        found, ``member_teams`` will be an empty list (not an error).
 
     Raises:
         ValueError: If no seasons exist in the database.
@@ -156,20 +198,21 @@ def load_config_from_db(db_path: Path) -> CrawlConfig:
         season_id: str = season_row["season_id"]
 
         team_rows = conn.execute(
-            "SELECT team_id, name, level, is_owned FROM teams WHERE is_active = 1 AND is_owned = 1"
+            "SELECT id, name, classification, gc_uuid "
+            "FROM teams WHERE is_active = 1 AND membership_type = 'member'"
         ).fetchall()
 
     teams = [
         TeamEntry(
-            id=row["team_id"],
+            id=row["gc_uuid"] or str(row["id"]),
             name=row["name"],
-            level=row["level"] or "",
-            is_owned=bool(row["is_owned"]),
+            classification=row["classification"] or "",
+            internal_id=row["id"],
         )
         for row in team_rows
     ]
 
     logger.debug(
-        "Loaded DB config: season=%s, %d owned teams", season_id, len(teams)
+        "Loaded DB config: season=%s, %d member teams", season_id, len(teams)
     )
-    return CrawlConfig(season=season_id, owned_teams=teams)
+    return CrawlConfig(season=season_id, member_teams=teams)

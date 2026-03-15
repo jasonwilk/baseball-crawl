@@ -118,7 +118,7 @@ class RosterLoader:
             return LoadResult(errors=1)
 
         # Ensure FK prerequisite rows exist before inserting team_rosters.
-        self._ensure_team_row(team_id)
+        team_int = self._ensure_team_row(team_id)
         self._ensure_season_row(season_id)
 
         result = LoadResult()
@@ -129,7 +129,7 @@ class RosterLoader:
                 continue
             try:
                 self._upsert_player(player)
-                self._upsert_roster_membership(player, team_id, season_id)
+                self._upsert_roster_membership(player, team_int, season_id)
                 result.loaded += 1
             except sqlite3.Error as exc:
                 logger.error(
@@ -284,7 +284,7 @@ class RosterLoader:
         logger.debug("Upserted player %s (%s %s)", player.player_id, player.first_name, player.last_name)
 
     def _upsert_roster_membership(
-        self, player: _Player, team_id: str, season_id: str
+        self, player: _Player, team_id: int, season_id: str
     ) -> None:
         """Upsert a team_rosters membership row.
 
@@ -293,7 +293,7 @@ class RosterLoader:
 
         Args:
             player: Parsed player record.
-            team_id: GameChanger team UUID.
+            team_id: INTEGER PK from the ``teams`` table.
             season_id: Season slug (e.g. ``'2025'``).
         """
         self._db.execute(
@@ -313,24 +313,33 @@ class RosterLoader:
             season_id,
         )
 
-    def _ensure_team_row(self, team_id: str) -> None:
-        """Ensure a ``teams`` row exists for ``team_id``.
+    def _ensure_team_row(self, gc_uuid: str) -> int:
+        """Ensure a ``teams`` row exists for ``gc_uuid`` and return its INTEGER PK.
 
-        Inserts a stub row if none exists.  Does nothing if already present.
-        This prevents FK violations when inserting ``team_rosters`` rows.
+        Inserts a stub row (membership_type='tracked') if none exists.  If the
+        row already exists (IGNORE fires), falls back to SELECT.
 
         Args:
-            team_id: GameChanger team UUID.
+            gc_uuid: GameChanger team UUID.
+
+        Returns:
+            The ``teams.id`` INTEGER PK for the row.
         """
-        self._db.execute(
-            """
-            INSERT INTO teams (team_id, name, is_owned, is_active)
-            VALUES (?, ?, 0, 0)
-            ON CONFLICT(team_id) DO NOTHING
-            """,
-            (team_id, team_id),  # name falls back to team_id until enriched
+        cursor = self._db.execute(
+            "INSERT OR IGNORE INTO teams (name, membership_type, gc_uuid, is_active) "
+            "VALUES (?, 'tracked', ?, 0)",
+            (gc_uuid, gc_uuid),
         )
-        logger.debug("Ensured teams row for team_id=%s", team_id)
+        if cursor.rowcount:
+            logger.debug("Created teams row for gc_uuid=%s id=%d", gc_uuid, cursor.lastrowid)
+            return cursor.lastrowid
+        row = self._db.execute(
+            "SELECT id FROM teams WHERE gc_uuid = ?", (gc_uuid,)
+        ).fetchone()
+        if row:
+            logger.debug("Found existing teams row for gc_uuid=%s id=%d", gc_uuid, row[0])
+            return row[0]
+        raise RuntimeError(f"Failed to find or create teams row for gc_uuid={gc_uuid!r}")
 
     def _ensure_season_row(self, season_id: str) -> None:
         """Ensure a ``seasons`` row exists for ``season_id``.

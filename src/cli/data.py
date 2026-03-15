@@ -278,6 +278,42 @@ def _run_scout_pipeline(
     return 1 if (crawl_result.errors or load_errors) else 0
 
 
+def _find_scouting_run(
+    conn: sqlite3.Connection,
+    public_id: str,
+    started_at: str,
+) -> tuple[int, str] | None:
+    """Look up the team INTEGER PK and season for the most recent running scouting run.
+
+    Args:
+        conn: Open SQLite connection.
+        public_id: Team public_id slug.
+        started_at: ISO timestamp — only runs checked after this time are considered.
+
+    Returns:
+        ``(team_id, season_id)`` or ``None`` if no matching team or run is found.
+    """
+    row = conn.execute(
+        "SELECT id FROM teams WHERE public_id = ? LIMIT 1", (public_id,)
+    ).fetchone()
+    if row is None:
+        logger.info("No team row found for public_id=%s; skipping load.", public_id)
+        return None
+    team_id: int = row[0]
+
+    run = conn.execute(
+        "SELECT season_id FROM scouting_runs "
+        "WHERE team_id = ? AND status = 'running' AND last_checked >= ? "
+        "ORDER BY last_checked DESC LIMIT 1",
+        (team_id, started_at),
+    ).fetchone()
+    if run is None:
+        logger.info("No running scouting run found for public_id=%s; skipping load.", public_id)
+        return None
+
+    return team_id, run[0]
+
+
 def _load_scouted_team(
     conn: sqlite3.Connection,
     crawler: ScoutingCrawler,
@@ -294,22 +330,11 @@ def _load_scouted_team(
     Returns:
         Number of load errors (0 on success).
     """
-    row = conn.execute(
-        "SELECT team_id FROM teams WHERE public_id = ? LIMIT 1", (public_id,)
-    ).fetchone()
-    team_id = row[0] if row else public_id
-
-    run = conn.execute(
-        "SELECT season_id FROM scouting_runs "
-        "WHERE team_id = ? AND status = 'running' AND last_checked >= ? "
-        "ORDER BY last_checked DESC LIMIT 1",
-        (team_id, started_at),
-    ).fetchone()
-    if run is None:
-        logger.info("No running scouting run found for public_id=%s; skipping load.", public_id)
+    lookup = _find_scouting_run(conn, public_id, started_at)
+    if lookup is None:
         return 0
+    team_id, season_id = lookup
 
-    season_id = run[0]
     scouting_dir = data_root / season_id / "scouting" / public_id
     if not scouting_dir.is_dir():
         logger.warning("Scouting dir not found at %s; skipping load.", scouting_dir)
@@ -353,7 +378,7 @@ def _load_all_scouted(
     """
     runs = conn.execute(
         "SELECT sr.team_id, sr.season_id, t.public_id "
-        "FROM scouting_runs sr JOIN teams t ON sr.team_id = t.team_id "
+        "FROM scouting_runs sr JOIN teams t ON sr.team_id = t.id "
         "WHERE sr.status = 'running' AND sr.last_checked >= ?",
         (started_at,),
     ).fetchall()
@@ -391,8 +416,8 @@ def _echo_dry_run_config(config: object) -> None:
     """Print dry-run summary of loaded config and exit."""
     typer.echo("Dry run -- no API calls or DB writes will be performed.")
     typer.echo(f"Season: {config.season}")  # type: ignore[attr-defined]
-    typer.echo(f"Owned teams ({len(config.owned_teams)}):")  # type: ignore[attr-defined]
-    for team in config.owned_teams:  # type: ignore[attr-defined]
+    typer.echo(f"Member teams ({len(config.member_teams)}):")  # type: ignore[attr-defined]
+    for team in config.member_teams:  # type: ignore[attr-defined]
         typer.echo(f"  {team.name} ({team.id})")
     raise SystemExit(0)
 

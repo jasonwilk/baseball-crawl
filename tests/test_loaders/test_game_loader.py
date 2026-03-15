@@ -210,8 +210,26 @@ def _write_team_dir(
     return team_dir
 
 
-def _make_loader(db: sqlite3.Connection, owned_team_id: str = _OWN_TEAM_ID) -> GameLoader:
-    return GameLoader(db, season_id=_SEASON_ID, owned_team_id=owned_team_id)
+def _insert_own_team(
+    db: sqlite3.Connection,
+    gc_uuid: str = _OWN_TEAM_ID,
+    public_id: str = _OWN_TEAM_SLUG,
+) -> int:
+    """Insert own team stub into teams table and return its INTEGER PK."""
+    cur = db.execute(
+        "INSERT OR IGNORE INTO teams (gc_uuid, public_id, name, membership_type, is_active) "
+        "VALUES (?, ?, ?, 'member', 1)",
+        (gc_uuid, public_id, gc_uuid),
+    )
+    if cur.rowcount:
+        return cur.lastrowid
+    return db.execute("SELECT id FROM teams WHERE gc_uuid = ?", (gc_uuid,)).fetchone()[0]
+
+
+def _make_loader(db: sqlite3.Connection, gc_uuid: str = _OWN_TEAM_ID) -> GameLoader:
+    from src.gamechanger.types import TeamRef
+    pk = _insert_own_team(db, gc_uuid=gc_uuid)
+    return GameLoader(db, season_id=_SEASON_ID, owned_team_ref=TeamRef(id=pk, gc_uuid=gc_uuid, public_id=_OWN_TEAM_SLUG))
 
 
 # ---------------------------------------------------------------------------
@@ -512,8 +530,11 @@ def test_same_game_from_two_team_dirs_is_idempotent(db: sqlite3.Connection, tmp_
         tmp_path, team_id="team-bbb", boxscores={_GAME_STREAM_ID: boxscore}
     )
 
-    loader_a = GameLoader(db, season_id=_SEASON_ID, owned_team_id="team-aaa")
-    loader_b = GameLoader(db, season_id=_SEASON_ID, owned_team_id=_OWN_TEAM_ID)
+    from src.gamechanger.types import TeamRef
+    pk_a = _insert_own_team(db, gc_uuid="team-aaa", public_id="slug-aaa")
+    pk_b = _insert_own_team(db, gc_uuid=_OWN_TEAM_ID)
+    loader_a = GameLoader(db, season_id=_SEASON_ID, owned_team_ref=TeamRef(id=pk_a, gc_uuid="team-aaa", public_id="slug-aaa"))
+    loader_b = GameLoader(db, season_id=_SEASON_ID, owned_team_ref=TeamRef(id=pk_b, gc_uuid=_OWN_TEAM_ID, public_id=_OWN_TEAM_SLUG))
 
     loader_a.load_all(team_dir_a)
     loader_b.load_all(team_dir_b)
@@ -537,12 +558,13 @@ def test_own_team_slug_key_detected_correctly(db: sqlite3.Connection, tmp_path: 
     result = loader.load_all(team_dir)
 
     assert result.errors == 0
-    # Own batting player should have team_id = _OWN_TEAM_ID
+    # Own batting player should have team_id = INTEGER PK of own team
     row = db.execute(
         "SELECT team_id FROM player_game_batting WHERE player_id = ?;", (_PLAYER_OWN_1,)
     ).fetchone()
     assert row is not None
-    assert row[0] == _OWN_TEAM_ID
+    own_pk = db.execute("SELECT id FROM teams WHERE gc_uuid = ?", (_OWN_TEAM_ID,)).fetchone()[0]
+    assert row[0] == own_pk
 
 
 def test_opponent_uuid_key_detected_correctly(db: sqlite3.Connection, tmp_path: Path) -> None:
@@ -557,7 +579,8 @@ def test_opponent_uuid_key_detected_correctly(db: sqlite3.Connection, tmp_path: 
         "SELECT team_id FROM player_game_batting WHERE player_id = ?;", (_PLAYER_OPP_1,)
     ).fetchone()
     assert row is not None
-    assert row[0] == _OPP_TEAM_ID
+    opp_pk = db.execute("SELECT id FROM teams WHERE gc_uuid = ?", (_OPP_TEAM_ID,)).fetchone()[0]
+    assert row[0] == opp_pk
 
 
 # ---------------------------------------------------------------------------
@@ -588,8 +611,10 @@ def test_home_away_home_sets_own_team_as_home(db: sqlite3.Connection, tmp_path: 
         (_EVENT_ID,),
     ).fetchone()
     assert row is not None
-    assert row[0] == _OWN_TEAM_ID   # home
-    assert row[1] == _OPP_TEAM_ID   # away
+    own_pk = db.execute("SELECT id FROM teams WHERE gc_uuid = ?", (_OWN_TEAM_ID,)).fetchone()[0]
+    opp_pk = db.execute("SELECT id FROM teams WHERE gc_uuid = ?", (_OPP_TEAM_ID,)).fetchone()[0]
+    assert row[0] == own_pk         # home
+    assert row[1] == opp_pk         # away
     assert row[2] == 7              # home score
     assert row[3] == 3              # away score
 
@@ -617,8 +642,10 @@ def test_home_away_away_sets_opponent_as_home(db: sqlite3.Connection, tmp_path: 
         (_EVENT_ID,),
     ).fetchone()
     assert row is not None
-    assert row[0] == _OPP_TEAM_ID   # home (opponent)
-    assert row[1] == _OWN_TEAM_ID   # away (own team)
+    own_pk = db.execute("SELECT id FROM teams WHERE gc_uuid = ?", (_OWN_TEAM_ID,)).fetchone()[0]
+    opp_pk = db.execute("SELECT id FROM teams WHERE gc_uuid = ?", (_OPP_TEAM_ID,)).fetchone()[0]
+    assert row[0] == opp_pk         # home (opponent)
+    assert row[1] == own_pk         # away (own team)
     assert row[2] == 9              # home score (opponent)
     assert row[3] == 4              # away score (own)
 
@@ -645,7 +672,8 @@ def test_home_away_none_defaults_to_own_team_as_home(db: sqlite3.Connection, tmp
         "SELECT home_team_id FROM games WHERE game_id = ?;", (_EVENT_ID,)
     ).fetchone()
     assert row is not None
-    assert row[0] == _OWN_TEAM_ID  # fallback: own team as home
+    own_pk = db.execute("SELECT id FROM teams WHERE gc_uuid = ?", (_OWN_TEAM_ID,)).fetchone()[0]
+    assert row[0] == own_pk  # fallback: own team as home
 
 
 # ---------------------------------------------------------------------------
@@ -657,19 +685,20 @@ def test_teams_rows_created_before_game_insert(db: sqlite3.Connection, tmp_path:
     """AC-8: teams rows for both home and away are created automatically."""
     boxscore = _make_boxscore()
     team_dir = _write_team_dir(tmp_path, boxscores={_GAME_STREAM_ID: boxscore})
-    loader = _make_loader(db)
 
+    # No teams rows before loader is created.
     count_before = db.execute("SELECT COUNT(*) FROM teams;").fetchone()[0]
     assert count_before == 0
 
-    loader.load_all(team_dir)
+    loader = _make_loader(db)  # inserts own team as FK prerequisite
+    loader.load_all(team_dir)  # inserts opponent team as FK prerequisite
 
-    team_ids = {
+    gc_uuids = {
         row[0]
-        for row in db.execute("SELECT team_id FROM teams;").fetchall()
+        for row in db.execute("SELECT gc_uuid FROM teams;").fetchall()
     }
-    assert _OWN_TEAM_ID in team_ids
-    assert _OPP_TEAM_ID in team_ids
+    assert _OWN_TEAM_ID in gc_uuids
+    assert _OPP_TEAM_ID in gc_uuids
 
 
 def test_seasons_row_created_automatically(db: sqlite3.Connection, tmp_path: Path) -> None:

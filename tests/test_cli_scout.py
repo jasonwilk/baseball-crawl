@@ -244,10 +244,11 @@ def test_load_scouted_team_sets_failed_status_on_load_errors(tmp_path: Path) -> 
     # Seed the state the crawler leaves: team + season + completed scouting run.
     # Use a far-future last_checked so last_checked >= started_at is always true.
     with _sqlite3.connect(str(db_path)) as seed_conn:
-        seed_conn.execute(
-            "INSERT INTO teams (team_id, name, public_id, is_owned, is_active) "
-            "VALUES ('mypubid', 'mypubid', 'mypubid', 0, 0)"
+        cur = seed_conn.execute(
+            "INSERT INTO teams (public_id, name, membership_type, is_active) "
+            "VALUES ('mypubid', 'mypubid', 'tracked', 0)"
         )
+        team_pk = cur.lastrowid
         seed_conn.execute(
             "INSERT INTO seasons (season_id, name, season_type, year) "
             "VALUES ('2025-spring-hs', '2025-spring-hs', 'unknown', 2025)"
@@ -255,8 +256,9 @@ def test_load_scouted_team_sets_failed_status_on_load_errors(tmp_path: Path) -> 
         seed_conn.execute(
             "INSERT INTO scouting_runs "
             "(team_id, season_id, run_type, started_at, status, last_checked, games_found) "
-            "VALUES ('mypubid', '2025-spring-hs', 'full', '2020-01-01T00:00:00.000Z', "
-            "'running', '2099-12-31T23:59:59.000Z', 3)"
+            "VALUES (?, '2025-spring-hs', 'full', '2020-01-01T00:00:00.000Z', "
+            "'running', '2099-12-31T23:59:59.000Z', 3)",
+            (team_pk,),
         )
         seed_conn.commit()
 
@@ -282,7 +284,8 @@ def test_load_scouted_team_sets_failed_status_on_load_errors(tmp_path: Path) -> 
     # Verify the DB row was downgraded to 'failed' and completed_at is NULL.
     with _sqlite3.connect(str(db_path)) as check_conn:
         row = check_conn.execute(
-            "SELECT status, completed_at FROM scouting_runs WHERE team_id = 'mypubid' LIMIT 1"
+            "SELECT status, completed_at FROM scouting_runs WHERE team_id = ? LIMIT 1",
+            (team_pk,),
         ).fetchone()
     assert row is not None
     assert row[0] == "failed", f"Expected status='failed', got '{row[0]}'"
@@ -420,10 +423,11 @@ def test_load_scouted_team_sets_completed_status_on_success(tmp_path: Path) -> N
     run_migrations(db_path=db_path)
 
     with _sqlite3.connect(str(db_path)) as seed_conn:
-        seed_conn.execute(
-            "INSERT INTO teams (team_id, name, public_id, is_owned, is_active) "
-            "VALUES ('mypubid', 'mypubid', 'mypubid', 0, 0)"
+        cur = seed_conn.execute(
+            "INSERT INTO teams (public_id, name, membership_type, is_active) "
+            "VALUES ('mypubid', 'mypubid', 'tracked', 0)"
         )
+        team_pk = cur.lastrowid
         seed_conn.execute(
             "INSERT INTO seasons (season_id, name, season_type, year) "
             "VALUES ('2025-spring-hs', '2025-spring-hs', 'unknown', 2025)"
@@ -431,8 +435,9 @@ def test_load_scouted_team_sets_completed_status_on_success(tmp_path: Path) -> N
         seed_conn.execute(
             "INSERT INTO scouting_runs "
             "(team_id, season_id, run_type, started_at, status, last_checked, games_found) "
-            "VALUES ('mypubid', '2025-spring-hs', 'full', '2020-01-01T00:00:00.000Z', "
-            "'running', '2099-12-31T23:59:59.000Z', 3)"
+            "VALUES (?, '2025-spring-hs', 'full', '2020-01-01T00:00:00.000Z', "
+            "'running', '2099-12-31T23:59:59.000Z', 3)",
+            (team_pk,),
         )
         seed_conn.commit()
 
@@ -458,7 +463,8 @@ def test_load_scouted_team_sets_completed_status_on_success(tmp_path: Path) -> N
 
     with _sqlite3.connect(str(db_path)) as check_conn:
         row = check_conn.execute(
-            "SELECT status, completed_at FROM scouting_runs WHERE team_id = 'mypubid' LIMIT 1"
+            "SELECT status, completed_at FROM scouting_runs WHERE team_id = ? LIMIT 1",
+            (team_pk,),
         ).fetchone()
     assert row is not None
     assert row[0] == "completed", f"Expected status='completed', got '{row[0]}'"

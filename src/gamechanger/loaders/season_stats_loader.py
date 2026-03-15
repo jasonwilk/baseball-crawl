@@ -125,7 +125,7 @@ class SeasonStatsLoader:
             return LoadResult(errors=1)
 
         # Ensure FK prerequisite rows before any stat inserts.
-        self._ensure_team_row(team_id)
+        team_int = self._ensure_team_row(team_id)
         self._ensure_season_row(season_id)
 
         result = LoadResult()
@@ -135,7 +135,7 @@ class SeasonStatsLoader:
                 result.skipped += 1
                 continue
             try:
-                loaded = self._load_player(player_id, player_data, team_id, season_id)
+                loaded = self._load_player(player_id, player_data, team_int, season_id)
                 result.loaded += loaded
                 if loaded == 0:
                     result.skipped += 1
@@ -165,7 +165,7 @@ class SeasonStatsLoader:
         self,
         player_id: str,
         player_data: Any,
-        team_id: str,
+        team_id: int,
         season_id: str,
     ) -> int:
         """Upsert batting and/or pitching season stats for a single player.
@@ -173,7 +173,7 @@ class SeasonStatsLoader:
         Args:
             player_id: GameChanger player UUID.
             player_data: Dict with ``stats.offense`` and/or ``stats.defense``.
-            team_id: GameChanger team UUID.
+            team_id: INTEGER PK from the ``teams`` table.
             season_id: Season slug.
 
         Returns:
@@ -239,7 +239,7 @@ class SeasonStatsLoader:
     def _upsert_batting(
         self,
         player_id: str,
-        team_id: str,
+        team_id: int,
         season_id: str,
         offense: dict[str, Any],
     ) -> None:
@@ -250,7 +250,7 @@ class SeasonStatsLoader:
 
         Args:
             player_id: GameChanger player UUID.
-            team_id: GameChanger team UUID.
+            team_id: INTEGER PK from the ``teams`` table.
             season_id: Season slug.
             offense: Offense stats dict from the API.
         """
@@ -258,10 +258,10 @@ class SeasonStatsLoader:
             """
             INSERT INTO player_season_batting (
                 player_id, team_id, season_id,
-                games, ab, h, doubles, triples, hr, rbi, bb, so, sb
+                gp, ab, h, doubles, triples, hr, rbi, bb, so, sb
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(player_id, team_id, season_id) DO UPDATE SET
-                games   = excluded.games,
+                gp      = excluded.gp,
                 ab      = excluded.ab,
                 h       = excluded.h,
                 doubles = excluded.doubles,
@@ -300,7 +300,7 @@ class SeasonStatsLoader:
     def _upsert_pitching(
         self,
         player_id: str,
-        team_id: str,
+        team_id: int,
         season_id: str,
         defense: dict[str, Any],
     ) -> None:
@@ -311,7 +311,7 @@ class SeasonStatsLoader:
 
         Args:
             player_id: GameChanger player UUID.
-            team_id: GameChanger team UUID.
+            team_id: INTEGER PK from the ``teams`` table.
             season_id: Season slug.
             defense: Defense stats dict from the API.
         """
@@ -322,18 +322,18 @@ class SeasonStatsLoader:
             """
             INSERT INTO player_season_pitching (
                 player_id, team_id, season_id,
-                games, ip_outs, h, er, bb, so, hr, pitches, strikes
+                gp_pitcher, ip_outs, h, er, bb, so, hr, pitches, total_strikes
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(player_id, team_id, season_id) DO UPDATE SET
-                games   = excluded.games,
-                ip_outs = excluded.ip_outs,
-                h       = excluded.h,
-                er      = excluded.er,
-                bb      = excluded.bb,
-                so      = excluded.so,
-                hr      = excluded.hr,
-                pitches = excluded.pitches,
-                strikes = excluded.strikes
+                gp_pitcher    = excluded.gp_pitcher,
+                ip_outs       = excluded.ip_outs,
+                h             = excluded.h,
+                er            = excluded.er,
+                bb            = excluded.bb,
+                so            = excluded.so,
+                hr            = excluded.hr,
+                pitches       = excluded.pitches,
+                total_strikes = excluded.total_strikes
             """,
             (
                 player_id,
@@ -385,23 +385,33 @@ class SeasonStatsLoader:
                 (player_id,),
             )
 
-    def _ensure_team_row(self, team_id: str) -> None:
-        """Ensure a ``teams`` row exists for ``team_id``.
+    def _ensure_team_row(self, gc_uuid: str) -> int:
+        """Ensure a ``teams`` row exists for ``gc_uuid`` and return its INTEGER PK.
 
-        Inserts a stub row if none exists.  Does nothing if already present.
+        Inserts a stub row (membership_type='tracked') if none exists.  If the
+        row already exists (IGNORE fires), falls back to SELECT.
 
         Args:
-            team_id: GameChanger team UUID.
+            gc_uuid: GameChanger team UUID.
+
+        Returns:
+            The ``teams.id`` INTEGER PK for the row.
         """
-        self._db.execute(
-            """
-            INSERT INTO teams (team_id, name, is_owned, is_active)
-            VALUES (?, ?, 0, 0)
-            ON CONFLICT(team_id) DO NOTHING
-            """,
-            (team_id, team_id),
+        cursor = self._db.execute(
+            "INSERT OR IGNORE INTO teams (name, membership_type, gc_uuid, is_active) "
+            "VALUES (?, 'tracked', ?, 0)",
+            (gc_uuid, gc_uuid),
         )
-        logger.debug("Ensured teams row for team_id=%s", team_id)
+        if cursor.rowcount:
+            logger.debug("Created teams row for gc_uuid=%s id=%d", gc_uuid, cursor.lastrowid)
+            return cursor.lastrowid
+        row = self._db.execute(
+            "SELECT id FROM teams WHERE gc_uuid = ?", (gc_uuid,)
+        ).fetchone()
+        if row:
+            logger.debug("Found existing teams row for gc_uuid=%s id=%d", gc_uuid, row[0])
+            return row[0]
+        raise RuntimeError(f"Failed to find or create teams row for gc_uuid={gc_uuid!r}")
 
     def _ensure_season_row(self, season_id: str) -> None:
         """Ensure a ``seasons`` row exists for ``season_id``.

@@ -1,4 +1,4 @@
-"""Tests for load_config_from_db() in src/gamechanger/config.py (E-042-06, E-094-03).
+"""Tests for load_config_from_db() in src/gamechanger/config.py (E-042-06, E-094-03, E-100-03).
 
 Uses in-memory SQLite databases -- no file I/O, no network calls.
 
@@ -56,8 +56,8 @@ def _seed(db_file: Path, seasons: list[dict], teams: list[dict]) -> None:
     Args:
         db_file: Path to the SQLite database.
         seasons: List of dicts with keys: season_id, name, season_type, year.
-        teams: List of dicts with keys: team_id, name, level (optional),
-            is_owned, is_active.
+        teams: List of dicts with keys: gc_uuid, name, classification (optional),
+            membership_type, is_active.
     """
     conn = sqlite3.connect(str(db_file))
     conn.execute("PRAGMA foreign_keys=ON;")
@@ -68,13 +68,13 @@ def _seed(db_file: Path, seasons: list[dict], teams: list[dict]) -> None:
         )
     for t in teams:
         conn.execute(
-            "INSERT INTO teams (team_id, name, level, is_owned, is_active) "
+            "INSERT INTO teams (gc_uuid, name, classification, membership_type, is_active) "
             "VALUES (?, ?, ?, ?, ?)",
             (
-                t["team_id"],
+                t["gc_uuid"],
                 t["name"],
-                t.get("level"),
-                t["is_owned"],
+                t.get("classification"),
+                t["membership_type"],
                 t["is_active"],
             ),
         )
@@ -88,9 +88,9 @@ def _seed(db_file: Path, seasons: list[dict], teams: list[dict]) -> None:
 
 _SEASON = {"season_id": "2026-spring-hs", "name": "Spring 2026 HS", "season_type": "spring-hs", "year": 2026}
 
-_OWNED_ACTIVE = {"team_id": "team-varsity", "name": "LSB Varsity", "level": "varsity", "is_owned": 1, "is_active": 1}
-_OWNED_INACTIVE = {"team_id": "team-jv", "name": "LSB JV", "level": "jv", "is_owned": 1, "is_active": 0}
-_TRACKED_ACTIVE = {"team_id": "team-opp", "name": "Opponent FC", "level": None, "is_owned": 0, "is_active": 1}
+_MEMBER_ACTIVE = {"gc_uuid": "team-varsity", "name": "LSB Varsity", "classification": "varsity", "membership_type": "member", "is_active": 1}
+_MEMBER_INACTIVE = {"gc_uuid": "team-jv", "name": "LSB JV", "classification": "jv", "membership_type": "member", "is_active": 0}
+_TRACKED_ACTIVE = {"gc_uuid": "team-opp", "name": "Opponent FC", "classification": None, "membership_type": "tracked", "is_active": 1}
 
 
 # ---------------------------------------------------------------------------
@@ -98,55 +98,55 @@ _TRACKED_ACTIVE = {"team_id": "team-opp", "name": "Opponent FC", "level": None, 
 # ---------------------------------------------------------------------------
 
 
-def test_load_config_from_db_returns_owned_active_teams(tmp_path: Path) -> None:
-    """load_config_from_db returns owned active teams in CrawlConfig."""
+def test_load_config_from_db_returns_member_active_teams(tmp_path: Path) -> None:
+    """load_config_from_db returns active member teams in CrawlConfig."""
     db_file = _make_db(tmp_path)
-    _seed(db_file, [_SEASON], [_OWNED_ACTIVE])
+    _seed(db_file, [_SEASON], [_MEMBER_ACTIVE])
 
     config = load_config_from_db(db_file)
 
     assert isinstance(config, CrawlConfig)
     assert config.season == "2026-spring-hs"
-    assert len(config.owned_teams) == 1
-    team = config.owned_teams[0]
+    assert len(config.member_teams) == 1
+    team = config.member_teams[0]
     assert isinstance(team, TeamEntry)
     assert team.id == "team-varsity"
     assert team.name == "LSB Varsity"
-    assert team.level == "varsity"
+    assert team.classification == "varsity"
 
 
-def test_load_config_from_db_excludes_inactive_owned_teams(tmp_path: Path) -> None:
+def test_load_config_from_db_excludes_inactive_member_teams(tmp_path: Path) -> None:
     """load_config_from_db excludes teams with is_active=0."""
     db_file = _make_db(tmp_path)
-    _seed(db_file, [_SEASON], [_OWNED_ACTIVE, _OWNED_INACTIVE])
+    _seed(db_file, [_SEASON], [_MEMBER_ACTIVE, _MEMBER_INACTIVE])
 
     config = load_config_from_db(db_file)
 
-    team_ids = [t.id for t in config.owned_teams]
+    team_ids = [t.id for t in config.member_teams]
     assert "team-varsity" in team_ids
     assert "team-jv" not in team_ids
 
 
-def test_load_config_from_db_excludes_tracked_only_teams(tmp_path: Path) -> None:
-    """load_config_from_db excludes teams with is_owned=0 (opponent-tracked)."""
+def test_load_config_from_db_excludes_tracked_teams(tmp_path: Path) -> None:
+    """load_config_from_db excludes teams with membership_type='tracked'."""
     db_file = _make_db(tmp_path)
-    _seed(db_file, [_SEASON], [_OWNED_ACTIVE, _TRACKED_ACTIVE])
+    _seed(db_file, [_SEASON], [_MEMBER_ACTIVE, _TRACKED_ACTIVE])
 
     config = load_config_from_db(db_file)
 
-    team_ids = [t.id for t in config.owned_teams]
+    team_ids = [t.id for t in config.member_teams]
     assert "team-varsity" in team_ids
     assert "team-opp" not in team_ids
 
 
 def test_load_config_from_db_empty_teams_list(tmp_path: Path) -> None:
-    """load_config_from_db returns empty owned_teams when no active owned teams exist."""
+    """load_config_from_db returns empty member_teams when no active member teams exist."""
     db_file = _make_db(tmp_path)
     _seed(db_file, [_SEASON], [])
 
     config = load_config_from_db(db_file)
 
-    assert config.owned_teams == []
+    assert config.member_teams == []
     assert config.season == "2026-spring-hs"
 
 
@@ -163,7 +163,7 @@ def test_load_config_from_db_derives_latest_season(tmp_path: Path) -> None:
         {"season_id": "2026-spring-hs", "name": "Spring 2026 HS", "season_type": "spring-hs", "year": 2026},
         {"season_id": "2025-spring-hs", "name": "Spring 2025 HS", "season_type": "spring-hs", "year": 2025},
     ]
-    _seed(db_file, seasons, [_OWNED_ACTIVE])
+    _seed(db_file, seasons, [_MEMBER_ACTIVE])
 
     config = load_config_from_db(db_file)
 
@@ -180,61 +180,113 @@ def test_load_config_from_db_raises_when_no_seasons(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Tests: null level handling
+# Tests: null classification handling
 # ---------------------------------------------------------------------------
 
 
-def test_load_config_from_db_null_level_becomes_empty_string(tmp_path: Path) -> None:
-    """load_config_from_db converts NULL level to empty string in TeamEntry."""
+def test_load_config_from_db_null_classification_becomes_empty_string(tmp_path: Path) -> None:
+    """load_config_from_db converts NULL classification to empty string in TeamEntry."""
     db_file = _make_db(tmp_path)
-    team = {"team_id": "team-no-level", "name": "No Level Team", "level": None, "is_owned": 1, "is_active": 1}
+    team = {"gc_uuid": "team-no-class", "name": "No Class Team", "classification": None, "membership_type": "member", "is_active": 1}
     _seed(db_file, [_SEASON], [team])
 
     config = load_config_from_db(db_file)
 
-    assert len(config.owned_teams) == 1
-    assert config.owned_teams[0].level == ""
+    assert len(config.member_teams) == 1
+    assert config.member_teams[0].classification == ""
 
 
 # ---------------------------------------------------------------------------
-# Tests: is_owned field (E-094-03)
+# Tests: internal_id population (E-100-03)
 # ---------------------------------------------------------------------------
 
 
-def test_load_config_from_db_sets_is_owned_true(tmp_path: Path) -> None:
-    """load_config_from_db sets is_owned=True on returned TeamEntry rows."""
+def test_load_config_from_db_populates_internal_id(tmp_path: Path) -> None:
+    """load_config_from_db populates internal_id from teams.id INTEGER PK."""
     db_file = _make_db(tmp_path)
-    _seed(db_file, [_SEASON], [_OWNED_ACTIVE])
+    _seed(db_file, [_SEASON], [_MEMBER_ACTIVE])
 
     config = load_config_from_db(db_file)
 
-    assert len(config.owned_teams) == 1
-    assert config.owned_teams[0].is_owned is True
+    assert len(config.member_teams) == 1
+    team = config.member_teams[0]
+    assert team.internal_id is not None
+    assert isinstance(team.internal_id, int)
+    assert team.internal_id > 0
 
 
-def test_team_entry_is_owned_default_true() -> None:
-    """TeamEntry.is_owned defaults to True when not supplied."""
-    entry = TeamEntry(id="abc", name="Test", level="jv")
-    assert entry.is_owned is True
+def test_load_config_yaml_populates_internal_id_when_db_path_given(tmp_path: Path) -> None:
+    """load_config with db_path= populates internal_id via DB lookup."""
+    db_file = _make_db(tmp_path)
+    _seed(db_file, [_SEASON], [_MEMBER_ACTIVE])
+
+    yaml_content = (
+        "season: '2026-spring-hs'\n"
+        "member_teams:\n"
+        "  - id: team-varsity\n"
+        "    name: LSB Varsity\n"
+        "    classification: varsity\n"
+    )
+    yaml_file = tmp_path / "teams.yaml"
+    yaml_file.write_text(yaml_content)
+
+    config = load_config(yaml_file, db_path=db_file)
+
+    assert len(config.member_teams) == 1
+    team = config.member_teams[0]
+    assert team.internal_id is not None
+    assert isinstance(team.internal_id, int)
+    assert team.internal_id > 0
 
 
-def test_load_config_yaml_sets_is_owned_true(tmp_path: Path) -> None:
-    """load_config (YAML path) sets is_owned=True on all TeamEntry instances."""
+def test_load_config_yaml_internal_id_none_when_no_db(tmp_path: Path) -> None:
+    """load_config without db_path leaves internal_id as None."""
     yaml_content = (
         "season: '2026'\n"
-        "owned_teams:\n"
+        "member_teams:\n"
         "  - id: team-abc\n"
         "    name: Lincoln Varsity\n"
-        "    level: varsity\n"
-        "  - id: team-def\n"
-        "    name: Lincoln JV\n"
-        "    level: jv\n"
+        "    classification: varsity\n"
     )
     yaml_file = tmp_path / "teams.yaml"
     yaml_file.write_text(yaml_content)
 
     config = load_config(yaml_file)
 
-    assert len(config.owned_teams) == 2
-    for team in config.owned_teams:
-        assert team.is_owned is True
+    assert len(config.member_teams) == 1
+    assert config.member_teams[0].internal_id is None
+
+
+# ---------------------------------------------------------------------------
+# Tests: YAML loading with new field names (AC-11)
+# ---------------------------------------------------------------------------
+
+
+def test_load_config_yaml_reads_member_teams_key(tmp_path: Path) -> None:
+    """load_config reads member_teams: YAML key."""
+    yaml_content = (
+        "season: '2026'\n"
+        "member_teams:\n"
+        "  - id: team-abc\n"
+        "    name: Lincoln Varsity\n"
+        "    classification: varsity\n"
+        "  - id: team-def\n"
+        "    name: Lincoln JV\n"
+        "    classification: jv\n"
+    )
+    yaml_file = tmp_path / "teams.yaml"
+    yaml_file.write_text(yaml_content)
+
+    config = load_config(yaml_file)
+
+    assert len(config.member_teams) == 2
+    assert config.member_teams[0].id == "team-abc"
+    assert config.member_teams[0].classification == "varsity"
+    assert config.member_teams[1].classification == "jv"
+
+
+def test_team_entry_has_classification_field() -> None:
+    """TeamEntry uses classification, not level."""
+    entry = TeamEntry(id="abc", name="Test", classification="jv")
+    assert entry.classification == "jv"
+    assert not hasattr(entry, "level")

@@ -37,10 +37,10 @@ def _make_config(team_ids: list[str] | None = None) -> CrawlConfig:
     """Build a CrawlConfig with given team IDs (or a single default team)."""
     ids = team_ids if team_ids is not None else [_TEAM_ID]
     teams = [
-        TeamEntry(id=tid, name=f"Team {tid}", level="jv")
+        TeamEntry(id=tid, name=f"Team {tid}", classification="jv")
         for tid in ids
     ]
-    return CrawlConfig(season=_SEASON, owned_teams=teams)
+    return CrawlConfig(season=_SEASON, member_teams=teams)
 
 
 def _make_client(return_value: object = None, side_effect: Exception | None = None) -> MagicMock:

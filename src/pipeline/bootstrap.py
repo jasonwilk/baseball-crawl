@@ -43,7 +43,7 @@ def _check_team_config() -> tuple[int, str]:
     except FileNotFoundError:
         return (1, f"Team config file not found: {_CONFIG_PATH.relative_to(_PROJECT_ROOT)}")
 
-    real_teams = [t for t in config.owned_teams if not t.id.startswith("REPLACE_WITH_")]
+    real_teams = [t for t in config.member_teams if not t.id.startswith("REPLACE_WITH_")]
     if not real_teams:
         return (
             1,

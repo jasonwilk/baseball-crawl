@@ -145,7 +145,7 @@ def run(
     if dry_run:
         logger.info("Dry run -- no API calls will be made.")
         logger.info("Season: %s", config.season)
-        logger.info("Teams: %s", [t.id for t in config.owned_teams])
+        logger.info("Teams: %s", [t.id for t in config.member_teams])
         logger.info("Crawlers that would run (in order):")
         for name, _ in selected:
             logger.info("  %s", name)

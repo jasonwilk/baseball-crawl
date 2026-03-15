@@ -19,11 +19,11 @@ from src.gamechanger.config import CrawlConfig, TeamEntry
 # Helpers
 # ---------------------------------------------------------------------------
 
-_REAL_TEAM = TeamEntry(id="abc123", name="Lincoln JV", level="jv")
-_PLACEHOLDER_TEAM = TeamEntry(id="REPLACE_WITH_TEAM_ID", name="Placeholder", level="jv")
-_VALID_CONFIG = CrawlConfig(season="2025", owned_teams=[_REAL_TEAM])
-_PLACEHOLDER_CONFIG = CrawlConfig(season="2025", owned_teams=[_PLACEHOLDER_TEAM])
-_EMPTY_CONFIG = CrawlConfig(season="2025", owned_teams=[])
+_REAL_TEAM = TeamEntry(id="abc123", name="Lincoln JV", classification="jv")
+_PLACEHOLDER_TEAM = TeamEntry(id="REPLACE_WITH_TEAM_ID", name="Placeholder", classification="jv")
+_VALID_CONFIG = CrawlConfig(season="2025", member_teams=[_REAL_TEAM])
+_PLACEHOLDER_CONFIG = CrawlConfig(season="2025", member_teams=[_PLACEHOLDER_TEAM])
+_EMPTY_CONFIG = CrawlConfig(season="2025", member_teams=[])
 
 
 def _patch_all(

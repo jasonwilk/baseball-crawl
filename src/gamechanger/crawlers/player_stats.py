@@ -72,7 +72,7 @@ class PlayerStatsCrawler:
     def crawl_all(self) -> CrawlResult:
         """Crawl season stats for all configured owned teams.
 
-        Iterates over every entry in ``config.owned_teams``.  API errors for
+        Iterates over every entry in ``config.member_teams``.  API errors for
         individual teams are caught, logged, and counted -- they do not abort
         the overall crawl.
 
@@ -81,7 +81,7 @@ class PlayerStatsCrawler:
             errors encountered.
         """
         result = CrawlResult()
-        for team in self._config.owned_teams:
+        for team in self._config.member_teams:
             try:
                 path = self.crawl_team(team.id, self._config.season)
                 if path is None:

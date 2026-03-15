@@ -95,7 +95,7 @@ class OpponentCrawler:
 
         # Phase 1: fetch opponent registry for each owned team.
         all_opponents: list[dict[str, Any]] = []
-        for team in self._config.owned_teams:
+        for team in self._config.member_teams:
             try:
                 opponents, wrote = self._crawl_registry(team.id)
                 if wrote:
@@ -117,7 +117,7 @@ class OpponentCrawler:
                 result.errors += 1
 
         # Phase 2: deduplicate and fetch rosters.
-        owned_ids = {t.id for t in self._config.owned_teams}
+        owned_ids = {t.id for t in self._config.member_teams}
         phase2_result = self._crawl_opponent_rosters(all_opponents, owned_ids)
 
         result.files_written += phase2_result.files_written

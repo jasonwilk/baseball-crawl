@@ -52,6 +52,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from src.gamechanger.loaders import LoadResult
+from src.gamechanger.types import TeamRef
 
 logger = logging.getLogger(__name__)
 
@@ -174,20 +175,21 @@ class GameLoader:
         db: Open ``sqlite3.Connection`` with ``PRAGMA foreign_keys=ON`` set.
             The caller owns the connection lifecycle.
         season_id: Season slug used as FK in all inserts (e.g. ``'2025'``).
-        owned_team_id: UUID of the team that owns the data directory.  Used to
-            identify which boxscore key belongs to the owned team vs. the
-            opponent.
+        owned_team_ref: ``TeamRef`` for the team that owns the data directory.
+            Used to identify which boxscore key belongs to the owned team vs.
+            the opponent.  ``gc_uuid`` is used for boxscore key detection;
+            ``id`` is used for FK inserts.
     """
 
     def __init__(
         self,
         db: sqlite3.Connection,
         season_id: str,
-        owned_team_id: str,
+        owned_team_ref: TeamRef,
     ) -> None:
         self._db = db
         self._season_id = season_id
-        self._owned_team_id = owned_team_id
+        self._team_ref = owned_team_ref
 
     # ------------------------------------------------------------------
     # Public API
@@ -353,15 +355,7 @@ class GameLoader:
     def _load_boxscore_file(
         self, path: Path, summary: GameSummaryEntry
     ) -> LoadResult:
-        """Parse and load a single boxscore JSON file.
-
-        Args:
-            path: Path to the boxscore JSON file.
-            summary: Resolved game-summaries metadata for this game.
-
-        Returns:
-            ``LoadResult`` for this file.
-        """
+        """Parse and load a single boxscore JSON file."""
         raw = self._read_json(path)
         if raw is None:
             return LoadResult(errors=1)
@@ -381,73 +375,132 @@ class GameLoader:
         own_data = raw.get(own_key) if own_key else None
         opp_data = raw.get(opp_key) if opp_key else None
 
-        # Resolve home/away for games table.
-        home_away = summary.home_away  # 'home', 'away', or None
-        own_team_id = self._owned_team_id
-        opp_team_id = summary.opponent_id or (opp_key or "unknown-opponent")
-
-        if home_away == "home":
-            home_team_id = own_team_id
-            away_team_id = opp_team_id
-            home_score = summary.owning_team_score
-            away_score = summary.opponent_team_score
-        elif home_away == "away":
-            home_team_id = opp_team_id
-            away_team_id = own_team_id
-            home_score = summary.opponent_team_score
-            away_score = summary.owning_team_score
+        # Resolve INTEGER PKs for home/away team rows.
+        own_team_id, opp_team_id_result = self._resolve_team_ids(summary, opp_key)
+        if opp_team_id_result is None:
+            opp_data = None
+            opp_team_id: int = own_team_id  # placeholder, not used when opp_data is None
         else:
-            # home_away is None -- use own team as home by convention, log warning.
-            logger.warning(
-                "home_away is None for game_id=%s; defaulting own team to home.",
-                summary.event_id,
-            )
-            home_team_id = own_team_id
-            away_team_id = opp_team_id
-            home_score = summary.owning_team_score
-            away_score = summary.opponent_team_score
+            opp_team_id = opp_team_id_result
+
+        # Resolve home/away for games table.
+        home_team_id, away_team_id, home_score, away_score = self._resolve_home_away(
+            summary, own_team_id, opp_team_id
+        )
 
         # Game date from last_scoring_update (YYYY-MM-DD prefix).
         game_date = summary.last_scoring_update[:10] if summary.last_scoring_update else "1900-01-01"
 
-        # Ensure FK prerequisite rows.
-        self._ensure_team_row(home_team_id)
-        self._ensure_team_row(away_team_id)
+        return self._upsert_game_and_stats(
+            summary, game_date,
+            home_team_id, away_team_id, home_score, away_score,
+            own_data, own_team_id, opp_data, opp_team_id,
+        )
 
-        # Upsert the game row.
+    def _resolve_team_ids(
+        self,
+        summary: GameSummaryEntry,
+        opp_key: str | None,
+    ) -> tuple[int, int | None]:
+        """Resolve INTEGER PKs for own and opponent teams.
+
+        Args:
+            summary: Game summary entry containing opponent_id.
+            opp_key: Opponent key from the boxscore response (fallback UUID).
+
+        Returns:
+            ``(own_team_id, opp_team_id)`` where ``opp_team_id`` is ``None``
+            if the opponent UUID cannot be determined.
+        """
+        own_team_id: int = self._ensure_team_row(self._team_ref.gc_uuid or "")
+        opp_gc_uuid = summary.opponent_id or opp_key
+        if not opp_gc_uuid:
+            logger.warning(
+                "Cannot determine opponent UUID for game %s; opponent stats will be skipped.",
+                summary.event_id,
+            )
+            return own_team_id, None
+        return own_team_id, self._ensure_team_row(opp_gc_uuid)
+
+    def _resolve_home_away(
+        self,
+        summary: GameSummaryEntry,
+        own_team_id: int,
+        opp_team_id: int,
+    ) -> tuple[int, int, int | None, int | None]:
+        """Determine home/away team IDs and scores from the game summary.
+
+        Args:
+            summary: Game summary entry with home_away and score fields.
+            own_team_id: INTEGER PK of the owned team.
+            opp_team_id: INTEGER PK of the opponent team.
+
+        Returns:
+            ``(home_team_id, away_team_id, home_score, away_score)``.
+        """
+        home_away = summary.home_away
+        if home_away == "home":
+            return own_team_id, opp_team_id, summary.owning_team_score, summary.opponent_team_score
+        if home_away == "away":
+            return opp_team_id, own_team_id, summary.opponent_team_score, summary.owning_team_score
+        # home_away is None -- default own team to home and log warning.
+        logger.warning(
+            "home_away is None for game_id=%s; defaulting own team to home.",
+            summary.event_id,
+        )
+        return own_team_id, opp_team_id, summary.owning_team_score, summary.opponent_team_score
+
+    def _upsert_game_and_stats(
+        self,
+        summary: GameSummaryEntry,
+        game_date: str,
+        home_team_id: int,
+        away_team_id: int,
+        home_score: int | None,
+        away_score: int | None,
+        own_data: dict | None,
+        own_team_id: int,
+        opp_data: dict | None,
+        opp_team_id: int,
+    ) -> LoadResult:
+        """Upsert the game row and load per-player stats for both teams.
+
+        Args:
+            summary: Game summary entry.
+            game_date: ISO date string (YYYY-MM-DD).
+            home_team_id: INTEGER PK of the home team.
+            away_team_id: INTEGER PK of the away team.
+            home_score: Final score for the home team.
+            away_score: Final score for the away team.
+            own_data: Boxscore data dict for the owned team (or None).
+            own_team_id: INTEGER PK of the owned team.
+            opp_data: Boxscore data dict for the opponent team (or None).
+            opp_team_id: INTEGER PK of the opponent team.
+
+        Returns:
+            ``LoadResult`` for this game.
+        """
         try:
             self._upsert_game(
-                summary.event_id,
-                game_date,
-                home_team_id,
-                away_team_id,
-                home_score,
-                away_score,
+                summary.event_id, game_date,
+                home_team_id, away_team_id, home_score, away_score,
             )
         except sqlite3.Error as exc:
-            logger.error(
-                "Failed to upsert game %s: %s", summary.event_id, exc
-            )
+            logger.error("Failed to upsert game %s: %s", summary.event_id, exc)
             return LoadResult(errors=1)
 
         result = LoadResult()
-
-        # Load per-player stats for own team.
         if own_data:
             r = self._load_team_stats(own_data, own_team_id, summary.event_id)
             result.loaded += r.loaded
             result.skipped += r.skipped
             result.errors += r.errors
-
-        # Load per-player stats for opponent team.
         if opp_data:
             r = self._load_team_stats(opp_data, opp_team_id, summary.event_id)
             result.loaded += r.loaded
             result.skipped += r.skipped
             result.errors += r.errors
-
-        # Count the game itself as a loaded record.
-        result.loaded += 1
+        result.loaded += 1  # count the game itself
         return result
 
     def _detect_team_keys(self, raw: dict) -> tuple[str | None, str | None]:
@@ -472,10 +525,11 @@ class GameLoader:
         opp_key: str | None = uuid_keys[0] if uuid_keys else None
 
         # If all keys are UUIDs (opponent-vs-opponent data), pick own team by
-        # matching against self._owned_team_id; the other is the opponent.
+        # matching against the owned team's gc_uuid; the other is the opponent.
         if own_key is None and len(uuid_keys) >= 2:
+            owned_gc_uuid = self._team_ref.gc_uuid or ""
             for k in uuid_keys:
-                if k.lower() == self._owned_team_id.lower():
+                if k.lower() == owned_gc_uuid.lower():
                     own_key = k
                 else:
                     opp_key = k
@@ -489,14 +543,14 @@ class GameLoader:
         return own_key, opp_key
 
     def _load_team_stats(
-        self, team_data: dict, team_id: str, game_id: str
+        self, team_data: dict, team_id: int, game_id: str
     ) -> LoadResult:
         """Parse and load batting + pitching lines for one team in a boxscore.
 
         Args:
             team_data: Value under one team key in the boxscore (contains
                 ``players`` and ``groups``).
-            team_id: GameChanger team UUID for this side of the game.
+            team_id: INTEGER PK from the ``teams`` table for this side of the game.
             game_id: Canonical event_id (games.game_id FK).
 
         Returns:
@@ -525,13 +579,13 @@ class GameLoader:
     # ------------------------------------------------------------------
 
     def _load_batting_group(
-        self, group: dict, team_id: str, game_id: str
+        self, group: dict, team_id: int, game_id: str
     ) -> LoadResult:
         """Parse and upsert batting lines from a lineup group.
 
         Args:
             group: The ``category="lineup"`` group dict from the boxscore.
-            team_id: Team UUID for this batting side.
+            team_id: INTEGER PK from the ``teams`` table for this batting side.
             game_id: Canonical event_id.
 
         Returns:
@@ -601,13 +655,13 @@ class GameLoader:
     # ------------------------------------------------------------------
 
     def _load_pitching_group(
-        self, group: dict, team_id: str, game_id: str
+        self, group: dict, team_id: int, game_id: str
     ) -> LoadResult:
         """Parse and upsert pitching lines from a pitching group.
 
         Args:
             group: The ``category="pitching"`` group dict from the boxscore.
-            team_id: Team UUID for this pitching side.
+            team_id: INTEGER PK from the ``teams`` table for this pitching side.
             game_id: Canonical event_id.
 
         Returns:
@@ -725,8 +779,8 @@ class GameLoader:
         self,
         game_id: str,
         game_date: str,
-        home_team_id: str,
-        away_team_id: str,
+        home_team_id: int,
+        away_team_id: int,
         home_score: int,
         away_score: int,
     ) -> None:
@@ -735,8 +789,8 @@ class GameLoader:
         Args:
             game_id: Canonical event_id (PK).
             game_date: ISO 8601 date string.
-            home_team_id: Home team UUID.
-            away_team_id: Away team UUID.
+            home_team_id: INTEGER PK of the home team.
+            away_team_id: INTEGER PK of the away team.
             home_score: Final home score.
             away_score: Final away score.
         """
@@ -768,13 +822,13 @@ class GameLoader:
         )
 
     def _upsert_batting(
-        self, batting: _PlayerBatting, team_id: str, game_id: str
+        self, batting: _PlayerBatting, team_id: int, game_id: str
     ) -> None:
         """Upsert a batting line into ``player_game_batting``.
 
         Args:
             batting: Parsed batting record.
-            team_id: Team UUID.
+            team_id: INTEGER PK from the ``teams`` table.
             game_id: Canonical event_id.
         """
         self._db.execute(
@@ -812,28 +866,27 @@ class GameLoader:
         )
 
     def _upsert_pitching(
-        self, pitching: _PlayerPitching, team_id: str, game_id: str
+        self, pitching: _PlayerPitching, team_id: int, game_id: str
     ) -> None:
         """Upsert a pitching line into ``player_game_pitching``.
 
         Args:
             pitching: Parsed pitching record.
-            team_id: Team UUID.
+            team_id: INTEGER PK from the ``teams`` table.
             game_id: Canonical event_id.
         """
         self._db.execute(
             """
             INSERT INTO player_game_pitching
-                (game_id, player_id, team_id, ip_outs, h, er, bb, so, hr)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (game_id, player_id, team_id, ip_outs, h, er, bb, so)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(game_id, player_id) DO UPDATE SET
                 team_id = excluded.team_id,
                 ip_outs = excluded.ip_outs,
                 h       = excluded.h,
                 er      = excluded.er,
                 bb      = excluded.bb,
-                so      = excluded.so,
-                hr      = excluded.hr
+                so      = excluded.so
             """,
             (
                 game_id,
@@ -844,7 +897,6 @@ class GameLoader:
                 pitching.er,
                 pitching.bb,
                 pitching.so,
-                pitching.hr,
             ),
         )
 
@@ -873,20 +925,31 @@ class GameLoader:
                 (player_id,),
             )
 
-    def _ensure_team_row(self, team_id: str) -> None:
-        """Ensure a ``teams`` row exists for ``team_id``.
+    def _ensure_team_row(self, gc_uuid: str) -> int:
+        """Ensure a ``teams`` row exists for ``gc_uuid`` and return its INTEGER PK.
+
+        Uses INSERT OR IGNORE with membership_type='tracked'.  If the row
+        already exists, falls back to SELECT.
 
         Args:
-            team_id: GameChanger team UUID.
+            gc_uuid: GameChanger team UUID (or placeholder string).
+
+        Returns:
+            The ``teams.id`` INTEGER PK for the row.
         """
-        self._db.execute(
-            """
-            INSERT INTO teams (team_id, name, is_owned, is_active)
-            VALUES (?, ?, 0, 0)
-            ON CONFLICT(team_id) DO NOTHING
-            """,
-            (team_id, team_id),
+        cursor = self._db.execute(
+            "INSERT OR IGNORE INTO teams (name, membership_type, gc_uuid, is_active) "
+            "VALUES (?, 'tracked', ?, 0)",
+            (gc_uuid, gc_uuid),
         )
+        if cursor.rowcount:
+            return cursor.lastrowid
+        row = self._db.execute(
+            "SELECT id FROM teams WHERE gc_uuid = ?", (gc_uuid,)
+        ).fetchone()
+        if row:
+            return row[0]
+        raise RuntimeError(f"Failed to find or create teams row for gc_uuid={gc_uuid!r}")
 
     def _ensure_season_row(self, season_id: str) -> None:
         """Ensure a ``seasons`` row exists for ``season_id``.

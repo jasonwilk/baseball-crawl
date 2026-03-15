@@ -26,7 +26,7 @@ def _make_mock_config(season: str = "2025", team_ids: list[str] | None = None) -
     config = MagicMock()
     config.season = season
     ids = team_ids or ["team-001"]
-    config.owned_teams = [MagicMock(id=tid) for tid in ids]
+    config.member_teams = [MagicMock(id=tid) for tid in ids]
     return config
 
 
@@ -124,15 +124,17 @@ def test_dry_run_no_manifest_written(tmp_path: Path) -> None:
     assert not manifest.exists()
 
 
-def test_dry_run_prints_crawlers(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    """Dry run prints all crawler names."""
-    with patch("src.pipeline.crawl.load_config", return_value=_make_mock_config()):
-        with patch("src.pipeline.crawl.GameChangerClient"):
-            run(dry_run=True, data_root=tmp_path)
+def test_dry_run_prints_crawlers(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    """Dry run logs all crawler names."""
+    import logging
 
-    captured = capsys.readouterr()
+    with caplog.at_level(logging.INFO, logger="src.pipeline.crawl"):
+        with patch("src.pipeline.crawl.load_config", return_value=_make_mock_config()):
+            with patch("src.pipeline.crawl.GameChangerClient"):
+                run(dry_run=True, data_root=tmp_path)
+
     for name in _CRAWLER_NAMES:
-        assert name in captured.out
+        assert name in caplog.text
 
 
 # ---------------------------------------------------------------------------
