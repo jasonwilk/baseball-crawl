@@ -141,7 +141,13 @@ When all stories are verified DONE, the main session executes the following clos
 
 12. **Context-layer assessment.** Evaluate the epic's impact on the context layer per `.claude/rules/context-layer-assessment.md`. Assess each of the six triggers with an explicit yes/no verdict and record all verdicts in the epic's History section. If any trigger fires, spawn claude-architect (if not already on the team) to codify the findings before archiving. The epic MUST NOT be archived until this assessment is complete and any required codification is done.
 
-13. **Archive the epic.** Move the entire epic directory from `/epics/E-NNN-slug/` to `/.project/archive/E-NNN-slug/`. The main session instructs an implementer still on the team to perform this move.
+13. **Archive the epic.** Move the entire epic directory from `/epics/E-NNN-slug/` to `/.project/archive/E-NNN-slug/` and verify the move is fully staged before proceeding.
+
+    **Move method:** Use `git mv epics/E-NNN-slug/ .project/archive/E-NNN-slug/` (not plain `mv`). `git mv` atomically stages both the new files at the destination and the deletions at the source.
+
+    **Verification gate:** After the move, run `git status --porcelain` and grep the output for the epic slug. Any line referencing `epics/E-NNN-slug/` or `.project/archive/E-NNN-slug/` that has a non-space character in column 2 (the working-tree status column) represents an unstaged change -- status codes like ` D`, `??`, `RM`, `AM`, `MM`, etc. Stage all such changes with `git add` before proceeding. The main session MUST NOT proceed past this step with unstaged archive-related changes in the working tree.
+
+    The main session instructs an implementer still on the team to perform the move and verification.
 
 14. **Update PM memory.** Move the epic from "Active Epics" to "Archived Epics" in the PM's MEMORY.md. Note any follow-up work or newly unblocked items.
 

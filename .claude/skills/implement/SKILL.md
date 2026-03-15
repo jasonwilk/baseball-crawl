@@ -330,7 +330,13 @@ Evaluate the epic's impact on the context layer per `.claude/rules/context-layer
 
 ### Step 4: Archive the epic
 
-Move the entire epic directory from `/epics/E-NNN-slug/` to `/.project/archive/E-NNN-slug/`. Instruct an implementing agent still on the team to perform this move. Do not proceed to team shutdown until the archive is confirmed.
+Move the entire epic directory from `/epics/E-NNN-slug/` to `/.project/archive/E-NNN-slug/` and verify the move is fully staged before proceeding.
+
+**Move method:** Use `git mv epics/E-NNN-slug/ .project/archive/E-NNN-slug/` (not plain `mv`). `git mv` atomically stages both the new files at the destination and the deletions at the source.
+
+**Verification gate:** After the move, run `git status --porcelain` and grep the output for the epic slug. Any line referencing `epics/E-NNN-slug/` or `.project/archive/E-NNN-slug/` that has a non-space character in column 2 (the working-tree status column) represents an unstaged change -- status codes like ` D`, `??`, `RM`, `AM`, `MM`, etc. Stage all such changes with `git add` before proceeding. The main session MUST NOT proceed past this step with unstaged archive-related changes in the working tree.
+
+Instruct an implementing agent still on the team to perform the move and verification. Do not proceed to team shutdown until the archive is confirmed and fully staged.
 
 ### Step 5: Update PM memory
 
@@ -446,7 +452,7 @@ Phase 5: Closure sequence
   - Update epic to COMPLETED with history entry
   - Documentation assessment (spawn docs-writer if needed)
   - Context-layer assessment (spawn claude-architect if needed)
-  - Archive epic to /.project/archive/
+  - Archive epic to /.project/archive/ (git mv + verify fully staged)
   - Update PM memory
   - Review ideas backlog
   - Review vision signals (advisory)
