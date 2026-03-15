@@ -20,7 +20,7 @@ E-072's ACs restated Technical Notes content verbatim, creating a sync surface t
 - [ ] **AC-5**: Existing template sections and PM agent definition sections are otherwise unchanged (no regressions).
 
 ## Technical Approach
-Three files to modify. For the story template: add a brief comment/guidance note near the AC section (HTML comment or inline note, matching existing template style). For the epic template: add a brief note in the Technical Notes section comment. For the PM agent definition: add a self-review gate subsection -- the implementer should find the appropriate location (near the Quality Checklist or the refinement workflow) and add the grep sweep instruction. Keep all additions concise -- a few sentences each, not paragraphs.
+Three files to modify. For the story template: add a brief comment/guidance note near the AC section (HTML comment or inline note, matching existing template style). For the epic template: add a brief note in the Technical Notes section comment. For the PM agent definition: add a self-review gate as a new subsection immediately after the Quality Checklist (e.g., "Post-Incorporation Consistency Sweep"). This gate fires at a different time than the Quality Checklist -- the checklist fires before finalizing an epic, while this gate fires mid-refinement after incorporating review findings and before the next review round. Add the grep sweep instruction there. Keep all additions concise -- a few sentences each, not paragraphs.
 
 Reference files:
 - `.project/templates/story-template.md`

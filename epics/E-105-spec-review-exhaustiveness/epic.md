@@ -15,7 +15,7 @@ E-072 (Proxy Session Ingestion Skill) exposed a class of review failures during 
 4. **Wrong methodology**: Reviewers pattern-matched individual items instead of building a complete model of the spec first and then checking each element against it.
 5. **Re-review scope undefined**: Round 2+ reviews re-reviewed everything instead of scoping to changes only, producing false positives on already-fixed items.
 
-Three independent analyses (PM, CR, CA) converged on the same root causes and deliverables. No expert consultation required -- the experts produced these recommendations directly.
+Three independent analyses (PM, CR, CA) converged on the same root causes and deliverables. Claude-architect participated directly in the root cause analysis and co-produced the category definitions and methodology recommendations captured in Technical Notes. This satisfies the agent infrastructure consultation trigger (E-105-02 modifies `.claude/agents/product-manager.md`).
 
 ## Goals
 - Spec review rubric catches consistency and propagation errors in a single pass
@@ -60,18 +60,23 @@ This table is the authoritative list of changes. Stories reference it by row rat
 | 3 | Add rubric category 12: Specification Surface Area | `.project/codex-spec-review.md` | HIGH |
 | 4 | Add "complete model" methodology instruction | `.project/codex-spec-review.md` | HIGH |
 | 5 | Add re-review scoping instruction | `.project/codex-spec-review.md` | MED |
+| 10 | Add "Epic-Level Checks" structural separation before categories 10-12 | `.project/codex-spec-review.md` | HIGH |
 | 6 | Add "reference not restate" guidance | `.project/templates/story-template.md` | HIGH |
 | 7 | Add "single source of truth" note | `.project/templates/epic-template.md` | MED |
 | 8 | Add PM self-review gate (post-incorporation grep sweep) | `.claude/agents/product-manager.md` | HIGH |
 | 9 | AC complexity soft limit (3 sub-clauses guidance) | `.project/templates/story-template.md` | MED |
 
-### Category Definitions (for rubric rows 1-3)
+### Category Definitions (for Deliverables Table rows 1-3)
 
 **Category 10 -- Internal Consistency**: Do values that appear in multiple locations (counts, env var names, field names, status codes) match across all occurrences in the epic and story files? Are there contradictions between ACs in different stories within the same epic?
 
 **Category 11 -- Propagation Completeness**: When the epic's Technical Notes define a rule, procedure, or constraint, do all stories that implement that rule reflect the current version? Are there stale references to superseded decisions? After a finding is incorporated, has the fix propagated to all locations where the original value appeared?
 
 **Category 12 -- Specification Surface Area**: Are ACs restating content from Technical Notes instead of referencing it? Could an AC sub-clause be replaced with "per Technical Notes section X"? Are there ACs with more than 3 sub-clauses that should be decomposed or converted to references?
+
+### Structural Placement of Categories 10-12
+
+Categories 1-9 are per-story checks ("does this story's ACs have clarity?", "does this story's routing match?"). The Evaluation Checklist intro ("For every story in the epic, check each item") is correct for them. Categories 10-12 are inherently cross-story -- they check consistency *across* files, propagation *across* stories, and surface area *across* ACs. They must be placed under a separate sub-heading (e.g., "Epic-Level Checks") with their own framing instruction that makes clear these checks operate on the epic as a whole, not per-story.
 
 ### Complete Model Methodology
 
