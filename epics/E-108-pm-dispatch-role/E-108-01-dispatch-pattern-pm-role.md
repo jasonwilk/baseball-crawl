@@ -19,7 +19,7 @@ The current dispatch pattern (established by E-065) gives the main session all c
 - [ ] **AC-4**: Dispatch Flow step 4 (currently "marks them IN_PROGRESS") routes to PM for status update instead of main session doing it directly.
 - [ ] **AC-5**: Dispatch Flow steps 6-8 (completion/review loop) include PM AC verification as a parallel gate alongside code-reviewer. Both must pass before merge-back.
 - [ ] **AC-6**: Dispatch Flow step 8 (mark DONE after merge-back) routes to PM for status update.
-- [ ] **AC-7**: Closure Sequence steps that involve status updates (step 10: update epic, step 14: update PM memory, step 15: review ideas, step 16: review vision signals) are attributed to PM, not main session.
+- [ ] **AC-7**: Closure Sequence steps that involve status updates or validation-ownership attribution (step 9: validate all work -- validation attribution reflects PM's AC verification role, step 10: update epic, step 14: update PM memory, step 15: review ideas, step 16: review vision signals) are attributed to PM, not main session.
 - [ ] **AC-8**: `workflow-discipline.md` Workflow Routing Rule section reflects PM's dispatch role (PM is spawned during dispatch for status management and AC verification).
 - [ ] **AC-9**: No references to "No PM teammate during dispatch" or "PM is not spawned as a teammate during dispatch" remain in either file.
 - [ ] **AC-10**: Implementer role description explicitly states: implementing agents MUST NOT modify story status files, check AC boxes, or update the epic Stories table. Only PM performs these actions after independent verification.
@@ -27,6 +27,14 @@ The current dispatch pattern (established by E-065) gives the main session all c
 - [ ] **AC-12**: Main session role includes a "never absorb" rule: if an agent is missing or crashed, respawn it rather than taking over its responsibilities. The main session must not perform PM, code-reviewer, or implementer work in their absence. (Addresses E-100 incident 1: PM not spawned, main session absorbed PM duties.)
 - [ ] **AC-13**: Implementer role includes: "Respond to code-review findings on their own work (main session routes findings back to the implementer who wrote the code)." This clarifies that code fixes from review go to the original implementer, not to the main session or a different agent.
 - [ ] **AC-14**: The Dispatch Flow documents that code-review findings (MUST FIX, accepted SHOULD FIX) are routed by the main session back to the implementer who wrote the code. The main session triages SHOULD FIX findings (accept/dismiss) but NEVER applies fixes itself.
+- [ ] **AC-15**: PM role in Team Composition explicitly states PM is spawned WITHOUT `isolation: "worktree"` — PM reads/writes status files in the main checkout and needs direct access.
+- [ ] **AC-16**: Dispatch Flow includes a Gate Interaction paragraph: when PM rejects ACs, route feedback to implementer alongside code-review findings. After revision, both gates re-evaluate. PM AC rejection does NOT have its own circuit breaker — the code-reviewer's 2-round circuit breaker governs the overall loop. If it fires, escalate to user regardless of PM AC status.
+- [ ] **AC-17**: `workflow-discipline.md` Workflow Routing Rule includes a concise version of the main session prohibitions (no code, no status updates, no AC verification). Full prohibition list lives in `dispatch-pattern.md`; `workflow-discipline.md` carries a defense-in-depth summary.
+- [ ] **AC-18**: `CLAUDE.md` Workflow Contract step 5 updated to reflect PM as a spawned dispatch teammate (replacing "PM is not spawned as a teammate during dispatch").
+- [ ] **AC-19**: `.claude/agents/product-manager.md` "How Work Flows" step 5 updated to reflect PM's dispatch role (status management + AC verification), replacing "PM's role is limited to setting the epic to READY and presenting it to the user for dispatch authorization."
+- [ ] **AC-20**: Dispatch Flow includes a PM-override mechanism for reviewer AC findings: when code-reviewer flags an AC as MUST FIX but PM verifies that AC as PASS, the main session removes the AC-based finding from the MUST FIX list before routing to the implementer. If removing AC-based items empties the MUST FIX list, the story passes the review gate (effectively APPROVED for merge-back). Non-AC MUST FIX findings (bugs, security, conventions) remain the reviewer's exclusive domain and are unaffected by PM override.
+- [ ] **AC-21**: Dispatch Flow step 6 (context-layer-only skip condition) routes AC verification and status update to PM instead of the main session doing it directly. The code-reviewer is still skipped for context-layer-only stories -- PM verifies ACs alone.
+- [ ] **AC-22**: The routing-precedence exception in the Agent Selection section (currently "The only exception is the main session updating PM memory files during normal closure work") is updated to reflect that PM updates its own memory files during closure. The main session no longer needs this exception.
 
 ## Technical Approach
 Refer to the epic Technical Notes for role boundaries and interaction flow. The changes are additive to `dispatch-pattern.md` (expand Team Composition, thread PM through Dispatch Flow and Closure Sequence) and a focused update to `workflow-discipline.md` (Workflow Routing Rule section). Do not change merge-back protocol, worktree isolation, or code-reviewer behavior.
@@ -38,6 +46,8 @@ Refer to the epic Technical Notes for role boundaries and interaction flow. The 
 ## Files to Create or Modify
 - `/.claude/rules/dispatch-pattern.md`
 - `/.claude/rules/workflow-discipline.md`
+- `/CLAUDE.md`
+- `/.claude/agents/product-manager.md`
 
 ## Agent Hint
 claude-architect

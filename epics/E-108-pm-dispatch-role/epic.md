@@ -1,7 +1,7 @@
 # E-108: PM as Dispatch Teammate
 
 ## Status
-`DRAFT`
+`READY`
 
 ## Overview
 Add the product-manager as a spawned teammate during epic dispatch. Currently, the main session manages all story statuses, epic table updates, and AC verification directly. This concentrates too many responsibilities in the main session and violates the PM's ownership of epics. The fix: PM is spawned as a teammate during dispatch and owns status management + AC verification, while the main session retains spawning, routing, merge-back, and cascade decisions.
@@ -11,7 +11,7 @@ The dispatch pattern was simplified in E-065 (Merge Team Lead and PM Roles) to e
 
 The fix is surgical: spawn PM as a teammate with a focused role (status management + AC verification), not as a general coordinator. The main session keeps spawning authority, routing decisions, merge-back, and cascade logic. This is a separation of concerns, not a return to the three-role model.
 
-**Expert consultation**: CA consultation recommended before READY — the changes touch 3 context-layer files that define the dispatch pattern. The epic is DRAFT pending CA consultation in the next session.
+**Expert consultation**: CA consultation completed 2026-03-15. No conflicts with worktree isolation, code-reviewer circuit breaker, or agent-team-compliance. See CA Consultation Results in Technical Notes.
 
 ## Goals
 - PM is spawned as a teammate during dispatch with a clearly defined role
@@ -123,7 +123,9 @@ New flow:
 Implementer reports completion -> Main session routes to code-reviewer AND PM
   - Code-reviewer: quality review -> findings to main session for triage
   - PM: AC verification -> pass/fail to main session
-  - Both must pass before main session runs merge-back
+  - Both must pass before merge-back (with PM AC override: if reviewer flags
+    an AC as MUST FIX but PM says it passes, PM's verdict is authoritative —
+    see PM-Reviewer AC Disagreement in Technical Notes)
   - PM updates status after merge-back succeeds
 ```
 
@@ -136,15 +138,51 @@ Implementer reports completion -> Main session routes to code-reviewer AND PM
 5. **Status updates happen after merge-back.** PM marks DONE only after the main session confirms merge-back succeeded. This preserves the "not DONE until merged" invariant.
 6. **Implementers never touch status.** Implementing agents must not modify story status files, check AC boxes, or update the epic Stories table. This was learned from E-100-02, where the SE prematurely marked its own story DONE and checked all ACs — bypassing PM's independent verification role.
 
+### Reviewer AC Relationship
+
+PM owns authoritative AC verification (pass/fail gate for the DONE decision). Code-reviewer continues to check ACs as part of its quality review — no rubric change, preserving the Non-Goals commitment. If code-reviewer flags an unmet AC, it is routed to PM who makes the final determination. This avoids changing `code-reviewer.md` while eliminating ambiguity about who has AC authority. The code-reviewer's AC observations are advisory input to PM's verdict, not a separate blocking gate.
+
+### CA Consultation Results (2026-03-15)
+
+**Conflict check**: No conflicts with worktree isolation, code-reviewer circuit breaker, or agent-team-compliance patterns. The "never absorb — always respawn" principle aligns with Pattern 3 in agent-team-compliance.md. No changes needed to agent-team-compliance.md.
+
+**Placement of "main session never writes code" rule**: Both files, with different scope. `dispatch-pattern.md` gets the full prohibition list in the main session role definition. `workflow-discipline.md` gets a concise version in the Workflow Routing Rule section. Rationale: defense-in-depth — different audiences at different moments, both always loaded.
+
+**PM worktree isolation**: PM is spawned WITHOUT `isolation: "worktree"` — it reads/writes status files in the main checkout and needs direct access.
+
+**Gate Interaction — PM AC rejection**: When PM rejects ACs, route feedback to implementer alongside code-review findings. After revision, both gates re-evaluate. PM AC rejection does NOT have its own circuit breaker — the code-reviewer's 2-round circuit breaker governs the overall loop. If the circuit breaker fires, escalate to user regardless of PM AC status.
+
+**PM-Reviewer AC Disagreement**: The code-reviewer mechanically classifies unmet ACs as MUST FIX, which produces a NOT APPROVED verdict. PM is the authoritative AC gate. When their verdicts conflict on AC satisfaction, the main session resolves as follows:
+1. Reviewer APPROVED + PM ACs pass → merge-back (normal path).
+2. Reviewer NOT APPROVED due to non-AC MUST FIX only (bugs, conventions, security) → route to implementer; PM's AC verdict is irrelevant to these findings.
+3. Reviewer NOT APPROVED, ALL MUST FIX are AC-related, PM says ACs pass → **PM override**: reclassify all AC-based MUST FIX as resolved-by-PM, proceed to merge-back.
+4. Reviewer NOT APPROVED with mixed AC + non-AC MUST FIX, PM says ACs pass → remove AC-based items from MUST FIX list, route only non-AC items to implementer. If non-AC items remain, verdict stays NOT APPROVED for those items only.
+5. PM says ACs fail → route PM's AC feedback to implementer regardless of reviewer verdict.
+Non-AC findings (bugs, security, conventions) are the reviewer's exclusive domain — PM cannot override those. This resolution happens at the main session's routing layer; `code-reviewer.md` is unchanged.
+
+**PM context window edge case**: If PM's context fills during large epics, the main session respawns PM with a fresh summary of epic state. Document this in implement SKILL.md.
+
+**PM spawn context template**: implement SKILL.md Phase 2 needs an explicit spawn context template for PM (like the ones for implementers and code-reviewer).
+
+**Closure assessment ownership**: Main session remains the trigger for doc/context-layer assessments (may need to spawn additional agents, which PM can't do). PM owns status + ACs, not spawning coordination.
+
 ### Files to Change
 
 - `/.claude/rules/dispatch-pattern.md` -- Team Composition section (add PM role), Dispatch Flow steps, Closure Sequence (PM owns status steps)
 - `/.claude/skills/implement/SKILL.md` -- Phase 2 (spawn PM), Phase 3 (route to PM), Phase 5 (PM owns closure status work), anti-patterns update
 - `/.claude/rules/workflow-discipline.md` -- Workflow Routing Rule (reflect PM dispatch role)
+- `/CLAUDE.md` -- Workflow Contract step 5 (replace "PM is not spawned" with PM dispatch role)
+- `/.claude/agents/product-manager.md` -- How Work Flows step 5 (replace "PM's role is limited to READY" with dispatch role)
 
 ## Open Questions
-- CA consultation needed: Do the proposed changes to dispatch-pattern.md create any conflicts with the worktree isolation rules, code-reviewer circuit breaker, or agent-team-compliance patterns? Should the "main session never writes code" rule be in dispatch-pattern.md, workflow-discipline.md, or both?
+*All resolved — see CA Consultation Results below.*
 
 ## History
 - 2026-03-15: Created during E-100 dispatch. Motivated by the main session's overloaded responsibilities during multi-wave dispatch.
 - 2026-03-15: Expanded with full 6-incident log from E-100 dispatch session. Added Role Boundary Principles, strengthened main session prohibitions ("MUST NOT write code, update statuses, verify ACs, or absorb other agents' work"), added implementer "respond to code-review findings on own work" responsibility, added "route findings to implementer" to main session (replacing direct fix pattern). CA consultation flagged as needed before READY. Stories updated with additional ACs covering all 6 incidents.
+- 2026-03-15: CA consultation completed. No conflicts found. Findings incorporated: PM spawned without worktree isolation, gate interaction paragraph (PM AC rejection uses code-reviewer circuit breaker), "never writes code" rule in both files with different scope, PM spawn context template added to E-108-02, PM context window respawn guidance added to E-108-02, closure assessment ownership stays with main session. Open Questions resolved. Stories updated with 3 new ACs (E-108-01) and 3 new ACs (E-108-02). Epic marked READY.
+- 2026-03-15: Codex spec review triage. Three findings assessed. F1 (P1, incomplete file set): REFINE — `CLAUDE.md` and `product-manager.md` added to E-108-01 scope with AC-18 and AC-19 to eliminate contradictory "PM is not spawned" statements in active context-layer files. F2 (P1, unclear reviewer/PM AC model): REFINE — "Reviewer AC Relationship" paragraph added to Technical Notes clarifying PM as authoritative AC gate with code-reviewer AC observations as advisory input; AC-20 added to E-108-01. F3 (P3, vague DoD): DISMISSED — template-level boilerplate, not actionable at story level.
+- 2026-03-15: Codex spec review Round 1 triage. Two findings assessed. F1 (P1, PM-vs-reviewer AC arbitration gap): DISMISSED — already resolved by Reviewer AC Relationship paragraph in Technical Notes + AC-20; code-reviewer's MUST FIX classification is advisory input to PM's verdict, not a separate blocking gate. F2 (P2, context-layer-only exception unaddressed): REFINE — AC-21 added to E-108-01 (dispatch-pattern.md step 6 routes to PM), AC-18 added to E-108-02 (implement SKILL.md context-layer-only skip routes to PM).
+- 2026-03-15: Codex spec review Round 2 triage. Two findings assessed. F1 (P1, PM-vs-reviewer AC arbitration still under-specified): **REVERSED from Round 1 DISMISS → REFINE** — Round 1 dismissal was premature. The Reviewer AC Relationship paragraph was conceptual but lacked a concrete dispatch flow mechanism. The reviewer mechanically classifies unmet ACs as MUST FIX → NOT APPROVED; the spec didn't describe what the main session does when PM disagrees. Added "PM-Reviewer AC Disagreement" paragraph to Technical Notes with 5-case resolution rule. Refined AC-20 to specify the PM-override mechanism (remove AC-based MUST FIX from routing list; if that empties MUST FIX, story passes review gate; non-AC findings remain reviewer's domain). Updated Interaction Flow Change diagram to reference PM AC override. F2 (P1, hidden dependency on code-reviewer.md): DISMISSED — restatement of F1. Arbitration logic lives in dispatch-pattern.md (in scope), not code-reviewer.md. Reviewer behavior unchanged per Non-Goals.
+- 2026-03-15: Codex spec review Round 3 triage. Two findings assessed. F1 (P2, E-108-01 not a standalone slice — transient contradiction with implement SKILL.md between stories): DISMISSED — both stories are sequential same-agent dispatch (01 → 02, both claude-architect); transient window is zero in practice; merging would create 39-AC mega-story; E-108-02 AC-11 explicitly checks cross-file consistency. F2 (P2, PM memory routing-precedence exception stale): REFINE — AC-22 added to E-108-01 to update dispatch-pattern.md line 183 exception text (main session no longer updates PM memory; PM owns its own memory during closure).
+- 2026-03-15: Codex spec review Round 4 (final) triage. Two P2 findings assessed — same class (stale validation-ownership text in closure sections). F1 (P2, dispatch-pattern.md step 9 still attributes context-layer-only validation to main session): REFINE — AC-7 expanded to include step 9 validation-ownership attribution alongside existing status-update steps. F2 (P2, implement SKILL.md Phase 5 Step 1 still attributes context-layer-only validation to main session): REFINE — AC-18 expanded to cover both Phase 3 (live dispatch) and Phase 5 Step 1 (closure validation summary). No new ACs added; minimal expansions to existing ACs.
