@@ -281,6 +281,25 @@ Three operating modes depending on session complexity:
 3. Set `teammateMode` to `tmux` in Claude Code settings
 4. Run Claude Code inside the tmux session
 
+**tmux window rename convention**: When starting an epic-related session in Heavy mode, rename the tmux window to `"E-NNN stage"` at the start of the session, before any work begins. This applies to all epic-related sessions -- team-based or headless, dispatch or refinement.
+
+Guarded one-liner (substitute the actual epic ID and stage):
+```bash
+{ [ -n "$TMUX" ] && command -v tmux >/dev/null 2>&1 && tmux rename-window "E-NNN stage" 2>/dev/null; } || true
+```
+
+Known stages:
+
+| Stage | When |
+|-------|------|
+| `refine` | Epic refinement, consultation, planning sessions |
+| `triage` | Spec review triage |
+| `spec-review` | Codex spec review |
+| `dispatch` | Implementation dispatch |
+| `code-review` | Codex code review |
+
+New stages should use short hyphenated names.
+
 The host/container split in Heavy mode follows the same boundary as the Proxy Boundary section above -- the tmux session runs on the Mac host, Claude Code runs inside the devcontainer.
 
 ## Shell Environment
