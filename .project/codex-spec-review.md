@@ -10,6 +10,10 @@ Before reviewing, read these workflow context files:
 
 This is a **planning artifact review**, not a code review. Evaluate the epic and story files provided against the project's workflow contracts and planning quality standards.
 
+## Facts Table (build before evaluating)
+
+Before checking individual items, extract a facts table from the epic's Technical Notes. List every named value: counts, env var names, field lists, status categories, file paths, agent names, and category labels. For each value, record every location where it appears across story ACs, the epic table, and Technical Notes. Use this table as the ground truth when evaluating categories 10-12 below -- it front-loads consistency checking instead of relying on noticing drift during line-by-line review.
+
 ## Evaluation Checklist
 
 For every story in the epic, check each item and report findings:
@@ -66,10 +70,38 @@ For every story in the epic, check each item and report findings:
 - Are any claims about existing infrastructure actually accurate (file paths, module names, API behaviors)?
 - If the epic references other epics as "completed", have those actually been completed and archived?
 
+## Epic-Level Checks
+
+The per-story categories above (1-9) evaluate each story individually. The following categories operate on the epic as a whole -- checking consistency *across* files, propagation *across* stories, and surface area *across* ACs. Evaluate these against the facts table built during setup.
+
+### 10. Internal Consistency
+- Do values that appear in multiple locations (counts, env var names, field names, status codes) match across all occurrences in the epic and story files?
+- Are there contradictions between ACs in different stories within the same epic?
+- Does the epic's Stories table (status, description, dependencies) match the content of the individual story files?
+
+### 11. Propagation Completeness
+- When the epic's Technical Notes define a rule, procedure, or constraint, do all stories that implement that rule reflect the current version?
+- Are there stale references to superseded decisions from earlier drafts or prior review rounds?
+- After a finding is incorporated, has the fix propagated to all locations where the original value appeared?
+
+### 12. Specification Surface Area
+- Are ACs restating content from Technical Notes instead of referencing it (e.g., "per Technical Notes section X")?
+- Could an AC sub-clause be replaced with a reference to Technical Notes without losing testability?
+- Are there ACs with more than 3 sub-clauses that should be decomposed into separate ACs or converted to references?
+
+## Re-Review Protocol
+
+Round 2+ reviews (after PM incorporates findings) follow a scoped process:
+
+1. Read the change summary from PM identifying what was modified.
+2. Verify each claimed fix was actually applied in the updated files.
+3. Check that fixes did not introduce new inconsistencies in adjacent text (the facts table helps here -- re-check affected rows).
+4. Do NOT re-review unchanged sections. Categories 1-9 findings on unmodified stories from prior rounds are closed. Only re-evaluate sections that were touched or are adjacent to a change.
+
 ## Reporting
 
 - Cite the specific story ID and AC label (e.g., "E-034-03, AC-5") for every finding.
 - Group findings by checklist category.
 - Rate each finding: **P1** (blocks READY), **P2** (should fix before READY), **P3** (minor, fix if easy).
-- If the spec is clean across all nine categories, state explicitly: "No findings. This epic is ready to mark READY."
+- If the spec is clean across all categories, state explicitly: "No findings. This epic is ready to mark READY."
 - Do not report stylistic opinions on prose quality unless they cause genuine ambiguity in a testable AC.

@@ -4,7 +4,7 @@
 [E-105: Spec Review Exhaustiveness](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, story and epic templates discourage AC-level duplication of Technical Notes, and the PM agent definition includes a self-review gate that catches cascade drift before handing back to reviewers.

@@ -1,7 +1,7 @@
 # E-105: Spec Review Exhaustiveness
 
 ## Status
-`READY`
+`COMPLETED`
 
 ## Overview
 Harden the spec review process so that multi-round review drift -- the pattern where each fix pass introduces new inconsistencies -- is structurally prevented rather than manually caught. E-072 required four refinement rounds because the rubric missed consistency/propagation checks, templates encouraged duplication, and the PM lacked a self-review gate.
@@ -37,8 +37,8 @@ Three independent analyses (PM, CR, CA) converged on the same root causes and de
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-105-01 | Spec review rubric hardening | TODO | None | - |
-| E-105-02 | Template and PM self-review gate | TODO | None | - |
+| E-105-01 | Spec review rubric hardening | DONE | None | arch-01 |
+| E-105-02 | Template and PM self-review gate | DONE | None | arch-02 |
 
 ## Dispatch Team
 - claude-architect
@@ -91,3 +91,4 @@ None.
 
 ## History
 - 2026-03-13: Created. Motivated by E-072's four-round refinement experience. Root causes and deliverables produced by convergent analysis from PM, CR, and CA during E-072 troubleshooting session.
+- 2026-03-15: Completed. Both stories implemented by claude-architect and approved by code-reviewer. Deliverables: (1) spec review rubric hardened with 3 new epic-level categories (10-12), facts-table methodology, and re-review protocol; (2) story and epic templates updated with reference-not-restate guidance; (3) PM agent definition gains post-incorporation consistency sweep gate. No documentation impact. Context-layer assessment: T1 (new agent capability) YES -- PM post-incorporation sweep is a new PM behavior; T2 (workflow change) YES -- spec review rubric expanded; T3 NO; T4 (agent behavior change) YES -- PM agent definition modified with new self-review gate (codification is the deliverable itself); T5-T6 NO. Codification handled inline (changes ARE the context-layer updates).

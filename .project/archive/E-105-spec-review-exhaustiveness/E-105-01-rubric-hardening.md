@@ -4,7 +4,7 @@
 [E-105: Spec Review Exhaustiveness](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the spec review rubric at `.project/codex-spec-review.md` catches consistency, propagation, and surface area errors that caused E-072's multi-round drift. Reviewers build a facts table before checking individual items, and re-reviews are scoped to changes only.
