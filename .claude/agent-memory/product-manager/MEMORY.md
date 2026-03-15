@@ -1,8 +1,8 @@
 # Product Manager -- Agent Memory
 
 ## Numbering State
-- Next available epic number: E-109
-- Epics created: E-001 through E-108 (E-001, E-003, E-005, E-006, E-007, E-008, E-010, E-011, E-012, E-013, E-014, E-015, E-016, E-017, E-018, E-019, E-020, E-021, E-022, E-024, E-025, E-026, E-027, E-028, E-029, E-030, E-031, E-032, E-033, E-034, E-035, E-036, E-037, E-038, E-042, E-044, E-046, E-048, E-049, E-050, E-052, E-053, E-054, E-056, E-057, E-058, E-055, E-059, E-060, E-061, E-075, E-081, E-084, E-087, E-088, E-089, E-090, E-091, E-092 archived; E-093, E-094, E-095 archived; E-096 archived; E-097 archived; E-098 archived; E-099 archived; E-100 active; E-101 archived; E-102 active; E-103 archived; E-104 active; E-105 active; E-106 draft; E-107 draft; E-108 draft)
+- Next available epic number: E-111
+- Epics created: E-001 through E-110 (E-001, E-003, E-005, E-006, E-007, E-008, E-010, E-011, E-012, E-013, E-014, E-015, E-016, E-017, E-018, E-019, E-020, E-021, E-022, E-024, E-025, E-026, E-027, E-028, E-029, E-030, E-031, E-032, E-033, E-034, E-035, E-036, E-037, E-038, E-042, E-044, E-046, E-048, E-049, E-050, E-052, E-053, E-054, E-056, E-057, E-058, E-055, E-059, E-060, E-061, E-075, E-081, E-084, E-087, E-088, E-089, E-090, E-091, E-092 archived; E-093, E-094, E-095 archived; E-096 archived; E-097 archived; E-098 archived; E-099 archived; E-100 active; E-101 archived; E-102 active; E-103 archived; E-104 active; E-105 active; E-106 draft; E-107 ready; E-108 draft; E-109 ready; E-110 draft)
 - Next available idea number: IDEA-025
 - Ideas created: IDEA-001 through IDEA-024
 
@@ -32,6 +32,8 @@
 - E-104 (READY): Athlete Profile Endpoint Probe -- Opponent Player Access -- 2 stories. api-scout probes four athlete-profile endpoints for opponent player access. Confirm endpoints independently (01), document player_id->athlete_profile_id lookup path (02). Wave: 01 -> 02. Pure API exploration, no code changes. Motivated by cross-team player identity discovery during 2026-03-13 vision session. E-100 adding gc_athlete_profile_id column; this epic determines how to populate it.
 - E-105 (READY): Spec Review Exhaustiveness -- 2 stories. Harden spec review to prevent multi-round drift. Rubric hardening: add categories 10-12 (consistency, propagation, surface area) + complete-model methodology + re-review scoping (01). Template + PM gate: reference-not-restate guidance in story/epic templates + AC complexity soft limit + PM self-review grep sweep gate (02). All context-layer work via claude-architect. Both stories parallel-safe. Motivated by E-072's four-round refinement experience.
 - E-108 (DRAFT): PM as Dispatch Teammate -- 2 stories. Spawn PM as teammate during dispatch for status management + AC verification. Update dispatch-pattern.md (01), implement SKILL.md (02). Wave: 01 -> 02. All context-layer work via claude-architect. No expert consultation required -- PM-domain process improvement.
+- E-109 (READY): tmux Window Rename for All Epic Team Sessions -- 1 story. Add tmux rename convention to CLAUDE.md Terminal Modes section so all epic-related team sessions (not just dispatch) rename the window. Single CLAUDE.md edit. claude-architect. No dependencies. Extends E-090 (dispatch-only rename) to all team sessions.
+- E-110 (DRAFT): Iterative Review Rounds Convention -- 2 stories. Codify the iterative review/refinement rounds pattern into a skill file (`.claude/skills/review-rounds/SKILL.md`) + CLAUDE.md Workflows entry. Covers both variants: refinement rounds (pre-dispatch spec review) and review rounds (post-implementation code review). Core loop: review -> early exit if clean -> triage -> fix -> respawn with fresh context -> repeat N times. Wraps existing skills (codex-spec-review, codex-review) without modifying them. All context-layer work via claude-architect. Wave: 01 -> 02.
 - E-101 (COMPLETED): BB CLI Help and Discoverability -- see Archived Epics.
 
 ## Archived Epics
