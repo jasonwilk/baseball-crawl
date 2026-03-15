@@ -88,10 +88,10 @@ async def team_stats(request: Request) -> Response:
     requested_team_id_raw = request.query_params.get("team_id")
     if requested_team_id_raw:
         try:
-            requested_team_id: int | None = int(requested_team_id_raw)
+            requested_team_id: int = int(requested_team_id_raw)
         except (ValueError, TypeError):
-            requested_team_id = None
-        if requested_team_id is None or requested_team_id not in permitted_teams:
+            return HTMLResponse(content="Bad Request", status_code=400)
+        if requested_team_id not in permitted_teams:
             return HTMLResponse(content="Forbidden", status_code=403)
         active_team_id: int = requested_team_id
     else:
@@ -222,10 +222,10 @@ async def team_pitching(request: Request) -> Response:
     requested_team_id_raw = request.query_params.get("team_id")
     if requested_team_id_raw:
         try:
-            requested_team_id_int: int | None = int(requested_team_id_raw)
+            requested_team_id_int: int = int(requested_team_id_raw)
         except (ValueError, TypeError):
-            requested_team_id_int = None
-        if requested_team_id_int is None or requested_team_id_int not in permitted_teams:
+            return HTMLResponse(content="Bad Request", status_code=400)
+        if requested_team_id_int not in permitted_teams:
             return HTMLResponse(content="Forbidden", status_code=403)
         active_team_id_p: int = requested_team_id_int
     else:
@@ -267,7 +267,7 @@ async def team_pitching(request: Request) -> Response:
     )
 
 
-def _compute_wl(game: dict, team_id: str) -> str:
+def _compute_wl(game: dict, team_id: int) -> str:
     """Compute W/L indicator from a game dict for the given team_id.
 
     Returns ``"W"``, ``"L"``, or ``"-"`` if scores are null.
@@ -329,10 +329,10 @@ async def game_list(request: Request) -> Response:
     requested_team_id_raw = request.query_params.get("team_id")
     if requested_team_id_raw:
         try:
-            requested_team_id_g: int | None = int(requested_team_id_raw)
+            requested_team_id_g: int = int(requested_team_id_raw)
         except (ValueError, TypeError):
-            requested_team_id_g = None
-        if requested_team_id_g is None or requested_team_id_g not in permitted_teams:
+            return HTMLResponse(content="Bad Request", status_code=400)
+        if requested_team_id_g not in permitted_teams:
             return HTMLResponse(content="Forbidden", status_code=403)
         active_team_id_g: int = requested_team_id_g
     else:
@@ -506,10 +506,10 @@ async def opponent_list(request: Request) -> Response:
     requested_team_id_raw = request.query_params.get("team_id")
     if requested_team_id_raw:
         try:
-            requested_team_id_o: int | None = int(requested_team_id_raw)
+            requested_team_id_o: int = int(requested_team_id_raw)
         except (ValueError, TypeError):
-            requested_team_id_o = None
-        if requested_team_id_o is None or requested_team_id_o not in permitted_teams:
+            return HTMLResponse(content="Bad Request", status_code=400)
+        if requested_team_id_o not in permitted_teams:
             return HTMLResponse(content="Forbidden", status_code=403)
         active_team_id_o: int = requested_team_id_o
     else:

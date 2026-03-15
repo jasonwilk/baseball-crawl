@@ -366,11 +366,11 @@ class TestTeamAccessControl:
         response = client.get("/dashboard?team_id=9999")
         assert response.status_code == 403
 
-    def test_non_integer_team_id_returns_403(self, single_team_client) -> None:
-        """A non-numeric team_id string also returns 403 (cannot parse to int)."""
+    def test_non_integer_team_id_returns_400(self, single_team_client) -> None:
+        """AC-8(d): a non-numeric team_id query param returns HTTP 400."""
         client, _, _ = single_team_client
         response = client.get("/dashboard?team_id=no-such-team")
-        assert response.status_code == 403
+        assert response.status_code == 400
 
     def test_default_view_uses_first_permitted_team(
         self, single_team_client
@@ -481,3 +481,56 @@ class TestNoAssignments:
         assert response.status_code == 200
         # Stats table should not be present
         assert "<table" not in response.text
+
+
+# ---------------------------------------------------------------------------
+# AC-8(c): INTEGER team references in team selector (AC-5, AC-6)
+# ---------------------------------------------------------------------------
+
+
+class TestIntegerTeamSelectorLinks:
+    """Verify team selector renders INTEGER team_id values in links (AC-5, AC-6, AC-8c)."""
+
+    def test_team_selector_contains_integer_team_id(
+        self, multi_team_client
+    ) -> None:
+        """AC-8(c): team selector href contains the INTEGER team_id, not a text slug."""
+        client, team_alpha_id, team_beta_id = multi_team_client
+        response = client.get("/dashboard")
+        assert response.status_code == 200
+        html = response.text
+        # The team selector must render links with integer team IDs
+        assert f"team_id={team_alpha_id}" in html
+        assert f"team_id={team_beta_id}" in html
+
+    def test_non_numeric_team_id_returns_400_pitching(
+        self, single_team_client
+    ) -> None:
+        """AC-8(d): non-numeric team_id returns 400 on pitching route."""
+        client, _, _ = single_team_client
+        response = client.get("/dashboard/pitching?team_id=not-a-number")
+        assert response.status_code == 400
+
+    def test_non_numeric_team_id_returns_400_games(
+        self, single_team_client
+    ) -> None:
+        """AC-8(d): non-numeric team_id returns 400 on games route."""
+        client, _, _ = single_team_client
+        response = client.get("/dashboard/games?team_id=not-a-number")
+        assert response.status_code == 400
+
+    def test_unpermitted_integer_team_id_returns_403(
+        self, single_team_client
+    ) -> None:
+        """AC-8(e): a valid integer team_id not in permitted_teams returns 403."""
+        client, _, team_beta_id = single_team_client
+        response = client.get(f"/dashboard?team_id={team_beta_id}")
+        assert response.status_code == 403
+
+    def test_nonexistent_integer_team_id_returns_403(
+        self, single_team_client
+    ) -> None:
+        """AC-8(e): an integer team_id that doesn't exist returns 403 (not 404)."""
+        client, _, _ = single_team_client
+        response = client.get("/dashboard?team_id=99999")
+        assert response.status_code == 403

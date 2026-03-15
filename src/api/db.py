@@ -267,7 +267,7 @@ def get_game_box_score(game_id: str) -> dict[str, Any]:
               away_team_id (int), home_score, away_score, home_team_name,
               away_team_name
             - ``teams``: list of two dicts, each with:
-                - team_id (int), team_name
+                - id (int), team_name
                 - batting_lines: list of player batting dicts
                 - pitching_lines: list of player pitching dicts
         Returns ``{}`` on DB error or missing game.
@@ -352,7 +352,7 @@ def get_game_box_score(game_id: str) -> dict[str, Any]:
         team_name = game["home_team_name"] if tid == home_id else game["away_team_name"]
         teams_data.append(
             {
-                "team_id": tid,
+                "id": tid,
                 "team_name": team_name or str(tid),
                 "batting_lines": batting_by_team.get(tid, []),
                 "pitching_lines": pitching_by_team.get(tid, []),
