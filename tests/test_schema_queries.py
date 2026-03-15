@@ -223,7 +223,7 @@ class TestTeamRosterByOBP:
           ON tr.player_id = psb.player_id
          AND tr.team_id   = psb.team_id
          AND tr.season_id = psb.season_id
-        WHERE psb.team_id  = 'TEAM_VARSITY'
+        WHERE psb.team_id  = (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY')
           AND psb.season_id = '2026-spring-hs'
         ORDER BY obp DESC;
     """
@@ -291,18 +291,25 @@ class TestTeamWinLossRecord:
     _QUERY = """
         SELECT
             SUM(CASE
-                WHEN home_team_id = 'TEAM_VARSITY' AND home_score > away_score THEN 1
-                WHEN away_team_id = 'TEAM_VARSITY' AND away_score > home_score THEN 1
+                WHEN home_team_id = (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY')
+                     AND home_score > away_score THEN 1
+                WHEN away_team_id = (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY')
+                     AND away_score > home_score THEN 1
                 ELSE 0
             END) AS wins,
             SUM(CASE
-                WHEN home_team_id = 'TEAM_VARSITY' AND home_score < away_score THEN 1
-                WHEN away_team_id = 'TEAM_VARSITY' AND away_score < home_score THEN 1
+                WHEN home_team_id = (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY')
+                     AND home_score < away_score THEN 1
+                WHEN away_team_id = (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY')
+                     AND away_score < home_score THEN 1
                 ELSE 0
             END) AS losses
         FROM games
         WHERE season_id = '2026-spring-hs'
-          AND (home_team_id = 'TEAM_VARSITY' OR away_team_id = 'TEAM_VARSITY');
+          AND (
+            home_team_id = (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY')
+            OR away_team_id = (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY')
+          );
     """
 
     def test_win_count(self, seeded_db: sqlite3.Connection) -> None:
@@ -404,7 +411,7 @@ class TestPitcherLeaderboardByK9:
             player_id,
             so * 27.0 / ip_outs AS k9
         FROM player_season_pitching
-        WHERE team_id  = 'TEAM_VARSITY'
+        WHERE team_id  = (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY')
           AND season_id = '2026-spring-hs'
           AND ip_outs > 0
         ORDER BY k9 DESC;
@@ -480,9 +487,9 @@ class TestPitcherLeaderboardByK9:
 
 
 class TestCrawlConfigQuery:
-    """AC-10: SELECT team_id, name FROM teams WHERE is_active = 1."""
+    """AC-10: SELECT gc_uuid FROM teams WHERE is_active = 1 (teams use INTEGER PK in E-100)."""
 
-    _QUERY = "SELECT team_id FROM teams WHERE is_active = 1 ORDER BY team_id;"
+    _QUERY = "SELECT gc_uuid FROM teams WHERE is_active = 1 ORDER BY gc_uuid;"
 
     def test_active_teams_count(self, seeded_db: sqlite3.Connection) -> None:
         """Exactly 4 teams are active in the seed data."""
@@ -492,18 +499,18 @@ class TestCrawlConfigQuery:
     def test_inactive_team_excluded(self, seeded_db: sqlite3.Connection) -> None:
         """TEAM_OPP_B (is_active=0) is not in the crawl config results."""
         rows = seeded_db.execute(self._QUERY).fetchall()
-        team_ids = {r[0] for r in rows}
-        assert "TEAM_OPP_B" not in team_ids, (
+        gc_uuids = {r[0] for r in rows}
+        assert "TEAM_OPP_B" not in gc_uuids, (
             "TEAM_OPP_B (inactive) should not appear in crawl config results"
         )
 
     def test_active_teams_present(self, seeded_db: sqlite3.Connection) -> None:
         """All four active teams appear in the crawl config results."""
         rows = seeded_db.execute(self._QUERY).fetchall()
-        team_ids = {r[0] for r in rows}
-        for expected_id in ("TEAM_VARSITY", "TEAM_JV", "TEAM_OPP_A", "TEAM_OPP_C"):
-            assert expected_id in team_ids, (
-                f"{expected_id} should be in crawl config but is missing"
+        gc_uuids = {r[0] for r in rows}
+        for expected_gc_uuid in ("TEAM_VARSITY", "TEAM_JV", "TEAM_OPP_A", "TEAM_OPP_C"):
+            assert expected_gc_uuid in gc_uuids, (
+                f"{expected_gc_uuid} should be in crawl config but is missing"
             )
 
     def test_query_performance(self, seeded_db: sqlite3.Connection) -> None:

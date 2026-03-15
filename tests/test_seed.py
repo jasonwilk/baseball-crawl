@@ -240,26 +240,26 @@ class TestSeedRowCounts:
         )
 
     def test_teams_includes_lincoln_team(self, seeded_db: Path) -> None:
-        """At least one team is an owned (Lincoln) team."""
+        """At least one team is a member (Lincoln) team."""
         conn = sqlite3.connect(str(seeded_db))
         try:
             count = conn.execute(
-                "SELECT COUNT(*) FROM teams WHERE is_owned = 1;"
+                "SELECT COUNT(*) FROM teams WHERE membership_type = 'member';"
             ).fetchone()[0]
         finally:
             conn.close()
-        assert count >= 1, "No owned (Lincoln) teams found in seed data"
+        assert count >= 1, "No member (Lincoln) teams found in seed data"
 
     def test_teams_includes_opponent(self, seeded_db: Path) -> None:
-        """At least one team is an opponent (is_owned = 0)."""
+        """At least one team is a tracked opponent."""
         conn = sqlite3.connect(str(seeded_db))
         try:
             count = conn.execute(
-                "SELECT COUNT(*) FROM teams WHERE is_owned = 0;"
+                "SELECT COUNT(*) FROM teams WHERE membership_type = 'tracked';"
             ).fetchone()[0]
         finally:
             conn.close()
-        assert count >= 1, "No opponent teams found in seed data"
+        assert count >= 1, "No tracked opponent teams found in seed data"
 
     def test_player_game_batting_references_valid_games(
         self, seeded_db: Path
@@ -304,8 +304,8 @@ class TestSeedRowCounts:
             count = conn.execute(
                 """
                 SELECT COUNT(*) FROM player_season_batting psb
-                JOIN teams t ON t.team_id = psb.team_id
-                WHERE t.is_owned = 1;
+                JOIN teams t ON t.id = psb.team_id
+                WHERE t.membership_type = 'member';
                 """
             ).fetchone()[0]
         finally:

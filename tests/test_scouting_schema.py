@@ -79,13 +79,18 @@ def migrated_db(fresh_db: Path) -> Generator[sqlite3.Connection, None, None]:
 # ---------------------------------------------------------------------------
 
 
-def _insert_team(conn: sqlite3.Connection, team_id: str, name: str) -> None:
-    """Insert a minimal team row."""
-    conn.execute(
-        "INSERT INTO teams (team_id, name) VALUES (?, ?)",
-        (team_id, name),
+def _insert_team(conn: sqlite3.Connection, team_id: str, name: str) -> int:
+    """Insert a minimal team row and return its INTEGER id.
+
+    The team_id parameter is unused (teams now use INTEGER AUTOINCREMENT PK),
+    but kept for backward compatibility with existing test call sites.
+    """
+    cursor = conn.execute(
+        "INSERT INTO teams (name, membership_type) VALUES (?, ?)",
+        (name, "tracked"),
     )
     conn.commit()
+    return cursor.lastrowid
 
 
 def _insert_season(conn: sqlite3.Connection, season_id: str) -> None:
@@ -99,13 +104,16 @@ def _insert_season(conn: sqlite3.Connection, season_id: str) -> None:
 
 def _insert_scouting_run(
     conn: sqlite3.Connection,
-    team_id: str,
+    team_id: int,
     season_id: str,
     run_type: str = "full",
     started_at: str = "2026-03-12T10:00:00Z",
     status: str = "running",
 ) -> None:
-    """Insert a minimal scouting_run row."""
+    """Insert a minimal scouting_run row.
+
+    team_id must be an INTEGER (the teams.id value), not a string.
+    """
     conn.execute(
         "INSERT INTO scouting_runs (team_id, season_id, run_type, started_at, status) "
         "VALUES (?, ?, ?, ?, ?)",
@@ -161,13 +169,13 @@ class TestMigration007ScoutingRuns:
 
     def test_first_fetched_set_by_default(self, migrated_db: sqlite3.Connection) -> None:
         """first_fetched is populated automatically via DEFAULT on insert (AC-1, AC-7)."""
-        _insert_team(migrated_db, "team-001", "Opponent A")
+        team_id = _insert_team(migrated_db, "team-001", "Opponent A")
         _insert_season(migrated_db, "2025-spring-hs")
-        _insert_scouting_run(migrated_db, "team-001", "2025-spring-hs")
+        _insert_scouting_run(migrated_db, team_id, "2025-spring-hs")
 
         cursor = migrated_db.execute(
             "SELECT first_fetched FROM scouting_runs WHERE team_id = ?",
-            ("team-001",),
+            (team_id,),
         )
         row = cursor.fetchone()
         assert row is not None
@@ -175,13 +183,13 @@ class TestMigration007ScoutingRuns:
 
     def test_last_checked_set_by_default(self, migrated_db: sqlite3.Connection) -> None:
         """last_checked is populated automatically via DEFAULT on insert (AC-1, AC-7)."""
-        _insert_team(migrated_db, "team-002", "Opponent B")
+        team_id = _insert_team(migrated_db, "team-002", "Opponent B")
         _insert_season(migrated_db, "2025-spring-hs")
-        _insert_scouting_run(migrated_db, "team-002", "2025-spring-hs")
+        _insert_scouting_run(migrated_db, team_id, "2025-spring-hs")
 
         cursor = migrated_db.execute(
             "SELECT last_checked FROM scouting_runs WHERE team_id = ?",
-            ("team-002",),
+            (team_id,),
         )
         row = cursor.fetchone()
         assert row is not None
@@ -189,21 +197,21 @@ class TestMigration007ScoutingRuns:
 
     def test_unique_constraint_enforced(self, migrated_db: sqlite3.Connection) -> None:
         """Inserting a duplicate (team_id, season_id, run_type) raises IntegrityError (AC-4)."""
-        _insert_team(migrated_db, "team-003", "Opponent C")
+        team_id = _insert_team(migrated_db, "team-003", "Opponent C")
         _insert_season(migrated_db, "2025-spring-hs")
-        _insert_scouting_run(migrated_db, "team-003", "2025-spring-hs", run_type="boxscores")
+        _insert_scouting_run(migrated_db, team_id, "2025-spring-hs", run_type="boxscores")
 
         with pytest.raises(sqlite3.IntegrityError):
             migrated_db.execute(
                 "INSERT INTO scouting_runs (team_id, season_id, run_type, started_at) "
                 "VALUES (?, ?, ?, ?)",
-                ("team-003", "2025-spring-hs", "boxscores", "2026-03-12T11:00:00Z"),
+                (team_id, "2025-spring-hs", "boxscores", "2026-03-12T11:00:00Z"),
             )
             migrated_db.commit()
 
     def test_on_conflict_preserves_first_fetched(self, migrated_db: sqlite3.Connection) -> None:
         """ON CONFLICT DO UPDATE updates last_checked without overwriting first_fetched (AC-4)."""
-        _insert_team(migrated_db, "team-004", "Opponent D")
+        team_id = _insert_team(migrated_db, "team-004", "Opponent D")
         _insert_season(migrated_db, "2025-spring-hs")
 
         original_first_fetched = "2026-01-01T10:00:00.000Z"
@@ -212,7 +220,7 @@ class TestMigration007ScoutingRuns:
             "(team_id, season_id, run_type, started_at, status, first_fetched, last_checked) "
             "VALUES (?, ?, ?, ?, ?, ?, ?)",
             (
-                "team-004",
+                team_id,
                 "2025-spring-hs",
                 "full",
                 "2026-01-01T10:00:00Z",
@@ -234,7 +242,7 @@ class TestMigration007ScoutingRuns:
             "started_at   = excluded.started_at, "
             "status       = excluded.status",
             (
-                "team-004",
+                team_id,
                 "2025-spring-hs",
                 "full",
                 "2026-03-12T12:00:00Z",
@@ -247,7 +255,7 @@ class TestMigration007ScoutingRuns:
 
         cursor = migrated_db.execute(
             "SELECT first_fetched, last_checked FROM scouting_runs WHERE team_id = ?",
-            ("team-004",),
+            (team_id,),
         )
         row = cursor.fetchone()
         assert row is not None
@@ -260,21 +268,21 @@ class TestMigration007ScoutingRuns:
 
     def test_completed_at_is_nullable(self, migrated_db: sqlite3.Connection) -> None:
         """completed_at defaults to NULL (run is in progress until explicitly set)."""
-        _insert_team(migrated_db, "team-005", "Opponent E")
+        team_id = _insert_team(migrated_db, "team-005", "Opponent E")
         _insert_season(migrated_db, "2025-spring-hs")
-        _insert_scouting_run(migrated_db, "team-005", "2025-spring-hs")
+        _insert_scouting_run(migrated_db, team_id, "2025-spring-hs")
 
         cursor = migrated_db.execute(
             "SELECT completed_at FROM scouting_runs WHERE team_id = ?",
-            ("team-005",),
+            (team_id,),
         )
         row = cursor.fetchone()
         assert row is not None
         assert row[0] is None, "completed_at should be NULL by default"
 
     def test_status_check_constraint_rejects_invalid(self, migrated_db: sqlite3.Connection) -> None:
-        """Inserting a status value not in ('running', 'completed', 'failed') raises (AC-1)."""
-        _insert_team(migrated_db, "team-006", "Opponent F")
+        """Inserting a status value not in ('pending','running','completed','failed') raises."""
+        team_id = _insert_team(migrated_db, "team-006", "Opponent F")
         _insert_season(migrated_db, "2025-spring-hs")
 
         with pytest.raises(sqlite3.IntegrityError):
@@ -282,20 +290,20 @@ class TestMigration007ScoutingRuns:
                 "INSERT INTO scouting_runs "
                 "(team_id, season_id, run_type, started_at, status) "
                 "VALUES (?, ?, ?, ?, ?)",
-                ("team-006", "2025-spring-hs", "full", "2026-03-12T10:00:00Z", "bad_status"),
+                (team_id, "2025-spring-hs", "full", "2026-03-12T10:00:00Z", "bad_status"),
             )
             migrated_db.commit()
 
     def test_nullable_count_columns(self, migrated_db: sqlite3.Connection) -> None:
         """games_found, games_crawled, and players_found are nullable."""
-        _insert_team(migrated_db, "team-007", "Opponent G")
+        team_id = _insert_team(migrated_db, "team-007", "Opponent G")
         _insert_season(migrated_db, "2025-spring-hs")
-        _insert_scouting_run(migrated_db, "team-007", "2025-spring-hs")
+        _insert_scouting_run(migrated_db, team_id, "2025-spring-hs")
 
         cursor = migrated_db.execute(
             "SELECT games_found, games_crawled, players_found FROM scouting_runs "
             "WHERE team_id = ?",
-            ("team-007",),
+            (team_id,),
         )
         row = cursor.fetchone()
         assert row is not None
@@ -331,53 +339,54 @@ class TestMigration008TeamsGcUuid:
         assert "gc_uuid" in columns, "gc_uuid column not found in teams table"
 
     def test_gc_uuid_is_nullable(self, migrated_db: sqlite3.Connection) -> None:
-        """Inserting a team without gc_uuid succeeds; column defaults to NULL (AC-9)."""
-        migrated_db.execute(
-            "INSERT INTO teams (team_id, name) VALUES (?, ?)",
-            ("team-gc-001", "Test Opponent"),
+        """Inserting a team without gc_uuid succeeds; column defaults to NULL."""
+        cursor = migrated_db.execute(
+            "INSERT INTO teams (name, membership_type) VALUES (?, ?)",
+            ("Test Opponent", "tracked"),
         )
         migrated_db.commit()
+        team_id = cursor.lastrowid
 
-        cursor = migrated_db.execute(
-            "SELECT gc_uuid FROM teams WHERE team_id = ?",
-            ("team-gc-001",),
-        )
-        row = cursor.fetchone()
+        row = migrated_db.execute(
+            "SELECT gc_uuid FROM teams WHERE id = ?",
+            (team_id,),
+        ).fetchone()
         assert row is not None
         assert row[0] is None, f"Expected NULL gc_uuid, got: {row[0]}"
 
     def test_gc_uuid_unique_constraint_on_non_null(self, migrated_db: sqlite3.Connection) -> None:
-        """Two teams with the same non-NULL gc_uuid raises IntegrityError (AC-9)."""
+        """Two teams with the same non-NULL gc_uuid raises IntegrityError."""
         migrated_db.execute(
-            "INSERT INTO teams (team_id, name, gc_uuid) VALUES (?, ?, ?)",
-            ("team-gc-002", "Team A", "uuid-aabbccdd-1122-3344"),
+            "INSERT INTO teams (name, membership_type, gc_uuid) VALUES (?, ?, ?)",
+            ("Team A", "tracked", "uuid-aabbccdd-1122-3344"),
         )
         migrated_db.commit()
 
         with pytest.raises(sqlite3.IntegrityError):
             migrated_db.execute(
-                "INSERT INTO teams (team_id, name, gc_uuid) VALUES (?, ?, ?)",
-                ("team-gc-003", "Team B", "uuid-aabbccdd-1122-3344"),
+                "INSERT INTO teams (name, membership_type, gc_uuid) VALUES (?, ?, ?)",
+                ("Team B", "tracked", "uuid-aabbccdd-1122-3344"),
             )
             migrated_db.commit()
 
     def test_multiple_null_gc_uuids_allowed(self, migrated_db: sqlite3.Connection) -> None:
-        """Multiple teams with gc_uuid = NULL succeeds (partial index, not regular UNIQUE) (AC-9)."""
+        """Multiple teams with gc_uuid = NULL succeeds (partial index, not regular UNIQUE)."""
         for i in range(3):
             migrated_db.execute(
-                "INSERT INTO teams (team_id, name, gc_uuid) VALUES (?, ?, ?)",
-                (f"team-gc-null-{i}", f"Null Team {i}", None),
+                "INSERT INTO teams (name, membership_type, gc_uuid) VALUES (?, ?, ?)",
+                (f"Null Team {i}", "tracked", None),
             )
         migrated_db.commit()
 
+        # All three should be NULL (partial index allows multiple NULLs)
         cursor = migrated_db.execute(
-            "SELECT COUNT(*) FROM teams WHERE gc_uuid IS NULL AND team_id LIKE 'team-gc-null-%';"
+            "SELECT COUNT(*) FROM teams WHERE gc_uuid IS NULL;"
         )
         count = cursor.fetchone()[0]
-        assert count == 3, f"Expected 3 NULL-gc_uuid rows, got: {count}"
+        assert count >= 3, f"Expected at least 3 NULL-gc_uuid rows, got: {count}"
 
     def test_gc_uuid_index_exists(self, migrated_db: sqlite3.Connection) -> None:
-        """After all migrations, idx_teams_gc_uuid index exists (AC-8)."""
+        """idx_teams_gc_uuid index exists after migration."""
         cursor = migrated_db.execute(
             "SELECT name FROM sqlite_master "
             "WHERE type='index' AND name='idx_teams_gc_uuid';"
@@ -387,26 +396,25 @@ class TestMigration008TeamsGcUuid:
     def test_gc_uuid_can_store_uuid_string(self, migrated_db: sqlite3.Connection) -> None:
         """A team can store a valid UUID in gc_uuid."""
         gc_uuid = "a1b2c3d4-e5f6-aaaa-bbbb-ccddeeaabbcc"
-        migrated_db.execute(
-            "INSERT INTO teams (team_id, name, gc_uuid) VALUES (?, ?, ?)",
-            ("team-gc-004", "Team With UUID", gc_uuid),
+        cursor = migrated_db.execute(
+            "INSERT INTO teams (name, membership_type, gc_uuid) VALUES (?, ?, ?)",
+            ("Team With UUID", "tracked", gc_uuid),
         )
         migrated_db.commit()
+        team_id = cursor.lastrowid
 
-        cursor = migrated_db.execute(
-            "SELECT gc_uuid FROM teams WHERE team_id = ?",
-            ("team-gc-004",),
-        )
-        row = cursor.fetchone()
+        row = migrated_db.execute(
+            "SELECT gc_uuid FROM teams WHERE id = ?",
+            (team_id,),
+        ).fetchone()
         assert row is not None
         assert row[0] == gc_uuid, f"Expected {gc_uuid}, got: {row[0]}"
 
-    def test_migration_008_after_007(self, fresh_db: Path) -> None:
-        """Migration 008 applies cleanly after 007 (not just on a fresh DB) (AC-9)."""
+    def test_scouting_runs_and_gc_uuid_coexist(self, fresh_db: Path) -> None:
+        """scouting_runs table and gc_uuid column both exist in the initial schema."""
         run_migrations(db_path=fresh_db)
 
         conn = sqlite3.connect(str(fresh_db))
-        # Verify both scouting_runs (007) and gc_uuid (008) are present
         cursor = conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name='scouting_runs';"
         )
@@ -414,5 +422,5 @@ class TestMigration008TeamsGcUuid:
 
         cursor = conn.execute("PRAGMA table_info(teams);")
         columns = {row[1] for row in cursor.fetchall()}
-        assert "gc_uuid" in columns, "gc_uuid column missing after 007+008"
+        assert "gc_uuid" in columns, "gc_uuid column missing from teams"
         conn.close()

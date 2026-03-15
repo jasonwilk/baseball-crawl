@@ -1,4 +1,4 @@
-"""Tests for apply_migrations.py (E-009-02 AC-3, AC-4).
+"""Tests for apply_migrations.py (E-009-02 AC-3, AC-4; updated E-100-01).
 
 Verifies that:
 - Migrations apply correctly to a fresh database (AC-3).
@@ -17,7 +17,6 @@ from __future__ import annotations
 import sqlite3
 import sys
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
@@ -81,6 +80,23 @@ class TestMigrationFiles:
         for f in files:
             assert f.suffix == ".sql", f"Unexpected file: {f}"
 
+    def test_only_001_initial_schema_exists(self) -> None:
+        """After E-100-01 archive, only 001_initial_schema.sql exists in migrations/."""
+        files = collect_migration_files()
+        names = [f.name for f in files]
+        assert "001_initial_schema.sql" in names
+        # Archived migrations should not be present
+        archived = {
+            "003_auth.sql",
+            "004_coaching_assignments.sql",
+            "005_teams_public_id.sql",
+            "006_opponent_links.sql",
+            "007_scouting_runs.sql",
+            "008_teams_gc_uuid.sql",
+        }
+        unexpected = archived & set(names)
+        assert not unexpected, f"Archived migrations still in migrations/: {unexpected}"
+
 
 class TestRunMigrations:
     """Verify apply behavior on a fresh and an existing database."""
@@ -106,13 +122,26 @@ class TestRunMigrations:
         """run_migrations creates all expected schema tables."""
         run_migrations(db_path=fresh_db)
         expected_tables = {
+            "programs",
+            "seasons",
             "players",
             "teams",
+            "team_opponents",
             "team_rosters",
             "games",
             "player_game_batting",
             "player_game_pitching",
             "player_season_batting",
+            "player_season_pitching",
+            "spray_charts",
+            "opponent_links",
+            "scouting_runs",
+            "users",
+            "user_team_access",
+            "magic_link_tokens",
+            "passkey_credentials",
+            "sessions",
+            "coaching_assignments",
         }
         conn = sqlite3.connect(str(fresh_db))
         cursor = conn.execute(
@@ -190,85 +219,15 @@ class TestRunMigrations:
         run_migrations(db_path=nested_db)
         assert nested_db.exists()
 
-
-class TestMigration005TeamsPublicId:
-    """Verify migration 005: public_id column added to teams table (E-042-01)."""
-
-    def test_public_id_column_exists(self, fresh_db: Path) -> None:
-        """After migration 005, teams table has a public_id column."""
+    def test_programs_seed_row_inserted(self, fresh_db: Path) -> None:
+        """001_initial_schema.sql inserts the lsb-hs program seed row."""
         run_migrations(db_path=fresh_db)
         conn = sqlite3.connect(str(fresh_db))
-        cursor = conn.execute("PRAGMA table_info(teams);")
-        columns = {row[1] for row in cursor.fetchall()}
+        row = conn.execute(
+            "SELECT program_id, name, program_type FROM programs WHERE program_id = 'lsb-hs';"
+        ).fetchone()
         conn.close()
-        assert "public_id" in columns, "public_id column not found in teams table"
-
-    def test_existing_rows_have_null_public_id(self, fresh_db: Path) -> None:
-        """Existing teams rows have public_id = NULL after migration (no data loss)."""
-        run_migrations(db_path=fresh_db)
-        conn = sqlite3.connect(str(fresh_db))
-        # Insert a team without public_id (simulating a pre-migration row)
-        conn.execute(
-            "INSERT INTO teams (team_id, name) VALUES (?, ?)",
-            ("team-uuid-001", "Test Team"),
-        )
-        conn.commit()
-        cursor = conn.execute(
-            "SELECT public_id FROM teams WHERE team_id = ?", ("team-uuid-001",)
-        )
-        row = cursor.fetchone()
-        conn.close()
-        assert row is not None, "Team row not found"
-        assert row[0] is None, f"Expected NULL public_id, got: {row[0]}"
-
-    def test_unique_constraint_rejects_duplicate_public_id(self, fresh_db: Path) -> None:
-        """Inserting two teams with the same non-NULL public_id raises IntegrityError."""
-        run_migrations(db_path=fresh_db)
-        conn = sqlite3.connect(str(fresh_db))
-        conn.execute(
-            "INSERT INTO teams (team_id, name, public_id) VALUES (?, ?, ?)",
-            ("team-uuid-002", "Team A", "abc123"),
-        )
-        conn.commit()
-        with pytest.raises(sqlite3.IntegrityError):
-            conn.execute(
-                "INSERT INTO teams (team_id, name, public_id) VALUES (?, ?, ?)",
-                ("team-uuid-003", "Team B", "abc123"),
-            )
-            conn.commit()
-        conn.close()
-
-    def test_multiple_null_public_ids_allowed(self, fresh_db: Path) -> None:
-        """Inserting multiple teams with public_id = NULL succeeds (partial index)."""
-        run_migrations(db_path=fresh_db)
-        conn = sqlite3.connect(str(fresh_db))
-        conn.execute(
-            "INSERT INTO teams (team_id, name, public_id) VALUES (?, ?, ?)",
-            ("team-uuid-004", "Opponent A", None),
-        )
-        conn.execute(
-            "INSERT INTO teams (team_id, name, public_id) VALUES (?, ?, ?)",
-            ("team-uuid-005", "Opponent B", None),
-        )
-        conn.execute(
-            "INSERT INTO teams (team_id, name, public_id) VALUES (?, ?, ?)",
-            ("team-uuid-006", "Opponent C", None),
-        )
-        conn.commit()
-        cursor = conn.execute(
-            "SELECT COUNT(*) FROM teams WHERE public_id IS NULL;"
-        )
-        count = cursor.fetchone()[0]
-        conn.close()
-        assert count == 3, f"Expected 3 NULL-public_id rows, got: {count}"
-
-    def test_unique_index_exists(self, fresh_db: Path) -> None:
-        """After migration 005, idx_teams_public_id index exists."""
-        run_migrations(db_path=fresh_db)
-        conn = sqlite3.connect(str(fresh_db))
-        cursor = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_teams_public_id';"
-        )
-        result = cursor.fetchone()
-        conn.close()
-        assert result is not None, "idx_teams_public_id index not found"
+        assert row is not None, "lsb-hs seed row not found in programs"
+        assert row[0] == "lsb-hs"
+        assert "Lincoln Standing Bear" in row[1]
+        assert row[2] == "hs"

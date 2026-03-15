@@ -5,7 +5,7 @@ All DB writes use an in-memory SQLite connection with the full schema applied.
 
 Tests cover:
 - AC-1: OpponentResolver class with resolve() method returning ResolveResult
-- AC-2: Outer loop iterates owned teams; fetches opponents; resolves via GET /teams/{id}
+- AC-2: Outer loop iterates member teams; fetches opponents; resolves via GET /teams/{id}
 - AC-3: Null progenitor_team_id -> unlinked row inserted
 - AC-4: Manual resolution links protected (COALESCE upsert logic)
 - AC-5: FK satisfaction -- team row ensured before opponent_links insert
@@ -19,10 +19,11 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
+from migrations.apply_migrations import run_migrations
 from src.gamechanger.client import CredentialExpiredError, ForbiddenError, GameChangerAPIError
 from src.gamechanger.config import CrawlConfig, TeamEntry
 from src.gamechanger.crawlers.opponent_resolver import OpponentResolver, ResolveResult
@@ -32,19 +33,15 @@ from src.gamechanger.crawlers.opponent_resolver import OpponentResolver, Resolve
 # ---------------------------------------------------------------------------
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
-_MIGRATION_001 = _PROJECT_ROOT / "migrations" / "001_initial_schema.sql"
-_MIGRATION_006 = _PROJECT_ROOT / "migrations" / "006_opponent_links.sql"
 
 
 @pytest.fixture()
-def db() -> sqlite3.Connection:
-    """In-memory SQLite connection with migrations 001 and 006 applied."""
-    conn = sqlite3.connect(":memory:")
-    conn.execute("PRAGMA journal_mode=WAL;")
+def db(tmp_path: Path) -> sqlite3.Connection:
+    """In-memory SQLite connection with full schema applied via run_migrations."""
+    db_path = tmp_path / "test_opponent_resolver.db"
+    run_migrations(db_path=db_path)
+    conn = sqlite3.connect(str(db_path))
     conn.execute("PRAGMA foreign_keys=ON;")
-    conn.commit()
-    conn.executescript(_MIGRATION_001.read_text(encoding="utf-8"))
-    conn.executescript(_MIGRATION_006.read_text(encoding="utf-8"))
     conn.commit()
     yield conn
     conn.close()
@@ -54,7 +51,7 @@ def db() -> sqlite3.Connection:
 # Constants and helpers
 # ---------------------------------------------------------------------------
 
-_OWN_TEAM_ID = "owned-team-uuid-001"
+_OWN_TEAM_GC_UUID = "owned-team-uuid-001"
 _OWN_TEAM_NAME = "LSB JV"
 _SEASON = "2025"
 
@@ -72,7 +69,7 @@ _TEAM_DETAIL = {
 
 _OPPONENT_WITH_PROGENITOR = {
     "root_team_id": _ROOT_TEAM_ID,
-    "owning_team_id": _OWN_TEAM_ID,
+    "owning_team_id": _OWN_TEAM_GC_UUID,
     "name": _TEAM_NAME,
     "is_hidden": False,
     "progenitor_team_id": _PROGENITOR_ID,
@@ -80,7 +77,7 @@ _OPPONENT_WITH_PROGENITOR = {
 
 _OPPONENT_NO_PROGENITOR = {
     "root_team_id": "root-bbb-002",
-    "owning_team_id": _OWN_TEAM_ID,
+    "owning_team_id": _OWN_TEAM_GC_UUID,
     "name": "Unknown Team",
     "is_hidden": False,
     # no progenitor_team_id key
@@ -88,18 +85,39 @@ _OPPONENT_NO_PROGENITOR = {
 
 _OPPONENT_HIDDEN = {
     "root_team_id": "root-ccc-003",
-    "owning_team_id": _OWN_TEAM_ID,
+    "owning_team_id": _OWN_TEAM_GC_UUID,
     "name": "Hidden Duplicate",
     "is_hidden": True,
     "progenitor_team_id": "progenitor-ccc-003",
 }
 
 
-def _make_config(team_ids: list[str] | None = None) -> CrawlConfig:
-    """Build a CrawlConfig with one default owned team."""
-    ids = team_ids if team_ids is not None else [_OWN_TEAM_ID]
-    teams = [TeamEntry(id=tid, name=f"Team {tid}", level="jv") for tid in ids]
-    return CrawlConfig(season=_SEASON, owned_teams=teams)
+def _insert_team(
+    db: sqlite3.Connection,
+    gc_uuid: str,
+    name: str = "Team",
+    membership_type: str = "member",
+    is_active: int = 1,
+) -> int:
+    """Insert a team row and return its INTEGER PK."""
+    cursor = db.execute(
+        "INSERT INTO teams (gc_uuid, name, membership_type, is_active) VALUES (?, ?, ?, ?)",
+        (gc_uuid, name, membership_type, is_active),
+    )
+    db.commit()
+    return cursor.lastrowid
+
+
+def _make_config(team_pairs: list[tuple[str, int]] | None = None) -> CrawlConfig:
+    """Build a CrawlConfig from a list of (gc_uuid, internal_id) pairs."""
+    if team_pairs is None:
+        # Default: not used directly; callers should pass pairs when internal_id matters
+        team_pairs = [(_OWN_TEAM_GC_UUID, 0)]
+    teams = [
+        TeamEntry(id=gc_uuid, name=f"Team {gc_uuid}", classification="jv", internal_id=pk)
+        for gc_uuid, pk in team_pairs
+    ]
+    return CrawlConfig(season=_SEASON, member_teams=teams)
 
 
 def _make_client(
@@ -130,15 +148,6 @@ def _fetch_links(db: sqlite3.Connection) -> list[dict]:
     return [dict(row) for row in rows]
 
 
-def _insert_own_team(db: sqlite3.Connection, team_id: str = _OWN_TEAM_ID) -> None:
-    """Insert a prerequisite owned team row into teams."""
-    db.execute(
-        "INSERT INTO teams (team_id, name, is_owned, is_active) VALUES (?, ?, 1, 1)",
-        (team_id, "LSB JV"),
-    )
-    db.commit()
-
-
 # ---------------------------------------------------------------------------
 # AC-1: class exists and returns ResolveResult
 # ---------------------------------------------------------------------------
@@ -146,9 +155,9 @@ def _insert_own_team(db: sqlite3.Connection, team_id: str = _OWN_TEAM_ID) -> Non
 
 def test_resolve_returns_resolve_result(db: sqlite3.Connection) -> None:
     """resolve() returns a ResolveResult dataclass with count fields."""
-    _insert_own_team(db)
+    own_pk = _insert_team(db, _OWN_TEAM_GC_UUID, _OWN_TEAM_NAME)
     client = _make_client(paginated_return=[], get_return=_TEAM_DETAIL)
-    config = _make_config()
+    config = _make_config([(_OWN_TEAM_GC_UUID, own_pk)])
     resolver = OpponentResolver(client, config, db)
 
     with patch("src.gamechanger.crawlers.opponent_resolver.time.sleep"):
@@ -162,18 +171,18 @@ def test_resolve_returns_resolve_result(db: sqlite3.Connection) -> None:
 
 
 # ---------------------------------------------------------------------------
-# AC-2: outer loop iterates owned teams and resolves via progenitor_team_id
+# AC-2: outer loop iterates member teams and resolves via progenitor_team_id
 # ---------------------------------------------------------------------------
 
 
 def test_resolve_calls_opponents_endpoint_per_team(db: sqlite3.Connection) -> None:
-    """resolve() calls GET /teams/{team_id}/opponents for each owned team."""
+    """resolve() calls GET /teams/{team_id}/opponents for each member team."""
     team_a = "owned-aaa"
     team_b = "owned-bbb"
-    _insert_own_team(db, team_a)
-    _insert_own_team(db, team_b)
+    pk_a = _insert_team(db, team_a)
+    pk_b = _insert_team(db, team_b)
     client = _make_client(paginated_return=[])
-    config = _make_config([team_a, team_b])
+    config = _make_config([(team_a, pk_a), (team_b, pk_b)])
     resolver = OpponentResolver(client, config, db)
 
     with patch("src.gamechanger.crawlers.opponent_resolver.time.sleep"):
@@ -192,12 +201,12 @@ def test_resolve_calls_opponents_endpoint_per_team(db: sqlite3.Connection) -> No
 
 def test_resolve_auto_resolves_opponent(db: sqlite3.Connection) -> None:
     """Opponent with progenitor_team_id gets resolved and upserted."""
-    _insert_own_team(db)
+    own_pk = _insert_team(db, _OWN_TEAM_GC_UUID, _OWN_TEAM_NAME)
     client = _make_client(
         paginated_return=[_OPPONENT_WITH_PROGENITOR],
         get_return=_TEAM_DETAIL,
     )
-    config = _make_config()
+    config = _make_config([(_OWN_TEAM_GC_UUID, own_pk)])
     resolver = OpponentResolver(client, config, db)
 
     with patch("src.gamechanger.crawlers.opponent_resolver.time.sleep"):
@@ -210,9 +219,15 @@ def test_resolve_auto_resolves_opponent(db: sqlite3.Connection) -> None:
     links = _fetch_links(db)
     assert len(links) == 1
     link = links[0]
-    assert link["our_team_id"] == _OWN_TEAM_ID
+    assert link["our_team_id"] == own_pk
     assert link["root_team_id"] == _ROOT_TEAM_ID
-    assert link["resolved_team_id"] == _PROGENITOR_ID
+    # resolved_team_id is an INTEGER PK -- verify it's not None and check via teams table
+    assert link["resolved_team_id"] is not None
+    resolved_row = db.execute(
+        "SELECT gc_uuid FROM teams WHERE id = ?", (link["resolved_team_id"],)
+    ).fetchone()
+    assert resolved_row is not None
+    assert resolved_row[0] == _PROGENITOR_ID
     assert link["public_id"] == _PUBLIC_ID
     assert link["resolution_method"] == "auto"
     assert link["opponent_name"] == _TEAM_NAME
@@ -221,12 +236,12 @@ def test_resolve_auto_resolves_opponent(db: sqlite3.Connection) -> None:
 
 def test_resolve_fetches_team_detail_for_progenitor(db: sqlite3.Connection) -> None:
     """Resolver calls GET /teams/{progenitor_team_id} with correct accept header."""
-    _insert_own_team(db)
+    own_pk = _insert_team(db, _OWN_TEAM_GC_UUID, _OWN_TEAM_NAME)
     client = _make_client(
         paginated_return=[_OPPONENT_WITH_PROGENITOR],
         get_return=_TEAM_DETAIL,
     )
-    config = _make_config()
+    config = _make_config([(_OWN_TEAM_GC_UUID, own_pk)])
     resolver = OpponentResolver(client, config, db)
 
     with patch("src.gamechanger.crawlers.opponent_resolver.time.sleep"):
@@ -245,9 +260,9 @@ def test_resolve_fetches_team_detail_for_progenitor(db: sqlite3.Connection) -> N
 
 def test_resolve_null_progenitor_inserts_unlinked(db: sqlite3.Connection) -> None:
     """Opponent without progenitor_team_id is inserted as unlinked row."""
-    _insert_own_team(db)
+    own_pk = _insert_team(db, _OWN_TEAM_GC_UUID, _OWN_TEAM_NAME)
     client = _make_client(paginated_return=[_OPPONENT_NO_PROGENITOR])
-    config = _make_config()
+    config = _make_config([(_OWN_TEAM_GC_UUID, own_pk)])
     resolver = OpponentResolver(client, config, db)
 
     with patch("src.gamechanger.crawlers.opponent_resolver.time.sleep"):
@@ -268,9 +283,9 @@ def test_resolve_null_progenitor_inserts_unlinked(db: sqlite3.Connection) -> Non
 
 def test_resolve_null_progenitor_does_not_call_team_detail(db: sqlite3.Connection) -> None:
     """Resolver does NOT call GET /teams/{id} for unlinked opponents."""
-    _insert_own_team(db)
+    own_pk = _insert_team(db, _OWN_TEAM_GC_UUID, _OWN_TEAM_NAME)
     client = _make_client(paginated_return=[_OPPONENT_NO_PROGENITOR])
-    config = _make_config()
+    config = _make_config([(_OWN_TEAM_GC_UUID, own_pk)])
     resolver = OpponentResolver(client, config, db)
 
     with patch("src.gamechanger.crawlers.opponent_resolver.time.sleep"):
@@ -286,14 +301,11 @@ def test_resolve_null_progenitor_does_not_call_team_detail(db: sqlite3.Connectio
 
 def test_resolve_does_not_overwrite_manual_link(db: sqlite3.Connection) -> None:
     """Auto-resolution does not overwrite a row with resolution_method='manual'."""
-    _insert_own_team(db)
-    # Pre-insert a manual link with a different resolved_team_id / public_id
-    manual_team_id = "manual-resolved-uuid"
+    own_pk = _insert_team(db, _OWN_TEAM_GC_UUID, _OWN_TEAM_NAME)
+    # Pre-insert a manual resolved team and link
+    manual_gc_uuid = "manual-resolved-uuid"
     manual_public_id = "manualPubSlug"
-    db.execute(
-        "INSERT INTO teams (team_id, name, is_owned, is_active) VALUES (?, ?, 0, 0)",
-        (manual_team_id, "Manual Team"),
-    )
+    manual_pk = _insert_team(db, manual_gc_uuid, "Manual Team", membership_type="tracked", is_active=0)
     db.execute(
         """
         INSERT INTO opponent_links
@@ -301,7 +313,7 @@ def test_resolve_does_not_overwrite_manual_link(db: sqlite3.Connection) -> None:
              public_id, resolution_method, resolved_at, is_hidden)
         VALUES (?, ?, ?, ?, ?, 'manual', datetime('now'), 0)
         """,
-        (_OWN_TEAM_ID, _ROOT_TEAM_ID, _TEAM_NAME, manual_team_id, manual_public_id),
+        (own_pk, _ROOT_TEAM_ID, _TEAM_NAME, manual_pk, manual_public_id),
     )
     db.commit()
 
@@ -309,7 +321,7 @@ def test_resolve_does_not_overwrite_manual_link(db: sqlite3.Connection) -> None:
         paginated_return=[_OPPONENT_WITH_PROGENITOR],
         get_return=_TEAM_DETAIL,
     )
-    config = _make_config()
+    config = _make_config([(_OWN_TEAM_GC_UUID, own_pk)])
     resolver = OpponentResolver(client, config, db)
 
     with patch("src.gamechanger.crawlers.opponent_resolver.time.sleep"):
@@ -319,7 +331,7 @@ def test_resolve_does_not_overwrite_manual_link(db: sqlite3.Connection) -> None:
     assert len(links) == 1
     link = links[0]
     # Manual link fields must be preserved
-    assert link["resolved_team_id"] == manual_team_id
+    assert link["resolved_team_id"] == manual_pk
     assert link["public_id"] == manual_public_id
     assert link["resolution_method"] == "manual"
 
@@ -331,19 +343,19 @@ def test_resolve_does_not_overwrite_manual_link(db: sqlite3.Connection) -> None:
 
 def test_resolve_creates_team_stub_for_resolved_team(db: sqlite3.Connection) -> None:
     """Resolver inserts a teams row for the resolved team before the FK insert."""
-    _insert_own_team(db)
+    own_pk = _insert_team(db, _OWN_TEAM_GC_UUID, _OWN_TEAM_NAME)
     client = _make_client(
         paginated_return=[_OPPONENT_WITH_PROGENITOR],
         get_return=_TEAM_DETAIL,
     )
-    config = _make_config()
+    config = _make_config([(_OWN_TEAM_GC_UUID, own_pk)])
     resolver = OpponentResolver(client, config, db)
 
     with patch("src.gamechanger.crawlers.opponent_resolver.time.sleep"):
         resolver.resolve()
 
     row = db.execute(
-        "SELECT name FROM teams WHERE team_id = ?", (_PROGENITOR_ID,)
+        "SELECT name FROM teams WHERE gc_uuid = ?", (_PROGENITOR_ID,)
     ).fetchone()
     assert row is not None
     assert row[0] == _TEAM_NAME  # real name, not UUID stub
@@ -351,52 +363,44 @@ def test_resolve_creates_team_stub_for_resolved_team(db: sqlite3.Connection) -> 
 
 def test_resolve_updates_uuid_stub_to_real_name(db: sqlite3.Connection) -> None:
     """If a UUID-as-name stub exists, resolver updates it with the real team name."""
-    _insert_own_team(db)
-    # Insert a stub where name = team_id (UUID-as-name, from game_loader pattern)
-    db.execute(
-        "INSERT INTO teams (team_id, name, is_owned, is_active) VALUES (?, ?, 0, 0)",
-        (_PROGENITOR_ID, _PROGENITOR_ID),
-    )
-    db.commit()
+    own_pk = _insert_team(db, _OWN_TEAM_GC_UUID, _OWN_TEAM_NAME)
+    # Insert a stub where name = gc_uuid (UUID-as-name, from game_loader pattern)
+    _insert_team(db, _PROGENITOR_ID, _PROGENITOR_ID, membership_type="tracked", is_active=0)
 
     client = _make_client(
         paginated_return=[_OPPONENT_WITH_PROGENITOR],
         get_return=_TEAM_DETAIL,
     )
-    config = _make_config()
+    config = _make_config([(_OWN_TEAM_GC_UUID, own_pk)])
     resolver = OpponentResolver(client, config, db)
 
     with patch("src.gamechanger.crawlers.opponent_resolver.time.sleep"):
         resolver.resolve()
 
     row = db.execute(
-        "SELECT name FROM teams WHERE team_id = ?", (_PROGENITOR_ID,)
+        "SELECT name FROM teams WHERE gc_uuid = ?", (_PROGENITOR_ID,)
     ).fetchone()
     assert row[0] == _TEAM_NAME
 
 
 def test_resolve_preserves_real_team_name(db: sqlite3.Connection) -> None:
     """If a team row already has a real name, resolver does not overwrite it."""
-    _insert_own_team(db)
+    own_pk = _insert_team(db, _OWN_TEAM_GC_UUID, _OWN_TEAM_NAME)
     existing_name = "Pre-Existing Real Name"
-    db.execute(
-        "INSERT INTO teams (team_id, name, is_owned, is_active) VALUES (?, ?, 0, 0)",
-        (_PROGENITOR_ID, existing_name),
-    )
-    db.commit()
+    _insert_team(db, _PROGENITOR_ID, existing_name, membership_type="tracked", is_active=0)
 
     client = _make_client(
         paginated_return=[_OPPONENT_WITH_PROGENITOR],
         get_return=_TEAM_DETAIL,
     )
-    config = _make_config()
+    config = _make_config([(_OWN_TEAM_GC_UUID, own_pk)])
     resolver = OpponentResolver(client, config, db)
 
     with patch("src.gamechanger.crawlers.opponent_resolver.time.sleep"):
         resolver.resolve()
 
     row = db.execute(
-        "SELECT name FROM teams WHERE team_id = ?", (_PROGENITOR_ID,)
+        "SELECT name FROM teams WHERE gc_uuid = ?", (_PROGENITOR_ID,)
     ).fetchone()
     assert row[0] == existing_name  # unchanged
 
@@ -410,12 +414,12 @@ def test_resolve_403_logs_warning_and_skips(
     db: sqlite3.Connection, caplog: pytest.LogCaptureFixture
 ) -> None:
     """403 ForbiddenError is logged at WARNING and the opponent is skipped."""
-    _insert_own_team(db)
+    own_pk = _insert_team(db, _OWN_TEAM_GC_UUID, _OWN_TEAM_NAME)
     client = _make_client(
         paginated_return=[_OPPONENT_WITH_PROGENITOR],
         get_side_effect=ForbiddenError("403 Forbidden"),
     )
-    config = _make_config()
+    config = _make_config([(_OWN_TEAM_GC_UUID, own_pk)])
     resolver = OpponentResolver(client, config, db)
 
     import logging
@@ -432,12 +436,12 @@ def test_resolve_403_logs_warning_and_skips(
 
 def test_resolve_401_raises_credential_expired(db: sqlite3.Connection) -> None:
     """401 CredentialExpiredError is re-raised immediately (aborts the run)."""
-    _insert_own_team(db)
+    own_pk = _insert_team(db, _OWN_TEAM_GC_UUID, _OWN_TEAM_NAME)
     client = _make_client(
         paginated_return=[_OPPONENT_WITH_PROGENITOR],
         get_side_effect=CredentialExpiredError("401 Unauthorized"),
     )
-    config = _make_config()
+    config = _make_config([(_OWN_TEAM_GC_UUID, own_pk)])
     resolver = OpponentResolver(client, config, db)
 
     with patch("src.gamechanger.crawlers.opponent_resolver.time.sleep"):
@@ -449,12 +453,12 @@ def test_resolve_5xx_logs_warning_and_skips(
     db: sqlite3.Connection, caplog: pytest.LogCaptureFixture
 ) -> None:
     """5xx GameChangerAPIError is logged at WARNING and the opponent is skipped."""
-    _insert_own_team(db)
+    own_pk = _insert_team(db, _OWN_TEAM_GC_UUID, _OWN_TEAM_NAME)
     client = _make_client(
         paginated_return=[_OPPONENT_WITH_PROGENITOR],
         get_side_effect=GameChangerAPIError("Server error HTTP 500"),
     )
-    config = _make_config()
+    config = _make_config([(_OWN_TEAM_GC_UUID, own_pk)])
     resolver = OpponentResolver(client, config, db)
 
     import logging
@@ -472,12 +476,12 @@ def test_resolve_404_logs_warning_and_skips(
     db: sqlite3.Connection, caplog: pytest.LogCaptureFixture
 ) -> None:
     """404 (surfaced as GameChangerAPIError) is logged at WARNING and skipped."""
-    _insert_own_team(db)
+    own_pk = _insert_team(db, _OWN_TEAM_GC_UUID, _OWN_TEAM_NAME)
     client = _make_client(
         paginated_return=[_OPPONENT_WITH_PROGENITOR],
         get_side_effect=GameChangerAPIError("Unexpected status 404"),
     )
-    config = _make_config()
+    config = _make_config([(_OWN_TEAM_GC_UUID, own_pk)])
     resolver = OpponentResolver(client, config, db)
 
     import logging
@@ -497,12 +501,12 @@ def test_resolve_404_logs_warning_and_skips(
 
 def test_resolve_sleeps_between_requests(db: sqlite3.Connection) -> None:
     """time.sleep is called after each API call during resolution."""
-    _insert_own_team(db)
+    own_pk = _insert_team(db, _OWN_TEAM_GC_UUID, _OWN_TEAM_NAME)
     client = _make_client(
         paginated_return=[_OPPONENT_WITH_PROGENITOR],
         get_return=_TEAM_DETAIL,
     )
-    config = _make_config()
+    config = _make_config([(_OWN_TEAM_GC_UUID, own_pk)])
     resolver = OpponentResolver(client, config, db)
 
     with patch("src.gamechanger.crawlers.opponent_resolver.time.sleep") as mock_sleep:
@@ -520,12 +524,12 @@ def test_resolve_sleeps_between_requests(db: sqlite3.Connection) -> None:
 
 def test_resolve_is_idempotent(db: sqlite3.Connection) -> None:
     """Running resolve() twice produces the same DB state (no duplicates)."""
-    _insert_own_team(db)
+    own_pk = _insert_team(db, _OWN_TEAM_GC_UUID, _OWN_TEAM_NAME)
     client = _make_client(
         paginated_return=[_OPPONENT_WITH_PROGENITOR, _OPPONENT_NO_PROGENITOR],
         get_return=_TEAM_DETAIL,
     )
-    config = _make_config()
+    config = _make_config([(_OWN_TEAM_GC_UUID, own_pk)])
     resolver = OpponentResolver(client, config, db)
 
     with patch("src.gamechanger.crawlers.opponent_resolver.time.sleep"):
@@ -538,12 +542,12 @@ def test_resolve_is_idempotent(db: sqlite3.Connection) -> None:
 
 def test_resolve_hidden_opponent_with_progenitor_stored(db: sqlite3.Connection) -> None:
     """Hidden opponent with progenitor_team_id is stored with is_hidden=1."""
-    _insert_own_team(db)
+    own_pk = _insert_team(db, _OWN_TEAM_GC_UUID, _OWN_TEAM_NAME)
     client = _make_client(
         paginated_return=[_OPPONENT_HIDDEN],
         get_return=_TEAM_DETAIL,
     )
-    config = _make_config()
+    config = _make_config([(_OWN_TEAM_GC_UUID, own_pk)])
     resolver = OpponentResolver(client, config, db)
 
     with patch("src.gamechanger.crawlers.opponent_resolver.time.sleep"):
@@ -564,13 +568,13 @@ def test_resolve_hidden_opponent_without_progenitor_stored(db: sqlite3.Connectio
     """Hidden opponent without progenitor_team_id is stored as unlinked with is_hidden=1."""
     hidden_no_progenitor = {
         "root_team_id": "root-hidden-no-prog",
-        "owning_team_id": _OWN_TEAM_ID,
+        "owning_team_id": _OWN_TEAM_GC_UUID,
         "name": "Hidden No Progenitor",
         "is_hidden": True,
     }
-    _insert_own_team(db)
+    own_pk = _insert_team(db, _OWN_TEAM_GC_UUID, _OWN_TEAM_NAME)
     client = _make_client(paginated_return=[hidden_no_progenitor])
-    config = _make_config()
+    config = _make_config([(_OWN_TEAM_GC_UUID, own_pk)])
     resolver = OpponentResolver(client, config, db)
 
     with patch("src.gamechanger.crawlers.opponent_resolver.time.sleep"):
@@ -589,12 +593,12 @@ def test_resolve_hidden_opponent_without_progenitor_stored(db: sqlite3.Connectio
 
 def test_resolve_non_hidden_opponent_stored_hidden_zero(db: sqlite3.Connection) -> None:
     """Non-hidden opponent is stored with is_hidden=0 (existing behavior preserved)."""
-    _insert_own_team(db)
+    own_pk = _insert_team(db, _OWN_TEAM_GC_UUID, _OWN_TEAM_NAME)
     client = _make_client(
         paginated_return=[_OPPONENT_WITH_PROGENITOR],
         get_return=_TEAM_DETAIL,
     )
-    config = _make_config()
+    config = _make_config([(_OWN_TEAM_GC_UUID, own_pk)])
     resolver = OpponentResolver(client, config, db)
 
     with patch("src.gamechanger.crawlers.opponent_resolver.time.sleep"):
@@ -609,19 +613,19 @@ def test_resolve_copies_is_hidden_flag(db: sqlite3.Connection) -> None:
     """is_hidden is copied from the API response into opponent_links on update."""
     hidden_with_progenitor = {
         "root_team_id": "root-hidden-progenitor",
-        "owning_team_id": _OWN_TEAM_ID,
+        "owning_team_id": _OWN_TEAM_GC_UUID,
         "name": "Hidden With Progenitor",
         "is_hidden": True,
         "progenitor_team_id": _PROGENITOR_ID,
     }
-    _insert_own_team(db)
+    own_pk = _insert_team(db, _OWN_TEAM_GC_UUID, _OWN_TEAM_NAME)
     # Process as visible first
     visible = dict(hidden_with_progenitor, is_hidden=False)
     client = _make_client(
         paginated_return=[visible],
         get_return=_TEAM_DETAIL,
     )
-    config = _make_config()
+    config = _make_config([(_OWN_TEAM_GC_UUID, own_pk)])
     resolver = OpponentResolver(client, config, db)
 
     with patch("src.gamechanger.crawlers.opponent_resolver.time.sleep"):
