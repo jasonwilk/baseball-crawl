@@ -1026,7 +1026,7 @@ class TestEditTeamForm:
 
 
 class TestUpdateTeam:
-    """POST /admin/teams/{id}/edit (AC-17q)."""
+    """POST /admin/teams/{id}/edit (AC-17q, AC-17b, AC-17m)."""
 
     def test_update_team_changes_name(self, team_db: Path) -> None:
         """POST /admin/teams/{id}/edit updates team name."""
@@ -1052,6 +1052,94 @@ class TestUpdateTeam:
         assert response.status_code == 303
         assert _count_rows(
             team_db, "teams", "name = ?", ("LSB Varsity Updated",)
+        ) == 1
+
+    def test_update_team_persists_program_id(self, team_db: Path) -> None:
+        """POST /admin/teams/{id}/edit persists program_id (AC-17b)."""
+        user_id = _insert_user(team_db, "admin@example.com")
+        token = _insert_session(team_db, user_id)
+        conn = sqlite3.connect(str(team_db))
+        team_id = conn.execute("SELECT id FROM teams LIMIT 1").fetchone()[0]
+        # Clear program_id first so we can verify the POST sets it
+        conn.execute("UPDATE teams SET program_id = NULL WHERE id = ?", (team_id,))
+        conn.commit()
+        conn.close()
+
+        with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
+            with TestClient(
+                app, follow_redirects=False, cookies={"session": token}
+            ) as client:
+                response = client.post(
+                    f"/admin/teams/{team_id}/edit",
+                    data={
+                        "name": "LSB Varsity 2026",
+                        "program_id": "lsb-hs",
+                        "classification": "",
+                        "membership_type": "tracked",
+                    },
+                )
+        assert response.status_code == 303
+        assert _count_rows(
+            team_db, "teams", "id = ? AND program_id = ?", (team_id, "lsb-hs")
+        ) == 1
+
+    def test_update_team_persists_classification(self, team_db: Path) -> None:
+        """POST /admin/teams/{id}/edit persists classification (AC-17b)."""
+        user_id = _insert_user(team_db, "admin@example.com")
+        token = _insert_session(team_db, user_id)
+        conn = sqlite3.connect(str(team_db))
+        team_id = conn.execute("SELECT id FROM teams LIMIT 1").fetchone()[0]
+        conn.close()
+
+        with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
+            with TestClient(
+                app, follow_redirects=False, cookies={"session": token}
+            ) as client:
+                response = client.post(
+                    f"/admin/teams/{team_id}/edit",
+                    data={
+                        "name": "LSB Varsity 2026",
+                        "program_id": "",
+                        "classification": "jv",
+                        "membership_type": "tracked",
+                    },
+                )
+        assert response.status_code == 303
+        assert _count_rows(
+            team_db, "teams", "id = ? AND classification = ?", (team_id, "jv")
+        ) == 1
+
+    def test_update_team_membership_type_change_tracked_to_member(
+        self, team_db: Path
+    ) -> None:
+        """Membership type change from tracked to member is persisted (AC-17m)."""
+        user_id = _insert_user(team_db, "admin@example.com")
+        token = _insert_session(team_db, user_id)
+        conn = sqlite3.connect(str(team_db))
+        team_id = conn.execute("SELECT id FROM teams LIMIT 1").fetchone()[0]
+        # Start as tracked
+        conn.execute(
+            "UPDATE teams SET membership_type = 'tracked' WHERE id = ?", (team_id,)
+        )
+        conn.commit()
+        conn.close()
+
+        with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
+            with TestClient(
+                app, follow_redirects=False, cookies={"session": token}
+            ) as client:
+                response = client.post(
+                    f"/admin/teams/{team_id}/edit",
+                    data={
+                        "name": "LSB Varsity 2026",
+                        "program_id": "",
+                        "classification": "",
+                        "membership_type": "member",
+                    },
+                )
+        assert response.status_code == 303
+        assert _count_rows(
+            team_db, "teams", "id = ? AND membership_type = ?", (team_id, "member")
         ) == 1
 
 

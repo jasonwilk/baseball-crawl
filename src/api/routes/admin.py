@@ -807,52 +807,29 @@ async def list_teams(request: Request) -> Response:
     )
 
 
-@router.post("/teams", response_model=None)
-async def add_team_phase1(
+async def _call_bridge(
     request: Request,
-    url_input: str = Form(...),
-) -> Response:
-    """Phase 1: Resolve a team from URL or public_id and redirect to confirm page.
-
-    Parses the URL input, calls the reverse bridge to discover gc_uuid
-    (403 = NULL), fetches the public team profile for the name, then
-    redirects to the confirm page with resolved info as query params.
+    guard: Any,
+    public_id: str,
+    url_stripped: str,
+) -> tuple[str | None, str] | Response:
+    """Call reverse bridge to discover gc_uuid.
 
     Args:
         request: The incoming HTTP request.
-        url_input: GameChanger URL, bare public_id slug (no UUIDs accepted).
+        guard: Admin user dict.
+        public_id: GC public_id slug.
+        url_stripped: Original input for error re-display.
 
     Returns:
-        Redirect to /admin/teams/confirm on success, or re-rendered teams
-        page with error banner on failure.
+        ``(gc_uuid, gc_uuid_status)`` tuple on success/403, or a Response on
+        credential/API error.
     """
-    guard = await _require_admin(request)
-    if isinstance(guard, Response):
-        return guard
-
-    url_stripped = url_input.strip()
-    try:
-        id_result = parse_team_url(url_stripped)
-    except ValueError as exc:
-        return await _render_teams_error(request, guard, str(exc), url_stripped)
-
-    if id_result.is_uuid:
-        return await _render_teams_error(
-            request, guard,
-            "Please provide a GameChanger URL or public_id slug, not a raw UUID.",
-            url_stripped,
-        )
-
-    public_id = id_result.value
-
-    # Try reverse bridge to discover gc_uuid (403 = NULL, not an error)
-    gc_uuid: str | None = None
-    gc_uuid_status = "forbidden"
     try:
         gc_uuid = await run_in_threadpool(resolve_public_id_to_uuid, public_id)
-        gc_uuid_status = "found"
+        return gc_uuid, "found"
     except BridgeForbiddenError:
-        gc_uuid_status = "forbidden"
+        return None, "forbidden"
     except (CredentialExpiredError, ConfigurationError) as exc:
         return await _render_teams_error(
             request, guard,
@@ -866,9 +843,26 @@ async def add_team_phase1(
             url_stripped,
         )
 
-    # Fetch public team profile to get the team name
+
+async def _fetch_public_profile(
+    request: Request,
+    guard: Any,
+    public_id: str,
+    url_stripped: str,
+) -> Any | Response:
+    """Fetch the public team profile for a given public_id.
+
+    Args:
+        request: The incoming HTTP request.
+        guard: Admin user dict.
+        public_id: GC public_id slug.
+        url_stripped: Original input for error re-display.
+
+    Returns:
+        ``TeamProfile`` on success, or a Response on not-found/API error.
+    """
     try:
-        profile = await run_in_threadpool(resolve_team, public_id)
+        return await run_in_threadpool(resolve_team, public_id)
     except TeamNotFoundError:
         return await _render_teams_error(
             request, guard,
@@ -882,6 +876,63 @@ async def add_team_phase1(
             url_stripped,
         )
 
+
+async def _parse_url_to_public_id(
+    request: Request, guard: Any, url_stripped: str
+) -> tuple[str, None] | tuple[None, Response]:
+    """Parse a team URL/public_id input to a public_id slug.
+
+    Args:
+        request: The incoming HTTP request.
+        guard: Admin user dict.
+        url_stripped: Stripped URL/public_id input.
+
+    Returns:
+        ``(public_id, None)`` on success, or ``(None, error_response)`` if
+        the input is invalid or is a raw UUID.
+    """
+    try:
+        id_result = parse_team_url(url_stripped)
+    except ValueError as exc:
+        return None, await _render_teams_error(request, guard, str(exc), url_stripped)
+    if id_result.is_uuid:
+        return None, await _render_teams_error(
+            request, guard,
+            "Please provide a GameChanger URL or public_id slug, not a raw UUID.",
+            url_stripped,
+        )
+    return id_result.value, None
+
+
+@router.post("/teams", response_model=None)
+async def add_team_phase1(
+    request: Request,
+    url_input: str = Form(...),
+) -> Response:
+    """Phase 1: resolve URL, discover gc_uuid, redirect to confirm.
+
+    Returns:
+        Redirect to /admin/teams/confirm on success, or teams page with
+        error banner on failure.
+    """
+    guard = await _require_admin(request)
+    if isinstance(guard, Response):
+        return guard
+
+    url_stripped = url_input.strip()
+    public_id, err = await _parse_url_to_public_id(request, guard, url_stripped)
+    if err is not None:
+        return err
+
+    bridge_result = await _call_bridge(request, guard, public_id, url_stripped)
+    if isinstance(bridge_result, Response):
+        return bridge_result
+    gc_uuid, gc_uuid_status = bridge_result
+
+    profile = await _fetch_public_profile(request, guard, public_id, url_stripped)
+    if isinstance(profile, Response):
+        return profile
+
     params: dict[str, str] = {
         "public_id": public_id,
         "team_name": profile.name,
@@ -891,6 +942,52 @@ async def add_team_phase1(
         params["gc_uuid"] = gc_uuid
     return RedirectResponse(
         url=f"/admin/teams/confirm?{urlencode(params)}", status_code=303
+    )
+
+
+async def _render_confirm_team_page(
+    request: Request,
+    guard: Any,
+    public_id: str,
+    team_name: str,
+    gc_uuid: str | None,
+    gc_uuid_status: str,
+    error: str,
+    programs: list[dict[str, Any]],
+    inferred_classification: str | None,
+    inferred_program_id: str | None,
+) -> Response:
+    """Render the confirm-add-team page with the given context.
+
+    Args:
+        request: The incoming HTTP request.
+        guard: Admin user dict.
+        public_id: GC public_id slug.
+        team_name: Resolved team display name.
+        gc_uuid: GC UUID or None.
+        gc_uuid_status: 'found' or 'forbidden'.
+        error: Error message to display (empty string for none).
+        programs: List of program dicts for the dropdown.
+        inferred_classification: Pre-selected division or None.
+        inferred_program_id: Pre-selected program slug or None.
+
+    Returns:
+        TemplateResponse for the confirm page.
+    """
+    return templates.TemplateResponse(
+        request,
+        "admin/confirm_team.html",
+        {
+            "public_id": public_id,
+            "team_name": team_name,
+            "gc_uuid": gc_uuid or "",
+            "gc_uuid_status": gc_uuid_status,
+            "programs": programs,
+            "inferred_classification": inferred_classification,
+            "inferred_program_id": inferred_program_id,
+            "error": error,
+            "admin_user": guard,
+        },
     )
 
 
@@ -924,28 +1021,59 @@ async def confirm_team_form(request: Request) -> Response:
     error = request.query_params.get("error", "")
 
     programs = await run_in_threadpool(_get_programs)
-    inferred_classification = _infer_classification(team_name)
-    inferred_program_id = _infer_program_id(team_name, programs)
+    if not error and await run_in_threadpool(_check_duplicate_new, public_id, gc_uuid):
+        error = "This team is already in the system."
 
-    if not error:
-        if await run_in_threadpool(_check_duplicate_new, public_id, gc_uuid):
-            error = "This team is already in the system."
-
-    return templates.TemplateResponse(
-        request,
-        "admin/confirm_team.html",
-        {
-            "public_id": public_id,
-            "team_name": team_name,
-            "gc_uuid": gc_uuid or "",
-            "gc_uuid_status": gc_uuid_status,
-            "programs": programs,
-            "inferred_classification": inferred_classification,
-            "inferred_program_id": inferred_program_id,
-            "error": error,
-            "admin_user": guard,
-        },
+    return await _render_confirm_team_page(
+        request, guard, public_id, team_name, gc_uuid, gc_uuid_status,
+        error, programs,
+        _infer_classification(team_name),
+        _infer_program_id(team_name, programs),
     )
+
+
+async def _toctou_refresh_uuid(
+    gc_uuid_value: str | None, public_id: str
+) -> str | None:
+    """Re-verify the reverse bridge to guard against stale Phase 1 query params.
+
+    Called only when gc_uuid_value is non-None (bridge succeeded in Phase 1).
+    On any error (403, credential, API), returns None so the team is stored
+    without a gc_uuid.
+
+    Args:
+        gc_uuid_value: UUID discovered in Phase 1 (non-None).
+        public_id: GC public_id slug to re-verify.
+
+    Returns:
+        Fresh UUID string on success, or None on any bridge failure.
+    """
+    try:
+        return await run_in_threadpool(resolve_public_id_to_uuid, public_id)
+    except (
+        BridgeForbiddenError,
+        CredentialExpiredError,
+        ConfigurationError,
+        GameChangerAPIError,
+    ):
+        return None
+
+
+def _normalize_confirm_inputs(
+    gc_uuid: str, program_id: str, classification: str
+) -> tuple[str | None, str | None, str | None]:
+    """Normalize and validate Phase 2 form inputs.
+
+    Returns:
+        ``(gc_uuid_value, program_id_value, classification_value)`` with empty
+        strings converted to None and invalid classifications replaced with None.
+    """
+    gc_uuid_value = gc_uuid.strip() or None
+    program_id_value = program_id.strip() or None
+    classification_value = classification.strip() or None
+    if classification_value not in _VALID_CLASSIFICATIONS:
+        classification_value = None
+    return gc_uuid_value, program_id_value, classification_value
 
 
 @router.post("/teams/confirm", response_model=None)
@@ -958,20 +1086,7 @@ async def confirm_team_submit(
     program_id: str = Form(default=""),
     classification: str = Form(default=""),
 ) -> Response:
-    """Phase 2: Create the team from confirm form submission.
-
-    Re-verifies the reverse bridge (TOCTOU guard) if gc_uuid was previously
-    found.  Performs duplicate detection.  Inserts the team row with INTEGER
-    PK auto-assigned.
-
-    Args:
-        request: The incoming HTTP request.
-        public_id: GC public_id slug (hidden field).
-        team_name: Team display name (hidden field).
-        gc_uuid: GC UUID from bridge discovery (hidden field, may be empty).
-        membership_type: Operator-selected 'member' or 'tracked' (default: tracked).
-        program_id: Optional program slug.
-        classification: Optional classification string.
+    """Phase 2: TOCTOU guard, duplicate check, then insert team.
 
     Returns:
         Redirect to /admin/teams on success, or re-rendered confirm page
@@ -981,44 +1096,22 @@ async def confirm_team_submit(
     if isinstance(guard, Response):
         return guard
 
-    gc_uuid_value = gc_uuid.strip() or None
-    program_id_value = program_id.strip() or None
-    classification_value = classification.strip() or None
-    if classification_value not in _VALID_CLASSIFICATIONS:
-        classification_value = None
+    gc_uuid_value, program_id_value, classification_value = _normalize_confirm_inputs(
+        gc_uuid, program_id, classification
+    )
 
-    # Re-verify bridge (TOCTOU guard): if gc_uuid was found in Phase 1, refresh it.
     if gc_uuid_value:
-        try:
-            fresh_uuid = await run_in_threadpool(resolve_public_id_to_uuid, public_id)
-            gc_uuid_value = fresh_uuid
-        except (
-            BridgeForbiddenError,
-            CredentialExpiredError,
-            ConfigurationError,
-            GameChangerAPIError,
-        ):
-            gc_uuid_value = None  # stale -- store NULL
+        gc_uuid_value = await _toctou_refresh_uuid(gc_uuid_value, public_id)
 
-    # Duplicate detection
     if await run_in_threadpool(_check_duplicate_new, public_id, gc_uuid_value):
         programs = await run_in_threadpool(_get_programs)
-        inferred_classification = _infer_classification(team_name)
-        inferred_program_id = _infer_program_id(team_name, programs)
-        return templates.TemplateResponse(
-            request,
-            "admin/confirm_team.html",
-            {
-                "public_id": public_id,
-                "team_name": team_name,
-                "gc_uuid": gc_uuid_value or "",
-                "gc_uuid_status": "found" if gc_uuid_value else "forbidden",
-                "programs": programs,
-                "inferred_classification": inferred_classification,
-                "inferred_program_id": inferred_program_id,
-                "error": "This team is already in the system.",
-                "admin_user": guard,
-            },
+        return await _render_confirm_team_page(
+            request, guard, public_id, team_name, gc_uuid_value,
+            "found" if gc_uuid_value else "forbidden",
+            "This team is already in the system.",
+            programs,
+            _infer_classification(team_name),
+            _infer_program_id(team_name, programs),
         )
 
     await run_in_threadpool(
@@ -1026,7 +1119,6 @@ async def confirm_team_submit(
         team_name, public_id, gc_uuid_value, membership_type,
         program_id_value, classification_value,
     )
-
     return RedirectResponse(
         url=f"/admin/teams?msg={quote_plus(f'Team added: {team_name}')}",
         status_code=303,
@@ -1330,6 +1422,46 @@ async def _get_duplicate_name_for_link(
     )
 
 
+async def _parse_and_validate_opponent_url(
+    request: Request,
+    link: dict[str, Any],
+    guard: Any,
+    url_input: str,
+) -> tuple[str, None] | tuple[None, Response]:
+    """Parse and validate a URL input for opponent connect confirm.
+
+    Parses the raw URL/public_id, rejects UUIDs, and rejects member-team
+    public_ids.
+
+    Args:
+        request: The incoming HTTP request.
+        link: The opponent link row dict.
+        guard: Admin user dict.
+        url_input: Raw URL/public_id string from query params.
+
+    Returns:
+        ``(public_id, None)`` on success, or ``(None, error_response)`` on
+        parse/validation failure.
+    """
+    try:
+        id_result = parse_team_url(url_input)
+    except ValueError as exc:
+        return None, _render_connect_error(request, link, guard, str(exc))
+    if id_result.is_uuid:
+        return None, _render_connect_error(
+            request, link, guard,
+            "Opponent teams require a GameChanger URL or public_id, not a UUID.",
+        )
+    public_id = id_result.value
+    is_own_team = await run_in_threadpool(is_member_team_public_id, public_id)
+    if is_own_team:
+        return None, _render_connect_error(
+            request, link, guard,
+            "This URL belongs to a Lincoln program team. You cannot link an opponent to an owned team.",
+        )
+    return public_id, None
+
+
 @router.get("/opponents/{link_id}/connect/confirm", response_model=None)
 async def connect_opponent_confirm(request: Request, link_id: int) -> Response:
     """Render the confirmation page for a manual opponent link.
@@ -1350,23 +1482,11 @@ async def connect_opponent_confirm(request: Request, link_id: int) -> Response:
         return HTMLResponse(content="Opponent link not found", status_code=404)
 
     url_input = request.query_params.get("url", "").strip()
-    try:
-        id_result = parse_team_url(url_input)
-    except ValueError as exc:
-        return _render_connect_error(request, link, guard, str(exc))
-    if id_result.is_uuid:
-        return _render_connect_error(
-            request, link, guard,
-            "Opponent teams require a GameChanger URL or public_id, not a UUID.",
-        )
-    public_id = id_result.value
-
-    is_own_team = await run_in_threadpool(is_member_team_public_id, public_id)
-    if is_own_team:
-        return _render_connect_error(
-            request, link, guard,
-            "This URL belongs to a Lincoln program team. You cannot link an opponent to an owned team.",
-        )
+    public_id, err = await _parse_and_validate_opponent_url(
+        request, link, guard, url_input
+    )
+    if err is not None:
+        return err
 
     duplicate_name = await _get_duplicate_name_for_link(link, public_id, link_id)
     profile, err = await _fetch_team_profile(request, link, guard, public_id)
