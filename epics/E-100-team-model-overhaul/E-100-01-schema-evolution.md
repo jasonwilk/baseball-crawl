@@ -4,7 +4,7 @@
 [E-100: Team Model Overhaul](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the database schema will be a single `001_initial_schema.sql` containing the complete DDL: programs, INTEGER PK teams, team_opponents junction, all non-computed stats available from the boxscore endpoint on per-game stat tables, all non-computed stats available from the season-stats endpoint on season stat tables, provenance columns, spray_charts with pitcher_id, and all auth tables. Old migrations are archived. The seed/reset script produces a valid seeded database against the new schema. Tests verify schema correctness.
