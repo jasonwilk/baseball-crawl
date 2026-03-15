@@ -4,9 +4,6 @@
 
 {% block header_extras %}
 <div class="ml-auto flex items-center gap-4 text-sm">
-  {% if admin_user and admin_user.display_name %}
-  <span class="text-blue-200">{{ admin_user.display_name }}</span>
-  {% endif %}
   <a href="/admin/users" class="text-blue-200 hover:text-white">Back to Users</a>
   <a href="/auth/logout" class="text-blue-200 hover:text-white">Logout</a>
 </div>
@@ -26,37 +23,10 @@
 </nav>
 
 <div class="bg-white rounded shadow p-6 max-w-lg">
-  <form method="post" action="/admin/users/{{ edit_user.user_id }}/edit">
+  <form method="post" action="/admin/users/{{ edit_user.id }}/edit">
     <div class="mb-4">
       <label class="block text-sm font-medium text-gray-700 mb-1">Email</label>
       <p class="text-sm text-gray-600 py-2">{{ edit_user.email }}</p>
-    </div>
-
-    <div class="mb-4">
-      <label class="block text-sm font-medium text-gray-700 mb-1" for="display_name">
-        Display Name <span class="text-red-600">*</span>
-      </label>
-      <input
-        type="text"
-        id="display_name"
-        name="display_name"
-        required
-        value="{{ edit_user.display_name }}"
-        class="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
-      >
-    </div>
-
-    <div class="mb-4">
-      <label class="flex items-center gap-2 text-sm font-medium text-gray-700 cursor-pointer">
-        <input
-          type="checkbox"
-          name="is_admin"
-          value="on"
-          {% if edit_user.is_admin %}checked{% endif %}
-          class="rounded"
-        >
-        Admin
-      </label>
     </div>
 
     {% if teams %}
@@ -67,8 +37,8 @@
         <input
           type="checkbox"
           name="team_ids"
-          value="{{ team.team_id }}"
-          {% if team.team_id in assigned_team_ids %}checked{% endif %}
+          value="{{ team.id }}"
+          {% if team.id in assigned_team_ids %}checked{% endif %}
           class="rounded"
         >
         {{ team.name }}

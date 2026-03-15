@@ -1,14 +1,14 @@
 # synthetic-test-data
-"""Tests for admin routes (src/api/routes/admin.py) -- E-023-05 AC-12.
+"""Tests for admin routes (src/api/routes/admin.py) -- E-100-04.
 
 Tests cover:
-- Admin routes require active session with is_admin=1 (AC-12a)
-- Non-admin authenticated users get 403 (AC-12b)
-- Unauthenticated requests redirect to /auth/login (AC-12c)
-- User CRUD operations (create, read, update, delete) (AC-12d)
-- Duplicate email rejection (AC-12e)
-- Self-delete prevention (AC-12f)
-- Cascade delete removes auth artifacts (AC-12g)
+- Admin routes require session matching ADMIN_EMAIL (or any session in dev mode)
+- Non-admin authenticated users get 403 (ADMIN_EMAIL set to different email)
+- Unauthenticated requests redirect to /auth/login
+- User CRUD operations (create, read, update, delete)
+- Duplicate email rejection
+- Self-delete prevention
+- Cascade delete removes auth artifacts
 
 Uses an in-process seeded SQLite database via tmp_path; no Docker or network.
 
@@ -39,7 +39,7 @@ from src.api.auth import hash_token  # noqa: E402
 from src.api.main import app  # noqa: E402
 
 # ---------------------------------------------------------------------------
-# Schema SQL (base + auth tables)
+# Schema SQL -- E-100 fresh-start schema (minimal subset for auth tests)
 # ---------------------------------------------------------------------------
 
 _SCHEMA_SQL = """
@@ -50,146 +50,80 @@ _SCHEMA_SQL = """
     );
     INSERT OR IGNORE INTO _migrations (filename) VALUES ('001_initial_schema.sql');
 
-    CREATE TABLE IF NOT EXISTS players (
-        player_id  TEXT PRIMARY KEY,
-        first_name TEXT NOT NULL,
-        last_name  TEXT NOT NULL,
-        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    CREATE TABLE IF NOT EXISTS programs (
+        program_id   TEXT PRIMARY KEY,
+        name         TEXT NOT NULL,
+        program_type TEXT NOT NULL
     );
 
     CREATE TABLE IF NOT EXISTS teams (
-        team_id    TEXT PRIMARY KEY,
-        name       TEXT NOT NULL,
-        level      TEXT,
-        is_owned   INTEGER NOT NULL DEFAULT 0,
-        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        name            TEXT NOT NULL,
+        program_id      TEXT REFERENCES programs(program_id),
+        membership_type TEXT NOT NULL DEFAULT 'member',
+        classification  TEXT,
+        public_id       TEXT,
+        gc_uuid         TEXT,
+        source          TEXT NOT NULL DEFAULT 'gamechanger',
+        is_active       INTEGER NOT NULL DEFAULT 1,
+        last_synced     TEXT,
+        created_at      TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
-    CREATE TABLE IF NOT EXISTS team_rosters (
-        id            INTEGER PRIMARY KEY AUTOINCREMENT,
-        team_id       TEXT NOT NULL,
-        player_id     TEXT NOT NULL,
-        season        TEXT NOT NULL,
-        jersey_number TEXT,
-        position      TEXT,
-        UNIQUE(team_id, player_id, season)
-    );
-
-    CREATE TABLE IF NOT EXISTS games (
-        game_id      TEXT PRIMARY KEY,
-        season       TEXT NOT NULL,
-        game_date    TEXT NOT NULL,
-        home_team_id TEXT NOT NULL,
-        away_team_id TEXT NOT NULL,
-        home_score   INTEGER,
-        away_score   INTEGER,
-        status       TEXT NOT NULL DEFAULT 'completed'
-    );
-
-    CREATE TABLE IF NOT EXISTS player_game_batting (
-        id        INTEGER PRIMARY KEY AUTOINCREMENT,
-        game_id   TEXT NOT NULL,
-        player_id TEXT NOT NULL,
-        team_id   TEXT NOT NULL,
-        ab        INTEGER,
-        h         INTEGER,
-        doubles   INTEGER,
-        triples   INTEGER,
-        hr        INTEGER,
-        rbi       INTEGER,
-        bb        INTEGER,
-        so        INTEGER,
-        sb        INTEGER,
-        UNIQUE(game_id, player_id)
-    );
-
-    CREATE TABLE IF NOT EXISTS player_game_pitching (
-        id        INTEGER PRIMARY KEY AUTOINCREMENT,
-        game_id   TEXT NOT NULL,
-        player_id TEXT NOT NULL,
-        team_id   TEXT NOT NULL,
-        ip_outs   INTEGER,
-        h         INTEGER,
-        er        INTEGER,
-        bb        INTEGER,
-        so        INTEGER,
-        hr        INTEGER,
-        UNIQUE(game_id, player_id)
-    );
-
-    CREATE TABLE IF NOT EXISTS player_season_batting (
-        id        INTEGER PRIMARY KEY AUTOINCREMENT,
-        player_id TEXT NOT NULL,
-        team_id   TEXT NOT NULL,
-        season    TEXT NOT NULL,
-        games     INTEGER,
-        ab        INTEGER,
-        h         INTEGER,
-        doubles   INTEGER,
-        triples   INTEGER,
-        hr        INTEGER,
-        rbi       INTEGER,
-        bb        INTEGER,
-        so        INTEGER,
-        sb        INTEGER,
-        home_ab   INTEGER,
-        home_h    INTEGER,
-        away_ab   INTEGER,
-        away_h    INTEGER,
-        vs_lhp_ab INTEGER,
-        vs_lhp_h  INTEGER,
-        vs_rhp_ab INTEGER,
-        vs_rhp_h  INTEGER,
-        UNIQUE(player_id, team_id, season)
-    );
-
-    -- Auth tables (003_auth.sql)
     CREATE TABLE IF NOT EXISTS users (
-        user_id      INTEGER PRIMARY KEY AUTOINCREMENT,
-        email        TEXT    NOT NULL UNIQUE,
-        display_name TEXT    NOT NULL,
-        is_admin     INTEGER NOT NULL DEFAULT 0,
-        created_at   TEXT    NOT NULL DEFAULT (datetime('now'))
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        email           TEXT UNIQUE NOT NULL,
+        hashed_password TEXT,
+        created_at      TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
     CREATE TABLE IF NOT EXISTS user_team_access (
-        id       INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id  INTEGER NOT NULL REFERENCES users(user_id),
-        team_id  TEXT    NOT NULL REFERENCES teams(team_id),
+        user_id INTEGER NOT NULL REFERENCES users(id),
+        team_id INTEGER NOT NULL REFERENCES teams(id),
         UNIQUE(user_id, team_id)
     );
 
+    CREATE TABLE IF NOT EXISTS sessions (
+        session_id TEXT PRIMARY KEY,
+        user_id    INTEGER NOT NULL REFERENCES users(id),
+        expires_at TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS magic_link_tokens (
-        id         INTEGER PRIMARY KEY AUTOINCREMENT,
-        token_hash TEXT    NOT NULL UNIQUE,
-        user_id    INTEGER NOT NULL REFERENCES users(user_id),
-        expires_at TEXT    NOT NULL,
-        used_at    TEXT,
-        created_at TEXT    NOT NULL DEFAULT (datetime('now'))
+        token      TEXT PRIMARY KEY,
+        user_id    INTEGER NOT NULL REFERENCES users(id),
+        expires_at TEXT NOT NULL
     );
 
     CREATE TABLE IF NOT EXISTS passkey_credentials (
-        id            INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id       INTEGER NOT NULL REFERENCES users(user_id),
-        credential_id BLOB    NOT NULL UNIQUE,
-        public_key    BLOB    NOT NULL,
-        sign_count    INTEGER NOT NULL DEFAULT 0,
-        created_at    TEXT    NOT NULL DEFAULT (datetime('now'))
+        credential_id TEXT PRIMARY KEY,
+        user_id       INTEGER NOT NULL REFERENCES users(id),
+        public_key    TEXT NOT NULL,
+        sign_count    INTEGER NOT NULL DEFAULT 0
     );
 
-    CREATE TABLE IF NOT EXISTS sessions (
-        id                  INTEGER PRIMARY KEY AUTOINCREMENT,
-        session_token_hash  TEXT    NOT NULL UNIQUE,
-        user_id             INTEGER NOT NULL REFERENCES users(user_id),
-        expires_at          TEXT    NOT NULL,
-        created_at          TEXT    NOT NULL DEFAULT (datetime('now'))
+    CREATE TABLE IF NOT EXISTS opponent_links (
+        id                INTEGER PRIMARY KEY AUTOINCREMENT,
+        our_team_id       INTEGER NOT NULL REFERENCES teams(id),
+        root_team_id      TEXT NOT NULL,
+        opponent_name     TEXT NOT NULL,
+        resolved_team_id  INTEGER REFERENCES teams(id),
+        public_id         TEXT,
+        resolution_method TEXT,
+        resolved_at       TEXT,
+        is_hidden         INTEGER NOT NULL DEFAULT 0,
+        created_at        TEXT NOT NULL DEFAULT (datetime('now')),
+        UNIQUE(our_team_id, root_team_id)
     );
 """
 
 _SEED_SQL = """
-    INSERT OR IGNORE INTO teams (team_id, name, level, is_owned) VALUES
-        ('lsb-varsity-2026', 'LSB Varsity 2026', 'varsity', 1),
-        ('lsb-jv-2026', 'LSB JV 2026', 'jv', 1);
+    INSERT OR IGNORE INTO programs (program_id, name, program_type)
+        VALUES ('lsb-hs', 'Lincoln Standing Bear HS', 'hs');
+
+    INSERT OR IGNORE INTO teams (name, program_id, membership_type, classification)
+        VALUES ('LSB Varsity 2026', 'lsb-hs', 'member', 'varsity'),
+               ('LSB JV 2026', 'lsb-hs', 'member', 'jv');
 """
 
 
@@ -199,7 +133,7 @@ _SEED_SQL = """
 
 
 def _make_db(tmp_path: Path) -> Path:
-    """Create a fully-schemed database with team rows.
+    """Create a fully-schemed database with seed rows.
 
     Args:
         tmp_path: pytest tmp_path fixture directory.
@@ -216,21 +150,20 @@ def _make_db(tmp_path: Path) -> Path:
     return db_path
 
 
-def _insert_user(db_path: Path, email: str, is_admin: int = 0) -> int:
-    """Insert a user row and return the user_id.
+def _insert_user(db_path: Path, email: str) -> int:
+    """Insert a user row and return the id.
 
     Args:
         db_path: Path to the database file.
         email: Email address for the user.
-        is_admin: 1 for admin, 0 for non-admin.
 
     Returns:
-        The new user_id.
+        The new integer user id.
     """
     conn = sqlite3.connect(str(db_path))
     cursor = conn.execute(
-        "INSERT INTO users (email, display_name, is_admin) VALUES (?, ?, ?)",
-        (email, "Test User", is_admin),
+        "INSERT INTO users (email, hashed_password) VALUES (?, '')",
+        (email,),
     )
     conn.commit()
     user_id = cursor.lastrowid
@@ -253,7 +186,7 @@ def _insert_session(db_path: Path, user_id: int) -> str:
     conn = sqlite3.connect(str(db_path))
     conn.execute(
         """
-        INSERT INTO sessions (session_token_hash, user_id, expires_at)
+        INSERT INTO sessions (session_id, user_id, expires_at)
         VALUES (?, ?, datetime('now', '+7 days'))
         """,
         (token_hash, user_id),
@@ -261,6 +194,23 @@ def _insert_session(db_path: Path, user_id: int) -> str:
     conn.commit()
     conn.close()
     return raw_token
+
+
+def _get_team_id(db_path: Path, name: str) -> int:
+    """Return the INTEGER id of a team by name.
+
+    Args:
+        db_path: Path to the database file.
+        name: Team name to look up.
+
+    Returns:
+        Integer team id.
+    """
+    conn = sqlite3.connect(str(db_path))
+    cursor = conn.execute("SELECT id FROM teams WHERE name = ?", (name,))
+    row = cursor.fetchone()
+    conn.close()
+    return row[0]
 
 
 def _count_rows(db_path: Path, table: str, where_clause: str, params: tuple) -> int:
@@ -291,53 +241,84 @@ def _count_rows(db_path: Path, table: str, where_clause: str, params: tuple) -> 
 
 @pytest.fixture()
 def admin_db(tmp_path: Path) -> Path:
-    """Full schema database with owned teams."""
+    """Full schema database with seeded teams."""
     return _make_db(tmp_path)
 
 
 # ---------------------------------------------------------------------------
-# AC-12a: Admin routes require is_admin=1
+# Admin auth: ADMIN_EMAIL controls access
 # ---------------------------------------------------------------------------
 
 
 class TestAdminAuthRequired:
-    """Admin routes require an active session with is_admin=1 (AC-12a)."""
+    """Admin routes require a session matching ADMIN_EMAIL (or any session if unset)."""
 
-    def test_admin_session_can_access_users_page(self, admin_db: Path) -> None:
-        """Admin with valid session gets 200 from GET /admin/users."""
-        admin_id = _insert_user(admin_db, "admin@example.com", is_admin=1)
-        raw_token = _insert_session(admin_db, admin_id)
+    def test_admin_email_match_can_access_users_page(self, admin_db: Path) -> None:
+        """Session email matching ADMIN_EMAIL gets 200 from GET /admin/users."""
+        user_id = _insert_user(admin_db, "admin@example.com")
+        raw_token = _insert_session(admin_db, user_id)
 
-        with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db)}):
+        with patch.dict(
+            "os.environ",
+            {"DATABASE_PATH": str(admin_db), "ADMIN_EMAIL": "admin@example.com"},
+        ):
             with TestClient(app, cookies={"session": raw_token}) as client:
                 response = client.get("/admin/users")
         assert response.status_code == 200
 
+    def test_dev_mode_any_session_can_access_users_page(self, admin_db: Path) -> None:
+        """When ADMIN_EMAIL is unset, any authenticated user gets 200."""
+        user_id = _insert_user(admin_db, "coach@example.com")
+        raw_token = _insert_session(admin_db, user_id)
+
+        env = {"DATABASE_PATH": str(admin_db)}
+        env.pop("ADMIN_EMAIL", None)  # ensure not set
+        with patch.dict("os.environ", env, clear=False):
+            # Remove ADMIN_EMAIL if it was set in environment
+            import os
+            old = os.environ.pop("ADMIN_EMAIL", None)
+            try:
+                with TestClient(app, cookies={"session": raw_token}) as client:
+                    response = client.get("/admin/users")
+                assert response.status_code == 200
+            finally:
+                if old is not None:
+                    os.environ["ADMIN_EMAIL"] = old
+
     def test_admin_page_contains_user_table(self, admin_db: Path) -> None:
         """Admin page HTML includes a users table header."""
-        admin_id = _insert_user(admin_db, "tableadmin@example.com", is_admin=1)
-        raw_token = _insert_session(admin_db, admin_id)
+        user_id = _insert_user(admin_db, "tableadmin@example.com")
+        raw_token = _insert_session(admin_db, user_id)
 
-        with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db)}):
+        with patch.dict(
+            "os.environ",
+            {"DATABASE_PATH": str(admin_db), "ADMIN_EMAIL": "tableadmin@example.com"},
+        ):
             with TestClient(app, cookies={"session": raw_token}) as client:
                 response = client.get("/admin/users")
         assert "Manage Users" in response.text
 
 
 # ---------------------------------------------------------------------------
-# AC-12b: Non-admin gets 403 HTML page (not JSON)
+# Non-admin gets 403
 # ---------------------------------------------------------------------------
 
 
 class TestNonAdminForbidden:
-    """Authenticated non-admin users receive a 403 HTML page (AC-12b)."""
+    """Authenticated users get 403 when ADMIN_EMAIL is set to a different email."""
 
     def test_non_admin_gets_403(self, admin_db: Path) -> None:
-        """Non-admin session results in 403 status code."""
-        user_id = _insert_user(admin_db, "coach@example.com", is_admin=0)
+        """ADMIN_EMAIL set to different email results in 403 status code."""
+        user_id = _insert_user(admin_db, "coach@example.com")
         raw_token = _insert_session(admin_db, user_id)
 
-        with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db)}):
+        with patch.dict(
+            "os.environ",
+            {
+                "DATABASE_PATH": str(admin_db),
+                "ADMIN_EMAIL": "other-admin@example.com",
+            },
+        ):
             with TestClient(
                 app, follow_redirects=False, cookies={"session": raw_token}
             ) as client:
@@ -346,10 +327,16 @@ class TestNonAdminForbidden:
 
     def test_non_admin_gets_html_not_json(self, admin_db: Path) -> None:
         """Non-admin 403 response is HTML, not a JSON error body."""
-        user_id = _insert_user(admin_db, "htmlcheck@example.com", is_admin=0)
+        user_id = _insert_user(admin_db, "htmlcheck@example.com")
         raw_token = _insert_session(admin_db, user_id)
 
-        with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db)}):
+        with patch.dict(
+            "os.environ",
+            {
+                "DATABASE_PATH": str(admin_db),
+                "ADMIN_EMAIL": "other@example.com",
+            },
+        ):
             with TestClient(app, cookies={"session": raw_token}) as client:
                 response = client.get("/admin/users")
         assert "text/html" in response.headers.get("content-type", "")
@@ -357,22 +344,28 @@ class TestNonAdminForbidden:
 
     def test_non_admin_forbidden_page_has_dashboard_link(self, admin_db: Path) -> None:
         """Forbidden page includes a link back to the dashboard."""
-        user_id = _insert_user(admin_db, "dashlink@example.com", is_admin=0)
+        user_id = _insert_user(admin_db, "dashlink@example.com")
         raw_token = _insert_session(admin_db, user_id)
 
-        with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db)}):
+        with patch.dict(
+            "os.environ",
+            {
+                "DATABASE_PATH": str(admin_db),
+                "ADMIN_EMAIL": "other@example.com",
+            },
+        ):
             with TestClient(app, cookies={"session": raw_token}) as client:
                 response = client.get("/admin/users")
         assert "/dashboard" in response.text
 
 
 # ---------------------------------------------------------------------------
-# AC-12c: Unauthenticated requests redirect to /auth/login
+# Unauthenticated requests redirect to /auth/login
 # ---------------------------------------------------------------------------
 
 
 class TestUnauthenticatedRedirect:
-    """Unauthenticated requests to /admin/* redirect to /auth/login (AC-12c)."""
+    """Unauthenticated requests to /admin/* redirect to /auth/login."""
 
     def test_no_session_redirects_to_login(self, admin_db: Path) -> None:
         """GET /admin/users without session cookie -> redirect to /auth/login."""
@@ -388,73 +381,82 @@ class TestUnauthenticatedRedirect:
             with TestClient(app, follow_redirects=False) as client:
                 response = client.post(
                     "/admin/users",
-                    data={"email": "x@x.com", "display_name": "X"},
+                    data={"email": "x@x.com"},
                 )
         assert response.status_code == 302
         assert "/auth/login" in response.headers["location"]
 
 
 # ---------------------------------------------------------------------------
-# AC-12d: CRUD operations
+# User CRUD operations
 # ---------------------------------------------------------------------------
 
 
 class TestUserCRUD:
-    """User CRUD operations work correctly (AC-12d)."""
+    """User CRUD operations work correctly with the new schema."""
 
     def test_list_users_returns_existing_user(self, admin_db: Path) -> None:
-        """GET /admin/users lists an existing user by name."""
-        admin_id = _insert_user(admin_db, "listadmin@example.com", is_admin=1)
-        _insert_user(admin_db, "coach@example.com", is_admin=0)
+        """GET /admin/users lists an existing user by email."""
+        admin_id = _insert_user(admin_db, "listadmin@example.com")
+        _insert_user(admin_db, "coach@example.com")
         raw_token = _insert_session(admin_db, admin_id)
 
-        with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db)}):
+        with patch.dict(
+            "os.environ",
+            {"DATABASE_PATH": str(admin_db), "ADMIN_EMAIL": "listadmin@example.com"},
+        ):
             with TestClient(app, cookies={"session": raw_token}) as client:
                 response = client.get("/admin/users")
         assert "coach@example.com" in response.text
 
     def test_create_user_inserts_db_row(self, admin_db: Path) -> None:
         """POST /admin/users creates a user row in the database."""
-        admin_id = _insert_user(admin_db, "createadmin@example.com", is_admin=1)
+        admin_id = _insert_user(admin_db, "createadmin@example.com")
         raw_token = _insert_session(admin_db, admin_id)
 
-        with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db)}):
+        with patch.dict(
+            "os.environ",
+            {
+                "DATABASE_PATH": str(admin_db),
+                "ADMIN_EMAIL": "createadmin@example.com",
+            },
+        ):
             with TestClient(
                 app, follow_redirects=False, cookies={"session": raw_token}
             ) as client:
                 response = client.post(
                     "/admin/users",
-                    data={
-                        "email": "newcoach@example.com",
-                        "display_name": "New Coach",
-                    },
+                    data={"email": "newcoach@example.com"},
                 )
         assert response.status_code == 303
         assert _count_rows(admin_db, "users", "email = ?", ("newcoach@example.com",)) == 1
 
     def test_create_user_with_team_assignment(self, admin_db: Path) -> None:
-        """POST /admin/users with team_ids creates user_team_access rows."""
-        admin_id = _insert_user(admin_db, "teamadmin@example.com", is_admin=1)
+        """POST /admin/users with team_ids (INTEGER) creates user_team_access rows."""
+        admin_id = _insert_user(admin_db, "teamadmin@example.com")
         raw_token = _insert_session(admin_db, admin_id)
+        team_id = _get_team_id(admin_db, "LSB Varsity 2026")
 
-        with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db)}):
+        with patch.dict(
+            "os.environ",
+            {
+                "DATABASE_PATH": str(admin_db),
+                "ADMIN_EMAIL": "teamadmin@example.com",
+            },
+        ):
             with TestClient(
                 app, follow_redirects=False, cookies={"session": raw_token}
             ) as client:
                 client.post(
                     "/admin/users",
-                    data={
-                        "email": "withteam@example.com",
-                        "display_name": "With Team",
-                        "team_ids": "lsb-varsity-2026",
-                    },
+                    data={"email": "withteam@example.com", "team_ids": str(team_id)},
                 )
 
         conn = sqlite3.connect(str(admin_db))
         cursor = conn.execute(
             """
             SELECT uta.team_id FROM user_team_access uta
-            JOIN users u ON u.user_id = uta.user_id
+            JOIN users u ON u.id = uta.user_id
             WHERE u.email = ?
             """,
             ("withteam@example.com",),
@@ -462,147 +464,165 @@ class TestUserCRUD:
         rows = cursor.fetchall()
         conn.close()
         assert len(rows) == 1
-        assert rows[0][0] == "lsb-varsity-2026"
+        assert rows[0][0] == team_id
 
     def test_create_user_success_redirects_with_flash(self, admin_db: Path) -> None:
         """POST /admin/users on success redirects with ?msg= flash message."""
-        admin_id = _insert_user(admin_db, "flashadmin@example.com", is_admin=1)
+        admin_id = _insert_user(admin_db, "flashadmin@example.com")
         raw_token = _insert_session(admin_db, admin_id)
 
-        with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db)}):
+        with patch.dict(
+            "os.environ",
+            {
+                "DATABASE_PATH": str(admin_db),
+                "ADMIN_EMAIL": "flashadmin@example.com",
+            },
+        ):
             with TestClient(
                 app, follow_redirects=False, cookies={"session": raw_token}
             ) as client:
                 response = client.post(
                     "/admin/users",
-                    data={"email": "flash@example.com", "display_name": "Flash"},
+                    data={"email": "flash@example.com"},
                 )
         assert response.status_code == 303
         assert "msg=" in response.headers["location"]
 
-    def test_edit_user_form_shows_current_values(self, admin_db: Path) -> None:
-        """GET /admin/users/{id}/edit renders current user details."""
-        admin_id = _insert_user(admin_db, "editadmin@example.com", is_admin=1)
-        coach_id = _insert_user(admin_db, "editcoach@example.com", is_admin=0)
+    def test_edit_user_form_shows_email(self, admin_db: Path) -> None:
+        """GET /admin/users/{id}/edit renders the user's email."""
+        admin_id = _insert_user(admin_db, "editadmin@example.com")
+        coach_id = _insert_user(admin_db, "editcoach@example.com")
         raw_token = _insert_session(admin_db, admin_id)
 
-        with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db)}):
+        with patch.dict(
+            "os.environ",
+            {"DATABASE_PATH": str(admin_db), "ADMIN_EMAIL": "editadmin@example.com"},
+        ):
             with TestClient(app, cookies={"session": raw_token}) as client:
                 response = client.get(f"/admin/users/{coach_id}/edit")
         assert response.status_code == 200
         assert "editcoach@example.com" in response.text
 
-    def test_update_user_changes_display_name(self, admin_db: Path) -> None:
-        """POST /admin/users/{id}/edit updates the user's display name."""
-        admin_id = _insert_user(admin_db, "updadmin@example.com", is_admin=1)
-        coach_id = _insert_user(admin_db, "updcoach@example.com", is_admin=0)
+    def test_update_user_team_assignment(self, admin_db: Path) -> None:
+        """POST /admin/users/{id}/edit updates the user's team assignments."""
+        admin_id = _insert_user(admin_db, "updadmin@example.com")
+        coach_id = _insert_user(admin_db, "updcoach@example.com")
         raw_token = _insert_session(admin_db, admin_id)
+        team_id = _get_team_id(admin_db, "LSB Varsity 2026")
 
-        with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db)}):
+        with patch.dict(
+            "os.environ",
+            {"DATABASE_PATH": str(admin_db), "ADMIN_EMAIL": "updadmin@example.com"},
+        ):
             with TestClient(
                 app, follow_redirects=False, cookies={"session": raw_token}
             ) as client:
                 response = client.post(
                     f"/admin/users/{coach_id}/edit",
-                    data={"display_name": "Updated Coach Name"},
+                    data={"team_ids": str(team_id)},
                 )
         assert response.status_code == 303
-
-        conn = sqlite3.connect(str(admin_db))
-        cursor = conn.execute(
-            "SELECT display_name FROM users WHERE user_id = ?", (coach_id,)
-        )
-        name = cursor.fetchone()[0]
-        conn.close()
-        assert name == "Updated Coach Name"
+        assert _count_rows(
+            admin_db, "user_team_access", "user_id = ? AND team_id = ?",
+            (coach_id, team_id)
+        ) == 1
 
     def test_update_user_success_redirects_with_flash(self, admin_db: Path) -> None:
         """POST /admin/users/{id}/edit redirects with ?msg= flash message."""
-        admin_id = _insert_user(admin_db, "updflash@example.com", is_admin=1)
-        coach_id = _insert_user(admin_db, "updflashcoach@example.com", is_admin=0)
+        admin_id = _insert_user(admin_db, "updflash@example.com")
+        coach_id = _insert_user(admin_db, "updflashcoach@example.com")
         raw_token = _insert_session(admin_db, admin_id)
 
-        with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db)}):
+        with patch.dict(
+            "os.environ",
+            {"DATABASE_PATH": str(admin_db), "ADMIN_EMAIL": "updflash@example.com"},
+        ):
             with TestClient(
                 app, follow_redirects=False, cookies={"session": raw_token}
             ) as client:
                 response = client.post(
                     f"/admin/users/{coach_id}/edit",
-                    data={"display_name": "Name"},
+                    data={},
                 )
         assert response.status_code == 303
         assert "msg=" in response.headers["location"]
 
     def test_delete_user_removes_row(self, admin_db: Path) -> None:
         """POST /admin/users/{id}/delete removes the user row."""
-        admin_id = _insert_user(admin_db, "deladmin@example.com", is_admin=1)
-        coach_id = _insert_user(admin_db, "delcoach@example.com", is_admin=0)
+        admin_id = _insert_user(admin_db, "deladmin@example.com")
+        coach_id = _insert_user(admin_db, "delcoach@example.com")
         raw_token = _insert_session(admin_db, admin_id)
 
-        with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db)}):
+        with patch.dict(
+            "os.environ",
+            {"DATABASE_PATH": str(admin_db), "ADMIN_EMAIL": "deladmin@example.com"},
+        ):
             with TestClient(
                 app, follow_redirects=False, cookies={"session": raw_token}
             ) as client:
                 response = client.post(f"/admin/users/{coach_id}/delete")
         assert response.status_code == 303
-        assert _count_rows(admin_db, "users", "user_id = ?", (coach_id,)) == 0
+        assert _count_rows(admin_db, "users", "id = ?", (coach_id,)) == 0
 
 
 # ---------------------------------------------------------------------------
-# AC-12e: Duplicate email rejection
+# Duplicate email rejection
 # ---------------------------------------------------------------------------
 
 
 class TestDuplicateEmail:
-    """Duplicate email shows error message and does not create a duplicate (AC-12e)."""
+    """Duplicate email shows error message and does not create a duplicate."""
 
     def test_duplicate_email_returns_error_message(self, admin_db: Path) -> None:
         """POST /admin/users with duplicate email shows error message."""
-        admin_id = _insert_user(admin_db, "dupadmin@example.com", is_admin=1)
-        _insert_user(admin_db, "existing@example.com", is_admin=0)
+        admin_id = _insert_user(admin_db, "dupadmin@example.com")
+        _insert_user(admin_db, "existing@example.com")
         raw_token = _insert_session(admin_db, admin_id)
 
-        with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db)}):
+        with patch.dict(
+            "os.environ",
+            {"DATABASE_PATH": str(admin_db), "ADMIN_EMAIL": "dupadmin@example.com"},
+        ):
             with TestClient(app, cookies={"session": raw_token}) as client:
                 response = client.post(
                     "/admin/users",
-                    data={
-                        "email": "existing@example.com",
-                        "display_name": "Duplicate",
-                    },
+                    data={"email": "existing@example.com"},
                 )
         assert response.status_code == 200
         assert "already exists" in response.text.lower()
 
     def test_duplicate_email_does_not_create_second_row(self, admin_db: Path) -> None:
         """POST /admin/users with duplicate email does not insert a second user row."""
-        admin_id = _insert_user(admin_db, "dup2admin@example.com", is_admin=1)
-        _insert_user(admin_db, "dup2@example.com", is_admin=0)
+        admin_id = _insert_user(admin_db, "dup2admin@example.com")
+        _insert_user(admin_db, "dup2@example.com")
         raw_token = _insert_session(admin_db, admin_id)
 
-        with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db)}):
+        with patch.dict(
+            "os.environ",
+            {"DATABASE_PATH": str(admin_db), "ADMIN_EMAIL": "dup2admin@example.com"},
+        ):
             with TestClient(app, cookies={"session": raw_token}) as client:
                 client.post(
                     "/admin/users",
-                    data={"email": "dup2@example.com", "display_name": "Dup"},
+                    data={"email": "dup2@example.com"},
                 )
         assert _count_rows(admin_db, "users", "email = ?", ("dup2@example.com",)) == 1
 
     def test_email_normalized_to_lowercase(self, admin_db: Path) -> None:
         """POST /admin/users normalizes email to lowercase before storage."""
-        admin_id = _insert_user(admin_db, "normadmin@example.com", is_admin=1)
+        admin_id = _insert_user(admin_db, "normadmin@example.com")
         raw_token = _insert_session(admin_db, admin_id)
 
-        with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db)}):
+        with patch.dict(
+            "os.environ",
+            {"DATABASE_PATH": str(admin_db), "ADMIN_EMAIL": "normadmin@example.com"},
+        ):
             with TestClient(
                 app, follow_redirects=False, cookies={"session": raw_token}
             ) as client:
                 client.post(
                     "/admin/users",
-                    data={
-                        "email": "Coach@Example.COM",
-                        "display_name": "Mixed Case",
-                    },
+                    data={"email": "Coach@Example.COM"},
                 )
         assert (
             _count_rows(admin_db, "users", "email = ?", ("coach@example.com",)) == 1
@@ -613,19 +633,22 @@ class TestDuplicateEmail:
 
 
 # ---------------------------------------------------------------------------
-# AC-12f: Self-delete prevention
+# Self-delete prevention
 # ---------------------------------------------------------------------------
 
 
 class TestSelfDeletePrevention:
-    """Admins cannot delete their own account (AC-12f)."""
+    """Admins cannot delete their own account."""
 
     def test_self_delete_is_rejected(self, admin_db: Path) -> None:
         """POST /admin/users/{own_id}/delete returns redirect with error."""
-        admin_id = _insert_user(admin_db, "selfadmin@example.com", is_admin=1)
+        admin_id = _insert_user(admin_db, "selfadmin@example.com")
         raw_token = _insert_session(admin_db, admin_id)
 
-        with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db)}):
+        with patch.dict(
+            "os.environ",
+            {"DATABASE_PATH": str(admin_db), "ADMIN_EMAIL": "selfadmin@example.com"},
+        ):
             with TestClient(
                 app, follow_redirects=False, cookies={"session": raw_token}
             ) as client:
@@ -635,40 +658,43 @@ class TestSelfDeletePrevention:
 
     def test_self_delete_does_not_remove_row(self, admin_db: Path) -> None:
         """POST /admin/users/{own_id}/delete leaves the admin row intact."""
-        admin_id = _insert_user(admin_db, "selfkeep@example.com", is_admin=1)
+        admin_id = _insert_user(admin_db, "selfkeep@example.com")
         raw_token = _insert_session(admin_db, admin_id)
 
-        with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db)}):
+        with patch.dict(
+            "os.environ",
+            {"DATABASE_PATH": str(admin_db), "ADMIN_EMAIL": "selfkeep@example.com"},
+        ):
             with TestClient(
                 app, follow_redirects=False, cookies={"session": raw_token}
             ) as client:
                 client.post(f"/admin/users/{admin_id}/delete")
-        assert _count_rows(admin_db, "users", "user_id = ?", (admin_id,)) == 1
+        assert _count_rows(admin_db, "users", "id = ?", (admin_id,)) == 1
 
 
 # ---------------------------------------------------------------------------
-# AC-12g: Cascade delete removes auth artifacts
+# Cascade delete removes auth artifacts
 # ---------------------------------------------------------------------------
 
 
 class TestCascadeDelete:
-    """Deleting a user removes all their auth artifacts (AC-12g)."""
+    """Deleting a user removes all their auth artifacts."""
 
     def _seed_full_user(self, db_path: Path, email: str) -> int:
-        """Insert a user with sessions, magic_link_tokens, and passkey_credentials.
+        """Insert a user with sessions and tokens.
 
         Args:
             db_path: Path to the database.
             email: Email for the new user.
 
         Returns:
-            The new user_id.
+            The new user id.
         """
         conn = sqlite3.connect(str(db_path))
 
         cursor = conn.execute(
-            "INSERT INTO users (email, display_name, is_admin) VALUES (?, ?, 0)",
-            (email, "Full User"),
+            "INSERT INTO users (email, hashed_password) VALUES (?, '')",
+            (email,),
         )
         user_id = cursor.lastrowid
 
@@ -677,140 +703,117 @@ class TestCascadeDelete:
             raw_token = secrets.token_hex(32)
             conn.execute(
                 """
-                INSERT INTO sessions (session_token_hash, user_id, expires_at)
+                INSERT INTO sessions (session_id, user_id, expires_at)
                 VALUES (?, ?, datetime('now', '+7 days'))
                 """,
                 (hash_token(raw_token), user_id),
             )
 
         # Magic link token
-        import secrets as _secrets
-        raw_magic = _secrets.token_urlsafe(32)
+        raw_magic = secrets.token_urlsafe(32)
         conn.execute(
             """
-            INSERT INTO magic_link_tokens (token_hash, user_id, expires_at)
+            INSERT INTO magic_link_tokens (token, user_id, expires_at)
             VALUES (?, ?, datetime('now', '+15 minutes'))
             """,
-            (hash_token(raw_magic), user_id),
+            (raw_magic, user_id),
         )
 
-        # Passkey credential (dummy blob data)
+        # Passkey credential
         conn.execute(
             """
-            INSERT INTO passkey_credentials (user_id, credential_id, public_key)
+            INSERT INTO passkey_credentials (credential_id, user_id, public_key)
             VALUES (?, ?, ?)
             """,
-            (user_id, b"dummy-cred-id", b"dummy-public-key"),
-        )
-
-        # Team assignment
-        conn.execute(
-            "INSERT OR IGNORE INTO user_team_access (user_id, team_id) VALUES (?, ?)",
-            (user_id, "lsb-varsity-2026"),
+            (secrets.token_hex(16), user_id, "fake-public-key"),
         )
 
         conn.commit()
         conn.close()
         return user_id
 
-    def test_cascade_delete_removes_sessions(self, admin_db: Path) -> None:
-        """Deleting a user removes their session rows."""
-        admin_id = _insert_user(admin_db, "cascadeadmin@example.com", is_admin=1)
-        coach_id = self._seed_full_user(admin_db, "cascadecoach@example.com")
+    def test_delete_user_removes_sessions(self, admin_db: Path) -> None:
+        """Deleting a user removes their sessions from the database."""
+        admin_id = _insert_user(admin_db, "cascadeadmin@example.com")
+        full_user_id = self._seed_full_user(admin_db, "fulluser@example.com")
         raw_token = _insert_session(admin_db, admin_id)
 
-        with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db)}):
+        assert _count_rows(admin_db, "sessions", "user_id = ?", (full_user_id,)) == 2
+
+        with patch.dict(
+            "os.environ",
+            {
+                "DATABASE_PATH": str(admin_db),
+                "ADMIN_EMAIL": "cascadeadmin@example.com",
+            },
+        ):
             with TestClient(
                 app, follow_redirects=False, cookies={"session": raw_token}
             ) as client:
-                client.post(f"/admin/users/{coach_id}/delete")
+                client.post(f"/admin/users/{full_user_id}/delete")
 
-        assert _count_rows(admin_db, "sessions", "user_id = ?", (coach_id,)) == 0
+        assert _count_rows(admin_db, "sessions", "user_id = ?", (full_user_id,)) == 0
 
-    def test_cascade_delete_removes_magic_link_tokens(self, admin_db: Path) -> None:
-        """Deleting a user removes their magic_link_token rows."""
-        admin_id = _insert_user(admin_db, "cascadeadmin2@example.com", is_admin=1)
-        coach_id = self._seed_full_user(admin_db, "cascadecoach2@example.com")
+    def test_delete_user_removes_magic_link_tokens(self, admin_db: Path) -> None:
+        """Deleting a user removes their magic link tokens."""
+        admin_id = _insert_user(admin_db, "cascadeadmin2@example.com")
+        full_user_id = self._seed_full_user(admin_db, "fulluser2@example.com")
         raw_token = _insert_session(admin_db, admin_id)
-
-        with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db)}):
-            with TestClient(
-                app, follow_redirects=False, cookies={"session": raw_token}
-            ) as client:
-                client.post(f"/admin/users/{coach_id}/delete")
 
         assert (
-            _count_rows(admin_db, "magic_link_tokens", "user_id = ?", (coach_id,)) == 0
+            _count_rows(
+                admin_db, "magic_link_tokens", "user_id = ?", (full_user_id,)
+            )
+            == 1
         )
 
-    def test_cascade_delete_removes_passkey_credentials(self, admin_db: Path) -> None:
-        """Deleting a user removes their passkey_credentials rows."""
-        admin_id = _insert_user(admin_db, "cascadeadmin3@example.com", is_admin=1)
-        coach_id = self._seed_full_user(admin_db, "cascadecoach3@example.com")
-        raw_token = _insert_session(admin_db, admin_id)
-
-        with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db)}):
+        with patch.dict(
+            "os.environ",
+            {
+                "DATABASE_PATH": str(admin_db),
+                "ADMIN_EMAIL": "cascadeadmin2@example.com",
+            },
+        ):
             with TestClient(
                 app, follow_redirects=False, cookies={"session": raw_token}
             ) as client:
-                client.post(f"/admin/users/{coach_id}/delete")
+                client.post(f"/admin/users/{full_user_id}/delete")
 
         assert (
-            _count_rows(admin_db, "passkey_credentials", "user_id = ?", (coach_id,))
+            _count_rows(
+                admin_db, "magic_link_tokens", "user_id = ?", (full_user_id,)
+            )
             == 0
         )
 
-    def test_cascade_delete_removes_team_access(self, admin_db: Path) -> None:
-        """Deleting a user removes their user_team_access rows."""
-        admin_id = _insert_user(admin_db, "cascadeadmin4@example.com", is_admin=1)
-        coach_id = self._seed_full_user(admin_db, "cascadecoach4@example.com")
+    def test_delete_user_removes_passkey_credentials(self, admin_db: Path) -> None:
+        """Deleting a user removes their passkey credentials."""
+        admin_id = _insert_user(admin_db, "cascadeadmin3@example.com")
+        full_user_id = self._seed_full_user(admin_db, "fulluser3@example.com")
         raw_token = _insert_session(admin_db, admin_id)
 
-        with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db)}):
+        assert (
+            _count_rows(
+                admin_db, "passkey_credentials", "user_id = ?", (full_user_id,)
+            )
+            == 1
+        )
+
+        with patch.dict(
+            "os.environ",
+            {
+                "DATABASE_PATH": str(admin_db),
+                "ADMIN_EMAIL": "cascadeadmin3@example.com",
+            },
+        ):
             with TestClient(
                 app, follow_redirects=False, cookies={"session": raw_token}
             ) as client:
-                client.post(f"/admin/users/{coach_id}/delete")
+                client.post(f"/admin/users/{full_user_id}/delete")
 
         assert (
-            _count_rows(admin_db, "user_team_access", "user_id = ?", (coach_id,)) == 0
+            _count_rows(
+                admin_db, "passkey_credentials", "user_id = ?", (full_user_id,)
+            )
+            == 0
         )
-
-
-# ---------------------------------------------------------------------------
-# AC-10: Admin link on dashboard visible to admins only
-# ---------------------------------------------------------------------------
-
-
-class TestAdminLinkOnDashboard:
-    """Admin link in dashboard header visible only to is_admin=1 users (AC-10)."""
-
-    def test_admin_link_visible_for_admin_user(self, admin_db: Path) -> None:
-        """Dashboard header shows Admin link for is_admin=1 users."""
-        admin_id = _insert_user(admin_db, "linkadmin@example.com", is_admin=1)
-        raw_token = _insert_session(admin_db, admin_id)
-
-        with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db)}):
-            with TestClient(app, cookies={"session": raw_token}) as client:
-                response = client.get("/dashboard")
-        assert response.status_code == 200
-        assert "/admin/users" in response.text
-
-    def test_admin_link_hidden_for_non_admin(self, admin_db: Path) -> None:
-        """Dashboard header does not show Admin link for non-admin users."""
-        # Need to grant team access so they can see the dashboard
-        coach_id = _insert_user(admin_db, "nolink@example.com", is_admin=0)
-        conn = sqlite3.connect(str(admin_db))
-        conn.execute(
-            "INSERT OR IGNORE INTO user_team_access (user_id, team_id) VALUES (?, ?)",
-            (coach_id, "lsb-varsity-2026"),
-        )
-        conn.commit()
-        conn.close()
-        raw_token = _insert_session(admin_db, coach_id)
-
-        with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db)}):
-            with TestClient(app, cookies={"session": raw_token}) as client:
-                response = client.get("/dashboard")
-        assert response.status_code == 200
-        assert "/admin/users" not in response.text

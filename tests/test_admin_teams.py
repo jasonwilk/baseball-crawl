@@ -1,17 +1,27 @@
 # synthetic-test-data
-"""Tests for admin team management routes (E-042-03).
+"""Tests for admin team management routes -- E-100-04.
 
-Tests cover:
-- GET /admin/teams returns 200 for admin, 403 for non-admin, 302 for unauthenticated.
-- Team list renders both owned and opponent sections.
-- POST /admin/teams with valid URL creates team and redirects.
-- POST /admin/teams with invalid URL shows parsing error.
-- POST /admin/teams with TeamNotFoundError shows not-found error.
-- POST /admin/teams with GameChangerAPIError shows API-unreachable error.
-- POST /admin/teams with duplicate non-placeholder team shows already-exists error.
-- POST /admin/teams with URL matching an existing discovered placeholder upgrades it.
-- Flash messages appear for ?msg= and ?error= params.
-- resolve_team is mocked -- no real HTTP calls.
+Tests cover AC-17 sub-items (a)-(n):
+(a) GET /admin/teams returns 200 for admin, 403 for non-admin, 302 for unauthenticated.
+(b) Flat team list with program/division/membership/opponent_count columns.
+(c) POST /admin/teams with valid URL redirects to /admin/teams/confirm.
+(d) Phase 1: URL parsed to public_id; bridge called for gc_uuid discovery.
+(e) Phase 1: 403 from bridge stored as NULL gc_uuid (gc_uuid_status=forbidden).
+(f) POST /admin/teams with invalid URL shows error on teams page.
+(g) POST /admin/teams with raw UUID input shows UUID-rejection error.
+(h) GET /admin/teams/confirm shows team name, public_id, gc_uuid status badge.
+(i) GET /admin/teams/confirm duplicate detection shows error.
+(j) POST /admin/teams/confirm inserts team and redirects to /admin/teams with flash.
+(k) POST /admin/teams/confirm duplicate shows error, no insert.
+(l) POST /admin/teams/confirm TOCTOU guard: gc_uuid refreshed before insert.
+(m) POST /admin/teams/confirm: gc_uuid=None when bridge 403 on re-verify.
+(n) Classification inference: JV/varsity/freshman/reserve/legion/age-U patterns.
+(o) Program pre-selection: longest substring match.
+(p) GET /admin/teams/{id}/edit uses INTEGER id path parameter.
+(q) POST /admin/teams/{id}/edit updates team with INTEGER id.
+(r) POST /admin/teams/{id}/toggle-active uses INTEGER id.
+AC-16: User-team assignment form uses INTEGER team ids.
+AC-18: Flash messages, ?msg= and ?error= params rendered.
 
 Run with:
     pytest tests/test_admin_teams.py -v
@@ -23,7 +33,7 @@ import secrets
 import sqlite3
 import sys
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -38,15 +48,10 @@ if str(_PROJECT_ROOT) not in sys.path:
 
 from src.api.auth import hash_token  # noqa: E402
 from src.api.main import app  # noqa: E402
-from src.gamechanger.team_resolver import (  # noqa: E402
-    DiscoveredOpponent,
-    GameChangerAPIError,
-    TeamNotFoundError,
-    TeamProfile,
-)
+from src.gamechanger.team_resolver import GameChangerAPIError, TeamNotFoundError, TeamProfile  # noqa: E402
 
 # ---------------------------------------------------------------------------
-# Schema SQL (minimal -- includes public_id column from migration 005)
+# Schema SQL -- E-100 fresh-start schema (minimal for team admin tests)
 # ---------------------------------------------------------------------------
 
 _SCHEMA_SQL = """
@@ -55,197 +60,68 @@ _SCHEMA_SQL = """
         filename   TEXT    NOT NULL UNIQUE,
         applied_at TEXT    NOT NULL DEFAULT (datetime('now'))
     );
+    INSERT OR IGNORE INTO _migrations (filename) VALUES ('001_initial_schema.sql');
 
-    CREATE TABLE IF NOT EXISTS players (
-        player_id  TEXT PRIMARY KEY,
-        first_name TEXT NOT NULL,
-        last_name  TEXT NOT NULL,
-        created_at TEXT NOT NULL DEFAULT (datetime('now'))
-    );
-
-    CREATE TABLE IF NOT EXISTS seasons (
-        season_id   TEXT PRIMARY KEY,
-        name        TEXT NOT NULL,
-        season_type TEXT NOT NULL,
-        year        INTEGER NOT NULL,
-        start_date  TEXT,
-        end_date    TEXT,
-        created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+    CREATE TABLE IF NOT EXISTS programs (
+        program_id   TEXT PRIMARY KEY,
+        name         TEXT NOT NULL,
+        program_type TEXT NOT NULL
     );
 
     CREATE TABLE IF NOT EXISTS teams (
-        team_id    TEXT PRIMARY KEY,
-        name       TEXT NOT NULL,
-        level      TEXT,
-        is_owned   INTEGER NOT NULL DEFAULT 0,
-        source     TEXT NOT NULL DEFAULT 'gamechanger',
-        is_active  INTEGER NOT NULL DEFAULT 1,
-        last_synced TEXT,
-        public_id  TEXT,
-        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        name            TEXT NOT NULL,
+        program_id      TEXT REFERENCES programs(program_id),
+        membership_type TEXT NOT NULL DEFAULT 'tracked',
+        classification  TEXT,
+        public_id       TEXT,
+        gc_uuid         TEXT,
+        source          TEXT NOT NULL DEFAULT 'gamechanger',
+        is_active       INTEGER NOT NULL DEFAULT 1,
+        last_synced     TEXT,
+        created_at      TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_teams_public_id
-        ON teams(public_id) WHERE public_id IS NOT NULL;
-
-    CREATE TABLE IF NOT EXISTS team_rosters (
-        id            INTEGER PRIMARY KEY AUTOINCREMENT,
-        team_id       TEXT NOT NULL,
-        player_id     TEXT NOT NULL,
-        season_id     TEXT NOT NULL,
-        jersey_number TEXT,
-        position      TEXT,
-        UNIQUE(team_id, player_id, season_id)
-    );
-
-    CREATE TABLE IF NOT EXISTS games (
-        game_id      TEXT PRIMARY KEY,
-        season_id    TEXT NOT NULL,
-        game_date    TEXT NOT NULL,
-        home_team_id TEXT NOT NULL,
-        away_team_id TEXT NOT NULL,
-        home_score   INTEGER,
-        away_score   INTEGER,
-        status       TEXT NOT NULL DEFAULT 'completed'
-    );
-
-    CREATE TABLE IF NOT EXISTS player_game_batting (
-        id        INTEGER PRIMARY KEY AUTOINCREMENT,
-        game_id   TEXT NOT NULL,
-        player_id TEXT NOT NULL,
-        team_id   TEXT NOT NULL,
-        ab        INTEGER,
-        h         INTEGER,
-        doubles   INTEGER,
-        triples   INTEGER,
-        hr        INTEGER,
-        rbi       INTEGER,
-        bb        INTEGER,
-        so        INTEGER,
-        sb        INTEGER,
-        UNIQUE(game_id, player_id)
-    );
-
-    CREATE TABLE IF NOT EXISTS player_game_pitching (
-        id        INTEGER PRIMARY KEY AUTOINCREMENT,
-        game_id   TEXT NOT NULL,
-        player_id TEXT NOT NULL,
-        team_id   TEXT NOT NULL,
-        ip_outs   INTEGER,
-        h         INTEGER,
-        er        INTEGER,
-        bb        INTEGER,
-        so        INTEGER,
-        hr        INTEGER,
-        UNIQUE(game_id, player_id)
-    );
-
-    CREATE TABLE IF NOT EXISTS player_season_batting (
-        id          INTEGER PRIMARY KEY AUTOINCREMENT,
-        player_id   TEXT NOT NULL,
-        team_id     TEXT NOT NULL,
-        season_id   TEXT NOT NULL,
-        games       INTEGER,
-        ab          INTEGER,
-        h           INTEGER,
-        doubles     INTEGER,
-        triples     INTEGER,
-        hr          INTEGER,
-        rbi         INTEGER,
-        bb          INTEGER,
-        so          INTEGER,
-        sb          INTEGER,
-        UNIQUE(player_id, team_id, season_id)
-    );
-
-    CREATE TABLE IF NOT EXISTS player_season_pitching (
-        id          INTEGER PRIMARY KEY AUTOINCREMENT,
-        player_id   TEXT NOT NULL,
-        team_id     TEXT NOT NULL,
-        season_id   TEXT NOT NULL,
-        games       INTEGER,
-        ip_outs     INTEGER,
-        h           INTEGER,
-        er          INTEGER,
-        bb          INTEGER,
-        so          INTEGER,
-        hr          INTEGER,
-        UNIQUE(player_id, team_id, season_id)
-    );
-
-    -- Auth tables
     CREATE TABLE IF NOT EXISTS users (
-        user_id      INTEGER PRIMARY KEY AUTOINCREMENT,
-        email        TEXT    NOT NULL UNIQUE,
-        display_name TEXT    NOT NULL,
-        is_admin     INTEGER NOT NULL DEFAULT 0,
-        created_at   TEXT    NOT NULL DEFAULT (datetime('now'))
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        email           TEXT UNIQUE NOT NULL,
+        hashed_password TEXT,
+        created_at      TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
     CREATE TABLE IF NOT EXISTS user_team_access (
-        id       INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id  INTEGER NOT NULL REFERENCES users(user_id),
-        team_id  TEXT    NOT NULL REFERENCES teams(team_id),
+        user_id INTEGER NOT NULL REFERENCES users(id),
+        team_id INTEGER NOT NULL REFERENCES teams(id),
         UNIQUE(user_id, team_id)
     );
 
-    CREATE TABLE IF NOT EXISTS magic_link_tokens (
-        id         INTEGER PRIMARY KEY AUTOINCREMENT,
-        token_hash TEXT    NOT NULL UNIQUE,
-        user_id    INTEGER NOT NULL REFERENCES users(user_id),
-        expires_at TEXT    NOT NULL,
-        used_at    TEXT,
-        created_at TEXT    NOT NULL DEFAULT (datetime('now'))
-    );
-
-    CREATE TABLE IF NOT EXISTS passkey_credentials (
-        id            INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id       INTEGER NOT NULL REFERENCES users(user_id),
-        credential_id BLOB    NOT NULL UNIQUE,
-        public_key    BLOB    NOT NULL,
-        sign_count    INTEGER NOT NULL DEFAULT 0,
-        created_at    TEXT    NOT NULL DEFAULT (datetime('now'))
-    );
-
     CREATE TABLE IF NOT EXISTS sessions (
-        id                  INTEGER PRIMARY KEY AUTOINCREMENT,
-        session_token_hash  TEXT    NOT NULL UNIQUE,
-        user_id             INTEGER NOT NULL REFERENCES users(user_id),
-        expires_at          TEXT    NOT NULL,
-        created_at          TEXT    NOT NULL DEFAULT (datetime('now'))
-    );
-
-    CREATE TABLE IF NOT EXISTS coaching_assignments (
-        id         INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id    INTEGER NOT NULL REFERENCES users(user_id),
-        team_id    TEXT    NOT NULL REFERENCES teams(team_id),
-        season_id  TEXT    NOT NULL REFERENCES seasons(season_id),
-        role       TEXT    NOT NULL DEFAULT 'assistant',
-        created_at TEXT    NOT NULL DEFAULT (datetime('now')),
-        UNIQUE(user_id, team_id, season_id)
+        session_id TEXT PRIMARY KEY,
+        user_id    INTEGER NOT NULL REFERENCES users(id),
+        expires_at TEXT NOT NULL
     );
 
     CREATE TABLE IF NOT EXISTS opponent_links (
-        id                  INTEGER PRIMARY KEY AUTOINCREMENT,
-        our_team_id         TEXT    NOT NULL REFERENCES teams(team_id),
-        root_team_id        TEXT    NOT NULL,
-        opponent_name       TEXT    NOT NULL,
-        resolved_team_id    TEXT    REFERENCES teams(team_id),
-        public_id           TEXT,
-        resolution_method   TEXT CHECK (resolution_method IN ('auto', 'manual') OR resolution_method IS NULL),
-        resolved_at         TEXT,
-        is_hidden           INTEGER NOT NULL DEFAULT 0,
-        created_at          TEXT    NOT NULL DEFAULT (datetime('now')),
-        updated_at          TEXT    NOT NULL DEFAULT (datetime('now')),
+        id                INTEGER PRIMARY KEY AUTOINCREMENT,
+        our_team_id       INTEGER NOT NULL REFERENCES teams(id),
+        root_team_id      TEXT NOT NULL,
+        opponent_name     TEXT NOT NULL,
+        resolved_team_id  INTEGER REFERENCES teams(id),
+        public_id         TEXT,
+        resolution_method TEXT,
+        resolved_at       TEXT,
+        is_hidden         INTEGER NOT NULL DEFAULT 0,
+        created_at        TEXT NOT NULL DEFAULT (datetime('now')),
         UNIQUE(our_team_id, root_team_id)
     );
 """
 
 _SEED_SQL = """
-    INSERT OR IGNORE INTO teams (team_id, name, level, is_owned, source, is_active)
-    VALUES
-        ('lsb-varsity-2026', 'LSB Varsity 2026', 'varsity', 1, 'gamechanger', 1),
-        ('lsb-jv-2026', 'LSB JV 2026', 'jv', 1, 'gamechanger', 1);
+    INSERT OR IGNORE INTO programs (program_id, name, program_type)
+        VALUES ('lsb-hs', 'Lincoln Standing Bear HS', 'hs');
+
+    INSERT OR IGNORE INTO teams (name, program_id, membership_type, classification)
+        VALUES ('LSB Varsity 2026', 'lsb-hs', 'member', 'varsity');
 """
 
 
@@ -255,15 +131,15 @@ _SEED_SQL = """
 
 
 def _make_db(tmp_path: Path) -> Path:
-    """Create a fully-schemed database.
+    """Create a seeded test database.
 
     Args:
-        tmp_path: pytest tmp_path fixture.
+        tmp_path: pytest tmp_path fixture directory.
 
     Returns:
         Path to the database file.
     """
-    db_path = tmp_path / "test_admin_teams.db"
+    db_path = tmp_path / "test_teams.db"
     conn = sqlite3.connect(str(db_path))
     conn.executescript(_SCHEMA_SQL)
     conn.executescript(_SEED_SQL)
@@ -272,21 +148,11 @@ def _make_db(tmp_path: Path) -> Path:
     return db_path
 
 
-def _insert_user(db_path: Path, email: str, is_admin: int = 0) -> int:
-    """Insert a user and return user_id.
-
-    Args:
-        db_path: Path to the database.
-        email: Email address.
-        is_admin: 1 for admin, 0 otherwise.
-
-    Returns:
-        New user_id.
-    """
+def _insert_user(db_path: Path, email: str) -> int:
+    """Insert a user row and return the id."""
     conn = sqlite3.connect(str(db_path))
     cursor = conn.execute(
-        "INSERT INTO users (email, display_name, is_admin) VALUES (?, ?, ?)",
-        (email, "Test User", is_admin),
+        "INSERT INTO users (email, hashed_password) VALUES (?, '')", (email,)
     )
     conn.commit()
     user_id = cursor.lastrowid
@@ -295,42 +161,67 @@ def _insert_user(db_path: Path, email: str, is_admin: int = 0) -> int:
 
 
 def _insert_session(db_path: Path, user_id: int) -> str:
-    """Insert a valid (non-expired) session and return the raw token.
-
-    Args:
-        db_path: Path to the database.
-        user_id: User to associate the session with.
-
-    Returns:
-        Raw session token (64 hex chars).
-    """
+    """Insert a valid session and return the raw token."""
     raw_token = secrets.token_hex(32)
     token_hash = hash_token(raw_token)
     conn = sqlite3.connect(str(db_path))
     conn.execute(
-        "INSERT INTO sessions (session_token_hash, user_id, expires_at) VALUES (?, ?, ?)",
-        (token_hash, user_id, "2099-01-01T00:00:00"),
+        """
+        INSERT INTO sessions (session_id, user_id, expires_at)
+        VALUES (?, ?, datetime('now', '+7 days'))
+        """,
+        (token_hash, user_id),
     )
     conn.commit()
     conn.close()
     return raw_token
 
 
-def _get_team(db_path: Path, team_id: str) -> dict | None:
-    """Fetch a team row by team_id.
-
-    Args:
-        db_path: Path to the database.
-        team_id: The team_id to look up.
-
-    Returns:
-        Dict or None.
-    """
+def _insert_team(
+    db_path: Path,
+    name: str,
+    membership_type: str = "member",
+    public_id: str | None = None,
+    gc_uuid: str | None = None,
+    classification: str | None = None,
+    program_id: str | None = None,
+) -> int:
+    """Insert a team row and return the INTEGER id."""
     conn = sqlite3.connect(str(db_path))
-    conn.row_factory = sqlite3.Row
-    row = conn.execute("SELECT * FROM teams WHERE team_id = ?", (team_id,)).fetchone()
+    cursor = conn.execute(
+        """
+        INSERT INTO teams (name, membership_type, public_id, gc_uuid, classification, program_id)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (name, membership_type, public_id, gc_uuid, classification, program_id),
+    )
+    conn.commit()
+    team_id = cursor.lastrowid
     conn.close()
-    return dict(row) if row else None
+    return team_id
+
+
+def _count_rows(db_path: Path, table: str, where_clause: str, params: tuple) -> int:
+    """Return a row count from a table."""
+    conn = sqlite3.connect(str(db_path))
+    cursor = conn.execute(f"SELECT COUNT(*) FROM {table} WHERE {where_clause}", params)
+    count = cursor.fetchone()[0]
+    conn.close()
+    return count
+
+
+def _make_profile(name: str = "Riverside Hawks") -> TeamProfile:
+    """Build a minimal TeamProfile mock."""
+    return TeamProfile(
+        public_id="abc123",
+        name=name,
+        sport="baseball",
+    )
+
+
+def _admin_env(db_path: Path, admin_email: str) -> dict[str, str]:
+    """Build env dict for admin session."""
+    return {"DATABASE_PATH": str(db_path), "ADMIN_EMAIL": admin_email}
 
 
 # ---------------------------------------------------------------------------
@@ -339,1186 +230,899 @@ def _get_team(db_path: Path, team_id: str) -> dict | None:
 
 
 @pytest.fixture()
-def admin_db(tmp_path: Path) -> Path:
-    """Database with schema and seed data.
-
-    Args:
-        tmp_path: pytest tmp_path fixture.
-
-    Returns:
-        Path to the database file.
-    """
+def team_db(tmp_path: Path) -> Path:
+    """Full schema database with seed data."""
     return _make_db(tmp_path)
 
 
 # ---------------------------------------------------------------------------
-# Auth guard tests
+# AC-17a: Auth guards on /admin/teams
 # ---------------------------------------------------------------------------
 
 
-class TestTeamListAuthGuard:
-    """GET /admin/teams access control."""
+class TestTeamsListAuth:
+    """GET /admin/teams auth guards (AC-17a)."""
 
-    def test_admin_gets_200(self, admin_db: Path) -> None:
-        """Admin with valid session sees 200."""
-        user_id = _insert_user(admin_db, "admin@example.com", is_admin=1)
-        token = _insert_session(admin_db, user_id)
+    def test_admin_gets_200(self, team_db: Path) -> None:
+        """Admin email gets 200 from GET /admin/teams."""
+        user_id = _insert_user(team_db, "admin@example.com")
+        token = _insert_session(team_db, user_id)
 
-        with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db), "DEV_USER_EMAIL": ""}):
+        with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
             with TestClient(app, cookies={"session": token}) as client:
                 response = client.get("/admin/teams")
         assert response.status_code == 200
 
-    def test_non_admin_gets_403(self, admin_db: Path) -> None:
-        """Non-admin authenticated user gets 403."""
-        user_id = _insert_user(admin_db, "coach@example.com", is_admin=0)
-        token = _insert_session(admin_db, user_id)
+    def test_non_admin_gets_403(self, team_db: Path) -> None:
+        """Non-admin email gets 403 from GET /admin/teams."""
+        user_id = _insert_user(team_db, "coach@example.com")
+        token = _insert_session(team_db, user_id)
 
-        with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db), "DEV_USER_EMAIL": ""}):
+        with patch.dict(
+            "os.environ",
+            {"DATABASE_PATH": str(team_db), "ADMIN_EMAIL": "other@example.com"},
+        ):
             with TestClient(app, follow_redirects=False, cookies={"session": token}) as client:
                 response = client.get("/admin/teams")
         assert response.status_code == 403
 
-    def test_unauthenticated_redirects_to_login(self, admin_db: Path) -> None:
-        """No session cookie redirects to /auth/login."""
-        with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db), "DEV_USER_EMAIL": ""}):
+    def test_no_session_redirects_to_login(self, team_db: Path) -> None:
+        """Unauthenticated GET /admin/teams redirects to /auth/login."""
+        with patch.dict("os.environ", {"DATABASE_PATH": str(team_db)}):
             with TestClient(app, follow_redirects=False) as client:
                 response = client.get("/admin/teams")
         assert response.status_code == 302
         assert "/auth/login" in response.headers["location"]
 
 
-class TestAddTeamAuthGuard:
-    """POST /admin/teams access control."""
-
-    def test_non_admin_post_gets_403(self, admin_db: Path) -> None:
-        """Non-admin POST gets 403."""
-        user_id = _insert_user(admin_db, "nonadmin2@example.com", is_admin=0)
-        token = _insert_session(admin_db, user_id)
-
-        with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db), "DEV_USER_EMAIL": ""}):
-            with TestClient(app, follow_redirects=False, cookies={"session": token}) as client:
-                response = client.post(
-                    "/admin/teams", data={"url_input": "abc123def456", "team_type": "tracked"}
-                )
-        assert response.status_code == 403
-
-    def test_unauthenticated_post_redirects_to_login(self, admin_db: Path) -> None:
-        """No session cookie on POST redirects to /auth/login."""
-        with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db), "DEV_USER_EMAIL": ""}):
-            with TestClient(app, follow_redirects=False) as client:
-                response = client.post(
-                    "/admin/teams", data={"url_input": "abc123def456", "team_type": "tracked"}
-                )
-        assert response.status_code == 302
-        assert "/auth/login" in response.headers["location"]
-
-
 # ---------------------------------------------------------------------------
-# Team list display tests
+# AC-17b: Flat team list columns
 # ---------------------------------------------------------------------------
 
 
-class TestTeamListDisplay:
-    """GET /admin/teams renders owned and opponent sections."""
+class TestTeamsFlatList:
+    """GET /admin/teams shows flat list with new columns (AC-17b)."""
 
-    def test_page_shows_owned_teams(self, admin_db: Path) -> None:
-        """Lincoln Program table contains seeded owned teams."""
-        user_id = _insert_user(admin_db, "admin2@example.com", is_admin=1)
-        token = _insert_session(admin_db, user_id)
+    def test_flat_list_shows_team_name(self, team_db: Path) -> None:
+        """Flat list includes seeded team name."""
+        user_id = _insert_user(team_db, "admin@example.com")
+        token = _insert_session(team_db, user_id)
 
-        with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db)}):
+        with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
             with TestClient(app, cookies={"session": token}) as client:
                 response = client.get("/admin/teams")
-        assert response.status_code == 200
         assert "LSB Varsity 2026" in response.text
-        assert "LSB JV 2026" in response.text
 
-    def test_page_shows_lincoln_program_section(self, admin_db: Path) -> None:
-        """Page contains 'Lincoln Program' section heading."""
-        user_id = _insert_user(admin_db, "admin3@example.com", is_admin=1)
-        token = _insert_session(admin_db, user_id)
+    def test_flat_list_shows_membership_badge(self, team_db: Path) -> None:
+        """Flat list shows membership type (member/tracked) labels."""
+        user_id = _insert_user(team_db, "admin@example.com")
+        token = _insert_session(team_db, user_id)
 
-        with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db)}):
+        with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
             with TestClient(app, cookies={"session": token}) as client:
                 response = client.get("/admin/teams")
-        assert "Lincoln Program" in response.text
+        # 'Member' badge appears for the seeded varsity team
+        assert "Member" in response.text
 
-    def test_page_shows_opponent_connections_section(self, admin_db: Path) -> None:
-        """Page contains 'Opponent Connections' summary section."""
-        user_id = _insert_user(admin_db, "admin4@example.com", is_admin=1)
-        token = _insert_session(admin_db, user_id)
+    def test_flat_list_uses_integer_id_in_edit_link(self, team_db: Path) -> None:
+        """Edit links use INTEGER id (not a text slug)."""
+        user_id = _insert_user(team_db, "admin@example.com")
+        token = _insert_session(team_db, user_id)
 
-        with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db)}):
+        with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
             with TestClient(app, cookies={"session": token}) as client:
                 response = client.get("/admin/teams")
-        assert "Opponent Connections" in response.text or "Manage connections" in response.text
+        # Edit link should be /admin/teams/1/edit (integer 1, not a text slug)
+        assert "/admin/teams/1/edit" in response.text
 
-    def test_opponent_section_links_to_opponents_page(self, admin_db: Path) -> None:
-        """Opponent connections section links to /admin/opponents."""
-        user_id = _insert_user(admin_db, "admin5@example.com", is_admin=1)
-        token = _insert_session(admin_db, user_id)
+    def test_opponent_count_links_to_filtered_opponents_page(self, team_db: Path) -> None:
+        """Opponent count links to /admin/opponents?team_id=<integer_id> (AC-6)."""
+        user_id = _insert_user(team_db, "admin@example.com")
+        token = _insert_session(team_db, user_id)
 
-        with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db)}):
+        with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
             with TestClient(app, cookies={"session": token}) as client:
                 response = client.get("/admin/teams")
-        assert "/admin/opponents" in response.text
+        # Opponent count should be a link to /admin/opponents?team_id=1
+        assert "/admin/opponents?team_id=1" in response.text
 
-    def test_active_team_shows_active_status(self, admin_db: Path) -> None:
-        """Active team shows 'Active' in status column."""
-        user_id = _insert_user(admin_db, "admin6@example.com", is_admin=1)
-        token = _insert_session(admin_db, user_id)
+    def test_flash_msg_displayed(self, team_db: Path) -> None:
+        """?msg= query param renders a flash message on teams page."""
+        user_id = _insert_user(team_db, "admin@example.com")
+        token = _insert_session(team_db, user_id)
 
-        with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db)}):
+        with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
             with TestClient(app, cookies={"session": token}) as client:
-                response = client.get("/admin/teams")
-        assert "Active" in response.text
+                response = client.get("/admin/teams?msg=Team+added")
+        assert "Team added" in response.text
 
-    def test_flash_msg_shows(self, admin_db: Path) -> None:
-        """?msg= query param renders as a flash message."""
-        user_id = _insert_user(admin_db, "admin7@example.com", is_admin=1)
-        token = _insert_session(admin_db, user_id)
+    def test_flash_error_displayed(self, team_db: Path) -> None:
+        """?error= query param renders an error banner on teams page."""
+        user_id = _insert_user(team_db, "admin@example.com")
+        token = _insert_session(team_db, user_id)
 
-        with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db)}):
-            with TestClient(app, cookies={"session": token}) as client:
-                response = client.get("/admin/teams?msg=Team+added+successfully")
-        assert "Team added successfully" in response.text
-
-    def test_flash_error_shows(self, admin_db: Path) -> None:
-        """?error= query param renders as an error banner."""
-        user_id = _insert_user(admin_db, "admin8@example.com", is_admin=1)
-        token = _insert_session(admin_db, user_id)
-
-        with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db)}):
+        with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
             with TestClient(app, cookies={"session": token}) as client:
                 response = client.get("/admin/teams?error=Something+went+wrong")
         assert "Something went wrong" in response.text
 
-    def test_each_team_has_edit_link(self, admin_db: Path) -> None:
-        """Each team row has an Edit link pointing to /admin/teams/{team_id}/edit."""
-        user_id = _insert_user(admin_db, "admin9@example.com", is_admin=1)
-        token = _insert_session(admin_db, user_id)
-
-        with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db)}):
-            with TestClient(app, cookies={"session": token}) as client:
-                response = client.get("/admin/teams")
-        assert "/admin/teams/lsb-varsity-2026/edit" in response.text
-        assert "/admin/teams/lsb-jv-2026/edit" in response.text
-
 
 # ---------------------------------------------------------------------------
-# POST /admin/teams -- success and error paths
+# AC-17c, d, e: Phase 1 POST /admin/teams
 # ---------------------------------------------------------------------------
 
 
-_SAMPLE_PROFILE = TeamProfile(
-    public_id="abc123def456",
-    name="Riverside Tigers",
-    sport="baseball",
-    city="Riverside",
-    state="CA",
-)
+class TestPhase1AddTeam:
+    """POST /admin/teams Phase 1 resolution (AC-17c, d, e)."""
 
-_SAMPLE_PROFILE_NO_LOCATION = TeamProfile(
-    public_id="abc123def456",
-    name="Mystery Team",
-    sport="baseball",
-    city=None,
-    state=None,
-)
+    def test_valid_url_redirects_to_confirm(self, team_db: Path) -> None:
+        """Phase 1 with valid URL redirects to /admin/teams/confirm."""
+        user_id = _insert_user(team_db, "admin@example.com")
+        token = _insert_session(team_db, user_id)
+        profile = _make_profile("Riverside Hawks")
 
+        with patch(
+            "src.api.routes.admin.resolve_public_id_to_uuid", return_value="uuid-1234"
+        ), patch(
+            "src.api.routes.admin.resolve_team", return_value=profile
+        ), patch(
+            "src.api.routes.admin.parse_team_url"
+        ) as mock_parse:
+            mock_result = MagicMock()
+            mock_result.is_uuid = False
+            mock_result.value = "abc123"
+            mock_parse.return_value = mock_result
 
-class TestAddTeamSuccess:
-    """POST /admin/teams successful team creation."""
-
-    def test_valid_url_creates_team_and_redirects(self, admin_db: Path) -> None:
-        """Valid URL resolves team and redirects to /admin/teams with msg."""
-        user_id = _insert_user(admin_db, "addteam1@example.com", is_admin=1)
-        token = _insert_session(admin_db, user_id)
-
-        with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db)}):
-            with patch(
-                "src.api.routes.admin.resolve_team", return_value=_SAMPLE_PROFILE
-            ):
+            with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
                 with TestClient(
                     app, follow_redirects=False, cookies={"session": token}
                 ) as client:
                     response = client.post(
                         "/admin/teams",
-                        data={
-                            "url_input": "https://web.gc.com/teams/abc123def456/riverside-tigers",
-                            "level": "varsity",
-                            "team_type": "tracked",
-                        },
+                        data={"url_input": "https://web.gc.com/teams/abc123/schedule"},
                     )
+
         assert response.status_code == 303
-        assert "/admin/teams" in response.headers["location"]
-        assert "msg=" in response.headers["location"]
+        assert "/admin/teams/confirm" in response.headers["location"]
 
-    def test_created_team_is_in_database(self, admin_db: Path) -> None:
-        """After successful POST, team row exists in database."""
-        user_id = _insert_user(admin_db, "addteam2@example.com", is_admin=1)
-        token = _insert_session(admin_db, user_id)
-
-        with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db)}):
-            with patch(
-                "src.api.routes.admin.resolve_team", return_value=_SAMPLE_PROFILE
-            ):
-                with TestClient(app, cookies={"session": token}) as client:
-                    client.post(
-                        "/admin/teams",
-                        data={
-                            "url_input": "abc123def456",
-                            "level": "jv",
-                            "team_type": "tracked",
-                        },
-                    )
-        team = _get_team(admin_db, "abc123def456")
-        assert team is not None
-        assert team["name"] == "Riverside Tigers"
-        assert team["public_id"] == "abc123def456"
-        assert team["is_owned"] == 0
-        assert team["is_active"] == 1
-        assert team["source"] == "gamechanger"
-
-    def test_owned_team_sets_is_owned_1(self, admin_db: Path) -> None:
-        """team_type=owned resolves UUID via reverse bridge and sets is_owned=1."""
-        user_id = _insert_user(admin_db, "addteam3@example.com", is_admin=1)
-        token = _insert_session(admin_db, user_id)
-        resolved_uuid = "00000000-0000-0000-0000-000000000001"
-
-        with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db)}):
-            with patch("src.api.routes.admin.resolve_team", return_value=_SAMPLE_PROFILE):
-                with patch(
-                    "src.api.routes.admin.resolve_public_id_to_uuid",
-                    return_value=resolved_uuid,
-                ):
-                    with TestClient(app, cookies={"session": token}) as client:
-                        client.post(
-                            "/admin/teams",
-                            data={
-                                "url_input": "abc123def456",
-                                "level": "varsity",
-                                "team_type": "owned",
-                            },
-                        )
-        # Owned team: team_id is the resolved UUID, not the public_id slug
-        team = _get_team(admin_db, resolved_uuid)
-        assert team is not None
-        assert team["is_owned"] == 1
-        assert team["public_id"] == "abc123def456"
-
-    def test_success_message_includes_location(self, admin_db: Path) -> None:
-        """Success redirect URL includes team name and city/state."""
-        user_id = _insert_user(admin_db, "addteam4@example.com", is_admin=1)
-        token = _insert_session(admin_db, user_id)
-
-        with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db)}):
-            with patch(
-                "src.api.routes.admin.resolve_team", return_value=_SAMPLE_PROFILE
-            ):
-                with TestClient(
-                    app, follow_redirects=False, cookies={"session": token}
-                ) as client:
-                    response = client.post(
-                        "/admin/teams",
-                        data={"url_input": "abc123def456", "team_type": "tracked"},
-                    )
-        location = response.headers["location"]
-        assert "Riverside+Tigers" in location or "Riverside%20Tigers" in location
-
-    def test_success_message_without_location(self, admin_db: Path) -> None:
-        """When city/state unavailable, message just shows team name."""
-        user_id = _insert_user(admin_db, "addteam5@example.com", is_admin=1)
-        token = _insert_session(admin_db, user_id)
-
-        with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db)}):
-            with patch(
-                "src.api.routes.admin.resolve_team",
-                return_value=_SAMPLE_PROFILE_NO_LOCATION,
-            ):
-                with TestClient(
-                    app, follow_redirects=False, cookies={"session": token}
-                ) as client:
-                    response = client.post(
-                        "/admin/teams",
-                        data={"url_input": "abc123def456", "team_type": "tracked"},
-                    )
-        location = response.headers["location"]
-        assert "Mystery" in location
-
-
-# ---------------------------------------------------------------------------
-# POST /admin/teams -- error paths
-# ---------------------------------------------------------------------------
-
-
-class TestAddTeamErrors:
-    """POST /admin/teams error handling."""
-
-    def test_invalid_url_shows_parse_error(self, admin_db: Path) -> None:
-        """Invalid URL input shows a parsing error message on the page."""
-        user_id = _insert_user(admin_db, "erradmin1@example.com", is_admin=1)
-        token = _insert_session(admin_db, user_id)
-
-        with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db)}):
-            with TestClient(app, cookies={"session": token}) as client:
-                response = client.post(
-                    "/admin/teams",
-                    data={"url_input": "not-a-valid-url!!!", "team_type": "tracked"},
-                )
-        assert response.status_code == 200
-        assert "error" in response.text.lower() or "invalid" in response.text.lower()
-
-    def test_team_not_found_shows_error(self, admin_db: Path) -> None:
-        """TeamNotFoundError shows 'Team not found' error message."""
-        user_id = _insert_user(admin_db, "erradmin2@example.com", is_admin=1)
-        token = _insert_session(admin_db, user_id)
-
-        with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db)}):
-            with patch(
-                "src.api.routes.admin.resolve_team",
-                side_effect=TeamNotFoundError("not found"),
-            ):
-                with TestClient(app, cookies={"session": token}) as client:
-                    response = client.post(
-                        "/admin/teams",
-                        data={"url_input": "abc123def456", "team_type": "tracked"},
-                    )
-        assert response.status_code == 200
-        assert "Team not found on GameChanger" in response.text
-
-    def test_api_error_shows_error(self, admin_db: Path) -> None:
-        """GameChangerAPIError shows 'Could not reach' error message."""
-        user_id = _insert_user(admin_db, "erradmin3@example.com", is_admin=1)
-        token = _insert_session(admin_db, user_id)
-
-        with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db)}):
-            with patch(
-                "src.api.routes.admin.resolve_team",
-                side_effect=GameChangerAPIError("timeout"),
-            ):
-                with TestClient(app, cookies={"session": token}) as client:
-                    response = client.post(
-                        "/admin/teams",
-                        data={"url_input": "abc123def456", "team_type": "tracked"},
-                    )
-        assert response.status_code == 200
-        assert "Could not reach GameChanger API" in response.text
-
-    def test_duplicate_non_placeholder_shows_error(self, admin_db: Path) -> None:
-        """Posting a public_id that already exists as a real team shows already-exists error."""
-        # Insert an existing real team with public_id matching what would be resolved
-        conn = sqlite3.connect(str(admin_db))
-        conn.execute(
-            "INSERT INTO teams (team_id, name, public_id, is_owned, source, is_active) "
-            "VALUES (?, ?, ?, 0, 'gamechanger', 1)",
-            ("existingpublicid1", "Existing Team", "existingpublicid1"),
-        )
-        conn.commit()
-        conn.close()
-
-        user_id = _insert_user(admin_db, "erradmin4@example.com", is_admin=1)
-        token = _insert_session(admin_db, user_id)
-
-        with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db)}):
-            # resolve_team should NOT be called since duplicate check fires first
-            with TestClient(app, cookies={"session": token}) as client:
-                response = client.post(
-                    "/admin/teams",
-                    data={"url_input": "existingpublicid1", "team_type": "tracked"},
-                )
-        assert response.status_code == 200
-        assert "already in the system" in response.text
-
-
-# ---------------------------------------------------------------------------
-# POST /admin/teams -- UUID resolution paths (AC-7)
-# ---------------------------------------------------------------------------
-
-_OWNED_UUID = "00000000-0000-0000-0000-000000000042"
-_OWNED_PUBLIC_ID = "abc123def456"
-_OWNED_PROFILE = TeamProfile(
-    public_id=_OWNED_PUBLIC_ID,
-    name="Riverside Tigers",
-    sport="baseball",
-    city="Riverside",
-    state="CA",
-)
-
-
-class TestUuidResolution:
-    """POST /admin/teams UUID resolution for owned teams (AC-7)."""
-
-    def test_owned_team_public_id_input_resolves_uuid_as_team_id(
-        self, admin_db: Path
-    ) -> None:
-        """AC-1: owned team added via public_id slug stores UUID as team_id."""
-        user_id = _insert_user(admin_db, "uuid1@example.com", is_admin=1)
-        token = _insert_session(admin_db, user_id)
-
-        with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db)}):
-            with patch("src.api.routes.admin.resolve_team", return_value=_OWNED_PROFILE):
-                with patch(
-                    "src.api.routes.admin.resolve_public_id_to_uuid",
-                    return_value=_OWNED_UUID,
-                ):
-                    with TestClient(app, cookies={"session": token}) as client:
-                        response = client.post(
-                            "/admin/teams",
-                            data={
-                                "url_input": _OWNED_PUBLIC_ID,
-                                "level": "varsity",
-                                "team_type": "owned",
-                            },
-                            follow_redirects=False,
-                        )
-        assert response.status_code == 303
-        team = _get_team(admin_db, _OWNED_UUID)
-        assert team is not None
-        assert team["team_id"] == _OWNED_UUID
-        assert team["public_id"] == _OWNED_PUBLIC_ID
-        assert team["is_owned"] == 1
-
-    def test_owned_team_uuid_input_uses_uuid_as_team_id(self, admin_db: Path) -> None:
-        """AC-2: owned team added via UUID input stores UUID as team_id."""
-        user_id = _insert_user(admin_db, "uuid2@example.com", is_admin=1)
-        token = _insert_session(admin_db, user_id)
-
-        with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db)}):
-            with patch("src.api.routes.admin.resolve_team", return_value=_OWNED_PROFILE):
-                with patch(
-                    "src.api.routes.admin.resolve_uuid_to_public_id",
-                    return_value=_OWNED_PUBLIC_ID,
-                ):
-                    with TestClient(app, cookies={"session": token}) as client:
-                        response = client.post(
-                            "/admin/teams",
-                            data={
-                                "url_input": _OWNED_UUID,
-                                "level": "varsity",
-                                "team_type": "owned",
-                            },
-                            follow_redirects=False,
-                        )
-        assert response.status_code == 303
-        team = _get_team(admin_db, _OWNED_UUID)
-        assert team is not None
-        assert team["team_id"] == _OWNED_UUID
-        assert team["public_id"] == _OWNED_PUBLIC_ID
-        assert team["is_owned"] == 1
-
-    def test_non_owned_team_uses_slug_as_team_id(self, admin_db: Path) -> None:
-        """AC-3: non-owned (tracked) team stores public_id as team_id, no bridge call."""
-        user_id = _insert_user(admin_db, "uuid3@example.com", is_admin=1)
-        token = _insert_session(admin_db, user_id)
-
-        with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db)}):
-            with patch("src.api.routes.admin.resolve_team", return_value=_OWNED_PROFILE):
-                with patch(
-                    "src.api.routes.admin.resolve_public_id_to_uuid"
-                ) as mock_bridge:
-                    with TestClient(app, cookies={"session": token}) as client:
-                        response = client.post(
-                            "/admin/teams",
-                            data={
-                                "url_input": _OWNED_PUBLIC_ID,
-                                "team_type": "tracked",
-                            },
-                            follow_redirects=False,
-                        )
-        assert response.status_code == 303
-        # Bridge should NOT be called for non-owned teams
-        mock_bridge.assert_not_called()
-        team = _get_team(admin_db, _OWNED_PUBLIC_ID)
-        assert team is not None
-        assert team["team_id"] == _OWNED_PUBLIC_ID
-        assert team["public_id"] == _OWNED_PUBLIC_ID
-        assert team["is_owned"] == 0
-
-    def test_non_owned_uuid_input_rejected(self, admin_db: Path) -> None:
-        """AC-3.5: UUID input for non-owned team shows clear error."""
-        user_id = _insert_user(admin_db, "uuid4@example.com", is_admin=1)
-        token = _insert_session(admin_db, user_id)
-
-        with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db)}):
-            with TestClient(app, cookies={"session": token}) as client:
-                response = client.post(
-                    "/admin/teams",
-                    data={"url_input": _OWNED_UUID, "team_type": "tracked"},
-                )
-        assert response.status_code == 200
-        assert "uuid" in response.text.lower() or "non-owned" in response.text.lower()
-
-    def test_owned_reverse_bridge_403_shows_error(self, admin_db: Path) -> None:
-        """AC-4: 403 from reverse bridge shows clear 'not on your account' error."""
+    def test_bridge_forbidden_sets_gc_uuid_forbidden(self, team_db: Path) -> None:
+        """Phase 1: 403 from bridge results in gc_uuid_status=forbidden in redirect."""
         from src.gamechanger.bridge import BridgeForbiddenError
 
-        user_id = _insert_user(admin_db, "uuid5@example.com", is_admin=1)
-        token = _insert_session(admin_db, user_id)
+        user_id = _insert_user(team_db, "admin@example.com")
+        token = _insert_session(team_db, user_id)
+        profile = _make_profile("Riverside Hawks")
 
-        with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db)}):
-            with patch(
-                "src.api.routes.admin.resolve_public_id_to_uuid",
-                side_effect=BridgeForbiddenError("403 Forbidden"),
-            ):
+        with patch(
+            "src.api.routes.admin.resolve_public_id_to_uuid",
+            side_effect=BridgeForbiddenError("forbidden"),
+        ), patch(
+            "src.api.routes.admin.resolve_team", return_value=profile
+        ), patch(
+            "src.api.routes.admin.parse_team_url"
+        ) as mock_parse:
+            mock_result = MagicMock()
+            mock_result.is_uuid = False
+            mock_result.value = "abc123"
+            mock_parse.return_value = mock_result
+
+            with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
+                with TestClient(
+                    app, follow_redirects=False, cookies={"session": token}
+                ) as client:
+                    response = client.post(
+                        "/admin/teams",
+                        data={"url_input": "abc123"},
+                    )
+
+        assert response.status_code == 303
+        location = response.headers["location"]
+        assert "gc_uuid_status=forbidden" in location
+        assert "gc_uuid=" not in location
+
+    def test_bridge_success_includes_gc_uuid_in_redirect(self, team_db: Path) -> None:
+        """Phase 1: successful bridge call includes gc_uuid in redirect params."""
+        user_id = _insert_user(team_db, "admin@example.com")
+        token = _insert_session(team_db, user_id)
+        profile = _make_profile("Riverside Hawks")
+
+        with patch(
+            "src.api.routes.admin.resolve_public_id_to_uuid",
+            return_value="gc-uuid-9999",
+        ), patch(
+            "src.api.routes.admin.resolve_team", return_value=profile
+        ), patch(
+            "src.api.routes.admin.parse_team_url"
+        ) as mock_parse:
+            mock_result = MagicMock()
+            mock_result.is_uuid = False
+            mock_result.value = "abc123"
+            mock_parse.return_value = mock_result
+
+            with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
+                with TestClient(
+                    app, follow_redirects=False, cookies={"session": token}
+                ) as client:
+                    response = client.post(
+                        "/admin/teams",
+                        data={"url_input": "abc123"},
+                    )
+
+        location = response.headers["location"]
+        assert "gc_uuid=gc-uuid-9999" in location
+        assert "gc_uuid_status=found" in location
+
+    def test_invalid_url_shows_error(self, team_db: Path) -> None:
+        """Phase 1: URL parse failure shows error message on teams page."""
+        user_id = _insert_user(team_db, "admin@example.com")
+        token = _insert_session(team_db, user_id)
+
+        with patch(
+            "src.api.routes.admin.parse_team_url",
+            side_effect=ValueError("Cannot parse URL"),
+        ):
+            with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
                 with TestClient(app, cookies={"session": token}) as client:
                     response = client.post(
                         "/admin/teams",
-                        data={"url_input": _OWNED_PUBLIC_ID, "team_type": "owned"},
+                        data={"url_input": "not-a-valid-url"},
                     )
+
         assert response.status_code == 200
-        assert "not found" in response.text.lower() or "account" in response.text.lower()
+        assert "Cannot parse URL" in response.text
 
-    def test_owned_uuid_duplicate_check_by_team_id(self, admin_db: Path) -> None:
-        """AC-5: re-adding owned team (UUID already in team_id) shows already-exists error."""
-        # Pre-insert the owned team with UUID as team_id
-        conn = sqlite3.connect(str(admin_db))
-        conn.execute(
-            "INSERT INTO teams (team_id, name, public_id, is_owned, source, is_active) "
-            "VALUES (?, ?, ?, 1, 'gamechanger', 1)",
-            (_OWNED_UUID, "Riverside Tigers", _OWNED_PUBLIC_ID),
-        )
-        conn.commit()
-        conn.close()
+    def test_uuid_input_rejected(self, team_db: Path) -> None:
+        """Phase 1: raw UUID input is rejected with a specific error."""
+        user_id = _insert_user(team_db, "admin@example.com")
+        token = _insert_session(team_db, user_id)
 
-        user_id = _insert_user(admin_db, "uuid6@example.com", is_admin=1)
-        token = _insert_session(admin_db, user_id)
+        with patch("src.api.routes.admin.parse_team_url") as mock_parse:
+            mock_result = MagicMock()
+            mock_result.is_uuid = True
+            mock_result.value = "some-uuid"
+            mock_parse.return_value = mock_result
 
-        with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db)}):
-            with patch(
-                "src.api.routes.admin.resolve_public_id_to_uuid",
-                return_value=_OWNED_UUID,
-            ):
+            with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
                 with TestClient(app, cookies={"session": token}) as client:
                     response = client.post(
                         "/admin/teams",
-                        data={"url_input": _OWNED_PUBLIC_ID, "team_type": "owned"},
+                        data={"url_input": "550e8400-e29b-41d4-a716-446655440000"},
                     )
+
         assert response.status_code == 200
+        assert "UUID" in response.text
+
+    def test_team_not_found_shows_error(self, team_db: Path) -> None:
+        """Phase 1: TeamNotFoundError shows error on teams page."""
+        user_id = _insert_user(team_db, "admin@example.com")
+        token = _insert_session(team_db, user_id)
+
+        with patch(
+            "src.api.routes.admin.resolve_public_id_to_uuid", return_value="uuid-1"
+        ), patch(
+            "src.api.routes.admin.resolve_team",
+            side_effect=TeamNotFoundError("abc123"),
+        ), patch(
+            "src.api.routes.admin.parse_team_url"
+        ) as mock_parse:
+            mock_result = MagicMock()
+            mock_result.is_uuid = False
+            mock_result.value = "abc123"
+            mock_parse.return_value = mock_result
+
+            with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
+                with TestClient(app, cookies={"session": token}) as client:
+                    response = client.post(
+                        "/admin/teams",
+                        data={"url_input": "abc123"},
+                    )
+
+        assert response.status_code == 200
+        assert "not found" in response.text.lower()
+
+    def test_api_error_shows_error(self, team_db: Path) -> None:
+        """Phase 1: GameChangerAPIError shows error on teams page."""
+        user_id = _insert_user(team_db, "admin@example.com")
+        token = _insert_session(team_db, user_id)
+
+        with patch(
+            "src.api.routes.admin.resolve_public_id_to_uuid", return_value="uuid-1"
+        ), patch(
+            "src.api.routes.admin.resolve_team",
+            side_effect=GameChangerAPIError("network error"),
+        ), patch(
+            "src.api.routes.admin.parse_team_url"
+        ) as mock_parse:
+            mock_result = MagicMock()
+            mock_result.is_uuid = False
+            mock_result.value = "abc123"
+            mock_parse.return_value = mock_result
+
+            with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
+                with TestClient(app, cookies={"session": token}) as client:
+                    response = client.post(
+                        "/admin/teams",
+                        data={"url_input": "abc123"},
+                    )
+
+        assert response.status_code == 200
+        assert "GameChanger" in response.text
+
+
+# ---------------------------------------------------------------------------
+# AC-17h, i: Phase 2 GET /admin/teams/confirm
+# ---------------------------------------------------------------------------
+
+
+class TestPhase2ConfirmForm:
+    """GET /admin/teams/confirm displays resolved info (AC-17h, i)."""
+
+    def test_confirm_page_shows_team_name(self, team_db: Path) -> None:
+        """GET /admin/teams/confirm renders the team name from query params."""
+        user_id = _insert_user(team_db, "admin@example.com")
+        token = _insert_session(team_db, user_id)
+
+        with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
+            with TestClient(app, cookies={"session": token}) as client:
+                response = client.get(
+                    "/admin/teams/confirm",
+                    params={
+                        "public_id": "abc123",
+                        "team_name": "Riverside Hawks",
+                        "gc_uuid_status": "forbidden",
+                    },
+                )
+        assert response.status_code == 200
+        assert "Riverside Hawks" in response.text
+
+    def test_confirm_page_shows_public_id(self, team_db: Path) -> None:
+        """GET /admin/teams/confirm shows the public_id."""
+        user_id = _insert_user(team_db, "admin@example.com")
+        token = _insert_session(team_db, user_id)
+
+        with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
+            with TestClient(app, cookies={"session": token}) as client:
+                response = client.get(
+                    "/admin/teams/confirm",
+                    params={
+                        "public_id": "abc123",
+                        "team_name": "Riverside Hawks",
+                        "gc_uuid_status": "forbidden",
+                    },
+                )
+        assert "abc123" in response.text
+
+    def test_confirm_page_shows_gc_uuid_found_badge(self, team_db: Path) -> None:
+        """Confirm page shows Discovered badge when gc_uuid is found."""
+        user_id = _insert_user(team_db, "admin@example.com")
+        token = _insert_session(team_db, user_id)
+
+        with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
+            with TestClient(app, cookies={"session": token}) as client:
+                response = client.get(
+                    "/admin/teams/confirm",
+                    params={
+                        "public_id": "abc123",
+                        "team_name": "Riverside Hawks",
+                        "gc_uuid": "some-uuid",
+                        "gc_uuid_status": "found",
+                    },
+                )
+        assert "Discovered" in response.text
+
+    def test_confirm_page_shows_not_available_badge_on_forbidden(
+        self, team_db: Path
+    ) -> None:
+        """Confirm page shows Not available badge when gc_uuid is forbidden."""
+        user_id = _insert_user(team_db, "admin@example.com")
+        token = _insert_session(team_db, user_id)
+
+        with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
+            with TestClient(app, cookies={"session": token}) as client:
+                response = client.get(
+                    "/admin/teams/confirm",
+                    params={
+                        "public_id": "abc123",
+                        "team_name": "Riverside Hawks",
+                        "gc_uuid_status": "forbidden",
+                    },
+                )
+        assert "403" in response.text or "Not available" in response.text
+
+    def test_confirm_page_duplicate_shows_error(self, team_db: Path) -> None:
+        """GET /admin/teams/confirm shows error when team is already in DB."""
+        user_id = _insert_user(team_db, "admin@example.com")
+        token = _insert_session(team_db, user_id)
+        # Insert team with public_id=abc123
+        _insert_team(team_db, "Existing Team", public_id="abc123")
+
+        with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
+            with TestClient(app, cookies={"session": token}) as client:
+                response = client.get(
+                    "/admin/teams/confirm",
+                    params={
+                        "public_id": "abc123",
+                        "team_name": "Existing Team",
+                        "gc_uuid_status": "forbidden",
+                    },
+                )
         assert "already in the system" in response.text
 
+    def test_confirm_page_missing_public_id_redirects(self, team_db: Path) -> None:
+        """GET /admin/teams/confirm without public_id redirects to /admin/teams."""
+        user_id = _insert_user(team_db, "admin@example.com")
+        token = _insert_session(team_db, user_id)
+
+        with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
+            with TestClient(
+                app, follow_redirects=False, cookies={"session": token}
+            ) as client:
+                response = client.get("/admin/teams/confirm")
+        assert response.status_code == 302
+        assert "/admin/teams" in response.headers["location"]
+
 
 # ---------------------------------------------------------------------------
-# POST /admin/teams -- placeholder upgrade path
+# AC-17j, k, l, m: Phase 2 POST /admin/teams/confirm
 # ---------------------------------------------------------------------------
 
 
-class TestPlaceholderUpgrade:
-    """POST /admin/teams upgrades a discovered placeholder instead of creating a duplicate."""
+class TestPhase2ConfirmSubmit:
+    """POST /admin/teams/confirm creates the team (AC-17j, k, l, m)."""
 
-    def test_placeholder_is_upgraded_not_duplicated(self, admin_db: Path) -> None:
-        """When a discovered placeholder matches resolved name, it is upgraded in place."""
-        # Insert a discovered placeholder
-        conn = sqlite3.connect(str(admin_db))
-        conn.execute(
-            "INSERT INTO teams (team_id, name, is_owned, source, is_active, public_id) "
-            "VALUES (?, ?, 0, 'discovered', 0, NULL)",
-            ("old-placeholder-id", "Riverside Tigers"),
-        )
-        conn.commit()
-        conn.close()
+    def test_confirm_submit_inserts_team(self, team_db: Path) -> None:
+        """Successful POST /admin/teams/confirm inserts a new team row."""
+        user_id = _insert_user(team_db, "admin@example.com")
+        token = _insert_session(team_db, user_id)
 
-        user_id = _insert_user(admin_db, "upgrade1@example.com", is_admin=1)
-        token = _insert_session(admin_db, user_id)
-
-        with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db)}):
-            with patch(
-                "src.api.routes.admin.resolve_team", return_value=_SAMPLE_PROFILE
-            ):
-                with TestClient(app, cookies={"session": token}) as client:
-                    client.post(
-                        "/admin/teams",
-                        data={"url_input": "abc123def456", "team_type": "tracked"},
+        with patch(
+            "src.api.routes.admin.resolve_public_id_to_uuid",
+            return_value="gc-uuid-fresh",
+        ):
+            with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
+                with TestClient(
+                    app, follow_redirects=False, cookies={"session": token}
+                ) as client:
+                    response = client.post(
+                        "/admin/teams/confirm",
+                        data={
+                            "public_id": "newteam1",
+                            "team_name": "New Team",
+                            "gc_uuid": "gc-uuid-fresh",
+                            "membership_type": "tracked",
+                            "program_id": "",
+                            "classification": "",
+                        },
                     )
 
-        # The old placeholder row should no longer exist with old team_id
-        old_row = _get_team(admin_db, "old-placeholder-id")
-        assert old_row is None, "Old placeholder row should be gone after upgrade"
+        assert response.status_code == 303
+        assert _count_rows(team_db, "teams", "public_id = ?", ("newteam1",)) == 1
 
-        # The new team_id (public_id) row should exist
-        new_row = _get_team(admin_db, "abc123def456")
-        assert new_row is not None
-        assert new_row["public_id"] == "abc123def456"
-        assert new_row["source"] == "gamechanger"
-        assert new_row["is_active"] == 1
-        assert new_row["name"] == "Riverside Tigers"
+    def test_confirm_submit_redirects_with_flash(self, team_db: Path) -> None:
+        """POST /admin/teams/confirm on success redirects with ?msg= flash."""
+        user_id = _insert_user(team_db, "admin@example.com")
+        token = _insert_session(team_db, user_id)
 
-    def test_placeholder_upgrade_no_duplicate_rows(self, admin_db: Path) -> None:
-        """After upgrade, only one team row exists for the team name."""
-        conn = sqlite3.connect(str(admin_db))
-        conn.execute(
-            "INSERT INTO teams (team_id, name, is_owned, source, is_active, public_id) "
-            "VALUES (?, ?, 0, 'discovered', 0, NULL)",
-            ("placeholder-two", "Riverside Tigers"),
-        )
-        conn.commit()
-        conn.close()
-
-        user_id = _insert_user(admin_db, "upgrade2@example.com", is_admin=1)
-        token = _insert_session(admin_db, user_id)
-
-        with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db)}):
-            with patch(
-                "src.api.routes.admin.resolve_team", return_value=_SAMPLE_PROFILE
-            ):
-                with TestClient(app, cookies={"session": token}) as client:
-                    client.post(
-                        "/admin/teams",
-                        data={"url_input": "abc123def456", "team_type": "tracked"},
+        with patch(
+            "src.api.routes.admin.resolve_public_id_to_uuid",
+            return_value="gc-uuid-xyz",
+        ):
+            with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
+                with TestClient(
+                    app, follow_redirects=False, cookies={"session": token}
+                ) as client:
+                    response = client.post(
+                        "/admin/teams/confirm",
+                        data={
+                            "public_id": "flashteam",
+                            "team_name": "Flash Team",
+                            "gc_uuid": "gc-uuid-xyz",
+                            "membership_type": "tracked",
+                            "program_id": "",
+                            "classification": "",
+                        },
                     )
 
-        conn = sqlite3.connect(str(admin_db))
-        count = conn.execute(
-            "SELECT COUNT(*) FROM teams WHERE LOWER(name) = 'riverside tigers'"
-        ).fetchone()[0]
+        assert "msg=" in response.headers["location"]
+
+    def test_confirm_submit_duplicate_shows_error(self, team_db: Path) -> None:
+        """POST /admin/teams/confirm with duplicate public_id shows error, no insert."""
+        user_id = _insert_user(team_db, "admin@example.com")
+        token = _insert_session(team_db, user_id)
+        _insert_team(team_db, "Already Exists", public_id="dup123")
+
+        from src.gamechanger.bridge import BridgeForbiddenError
+
+        with patch(
+            "src.api.routes.admin.resolve_public_id_to_uuid",
+            side_effect=BridgeForbiddenError("403"),
+        ):
+            with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
+                with TestClient(app, cookies={"session": token}) as client:
+                    response = client.post(
+                        "/admin/teams/confirm",
+                        data={
+                            "public_id": "dup123",
+                            "team_name": "Already Exists",
+                            "gc_uuid": "",
+                            "membership_type": "tracked",
+                            "program_id": "",
+                            "classification": "",
+                        },
+                    )
+
+        assert response.status_code == 200
+        assert "already in the system" in response.text
+        # Only 1 row (the existing one)
+        assert _count_rows(team_db, "teams", "public_id = ?", ("dup123",)) == 1
+
+    def test_confirm_submit_toctou_refreshes_gc_uuid(self, team_db: Path) -> None:
+        """POST: TOCTOU guard calls bridge again to refresh gc_uuid before insert."""
+        user_id = _insert_user(team_db, "admin@example.com")
+        token = _insert_session(team_db, user_id)
+
+        with patch(
+            "src.api.routes.admin.resolve_public_id_to_uuid",
+            return_value="fresh-uuid-999",
+        ) as mock_bridge:
+            with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
+                with TestClient(
+                    app, follow_redirects=False, cookies={"session": token}
+                ) as client:
+                    client.post(
+                        "/admin/teams/confirm",
+                        data={
+                            "public_id": "toctou1",
+                            "team_name": "TOCTOU Team",
+                            "gc_uuid": "stale-uuid",  # Phase 1 found a uuid -> triggers re-verify
+                            "membership_type": "tracked",
+                            "program_id": "",
+                            "classification": "",
+                        },
+                    )
+        # Bridge should be called once (TOCTOU re-verify)
+        mock_bridge.assert_called_once()
+
+        # The inserted gc_uuid should be the fresh one
+        conn = sqlite3.connect(str(team_db))
+        row = conn.execute(
+            "SELECT gc_uuid FROM teams WHERE public_id = ?", ("toctou1",)
+        ).fetchone()
         conn.close()
-        assert count == 1, f"Expected 1 row for Riverside Tigers, got {count}"
+        assert row is not None
+        assert row[0] == "fresh-uuid-999"
+
+    def test_confirm_submit_gc_uuid_null_on_403_during_reverify(
+        self, team_db: Path
+    ) -> None:
+        """POST: gc_uuid stored as NULL when TOCTOU re-verify returns 403."""
+        from src.gamechanger.bridge import BridgeForbiddenError
+
+        user_id = _insert_user(team_db, "admin@example.com")
+        token = _insert_session(team_db, user_id)
+
+        with patch(
+            "src.api.routes.admin.resolve_public_id_to_uuid",
+            side_effect=BridgeForbiddenError("now 403"),
+        ):
+            with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
+                with TestClient(
+                    app, follow_redirects=False, cookies={"session": token}
+                ) as client:
+                    client.post(
+                        "/admin/teams/confirm",
+                        data={
+                            "public_id": "stale1",
+                            "team_name": "Stale UUID Team",
+                            "gc_uuid": "old-uuid",  # was found in Phase 1
+                            "membership_type": "tracked",
+                            "program_id": "",
+                            "classification": "",
+                        },
+                    )
+
+        conn = sqlite3.connect(str(team_db))
+        row = conn.execute(
+            "SELECT gc_uuid FROM teams WHERE public_id = ?", ("stale1",)
+        ).fetchone()
+        conn.close()
+        assert row is not None
+        assert row[0] is None  # stored as NULL
+
+    def test_confirm_submit_stores_membership_type(self, team_db: Path) -> None:
+        """POST /admin/teams/confirm stores the chosen membership_type."""
+        user_id = _insert_user(team_db, "admin@example.com")
+        token = _insert_session(team_db, user_id)
+
+        from src.gamechanger.bridge import BridgeForbiddenError
+
+        with patch(
+            "src.api.routes.admin.resolve_public_id_to_uuid",
+            side_effect=BridgeForbiddenError("403"),
+        ):
+            with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
+                with TestClient(
+                    app, follow_redirects=False, cookies={"session": token}
+                ) as client:
+                    client.post(
+                        "/admin/teams/confirm",
+                        data={
+                            "public_id": "memberteam1",
+                            "team_name": "Member Team",
+                            "gc_uuid": "",
+                            "membership_type": "member",
+                            "program_id": "",
+                            "classification": "",
+                        },
+                    )
+
+        conn = sqlite3.connect(str(team_db))
+        row = conn.execute(
+            "SELECT membership_type FROM teams WHERE public_id = ?", ("memberteam1",)
+        ).fetchone()
+        conn.close()
+        assert row is not None
+        assert row[0] == "member"
 
 
 # ---------------------------------------------------------------------------
-# GET /admin/teams/{team_id}/edit -- edit team form (E-042-04)
+# AC-17n: Classification inference
+# ---------------------------------------------------------------------------
+
+
+class TestClassificationInference:
+    """_infer_classification correctly maps team name keywords (AC-17n)."""
+
+    def _infer(self, name: str) -> str | None:
+        from src.api.routes.admin import _infer_classification
+        return _infer_classification(name)
+
+    def test_jv_keyword(self) -> None:
+        assert self._infer("LSB JV 2026") == "jv"
+
+    def test_junior_varsity_keyword(self) -> None:
+        assert self._infer("LSB Junior Varsity 2026") == "jv"
+
+    def test_varsity_keyword(self) -> None:
+        assert self._infer("LSB Varsity 2026") == "varsity"
+
+    def test_freshman_keyword(self) -> None:
+        assert self._infer("LSB Freshman 2026") == "freshman"
+
+    def test_frosh_keyword(self) -> None:
+        assert self._infer("LSB Frosh 2026") == "freshman"
+
+    def test_reserve_keyword(self) -> None:
+        assert self._infer("LSB Reserve Team") == "reserve"
+
+    def test_legion_keyword(self) -> None:
+        assert self._infer("Lincoln Legion Post 100") == "legion"
+
+    def test_age_14u(self) -> None:
+        assert self._infer("Riverside 14U Hawks") == "14U"
+
+    def test_age_12u(self) -> None:
+        assert self._infer("Metro 12U Elite") == "12U"
+
+    def test_age_8u(self) -> None:
+        assert self._infer("Smith 8U Stars") == "8U"
+
+    def test_age_lowercase_u(self) -> None:
+        assert self._infer("Metro 13u Prospects") == "13U"
+
+    def test_jv_wins_over_varsity_in_junior_varsity(self) -> None:
+        """'Junior Varsity' should return 'jv', not 'varsity'."""
+        assert self._infer("Lincoln Junior Varsity") == "jv"
+
+    def test_out_of_range_age_returns_none(self) -> None:
+        """Age patterns outside 8U-14U return None."""
+        assert self._infer("Metro 7U Stars") is None
+
+    def test_no_keyword_returns_none(self) -> None:
+        assert self._infer("Riverside Hawks Baseball") is None
+
+
+# ---------------------------------------------------------------------------
+# AC-17o: Program pre-selection
+# ---------------------------------------------------------------------------
+
+
+class TestProgramInference:
+    """_infer_program_id finds the longest matching program name (AC-17o)."""
+
+    def _infer(self, team_name: str, programs: list[dict]) -> str | None:
+        from src.api.routes.admin import _infer_program_id
+        return _infer_program_id(team_name, programs)
+
+    def test_exact_substring_match(self) -> None:
+        programs = [{"program_id": "lsb-hs", "name": "Lincoln Standing Bear HS"}]
+        assert self._infer("Lincoln Standing Bear HS Varsity", programs) == "lsb-hs"
+
+    def test_case_insensitive_match(self) -> None:
+        programs = [{"program_id": "lsb-hs", "name": "Lincoln Standing Bear HS"}]
+        assert self._infer("lincoln standing bear hs varsity", programs) == "lsb-hs"
+
+    def test_no_match_returns_none(self) -> None:
+        programs = [{"program_id": "lsb-hs", "name": "Lincoln Standing Bear HS"}]
+        assert self._infer("Riverside Hawks", programs) is None
+
+    def test_longest_match_wins(self) -> None:
+        programs = [
+            {"program_id": "lincoln", "name": "Lincoln"},
+            {"program_id": "lsb-hs", "name": "Lincoln Standing Bear HS"},
+        ]
+        # Both match, but 'Lincoln Standing Bear HS' is longer
+        result = self._infer("Lincoln Standing Bear HS Varsity 2026", programs)
+        assert result == "lsb-hs"
+
+    def test_empty_programs_returns_none(self) -> None:
+        assert self._infer("Any Team Name", []) is None
+
+
+# ---------------------------------------------------------------------------
+# AC-17p: GET /admin/teams/{id}/edit uses INTEGER id
 # ---------------------------------------------------------------------------
 
 
 class TestEditTeamForm:
-    """GET /admin/teams/{team_id}/edit access, rendering, and 404 handling."""
+    """GET /admin/teams/{id}/edit uses INTEGER path param (AC-17p)."""
 
-    def test_admin_gets_200_for_existing_team(self, admin_db: Path) -> None:
-        """Admin with valid session can access the edit form for an existing team."""
-        user_id = _insert_user(admin_db, "editteam1@example.com", is_admin=1)
-        token = _insert_session(admin_db, user_id)
+    def test_edit_form_loads_with_integer_id(self, team_db: Path) -> None:
+        """GET /admin/teams/1/edit returns 200 for a valid INTEGER team id."""
+        user_id = _insert_user(team_db, "admin@example.com")
+        token = _insert_session(team_db, user_id)
+        # Get the id of the seeded team
+        conn = sqlite3.connect(str(team_db))
+        team_id = conn.execute("SELECT id FROM teams LIMIT 1").fetchone()[0]
+        conn.close()
 
-        with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db), "DEV_USER_EMAIL": ""}):
+        with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
             with TestClient(app, cookies={"session": token}) as client:
-                response = client.get("/admin/teams/lsb-varsity-2026/edit")
+                response = client.get(f"/admin/teams/{team_id}/edit")
         assert response.status_code == 200
-
-    def test_form_prefilled_with_team_name(self, admin_db: Path) -> None:
-        """Edit form contains the team's current name as a pre-filled value."""
-        user_id = _insert_user(admin_db, "editteam2@example.com", is_admin=1)
-        token = _insert_session(admin_db, user_id)
-
-        with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db), "DEV_USER_EMAIL": ""}):
-            with TestClient(app, cookies={"session": token}) as client:
-                response = client.get("/admin/teams/lsb-varsity-2026/edit")
         assert "LSB Varsity 2026" in response.text
 
-    def test_form_shows_level_and_status(self, admin_db: Path) -> None:
-        """Edit form shows current level and Active/Inactive status."""
-        user_id = _insert_user(admin_db, "editteam3@example.com", is_admin=1)
-        token = _insert_session(admin_db, user_id)
+    def test_edit_form_shows_membership_type(self, team_db: Path) -> None:
+        """Edit form shows the team's membership_type field."""
+        user_id = _insert_user(team_db, "admin@example.com")
+        token = _insert_session(team_db, user_id)
+        conn = sqlite3.connect(str(team_db))
+        team_id = conn.execute("SELECT id FROM teams LIMIT 1").fetchone()[0]
+        conn.close()
 
-        with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db), "DEV_USER_EMAIL": ""}):
+        with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
             with TestClient(app, cookies={"session": token}) as client:
-                response = client.get("/admin/teams/lsb-varsity-2026/edit")
-        # level "varsity" should appear as selected option in form
-        assert "varsity" in response.text
-        # Status should show Active (seeded with is_active=1)
-        assert "Active" in response.text
+                response = client.get(f"/admin/teams/{team_id}/edit")
+        # Should have membership radio buttons
+        assert "membership_type" in response.text
 
-    def test_nonexistent_team_returns_404(self, admin_db: Path) -> None:
-        """AC-4: GET edit for a nonexistent team_id returns 404."""
-        user_id = _insert_user(admin_db, "editteam4@example.com", is_admin=1)
-        token = _insert_session(admin_db, user_id)
+    def test_edit_form_404_for_missing_id(self, team_db: Path) -> None:
+        """GET /admin/teams/9999/edit returns 404 for nonexistent team."""
+        user_id = _insert_user(team_db, "admin@example.com")
+        token = _insert_session(team_db, user_id)
 
-        with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db), "DEV_USER_EMAIL": ""}):
+        with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
             with TestClient(app, cookies={"session": token}) as client:
-                response = client.get("/admin/teams/does-not-exist/edit")
+                response = client.get("/admin/teams/9999/edit")
         assert response.status_code == 404
 
-    def test_non_admin_gets_403(self, admin_db: Path) -> None:
-        """AC-3: non-admin gets 403 on edit form."""
-        user_id = _insert_user(admin_db, "editteam5@example.com", is_admin=0)
-        token = _insert_session(admin_db, user_id)
+    def test_edit_form_action_uses_integer_id(self, team_db: Path) -> None:
+        """Edit form's action attribute uses the INTEGER team id."""
+        user_id = _insert_user(team_db, "admin@example.com")
+        token = _insert_session(team_db, user_id)
+        conn = sqlite3.connect(str(team_db))
+        team_id = conn.execute("SELECT id FROM teams LIMIT 1").fetchone()[0]
+        conn.close()
 
-        with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db), "DEV_USER_EMAIL": ""}):
-            with TestClient(app, follow_redirects=False, cookies={"session": token}) as client:
-                response = client.get("/admin/teams/lsb-varsity-2026/edit")
-        assert response.status_code == 403
-
-    def test_unauthenticated_redirects_to_login(self, admin_db: Path) -> None:
-        """AC-3: unauthenticated request redirects to /auth/login."""
-        with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db), "DEV_USER_EMAIL": ""}):
-            with TestClient(app, follow_redirects=False) as client:
-                response = client.get("/admin/teams/lsb-varsity-2026/edit")
-        assert response.status_code == 302
-        assert "/auth/login" in response.headers["location"]
+        with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
+            with TestClient(app, cookies={"session": token}) as client:
+                response = client.get(f"/admin/teams/{team_id}/edit")
+        assert f"/admin/teams/{team_id}/edit" in response.text
 
 
 # ---------------------------------------------------------------------------
-# POST /admin/teams/{team_id}/edit -- update team (E-042-04)
+# AC-17q: POST /admin/teams/{id}/edit updates team with INTEGER id
 # ---------------------------------------------------------------------------
 
 
 class TestUpdateTeam:
-    """POST /admin/teams/{team_id}/edit updates team and redirects."""
+    """POST /admin/teams/{id}/edit (AC-17q)."""
 
-    def test_post_edit_updates_name_and_redirects(self, admin_db: Path) -> None:
-        """AC-5, AC-6: POST updates name and redirects to /admin/teams?msg=Team+updated."""
-        user_id = _insert_user(admin_db, "updateteam1@example.com", is_admin=1)
-        token = _insert_session(admin_db, user_id)
+    def test_update_team_changes_name(self, team_db: Path) -> None:
+        """POST /admin/teams/{id}/edit updates team name."""
+        user_id = _insert_user(team_db, "admin@example.com")
+        token = _insert_session(team_db, user_id)
+        conn = sqlite3.connect(str(team_db))
+        team_id = conn.execute("SELECT id FROM teams LIMIT 1").fetchone()[0]
+        conn.close()
 
-        with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db), "DEV_USER_EMAIL": ""}):
+        with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
             with TestClient(
                 app, follow_redirects=False, cookies={"session": token}
             ) as client:
                 response = client.post(
-                    "/admin/teams/lsb-varsity-2026/edit",
-                    data={"name": "LSB Varsity Updated", "level": "varsity", "team_type": "owned"},
+                    f"/admin/teams/{team_id}/edit",
+                    data={
+                        "name": "LSB Varsity Updated",
+                        "program_id": "",
+                        "classification": "",
+                        "membership_type": "member",
+                    },
                 )
         assert response.status_code == 303
-        assert "/admin/teams" in response.headers["location"]
-        assert "msg=Team+updated" in response.headers["location"]
-
-    def test_post_edit_persists_changes(self, admin_db: Path) -> None:
-        """AC-5: updated name, level, and is_owned are saved to the database."""
-        user_id = _insert_user(admin_db, "updateteam2@example.com", is_admin=1)
-        token = _insert_session(admin_db, user_id)
-
-        with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db), "DEV_USER_EMAIL": ""}):
-            with TestClient(app, cookies={"session": token}) as client:
-                client.post(
-                    "/admin/teams/lsb-jv-2026/edit",
-                    data={"name": "LSB JV Renamed", "level": "jv", "team_type": "tracked"},
-                )
-
-        team = _get_team(admin_db, "lsb-jv-2026")
-        assert team is not None
-        assert team["name"] == "LSB JV Renamed"
-        assert team["is_owned"] == 0
-
-    def test_post_edit_nonexistent_team_returns_404(self, admin_db: Path) -> None:
-        """AC-5: POST to nonexistent team returns 404."""
-        user_id = _insert_user(admin_db, "updateteam3@example.com", is_admin=1)
-        token = _insert_session(admin_db, user_id)
-
-        with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db), "DEV_USER_EMAIL": ""}):
-            with TestClient(app, cookies={"session": token}) as client:
-                response = client.post(
-                    "/admin/teams/no-such-team/edit",
-                    data={"name": "Ghost Team", "level": "", "team_type": "tracked"},
-                )
-        assert response.status_code == 404
-
-    def test_post_edit_non_admin_gets_403(self, admin_db: Path) -> None:
-        """AC-7: non-admin POST gets 403."""
-        user_id = _insert_user(admin_db, "updateteam4@example.com", is_admin=0)
-        token = _insert_session(admin_db, user_id)
-
-        with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db), "DEV_USER_EMAIL": ""}):
-            with TestClient(
-                app, follow_redirects=False, cookies={"session": token}
-            ) as client:
-                response = client.post(
-                    "/admin/teams/lsb-varsity-2026/edit",
-                    data={"name": "Hacked", "level": "", "team_type": "tracked"},
-                )
-        assert response.status_code == 403
-
-    def test_post_edit_unauthenticated_redirects(self, admin_db: Path) -> None:
-        """AC-7: unauthenticated POST redirects to /auth/login."""
-        with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db), "DEV_USER_EMAIL": ""}):
-            with TestClient(app, follow_redirects=False) as client:
-                response = client.post(
-                    "/admin/teams/lsb-varsity-2026/edit",
-                    data={"name": "Hacked", "level": "", "team_type": "tracked"},
-                )
-        assert response.status_code == 302
-        assert "/auth/login" in response.headers["location"]
+        assert _count_rows(
+            team_db, "teams", "name = ?", ("LSB Varsity Updated",)
+        ) == 1
 
 
 # ---------------------------------------------------------------------------
-# POST /admin/teams/{team_id}/toggle-active -- toggle is_active (E-042-04)
+# AC-17r: POST /admin/teams/{id}/toggle-active uses INTEGER id
 # ---------------------------------------------------------------------------
 
 
 class TestToggleTeamActive:
-    """POST /admin/teams/{team_id}/toggle-active flips is_active and redirects."""
+    """POST /admin/teams/{id}/toggle-active (AC-17r)."""
 
-    def test_toggle_deactivates_active_team(self, admin_db: Path) -> None:
-        """AC-8, AC-9: toggling an active team deactivates it and redirects with 'deactivated'."""
-        user_id = _insert_user(admin_db, "toggle1@example.com", is_admin=1)
-        token = _insert_session(admin_db, user_id)
+    def test_toggle_active_deactivates_team(self, team_db: Path) -> None:
+        """Toggle on active team sets is_active=0."""
+        user_id = _insert_user(team_db, "admin@example.com")
+        token = _insert_session(team_db, user_id)
+        conn = sqlite3.connect(str(team_db))
+        team_id = conn.execute("SELECT id FROM teams LIMIT 1").fetchone()[0]
+        conn.close()
 
-        # lsb-varsity-2026 is seeded as active
-        with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db), "DEV_USER_EMAIL": ""}):
+        with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
             with TestClient(
                 app, follow_redirects=False, cookies={"session": token}
             ) as client:
-                response = client.post("/admin/teams/lsb-varsity-2026/toggle-active")
-
+                response = client.post(f"/admin/teams/{team_id}/toggle-active")
         assert response.status_code == 303
-        assert "/admin/teams" in response.headers["location"]
-        assert "deactivated" in response.headers["location"]
+        assert _count_rows(
+            team_db, "teams", "id = ? AND is_active = 0", (team_id,)
+        ) == 1
 
-        team = _get_team(admin_db, "lsb-varsity-2026")
-        assert team is not None
-        assert team["is_active"] == 0
-
-    def test_toggle_activates_inactive_team(self, admin_db: Path) -> None:
-        """AC-8, AC-9: toggling an inactive team activates it and redirects with 'activated'."""
-        # Insert an inactive team
-        conn = sqlite3.connect(str(admin_db))
-        conn.execute(
-            "INSERT INTO teams (team_id, name, is_owned, source, is_active) "
-            "VALUES ('inactive-team-1', 'Inactive Team', 0, 'gamechanger', 0)"
-        )
+    def test_toggle_active_reactivates_team(self, team_db: Path) -> None:
+        """Toggle on inactive team sets is_active=1."""
+        user_id = _insert_user(team_db, "admin@example.com")
+        token = _insert_session(team_db, user_id)
+        inactive_id = _insert_team(team_db, "Inactive Team")
+        conn = sqlite3.connect(str(team_db))
+        conn.execute("UPDATE teams SET is_active=0 WHERE id=?", (inactive_id,))
         conn.commit()
         conn.close()
 
-        user_id = _insert_user(admin_db, "toggle2@example.com", is_admin=1)
-        token = _insert_session(admin_db, user_id)
-
-        with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db), "DEV_USER_EMAIL": ""}):
+        with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
             with TestClient(
                 app, follow_redirects=False, cookies={"session": token}
             ) as client:
-                response = client.post("/admin/teams/inactive-team-1/toggle-active")
-
+                response = client.post(f"/admin/teams/{inactive_id}/toggle-active")
         assert response.status_code == 303
-        assert "activated" in response.headers["location"]
+        assert _count_rows(
+            team_db, "teams", "id = ? AND is_active = 1", (inactive_id,)
+        ) == 1
 
-        team = _get_team(admin_db, "inactive-team-1")
-        assert team is not None
-        assert team["is_active"] == 1
 
-    def test_toggle_nonexistent_team_returns_404(self, admin_db: Path) -> None:
-        """Toggle on nonexistent team_id returns 404."""
-        user_id = _insert_user(admin_db, "toggle3@example.com", is_admin=1)
-        token = _insert_session(admin_db, user_id)
+# ---------------------------------------------------------------------------
+# AC-16: User-team assignment uses INTEGER team ids
+# ---------------------------------------------------------------------------
 
-        with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db), "DEV_USER_EMAIL": ""}):
+
+class TestUserTeamAssignmentIntegerIds:
+    """User-team assignment form uses INTEGER team ids (AC-16)."""
+
+    def test_edit_user_form_shows_integer_team_id_in_checkbox(
+        self, team_db: Path
+    ) -> None:
+        """GET /admin/users/{id}/edit shows checkboxes with INTEGER team ids."""
+        admin_id = _insert_user(team_db, "admin@example.com")
+        coach_id = _insert_user(team_db, "coach@example.com")
+        token = _insert_session(team_db, admin_id)
+        conn = sqlite3.connect(str(team_db))
+        team_id = conn.execute("SELECT id FROM teams LIMIT 1").fetchone()[0]
+        conn.close()
+
+        with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
             with TestClient(app, cookies={"session": token}) as client:
-                response = client.post("/admin/teams/no-such-team/toggle-active")
-        assert response.status_code == 404
-
-    def test_toggle_non_admin_gets_403(self, admin_db: Path) -> None:
-        """AC-10: non-admin POST gets 403."""
-        user_id = _insert_user(admin_db, "toggle4@example.com", is_admin=0)
-        token = _insert_session(admin_db, user_id)
-
-        with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db), "DEV_USER_EMAIL": ""}):
-            with TestClient(
-                app, follow_redirects=False, cookies={"session": token}
-            ) as client:
-                response = client.post("/admin/teams/lsb-varsity-2026/toggle-active")
-        assert response.status_code == 403
-
-    def test_toggle_unauthenticated_redirects(self, admin_db: Path) -> None:
-        """AC-10: unauthenticated POST redirects to /auth/login."""
-        with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db), "DEV_USER_EMAIL": ""}):
-            with TestClient(app, follow_redirects=False) as client:
-                response = client.post("/admin/teams/lsb-varsity-2026/toggle-active")
-        assert response.status_code == 302
-        assert "/auth/login" in response.headers["location"]
-
-
-# ---------------------------------------------------------------------------
-# Team list -- activate/deactivate buttons (E-042-04 AC-11)
-# ---------------------------------------------------------------------------
-
-
-class TestTeamListToggleButtons:
-    """AC-11: teams list shows Activate/Deactivate buttons per row."""
-
-    def test_active_team_shows_deactivate_button(self, admin_db: Path) -> None:
-        """Active teams show a Deactivate button linking to toggle endpoint."""
-        user_id = _insert_user(admin_db, "togglebtn1@example.com", is_admin=1)
-        token = _insert_session(admin_db, user_id)
-
-        with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db)}):
-            with TestClient(app, cookies={"session": token}) as client:
-                response = client.get("/admin/teams")
-        assert "Deactivate" in response.text
-        assert "/admin/teams/lsb-varsity-2026/toggle-active" in response.text
-
-    def test_inactive_team_shows_activate_button(self, admin_db: Path) -> None:
-        """Inactive teams show an Activate button."""
-        conn = sqlite3.connect(str(admin_db))
-        conn.execute(
-            "INSERT INTO teams (team_id, name, is_owned, source, is_active) "
-            "VALUES ('sleeping-team', 'Sleeping Team', 1, 'gamechanger', 0)"
-        )
-        conn.commit()
-        conn.close()
-
-        user_id = _insert_user(admin_db, "togglebtn2@example.com", is_admin=1)
-        token = _insert_session(admin_db, user_id)
-
-        with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db)}):
-            with TestClient(app, cookies={"session": token}) as client:
-                response = client.get("/admin/teams")
-        assert "Activate" in response.text
-        assert "/admin/teams/sleeping-team/toggle-active" in response.text
-
-
-# ---------------------------------------------------------------------------
-# POST /admin/teams/{team_id}/discover-opponents (E-042-05)
-# ---------------------------------------------------------------------------
-
-
-_DISCOVER_GAMES_RESPONSE = [
-    {"id": "g1", "opponent_team": {"name": "Riverside Tigers"}},
-    {"id": "g2", "opponent_team": {"name": "Jr Bluejays 15U"}},
-    {"id": "g3", "opponent_team": {"name": "Riverside Tigers"}},  # duplicate
-]
-
-
-def _insert_team_with_public_id(db_path: Path, team_id: str, name: str, public_id: str) -> None:
-    """Insert an owned active team with a public_id.
-
-    Args:
-        db_path: Path to the database.
-        team_id: Team primary key.
-        name: Team display name.
-        public_id: GameChanger public_id slug.
-    """
-    conn = sqlite3.connect(str(db_path))
-    conn.execute(
-        "INSERT OR IGNORE INTO teams (team_id, name, is_owned, source, is_active, public_id) "
-        "VALUES (?, ?, 1, 'gamechanger', 1, ?)",
-        (team_id, name, public_id),
-    )
-    conn.commit()
-    conn.close()
-
-
-class TestDiscoverOpponentsRoute:
-    """AC-8 through AC-12: POST /admin/teams/{team_id}/discover-opponents."""
-
-    def test_creates_new_opponent_rows(self, admin_db: Path) -> None:
-        """AC-9: newly discovered opponents are inserted as placeholder rows."""
-        _insert_team_with_public_id(admin_db, "lsb-varsity-pub", "LSB Varsity", "abc123pub")
-        user_id = _insert_user(admin_db, "disc1@example.com", is_admin=1)
-        token = _insert_session(admin_db, user_id)
-
-        with patch(
-            "src.api.routes.admin.discover_opponents",
-            return_value=[
-                DiscoveredOpponent(name="Riverside Tigers"),
-                DiscoveredOpponent(name="Jr Bluejays 15U"),
-            ],
-        ):
-            with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db), "DEV_USER_EMAIL": ""}):
-                with TestClient(app, follow_redirects=False, cookies={"session": token}) as client:
-                    response = client.post("/admin/teams/lsb-varsity-pub/discover-opponents")
-
-        assert response.status_code == 303
-
-        conn = sqlite3.connect(str(admin_db))
-        conn.row_factory = sqlite3.Row
-        rows = conn.execute(
-            "SELECT * FROM teams WHERE source = 'discovered'"
-        ).fetchall()
-        conn.close()
-        names = {r["name"] for r in rows}
-        assert "Riverside Tigers" in names
-        assert "Jr Bluejays 15U" in names
-
-    def test_skips_existing_team_by_name(self, admin_db: Path) -> None:
-        """AC-10: opponents already in DB (by case-insensitive name) are not duplicated."""
-        _insert_team_with_public_id(admin_db, "lsb-varsity-pub2", "LSB Varsity 2", "abc456pub")
-        # Pre-insert one opponent
-        conn = sqlite3.connect(str(admin_db))
-        conn.execute(
-            "INSERT INTO teams (team_id, name, is_owned, source, is_active) "
-            "VALUES ('existing-opp', 'Riverside Tigers', 0, 'gamechanger', 0)"
-        )
-        conn.commit()
-        conn.close()
-
-        user_id = _insert_user(admin_db, "disc2@example.com", is_admin=1)
-        token = _insert_session(admin_db, user_id)
-
-        with patch(
-            "src.api.routes.admin.discover_opponents",
-            return_value=[
-                DiscoveredOpponent(name="Riverside Tigers"),  # already exists
-                DiscoveredOpponent(name="New Opponent FC"),   # new
-            ],
-        ):
-            with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db), "DEV_USER_EMAIL": ""}):
-                with TestClient(app, follow_redirects=False, cookies={"session": token}) as client:
-                    client.post("/admin/teams/lsb-varsity-pub2/discover-opponents")
-
-        conn = sqlite3.connect(str(admin_db))
-        count = conn.execute(
-            "SELECT COUNT(*) FROM teams WHERE LOWER(name) = 'riverside tigers'"
-        ).fetchone()[0]
-        conn.close()
-        assert count == 1  # no duplicate
-
-    def test_redirect_message_shows_correct_count(self, admin_db: Path) -> None:
-        """AC-11: redirect URL contains count of newly added opponents."""
-        _insert_team_with_public_id(admin_db, "lsb-varsity-pub3", "LSB Varsity 3", "abc789pub")
-        user_id = _insert_user(admin_db, "disc3@example.com", is_admin=1)
-        token = _insert_session(admin_db, user_id)
-
-        with patch(
-            "src.api.routes.admin.discover_opponents",
-            return_value=[
-                DiscoveredOpponent(name="Team Alpha"),
-                DiscoveredOpponent(name="Team Beta"),
-            ],
-        ):
-            with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db), "DEV_USER_EMAIL": ""}):
-                with TestClient(app, follow_redirects=False, cookies={"session": token}) as client:
-                    response = client.post("/admin/teams/lsb-varsity-pub3/discover-opponents")
-
-        assert "2" in response.headers["location"]
-        assert "Discovered" in response.headers["location"]
-
-    def test_no_public_id_redirects_with_error(self, admin_db: Path) -> None:
-        """AC-12: team without public_id redirects with an error message."""
-        user_id = _insert_user(admin_db, "disc4@example.com", is_admin=1)
-        token = _insert_session(admin_db, user_id)
-
-        with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db), "DEV_USER_EMAIL": ""}):
-            with TestClient(app, follow_redirects=False, cookies={"session": token}) as client:
-                # lsb-varsity-2026 has no public_id in seed data
-                response = client.post("/admin/teams/lsb-varsity-2026/discover-opponents")
-
-        assert response.status_code == 303
-        assert "error" in response.headers["location"]
-        assert "no+public+ID" in response.headers["location"] or "public+ID" in response.headers["location"]
-
-    def test_non_admin_gets_403(self, admin_db: Path) -> None:
-        """AC-13: non-admin POST gets 403."""
-        _insert_team_with_public_id(admin_db, "lsb-varsity-pub4", "LSB Varsity 4", "abcdefpub")
-        user_id = _insert_user(admin_db, "disc5@example.com", is_admin=0)
-        token = _insert_session(admin_db, user_id)
-
-        with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db), "DEV_USER_EMAIL": ""}):
-            with TestClient(app, follow_redirects=False, cookies={"session": token}) as client:
-                response = client.post("/admin/teams/lsb-varsity-pub4/discover-opponents")
-
-        assert response.status_code == 403
-
-    def test_unauthenticated_redirects_to_login(self, admin_db: Path) -> None:
-        """AC-13: unauthenticated POST redirects to /auth/login."""
-        with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db), "DEV_USER_EMAIL": ""}):
-            with TestClient(app, follow_redirects=False) as client:
-                response = client.post("/admin/teams/lsb-varsity-2026/discover-opponents")
-
-        assert response.status_code == 302
-        assert "/auth/login" in response.headers["location"]
-
-    def test_api_error_redirects_with_error_message(self, admin_db: Path) -> None:
-        """API error redirects with an appropriate error flash message."""
-        _insert_team_with_public_id(admin_db, "lsb-varsity-pub5", "LSB Varsity 5", "abcxyzpub")
-        user_id = _insert_user(admin_db, "disc6@example.com", is_admin=1)
-        token = _insert_session(admin_db, user_id)
-
-        with patch(
-            "src.api.routes.admin.discover_opponents",
-            side_effect=GameChangerAPIError("timeout"),
-        ):
-            with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db), "DEV_USER_EMAIL": ""}):
-                with TestClient(app, follow_redirects=False, cookies={"session": token}) as client:
-                    response = client.post("/admin/teams/lsb-varsity-pub5/discover-opponents")
-
-        assert response.status_code == 303
-        assert "error" in response.headers["location"]
-
-
-# ---------------------------------------------------------------------------
-# Discover Opponents button in team list (E-042-05 AC-7)
-# ---------------------------------------------------------------------------
-
-
-class TestDiscoverOpponentsButton:
-    """AC-7: Discover Opponents button appears for active teams with public_id."""
-
-    def test_discover_button_shown_for_active_team_with_public_id(self, admin_db: Path) -> None:
-        """Active team with public_id gets a Discover Opponents button."""
-        _insert_team_with_public_id(admin_db, "lsb-btn-test", "LSB Button Test", "btnpub123")
-        user_id = _insert_user(admin_db, "disc7@example.com", is_admin=1)
-        token = _insert_session(admin_db, user_id)
-
-        with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db)}):
-            with TestClient(app, cookies={"session": token}) as client:
-                response = client.get("/admin/teams")
-
-        assert "discover-opponents" in response.text
-        assert "Discover Opponents" in response.text
-
-    def test_discover_button_hidden_for_team_without_public_id(self, admin_db: Path) -> None:
-        """Active team without public_id does NOT show Discover Opponents button."""
-        user_id = _insert_user(admin_db, "disc8@example.com", is_admin=1)
-        token = _insert_session(admin_db, user_id)
-
-        # lsb-varsity-2026 from seed has no public_id
-        with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db)}):
-            with TestClient(app, cookies={"session": token}) as client:
-                response = client.get("/admin/teams")
-
-        # Button should NOT appear for the seed teams (no public_id)
-        assert "discover-opponents" not in response.text
-
-
-# ---------------------------------------------------------------------------
-# bulk_create_opponents -- long-name collision safety (Fix P1-2)
-# ---------------------------------------------------------------------------
-
-
-class TestBulkCreateOpponentsLongName:
-    """Verify team_id generation is collision-safe for very long opponent names."""
-
-    def _call_bulk_create(self, admin_db: Path, names: list[str]) -> int:
-        from src.api.db import bulk_create_opponents
-
-        with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db)}):
-            return bulk_create_opponents(names)
-
-    def test_long_name_team_id_within_50_chars(self, admin_db: Path) -> None:
-        """team_id generated for a 60-char name must be <= 50 chars."""
-        long_name = "A" * 60 + " Baseball Club"
-        count = self._call_bulk_create(admin_db, [long_name])
-        assert count == 1
-
-        conn = sqlite3.connect(str(admin_db))
-        row = conn.execute(
-            "SELECT team_id FROM teams WHERE name = ?", (long_name,)
-        ).fetchone()
-        conn.close()
-        assert row is not None
-        assert len(row[0]) <= 50
-
-    def test_long_name_suffix_preserved(self, admin_db: Path) -> None:
-        """The 6-char hex suffix must not be truncated for long names."""
-        long_name = "B" * 70 + " Sports Academy"
-        count = self._call_bulk_create(admin_db, [long_name])
-        assert count == 1
-
-        conn = sqlite3.connect(str(admin_db))
-        row = conn.execute(
-            "SELECT team_id FROM teams WHERE name = ?", (long_name,)
-        ).fetchone()
-        conn.close()
-        assert row is not None
-        team_id = row[0]
-        # Suffix is the last 6 chars after the final "-"
-        parts = team_id.rsplit("-", 1)
-        assert len(parts) == 2
-        suffix = parts[1]
-        assert len(suffix) == 6
-        assert all(c in "0123456789abcdef" for c in suffix)
-
-    def test_two_long_names_with_same_prefix_dont_collide(self, admin_db: Path) -> None:
-        """Two names that produce the same slug prefix get distinct team_ids."""
-        # Both names start with 50+ identical chars; only differ at the end
-        prefix = "C" * 55
-        name_a = prefix + " Tigers"
-        name_b = prefix + " Eagles"
-        count = self._call_bulk_create(admin_db, [name_a, name_b])
-        assert count == 2
-
-        conn = sqlite3.connect(str(admin_db))
-        rows = conn.execute(
-            "SELECT team_id FROM teams WHERE name IN (?, ?)", (name_a, name_b)
-        ).fetchall()
-        conn.close()
-        ids = [r[0] for r in rows]
-        assert len(ids) == 2
-        assert ids[0] != ids[1]
+                response = client.get(f"/admin/users/{coach_id}/edit")
+        # The checkbox value should be the integer id (e.g., "1"), not a text slug
+        assert f'value="{team_id}"' in response.text

@@ -1,7 +1,8 @@
 """Admin CRUD routes for the baseball-crawl application.
 
 Provides server-rendered HTML views for managing user accounts and team
-assignments.  All routes require an active session with ``is_admin=1``.
+assignments.  All routes require an active session matching ADMIN_EMAIL
+(or any authenticated user when ADMIN_EMAIL is unset in dev mode).
 
 Routes:
     GET  /admin/users                                    -- List all users
@@ -9,25 +10,31 @@ Routes:
     GET  /admin/users/{user_id}/edit                     -- Edit user form
     POST /admin/users/{user_id}/edit                     -- Update user
     POST /admin/users/{user_id}/delete                   -- Delete user (cascade)
-    GET  /admin/teams                                    -- List all teams with add-team form
-    POST /admin/teams                                    -- Add team via GameChanger URL or public_id
-    GET  /admin/teams/{team_id}/edit                     -- Edit team form
-    POST /admin/teams/{team_id}/edit                     -- Update team metadata
-    POST /admin/teams/{team_id}/toggle-active            -- Toggle team is_active flag
+    GET  /admin/teams                                    -- Flat team list + add-team Phase 1 form
+    POST /admin/teams                                    -- Phase 1: resolve URL, redirect to confirm
+    GET  /admin/teams/confirm                            -- Phase 2: confirm page
+    POST /admin/teams/confirm                            -- Phase 2: create team
+    GET  /admin/teams/{id}/edit                          -- Edit team form (INTEGER id)
+    POST /admin/teams/{id}/edit                          -- Update team metadata (INTEGER id)
+    POST /admin/teams/{id}/toggle-active                 -- Toggle team is_active flag (INTEGER id)
+    POST /admin/teams/{id}/discover-opponents            -- Discover opponent placeholders (INTEGER id)
     GET  /admin/opponents                                -- Opponent link states listing
-    GET  /admin/opponents/{id}/connect                   -- URL-paste form
-    GET  /admin/opponents/{id}/connect/confirm           -- Confirmation page (fetches team info)
-    POST /admin/opponents/{id}/connect                   -- Save manual link
-    POST /admin/opponents/{id}/disconnect                -- Remove manual link
+    GET  /admin/opponents/{link_id}/connect              -- URL-paste form
+    GET  /admin/opponents/{link_id}/connect/confirm      -- Confirmation page (fetches team info)
+    POST /admin/opponents/{link_id}/connect              -- Save manual link
+    POST /admin/opponents/{link_id}/disconnect           -- Remove manual link
 """
 
 from __future__ import annotations
 
 import logging
+import os
+import re
 import sqlite3
 from contextlib import closing
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote_plus, urlencode
 
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -37,7 +44,6 @@ from starlette.responses import Response
 
 from src.api.db import (
     bulk_create_opponents,
-    count_all_opponent_links,
     disconnect_opponent_link,
     get_connection,
     get_duplicate_opponent_name,
@@ -45,13 +51,12 @@ from src.api.db import (
     get_opponent_link_count_for_team,
     get_opponent_link_counts,
     get_opponent_links,
-    is_owned_team_public_id,
+    is_member_team_public_id,
     save_manual_opponent_link,
 )
 from src.gamechanger.bridge import (
     BridgeForbiddenError,
     resolve_public_id_to_uuid,
-    resolve_uuid_to_public_id,
 )
 from src.gamechanger.exceptions import ConfigurationError, CredentialExpiredError
 from src.gamechanger.team_resolver import (
@@ -60,7 +65,7 @@ from src.gamechanger.team_resolver import (
     discover_opponents,
     resolve_team,
 )
-from src.gamechanger.url_parser import TeamIdResult, parse_team_url
+from src.gamechanger.url_parser import parse_team_url
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +73,13 @@ _TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
 templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
 
 router = APIRouter(prefix="/admin")
+
+# Valid classification values (must match schema CHECK constraint)
+_VALID_CLASSIFICATIONS = {
+    "varsity", "jv", "freshman", "reserve",
+    "8U", "9U", "10U", "11U", "12U", "13U", "14U",
+    "legion",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -99,6 +111,10 @@ async def _require_admin(request: Request) -> dict[str, Any] | Response:
     user dict for admins, a redirect for unauthenticated requests, or a 403
     page for non-admin authenticated users.
 
+    Admin access is controlled by the ``ADMIN_EMAIL`` environment variable.
+    If ``ADMIN_EMAIL`` is set, only that email address is treated as admin.
+    If ``ADMIN_EMAIL`` is unset (dev mode), all authenticated users are admin.
+
     Args:
         request: The incoming HTTP request.
 
@@ -108,13 +124,14 @@ async def _require_admin(request: Request) -> dict[str, Any] | Response:
     user = getattr(request.state, "user", None)
     if not user:
         return RedirectResponse(url="/auth/login", status_code=302)
-    if not user.get("is_admin"):
+    admin_email = os.environ.get("ADMIN_EMAIL", "")
+    if admin_email and user.get("email") != admin_email:
         return _forbidden_response(request)
     return user
 
 
 # ---------------------------------------------------------------------------
-# DB helpers (synchronous -- called via run_in_threadpool)
+# User management DB helpers (synchronous -- called via run_in_threadpool)
 # ---------------------------------------------------------------------------
 
 
@@ -122,7 +139,7 @@ def _get_all_users() -> list[dict[str, Any]]:
     """Fetch all users with their team assignments.
 
     Returns:
-        List of user dicts with keys: user_id, email, display_name, is_admin,
+        List of user dicts with keys: id, email,
         teams (comma-separated team names).
     """
     with closing(get_connection()) as conn:
@@ -130,7 +147,7 @@ def _get_all_users() -> list[dict[str, Any]]:
         users = [
             dict(row)
             for row in conn.execute(
-                "SELECT user_id, email, display_name, is_admin FROM users ORDER BY display_name"
+                "SELECT id, email FROM users ORDER BY email"
             ).fetchall()
         ]
         for user in users:
@@ -138,34 +155,34 @@ def _get_all_users() -> list[dict[str, Any]]:
                 """
                 SELECT t.name
                 FROM user_team_access uta
-                JOIN teams t ON t.team_id = uta.team_id
+                JOIN teams t ON t.id = uta.team_id
                 WHERE uta.user_id = ?
                 ORDER BY t.name
                 """,
-                (user["user_id"],),
+                (user["id"],),
             ).fetchall()
             user["teams"] = ", ".join(row["name"] for row in rows)
     return users
 
 
-def _get_owned_teams() -> list[dict[str, Any]]:
-    """Return all is_owned=1 teams for the checkbox list.
+def _get_available_teams() -> list[dict[str, Any]]:
+    """Return member teams for user assignment checkboxes.
 
     Returns:
-        List of dicts with keys: team_id, name.
+        List of dicts with keys: id (INTEGER), name.
     """
     with closing(get_connection()) as conn:
         conn.row_factory = sqlite3.Row
         return [
             dict(row)
             for row in conn.execute(
-                "SELECT team_id, name FROM teams WHERE is_owned = 1 ORDER BY name"
+                "SELECT id, name FROM teams WHERE membership_type = 'member' ORDER BY name"
             ).fetchall()
         ]
 
 
 def _get_user_by_id(user_id: int) -> dict[str, Any] | None:
-    """Fetch a single user row by user_id.
+    """Fetch a single user row by id.
 
     Args:
         user_id: The user's primary key.
@@ -176,20 +193,20 @@ def _get_user_by_id(user_id: int) -> dict[str, Any] | None:
     with closing(get_connection()) as conn:
         conn.row_factory = sqlite3.Row
         row = conn.execute(
-            "SELECT user_id, email, display_name, is_admin FROM users WHERE user_id = ?",
+            "SELECT id, email FROM users WHERE id = ?",
             (user_id,),
         ).fetchone()
         return dict(row) if row else None
 
 
-def _get_user_team_ids(user_id: int) -> list[str]:
-    """Return the list of team_ids assigned to a user.
+def _get_user_team_ids(user_id: int) -> list[int]:
+    """Return the list of INTEGER team ids assigned to a user.
 
     Args:
         user_id: The user's primary key.
 
     Returns:
-        List of team_id strings.
+        List of INTEGER team ids.
     """
     with closing(get_connection()) as conn:
         rows = conn.execute(
@@ -200,17 +217,13 @@ def _get_user_team_ids(user_id: int) -> list[str]:
 
 def _create_user(
     email: str,
-    display_name: str,
-    is_admin: int,
-    team_ids: list[str],
+    team_ids: list[int],
 ) -> str | None:
     """Insert a new user and their team assignments.
 
     Args:
         email: Normalized (lowercase) email address.
-        display_name: Display name.
-        is_admin: 1 for admin, 0 otherwise.
-        team_ids: List of team_id strings to assign.
+        team_ids: List of INTEGER team ids to assign.
 
     Returns:
         None on success, or an error message string on failure.
@@ -219,8 +232,8 @@ def _create_user(
         with closing(get_connection()) as conn:
             try:
                 cursor = conn.execute(
-                    "INSERT INTO users (email, display_name, is_admin) VALUES (?, ?, ?)",
-                    (email, display_name, is_admin),
+                    "INSERT INTO users (email) VALUES (?)",
+                    (email,),
                 )
                 new_user_id = cursor.lastrowid
             except sqlite3.IntegrityError:
@@ -240,25 +253,15 @@ def _create_user(
 
 def _update_user(
     user_id: int,
-    display_name: str,
-    is_admin: int,
-    team_ids: list[str],
+    team_ids: list[int],
 ) -> None:
-    """Update a user's name, admin status, and team assignments.
-
-    Replaces all existing team assignments with the provided list.
+    """Replace a user's team assignments with the provided list.
 
     Args:
         user_id: The user's primary key.
-        display_name: New display name.
-        is_admin: 1 for admin, 0 otherwise.
-        team_ids: Complete list of team_id strings (replaces existing).
+        team_ids: Complete list of INTEGER team ids (replaces existing).
     """
     with closing(get_connection()) as conn:
-        conn.execute(
-            "UPDATE users SET display_name = ?, is_admin = ? WHERE user_id = ?",
-            (display_name, is_admin, user_id),
-        )
         conn.execute(
             "DELETE FROM user_team_access WHERE user_id = ?", (user_id,)
         )
@@ -284,12 +287,263 @@ def _delete_user(user_id: int) -> None:
         conn.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
         conn.execute("DELETE FROM magic_link_tokens WHERE user_id = ?", (user_id,))
         conn.execute("DELETE FROM passkey_credentials WHERE user_id = ?", (user_id,))
-        conn.execute("DELETE FROM users WHERE user_id = ?", (user_id,))
+        conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
         conn.commit()
 
 
 # ---------------------------------------------------------------------------
-# Routes
+# Team management DB helpers (synchronous -- called via run_in_threadpool)
+# ---------------------------------------------------------------------------
+
+
+def _get_all_teams_flat() -> list[dict[str, Any]]:
+    """Return all teams in a flat list with program name and opponent count.
+
+    Returns:
+        List of dicts with keys: id, name, program_id, membership_type,
+        classification, is_active, public_id, gc_uuid, last_synced,
+        program_name (nullable), opponent_count.
+    """
+    with closing(get_connection()) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            """
+            SELECT
+                t.id,
+                t.name,
+                t.program_id,
+                t.membership_type,
+                t.classification,
+                t.is_active,
+                t.public_id,
+                t.gc_uuid,
+                t.last_synced,
+                p.name AS program_name,
+                (
+                    SELECT COUNT(*)
+                    FROM opponent_links ol
+                    WHERE ol.our_team_id = t.id
+                ) AS opponent_count
+            FROM teams t
+            LEFT JOIN programs p ON t.program_id = p.program_id
+            ORDER BY t.name
+            """
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def _get_programs() -> list[dict[str, Any]]:
+    """Return all programs for dropdowns.
+
+    Returns:
+        List of dicts with keys: program_id, name.
+    """
+    with closing(get_connection()) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            "SELECT program_id, name FROM programs ORDER BY name"
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def _get_team_by_integer_id(team_id: int) -> dict[str, Any] | None:
+    """Fetch a single team row by INTEGER id.
+
+    Args:
+        team_id: The team's INTEGER primary key.
+
+    Returns:
+        Team dict with all columns plus program_name, or None if not found.
+    """
+    with closing(get_connection()) as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            """
+            SELECT t.id, t.name, t.program_id, t.membership_type, t.classification,
+                   t.is_active, t.public_id, t.gc_uuid, t.last_synced,
+                   p.name AS program_name
+            FROM teams t
+            LEFT JOIN programs p ON t.program_id = p.program_id
+            WHERE t.id = ?
+            """,
+            (team_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def _update_team_integer(
+    team_id: int,
+    name: str,
+    program_id: str | None,
+    classification: str | None,
+    membership_type: str,
+) -> None:
+    """Update a team's name, program, classification, and membership_type.
+
+    Args:
+        team_id: The team's INTEGER primary key.
+        name: New team name.
+        program_id: Program slug or None.
+        classification: Classification string or None.
+        membership_type: 'member' or 'tracked'.
+    """
+    with closing(get_connection()) as conn:
+        conn.execute(
+            """
+            UPDATE teams
+            SET name = ?, program_id = ?, classification = ?, membership_type = ?
+            WHERE id = ?
+            """,
+            (name, program_id, classification, membership_type, team_id),
+        )
+        conn.commit()
+
+
+def _toggle_team_active_integer(team_id: int) -> int:
+    """Toggle a team's is_active flag between 0 and 1.
+
+    Args:
+        team_id: The team's INTEGER primary key.
+
+    Returns:
+        The new is_active value after toggling (0 or 1).
+    """
+    with closing(get_connection()) as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT is_active FROM teams WHERE id = ?", (team_id,)
+        ).fetchone()
+        if row is None:
+            return 0
+        new_value = 0 if row["is_active"] else 1
+        conn.execute(
+            "UPDATE teams SET is_active = ? WHERE id = ?", (new_value, team_id)
+        )
+        conn.commit()
+        return new_value
+
+
+def _check_duplicate_new(public_id: str, gc_uuid: str | None) -> bool:
+    """Return True if public_id or gc_uuid already exists in the teams table.
+
+    Args:
+        public_id: The GC public_id slug to check.
+        gc_uuid: The GC UUID to check (may be None).
+
+    Returns:
+        True if a duplicate exists.
+    """
+    with closing(get_connection()) as conn:
+        row = conn.execute(
+            "SELECT 1 FROM teams WHERE public_id = ?", (public_id,)
+        ).fetchone()
+        if row:
+            return True
+        if gc_uuid:
+            row = conn.execute(
+                "SELECT 1 FROM teams WHERE gc_uuid = ?", (gc_uuid,)
+            ).fetchone()
+            if row:
+                return True
+    return False
+
+
+def _insert_team_new(
+    name: str,
+    public_id: str,
+    gc_uuid: str | None,
+    membership_type: str,
+    program_id: str | None,
+    classification: str | None,
+) -> None:
+    """Insert a new team row with INTEGER PK auto-assigned.
+
+    Args:
+        name: Team display name.
+        public_id: GC public_id slug.
+        gc_uuid: GC UUID (None if bridge returned 403).
+        membership_type: 'member' or 'tracked'.
+        program_id: Program slug or None.
+        classification: Classification string or None.
+    """
+    with closing(get_connection()) as conn:
+        conn.execute(
+            """
+            INSERT INTO teams
+                (name, public_id, gc_uuid, membership_type, program_id,
+                 classification, source, is_active)
+            VALUES (?, ?, ?, ?, ?, ?, 'gamechanger', 1)
+            """,
+            (name, public_id, gc_uuid, membership_type, program_id, classification),
+        )
+        conn.commit()
+
+
+# ---------------------------------------------------------------------------
+# Inference helpers for the add-team confirm page
+# ---------------------------------------------------------------------------
+
+
+def _infer_classification(name: str) -> str | None:
+    """Infer team classification from name keywords.
+
+    Checks HS division keywords (varsity, jv, freshman, reserve, legion)
+    and USSSA age patterns (8U-14U).
+
+    Args:
+        name: Team display name from GameChanger API.
+
+    Returns:
+        Classification string or None if no match.
+    """
+    name_lower = name.lower()
+    if "junior varsity" in name_lower or " jv " in name_lower or name_lower.endswith(" jv"):
+        return "jv"
+    if "varsity" in name_lower:
+        return "varsity"
+    if "freshman" in name_lower or "frosh" in name_lower:
+        return "freshman"
+    if "reserve" in name_lower:
+        return "reserve"
+    if "legion" in name_lower:
+        return "legion"
+    # Age divisions: match patterns like "14U", "13u", "8U"
+    m = re.search(r"\b(\d{1,2})[uU]\b", name)
+    if m:
+        ag = m.group(1) + "U"
+        if ag in {"8U", "9U", "10U", "11U", "12U", "13U", "14U"}:
+            return ag
+    return None
+
+
+def _infer_program_id(
+    team_name: str, programs: list[dict[str, Any]]
+) -> str | None:
+    """Find best matching program by substring (longest match wins).
+
+    Matches program name as case-insensitive substring of team name.
+    If multiple programs match, the longest program name wins.
+
+    Args:
+        team_name: Team display name from GameChanger API.
+        programs: List of program dicts with program_id and name keys.
+
+    Returns:
+        program_id string or None if no match.
+    """
+    best_match: str | None = None
+    best_len = 0
+    name_lower = team_name.lower()
+    for prog in programs:
+        prog_name_lower = prog["name"].lower()
+        if prog_name_lower in name_lower and len(prog_name_lower) > best_len:
+            best_match = prog["program_id"]
+            best_len = len(prog_name_lower)
+    return best_match
+
+
+# ---------------------------------------------------------------------------
+# User management routes
 # ---------------------------------------------------------------------------
 
 
@@ -314,7 +568,7 @@ async def list_users(request: Request) -> Response:
     error = request.query_params.get("error", "")
 
     users, teams = await run_in_threadpool(_get_all_users), await run_in_threadpool(
-        _get_owned_teams
+        _get_available_teams
     )
 
     return templates.TemplateResponse(
@@ -334,8 +588,6 @@ async def list_users(request: Request) -> Response:
 async def create_user(
     request: Request,
     email: str = Form(...),
-    display_name: str = Form(...),
-    is_admin: str = Form(default=""),
     team_ids: list[str] = Form(default=[]),
 ) -> Response:
     """Create a new user with team assignments.
@@ -346,9 +598,7 @@ async def create_user(
     Args:
         request: The incoming HTTP request.
         email: User email address (required).
-        display_name: Display name (required).
-        is_admin: Checkbox value ("on" when checked, empty otherwise).
-        team_ids: List of selected team_id values from checkboxes.
+        team_ids: List of INTEGER team id values from checkboxes (as strings).
 
     Returns:
         Redirect on success, or HTMLResponse with error on failure.
@@ -358,16 +608,14 @@ async def create_user(
         return guard
 
     normalized_email = email.strip().lower()
-    is_admin_int = 1 if is_admin else 0
+    int_team_ids = [int(tid) for tid in team_ids if tid.strip().isdigit()]
 
-    error = await run_in_threadpool(
-        _create_user, normalized_email, display_name.strip(), is_admin_int, team_ids
-    )
+    error = await run_in_threadpool(_create_user, normalized_email, int_team_ids)
 
     if error:
         users, teams = await run_in_threadpool(
             _get_all_users
-        ), await run_in_threadpool(_get_owned_teams)
+        ), await run_in_threadpool(_get_available_teams)
         return templates.TemplateResponse(
             request,
             "admin/users.html",
@@ -378,7 +626,6 @@ async def create_user(
                 "error": error,
                 "admin_user": guard,
                 "form_email": normalized_email,
-                "form_display_name": display_name.strip(),
             },
         )
 
@@ -404,7 +651,7 @@ async def edit_user_form(request: Request, user_id: int) -> Response:
 
     user, teams = await run_in_threadpool(
         _get_user_by_id, user_id
-    ), await run_in_threadpool(_get_owned_teams)
+    ), await run_in_threadpool(_get_available_teams)
 
     if not user:
         return HTMLResponse(content="User not found", status_code=404)
@@ -427,18 +674,14 @@ async def edit_user_form(request: Request, user_id: int) -> Response:
 async def update_user(
     request: Request,
     user_id: int,
-    display_name: str = Form(...),
-    is_admin: str = Form(default=""),
     team_ids: list[str] = Form(default=[]),
 ) -> Response:
-    """Update a user's display name, admin status, and team assignments.
+    """Update a user's team assignments.
 
     Args:
         request: The incoming HTTP request.
         user_id: The user's primary key from the URL path.
-        display_name: Updated display name.
-        is_admin: Checkbox value ("on" when checked, empty otherwise).
-        team_ids: Complete list of selected team_id values.
+        team_ids: Complete list of INTEGER team id values (replaces existing).
 
     Returns:
         Redirect on success, or 404/auth response.
@@ -451,10 +694,8 @@ async def update_user(
     if not user:
         return HTMLResponse(content="User not found", status_code=404)
 
-    is_admin_int = 1 if is_admin else 0
-    await run_in_threadpool(
-        _update_user, user_id, display_name.strip(), is_admin_int, team_ids
-    )
+    int_team_ids = [int(tid) for tid in team_ids if tid.strip().isdigit()]
+    await run_in_threadpool(_update_user, user_id, int_team_ids)
 
     return RedirectResponse(
         url="/admin/users?msg=User+updated+successfully", status_code=303
@@ -478,7 +719,7 @@ async def delete_user(request: Request, user_id: int) -> Response:
     if isinstance(guard, Response):
         return guard
 
-    if guard["user_id"] == user_id:
+    if guard["id"] == user_id:
         return RedirectResponse(
             url="/admin/users?error=You+cannot+delete+your+own+account",
             status_code=303,
@@ -496,234 +737,48 @@ async def delete_user(request: Request, user_id: int) -> Response:
 
 
 # ---------------------------------------------------------------------------
-# Team management DB helpers (synchronous -- called via run_in_threadpool)
-# ---------------------------------------------------------------------------
-
-
-def _get_all_teams_split() -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Return teams split into owned (Lincoln) and opponent lists.
-
-    Returns:
-        Tuple of (owned_teams, opponent_teams), each a list of dicts with keys:
-        team_id, name, level, is_active, public_id, last_synced.
-    """
-    with closing(get_connection()) as conn:
-        conn.row_factory = sqlite3.Row
-        owned_rows = conn.execute(
-            "SELECT team_id, name, level, is_owned, is_active, public_id, last_synced "
-            "FROM teams WHERE is_owned = 1 ORDER BY name"
-        ).fetchall()
-        opponent_rows = conn.execute(
-            "SELECT team_id, name, level, is_owned, is_active, public_id, last_synced "
-            "FROM teams WHERE is_owned = 0 ORDER BY name"
-        ).fetchall()
-    return [dict(r) for r in owned_rows], [dict(r) for r in opponent_rows]
-
-
-def _find_discovered_placeholder(name: str) -> dict[str, Any] | None:
-    """Look up an existing team row that is a discovered placeholder matching the given name.
-
-    A placeholder is a row where ``source='discovered'`` and ``public_id IS NULL``.
-    Matching is case-insensitive on the ``name`` column.
-
-    Args:
-        name: Team name to match (case-insensitive).
-
-    Returns:
-        Team dict (team_id, name, ...) if a placeholder exists, else None.
-    """
-    with closing(get_connection()) as conn:
-        conn.row_factory = sqlite3.Row
-        row = conn.execute(
-            "SELECT team_id, name, source FROM teams "
-            "WHERE LOWER(name) = LOWER(?) AND source = 'discovered' AND public_id IS NULL",
-            (name,),
-        ).fetchone()
-    return dict(row) if row else None
-
-
-def _team_id_exists(team_id: str) -> bool:
-    """Check whether a team with the given team_id already exists.
-
-    Args:
-        team_id: The team_id to look up.
-
-    Returns:
-        True if a row exists, False otherwise.
-    """
-    with closing(get_connection()) as conn:
-        row = conn.execute(
-            "SELECT 1 FROM teams WHERE team_id = ?", (team_id,)
-        ).fetchone()
-    return row is not None
-
-
-def _public_id_exists(public_id: str) -> bool:
-    """Check whether any team row has the given public_id in the public_id column.
-
-    Discovered placeholders have ``public_id IS NULL`` so they are never matched.
-
-    Args:
-        public_id: The public_id slug to look up.
-
-    Returns:
-        True if any team row has this public_id, False otherwise.
-    """
-    with closing(get_connection()) as conn:
-        row = conn.execute(
-            "SELECT 1 FROM teams WHERE public_id = ?", (public_id,)
-        ).fetchone()
-    return row is not None
-
-
-def _check_team_duplicate(team_id: str, public_id: str) -> bool:
-    """Return True if team_id or public_id already exists as a non-placeholder.
-
-    For owned teams team_id is a UUID and public_id is a slug, so both columns
-    are checked.  For non-owned teams team_id == public_id and the first check
-    is sufficient.
-
-    Args:
-        team_id: The resolved team primary key (UUID for owned, slug for non-owned).
-        public_id: The public_id slug.
-
-    Returns:
-        True if a non-placeholder match is found in either column.
-    """
-    if _team_id_exists(team_id) and not _team_is_discovered_placeholder(team_id):
-        return True
-    if team_id != public_id:
-        return _public_id_exists(public_id)
-    return False
-
-
-def _resolve_team_ids(id_result: TeamIdResult, is_owned: int) -> tuple[str, str]:
-    """Resolve the final (team_id, public_id) pair from parsed input and team type.
-
-    Non-owned teams: returns (slug, slug) -- no bridge calls needed.
-    Owned + UUID input: calls the forward bridge to get public_id.
-    Owned + public_id input: calls the reverse bridge to get UUID.
-
-    Args:
-        id_result: Parsed TeamIdResult from parse_team_url().
-        is_owned: 1 for owned (Lincoln) teams, 0 for tracked opponents.
-
-    Returns:
-        Tuple of (team_id, public_id_slug).
-
-    Raises:
-        BridgeForbiddenError: If the bridge API returns 403.
-        CredentialExpiredError: If authentication fails.
-        ConfigurationError: If GC credentials are not configured in .env.
-    """
-    if not is_owned:
-        # Non-owned: public_id slug doubles as team_id (UUID case rejected by caller)
-        return id_result.value, id_result.value
-    if id_result.is_uuid:
-        # Owned + UUID input: resolve UUID -> public_id via forward bridge
-        slug = resolve_uuid_to_public_id(id_result.value)
-        return id_result.value, slug
-    # Owned + public_id input: resolve public_id -> UUID via reverse bridge
-    team_uuid = resolve_public_id_to_uuid(id_result.value)
-    return team_uuid, id_result.value
-
-
-def _team_is_discovered_placeholder(team_id: str) -> bool:
-    """Return True if the team with team_id is a discovered placeholder (not yet a real add).
-
-    A placeholder has ``source='discovered'`` and ``public_id IS NULL``.
-
-    Args:
-        team_id: The team_id to check.
-
-    Returns:
-        True if the team is a discovered placeholder, False otherwise.
-    """
-    with closing(get_connection()) as conn:
-        row = conn.execute(
-            "SELECT 1 FROM teams WHERE team_id = ? AND source = 'discovered' AND public_id IS NULL",
-            (team_id,),
-        ).fetchone()
-    return row is not None
-
-
-def _upgrade_placeholder_team(
-    old_team_id: str,
-    new_team_id: str,
-    name: str,
-    public_id: str,
-    level: str | None,
-    is_owned: int,
-) -> None:
-    """Upgrade a discovered placeholder team row with resolved data.
-
-    Updates team_id, public_id, name, level, is_owned, source, is_active on the
-    matching placeholder row.
-
-    Args:
-        old_team_id: The existing placeholder's team_id to update.
-        new_team_id: The resolved team_id (UUID for owned teams, public_id slug for non-owned).
-        name: Team name from the API.
-        public_id: The GameChanger public_id slug.
-        level: Level string or None.
-        is_owned: 1 for owned, 0 for tracked.
-    """
-    with closing(get_connection()) as conn:
-        conn.execute(
-            """
-            UPDATE teams
-            SET team_id   = ?,
-                name      = ?,
-                public_id = ?,
-                level     = ?,
-                is_owned  = ?,
-                source    = 'gamechanger',
-                is_active = 1
-            WHERE team_id = ?
-            """,
-            (new_team_id, name, public_id, level or None, is_owned, old_team_id),
-        )
-        conn.commit()
-
-
-def _insert_team(
-    team_id: str,
-    name: str,
-    public_id: str,
-    level: str | None,
-    is_owned: int,
-) -> None:
-    """Insert a new team row.
-
-    Args:
-        team_id: Primary key (UUID for owned teams; equals public_id for non-owned teams).
-        name: Team name from the API.
-        public_id: The GameChanger public_id slug.
-        level: Level string or None.
-        is_owned: 1 for owned, 0 for tracked.
-    """
-    with closing(get_connection()) as conn:
-        conn.execute(
-            """
-            INSERT INTO teams (team_id, name, public_id, level, is_owned, source, is_active)
-            VALUES (?, ?, ?, ?, ?, 'gamechanger', 1)
-            """,
-            (team_id, name, public_id, level or None, is_owned),
-        )
-        conn.commit()
-
-
-# ---------------------------------------------------------------------------
 # Team management routes
 # ---------------------------------------------------------------------------
+
+
+async def _render_teams_error(
+    request: Request,
+    guard: dict[str, Any],
+    error: str,
+    form_url_input: str,
+) -> Response:
+    """Re-render the teams page with a Phase 1 form error.
+
+    Args:
+        request: The incoming HTTP request.
+        guard: Admin user dict from _require_admin.
+        error: Error message to display.
+        form_url_input: The submitted URL/public_id value to repopulate.
+
+    Returns:
+        HTMLResponse with the teams page and error banner.
+    """
+    teams = await run_in_threadpool(_get_all_teams_flat)
+    return templates.TemplateResponse(
+        request,
+        "admin/teams.html",
+        {
+            "teams": teams,
+            "msg": "",
+            "error": error,
+            "admin_user": guard,
+            "form_url_input": form_url_input,
+        },
+    )
 
 
 @router.get("/teams", response_model=None)
 async def list_teams(request: Request) -> Response:
     """Render the team management page.
 
-    Requires admin session.  Shows Lincoln-owned teams and tracked opponents
-    in separate tables, plus an Add Team form.
+    Requires admin session.  Shows all teams in a flat table with program,
+    division, membership badge, and opponent count columns.  Includes a
+    Phase 1 add-team form (URL input only).
 
     Args:
         request: The incoming HTTP request.
@@ -738,16 +793,13 @@ async def list_teams(request: Request) -> Response:
     msg = request.query_params.get("msg", "")
     error = request.query_params.get("error", "")
 
-    owned_teams, opponent_teams = await run_in_threadpool(_get_all_teams_split)
-    total_opponent_links = await run_in_threadpool(count_all_opponent_links)
+    teams = await run_in_threadpool(_get_all_teams_flat)
 
     return templates.TemplateResponse(
         request,
         "admin/teams.html",
         {
-            "owned_teams": owned_teams,
-            "opponent_teams": opponent_teams,
-            "total_opponent_links": total_opponent_links,
+            "teams": teams,
             "msg": msg,
             "error": error,
             "admin_user": guard,
@@ -756,226 +808,241 @@ async def list_teams(request: Request) -> Response:
 
 
 @router.post("/teams", response_model=None)
-async def add_team(
+async def add_team_phase1(
     request: Request,
     url_input: str = Form(...),
-    level: str = Form(default=""),
-    team_type: str = Form(default="tracked"),
 ) -> Response:
-    """Add a team by GameChanger URL, public_id slug, or UUID.
+    """Phase 1: Resolve a team from URL or public_id and redirect to confirm page.
 
-    Parses the URL input, resolves team_id and public_id (calling bridge APIs
-    for owned teams), fetches the public team profile, then either upgrades an
-    existing discovered placeholder or inserts a new row.
+    Parses the URL input, calls the reverse bridge to discover gc_uuid
+    (403 = NULL), fetches the public team profile for the name, then
+    redirects to the confirm page with resolved info as query params.
 
     Args:
         request: The incoming HTTP request.
-        url_input: GameChanger URL, bare public_id slug, or UUID.
-        level: Optional level value (freshman/jv/varsity/reserve/legion/other).
-        team_type: "owned" for Lincoln teams, "tracked" for opponents.
+        url_input: GameChanger URL, bare public_id slug (no UUIDs accepted).
 
     Returns:
-        Redirect on success, or HTMLResponse with error on failure.
+        Redirect to /admin/teams/confirm on success, or re-rendered teams
+        page with error banner on failure.
     """
     guard = await _require_admin(request)
     if isinstance(guard, Response):
         return guard
 
-    is_owned = 1 if team_type == "owned" else 0
-    level_value = level.strip() or None
-
+    url_stripped = url_input.strip()
     try:
-        id_result = parse_team_url(url_input.strip())
+        id_result = parse_team_url(url_stripped)
     except ValueError as exc:
-        return await _render_teams_error(request, guard, str(exc), url_input, level_value, team_type)
+        return await _render_teams_error(request, guard, str(exc), url_stripped)
 
-    # AC-3.5: UUID input is only valid for owned teams (no path to resolve non-owned UUIDs)
-    if id_result.is_uuid and not is_owned:
+    if id_result.is_uuid:
         return await _render_teams_error(
             request, guard,
-            "Non-owned (tracked) teams require a GameChanger URL or public_id, not a UUID.",
-            url_input, level_value, team_type,
+            "Please provide a GameChanger URL or public_id slug, not a raw UUID.",
+            url_stripped,
         )
 
-    # Resolve final team_id (UUID for owned) and public_id slug (may need bridge calls)
+    public_id = id_result.value
+
+    # Try reverse bridge to discover gc_uuid (403 = NULL, not an error)
+    gc_uuid: str | None = None
+    gc_uuid_status = "forbidden"
     try:
-        team_id, public_id = await run_in_threadpool(_resolve_team_ids, id_result, is_owned)
+        gc_uuid = await run_in_threadpool(resolve_public_id_to_uuid, public_id)
+        gc_uuid_status = "found"
     except BridgeForbiddenError:
-        return await _render_teams_error(
-            request, guard,
-            "Team not found on your GameChanger account. "
-            "If you selected 'owned', verify the URL belongs to a team you manage.",
-            url_input, level_value, team_type,
-        )
+        gc_uuid_status = "forbidden"
     except (CredentialExpiredError, ConfigurationError) as exc:
         return await _render_teams_error(
             request, guard,
             f"GameChanger credentials error: {exc}. Run: bb creds check",
-            url_input, level_value, team_type,
+            url_stripped,
         )
     except GameChangerAPIError:
         return await _render_teams_error(
             request, guard,
-            "Could not reach GameChanger API to resolve team ID. Try again later.",
-            url_input, level_value, team_type,
+            "Could not reach GameChanger API. Try again later.",
+            url_stripped,
         )
 
-    # Duplicate check on team_id (UUID or slug) and public_id slug columns
-    if await run_in_threadpool(_check_team_duplicate, team_id, public_id):
-        return await _render_teams_error(
-            request, guard,
-            "This team is already in the system.",
-            url_input, level_value, team_type,
-        )
-
-    # Fetch public team profile (name, city, sport, etc.)
+    # Fetch public team profile to get the team name
     try:
         profile = await run_in_threadpool(resolve_team, public_id)
     except TeamNotFoundError:
         return await _render_teams_error(
             request, guard,
             "Team not found on GameChanger. Check the URL and try again.",
-            url_input, level_value, team_type,
+            url_stripped,
         )
     except GameChangerAPIError:
         return await _render_teams_error(
             request, guard,
             "Could not reach GameChanger API. Try again later.",
-            url_input, level_value, team_type,
+            url_stripped,
         )
 
-    # Upgrade discovered placeholder or insert new row
-    # Placeholders have no child rows (no stats imported yet), so PK update is safe.
-    placeholder = await run_in_threadpool(_find_discovered_placeholder, profile.name)
-    if placeholder:
-        await run_in_threadpool(
-            _upgrade_placeholder_team,
-            placeholder["team_id"], team_id, profile.name, public_id, level_value, is_owned,
-        )
-    else:
-        await run_in_threadpool(
-            _insert_team, team_id, profile.name, public_id, level_value, is_owned,
-        )
-
-    location_parts = [p for p in (profile.city, profile.state) if p]
-    msg = (
-        f"Team added: {profile.name} ({', '.join(location_parts)})"
-        if location_parts else f"Team added: {profile.name}"
+    params: dict[str, str] = {
+        "public_id": public_id,
+        "team_name": profile.name,
+        "gc_uuid_status": gc_uuid_status,
+    }
+    if gc_uuid:
+        params["gc_uuid"] = gc_uuid
+    return RedirectResponse(
+        url=f"/admin/teams/confirm?{urlencode(params)}", status_code=303
     )
-    from urllib.parse import quote_plus
-    return RedirectResponse(url=f"/admin/teams?msg={quote_plus(msg)}", status_code=303)
 
 
-def _get_team_by_id(team_id: str) -> dict[str, Any] | None:
-    """Fetch a single team row by team_id.
+@router.get("/teams/confirm", response_model=None)
+async def confirm_team_form(request: Request) -> Response:
+    """Phase 2: Render the confirm-add-team page.
 
-    Args:
-        team_id: The team's primary key.
-
-    Returns:
-        Team dict with all columns, or None if not found.
-    """
-    with closing(get_connection()) as conn:
-        conn.row_factory = sqlite3.Row
-        row = conn.execute(
-            "SELECT team_id, name, level, is_owned, is_active, public_id, last_synced "
-            "FROM teams WHERE team_id = ?",
-            (team_id,),
-        ).fetchone()
-        return dict(row) if row else None
-
-
-def _update_team(team_id: str, name: str, level: str | None, is_owned: int) -> None:
-    """Update a team's name, level, and is_owned flag.
-
-    Args:
-        team_id: The team's primary key.
-        name: New team name.
-        level: Level string or None.
-        is_owned: 1 for owned (Lincoln), 0 for tracked opponent.
-    """
-    with closing(get_connection()) as conn:
-        conn.execute(
-            "UPDATE teams SET name = ?, level = ?, is_owned = ? WHERE team_id = ?",
-            (name, level or None, is_owned, team_id),
-        )
-        conn.commit()
-
-
-def _toggle_team_active(team_id: str) -> int:
-    """Toggle a team's is_active flag between 0 and 1.
-
-    Args:
-        team_id: The team's primary key.
-
-    Returns:
-        The new is_active value after toggling (0 or 1).
-    """
-    with closing(get_connection()) as conn:
-        conn.row_factory = sqlite3.Row
-        row = conn.execute(
-            "SELECT is_active FROM teams WHERE team_id = ?", (team_id,)
-        ).fetchone()
-        if row is None:
-            return 0
-        new_value = 0 if row["is_active"] else 1
-        conn.execute(
-            "UPDATE teams SET is_active = ? WHERE team_id = ?", (new_value, team_id)
-        )
-        conn.commit()
-        return new_value
-
-
-async def _render_teams_error(
-    request: Request,
-    guard: dict[str, Any],
-    error: str,
-    form_url_input: str,
-    form_level: str | None,
-    form_team_type: str,
-) -> Response:
-    """Re-render the teams page with an error message.
+    Displays resolved team info, gc_uuid status (informational), membership
+    radio (default: tracked), and pre-populated program and division dropdowns.
+    Also performs duplicate detection and shows an error if the team already
+    exists.
 
     Args:
         request: The incoming HTTP request.
-        guard: Admin user dict from _require_admin.
-        error: Error message to display.
-        form_url_input: The submitted URL/public_id value to repopulate.
-        form_level: The submitted level value to repopulate.
-        form_team_type: The submitted team_type value to repopulate.
 
     Returns:
-        HTMLResponse with the teams page and error banner.
+        HTMLResponse with confirm form, or redirect to /admin/teams if
+        required query params are missing.
     """
-    owned_teams, opponent_teams = await run_in_threadpool(_get_all_teams_split)
-    total_opponent_links = await run_in_threadpool(count_all_opponent_links)
+    guard = await _require_admin(request)
+    if isinstance(guard, Response):
+        return guard
+
+    public_id = request.query_params.get("public_id", "")
+    if not public_id:
+        return RedirectResponse(url="/admin/teams", status_code=302)
+
+    team_name = request.query_params.get("team_name", "")
+    gc_uuid = request.query_params.get("gc_uuid", "") or None
+    gc_uuid_status = request.query_params.get("gc_uuid_status", "forbidden")
+    error = request.query_params.get("error", "")
+
+    programs = await run_in_threadpool(_get_programs)
+    inferred_classification = _infer_classification(team_name)
+    inferred_program_id = _infer_program_id(team_name, programs)
+
+    if not error:
+        if await run_in_threadpool(_check_duplicate_new, public_id, gc_uuid):
+            error = "This team is already in the system."
+
     return templates.TemplateResponse(
         request,
-        "admin/teams.html",
+        "admin/confirm_team.html",
         {
-            "owned_teams": owned_teams,
-            "opponent_teams": opponent_teams,
-            "total_opponent_links": total_opponent_links,
-            "msg": "",
+            "public_id": public_id,
+            "team_name": team_name,
+            "gc_uuid": gc_uuid or "",
+            "gc_uuid_status": gc_uuid_status,
+            "programs": programs,
+            "inferred_classification": inferred_classification,
+            "inferred_program_id": inferred_program_id,
             "error": error,
             "admin_user": guard,
-            "form_url_input": form_url_input,
-            "form_level": form_level or "",
-            "form_team_type": form_team_type,
         },
     )
 
 
-@router.get("/teams/{team_id}/edit", response_model=None)
-async def edit_team_form(request: Request, team_id: str) -> Response:
-    """Render the edit team form.
+@router.post("/teams/confirm", response_model=None)
+async def confirm_team_submit(
+    request: Request,
+    public_id: str = Form(...),
+    team_name: str = Form(...),
+    gc_uuid: str = Form(default=""),
+    membership_type: str = Form(default="tracked"),
+    program_id: str = Form(default=""),
+    classification: str = Form(default=""),
+) -> Response:
+    """Phase 2: Create the team from confirm form submission.
 
-    Pre-fills Name, Level, Type, and shows read-only Public ID, status, and
-    last_synced.
+    Re-verifies the reverse bridge (TOCTOU guard) if gc_uuid was previously
+    found.  Performs duplicate detection.  Inserts the team row with INTEGER
+    PK auto-assigned.
 
     Args:
         request: The incoming HTTP request.
-        team_id: The team's primary key from the URL path.
+        public_id: GC public_id slug (hidden field).
+        team_name: Team display name (hidden field).
+        gc_uuid: GC UUID from bridge discovery (hidden field, may be empty).
+        membership_type: Operator-selected 'member' or 'tracked' (default: tracked).
+        program_id: Optional program slug.
+        classification: Optional classification string.
+
+    Returns:
+        Redirect to /admin/teams on success, or re-rendered confirm page
+        with error on duplicate.
+    """
+    guard = await _require_admin(request)
+    if isinstance(guard, Response):
+        return guard
+
+    gc_uuid_value = gc_uuid.strip() or None
+    program_id_value = program_id.strip() or None
+    classification_value = classification.strip() or None
+    if classification_value not in _VALID_CLASSIFICATIONS:
+        classification_value = None
+
+    # Re-verify bridge (TOCTOU guard): if gc_uuid was found in Phase 1, refresh it.
+    if gc_uuid_value:
+        try:
+            fresh_uuid = await run_in_threadpool(resolve_public_id_to_uuid, public_id)
+            gc_uuid_value = fresh_uuid
+        except (
+            BridgeForbiddenError,
+            CredentialExpiredError,
+            ConfigurationError,
+            GameChangerAPIError,
+        ):
+            gc_uuid_value = None  # stale -- store NULL
+
+    # Duplicate detection
+    if await run_in_threadpool(_check_duplicate_new, public_id, gc_uuid_value):
+        programs = await run_in_threadpool(_get_programs)
+        inferred_classification = _infer_classification(team_name)
+        inferred_program_id = _infer_program_id(team_name, programs)
+        return templates.TemplateResponse(
+            request,
+            "admin/confirm_team.html",
+            {
+                "public_id": public_id,
+                "team_name": team_name,
+                "gc_uuid": gc_uuid_value or "",
+                "gc_uuid_status": "found" if gc_uuid_value else "forbidden",
+                "programs": programs,
+                "inferred_classification": inferred_classification,
+                "inferred_program_id": inferred_program_id,
+                "error": "This team is already in the system.",
+                "admin_user": guard,
+            },
+        )
+
+    await run_in_threadpool(
+        _insert_team_new,
+        team_name, public_id, gc_uuid_value, membership_type,
+        program_id_value, classification_value,
+    )
+
+    return RedirectResponse(
+        url=f"/admin/teams?msg={quote_plus(f'Team added: {team_name}')}",
+        status_code=303,
+    )
+
+
+@router.get("/teams/{id}/edit", response_model=None)
+async def edit_team_form(request: Request, id: int) -> Response:
+    """Render the edit team form.
+
+    Pre-fills Name, Division, Program, and membership type.  Shows read-only
+    Public ID, gc_uuid status, and last_synced.
+
+    Args:
+        request: The incoming HTTP request.
+        id: The team's INTEGER primary key from the URL path.
 
     Returns:
         HTMLResponse with the edit form, or a 404/auth response.
@@ -984,41 +1051,43 @@ async def edit_team_form(request: Request, team_id: str) -> Response:
     if isinstance(guard, Response):
         return guard
 
-    team = await run_in_threadpool(_get_team_by_id, team_id)
+    team = await run_in_threadpool(_get_team_by_integer_id, id)
     if not team:
         return HTMLResponse(content="Team not found", status_code=404)
 
-    opponent_link_count = await run_in_threadpool(
-        get_opponent_link_count_for_team, team_id
-    )
+    opponent_link_count = await run_in_threadpool(get_opponent_link_count_for_team, id)
+    programs = await run_in_threadpool(_get_programs)
 
     return templates.TemplateResponse(
         request,
         "admin/edit_team.html",
         {
             "edit_team": team,
+            "programs": programs,
             "opponent_link_count": opponent_link_count,
             "admin_user": guard,
         },
     )
 
 
-@router.post("/teams/{team_id}/edit", response_model=None)
+@router.post("/teams/{id}/edit", response_model=None)
 async def update_team(
     request: Request,
-    team_id: str,
+    id: int,
     name: str = Form(...),
-    level: str = Form(default=""),
-    team_type: str = Form(default="tracked"),
+    program_id: str = Form(default=""),
+    classification: str = Form(default=""),
+    membership_type: str = Form(default="tracked"),
 ) -> Response:
-    """Update a team's name, level, and is_owned flag.
+    """Update a team's name, program, division, and membership type.
 
     Args:
         request: The incoming HTTP request.
-        team_id: The team's primary key from the URL path.
+        id: The team's INTEGER primary key from the URL path.
         name: New team name (required).
-        level: Level value (optional).
-        team_type: "owned" for Lincoln teams, "tracked" for opponents.
+        program_id: Program slug (optional).
+        classification: Classification string (optional).
+        membership_type: 'member' or 'tracked'.
 
     Returns:
         Redirect on success, or 404/auth response.
@@ -1027,24 +1096,33 @@ async def update_team(
     if isinstance(guard, Response):
         return guard
 
-    team = await run_in_threadpool(_get_team_by_id, team_id)
+    team = await run_in_threadpool(_get_team_by_integer_id, id)
     if not team:
         return HTMLResponse(content="Team not found", status_code=404)
 
-    is_owned = 1 if team_type == "owned" else 0
-    level_value = level.strip() or None
-    await run_in_threadpool(_update_team, team_id, name.strip(), level_value, is_owned)
+    classification_value = classification.strip() or None
+    if classification_value not in _VALID_CLASSIFICATIONS:
+        classification_value = None
+
+    await run_in_threadpool(
+        _update_team_integer,
+        id,
+        name.strip(),
+        program_id.strip() or None,
+        classification_value,
+        membership_type,
+    )
 
     return RedirectResponse(url="/admin/teams?msg=Team+updated", status_code=303)
 
 
-@router.post("/teams/{team_id}/toggle-active", response_model=None)
-async def toggle_team_active(request: Request, team_id: str) -> Response:
+@router.post("/teams/{id}/toggle-active", response_model=None)
+async def toggle_team_active(request: Request, id: int) -> Response:
     """Toggle a team's is_active status between active and inactive.
 
     Args:
         request: The incoming HTTP request.
-        team_id: The team's primary key from the URL path.
+        id: The team's INTEGER primary key from the URL path.
 
     Returns:
         Redirect to /admin/teams with an appropriate flash message.
@@ -1053,21 +1131,20 @@ async def toggle_team_active(request: Request, team_id: str) -> Response:
     if isinstance(guard, Response):
         return guard
 
-    team = await run_in_threadpool(_get_team_by_id, team_id)
+    team = await run_in_threadpool(_get_team_by_integer_id, id)
     if not team:
         return HTMLResponse(content="Team not found", status_code=404)
 
-    new_active = await run_in_threadpool(_toggle_team_active, team_id)
+    new_active = await run_in_threadpool(_toggle_team_active_integer, id)
     verb = "activated" if new_active else "deactivated"
 
-    from urllib.parse import quote_plus
     return RedirectResponse(
         url=f"/admin/teams?msg=Team+{quote_plus(verb)}", status_code=303
     )
 
 
-@router.post("/teams/{team_id}/discover-opponents", response_model=None)
-async def discover_team_opponents(request: Request, team_id: str) -> Response:
+@router.post("/teams/{id}/discover-opponents", response_model=None)
+async def discover_team_opponents(request: Request, id: int) -> Response:
     """Trigger opponent auto-discovery from a team's public game schedule.
 
     Fetches ``GET /public/teams/{public_id}/games``, extracts unique opponent
@@ -1076,18 +1153,16 @@ async def discover_team_opponents(request: Request, team_id: str) -> Response:
 
     Args:
         request: The incoming HTTP request.
-        team_id: The team's primary key from the URL path.
+        id: The team's INTEGER primary key from the URL path.
 
     Returns:
         Redirect to /admin/teams with a success or error flash message.
     """
-    from urllib.parse import quote_plus
-
     guard = await _require_admin(request)
     if isinstance(guard, Response):
         return guard
 
-    team = await run_in_threadpool(_get_team_by_id, team_id)
+    team = await run_in_threadpool(_get_team_by_integer_id, id)
     if not team:
         return HTMLResponse(content="Team not found", status_code=404)
 
@@ -1102,7 +1177,7 @@ async def discover_team_opponents(request: Request, team_id: str) -> Response:
     try:
         discovered = await run_in_threadpool(discover_opponents, public_id)
     except GameChangerAPIError as exc:
-        logger.warning("Opponent discovery failed for team %s: %s", team_id, exc)
+        logger.warning("Opponent discovery failed for team %s: %s", id, exc)
         return RedirectResponse(
             url="/admin/teams?error="
             + quote_plus("Could not reach GameChanger API. Try again later."),
@@ -1112,7 +1187,7 @@ async def discover_team_opponents(request: Request, team_id: str) -> Response:
     names = [opp.name for opp in discovered]
     count = await run_in_threadpool(bulk_create_opponents, names)
 
-    team_name = team.get("name", team_id)
+    team_name = team.get("name", str(id))
     msg = f"Discovered {count} new opponent{'s' if count != 1 else ''} for {team_name}"
     return RedirectResponse(
         url=f"/admin/teams?msg={quote_plus(msg)}", status_code=303
@@ -1129,8 +1204,8 @@ async def list_opponents(request: Request) -> Response:
     """Render the opponent link management page.
 
     Lists opponent_links rows with filter pills (All / Full stats / Scoresheet
-    only) and summary counts.  Supports ``?team_id=`` for scoping to a single
-    owned team and ``?filter=`` for resolution state filtering.
+    only) and summary counts.  Supports ``?team_id=`` (INTEGER) for scoping to
+    a single member team and ``?filter=`` for resolution state filtering.
 
     Args:
         request: The incoming HTTP request.
@@ -1142,16 +1217,23 @@ async def list_opponents(request: Request) -> Response:
     if isinstance(guard, Response):
         return guard
 
-    team_id_filter = request.query_params.get("team_id", "")
+    team_id_filter_raw = request.query_params.get("team_id", "")
     state_filter = request.query_params.get("filter", "")
     msg = request.query_params.get("msg", "")
     error = request.query_params.get("error", "")
 
+    team_id_filter_int: int | None = None
+    if team_id_filter_raw:
+        try:
+            team_id_filter_int = int(team_id_filter_raw)
+        except ValueError:
+            team_id_filter_int = None
+
     links = await run_in_threadpool(
-        get_opponent_links, team_id_filter or None, state_filter or None
+        get_opponent_links, team_id_filter_int, state_filter or None
     )
-    counts = await run_in_threadpool(get_opponent_link_counts, team_id_filter or None)
-    owned_teams = await run_in_threadpool(_get_owned_teams)
+    counts = await run_in_threadpool(get_opponent_link_counts, team_id_filter_int)
+    member_teams = await run_in_threadpool(_get_available_teams)
 
     return templates.TemplateResponse(
         request,
@@ -1159,8 +1241,8 @@ async def list_opponents(request: Request) -> Response:
         {
             "links": links,
             "counts": counts,
-            "owned_teams": owned_teams,
-            "team_id_filter": team_id_filter,
+            "member_teams": member_teams,
+            "team_id_filter": team_id_filter_raw,
             "state_filter": state_filter,
             "msg": msg,
             "error": error,
@@ -1279,7 +1361,7 @@ async def connect_opponent_confirm(request: Request, link_id: int) -> Response:
         )
     public_id = id_result.value
 
-    is_own_team = await run_in_threadpool(is_owned_team_public_id, public_id)
+    is_own_team = await run_in_threadpool(is_member_team_public_id, public_id)
     if is_own_team:
         return _render_connect_error(
             request, link, guard,
@@ -1307,8 +1389,6 @@ async def connect_opponent_confirm(request: Request, link_id: int) -> Response:
 
 def _build_connect_success_msg(opponent_name: str, duplicate_name: str | None) -> str:
     """Build the flash message for a successful manual link save."""
-    from urllib.parse import quote_plus
-
     if duplicate_name:
         return quote_plus(
             f"Linked {opponent_name} -- note: this URL is already used by {duplicate_name}."
@@ -1345,8 +1425,6 @@ async def connect_opponent(
     Returns:
         Redirect to /admin/opponents?team_id=... on success, or error response.
     """
-    from urllib.parse import quote_plus
-
     guard = await _require_admin(request)
     if isinstance(guard, Response):
         return guard
@@ -1359,7 +1437,7 @@ async def connect_opponent(
     if already_resolved is not None:
         return already_resolved
 
-    is_own_team = await run_in_threadpool(is_owned_team_public_id, public_id)
+    is_own_team = await run_in_threadpool(is_member_team_public_id, public_id)
     if is_own_team:
         return HTMLResponse(
             content="Cannot link an opponent to a Lincoln program team.",
@@ -1373,7 +1451,7 @@ async def connect_opponent(
     await run_in_threadpool(save_manual_opponent_link, link_id, public_id)
     msg = _build_connect_success_msg(link["opponent_name"], duplicate_name)
     return RedirectResponse(
-        url=f"/admin/opponents?team_id={quote_plus(our_team_id)}&msg={msg}",
+        url=f"/admin/opponents?team_id={our_team_id}&msg={msg}",
         status_code=303,
     )
 
@@ -1392,8 +1470,6 @@ async def disconnect_opponent(request: Request, link_id: int) -> Response:
     Returns:
         Redirect to /admin/opponents on success, or 400/404/auth response.
     """
-    from urllib.parse import quote_plus
-
     guard = await _require_admin(request)
     if isinstance(guard, Response):
         return guard
@@ -1415,6 +1491,6 @@ async def disconnect_opponent(request: Request, link_id: int) -> Response:
     our_team_id = link["our_team_id"]
     msg = quote_plus(f"Disconnected {link['opponent_name']}.")
     return RedirectResponse(
-        url=f"/admin/opponents?team_id={quote_plus(our_team_id)}&msg={msg}",
+        url=f"/admin/opponents?team_id={our_team_id}&msg={msg}",
         status_code=303,
     )

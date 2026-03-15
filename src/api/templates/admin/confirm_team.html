@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+
+{% block title %}Admin -- Confirm Add Team{% endblock %}
+
+{% block header_extras %}
+<div class="ml-auto flex items-center gap-4 text-sm">
+  <a href="/admin/teams" class="text-blue-200 hover:text-white">Back to Teams</a>
+  <a href="/auth/logout" class="text-blue-200 hover:text-white">Logout</a>
+</div>
+{% endblock %}
+
+{% block content %}
+<h1 class="text-xl font-bold mb-4">Confirm Add Team</h1>
+
+<!-- Admin sub-navigation -->
+<nav class="mb-6 flex gap-4 border-b border-gray-300 pb-2 text-sm">
+  <a href="/admin/users"
+     class="font-medium text-gray-600 hover:text-blue-900">Users</a>
+  <a href="/admin/teams"
+     class="font-bold underline text-blue-900">Teams</a>
+  <a href="/admin/opponents"
+     class="font-medium text-gray-600 hover:text-blue-900">Opponents</a>
+</nav>
+
+{% if error %}
+<div class="mb-4 p-3 bg-red-100 text-red-800 rounded border border-red-300">
+  {{ error }}
+</div>
+{% endif %}
+
+<div class="bg-white rounded shadow p-6 max-w-lg">
+
+  <!-- Read-only resolved info -->
+  <div class="mb-4">
+    <p class="text-sm font-medium text-gray-700 mb-1">Team Name</p>
+    <p class="text-sm text-gray-800 py-1 font-semibold">{{ team_name }}</p>
+  </div>
+
+  <div class="mb-4">
+    <p class="text-sm font-medium text-gray-700 mb-1">Public ID</p>
+    <p class="text-sm font-mono text-gray-600 py-1">{{ public_id }}</p>
+  </div>
+
+  <div class="mb-4">
+    <p class="text-sm font-medium text-gray-700 mb-1">GameChanger UUID</p>
+    {% if gc_uuid_status == 'found' and gc_uuid %}
+      <span class="inline-flex items-center gap-2">
+        <span class="px-2 py-0.5 rounded text-xs font-semibold bg-green-100 text-green-800 border border-green-300">Discovered</span>
+        <span class="text-xs font-mono text-gray-600">{{ gc_uuid }}</span>
+      </span>
+    {% else %}
+      <span class="px-2 py-0.5 rounded text-xs font-semibold bg-yellow-100 text-yellow-800 border border-yellow-300">Not available (403)</span>
+    {% endif %}
+  </div>
+
+  <!-- Confirm form -->
+  <form method="post" action="/admin/teams/confirm">
+    <!-- Hidden fields carrying Phase 1 results -->
+    <input type="hidden" name="public_id" value="{{ public_id }}">
+    <input type="hidden" name="team_name" value="{{ team_name }}">
+    <input type="hidden" name="gc_uuid" value="{{ gc_uuid }}">
+
+    <!-- Membership type -->
+    <div class="mb-4">
+      <p class="block text-sm font-medium text-gray-700 mb-1">Membership</p>
+      <label class="flex items-center gap-2 text-sm text-gray-700 mb-1 cursor-pointer">
+        <input type="radio" name="membership_type" value="tracked" checked class="rounded">
+        Tracked (opponent / external team)
+      </label>
+      <label class="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+        <input type="radio" name="membership_type" value="member" class="rounded">
+        Member (Lincoln program team)
+      </label>
+    </div>
+
+    <!-- Program -->
+    {% if programs %}
+    <div class="mb-4">
+      <label class="block text-sm font-medium text-gray-700 mb-1" for="program_id">
+        Program <span class="text-gray-400 font-normal">(optional)</span>
+      </label>
+      <select
+        id="program_id"
+        name="program_id"
+        class="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
+      >
+        <option value="">-- none --</option>
+        {% for prog in programs %}
+        <option value="{{ prog.program_id }}"
+                {% if prog.program_id == inferred_program_id %}selected{% endif %}>
+          {{ prog.name }}
+        </option>
+        {% endfor %}
+      </select>
+    </div>
+    {% endif %}
+
+    <!-- Division / Classification -->
+    <div class="mb-4">
+      <label class="block text-sm font-medium text-gray-700 mb-1" for="classification">
+        Division <span class="text-gray-400 font-normal">(optional)</span>
+      </label>
+      <select
+        id="classification"
+        name="classification"
+        class="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
+      >
+        <option value="">-- none --</option>
+        <optgroup label="High School">
+          <option value="varsity" {% if inferred_classification == 'varsity' %}selected{% endif %}>Varsity</option>
+          <option value="jv" {% if inferred_classification == 'jv' %}selected{% endif %}>JV</option>
+          <option value="freshman" {% if inferred_classification == 'freshman' %}selected{% endif %}>Freshman</option>
+          <option value="reserve" {% if inferred_classification == 'reserve' %}selected{% endif %}>Reserve</option>
+          <option value="legion" {% if inferred_classification == 'legion' %}selected{% endif %}>Legion</option>
+        </optgroup>
+        <optgroup label="Youth / USSSA">
+          <option value="8U" {% if inferred_classification == '8U' %}selected{% endif %}>8U</option>
+          <option value="9U" {% if inferred_classification == '9U' %}selected{% endif %}>9U</option>
+          <option value="10U" {% if inferred_classification == '10U' %}selected{% endif %}>10U</option>
+          <option value="11U" {% if inferred_classification == '11U' %}selected{% endif %}>11U</option>
+          <option value="12U" {% if inferred_classification == '12U' %}selected{% endif %}>12U</option>
+          <option value="13U" {% if inferred_classification == '13U' %}selected{% endif %}>13U</option>
+          <option value="14U" {% if inferred_classification == '14U' %}selected{% endif %}>14U</option>
+        </optgroup>
+      </select>
+    </div>
+
+    <div class="flex gap-3">
+      <button
+        type="submit"
+        class="bg-blue-900 text-white px-4 py-2 rounded text-sm hover:bg-blue-800"
+        {% if error == 'This team is already in the system.' %}disabled{% endif %}
+      >
+        Add Team
+      </button>
+      <a
+        href="/admin/teams"
+        class="px-4 py-2 rounded text-sm border border-gray-300 text-gray-700 hover:bg-gray-50"
+      >
+        Cancel
+      </a>
+    </div>
+  </form>
+</div>
+{% endblock %}

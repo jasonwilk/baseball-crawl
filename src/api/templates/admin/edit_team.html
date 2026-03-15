@@ -4,9 +4,6 @@
 
 {% block header_extras %}
 <div class="ml-auto flex items-center gap-4 text-sm">
-  {% if admin_user and admin_user.display_name %}
-  <span class="text-blue-200">{{ admin_user.display_name }}</span>
-  {% endif %}
   <a href="/admin/teams" class="text-blue-200 hover:text-white">Back to Teams</a>
   <a href="/auth/logout" class="text-blue-200 hover:text-white">Logout</a>
 </div>
@@ -33,6 +30,15 @@
     <p class="text-sm font-mono text-gray-600 py-1">{{ edit_team.public_id or "—" }}</p>
   </div>
 
+  <div class="mb-4">
+    <p class="text-sm font-medium text-gray-700 mb-1">GameChanger UUID</p>
+    {% if edit_team.gc_uuid %}
+      <p class="text-xs font-mono text-gray-600 py-1">{{ edit_team.gc_uuid }}</p>
+    {% else %}
+      <p class="text-sm text-gray-500 py-1">—</p>
+    {% endif %}
+  </div>
+
   <div class="mb-4 flex gap-6">
     <div>
       <p class="text-sm font-medium text-gray-700 mb-1">Status</p>
@@ -51,7 +57,7 @@
   </div>
 
   <!-- Editable fields -->
-  <form method="post" action="/admin/teams/{{ edit_team.team_id }}/edit">
+  <form method="post" action="/admin/teams/{{ edit_team.id }}/edit">
     <div class="mb-4">
       <label class="block text-sm font-medium text-gray-700 mb-1" for="name">
         Name <span class="text-red-600">*</span>
@@ -66,36 +72,70 @@
       >
     </div>
 
+    <!-- Program -->
+    {% if programs %}
     <div class="mb-4">
-      <label class="block text-sm font-medium text-gray-700 mb-1" for="level">
-        Level <span class="text-gray-400 font-normal">(optional)</span>
+      <label class="block text-sm font-medium text-gray-700 mb-1" for="program_id">
+        Program <span class="text-gray-400 font-normal">(optional)</span>
       </label>
       <select
-        id="level"
-        name="level"
+        id="program_id"
+        name="program_id"
         class="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
       >
-        <option value="">-- select level --</option>
-        <option value="freshman" {% if edit_team.level == 'freshman' %}selected{% endif %}>Freshman</option>
-        <option value="jv" {% if edit_team.level == 'jv' %}selected{% endif %}>JV</option>
-        <option value="varsity" {% if edit_team.level == 'varsity' %}selected{% endif %}>Varsity</option>
-        <option value="reserve" {% if edit_team.level == 'reserve' %}selected{% endif %}>Reserve</option>
-        <option value="legion" {% if edit_team.level == 'legion' %}selected{% endif %}>Legion</option>
-        <option value="other" {% if edit_team.level == 'other' %}selected{% endif %}>Other</option>
+        <option value="">-- none --</option>
+        {% for prog in programs %}
+        <option value="{{ prog.program_id }}"
+                {% if prog.program_id == edit_team.program_id %}selected{% endif %}>
+          {{ prog.name }}
+        </option>
+        {% endfor %}
+      </select>
+    </div>
+    {% endif %}
+
+    <!-- Division / Classification -->
+    <div class="mb-4">
+      <label class="block text-sm font-medium text-gray-700 mb-1" for="classification">
+        Division <span class="text-gray-400 font-normal">(optional)</span>
+      </label>
+      <select
+        id="classification"
+        name="classification"
+        class="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
+      >
+        <option value="">-- none --</option>
+        <optgroup label="High School">
+          <option value="varsity" {% if edit_team.classification == 'varsity' %}selected{% endif %}>Varsity</option>
+          <option value="jv" {% if edit_team.classification == 'jv' %}selected{% endif %}>JV</option>
+          <option value="freshman" {% if edit_team.classification == 'freshman' %}selected{% endif %}>Freshman</option>
+          <option value="reserve" {% if edit_team.classification == 'reserve' %}selected{% endif %}>Reserve</option>
+          <option value="legion" {% if edit_team.classification == 'legion' %}selected{% endif %}>Legion</option>
+        </optgroup>
+        <optgroup label="Youth / USSSA">
+          <option value="8U" {% if edit_team.classification == '8U' %}selected{% endif %}>8U</option>
+          <option value="9U" {% if edit_team.classification == '9U' %}selected{% endif %}>9U</option>
+          <option value="10U" {% if edit_team.classification == '10U' %}selected{% endif %}>10U</option>
+          <option value="11U" {% if edit_team.classification == '11U' %}selected{% endif %}>11U</option>
+          <option value="12U" {% if edit_team.classification == '12U' %}selected{% endif %}>12U</option>
+          <option value="13U" {% if edit_team.classification == '13U' %}selected{% endif %}>13U</option>
+          <option value="14U" {% if edit_team.classification == '14U' %}selected{% endif %}>14U</option>
+        </optgroup>
       </select>
     </div>
 
+    <!-- Membership type -->
     <div class="mb-4">
-      <p class="block text-sm font-medium text-gray-700 mb-1">Type</p>
+      <p class="block text-sm font-medium text-gray-700 mb-1">Membership</p>
       <label class="flex items-center gap-2 text-sm text-gray-700 mb-1 cursor-pointer">
-        <input type="radio" name="team_type" value="tracked"
-               {% if not edit_team.is_owned %}checked{% endif %}>
-        Tracked (opponent)
+        <input type="radio" name="membership_type" value="tracked"
+               {% if edit_team.membership_type != 'member' %}checked{% endif %}>
+        Tracked (opponent / external team)
       </label>
       <label class="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
-        <input type="radio" name="team_type" value="owned"
-               {% if edit_team.is_owned %}checked{% endif %}>
-        Owned (Lincoln program)
+        <input type="radio" name="membership_type" value="member"
+               {% if edit_team.membership_type == 'member' %}checked{% endif %}>
+        Member (Lincoln program team)
       </label>
     </div>
 
@@ -122,7 +162,7 @@
     <strong>{{ opponent_link_count }}</strong>
     opponent connection{{ 's' if opponent_link_count != 1 else '' }}
   </span>
-  <a href="/admin/opponents?team_id={{ edit_team.team_id }}"
+  <a href="/admin/opponents?team_id={{ edit_team.id }}"
      class="text-blue-700 hover:underline">Manage connections →</a>
 </div>
 {% endblock %}
