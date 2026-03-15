@@ -40,7 +40,7 @@ from src.api.auth import hash_token  # noqa: E402
 from src.api.main import app  # noqa: E402
 
 # ---------------------------------------------------------------------------
-# Schema SQL (includes both base tables and auth tables)
+# Schema SQL -- E-100 schema (teams INTEGER PK, new users/sessions/auth tables)
 # ---------------------------------------------------------------------------
 
 _SCHEMA_SQL = """
@@ -51,151 +51,69 @@ _SCHEMA_SQL = """
     );
     INSERT OR IGNORE INTO _migrations (filename) VALUES ('001_initial_schema.sql');
 
-    CREATE TABLE IF NOT EXISTS players (
-        player_id  TEXT PRIMARY KEY,
-        first_name TEXT NOT NULL,
-        last_name  TEXT NOT NULL,
-        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    CREATE TABLE IF NOT EXISTS programs (
+        program_id   TEXT PRIMARY KEY,
+        name         TEXT NOT NULL,
+        program_type TEXT NOT NULL,
+        created_at   TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
     CREATE TABLE IF NOT EXISTS teams (
-        team_id    TEXT PRIMARY KEY,
-        name       TEXT NOT NULL,
-        level      TEXT,
-        is_owned   INTEGER NOT NULL DEFAULT 0,
-        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        name            TEXT NOT NULL,
+        program_id      TEXT REFERENCES programs(program_id),
+        membership_type TEXT NOT NULL CHECK(membership_type IN ('member', 'tracked')),
+        classification  TEXT,
+        public_id       TEXT,
+        gc_uuid         TEXT,
+        source          TEXT NOT NULL DEFAULT 'gamechanger',
+        is_active       INTEGER NOT NULL DEFAULT 1,
+        created_at      TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
-    CREATE TABLE IF NOT EXISTS team_rosters (
-        id            INTEGER PRIMARY KEY AUTOINCREMENT,
-        team_id       TEXT NOT NULL,
-        player_id     TEXT NOT NULL,
-        season        TEXT NOT NULL,
-        jersey_number TEXT,
-        position      TEXT,
-        UNIQUE(team_id, player_id, season)
-    );
-
-    CREATE TABLE IF NOT EXISTS games (
-        game_id      TEXT PRIMARY KEY,
-        season       TEXT NOT NULL,
-        game_date    TEXT NOT NULL,
-        home_team_id TEXT NOT NULL,
-        away_team_id TEXT NOT NULL,
-        home_score   INTEGER,
-        away_score   INTEGER,
-        status       TEXT NOT NULL DEFAULT 'completed'
-    );
-
-    CREATE TABLE IF NOT EXISTS player_game_batting (
-        id        INTEGER PRIMARY KEY AUTOINCREMENT,
-        game_id   TEXT NOT NULL,
-        player_id TEXT NOT NULL,
-        team_id   TEXT NOT NULL,
-        ab        INTEGER,
-        h         INTEGER,
-        doubles   INTEGER,
-        triples   INTEGER,
-        hr        INTEGER,
-        rbi       INTEGER,
-        bb        INTEGER,
-        so        INTEGER,
-        sb        INTEGER,
-        UNIQUE(game_id, player_id)
-    );
-
-    CREATE TABLE IF NOT EXISTS player_game_pitching (
-        id        INTEGER PRIMARY KEY AUTOINCREMENT,
-        game_id   TEXT NOT NULL,
-        player_id TEXT NOT NULL,
-        team_id   TEXT NOT NULL,
-        ip_outs   INTEGER,
-        h         INTEGER,
-        er        INTEGER,
-        bb        INTEGER,
-        so        INTEGER,
-        hr        INTEGER,
-        UNIQUE(game_id, player_id)
-    );
-
-    CREATE TABLE IF NOT EXISTS player_season_batting (
-        id        INTEGER PRIMARY KEY AUTOINCREMENT,
-        player_id TEXT NOT NULL,
-        team_id   TEXT NOT NULL,
-        season    TEXT NOT NULL,
-        games     INTEGER,
-        ab        INTEGER,
-        h         INTEGER,
-        doubles   INTEGER,
-        triples   INTEGER,
-        hr        INTEGER,
-        rbi       INTEGER,
-        bb        INTEGER,
-        so        INTEGER,
-        sb        INTEGER,
-        home_ab   INTEGER,
-        home_h    INTEGER,
-        away_ab   INTEGER,
-        away_h    INTEGER,
-        vs_lhp_ab INTEGER,
-        vs_lhp_h  INTEGER,
-        vs_rhp_ab INTEGER,
-        vs_rhp_h  INTEGER,
-        UNIQUE(player_id, team_id, season)
-    );
-
-    -- Auth tables (003_auth.sql)
     CREATE TABLE IF NOT EXISTS users (
-        user_id      INTEGER PRIMARY KEY AUTOINCREMENT,
-        email        TEXT    NOT NULL UNIQUE,
-        display_name TEXT    NOT NULL,
-        is_admin     INTEGER NOT NULL DEFAULT 0,
-        created_at   TEXT    NOT NULL DEFAULT (datetime('now'))
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        email           TEXT UNIQUE NOT NULL,
+        hashed_password TEXT,
+        created_at      TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
     CREATE TABLE IF NOT EXISTS user_team_access (
-        id       INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id  INTEGER NOT NULL REFERENCES users(user_id),
-        team_id  TEXT    NOT NULL REFERENCES teams(team_id),
+        user_id INTEGER NOT NULL REFERENCES users(id),
+        team_id INTEGER NOT NULL REFERENCES teams(id),
         UNIQUE(user_id, team_id)
     );
 
     CREATE TABLE IF NOT EXISTS magic_link_tokens (
-        id         INTEGER PRIMARY KEY AUTOINCREMENT,
-        token_hash TEXT    NOT NULL UNIQUE,
-        user_id    INTEGER NOT NULL REFERENCES users(user_id),
-        expires_at TEXT    NOT NULL,
-        used_at    TEXT,
-        created_at TEXT    NOT NULL DEFAULT (datetime('now'))
+        token      TEXT PRIMARY KEY,
+        user_id    INTEGER NOT NULL REFERENCES users(id),
+        expires_at TEXT NOT NULL
     );
 
     CREATE TABLE IF NOT EXISTS passkey_credentials (
-        id            INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id       INTEGER NOT NULL REFERENCES users(user_id),
-        credential_id BLOB    NOT NULL UNIQUE,
-        public_key    BLOB    NOT NULL,
-        sign_count    INTEGER NOT NULL DEFAULT 0,
-        created_at    TEXT    NOT NULL DEFAULT (datetime('now'))
+        credential_id TEXT PRIMARY KEY,
+        user_id       INTEGER NOT NULL REFERENCES users(id),
+        public_key    TEXT NOT NULL,
+        sign_count    INTEGER NOT NULL DEFAULT 0
     );
 
     CREATE TABLE IF NOT EXISTS sessions (
-        id                  INTEGER PRIMARY KEY AUTOINCREMENT,
-        session_token_hash  TEXT    NOT NULL UNIQUE,
-        user_id             INTEGER NOT NULL REFERENCES users(user_id),
-        expires_at          TEXT    NOT NULL,
-        challenge           TEXT,
-        created_at          TEXT    NOT NULL DEFAULT (datetime('now'))
+        session_id TEXT PRIMARY KEY,
+        user_id    INTEGER NOT NULL REFERENCES users(id),
+        expires_at TEXT NOT NULL
     );
 """
 
 _SEED_SQL = """
-    INSERT OR IGNORE INTO teams (team_id, name, level, is_owned) VALUES
-        ('lsb-varsity-2026', 'LSB Varsity 2026', 'varsity', 1);
+    INSERT OR IGNORE INTO programs (program_id, name, program_type) VALUES
+        ('lsb-hs', 'Lincoln Standing Bear HS', 'hs');
+    INSERT OR IGNORE INTO teams (name, membership_type, classification) VALUES
+        ('LSB Varsity 2026', 'member', 'varsity');
 """
 
 
 def _make_auth_db(tmp_path: Path) -> Path:
-    """Create a database with full schema (base + auth tables).
+    """Create a database with full E-100 schema (base + auth tables).
 
     Args:
         tmp_path: pytest tmp_path fixture directory.
@@ -212,21 +130,20 @@ def _make_auth_db(tmp_path: Path) -> Path:
     return db_path
 
 
-def _insert_user(db_path: Path, email: str, is_admin: int = 0) -> int:
-    """Insert a user row and return the user_id.
+def _insert_user(db_path: Path, email: str) -> int:
+    """Insert a user row and return the user id.
 
     Args:
         db_path: Path to the database file.
         email: Email address for the user.
-        is_admin: 1 for admin, 0 for non-admin.
 
     Returns:
-        The new user_id.
+        The new user id (INTEGER PK).
     """
     conn = sqlite3.connect(str(db_path))
     cursor = conn.execute(
-        "INSERT INTO users (email, display_name, is_admin) VALUES (?, ?, ?)",
-        (email, "Test User", is_admin),
+        "INSERT INTO users (email) VALUES (?)",
+        (email,),
     )
     conn.commit()
     user_id = cursor.lastrowid
@@ -245,14 +162,14 @@ def _insert_session(db_path: Path, user_id: int) -> str:
         Raw session token (64 hex chars).
     """
     raw_token = secrets.token_hex(32)
-    token_hash = hash_token(raw_token)
+    session_id = hash_token(raw_token)
     conn = sqlite3.connect(str(db_path))
     conn.execute(
         """
-        INSERT INTO sessions (session_token_hash, user_id, expires_at)
+        INSERT INTO sessions (session_id, user_id, expires_at)
         VALUES (?, ?, datetime('now', '+7 days'))
         """,
-        (token_hash, user_id),
+        (session_id, user_id),
     )
     conn.commit()
     conn.close()
@@ -270,14 +187,14 @@ def _insert_expired_session(db_path: Path, user_id: int) -> str:
         Raw session token (64 hex chars).
     """
     raw_token = secrets.token_hex(32)
-    token_hash = hash_token(raw_token)
+    session_id = hash_token(raw_token)
     conn = sqlite3.connect(str(db_path))
     conn.execute(
         """
-        INSERT INTO sessions (session_token_hash, user_id, expires_at)
+        INSERT INTO sessions (session_id, user_id, expires_at)
         VALUES (?, ?, datetime('now', '-1 hour'))
         """,
-        (token_hash, user_id),
+        (session_id, user_id),
     )
     conn.commit()
     conn.close()
@@ -291,7 +208,7 @@ def _insert_expired_session(db_path: Path, user_id: int) -> str:
 
 @pytest.fixture()
 def auth_db(tmp_path: Path) -> Path:
-    """Full schema database with one owned team."""
+    """Full E-100 schema database with one member team."""
     return _make_auth_db(tmp_path)
 
 
@@ -346,7 +263,7 @@ class TestSessionMiddlewareValidSession:
 
     def test_valid_session_sets_request_state(self, auth_db: Path) -> None:
         """A valid session cookie results in a 200 response (state is attached)."""
-        user_id = _insert_user(auth_db, "coach2@example.com", is_admin=1)
+        user_id = _insert_user(auth_db, "coach2@example.com")
         raw_token = _insert_session(auth_db, user_id)
 
         with patch.dict("os.environ", {"DATABASE_PATH": str(auth_db)}):
@@ -431,18 +348,17 @@ class TestDevBypass:
 
         conn = sqlite3.connect(str(auth_db))
         cursor = conn.execute(
-            "SELECT email, is_admin FROM users WHERE email = ?", (dev_email,)
+            "SELECT email FROM users WHERE email = ?", (dev_email,)
         )
         row = cursor.fetchone()
         conn.close()
         assert row is not None
         assert row[0] == dev_email
-        assert row[1] == 1  # is_admin=1
 
     def test_dev_bypass_uses_existing_user(self, auth_db: Path) -> None:
         """DEV_USER_EMAIL reuses existing user row if already present (AC-17j)."""
         dev_email = "existing@example.com"
-        _insert_user(auth_db, dev_email, is_admin=0)
+        _insert_user(auth_db, dev_email)
 
         env = {
             "DATABASE_PATH": str(auth_db),
@@ -541,19 +457,11 @@ class TestDevUserEmailProductionGuard:
 # ---------------------------------------------------------------------------
 
 _SCHEMA_SQL_NO_AUTH = """
-    CREATE TABLE IF NOT EXISTS players (
-        player_id  TEXT PRIMARY KEY,
-        first_name TEXT NOT NULL,
-        last_name  TEXT NOT NULL,
-        created_at TEXT NOT NULL DEFAULT (datetime('now'))
-    );
-
     CREATE TABLE IF NOT EXISTS teams (
-        team_id    TEXT PRIMARY KEY,
-        name       TEXT NOT NULL,
-        level      TEXT,
-        is_owned   INTEGER NOT NULL DEFAULT 0,
-        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        name            TEXT NOT NULL,
+        membership_type TEXT NOT NULL DEFAULT 'member',
+        created_at      TEXT NOT NULL DEFAULT (datetime('now'))
     );
 """
 

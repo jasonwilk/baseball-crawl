@@ -14,6 +14,13 @@ Tests cover:
   a session and sets a cookie.
 - (AC-14f) sign_count is updated after authentication.
 
+E-100 schema notes:
+    - sessions: session_id TEXT PK (no challenge column, no id)
+    - users: id INTEGER PK (no user_id alias)
+    - passkey_credentials: credential_id TEXT PK (no id column)
+    - Passkey registration challenges stored in _PASSKEY_REG_CHALLENGES
+      in-memory dict (keyed by SHA-256 of session cookie token)
+
 py_webauthn verify functions are mocked so no real WebAuthn hardware is needed.
 
 Run with:
@@ -27,7 +34,6 @@ import json
 import secrets
 import sqlite3
 import sys
-from contextlib import closing
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -46,7 +52,7 @@ from src.api.auth import hash_token  # noqa: E402
 from src.api.main import app  # noqa: E402
 
 # ---------------------------------------------------------------------------
-# Full schema SQL (base + auth tables with challenge column)
+# Full schema SQL -- E-100 schema
 # ---------------------------------------------------------------------------
 
 _SCHEMA_SQL = """
@@ -57,146 +63,64 @@ _SCHEMA_SQL = """
     );
     INSERT OR IGNORE INTO _migrations (filename) VALUES ('001_initial_schema.sql');
 
-    CREATE TABLE IF NOT EXISTS players (
-        player_id  TEXT PRIMARY KEY,
-        first_name TEXT NOT NULL,
-        last_name  TEXT NOT NULL,
-        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    CREATE TABLE IF NOT EXISTS programs (
+        program_id   TEXT PRIMARY KEY,
+        name         TEXT NOT NULL,
+        program_type TEXT NOT NULL,
+        created_at   TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
     CREATE TABLE IF NOT EXISTS teams (
-        team_id    TEXT PRIMARY KEY,
-        name       TEXT NOT NULL,
-        level      TEXT,
-        is_owned   INTEGER NOT NULL DEFAULT 0,
-        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        name            TEXT NOT NULL,
+        program_id      TEXT REFERENCES programs(program_id),
+        membership_type TEXT NOT NULL CHECK(membership_type IN ('member', 'tracked')),
+        classification  TEXT,
+        public_id       TEXT,
+        gc_uuid         TEXT,
+        source          TEXT NOT NULL DEFAULT 'gamechanger',
+        is_active       INTEGER NOT NULL DEFAULT 1,
+        created_at      TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
-    CREATE TABLE IF NOT EXISTS team_rosters (
-        id            INTEGER PRIMARY KEY AUTOINCREMENT,
-        team_id       TEXT NOT NULL,
-        player_id     TEXT NOT NULL,
-        season        TEXT NOT NULL,
-        jersey_number TEXT,
-        position      TEXT,
-        UNIQUE(team_id, player_id, season)
-    );
-
-    CREATE TABLE IF NOT EXISTS games (
-        game_id      TEXT PRIMARY KEY,
-        season       TEXT NOT NULL,
-        game_date    TEXT NOT NULL,
-        home_team_id TEXT NOT NULL,
-        away_team_id TEXT NOT NULL,
-        home_score   INTEGER,
-        away_score   INTEGER,
-        status       TEXT NOT NULL DEFAULT 'completed'
-    );
-
-    CREATE TABLE IF NOT EXISTS player_game_batting (
-        id        INTEGER PRIMARY KEY AUTOINCREMENT,
-        game_id   TEXT NOT NULL,
-        player_id TEXT NOT NULL,
-        team_id   TEXT NOT NULL,
-        ab        INTEGER,
-        h         INTEGER,
-        doubles   INTEGER,
-        triples   INTEGER,
-        hr        INTEGER,
-        rbi       INTEGER,
-        bb        INTEGER,
-        so        INTEGER,
-        sb        INTEGER,
-        UNIQUE(game_id, player_id)
-    );
-
-    CREATE TABLE IF NOT EXISTS player_game_pitching (
-        id        INTEGER PRIMARY KEY AUTOINCREMENT,
-        game_id   TEXT NOT NULL,
-        player_id TEXT NOT NULL,
-        team_id   TEXT NOT NULL,
-        ip_outs   INTEGER,
-        h         INTEGER,
-        er        INTEGER,
-        bb        INTEGER,
-        so        INTEGER,
-        hr        INTEGER,
-        UNIQUE(game_id, player_id)
-    );
-
-    CREATE TABLE IF NOT EXISTS player_season_batting (
-        id        INTEGER PRIMARY KEY AUTOINCREMENT,
-        player_id TEXT NOT NULL,
-        team_id   TEXT NOT NULL,
-        season    TEXT NOT NULL,
-        games     INTEGER,
-        ab        INTEGER,
-        h         INTEGER,
-        doubles   INTEGER,
-        triples   INTEGER,
-        hr        INTEGER,
-        rbi       INTEGER,
-        bb        INTEGER,
-        so        INTEGER,
-        sb        INTEGER,
-        home_ab   INTEGER,
-        home_h    INTEGER,
-        away_ab   INTEGER,
-        away_h    INTEGER,
-        vs_lhp_ab INTEGER,
-        vs_lhp_h  INTEGER,
-        vs_rhp_ab INTEGER,
-        vs_rhp_h  INTEGER,
-        UNIQUE(player_id, team_id, season)
-    );
-
-    -- Auth tables (003_auth.sql) with challenge column for WebAuthn
     CREATE TABLE IF NOT EXISTS users (
-        user_id      INTEGER PRIMARY KEY AUTOINCREMENT,
-        email        TEXT    NOT NULL UNIQUE,
-        display_name TEXT    NOT NULL,
-        is_admin     INTEGER NOT NULL DEFAULT 0,
-        created_at   TEXT    NOT NULL DEFAULT (datetime('now'))
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        email           TEXT UNIQUE NOT NULL,
+        hashed_password TEXT,
+        created_at      TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
     CREATE TABLE IF NOT EXISTS user_team_access (
-        id       INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id  INTEGER NOT NULL REFERENCES users(user_id),
-        team_id  TEXT    NOT NULL REFERENCES teams(team_id),
+        user_id INTEGER NOT NULL REFERENCES users(id),
+        team_id INTEGER NOT NULL REFERENCES teams(id),
         UNIQUE(user_id, team_id)
     );
 
     CREATE TABLE IF NOT EXISTS magic_link_tokens (
-        id         INTEGER PRIMARY KEY AUTOINCREMENT,
-        token_hash TEXT    NOT NULL UNIQUE,
-        user_id    INTEGER NOT NULL REFERENCES users(user_id),
-        expires_at TEXT    NOT NULL,
-        used_at    TEXT,
-        created_at TEXT    NOT NULL DEFAULT (datetime('now'))
+        token      TEXT PRIMARY KEY,
+        user_id    INTEGER NOT NULL REFERENCES users(id),
+        expires_at TEXT NOT NULL
     );
 
     CREATE TABLE IF NOT EXISTS passkey_credentials (
-        id            INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id       INTEGER NOT NULL REFERENCES users(user_id),
-        credential_id BLOB    NOT NULL UNIQUE,
-        public_key    BLOB    NOT NULL,
-        sign_count    INTEGER NOT NULL DEFAULT 0,
-        created_at    TEXT    NOT NULL DEFAULT (datetime('now'))
+        credential_id TEXT PRIMARY KEY,
+        user_id       INTEGER NOT NULL REFERENCES users(id),
+        public_key    TEXT NOT NULL,
+        sign_count    INTEGER NOT NULL DEFAULT 0
     );
 
     CREATE TABLE IF NOT EXISTS sessions (
-        id                  INTEGER PRIMARY KEY AUTOINCREMENT,
-        session_token_hash  TEXT    NOT NULL UNIQUE,
-        user_id             INTEGER NOT NULL REFERENCES users(user_id),
-        expires_at          TEXT    NOT NULL,
-        challenge           TEXT,
-        created_at          TEXT    NOT NULL DEFAULT (datetime('now'))
+        session_id TEXT PRIMARY KEY,
+        user_id    INTEGER NOT NULL REFERENCES users(id),
+        expires_at TEXT NOT NULL
     );
 """
 
 _SEED_SQL = """
-    INSERT OR IGNORE INTO teams (team_id, name, level, is_owned) VALUES
-        ('lsb-varsity-2026', 'LSB Varsity 2026', 'varsity', 1);
+    INSERT OR IGNORE INTO programs (program_id, name, program_type) VALUES
+        ('lsb-hs', 'Lincoln Standing Bear HS', 'hs');
+    INSERT OR IGNORE INTO teams (name, membership_type, classification) VALUES
+        ('LSB Varsity 2026', 'member', 'varsity');
 """
 
 
@@ -206,7 +130,7 @@ _SEED_SQL = """
 
 
 def _make_db(tmp_path: Path) -> Path:
-    """Create a fully-schemed database with one team row.
+    """Create a fully-schemed E-100 database with one team row.
 
     Args:
         tmp_path: pytest tmp_path fixture directory.
@@ -223,21 +147,20 @@ def _make_db(tmp_path: Path) -> Path:
     return db_path
 
 
-def _insert_user(db_path: Path, email: str, is_admin: int = 0) -> int:
-    """Insert a user and return user_id.
+def _insert_user(db_path: Path, email: str) -> int:
+    """Insert a user and return user id.
 
     Args:
         db_path: Path to the database.
         email: User email address.
-        is_admin: Admin flag.
 
     Returns:
-        The new user_id integer.
+        The new user id integer (INTEGER PK).
     """
     conn = sqlite3.connect(str(db_path))
     cursor = conn.execute(
-        "INSERT INTO users (email, display_name, is_admin) VALUES (?, ?, ?)",
-        (email, "Test Coach", is_admin),
+        "INSERT INTO users (email) VALUES (?)",
+        (email,),
     )
     conn.commit()
     user_id = cursor.lastrowid
@@ -248,27 +171,29 @@ def _insert_user(db_path: Path, email: str, is_admin: int = 0) -> int:
 def _insert_session(
     db_path: Path,
     user_id: int,
-    challenge: str | None = None,
 ) -> str:
     """Insert a valid session row and return the raw token.
+
+    In E-100 schema, sessions has no challenge column. Passkey registration
+    challenges are stored in the _PASSKEY_REG_CHALLENGES in-memory dict in
+    routes/auth.py, keyed by SHA-256 of the cookie token.
 
     Args:
         db_path: Path to the database.
         user_id: User to associate with this session.
-        challenge: Optional base64-encoded challenge to store in the session.
 
     Returns:
         Raw session token (64 hex chars).
     """
     raw_token = secrets.token_hex(32)
-    token_hash = hash_token(raw_token)
+    session_id = hash_token(raw_token)
     conn = sqlite3.connect(str(db_path))
     conn.execute(
         """
-        INSERT INTO sessions (session_token_hash, user_id, expires_at, challenge)
-        VALUES (?, ?, datetime('now', '+7 days'), ?)
+        INSERT INTO sessions (session_id, user_id, expires_at)
+        VALUES (?, ?, datetime('now', '+7 days'))
         """,
-        (token_hash, user_id, challenge),
+        (session_id, user_id),
     )
     conn.commit()
     conn.close()
@@ -283,6 +208,9 @@ def _insert_passkey_credential(
     sign_count: int = 0,
 ) -> bytes:
     """Insert a passkey credential row and return the credential_id bytes.
+
+    In E-100 schema, passkey_credentials has credential_id TEXT PRIMARY KEY
+    (stored as bytes blob via sqlite3 BLOB affinity).
 
     Args:
         db_path: Path to the database.
@@ -330,7 +258,7 @@ def _b64url(data: bytes) -> str:
 
 @pytest.fixture()
 def db(tmp_path: Path) -> Path:
-    """Database with full schema and one owned team."""
+    """Database with full E-100 schema and one member team."""
     return _make_db(tmp_path)
 
 
@@ -413,6 +341,30 @@ class TestGetPasskeyRegister:
         assert response.status_code == 302
         assert "/auth/login" in response.headers["location"]
 
+    def test_register_stores_challenge_in_memory(self, db: Path) -> None:
+        """GET /auth/passkey/register stores challenge in _PASSKEY_REG_CHALLENGES dict.
+
+        In E-100 schema, there is no sessions.challenge column. The challenge
+        is stored in the module-level in-memory dict keyed by session_id hash.
+        """
+        user_id = _insert_user(db, "challenge-stored@example.com")
+        raw_token = _insert_session(db, user_id)
+        session_id = hash_token(raw_token)
+
+        env = {"DATABASE_PATH": str(db), "DEV_USER_EMAIL": ""}
+        import src.api.routes.auth as auth_routes
+
+        with patch.dict("os.environ", env, clear=False):
+            with TestClient(
+                app,
+                follow_redirects=False,
+                cookies={"session": raw_token},
+            ) as client:
+                client.get("/auth/passkey/register")
+
+        # Challenge should be in the in-memory dict.
+        assert session_id in auth_routes._PASSKEY_REG_CHALLENGES
+
 
 # ---------------------------------------------------------------------------
 # AC-14c: Registration requires active session
@@ -446,10 +398,8 @@ class TestPostPasskeyRegister:
     def test_successful_registration_stores_credential(self, db: Path) -> None:
         """Valid attestation response stores credential_id, public_key, sign_count (AC-14b)."""
         user_id = _insert_user(db, "store-cred@example.com")
-        # Pre-store a challenge in the session
-        challenge_bytes = secrets.token_bytes(32)
-        challenge_b64 = base64.b64encode(challenge_bytes).decode()
-        raw_token = _insert_session(db, user_id, challenge=challenge_b64)
+        raw_token = _insert_session(db, user_id)
+        session_id = hash_token(raw_token)
 
         credential_id = secrets.token_bytes(16)
         public_key_bytes = secrets.token_bytes(64)
@@ -459,6 +409,10 @@ class TestPostPasskeyRegister:
         mock_verified.credential_id = credential_id
         mock_verified.credential_public_key = public_key_bytes
         mock_verified.sign_count = 0
+
+        # Pre-populate the in-memory challenge dict (simulates GET /register having been called).
+        challenge_bytes = secrets.token_bytes(32)
+        challenge_b64 = base64.b64encode(challenge_bytes).decode()
 
         # Fake attestation response body matching what the browser sends
         raw_id_b64url = _b64url(credential_id)
@@ -472,17 +426,24 @@ class TestPostPasskeyRegister:
             },
         }
 
+        import src.api.routes.auth as auth_routes
+
         env = {"DATABASE_PATH": str(db), "DEV_USER_EMAIL": ""}
         with patch.dict("os.environ", env, clear=False):
-            with patch(
-                "src.api.routes.auth.verify_registration_response",
-                return_value=mock_verified,
+            with patch.dict(
+                auth_routes._PASSKEY_REG_CHALLENGES,
+                {session_id: (challenge_b64, __import__("time").time() + 300)},
+                clear=False,
             ):
-                with TestClient(
-                    app,
-                    cookies={"session": raw_token},
-                ) as client:
-                    response = client.post("/auth/passkey/register", json=body)
+                with patch(
+                    "src.api.routes.auth.verify_registration_response",
+                    return_value=mock_verified,
+                ):
+                    with TestClient(
+                        app,
+                        cookies={"session": raw_token},
+                    ) as client:
+                        response = client.post("/auth/passkey/register", json=body)
 
         assert response.status_code == 200
         data = response.json()
@@ -501,19 +462,20 @@ class TestPostPasskeyRegister:
         assert bytes(row[1]) == credential_id
         assert row[2] == 0
 
-    def test_successful_registration_clears_challenge(self, db: Path) -> None:
-        """After registration, the session challenge column is cleared (AC-14b)."""
+    def test_successful_registration_clears_challenge_from_memory(self, db: Path) -> None:
+        """After registration, the challenge is removed from _PASSKEY_REG_CHALLENGES (AC-14b)."""
         user_id = _insert_user(db, "clear-challenge@example.com")
-        challenge_bytes = secrets.token_bytes(32)
-        challenge_b64 = base64.b64encode(challenge_bytes).decode()
-        raw_token = _insert_session(db, user_id, challenge=challenge_b64)
-        token_hash = hash_token(raw_token)
+        raw_token = _insert_session(db, user_id)
+        session_id = hash_token(raw_token)
 
         credential_id = secrets.token_bytes(16)
         mock_verified = MagicMock()
         mock_verified.credential_id = credential_id
         mock_verified.credential_public_key = secrets.token_bytes(64)
         mock_verified.sign_count = 0
+
+        challenge_bytes = secrets.token_bytes(32)
+        challenge_b64 = base64.b64encode(challenge_bytes).decode()
 
         raw_id_b64url = _b64url(credential_id)
         body = {
@@ -526,32 +488,33 @@ class TestPostPasskeyRegister:
             },
         }
 
+        import src.api.routes.auth as auth_routes
+
         env = {"DATABASE_PATH": str(db), "DEV_USER_EMAIL": ""}
         with patch.dict("os.environ", env, clear=False):
-            with patch(
-                "src.api.routes.auth.verify_registration_response",
-                return_value=mock_verified,
+            with patch.dict(
+                auth_routes._PASSKEY_REG_CHALLENGES,
+                {session_id: (challenge_b64, __import__("time").time() + 300)},
+                clear=False,
             ):
-                with TestClient(
-                    app,
-                    cookies={"session": raw_token},
-                ) as client:
-                    client.post("/auth/passkey/register", json=body)
+                with patch(
+                    "src.api.routes.auth.verify_registration_response",
+                    return_value=mock_verified,
+                ):
+                    with TestClient(
+                        app,
+                        cookies={"session": raw_token},
+                    ) as client:
+                        client.post("/auth/passkey/register", json=body)
 
-        conn = sqlite3.connect(str(db))
-        cursor = conn.execute(
-            "SELECT challenge FROM sessions WHERE session_token_hash = ?",
-            (token_hash,),
-        )
-        row = cursor.fetchone()
-        conn.close()
-        assert row is not None
-        assert row[0] is None  # challenge cleared
+        # Challenge should be consumed (popped from dict).
+        assert session_id not in auth_routes._PASSKEY_REG_CHALLENGES
 
     def test_registration_without_challenge_returns_400(self, db: Path) -> None:
         """POST /auth/passkey/register with no stored challenge returns 400 (AC-14b)."""
         user_id = _insert_user(db, "no-challenge@example.com")
-        raw_token = _insert_session(db, user_id, challenge=None)
+        raw_token = _insert_session(db, user_id)
+        session_id = hash_token(raw_token)
 
         body = {
             "id": "dGVzdA",
@@ -563,8 +526,12 @@ class TestPostPasskeyRegister:
             },
         }
 
+        import src.api.routes.auth as auth_routes
+
         env = {"DATABASE_PATH": str(db), "DEV_USER_EMAIL": ""}
         with patch.dict("os.environ", env, clear=False):
+            # Ensure no challenge entry for this session.
+            auth_routes._PASSKEY_REG_CHALLENGES.pop(session_id, None)
             with TestClient(
                 app,
                 cookies={"session": raw_token},
@@ -576,9 +543,11 @@ class TestPostPasskeyRegister:
     def test_registration_failure_shows_error_page(self, db: Path) -> None:
         """Failed attestation verification returns error page with 'try again' (AC-5)."""
         user_id = _insert_user(db, "fail-reg@example.com")
+        raw_token = _insert_session(db, user_id)
+        session_id = hash_token(raw_token)
+
         challenge_bytes = secrets.token_bytes(32)
         challenge_b64 = base64.b64encode(challenge_bytes).decode()
-        raw_token = _insert_session(db, user_id, challenge=challenge_b64)
 
         body = {
             "id": _b64url(secrets.token_bytes(16)),
@@ -590,17 +559,24 @@ class TestPostPasskeyRegister:
             },
         }
 
+        import src.api.routes.auth as auth_routes
+
         env = {"DATABASE_PATH": str(db), "DEV_USER_EMAIL": ""}
         with patch.dict("os.environ", env, clear=False):
-            with patch(
-                "src.api.routes.auth.verify_registration_response",
-                side_effect=Exception("Verification failed"),
+            with patch.dict(
+                auth_routes._PASSKEY_REG_CHALLENGES,
+                {session_id: (challenge_b64, __import__("time").time() + 300)},
+                clear=False,
             ):
-                with TestClient(
-                    app,
-                    cookies={"session": raw_token},
-                ) as client:
-                    response = client.post("/auth/passkey/register", json=body)
+                with patch(
+                    "src.api.routes.auth.verify_registration_response",
+                    side_effect=Exception("Verification failed"),
+                ):
+                    with TestClient(
+                        app,
+                        cookies={"session": raw_token},
+                    ) as client:
+                        response = client.post("/auth/passkey/register", json=body)
 
         assert response.status_code == 400
         assert "try again" in response.text.lower()
@@ -609,13 +585,17 @@ class TestPostPasskeyRegister:
         """A user can register multiple passkeys (AC-4): separate credential rows."""
         user_id = _insert_user(db, "multi-passkey@example.com")
 
+        import src.api.routes.auth as auth_routes
+
         cred_id_1 = secrets.token_bytes(16)
         cred_id_2 = secrets.token_bytes(16)
 
         for cred_id in (cred_id_1, cred_id_2):
+            raw_token = _insert_session(db, user_id)
+            session_id = hash_token(raw_token)
+
             challenge_bytes = secrets.token_bytes(32)
             challenge_b64 = base64.b64encode(challenge_bytes).decode()
-            raw_token = _insert_session(db, user_id, challenge=challenge_b64)
 
             mock_verified = MagicMock()
             mock_verified.credential_id = cred_id
@@ -635,15 +615,20 @@ class TestPostPasskeyRegister:
 
             env = {"DATABASE_PATH": str(db), "DEV_USER_EMAIL": ""}
             with patch.dict("os.environ", env, clear=False):
-                with patch(
-                    "src.api.routes.auth.verify_registration_response",
-                    return_value=mock_verified,
+                with patch.dict(
+                    auth_routes._PASSKEY_REG_CHALLENGES,
+                    {session_id: (challenge_b64, __import__("time").time() + 300)},
+                    clear=False,
                 ):
-                    with TestClient(
-                        app,
-                        cookies={"session": raw_token},
-                    ) as client:
-                        response = client.post("/auth/passkey/register", json=body)
+                    with patch(
+                        "src.api.routes.auth.verify_registration_response",
+                        return_value=mock_verified,
+                    ):
+                        with TestClient(
+                            app,
+                            cookies={"session": raw_token},
+                        ) as client:
+                            response = client.post("/auth/passkey/register", json=body)
 
             assert response.status_code == 200
 
@@ -751,7 +736,6 @@ class TestPostPasskeyLoginVerify:
             db, user_id, credential_id=credential_id, public_key=public_key_bytes, sign_count=5
         )
 
-        # First call login/options to get a challenge stored server-side
         env = {
             "DATABASE_PATH": str(db),
             "WEBAUTHN_RP_ID": "localhost",
@@ -761,7 +745,6 @@ class TestPostPasskeyLoginVerify:
 
         raw_id_b64url = _b64url(credential_id)
 
-        # Mock the authentication options to get a known challenge
         challenge_bytes = secrets.token_bytes(32)
         challenge_b64url = _b64url(challenge_bytes)
         challenge_b64 = base64.b64encode(challenge_bytes).decode()
@@ -769,7 +752,6 @@ class TestPostPasskeyLoginVerify:
         client_data_bytes = self._make_fake_client_data(challenge_b64url)
         client_data_b64url = _b64url(client_data_bytes)
 
-        # Build fake assertion body
         body = {
             "id": raw_id_b64url,
             "rawId": raw_id_b64url,
@@ -782,12 +764,10 @@ class TestPostPasskeyLoginVerify:
             },
         }
 
-        # Mock VerifiedAuthentication result
         mock_verified = MagicMock()
         mock_verified.new_sign_count = 6
 
         with patch.dict("os.environ", env, clear=False):
-            # Pre-populate the challenge store
             with patch.dict(
                 "src.api.routes.auth._PASSKEY_LOGIN_CHALLENGES",
                 {challenge_b64: __import__("time").time() + 300},
@@ -1038,20 +1018,27 @@ class TestVerifyRedirectsToPromptWhenNoPasskeys:
         db_path: Path,
         user_id: int,
         expired: bool = False,
-        used: bool = False,
     ) -> str:
+        """Insert a magic link token for testing verify redirects.
+
+        Args:
+            db_path: Path to the database.
+            user_id: User to associate with this token.
+            expired: If True, sets expires_at in the past.
+
+        Returns:
+            Raw token string.
+        """
         raw_token = secrets.token_urlsafe(32)
-        token_hash = hash_token(raw_token)
         expires_offset = "-1 hour" if expired else "+15 minutes"
-        used_at_expr = "datetime('now')" if used else "NULL"
 
         conn = sqlite3.connect(str(db_path))
         conn.execute(
             f"""
-            INSERT INTO magic_link_tokens (token_hash, user_id, expires_at, used_at)
-            VALUES (?, ?, datetime('now', '{expires_offset}'), {used_at_expr})
+            INSERT INTO magic_link_tokens (token, user_id, expires_at)
+            VALUES (?, ?, datetime('now', '{expires_offset}'))
             """,
-            (token_hash, user_id),
+            (raw_token, user_id),
         )
         conn.commit()
         conn.close()

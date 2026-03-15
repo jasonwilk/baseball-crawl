@@ -13,8 +13,6 @@ from __future__ import annotations
 
 import logging
 import os
-import re
-import secrets
 import sqlite3
 from contextlib import closing
 from pathlib import Path
@@ -57,7 +55,7 @@ def get_connection() -> sqlite3.Connection:
 
 
 def get_team_batting_stats(
-    team_id: str = "lsb-varsity-2026",
+    team_id: int,
     season_id: str = "2026-spring-hs",
 ) -> list[dict[str, Any]]:
     """Return season batting stats for all players on a team.
@@ -67,7 +65,7 @@ def get_team_batting_stats(
     Results are sorted by AVG descending; players with no AB appear at bottom.
 
     Args:
-        team_id:   The team identifier to query.  Defaults to LSB Varsity 2026.
+        team_id:   The INTEGER team id to query.
         season_id: The season slug (e.g. ``"2026-spring-hs"``).  Defaults to
                    ``"2026-spring-hs"``.
 
@@ -82,7 +80,7 @@ def get_team_batting_stats(
             p.player_id,
             p.first_name || ' ' || p.last_name AS name,
             tr.jersey_number,
-            COALESCE(psb.games, 0)   AS games,
+            COALESCE(psb.gp, 0)      AS games,
             COALESCE(psb.ab, 0)      AS ab,
             COALESCE(psb.h, 0)       AS h,
             COALESCE(psb.doubles, 0) AS doubles,
@@ -115,20 +113,20 @@ def get_team_batting_stats(
         return []
 
 
-def get_teams_by_ids(team_ids: list[str]) -> list[dict[str, Any]]:
-    """Return team display names for the given list of team_ids.
+def get_teams_by_ids(team_ids: list[int]) -> list[dict[str, Any]]:
+    """Return team display names for the given list of INTEGER team ids.
 
     Args:
-        team_ids: List of team_id strings to look up.
+        team_ids: List of INTEGER team ids to look up.
 
     Returns:
-        List of dicts with keys: team_id, name.
+        List of dicts with keys: id, name.
         Returns an empty list if team_ids is empty or on DB error.
     """
     if not team_ids:
         return []
     placeholders = ",".join("?" for _ in team_ids)
-    query = f"SELECT team_id, name FROM teams WHERE team_id IN ({placeholders})"
+    query = f"SELECT id, name FROM teams WHERE id IN ({placeholders})"
     try:
         with closing(get_connection()) as conn:
             conn.row_factory = sqlite3.Row
@@ -141,7 +139,7 @@ def get_teams_by_ids(team_ids: list[str]) -> list[dict[str, Any]]:
 
 
 def get_team_pitching_stats(
-    team_id: str = "lsb-varsity-2026",
+    team_id: int,
     season_id: str = "2026-spring-hs",
 ) -> list[dict[str, Any]]:
     """Return season pitching stats for all pitchers on a team.
@@ -152,7 +150,7 @@ def get_team_pitching_stats(
     at the bottom).
 
     Args:
-        team_id:   The team identifier to query.  Defaults to LSB Varsity 2026.
+        team_id:   The INTEGER team id to query.
         season_id: The season slug (e.g. ``"2026-spring-hs"``).  Defaults to
                    ``"2026-spring-hs"``.
 
@@ -167,7 +165,7 @@ def get_team_pitching_stats(
             p.player_id,
             p.first_name || ' ' || p.last_name AS name,
             tr.jersey_number,
-            COALESCE(psp.games, 0)   AS games,
+            COALESCE(psp.gp_pitcher, 0) AS games,
             COALESCE(psp.ip_outs, 0) AS ip_outs,
             COALESCE(psp.h, 0)       AS h,
             COALESCE(psp.er, 0)      AS er,
@@ -198,7 +196,7 @@ def get_team_pitching_stats(
 
 
 def get_team_games(
-    team_id: str,
+    team_id: int,
     season_id: str,
 ) -> list[dict[str, Any]]:
     """Return the game list for a team in a season, sorted by date descending.
@@ -207,7 +205,7 @@ def get_team_games(
     opponent name and determine home/away context.
 
     Args:
-        team_id:   The team_id to query (home or away).
+        team_id:   The INTEGER team id to query (home or away).
         season_id: The season slug (e.g. ``"2026-spring-hs"``).
 
     Returns:
@@ -233,8 +231,8 @@ def get_team_games(
                  ELSE opp_home.name
             END AS opponent_name
         FROM games g
-        LEFT JOIN teams opp_away ON opp_away.team_id = g.away_team_id
-        LEFT JOIN teams opp_home ON opp_home.team_id = g.home_team_id
+        LEFT JOIN teams opp_away ON opp_away.id = g.away_team_id
+        LEFT JOIN teams opp_home ON opp_home.id = g.home_team_id
         WHERE g.season_id = :season_id
           AND (g.home_team_id = :team_id OR g.away_team_id = :team_id)
         ORDER BY g.game_date DESC
@@ -257,17 +255,19 @@ def get_game_box_score(game_id: str) -> dict[str, Any]:
     ``players`` and ``teams``, returning per-player lines grouped by team.
 
     Also returns top-level game metadata (game_date, home_team_id, away_team_id,
-    home_score, away_score).
+    home_score, away_score).  The ``home_team_id`` and ``away_team_id`` values
+    are INTEGER references to ``teams.id``.
 
     Args:
         game_id: The game identifier.
 
     Returns:
         Dict with keys:
-            - ``game``: dict with game_id, game_date, home_team_id, away_team_id,
-              home_score, away_score, home_team_name, away_team_name
+            - ``game``: dict with game_id, game_date, home_team_id (int),
+              away_team_id (int), home_score, away_score, home_team_name,
+              away_team_name
             - ``teams``: list of two dicts, each with:
-                - team_id, team_name
+                - team_id (int), team_name
                 - batting_lines: list of player batting dicts
                 - pitching_lines: list of player pitching dicts
         Returns ``{}`` on DB error or missing game.
@@ -283,8 +283,8 @@ def get_game_box_score(game_id: str) -> dict[str, Any]:
             th.name AS home_team_name,
             ta.name AS away_team_name
         FROM games g
-        LEFT JOIN teams th ON th.team_id = g.home_team_id
-        LEFT JOIN teams ta ON ta.team_id = g.away_team_id
+        LEFT JOIN teams th ON th.id = g.home_team_id
+        LEFT JOIN teams ta ON ta.id = g.away_team_id
         WHERE g.game_id = ?
     """
     batting_query = """
@@ -315,8 +315,7 @@ def get_game_box_score(game_id: str) -> dict[str, Any]:
             COALESCE(pgp.h, 0)       AS h,
             COALESCE(pgp.er, 0)      AS er,
             COALESCE(pgp.bb, 0)      AS bb,
-            COALESCE(pgp.so, 0)      AS so,
-            COALESCE(pgp.hr, 0)      AS hr
+            COALESCE(pgp.so, 0)      AS so
         FROM player_game_pitching pgp
         JOIN players p ON p.player_id = pgp.player_id
         WHERE pgp.game_id = ?
@@ -335,17 +334,17 @@ def get_game_box_score(game_id: str) -> dict[str, Any]:
         logger.exception("Failed to fetch game box score")
         return {}
 
-    # Group batting and pitching lines by team_id
-    batting_by_team: dict[str, list[dict[str, Any]]] = {}
+    # Group batting and pitching lines by team_id (INTEGER)
+    batting_by_team: dict[int, list[dict[str, Any]]] = {}
     for row in batting_rows:
         batting_by_team.setdefault(row["team_id"], []).append(row)
 
-    pitching_by_team: dict[str, list[dict[str, Any]]] = {}
+    pitching_by_team: dict[int, list[dict[str, Any]]] = {}
     for row in pitching_rows:
         pitching_by_team.setdefault(row["team_id"], []).append(row)
 
-    home_id = game["home_team_id"]
-    away_id = game["away_team_id"]
+    home_id: int = game["home_team_id"]
+    away_id: int = game["away_team_id"]
     team_ids = [home_id, away_id]
 
     teams_data = []
@@ -354,7 +353,7 @@ def get_game_box_score(game_id: str) -> dict[str, Any]:
         teams_data.append(
             {
                 "team_id": tid,
-                "team_name": team_name or tid,
+                "team_name": team_name or str(tid),
                 "batting_lines": batting_by_team.get(tid, []),
                 "pitching_lines": pitching_by_team.get(tid, []),
             }
@@ -364,7 +363,7 @@ def get_game_box_score(game_id: str) -> dict[str, Any]:
 
 
 def get_team_opponents(
-    team_id: str,
+    team_id: int,
     season_id: str,
 ) -> list[dict[str, Any]]:
     """Return all opponents the given team has faced or will face in a season.
@@ -374,7 +373,7 @@ def get_team_opponents(
     future) or the most recent completed game date.
 
     Args:
-        team_id:   The team_id to query (home or away side).
+        team_id:   The INTEGER team id to query (home or away side).
         season_id: The season slug (e.g. ``"2026-spring-hs"``).
 
     Returns:
@@ -412,8 +411,8 @@ def get_team_opponents(
                      THEN g.game_date END) AS next_game_date,
             MAX(CASE WHEN g.status = 'completed' THEN g.game_date END) AS last_game_date
         FROM games g
-        LEFT JOIN teams opp_away ON opp_away.team_id = g.away_team_id
-        LEFT JOIN teams opp_home ON opp_home.team_id = g.home_team_id
+        LEFT JOIN teams opp_away ON opp_away.id = g.away_team_id
+        LEFT JOIN teams opp_home ON opp_home.id = g.home_team_id
         WHERE g.season_id = :season_id
           AND (g.home_team_id = :team_id OR g.away_team_id = :team_id)
         GROUP BY opponent_team_id, opponent_name
@@ -431,25 +430,25 @@ def get_team_opponents(
 
 
 def get_opponent_scouting_report(
-    opponent_team_id: str,
+    opponent_team_id: int,
     season_id: str,
 ) -> dict[str, Any]:
     """Return batting and pitching stats for an opponent team in a season.
 
     Queries ``player_season_batting`` and ``player_season_pitching`` for the
-    given team_id and season_id.  Results are sorted by AVG desc (batting) and
+    given team id and season_id.  Results are sorted by AVG desc (batting) and
     ERA asc (pitching).
 
     Also returns the opponent team name from the ``teams`` table, and the
     opponent's season record (wins/losses from ``games``).
 
     Args:
-        opponent_team_id: The opponent's team_id.
+        opponent_team_id: The opponent's INTEGER team id.
         season_id:        The season slug (e.g. ``"2026-spring-hs"``).
 
     Returns:
         Dict with keys:
-            - ``team_name``: display name or opponent_team_id fallback
+            - ``team_name``: display name or str(opponent_team_id) fallback
             - ``record``: dict with wins/losses (int), or None if no games
             - ``batting``: list of dicts (player_id, name, games, ab, h,
               doubles, triples, hr, rbi, bb, so, sb)
@@ -457,7 +456,7 @@ def get_opponent_scouting_report(
               h, er, bb, so, pitches)
         Returns an empty dict on DB error.
     """
-    team_query = "SELECT name FROM teams WHERE team_id = ?"
+    team_query = "SELECT name FROM teams WHERE id = ?"
     record_query = """
         SELECT
             SUM(CASE
@@ -479,7 +478,7 @@ def get_opponent_scouting_report(
         SELECT
             p.player_id,
             p.first_name || ' ' || p.last_name AS name,
-            COALESCE(psb.games, 0)   AS games,
+            COALESCE(psb.gp, 0)      AS games,
             COALESCE(psb.ab, 0)      AS ab,
             COALESCE(psb.h, 0)       AS h,
             COALESCE(psb.doubles, 0) AS doubles,
@@ -501,7 +500,7 @@ def get_opponent_scouting_report(
         SELECT
             p.player_id,
             p.first_name || ' ' || p.last_name AS name,
-            COALESCE(psp.games, 0)   AS games,
+            COALESCE(psp.gp_pitcher, 0) AS games,
             COALESCE(psp.ip_outs, 0) AS ip_outs,
             COALESCE(psp.h, 0)       AS h,
             COALESCE(psp.er, 0)      AS er,
@@ -520,7 +519,7 @@ def get_opponent_scouting_report(
         with closing(get_connection()) as conn:
             conn.row_factory = sqlite3.Row
             team_row = conn.execute(team_query, (opponent_team_id,)).fetchone()
-            team_name = dict(team_row)["name"] if team_row else opponent_team_id
+            team_name = dict(team_row)["name"] if team_row else str(opponent_team_id)
             record_row = conn.execute(
                 record_query, {"tid": opponent_team_id, "season_id": season_id}
             ).fetchone()
@@ -548,8 +547,8 @@ def get_opponent_scouting_report(
 
 
 def get_last_meeting(
-    team_id: str,
-    opponent_team_id: str,
+    team_id: int,
+    opponent_team_id: int,
     season_id: str,
 ) -> dict[str, Any] | None:
     """Return the most recent completed game between two teams in a season.
@@ -558,8 +557,8 @@ def get_last_meeting(
     ``opponent_team_id``, with ``status = 'completed'`` and scores recorded.
 
     Args:
-        team_id:          The user's active team_id.
-        opponent_team_id: The opponent's team_id.
+        team_id:          The user's active INTEGER team id.
+        opponent_team_id: The opponent's INTEGER team id.
         season_id:        The season slug (e.g. ``"2026-spring-hs"``).
 
     Returns:
@@ -631,7 +630,7 @@ def get_player_profile(player_id: str) -> dict[str, Any]:
             s.name        AS season_name,
             psb.team_id,
             t.name        AS team_name,
-            COALESCE(psb.games, 0)   AS games,
+            COALESCE(psb.gp, 0)      AS games,
             COALESCE(psb.ab, 0)      AS ab,
             COALESCE(psb.h, 0)       AS h,
             COALESCE(psb.doubles, 0) AS doubles,
@@ -643,7 +642,7 @@ def get_player_profile(player_id: str) -> dict[str, Any]:
             COALESCE(psb.sb, 0)      AS sb
         FROM player_season_batting psb
         JOIN seasons s ON s.season_id = psb.season_id
-        JOIN teams t ON t.team_id = psb.team_id
+        JOIN teams t ON t.id = psb.team_id
         WHERE psb.player_id = ?
         ORDER BY psb.season_id DESC
     """
@@ -653,7 +652,7 @@ def get_player_profile(player_id: str) -> dict[str, Any]:
             s.name        AS season_name,
             psp.team_id,
             t.name        AS team_name,
-            COALESCE(psp.games, 0)   AS games,
+            COALESCE(psp.gp_pitcher, 0) AS games,
             COALESCE(psp.ip_outs, 0) AS ip_outs,
             COALESCE(psp.h, 0)       AS h,
             COALESCE(psp.er, 0)      AS er,
@@ -662,7 +661,7 @@ def get_player_profile(player_id: str) -> dict[str, Any]:
             COALESCE(psp.hr, 0)      AS hr
         FROM player_season_pitching psp
         JOIN seasons s ON s.season_id = psp.season_id
-        JOIN teams t ON t.team_id = psp.team_id
+        JOIN teams t ON t.id = psp.team_id
         WHERE psp.player_id = ?
         ORDER BY psp.season_id DESC
     """
@@ -686,8 +685,8 @@ def get_player_profile(player_id: str) -> dict[str, Any]:
             'batting' AS appearance_type
         FROM player_game_batting pgb
         JOIN games g ON g.game_id = pgb.game_id
-        LEFT JOIN teams opp_away ON opp_away.team_id = g.away_team_id
-        LEFT JOIN teams opp_home ON opp_home.team_id = g.home_team_id
+        LEFT JOIN teams opp_away ON opp_away.id = g.away_team_id
+        LEFT JOIN teams opp_home ON opp_home.id = g.home_team_id
         WHERE pgb.player_id = ?
 
         UNION
@@ -709,8 +708,8 @@ def get_player_profile(player_id: str) -> dict[str, Any]:
             'pitching' AS appearance_type
         FROM player_game_pitching pgp
         JOIN games g ON g.game_id = pgp.game_id
-        LEFT JOIN teams opp_away ON opp_away.team_id = g.away_team_id
-        LEFT JOIN teams opp_home ON opp_home.team_id = g.home_team_id
+        LEFT JOIN teams opp_away ON opp_away.id = g.away_team_id
+        LEFT JOIN teams opp_home ON opp_home.id = g.home_team_id
         WHERE pgp.player_id = ?
     """
     # Deduplicate by game_id (prefer batting row when both exist), then sort and limit.
@@ -763,29 +762,15 @@ def get_player_profile(player_id: str) -> dict[str, Any]:
     }
 
 
-def _generate_opponent_team_id(name: str) -> str:
-    """Generate a unique team_id slug for a discovered opponent.
-
-    Builds a lowercase-hyphenated slug from the name, truncated to 43 chars to
-    reserve room for the "-" separator and 6-char hex suffix, giving a total
-    team_id of at most 50 characters.
-    """
-    slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:43]
-    suffix = secrets.token_hex(3)  # 6 hex chars
-    return f"{slug}-{suffix}"
-
-
 def bulk_create_opponents(names: list[str]) -> int:
     """Insert discovered opponent placeholder rows for names not already in the DB.
 
     Skips any name that already exists in the ``teams`` table (case-insensitive
     match on the ``name`` column).  New rows are inserted with:
-    - ``team_id``: lowercase-hyphenated slug from the name, suffixed with 6
-      random hex chars to ensure uniqueness (max 50 chars total).
-    - ``public_id = NULL``
-    - ``is_owned = 0``
+    - ``membership_type = 'tracked'``
     - ``is_active = 0``
     - ``source = 'discovered'``
+    - INTEGER PK auto-assigned by SQLite AUTOINCREMENT
 
     Uses ``INSERT OR IGNORE`` as a secondary safety net for any race conditions.
 
@@ -806,14 +791,13 @@ def bulk_create_opponents(names: list[str]) -> int:
             for name in names:
                 if name.lower() in existing_lower:
                     continue
-                team_id = _generate_opponent_team_id(name)
                 result = conn.execute(
                     """
                     INSERT OR IGNORE INTO teams
-                        (team_id, name, public_id, level, is_owned, is_active, source)
-                    VALUES (?, ?, NULL, NULL, 0, 0, 'discovered')
+                        (name, membership_type, is_active, source)
+                    VALUES (?, 'tracked', 0, 'discovered')
                     """,
-                    (team_id, name),
+                    (name,),
                 )
                 existing_lower.add(name.lower())
                 if result.rowcount:
@@ -837,19 +821,19 @@ _OPPONENT_LINKS_BASE_SQL = """
         ol.resolved_at,
         ol.is_hidden
     FROM opponent_links ol
-    JOIN teams t ON t.team_id = ol.our_team_id
+    JOIN teams t ON t.id = ol.our_team_id
     WHERE {where}
     ORDER BY t.name, ol.opponent_name
 """
 
 
 def _opponent_links_where(
-    our_team_id: str | None, filter: str | None
+    our_team_id: int | None, filter: str | None
 ) -> tuple[str, list[Any]]:
     """Build WHERE clause and params for opponent_links queries."""
     conditions: list[str] = ["ol.is_hidden = 0"]
     params: list[Any] = []
-    if our_team_id:
+    if our_team_id is not None:
         conditions.append("ol.our_team_id = ?")
         params.append(our_team_id)
     if filter == "full":
@@ -860,13 +844,14 @@ def _opponent_links_where(
 
 
 def get_opponent_links(
-    our_team_id: str | None = None,
+    our_team_id: int | None = None,
     filter: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Return opponent_links rows with optional team_id and resolution-state filter.
+    """Return opponent_links rows with optional team id and resolution-state filter.
 
     Args:
-        our_team_id: Scope to a specific owned team. None returns all teams.
+        our_team_id: INTEGER team id to scope to a specific owned team.
+            None returns all teams.
         filter: ``'full'`` for resolved, ``'scoresheet'`` for unlinked, None for all.
 
     Returns:
@@ -885,18 +870,18 @@ def get_opponent_links(
         return []
 
 
-def get_opponent_link_counts(our_team_id: str | None = None) -> dict[str, int]:
+def get_opponent_link_counts(our_team_id: int | None = None) -> dict[str, int]:
     """Return total, full_stats, and scoresheet_only counts for opponent links.
 
     Args:
-        our_team_id: Scope to a specific team, or None for all teams.
+        our_team_id: INTEGER team id to scope to a specific team, or None for all teams.
 
     Returns:
         Dict with keys: total, full_stats, scoresheet_only.
     """
     conditions: list[str] = ["is_hidden = 0"]
     params: list[Any] = []
-    if our_team_id:
+    if our_team_id is not None:
         conditions.append("our_team_id = ?")
         params.append(our_team_id)
     where = " AND ".join(conditions)
@@ -945,7 +930,7 @@ def get_opponent_link_by_id(link_id: int) -> dict[str, Any] | None:
             ol.resolved_at,
             ol.is_hidden
         FROM opponent_links ol
-        JOIN teams t ON t.team_id = ol.our_team_id
+        JOIN teams t ON t.id = ol.our_team_id
         WHERE ol.id = ?
     """
     try:
@@ -958,30 +943,30 @@ def get_opponent_link_by_id(link_id: int) -> dict[str, Any] | None:
         return None
 
 
-def is_owned_team_public_id(public_id: str) -> bool:
-    """Return True if the public_id belongs to an owned (LSB) team.
+def is_member_team_public_id(public_id: str) -> bool:
+    """Return True if the public_id belongs to a member (LSB) team.
 
     Args:
         public_id: The public_id slug to check.
 
     Returns:
-        True if an owned team has this public_id.
+        True if a member team has this public_id.
     """
     try:
         with closing(get_connection()) as conn:
             row = conn.execute(
-                "SELECT 1 FROM teams WHERE public_id = ? AND is_owned = 1",
+                "SELECT 1 FROM teams WHERE public_id = ? AND membership_type = 'member'",
                 (public_id,),
             ).fetchone()
         return row is not None
     except sqlite3.Error:
-        logger.exception("Failed to check owned team public_id %s", public_id)
+        logger.exception("Failed to check member team public_id %s", public_id)
         return False
 
 
 def get_duplicate_opponent_name(
     public_id: str,
-    our_team_id: str,
+    our_team_id: int,
     exclude_id: int | None = None,
 ) -> str | None:
     """Return the opponent_name of an existing row that already uses this public_id.
@@ -991,7 +976,7 @@ def get_duplicate_opponent_name(
 
     Args:
         public_id: The public_id slug to check.
-        our_team_id: The owning team -- only rows for this team are checked.
+        our_team_id: The owning INTEGER team id -- only rows for this team are checked.
         exclude_id: opponent_links.id to exclude (for updates).
 
     Returns:
@@ -1035,8 +1020,7 @@ def save_manual_opponent_link(link_id: int, public_id: str) -> None:
             SET public_id          = ?,
                 resolution_method  = 'manual',
                 resolved_team_id   = NULL,
-                resolved_at        = datetime('now'),
-                updated_at         = datetime('now')
+                resolved_at        = datetime('now')
             WHERE id = ?
             """,
             (public_id, link_id),
@@ -1073,8 +1057,7 @@ def disconnect_opponent_link(link_id: int) -> bool:
                 SET public_id         = NULL,
                     resolution_method = NULL,
                     resolved_team_id  = NULL,
-                    resolved_at       = NULL,
-                    updated_at        = datetime('now')
+                    resolved_at       = NULL
                 WHERE id = ?
                 """,
                 (link_id,),
@@ -1103,11 +1086,11 @@ def count_all_opponent_links() -> int:
         return 0
 
 
-def get_opponent_link_count_for_team(our_team_id: str) -> int:
+def get_opponent_link_count_for_team(our_team_id: int) -> int:
     """Return the non-hidden opponent_links count for a specific owned team.
 
     Args:
-        our_team_id: The team_id to count for.
+        our_team_id: The INTEGER team id to count for.
 
     Returns:
         Integer count.
@@ -1120,7 +1103,7 @@ def get_opponent_link_count_for_team(our_team_id: str) -> int:
             ).fetchone()
         return row[0] if row else 0
     except sqlite3.Error:
-        logger.exception("Failed to count opponent links for team %s", our_team_id)
+        logger.exception("Failed to count opponent links for team %d", our_team_id)
         return 0
 
 

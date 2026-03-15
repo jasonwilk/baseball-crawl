@@ -13,6 +13,13 @@ Routes:
     GET  /auth/passkey/login/options  -- Return WebAuthn authentication options as JSON
     POST /auth/passkey/login/verify   -- Verify assertion and create session
     GET  /auth/passkey/prompt         -- Post-login passkey registration CTA (interstitial)
+
+Schema notes (E-100 schema):
+    - sessions.session_id is the SHA-256 hash of the raw cookie token (TEXT PRIMARY KEY)
+    - users.id is INTEGER PRIMARY KEY (no user_id alias, no display_name, no is_admin)
+    - magic_link_tokens.token is TEXT PRIMARY KEY (raw token stored directly; DELETE on use)
+    - passkey registration challenges stored in _PASSKEY_REG_CHALLENGES in-memory dict
+      (sessions table has no challenge column in E-100 schema)
 """
 
 from __future__ import annotations
@@ -62,6 +69,9 @@ _SESSION_COOKIE_NAME = "session"
 _SESSION_MAX_AGE = 604800  # 7 days in seconds
 _APP_URL_DEFAULT = "http://baseball.localhost:8001"
 
+# Magic link rate-limit cooldown in seconds.
+_MAGIC_LINK_COOLDOWN_SECONDS = 60
+
 # In-memory challenge store for passkey login (no session exists yet).
 # Maps challenge_b64 -> expiry timestamp (unix seconds).
 # Entries expire after 5 minutes.
@@ -70,6 +80,12 @@ _APP_URL_DEFAULT = "http://baseball.localhost:8001"
 # another, silently breaking passkey login. Move to SQLite if scaling.
 _PASSKEY_LOGIN_CHALLENGES: dict[str, float] = {}
 _PASSKEY_CHALLENGE_TTL = 300  # seconds
+
+# In-memory challenge store for passkey REGISTRATION.
+# Maps session_id_hash (SHA-256 of cookie token) -> (challenge_b64, expiry).
+# The E-100 sessions table has no challenge column; challenges are stored here.
+# WARNING: Same single-worker constraint as _PASSKEY_LOGIN_CHALLENGES.
+_PASSKEY_REG_CHALLENGES: dict[str, tuple[str, float]] = {}
 
 
 def _get_app_url() -> str:
@@ -138,8 +154,7 @@ def _get_authenticated_user(
         request: The incoming HTTP request.
 
     Returns:
-        User dict with user_id, email, display_name, is_admin if authenticated;
-        None if no valid session.
+        User dict with ``id`` and ``email`` if authenticated; None if no valid session.
     """
     # Check if middleware already resolved the user (non-auth routes).
     user = getattr(request.state, "user", None)
@@ -151,7 +166,7 @@ def _get_authenticated_user(
     if not cookie_value:
         return None
 
-    token_hash = hash_token(cookie_value)
+    session_id = hash_token(cookie_value)
     try:
         with closing(get_connection()) as conn:
             conn.row_factory = sqlite3.Row
@@ -159,17 +174,17 @@ def _get_authenticated_user(
                 """
                 SELECT s.user_id
                 FROM sessions s
-                WHERE s.session_token_hash = ?
+                WHERE s.session_id = ?
                   AND s.expires_at > datetime('now')
                 """,
-                (token_hash,),
+                (session_id,),
             )
             session_row = cursor.fetchone()
             if not session_row:
                 return None
 
             cursor = conn.execute(
-                "SELECT user_id, email, display_name, is_admin FROM users WHERE user_id = ?",
+                "SELECT id, email FROM users WHERE id = ?",
                 (session_row["user_id"],),
             )
             user_row = cursor.fetchone()
@@ -200,11 +215,14 @@ def _user_has_passkeys(conn: sqlite3.Connection, user_id: int) -> bool:
 
 
 def _purge_expired_challenges() -> None:
-    """Remove expired entries from the in-memory passkey challenge store."""
+    """Remove expired entries from the in-memory passkey challenge stores."""
     now = time.time()
-    expired = [k for k, exp in _PASSKEY_LOGIN_CHALLENGES.items() if exp < now]
-    for k in expired:
+    expired_login = [k for k, exp in _PASSKEY_LOGIN_CHALLENGES.items() if exp < now]
+    for k in expired_login:
         _PASSKEY_LOGIN_CHALLENGES.pop(k, None)
+    expired_reg = [k for k, (_, exp) in _PASSKEY_REG_CHALLENGES.items() if exp < now]
+    for k in expired_reg:
+        _PASSKEY_REG_CHALLENGES.pop(k, None)
 
 
 def _base64url_decode(value: str) -> bytes:
@@ -240,16 +258,16 @@ async def get_login(request: Request) -> HTMLResponse | RedirectResponse:
     # Also check cookie directly for the "already logged in" case.
     cookie_value = request.cookies.get(_SESSION_COOKIE_NAME, "")
     if cookie_value:
-        token_hash = hash_token(cookie_value)
+        session_id = hash_token(cookie_value)
         try:
             with closing(get_connection()) as conn:
                 cursor = conn.execute(
                     """
                     SELECT 1 FROM sessions
-                    WHERE session_token_hash = ?
+                    WHERE session_id = ?
                       AND expires_at > datetime('now')
                     """,
-                    (token_hash,),
+                    (session_id,),
                 )
                 if cursor.fetchone():
                     return RedirectResponse(url="/dashboard", status_code=302)
@@ -270,6 +288,11 @@ async def post_login(
     renders the same "If this email is registered..." confirmation page to
     prevent user enumeration.
 
+    Rate limit: if the user has an unexpired token issued within the last 60
+    seconds (approximated by checking expires_at > now + 14min), suppress
+    issuance.  Since tokens expire in 15 minutes, a token with more than 14
+    minutes remaining was issued less than 60 seconds ago.
+
     Args:
         request: The incoming HTTP request.
         email: Email address submitted via form.
@@ -283,53 +306,44 @@ async def post_login(
         with closing(get_connection()) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.execute(
-                "SELECT user_id FROM users WHERE email = ?",
+                "SELECT id FROM users WHERE email = ?",
                 (email,),
             )
             user_row = cursor.fetchone()
 
             if user_row:
-                # Rate limit: skip issuance if a link was sent within the last
-                # 60 seconds.  Show the same confirmation page either way so
-                # that timing cannot be used to enumerate registered emails.
+                user_id: int = user_row["id"]
+
+                # Rate limit: if there is an unexpired token with > 14 minutes
+                # remaining, it was issued within the last 60 seconds.
                 cursor = conn.execute(
                     """
-                    SELECT (julianday('now') - julianday(created_at)) * 86400.0
-                        AS seconds_since
+                    SELECT COUNT(*) AS cnt
                     FROM magic_link_tokens
                     WHERE user_id = ?
-                    ORDER BY created_at DESC
-                    LIMIT 1
+                      AND expires_at > datetime('now', '+14 minutes')
                     """,
-                    (user_row["user_id"],),
+                    (user_id,),
                 )
                 recent = cursor.fetchone()
-                if recent is not None and recent["seconds_since"] < 60:
+                if recent and recent["cnt"] > 0:
                     logger.info(
-                        "Magic link rate limit hit for user %d (%.1fs ago)",
-                        user_row["user_id"],
-                        recent["seconds_since"],
+                        "Magic link rate limit hit for user %d", user_id
                     )
                 else:
                     raw_token = secrets.token_urlsafe(32)
-                    token_hash = hash_token(raw_token)
-                    # Invalidate all prior unused tokens for this user before
-                    # inserting the new one.  Both statements run in the same
-                    # transaction so the invalidation and insertion are atomic.
+                    # Invalidate all prior unused tokens for this user by
+                    # deleting them before inserting the new one.
                     conn.execute(
-                        """
-                        UPDATE magic_link_tokens
-                        SET used_at = datetime('now')
-                        WHERE user_id = ? AND used_at IS NULL
-                        """,
-                        (user_row["user_id"],),
+                        "DELETE FROM magic_link_tokens WHERE user_id = ?",
+                        (user_id,),
                     )
                     conn.execute(
                         """
-                        INSERT INTO magic_link_tokens (token_hash, user_id, expires_at)
+                        INSERT INTO magic_link_tokens (token, user_id, expires_at)
                         VALUES (?, ?, datetime('now', '+15 minutes'))
                         """,
-                        (token_hash, user_row["user_id"]),
+                        (raw_token, user_id),
                     )
                     conn.commit()
 
@@ -353,6 +367,9 @@ async def verify_token(
     passkeys.  If not, redirects to the passkey prompt interstitial.  If
     they do, redirects directly to /dashboard.
 
+    The token is stored directly in magic_link_tokens.token (TEXT PRIMARY KEY).
+    Verification deletes the row (single-use).
+
     Args:
         request: The incoming HTTP request.
         token: Raw magic link token from the query string.
@@ -365,29 +382,21 @@ async def verify_token(
             request, "auth/verify_error.html", {}, status_code=400
         )
 
-    token_hash = hash_token(token)
-
     try:
         with closing(get_connection()) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.execute(
                 """
-                SELECT id, user_id, expires_at, used_at
+                SELECT user_id, expires_at
                 FROM magic_link_tokens
-                WHERE token_hash = ?
+                WHERE token = ?
                 """,
-                (token_hash,),
+                (token,),
             )
             row = cursor.fetchone()
 
             if not row:
-                logger.warning("Magic link token not found: hash=%s...", token_hash[:8])
-                return templates.TemplateResponse(
-                    request, "auth/verify_error.html", {}, status_code=400
-                )
-
-            if row["used_at"] is not None:
-                logger.warning("Magic link token already used: id=%d", row["id"])
+                logger.warning("Magic link token not found")
                 return templates.TemplateResponse(
                     request, "auth/verify_error.html", {}, status_code=400
                 )
@@ -397,29 +406,33 @@ async def verify_token(
                 """
                 SELECT (expires_at > datetime('now')) AS valid
                 FROM magic_link_tokens
-                WHERE id = ?
+                WHERE token = ?
                 """,
-                (row["id"],),
+                (token,),
             )
             validity = cursor.fetchone()
             if not validity or not validity["valid"]:
-                logger.warning("Magic link token expired: id=%d", row["id"])
+                logger.warning("Magic link token expired for user %d", row["user_id"])
+                # Clean up expired token.
+                conn.execute(
+                    "DELETE FROM magic_link_tokens WHERE token = ?",
+                    (token,),
+                )
+                conn.commit()
                 return templates.TemplateResponse(
                     request, "auth/verify_error.html", {}, status_code=400
                 )
 
-            # Atomically mark as used -- the WHERE used_at IS NULL guard
-            # prevents a concurrent request from also consuming this token.
+            # Atomically delete the token (single-use enforcement).
             cursor = conn.execute(
-                "UPDATE magic_link_tokens SET used_at = datetime('now') "
-                "WHERE id = ? AND used_at IS NULL",
-                (row["id"],),
+                "DELETE FROM magic_link_tokens WHERE token = ?",
+                (token,),
             )
             conn.commit()
 
             if cursor.rowcount == 0:
-                # Another request consumed the token between our SELECT and UPDATE.
-                logger.warning("Magic link token race: id=%d already consumed", row["id"])
+                # Another request consumed the token between our SELECT and DELETE.
+                logger.warning("Magic link token race: already consumed")
                 return templates.TemplateResponse(
                     request, "auth/verify_error.html", {}, status_code=400
                 )
@@ -455,12 +468,12 @@ async def logout(request: Request) -> RedirectResponse:
     """
     cookie_value = request.cookies.get(_SESSION_COOKIE_NAME, "")
     if cookie_value:
-        token_hash = hash_token(cookie_value)
+        session_id = hash_token(cookie_value)
         try:
             with closing(get_connection()) as conn:
                 conn.execute(
-                    "DELETE FROM sessions WHERE session_token_hash = ?",
-                    (token_hash,),
+                    "DELETE FROM sessions WHERE session_id = ?",
+                    (session_id,),
                 )
                 conn.commit()
         except sqlite3.Error:
@@ -507,8 +520,11 @@ async def get_passkey_register(request: Request) -> HTMLResponse | RedirectRespo
     """Render the passkey registration page with embedded WebAuthn options.
 
     Requires an active session.  Generates registration options server-side,
-    stores the challenge in the DB (sessions.challenge column), and embeds
-    the options as JSON in the rendered page.
+    stores the challenge in _PASSKEY_REG_CHALLENGES (keyed by session_id hash),
+    and embeds the options as JSON in the rendered page.
+
+    The E-100 sessions table has no challenge column; challenges are stored
+    in the module-level in-memory dict instead.
 
     Args:
         request: The incoming HTTP request.
@@ -520,7 +536,7 @@ async def get_passkey_register(request: Request) -> HTMLResponse | RedirectRespo
     if not user:
         return RedirectResponse(url="/auth/login", status_code=302)
 
-    user_id: int = user["user_id"]
+    user_id: int = user["id"]
     email: str = user["email"]
 
     rp_id = _get_webauthn_rp_id()
@@ -542,33 +558,23 @@ async def get_passkey_register(request: Request) -> HTMLResponse | RedirectRespo
         rp_name="LSB Baseball",
         user_name=email,
         user_id=str(user_id).encode(),
-        user_display_name=user.get("display_name", email),
+        user_display_name=email,
         authenticator_selection=AuthenticatorSelectionCriteria(
             resident_key=ResidentKeyRequirement.PREFERRED,
             user_verification=UserVerificationRequirement.PREFERRED,
         ),
     )
 
-    # Store challenge in the session row (base64-encoded bytes).
+    # Store challenge in the in-memory dict (keyed by session_id hash).
     challenge_b64 = base64.b64encode(registration_options.challenge).decode()
     cookie_value = request.cookies.get(_SESSION_COOKIE_NAME, "")
     if cookie_value:
-        token_hash = hash_token(cookie_value)
-        try:
-            with closing(get_connection()) as conn:
-                conn.execute(
-                    "UPDATE sessions SET challenge = ? WHERE session_token_hash = ?",
-                    (challenge_b64, token_hash),
-                )
-                conn.commit()
-        except sqlite3.OperationalError as exc:
-            if "no such column" in str(exc).lower():
-                logger.error(
-                    "sessions.challenge column missing -- "
-                    "run the passkey challenge migration before registering passkeys"
-                )
-            else:
-                raise
+        session_id = hash_token(cookie_value)
+        _purge_expired_challenges()
+        _PASSKEY_REG_CHALLENGES[session_id] = (
+            challenge_b64,
+            time.time() + _PASSKEY_CHALLENGE_TTL,
+        )
 
     options_json_str = options_to_json(registration_options)
     return templates.TemplateResponse(
@@ -584,8 +590,8 @@ async def post_passkey_register(
 ) -> JSONResponse | RedirectResponse | HTMLResponse:
     """Verify the attestation response and store the new passkey credential.
 
-    Reads the challenge from the session row, verifies via py_webauthn, and
-    stores the credential in ``passkey_credentials``.
+    Reads the challenge from _PASSKEY_REG_CHALLENGES (keyed by session_id hash),
+    verifies via py_webauthn, and stores the credential in ``passkey_credentials``.
 
     Args:
         request: The incoming HTTP request.
@@ -597,7 +603,7 @@ async def post_passkey_register(
     if not user:
         return JSONResponse({"detail": "Not authenticated"}, status_code=401)
 
-    user_id: int = user["user_id"]
+    user_id: int = user["id"]
 
     # Parse JSON body.
     try:
@@ -605,38 +611,24 @@ async def post_passkey_register(
     except Exception:
         return JSONResponse({"detail": "Invalid JSON body"}, status_code=400)
 
-    # Retrieve and clear challenge from session row.
+    # Retrieve and clear challenge from the in-memory dict.
     cookie_value = request.cookies.get(_SESSION_COOKIE_NAME, "")
     if not cookie_value:
         return JSONResponse({"detail": "Session cookie missing"}, status_code=401)
 
-    token_hash = hash_token(cookie_value)
-    challenge_bytes: bytes | None = None
-    try:
-        with closing(get_connection()) as conn:
-            cursor = conn.execute(
-                "SELECT challenge FROM sessions WHERE session_token_hash = ?",
-                (token_hash,),
-            )
-            row = cursor.fetchone()
-            if row and row[0]:
-                challenge_bytes = base64.b64decode(row[0])
-                # Clear the challenge after reading.
-                conn.execute(
-                    "UPDATE sessions SET challenge = NULL WHERE session_token_hash = ?",
-                    (token_hash,),
-                )
-                conn.commit()
-    except sqlite3.Error:
-        logger.exception("DB error retrieving passkey registration challenge")
-        return JSONResponse({"detail": "Server error"}, status_code=500)
+    session_id = hash_token(cookie_value)
+    _purge_expired_challenges()
+    reg_entry = _PASSKEY_REG_CHALLENGES.pop(session_id, None)
 
-    if not challenge_bytes:
+    if not reg_entry:
         logger.warning("No passkey registration challenge found for user %d", user_id)
         return JSONResponse(
             {"detail": "Registration session expired. Please try again."},
             status_code=400,
         )
+
+    challenge_b64, _ = reg_entry
+    challenge_bytes: bytes = base64.b64decode(challenge_b64)
 
     # Build the RegistrationCredential from the browser response.
     try:
@@ -795,7 +787,7 @@ async def post_passkey_login_verify(request: Request) -> JSONResponse | Redirect
             conn.row_factory = sqlite3.Row
             cursor = conn.execute(
                 """
-                SELECT id, user_id, credential_id, public_key, sign_count
+                SELECT user_id, credential_id, public_key, sign_count
                 FROM passkey_credentials
                 WHERE credential_id = ?
                 """,
@@ -873,12 +865,12 @@ async def post_passkey_login_verify(request: Request) -> JSONResponse | Redirect
     try:
         with closing(get_connection()) as conn:
             conn.execute(
-                "UPDATE passkey_credentials SET sign_count = ? WHERE id = ?",
-                (verified.new_sign_count, cred_row["id"]),
+                "UPDATE passkey_credentials SET sign_count = ? WHERE credential_id = ?",
+                (verified.new_sign_count, cred_row["credential_id"]),
             )
             conn.commit()
     except sqlite3.Error:
-        logger.exception("DB error updating passkey sign_count for credential %d", cred_row["id"])
+        logger.exception("DB error updating passkey sign_count")
         # Non-fatal -- session still gets created.
 
     # Create a session (same path as magic link verify).

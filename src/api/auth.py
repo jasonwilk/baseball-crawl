@@ -81,10 +81,10 @@ def create_session(user_id: int) -> str:
     """Create a new session in the database and return the raw session token.
 
     Generates a ``secrets.token_hex(32)`` raw token, stores its SHA-256 hash
-    in the ``sessions`` table with a 7-day expiry.
+    as the session_id in the ``sessions`` table with a 7-day expiry.
 
     Args:
-        user_id: The authenticated user's database ID.
+        user_id: The authenticated user's database ID (INTEGER PK from users.id).
 
     Returns:
         Raw 64-character hex session token to be set as a cookie.
@@ -97,7 +97,7 @@ def create_session(user_id: int) -> str:
     with closing(get_connection()) as conn:
         conn.execute(
             """
-            INSERT INTO sessions (session_token_hash, user_id, expires_at)
+            INSERT INTO sessions (session_id, user_id, expires_at)
             VALUES (?, ?, datetime('now', '+7 days'))
             """,
             (token_hash, user_id),
@@ -110,7 +110,7 @@ def _get_user_by_email(conn: sqlite3.Connection, email: str) -> dict[str, Any] |
     """Fetch user row by email; returns None if not found."""
     conn.row_factory = sqlite3.Row
     cursor = conn.execute(
-        "SELECT user_id, email, display_name, is_admin FROM users WHERE email = ?",
+        "SELECT id, email FROM users WHERE email = ?",
         (email,),
     )
     row = cursor.fetchone()
@@ -118,43 +118,35 @@ def _get_user_by_email(conn: sqlite3.Connection, email: str) -> dict[str, Any] |
 
 
 def _create_dev_user(conn: sqlite3.Connection, email: str) -> dict[str, Any]:
-    """Insert a dev admin user and return the new row dict."""
+    """Insert a dev user and return the new row dict."""
     cursor = conn.execute(
-        "INSERT INTO users (email, display_name, is_admin) VALUES (?, ?, 1)",
-        (email, "Dev Admin"),
+        "INSERT INTO users (email) VALUES (?)",
+        (email,),
     )
     conn.commit()
     user_id = cursor.lastrowid
     return {
-        "user_id": user_id,
+        "id": user_id,
         "email": email,
-        "display_name": "Dev Admin",
-        "is_admin": 1,
     }
 
 
-def _get_permitted_teams(conn: sqlite3.Connection, user: dict[str, Any]) -> list[str]:
-    """Return the list of permitted team_ids for the user.
+def _get_permitted_teams(conn: sqlite3.Connection, user: dict[str, Any]) -> list[int]:
+    """Return the list of permitted INTEGER team ids for the user.
 
-    Admins receive all is_owned=1 team_ids.  Non-admins receive only their
-    explicitly granted team_ids from user_team_access.
+    All users receive team ids from user_team_access.
 
     Args:
         conn: Open SQLite connection.
-        user: User dict with at least ``user_id`` and ``is_admin``.
+        user: User dict with at least ``id``.
 
     Returns:
-        List of team_id strings.
+        List of INTEGER team ids.
     """
-    if user.get("is_admin"):
-        cursor = conn.execute(
-            "SELECT team_id FROM teams WHERE is_owned = 1"
-        )
-    else:
-        cursor = conn.execute(
-            "SELECT team_id FROM user_team_access WHERE user_id = ?",
-            (user["user_id"],),
-        )
+    cursor = conn.execute(
+        "SELECT team_id FROM user_team_access WHERE user_id = ?",
+        (user["id"],),
+    )
     return [row[0] for row in cursor.fetchall()]
 
 
@@ -180,7 +172,7 @@ def _resolve_session_from_cookie(
                 """
                 SELECT s.user_id
                 FROM sessions s
-                WHERE s.session_token_hash = ?
+                WHERE s.session_id = ?
                   AND s.expires_at > datetime('now')
                 """,
                 (token_hash,),
@@ -191,7 +183,7 @@ def _resolve_session_from_cookie(
 
             user_id = session_row["user_id"]
             cursor = conn.execute(
-                "SELECT user_id, email, display_name, is_admin FROM users WHERE user_id = ?",
+                "SELECT id, email FROM users WHERE id = ?",
                 (user_id,),
             )
             user_row = cursor.fetchone()

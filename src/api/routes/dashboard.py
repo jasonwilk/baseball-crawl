@@ -66,7 +66,7 @@ async def team_stats(request: Request) -> Response:
     Returns:
         HTMLResponse containing the rendered team stats page, or a 403.
     """
-    permitted_teams: list[str] = getattr(request.state, "permitted_teams", [])
+    permitted_teams: list[int] = getattr(request.state, "permitted_teams", [])
     user: dict = getattr(request.state, "user", {})
 
     # AC-7: no permitted teams
@@ -85,11 +85,15 @@ async def team_stats(request: Request) -> Response:
         )
 
     # AC-2: respect team_id query param, validate against permitted list
-    requested_team_id = request.query_params.get("team_id")
-    if requested_team_id:
-        if requested_team_id not in permitted_teams:
+    requested_team_id_raw = request.query_params.get("team_id")
+    if requested_team_id_raw:
+        try:
+            requested_team_id: int | None = int(requested_team_id_raw)
+        except (ValueError, TypeError):
+            requested_team_id = None
+        if requested_team_id is None or requested_team_id not in permitted_teams:
             return HTMLResponse(content="Forbidden", status_code=403)
-        active_team_id = requested_team_id
+        active_team_id: int = requested_team_id
     else:
         active_team_id = permitted_teams[0]
 
@@ -103,8 +107,8 @@ async def team_stats(request: Request) -> Response:
     )
 
     team_name = next(
-        (t["name"] for t in team_infos if t["team_id"] == active_team_id),
-        active_team_id,
+        (t["name"] for t in team_infos if t["id"] == active_team_id),
+        str(active_team_id),
     )
 
     logger.debug(
@@ -126,9 +130,9 @@ async def team_stats(request: Request) -> Response:
 
 
 async def _fetch_dashboard_data(
-    active_team_id: str,
+    active_team_id: int,
     season_id: str,
-    permitted_teams: list[str],
+    permitted_teams: list[int],
 ) -> tuple[list, list]:
     """Fetch batting stats and team display names concurrently.
 
@@ -198,7 +202,7 @@ async def team_pitching(request: Request) -> Response:
     Returns:
         HTMLResponse containing the rendered pitching stats page, or a 403.
     """
-    permitted_teams: list[str] = getattr(request.state, "permitted_teams", [])
+    permitted_teams: list[int] = getattr(request.state, "permitted_teams", [])
     user: dict = getattr(request.state, "user", {})
 
     if not permitted_teams:
@@ -215,32 +219,36 @@ async def team_pitching(request: Request) -> Response:
             },
         )
 
-    requested_team_id = request.query_params.get("team_id")
-    if requested_team_id:
-        if requested_team_id not in permitted_teams:
+    requested_team_id_raw = request.query_params.get("team_id")
+    if requested_team_id_raw:
+        try:
+            requested_team_id_int: int | None = int(requested_team_id_raw)
+        except (ValueError, TypeError):
+            requested_team_id_int = None
+        if requested_team_id_int is None or requested_team_id_int not in permitted_teams:
             return HTMLResponse(content="Forbidden", status_code=403)
-        active_team_id = requested_team_id
+        active_team_id_p: int = requested_team_id_int
     else:
-        active_team_id = permitted_teams[0]
+        active_team_id_p = permitted_teams[0]
 
     requested_season_id = request.query_params.get("season_id", "").strip()
     season_id = requested_season_id or f"{datetime.date.today().year}-spring-hs"
 
     pitchers_raw = await run_in_threadpool(
-        db.get_team_pitching_stats, active_team_id, season_id
+        db.get_team_pitching_stats, active_team_id_p, season_id
     )
     team_infos = await run_in_threadpool(db.get_teams_by_ids, permitted_teams)
 
     pitchers = _compute_pitching_rates(pitchers_raw)
 
     team_name = next(
-        (t["name"] for t in team_infos if t["team_id"] == active_team_id),
-        active_team_id,
+        (t["name"] for t in team_infos if t["id"] == active_team_id_p),
+        str(active_team_id_p),
     )
 
     logger.debug(
         "Pitching dashboard: team=%s season_id=%s pitchers=%d",
-        active_team_id,
+        active_team_id_p,
         season_id,
         len(pitchers),
     )
@@ -252,7 +260,7 @@ async def team_pitching(request: Request) -> Response:
             "pitchers": pitchers,
             "team_name": team_name,
             "permitted_team_infos": team_infos,
-            "active_team_id": active_team_id,
+            "active_team_id": active_team_id_p,
             "user": user,
             "no_assignments": False,
         },
@@ -301,7 +309,7 @@ async def game_list(request: Request) -> Response:
     Returns:
         HTMLResponse containing the rendered game list page, or a 403.
     """
-    permitted_teams: list[str] = getattr(request.state, "permitted_teams", [])
+    permitted_teams: list[int] = getattr(request.state, "permitted_teams", [])
     user: dict = getattr(request.state, "user", {})
 
     if not permitted_teams:
@@ -318,30 +326,34 @@ async def game_list(request: Request) -> Response:
             },
         )
 
-    requested_team_id = request.query_params.get("team_id")
-    if requested_team_id:
-        if requested_team_id not in permitted_teams:
+    requested_team_id_raw = request.query_params.get("team_id")
+    if requested_team_id_raw:
+        try:
+            requested_team_id_g: int | None = int(requested_team_id_raw)
+        except (ValueError, TypeError):
+            requested_team_id_g = None
+        if requested_team_id_g is None or requested_team_id_g not in permitted_teams:
             return HTMLResponse(content="Forbidden", status_code=403)
-        active_team_id = requested_team_id
+        active_team_id_g: int = requested_team_id_g
     else:
-        active_team_id = permitted_teams[0]
+        active_team_id_g = permitted_teams[0]
 
     requested_season_id = request.query_params.get("season_id", "").strip()
     season_id = requested_season_id or f"{datetime.date.today().year}-spring-hs"
 
-    games_raw, team_infos = await _fetch_game_list_data(active_team_id, season_id, permitted_teams)
+    games_raw, team_infos = await _fetch_game_list_data(active_team_id_g, season_id, permitted_teams)
 
     # Annotate each game with W/L indicator and formatted score
     for game in games_raw:
-        game["wl"] = _compute_wl(game, active_team_id)
+        game["wl"] = _compute_wl(game, active_team_id_g)
 
     team_name = next(
-        (t["name"] for t in team_infos if t["team_id"] == active_team_id),
-        active_team_id,
+        (t["name"] for t in team_infos if t["id"] == active_team_id_g),
+        str(active_team_id_g),
     )
 
     logger.debug(
-        "Game list: team=%s season_id=%s games=%d", active_team_id, season_id, len(games_raw)
+        "Game list: team=%s season_id=%s games=%d", active_team_id_g, season_id, len(games_raw)
     )
 
     return templates.TemplateResponse(
@@ -351,7 +363,7 @@ async def game_list(request: Request) -> Response:
             "games": games_raw,
             "team_name": team_name,
             "permitted_team_infos": team_infos,
-            "active_team_id": active_team_id,
+            "active_team_id": active_team_id_g,
             "season_id": season_id,
             "user": user,
             "no_assignments": False,
@@ -360,9 +372,9 @@ async def game_list(request: Request) -> Response:
 
 
 async def _fetch_game_list_data(
-    active_team_id: str,
+    active_team_id: int,
     season_id: str,
-    permitted_teams: list[str],
+    permitted_teams: list[int],
 ) -> tuple[list, list]:
     """Fetch game list and team display names concurrently.
 
@@ -474,7 +486,7 @@ async def opponent_list(request: Request) -> Response:
     Returns:
         HTMLResponse containing the rendered opponent list page, or a 403.
     """
-    permitted_teams: list[str] = getattr(request.state, "permitted_teams", [])
+    permitted_teams: list[int] = getattr(request.state, "permitted_teams", [])
     user: dict = getattr(request.state, "user", {})
 
     if not permitted_teams:
@@ -491,27 +503,31 @@ async def opponent_list(request: Request) -> Response:
             },
         )
 
-    requested_team_id = request.query_params.get("team_id")
-    if requested_team_id:
-        if requested_team_id not in permitted_teams:
+    requested_team_id_raw = request.query_params.get("team_id")
+    if requested_team_id_raw:
+        try:
+            requested_team_id_o: int | None = int(requested_team_id_raw)
+        except (ValueError, TypeError):
+            requested_team_id_o = None
+        if requested_team_id_o is None or requested_team_id_o not in permitted_teams:
             return HTMLResponse(content="Forbidden", status_code=403)
-        active_team_id = requested_team_id
+        active_team_id_o: int = requested_team_id_o
     else:
-        active_team_id = permitted_teams[0]
+        active_team_id_o = permitted_teams[0]
 
     requested_season_id = request.query_params.get("season_id", "").strip()
     season_id = requested_season_id or f"{datetime.date.today().year}-spring-hs"
 
-    opponents, team_infos = await _fetch_opponent_list_data(active_team_id, season_id, permitted_teams)
+    opponents, team_infos = await _fetch_opponent_list_data(active_team_id_o, season_id, permitted_teams)
 
     team_name = next(
-        (t["name"] for t in team_infos if t["team_id"] == active_team_id),
-        active_team_id,
+        (t["name"] for t in team_infos if t["id"] == active_team_id_o),
+        str(active_team_id_o),
     )
 
     logger.debug(
         "Opponent list: team=%s season_id=%s opponents=%d",
-        active_team_id,
+        active_team_id_o,
         season_id,
         len(opponents),
     )
@@ -523,7 +539,7 @@ async def opponent_list(request: Request) -> Response:
             "opponents": opponents,
             "team_name": team_name,
             "permitted_team_infos": team_infos,
-            "active_team_id": active_team_id,
+            "active_team_id": active_team_id_o,
             "season_id": season_id,
             "user": user,
             "no_assignments": False,
@@ -532,9 +548,9 @@ async def opponent_list(request: Request) -> Response:
 
 
 async def _fetch_opponent_list_data(
-    active_team_id: str,
+    active_team_id: int,
     season_id: str,
-    permitted_teams: list[str],
+    permitted_teams: list[int],
 ) -> tuple[list, list]:
     """Fetch opponent list and team display names concurrently.
 
@@ -552,7 +568,7 @@ async def _fetch_opponent_list_data(
 
 
 @router.get("/dashboard/opponents/{opponent_team_id}", response_model=None)
-async def opponent_detail(request: Request, opponent_team_id: str) -> Response:
+async def opponent_detail(request: Request, opponent_team_id: int) -> Response:
     """Render the opponent scouting report page.
 
     Shows Key Players card, Last Meeting card, batting leaders, and pitching
@@ -568,7 +584,7 @@ async def opponent_detail(request: Request, opponent_team_id: str) -> Response:
     Returns:
         HTMLResponse containing the rendered scouting report page, or a 403.
     """
-    permitted_teams: list[str] = getattr(request.state, "permitted_teams", [])
+    permitted_teams: list[int] = getattr(request.state, "permitted_teams", [])
     user: dict = getattr(request.state, "user", {})
 
     # AC-11: verify opponent appears in games for at least one permitted team
@@ -579,11 +595,18 @@ async def opponent_detail(request: Request, opponent_team_id: str) -> Response:
         return HTMLResponse(content="Forbidden", status_code=403)
 
     # Determine active team for Last Meeting query (AC-16)
-    requested_team_id = request.query_params.get("team_id")
-    if requested_team_id and requested_team_id in permitted_teams:
-        active_team_id = requested_team_id
+    requested_team_id_raw = request.query_params.get("team_id")
+    if requested_team_id_raw:
+        try:
+            requested_team_id_od: int | None = int(requested_team_id_raw)
+        except (ValueError, TypeError):
+            requested_team_id_od = None
+        if requested_team_id_od is not None and requested_team_id_od in permitted_teams:
+            active_team_id_od: int | None = requested_team_id_od
+        else:
+            active_team_id_od = permitted_teams[0] if permitted_teams else None
     else:
-        active_team_id = permitted_teams[0] if permitted_teams else None
+        active_team_id_od = permitted_teams[0] if permitted_teams else None
 
     requested_season_id = request.query_params.get("season_id", "").strip()
     season_id = requested_season_id or f"{datetime.date.today().year}-spring-hs"
@@ -603,9 +626,9 @@ async def opponent_detail(request: Request, opponent_team_id: str) -> Response:
 
     # Fetch last meeting
     last_meeting = None
-    if active_team_id:
+    if active_team_id_od:
         last_meeting = await run_in_threadpool(
-            db.get_last_meeting, active_team_id, opponent_team_id, season_id
+            db.get_last_meeting, active_team_id_od, opponent_team_id, season_id
         )
 
     logger.debug(
@@ -620,7 +643,7 @@ async def opponent_detail(request: Request, opponent_team_id: str) -> Response:
             "opponent_team_id": opponent_team_id,
             "key_players": key_players,
             "last_meeting": last_meeting,
-            "active_team_id": active_team_id,
+            "active_team_id": active_team_id_od,
             "permitted_team_infos": team_infos,
             "season_id": season_id,
             "user": user,
@@ -629,8 +652,8 @@ async def opponent_detail(request: Request, opponent_team_id: str) -> Response:
 
 
 def _check_opponent_authorization(
-    opponent_team_id: str,
-    permitted_teams: list[str],
+    opponent_team_id: int,
+    permitted_teams: list[int],
 ) -> bool:
     """Return True if the opponent appears in games for at least one permitted team.
 
@@ -664,9 +687,9 @@ def _check_opponent_authorization(
 
 
 async def _fetch_opponent_detail_data(
-    opponent_team_id: str,
+    opponent_team_id: int,
     season_id: str,
-    permitted_teams: list[str],
+    permitted_teams: list[int],
 ) -> tuple[dict, list]:
     """Fetch scouting report and team display names.
 
@@ -701,7 +724,7 @@ async def game_detail(request: Request, game_id: str) -> Response:
     Returns:
         HTMLResponse containing the rendered box score page, or a 403/404.
     """
-    permitted_teams: list[str] = getattr(request.state, "permitted_teams", [])
+    permitted_teams: list[int] = getattr(request.state, "permitted_teams", [])
     user: dict = getattr(request.state, "user", {})
 
     box_score = await run_in_threadpool(db.get_game_box_score, game_id)
@@ -710,26 +733,36 @@ async def game_detail(request: Request, game_id: str) -> Response:
         return HTMLResponse(content="Game not found", status_code=404)
 
     game = box_score["game"]
-    team_ids_in_game = {game["home_team_id"], game["away_team_id"]}
+    team_ids_in_game: set[int] = {game["home_team_id"], game["away_team_id"]}
 
     # AC-11: verify game involves at least one permitted team
     if not team_ids_in_game.intersection(permitted_teams):
         return HTMLResponse(content="Forbidden", status_code=403)
 
     # Determine active_team_id for the details open attribute
-    requested_team_id = request.query_params.get("team_id")
-    if requested_team_id and requested_team_id in permitted_teams:
-        active_team_id = requested_team_id
+    requested_team_id_raw = request.query_params.get("team_id")
+    if requested_team_id_raw:
+        try:
+            requested_team_id_gd: int | None = int(requested_team_id_raw)
+        except (ValueError, TypeError):
+            requested_team_id_gd = None
+        if requested_team_id_gd is not None and requested_team_id_gd in permitted_teams:
+            active_team_id_gd: int | None = requested_team_id_gd
+        else:
+            active_team_id_gd = next(
+                (t for t in permitted_teams if t in team_ids_in_game),
+                permitted_teams[0] if permitted_teams else None,
+            )
     else:
         # Use first permitted team that appears in this game; fall back to first permitted
-        active_team_id = next(
+        active_team_id_gd = next(
             (t for t in permitted_teams if t in team_ids_in_game),
             permitted_teams[0] if permitted_teams else None,
         )
 
     team_infos = await run_in_threadpool(db.get_teams_by_ids, list(permitted_teams))
 
-    logger.debug("Game detail: game_id=%s active_team_id=%s", game_id, active_team_id)
+    logger.debug("Game detail: game_id=%s active_team_id=%s", game_id, active_team_id_gd)
 
     return templates.TemplateResponse(
         request,
@@ -737,7 +770,7 @@ async def game_detail(request: Request, game_id: str) -> Response:
         {
             "game": game,
             "teams": box_score["teams"],
-            "active_team_id": active_team_id,
+            "active_team_id": active_team_id_gd,
             "permitted_team_infos": team_infos,
             "user": user,
         },
@@ -774,7 +807,7 @@ def _compute_player_pitching_rates(pitching_seasons: list[dict]) -> list[dict]:
 
 def _check_player_authorization(
     player_id: str,
-    permitted_teams: list[str],
+    permitted_teams: list[int],
 ) -> bool:
     """Return True if the player has a team_rosters entry on any permitted team.
 
@@ -825,7 +858,7 @@ async def player_profile(request: Request, player_id: str) -> Response:
     Returns:
         HTMLResponse containing the rendered player profile page, or a 403/404.
     """
-    permitted_teams: list[str] = getattr(request.state, "permitted_teams", [])
+    permitted_teams: list[int] = getattr(request.state, "permitted_teams", [])
     user: dict = getattr(request.state, "user", {})
 
     profile = await run_in_threadpool(db.get_player_profile, player_id)

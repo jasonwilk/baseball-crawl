@@ -1,5 +1,5 @@
 # synthetic-test-data
-"""Tests for auth-scoped dashboard behavior (E-023-04).
+"""Tests for auth-scoped dashboard behavior (E-023-04), updated for E-100 schema.
 
 Verifies:
 - Team access control (AC-2, AC-8): users cannot view teams they don't have access to
@@ -38,9 +38,11 @@ _CURRENT_SEASON_ID = f"{datetime.date.today().year}-spring-hs"
 
 
 # ---------------------------------------------------------------------------
-# Database fixture helpers
+# Database fixture helpers (E-100 schema)
 # ---------------------------------------------------------------------------
 
+# Minimal E-100 schema subset needed for dashboard tests.
+# Uses the actual column names from 001_initial_schema.sql.
 _SCHEMA_SQL = """
     CREATE TABLE IF NOT EXISTS _migrations (
         id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -48,41 +50,55 @@ _SCHEMA_SQL = """
         applied_at TEXT    NOT NULL DEFAULT (datetime('now'))
     );
 
+    -- E-100: users -- id INTEGER PK, no display_name, no is_admin
     CREATE TABLE IF NOT EXISTS users (
-        user_id      INTEGER PRIMARY KEY AUTOINCREMENT,
-        email        TEXT    NOT NULL UNIQUE,
-        display_name TEXT    NOT NULL,
-        is_admin     INTEGER NOT NULL DEFAULT 0,
-        created_at   TEXT    NOT NULL DEFAULT (datetime('now'))
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        email      TEXT NOT NULL UNIQUE,
+        hashed_password TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+
+    -- E-100: teams -- id INTEGER PK AUTOINCREMENT, membership_type replaces is_owned
+    CREATE TABLE IF NOT EXISTS teams (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        name            TEXT NOT NULL,
+        membership_type TEXT NOT NULL DEFAULT 'member',
+        classification  TEXT,
+        public_id       TEXT,
+        gc_uuid         TEXT,
+        source          TEXT NOT NULL DEFAULT 'gamechanger',
+        is_active       INTEGER NOT NULL DEFAULT 1,
+        last_synced     TEXT,
+        created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    -- E-100: user_team_access -- team_id is INTEGER FK
     CREATE TABLE IF NOT EXISTS user_team_access (
-        id       INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id  INTEGER NOT NULL REFERENCES users(user_id),
-        team_id  TEXT    NOT NULL REFERENCES teams(team_id),
+        user_id INTEGER NOT NULL REFERENCES users(id),
+        team_id INTEGER NOT NULL REFERENCES teams(id),
         UNIQUE(user_id, team_id)
     );
-    CREATE TABLE IF NOT EXISTS magic_link_tokens (
-        id         INTEGER PRIMARY KEY AUTOINCREMENT,
-        token_hash TEXT    NOT NULL UNIQUE,
-        user_id    INTEGER NOT NULL REFERENCES users(user_id),
-        expires_at TEXT    NOT NULL,
-        used_at    TEXT,
-        created_at TEXT    NOT NULL DEFAULT (datetime('now'))
-    );
+
+    -- E-100: sessions -- session_id TEXT PK (no id, no session_token_hash)
     CREATE TABLE IF NOT EXISTS sessions (
-        id                  INTEGER PRIMARY KEY AUTOINCREMENT,
-        session_token_hash  TEXT    NOT NULL UNIQUE,
-        user_id             INTEGER NOT NULL REFERENCES users(user_id),
-        expires_at          TEXT    NOT NULL,
-        created_at          TEXT    NOT NULL DEFAULT (datetime('now'))
+        session_id TEXT PRIMARY KEY,
+        user_id    INTEGER NOT NULL REFERENCES users(id),
+        expires_at TEXT NOT NULL
     );
+
+    -- E-100: magic_link_tokens -- token TEXT PK
+    CREATE TABLE IF NOT EXISTS magic_link_tokens (
+        token      TEXT PRIMARY KEY,
+        user_id    INTEGER NOT NULL REFERENCES users(id),
+        expires_at TEXT NOT NULL
+    );
+
+    -- E-100: passkey_credentials -- credential_id TEXT PK
     CREATE TABLE IF NOT EXISTS passkey_credentials (
-        id            INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id       INTEGER NOT NULL REFERENCES users(user_id),
-        credential_id BLOB    NOT NULL UNIQUE,
-        public_key    BLOB    NOT NULL,
-        sign_count    INTEGER NOT NULL DEFAULT 0,
-        created_at    TEXT    NOT NULL DEFAULT (datetime('now'))
+        credential_id TEXT PRIMARY KEY,
+        user_id       INTEGER NOT NULL REFERENCES users(id),
+        public_key    TEXT NOT NULL,
+        sign_count    INTEGER NOT NULL DEFAULT 0
     );
 
     CREATE TABLE IF NOT EXISTS players (
@@ -92,30 +108,29 @@ _SCHEMA_SQL = """
         created_at  TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
-    CREATE TABLE IF NOT EXISTS teams (
-        team_id    TEXT PRIMARY KEY,
-        name       TEXT NOT NULL,
-        level      TEXT,
-        is_owned   INTEGER NOT NULL DEFAULT 0,
-        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    CREATE TABLE IF NOT EXISTS seasons (
+        season_id   TEXT PRIMARY KEY,
+        name        TEXT NOT NULL,
+        season_type TEXT NOT NULL,
+        year        INTEGER NOT NULL,
+        created_at  TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
     CREATE TABLE IF NOT EXISTS team_rosters (
-        id            INTEGER PRIMARY KEY AUTOINCREMENT,
-        team_id       TEXT NOT NULL,
-        player_id     TEXT NOT NULL,
-        season        TEXT NOT NULL,
+        team_id       INTEGER NOT NULL REFERENCES teams(id),
+        player_id     TEXT NOT NULL REFERENCES players(player_id),
+        season_id     TEXT NOT NULL REFERENCES seasons(season_id),
         jersey_number TEXT,
         position      TEXT,
-        UNIQUE(team_id, player_id, season)
+        PRIMARY KEY (team_id, player_id, season_id)
     );
 
     CREATE TABLE IF NOT EXISTS games (
         game_id      TEXT PRIMARY KEY,
-        season       TEXT NOT NULL,
+        season_id    TEXT NOT NULL,
         game_date    TEXT NOT NULL,
-        home_team_id TEXT NOT NULL,
-        away_team_id TEXT NOT NULL,
+        home_team_id INTEGER NOT NULL,
+        away_team_id INTEGER NOT NULL,
         home_score   INTEGER,
         away_score   INTEGER,
         status       TEXT NOT NULL DEFAULT 'completed'
@@ -125,7 +140,7 @@ _SCHEMA_SQL = """
         id        INTEGER PRIMARY KEY AUTOINCREMENT,
         game_id   TEXT NOT NULL,
         player_id TEXT NOT NULL,
-        team_id   TEXT NOT NULL,
+        team_id   INTEGER NOT NULL,
         ab        INTEGER,
         h         INTEGER,
         doubles   INTEGER,
@@ -142,22 +157,22 @@ _SCHEMA_SQL = """
         id        INTEGER PRIMARY KEY AUTOINCREMENT,
         game_id   TEXT NOT NULL,
         player_id TEXT NOT NULL,
-        team_id   TEXT NOT NULL,
+        team_id   INTEGER NOT NULL,
         ip_outs   INTEGER,
         h         INTEGER,
         er        INTEGER,
         bb        INTEGER,
         so        INTEGER,
-        hr        INTEGER,
         UNIQUE(game_id, player_id)
     );
 
     CREATE TABLE IF NOT EXISTS player_season_batting (
-        id        INTEGER PRIMARY KEY AUTOINCREMENT,
-        player_id TEXT NOT NULL,
-        team_id   TEXT NOT NULL,
-        season_id TEXT NOT NULL,
-        games     INTEGER,
+        id                INTEGER PRIMARY KEY AUTOINCREMENT,
+        player_id         TEXT NOT NULL,
+        team_id           INTEGER NOT NULL,
+        season_id         TEXT NOT NULL,
+        stat_completeness TEXT NOT NULL DEFAULT 'boxscore_only',
+        gp        INTEGER,
         ab        INTEGER,
         h         INTEGER,
         doubles   INTEGER,
@@ -167,77 +182,68 @@ _SCHEMA_SQL = """
         bb        INTEGER,
         so        INTEGER,
         sb        INTEGER,
-        home_ab   INTEGER,
-        home_h    INTEGER,
-        away_ab   INTEGER,
-        away_h    INTEGER,
-        vs_lhp_ab INTEGER,
-        vs_lhp_h  INTEGER,
-        vs_rhp_ab INTEGER,
-        vs_rhp_h  INTEGER,
         UNIQUE(player_id, team_id, season_id)
     );
 """
 
-_SEED_SQL = f"""
-    INSERT OR IGNORE INTO teams (team_id, name, level, is_owned) VALUES
-        ('team-alpha', 'Alpha Team', 'varsity', 1),
-        ('team-beta',  'Beta Team',  'jv',      1),
-        ('team-gamma', 'Gamma Team', 'freshman', 1);
 
-    INSERT OR IGNORE INTO players (player_id, first_name, last_name) VALUES
-        ('gc-p-001', 'Marcus',  'Whitehorse'),
-        ('gc-p-002', 'Diego',   'Runningwater');
-
-    INSERT OR IGNORE INTO player_season_batting
-        (player_id, team_id, season_id, games, ab, h, bb, so) VALUES
-        ('gc-p-001', 'team-alpha', '{_CURRENT_SEASON_ID}', 2, 6, 3, 2, 1),
-        ('gc-p-002', 'team-beta',  '{_CURRENT_SEASON_ID}', 2, 8, 2, 1, 2);
-"""
-
-
-def _make_seeded_db(tmp_path: Path) -> Path:
+def _make_seeded_db(tmp_path: Path) -> tuple[Path, int, int]:
     """Create a fully migrated and seeded SQLite database for testing.
+
+    Inserts three teams: alpha (id=1), beta (id=2), gamma (id=3).
 
     Args:
         tmp_path: pytest tmp_path fixture directory.
 
     Returns:
-        Path to the seeded database file.
+        Tuple of (db_path, team_alpha_id, team_beta_id).
     """
     db_path = tmp_path / "test_app.db"
     conn = sqlite3.connect(str(db_path))
     conn.executescript(_SCHEMA_SQL)
-    conn.executescript(_SEED_SQL)
+
+    # Insert seasons row needed for FK constraints
+    conn.execute(
+        "INSERT OR IGNORE INTO seasons (season_id, name, season_type, year)"
+        " VALUES (?, 'Test Season', 'spring-hs', ?)",
+        (_CURRENT_SEASON_ID, datetime.date.today().year),
+    )
+
+    # Insert teams -- IDs assigned by AUTOINCREMENT
+    cursor = conn.execute(
+        "INSERT INTO teams (name, membership_type) VALUES ('Alpha Team', 'member')"
+    )
+    team_alpha_id: int = cursor.lastrowid  # type: ignore[assignment]
+    cursor = conn.execute(
+        "INSERT INTO teams (name, membership_type) VALUES ('Beta Team', 'member')"
+    )
+    team_beta_id: int = cursor.lastrowid  # type: ignore[assignment]
+    conn.execute(
+        "INSERT INTO teams (name, membership_type) VALUES ('Gamma Team', 'member')"
+    )
+
+    # Insert players and season batting stats
+    conn.execute(
+        "INSERT OR IGNORE INTO players (player_id, first_name, last_name) VALUES"
+        " ('gc-p-001', 'Marcus', 'Whitehorse'),"
+        " ('gc-p-002', 'Diego', 'Runningwater')"
+    )
+    conn.execute(
+        "INSERT OR IGNORE INTO player_season_batting"
+        " (player_id, team_id, season_id, gp, ab, h, bb, so)"
+        " VALUES ('gc-p-001', ?, ?, 2, 6, 3, 2, 1)",
+        (team_alpha_id, _CURRENT_SEASON_ID),
+    )
+    conn.execute(
+        "INSERT OR IGNORE INTO player_season_batting"
+        " (player_id, team_id, season_id, gp, ab, h, bb, so)"
+        " VALUES ('gc-p-002', ?, ?, 2, 8, 2, 1, 2)",
+        (team_beta_id, _CURRENT_SEASON_ID),
+    )
+
     conn.commit()
     conn.close()
-    return db_path
-
-
-def _make_client(
-    tmp_path: Path,
-    dev_email: str,
-    follow_redirects: bool = False,
-) -> TestClient:
-    """Create a TestClient with the given DEV_USER_EMAIL.
-
-    Args:
-        tmp_path: pytest tmp_path directory.
-        dev_email: Email to set as DEV_USER_EMAIL (bypasses real auth).
-        follow_redirects: Whether the client follows redirects automatically.
-
-    Returns:
-        Configured TestClient.
-    """
-    db_path = _make_seeded_db(tmp_path)
-    env_overrides = {
-        "DATABASE_PATH": str(db_path),
-        "DEV_USER_EMAIL": dev_email,
-    }
-    with patch.dict("os.environ", env_overrides):
-        client = TestClient(app, follow_redirects=follow_redirects)
-        client.__enter__()
-    return client, db_path, env_overrides
+    return db_path, team_alpha_id, team_beta_id
 
 
 # ---------------------------------------------------------------------------
@@ -246,29 +252,28 @@ def _make_client(
 
 
 @pytest.fixture()
-def db_path(tmp_path: Path) -> Path:
-    """Seeded database path."""
+def db_info(tmp_path: Path) -> tuple[Path, int, int]:
+    """Seeded database path and team IDs."""
     return _make_seeded_db(tmp_path)
 
 
 @pytest.fixture()
-def single_team_client(tmp_path: Path, db_path: Path):
-    """Client for a user with access to only team-alpha.
-
-    The DEV_USER_EMAIL creates an admin user (is_admin=1) by default, so we
-    use a non-admin user and add team access manually.
-    """
-    # Use a non-admin user with explicit team access
+def single_team_client(tmp_path: Path, db_info: tuple[Path, int, int]):
+    """Client for a user with access to only team-alpha."""
+    db_path, team_alpha_id, _team_beta_id = db_info
     conn = sqlite3.connect(str(db_path))
-    conn.execute(
-        "INSERT OR IGNORE INTO users (email, display_name, is_admin) VALUES (?, ?, 0)",
-        ("coach-alpha@example.com", "Coach Alpha"),
+    # Insert user (E-100: email only, no display_name, no is_admin)
+    cursor = conn.execute(
+        "INSERT OR IGNORE INTO users (email) VALUES (?)",
+        ("coach-alpha@example.com",),
     )
+    conn.commit()
+    user_id = cursor.lastrowid or conn.execute(
+        "SELECT id FROM users WHERE email = 'coach-alpha@example.com'"
+    ).fetchone()[0]
     conn.execute(
-        """
-        INSERT OR IGNORE INTO user_team_access (user_id, team_id)
-        SELECT user_id, 'team-alpha' FROM users WHERE email = 'coach-alpha@example.com'
-        """
+        "INSERT OR IGNORE INTO user_team_access (user_id, team_id) VALUES (?, ?)",
+        (user_id, team_alpha_id),
     )
     conn.commit()
     conn.close()
@@ -279,29 +284,27 @@ def single_team_client(tmp_path: Path, db_path: Path):
     }
     with patch.dict("os.environ", env_overrides):
         with TestClient(app, follow_redirects=False) as client:
-            yield client
+            yield client, team_alpha_id, _team_beta_id
 
 
 @pytest.fixture()
-def multi_team_client(tmp_path: Path, db_path: Path):
+def multi_team_client(tmp_path: Path, db_info: tuple[Path, int, int]):
     """Client for a user with access to team-alpha and team-beta."""
+    db_path, team_alpha_id, team_beta_id = db_info
     conn = sqlite3.connect(str(db_path))
-    conn.execute(
-        "INSERT OR IGNORE INTO users (email, display_name, is_admin) VALUES (?, ?, 0)",
-        ("coach-multi@example.com", "Coach Multi"),
+    cursor = conn.execute(
+        "INSERT OR IGNORE INTO users (email) VALUES (?)",
+        ("coach-multi@example.com",),
     )
-    conn.execute(
-        """
-        INSERT OR IGNORE INTO user_team_access (user_id, team_id)
-        SELECT user_id, 'team-alpha' FROM users WHERE email = 'coach-multi@example.com'
-        """
-    )
-    conn.execute(
-        """
-        INSERT OR IGNORE INTO user_team_access (user_id, team_id)
-        SELECT user_id, 'team-beta' FROM users WHERE email = 'coach-multi@example.com'
-        """
-    )
+    conn.commit()
+    user_id = cursor.lastrowid or conn.execute(
+        "SELECT id FROM users WHERE email = 'coach-multi@example.com'"
+    ).fetchone()[0]
+    for tid in (team_alpha_id, team_beta_id):
+        conn.execute(
+            "INSERT OR IGNORE INTO user_team_access (user_id, team_id) VALUES (?, ?)",
+            (user_id, tid),
+        )
     conn.commit()
     conn.close()
 
@@ -311,16 +314,17 @@ def multi_team_client(tmp_path: Path, db_path: Path):
     }
     with patch.dict("os.environ", env_overrides):
         with TestClient(app, follow_redirects=False) as client:
-            yield client
+            yield client, team_alpha_id, team_beta_id
 
 
 @pytest.fixture()
-def no_teams_client(tmp_path: Path, db_path: Path):
+def no_teams_client(tmp_path: Path, db_info: tuple[Path, int, int]):
     """Client for a user with no team assignments."""
+    db_path, _alpha, _beta = db_info
     conn = sqlite3.connect(str(db_path))
     conn.execute(
-        "INSERT OR IGNORE INTO users (email, display_name, is_admin) VALUES (?, ?, 0)",
-        ("coach-none@example.com", "Coach None"),
+        "INSERT OR IGNORE INTO users (email) VALUES (?)",
+        ("coach-none@example.com",),
     )
     conn.commit()
     conn.close()
@@ -342,28 +346,38 @@ def no_teams_client(tmp_path: Path, db_path: Path):
 class TestTeamAccessControl:
     """Verify team-scoped authorization (AC-2, AC-8)."""
 
-    def test_permitted_team_returns_200(self, single_team_client: TestClient) -> None:
+    def test_permitted_team_returns_200(self, single_team_client) -> None:
         """User with team-alpha access can view team-alpha dashboard."""
-        response = single_team_client.get("/dashboard?team_id=team-alpha")
+        client, team_alpha_id, _ = single_team_client
+        response = client.get(f"/dashboard?team_id={team_alpha_id}")
         assert response.status_code == 200
 
-    def test_forbidden_team_returns_403(self, single_team_client: TestClient) -> None:
-        """AC-8: user with access to team-alpha cannot view team-beta (AC-8)."""
-        response = single_team_client.get("/dashboard?team_id=team-beta")
+    def test_forbidden_team_returns_403(self, single_team_client) -> None:
+        """AC-8: user with access to team-alpha cannot view team-beta."""
+        client, _, team_beta_id = single_team_client
+        response = client.get(f"/dashboard?team_id={team_beta_id}")
         assert response.status_code == 403
 
     def test_completely_unknown_team_returns_403(
-        self, single_team_client: TestClient
+        self, single_team_client
     ) -> None:
-        """Requesting a nonexistent team_id also returns 403."""
-        response = single_team_client.get("/dashboard?team_id=no-such-team")
+        """Requesting a nonexistent team_id (non-integer) also returns 403."""
+        client, _, _ = single_team_client
+        response = client.get("/dashboard?team_id=9999")
+        assert response.status_code == 403
+
+    def test_non_integer_team_id_returns_403(self, single_team_client) -> None:
+        """A non-numeric team_id string also returns 403 (cannot parse to int)."""
+        client, _, _ = single_team_client
+        response = client.get("/dashboard?team_id=no-such-team")
         assert response.status_code == 403
 
     def test_default_view_uses_first_permitted_team(
-        self, single_team_client: TestClient
+        self, single_team_client
     ) -> None:
         """AC-1: /dashboard with no team_id defaults to first permitted team."""
-        response = single_team_client.get("/dashboard")
+        client, _, _ = single_team_client
+        response = client.get("/dashboard")
         assert response.status_code == 200
         assert "Alpha Team" in response.text
 
@@ -376,32 +390,33 @@ class TestTeamAccessControl:
 class TestTeamSelectorVisibility:
     """Verify team selector rendering (AC-3, AC-4, AC-9)."""
 
-    def test_multi_team_user_sees_selector(self, multi_team_client: TestClient) -> None:
+    def test_multi_team_user_sees_selector(self, multi_team_client) -> None:
         """AC-3, AC-9: multi-team user sees team selector with all permitted teams."""
-        response = multi_team_client.get("/dashboard")
+        client, _, _ = multi_team_client
+        response = client.get("/dashboard")
         assert response.status_code == 200
         html = response.text
         # Both team names must appear as selector links
         assert "Alpha Team" in html
         assert "Beta Team" in html
-        # Links should contain team_id query params
-        assert "team_id=team-alpha" in html
-        assert "team_id=team-beta" in html
+        # Links should contain integer team_id query params
+        assert "team_id=" in html
 
-    def test_single_team_user_no_selector(self, single_team_client: TestClient) -> None:
+    def test_single_team_user_no_selector(self, single_team_client) -> None:
         """AC-4, AC-9: single-team user does not see team selector."""
-        response = single_team_client.get("/dashboard")
+        client, team_alpha_id, team_beta_id = single_team_client
+        response = client.get("/dashboard")
         assert response.status_code == 200
         html = response.text
-        # team_id links should not appear for single-team users
-        assert "team_id=team-alpha" not in html
-        assert "team_id=team-beta" not in html
+        # team_id link for team-beta should not appear (not permitted)
+        assert f"team_id={team_beta_id}" not in html
 
     def test_multi_team_user_can_switch_teams(
-        self, multi_team_client: TestClient
+        self, multi_team_client
     ) -> None:
         """AC-3: multi-team user can navigate to a specific permitted team."""
-        response = multi_team_client.get("/dashboard?team_id=team-beta")
+        client, _, team_beta_id = multi_team_client
+        response = client.get(f"/dashboard?team_id={team_beta_id}")
         assert response.status_code == 200
         assert "Beta Team" in response.text
 
@@ -415,28 +430,32 @@ class TestLogoutLink:
     """Verify logout link presence in dashboard header (AC-5, AC-10)."""
 
     def test_logout_link_present_single_team(
-        self, single_team_client: TestClient
+        self, single_team_client
     ) -> None:
         """AC-10: logout link present for single-team user."""
-        response = single_team_client.get("/dashboard")
+        client, _, _ = single_team_client
+        response = client.get("/dashboard")
         assert response.status_code == 200
         assert "/auth/logout" in response.text
         assert "Logout" in response.text
 
     def test_logout_link_present_multi_team(
-        self, multi_team_client: TestClient
+        self, multi_team_client
     ) -> None:
         """AC-10: logout link present for multi-team user."""
-        response = multi_team_client.get("/dashboard")
+        client, _, _ = multi_team_client
+        response = client.get("/dashboard")
         assert response.status_code == 200
         assert "/auth/logout" in response.text
         assert "Logout" in response.text
 
-    def test_user_display_name_shown(self, single_team_client: TestClient) -> None:
-        """AC-5: user's display name shown in dashboard header."""
-        response = single_team_client.get("/dashboard")
+    def test_user_email_shown(self, single_team_client) -> None:
+        """AC-5: user's email shown in dashboard header (display_name removed in E-100)."""
+        client, _, _ = single_team_client
+        response = client.get("/dashboard")
         assert response.status_code == 200
-        assert "Coach Alpha" in response.text
+        # E-100: no display_name column; email is the identity shown
+        assert "coach-alpha@example.com" in response.text
 
 
 # ---------------------------------------------------------------------------
