@@ -44,7 +44,10 @@
 - data-engineer
 
 ## Technical Notes
-<!-- Architectural decisions, technology choices, or constraints across all stories. -->
+<!-- Architectural decisions, technology choices, or constraints across all stories.
+     Technical Notes are the single source of truth for procedures and constraints.
+     Story ACs should verify outcomes and reference Technical Notes sections rather than
+     restating their content. This prevents drift during refinement. -->
 
 ## Open Questions
 - <!-- Unresolved question 1 -->

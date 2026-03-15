@@ -13,6 +13,11 @@
 <!-- Why does this story exist? How does it fit into the epic? What does the agent need to know? -->
 
 ## Acceptance Criteria
+<!-- ACs verify outcomes, not procedures. If an AC needs to reference a procedure or constraint
+     defined in Technical Notes, write "per Technical Notes section X" rather than restating the
+     content inline. Restating creates a sync surface that drifts during refinement.
+     If an AC has more than 3 sub-clauses, consider decomposing it into separate ACs or converting
+     the detailed sub-clauses into a Technical Notes section with a single AC reference. -->
 - [ ] **AC-1**: Given [precondition], when [action], then [expected result]
 - [ ] **AC-2**: Given [precondition], when [action], then [expected result]
 

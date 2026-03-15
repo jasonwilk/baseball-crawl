@@ -254,6 +254,17 @@ Before finalizing any epic or story:
 - [ ] Technical Approach sections describe the problem and constraints, not the code solution (no specific function names, variable names, or code patterns)
 - [ ] Epic status set to READY after all stories pass this checklist
 
+### Post-Incorporation Consistency Sweep
+
+After incorporating review findings (Codex spec review, team feedback, or user edits) and before handing back for the next review round, run a consistency sweep:
+
+1. List every value you changed (counts, env var names, field names, file paths, status categories).
+2. Grep the epic directory for each changed value to find all occurrences.
+3. Verify the new value is consistent everywhere it appears -- in the epic file, all story files, and Technical Notes.
+4. If a fix in one file requires a corresponding update in another, apply both before handing back.
+
+This gate catches cascade drift where a fix in one story introduces an inconsistency in another.
+
 ### Optional: Codex Spec Review
 
 Before setting an epic to READY, you may optionally request a Codex spec review for a second opinion on AC quality, dependency correctness, and story sizing. This is advisory -- not a mandatory gate. To request a review, dispatch a `software-engineer` agent with:
