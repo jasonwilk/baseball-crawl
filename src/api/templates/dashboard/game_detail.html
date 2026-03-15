@@ -39,14 +39,14 @@ Game Detail{% if game %} -- {{ game.game_date }}{% endif %}
 
   {% for team in teams %}
     {# Open the user's active team section; collapse the opponent #}
-    {% if team.team_id == active_team_id %}
+    {% if team.id == active_team_id %}
       <details open class="mb-4 border border-gray-200 rounded bg-white shadow">
     {% else %}
       <details class="mb-4 border border-gray-200 rounded bg-white shadow">
     {% endif %}
       <summary class="cursor-pointer select-none py-3 px-4 font-bold text-blue-900 bg-blue-50 rounded-t">
         {{ team.team_name }}
-        {% if team.team_id == game.home_team_id %}
+        {% if team.id == game.home_team_id %}
           &mdash; {{ home_score if home_score is not none else '-' }} (Home)
         {% else %}
           &mdash; {{ away_score if away_score is not none else '-' }} (Away)
