@@ -166,6 +166,17 @@ Non-AC findings (bugs, security, conventions) are the reviewer's exclusive domai
 
 **Closure assessment ownership**: Main session remains the trigger for doc/context-layer assessments (may need to spawn additional agents, which PM can't do). PM owns status + ACs, not spawning coordination.
 
+### Stale Agent Memory Cleanup
+
+After E-108 ships, PM's own memory files and one skill file will contain contradictory "no PM during dispatch" language. The implementing agent (claude-architect) must update these as part of E-108 implementation -- they are context-layer files within architect's domain.
+
+Files containing stale language:
+1. `/.claude/agent-memory/product-manager/lessons-learned.md` -- contains "PM is not spawned as a teammate during dispatch"
+2. `/.claude/agent-memory/product-manager/MEMORY.md` -- contains "Main session creates team, spawns implementers directly (no PM teammate)"
+3. `/.claude/skills/multi-agent-patterns/SKILL.md` -- contains "no PM intermediary during dispatch" (lower priority, loaded on demand)
+
+If these are not updated, PM will read its own memory at conversation start and see rules contradicting the new dispatch pattern. This is the same class of issue that Codex spec review F1 (Round 0) caught for `CLAUDE.md` and `product-manager.md` -- stale "PM is not spawned" text in active context-layer files.
+
 ### Files to Change
 
 - `/.claude/rules/dispatch-pattern.md` -- Team Composition section (add PM role), Dispatch Flow steps, Closure Sequence (PM owns status steps)
@@ -173,6 +184,9 @@ Non-AC findings (bugs, security, conventions) are the reviewer's exclusive domai
 - `/.claude/rules/workflow-discipline.md` -- Workflow Routing Rule (reflect PM dispatch role)
 - `/CLAUDE.md` -- Workflow Contract step 5 (replace "PM is not spawned" with PM dispatch role)
 - `/.claude/agents/product-manager.md` -- How Work Flows step 5 (replace "PM's role is limited to READY" with dispatch role)
+- `/.claude/agent-memory/product-manager/lessons-learned.md` -- remove/update "PM is not spawned as a teammate during dispatch" language
+- `/.claude/agent-memory/product-manager/MEMORY.md` -- remove/update "no PM teammate" language in Key Workflow Contract and Active Epics sections
+- `/.claude/skills/multi-agent-patterns/SKILL.md` -- remove/update "no PM intermediary during dispatch" language
 
 ## Open Questions
 *All resolved — see CA Consultation Results below.*
@@ -186,3 +200,6 @@ Non-AC findings (bugs, security, conventions) are the reviewer's exclusive domai
 - 2026-03-15: Codex spec review Round 2 triage. Two findings assessed. F1 (P1, PM-vs-reviewer AC arbitration still under-specified): **REVERSED from Round 1 DISMISS → REFINE** — Round 1 dismissal was premature. The Reviewer AC Relationship paragraph was conceptual but lacked a concrete dispatch flow mechanism. The reviewer mechanically classifies unmet ACs as MUST FIX → NOT APPROVED; the spec didn't describe what the main session does when PM disagrees. Added "PM-Reviewer AC Disagreement" paragraph to Technical Notes with 5-case resolution rule. Refined AC-20 to specify the PM-override mechanism (remove AC-based MUST FIX from routing list; if that empties MUST FIX, story passes review gate; non-AC findings remain reviewer's domain). Updated Interaction Flow Change diagram to reference PM AC override. F2 (P1, hidden dependency on code-reviewer.md): DISMISSED — restatement of F1. Arbitration logic lives in dispatch-pattern.md (in scope), not code-reviewer.md. Reviewer behavior unchanged per Non-Goals.
 - 2026-03-15: Codex spec review Round 3 triage. Two findings assessed. F1 (P2, E-108-01 not a standalone slice — transient contradiction with implement SKILL.md between stories): DISMISSED — both stories are sequential same-agent dispatch (01 → 02, both claude-architect); transient window is zero in practice; merging would create 39-AC mega-story; E-108-02 AC-11 explicitly checks cross-file consistency. F2 (P2, PM memory routing-precedence exception stale): REFINE — AC-22 added to E-108-01 to update dispatch-pattern.md line 183 exception text (main session no longer updates PM memory; PM owns its own memory during closure).
 - 2026-03-15: Codex spec review Round 4 (final) triage. Two P2 findings assessed — same class (stale validation-ownership text in closure sections). F1 (P2, dispatch-pattern.md step 9 still attributes context-layer-only validation to main session): REFINE — AC-7 expanded to include step 9 validation-ownership attribution alongside existing status-update steps. F2 (P2, implement SKILL.md Phase 5 Step 1 still attributes context-layer-only validation to main session): REFINE — AC-18 expanded to cover both Phase 3 (live dispatch) and Phase 5 Step 1 (closure validation summary). No new ACs added; minimal expansions to existing ACs.
+- 2026-03-15: E-108 evaluation session identified stale agent memory cleanup requirement. Three files outside original scope contain contradictory "no PM during dispatch" language: `lessons-learned.md`, PM `MEMORY.md`, and `multi-agent-patterns/SKILL.md`. Added "Stale Agent Memory Cleanup" subsection to Technical Notes and added all three files to Files to Change. Same class as Codex spec review F1 (Round 0) -- stale text in active context-layer files that PM reads at conversation start.
+- 2026-03-15: Folded two E-107 code review SHOULD FIX findings into E-108-01 as opportunistic fixes (both target `workflow-discipline.md`, already in scope): (1) PM Task Types section says "five modes" but should say "six" (curate added in E-068), (2) Consultation Mode Constraint MUST NOT list blocks `docs/` but is silent about `.claude/` paths -- add clarifying sentence explaining the intentional asymmetry.
+- 2026-03-15: Codex spec review Round 5 triage. Two findings assessed. F1 (P1, stale memory cleanup has no story-level AC): REFINE — AC-9 expanded from "either file" to "any file listed in Files to Create or Modify" and three stale memory/skill files added to E-108-01's Files to Create or Modify section (`lessons-learned.md`, PM `MEMORY.md`, `multi-agent-patterns/SKILL.md`). F2 (P2, opportunistic fixes have no AC coverage): **REVERSED from DISMISS → REFINE** — user override: opportunistic fixes are carry-overs that were already missed once during E-107; they are the most in need of an AC, not the least. "The implementer will just do it" is the same reasoning that let them slip originally. AC-23 added to E-108-01 covering both fixes.
