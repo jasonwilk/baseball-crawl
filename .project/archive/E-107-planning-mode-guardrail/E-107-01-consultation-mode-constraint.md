@@ -4,7 +4,7 @@
 [E-107: Planning-Mode Agent Guardrail](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, agents whose spawn prompt declares consultation mode will be structurally prevented from implementing code, modifying story/epic files, or running implementation-verification commands. The constraint is activated by a mode declaration in the spawn prompt (not by the absence of a story reference), ensuring agents working in their primary capacity (PM writing epics, api-scout writing endpoint docs) are unaffected. Both the constraint and the spawn convention live in `workflow-discipline.md` (loaded for all agents).

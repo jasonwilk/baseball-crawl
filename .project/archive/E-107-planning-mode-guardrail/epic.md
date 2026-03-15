@@ -1,7 +1,7 @@
 # E-107: Planning-Mode Agent Guardrail
 
 ## Status
-`READY`
+`COMPLETED`
 
 ## Overview
 Prevent agents spawned for planning/consultation from implementing code. The existing Work Authorization Gate (workflow-discipline.md) covers dispatch — agents need a story reference before implementing. But agents spawned for planning sessions (schema design, epic refinement, domain consultation) have no equivalent constraint preventing them from writing code when they should only be advising.
@@ -42,7 +42,7 @@ DE also modified the story file (`E-100-01-schema-evolution.md`) — marking it 
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-107-01 | Add Consultation Mode Constraint to Rules Layer | TODO | None | claude-architect |
+| E-107-01 | Add Consultation Mode Constraint to Rules Layer | DONE | None | claude-architect |
 
 ## Dispatch Team
 - claude-architect
@@ -87,3 +87,4 @@ None remaining. All resolved during refinement:
 - 2026-03-15: Second refinement pass. PM identified critical scoping gap: story-absence discriminator would block PM from writing epics and api-scout from writing endpoint docs. Architect consulted — recommended Option A (spawn-convention-triggered) with mode-declaration refinement. ACs revised: consultation mode is now triggered by spawn prompt declaration, not by absence of story reference. AC-5 elevated from defense-in-depth to primary enforcement mechanism. Guidance added for when to declare consultation mode.
 - 2026-03-15: Fresh-eyes PM pass. One finding: AC-6 lacked explicit mutual exclusivity statement for the two gates. Added precedence rule (Consultation Mode Constraint wins if both signals are present in a spawn prompt). Minor clarification, no design change.
 - 2026-03-15: Second fresh-eyes PM pass (new context). One finding: AC-5(c) SHOULD list omitted docs-writer, which CLAUDE.md explicitly lists as an implementing agent requiring work authorization. Expanded parenthetical from "(SE, DE)" to "(SE, DE, docs-writer)." Also noted pre-existing inconsistency in PM Task Types section ("five modes" should be six -- curate added in E-068) -- outside E-107 scope.
+- 2026-03-15: Dispatched and completed. claude-architect implemented E-107-01 (context-layer-only story, no worktree isolation). Main session verified all 7 ACs directly. Documentation assessment: no triggers fired. Context-layer assessment: triggers 1 (new convention), 3 (failure mode discovered), 4 (agent behavior change) fired -- codification was the epic's deliverable itself (new Consultation Mode Constraint section in workflow-discipline.md), so no additional architect work needed. Triggers 2, 5, 6: no.

@@ -22,6 +22,45 @@ This gate exists in workflow-discipline.md (loaded for all agents) in addition t
 
 Implementing agents MUST NOT begin any implementation work without a referenced story file in the task prompt. The story file must have `Status: TODO` or `Status: IN_PROGRESS`. If no story reference is found, refuse the task.
 
+## Consultation Mode Constraint
+
+An agent is in consultation mode when its spawn prompt includes the consultation mode convention phrase defined in the Spawning Convention subsection below. This constraint is activated by the presence of that phrase -- not by the absence of a story reference.
+
+### What Consultation-Mode Agents MUST NOT Do
+
+- **Create, modify, or delete files** in `src/`, `tests/`, `migrations/`, `scripts/`, or `docs/`.
+- **Modify epic or story files** (`epics/**`, `.project/archive/**`).
+- **Run implementation-verification commands** (`pytest`, `docker compose`).
+
+If a consultation-mode agent identifies implementable work, it MUST report the recommendation to the spawner via SendMessage rather than implementing it.
+
+### What Consultation-Mode Agents MAY Do
+
+- **Read any file** in the repository.
+- **Write to own agent memory** (`.claude/agent-memory/<agent-name>/`).
+- **Produce recommendations** via SendMessage to the spawner.
+- **Create files in `.project/research/`** when explicitly asked by the spawner.
+
+### How the Two Authorization Gates Complement Each Other
+
+- **Work Authorization Gate**: Covers dispatch. Requires a story reference. Structural (opt-out -- all implementing agents are bound unless they have a story).
+- **Consultation Mode Constraint**: Covers advisory spawns. Triggered by mode declaration. Structural (opt-in by spawner, mandatory compliance by agent).
+
+The two gates are mutually exclusive by spawn type: a dispatch spawn includes a story reference without the consultation mode phrase; a consultation spawn includes the consultation mode phrase without a story reference. If both are present in a spawn prompt, the Consultation Mode Constraint takes precedence (more restrictive).
+
+### Spawning Convention
+
+Consultation spawn prompts MUST include the following phrase:
+
+> **Consultation mode: do not create or modify implementation files or planning artifacts**
+
+This phrase is the sole trigger that activates the Consultation Mode Constraint. Semantically equivalent phrasing (e.g., "advisory only," "read-only consultation," "don't write code") does NOT activate it -- the exact phrase above is required.
+
+**When to declare consultation mode:**
+
+- **SHOULD declare** when spawning implementing-type agents (software-engineer, data-engineer, docs-writer) for advisory input during planning or formation.
+- **NOT declared** when spawning agents in their primary capacity: PM for planning, api-scout for exploration, baseball-coach for domain consultation, claude-architect for context-layer work. These agents produce artifacts (epics, endpoint docs, domain requirements, context-layer files) as part of their normal function -- consultation mode would conflict with legitimate output.
+
 ## Workflow Routing Rule
 
 Work-initiation requests follow two phases: **planning** (`user -> PM`) and **dispatch** (`user/main session -> implementing agent`). PM plans epics and refines stories. When the user authorizes dispatch, the main session creates the dispatch team, spawns implementers and the code-reviewer directly, assigns stories, and manages all statuses. For code stories, acceptance criteria verification is performed by the code-reviewer (not the main session directly) -- the reviewer is the quality gate. The main session still manages statuses and coordinates the review loop. For context-layer-only stories (no Python code), the main session verifies ACs directly. PM is not spawned as a teammate during dispatch. See `/.claude/rules/dispatch-pattern.md`.
