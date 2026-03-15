@@ -4,7 +4,7 @@
 [E-108: PM as Dispatch Teammate](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the implement skill spawns PM as a teammate in Phase 2, routes status updates and AC verification through PM in Phase 3, and delegates closure status work to PM in Phase 5. The anti-pattern "Do not spawn a PM teammate" is removed and replaced with PM spawning instructions.

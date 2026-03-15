@@ -32,6 +32,8 @@ An agent is in consultation mode when its spawn prompt includes the consultation
 - **Modify epic or story files** (`epics/**`, `.project/archive/**`).
 - **Run implementation-verification commands** (`pytest`, `docker compose`).
 
+Note: `.claude/` paths are intentionally excluded from this prohibition because consultation-mode agents may write to their own agent memory (`.claude/agent-memory/<agent-name>/`).
+
 If a consultation-mode agent identifies implementable work, it MUST report the recommendation to the spawner via SendMessage rather than implementing it.
 
 ### What Consultation-Mode Agents MAY Do
@@ -63,11 +65,11 @@ This phrase is the sole trigger that activates the Consultation Mode Constraint.
 
 ## Workflow Routing Rule
 
-Work-initiation requests follow two phases: **planning** (`user -> PM`) and **dispatch** (`user/main session -> implementing agent`). PM plans epics and refines stories. When the user authorizes dispatch, the main session creates the dispatch team, spawns implementers and the code-reviewer directly, assigns stories, and manages all statuses. For code stories, acceptance criteria verification is performed by the code-reviewer (not the main session directly) -- the reviewer is the quality gate. The main session still manages statuses and coordinates the review loop. For context-layer-only stories (no Python code), the main session verifies ACs directly. PM is not spawned as a teammate during dispatch. See `/.claude/rules/dispatch-pattern.md`.
+Work-initiation requests follow two phases: **planning** (`user -> PM`) and **dispatch** (`user/main session -> implementing agent`). PM plans epics and refines stories. When the user authorizes dispatch, the main session creates the dispatch team and spawns implementers, code-reviewer, and PM. The main session is the spawner and router -- it assigns stories, routes completion reports, manages merge-back and cascade, and escalates to the user. PM is spawned as a teammate during dispatch for status management (story/epic status transitions) and AC verification ("did they build what was specified"). The code-reviewer is the quality gate for code stories. Both PM and code-reviewer must approve before merge-back (PM is authoritative on ACs -- see dispatch-pattern.md for disagreement resolution). The main session **MUST NOT**: write or modify application/test code, update story/epic status files, check AC boxes, or verify acceptance criteria. See `/.claude/rules/dispatch-pattern.md`.
 
 ## PM Task Types
 
-The PM operates in five modes: **discover**, **plan**, **clarify**, **triage**, and **close**.
+The PM operates in six modes: **discover**, **plan**, **clarify**, **triage**, **close**, and **curate**.
 
 ## Direct-Routing Exceptions
 

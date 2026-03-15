@@ -4,7 +4,7 @@
 [E-108: PM as Dispatch Teammate](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, `dispatch-pattern.md` documents the PM as a spawned teammate during dispatch with clear responsibility boundaries: PM owns status management (story and epic status transitions, epic table updates) and AC verification. The main session retains spawning, routing, merge-back, and cascade. `workflow-discipline.md` reflects the PM's dispatch role.

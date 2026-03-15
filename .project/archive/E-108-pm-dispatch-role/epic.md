@@ -1,7 +1,7 @@
 # E-108: PM as Dispatch Teammate
 
 ## Status
-`READY`
+`COMPLETED`
 
 ## Overview
 Add the product-manager as a spawned teammate during epic dispatch. Currently, the main session manages all story statuses, epic table updates, and AC verification directly. This concentrates too many responsibilities in the main session and violates the PM's ownership of epics. The fix: PM is spawned as a teammate during dispatch and owns status management + AC verification, while the main session retains spawning, routing, merge-back, and cascade decisions.
@@ -42,8 +42,8 @@ The fix is surgical: spawn PM as a teammate with a focused role (status manageme
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-108-01 | Update dispatch-pattern.md and workflow-discipline.md with PM dispatch role | TODO | None | - |
-| E-108-02 | Update implement SKILL.md with PM spawning and routing | TODO | E-108-01 | - |
+| E-108-01 | Update dispatch-pattern.md and workflow-discipline.md with PM dispatch role | DONE | None | claude-architect |
+| E-108-02 | Update implement SKILL.md with PM spawning and routing | DONE | E-108-01 | claude-architect |
 
 ## Dispatch Team
 - claude-architect (E-108-01, E-108-02)
@@ -203,3 +203,4 @@ If these are not updated, PM will read its own memory at conversation start and 
 - 2026-03-15: E-108 evaluation session identified stale agent memory cleanup requirement. Three files outside original scope contain contradictory "no PM during dispatch" language: `lessons-learned.md`, PM `MEMORY.md`, and `multi-agent-patterns/SKILL.md`. Added "Stale Agent Memory Cleanup" subsection to Technical Notes and added all three files to Files to Change. Same class as Codex spec review F1 (Round 0) -- stale text in active context-layer files that PM reads at conversation start.
 - 2026-03-15: Folded two E-107 code review SHOULD FIX findings into E-108-01 as opportunistic fixes (both target `workflow-discipline.md`, already in scope): (1) PM Task Types section says "five modes" but should say "six" (curate added in E-068), (2) Consultation Mode Constraint MUST NOT list blocks `docs/` but is silent about `.claude/` paths -- add clarifying sentence explaining the intentional asymmetry.
 - 2026-03-15: Codex spec review Round 5 triage. Two findings assessed. F1 (P1, stale memory cleanup has no story-level AC): REFINE — AC-9 expanded from "either file" to "any file listed in Files to Create or Modify" and three stale memory/skill files added to E-108-01's Files to Create or Modify section (`lessons-learned.md`, PM `MEMORY.md`, `multi-agent-patterns/SKILL.md`). F2 (P2, opportunistic fixes have no AC coverage): **REVERSED from DISMISS → REFINE** — user override: opportunistic fixes are carry-overs that were already missed once during E-107; they are the most in need of an AC, not the least. "The implementer will just do it" is the same reasoning that let them slip originally. AC-23 added to E-108-01 covering both fixes.
+- 2026-03-15: E-108 completed. Both stories implemented by claude-architect, verified by PM. E-108-01 updated dispatch-pattern.md, workflow-discipline.md, CLAUDE.md, product-manager.md, and 3 stale memory/skill files (23 ACs). E-108-02 updated implement SKILL.md (18 ACs). PM role now codified as fourth dispatch teammate for status management and AC verification.

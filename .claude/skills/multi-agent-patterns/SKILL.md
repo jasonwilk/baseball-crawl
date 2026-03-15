@@ -25,7 +25,7 @@ Pass original content at every relay point. Never summarize.
 
 **Main Session -> Implementing Agent**: Include the **full story file text** and **full epic Technical Notes** in every dispatch. Not a summary. Every acceptance criterion, file path, and constraint.
 
-In this project, the main session dispatches directly to implementing agents (no PM intermediary during dispatch), which minimizes telephone game risk. The primary risk is in how the main session packages context for dispatch.
+In this project, the main session dispatches directly to implementing agents and spawns PM as a teammate for status management and AC verification. PM is not a relay point for context -- the main session packages context directly for implementers. The primary telephone game risk is in how the main session packages that context.
 
 ## Baseball-Crawl's Routing Chain
 
@@ -51,7 +51,7 @@ Before spawning an implementer for a story:
 - [ ] Read the story file in full
 - [ ] Read the epic Technical Notes in full
 - [ ] Include full story file text + Technical Notes in the prompt (not a summary)
-- [ ] Set story status to IN_PROGRESS
+- [ ] Route to PM to set story status to IN_PROGRESS
 - [ ] Spawn stories in parallel when they have no file conflicts
 
 ## When to Shorten the Chain

@@ -25,7 +25,7 @@ Detailed notes on patterns and lessons from past epics. MEMORY.md links here.
 - E-022 archive gap (2026-03-02): the PM's Atomic Status Update Protocol had checklists for completing stories and spikes, but NOT for completing epics. E-022 was marked COMPLETED but never archived. E-024 fixes by adding an explicit "Completing an epic" checklist and a PreToolUse hook. Pattern: every status transition that triggers downstream work needs its own checklist, not just a mention in a flow description.
 
 ## Platform Constraints
-- Agent Teams (`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`) is the dispatch mechanism. **The main session acts as both spawner and coordinator during dispatch** -- it creates the team, spawns implementers directly, assigns stories, verifies ACs, and runs the closure sequence. PM is not spawned as a teammate during dispatch. (Updated in E-065; previously the team lead spawned PM as a coordinator teammate.)
+- Agent Teams (`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`) is the dispatch mechanism. **The main session is the spawner and router during dispatch** -- it creates the team, spawns implementers + code-reviewer + PM, assigns stories, routes completion reports, manages merge-back, and runs the closure sequence. PM is spawned as a teammate for status management and AC verification. The main session MUST NOT write code, update statuses, or verify ACs. (Updated in E-108; previously the main session absorbed PM duties during dispatch.)
 - Task tool: use for single-agent consultations (e.g., consulting baseball-coach). Cannot nest further.
 - E-015 consultation pattern: when the consultation itself would trigger the bug being diagnosed, read the expert's memory files directly instead.
 

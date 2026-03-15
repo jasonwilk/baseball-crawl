@@ -2,7 +2,7 @@
 
 ## Numbering State
 - Next available epic number: E-112
-- Epics created: E-001 through E-111 (E-001, E-003, E-005, E-006, E-007, E-008, E-010, E-011, E-012, E-013, E-014, E-015, E-016, E-017, E-018, E-019, E-020, E-021, E-022, E-024, E-025, E-026, E-027, E-028, E-029, E-030, E-031, E-032, E-033, E-034, E-035, E-036, E-037, E-038, E-042, E-044, E-046, E-048, E-049, E-050, E-052, E-053, E-054, E-056, E-057, E-058, E-055, E-059, E-060, E-061, E-075, E-081, E-084, E-087, E-088, E-089, E-090, E-091, E-092 archived; E-093, E-094, E-095 archived; E-096 archived; E-097 archived; E-098 archived; E-099 archived; E-100 active; E-101 archived; E-102 active; E-103 archived; E-104 active; E-105 archived; E-106 draft; E-107 archived; E-108 draft; E-109 archived; E-110 ready; E-111 archived)
+- Epics created: E-001 through E-111 (E-001, E-003, E-005, E-006, E-007, E-008, E-010, E-011, E-012, E-013, E-014, E-015, E-016, E-017, E-018, E-019, E-020, E-021, E-022, E-024, E-025, E-026, E-027, E-028, E-029, E-030, E-031, E-032, E-033, E-034, E-035, E-036, E-037, E-038, E-042, E-044, E-046, E-048, E-049, E-050, E-052, E-053, E-054, E-056, E-057, E-058, E-055, E-059, E-060, E-061, E-075, E-081, E-084, E-087, E-088, E-089, E-090, E-091, E-092 archived; E-093, E-094, E-095 archived; E-096 archived; E-097 archived; E-098 archived; E-099 archived; E-100 active; E-101 archived; E-102 active; E-103 archived; E-104 active; E-105 archived; E-106 draft; E-107 archived; E-108 archived; E-109 archived; E-110 ready; E-111 archived)
 - Next available idea number: IDEA-026
 - Ideas created: IDEA-001 through IDEA-025
 
@@ -30,13 +30,14 @@
 - E-098 (COMPLETED): Fix Scouting Pipeline Bugs -- see Archived Epics.
 - E-099 (COMPLETED): Targeted Review Quality Checklists -- see Archived Epics.
 - E-104 (READY): Athlete Profile Endpoint Probe -- Opponent Player Access -- 2 stories. api-scout probes four athlete-profile endpoints for opponent player access. Confirm endpoints independently (01), document player_id->athlete_profile_id lookup path (02). Wave: 01 -> 02. Pure API exploration, no code changes. Motivated by cross-team player identity discovery during 2026-03-13 vision session. E-100 adding gc_athlete_profile_id column; this epic determines how to populate it.
-- E-108 (DRAFT): PM as Dispatch Teammate -- 2 stories. Spawn PM as teammate during dispatch for status management + AC verification. Update dispatch-pattern.md (01), implement SKILL.md (02). Wave: 01 -> 02. All context-layer work via claude-architect. No expert consultation required -- PM-domain process improvement.
+- E-108 (COMPLETED): PM as Dispatch Teammate -- see Archived Epics.
 - E-109 (COMPLETED): tmux Window Rename for All Epic Sessions -- see Archived Epics.
 - E-110 (READY): Iterative Review Rounds Convention -- 2 stories. Codify the iterative review/refinement rounds pattern into a skill file (`.claude/skills/review-rounds/SKILL.md`) + CLAUDE.md Workflows entry. Covers both variants: refinement rounds (pre-dispatch spec review, ends with READY gate offer) and review rounds (post-implementation code review, main checkout, no worktree). Core loop: review -> early exit if clean -> triage -> fix -> respawn with fresh context -> repeat N times -> closing synthesis -> variant-specific disposition. Wraps existing skills (codex-spec-review, codex-review) without modifying them. All context-layer work via claude-architect. Wave: 01 -> 02. 5 refinement rounds (2 Codex + 3 team).
 - E-111 (COMPLETED): Closure Archive Verification Gate -- see Archived Epics.
 - E-101 (COMPLETED): BB CLI Help and Discoverability -- see Archived Epics.
 
 ## Archived Epics
+- E-108 (COMPLETED): PM as Dispatch Teammate -- 2 stories completed 2026-03-15. Codified PM as fourth dispatch teammate role. E-108-01 updated dispatch-pattern.md (Team Composition, Dispatch Flow, Closure Sequence), workflow-discipline.md, CLAUDE.md, product-manager.md, and 3 stale memory/skill files (23 ACs). E-108-02 updated implement SKILL.md with PM spawning in Phase 2, routing in Phase 3, and closure attribution in Phase 5 (18 ACs). Key change: PM now spawned as infrastructure alongside code-reviewer for every dispatch; owns status management + AC verification. Main session prohibited from writing code, updating statuses, or verifying ACs. 5 refinement rounds (2 Codex + 3 team). No follow-up work.
 - E-107 (COMPLETED): Planning-Mode Agent Guardrail -- 1 story completed 2026-03-15. Added Consultation Mode Constraint to workflow-discipline.md: mode-declaration-triggered gate that prevents consultation-spawned agents from writing code, modifying stories, or running implementation commands. Spawning convention phrase is the sole trigger. Complements existing Work Authorization Gate (dispatch scope) with advisory-spawn scope. No follow-up work.
 - E-111 (COMPLETED): Closure Archive Verification Gate -- 1 story completed 2026-03-15. Added `git mv` + `git status --porcelain` verification gate to dispatch-pattern.md step 13 and implement SKILL.md Phase 5 Step 4. Prevents ghost unstaged deletions from persisting after epic archival. No follow-up work.
 - E-109 (COMPLETED): tmux Window Rename for All Epic Sessions -- 1 story completed 2026-03-15. Extended tmux rename convention from dispatch-only (E-090) to all epic-related sessions. CLAUDE.md Terminal Modes section now documents the `"E-NNN stage"` convention with 5 known stages (refine, triage, spec-review, dispatch, code-review) and guarded one-liner. Implement skill Phase 0 updated from `"E-NNN"` to `"E-NNN dispatch"`. No follow-up work.
@@ -191,7 +192,7 @@
 - PM modes: discover, plan, clarify, triage, close, curate (no dispatch mode -- removed in E-065; curate added in E-068)
 - Epic lifecycle: DRAFT -> READY -> ACTIVE -> COMPLETED (or BLOCKED / ABANDONED)
 - READY gate: must be READY/ACTIVE before dispatch. PM sets READY explicitly.
-- Dispatch: Main session creates team, spawns implementers directly (no PM teammate), assigns stories, verifies ACs, runs closure sequence. See /.claude/rules/dispatch-pattern.md.
+- Dispatch: Main session creates team, spawns implementers + code-reviewer + PM, assigns stories, routes to PM for AC verification and status updates, manages merge-back and cascade. PM is a spawned teammate during dispatch. See /.claude/rules/dispatch-pattern.md.
 - Direct-routing exceptions (no PM needed): api-scout, baseball-coach, claude-architect
 - Implementing agents needing work auth: software-engineer, data-engineer, docs-writer
 - Agent ecosystem: 9 agents (claude-architect, product-manager, baseball-coach, api-scout, data-engineer, software-engineer, docs-writer, ux-designer, code-reviewer)

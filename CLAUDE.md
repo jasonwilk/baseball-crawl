@@ -181,7 +181,7 @@ These commands manage the mitmproxy process and must be run on the Mac host, not
 - `cd proxy && ./logs.sh` -- follow live mitmproxy log output
 
 ## Workflows
-- **Implement**: When the user says "implement E-NNN" (or similar -- "start epic", "execute E-NNN", "dispatch E-NNN", "kick off E-NNN"), load `.claude/skills/implement/SKILL.md` and follow its workflow. The main session reads the epic for team composition and spawns implementers directly. Supports an "and review" modifier to chain a code review after implementation completes.
+- **Implement**: When the user says "implement E-NNN" (or similar -- "start epic", "execute E-NNN", "dispatch E-NNN", "kick off E-NNN"), load `.claude/skills/implement/SKILL.md` and follow its workflow. The main session reads the epic for team composition and spawns implementers, code-reviewer, and PM. Supports an "and review" modifier to chain a code review after implementation completes.
 - **Ingest endpoint**: When the user says "ingest endpoint" (or similar -- "curl is ready", "new endpoint to analyze"), load `.claude/skills/ingest-endpoint/SKILL.md` and follow its two-phase workflow. The user has placed a curl command in `secrets/gamechanger-curl.txt` and expects api-scout to execute it (time-sensitive -- the `gc-signature` header in POST requests expires within minutes, and curl commands should be executed promptly regardless of token lifetime), then claude-architect to integrate findings into the context layer.
 - **Spec review**: When the user says "spec review" (or similar -- "spec review E-NNN", "codex spec review", "spec review prompt", "codex spec review prompt"), load `.claude/skills/codex-spec-review/SKILL.md` and follow its workflow. Supports two execution paths: headless (default -- runs Codex via script, presents findings, offers advisory triage) and prompt generation (trigger phrase contains "prompt" -- assembles lean prompt for copy-paste).
 - **Code review**: When the user says "codex review" (or similar -- "review with codex", "code review", "review epic", "codex review prompt", "code review prompt", "post-dev review"), load `.claude/skills/codex-review/SKILL.md` and follow its workflow. Supports two execution paths: headless (default -- runs Codex via script, presents findings, offers advisory triage) and prompt generation (trigger phrase contains "prompt" -- assembles lean prompt for copy-paste).
@@ -468,7 +468,7 @@ This project uses specialized agents coordinated by the product-manager:
 - **api-scout** maintains the `docs/api/` directory structure -- the single source of truth for API knowledge
 - **data-engineer** designs schemas informed by both baseball-coach requirements and api-scout discoveries
 - **software-engineer** implements stories, referencing specs produced by other agents
-- **product-manager** discovers requirements, consults domain experts, writes epics and stories, and closes completed work. During dispatch, the main session coordinates implementers directly.
+- **product-manager** discovers requirements, consults domain experts, writes epics and stories, and closes completed work. During dispatch, PM is spawned as a teammate for status management (story/epic status transitions) and AC verification.
 - **code-reviewer** reviews every code story during dispatch before it can be marked DONE. Routes MUST FIX findings back through the main session to implementers. The main session triages each SHOULD FIX finding: accept (route to implementer for fixing) or dismiss (record one-line reason, finding closed). Every finding reaches a terminal state (FIXED or DISMISSED) during the story -- no findings are deferred to epic History.
 - Any agent that identifies future work should flag it to the PM for idea capture rather than creating speculative epics
 
@@ -489,7 +489,7 @@ All routed work follows this contract:
 2. **PM consults experts during formation.** Before writing stories, PM consults domain experts as needed. When not required, PM notes the reason.
 3. **PM marks the epic `READY` when refinement is complete.** `DRAFT` epics are not dispatchable.
 4. **"Ready for dev" = `Status: TODO` in a `READY` epic.** No story file means no implementation work begins.
-5. **Main session creates the dispatch team and spawns implementers + code-reviewer directly.** The main session acts as both spawner and coordinator during dispatch -- assigning stories, routing completed code stories through the code-reviewer for AC verification and quality review, managing statuses, and cascading to newly unblocked stories. PM is not spawned as a teammate during dispatch. See `/.claude/rules/dispatch-pattern.md`.
+5. **Main session creates the dispatch team and spawns implementers, code-reviewer, and PM.** The main session is the spawner and router during dispatch -- assigning stories, routing completed work to PM (AC verification, status updates) and code-reviewer (quality review), managing merge-back, and cascading to newly unblocked stories. The main session MUST NOT write code, update status files, or verify ACs. See `/.claude/rules/dispatch-pattern.md`.
 6. **Implementing agents require a story reference.** Must receive a story file path or story ID before beginning any task.
 
 **Enforcement Boundary**: The user always retains override authority to invoke any agent directly; this contract governs the normal orchestrated path.

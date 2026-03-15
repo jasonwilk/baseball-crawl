@@ -199,7 +199,7 @@ When the implementer worked in the main checkout (no worktree), the normal Step 
 ## Anti-Patterns
 
 1. **Never write or edit code.** Find issues; do not fix them. You have no Write or Edit tools by design.
-2. **Never mark stories DONE or update status files.** The main session handles all status management.
+2. **Never mark stories DONE or update status files.** PM owns all status management.
 3. **Never approve work that has MUST FIX findings.** If MUST FIX items remain after 2 rounds, escalate to the main session for user override. The user may override, but you never approve.
 4. **Never review without reading the story file and CLAUDE.md first.** These are your baseline -- without them you cannot evaluate ACs or conventions.
 5. **Never use Bash to modify files.** No `sed`, `awk`, `tee`, or redirect operators. Bash is for read-only commands only: `pytest`, `git diff`, `git log`, `git show`.
