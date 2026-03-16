@@ -67,10 +67,16 @@
         <input type="radio" name="membership_type" value="tracked" checked class="rounded">
         Tracked (opponent / external team)
       </label>
-      <label class="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
-        <input type="radio" name="membership_type" value="member" class="rounded">
+      <label class="flex items-center gap-2 text-sm {% if gc_uuid_status != 'found' %}text-gray-400{% else %}text-gray-700{% endif %} cursor-pointer">
+        <input type="radio" name="membership_type" value="member" class="rounded"
+               {% if gc_uuid_status != 'found' %}disabled{% endif %}>
         Member (Lincoln program team)
       </label>
+      {% if gc_uuid_status != 'found' %}
+      <p class="mt-1 text-xs text-yellow-700">
+        Member teams require a GameChanger UUID for crawling. UUID not available — add as Tracked instead.
+      </p>
+      {% endif %}
     </div>
 
     <!-- Program -->

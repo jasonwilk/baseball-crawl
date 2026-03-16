@@ -629,6 +629,57 @@ class TestPhase2ConfirmForm:
                 )
         assert "403" in response.text or "Not available" in response.text
 
+    def test_confirm_page_member_radio_disabled_when_gc_uuid_forbidden(
+        self, team_db: Path
+    ) -> None:
+        """Confirm page disables Member radio and shows warning when gc_uuid_status=forbidden."""
+        user_id = _insert_user(team_db, "admin@example.com")
+        token = _insert_session(team_db, user_id)
+
+        with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
+            with TestClient(app, cookies={"session": token}) as client:
+                response = client.get(
+                    "/admin/teams/confirm",
+                    params={
+                        "public_id": "abc123",
+                        "team_name": "Riverside Hawks",
+                        "gc_uuid_status": "forbidden",
+                    },
+                )
+        assert response.status_code == 200
+        # Member radio must carry the disabled attribute
+        assert 'value="member"' in response.text
+        assert "disabled" in response.text
+        # Warning message must explain why
+        assert "GameChanger UUID" in response.text
+
+    def test_confirm_page_member_radio_enabled_when_gc_uuid_found(
+        self, team_db: Path
+    ) -> None:
+        """Confirm page enables Member radio when gc_uuid_status=found."""
+        user_id = _insert_user(team_db, "admin@example.com")
+        token = _insert_session(team_db, user_id)
+
+        with patch(
+            "src.api.routes.admin.resolve_public_id_to_uuid",
+            return_value="some-uuid",
+        ):
+            with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
+                with TestClient(app, cookies={"session": token}) as client:
+                    response = client.get(
+                        "/admin/teams/confirm",
+                        params={
+                            "public_id": "abc123",
+                            "team_name": "Riverside Hawks",
+                            "gc_uuid": "some-uuid",
+                            "gc_uuid_status": "found",
+                        },
+                    )
+        assert response.status_code == 200
+        assert 'value="member"' in response.text
+        # The warning about UUID being required must NOT appear when UUID is available
+        assert "UUID not available" not in response.text
+
     def test_confirm_page_duplicate_shows_error(self, team_db: Path) -> None:
         """GET /admin/teams/confirm shows error when team is already in DB."""
         user_id = _insert_user(team_db, "admin@example.com")
