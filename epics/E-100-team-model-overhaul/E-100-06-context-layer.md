@@ -4,7 +4,7 @@
 [E-100: Team Model Overhaul](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, all context-layer files will reflect the new team model: programs, membership_type replacing is_owned, classification/Division replacing level, team_opponents junction, INTEGER PK for teams, TeamRef pattern, enriched stat columns, spray_charts table, and the two-phase add-team flow. CLAUDE.md sections on data model, admin UI, and key metrics will be updated. Migration rules will reflect the new numbering.

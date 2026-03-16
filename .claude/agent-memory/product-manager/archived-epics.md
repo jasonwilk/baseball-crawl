@@ -87,7 +87,7 @@ Complete list of archived epics with summary descriptions.
 - E-097 (COMPLETED): Opponent Scouting Data Pipeline -- bb data scout command, scouting crawler and loader.
 - E-098 (COMPLETED): Codex Review Remediation Round 2 -- findings from E-097 code review.
 - E-099 (COMPLETED): bb data sync Command -- full bootstrap: validate credentials, crawl, and load.
-- E-100 (ACTIVE): Team Model Overhaul -- schema revision, migration rewrite. Stories 01-02 DONE, 03+ TODO.
+- E-100 (COMPLETED): Team Model Overhaul -- fresh-start schema rewrite. Programs, INTEGER PK for teams, membership_type, classification, team_opponents, TeamRef, enriched stat columns (schema-ready), two-phase add-team flow, flat team list. 6 stories, 4 waves. Pre-existing test issues noted: load_dotenv in apply_migrations.py (test isolation), PII scanner test mismatch.
 - E-101 (COMPLETED): BB CLI Help and Discoverability -- sub-group help, --help at every depth, docker/git/kubectl conventions.
 - E-103 (COMPLETED): Baseball Coach Agent Refinement -- team-first coaching perspective, rate-stat-driven, flag-oriented.
 - E-105 (COMPLETED): Spec Review Exhaustiveness -- multi-round review drift prevention, consistency/propagation checks.

@@ -7,14 +7,14 @@ paths:
 
 ## Numbering Scheme
 
-- Sequential, zero-padded to 3 digits: `001`, `003`, `004`, etc.
+- Sequential, zero-padded to 3 digits: `001`, `002`, `003`, etc.
 - Never reuse a migration number, even if a slot is unused.
-- Current sequence: 001, 003, 004, 005, 006 (slot 002 is unused -- do not backfill).
-- Next migration: `007`.
+- Current sequence: `001` (complete schema rewrite from E-100). Old migrations 001-008 archived in `.project/archive/migrations-pre-E100/`.
+- Next migration: `002`.
 
 ## Naming Pattern
 
-`NNN_descriptive_name.sql` -- e.g., `006_opponent_links.sql`.
+`NNN_descriptive_name.sql` -- e.g., `002_add_something.sql`.
 
 ## Idempotency Requirements
 
@@ -23,7 +23,7 @@ All migrations MUST be idempotent:
 - Use `CREATE INDEX IF NOT EXISTS` for index creation.
 - Use `INSERT OR IGNORE` or `INSERT ... ON CONFLICT DO NOTHING` for seed data.
 - Re-running a migration must not fail or duplicate data.
-- **ALTER TABLE exception**: SQLite has no `ALTER TABLE ADD COLUMN IF NOT EXISTS` syntax. `ALTER TABLE ADD COLUMN` migrations are safe without DDL-level idempotency because `apply_migrations.py` tracks applied migrations in `_migrations` and runs each exactly once. Precedent: migration 005 (`ALTER TABLE teams ADD COLUMN public_id TEXT`).
+- **ALTER TABLE exception**: SQLite has no `ALTER TABLE ADD COLUMN IF NOT EXISTS` syntax. `ALTER TABLE ADD COLUMN` migrations are safe without DDL-level idempotency because `apply_migrations.py` tracks applied migrations in `_migrations` and runs each exactly once.
 
 ## Seed Data
 

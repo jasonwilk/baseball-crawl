@@ -116,6 +116,24 @@ After changing `src/`, `migrations/`, `Dockerfile`, `docker-compose.yml`, or `re
 - **`migrations/` is a Python package**: It has `__init__.py` and is included in `pyproject.toml` `[tool.setuptools.packages]` because `src/db/reset.py` imports from it. Do not remove `migrations/__init__.py` or the pyproject.toml include without understanding this dependency.
 - **Scouting pipeline**: `src/gamechanger/crawlers/scouting.py` (crawler) and `src/gamechanger/loaders/scouting_loader.py` (loader) implement the opponent scouting data flow. The crawler fetches opponent schedules, rosters, and boxscores; the loader aggregates boxscores into season stats and writes to the database. Entry point: `bb data scout`.
 
+## Data Model
+
+The schema is defined in a single migration (`migrations/001_initial_schema.sql`). Key design decisions:
+
+- **Programs**: Umbrella entity grouping teams under an organizational program (e.g., `lsb-hs` = Lincoln Standing Bear HS). Types: `hs`, `usssa`, `legion`.
+- **Teams**: INTEGER PRIMARY KEY AUTOINCREMENT (`teams.id`). External GC identifiers live in dedicated UNIQUE columns: `gc_uuid` (authenticated API) and `public_id` (public URL slug). All FK references to teams use `teams(id)`. INTEGER PK applies to `teams` only -- programs, seasons, and players keep TEXT PKs.
+- **Membership type**: `teams.membership_type` (`member` or `tracked`). Member teams are those the operator manages in GameChanger; tracked teams are opponents or other teams added for scouting.
+- **Classification**: `teams.classification` column. Valid values: `varsity`, `jv`, `freshman`, `reserve` (HS); `8U`-`14U` (USSSA); `legion`. Division dropdown in the admin UI.
+- **team_opponents**: Junction table linking member teams to their tracked opponents (`our_team_id` -> `opponent_team_id`), with `first_seen_year` for historical context.
+- **TeamRef pattern**: Pipeline code uses a `TeamRef` dataclass (`id: int`, `gc_uuid: str | None`, `public_id: str | None`). `.id` for all DB operations; `.gc_uuid` / `.public_id` for API calls. Tracked teams may have `gc_uuid=None`.
+- **Enriched stat columns** (schema-ready, not yet populated): `bats`/`throws` on players, home/away and vs-LHP/RHP split columns on season batting/pitching, `pitches`/`total_strikes` on game pitching, `batting_order`/`positions_played`/`is_primary` on game batting, `stat_completeness` tracking on all stat tables, `spray_charts` table for ball-in-play coordinate data.
+
+## Admin UI
+
+- **Team list**: Flat table of all teams at `/admin/teams/`. Columns: team name, program, division (classification), membership badge, active/inactive, opponent count, edit link.
+- **Two-phase add-team flow**: Phase 1 = URL input (paste a GameChanger team URL). Phase 2 = confirm page showing resolved team info, gc_uuid status (from reverse bridge lookup), membership radio (`member`/`tracked`, default: `tracked`), optional program dropdown and division dropdown.
+- **Edit page**: Program assignment, division, name override, active toggle. Membership type is editable (radio button) as a correction path for misclassification.
+
 ## Project Management
 
 Epic/story system managed by the **product-manager**. Epics: `E-NNN`, Stories: `E-NNN-SS`, Research: `E-NNN-R-SS`.

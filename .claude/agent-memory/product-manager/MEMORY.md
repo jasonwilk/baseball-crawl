@@ -1,8 +1,8 @@
 # Product Manager -- Agent Memory
 
 ## Numbering State
-- Next available epic number: E-113
-- Epics created: E-001 through E-112 (E-001, E-003, E-005, E-006, E-007, E-008, E-010, E-011, E-012, E-013, E-014, E-015, E-016, E-017, E-018, E-019, E-020, E-021, E-022, E-024, E-025, E-026, E-027, E-028, E-029, E-030, E-031, E-032, E-033, E-034, E-035, E-036, E-037, E-038, E-042, E-044, E-046, E-048, E-049, E-050, E-052, E-053, E-054, E-056, E-057, E-058, E-055, E-059, E-060, E-061, E-075, E-081, E-084, E-087, E-088, E-089, E-090, E-091, E-092 archived; E-093, E-094, E-095 archived; E-096 archived; E-097 archived; E-098 archived; E-099 archived; E-100 active; E-101 archived; E-102 archived; E-103 archived; E-104 ready; E-105 archived; E-106 draft; E-107 archived; E-108 archived; E-109 archived; E-110 ready; E-111 archived; E-112 archived)
+- Next available epic number: E-115
+- Epics created: E-001 through E-112 (E-001, E-003, E-005, E-006, E-007, E-008, E-010, E-011, E-012, E-013, E-014, E-015, E-016, E-017, E-018, E-019, E-020, E-021, E-022, E-024, E-025, E-026, E-027, E-028, E-029, E-030, E-031, E-032, E-033, E-034, E-035, E-036, E-037, E-038, E-042, E-044, E-046, E-048, E-049, E-050, E-052, E-053, E-054, E-056, E-057, E-058, E-055, E-059, E-060, E-061, E-075, E-081, E-084, E-087, E-088, E-089, E-090, E-091, E-092 archived; E-093, E-094, E-095 archived; E-096 archived; E-097 archived; E-098 archived; E-099 archived; E-100 completed; E-101 archived; E-102 archived; E-103 archived; E-104 ready; E-105 archived; E-106 draft; E-107 archived; E-108 archived; E-109 archived; E-110 ready; E-111 archived; E-112 archived)
 - Next available idea number: IDEA-028
 - Ideas created: IDEA-001 through IDEA-027
 
@@ -20,10 +20,12 @@
 |------|-------|--------|-------------|
 | E-072 | Proxy Session Ingestion Skill | READY | Proxy session data ingestion |
 | E-073 | API Documentation Validation Sweep | READY | API doc validation |
-| E-100 | Team Model Overhaul | ACTIVE | Schema revision, migration rewrite. Stories 01-02 DONE, 03+ TODO |
+| E-100 | Team Model Overhaul | COMPLETED | All 6 stories DONE. Pending archive. |
 | E-104 | Athlete Profile Endpoint Probe | READY | athlete_profile_id probing for opponent access |
 | E-106 | Evaluate Unauthorized E-100-01 Implementation | DRAFT | Evaluate DE's unauthorized E-100-01 work |
 | E-110 | Iterative Review Rounds Convention | READY | Codify iterative review/refinement pattern |
+| E-113 | Dispatch Boundary Enforcement | READY | Stop main session domain work during dispatch. 2 stories (parallel), CA only. |
+| E-114 | E-100 Codex Review Fixes | READY | 3 bugs from codex review: phantom team row (P1), duplicate detection gap (P2), member radio UX (P2). SE only. E-114-01 parallel; E-114-03 blocked on E-114-02. |
 
 ## Key Architectural Decisions
 - Storage: SQLite (WAL mode). Host-mounted at ./data/app.db. Simple file backup via scripts/backup_db.py (no Litestream).
@@ -35,9 +37,9 @@
 - ip_outs: innings pitched stored as integer outs (1 IP = 3 outs)
 - Mobile credentials (E-075, 2026-03-08): Mobile client key CONFIRMED DIFFERENT from web. iOS app is purely native (no JS bundles). Programmatic mobile refresh blocked on unknown client key.
 - FK-safe orphan handling: unknown player_ids get a stub row inserted before the stat row
-- Data model (revised 2026-03-07): seasons = first-class entity (season_id TEXT PK, type-based filtering). teams have crawl config (source, is_active, last_synced) + public_id. coaching_assignments = domain table (not auth). Migration numbering: 001=data model, 003=auth, 004=coaching_assignments, 005=teams_public_id. Slot 002 unused.
+- Data model (revised 2026-03-16, E-100): Fresh-start schema rewrite in single migration `001_initial_schema.sql` (old 001-008 archived). Key changes: programs table (hs/usssa/legion umbrella entity); teams use INTEGER PK AUTOINCREMENT with gc_uuid/public_id as UNIQUE external identifier columns; `membership_type` (member/tracked) replaces is_owned; `classification` replaces level (varsity/jv/freshman/reserve/8U-14U/legion); team_opponents junction table for opponent relationships; TeamRef dataclass pattern (id/gc_uuid/public_id) for pipeline code; enriched stat columns (bats/throws, splits, batting_order, pitches/strikes, stat_completeness tracking, spray_charts table) -- schema-ready, not yet populated. Auth tables simplified (users/sessions/magic_link_tokens/passkey_credentials/coaching_assignments). Next migration: 002.
 - Routing model (2026-03-03): Orchestrator removed (E-030). PM is the direct entry point for all work.
-- Auth model (revised 2026-03-03): ALL users = magic link email + optional passkey. No separate admin login path. Cloudflare Access for /admin/*. Dev bypass via DEV_USER_EMAIL. Migration 003_auth.sql.
+- Auth model (revised 2026-03-03): ALL users = magic link email + optional passkey. No separate admin login path. Cloudflare Access for /admin/*. Dev bypass via DEV_USER_EMAIL. Auth tables in 001_initial_schema.sql (folded in during E-100 rewrite).
 
 ## User Preferences
 - Build it right, no rush

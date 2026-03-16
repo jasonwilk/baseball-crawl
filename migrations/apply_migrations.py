@@ -41,15 +41,19 @@ _MIGRATIONS_DIR = Path(__file__).resolve().parent
 # Repo root: migrations/apply_migrations.py is 1 level deep, so .parents[1] is the repo root.
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
-# Load DATABASE_PATH from .env if python-dotenv is available.
-try:
-    from dotenv import load_dotenv
+# Load DATABASE_PATH from .env only when run as a script (not on import).
+# Guarding here prevents load_dotenv() from polluting os.environ in the test
+# session when test modules import run_migrations at the module level.
+def _load_dotenv_if_cli() -> None:
+    """Load .env only when this module is invoked directly or via CLI."""
+    try:
+        from dotenv import load_dotenv
 
-    _env_file = _MIGRATIONS_DIR.parent / ".env"
-    if _env_file.exists():
-        load_dotenv(_env_file)
-except ImportError:
-    pass  # dotenv is optional; env vars may be injected directly (Docker)
+        _env_file = _MIGRATIONS_DIR.parent / ".env"
+        if _env_file.exists():
+            load_dotenv(_env_file)
+    except ImportError:
+        pass  # dotenv is optional; env vars may be injected directly (Docker)
 
 _DEFAULT_DB_PATH = _PROJECT_ROOT / "data" / "app.db"
 
@@ -186,6 +190,7 @@ def run_migrations(db_path: Path | None = None) -> None:
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
+    _load_dotenv_if_cli()
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s [migrations] %(message)s",
