@@ -412,7 +412,7 @@ class GameLoader:
             ``(own_team_id, opp_team_id)`` where ``opp_team_id`` is ``None``
             if the opponent UUID cannot be determined.
         """
-        own_team_id: int = self._ensure_team_row(self._team_ref.gc_uuid or "")
+        own_team_id: int = self._team_ref.id
         opp_gc_uuid = summary.opponent_id or opp_key
         if not opp_gc_uuid:
             logger.warning(
@@ -527,12 +527,18 @@ class GameLoader:
         # If all keys are UUIDs (opponent-vs-opponent data), pick own team by
         # matching against the owned team's gc_uuid; the other is the opponent.
         if own_key is None and len(uuid_keys) >= 2:
-            owned_gc_uuid = self._team_ref.gc_uuid or ""
-            for k in uuid_keys:
-                if k.lower() == owned_gc_uuid.lower():
-                    own_key = k
-                else:
-                    opp_key = k
+            owned_gc_uuid = self._team_ref.gc_uuid
+            if owned_gc_uuid is None:
+                logger.warning(
+                    "Cannot identify own team key in UUID-only boxscore: gc_uuid is None. "
+                    "own_key will be None."
+                )
+            else:
+                for k in uuid_keys:
+                    if k.lower() == owned_gc_uuid.lower():
+                        own_key = k
+                    else:
+                        opp_key = k
 
         logger.debug(
             "Boxscore key detection: own_key=%s opp_key=%s (all_keys=%s)",

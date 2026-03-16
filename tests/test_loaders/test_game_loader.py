@@ -896,3 +896,100 @@ def test_multiple_games_in_one_team_dir(db: sqlite3.Connection, tmp_path: Path) 
     count = db.execute("SELECT COUNT(*) FROM games;").fetchone()[0]
     assert count == 2
     assert result.errors == 0
+
+
+# ---------------------------------------------------------------------------
+# AC-3 / AC-3b: gc_uuid=None scouting path -- no phantom team rows
+# ---------------------------------------------------------------------------
+
+
+def _insert_team_no_uuid(
+    db: sqlite3.Connection,
+    public_id: str = _OWN_TEAM_SLUG,
+) -> int:
+    """Insert a tracked team row without a gc_uuid (bridge returned 403 scenario)."""
+    cur = db.execute(
+        "INSERT INTO teams (public_id, name, membership_type, is_active) "
+        "VALUES (?, 'Scouted Team', 'tracked', 0)",
+        (public_id,),
+    )
+    db.commit()
+    return cur.lastrowid
+
+
+def test_gc_uuid_none_no_phantom_team_row(db: sqlite3.Connection, tmp_path: Path) -> None:
+    """AC-3: GameLoader with gc_uuid=None (scouting path) does not create phantom team row.
+
+    Verifies:
+    (a) No phantom team row with gc_uuid='' is created.
+    (b) Stats are written against the correct team ID.
+    (c) The opponent team row is created normally via _ensure_team_row.
+    """
+    from src.gamechanger.types import TeamRef
+
+    pk = _insert_team_no_uuid(db)
+    loader = GameLoader(
+        db,
+        season_id=_SEASON_ID,
+        owned_team_ref=TeamRef(id=pk, gc_uuid=None, public_id=_OWN_TEAM_SLUG),
+    )
+
+    # Boxscore uses slug key for own team (standard layout for authenticated member teams)
+    boxscore = _make_boxscore(own_key=_OWN_TEAM_SLUG, opp_key=_OPP_TEAM_ID)
+    team_dir = _write_team_dir(tmp_path, boxscores={_GAME_STREAM_ID: boxscore})
+
+    result = loader.load_all(team_dir)
+
+    assert result.errors == 0
+
+    # (a) No phantom team row with gc_uuid=''
+    phantom = db.execute(
+        "SELECT id FROM teams WHERE gc_uuid = ?", ("",)
+    ).fetchone()
+    assert phantom is None, "Phantom team row with gc_uuid='' should not exist"
+
+    # (b) Own team stats written against the correct team ID
+    row = db.execute(
+        "SELECT team_id FROM player_game_batting WHERE player_id = ?", (_PLAYER_OWN_1,)
+    ).fetchone()
+    assert row is not None, "Own team batting row should exist"
+    assert row[0] == pk, f"Expected team_id={pk} (own team), got {row[0]}"
+
+    # (c) Opponent team row created normally via _ensure_team_row
+    opp_row = db.execute(
+        "SELECT id FROM teams WHERE gc_uuid = ?", (_OPP_TEAM_ID,)
+    ).fetchone()
+    assert opp_row is not None, "Opponent team row should be created via _ensure_team_row"
+
+
+def test_detect_team_keys_uuid_only_gc_uuid_none(db: sqlite3.Connection) -> None:
+    """AC-3b: _detect_team_keys with two-UUID-key boxscore when gc_uuid is None.
+
+    Verifies that when gc_uuid is None, the code does not match on empty string
+    and own_key remains None (cannot identify own team from UUID-only boxscore).
+    """
+    from src.gamechanger.types import TeamRef
+
+    pk = _insert_team_no_uuid(db)
+    loader = GameLoader(
+        db,
+        season_id=_SEASON_ID,
+        owned_team_ref=TeamRef(id=pk, gc_uuid=None, public_id=_OWN_TEAM_SLUG),
+    )
+
+    # Boxscore with two UUID keys -- no slug key (opponent-vs-opponent scenario)
+    uuid_key_1 = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+    uuid_key_2 = _OPP_TEAM_ID
+    raw = {uuid_key_1: {}, uuid_key_2: {}}
+
+    own_key, opp_key = loader._detect_team_keys(raw)
+
+    # With gc_uuid=None, own team cannot be matched from UUID-only boxscore.
+    # own_key must remain None (no empty-string match should occur).
+    assert own_key is None, (
+        f"own_key should be None when gc_uuid is None in UUID-only boxscore, got {own_key!r}"
+    )
+
+    # No phantom team rows should be created by _detect_team_keys (it only reads)
+    phantom = db.execute("SELECT id FROM teams WHERE gc_uuid = ''").fetchone()
+    assert phantom is None, "No phantom row with gc_uuid='' should exist"
