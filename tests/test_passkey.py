@@ -114,6 +114,11 @@ _SCHEMA_SQL = """
         user_id    INTEGER NOT NULL REFERENCES users(id),
         expires_at TEXT NOT NULL
     );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_teams_gc_uuid
+        ON teams(gc_uuid) WHERE gc_uuid IS NOT NULL;
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_teams_public_id
+        ON teams(public_id) WHERE public_id IS NOT NULL;
 """
 
 _SEED_SQL = """

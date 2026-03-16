@@ -105,6 +105,11 @@ _SCHEMA_SQL = """
         created_at        TEXT NOT NULL DEFAULT (datetime('now')),
         UNIQUE(our_team_id, root_team_id)
     );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_teams_gc_uuid
+        ON teams(gc_uuid) WHERE gc_uuid IS NOT NULL;
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_teams_public_id
+        ON teams(public_id) WHERE public_id IS NOT NULL;
 """
 
 

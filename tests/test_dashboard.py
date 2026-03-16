@@ -206,6 +206,11 @@ _SCHEMA_SQL = """
         pitches    INTEGER,
         UNIQUE(player_id, team_id, season_id)
     );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_teams_gc_uuid
+        ON teams(gc_uuid) WHERE gc_uuid IS NOT NULL;
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_teams_public_id
+        ON teams(public_id) WHERE public_id IS NOT NULL;
 """
 
 

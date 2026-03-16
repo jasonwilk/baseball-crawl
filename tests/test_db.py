@@ -433,12 +433,18 @@ class TestGetOpponentScoutingReport:
         conn = _make_db()
         season_id = _insert_season(conn)
         opp_id = _insert_team(conn, "Scout Target", membership_type="tracked")
-        player_id = _insert_player(conn, "p-scout", "Eve", "Garcia")
+        batter_id = _insert_player(conn, "p-scout-bat", "Eve", "Garcia")
+        pitcher_id = _insert_player(conn, "p-scout-pit", "Frank", "Torres")
 
         conn.execute(
             "INSERT INTO player_season_batting (player_id, team_id, season_id, ab, h)"
             " VALUES (?, ?, ?, 12, 4)",
-            (player_id, opp_id, season_id),
+            (batter_id, opp_id, season_id),
+        )
+        conn.execute(
+            "INSERT INTO player_season_pitching (player_id, team_id, season_id, ip_outs, er, so)"
+            " VALUES (?, ?, ?, 9, 2, 8)",
+            (pitcher_id, opp_id, season_id),
         )
         conn.commit()
 
@@ -456,6 +462,10 @@ class TestGetOpponentScoutingReport:
         assert result["team_name"] == "Scout Target"
         assert len(result["batting"]) == 1
         assert result["batting"][0]["ab"] == 12
+        assert len(result["pitching"]) == 1
+        assert result["pitching"][0]["ip_outs"] == 9
+        assert result["pitching"][0]["er"] == 2
+        assert result["pitching"][0]["so"] == 8
 
 
 class TestGetLastMeeting:
@@ -588,7 +598,7 @@ class TestBulkCreateOpponents:
         verify_conn = sqlite3.connect(db_path)
         verify_conn.row_factory = sqlite3.Row
         rows = verify_conn.execute(
-            "SELECT id, name, membership_type FROM teams WHERE name IN (?, ?)",
+            "SELECT id, name, membership_type, is_active, source FROM teams WHERE name IN (?, ?)",
             ("Apex Warriors", "Blue Thunder"),
         ).fetchall()
         verify_conn.close()
@@ -599,6 +609,8 @@ class TestBulkCreateOpponents:
             assert r["membership_type"] == "tracked"
             assert isinstance(r["id"], int), "id should be an INTEGER"
             assert r["id"] > 0, "id should be auto-assigned positive integer"
+            assert r["is_active"] == 0, "bulk_create_opponents should set is_active=0"
+            assert r["source"] == "discovered", "bulk_create_opponents should set source='discovered'"
 
     def test_does_not_insert_duplicates(self, tmp_path: Path) -> None:
         conn = _make_db()
