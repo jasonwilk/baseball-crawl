@@ -30,14 +30,14 @@
 ## Dispatch Team
 <!-- Which implementing agents should be on the dispatch team for this epic's stories.
      This section is advisory: the main session retains final routing authority
-     based on story domains and the Agent Selection table in dispatch-pattern.md.
+     based on story domains and the Agent Selection table in agent-routing.md.
      When this section is present, the main session should prefer it over inferring
      agents from each story's domain. When absent or empty, the main session falls
      back to the routing table.
 
      Deriving the team: build this list from the union of Agent Hint values across
      all stories. For stories that lack an Agent Hint, use file-path inference
-     (the Agent Selection table in dispatch-pattern.md) and include the inferred
+     (the Agent Selection table in agent-routing.md) and include the inferred
      agent type in the union. The resulting list is still advisory -- the main
      session retains final routing authority. -->
 - software-engineer

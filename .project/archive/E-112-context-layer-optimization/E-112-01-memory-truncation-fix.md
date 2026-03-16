@@ -4,7 +4,7 @@
 [E-112: Context Layer Optimization](./epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, all 6 agent MEMORY.md files will be concise indexes under 150 lines, with detailed content extracted to topic files in each agent's memory directory. This fixes silent truncation where content beyond line 200 is dropped -- currently affecting 5 of 6 agents, with the most valuable memory entries (coaching decisions, ETL patterns, DB conventions) being invisible.

@@ -14,7 +14,8 @@ Load this skill when the user says any of:
 - "execute E-NNN", "execute epic E-NNN"
 - "dispatch E-NNN", "dispatch epic E-NNN"
 - "run epic E-NNN", "kick off E-NNN"
-- Any request that implies dispatching an epic's stories for implementation
+- "dispatch story E-NNN-SS", "implement story E-NNN-SS", "execute story E-NNN-SS"
+- Any request that implies dispatching an epic's stories (or a single story) for implementation
 
 **Chaining modifier**: The user may append "and review" or "and codex review" to any trigger phrase (e.g., "implement E-NNN and review", "start E-NNN and codex review"). This chains a code review after implementation completes. See Phase 4.
 
@@ -24,7 +25,7 @@ Load this skill when the user says any of:
 
 Codify the full workflow for dispatching and coordinating an epic when the user requests implementation. The main session (user-facing agent) is the spawner and router: it reads the epic, spawns implementers, code-reviewer, and PM, assigns stories with full context blocks, routes completion reports to PM (AC verification, status updates) and code-reviewer (quality review), manages merge-back, cascades to newly unblocked stories, and runs the closure sequence. The main session does not own statuses, verify ACs, or write code.
 
-This skill is the primary dispatch procedure reference. It aligns with the canonical model defined in `/.claude/rules/dispatch-pattern.md`.
+This skill is the authoritative source for dispatch procedures. Agent routing tables are in `/.claude/rules/agent-routing.md`. See `/.claude/rules/dispatch-pattern.md` for a brief overview of dispatch roles.
 
 ---
 
@@ -68,7 +69,7 @@ Do not report the result to the user or treat a failure as an error. Proceed to 
 Read the epic's `## Dispatch Team` section.
 
 - **If present and non-empty**: Extract the listed agent types. These are the implementers to spawn. PM and code-reviewer are always spawned as infrastructure -- they are not listed in the Dispatch Team section.
-- **If absent or empty**: Use the Agent Selection routing table in `/.claude/rules/dispatch-pattern.md` to determine which agent types are needed based on story domains and "Files to Create or Modify" sections. Read story files to make this determination.
+- **If absent or empty**: Use the Agent Selection routing table in `/.claude/rules/agent-routing.md` to determine which agent types are needed based on story domains and "Files to Create or Modify" sections. Read story files to make this determination.
 
 ### Multi-Wave Planning
 
@@ -132,8 +133,8 @@ Find stories with `Status: TODO` whose blocking dependencies are all `DONE`.
 For each eligible story:
 
 1. **Check Agent Hint.** If the story has an `## Agent Hint` field, prefer that agent type.
-2. **Check context-layer routing.** Scan the story's "Files to Create or Modify" section. If **any** file matches a context-layer path (see Routing Precedence in `/.claude/rules/dispatch-pattern.md`), that story MUST go to `claude-architect` regardless of the Agent Hint. **Isolation depends on file mix:** if the story modifies ONLY context-layer files, spawn WITHOUT `isolation: "worktree"` (runs in the main checkout because these files are shared infrastructure that must be immediately visible to all agents). If the story is mixed (context-layer + code files), spawn `claude-architect` WITH `isolation: "worktree"` -- the architect edits both context-layer and code files from the worktree.
-3. **Fall back to routing table.** If no Agent Hint and no context-layer match, use the Agent Selection table in `/.claude/rules/dispatch-pattern.md` to determine the agent type from file paths and story domain.
+2. **Check context-layer routing.** Scan the story's "Files to Create or Modify" section. If **any** file matches a context-layer path (see Routing Precedence in `/.claude/rules/agent-routing.md`), that story MUST go to `claude-architect` regardless of the Agent Hint. **Isolation depends on file mix:** if the story modifies ONLY context-layer files, spawn WITHOUT `isolation: "worktree"` (runs in the main checkout because these files are shared infrastructure that must be immediately visible to all agents). If the story is mixed (context-layer + code files), spawn `claude-architect` WITH `isolation: "worktree"` -- the architect edits both context-layer and code files from the worktree.
+3. **Fall back to routing table.** If no Agent Hint and no context-layer match, use the Agent Selection table in `/.claude/rules/agent-routing.md` to determine the agent type from file paths and story domain.
 
 ### Step 3: Update statuses
 
@@ -160,7 +161,61 @@ Completed dependencies:
 Handoff context from completed dependencies:
 - From E-NNN-01: [artifact path and description declared in upstream story's Handoff Context section]
 
-You are working in a git worktree (an isolated copy of the repository). Review `.claude/rules/worktree-isolation.md` for constraints on what you can and cannot do in a worktree. Key constraints: no Docker commands, no `bb` CLI, no `.env` or `data/` access. You CAN run pytest and edit tracked files.
+You are working in a git worktree (an isolated copy of the repository). Your working directory will be something like `/tmp/.worktrees/baseball-crawl-abc123/` instead of `/workspaces/baseball-crawl`.
+
+## Worktree Constraints -- What You MUST NOT Do
+
+### No Docker Interaction
+- Do NOT run `docker compose` commands (up, down, restart, ps, logs, build)
+- Do NOT run `curl localhost:8001` or any health checks against the app
+- Do NOT attempt to rebuild or restart the app container
+- The Docker stack reads from the main checkout, not from your worktree
+
+### No App/Credential/Database CLI Commands
+- Do NOT run `bb data sync`, `bb data crawl`, `bb data load`
+- Do NOT run `bb creds check`, `bb creds refresh`, `bb creds import`
+- Do NOT run `bb db reset`, `bb db backup`
+- Do NOT run `bb status`
+- These commands assume the main checkout and interact with the live app, credentials, or database
+
+### No Proxy Commands
+- Do NOT run `bb proxy *` commands (`bb proxy report`, `bb proxy endpoints`, `bb proxy check`, etc.)
+- Do NOT run `./scripts/proxy-*.sh` scripts
+- These assume main-checkout paths for `proxy/data/`
+
+### No Credential or Data File Access
+- `.env` is gitignored and **does not exist** in your worktree
+- `data/` is gitignored and **does not exist** in your worktree
+- Do NOT attempt to read credentials, access the app database, or reference data files
+- If your code needs `.env` values, use `__file__`-relative path resolution (not cwd-relative)
+
+### No Context-Layer Modifications (Unless Assigned)
+- Do NOT modify `CLAUDE.md`, `.claude/agents/*.md`, `.claude/rules/*.md`, `.claude/skills/**`, `.claude/hooks/**`, `.claude/settings.json`, or `.claude/agent-memory/**`
+- Context-layer files are shared infrastructure and must be modified in the main checkout
+- Exception: if your story is explicitly a context-layer story assigned to you in the main checkout (pure context-layer stories are never dispatched to worktrees)
+- Exception: mixed stories (context-layer + code files) are dispatched to `claude-architect` WITH worktree isolation. In this case, the architect edits both context-layer and code files from the worktree, and changes are merged back like any other worktree story.
+
+### No Branch or Worktree Management
+- Do NOT run `git merge`, `git rebase`, `git worktree remove`, or `git branch -d`
+- Do NOT attempt to merge your work back into the main branch
+- Branch management, merging, and worktree cleanup are handled by the main session
+
+## What You CAN Do
+
+### Run Tests
+- `pytest` is safe to run from worktrees
+- Tests use `tmp_path`, `:memory:` SQLite databases, and mocked HTTP -- they do not depend on `.env`, `data/`, or Docker
+
+### Read and Write Source Code
+- Edit files in `src/`, `tests/`, `migrations/`, `scripts/`, `docs/`, and other tracked directories
+- Your changes are on an isolated branch and will be merged by the main session after review
+
+### Use Git for Inspection
+- `git status`, `git diff`, `git log` are safe
+- Committing your changes is fine -- the main session handles the merge
+
+## File Paths in Reports
+- When reporting `## Files Changed`, use **absolute paths** (e.g., `/tmp/.worktrees/baseball-crawl-abc123/src/foo.py`). The main session and code-reviewer need these paths to locate your work in the worktree.
 
 Satisfy all acceptance criteria and report back when complete. Do not modify story status files, check AC boxes, or update the epic Stories table. Report completion to the main session; PM will verify ACs and update statuses independently.
 
@@ -179,12 +234,14 @@ Example:
 
 **Context-layer stories** (spawned without worktree isolation): Omit the worktree paragraph from the context block. Use main-checkout paths in the Files Changed example instead.
 
-**Context block requirements** (per `/.claude/rules/dispatch-pattern.md`):
+**Context block requirements**:
 - Include the **full story file text** verbatim. Never summarize.
 - Include the **full epic Technical Notes** verbatim.
 - When a story has completed upstream dependencies with Handoff Context declarations, include the declared artifact paths and descriptions.
 
-Assign stories in parallel when they have no file conflicts.
+Assign stories in parallel when they have no file conflicts. Before routing stories to parallel agents, compare their "Files to Create or Modify" sections -- overlapping stories are serialized (assigned sequentially, not concurrently).
+
+**Migration serialization**: Migration stories (files under `migrations/`) must never run concurrently, even without explicit file overlap. Concurrent migrations cause numbering conflicts (two migrations may claim the same sequence number). Serialize all stories whose "Files to Create or Modify" include paths under `migrations/`.
 
 ### Step 5: Monitor, review, and verify
 
@@ -230,7 +287,7 @@ When the implementer did NOT work in a worktree (context-layer stories that touc
 
    **If PM rejects ACs** (regardless of reviewer verdict): Route PM's AC feedback to the implementer alongside any code-review MUST FIX items and accepted SHOULD FIX items. After the implementer revises, both PM and the code-reviewer re-evaluate. See Gate Interaction below.
 
-   **PM-Reviewer AC Disagreement**: If the code-reviewer flags an AC as MUST FIX but PM verifies that AC as PASS, the main session removes the AC-based finding from the MUST FIX list before routing to the implementer. If removing AC-based items empties the MUST FIX list, the story passes the review gate (effectively APPROVED for merge-back). Non-AC MUST FIX findings (bugs, security, conventions) are the reviewer's exclusive domain and are unaffected by PM override. See `dispatch-pattern.md` PM-Reviewer AC Disagreement section for the full resolution matrix.
+   **PM-Reviewer AC Disagreement**: If the code-reviewer flags an AC as MUST FIX but PM verifies that AC as PASS, the main session removes the AC-based finding from the MUST FIX list before routing to the implementer. If removing AC-based items empties the MUST FIX list, the story passes the review gate (effectively APPROVED for merge-back). Non-AC MUST FIX findings (bugs, security, conventions) are the reviewer's exclusive domain and are unaffected by PM override. The full PM-Reviewer AC Disagreement resolution matrix: (1) Reviewer APPROVED + PM pass = merge-back. (2) Reviewer NOT APPROVED, non-AC MUST FIX only = route to implementer. (3) Reviewer NOT APPROVED, ALL MUST FIX are AC-related, PM says pass = PM override, proceed to merge-back. (4) Mixed AC + non-AC MUST FIX, PM says pass = remove AC items, route only non-AC items. (5) PM says fail = route PM feedback to implementer regardless. Non-AC findings (bugs, security, conventions) are the reviewer's exclusive domain -- PM cannot override those.
 
 5. **If the reviewer returns NOT APPROVED** (MUST FIX findings): Triage SHOULD FIX findings per step 3 above. Route MUST FIX items plus any accepted SHOULD FIX items to the implementer who wrote the code with the review round number (e.g., "Round 1 of 2 -- items to fix below"). The main session NEVER applies code fixes itself -- all fixes are routed to the implementer. The implementer fixes the issues in the same worktree and reports completion again (with updated `## Files Changed`). Send the updated work back to the reviewer for Round 2 using an expanded template that includes the prior findings:
 

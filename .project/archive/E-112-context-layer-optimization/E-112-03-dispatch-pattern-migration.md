@@ -4,7 +4,7 @@
 [E-112: Context Layer Optimization](./epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, `dispatch-pattern.md` will be a ~25-line stub containing the Agent Selection routing table and a pointer to the implement skill. The ~195 lines of dispatch procedure content (already present in the implement skill) will be removed from the universal rule, saving ambient context on every non-dispatch interaction.

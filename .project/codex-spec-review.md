@@ -5,8 +5,9 @@
 Before reviewing, read these workflow context files:
 1. `/workspaces/baseball-crawl/CLAUDE.md` -- project principles, tech stack, agent ecosystem, workflow conventions
 2. `/workspaces/baseball-crawl/.claude/rules/workflow-discipline.md` -- READY gate, work authorization gate, PM task types
-3. `/workspaces/baseball-crawl/.claude/rules/dispatch-pattern.md` -- how stories are dispatched, PM responsibilities, agent routing table
-4. `/workspaces/baseball-crawl/.claude/agents/product-manager.md` -- PM agent definition, refinement workflow, quality checklist
+3. `/workspaces/baseball-crawl/.claude/rules/agent-routing.md` -- agent selection routing table, dispatch team metadata, decision routing
+4. `/workspaces/baseball-crawl/.claude/rules/dispatch-pattern.md` -- dispatch overview (team roles, procedure pointer)
+5. `/workspaces/baseball-crawl/.claude/agents/product-manager.md` -- PM agent definition, refinement workflow, quality checklist
 
 This is a **planning artifact review**, not a code review. Evaluate the epic and story files provided against the project's workflow contracts and planning quality standards.
 
@@ -41,7 +42,7 @@ For every story in the epic, check each item and report findings:
 - Does each story deliver clear, standalone value?
 
 ### 5. Agent-Routing Correctness
-- Per the routing table in `dispatch-pattern.md`: context-layer files (CLAUDE.md, `.claude/agents/*.md`, `.claude/rules/*.md`, `.claude/skills/**`, `.claude/hooks/**`, `.claude/settings.json`, `.claude/agent-memory/**`) must route to `claude-architect`.
+- Per the routing table in `agent-routing.md`: context-layer files (CLAUDE.md, `.claude/agents/*.md`, `.claude/rules/*.md`, `.claude/skills/**`, `.claude/hooks/**`, `.claude/settings.json`, `.claude/agent-memory/**`) must route to `claude-architect`.
 - Python implementation, crawlers, parsers, tests, utility scripts route to `software-engineer`.
 - Database schema, SQL migrations, ETL route to a data-engineer-roled agent.
 - Are any stories routed to the wrong agent type given their "Files to Create or Modify"?

@@ -35,7 +35,7 @@
 <!-- Optional. Routing hint for PM -- declares which agent type should implement this story.
      Valid values are agent names as they appear in .claude/agents/ filenames:
      software-engineer, data-engineer, claude-architect, docs-writer, ux-designer, api-scout.
-     If the hint disagrees with the routing table in dispatch-pattern.md, the routing table wins.
+     If the hint disagrees with the routing table in agent-routing.md, the routing table wins.
      Omit this field entirely for stories with no routing preference. -->
 
 ## Handoff Context

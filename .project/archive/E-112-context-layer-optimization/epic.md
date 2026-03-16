@@ -1,7 +1,7 @@
 # E-112: Context Layer Optimization
 
 ## Status
-`READY`
+`COMPLETED`
 
 ## Overview
 Reduce ambient context layer load from ~980 lines to ~380 lines (61% reduction) and CLAUDE.md from 508 to ~150 lines (70% reduction) through systematic content placement -- moving every section to the delivery mechanism where it belongs (scoped rules, skills, agent defs, or docs). Also fix silent MEMORY.md truncation that causes 5 agents to operate on incomplete memory.
@@ -41,11 +41,11 @@ The architect produced a 6-step migration plan ordered by safety. Steps 2-4 (all
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-112-01 | Fix MEMORY.md Truncation for 5 Agents | TODO | None | claude-architect |
-| E-112-02 | CLAUDE.md Content Trim | TODO | None | claude-architect |
-| E-112-03 | dispatch-pattern.md Migration to Dispatch Scope | TODO | None | claude-architect |
-| E-112-04 | worktree-isolation.md Migration to Dispatch Scope | TODO | None | claude-architect |
-| E-112-05 | CLAUDE.md Placement Migration | TODO | E-112-02 | claude-architect |
+| E-112-01 | Fix MEMORY.md Truncation for 5 Agents | DONE | None | claude-architect |
+| E-112-02 | CLAUDE.md Content Trim | DONE | None | claude-architect |
+| E-112-03 | dispatch-pattern.md Migration to Dispatch Scope | DONE | None | claude-architect |
+| E-112-04 | worktree-isolation.md Migration to Dispatch Scope | DONE | None | claude-architect |
+| E-112-05 | CLAUDE.md Placement Migration | DONE | E-112-02 | claude-architect |
 
 ## Dispatch Team
 - claude-architect
@@ -139,3 +139,4 @@ All stories modify context-layer files exclusively. Per the context-layer except
 - 2026-03-15: Expanded scope after PM+CA refinement session. CA performed a systematic placement audit identifying ~227 additional CLAUDE.md lines that belong in scoped rules. Added E-112-05 (CLAUDE.md Placement Migration). Updated targets from 35% to 61% ambient reduction, CLAUDE.md from ~377 to ~150 lines. IDEA-026 created for future work (subdirectory intent nodes, rules consolidation, automated staleness detection).
 - 2026-03-15: Second refinement pass (CA+SE validation). CA read every source and destination file to verify plan assumptions. Critical finding: E-112-04's core assumption was false -- the implement skill REFERENCES `worktree-isolation.md` by path, it does not inline constraints. Stubbing the rule as-is would break worktree agents. Resolution: revised E-112-04 to inline constraints in the skill first, then stub the rule. Also identified: (1) migration serialization gap in implement skill (added AC to E-112-03), (2) dependency-management.md needs Dockerfile + devcontainer.json in paths (updated E-112-05 AC-1), (3) app-troubleshooting.md `src/**` scope too broad -- tightened to `docker-compose.yml`, `Dockerfile`, `requirements.txt`, `migrations/**` with 1-line CLAUDE.md reminder (updated E-112-05 AC-3), (4) ideas-workflow.md needs `epics/**` in paths (added E-112-05 AC-12). SE confirmed all amendments are implementation-safe.
 - 2026-03-16: Third and fourth refinement passes (context-fundamentals lens + edge cases). Context-fundamentals skill budget update relocated from E-112-02 Notes to E-112-05 AC (final numbers not stable until last story). E-112-04 dependency note corrected (depends on E-112-03 for implement skill frontmatter, not independent). Shared-file note added to Execution Constraints (E-112-03 and E-112-04 both modify implement skill). Open Questions updated with post-dispatch monitoring note.
+- 2026-03-16: **COMPLETED.** All 5 stories executed serially by claude-architect in the main checkout (context-layer exception). Key outcomes: (1) All 6 agent MEMORY.md files restructured -- 5 were over the 200-line silent truncation limit, now all under 150 lines with detailed content in topic files. (2) CLAUDE.md reduced from 508 → 152 lines (70% reduction) through systematic placement migration -- every section moved to its proper delivery mechanism. (3) dispatch-pattern.md reduced from 221 → 24 lines (stub pointing to implement skill as source of truth). (4) worktree-isolation.md reduced from 67 → 14 lines (stub with critical prohibitions, full constraints inlined in implement skill). (5) 4 new scoped rules created: dependency-management.md, http-discipline.md (absorbed crawling.md), app-troubleshooting.md, context-layer-guard.md. (6) 2 existing rules extended: proxy-boundary.md (Bright Data), python-style.md (Code Style). (7) Agent routing extracted to standalone rule (agent-routing.md) with dispatch routing table + decision routing table. (8) Implement skill enhanced: single-story dispatch triggers, migration serialization constraint, full worktree constraints inlined in spawn context. (9) context-fundamentals skill updated with measured post-E-112 actuals. Zero information loss -- all content preserved in scoped delivery mechanisms. Total ambient context reduction: ~980 → ~560-870 lines (universal rules + CLAUDE.md baseline, with 0-400 triggered rules loaded only when relevant files are touched).

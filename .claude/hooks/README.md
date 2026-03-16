@@ -2,6 +2,16 @@
 
 ## Statusline (`statusline.sh`)
 
+A custom statusline is configured in `.claude/settings.json` and displayed at the bottom of the Claude Code terminal during sessions. It shows:
+- Model name, current directory, and git branch
+- Color-coded context window usage bar (green < 70%, yellow 70-89%, red 90%+)
+- Session cost and elapsed time
+
+Script location: `.claude/hooks/statusline.sh`
+Dependencies: `bash`, `jq`, `git` (optional, for branch display)
+
+### Details
+
 A custom status bar displayed at the bottom of the Claude Code terminal. It shows
 at-a-glance session information so you always know what model you are using, how
 much context remains, what you have spent, and how long you have been working.

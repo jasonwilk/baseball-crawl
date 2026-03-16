@@ -4,7 +4,7 @@
 [E-112: Context Layer Optimization](./epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, CLAUDE.md will be ~131 lines shorter through deduplication and compression of four sections: Proxy Boundary, Script Aliases/Terminal/Shell/Codex, and GameChanger API auth details. All removed content is already available in scoped rules or docs -- this story eliminates redundancy, not information.

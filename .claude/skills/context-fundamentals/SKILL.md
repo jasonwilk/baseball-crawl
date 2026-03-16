@@ -25,7 +25,7 @@ Load this skill when you are about to:
 
 Every agent session's context window contains four types of content:
 
-1. **System prompt / ambient rules**: The project's root CLAUDE.md, all `.claude/rules/*.md` files, and the agent's definition from `.claude/agents/<agent>.md`. This loads automatically at session start. In baseball-crawl, this is approximately 1,000-1,270 lines of text before any task-specific content is added.
+1. **System prompt / ambient rules**: The project's root CLAUDE.md, universal `.claude/rules/*.md` files (those with `paths: "**"` or no `paths:` frontmatter), and the agent's definition from `.claude/agents/<agent>.md`. This loads automatically at session start. In baseball-crawl, this is approximately 560-870 lines of always-loaded text before any task-specific content is added. Scoped rules (those with specific `paths:` patterns) add 0-400 lines depending on which files are touched during the session.
 
 2. **Conversation history**: The turn-by-turn exchange between the user and the agent, including all tool calls and tool results. This grows throughout the session. Long sessions with many file reads, bash commands, and edit operations accumulate substantial conversation history.
 
@@ -71,17 +71,18 @@ When a session's context window approaches its limit, Claude Code automatically 
 
 ### Baseball-Crawl's Context Budget
 
-Every baseball-crawl agent session starts with approximately **1,000-1,270 lines of ambient context** before any task-specific content is loaded:
+Every baseball-crawl agent session starts with approximately **560-870 lines of always-loaded ambient context** before any task-specific content is loaded:
 
 | Source | Approximate Size | Notes |
 |--------|-----------------|-------|
-| Root `CLAUDE.md` | ~297 lines | Project conventions, architecture, security rules, HTTP discipline |
-| `.claude/rules/*.md` files (10 files) | ~546 lines total | Workflow discipline, dispatch pattern, documentation, ideas, devcontainer, python-style, testing, crawling, project-management, and other rules |
-| Agent definition (`.claude/agents/<agent>.md`) | ~139-327 lines | Varies by agent; PM is largest (327), baseball-coach smallest (139) |
-| Agent `MEMORY.md` (`.claude/agent-memory/<agent>/MEMORY.md`) | ~12-97 lines | Varies; PM ~97, architect ~97, docs-writer ~12 |
-| **Total ambient** | **~1,000-1,270 lines** | Before any task begins |
+| Root `CLAUDE.md` | ~152 lines | Project identity, stack, deployment, security, architecture, commands |
+| Universal rules (6 files) | ~258 lines total | workflow-discipline (96), agent-team-compliance (59), agent-routing (37), vision-signals (29), dispatch-pattern (23), worktree-isolation (14) |
+| Triggered rules (0-15 files) | ~0-400 lines | Scoped by `paths:` frontmatter; loads only when matching files are touched. Highest for `src/gamechanger/` edits (~200+ lines: http-discipline, testing, python-style, api-docs), lowest for context-layer edits (~35 lines: context-layer-guard) |
+| Agent definition (`.claude/agents/<agent>.md`) | ~142-287 lines | Varies by agent; PM is largest (287), baseball-coach smallest (142) |
+| Agent `MEMORY.md` (`.claude/agent-memory/<agent>/MEMORY.md`) | ~12-174 lines | Varies; architect ~174, PM ~91, docs-writer ~12 |
+| **Total ambient** | **~560-870 lines** | Always-loaded context before any task begins |
 
-These are actuals measured during the 2026-03-03 context-layer review (`/.project/research/context-layer-review-2026-03-03.md`). Check the actual files if precision matters for a specific decision.
+These are actuals measured post-E-112 (2026-03-16). Triggered rules add 0-400 lines on top depending on files touched. Check the actual files if precision matters for a specific decision.
 
 ### Task-Specific Context (Loaded on Demand)
 
@@ -114,7 +115,9 @@ A typical story dispatch adds **200-400 lines** of task-specific context (story 
 - The artifact is older and the epic it informed has evolved significantly
 - The task only needs a high-level decision, not the artifact's detailed constraints
 
-**Rule of thumb**: If MEMORY.md has a self-contained entry for the pattern or decision, use MEMORY.md. If MEMORY.md says "see [artifact]" and the task depends on the details, load the artifact.
+**MEMORY.md topic file indirection**: When MEMORY.md is an index pointing to topic files (e.g., `[endpoint-schema-notes.md](endpoint-schema-notes.md)` -- detailed notes in a separate file), load the topic file rather than the full research artifact. Topic files are smaller than research artifacts and more current than a compressed MEMORY.md summary. This is the middle ground between loading a 400-line artifact and relying on a one-line MEMORY.md entry.
+
+**Rule of thumb**: If MEMORY.md has a self-contained entry for the pattern or decision, use MEMORY.md. If MEMORY.md points to a topic file, load the topic file. If neither has the detail and the task depends on it, load the full research artifact.
 
 #### Decision 2: When to Use `/clear` Between Tasks
 
@@ -144,34 +147,41 @@ The statusline at `.claude/hooks/statusline.sh` displays a color-coded context w
 
 ### Context Budget for a Typical Story
 
-Here is a worked example for a software-engineer story in E-006:
+Here is a worked example for a software-engineer story working on `src/gamechanger/` code:
 
 ```
-Session start (ambient):
-  CLAUDE.md:                     ~297 lines
-  workflow-discipline.md:         ~40 lines
-  other rules files (9):         ~506 lines
-  software-engineer.md agent def: ~150 lines
-  software-engineer MEMORY.md:    ~87 lines
+Session start (always-loaded ambient):
+  CLAUDE.md:                       ~152 lines
+  Universal rules (6 files):       ~258 lines
+  software-engineer.md agent def:  ~185 lines
+  software-engineer MEMORY.md:      ~50 lines
   ----------------------------------------
-  Ambient subtotal:             ~1,080 lines
+  Ambient subtotal:                ~645 lines
+
+Triggered rules (for src/gamechanger/ files):
+  http-discipline.md:               ~54 lines
+  testing.md:                       ~74 lines
+  python-style.md:                  ~21 lines
+  api-docs.md:                     ~199 lines
+  ----------------------------------------
+  Triggered subtotal:              ~348 lines
 
 Task start (story dispatch):
-  E-006-04.md (story file):      ~120 lines
-  E-006 epic Technical Notes:    ~150 lines
-  E-006-02.md (dependency):       ~80 lines  [loaded to understand PII taxonomy delivered]
+  Story file:                      ~120 lines
+  Epic Technical Notes:            ~150 lines
+  Dependency story:                 ~80 lines
   ----------------------------------------
-  Task subtotal:                 ~350 lines
+  Task subtotal:                   ~350 lines
 
 During task (demand-loaded):
-  /.project/research/E-006-precommit-design.md:  ~200 lines
+  Research artifact:               ~200 lines
   ----------------------------------------
-  Demand subtotal:               ~200 lines
+  Demand subtotal:                 ~200 lines
 
-Total:                         ~1,630 lines (~25-30% of a 128k context window)
+Total:                           ~1,543 lines (~24% of a 128k context window)
 ```
 
-This is a healthy context load. There is ample room for tool outputs (bash commands, file reads of code files) and conversation history before approaching yellow territory.
+This is a healthy context load -- significantly lighter than pre-E-112 (~1,630 lines for the same scenario, but with all rules loaded universally instead of scoped). The main win is that agents working outside `src/gamechanger/` (e.g., claude-architect on context-layer files) see only ~680 lines of ambient context instead of ~1,000+.
 
 A session becomes risky when demand-loaded files are large (full API response dumps, multiple research artifacts) or when conversation history grows from many debugging cycles. Watch the statusline.
 

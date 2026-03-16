@@ -2,6 +2,7 @@
 paths:
   - ".project/ideas/**"
   - ".project/templates/idea-template.md"
+  - "epics/**"
 ---
 
 # Ideas Workflow Rules

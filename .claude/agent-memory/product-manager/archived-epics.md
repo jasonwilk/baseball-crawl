@@ -1,0 +1,98 @@
+# Archived Epics -- Detailed History
+
+Complete list of archived epics with summary descriptions.
+
+- E-005 (COMPLETED): Research Spike + GameChanger API Client -- session extraction, request headers, initial client. Archived.
+- E-006 (COMPLETED): PII Safety System -- pre-commit hook + Claude Code hook for credential/PII scanning. Archived.
+- E-007 (COMPLETED): CLAUDE.md Restructure -- from minimal to comprehensive project context document. Archived.
+- E-008 (COMPLETED): Context Layer Foundations -- skills, hooks, statusline infrastructure. Archived.
+- E-011 (COMPLETED): Slash Command Aliases -- unified `/implement`, `/review`, `/spec-review` trigger phrases. Archived.
+- E-012 (COMPLETED): Absorbed into E-013. Agent stubs.
+- E-013 (COMPLETED): Agent Buildout -- data-engineer and software-engineer from stubs to full operational manuals.
+- E-014 (COMPLETED): Absorbed into E-013. Agent memory seeding.
+- E-015 (COMPLETED): Fix Epic Workflow Violations -- PM compliance improvements.
+- E-016 (COMPLETED): Fix Agent Spawn Failures -- tool availability constraints.
+- E-017 (COMPLETED): Epic Formation Quality -- consultation, dependency tracking, AC quality.
+- E-018 (COMPLETED): Context Loading Optimization -- load/defer decisions for context budget management.
+- E-019 (COMPLETED): PII Safety Hardening -- expanded scanner coverage, credential scanning, .env isolation.
+- E-020 (COMPLETED): Agent Effectiveness Audit & Refinement -- all 5 target agents refined.
+- E-021 (COMPLETED): Agent Workflow Guardrails -- work authorization and dispatch failure protocols.
+- E-022 (COMPLETED): Safety Scan Hardening -- visible confirmation, hook hardening, CLAUDE.md reminder, integration tests.
+- E-024 (COMPLETED): Epic Archive Enforcement -- hook + PM protocol fix to prevent completed epics lingering in /epics/.
+- E-025 (COMPLETED): Devcontainer Update -- Python 3.12 + Docker-in-Docker alongside Node.js.
+- E-026 (COMPLETED): Python Version Governance -- migrated 3.12->3.13, .python-version as source of truth, pyproject.toml.
+- E-027 (COMPLETED): Devcontainer-to-Compose Networking -- port 8001 mapping for app access from devcontainer, troubleshooting docs in CLAUDE.md.
+- E-029 (COMPLETED): Context-Layer Routing Enforcement -- explicit context-layer file paths in dispatch-pattern.md routing table + PM dispatch pre-check step.
+- E-030 (COMPLETED): Remove Orchestrator Agent -- deleted orchestrator.md, updated CLAUDE.md/rules/agent defs/skills/memory. Agent ecosystem now 6 agents.
+- E-031 (COMPLETED): Dispatch Closure Sequence -- expanded dispatch closure in dispatch-pattern.md and product-manager.md into a 7-step sequence.
+- E-010 (ABANDONED): Intent/Context Layer -- Phase 1 DONE (3 skill files). Phase 2 abandoned. Concept captured as IDEA-005.
+- E-028 (COMPLETED): Documentation System -- docs-writer agent, documentation maintenance rules, admin+coaching docs, workflow integration.
+- E-032 (COMPLETED): Agent Log Access and Troubleshooting Verification -- validated E-027 troubleshooting workflow end-to-end.
+- E-033 (COMPLETED): Project Hygiene -- aligned docs and tests with current reality. CLAUDE.md stack sections corrected, hardcoded paths fixed, TestClient lifecycle fixed, pytest-timeout added.
+- E-034 (COMPLETED): Codex Review Integration -- two review lanes (code + spec). Artifacts: `.project/codex-review.md`, `scripts/codex-review.sh`, `.project/codex-spec-review.md`, `scripts/codex-spec-review.sh`.
+- E-001 (COMPLETED): GameChanger API Foundation -- credential parser, API client, endpoint docs, smoke test. All 4 stories DONE. Archived 2026-03-03.
+- E-035 (COMPLETED): Context Layer Staleness Fixes -- fixed P1 (misleading agent count, stale deployment details, wrong budget numbers), P2 (stale references), P3 (memory duplication).
+- E-036 (COMPLETED): Fix Codex Code-Review Wrapper -- replaced `codex review` with `codex exec --ephemeral -`.
+- E-037 (COMPLETED): Codex Review Remediation -- 4 stories. Fixed dashboard query, rewrote E-002 loader ACs, updated context-layer files.
+- E-038 (COMPLETED): Fix PII Pre-Commit Hook Silent Failure -- changed core.hooksPath from absolute to relative path.
+- E-002 (COMPLETED): Data Ingestion Pipeline -- 13 stories (1 spike + 5 crawlers + 3 loaders + 1 orchestrator + 3 remediation). 615 tests total.
+- E-003 (COMPLETED): Data Model and Storage Schema -- core schema rewrite, coaching_assignments migration, seed data + query validation. 394 tests.
+- E-040 (COMPLETED): UX Designer Agent -- created ux-designer.md.
+- E-044 (COMPLETED): Workflow Trigger Phrases -- three workflow skills (spec-review, review-epic, implement) + Dispatch Team section in epic template.
+- E-045 (COMPLETED): Resolve mitmproxy Port Conflict -- removed 8080/8081 from devcontainer forwardPorts.
+- E-039 (COMPLETED): mitmproxy Credential Sync and API Discovery -- passive HTTPS proxy for credential extraction, header capture, endpoint discovery.
+- E-047 (COMPLETED): PM Workflow Bugs -- consultation override rule, dispatch authorization gate, spec-review timing guidance.
+- E-048 (COMPLETED): Host Proxy Migration -- migrated mitmproxy from Docker Compose profile to standalone host-based proxy/ folder.
+- E-049 (COMPLETED): API Endpoint Documentation and Dual-Header System -- full schema docs for 37 payloads, dual-header system.
+- E-046 (COMPLETED): Upstream Proxy Support -- dual-zone Bright Data proxy.
+- E-050 (COMPLETED): Credential Validation and Crawl Bootstrap -- health check, profile-aware client, bootstrap pipeline.
+- E-051 (COMPLETED): Fix mitmproxy CA Certificate Persistence.
+- E-056 (COMPLETED): Fix Dispatch Pattern -- Team Lead as Spawner -- rewrote dispatch-pattern.md, PM agent def, implement skill.
+- E-053 (COMPLETED): Profile-Scoped Credentials -- profile-scoped env keys (_WEB/_MOBILE).
+- E-054 (COMPLETED): Header Parity Refresh from MITM Captures -- proxy-refresh-headers.py.
+- E-059 (COMPLETED): Consultation Compliance Guardrails -- PM anti-patterns and workflow-discipline.md updates.
+- E-060 (COMPLETED): Stabilize Header-Capture Aggregation -- first-seen-wins per-key aggregation.
+- E-058 (COMPLETED): Fix Relative Path Bug in Proxy Scripts.
+- E-057 (COMPLETED): pip-tools Dependency Management.
+- E-042 (COMPLETED): Admin Interface and Team Management -- URL-based team onboarding, admin CRUD, opponent auto-discovery, DB-driven crawl config.
+- E-061 (COMPLETED): Proactive Agent Handoffs -- Agent Hint + Handoff Context dispatch metadata.
+- E-062 (COMPLETED): Split API Documentation into Per-Endpoint Files -- 89 endpoint files, 6 global reference files.
+- E-052 (COMPLETED): Proxy Data Lifecycle -- session-scoped capture dirs, review tracking, session-aware scripts.
+- E-055 (COMPLETED): Mobile Credential Capture -- mitmproxy-based credential extraction for iOS GameChanger app.
+- E-063 (COMPLETED): Proxy Session Review Workflow -- session inventory, review tracking, endpoint discovery pipeline.
+- E-064 (COMPLETED): Worktree Dispatch Implementation -- git worktree isolation for parallel story dispatch.
+- E-065 (COMPLETED): Merge PM and Team Lead -- three-role model, main session as coordinator.
+- E-066 (COMPLETED): Terminal Modes -- Solo/Coordinated/Heavy mode documentation and tmux setup.
+- E-067 (COMPLETED): Codex Evaluation Phase 2 -- codex-review.sh, codex-spec-review.sh scripts.
+- E-068 (COMPLETED): Vision System -- VISION.md, vision-signals.md, curate-the-vision workflow.
+- E-069 (COMPLETED): Statusline Enhancement -- context window usage bar, session cost, elapsed time.
+- E-070 (COMPLETED): Code Review Agent -- code-reviewer.md agent definition and dispatch integration.
+- E-071 (COMPLETED): Dispatch Code Review Integration -- code-reviewer wired into dispatch flow.
+- E-072 (COMPLETED): Proxy Session 2026-03-09 Ingestion -- three mobile proxy sessions analyzed.
+- E-075 (COMPLETED): Mobile Credential Capture Workflow -- mitmproxy capture + bb creds capture command.
+- E-077 (COMPLETED): Programmatic Auth Module -- gc-signature HMAC, token refresh, client integration.
+- E-081 (COMPLETED): Codex Bootstrap -- AGENTS.md, .codex/ config, CODEX_HOME, trust seeding.
+- E-084 (COMPLETED): RTK Integration -- Rust Token Killer CLI proxy installation and hook configuration.
+- E-085 (COMPLETED): Login Fallback for Token Manager -- full login flow when refresh token expires.
+- E-087 (COMPLETED): Client Key Auto-Refresh -- bb creds extract-key command for GC JS bundle.
+- E-088 (COMPLETED): bb CLI Unification -- Typer-based CLI replacing standalone scripts.
+- E-089 (COMPLETED): Bright Data Proxy Integration -- residential proxy for IP anonymization.
+- E-090 (COMPLETED): Proxy Sticky Sessions -- per-client sticky IP routing via session ID.
+- E-091 (COMPLETED): Crawl Source Flexibility -- --source db|yaml flag for crawl/load commands.
+- E-092 (COMPLETED): Proxy Session 2026-03-11 Ingestion -- web proxy sessions analyzed.
+- E-093 (COMPLETED): Fix Crawl Data Quality Issues -- game deduplication, player-team join, opponent resolution.
+- E-094 (COMPLETED): Proxy Session 2026-03-12 Ingestion -- follow-gating discovery, unfollow lifecycle.
+- E-095 (COMPLETED): bb data resolve-opponents Command -- opponent public_id resolution via API.
+- E-096 (COMPLETED): Production Deployment -- Docker Compose on home Linux server with Cloudflare Tunnel.
+- E-097 (COMPLETED): Opponent Scouting Data Pipeline -- bb data scout command, scouting crawler and loader.
+- E-098 (COMPLETED): Codex Review Remediation Round 2 -- findings from E-097 code review.
+- E-099 (COMPLETED): bb data sync Command -- full bootstrap: validate credentials, crawl, and load.
+- E-100 (ACTIVE): Team Model Overhaul -- schema revision, migration rewrite. Stories 01-02 DONE, 03+ TODO.
+- E-101 (COMPLETED): BB CLI Help and Discoverability -- sub-group help, --help at every depth, docker/git/kubectl conventions.
+- E-103 (COMPLETED): Baseball Coach Agent Refinement -- team-first coaching perspective, rate-stat-driven, flag-oriented.
+- E-105 (COMPLETED): Spec Review Exhaustiveness -- multi-round review drift prevention, consistency/propagation checks.
+- E-107 (COMPLETED): Planning-Mode Agent Guardrail -- prevents agents from implementing during planning.
+- E-108 (COMPLETED): PM as Dispatch Teammate -- status ownership and AC verification.
+- E-109 (COMPLETED): tmux Window Rename for All Epic Sessions -- extend rename from dispatch-only to all epic sessions with workflow stage.
+- E-111 (COMPLETED): Archive Verification Gate -- added to closure sequence.
+- E-112 (COMPLETED): Context Layer Optimization -- 5 stories. MEMORY.md truncation fix (5 agents restructured), CLAUDE.md 508→152 lines, dispatch-pattern 221→24 lines, worktree-isolation 67→14 lines. 4 new scoped rules (dependency-management, http-discipline, app-troubleshooting, context-layer-guard), 2 extended rules (proxy-boundary, python-style), agent-routing.md extracted, implement skill enhanced (dispatch triggers, migration serialization, worktree constraints inlined), context-fundamentals updated with post-E-112 actuals. Zero information loss. No follow-up work.

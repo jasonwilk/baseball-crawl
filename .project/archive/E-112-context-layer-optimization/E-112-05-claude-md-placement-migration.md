@@ -4,7 +4,7 @@
 [E-112: Context Layer Optimization](./epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, every remaining CLAUDE.md section that has a more appropriate delivery mechanism will have been moved there. Four new scoped rules are created (including a context-layer guard rule to prevent regression), two existing rules are extended, six pure duplicates are removed, one section is relocated, and the context-fundamentals skill is updated with post-E-112 actuals. CLAUDE.md retains only genuinely ambient project identity content (~150 lines).

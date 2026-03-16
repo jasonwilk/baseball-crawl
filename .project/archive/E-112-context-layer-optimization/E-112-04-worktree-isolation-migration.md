@@ -4,7 +4,7 @@
 [E-112: Context Layer Optimization](./epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, `worktree-isolation.md` will be a ~5-line stub retaining the three critical prohibition categories (no Docker, no credentials, no branch management) with a pointer to the implement skill for the full constraint set. The implement skill will inline the full worktree constraints directly into each worktree agent's spawn context, replacing the current reference to the rule file.
