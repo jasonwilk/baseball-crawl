@@ -993,3 +993,69 @@ class TestConnectGuardAgainstResolved:
                     data={"public_id": "SomeOtherId"},
                 )
         assert response.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# A-P2a: discover-opponents route coverage
+# ---------------------------------------------------------------------------
+
+
+class TestDiscoverOpponents:
+    """POST /admin/teams/{id}/discover-opponents returns discovered opponents (A-P2a)."""
+
+    def test_discover_opponents_returns_flash_with_count(
+        self, opp_db_with_ids: tuple
+    ) -> None:
+        """POST discover-opponents redirects with correct count of new opponents found."""
+        from src.gamechanger.team_resolver import DiscoveredOpponent
+
+        opp_db, team_ids = opp_db_with_ids
+        varsity_id = team_ids["varsity"]
+        admin_id = _insert_user(opp_db, "discover1@test.com")
+        token = _insert_session(opp_db, admin_id)
+
+        discovered = [
+            DiscoveredOpponent(name="Rival Team A"),
+            DiscoveredOpponent(name="Rival Team B"),
+        ]
+        with patch(
+            "src.api.routes.admin.discover_opponents",
+            return_value=discovered,
+        ) as mock_discover:
+            with patch(
+                "src.api.routes.admin.bulk_create_opponents",
+                return_value=2,
+            ) as mock_bulk:
+                with patch.dict("os.environ", _admin_env(opp_db, "discover1@test.com")):
+                    with TestClient(
+                        app, follow_redirects=False, cookies={"session": token}
+                    ) as client:
+                        response = client.post(
+                            f"/admin/teams/{varsity_id}/discover-opponents"
+                        )
+
+        assert response.status_code == 303
+        assert "msg=" in response.headers["location"]
+        assert "2" in response.headers["location"]
+        mock_discover.assert_called_once_with("ownedPubId001")
+        mock_bulk.assert_called_once_with(["Rival Team A", "Rival Team B"])
+
+    def test_discover_opponents_no_public_id_redirects_with_error(
+        self, opp_db_with_ids: tuple
+    ) -> None:
+        """POST discover-opponents for team with no public_id redirects with error."""
+        opp_db, team_ids = opp_db_with_ids
+        jv_id = team_ids["jv"]  # JV team has public_id=NULL
+        admin_id = _insert_user(opp_db, "discover2@test.com")
+        token = _insert_session(opp_db, admin_id)
+
+        with patch.dict("os.environ", _admin_env(opp_db, "discover2@test.com")):
+            with TestClient(
+                app, follow_redirects=False, cookies={"session": token}
+            ) as client:
+                response = client.post(
+                    f"/admin/teams/{jv_id}/discover-opponents"
+                )
+
+        assert response.status_code == 303
+        assert "error=" in response.headers["location"]

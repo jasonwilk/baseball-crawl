@@ -864,6 +864,49 @@ class TestPhase2ConfirmSubmit:
         assert row is not None
         assert row[0] == "member"
 
+    def test_confirm_submit_duplicate_detected_via_phase1_uuid_when_reverify_fails(
+        self, team_db: Path
+    ) -> None:
+        """POST: duplicate detected via Phase 1 gc_uuid when TOCTOU reverify returns 403.
+
+        Scenario:
+        - A team row exists with gc_uuid='existing-uuid' but no public_id
+          (as created by opponent_resolver).
+        - The add-team confirm POST arrives with public_id='newpub' and
+          gc_uuid='existing-uuid' (Phase 1 found it).
+        - TOCTOU reverify fails (403), so gc_uuid_value becomes None.
+        - The duplicate check must still catch the existing row via the Phase 1 UUID.
+        """
+        from src.gamechanger.bridge import BridgeForbiddenError
+
+        user_id = _insert_user(team_db, "admin@example.com")
+        token = _insert_session(team_db, user_id)
+        # Team row with gc_uuid but no public_id (opponent_resolver pattern)
+        _insert_team(team_db, "Existing Opponent", gc_uuid="existing-uuid", membership_type="tracked")
+
+        with patch(
+            "src.api.routes.admin.resolve_public_id_to_uuid",
+            side_effect=BridgeForbiddenError("403"),
+        ):
+            with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
+                with TestClient(app, cookies={"session": token}) as client:
+                    response = client.post(
+                        "/admin/teams/confirm",
+                        data={
+                            "public_id": "newpub",
+                            "team_name": "Existing Opponent",
+                            "gc_uuid": "existing-uuid",  # Phase 1 discovered this
+                            "membership_type": "tracked",
+                            "program_id": "",
+                            "classification": "",
+                        },
+                    )
+
+        assert response.status_code == 200
+        assert "already in the system" in response.text
+        # No new row should be inserted; only the original row exists
+        assert _count_rows(team_db, "teams", "gc_uuid = ?", ("existing-uuid",)) == 1
+
 
 # ---------------------------------------------------------------------------
 # AC-17n: Classification inference

@@ -423,12 +423,20 @@ def _toggle_team_active_integer(team_id: int) -> int:
         return new_value
 
 
-def _check_duplicate_new(public_id: str, gc_uuid: str | None) -> bool:
+def _check_duplicate_new(
+    public_id: str,
+    gc_uuid: str | None,
+    phase1_gc_uuid: str | None = None,
+) -> bool:
     """Return True if public_id or gc_uuid already exists in the teams table.
 
     Args:
         public_id: The GC public_id slug to check.
-        gc_uuid: The GC UUID to check (may be None).
+        gc_uuid: The GC UUID to check (may be None if TOCTOU reverify failed).
+        phase1_gc_uuid: The UUID discovered in Phase 1 before TOCTOU reverify.
+            Checked as a fallback when gc_uuid is None -- covers the case where
+            opponent_resolver previously created a row with the gc_uuid but no
+            public_id, and reverify failed so gc_uuid is now None.
 
     Returns:
         True if a duplicate exists.
@@ -442,6 +450,15 @@ def _check_duplicate_new(public_id: str, gc_uuid: str | None) -> bool:
         if gc_uuid:
             row = conn.execute(
                 "SELECT 1 FROM teams WHERE gc_uuid = ?", (gc_uuid,)
+            ).fetchone()
+            if row:
+                return True
+        # When reverify failed (gc_uuid is None), still check the Phase 1 UUID.
+        # This catches the case where a row exists with gc_uuid but no public_id
+        # (e.g., created by opponent_resolver) -- public_id check above misses it.
+        if phase1_gc_uuid and phase1_gc_uuid != gc_uuid:
+            row = conn.execute(
+                "SELECT 1 FROM teams WHERE gc_uuid = ?", (phase1_gc_uuid,)
             ).fetchone()
             if row:
                 return True
@@ -1100,10 +1117,14 @@ async def confirm_team_submit(
         gc_uuid, program_id, classification
     )
 
+    # Preserve Phase 1 UUID before TOCTOU may clear it on 403.
+    # Used as fallback in duplicate check when reverify fails.
+    phase1_gc_uuid = gc_uuid_value
+
     if gc_uuid_value:
         gc_uuid_value = await _toctou_refresh_uuid(gc_uuid_value, public_id)
 
-    if await run_in_threadpool(_check_duplicate_new, public_id, gc_uuid_value):
+    if await run_in_threadpool(_check_duplicate_new, public_id, gc_uuid_value, phase1_gc_uuid):
         programs = await run_in_threadpool(_get_programs)
         return await _render_confirm_team_page(
             request, guard, public_id, team_name, gc_uuid_value,
