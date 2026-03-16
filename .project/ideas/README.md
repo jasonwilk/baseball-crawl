@@ -46,6 +46,20 @@ Review this list every 90 days, or when completing an epic. Ask:
 | [IDEA-025](IDEA-025-test-fixture-migration-driven.md) | Migration-Driven Test Fixtures | CANDIDATE | 2026-06-14 |
 | [IDEA-026](IDEA-026-context-layer-placement-audit.md) | Context Layer Placement Audit -- Phase 2 | CANDIDATE | 2026-06-15 |
 | [IDEA-027](IDEA-027-unified-team-lifecycle.md) | Unified Team Lifecycle -- Consult → Refine → Dispatch in One Team | CANDIDATE | 2026-06-15 |
+| [IDEA-028](IDEA-028-loader-stat-population.md) | Loader Stat Population (Per-Game + Season) | PROMOTED | 2026-03-16 -- promoted to E-117 |
+| [IDEA-029](IDEA-029-lr-split-population.md) | L/R Split Data Population | CANDIDATE | 2026-06-14 |
+| [IDEA-030](IDEA-030-fielding-catcher-pitch-type-tables.md) | Fielding, Catcher, and Pitch Type Tables | CANDIDATE | 2026-06-14 |
+| [IDEA-031](IDEA-031-stat-blending-logic.md) | Stat Blending Logic | CANDIDATE | 2026-06-14 |
+| [IDEA-032](IDEA-032-multi-credential-per-program.md) | Multi-Credential per Program | CANDIDATE | 2026-06-14 |
+| [IDEA-033](IDEA-033-bulk-team-import.md) | Bulk Team Import from /me/teams | CANDIDATE | 2026-06-14 |
+| [IDEA-034](IDEA-034-program-crud-admin.md) | Program CRUD Admin Page | CANDIDATE | 2026-06-14 |
+| [IDEA-035](IDEA-035-opponent-page-redesign.md) | Opponent Page Redesign | CANDIDATE | 2026-06-14 |
+| [IDEA-036](IDEA-036-dashboard-program-awareness.md) | Dashboard Program Awareness | CANDIDATE | 2026-06-14 |
+| [IDEA-037](IDEA-037-scouting-report-redesign.md) | Scouting Report Redesign | CANDIDATE | 2026-06-14 |
+| [IDEA-038](IDEA-038-query-time-splits-and-streaks.md) | Query-Time Splits and Streaks | CANDIDATE | 2026-06-14 |
+| [IDEA-039](IDEA-039-game-metadata-enrichment.md) | Game Metadata Enrichment | CANDIDATE | 2026-06-14 |
+| [IDEA-040](IDEA-040-optimistic-pitching-column-audit.md) | Optimistic Pitching Column API Audit | CANDIDATE | 2026-06-14 |
+| [IDEA-041](IDEA-041-play-by-play-stat-compilation.md) | Play-by-Play Stat Compilation Pipeline | CANDIDATE | 2026-06-14 |
 
 ## Status Definitions
 
