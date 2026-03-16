@@ -4,7 +4,7 @@
 [E-114: E-100 Codex Review Fixes](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, all templates use the correct user dict fields from the E-100 schema. Six dashboard templates still reference `user.display_name` and `user.is_admin` which no longer exist, and one admin template references `admin_user.display_name` -- Jinja2 silently renders nothing, so admin nav links never appear and user names are blank on these pages.
@@ -16,7 +16,7 @@ E-100 simplified the user model, removing `display_name` and `is_admin` from the
 - [ ] **AC-1**: `dashboard/team_pitching.html`, `dashboard/game_list.html`, `dashboard/opponent_list.html`, `dashboard/opponent_detail.html`, `dashboard/player_profile.html`, and `dashboard/game_detail.html` use `user.email` instead of `user.display_name` for user identification display.
 - [ ] **AC-2**: All references to `user.is_admin` conditionals are removed from the six dashboard templates listed in AC-1. Admin navigation is handled by the same pattern used in `dashboard/team_stats.html`.
 - [ ] **AC-3**: `admin/opponent_connect.html` uses `admin_user.email` instead of `admin_user.display_name`.
-- [ ] **AC-4**: A test verifies that at least one of the fixed templates renders user email correctly and does not contain `display_name` references.
+- [ ] **AC-4**: A test renders at least one of the fixed dashboard templates with a known user email and asserts the email appears in the rendered HTML. Additionally, a source-level assertion (grep or file read) confirms the template files no longer contain the literal strings `display_name` or `is_admin`.
 - [ ] **AC-5**: Existing template and route tests continue to pass.
 
 ## Technical Approach

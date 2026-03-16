@@ -4,7 +4,7 @@
 [E-114: E-100 Codex Review Fixes](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the game loader uses `self._team_ref.id` directly for the own team's INTEGER PK instead of resolving through `_ensure_team_row(gc_uuid or "")`, eliminating the phantom team row created when `gc_uuid` is None.

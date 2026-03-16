@@ -4,10 +4,10 @@
 [E-114: E-100 Codex Review Fixes](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
-After this story is complete, test files that use inline `_SCHEMA_SQL` include the partial unique indexes on `gc_uuid` and `public_id` from production DDL, ensuring uniqueness violations caught in production are also caught in tests.
+After this story is complete, test files that use inline `_SCHEMA_SQL` include the partial unique indexes on `gc_uuid` and `public_id` from production DDL, ensuring uniqueness violations caught in production are also caught in tests. Additionally, two test coverage gaps are closed: scouting report pitching assertions (C-P2a) and bulk_create_opponents default field assertions (C-P2b).
 
 ## Context
 Eight test files define inline `_SCHEMA_SQL` that reproduces the production schema but omits the `CREATE UNIQUE INDEX` statements for `gc_uuid` and `public_id`. This means tests pass when inserting duplicate `gc_uuid` or `public_id` values, but the same operations would fail in production. The drift was introduced during E-100 when the schema was rewritten but test schemas were not updated to match.

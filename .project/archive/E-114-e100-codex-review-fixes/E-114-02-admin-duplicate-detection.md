@@ -4,10 +4,10 @@
 [E-114: E-100 Codex Review Fixes](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
-After this story is complete, the admin add-team flow detects duplicate teams even when the TOCTOU bridge reverification fails (403), preventing creation of a second row for a team that already exists with a gc_uuid from prior opponent resolution.
+After this story is complete, the admin add-team flow detects duplicate teams even when the TOCTOU bridge reverification fails (403), preventing creation of a second row for a team that already exists with a gc_uuid from prior opponent resolution. Additionally, the discover-opponents admin route gains test coverage (A-P2a gap from codex test review).
 
 ## Context
 The GET confirm handler already calls `_check_duplicate_new` with the Phase 1 gc_uuid from query params, so duplicates are caught at render time. The bug is **POST-side only**: when `_toctou_refresh_uuid` returns None (bridge 403 on reverify), `_check_duplicate_new` only checks `public_id` because `gc_uuid_value` is None. If opponent_resolver previously created a row with the team's gc_uuid but no public_id, the POST duplicate check misses it. Result: two rows for the same real-world team with stats accumulating separately. Low probability (requires credential expiry between Phase 1 and Phase 2) but hard to recover from.

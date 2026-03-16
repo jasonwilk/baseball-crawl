@@ -1,10 +1,10 @@
 # E-114: E-100 Codex Review Fixes
 
 ## Status
-`READY`
+`COMPLETED`
 
 ## Overview
-Fixes bugs discovered during the E-100 post-implementation Codex review and subsequent Codex test review. P1-1 is a data corruption bug where the game loader creates phantom team rows when `gc_uuid` is None (common scouting scenario). P1-3 is a duplicate-row integrity bug in the admin add-team flow when bridge reverification fails. P1-2 is an optional UX guard preventing operators from creating member teams that can't be crawled. B-P2b fixes stale template references to removed user fields (7 templates across dashboard and admin). A-P4 fixes test schema drift where inline test schemas omit production unique indexes (8 test files).
+Fixes bugs discovered during the E-100 post-implementation Codex review and subsequent Codex test review. P1-1 is a data corruption bug where the game loader creates phantom team rows when `gc_uuid` is None (common scouting scenario). P1-3 is a duplicate-row integrity bug in the admin add-team flow when bridge reverification fails. P1-2 is a UX guard preventing operators from creating member teams that can't be crawled. B-P2b fixes stale template references to removed user fields (7 templates across dashboard and admin). A-P4 fixes test schema drift where inline test schemas omit production unique indexes (8 test files).
 
 ## Background & Context
 Codex review of E-100 implementation found the original three bugs (P1-1, P1-3, P1-2). A subsequent Codex test review found two additional issues (B-P2b, A-P4) and three test coverage gaps (A-P2a, C-P2a, C-P2b). All confirmed by both code-reviewer and software-engineer. All issues exist in code written or rewritten during E-100.
@@ -13,20 +13,22 @@ Codex review of E-100 implementation found the original three bugs (P1-1, P1-3, 
 
 **P1-3 severity**: Medium. Low probability (requires credential expiry between Phase 1 and Phase 2 of add-team flow), but hard to recover from -- two rows for the same team with stats accumulating separately.
 
-**P1-2 severity**: Low. Not a correctness bug -- operator-error path with visible failure (crawlers fail loudly on member teams without gc_uuid). UX improvement to prevent the error path entirely.
+**P1-2 severity**: Low. Not a correctness bug -- operator-error path with visible failure (crawlers fail loudly on member teams without gc_uuid). UX guard to prevent the error path entirely.
 
 **B-P2b severity**: Medium. Six dashboard templates and one admin template silently render blank user names and invisible admin nav links due to stale field references.
 
 **A-P4 severity**: Medium. Eight test schemas diverge from production DDL -- uniqueness violations pass in tests but fail in production.
 
-No expert consultation required -- bugs are well-characterized with confirmed fixes.
+No expert consultation required. All five bugs are mechanical code fixes to existing patterns, not schema design, API behavior, or architectural decisions. Root causes and fix approaches were independently confirmed by both code-reviewer and software-engineer during two prior review rounds. The ETL fix (E-114-01) uses an already-known INTEGER PK; the admin fix (E-114-02) preserves an already-discovered gc_uuid across a form submit; the template fixes (E-114-04) replicate an already-established pattern from `team_stats.html`; the test schema fix (E-114-05) copies production DDL verbatim.
 
 ## Goals
 - Game loader uses `self._team_ref.id` directly for the own team, never passing empty string to `_ensure_team_row`
 - Admin add-team duplicate detection catches gc_uuid-only rows even when reverify fails
-- (Optional) Member radio is disabled or warned when gc_uuid is unavailable
+- Admin discover-opponents route has test coverage
+- Member radio is disabled with explanatory text when gc_uuid is unavailable
 - Dashboard and admin templates use correct user dict fields (no stale `display_name`/`is_admin` references)
 - Test schemas match production DDL (partial unique indexes included)
+- Existing test gaps closed: scouting report pitching assertions, bulk_create_opponents default field assertions
 
 ## Non-Goals
 - **Redesigning the loader's team resolution pattern.** Minimal fix to the specific bug path.
@@ -40,18 +42,22 @@ No expert consultation required -- bugs are well-characterized with confirmed fi
 - The secondary `gc_uuid or ""` usage in `_detect_team_keys` (line 530) is also fixed
 - `_check_duplicate_new` detects existing rows when `gc_uuid` is None on reverify but the row has a gc_uuid from prior resolution
 - Test coverage for `TeamRef(gc_uuid=None)` scouting path in game loader
+- Test coverage for `_detect_team_keys` with a two-UUID-key boxscore when `gc_uuid` is None (the secondary line-530 bug path)
 - Test coverage for gc_uuid-only duplicate + reverify failure interaction in admin
+- A test covers the `discover-opponents` admin route (returns discovered opponents correctly)
 - All dashboard templates use `user.email` (not `user.display_name`) and have no `user.is_admin` conditionals; `admin/opponent_connect.html` uses `admin_user.email` (not `admin_user.display_name`)
 - Test inline schemas include the same unique indexes as production DDL
+- `get_opponent_scouting_report()` test asserts on pitching data (not just batting)
+- `bulk_create_opponents()` test asserts `is_active=0` and `source='discovered'` defaults
 
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-114-01 | Fix game loader phantom team row on gc_uuid=None | TODO | None | - |
-| E-114-02 | Fix admin duplicate detection on reverify failure | TODO | None | - |
-| E-114-03 | UX guard: disable member radio without gc_uuid | TODO | E-114-02 | - |
-| E-114-04 | Fix dashboard and admin template stale references | TODO | None | - |
-| E-114-05 | Fix test schema drift — missing unique indexes | TODO | E-114-02, E-114-04 | - |
+| E-114-01 | Fix game loader phantom team row on gc_uuid=None | DONE | None | - |
+| E-114-02 | Fix admin duplicate detection on reverify failure | DONE | None | - |
+| E-114-03 | UX guard: disable member radio without gc_uuid | DONE | E-114-02 | - |
+| E-114-04 | Fix dashboard and admin template stale references | DONE | None | - |
+| E-114-05 | Fix test schema drift — missing unique indexes | DONE | E-114-02, E-114-04 | - |
 
 ## Dispatch Team
 - software-engineer (E-114-01, E-114-02, E-114-03, E-114-04, E-114-05)
@@ -73,10 +79,7 @@ No expert consultation required -- bugs are well-characterized with confirmed fi
 ### P1-2: Member Radio UX Guard
 **Root cause**: `confirm_team.html` line 71 offers `<input type="radio" name="membership_type" value="member">` unconditionally regardless of `gc_uuid_status`.
 
-**Fix options** (implementer chooses):
-1. Disable the member radio when `gc_uuid_status != 'found'` (add `disabled` attribute)
-2. Add a prominent warning below the member radio when gc_uuid is unavailable
-3. Both: disable + warning
+**Fix**: Disable the member radio when `gc_uuid_status != 'found'` (add `disabled` attribute) and add explanatory text communicating that member teams require a GameChanger UUID for crawling.
 
 ### B-P2b: Dashboard Template Stale References
 **Root cause**: E-100 removed `display_name` and `is_admin` from the user dict but only updated `dashboard/team_stats.html`. Seven other templates still reference these fields. Jinja2 silently renders undefined variables as empty strings, so the pages render without errors but admin nav links never appear and user names are blank.
@@ -119,4 +122,7 @@ E-114-04 is independent of E-114-01, E-114-02, and E-114-03 (no file overlap).
 - 2026-03-16: PM refinement review. Fixed: (1) Stories table now shows E-114-03 dependency on E-114-02, (2) Parallel Execution section corrected to reflect confirm_team.html overlap between E-114-02 and E-114-03, (3) E-114-02 Technical Approach revised to describe the constraint rather than prescribing a hidden-field solution. All three bugs verified in source code. Set to READY.
 - 2026-03-16: Codex spec review triage. Fixed 4 findings: (F1-P1) corrected test file paths across all stories and epic -- `tests/test_game_loader.py` → `tests/test_loaders/test_game_loader.py`, `tests/test_admin_routes.py` → `tests/test_admin_teams.py`; (F2-P2) renamed `_identify_own_team` → `_detect_team_keys` in epic Technical Notes and Success Criteria to match actual code; (F3-P2) added AC-3b to E-114-01 requiring a two-UUID-key boxscore test to exercise the secondary line-530 bug path; (F4-P2) clarified P1-3 description in epic and E-114-02 Context that the duplicate detection gap is POST-side only (GET already catches duplicates with Phase 1 gc_uuid).
 - 2026-03-16: Codex test review triage. Added 2 new stories and expanded ACs. New: E-114-04 (dashboard template stale references -- 6 templates still using removed `user.display_name`/`user.is_admin` fields), E-114-05 (test schema drift -- 6 test files missing production unique indexes on `gc_uuid`/`public_id`). Expanded: E-114-02 AC-4 added for discover-opponents route test coverage (A-P2a); E-114-05 AC-3/AC-4 added for pitching assertion on scouting report test (C-P2a) and is_active/source assertions on bulk_create_opponents test (C-P2b). Dismissed: A-P1 (intentional dev-mode design), A-P2b/B-P1a/B-P1b/B-P2a (low-risk, deferred). Updated Parallel Execution with new file conflicts: E-114-05 blocked by E-114-02 (shared test files). Epic now has 5 stories total.
+- 2026-03-16: Codex spec review R2 triage. Fixed 3 findings, dismissed 1: (F1) E-114-04 AC-4 rewritten to require positive email assertion + source-level grep instead of untestable rendered-output negative check; (F2-dismissed) consultation justification strengthened but no expert consultation added -- all bugs are mechanical fixes confirmed by CR+SE, not architectural decisions; (F3) removed "(Optional)" framing from E-114-03 across epic Overview, Goals, severity note, and Technical Notes to match the firm story ACs; (F4) propagated E-114-02 AC-4 (discover-opponents), E-114-05 AC-3 (pitching assertions), E-114-05 AC-4 (bulk_create assertions) to epic Goals and Success Criteria; updated E-114-02 and E-114-05 descriptions to reflect expanded scope.
 - 2026-03-16: Full refinement review. Fixed 6 issues: (1) E-114-01 "Context files to read" corrected `_identify_own_team` -> `_detect_team_keys` (stale reference from pre-triage); (2) E-114-02 Files to Create removed prescriptive "hidden field" parenthetical; (3) E-114-04 template paths corrected -- all 6 were missing `dashboard/` subdirectory (e.g., `src/api/templates/team_pitching.html` -> `src/api/templates/dashboard/team_pitching.html`); (4) E-114-04 scope expanded to 7 templates -- `admin/opponent_connect.html` uses `admin_user.display_name` (same stale field, different variable name); (5) E-114-05 scope expanded from 6 to 8 test files -- `test_dashboard.py` and `test_dashboard_auth.py` also have inline schemas missing unique indexes; (6) E-114-05 now blocked by both E-114-02 and E-114-04 (`test_dashboard.py` overlap). E-114-04 test file resolved to `tests/test_dashboard.py` (not `test_admin.py`). All bugs re-verified in source code.
+- 2026-03-16: Final polish pass. Added missing Success Criteria bullet for E-114-01 AC-3b test (`_detect_team_keys` two-UUID-key boxscore test). All file paths, function names, line numbers, dependency chains, and cross-story consistency verified against current codebase.
+- 2026-03-16: All 5 stories DONE, AC-verified by PM. Fixes delivered: (1) game loader phantom team row eliminated — uses TeamRef.id directly, (2) admin duplicate detection preserves Phase 1 gc_uuid across TOCTOU reverify failure, (3) member radio disabled when gc_uuid unavailable with explanatory warning, (4) all 7 templates updated from stale display_name/is_admin to email, (5) 8 test schemas aligned with production unique indexes + scouting report pitching and bulk_create_opponents assertion gaps closed. Epic COMPLETED.

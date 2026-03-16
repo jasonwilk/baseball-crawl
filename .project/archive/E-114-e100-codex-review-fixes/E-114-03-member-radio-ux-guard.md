@@ -4,7 +4,7 @@
 [E-114: E-100 Codex Review Fixes](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the add-team confirm page prevents operators from selecting "Member" when gc_uuid is unavailable (bridge returned 403), since member teams without gc_uuid cannot be crawled.
