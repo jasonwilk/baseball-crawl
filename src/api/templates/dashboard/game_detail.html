@@ -8,11 +8,8 @@ Game Detail{% if game %} -- {{ game.game_date }}{% endif %}
 
 {% block header_extras %}
 <div class="ml-auto flex items-center gap-4 text-sm">
-  {% if user and user.display_name %}
-  <span class="text-blue-200">{{ user.display_name }}</span>
-  {% endif %}
-  {% if user and user.is_admin %}
-  <a href="/admin/users" class="text-blue-200 hover:text-white">Admin</a>
+  {% if user and user.email %}
+  <span class="text-blue-200">{{ user.email }}</span>
   {% endif %}
   <a href="/auth/logout" class="text-blue-200 hover:text-white">Logout</a>
 </div>

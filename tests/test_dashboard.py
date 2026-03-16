@@ -1534,3 +1534,48 @@ class TestPlayerProfile:
         html = response.text
         occurrences = html.count("/dashboard/games/game-001")
         assert occurrences == 1
+
+
+class TestTemplateStaleRefs:
+    """AC-4: Verify stale field references removed from dashboard and admin templates (E-114-04)."""
+
+    _DASHBOARD_TEMPLATES = [
+        "team_pitching.html",
+        "game_list.html",
+        "opponent_list.html",
+        "opponent_detail.html",
+        "player_profile.html",
+        "game_detail.html",
+    ]
+    _TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "src" / "api" / "templates"
+
+    def test_pitching_template_renders_user_email(self, pitching_client) -> None:
+        """GET /dashboard/pitching renders user.email in header (AC-4)."""
+        client, _ = pitching_client
+        response = client.get("/dashboard/pitching")
+        assert response.status_code == 200
+        assert "testdev@example.com" in response.text
+
+    def test_dashboard_templates_no_display_name(self) -> None:
+        """All six dashboard templates contain no 'display_name' references (AC-4)."""
+        for filename in self._DASHBOARD_TEMPLATES:
+            path = self._TEMPLATES_DIR / "dashboard" / filename
+            content = path.read_text()
+            assert "display_name" not in content, (
+                f"{filename} still contains 'display_name'"
+            )
+
+    def test_dashboard_templates_no_is_admin(self) -> None:
+        """All six dashboard templates contain no 'is_admin' references (AC-4)."""
+        for filename in self._DASHBOARD_TEMPLATES:
+            path = self._TEMPLATES_DIR / "dashboard" / filename
+            content = path.read_text()
+            assert "is_admin" not in content, (
+                f"{filename} still contains 'is_admin'"
+            )
+
+    def test_admin_opponent_connect_no_display_name(self) -> None:
+        """admin/opponent_connect.html contains no 'display_name' references (AC-4)."""
+        path = self._TEMPLATES_DIR / "admin" / "opponent_connect.html"
+        content = path.read_text()
+        assert "display_name" not in content
