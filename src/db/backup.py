@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 import os
-import shutil
+import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -42,7 +42,11 @@ def _get_db_path(override: Path | None = None) -> Path:
 
 
 def backup_database(db_path: Path | None = None) -> Path:
-    """Copy the database file to a timestamped backup.
+    """Copy the database file to a timestamped backup using the SQLite backup API.
+
+    Uses ``sqlite3.Connection.backup()`` instead of a raw file copy so that
+    WAL-mode sidecar files (.wal, .shm) are included in the checkpoint and the
+    backup is always a consistent, self-contained database file.
 
     Args:
         db_path: Path to the database file.  Uses ``_get_db_path()`` if None.
@@ -65,7 +69,8 @@ def backup_database(db_path: Path | None = None) -> Path:
     backup_name = f"app-{timestamp}.db"
     backup_path = _BACKUPS_DIR / backup_name
 
-    shutil.copy2(db_path, backup_path)
+    with sqlite3.connect(db_path) as src, sqlite3.connect(backup_path) as dst:
+        src.backup(dst)
     logger.info("Backup saved to %s", backup_path)
 
     return backup_path
