@@ -1,8 +1,7 @@
 ---
 paths:
   - "tests/**"
-  - "**/*test*.py"
-  - "src/**"
+  - "src/**"  # Test Scope Discovery must fire when agents edit source files
 ---
 
 # Testing Rules
@@ -43,7 +42,7 @@ For each source module you modified, find all test files that import from it:
 
 ### Scope
 
-This rule requires **targeted discovery**, not a full `pytest` run. You are looking for test files that import from modules you changed -- not running the entire test suite. If discovery reveals 10+ files, consider a full `pytest` run instead of listing them all individually.
+The default is **targeted discovery**: find and run test files that import from modules you changed. If targeted discovery reveals 10+ test files, run `pytest` (full suite) instead of listing them individually.
 
 ### Subprocess Edge Case
 

@@ -25,6 +25,8 @@ All HTTP requests to GameChanger -- whether API calls or web scraping -- must pr
 
 ## Rate Limiting & Timing
 
+> **Scope**: These rate limits apply to production and operator HTTP sessions -- code in `src/` and `scripts/` that makes real network requests. Test code mocks HTTP at the transport layer and is not subject to rate limiting rules.
+
 - Implement rate limiting between requests (minimum 1 second delay).
 - Use exponential backoff for retries on failure (max 3 retries).
 - Respect any `Retry-After` or rate-limit headers.

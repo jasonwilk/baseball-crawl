@@ -5,17 +5,16 @@ paths:
 
 # Python Style Rules
 
-- Use type hints for all function parameters and return types
+- Use type hints for all function parameters and return types in `src/`. In tests, use hints for complex helpers and fixtures with non-obvious signatures; simple test functions and `-> None` fixtures do not require annotation
 - Use `from __future__ import annotations` at the top of each module for modern type syntax
 - Prefer `pathlib.Path` over `os.path` for all file operations
 - Use f-strings for string formatting
-- Use `logging` module, never `print()` for operational output
-- Use dataclasses or Pydantic models for structured data, not plain dicts
+- Use `logging` module for operational output. For CLI user-facing output, `typer.echo()`, `rich.Console.print()`, or `print()` are acceptable
+- Prefer dataclasses or Pydantic models for structured data passed across module boundaries. Plain dicts are fine for local or transient use
 - Use context managers (`with`) for file and network resources
 - Follow PEP 8 naming: snake_case for functions/variables, PascalCase for classes
 - Prefer focused functions that do one thing. Extract helpers when logic is reused or when a block represents a genuinely independent concern -- not to hit a line count. Long functions are acceptable when they are linear and coherent (e.g., SQL query + execute + group results, or request validation + fetch + render).
 - Use explicit exception types, never bare `except:`
 - **No `sys.path` manipulation in `src/` modules**: Never use `sys.path.insert()` or `sys.path.append()` in modules under `src/`. Path manipulation belongs only in standalone scripts (`scripts/`) that need to bootstrap `src.*` imports when run directly. `src/` modules are always importable via the editable install.
 - **Repo-root resolution convention**: Use `Path(__file__).resolve().parents[N]` to derive repo-root-relative paths from `src/` modules. Count directory levels from the module to the repo root (e.g., `parents[2]` for `src/db/reset.py`, `parents[3]` for `src/gamechanger/crawlers/roster.py`). See existing usage throughout `src/` for reference.
-- Write docstrings for public functions and classes
-- Prefer dataclasses or Pydantic models for structured data
+- Write docstrings for public functions and classes when purpose or behavior is not obvious from the function signature. Priority cases: side effects, error handling, or non-trivial preconditions

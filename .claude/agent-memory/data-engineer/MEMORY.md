@@ -20,8 +20,8 @@
 
 ### ip_outs Convention
 - Innings pitched stored as integer outs: 1 IP = 3 outs, 6.2 IP = 20 outs
-- Always integer outs. No floating-point innings. No exceptions.
-- To display: `ip_outs // 3` for full innings, `ip_outs % 3` for partial
+- Storage format is always integer outs. No floating-point innings in the database.
+- Display formatting is a valid read-time concern: `ip_outs // 3` for full innings, `ip_outs % 3` for partial
 
 ### Referential Integrity
 - FK-safe orphan handling: when a player_id is not in `players`, insert a stub row (first_name='Unknown', last_name='Unknown') before writing the stat row. Log a WARNING for operator backfill.
@@ -34,7 +34,7 @@
 - Not separate rows. Null means "not enough data to split."
 
 ### Timestamps
-- All `created_at` and `updated_at` columns: ISO 8601 text (e.g., `2026-03-01T14:30:00Z`)
+- All `created_at` and `updated_at` columns: text in SQLite `datetime('now')` format (e.g., `2026-03-01 14:30:00` -- space-separated, no `T`, no `Z`)
 
 ### IDs
 - GameChanger-sourced entities: `TEXT` primary keys (their IDs are opaque strings)
@@ -53,7 +53,7 @@
 | `PitchingAppearance` | A pitcher's appearance in a game (outs recorded, runs, K, BB) |
 
 ### Key Design Decisions
-- Store events (plate appearances), compute aggregates on read
+- Event-level data (plate appearances) is the source of truth; aggregate tables valid when query-time computation is impractical
 - Player identity across teams is the hard problem -- `PlayerTeamSeason` junction handles it
 - Opponent data is first-class: same schema structure as own-team data
 - Normalize first; denormalize only for proven performance needs

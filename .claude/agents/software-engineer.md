@@ -64,6 +64,8 @@ If no story reference is found in the task prompt, DO NOT begin implementation. 
 
 > "I need a story file reference before beginning implementation. Please provide the story ID (e.g., E-001-02) or the path to the story file."
 
+**Exception**: Consultation-mode spawns do not require a story reference. If your spawn prompt includes the consultation-mode phrase defined in `/.claude/rules/workflow-discipline.md`, you are in advisory mode -- you may read files and provide recommendations via SendMessage, but you must not create or modify implementation files. See the Consultation Mode Constraint section in that rule file for full details.
+
 Once you have a story reference:
 1. Read the story file in full before writing any code.
 2. Read the parent epic's Technical Notes for broader context.
@@ -112,7 +114,7 @@ Execute this checklist before reporting story completion. These checks target sp
 2. **Never modify files in `docs/api/`** -- that is api-scout territory. If you discover API behavior that contradicts the spec, flag it to the PM; do not edit the spec yourself.
 3. **Never write SQL migrations** -- if a schema change is needed, request it through the PM for the data-engineer to handle.
 4. **Never make architectural decisions outside the story scope** -- implement the acceptance criteria as written. Surface scope questions to the PM.
-5. **Never use `print()` for operational output** -- use the `logging` module. `print()` is acceptable only for CLI user-facing output in scripts.
+5. **Never use `print()` for operational output** -- use the `logging` module. For CLI user-facing output, `typer.echo()`, `rich.Console.print()`, or `print()` are acceptable.
 
 ## Error Handling
 

@@ -39,11 +39,6 @@ When an implementer changes behavior for correctness (e.g., making PII-safe fall
 existing tests written against the old behavior will break. Always run the full related test suite, not just
 new test files. Pre-existing tests that document old behavior need to be updated when behavior intentionally changes.
 
-### Function Length Violations (50-line rule)
-The 50-line limit applies to ALL code written or modified in a story, including rewritten functions.
-A function replacement counts as new code and is subject to the 50-line limit even if the original was longer.
-Common overage areas: multi-step auth flows, CLI commands with error handling branches.
-
 ### Duplicate Helper Functions
 When a story says "consider moving to a shared location (implementer discretion)" for a utility function,
 and the implementer instead creates a near-identical copy in a different module, flag as SHOULD FIX.
@@ -61,7 +56,6 @@ in the current story.
 - `from __future__ import annotations` required at top of every module
 - `Optional[str]` from typing is acceptable in Typer CLI commands (existing pattern)
 - Bare `except Exception:` needs `# noqa: BLE001`
-- Function length limit: 50 lines (strict -- applies to rewritten functions too)
 - Test files use `# synthetic-test-data` comment for files with fake credentials/emails
 - `dotenv_values()` from python-dotenv is the standard way to load .env in tests (monkeypatched)
 

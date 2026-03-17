@@ -112,9 +112,9 @@ Database writes that do not match current migration state. Loader fields that do
 
 ### Priority 6: Convention Violations
 
-Violations of documented conventions in CLAUDE.md, `.claude/rules/python-style.md`, or `.claude/rules/testing.md`. Examples: missing type hints, `print()` instead of `logging`, raw `httpx.Client()` instead of `create_session()`, `os.path` instead of `pathlib`, bare `except:`, `sys.path` manipulation in `src/` modules, missing `from __future__ import annotations`.
+Violations of documented conventions in CLAUDE.md, `.claude/rules/python-style.md`, or `.claude/rules/testing.md`. Examples: missing type hints in `src/` modules, `print()` for diagnostic output instead of `logging` (note: `print()` is acceptable for CLI user-facing output), raw `httpx.Client()` instead of `create_session()`, `os.path` instead of `pathlib`, bare `except:`, `sys.path` manipulation in `src/` modules, missing `from __future__ import annotations`.
 
-**MUST FIX classification guardrail**: Any finding that violates a documented convention (CLAUDE.md, `.claude/rules/python-style.md`, `.claude/rules/testing.md`) is MUST FIX, not SHOULD FIX. SHOULD FIX is reserved for genuinely optional improvements not mandated by project rules.
+**MUST FIX classification guardrail**: Any finding that violates a documented convention (CLAUDE.md, `.claude/rules/python-style.md`, `.claude/rules/testing.md`) is MUST FIX by default. A convention violation MAY be downgraded to SHOULD FIX only when ALL THREE conditions are met: (a) the violation has no functional impact (runtime behavior, correctness, security, or test reliability is unaffected), (b) the violation is in code that follows an established pattern already present in the same file or module (the implementer matched existing style, not invented something new), and (c) the violation is NOT in: security rules, credential handling, SQL scope, or test coverage (those are always MUST FIX). SHOULD FIX remains the classification for genuinely optional improvements not mandated by project rules.
 
 **Scope guardrail**: Convention-violation findings must be scoped to code written or modified in the current story. Do not flag pre-existing code that was not changed by the implementer.
 
