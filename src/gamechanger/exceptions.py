@@ -44,3 +44,7 @@ class RateLimitError(Exception):
 
 class GameChangerAPIError(Exception):
     """Raised when the API returns a 5xx error after all retries are exhausted."""
+
+
+class TeamNotFoundError(ValueError):
+    """Raised when the GameChanger API returns 404 for the requested team."""

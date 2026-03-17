@@ -30,6 +30,7 @@ from dataclasses import dataclass, field
 
 import httpx
 
+from src.gamechanger.exceptions import GameChangerAPIError, TeamNotFoundError
 from src.http.session import create_session
 
 logger = logging.getLogger(__name__)
@@ -38,14 +39,6 @@ _BASE_URL = "https://api.team-manager.gc.com"
 _ACCEPT_HEADER = "application/vnd.gc.com.public_team_profile+json; version=0.1.0"
 _ACCEPT_GAMES_HEADER = "application/vnd.gc.com.public_team_schedule_event:list+json; version=0.0.0"
 _TIMEOUT_SECONDS = 10
-
-
-class GameChangerAPIError(Exception):
-    """Raised when the GameChanger API returns an unexpected error response."""
-
-
-class TeamNotFoundError(ValueError):
-    """Raised when the GameChanger API returns 404 for the requested team."""
 
 
 @dataclass
