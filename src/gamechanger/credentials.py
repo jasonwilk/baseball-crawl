@@ -44,7 +44,7 @@ _ENV_PATH = Path(__file__).resolve().parents[2] / ".env"
 
 _ME_USER_ACCEPT = "application/vnd.gc.com.user+json; version=0.3.0"
 _ME_USER_ENDPOINT = "/me/user"
-_ALL_PROFILES: tuple[str, ...] = ("web", "mobile")
+ALL_PROFILES: tuple[str, ...] = ("web", "mobile")
 
 
 # ---------------------------------------------------------------------------
@@ -158,7 +158,7 @@ def _extract_display_name(user: dict) -> str:
     return f"{first} {last}".strip() if (first and last) else "(authenticated user)"
 
 
-def _run_api_check(profile: str) -> ApiCheckResult:
+def run_api_check(profile: str) -> ApiCheckResult:
     """Attempt GET /me/user and return a structured result.
 
     Never raises -- all errors are captured into the returned object.
@@ -237,7 +237,7 @@ def _check_api(profile: str, keys_missing: list[str]) -> tuple[ApiCheckResult, i
             message="Skipped (required credentials missing)",
         )
         return result, 2
-    result = _run_api_check(profile)
+    result = run_api_check(profile)
     return result, result.exit_code
 
 
@@ -481,7 +481,7 @@ def check_credentials(profile: str | None = None) -> tuple[int, str]:
 
     # Multi-profile summary
     results: dict[str, tuple[int, str]] = {}
-    for p in _ALL_PROFILES:
+    for p in ALL_PROFILES:
         results[p] = check_single_profile(p)
 
     lines = ["Credential status:"]

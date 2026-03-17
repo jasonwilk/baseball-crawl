@@ -19,8 +19,8 @@ from rich.text import Text
 from src.gamechanger.credentials import (
     ClientKeyCheckResult,
     ProfileCheckResult,
-    _ALL_PROFILES,
-    _run_api_check,
+    ALL_PROFILES,
+    run_api_check,
     check_credentials,
     check_profile_detailed,
 )
@@ -415,7 +415,7 @@ def check(
         raise typer.Exit(code=result.exit_code)
 
     # Multi-profile: check all profiles, exit 0 if any valid
-    results = [check_profile_detailed(p) for p in _ALL_PROFILES]
+    results = [check_profile_detailed(p) for p in ALL_PROFILES]
     for r in results:
         _console.print(Panel(_render_profile_report(r), title=f"Profile: {r.profile}", expand=False))
     any_valid = any(r.exit_code == 0 for r in results)
@@ -516,7 +516,7 @@ def _print_capture_result(creds: dict[str, str], profile: str) -> None:
 
     t.append("API Validation  ", style="bold")
     t.append("(GET /me/user)\n", style="dim")
-    api = _run_api_check(profile)
+    api = run_api_check(profile)
     api_style = "green" if api.exit_code == 0 else ("dim" if api.exit_code == 2 else "red")
     _append_row(t, api_style, api.message)
     t.append("\n")

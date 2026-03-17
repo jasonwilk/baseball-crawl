@@ -651,7 +651,7 @@ class TestCredsCapture:
         """Invoke capture with mocked .env credentials and API result."""
         with (
             patch("src.cli.creds.dotenv_values", return_value=creds),
-            patch("src.cli.creds._run_api_check", return_value=_make_api_result(api_exit)),
+            patch("src.cli.creds.run_api_check", return_value=_make_api_result(api_exit)),
         ):
             return runner.invoke(app, ["creds", "capture", "--profile", "mobile"])
 
@@ -737,10 +737,10 @@ class TestCredsCapture:
 
     # AC-2: API validation call
     def test_api_validation_called_for_mobile_profile(self) -> None:
-        """AC-2: _run_api_check is called with 'mobile' profile."""
+        """AC-2: run_api_check is called with 'mobile' profile."""
         with (
             patch("src.cli.creds.dotenv_values", return_value=_MOBILE_ENV),
-            patch("src.cli.creds._run_api_check", return_value=_make_api_result()) as mock_api,
+            patch("src.cli.creds.run_api_check", return_value=_make_api_result()) as mock_api,
         ):
             runner.invoke(app, ["creds", "capture", "--profile", "mobile"])
         mock_api.assert_called_once_with("mobile")
