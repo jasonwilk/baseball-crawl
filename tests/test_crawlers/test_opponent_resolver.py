@@ -609,6 +609,31 @@ def test_resolve_non_hidden_opponent_stored_hidden_zero(db: sqlite3.Connection) 
     assert links[0]["is_hidden"] == 0
 
 
+# ---------------------------------------------------------------------------
+# AC-3 (E-120-01): None internal_id raises ValueError, counted in result.errors
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_team_none_internal_id_counted_as_error(db: sqlite3.Connection) -> None:
+    """When TeamEntry.internal_id is None, resolve() counts one error (no silent 0 fallback)."""
+    team_with_none_pk = TeamEntry(
+        id=_OWN_TEAM_GC_UUID,
+        name=_OWN_TEAM_NAME,
+        classification="jv",
+        internal_id=None,
+    )
+    config = CrawlConfig(season=_SEASON, member_teams=[team_with_none_pk])
+    client = _make_client(paginated_return=[_OPPONENT_WITH_PROGENITOR], get_return=_TEAM_DETAIL)
+    resolver = OpponentResolver(client, config, db)
+
+    with patch("src.gamechanger.crawlers.opponent_resolver.time.sleep"):
+        result = resolver.resolve()
+
+    assert result.errors == 1
+    assert result.resolved == 0
+    assert _fetch_links(db) == []
+
+
 def test_resolve_copies_is_hidden_flag(db: sqlite3.Connection) -> None:
     """is_hidden is copied from the API response into opponent_links on update."""
     hidden_with_progenitor = {
