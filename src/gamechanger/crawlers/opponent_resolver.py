@@ -194,7 +194,11 @@ class OpponentResolver:
         time.sleep(_DELAY_SECONDS)
 
         # our_team_id for DB operations is the INTEGER PK.
-        our_team_id: int = team.internal_id or 0
+        if team.internal_id is None:
+            raise ValueError(
+                f"Team '{team.id}' has no internal_id — ensure load_config() was called with db_path"
+            )
+        our_team_id: int = team.internal_id
 
         for opponent in opponents:
             self._process_opponent(opponent, our_team_id, result)

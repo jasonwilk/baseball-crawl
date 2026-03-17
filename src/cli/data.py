@@ -457,11 +457,10 @@ def resolve_opponents(
     from src.gamechanger.config import load_config
     from src.gamechanger.crawlers.opponent_resolver import OpponentResolver
 
-    config = load_config()
+    db_path = _resolve_db_path()
+    config = load_config(db_path=db_path)
     if dry_run:
         _echo_dry_run_config(config)
-
-    db_path = _resolve_db_path()
     client = GameChangerClient(profile=profile)
 
     with closing(sqlite3.connect(str(db_path))) as conn:
