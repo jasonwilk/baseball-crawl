@@ -1383,6 +1383,47 @@ class TestOpponentDetail:
         response = client.get(f"/dashboard/opponents/{opp_team_id}?season_id={_ALT_SEASON_ID}")
         assert response.status_code == 200
 
+    def test_opponent_detail_last_meeting_shows_tie_not_loss(self, tmp_path: Path) -> None:
+        """Last Meeting card shows 'T' (not 'L') when most recent game was a tie (Fix 3).
+
+        game-tie: lsb home 4-4 vs tie-opp => equal scores => should display T badge.
+        The old template had no elif for ties, so ties rendered as losses.
+        """
+        db_path = tmp_path / "test_tie.db"
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("PRAGMA foreign_keys=ON;")
+        _apply_schema(conn)
+        lsb_team_id, _ = _insert_lsb_team_and_user(conn)
+
+        cursor = conn.execute(
+            "INSERT INTO teams (name, membership_type) VALUES (?, ?)",
+            ("Tie Opponent", "tracked"),
+        )
+        tie_opp_id: int = cursor.lastrowid  # type: ignore[assignment]
+
+        # Tied game: lsb is home with equal scores (status defaults to 'completed' in test schema)
+        conn.execute(
+            "INSERT INTO games"
+            " (game_id, season_id, game_date, home_team_id, away_team_id, home_score, away_score)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?)",
+            ("game-tie", _CURRENT_SEASON_ID, "2026-03-10", lsb_team_id, tie_opp_id, 4, 4),
+        )
+        conn.commit()
+        conn.close()
+
+        env_overrides = {
+            "DATABASE_PATH": str(db_path),
+            "DEV_USER_EMAIL": "testdev@example.com",
+        }
+        with patch.dict("os.environ", env_overrides):
+            with TestClient(app) as client:
+                response = client.get(f"/dashboard/opponents/{tie_opp_id}")
+        assert response.status_code == 200
+        html = response.text
+        assert "4-4" in html
+        assert 'text-gray-600">T' in html   # tie badge rendered
+        assert 'text-red-700">L' not in html  # loss badge must not appear
+
 
 class TestPlayerProfile:
     """Tests for GET /dashboard/players/{player_id} (E-004-06)."""
@@ -1539,6 +1580,79 @@ class TestPlayerProfile:
         html = response.text
         occurrences = html.count("/dashboard/games/game-001")
         assert occurrences == 1
+
+    def test_player_profile_backlink_uses_permitted_team_not_scouting_team(
+        self, tmp_path: Path
+    ) -> None:
+        """Backlink resolves to a permitted team even when a scouting team's season is newer (Fix 2).
+
+        gc-p-back has two batting seasons:
+          - Opponent team (tracked, not permitted), season _CURRENT_SEASON_ID (newer, sorts first)
+          - LSB team (member, permitted), season _ALT_SEASON_ID (older, sorts second)
+
+        The old template used batting_seasons[0].team_id (the opponent), which would produce
+        a 403 when the user clicked the backlink. The fix selects the first permitted team.
+        """
+        db_path = tmp_path / "test_backlink.db"
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("PRAGMA foreign_keys=ON;")
+        _apply_schema(conn)
+        lsb_team_id, _ = _insert_lsb_team_and_user(conn)
+
+        # Opponent team — tracked, NOT in the user's permitted_teams
+        cursor = conn.execute(
+            "INSERT INTO teams (name, membership_type) VALUES (?, ?)",
+            ("Scouted Opponent", "tracked"),
+        )
+        opp_team_id: int = cursor.lastrowid  # type: ignore[assignment]
+
+        conn.execute(
+            "INSERT OR IGNORE INTO seasons (season_id, name, season_type, year) VALUES (?, ?, ?, ?)",
+            (_ALT_SEASON_ID, "Spring 2025 High School", "spring-hs", 2025),
+        )
+
+        conn.execute(
+            "INSERT OR IGNORE INTO players (player_id, first_name, last_name) VALUES (?, ?, ?)",
+            ("gc-p-back", "Back", "Linktest"),
+        )
+
+        # Roster entry on LSB so authorization check passes
+        conn.execute(
+            "INSERT OR IGNORE INTO team_rosters (team_id, player_id, season_id) VALUES (?, ?, ?)",
+            (lsb_team_id, "gc-p-back", _ALT_SEASON_ID),
+        )
+
+        # Opponent batting season: NEWER (sorts first in DESC) — not permitted
+        conn.execute(
+            "INSERT OR IGNORE INTO player_season_batting"
+            " (player_id, team_id, season_id, gp, ab, h, doubles, triples, hr, rbi, bb, so, sb)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("gc-p-back", opp_team_id, _CURRENT_SEASON_ID, 2, 8, 3, 0, 0, 0, 1, 1, 2, 0),
+        )
+
+        # LSB batting season: OLDER (sorts second in DESC) — permitted
+        conn.execute(
+            "INSERT OR IGNORE INTO player_season_batting"
+            " (player_id, team_id, season_id, gp, ab, h, doubles, triples, hr, rbi, bb, so, sb)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("gc-p-back", lsb_team_id, _ALT_SEASON_ID, 3, 10, 4, 1, 0, 0, 2, 2, 1, 0),
+        )
+
+        conn.commit()
+        conn.close()
+
+        env_overrides = {
+            "DATABASE_PATH": str(db_path),
+            "DEV_USER_EMAIL": "testdev@example.com",
+        }
+        with patch.dict("os.environ", env_overrides):
+            with TestClient(app) as client:
+                response = client.get("/dashboard/players/gc-p-back")
+        assert response.status_code == 200
+        html = response.text
+        # Backlink must point to the permitted LSB team, not the scouting opponent
+        assert f"/dashboard/stats?team_id={lsb_team_id}" in html
+        assert f"/dashboard/stats?team_id={opp_team_id}" not in html
 
 
 class TestTemplateStaleRefs:
