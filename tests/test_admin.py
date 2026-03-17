@@ -822,3 +822,83 @@ class TestCascadeDelete:
             )
             == 0
         )
+
+
+# ---------------------------------------------------------------------------
+# AC-3/AC-4: membership_type validation and already-resolved link guard
+# ---------------------------------------------------------------------------
+
+
+def _insert_opponent_link(
+    db_path: Path,
+    our_team_id: int,
+    opponent_name: str,
+    public_id: str | None = None,
+) -> int:
+    """Insert an opponent_links row and return its id."""
+    conn = sqlite3.connect(str(db_path))
+    cursor = conn.execute(
+        "INSERT INTO opponent_links (our_team_id, root_team_id, opponent_name, public_id)"
+        " VALUES (?, ?, ?, ?)",
+        (our_team_id, f"root-{opponent_name}", opponent_name, public_id),
+    )
+    conn.commit()
+    link_id = cursor.lastrowid
+    conn.close()
+    return link_id
+
+
+class TestMembershipTypeValidation:
+    """Invalid membership_type values are rejected with 400."""
+
+    def test_confirm_team_submit_rejects_invalid_membership_type(
+        self, admin_db: Path
+    ) -> None:
+        """POST /admin/teams/confirm with an invalid membership_type returns 400."""
+        admin_id = _insert_user(admin_db, "mtadmin@example.com")
+        raw_token = _insert_session(admin_db, admin_id)
+
+        with patch.dict(
+            "os.environ",
+            {"DATABASE_PATH": str(admin_db), "ADMIN_EMAIL": "mtadmin@example.com"},
+        ):
+            with TestClient(
+                app, follow_redirects=False, cookies={"session": raw_token}
+            ) as client:
+                response = client.post(
+                    "/admin/teams/confirm",
+                    data={
+                        "public_id": "some-team-slug",
+                        "team_name": "Some Team",
+                        "membership_type": "superadmin",
+                    },
+                )
+        assert response.status_code == 400
+
+
+class TestAlreadyResolvedLinkGuard:
+    """GET connect/confirm returns 400 when the link already has a public_id."""
+
+    def test_connect_opponent_confirm_get_returns_400_for_resolved_link(
+        self, admin_db: Path
+    ) -> None:
+        """GET /admin/opponents/{link_id}/connect/confirm returns 400 when already resolved."""
+        admin_id = _insert_user(admin_db, "rladmin@example.com")
+        raw_token = _insert_session(admin_db, admin_id)
+
+        our_team_id = _get_team_id(admin_db, "LSB Varsity 2026")
+        link_id = _insert_opponent_link(
+            admin_db, our_team_id, "Resolved Opponent", public_id="already-linked-slug"
+        )
+
+        with patch.dict(
+            "os.environ",
+            {"DATABASE_PATH": str(admin_db), "ADMIN_EMAIL": "rladmin@example.com"},
+        ):
+            with TestClient(
+                app, follow_redirects=False, cookies={"session": raw_token}
+            ) as client:
+                response = client.get(
+                    f"/admin/opponents/{link_id}/connect/confirm"
+                )
+        assert response.status_code == 400

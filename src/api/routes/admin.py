@@ -81,6 +81,9 @@ _VALID_CLASSIFICATIONS = {
     "legion",
 }
 
+# Valid membership_type values (must match schema CHECK constraint)
+_VALID_MEMBERSHIP_TYPES = {"member", "tracked"}
+
 
 # ---------------------------------------------------------------------------
 # Admin guard dependency
@@ -1117,6 +1120,12 @@ async def confirm_team_submit(
         gc_uuid, program_id, classification
     )
 
+    if membership_type not in _VALID_MEMBERSHIP_TYPES:
+        return HTMLResponse(
+            content=f"Invalid membership_type: {membership_type!r}. Must be 'member' or 'tracked'.",
+            status_code=400,
+        )
+
     # Preserve Phase 1 UUID before TOCTOU may clear it on 403.
     # Used as fallback in duplicate check when reverify fails.
     phase1_gc_uuid = gc_uuid_value
@@ -1212,6 +1221,12 @@ async def update_team(
     team = await run_in_threadpool(_get_team_by_integer_id, id)
     if not team:
         return HTMLResponse(content="Team not found", status_code=404)
+
+    if membership_type not in _VALID_MEMBERSHIP_TYPES:
+        return HTMLResponse(
+            content=f"Invalid membership_type: {membership_type!r}. Must be 'member' or 'tracked'.",
+            status_code=400,
+        )
 
     classification_value = classification.strip() or None
     if classification_value not in _VALID_CLASSIFICATIONS:
@@ -1501,6 +1516,10 @@ async def connect_opponent_confirm(request: Request, link_id: int) -> Response:
     link = await run_in_threadpool(get_opponent_link_by_id, link_id)
     if not link:
         return HTMLResponse(content="Opponent link not found", status_code=404)
+
+    already_resolved = _check_already_resolved(link)
+    if already_resolved is not None:
+        return already_resolved
 
     url_input = request.query_params.get("url", "").strip()
     public_id, err = await _parse_and_validate_opponent_url(
