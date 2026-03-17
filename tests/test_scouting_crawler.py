@@ -726,3 +726,110 @@ def test_zero_boxscores_marks_run_failed_and_returns_error(
     assert row is not None
     assert row[0] == "failed", f"Expected 'failed', got '{row[0]}'"
     assert row[1] is not None, "Expected completed_at to be set for 'failed' row"
+
+
+# ---------------------------------------------------------------------------
+# update_run_load_status tests (E-125-02 AC-1, AC-2, AC-6)
+# ---------------------------------------------------------------------------
+
+
+class TestUpdateRunLoadStatus:
+    """Verify update_run_load_status uses parameterized SQL and handles both statuses."""
+
+    def test_completed_status_sets_completed_at(
+        self,
+        db: sqlite3.Connection,
+        mock_client: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        """AC-6: 'completed' status sets completed_at to a non-NULL timestamp."""
+        team_id = _insert_team_with_public_id(db, "status-test-pub")
+        season_id = "2025-spring-hs"
+        _insert_season(db, season_id)
+        _insert_scouting_run(
+            db, team_id, season_id, "running", "2025-04-10T00:00:00.000Z"
+        )
+
+        crawler = ScoutingCrawler(mock_client, db, data_root=tmp_path / "raw")
+        crawler.update_run_load_status(team_id, season_id, "completed")
+
+        row = db.execute(
+            "SELECT status, completed_at FROM scouting_runs "
+            "WHERE team_id = ? AND season_id = ?",
+            (team_id, season_id),
+        ).fetchone()
+        assert row[0] == "completed"
+        assert row[1] is not None, "completed_at should be set for 'completed' status"
+
+    def test_failed_status_sets_completed_at_null(
+        self,
+        db: sqlite3.Connection,
+        mock_client: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        """AC-6: 'failed' status sets completed_at to NULL."""
+        team_id = _insert_team_with_public_id(db, "status-fail-pub")
+        season_id = "2025-spring-hs"
+        _insert_season(db, season_id)
+        _insert_scouting_run(
+            db, team_id, season_id, "running", "2025-04-10T00:00:00.000Z"
+        )
+
+        crawler = ScoutingCrawler(mock_client, db, data_root=tmp_path / "raw")
+        crawler.update_run_load_status(team_id, season_id, "failed")
+
+        row = db.execute(
+            "SELECT status, completed_at FROM scouting_runs "
+            "WHERE team_id = ? AND season_id = ?",
+            (team_id, season_id),
+        ).fetchone()
+        assert row[0] == "failed"
+        assert row[1] is None, "completed_at should be NULL for 'failed' status"
+
+    def test_no_f_string_sql_injection(
+        self,
+        db: sqlite3.Connection,
+        mock_client: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        """AC-1: Verify no f-string interpolation -- a crafted status value
+        cannot inject SQL. The CHECK constraint rejects invalid statuses, but
+        the parameterized query itself should handle arbitrary input safely."""
+        team_id = _insert_team_with_public_id(db, "inject-test-pub")
+        season_id = "2025-spring-hs"
+        _insert_season(db, season_id)
+        _insert_scouting_run(
+            db, team_id, season_id, "running", "2025-04-10T00:00:00.000Z"
+        )
+
+        crawler = ScoutingCrawler(mock_client, db, data_root=tmp_path / "raw")
+        # This should fail due to CHECK constraint, not SQL injection.
+        with pytest.raises(sqlite3.IntegrityError):
+            crawler.update_run_load_status(
+                team_id, season_id, "completed'; DROP TABLE scouting_runs;--"
+            )
+
+    def test_completed_updates_last_checked(
+        self,
+        db: sqlite3.Connection,
+        mock_client: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        """Verify last_checked is updated on status change."""
+        team_id = _insert_team_with_public_id(db, "lastchk-test-pub")
+        season_id = "2025-spring-hs"
+        _insert_season(db, season_id)
+        _insert_scouting_run(
+            db, team_id, season_id, "running", "2020-01-01T00:00:00.000Z"
+        )
+
+        crawler = ScoutingCrawler(mock_client, db, data_root=tmp_path / "raw")
+        crawler.update_run_load_status(team_id, season_id, "completed")
+
+        row = db.execute(
+            "SELECT last_checked FROM scouting_runs "
+            "WHERE team_id = ? AND season_id = ?",
+            (team_id, season_id),
+        ).fetchone()
+        # last_checked should be updated to a recent timestamp, not the old 2020 value.
+        assert row[0] > "2024-01-01"

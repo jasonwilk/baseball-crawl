@@ -50,7 +50,11 @@ if str(_PROJECT_ROOT) not in sys.path:
 
 from migrations.apply_migrations import run_migrations  # noqa: E402
 from src.api.auth import hash_token  # noqa: E402
+from src.api.csrf import CSRF_COOKIE_NAME, CSRF_HEADER  # noqa: E402
 from src.api.main import app  # noqa: E402
+
+_CSRF = "test-csrf-token-passkey"
+_CSRF_COOKIES = {CSRF_COOKIE_NAME: _CSRF}
 
 _SEED_SQL = """
     INSERT OR IGNORE INTO programs (program_id, name, program_type) VALUES
@@ -216,7 +220,7 @@ class TestGetPasskeyRegister:
             with TestClient(
                 app,
                 follow_redirects=False,
-                cookies={"session": raw_token},
+                cookies={"session": raw_token, CSRF_COOKIE_NAME: _CSRF},
             ) as client:
                 response = client.get("/auth/passkey/register")
 
@@ -232,7 +236,7 @@ class TestGetPasskeyRegister:
             with TestClient(
                 app,
                 follow_redirects=False,
-                cookies={"session": raw_token},
+                cookies={"session": raw_token, CSRF_COOKIE_NAME: _CSRF},
             ) as client:
                 response = client.get("/auth/passkey/register")
 
@@ -250,7 +254,7 @@ class TestGetPasskeyRegister:
             with TestClient(
                 app,
                 follow_redirects=False,
-                cookies={"session": raw_token},
+                cookies={"session": raw_token, CSRF_COOKIE_NAME: _CSRF},
             ) as client:
                 response = client.get("/auth/passkey/register")
 
@@ -271,7 +275,7 @@ class TestGetPasskeyRegister:
         """GET /auth/passkey/register redirects to /auth/login without session (AC-14c)."""
         env = {"DATABASE_PATH": str(db), "DEV_USER_EMAIL": ""}
         with patch.dict("os.environ", env, clear=False):
-            with TestClient(app, follow_redirects=False) as client:
+            with TestClient(app, follow_redirects=False, cookies=_CSRF_COOKIES) as client:
                 response = client.get("/auth/passkey/register")
 
         assert response.status_code == 302
@@ -294,7 +298,7 @@ class TestGetPasskeyRegister:
             with TestClient(
                 app,
                 follow_redirects=False,
-                cookies={"session": raw_token},
+                cookies={"session": raw_token, CSRF_COOKIE_NAME: _CSRF},
             ) as client:
                 client.get("/auth/passkey/register")
 
@@ -314,10 +318,11 @@ class TestPasskeyRegisterRequiresSession:
         """POST /auth/passkey/register without session cookie returns 401."""
         env = {"DATABASE_PATH": str(db), "DEV_USER_EMAIL": ""}
         with patch.dict("os.environ", env, clear=False):
-            with TestClient(app) as client:
+            with TestClient(app, cookies=_CSRF_COOKIES) as client:
                 response = client.post(
                     "/auth/passkey/register",
                     json={"id": "test", "rawId": "dGVzdA", "type": "public-key", "response": {}},
+                    headers={CSRF_HEADER: _CSRF},
                 )
 
         assert response.status_code == 401
@@ -377,9 +382,9 @@ class TestPostPasskeyRegister:
                 ):
                     with TestClient(
                         app,
-                        cookies={"session": raw_token},
+                        cookies={"session": raw_token, CSRF_COOKIE_NAME: _CSRF},
                     ) as client:
-                        response = client.post("/auth/passkey/register", json=body)
+                        response = client.post("/auth/passkey/register", json=body, headers={CSRF_HEADER: _CSRF})
 
         assert response.status_code == 200
         data = response.json()
@@ -439,9 +444,9 @@ class TestPostPasskeyRegister:
                 ):
                     with TestClient(
                         app,
-                        cookies={"session": raw_token},
+                        cookies={"session": raw_token, CSRF_COOKIE_NAME: _CSRF},
                     ) as client:
-                        client.post("/auth/passkey/register", json=body)
+                        client.post("/auth/passkey/register", json=body, headers={CSRF_HEADER: _CSRF})
 
         # Challenge should be consumed (popped from dict).
         assert session_id not in auth_routes._PASSKEY_REG_CHALLENGES
@@ -470,9 +475,9 @@ class TestPostPasskeyRegister:
             auth_routes._PASSKEY_REG_CHALLENGES.pop(session_id, None)
             with TestClient(
                 app,
-                cookies={"session": raw_token},
+                cookies={"session": raw_token, CSRF_COOKIE_NAME: _CSRF},
             ) as client:
-                response = client.post("/auth/passkey/register", json=body)
+                response = client.post("/auth/passkey/register", json=body, headers={CSRF_HEADER: _CSRF})
 
         assert response.status_code == 400
 
@@ -510,9 +515,9 @@ class TestPostPasskeyRegister:
                 ):
                     with TestClient(
                         app,
-                        cookies={"session": raw_token},
+                        cookies={"session": raw_token, CSRF_COOKIE_NAME: _CSRF},
                     ) as client:
-                        response = client.post("/auth/passkey/register", json=body)
+                        response = client.post("/auth/passkey/register", json=body, headers={CSRF_HEADER: _CSRF})
 
         assert response.status_code == 400
         assert "try again" in response.text.lower()
@@ -562,9 +567,9 @@ class TestPostPasskeyRegister:
                     ):
                         with TestClient(
                             app,
-                            cookies={"session": raw_token},
+                            cookies={"session": raw_token, CSRF_COOKIE_NAME: _CSRF},
                         ) as client:
-                            response = client.post("/auth/passkey/register", json=body)
+                            response = client.post("/auth/passkey/register", json=body, headers={CSRF_HEADER: _CSRF})
 
             assert response.status_code == 200
 
@@ -591,7 +596,7 @@ class TestGetPasskeyLoginOptions:
         """GET /auth/passkey/login/options returns 200 (AC-14d)."""
         env = {"DATABASE_PATH": str(db)}
         with patch.dict("os.environ", env, clear=False):
-            with TestClient(app) as client:
+            with TestClient(app, cookies=_CSRF_COOKIES) as client:
                 response = client.get("/auth/passkey/login/options")
 
         assert response.status_code == 200
@@ -600,7 +605,7 @@ class TestGetPasskeyLoginOptions:
         """GET /auth/passkey/login/options returns JSON content type (AC-14d)."""
         env = {"DATABASE_PATH": str(db)}
         with patch.dict("os.environ", env, clear=False):
-            with TestClient(app) as client:
+            with TestClient(app, cookies=_CSRF_COOKIES) as client:
                 response = client.get("/auth/passkey/login/options")
 
         assert "application/json" in response.headers.get("content-type", "")
@@ -609,7 +614,7 @@ class TestGetPasskeyLoginOptions:
         """Authentication options JSON contains a 'challenge' field (AC-14d)."""
         env = {"DATABASE_PATH": str(db)}
         with patch.dict("os.environ", env, clear=False):
-            with TestClient(app) as client:
+            with TestClient(app, cookies=_CSRF_COOKIES) as client:
                 response = client.get("/auth/passkey/login/options")
 
         data = response.json()
@@ -620,7 +625,7 @@ class TestGetPasskeyLoginOptions:
         """Authentication options JSON contains 'rpId' field (AC-14d)."""
         env = {"DATABASE_PATH": str(db), "WEBAUTHN_RP_ID": "localhost"}
         with patch.dict("os.environ", env, clear=False):
-            with TestClient(app) as client:
+            with TestClient(app, cookies=_CSRF_COOKIES) as client:
                 response = client.get("/auth/passkey/login/options")
 
         data = response.json()
@@ -631,7 +636,7 @@ class TestGetPasskeyLoginOptions:
         """Authentication options allowCredentials is empty (discoverable credentials, AC-7)."""
         env = {"DATABASE_PATH": str(db)}
         with patch.dict("os.environ", env, clear=False):
-            with TestClient(app) as client:
+            with TestClient(app, cookies=_CSRF_COOKIES) as client:
                 response = client.get("/auth/passkey/login/options")
 
         data = response.json()
@@ -713,9 +718,10 @@ class TestPostPasskeyLoginVerify:
                     "src.api.routes.auth.verify_authentication_response",
                     return_value=mock_verified,
                 ):
-                    with TestClient(app, follow_redirects=False) as client:
+                    with TestClient(app, follow_redirects=False, cookies=_CSRF_COOKIES) as client:
                         response = client.post(
-                            "/auth/passkey/login/verify", json=body
+                            "/auth/passkey/login/verify", json=body,
+                            headers={CSRF_HEADER: _CSRF},
                         )
 
         assert response.status_code == 200
@@ -770,8 +776,8 @@ class TestPostPasskeyLoginVerify:
                     "src.api.routes.auth.verify_authentication_response",
                     return_value=mock_verified,
                 ):
-                    with TestClient(app, follow_redirects=False) as client:
-                        client.post("/auth/passkey/login/verify", json=body)
+                    with TestClient(app, follow_redirects=False, cookies=_CSRF_COOKIES) as client:
+                        client.post("/auth/passkey/login/verify", json=body, headers={CSRF_HEADER: _CSRF})
 
         conn = sqlite3.connect(str(db))
         cursor = conn.execute(
@@ -834,8 +840,8 @@ class TestPostPasskeyLoginVerify:
                     "src.api.routes.auth.verify_authentication_response",
                     return_value=mock_verified,
                 ):
-                    with TestClient(app, follow_redirects=False) as client:
-                        client.post("/auth/passkey/login/verify", json=body)
+                    with TestClient(app, follow_redirects=False, cookies=_CSRF_COOKIES) as client:
+                        client.post("/auth/passkey/login/verify", json=body, headers={CSRF_HEADER: _CSRF})
 
         conn = sqlite3.connect(str(db))
         cursor = conn.execute(
@@ -888,9 +894,10 @@ class TestPostPasskeyLoginVerify:
                     "src.api.routes.auth.verify_authentication_response",
                     side_effect=Exception("Invalid signature"),
                 ):
-                    with TestClient(app) as client:
+                    with TestClient(app, cookies=_CSRF_COOKIES) as client:
                         response = client.post(
-                            "/auth/passkey/login/verify", json=body
+                            "/auth/passkey/login/verify", json=body,
+                            headers={CSRF_HEADER: _CSRF},
                         )
 
         assert response.status_code == 401
@@ -935,8 +942,8 @@ class TestPostPasskeyLoginVerify:
                 {challenge_b64: __import__("time").time() + 300},
                 clear=False,
             ):
-                with TestClient(app) as client:
-                    response = client.post("/auth/passkey/login/verify", json=body)
+                with TestClient(app, cookies=_CSRF_COOKIES) as client:
+                    response = client.post("/auth/passkey/login/verify", json=body, headers={CSRF_HEADER: _CSRF})
 
         assert response.status_code == 401
 
@@ -966,6 +973,7 @@ class TestVerifyRedirectsToPromptWhenNoPasskeys:
             Raw token string.
         """
         raw_token = secrets.token_urlsafe(32)
+        token_hashed = hash_token(raw_token)
         expires_offset = "-1 hour" if expired else "+15 minutes"
 
         conn = sqlite3.connect(str(db_path))
@@ -974,7 +982,7 @@ class TestVerifyRedirectsToPromptWhenNoPasskeys:
             INSERT INTO magic_link_tokens (token, user_id, expires_at)
             VALUES (?, ?, datetime('now', '{expires_offset}'))
             """,
-            (raw_token, user_id),
+            (token_hashed, user_id),
         )
         conn.commit()
         conn.close()
@@ -987,7 +995,7 @@ class TestVerifyRedirectsToPromptWhenNoPasskeys:
 
         env = {"DATABASE_PATH": str(db), "DEV_USER_EMAIL": ""}
         with patch.dict("os.environ", env, clear=False):
-            with TestClient(app, follow_redirects=False) as client:
+            with TestClient(app, follow_redirects=False, cookies=_CSRF_COOKIES) as client:
                 response = client.get(f"/auth/verify?token={raw_token}")
 
         assert response.status_code == 302
@@ -1001,7 +1009,7 @@ class TestVerifyRedirectsToPromptWhenNoPasskeys:
 
         env = {"DATABASE_PATH": str(db), "DEV_USER_EMAIL": ""}
         with patch.dict("os.environ", env, clear=False):
-            with TestClient(app, follow_redirects=False) as client:
+            with TestClient(app, follow_redirects=False, cookies=_CSRF_COOKIES) as client:
                 response = client.get(f"/auth/verify?token={raw_token}")
 
         assert response.status_code == 302

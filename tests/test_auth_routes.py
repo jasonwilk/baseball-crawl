@@ -50,6 +50,9 @@ from migrations.apply_migrations import run_migrations  # noqa: E402
 from src.api.auth import hash_token  # noqa: E402
 from src.api.main import app  # noqa: E402
 
+_CSRF = "test-csrf-token"
+_CSRF_COOKIES = {"csrf_token": _CSRF}
+
 _SEED_SQL = """
     INSERT OR IGNORE INTO programs (program_id, name, program_type) VALUES
         ('lsb-hs', 'Lincoln Standing Bear HS', 'hs');
@@ -107,10 +110,11 @@ def _insert_magic_token(
     user_id: int,
     expired: bool = False,
 ) -> str:
-    """Insert a magic link token and return the raw token.
+    """Insert a magic link token (hashed) and return the raw token.
 
-    In the E-100 schema, the token IS the PRIMARY KEY (raw token stored
-    directly, no hashing). Single-use enforcement is done via DELETE on use.
+    The token column stores the SHA-256 hash of the raw token. The raw
+    token is returned so tests can pass it to /auth/verify, which hashes
+    it before lookup.
 
     Args:
         db_path: Path to the database.
@@ -121,6 +125,7 @@ def _insert_magic_token(
         Raw token string (URL-safe base64, 43 chars).
     """
     raw_token = secrets.token_urlsafe(32)
+    token_hashed = hash_token(raw_token)
     expires_offset = "-1 hour" if expired else "+15 minutes"
 
     conn = sqlite3.connect(str(db_path))
@@ -129,7 +134,7 @@ def _insert_magic_token(
         INSERT INTO magic_link_tokens (token, user_id, expires_at)
         VALUES (?, ?, datetime('now', '{expires_offset}'))
         """,
-        (raw_token, user_id),
+        (token_hashed, user_id),
     )
     conn.commit()
     conn.close()
@@ -141,10 +146,10 @@ def _insert_magic_token_with_age(
     user_id: int,
     seconds_ago: int,
 ) -> str:
-    """Insert a magic link token that appears to have been issued N seconds ago.
+    """Insert a magic link token (hashed) that appears to have been issued N seconds ago.
 
-    In the E-100 schema, rate limiting is approximated by checking if a token
-    has expires_at > datetime('now', '+14 minutes'). A token issued N seconds
+    Rate limiting is approximated by checking if a token has
+    expires_at > datetime('now', '+14 minutes'). A token issued N seconds
     ago would have expires_at = issued_at + 15 minutes.
 
     For N seconds_ago, expires_at = now - N seconds + 15 minutes
@@ -161,6 +166,7 @@ def _insert_magic_token_with_age(
         Raw token string (URL-safe base64, 43 chars).
     """
     raw_token = secrets.token_urlsafe(32)
+    token_hashed = hash_token(raw_token)
     # Calculate remaining lifetime: 15 minutes - seconds_ago seconds
     remaining_seconds = 15 * 60 - seconds_ago
     conn = sqlite3.connect(str(db_path))
@@ -169,7 +175,7 @@ def _insert_magic_token_with_age(
         INSERT INTO magic_link_tokens (token, user_id, expires_at)
         VALUES (?, ?, datetime('now', '{remaining_seconds} seconds'))
         """,
-        (raw_token, user_id),
+        (token_hashed, user_id),
     )
     conn.commit()
     conn.close()
@@ -223,28 +229,28 @@ class TestLoginPageRenders:
     def test_login_page_returns_200(self, db: Path) -> None:
         """GET /auth/login returns 200."""
         with patch.dict("os.environ", {"DATABASE_PATH": str(db)}):
-            with TestClient(app) as client:
+            with TestClient(app, cookies=_CSRF_COOKIES) as client:
                 response = client.get("/auth/login")
         assert response.status_code == 200
 
     def test_login_page_contains_email_input(self, db: Path) -> None:
         """GET /auth/login HTML includes an email input field."""
         with patch.dict("os.environ", {"DATABASE_PATH": str(db)}):
-            with TestClient(app) as client:
+            with TestClient(app, cookies=_CSRF_COOKIES) as client:
                 response = client.get("/auth/login")
         assert 'type="email"' in response.text
 
     def test_login_page_contains_submit_button(self, db: Path) -> None:
         """GET /auth/login HTML includes a submit button."""
         with patch.dict("os.environ", {"DATABASE_PATH": str(db)}):
-            with TestClient(app) as client:
+            with TestClient(app, cookies=_CSRF_COOKIES) as client:
                 response = client.get("/auth/login")
         assert "magic link" in response.text.lower() or "submit" in response.text.lower()
 
     def test_login_page_contains_form_post(self, db: Path) -> None:
         """GET /auth/login form uses POST method."""
         with patch.dict("os.environ", {"DATABASE_PATH": str(db)}):
-            with TestClient(app) as client:
+            with TestClient(app, cookies=_CSRF_COOKIES) as client:
                 response = client.get("/auth/login")
         assert 'method="post"' in response.text.lower()
 
@@ -257,7 +263,7 @@ class TestLoginPageRenders:
             with TestClient(
                 app,
                 follow_redirects=False,
-                cookies={"session": raw_token},
+                cookies={"session": raw_token, "csrf_token": _CSRF},
             ) as client:
                 response = client.get("/auth/login")
         assert response.status_code == 302
@@ -279,8 +285,8 @@ class TestPostLogin:
 
         with patch.dict("os.environ", {"DATABASE_PATH": str(db)}):
             with patch("src.api.routes.auth.send_magic_link_email", new_callable=AsyncMock, return_value=True):
-                with TestClient(app) as client:
-                    response = client.post("/auth/login", data={"email": email})
+                with TestClient(app, cookies=_CSRF_COOKIES) as client:
+                    response = client.post("/auth/login", data={"email": email, "csrf_token": _CSRF})
 
         assert response.status_code == 200
         # Verify token was inserted
@@ -302,8 +308,8 @@ class TestPostLogin:
             with patch(
                 "src.api.routes.auth.send_magic_link_email", new_callable=AsyncMock, return_value=True
             ) as mock_send:
-                with TestClient(app) as client:
-                    client.post("/auth/login", data={"email": email})
+                with TestClient(app, cookies=_CSRF_COOKIES) as client:
+                    client.post("/auth/login", data={"email": email, "csrf_token": _CSRF})
 
         mock_send.assert_called_once()
         call_args = mock_send.call_args
@@ -317,17 +323,17 @@ class TestPostLogin:
 
         with patch.dict("os.environ", {"DATABASE_PATH": str(db)}):
             with patch("src.api.routes.auth.send_magic_link_email", new_callable=AsyncMock, return_value=True):
-                with TestClient(app) as client:
-                    response = client.post("/auth/login", data={"email": email})
+                with TestClient(app, cookies=_CSRF_COOKIES) as client:
+                    response = client.post("/auth/login", data={"email": email, "csrf_token": _CSRF})
 
         assert "If this email is registered" in response.text
 
     def test_unknown_email_shows_same_page(self, db: Path) -> None:
         """POST /auth/login with unknown email shows identical page (no enumeration, AC-17c)."""
         with patch.dict("os.environ", {"DATABASE_PATH": str(db)}):
-            with TestClient(app) as client:
+            with TestClient(app, cookies=_CSRF_COOKIES) as client:
                 response = client.post(
-                    "/auth/login", data={"email": "unknown@example.com"}
+                    "/auth/login", data={"email": "unknown@example.com", "csrf_token": _CSRF}
                 )
 
         assert response.status_code == 200
@@ -336,8 +342,8 @@ class TestPostLogin:
     def test_unknown_email_does_not_create_token(self, db: Path) -> None:
         """POST /auth/login with unknown email does not insert a magic_link_tokens row."""
         with patch.dict("os.environ", {"DATABASE_PATH": str(db)}):
-            with TestClient(app) as client:
-                client.post("/auth/login", data={"email": "ghost@example.com"})
+            with TestClient(app, cookies=_CSRF_COOKIES) as client:
+                client.post("/auth/login", data={"email": "ghost@example.com", "csrf_token": _CSRF})
 
         conn = sqlite3.connect(str(db))
         cursor = conn.execute("SELECT COUNT(*) FROM magic_link_tokens;")
@@ -357,8 +363,8 @@ class TestPostLogin:
             with patch(
                 "src.api.routes.auth.send_magic_link_email", new_callable=AsyncMock, return_value=True
             ) as mock_send:
-                with TestClient(app) as client:
-                    client.post("/auth/login", data={"email": email})
+                with TestClient(app, cookies=_CSRF_COOKIES) as client:
+                    client.post("/auth/login", data={"email": email, "csrf_token": _CSRF})
 
         url_arg = mock_send.call_args[0][1]
         assert url_arg.startswith(f"{app_url}/auth/verify?token=")
@@ -385,7 +391,7 @@ class TestVerifyToken:
         raw_token = _insert_magic_token(db, user_id)
 
         with patch.dict("os.environ", {"DATABASE_PATH": str(db)}):
-            with TestClient(app, follow_redirects=False) as client:
+            with TestClient(app, follow_redirects=False, cookies=_CSRF_COOKIES) as client:
                 response = client.get(f"/auth/verify?token={raw_token}")
 
         assert response.status_code == 302
@@ -399,7 +405,7 @@ class TestVerifyToken:
         raw_token = _insert_magic_token(db, user_id)
 
         with patch.dict("os.environ", {"DATABASE_PATH": str(db)}):
-            with TestClient(app, follow_redirects=False) as client:
+            with TestClient(app, follow_redirects=False, cookies=_CSRF_COOKIES) as client:
                 response = client.get(f"/auth/verify?token={raw_token}")
 
         assert "session" in response.cookies
@@ -410,7 +416,7 @@ class TestVerifyToken:
         raw_token = _insert_magic_token(db, user_id)
 
         with patch.dict("os.environ", {"DATABASE_PATH": str(db)}):
-            with TestClient(app, follow_redirects=False) as client:
+            with TestClient(app, follow_redirects=False, cookies=_CSRF_COOKIES) as client:
                 client.get(f"/auth/verify?token={raw_token}")
 
         conn = sqlite3.connect(str(db))
@@ -430,13 +436,13 @@ class TestVerifyToken:
         raw_token = _insert_magic_token(db, user_id)
 
         with patch.dict("os.environ", {"DATABASE_PATH": str(db)}):
-            with TestClient(app, follow_redirects=False) as client:
+            with TestClient(app, follow_redirects=False, cookies=_CSRF_COOKIES) as client:
                 client.get(f"/auth/verify?token={raw_token}")
 
         conn = sqlite3.connect(str(db))
         cursor = conn.execute(
             "SELECT COUNT(*) FROM magic_link_tokens WHERE token = ?",
-            (raw_token,),
+            (hash_token(raw_token),),
         )
         count = cursor.fetchone()[0]
         conn.close()
@@ -448,7 +454,7 @@ class TestVerifyToken:
         raw_token = _insert_magic_token(db, user_id, expired=True)
 
         with patch.dict("os.environ", {"DATABASE_PATH": str(db)}):
-            with TestClient(app) as client:
+            with TestClient(app, cookies=_CSRF_COOKIES) as client:
                 response = client.get(f"/auth/verify?token={raw_token}")
 
         assert response.status_code in (400, 200)  # renders error page
@@ -465,12 +471,12 @@ class TestVerifyToken:
 
         # First use consumes (deletes) the token.
         with patch.dict("os.environ", {"DATABASE_PATH": str(db)}):
-            with TestClient(app, follow_redirects=False) as client:
+            with TestClient(app, follow_redirects=False, cookies=_CSRF_COOKIES) as client:
                 client.get(f"/auth/verify?token={raw_token}")
 
         # Second attempt -- token is gone.
         with patch.dict("os.environ", {"DATABASE_PATH": str(db)}):
-            with TestClient(app) as client:
+            with TestClient(app, cookies=_CSRF_COOKIES) as client:
                 response = client.get(f"/auth/verify?token={raw_token}")
 
         assert "invalid or has expired" in response.text.lower()
@@ -478,7 +484,7 @@ class TestVerifyToken:
     def test_nonexistent_token_shows_error_page(self, db: Path) -> None:
         """Non-existent token renders verify_error.html."""
         with patch.dict("os.environ", {"DATABASE_PATH": str(db)}):
-            with TestClient(app) as client:
+            with TestClient(app, cookies=_CSRF_COOKIES) as client:
                 response = client.get("/auth/verify?token=doesnotexisttoken123456789012")
 
         assert "invalid or has expired" in response.text.lower()
@@ -486,7 +492,7 @@ class TestVerifyToken:
     def test_missing_token_param_shows_error_page(self, db: Path) -> None:
         """Missing token parameter renders verify_error.html."""
         with patch.dict("os.environ", {"DATABASE_PATH": str(db)}):
-            with TestClient(app) as client:
+            with TestClient(app, cookies=_CSRF_COOKIES) as client:
                 response = client.get("/auth/verify")
 
         assert response.status_code in (400, 422, 200)
@@ -498,12 +504,12 @@ class TestVerifyToken:
         raw_token = _insert_magic_token(db, user_id)
 
         with patch.dict("os.environ", {"DATABASE_PATH": str(db)}):
-            with TestClient(app, follow_redirects=False) as client:
+            with TestClient(app, follow_redirects=False, cookies=_CSRF_COOKIES) as client:
                 # First use -- should succeed
                 response1 = client.get(f"/auth/verify?token={raw_token}")
                 assert response1.status_code == 302
 
-            with TestClient(app) as client:
+            with TestClient(app, cookies=_CSRF_COOKIES) as client:
                 # Second use -- should fail (token was deleted)
                 response2 = client.get(f"/auth/verify?token={raw_token}")
                 assert "invalid or has expired" in response2.text.lower()
@@ -515,10 +521,10 @@ class TestVerifyToken:
 
 
 class TestLogout:
-    """GET /auth/logout clears session (AC-17i)."""
+    """POST /auth/logout clears session (AC-17i)."""
 
     def test_logout_redirects_to_login(self, db: Path) -> None:
-        """GET /auth/logout redirects to /auth/login (AC-17i)."""
+        """POST /auth/logout redirects to /auth/login (AC-17i)."""
         user_id = _insert_user(db, "logout@example.com")
         raw_token = _insert_session(db, user_id)
 
@@ -526,15 +532,15 @@ class TestLogout:
             with TestClient(
                 app,
                 follow_redirects=False,
-                cookies={"session": raw_token},
+                cookies={"session": raw_token, "csrf_token": _CSRF},
             ) as client:
-                response = client.get("/auth/logout")
+                response = client.post("/auth/logout", data={"csrf_token": _CSRF})
 
         assert response.status_code == 302
         assert "/auth/login" in response.headers["location"]
 
     def test_logout_deletes_session_from_db(self, db: Path) -> None:
-        """GET /auth/logout removes the session row from the DB (AC-17i)."""
+        """POST /auth/logout removes the session row from the DB (AC-17i)."""
         user_id = _insert_user(db, "logoutdb@example.com")
         raw_token = _insert_session(db, user_id)
         session_id = hash_token(raw_token)
@@ -543,9 +549,9 @@ class TestLogout:
             with TestClient(
                 app,
                 follow_redirects=False,
-                cookies={"session": raw_token},
+                cookies={"session": raw_token, "csrf_token": _CSRF},
             ) as client:
-                client.get("/auth/logout")
+                client.post("/auth/logout", data={"csrf_token": _CSRF})
 
         conn = sqlite3.connect(str(db))
         cursor = conn.execute(
@@ -557,7 +563,7 @@ class TestLogout:
         assert count == 0
 
     def test_logout_clears_cookie(self, db: Path) -> None:
-        """GET /auth/logout clears the session cookie (AC-17i)."""
+        """POST /auth/logout clears the session cookie (AC-17i)."""
         user_id = _insert_user(db, "logoutcookie@example.com")
         raw_token = _insert_session(db, user_id)
 
@@ -565,19 +571,19 @@ class TestLogout:
             with TestClient(
                 app,
                 follow_redirects=False,
-                cookies={"session": raw_token},
+                cookies={"session": raw_token, "csrf_token": _CSRF},
             ) as client:
-                response = client.get("/auth/logout")
+                response = client.post("/auth/logout", data={"csrf_token": _CSRF})
 
         # Cookie should be cleared (max_age=0 or empty value)
         set_cookie = response.headers.get("set-cookie", "")
         assert "session" in set_cookie
 
     def test_logout_without_session_still_redirects(self, db: Path) -> None:
-        """GET /auth/logout without session cookie still redirects to /auth/login."""
+        """POST /auth/logout without session cookie still redirects to /auth/login."""
         with patch.dict("os.environ", {"DATABASE_PATH": str(db)}):
-            with TestClient(app, follow_redirects=False) as client:
-                response = client.get("/auth/logout")
+            with TestClient(app, follow_redirects=False, cookies=_CSRF_COOKIES) as client:
+                response = client.post("/auth/logout", data={"csrf_token": _CSRF})
 
         assert response.status_code == 302
         assert "/auth/login" in response.headers["location"]
@@ -597,7 +603,7 @@ class TestSessionCookieProperties:
         raw_token = _insert_magic_token(db, user_id)
 
         with patch.dict("os.environ", {"DATABASE_PATH": str(db), "APP_ENV": "development"}):
-            with TestClient(app, follow_redirects=False) as client:
+            with TestClient(app, follow_redirects=False, cookies=_CSRF_COOKIES) as client:
                 response = client.get(f"/auth/verify?token={raw_token}")
 
         set_cookie = response.headers.get("set-cookie", "").lower()
@@ -609,7 +615,7 @@ class TestSessionCookieProperties:
         raw_token = _insert_magic_token(db, user_id)
 
         with patch.dict("os.environ", {"DATABASE_PATH": str(db), "APP_ENV": "development"}):
-            with TestClient(app, follow_redirects=False) as client:
+            with TestClient(app, follow_redirects=False, cookies=_CSRF_COOKIES) as client:
                 response = client.get(f"/auth/verify?token={raw_token}")
 
         set_cookie = response.headers.get("set-cookie", "").lower()
@@ -621,7 +627,7 @@ class TestSessionCookieProperties:
         raw_token = _insert_magic_token(db, user_id)
 
         with patch.dict("os.environ", {"DATABASE_PATH": str(db), "APP_ENV": "development"}):
-            with TestClient(app, follow_redirects=False) as client:
+            with TestClient(app, follow_redirects=False, cookies=_CSRF_COOKIES) as client:
                 response = client.get(f"/auth/verify?token={raw_token}")
 
         set_cookie = response.headers.get("set-cookie", "").lower()
@@ -656,14 +662,14 @@ class TestStaleMagicLinkInvalidation:
                 new_callable=AsyncMock,
                 return_value=True,
             ):
-                with TestClient(app) as client:
-                    client.post("/auth/login", data={"email": email})
+                with TestClient(app, cookies=_CSRF_COOKIES) as client:
+                    client.post("/auth/login", data={"email": email, "csrf_token": _CSRF})
 
         # Prior token should be gone.
         conn = sqlite3.connect(str(db))
         cursor = conn.execute(
             "SELECT COUNT(*) FROM magic_link_tokens WHERE token = ?",
-            (prior_raw,),
+            (hash_token(prior_raw),),
         )
         count = cursor.fetchone()[0]
         conn.close()
@@ -682,12 +688,12 @@ class TestStaleMagicLinkInvalidation:
                 new_callable=AsyncMock,
                 return_value=True,
             ):
-                with TestClient(app) as client:
-                    client.post("/auth/login", data={"email": email})
+                with TestClient(app, cookies=_CSRF_COOKIES) as client:
+                    client.post("/auth/login", data={"email": email, "csrf_token": _CSRF})
 
         # Attempting to verify the prior (now-deleted) token must fail.
         with patch.dict("os.environ", {"DATABASE_PATH": str(db)}):
-            with TestClient(app) as client:
+            with TestClient(app, cookies=_CSRF_COOKIES) as client:
                 response = client.get(f"/auth/verify?token={prior_raw}")
 
         assert "invalid or has expired" in response.text.lower()
@@ -709,15 +715,15 @@ class TestStaleMagicLinkInvalidation:
                 "src.api.routes.auth.send_magic_link_email",
                 side_effect=capture_email,
             ):
-                with TestClient(app) as client:
-                    client.post("/auth/login", data={"email": email})
+                with TestClient(app, cookies=_CSRF_COOKIES) as client:
+                    client.post("/auth/login", data={"email": email, "csrf_token": _CSRF})
 
         assert len(captured_url) == 1
         new_token = captured_url[0].split("token=")[-1]
 
         # The new token must verify successfully.
         with patch.dict("os.environ", {"DATABASE_PATH": str(db)}):
-            with TestClient(app, follow_redirects=False) as client:
+            with TestClient(app, follow_redirects=False, cookies=_CSRF_COOKIES) as client:
                 response = client.get(f"/auth/verify?token={new_token}")
 
         assert response.status_code == 302
@@ -741,19 +747,19 @@ class TestStaleMagicLinkInvalidation:
                 "src.api.routes.auth.send_magic_link_email",
                 side_effect=capture_email,
             ):
-                with TestClient(app) as client:
-                    client.post("/auth/login", data={"email": email})
+                with TestClient(app, cookies=_CSRF_COOKIES) as client:
+                    client.post("/auth/login", data={"email": email, "csrf_token": _CSRF})
 
         assert len(captured_url) == 1
         token_b_raw = captured_url[0].split("token=")[-1]
 
         with patch.dict("os.environ", {"DATABASE_PATH": str(db)}):
-            with TestClient(app) as client:
+            with TestClient(app, cookies=_CSRF_COOKIES) as client:
                 # Verify A -- must fail (deleted by B issuance).
                 response_a = client.get(f"/auth/verify?token={token_a_raw}")
             assert "invalid or has expired" in response_a.text.lower()
 
-            with TestClient(app, follow_redirects=False) as client:
+            with TestClient(app, follow_redirects=False, cookies=_CSRF_COOKIES) as client:
                 # Verify B -- must succeed.
                 response_b = client.get(f"/auth/verify?token={token_b_raw}")
             assert response_b.status_code == 302
@@ -771,7 +777,7 @@ class TestStaleMagicLinkInvalidation:
             INSERT INTO magic_link_tokens (token, user_id, expires_at)
             VALUES (?, ?, datetime('now', '839 seconds'))
             """,
-            (secrets.token_urlsafe(32), user_id),
+            (hash_token(secrets.token_urlsafe(32)), user_id),
         )
         conn.commit()
         conn.close()
@@ -782,8 +788,8 @@ class TestStaleMagicLinkInvalidation:
                 new_callable=AsyncMock,
                 return_value=True,
             ):
-                with TestClient(app) as client:
-                    client.post("/auth/login", data={"email": email})
+                with TestClient(app, cookies=_CSRF_COOKIES) as client:
+                    client.post("/auth/login", data={"email": email, "csrf_token": _CSRF})
 
         conn = sqlite3.connect(str(db))
         cursor = conn.execute(
@@ -818,8 +824,8 @@ class TestMagicLinkRateLimiting:
                 new_callable=AsyncMock,
                 return_value=True,
             ) as mock_send:
-                with TestClient(app) as client:
-                    response = client.post("/auth/login", data={"email": email})
+                with TestClient(app, cookies=_CSRF_COOKIES) as client:
+                    response = client.post("/auth/login", data={"email": email, "csrf_token": _CSRF})
 
         assert response.status_code == 200
         assert "If this email is registered" in response.text
@@ -846,8 +852,8 @@ class TestMagicLinkRateLimiting:
                 new_callable=AsyncMock,
                 return_value=True,
             ) as mock_send:
-                with TestClient(app) as client:
-                    response = client.post("/auth/login", data={"email": email})
+                with TestClient(app, cookies=_CSRF_COOKIES) as client:
+                    response = client.post("/auth/login", data={"email": email, "csrf_token": _CSRF})
 
         # Same confirmation page shown regardless.
         assert response.status_code == 200
@@ -875,8 +881,8 @@ class TestMagicLinkRateLimiting:
                 new_callable=AsyncMock,
                 return_value=True,
             ) as mock_send:
-                with TestClient(app) as client:
-                    response = client.post("/auth/login", data={"email": email})
+                with TestClient(app, cookies=_CSRF_COOKIES) as client:
+                    response = client.post("/auth/login", data={"email": email, "csrf_token": _CSRF})
 
         assert response.status_code == 200
         assert "If this email is registered" in response.text
@@ -892,9 +898,9 @@ class TestMagicLinkRateLimiting:
     def test_unknown_email_still_shows_confirmation_page(self, db: Path) -> None:
         """AC-3: Unknown email returns the same check_email page (no enumeration)."""
         with patch.dict("os.environ", {"DATABASE_PATH": str(db)}):
-            with TestClient(app) as client:
+            with TestClient(app, cookies=_CSRF_COOKIES) as client:
                 response = client.post(
-                    "/auth/login", data={"email": "nobody@example.com"}
+                    "/auth/login", data={"email": "nobody@example.com", "csrf_token": _CSRF}
                 )
 
         assert response.status_code == 200
@@ -921,7 +927,7 @@ class TestMagicLinkRateLimiting:
                 new_callable=AsyncMock,
                 return_value=True,
             ) as mock_send:
-                with TestClient(app) as client:
-                    client.post("/auth/login", data={"email": email})
+                with TestClient(app, cookies=_CSRF_COOKIES) as client:
+                    client.post("/auth/login", data={"email": email, "csrf_token": _CSRF})
 
         mock_send.assert_called_once()

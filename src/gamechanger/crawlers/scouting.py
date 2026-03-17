@@ -284,20 +284,17 @@ class ScoutingCrawler:
             season_id: Season slug.
             status: New status string -- either ``'completed'`` or ``'failed'``.
         """
-        completed_at = (
-            "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')"
-            if status == "completed"
-            else "NULL"
-        )
         self._db.execute(
-            f"""
+            """
             UPDATE scouting_runs SET
                 status       = ?,
                 last_checked = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
-                completed_at = {completed_at}
+                completed_at = CASE WHEN ? = 'completed'
+                                    THEN strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+                                    ELSE NULL END
             WHERE team_id = ? AND season_id = ? AND run_type = ?
             """,
-            (status, team_id, season_id, _RUN_TYPE),
+            (status, status, team_id, season_id, _RUN_TYPE),
         )
         self._db.commit()
 

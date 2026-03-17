@@ -332,6 +332,7 @@ async def post_login(
                     )
                 else:
                     raw_token = secrets.token_urlsafe(32)
+                    token_hash = hash_token(raw_token)
                     # Invalidate all prior unused tokens for this user by
                     # deleting them before inserting the new one.
                     conn.execute(
@@ -343,7 +344,7 @@ async def post_login(
                         INSERT INTO magic_link_tokens (token, user_id, expires_at)
                         VALUES (?, ?, datetime('now', '+15 minutes'))
                         """,
-                        (raw_token, user_id),
+                        (token_hash, user_id),
                     )
                     conn.commit()
 
@@ -382,6 +383,8 @@ async def verify_token(
             request, "auth/verify_error.html", {}, status_code=400
         )
 
+    token_hash = hash_token(token)
+
     try:
         with closing(get_connection()) as conn:
             conn.row_factory = sqlite3.Row
@@ -391,7 +394,7 @@ async def verify_token(
                 FROM magic_link_tokens
                 WHERE token = ?
                 """,
-                (token,),
+                (token_hash,),
             )
             row = cursor.fetchone()
 
@@ -408,7 +411,7 @@ async def verify_token(
                 FROM magic_link_tokens
                 WHERE token = ?
                 """,
-                (token,),
+                (token_hash,),
             )
             validity = cursor.fetchone()
             if not validity or not validity["valid"]:
@@ -416,7 +419,7 @@ async def verify_token(
                 # Clean up expired token.
                 conn.execute(
                     "DELETE FROM magic_link_tokens WHERE token = ?",
-                    (token,),
+                    (token_hash,),
                 )
                 conn.commit()
                 return templates.TemplateResponse(
@@ -426,7 +429,7 @@ async def verify_token(
             # Atomically delete the token (single-use enforcement).
             cursor = conn.execute(
                 "DELETE FROM magic_link_tokens WHERE token = ?",
-                (token,),
+                (token_hash,),
             )
             conn.commit()
 
@@ -456,7 +459,7 @@ async def verify_token(
     return response
 
 
-@router.get("/logout")
+@router.post("/logout")
 async def logout(request: Request) -> RedirectResponse:
     """Clear the session cookie and delete the session from the DB.
 
@@ -576,11 +579,12 @@ async def get_passkey_register(request: Request) -> HTMLResponse | RedirectRespo
             time.time() + _PASSKEY_CHALLENGE_TTL,
         )
 
-    options_json_str = options_to_json(registration_options)
+    import json as _json
+    options_dict = _json.loads(options_to_json(registration_options))
     return templates.TemplateResponse(
         request,
         "auth/passkey_register.html",
-        {"options_json": options_json_str},
+        {"options_json": options_dict},
     )
 
 
