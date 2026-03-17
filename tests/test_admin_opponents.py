@@ -38,79 +38,9 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
+from migrations.apply_migrations import run_migrations  # noqa: E402
 from src.api.auth import hash_token  # noqa: E402
 from src.api.main import app  # noqa: E402
-
-# ---------------------------------------------------------------------------
-# Schema SQL -- E-100 fresh-start schema
-# ---------------------------------------------------------------------------
-
-_SCHEMA_SQL = """
-    CREATE TABLE IF NOT EXISTS _migrations (
-        id         INTEGER PRIMARY KEY AUTOINCREMENT,
-        filename   TEXT    NOT NULL UNIQUE,
-        applied_at TEXT    NOT NULL DEFAULT (datetime('now'))
-    );
-    INSERT OR IGNORE INTO _migrations (filename) VALUES ('001_initial_schema.sql');
-
-    CREATE TABLE IF NOT EXISTS programs (
-        program_id   TEXT PRIMARY KEY,
-        name         TEXT NOT NULL,
-        program_type TEXT NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS teams (
-        id              INTEGER PRIMARY KEY AUTOINCREMENT,
-        name            TEXT NOT NULL,
-        program_id      TEXT REFERENCES programs(program_id),
-        membership_type TEXT NOT NULL DEFAULT 'tracked',
-        classification  TEXT,
-        public_id       TEXT,
-        gc_uuid         TEXT,
-        source          TEXT NOT NULL DEFAULT 'gamechanger',
-        is_active       INTEGER NOT NULL DEFAULT 1,
-        last_synced     TEXT,
-        created_at      TEXT NOT NULL DEFAULT (datetime('now'))
-    );
-
-    CREATE TABLE IF NOT EXISTS users (
-        id              INTEGER PRIMARY KEY AUTOINCREMENT,
-        email           TEXT UNIQUE NOT NULL,
-        hashed_password TEXT,
-        created_at      TEXT NOT NULL DEFAULT (datetime('now'))
-    );
-
-    CREATE TABLE IF NOT EXISTS user_team_access (
-        user_id INTEGER NOT NULL REFERENCES users(id),
-        team_id INTEGER NOT NULL REFERENCES teams(id),
-        UNIQUE(user_id, team_id)
-    );
-
-    CREATE TABLE IF NOT EXISTS sessions (
-        session_id TEXT PRIMARY KEY,
-        user_id    INTEGER NOT NULL REFERENCES users(id),
-        expires_at TEXT NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS opponent_links (
-        id                INTEGER PRIMARY KEY AUTOINCREMENT,
-        our_team_id       INTEGER NOT NULL REFERENCES teams(id),
-        root_team_id      TEXT NOT NULL,
-        opponent_name     TEXT NOT NULL,
-        resolved_team_id  INTEGER REFERENCES teams(id),
-        public_id         TEXT,
-        resolution_method TEXT CHECK(resolution_method IN ('auto', 'manual') OR resolution_method IS NULL),
-        resolved_at       TEXT,
-        is_hidden         INTEGER NOT NULL DEFAULT 0,
-        created_at        TEXT NOT NULL DEFAULT (datetime('now')),
-        UNIQUE(our_team_id, root_team_id)
-    );
-
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_teams_gc_uuid
-        ON teams(gc_uuid) WHERE gc_uuid IS NOT NULL;
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_teams_public_id
-        ON teams(public_id) WHERE public_id IS NOT NULL;
-"""
 
 
 # ---------------------------------------------------------------------------
@@ -125,8 +55,8 @@ def _make_db(tmp_path: Path) -> tuple[Path, dict[str, int]]:
         Tuple of (db_path, team_ids) where team_ids maps name to INTEGER id.
     """
     db_path = tmp_path / "test_opponents.db"
+    run_migrations(db_path=db_path)
     conn = sqlite3.connect(str(db_path))
-    conn.executescript(_SCHEMA_SQL)
 
     # Seed programs
     conn.execute(

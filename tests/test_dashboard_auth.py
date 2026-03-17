@@ -31,165 +31,11 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
+from migrations.apply_migrations import run_migrations  # noqa: E402
 from src.api.main import app  # noqa: E402
 
 # Derive season_id the same way the route does, so tests stay valid across years.
 _CURRENT_SEASON_ID = f"{datetime.date.today().year}-spring-hs"
-
-
-# ---------------------------------------------------------------------------
-# Database fixture helpers (E-100 schema)
-# ---------------------------------------------------------------------------
-
-# Minimal E-100 schema subset needed for dashboard tests.
-# Uses the actual column names from 001_initial_schema.sql.
-_SCHEMA_SQL = """
-    CREATE TABLE IF NOT EXISTS _migrations (
-        id         INTEGER PRIMARY KEY AUTOINCREMENT,
-        filename   TEXT    NOT NULL UNIQUE,
-        applied_at TEXT    NOT NULL DEFAULT (datetime('now'))
-    );
-
-    -- E-100: users -- id INTEGER PK, no display_name, no is_admin
-    CREATE TABLE IF NOT EXISTS users (
-        id         INTEGER PRIMARY KEY AUTOINCREMENT,
-        email      TEXT NOT NULL UNIQUE,
-        hashed_password TEXT,
-        created_at TEXT NOT NULL DEFAULT (datetime('now'))
-    );
-
-    -- E-100: teams -- id INTEGER PK AUTOINCREMENT, membership_type replaces is_owned
-    CREATE TABLE IF NOT EXISTS teams (
-        id              INTEGER PRIMARY KEY AUTOINCREMENT,
-        name            TEXT NOT NULL,
-        membership_type TEXT NOT NULL DEFAULT 'member',
-        classification  TEXT,
-        public_id       TEXT,
-        gc_uuid         TEXT,
-        source          TEXT NOT NULL DEFAULT 'gamechanger',
-        is_active       INTEGER NOT NULL DEFAULT 1,
-        last_synced     TEXT,
-        created_at      TEXT NOT NULL DEFAULT (datetime('now'))
-    );
-
-    -- E-100: user_team_access -- team_id is INTEGER FK
-    CREATE TABLE IF NOT EXISTS user_team_access (
-        user_id INTEGER NOT NULL REFERENCES users(id),
-        team_id INTEGER NOT NULL REFERENCES teams(id),
-        UNIQUE(user_id, team_id)
-    );
-
-    -- E-100: sessions -- session_id TEXT PK (no id, no session_token_hash)
-    CREATE TABLE IF NOT EXISTS sessions (
-        session_id TEXT PRIMARY KEY,
-        user_id    INTEGER NOT NULL REFERENCES users(id),
-        expires_at TEXT NOT NULL
-    );
-
-    -- E-100: magic_link_tokens -- token TEXT PK
-    CREATE TABLE IF NOT EXISTS magic_link_tokens (
-        token      TEXT PRIMARY KEY,
-        user_id    INTEGER NOT NULL REFERENCES users(id),
-        expires_at TEXT NOT NULL
-    );
-
-    -- E-100: passkey_credentials -- credential_id TEXT PK
-    CREATE TABLE IF NOT EXISTS passkey_credentials (
-        credential_id TEXT PRIMARY KEY,
-        user_id       INTEGER NOT NULL REFERENCES users(id),
-        public_key    TEXT NOT NULL,
-        sign_count    INTEGER NOT NULL DEFAULT 0
-    );
-
-    CREATE TABLE IF NOT EXISTS players (
-        player_id   TEXT PRIMARY KEY,
-        first_name  TEXT NOT NULL,
-        last_name   TEXT NOT NULL,
-        created_at  TEXT NOT NULL DEFAULT (datetime('now'))
-    );
-
-    CREATE TABLE IF NOT EXISTS seasons (
-        season_id   TEXT PRIMARY KEY,
-        name        TEXT NOT NULL,
-        season_type TEXT NOT NULL,
-        year        INTEGER NOT NULL,
-        created_at  TEXT NOT NULL DEFAULT (datetime('now'))
-    );
-
-    CREATE TABLE IF NOT EXISTS team_rosters (
-        team_id       INTEGER NOT NULL REFERENCES teams(id),
-        player_id     TEXT NOT NULL REFERENCES players(player_id),
-        season_id     TEXT NOT NULL REFERENCES seasons(season_id),
-        jersey_number TEXT,
-        position      TEXT,
-        PRIMARY KEY (team_id, player_id, season_id)
-    );
-
-    CREATE TABLE IF NOT EXISTS games (
-        game_id      TEXT PRIMARY KEY,
-        season_id    TEXT NOT NULL,
-        game_date    TEXT NOT NULL,
-        home_team_id INTEGER NOT NULL,
-        away_team_id INTEGER NOT NULL,
-        home_score   INTEGER,
-        away_score   INTEGER,
-        status       TEXT NOT NULL DEFAULT 'completed'
-    );
-
-    CREATE TABLE IF NOT EXISTS player_game_batting (
-        id        INTEGER PRIMARY KEY AUTOINCREMENT,
-        game_id   TEXT NOT NULL,
-        player_id TEXT NOT NULL,
-        team_id   INTEGER NOT NULL,
-        ab        INTEGER,
-        h         INTEGER,
-        doubles   INTEGER,
-        triples   INTEGER,
-        hr        INTEGER,
-        rbi       INTEGER,
-        bb        INTEGER,
-        so        INTEGER,
-        sb        INTEGER,
-        UNIQUE(game_id, player_id)
-    );
-
-    CREATE TABLE IF NOT EXISTS player_game_pitching (
-        id        INTEGER PRIMARY KEY AUTOINCREMENT,
-        game_id   TEXT NOT NULL,
-        player_id TEXT NOT NULL,
-        team_id   INTEGER NOT NULL,
-        ip_outs   INTEGER,
-        h         INTEGER,
-        er        INTEGER,
-        bb        INTEGER,
-        so        INTEGER,
-        UNIQUE(game_id, player_id)
-    );
-
-    CREATE TABLE IF NOT EXISTS player_season_batting (
-        id                INTEGER PRIMARY KEY AUTOINCREMENT,
-        player_id         TEXT NOT NULL,
-        team_id           INTEGER NOT NULL,
-        season_id         TEXT NOT NULL,
-        stat_completeness TEXT NOT NULL DEFAULT 'boxscore_only',
-        gp        INTEGER,
-        ab        INTEGER,
-        h         INTEGER,
-        doubles   INTEGER,
-        triples   INTEGER,
-        hr        INTEGER,
-        rbi       INTEGER,
-        bb        INTEGER,
-        so        INTEGER,
-        sb        INTEGER,
-        UNIQUE(player_id, team_id, season_id)
-    );
-
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_teams_gc_uuid
-        ON teams(gc_uuid) WHERE gc_uuid IS NOT NULL;
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_teams_public_id
-        ON teams(public_id) WHERE public_id IS NOT NULL;
-"""
 
 
 def _make_seeded_db(tmp_path: Path) -> tuple[Path, int, int]:
@@ -204,8 +50,8 @@ def _make_seeded_db(tmp_path: Path) -> tuple[Path, int, int]:
         Tuple of (db_path, team_alpha_id, team_beta_id).
     """
     db_path = tmp_path / "test_app.db"
+    run_migrations(db_path=db_path)
     conn = sqlite3.connect(str(db_path))
-    conn.executescript(_SCHEMA_SQL)
 
     # Insert seasons row needed for FK constraints
     conn.execute(

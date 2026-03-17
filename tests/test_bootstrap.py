@@ -26,31 +26,6 @@ _PLACEHOLDER_CONFIG = CrawlConfig(season="2025", member_teams=[_PLACEHOLDER_TEAM
 _EMPTY_CONFIG = CrawlConfig(season="2025", member_teams=[])
 
 
-def _patch_all(
-    cred_result: tuple[int, str] = (0, "Credentials valid -- logged in as Jason Smith"),
-    config: CrawlConfig | None = _VALID_CONFIG,
-    config_missing: bool = False,
-    crawl_code: int = 0,
-    load_code: int = 0,
-):
-    """Return a context manager stack that patches all external dependencies."""
-    patches = [
-        patch("src.pipeline.bootstrap.check_credentials", return_value=cred_result),
-        patch("src.pipeline.bootstrap.crawl_module.run", return_value=crawl_code),
-        patch("src.pipeline.bootstrap.load_module.run", return_value=load_code),
-    ]
-    if config_missing:
-        patches.append(
-            patch(
-                "scripts.bootstrap.load_config",
-                side_effect=FileNotFoundError("not found"),
-            )
-        )
-    else:
-        patches.append(patch("src.pipeline.bootstrap.load_config", return_value=config))
-    return patches
-
-
 # ---------------------------------------------------------------------------
 # Successful full run
 # ---------------------------------------------------------------------------

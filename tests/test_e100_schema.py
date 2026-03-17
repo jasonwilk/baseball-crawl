@@ -158,9 +158,13 @@ class TestMigrationsApply:
         assert not missing, f"Missing tables: {missing}"
 
     def test_foreign_keys_enabled(self, migrated_db: sqlite3.Connection) -> None:
-        """FK enforcement is active after migration."""
-        row = migrated_db.execute("PRAGMA foreign_keys;").fetchone()
-        assert row[0] == 1, "PRAGMA foreign_keys should be 1"
+        """FK enforcement is active after migration -- verified by observing a violation."""
+        with pytest.raises(sqlite3.IntegrityError):
+            migrated_db.execute(
+                "INSERT INTO team_opponents (our_team_id, opponent_team_id) VALUES (?, ?)",
+                (9999, 8888),
+            )
+            migrated_db.commit()
 
 
 # ---------------------------------------------------------------------------
