@@ -1,7 +1,7 @@
 # E-119: Fix PII Scanner Discoverability
 
 ## Status
-`READY`
+`COMPLETED`
 
 ## Overview
 Agents and the main session cannot discover how to manually invoke the PII scanner. During E-116 dispatch, the main session tried `python scripts/pii_scan.py` which does not exist -- the scanner lives at `src/safety/pii_scanner.py`. The pre-commit hooks work correctly (they reference the right path), but there is no documented or discoverable way for agents to invoke the scanner outside of a commit. This epic adds the scanner path and invocation syntax to CLAUDE.md so agents know the correct invocation path.
@@ -34,7 +34,7 @@ The existing context-layer file `.claude/rules/pii-safety.md` mentions the scann
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-119-01 | Document PII scanner invocation in CLAUDE.md | TODO | None | - |
+| E-119-01 | Document PII scanner invocation in CLAUDE.md | DONE | None | claude-architect |
 
 ## Dispatch Team
 - claude-architect
@@ -60,3 +60,4 @@ None.
 ## History
 - 2026-03-17: Created. Bug discovered during E-116 dispatch when main session tried non-existent `scripts/pii_scan.py`.
 - 2026-03-17: Incorporated CA recommendation (CLAUDE.md placement) and Codex spec review findings (5 items). Set to READY.
+- 2026-03-17: All stories DONE. AC verification passed (all 3 ACs confirmed). Epic COMPLETED.

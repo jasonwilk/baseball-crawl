@@ -103,6 +103,7 @@ After changing `src/`, `migrations/`, `Dockerfile`, `docker-compose.yml`, or `re
 - Use environment variables via .env files for production (Docker Compose reads .env; files are git-ignored)
 - When agents work with API responses, strip or redact auth headers before storing raw responses
 - Treat GameChanger session tokens as sensitive data at all times
+- **PII scanner**: `src/safety/pii_scanner.py` -- run manually with `python3 src/safety/pii_scanner.py --staged` (also supports `--stdin` and explicit file args)
 
 ## Architecture
 - Keep data extraction separate from analysis/processing
