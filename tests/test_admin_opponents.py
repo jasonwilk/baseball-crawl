@@ -57,6 +57,7 @@ def _make_db(tmp_path: Path) -> tuple[Path, dict[str, int]]:
     db_path = tmp_path / "test_opponents.db"
     run_migrations(db_path=db_path)
     conn = sqlite3.connect(str(db_path))
+    conn.execute("PRAGMA foreign_keys=ON;")
 
     # Seed programs
     conn.execute(
@@ -127,6 +128,7 @@ def _make_db(tmp_path: Path) -> tuple[Path, dict[str, int]]:
 
 def _insert_user(db_path: Path, email: str) -> int:
     conn = sqlite3.connect(str(db_path))
+    conn.execute("PRAGMA foreign_keys=ON;")
     cursor = conn.execute(
         "INSERT INTO users (email, hashed_password) VALUES (?, '')", (email,)
     )
@@ -140,6 +142,7 @@ def _insert_session(db_path: Path, user_id: int) -> str:
     raw_token = secrets.token_hex(32)
     token_hash = hash_token(raw_token)
     conn = sqlite3.connect(str(db_path))
+    conn.execute("PRAGMA foreign_keys=ON;")
     conn.execute(
         "INSERT INTO sessions (session_id, user_id, expires_at) "
         "VALUES (?, ?, datetime('now', '+7 days'))",
@@ -152,6 +155,7 @@ def _insert_session(db_path: Path, user_id: int) -> str:
 
 def _get_link_row(db_path: Path, link_id: int) -> dict | None:
     conn = sqlite3.connect(str(db_path))
+    conn.execute("PRAGMA foreign_keys=ON;")
     conn.row_factory = sqlite3.Row
     row = conn.execute(
         "SELECT * FROM opponent_links WHERE id = ?", (link_id,)
@@ -162,6 +166,7 @@ def _get_link_row(db_path: Path, link_id: int) -> dict | None:
 
 def _get_link_id_by_name(db_path: Path, opponent_name: str) -> int | None:
     conn = sqlite3.connect(str(db_path))
+    conn.execute("PRAGMA foreign_keys=ON;")
     row = conn.execute(
         "SELECT id FROM opponent_links WHERE opponent_name = ?", (opponent_name,)
     ).fetchone()

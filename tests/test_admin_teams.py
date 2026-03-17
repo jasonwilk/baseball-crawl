@@ -77,6 +77,7 @@ def _make_db(tmp_path: Path) -> Path:
     db_path = tmp_path / "test_teams.db"
     run_migrations(db_path=db_path)
     conn = sqlite3.connect(str(db_path))
+    conn.execute("PRAGMA foreign_keys=ON;")
     conn.executescript(_SEED_SQL)
     conn.commit()
     conn.close()
@@ -86,6 +87,7 @@ def _make_db(tmp_path: Path) -> Path:
 def _insert_user(db_path: Path, email: str) -> int:
     """Insert a user row and return the id."""
     conn = sqlite3.connect(str(db_path))
+    conn.execute("PRAGMA foreign_keys=ON;")
     cursor = conn.execute(
         "INSERT INTO users (email, hashed_password) VALUES (?, '')", (email,)
     )
@@ -100,6 +102,7 @@ def _insert_session(db_path: Path, user_id: int) -> str:
     raw_token = secrets.token_hex(32)
     token_hash = hash_token(raw_token)
     conn = sqlite3.connect(str(db_path))
+    conn.execute("PRAGMA foreign_keys=ON;")
     conn.execute(
         """
         INSERT INTO sessions (session_id, user_id, expires_at)
@@ -123,6 +126,7 @@ def _insert_team(
 ) -> int:
     """Insert a team row and return the INTEGER id."""
     conn = sqlite3.connect(str(db_path))
+    conn.execute("PRAGMA foreign_keys=ON;")
     cursor = conn.execute(
         """
         INSERT INTO teams (name, membership_type, public_id, gc_uuid, classification, program_id)
@@ -139,6 +143,7 @@ def _insert_team(
 def _count_rows(db_path: Path, table: str, where_clause: str, params: tuple) -> int:
     """Return a row count from a table."""
     conn = sqlite3.connect(str(db_path))
+    conn.execute("PRAGMA foreign_keys=ON;")
     cursor = conn.execute(f"SELECT COUNT(*) FROM {table} WHERE {where_clause}", params)
     count = cursor.fetchone()[0]
     conn.close()

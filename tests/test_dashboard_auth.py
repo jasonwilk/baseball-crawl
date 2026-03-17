@@ -52,6 +52,7 @@ def _make_seeded_db(tmp_path: Path) -> tuple[Path, int, int]:
     db_path = tmp_path / "test_app.db"
     run_migrations(db_path=db_path)
     conn = sqlite3.connect(str(db_path))
+    conn.execute("PRAGMA foreign_keys=ON;")
 
     # Insert seasons row needed for FK constraints
     conn.execute(
@@ -113,6 +114,7 @@ def single_team_client(tmp_path: Path, db_info: tuple[Path, int, int]):
     """Client for a user with access to only team-alpha."""
     db_path, team_alpha_id, _team_beta_id = db_info
     conn = sqlite3.connect(str(db_path))
+    conn.execute("PRAGMA foreign_keys=ON;")
     # Insert user (E-100: email only, no display_name, no is_admin)
     cursor = conn.execute(
         "INSERT OR IGNORE INTO users (email) VALUES (?)",
@@ -143,6 +145,7 @@ def multi_team_client(tmp_path: Path, db_info: tuple[Path, int, int]):
     """Client for a user with access to team-alpha and team-beta."""
     db_path, team_alpha_id, team_beta_id = db_info
     conn = sqlite3.connect(str(db_path))
+    conn.execute("PRAGMA foreign_keys=ON;")
     cursor = conn.execute(
         "INSERT OR IGNORE INTO users (email) VALUES (?)",
         ("coach-multi@example.com",),
@@ -173,6 +176,7 @@ def no_teams_client(tmp_path: Path, db_info: tuple[Path, int, int]):
     """Client for a user with no team assignments."""
     db_path, _alpha, _beta = db_info
     conn = sqlite3.connect(str(db_path))
+    conn.execute("PRAGMA foreign_keys=ON;")
     conn.execute(
         "INSERT OR IGNORE INTO users (email) VALUES (?)",
         ("coach-none@example.com",),

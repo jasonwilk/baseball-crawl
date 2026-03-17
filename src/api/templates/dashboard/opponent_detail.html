@@ -73,6 +73,8 @@ Scout: {{ scouting_report.team_name if scouting_report else opponent_team_id }}
     {% if my_score is not none and their_score is not none %}
       {% if my_score > their_score %}
         {% set wl = "W" %}
+      {% elif my_score == their_score %}
+        {% set wl = "T" %}
       {% else %}
         {% set wl = "L" %}
       {% endif %}
@@ -86,6 +88,8 @@ Scout: {{ scouting_report.team_name if scouting_report else opponent_team_id }}
     <span class="font-bold text-green-700">W</span>
     {% elif wl == "L" %}
     <span class="font-bold text-red-700">L</span>
+    {% elif wl == "T" %}
+    <span class="font-bold text-gray-600">T</span>
     {% else %}
     <span class="text-gray-600">-</span>
     {% endif %}

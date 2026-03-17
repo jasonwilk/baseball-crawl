@@ -890,6 +890,16 @@ async def player_profile(request: Request, player_id: str) -> Response:
     if pitching_seasons:
         current_pitching = pitching_seasons[0]  # already sorted by season_id DESC
 
+    # Backlink should go to a permitted team, not an opponent team from scouting
+    permitted_set = set(permitted_teams)
+    backlink_team_id: int | None = next(
+        (s["team_id"] for s in batting_seasons if s["team_id"] in permitted_set),
+        next(
+            (s["team_id"] for s in pitching_seasons if s["team_id"] in permitted_set),
+            permitted_teams[0] if permitted_teams else None,
+        ),
+    )
+
     logger.debug("Player profile: player_id=%s", player_id)
 
     return templates.TemplateResponse(
@@ -903,6 +913,7 @@ async def player_profile(request: Request, player_id: str) -> Response:
             "current_batting": current_batting,
             "current_pitching": current_pitching,
             "permitted_team_infos": team_infos,
+            "backlink_team_id": backlink_team_id,
             "user": user,
         },
     )

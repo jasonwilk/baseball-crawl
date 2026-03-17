@@ -315,8 +315,7 @@ def get_game_box_score(game_id: str) -> dict[str, Any]:
             COALESCE(pgp.h, 0)       AS h,
             COALESCE(pgp.er, 0)      AS er,
             COALESCE(pgp.bb, 0)      AS bb,
-            COALESCE(pgp.so, 0)      AS so,
-            COALESCE(pgp.hr, 0)      AS hr
+            COALESCE(pgp.so, 0)      AS so
         FROM player_game_pitching pgp
         JOIN players p ON p.player_id = pgp.player_id
         WHERE pgp.game_id = ?
