@@ -876,6 +876,39 @@ class TestMembershipTypeValidation:
         assert response.status_code == 400
 
 
+class TestConfirmTeamInsertIntegrityError:
+    """Concurrent insert raising IntegrityError returns a redirect, not a 500."""
+
+    def test_confirm_team_submit_integrity_error_returns_redirect(
+        self, admin_db: Path
+    ) -> None:
+        """POST /admin/teams/confirm redirects with error when _insert_team_new raises IntegrityError."""
+        admin_id = _insert_user(admin_db, "ierr@example.com")
+        raw_token = _insert_session(admin_db, admin_id)
+
+        with patch.dict(
+            "os.environ",
+            {"DATABASE_PATH": str(admin_db), "ADMIN_EMAIL": "ierr@example.com"},
+        ):
+            with patch(
+                "src.api.routes.admin._insert_team_new",
+                side_effect=sqlite3.IntegrityError("UNIQUE constraint failed: teams.public_id"),
+            ):
+                with TestClient(
+                    app, follow_redirects=False, cookies={"session": raw_token}
+                ) as client:
+                    response = client.post(
+                        "/admin/teams/confirm",
+                        data={
+                            "public_id": "some-team-slug",
+                            "team_name": "Some Team",
+                            "membership_type": "tracked",
+                        },
+                    )
+        assert response.status_code != 500
+        assert response.status_code == 303
+
+
 class TestAlreadyResolvedLinkGuard:
     """GET connect/confirm returns 400 when the link already has a public_id."""
 

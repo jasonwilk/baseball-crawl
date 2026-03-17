@@ -1145,11 +1145,17 @@ async def confirm_team_submit(
             _infer_program_id(team_name, programs),
         )
 
-    await run_in_threadpool(
-        _insert_team_new,
-        team_name, public_id, gc_uuid_value, membership_type,
-        program_id_value, classification_value,
-    )
+    try:
+        await run_in_threadpool(
+            _insert_team_new,
+            team_name, public_id, gc_uuid_value, membership_type,
+            program_id_value, classification_value,
+        )
+    except sqlite3.IntegrityError:
+        return RedirectResponse(
+            url=f"/admin/teams?error={quote_plus('Team already exists (concurrent insert).')}",
+            status_code=303,
+        )
     return RedirectResponse(
         url=f"/admin/teams?msg={quote_plus(f'Team added: {team_name}')}",
         status_code=303,
