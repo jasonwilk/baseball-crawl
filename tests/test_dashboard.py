@@ -1584,3 +1584,38 @@ class TestTemplateStaleRefs:
         path = self._TEMPLATES_DIR / "admin" / "opponent_connect.html"
         content = path.read_text()
         assert "display_name" not in content
+
+
+# ---------------------------------------------------------------------------
+# _compute_wl unit tests (E-120-07)
+# ---------------------------------------------------------------------------
+
+
+from src.api.routes.dashboard import _compute_wl  # noqa: E402
+
+
+class TestComputeWL:
+    """Unit tests for _compute_wl helper."""
+
+    def _game(self, home_score, away_score, is_home: bool) -> dict:
+        return {"home_score": home_score, "away_score": away_score, "is_home": is_home}
+
+    def test_compute_wl_home_win(self) -> None:
+        assert _compute_wl(self._game(5, 3, True), team_id=1) == "W"
+
+    def test_compute_wl_home_loss(self) -> None:
+        assert _compute_wl(self._game(3, 5, True), team_id=1) == "L"
+
+    def test_compute_wl_away_win(self) -> None:
+        assert _compute_wl(self._game(3, 5, False), team_id=1) == "W"
+
+    def test_compute_wl_away_loss(self) -> None:
+        assert _compute_wl(self._game(5, 3, False), team_id=1) == "L"
+
+    def test_compute_wl_null_scores(self) -> None:
+        assert _compute_wl(self._game(None, None, True), team_id=1) == "-"
+
+    def test_compute_wl_tied_game_returns_T(self) -> None:
+        """AC-5: Tied game (e.g. suspended/called) returns 'T', not 'L'."""
+        assert _compute_wl(self._game(3, 3, True), team_id=1) == "T"
+        assert _compute_wl(self._game(3, 3, False), team_id=1) == "T"

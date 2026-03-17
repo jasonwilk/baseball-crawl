@@ -270,19 +270,21 @@ async def team_pitching(request: Request) -> Response:
 def _compute_wl(game: dict, team_id: int) -> str:
     """Compute W/L indicator from a game dict for the given team_id.
 
-    Returns ``"W"``, ``"L"``, or ``"-"`` if scores are null.
+    Returns ``"W"``, ``"L"``, ``"T"`` for tied games, or ``"-"`` if scores are null.
 
     Args:
         game:    A game dict from ``db.get_team_games``.
         team_id: The team whose perspective determines W/L.
 
     Returns:
-        ``"W"``, ``"L"``, or ``"-"``.
+        ``"W"``, ``"L"``, ``"T"``, or ``"-"``.
     """
     home_score = game.get("home_score")
     away_score = game.get("away_score")
     if home_score is None or away_score is None:
         return "-"
+    if home_score == away_score:
+        return "T"
     is_home = game.get("is_home")
     if is_home:
         return "W" if home_score > away_score else "L"

@@ -81,7 +81,7 @@ Scout: {{ scouting_report.team_name if scouting_report else opponent_team_id }}
     {% endif %}
   <div class="flex items-center gap-4">
     <span class="text-gray-900 font-medium">{{ last_meeting.game_date | format_date }}</span>
-    <span class="font-medium">{{ my_score }}-{{ their_score }}</span>
+    <span class="font-medium">{{ my_score if my_score is not none else "-" }}-{{ their_score if their_score is not none else "-" }}</span>
     {% if wl == "W" %}
     <span class="font-bold text-green-700">W</span>
     {% elif wl == "L" %}
