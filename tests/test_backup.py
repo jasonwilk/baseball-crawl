@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -82,3 +83,33 @@ def test_backup_is_self_contained_without_wal_files(tmp_path: Path, monkeypatch)
     with sqlite3.connect(backup_path) as conn:
         row = conn.execute("SELECT value FROM test WHERE id = 1").fetchone()
     assert row is not None and row[0] == "hello"
+
+
+def test_backup_closes_connections_on_failure(tmp_path: Path, monkeypatch) -> None:
+    """Connections are closed even when backup() raises an exception."""
+    db = tmp_path / "app.db"
+    _create_db(db)
+
+    backups_dir = tmp_path / "backups"
+    monkeypatch.setattr("src.db.backup._BACKUPS_DIR", backups_dir)
+
+    mock_src = MagicMock(spec=sqlite3.Connection)
+    mock_dst = MagicMock(spec=sqlite3.Connection)
+    mock_src.backup.side_effect = sqlite3.OperationalError("disk full")
+
+    call_count = 0
+    original_connect = sqlite3.connect
+
+    def fake_connect(path, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return mock_src
+        return mock_dst
+
+    with patch("src.db.backup.sqlite3.connect", side_effect=fake_connect):
+        with pytest.raises(sqlite3.OperationalError, match="disk full"):
+            backup_database(db_path=db)
+
+    mock_src.close.assert_called_once()
+    mock_dst.close.assert_called_once()

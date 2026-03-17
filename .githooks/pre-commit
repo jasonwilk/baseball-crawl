@@ -3,9 +3,9 @@
 # PII safety pre-commit hook -- blocks commits containing PII patterns
 # See docs/safe-data-handling.md for details
 
-SCANNER="$(git rev-parse --show-toplevel)/src/safety/pii_scanner.py"
+REPO_ROOT="$(git rev-parse --show-toplevel)"
 
-if [ ! -f "$SCANNER" ]; then
+if [ ! -f "$REPO_ROOT/src/safety/pii_scanner.py" ]; then
   echo "[pii-hook] Scanner not installed yet. Skipping PII check."
   exit 0
 fi
@@ -17,8 +17,8 @@ if [ -z "$STAGED_FILES" ]; then
   exit 0
 fi
 
-# Run scanner
-echo "$STAGED_FILES" | python3 "$SCANNER" --stdin
+# Run scanner as a module (avoids sys.path manipulation in src/)
+cd "$REPO_ROOT" && echo "$STAGED_FILES" | python3 -m src.safety.pii_scanner --stdin
 EXIT_CODE=$?
 
 if [ $EXIT_CODE -ne 0 ]; then

@@ -25,25 +25,12 @@ import sys
 from pathlib import Path
 from typing import NamedTuple
 
-try:
-    from .pii_patterns import (
-        COMPILED_PATTERNS,
-        SCANNABLE_EXTENSIONS,
-        SKIP_PATHS,
-        SYNTHETIC_MARKER,
-    )
-except ImportError:
-    # When run as a standalone script (e.g., from pre-commit hook),
-    # relative imports fail. Fall back to adding the parent directory
-    # to sys.path so pii_patterns can be found.
-    import os
-    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-    from pii_patterns import (  # type: ignore[no-redef]
-        COMPILED_PATTERNS,
-        SCANNABLE_EXTENSIONS,
-        SKIP_PATHS,
-        SYNTHETIC_MARKER,
-    )
+from src.safety.pii_patterns import (
+    COMPILED_PATTERNS,
+    SCANNABLE_EXTENSIONS,
+    SKIP_PATHS,
+    SYNTHETIC_MARKER,
+)
 
 logger = logging.getLogger(__name__)
 

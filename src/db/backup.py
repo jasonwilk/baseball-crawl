@@ -69,8 +69,13 @@ def backup_database(db_path: Path | None = None) -> Path:
     backup_name = f"app-{timestamp}.db"
     backup_path = _BACKUPS_DIR / backup_name
 
-    with sqlite3.connect(db_path) as src, sqlite3.connect(backup_path) as dst:
+    src = sqlite3.connect(db_path)
+    dst = sqlite3.connect(backup_path)
+    try:
         src.backup(dst)
-    logger.info("Backup saved to %s", backup_path)
+        logger.info("Backup saved to %s", backup_path)
+    finally:
+        dst.close()
+        src.close()
 
     return backup_path

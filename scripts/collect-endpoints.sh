@@ -21,10 +21,21 @@ fi
 echo "Credentials loaded. Output dir: $OUTDIR"
 
 BASE="https://api.team-manager.gc.com"
-TEAM="72bb77d8-54ca-42d2-8547-9da4880d0cb4"
-ORG="8881846c-7a9c-4230-ac17-09627aac7f59"
-EVENT="1e0f8dfc-a7cb-46ce-9d3e-671e9110ece6"
-STREAM="c05a5413-d250-4f28-bd92-efbe67bac348"
+
+# Load entity UUIDs from environment variables (or .env file).
+# These resolve to real GameChanger entities and must not be hardcoded.
+if [[ -f .env ]]; then
+  # Source .env for any vars not already set in the environment
+  set -a
+  # shellcheck disable=SC1091
+  source .env
+  set +a
+fi
+
+TEAM="${GC_TEAM_UUID:?ERROR: GC_TEAM_UUID not set. Export it or add to .env}"
+ORG="${GC_ORG_UUID:?ERROR: GC_ORG_UUID not set. Export it or add to .env}"
+EVENT="${GC_EVENT_UUID:?ERROR: GC_EVENT_UUID not set. Export it or add to .env}"
+STREAM="${GC_STREAM_UUID:?ERROR: GC_STREAM_UUID not set. Export it or add to .env}"
 
 # Common headers matching the web browser profile from the curl capture
 do_get() {
