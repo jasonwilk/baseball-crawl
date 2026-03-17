@@ -179,7 +179,7 @@ class ScoutingCrawler:
             self._upsert_run_end(team_id, season_id, "failed", games_found, 0, roster_size, "All boxscore fetches failed")
             self._db.commit()
             return CrawlResult(errors=1)
-        self._upsert_run_end(team_id, season_id, "running", games_found, games_crawled, roster_size, None)
+        self._upsert_run_end(team_id, season_id, "completed", games_found, games_crawled, roster_size, None)
         self._db.commit()
         return CrawlResult(files_written=2 + games_crawled)
 
