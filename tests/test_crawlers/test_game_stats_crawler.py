@@ -16,7 +16,7 @@ from unittest.mock import MagicMock, call, patch
 
 import pytest
 
-from src.gamechanger.client import GameChangerAPIError
+from src.gamechanger.client import CredentialExpiredError, GameChangerAPIError
 from src.gamechanger.config import CrawlConfig, TeamEntry
 from src.gamechanger.crawlers import CrawlResult
 from src.gamechanger.crawlers.game_stats import GameStatsCrawler, _BOXSCORE_ACCEPT
@@ -395,6 +395,23 @@ def test_missing_summaries_file_logs_warning(
         crawler.crawl_all()
 
     assert "not found" in caplog.text or "Game summaries" in caplog.text
+
+
+# ---------------------------------------------------------------------------
+# CredentialExpiredError propagation
+# ---------------------------------------------------------------------------
+
+def test_crawl_all_propagates_credential_expired_error(tmp_path: Path) -> None:
+    """CredentialExpiredError raised during boxscore fetch aborts crawl_all()."""
+    _write_summaries(
+        tmp_path, _SEASON, _TEAM_ID,
+        [_make_summary(_GAME_STREAM_ID_1, _EVENT_ID_1, "completed")],
+    )
+    client = _make_client(side_effect=CredentialExpiredError("Token expired"))
+    crawler = GameStatsCrawler(client, _make_config(), data_root=tmp_path)
+
+    with pytest.raises(CredentialExpiredError):
+        crawler.crawl_all()
 
 
 # ---------------------------------------------------------------------------

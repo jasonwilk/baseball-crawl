@@ -15,7 +15,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from src.gamechanger.client import GameChangerAPIError
+from src.gamechanger.client import CredentialExpiredError, GameChangerAPIError
 from src.gamechanger.config import CrawlConfig, TeamEntry
 from src.gamechanger.crawlers import CrawlResult
 from src.gamechanger.crawlers.player_stats import PlayerStatsCrawler
@@ -374,3 +374,17 @@ def test_crawl_result_multiple_teams_mixed_outcomes(tmp_path: Path) -> None:
     assert result.files_skipped == 1
     assert result.errors == 1
     assert result.files_written == 1
+
+
+# ---------------------------------------------------------------------------
+# CredentialExpiredError propagation
+# ---------------------------------------------------------------------------
+
+def test_crawl_all_propagates_credential_expired_error(tmp_path: Path) -> None:
+    """CredentialExpiredError raised by the client aborts crawl_all() immediately."""
+    client = _make_client(side_effect=CredentialExpiredError("Token expired"))
+    config = _make_config([_TEAM_ID])
+    crawler = PlayerStatsCrawler(client, config, data_root=tmp_path)
+
+    with pytest.raises(CredentialExpiredError):
+        crawler.crawl_all()

@@ -40,7 +40,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from src.gamechanger.client import GameChangerClient, GameChangerAPIError
+from src.gamechanger.client import CredentialExpiredError, GameChangerAPIError, GameChangerClient
 from src.gamechanger.config import CrawlConfig
 from src.gamechanger.crawlers import CrawlResult
 
@@ -174,6 +174,8 @@ class GameStatsCrawler:
                     exc,
                 )
                 result.errors += 1
+            except CredentialExpiredError:
+                raise
             except Exception as exc:  # noqa: BLE001 -- broad catch intentional; log and continue
                 logger.error(
                     "Unexpected error fetching boxscore for game_stream_id=%s event_id=%s: %s",

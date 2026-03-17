@@ -16,7 +16,7 @@ from unittest.mock import MagicMock, call, patch
 
 import pytest
 
-from src.gamechanger.client import GameChangerAPIError
+from src.gamechanger.client import CredentialExpiredError, GameChangerAPIError
 from src.gamechanger.config import CrawlConfig, TeamEntry
 from src.gamechanger.crawlers import CrawlResult
 from src.gamechanger.crawlers.schedule import ScheduleCrawler
@@ -464,3 +464,19 @@ def test_is_fresh_returns_false_for_stale_file(tmp_path: Path) -> None:
     os.utime(f, (stale_mtime, stale_mtime))
 
     assert crawler._is_fresh(f, 1) is False
+
+
+# ---------------------------------------------------------------------------
+# CredentialExpiredError propagation
+# ---------------------------------------------------------------------------
+
+def test_crawl_all_propagates_credential_expired_error(tmp_path: Path) -> None:
+    """CredentialExpiredError raised by the client aborts crawl_all() immediately."""
+    client = _make_client()
+    client.get.side_effect = CredentialExpiredError("Token expired")
+
+    config = _make_config([_TEAM_ID])
+    crawler = ScheduleCrawler(client, config, data_root=tmp_path)
+
+    with pytest.raises(CredentialExpiredError):
+        crawler.crawl_all()
