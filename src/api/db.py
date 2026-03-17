@@ -6,7 +6,7 @@ route handlers to avoid blocking the event loop (see routes/health.py).
 
 Configuration:
     DATABASE_PATH   Environment variable specifying the path to the SQLite
-                    file.  Defaults to ``./data/app.db``.
+                    file.  Defaults to ``<repo_root>/data/app.db``.
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_DB_PATH = "./data/app.db"
+_DEFAULT_DB_PATH = Path(__file__).resolve().parents[2] / "data" / "app.db"
 
 
 def get_db_path() -> Path:

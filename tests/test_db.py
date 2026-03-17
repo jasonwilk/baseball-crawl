@@ -756,3 +756,50 @@ class TestGetPermittedTeams:
 
         assert sorted(result) == sorted([tid1, tid2, tid3])
         assert all(isinstance(t, int) for t in result)
+
+
+# ---------------------------------------------------------------------------
+# get_db_path -- default path resolution (E-116-02)
+# ---------------------------------------------------------------------------
+
+
+class TestGetDbPathDefault:
+    """Verify that the default database path is absolute and repo-root-relative."""
+
+    def test_default_path_is_absolute(self) -> None:
+        """Default path must be absolute, not cwd-relative."""
+        import src.api.db as db_module
+
+        with patch.dict(os.environ, {}, clear=False):
+            # Remove DATABASE_PATH if set so the default is used
+            env_without_db_path = {
+                k: v for k, v in os.environ.items() if k != "DATABASE_PATH"
+            }
+            with patch.dict(os.environ, env_without_db_path, clear=True):
+                path = db_module.get_db_path()
+
+        assert path.is_absolute(), f"Expected absolute path, got: {path}"
+
+    def test_default_path_ends_with_data_app_db(self) -> None:
+        """Default path must end with data/app.db."""
+        import src.api.db as db_module
+
+        env_without_db_path = {
+            k: v for k, v in os.environ.items() if k != "DATABASE_PATH"
+        }
+        with patch.dict(os.environ, env_without_db_path, clear=True):
+            path = db_module.get_db_path()
+
+        assert path.parts[-2:] == ("data", "app.db"), (
+            f"Expected path ending in data/app.db, got: {path}"
+        )
+
+    def test_database_path_env_takes_precedence(self, tmp_path: Path) -> None:
+        """When DATABASE_PATH is set, it overrides the default."""
+        import src.api.db as db_module
+
+        custom_path = tmp_path / "custom.db"
+        with patch.dict(os.environ, {"DATABASE_PATH": str(custom_path)}):
+            path = db_module.get_db_path()
+
+        assert path == custom_path.resolve()
