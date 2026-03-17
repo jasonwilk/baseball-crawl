@@ -1,13 +1,13 @@
 # E-117: Loader Stat Population — Full Endpoint Coverage
 
 ## Status
-`DRAFT`
+`READY`
 
 ## Overview
 Expand game_loader, season_stats_loader, and scouting_loader to populate all stat columns that the E-100 schema supports and the respective API endpoints provide. Currently ~80+ schema columns remain permanently NULL because the loaders only map a legacy subset. This epic closes the gap between schema capability and actual data flow.
 
 ## Dependencies
-- **Blocked by E-116** (E-100 Codex Review Bug Fixes): The YAML `TeamRef(id=0)` fix must ship before `bb data load` works correctly. E-117 stories cannot be verified until E-116 is complete.
+- **E-116** (E-100 Codex Review Bug Fixes): COMPLETED (archived 2026-03-17). The YAML `TeamRef(id=0)` fix has shipped. E-117 is unblocked.
 
 ## Background & Context
 E-100 (Team Model Overhaul) created the DDL with complete stat columns per endpoint but explicitly deferred population as a Non-Goal: "New stat columns... added to the DDL but NOT populated by any E-100 story. Population is follow-up epic scope." Post-dev Codex review (2026-03-16) confirmed the gap. SE and DE investigation classified the missing columns and confirmed the DDL is correct — all fixes are in Python loader code, zero schema changes.
@@ -53,10 +53,10 @@ Promoted from IDEA-028 (Loader Stat Population). Expert consultation with SE and
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-117-01 | Game loader: full boxscore stat coverage + game_stream_id | TODO | E-116 | - |
-| E-117-02 | Season stats loader: batting column expansion (member teams) | TODO | E-116 | - |
-| E-117-03 | Season stats loader: pitching column expansion (member teams) | TODO | E-116, E-117-02 | - |
-| E-117-04 | Scouting loader: aggregate query expansion (opponent teams) | TODO | E-116, E-117-01 | - |
+| E-117-01 | Game loader: full boxscore stat coverage + game_stream_id | TODO | None | - |
+| E-117-02 | Season stats loader: batting column expansion (member teams) | TODO | None | - |
+| E-117-03 | Season stats loader: pitching column expansion (member teams) | TODO | E-117-02 | - |
+| E-117-04 | Scouting loader: aggregate query expansion (opponent teams) | TODO | E-117-01 | - |
 
 ## Dispatch Team
 - software-engineer (E-117-01, E-117-02, E-117-03, E-117-04)
@@ -176,4 +176,6 @@ Cascade columns:
 - 2026-03-16: SE+DE consultation during refinement. DE caught critical error: `e` (errors) has NO column in `player_season_batting` — only in `player_game_batting`. Corrected E-117-04 AC-1 from 6 to 5 batting cascade columns (r, tb, hbp, shf, cs). SE confirmed all API key→column mappings and flagged that `TS` (total_strikes) may not appear in season-stats defense response (not in endpoint doc, though glossary lists it). Existing loader already maps it — pre-existing behavior, not E-117 scope. IDEA-040 should verify.
 - 2026-03-16: User insight on boxscore-only limitation. Added Non-Goals section to E-117-04 explicitly scoping it to boxscore-available counting stats only — advanced stats (QAB, contact quality, swing metrics, etc.) require play-by-play parsing. Added boxscore-only limitation note to epic Technical Notes (Scouting Loader Cascade). Created IDEA-041 (Play-by-Play Stat Compilation Pipeline) — the user's vision for achieving full stat parity between owned and opponent teams via play-by-play parsing and compilation.
 - 2026-03-16: Final refinement pass. Added "Future Enrichment Path" architectural principle to Technical Notes — documents boxscore-INSERT / play-by-play-UPDATE ownership model and stat_completeness preservation constraint. Added AC-12 to E-117-01 requiring stat_completeness NOT be in INSERT/ON CONFLICT UPDATE (preserves future enrichment). Updated E-117-04 AC-3 with same principle. Flagged GP vs GP:P mapping ambiguity in Technical Notes and E-117-03 — `GP` (games played all roles) is in `general` section, not `defense`; `defense.get("GP")` will return None (acceptable under optimistic approach). Verified no missing ideas or uncaptured vision signals.
+- 2026-03-17: Refinement pass. E-116 completed and archived — all blocking dependencies resolved, updated all story dependency sections. Added AC-13 to E-117-01: remove dead `_PlayerPitching.hr` field (no schema column, never used in upsert). Renumbered AC-14 (was AC-13: all existing tests pass). Verified all column inventories against current schema DDL — 6+6 game, 37 season batting, 15+23 season pitching all match. Verified all file paths and test file paths exist. Confirmed no file conflicts with E-120. Set status to READY.
+- 2026-03-17: Codex spec review triage (2 findings). P1 E-117-04 ON CONFLICT UPDATE omission: FIX — updated AC-1/AC-2 to require columns in SELECT, INSERT, and ON CONFLICT UPDATE (not just SELECT and INSERT). Updated Technical Approach to call out the three-place requirement. Added AC-6 (rerun idempotency test), renumbered AC-7 (was AC-6: all existing tests pass). P2 E-117-03 optimistic column test weakness: FIX — strengthened AC-7 to require exact value assertions for optimistic columns (same standard as confirmed), not just generic present/absent checks. Epic Success Criteria already says "assert specific values for every newly populated column" — consistent, no epic change needed.
 - 2026-03-16: Codex spec review triage (5 findings). P1 gp sourcing conflict: FIX — updated E-117-03 AC-2 to acknowledge gp will be NULL (defense.get returns None), explicitly prohibit cross-section mapping (follow-up scope), updated epic Success Criteria. P2 TB mapping not tested: FIX — added E-117-03 AC-8 requiring specific TB→total_balls test. P2 NULL vs zero ambiguity: FIX — specified plain SUM() (not COALESCE) in E-117-04 Technical Approach and epic TN, added NULL-specific test cases to AC-4/AC-5. P2 api-scout consultation: DISMISS — dict.get() makes API behavior questions non-blocking; deferred to IDEA-040. P3 column list duplication: DISMISS — intentional for story self-containment; drift risk low (stories written together).

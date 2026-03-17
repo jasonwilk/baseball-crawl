@@ -30,7 +30,7 @@ Refer to epic Technical Notes "Column Inventory" (player_season_batting section)
 For response structure, see `docs/api/endpoints/get-teams-team_id-season-stats.md`. Batting stats live under `stats_data.players.<uuid>.stats.offense`. Test fixtures should use realistic data shaped from this response structure.
 
 ## Dependencies
-- **Blocked by**: E-116 (TeamRef YAML fix must ship before `bb data load` works)
+- **E-116**: COMPLETED (archived 2026-03-17). No longer blocking.
 - **Blocks**: E-117-03 (shared file: `season_stats_loader.py`)
 
 ## Files to Create or Modify

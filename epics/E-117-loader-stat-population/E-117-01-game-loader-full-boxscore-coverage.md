@@ -25,7 +25,8 @@ E-100-01 added these columns to the DDL but E-100-03 only converted the loaders 
 - [ ] **AC-10**: Test asserts exact stored values for each of the 6 new pitching columns on at least one player row. Includes at least one case where a sparse extra (e.g., `wp`, `pitches`) is zero/absent.
 - [ ] **AC-11**: Test asserts `games.game_stream_id` is populated for loaded games.
 - [ ] **AC-12**: `stat_completeness` is NOT added to `_upsert_batting()` or `_upsert_pitching()` INSERT or ON CONFLICT UPDATE clauses. The schema default ('boxscore_only') handles INSERT. Omitting it from ON CONFLICT UPDATE preserves any future enrichment (e.g., play-by-play pipeline setting 'supplemented'). See epic Technical Notes "Future Enrichment Path."
-- [ ] **AC-13**: All existing tests pass.
+- [ ] **AC-13**: `_PlayerPitching.hr` field (dead code — no `hr` column in `player_game_pitching` schema, never used in `_upsert_pitching`) is removed from the dataclass. If `HR` appears in `_PITCHING_EXTRAS_SKIP_DEBUG`, it should remain there (HR allowed is genuinely not in the boxscore pitching extras per the schema comment).
+- [ ] **AC-14**: All existing tests pass.
 
 ## Technical Approach
 Refer to epic Technical Notes "Column Inventory" (player_game_batting and player_game_pitching tables) for the exact column list and current loader disposition. Refer to `docs/gamechanger-stat-glossary.md` for API key → schema column name mapping. The glossary's "API Field Name Mapping" table is the authoritative source for translating boxscore response keys to database column names. For boxscore response structure, see `docs/api/endpoints/get-game-stream-processing-game_stream_id-boxscore.md`.
@@ -35,7 +36,7 @@ Refer to epic Technical Notes "Column Inventory" (player_game_batting and player
 Test fixtures should use realistic data shaped from actual boxscore API response structures. Reference `docs/api/endpoints/get-game-stream-processing-game_stream_id-boxscore.md` for the extras array format (sparse: `{stat_name, stats: [{player_id, value}]}`). The user has offered a data dump if needed for realistic values.
 
 ## Dependencies
-- **Blocked by**: E-116 (TeamRef YAML fix must ship before `bb data load` works)
+- **E-116**: COMPLETED (archived 2026-03-17). No longer blocking.
 - **Blocks**: E-117-04 (scouting loader aggregate expansion)
 
 ## Files to Create or Modify

@@ -21,7 +21,7 @@ The season_stats_loader currently maps only 9 pitching columns (gp_pitcher, ip_o
 - [ ] **AC-4**: Rows upserted by season_stats_loader have `stat_completeness = 'full'` (per epic Technical Notes "stat_completeness Provenance").
 - [ ] **AC-5**: Test fixture includes realistic non-zero values for a representative sample of the new columns (at minimum: gs, bf, wp, hbp, w, l, sv, and 3+ other confirmed columns).
 - [ ] **AC-6**: Test asserts exact stored values for every newly added confirmed column on at least one player row.
-- [ ] **AC-7**: Test asserts that optimistic columns are populated when present in the API response, and NULL when absent. At least one test case with an optimistic field present, one with it absent.
+- [ ] **AC-7**: Test asserts exact stored values for every newly added optimistic column on at least one player row (same standard as confirmed columns — the `defense.get()` mapping is deterministic, so exact assertions are trivially achievable). Additionally, at least one test case where an optimistic field is absent from the fixture, asserting the stored value is NULL.
 - [ ] **AC-8**: Test specifically verifies the TB→total_balls mapping: fixture includes `"TB": <non-zero value>` in the defense dict, and the test asserts that `total_balls` (not `tb`) is populated with the correct value. This guards the critical disambiguation (TB = "Total Balls" in pitching context).
 - [ ] **AC-9**: Test asserts `stat_completeness = 'full'` for the loaded row.
 - [ ] **AC-10**: All existing tests pass.
@@ -36,7 +36,8 @@ The existing loader pattern uses `defense.get("KEY")` — extend to all 38 colum
 For response structure, see `docs/api/endpoints/get-teams-team_id-season-stats.md`. Pitching stats live under `stats_data.players.<uuid>.stats.defense` (co-mingled with fielding stats — use only the pitching fields). Test fixtures should use realistic data shaped from this response structure.
 
 ## Dependencies
-- **Blocked by**: E-116 (TeamRef YAML fix), E-117-02 (shared file: `season_stats_loader.py` and `test_season_stats_loader.py`)
+- **E-116**: COMPLETED (archived 2026-03-17). No longer blocking.
+- **Blocked by**: E-117-02 (shared file: `season_stats_loader.py` and `test_season_stats_loader.py`)
 - **Blocks**: None
 
 ## Files to Create or Modify
