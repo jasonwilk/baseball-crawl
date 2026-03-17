@@ -1398,17 +1398,32 @@ class TestPlayerProfile:
         response = client.get("/dashboard/players/gc-p-001")
         assert response.status_code == 200
 
-    def test_player_profile_two_way_player_dedup(self, player_profile_client) -> None:
-        """Recent Games deduplicates by game_id for two-way players (AC-13).
+    def test_player_profile_two_way_player_both_rows(self, player_profile_client) -> None:
+        """Recent Games returns two rows for a two-way game (AC-1, AC-3).
 
         gc-p-001 has both batting and pitching lines in game-001.
-        game-001 should appear only once in Recent Games.
+        game-001 should appear twice in Recent Games -- once for batting, once for pitching.
         """
         client, _ = player_profile_client
         response = client.get("/dashboard/players/gc-p-001")
         html = response.text
         occurrences = html.count("/dashboard/games/game-001")
-        assert occurrences == 1
+        assert occurrences == 2
+
+    def test_player_profile_two_way_player_both_stat_types(self, player_profile_client) -> None:
+        """Recent Games shows batting and pitching stats for a two-way game (AC-1, AC-3).
+
+        gc-p-001 in game-001: batting 2-for-4 with 1 HR, 2 RBI; pitching 3.0 IP, 0 ER, 5 SO.
+        """
+        client, _ = player_profile_client
+        response = client.get("/dashboard/players/gc-p-001")
+        html = response.text
+        # Batting row
+        assert "2-for-4" in html
+        # Pitching row (9 ip_outs = 3.0 IP, 0 ER, 5 SO)
+        assert "3.0 IP" in html
+        assert "0 ER" in html
+        assert "5 SO" in html
 
     def test_player_profile_backlink_uses_permitted_team_not_scouting_team(
         self, tmp_path: Path

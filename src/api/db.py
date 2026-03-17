@@ -744,13 +744,19 @@ def get_player_profile(player_id: str) -> dict[str, Any]:
         logger.exception("Failed to fetch player profile")
         return {}
 
-    # Deduplicate recent games: one row per game_id, batting preferred over pitching
-    games_by_id: dict[str, dict[str, Any]] = {}
-    for row in raw_games:
-        gid = row["game_id"]
-        if gid not in games_by_id or row["appearance_type"] == "batting":
-            games_by_id[gid] = row
-    recent_games = sorted(games_by_id.values(), key=lambda r: r["game_date"], reverse=True)[:5]
+    # Return both batting and pitching rows for two-way games (a player who bats
+    # and pitches in the same game has two rows -- both are needed for the full picture).
+    # Identify the 5 most recent distinct games by date, then return all rows for those games.
+    game_dates: dict[str, str] = {row["game_id"]: row["game_date"] for row in raw_games}
+    top_game_ids = {
+        gid
+        for gid, _ in sorted(game_dates.items(), key=lambda x: x[1], reverse=True)[:5]
+    }
+    recent_games = sorted(
+        [row for row in raw_games if row["game_id"] in top_game_ids],
+        key=lambda r: r["game_date"],
+        reverse=True,
+    )
 
     player["jersey_number"] = jersey_number
 
