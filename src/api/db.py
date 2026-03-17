@@ -829,7 +829,7 @@ _OPPONENT_LINKS_BASE_SQL = """
 
 
 def _opponent_links_where(
-    our_team_id: int | None, filter: str | None
+    our_team_id: int | None, status_filter: str | None
 ) -> tuple[str, list[Any]]:
     """Build WHERE clause and params for opponent_links queries."""
     conditions: list[str] = ["ol.is_hidden = 0"]
@@ -837,29 +837,29 @@ def _opponent_links_where(
     if our_team_id is not None:
         conditions.append("ol.our_team_id = ?")
         params.append(our_team_id)
-    if filter == "full":
+    if status_filter == "full":
         conditions.append("ol.public_id IS NOT NULL")
-    elif filter == "scoresheet":
+    elif status_filter == "scoresheet":
         conditions.append("ol.public_id IS NULL")
     return " AND ".join(conditions), params
 
 
 def get_opponent_links(
     our_team_id: int | None = None,
-    filter: str | None = None,
+    status_filter: str | None = None,
 ) -> list[dict[str, Any]]:
     """Return opponent_links rows with optional team id and resolution-state filter.
 
     Args:
         our_team_id: INTEGER team id to scope to a specific owned team.
             None returns all teams.
-        filter: ``'full'`` for resolved, ``'scoresheet'`` for unlinked, None for all.
+        status_filter: ``'full'`` for resolved, ``'scoresheet'`` for unlinked, None for all.
 
     Returns:
         List of dicts with keys: id, our_team_id, our_team_name, opponent_name,
         resolved_team_id, public_id, resolution_method, resolved_at, is_hidden.
     """
-    where, params = _opponent_links_where(our_team_id, filter)
+    where, params = _opponent_links_where(our_team_id, status_filter)
     query = _OPPONENT_LINKS_BASE_SQL.format(where=where)
     try:
         with closing(get_connection()) as conn:

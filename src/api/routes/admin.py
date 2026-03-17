@@ -14,8 +14,8 @@ Routes:
     POST /admin/teams                                    -- Phase 1: resolve URL, redirect to confirm
     GET  /admin/teams/confirm                            -- Phase 2: confirm page
     POST /admin/teams/confirm                            -- Phase 2: create team
-    GET  /admin/teams/{id}/edit                          -- Edit team form (INTEGER id)
-    POST /admin/teams/{id}/edit                          -- Update team metadata (INTEGER id)
+    GET  /admin/teams/{team_id}/edit                     -- Edit team form (INTEGER team_id)
+    POST /admin/teams/{team_id}/edit                     -- Update team metadata (INTEGER team_id)
     POST /admin/teams/{id}/toggle-active                 -- Toggle team is_active flag (INTEGER id)
     POST /admin/teams/{id}/discover-opponents            -- Discover opponent placeholders (INTEGER id)
     GET  /admin/opponents                                -- Opponent link states listing
@@ -1162,8 +1162,8 @@ async def confirm_team_submit(
     )
 
 
-@router.get("/teams/{id}/edit", response_model=None)
-async def edit_team_form(request: Request, id: int) -> Response:
+@router.get("/teams/{team_id}/edit", response_model=None)
+async def edit_team_form(request: Request, team_id: int) -> Response:
     """Render the edit team form.
 
     Pre-fills Name, Division, Program, and membership type.  Shows read-only
@@ -1171,7 +1171,7 @@ async def edit_team_form(request: Request, id: int) -> Response:
 
     Args:
         request: The incoming HTTP request.
-        id: The team's INTEGER primary key from the URL path.
+        team_id: The team's INTEGER primary key from the URL path.
 
     Returns:
         HTMLResponse with the edit form, or a 404/auth response.
@@ -1180,11 +1180,11 @@ async def edit_team_form(request: Request, id: int) -> Response:
     if isinstance(guard, Response):
         return guard
 
-    team = await run_in_threadpool(_get_team_by_integer_id, id)
+    team = await run_in_threadpool(_get_team_by_integer_id, team_id)
     if not team:
         return HTMLResponse(content="Team not found", status_code=404)
 
-    opponent_link_count = await run_in_threadpool(get_opponent_link_count_for_team, id)
+    opponent_link_count = await run_in_threadpool(get_opponent_link_count_for_team, team_id)
     programs = await run_in_threadpool(_get_programs)
 
     return templates.TemplateResponse(
@@ -1199,10 +1199,10 @@ async def edit_team_form(request: Request, id: int) -> Response:
     )
 
 
-@router.post("/teams/{id}/edit", response_model=None)
+@router.post("/teams/{team_id}/edit", response_model=None)
 async def update_team(
     request: Request,
-    id: int,
+    team_id: int,
     name: str = Form(...),
     program_id: str = Form(default=""),
     classification: str = Form(default=""),
@@ -1212,7 +1212,7 @@ async def update_team(
 
     Args:
         request: The incoming HTTP request.
-        id: The team's INTEGER primary key from the URL path.
+        team_id: The team's INTEGER primary key from the URL path.
         name: New team name (required).
         program_id: Program slug (optional).
         classification: Classification string (optional).
@@ -1225,7 +1225,7 @@ async def update_team(
     if isinstance(guard, Response):
         return guard
 
-    team = await run_in_threadpool(_get_team_by_integer_id, id)
+    team = await run_in_threadpool(_get_team_by_integer_id, team_id)
     if not team:
         return HTMLResponse(content="Team not found", status_code=404)
 
@@ -1241,7 +1241,7 @@ async def update_team(
 
     await run_in_threadpool(
         _update_team_integer,
-        id,
+        team_id,
         name.strip(),
         program_id.strip() or None,
         classification_value,
