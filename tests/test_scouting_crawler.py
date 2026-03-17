@@ -492,6 +492,49 @@ def test_derive_season_id_uses_season_suffix() -> None:
 
 
 # ---------------------------------------------------------------------------
+# AC-4 (E-122-01): CredentialExpiredError propagates out of boxscore fetch
+# ---------------------------------------------------------------------------
+
+
+def test_credential_expired_on_boxscore_propagates_from_scout_team(
+    crawler: ScoutingCrawler, mock_client: MagicMock
+) -> None:
+    """CredentialExpiredError during boxscore fetch propagates out of scout_team()."""
+    mock_client.get_public.return_value = _GAMES_RESPONSE
+    mock_client.get.side_effect = [_ROSTER_RESPONSE, CredentialExpiredError("token expired")]
+    with pytest.raises(CredentialExpiredError):
+        crawler.scout_team(_PUBLIC_ID, season_id="2025-spring-hs")
+
+
+def test_credential_expired_on_boxscore_propagates_through_scout_all(
+    crawler: ScoutingCrawler, mock_client: MagicMock, db: sqlite3.Connection
+) -> None:
+    """CredentialExpiredError during boxscore fetch propagates out of scout_all()."""
+    owned_id = _insert_member_team(db, "My Team", "owned-team-gc-uuid")
+    _insert_team_with_public_id(db, _PUBLIC_ID)
+    db.execute(
+        "INSERT INTO opponent_links (our_team_id, root_team_id, opponent_name, public_id) "
+        "VALUES (?, ?, ?, ?)",
+        (owned_id, "root-001", "Test Opponent", _PUBLIC_ID),
+    )
+    mock_client.get_public.return_value = _GAMES_RESPONSE
+    mock_client.get.side_effect = [_ROSTER_RESPONSE, CredentialExpiredError("token expired")]
+    with pytest.raises(CredentialExpiredError):
+        crawler.scout_all(season_id="2025-spring-hs")
+
+
+def test_forbidden_on_boxscore_does_not_propagate(
+    crawler: ScoutingCrawler, mock_client: MagicMock
+) -> None:
+    """ForbiddenError during boxscore fetch is caught (expected for non-owned teams)."""
+    mock_client.get_public.return_value = _GAMES_RESPONSE
+    mock_client.get.side_effect = [_ROSTER_RESPONSE, ForbiddenError("403")]
+    # Should not raise -- ForbiddenError is caught per-game
+    result = crawler.scout_team(_PUBLIC_ID, season_id="2025-spring-hs")
+    assert result.errors >= 1  # all boxscores failed → run failed
+
+
+# ---------------------------------------------------------------------------
 # AC-16: UUID opportunism
 # ---------------------------------------------------------------------------
 

@@ -243,7 +243,15 @@ class ScoutingCrawler:
                     f"/game-stream-processing/{game_stream_id}/boxscore",
                     accept=_BOXSCORE_ACCEPT,
                 )
-            except (CredentialExpiredError, ForbiddenError, GameChangerAPIError) as exc:
+            except ForbiddenError as exc:  # ForbiddenError subclasses CredentialExpiredError; catch first
+                logger.warning(
+                    "Boxscore fetch failed game=%s public_id=%s: %s",
+                    game_stream_id, public_id, exc,
+                )
+                continue
+            except CredentialExpiredError:
+                raise
+            except GameChangerAPIError as exc:
                 logger.warning(
                     "Boxscore fetch failed game=%s public_id=%s: %s",
                     game_stream_id, public_id, exc,
@@ -327,6 +335,8 @@ class ScoutingCrawler:
 
             try:
                 result = self.scout_team(pub_id, season_id)
+            except CredentialExpiredError:
+                raise
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Unexpected error scouting public_id=%s: %s", pub_id, exc)
                 total.errors += 1
