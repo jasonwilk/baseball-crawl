@@ -28,6 +28,7 @@ import secrets
 import time
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 from dotenv import dotenv_values
@@ -42,6 +43,34 @@ from src.gamechanger.exceptions import (  # noqa: F401 -- re-exported for caller
 )
 from src.gamechanger.token_manager import AuthSigningError, TokenManager
 from src.http.session import create_session, resolve_proxy_from_dict
+
+# Default fallback when Retry-After header cannot be parsed as an integer.
+_DEFAULT_RETRY_AFTER_SECONDS = 60
+
+
+def _parse_retry_after(value: str) -> int:
+    """Parse a Retry-After header value, returning seconds to wait.
+
+    Per RFC 7231 section 7.1.3, Retry-After can be an integer (delay-seconds)
+    or an HTTP-date string.  We attempt integer parsing first; on failure,
+    fall back to ``_DEFAULT_RETRY_AFTER_SECONDS`` rather than crashing.
+
+    Args:
+        value: Raw header value (e.g. ``"30"`` or ``"Fri, 31 Dec 1999 23:59:59 GMT"``).
+
+    Returns:
+        Seconds to wait (always >= 1).
+    """
+    try:
+        return max(1, int(value))
+    except (ValueError, TypeError):
+        logger.warning(
+            "Could not parse Retry-After header %r as integer; "
+            "defaulting to %ds",
+            value,
+            _DEFAULT_RETRY_AFTER_SECONDS,
+        )
+        return _DEFAULT_RETRY_AFTER_SECONDS
 
 logger = logging.getLogger(__name__)
 
@@ -287,7 +316,9 @@ class GameChangerClient:
                     )
 
                 if response.status_code == 429:
-                    retry_after = int(response.headers.get("Retry-After", "60"))
+                    retry_after = _parse_retry_after(
+                        response.headers.get("Retry-After", str(_DEFAULT_RETRY_AFTER_SECONDS))
+                    )
                     logger.warning(
                         "Rate limit hit on %s (HTTP 429). Waiting %ds before raising.",
                         url,
@@ -332,6 +363,20 @@ class GameChangerClient:
 
             next_page_url = page_response.headers.get("x-next-page")
             if not next_page_url:
+                break
+
+            # Validate that the next-page URL's host matches our base URL's host.
+            # Defense-in-depth: a malicious server response could redirect auth
+            # tokens to an attacker-controlled host.
+            next_host = urlparse(next_page_url).hostname
+            base_host = urlparse(self._base_url).hostname
+            if next_host != base_host:
+                logger.warning(
+                    "Pagination URL host mismatch: expected %s, got %s. "
+                    "Stopping pagination.",
+                    base_host,
+                    next_host,
+                )
                 break
 
             url = next_page_url
@@ -426,7 +471,9 @@ class GameChangerClient:
                 return response.json()
 
             if response.status_code == 429:
-                retry_after = int(response.headers.get("Retry-After", "60"))
+                retry_after = _parse_retry_after(
+                    response.headers.get("Retry-After", str(_DEFAULT_RETRY_AFTER_SECONDS))
+                )
                 logger.warning(
                     "Rate limit hit on %s (HTTP 429). Waiting %ds before raising.",
                     path,
@@ -524,7 +571,9 @@ class GameChangerClient:
                 )
 
             if response.status_code == 429:
-                retry_after = int(response.headers.get("Retry-After", "60"))
+                retry_after = _parse_retry_after(
+                    response.headers.get("Retry-After", str(_DEFAULT_RETRY_AFTER_SECONDS))
+                )
                 logger.warning(
                     "Rate limit hit on %s (HTTP 429). Waiting %ds before raising.",
                     path,

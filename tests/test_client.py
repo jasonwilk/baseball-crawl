@@ -1305,3 +1305,163 @@ def test_default_env_path_is_absolute() -> None:
     from src.gamechanger.client import _DEFAULT_ENV_PATH
 
     assert _DEFAULT_ENV_PATH.is_absolute()
+
+
+# ---------------------------------------------------------------------------
+# E-125-05: Retry-After non-integer handling (AC-1, AC-2, AC-5)
+# ---------------------------------------------------------------------------
+
+
+def test_parse_retry_after_integer_string() -> None:
+    """_parse_retry_after returns the integer value for a valid integer string."""
+    from src.gamechanger.client import _parse_retry_after
+
+    assert _parse_retry_after("30") == 30
+
+
+def test_parse_retry_after_http_date_falls_back_to_default() -> None:
+    """_parse_retry_after falls back to default for an HTTP-date string (AC-1)."""
+    from src.gamechanger.client import _parse_retry_after, _DEFAULT_RETRY_AFTER_SECONDS
+
+    result = _parse_retry_after("Fri, 31 Dec 1999 23:59:59 GMT")
+    assert result == _DEFAULT_RETRY_AFTER_SECONDS
+
+
+def test_parse_retry_after_empty_string_falls_back_to_default() -> None:
+    """_parse_retry_after falls back to default for an empty string."""
+    from src.gamechanger.client import _parse_retry_after, _DEFAULT_RETRY_AFTER_SECONDS
+
+    assert _parse_retry_after("") == _DEFAULT_RETRY_AFTER_SECONDS
+
+
+def test_parse_retry_after_zero_returns_one() -> None:
+    """_parse_retry_after clamps to minimum of 1 second."""
+    from src.gamechanger.client import _parse_retry_after
+
+    assert _parse_retry_after("0") == 1
+
+
+@respx.mock
+def test_get_429_with_http_date_retry_after_does_not_crash(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AC-5: HTTP 429 with an HTTP-date Retry-After does not crash with ValueError."""
+    from src.gamechanger.client import _DEFAULT_RETRY_AFTER_SECONDS
+
+    sleep_calls: list[float] = []
+    monkeypatch.setattr("src.gamechanger.client.time.sleep", lambda s: sleep_calls.append(s))
+
+    respx.get(f"{_BASE_URL}/teams/abc/game-summaries").mock(
+        return_value=httpx.Response(
+            429, headers={"Retry-After": "Fri, 31 Dec 1999 23:59:59 GMT"}
+        )
+    )
+    client = _make_client(monkeypatch)
+
+    with pytest.raises(RateLimitError):
+        client.get("/teams/abc/game-summaries")
+
+    meaningful_sleeps = [s for s in sleep_calls if s > 0]
+    assert meaningful_sleeps == [_DEFAULT_RETRY_AFTER_SECONDS]
+
+
+@respx.mock
+def test_get_public_429_with_http_date_retry_after_does_not_crash(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AC-5: HTTP 429 with an HTTP-date Retry-After on get_public does not crash."""
+    from src.gamechanger.client import _DEFAULT_RETRY_AFTER_SECONDS
+
+    sleep_calls: list[float] = []
+    monkeypatch.setattr("src.gamechanger.client.time.sleep", lambda s: sleep_calls.append(s))
+
+    respx.get(f"{_BASE_URL}/public/teams/abc/games").mock(
+        return_value=httpx.Response(
+            429, headers={"Retry-After": "Sat, 01 Jan 2000 00:00:00 GMT"}
+        )
+    )
+    client = _make_client(monkeypatch)
+
+    with pytest.raises(RateLimitError):
+        client.get_public("/public/teams/abc/games")
+
+    meaningful_sleeps = [s for s in sleep_calls if s > 0]
+    assert meaningful_sleeps == [_DEFAULT_RETRY_AFTER_SECONDS]
+
+
+@respx.mock
+def test_get_paginated_429_with_http_date_retry_after_does_not_crash(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AC-5: HTTP 429 with an HTTP-date Retry-After on get_paginated does not crash."""
+    from src.gamechanger.client import _DEFAULT_RETRY_AFTER_SECONDS
+
+    sleep_calls: list[float] = []
+    monkeypatch.setattr("src.gamechanger.client.time.sleep", lambda s: sleep_calls.append(s))
+
+    respx.get(f"{_BASE_URL}/teams/abc/game-summaries").mock(
+        return_value=httpx.Response(
+            429, headers={"Retry-After": "Sun, 02 Jan 2000 12:00:00 GMT"}
+        )
+    )
+    client = _make_client(monkeypatch)
+
+    with pytest.raises(RateLimitError):
+        client.get_paginated("/teams/abc/game-summaries")
+
+    meaningful_sleeps = [s for s in sleep_calls if s > 0]
+    assert meaningful_sleeps == [_DEFAULT_RETRY_AFTER_SECONDS]
+
+
+# ---------------------------------------------------------------------------
+# E-125-05: Pagination URL host validation (AC-3, AC-6)
+# ---------------------------------------------------------------------------
+
+
+@respx.mock
+def test_paginated_rejects_different_host_next_page(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """AC-6: get_paginated stops pagination when x-next-page host differs from base URL."""
+    import logging
+
+    evil_url = "https://evil.example.com/steal-tokens?page=2"
+    respx.get(f"{_BASE_URL}/teams/abc/game-summaries").mock(
+        return_value=httpx.Response(
+            200,
+            json=[{"id": "game-1"}],
+            headers={"x-next-page": evil_url},
+        )
+    )
+    # The evil URL should NOT be followed.
+    respx.get(evil_url).mock(return_value=httpx.Response(200, json=[{"id": "stolen"}]))
+
+    client = _make_client(monkeypatch)
+    with caplog.at_level(logging.WARNING, logger="src.gamechanger.client"):
+        result = client.get_paginated("/teams/abc/game-summaries")
+
+    # Only page 1 data returned; evil page was not followed.
+    assert result == [{"id": "game-1"}]
+    assert any("host mismatch" in r.getMessage() for r in caplog.records)
+
+
+@respx.mock
+def test_paginated_allows_same_host_next_page(monkeypatch: pytest.MonkeyPatch) -> None:
+    """AC-3: get_paginated follows x-next-page when host matches base URL."""
+    page2_url = f"{_BASE_URL}/teams/abc/game-summaries-page2"
+
+    respx.get(f"{_BASE_URL}/teams/abc/game-summaries").mock(
+        return_value=httpx.Response(
+            200,
+            json=[{"id": "game-1"}],
+            headers={"x-next-page": page2_url},
+        )
+    )
+    respx.get(page2_url).mock(
+        return_value=httpx.Response(200, json=[{"id": "game-2"}])
+    )
+
+    client = _make_client(monkeypatch)
+    result = client.get_paginated("/teams/abc/game-summaries")
+
+    assert result == [{"id": "game-1"}, {"id": "game-2"}]

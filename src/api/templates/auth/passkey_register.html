@@ -29,7 +29,7 @@
 </div>
 
 <script id="webauthn-options" type="application/json">
-{{ options_json | safe }}
+{{ options_json | tojson }}
 </script>
 
 <script>
@@ -98,9 +98,10 @@
         }
       };
 
+      var csrfToken = (document.cookie.match(/csrf_token=([^;]+)/) || [])[1] || "";
       var resp = await fetch("/auth/passkey/register", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken },
         body: JSON.stringify(body),
       });
 
