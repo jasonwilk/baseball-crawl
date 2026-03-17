@@ -1495,8 +1495,8 @@ class TestPlayerProfile:
         assert response.status_code == 200
         html = response.text
         # Backlink must point to the permitted LSB team, not the scouting opponent
-        assert f"/dashboard/stats?team_id={lsb_team_id}" in html
-        assert f"/dashboard/stats?team_id={opp_team_id}" not in html
+        assert f"/dashboard?team_id={lsb_team_id}" in html
+        assert f"/dashboard?team_id={opp_team_id}" not in html
 
 
 class TestTemplateStaleRefs:
@@ -1577,3 +1577,196 @@ class TestComputeWL:
         """AC-5: Tied game (e.g. suspended/called) returns 'T', not 'L'."""
         assert _compute_wl(self._game(3, 3, True), team_id=1) == "T"
         assert _compute_wl(self._game(3, 3, False), team_id=1) == "T"
+
+
+class TestOBPFormula:
+    """Tests for corrected OBP formula: (H+BB+HBP)/(AB+BB+HBP+SF) (E-125-03)."""
+
+    @pytest.fixture()
+    def obp_client(self, tmp_path: Path):
+        """TestClient with players that have hbp and shf data.
+
+        Yields (client, lsb_team_id, opp_team_id).
+        """
+        db_path = tmp_path / "test_obp.db"
+        _apply_schema(db_path)
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("PRAGMA foreign_keys=ON;")
+        lsb_team_id, _ = _insert_lsb_team_and_user(conn)
+
+        # Opponent team for scouting report
+        cursor = conn.execute(
+            "INSERT INTO teams (name, membership_type) VALUES (?, ?)",
+            ("OBP Rival", "tracked"),
+        )
+        opp_team_id: int = cursor.lastrowid  # type: ignore[assignment]
+
+        conn.executemany(
+            "INSERT OR IGNORE INTO players (player_id, first_name, last_name) VALUES (?, ?, ?)",
+            [
+                ("obp-p-001", "Hit", "ByPitch"),
+                ("obp-p-002", "No", "HBP"),
+                ("obp-p-003", "Zero", "PA"),
+            ],
+        )
+
+        # Roster entries
+        conn.executemany(
+            "INSERT OR IGNORE INTO team_rosters (team_id, player_id, season_id, jersey_number)"
+            " VALUES (?, ?, ?, ?)",
+            [
+                (lsb_team_id, "obp-p-001", _CURRENT_SEASON_ID, "10"),
+                (lsb_team_id, "obp-p-002", _CURRENT_SEASON_ID, "20"),
+                (lsb_team_id, "obp-p-003", _CURRENT_SEASON_ID, "30"),
+            ],
+        )
+
+        # obp-p-001: 10 AB, 3 H, 2 BB, 1 HBP, 1 SF
+        # Old OBP = (3+2)/(10+2) = .417
+        # Correct OBP = (3+2+1)/(10+2+1+1) = 6/14 = .429
+        conn.execute(
+            "INSERT INTO player_season_batting"
+            " (player_id, team_id, season_id, gp, ab, h, doubles, triples, hr, rbi, bb, so, sb, hbp, shf)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("obp-p-001", lsb_team_id, _CURRENT_SEASON_ID, 5, 10, 3, 1, 0, 0, 2, 2, 3, 1, 1, 1),
+        )
+
+        # obp-p-002: 8 AB, 2 H, 1 BB, 0 HBP, 0 SF
+        # OBP = (2+1+0)/(8+1+0+0) = 3/9 = .333
+        conn.execute(
+            "INSERT INTO player_season_batting"
+            " (player_id, team_id, season_id, gp, ab, h, doubles, triples, hr, rbi, bb, so, sb, hbp, shf)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("obp-p-002", lsb_team_id, _CURRENT_SEASON_ID, 4, 8, 2, 0, 0, 0, 1, 1, 2, 0, 0, 0),
+        )
+
+        # obp-p-003: 0 AB, 0 everything -- zero denominator case
+        conn.execute(
+            "INSERT INTO player_season_batting"
+            " (player_id, team_id, season_id, gp, ab, h, doubles, triples, hr, rbi, bb, so, sb, hbp, shf)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("obp-p-003", lsb_team_id, _CURRENT_SEASON_ID, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+        )
+
+        # Same players as opponents for opponent_detail test
+        conn.execute(
+            "INSERT INTO player_season_batting"
+            " (player_id, team_id, season_id, gp, ab, h, doubles, triples, hr, rbi, bb, so, sb, hbp, shf)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("obp-p-001", opp_team_id, _CURRENT_SEASON_ID, 5, 10, 3, 1, 0, 0, 2, 2, 3, 1, 1, 1),
+        )
+
+        # Game for opponent context
+        conn.execute(
+            "INSERT INTO games"
+            " (game_id, season_id, game_date, home_team_id, away_team_id, home_score, away_score, status)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            ("game-obp", _CURRENT_SEASON_ID, "2026-03-10", lsb_team_id, opp_team_id, 5, 3, "completed"),
+        )
+
+        conn.commit()
+        conn.close()
+
+        env_overrides = {
+            "DATABASE_PATH": str(db_path),
+            "DEV_USER_EMAIL": "testdev@example.com",
+        }
+        with patch.dict("os.environ", env_overrides):
+            with TestClient(app) as client:
+                yield client, lsb_team_id, opp_team_id
+
+    def test_team_stats_obp_includes_hbp(self, obp_client) -> None:
+        """AC-1: OBP on team_stats uses (H+BB+HBP)/(AB+BB+HBP+SF)."""
+        client, lsb_team_id, _ = obp_client
+        response = client.get(f"/dashboard?team_id={lsb_team_id}")
+        assert response.status_code == 200
+        html = response.text
+        # obp-p-001: (3+2+1)/(10+2+1+1) = 6/14 = .429
+        assert ".429" in html
+        # obp-p-002: (2+1+0)/(8+1+0+0) = 3/9 = .333
+        assert ".333" in html
+
+    def test_team_stats_obp_hbp_raises_obp(self, obp_client) -> None:
+        """AC-6: Player with HBP gets higher OBP than old formula would produce."""
+        client, lsb_team_id, _ = obp_client
+        response = client.get(f"/dashboard?team_id={lsb_team_id}")
+        html = response.text
+        # Old formula for obp-p-001: (3+2)/(10+2) = 5/12 = .417
+        # New formula: .429 -- the old value should NOT appear
+        assert ".429" in html
+        assert ".417" not in html
+
+    def test_team_stats_obp_zero_denom_shows_dash(self, obp_client) -> None:
+        """AC-8: Zero denominator displays '-' instead of division error."""
+        client, lsb_team_id, _ = obp_client
+        response = client.get(f"/dashboard?team_id={lsb_team_id}")
+        assert response.status_code == 200
+        # obp-p-003 has 0 AB, 0 BB, 0 HBP, 0 SF => denom=0 => "-"
+        # We can't easily isolate which "-" is for OBP, but we confirm no error
+
+    def test_opponent_detail_obp_includes_hbp(self, obp_client) -> None:
+        """AC-2: OBP on opponent_detail uses corrected formula."""
+        client, lsb_team_id, opp_team_id = obp_client
+        response = client.get(
+            f"/dashboard/opponents/{opp_team_id}?team_id={lsb_team_id}"
+        )
+        assert response.status_code == 200
+        html = response.text
+        # obp-p-001 on opponent: (3+2+1)/(10+2+1+1) = .429
+        assert ".429" in html
+
+    def test_player_profile_obp_includes_hbp(self, obp_client) -> None:
+        """AC-3: OBP on player_profile uses corrected formula (both occurrences)."""
+        client, lsb_team_id, _ = obp_client
+        response = client.get("/dashboard/players/obp-p-001")
+        assert response.status_code == 200
+        html = response.text
+        # Both current season summary and batting-by-season table should show .429
+        assert html.count(".429") >= 2
+
+    def test_player_profile_backlink_to_dashboard(self, obp_client) -> None:
+        """AC-5: Backlink navigates to /dashboard, not /dashboard/stats."""
+        client, lsb_team_id, _ = obp_client
+        response = client.get("/dashboard/players/obp-p-001")
+        assert response.status_code == 200
+        html = response.text
+        assert "/dashboard/stats" not in html
+        assert f"/dashboard?team_id={lsb_team_id}" in html
+
+    def test_null_hbp_shf_coalesced_to_zero(self, tmp_path: Path) -> None:
+        """AC-4/AC-7: NULL hbp and shf are treated as 0 via COALESCE."""
+        db_path = tmp_path / "test_obp_null.db"
+        _apply_schema(db_path)
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("PRAGMA foreign_keys=ON;")
+        lsb_team_id, _ = _insert_lsb_team_and_user(conn)
+
+        conn.execute(
+            "INSERT OR IGNORE INTO players (player_id, first_name, last_name) VALUES (?, ?, ?)",
+            ("null-hbp", "Null", "HBPPlayer"),
+        )
+        conn.execute(
+            "INSERT OR IGNORE INTO team_rosters (team_id, player_id, season_id) VALUES (?, ?, ?)",
+            (lsb_team_id, "null-hbp", _CURRENT_SEASON_ID),
+        )
+        # Insert with NULL hbp and shf (omit from column list)
+        conn.execute(
+            "INSERT INTO player_season_batting"
+            " (player_id, team_id, season_id, gp, ab, h, doubles, triples, hr, rbi, bb, so, sb)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("null-hbp", lsb_team_id, _CURRENT_SEASON_ID, 3, 9, 3, 1, 0, 0, 2, 3, 2, 0),
+        )
+        conn.commit()
+        conn.close()
+
+        env_overrides = {
+            "DATABASE_PATH": str(db_path),
+            "DEV_USER_EMAIL": "testdev@example.com",
+        }
+        with patch.dict("os.environ", env_overrides):
+            with TestClient(app) as client:
+                response = client.get(f"/dashboard?team_id={lsb_team_id}")
+        assert response.status_code == 200
+        html = response.text
+        # With NULL hbp/shf coalesced to 0: OBP = (3+3+0)/(9+3+0+0) = 6/12 = .500
+        assert ".500" in html

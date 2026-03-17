@@ -19,11 +19,11 @@
 
 <div class="mb-4">
   {% if batting_seasons %}
-  <a href="/dashboard/stats?team_id={{ backlink_team_id }}" class="text-blue-900 hover:underline text-sm">&larr; Back to Team Stats</a>
+  <a href="/dashboard?team_id={{ backlink_team_id }}" class="text-blue-900 hover:underline text-sm">&larr; Back to Team Stats</a>
   {% elif pitching_seasons %}
   <a href="/dashboard/pitching?team_id={{ backlink_team_id }}" class="text-blue-900 hover:underline text-sm">&larr; Back to Team Pitching</a>
   {% else %}
-  <a href="/dashboard/stats" class="text-blue-900 hover:underline text-sm">&larr; Back to Team Stats</a>
+  <a href="/dashboard" class="text-blue-900 hover:underline text-sm">&larr; Back to Team Stats</a>
   {% endif %}
 </div>
 
@@ -48,7 +48,7 @@
       <div class="flex flex-wrap gap-4 text-sm">
         <span><span class="text-gray-600">GP</span> <span class="font-medium">{{ current_batting.games }}</span></span>
         <span><span class="text-gray-600">AVG</span> <span class="font-medium">{{ current_batting.h | format_avg(current_batting.ab) }}</span></span>
-        <span><span class="text-gray-600">OBP</span> <span class="font-medium">{{ (current_batting.h + current_batting.bb) | format_avg(current_batting.ab + current_batting.bb) }}</span></span>
+        <span><span class="text-gray-600">OBP</span> <span class="font-medium">{{ (current_batting.h + current_batting.bb + current_batting.hbp) | format_avg(current_batting.ab + current_batting.bb + current_batting.hbp + current_batting.shf) }}</span></span>
         <span><span class="text-gray-600">SLG</span> <span class="font-medium">{{ (current_batting.h + current_batting.doubles + 2 * current_batting.triples + 3 * current_batting.hr) | format_avg(current_batting.ab) }}</span></span>
         <span><span class="text-gray-600">HR</span> <span class="font-medium">{{ current_batting.hr }}</span></span>
         <span><span class="text-gray-600">RBI</span> <span class="font-medium">{{ current_batting.rbi }}</span></span>
@@ -103,7 +103,7 @@
         <td class="py-2 px-3 whitespace-nowrap">{{ row.season_name }}</td>
         <td class="py-2 px-3 whitespace-nowrap">{{ row.team_name }}</td>
         <td class="py-2 px-3 text-center">{{ row.h | format_avg(row.ab) }}</td>
-        <td class="py-2 px-3 text-center">{{ (row.h + row.bb) | format_avg(row.ab + row.bb) }}</td>
+        <td class="py-2 px-3 text-center">{{ (row.h + row.bb + row.hbp) | format_avg(row.ab + row.bb + row.hbp + row.shf) }}</td>
         <td class="py-2 px-3 text-center">{{ row.games }}</td>
         <td class="py-2 px-3 text-center">{{ row.bb }}</td>
         <td class="py-2 px-3 text-center">{{ row.so }}</td>

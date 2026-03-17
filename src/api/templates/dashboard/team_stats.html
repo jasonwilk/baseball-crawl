@@ -45,8 +45,8 @@
     </thead>
     <tbody>
       {% for player in players %}
-      {# Compute rate stats: AVG = h/ab, OBP = (h+bb)/(ab+bb), SLG = (h+2B+2*3B+3*HR)/ab #}
-      {# format_avg filter: format_avg(numerator, denominator) -> ".333" or "-" #}
+      {# Compute rate stats: AVG = h/ab, OBP = (h+bb+hbp)/(ab+bb+hbp+shf), SLG = (h+2B+2*3B+3*HR)/ab #}
+      {# format_avg filter: format_avg(numerator, denominator) -> ".333" or "—" #}
       <tr class="border-b border-gray-200 {% if loop.index is even %}bg-gray-50{% endif %}">
         <td class="py-2 px-3 font-medium whitespace-nowrap">
           <a href="/dashboard/players/{{ player.player_id }}" class="text-blue-700 hover:underline">
@@ -54,7 +54,7 @@
           </a>
         </td>
         <td class="py-2 px-3 text-center">{{ player.h | format_avg(player.ab) }}</td>
-        <td class="py-2 px-3 text-center">{{ (player.h + player.bb) | format_avg(player.ab + player.bb) }}</td>
+        <td class="py-2 px-3 text-center">{{ (player.h + player.bb + player.hbp) | format_avg(player.ab + player.bb + player.hbp + player.shf) }}</td>
         <td class="py-2 px-3 text-center">{{ player.games }}</td>
         <td class="py-2 px-3 text-center">{{ player.bb }}</td>
         <td class="py-2 px-3 text-center">{{ player.so }}</td>

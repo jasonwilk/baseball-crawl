@@ -89,7 +89,9 @@ def get_team_batting_stats(
             COALESCE(psb.rbi, 0)     AS rbi,
             COALESCE(psb.bb, 0)      AS bb,
             COALESCE(psb.so, 0)      AS so,
-            COALESCE(psb.sb, 0)      AS sb
+            COALESCE(psb.sb, 0)      AS sb,
+            COALESCE(psb.hbp, 0)     AS hbp,
+            COALESCE(psb.shf, 0)     AS shf
         FROM player_season_batting psb
         JOIN players p ON p.player_id = psb.player_id
         LEFT JOIN team_rosters tr
@@ -501,7 +503,9 @@ def get_opponent_scouting_report(
             COALESCE(psb.rbi, 0)     AS rbi,
             COALESCE(psb.bb, 0)      AS bb,
             COALESCE(psb.so, 0)      AS so,
-            COALESCE(psb.sb, 0)      AS sb
+            COALESCE(psb.sb, 0)      AS sb,
+            COALESCE(psb.hbp, 0)     AS hbp,
+            COALESCE(psb.shf, 0)     AS shf
         FROM player_season_batting psb
         JOIN players p ON p.player_id = psb.player_id
         WHERE psb.team_id = ? AND psb.season_id = ?
@@ -653,7 +657,9 @@ def get_player_profile(player_id: str) -> dict[str, Any]:
             COALESCE(psb.rbi, 0)     AS rbi,
             COALESCE(psb.bb, 0)      AS bb,
             COALESCE(psb.so, 0)      AS so,
-            COALESCE(psb.sb, 0)      AS sb
+            COALESCE(psb.sb, 0)      AS sb,
+            COALESCE(psb.hbp, 0)     AS hbp,
+            COALESCE(psb.shf, 0)     AS shf
         FROM player_season_batting psb
         JOIN seasons s ON s.season_id = psb.season_id
         JOIN teams t ON t.id = psb.team_id
