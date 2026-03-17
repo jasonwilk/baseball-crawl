@@ -294,6 +294,42 @@ def test_server_error_retries_3_times_then_raises(monkeypatch: pytest.MonkeyPatc
 
 
 @respx.mock
+def test_non_5xx_unexpected_status_raises_unexpected_status_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Non-5xx unexpected status (e.g. 418) raises 'Unexpected status' error without retrying."""
+    respx.get(f"{_BASE_URL}/teams/abc/game-summaries").mock(return_value=httpx.Response(418))
+    client = _make_client(monkeypatch)
+
+    with pytest.raises(GameChangerAPIError, match=r"Unexpected status 418"):
+        client.get("/teams/abc/game-summaries")
+
+
+@respx.mock
+def test_server_error_exhausted_retries_raises_retry_context(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Three consecutive 5xx responses raise an error that includes retry context, not 'Unexpected status'."""
+    monkeypatch.setattr("src.gamechanger.client.time.sleep", lambda s: None)
+
+    respx.get(f"{_BASE_URL}/teams/abc/game-summaries").mock(return_value=httpx.Response(503))
+    client = _make_client(monkeypatch)
+
+    with pytest.raises(GameChangerAPIError, match=r"attempt"):
+        client.get("/teams/abc/game-summaries")
+
+
+@respx.mock
+def test_server_error_exhausted_retries_does_not_raise_unexpected_status(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Three consecutive 5xx responses do not produce an 'Unexpected status' error message."""
+    monkeypatch.setattr("src.gamechanger.client.time.sleep", lambda s: None)
+
+    respx.get(f"{_BASE_URL}/teams/abc/game-summaries").mock(return_value=httpx.Response(503))
+    client = _make_client(monkeypatch)
+
+    with pytest.raises(GameChangerAPIError) as exc_info:
+        client.get("/teams/abc/game-summaries")
+
+    assert "Unexpected status" not in str(exc_info.value)
+
+
+@respx.mock
 def test_server_error_succeeds_on_second_attempt(monkeypatch: pytest.MonkeyPatch) -> None:
     """5xx on first attempt, 200 on second attempt returns the response."""
     monkeypatch.setattr("src.gamechanger.client.time.sleep", lambda s: None)

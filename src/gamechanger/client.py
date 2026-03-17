@@ -551,14 +551,12 @@ class GameChangerClient:
                     )
                     time.sleep(backoff)
                     continue
+                raise last_error
 
             # Unexpected non-success status -- treat as a non-retryable API error.
             raise GameChangerAPIError(
                 f"Unexpected status {response.status_code} for {path}."
             )
-
-        assert last_error is not None  # appease mypy; loop always sets this before here
-        raise last_error
 
     def _load_credentials(self, profile: str) -> dict[str, str]:
         """Load profile-scoped credentials from the .env file.
