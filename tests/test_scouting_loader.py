@@ -556,3 +556,122 @@ def test_aggregate_isolated_per_season(
         "SELECT COUNT(*) FROM player_season_pitching WHERE season_id = ?", (season_a,)
     ).fetchone()[0]
     assert pitch_2025 == 0, f"Expected 0 rows for 2025-spring, got {pitch_2025}"
+
+
+def test_aggregate_isolated_per_team(
+    loader: ScoutingLoader, db: sqlite3.Connection
+) -> None:
+    """Aggregates for one team do not include game rows from another team.
+
+    Sets up two teams (own and opponent) with different players and stats in
+    the same game/season, then verifies that running aggregation for the own
+    team only includes the own team's player data.
+
+    Verification: removing the ``WHERE team_id = ?`` clause from the aggregate
+    query would cause own_team's aggregate to absorb opp_team's stats,
+    producing ab=8 (3+5) instead of ab=3, and ip_outs=12 (4+8) instead of 4.
+    """
+    season_id = "2025-spring-team-iso"
+    game_id = "game-team-iso-001"
+
+    # -- Seed required FK rows -------------------------------------------------
+    db.execute(
+        "INSERT OR IGNORE INTO seasons (season_id, name, season_type, year) "
+        "VALUES (?, ?, ?, ?)",
+        (season_id, "Spring 2025 Iso", "spring-hs", 2025),
+    )
+    own_pk = db.execute(
+        "INSERT INTO teams (name, membership_type, gc_uuid, is_active) "
+        "VALUES (?, 'member', ?, 1)",
+        ("Own Team Iso", "ownteam-iso-uuid-0001"),
+    ).lastrowid
+    opp_pk = db.execute(
+        "INSERT INTO teams (name, membership_type, gc_uuid, is_active) "
+        "VALUES (?, 'tracked', ?, 0)",
+        ("Opp Team Iso", "oppteam-iso-uuid-0002"),
+    ).lastrowid
+    db.execute(
+        "INSERT OR IGNORE INTO players (player_id, first_name, last_name) "
+        "VALUES (?, ?, ?)",
+        (_PLAYER_1, "John", "Doe"),
+    )
+    db.execute(
+        "INSERT OR IGNORE INTO players (player_id, first_name, last_name) "
+        "VALUES (?, ?, ?)",
+        (_PLAYER_2, "Jane", "Smith"),
+    )
+    db.execute(
+        "INSERT OR IGNORE INTO games "
+        "(game_id, season_id, game_date, home_team_id, away_team_id) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (game_id, season_id, "2025-04-15", own_pk, opp_pk),
+    )
+
+    # -- Own team (_PLAYER_1): ab=3, h=2; ip_outs=4, er=1 ---------------------
+    db.execute(
+        "INSERT INTO player_game_batting "
+        "(game_id, player_id, team_id, ab, h, doubles, triples, hr, rbi, bb, so, sb) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (game_id, _PLAYER_1, own_pk, 3, 2, 0, 0, 0, 0, 0, 0, 0),
+    )
+    db.execute(
+        "INSERT INTO player_game_pitching "
+        "(game_id, player_id, team_id, ip_outs, h, er, bb, so) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (game_id, _PLAYER_1, own_pk, 4, 1, 1, 0, 2),
+    )
+
+    # -- Opp team (_PLAYER_2): ab=5, h=1; ip_outs=8, er=3 --------------------
+    db.execute(
+        "INSERT INTO player_game_batting "
+        "(game_id, player_id, team_id, ab, h, doubles, triples, hr, rbi, bb, so, sb) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (game_id, _PLAYER_2, opp_pk, 5, 1, 0, 0, 0, 0, 0, 2, 0),
+    )
+    db.execute(
+        "INSERT INTO player_game_pitching "
+        "(game_id, player_id, team_id, ip_outs, h, er, bb, so) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (game_id, _PLAYER_2, opp_pk, 8, 4, 3, 1, 5),
+    )
+    db.commit()
+
+    # -- Run aggregation for own team only ------------------------------------
+    loader._compute_batting_aggregates(own_pk, season_id)
+    loader._compute_pitching_aggregates(own_pk, season_id)
+    db.commit()
+
+    # -- Own team batting: should reflect _PLAYER_1 only (ab=3, h=2) ----------
+    bat_row = db.execute(
+        "SELECT ab, h FROM player_season_batting "
+        "WHERE player_id = ? AND team_id = ? AND season_id = ?",
+        (_PLAYER_1, own_pk, season_id),
+    ).fetchone()
+    assert bat_row is not None, "Expected player_season_batting row for own team"
+    assert bat_row[0] == 3, f"Expected ab=3 (own team only), got {bat_row[0]}"
+    assert bat_row[1] == 2, f"Expected h=2 (own team only), got {bat_row[1]}"
+
+    # -- Own team pitching: should reflect _PLAYER_1 only (ip_outs=4, er=1) ---
+    pitch_row = db.execute(
+        "SELECT ip_outs, er FROM player_season_pitching "
+        "WHERE player_id = ? AND team_id = ? AND season_id = ?",
+        (_PLAYER_1, own_pk, season_id),
+    ).fetchone()
+    assert pitch_row is not None, "Expected player_season_pitching row for own team"
+    assert pitch_row[0] == 4, f"Expected ip_outs=4 (own team only), got {pitch_row[0]}"
+    assert pitch_row[1] == 1, f"Expected er=1 (own team only), got {pitch_row[1]}"
+
+    # -- Opp team's player should NOT appear in own team's aggregates ----------
+    opp_bat = db.execute(
+        "SELECT COUNT(*) FROM player_season_batting "
+        "WHERE player_id = ? AND team_id = ?",
+        (_PLAYER_2, own_pk),
+    ).fetchone()[0]
+    assert opp_bat == 0, f"Opp player's batting leaked into own team aggregate: {opp_bat} row(s)"
+
+    opp_pitch = db.execute(
+        "SELECT COUNT(*) FROM player_season_pitching "
+        "WHERE player_id = ? AND team_id = ?",
+        (_PLAYER_2, own_pk),
+    ).fetchone()[0]
+    assert opp_pitch == 0, f"Opp player's pitching leaked into own team aggregate: {opp_pitch} row(s)"

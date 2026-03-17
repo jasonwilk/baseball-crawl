@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from unittest.mock import patch
+from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 from typer.testing import CliRunner
@@ -265,3 +266,38 @@ def test_data_help_lists_commands() -> None:
     assert "sync" in result.output
     assert "crawl" in result.output
     assert "load" in result.output
+
+
+# ---------------------------------------------------------------------------
+# bb data resolve-opponents
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_opponents_passes_db_path_to_load_config() -> None:
+    """resolve_opponents() calls load_config with the db_path keyword argument.
+
+    This is a regression test for the bug fixed in E-120-01 where load_config()
+    was called without db_path, causing it to always use the default path.
+    """
+    fake_db_path = Path("/fake/path/app.db")
+
+    mock_result = MagicMock()
+    mock_result.resolved = 1
+    mock_result.unlinked = 0
+    mock_result.stored_hidden = 0
+    mock_result.errors = 0
+
+    with (
+        patch("src.cli.data._resolve_db_path", return_value=fake_db_path),
+        patch("src.gamechanger.config.load_config") as mock_load_config,
+        patch("src.gamechanger.client.GameChangerClient"),
+        patch(
+            "src.gamechanger.crawlers.opponent_resolver.OpponentResolver"
+        ) as mock_resolver_cls,
+        patch("src.cli.data.sqlite3.connect"),
+    ):
+        mock_resolver_cls.return_value.resolve.return_value = mock_result
+        result = runner.invoke(app, ["data", "resolve-opponents"])
+
+    mock_load_config.assert_called_once_with(db_path=fake_db_path)
+    assert result.exit_code == 0
