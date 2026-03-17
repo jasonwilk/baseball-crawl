@@ -488,6 +488,10 @@ class TestHumanSize:
     def test_gigabytes(self) -> None:
         assert status_module._human_size(3 * 1024 * 1024 * 1024) == "3.0 GB"
 
+    def test_fractional_megabytes(self) -> None:
+        # 2_560_000 bytes = 2500 KB = ~2.44 MB; integer division would give "2.0 MB"
+        assert status_module._human_size(2_560_000) == "2.4 MB"
+
 
 class TestFormatCrawledAt:
     """Unit tests for _format_crawled_at helper."""

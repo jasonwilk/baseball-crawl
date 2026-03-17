@@ -56,7 +56,7 @@ def get_connection() -> sqlite3.Connection:
 
 def get_team_batting_stats(
     team_id: int,
-    season_id: str = "2026-spring-hs",
+    season_id: str | None = None,
 ) -> list[dict[str, Any]]:
     """Return season batting stats for all players on a team.
 
@@ -67,13 +67,13 @@ def get_team_batting_stats(
     Args:
         team_id:   The INTEGER team id to query.
         season_id: The season slug (e.g. ``"2026-spring-hs"``).  Defaults to
-                   ``"2026-spring-hs"``.
+                   the most recent season in the ``seasons`` table.
 
     Returns:
         List of dicts with keys: player_id, name, jersey_number, games, ab, h,
         doubles, triples, hr, rbi, bb, so, sb.
-        Returns an empty list if the database is not accessible or the team
-        has no season batting rows.
+        Returns an empty list if the database is not accessible, no seasons
+        exist, or the team has no season batting rows.
     """
     query = """
         SELECT
@@ -105,6 +105,13 @@ def get_team_batting_stats(
     try:
         with closing(get_connection()) as conn:
             conn.row_factory = sqlite3.Row
+            if season_id is None:
+                row = conn.execute(
+                    "SELECT season_id FROM seasons ORDER BY season_id DESC LIMIT 1"
+                ).fetchone()
+                if row is None:
+                    return []
+                season_id = row["season_id"]
             cursor = conn.execute(query, (team_id, season_id))
             rows = cursor.fetchall()
         return [dict(row) for row in rows]
@@ -140,7 +147,7 @@ def get_teams_by_ids(team_ids: list[int]) -> list[dict[str, Any]]:
 
 def get_team_pitching_stats(
     team_id: int,
-    season_id: str = "2026-spring-hs",
+    season_id: str | None = None,
 ) -> list[dict[str, Any]]:
     """Return season pitching stats for all pitchers on a team.
 
@@ -152,13 +159,13 @@ def get_team_pitching_stats(
     Args:
         team_id:   The INTEGER team id to query.
         season_id: The season slug (e.g. ``"2026-spring-hs"``).  Defaults to
-                   ``"2026-spring-hs"``.
+                   the most recent season in the ``seasons`` table.
 
     Returns:
         List of dicts with keys: player_id, name, jersey_number, games,
         ip_outs, h, er, bb, so, hr.
-        Returns an empty list if the database is not accessible or the team
-        has no season pitching rows.
+        Returns an empty list if the database is not accessible, no seasons
+        exist, or the team has no season pitching rows.
     """
     query = """
         SELECT
@@ -187,6 +194,13 @@ def get_team_pitching_stats(
     try:
         with closing(get_connection()) as conn:
             conn.row_factory = sqlite3.Row
+            if season_id is None:
+                row = conn.execute(
+                    "SELECT season_id FROM seasons ORDER BY season_id DESC LIMIT 1"
+                ).fetchone()
+                if row is None:
+                    return []
+                season_id = row["season_id"]
             cursor = conn.execute(query, (team_id, season_id))
             rows = cursor.fetchall()
         return [dict(row) for row in rows]

@@ -321,6 +321,94 @@ class TestGetTeamPitchingStats:
         assert result[0]["player_id"] == "p-pitch-a"
 
 
+# ---------------------------------------------------------------------------
+# AC-1 (E-123-09): dynamic season default for batting and pitching stat functions
+# ---------------------------------------------------------------------------
+
+
+class TestSeasonDefault:
+    """Calling batting/pitching stat functions without season_id uses the most recent season."""
+
+    def test_batting_default_uses_most_recent_season(self, tmp_path: Path) -> None:
+        """get_team_batting_stats() without season_id selects the most recent season."""
+        conn = _make_db()
+        _insert_program(conn)
+        # Insert two seasons; the newer one should be selected by default.
+        _insert_season(conn, "2025-spring-hs")
+        _insert_season(conn, "2026-spring-hs")
+        team_id = _insert_team(conn, "LSB JV")
+        player_id = _insert_player(conn, "p-season-bat")
+
+        conn.execute(
+            "INSERT INTO player_season_batting (player_id, team_id, season_id, ab, h)"
+            " VALUES (?, ?, ?, 10, 3)",
+            (player_id, team_id, "2025-spring-hs"),
+        )
+        conn.execute(
+            "INSERT INTO player_season_batting (player_id, team_id, season_id, ab, h)"
+            " VALUES (?, ?, ?, 20, 8)",
+            (player_id, team_id, "2026-spring-hs"),
+        )
+        conn.commit()
+
+        env = _db_env(tmp_path, conn)
+        with patch.dict(os.environ, env):
+            from importlib import reload
+
+            import src.api.db as db_module
+
+            reload(db_module)
+            # No season_id argument -- should default to most recent ("2026-spring-hs")
+            result = db_module.get_team_batting_stats(team_id=team_id)
+
+        assert len(result) == 1
+        assert result[0]["ab"] == 20  # 2026 row, not 2025
+
+    def test_pitching_default_uses_most_recent_season(self, tmp_path: Path) -> None:
+        """get_team_pitching_stats() without season_id selects the most recent season."""
+        conn = _make_db()
+        _insert_program(conn)
+        _insert_season(conn, "2025-spring-hs")
+        _insert_season(conn, "2026-spring-hs")
+        team_id = _insert_team(conn, "LSB JV Pitching")
+        player_id = _insert_player(conn, "p-season-pitch")
+
+        conn.execute(
+            "INSERT INTO player_season_pitching (player_id, team_id, season_id, ip_outs, er)"
+            " VALUES (?, ?, ?, 9, 3)",
+            (player_id, team_id, "2025-spring-hs"),
+        )
+        conn.execute(
+            "INSERT INTO player_season_pitching (player_id, team_id, season_id, ip_outs, er)"
+            " VALUES (?, ?, ?, 18, 1)",
+            (player_id, team_id, "2026-spring-hs"),
+        )
+        conn.commit()
+
+        env = _db_env(tmp_path, conn)
+        with patch.dict(os.environ, env):
+            from importlib import reload
+
+            import src.api.db as db_module
+
+            reload(db_module)
+            # No season_id argument -- should default to most recent ("2026-spring-hs")
+            result = db_module.get_team_pitching_stats(team_id=team_id)
+
+        assert len(result) == 1
+        assert result[0]["ip_outs"] == 18  # 2026 row, not 2025
+
+    def test_batting_returns_empty_when_no_seasons(self, tmp_path: Path) -> None:
+        """get_team_batting_stats() returns [] when seasons table is empty."""
+        conn = _make_db()
+        env = _db_env(tmp_path, conn)
+        with patch.dict(os.environ, env):
+            from src.api.db import get_team_batting_stats
+
+            result = get_team_batting_stats(team_id=1)
+        assert result == []
+
+
 class TestGetTeamGames:
     """AC-4: team_id: int parameter for get_team_games."""
 

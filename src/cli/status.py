@@ -28,11 +28,12 @@ _PROFILES: tuple[str, ...] = ("web", "mobile")
 
 def _human_size(num_bytes: int) -> str:
     """Format a byte count as a human-readable string (KB / MB / GB)."""
+    size: float = float(num_bytes)
     for unit in ("B", "KB", "MB", "GB"):
-        if num_bytes < 1024:
-            return f"{num_bytes:.1f} {unit}"
-        num_bytes //= 1024
-    return f"{num_bytes:.1f} TB"
+        if size < 1024:
+            return f"{size:.1f} {unit}"
+        size /= 1024
+    return f"{size:.1f} TB"
 
 
 def _get_credential_status() -> dict[str, tuple[int, str]]:
