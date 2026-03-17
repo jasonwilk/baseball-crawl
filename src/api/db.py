@@ -712,8 +712,9 @@ def get_player_profile(player_id: str) -> dict[str, Any]:
         LEFT JOIN teams opp_home ON opp_home.id = g.home_team_id
         WHERE pgp.player_id = ?
     """
-    # Deduplicate by game_id (prefer batting row when both exist), then sort and limit.
-    # We do this in Python after fetching both UNION arms to avoid complex SQLite window functions.
+    # All rows from both UNION arms are fetched in Python; we then take the 5 most recent
+    # distinct games and return all rows for those games (including both batting and pitching
+    # rows for two-way players who bat and pitch in the same game).
     jersey_query = """
         SELECT tr.jersey_number
         FROM team_rosters tr
