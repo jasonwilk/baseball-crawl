@@ -15,7 +15,6 @@ Covers two distinct proxy systems:
 
 from __future__ import annotations
 
-import importlib.util
 import subprocess
 from pathlib import Path
 from typing import Optional
@@ -27,6 +26,7 @@ from src.http.proxy_check import (
     check_proxy_routing,
     get_direct_ip,
 )
+from src.http.proxy_refresh import run as _run_refresh_headers
 
 app = typer.Typer(
     help="Proxy analysis commands.",
@@ -43,15 +43,6 @@ def _proxy_group(ctx: typer.Context) -> None:
         raise typer.Exit()
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
-
-
-def _load_refresh_headers_module():
-    """Load scripts/proxy-refresh-headers.py via importlib (hyphenated filename)."""
-    script_path = _PROJECT_ROOT / "scripts" / "proxy-refresh-headers.py"
-    spec = importlib.util.spec_from_file_location("proxy_refresh_headers", script_path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
 
 
 @app.command()
@@ -97,8 +88,7 @@ def refresh_headers(
         bb proxy refresh-headers           # preview changes without writing
         bb proxy refresh-headers --apply   # write updated headers to src/http/headers.py
     """
-    module = _load_refresh_headers_module()
-    exit_code = module.run(apply=apply)
+    exit_code = _run_refresh_headers(apply=apply)
     raise SystemExit(exit_code)
 
 

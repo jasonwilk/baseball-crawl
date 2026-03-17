@@ -1,4 +1,4 @@
-"""Unit tests for scripts/proxy-refresh-headers.py.
+"""Unit tests for src/http/proxy_refresh.py.
 
 Tests cover dry-run output, apply mode writing, excluded header filtering,
 single-source partial update, missing report file error, and round-trip
@@ -7,40 +7,21 @@ single-source partial update, missing report file error, and round-trip
 
 from __future__ import annotations
 
-import importlib.util
 import json
-import sys
 import textwrap
 from pathlib import Path
-from types import ModuleType
 from unittest.mock import patch
 
 import pytest
 
-# ---------------------------------------------------------------------------
-# Import the script under test
-# ---------------------------------------------------------------------------
-
-_SCRIPT_PATH = Path(__file__).resolve().parents[1] / "scripts" / "proxy-refresh-headers.py"
-
-
-def _load_script() -> ModuleType:
-    """Load proxy-refresh-headers.py as a module without executing __main__."""
-    spec = importlib.util.spec_from_file_location("proxy_refresh_headers", _SCRIPT_PATH)
-    assert spec is not None
-    mod = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod
-
-
-_mod = _load_script()
-
-extract_headers_by_source = _mod.extract_headers_by_source
-generate_headers_file = _mod.generate_headers_file
-parse_existing_headers = _mod.parse_existing_headers
-run = _mod.run
-_EXCLUDED_HEADERS = _mod._EXCLUDED_HEADERS
+import src.http.proxy_refresh as _mod
+from src.http.proxy_refresh import (
+    _EXCLUDED_HEADERS,
+    extract_headers_by_source,
+    generate_headers_file,
+    parse_existing_headers,
+    run,
+)
 
 
 # ---------------------------------------------------------------------------

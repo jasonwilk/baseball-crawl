@@ -2,14 +2,13 @@
 
 Tests use CliRunner to exercise argument mapping only -- actual script
 execution is mocked. For bash-wrapped commands, subprocess.run is mocked
-and the command list and cwd are verified. For refresh-headers, the loaded
-module's run() function is mocked.
+and the command list and cwd are verified. For refresh-headers,
+src.http.proxy_refresh.run is mocked.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
-from types import ModuleType
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -147,38 +146,33 @@ class TestProxyEndpoints:
 class TestProxyRefreshHeaders:
     """Argument mapping tests for ``bb proxy refresh-headers``."""
 
-    def _make_mock_module(self, run_return: int = 0) -> ModuleType:
-        mock_module = MagicMock()
-        mock_module.run.return_value = run_return
-        return mock_module
-
     def _invoke(self, args: list[str], run_return: int = 0):
-        mock_module = self._make_mock_module(run_return)
-        with patch("src.cli.proxy._load_refresh_headers_module", return_value=mock_module) as mock_load:
+        mock_run = MagicMock(return_value=run_return)
+        with patch("src.cli.proxy._run_refresh_headers", mock_run) as mock_patch:
             result = runner.invoke(app, args)
-            return result, mock_module, mock_load
+            return result, mock_patch
 
     def test_refresh_headers_default_is_dry_run(self) -> None:
         """``bb proxy refresh-headers`` with no flags calls run(apply=False)."""
-        result, mock_module, _ = self._invoke(["proxy", "refresh-headers"])
+        result, mock_run = self._invoke(["proxy", "refresh-headers"])
         assert result.exit_code == 0
-        mock_module.run.assert_called_once_with(apply=False)
+        mock_run.assert_called_once_with(apply=False)
 
     def test_refresh_headers_apply_flag(self) -> None:
         """``--apply`` calls run(apply=True)."""
-        result, mock_module, _ = self._invoke(["proxy", "refresh-headers", "--apply"])
+        result, mock_run = self._invoke(["proxy", "refresh-headers", "--apply"])
         assert result.exit_code == 0
-        mock_module.run.assert_called_once_with(apply=True)
+        mock_run.assert_called_once_with(apply=True)
 
     def test_refresh_headers_passes_exit_code_through(self) -> None:
         """Exit code from run() is passed through."""
-        result, _, _ = self._invoke(["proxy", "refresh-headers"], run_return=1)
+        result, _ = self._invoke(["proxy", "refresh-headers"], run_return=1)
         assert result.exit_code == 1
 
-    def test_refresh_headers_loads_module(self) -> None:
-        """_load_refresh_headers_module is called exactly once."""
-        _, _, mock_load = self._invoke(["proxy", "refresh-headers"])
-        mock_load.assert_called_once()
+    def test_refresh_headers_calls_run_once(self) -> None:
+        """_run_refresh_headers is called exactly once."""
+        _, mock_run = self._invoke(["proxy", "refresh-headers"])
+        mock_run.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
