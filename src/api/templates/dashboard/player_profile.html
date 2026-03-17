@@ -18,7 +18,13 @@
 {% block content %}
 
 <div class="mb-4">
-  <a href="javascript:history.back()" class="text-blue-900 hover:underline text-sm">&larr; Back</a>
+  {% if batting_seasons %}
+  <a href="/dashboard/stats?team_id={{ batting_seasons[0].team_id }}" class="text-blue-900 hover:underline text-sm">&larr; Back to Team Stats</a>
+  {% elif pitching_seasons %}
+  <a href="/dashboard/pitching?team_id={{ pitching_seasons[0].team_id }}" class="text-blue-900 hover:underline text-sm">&larr; Back to Team Pitching</a>
+  {% else %}
+  <a href="/dashboard/stats" class="text-blue-900 hover:underline text-sm">&larr; Back to Team Stats</a>
+  {% endif %}
 </div>
 
 {# Page header: player name + jersey number #}
