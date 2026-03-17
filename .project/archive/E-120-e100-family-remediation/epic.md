@@ -1,7 +1,7 @@
 # E-120: E-100 Family Code Review Remediation
 
 ## Status
-`READY`
+`COMPLETED`
 
 ## Overview
 Fix bugs, test gaps, validation holes, and documentation errors identified by two comprehensive code reviews of the E-100 family (E-100, E-114, E-115, E-116, E-118). The most critical issue is a pipeline bug where `bb data resolve-opponents` silently writes zero rows because `load_config()` is called without `db_path`, making every `TeamEntry.internal_id` None. The second review added dashboard display bugs, TOCTOU handling, parameter shadowing, XSS regression testing, and additional doc/test gaps.
@@ -64,18 +64,18 @@ Expert consultation completed: SE validated technical feasibility and severity f
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-120-01 | Fix resolve-opponents pipeline bug | TODO | None | - |
-| E-120-02 | Resolve-opponents and scouting loader test coverage | TODO | E-120-01 | - |
-| E-120-03 | Admin validation and UX hardening | TODO | None | - |
-| E-120-04 | Opponent count query and db.py consistency fixes | TODO | E-120-03 | - |
-| E-120-05 | Test infrastructure quality fixes | TODO | None | - |
-| E-120-06 | Documentation corrections | TODO | None | - |
-| E-120-07 | Dashboard pitching HR query and template display fixes | TODO | None | - |
-| E-120-08 | Admin team insert IntegrityError handling | TODO | E-120-03 | - |
-| E-120-09 | Parameter shadowing cleanup | TODO | E-120-08 | - |
-| E-120-10 | XSS escaping regression test for query parameters | TODO | E-120-03 | - |
-| E-120-11 | Dashboard back-link navigation fixes | TODO | None | - |
-| E-120-12 | Scouting loader public_id type guard | TODO | E-120-01 | - |
+| E-120-01 | Fix resolve-opponents pipeline bug | DONE | None | - |
+| E-120-02 | Resolve-opponents and scouting loader test coverage | DONE | E-120-01 | - |
+| E-120-03 | Admin validation and UX hardening | DONE | None | - |
+| E-120-04 | Opponent count query and db.py consistency fixes | DONE | E-120-03 | - |
+| E-120-05 | Test infrastructure quality fixes | DONE | None | - |
+| E-120-06 | Documentation corrections | DONE | None | - |
+| E-120-07 | Dashboard pitching HR query and template display fixes | DONE | None | - |
+| E-120-08 | Admin team insert IntegrityError handling | DONE | E-120-03 | - |
+| E-120-09 | Parameter shadowing cleanup | DONE | E-120-08 | - |
+| E-120-10 | XSS escaping regression test for query parameters | DONE | E-120-03 | - |
+| E-120-11 | Dashboard back-link navigation fixes | DONE | None | - |
+| E-120-12 | Scouting loader public_id type guard | DONE | E-120-01 | - |
 
 ## Dispatch Team
 - software-engineer (E-120-01, E-120-02, E-120-03, E-120-04, E-120-05, E-120-07, E-120-08, E-120-09, E-120-10, E-120-11, E-120-12)
@@ -173,3 +173,4 @@ None — all findings are scoped and actionable.
 - 2026-03-17: Refinement pass. Tightened ACs with exact line numbers and file references. Added E-120-04 dependency on E-120-03 (both modify admin.py). Routed E-120-03/04 tests to test_admin.py to avoid conflict with E-120-05 (which modifies test_admin_teams.py and test_admin_opponents.py). Fixed finding count (12 FIX, not 13). Added dispatch wave structure and file conflict map. Confirmed test_cli_data.py already exists.
 - 2026-03-17: Second code review triage with expert consultation (SE + Coach). 26 new findings triaged: 3 already covered by stories 01-06, 4 covered by stories 07-10, 5 new FIX items, 1 deferred (m3 season fallback per Coach), 13 dismissed. Replaced E-120-11 (was M4+m3, now m4+m5 dashboard nav fixes per SE recommendation). Created E-120-12 (m8 scouting loader type guard per SE). Key expert inputs: Coach confirmed "T" for tied games, pitcher HR marginal but COALESCE fix sufficient, season fallback adequate; SE confirmed M6 same as P3-1, M2 dismiss, m4+m5 worth grouping, m8 is real bug. Epic now has 12 stories across 3 dispatch waves.
 - 2026-03-17: Codex spec review triage (5 findings). ACCEPTED all 5: (1) E-120-12 retargeted from scouting_loader.py to data.py:388 where the bug actually lives, added E-120-01 dependency and data.py to conflict map, moved from wave 1 to wave 2; (2) E-120-06 AC-7 bounded with concrete stop condition (scan schema + routes, note if none found); (3) E-120-07 AC-2 converted to verification-only (season query already has hr at db.py:174); (4) E-120-03 Blocks field updated to list E-120-04/08/10 (was "None", contradicted epic table); (5) E-120-10 Files clarified to test_admin.py (removed ambiguous "or test_admin_teams.py" — dependency is about serializing test_admin.py writes with E-120-03).
+- 2026-03-17: COMPLETED. All 12 stories done across 3 dispatch waves. Wave 1 (parallel): 01, 03, 05, 06, 07, 11. Wave 2a (parallel): 02, 04, 12. Wave 2b: 08, 10. Wave 3: 09. Fixes delivered: critical resolve-opponents pipeline bug (01), admin validation hardening (03), opponent count query fix (04), test infrastructure migration to run_migrations() (05), architecture/operations doc corrections (06), dashboard pitching HR + tied games + null scores (07), IntegrityError handling (08), parameter shadowing cleanup (09), XSS regression test (10), dashboard back-link navigation (11), scouting loader type guard (12), and resolve-opponents + scouting loader test coverage (02). Documentation assessment: E-120-06 already delivered doc fixes as a story — no additional docs-writer dispatch needed. Context-layer assessment: (1) New agent capability? No. (2) New conventions/patterns? No — fixes apply existing patterns. (3) New project knowledge for CLAUDE.md? No. (4) Changed file organization? No. (5) Lessons learned for agent definitions? No. (6) New rules/skills needed? No. No context-layer impact.

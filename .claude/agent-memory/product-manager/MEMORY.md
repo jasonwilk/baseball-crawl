@@ -1,10 +1,10 @@
 # Product Manager -- Agent Memory
 
 ## Numbering State
-- Next available epic number: E-121
-- Epics created: E-001 through E-120 (E-001, E-003, E-005, E-006, E-007, E-008, E-010, E-011, E-012, E-013, E-014, E-015, E-016, E-017, E-018, E-019, E-020, E-021, E-022, E-024, E-025, E-026, E-027, E-028, E-029, E-030, E-031, E-032, E-033, E-034, E-035, E-036, E-037, E-038, E-042, E-044, E-046, E-048, E-049, E-050, E-052, E-053, E-054, E-056, E-057, E-058, E-055, E-059, E-060, E-061, E-075, E-081, E-084, E-087, E-088, E-089, E-090, E-091, E-092 archived; E-093, E-094, E-095 archived; E-096 archived; E-097 archived; E-098 archived; E-099 archived; E-100 completed; E-101 archived; E-102 archived; E-103 archived; E-104 ready; E-105 archived; E-106 draft; E-107 archived; E-108 archived; E-109 archived; E-110 ready; E-111 archived; E-112 archived; E-114 archived; E-115 archived; E-116 archived; E-118 archived; E-119 ready; E-120 ready)
-- Next available idea number: IDEA-042
-- Ideas created: IDEA-001 through IDEA-041
+- Next available epic number: E-122
+- Epics created: E-001 through E-120 (E-001, E-003, E-005, E-006, E-007, E-008, E-010, E-011, E-012, E-013, E-014, E-015, E-016, E-017, E-018, E-019, E-020, E-021, E-022, E-024, E-025, E-026, E-027, E-028, E-029, E-030, E-031, E-032, E-033, E-034, E-035, E-036, E-037, E-038, E-042, E-044, E-046, E-048, E-049, E-050, E-052, E-053, E-054, E-056, E-057, E-058, E-055, E-059, E-060, E-061, E-075, E-081, E-084, E-087, E-088, E-089, E-090, E-091, E-092 archived; E-093, E-094, E-095 archived; E-096 archived; E-097 archived; E-098 archived; E-099 archived; E-100 completed; E-101 archived; E-102 archived; E-103 archived; E-104 ready; E-105 archived; E-106 draft; E-107 archived; E-108 archived; E-109 archived; E-110 ready; E-111 archived; E-112 archived; E-114 archived; E-115 archived; E-116 archived; E-118 archived; E-119 archived; E-120 completed)
+- Next available idea number: IDEA-043
+- Ideas created: IDEA-001 through IDEA-042
 
 ## Project Context
 - Project: baseball-crawl -- GameChanger API -> database -> coaching dashboard
@@ -25,8 +25,9 @@
 | E-110 | Iterative Review Rounds Convention | READY | Codify iterative review/refinement pattern |
 | E-113 | Dispatch Boundary Enforcement | READY | Stop main session domain work during dispatch. 2 stories (parallel), CA only. |
 | E-117 | Loader Stat Population | READY | 4 stories: game_loader expansion (01), season batting (02), season pitching (03, after 02), scouting cascade (04, after 01). SE only. 2-wave dispatch. E-116 YAML fix unblocks this. |
+| E-121 | Style Guide and Context-Layer Remediation | READY | 4 stories (01-03 parallel, 04 after 03). 15 findings: CR memory cleanup, python-style.md fixes, DE agent def updates, CR proportionality, testing/http-discipline scoping. CA only. |
 | E-119 | Fix PII Scanner Discoverability | READY | 1 story (CA only). Add scanner path to CLAUDE.md Security Rules. |
-| E-120 | E-100 Family Code Review Remediation | READY | 6 stories: pipeline bug fix (01), test coverage (02, after 01), admin validation (03), db.py fixes (04), test infra (05), docs (06). SE + docs-writer. |
+| E-120 | E-100 Family Code Review Remediation | COMPLETED | 12 stories across 3 waves. Pipeline bug, admin validation, test infra, docs, dashboard fixes, IntegrityError, XSS, parameter shadowing, scouting loader guard. SE + docs-writer. |
 
 ## Key Architectural Decisions
 - Storage: SQLite (WAL mode). Host-mounted at ./data/app.db. Simple file backup via scripts/backup_db.py (no Litestream).
