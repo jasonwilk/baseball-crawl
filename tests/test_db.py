@@ -408,6 +408,16 @@ class TestSeasonDefault:
             result = get_team_batting_stats(team_id=1)
         assert result == []
 
+    def test_pitching_returns_empty_when_no_seasons(self, tmp_path: Path) -> None:
+        """get_team_pitching_stats() returns [] when seasons table is empty."""
+        conn = _make_db()
+        env = _db_env(tmp_path, conn)
+        with patch.dict(os.environ, env):
+            from src.api.db import get_team_pitching_stats
+
+            result = get_team_pitching_stats(team_id=1)
+        assert result == []
+
 
 class TestGetTeamGames:
     """AC-4: team_id: int parameter for get_team_games."""
