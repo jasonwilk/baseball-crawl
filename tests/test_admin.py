@@ -902,3 +902,38 @@ class TestAlreadyResolvedLinkGuard:
                     f"/admin/opponents/{link_id}/connect/confirm"
                 )
         assert response.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# AC-1: opponent_count excludes hidden links
+# ---------------------------------------------------------------------------
+
+
+class TestOpponentCountExcludesHidden:
+    """Team list opponent_count only counts non-hidden opponent_links rows."""
+
+    def test_opponent_count_excludes_hidden_links(self, admin_db: Path) -> None:
+        """_get_all_teams_flat returns opponent_count that excludes hidden rows."""
+        from src.api.routes.admin import _get_all_teams_flat
+
+        our_team_id = _get_team_id(admin_db, "LSB Varsity 2026")
+
+        conn = sqlite3.connect(str(admin_db))
+        conn.execute(
+            "INSERT INTO opponent_links (our_team_id, root_team_id, opponent_name, is_hidden)"
+            " VALUES (?, 'root-visible', 'Visible Opponent', 0)",
+            (our_team_id,),
+        )
+        conn.execute(
+            "INSERT INTO opponent_links (our_team_id, root_team_id, opponent_name, is_hidden)"
+            " VALUES (?, 'root-hidden', 'Hidden Opponent', 1)",
+            (our_team_id,),
+        )
+        conn.commit()
+        conn.close()
+
+        with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db)}):
+            teams = _get_all_teams_flat()
+
+        varsity = next(t for t in teams if t["name"] == "LSB Varsity 2026")
+        assert varsity["opponent_count"] == 1

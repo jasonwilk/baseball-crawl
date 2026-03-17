@@ -385,8 +385,13 @@ def _load_all_scouted(
 
     total_errors = 0
     for team_id, season_id, pub_id in runs:
-        effective_pub_id = pub_id or team_id
-        scouting_dir = data_root / season_id / "scouting" / effective_pub_id
+        if pub_id is None:
+            logger.warning(
+                "Team id=%s has no public_id; cannot determine scouting directory. Skipping load.",
+                team_id,
+            )
+            continue
+        scouting_dir = data_root / season_id / "scouting" / pub_id
         if not scouting_dir.is_dir():
             logger.warning("Scouting dir not found at %s; skipping load.", scouting_dir)
             continue
@@ -394,21 +399,21 @@ def _load_all_scouted(
             result = loader.load_team(scouting_dir, team_id, season_id)
         except Exception as exc:
             logger.error("Load failed for team_id=%s: %s", team_id, exc)
-            typer.echo(f"Load error for {effective_pub_id}: {exc}", err=True)
+            typer.echo(f"Load error for {pub_id}: {exc}", err=True)
             crawler.update_run_load_status(team_id, season_id, "failed")
             total_errors += 1
             continue
 
         if result.errors:
             typer.echo(
-                f"Load errors for {effective_pub_id} (season={season_id}): {result.errors} error(s).",
+                f"Load errors for {pub_id} (season={season_id}): {result.errors} error(s).",
                 err=True,
             )
             crawler.update_run_load_status(team_id, season_id, "failed")
             total_errors += result.errors
         else:
             crawler.update_run_load_status(team_id, season_id, "completed")
-            typer.echo(f"Load complete for {effective_pub_id} (season={season_id}).")
+            typer.echo(f"Load complete for {pub_id} (season={season_id}).")
     return total_errors
 
 

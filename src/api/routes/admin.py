@@ -326,6 +326,7 @@ def _get_all_teams_flat() -> list[dict[str, Any]]:
                     SELECT COUNT(*)
                     FROM opponent_links ol
                     WHERE ol.our_team_id = t.id
+                      AND ol.is_hidden = 0
                 ) AS opponent_count
             FROM teams t
             LEFT JOIN programs p ON t.program_id = p.program_id

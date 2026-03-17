@@ -1008,25 +1008,28 @@ def save_manual_opponent_link(link_id: int, public_id: str) -> None:
 
     Sets resolved_team_id=NULL (manual links cannot obtain a UUID via the
     reverse bridge endpoint, which returns 403 for opponent teams).
-    Callers must set updated_at explicitly (no trigger on this table).
 
     Args:
         link_id: The opponent_links primary key.
         public_id: The GameChanger public_id slug.
     """
-    with closing(get_connection()) as conn:
-        conn.execute(
-            """
-            UPDATE opponent_links
-            SET public_id          = ?,
-                resolution_method  = 'manual',
-                resolved_team_id   = NULL,
-                resolved_at        = datetime('now')
-            WHERE id = ?
-            """,
-            (public_id, link_id),
-        )
-        conn.commit()
+    try:
+        with closing(get_connection()) as conn:
+            conn.execute(
+                """
+                UPDATE opponent_links
+                SET public_id          = ?,
+                    resolution_method  = 'manual',
+                    resolved_team_id   = NULL,
+                    resolved_at        = datetime('now')
+                WHERE id = ?
+                """,
+                (public_id, link_id),
+            )
+            conn.commit()
+    except sqlite3.Error:
+        logger.exception("Failed to save manual opponent link %s -> %s", link_id, public_id)
+        raise
 
 
 def disconnect_opponent_link(link_id: int) -> bool:
