@@ -970,3 +970,30 @@ class TestOpponentCountExcludesHidden:
 
         varsity = next(t for t in teams if t["name"] == "LSB Varsity 2026")
         assert varsity["opponent_count"] == 1
+
+
+# ---------------------------------------------------------------------------
+# XSS escaping regression: query parameters are HTML-escaped in responses
+# ---------------------------------------------------------------------------
+
+
+class TestXSSEscaping:
+    """User-controlled query parameters are HTML-escaped in admin templates."""
+
+    def test_msg_param_is_escaped_in_team_list(self, admin_db: Path) -> None:
+        """GET /admin/teams?msg=<script>alert(1)</script> escapes the payload."""
+        admin_id = _insert_user(admin_db, "xssadmin@example.com")
+        raw_token = _insert_session(admin_db, admin_id)
+
+        payload = "<script>alert(1)</script>"
+
+        with patch.dict(
+            "os.environ",
+            {"DATABASE_PATH": str(admin_db), "ADMIN_EMAIL": "xssadmin@example.com"},
+        ):
+            with TestClient(app, cookies={"session": raw_token}) as client:
+                response = client.get(f"/admin/teams?msg={payload}")
+
+        assert response.status_code == 200
+        assert payload not in response.text
+        assert "&lt;script&gt;" in response.text
