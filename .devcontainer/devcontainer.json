@@ -61,14 +61,12 @@
   // in the devcontainer namespace. Host access requires VS Code forwarding.
   "forwardPorts": [8000, 8180],
   "mounts": [
-    "source=${localEnv:HOME}/.claude,target=/home/vscode/.claude,type=bind",
-    "source=${localEnv:SSH_AUTH_SOCK},target=/tmp/ssh-agent.sock,type=bind"
+    "source=${localEnv:HOME}/.claude,target=/home/vscode/.claude,type=bind"
   ],
   "remoteEnv": {
     "PATH": "${containerEnv:PATH}:/home/vscode/.local/bin",
     "LANG": "en_US.UTF-8",
-    "CODEX_HOME": "/workspaces/baseball-crawl/.codex-home",
-    "SSH_AUTH_SOCK": "/tmp/ssh-agent.sock"
+    "CODEX_HOME": "/workspaces/baseball-crawl/.codex-home"
   },
   "sshAgent": "local"
 }
