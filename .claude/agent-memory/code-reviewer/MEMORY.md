@@ -59,6 +59,22 @@ in the current story.
 - Test files use `# synthetic-test-data` comment for files with fake credentials/emails
 - `dotenv_values()` from python-dotenv is the standard way to load .env in tests (monkeypatched)
 
+## Security Review Mandate (added after E-123 full-project code review)
+
+The Priority 4 security review checklist was expanded significantly after a full-project code review
+found critical issues (CSRF, SQLi, SSRF, XSS, plaintext tokens, root Docker) that should have been
+caught during story-level reviews. The checklist is now in the agent definition under Priority 4 with
+subsections 4a-4h. Key reminders:
+
+- Cloudflare/WAF/network controls are NOT compensating controls for app-layer defects. Never downgrade.
+- `|safe` in Jinja2 templates is a red flag -- must be justified for every use.
+- POST forms without CSRF tokens are automatic MUST FIX.
+- SQL via f-string/format/concat is automatic MUST FIX regardless of input source.
+- URL following (pagination, redirects) must validate host before sending auth headers.
+- All stored tokens/secrets must be hashed -- inconsistency between token types is a defect.
+- Header parsing (Retry-After, etc.) must handle malformed values without crashing.
+- Docker containers must not run as root.
+
 ## Important File Locations
 - Python style rules: `.claude/rules/python-style.md`
 - Testing rules: `.claude/rules/testing.md`
