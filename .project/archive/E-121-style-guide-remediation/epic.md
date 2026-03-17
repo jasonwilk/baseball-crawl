@@ -1,7 +1,7 @@
 # E-121: Style Guide and Context-Layer Remediation
 
 ## Status
-`READY`
+`COMPLETED`
 <!-- Lifecycle: DRAFT -> READY -> ACTIVE -> COMPLETED (or BLOCKED / ABANDONED) -->
 <!-- PM sets READY explicitly after: expert consultation done, all stories have testable ACs, quality checklist passed. -->
 <!-- Only READY and ACTIVE epics can be dispatched. -->
@@ -44,10 +44,10 @@ Expert consultation: claude-architect (context-layer scoping), software-engineer
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-121-01 | CR memory cleanup + python-style.md fixes | TODO | None | - |
-| E-121-02 | http-discipline.md + testing.md scoping | TODO | None | - |
-| E-121-03 | DE agent definition + DE memory fixes | TODO | None | - |
-| E-121-04 | CR agent definition + SE/DE agent definition fixes | TODO | E-121-03 | - |
+| E-121-01 | CR memory cleanup + python-style.md fixes | DONE | None | - |
+| E-121-02 | http-discipline.md + testing.md scoping | DONE | None | - |
+| E-121-03 | DE agent definition + DE memory fixes | DONE | None | - |
+| E-121-04 | CR agent definition + SE/DE agent definition fixes | DONE | E-121-03 | - |
 
 ## Dispatch Team
 - claude-architect
@@ -97,3 +97,4 @@ Since these are context-layer files (no code, no tests), verification is by file
 - 2026-03-17: Created from triage audit findings. Expert consultation with CA, SE, CR during formation.
 - 2026-03-17: Refinement pass. Tightened AC-1 proportionality criteria per CR feedback. Corrected DE memory timestamp finding (SQLite `datetime('now')` produces space-separated format, not T/Z). Resolved testing.md `src/**` decision (retain for test-scope-discovery). Removed ambiguous AC language. Consistency sweep passed. Set READY.
 - 2026-03-17: Incorporated SE authoritative decisions on python-style.md replacement language (E-121-01 ACs 4-6). Added `rich.Console.print()` to CLI exception, specific type hint scoping wording, docstring priority anchoring. CA responses confirmed all prior decisions. All three consultations complete.
+- 2026-03-17: All 4 stories DONE. COMPLETED. All 15 triage findings remediated across 10 context-layer files: CR memory fabricated 50-line rule deleted, python-style.md aligned with CLAUDE.md core principle (dicts, print, type hints, docstrings), http-discipline.md rate limits scoped to production, testing.md paths narrowed and self-contradiction resolved, DE agent def updated (stub-row FK handling, two-mode indexing, aggregate tables acknowledged), DE memory corrected (timestamp format, ip_outs scoping), CR agent def gained proportionality qualifier for convention violations, SE and DE agent defs gained consultation-mode exception notes. Bonus fixes during review: SE agent def Anti-Pattern #5 "in scripts" restriction removed for cross-file consistency with python-style.md (E-121-01 R2), stale examples in CR/SE/DE agent defs updated (E-121-04 R2).
