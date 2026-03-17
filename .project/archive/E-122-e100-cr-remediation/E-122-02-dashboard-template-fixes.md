@@ -4,7 +4,7 @@
 [E-122: E-100 Family Code Review Remediation (Wave 2)](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the game detail pitching table will no longer show a phantom HR column (which has no backing data), and the opponent detail page back-link will preserve `team_id` context so users don't lose their team filter when navigating back.

@@ -4,7 +4,7 @@
 [E-122: E-100 Family Code Review Remediation (Wave 2)](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the scouting crawler will immediately abort when it encounters a `CredentialExpiredError` (HTTP 401) during boxscore fetching, instead of logging a warning and continuing to the next game. This matches the behavior of the member-team crawlers, which correctly let 401 propagate.

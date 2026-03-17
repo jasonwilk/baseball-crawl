@@ -4,7 +4,7 @@
 [E-122: E-100 Family Code Review Remediation (Wave 2)](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, `src/cli/proxy.py` will import reusable proxy logic from a proper `src/` module instead of using `importlib` to load `scripts/proxy-refresh-headers.py`. The `scripts/` file becomes a thin wrapper, preserving its standalone usability while fixing the import boundary violation.

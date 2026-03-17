@@ -4,7 +4,7 @@
 [E-122: E-100 Family Code Review Remediation (Wave 2)](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, all 5 test files that currently define inline `_SCHEMA_SQL` strings will use `run_migrations()` instead, eliminating schema drift risk. The inline constants will be removed entirely.

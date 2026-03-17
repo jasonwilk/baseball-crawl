@@ -13,7 +13,7 @@ The system is designed for a small-scale deployment: 4 teams (Freshman, JV, Vars
 | **FastAPI app** | Python 3.13, FastAPI 0.115, Uvicorn | Serves the web dashboard (Jinja2 templates) and a JSON health endpoint. Runs inside a Docker container on port 8000. |
 | **SQLite database** | SQLite with WAL mode | Stores players, teams, rosters, games, per-game/per-season batting and pitching stats, and coaching assignments. Located at `data/app.db` (host-mounted volume). |
 | **Docker Compose stack** | Docker Compose | Orchestrates three services: the FastAPI app, Traefik (reverse proxy), and cloudflared (Cloudflare Tunnel). |
-| **Traefik** | Traefik v3 | Reverse proxy that routes requests by `Host` header. In development, accessible at `http://localhost:8000`. Waits for the app health check before accepting traffic. |
+| **Traefik** | Traefik v3 | Reverse proxy that routes requests by `Host` header. In development, accessible at `http://localhost:8000`. The app container is also directly accessible at `http://localhost:8001` (bypasses Traefik; useful for health checks from the devcontainer shell). Waits for the app health check before accepting traffic. |
 | **Cloudflare Tunnel** | cloudflared | Exposes the stack to the internet through Cloudflare's network. Handles SSL termination and integrates with Cloudflare Zero Trust for access control. |
 | **Agent ecosystem** | Claude Code agents | AI agents that manage the project: planning, coding, API exploration, domain expertise, and documentation. See [Agent Guide](agent-guide.md). |
 
@@ -118,7 +118,10 @@ Every team in the system -- both Lincoln member teams and tracked opponent teams
 | `classification` | TEXT | Division: `'varsity'`, `'jv'`, `'freshman'`, `'reserve'`; USSSA age bands `'8U'`--`'14U'`; `'legion'` |
 | `gc_uuid` | TEXT (unique when non-null) | Team UUID from the authenticated GC API (nullable) |
 | `public_id` | TEXT (unique when non-null) | Team slug from public GC URLs (nullable) |
+| `source` | TEXT | Origin of the record (default `'gamechanger'`) |
 | `is_active` | INTEGER | 1 = active, 0 = inactive |
+| `last_synced` | TEXT | ISO 8601 timestamp of last data sync (nullable) |
+| `created_at` | TEXT | ISO 8601 timestamp when the row was created |
 
 **INTEGER PK rationale**: `teams.id` is an internal autoincrement integer. External GC identifiers (`gc_uuid`, `public_id`) live in their own columns with partial unique indexes (enforced via `WHERE ... IS NOT NULL`), allowing multiple NULL values while preventing duplicate non-null identifiers. This separates internal database identity from external API identifiers, which may not always be available -- opponents discovered by name have neither GC identifier until an admin pastes their URL. All FK references to teams use `teams(id)`.
 
@@ -133,6 +136,25 @@ A junction table that records which tracked opponent teams are associated with a
 | `first_seen_year` | INTEGER | Year the opponent relationship was first recorded (nullable) |
 
 A UNIQUE constraint on `(our_team_id, opponent_team_id)` prevents duplicate links.
+
+#### opponent_links
+
+Tracks the resolution state for each opponent entry from the GameChanger opponents endpoint. Where `team_opponents` links fully-resolved tracked teams, `opponent_links` records the intermediate resolution state -- from a raw GC opponents entry to a resolved `teams` row.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `id` | INTEGER PK | Auto-increment primary key |
+| `our_team_id` | INTEGER FK | References `teams(id)` -- the member team |
+| `root_team_id` | TEXT | GC internal registry key from the opponents endpoint (not a canonical UUID) |
+| `opponent_name` | TEXT | Opponent name as returned by the opponents endpoint |
+| `resolved_team_id` | INTEGER FK | References `teams(id)` after resolution; NULL until resolved |
+| `public_id` | TEXT | GC public URL slug, once known (nullable) |
+| `resolution_method` | TEXT | How the opponent was resolved, e.g. `'manual'` or `'auto'` (nullable) |
+| `resolved_at` | TEXT | ISO 8601 timestamp when resolution occurred (nullable) |
+| `is_hidden` | INTEGER | 1 = excluded from UI and scouting pipelines, 0 = visible |
+| `created_at` | TEXT | ISO 8601 timestamp when the row was created |
+
+A UNIQUE constraint on `(our_team_id, root_team_id)` prevents duplicate entries. The relationship to `team_opponents`: once an `opponent_links` row is resolved (`resolved_team_id` is set), the resolved team can be linked via `team_opponents` for full scouting workflow access.
 
 ## Admin Interface
 
@@ -155,16 +177,16 @@ The team list is a flat table showing all teams (no Lincoln/Opponents split). Co
 
 The add-team flow is two-phase: Phase 1 accepts a GameChanger team URL or bare identifier. Phase 2 shows the resolved team information and lets the operator set membership type (default: `tracked`), program, and division before saving.
 
-Sub-navigation links Users and Teams pages across all admin views.
+Sub-navigation links Users, Teams, and Opponents pages across all admin views.
 
 ### Supporting Modules
 
 | Module | Purpose |
 |--------|---------|
-| `src/gamechanger/url_parser.py` | Extracts a team identifier from a GameChanger URL, bare public_id slug, or bare UUID. Returns a `TeamIdResult` with the extracted `value` and its `id_type` (`"public_id"` or `"uuid"`). Accepts any URL containing a `/teams/{id}` segment, including mobile share links. |
+| `src/gamechanger/url_parser.py` | Extracts a team identifier from a GameChanger URL, bare public_id slug, or bare UUID. Returns a `TeamIdResult` with the extracted `value` and its `id_type` (`"public_id"` or `"uuid"`). Accepts any URL containing a `/teams/{id}` segment, including mobile share links. Note: while the parser accepts bare UUIDs, the admin add-team route rejects `uuid` id_type with an error directing users to provide a URL or public_id slug instead. |
 | `src/gamechanger/team_resolver.py` | Calls `GET /public/teams/{public_id}` (no auth) to resolve a team's name, location, record, and staff into a `TeamProfile` dataclass. Also provides `discover_opponents()` which calls `GET /public/teams/{public_id}/games` and returns a deduplicated list of `DiscoveredOpponent` instances by name. |
 
-Both modules use the shared HTTP session factory (`src/http/session.py`) with a 10-second timeout. No authentication headers are sent -- these are public GameChanger API endpoints.
+`team_resolver.py` uses the shared HTTP session factory (`src/http/session.py`) with a 10-second timeout. No authentication headers are sent -- these are public GameChanger API endpoints. `url_parser.py` is a pure string parser (imports only `re`, `dataclasses`, and `urllib.parse`) and makes no HTTP calls.
 
 ## Cross-References
 
@@ -174,4 +196,4 @@ Both modules use the shared HTTP session factory (`src/http/session.py`) with a 
 
 ---
 
-*Last updated: 2026-03-17 | Source: E-115-02 (schema and admin sections rewritten for E-100 fresh-start schema), E-042 (admin team management, url_parser, team_resolver), E-003-02 (original)*
+*Last updated: 2026-03-17 | Source: E-120-06 (opponent_links table, sub-nav Opponents, url_parser correction, port 8001, teams columns), E-115-02 (schema and admin sections rewritten for E-100 fresh-start schema), E-042 (admin team management, url_parser, team_resolver), E-003-02 (original)*

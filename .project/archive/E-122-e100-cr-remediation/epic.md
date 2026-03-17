@@ -1,7 +1,7 @@
 # E-122: E-100 Family Code Review Remediation (Wave 2)
 
 ## Status
-`READY`
+`COMPLETED`
 
 ## Overview
 Fix 7 confirmed bugs and warnings from the E-100 family code review that are not covered by other active epics. These span scouting auth handling, dashboard template errors, import boundary violations, and test infrastructure drift. Left unfixed, they cause silent auth failure during scouting crawls, phantom UI columns, architecture violations, and schema drift risk in tests.
@@ -41,11 +41,11 @@ Expert consultation: No expert consultation required -- all findings are verifie
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-122-01 | Scouting crawler: abort on CredentialExpiredError | TODO | None | - |
-| E-122-02 | Dashboard template fixes: phantom HR column + opponent back-link | TODO | None | - |
-| E-122-03 | proxy.py import boundary fix | TODO | None | - |
-| E-122-04 | Migrate inline _SCHEMA_SQL to run_migrations() | TODO | None | - |
-| E-122-05 | Credentials module: publicize private API names | TODO | None | - |
+| E-122-01 | Scouting crawler: abort on CredentialExpiredError | DONE | None | se-01 |
+| E-122-02 | Dashboard template fixes: phantom HR column + opponent back-link | DONE | None | se-02 |
+| E-122-03 | proxy.py import boundary fix | DONE | None | se-03 |
+| E-122-04 | Migrate inline _SCHEMA_SQL to run_migrations() | DONE | None | se-04 |
+| E-122-05 | Credentials module: publicize private API names | DONE | None | se-05 |
 
 ## Dispatch Team
 - software-engineer (E-122-01 through E-122-05)
@@ -84,3 +84,7 @@ Full diagnostic details for each finding are in `/.project/research/cr-e100-fami
 
 ## History
 - 2026-03-17: Created from verified E-100 family code review findings. 3 of 10 actionable items excluded (covered by E-117-01). 7 remaining items organized into 5 stories. No expert consultation required. Set READY.
+- 2026-03-17: All 5 stories DONE. Epic COMPLETED. Fixes delivered: scouting crawler aborts on CredentialExpiredError (E-122-01), phantom HR column removed + opponent back-link preserves team_id (E-122-02), proxy.py import boundary fixed via new src/http/proxy_refresh.py module (E-122-03), all 5 inline _SCHEMA_SQL test files migrated to run_migrations() with 2 real schema-drift bugs caught (E-122-04), credentials module _ALL_PROFILES/_run_api_check made public (E-122-05). Full test suite: 2017 passed.
+- 2026-03-17: Documentation assessment: No documentation impact — all changes are bug fixes to existing code/templates with no new features, architecture changes, schema changes, or user-facing workflow changes.
+- 2026-03-17: Context-layer assessment: (1) New convention/pattern/constraint? No. (2) Architectural decision with ongoing implications? No. (3) Footgun/failure mode/boundary discovered? No. (4) Change to agent behavior/routing/coordination? No. (5) Domain knowledge discovered? No. (6) New CLI command/workflow/procedure? No. No context-layer codification needed.
+- 2026-03-17: Post-implementation code review completed. Findings: (1) MUST FIX (resolved) — test scope gap: `tests/test_credentials.py` and `tests/test_check_credentials.py` import from modified `credentials.py` but weren't in original Files Changed; confirmed passing (52 tests). (2) SHOULD FIX (accepted, fixed) — `src/http/proxy_refresh.py` had local `import re` inside `_split_user_agent()` function body; moved to top-level module imports; 60 proxy tests pass. (3) SHOULD FIX (dismissed) — missing `from __future__ import annotations` in `credentials.py`, `proxy.py`, `creds.py`; pre-existing violations not introduced by E-122, out of scope. All acceptance criteria across all 5 stories verified passing. Implementation correct and complete.

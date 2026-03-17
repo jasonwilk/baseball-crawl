@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import difflib
 import json
+import re
 import sys
 from datetime import date
 from pathlib import Path
@@ -188,8 +189,6 @@ def _split_user_agent(ua: str) -> list[str]:
     ``AppleWebKit/...``, ``Chrome/...``).  Only splits if the result would span
     multiple lines; short UAs are returned as a single-element list.
     """
-    import re
-
     # Split before known browser token prefixes
     tokens = re.split(r" (?=[A-Z][a-zA-Z]+/)", ua)
     if len(tokens) <= 1:

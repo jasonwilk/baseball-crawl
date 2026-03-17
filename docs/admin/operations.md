@@ -67,6 +67,8 @@ Click **Add Team** to save, or **Cancel** to return to the team list. If the tea
 - Any URL containing `/teams/{id}` in the path (mobile share links, etc.)
 - A bare public ID slug: `a1GFM9Ku0BbF`
 
+Raw UUIDs are not accepted -- the form will return an error asking for a URL or public ID slug instead.
+
 ### Team List
 
 The teams page (`/admin/teams`) shows a single flat table of all teams -- member and tracked -- with no section split.
@@ -301,4 +303,4 @@ For the expected data volume (~30 games x 4 teams x a few seasons), the database
 
 ---
 
-*Last updated: 2026-03-17 | Source: E-055 (unified CLI), E-115-01 (E-100 team management model), E-028-03 (original)*
+*Last updated: 2026-03-17 | Source: E-120-06 (bare UUID input documented), E-055 (unified CLI), E-115-01 (E-100 team management model), E-028-03 (original)*

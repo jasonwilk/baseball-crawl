@@ -4,7 +4,7 @@
 [E-122: E-100 Family Code Review Remediation (Wave 2)](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, `_ALL_PROFILES` and `_run_api_check` in the credentials module will be renamed to public names (no leading underscore), and all consumers will be updated. This eliminates the coupling risk of importing private names across module boundaries.
