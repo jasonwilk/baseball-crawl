@@ -1,7 +1,7 @@
 # E-116: E-100 Codex Review Bug Fixes
 
 ## Status
-`READY`
+`COMPLETED`
 
 ## Overview
 Fix two bugs discovered by Codex code review of E-100 implementation: a broken YAML load path that produces `TeamRef(id=0)` causing FK violations, and a cwd-relative default database path in `src/api/db.py` that violates the project's repo-root resolution convention.
@@ -28,8 +28,8 @@ No expert consultation required — both fixes are small, well-understood bugs w
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-116-01 | Fix YAML load path TeamRef(id=0) regression | TODO | None | - |
-| E-116-02 | Fix db.py cwd-relative default path | TODO | None | - |
+| E-116-01 | Fix YAML load path TeamRef(id=0) regression | DONE | None | - |
+| E-116-02 | Fix db.py cwd-relative default path | DONE | None | - |
 
 ## Dispatch Team
 - software-engineer (E-116-01, E-116-02)
@@ -49,3 +49,4 @@ The fix: pass `db_path` to `load_config()` in `src/pipeline/load.py` so that YAM
 
 ## History
 - 2026-03-16: Created from Codex review triage (2 FIX items). SE and DE investigation confirmed both bugs. IDEA-028 through IDEA-037 captured deferred E-100 Non-Goal work.
+- 2026-03-17: COMPLETED. Both stories implemented and verified. E-116-01: Fixed YAML load path TeamRef(id=0) regression by passing db_path to load_config() and replacing silent id=0 fallback with explicit ValueError. E-116-02: Fixed cwd-relative default db path in src/api/db.py using Path(__file__).resolve().parents[2]. Both stories include new tests (2 in load_orchestrator, 3 in test_db). All ACs verified by PM.

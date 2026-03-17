@@ -1,7 +1,7 @@
 # E-115: E-100 Documentation Updates
 
 ## Status
-`READY`
+`COMPLETED`
 
 ## Overview
 Update admin documentation to reflect the team model overhaul shipped in E-100. The operations guide and architecture doc both describe the pre-E-100 team management model (is_owned, TEXT team_id, two-section layout, single-step add-team form). These sections must be rewritten to describe the implemented reality: membership_type, INTEGER PK, flat team list, two-phase add-team flow, programs table, and classification replacing level.
@@ -41,8 +41,8 @@ No expert consultation required -- this is a documentation-only epic updating pr
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-115-01 | Update operations.md team management section | TODO | None | docs-writer |
-| E-115-02 | Update architecture.md schema and admin sections | TODO | None | docs-writer |
+| E-115-01 | Update operations.md team management section | DONE | None | docs-writer |
+| E-115-02 | Update architecture.md schema and admin sections | DONE | None | docs-writer |
 
 ## Dispatch Team
 - docs-writer
@@ -88,3 +88,6 @@ The docs-writer should read these files to verify the implemented reality:
 
 ## History
 - 2026-03-16: Created. Documentation assessment gate fired during E-100 closure on 3 triggers. Scoped to operations.md and architecture.md updates only.
+- 2026-03-17: COMPLETED. Both admin docs updated to reflect E-100 team model overhaul. operations.md team management section rewritten (two-phase add-team flow, flat team list, membership_type model, classification, program assignment). architecture.md schema and admin interface sections rewritten (fresh-start schema summary, INTEGER PK routes, supporting modules updated).
+- 2026-03-17: Documentation assessment: No additional documentation impact -- this epic IS the documentation update triggered by E-100.
+- 2026-03-17: Context-layer assessment (6 triggers): (1) New convention/pattern/constraint: No. (2) Architectural decision: No. (3) Footgun/failure/boundary: No. (4) Agent behavior change: No. (5) Domain knowledge: No. (6) New CLI/workflow/procedure: No. No context-layer codification needed.

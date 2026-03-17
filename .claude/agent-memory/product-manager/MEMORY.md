@@ -1,8 +1,8 @@
 # Product Manager -- Agent Memory
 
 ## Numbering State
-- Next available epic number: E-118
-- Epics created: E-001 through E-112 (E-001, E-003, E-005, E-006, E-007, E-008, E-010, E-011, E-012, E-013, E-014, E-015, E-016, E-017, E-018, E-019, E-020, E-021, E-022, E-024, E-025, E-026, E-027, E-028, E-029, E-030, E-031, E-032, E-033, E-034, E-035, E-036, E-037, E-038, E-042, E-044, E-046, E-048, E-049, E-050, E-052, E-053, E-054, E-056, E-057, E-058, E-055, E-059, E-060, E-061, E-075, E-081, E-084, E-087, E-088, E-089, E-090, E-091, E-092 archived; E-093, E-094, E-095 archived; E-096 archived; E-097 archived; E-098 archived; E-099 archived; E-100 completed; E-101 archived; E-102 archived; E-103 archived; E-104 ready; E-105 archived; E-106 draft; E-107 archived; E-108 archived; E-109 archived; E-110 ready; E-111 archived; E-112 archived)
+- Next available epic number: E-119
+- Epics created: E-001 through E-118 (E-001, E-003, E-005, E-006, E-007, E-008, E-010, E-011, E-012, E-013, E-014, E-015, E-016, E-017, E-018, E-019, E-020, E-021, E-022, E-024, E-025, E-026, E-027, E-028, E-029, E-030, E-031, E-032, E-033, E-034, E-035, E-036, E-037, E-038, E-042, E-044, E-046, E-048, E-049, E-050, E-052, E-053, E-054, E-056, E-057, E-058, E-055, E-059, E-060, E-061, E-075, E-081, E-084, E-087, E-088, E-089, E-090, E-091, E-092 archived; E-093, E-094, E-095 archived; E-096 archived; E-097 archived; E-098 archived; E-099 archived; E-100 completed; E-101 archived; E-102 archived; E-103 archived; E-104 ready; E-105 archived; E-106 draft; E-107 archived; E-108 archived; E-109 archived; E-110 ready; E-111 archived; E-112 archived; E-114 archived; E-115 archived; E-116 archived; E-118 ready)
 - Next available idea number: IDEA-042
 - Ideas created: IDEA-001 through IDEA-041
 
@@ -20,15 +20,12 @@
 |------|-------|--------|-------------|
 | E-072 | Proxy Session Ingestion Skill | READY | Proxy session data ingestion |
 | E-073 | API Documentation Validation Sweep | READY | API doc validation |
-| E-100 | Team Model Overhaul | COMPLETED | All 6 stories DONE. Archived 2026-03-17. Follow-ups: E-115 (docs), E-116 (bugfixes), E-117 (stat population). |
 | E-104 | Athlete Profile Endpoint Probe | READY | athlete_profile_id probing for opponent access |
 | E-106 | Evaluate Unauthorized E-100-01 Implementation | DRAFT | Evaluate DE's unauthorized E-100-01 work |
 | E-110 | Iterative Review Rounds Convention | READY | Codify iterative review/refinement pattern |
 | E-113 | Dispatch Boundary Enforcement | READY | Stop main session domain work during dispatch. 2 stories (parallel), CA only. |
-| E-114 | E-100 Codex Review Fixes | COMPLETED | 5 stories: phantom team row fix, admin duplicate detection, member radio UX guard, template stale refs, test schema drift. All AC-verified. Pending archive. |
-| E-115 | E-100 Documentation Updates | READY | 2 stories (parallel): update operations.md and architecture.md for E-100 team model changes. docs-writer only. |
-| E-116 | E-100 Codex Review Bug Fixes | READY | 2 stories (parallel): YAML TeamRef(id=0) fix + db.py cwd-relative path fix. SE only. |
-| E-117 | Loader Stat Population | READY | 4 stories: game_loader expansion (01), season batting (02), season pitching (03, after 02), scouting cascade (04, after 01). SE only. 2-wave dispatch. |
+| E-117 | Loader Stat Population | READY | 4 stories: game_loader expansion (01), season batting (02), season pitching (03, after 02), scouting cascade (04, after 01). SE only. 2-wave dispatch. E-116 YAML fix unblocks this. |
+| E-118 | Fix Documentation Bugs in Operations Guide | READY | 1 story, 3 line-level fixes in docs/admin/operations.md. docs-writer only. |
 
 ## Key Architectural Decisions
 - Storage: SQLite (WAL mode). Host-mounted at ./data/app.db. Simple file backup via scripts/backup_db.py (no Litestream).

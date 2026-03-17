@@ -45,49 +45,64 @@ The admin interface at `/admin/teams` is the primary way to add and manage teams
 
 ### Adding a Team
 
-1. Navigate to `/admin/teams`.
-2. Paste a GameChanger team URL (e.g., `https://web.gc.com/teams/a1GFM9Ku0BbF/2025-lincoln-varsity`) or a bare public ID slug into the URL input field.
-3. Select the team type: **Lincoln Program** (an LSB-owned team) or **Tracked Opponent**.
-4. Optionally set a level (freshman, jv, varsity, reserve, legion, other).
-5. Submit. The system calls `GET /public/teams/{public_id}` (no authentication required) to resolve the team name and location, then stores the record.
+Adding a team is a two-phase flow.
 
-The success flash message includes the resolved team name and location (e.g., "Team added: Lincoln Rebels (Omaha, NE)"). If the name or location looks wrong, use the Edit button to correct it.
+**Phase 1 -- URL input**: Navigate to `/admin/teams`. Paste a GameChanger team URL or identifier into the URL input field and click **Continue**. No team type selector appears at this step.
+
+**Phase 2 -- Confirm**: The system resolves the team name and location by calling `GET /public/teams/{public_id}` and attempts to discover the team's GameChanger UUID via the reverse bridge endpoint (`GET /teams/public/{public_id}/id`). The confirm page shows:
+
+| Field | Description |
+|-------|-------------|
+| Team Name | Resolved display name from the public API |
+| Public ID | The GC public URL slug |
+| GameChanger UUID | Shown as **Discovered** (green badge) if the reverse bridge succeeded, or **Not available (403)** (yellow badge) if it did not |
+| Membership | Radio button: **Tracked** (default) or **Member** (Lincoln program team). Member is disabled if no UUID was discovered. |
+| Program | Optional dropdown to assign the team to a program (e.g., Lincoln Standing Bear HS) |
+| Division | Optional dropdown (High School: varsity/JV/freshman/reserve/legion; Youth/USSSA: 8U--14U) |
+
+Click **Add Team** to save, or **Cancel** to return to the team list. If the team is already in the system, the confirm page shows an error and the **Add Team** button is disabled.
 
 **What the URL parser accepts**:
 - Full GameChanger web URL: `https://web.gc.com/teams/{public_id}/any-slug`
-- Mobile share URLs or any URL containing `/teams/{public_id}` in the path
+- Any URL containing `/teams/{id}` in the path (mobile share links, etc.)
 - A bare public ID slug: `a1GFM9Ku0BbF`
 
-**Discovered placeholder upgrade**: If a team was previously auto-discovered from an opponent's schedule (name-only, no public ID), pasting its URL will upgrade that existing placeholder record rather than creating a duplicate row.
+### Team List
 
-### Team List Layout
+The teams page (`/admin/teams`) shows a single flat table of all teams -- member and tracked -- with no section split.
 
-The teams page shows two sections:
-
-| Section | Contents |
-|---------|---------|
-| **Lincoln Program** | Teams with `is_owned = 1` -- LSB Freshman, JV, Varsity, Reserve, and any other owned teams. |
-| **Tracked Opponents** | Teams with `is_owned = 0` -- opponents added manually or discovered via schedule. |
-
-Newly discovered opponents appear in Tracked Opponents with status Inactive. An admin must activate them before they are included in crawls.
+| Column | Contents |
+|--------|---------|
+| Name | Team display name |
+| Program | Assigned program, or `—` if none |
+| Division | `classification` value (e.g., varsity, jv, 8U), or `—` if none |
+| Membership | **Member** badge (blue) or **Tracked** badge (gray) |
+| Opponents | Count of opponent connections; links to `/admin/opponents?team_id={id}` |
+| Status | **Active** or **Inactive** |
+| Actions | Edit link, Activate/Deactivate button, Discover button (active teams with a public ID only) |
 
 ### Editing a Team
 
-From either team table, click **Edit** on any team row to open the edit form at `/admin/teams/{team_id}/edit`. Editable fields: Name, Level, and Type (owned vs. tracked). Public ID and last-synced date are shown read-only.
+Click **Edit** on any row to open the edit form at `/admin/teams/{id}/edit` (INTEGER `id`). The form shows Public ID and GameChanger UUID read-only, along with Status and Last Synced. Editable fields:
+
+- **Name**: Team display name
+- **Program**: Optional program assignment
+- **Division**: Optional classification (same dropdown as Add Team)
+- **Membership**: Radio button to toggle between Tracked and Member
 
 ### Activating and Deactivating Teams
 
-The **Activate/Deactivate** button on each team row calls `POST /admin/teams/{team_id}/toggle-active`. Active teams (`is_active = 1`) are included when crawling with `--source db`. Deactivated teams are preserved in the database but excluded from crawls.
+The **Activate/Deactivate** button on each row calls `POST /admin/teams/{id}/toggle-active`. Active teams (`is_active = 1`) are included when crawling with `--source db`. Deactivated teams are preserved in the database but excluded from crawls.
 
 ### Discovering Opponents
 
-For any Lincoln Program team that has a public ID, click **Discover Opponents** to trigger automatic opponent discovery. The system calls `GET /public/teams/{public_id}/games`, extracts unique opponent names from the schedule, and inserts placeholder records for any opponents not already in the database.
+For any active team that has a public ID, the **Discover** button calls `POST /admin/teams/{id}/discover-opponents`. The system fetches `GET /public/teams/{public_id}/games`, extracts unique opponent names, and inserts placeholder rows for any opponents not already in the database.
 
-**Important limitation**: The public games endpoint returns opponent names only -- no public ID or other identifier. Discovered opponents are stored as placeholders (`source = 'discovered'`, `public_id = NULL`, `is_active = 0`). To fully onboard a discovered opponent, paste their GameChanger URL via the Add Team form.
+**Important limitation**: The public games endpoint returns opponent names only -- no public ID or other identifier. Discovered opponents are inserted as placeholder rows in the `teams` table with `membership_type = 'tracked'`, `is_active = 0`, and `public_id = NULL`. To upgrade a placeholder to a full record, paste the team's GameChanger URL into the Add Team form at `/admin/teams`.
 
 ### Database-Driven Crawl Configuration
 
-By default, `scripts/crawl.py` and `scripts/load.py` read team configuration from `config/teams.yaml`. Pass `--source db` to read active owned teams directly from the database instead:
+By default, `scripts/crawl.py` and `scripts/load.py` read team configuration from `config/teams.yaml`. Pass `--source db` to read active member teams directly from the database instead:
 
 ```bash
 python scripts/crawl.py --source db
@@ -98,7 +113,7 @@ Also available as `bb data crawl --source db` and `bb data load --source db`.
 
 With `--source db`, both scripts query:
 ```sql
-SELECT team_id, name, level FROM teams WHERE is_active = 1 AND is_owned = 1
+SELECT id, name, classification, gc_uuid FROM teams WHERE is_active = 1 AND membership_type = 'member'
 ```
 
 The database path defaults to `./data/app.db` or the `DATABASE_PATH` environment variable.
@@ -286,4 +301,4 @@ For the expected data volume (~30 games x 4 teams x a few seasons), the database
 
 ---
 
-*Last updated: 2026-03-07 | Source: E-055 (unified CLI), E-042 (admin team management), E-028-03 (original)*
+*Last updated: 2026-03-17 | Source: E-055 (unified CLI), E-115-01 (E-100 team management model), E-028-03 (original)*

@@ -4,7 +4,7 @@
 [E-116: E-100 Codex Review Bug Fixes](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, `src/api/db.py` will resolve its default database path relative to the repo root using `Path(__file__).resolve().parents[2]`, consistent with the project's repo-root resolution convention.

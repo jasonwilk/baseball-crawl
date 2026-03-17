@@ -4,7 +4,7 @@
 [E-115: E-100 Documentation Updates](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, `docs/admin/architecture.md` will accurately describe the E-100 schema and admin interface. The "Schema Changes" section will replace the migration 005 documentation with a summary of the fresh-start schema rewrite (programs table, INTEGER PK teams, team_opponents, key column changes). The "Admin Interface" section will describe the current route set with INTEGER `{id}` parameters and the two-phase add-team flow. References to E-042-era modules will be updated to reflect any changes.

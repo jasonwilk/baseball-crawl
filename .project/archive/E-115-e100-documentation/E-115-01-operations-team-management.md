@@ -4,7 +4,7 @@
 [E-115: E-100 Documentation Updates](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the "Admin Team Management" section of `docs/admin/operations.md` will accurately describe the E-100 team management workflow: two-phase add-team flow, flat team list with membership badges, membership_type model, classification replacing level, program assignment, and gc_uuid discovery via reverse bridge. All references to `is_owned`, `level` (as a team field), two-section layout, and single-step add form will be removed.

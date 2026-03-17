@@ -4,7 +4,7 @@
 [E-116: E-100 Codex Review Bug Fixes](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, `bb data load --source yaml` will correctly resolve each team's `internal_id` from the database before constructing `TeamRef`, eliminating the FK violation that currently causes all own-team player stat INSERTs to fail.

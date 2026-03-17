@@ -90,42 +90,79 @@ baseball-crawl/
 
 ## Schema Changes
 
-### Migration 005: `public_id` on `teams` (E-042)
+### E-100 Fresh-Start Schema Rewrite
 
-Migration 005 adds a `public_id` column to the `teams` table:
+E-100 replaced the entire prior migration history with a single `migrations/001_initial_schema.sql`. The previous incremental migrations (001--008) are archived in `.project/archive/migrations-pre-E100/`. All DDL lives in the one file.
 
-```sql
-ALTER TABLE teams ADD COLUMN public_id TEXT;
-CREATE UNIQUE INDEX idx_teams_public_id ON teams(public_id) WHERE public_id IS NOT NULL;
-```
+#### programs
 
-`public_id` is the short alphanumeric slug used by the GameChanger public API and web UI (e.g., `a1GFM9Ku0BbF`). It is nullable because opponents discovered by name from a team's schedule have no public ID until an admin pastes their URL. The partial unique index allows multiple NULL values while enforcing uniqueness across non-NULL values.
+An umbrella entity that groups teams under an organizational program. The seed row for Lincoln Standing Bear HS is included in the migration.
 
-For URL-added teams, `team_id` equals `public_id` (the UUID is not available from public API endpoints).
+| Column | Type | Notes |
+|--------|------|-------|
+| `program_id` | TEXT PK | Slug, e.g. `'lsb-hs'` |
+| `name` | TEXT | Display name |
+| `program_type` | TEXT | One of `'hs'`, `'usssa'`, `'legion'` |
+| `org_name` | TEXT | Org display name (nullable) |
+
+#### teams
+
+Every team in the system -- both Lincoln member teams and tracked opponent teams.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `id` | INTEGER PK AUTOINCREMENT | Internal identity; used for all FK references |
+| `name` | TEXT | Team display name |
+| `program_id` | TEXT FK | References `programs(program_id)`; nullable for opponents |
+| `membership_type` | TEXT | `'member'` (operator manages in GC) or `'tracked'` (opponent/scouting) |
+| `classification` | TEXT | Division: `'varsity'`, `'jv'`, `'freshman'`, `'reserve'`; USSSA age bands `'8U'`--`'14U'`; `'legion'` |
+| `gc_uuid` | TEXT (unique when non-null) | Team UUID from the authenticated GC API (nullable) |
+| `public_id` | TEXT (unique when non-null) | Team slug from public GC URLs (nullable) |
+| `is_active` | INTEGER | 1 = active, 0 = inactive |
+
+**INTEGER PK rationale**: `teams.id` is an internal autoincrement integer. External GC identifiers (`gc_uuid`, `public_id`) live in their own columns with partial unique indexes (enforced via `WHERE ... IS NOT NULL`), allowing multiple NULL values while preventing duplicate non-null identifiers. This separates internal database identity from external API identifiers, which may not always be available -- opponents discovered by name have neither GC identifier until an admin pastes their URL. All FK references to teams use `teams(id)`.
+
+#### team_opponents
+
+A junction table that records which tracked opponent teams are associated with a given member team.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `our_team_id` | INTEGER FK | References `teams(id)` -- a member team |
+| `opponent_team_id` | INTEGER FK | References `teams(id)` -- a tracked opponent |
+| `first_seen_year` | INTEGER | Year the opponent relationship was first recorded (nullable) |
+
+A UNIQUE constraint on `(our_team_id, opponent_team_id)` prevents duplicate links.
 
 ## Admin Interface
 
-### Team Management Routes (E-042)
+### Team Management Routes (E-100)
 
-All routes are under `/admin/` and require an admin session. The team management pages were added alongside the existing user management pages from E-023.
+All routes are under `/admin/` and require an active session. Team routes use INTEGER `{id}` path parameters matching `teams.id`.
 
 | Route | Method | Description |
 |-------|--------|-------------|
-| `/admin/teams` | GET | Team list (Lincoln Program + Tracked Opponents) with Add Team form |
-| `/admin/teams` | POST | Add a team by GameChanger URL or bare public ID |
-| `/admin/teams/{team_id}/edit` | GET | Edit team form (name, level, type) |
-| `/admin/teams/{team_id}/edit` | POST | Update team metadata |
-| `/admin/teams/{team_id}/toggle-active` | POST | Toggle `is_active` between 0 and 1 |
-| `/admin/teams/{team_id}/discover-opponents` | POST | Auto-discover opponents from team's public schedule |
+| `/admin/teams` | GET | Flat team list with Phase 1 add-team form |
+| `/admin/teams` | POST | Phase 1 submit: resolve URL or identifier, redirect to confirm |
+| `/admin/teams/confirm` | GET | Phase 2 confirm page: shows resolved team info, membership radio, program/division dropdowns |
+| `/admin/teams/confirm` | POST | Phase 2 save: create team record |
+| `/admin/teams/{id}/edit` | GET | Edit form: name, program, division (classification), membership type |
+| `/admin/teams/{id}/edit` | POST | Save team edits |
+| `/admin/teams/{id}/toggle-active` | POST | Toggle `is_active` between 0 and 1 |
+| `/admin/teams/{id}/discover-opponents` | POST | Discover opponent placeholder entries from team's public schedule |
+
+The team list is a flat table showing all teams (no Lincoln/Opponents split). Columns: name, program, division (classification), membership badge (member/tracked), active/inactive status, opponent count, and an edit link.
+
+The add-team flow is two-phase: Phase 1 accepts a GameChanger team URL or bare identifier. Phase 2 shows the resolved team information and lets the operator set membership type (default: `tracked`), program, and division before saving.
 
 Sub-navigation links Users and Teams pages across all admin views.
 
-### New Modules (E-042)
+### Supporting Modules
 
 | Module | Purpose |
 |--------|---------|
-| `src/gamechanger/url_parser.py` | Extracts `public_id` from GameChanger team URLs or bare slugs. Accepts any URL containing `/teams/{public_id}` in the path. |
-| `src/gamechanger/team_resolver.py` | Calls `GET /public/teams/{public_id}` (no auth) to resolve a team name, location, and metadata. Also provides `discover_opponents()` which calls `GET /public/teams/{public_id}/games` to extract opponent names. |
+| `src/gamechanger/url_parser.py` | Extracts a team identifier from a GameChanger URL, bare public_id slug, or bare UUID. Returns a `TeamIdResult` with the extracted `value` and its `id_type` (`"public_id"` or `"uuid"`). Accepts any URL containing a `/teams/{id}` segment, including mobile share links. |
+| `src/gamechanger/team_resolver.py` | Calls `GET /public/teams/{public_id}` (no auth) to resolve a team's name, location, record, and staff into a `TeamProfile` dataclass. Also provides `discover_opponents()` which calls `GET /public/teams/{public_id}/games` and returns a deduplicated list of `DiscoveredOpponent` instances by name. |
 
 Both modules use the shared HTTP session factory (`src/http/session.py`) with a 10-second timeout. No authentication headers are sent -- these are public GameChanger API endpoints.
 
@@ -137,4 +174,4 @@ Both modules use the shared HTTP session factory (`src/http/session.py`) with a 
 
 ---
 
-*Last updated: 2026-03-07 | Source: E-042 (schema migration 005, admin team management, url_parser, team_resolver), E-003-02 (original)*
+*Last updated: 2026-03-17 | Source: E-115-02 (schema and admin sections rewritten for E-100 fresh-start schema), E-042 (admin team management, url_parser, team_resolver), E-003-02 (original)*

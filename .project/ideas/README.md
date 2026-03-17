@@ -60,6 +60,7 @@ Review this list every 90 days, or when completing an epic. Ask:
 | [IDEA-039](IDEA-039-game-metadata-enrichment.md) | Game Metadata Enrichment | CANDIDATE | 2026-06-14 |
 | [IDEA-040](IDEA-040-optimistic-pitching-column-audit.md) | Optimistic Pitching Column API Audit | CANDIDATE | 2026-06-14 |
 | [IDEA-041](IDEA-041-play-by-play-stat-compilation.md) | Play-by-Play Stat Compilation Pipeline | CANDIDATE | 2026-06-14 |
+| [IDEA-042](IDEA-042-bulk-create-opponents-missing-links.md) | bulk_create_opponents Should Create team_opponents Links | CANDIDATE | 2026-06-15 |
 
 ## Status Definitions
 
