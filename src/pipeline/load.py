@@ -70,8 +70,13 @@ def _run_game_loader(db: sqlite3.Connection, config: object, data_root: Path) ->
 
     for team in config.member_teams:
         team_dir = data_root / config.season / "teams" / team.id
+        if team.internal_id is None:
+            raise ValueError(
+                f"Team '{team.name}' (gc_uuid={team.id!r}) was not found in the database. "
+                "Ensure the team exists in the teams table before running the game loader."
+            )
         team_ref = TeamRef(
-            id=team.internal_id or 0,
+            id=team.internal_id,
             gc_uuid=team.id,
             public_id=None,
         )
@@ -159,7 +164,7 @@ def run(
         config = load_config_from_db(resolved_db)
         db_path = resolved_db
     else:
-        config = load_config()
+        config = load_config(db_path=db_path)
 
     selected = [
         (name, runner)

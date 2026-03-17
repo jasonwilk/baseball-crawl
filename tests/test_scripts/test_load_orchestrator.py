@@ -1,17 +1,22 @@
 """Tests for the load pipeline orchestrator (src/pipeline/load.py).
 
-All loaders and DB interactions are mocked -- no real SQLite writes.
+Most tests mock loaders and DB interactions. AC-3/AC-4 use real SQLite
+to verify the YAML load path TeamRef fix introduced in E-116-01.
 """
 
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+import yaml
 
-from src.pipeline.load import run, _LOADER_NAMES
+from src.gamechanger.config import CrawlConfig, TeamEntry, load_config
 from src.gamechanger.loaders import LoadResult
+from src.pipeline.load import _run_game_loader, run, _LOADER_NAMES
+from migrations.apply_migrations import run_migrations
 
 # ---------------------------------------------------------------------------
 # Loader registry
@@ -353,3 +358,119 @@ def test_all_three_loaders_run_in_order(tmp_path: Path) -> None:
 
     assert exit_code == 0
     assert call_order == ["roster", "game", "season-stats"]
+
+
+# ---------------------------------------------------------------------------
+# E-116-01: YAML load path TeamRef fix (AC-3 and AC-4)
+# ---------------------------------------------------------------------------
+
+
+def _setup_migrated_db(db_path: Path) -> None:
+    """Apply migrations to a fresh SQLite database at db_path."""
+    run_migrations(db_path=db_path)
+
+
+def _insert_team(db_path: Path, gc_uuid: str, name: str = "Test Team") -> int:
+    """Insert a member team row and return its INTEGER primary key."""
+    conn = sqlite3.connect(str(db_path))
+    try:
+        conn.execute("PRAGMA foreign_keys=ON;")
+        cursor = conn.execute(
+            "INSERT INTO teams (name, membership_type, classification, gc_uuid) "
+            "VALUES (?, 'member', 'varsity', ?)",
+            (name, gc_uuid),
+        )
+        conn.commit()
+        return cursor.lastrowid
+    finally:
+        conn.close()
+
+
+def _write_yaml_config(yaml_path: Path, gc_uuid: str, season: str = "2025") -> None:
+    """Write a minimal teams.yaml config to yaml_path."""
+    data = {
+        "season": season,
+        "member_teams": [
+            {"id": gc_uuid, "name": "Test Team", "classification": "varsity"}
+        ],
+    }
+    yaml_path.write_text(yaml.dump(data))
+
+
+def test_yaml_source_teamref_has_valid_db_id(tmp_path: Path) -> None:
+    """AC-3: YAML-sourced config produces TeamRef with a valid (non-zero) id.
+
+    Verifies the E-116-01 fix: run() now passes db_path to load_config() so that
+    TeamEntry.internal_id is resolved from the database before _run_game_loader()
+    constructs TeamRef.
+    """
+    gc_uuid = "test-uuid-ac3"
+    db_path = tmp_path / "app.db"
+    yaml_path = tmp_path / "teams.yaml"
+    season = "2025"
+
+    _setup_migrated_db(db_path)
+    expected_id = _insert_team(db_path, gc_uuid)
+    _write_yaml_config(yaml_path, gc_uuid, season)
+
+    # Create a team directory so the game loader finds it.
+    team_dir = tmp_path / season / "teams" / gc_uuid
+    team_dir.mkdir(parents=True)
+
+    captured_team_refs: list = []
+
+    real_load_config = load_config
+
+    def patched_load_config(db_path=None):  # type: ignore[override]
+        return real_load_config(path=yaml_path, db_path=db_path)
+
+    with patch("src.pipeline.load.load_config", side_effect=patched_load_config):
+        with patch("src.pipeline.load.GameLoader") as mock_loader_cls:
+            mock_loader = MagicMock()
+            mock_loader.load_all.return_value = _make_result()
+            mock_loader_cls.side_effect = lambda db, season_id, owned_team_ref: (
+                captured_team_refs.append(owned_team_ref) or mock_loader
+            )
+
+            exit_code = run(
+                loader_filter="game",
+                source="yaml",
+                data_root=tmp_path,
+                db_path=db_path,
+            )
+
+    assert exit_code == 0, "Loader should succeed when team is in DB"
+    assert len(captured_team_refs) == 1
+    team_ref = captured_team_refs[0]
+    assert team_ref.id == expected_id, (
+        f"Expected TeamRef.id={expected_id}, got {team_ref.id}. "
+        "TeamRef(id=0) regression would produce id=0."
+    )
+    assert team_ref.id != 0, "TeamRef.id must not be 0 (FK violation guard)"
+    assert team_ref.gc_uuid == gc_uuid
+
+
+def test_yaml_source_raises_when_team_not_in_db(tmp_path: Path) -> None:
+    """AC-4: YAML-sourced config raises a clear error when team is absent from DB.
+
+    Verifies that the 'or 0' fallback is replaced with an explicit ValueError
+    so that missing teams fail loudly instead of producing TeamRef(id=0).
+    """
+    gc_uuid = "missing-uuid-ac4"
+
+    # Build a config with internal_id=None (team not in any DB).
+    config = CrawlConfig(
+        season="2025",
+        member_teams=[
+            TeamEntry(id=gc_uuid, name="Ghost Team", classification="varsity", internal_id=None)
+        ],
+    )
+    team_dir = tmp_path / "2025" / "teams" / gc_uuid
+    team_dir.mkdir(parents=True)
+
+    db_conn = sqlite3.connect(":memory:")
+
+    with pytest.raises(ValueError, match=gc_uuid):
+        _run_game_loader(db_conn, config, tmp_path)
+
+    db_conn.close()
