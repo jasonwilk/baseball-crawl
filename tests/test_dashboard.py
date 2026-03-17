@@ -28,190 +28,12 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
+from migrations.apply_migrations import run_migrations  # noqa: E402
 from src.api.main import app  # noqa: E402
 
 # Derive season_id the same way the route does, so tests stay valid across years.
 _CURRENT_SEASON_ID = f"{datetime.date.today().year}-spring-hs"
 _ALT_SEASON_ID = "2025-spring-hs"
-
-# ---------------------------------------------------------------------------
-# E-100 schema (subset needed by dashboard tests)
-# ---------------------------------------------------------------------------
-
-_SCHEMA_SQL = """
-    CREATE TABLE IF NOT EXISTS _migrations (
-        id         INTEGER PRIMARY KEY AUTOINCREMENT,
-        filename   TEXT    NOT NULL UNIQUE,
-        applied_at TEXT    NOT NULL DEFAULT (datetime('now'))
-    );
-    INSERT OR IGNORE INTO _migrations (filename)
-        VALUES ('001_initial_schema.sql');
-
-    -- E-100: users -- id INTEGER PK
-    CREATE TABLE IF NOT EXISTS users (
-        id         INTEGER PRIMARY KEY AUTOINCREMENT,
-        email      TEXT NOT NULL UNIQUE,
-        created_at TEXT NOT NULL DEFAULT (datetime('now'))
-    );
-
-    -- E-100: teams -- id INTEGER PK AUTOINCREMENT, membership_type replaces is_owned
-    CREATE TABLE IF NOT EXISTS teams (
-        id              INTEGER PRIMARY KEY AUTOINCREMENT,
-        name            TEXT NOT NULL,
-        membership_type TEXT NOT NULL DEFAULT 'member',
-        classification  TEXT,
-        public_id       TEXT,
-        gc_uuid         TEXT,
-        source          TEXT NOT NULL DEFAULT 'gamechanger',
-        is_active       INTEGER NOT NULL DEFAULT 1,
-        last_synced     TEXT,
-        created_at      TEXT NOT NULL DEFAULT (datetime('now'))
-    );
-
-    -- E-100: user_team_access -- team_id is INTEGER FK
-    CREATE TABLE IF NOT EXISTS user_team_access (
-        user_id INTEGER NOT NULL REFERENCES users(id),
-        team_id INTEGER NOT NULL REFERENCES teams(id),
-        UNIQUE(user_id, team_id)
-    );
-
-    -- E-100: sessions
-    CREATE TABLE IF NOT EXISTS sessions (
-        session_id TEXT PRIMARY KEY,
-        user_id    INTEGER NOT NULL REFERENCES users(id),
-        expires_at TEXT NOT NULL
-    );
-
-    -- E-100: magic_link_tokens
-    CREATE TABLE IF NOT EXISTS magic_link_tokens (
-        token      TEXT PRIMARY KEY,
-        user_id    INTEGER NOT NULL REFERENCES users(id),
-        expires_at TEXT NOT NULL
-    );
-
-    -- E-100: passkey_credentials
-    CREATE TABLE IF NOT EXISTS passkey_credentials (
-        credential_id TEXT PRIMARY KEY,
-        user_id       INTEGER NOT NULL REFERENCES users(id),
-        public_key    TEXT NOT NULL,
-        sign_count    INTEGER NOT NULL DEFAULT 0
-    );
-
-    CREATE TABLE IF NOT EXISTS seasons (
-        season_id   TEXT PRIMARY KEY,
-        name        TEXT NOT NULL,
-        season_type TEXT NOT NULL,
-        year        INTEGER NOT NULL,
-        start_date  TEXT,
-        end_date    TEXT,
-        created_at  TEXT NOT NULL DEFAULT (datetime('now'))
-    );
-
-    CREATE TABLE IF NOT EXISTS players (
-        player_id   TEXT PRIMARY KEY,
-        first_name  TEXT NOT NULL,
-        last_name   TEXT NOT NULL,
-        created_at  TEXT NOT NULL DEFAULT (datetime('now'))
-    );
-
-    -- E-100: team_rosters -- team_id is INTEGER FK
-    CREATE TABLE IF NOT EXISTS team_rosters (
-        team_id       INTEGER NOT NULL REFERENCES teams(id),
-        player_id     TEXT NOT NULL REFERENCES players(player_id),
-        season_id     TEXT NOT NULL REFERENCES seasons(season_id),
-        jersey_number TEXT,
-        position      TEXT,
-        PRIMARY KEY(team_id, player_id, season_id)
-    );
-
-    -- E-100: games -- home_team_id / away_team_id are INTEGER FKs
-    CREATE TABLE IF NOT EXISTS games (
-        game_id      TEXT PRIMARY KEY,
-        season_id    TEXT NOT NULL REFERENCES seasons(season_id),
-        game_date    TEXT NOT NULL,
-        home_team_id INTEGER NOT NULL REFERENCES teams(id),
-        away_team_id INTEGER NOT NULL REFERENCES teams(id),
-        home_score   INTEGER,
-        away_score   INTEGER,
-        status       TEXT NOT NULL DEFAULT 'completed'
-    );
-
-    -- E-100: player_game_batting -- team_id is INTEGER FK
-    CREATE TABLE IF NOT EXISTS player_game_batting (
-        id        INTEGER PRIMARY KEY AUTOINCREMENT,
-        game_id   TEXT NOT NULL REFERENCES games(game_id),
-        player_id TEXT NOT NULL REFERENCES players(player_id),
-        team_id   INTEGER NOT NULL REFERENCES teams(id),
-        ab        INTEGER,
-        h         INTEGER,
-        doubles   INTEGER,
-        triples   INTEGER,
-        hr        INTEGER,
-        rbi       INTEGER,
-        bb        INTEGER,
-        so        INTEGER,
-        sb        INTEGER,
-        UNIQUE(game_id, player_id)
-    );
-
-    -- E-100: player_game_pitching -- team_id is INTEGER FK
-    CREATE TABLE IF NOT EXISTS player_game_pitching (
-        id        INTEGER PRIMARY KEY AUTOINCREMENT,
-        game_id   TEXT NOT NULL REFERENCES games(game_id),
-        player_id TEXT NOT NULL REFERENCES players(player_id),
-        team_id   INTEGER NOT NULL REFERENCES teams(id),
-        ip_outs   INTEGER,
-        h         INTEGER,
-        er        INTEGER,
-        bb        INTEGER,
-        so        INTEGER,
-        hr        INTEGER,
-        UNIQUE(game_id, player_id)
-    );
-
-    -- E-100: player_season_batting -- team_id INTEGER FK, gp column (was 'games')
-    CREATE TABLE IF NOT EXISTS player_season_batting (
-        id                INTEGER PRIMARY KEY AUTOINCREMENT,
-        player_id         TEXT NOT NULL REFERENCES players(player_id),
-        team_id           INTEGER NOT NULL REFERENCES teams(id),
-        season_id         TEXT NOT NULL REFERENCES seasons(season_id),
-        stat_completeness TEXT NOT NULL DEFAULT 'boxscore_only',
-        gp        INTEGER,
-        ab        INTEGER,
-        h         INTEGER,
-        doubles   INTEGER,
-        triples   INTEGER,
-        hr        INTEGER,
-        rbi       INTEGER,
-        bb        INTEGER,
-        so        INTEGER,
-        sb        INTEGER,
-        UNIQUE(player_id, team_id, season_id)
-    );
-
-    -- E-100: player_season_pitching -- team_id INTEGER FK, gp_pitcher column (was 'games')
-    CREATE TABLE IF NOT EXISTS player_season_pitching (
-        id                INTEGER PRIMARY KEY AUTOINCREMENT,
-        player_id         TEXT NOT NULL REFERENCES players(player_id),
-        team_id           INTEGER NOT NULL REFERENCES teams(id),
-        season_id         TEXT NOT NULL REFERENCES seasons(season_id),
-        stat_completeness TEXT NOT NULL DEFAULT 'boxscore_only',
-        gp_pitcher INTEGER,
-        ip_outs    INTEGER,
-        h          INTEGER,
-        er         INTEGER,
-        bb         INTEGER,
-        so         INTEGER,
-        hr         INTEGER,
-        pitches    INTEGER,
-        UNIQUE(player_id, team_id, season_id)
-    );
-
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_teams_gc_uuid
-        ON teams(gc_uuid) WHERE gc_uuid IS NOT NULL;
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_teams_public_id
-        ON teams(public_id) WHERE public_id IS NOT NULL;
-"""
 
 
 # ---------------------------------------------------------------------------
@@ -219,9 +41,9 @@ _SCHEMA_SQL = """
 # ---------------------------------------------------------------------------
 
 
-def _apply_schema(conn: sqlite3.Connection) -> None:
-    """Apply the E-100 schema to a fresh SQLite connection."""
-    conn.executescript(_SCHEMA_SQL)
+def _apply_schema(db_path: Path) -> None:
+    """Apply migrations to a fresh database at db_path."""
+    run_migrations(db_path=db_path)
 
 
 def _insert_lsb_team_and_user(conn: sqlite3.Connection) -> tuple[int, int]:
@@ -354,28 +176,28 @@ def _insert_game_data(
     # LSB games in current season
     conn.executemany(
         "INSERT OR IGNORE INTO games"
-        " (game_id, season_id, game_date, home_team_id, away_team_id, home_score, away_score)"
-        " VALUES (?, ?, ?, ?, ?, ?, ?)",
+        " (game_id, season_id, game_date, home_team_id, away_team_id, home_score, away_score, status)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         [
-            ("game-001", _CURRENT_SEASON_ID, "2026-03-01", lsb_team_id, opp_team_id, 7, 3),
-            ("game-002", _CURRENT_SEASON_ID, "2026-02-20", opp_team_id, lsb_team_id, 2, 5),
+            ("game-001", _CURRENT_SEASON_ID, "2026-03-01", lsb_team_id, opp_team_id, 7, 3, "completed"),
+            ("game-002", _CURRENT_SEASON_ID, "2026-02-20", opp_team_id, lsb_team_id, 2, 5, "completed"),
         ],
     )
 
     # Unrelated game (not involving lsb_team_id)
     conn.execute(
         "INSERT OR IGNORE INTO games"
-        " (game_id, season_id, game_date, home_team_id, away_team_id, home_score, away_score)"
-        " VALUES (?, ?, ?, ?, ?, ?, ?)",
-        ("game-unrelated", _CURRENT_SEASON_ID, "2026-03-05", other_team_id1, other_team_id2, 4, 1),
+        " (game_id, season_id, game_date, home_team_id, away_team_id, home_score, away_score, status)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        ("game-unrelated", _CURRENT_SEASON_ID, "2026-03-05", other_team_id1, other_team_id2, 4, 1, "completed"),
     )
 
     # Alt-season game
     conn.execute(
         "INSERT OR IGNORE INTO games"
-        " (game_id, season_id, game_date, home_team_id, away_team_id, home_score, away_score)"
-        " VALUES (?, ?, ?, ?, ?, ?, ?)",
-        ("game-2025", _ALT_SEASON_ID, "2025-03-15", lsb_team_id, opp_team_id, 6, 4),
+        " (game_id, season_id, game_date, home_team_id, away_team_id, home_score, away_score, status)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        ("game-2025", _ALT_SEASON_ID, "2025-03-15", lsb_team_id, opp_team_id, 6, 4, "completed"),
     )
 
     # Per-game batting for game-001 (lsb = home)
@@ -392,9 +214,9 @@ def _insert_game_data(
     # Per-game pitching for game-001
     conn.execute(
         "INSERT OR IGNORE INTO player_game_pitching"
-        " (game_id, player_id, team_id, ip_outs, h, er, bb, so, hr)"
-        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        ("game-001", "gc-p-001", lsb_team_id, 18, 3, 1, 2, 8, 0),
+        " (game_id, player_id, team_id, ip_outs, h, er, bb, so)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        ("game-001", "gc-p-001", lsb_team_id, 18, 3, 1, 2, 8),
     )
 
     return opp_team_id, other_team_id1
@@ -450,9 +272,9 @@ def _insert_opponent_stats(
     # Alt-season game for season_id override test
     conn.execute(
         "INSERT OR IGNORE INTO games"
-        " (game_id, season_id, game_date, home_team_id, away_team_id, home_score, away_score)"
-        " VALUES (?, ?, ?, ?, ?, ?, ?)",
-        ("game-opp-2025", _ALT_SEASON_ID, "2025-03-10", lsb_team_id, opp_team_id, 4, 2),
+        " (game_id, season_id, game_date, home_team_id, away_team_id, home_score, away_score, status)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        ("game-opp-2025", _ALT_SEASON_ID, "2025-03-10", lsb_team_id, opp_team_id, 4, 2, "completed"),
     )
 
     return unrelated_opp_id
@@ -496,11 +318,11 @@ def _insert_player_profile_data(
     # Games for recent games section
     conn.executemany(
         "INSERT OR IGNORE INTO games"
-        " (game_id, season_id, game_date, home_team_id, away_team_id, home_score, away_score)"
-        " VALUES (?, ?, ?, ?, ?, ?, ?)",
+        " (game_id, season_id, game_date, home_team_id, away_team_id, home_score, away_score, status)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         [
-            ("game-001", _CURRENT_SEASON_ID, "2026-03-01", lsb_team_id, opp_team_id, 7, 3),
-            ("game-002", _CURRENT_SEASON_ID, "2026-02-20", opp_team_id, lsb_team_id, 2, 5),
+            ("game-001", _CURRENT_SEASON_ID, "2026-03-01", lsb_team_id, opp_team_id, 7, 3, "completed"),
+            ("game-002", _CURRENT_SEASON_ID, "2026-02-20", opp_team_id, lsb_team_id, 2, 5, "completed"),
         ],
     )
 
@@ -518,9 +340,9 @@ def _insert_player_profile_data(
     # Per-game pitching for gc-p-001 in game-001 (two-way player)
     conn.execute(
         "INSERT OR IGNORE INTO player_game_pitching"
-        " (game_id, player_id, team_id, ip_outs, h, er, bb, so, hr)"
-        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        ("game-001", "gc-p-001", lsb_team_id, 9, 2, 0, 1, 5, 0),
+        " (game_id, player_id, team_id, ip_outs, h, er, bb, so)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        ("game-001", "gc-p-001", lsb_team_id, 9, 2, 0, 1, 5),
     )
 
     # Player with no stats (just a roster entry)
@@ -542,8 +364,8 @@ def _insert_player_profile_data(
 def _make_seeded_db(tmp_path: Path) -> tuple[Path, int]:
     """Create database with basic batting data. Returns (db_path, lsb_team_id)."""
     db_path = tmp_path / "test_app.db"
+    _apply_schema(db_path)
     conn = sqlite3.connect(str(db_path))
-    _apply_schema(conn)
     lsb_team_id, _ = _insert_lsb_team_and_user(conn)
     _insert_players_and_batting(conn, lsb_team_id)
     conn.commit()
@@ -554,8 +376,8 @@ def _make_seeded_db(tmp_path: Path) -> tuple[Path, int]:
 def _make_pitching_seeded_db(tmp_path: Path) -> tuple[Path, int]:
     """Create database with batting + pitching data. Returns (db_path, lsb_team_id)."""
     db_path = tmp_path / "test_pitching.db"
+    _apply_schema(db_path)
     conn = sqlite3.connect(str(db_path))
-    _apply_schema(conn)
     lsb_team_id, _ = _insert_lsb_team_and_user(conn)
     _insert_players_and_batting(conn, lsb_team_id)
     _insert_pitching(conn, lsb_team_id)
@@ -567,8 +389,8 @@ def _make_pitching_seeded_db(tmp_path: Path) -> tuple[Path, int]:
 def _make_games_seeded_db(tmp_path: Path) -> tuple[Path, int, int]:
     """Create database with game log data. Returns (db_path, lsb_team_id, opp_team_id)."""
     db_path = tmp_path / "test_games.db"
+    _apply_schema(db_path)
     conn = sqlite3.connect(str(db_path))
-    _apply_schema(conn)
     lsb_team_id, _ = _insert_lsb_team_and_user(conn)
     _insert_players_and_batting(conn, lsb_team_id)
     opp_team_id, _ = _insert_game_data(conn, lsb_team_id)
@@ -582,8 +404,8 @@ def _make_opponent_seeded_db(tmp_path: Path) -> tuple[Path, int, int, int]:
     Returns (db_path, lsb_team_id, opp_team_id, unrelated_opp_team_id).
     """
     db_path = tmp_path / "test_opponents.db"
+    _apply_schema(db_path)
     conn = sqlite3.connect(str(db_path))
-    _apply_schema(conn)
     lsb_team_id, _ = _insert_lsb_team_and_user(conn)
     _insert_players_and_batting(conn, lsb_team_id)
     opp_team_id, _ = _insert_game_data(conn, lsb_team_id)
@@ -596,8 +418,8 @@ def _make_opponent_seeded_db(tmp_path: Path) -> tuple[Path, int, int, int]:
 def _make_player_profile_seeded_db(tmp_path: Path) -> tuple[Path, int, int]:
     """Create database with player profile data. Returns (db_path, lsb_team_id, opp_team_id)."""
     db_path = tmp_path / "test_player_profile.db"
+    _apply_schema(db_path)
     conn = sqlite3.connect(str(db_path))
-    _apply_schema(conn)
     lsb_team_id, _ = _insert_lsb_team_and_user(conn)
     _insert_players_and_batting(conn, lsb_team_id)
     # Need opponent team for games
@@ -1106,7 +928,7 @@ class TestGameDetail:
         client, _, _ = games_client
         response = client.get("/dashboard/games/game-001")
         html = response.text
-        for header in ("IP", "H", "ER", "BB", "SO", "HR"):
+        for header in ("IP", "H", "ER", "BB", "SO"):
             assert header in html, f"Expected pitching header '{header}' in game detail."
 
     def test_game_detail_ip_display_filter(self, games_client) -> None:
@@ -1345,8 +1167,8 @@ class TestOpponentDetail:
     ) -> None:
         """'First meeting this season.' shown when only scheduled (not completed) games exist."""
         db_path = tmp_path / "test_no_completed.db"
+        _apply_schema(db_path)
         conn = sqlite3.connect(str(db_path))
-        _apply_schema(conn)
         lsb_team_id, _ = _insert_lsb_team_and_user(conn)
         # Insert opponent and a scheduled (not completed) game
         cursor = conn.execute(
@@ -1390,9 +1212,9 @@ class TestOpponentDetail:
         The old template had no elif for ties, so ties rendered as losses.
         """
         db_path = tmp_path / "test_tie.db"
+        _apply_schema(db_path)
         conn = sqlite3.connect(str(db_path))
         conn.execute("PRAGMA foreign_keys=ON;")
-        _apply_schema(conn)
         lsb_team_id, _ = _insert_lsb_team_and_user(conn)
 
         cursor = conn.execute(
@@ -1401,12 +1223,12 @@ class TestOpponentDetail:
         )
         tie_opp_id: int = cursor.lastrowid  # type: ignore[assignment]
 
-        # Tied game: lsb is home with equal scores (status defaults to 'completed' in test schema)
+        # Tied game: lsb is home with equal scores
         conn.execute(
             "INSERT INTO games"
-            " (game_id, season_id, game_date, home_team_id, away_team_id, home_score, away_score)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?)",
-            ("game-tie", _CURRENT_SEASON_ID, "2026-03-10", lsb_team_id, tie_opp_id, 4, 4),
+            " (game_id, season_id, game_date, home_team_id, away_team_id, home_score, away_score, status)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            ("game-tie", _CURRENT_SEASON_ID, "2026-03-10", lsb_team_id, tie_opp_id, 4, 4, "completed"),
         )
         conn.commit()
         conn.close()
@@ -1423,6 +1245,13 @@ class TestOpponentDetail:
         assert "4-4" in html
         assert 'text-gray-600">T' in html   # tie badge rendered
         assert 'text-red-700">L' not in html  # loss badge must not appear
+
+    def test_opponent_detail_back_link_preserves_team_id(self, opponent_client) -> None:
+        """Back-link to opponents list includes ?team_id= to preserve team context (AC-3 E-122-02)."""
+        client, lsb_team_id, opp_team_id, _ = opponent_client
+        response = client.get(f"/dashboard/opponents/{opp_team_id}?team_id={lsb_team_id}")
+        assert response.status_code == 200
+        assert f"/dashboard/opponents?team_id={lsb_team_id}" in response.text
 
 
 class TestPlayerProfile:
@@ -1594,9 +1423,9 @@ class TestPlayerProfile:
         a 403 when the user clicked the backlink. The fix selects the first permitted team.
         """
         db_path = tmp_path / "test_backlink.db"
+        _apply_schema(db_path)
         conn = sqlite3.connect(str(db_path))
         conn.execute("PRAGMA foreign_keys=ON;")
-        _apply_schema(conn)
         lsb_team_id, _ = _insert_lsb_team_and_user(conn)
 
         # Opponent team — tracked, NOT in the user's permitted_teams

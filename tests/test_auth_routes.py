@@ -46,78 +46,9 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
+from migrations.apply_migrations import run_migrations  # noqa: E402
 from src.api.auth import hash_token  # noqa: E402
 from src.api.main import app  # noqa: E402
-
-# ---------------------------------------------------------------------------
-# Full schema SQL -- E-100 schema
-# ---------------------------------------------------------------------------
-
-_SCHEMA_SQL = """
-    CREATE TABLE IF NOT EXISTS _migrations (
-        id         INTEGER PRIMARY KEY AUTOINCREMENT,
-        filename   TEXT    NOT NULL UNIQUE,
-        applied_at TEXT    NOT NULL DEFAULT (datetime('now'))
-    );
-    INSERT OR IGNORE INTO _migrations (filename) VALUES ('001_initial_schema.sql');
-
-    CREATE TABLE IF NOT EXISTS programs (
-        program_id   TEXT PRIMARY KEY,
-        name         TEXT NOT NULL,
-        program_type TEXT NOT NULL,
-        created_at   TEXT NOT NULL DEFAULT (datetime('now'))
-    );
-
-    CREATE TABLE IF NOT EXISTS teams (
-        id              INTEGER PRIMARY KEY AUTOINCREMENT,
-        name            TEXT NOT NULL,
-        program_id      TEXT REFERENCES programs(program_id),
-        membership_type TEXT NOT NULL CHECK(membership_type IN ('member', 'tracked')),
-        classification  TEXT,
-        public_id       TEXT,
-        gc_uuid         TEXT,
-        source          TEXT NOT NULL DEFAULT 'gamechanger',
-        is_active       INTEGER NOT NULL DEFAULT 1,
-        created_at      TEXT NOT NULL DEFAULT (datetime('now'))
-    );
-
-    CREATE TABLE IF NOT EXISTS users (
-        id              INTEGER PRIMARY KEY AUTOINCREMENT,
-        email           TEXT UNIQUE NOT NULL,
-        hashed_password TEXT,
-        created_at      TEXT NOT NULL DEFAULT (datetime('now'))
-    );
-
-    CREATE TABLE IF NOT EXISTS user_team_access (
-        user_id INTEGER NOT NULL REFERENCES users(id),
-        team_id INTEGER NOT NULL REFERENCES teams(id),
-        UNIQUE(user_id, team_id)
-    );
-
-    CREATE TABLE IF NOT EXISTS magic_link_tokens (
-        token      TEXT PRIMARY KEY,
-        user_id    INTEGER NOT NULL REFERENCES users(id),
-        expires_at TEXT NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS passkey_credentials (
-        credential_id TEXT PRIMARY KEY,
-        user_id       INTEGER NOT NULL REFERENCES users(id),
-        public_key    TEXT NOT NULL,
-        sign_count    INTEGER NOT NULL DEFAULT 0
-    );
-
-    CREATE TABLE IF NOT EXISTS sessions (
-        session_id TEXT PRIMARY KEY,
-        user_id    INTEGER NOT NULL REFERENCES users(id),
-        expires_at TEXT NOT NULL
-    );
-
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_teams_gc_uuid
-        ON teams(gc_uuid) WHERE gc_uuid IS NOT NULL;
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_teams_public_id
-        ON teams(public_id) WHERE public_id IS NOT NULL;
-"""
 
 _SEED_SQL = """
     INSERT OR IGNORE INTO programs (program_id, name, program_type) VALUES
@@ -142,8 +73,8 @@ def _make_db(tmp_path: Path) -> Path:
         Path to the database file.
     """
     db_path = tmp_path / "test_routes.db"
+    run_migrations(db_path=db_path)
     conn = sqlite3.connect(str(db_path))
-    conn.executescript(_SCHEMA_SQL)
     conn.executescript(_SEED_SQL)
     conn.commit()
     conn.close()
