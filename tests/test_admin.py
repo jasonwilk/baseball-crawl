@@ -740,6 +740,39 @@ class TestCascadeDelete:
             == 0
         )
 
+    def test_delete_user_removes_coaching_assignments(self, admin_db: Path) -> None:
+        """Deleting a user with coaching assignments raises no IntegrityError."""
+        admin_id = _insert_user(admin_db, "cascadeadmin4@example.com")
+        user_id = _insert_user(admin_db, "coachuser@example.com")
+        raw_token = _insert_session(admin_db, admin_id)
+
+        # Insert a coaching assignment for the user being deleted.
+        conn = sqlite3.connect(str(admin_db))
+        conn.execute(
+            "INSERT INTO coaching_assignments (user_id, team_id, role) VALUES (?, 1, 'assistant')",
+            (user_id,),
+        )
+        conn.commit()
+        conn.close()
+
+        assert _count_rows(admin_db, "coaching_assignments", "user_id = ?", (user_id,)) == 1
+
+        with patch.dict(
+            "os.environ",
+            {
+                "DATABASE_PATH": str(admin_db),
+                "ADMIN_EMAIL": "cascadeadmin4@example.com",
+            },
+        ):
+            with TestClient(
+                app, follow_redirects=False, cookies={"session": raw_token}
+            ) as client:
+                response = client.post(f"/admin/users/{user_id}/delete")
+
+        # No IntegrityError -- deletion succeeded and redirected.
+        assert response.status_code == 303
+        assert _count_rows(admin_db, "coaching_assignments", "user_id = ?", (user_id,)) == 0
+
 
 # ---------------------------------------------------------------------------
 # AC-3/AC-4: membership_type validation and already-resolved link guard

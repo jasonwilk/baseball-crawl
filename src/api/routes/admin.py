@@ -279,8 +279,8 @@ def _update_user(
 def _delete_user(user_id: int) -> None:
     """Cascade-delete a user and all their auth artifacts.
 
-    Deletes rows from user_team_access, sessions, magic_link_tokens, and
-    passkey_credentials before deleting the user row.
+    Deletes rows from user_team_access, sessions, magic_link_tokens,
+    passkey_credentials, and coaching_assignments before deleting the user row.
 
     Args:
         user_id: The user's primary key.
@@ -290,6 +290,7 @@ def _delete_user(user_id: int) -> None:
         conn.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
         conn.execute("DELETE FROM magic_link_tokens WHERE user_id = ?", (user_id,))
         conn.execute("DELETE FROM passkey_credentials WHERE user_id = ?", (user_id,))
+        conn.execute("DELETE FROM coaching_assignments WHERE user_id = ?", (user_id,))
         conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
         conn.commit()
 
