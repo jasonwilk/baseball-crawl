@@ -4,7 +4,7 @@
 [E-123: Full Code Review Remediation](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, three small correctness issues will be fixed: the hardcoded season default will be dynamic, the `_human_size()` function will display fractional values correctly, and the admin user delete confirmation will use safe JS escaping.

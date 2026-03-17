@@ -4,7 +4,7 @@
 [E-123: Full Code Review Remediation](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, `team_resolver.py` will use the shared `GameChangerAPIError` from `src.gamechanger.exceptions` instead of defining a local duplicate. Exception handling across the codebase will catch the correct type.

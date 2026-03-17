@@ -4,7 +4,7 @@
 [E-123: Full Code Review Remediation](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the player profile recent games display will show both batting and pitching data for two-way players who bat and pitch in the same game, instead of dropping the pitching row during deduplication.

@@ -4,7 +4,7 @@
 [E-123: Full Code Review Remediation](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the PII scanner's `api_key_assignment` regex will detect unquoted YAML-style key-value assignments (e.g., `secret_key: xKfake_value`) in addition to quoted values. The currently failing test `test_secret_key_colon` will pass.

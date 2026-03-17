@@ -1,7 +1,7 @@
 # E-123: Full Code Review Remediation
 
 ## Status
-`READY`
+`COMPLETED`
 
 ## Overview
 Fix 20+ confirmed bugs and safety gaps discovered during the full codebase code review. These span silent auth failure in crawlers, a PII scanner regex gap with a failing test, FK cascade violations, exception type mismatches, data display bugs, unsafe backup operations, and small correctness issues. Left unfixed, they cause silent credential-expiry waste across all crawl operations, a safety tool blind spot, admin delete crashes, wrong error diagnostics, and stale season defaults that will break next year.
@@ -57,15 +57,15 @@ Expert consultation: No expert consultation required -- all findings are verifie
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-123-01 | Crawler CredentialExpiredError propagation (4 non-scouting) | TODO | E-122-01 | - |
-| E-123-02 | PII scanner regex fix for unquoted values | TODO | None | - |
-| E-123-03 | User cascade delete FK fix | TODO | None | - |
-| E-123-04 | GameChangerAPIError type consolidation | TODO | None | - |
-| E-123-05 | Two-way player recent games fix | TODO | None | - |
-| E-123-06 | Scouting run status lifecycle fix | TODO | None | - |
-| E-123-07 | Client retry error message fix | TODO | None | - |
-| E-123-08 | WAL-safe database backup | TODO | None | - |
-| E-123-09 | Small correctness fixes (season default, display, XSS) | TODO | E-123-05 | - |
+| E-123-01 | Crawler CredentialExpiredError propagation (4 non-scouting) | DONE | E-122-01 | - |
+| E-123-02 | PII scanner regex fix for unquoted values | DONE | None | - |
+| E-123-03 | User cascade delete FK fix | DONE | None | - |
+| E-123-04 | GameChangerAPIError type consolidation | DONE | None | - |
+| E-123-05 | Two-way player recent games fix | DONE | None | - |
+| E-123-06 | Scouting run status lifecycle fix | DONE | None | - |
+| E-123-07 | Client retry error message fix | DONE | None | - |
+| E-123-08 | WAL-safe database backup | DONE | None | - |
+| E-123-09 | Small correctness fixes (season default, display, XSS) | DONE | E-123-05 | - |
 
 ## Dispatch Team
 - software-engineer (E-123-01 through E-123-09)
@@ -119,3 +119,4 @@ Story implementers should read the relevant finding section for line numbers, co
 - 2026-03-17: Created from full codebase code review verified findings. 5 verifiers (SE x4, DE x1) confirmed ~40 findings; ~20 net-new after excluding E-117, E-122, E-121 overlap. Organized into 9 stories (all parallel, no file conflicts). Set DRAFT pending user review.
 - 2026-03-17: Codex spec review produced 5 findings; all 5 accepted and applied. Fixes: E-123-06 AC-1 tightened to require `"completed"` status; E-123-06 file list added `tests/test_scouting_crawler.py`; E-123-01 scoped to 4 non-scouting crawlers with E-122-01 dependency; E-123-05 AC-1/AC-3 specified two-row display contract and added template to file list; E-123-09 AC-1 specified query-most-recent-season resolution and added `tests/test_db.py`. Set READY.
 - 2026-03-17: Post-E-122 review found two AC-vs-Technical-Approach contradictions. E-123-05: removed "consider merging" alternative from Technical Approach -- AC-1 mandates two rows, not a merge. E-123-09: removed "or using a helper that derives from current date" from Technical Approach -- AC-1 mandates DB-query for most recent season_id. Also aligned TN-5 in epic to match the two-row contract.
+- 2026-03-17: All 9 stories COMPLETED. Fixes delivered: crawler auth abort propagation (4 crawlers), PII scanner regex gap, user cascade delete FK, exception type consolidation, two-way player recent games, scouting run status lifecycle, client retry error context, WAL-safe backup, dynamic season default + display fix + XSS escaping. 2039 tests pass. Two-wave dispatch (8 parallel wave 1, E-123-09 wave 2 after E-123-05). Documentation assessment: no documentation impact (all bug fixes, no new features/endpoints/schema changes). Context-layer assessment: (1) New convention/pattern? No — CredentialExpiredError pattern established by E-122-01. (2) Architectural decision? No. (3) Footgun/failure mode? No. (4) Agent behavior changes? No. (5) Domain knowledge? No. (6) New CLI/workflow? No. All six triggers: no. No codification needed.

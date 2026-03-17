@@ -4,7 +4,7 @@
 [E-123: Full Code Review Remediation](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the scouting run status lifecycle will correctly transition from `"running"` to `"completed"` after a successful crawl, so that the freshness gating check (`_is_scouted_recently`) works as intended and teams are not re-scouted every run.

@@ -748,9 +748,10 @@ class TestCascadeDelete:
 
         # Insert a coaching assignment for the user being deleted.
         conn = sqlite3.connect(str(admin_db))
+        team_id = _get_team_id(admin_db, "LSB Varsity 2026")
         conn.execute(
-            "INSERT INTO coaching_assignments (user_id, team_id, role) VALUES (?, 1, 'assistant')",
-            (user_id,),
+            "INSERT INTO coaching_assignments (user_id, team_id, role) VALUES (?, ?, 'assistant')",
+            (user_id, team_id),
         )
         conn.commit()
         conn.close()

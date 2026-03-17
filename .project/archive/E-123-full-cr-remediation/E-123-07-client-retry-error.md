@@ -4,7 +4,7 @@
 [E-123: Full Code Review Remediation](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, when `_get_with_retries` exhausts all retry attempts on a 5xx error, the raised exception will include retry context (e.g., "Server error after 3 attempts") instead of the generic "Unexpected status" message.

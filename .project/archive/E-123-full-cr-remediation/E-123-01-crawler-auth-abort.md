@@ -4,7 +4,7 @@
 [E-123: Full Code Review Remediation](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, all four remaining crawlers (schedule, roster, game_stats, player_stats) will immediately abort their `crawl_all()` loops when a `CredentialExpiredError` is raised, instead of catching it in the generic `except Exception` handler and continuing to log errors for every subsequent team. This extends the same pattern that E-122-01 applies to the scouting crawler.

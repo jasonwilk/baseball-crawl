@@ -4,7 +4,7 @@
 [E-123: Full Code Review Remediation](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, `backup_database()` will use the SQLite `Connection.backup()` API instead of `shutil.copy2()`, producing consistent backups even when the database is actively being written to in WAL mode.

@@ -4,7 +4,7 @@
 [E-123: Full Code Review Remediation](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, deleting a user via the admin UI will correctly cascade through the `coaching_assignments` table, preventing `IntegrityError` when a user has coaching assignments. A test will verify the complete cascade.
