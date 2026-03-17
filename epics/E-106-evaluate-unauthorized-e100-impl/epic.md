@@ -38,7 +38,7 @@ To be written during refinement.
 
 ## Technical Notes
 - Branch: `chore/e100-01-de-preimpl` (contains all unauthorized changes)
-- Files reportedly changed: `migrations/001_initial_schema.sql`, `tests/test_e100_schema.py` (new), `tests/fixtures/seed.sql`, `tests/test_migrations.py`, `tests/test_scouting_schema.py`, `tests/test_seed.py`, `tests/test_schema_queries.py`, `epics/E-100-team-model-overhaul/E-100-01-schema-evolution.md`
+- Files reportedly changed: `migrations/001_initial_schema.sql`, `tests/test_e100_schema.py` (new), `tests/fixtures/seed.sql`, `tests/test_migrations.py`, `tests/test_scouting_schema.py`, `tests/test_seed.py`, `tests/test_schema_queries.py`, `.project/archive/E-100-team-model-overhaul/E-100-01-schema-evolution.md`
 - The evaluation should be performed AFTER E-100 planning is finalized and the epic is READY
 
 ## Open Questions

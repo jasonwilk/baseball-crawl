@@ -1,7 +1,7 @@
 # E-100: Team Model Overhaul — Team-First Data Model
 
 ## Status
-`ACTIVE`
+`COMPLETED`
 
 ## Overview
 Fresh-start rebuild of the team data model into a team-first architecture. Drops all existing data (user confirmed), rewrites the schema from scratch with INTEGER PK for teams, programs as organizational metadata, membership_type replacing is_owned, and complete stat coverage per endpoint: per-game stats bounded by the boxscore endpoint, season aggregate stats bounded by the season-stats endpoint. All application code (db.py, auth.py, pipeline, admin, dashboard) is updated in one coordinated epic with no backward-compatibility concerns.
@@ -68,7 +68,7 @@ The current model hardcodes Lincoln Standing Bear assumptions: `is_owned` distin
 | E-100-03 | Pipeline: membership_type + TeamRef + INTEGER PK | DONE | E-100-02 | software-engineer |
 | E-100-04 | Admin UI: team list + add-team flow + INTEGER URLs | DONE | E-100-02 | software-engineer |
 | E-100-05 | Dashboard: INTEGER PK migration | DONE | E-100-02 | software-engineer |
-| E-100-06 | Context-layer updates | TODO | E-100-03, E-100-04, E-100-05 | - |
+| E-100-06 | Context-layer updates | DONE | E-100-03, E-100-04, E-100-05 | claude-architect |
 
 ## Dispatch Team
 - data-engineer (E-100-01)
@@ -337,3 +337,4 @@ With no backward compatibility:
 - 2026-03-14: Codex spec review triage (PM + SE + DE + Coach). 8 findings (F1-F8), 7 questions (Q1-Q7). Final verdicts: F1 FIX (decouple gc_uuid discovery from membership — bridge success proves "followed OR managed," not membership; membership now operator-selected, default tracked; editable on both confirm and edit pages; coach escalated from initial DISMISS), F2 FIX (rule override Technical Note for append-only migration rule), F3 FIX-LITE (wave-boundary merge dispatch guidance added, not a story change), F4 FIX (added 6 missing files to E-100-03: 3 pipeline modules + 3 test files), F5 FIX (corrected migration file names, added seed_dev.sql), F6 FIX (added test_migration_003.py + test_coaching_assignments.py to E-100-01), F7 FIX (TeamRef gc_uuid changed to str | None), F8 FIX (opponent count uses opponent_links, not empty team_opponents). Q7 addressed as SHOULD note in E-100-04 Technical Approach (bridge re-verification on Phase 2 POST).
 - 2026-03-15: Wave 1-3 complete (E-100-01 through E-100-05 DONE). E-100-06 (context-layer) is the only remaining story. Dispatch paused mid-session — will resume in a new session. E-108 (PM as Dispatch Teammate) created as DRAFT during this dispatch to fix workflow role boundaries.
 - 2026-03-14: R7 Codex review triage (SE). F1 FIX (epic overclaimed "every non-computed stat from glossary" while deferring fielding/catcher/pitch-type — narrowed to "per-game tables bounded by boxscore endpoint, season tables bounded by season-stats endpoint"; standing design principle updated; Goals + Success Criteria updated accordingly). F2 FIX (E-100-02 description contradicted AC-13: said "does NOT touch route-level test files" but included test_auth_routes.py — description scoped to exclude test_auth_routes.py which must change when auth.py return type changes). F3 FIX (E-100-04 AC-4 missing `name` field — save POST now includes name). F4 FIX (E-100-01 AC-18 "all other tables" vague — expanded with explicit table list and key FK constraints).
+- 2026-03-17: Epic COMPLETED. All 6 stories done. Fresh-start schema rewrite with INTEGER PK teams, programs, membership_type, classification, team_opponents, enriched stat columns, spray_charts table, TeamRef pattern, two-phase add-team flow, flat team list, complete pipeline and dashboard migration. Context-layer updates codified. Documentation updates captured in E-115 (READY). Context-layer assessment: Trigger 1 (new convention) YES — codified by E-100-06; Trigger 2 (architectural decision) YES — codified by E-100-06; Triggers 3-6 NO. Documentation assessment: Triggers 1, 2, 4, 5 fire — captured by E-115 (READY, 2 stories for docs-writer).
