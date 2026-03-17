@@ -28,6 +28,8 @@ Refer to epic Technical Notes "Scouting Loader Cascade" for the cascade column l
 
 `shf` is confirmed present in `player_season_batting` (DDL line 246). `e` is NOT present in `player_season_batting` — it only exists in `player_game_batting` (DDL line 176). Include 5 batting cascade columns: r, tb, hbp, shf, cs.
 
+**Test file context (E-120-02):** `tests/test_scouting_loader.py` was updated by E-120-02 (shipped 2026-03-17) with a new `test_aggregate_isolated_per_team` test that verifies per-team aggregate isolation. Existing aggregate tests insert game data using only the original columns (ab, h, doubles, triples, hr, rbi, bb, so, sb for batting; ip_outs, h, er, bb, so for pitching). New test fixtures for E-117-04 must include the expanded columns.
+
 ## Non-Goals (Boxscore-Only Scope)
 This story aggregates only the counting stats available from boxscores. Advanced stats that require play-by-play parsing are NOT available in boxscore data and MUST NOT be included in these aggregates:
 - **Not available from boxscores**: QAB, pitches seen per batter (PS), contact quality (HARD/WEAK/LND), fly balls (FLB), ground balls (GB), swing metrics (SW/SM), full count PAs (FULL), 2-strike counts, 6+ pitch PAs, LOB in big spots (LOBB), and all other advanced batting/pitching stats
