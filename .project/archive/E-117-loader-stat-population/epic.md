@@ -1,7 +1,7 @@
 # E-117: Loader Stat Population — Full Endpoint Coverage
 
 ## Status
-`READY`
+`COMPLETED`
 
 ## Overview
 Expand game_loader, season_stats_loader, and scouting_loader to populate all stat columns that the E-100 schema supports and the respective API endpoints provide. Currently ~80+ schema columns remain permanently NULL because the loaders only map a legacy subset. This epic closes the gap between schema capability and actual data flow.
@@ -53,10 +53,10 @@ Promoted from IDEA-028 (Loader Stat Population). Expert consultation with SE and
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-117-01 | Game loader: full boxscore stat coverage + game_stream_id | TODO | None | - |
-| E-117-02 | Season stats loader: batting column expansion (member teams) | TODO | None | - |
-| E-117-03 | Season stats loader: pitching column expansion (member teams) | TODO | E-117-02 | - |
-| E-117-04 | Scouting loader: aggregate query expansion (opponent teams) | TODO | E-117-01 | - |
+| E-117-01 | Game loader: full boxscore stat coverage + game_stream_id | DONE | None | - |
+| E-117-02 | Season stats loader: batting column expansion (member teams) | DONE | None | - |
+| E-117-03 | Season stats loader: pitching column expansion (member teams) | DONE | E-117-02 | - |
+| E-117-04 | Scouting loader: aggregate query expansion (opponent teams) | DONE | E-117-01 | - |
 
 ## Dispatch Team
 - software-engineer (E-117-01, E-117-02, E-117-03, E-117-04)
@@ -152,6 +152,8 @@ Cascade columns:
 - **Batting**: r, tb, hbp, shf, cs (5 of the 6 new game-level columns — `e` has no corresponding column in `player_season_batting`, so it is NOT aggregated)
 - **Pitching**: r, wp, hbp, pitches, total_strikes, bf
 
+**Four sync points per aggregate method:** New columns must appear in all four places: (1) SELECT query, (2) Python tuple unpacking in the `for player_id, ... in rows:` loop, (3) INSERT VALUES, (4) ON CONFLICT UPDATE SET. Missing any one causes either stale/NULL season totals or a runtime `ValueError` (tuple unpacking mismatch).
+
 **NULL handling for sparse aggregates:** Use plain `SUM(col)` (not `COALESCE`). NULL season total = "no data" (stat never recorded). 0 = "zero confirmed occurrences." SQL `SUM()` correctly returns NULL when all inputs are NULL.
 
 **Boxscore-only limitation:** Scouting aggregates can only include basic counting stats that appear in the boxscore response. Advanced stats (QAB, pitches seen per batter, contact quality, swing metrics, etc.) are NOT in boxscores — they require play-by-play parsing. This means scouting-derived opponent season stats will have fewer populated columns than member team season stats (which come from the season-stats API, where GC has already compiled advanced stats). Achieving full stat parity for opponents requires a future play-by-play compilation pipeline (see IDEA-041).
@@ -182,4 +184,6 @@ Cascade columns:
 - 2026-03-17: Codex spec review triage (2 findings). P1 E-117-04 ON CONFLICT UPDATE omission: FIX — updated AC-1/AC-2 to require columns in SELECT, INSERT, and ON CONFLICT UPDATE (not just SELECT and INSERT). Updated Technical Approach to call out the three-place requirement. Added AC-6 (rerun idempotency test), renumbered AC-7 (was AC-6: all existing tests pass). P2 E-117-03 optimistic column test weakness: FIX — strengthened AC-7 to require exact value assertions for optimistic columns (same standard as confirmed), not just generic present/absent checks. Epic Success Criteria already says "assert specific values for every newly populated column" — consistent, no epic change needed.
 - 2026-03-16: Codex spec review triage (5 findings). P1 gp sourcing conflict: FIX — updated E-117-03 AC-2 to acknowledge gp will be NULL (defense.get returns None), explicitly prohibit cross-section mapping (follow-up scope), updated epic Success Criteria. P2 TB mapping not tested: FIX — added E-117-03 AC-8 requiring specific TB→total_balls test. P2 NULL vs zero ambiguity: FIX — specified plain SUM() (not COALESCE) in E-117-04 Technical Approach and epic TN, added NULL-specific test cases to AC-4/AC-5. P2 api-scout consultation: DISMISS — dict.get() makes API behavior questions non-blocking; deferred to IDEA-040. P3 column list duplication: DISMISS — intentional for story self-containment; drift risk low (stories written together).
 - 2026-03-17: Codex spec review round 3 (1 finding). P2 Agent-Routing: stories route to SE but routing table maps ETL to DE. DISMISS with documentation — added Routing Note to Dispatch Team section explaining why SE is correct (Python dict-mapping, not schema/migration work; DE consulted during planning).
+- 2026-03-18: Added 4th sync point (Python tuple unpacking) to Scouting Loader Cascade Technical Notes and E-117-04. SE identified that `_compute_batting_aggregates` and `_compute_pitching_aggregates` destructure rows via positional tuple unpacking — adding a column to the SELECT without extending the unpacking tuple causes a `ValueError` at runtime. Updated E-117-04 AC-1, AC-2, and Technical Approach to require columns in all four places (SELECT, tuple unpacking, INSERT, ON CONFLICT UPDATE).
 - 2026-03-17: Final pre-dispatch refinement pass. Verified all ACs against current source code post-E-120. Column inventories: 6+6 game, 37 season batting, 15+23 season pitching all confirmed against DDL. Skip-debug set contents (lines 79/89/100/102 of game_loader.py) match story descriptions. _PlayerPitching.hr dead code confirmed (field at line 159, not in _upsert_pitching SQL). game_stream_id confirmed in DDL line 135, absent from _upsert_game(). All 37 batting API keys confirmed in season-stats endpoint doc. All 15 confirmed pitching keys confirmed; 23 optimistic correctly classified as not-in-doc. E-120 interactions checked: E-120-02 added test_aggregate_isolated_per_team to tests/test_scouting_loader.py — noted in E-117-04 Technical Approach. No file conflicts, no AC changes needed. Epic confirmed READY for dispatch.
+- 2026-03-18: **COMPLETED.** All 4 stories implemented and verified. E-117-01: game_loader expanded to 12 stat columns (6 batting + 6 pitching) plus game_stream_id threading; dead _PlayerPitching.hr field removed. E-117-02: season_stats_loader batting upsert expanded to 47 columns with stat_completeness='full'. E-117-03: season_stats_loader pitching upsert expanded to 47 columns (15 confirmed + 23 optimistic) with TB→total_balls disambiguation and stat_completeness='full'. E-117-04: scouting_loader aggregate queries expanded (5 batting + 6 pitching cascade columns) with 4-sync-point pattern and NULL-preserving SUM(). 39 total ACs verified. No documentation impact — stat categories already described in CLAUDE.md "Key Metrics We Track." Context-layer assessment: (1) New agent? No. (2) New rule? No. (3) New skill? No. (4) CLAUDE.md change? No. (5) New hook? No. (6) Agent memory? PM memory updated. No context-layer changes needed.

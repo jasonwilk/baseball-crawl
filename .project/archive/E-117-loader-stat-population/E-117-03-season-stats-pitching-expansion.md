@@ -4,7 +4,7 @@
 [E-117: Loader Stat Population](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, `season_stats_loader.py` will populate all 15 confirmed and 23 optimistic pitching columns from the season-stats API endpoint's defense section into `player_season_pitching`, and set `stat_completeness = 'full'` for API-sourced rows.

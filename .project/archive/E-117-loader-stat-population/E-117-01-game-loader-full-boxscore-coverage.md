@@ -4,7 +4,7 @@
 [E-117: Loader Stat Population](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, `game_loader.py` will populate all 12 stat columns available from the boxscore endpoint (6 batting + 6 pitching) and thread `game_stream_id` to the `games` table. Stale "not in schema" comments will be corrected.
