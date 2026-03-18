@@ -4,7 +4,7 @@
 [E-126: Optimize Claude-Architect Context Footprint](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the architect's MEMORY.md will be under 110 lines. Historical ingest workflow logs and Codex configuration details will live in dedicated topic files. Duplicated content (Agent Ecosystem, Agent Frontmatter) will be removed with pointers to authoritative sources.

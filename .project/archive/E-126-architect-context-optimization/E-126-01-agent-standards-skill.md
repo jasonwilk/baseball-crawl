@@ -4,7 +4,7 @@
 [E-126: Optimize Claude-Architect Context Footprint](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the claude-architect agent definition will be ~90 lines shorter. The Standards and Design Methodology sections will live in a new `agent-standards` skill that loads on demand when the architect creates or modifies agents. The agent roster duplication will be replaced with a pointer to CLAUDE.md.
