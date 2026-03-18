@@ -245,6 +245,8 @@ Assign stories in parallel when they have no file conflicts. Before routing stor
 
 ### Step 5: Monitor, review, and verify
 
+> **Boundary reminder:** If you are about to read source files, run `git log`, `grep`, or inspect the implementation to "quickly check" something -- stop. That is domain work regardless of size, and it must be routed to the appropriate agent. Route it through the review/verification sequence below (see Domain Work During Dispatch in `dispatch-pattern.md`).
+
 Stay active in the team. As each implementer reports completion (with `## Files Changed`):
 
 1. **Check context-layer-only skip condition.** If the story modifies ONLY context-layer files (`.claude/agents/`, `.claude/rules/`, `.claude/skills/`, `.claude/hooks/`, `.claude/settings.json`, `.claude/settings.local.json`, `.claude/agent-memory/`, `CLAUDE.md`) and no Python code, route to PM for AC verification and status update. The code-reviewer is skipped for context-layer-only stories -- PM verifies ACs alone. After PM confirms ACs pass, proceed to Step 6 (PM marks DONE). If PM rejects ACs, route feedback to the implementer for revision.
@@ -580,16 +582,12 @@ If PM's context fills during a large epic, the main session respawns PM with a f
 
 ## Anti-Patterns
 
-1. **Do not implement stories yourself.** The main session MUST NOT create, modify, or delete any file -- its only direct file operations are git commands (`git merge`, `git mv`, `git add`, `git commit`) and writes to its own memory directory (`/home/vscode/.claude/projects/*/memory/`). Spawn an implementer for every story, even if the work seems trivial. The coordinator must not also be an implementer.
+1. **Do not fall for the "quick check" trap.** The main session's most common boundary violation starts with a rationalization: "too small to route," "I'll just verify this one thing," "quick check." Quick checks are domain work regardless of size. The main session MUST NOT: create, modify, or delete any file (its only direct file operations are git commands and writes to its own memory directory); verify ACs or update statuses (PM's exclusive responsibility); bypass the code-reviewer by verifying code quality directly; absorb a crashed agent's work instead of respawning the agent; apply fixes -- not even trivial one-line fixes. When something feels too small to route, route it anyway.
 2. **Do not summarize context blocks.** Always send the full story file text and full Technical Notes verbatim. Summarizing loses acceptance criteria, file paths, and constraints that implementers need.
-3. **Do not verify ACs or update statuses yourself.** AC verification and status updates are PM's exclusive responsibility. Route completion reports to PM. The main session MUST NOT check AC boxes, update story/epic status files, or verify acceptance criteria.
-4. **Do not proceed to closure with unverified stories.** If any AC is unmet, send the implementer back. Do not close the epic with partial completion.
-5. **Do not skip the documentation assessment.** The epic cannot be archived until the documentation impact is evaluated per `.claude/rules/documentation.md`.
-6. **Do not commit automatically.** The closure sequence offers to commit -- the user must explicitly approve.
-7. **Do not skip PM spawning.** PM handles all status updates and AC verification during dispatch. PM is spawned alongside implementers and code-reviewer as infrastructure for every dispatch.
-8. **Do not skip the context-layer assessment.** The epic cannot be archived until the context-layer impact is evaluated per `.claude/rules/context-layer-assessment.md`.
-9. **Do not mark stories DONE without code-reviewer approval** (except context-layer-only stories) unless the user explicitly overrides via the circuit breaker escalation. The reviewer is the quality gate -- the main session does not bypass it by verifying ACs directly.
-10. **Do not defer SHOULD FIX findings to epic History.** Every finding must reach a terminal state (FIXED or DISMISSED) during the story. The main session triages each SHOULD FIX item: accept it (route to implementer immediately) or dismiss it (present reasoning to user and wait for confirmation). There is no deferral path.
-11. **Do not spawn context-layer stories with worktree isolation.** Context-layer files (CLAUDE.md, `.claude/agents/`, `.claude/rules/`, `.claude/skills/`, etc.) are shared infrastructure. Stories modifying only these files must run in the main checkout without `isolation: "worktree"`.
-12. **Do not absorb agent work.** If PM crashes, respawn PM. If an implementer crashes, respawn the implementer. The main session never takes over another agent's domain responsibilities. If the code-reviewer is unavailable, respawn it -- do not verify code quality yourself.
-13. **Do not apply fixes yourself.** Route all MUST FIX and accepted SHOULD FIX findings to the implementer who wrote the code. The main session MUST NOT create, modify, or delete any file -- not even for trivial one-line fixes. All file operations are dispatched to implementers.
+3. **Do not proceed to closure with unverified stories.** If any AC is unmet, send the implementer back. Do not close the epic with partial completion.
+4. **Do not skip the documentation assessment.** The epic cannot be archived until the documentation impact is evaluated per `.claude/rules/documentation.md`.
+5. **Do not commit automatically.** The closure sequence offers to commit -- the user must explicitly approve.
+6. **Do not skip PM spawning.** PM handles all status updates and AC verification during dispatch. PM is spawned alongside implementers and code-reviewer as infrastructure for every dispatch.
+7. **Do not skip the context-layer assessment.** The epic cannot be archived until the context-layer impact is evaluated per `.claude/rules/context-layer-assessment.md`.
+8. **Do not defer SHOULD FIX findings to epic History.** Every finding must reach a terminal state (FIXED or DISMISSED) during the story. The main session triages each SHOULD FIX item: accept it (route to implementer immediately) or dismiss it (present reasoning to user and wait for confirmation). There is no deferral path.
+9. **Do not spawn context-layer stories with worktree isolation.** Context-layer files (CLAUDE.md, `.claude/agents/`, `.claude/rules/`, `.claude/skills/`, etc.) are shared infrastructure. Stories modifying only these files must run in the main checkout without `isolation: "worktree"`.
