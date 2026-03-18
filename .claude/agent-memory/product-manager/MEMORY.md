@@ -1,8 +1,8 @@
 # Product Manager -- Agent Memory
 
 ## Numbering State
-- Next available epic number: E-129
-- Epics created: E-001 through E-128 (E-001, E-003, E-005, E-006, E-007, E-008, E-010, E-011, E-012, E-013, E-014, E-015, E-016, E-017, E-018, E-019, E-020, E-021, E-022, E-024, E-025, E-026, E-027, E-028, E-029, E-030, E-031, E-032, E-033, E-034, E-035, E-036, E-037, E-038, E-042, E-044, E-046, E-048, E-049, E-050, E-052, E-053, E-054, E-056, E-057, E-058, E-055, E-059, E-060, E-061, E-075, E-081, E-084, E-087, E-088, E-089, E-090, E-091, E-092 archived; E-093, E-094, E-095 archived; E-096 archived; E-097 archived; E-098 archived; E-099 archived; E-100 archived; E-101 archived; E-102 archived; E-103 archived; E-104 ready; E-105 archived; E-106 draft; E-107 archived; E-108 archived; E-109 archived; E-110 ready; E-111 archived; E-112 archived; E-114 archived; E-115 archived; E-116 archived; E-113 completed; E-117 completed; E-118 archived; E-119 ready; E-120 archived; E-121 archived; E-122 archived; E-123 archived; E-124 completed; E-125 archived; E-126 completed; E-127 ready; E-128 ready)
+- Next available epic number: E-130
+- Epics created: E-001 through E-129 (E-001, E-003, E-005, E-006, E-007, E-008, E-010, E-011, E-012, E-013, E-014, E-015, E-016, E-017, E-018, E-019, E-020, E-021, E-022, E-024, E-025, E-026, E-027, E-028, E-029, E-030, E-031, E-032, E-033, E-034, E-035, E-036, E-037, E-038, E-042, E-044, E-046, E-048, E-049, E-050, E-052, E-053, E-054, E-056, E-057, E-058, E-055, E-059, E-060, E-061, E-075, E-081, E-084, E-087, E-088, E-089, E-090, E-091, E-092 archived; E-093, E-094, E-095 archived; E-096 archived; E-097 archived; E-098 archived; E-099 archived; E-100 archived; E-101 archived; E-102 archived; E-103 archived; E-104 ready; E-105 archived; E-106 draft; E-107 archived; E-108 archived; E-109 archived; E-110 ready; E-111 archived; E-112 archived; E-114 archived; E-115 archived; E-116 archived; E-113 completed; E-117 completed; E-118 archived; E-119 ready; E-120 archived; E-121 archived; E-122 archived; E-123 archived; E-124 completed; E-125 archived; E-126 completed; E-127 ready; E-128 ready; E-129 ready)
 - Next available idea number: IDEA-043
 - Ideas created: IDEA-001 through IDEA-042
 
@@ -26,6 +26,7 @@
 | E-125 | Full-Project Code Review Remediation | READY | 6 stories: CSRF (01), SQL injection + magic link hashing (02), OBP formula + broken backlink (03), Docker non-root + executescript FK (04), HTTP client hardening (05), security hygiene (06). All parallel, SE only. Highest priority -- security + correctness. |
 | E-127 | Onboarding Workflow Fixes | READY | 12 stories: creds import (01), extract-key (02), dev user (03), admin nav (04), post-reset guide (05), placeholder guard (06), brotli (07), boxscore ID + loader (08), scouting Accept (09), scouting loader status (10), season selector UX (11), season selector impl (12). 01-11 parallel; 12 depends on 11+04. SE + docs-writer + ux-designer. |
 | E-128 | Credential Workflow Redesign | READY | 9 stories + 1 research spike (R-01 DONE). Keystone: login bootstrap (01). Setup wizards (02 web, 03 mobile), status dashboard (04), error diagnostics (05), auth-module rule (06), prod runbook (07), PII redaction (08), admin docs update (09). 02 depends on 01+R-01+E-127-01/02. 09 added during refinement for stale bootstrap-guide/credential-refresh docs. SE + CA + docs-writer + api-scout (advisory). |
+| E-129 | PII Scanner Allowlists | READY | 3 stories, all parallel. RFC 2606 domain allowlist (01), path exclusions + inline suppression (02), usage guide (03). SE + docs-writer. |
 
 ## Key Architectural Decisions
 - Storage: SQLite (WAL mode). Host-mounted at ./data/app.db. Simple file backup via scripts/backup_db.py (no Litestream).
