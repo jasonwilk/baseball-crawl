@@ -25,7 +25,7 @@
 | E-110 | Iterative Review Rounds Convention | READY | Codify iterative review/refinement pattern |
 | E-113 | Dispatch Boundary Enforcement | READY | Stop main session domain work during dispatch. 2 stories (parallel), CA only. |
 | E-117 | Loader Stat Population | READY | 4 stories: game_loader expansion (01), season batting (02), season pitching (03, after 02), scouting cascade (04, after 01). SE only. 2-wave dispatch. E-116 YAML fix unblocks this. |
-| E-124 | Review Workflow Improvements | DRAFT | 3 stories: user-in-loop triage, post-review remediation loop, main-session edit prohibition. CA only. |
+| E-124 | Review Workflow Improvements | READY | 3 stories serialized: edit prohibition (03) -> triage (01) -> remediation loop (02). CA only. Key refinement: serialized for edit-tool safety, added workflow-discipline.md to E-124-02 for auth gate exception. |
 | E-125 | Full-Project Code Review Remediation | READY | 6 stories: CSRF (01), SQL injection + magic link hashing (02), OBP formula + broken backlink (03), Docker non-root + executescript FK (04), HTTP client hardening (05), security hygiene (06). All parallel, SE only. Highest priority -- security + correctness. |
 
 ## Key Architectural Decisions

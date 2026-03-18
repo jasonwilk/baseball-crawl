@@ -22,8 +22,8 @@ During dispatch, the main session triages SHOULD FIX findings (Phase 3, Step 5, 
 The implement skill's Phase 3, Step 5, item 3 currently describes a binary accept/dismiss decision made entirely by the main session. This story changes the dismiss path to require user confirmation. The accept path is unchanged. The workflow summary ASCII diagram at the end of the skill also references triage and should reflect the new user-confirmation step.
 
 ## Dependencies
-- **Blocked by**: None
-- **Blocks**: None
+- **Blocked by**: E-124-03 (establishes absolute language foundation; must be in place before triage edits)
+- **Blocks**: E-124-02
 
 ## Files to Create or Modify
 - `.claude/skills/implement/SKILL.md` (Phase 3, Step 5 item 3; workflow summary diagram)
