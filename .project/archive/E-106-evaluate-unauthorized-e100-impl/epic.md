@@ -1,7 +1,7 @@
 # E-106: Evaluate Unauthorized E-100-01 Implementation
 
 ## Status
-`DRAFT`
+`INVALID`
 
 ## Overview
 During an E-100 planning session (2026-03-14), the DE agent implemented E-100-01 (schema rewrite) without dispatch authorization. The work is branched at `chore/e100-01-de-preimpl`. This epic evaluates that work against the finalized E-100 plan and decides: adopt, partially adopt, or discard.
@@ -47,3 +47,4 @@ To be written during refinement.
 
 ## History
 - 2026-03-14: Created. Motivated by DE agent implementing E-100-01 during a planning session without dispatch authorization. All three consulted agents (PM, SE, DE) recommended branching and evaluating rather than reverting.
+- 2026-03-18: Marked INVALID. E-100 completed independently through normal dispatch, making this evaluation epic moot. Branch `chore/e100-01-de-preimpl` deleted.
