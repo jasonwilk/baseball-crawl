@@ -70,36 +70,52 @@ _UUID_RE = re.compile(
 # Stats present in the main stats object (always):
 _BATTING_MAIN: dict[str, str] = {
     "AB": "ab",
+    "R": "r",
     "H": "h",
     "RBI": "rbi",
     "BB": "bb",
     "SO": "so",
 }
-# "R" is not in the schema -- log at DEBUG, do not store.
-_BATTING_SKIP_DEBUG = {"R", "TB"}
 
-# Extras mapped from stat_name to DB column:
+# Extras mapped from stat_name to DB column (absent = 0):
 _BATTING_EXTRAS: dict[str, str] = {
     "2B": "doubles",
     "3B": "triples",
     "HR": "hr",
     "SB": "sb",
+    "TB": "tb",
+    "HBP": "hbp",
+    "CS": "cs",
 }
-# Extras not in batting schema -- log at DEBUG, do not store.
-_BATTING_EXTRAS_SKIP_DEBUG = {"TB", "HBP", "CS", "E"}
+# Nullable batting extras: SHF and E may be absent from some boxscore responses.
+# Use dict.get() without default -- absent = NULL (not 0).
+# SHF: listed in GC JS bundle but not confirmed in observed boxscore extras.
+# E: placement varies (some boxscores list under FIELDING_EXTRA, not BATTING_EXTRA).
+_BATTING_EXTRAS_NULLABLE: dict[str, str] = {
+    "SHF": "shf",
+    "E": "e",
+}
 
 # Pitching stats mapped from boxscore to DB columns.
 _PITCHING_MAIN: dict[str, str] = {
     "H": "h",
+    "R": "r",
     "ER": "er",
     "BB": "bb",
     "SO": "so",
 }
 # "IP" is converted to ip_outs (not a simple name mapping).
-# "R" is not in the schema.
-_PITCHING_SKIP_DEBUG = {"R"}
-# Pitching extras not in schema:
-_PITCHING_EXTRAS_SKIP_DEBUG = {"WP", "HBP", "#P", "TS", "BF", "HR"}
+
+# Pitching extras mapped from stat_name to DB column (absent = 0):
+_PITCHING_EXTRAS: dict[str, str] = {
+    "WP": "wp",
+    "HBP": "hbp",
+    "#P": "pitches",
+    "TS": "total_strikes",
+    "BF": "bf",
+}
+# HR allowed is genuinely not in the boxscore pitching extras (confirmed by E-100).
+_PITCHING_EXTRAS_SKIP_DEBUG = {"HR"}
 
 
 # ---------------------------------------------------------------------------
@@ -136,6 +152,7 @@ class _PlayerBatting:
 
     player_id: str
     ab: int = 0
+    r: int = 0
     h: int = 0
     doubles: int = 0
     triples: int = 0
@@ -144,6 +161,11 @@ class _PlayerBatting:
     bb: int = 0
     so: int = 0
     sb: int = 0
+    tb: int = 0
+    hbp: int = 0
+    cs: int = 0
+    shf: int | None = None
+    e: int | None = None
 
 
 @dataclass
@@ -153,10 +175,15 @@ class _PlayerPitching:
     player_id: str
     ip_outs: int = 0
     h: int = 0
+    r: int = 0
     er: int = 0
     bb: int = 0
     so: int = 0
-    hr: int = 0
+    wp: int = 0
+    hbp: int = 0
+    pitches: int = 0
+    total_strikes: int = 0
+    bf: int = 0
 
 
 # ---------------------------------------------------------------------------
@@ -484,6 +511,7 @@ class GameLoader:
             self._upsert_game(
                 summary.event_id, game_date,
                 home_team_id, away_team_id, home_score, away_score,
+                summary.game_stream_id,
             )
         except sqlite3.Error as exc:
             logger.error("Failed to upsert game %s: %s", summary.event_id, exc)
@@ -621,25 +649,12 @@ class GameLoader:
             for api_key, db_col in _BATTING_MAIN.items():
                 if api_key in raw_stats:
                     setattr(batting, db_col, int(raw_stats[api_key]))
-            for api_key in _BATTING_SKIP_DEBUG:
-                if api_key in raw_stats:
-                    logger.debug(
-                        "Batting field %r not in schema; ignoring (player=%s game=%s)",
-                        api_key,
-                        player_id,
-                        game_id,
-                    )
             for api_key, db_col in _BATTING_EXTRAS.items():
                 val = player_extras.get(api_key, 0)
                 setattr(batting, db_col, int(val))
-            for api_key in _BATTING_EXTRAS_SKIP_DEBUG:
-                if api_key in player_extras:
-                    logger.debug(
-                        "Batting extra %r not in schema; ignoring (player=%s game=%s)",
-                        api_key,
-                        player_id,
-                        game_id,
-                    )
+            for api_key, db_col in _BATTING_EXTRAS_NULLABLE.items():
+                val = player_extras.get(api_key)
+                setattr(batting, db_col, int(val) if val is not None else None)
 
             try:
                 self._ensure_stub_player(player_id)
@@ -696,17 +711,12 @@ class GameLoader:
             for api_key, db_col in _PITCHING_MAIN.items():
                 if api_key in raw_stats:
                     setattr(pitching, db_col, int(raw_stats[api_key]))
-            for api_key in _PITCHING_SKIP_DEBUG:
-                if api_key in raw_stats:
-                    logger.debug(
-                        "Pitching field %r not in schema; ignoring (player=%s game=%s)",
-                        api_key,
-                        player_id,
-                        game_id,
-                    )
             # IP -> ip_outs conversion (1 IP = 3 outs)
             if "IP" in raw_stats:
                 pitching.ip_outs = round(float(raw_stats["IP"]) * 3)
+            for api_key, db_col in _PITCHING_EXTRAS.items():
+                val = player_extras.get(api_key, 0)
+                setattr(pitching, db_col, int(val))
             for api_key in _PITCHING_EXTRAS_SKIP_DEBUG:
                 if api_key in player_extras:
                     logger.debug(
@@ -789,6 +799,7 @@ class GameLoader:
         away_team_id: int,
         home_score: int,
         away_score: int,
+        game_stream_id: str,
     ) -> None:
         """Upsert a game record into the ``games`` table.
 
@@ -799,23 +810,25 @@ class GameLoader:
             away_team_id: INTEGER PK of the away team.
             home_score: Final home score.
             away_score: Final away score.
+            game_stream_id: Stream ID from game-summaries (boxscore file key).
         """
         self._db.execute(
             """
             INSERT INTO games
                 (game_id, season_id, game_date, home_team_id, away_team_id,
-                 home_score, away_score, status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, 'completed')
+                 home_score, away_score, status, game_stream_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'completed', ?)
             ON CONFLICT(game_id) DO UPDATE SET
-                game_date    = excluded.game_date,
-                home_team_id = excluded.home_team_id,
-                away_team_id = excluded.away_team_id,
-                home_score   = excluded.home_score,
-                away_score   = excluded.away_score,
-                status       = excluded.status
+                game_date      = excluded.game_date,
+                home_team_id   = excluded.home_team_id,
+                away_team_id   = excluded.away_team_id,
+                home_score     = excluded.home_score,
+                away_score     = excluded.away_score,
+                status         = excluded.status,
+                game_stream_id = excluded.game_stream_id
             """,
             (game_id, self._season_id, game_date, home_team_id, away_team_id,
-             home_score, away_score),
+             home_score, away_score, game_stream_id),
         )
         logger.debug(
             "Upserted game %s: %s vs %s (%d-%d) on %s",
@@ -840,12 +853,13 @@ class GameLoader:
         self._db.execute(
             """
             INSERT INTO player_game_batting
-                (game_id, player_id, team_id, ab, h, doubles, triples,
-                 hr, rbi, bb, so, sb)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (game_id, player_id, team_id, ab, r, h, doubles, triples,
+                 hr, rbi, bb, so, sb, tb, hbp, cs, shf, e)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(game_id, player_id) DO UPDATE SET
                 team_id = excluded.team_id,
                 ab      = excluded.ab,
+                r       = excluded.r,
                 h       = excluded.h,
                 doubles = excluded.doubles,
                 triples = excluded.triples,
@@ -853,13 +867,19 @@ class GameLoader:
                 rbi     = excluded.rbi,
                 bb      = excluded.bb,
                 so      = excluded.so,
-                sb      = excluded.sb
+                sb      = excluded.sb,
+                tb      = excluded.tb,
+                hbp     = excluded.hbp,
+                cs      = excluded.cs,
+                shf     = excluded.shf,
+                e       = excluded.e
             """,
             (
                 game_id,
                 batting.player_id,
                 team_id,
                 batting.ab,
+                batting.r,
                 batting.h,
                 batting.doubles,
                 batting.triples,
@@ -868,6 +888,11 @@ class GameLoader:
                 batting.bb,
                 batting.so,
                 batting.sb,
+                batting.tb,
+                batting.hbp,
+                batting.cs,
+                batting.shf,
+                batting.e,
             ),
         )
 
@@ -884,15 +909,22 @@ class GameLoader:
         self._db.execute(
             """
             INSERT INTO player_game_pitching
-                (game_id, player_id, team_id, ip_outs, h, er, bb, so)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                (game_id, player_id, team_id, ip_outs, h, r, er, bb, so,
+                 wp, hbp, pitches, total_strikes, bf)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(game_id, player_id) DO UPDATE SET
-                team_id = excluded.team_id,
-                ip_outs = excluded.ip_outs,
-                h       = excluded.h,
-                er      = excluded.er,
-                bb      = excluded.bb,
-                so      = excluded.so
+                team_id       = excluded.team_id,
+                ip_outs       = excluded.ip_outs,
+                h             = excluded.h,
+                r             = excluded.r,
+                er            = excluded.er,
+                bb            = excluded.bb,
+                so            = excluded.so,
+                wp            = excluded.wp,
+                hbp           = excluded.hbp,
+                pitches       = excluded.pitches,
+                total_strikes = excluded.total_strikes,
+                bf            = excluded.bf
             """,
             (
                 game_id,
@@ -900,9 +932,15 @@ class GameLoader:
                 team_id,
                 pitching.ip_outs,
                 pitching.h,
+                pitching.r,
                 pitching.er,
                 pitching.bb,
                 pitching.so,
+                pitching.wp,
+                pitching.hbp,
+                pitching.pitches,
+                pitching.total_strikes,
+                pitching.bf,
             ),
         )
 

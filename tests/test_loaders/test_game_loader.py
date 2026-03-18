@@ -993,3 +993,252 @@ def test_detect_team_keys_uuid_only_gc_uuid_none(db: sqlite3.Connection) -> None
     # No phantom team rows should be created by _detect_team_keys (it only reads)
     phantom = db.execute("SELECT id FROM teams WHERE gc_uuid = ''").fetchone()
     assert phantom is None, "No phantom row with gc_uuid='' should exist"
+
+
+# ---------------------------------------------------------------------------
+# E-117-01: Extended stat coverage (AC-8 through AC-11)
+# ---------------------------------------------------------------------------
+
+
+def _make_full_boxscore() -> dict:
+    """Boxscore with non-zero values for all 12 new stat columns.
+
+    Batting extras: R (main), TB, HBP, CS in extras; SHF and E present too.
+    Pitching extras: R (main), WP, HBP, pitches, total_strikes, BF in extras.
+    """
+    return {
+        _OWN_TEAM_SLUG: {
+            "players": [],
+            "groups": [
+                {
+                    "category": "lineup",
+                    "stats": [
+                        {
+                            "player_id": _PLAYER_OWN_1,
+                            "player_text": "(CF)",
+                            "is_primary": True,
+                            "stats": {
+                                "AB": 4, "R": 2, "H": 3, "RBI": 2, "BB": 1, "SO": 0
+                            },
+                        }
+                    ],
+                    "extra": [
+                        {"stat_name": "2B",  "stats": [{"player_id": _PLAYER_OWN_1, "value": 1}]},
+                        {"stat_name": "TB",  "stats": [{"player_id": _PLAYER_OWN_1, "value": 5}]},
+                        {"stat_name": "HBP", "stats": [{"player_id": _PLAYER_OWN_1, "value": 1}]},
+                        {"stat_name": "CS",  "stats": [{"player_id": _PLAYER_OWN_1, "value": 1}]},
+                        {"stat_name": "SHF", "stats": [{"player_id": _PLAYER_OWN_1, "value": 2}]},
+                        {"stat_name": "E",   "stats": [{"player_id": _PLAYER_OWN_1, "value": 1}]},
+                    ],
+                },
+                {
+                    "category": "pitching",
+                    "stats": [
+                        {
+                            "player_id": _PLAYER_OWN_P1,
+                            "player_text": "(W)",
+                            "stats": {
+                                "IP": 6, "H": 4, "R": 2, "ER": 2, "BB": 1, "SO": 8
+                            },
+                        }
+                    ],
+                    "extra": [
+                        {"stat_name": "WP",  "stats": [{"player_id": _PLAYER_OWN_P1, "value": 1}]},
+                        {"stat_name": "HBP", "stats": [{"player_id": _PLAYER_OWN_P1, "value": 1}]},
+                        {"stat_name": "#P",  "stats": [{"player_id": _PLAYER_OWN_P1, "value": 87}]},
+                        {"stat_name": "TS",  "stats": [{"player_id": _PLAYER_OWN_P1, "value": 57}]},
+                        {"stat_name": "BF",  "stats": [{"player_id": _PLAYER_OWN_P1, "value": 24}]},
+                    ],
+                },
+            ],
+        },
+        _OPP_TEAM_ID: {
+            "players": [],
+            "groups": [
+                {
+                    "category": "lineup",
+                    "stats": [
+                        {
+                            "player_id": _PLAYER_OPP_1,
+                            "player_text": "(1B)",
+                            "stats": {"AB": 3, "R": 0, "H": 1, "RBI": 0, "BB": 0, "SO": 1},
+                        }
+                    ],
+                    "extra": [],
+                },
+                {
+                    "category": "pitching",
+                    "stats": [
+                        {
+                            "player_id": _PLAYER_OPP_P1,
+                            "player_text": "(L)",
+                            "stats": {"IP": 5, "H": 7, "R": 5, "ER": 5, "BB": 2, "SO": 4},
+                        }
+                    ],
+                    "extra": [],
+                },
+            ],
+        },
+    }
+
+
+def test_batting_r_stored_from_main_stats(db: sqlite3.Connection, tmp_path: Path) -> None:
+    """AC-8/9: Batting R from main stats is stored in player_game_batting.r."""
+    boxscore = _make_full_boxscore()
+    team_dir = _write_team_dir(tmp_path, boxscores={_GAME_STREAM_ID: boxscore})
+    loader = _make_loader(db)
+
+    loader.load_all(team_dir)
+
+    row = db.execute(
+        "SELECT r FROM player_game_batting WHERE player_id = ? AND game_id = ?",
+        (_PLAYER_OWN_1, _EVENT_ID),
+    ).fetchone()
+    assert row is not None
+    assert row[0] == 2
+
+
+def test_batting_tb_hbp_cs_stored_from_extras(db: sqlite3.Connection, tmp_path: Path) -> None:
+    """AC-9: TB, HBP, CS from extras array are stored correctly."""
+    boxscore = _make_full_boxscore()
+    team_dir = _write_team_dir(tmp_path, boxscores={_GAME_STREAM_ID: boxscore})
+    loader = _make_loader(db)
+
+    loader.load_all(team_dir)
+
+    row = db.execute(
+        "SELECT tb, hbp, cs FROM player_game_batting WHERE player_id = ? AND game_id = ?",
+        (_PLAYER_OWN_1, _EVENT_ID),
+    ).fetchone()
+    assert row is not None
+    assert row[0] == 5   # tb
+    assert row[1] == 1   # hbp
+    assert row[2] == 1   # cs
+
+
+def test_batting_shf_e_stored_when_present(db: sqlite3.Connection, tmp_path: Path) -> None:
+    """AC-9: SHF and E store integer values when present in extras."""
+    boxscore = _make_full_boxscore()
+    team_dir = _write_team_dir(tmp_path, boxscores={_GAME_STREAM_ID: boxscore})
+    loader = _make_loader(db)
+
+    loader.load_all(team_dir)
+
+    row = db.execute(
+        "SELECT shf, e FROM player_game_batting WHERE player_id = ? AND game_id = ?",
+        (_PLAYER_OWN_1, _EVENT_ID),
+    ).fetchone()
+    assert row is not None
+    assert row[0] == 2   # shf
+    assert row[1] == 1   # e
+
+
+def test_batting_shf_e_null_when_absent(db: sqlite3.Connection, tmp_path: Path) -> None:
+    """AC-9: SHF and E are NULL when not present in extras (nullable columns)."""
+    # Default boxscore has no extras -- SHF and E will be absent.
+    boxscore = _make_boxscore(batting_extra=[])
+    team_dir = _write_team_dir(tmp_path, boxscores={_GAME_STREAM_ID: boxscore})
+    loader = _make_loader(db)
+
+    loader.load_all(team_dir)
+
+    row = db.execute(
+        "SELECT shf, e FROM player_game_batting WHERE player_id = ? AND game_id = ?",
+        (_PLAYER_OWN_1, _EVENT_ID),
+    ).fetchone()
+    assert row is not None
+    assert row[0] is None, f"shf should be NULL when absent, got {row[0]}"
+    assert row[1] is None, f"e should be NULL when absent, got {row[1]}"
+
+
+def test_batting_hbp_cs_zero_when_absent(db: sqlite3.Connection, tmp_path: Path) -> None:
+    """AC-9: HBP and CS are 0 when not present in extras (sparse but confirmed in API)."""
+    boxscore = _make_boxscore(batting_extra=[])
+    team_dir = _write_team_dir(tmp_path, boxscores={_GAME_STREAM_ID: boxscore})
+    loader = _make_loader(db)
+
+    loader.load_all(team_dir)
+
+    row = db.execute(
+        "SELECT hbp, cs FROM player_game_batting WHERE player_id = ? AND game_id = ?",
+        (_PLAYER_OWN_1, _EVENT_ID),
+    ).fetchone()
+    assert row is not None
+    assert row[0] == 0, f"hbp should be 0 when absent, got {row[0]}"
+    assert row[1] == 0, f"cs should be 0 when absent, got {row[1]}"
+
+
+def test_pitching_r_stored_from_main_stats(db: sqlite3.Connection, tmp_path: Path) -> None:
+    """AC-10: Pitching R from main stats is stored in player_game_pitching.r."""
+    boxscore = _make_full_boxscore()
+    team_dir = _write_team_dir(tmp_path, boxscores={_GAME_STREAM_ID: boxscore})
+    loader = _make_loader(db)
+
+    loader.load_all(team_dir)
+
+    row = db.execute(
+        "SELECT r FROM player_game_pitching WHERE player_id = ? AND game_id = ?",
+        (_PLAYER_OWN_P1, _EVENT_ID),
+    ).fetchone()
+    assert row is not None
+    assert row[0] == 2
+
+
+def test_pitching_new_extras_stored(db: sqlite3.Connection, tmp_path: Path) -> None:
+    """AC-10: WP, HBP, pitches, total_strikes, BF from extras are stored correctly."""
+    boxscore = _make_full_boxscore()
+    team_dir = _write_team_dir(tmp_path, boxscores={_GAME_STREAM_ID: boxscore})
+    loader = _make_loader(db)
+
+    loader.load_all(team_dir)
+
+    row = db.execute(
+        "SELECT wp, hbp, pitches, total_strikes, bf "
+        "FROM player_game_pitching WHERE player_id = ? AND game_id = ?",
+        (_PLAYER_OWN_P1, _EVENT_ID),
+    ).fetchone()
+    assert row is not None
+    assert row[0] == 1    # wp
+    assert row[1] == 1    # hbp
+    assert row[2] == 87   # pitches
+    assert row[3] == 57   # total_strikes
+    assert row[4] == 24   # bf
+
+
+def test_pitching_extras_zero_when_absent(db: sqlite3.Connection, tmp_path: Path) -> None:
+    """AC-10: Pitching sparse extras (WP, HBP, pitches) are 0 when not in extras."""
+    # Use default boxscore -- own pitcher has no extras array.
+    boxscore = _make_boxscore()
+    team_dir = _write_team_dir(tmp_path, boxscores={_GAME_STREAM_ID: boxscore})
+    loader = _make_loader(db)
+
+    loader.load_all(team_dir)
+
+    row = db.execute(
+        "SELECT wp, hbp, pitches, total_strikes, bf "
+        "FROM player_game_pitching WHERE player_id = ? AND game_id = ?",
+        (_PLAYER_OWN_P1, _EVENT_ID),
+    ).fetchone()
+    assert row is not None
+    assert row[0] == 0, f"wp should be 0 when absent, got {row[0]}"
+    assert row[1] == 0, f"hbp should be 0 when absent, got {row[1]}"
+    assert row[2] == 0, f"pitches should be 0 when absent, got {row[2]}"
+    assert row[3] == 0, f"total_strikes should be 0 when absent, got {row[3]}"
+    assert row[4] == 0, f"bf should be 0 when absent, got {row[4]}"
+
+
+def test_game_stream_id_stored(db: sqlite3.Connection, tmp_path: Path) -> None:
+    """AC-11: games.game_stream_id is populated from GameSummaryEntry.game_stream_id."""
+    boxscore = _make_boxscore()
+    team_dir = _write_team_dir(tmp_path, boxscores={_GAME_STREAM_ID: boxscore})
+    loader = _make_loader(db)
+
+    loader.load_all(team_dir)
+
+    row = db.execute(
+        "SELECT game_stream_id FROM games WHERE game_id = ?", (_EVENT_ID,)
+    ).fetchone()
+    assert row is not None
+    assert row[0] == _GAME_STREAM_ID, (
+        f"Expected game_stream_id={_GAME_STREAM_ID!r}, got {row[0]!r}"
+    )
