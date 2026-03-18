@@ -224,21 +224,18 @@ class GameStatsCrawler:
         return raw
 
     def _extract_game_stream_id(self, record: dict[str, Any]) -> str | None:
-        """Extract the ``game_stream.id`` from a game-summaries record.
+        """Extract the ``event_id`` from a game-summaries record.
 
-        This is the path parameter for the boxscore endpoint.  It is distinct
-        from ``event_id`` and ``game_stream.game_id``.
+        The boxscore endpoint path parameter is ``event_id`` (which equals
+        ``game_stream.game_id``), NOT ``game_stream.id``.
 
         Args:
             record: A single game-summaries record dict.
 
         Returns:
-            The ``game_stream.id`` string, or ``None`` if absent.
+            The ``event_id`` string, or ``None`` if absent.
         """
-        game_stream = record.get("game_stream")
-        if not isinstance(game_stream, dict):
-            return None
-        return game_stream.get("id")
+        return record.get("event_id")
 
     def _game_summaries_path(self, team_id: str, season: str) -> Path:
         """Return the path to the game-summaries file for a team.

@@ -23,14 +23,24 @@ payload = json.loads(base64.urlsafe_b64decode(token.split('.')[1] + '=='))
 print(payload.get('cid'))  # compare to GAMECHANGER_CLIENT_ID_WEB
 ```
 
+## iOS Client ID Version History (Confirmed via Proxy)
+
+| App Version | iOS Version | Client ID |
+|-------------|-------------|-----------|
+| Odyssey/2026.8.0 | 26.3.0 | `0f18f027-c51e-4122-a330-9d537beb83e0` |
+| Odyssey/2026.9.0 | 26.3.1 | `23e37466-2878-43f4-a9f8-5f1751b7efcf` (current as of 2026-03-12) |
+
+Client IDs rotate with major iOS app versions. The JS bundle multi-match issue (E-127-02) is related: web bundle also contains multiple EDEN_AUTH_CLIENT_KEY entries (web + current mobile).
+
 ## Mobile vs Web Differences (Confirmed)
 
 | Header | Web | Mobile |
 |--------|-----|--------|
 | POST /auth content-type | `application/json; charset=utf-8` | `application/vnd.gc.com.post_eden_auth+json; version=1.0.0` |
+| POST /auth Accept | N/A | `application/vnd.gc.com.eden_auth+json; version=1.0.0` |
 | GET content-type | `application/vnd.gc.com.none+json; version=undefined` | `application/vnd.gc.com.none+json; version=0.0.0` |
-| gc-app-version | `0.0.0` (POST /auth only) | `2026.7.0.0` (all requests) |
-| Accept-Encoding | `gzip, deflate` | `br;q=1.0, gzip;q=0.9, deflate;q=0.8` |
+| gc-app-version | `0.0.0` (POST /auth only) | `2026.9.0.0` (all requests; was 2026.7.0.0) |
+| Accept-Encoding | `gzip, deflate, br, zstd` (real Chrome) | `br;q=1.0, gzip;q=0.9, deflate;q=0.8` |
 
 ## Proxy Addon Gaps (E-075-02 targets)
 

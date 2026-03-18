@@ -1,7 +1,7 @@
 # E-110: Iterative Review Rounds Convention
 
 ## Status
-`READY`
+`ABANDONED`
 
 ## Overview
 Codify the iterative review/refinement rounds pattern into a documented skill so the main session has a clear procedural reference when the user requests multi-round quality loops (e.g., "3 rounds of refinement" or "review with 2 rounds"). The pattern wraps existing skills (codex-spec-review, codex-review) and the code-reviewer agent -- it does not replace them.
@@ -61,3 +61,4 @@ No expert consultation required beyond CA -- this is a pure process/workflow epi
 - 2026-03-15: Codex spec review round 2. 2 findings (1×P1, 1×P2). 1 refined: E-110-02 AC-4 corrected "bold trigger phrase" to "bold workflow label" to match actual CLAUDE.md Workflows format. 1 dismissed: E-110-01 AC-5 review input contract (P1) -- the skill wraps existing tools by reference; input contracts are defined in each tool's own file, and duplicating them would create maintenance coupling. AC-5 already specifies what the section must cover (inner tools, participants, review target); how to invoke each tool is the architect's domain.
 - 2026-03-15: Final refinement pass. 2 changes: (1) Added closing synthesis step -- AC-3 step (7) + new AC-10 requiring the main session to present a synthesis to the user after all rounds complete (summarize refinements, flag unresolved items, confirm before proceeding). The main session is the only agent that persists across rounds and has the full picture. (2) Added implement skill boundary clarification to Technical Notes -- review-rounds is a standalone workflow, not a modifier on implement's Phase 4 "and review" chain.
 - 2026-03-15: PM+CA team refinement (round 5). 4 changes: (1) New AC-11 -- READY Gate step for refinement rounds variant: after closing synthesis, main session offers to mark epic READY (user confirms; refinement-rounds only). Addresses user's explicit request. (2) AC-9 extended with cross-round finding resolution anti-pattern (each round's triage must reach terminal state before next round begins). (3) Technical Note added: READY gate design reasoning (main session authority, offer-not-automatic, Dispatch Authorization Gate preserved). (4) Technical Note added: review rounds operate on main checkout (no worktree isolation). Epic set to READY.
+- 2026-03-18: ABANDONED. User decided to invalidate and abandon the epic.

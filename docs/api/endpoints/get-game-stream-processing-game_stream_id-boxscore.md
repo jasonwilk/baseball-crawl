@@ -6,7 +6,12 @@ auth: required
 profiles:
   web:
     status: confirmed
-    notes: Full schema documented. Both teams' batting and pitching lines confirmed.
+    notes: >
+      Full schema documented. Both teams' batting and pitching lines confirmed.
+      Path parameter is event_id -- empirically verified 2026-03-18: event_id
+      returns 200, game_stream.id returns 500 (same game, direct A/B test,
+      Standing Bear Freshman 2025). Prior documentation incorrectly identified
+      the parameter as game_stream.id.
   mobile:
     status: unverified
     notes: Not captured from mobile profile.
@@ -18,15 +23,21 @@ response_shape: object
 response_sample: data/raw/boxscore-sample.json
 raw_sample_size: "13 KB, both teams' batting and pitching lines"
 discovered: "2026-03-04"
-last_confirmed: "2026-03-12"
+last_confirmed: "2026-03-18"
 tags: [games, events, player, stats]
 caveats:
   - >
-    CRITICAL ID MAPPING: The URL parameter is the game_stream_id -- NOT event_id,
-    NOT game_stream.game_id. Two sources for this UUID: (1) preferred: `id` field
-    from GET /public/teams/{public_id}/games (no auth, confirmed 2026-03-12); (2)
-    fallback: game_stream.id from GET /teams/{team_id}/game-summaries (requires auth
-    + UUID). For the scouting chain, use the public /games path -- no bridge call needed.
+    CORRECTED ID MAPPING (2026-03-18): The URL parameter is event_id -- NOT
+    game_stream.id. In game-summaries: event_id == game_stream.game_id (always
+    equal); game_stream.id is a third distinct UUID that returns 500
+    {"error":"[scheduling] Cannot find event[...]"}. Direct A/B test confirmed
+    2026-03-18 (Standing Bear Freshman 2025). Prior documentation (2026-03-04,
+    2026-03-12) incorrectly identified the parameter as game_stream.id -- likely
+    caused by confusion between game_stream.id and game_stream.game_id when
+    reading game-summaries records. The /public/teams/{public_id}/games `id` field
+    relationship to this parameter is now also unresolved -- that field was
+    previously documented as identical to game_stream.id, which is now known to be
+    the wrong parameter. Re-verify what /public/games `id` actually equals.
   - >
     ASYMMETRIC TOP-LEVEL KEYS: Own team key is the public_id slug (short alphanumeric,
     no dashes); opponent key is a UUID (with dashes). Detect via regex or match against
@@ -34,9 +45,9 @@ caveats:
 related_schemas: []
 see_also:
   - path: /public/teams/{public_id}/games
-    reason: Preferred game_stream_id source -- `id` field IS the game_stream_id (no auth, no bridge call)
+    reason: Potential event_id source -- relationship to event_id needs re-verification (prior docs incorrectly called its `id` field a game_stream_id)
   - path: /teams/{team_id}/game-summaries
-    reason: Authenticated fallback game_stream_id source -- provides game_stream.id (requires UUID)
+    reason: Confirmed event_id source -- use `event_id` field (= game_stream.game_id); NOT game_stream.id
   - path: /game-stream-processing/{game_stream_id}/plays
     reason: Pitch-by-pitch play data using the same game_stream_id
   - path: /public/game-stream-processing/{game_stream_id}/details
@@ -47,25 +58,18 @@ see_also:
 
 # GET /game-stream-processing/{game_stream_id}/boxscore
 
-**Status:** CONFIRMED LIVE -- 200 OK. Per-game box score for both teams. Last verified: 2026-03-04.
+**Status:** CONFIRMED LIVE -- 200 OK. Per-game box score for both teams. Last verified: 2026-03-18.
 
 Returns the per-player box score for both teams (home and away) in a single response. Includes batting lines, pitching lines, batting order, positions, and player names. This is the primary source for per-player game stats (alongside the event player-stats endpoint).
 
-**ID chain for this endpoint (two sources for game_stream_id):**
+**ID source for this endpoint:**
 
-Preferred (no auth for step 1):
 ```
-GET /public/teams/{public_id}/games -> id  (this IS the game_stream_id)
-  -> GET /game-stream-processing/{game_stream_id}/boxscore (this endpoint)
-```
-
-Authenticated fallback (requires UUID):
-```
-GET /teams/{team_id}/game-summaries -> game_stream.id
-  -> GET /game-stream-processing/{game_stream_id}/boxscore (this endpoint)
+GET /teams/{team_id}/game-summaries -> event_id  (= game_stream.game_id -- always equal)
+  -> GET /game-stream-processing/{event_id}/boxscore (this endpoint)
 ```
 
-The `id` field from `/public/teams/{public_id}/games` and `game_stream.id` from `game-summaries` are the same UUID (confirmed 2026-03-12). Use the public path when available -- no bridge call needed. NOT `game_stream.game_id`, NOT `event_id`. See [public games](get-public-teams-public_id-games.md) or [game-summaries](get-teams-team_id-game-summaries.md).
+Use `event_id` from game-summaries. **Do NOT use `game_stream.id`** -- that UUID returns 500 `{"error":"[scheduling] Cannot find event[...]"}`. Confirmed 2026-03-18 via direct A/B test. Prior documentation incorrectly stated the parameter was `game_stream.id`.
 
 ```
 GET https://api.team-manager.gc.com/game-stream-processing/{game_stream_id}/boxscore
@@ -75,7 +79,7 @@ GET https://api.team-manager.gc.com/game-stream-processing/{game_stream_id}/boxs
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `game_stream_id` | UUID | Game stream identifier. From `game_stream.id` in game-summaries. NOT `event_id`. |
+| `game_stream_id` | UUID | The game's `event_id` from game-summaries (= `game_stream.game_id` -- always equal). NOT `game_stream.id` (that UUID returns 500). Corrected 2026-03-18 via direct A/B test. |
 
 ## Headers (Web Profile)
 
@@ -175,4 +179,4 @@ Each group contains:
 - `player_text` encoding may be empty for subs.
 - No `gc-user-action` observed -- may be optional for this endpoint.
 
-**Discovered:** 2026-03-04. **Schema fully documented:** 2026-03-04.
+**Discovered:** 2026-03-04. **Schema fully documented:** 2026-03-04. **Path parameter corrected:** 2026-03-18 -- parameter is `event_id`, not `game_stream.id` (direct A/B test, Standing Bear Freshman 2025).

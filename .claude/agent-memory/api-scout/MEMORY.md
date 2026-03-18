@@ -13,7 +13,7 @@
 
 **.env variables:** `GAMECHANGER_REFRESH_TOKEN_WEB`, `GAMECHANGER_CLIENT_ID_WEB`, `GAMECHANGER_CLIENT_KEY_WEB` (SECRET), `GAMECHANGER_DEVICE_ID`, `GAMECHANGER_USER_EMAIL`, `GAMECHANGER_USER_PASSWORD`.
 
-**Mobile profile:** Mobile client ID `0f18f027-...` differs from web `07cb985d-...`. Mobile client key UNKNOWN (iOS binary). Programmatic mobile refresh NOT POSSIBLE.
+**Mobile profile:** Mobile client IDs are version-specific and rotate with app updates. `0f18f027-...` = Odyssey/2026.8.0 (iOS 26.3.0), `23e37466-2878-43f4-a9f8-5f1751b7efcf` = Odyssey/2026.9.0 (iOS 26.3.1, current as of 2026-03-12). Web client ID: `07cb985d-...`. Mobile client key UNKNOWN (iOS binary). Programmatic mobile refresh NOT POSSIBLE.
 
 **Token validity check**: `GET /me/user` returns 200 OK (valid) or 401 (expired).
 

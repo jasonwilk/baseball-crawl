@@ -65,7 +65,7 @@ logger = logging.getLogger(__name__)
 # Accept headers
 # ---------------------------------------------------------------------------
 
-_PUBLIC_GAMES_ACCEPT = "application/vnd.gc.com.event:list+json; version=0.1.0"
+_PUBLIC_GAMES_ACCEPT = "application/vnd.gc.com.public_team_schedule_event:list+json; version=0.0.0"
 _ROSTER_ACCEPT = "application/vnd.gc.com.public_player:list+json; version=0.0.0"
 _BOXSCORE_ACCEPT = "application/vnd.gc.com.event_box_score+json; version=0.0.0"
 

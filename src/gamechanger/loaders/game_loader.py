@@ -338,6 +338,7 @@ class GameLoader:
             entry = self._parse_summary_record(record)
             if entry is not None:
                 index[entry.game_stream_id] = entry
+                index[entry.event_id] = entry
 
         logger.info(
             "Built game-summaries index: %d entries from %s",
