@@ -66,13 +66,18 @@ Replace `<repository-url>` with the actual Git remote URL.
 
 ### 2.2 Create the data directory
 
-The SQLite database is host-mounted at `./data/app.db`. Create the directory and set
-permissions before first start:
+The SQLite database is host-mounted at `./data/app.db`. The application container runs as
+a non-root user (`appuser`, UID 1000). Create the directory and set permissions so the
+container can read/write the database:
 
 ```bash
 mkdir -p data/backups
+chown 1000:1000 data
 chmod 755 data
 ```
+
+> **Upgrading from an earlier version?** If `./data/` was previously created by root (or by
+> a container running as root), update ownership: `sudo chown -R 1000:1000 data`
 
 ### 2.3 Create the `.env` file
 

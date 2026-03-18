@@ -39,6 +39,8 @@ from migrations.apply_migrations import run_migrations  # noqa: E402
 from src.api.auth import hash_token  # noqa: E402
 from src.api.main import app  # noqa: E402
 
+_CSRF = "test-csrf-token"
+
 _SEED_SQL = """
     INSERT OR IGNORE INTO programs (program_id, name, program_type)
         VALUES ('lsb-hs', 'Lincoln Standing Bear HS', 'hs');
@@ -184,7 +186,7 @@ class TestAdminAuthRequired:
             "os.environ",
             {"DATABASE_PATH": str(admin_db), "ADMIN_EMAIL": "admin@example.com"},
         ):
-            with TestClient(app, cookies={"session": raw_token}) as client:
+            with TestClient(app, cookies={"session": raw_token, "csrf_token": _CSRF}) as client:
                 response = client.get("/admin/users")
         assert response.status_code == 200
 
@@ -200,7 +202,7 @@ class TestAdminAuthRequired:
             import os
             old = os.environ.pop("ADMIN_EMAIL", None)
             try:
-                with TestClient(app, cookies={"session": raw_token}) as client:
+                with TestClient(app, cookies={"session": raw_token, "csrf_token": _CSRF}) as client:
                     response = client.get("/admin/users")
                 assert response.status_code == 200
             finally:
@@ -216,7 +218,7 @@ class TestAdminAuthRequired:
             "os.environ",
             {"DATABASE_PATH": str(admin_db), "ADMIN_EMAIL": "tableadmin@example.com"},
         ):
-            with TestClient(app, cookies={"session": raw_token}) as client:
+            with TestClient(app, cookies={"session": raw_token, "csrf_token": _CSRF}) as client:
                 response = client.get("/admin/users")
         assert "Manage Users" in response.text
 
@@ -242,7 +244,7 @@ class TestNonAdminForbidden:
             },
         ):
             with TestClient(
-                app, follow_redirects=False, cookies={"session": raw_token}
+                app, follow_redirects=False, cookies={"session": raw_token, "csrf_token": _CSRF}
             ) as client:
                 response = client.get("/admin/users")
         assert response.status_code == 403
@@ -259,7 +261,7 @@ class TestNonAdminForbidden:
                 "ADMIN_EMAIL": "other@example.com",
             },
         ):
-            with TestClient(app, cookies={"session": raw_token}) as client:
+            with TestClient(app, cookies={"session": raw_token, "csrf_token": _CSRF}) as client:
                 response = client.get("/admin/users")
         assert "text/html" in response.headers.get("content-type", "")
         assert "permission" in response.text.lower()
@@ -276,7 +278,7 @@ class TestNonAdminForbidden:
                 "ADMIN_EMAIL": "other@example.com",
             },
         ):
-            with TestClient(app, cookies={"session": raw_token}) as client:
+            with TestClient(app, cookies={"session": raw_token, "csrf_token": _CSRF}) as client:
                 response = client.get("/admin/users")
         assert "/dashboard" in response.text
 
@@ -300,10 +302,12 @@ class TestUnauthenticatedRedirect:
     def test_post_no_session_redirects_to_login(self, admin_db: Path) -> None:
         """POST /admin/users without session cookie -> redirect to /auth/login."""
         with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db)}):
-            with TestClient(app, follow_redirects=False) as client:
+            with TestClient(
+                app, follow_redirects=False, cookies={"csrf_token": _CSRF}
+            ) as client:
                 response = client.post(
                     "/admin/users",
-                    data={"email": "x@x.com"},
+                    data={"email": "x@x.com", "csrf_token": _CSRF},
                 )
         assert response.status_code == 302
         assert "/auth/login" in response.headers["location"]
@@ -327,7 +331,7 @@ class TestUserCRUD:
             "os.environ",
             {"DATABASE_PATH": str(admin_db), "ADMIN_EMAIL": "listadmin@example.com"},
         ):
-            with TestClient(app, cookies={"session": raw_token}) as client:
+            with TestClient(app, cookies={"session": raw_token, "csrf_token": _CSRF}) as client:
                 response = client.get("/admin/users")
         assert "coach@example.com" in response.text
 
@@ -344,11 +348,11 @@ class TestUserCRUD:
             },
         ):
             with TestClient(
-                app, follow_redirects=False, cookies={"session": raw_token}
+                app, follow_redirects=False, cookies={"session": raw_token, "csrf_token": _CSRF}
             ) as client:
                 response = client.post(
                     "/admin/users",
-                    data={"email": "newcoach@example.com"},
+                    data={"email": "newcoach@example.com", "csrf_token": _CSRF},
                 )
         assert response.status_code == 303
         assert _count_rows(admin_db, "users", "email = ?", ("newcoach@example.com",)) == 1
@@ -367,11 +371,11 @@ class TestUserCRUD:
             },
         ):
             with TestClient(
-                app, follow_redirects=False, cookies={"session": raw_token}
+                app, follow_redirects=False, cookies={"session": raw_token, "csrf_token": _CSRF}
             ) as client:
                 client.post(
                     "/admin/users",
-                    data={"email": "withteam@example.com", "team_ids": str(team_id)},
+                    data={"email": "withteam@example.com", "team_ids": str(team_id), "csrf_token": _CSRF},
                 )
 
         conn = sqlite3.connect(str(admin_db))
@@ -401,11 +405,11 @@ class TestUserCRUD:
             },
         ):
             with TestClient(
-                app, follow_redirects=False, cookies={"session": raw_token}
+                app, follow_redirects=False, cookies={"session": raw_token, "csrf_token": _CSRF}
             ) as client:
                 response = client.post(
                     "/admin/users",
-                    data={"email": "flash@example.com"},
+                    data={"email": "flash@example.com", "csrf_token": _CSRF},
                 )
         assert response.status_code == 303
         assert "msg=" in response.headers["location"]
@@ -420,7 +424,7 @@ class TestUserCRUD:
             "os.environ",
             {"DATABASE_PATH": str(admin_db), "ADMIN_EMAIL": "editadmin@example.com"},
         ):
-            with TestClient(app, cookies={"session": raw_token}) as client:
+            with TestClient(app, cookies={"session": raw_token, "csrf_token": _CSRF}) as client:
                 response = client.get(f"/admin/users/{coach_id}/edit")
         assert response.status_code == 200
         assert "editcoach@example.com" in response.text
@@ -437,11 +441,11 @@ class TestUserCRUD:
             {"DATABASE_PATH": str(admin_db), "ADMIN_EMAIL": "updadmin@example.com"},
         ):
             with TestClient(
-                app, follow_redirects=False, cookies={"session": raw_token}
+                app, follow_redirects=False, cookies={"session": raw_token, "csrf_token": _CSRF}
             ) as client:
                 response = client.post(
                     f"/admin/users/{coach_id}/edit",
-                    data={"team_ids": str(team_id)},
+                    data={"team_ids": str(team_id), "csrf_token": _CSRF},
                 )
         assert response.status_code == 303
         assert _count_rows(
@@ -460,11 +464,11 @@ class TestUserCRUD:
             {"DATABASE_PATH": str(admin_db), "ADMIN_EMAIL": "updflash@example.com"},
         ):
             with TestClient(
-                app, follow_redirects=False, cookies={"session": raw_token}
+                app, follow_redirects=False, cookies={"session": raw_token, "csrf_token": _CSRF}
             ) as client:
                 response = client.post(
                     f"/admin/users/{coach_id}/edit",
-                    data={},
+                    data={"csrf_token": _CSRF},
                 )
         assert response.status_code == 303
         assert "msg=" in response.headers["location"]
@@ -480,9 +484,9 @@ class TestUserCRUD:
             {"DATABASE_PATH": str(admin_db), "ADMIN_EMAIL": "deladmin@example.com"},
         ):
             with TestClient(
-                app, follow_redirects=False, cookies={"session": raw_token}
+                app, follow_redirects=False, cookies={"session": raw_token, "csrf_token": _CSRF}
             ) as client:
-                response = client.post(f"/admin/users/{coach_id}/delete")
+                response = client.post(f"/admin/users/{coach_id}/delete", data={"csrf_token": _CSRF})
         assert response.status_code == 303
         assert _count_rows(admin_db, "users", "id = ?", (coach_id,)) == 0
 
@@ -505,10 +509,10 @@ class TestDuplicateEmail:
             "os.environ",
             {"DATABASE_PATH": str(admin_db), "ADMIN_EMAIL": "dupadmin@example.com"},
         ):
-            with TestClient(app, cookies={"session": raw_token}) as client:
+            with TestClient(app, cookies={"session": raw_token, "csrf_token": _CSRF}) as client:
                 response = client.post(
                     "/admin/users",
-                    data={"email": "existing@example.com"},
+                    data={"email": "existing@example.com", "csrf_token": _CSRF},
                 )
         assert response.status_code == 200
         assert "already exists" in response.text.lower()
@@ -523,10 +527,10 @@ class TestDuplicateEmail:
             "os.environ",
             {"DATABASE_PATH": str(admin_db), "ADMIN_EMAIL": "dup2admin@example.com"},
         ):
-            with TestClient(app, cookies={"session": raw_token}) as client:
+            with TestClient(app, cookies={"session": raw_token, "csrf_token": _CSRF}) as client:
                 client.post(
                     "/admin/users",
-                    data={"email": "dup2@example.com"},
+                    data={"email": "dup2@example.com", "csrf_token": _CSRF},
                 )
         assert _count_rows(admin_db, "users", "email = ?", ("dup2@example.com",)) == 1
 
@@ -540,11 +544,11 @@ class TestDuplicateEmail:
             {"DATABASE_PATH": str(admin_db), "ADMIN_EMAIL": "normadmin@example.com"},
         ):
             with TestClient(
-                app, follow_redirects=False, cookies={"session": raw_token}
+                app, follow_redirects=False, cookies={"session": raw_token, "csrf_token": _CSRF}
             ) as client:
                 client.post(
                     "/admin/users",
-                    data={"email": "Coach@Example.COM"},
+                    data={"email": "Coach@Example.COM", "csrf_token": _CSRF},
                 )
         assert (
             _count_rows(admin_db, "users", "email = ?", ("coach@example.com",)) == 1
@@ -572,9 +576,9 @@ class TestSelfDeletePrevention:
             {"DATABASE_PATH": str(admin_db), "ADMIN_EMAIL": "selfadmin@example.com"},
         ):
             with TestClient(
-                app, follow_redirects=False, cookies={"session": raw_token}
+                app, follow_redirects=False, cookies={"session": raw_token, "csrf_token": _CSRF}
             ) as client:
-                response = client.post(f"/admin/users/{admin_id}/delete")
+                response = client.post(f"/admin/users/{admin_id}/delete", data={"csrf_token": _CSRF})
         assert response.status_code == 303
         assert "error=" in response.headers["location"]
 
@@ -588,9 +592,9 @@ class TestSelfDeletePrevention:
             {"DATABASE_PATH": str(admin_db), "ADMIN_EMAIL": "selfkeep@example.com"},
         ):
             with TestClient(
-                app, follow_redirects=False, cookies={"session": raw_token}
+                app, follow_redirects=False, cookies={"session": raw_token, "csrf_token": _CSRF}
             ) as client:
-                client.post(f"/admin/users/{admin_id}/delete")
+                client.post(f"/admin/users/{admin_id}/delete", data={"csrf_token": _CSRF})
         assert _count_rows(admin_db, "users", "id = ?", (admin_id,)) == 1
 
 
@@ -670,9 +674,9 @@ class TestCascadeDelete:
             },
         ):
             with TestClient(
-                app, follow_redirects=False, cookies={"session": raw_token}
+                app, follow_redirects=False, cookies={"session": raw_token, "csrf_token": _CSRF}
             ) as client:
-                client.post(f"/admin/users/{full_user_id}/delete")
+                client.post(f"/admin/users/{full_user_id}/delete", data={"csrf_token": _CSRF})
 
         assert _count_rows(admin_db, "sessions", "user_id = ?", (full_user_id,)) == 0
 
@@ -697,9 +701,9 @@ class TestCascadeDelete:
             },
         ):
             with TestClient(
-                app, follow_redirects=False, cookies={"session": raw_token}
+                app, follow_redirects=False, cookies={"session": raw_token, "csrf_token": _CSRF}
             ) as client:
-                client.post(f"/admin/users/{full_user_id}/delete")
+                client.post(f"/admin/users/{full_user_id}/delete", data={"csrf_token": _CSRF})
 
         assert (
             _count_rows(
@@ -729,9 +733,9 @@ class TestCascadeDelete:
             },
         ):
             with TestClient(
-                app, follow_redirects=False, cookies={"session": raw_token}
+                app, follow_redirects=False, cookies={"session": raw_token, "csrf_token": _CSRF}
             ) as client:
-                client.post(f"/admin/users/{full_user_id}/delete")
+                client.post(f"/admin/users/{full_user_id}/delete", data={"csrf_token": _CSRF})
 
         assert (
             _count_rows(
@@ -766,9 +770,9 @@ class TestCascadeDelete:
             },
         ):
             with TestClient(
-                app, follow_redirects=False, cookies={"session": raw_token}
+                app, follow_redirects=False, cookies={"session": raw_token, "csrf_token": _CSRF}
             ) as client:
-                response = client.post(f"/admin/users/{user_id}/delete")
+                response = client.post(f"/admin/users/{user_id}/delete", data={"csrf_token": _CSRF})
 
         # No IntegrityError -- deletion succeeded and redirected.
         assert response.status_code == 303
@@ -814,7 +818,7 @@ class TestMembershipTypeValidation:
             {"DATABASE_PATH": str(admin_db), "ADMIN_EMAIL": "mtadmin@example.com"},
         ):
             with TestClient(
-                app, follow_redirects=False, cookies={"session": raw_token}
+                app, follow_redirects=False, cookies={"session": raw_token, "csrf_token": _CSRF}
             ) as client:
                 response = client.post(
                     "/admin/teams/confirm",
@@ -822,6 +826,7 @@ class TestMembershipTypeValidation:
                         "public_id": "some-team-slug",
                         "team_name": "Some Team",
                         "membership_type": "superadmin",
+                        "csrf_token": _CSRF,
                     },
                 )
         assert response.status_code == 400
@@ -846,7 +851,7 @@ class TestConfirmTeamInsertIntegrityError:
                 side_effect=sqlite3.IntegrityError("UNIQUE constraint failed: teams.public_id"),
             ):
                 with TestClient(
-                    app, follow_redirects=False, cookies={"session": raw_token}
+                    app, follow_redirects=False, cookies={"session": raw_token, "csrf_token": _CSRF}
                 ) as client:
                     response = client.post(
                         "/admin/teams/confirm",
@@ -854,6 +859,7 @@ class TestConfirmTeamInsertIntegrityError:
                             "public_id": "some-team-slug",
                             "team_name": "Some Team",
                             "membership_type": "tracked",
+                            "csrf_token": _CSRF,
                         },
                     )
         assert response.status_code != 500
@@ -880,7 +886,7 @@ class TestAlreadyResolvedLinkGuard:
             {"DATABASE_PATH": str(admin_db), "ADMIN_EMAIL": "rladmin@example.com"},
         ):
             with TestClient(
-                app, follow_redirects=False, cookies={"session": raw_token}
+                app, follow_redirects=False, cookies={"session": raw_token, "csrf_token": _CSRF}
             ) as client:
                 response = client.get(
                     f"/admin/opponents/{link_id}/connect/confirm"
@@ -942,7 +948,7 @@ class TestXSSEscaping:
             "os.environ",
             {"DATABASE_PATH": str(admin_db), "ADMIN_EMAIL": "xssadmin@example.com"},
         ):
-            with TestClient(app, cookies={"session": raw_token}) as client:
+            with TestClient(app, cookies={"session": raw_token, "csrf_token": _CSRF}) as client:
                 response = client.get(f"/admin/teams?msg={payload}")
 
         assert response.status_code == 200

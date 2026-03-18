@@ -48,6 +48,8 @@ if str(_PROJECT_ROOT) not in sys.path:
 
 from migrations.apply_migrations import run_migrations  # noqa: E402
 from src.api.auth import hash_token  # noqa: E402
+
+_CSRF = "test-csrf-token"
 from src.api.main import app  # noqa: E402
 from src.gamechanger.team_resolver import GameChangerAPIError, TeamNotFoundError, TeamProfile  # noqa: E402
 
@@ -189,7 +191,7 @@ class TestTeamsListAuth:
         token = _insert_session(team_db, user_id)
 
         with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
-            with TestClient(app, cookies={"session": token}) as client:
+            with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
                 response = client.get("/admin/teams")
         assert response.status_code == 200
 
@@ -202,7 +204,7 @@ class TestTeamsListAuth:
             "os.environ",
             {"DATABASE_PATH": str(team_db), "ADMIN_EMAIL": "other@example.com"},
         ):
-            with TestClient(app, follow_redirects=False, cookies={"session": token}) as client:
+            with TestClient(app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}) as client:
                 response = client.get("/admin/teams")
         assert response.status_code == 403
 
@@ -229,7 +231,7 @@ class TestTeamsFlatList:
         token = _insert_session(team_db, user_id)
 
         with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
-            with TestClient(app, cookies={"session": token}) as client:
+            with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
                 response = client.get("/admin/teams")
         assert "LSB Varsity 2026" in response.text
 
@@ -239,7 +241,7 @@ class TestTeamsFlatList:
         token = _insert_session(team_db, user_id)
 
         with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
-            with TestClient(app, cookies={"session": token}) as client:
+            with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
                 response = client.get("/admin/teams")
         # 'Member' badge appears for the seeded varsity team
         assert "Member" in response.text
@@ -250,7 +252,7 @@ class TestTeamsFlatList:
         token = _insert_session(team_db, user_id)
 
         with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
-            with TestClient(app, cookies={"session": token}) as client:
+            with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
                 response = client.get("/admin/teams")
         # Edit link should be /admin/teams/1/edit (integer 1, not a text slug)
         assert "/admin/teams/1/edit" in response.text
@@ -261,7 +263,7 @@ class TestTeamsFlatList:
         token = _insert_session(team_db, user_id)
 
         with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
-            with TestClient(app, cookies={"session": token}) as client:
+            with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
                 response = client.get("/admin/teams")
         # Opponent count should be a link to /admin/opponents?team_id=1
         assert "/admin/opponents?team_id=1" in response.text
@@ -272,7 +274,7 @@ class TestTeamsFlatList:
         token = _insert_session(team_db, user_id)
 
         with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
-            with TestClient(app, cookies={"session": token}) as client:
+            with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
                 response = client.get("/admin/teams?msg=Team+added")
         assert "Team added" in response.text
 
@@ -282,7 +284,7 @@ class TestTeamsFlatList:
         token = _insert_session(team_db, user_id)
 
         with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
-            with TestClient(app, cookies={"session": token}) as client:
+            with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
                 response = client.get("/admin/teams?error=Something+went+wrong")
         assert "Something went wrong" in response.text
 
@@ -315,11 +317,11 @@ class TestPhase1AddTeam:
 
             with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
                 with TestClient(
-                    app, follow_redirects=False, cookies={"session": token}
+                    app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
                 ) as client:
                     response = client.post(
                         "/admin/teams",
-                        data={"url_input": "https://web.gc.com/teams/abc123/schedule"},
+                        data={"url_input": "https://web.gc.com/teams/abc123/schedule", "csrf_token": _CSRF},
                     )
 
         assert response.status_code == 303
@@ -348,11 +350,11 @@ class TestPhase1AddTeam:
 
             with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
                 with TestClient(
-                    app, follow_redirects=False, cookies={"session": token}
+                    app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
                 ) as client:
                     response = client.post(
                         "/admin/teams",
-                        data={"url_input": "abc123"},
+                        data={"url_input": "abc123", "csrf_token": _CSRF},
                     )
 
         assert response.status_code == 303
@@ -381,11 +383,11 @@ class TestPhase1AddTeam:
 
             with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
                 with TestClient(
-                    app, follow_redirects=False, cookies={"session": token}
+                    app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
                 ) as client:
                     response = client.post(
                         "/admin/teams",
-                        data={"url_input": "abc123"},
+                        data={"url_input": "abc123", "csrf_token": _CSRF},
                     )
 
         location = response.headers["location"]
@@ -402,10 +404,10 @@ class TestPhase1AddTeam:
             side_effect=ValueError("Cannot parse URL"),
         ):
             with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
-                with TestClient(app, cookies={"session": token}) as client:
+                with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
                     response = client.post(
                         "/admin/teams",
-                        data={"url_input": "not-a-valid-url"},
+                        data={"url_input": "not-a-valid-url", "csrf_token": _CSRF},
                     )
 
         assert response.status_code == 200
@@ -423,10 +425,10 @@ class TestPhase1AddTeam:
             mock_parse.return_value = mock_result
 
             with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
-                with TestClient(app, cookies={"session": token}) as client:
+                with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
                     response = client.post(
                         "/admin/teams",
-                        data={"url_input": "550e8400-e29b-41d4-a716-446655440000"},
+                        data={"url_input": "550e8400-e29b-41d4-a716-446655440000", "csrf_token": _CSRF},
                     )
 
         assert response.status_code == 200
@@ -451,10 +453,10 @@ class TestPhase1AddTeam:
             mock_parse.return_value = mock_result
 
             with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
-                with TestClient(app, cookies={"session": token}) as client:
+                with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
                     response = client.post(
                         "/admin/teams",
-                        data={"url_input": "abc123"},
+                        data={"url_input": "abc123", "csrf_token": _CSRF},
                     )
 
         assert response.status_code == 200
@@ -479,10 +481,10 @@ class TestPhase1AddTeam:
             mock_parse.return_value = mock_result
 
             with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
-                with TestClient(app, cookies={"session": token}) as client:
+                with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
                     response = client.post(
                         "/admin/teams",
-                        data={"url_input": "abc123"},
+                        data={"url_input": "abc123", "csrf_token": _CSRF},
                     )
 
         assert response.status_code == 200
@@ -503,7 +505,7 @@ class TestPhase2ConfirmForm:
         token = _insert_session(team_db, user_id)
 
         with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
-            with TestClient(app, cookies={"session": token}) as client:
+            with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
                 response = client.get(
                     "/admin/teams/confirm",
                     params={
@@ -521,7 +523,7 @@ class TestPhase2ConfirmForm:
         token = _insert_session(team_db, user_id)
 
         with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
-            with TestClient(app, cookies={"session": token}) as client:
+            with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
                 response = client.get(
                     "/admin/teams/confirm",
                     params={
@@ -538,7 +540,7 @@ class TestPhase2ConfirmForm:
         token = _insert_session(team_db, user_id)
 
         with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
-            with TestClient(app, cookies={"session": token}) as client:
+            with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
                 response = client.get(
                     "/admin/teams/confirm",
                     params={
@@ -558,7 +560,7 @@ class TestPhase2ConfirmForm:
         token = _insert_session(team_db, user_id)
 
         with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
-            with TestClient(app, cookies={"session": token}) as client:
+            with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
                 response = client.get(
                     "/admin/teams/confirm",
                     params={
@@ -577,7 +579,7 @@ class TestPhase2ConfirmForm:
         token = _insert_session(team_db, user_id)
 
         with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
-            with TestClient(app, cookies={"session": token}) as client:
+            with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
                 response = client.get(
                     "/admin/teams/confirm",
                     params={
@@ -605,7 +607,7 @@ class TestPhase2ConfirmForm:
             return_value="some-uuid",
         ):
             with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
-                with TestClient(app, cookies={"session": token}) as client:
+                with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
                     response = client.get(
                         "/admin/teams/confirm",
                         params={
@@ -628,7 +630,7 @@ class TestPhase2ConfirmForm:
         _insert_team(team_db, "Existing Team", public_id="abc123")
 
         with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
-            with TestClient(app, cookies={"session": token}) as client:
+            with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
                 response = client.get(
                     "/admin/teams/confirm",
                     params={
@@ -646,7 +648,7 @@ class TestPhase2ConfirmForm:
 
         with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
             with TestClient(
-                app, follow_redirects=False, cookies={"session": token}
+                app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
             ) as client:
                 response = client.get("/admin/teams/confirm")
         assert response.status_code == 302
@@ -672,7 +674,7 @@ class TestPhase2ConfirmSubmit:
         ):
             with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
                 with TestClient(
-                    app, follow_redirects=False, cookies={"session": token}
+                    app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
                 ) as client:
                     response = client.post(
                         "/admin/teams/confirm",
@@ -683,6 +685,7 @@ class TestPhase2ConfirmSubmit:
                             "membership_type": "tracked",
                             "program_id": "",
                             "classification": "",
+                            "csrf_token": _CSRF,
                         },
                     )
 
@@ -700,7 +703,7 @@ class TestPhase2ConfirmSubmit:
         ):
             with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
                 with TestClient(
-                    app, follow_redirects=False, cookies={"session": token}
+                    app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
                 ) as client:
                     response = client.post(
                         "/admin/teams/confirm",
@@ -711,6 +714,7 @@ class TestPhase2ConfirmSubmit:
                             "membership_type": "tracked",
                             "program_id": "",
                             "classification": "",
+                            "csrf_token": _CSRF,
                         },
                     )
 
@@ -729,7 +733,7 @@ class TestPhase2ConfirmSubmit:
             side_effect=BridgeForbiddenError("403"),
         ):
             with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
-                with TestClient(app, cookies={"session": token}) as client:
+                with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
                     response = client.post(
                         "/admin/teams/confirm",
                         data={
@@ -739,6 +743,7 @@ class TestPhase2ConfirmSubmit:
                             "membership_type": "tracked",
                             "program_id": "",
                             "classification": "",
+                            "csrf_token": _CSRF,
                         },
                     )
 
@@ -758,7 +763,7 @@ class TestPhase2ConfirmSubmit:
         ) as mock_bridge:
             with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
                 with TestClient(
-                    app, follow_redirects=False, cookies={"session": token}
+                    app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
                 ) as client:
                     client.post(
                         "/admin/teams/confirm",
@@ -769,6 +774,7 @@ class TestPhase2ConfirmSubmit:
                             "membership_type": "tracked",
                             "program_id": "",
                             "classification": "",
+                            "csrf_token": _CSRF,
                         },
                     )
         # Bridge should be called once (TOCTOU re-verify)
@@ -798,7 +804,7 @@ class TestPhase2ConfirmSubmit:
         ):
             with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
                 with TestClient(
-                    app, follow_redirects=False, cookies={"session": token}
+                    app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
                 ) as client:
                     client.post(
                         "/admin/teams/confirm",
@@ -809,6 +815,7 @@ class TestPhase2ConfirmSubmit:
                             "membership_type": "tracked",
                             "program_id": "",
                             "classification": "",
+                            "csrf_token": _CSRF,
                         },
                     )
 
@@ -833,7 +840,7 @@ class TestPhase2ConfirmSubmit:
         ):
             with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
                 with TestClient(
-                    app, follow_redirects=False, cookies={"session": token}
+                    app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
                 ) as client:
                     client.post(
                         "/admin/teams/confirm",
@@ -844,6 +851,7 @@ class TestPhase2ConfirmSubmit:
                             "membership_type": "member",
                             "program_id": "",
                             "classification": "",
+                            "csrf_token": _CSRF,
                         },
                     )
 
@@ -880,7 +888,7 @@ class TestPhase2ConfirmSubmit:
             side_effect=BridgeForbiddenError("403"),
         ):
             with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
-                with TestClient(app, cookies={"session": token}) as client:
+                with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
                     response = client.post(
                         "/admin/teams/confirm",
                         data={
@@ -890,6 +898,7 @@ class TestPhase2ConfirmSubmit:
                             "membership_type": "tracked",
                             "program_id": "",
                             "classification": "",
+                            "csrf_token": _CSRF,
                         },
                     )
 
@@ -1011,7 +1020,7 @@ class TestEditTeamForm:
         conn.close()
 
         with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
-            with TestClient(app, cookies={"session": token}) as client:
+            with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
                 response = client.get(f"/admin/teams/{team_id}/edit")
         assert response.status_code == 200
         assert "LSB Varsity 2026" in response.text
@@ -1025,7 +1034,7 @@ class TestEditTeamForm:
         conn.close()
 
         with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
-            with TestClient(app, cookies={"session": token}) as client:
+            with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
                 response = client.get(f"/admin/teams/{team_id}/edit")
         # Should have membership radio buttons
         assert "membership_type" in response.text
@@ -1036,7 +1045,7 @@ class TestEditTeamForm:
         token = _insert_session(team_db, user_id)
 
         with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
-            with TestClient(app, cookies={"session": token}) as client:
+            with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
                 response = client.get("/admin/teams/9999/edit")
         assert response.status_code == 404
 
@@ -1049,7 +1058,7 @@ class TestEditTeamForm:
         conn.close()
 
         with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
-            with TestClient(app, cookies={"session": token}) as client:
+            with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
                 response = client.get(f"/admin/teams/{team_id}/edit")
         assert f"/admin/teams/{team_id}/edit" in response.text
 
@@ -1072,7 +1081,7 @@ class TestUpdateTeam:
 
         with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
             with TestClient(
-                app, follow_redirects=False, cookies={"session": token}
+                app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
             ) as client:
                 response = client.post(
                     f"/admin/teams/{team_id}/edit",
@@ -1081,6 +1090,7 @@ class TestUpdateTeam:
                         "program_id": "",
                         "classification": "",
                         "membership_type": "member",
+                        "csrf_token": _CSRF,
                     },
                 )
         assert response.status_code == 303
@@ -1101,7 +1111,7 @@ class TestUpdateTeam:
 
         with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
             with TestClient(
-                app, follow_redirects=False, cookies={"session": token}
+                app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
             ) as client:
                 response = client.post(
                     f"/admin/teams/{team_id}/edit",
@@ -1110,6 +1120,7 @@ class TestUpdateTeam:
                         "program_id": "lsb-hs",
                         "classification": "",
                         "membership_type": "tracked",
+                        "csrf_token": _CSRF,
                     },
                 )
         assert response.status_code == 303
@@ -1127,7 +1138,7 @@ class TestUpdateTeam:
 
         with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
             with TestClient(
-                app, follow_redirects=False, cookies={"session": token}
+                app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
             ) as client:
                 response = client.post(
                     f"/admin/teams/{team_id}/edit",
@@ -1136,6 +1147,7 @@ class TestUpdateTeam:
                         "program_id": "",
                         "classification": "jv",
                         "membership_type": "tracked",
+                        "csrf_token": _CSRF,
                     },
                 )
         assert response.status_code == 303
@@ -1160,7 +1172,7 @@ class TestUpdateTeam:
 
         with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
             with TestClient(
-                app, follow_redirects=False, cookies={"session": token}
+                app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
             ) as client:
                 response = client.post(
                     f"/admin/teams/{team_id}/edit",
@@ -1169,6 +1181,7 @@ class TestUpdateTeam:
                         "program_id": "",
                         "classification": "",
                         "membership_type": "member",
+                        "csrf_token": _CSRF,
                     },
                 )
         assert response.status_code == 303
@@ -1195,9 +1208,9 @@ class TestToggleTeamActive:
 
         with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
             with TestClient(
-                app, follow_redirects=False, cookies={"session": token}
+                app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
             ) as client:
-                response = client.post(f"/admin/teams/{team_id}/toggle-active")
+                response = client.post(f"/admin/teams/{team_id}/toggle-active", data={"csrf_token": _CSRF})
         assert response.status_code == 303
         assert _count_rows(
             team_db, "teams", "id = ? AND is_active = 0", (team_id,)
@@ -1215,9 +1228,9 @@ class TestToggleTeamActive:
 
         with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
             with TestClient(
-                app, follow_redirects=False, cookies={"session": token}
+                app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
             ) as client:
-                response = client.post(f"/admin/teams/{inactive_id}/toggle-active")
+                response = client.post(f"/admin/teams/{inactive_id}/toggle-active", data={"csrf_token": _CSRF})
         assert response.status_code == 303
         assert _count_rows(
             team_db, "teams", "id = ? AND is_active = 1", (inactive_id,)
@@ -1244,7 +1257,7 @@ class TestUserTeamAssignmentIntegerIds:
         conn.close()
 
         with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
-            with TestClient(app, cookies={"session": token}) as client:
+            with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
                 response = client.get(f"/admin/users/{coach_id}/edit")
         # The checkbox value should be the integer id (e.g., "1"), not a text slug
         assert f'value="{team_id}"' in response.text

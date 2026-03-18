@@ -42,6 +42,8 @@ from migrations.apply_migrations import run_migrations  # noqa: E402
 from src.api.auth import hash_token  # noqa: E402
 from src.api.main import app  # noqa: E402
 
+_CSRF = "test-csrf-token"
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -240,7 +242,7 @@ class TestOpponentListing:
         token = _insert_session(opp_db, admin_id)
 
         with patch.dict("os.environ", _admin_env(opp_db, "admin@test.com")):
-            with TestClient(app, cookies={"session": token}) as client:
+            with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
                 response = client.get("/admin/opponents")
         assert response.status_code == 200
         assert "Northside Eagles" in response.text
@@ -253,7 +255,7 @@ class TestOpponentListing:
         token = _insert_session(opp_db, admin_id)
 
         with patch.dict("os.environ", _admin_env(opp_db, "counts@test.com")):
-            with TestClient(app, cookies={"session": token}) as client:
+            with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
                 response = client.get("/admin/opponents")
         assert "All (3)" in response.text
         assert "Full stats (2)" in response.text
@@ -265,7 +267,7 @@ class TestOpponentListing:
         token = _insert_session(opp_db, admin_id)
 
         with patch.dict("os.environ", _admin_env(opp_db, "filterfull@test.com")):
-            with TestClient(app, cookies={"session": token}) as client:
+            with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
                 response = client.get("/admin/opponents?filter=full")
         assert "Northside Eagles" in response.text
         assert "Westview Tigers" in response.text
@@ -277,7 +279,7 @@ class TestOpponentListing:
         token = _insert_session(opp_db, admin_id)
 
         with patch.dict("os.environ", _admin_env(opp_db, "filtersheet@test.com")):
-            with TestClient(app, cookies={"session": token}) as client:
+            with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
                 response = client.get("/admin/opponents?filter=scoresheet")
         assert "Ridgecrest Rockets" in response.text
         assert "Northside Eagles" not in response.text
@@ -291,7 +293,7 @@ class TestOpponentListing:
         token = _insert_session(opp_db, admin_id)
 
         with patch.dict("os.environ", _admin_env(opp_db, "scopetest@test.com")):
-            with TestClient(app, cookies={"session": token}) as client:
+            with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
                 response = client.get(f"/admin/opponents?team_id={jv_id}")
         assert "Westview Tigers" in response.text
         assert "Northside Eagles" not in response.text
@@ -311,7 +313,7 @@ class TestSubNav:
         token = _insert_session(opp_db, admin_id)
 
         with patch.dict("os.environ", _admin_env(opp_db, "subnav1@test.com")):
-            with TestClient(app, cookies={"session": token}) as client:
+            with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
                 response = client.get("/admin/users")
         assert "/admin/opponents" in response.text
 
@@ -320,7 +322,7 @@ class TestSubNav:
         token = _insert_session(opp_db, admin_id)
 
         with patch.dict("os.environ", _admin_env(opp_db, "subnav2@test.com")):
-            with TestClient(app, cookies={"session": token}) as client:
+            with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
                 response = client.get("/admin/teams")
         assert "/admin/opponents" in response.text
 
@@ -330,7 +332,7 @@ class TestSubNav:
         token = _insert_session(opp_db, admin_id)
 
         with patch.dict("os.environ", _admin_env(opp_db, "subnav3@test.com")):
-            with TestClient(app, cookies={"session": token}) as client:
+            with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
                 response = client.get(f"/admin/users/{coach_id}/edit")
         assert "/admin/opponents" in response.text
 
@@ -341,7 +343,7 @@ class TestSubNav:
         token = _insert_session(opp_db, admin_id)
 
         with patch.dict("os.environ", _admin_env(opp_db, "subnav4@test.com")):
-            with TestClient(app, cookies={"session": token}) as client:
+            with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
                 response = client.get(f"/admin/teams/{varsity_id}/edit")
         assert "/admin/opponents" in response.text
 
@@ -350,7 +352,7 @@ class TestSubNav:
         token = _insert_session(opp_db, admin_id)
 
         with patch.dict("os.environ", _admin_env(opp_db, "subnav5@test.com")):
-            with TestClient(app, cookies={"session": token}) as client:
+            with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
                 response = client.get("/admin/opponents")
         assert "/admin/opponents" in response.text
 
@@ -368,7 +370,7 @@ class TestBadgeStates:
         token = _insert_session(opp_db, admin_id)
 
         with patch.dict("os.environ", _admin_env(opp_db, "badge1@test.com")):
-            with TestClient(app, cookies={"session": token}) as client:
+            with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
                 response = client.get("/admin/opponents")
         assert "auto" in response.text
         assert "Full stats" in response.text
@@ -378,7 +380,7 @@ class TestBadgeStates:
         token = _insert_session(opp_db, admin_id)
 
         with patch.dict("os.environ", _admin_env(opp_db, "badge2@test.com")):
-            with TestClient(app, cookies={"session": token}) as client:
+            with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
                 response = client.get("/admin/opponents")
         assert "manual" in response.text
 
@@ -387,7 +389,7 @@ class TestBadgeStates:
         token = _insert_session(opp_db, admin_id)
 
         with patch.dict("os.environ", _admin_env(opp_db, "badge3@test.com")):
-            with TestClient(app, cookies={"session": token}) as client:
+            with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
                 response = client.get("/admin/opponents")
         assert "Scoresheet only" in response.text
 
@@ -407,7 +409,7 @@ class TestConnectButton:
         assert unlinked_id is not None
 
         with patch.dict("os.environ", _admin_env(opp_db, "connect1@test.com")):
-            with TestClient(app, cookies={"session": token}) as client:
+            with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
                 response = client.get("/admin/opponents")
         assert f"/admin/opponents/{unlinked_id}/connect" in response.text
 
@@ -418,7 +420,7 @@ class TestConnectButton:
         assert auto_id is not None
 
         with patch.dict("os.environ", _admin_env(opp_db, "connect2@test.com")):
-            with TestClient(app, cookies={"session": token}) as client:
+            with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
                 response = client.get("/admin/opponents")
         assert f"/admin/opponents/{auto_id}/connect" not in response.text
 
@@ -438,7 +440,7 @@ class TestConnectForm:
         assert link_id is not None
 
         with patch.dict("os.environ", _admin_env(opp_db, "form1@test.com")):
-            with TestClient(app, cookies={"session": token}) as client:
+            with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
                 response = client.get(f"/admin/opponents/{link_id}/connect")
         assert response.status_code == 200
         assert "Ridgecrest Rockets" in response.text
@@ -449,7 +451,7 @@ class TestConnectForm:
         token = _insert_session(opp_db, admin_id)
 
         with patch.dict("os.environ", _admin_env(opp_db, "form2@test.com")):
-            with TestClient(app, cookies={"session": token}) as client:
+            with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
                 response = client.get("/admin/opponents/9999/connect")
         assert response.status_code == 404
 
@@ -460,7 +462,7 @@ class TestConnectForm:
         assert link_id is not None
 
         with patch.dict("os.environ", _admin_env(opp_db, "form3@test.com")):
-            with TestClient(app, cookies={"session": token}) as client:
+            with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
                 response = client.get(f"/admin/opponents/{link_id}/connect")
         assert f"/admin/opponents/{link_id}/connect/confirm" in response.text
 
@@ -488,7 +490,7 @@ class TestConnectConfirm:
 
         with patch.dict("os.environ", _admin_env(opp_db, "confirm1@test.com")):
             with patch("src.api.routes.admin.resolve_team", return_value=mock_profile):
-                with TestClient(app, cookies={"session": token}) as client:
+                with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
                     response = client.get(
                         f"/admin/opponents/{link_id}/connect/confirm",
                         params={"url": "https://web.gc.com/teams/NewTeam001/slug"},
@@ -503,7 +505,7 @@ class TestConnectConfirm:
         link_id = _get_link_id_by_name(opp_db, "Ridgecrest Rockets")
 
         with patch.dict("os.environ", _admin_env(opp_db, "confirm2@test.com")):
-            with TestClient(app, cookies={"session": token}) as client:
+            with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
                 response = client.get(
                     f"/admin/opponents/{link_id}/connect/confirm",
                     params={"url": "not-a-valid-url-at-all!!"},
@@ -523,7 +525,7 @@ class TestConnectConfirm:
                 "src.api.routes.admin.resolve_team",
                 side_effect=GameChangerAPIError("API down"),
             ):
-                with TestClient(app, cookies={"session": token}) as client:
+                with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
                     response = client.get(
                         f"/admin/opponents/{link_id}/connect/confirm",
                         params={"url": "https://web.gc.com/teams/NewTeam001/slug"},
@@ -543,7 +545,7 @@ class TestConnectConfirm:
                 "src.api.routes.admin.resolve_team",
                 side_effect=TeamNotFoundError("Not found"),
             ):
-                with TestClient(app, cookies={"session": token}) as client:
+                with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
                     response = client.get(
                         f"/admin/opponents/{link_id}/connect/confirm",
                         params={"url": "https://web.gc.com/teams/NewTeam001/slug"},
@@ -559,7 +561,7 @@ class TestConnectConfirm:
 
         # ownedPubId001 is the public_id of LSB Varsity (membership_type='member')
         with patch.dict("os.environ", _admin_env(opp_db, "confirm5@test.com")):
-            with TestClient(app, cookies={"session": token}) as client:
+            with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
                 response = client.get(
                     f"/admin/opponents/{link_id}/connect/confirm",
                     params={"url": "https://web.gc.com/teams/ownedPubId001/slug"},
@@ -584,7 +586,7 @@ class TestConnectConfirm:
 
         with patch.dict("os.environ", _admin_env(opp_db, "confirm6@test.com")):
             with patch("src.api.routes.admin.resolve_team", return_value=mock_profile):
-                with TestClient(app, cookies={"session": token}) as client:
+                with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
                     response = client.get(
                         f"/admin/opponents/{link_id}/connect/confirm",
                         params={"url": "https://web.gc.com/teams/a1GFM9Ku0BbF/slug"},
@@ -610,11 +612,11 @@ class TestConnectPost:
 
         with patch.dict("os.environ", _admin_env(opp_db, "post1@test.com")):
             with TestClient(
-                app, follow_redirects=False, cookies={"session": token}
+                app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
             ) as client:
                 response = client.post(
                     f"/admin/opponents/{link_id}/connect",
-                    data={"public_id": "RidgeCrest01"},
+                    data={"public_id": "RidgeCrest01", "csrf_token": _CSRF},
                 )
         assert response.status_code == 303
 
@@ -632,11 +634,11 @@ class TestConnectPost:
 
         with patch.dict("os.environ", _admin_env(opp_db, "post3@test.com")):
             with TestClient(
-                app, follow_redirects=False, cookies={"session": token}
+                app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
             ) as client:
                 response = client.post(
                     f"/admin/opponents/{link_id}/connect",
-                    data={"public_id": "RidgeCrest02"},
+                    data={"public_id": "RidgeCrest02", "csrf_token": _CSRF},
                 )
         assert response.status_code == 303
         assert "/admin/opponents" in response.headers["location"]
@@ -651,11 +653,11 @@ class TestConnectPost:
 
         with patch.dict("os.environ", _admin_env(opp_db, "post4@test.com")):
             with TestClient(
-                app, follow_redirects=False, cookies={"session": token}
+                app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
             ) as client:
                 response = client.post(
                     f"/admin/opponents/{link_id}/connect",
-                    data={"public_id": "ownedPubId001"},  # belongs to LSB Varsity member
+                    data={"public_id": "ownedPubId001", "csrf_token": _CSRF},  # belongs to LSB Varsity member
                 )
         assert response.status_code == 400
 
@@ -669,11 +671,11 @@ class TestConnectPost:
         # a1GFM9Ku0BbF already used by Northside Eagles
         with patch.dict("os.environ", _admin_env(opp_db, "post5@test.com")):
             with TestClient(
-                app, follow_redirects=False, cookies={"session": token}
+                app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
             ) as client:
                 response = client.post(
                     f"/admin/opponents/{link_id}/connect",
-                    data={"public_id": "a1GFM9Ku0BbF"},
+                    data={"public_id": "a1GFM9Ku0BbF", "csrf_token": _CSRF},
                 )
         assert response.status_code == 303
         location = response.headers["location"]
@@ -713,11 +715,11 @@ class TestDuplicatePublicIdScopedToTeam:
         # a1GFM9Ku0BbF is used by varsity/Northside Eagles (auto), but not JV
         with patch.dict("os.environ", _admin_env(opp_db, "e091cross1@test.com")):
             with TestClient(
-                app, follow_redirects=False, cookies={"session": token}
+                app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
             ) as client:
                 response = client.post(
                     f"/admin/opponents/{link_id}/connect",
-                    data={"public_id": "a1GFM9Ku0BbF"},
+                    data={"public_id": "a1GFM9Ku0BbF", "csrf_token": _CSRF},
                 )
 
         assert response.status_code == 303
@@ -741,11 +743,11 @@ class TestDuplicatePublicIdScopedToTeam:
         # a1GFM9Ku0BbF already used by Northside Eagles on the same varsity team
         with patch.dict("os.environ", _admin_env(opp_db, "e091same1@test.com")):
             with TestClient(
-                app, follow_redirects=False, cookies={"session": token}
+                app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
             ) as client:
                 response = client.post(
                     f"/admin/opponents/{link_id}/connect",
-                    data={"public_id": "a1GFM9Ku0BbF"},
+                    data={"public_id": "a1GFM9Ku0BbF", "csrf_token": _CSRF},
                 )
 
         assert response.status_code == 303
@@ -782,7 +784,7 @@ class TestDuplicatePublicIdScopedToTeam:
 
         with patch.dict("os.environ", _admin_env(opp_db, "e091cross2@test.com")):
             with patch("src.api.routes.admin.resolve_team", return_value=mock_profile):
-                with TestClient(app, cookies={"session": token}) as client:
+                with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
                     response = client.get(
                         f"/admin/opponents/{link_id}/connect/confirm",
                         params={"url": "https://web.gc.com/teams/a1GFM9Ku0BbF/slug"},
@@ -809,9 +811,9 @@ class TestDisconnect:
 
         with patch.dict("os.environ", _admin_env(opp_db, "disc1@test.com")):
             with TestClient(
-                app, follow_redirects=False, cookies={"session": token}
+                app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
             ) as client:
-                response = client.post(f"/admin/opponents/{link_id}/disconnect")
+                response = client.post(f"/admin/opponents/{link_id}/disconnect", data={"csrf_token": _CSRF})
         assert response.status_code == 303
 
         row = _get_link_row(opp_db, link_id)
@@ -828,9 +830,9 @@ class TestDisconnect:
 
         with patch.dict("os.environ", _admin_env(opp_db, "disc2@test.com")):
             with TestClient(
-                app, follow_redirects=False, cookies={"session": token}
+                app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
             ) as client:
-                response = client.post(f"/admin/opponents/{link_id}/disconnect")
+                response = client.post(f"/admin/opponents/{link_id}/disconnect", data={"csrf_token": _CSRF})
         assert response.status_code == 303
         assert "/admin/opponents" in response.headers["location"]
 
@@ -841,8 +843,8 @@ class TestDisconnect:
         assert link_id is not None
 
         with patch.dict("os.environ", _admin_env(opp_db, "disc3@test.com")):
-            with TestClient(app, cookies={"session": token}) as client:
-                response = client.post(f"/admin/opponents/{link_id}/disconnect")
+            with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
+                response = client.post(f"/admin/opponents/{link_id}/disconnect", data={"csrf_token": _CSRF})
         assert response.status_code == 400
 
     def test_disconnect_unlinked_returns_400(self, opp_db: Path) -> None:
@@ -852,8 +854,8 @@ class TestDisconnect:
         assert link_id is not None
 
         with patch.dict("os.environ", _admin_env(opp_db, "disc4@test.com")):
-            with TestClient(app, cookies={"session": token}) as client:
-                response = client.post(f"/admin/opponents/{link_id}/disconnect")
+            with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
+                response = client.post(f"/admin/opponents/{link_id}/disconnect", data={"csrf_token": _CSRF})
         assert response.status_code == 400
 
     def test_disconnect_shows_disconnect_button_only_for_manual(
@@ -867,7 +869,7 @@ class TestDisconnect:
         assert auto_id is not None
 
         with patch.dict("os.environ", _admin_env(opp_db, "disc5@test.com")):
-            with TestClient(app, cookies={"session": token}) as client:
+            with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
                 response = client.get("/admin/opponents")
 
         assert f"/admin/opponents/{manual_id}/disconnect" in response.text
@@ -888,7 +890,7 @@ class TestTeamsEditSimplified:
         token = _insert_session(opp_db, admin_id)
 
         with patch.dict("os.environ", _admin_env(opp_db, "ac10a@test.com")):
-            with TestClient(app, cookies={"session": token}) as client:
+            with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
                 response = client.get("/admin/teams")
         assert "/admin/opponents" in response.text
 
@@ -902,7 +904,7 @@ class TestTeamsEditSimplified:
         token = _insert_session(opp_db, admin_id)
 
         with patch.dict("os.environ", _admin_env(opp_db, "ac10b@test.com")):
-            with TestClient(app, cookies={"session": token}) as client:
+            with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
                 response = client.get(f"/admin/teams/{varsity_id}/edit")
         # varsity has 2 opponent links (Northside auto + Ridgecrest unlinked)
         assert "Manage connections" in response.text
@@ -926,11 +928,11 @@ class TestConnectGuardAgainstResolved:
 
         with patch.dict("os.environ", _admin_env(opp_db, "guard1@test.com")):
             with TestClient(
-                app, follow_redirects=False, cookies={"session": token}
+                app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
             ) as client:
                 response = client.post(
                     f"/admin/opponents/{auto_id}/connect",
-                    data={"public_id": "SomeOtherId"},
+                    data={"public_id": "SomeOtherId", "csrf_token": _CSRF},
                 )
         assert response.status_code == 400
 
@@ -968,10 +970,11 @@ class TestDiscoverOpponents:
             ) as mock_bulk:
                 with patch.dict("os.environ", _admin_env(opp_db, "discover1@test.com")):
                     with TestClient(
-                        app, follow_redirects=False, cookies={"session": token}
+                        app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
                     ) as client:
                         response = client.post(
-                            f"/admin/teams/{varsity_id}/discover-opponents"
+                            f"/admin/teams/{varsity_id}/discover-opponents",
+                            data={"csrf_token": _CSRF},
                         )
 
         assert response.status_code == 303
@@ -991,10 +994,11 @@ class TestDiscoverOpponents:
 
         with patch.dict("os.environ", _admin_env(opp_db, "discover2@test.com")):
             with TestClient(
-                app, follow_redirects=False, cookies={"session": token}
+                app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
             ) as client:
                 response = client.post(
-                    f"/admin/teams/{jv_id}/discover-opponents"
+                    f"/admin/teams/{jv_id}/discover-opponents",
+                    data={"csrf_token": _CSRF},
                 )
 
         assert response.status_code == 303

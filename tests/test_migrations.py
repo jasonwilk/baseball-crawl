@@ -29,6 +29,7 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from migrations.apply_migrations import (  # noqa: E402
+    apply_migration,
     collect_migration_files,
     get_applied_migrations,
     run_migrations,
@@ -231,3 +232,61 @@ class TestRunMigrations:
         assert row[0] == "lsb-hs"
         assert "Lincoln Standing Bear" in row[1]
         assert row[2] == "hs"
+
+
+class TestFKEnforcementDuringMigration:
+    """Verify that FK constraints are enforced during migration execution.
+
+    executescript() resets connection state, so PRAGMA foreign_keys=ON must
+    be included inline in the SQL string. These tests confirm that the fix
+    in apply_migration() actually enforces FK constraints.
+    """
+
+    def test_fk_violation_rejected_during_migration(self, fresh_db: Path):
+        """A migration containing a bad FK reference raises IntegrityError."""
+        # First, apply the real schema so FK-bearing tables exist.
+        run_migrations(db_path=fresh_db)
+
+        # Create a fake migration file that inserts a row with an invalid FK.
+        # teams.program_id references programs(program_id); 'nonexistent-program'
+        # does not exist, so this INSERT must fail if FKs are enforced.
+        bad_sql = (
+            "INSERT INTO teams (program_id, name, membership_type, source, is_active) "
+            "VALUES ('nonexistent-program', 'Bad Team', 'tracked', 'manual', 1);"
+        )
+        fake_migration = fresh_db.parent / "999_fk_violation_test.sql"
+        fake_migration.write_text(bad_sql, encoding="utf-8")
+
+        conn = sqlite3.connect(str(fresh_db))
+        try:
+            with pytest.raises(sqlite3.IntegrityError):
+                apply_migration(conn, fake_migration)
+        finally:
+            conn.close()
+
+    def test_fk_enforcement_pragma_is_inline(self, fresh_db: Path):
+        """After running a migration via executescript, FK enforcement is active.
+
+        Directly verifies that PRAGMA foreign_keys is ON after apply_migration
+        runs -- proving the inline pragma approach works.
+        """
+        run_migrations(db_path=fresh_db)
+
+        # Create a harmless migration that just inserts a program row.
+        harmless_sql = (
+            "INSERT OR IGNORE INTO programs (program_id, name, program_type) "
+            "VALUES ('test-prog', 'Test Program', 'hs');"
+        )
+        fake_migration = fresh_db.parent / "998_harmless.sql"
+        fake_migration.write_text(harmless_sql, encoding="utf-8")
+
+        conn = sqlite3.connect(str(fresh_db))
+        try:
+            apply_migration(conn, fake_migration)
+            # After executescript with inline PRAGMA, foreign_keys should be ON.
+            fk_status = conn.execute("PRAGMA foreign_keys;").fetchone()[0]
+            assert fk_status == 1, (
+                f"Expected foreign_keys=1 after migration, got {fk_status}"
+            )
+        finally:
+            conn.close()

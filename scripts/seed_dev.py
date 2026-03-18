@@ -104,8 +104,8 @@ def load_seed(db_path: Path, seed_file: Path) -> None:
 
     conn = sqlite3.connect(str(db_path))
     try:
-        conn.execute("PRAGMA foreign_keys=ON;")
-        conn.executescript(sql)
+        # executescript() resets connection state, so FK pragma must be inline.
+        conn.executescript("PRAGMA foreign_keys=ON;\n" + sql)
         conn.commit()
         logger.info("Seed data loaded successfully.")
     except sqlite3.Error:

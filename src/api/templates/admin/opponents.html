@@ -5,7 +5,7 @@
 {% block header_extras %}
 <div class="ml-auto flex items-center gap-4 text-sm">
   <a href="/dashboard" class="text-blue-200 hover:text-white">Dashboard</a>
-  <a href="/auth/logout" class="text-blue-200 hover:text-white">Logout</a>
+  <form method="post" action="/auth/logout" class="inline"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><button type="submit" class="text-blue-200 hover:text-white bg-transparent border-0 cursor-pointer p-0 font-[inherit] text-[length:inherit]">Logout</button></form>
 </div>
 {% endblock %}
 
@@ -106,6 +106,7 @@
             {% endif %}
             {% if link.resolution_method == 'manual' %}
             <form method="post" action="/admin/opponents/{{ link.id }}/disconnect" class="inline">
+              <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
               <button type="submit"
                       class="text-red-600 hover:underline text-xs"
                       data-name="{{ link.opponent_name }}"

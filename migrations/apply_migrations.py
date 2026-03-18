@@ -127,7 +127,8 @@ def apply_migration(conn: sqlite3.Connection, migration_file: Path) -> None:
     sql = migration_file.read_text(encoding="utf-8")
     logger.info("Applying migration: %s", migration_file.name)
     try:
-        conn.executescript(sql)
+        # executescript() resets connection state, so FK pragma must be inline.
+        conn.executescript("PRAGMA foreign_keys=ON;\n" + sql)
         conn.execute(
             "INSERT INTO _migrations (filename) VALUES (?);",
             (migration_file.name,),
@@ -164,7 +165,8 @@ def run_migrations(db_path: Path | None = None) -> None:
         conn.commit()
 
         # Ensure the migrations tracking table exists.
-        conn.executescript(_CREATE_MIGRATIONS_TABLE)
+        # executescript() resets connection state, so FK pragma must be inline.
+        conn.executescript("PRAGMA foreign_keys=ON;\n" + _CREATE_MIGRATIONS_TABLE)
         conn.commit()
 
         applied = get_applied_migrations(conn)

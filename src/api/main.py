@@ -12,7 +12,7 @@ Route structure (current):
     GET  /auth/login     -- Login page (see routes/auth.py)
     POST /auth/login     -- Magic link issuance (see routes/auth.py)
     GET  /auth/verify    -- Magic link verification (see routes/auth.py)
-    GET  /auth/logout    -- Session logout (see routes/auth.py)
+    POST /auth/logout    -- Session logout (see routes/auth.py)
     GET  /admin/users    -- Admin user list (see routes/admin.py)
     POST /admin/users    -- Create user (see routes/admin.py)
 """
@@ -31,6 +31,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from src.api.auth import SessionMiddleware
+from src.api.csrf import CSRFMiddleware
 from src.api.routes.admin import router as admin_router
 from src.api.routes.auth import router as auth_router
 from src.api.routes.health import router as health_router
@@ -88,6 +89,7 @@ app = FastAPI(
 # ---------------------------------------------------------------------------
 
 app.add_middleware(SessionMiddleware)
+app.add_middleware(CSRFMiddleware)
 
 # ---------------------------------------------------------------------------
 # Static files and templates

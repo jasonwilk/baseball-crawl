@@ -5,7 +5,7 @@
 {% block header_extras %}
 <div class="ml-auto flex items-center gap-4 text-sm">
   <a href="/dashboard" class="text-blue-200 hover:text-white">Dashboard</a>
-  <a href="/auth/logout" class="text-blue-200 hover:text-white">Logout</a>
+  <form method="post" action="/auth/logout" class="inline"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><button type="submit" class="text-blue-200 hover:text-white bg-transparent border-0 cursor-pointer p-0 font-[inherit] text-[length:inherit]">Logout</button></form>
 </div>
 {% endblock %}
 
@@ -56,6 +56,7 @@
                 class="inline"
                 data-email="{{ user.email }}"
                 onsubmit="return confirm('Delete ' + this.dataset.email + '? This cannot be undone.');">
+            <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
             <button type="submit" class="text-red-600 hover:underline">Delete</button>
           </form>
         </td>
@@ -73,6 +74,7 @@
 <div class="bg-white rounded shadow p-6 max-w-lg">
   <h2 class="text-lg font-semibold mb-4">Add User</h2>
   <form method="post" action="/admin/users">
+    <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
     <div class="mb-4">
       <label class="block text-sm font-medium text-gray-700 mb-1" for="email">
         Email <span class="text-red-600">*</span>

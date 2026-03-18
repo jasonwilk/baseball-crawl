@@ -126,8 +126,8 @@ def load_seed(db_path: Path, seed_file: Path) -> int:
 
     conn = sqlite3.connect(str(db_path))
     try:
-        conn.execute("PRAGMA foreign_keys=ON;")
-        conn.executescript(sql)
+        # executescript() resets connection state, so FK pragma must be inline.
+        conn.executescript("PRAGMA foreign_keys=ON;\n" + sql)
         conn.commit()
 
         # Count total rows across all user tables (excluding _migrations).

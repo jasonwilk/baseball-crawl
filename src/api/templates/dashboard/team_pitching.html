@@ -10,7 +10,7 @@
   {% if user and user.email %}
   <span class="text-blue-200">{{ user.email }}</span>
   {% endif %}
-  <a href="/auth/logout" class="text-blue-200 hover:text-white">Logout</a>
+  <form method="post" action="/auth/logout" class="inline"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><button type="submit" class="text-blue-200 hover:text-white bg-transparent border-0 cursor-pointer p-0 font-[inherit] text-[length:inherit]">Logout</button></form>
 </div>
 {% endblock %}
 

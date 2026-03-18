@@ -20,16 +20,9 @@ if ! echo "$COMMAND" | grep -qE '(^|[;&|]\s*)git\s+commit'; then
   exit 0
 fi
 
-# Run PII scanner against staged files
-SCANNER="$CLAUDE_PROJECT_DIR/src/safety/pii_scanner.py"
-
-if [ ! -f "$SCANNER" ]; then
-  # Scanner not found at expected path; allow commit (fail open)
-  exit 0
-fi
-
+# Run PII scanner against staged files via module invocation
 # Run scanner; capture output
-SCAN_OUTPUT=$(python3 "$SCANNER" --staged 2>&1)
+SCAN_OUTPUT=$(cd "$CLAUDE_PROJECT_DIR" && python3 -m src.safety.pii_scanner --staged 2>&1)
 SCAN_EXIT=$?
 
 if [ $SCAN_EXIT -ne 0 ]; then

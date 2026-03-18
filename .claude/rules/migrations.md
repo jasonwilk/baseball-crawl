@@ -33,6 +33,10 @@ Seed data (reference data that the application requires at startup) belongs in m
 
 `datetime('now')` in SQLite produces `'YYYY-MM-DD HH:MM:SS'` format -- space separator, no `T`, no `Z`. This is NOT ISO 8601 with `T`/`Z`. When comparing or parsing timestamps from SQLite, account for this format.
 
+## `executescript()` and PRAGMAs
+
+SQLite's `executescript()` implicitly commits any open transaction and resets connection state. A `PRAGMA foreign_keys=ON` set on the connection before `executescript()` has **no effect** on the SQL it runs. If a script needs FK enforcement, prepend `PRAGMA foreign_keys=ON;\n` to the SQL string passed to `executescript()`.
+
 ## Application
 
 Migrations are applied via `python migrations/apply_migrations.py`. The `migrations/` directory is a Python package (`__init__.py` exists) because `src/db/reset.py` imports from it.

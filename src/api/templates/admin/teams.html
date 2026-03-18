@@ -5,7 +5,7 @@
 {% block header_extras %}
 <div class="ml-auto flex items-center gap-4 text-sm">
   <a href="/dashboard" class="text-blue-200 hover:text-white">Dashboard</a>
-  <a href="/auth/logout" class="text-blue-200 hover:text-white">Logout</a>
+  <form method="post" action="/auth/logout" class="inline"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><button type="submit" class="text-blue-200 hover:text-white bg-transparent border-0 cursor-pointer p-0 font-[inherit] text-[length:inherit]">Logout</button></form>
 </div>
 {% endblock %}
 
@@ -77,6 +77,7 @@
             <a href="/admin/teams/{{ team.id }}/edit"
                class="text-blue-700 hover:underline text-xs">Edit</a>
             <form method="post" action="/admin/teams/{{ team.id }}/toggle-active" class="inline">
+              <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
               <button type="submit"
                       class="text-xs {% if team.is_active %}text-red-600 hover:underline{% else %}text-green-700 hover:underline{% endif %}">
                 {% if team.is_active %}Deactivate{% else %}Activate{% endif %}
@@ -84,6 +85,7 @@
             </form>
             {% if team.is_active and team.public_id %}
             <form method="post" action="/admin/teams/{{ team.id }}/discover-opponents" class="inline">
+              <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
               <button type="submit"
                       class="text-xs text-indigo-700 hover:underline">
                 Discover
@@ -108,6 +110,7 @@
 <div class="bg-white rounded shadow p-6 max-w-lg">
   <h2 class="text-lg font-semibold mb-4">Add Team</h2>
   <form method="post" action="/admin/teams">
+    <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
     <div class="mb-4">
       <label class="block text-sm font-medium text-gray-700 mb-1" for="url_input">
         GameChanger URL or Public ID <span class="text-red-600">*</span>
