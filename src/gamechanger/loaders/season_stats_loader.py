@@ -245,6 +245,9 @@ class SeasonStatsLoader:
     ) -> None:
         """Upsert a player_season_batting row.
 
+        Populates all 47 batting stat columns from the season-stats API
+        offense section.  Sets ``stat_completeness = 'full'`` because
+        the season-stats endpoint provides authoritative aggregate data.
         All split columns are NULL -- the season-stats API does not provide
         home/away or left/right pitcher splits.
 
@@ -257,35 +260,123 @@ class SeasonStatsLoader:
         self._db.execute(
             """
             INSERT INTO player_season_batting (
-                player_id, team_id, season_id,
-                gp, ab, h, doubles, triples, hr, rbi, bb, so, sb
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                player_id, team_id, season_id, stat_completeness,
+                gp, pa, ab, h, singles, doubles, triples, hr, rbi, r,
+                bb, so, sol, hbp, shb, shf, gidp, roe, fc, ci, pik, sb, cs,
+                tb, xbh, lob, three_out_lob, ob, gshr, two_out_rbi, hrisp, abrisp,
+                qab, hard, weak, lnd, flb, gb, ps, sw, sm, inp, full,
+                two_strikes, two_s_plus_3, six_plus, lobb
+            ) VALUES (
+                ?, ?, ?, 'full',
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                ?, ?, ?, ?
+            )
             ON CONFLICT(player_id, team_id, season_id) DO UPDATE SET
-                gp      = excluded.gp,
-                ab      = excluded.ab,
-                h       = excluded.h,
-                doubles = excluded.doubles,
-                triples = excluded.triples,
-                hr      = excluded.hr,
-                rbi     = excluded.rbi,
-                bb      = excluded.bb,
-                so      = excluded.so,
-                sb      = excluded.sb
+                stat_completeness = 'full',
+                gp           = excluded.gp,
+                pa           = excluded.pa,
+                ab           = excluded.ab,
+                h            = excluded.h,
+                singles      = excluded.singles,
+                doubles      = excluded.doubles,
+                triples      = excluded.triples,
+                hr           = excluded.hr,
+                rbi          = excluded.rbi,
+                r            = excluded.r,
+                bb           = excluded.bb,
+                so           = excluded.so,
+                sol          = excluded.sol,
+                hbp          = excluded.hbp,
+                shb          = excluded.shb,
+                shf          = excluded.shf,
+                gidp         = excluded.gidp,
+                roe          = excluded.roe,
+                fc           = excluded.fc,
+                ci           = excluded.ci,
+                pik          = excluded.pik,
+                sb           = excluded.sb,
+                cs           = excluded.cs,
+                tb           = excluded.tb,
+                xbh          = excluded.xbh,
+                lob          = excluded.lob,
+                three_out_lob = excluded.three_out_lob,
+                ob           = excluded.ob,
+                gshr         = excluded.gshr,
+                two_out_rbi  = excluded.two_out_rbi,
+                hrisp        = excluded.hrisp,
+                abrisp       = excluded.abrisp,
+                qab          = excluded.qab,
+                hard         = excluded.hard,
+                weak         = excluded.weak,
+                lnd          = excluded.lnd,
+                flb          = excluded.flb,
+                gb           = excluded.gb,
+                ps           = excluded.ps,
+                sw           = excluded.sw,
+                sm           = excluded.sm,
+                inp          = excluded.inp,
+                full         = excluded.full,
+                two_strikes  = excluded.two_strikes,
+                two_s_plus_3 = excluded.two_s_plus_3,
+                six_plus     = excluded.six_plus,
+                lobb         = excluded.lobb
             """,
             (
                 player_id,
                 team_id,
                 season_id,
+                # Standard batting (10 existing + 22 new)
                 offense.get("GP"),
+                offense.get("PA"),
                 offense.get("AB"),
                 offense.get("H"),
+                offense.get("1B"),
                 offense.get("2B"),
                 offense.get("3B"),
                 offense.get("HR"),
                 offense.get("RBI"),
+                offense.get("R"),
                 offense.get("BB"),
                 offense.get("SO"),
+                offense.get("SOL"),
+                offense.get("HBP"),
+                offense.get("SHB"),
+                offense.get("SHF"),
+                offense.get("GIDP"),
+                offense.get("ROE"),
+                offense.get("FC"),
+                offense.get("CI"),
+                offense.get("PIK"),
                 offense.get("SB"),
+                offense.get("CS"),
+                offense.get("TB"),
+                offense.get("XBH"),
+                offense.get("LOB"),
+                offense.get("3OUTLOB"),
+                offense.get("OB"),
+                offense.get("GSHR"),
+                offense.get("2OUTRBI"),
+                offense.get("HRISP"),
+                offense.get("ABRISP"),
+                # Advanced batting (15 new)
+                offense.get("QAB"),
+                offense.get("HARD"),
+                offense.get("WEAK"),
+                offense.get("LND"),
+                offense.get("FLB"),
+                offense.get("GB"),
+                offense.get("PS"),
+                offense.get("SW"),
+                offense.get("SM"),
+                offense.get("INP"),
+                offense.get("FULL"),
+                offense.get("2STRIKES"),
+                offense.get("2S+3"),
+                offense.get("6+"),
+                offense.get("LOBB"),
             ),
         )
         logger.debug(
@@ -306,8 +397,20 @@ class SeasonStatsLoader:
     ) -> None:
         """Upsert a player_season_pitching row.
 
+        Populates all 47 pitching stat columns from the season-stats API
+        defense section.  Sets ``stat_completeness = 'full'`` because
+        the season-stats endpoint provides authoritative aggregate data.
         Converts ``IP`` (float) to ``ip_outs`` (integer outs).  All split
         columns are NULL -- the season-stats API does not provide splits.
+
+        Optimistic columns (23) use ``defense.get("KEY")`` -- if the API
+        omits a field, ``None`` flows to NULL, which is correct for nullable
+        columns.  The ``gp`` column (games played, all roles) will likely be
+        NULL because the API places ``GP`` in the ``general`` section, not
+        ``defense``.
+
+        Note: ``TB`` in the pitching/defense context means "Total Balls"
+        (not "Total Bases"), stored in schema column ``total_balls``.
 
         Args:
             player_id: GameChanger player UUID.
@@ -315,39 +418,132 @@ class SeasonStatsLoader:
             season_id: Season slug.
             defense: Defense stats dict from the API.
         """
-        raw_ip = defense.get("IP")
-        ip_outs = _ip_to_ip_outs(raw_ip)
+        ip_outs = _ip_to_ip_outs(defense.get("IP"))
 
         self._db.execute(
             """
             INSERT INTO player_season_pitching (
-                player_id, team_id, season_id,
-                gp_pitcher, ip_outs, h, er, bb, so, hr, pitches, total_strikes
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                player_id, team_id, season_id, stat_completeness,
+                gp_pitcher, gs, ip_outs, bf, pitches,
+                h, er, bb, so, hr, bk, wp, hbp, svo, sb, cs,
+                go, ao, loo, zero_bb_inn, inn_123, fps, lbfpn,
+                gp, w, l, sv, bs, r, sol, lob, pik,
+                total_strikes, total_balls,
+                lt_3, first_2_out, lt_13,
+                bbs, lobb, lobbs, sm, sw, weak, hard, lnd, fb, gb
+            ) VALUES (
+                ?, ?, ?, 'full',
+                ?, ?, ?, ?, ?,
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                ?, ?, ?, ?, ?, ?, ?,
+                ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                ?, ?,
+                ?, ?, ?,
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+            )
             ON CONFLICT(player_id, team_id, season_id) DO UPDATE SET
-                gp_pitcher    = excluded.gp_pitcher,
-                ip_outs       = excluded.ip_outs,
-                h             = excluded.h,
-                er            = excluded.er,
-                bb            = excluded.bb,
-                so            = excluded.so,
-                hr            = excluded.hr,
-                pitches       = excluded.pitches,
-                total_strikes = excluded.total_strikes
+                stat_completeness = 'full',
+                gp_pitcher   = excluded.gp_pitcher,
+                gs           = excluded.gs,
+                ip_outs      = excluded.ip_outs,
+                bf           = excluded.bf,
+                pitches      = excluded.pitches,
+                h            = excluded.h,
+                er           = excluded.er,
+                bb           = excluded.bb,
+                so           = excluded.so,
+                hr           = excluded.hr,
+                bk           = excluded.bk,
+                wp           = excluded.wp,
+                hbp          = excluded.hbp,
+                svo          = excluded.svo,
+                sb           = excluded.sb,
+                cs           = excluded.cs,
+                go           = excluded.go,
+                ao           = excluded.ao,
+                loo          = excluded.loo,
+                zero_bb_inn  = excluded.zero_bb_inn,
+                inn_123      = excluded.inn_123,
+                fps          = excluded.fps,
+                lbfpn        = excluded.lbfpn,
+                gp           = excluded.gp,
+                w            = excluded.w,
+                l            = excluded.l,
+                sv           = excluded.sv,
+                bs           = excluded.bs,
+                r            = excluded.r,
+                sol          = excluded.sol,
+                lob          = excluded.lob,
+                pik          = excluded.pik,
+                total_strikes = excluded.total_strikes,
+                total_balls  = excluded.total_balls,
+                lt_3         = excluded.lt_3,
+                first_2_out  = excluded.first_2_out,
+                lt_13        = excluded.lt_13,
+                bbs          = excluded.bbs,
+                lobb         = excluded.lobb,
+                lobbs        = excluded.lobbs,
+                sm           = excluded.sm,
+                sw           = excluded.sw,
+                weak         = excluded.weak,
+                hard         = excluded.hard,
+                lnd          = excluded.lnd,
+                fb           = excluded.fb,
+                gb           = excluded.gb
             """,
             (
                 player_id,
                 team_id,
                 season_id,
-                defense.get("GP:P"),
-                ip_outs,
-                defense.get("H"),
-                defense.get("ER"),
-                defense.get("BB"),
-                defense.get("SO"),
-                defense.get("HR"),
-                defense.get("#P"),
-                defense.get("TS"),
+                # Confirmed-in-endpoint (standard + existing)
+                defense.get("GP:P"),     # gp_pitcher
+                defense.get("GS"),       # gs
+                ip_outs,                 # ip_outs (converted from IP float)
+                defense.get("BF"),       # bf
+                defense.get("#P"),       # pitches
+                defense.get("H"),        # h
+                defense.get("ER"),       # er
+                defense.get("BB"),       # bb
+                defense.get("SO"),       # so
+                defense.get("HR"),       # hr
+                defense.get("BK"),       # bk
+                defense.get("WP"),       # wp
+                defense.get("HBP"),      # hbp
+                defense.get("SVO"),      # svo
+                defense.get("SB"),       # sb
+                defense.get("CS"),       # cs
+                defense.get("GO"),       # go
+                defense.get("AO"),       # ao
+                defense.get("LOO"),      # loo
+                defense.get("0BBINN"),   # zero_bb_inn
+                defense.get("123INN"),   # inn_123
+                defense.get("FPS"),      # fps
+                defense.get("LBFPN"),    # lbfpn
+                # Optimistic (expected in API but not yet confirmed in endpoint doc)
+                defense.get("GP"),       # gp (likely None -- GP lives in general section)
+                defense.get("W"),        # w
+                defense.get("L"),        # l
+                defense.get("SV"),       # sv
+                defense.get("BS"),       # bs
+                defense.get("R"),        # r
+                defense.get("SOL"),      # sol
+                defense.get("LOB"),      # lob
+                defense.get("PIK"),      # pik
+                defense.get("TS"),       # total_strikes
+                defense.get("TB"),       # total_balls (TB in pitching = Total Balls, NOT Total Bases)
+                defense.get("<3"),       # lt_3
+                defense.get("1ST2OUT"),  # first_2_out
+                defense.get("<13"),      # lt_13
+                defense.get("BBS"),      # bbs
+                defense.get("LOBB"),     # lobb
+                defense.get("LOBBS"),    # lobbs
+                defense.get("SM"),       # sm
+                defense.get("SW"),       # sw
+                defense.get("WEAK"),     # weak
+                defense.get("HARD"),     # hard
+                defense.get("LND"),      # lnd
+                defense.get("FB"),       # fb
+                defense.get("GB"),       # gb
             ),
         )
         logger.debug(

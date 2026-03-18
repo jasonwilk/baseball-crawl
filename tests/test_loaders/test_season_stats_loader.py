@@ -11,6 +11,13 @@ Tests cover:
 - AC-4: Missing player gets stub row (Unknown/Unknown) + WARNING log
 - AC-5: Position player (no defense) -> only batting row; pitcher-only -> only pitching row
 - AC-6: FK prerequisites (teams, seasons rows) created automatically
+- AC-5/AC-6 (E-117-02): Full batting fixture covers all 37 new columns
+- AC-6 (E-117-02): Exact stored values asserted for every new column
+- AC-7 (E-117-02): stat_completeness = 'full' for season_stats_loader rows
+- AC-1/AC-5 (E-117-03): Full pitching fixture covers all 38 new pitching columns
+- AC-6/AC-7 (E-117-03): Exact stored values for confirmed and optimistic columns
+- AC-8 (E-117-03): TB → total_balls mapping verified (pitching context disambiguation)
+- AC-9 (E-117-03): stat_completeness = 'full' for pitching rows
 - IP float -> ip_outs integer conversion
 - Empty players dict loads cleanly (zero records)
 - Malformed file returns LoadResult(errors=1)
@@ -65,6 +72,53 @@ _OFFENSE_A = {
     "RBI": 10, "BB": 8, "SO": 12, "SB": 3,
 }
 
+# Full offense fixture covering all 47 batting stat columns.
+# Values are realistic (non-zero) for the sample required by AC-5.
+_OFFENSE_FULL = {
+    # Standard (existing 10)
+    "GP": 28, "AB": 85, "H": 27, "2B": 6, "3B": 2, "HR": 4,
+    "RBI": 18, "BB": 12, "SO": 20, "SB": 7,
+    # Standard (22 new)
+    "PA": 102,
+    "1B": 15,    # singles
+    "R": 19,
+    "SOL": 8,    # strikeouts looking
+    "HBP": 3,
+    "SHB": 2,    # sacrifice bunts
+    "SHF": 1,    # sacrifice flies
+    "GIDP": 2,
+    "ROE": 3,
+    "FC": 1,
+    "CI": 0,
+    "PIK": 1,
+    "CS": 2,
+    "TB": 49,    # total bases
+    "XBH": 12,   # extra base hits
+    "LOB": 24,
+    "3OUTLOB": 6,
+    "OB": 42,    # times on base
+    "GSHR": 1,   # grand slams
+    "2OUTRBI": 7,
+    "HRISP": 9,  # hits with RISP
+    "ABRISP": 30,
+    # Advanced (15 new)
+    "QAB": 55,
+    "HARD": 11,
+    "WEAK": 8,
+    "LND": 9,
+    "FLB": 14,
+    "GB": 22,
+    "PS": 310,
+    "SW": 60,
+    "SM": 15,
+    "INP": 45,
+    "FULL": 18,
+    "2STRIKES": 52,
+    "2S+3": 28,
+    "6+": 12,
+    "LOBB": 4,
+}
+
 _DEFENSE_PITCHER = {
     "GP:P": 8,
     "IP": 20.0,   # 20 whole innings = 60 outs
@@ -75,6 +129,63 @@ _DEFENSE_PITCHER = {
     "HR": 1,
     "#P": 300,
     "TS": 200,
+}
+
+# Full pitching defense fixture covering all 47 pitching stat columns.
+# Values are realistic (non-zero) for the sample required by AC-5.
+# Optimistic columns that may not be in the defense section are also included
+# to verify correct mapping when they ARE present.
+_DEFENSE_PITCHER_FULL = {
+    # Existing 9 columns
+    "GP:P": 14,
+    "IP": 40.0,   # 40 innings = 120 outs
+    "H": 32,
+    "ER": 14,
+    "BB": 18,
+    "SO": 55,
+    "HR": 3,
+    "#P": 620,
+    "TS": 390,
+    # Confirmed-in-endpoint (15 new)
+    "GS": 10,
+    "BF": 168,
+    "BK": 1,
+    "WP": 4,
+    "HBP": 5,
+    "SVO": 3,
+    "SB": 8,
+    "CS": 2,
+    "GO": 35,
+    "AO": 28,
+    "LOO": 22,
+    "0BBINN": 25,
+    "123INN": 12,
+    "FPS": 88,
+    "LBFPN": 7,
+    # Optimistic (23 -- expected in API, may return None in practice for some)
+    "GP": None,   # Typically None (lives in general section, not defense)
+    "W": 7,
+    "L": 4,
+    "SV": 2,
+    "BS": 1,
+    "R": 17,
+    "SOL": 18,
+    "LOB": 30,
+    "PIK": 3,
+    "TB": 95,     # CRITICAL: TB in pitching = Total Balls (NOT Total Bases)
+    "<3": 42,
+    "1ST2OUT": 18,
+    "<13": 30,
+    "BBS": 6,
+    "LOBB": 4,
+    "LOBBS": 2,
+    "SM": 48,
+    "SW": 110,
+    "WEAK": 19,
+    "HARD": 12,
+    "LND": 10,
+    "FB": 25,
+    "GB": 38,
 }
 
 _DEFENSE_FIELDER = {
@@ -653,3 +764,383 @@ def test_load_file_infers_team_and_season_from_path(
     ).fetchone()
     assert row is not None
     assert row[0] == _PLAYER_A
+
+
+# ---------------------------------------------------------------------------
+# E-117-02: Expanded batting column tests (AC-5, AC-6, AC-7)
+# ---------------------------------------------------------------------------
+
+def test_batting_expansion_all_standard_new_columns_stored(
+    db: sqlite3.Connection, tmp_path: Path
+) -> None:
+    """AC-6: Every newly added standard batting column stores the exact expected value."""
+    _seed_player(db, _PLAYER_A)
+    payload = _make_stats_payload({_PLAYER_A: {"stats": {"offense": _OFFENSE_FULL}}})
+    path = _write_stats(tmp_path, payload)
+
+    SeasonStatsLoader(db).load_file(path)
+
+    row = db.execute(
+        """
+        SELECT
+            pa, singles, r, sol, hbp, shb, shf, gidp, roe, fc, ci, pik, cs,
+            tb, xbh, lob, three_out_lob, ob, gshr, two_out_rbi, hrisp, abrisp
+        FROM player_season_batting WHERE player_id = ?
+        """,
+        (_PLAYER_A,),
+    ).fetchone()
+    assert row is not None
+    (
+        pa, singles, r, sol, hbp, shb, shf, gidp, roe, fc, ci, pik, cs,
+        tb, xbh, lob, three_out_lob, ob, gshr, two_out_rbi, hrisp, abrisp,
+    ) = row
+    assert pa == 102
+    assert singles == 15
+    assert r == 19
+    assert sol == 8
+    assert hbp == 3
+    assert shb == 2
+    assert shf == 1
+    assert gidp == 2
+    assert roe == 3
+    assert fc == 1
+    assert ci == 0
+    assert pik == 1
+    assert cs == 2
+    assert tb == 49
+    assert xbh == 12
+    assert lob == 24
+    assert three_out_lob == 6
+    assert ob == 42
+    assert gshr == 1
+    assert two_out_rbi == 7
+    assert hrisp == 9
+    assert abrisp == 30
+
+
+def test_batting_expansion_all_advanced_columns_stored(
+    db: sqlite3.Connection, tmp_path: Path
+) -> None:
+    """AC-6: Every newly added advanced batting column stores the exact expected value."""
+    _seed_player(db, _PLAYER_A)
+    payload = _make_stats_payload({_PLAYER_A: {"stats": {"offense": _OFFENSE_FULL}}})
+    path = _write_stats(tmp_path, payload)
+
+    SeasonStatsLoader(db).load_file(path)
+
+    row = db.execute(
+        """
+        SELECT qab, hard, weak, lnd, flb, gb, ps, sw, sm, inp, full,
+               two_strikes, two_s_plus_3, six_plus, lobb
+        FROM player_season_batting WHERE player_id = ?
+        """,
+        (_PLAYER_A,),
+    ).fetchone()
+    assert row is not None
+    qab, hard, weak, lnd, flb, gb, ps, sw, sm, inp, full, two_strikes, two_s_plus_3, six_plus, lobb = row
+    assert qab == 55
+    assert hard == 11
+    assert weak == 8
+    assert lnd == 9
+    assert flb == 14
+    assert gb == 22
+    assert ps == 310
+    assert sw == 60
+    assert sm == 15
+    assert inp == 45
+    assert full == 18
+    assert two_strikes == 52
+    assert two_s_plus_3 == 28
+    assert six_plus == 12
+    assert lobb == 4
+
+
+def test_batting_expansion_stat_completeness_is_full(
+    db: sqlite3.Connection, tmp_path: Path
+) -> None:
+    """AC-7: Rows upserted by season_stats_loader have stat_completeness = 'full'."""
+    _seed_player(db, _PLAYER_A)
+    payload = _make_stats_payload({_PLAYER_A: {"stats": {"offense": _OFFENSE_FULL}}})
+    path = _write_stats(tmp_path, payload)
+
+    SeasonStatsLoader(db).load_file(path)
+
+    row = db.execute(
+        "SELECT stat_completeness FROM player_season_batting WHERE player_id = ?",
+        (_PLAYER_A,),
+    ).fetchone()
+    assert row is not None
+    assert row[0] == "full"
+
+
+def test_batting_expansion_stat_completeness_full_on_minimal_offense(
+    db: sqlite3.Connection, tmp_path: Path
+) -> None:
+    """AC-7: stat_completeness = 'full' even when only a few fields are present."""
+    _seed_player(db, _PLAYER_A)
+    payload = _make_stats_payload({_PLAYER_A: {"stats": {"offense": _OFFENSE_A}}})
+    path = _write_stats(tmp_path, payload)
+
+    SeasonStatsLoader(db).load_file(path)
+
+    row = db.execute(
+        "SELECT stat_completeness FROM player_season_batting WHERE player_id = ?",
+        (_PLAYER_A,),
+    ).fetchone()
+    assert row is not None
+    assert row[0] == "full"
+
+
+def test_batting_expansion_upsert_overwrites_completeness(
+    db: sqlite3.Connection, tmp_path: Path
+) -> None:
+    """AC-7: ON CONFLICT UPDATE also sets stat_completeness = 'full'."""
+    _seed_player(db, _PLAYER_A)
+    # Manually insert a row with boxscore_only completeness.
+    team_pk = db.execute(
+        "INSERT OR IGNORE INTO teams (name, membership_type, gc_uuid, is_active) "
+        "VALUES (?, 'tracked', ?, 0) RETURNING id",
+        (_TEAM_ID, _TEAM_ID),
+    ).fetchone()[0]
+    db.execute(
+        "INSERT OR IGNORE INTO seasons (season_id, name, season_type, year) VALUES (?, ?, 'unknown', 2025)",
+        (_SEASON_ID, _SEASON_ID),
+    )
+    db.execute(
+        "INSERT INTO player_season_batting (player_id, team_id, season_id, stat_completeness, ab) "
+        "VALUES (?, ?, ?, 'boxscore_only', 40)",
+        (_PLAYER_A, team_pk, _SEASON_ID),
+    )
+    db.commit()
+
+    payload = _make_stats_payload({_PLAYER_A: {"stats": {"offense": _OFFENSE_FULL}}})
+    path = _write_stats(tmp_path, payload)
+    SeasonStatsLoader(db).load_file(path)
+
+    row = db.execute(
+        "SELECT stat_completeness FROM player_season_batting WHERE player_id = ?",
+        (_PLAYER_A,),
+    ).fetchone()
+    assert row[0] == "full"
+
+
+def test_batting_expansion_absent_fields_stored_as_null(
+    db: sqlite3.Connection, tmp_path: Path
+) -> None:
+    """AC-5 edge case: New columns absent from offense dict are stored as NULL."""
+    _seed_player(db, _PLAYER_A)
+    # Minimal offense with only existing fields -- all new columns absent.
+    payload = _make_stats_payload({_PLAYER_A: {"stats": {"offense": _OFFENSE_A}}})
+    path = _write_stats(tmp_path, payload)
+
+    SeasonStatsLoader(db).load_file(path)
+
+    row = db.execute(
+        "SELECT pa, singles, r, sol, qab, hard, lnd, flb, two_strikes FROM player_season_batting WHERE player_id = ?",
+        (_PLAYER_A,),
+    ).fetchone()
+    assert row is not None
+    # All new columns should be NULL because _OFFENSE_A doesn't include them.
+    assert all(v is None for v in row), f"Expected all NULL but got: {row}"
+
+
+# ---------------------------------------------------------------------------
+# E-117-03: Expanded pitching column tests (AC-1 through AC-10)
+# ---------------------------------------------------------------------------
+
+def test_pitching_expansion_confirmed_columns_stored(
+    db: sqlite3.Connection, tmp_path: Path
+) -> None:
+    """AC-6: Every newly added confirmed-in-endpoint pitching column stores the exact expected value."""
+    _seed_player(db, _PLAYER_A)
+    payload = _make_stats_payload(
+        {_PLAYER_A: {"stats": {"defense": _DEFENSE_PITCHER_FULL}}}
+    )
+    path = _write_stats(tmp_path, payload)
+
+    SeasonStatsLoader(db).load_file(path)
+
+    row = db.execute(
+        """
+        SELECT gs, bf, bk, wp, hbp, svo, sb, cs, go, ao,
+               loo, zero_bb_inn, inn_123, fps, lbfpn
+        FROM player_season_pitching WHERE player_id = ?
+        """,
+        (_PLAYER_A,),
+    ).fetchone()
+    assert row is not None
+    gs, bf, bk, wp, hbp, svo, sb, cs, go, ao, loo, zero_bb_inn, inn_123, fps, lbfpn = row
+    assert gs == 10
+    assert bf == 168
+    assert bk == 1
+    assert wp == 4
+    assert hbp == 5
+    assert svo == 3
+    assert sb == 8
+    assert cs == 2
+    assert go == 35
+    assert ao == 28
+    assert loo == 22
+    assert zero_bb_inn == 25
+    assert inn_123 == 12
+    assert fps == 88
+    assert lbfpn == 7
+
+
+def test_pitching_expansion_optimistic_columns_stored(
+    db: sqlite3.Connection, tmp_path: Path
+) -> None:
+    """AC-7: Every newly added optimistic pitching column stores the exact expected value."""
+    _seed_player(db, _PLAYER_A)
+    payload = _make_stats_payload(
+        {_PLAYER_A: {"stats": {"defense": _DEFENSE_PITCHER_FULL}}}
+    )
+    path = _write_stats(tmp_path, payload)
+
+    SeasonStatsLoader(db).load_file(path)
+
+    row = db.execute(
+        """
+        SELECT w, l, sv, bs, r, sol, lob, pik,
+               lt_3, first_2_out, lt_13, bbs, lobb, lobbs,
+               sm, sw, weak, hard, lnd, fb, gb
+        FROM player_season_pitching WHERE player_id = ?
+        """,
+        (_PLAYER_A,),
+    ).fetchone()
+    assert row is not None
+    (
+        w, l, sv, bs, r, sol, lob, pik,
+        lt_3, first_2_out, lt_13, bbs, lobb, lobbs,
+        sm, sw, weak, hard, lnd, fb, gb,
+    ) = row
+    assert w == 7
+    assert l == 4
+    assert sv == 2
+    assert bs == 1
+    assert r == 17
+    assert sol == 18
+    assert lob == 30
+    assert pik == 3
+    assert lt_3 == 42
+    assert first_2_out == 18
+    assert lt_13 == 30
+    assert bbs == 6
+    assert lobb == 4
+    assert lobbs == 2
+    assert sm == 48
+    assert sw == 110
+    assert weak == 19
+    assert hard == 12
+    assert lnd == 10
+    assert fb == 25
+    assert gb == 38
+
+
+def test_pitching_expansion_tb_maps_to_total_balls(
+    db: sqlite3.Connection, tmp_path: Path
+) -> None:
+    """AC-8: TB in pitching defense maps to total_balls, NOT tb (Total Balls, not Total Bases)."""
+    _seed_player(db, _PLAYER_A)
+    defense = dict(_DEFENSE_PITCHER_FULL)
+    defense["TB"] = 95  # total balls thrown
+
+    payload = _make_stats_payload(
+        {_PLAYER_A: {"stats": {"defense": defense}}}
+    )
+    path = _write_stats(tmp_path, payload)
+
+    SeasonStatsLoader(db).load_file(path)
+
+    row = db.execute(
+        "SELECT total_balls FROM player_season_pitching WHERE player_id = ?",
+        (_PLAYER_A,),
+    ).fetchone()
+    assert row is not None
+    assert row[0] == 95
+
+
+def test_pitching_expansion_gp_is_null_when_absent_from_defense(
+    db: sqlite3.Connection, tmp_path: Path
+) -> None:
+    """AC-7 null case: gp column is NULL when GP is absent from the defense dict (lives in general section)."""
+    _seed_player(db, _PLAYER_A)
+    # Use a defense fixture that has GP=None (simulating real API behavior).
+    defense = dict(_DEFENSE_PITCHER_FULL)
+    assert defense.get("GP") is None  # fixture sets GP=None
+
+    payload = _make_stats_payload(
+        {_PLAYER_A: {"stats": {"defense": defense}}}
+    )
+    path = _write_stats(tmp_path, payload)
+
+    SeasonStatsLoader(db).load_file(path)
+
+    row = db.execute(
+        "SELECT gp FROM player_season_pitching WHERE player_id = ?",
+        (_PLAYER_A,),
+    ).fetchone()
+    assert row is not None
+    assert row[0] is None
+
+
+def test_pitching_expansion_stat_completeness_is_full(
+    db: sqlite3.Connection, tmp_path: Path
+) -> None:
+    """AC-9: Pitching rows upserted by season_stats_loader have stat_completeness = 'full'."""
+    _seed_player(db, _PLAYER_A)
+    payload = _make_stats_payload(
+        {_PLAYER_A: {"stats": {"defense": _DEFENSE_PITCHER_FULL}}}
+    )
+    path = _write_stats(tmp_path, payload)
+
+    SeasonStatsLoader(db).load_file(path)
+
+    row = db.execute(
+        "SELECT stat_completeness FROM player_season_pitching WHERE player_id = ?",
+        (_PLAYER_A,),
+    ).fetchone()
+    assert row is not None
+    assert row[0] == "full"
+
+
+def test_pitching_expansion_stat_completeness_full_on_minimal_defense(
+    db: sqlite3.Connection, tmp_path: Path
+) -> None:
+    """AC-9: stat_completeness = 'full' even with the minimal defense fixture."""
+    _seed_player(db, _PLAYER_A)
+    payload = _make_stats_payload(
+        {_PLAYER_A: {"stats": {"defense": _DEFENSE_PITCHER}}}
+    )
+    path = _write_stats(tmp_path, payload)
+
+    SeasonStatsLoader(db).load_file(path)
+
+    row = db.execute(
+        "SELECT stat_completeness FROM player_season_pitching WHERE player_id = ?",
+        (_PLAYER_A,),
+    ).fetchone()
+    assert row is not None
+    assert row[0] == "full"
+
+
+def test_pitching_expansion_absent_optimistic_fields_are_null(
+    db: sqlite3.Connection, tmp_path: Path
+) -> None:
+    """AC-7 null case: Optimistic columns absent from defense dict are stored as NULL."""
+    _seed_player(db, _PLAYER_A)
+    # Use the minimal defense fixture -- no optimistic fields present.
+    payload = _make_stats_payload(
+        {_PLAYER_A: {"stats": {"defense": _DEFENSE_PITCHER}}}
+    )
+    path = _write_stats(tmp_path, payload)
+
+    SeasonStatsLoader(db).load_file(path)
+
+    row = db.execute(
+        "SELECT w, l, sv, r, sol, sm, sw, weak, hard, lnd, fb, gb, total_balls "
+        "FROM player_season_pitching WHERE player_id = ?",
+        (_PLAYER_A,),
+    ).fetchone()
+    assert row is not None
+    assert all(v is None for v in row), f"Expected all NULL but got: {row}"

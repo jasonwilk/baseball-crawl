@@ -2,7 +2,7 @@
 
 ## Numbering State
 - Next available epic number: E-127
-- Epics created: E-001 through E-126 (E-001, E-003, E-005, E-006, E-007, E-008, E-010, E-011, E-012, E-013, E-014, E-015, E-016, E-017, E-018, E-019, E-020, E-021, E-022, E-024, E-025, E-026, E-027, E-028, E-029, E-030, E-031, E-032, E-033, E-034, E-035, E-036, E-037, E-038, E-042, E-044, E-046, E-048, E-049, E-050, E-052, E-053, E-054, E-056, E-057, E-058, E-055, E-059, E-060, E-061, E-075, E-081, E-084, E-087, E-088, E-089, E-090, E-091, E-092 archived; E-093, E-094, E-095 archived; E-096 archived; E-097 archived; E-098 archived; E-099 archived; E-100 archived; E-101 archived; E-102 archived; E-103 archived; E-104 ready; E-105 archived; E-106 draft; E-107 archived; E-108 archived; E-109 archived; E-110 ready; E-111 archived; E-112 archived; E-114 archived; E-115 archived; E-116 archived; E-118 archived; E-119 ready; E-120 archived; E-121 archived; E-122 archived; E-123 archived; E-124 completed; E-125 archived; E-126 completed)
+- Epics created: E-001 through E-126 (E-001, E-003, E-005, E-006, E-007, E-008, E-010, E-011, E-012, E-013, E-014, E-015, E-016, E-017, E-018, E-019, E-020, E-021, E-022, E-024, E-025, E-026, E-027, E-028, E-029, E-030, E-031, E-032, E-033, E-034, E-035, E-036, E-037, E-038, E-042, E-044, E-046, E-048, E-049, E-050, E-052, E-053, E-054, E-056, E-057, E-058, E-055, E-059, E-060, E-061, E-075, E-081, E-084, E-087, E-088, E-089, E-090, E-091, E-092 archived; E-093, E-094, E-095 archived; E-096 archived; E-097 archived; E-098 archived; E-099 archived; E-100 archived; E-101 archived; E-102 archived; E-103 archived; E-104 ready; E-105 archived; E-106 draft; E-107 archived; E-108 archived; E-109 archived; E-110 ready; E-111 archived; E-112 archived; E-114 archived; E-115 archived; E-116 archived; E-117 completed; E-118 archived; E-119 ready; E-120 archived; E-121 archived; E-122 archived; E-123 archived; E-124 completed; E-125 archived; E-126 completed)
 - Next available idea number: IDEA-043
 - Ideas created: IDEA-001 through IDEA-042
 
@@ -24,9 +24,7 @@
 | E-106 | Evaluate Unauthorized E-100-01 Implementation | DRAFT | Evaluate DE's unauthorized E-100-01 work |
 | E-110 | Iterative Review Rounds Convention | READY | Codify iterative review/refinement pattern |
 | E-113 | Dispatch Boundary Enforcement | READY | Stop main session domain work during dispatch. 2 stories (parallel), CA only. |
-| E-117 | Loader Stat Population | READY | 4 stories: game_loader expansion (01), season batting (02), season pitching (03, after 02), scouting cascade (04, after 01). SE only. 2-wave dispatch. E-116 YAML fix unblocks this. |
 | E-125 | Full-Project Code Review Remediation | READY | 6 stories: CSRF (01), SQL injection + magic link hashing (02), OBP formula + broken backlink (03), Docker non-root + executescript FK (04), HTTP client hardening (05), security hygiene (06). All parallel, SE only. Highest priority -- security + correctness. |
-| E-126 | Architect Context Optimization | COMPLETED | 2 stories (parallel): agent-standards skill + agent def refactor (01), MEMORY.md consolidation (02). CA only. ~176 lines saved (~22% reduction). |
 
 ## Key Architectural Decisions
 - Storage: SQLite (WAL mode). Host-mounted at ./data/app.db. Simple file backup via scripts/backup_db.py (no Litestream).
@@ -38,7 +36,7 @@
 - ip_outs: innings pitched stored as integer outs (1 IP = 3 outs)
 - Mobile credentials (E-075, 2026-03-08): Mobile client key CONFIRMED DIFFERENT from web. iOS app is purely native (no JS bundles). Programmatic mobile refresh blocked on unknown client key.
 - FK-safe orphan handling: unknown player_ids get a stub row inserted before the stat row
-- Data model (revised 2026-03-16, E-100): Fresh-start schema rewrite in single migration `001_initial_schema.sql` (old 001-008 archived). Key changes: programs table (hs/usssa/legion umbrella entity); teams use INTEGER PK AUTOINCREMENT with gc_uuid/public_id as UNIQUE external identifier columns; `membership_type` (member/tracked) replaces is_owned; `classification` replaces level (varsity/jv/freshman/reserve/8U-14U/legion); team_opponents junction table for opponent relationships; TeamRef dataclass pattern (id/gc_uuid/public_id) for pipeline code; enriched stat columns (game_stream_id, bats/throws, splits, batting_order, pitches/strikes, stat_completeness tracking, spray_charts table) -- schema-ready, not yet populated. Auth tables simplified (users/sessions/magic_link_tokens/passkey_credentials/coaching_assignments). Next migration: 002.
+- Data model (revised 2026-03-16, E-100): Fresh-start schema rewrite in single migration `001_initial_schema.sql` (old 001-008 archived). Key changes: programs table (hs/usssa/legion umbrella entity); teams use INTEGER PK AUTOINCREMENT with gc_uuid/public_id as UNIQUE external identifier columns; `membership_type` (member/tracked) replaces is_owned; `classification` replaces level (varsity/jv/freshman/reserve/8U-14U/legion); team_opponents junction table for opponent relationships; TeamRef dataclass pattern (id/gc_uuid/public_id) for pipeline code; enriched stat columns -- game_stream_id + all counting stats now populated by E-117 (game loader: 12 stats + game_stream_id; season stats: 47 batting + 47 pitching; scouting aggregates: 5 batting + 6 pitching cascade). Still unpopulated: bats/throws, splits, batting_order, spray_charts table. Auth tables simplified (users/sessions/magic_link_tokens/passkey_credentials/coaching_assignments). Next migration: 002.
 - Routing model (2026-03-03): Orchestrator removed (E-030). PM is the direct entry point for all work.
 - Auth model (revised 2026-03-03): ALL users = magic link email + optional passkey. No separate admin login path. Cloudflare Access for /admin/*. Dev bypass via DEV_USER_EMAIL. Auth tables in 001_initial_schema.sql (folded in during E-100 rewrite).
 
@@ -78,7 +76,7 @@
 | IDEA-026 | Context Layer Placement Audit -- Phase 2 | CANDIDATE | 2026-06-15 | Trigger: after E-112 ships |
 | IDEA-027 | Unified Team Lifecycle | CANDIDATE | 2026-06-15 | Consult → Refine → Dispatch in one team |
 | IDEA-028 | Loader Stat Population (Per-Game + Season) | PROMOTED | 2026-03-16 | Promoted to E-117 |
-| IDEA-029 | L/R Split Data Population | CANDIDATE | 2026-06-14 | E-100 deferred. Depends on IDEA-028. |
+| IDEA-029 | L/R Split Data Population | CANDIDATE | 2026-06-14 | E-100 deferred. E-117 complete but handedness data source unknown -- not fully unblocked. |
 | IDEA-030 | Fielding/Catcher/Pitch Type Tables | CANDIDATE | 2026-06-14 | E-100 deferred. Additive tables. |
 | IDEA-031 | Stat Blending Logic | CANDIDATE | 2026-06-14 | E-100 deferred. API vs boxscore merge strategy. |
 | IDEA-032 | Multi-Credential per Program | CANDIDATE | 2026-06-14 | E-100 deferred. May never be needed. |
@@ -87,10 +85,10 @@
 | IDEA-035 | Opponent Page Redesign | CANDIDATE | 2026-06-14 | E-100 deferred. After scouting data flows. |
 | IDEA-036 | Dashboard Program Awareness | CANDIDATE | 2026-06-14 | E-100 deferred. After multiple programs exist. |
 | IDEA-037 | Scouting Report Redesign | CANDIDATE | 2026-06-14 | E-100 deferred. Rate stats, flags, PDF export. |
-| IDEA-038 | Query-Time Splits and Streaks | CANDIDATE | 2026-06-14 | Coach MUST HAVE: recent form, doubleheader, season phase. All query-time over per-game data. Depends on E-117. |
+| IDEA-038 | Query-Time Splits and Streaks | CANDIDATE | 2026-06-14 | **Trigger met**: E-117 complete. Coach MUST HAVE: recent form, doubleheader, season phase. All query-time over per-game data. |
 | IDEA-039 | Game Metadata Enrichment | CANDIDATE | 2026-06-14 | venue_name, is_doubleheader, game_num_in_week. Supports IDEA-038. |
-| IDEA-040 | Optimistic Pitching Column API Audit | CANDIDATE | 2026-06-14 | api-scout: which of 23 optimistic pitching cols does GC actually return? After E-117. |
-| IDEA-041 | Play-by-Play Stat Compilation Pipeline | CANDIDATE | 2026-06-14 | Keystone: parse plays endpoint → derive advanced stats → validate vs boxscore → compile season aggregates. Achieves full opponent stat parity. After E-117. |
+| IDEA-040 | Optimistic Pitching Column API Audit | CANDIDATE | 2026-06-14 | **Trigger met**: E-117 complete. api-scout: which of 23 optimistic pitching cols does GC actually return? |
+| IDEA-041 | Play-by-Play Stat Compilation Pipeline | CANDIDATE | 2026-06-14 | **Trigger met**: E-117 complete. Keystone: parse plays endpoint → derive advanced stats → validate vs boxscore → compile season aggregates. Achieves full opponent stat parity. |
 
 ## Key Workflow Contract
 - Routing model: planning (user -> PM), dispatch (user/main session -> implementers directly). PM plans and closes; main session dispatches.
