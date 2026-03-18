@@ -4,7 +4,7 @@
 [E-125: Full-Project Code Review Remediation](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, `.claude/hooks/pii-check.sh` will invoke the PII scanner via `python3 -m src.safety.pii_scanner` instead of running the script file directly. This aligns with E-125-06's removal of `sys.path` manipulation from `pii_scanner.py` and ensures the Claude Code pre-commit hook works correctly with the editable install.

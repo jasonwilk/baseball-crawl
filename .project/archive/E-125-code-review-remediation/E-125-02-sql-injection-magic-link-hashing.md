@@ -4,7 +4,7 @@
 [E-125: Full-Project Code Review Remediation](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the SQL injection surface in `scouting.py:update_run_load_status` will be eliminated (parameterized SQL only), and magic link tokens will be hashed before database storage using the same SHA-256 pattern already used for session tokens. These are the two most urgent security fixes in the codebase.

@@ -4,7 +4,7 @@
 [E-125: Full-Project Code Review Remediation](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the HTTP client layer will handle non-integer `Retry-After` headers without crashing, pagination will only follow URLs on the same host as the base URL, and the WebAuthn `|safe` filter will be replaced with a safe JSON embedding pattern. These are three independent but small fixes grouped into one story because each is a single-line to few-line change.

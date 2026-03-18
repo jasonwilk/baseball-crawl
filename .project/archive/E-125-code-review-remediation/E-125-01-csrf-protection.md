@@ -4,7 +4,7 @@
 [E-125: Full-Project Code Review Remediation](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, every state-mutating endpoint in the FastAPI application will validate a CSRF token. All HTML forms will include a hidden CSRF token field, JS-initiated POSTs will include the CSRF token via header or compatible transport, the mutating GET `/auth/logout` will be converted to POST, and a server-side middleware will reject POST requests with missing or invalid tokens. This closes the most significant security gap identified in the web application review.

@@ -4,7 +4,7 @@
 [E-125: Full-Project Code Review Remediation](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, four hygiene issues will be resolved: hardcoded real UUIDs removed from a committed script, the backup database function properly closes connections on error, the PII scanner eliminates its `sys.path` manipulation, and the stale `.env.example` SQL instruction matches the current schema. These are individually small fixes grouped because each is a few-line change.

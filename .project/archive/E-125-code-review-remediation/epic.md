@@ -1,7 +1,7 @@
 # E-125: Full-Project Code Review Remediation
 
 ## Status
-`READY`
+`COMPLETED`
 
 ## Overview
 Remediate all Critical and Important findings from the 4-session full-project code review (2026-03-17). This is the highest-priority remediation epic: the project has no CSRF protection, a SQL injection surface, plaintext magic link tokens, a Docker container running as root, a broken OBP formula that misinforms coaching decisions, and multiple correctness bugs. Loader stat population gaps (review 02 C-1/C-2/I-4/I-9) are already covered by E-117 and excluded here.
@@ -61,13 +61,13 @@ Expert consultations completed:
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-125-01 | CSRF protection for all POST endpoints | TODO | None | - |
-| E-125-02 | SQL injection fix + magic link token hashing | TODO | E-125-01 | - |
-| E-125-03 | OBP formula correction + broken backlink fix | TODO | None | - |
-| E-125-04 | Docker non-root user + executescript FK enforcement | TODO | None | - |
-| E-125-05 | HTTP client hardening (rate limit crash, pagination validation, XSS) | TODO | E-125-01 | - |
-| E-125-06 | Security hygiene (hardcoded UUIDs, backup connection, pii_scanner sys.path, stale .env.example) | TODO | None | - |
-| E-125-07 | Claude hooks PII scanner invocation update | TODO | None | - |
+| E-125-01 | CSRF protection for all POST endpoints | DONE | None | se-01 |
+| E-125-02 | SQL injection fix + magic link token hashing | DONE | E-125-01 | se-02 |
+| E-125-03 | OBP formula correction + broken backlink fix | DONE | None | se-03 |
+| E-125-04 | Docker non-root user + executescript FK enforcement | DONE | None | se-04 |
+| E-125-05 | HTTP client hardening (rate limit crash, pagination validation, XSS) | DONE | E-125-01 | se-05 |
+| E-125-06 | Security hygiene (hardcoded UUIDs, backup connection, pii_scanner sys.path, stale .env.example) | DONE | None | se-06 |
+| E-125-07 | Claude hooks PII scanner invocation update | DONE | None | ca-07 |
 
 ## Dispatch Team
 - software-engineer (E-125-01 through E-125-06)
@@ -156,3 +156,27 @@ The `executescript()` FK enforcement issue is real in spirit even if the mechani
 ## History
 - 2026-03-17: Created from 4-session full-project code review. Grouped findings into 6 stories by domain. E-117 overlap noted and excluded. Set to READY.
 - 2026-03-17: Codex spec review triage. Incorporated baseball-coach (OBP formula) and data-engineer (FK enforcement) consultations. Expanded E-125-01 for mutating GETs and JS CSRF transport. Added E-125-07 (CA) for `.claude/hooks/pii-check.sh`. Updated TN-8 with test file overlap sequencing. Expanded E-125-03 with NULL handling ACs. Expanded E-125-06 AC-5 for both stale `.env.example` references. Re-verified READY.
+- 2026-03-17: COMPLETED. All 7 stories DONE. Two-wave dispatch: wave-1 (E-125-01, 03, 04, 06, 07 parallel), wave-2 (E-125-02, 05 after E-125-01 merged). E-125-01 AC-7 failed initial verification (7 dashboard logout links still GET after route converted to POST) -- fixed and re-verified. Key deliverables: CSRF middleware (double-submit cookie, pure ASGI), SQL injection elimination, magic link token hashing, OBP formula correction, Docker non-root user, executescript FK enforcement, HTTP client hardening (Retry-After, pagination validation, XSS), security hygiene cleanup. ~25 new tests added across stories.
+
+### Documentation Assessment
+- Trigger 1 (new feature/endpoint): YES -- CSRF middleware is a new feature, logout converted from GET to POST.
+- Trigger 2 (architecture/deployment change): YES -- Docker non-root user changes production deployment (data directory ownership).
+- Trigger 3 (agent modification): No.
+- Trigger 4 (schema change): No.
+- Trigger 5 (changes how system works/user interaction): YES -- logout is now POST (coaches see a button instead of a link), CSRF tokens required on all forms.
+- **Verdict**: docs-writer dispatch needed. Affected docs: `docs/admin/` (deployment runbook re: non-root user, data dir ownership), `docs/production-deployment.md` if it exists.
+
+### Context-Layer Assessment
+1. **New convention/pattern/constraint**: NO -- CSRF, parameterized SQL, and token hashing are standard security practices, not project-specific conventions. No new naming or file organization rules.
+2. **Architectural decision with ongoing implications**: NO -- CSRF middleware and double-submit cookie pattern are implementation details, not architectural decisions that change how future epics are planned. The CSRF token inclusion in forms/JS is mechanical.
+3. **Footgun/failure mode/boundary discovered**: YES -- The `executescript()` FK enforcement gotcha (PRAGMA resets across executescript boundaries) is a real footgun that future migration or seed work could trip over. Also, the `|safe` filter XSS risk in Jinja2 templates is worth noting.
+4. **Change to agent behavior/routing/coordination**: NO -- E-125-07 updated `.claude/hooks/pii-check.sh` invocation but the hook behavior is unchanged (same scanner, same deny/allow logic).
+5. **Domain knowledge for future epics**: NO -- OBP formula is standard baseball knowledge, not a project-specific discovery.
+6. **New CLI command/workflow/operational procedure**: NO -- No new commands or workflows.
+- **Verdict**: Trigger 3 fires. claude-architect dispatch recommended to codify the `executescript()` FK gotcha and `|safe` XSS risk as a rule or CLAUDE.md note.
+
+### Ideas Backlog Review
+No CANDIDATE ideas are newly unblocked by E-125. This epic was security/correctness remediation with no new capabilities or data model changes that would unblock existing ideas.
+
+### Vision Signals
+24 unprocessed signals exist in `docs/vision-signals.md` (accumulated since 2026-03-07). No new signals generated by E-125 (security remediation, no vision-relevant work). The backlog is substantial -- worth mentioning to the user at a natural pause.

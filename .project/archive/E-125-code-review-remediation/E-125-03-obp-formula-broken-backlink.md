@@ -4,7 +4,7 @@
 [E-125: Full-Project Code Review Remediation](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the OBP calculation in all dashboard templates will use the correct formula including HBP and SF, and the broken "Back to Team Stats" link on player profile pages will navigate to a valid route. These fixes correct two user-facing bugs that affect coaching decisions and daily navigation.

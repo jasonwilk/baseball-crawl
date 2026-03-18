@@ -4,7 +4,7 @@
 [E-125: Full-Project Code Review Remediation](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the Docker production container will run the application as a non-root user, and all `executescript()` calls will properly enforce foreign key constraints. These are infrastructure hardening fixes that prevent privilege escalation and data integrity violations.
