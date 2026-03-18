@@ -350,9 +350,14 @@ class ScoutingLoader:
                 SUM(pgb.triples) AS triples,
                 SUM(pgb.hr)      AS hr,
                 SUM(pgb.rbi)     AS rbi,
+                SUM(pgb.r)       AS r,
                 SUM(pgb.bb)      AS bb,
                 SUM(pgb.so)      AS so,
-                SUM(pgb.sb)      AS sb
+                SUM(pgb.sb)      AS sb,
+                SUM(pgb.tb)      AS tb,
+                SUM(pgb.hbp)     AS hbp,
+                SUM(pgb.shf)     AS shf,
+                SUM(pgb.cs)      AS cs
             FROM player_game_batting pgb
             JOIN games g ON pgb.game_id = g.game_id
             WHERE pgb.team_id = ? AND g.season_id = ?
@@ -360,13 +365,16 @@ class ScoutingLoader:
             """,
             (team_id, season_id),
         ).fetchall()
-        for player_id, games_tracked, ab, h, doubles, triples, hr, rbi, bb, so, sb in rows:
+        for (player_id, games_tracked,
+             ab, h, doubles, triples, hr, rbi, r, bb, so, sb,
+             tb, hbp, shf, cs) in rows:
             self._db.execute(
                 """
                 INSERT INTO player_season_batting
                     (player_id, team_id, season_id,
-                     gp, games_tracked, ab, h, doubles, triples, hr, rbi, bb, so, sb)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     gp, games_tracked, ab, h, doubles, triples, hr, rbi, r, bb, so, sb,
+                     tb, hbp, shf, cs)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(player_id, team_id, season_id) DO UPDATE SET
                     gp            = excluded.gp,
                     games_tracked = excluded.games_tracked,
@@ -376,12 +384,18 @@ class ScoutingLoader:
                     triples       = excluded.triples,
                     hr            = excluded.hr,
                     rbi           = excluded.rbi,
+                    r             = excluded.r,
                     bb            = excluded.bb,
                     so            = excluded.so,
-                    sb            = excluded.sb
+                    sb            = excluded.sb,
+                    tb            = excluded.tb,
+                    hbp           = excluded.hbp,
+                    shf           = excluded.shf,
+                    cs            = excluded.cs
                 """,
                 (player_id, team_id, season_id, games_tracked, games_tracked,
-                 ab, h, doubles, triples, hr, rbi, bb, so, sb),
+                 ab, h, doubles, triples, hr, rbi, r, bb, so, sb,
+                 tb, hbp, shf, cs),
             )
         return len(rows)
 
@@ -395,12 +409,18 @@ class ScoutingLoader:
             """
             SELECT
                 pgp.player_id,
-                COUNT(*)         AS games_tracked,
-                SUM(pgp.ip_outs) AS ip_outs,
-                SUM(pgp.h)       AS h,
-                SUM(pgp.er)      AS er,
-                SUM(pgp.bb)      AS bb,
-                SUM(pgp.so)      AS so
+                COUNT(*)              AS games_tracked,
+                SUM(pgp.ip_outs)      AS ip_outs,
+                SUM(pgp.h)            AS h,
+                SUM(pgp.r)            AS r,
+                SUM(pgp.er)           AS er,
+                SUM(pgp.bb)           AS bb,
+                SUM(pgp.so)           AS so,
+                SUM(pgp.wp)           AS wp,
+                SUM(pgp.hbp)          AS hbp,
+                SUM(pgp.pitches)      AS pitches,
+                SUM(pgp.total_strikes) AS total_strikes,
+                SUM(pgp.bf)           AS bf
             FROM player_game_pitching pgp
             JOIN games g ON pgp.game_id = g.game_id
             WHERE pgp.team_id = ? AND g.season_id = ?
@@ -408,24 +428,34 @@ class ScoutingLoader:
             """,
             (team_id, season_id),
         ).fetchall()
-        for player_id, games_tracked, ip_outs, h, er, bb, so in rows:
+        for (player_id, games_tracked,
+             ip_outs, h, r, er, bb, so,
+             wp, hbp, pitches, total_strikes, bf) in rows:
             self._db.execute(
                 """
                 INSERT INTO player_season_pitching
                     (player_id, team_id, season_id,
-                     gp_pitcher, games_tracked, ip_outs, h, er, bb, so)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     gp_pitcher, games_tracked, ip_outs, h, r, er, bb, so,
+                     wp, hbp, pitches, total_strikes, bf)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(player_id, team_id, season_id) DO UPDATE SET
                     gp_pitcher    = excluded.gp_pitcher,
                     games_tracked = excluded.games_tracked,
                     ip_outs       = excluded.ip_outs,
                     h             = excluded.h,
+                    r             = excluded.r,
                     er            = excluded.er,
                     bb            = excluded.bb,
-                    so            = excluded.so
+                    so            = excluded.so,
+                    wp            = excluded.wp,
+                    hbp           = excluded.hbp,
+                    pitches       = excluded.pitches,
+                    total_strikes = excluded.total_strikes,
+                    bf            = excluded.bf
                 """,
                 (player_id, team_id, season_id, games_tracked, games_tracked,
-                 ip_outs, h, er, bb, so),
+                 ip_outs, h, r, er, bb, so,
+                 wp, hbp, pitches, total_strikes, bf),
             )
         return len(rows)
 
