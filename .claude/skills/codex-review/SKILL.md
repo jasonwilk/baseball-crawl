@@ -87,7 +87,42 @@ After presenting findings, offer the user an advisory triage session:
 3. Offer to spawn a triage team with the relevant agents. The team composition depends on the findings' domains -- there is no fixed team.
 4. If the user accepts, create the team and spawn agents. If the user declines, the workflow ends.
 
-**Triage is advisory.** The team assesses findings and recommends action (fix, defer, dismiss) but does NOT implement changes directly. Implementation requires a story reference per the Work Authorization Gate (workflow-discipline.md).
+**Triage is advisory.** The team assesses findings and recommends action (fix, defer, dismiss) but does NOT implement changes directly. Confirmed findings proceed to Step 5 (Remediation Loop).
+
+### Step 5: Remediation loop
+
+After triage completes (whether via triage team or main session assessment), any findings confirmed for remediation enter the remediation loop. If all findings were dismissed or marked false positive during triage, skip to Step 7. Remediation is authorized by the post-review remediation exception in `workflow-discipline.md`'s Work Authorization Gate -- the codex-review skill does not declare its own authorization model.
+
+**Spawning mechanics** depend on context:
+
+- **(a) "And review" chain** (invoked from implement skill Phase 4): The dispatch team is still active. The original implementer on the team validates and remediates findings. PM is already on the team for disposition tracking.
+- **(b) Standalone post-dev review** (invoked directly by the user): No dispatch team exists. The main session creates a remediation team using the agent routing table (`/.claude/rules/agent-routing.md`) to select the appropriate implementer type(s) for the findings' domains (not hard-coded to SE), plus PM for disposition tracking.
+
+For each finding confirmed for remediation, route it to the implementer with the finding details. The implementer:
+
+1. **Validates** the finding -- confirming it is a real issue or identifying it as a false positive.
+2. **Remediates** confirmed issues. The implementer works in the main checkout (not a worktree -- all story branches are already merged by this point).
+3. Reports completion with a change summary (files changed and nature of fix).
+
+**Remediation fixes are NOT re-reviewed.** The implementer commits fixes and PM records dispositions. If the user wants another review pass after remediation, they invoke a separate codex-review.
+
+### Step 6: PM disposition tracking
+
+PM records all findings with their dispositions. Each finding gets one of three dispositions:
+
+- **FIXED**: With a change summary describing what was fixed (files, nature of change) -- not a git commit SHA, since commits happen after team shutdown.
+- **DISMISSED**: With a reason explaining why the finding was not actionable.
+- **FALSE POSITIVE**: With an explanation of why the finding does not apply.
+
+**Recording location** depends on context:
+
+- **(a) "And review" chain**: PM records in the dispatch epic's History section.
+- **(b) Standalone post-dev review**: PM records in a remediation log at `/.project/research/codex-review-YYYY-MM-DD-remediation.md` (standalone reviews may not map to a single epic).
+
+### Step 7: Wrap up
+
+- If this was an "and review" chain, control returns to the implement skill's Phase 4, which proceeds to Phase 5 (closure).
+- If this was a standalone review, present the disposition summary to the user and offer to commit changes.
 
 ---
 
@@ -217,7 +252,18 @@ Determine diff mode (default: uncommitted)
   |       No findings? -> Report clean review, stop
   |       Findings? -> Offer advisory triage (agents from CLAUDE.md)
   |       User accepts? -> Spawn triage team
-  |       User declines? -> Stop
+  |       User declines? -> Stop (no remediation)
+  |       Triage complete, findings confirmed for remediation?
+  |         NO -> Stop
+  |         YES -> Remediation loop:
+  |           Spawn implementer (reuse dispatch team or create remediation team)
+  |           Implementer validates each finding (real issue or false positive)
+  |           Implementer remediates confirmed issues in main checkout
+  |           PM records dispositions (FIXED/DISMISSED/FALSE POSITIVE)
+  |             "And review" chain -> epic History section
+  |             Standalone review -> .project/research/codex-review-YYYY-MM-DD-remediation.md
+  |           Fixes are NOT re-reviewed
+  |           Present disposition summary, offer to commit
   |
   +---> PROMPT-GEN PATH:
           Gather diff via Bash + Read
@@ -262,4 +308,4 @@ Detected via `file --brief --mime-type`. Binary files are skipped with a note. T
 3. **Do not embed rubric content in this skill file or in generated prompts.** The rubric is referenced by absolute path; Codex reads it directly.
 4. **Do not summarize the diff in prompt-generation.** The prompt must contain the complete diff content. Codex needs the full code to perform a meaningful review.
 5. **Do not add separator walls, "Begin your response with" instructions, or team recommendation blocks to prompts.** The lean format has no ceremony.
-6. **Do not implement fixes during triage.** Triage is advisory. Implementation requires a story reference per the Work Authorization Gate.
+6. **Do not implement fixes during triage.** Triage is advisory -- the triage team assesses and recommends but does NOT write code. Implementation happens in the separate remediation phase (Step 5), which is authorized by the post-review remediation exception in `workflow-discipline.md`'s Work Authorization Gate.

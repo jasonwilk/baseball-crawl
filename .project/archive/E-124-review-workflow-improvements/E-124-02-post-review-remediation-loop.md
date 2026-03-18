@@ -4,7 +4,7 @@
 [E-124: Review Workflow Improvements](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the codex-review skill will define a formal remediation loop for post-implementation code review findings: an implementer validates each finding, remediates confirmed issues, and PM records all findings and their dispositions (in the dispatch epic's History section for "and review" chains, or in a standalone remediation log for post-dev reviews). The implement skill's Phase 4 ("and review" chain) will also connect to this remediation loop.

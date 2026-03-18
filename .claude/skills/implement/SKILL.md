@@ -23,7 +23,7 @@ Load this skill when the user says any of:
 
 ## Purpose
 
-Codify the full workflow for dispatching and coordinating an epic when the user requests implementation. The main session (user-facing agent) is the spawner and router: it reads the epic, spawns implementers, code-reviewer, and PM, assigns stories with full context blocks, routes completion reports to PM (AC verification, status updates) and code-reviewer (quality review), manages merge-back, cascades to newly unblocked stories, and runs the closure sequence. The main session does not own statuses, verify ACs, or write code.
+Codify the full workflow for dispatching and coordinating an epic when the user requests implementation. The main session (user-facing agent) is the spawner and router: it reads the epic, spawns implementers, code-reviewer, and PM, assigns stories with full context blocks, routes completion reports to PM (AC verification, status updates) and code-reviewer (quality review), manages merge-back, cascades to newly unblocked stories, and runs the closure sequence. The main session does not own statuses, verify ACs, or create, modify, or delete any file. The main session's only direct file operations are git commands (`git merge`, `git mv`, `git add`, `git commit`) and writes to its own memory directory (`/home/vscode/.claude/projects/*/memory/`).
 
 This skill is the authoritative source for dispatch procedures. Agent routing tables are in `/.claude/rules/agent-routing.md`. See `/.claude/rules/dispatch-pattern.md` for a brief overview of dispatch roles.
 
@@ -276,20 +276,20 @@ Review this story's implementation against all acceptance criteria and the revie
 
 When the implementer did NOT work in a worktree (context-layer stories that touch non-context files, or stories spawned without isolation for other reasons), omit the "Implementer worktree path" paragraph.
 
-3. **Triage ALL findings.** Before any merge or routing decision, the main session reads every finding (MUST FIX and SHOULD FIX) and triages each SHOULD FIX item:
-   - **Accept (fix it)**: The finding improves code touched by the story. Route to the implementer alongside MUST FIX items.
-   - **Dismiss (close it)**: The finding targets pre-existing code not modified by the story, or the main session disagrees with the recommendation. Record a one-line dismissal reason. The finding is closed -- it is NOT deferred to epic History or recorded anywhere else.
+3. **Triage ALL findings.** Before any merge or routing decision, the main session reads every finding (MUST FIX and SHOULD FIX) and triages each SHOULD FIX item into one of two tracks:
+   - **Accept track (fix it)**: The finding improves code touched by the story. Route to the implementer immediately alongside MUST FIX items. No user confirmation needed.
+   - **Dismiss track (close it)**: The finding targets pre-existing code not modified by the story, or the main session disagrees with the recommendation. For each finding on the dismiss track, the main session presents the finding and its dismissal reasoning to the user in plain English, then waits for user confirmation before closing. If the user vetoes a dismissal, the finding moves to the accept track and is routed to the implementer.
    - **When uncertain, bias toward accepting** -- prefer fixing over dismissing.
 
    Every finding reaches a terminal state during the story: FIXED or DISMISSED. No deferral path exists.
 
-4. **If the reviewer returns APPROVED and PM verifies ACs pass** (no MUST FIX findings, ACs satisfied): Triage any SHOULD FIX findings per step 3 above. If all SHOULD FIX items are dismissed (or there are none), run the merge-back sequence (see Step 5a below), then route to PM to mark the story `DONE`. If any SHOULD FIX items are accepted, route them to the implementer who wrote the code before merge-back. After the implementer fixes them, send the updated work back to the reviewer for re-review. The main session routes findings to implementers for resolution -- it NEVER applies code fixes itself.
+4. **If the reviewer returns APPROVED and PM verifies ACs pass** (no MUST FIX findings, ACs satisfied): Triage any SHOULD FIX findings per step 3 above. If all SHOULD FIX items are dismissed (or there are none), run the merge-back sequence (see Step 5a below), then route to PM to mark the story `DONE`. If any SHOULD FIX items are accepted, route them to the implementer who wrote the code before merge-back. After the implementer fixes them, send the updated work back to the reviewer for re-review. The main session routes findings to implementers for resolution -- it NEVER creates, modifies, or deletes any file itself.
 
    **If PM rejects ACs** (regardless of reviewer verdict): Route PM's AC feedback to the implementer alongside any code-review MUST FIX items and accepted SHOULD FIX items. After the implementer revises, both PM and the code-reviewer re-evaluate. See Gate Interaction below.
 
    **PM-Reviewer AC Disagreement**: If the code-reviewer flags an AC as MUST FIX but PM verifies that AC as PASS, the main session removes the AC-based finding from the MUST FIX list before routing to the implementer. If removing AC-based items empties the MUST FIX list, the story passes the review gate (effectively APPROVED for merge-back). Non-AC MUST FIX findings (bugs, security, conventions) are the reviewer's exclusive domain and are unaffected by PM override. The full PM-Reviewer AC Disagreement resolution matrix: (1) Reviewer APPROVED + PM pass = merge-back. (2) Reviewer NOT APPROVED, non-AC MUST FIX only = route to implementer. (3) Reviewer NOT APPROVED, ALL MUST FIX are AC-related, PM says pass = PM override, proceed to merge-back. (4) Mixed AC + non-AC MUST FIX, PM says pass = remove AC items, route only non-AC items. (5) PM says fail = route PM feedback to implementer regardless. Non-AC findings (bugs, security, conventions) are the reviewer's exclusive domain -- PM cannot override those.
 
-5. **If the reviewer returns NOT APPROVED** (MUST FIX findings): Triage SHOULD FIX findings per step 3 above. Route MUST FIX items plus any accepted SHOULD FIX items to the implementer who wrote the code with the review round number (e.g., "Round 1 of 2 -- items to fix below"). The main session NEVER applies code fixes itself -- all fixes are routed to the implementer. The implementer fixes the issues in the same worktree and reports completion again (with updated `## Files Changed`). Send the updated work back to the reviewer for Round 2 using an expanded template that includes the prior findings:
+5. **If the reviewer returns NOT APPROVED** (MUST FIX findings): Triage SHOULD FIX findings per step 3 above. Route MUST FIX items plus any accepted SHOULD FIX items to the implementer who wrote the code with the review round number (e.g., "Round 1 of 2 -- items to fix below"). The main session NEVER creates, modifies, or deletes any file itself -- all fixes are routed to the implementer. The implementer fixes the issues in the same worktree and reports completion again (with updated `## Files Changed`). Send the updated work back to the reviewer for Round 2 using an expanded template that includes the prior findings:
 
 ```
 Review story E-NNN-SS: [Title] (Round 2)
@@ -366,8 +366,9 @@ After PM marks a story DONE, check for newly unblocked stories (stories whose bl
 If the user specified the "and review" modifier (e.g., "implement E-NNN and review"):
 
 - After all stories are verified DONE, chain into the code review workflow at `.claude/skills/codex-review/SKILL.md` (headless path).
-- Run the review before proceeding to the closure sequence (Phase 5).
 - The main session invokes the review skill directly.
+- If the review produces findings, they flow through the codex-review skill's remediation loop (Steps 5-7): the original implementer on the dispatch team validates each finding and remediates confirmed issues, PM records dispositions in the epic's History section, and remediation fixes are not re-reviewed.
+- After the remediation loop completes (or if the review produces no findings), proceed to Phase 5 (closure).
 
 If the modifier was not specified, skip this phase and proceed directly to Phase 5.
 
@@ -500,8 +501,11 @@ Phase 3: Coordination loop
       |
       v
     Main session triages ALL findings:
-      - MUST FIX: always routed to implementer (main session NEVER fixes code itself)
-      - SHOULD FIX: accept (route to implementer) or dismiss (one-line reason, closed)
+      - MUST FIX: always routed to implementer (main session NEVER creates, modifies, or deletes any file itself)
+      - SHOULD FIX accept track: route to implementer immediately (no user wait)
+      - SHOULD FIX dismiss track: present reasoning to user, wait for confirmation
+        - User confirms -> finding DISMISSED
+        - User vetoes -> moves to accept track, routed to implementer
       - No deferral path -- every finding ends FIXED or DISMISSED
       |
       v
@@ -576,7 +580,7 @@ If PM's context fills during a large epic, the main session respawns PM with a f
 
 ## Anti-Patterns
 
-1. **Do not implement stories yourself.** The main session coordinates -- it does not implement. Spawn an implementer for every story, even if the work seems trivial. The coordinator must not also be an implementer.
+1. **Do not implement stories yourself.** The main session MUST NOT create, modify, or delete any file -- its only direct file operations are git commands (`git merge`, `git mv`, `git add`, `git commit`) and writes to its own memory directory (`/home/vscode/.claude/projects/*/memory/`). Spawn an implementer for every story, even if the work seems trivial. The coordinator must not also be an implementer.
 2. **Do not summarize context blocks.** Always send the full story file text and full Technical Notes verbatim. Summarizing loses acceptance criteria, file paths, and constraints that implementers need.
 3. **Do not verify ACs or update statuses yourself.** AC verification and status updates are PM's exclusive responsibility. Route completion reports to PM. The main session MUST NOT check AC boxes, update story/epic status files, or verify acceptance criteria.
 4. **Do not proceed to closure with unverified stories.** If any AC is unmet, send the implementer back. Do not close the epic with partial completion.
@@ -585,7 +589,7 @@ If PM's context fills during a large epic, the main session respawns PM with a f
 7. **Do not skip PM spawning.** PM handles all status updates and AC verification during dispatch. PM is spawned alongside implementers and code-reviewer as infrastructure for every dispatch.
 8. **Do not skip the context-layer assessment.** The epic cannot be archived until the context-layer impact is evaluated per `.claude/rules/context-layer-assessment.md`.
 9. **Do not mark stories DONE without code-reviewer approval** (except context-layer-only stories) unless the user explicitly overrides via the circuit breaker escalation. The reviewer is the quality gate -- the main session does not bypass it by verifying ACs directly.
-10. **Do not defer SHOULD FIX findings to epic History.** Every finding must reach a terminal state (FIXED or DISMISSED) during the story. The main session triages each SHOULD FIX item: accept it (route to implementer alongside MUST FIX items) or dismiss it (record a one-line reason). There is no deferral path.
+10. **Do not defer SHOULD FIX findings to epic History.** Every finding must reach a terminal state (FIXED or DISMISSED) during the story. The main session triages each SHOULD FIX item: accept it (route to implementer immediately) or dismiss it (present reasoning to user and wait for confirmation). There is no deferral path.
 11. **Do not spawn context-layer stories with worktree isolation.** Context-layer files (CLAUDE.md, `.claude/agents/`, `.claude/rules/`, `.claude/skills/`, etc.) are shared infrastructure. Stories modifying only these files must run in the main checkout without `isolation: "worktree"`.
 12. **Do not absorb agent work.** If PM crashes, respawn PM. If an implementer crashes, respawn the implementer. The main session never takes over another agent's domain responsibilities. If the code-reviewer is unavailable, respawn it -- do not verify code quality yourself.
-13. **Do not apply code fixes yourself.** Route all MUST FIX and accepted SHOULD FIX findings to the implementer who wrote the code. The main session NEVER writes or modifies application/test code, even for trivial one-line fixes.
+13. **Do not apply fixes yourself.** Route all MUST FIX and accepted SHOULD FIX findings to the implementer who wrote the code. The main session MUST NOT create, modify, or delete any file -- not even for trivial one-line fixes. All file operations are dispatched to implementers.

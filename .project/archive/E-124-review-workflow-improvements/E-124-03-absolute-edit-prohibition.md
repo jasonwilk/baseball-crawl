@@ -4,7 +4,7 @@
 [E-124: Review Workflow Improvements](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the implement skill, dispatch-pattern rule, and workflow-discipline rule will all state an absolute prohibition: the main session MUST NOT create, modify, or delete any file. The only file operations the main session performs directly are git operations (merge, mv, add, commit) and writes to its own memory directory. All other file edits are dispatched to the appropriate agent. No exception language for "trivial" fixes, doc edits, or one-liners.

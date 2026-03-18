@@ -4,7 +4,7 @@
 [E-124: Review Workflow Improvements](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the main session will present each finding it intends to dismiss to the user with a plain-English explanation, and wait for user confirmation before closing it. Findings the main session intends to accept/fix will proceed immediately to the implementer without waiting. This gives the user visibility and veto power over dismissals while not slowing down the fix cycle.

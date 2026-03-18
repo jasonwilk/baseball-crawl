@@ -1,7 +1,7 @@
 # E-124: Review Workflow Improvements
 
 ## Status
-`READY`
+`COMPLETED`
 <!-- Lifecycle: DRAFT -> READY -> ACTIVE -> COMPLETED (or BLOCKED / ABANDONED) -->
 <!-- PM sets READY explicitly after: expert consultation done, all stories have testable ACs, quality checklist passed. -->
 <!-- Only READY and ACTIVE epics can be dispatched. -->
@@ -39,9 +39,9 @@ Expert consultation: claude-architect (context-layer file scope and change sizin
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-124-03 | Absolute main-session edit prohibition | TODO | None | - |
-| E-124-01 | User-in-the-loop finding triage | TODO | E-124-03 | - |
-| E-124-02 | Post-review remediation loop | TODO | E-124-01 | - |
+| E-124-03 | Absolute main-session edit prohibition | DONE | None | - |
+| E-124-01 | User-in-the-loop finding triage | DONE | E-124-03 | - |
+| E-124-02 | Post-review remediation loop | DONE | E-124-01 | - |
 
 ## Dispatch Team
 - claude-architect
@@ -115,3 +115,6 @@ Files to update:
 - 2026-03-17: Second refinement pass (PM). Architect consultation attempted but no response received -- PM proceeded with own judgment on AC quality. Key changes: (1) E-124-03: broadened AC-2 to cover all weak language in dispatch-pattern.md including opening paragraph (line 8), not just Team Roles item 1; added AC-7 for comprehensive scanning of dispatch-pattern.md and workflow-discipline.md (AC-6 only covered implement skill); updated Technical Approach and Files to Modify accordingly. (2) E-124-02: fixed AC-4 scoping gap -- changed "completed epic" to "after all stories in the epic are DONE" to cover both standalone reviews and "and review" chains; improved AC-1 precision to match TN-3 (original implementer preference, not just "an SE"); added AC-7 for spawning mechanics (dispatch team reuse vs. new remediation team); added TN-3 spawning mechanics paragraph. (3) Updated file impact map for dispatch-pattern.md (opening paragraph + Team Roles). Serialization order E-124-03 -> E-124-01 -> E-124-02 confirmed still correct.
 - 2026-03-17: Second refinement pass continued (PM + architect). Architect delivered adversarial review with 10 findings. Four incorporated: (1) E-124-03: added memory directory carve-out to AC-4, Description, and TN-4 -- without this, the main session couldn't update its own memory since workflow-discipline.md applies to all interactions, not just dispatch (Finding G, HIGH). (2) E-124-02: added AC-8 requiring codex-review anti-pattern #6 update -- current language "Do not implement fixes during triage" would contradict the new remediation phase (Finding B, HIGH). (3) E-124-02: added AC-9 explicitly stating no re-review for remediation fixes -- keeps the loop finite (Finding D, MEDIUM). (4) E-124-02: added AC-10 requiring routing authority scoping in the Work Authorization Gate exception -- prevents implementers from self-authorizing remediation (Finding J, MEDIUM). Updated file impact map (codex-review anti-pattern #6) and TN-3 (added anti-pattern reconciliation, no-re-review, and routing authority paragraphs). Findings A and F were already addressed by PM's earlier changes. Findings C, E, H skipped (low severity, context-obvious).
 - 2026-03-18: Spec review refinement pass (PM). Addressed four findings (3 P1, 1 P3). (1) P1 -- standalone remediation epic targeting: E-124-02 AC-3 split into two recording paths -- "and review" chain writes to the dispatch epic's History section, standalone reviews write to `/.project/research/codex-review-YYYY-MM-DD-remediation.md` since standalone reviews may not map to a single epic. TN-3 updated to match. (2) P1 -- standalone remediation hard-codes SE: E-124-02 AC-7 changed from "SE + PM" to routing-table-driven implementer selection plus PM. TN-3 spawning mechanics updated to match. (3) P1 -- FIXED disposition requires commit ref but commits happen after team shutdown: E-124-02 AC-2 changed "commit ref" to "change summary" (files and nature of change, not a git SHA). TN-3 artifact tracking and no-re-review paragraphs updated for consistency. (4) P3 -- TN-1 stale scope: removed "Team Roles wording" from implement/SKILL.md row in file impact map (Team Roles is in dispatch-pattern.md, which already has its own row covering that scope).
+- 2026-03-18: Epic COMPLETED. All three stories implemented and verified by claude-architect in serialized order (E-124-03 → E-124-01 → E-124-02). Key changes: (1) absolute main-session file-edit prohibition with git + memory carve-outs across implement skill, dispatch-pattern, and workflow-discipline; (2) user-in-the-loop triage with accept/dismiss tracks and user veto power for dismissals; (3) post-review remediation loop in codex-review skill with Work Authorization Gate exception, dual-context spawning mechanics, PM disposition tracking, and no-re-review policy.
+- Documentation assessment: No documentation impact. Epic modified only context-layer files (skills, rules) -- no new features, endpoints, schema changes, or deployment changes.
+- Context-layer assessment: (1) New convention/pattern/constraint: YES -- codified by epic's own stories (absolute edit prohibition). (2) Architectural decision with ongoing implications: YES -- codified by epic's own stories (remediation loop, Work Authorization Gate exception). (3) Footgun/failure mode/boundary: NO. (4) Change to agent behavior/routing/coordination: YES -- codified by epic's own stories (user-in-the-loop triage, remediation spawning, PM disposition tracking). (5) Domain knowledge: NO. (6) New CLI command/workflow/procedure: NO. All "yes" triggers were self-codifying -- no additional codification needed.
