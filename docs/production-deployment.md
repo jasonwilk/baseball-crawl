@@ -124,11 +124,10 @@ The admin UI requires at least one user in the database before the first login. 
 starting the stack (Step 4), run:
 
 ```bash
-sqlite3 data/app.db "INSERT INTO users (user_email, display_name, is_admin) VALUES ('<ADMIN_EMAIL>', '<ADMIN_NAME>', 1);"
+sqlite3 data/app.db "INSERT INTO users (email) VALUES ('<YOUR_EMAIL>');"
 ```
 
-Replace the placeholder values with the actual admin user's credentials. This is a one-time
-bootstrap step.
+Replace the email with the actual admin user's email. This is a one-time bootstrap step.
 
 ---
 
