@@ -5,20 +5,21 @@ records and per-player batting/pitching lines into the SQLite database.
 
 Expected file layout (written by GameStatsCrawler)::
 
-    data/raw/{season}/teams/{team_id}/games/{game_stream_id}.json
+    data/raw/{season}/teams/{team_id}/games/{event_id}.json
 
 The loader also reads game-summaries files (one per team directory) to build a
-``game_stream_id -> event_id`` mapping and resolve ``home_away`` assignments::
+dual-key index (keyed by both ``event_id`` and ``game_stream_id``) used to
+resolve ``home_away`` assignments::
 
     data/raw/{season}/teams/{team_id}/game_summaries.json
 
-``games.game_id`` uses the ``event_id`` from game-summaries (not the
-``game_stream_id``).
+``games.game_id`` uses the ``event_id`` from game-summaries.
 
 Key data decisions
 ------------------
-- **ID mapping**: file name is ``game_stream_id``; DB primary key is ``event_id``.
-  The game-summaries index is required to resolve this mapping.
+- **ID mapping**: file name is ``event_id``; DB primary key is also ``event_id``.
+  The game-summaries index is keyed by both ``event_id`` and ``game_stream_id``
+  so that files named by either key are matched correctly.
 - **Asymmetric boxscore keys**: own team key = public_id slug (alphanumeric, no
   dashes); opponent key = UUID (lowercase hex with dashes, 36 chars).
 - **IP to ip_outs**: boxscore stores IP as float decimal innings (e.g. 3.333...
@@ -194,8 +195,8 @@ class _PlayerPitching:
 class GameLoader:
     """Loads boxscore JSON files into the SQLite database.
 
-    Reads all ``games/{game_stream_id}.json`` files in a team directory, maps
-    them to canonical ``event_id`` values via the game-summaries index, and
+    Reads all ``games/{event_id}.json`` files in a team directory, resolves
+    each file to a ``GameSummaryEntry`` via the dual-key summaries index, and
     upserts game records plus per-player batting and pitching lines.
 
     Args:
@@ -226,8 +227,8 @@ class GameLoader:
         """Load all boxscore files in a team directory.
 
         Reads ``game_summaries.json`` from ``team_dir`` to build the
-        ``game_stream_id -> event_id`` index, then loads each
-        ``games/{game_stream_id}.json`` file found in ``team_dir``.
+        dual-key index (by ``event_id`` and ``game_stream_id``), then loads each
+        ``games/{event_id}.json`` file found in ``team_dir``.
 
         Args:
             team_dir: Path to ``data/raw/{season}/teams/{team_id}/``.
@@ -300,15 +301,18 @@ class GameLoader:
     def _build_summaries_index(
         self, team_dir: Path
     ) -> dict[str, GameSummaryEntry] | None:
-        """Build a ``game_stream_id -> GameSummaryEntry`` mapping.
+        """Build a dual-key ``GameSummaryEntry`` index.
 
-        Reads ``game_summaries.json`` from ``team_dir`` and parses each record.
+        Reads ``game_summaries.json`` from ``team_dir`` and indexes each entry
+        by both ``event_id`` and ``game_stream_id`` so that boxscore files named
+        by either key are resolved to the correct summary.
 
         Args:
             team_dir: Path to the team data directory.
 
         Returns:
-            Dict keyed by ``game_stream_id``, or ``None`` on read error.
+            Dict keyed by both ``event_id`` and ``game_stream_id``, or ``None``
+            on read error.
         """
         summaries_path = team_dir / "game_summaries.json"
         if not summaries_path.exists():

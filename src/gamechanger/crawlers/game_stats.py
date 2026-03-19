@@ -3,22 +3,22 @@
 Reads game-summaries files written by the schedule crawler (E-002-02), filters
 to completed games, fetches per-game box score data for each game via::
 
-    GET /game-stream-processing/{game_stream_id}/boxscore
+    GET /game-stream-processing/{event_id}/boxscore
 
 and writes raw JSON to::
 
-    data/raw/{season}/teams/{team_id}/games/{game_stream_id}.json
+    data/raw/{season}/teams/{team_id}/games/{event_id}.json
 
 Completed game stats never change, so the idempotency check is existence-only:
 if the file already exists it is skipped regardless of age.
 
 CRITICAL ID MAPPING
 -------------------
-The boxscore endpoint path parameter is ``game_stream.id`` from game-summaries.
-This is NOT ``event_id`` and NOT ``game_stream.game_id``.  In game-summaries:
+The boxscore endpoint path parameter is ``event_id`` from game-summaries.
+This is NOT ``game_stream.id``.  In game-summaries:
 
     event_id == game_stream.game_id  (always)
-    game_stream.id != game_stream.game_id  (always)
+    game_stream.id != event_id  (always)
 
 Usage::
 
@@ -139,37 +139,34 @@ class GameStatsCrawler:
             )
 
         for record in completed:
-            game_stream_id = self._extract_game_stream_id(record)
-            event_id = record.get("event_id", "<unknown>")
+            event_id = self._extract_event_id(record)
 
-            if game_stream_id is None:
+            if event_id is None:
                 logger.warning(
-                    "Missing game_stream.id for event %s (team %s); skipping.",
-                    event_id,
+                    "Missing event_id in record for team %s; skipping.",
                     team_id,
                 )
                 result.errors += 1
                 continue
 
-            dest = self._game_path(team_id, season, game_stream_id)
+            dest = self._game_path(team_id, season, event_id)
 
             if dest.exists():
                 logger.debug(
-                    "Boxscore for game %s already cached; skipping.", game_stream_id
+                    "Boxscore for game %s already cached; skipping.", event_id
                 )
                 result.files_skipped += 1
                 continue
 
             try:
-                data = self._fetch_boxscore(game_stream_id)
+                data = self._fetch_boxscore(event_id)
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 dest.write_text(json.dumps(data, indent=2), encoding="utf-8")
-                logger.info("Wrote boxscore %s -> %s.", game_stream_id, dest)
+                logger.info("Wrote boxscore %s -> %s.", event_id, dest)
                 result.files_written += 1
             except GameChangerAPIError as exc:
                 logger.error(
-                    "API error fetching boxscore for game_stream_id=%s event_id=%s: %s",
-                    game_stream_id,
+                    "API error fetching boxscore for event_id=%s: %s",
                     event_id,
                     exc,
                 )
@@ -178,8 +175,7 @@ class GameStatsCrawler:
                 raise
             except Exception as exc:  # noqa: BLE001 -- broad catch intentional; log and continue
                 logger.error(
-                    "Unexpected error fetching boxscore for game_stream_id=%s event_id=%s: %s",
-                    game_stream_id,
+                    "Unexpected error fetching boxscore for event_id=%s: %s",
                     event_id,
                     exc,
                 )
@@ -187,11 +183,12 @@ class GameStatsCrawler:
 
         return result
 
-    def _fetch_boxscore(self, game_stream_id: str) -> Any:
+    def _fetch_boxscore(self, event_id: str) -> Any:
         """Fetch the raw boxscore response for a single game.
 
         Args:
-            game_stream_id: The ``game_stream.id`` value from game-summaries.
+            event_id: The ``event_id`` from game-summaries -- used as the
+                boxscore endpoint path parameter.
 
         Returns:
             Parsed JSON response (dict with team-keyed entries).
@@ -200,7 +197,7 @@ class GameStatsCrawler:
             GameChangerAPIError: If the API returns an error response.
         """
         return self._client.get(
-            f"/game-stream-processing/{game_stream_id}/boxscore",
+            f"/game-stream-processing/{event_id}/boxscore",
             accept=_BOXSCORE_ACCEPT,
         )
 
@@ -223,7 +220,7 @@ class GameStatsCrawler:
             return []
         return raw
 
-    def _extract_game_stream_id(self, record: dict[str, Any]) -> str | None:
+    def _extract_event_id(self, record: dict[str, Any]) -> str | None:
         """Extract the ``event_id`` from a game-summaries record.
 
         The boxscore endpoint path parameter is ``event_id`` (which equals
@@ -249,15 +246,15 @@ class GameStatsCrawler:
         """
         return self._data_root / season / "teams" / team_id / "game_summaries.json"
 
-    def _game_path(self, team_id: str, season: str, game_stream_id: str) -> Path:
+    def _game_path(self, team_id: str, season: str, event_id: str) -> Path:
         """Return the destination path for a single game's boxscore file.
 
         Args:
             team_id: GameChanger team UUID.
             season: Season label string.
-            game_stream_id: The ``game_stream.id`` UUID.
+            event_id: The ``event_id`` from game-summaries -- used as the filename.
 
         Returns:
-            ``data/raw/{season}/teams/{team_id}/games/{game_stream_id}.json``
+            ``data/raw/{season}/teams/{team_id}/games/{event_id}.json``
         """
-        return self._data_root / season / "teams" / team_id / "games" / f"{game_stream_id}.json"
+        return self._data_root / season / "teams" / team_id / "games" / f"{event_id}.json"

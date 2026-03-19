@@ -1242,3 +1242,81 @@ def test_game_stream_id_stored(db: sqlite3.Connection, tmp_path: Path) -> None:
     assert row[0] == _GAME_STREAM_ID, (
         f"Expected game_stream_id={_GAME_STREAM_ID!r}, got {row[0]!r}"
     )
+
+
+# ---------------------------------------------------------------------------
+# AC-8 (E-127-08): Dual-key summaries index -- event_id and game_stream_id
+# ---------------------------------------------------------------------------
+
+
+def test_boxscore_named_by_event_id_matches_summary(db: sqlite3.Connection, tmp_path: Path) -> None:
+    """AC-8: A boxscore file named by event_id is matched via the summaries index."""
+    boxscore = _make_boxscore()
+    # Write the boxscore file named by event_id (new crawler behaviour).
+    team_dir = _write_team_dir(tmp_path, boxscores={_EVENT_ID: boxscore})
+    loader = _make_loader(db)
+
+    result = loader.load_all(team_dir)
+
+    assert result.errors == 0
+    assert result.skipped == 0
+    row = db.execute("SELECT game_id FROM games WHERE game_id = ?", (_EVENT_ID,)).fetchone()
+    assert row is not None, f"Expected game row for event_id={_EVENT_ID!r}"
+
+
+def test_boxscore_named_by_game_stream_id_matches_summary(db: sqlite3.Connection, tmp_path: Path) -> None:
+    """AC-8: A boxscore file named by game_stream_id is also matched (backwards compat)."""
+    boxscore = _make_boxscore()
+    # Write the boxscore file named by game_stream_id (old crawler behaviour).
+    team_dir = _write_team_dir(tmp_path, boxscores={_GAME_STREAM_ID: boxscore})
+    loader = _make_loader(db)
+
+    result = loader.load_all(team_dir)
+
+    assert result.errors == 0
+    assert result.skipped == 0
+    row = db.execute("SELECT game_id FROM games WHERE game_id = ?", (_EVENT_ID,)).fetchone()
+    assert row is not None, f"Expected game row for event_id={_EVENT_ID!r}"
+
+
+def test_dual_key_index_event_id_and_game_stream_id_both_resolve(db: sqlite3.Connection, tmp_path: Path) -> None:
+    """AC-8: When both event_id and game_stream_id are distinct, either key resolves the summary."""
+    # Confirm the test constants are distinct (test assumption).
+    assert _EVENT_ID != _GAME_STREAM_ID
+
+    boxscore = _make_boxscore()
+
+    # Load using event_id-named file.
+    team_dir_a = _write_team_dir(tmp_path, team_id="team-a", boxscores={_EVENT_ID: boxscore})
+    loader_a = _make_loader(db)
+    result_a = loader_a.load_all(team_dir_a)
+    assert result_a.errors == 0
+
+    # Same game loaded again using game_stream_id-named file -- should upsert, not error.
+    from src.gamechanger.types import TeamRef
+    pk_b = _insert_own_team(db, gc_uuid="team-b", public_id="slug-b")
+    loader_b = GameLoader(
+        db, season_id=_SEASON_ID,
+        owned_team_ref=TeamRef(id=pk_b, gc_uuid="team-b", public_id="slug-b"),
+    )
+    summaries_b = [
+        {
+            "event_id": _EVENT_ID,
+            "game_stream": {"id": _GAME_STREAM_ID, "opponent_id": _OPP_TEAM_ID},
+            "home_away": "home",
+            "owning_team_score": 5,
+            "opponent_team_score": 2,
+            "last_scoring_update": "2025-05-10T19:39:58.788Z",
+        }
+    ]
+    team_dir_b = _write_team_dir(
+        tmp_path, team_id="team-b",
+        summaries=summaries_b,
+        boxscores={_GAME_STREAM_ID: boxscore},
+    )
+    result_b = loader_b.load_all(team_dir_b)
+    assert result_b.errors == 0
+
+    # Only one game row should exist (idempotent upsert).
+    count = db.execute("SELECT COUNT(*) FROM games WHERE game_id = ?", (_EVENT_ID,)).fetchone()[0]
+    assert count == 1

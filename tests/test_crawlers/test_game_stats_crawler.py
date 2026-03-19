@@ -1,7 +1,7 @@
 """Tests for src/gamechanger/crawlers/game_stats.py.
 
 All HTTP calls are mocked -- no real network requests are made.
-Tests cover: completed games are fetched using game_stream.id as path param,
+Tests cover: completed games are fetched using event_id as path param,
 non-completed games are skipped, already-cached games are skipped, API errors
 are logged and crawl continues, summary log is produced, correct Accept header
 is used, missing game-summaries file is handled gracefully.
@@ -100,7 +100,7 @@ def _write_summaries(
 # ---------------------------------------------------------------------------
 
 def test_crawl_all_writes_boxscore_for_completed_game(tmp_path: Path) -> None:
-    """Completed game produces a boxscore file at the correct path."""
+    """Completed game produces a boxscore file named by event_id."""
     _write_summaries(
         tmp_path, _SEASON, _TEAM_ID,
         [_make_summary(_GAME_STREAM_ID_1, _EVENT_ID_1, "completed")],
@@ -110,7 +110,7 @@ def test_crawl_all_writes_boxscore_for_completed_game(tmp_path: Path) -> None:
 
     result = crawler.crawl_all()
 
-    expected = tmp_path / _SEASON / "teams" / _TEAM_ID / "games" / f"{_GAME_STREAM_ID_1}.json"
+    expected = tmp_path / _SEASON / "teams" / _TEAM_ID / "games" / f"{_EVENT_ID_1}.json"
     assert expected.exists()
     assert json.loads(expected.read_text()) == _SAMPLE_BOXSCORE
     assert result.files_written == 1
@@ -118,8 +118,8 @@ def test_crawl_all_writes_boxscore_for_completed_game(tmp_path: Path) -> None:
     assert result.errors == 0
 
 
-def test_crawl_all_uses_game_stream_id_as_path_param(tmp_path: Path) -> None:
-    """The boxscore API call uses game_stream.id (not event_id) in the URL."""
+def test_crawl_all_uses_event_id_as_path_param(tmp_path: Path) -> None:
+    """The boxscore API call uses event_id (not game_stream.id) in the URL."""
     _write_summaries(
         tmp_path, _SEASON, _TEAM_ID,
         [_make_summary(_GAME_STREAM_ID_1, _EVENT_ID_1, "completed")],
@@ -130,7 +130,7 @@ def test_crawl_all_uses_game_stream_id_as_path_param(tmp_path: Path) -> None:
     crawler.crawl_all()
 
     client.get.assert_called_once_with(
-        f"/game-stream-processing/{_GAME_STREAM_ID_1}/boxscore",
+        f"/game-stream-processing/{_EVENT_ID_1}/boxscore",
         accept=_BOXSCORE_ACCEPT,
     )
 
@@ -170,7 +170,7 @@ def test_written_json_is_unmodified_api_response(tmp_path: Path) -> None:
 
     crawler.crawl_all()
 
-    dest = tmp_path / _SEASON / "teams" / _TEAM_ID / "games" / f"{_GAME_STREAM_ID_1}.json"
+    dest = tmp_path / _SEASON / "teams" / _TEAM_ID / "games" / f"{_EVENT_ID_1}.json"
     assert json.loads(dest.read_text()) == raw_response
 
 
@@ -237,8 +237,8 @@ def test_existing_game_file_is_skipped(tmp_path: Path) -> None:
         tmp_path, _SEASON, _TEAM_ID,
         [_make_summary(_GAME_STREAM_ID_1, _EVENT_ID_1, "completed")],
     )
-    # Pre-populate the boxscore file.
-    dest = tmp_path / _SEASON / "teams" / _TEAM_ID / "games" / f"{_GAME_STREAM_ID_1}.json"
+    # Pre-populate the boxscore file (named by event_id, as the crawler writes it).
+    dest = tmp_path / _SEASON / "teams" / _TEAM_ID / "games" / f"{_EVENT_ID_1}.json"
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_text(json.dumps({"cached": True}), encoding="utf-8")
 
@@ -261,8 +261,8 @@ def test_mix_of_cached_and_new_games(tmp_path: Path) -> None:
     ]
     _write_summaries(tmp_path, _SEASON, _TEAM_ID, records)
 
-    # Pre-populate only game 1.
-    cached = tmp_path / _SEASON / "teams" / _TEAM_ID / "games" / f"{_GAME_STREAM_ID_1}.json"
+    # Pre-populate only game 1 (named by event_id, as the crawler writes it).
+    cached = tmp_path / _SEASON / "teams" / _TEAM_ID / "games" / f"{_EVENT_ID_1}.json"
     cached.parent.mkdir(parents=True, exist_ok=True)
     cached.write_text("{}", encoding="utf-8")
 
@@ -274,7 +274,7 @@ def test_mix_of_cached_and_new_games(tmp_path: Path) -> None:
     assert result.files_skipped == 1
     assert result.files_written == 1
     client.get.assert_called_once_with(
-        f"/game-stream-processing/{_GAME_STREAM_ID_2}/boxscore",
+        f"/game-stream-processing/{_EVENT_ID_2}/boxscore",
         accept=_BOXSCORE_ACCEPT,
     )
 
@@ -310,10 +310,10 @@ def test_api_error_is_logged_and_crawl_continues(tmp_path: Path) -> None:
     assert result.files_written == 1
 
 
-def test_api_error_log_includes_game_stream_id_and_event_id(
+def test_api_error_log_includes_event_id(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """Error log includes both game_stream_id and event_id."""
+    """Error log includes event_id."""
     _write_summaries(
         tmp_path, _SEASON, _TEAM_ID,
         [_make_summary(_GAME_STREAM_ID_1, _EVENT_ID_1, "completed")],
@@ -324,7 +324,6 @@ def test_api_error_log_includes_game_stream_id_and_event_id(
     with caplog.at_level(logging.ERROR, logger="src.gamechanger.crawlers.game_stats"):
         crawler.crawl_all()
 
-    assert _GAME_STREAM_ID_1 in caplog.text
     assert _EVENT_ID_1 in caplog.text
 
 
@@ -459,15 +458,62 @@ def test_crawl_result_is_crawl_result_instance(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Edge case: game_stream.id missing from record
+# AC-7: Correct ID extracted from game-summaries and used in API call
 # ---------------------------------------------------------------------------
 
-def test_record_missing_game_stream_id_is_counted_as_error(tmp_path: Path) -> None:
-    """A completed record with no game_stream.id is counted as an error."""
+
+def test_extract_event_id_returns_event_id_from_record() -> None:
+    """_extract_event_id returns the event_id field from a game-summaries record."""
+    from src.gamechanger.crawlers.game_stats import GameStatsCrawler
+    crawler = GameStatsCrawler(_make_client(), _make_config())
+    record = {
+        "event_id": "event-xyz-001",
+        "game_stream": {"id": "stream-xyz-999", "game_id": "event-xyz-001"},
+    }
+    assert crawler._extract_event_id(record) == "event-xyz-001"
+
+
+def test_extract_event_id_returns_none_when_absent() -> None:
+    """_extract_event_id returns None when event_id is not in the record."""
+    from src.gamechanger.crawlers.game_stats import GameStatsCrawler
+    crawler = GameStatsCrawler(_make_client(), _make_config())
+    record = {"game_stream": {"id": "stream-xyz-999"}}
+    assert crawler._extract_event_id(record) is None
+
+
+def test_event_id_differs_from_game_stream_id_uses_event_id(tmp_path: Path) -> None:
+    """When event_id and game_stream.id differ, event_id is used for the API call."""
+    _write_summaries(
+        tmp_path, _SEASON, _TEAM_ID,
+        [_make_summary(_GAME_STREAM_ID_1, _EVENT_ID_1, "completed")],
+    )
+    # Confirm the two IDs are distinct in the test fixture.
+    assert _EVENT_ID_1 != _GAME_STREAM_ID_1
+
+    client = _make_client()
+    crawler = GameStatsCrawler(client, _make_config(), data_root=tmp_path)
+    crawler.crawl_all()
+
+    # API must be called with event_id, NOT game_stream.id.
+    client.get.assert_called_once_with(
+        f"/game-stream-processing/{_EVENT_ID_1}/boxscore",
+        accept=_BOXSCORE_ACCEPT,
+    )
+    # File must also be named by event_id.
+    expected = tmp_path / _SEASON / "teams" / _TEAM_ID / "games" / f"{_EVENT_ID_1}.json"
+    assert expected.exists()
+
+
+# ---------------------------------------------------------------------------
+# Edge case: event_id missing from record
+# ---------------------------------------------------------------------------
+
+def test_record_missing_event_id_is_counted_as_error(tmp_path: Path) -> None:
+    """A completed record with no event_id is counted as an error."""
     bad_record = {
-        "event_id": "event-bad",
+        # no 'event_id' key
         "game_status": "completed",
-        "game_stream": {},  # missing 'id' field
+        "game_stream": {"id": "stream-bad", "game_id": None},
     }
     _write_summaries(tmp_path, _SEASON, _TEAM_ID, [bad_record])
     client = _make_client()
@@ -479,12 +525,12 @@ def test_record_missing_game_stream_id_is_counted_as_error(tmp_path: Path) -> No
     assert result.errors == 1
 
 
-def test_record_missing_game_stream_object_is_counted_as_error(tmp_path: Path) -> None:
-    """A completed record with no game_stream key at all is counted as an error."""
+def test_record_with_null_event_id_is_counted_as_error(tmp_path: Path) -> None:
+    """A completed record with event_id=null is counted as an error."""
     bad_record = {
-        "event_id": "event-bad",
+        "event_id": None,
         "game_status": "completed",
-        # no 'game_stream' key
+        "game_stream": {"id": "stream-bad"},
     }
     _write_summaries(tmp_path, _SEASON, _TEAM_ID, [bad_record])
     client = _make_client()
