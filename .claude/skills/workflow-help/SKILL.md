@@ -18,44 +18,41 @@ Load this skill when the user says any of:
 
 ## Purpose
 
-Display a concise cheat sheet of all workflow trigger phrases and their effects. This is a reference card, not a tutorial -- one line per command, grouped by workflow phase.
+Display a concise cheat sheet of all workflow trigger phrases and their effects. This is a reference card, not a tutorial. Plain text output, no markdown rendering.
 
 ---
 
 ## Action
 
-Print the following cheat sheet exactly. Do not add commentary, explanation, or offer to run any command. Just print it and stop.
+Print the following cheat sheet exactly as plain text. Do not add commentary, explanation, or offer to run any command. Do not render as markdown. Just print it and stop.
 
 ```
-PLANNING
-  "plan an epic for X"              → plan skill: team + spec review + refine + READY
-  "plan and dispatch X"             → plan + implement chained (full pipeline)
-  "plan this with PM and [agent]"   → plan skill with named experts
+/workflow-help  ─────────────────────────────────────────
 
-DISPATCH
-  "implement E-NNN"                 → dispatch stories to implementers
-  "start E-NNN"                     → same as implement
-  "implement E-NNN and review"      → dispatch + codex review + CR review chained
+PLAN
+  "plan E-NNN"              PM writes stories
+  "curate the vision"       PM reviews vision signals
 
 SPEC REVIEW
-  "spec review E-NNN"               → codex spec review (headless)
-  "spec review prompt"              → generate prompt for async codex
+  "spec review E-NNN"       Codex audits planning docs
+  └─ + "prompt"             Returns copy-paste prompt
+
+DISPATCH
+  "implement E-NNN"         Full agent dispatch + merge
+  └─ + "and review"         Chains code review after
 
 CODE REVIEW
-  "codex review"                    → code review (uncommitted changes)
-  "codex review base main"          → code review (branch diff)
-  "codex review prompt"             → generate review prompt for async codex
+  "codex review E-NNN"      Codex audits implementation
+  └─ + "prompt"             Returns copy-paste prompt
 
-VISION
-  "curate the vision"               → PM reviews vision signals with user
+API CAPTURE  ⚠ time-sensitive
+  "ingest endpoint"         Execute curl + document endpoint
+                            gc-signature expires in minutes
 
-API INGESTION
-  "ingest endpoint"                 → api-scout processes curl from secrets/gamechanger-curl.txt
-
-DIRECT AGENTS (no PM needed)
-  api-scout                         → API exploration, endpoint docs
-  baseball-coach                    → domain consultation, stat validation
-  claude-architect                  → agent infra, CLAUDE.md, rules, skills
+─────────────────────────────────────────────────────────
+HAPPY PATH:  plan → spec review → implement [and review]
+─────────────────────────────────────────────────────────
+CLI commands:  bb --help
 ```
 
 ---
@@ -70,3 +67,5 @@ When a workflow skill is added, renamed, or retired, update the cheat sheet abov
 - Code review: `.claude/skills/codex-review/SKILL.md`
 - Ingest endpoint: `.claude/skills/ingest-endpoint/SKILL.md`
 - Vision curation: PM agent definition (`.claude/agents/product-manager.md`, curate task type)
+
+Internal-only skills (context-fundamentals, filesystem-context, multi-agent-patterns, agent-standards) are omitted -- they load automatically and are never triggered by the user directly.
