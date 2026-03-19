@@ -5,7 +5,7 @@
 [E-129: PII Scanner Allowlists](epic.md)
 
 ## Status
-`TODO`
+`IN_PROGRESS`
 
 ## Description
 After this story is complete, planning artifacts under `epics/` and `.project/` will be excluded from PII scanning, and individual lines in any scanned file can be suppressed with an inline `# pii-ok` marker. This eliminates false positives from story files that reference PII-like patterns as examples and provides an escape hatch for edge cases in any file.

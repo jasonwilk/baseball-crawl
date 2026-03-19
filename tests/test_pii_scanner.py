@@ -499,6 +499,124 @@ class TestRfc2606DomainAllowlist:
 
 
 # ---------------------------------------------------------------------------
+# Unit tests: path exclusions for epics/ and .project/ (E-129-02 AC-5)
+# ---------------------------------------------------------------------------
+
+class TestNewSkipPaths:
+    """AC-5/AC-7: epics/ and .project/ are excluded by SKIP_PATHS."""
+
+    def test_epics_path_skipped(self) -> None:
+        assert should_skip_path("epics/E-129-01-rfc2606-domain-allowlist.md") is True
+
+    def test_epics_nested_path_skipped(self) -> None:
+        assert should_skip_path("epics/E-129-pii-scanner-allowlists/epic.md") is True
+
+    def test_project_path_skipped(self) -> None:
+        assert should_skip_path(".project/ideas/IDEA-042-foo.md") is True
+
+    def test_project_archive_skipped(self) -> None:
+        assert should_skip_path(".project/archive/E-001/epic.md") is True
+
+    def test_docs_not_skipped(self) -> None:
+        # docs/ is intentionally NOT excluded -- could contain real PII
+        assert should_skip_path("docs/api/README.md") is False
+
+    def test_tests_not_skipped(self) -> None:
+        # tests/ is intentionally NOT excluded -- SYNTHETIC_MARKER handles it
+        assert should_skip_path("tests/test_pii_scanner.py") is False
+
+
+class TestEpicsPathExclusionIntegration:
+    """AC-1/AC-2/AC-7: Files under epics/ and .project/ are skipped during scan."""
+
+    def test_epics_file_skipped(self, tmp_path: Path) -> None:
+        """AC-1: epics/ file with real email produces no finding."""
+        # Write the file under a simulated epics/ path by using should_skip_path
+        # directly -- we can't create epics/ under tmp_path and test via scan_file
+        # because scan_file uses the path string for prefix matching.
+        assert should_skip_path("epics/E-129-pii-scanner-allowlists/E-129-01-rfc2606-domain-allowlist.md") is True
+
+    def test_project_ideas_file_skipped(self) -> None:
+        """AC-2: .project/ideas/ file with email address is skipped."""
+        assert should_skip_path(".project/ideas/IDEA-042-foo.md") is True
+
+    def test_scan_file_skips_epics_path(self, tmp_path: Path) -> None:
+        """scan_file returns empty when the path string starts with epics/."""
+        # Create a real file but pass it with an epics/ prefix path
+        real_file = tmp_path / "story.md"
+        real_file.write_text("coach@realdomain.com\n")
+        # Simulate what the scanner sees: the path as reported by git
+        violations = scan_file("epics/fake-story.md")
+        assert violations == []
+
+
+# ---------------------------------------------------------------------------
+# Unit tests: inline suppression (E-129-02 AC-3/AC-4/AC-6/AC-8)
+# ---------------------------------------------------------------------------
+
+class TestInlineSuppression:
+    """AC-3/AC-4/AC-6/AC-7/AC-8: pii-ok marker suppresses findings on a line."""
+
+    def test_suppressed_line_not_reported(self, tmp_path: Path) -> None:
+        """AC-3: Line with # pii-ok is not reported."""
+        path = _write_file(
+            tmp_path,
+            "config.py",
+            'email = "jason@realdomain.com"  # pii-ok\n',
+        )
+        violations = scan_file(path)
+        assert violations == []
+
+    def test_unsuppressed_line_is_reported(self, tmp_path: Path) -> None:
+        """AC-4: Line without # pii-ok IS reported."""
+        path = _write_file(
+            tmp_path,
+            "config.py",
+            'email = "jason@realdomain.com"\n',
+        )
+        violations = scan_file(path)
+        assert len(violations) == 1
+        assert violations[0].pattern_name == "email"
+
+    def test_html_suppression_form(self, tmp_path: Path) -> None:
+        """AC-8: <!-- pii-ok --> also suppresses (contains 'pii-ok' substring)."""
+        path = _write_file(
+            tmp_path,
+            "page.html",
+            '<p>Contact: coach@realdomain.com <!-- pii-ok --></p>\n',
+        )
+        violations = scan_file(path)
+        assert violations == []
+
+    def test_suppressed_bearer_token(self, tmp_path: Path) -> None:
+        """Suppression works for non-email patterns too."""
+        path = _write_file(
+            tmp_path,
+            "docs.md",
+            'Authorization: Bearer eyEXAMPLETOKEN123abc  # pii-ok\n',
+        )
+        violations = scan_file(path)
+        assert violations == []
+
+    def test_suppression_only_on_marked_line(self, tmp_path: Path) -> None:
+        """Suppression is per-line: other lines still flagged."""
+        content = (
+            'email = "jason@realdomain.com"  # pii-ok\n'
+            'other = "coach@school.org"\n'
+        )
+        path = _write_file(tmp_path, "config.py", content)
+        violations = scan_file(path)
+        assert len(violations) == 1
+        assert violations[0].line_number == 2
+
+    def test_suppression_marker_alone_no_crash(self, tmp_path: Path) -> None:
+        """A line containing only the marker does not crash."""
+        path = _write_file(tmp_path, "notes.txt", "# pii-ok\n")
+        violations = scan_file(path)
+        assert violations == []
+
+
+# ---------------------------------------------------------------------------
 # Integration tests: scan_files (multiple files)
 # ---------------------------------------------------------------------------
 

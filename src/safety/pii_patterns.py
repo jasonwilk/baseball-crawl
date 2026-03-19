@@ -116,10 +116,20 @@ RFC2606_DOMAINS: frozenset[str] = frozenset({
     "localhost",
 })
 
+# Inline suppression marker. A line containing this string (as a substring,
+# case-sensitive) is excluded from all findings on that line. Language-agnostic:
+# works in Python, YAML, shell, etc. (`# pii-ok`). For HTML/XML where `#` is
+# not a comment character, use `<!-- pii-ok -->` -- both are caught by the same
+# substring check.
+PII_OK_MARKER: str = "pii-ok"
+
 # Path prefixes to always skip, relative to repo root. Any file whose path
 # starts with one of these prefixes is skipped without being read.
 SKIP_PATHS: set[str] = {
     ".git/", ".claude/", "node_modules/", "__pycache__/",
+    # Planning artifacts -- story and idea files frequently reference PII-like
+    # patterns as examples; scanning them produces only noise. (TN-2)
+    "epics/", ".project/",
     # pip-compile generated lockfiles contain SHA256 hashes that trigger
     # the us_phone pattern (10-digit sequences inside hex strings).
     "requirements.txt",

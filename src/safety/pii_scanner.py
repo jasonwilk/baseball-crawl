@@ -27,6 +27,7 @@ from typing import NamedTuple
 
 from src.safety.pii_patterns import (
     COMPILED_PATTERNS,
+    PII_OK_MARKER,
     RFC2606_DOMAINS,
     SCANNABLE_EXTENSIONS,
     SKIP_PATHS,
@@ -132,6 +133,9 @@ def scan_file(file_path: str) -> list[Violation]:
 
     violations: list[Violation] = []
     for line_number, line in enumerate(lines, start=1):
+        if PII_OK_MARKER in line:
+            logger.debug("Skipping suppressed line %s:%d", file_path, line_number)
+            continue
         for compiled in COMPILED_PATTERNS:
             match = compiled["pattern"].search(line)
             if not match:
