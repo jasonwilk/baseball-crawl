@@ -108,6 +108,21 @@ cd /workspaces/baseball-crawl 2>/dev/null
 
 BLOCK
 
+# The docker-in-docker devcontainer feature injects a credsStore entry in
+# ~/.docker/config.json pointing to a credential helper that can break
+# (exit status 255) when pulling public images.  We don't need authenticated
+# pulls, so remove the credsStore key if present.
+if [ -f "$HOME/.docker/config.json" ]; then
+    python3 -c "
+import json, pathlib, sys
+p = pathlib.Path(sys.argv[1])
+c = json.loads(p.read_text())
+if 'credsStore' in c:
+    del c['credsStore']
+    p.write_text(json.dumps(c, indent=2) + '\n')
+" "$HOME/.docker/config.json" 2>/dev/null || true
+fi
+
 prepend_managed_block "$BASHRC" "$ENV_START_MARKER" "$ENV_END_MARKER" "$EXPORT_BLOCK"
 prepend_managed_block "$ZSHRC" "$ENV_START_MARKER" "$ENV_END_MARKER" "$EXPORT_BLOCK"
 append_managed_block "$BASHRC" "$ALIAS_START_MARKER" "$ALIAS_END_MARKER" "$ALIAS_BLOCK"

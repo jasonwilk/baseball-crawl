@@ -24,6 +24,7 @@ instantiation time.
 from __future__ import annotations
 
 import logging
+import os
 import secrets
 import time
 from pathlib import Path
@@ -624,7 +625,15 @@ class GameChangerClient:
         Raises:
             ConfigurationError: If any unconditionally required key is missing.
         """
-        env_values = dotenv_values(_DEFAULT_ENV_PATH)
+        env_values = {**dotenv_values(_DEFAULT_ENV_PATH)}
+        # Fall back to process environment for keys not found in .env file
+        # (e.g., when running inside a Docker container where env vars are
+        # injected by Docker Compose rather than read from a mounted file).
+        for key in _required_keys(profile):
+            if not env_values.get(key):
+                val = os.environ.get(key)
+                if val:
+                    env_values[key] = val
         required = _required_keys(profile)
         missing = [key for key in required if not env_values.get(key)]
         if missing:
