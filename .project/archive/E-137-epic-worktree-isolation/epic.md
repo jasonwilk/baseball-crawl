@@ -1,7 +1,7 @@
 # E-137: Epic-Level Worktree Isolation
 
 ## Status
-`READY`
+`COMPLETED`
 
 ## Overview
 Isolate each dispatched epic's changes into a dedicated git worktree so that story merge-back, code review, and atomic commits are scoped to exactly the current epic's changes. Today, all story patches accumulate in the shared main checkout, contaminating commits with unrelated files from PM planning, stale artifacts, and cross-story bleed.
@@ -45,15 +45,15 @@ Expert consultation: claude-architect (context-layer architecture), software-eng
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-137-01 | Epic worktree lifecycle + triage simplification | TODO | None | - |
-| E-137-02 | Update dispatch-pattern rule | TODO | E-137-01 | - |
-| E-137-03 | Update worktree-isolation rule | TODO | E-137-01 | - |
-| E-137-04 | Update workflow-discipline rule | TODO | E-137-01 | - |
-| E-137-05 | Update code-reviewer agent definition | TODO | E-137-01 | - |
-| E-137-06 | Update PM agent definition | TODO | E-137-01 | - |
-| E-137-07 | Update codex-review skill | TODO | E-137-01 | - |
-| E-137-08 | Context-layer story exception documentation | TODO | E-137-01 | - |
-| E-137-09 | Context-layer hygiene review | TODO | E-137-02, E-137-03, E-137-04, E-137-05, E-137-06, E-137-07, E-137-08 | - |
+| E-137-01 | Epic worktree lifecycle + triage simplification | DONE | None | - |
+| E-137-02 | Update dispatch-pattern rule | DONE | E-137-01 | - |
+| E-137-03 | Update worktree-isolation rule | DONE | E-137-01 | - |
+| E-137-04 | Update workflow-discipline rule | DONE | E-137-01 | - |
+| E-137-05 | Update code-reviewer agent definition | DONE | E-137-01 | - |
+| E-137-06 | Update PM agent definition | DONE | E-137-01 | - |
+| E-137-07 | Update codex-review skill | DONE | E-137-01 | - |
+| E-137-08 | Context-layer story exception documentation | DONE | E-137-01 | - |
+| E-137-09 | Context-layer hygiene review | DONE | E-137-02, E-137-03, E-137-04, E-137-05, E-137-06, E-137-07, E-137-08 | - |
 
 ## Dispatch Team
 - claude-architect
@@ -125,3 +125,4 @@ The codex-review skill and `scripts/codex-review.sh` must support running agains
 ## History
 - 2026-03-19: Created during parallel-epic-design consultation team. PM, CA, SE, and DE contributed analysis. User validated two-epic plan (E-137 infrastructure, E-138 pipeline).
 - 2026-03-19: Codex spec review completed -- all findings fixed during refinement. User approved plan. Status set to READY.
+- 2026-03-19: Epic COMPLETED. All 9 stories DONE across 3 waves. Wave 1: E-137-01 rewrote the implement skill with epic worktree lifecycle, closure merge sequence (epic worktree → main), and simplified triage model (fix all valid findings, dismiss only invalid). Wave 2: E-137-02 through E-137-08 aligned all dependent context-layer files (dispatch-pattern, worktree-isolation, workflow-discipline rules; code-reviewer and PM agent definitions; codex-review skill and script with --workdir support; context-layer exception documentation). Wave 3: E-137-09 hygiene review found and fixed 2 stale triage language references in code-reviewer.md. Key artifacts: implement skill fully rewritten for epic worktree model, codex-review.sh enhanced with --workdir parameter, hygiene audit log at /.project/research/E-137-09-hygiene-audit.md.

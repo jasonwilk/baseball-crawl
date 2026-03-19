@@ -18,9 +18,16 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 RUBRIC_FILE="${REPO_ROOT}/.project/codex-review.md"
 
+WORKDIR=""
+
 usage() {
     cat >&2 <<EOF
-Usage: $(basename "$0") <mode> [args]
+Usage: $(basename "$0") [--workdir <path>] <mode> [args]
+
+Options:
+  --workdir <path>     Run git commands from the specified directory instead of
+                       the script's own REPO_ROOT. In 'uncommitted' mode, the
+                       diff is generated as 'git diff main' from <path>.
 
 Modes:
   uncommitted          Review staged, unstaged, and untracked changes
@@ -31,6 +38,7 @@ Examples:
   $(basename "$0") uncommitted
   $(basename "$0") base main
   $(basename "$0") commit abc1234
+  $(basename "$0") --workdir /tmp/.worktrees/baseball-crawl-E-137 uncommitted
 EOF
     exit 1
 }
@@ -79,25 +87,75 @@ assemble_review_prompt() {
 }
 
 # ---------------------------------------------------------------------------
+# Parse optional --workdir before the mode argument
+# ---------------------------------------------------------------------------
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --workdir)
+            if [[ -z "${2:-}" ]]; then
+                echo "Error: --workdir requires a path argument." >&2
+                usage
+            fi
+            WORKDIR="$2"
+            if [[ ! -d "${WORKDIR}" ]]; then
+                echo "Error: --workdir path does not exist: ${WORKDIR}" >&2
+                exit 1
+            fi
+            shift 2
+            ;;
+        *)
+            break
+            ;;
+    esac
+done
+
+# ---------------------------------------------------------------------------
+# Helper: run git commands from WORKDIR if set, otherwise from REPO_ROOT
+# ---------------------------------------------------------------------------
+run_git() {
+    if [[ -n "${WORKDIR}" ]]; then
+        git -C "${WORKDIR}" "$@"
+    else
+        git "$@"
+    fi
+}
+
+# ---------------------------------------------------------------------------
 # Generate diff content for each mode
 # ---------------------------------------------------------------------------
 generate_uncommitted_diff() {
     local diff_output=""
-    local staged
-    staged="$(git diff --cached 2>/dev/null || true)"
-    local unstaged
-    unstaged="$(git diff 2>/dev/null || true)"
-    local untracked
-    untracked="$(git ls-files --others --exclude-standard 2>/dev/null || true)"
 
-    if [[ -n "${staged}" ]]; then
-        diff_output+="--- Staged changes ---"$'\n'"${staged}"$'\n'$'\n'
-    fi
-    if [[ -n "${unstaged}" ]]; then
-        diff_output+="--- Unstaged changes ---"$'\n'"${unstaged}"$'\n'$'\n'
-    fi
-    if [[ -n "${untracked}" ]]; then
-        diff_output+="--- Untracked files ---"$'\n'"${untracked}"$'\n'
+    if [[ -n "${WORKDIR}" ]]; then
+        # Epic worktree mode: all changes relative to main (staged + unstaged)
+        local worktree_diff
+        worktree_diff="$(run_git diff main 2>/dev/null || true)"
+        if [[ -n "${worktree_diff}" ]]; then
+            diff_output+="${worktree_diff}"$'\n'
+        fi
+        # Note: git diff main compares the working tree to main. In the epic
+        # worktree, the working tree contains all accumulated story patches
+        # (applied via git apply and staged via git add -A), so this single
+        # diff captures the complete epic changeset. No separate --cached
+        # pass is needed.
+    else
+        # Standard mode: separate staged, unstaged, untracked
+        local staged
+        staged="$(git diff --cached 2>/dev/null || true)"
+        local unstaged
+        unstaged="$(git diff 2>/dev/null || true)"
+        local untracked
+        untracked="$(git ls-files --others --exclude-standard 2>/dev/null || true)"
+
+        if [[ -n "${staged}" ]]; then
+            diff_output+="--- Staged changes ---"$'\n'"${staged}"$'\n'$'\n'
+        fi
+        if [[ -n "${unstaged}" ]]; then
+            diff_output+="--- Unstaged changes ---"$'\n'"${unstaged}"$'\n'$'\n'
+        fi
+        if [[ -n "${untracked}" ]]; then
+            diff_output+="--- Untracked files ---"$'\n'"${untracked}"$'\n'
+        fi
     fi
 
     echo "${diff_output}"
@@ -105,16 +163,16 @@ generate_uncommitted_diff() {
 
 generate_base_diff() {
     local branch="$1"
-    git diff "${branch}"...HEAD 2>/dev/null || true
+    run_git diff "${branch}"...HEAD 2>/dev/null || true
 }
 
 generate_commit_diff() {
     local sha="$1"
-    git show "${sha}" 2>/dev/null || true
+    run_git show "${sha}" 2>/dev/null || true
 }
 
 # ---------------------------------------------------------------------------
-# Parse mode and execute
+# Parse mode and execute (remaining args after --workdir was consumed)
 # ---------------------------------------------------------------------------
 MODE="${1:-}"
 
@@ -125,7 +183,11 @@ case "${MODE}" in
             echo "No uncommitted changes to review."
             exit 0
         fi
-        assemble_review_prompt "${DIFF_CONTENT}" "uncommitted" | codex exec --ephemeral -
+        MODE_LABEL="uncommitted"
+        if [[ -n "${WORKDIR}" ]]; then
+            MODE_LABEL="uncommitted (workdir: ${WORKDIR})"
+        fi
+        assemble_review_prompt "${DIFF_CONTENT}" "${MODE_LABEL}" | codex exec --ephemeral -
         ;;
     base)
         BRANCH="${2:-}"

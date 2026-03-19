@@ -4,7 +4,7 @@
 [E-137: Epic-Level Worktree Isolation](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the implement skill creates an epic-level git worktree at dispatch start, routes all story merge-back patches to it instead of the main checkout, and merges the epic worktree to main at closure. The review finding triage model is simplified: all real findings are fixed, only false positives are dismissed.

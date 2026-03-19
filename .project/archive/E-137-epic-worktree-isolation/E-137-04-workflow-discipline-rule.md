@@ -4,7 +4,7 @@
 [E-137: Epic-Level Worktree Isolation](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the workflow-discipline rule (`.claude/rules/workflow-discipline.md`) reflects the epic worktree model in its closure sequence description and merge-back mechanics.

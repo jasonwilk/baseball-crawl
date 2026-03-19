@@ -4,7 +4,7 @@
 [E-137: Epic-Level Worktree Isolation](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the implement skill clearly documents the context-layer story exception in the epic worktree model: stories that modify only context-layer files run in the main checkout (not the epic worktree), and their changes are committed separately from the epic's atomic commit.

@@ -4,7 +4,7 @@
 [E-137: Epic-Level Worktree Isolation](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the worktree-isolation rule (`.claude/rules/worktree-isolation.md`) distinguishes between story-level worktrees (existing) and epic-level worktrees (new). Agents in story worktrees have the same constraints as today. The rule also describes the epic worktree's role and what happens within it.

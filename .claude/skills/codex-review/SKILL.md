@@ -52,17 +52,32 @@ If the user does not specify a mode, default to `uncommitted`.
 
 ---
 
+## Epic Worktree Path
+
+When this skill is invoked during the "and review" chain (implement skill Phase 4), the epic worktree path is available from the dispatch context. The implement skill creates the epic worktree in Phase 2 Step 1 at `/tmp/.worktrees/baseball-crawl-E-NNN/` and carries it through the entire dispatch lifecycle. Phase 4 invokes this skill after all stories are DONE but before closure -- the epic worktree contains all accumulated story patches (the complete epic diff against main).
+
+When this skill is invoked standalone (not during dispatch), no epic worktree path is available. The skill operates on the main checkout as before.
+
+---
+
 ## Headless Path
 
 ### Step 1: Run the script
 
-Run the code review script via Bash in the foreground:
+Run the code review script via Bash in the foreground. When an epic worktree path is available (during the "and review" chain), pass `--workdir <epic-worktree-path>` so that `uncommitted` mode generates the diff from the epic worktree against main:
 
+**During "and review" chain (epic worktree available):**
+```
+timeout 600 ./scripts/codex-review.sh --workdir <epic-worktree-path> <mode> [args]
+```
+
+**Standalone invocation (no epic worktree):**
 ```
 timeout 600 ./scripts/codex-review.sh <mode> [args]
 ```
 
 Examples:
+- `timeout 600 ./scripts/codex-review.sh --workdir /tmp/.worktrees/baseball-crawl-E-137 uncommitted`
 - `timeout 600 ./scripts/codex-review.sh uncommitted`
 - `timeout 600 ./scripts/codex-review.sh base main`
 - `timeout 600 ./scripts/codex-review.sh commit abc1234`
@@ -101,10 +116,12 @@ After triage completes (whether via triage team or main session assessment), any
 For each finding confirmed for remediation, route it to the implementer with the finding details. The implementer:
 
 1. **Validates** the finding -- confirming it is a real issue or identifying it as a false positive.
-2. **Remediates** confirmed issues. The implementer works in the main checkout (not a worktree -- all story branches are already merged by this point).
+2. **Remediates** confirmed issues. Where the implementer works depends on context:
+   - **(a) "And review" chain**: The epic worktree is still active (closure has not happened yet). The implementer applies fixes in the **epic worktree**. Fixes are NOT committed -- they accumulate in the epic worktree and are included in the closure merge sequence (Phase 5).
+   - **(b) Standalone post-dev review**: No epic worktree exists. The implementer works in the main checkout.
 3. Reports completion with a change summary (files changed and nature of fix).
 
-**Remediation fixes are NOT re-reviewed.** The implementer commits fixes and PM records dispositions. If the user wants another review pass after remediation, they invoke a separate codex-review.
+**Remediation fixes are NOT re-reviewed.** PM records dispositions. If the user wants another review pass after remediation, they invoke a separate codex-review.
 
 ### Step 6: PM disposition tracking
 
@@ -130,9 +147,20 @@ PM records all findings with their dispositions. Each finding gets one of three 
 
 ### Step 1: Gather the diff
 
-Use Bash to gather the diff content based on the mode.
+Use Bash to gather the diff content based on the mode. When an epic worktree path is available (during the "and review" chain), use `git -C <epic-worktree-path>` to run git commands from the epic worktree.
 
 **Mode: `uncommitted`**
+
+**During "and review" chain (epic worktree available):**
+
+Run a single command to get all changes relative to main:
+```
+git -C <epic-worktree-path> diff main
+```
+
+This produces the complete epic diff (all accumulated story patches against main).
+
+**Standalone invocation (no epic worktree):**
 
 Run three commands:
 
@@ -176,14 +204,18 @@ Omit any section that is empty.
 
 **Mode: `base <branch>`**
 
+When an epic worktree path is available, use it; otherwise omit `-C` (runs from the main checkout):
 ```
-git diff <branch>...HEAD
+git -C <epic-worktree-path> diff <branch>...HEAD   # during "and review" chain
+git diff <branch>...HEAD                            # standalone
 ```
 
 **Mode: `commit <sha>`**
 
+Same resolution — use the epic worktree path if available, otherwise the main checkout:
 ```
-git show <sha>
+git -C <epic-worktree-path> show <sha>              # during "and review" chain
+git show <sha>                                      # standalone
 ```
 
 **Empty diff**: If all diff commands return empty output, report "No changes found for the specified mode. Nothing to generate a review prompt for." Stop.
@@ -246,7 +278,7 @@ Verify rubric exists at .project/codex-review.md
 Determine diff mode (default: uncommitted)
   |
   +---> HEADLESS PATH:
-  |       Run codex-review.sh <mode> [args]
+  |       Run codex-review.sh [--workdir <epic-worktree-path>] <mode> [args]
   |       Capture and present findings
   |       No changes? -> Report and stop
   |       No findings? -> Report clean review, stop

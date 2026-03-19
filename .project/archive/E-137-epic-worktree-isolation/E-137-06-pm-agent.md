@@ -4,7 +4,7 @@
 [E-137: Epic-Level Worktree Isolation](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the product-manager agent definition (`.claude/agents/product-manager.md`) reflects the epic worktree model in any references to dispatch mechanics, closure sequences, or the triage model.

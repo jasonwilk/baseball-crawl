@@ -4,7 +4,7 @@
 [E-137: Epic-Level Worktree Isolation](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the code-reviewer agent definition (`.claude/agents/code-reviewer.md`) references the epic worktree in its Worktree Review section and describes how to access the epic-level diff for integration reviews (used by E-138).

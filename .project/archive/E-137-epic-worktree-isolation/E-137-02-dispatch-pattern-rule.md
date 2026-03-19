@@ -4,7 +4,7 @@
 [E-137: Epic-Level Worktree Isolation](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the dispatch-pattern rule (`.claude/rules/dispatch-pattern.md`) reflects the epic worktree model: merge-back targets the epic worktree, the main session's permitted git operations include epic worktree creation/management, and the "Domain Work During Dispatch" section accounts for the epic worktree as a new path.

@@ -4,7 +4,7 @@
 [E-137: Epic-Level Worktree Isolation](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the codex-review skill (`.claude/skills/codex-review/SKILL.md`) and the codex-review script (`scripts/codex-review.sh`) support running against an epic worktree. When invoked during dispatch (the "and review" chain), the diff is generated from the epic worktree against main, producing exactly the epic's changes.

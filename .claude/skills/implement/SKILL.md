@@ -23,7 +23,7 @@ Load this skill when the user says any of:
 
 ## Purpose
 
-Codify the full workflow for dispatching and coordinating an epic when the user requests implementation. The main session (user-facing agent) is the spawner and router: it reads the epic, spawns implementers, code-reviewer, and PM, assigns stories with full context blocks, routes completion reports to PM (AC verification, status updates) and code-reviewer (quality review), manages patch-apply merge-back, cascades to newly unblocked stories, and runs the closure sequence (atomic commit). The main session does not own statuses, verify ACs, or create, modify, or delete any file. The main session's only direct file operations are git commands (`git apply` for merge-back, `git add -A` and `git commit` for the closure atomic commit, `git worktree` and `git branch -D` for worktree cleanup, `git mv` for archival) and writes to its own memory directory (`/home/vscode/.claude/projects/*/memory/`).
+Codify the full workflow for dispatching and coordinating an epic when the user requests implementation. The main session (user-facing agent) is the spawner and router: it reads the epic, creates an epic-level worktree as the accumulation point for all story patches, spawns implementers, code-reviewer, and PM, assigns stories with full context blocks, routes completion reports to PM (AC verification, status updates) and code-reviewer (quality review), manages patch-apply merge-back to the epic worktree, cascades to newly unblocked stories, and runs the closure sequence (merge epic worktree to main, commit, cleanup). The main session does not own statuses, verify ACs, or create, modify, or delete any file. The main session's only direct file operations are git commands (`git worktree add/remove` for epic and story worktree lifecycle, `git apply` for merge-back to the epic worktree, `git diff`/`git apply` for closure merge to main, `git add -A` and `git commit` for the closure commit, `git branch -D` for branch cleanup, `git mv` for archival) and writes to its own memory directory (`/home/vscode/.claude/projects/*/memory/`).
 
 This skill is the authoritative source for dispatch procedures. Agent routing tables are in `/.claude/rules/agent-routing.md`. See `/.claude/rules/dispatch-pattern.md` for a brief overview of dispatch roles.
 
@@ -82,15 +82,31 @@ Review the full dependency graph across all stories:
 
 ## Phase 2: Dispatch
 
-Create the team and spawn all agents. The main session spawns implementers, code-reviewer, and PM.
+Create the epic worktree, the team, and spawn all agents. The main session creates the epic worktree first, then spawns implementers, code-reviewer, and PM.
 
-### Step 1: Create the team
+### Step 1: Create the epic worktree
+
+Before team creation, create an epic-level worktree that serves as the accumulation point for all story patches during dispatch. Story patches are applied here (not to the main checkout), isolating the epic's changes from the main working tree.
+
+**Command** (substitute the actual epic ID):
+
+```bash
+git worktree add -b epic/E-NNN /tmp/.worktrees/baseball-crawl-E-NNN
+```
+
+- **Path**: `/tmp/.worktrees/baseball-crawl-E-NNN/` (e.g., `/tmp/.worktrees/baseball-crawl-E-137/`)
+- **Branch**: `epic/E-NNN` (e.g., `epic/E-137`)
+- Store the epic worktree path for use throughout dispatch -- it is passed to PM and code-reviewer in their spawn context and used in every merge-back operation.
+
+If the branch or worktree already exists (e.g., resuming a previously interrupted dispatch), reuse the existing worktree rather than failing.
+
+### Step 2: Create the team
 
 Use `TeamCreate` to create a dispatch team for the epic.
 
-### Step 2: Spawn implementing agents, code-reviewer, and PM
+### Step 3: Spawn implementing agents, code-reviewer, and PM
 
-Spawn each implementing agent with `isolation: "worktree"` (unless the context-layer exception applies -- see Phase 3 Step 2). This gives each agent an isolated copy of the repository via `git worktree`, preventing concurrent stories from interfering with each other's working trees.
+Spawn each implementing agent with `isolation: "worktree"` (unless the context-layer exception applies -- see Phase 3 Step 2). This gives each agent an isolated copy of the repository via `git worktree` (a story-level worktree, separate from the epic worktree), preventing concurrent stories from interfering with each other's working trees.
 
 Implementer spawn context:
 
@@ -103,18 +119,18 @@ If this is a multi-wave epic, spawn only wave-1 agents now. Later-wave agents ar
 **Spawn the code-reviewer** alongside the implementing agents. The code-reviewer is infrastructure, not a story-specific implementer -- it is NOT listed in the epic's Dispatch Team section. The implement skill spawns it automatically for every dispatch. The code-reviewer is NOT spawned with `isolation: "worktree"` -- it needs to access any implementer's worktree path to read their changed files and run `git diff`. Code-reviewer spawn context:
 
 ```
-You are the code-reviewer agent on the [team-name] team. Wait for review assignments from the main session via SendMessage. Do not self-initiate reviews. Each review assignment will include a story ID, the full story file text, epic Technical Notes, and the implementer's Files Changed list. When the implementer worked in a worktree, the assignment will include the worktree path -- use it when reading files and running git diff.
+You are the code-reviewer agent on the [team-name] team. Wait for review assignments from the main session via SendMessage. Do not self-initiate reviews. Each review assignment will include a story ID, the full story file text, epic Technical Notes, and the implementer's Files Changed list. When the implementer worked in a worktree, the assignment will include the worktree path -- use it when reading files and running git diff. Epic worktree path: [epic-worktree-path] (e.g., /tmp/.worktrees/baseball-crawl-E-NNN/) -- this is where all story patches accumulate during dispatch; use it for integration-level diffs when needed.
 ```
 
 **Spawn the product-manager (PM)** alongside implementers and code-reviewer. PM is infrastructure -- it is NOT listed in the epic's Dispatch Team section. The implement skill spawns it automatically for every dispatch. PM is NOT spawned with `isolation: "worktree"` -- it reads/writes status files in the main checkout and needs direct access. PM spawn context:
 
 ```
-You are the product-manager agent on the [team-name] team. Your role during dispatch is status management and AC verification. You own: story status file updates (TODO -> IN_PROGRESS -> DONE), epic Stories table updates, epic status transitions (READY -> ACTIVE -> COMPLETED), and AC verification ("did they build what was specified"). Wait for routing from the main session via SendMessage -- the main session will send you status update requests and completion reports for AC verification. Do not self-initiate work. Epic file: [absolute path to epic.md].
+You are the product-manager agent on the [team-name] team. Your role during dispatch is status management and AC verification. You own: story status file updates (TODO -> IN_PROGRESS -> DONE), epic Stories table updates, epic status transitions (READY -> ACTIVE -> COMPLETED), and AC verification ("did they build what was specified"). Wait for routing from the main session via SendMessage -- the main session will send you status update requests and completion reports for AC verification. Do not self-initiate work. Epic file: [absolute path to epic.md]. Epic worktree path: [epic-worktree-path] (e.g., /tmp/.worktrees/baseball-crawl-E-NNN/) -- this is where all story patches accumulate during dispatch; reference it when verifying ACs (accumulated changes live here, not in the main checkout; exception: context-layer-only stories run in the main checkout without worktree isolation -- their changes remain in the main checkout, not the epic worktree).
 ```
 
 **PM context window recovery**: If PM's context fills during large epics, the main session respawns PM with a fresh summary of current epic state: which stories are DONE, which are IN_PROGRESS, the current wave, and a reminder of PM's role. No state is lost because PM's work products (status files, epic table) persist on disk.
 
-### Step 3: Set epic to ACTIVE
+### Step 4: Set epic to ACTIVE
 
 If this is the first dispatch of this epic (status is `READY`), route to PM to update the epic status to `ACTIVE`.
 
@@ -134,6 +150,8 @@ For each eligible story:
 
 1. **Check Agent Hint.** If the story has an `## Agent Hint` field, prefer that agent type.
 2. **Check context-layer routing.** Scan the story's "Files to Create or Modify" section. If **any** file matches a context-layer path (see Routing Precedence in `/.claude/rules/agent-routing.md`), that story MUST go to `claude-architect` regardless of the Agent Hint. **Isolation depends on file mix:** if the story modifies ONLY context-layer files, spawn WITHOUT `isolation: "worktree"` (runs in the main checkout because these files are shared infrastructure that must be immediately visible to all agents). If the story is mixed (context-layer + code files), spawn `claude-architect` WITH `isolation: "worktree"` -- the architect edits both context-layer and code files from the worktree.
+
+   **Context-layer exception in the epic worktree model:** Context-layer-only stories run in the main checkout, so their changes are NOT accumulated in the epic worktree and are NOT included in the epic's atomic commit. Their changes remain **uncommitted** in the main checkout throughout dispatch. This is intentional: committing context-layer changes to main mid-dispatch would shift the diff base (the `main` HEAD that all story patches and the epic closure merge are generated against) and break the epic-scoped diff guarantee. Context-layer changes are committed separately AFTER the epic's atomic commit succeeds (see Phase 5 Step 8, item 8). Mixed stories (context-layer + code) run in a worktree, and their patches merge to the epic worktree like any other story.
 3. **Fall back to routing table.** If no Agent Hint and no context-layer match, use the Agent Selection table in `/.claude/rules/agent-routing.md` to determine the agent type from file paths and story domain.
 
 ### Step 3: Update statuses
@@ -278,20 +296,19 @@ Review this story's implementation against all acceptance criteria and the revie
 
 When the implementer did NOT work in a worktree (context-layer stories that touch non-context files, or stories spawned without isolation for other reasons), omit the "Implementer worktree path" paragraph.
 
-3. **Triage ALL findings.** Before any merge or routing decision, the main session reads every finding (MUST FIX and SHOULD FIX) and triages each SHOULD FIX item into one of two tracks:
-   - **Accept track (fix it)**: The finding improves code touched by the story. Route to the implementer immediately alongside MUST FIX items. No user confirmation needed.
-   - **Dismiss track (close it)**: The finding targets pre-existing code not modified by the story, or the main session disagrees with the recommendation. For each finding on the dismiss track, the main session presents the finding and its dismissal reasoning to the user in plain English, then waits for user confirmation before closing. If the user vetoes a dismissal, the finding moves to the accept track and is routed to the implementer.
-   - **When uncertain, bias toward accepting** -- prefer fixing over dismissing.
+3. **Triage ALL findings.** Before any merge or routing decision, the main session classifies every finding (MUST FIX and SHOULD FIX) as **valid** or **invalid**:
+   - **Valid finding** (correct analysis of the code): Route to the implementer for fixing, regardless of severity (MUST FIX or SHOULD FIX), size, or cosmetic nature. "Correct but too small to fix" is NOT a valid dismissal reason.
+   - **Invalid finding** (false positive, misunderstanding of the code, or targets code not modified by the story): Dismiss with explanation. No user confirmation needed.
 
-   Every finding reaches a terminal state during the story: FIXED or DISMISSED. No deferral path exists.
+   The distinction between MUST FIX and SHOULD FIX is preserved in the code-reviewer's output (it signals severity), but the handling for all valid findings is the same: fix it. Every finding reaches a terminal state during the story: FIXED or DISMISSED. No deferral path exists.
 
-4. **If the reviewer returns APPROVED and PM verifies ACs pass** (no MUST FIX findings, ACs satisfied): Triage any SHOULD FIX findings per step 3 above. If all SHOULD FIX items are dismissed (or there are none), run the merge-back sequence (see Step 5a below), then route to PM to mark the story `DONE`. If any SHOULD FIX items are accepted, route them to the implementer who wrote the code before merge-back. After the implementer fixes them, send the updated work back to the reviewer for re-review. The main session routes findings to implementers for resolution -- it NEVER creates, modifies, or deletes any file itself.
+4. **If the reviewer returns APPROVED and PM verifies ACs pass** (no MUST FIX findings, ACs satisfied): Triage any SHOULD FIX findings per step 3 above. If all findings are invalid (dismissed) or there are none, run the merge-back sequence (see Step 5a below), then route to PM to mark the story `DONE`. If any valid findings exist, route them to the implementer who wrote the code before merge-back. After the implementer fixes them, send the updated work back to the reviewer for re-review. The main session routes findings to implementers for resolution -- it NEVER creates, modifies, or deletes any file itself.
 
-   **If PM rejects ACs** (regardless of reviewer verdict): Route PM's AC feedback to the implementer alongside any code-review MUST FIX items and accepted SHOULD FIX items. After the implementer revises, both PM and the code-reviewer re-evaluate. See Gate Interaction below.
+   **If PM rejects ACs** (regardless of reviewer verdict): Route PM's AC feedback to the implementer alongside any valid code-review findings. After the implementer revises, both PM and the code-reviewer re-evaluate. See Gate Interaction below.
 
-   **PM-Reviewer AC Disagreement**: If the code-reviewer flags an AC as MUST FIX but PM verifies that AC as PASS, the main session removes the AC-based finding from the MUST FIX list before routing to the implementer. If removing AC-based items empties the MUST FIX list, the story passes the review gate (effectively APPROVED for merge-back). Non-AC MUST FIX findings (bugs, security, conventions) are the reviewer's exclusive domain and are unaffected by PM override. The full PM-Reviewer AC Disagreement resolution matrix: (1) Reviewer APPROVED + PM pass = merge-back. (2) Reviewer NOT APPROVED, non-AC MUST FIX only = route to implementer. (3) Reviewer NOT APPROVED, ALL MUST FIX are AC-related, PM says pass = PM override, proceed to merge-back. (4) Mixed AC + non-AC MUST FIX, PM says pass = remove AC items, route only non-AC items. (5) PM says fail = route PM feedback to implementer regardless. Non-AC findings (bugs, security, conventions) are the reviewer's exclusive domain -- PM cannot override those.
+   **PM-Reviewer AC Disagreement**: If the code-reviewer flags an AC as MUST FIX but PM verifies that AC as PASS, the main session removes the AC-based finding from the valid findings list before routing to the implementer. If removing AC-based items empties the valid findings list, the story passes the review gate (effectively APPROVED for merge-back). Non-AC MUST FIX findings (bugs, security, conventions) are the reviewer's exclusive domain and are unaffected by PM override. The full PM-Reviewer AC Disagreement resolution matrix: (1) Reviewer APPROVED + PM pass = merge-back. (2) Reviewer NOT APPROVED, non-AC MUST FIX only = route to implementer. (3) Reviewer NOT APPROVED, ALL MUST FIX are AC-related, PM says pass = PM override, proceed to merge-back. (4) Mixed AC + non-AC MUST FIX, PM says pass = remove AC items, route only non-AC items. (5) PM says fail = route PM feedback to implementer regardless. Non-AC findings (bugs, security, conventions) are the reviewer's exclusive domain -- PM cannot override those.
 
-5. **If the reviewer returns NOT APPROVED** (MUST FIX findings): Triage SHOULD FIX findings per step 3 above. Route MUST FIX items plus any accepted SHOULD FIX items to the implementer who wrote the code with the review round number (e.g., "Round 1 of 2 -- items to fix below"). The main session NEVER creates, modifies, or deletes any file itself -- all fixes are routed to the implementer. The implementer fixes the issues in the same worktree and reports completion again (with updated `## Files Changed`). Send the updated work back to the reviewer for Round 2 using an expanded template that includes the prior findings:
+5. **If the reviewer returns NOT APPROVED** (MUST FIX findings): Triage all findings per step 3 above. Route all valid findings (MUST FIX and any valid SHOULD FIX items) to the implementer who wrote the code with the review round number (e.g., "Round 1 of 2 -- items to fix below"). The main session NEVER creates, modifies, or deletes any file itself -- all fixes are routed to the implementer. The implementer fixes the issues in the same worktree and reports completion again (with updated `## Files Changed`). Send the updated work back to the reviewer for Round 2 using an expanded template that includes the prior findings:
 
 ```
 Review story E-NNN-SS: [Title] (Round 2)
@@ -312,11 +329,11 @@ Implementer-reported test results:
 [Test Results section from implementer's round-2 completion message]
 
 Round 1 findings routed to implementer:
-[Paste the MUST FIX findings and accepted SHOULD FIX findings from round 1 verbatim]
+[Paste all valid findings (MUST FIX and valid SHOULD FIX) from round 1 verbatim]
 
 Review round: 2 of 2 (circuit breaker)
 
-This is a round-2 re-review. The implementer was asked to fix the Round 1 findings listed above (MUST FIX items plus any SHOULD FIX items accepted by the main session during triage). Perform a full re-review of all changed files, but focus on whether the Round 1 MUST FIX items are resolved and whether the fixes introduced any new issues. Report findings using the structured format.
+This is a round-2 re-review. The implementer was asked to fix the Round 1 findings listed above (all valid findings -- MUST FIX and valid SHOULD FIX items). Perform a full re-review of all changed files, but focus on whether the Round 1 findings are resolved and whether the fixes introduced any new issues. Report findings using the structured format.
 ```
 
 6. **Circuit breaker.** Max 2 review rounds per story. If the 2nd review still has MUST FIX findings, escalate to the user with the findings summary and present options:
@@ -332,24 +349,25 @@ When PM rejects ACs, route PM's feedback to the implementer alongside any code-r
 
 ### Step 5a: Merge-back via patch-apply (worktree stories only)
 
-After both the code-reviewer approves and PM verifies ACs pass for a story implemented in a worktree (or PM alone approves for context-layer-only stories), the main session runs the patch-apply merge-back sequence from the main checkout BEFORE marking DONE or cascading. A story is NOT marked DONE until its changes are successfully applied.
+After both the code-reviewer approves and PM verifies ACs pass for a story implemented in a worktree (or PM alone approves for context-layer-only stories), the main session runs the patch-apply merge-back sequence to apply the story's changes to the **epic worktree** BEFORE marking DONE or cascading. A story is NOT marked DONE until its changes are successfully applied.
 
 **Patch-apply sequence:**
 
-1. **In the worktree**: Generate a patch from staged changes: `cd <worktree-path> && git diff --binary --cached main > /tmp/E-NNN-SS.patch`
-2. **In the main checkout**: Apply the patch: `cd /workspaces/baseball-crawl && git apply --3way /tmp/E-NNN-SS.patch` (the `--3way` flag falls back to 3-way merge semantics when sequential same-file patches have context-line mismatches; compatible with `--binary`). Do NOT stage the applied changes yet -- they accumulate unstaged in the main checkout until the closure atomic commit.
-3. **If apply succeeds:**
-   - Remove the worktree: `git worktree remove <path>` (retry with `--force` if it fails due to untracked files).
-   - Delete the branch: `git branch -D <branch>` (force delete because the branch has no commits beyond main).
+1. **In the story worktree**: Generate a patch from staged changes: `cd <story-worktree-path> && git diff --binary --cached main > /tmp/E-NNN-SS.patch`
+2. **In the epic worktree**: Apply the patch: `cd <epic-worktree-path> && git apply --3way /tmp/E-NNN-SS.patch` (the `--3way` flag falls back to 3-way merge semantics when sequential same-file patches have context-line mismatches; compatible with `--binary`).
+3. **Stage in epic worktree**: After successful apply, stage the changes: `cd <epic-worktree-path> && git add -A`. This keeps the epic worktree's index up to date as story patches accumulate.
+4. **If apply succeeds:**
+   - Remove the story worktree: `git worktree remove <story-worktree-path>` (retry with `--force` if it fails due to untracked files).
+   - Delete the story branch: `git branch -D <story-branch>` (force delete because the branch has no commits beyond main).
    - Route to PM to mark the story `DONE` (Step 6).
    - Proceed to cascade (Step 6).
-4. **If apply fails (conflict):**
+5. **If apply fails (conflict):**
    - The story remains `IN_PROGRESS`.
    - Cascade is blocked for dependent stories only (non-dependent stories can proceed).
-   - The worktree stays active for inspection.
+   - The story worktree stays active for inspection.
    - Escalate to the user with conflict details.
-   - Recovery in main checkout: `git checkout -- . && git clean -fd` to reset, then retry after conflict resolution.
-   - After resolution, the main session removes the worktree, deletes the branch (`-D`), routes to PM to mark DONE, and proceeds to cascade.
+   - Recovery in epic worktree: `cd <epic-worktree-path> && git reset --hard HEAD && git clean -fd` to reset (handles unmerged index entries from `--3way` conflicts), then retry after conflict resolution.
+   - After resolution, the main session removes the story worktree, deletes the story branch (`-D`), routes to PM to mark DONE, and proceeds to cascade.
 
 For stories that were NOT implemented in a worktree (context-layer stories), skip this step -- their changes are already in the main checkout. Proceed directly to PM marking DONE.
 
@@ -387,7 +405,7 @@ When all stories are verified DONE (and the optional review chain is complete), 
 
 Confirm all stories are DONE. Per-story AC verification was performed by PM during Phase 3 (for all stories), and code quality was verified by the code-reviewer (for code stories). This step confirms completion status -- it is not a re-review of all code.
 
-**Worktree verification:** Run `git worktree list --porcelain` to verify no worktrees remain (all should have been removed during per-story patch-apply merge-back in Phase 3 Step 5a). If any orphans are found, force-remove them (`git worktree remove --force <path>`, then `git branch -D <branch>`). Run `git worktree prune` as a final cleanup for stale registrations. This closure check catches only orphans from error paths -- per-story worktree cleanup happens at merge-back time.
+**Worktree verification:** Run `git worktree list --porcelain` to verify no **story** worktrees remain (all should have been removed during per-story patch-apply merge-back in Phase 3 Step 5a). The **epic worktree** (`/tmp/.worktrees/baseball-crawl-E-NNN/`) MUST still be present at this point -- it is cleaned up later in Step 10 after the closure merge to main succeeds. If any orphaned story worktrees are found, force-remove them (`git worktree remove --force <path>`, then `git branch -D <branch>`). Run `git worktree prune` as a final cleanup for stale registrations. This closure check catches only orphans from error paths -- per-story worktree cleanup happens at merge-back time.
 
 ### Step 2: Update the epic completely
 
@@ -407,29 +425,15 @@ Review the epic's scope against the update triggers in `.claude/rules/documentat
 
 Evaluate the epic's impact on the context layer per `.claude/rules/context-layer-assessment.md`. Assess each of the six triggers with an explicit yes/no verdict and record all verdicts in the epic's History section. If any trigger fires, spawn claude-architect (if not already on the team) to codify the findings before archiving. The epic MUST NOT be archived until this assessment is complete and any required codification is done.
 
-### Step 4: Archive the epic
-
-Move the entire epic directory from `/epics/E-NNN-slug/` to `/.project/archive/E-NNN-slug/` and verify the move is fully staged before proceeding.
-
-**Move method:** Use `git mv epics/E-NNN-slug/ .project/archive/E-NNN-slug/` (not plain `mv`). `git mv` atomically stages both the new files at the destination and the deletions at the source.
-
-**Verification gate:** After the move, run `git status --porcelain` and grep the output for the epic slug. Any line referencing `epics/E-NNN-slug/` or `.project/archive/E-NNN-slug/` that has a non-space character in column 2 (the working-tree status column) represents an unstaged change -- status codes like ` D`, `??`, `RM`, `AM`, `MM`, etc. Stage all such changes with `git add` before proceeding. The main session MUST NOT proceed past this step with unstaged archive-related changes in the working tree.
-
-The main session performs the `git mv` and verification directly (this is a git operation, same category as merge-back). Do not proceed to team shutdown until the archive is confirmed and fully staged.
-
-### Step 5: Update PM memory
-
-Route to PM to move the epic from "Active Epics" to "Archived Epics" in the PM's MEMORY.md (`.claude/agent-memory/product-manager/MEMORY.md`). PM notes any follow-up work or newly unblocked items.
-
-### Step 6: Review ideas backlog
+### Step 4: Review ideas backlog
 
 PM checks `/.project/ideas/README.md` for CANDIDATE ideas that may now be unblocked or promoted by the epic's completion.
 
-### Step 7: Review vision signals
+### Step 5: Review vision signals
 
 PM checks whether `docs/vision-signals.md` has any content after the `## Signals` heading. If unprocessed signals exist, PM mentions them in the closure summary and the main session asks the user if they want to "curate the vision." This is advisory, not blocking -- the closure sequence proceeds regardless of the user's answer.
 
-### Step 8: Present a summary to the user
+### Step 6: Present a summary to the user
 
 Before ending the dispatch, present a clear summary including:
 - Epic ID and title
@@ -438,22 +442,57 @@ Before ending the dispatch, present a clear summary including:
 - Any follow-up work identified
 - Any ideas that may now be promotable
 
-### Step 9: Shut down all teammates
+### Step 7: Shut down implementers and code-reviewer
 
-Send a `shutdown_request` to each agent on the team (implementers, code-reviewer, and PM). Wait for shutdown confirmations. Delete the team.
+Send a `shutdown_request` to each implementer and to the code-reviewer. Wait for shutdown confirmations. **Do NOT shut down PM yet** -- PM is needed for memory updates after archive.
 
-**After spinning down the team:**
+**After spinning down implementers and code-reviewer:**
 
-### Step 10: Atomic commit
+### Step 8: Closure merge and commit
 
-After shutting down teammates and deleting the team, produce a single commit for all accumulated epic changes:
+Merge the epic worktree's accumulated changes into the main checkout and produce a single commit.
 
-1. `git add -A` to stage all accumulated changes from all stories.
-2. Run PII scanner on staged files (the pre-commit hook covers this automatically).
-3. Present the staged changes summary to the user and ask for explicit approval before committing.
-4. `git commit` with a conventional commit message: `feat(E-NNN): <epic title>`.
+**Migration merge-time scan:** Before generating the epic patch, check whether the epic worktree's staged changes include any new migration files (paths under `migrations/`). If they do, check whether main has added new migrations since the epic worktree branched (compare `ls migrations/` in both the epic worktree and the main checkout). If main has new migrations that did not exist when the epic worktree was created, flag the potential numbering conflict to the user before proceeding. The user decides whether to continue, renumber, or abort.
+
+**Closure merge sequence:**
+
+1. **Stage in epic worktree**: `cd <epic-worktree-path> && git add -A` (ensure all accumulated story patches are staged).
+2. **Generate epic patch**: `cd <epic-worktree-path> && git diff --binary --cached main > /tmp/E-NNN-epic.patch`
+3. **Dry-run in main checkout**: `cd /workspaces/baseball-crawl && git apply --check --3way /tmp/E-NNN-epic.patch`
+4. **If dry-run succeeds**: Apply for real: `cd /workspaces/baseball-crawl && git apply --3way /tmp/E-NNN-epic.patch`
+5. **PII scan**: Run on applied changes (the pre-commit hook covers this automatically).
+6. **Stage and present**: Stage the applied epic changes. If context-layer-only stories left uncommitted changes in the main checkout, use targeted staging (`git add` on the specific files from the epic patch -- list them via `git apply --stat /tmp/E-NNN-epic.patch` or stage all then unstage context-layer paths) to avoid accidentally including context-layer changes in the epic commit. Present the staged changes summary to the user and ask for explicit approval before committing.
+7. **Commit**: `git commit` with a conventional commit message: `feat(E-NNN): <epic title>`.
+8. **Context-layer commit**: After the epic commit succeeds, check for uncommitted context-layer changes in the main checkout (from context-layer-only stories that ran without worktree isolation). Run `git status --porcelain` and look for changes to context-layer paths (`.claude/`, `CLAUDE.md`). If found, stage them (`git add .claude/ CLAUDE.md` or the specific changed paths) and commit in a separate commit: `chore(E-NNN): context-layer updates`. If the epic commit failed or was aborted (steps 3-7), do NOT commit context-layer changes -- they remain uncommitted in the main checkout for the user to handle manually.
+9. **Cleanup**: `git worktree remove <epic-worktree-path> && git branch -D epic/E-NNN`.
+
+**If dry-run fails (conflict with main):** Present a conflict report to the user with the affected files. Options:
+- (a) Resolve manually (user fixes conflicts, then the main session retries from step 3)
+- (b) Abort (epic worktree is preserved for manual recovery; the main session does not clean it up)
 
 The user must explicitly approve before the commit happens. If PII scan catches issues, nothing is committed -- the atomic approach makes this safer than partial commits. Commit must NOT happen automatically.
+
+### Step 9: Archive the epic
+
+Move the entire epic directory from `/epics/E-NNN-slug/` to `/.project/archive/E-NNN-slug/` and verify the move is fully staged before proceeding.
+
+**Move method:** Use `git mv epics/E-NNN-slug/ .project/archive/E-NNN-slug/` (not plain `mv`). `git mv` atomically stages both the new files at the destination and the deletions at the source.
+
+**Verification gate:** After the move, run `git status --porcelain` and grep the output for the epic slug. Any line referencing `epics/E-NNN-slug/` or `.project/archive/E-NNN-slug/` that has a non-space character in column 2 (the working-tree status column) represents an unstaged change -- status codes like ` D`, `??`, `RM`, `AM`, `MM`, etc. Stage all such changes with `git add` before proceeding. The main session MUST NOT proceed past this step with unstaged archive-related changes in the working tree.
+
+The main session performs the `git mv` and verification directly (this is a git operation, same category as merge-back).
+
+### Step 10: Update PM memory
+
+Route to PM to move the epic from "Active Epics" to "Archived Epics" in the PM's MEMORY.md (`.claude/agent-memory/product-manager/MEMORY.md`). PM notes any follow-up work or newly unblocked items. PM is still running (shut down was deferred in Step 7).
+
+### Step 11: Archive commit
+
+Commit the archive move and PM memory update: `git add -A && git commit -m "chore(E-NNN): archive epic"`.
+
+### Step 12: Shut down PM and delete team
+
+Send a `shutdown_request` to PM. Wait for shutdown confirmation. Delete the team.
 
 ---
 
@@ -480,7 +519,11 @@ Phase 1: Read epic's Dispatch Team section
   - Plan multi-wave spawning if dependencies exist
   |
   v
-Phase 2: Create team, spawn implementers (worktree) + code-reviewer (no worktree) + PM (no worktree)
+Phase 2: Create epic worktree, team, spawn agents
+  - Create epic worktree: git worktree add -b epic/E-NNN /tmp/.worktrees/baseball-crawl-E-NNN
+  - Create dispatch team
+  - Spawn implementers (story worktree) + code-reviewer (no worktree) + PM (no worktree)
+  - Pass epic worktree path to PM and code-reviewer in spawn context
   - Context-layer stories: spawned WITHOUT worktree isolation
   - Code-reviewer + PM spawned automatically (infrastructure, not in Dispatch Team)
   - PM owns status management + AC verification
@@ -497,8 +540,8 @@ Phase 3: Coordination loop
       |
       v
     Context-layer-only? --YES--> Route to PM for AC verification + status update
-      |
-      NO
+      |                           (changes stay UNCOMMITTED in main checkout -- NOT in epic worktree)
+      NO                          (committed separately AFTER epic commit in Phase 5 Step 8)
       |
       v
     Send to code-reviewer (round 1 of 2) AND PM (AC verification) in parallel
@@ -511,19 +554,17 @@ Phase 3: Coordination loop
       - PM-Reviewer AC disagreement: PM override for AC-related MUST FIX items
       |
       v
-    Main session triages ALL findings:
-      - MUST FIX: always routed to implementer (main session NEVER creates, modifies, or deletes any file itself)
-      - SHOULD FIX accept track: route to implementer immediately (no user wait)
-      - SHOULD FIX dismiss track: present reasoning to user, wait for confirmation
-        - User confirms -> finding DISMISSED
-        - User vetoes -> moves to accept track, routed to implementer
+    Main session classifies ALL findings:
+      - Valid finding (correct analysis): route to implementer for fixing
+      - Invalid finding (false positive, misunderstanding, untouched code): dismiss with explanation
+      - No "correct but too small to fix" -- valid findings always get fixed
       - No deferral path -- every finding ends FIXED or DISMISSED
       |
       v
-    Items to fix? --NO--> Patch-apply: generate patch in worktree -> apply in main checkout
-      |                     -> remove worktree -> delete branch (-D) -> Route to PM: mark DONE
-      YES                   [If apply fails: escalate to user, block dependent cascade only]
-      |
+    Items to fix? --NO--> Patch-apply: generate patch in story worktree -> apply in EPIC worktree
+      |                     -> stage in epic worktree -> remove story worktree -> delete branch (-D)
+      YES                   -> Route to PM: mark DONE
+      |                     [If apply fails: escalate to user, block dependent cascade only]
       v
     Route findings to implementer who wrote the code, implementer fixes in same worktree
       |
@@ -531,7 +572,7 @@ Phase 3: Coordination loop
     Send to code-reviewer (round 2 of 2) + PM re-verifies ACs
       |
       v
-    Items to fix? --NO--> Patch-apply -> Route to PM: mark DONE
+    Items to fix? --NO--> Patch-apply to epic worktree -> Route to PM: mark DONE
       |
       YES
       |
@@ -545,18 +586,23 @@ Phase 3: Coordination loop
   |
   v
 Phase 5: Closure sequence
-  - Validate all work (confirm DONE + PM verified ACs + no worktrees remain)
-  - Sweep for orphaned worktrees (git worktree list --porcelain; force-remove; prune)
+  - Validate all work (confirm DONE + PM verified ACs + no story worktrees remain)
+  - Sweep for orphaned STORY worktrees (epic worktree must still be present)
   - Route to PM: update epic to COMPLETED with history entry
   - Documentation assessment (spawn docs-writer if needed)
   - Context-layer assessment (spawn claude-architect if needed)
-  - Archive epic to /.project/archive/ (git mv + verify fully staged)
-  - PM: update PM memory
   - PM: review ideas backlog
   - PM: review vision signals (advisory)
   - Present summary to user
-  - Shut down team (implementers + code-reviewer + PM)
-  - Atomic commit: git add -A -> PII scan -> user approval -> single git commit
+  - Shut down implementers + code-reviewer (PM stays alive)
+  - Closure merge: migration scan -> epic patch -> dry-run -> apply in main -> PII scan
+    -> user approval -> commit feat(E-NNN) -> context-layer commit (if any)
+    -> cleanup epic worktree + branch
+    [If dry-run fails: present conflict report, user decides resolve or abort]
+  - Archive epic to /.project/archive/ (git mv + verify fully staged)
+  - PM updates its own memory
+  - Archive commit (git add -A && git commit)
+  - Shut down PM, delete team
 ```
 
 ---
@@ -598,7 +644,9 @@ If PM's context fills during a large epic, the main session respawns PM with a f
 5. **Do not commit automatically.** The closure sequence offers to commit -- the user must explicitly approve.
 6. **Do not skip PM spawning.** PM handles all status updates and AC verification during dispatch. PM is spawned alongside implementers and code-reviewer as infrastructure for every dispatch.
 7. **Do not skip the context-layer assessment.** The epic cannot be archived until the context-layer impact is evaluated per `.claude/rules/context-layer-assessment.md`.
-8. **Do not defer SHOULD FIX findings to epic History.** Every finding must reach a terminal state (FIXED or DISMISSED) during the story. The main session triages each SHOULD FIX item: accept it (route to implementer immediately) or dismiss it (present reasoning to user and wait for confirmation). There is no deferral path.
+8. **Do not defer findings to epic History.** Every finding must reach a terminal state (FIXED or DISMISSED) during the story. Valid findings are routed to the implementer; invalid findings are dismissed with explanation. There is no deferral path.
 9. **Do not spawn context-layer stories with worktree isolation.** Context-layer files (CLAUDE.md, `.claude/agents/`, `.claude/rules/`, `.claude/skills/`, etc.) are shared infrastructure. Stories modifying only these files must run in the main checkout without `isolation: "worktree"`.
 10. **Do not commit in worktrees.** Implementers stage changes (`git add -A`) but NEVER commit. The main session extracts staged changes via patch-apply (`git diff --binary --cached main`) and produces a single atomic commit at closure. Committing in a worktree breaks the patch-apply merge-back flow.
-11. **Do not use `git merge` for merge-back.** Merge-back uses the patch-apply sequence: generate a patch from staged changes in the worktree, apply it in the main checkout. `git merge --no-ff` is not used because there are no commits to merge.
+11. **Do not use `git merge` for merge-back.** Merge-back uses the patch-apply sequence: generate a patch from staged changes in the story worktree, apply it in the epic worktree. `git merge --no-ff` is not used because there are no commits to merge.
+12. **Do not apply story patches to the main checkout.** Story patches are applied to the epic worktree (`/tmp/.worktrees/baseball-crawl-E-NNN/`), not to `/workspaces/baseball-crawl`. The main checkout only receives changes via the closure merge sequence in Phase 5 Step 8.
+13. **Do not dismiss valid findings based on size or cosmetic nature.** If the code-reviewer's finding is a correct analysis of the code, it gets fixed -- regardless of whether it is a MUST FIX or SHOULD FIX, regardless of how small or cosmetic it appears. "Correct but not worth fixing" is not a valid dismissal reason. Only false positives, misunderstandings, and findings about untouched code are dismissed.

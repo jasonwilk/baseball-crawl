@@ -4,7 +4,7 @@
 [E-137: Epic-Level Worktree Isolation](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, all context-layer files affected by E-137 have been reviewed for internal consistency using the context-fundamentals skill. Cross-references between the implement skill, dispatch-pattern rule, worktree-isolation rule, workflow-discipline rule, agent definitions, and codex-review skill are verified as aligned.
