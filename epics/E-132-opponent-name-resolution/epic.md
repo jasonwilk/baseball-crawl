@@ -63,6 +63,11 @@ No expert consultation required -- this is a loader bug fix using data sources a
 
 The scouting path has an additional wrinkle: in `_build_games_index()`, the `GameSummaryEntry.opponent_id` is set to `""` (empty string) because the public games response structure differs from game-summaries. The opponent UUID comes from the boxscore keys, not from the games index. The opponent name, however, IS in the games index (`opponent_team.name`). The `id` field in each `games.json` entry is the `game_stream_id` (same value used as the boxscore filename), so a `game_stream_id → opponent_team.name` map can be built alongside the existing games index. The challenge is then passing that name through to `GameLoader` when the opponent UUID is discovered during boxscore parsing.
 
+### Scouting Loader Safety Net
+`ScoutingLoader._record_uuid_from_boxscore_path()` (line 488 of `scouting_loader.py`) has an inline `INSERT OR IGNORE` that creates UUID-stub rows as a "safety net" for UUID keys found in boxscores. This runs AFTER `GameLoader.load_file()` for each boxscore, so in the happy path the row already exists with a name and the INSERT is a no-op. However, if `load_file()` fails/skips a boxscore, this safety net can create a UUID-stub row. This code path must also use opponent names when available.
+
+Note: `roster.py` and `season_stats_loader.py` also have `_ensure_team_row()` methods with the same pattern, but they only run for member teams (which already have proper names from admin setup). Those are not in scope.
+
 ### Opponent Deduplication
 The `teams` table has a UNIQUE constraint on `gc_uuid`. When the same opponent appears in multiple games, `_ensure_team_row()` uses `INSERT OR IGNORE` -- the first insert creates the row, subsequent calls fall through to `SELECT`. With the self-healing behavior (update UUID-stub names on SELECT), deduplication works correctly: the first insert creates a named row, and subsequent calls for the same opponent are no-ops.
 
@@ -79,3 +84,4 @@ None.
 - 2026-03-19: Revised to use opponents.json as primary name source (per SE analysis)
 - 2026-03-19: Codex spec review remediation -- 5 findings fixed (method name, CLI contract, success criteria/fallback reconciliation, guard alignment, UUID caveat propagation). Set to READY.
 - 2026-03-19: Refinement pass -- AC-4 revised for self-healing behavior (update UUID-stub names on existing rows during normal loading, not just on INSERT). Scouting path linkage clarified (game_stream_id connects games.json name to boxscore UUID). E-132-02 context updated to reflect catch-stragglers role.
+- 2026-03-19: Holistic refinement -- added scouting_loader `_record_uuid_from_boxscore_path()` (line 488) as third code path in scope (AC-5 on E-132-01). Confirmed roster.py and season_stats_loader.py NOT in scope (member teams only). No UXD or api-scout consultation needed.
