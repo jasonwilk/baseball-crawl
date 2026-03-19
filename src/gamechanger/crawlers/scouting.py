@@ -234,6 +234,9 @@ class ScoutingCrawler:
         """Fetch and write a boxscore file for each completed game."""
         games_crawled = 0
         for game in completed_games:
+            # game.get("id") is the public-endpoint equivalent of event_id in the
+            # authenticated flow (game-summaries).  Pass it directly to the boxscore
+            # endpoint -- no bridge call required (confirmed 2026-03-19).
             game_stream_id = game.get("id")
             if not game_stream_id:
                 logger.warning("Game missing 'id' for public_id=%s; skipping.", public_id)

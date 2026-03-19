@@ -1,4 +1,4 @@
-"""Tests for src/gamechanger/crawlers/scouting.py (E-097-03, E-100-03).
+"""Tests for src/gamechanger/crawlers/scouting.py (E-097-03, E-100-03, E-127-09).
 
 Covers:
 - AC-12: Single-team scouting with mocked API responses
@@ -8,6 +8,7 @@ Covers:
 - AC-12: first_fetched / last_checked timestamp behaviour on scouting_runs
 - AC-1/AC-2: ScoutingCrawler constructor and method signatures
 - AC-16: UUID opportunism
+- E-127-09 AC-4: _PUBLIC_GAMES_ACCEPT constant value
 
 All HTTP calls are mocked. No real network requests are made.
 """
@@ -25,7 +26,11 @@ import pytest
 from migrations.apply_migrations import run_migrations
 from src.gamechanger.client import CredentialExpiredError, ForbiddenError
 from src.gamechanger.crawlers import CrawlResult
-from src.gamechanger.crawlers.scouting import ScoutingCrawler, _derive_season_id
+from src.gamechanger.crawlers.scouting import (
+    ScoutingCrawler,
+    _PUBLIC_GAMES_ACCEPT,
+    _derive_season_id,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -172,6 +177,13 @@ def _insert_scouting_run(
 # ---------------------------------------------------------------------------
 
 
+def test_public_games_accept_header_constant() -> None:
+    """_PUBLIC_GAMES_ACCEPT uses the correct vendor media type (E-127-09 AC-4)."""
+    assert _PUBLIC_GAMES_ACCEPT == (
+        "application/vnd.gc.com.public_team_schedule_event:list+json; version=0.0.0"
+    )
+
+
 def test_scouting_crawler_constructor(mock_client: MagicMock, db: sqlite3.Connection, tmp_path: Path) -> None:
     """ScoutingCrawler accepts client, db, freshness_hours, data_root."""
     crawler = ScoutingCrawler(mock_client, db, freshness_hours=48, data_root=tmp_path)
@@ -198,7 +210,7 @@ def test_scout_team_calls_public_endpoint_for_games(
 
     mock_client.get_public.assert_called_once_with(
         f"/public/teams/{_PUBLIC_ID}/games",
-        accept="application/vnd.gc.com.event:list+json; version=0.1.0",
+        accept=_PUBLIC_GAMES_ACCEPT,
     )
 
 

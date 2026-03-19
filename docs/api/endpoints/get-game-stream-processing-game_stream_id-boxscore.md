@@ -35,9 +35,8 @@ caveats:
     2026-03-12) incorrectly identified the parameter as game_stream.id -- likely
     caused by confusion between game_stream.id and game_stream.game_id when
     reading game-summaries records. The /public/teams/{public_id}/games `id` field
-    relationship to this parameter is now also unresolved -- that field was
-    previously documented as identical to game_stream.id, which is now known to be
-    the wrong parameter. Re-verify what /public/games `id` actually equals.
+    equals event_id (confirmed 2026-03-19) -- it is the public-endpoint equivalent
+    of event_id from the authenticated flow.
   - >
     ASYMMETRIC TOP-LEVEL KEYS: Own team key is the public_id slug (short alphanumeric,
     no dashes); opponent key is a UUID (with dashes). Detect via regex or match against
@@ -45,7 +44,7 @@ caveats:
 related_schemas: []
 see_also:
   - path: /public/teams/{public_id}/games
-    reason: Potential event_id source -- relationship to event_id needs re-verification (prior docs incorrectly called its `id` field a game_stream_id)
+    reason: Confirmed event_id source (public path) -- `id` field equals event_id (confirmed 2026-03-19); no bridge call needed
   - path: /teams/{team_id}/game-summaries
     reason: Confirmed event_id source -- use `event_id` field (= game_stream.game_id); NOT game_stream.id
   - path: /game-stream-processing/{game_stream_id}/plays

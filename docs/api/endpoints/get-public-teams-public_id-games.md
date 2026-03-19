@@ -23,7 +23,7 @@ tags: [games, team, public]
 related_schemas: []
 see_also:
   - path: /game-stream-processing/{game_stream_id}/boxscore
-    reason: The `id` field from this response IS the game_stream_id for boxscore -- no bridge call needed (confirmed 2026-03-12)
+    reason: The `id` field from this response IS the event_id for boxscore (confirmed 2026-03-12, terminology corrected 2026-03-19) -- no bridge call needed
   - path: /public/teams/{public_id}/games/preview
     reason: Near-duplicate endpoint; uses event_id instead of id, lacks has_videos_available; prefer /games
   - path: /public/teams/{public_id}
@@ -65,7 +65,7 @@ Bare JSON array of completed game records. 32 records in a single response (no p
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `id` | UUID | **This IS the `game_stream_id`** used by the boxscore endpoint. Pass directly to `GET /game-stream-processing/{game_stream_id}/boxscore` -- no bridge call needed (confirmed 2026-03-12). Note: this UUID is distinct from `event_id` (used by `/games/preview`). |
+| `id` | UUID | **This IS the `event_id`** used by the boxscore endpoint. Pass directly to `GET /game-stream-processing/{event_id}/boxscore` -- no bridge call needed (confirmed 2026-03-12, terminology corrected 2026-03-19). Equivalent to `event_id` in the authenticated flow (game-summaries); distinct from `event_id` (used by `/games/preview` as a different field name for the same value). |
 | `opponent_team` | object | Opponent team info |
 | `opponent_team.name` | string | Opponent team name |
 | `opponent_team.avatar_url` | string or absent | Opponent avatar URL. Present on 21/32 records. Absent (not null, not empty) when no avatar. |
@@ -119,6 +119,6 @@ Bare JSON array of completed game records. 32 records in a single response (no p
 - No pagination observed for 32 games. Behavior for teams with very large game histories unknown.
 - Only `"completed"` games appear -- scheduled or canceled games are not included. For in-progress or upcoming games, use the authenticated `GET /teams/{team_id}/game-summaries`.
 - `has_live_stream` is `false` for all observed (historical) records.
-- The `id` field is the `game_stream_id` (confirmed 2026-03-12), NOT the same as `event_id` used in `/games/preview`. Do not confuse these two UUID fields.
+- The `id` field is the `event_id` parameter for the boxscore endpoint (confirmed 2026-03-12, terminology corrected 2026-03-19). This is the public-endpoint equivalent of `event_id` in the authenticated flow (game-summaries). `/games/preview` uses `event_id` as the field name for the same value; `/games` uses `id`.
 
 **Discovered:** 2026-03-04. **Confirmed no-auth:** 2026-03-04.
