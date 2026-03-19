@@ -112,8 +112,14 @@ class ScoutingLoader:
         # Build TeamRef for GameLoader by looking up gc_uuid and public_id.
         team_ref = self._build_team_ref(team_id)
         game_loader = GameLoader(db=self._db, season_id=season_id, owned_team_ref=team_ref)
-        games_index = self._build_games_index(scouting_dir / "games.json")
-        bs_result = self._load_boxscores(game_loader, games_index, boxscores_dir)
+        games_path = scouting_dir / "games.json"
+        games_index = self._build_games_index(games_path)
+        opponent_name_index = self._build_opponent_name_index(games_path)
+        bs_result = self._load_boxscores(
+            game_loader, games_index, boxscores_dir,
+            opponent_name_index=opponent_name_index,
+            own_gc_uuid=team_ref.gc_uuid,
+        )
         total.loaded += bs_result.loaded
         total.skipped += bs_result.skipped
         total.errors += bs_result.errors
@@ -168,6 +174,8 @@ class ScoutingLoader:
         game_loader: GameLoader,
         games_index: dict,
         boxscores_dir: Path,
+        opponent_name_index: dict[str, str] | None = None,
+        own_gc_uuid: str | None = None,
     ) -> LoadResult:
         """Load all boxscore files in ``boxscores_dir`` via ``game_loader``.
 
@@ -175,10 +183,16 @@ class ScoutingLoader:
             game_loader: Configured ``GameLoader`` for the scouted team.
             games_index: Mapping of ``game_stream_id`` → ``GameSummaryEntry``.
             boxscores_dir: Directory containing ``{game_stream_id}.json`` files.
+            opponent_name_index: Optional mapping of ``game_stream_id`` →
+                opponent team name.  When provided, real names are used for
+                opponent team rows instead of UUID placeholders.
+            own_gc_uuid: The scouted team's own GameChanger UUID, used by the
+                safety-net to avoid labeling the own-team UUID as the opponent.
 
         Returns:
             Aggregated ``LoadResult`` across all boxscore files.
         """
+        name_index = opponent_name_index or {}
         total = LoadResult()
         for bs_path in sorted(boxscores_dir.glob("*.json")):
             game_stream_id = bs_path.stem
@@ -190,16 +204,52 @@ class ScoutingLoader:
                 )
                 total.skipped += 1
                 continue
-            result = game_loader.load_file(bs_path, summary)
+            opponent_name = name_index.get(game_stream_id)
+            result = game_loader.load_file(bs_path, summary, opponent_name=opponent_name)
             total.loaded += result.loaded
             total.skipped += result.skipped
             total.errors += result.errors
-            self._record_uuid_from_boxscore_path(bs_path)
+            self._record_uuid_from_boxscore_path(
+                bs_path, opponent_name=opponent_name, own_gc_uuid=own_gc_uuid
+            )
         return total
 
     # ------------------------------------------------------------------
     # Games index builder
     # ------------------------------------------------------------------
+
+    def _build_opponent_name_index(self, games_path: Path) -> dict[str, str]:
+        """Build a ``game_stream_id → opponent_team.name`` mapping from games.json.
+
+        Used to supply real opponent team names to ``GameLoader`` so team rows
+        are created with human-readable names instead of UUID placeholders.
+
+        Args:
+            games_path: Path to ``games.json`` (public games response).
+
+        Returns:
+            Dict mapping ``game_stream_id`` (= the ``id`` field in games.json)
+            to the opponent team display name.  Returns empty dict on error.
+        """
+        if not games_path.exists():
+            return {}
+        try:
+            with games_path.open(encoding="utf-8") as fh:
+                raw = json.load(fh)
+        except (json.JSONDecodeError, OSError) as exc:
+            logger.warning("Failed to read %s for opponent name index: %s", games_path, exc)
+            return {}
+        if not isinstance(raw, list):
+            return {}
+
+        index: dict[str, str] = {}
+        for game in raw:
+            game_id = game.get("id")
+            opponent_team = game.get("opponent_team") or {}
+            name = opponent_team.get("name")
+            if game_id and name:
+                index[str(game_id)] = name
+        return index
 
     def _build_games_index(self, games_path: Path) -> dict[str, GameSummaryEntry]:
         """Build a ``game_stream_id -> GameSummaryEntry`` mapping from games.json."""
@@ -463,14 +513,28 @@ class ScoutingLoader:
     # UUID opportunism
     # ------------------------------------------------------------------
 
-    def _record_uuid_from_boxscore_path(self, bs_path: Path) -> None:
+    def _record_uuid_from_boxscore_path(
+        self, bs_path: Path, opponent_name: str | None = None, own_gc_uuid: str | None = None
+    ) -> None:
         """Ensure a ``teams`` stub row exists for any UUID key found in a boxscore.
 
         The GameLoader already creates stubs during load_file(), so this is a
         safety net for UUID keys not covered by normal team detection.
 
+        When ``opponent_name`` is provided, the row is created with the real name
+        instead of the UUID placeholder.  Existing rows with ``name == gc_uuid``
+        (UUID-stubs) are updated to the real name.
+
+        The ``own_gc_uuid`` parameter prevents mislabeling the scouted team's own
+        UUID as the opponent.  When a boxscore has two UUID keys and we cannot
+        identify which is the own team (``own_gc_uuid`` is ``None``), neither UUID
+        gets ``opponent_name`` — both fall back to UUID-as-name to avoid false labels.
+
         Args:
             bs_path: Path to a boxscore JSON file.
+            opponent_name: Human-readable opponent team name.
+            own_gc_uuid: The scouted team's own GC UUID.  When provided, the
+                matching key is not labeled as the opponent.
         """
         try:
             with bs_path.open(encoding="utf-8") as fh:
@@ -482,14 +546,35 @@ class ScoutingLoader:
         if not isinstance(boxscore, dict):
             return
 
-        for key in boxscore:
-            if _UUID_RE.match(key):
-                self._db.execute(
-                    "INSERT OR IGNORE INTO teams (name, membership_type, gc_uuid, is_active) "
-                    "VALUES (?, 'tracked', ?, 0)",
-                    (key, key),
-                )
-                logger.debug("UUID opportunism (loader): ensured stub row for gc_uuid=%s", key)
+        uuid_keys = [k for k in boxscore if _UUID_RE.match(k)]
+        multi_uuid = len(uuid_keys) >= 2
+
+        for key in uuid_keys:
+            is_own_team = bool(own_gc_uuid and key.lower() == own_gc_uuid.lower())
+            # When own_gc_uuid is unknown and the boxscore has multiple UUID keys
+            # we cannot distinguish own vs opponent — fall back to UUID-as-name for all.
+            ambiguous = own_gc_uuid is None and multi_uuid
+            name = key if (is_own_team or ambiguous) else (opponent_name or key)
+
+            cursor = self._db.execute(
+                "INSERT OR IGNORE INTO teams (name, membership_type, gc_uuid, is_active) "
+                "VALUES (?, 'tracked', ?, 0)",
+                (name, key),
+            )
+            if not cursor.rowcount and opponent_name and not is_own_team and not ambiguous:
+                # Row existed; self-heal UUID-stub if name is still the UUID placeholder.
+                row = self._db.execute(
+                    "SELECT id, name FROM teams WHERE gc_uuid = ?", (key,)
+                ).fetchone()
+                if row and row[1] == key:
+                    self._db.execute(
+                        "UPDATE teams SET name = ? WHERE id = ?", (opponent_name, row[0])
+                    )
+                    logger.debug(
+                        "UUID opportunism: updated UUID-stub name for gc_uuid=%s -> %r",
+                        key, opponent_name,
+                    )
+            logger.debug("UUID opportunism (loader): ensured stub row for gc_uuid=%s", key)
 
     # ------------------------------------------------------------------
     # FK prerequisite helpers

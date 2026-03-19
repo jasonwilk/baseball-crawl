@@ -4,7 +4,7 @@
 [E-132: Fix Opponent Names Showing as UUIDs on Player Detail Page](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, existing team rows where `name == gc_uuid` will be updated with the correct opponent name by scanning on-disk data files. A `bb` CLI command will be available to run this backfill on demand.

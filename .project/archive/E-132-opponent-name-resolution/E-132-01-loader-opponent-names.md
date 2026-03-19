@@ -4,7 +4,7 @@
 [E-132: Fix Opponent Names Showing as UUIDs on Player Detail Page](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, both the authenticated game loader and the scouting loader will create opponent team rows with human-readable names instead of UUIDs. The `GameLoader._ensure_team_row()` method will accept an optional opponent name parameter, and both loader paths will extract opponent names from their respective on-disk data files and pass them through.

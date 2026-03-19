@@ -230,6 +230,10 @@ class GameLoader:
         dual-key index (by ``event_id`` and ``game_stream_id``), then loads each
         ``games/{event_id}.json`` file found in ``team_dir``.
 
+        Also reads ``opponents.json`` (and ``schedule.json`` as a supplement) to
+        build a UUID→name lookup so opponent team rows are created with real names
+        instead of UUID placeholders.
+
         Args:
             team_dir: Path to ``data/raw/{season}/teams/{team_id}/``.
 
@@ -246,6 +250,7 @@ class GameLoader:
             return LoadResult()
 
         self._ensure_season_row(self._season_id)
+        opponent_name_lookup = self._build_opponent_name_lookup(team_dir)
 
         total = LoadResult()
         for boxscore_path in sorted(games_dir.glob("*.json")):
@@ -260,7 +265,8 @@ class GameLoader:
                 total.skipped += 1
                 continue
 
-            result = self._load_boxscore_file(boxscore_path, summary)
+            opponent_name = opponent_name_lookup.get(summary.opponent_id) if summary.opponent_id else None
+            result = self._load_boxscore_file(boxscore_path, summary, opponent_name=opponent_name)
             total.loaded += result.loaded
             total.skipped += result.skipped
             total.errors += result.errors
@@ -276,7 +282,10 @@ class GameLoader:
         return total
 
     def load_file(
-        self, boxscore_path: Path, summary: GameSummaryEntry
+        self,
+        boxscore_path: Path,
+        summary: GameSummaryEntry,
+        opponent_name: str | None = None,
     ) -> LoadResult:
         """Load a single boxscore file.
 
@@ -286,17 +295,83 @@ class GameLoader:
         Args:
             boxscore_path: Path to a ``{game_stream_id}.json`` boxscore file.
             summary: Resolved game-summaries entry for this game.
+            opponent_name: Human-readable opponent team name.  When provided,
+                used as the ``teams.name`` value instead of the UUID placeholder.
+                Existing rows with ``name == gc_uuid`` (UUID-stubs) are updated.
 
         Returns:
             ``LoadResult`` for this single game.
         """
-        result = self._load_boxscore_file(boxscore_path, summary)
+        result = self._load_boxscore_file(boxscore_path, summary, opponent_name=opponent_name)
         self._db.commit()
         return result
 
     # ------------------------------------------------------------------
     # Index building
     # ------------------------------------------------------------------
+
+    def _build_opponent_name_lookup(self, team_dir: Path) -> dict[str, str]:
+        """Build a ``progenitor_team_id → name`` mapping from on-disk data.
+
+        Reads ``opponents.json`` first (keyed by ``progenitor_team_id`` -- NOT
+        ``root_team_id``; see API spec caveats).  Supplements with ``schedule.json``
+        for any opponent whose ``progenitor_team_id`` is null in opponents.json.
+
+        Args:
+            team_dir: Path to the team data directory.
+
+        Returns:
+            Dict mapping canonical GC team UUID to human-readable team name.
+            Returns an empty dict if both source files are missing or unreadable.
+        """
+        lookup: dict[str, str] = {}
+
+        # Primary source: opponents.json
+        opponents_path = team_dir / "opponents.json"
+        if opponents_path.exists():
+            try:
+                with opponents_path.open(encoding="utf-8") as fh:
+                    opponents = json.load(fh)
+                if isinstance(opponents, list):
+                    for opp in opponents:
+                        pid = opp.get("progenitor_team_id")  # canonical UUID
+                        name = opp.get("name")
+                        # Skip hidden records (duplicates / bad entries) and null progenitor_team_id.
+                        if pid and name and not opp.get("is_hidden"):
+                            lookup[pid] = name
+                    logger.info(
+                        "Built opponent name lookup from %s: %d entries",
+                        opponents_path,
+                        len(lookup),
+                    )
+            except (json.JSONDecodeError, OSError) as exc:
+                logger.warning("Failed to read %s: %s", opponents_path, exc)
+
+        # Supplementary source: schedule.json (covers opponents with null progenitor_team_id)
+        schedule_path = team_dir / "schedule.json"
+        if schedule_path.exists():
+            try:
+                with schedule_path.open(encoding="utf-8") as fh:
+                    schedule = json.load(fh)
+                if isinstance(schedule, list):
+                    added = 0
+                    for event in schedule:
+                        pregame = event.get("pregame_data") or {}
+                        opp_id = pregame.get("opponent_id")
+                        opp_name = pregame.get("opponent_name")
+                        if opp_id and opp_name and opp_id not in lookup:
+                            lookup[opp_id] = opp_name
+                            added += 1
+                    if added:
+                        logger.info(
+                            "Supplemented opponent name lookup from %s: %d additional entries",
+                            schedule_path,
+                            added,
+                        )
+            except (json.JSONDecodeError, OSError) as exc:
+                logger.warning("Failed to read %s: %s", schedule_path, exc)
+
+        return lookup
 
     def _build_summaries_index(
         self, team_dir: Path
@@ -385,9 +460,19 @@ class GameLoader:
     # ------------------------------------------------------------------
 
     def _load_boxscore_file(
-        self, path: Path, summary: GameSummaryEntry
+        self,
+        path: Path,
+        summary: GameSummaryEntry,
+        opponent_name: str | None = None,
     ) -> LoadResult:
-        """Parse and load a single boxscore JSON file."""
+        """Parse and load a single boxscore JSON file.
+
+        Args:
+            path: Path to the boxscore JSON file.
+            summary: Resolved game-summaries entry for this game.
+            opponent_name: Human-readable opponent team name.  When provided,
+                used instead of the UUID placeholder for ``teams.name``.
+        """
         raw = self._read_json(path)
         if raw is None:
             return LoadResult(errors=1)
@@ -408,7 +493,7 @@ class GameLoader:
         opp_data = raw.get(opp_key) if opp_key else None
 
         # Resolve INTEGER PKs for home/away team rows.
-        own_team_id, opp_team_id_result = self._resolve_team_ids(summary, opp_key)
+        own_team_id, opp_team_id_result = self._resolve_team_ids(summary, opp_key, opponent_name=opponent_name)
         if opp_team_id_result is None:
             opp_data = None
             opp_team_id: int = own_team_id  # placeholder, not used when opp_data is None
@@ -433,12 +518,15 @@ class GameLoader:
         self,
         summary: GameSummaryEntry,
         opp_key: str | None,
+        opponent_name: str | None = None,
     ) -> tuple[int, int | None]:
         """Resolve INTEGER PKs for own and opponent teams.
 
         Args:
             summary: Game summary entry containing opponent_id.
             opp_key: Opponent key from the boxscore response (fallback UUID).
+            opponent_name: Human-readable opponent team name to use when
+                creating or updating the teams row.
 
         Returns:
             ``(own_team_id, opp_team_id)`` where ``opp_team_id`` is ``None``
@@ -452,7 +540,7 @@ class GameLoader:
                 summary.event_id,
             )
             return own_team_id, None
-        return own_team_id, self._ensure_team_row(opp_gc_uuid)
+        return own_team_id, self._ensure_team_row(opp_gc_uuid, opponent_name=opponent_name)
 
     def _resolve_home_away(
         self,
@@ -974,30 +1062,49 @@ class GameLoader:
                 (player_id,),
             )
 
-    def _ensure_team_row(self, gc_uuid: str) -> int:
+    def _ensure_team_row(self, gc_uuid: str, opponent_name: str | None = None) -> int:
         """Ensure a ``teams`` row exists for ``gc_uuid`` and return its INTEGER PK.
 
         Uses INSERT OR IGNORE with membership_type='tracked'.  If the row
         already exists, falls back to SELECT.
 
+        When ``opponent_name`` is provided:
+        - New rows are created with ``name = opponent_name`` instead of the UUID.
+        - Existing rows whose ``name == gc_uuid`` (UUID-stub from a prior load)
+          are updated to the real name.  Existing rows with a non-UUID name are
+          NOT overwritten.
+
         Args:
             gc_uuid: GameChanger team UUID (or placeholder string).
+            opponent_name: Human-readable team name.  When ``None``, falls back
+                to ``gc_uuid`` as the name (legacy behaviour).
 
         Returns:
             The ``teams.id`` INTEGER PK for the row.
         """
+        name = opponent_name or gc_uuid
         cursor = self._db.execute(
             "INSERT OR IGNORE INTO teams (name, membership_type, gc_uuid, is_active) "
             "VALUES (?, 'tracked', ?, 0)",
-            (gc_uuid, gc_uuid),
+            (name, gc_uuid),
         )
         if cursor.rowcount:
             return cursor.lastrowid
         row = self._db.execute(
-            "SELECT id FROM teams WHERE gc_uuid = ?", (gc_uuid,)
+            "SELECT id, name FROM teams WHERE gc_uuid = ?", (gc_uuid,)
         ).fetchone()
         if row:
-            return row[0]
+            existing_id, existing_name = row
+            # Self-heal UUID-stub rows created by a prior load without a name.
+            if opponent_name and existing_name == gc_uuid:
+                self._db.execute(
+                    "UPDATE teams SET name = ? WHERE id = ?", (opponent_name, existing_id)
+                )
+                logger.debug(
+                    "Updated UUID-stub name for team %d: %r -> %r",
+                    existing_id, existing_name, opponent_name,
+                )
+            return existing_id
         raise RuntimeError(f"Failed to find or create teams row for gc_uuid={gc_uuid!r}")
 
     def _ensure_season_row(self, season_id: str) -> None:

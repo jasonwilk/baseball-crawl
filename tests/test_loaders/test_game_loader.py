@@ -1320,3 +1320,315 @@ def test_dual_key_index_event_id_and_game_stream_id_both_resolve(db: sqlite3.Con
     # Only one game row should exist (idempotent upsert).
     count = db.execute("SELECT COUNT(*) FROM games WHERE game_id = ?", (_EVENT_ID,)).fetchone()[0]
     assert count == 1
+
+# ---------------------------------------------------------------------------
+# E-132-01: Opponent name resolution (AC-1, AC-3, AC-4, AC-6)
+# ---------------------------------------------------------------------------
+
+_OPP_NAME = "Blackhawks 14U"
+_OPP_PROGENITOR_UUID = _OPP_TEAM_ID  # progenitor_team_id matches opponent_id in game_stream
+
+
+def _write_opponents_json(team_dir: Path, opponents: list[dict] | None = None) -> None:
+    """Write an opponents.json file in team_dir."""
+    if opponents is None:
+        opponents = [
+            {
+                "root_team_id": "root-uuid-different-from-progenitor",
+                "owning_team_id": _OWN_TEAM_ID,
+                "name": _OPP_NAME,
+                "is_hidden": False,
+                "progenitor_team_id": _OPP_PROGENITOR_UUID,
+            }
+        ]
+    (team_dir / "opponents.json").write_text(json.dumps(opponents), encoding="utf-8")
+
+
+def _write_schedule_json(team_dir: Path, events: list[dict] | None = None) -> None:
+    """Write a schedule.json file in team_dir."""
+    if events is None:
+        events = [
+            {
+                "id": _EVENT_ID,
+                "pregame_data": {
+                    "opponent_id": _OPP_PROGENITOR_UUID,
+                    "opponent_name": _OPP_NAME,
+                },
+            }
+        ]
+    (team_dir / "schedule.json").write_text(json.dumps(events), encoding="utf-8")
+
+
+def test_ensure_team_row_with_name_creates_named_row(db: sqlite3.Connection) -> None:
+    """_ensure_team_row() uses opponent_name as teams.name when provided."""
+    loader = _make_loader(db)
+    gc_uuid = "aaaabbbb-cccc-dddd-eeee-111122223333"
+    pk = loader._ensure_team_row(gc_uuid, opponent_name="Kearney Mavericks 14U")
+
+    row = db.execute("SELECT name FROM teams WHERE id = ?", (pk,)).fetchone()
+    assert row is not None
+    assert row[0] == "Kearney Mavericks 14U"
+
+
+def test_ensure_team_row_without_name_falls_back_to_uuid(db: sqlite3.Connection) -> None:
+    """_ensure_team_row() without opponent_name uses UUID as teams.name (legacy)."""
+    loader = _make_loader(db)
+    gc_uuid = "bbbbcccc-dddd-eeee-ffff-222233334444"
+    pk = loader._ensure_team_row(gc_uuid)
+
+    row = db.execute("SELECT name FROM teams WHERE id = ?", (pk,)).fetchone()
+    assert row is not None
+    assert row[0] == gc_uuid
+
+
+def test_ensure_team_row_updates_uuid_stub_with_name(db: sqlite3.Connection) -> None:
+    """AC-4: When existing row has name == gc_uuid, it is updated to the real name."""
+    loader = _make_loader(db)
+    gc_uuid = "ccccdddd-eeee-ffff-aaaa-333344445555"
+
+    # Create UUID-stub row (name == gc_uuid).
+    stub_pk = db.execute(
+        "INSERT INTO teams (name, membership_type, gc_uuid, is_active) VALUES (?, 'tracked', ?, 0)",
+        (gc_uuid, gc_uuid),
+    ).lastrowid
+    db.commit()
+
+    returned_pk = loader._ensure_team_row(gc_uuid, opponent_name="Real Team Name")
+
+    assert returned_pk == stub_pk
+    row = db.execute("SELECT name FROM teams WHERE id = ?", (stub_pk,)).fetchone()
+    assert row[0] == "Real Team Name"
+
+
+def test_ensure_team_row_preserves_existing_non_uuid_name(db: sqlite3.Connection) -> None:
+    """AC-4: When existing row has a non-UUID name, it is NOT overwritten."""
+    loader = _make_loader(db)
+    gc_uuid = "ddddeee-ffff-aaaa-bbbb-444455556666"
+
+    # Pre-existing row with a real name (set by opponent_resolver or admin).
+    existing_pk = db.execute(
+        "INSERT INTO teams (name, membership_type, gc_uuid, is_active) "
+        "VALUES (?, 'tracked', ?, 0)",
+        ("Existing Real Name", gc_uuid),
+    ).lastrowid
+    db.commit()
+
+    returned_pk = loader._ensure_team_row(gc_uuid, opponent_name="Different Name")
+
+    assert returned_pk == existing_pk
+    row = db.execute("SELECT name FROM teams WHERE id = ?", (existing_pk,)).fetchone()
+    assert row[0] == "Existing Real Name", "Non-UUID name must NOT be overwritten"
+
+
+def test_build_opponent_name_lookup_reads_progenitor_team_id(
+    db: sqlite3.Connection, tmp_path: Path
+) -> None:
+    """_build_opponent_name_lookup() keys by progenitor_team_id (not root_team_id)."""
+    loader = _make_loader(db)
+    team_dir = tmp_path / "team"
+    team_dir.mkdir()
+    opponents = [
+        {
+            "root_team_id": "root-uuid-000-should-not-be-used",
+            "name": "Nighthawks Navy",
+            "is_hidden": False,
+            "progenitor_team_id": "progenitor-uuid-aaa",
+        },
+        # Hidden entry: should be excluded.
+        {
+            "root_team_id": "root-uuid-hidden",
+            "name": "Hidden Team",
+            "is_hidden": True,
+            "progenitor_team_id": "progenitor-uuid-hidden",
+        },
+        # Null progenitor: should be excluded from primary lookup.
+        {
+            "root_team_id": "root-uuid-null",
+            "name": "No Progenitor Team",
+            "is_hidden": False,
+            "progenitor_team_id": None,
+        },
+    ]
+    (team_dir / "opponents.json").write_text(json.dumps(opponents), encoding="utf-8")
+
+    lookup = loader._build_opponent_name_lookup(team_dir)
+
+    assert lookup.get("progenitor-uuid-aaa") == "Nighthawks Navy"
+    assert "root-uuid-000-should-not-be-used" not in lookup
+    assert "progenitor-uuid-hidden" not in lookup
+    assert None not in lookup  # null progenitor_team_id must not be stored as a key
+
+
+def test_build_opponent_name_lookup_supplements_from_schedule(
+    db: sqlite3.Connection, tmp_path: Path
+) -> None:
+    """_build_opponent_name_lookup() uses schedule.json to fill null-progenitor gaps."""
+    loader = _make_loader(db)
+    team_dir = tmp_path / "team"
+    team_dir.mkdir()
+    # opponents.json with one null progenitor (no name from that source).
+    opponents = [
+        {
+            "root_team_id": "root-uuid-001",
+            "name": "Primary Team",
+            "is_hidden": False,
+            "progenitor_team_id": "progenitor-001",
+        },
+    ]
+    (team_dir / "opponents.json").write_text(json.dumps(opponents), encoding="utf-8")
+    # schedule.json with an opponent not covered by opponents.json (different UUID).
+    schedule = [
+        {
+            "id": "sched-event-001",
+            "pregame_data": {
+                "opponent_id": "progenitor-002",
+                "opponent_name": "Schedule Supplement Team",
+            },
+        }
+    ]
+    (team_dir / "schedule.json").write_text(json.dumps(schedule), encoding="utf-8")
+
+    lookup = loader._build_opponent_name_lookup(team_dir)
+
+    assert lookup.get("progenitor-001") == "Primary Team"
+    assert lookup.get("progenitor-002") == "Schedule Supplement Team"
+
+
+def test_build_opponent_name_lookup_schedule_does_not_override_opponents(
+    db: sqlite3.Connection, tmp_path: Path
+) -> None:
+    """schedule.json supplement does not overwrite entries from opponents.json."""
+    loader = _make_loader(db)
+    team_dir = tmp_path / "team"
+    team_dir.mkdir()
+    shared_uuid = "shared-uuid-001"
+    (team_dir / "opponents.json").write_text(
+        json.dumps([{"name": "Opponents Name", "is_hidden": False, "progenitor_team_id": shared_uuid}]),
+        encoding="utf-8",
+    )
+    (team_dir / "schedule.json").write_text(
+        json.dumps([{"id": "ev", "pregame_data": {"opponent_id": shared_uuid, "opponent_name": "Schedule Name"}}]),
+        encoding="utf-8",
+    )
+
+    lookup = loader._build_opponent_name_lookup(team_dir)
+
+    assert lookup[shared_uuid] == "Opponents Name"  # opponents.json wins
+
+
+def test_build_opponent_name_lookup_missing_files_returns_empty(
+    db: sqlite3.Connection, tmp_path: Path
+) -> None:
+    """AC-3: _build_opponent_name_lookup() returns empty dict when files are absent."""
+    loader = _make_loader(db)
+    team_dir = tmp_path / "team"
+    team_dir.mkdir()
+
+    lookup = loader._build_opponent_name_lookup(team_dir)
+
+    assert lookup == {}
+
+
+def test_load_all_creates_opponent_row_with_name_from_opponents_json(
+    db: sqlite3.Connection, tmp_path: Path
+) -> None:
+    """AC-1: load_all() creates opponent team row with name from opponents.json."""
+    boxscore = _make_boxscore()
+    team_dir = _write_team_dir(tmp_path, boxscores={_GAME_STREAM_ID: boxscore})
+    _write_opponents_json(team_dir)
+    loader = _make_loader(db)
+
+    loader.load_all(team_dir)
+
+    row = db.execute(
+        "SELECT name FROM teams WHERE gc_uuid = ?", (_OPP_TEAM_ID,)
+    ).fetchone()
+    assert row is not None
+    assert row[0] == _OPP_NAME, f"Expected '{_OPP_NAME}', got {row[0]!r}"
+
+
+def test_load_all_creates_opponent_row_with_name_from_schedule_fallback(
+    db: sqlite3.Connection, tmp_path: Path
+) -> None:
+    """AC-1: load_all() uses schedule.json when opponents.json has null progenitor_team_id."""
+    boxscore = _make_boxscore()
+    team_dir = _write_team_dir(tmp_path, boxscores={_GAME_STREAM_ID: boxscore})
+    # opponents.json with null progenitor for this opponent.
+    _write_opponents_json(team_dir, opponents=[
+        {
+            "root_team_id": "root-null-progenitor",
+            "name": "Null Progenitor Team",
+            "is_hidden": False,
+            "progenitor_team_id": None,
+        }
+    ])
+    _write_schedule_json(team_dir)
+    loader = _make_loader(db)
+
+    loader.load_all(team_dir)
+
+    row = db.execute(
+        "SELECT name FROM teams WHERE gc_uuid = ?", (_OPP_TEAM_ID,)
+    ).fetchone()
+    assert row is not None
+    assert row[0] == _OPP_NAME
+
+
+def test_load_all_falls_back_to_uuid_when_opponents_json_absent(
+    db: sqlite3.Connection, tmp_path: Path
+) -> None:
+    """AC-3: load_all() falls back to UUID as name when opponents.json is missing."""
+    boxscore = _make_boxscore()
+    team_dir = _write_team_dir(tmp_path, boxscores={_GAME_STREAM_ID: boxscore})
+    loader = _make_loader(db)
+
+    result = loader.load_all(team_dir)
+
+    assert result.errors == 0
+    row = db.execute(
+        "SELECT name FROM teams WHERE gc_uuid = ?", (_OPP_TEAM_ID,)
+    ).fetchone()
+    assert row is not None
+    assert row[0] == _OPP_TEAM_ID  # UUID used as name (fallback)
+
+
+def test_load_all_self_heals_uuid_stub_on_reload(
+    db: sqlite3.Connection, tmp_path: Path
+) -> None:
+    """AC-4: Re-running load_all() with opponents.json updates existing UUID-stub names."""
+    # First load: no opponents.json → UUID-stub created.
+    boxscore = _make_boxscore()
+    team_dir = _write_team_dir(tmp_path, boxscores={_GAME_STREAM_ID: boxscore})
+    loader = _make_loader(db)
+    loader.load_all(team_dir)
+
+    stub_row = db.execute(
+        "SELECT id, name FROM teams WHERE gc_uuid = ?", (_OPP_TEAM_ID,)
+    ).fetchone()
+    assert stub_row is not None
+    assert stub_row[1] == _OPP_TEAM_ID, "First load without opponents.json should create UUID-stub"
+
+    # Second load: with opponents.json → stub should be healed.
+    _write_opponents_json(team_dir)
+    loader.load_all(team_dir)
+
+    updated = db.execute(
+        "SELECT name FROM teams WHERE id = ?", (stub_row[0],)
+    ).fetchone()
+    assert updated[0] == _OPP_NAME, f"Expected stub name to be updated to '{_OPP_NAME}', got {updated[0]!r}"
+
+
+def test_load_file_uses_opponent_name(db: sqlite3.Connection, tmp_path: Path) -> None:
+    """load_file() accepts opponent_name and uses it for the team row."""
+    loader = _make_loader(db)
+    boxscore = _make_boxscore()
+    bs_path = _write_boxscore(tmp_path, boxscore)
+    summary = _make_summary()
+
+    loader.load_file(bs_path, summary, opponent_name="Provided Opponent Name")
+
+    row = db.execute(
+        "SELECT name FROM teams WHERE gc_uuid = ?", (_OPP_TEAM_ID,)
+    ).fetchone()
+    assert row is not None
+    assert row[0] == "Provided Opponent Name"

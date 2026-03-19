@@ -1,7 +1,7 @@
 # E-132: Fix Opponent Names Showing as UUIDs on Player Detail Page
 
 ## Status
-`READY`
+`COMPLETED`
 
 ## Overview
 The player detail page (`/dashboard/players/{player_id}`) shows game UUIDs instead of opponent team names in the "Recent Games" section. The root cause is `GameLoader._ensure_team_row()`, which creates opponent team rows with `name = gc_uuid` because the boxscore response contains no team name metadata. The fix uses opponent names already available on disk: `opponents.json` (authenticated path) and `games.json` (scouting path).
@@ -39,8 +39,8 @@ No expert consultation required -- this is a loader bug fix using data sources a
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-132-01 | Use opponent names from on-disk data in both loader paths | TODO | None | - |
-| E-132-02 | Backfill existing UUID-stub team names from on-disk data | TODO | E-132-01 | - |
+| E-132-01 | Use opponent names from on-disk data in both loader paths | DONE | None | - |
+| E-132-02 | Backfill existing UUID-stub team names from on-disk data | DONE | E-132-01 | - |
 
 ## Dispatch Team
 - software-engineer
@@ -85,3 +85,6 @@ None.
 - 2026-03-19: Codex spec review remediation -- 5 findings fixed (method name, CLI contract, success criteria/fallback reconciliation, guard alignment, UUID caveat propagation). Set to READY.
 - 2026-03-19: Refinement pass -- AC-4 revised for self-healing behavior (update UUID-stub names on existing rows during normal loading, not just on INSERT). Scouting path linkage clarified (game_stream_id connects games.json name to boxscore UUID). E-132-02 context updated to reflect catch-stragglers role.
 - 2026-03-19: Holistic refinement -- added scouting_loader `_record_uuid_from_boxscore_path()` (line 488) as third code path in scope (AC-5 on E-132-01). Confirmed roster.py and season_stats_loader.py NOT in scope (member teams only). No UXD or api-scout consultation needed.
+- 2026-03-19: Completed. Both stories implemented and reviewed. E-132-01 fixed opponent name resolution in both authenticated and scouting loader paths with self-healing behavior. E-132-02 added `bb data backfill-team-names` CLI command for retroactive UUID-stub name resolution. One SHOULD FIX finding per story (vacuous test assertion, procedural test scope gap) — both resolved/dismissed with no functional impact.
+- 2026-03-19: Documentation assessment: No documentation impact — new `bb data backfill-team-names` is self-documenting via CLI help; no admin/coaching doc currently covers individual data subcommands.
+- 2026-03-19: Context-layer assessment: (1) New convention/pattern: No — reused existing `name == gc_uuid` guard pattern from opponent_resolver. (2) Architectural decision: No — loader bugfix, no structural changes. (3) Footgun/boundary: No — UUID semantics caveat already documented in API docs. (4) Agent behavior changes: No. (5) Domain knowledge: No — opponent name resolution pattern already known. (6) New CLI command: No codification needed — `bb data backfill-team-names` added but CLAUDE.md delegates to `bb --help` for command enumeration.

@@ -31,7 +31,7 @@
 | E-131 | Jersey Number as Distinct Column | READY | 3 stories, all parallel. Season stats column extraction (01), game box score query+column (02), opponent scouting query+column (03). SE only. No schema/ETL changes -- pure query-layer + UI. |
 | E-133 | Year Selector Dropdown | READY | 2 stories, sequential. Year dropdown UI + route integration (01), remove legacy season selector (02). SE only. No migration -- year derived from existing `seasons.year` join. |
 | E-134 | Strike % and # Pitches Columns | READY | 1 story. Add pitches + strike_pct to all 5 pitching display surfaces. Pure query+template, no schema changes. SE only. |
-| E-132 | Fix Opponent Names as UUIDs | READY | 2 stories (01 blocks 02). Loader fix: use opponents.json (auth path) and games.json (scouting path) for opponent names at insert time. Backfill existing UUID-stub rows via `bb data backfill-team-names`. SE only. |
+| E-132 | Fix Opponent Names as UUIDs | COMPLETED | 2 stories completed 2026-03-19. Loader fix: use opponents.json (auth path) and games.json (scouting path) for opponent names at insert time. Backfill existing UUID-stub rows via `bb data backfill-team-names`. SE only. |
 | E-135 | Atomic Epic Commits | ABANDONED | Abandoned -- user wanted proper epic. Replaced by E-136. |
 | E-136 | Atomic Epic Commits | COMPLETED | 5 stories completed 2026-03-19. Implement skill (01), dispatch pattern (02), worktree isolation (03), workflow discipline (04), code-reviewer (05) updated for atomic commit workflow. CA only. Replaces E-135. |
 
