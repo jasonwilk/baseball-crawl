@@ -80,13 +80,18 @@ def _sort_batting(players: list[dict], sort_key: str, direction: str) -> list[di
     """
     reverse = direction == "desc"
 
+    # Name sort: split zero-AB rows to bottom, sort the rest alphabetically.
+    if sort_key == "name":
+        has_ab = [r for r in players if (r.get("ab") or 0) > 0]
+        zero_ab = [r for r in players if (r.get("ab") or 0) == 0]
+        has_ab_sorted = sorted(has_ab, key=lambda r: r.get("name") or "", reverse=reverse)
+        zero_ab_sorted = sorted(zero_ab, key=lambda r: r.get("name") or "")
+        return has_ab_sorted + zero_ab_sorted
+
     def _key(row: dict) -> tuple:
         ab = row.get("ab") or 0
         ip_zero = ab == 0  # sentinel for zero-denominator
 
-        if sort_key == "name":
-            val: float | str = row.get("name") or ""
-            return (1 if ip_zero else 0, val if not reverse else "")
         if sort_key == "avg":
             val = (row.get("h") or 0) / ab if ab else 0.0
         elif sort_key == "obp":
@@ -143,13 +148,18 @@ def _sort_pitching(pitchers: list[dict], sort_key: str, direction: str) -> list[
     """
     reverse = direction == "desc"
 
+    # Name sort: split zero-ip_outs rows to bottom, sort the rest alphabetically.
+    if sort_key == "name":
+        has_ip = [r for r in pitchers if (r.get("ip_outs") or 0) > 0]
+        zero_ip = [r for r in pitchers if (r.get("ip_outs") or 0) == 0]
+        has_ip_sorted = sorted(has_ip, key=lambda r: r.get("name") or "", reverse=reverse)
+        zero_ip_sorted = sorted(zero_ip, key=lambda r: r.get("name") or "")
+        return has_ip_sorted + zero_ip_sorted
+
     def _key(row: dict) -> tuple:
         ip_outs = row.get("ip_outs") or 0
         zero_ip = ip_outs == 0
 
-        if sort_key == "name":
-            val: float | str = row.get("name") or ""
-            return (1 if zero_ip else 0, val if not reverse else "")
         if sort_key == "era":
             val = (row.get("er") or 0) * 27 / ip_outs if ip_outs else float("inf")
         elif sort_key == "k9":
@@ -262,8 +272,8 @@ async def team_stats(request: Request) -> Response:
 
     if raw_sort in _BATTING_SORT_KEYS:
         players = _sort_batting(players, current_sort, current_dir)
-    # Default sort (avg desc) already applied by the SQL query; no re-sort needed unless
-    # an explicit sort param was provided.
+    # When raw_sort is unrecognized, current_sort falls back to "avg" (shown as the active
+    # column in the template), and the SQL-level AVG desc order is preserved -- no re-sort.
 
     team_name = next(
         (t["name"] for t in team_infos if t["id"] == active_team_id),

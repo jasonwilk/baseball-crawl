@@ -835,7 +835,7 @@ class TestBattingSortParams:
         assert names[-1] == "Carol Gamma"
 
     def test_unrecognized_sort_falls_back_to_default(self, tmp_path: Path) -> None:
-        """AC-8(c): unrecognized sort param falls back to default AVG desc."""
+        """AC-8(c): unrecognized sort param falls back to default AVG desc order."""
         db_path, team_id = self._setup_db(tmp_path)
         with patch.dict(
             "os.environ",
@@ -845,8 +845,27 @@ class TestBattingSortParams:
             with client:
                 resp = client.get(f"/dashboard?season_id={_CURRENT_SEASON}&sort=notacolumn&dir=desc")
         assert resp.status_code == 200
-        # Should still render 200 without error
-        assert "Alice Alpha" in resp.text
+        names = _extract_player_order(resp.text)
+        # Falls back to AVG desc: Alice (.500) before Bob (.300); Carol (0 AB) last
+        assert names.index("Alice Alpha") < names.index("Bob Beta")
+        assert names[-1] == "Carol Gamma"
+
+    def test_name_sort_desc(self, tmp_path: Path) -> None:
+        """sort=name&dir=desc produces reverse-alphabetical order, zero-AB rows last."""
+        db_path, team_id = self._setup_db(tmp_path)
+        with patch.dict(
+            "os.environ",
+            {"DATABASE_PATH": str(db_path), "DEV_USER_EMAIL": "dev@example.com"},
+        ):
+            client = _make_dev_client(db_path, team_id)
+            with client:
+                resp = client.get(f"/dashboard?season_id={_CURRENT_SEASON}&sort=name&dir=desc")
+        assert resp.status_code == 200
+        names = _extract_player_order(resp.text)
+        # "Bob Beta" > "Alice Alpha" alphabetically, so desc puts Bob first
+        assert names.index("Bob Beta") < names.index("Alice Alpha")
+        # Carol Gamma (0 AB) is still last regardless of direction
+        assert names[-1] == "Carol Gamma"
 
     def test_direction_toggle_reflected_in_url(self, tmp_path: Path) -> None:
         """AC-8(d): when current_sort=hr and dir=desc, hr header link should toggle to asc."""

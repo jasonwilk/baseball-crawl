@@ -42,8 +42,8 @@
   {%- if is_active -%}
     {%- set next_dir = "asc" if current_dir == "desc" else "desc" -%}
   {%- else -%}
-    {# Default directions from TN-4 #}
-    {%- set _asc_cols = ["name", "so", "era", "bb9", "whip", "er", "bb"] -%}
+    {# Default directions from TN-4: lower is better for these batting columns #}
+    {%- set _asc_cols = ["name", "so"] -%}
     {%- set next_dir = "asc" if col_key in _asc_cols else "desc" -%}
   {%- endif -%}
   {%- set _href = "/dashboard?team_id=" ~ active_team_id ~ "&season_id=" ~ season_id ~ "&sort=" ~ col_key ~ "&dir=" ~ next_dir -%}
