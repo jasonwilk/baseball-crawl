@@ -1,7 +1,7 @@
 # E-130: Dashboard Column Sorting
 
 ## Status
-`READY`
+`COMPLETED`
 <!-- Lifecycle: DRAFT -> READY -> ACTIVE -> COMPLETED (or BLOCKED / ABANDONED) -->
 
 ## Overview
@@ -42,8 +42,8 @@ No expert consultation required for baseball-coach -- sorting is a pure UI/UX ca
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-130-01 | Sortable batting and pitching stats tables | TODO | None | - |
-| E-130-02 | Sortable opponent scouting report tables | TODO | E-130-01 | - |
+| E-130-01 | Sortable batting and pitching stats tables | DONE | None | - |
+| E-130-02 | Sortable opponent scouting report tables | DONE | E-130-01 | - |
 
 ## Dispatch Team
 - software-engineer
@@ -122,3 +122,12 @@ The active sort column's header shows a Unicode indicator: `▲` for ascending, 
 - 2026-03-19: Created. Scoped to team batting and pitching tables only. Season navigation and tab context persistence identified as fully covered by E-127-11/12 (not duplicated here). UXD, SE consulted. Server-side sorting chosen over client-side JS per UXD recommendation.
 - 2026-03-19: Expanded scope to include opponent scouting report tables (E-130-02) per UXD recommendation -- opponent sorting is the core coaching use case for pre-game prep. E-130-02 depends on E-130-01 (reuses sort pattern). Added TN-7 for opponent detail dual-table sort context.
 - 2026-03-19: Codex spec review triage. 5 findings assessed (all valid). Applied: (F1) pinned `bat_sort/bat_dir/pit_sort/pit_dir` param contract in TN-7, removed alternative; (F2) added explicit `team_id`/`season_id` preservation to E-130-02 AC-2/AC-3/AC-7; (F3) completed TN-4 default-direction map for all column keys; (F4) fixed one-sided dependency metadata in E-130-01; (F5) added AC-8 (invalid fallback) and AC-9 (direction toggle) to E-130-02, expanded test AC.
+- 2026-03-19: COMPLETED. Both stories DONE. E-130-01 added server-side sorting to team batting and pitching tables (14 batting + 12 pitching sortable columns, sort_header Jinja2 macro, _sort_batting/_sort_pitching utilities, 18 tests). E-130-02 added sorting to opponent scouting report batting and pitching tables (dual-table independent sort via bat_sort/bat_dir/pit_sort/pit_dir params, 12 tests). 30 new tests total, 203 passing, 0 regressions.
+  - **Documentation assessment**: No documentation impact. This is a pure UI enhancement (clickable column headers) with no new endpoints, no architecture changes, no schema changes, and no new CLI commands. Coaching staff docs in `docs/coaching/` do not document individual dashboard column behaviors.
+  - **Context-layer assessment**:
+    1. New convention/pattern: **No** -- server-side sorting via query params is a standard pattern, not a new project convention.
+    2. Architectural decision: **No** -- no technology choices or structural decisions with ongoing implications.
+    3. Footgun/failure mode: **No** -- no gotchas discovered. Zero-denominator handling is straightforward.
+    4. Agent behavior change: **No** -- no changes to agent dispatch, routing, or coordination.
+    5. Domain knowledge: **No** -- sort column keys and default directions are implementation details, not domain knowledge.
+    6. New CLI/workflow: **No** -- no new commands, scripts, or operational procedures.
