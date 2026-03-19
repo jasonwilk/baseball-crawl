@@ -227,43 +227,37 @@ When reporting escalation, include:
 
 ## Worktree Review
 
-When implementing agents are spawned with `isolation: "worktree"`, their changed files live in a temporary worktree directory (e.g., `/tmp/.worktrees/baseball-crawl-abc123/src/crawlers/foo.py`) rather than the main checkout at `/workspaces/baseball-crawl/`. This section describes how reviews work in that scenario.
-
-### You Do NOT Get a Worktree
-
-The code-reviewer is spawned without `isolation: "worktree"`. You run in the main checkout. This is intentional -- you need to access any implementer's worktree path, and giving you your own worktree would be counterproductive.
-
-### Worktree Paths in Review Assignments
-
-When the implementer worked in a worktree, the review assignment from the main session will include worktree-absolute paths in the `## Files Changed` list (e.g., `/tmp/.worktrees/baseball-crawl-abc123/src/foo.py`). Use these paths directly when reading changed files via the Read, Glob, and Grep tools.
-
-### Running `git diff` from the Worktree
-
-To see the implementer's staged changes, run `git diff --cached` from within the worktree directory, not from the main checkout. Implementers stage their work (`git add -A`) but do not commit -- the main session handles the atomic commit at closure. For example:
-
-```bash
-cd /tmp/.worktrees/baseball-crawl-abc123 && git diff --cached main
-```
-
-This shows all staged changes relative to main. Do not use `git diff main..HEAD` -- it shows nothing when there are no commits.
+All implementing agents work in the **epic worktree** (`/tmp/.worktrees/baseball-crawl-E-NNN/`) during dispatch. Stories execute serially, and the staging boundary protocol isolates per-story changes.
 
 ### Epic Worktree Path
 
-During dispatch, the main session passes an **epic worktree path** (e.g., `/tmp/.worktrees/baseball-crawl-E-NNN/`) in your spawn context. This is the accumulation point where all story patches are applied during the epic's dispatch lifecycle. The epic worktree contains the combined changes from all stories that have been merged back so far.
+The main session passes the epic worktree path in your spawn context. Use it for all file reads and git operations during review.
 
-This path is available as context for integration-level reviews (e.g., reviewing cross-story interactions after all stories are complete). The procedures for when and how integration reviews are triggered are defined in the implement skill, not here.
+### Reviewing Current-Story Changes
 
-Per-story reviews continue to use the individual implementer's story worktree path as described above -- that behavior is unchanged.
+The current story's changes are **unstaged** in the epic worktree. Prior stories' changes are staged. To review just the current story:
+
+```bash
+cd /tmp/.worktrees/baseball-crawl-E-NNN && git diff
+```
+
+To see all accumulated changes (prior stories + current):
+
+```bash
+cd /tmp/.worktrees/baseball-crawl-E-NNN && git diff main
+```
+
+### File Paths in Review Assignments
+
+The review assignment will include worktree-absolute paths in the `## Files Changed` list (e.g., `/tmp/.worktrees/baseball-crawl-E-NNN/src/foo.py`). Use these paths directly with Read, Glob, and Grep tools.
 
 ### Test Execution Constraint
 
-When the implementer worked in a worktree, do NOT run `pytest` from the worktree directory. The project uses an editable install whose meta path finder hardcodes the main checkout's `src/` path and intercepts all `import src.*` before `sys.path` is consulted -- `PYTHONPATH=src` has no effect in a worktree. Instead:
+Do NOT run `pytest` from the epic worktree. The project uses an editable install whose meta path finder hardcodes the main checkout's `src/` path -- pytest from the worktree tests main's code, not the worktree's changes. Instead:
 
 - The implementer runs tests during implementation and reports results.
 - You verify AC compliance primarily through **file inspection** (reading changed source and test files).
 - If the implementer's reported test results are absent or incomplete, flag it as a MUST FIX finding ("test results not provided").
-
-When the implementer worked in the main checkout (no worktree), the normal Step 1 test execution procedure applies unchanged.
 
 ## Anti-Patterns
 

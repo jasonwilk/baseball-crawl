@@ -110,7 +110,7 @@ After triage completes (whether via triage team or main session assessment), any
 
 **Spawning mechanics** depend on context:
 
-- **(a) "And review" chain** (invoked from implement skill Phase 4): The dispatch team is still active. A fresh implementer is spawned into the **epic worktree** (without `isolation: "worktree"`) using the agent routing table to select the appropriate agent type for each finding's domain. The original dispatch team implementers may have been shut down, so a fresh spawn is the reliable path. PM is already on the team for disposition tracking. See the implement skill Phase 4a for the full remediation spawn context and epic worktree exception.
+- **(a) "And review" chain** (invoked from implement skill Phase 4): The dispatch team is still active. A fresh implementer is spawned into the **epic worktree** (without `isolation: "worktree"`) using the agent routing table to select the appropriate agent type for each finding's domain. The original dispatch team implementers may have been shut down, so a fresh spawn is the reliable path. PM is already on the team for disposition tracking. See the implement skill Phase 4a for the full remediation spawn context.
 - **(b) Standalone post-dev review** (invoked directly by the user): No dispatch team exists. The main session creates a remediation team using the agent routing table (`/.claude/rules/agent-routing.md`) to select the appropriate implementer type(s) for the findings' domains (not hard-coded to SE), plus PM for disposition tracking.
 
 For each finding confirmed for remediation, route it to the implementer with the finding details. The implementer:

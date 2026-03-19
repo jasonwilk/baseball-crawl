@@ -110,12 +110,13 @@ Templates live at `/.project/templates/`. Read them when creating epics or stori
 2. **Discovery**: PM creates a DRAFT epic (promoting an idea if one exists).
 3. **Refinement**: When the plan skill is loaded (`.claude/skills/plan/SKILL.md`), the skill orchestrates team formation, discovery, planning, spec review, and refinement through its six phases. PM operates within the skill's phase structure. When operating outside the plan skill (ad-hoc refinement, clarify mode), scan the user's request for explicit collaboration directives (imperative verb + agent name, e.g., "work with SE," "consult data-engineer"). If found, consult the named agent via Task tool first -- or if unable to spawn, escalate to the user with specific questions for the named agent. Then consult domain experts per the Consultation Triggers table. Break epic into stories, write ACs. Epic moves to READY.
 4. **User Authorization**: PM presents the READY epic to the user. Execution begins only when the user explicitly requests dispatch. Compound requests that explicitly include dispatch language (e.g., "define and execute," "plan and dispatch," "create the epic and start it") authorize both planning and dispatch in sequence.
-5. **Execution**: The main session creates the dispatch team and spawns implementers, code-reviewer, and PM (see `/.claude/rules/dispatch-pattern.md` for overview, `/.claude/skills/implement/SKILL.md` for full procedures). PM is spawned as a teammate during dispatch for status management (story/epic status transitions, epic table updates) and AC verification ("did they build what was specified"). PM receives the epic worktree path in its spawn context for AC verification -- accumulated story changes live in the epic worktree, not in the main checkout. The main session handles spawning, routing, merge-back, and cascade.
+5. **Execution**: The main session creates the dispatch team and spawns implementers, code-reviewer, and PM -- all working in the epic worktree (see `/.claude/rules/dispatch-pattern.md` for overview, `/.claude/skills/implement/SKILL.md` for full procedures). PM works in the epic worktree during dispatch for status management (story/epic status transitions, epic table updates) and AC verification ("did they build what was specified"). Stories execute serially; the staging boundary protocol (`git add -A` after each story passes review) isolates per-story changes. The main session handles spawning, routing, staging boundary, and cascade.
 6. **Completion**: All stories DONE -> epic to COMPLETED, archive. Review ideas backlog for newly unblocked candidates.
 7. **Abandonment**: Epic no longer relevant -> ABANDONED with reason, then archive.
 
-### Parallel Execution Rules
-1. If two stories modify the same file, one must depend on the other.
+### Story Sequencing Rules
+Stories execute serially during dispatch (one at a time in the epic worktree). Dependency ordering determines execution order.
+1. If two stories modify the same file, one must depend on the other (determines which runs first).
 2. List all files each story touches (mandatory).
 3. Define interfaces in epic Technical Notes when stories must interact.
 4. Prefer composition over shared state.

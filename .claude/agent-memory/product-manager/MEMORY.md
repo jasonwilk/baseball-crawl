@@ -2,7 +2,7 @@
 
 ## Numbering State
 - Next available epic number: E-141
-- Epics created: E-001 through E-139 (E-001, E-003, E-005, E-006, E-007, E-008, E-010, E-011, E-012, E-013, E-014, E-015, E-016, E-017, E-018, E-019, E-020, E-021, E-022, E-024, E-025, E-026, E-027, E-028, E-029, E-030, E-031, E-032, E-033, E-034, E-035, E-036, E-037, E-038, E-042, E-044, E-046, E-048, E-049, E-050, E-052, E-053, E-054, E-056, E-057, E-058, E-055, E-059, E-060, E-061, E-075, E-081, E-084, E-087, E-088, E-089, E-090, E-091, E-092 archived; E-093, E-094, E-095 archived; E-096 archived; E-097 archived; E-098 archived; E-099 archived; E-100 archived; E-101 archived; E-102 archived; E-103 archived; E-104 ready; E-105 archived; E-106 draft; E-107 archived; E-108 archived; E-109 archived; E-110 ready; E-111 archived; E-112 archived; E-114 archived; E-115 archived; E-116 archived; E-113 completed; E-117 completed; E-118 archived; E-119 ready; E-120 archived; E-121 archived; E-122 archived; E-123 archived; E-124 completed; E-125 archived; E-126 completed; E-127 archived; E-128 ready; E-129 archived; E-130 archived; E-131 ready; E-132 ready; E-133 ready; E-134 ready; E-135 abandoned; E-136 ready; E-137 ready; E-138 archived; E-139 archived; E-140 ready)
+- Epics created: E-001 through E-140 (E-001, E-003, E-005, E-006, E-007, E-008, E-010, E-011, E-012, E-013, E-014, E-015, E-016, E-017, E-018, E-019, E-020, E-021, E-022, E-024, E-025, E-026, E-027, E-028, E-029, E-030, E-031, E-032, E-033, E-034, E-035, E-036, E-037, E-038, E-042, E-044, E-046, E-048, E-049, E-050, E-052, E-053, E-054, E-056, E-057, E-058, E-055, E-059, E-060, E-061, E-075, E-081, E-084, E-087, E-088, E-089, E-090, E-091, E-092 archived; E-093, E-094, E-095 archived; E-096 archived; E-097 archived; E-098 archived; E-099 archived; E-100 archived; E-101 archived; E-102 archived; E-103 archived; E-104 ready; E-105 archived; E-106 draft; E-107 archived; E-108 archived; E-109 archived; E-110 ready; E-111 archived; E-112 archived; E-114 archived; E-115 archived; E-116 archived; E-113 completed; E-117 completed; E-118 archived; E-119 ready; E-120 archived; E-121 archived; E-122 archived; E-123 archived; E-124 completed; E-125 archived; E-126 completed; E-127 archived; E-128 ready; E-129 archived; E-130 archived; E-131 ready; E-132 ready; E-133 ready; E-134 ready; E-135 abandoned; E-136 ready; E-137 ready; E-138 archived; E-139 archived; E-140 archived)
 - Next available idea number: IDEA-043
 - Ideas created: IDEA-001 through IDEA-042
 
@@ -28,7 +28,6 @@
 | E-131 | Jersey Number as Distinct Column | READY | 3 stories, all parallel. Season stats column extraction (01), game box score query+column (02), opponent scouting query+column (03). SE only. No schema/ETL changes -- pure query-layer + UI. |
 | E-133 | Year Selector Dropdown | READY | 2 stories, sequential. Year dropdown UI + route integration (01), remove legacy season selector (02). SE only. No migration -- year derived from existing `seasons.year` join. |
 | E-134 | Strike % and # Pitches Columns | READY | 1 story. Add pitches + strike_pct to all 5 pitching display surfaces. Pure query+template, no schema changes. SE only. |
-| E-140 | Planning Skill | READY | 6 stories, sequential (01 is keystone). Formalize plan→spec review→triage→refine→READY workflow as `.claude/skills/plan/SKILL.md`. Team composition suggestions, auto-chain spec review, consistency sweep gate, "plan and dispatch" compound trigger with implement skill handoff. CA only. |
 
 ## Key Architectural Decisions
 - Storage: SQLite (WAL mode). Host-mounted at ./data/app.db. Simple file backup via scripts/backup_db.py (no Litestream).
@@ -78,7 +77,7 @@
 | IDEA-024 | Refactor postCreateCommand | CANDIDATE | 2026-06-13 | Extract monolithic one-liner |
 | IDEA-025 | Migration-Driven Test Fixtures | CANDIDATE | 2026-06-14 | |
 | IDEA-026 | Context Layer Placement Audit -- Phase 2 | CANDIDATE | 2026-06-15 | Trigger: after E-112 ships |
-| IDEA-027 | Unified Team Lifecycle | CANDIDATE | 2026-06-15 | Consult → Refine → Dispatch in one team |
+| IDEA-027 | Unified Team Lifecycle | PROMOTED | 2026-03-19 | Promoted to E-140 |
 | IDEA-028 | Loader Stat Population (Per-Game + Season) | PROMOTED | 2026-03-16 | Promoted to E-117 |
 | IDEA-029 | L/R Split Data Population | CANDIDATE | 2026-06-14 | E-100 deferred. E-117 complete but handedness data source unknown -- not fully unblocked. |
 | IDEA-030 | Fielding/Catcher/Pitch Type Tables | CANDIDATE | 2026-06-14 | E-100 deferred. Additive tables. |

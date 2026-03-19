@@ -5,14 +5,14 @@ paths:
 
 # Dispatch Pattern -- Agent Teams
 
-**The main session (user-facing agent) is the spawner and router during dispatch.** It creates the epic worktree, creates teams, spawns all agents (implementers, code-reviewer, and PM), assigns stories, routes completed work through the review and AC verification loop, manages patch-apply merge-back to the epic worktree, and runs the closure merge sequence (epic worktree → main). The main session orchestrates -- it does not own statuses, verify ACs, or create, modify, or delete any file. The main session's only direct file operations are git commands (`git worktree add` for epic worktree creation, `git apply` for patch-apply merge-back to the epic worktree, `git diff`/`git apply` for closure merge from epic worktree to main, `git add -A` and `git commit` for the closure commit, `git worktree remove` and `git branch -D` for story and epic worktree cleanup, `git mv` for archive) and writes to its own memory directory (`/home/vscode/.claude/projects/*/memory/`).
+**The main session (user-facing agent) is the spawner and router during dispatch.** It creates the epic worktree, creates teams, spawns all agents (implementers, code-reviewer, and PM -- all working in the epic worktree), assigns stories serially, routes completed work through the review and AC verification loop, manages the staging boundary between stories (`git add -A` after each story passes review), and runs the closure merge sequence (epic worktree → main). The main session orchestrates -- it does not own statuses, verify ACs, or create, modify, or delete any file. The main session's only direct file operations are git commands (`git worktree add/remove` for epic worktree lifecycle, `git diff`/`git apply` for closure merge from epic worktree to main, `git add -A` for staging boundary and closure commit, `git commit` for the closure commit, `git branch -D` for branch cleanup, `git mv` for archive) and writes to its own memory directory (`/home/vscode/.claude/projects/*/memory/`).
 
 ## Team Roles
 
-1. **Main session (spawner + router)** -- Creates the epic worktree (`git worktree add -b epic/E-NNN /tmp/.worktrees/baseball-crawl-E-NNN`), creates the team, assigns stories, routes completion reports, manages patch-apply merge-back to the epic worktree, runs the closure merge sequence (epic worktree → main). MUST NOT create, modify, or delete any file, or verify ACs. The only direct file operations are git commands (`git worktree add` for epic worktree creation, `git apply` for patch-apply merge-back to the epic worktree, `git diff`/`git apply` for closure merge from epic worktree to main, `git add -A` and `git commit` for the closure commit, `git worktree remove` and `git branch -D` for story and epic worktree cleanup, `git mv` for archive) and writes to its own memory directory (`/home/vscode/.claude/projects/*/memory/`).
-2. **Product-manager (status owner + AC verifier)** -- Owns story/epic status transitions and AC verification. Spawned as infrastructure (not in Dispatch Team section). No worktree isolation.
-3. **Specialist agents (implementers)** -- Execute assigned stories. Spawned per the epic's Dispatch Team section or the routing table in `/.claude/rules/agent-routing.md`.
-4. **Code-reviewer (quality gate)** -- Reviews every code story before DONE. Spawned as infrastructure. No worktree isolation.
+1. **Main session (spawner + router)** -- Creates the epic worktree, creates the team, assigns stories serially, routes completion reports, manages the staging boundary (`git add -A` after each story passes review), runs the closure merge sequence (epic worktree → main). MUST NOT create, modify, or delete any file, or verify ACs. The only direct file operations are git commands (`git worktree add/remove` for epic worktree lifecycle, `git diff`/`git apply` for closure merge, `git add -A` for staging boundary and closure commit, `git commit`, `git branch -D`, `git mv` for archive) and writes to its own memory directory.
+2. **Product-manager (status owner + AC verifier)** -- Owns story/epic status transitions and AC verification. Works in the epic worktree during dispatch. Spawned as infrastructure (not in Dispatch Team section).
+3. **Specialist agents (implementers)** -- Execute assigned stories in the epic worktree. Spawned per the epic's Dispatch Team section or the routing table in `/.claude/rules/agent-routing.md`.
+4. **Code-reviewer (quality gate)** -- Reviews every code story before DONE. Reviews via `git diff` in the epic worktree (unstaged = current story). Spawned as infrastructure.
 
 ## Domain Work During Dispatch
 
@@ -30,8 +30,7 @@ Many boundary violations start as "quick checks" that feel like orchestration bu
 **Permitted orchestration -- the main session does these directly:**
 - Reading epic and story files for routing decisions
 - Epic worktree creation (`git worktree add -b epic/E-NNN /tmp/.worktrees/baseball-crawl-E-NNN`)
-- Patch-apply merge-back to the epic worktree (`git diff --binary --cached main` in story worktree, `git apply --3way` in epic worktree, `git add -A` in epic worktree)
-- Story worktree cleanup (`git worktree remove`, `git branch -D`)
+- Staging boundary: `git add -A` in the epic worktree after each story passes review
 - Sending messages to teammates via SendMessage
 - Team lifecycle management (spawn, shutdown)
 - Closure merge sequence: epic worktree → main (`git diff --binary --cached main` in epic worktree, `git apply --check --3way` dry-run in main, `git apply --3way` in main, `git add -A`, `git commit`)
@@ -43,7 +42,7 @@ For the procedural protocol on handling completion reports, see the implement sk
 
 ## Dispatch Procedures
 
-The **implement skill** (`.claude/skills/implement/SKILL.md`) is the authoritative source for all dispatch procedures: team creation, story assignment, review loops, merge-back, closure sequence, and edge cases. Load it when the user requests dispatch.
+The **implement skill** (`.claude/skills/implement/SKILL.md`) is the authoritative source for all dispatch procedures: team creation, story assignment, review loops, staging boundary, closure sequence, and edge cases. Load it when the user requests dispatch.
 
 ## Agent Routing
 
