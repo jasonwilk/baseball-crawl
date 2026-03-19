@@ -45,6 +45,8 @@ CA previously designed and implemented these changes (subsequently reverted beca
 | E-136-01 | Update implement skill for atomic commits | TODO | None | - |
 | E-136-02 | Update dispatch pattern overview | TODO | None | - |
 | E-136-03 | Add no-committing prohibition to worktree isolation | TODO | None | - |
+| E-136-04 | Update workflow discipline for patch-apply merge-back | TODO | None | - |
+| E-136-05 | Update code-reviewer for staged diff command | TODO | None | - |
 
 ## Dispatch Team
 - claude-architect
@@ -61,7 +63,7 @@ The code-reviewer runs `git diff --cached` from the worktree to see all staged c
 Replace `git merge --no-ff <branch>` with a patch-apply sequence:
 
 1. **In the worktree**: `git diff --binary --cached main > /tmp/E-NNN-SS.patch`
-2. **In the main checkout**: `git apply /tmp/E-NNN-SS.patch`
+2. **In the main checkout**: `git apply --3way /tmp/E-NNN-SS.patch` (the `--3way` flag falls back to 3-way merge semantics when sequential same-file patches have context-line mismatches; compatible with `--binary`)
 3. **On success**: Remove the worktree (`git worktree remove <path>`), delete the branch (`git branch -D <branch>`). Do NOT stage yet -- changes accumulate unstaged in the main checkout until closure.
 4. **On failure** (conflict): The story remains IN_PROGRESS. The worktree stays active. Escalate to the user with conflict details. Recovery in main checkout: `git checkout -- . && git clean -fd` to reset, then retry after conflict resolution.
 
