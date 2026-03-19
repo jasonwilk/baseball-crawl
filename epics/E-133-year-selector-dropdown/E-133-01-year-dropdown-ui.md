@@ -14,8 +14,8 @@ The current season selector (`_season_selector.html`) renders pill buttons per s
 
 ## Acceptance Criteria
 - [ ] **AC-1**: A new function in `src/api/db.py` accepts a list of team IDs and returns a mapping of `team_id → year` by joining stat tables to `seasons.year`, per epic Technical Notes TN-1.
-- [ ] **AC-2**: All four main dashboard routes (`/dashboard`, `/dashboard/pitching`, `/dashboard/games`, `/dashboard/opponents`) accept a `year` query parameter. When provided, `permitted_teams` is filtered to only teams whose year matches.
-- [ ] **AC-3**: When no `year` param is provided, the current calendar year is used. If no teams have data for the current year, the most recent year with data is used as fallback.
+- [ ] **AC-2**: All four main dashboard routes (`/dashboard`, `/dashboard/pitching`, `/dashboard/games`, `/dashboard/opponents`) accept a `year` query parameter and resolve the active year and team per epic Technical Notes TN-2 parameter resolution order: `team_id` present → team_id wins (year derived from team); `team_id` absent → `year` param filters teams.
+- [ ] **AC-3**: When no `year` param and no `team_id` param are provided, the current calendar year is used. If no teams have data for the current year, the most recent year with data is used as fallback. An explicit `year` param with no matching teams also falls back to the most recent year.
 - [ ] **AC-4**: A native `<select>` dropdown appears right-aligned in the team selector row, showing available years in descending order. The active year is selected. The dropdown is hidden when only one year has data.
 - [ ] **AC-5**: Selecting a different year reloads the page with `?year=YYYY` (no `team_id` carried forward -- the route defaults to the first permitted team for the new year).
 - [ ] **AC-6**: The `year` parameter propagates through ALL internal links per epic Technical Notes TN-5: bottom nav bar, team selector pills, game list row links, opponent list row links, player name links in stat tables, and back-links from detail pages.

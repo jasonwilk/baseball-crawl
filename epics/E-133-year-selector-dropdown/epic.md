@@ -34,7 +34,8 @@ No expert consultation required for coaching domain -- this is a pure UI/data-pl
 - Dashboard pages show a year dropdown defaulting to the current year
 - Selecting a past year filters the team selector to show only teams with data in that year
 - Stat pages (batting, pitching, games, opponents) display data for the correct year
-- Year selection propagates through bottom nav links
+- Year selection propagates through ALL internal links (bottom nav, team pills, game/opponent/player links, back-links)
+- Existing bookmarks with `?team_id=N` (no year param) continue to work correctly
 - The dropdown is visually compact and does not dominate the page header area
 
 ## Stories
@@ -67,17 +68,21 @@ The available years list is derived from this map in Python: `sorted(set(map.val
 
 Teams with no stat data won't appear in the year filter. This is acceptable -- a team with no data has nothing to display.
 
-### TN-2: Year Filtering Approach
-The year dropdown drives the team selector. When a user selects a year:
-1. Filter `permitted_teams` to only those whose year matches (via team_year_map)
-2. The first team in the filtered list becomes the active team
-3. The `season_id` is derived from the active team's available seasons (existing `get_available_seasons()`)
+### TN-2: Year Filtering Approach and Parameter Resolution
 
 The `year` query parameter is added to all dashboard routes. It propagates through the bottom nav bar and all internal links, just like `team_id` and `season_id` do today.
 
-**Default year logic**: If no `year` param, use current calendar year. If no teams have data for the current year, fall back to the most recent year with data.
+**Parameter resolution order** (critical for backward compat):
 
-**Year ↔ team_id interaction**: When year changes, do NOT carry `team_id` forward (it may not exist in the new year). Let the route default to the first permitted team for the selected year.
+1. Build `team_year_map` for ALL `permitted_teams` (unfiltered).
+2. If `team_id` is present and in `permitted_teams`: **team_id wins**. Derive year from `team_year_map[team_id]`. The year dropdown reflects this derived year. This preserves backward compatibility with existing bookmarks and links that carry `team_id` without `year`.
+3. If `team_id` is absent: use `year` param (or default) to filter `permitted_teams` by year. Pick the first team in the filtered list.
+4. **Default year** (no `year` param and no `team_id` param): use current calendar year. If no teams have data for the current year, fall back to the most recent year with data.
+5. **Invalid `year` param** (explicit `year` with no matching teams, e.g., manual URL `?year=2020`): fall back to the most recent year with data.
+
+After resolving the active team, derive `season_id` from its available seasons (existing `get_available_seasons()`).
+
+**Year ↔ team_id interaction in the UI**: The year dropdown submits `?year=YYYY` only (no `team_id`), so changing year always triggers resolution path 3. Team pill links carry both `team_id` and `year`, so clicking a team triggers resolution path 2. This means `team_id` always wins when present, and year-only submissions always pick the first team in that year.
 
 ### TN-3: UI Placement and Design
 The year dropdown renders as a native `<select>` element **right-aligned within the team selector row**:
@@ -117,3 +122,4 @@ None -- all questions resolved during consultation.
 - 2026-03-19: Created. Expert consultation with SE, DE, UXD, API Scout completed.
 - 2026-03-19: Revised after full consultation synthesis. Removed migration story (DE: derive year from existing `seasons.year` join). Moved year dropdown from navbar to team selector row (UXD). Simplified from 3 stories to 2. Set to READY.
 - 2026-03-19: Codex spec review triage. P1 link propagation: refined -- added TN-5, expanded AC-6/AC-7/file list to cover all internal links. P2 TN-1 stale text: fixed -- clarified one function + derivation. P2 AC-3 ambiguity: fixed -- concrete decision to remove banner (TN-6). P2 missing tests: fixed -- added tests/ to E-133-02 file list.
+- 2026-03-19: Fresh refinement pass. Found backward-compat issue: old bookmarks with `?team_id=N` would break if year filtering runs first. Rewrote TN-2 with explicit parameter resolution order (team_id wins when present, year filters when team_id absent). Updated AC-2/AC-3 to match. Refined AC-7 (detail pages pass year through for links, don't filter by year). Fixed TN-3 JS terminology. Added backward-compat to Success Criteria.
