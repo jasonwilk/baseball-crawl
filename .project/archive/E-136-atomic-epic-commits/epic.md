@@ -1,7 +1,7 @@
 # E-136: Atomic Epic Commits
 
 ## Status
-`READY`
+`COMPLETED`
 <!-- Lifecycle: DRAFT -> READY -> ACTIVE -> COMPLETED (or BLOCKED / ABANDONED) -->
 
 ## Overview
@@ -42,11 +42,11 @@ CA previously designed and implemented these changes (subsequently reverted beca
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-136-01 | Update implement skill for atomic commits | TODO | None | - |
-| E-136-02 | Update dispatch pattern overview | TODO | None | - |
-| E-136-03 | Add no-committing prohibition to worktree isolation | TODO | None | - |
-| E-136-04 | Update workflow discipline for patch-apply merge-back | TODO | None | - |
-| E-136-05 | Update code-reviewer for staged diff command | TODO | None | - |
+| E-136-01 | Update implement skill for atomic commits | DONE | None | claude-architect |
+| E-136-02 | Update dispatch pattern overview | DONE | None | claude-architect |
+| E-136-03 | Add no-committing prohibition to worktree isolation | DONE | None | claude-architect |
+| E-136-04 | Update workflow discipline for patch-apply merge-back | DONE | None | claude-architect |
+| E-136-05 | Update code-reviewer for staged diff command | DONE | None | claude-architect |
 
 ## Dispatch Team
 - claude-architect
@@ -108,3 +108,13 @@ None -- all questions resolved via CA and SE consultation.
 ## History
 - 2026-03-19: Created. Replaces abandoned E-135 (which was abandoned because the user wanted a proper epic, not a direct CA fix). CA and SE consultation completed via team-lead relay.
 - 2026-03-19: Refinement with PM, SE, CA. Added E-136-04 (workflow-discipline.md) and E-136-05 (code-reviewer.md) for cross-file consistency. Tightened ACs in E-136-01. Updated TN-3 with --3way flag. Phase 4 (codex-review) verified compatible with atomic workflow -- no changes needed.
+- 2026-03-19: COMPLETED. All 5 stories implemented. Implement skill, dispatch pattern, worktree isolation, workflow discipline, and code-reviewer updated for atomic commit workflow: implementers stage but don't commit, code review uses git diff --cached, merge-back uses patch-apply, closure produces single atomic commit.
+  - Documentation assessment: No documentation impact -- epic modifies only internal dispatch mechanics, no user-facing features or API changes.
+  - Context-layer assessment:
+    - New commands/workflows: YES (handled by E-136-01, E-136-02, E-136-04)
+    - Agent behavior changes: YES (handled by E-136-05)
+    - New conventions: YES (handled by E-136-03)
+    - New file patterns: NO
+    - Integration points: NO
+    - Security/safety: NO
+    - Verdict: All triggers satisfied by the stories themselves (the epic IS context-layer changes). No additional codification needed.

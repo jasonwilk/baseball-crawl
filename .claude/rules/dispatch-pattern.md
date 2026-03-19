@@ -5,11 +5,11 @@ paths:
 
 # Dispatch Pattern -- Agent Teams
 
-**The main session (user-facing agent) is the spawner and router during dispatch.** It creates teams, spawns all agents (implementers, code-reviewer, and PM), assigns stories, routes completed work through the review and AC verification loop, manages merge-back, and runs the closure sequence. The main session orchestrates -- it does not own statuses, verify ACs, or create, modify, or delete any file. The main session's only direct file operations are git commands (`git merge`, `git mv`, `git add`, `git commit`) and writes to its own memory directory (`/home/vscode/.claude/projects/*/memory/`).
+**The main session (user-facing agent) is the spawner and router during dispatch.** It creates teams, spawns all agents (implementers, code-reviewer, and PM), assigns stories, routes completed work through the review and AC verification loop, manages patch-apply merge-back, and runs the closure sequence (atomic commit). The main session orchestrates -- it does not own statuses, verify ACs, or create, modify, or delete any file. The main session's only direct file operations are git commands (`git apply` for merge-back, `git add -A` and `git commit` for the closure atomic commit, `git worktree` and `git branch -D` for worktree cleanup) and writes to its own memory directory (`/home/vscode/.claude/projects/*/memory/`).
 
 ## Team Roles
 
-1. **Main session (spawner + router)** -- Creates the team, assigns stories, routes completion reports, manages merge-back and cascade, runs closure. MUST NOT create, modify, or delete any file, or verify ACs. The only direct file operations are git commands (`git merge`, `git mv`, `git add`, `git commit`) and writes to its own memory directory (`/home/vscode/.claude/projects/*/memory/`).
+1. **Main session (spawner + router)** -- Creates the team, assigns stories, routes completion reports, manages patch-apply merge-back and cascade, runs closure (atomic commit). MUST NOT create, modify, or delete any file, or verify ACs. The only direct file operations are git commands (`git apply` for merge-back, `git worktree` and `git branch -D` for worktree cleanup, `git add -A` and `git commit` for the closure atomic commit, `git mv` for archive) and writes to its own memory directory (`/home/vscode/.claude/projects/*/memory/`).
 2. **Product-manager (status owner + AC verifier)** -- Owns story/epic status transitions and AC verification. Spawned as infrastructure (not in Dispatch Team section). No worktree isolation.
 3. **Specialist agents (implementers)** -- Execute assigned stories. Spawned per the epic's Dispatch Team section or the routing table in `/.claude/rules/agent-routing.md`.
 4. **Code-reviewer (quality gate)** -- Reviews every code story before DONE. Spawned as infrastructure. No worktree isolation.
@@ -29,9 +29,10 @@ Many boundary violations start as "quick checks" that feel like orchestration bu
 
 **Permitted orchestration -- the main session does these directly:**
 - Reading epic and story files for routing decisions
-- Git commands for merge-back mechanics (`git merge`, `git worktree`, `git branch -d`)
+- Git commands for patch-apply merge-back (`git apply`, `git worktree`, `git branch -D`)
 - Sending messages to teammates via SendMessage
 - Team lifecycle management (spawn, shutdown)
+- Git commands for closure atomic commit (`git add -A`, `git commit`)
 - Git commands for archive (`git mv`, `git add`, `git commit`)
 - Writes to own memory directory
 

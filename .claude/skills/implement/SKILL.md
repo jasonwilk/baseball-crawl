@@ -23,7 +23,7 @@ Load this skill when the user says any of:
 
 ## Purpose
 
-Codify the full workflow for dispatching and coordinating an epic when the user requests implementation. The main session (user-facing agent) is the spawner and router: it reads the epic, spawns implementers, code-reviewer, and PM, assigns stories with full context blocks, routes completion reports to PM (AC verification, status updates) and code-reviewer (quality review), manages merge-back, cascades to newly unblocked stories, and runs the closure sequence. The main session does not own statuses, verify ACs, or create, modify, or delete any file. The main session's only direct file operations are git commands (`git merge`, `git mv`, `git add`, `git commit`) and writes to its own memory directory (`/home/vscode/.claude/projects/*/memory/`).
+Codify the full workflow for dispatching and coordinating an epic when the user requests implementation. The main session (user-facing agent) is the spawner and router: it reads the epic, spawns implementers, code-reviewer, and PM, assigns stories with full context blocks, routes completion reports to PM (AC verification, status updates) and code-reviewer (quality review), manages patch-apply merge-back, cascades to newly unblocked stories, and runs the closure sequence (atomic commit). The main session does not own statuses, verify ACs, or create, modify, or delete any file. The main session's only direct file operations are git commands (`git apply` for merge-back, `git add -A` and `git commit` for the closure atomic commit, `git worktree` and `git branch -D` for worktree cleanup, `git mv` for archival) and writes to its own memory directory (`/home/vscode/.claude/projects/*/memory/`).
 
 This skill is the authoritative source for dispatch procedures. Agent routing tables are in `/.claude/rules/agent-routing.md`. See `/.claude/rules/dispatch-pattern.md` for a brief overview of dispatch roles.
 
@@ -196,7 +196,7 @@ You are working in a git worktree (an isolated copy of the repository). Your wor
 - Exception: mixed stories (context-layer + code files) are dispatched to `claude-architect` WITH worktree isolation. In this case, the architect edits both context-layer and code files from the worktree, and changes are merged back like any other worktree story.
 
 ### No Branch or Worktree Management
-- Do NOT run `git merge`, `git rebase`, `git worktree remove`, or `git branch -d`
+- Do NOT run `git merge`, `git rebase`, `git worktree remove`, or `git branch -d/-D`
 - Do NOT attempt to merge your work back into the main branch
 - Branch management, merging, and worktree cleanup are handled by the main session
 
@@ -208,11 +208,11 @@ You are working in a git worktree (an isolated copy of the repository). Your wor
 
 ### Read and Write Source Code
 - Edit files in `src/`, `tests/`, `migrations/`, `scripts/`, `docs/`, and other tracked directories
-- Your changes are on an isolated branch and will be merged by the main session after review
+- Your changes stay in the working tree -- there are no commits and no branch divergence. After review, the main session extracts your staged changes via patch-apply.
 
 ### Use Git for Inspection
 - `git status`, `git diff`, `git log` are safe
-- Committing your changes is fine -- the main session handles the merge
+- Before reporting completion, run `git add -A` to stage all changes (new files, modifications, deletions). Do NOT run `git commit` -- the main session collects your staged changes via patch-apply after review
 
 ## File Paths in Reports
 - When reporting `## Files Changed`, use **absolute paths** (e.g., `/tmp/.worktrees/baseball-crawl-abc123/src/foo.py`). The main session and code-reviewer need these paths to locate your work in the worktree.
@@ -263,7 +263,7 @@ Epic Technical Notes:
 [Full Technical Notes]
 
 Implementer worktree path: [worktree path, e.g. /tmp/.worktrees/baseball-crawl-abc123/]
-(Use this path to read changed files and run `git diff`. Run `cd <worktree-path> && git diff main..HEAD` to see changes. Do NOT run pytest from the worktree -- verify ACs through file inspection. See `.claude/agents/code-reviewer.md` Worktree Review section.)
+(Use this path to read changed files and run `git diff`. Run `cd <worktree-path> && git diff --cached main` to see all staged changes. Do NOT run pytest from the worktree -- verify ACs through file inspection. See `.claude/agents/code-reviewer.md` Worktree Review section.)
 
 Implementer-reported files changed:
 [Files Changed section from implementer's completion message -- paths will be worktree-absolute]
@@ -303,7 +303,7 @@ Epic Technical Notes:
 [Full Technical Notes]
 
 Implementer worktree path: [worktree path]
-(Same instructions as round 1 -- read files and run git diff from this path.)
+(Same instructions as round 1 -- read files and run `git diff --cached main` from this path.)
 
 Implementer-reported files changed:
 [Updated Files Changed section from implementer's round-2 completion message]
@@ -330,27 +330,28 @@ This is a round-2 re-review. The implementer was asked to fix the Round 1 findin
 
 When PM rejects ACs, route PM's feedback to the implementer alongside any code-review findings. After the implementer revises, both PM and the code-reviewer re-evaluate. PM AC rejection does NOT have its own circuit breaker -- the code-reviewer's 2-round circuit breaker governs the overall loop. If the circuit breaker fires, escalate to the user regardless of PM AC status.
 
-### Step 5a: Merge-back (worktree stories only)
+### Step 5a: Merge-back via patch-apply (worktree stories only)
 
-After both the code-reviewer approves and PM verifies ACs pass for a story implemented in a worktree (or PM alone approves for context-layer-only stories), the main session runs the merge-back sequence from the main checkout BEFORE marking DONE or cascading. A story is NOT marked DONE until its branch is successfully merged.
+After both the code-reviewer approves and PM verifies ACs pass for a story implemented in a worktree (or PM alone approves for context-layer-only stories), the main session runs the patch-apply merge-back sequence from the main checkout BEFORE marking DONE or cascading. A story is NOT marked DONE until its changes are successfully applied.
 
-**Merge-back sequence:**
+**Patch-apply sequence:**
 
-1. `git merge --no-ff <worktree-branch>` from the main checkout -- creates a merge commit preserving story history.
-2. **If merge succeeds:**
+1. **In the worktree**: Generate a patch from staged changes: `cd <worktree-path> && git diff --binary --cached main > /tmp/E-NNN-SS.patch`
+2. **In the main checkout**: Apply the patch: `cd /workspaces/baseball-crawl && git apply --3way /tmp/E-NNN-SS.patch` (the `--3way` flag falls back to 3-way merge semantics when sequential same-file patches have context-line mismatches; compatible with `--binary`). Do NOT stage the applied changes yet -- they accumulate unstaged in the main checkout until the closure atomic commit.
+3. **If apply succeeds:**
    - Remove the worktree: `git worktree remove <path>` (retry with `--force` if it fails due to untracked files).
-   - Delete the branch: `git branch -d <branch>` (safe because the branch is fully merged).
+   - Delete the branch: `git branch -D <branch>` (force delete because the branch has no commits beyond main).
    - Route to PM to mark the story `DONE` (Step 6).
    - Proceed to cascade (Step 6).
-3. **If merge conflicts:**
+4. **If apply fails (conflict):**
    - The story remains `IN_PROGRESS`.
    - Cascade is blocked for dependent stories only (non-dependent stories can proceed).
    - The worktree stays active for inspection.
-   - Escalate to the user with conflict details: which files conflict and between which stories.
-   - The user resolves the conflict in the main checkout (not the worktree).
-   - After resolution, the main session removes the worktree, deletes the branch, routes to PM to mark DONE, and proceeds to cascade.
+   - Escalate to the user with conflict details.
+   - Recovery in main checkout: `git checkout -- . && git clean -fd` to reset, then retry after conflict resolution.
+   - After resolution, the main session removes the worktree, deletes the branch (`-D`), routes to PM to mark DONE, and proceeds to cascade.
 
-For stories that were NOT implemented in a worktree (context-layer stories), skip this step -- proceed directly to PM marking DONE.
+For stories that were NOT implemented in a worktree (context-layer stories), skip this step -- their changes are already in the main checkout. Proceed directly to PM marking DONE.
 
 ### Step 6: Cascade
 
@@ -386,7 +387,7 @@ When all stories are verified DONE (and the optional review chain is complete), 
 
 Confirm all stories are DONE. Per-story AC verification was performed by PM during Phase 3 (for all stories), and code quality was verified by the code-reviewer (for code stories). This step confirms completion status -- it is not a re-review of all code.
 
-**Worktree verification:** Verify all worktree branches have been merged into the current branch. Run `git branch` to confirm no worktree branches remain unmerged. Then run `git worktree list --porcelain` as a safety-net sweep for orphaned worktrees from error paths. If any orphans are found, force-remove them (`git worktree remove --force <path>`, then `git branch -D <branch>` for unmerged branches). Run `git worktree prune` as a final cleanup for stale registrations. Per-story worktree cleanup happens at merge-back time (Phase 3 Step 5a) -- this closure check catches only orphans from error paths.
+**Worktree verification:** Run `git worktree list --porcelain` to verify no worktrees remain (all should have been removed during per-story patch-apply merge-back in Phase 3 Step 5a). If any orphans are found, force-remove them (`git worktree remove --force <path>`, then `git branch -D <branch>`). Run `git worktree prune` as a final cleanup for stale registrations. This closure check catches only orphans from error paths -- per-story worktree cleanup happens at merge-back time.
 
 ### Step 2: Update the epic completely
 
@@ -443,9 +444,16 @@ Send a `shutdown_request` to each agent on the team (implementers, code-reviewer
 
 **After spinning down the team:**
 
-### Step 10: Offer to scan and commit
+### Step 10: Atomic commit
 
-After shutting down teammates and deleting the team, offer to run the PII scan and commit the changes. Commit must NOT happen automatically -- the user must explicitly approve before any commit happens.
+After shutting down teammates and deleting the team, produce a single commit for all accumulated epic changes:
+
+1. `git add -A` to stage all accumulated changes from all stories.
+2. Run PII scanner on staged files (the pre-commit hook covers this automatically).
+3. Present the staged changes summary to the user and ask for explicit approval before committing.
+4. `git commit` with a conventional commit message: `feat(E-NNN): <epic title>`.
+
+The user must explicitly approve before the commit happens. If PII scan catches issues, nothing is committed -- the atomic approach makes this safer than partial commits. Commit must NOT happen automatically.
 
 ---
 
@@ -485,7 +493,7 @@ Phase 3: Coordination loop
   - Context-layer stories -> claude-architect, no worktree
   - Route to PM: mark stories IN_PROGRESS
   - Assign with full context blocks (+ worktree notice + status prohibition)
-  - Implementer reports completion with ## Files Changed (worktree-absolute paths)
+  - Implementer stages all changes (`git add -A`) and reports completion with ## Files Changed
       |
       v
     Context-layer-only? --YES--> Route to PM for AC verification + status update
@@ -494,6 +502,7 @@ Phase 3: Coordination loop
       |
       v
     Send to code-reviewer (round 1 of 2) AND PM (AC verification) in parallel
+      - Code-reviewer runs `git diff --cached main` to review staged changes
       |
       v
     Both gates must pass:
@@ -511,9 +520,9 @@ Phase 3: Coordination loop
       - No deferral path -- every finding ends FIXED or DISMISSED
       |
       v
-    Items to fix? --NO--> Merge-back: git merge --no-ff -> remove worktree -> delete branch
-      |                     -> Route to PM: mark DONE
-      YES                   [If merge conflict: escalate to user, block dependent cascade only]
+    Items to fix? --NO--> Patch-apply: generate patch in worktree -> apply in main checkout
+      |                     -> remove worktree -> delete branch (-D) -> Route to PM: mark DONE
+      YES                   [If apply fails: escalate to user, block dependent cascade only]
       |
       v
     Route findings to implementer who wrote the code, implementer fixes in same worktree
@@ -522,13 +531,13 @@ Phase 3: Coordination loop
     Send to code-reviewer (round 2 of 2) + PM re-verifies ACs
       |
       v
-    Items to fix? --NO--> Merge-back -> Route to PM: mark DONE
+    Items to fix? --NO--> Patch-apply -> Route to PM: mark DONE
       |
       YES
       |
       v
     Escalate to user (circuit breaker)
-  - Cascade to newly unblocked stories (merge MUST complete before cascade)
+  - Cascade to newly unblocked stories (patch-apply MUST complete before cascade)
   - Spawn later-wave agents as dependencies complete (with isolation: "worktree")
   |
   v
@@ -536,7 +545,7 @@ Phase 3: Coordination loop
   |
   v
 Phase 5: Closure sequence
-  - Validate all work (confirm DONE + PM verified ACs + all branches merged)
+  - Validate all work (confirm DONE + PM verified ACs + no worktrees remain)
   - Sweep for orphaned worktrees (git worktree list --porcelain; force-remove; prune)
   - Route to PM: update epic to COMPLETED with history entry
   - Documentation assessment (spawn docs-writer if needed)
@@ -547,7 +556,7 @@ Phase 5: Closure sequence
   - PM: review vision signals (advisory)
   - Present summary to user
   - Shut down team (implementers + code-reviewer + PM)
-  - Offer to scan and commit
+  - Atomic commit: git add -A -> PII scan -> user approval -> single git commit
 ```
 
 ---
@@ -591,3 +600,5 @@ If PM's context fills during a large epic, the main session respawns PM with a f
 7. **Do not skip the context-layer assessment.** The epic cannot be archived until the context-layer impact is evaluated per `.claude/rules/context-layer-assessment.md`.
 8. **Do not defer SHOULD FIX findings to epic History.** Every finding must reach a terminal state (FIXED or DISMISSED) during the story. The main session triages each SHOULD FIX item: accept it (route to implementer immediately) or dismiss it (present reasoning to user and wait for confirmation). There is no deferral path.
 9. **Do not spawn context-layer stories with worktree isolation.** Context-layer files (CLAUDE.md, `.claude/agents/`, `.claude/rules/`, `.claude/skills/`, etc.) are shared infrastructure. Stories modifying only these files must run in the main checkout without `isolation: "worktree"`.
+10. **Do not commit in worktrees.** Implementers stage changes (`git add -A`) but NEVER commit. The main session extracts staged changes via patch-apply (`git diff --binary --cached main`) and produces a single atomic commit at closure. Committing in a worktree breaks the patch-apply merge-back flow.
+11. **Do not use `git merge` for merge-back.** Merge-back uses the patch-apply sequence: generate a patch from staged changes in the worktree, apply it in the main checkout. `git merge --no-ff` is not used because there are no commits to merge.

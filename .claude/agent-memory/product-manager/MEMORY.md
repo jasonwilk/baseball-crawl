@@ -33,7 +33,7 @@
 | E-134 | Strike % and # Pitches Columns | READY | 1 story. Add pitches + strike_pct to all 5 pitching display surfaces. Pure query+template, no schema changes. SE only. |
 | E-132 | Fix Opponent Names as UUIDs | READY | 2 stories (01 blocks 02). Loader fix: use opponents.json (auth path) and games.json (scouting path) for opponent names at insert time. Backfill existing UUID-stub rows via `bb data backfill-team-names`. SE only. |
 | E-135 | Atomic Epic Commits | ABANDONED | Abandoned -- user wanted proper epic. Replaced by E-136. |
-| E-136 | Atomic Epic Commits | READY | 3 stories, all parallel. Implement skill update (01), dispatch pattern overview (02), worktree isolation no-commit rule (03). CA only. Replaces E-135. |
+| E-136 | Atomic Epic Commits | COMPLETED | 5 stories completed 2026-03-19. Implement skill (01), dispatch pattern (02), worktree isolation (03), workflow discipline (04), code-reviewer (05) updated for atomic commit workflow. CA only. Replaces E-135. |
 
 ## Key Architectural Decisions
 - Storage: SQLite (WAL mode). Host-mounted at ./data/app.db. Simple file backup via scripts/backup_db.py (no Litestream).

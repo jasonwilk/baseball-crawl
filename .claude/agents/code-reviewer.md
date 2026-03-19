@@ -239,13 +239,13 @@ When the implementer worked in a worktree, the review assignment from the main s
 
 ### Running `git diff` from the Worktree
 
-To see the implementer's changes, run `git diff` from within the worktree directory, not from the main checkout. For example:
+To see the implementer's staged changes, run `git diff --cached` from within the worktree directory, not from the main checkout. Implementers stage their work (`git add -A`) but do not commit -- the main session handles the atomic commit at closure. For example:
 
 ```bash
-cd /tmp/.worktrees/baseball-crawl-abc123 && git diff main..HEAD
+cd /tmp/.worktrees/baseball-crawl-abc123 && git diff --cached main
 ```
 
-The worktree has its own branch and HEAD, so `git diff` from the main checkout will not show the implementer's changes.
+This shows all staged changes relative to main. Do not use `git diff main..HEAD` -- it shows nothing when there are no commits.
 
 ### Test Execution Constraint
 
