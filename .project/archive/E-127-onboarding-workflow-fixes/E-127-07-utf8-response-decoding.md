@@ -4,7 +4,7 @@
 [E-127: Onboarding Workflow Fixes](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the Python runtime will have `brotlicffi` installed so that httpx can decompress brotli-compressed responses from the GameChanger API. The mobile profile's `Accept-Encoding: br;q=1.0, gzip;q=0.9, deflate;q=0.8` header is correct and matches the real iOS app -- the fix is installing the missing decompression library, NOT modifying headers.

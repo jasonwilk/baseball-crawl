@@ -4,7 +4,7 @@
 [E-127: Onboarding Workflow Fixes](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the scouting crawler will use the correct vendor Accept header for the public games endpoint (`/public/teams/{public_id}/games`), eliminating the HTTP 415 Unsupported Media Type error that prevented opponent schedule fetching.

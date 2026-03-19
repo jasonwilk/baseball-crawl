@@ -117,14 +117,42 @@ def _get_user_by_email(conn: sqlite3.Connection, email: str) -> dict[str, Any] |
     return dict(row) if row else None
 
 
+def _assign_member_teams(conn: sqlite3.Connection, user_id: int) -> None:
+    """Insert OR IGNORE user_team_access rows for every member team.
+
+    Args:
+        conn: Open SQLite connection (caller is responsible for commit).
+        user_id: The user to assign.
+    """
+    team_rows = conn.execute(
+        "SELECT id FROM teams WHERE membership_type = 'member'"
+    ).fetchall()
+    for (team_id,) in team_rows:
+        conn.execute(
+            "INSERT OR IGNORE INTO user_team_access (user_id, team_id) VALUES (?, ?)",
+            (user_id, team_id),
+        )
+
+
 def _create_dev_user(conn: sqlite3.Connection, email: str) -> dict[str, Any]:
-    """Insert a dev user and return the new row dict."""
+    """Insert a dev user, assign all member teams, and return the new row dict.
+
+    User creation and team assignment are committed in the same transaction.
+
+    Args:
+        conn: Open SQLite connection.
+        email: Email address for the new dev user.
+
+    Returns:
+        Dict with ``id`` and ``email`` keys.
+    """
     cursor = conn.execute(
         "INSERT INTO users (email) VALUES (?)",
         (email,),
     )
-    conn.commit()
     user_id = cursor.lastrowid
+    _assign_member_teams(conn, user_id)
+    conn.commit()
     return {
         "id": user_id,
         "email": email,
@@ -217,6 +245,12 @@ def _handle_dev_bypass(email: str) -> dict[str, Any] | None:
             if not user:
                 user = _create_dev_user(conn, email)
             permitted_teams = _get_permitted_teams(conn, user)
+            if not permitted_teams:
+                # Backfill: user exists but has zero team assignments.
+                # Covers the "bb db reset but .env preserved" scenario.
+                _assign_member_teams(conn, user["id"])
+                conn.commit()
+                permitted_teams = _get_permitted_teams(conn, user)
             return {"user": user, "permitted_teams": permitted_teams}
     except sqlite3.OperationalError:
         # Let OperationalError propagate so dispatch() can handle schema errors

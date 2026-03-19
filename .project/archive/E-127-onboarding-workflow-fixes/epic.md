@@ -1,7 +1,7 @@
 # E-127: Onboarding Workflow Fixes
 
 ## Status
-`READY`
+`COMPLETED`
 <!-- Lifecycle: DRAFT -> READY -> ACTIVE -> COMPLETED (or BLOCKED / ABANDONED) -->
 
 ## Overview
@@ -66,18 +66,18 @@ During a real-world reseed-and-crawl session (2026-03-18), four friction points 
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-127-01 | `bb creds import` multi-format input | TODO | None | - |
-| E-127-02 | `bb creds extract-key` multi-match disambiguation | TODO | None | - |
-| E-127-03 | Dev user auto-assignment to member teams | TODO | None | - |
-| E-127-04 | Admin nav discoverability | TODO | None | - |
-| E-127-05 | Post-reset onboarding guide | TODO | None | - |
-| E-127-06 | Crawler skips placeholder teams | TODO | None | - |
-| E-127-07 | Install brotlicffi for mobile brotli decompression | TODO | None | - |
-| E-127-08 | Boxscore crawler uses wrong ID + loader dual-key index | TODO | None | - |
-| E-127-09 | Scouting crawler public games Accept header | TODO | None | - |
-| E-127-10 | Scouting loader skips completed crawl runs (both paths) | TODO | None | - |
-| E-127-11 | Season selector UX design | TODO | None | - |
-| E-127-12 | Season selector implementation | TODO | E-127-11, E-127-04 | - |
+| E-127-01 | `bb creds import` multi-format input | DONE | None | - |
+| E-127-02 | `bb creds extract-key` multi-match disambiguation | DONE | None | - |
+| E-127-03 | Dev user auto-assignment to member teams | DONE | None | - |
+| E-127-04 | Admin nav discoverability | DONE | None | - |
+| E-127-05 | Post-reset onboarding guide | DONE | None | - |
+| E-127-06 | Crawler skips placeholder teams | DONE | None | - |
+| E-127-07 | Install brotlicffi for mobile brotli decompression | DONE | None | - |
+| E-127-08 | Boxscore crawler uses wrong ID + loader dual-key index | DONE | None | - |
+| E-127-09 | Scouting crawler public games Accept header | DONE | None | - |
+| E-127-10 | Scouting loader skips completed crawl runs (both paths) | DONE | None | - |
+| E-127-11 | Season selector UX design | DONE | None | - |
+| E-127-12 | Season selector implementation | DONE | E-127-11, E-127-04 | - |
 
 ## Dispatch Team
 - software-engineer
@@ -218,3 +218,6 @@ The documented workflow after `bb db reset`:
 - 2026-03-18: Full-team refinement session (SE, DE, UXD, coach, CA, api-scout). 17 findings incorporated. Followed by Codex spec review (10 findings triaged: 4 refined, 2 fixed, 2 dismissed, 1 removed, 1 added dispatch note). Key Codex-driven changes: E-127-01 AC-1b added for convenience JSON formats; E-127-02 AC-3 tightened (no silent heuristic); E-127-11 AC-5 pinned artifact path; E-127-12 season label format aligned to "Spring 2025" (season-first); E-127-10 timestamp note corrected (repo uses ISO T-format, not space-separator); coach added to consultation audit trail; E-127-05 dispatch-last note added; E-127-01/02 creds.py dispatch awareness note added. Original 17 findings: E-127-10 expanded to cover second `_load_all_scouted()` bug instance + timestamp format warning; E-127-07/08/09 annotated with pre-implementation status; E-127-09 AC-2 expanded to fix stale `id` field description in public games endpoint doc; E-127-04 ACs tightened (is_admin_page default, specific styling); E-127-11 ACs added for human-readable labels, stale-data indicator, game count, own-team/opponent view compatibility; E-127-12 ACs refined (season selector on 4 main tabs only, back link persistence, expanded test coverage, data freshness indicator); E-127-05 AC-3 expanded to include extract-key; TN-1 updated with `type: "token"` field; TN-10 expanded; dispatch sequencing note added. No new stories, no migrations, no context-layer changes needed.
 - 2026-03-18: Proxy data refinement round. E-127-07 fully rescoped: proxy sessions confirm iOS sends brotli Accept-Encoding across all captures. Fix changed from "remove br from headers" to "install brotlicffi~=1.0". Headers must match real app behavior (see feedback memories). E-127-02 updated with client ID rotation finding (iOS client ID rotates with app updates, e.g., 0f18f027→23e37466 between Odyssey 2026.8.0→2026.9.0). TN-7 rewritten. Goals, Success Criteria, and story title updated to match new approach. Bonus findings (web Accept-Encoding gap, iOS user-agent version drift) captured as vision signals.
 - 2026-03-18: Second fresh-eyes refinement (SE, DE, UXD, coach, CA, api-scout). 13 findings, 11 applied: (1) E-127-09 Agent Hint changed from SE to api-scout -- SE anti-patterns prohibit editing `docs/api/`; api-scout added to Dispatch Team; (2) E-127-10 AC-1 corrected to `IN ('running', 'completed')` matching TN-10; (3) TN-2 heuristic fallback removed to align with E-127-02 AC-3; (4) E-127-11 AC-7 expanded with stale-data indicator copy spec per coach; (5) E-127-11 AC-8 expanded with opponent "scouted" qualifier per coach; (6) E-127-12 AC-2 adds single-season suppression; (7) E-127-12 season_display suffix list expanded (`-reserve`, `-legion`, graceful unknown); (8) E-127-01 AC-6 adds `user_id` tolerance test + `--profile mobile` JSON; (9) E-127-04 AC-4 clarifies right-side placement; (10) E-127-04 test spec adds dev-mode empty-state test; (11) E-127-08 AC-3 expanded to cover all stale references + Pre-Impl Status flags game_loader module docstring; (12) E-127-09 AC-2 expanded to name all 3 locations in public games doc. Deferred: CLAUDE.md `game_stream_id` description update -- handle at epic closure context-layer assessment.
+- 2026-03-19: **COMPLETED.** All 12 stories DONE. Dispatched in two waves: Wave 1 (10 parallel stories: 01-04, 06-11) and Wave 2 (05 docs + 12 season selector, after dependencies merged). Key accomplishments: (1) `bb creds import` now accepts curl, JSON, and bare JWT formats with auto-detection; (2) `bb creds extract-key` handles multi-match disambiguation via known client ID; (3) dev user auto-assigned to member teams on first request; (4) admin UI discoverable via top nav link, coaching nav suppressed on admin pages; (5) crawler guards against placeholder gc_uuids; (6) brotlicffi installed for mobile brotli decompression; (7) boxscore crawler uses correct `event_id`, loader has dual-key index; (8) scouting Accept header and loader status query fixed; (9) season selector with auto-detection, human-readable labels, freshness indicator, and nav persistence; (10) post-reset onboarding guide documented. Notable implementation detail: E-127-12 season selector uses pill buttons (matching team selector pattern) rather than the `<select>` dropdown specified in E-127-11 design -- functionally equivalent, visually consistent with existing UI. E-127-12 required a circuit breaker reset during code review (test failures from stale worktree state, resolved on fresh worktree).
+- 2026-03-19: **Documentation assessment.** Documentation impact addressed by E-127-05 (post-reset guide) and E-127-09 (API endpoint docs). Minor staleness in secondary admin docs (`bb creds import` described as curl-only) is non-blocking. No additional docs-writer dispatch needed.
+- 2026-03-19: **Context-layer assessment.** Per-trigger verdicts: (1) New convention/pattern: **YES** — Jinja2 template `&amp;` requirement for query params in href attributes; season validation pattern (trust explicit season_id, don't reject). (2) Architectural decision: **YES** — `event_id` is the correct boxscore path parameter, not `game_stream.id`; CLAUDE.md's `game_stream_id` description needs update. (3) Footgun/boundary: **YES** — brotlicffi required for mobile profile; `&` vs `&amp;` in Jinja2 raw template text. (4) Agent behavior change: **NO**. (5) Domain knowledge: **YES** — boxscore endpoint uses `event_id` (corrected from `game_stream.id`); game loader dual-key index pattern. (6) New CLI command/workflow: **NO**. Triggers 1, 2, 3, 5 fire. claude-architect dispatched for codification.

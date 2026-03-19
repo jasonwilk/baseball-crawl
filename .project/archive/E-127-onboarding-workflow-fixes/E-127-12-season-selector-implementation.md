@@ -4,7 +4,7 @@
 [E-127: Onboarding Workflow Fixes](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the dashboard will auto-detect the most recent season with data for the selected team, display a season selector UI, and persist season context across all tab navigation (Batting/Pitching/Games/Opponents). Users will no longer need to manually construct URLs with `&season_id=` to view data from non-default seasons.
@@ -18,13 +18,13 @@ All dashboard routes already accept `?season_id=` as a query parameter. The impl
 3. **Navigation persistence**: Ensure all dashboard links (bottom nav, team selector, back links) carry `season_id`.
 
 ## Acceptance Criteria
-- [ ] **AC-1**: When no `season_id` query parameter is provided, the dashboard auto-detects the most recent season with data for the selected team (not a hardcoded year/type).
-- [ ] **AC-2**: A season selector UI element is rendered on the four main dashboard tab pages (Batting, Pitching, Games list, Opponents list), showing available seasons for the selected team, per the E-127-11 design spec. The selector is suppressed (not rendered) when only one season has data for the team. Detail pages (game detail, opponent detail, player profile) do NOT display the season selector.
-- [ ] **AC-3**: All navigation links (bottom nav tabs, back links in detail pages like `← Games` and `← Opponents`, game detail links) include the current `season_id` as a query parameter. Team selector links should OMIT `season_id` to trigger auto-detection for the new team (per E-127-11 design spec).
-- [ ] **AC-4**: Changing the selected team updates the season selector to show seasons available for the new team, and auto-selects the most recent season with data.
-- [ ] **AC-5**: Edge case: a team with no data in any season shows an appropriate empty state (not a broken page).
-- [ ] **AC-6**: Tests verify: (a) season auto-detection returns the most recent season with data, (b) `available_seasons` and `season_id` are present in template context for all four main tab routes, (c) navigation link generation includes `season_id`, (d) empty-state behavior for teams with no data, (e) the `season_display` Jinja2 filter is unit tested for all known season ID patterns including those without a classification suffix (e.g., `2025-summer`) and non-HS suffixes (e.g., `2025-spring-legion`, `2025-spring-reserve`), (f) season selector is not rendered when only one season has data.
-- [ ] **AC-7**: A data freshness indicator (yellow info bar per E-127-11 design spec) is displayed between the selectors and page h1 when the displayed season is from a prior year (`is_current_season = False`). Not shown when the active season year matches the current calendar year, even if stats are empty.
+- [x] **AC-1**: When no `season_id` query parameter is provided, the dashboard auto-detects the most recent season with data for the selected team (not a hardcoded year/type).
+- [x] **AC-2**: A season selector UI element is rendered on the four main dashboard tab pages (Batting, Pitching, Games list, Opponents list), showing available seasons for the selected team, per the E-127-11 design spec. The selector is suppressed (not rendered) when only one season has data for the team. Detail pages (game detail, opponent detail, player profile) do NOT display the season selector.
+- [x] **AC-3**: All navigation links (bottom nav tabs, back links in detail pages like `← Games` and `← Opponents`, game detail links) include the current `season_id` as a query parameter. Team selector links should OMIT `season_id` to trigger auto-detection for the new team (per E-127-11 design spec).
+- [x] **AC-4**: Changing the selected team updates the season selector to show seasons available for the new team, and auto-selects the most recent season with data.
+- [x] **AC-5**: Edge case: a team with no data in any season shows an appropriate empty state (not a broken page).
+- [x] **AC-6**: Tests verify: (a) season auto-detection returns the most recent season with data, (b) `available_seasons` and `season_id` are present in template context for all four main tab routes, (c) navigation link generation includes `season_id`, (d) empty-state behavior for teams with no data, (e) the `season_display` Jinja2 filter is unit tested for all known season ID patterns including those without a classification suffix (e.g., `2025-summer`) and non-HS suffixes (e.g., `2025-spring-legion`, `2025-spring-reserve`), (f) season selector is not rendered when only one season has data.
+- [x] **AC-7**: A data freshness indicator (yellow info bar per E-127-11 design spec) is displayed between the selectors and page h1 when the displayed season is from a prior year (`is_current_season = False`). Not shown when the active season year matches the current calendar year, even if stats are empty.
 
 ## Technical Approach
 Read the E-127-11 design artifact at `epics/E-127-onboarding-workflow-fixes/season-selector-design.md` for the UX specification. The implementation touches the dashboard routes (season default logic) and templates (season selector, navigation links).

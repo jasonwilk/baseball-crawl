@@ -4,7 +4,7 @@
 [E-127: Onboarding Workflow Fixes](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the `DEV_USER_EMAIL` bypass will automatically assign the dev user to all teams with `membership_type = 'member'`. This eliminates the "You have no team assignments" dead end that occurs after `bb db reset` when the dev user is auto-created but has no `user_team_access` rows.

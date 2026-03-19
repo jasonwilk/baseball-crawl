@@ -4,7 +4,7 @@
 [E-127: Onboarding Workflow Fixes](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, `bb creds import` will accept three input formats -- curl commands (existing), raw JSON token payloads, and bare JWT strings -- and auto-detect the format without requiring new CLI flags. This eliminates the need for operators to craft curl commands when they only have token values from a proxy capture or browser devtools.

@@ -91,7 +91,7 @@ Scout: {{ scouting_report.team_name if scouting_report else opponent_team_id }}
     {% else %}
     <span class="text-gray-600">-</span>
     {% endif %}
-    <a href="/dashboard/games/{{ last_meeting.game_id }}" class="text-blue-900 hover:underline text-sm">Box Score</a>
+    <a href="/dashboard/games/{{ last_meeting.game_id }}?team_id={{ active_team_id }}{% if season_id %}&amp;season_id={{ season_id }}{% endif %}" class="text-blue-900 hover:underline text-sm">Box Score</a>
   </div>
   {% else %}
   <p class="text-gray-600 text-sm">First meeting this season.</p>

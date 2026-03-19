@@ -426,6 +426,44 @@ class TestNavigationLinks:
         # Each game row link should carry season_id
         assert f"/dashboard/games/g-row-001?team_id={team_id}&amp;season_id={_CURRENT_SEASON}" in html
 
+    def test_opponent_detail_box_score_link_carries_season_id(self, tmp_path: Path) -> None:
+        """Box Score link on opponent detail page includes season_id as &amp;season_id=."""
+        db_path = _make_db(tmp_path)
+        team_id = _insert_team(db_path, "Our Team")
+        opp_team_id = _insert_team(db_path, "Opponent Team")
+        _insert_season(db_path, _CURRENT_SEASON)
+
+        # Insert a completed game so last_meeting is non-None and Box Score link renders
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("PRAGMA foreign_keys=ON;")
+        conn.execute(
+            "INSERT INTO games (game_id, season_id, home_team_id, away_team_id,"
+            " game_date, home_score, away_score, status)"
+            " VALUES ('g-detail-001', ?, ?, ?, '2026-04-15', 5, 3, 'completed')",
+            (_CURRENT_SEASON, team_id, opp_team_id),
+        )
+        conn.commit()
+        conn.close()
+
+        with patch.dict(
+            "os.environ",
+            {"DATABASE_PATH": str(db_path), "DEV_USER_EMAIL": "dev@example.com"},
+        ):
+            client = _make_dev_client(db_path, team_id)
+            with client:
+                resp = client.get(
+                    f"/dashboard/opponents/{opp_team_id}"
+                    f"?team_id={team_id}&season_id={_CURRENT_SEASON}"
+                )
+
+        assert resp.status_code == 200
+        html = resp.text
+        # Box Score link must carry both team_id and season_id as valid HTML entities
+        assert (
+            f"/dashboard/games/g-detail-001?team_id={team_id}"
+            f"&amp;season_id={_CURRENT_SEASON}"
+        ) in html
+
     def test_opponent_list_link_carries_season_id(self, tmp_path: Path) -> None:
         """Opponent links in opponent list carry season_id."""
         db_path = _make_db(tmp_path)

@@ -4,7 +4,7 @@
 [E-127: Onboarding Workflow Fixes](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the crawler's DB source path will skip teams with NULL or placeholder `gc_uuid` values instead of sending them to the GameChanger API (where they return HTTP 500). The YAML source path already has `REPLACE_WITH_` prefix guards; the DB source path needs an equivalent safety check.

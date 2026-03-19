@@ -4,7 +4,7 @@
 [E-127: Onboarding Workflow Fixes](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the scouting load step in `bb data scout` will correctly find and load data from crawl runs that have already been marked `completed` by the crawl step. Currently the load step silently skips all scouted teams because the query filters for `status = 'running'` but the crawl step has already transitioned runs to `completed` before the load step executes.

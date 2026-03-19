@@ -496,3 +496,195 @@ class TestFailClosedMissingAuthTables:
                     ) as client:
                         with pytest.raises(sqlite3.OperationalError, match="database is locked"):
                             client.get("/dashboard")
+
+
+# ---------------------------------------------------------------------------
+# Dev user auto-assignment tests (E-127-03)
+# ---------------------------------------------------------------------------
+
+_SEED_SQL_TWO_TEAMS = """
+    INSERT OR IGNORE INTO programs (program_id, name, program_type) VALUES
+        ('lsb-hs', 'Lincoln Standing Bear HS', 'hs');
+    INSERT OR IGNORE INTO teams (name, membership_type, classification) VALUES
+        ('LSB Varsity 2026', 'member', 'varsity');
+    INSERT OR IGNORE INTO teams (name, membership_type, classification) VALUES
+        ('LSB JV 2026', 'member', 'jv');
+    INSERT OR IGNORE INTO teams (name, membership_type, classification) VALUES
+        ('Opponent Team', 'tracked', 'varsity');
+"""
+
+
+def _make_two_team_db(tmp_path: Path) -> Path:
+    """Create a database with two member teams and one tracked team.
+
+    Args:
+        tmp_path: pytest tmp_path fixture directory.
+
+    Returns:
+        Path to the database file.
+    """
+    db_path = tmp_path / "test_auto_assign.db"
+    run_migrations(db_path=db_path)
+    conn = sqlite3.connect(str(db_path))
+    conn.executescript(_SEED_SQL_TWO_TEAMS)
+    conn.commit()
+    conn.close()
+    return db_path
+
+
+def _get_team_access_rows(db_path: Path, user_id: int) -> list[int]:
+    """Return list of team_ids in user_team_access for the given user.
+
+    Args:
+        db_path: Path to the database file.
+        user_id: User to query.
+
+    Returns:
+        Sorted list of team_id integers.
+    """
+    conn = sqlite3.connect(str(db_path))
+    cursor = conn.execute(
+        "SELECT team_id FROM user_team_access WHERE user_id = ? ORDER BY team_id",
+        (user_id,),
+    )
+    rows = [row[0] for row in cursor.fetchall()]
+    conn.close()
+    return rows
+
+
+def _get_member_team_ids(db_path: Path) -> list[int]:
+    """Return sorted list of member team ids.
+
+    Args:
+        db_path: Path to the database file.
+
+    Returns:
+        Sorted list of INTEGER team ids.
+    """
+    conn = sqlite3.connect(str(db_path))
+    cursor = conn.execute(
+        "SELECT id FROM teams WHERE membership_type = 'member' ORDER BY id"
+    )
+    rows = [row[0] for row in cursor.fetchall()]
+    conn.close()
+    return rows
+
+
+class TestDevUserAutoAssignment:
+    """Dev bypass auto-assigns member teams (E-127-03)."""
+
+    def test_new_dev_user_gets_all_member_team_assignments(self, tmp_path: Path) -> None:
+        """New dev user is auto-assigned to all member teams on creation (AC-1)."""
+        db_path = _make_two_team_db(tmp_path)
+        member_ids = _get_member_team_ids(db_path)
+        assert len(member_ids) == 2  # sanity check fixture
+
+        dev_email = "newdev@example.com"
+        env = {"DATABASE_PATH": str(db_path), "DEV_USER_EMAIL": dev_email}
+        with patch.dict("os.environ", env):
+            with TestClient(app) as client:
+                client.get("/dashboard")
+
+        conn = sqlite3.connect(str(db_path))
+        user_row = conn.execute(
+            "SELECT id FROM users WHERE email = ?", (dev_email,)
+        ).fetchone()
+        conn.close()
+        assert user_row is not None
+        assigned = _get_team_access_rows(db_path, user_row[0])
+        assert assigned == member_ids
+
+    def test_new_dev_user_assignment_excludes_tracked_teams(self, tmp_path: Path) -> None:
+        """Dev user auto-assignment only includes member teams, not tracked (AC-1)."""
+        db_path = _make_two_team_db(tmp_path)
+        member_ids = _get_member_team_ids(db_path)
+
+        dev_email = "newdev2@example.com"
+        env = {"DATABASE_PATH": str(db_path), "DEV_USER_EMAIL": dev_email}
+        with patch.dict("os.environ", env):
+            with TestClient(app) as client:
+                client.get("/dashboard")
+
+        conn = sqlite3.connect(str(db_path))
+        user_row = conn.execute(
+            "SELECT id FROM users WHERE email = ?", (dev_email,)
+        ).fetchone()
+        conn.close()
+        assigned = _get_team_access_rows(db_path, user_row[0])
+        # Only member teams assigned -- tracked team excluded
+        assert assigned == member_ids
+
+    def test_existing_dev_user_with_no_assignments_gets_backfilled(
+        self, tmp_path: Path
+    ) -> None:
+        """Existing dev user with zero user_team_access rows is backfilled (AC-2)."""
+        db_path = _make_two_team_db(tmp_path)
+        member_ids = _get_member_team_ids(db_path)
+        dev_email = "olddev@example.com"
+
+        # Insert user with no team assignments
+        conn = sqlite3.connect(str(db_path))
+        cursor = conn.execute("INSERT INTO users (email) VALUES (?)", (dev_email,))
+        user_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+
+        # Verify no assignments before the request
+        assert _get_team_access_rows(db_path, user_id) == []
+
+        env = {"DATABASE_PATH": str(db_path), "DEV_USER_EMAIL": dev_email}
+        with patch.dict("os.environ", env):
+            with TestClient(app) as client:
+                response = client.get("/dashboard")
+
+        assert response.status_code == 200
+        assigned = _get_team_access_rows(db_path, user_id)
+        assert assigned == member_ids
+
+    def test_existing_dev_user_with_assignments_has_no_duplicates(
+        self, tmp_path: Path
+    ) -> None:
+        """Multiple requests for dev user with assignments produce no duplicates (AC-3)."""
+        db_path = _make_two_team_db(tmp_path)
+        member_ids = _get_member_team_ids(db_path)
+        dev_email = "repeatdev@example.com"
+
+        env = {"DATABASE_PATH": str(db_path), "DEV_USER_EMAIL": dev_email}
+        with patch.dict("os.environ", env):
+            with TestClient(app) as client:
+                client.get("/dashboard")
+                client.get("/dashboard")
+                client.get("/dashboard")
+
+        conn = sqlite3.connect(str(db_path))
+        user_row = conn.execute(
+            "SELECT id FROM users WHERE email = ?", (dev_email,)
+        ).fetchone()
+        count = conn.execute(
+            "SELECT COUNT(*) FROM user_team_access WHERE user_id = ?",
+            (user_row[0],),
+        ).fetchone()[0]
+        conn.close()
+        # Exactly one row per member team, no duplicates
+        assert count == len(member_ids)
+
+    def test_permitted_teams_set_on_first_request(self, tmp_path: Path) -> None:
+        """permitted_teams is non-empty on the very first request (AC-4)."""
+        db_path = _make_two_team_db(tmp_path)
+        dev_email = "firsttime@example.com"
+        env = {"DATABASE_PATH": str(db_path), "DEV_USER_EMAIL": dev_email}
+        with patch.dict("os.environ", env):
+            with TestClient(app) as client:
+                # First request should succeed -- permitted_teams is set
+                response = client.get("/dashboard")
+        assert response.status_code == 200
+
+        # Verify assignments were created during that first request
+        conn = sqlite3.connect(str(db_path))
+        user_row = conn.execute(
+            "SELECT id FROM users WHERE email = ?", (dev_email,)
+        ).fetchone()
+        conn.close()
+        assert user_row is not None
+        assigned = _get_team_access_rows(db_path, user_row[0])
+        assert len(assigned) > 0

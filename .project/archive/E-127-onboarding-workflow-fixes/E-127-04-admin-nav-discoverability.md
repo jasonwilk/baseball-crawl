@@ -4,7 +4,7 @@
 [E-127: Onboarding Workflow Fixes](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the admin UI will be discoverable from the main dashboard via a visible "Admin" link in the top navigation bar. Admin pages will suppress the bottom coaching nav to avoid confusing context mixing. The empty-state "no team assignments" message will link dev-mode users to `/admin/teams`.

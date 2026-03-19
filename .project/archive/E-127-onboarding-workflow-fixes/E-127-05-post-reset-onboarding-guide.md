@@ -4,7 +4,7 @@
 [E-127: Onboarding Workflow Fixes](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, `docs/admin/post-reset-guide.md` will document the end-to-end operator workflow for going from a fresh `bb db reset` to a working local environment with real GameChanger data. This bridges the gap between "I just reset the database" and "I can see real team data on the dashboard."

@@ -4,7 +4,7 @@
 [E-127: Onboarding Workflow Fixes](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, `bb creds extract-key` will correctly handle JS bundles containing multiple `EDEN_AUTH_CLIENT_KEY` entries by logging all matches and selecting the web client key. Currently `_EDEN_KEY_PATTERN.search()` returns the first match, which may be the mobile key rather than the web key.

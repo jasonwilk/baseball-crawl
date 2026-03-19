@@ -4,7 +4,7 @@
 [E-127: Onboarding Workflow Fixes](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, there will be a UX specification for how the dashboard handles season selection -- including auto-detection of the most recent season with data for the selected team, a season dropdown/selector UI, and season context persistence across tab navigation (Batting/Pitching/Games/Opponents).

@@ -4,7 +4,7 @@
 [E-127: Onboarding Workflow Fixes](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the game stats crawler will use `event_id` (not `game_stream.id`) as the path parameter for `GET /game-stream-processing/{id}/boxscore`, the misleading code comments claiming `game_stream.id` is the correct ID will be corrected, and the game loader's summaries index will support lookup by both `event_id` and `game_stream_id` so that boxscore files named by `event_id` can be matched to game summaries. This bug caused all 17 boxscore fetches to fail with HTTP 500 "Cannot find event" during crawl testing.
