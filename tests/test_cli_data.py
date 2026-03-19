@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -9,6 +10,7 @@ import pytest
 from typer.testing import CliRunner
 
 from src.cli import app
+from src.cli.data import _find_scouting_run, _load_all_scouted
 
 runner = CliRunner()
 
@@ -301,3 +303,155 @@ def test_resolve_opponents_passes_db_path_to_load_config() -> None:
 
     mock_load_config.assert_called_once_with(db_path=fake_db_path)
     assert result.exit_code == 0
+
+
+# ---------------------------------------------------------------------------
+# _find_scouting_run / _load_all_scouted -- status query bug (E-127-10)
+# ---------------------------------------------------------------------------
+
+
+def _make_scouting_db() -> sqlite3.Connection:
+    """Return an in-memory SQLite connection with the minimal schema for scouting tests."""
+    conn = sqlite3.connect(":memory:")
+    conn.execute("PRAGMA foreign_keys=ON")
+    conn.executescript(
+        """
+        CREATE TABLE seasons (
+            season_id   TEXT PRIMARY KEY,
+            name        TEXT NOT NULL,
+            season_type TEXT NOT NULL,
+            year        INTEGER NOT NULL
+        );
+        CREATE TABLE teams (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            name            TEXT NOT NULL,
+            membership_type TEXT NOT NULL,
+            public_id       TEXT
+        );
+        CREATE TABLE scouting_runs (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            team_id       INTEGER NOT NULL REFERENCES teams(id),
+            season_id     TEXT NOT NULL REFERENCES seasons(season_id),
+            run_type      TEXT NOT NULL DEFAULT 'full',
+            status        TEXT NOT NULL DEFAULT 'pending',
+            last_checked  TEXT NOT NULL DEFAULT (datetime('now')),
+            UNIQUE(team_id, season_id, run_type)
+        );
+        INSERT INTO seasons(season_id, name, season_type, year)
+            VALUES ('2026-spring-hs', 'Spring 2026 HS', 'spring-hs', 2026);
+        """
+    )
+    return conn
+
+
+def test_find_scouting_run_returns_completed_run() -> None:
+    """_find_scouting_run() finds a run with status='completed'."""
+    conn = _make_scouting_db()
+    conn.execute(
+        "INSERT INTO teams(name, membership_type, public_id) VALUES ('Opponent A', 'tracked', 'opp-a')"
+    )
+    team_id = conn.execute("SELECT id FROM teams WHERE public_id='opp-a'").fetchone()[0]
+    conn.execute(
+        "INSERT INTO scouting_runs(team_id, season_id, status, last_checked) "
+        "VALUES (?, '2026-spring-hs', 'completed', '2026-01-01T12:00:00.000Z')",
+        (team_id,),
+    )
+    conn.commit()
+
+    result = _find_scouting_run(conn, "opp-a", "2026-01-01T00:00:00.000Z")
+
+    assert result is not None
+    assert result == (team_id, "2026-spring-hs")
+
+
+def test_find_scouting_run_returns_running_run() -> None:
+    """_find_scouting_run() still finds a run with status='running'."""
+    conn = _make_scouting_db()
+    conn.execute(
+        "INSERT INTO teams(name, membership_type, public_id) VALUES ('Opponent B', 'tracked', 'opp-b')"
+    )
+    team_id = conn.execute("SELECT id FROM teams WHERE public_id='opp-b'").fetchone()[0]
+    conn.execute(
+        "INSERT INTO scouting_runs(team_id, season_id, status, last_checked) "
+        "VALUES (?, '2026-spring-hs', 'running', '2026-01-01T12:00:00.000Z')",
+        (team_id,),
+    )
+    conn.commit()
+
+    result = _find_scouting_run(conn, "opp-b", "2026-01-01T00:00:00.000Z")
+
+    assert result is not None
+    assert result == (team_id, "2026-spring-hs")
+
+
+def test_find_scouting_run_skips_pending_run() -> None:
+    """_find_scouting_run() does not return runs with status='pending'."""
+    conn = _make_scouting_db()
+    conn.execute(
+        "INSERT INTO teams(name, membership_type, public_id) VALUES ('Opponent C', 'tracked', 'opp-c')"
+    )
+    team_id = conn.execute("SELECT id FROM teams WHERE public_id='opp-c'").fetchone()[0]
+    conn.execute(
+        "INSERT INTO scouting_runs(team_id, season_id, status, last_checked) "
+        "VALUES (?, '2026-spring-hs', 'pending', '2026-01-01T12:00:00.000Z')",
+        (team_id,),
+    )
+    conn.commit()
+
+    result = _find_scouting_run(conn, "opp-c", "2026-01-01T00:00:00.000Z")
+
+    assert result is None
+
+
+def test_load_all_scouted_finds_completed_runs(tmp_path: Path) -> None:
+    """_load_all_scouted() processes runs with status='completed'."""
+    conn = _make_scouting_db()
+    conn.execute(
+        "INSERT INTO teams(name, membership_type, public_id) VALUES ('Opponent D', 'tracked', 'opp-d')"
+    )
+    team_id = conn.execute("SELECT id FROM teams WHERE public_id='opp-d'").fetchone()[0]
+    conn.execute(
+        "INSERT INTO scouting_runs(team_id, season_id, status, last_checked) "
+        "VALUES (?, '2026-spring-hs', 'completed', '2026-01-01T12:00:00.000Z')",
+        (team_id,),
+    )
+    conn.commit()
+
+    # Create the scouting dir so the loader call is attempted.
+    scouting_dir = tmp_path / "2026-spring-hs" / "scouting" / "opp-d"
+    scouting_dir.mkdir(parents=True)
+
+    mock_load_result = MagicMock()
+    mock_load_result.errors = 0
+
+    mock_crawler = MagicMock()
+    mock_loader = MagicMock()
+    mock_loader.load_team.return_value = mock_load_result
+
+    errors = _load_all_scouted(conn, mock_crawler, mock_loader, tmp_path, "2026-01-01T00:00:00.000Z")
+
+    assert errors == 0
+    mock_loader.load_team.assert_called_once()
+
+
+def test_load_all_scouted_skips_pending_runs(tmp_path: Path) -> None:
+    """_load_all_scouted() ignores runs with status='pending'."""
+    conn = _make_scouting_db()
+    conn.execute(
+        "INSERT INTO teams(name, membership_type, public_id) VALUES ('Opponent E', 'tracked', 'opp-e')"
+    )
+    team_id = conn.execute("SELECT id FROM teams WHERE public_id='opp-e'").fetchone()[0]
+    conn.execute(
+        "INSERT INTO scouting_runs(team_id, season_id, status, last_checked) "
+        "VALUES (?, '2026-spring-hs', 'pending', '2026-01-01T12:00:00.000Z')",
+        (team_id,),
+    )
+    conn.commit()
+
+    mock_crawler = MagicMock()
+    mock_loader = MagicMock()
+
+    errors = _load_all_scouted(conn, mock_crawler, mock_loader, tmp_path, "2026-01-01T00:00:00.000Z")
+
+    assert errors == 0
+    mock_loader.load_team.assert_not_called()

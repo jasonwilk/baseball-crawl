@@ -283,7 +283,7 @@ def _find_scouting_run(
     public_id: str,
     started_at: str,
 ) -> tuple[int, str] | None:
-    """Look up the team INTEGER PK and season for the most recent running scouting run.
+    """Look up the team INTEGER PK and season for the most recent eligible scouting run.
 
     Args:
         conn: Open SQLite connection.
@@ -303,12 +303,12 @@ def _find_scouting_run(
 
     run = conn.execute(
         "SELECT season_id FROM scouting_runs "
-        "WHERE team_id = ? AND status = 'running' AND last_checked >= ? "
+        "WHERE team_id = ? AND status IN ('running', 'completed') AND last_checked >= ? "
         "ORDER BY last_checked DESC LIMIT 1",
         (team_id, started_at),
     ).fetchone()
     if run is None:
-        logger.info("No running scouting run found for public_id=%s; skipping load.", public_id)
+        logger.info("No eligible scouting run found for public_id=%s; skipping load.", public_id)
         return None
 
     return team_id, run[0]
@@ -379,7 +379,7 @@ def _load_all_scouted(
     runs = conn.execute(
         "SELECT sr.team_id, sr.season_id, t.public_id "
         "FROM scouting_runs sr JOIN teams t ON sr.team_id = t.id "
-        "WHERE sr.status = 'running' AND sr.last_checked >= ?",
+        "WHERE sr.status IN ('running', 'completed') AND sr.last_checked >= ?",
         (started_at,),
     ).fetchall()
 
