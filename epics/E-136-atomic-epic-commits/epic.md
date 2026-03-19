@@ -107,3 +107,4 @@ None -- all questions resolved via CA and SE consultation.
 
 ## History
 - 2026-03-19: Created. Replaces abandoned E-135 (which was abandoned because the user wanted a proper epic, not a direct CA fix). CA and SE consultation completed via team-lead relay.
+- 2026-03-19: Refinement with PM, SE, CA. Added E-136-04 (workflow-discipline.md) and E-136-05 (code-reviewer.md) for cross-file consistency. Tightened ACs in E-136-01. Updated TN-3 with --3way flag. Phase 4 (codex-review) verified compatible with atomic workflow -- no changes needed.
