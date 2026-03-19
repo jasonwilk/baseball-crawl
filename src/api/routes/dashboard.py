@@ -359,6 +359,8 @@ def _compute_pitching_rates(pitchers: list[dict]) -> list[dict]:
         so = row.get("so") or 0
         bb = row.get("bb") or 0
         h = row.get("h") or 0
+        pitches = row.get("pitches") or 0
+        total_strikes = row.get("total_strikes") or 0
         if ip_outs == 0:
             row["era"] = "-"
             row["k9"] = "-"
@@ -369,6 +371,7 @@ def _compute_pitching_rates(pitchers: list[dict]) -> list[dict]:
             row["k9"] = f"{(so * 27) / ip_outs:.1f}"
             row["bb9"] = f"{(bb * 27) / ip_outs:.1f}"
             row["whip"] = f"{(bb + h) * 3 / ip_outs:.2f}"
+        row["strike_pct"] = f"{(total_strikes / pitches) * 100:.1f}%" if pitches > 0 else "-"
     return pitchers
 
 
@@ -635,6 +638,7 @@ def _compute_opponent_pitching_rates(pitchers: list[dict]) -> list[dict]:
         h = row.get("h") or 0
         games = row.get("games") or 0
         pitches = row.get("pitches") or 0
+        total_strikes = row.get("total_strikes") or 0
         if ip_outs == 0:
             row["era"] = "-"
             row["k9"] = "-"
@@ -644,6 +648,7 @@ def _compute_opponent_pitching_rates(pitchers: list[dict]) -> list[dict]:
             row["k9"] = f"{(so * 27) / ip_outs:.1f}"
             row["whip"] = f"{(bb + h) * 3 / ip_outs:.2f}"
         row["avg_pitches"] = str(pitches // games) if games > 0 else "-"
+        row["strike_pct"] = f"{(total_strikes / pitches) * 100:.1f}%" if pitches > 0 else "-"
     return pitchers
 
 
@@ -1027,6 +1032,11 @@ async def game_detail(request: Request, game_id: str) -> Response:
     team_infos = await run_in_threadpool(db.get_teams_by_ids, list(permitted_teams))
     season_id_gd = request.query_params.get("season_id", "").strip()
 
+    # Compute strike_pct for each team's pitching lines
+    teams = box_score["teams"]
+    for team in teams:
+        _compute_game_pitching_rates(team.get("pitching_lines", []))
+
     logger.debug("Game detail: game_id=%s active_team_id=%s", game_id, active_team_id_gd)
 
     return templates.TemplateResponse(
@@ -1034,7 +1044,7 @@ async def game_detail(request: Request, game_id: str) -> Response:
         "dashboard/game_detail.html",
         {
             "game": game,
-            "teams": box_score["teams"],
+            "teams": teams,
             "active_team_id": active_team_id_gd,
             "season_id": season_id_gd,
             "permitted_team_infos": team_infos,
@@ -1060,6 +1070,8 @@ def _compute_player_pitching_rates(pitching_seasons: list[dict]) -> list[dict]:
         so = row.get("so") or 0
         bb = row.get("bb") or 0
         h = row.get("h") or 0
+        pitches = row.get("pitches") or 0
+        total_strikes = row.get("total_strikes") or 0
         if ip_outs == 0:
             row["era"] = "-"
             row["k9"] = "-"
@@ -1068,7 +1080,27 @@ def _compute_player_pitching_rates(pitching_seasons: list[dict]) -> list[dict]:
             row["era"] = f"{(er * 27) / ip_outs:.2f}"
             row["k9"] = f"{(so * 27) / ip_outs:.1f}"
             row["whip"] = f"{(bb + h) * 3 / ip_outs:.2f}"
+        row["strike_pct"] = f"{(total_strikes / pitches) * 100:.1f}%" if pitches > 0 else "-"
     return pitching_seasons
+
+
+def _compute_game_pitching_rates(pitchers: list[dict]) -> list[dict]:
+    """Compute strike_pct for each pitcher row in a game box score.
+
+    Mutates each row in place by adding a ``strike_pct`` string key.
+    When ``pitches`` is 0 or NULL, yields ``"-"``.
+
+    Args:
+        pitchers: List of pitcher dicts from ``db.get_game_box_score``.
+
+    Returns:
+        The same list with ``strike_pct`` field added to each dict.
+    """
+    for row in pitchers:
+        pitches = row.get("pitches") or 0
+        total_strikes = row.get("total_strikes") or 0
+        row["strike_pct"] = f"{(total_strikes / pitches) * 100:.1f}%" if pitches > 0 else "-"
+    return pitchers
 
 
 def _check_player_authorization(

@@ -108,6 +108,8 @@ Game Detail{% if game %} -- {{ game.game_date }}{% endif %}
                 <th class="py-2 px-3 text-center">ER</th>
                 <th class="py-2 px-3 text-center">BB</th>
                 <th class="py-2 px-3 text-center">SO</th>
+                <th class="py-2 px-3 text-center">#P</th>
+                <th class="py-2 px-3 text-center">Strike %</th>
               </tr>
             </thead>
             <tbody>
@@ -123,6 +125,8 @@ Game Detail{% if game %} -- {{ game.game_date }}{% endif %}
                 <td class="py-2 px-3 text-center">{{ pitcher.er }}</td>
                 <td class="py-2 px-3 text-center">{{ pitcher.bb }}</td>
                 <td class="py-2 px-3 text-center">{{ pitcher.so }}</td>
+                <td class="py-2 px-3 text-center">{{ pitcher.pitches }}</td>
+                <td class="py-2 px-3 text-center">{{ pitcher.strike_pct }}</td>
               </tr>
               {% endfor %}
             </tbody>

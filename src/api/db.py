@@ -176,11 +176,13 @@ def get_team_pitching_stats(
             tr.jersey_number,
             COALESCE(psp.gp_pitcher, 0) AS games,
             COALESCE(psp.ip_outs, 0) AS ip_outs,
-            COALESCE(psp.h, 0)       AS h,
-            COALESCE(psp.er, 0)      AS er,
-            COALESCE(psp.bb, 0)      AS bb,
-            COALESCE(psp.so, 0)      AS so,
-            COALESCE(psp.hr, 0)      AS hr
+            COALESCE(psp.h, 0)             AS h,
+            COALESCE(psp.er, 0)            AS er,
+            COALESCE(psp.bb, 0)            AS bb,
+            COALESCE(psp.so, 0)            AS so,
+            COALESCE(psp.hr, 0)            AS hr,
+            COALESCE(psp.pitches, 0)       AS pitches,
+            COALESCE(psp.total_strikes, 0) AS total_strikes
         FROM player_season_pitching psp
         JOIN players p ON p.player_id = psp.player_id
         LEFT JOIN team_rosters tr
@@ -327,11 +329,13 @@ def get_game_box_score(game_id: str) -> dict[str, Any]:
             pgp.player_id,
             p.first_name || ' ' || p.last_name AS name,
             pgp.team_id,
-            COALESCE(pgp.ip_outs, 0) AS ip_outs,
-            COALESCE(pgp.h, 0)       AS h,
-            COALESCE(pgp.er, 0)      AS er,
-            COALESCE(pgp.bb, 0)      AS bb,
-            COALESCE(pgp.so, 0)      AS so
+            COALESCE(pgp.ip_outs, 0)       AS ip_outs,
+            COALESCE(pgp.h, 0)             AS h,
+            COALESCE(pgp.er, 0)            AS er,
+            COALESCE(pgp.bb, 0)            AS bb,
+            COALESCE(pgp.so, 0)            AS so,
+            COALESCE(pgp.pitches, 0)       AS pitches,
+            COALESCE(pgp.total_strikes, 0) AS total_strikes
         FROM player_game_pitching pgp
         JOIN players p ON p.player_id = pgp.player_id
         WHERE pgp.game_id = ?
@@ -518,13 +522,14 @@ def get_opponent_scouting_report(
         SELECT
             p.player_id,
             p.first_name || ' ' || p.last_name AS name,
-            COALESCE(psp.gp_pitcher, 0) AS games,
-            COALESCE(psp.ip_outs, 0) AS ip_outs,
-            COALESCE(psp.h, 0)       AS h,
-            COALESCE(psp.er, 0)      AS er,
-            COALESCE(psp.bb, 0)      AS bb,
-            COALESCE(psp.so, 0)      AS so,
-            COALESCE(psp.pitches, 0) AS pitches
+            COALESCE(psp.gp_pitcher, 0)    AS games,
+            COALESCE(psp.ip_outs, 0)       AS ip_outs,
+            COALESCE(psp.h, 0)             AS h,
+            COALESCE(psp.er, 0)            AS er,
+            COALESCE(psp.bb, 0)            AS bb,
+            COALESCE(psp.so, 0)            AS so,
+            COALESCE(psp.pitches, 0)       AS pitches,
+            COALESCE(psp.total_strikes, 0) AS total_strikes
         FROM player_season_pitching psp
         JOIN players p ON p.player_id = psp.player_id
         WHERE psp.team_id = ? AND psp.season_id = ?
@@ -672,13 +677,15 @@ def get_player_profile(player_id: str) -> dict[str, Any]:
             s.name        AS season_name,
             psp.team_id,
             t.name        AS team_name,
-            COALESCE(psp.gp_pitcher, 0) AS games,
-            COALESCE(psp.ip_outs, 0) AS ip_outs,
-            COALESCE(psp.h, 0)       AS h,
-            COALESCE(psp.er, 0)      AS er,
-            COALESCE(psp.bb, 0)      AS bb,
-            COALESCE(psp.so, 0)      AS so,
-            COALESCE(psp.hr, 0)      AS hr
+            COALESCE(psp.gp_pitcher, 0)    AS games,
+            COALESCE(psp.ip_outs, 0)       AS ip_outs,
+            COALESCE(psp.h, 0)             AS h,
+            COALESCE(psp.er, 0)            AS er,
+            COALESCE(psp.bb, 0)            AS bb,
+            COALESCE(psp.so, 0)            AS so,
+            COALESCE(psp.hr, 0)            AS hr,
+            COALESCE(psp.pitches, 0)       AS pitches,
+            COALESCE(psp.total_strikes, 0) AS total_strikes
         FROM player_season_pitching psp
         JOIN seasons s ON s.season_id = psp.season_id
         JOIN teams t ON t.id = psp.team_id

@@ -1,7 +1,7 @@
 # E-134: Add Strike % and # Pitches to Pitching Displays
 
 ## Status
-`READY`
+`COMPLETED`
 
 ## Overview
 Add two pitching stats -- **Strike %** (total_strikes / pitches × 100) and **# Pitches** -- to all pitching display surfaces in the coaching dashboard. Both columns already exist in the database and are populated by all ingestion paths; this epic surfaces them in the UI.
@@ -29,7 +29,7 @@ No expert consultation required -- this is a pure display-layer change using exi
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-134-01 | Add Strike % and # Pitches to all pitching display surfaces | TODO | None | - |
+| E-134-01 | Add Strike % and # Pitches to all pitching display surfaces | DONE | None | - |
 
 ## Dispatch Team
 - software-engineer
@@ -85,3 +85,4 @@ None.
 ## History
 - 2026-03-19: Created
 - 2026-03-19: Holistic refinement with SE, DE, UXD, api-scout. Changes: (1) AC-6 expanded to cover NULL pitches, not just 0 -- DE identified nullable schema columns with inconsistent loader defaults; (2) game box score helper function guidance added to Technical Notes -- SE recommended for consistency and testability; (3) colspan update note added -- UXD identified stale colspan="12" in team_pitching.html empty state; (4) AC-8 refined to specify unit tests on compute functions with crafted dicts; (5) api-scout confirmed `TS` field IS present in season-stats defense object despite API spec documentation gap -- no scope change needed.
+- 2026-03-19: Completed. Added #P and Strike % columns to all 5 pitching display surfaces. Codex review clean. CR approved.

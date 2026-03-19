@@ -62,6 +62,8 @@
         <span><span class="text-gray-600">ERA</span> <span class="font-medium">{{ current_pitching.era }}</span></span>
         <span><span class="text-gray-600">K/9</span> <span class="font-medium">{{ current_pitching.k9 }}</span></span>
         <span><span class="text-gray-600">WHIP</span> <span class="font-medium">{{ current_pitching.whip }}</span></span>
+        <span><span class="text-gray-600">#P</span> <span class="font-medium">{{ current_pitching.pitches }}</span></span>
+        <span><span class="text-gray-600">Strike %</span> <span class="font-medium">{{ current_pitching.strike_pct }}</span></span>
       </div>
     </div>
     {% endif %}
@@ -140,6 +142,8 @@
         <th class="py-2 px-3 text-center">ER</th>
         <th class="py-2 px-3 text-center">BB</th>
         <th class="py-2 px-3 text-center">SO</th>
+        <th class="py-2 px-3 text-center">#P</th>
+        <th class="py-2 px-3 text-center">Strike %</th>
         <th class="py-2 px-3 text-center">HR</th>
       </tr>
     </thead>
@@ -157,6 +161,8 @@
         <td class="py-2 px-3 text-center">{{ row.er }}</td>
         <td class="py-2 px-3 text-center">{{ row.bb }}</td>
         <td class="py-2 px-3 text-center">{{ row.so }}</td>
+        <td class="py-2 px-3 text-center">{{ row.pitches }}</td>
+        <td class="py-2 px-3 text-center">{{ row.strike_pct }}</td>
         <td class="py-2 px-3 text-center">{{ row.hr }}</td>
       </tr>
       {% endfor %}
