@@ -1,7 +1,7 @@
 # E-137: Epic-Level Worktree Isolation
 
 ## Status
-`DRAFT`
+`READY`
 
 ## Overview
 Isolate each dispatched epic's changes into a dedicated git worktree so that story merge-back, code review, and atomic commits are scoped to exactly the current epic's changes. Today, all story patches accumulate in the shared main checkout, contaminating commits with unrelated files from PM planning, stale artifacts, and cross-story bleed.
@@ -124,3 +124,4 @@ The codex-review skill and `scripts/codex-review.sh` must support running agains
 
 ## History
 - 2026-03-19: Created during parallel-epic-design consultation team. PM, CA, SE, and DE contributed analysis. User validated two-epic plan (E-137 infrastructure, E-138 pipeline).
+- 2026-03-19: Codex spec review completed -- all findings fixed during refinement. User approved plan. Status set to READY.

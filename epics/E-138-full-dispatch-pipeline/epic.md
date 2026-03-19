@@ -1,7 +1,7 @@
 # E-138: Full Dispatch Pipeline
 
 ## Status
-`DRAFT`
+`READY`
 
 ## Overview
 Automate the full post-dispatch pipeline — codex review, code-reviewer integration review, remediation, and commit — into a single "and review" modifier on the dispatch trigger. Today this requires 4+ manual interactions; the pipeline absorbs them all while gracefully degrading when the diff is too large for headless codex review.
@@ -138,3 +138,4 @@ This epic depends on E-137 (epic-level worktree isolation). All diffs are genera
 
 ## History
 - 2026-03-19: Created during parallel-epic-design consultation team. PM, CA, SE contributed analysis. User validated two-epic plan (E-137 infrastructure, E-138 pipeline).
+- 2026-03-19: Codex spec review completed -- all findings fixed during refinement. User approved plan. Status set to READY.
