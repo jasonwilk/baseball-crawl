@@ -19,7 +19,7 @@ The main session evaluates each trigger with an explicit **yes** or **no** verdi
 3. **Footgun, failure mode, or boundary discovered.** Did the epic reveal a gotcha, a common mistake, or an operational boundary (host vs container, auth vs public, etc.) that agents could trip over in future work?
 4. **Change to agent behavior, routing, or coordination.** Did the epic modify how agents are dispatched, what they can do, how they communicate, or how the closure sequence works?
 5. **Domain knowledge discovered that should influence agent decisions in future epics.** Did the epic surface baseball domain insights, API behavior patterns, or data model knowledge that agents should carry forward?
-6. **New CLI command, workflow, or operational procedure introduced.** Did the epic add a new `bb` subcommand, a new script, a new skill, or a new operational workflow that should be documented in the context layer?
+6. **New CLI command, workflow, or operational procedure introduced.** Did the epic add a new `bb` subcommand, a new script, a new skill, or a new operational workflow that should be documented in the context layer? If a workflow skill was added, renamed, or retired, also update the `/workflow-help` cheat sheet (`.claude/skills/workflow-help/SKILL.md`) and the CLAUDE.md Workflows section.
 
 ## Assessment Procedure
 
