@@ -15,6 +15,7 @@ Run with:
 from __future__ import annotations
 
 import datetime
+import secrets
 import sqlite3
 import sys
 from pathlib import Path
@@ -32,6 +33,7 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from migrations.apply_migrations import run_migrations  # noqa: E402
+from src.api.auth import hash_token  # noqa: E402
 from src.api.main import app  # noqa: E402
 
 # Derive season_id the same way the route does, so tests stay valid across years.
@@ -173,23 +175,38 @@ def multi_team_client(tmp_path: Path, db_info: tuple[Path, int, int]):
 
 @pytest.fixture()
 def no_teams_client(tmp_path: Path, db_info: tuple[Path, int, int]):
-    """Client for a user with no team assignments."""
+    """Client for a session-authenticated user with no team assignments.
+
+    Uses session-based auth (no DEV_USER_EMAIL) so the E-127-03 backfill
+    logic does not trigger and permitted_teams stays empty.
+    """
     db_path, _alpha, _beta = db_info
     conn = sqlite3.connect(str(db_path))
     conn.execute("PRAGMA foreign_keys=ON;")
-    conn.execute(
+    cursor = conn.execute(
         "INSERT OR IGNORE INTO users (email) VALUES (?)",
         ("coach-none@example.com",),
     )
     conn.commit()
+    user_id = cursor.lastrowid or conn.execute(
+        "SELECT id FROM users WHERE email = ?", ("coach-none@example.com",)
+    ).fetchone()[0]
+
+    raw_token = secrets.token_hex(32)
+    token_hash = hash_token(raw_token)
+    conn.execute(
+        "INSERT INTO sessions (session_id, user_id, expires_at) VALUES (?, ?, datetime('now', '+7 days'))",
+        (token_hash, user_id),
+    )
+    conn.commit()
     conn.close()
 
-    env_overrides = {
-        "DATABASE_PATH": str(db_path),
-        "DEV_USER_EMAIL": "coach-none@example.com",
-    }
-    with patch.dict("os.environ", env_overrides):
-        with TestClient(app, follow_redirects=False) as client:
+    with patch.dict("os.environ", {"DATABASE_PATH": str(db_path)}):
+        with TestClient(
+            app,
+            follow_redirects=False,
+            cookies={"session": raw_token, "csrf_token": "test-csrf"},
+        ) as client:
             yield client
 
 
