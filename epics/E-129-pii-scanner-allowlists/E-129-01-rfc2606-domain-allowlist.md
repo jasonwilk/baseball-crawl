@@ -5,7 +5,7 @@
 [E-129: PII Scanner Allowlists](epic.md)
 
 ## Status
-`TODO`
+`IN_PROGRESS`
 
 ## Description
 After this story is complete, the PII scanner's email pattern will skip matches where the domain is an RFC 2606 reserved domain. Emails like `user@example.com`, `test@foo.test`, and `admin@localhost` will no longer trigger findings. Real email addresses (any non-reserved domain) will continue to be caught.

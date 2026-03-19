@@ -92,6 +92,30 @@ SCANNABLE_EXTENSIONS: set[str] = {
     ".env", ".sh", ".bash",
 }
 
+# RFC 2606 reserved domain allowlist for email filtering.
+# Email addresses using these domains are never real and are excluded from
+# findings. See TN-1 in the E-129 epic for matching strategy details.
+#
+# Matching rule: a domain is allowed if it equals any entry (after stripping
+# a leading dot) or ends with "." + entry (after stripping a leading dot).
+# Examples:
+#   "example.com"  → allows example.com, sub.example.com
+#   ".test"        → allows foo.test, bar.baz.test
+#   "localhost"    → allows localhost, foo.localhost
+RFC2606_DOMAINS: frozenset[str] = frozenset({
+    # Second-level reserved domains (RFC 2606 §3)
+    "example.com",
+    "example.org",
+    "example.net",
+    # Reserved TLDs (RFC 2606 §2) -- leading dot signals TLD-only entries
+    ".test",
+    ".example",
+    ".invalid",
+    ".localhost",
+    # Bare hostname
+    "localhost",
+})
+
 # Path prefixes to always skip, relative to repo root. Any file whose path
 # starts with one of these prefixes is skipped without being read.
 SKIP_PATHS: set[str] = {

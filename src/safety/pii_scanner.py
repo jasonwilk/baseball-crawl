@@ -27,6 +27,7 @@ from typing import NamedTuple
 
 from src.safety.pii_patterns import (
     COMPILED_PATTERNS,
+    RFC2606_DOMAINS,
     SCANNABLE_EXTENSIONS,
     SKIP_PATHS,
     SYNTHETIC_MARKER,
@@ -40,6 +41,24 @@ class Violation(NamedTuple):
     file_path: str
     line_number: int
     pattern_name: str
+
+
+def is_rfc2606_email(email: str) -> bool:
+    """Return True if the email's domain is an RFC 2606 reserved domain.
+
+    Uses suffix matching: a domain is allowed if it equals a reserved entry
+    or ends with "." + a reserved entry. TLD entries like ".test" match any
+    domain ending in that TLD.
+    """
+    at_pos = email.rfind("@")
+    if at_pos < 0:
+        return False
+    domain = email[at_pos + 1:].lower()
+    for entry in RFC2606_DOMAINS:
+        entry_norm = entry.lstrip(".")
+        if domain == entry_norm or domain.endswith("." + entry_norm):
+            return True
+    return False
 
 
 def should_skip_path(file_path: str) -> bool:
@@ -114,14 +133,23 @@ def scan_file(file_path: str) -> list[Violation]:
     violations: list[Violation] = []
     for line_number, line in enumerate(lines, start=1):
         for compiled in COMPILED_PATTERNS:
-            if compiled["pattern"].search(line):
-                violations.append(
-                    Violation(
-                        file_path=file_path,
-                        line_number=line_number,
-                        pattern_name=compiled["name"],
-                    )
+            match = compiled["pattern"].search(line)
+            if not match:
+                continue
+            if compiled["name"] == "email" and is_rfc2606_email(match.group(0)):
+                logger.debug(
+                    "Skipping RFC 2606 email match on %s:%d",
+                    file_path,
+                    line_number,
                 )
+                continue
+            violations.append(
+                Violation(
+                    file_path=file_path,
+                    line_number=line_number,
+                    pattern_name=compiled["name"],
+                )
+            )
 
     return violations
 

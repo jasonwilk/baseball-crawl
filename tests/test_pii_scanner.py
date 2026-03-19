@@ -21,6 +21,7 @@ from src.safety.pii_scanner import (
     Violation,
     _count_scannable,
     has_synthetic_marker,
+    is_rfc2606_email,
     is_scannable,
     main,
     scan_file,
@@ -137,7 +138,7 @@ class TestScanFileEmailDetection:
         path = _write_file(
             tmp_path,
             "data.json",
-            '{"email": "test+tag@example.com"}\n',
+            '{"email": "test+tag@realdomain.com"}\n',
         )
         violations = scan_file(path)
         assert len(violations) == 1
@@ -327,7 +328,7 @@ class TestScanFileMultipleViolations:
     def test_email_and_phone_on_different_lines(self, tmp_path: Path) -> None:
         content = (
             "Contact info:\n"
-            "Email: test@example.com\n"
+            "Email: test@realdomain.com\n"
             "Phone: (555) 867-5309\n"
         )
         path = _write_file(tmp_path, "contact.txt", content)
@@ -372,6 +373,132 @@ class TestScanFileSkipPath:
 
 
 # ---------------------------------------------------------------------------
+# Unit tests: is_rfc2606_email (E-129-01)
+# ---------------------------------------------------------------------------
+
+class TestIsRfc2606Email:
+    """AC-7: Unit tests for the RFC 2606 domain allowlist helper."""
+
+    # Second-level reserved domains
+    def test_example_com(self) -> None:
+        assert is_rfc2606_email("user@example.com") is True
+
+    def test_example_org(self) -> None:
+        assert is_rfc2606_email("user@example.org") is True
+
+    def test_example_net(self) -> None:
+        assert is_rfc2606_email("user@example.net") is True
+
+    def test_subdomain_of_example_com(self) -> None:
+        assert is_rfc2606_email("test@subdomain.example.com") is True
+
+    def test_subdomain_of_example_org(self) -> None:
+        assert is_rfc2606_email("test@subdomain.example.org") is True
+
+    # TLD-based entries
+    def test_dot_test_tld(self) -> None:
+        assert is_rfc2606_email("admin@foo.test") is True
+
+    def test_dot_example_tld(self) -> None:
+        assert is_rfc2606_email("admin@bar.example") is True
+
+    def test_dot_invalid_tld(self) -> None:
+        assert is_rfc2606_email("admin@host.invalid") is True
+
+    def test_dot_localhost_tld(self) -> None:
+        assert is_rfc2606_email("admin@foo.localhost") is True
+
+    def test_multi_level_dot_test(self) -> None:
+        assert is_rfc2606_email("x@bar.baz.test") is True
+
+    # localhost bare hostname
+    def test_localhost_bare(self) -> None:
+        # admin@localhost doesn't match the email regex (no dot in domain),
+        # but the helper should still return True for correctness.
+        assert is_rfc2606_email("admin@localhost") is True
+
+    # Real domains must NOT be allowed
+    def test_real_domain_not_allowed(self) -> None:
+        assert is_rfc2606_email("jason@realdomain.com") is False
+
+    def test_school_domain_not_allowed(self) -> None:
+        assert is_rfc2606_email("coach@school.org") is False
+
+    def test_gmail_not_allowed(self) -> None:
+        assert is_rfc2606_email("user@gmail.com") is False
+
+    def test_domain_ending_in_example_com_substring_not_allowed(self) -> None:
+        # "notexample.com" should NOT match because it doesn't equal example.com
+        # or end with ".example.com"
+        assert is_rfc2606_email("user@notexample.com") is False
+
+    # Case insensitivity
+    def test_uppercase_domain(self) -> None:
+        assert is_rfc2606_email("user@EXAMPLE.COM") is True
+
+
+# ---------------------------------------------------------------------------
+# Integration tests: scan_file with RFC 2606 allowlist (E-129-01 ACs)
+# ---------------------------------------------------------------------------
+
+class TestRfc2606DomainAllowlist:
+    """AC-1 through AC-6: Email allowlist filtering integration tests."""
+
+    def test_ac1_example_com_not_reported(self, tmp_path: Path) -> None:
+        """AC-1: user@example.com produces no email finding."""
+        path = _write_file(tmp_path, "doc.md", "Contact: user@example.com\n")
+        violations = scan_file(path)
+        assert violations == []
+
+    def test_ac2_subdomain_example_org_not_reported(self, tmp_path: Path) -> None:
+        """AC-2: test@subdomain.example.org produces no email finding."""
+        path = _write_file(tmp_path, "doc.md", "Email: test@subdomain.example.org\n")
+        violations = scan_file(path)
+        assert violations == []
+
+    def test_ac3_dot_test_tld_not_reported(self, tmp_path: Path) -> None:
+        """AC-3: admin@foo.test produces no email finding."""
+        path = _write_file(tmp_path, "doc.md", "Server: admin@foo.test\n")
+        violations = scan_file(path)
+        assert violations == []
+
+    def test_ac5_real_domain_still_reported(self, tmp_path: Path) -> None:
+        """AC-5: jason@realdomain.com IS reported as a violation."""
+        path = _write_file(tmp_path, "contact.json", '{"email": "jason@realdomain.com"}\n')
+        violations = scan_file(path)
+        assert len(violations) == 1
+        assert violations[0].pattern_name == "email"
+
+    def test_example_net_not_reported(self, tmp_path: Path) -> None:
+        """example.net is reserved -- no finding."""
+        path = _write_file(tmp_path, "doc.txt", "user@example.net\n")
+        violations = scan_file(path)
+        assert violations == []
+
+    def test_dot_invalid_tld_not_reported(self, tmp_path: Path) -> None:
+        """host.invalid is a reserved TLD -- no finding."""
+        path = _write_file(tmp_path, "doc.txt", "admin@host.invalid\n")
+        violations = scan_file(path)
+        assert violations == []
+
+    def test_phone_unaffected_by_allowlist(self, tmp_path: Path) -> None:
+        """Other patterns (phone) are unaffected by the email allowlist."""
+        path = _write_file(tmp_path, "contact.txt", "Phone: (555) 867-5309\n")
+        violations = scan_file(path)
+        assert len(violations) == 1
+        assert violations[0].pattern_name == "us_phone"
+
+    def test_rfc2606_email_mixed_with_real_email(self, tmp_path: Path) -> None:
+        """A file with both a reserved and a real email: only real is flagged."""
+        content = "Doc: user@example.com\nCoach: coach@school.org\n"
+        path = _write_file(tmp_path, "mixed.txt", content)
+        violations = scan_file(path)
+        assert len(violations) == 1
+        assert violations[0].pattern_name == "email"
+        assert violations[0].line_number == 2
+
+
+# ---------------------------------------------------------------------------
 # Integration tests: scan_files (multiple files)
 # ---------------------------------------------------------------------------
 
@@ -387,7 +514,7 @@ class TestScanFilesMultiple:
         dirty_path = _write_file(
             tmp_path,
             "dirty.json",
-            '{"email": "test@example.com"}\n',
+            '{"email": "test@realdomain.com"}\n',
         )
         violations = scan_files([clean_path, dirty_path])
         assert len(violations) == 1
@@ -401,7 +528,7 @@ class TestScanFilesMultiple:
         assert violations == []
 
     def test_multiple_dirty_files(self, tmp_path: Path) -> None:
-        p1 = _write_file(tmp_path, "a.json", '{"email": "test@example.com"}\n')
+        p1 = _write_file(tmp_path, "a.json", '{"email": "test@realdomain.com"}\n')
         p2 = _write_file(tmp_path, "b.txt", "Phone: (555) 867-5309\n")
         violations = scan_files([p1, p2])
         assert len(violations) == 2
@@ -462,7 +589,7 @@ class TestSuccessConfirmation:
 
     def test_no_confirmation_on_violations(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
         """AC-3: No confirmation when violations are found."""
-        dirty = _write_file(tmp_path, "dirty.json", '{"email": "test@example.com"}\n')
+        dirty = _write_file(tmp_path, "dirty.json", '{"email": "test@realdomain.com"}\n')
         monkeypatch.setattr("sys.argv", ["pii_scanner", dirty])
         exit_code = main()
         captured = capsys.readouterr()
