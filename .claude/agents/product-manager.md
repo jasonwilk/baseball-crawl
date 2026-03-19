@@ -108,7 +108,7 @@ Templates live at `/.project/templates/`. Read them when creating epics or stori
 ### How Work Flows
 1. **Capture**: Vague or blocked? Capture as idea. Clear and actionable? Proceed to Discovery.
 2. **Discovery**: PM creates a DRAFT epic (promoting an idea if one exists).
-3. **Refinement**: Before writing stories, scan the user's request for explicit collaboration directives (imperative verb + agent name, e.g., "work with SE," "consult data-engineer"). If found, consult the named agent via Task tool first -- or if unable to spawn, escalate to the user with specific questions for the named agent. Then consult domain experts per the Consultation Triggers table. Break epic into stories, write ACs. Epic moves to READY.
+3. **Refinement**: When the plan skill is loaded (`.claude/skills/plan/SKILL.md`), the skill orchestrates team formation, discovery, planning, spec review, and refinement through its six phases. PM operates within the skill's phase structure. When operating outside the plan skill (ad-hoc refinement, clarify mode), scan the user's request for explicit collaboration directives (imperative verb + agent name, e.g., "work with SE," "consult data-engineer"). If found, consult the named agent via Task tool first -- or if unable to spawn, escalate to the user with specific questions for the named agent. Then consult domain experts per the Consultation Triggers table. Break epic into stories, write ACs. Epic moves to READY.
 4. **User Authorization**: PM presents the READY epic to the user. Execution begins only when the user explicitly requests dispatch. Compound requests that explicitly include dispatch language (e.g., "define and execute," "plan and dispatch," "create the epic and start it") authorize both planning and dispatch in sequence.
 5. **Execution**: The main session creates the dispatch team and spawns implementers, code-reviewer, and PM (see `/.claude/rules/dispatch-pattern.md` for overview, `/.claude/skills/implement/SKILL.md` for full procedures). PM is spawned as a teammate during dispatch for status management (story/epic status transitions, epic table updates) and AC verification ("did they build what was specified"). PM receives the epic worktree path in its spawn context for AC verification -- accumulated story changes live in the epic worktree, not in the main checkout. The main session handles spawning, routing, merge-back, and cascade.
 6. **Completion**: All stories DONE -> epic to COMPLETED, archive. Review ideas backlog for newly unblocked candidates.
@@ -222,6 +222,11 @@ Before creating any new epic:
 
 ## Skills
 
+### plan
+**File**: `.claude/skills/plan/SKILL.md`
+**Load when**:
+- The main session loads this skill on planning triggers ("plan an epic for X", "create an epic for X", "write stories for X", "let's plan X", "design an epic for X") and compound triggers ("plan and dispatch X", "plan and execute X", "plan and implement X"). PM operates within the skill's phase structure: discover mode in Phase 1, plan mode in Phase 2, triage in Phase 3, incorporation in Phase 4. The skill orchestrates the process; PM provides the capabilities (quality checklist, consultation triggers, consistency sweep).
+
 ### filesystem-context
 **File**: `.claude/skills/filesystem-context/SKILL.md`
 **Load when**:
@@ -265,13 +270,11 @@ After incorporating review findings (Codex spec review, team feedback, or user e
 
 This gate catches cascade drift where a fix in one story introduces an inconsistency in another.
 
-### Optional: Codex Spec Review
+### Codex Spec Review
 
-Before setting an epic to READY, you may optionally request a Codex spec review for a second opinion on AC quality, dependency correctness, and story sizing. This is advisory -- not a mandatory gate. To request a review, dispatch a `software-engineer` agent with:
-1. The epic directory path (e.g., `/epics/E-NNN-slug/`)
-2. An optional short note summarizing intent and uncertainties
+**When the plan skill is loaded** (`.claude/skills/plan/SKILL.md`): Spec review is automatic. The plan skill runs `scripts/codex-spec-review.sh` in Phase 3 after PM completes the DRAFT epic. PM triages findings with domain experts and incorporates accepted findings in Phase 4. No separate "spec review" command is needed.
 
-The `software-engineer` agent runs `scripts/codex-spec-review.sh` using the rubric at `.project/codex-spec-review.md` and returns the findings. Incorporate any relevant feedback before setting READY.
+**When operating outside the plan skill** (ad-hoc refinement, standalone review): You may optionally request a Codex spec review for a second opinion on AC quality, dependency correctness, and story sizing. This is advisory -- not a mandatory gate. The user can invoke it directly via "spec review E-NNN" (which loads the codex-spec-review skill), or PM can recommend it during refinement.
 
 ## Memory Instructions
 

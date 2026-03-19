@@ -19,11 +19,15 @@ Load this skill when the user says any of:
 
 **Chaining modifier**: The user may append "and review" or "and codex review" to any trigger phrase (e.g., "implement E-NNN and review", "start E-NNN and codex review"). This chains a code review after implementation completes. See Phase 4.
 
+**Plan skill handoff**: This skill may also be loaded by the plan skill's Phase 5 when the user used a compound trigger ("plan and dispatch"). In this case, `handoff_from_plan = true` and a planning team is already active. The implement skill reuses the existing team rather than creating a fresh one. See Phase 1 and Phase 2 for handoff-specific paths.
+
 ---
 
 ## Purpose
 
 Codify the full workflow for dispatching and coordinating an epic when the user requests implementation. The main session (user-facing agent) is the spawner and router: it reads the epic, creates an epic-level worktree as the accumulation point for all story patches, spawns implementers, code-reviewer, and PM, assigns stories with full context blocks, routes completion reports to PM (AC verification, status updates) and code-reviewer (quality review), manages patch-apply merge-back to the epic worktree, cascades to newly unblocked stories, and runs the closure sequence (merge epic worktree to main, commit, cleanup). The main session does not own statuses, verify ACs, or create, modify, or delete any file. The main session's only direct file operations are git commands (`git worktree add/remove` for epic and story worktree lifecycle, `git apply` for merge-back to the epic worktree, `git diff`/`git apply` for closure merge to main, `git add -A` and `git commit` for the closure commit, `git branch -D` for branch cleanup, `git mv` for archival) and writes to its own memory directory (`/home/vscode/.claude/projects/*/memory/`).
+
+When invoked via plan skill handoff (`handoff_from_plan = true`), the planning team is already active with PM and domain experts. The implement skill reuses these agents rather than creating a fresh team, preserving expert context from the planning session (unified team lifecycle).
 
 This skill is the authoritative source for dispatch procedures. Agent routing tables are in `/.claude/rules/agent-routing.md`. See `/.claude/rules/dispatch-pattern.md` for a brief overview of dispatch roles.
 
@@ -66,14 +70,16 @@ Do not report the result to the user or treat a failure as an error. Proceed to 
 
 ## Phase 1: Team Composition
 
-Read the epic's `## Dispatch Team` section.
+**If `handoff_from_plan = true`** (plan skill handoff): The planning team is already active with PM and domain experts. The plan skill has already performed the team transition (PM role change, consultation-mode agents transitioned to implementation mode, code-reviewer spawned fresh). Skip the team composition analysis below and proceed to Phase 2, which will detect the handoff and skip team/agent creation. However, still perform multi-wave planning to determine the story assignment order.
+
+**If `handoff_from_plan = false`** (standard dispatch): Read the epic's `## Dispatch Team` section.
 
 - **If present and non-empty**: Extract the listed agent types. These are the implementers to spawn. PM and code-reviewer are always spawned as infrastructure -- they are not listed in the Dispatch Team section.
 - **If absent or empty**: Use the Agent Selection routing table in `/.claude/rules/agent-routing.md` to determine which agent types are needed based on story domains and "Files to Create or Modify" sections. Read story files to make this determination.
 
 ### Multi-Wave Planning
 
-Review the full dependency graph across all stories:
+Review the full dependency graph across all stories (applies to both handoff and standard dispatch):
 
 - **Single-wave epics** (no inter-story dependencies): All implementers are spawned at once in Phase 2.
 - **Multi-wave epics** (stories have dependencies on other stories): Identify which agent types are needed for wave 1 (stories with no unsatisfied dependencies) and which are needed for later waves. Spawn wave-1 agents in Phase 2. Spawn later-wave agents directly as their dependencies complete during Phase 3.
@@ -82,7 +88,9 @@ Review the full dependency graph across all stories:
 
 ## Phase 2: Dispatch
 
-Create the epic worktree, the team, and spawn all agents. The main session creates the epic worktree first, then spawns implementers, code-reviewer, and PM.
+**If `handoff_from_plan = true`** (plan skill handoff): The planning team is already active, the epic worktree was created by the plan skill's handoff sequence, and agents have been transitioned. Skip Steps 1-3 (epic worktree creation, team creation, agent spawning). Proceed directly to Step 4 (set epic to ACTIVE). Code-reviewer is already on the team (spawned by the plan skill's Phase 5 Step 3a) -- do not re-spawn it. If any additional implementer types are needed that were not on the planning team, spawn them now with `isolation: "worktree"` using the standard spawn context below.
+
+**If `handoff_from_plan = false`** (standard dispatch): Create the epic worktree, the team, and spawn all agents as described below.
 
 ### Step 1: Create the epic worktree
 
@@ -679,6 +687,8 @@ Send a `shutdown_request` to PM. Wait for shutdown confirmation. Delete the team
 
 ```
 User says "implement E-NNN" (optionally "and review")
+  -- OR --
+Plan skill hands off after "plan and dispatch" (handoff_from_plan = true)
   |
   v
 Main session loads this skill
@@ -693,16 +703,20 @@ Prerequisites: verify epic exists, status is READY or ACTIVE
 Phase 0: tmux rename-window "E-NNN dispatch" (silent, non-blocking)
   |
   v
-Phase 1: Read epic's Dispatch Team section
-  - Extract implementer types
-  - Plan multi-wave spawning if dependencies exist
+Phase 1: Team Composition
+  - If handoff_from_plan: skip team analysis (planning team already transitioned)
+  - If standard dispatch: read Dispatch Team section, extract implementer types
+  - Plan multi-wave spawning if dependencies exist (both paths)
   |
   v
-Phase 2: Create epic worktree, team, spawn agents
-  - Create epic worktree: git worktree add -b epic/E-NNN /tmp/.worktrees/baseball-crawl-E-NNN
-  - Create dispatch team
-  - Spawn implementers (story worktree) + code-reviewer (no worktree) + PM (no worktree)
-  - Pass epic worktree path to PM and code-reviewer in spawn context
+Phase 2: Dispatch setup
+  - If handoff_from_plan: skip Steps 1-3 (worktree, team, agents already set up)
+    Spawn any additional implementer types not on the planning team
+  - If standard dispatch:
+    - Create epic worktree: git worktree add -b epic/E-NNN /tmp/.worktrees/baseball-crawl-E-NNN
+    - Create dispatch team
+    - Spawn implementers (story worktree) + code-reviewer (no worktree) + PM (no worktree)
+    - Pass epic worktree path to PM and code-reviewer in spawn context
   - Context-layer stories: spawned WITHOUT worktree isolation
   - Code-reviewer + PM spawned automatically (infrastructure, not in Dispatch Team)
   - PM owns status management + AC verification

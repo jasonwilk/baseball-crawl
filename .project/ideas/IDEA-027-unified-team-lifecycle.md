@@ -1,7 +1,9 @@
 # IDEA-027: Unified Team Lifecycle
 
 ## Status
-`CANDIDATE`
+`PROMOTED`
+
+Promoted to E-140.
 
 ## Summary
 Refinement and dispatch should use the same team with no teardown between phases. Agents come online for consultation during refinement, then the same team dispatches implementation, reviews code, and handles follow-up fixes -- all in one continuous session. The current separation between "refinement team" and "dispatch team" creates unnecessary overhead and context loss.

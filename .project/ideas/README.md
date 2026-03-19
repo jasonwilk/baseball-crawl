@@ -45,7 +45,7 @@ Review this list every 90 days, or when completing an epic. Ask:
 | [IDEA-024](IDEA-024-postcreatecommand-refactor.md) | Refactor postCreateCommand into Bootstrap Script | CANDIDATE | 2026-06-13 |
 | [IDEA-025](IDEA-025-test-fixture-migration-driven.md) | Migration-Driven Test Fixtures | CANDIDATE | 2026-06-14 |
 | [IDEA-026](IDEA-026-context-layer-placement-audit.md) | Context Layer Placement Audit -- Phase 2 | CANDIDATE | 2026-06-15 |
-| [IDEA-027](IDEA-027-unified-team-lifecycle.md) | Unified Team Lifecycle -- Consult → Refine → Dispatch in One Team | CANDIDATE | 2026-06-15 |
+| [IDEA-027](IDEA-027-unified-team-lifecycle.md) | Unified Team Lifecycle -- Consult → Refine → Dispatch in One Team | PROMOTED | 2026-03-19 -- promoted to E-140 |
 | [IDEA-028](IDEA-028-loader-stat-population.md) | Loader Stat Population (Per-Game + Season) | PROMOTED | 2026-03-16 -- promoted to E-117 |
 | [IDEA-029](IDEA-029-lr-split-population.md) | L/R Split Data Population | CANDIDATE | 2026-06-14 |
 | [IDEA-030](IDEA-030-fielding-catcher-pitch-type-tables.md) | Fielding, Catcher, and Pitch Type Tables | CANDIDATE | 2026-06-14 |
