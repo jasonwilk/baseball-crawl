@@ -39,7 +39,7 @@ All stories and ACs must work correctly for both member-team data (roster-loaded
 - Players without jersey numbers show `—` (em dash), not blank cells
 - No existing player rows disappear from any view (LEFT JOIN correctness)
 - Jersey number displays correctly for both member teams (roster-loaded data) and opponent teams (scouting-loaded data)
-- All existing tests pass; new tests cover jersey number in box score and scouting queries, including test scenarios for both member and opponent team data paths
+- All existing tests pass; new tests cover jersey number in season stats, box score, and scouting queries, including test scenarios for both member and opponent team data paths
 
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
