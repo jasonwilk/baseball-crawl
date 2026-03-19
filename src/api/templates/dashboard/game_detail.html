@@ -16,7 +16,7 @@ Game Detail{% if game %} -- {{ game.game_date }}{% endif %}
 {% block content %}
 
 <div class="mb-4">
-  <a href="/dashboard/games?team_id={{ active_team_id }}" class="text-blue-900 hover:underline text-sm">&larr; Back to Games</a>
+  <a href="/dashboard/games?team_id={{ active_team_id }}{% if season_id %}&season_id={{ season_id }}{% endif %}" class="text-blue-900 hover:underline text-sm">&larr; Back to Games</a>
 </div>
 
 {% if game %}

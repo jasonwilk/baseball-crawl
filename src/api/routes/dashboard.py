@@ -29,7 +29,7 @@ from starlette.concurrency import run_in_threadpool
 from starlette.responses import Response
 
 from src.api import db
-from src.api.helpers import format_avg, format_date, ip_display
+from src.api.helpers import format_avg, format_date, format_season_display, ip_display
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +44,7 @@ router = APIRouter()
 templates.env.filters["ip_display"] = ip_display
 templates.env.filters["format_avg"] = format_avg
 templates.env.filters["format_date"] = format_date
+templates.env.filters["season_display"] = format_season_display
 
 
 @router.get("/dashboard", response_model=None)
@@ -99,9 +100,17 @@ async def team_stats(request: Request) -> Response:
     else:
         active_team_id = permitted_teams[0]
 
-    # AC-9: accept ?season_id= override; fall back to current year spring HS
+    current_year = datetime.date.today().year
     requested_season_id = request.query_params.get("season_id", "").strip()
-    season_id = requested_season_id or f"{datetime.date.today().year}-spring-hs"
+
+    available_seasons = await run_in_threadpool(db.get_available_seasons, active_team_id)
+    valid_season_ids = {s["season_id"] for s in available_seasons}
+    if not requested_season_id or requested_season_id not in valid_season_ids:
+        season_id = available_seasons[0]["season_id"] if available_seasons else f"{current_year}-spring-hs"
+    else:
+        season_id = requested_season_id
+    if not available_seasons:
+        available_seasons = [{"season_id": season_id}]
 
     # Fetch batting stats and team display names in parallel threadpool calls
     players, team_infos = await _fetch_dashboard_data(
@@ -125,6 +134,10 @@ async def team_stats(request: Request) -> Response:
             "team_name": team_name,
             "permitted_team_infos": team_infos,
             "active_team_id": active_team_id,
+            "season_id": season_id,
+            "available_seasons": available_seasons,
+            "is_current_season": int(season_id[:4]) == current_year,
+            "current_year": current_year,
             "user": user,
             "no_assignments": False,
         },
@@ -233,8 +246,17 @@ async def team_pitching(request: Request) -> Response:
     else:
         active_team_id_p = permitted_teams[0]
 
+    current_year = datetime.date.today().year
     requested_season_id = request.query_params.get("season_id", "").strip()
-    season_id = requested_season_id or f"{datetime.date.today().year}-spring-hs"
+
+    available_seasons = await run_in_threadpool(db.get_available_seasons, active_team_id_p)
+    valid_season_ids = {s["season_id"] for s in available_seasons}
+    if not requested_season_id or requested_season_id not in valid_season_ids:
+        season_id = available_seasons[0]["season_id"] if available_seasons else f"{current_year}-spring-hs"
+    else:
+        season_id = requested_season_id
+    if not available_seasons:
+        available_seasons = [{"season_id": season_id}]
 
     pitchers_raw = await run_in_threadpool(
         db.get_team_pitching_stats, active_team_id_p, season_id
@@ -263,6 +285,10 @@ async def team_pitching(request: Request) -> Response:
             "team_name": team_name,
             "permitted_team_infos": team_infos,
             "active_team_id": active_team_id_p,
+            "season_id": season_id,
+            "available_seasons": available_seasons,
+            "is_current_season": int(season_id[:4]) == current_year,
+            "current_year": current_year,
             "user": user,
             "no_assignments": False,
         },
@@ -342,8 +368,17 @@ async def game_list(request: Request) -> Response:
     else:
         active_team_id_g = permitted_teams[0]
 
+    current_year = datetime.date.today().year
     requested_season_id = request.query_params.get("season_id", "").strip()
-    season_id = requested_season_id or f"{datetime.date.today().year}-spring-hs"
+
+    available_seasons = await run_in_threadpool(db.get_available_seasons, active_team_id_g)
+    valid_season_ids = {s["season_id"] for s in available_seasons}
+    if not requested_season_id or requested_season_id not in valid_season_ids:
+        season_id = available_seasons[0]["season_id"] if available_seasons else f"{current_year}-spring-hs"
+    else:
+        season_id = requested_season_id
+    if not available_seasons:
+        available_seasons = [{"season_id": season_id}]
 
     games_raw, team_infos = await _fetch_game_list_data(active_team_id_g, season_id, permitted_teams)
 
@@ -369,6 +404,9 @@ async def game_list(request: Request) -> Response:
             "permitted_team_infos": team_infos,
             "active_team_id": active_team_id_g,
             "season_id": season_id,
+            "available_seasons": available_seasons,
+            "is_current_season": int(season_id[:4]) == current_year,
+            "current_year": current_year,
             "user": user,
             "no_assignments": False,
         },
@@ -519,8 +557,17 @@ async def opponent_list(request: Request) -> Response:
     else:
         active_team_id_o = permitted_teams[0]
 
+    current_year = datetime.date.today().year
     requested_season_id = request.query_params.get("season_id", "").strip()
-    season_id = requested_season_id or f"{datetime.date.today().year}-spring-hs"
+
+    available_seasons = await run_in_threadpool(db.get_available_seasons, active_team_id_o)
+    valid_season_ids = {s["season_id"] for s in available_seasons}
+    if not requested_season_id or requested_season_id not in valid_season_ids:
+        season_id = available_seasons[0]["season_id"] if available_seasons else f"{current_year}-spring-hs"
+    else:
+        season_id = requested_season_id
+    if not available_seasons:
+        available_seasons = [{"season_id": season_id}]
 
     opponents, team_infos = await _fetch_opponent_list_data(active_team_id_o, season_id, permitted_teams)
 
@@ -545,6 +592,9 @@ async def opponent_list(request: Request) -> Response:
             "permitted_team_infos": team_infos,
             "active_team_id": active_team_id_o,
             "season_id": season_id,
+            "available_seasons": available_seasons,
+            "is_current_season": int(season_id[:4]) == current_year,
+            "current_year": current_year,
             "user": user,
             "no_assignments": False,
         },
@@ -612,8 +662,19 @@ async def opponent_detail(request: Request, opponent_team_id: int) -> Response:
     else:
         active_team_id_od = permitted_teams[0] if permitted_teams else None
 
+    current_year = datetime.date.today().year
     requested_season_id = request.query_params.get("season_id", "").strip()
-    season_id = requested_season_id or f"{datetime.date.today().year}-spring-hs"
+
+    available_seasons_opp = await run_in_threadpool(db.get_available_seasons, opponent_team_id)
+    valid_season_ids_opp = {s["season_id"] for s in available_seasons_opp}
+    if not requested_season_id or requested_season_id not in valid_season_ids_opp:
+        season_id = (
+            available_seasons_opp[0]["season_id"]
+            if available_seasons_opp
+            else f"{current_year}-spring-hs"
+        )
+    else:
+        season_id = requested_season_id
 
     scouting_report, team_infos = await _fetch_opponent_detail_data(
         opponent_team_id, season_id, permitted_teams
@@ -765,6 +826,7 @@ async def game_detail(request: Request, game_id: str) -> Response:
         )
 
     team_infos = await run_in_threadpool(db.get_teams_by_ids, list(permitted_teams))
+    season_id_gd = request.query_params.get("season_id", "").strip()
 
     logger.debug("Game detail: game_id=%s active_team_id=%s", game_id, active_team_id_gd)
 
@@ -775,6 +837,7 @@ async def game_detail(request: Request, game_id: str) -> Response:
             "game": game,
             "teams": box_score["teams"],
             "active_team_id": active_team_id_gd,
+            "season_id": season_id_gd,
             "permitted_team_infos": team_infos,
             "user": user,
         },

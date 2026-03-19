@@ -72,6 +72,43 @@ def format_avg(numerator: int | None, denominator: int | None) -> str:
     return formatted.lstrip("0") or ".000"
 
 
+def format_season_display(season_id: str) -> str:
+    """Convert a season ID to a short human-readable label.
+
+    Strips the classification suffix (e.g. ``-hs``, ``-legion``) and
+    capitalizes the season type word.  Output is season-first format:
+    ``"Spring 2026"``, not ``"2026 Spring"``.
+
+    Args:
+        season_id: Season ID string, e.g. ``"2026-spring-hs"``.
+
+    Returns:
+        Human-readable label, e.g. ``"Spring 2026"``.
+
+    Examples:
+        >>> format_season_display("2026-spring-hs")
+        'Spring 2026'
+        >>> format_season_display("2025-summer")
+        'Summer 2025'
+        >>> format_season_display("2025-spring-legion")
+        'Spring 2025'
+        >>> format_season_display("2025-fall-reserve")
+        'Fall 2025'
+    """
+    _TYPE_MAP = {
+        "spring": "Spring",
+        "summer": "Summer",
+        "fall": "Fall",
+        "legion": "Legion",
+    }
+    parts = season_id.split("-", 2)  # ["2026", "spring"] or ["2026", "spring", "hs"]
+    if len(parts) < 2:
+        return season_id
+    year = parts[0]
+    season_type = _TYPE_MAP.get(parts[1], parts[1].capitalize())
+    return f"{season_type} {year}"
+
+
 def format_date(date_str: str | None) -> str:
     """Convert an ISO date string to a short human-readable format.
 

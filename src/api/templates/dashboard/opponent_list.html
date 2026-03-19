@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "dashboard/_team_selector.html" import team_selector %}
+{% from "dashboard/_season_selector.html" import season_selector %}
 
 {% set active_nav = "opponents" %}
 
@@ -20,6 +21,14 @@
 
 {{ team_selector(permitted_team_infos, active_team_id, "/dashboard/opponents") }}
 
+{{ season_selector(available_seasons, season_id, "/dashboard/opponents", active_team_id) }}
+
+{% if not is_current_season %}
+<div class="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded text-sm text-yellow-900">
+  Showing {{ season_id | season_display }} data — no {{ current_year }} season data has been loaded for this team yet.
+</div>
+{% endif %}
+
 <h1 class="text-xl font-bold mb-4">{{ team_name }} &mdash; Opponents</h1>
 
 {% if not opponents %}
@@ -39,7 +48,7 @@
       {% for opp in opponents %}
       <tr class="border-b border-gray-200 {% if loop.index is even %}bg-gray-50{% endif %}">
         <td class="py-3 px-3 font-medium whitespace-nowrap">
-          <a href="/dashboard/opponents/{{ opp.opponent_team_id }}?team_id={{ active_team_id }}" class="text-blue-900 hover:underline">
+          <a href="/dashboard/opponents/{{ opp.opponent_team_id }}?team_id={{ active_team_id }}{% if season_id %}&season_id={{ season_id }}{% endif %}" class="text-blue-900 hover:underline">
             {{ opp.opponent_name or opp.opponent_team_id }}
           </a>
         </td>

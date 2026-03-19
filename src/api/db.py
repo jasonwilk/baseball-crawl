@@ -1137,6 +1137,36 @@ def get_opponent_link_count_for_team(our_team_id: int) -> int:
         return 0
 
 
+def get_available_seasons(team_id: int) -> list[dict[str, Any]]:
+    """Return the distinct seasons for which a team has batting or pitching data.
+
+    Queries ``player_season_batting`` and ``player_season_pitching`` for the
+    given team id, deduplicates via UNION, and returns results ordered
+    most-recent first (lexicographic DESC on the ``YYYY-type[-class]`` format).
+
+    Args:
+        team_id: The INTEGER team id.
+
+    Returns:
+        List of dicts with key ``season_id``, ordered most-recent first.
+        Returns an empty list if no data exists or on DB error.
+    """
+    query = """
+        SELECT DISTINCT season_id FROM player_season_batting WHERE team_id = ?
+        UNION
+        SELECT DISTINCT season_id FROM player_season_pitching WHERE team_id = ?
+        ORDER BY season_id DESC
+    """
+    try:
+        with closing(get_connection()) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(query, (team_id, team_id)).fetchall()
+        return [{"season_id": row["season_id"]} for row in rows]
+    except sqlite3.Error:
+        logger.exception("Failed to fetch available seasons for team %d", team_id)
+        return []
+
+
 def check_connection() -> bool:
     """Verify that the database is accessible and the schema is initialized.
 

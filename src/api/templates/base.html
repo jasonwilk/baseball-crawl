@@ -21,25 +21,29 @@
   </main>
   {% if not is_admin_page %}
   <!-- Bottom fixed navigation bar -->
+  {# Build query string from active_team_id and season_id context vars #}
+  {%- set _qs = "" -%}
+  {%- if active_team_id %}{% set _qs = "team_id=" ~ active_team_id %}{% endif -%}
+  {%- if season_id %}{% if _qs %}{% set _qs = _qs ~ "&season_id=" ~ season_id %}{% else %}{% set _qs = "season_id=" ~ season_id %}{% endif %}{% endif -%}
   <nav class="fixed bottom-0 w-full bg-white border-t border-gray-200 z-10">
     <div class="flex justify-around">
       <a
-        href="/dashboard"
+        href="/dashboard{% if _qs %}?{{ _qs }}{% endif %}"
         class="flex-1 flex flex-col items-center justify-center py-3 text-xs font-medium
           {% if active_nav == 'batting' %}text-blue-900 font-bold{% else %}text-gray-600 hover:text-blue-900{% endif %}"
       >Batting</a>
       <a
-        href="/dashboard/pitching"
+        href="/dashboard/pitching{% if _qs %}?{{ _qs }}{% endif %}"
         class="flex-1 flex flex-col items-center justify-center py-3 text-xs font-medium
           {% if active_nav == 'pitching' %}text-blue-900 font-bold{% else %}text-gray-600 hover:text-blue-900{% endif %}"
       >Pitching</a>
       <a
-        href="/dashboard/games"
+        href="/dashboard/games{% if _qs %}?{{ _qs }}{% endif %}"
         class="flex-1 flex flex-col items-center justify-center py-3 text-xs font-medium
           {% if active_nav == 'games' %}text-blue-900 font-bold{% else %}text-gray-600 hover:text-blue-900{% endif %}"
       >Games</a>
       <a
-        href="/dashboard/opponents"
+        href="/dashboard/opponents{% if _qs %}?{{ _qs }}{% endif %}"
         class="flex-1 flex flex-col items-center justify-center py-3 text-xs font-medium
           {% if active_nav == 'opponents' %}text-blue-900 font-bold{% else %}text-gray-600 hover:text-blue-900{% endif %}"
       >Opponents</a>

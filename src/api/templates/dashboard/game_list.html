@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "dashboard/_team_selector.html" import team_selector %}
+{% from "dashboard/_season_selector.html" import season_selector %}
 
 {% set active_nav = "games" %}
 
@@ -19,6 +20,14 @@
 {% else %}
 
 {{ team_selector(permitted_team_infos, active_team_id, "/dashboard/games") }}
+
+{{ season_selector(available_seasons, season_id, "/dashboard/games", active_team_id) }}
+
+{% if not is_current_season %}
+<div class="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded text-sm text-yellow-900">
+  Showing {{ season_id | season_display }} data — no {{ current_year }} season data has been loaded for this team yet.
+</div>
+{% endif %}
 
 <h1 class="text-xl font-bold mb-4">{{ team_name }} &mdash; Games</h1>
 
