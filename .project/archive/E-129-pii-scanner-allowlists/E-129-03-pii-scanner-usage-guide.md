@@ -5,7 +5,7 @@
 [E-129: PII Scanner Allowlists](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, `docs/safe-data-handling.md` will be updated to document the new allowlist mechanisms (RFC 2606 domain allowlist, inline `# pii-ok` suppression, expanded path exclusions) and include a "Safe Fake Data Standards" section with recommended patterns for tests and documentation.

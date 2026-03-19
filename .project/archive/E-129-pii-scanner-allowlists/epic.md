@@ -2,7 +2,7 @@
 # E-129: PII Scanner Allowlists
 
 ## Status
-`READY`
+`COMPLETED`
 
 ## Overview
 The PII scanner blocks commits on obviously fake data -- RFC 2606 reserved-domain emails (`user@example.com`), PII-like terms in planning artifacts, and test fixtures. This epic adds targeted allowlists so the scanner stops crying wolf on safe patterns while continuing to catch real PII.
@@ -41,9 +41,9 @@ The problem: `SKIP_PATHS` does not include `epics/` or `.project/` -- so story f
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-129-01 | RFC 2606 domain allowlist | TODO | None | - |
-| E-129-02 | Path exclusions and inline suppression | TODO | E-129-01 | - |
-| E-129-03 | Update safe data handling guide | TODO | None | - |
+| E-129-01 | RFC 2606 domain allowlist | DONE | None | - |
+| E-129-02 | Path exclusions and inline suppression | DONE | E-129-01 | - |
+| E-129-03 | Update safe data handling guide | DONE | None | - |
 
 ## Dispatch Team
 - software-engineer
@@ -87,3 +87,6 @@ None.
 ## History
 - 2026-03-18: Created. SE and CA consulted on scanner architecture. Both confirmed no hook changes needed. CA recommended a `.pii-allowlist` config file with file:line:pattern granularity; SE recommended inline `# pii-ok` suppression. Decision: inline suppression (simpler, self-documenting, follows `# noqa` convention, no line-number brittleness). Config file deferred per "simple first" principle. Story 03 updated to modify existing `docs/safe-data-handling.md` rather than creating new file (git hook already references it).
 - 2026-03-18: Codex spec review — 2 P1s, 2 P2s triaged. P1-1: E-129-02 now depends on E-129-01 (shared files: pii_scanner.py, test_pii_scanner.py). P1-2: Added AC-8 to E-129-02 for HTML `<!-- pii-ok -->` form. P2-3: Reworded epic Background/Goals to not imply docs/ is excluded. P2-4: Clarified TN-1 to specify suffix matching for subdomain support; aligned E-129-01 Technical Approach.
+- 2026-03-19: COMPLETED. All 3 stories DONE. E-129-01: RFC 2606 domain allowlist — frozenset in pii_patterns.py, suffix-matching filter in pii_scanner.py for email pattern. E-129-01 round 2 fix: search→finditer for multi-match-per-line correctness. E-129-02: path exclusions (epics/, .project/ added to SKIP_PATHS) and inline `# pii-ok` suppression (substring matching, works for both `# pii-ok` and `<!-- pii-ok -->`). E-129-03: updated docs/safe-data-handling.md with RFC 2606 allowlist section, inline suppression guide, safe fake data standards, and expanded SKIP_PATHS documentation. 89 tests passing, 0 regressions.
+- 2026-03-19: Documentation assessment: No documentation impact beyond E-129-03 (docs story was part of the epic).
+- 2026-03-19: Context-layer assessment: (1) New agent type added? No. (2) New rules or skills added? No. (3) Existing CLAUDE.md sections need update? No — PII scanner section references are still accurate; the scanner behavior changed but CLAUDE.md doesn't describe scanner internals. (4) Agent routing changes? No. (5) New conventions or patterns? No — pii-ok is documented in docs/safe-data-handling.md, not context layer. (6) Hook changes? No — TN-4 explicitly states no hook changes. No context-layer impact.
