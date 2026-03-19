@@ -10,13 +10,17 @@
   <nav class="bg-blue-900 text-white px-4 py-3">
     <div class="max-w-4xl mx-auto flex items-center">
       <span class="font-bold text-lg">LSB Baseball</span>
-      {% block header_extras %}{% endblock %}
+      <div class="ml-auto flex items-center gap-4 text-sm">
+        <a href="/admin/teams" class="text-blue-200 hover:text-white">Admin</a>
+        {% block header_extras %}{% endblock %}
+      </div>
     </div>
   </nav>
   <main class="p-4 max-w-4xl mx-auto pb-16">
     {% block content %}{% endblock %}
   </main>
-  <!-- Bottom fixed navigation bar (AC-1) -->
+  {% if not is_admin_page %}
+  <!-- Bottom fixed navigation bar -->
   <nav class="fixed bottom-0 w-full bg-white border-t border-gray-200 z-10">
     <div class="flex justify-around">
       <a
@@ -41,5 +45,6 @@
       >Opponents</a>
     </div>
   </nav>
+  {% endif %}
 </body>
 </html>

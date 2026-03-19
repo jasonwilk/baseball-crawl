@@ -14,10 +14,12 @@ import respx
 from src.gamechanger.key_extractor import (
     ExtractedKey,
     KeyExtractionError,
+    MultipleKeysFoundError,
     _extract_composite,
     _fetch_bundle,
     _fetch_homepage,
     _find_bundle_url,
+    _find_composites,
     _parse_composite,
     extract_client_key,
 )
@@ -44,6 +46,19 @@ _HTML_WITH_DOUBLE_QUOTE = f'<html><head><script src="{_BUNDLE_PATH}"></script></
 _JS_BUNDLE = (
     f'ba={{PUBLIC_PREFIX:"",VERSION_NUMBER:"1.0.0",'
     f'EDEN_AUTH_CLIENT_KEY:"{_FAKE_COMPOSITE}",'
+    f'RUM_CLIENT_TOKEN:"some-token"}}'
+)
+
+# Multi-match fixtures: web key (matches _FAKE_CLIENT_ID) and a mobile key.
+_MOBILE_CLIENT_ID = "11111111-2222-3333-4444-555555555555"
+_MOBILE_CLIENT_KEY = "ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ0="
+_MOBILE_COMPOSITE = f"{_MOBILE_CLIENT_ID}:{_MOBILE_CLIENT_KEY}"
+
+# Bundle containing both web and mobile EDEN_AUTH_CLIENT_KEY entries.
+_JS_BUNDLE_MULTI = (
+    f'ba={{PUBLIC_PREFIX:"",VERSION_NUMBER:"1.0.0",'
+    f'EDEN_AUTH_CLIENT_KEY:"{_FAKE_COMPOSITE}",'
+    f'EDEN_AUTH_CLIENT_KEY:"{_MOBILE_COMPOSITE}",'
     f'RUM_CLIENT_TOKEN:"some-token"}}'
 )
 
@@ -279,3 +294,101 @@ def test_no_credential_values_exposed() -> None:
     # The extractor returns the key so the CLI can compare it; the CLI is
     # responsible for never printing it. Verify the result contains it.
     assert result.client_key == _FAKE_CLIENT_KEY
+
+
+# ---------------------------------------------------------------------------
+# Unit tests: _find_composites
+# ---------------------------------------------------------------------------
+
+
+class TestFindComposites:
+    def test_single_match(self) -> None:
+        """Returns a one-element list when only one key is in the bundle."""
+        result = _find_composites(_JS_BUNDLE)
+        assert result == [_FAKE_COMPOSITE]
+
+    def test_multi_match(self) -> None:
+        """Returns all matches when the bundle contains multiple entries."""
+        result = _find_composites(_JS_BUNDLE_MULTI)
+        assert result == [_FAKE_COMPOSITE, _MOBILE_COMPOSITE]
+
+    def test_raises_when_absent(self) -> None:
+        """Raises KeyExtractionError when no EDEN_AUTH_CLIENT_KEY is found."""
+        with pytest.raises(KeyExtractionError, match="EDEN_AUTH_CLIENT_KEY not found"):
+            _find_composites('ba={OTHER:"value"}')
+
+
+# ---------------------------------------------------------------------------
+# Integration tests: extract_client_key multi-match scenarios (AC-1, AC-2, AC-3, AC-4)
+# ---------------------------------------------------------------------------
+
+
+def test_single_match_behavior_unchanged() -> None:
+    """AC-4: single-match bundles behave identically to the old implementation."""
+    with respx.mock as mock:
+        _mock_gc_bundle(mock)
+        result = extract_client_key()
+
+    assert result.client_id == _FAKE_CLIENT_ID
+    assert result.client_key == _FAKE_CLIENT_KEY
+
+
+def test_multi_match_logs_all_uuids(caplog: pytest.LogCaptureFixture) -> None:
+    """AC-1: all discovered UUIDs are logged (not key material)."""
+    with respx.mock as mock:
+        _mock_gc_bundle(mock, bundle_content=_JS_BUNDLE_MULTI)
+        with caplog.at_level(logging.INFO, logger="src.gamechanger.key_extractor"):
+            try:
+                extract_client_key()
+            except MultipleKeysFoundError:
+                pass  # expected -- we only care about the log output here
+
+    assert _FAKE_CLIENT_ID in caplog.text
+    assert _MOBILE_CLIENT_ID in caplog.text
+    # Key material must NOT appear in logs.
+    assert _FAKE_CLIENT_KEY not in caplog.text
+    assert _MOBILE_CLIENT_KEY not in caplog.text
+
+
+def test_multi_match_with_known_id_selects_correct_key() -> None:
+    """AC-2: known_client_id selects the matching entry from multiple candidates."""
+    with respx.mock as mock:
+        _mock_gc_bundle(mock, bundle_content=_JS_BUNDLE_MULTI)
+        result = extract_client_key(known_client_id=_FAKE_CLIENT_ID)
+
+    assert result.client_id == _FAKE_CLIENT_ID
+    assert result.client_key == _FAKE_CLIENT_KEY
+
+
+def test_multi_match_with_known_id_selects_mobile_key() -> None:
+    """AC-2: known_client_id can also select the mobile entry when that ID is known."""
+    with respx.mock as mock:
+        _mock_gc_bundle(mock, bundle_content=_JS_BUNDLE_MULTI)
+        result = extract_client_key(known_client_id=_MOBILE_CLIENT_ID)
+
+    assert result.client_id == _MOBILE_CLIENT_ID
+    assert result.client_key == _MOBILE_CLIENT_KEY
+
+
+def test_multi_match_without_known_id_raises() -> None:
+    """AC-3: raises MultipleKeysFoundError with all candidates when known_client_id is not set."""
+    with respx.mock as mock:
+        _mock_gc_bundle(mock, bundle_content=_JS_BUNDLE_MULTI)
+        with pytest.raises(MultipleKeysFoundError) as exc_info:
+            extract_client_key(known_client_id=None)
+
+    candidates = exc_info.value.candidates
+    assert len(candidates) == 2
+    candidate_ids = {c.client_id for c in candidates}
+    assert _FAKE_CLIENT_ID in candidate_ids
+    assert _MOBILE_CLIENT_ID in candidate_ids
+
+
+def test_multi_match_with_nonmatching_known_id_raises() -> None:
+    """MultipleKeysFoundError raised when known_client_id doesn't match any candidate."""
+    with respx.mock as mock:
+        _mock_gc_bundle(mock, bundle_content=_JS_BUNDLE_MULTI)
+        with pytest.raises(MultipleKeysFoundError) as exc_info:
+            extract_client_key(known_client_id="00000000-0000-0000-0000-000000000000")
+
+    assert len(exc_info.value.candidates) == 2

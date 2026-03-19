@@ -602,6 +602,7 @@ async def list_users(request: Request) -> Response:
             "msg": msg,
             "error": error,
             "admin_user": guard,
+            "is_admin_page": True,
         },
     )
 
@@ -648,6 +649,7 @@ async def create_user(
                 "error": error,
                 "admin_user": guard,
                 "form_email": normalized_email,
+                "is_admin_page": True,
             },
         )
 
@@ -688,6 +690,7 @@ async def edit_user_form(request: Request, user_id: int) -> Response:
             "teams": teams,
             "assigned_team_ids": assigned_team_ids,
             "admin_user": guard,
+            "is_admin_page": True,
         },
     )
 
@@ -790,6 +793,7 @@ async def _render_teams_error(
             "error": error,
             "admin_user": guard,
             "form_url_input": form_url_input,
+            "is_admin_page": True,
         },
     )
 
@@ -825,6 +829,7 @@ async def list_teams(request: Request) -> Response:
             "msg": msg,
             "error": error,
             "admin_user": guard,
+            "is_admin_page": True,
         },
     )
 
@@ -1009,6 +1014,7 @@ async def _render_confirm_team_page(
             "inferred_program_id": inferred_program_id,
             "error": error,
             "admin_user": guard,
+            "is_admin_page": True,
         },
     )
 
@@ -1196,6 +1202,7 @@ async def edit_team_form(request: Request, team_id: int) -> Response:
             "programs": programs,
             "opponent_link_count": opponent_link_count,
             "admin_user": guard,
+            "is_admin_page": True,
         },
     )
 
@@ -1383,6 +1390,7 @@ async def list_opponents(request: Request) -> Response:
             "msg": msg,
             "error": error,
             "admin_user": guard,
+            "is_admin_page": True,
         },
     )
 
@@ -1394,7 +1402,7 @@ def _render_connect_error(
     return templates.TemplateResponse(
         request,
         "admin/opponent_connect.html",
-        {"link": link, "mode": "error", "error": error, "admin_user": admin_user},
+        {"link": link, "mode": "error", "error": error, "admin_user": admin_user, "is_admin_page": True},
     )
 
 
@@ -1424,6 +1432,7 @@ async def connect_opponent_form(request: Request, link_id: int) -> Response:
             "link": link,
             "mode": "form",
             "admin_user": guard,
+            "is_admin_page": True,
         },
     )
 
@@ -1551,6 +1560,7 @@ async def connect_opponent_confirm(request: Request, link_id: int) -> Response:
             "public_id": public_id,
             "duplicate_name": duplicate_name,
             "admin_user": guard,
+            "is_admin_page": True,
         },
     )
 

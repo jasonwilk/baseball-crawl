@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import datetime
 import logging
+import os
 from pathlib import Path
 
 from fastapi import APIRouter, Request
@@ -81,6 +82,7 @@ async def team_stats(request: Request) -> Response:
                 "active_team_id": None,
                 "user": user,
                 "no_assignments": True,
+                "is_dev_mode": bool(os.environ.get("DEV_USER_EMAIL")),
             },
         )
 

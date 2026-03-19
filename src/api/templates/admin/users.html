@@ -3,10 +3,8 @@
 {% block title %}Admin -- Manage Users{% endblock %}
 
 {% block header_extras %}
-<div class="ml-auto flex items-center gap-4 text-sm">
   <a href="/dashboard" class="text-blue-200 hover:text-white">Dashboard</a>
   <form method="post" action="/auth/logout" class="inline"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><button type="submit" class="text-blue-200 hover:text-white bg-transparent border-0 cursor-pointer p-0 font-[inherit] text-[length:inherit]">Logout</button></form>
-</div>
 {% endblock %}
 
 {% block content %}
@@ -116,5 +114,4 @@
   the first admin must be seeded directly via SQLite:
   <pre class="mt-2 bg-white rounded p-2 overflow-x-auto">docker compose exec app sqlite3 /app/data/app.db "INSERT INTO users (email, hashed_password) VALUES ('[your-admin-email]', '');"</pre>
   Set <code>ADMIN_EMAIL</code> in your <code>.env</code> file to designate the admin address.
-</div>
 {% endblock %}

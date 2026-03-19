@@ -32,9 +32,9 @@ class TestCredsImport:
     _MERGED = {**_FAKE_CREDENTIALS, "SOME_OTHER_KEY": "other_value"}
 
     def _invoke(self, args: list[str], curl_file_exists: bool = True):
-        """Run the CLI with parse_curl and merge_env_file mocked."""
+        """Run the CLI with parse_credentials and merge_env_file mocked."""
         with (
-            patch("src.cli.creds.parse_curl", return_value=self._FAKE_CREDENTIALS) as mock_parse,
+            patch("src.cli.creds.parse_credentials", return_value=self._FAKE_CREDENTIALS) as mock_parse,
             patch("src.cli.creds.merge_env_file", return_value=self._MERGED) as mock_merge,
             patch("src.cli.creds._DEFAULT_CURL_FILE") as mock_default,
         ):
@@ -51,10 +51,10 @@ class TestCredsImport:
         mock_parse.assert_called_once()
 
     def test_curl_flag_passes_inline_string(self) -> None:
-        """--curl flag passes the inline string directly to parse_curl with profile='web'."""
+        """--curl flag passes the inline string directly to parse_credentials with profile='web'."""
         inline = "curl 'https://api.gc.com' -H 'gc-token: tok'"
         with (
-            patch("src.cli.creds.parse_curl", return_value=self._FAKE_CREDENTIALS) as mock_parse,
+            patch("src.cli.creds.parse_credentials", return_value=self._FAKE_CREDENTIALS) as mock_parse,
             patch("src.cli.creds.merge_env_file", return_value=self._MERGED),
         ):
             result = runner.invoke(app, ["creds", "import", "--curl", inline])
@@ -66,7 +66,7 @@ class TestCredsImport:
         curl_file = tmp_path / "my-curl.txt"
         curl_file.write_text("curl 'https://api.gc.com' -H 'gc-token: tok'", encoding="utf-8")
         with (
-            patch("src.cli.creds.parse_curl", return_value=self._FAKE_CREDENTIALS) as mock_parse,
+            patch("src.cli.creds.parse_credentials", return_value=self._FAKE_CREDENTIALS) as mock_parse,
             patch("src.cli.creds.merge_env_file", return_value=self._MERGED),
         ):
             result = runner.invoke(app, ["creds", "import", "--file", str(curl_file)])
@@ -98,11 +98,11 @@ class TestCredsImport:
         assert result.exit_code != 0
 
     def test_curl_parse_error_exits_nonzero(self) -> None:
-        """CurlParseError from parse_curl produces a non-zero exit."""
-        from src.gamechanger.credential_parser import CurlParseError
+        """CredentialImportError from parse_credentials produces a non-zero exit."""
+        from src.gamechanger.credential_parser import CredentialImportError
 
         with (
-            patch("src.cli.creds.parse_curl", side_effect=CurlParseError("bad curl")),
+            patch("src.cli.creds.parse_credentials", side_effect=CredentialImportError("bad curl")),
             patch("src.cli.creds._DEFAULT_CURL_FILE") as mock_default,
         ):
             mock_default.exists.return_value = True
@@ -111,15 +111,15 @@ class TestCredsImport:
             result = runner.invoke(app, ["creds", "import"])
         assert result.exit_code != 0
 
-    def test_profile_mobile_passes_to_parse_curl(self) -> None:
-        """--profile mobile is forwarded to parse_curl."""
+    def test_profile_mobile_passes_to_parse_credentials(self) -> None:
+        """--profile mobile is forwarded to parse_credentials."""
         inline = "curl 'https://api.gc.com' -H 'gc-token: tok'"
         mobile_creds = {
             "GAMECHANGER_ACCESS_TOKEN_MOBILE": "access_tok",
             "GAMECHANGER_BASE_URL": "https://api.gc.com",
         }
         with (
-            patch("src.cli.creds.parse_curl", return_value=mobile_creds) as mock_parse,
+            patch("src.cli.creds.parse_credentials", return_value=mobile_creds) as mock_parse,
             patch("src.cli.creds.merge_env_file", return_value=mobile_creds),
         ):
             result = runner.invoke(app, ["creds", "import", "--profile", "mobile", "--curl", inline])
@@ -130,7 +130,7 @@ class TestCredsImport:
         """--profile web explicit behaves identically to no-flag (default)."""
         inline = "curl 'https://api.gc.com' -H 'gc-token: tok'"
         with (
-            patch("src.cli.creds.parse_curl", return_value=self._FAKE_CREDENTIALS) as mock_parse,
+            patch("src.cli.creds.parse_credentials", return_value=self._FAKE_CREDENTIALS) as mock_parse,
             patch("src.cli.creds.merge_env_file", return_value=self._MERGED),
         ):
             result = runner.invoke(app, ["creds", "import", "--profile", "web", "--curl", inline])
@@ -145,7 +145,7 @@ class TestCredsImport:
         }
         inline = "curl 'https://api.gc.com' -H 'gc-token: tok'"
         with (
-            patch("src.cli.creds.parse_curl", return_value=mobile_creds),
+            patch("src.cli.creds.parse_credentials", return_value=mobile_creds),
             patch("src.cli.creds.merge_env_file", return_value=mobile_creds),
         ):
             result = runner.invoke(app, ["creds", "import", "--profile", "mobile", "--curl", inline])
@@ -171,7 +171,7 @@ class TestCredsImport:
             "GAMECHANGER_BASE_URL": "https://api.gc.com",
         }
         with (
-            patch("src.cli.creds.parse_curl", return_value=creds_with_real_token),
+            patch("src.cli.creds.parse_credentials", return_value=creds_with_real_token),
             patch("src.cli.creds.merge_env_file", return_value=creds_with_real_token),
         ):
             result = runner.invoke(app, ["creds", "import"])

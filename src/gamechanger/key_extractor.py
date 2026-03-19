@@ -57,6 +57,22 @@ class KeyExtractionError(RuntimeError):
     """Raised when the client key cannot be extracted."""
 
 
+class MultipleKeysFoundError(RuntimeError):
+    """Raised when multiple EDEN_AUTH_CLIENT_KEY entries are found and cannot be disambiguated.
+
+    Attributes:
+        candidates: All parsed :class:`ExtractedKey` instances discovered in the bundle.
+    """
+
+    def __init__(self, candidates: list[ExtractedKey]) -> None:
+        self.candidates = candidates
+        super().__init__(
+            f"Found {len(candidates)} EDEN_AUTH_CLIENT_KEY entries; "
+            "disambiguation required. "
+            "Set GAMECHANGER_CLIENT_ID_WEB in .env and re-run."
+        )
+
+
 # --- result dataclass --------------------------------------------------------
 
 
@@ -78,8 +94,18 @@ class ExtractedKey:
 # --- public API --------------------------------------------------------------
 
 
-def extract_client_key() -> ExtractedKey:
+def extract_client_key(known_client_id: str | None = None) -> ExtractedKey:
     """Fetch the GC homepage and extract the current client key from the JS bundle.
+
+    When the bundle contains multiple ``EDEN_AUTH_CLIENT_KEY`` entries (web and
+    mobile), ``known_client_id`` is used to select the correct one.  All
+    discovered UUIDs are logged at INFO level for auditability.
+
+    Args:
+        known_client_id: The expected ``GAMECHANGER_CLIENT_ID_WEB`` value from
+            ``.env``.  When provided and a match is found among multiple
+            candidates, that key is returned automatically.  When ``None`` and
+            multiple candidates exist, :class:`MultipleKeysFoundError` is raised.
 
     Returns:
         An :class:`ExtractedKey` with ``client_id``, ``client_key``, and the
@@ -88,14 +114,45 @@ def extract_client_key() -> ExtractedKey:
     Raises:
         KeyExtractionError: On any network failure, missing bundle URL, or
             missing ``EDEN_AUTH_CLIENT_KEY`` in the bundle.
+        MultipleKeysFoundError: When multiple keys are found and ``known_client_id``
+            is not set or does not match any candidate.
     """
     with httpx.Client(trust_env=False, follow_redirects=True) as client:
         html = _fetch_homepage(client)
         bundle_url = _find_bundle_url(html)
         bundle_js = _fetch_bundle(client, bundle_url)
 
-    composite = _extract_composite(bundle_js)
-    return _parse_composite(composite, bundle_url)
+    composites = _find_composites(bundle_js)
+    candidates = [_parse_composite(c, bundle_url) for c in composites]
+
+    # AC-1: log all discovered UUIDs (never the key material).
+    logger.info(
+        "Found %d EDEN_AUTH_CLIENT_KEY entry(s) in bundle: %s",
+        len(candidates),
+        [c.client_id for c in candidates],
+    )
+
+    if len(candidates) == 1:
+        # AC-4: single match -- unchanged behavior.
+        return candidates[0]
+
+    # Multiple matches -- disambiguation required.
+    if known_client_id:
+        for candidate in candidates:
+            if candidate.client_id == known_client_id:
+                logger.info(
+                    "Selected key matching known client ID %s", known_client_id
+                )
+                return candidate
+        logger.warning(
+            "GAMECHANGER_CLIENT_ID_WEB (%s) did not match any discovered key UUID. "
+            "Candidates: %s",
+            known_client_id,
+            [c.client_id for c in candidates],
+        )
+
+    # AC-3: no known ID set, or known ID didn't match -- cannot disambiguate.
+    raise MultipleKeysFoundError(candidates)
 
 
 # --- internal helpers --------------------------------------------------------
@@ -205,8 +262,38 @@ def _fetch_bundle(client: httpx.Client, bundle_url: str) -> str:
     return response.text
 
 
+def _find_composites(bundle_js: str) -> list[str]:
+    """Find all raw ``EDEN_AUTH_CLIENT_KEY`` composite values in the bundle.
+
+    Uses ``findall()`` to capture every occurrence (web and mobile keys may
+    both be present in recent GC bundles).
+
+    Args:
+        bundle_js: The full JS bundle content.
+
+    Returns:
+        A list of raw ``clientId:clientKey`` composite strings (one or more).
+
+    Raises:
+        KeyExtractionError: When no ``EDEN_AUTH_CLIENT_KEY`` entry is found.
+    """
+    matches = _EDEN_KEY_PATTERN.findall(bundle_js)
+    if not matches:
+        raise KeyExtractionError(
+            "EDEN_AUTH_CLIENT_KEY not found in the JS bundle. "
+            "The variable name may have changed in a GC deployment."
+        )
+    logger.debug(
+        "Found %d EDEN_AUTH_CLIENT_KEY composite value(s)", len(matches)
+    )
+    return matches
+
+
 def _extract_composite(bundle_js: str) -> str:
     """Find the raw ``EDEN_AUTH_CLIENT_KEY`` composite value in the bundle.
+
+    Returns only the **first** match.  Use :func:`_find_composites` when all
+    matches are needed (e.g., multi-key disambiguation).
 
     Args:
         bundle_js: The full JS bundle content.
@@ -217,16 +304,7 @@ def _extract_composite(bundle_js: str) -> str:
     Raises:
         KeyExtractionError: When ``EDEN_AUTH_CLIENT_KEY`` is not found.
     """
-    match = _EDEN_KEY_PATTERN.search(bundle_js)
-    if not match:
-        raise KeyExtractionError(
-            "EDEN_AUTH_CLIENT_KEY not found in the JS bundle. "
-            "The variable name may have changed in a GC deployment."
-        )
-
-    composite = match.group(1)
-    logger.debug("Found EDEN_AUTH_CLIENT_KEY composite value (length: %d)", len(composite))
-    return composite
+    return _find_composites(bundle_js)[0]
 
 
 def _parse_composite(composite: str, bundle_url: str) -> ExtractedKey:

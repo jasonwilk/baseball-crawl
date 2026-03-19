@@ -3,10 +3,8 @@
 {% block title %}Admin -- Edit User{% endblock %}
 
 {% block header_extras %}
-<div class="ml-auto flex items-center gap-4 text-sm">
   <a href="/admin/users" class="text-blue-200 hover:text-white">Back to Users</a>
   <form method="post" action="/auth/logout" class="inline"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><button type="submit" class="text-blue-200 hover:text-white bg-transparent border-0 cursor-pointer p-0 font-[inherit] text-[length:inherit]">Logout</button></form>
-</div>
 {% endblock %}
 
 {% block content %}
@@ -63,5 +61,4 @@
       </a>
     </div>
   </form>
-</div>
 {% endblock %}
