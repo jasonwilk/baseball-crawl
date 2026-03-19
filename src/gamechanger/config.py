@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+import uuid
 from contextlib import closing
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -199,18 +200,30 @@ def load_config_from_db(db_path: Path) -> CrawlConfig:
 
         team_rows = conn.execute(
             "SELECT id, name, classification, gc_uuid "
-            "FROM teams WHERE is_active = 1 AND membership_type = 'member'"
+            "FROM teams WHERE is_active = 1 AND membership_type = 'member' AND gc_uuid IS NOT NULL"
         ).fetchall()
 
-    teams = [
-        TeamEntry(
-            id=row["gc_uuid"] or str(row["id"]),
-            name=row["name"],
-            classification=row["classification"] or "",
-            internal_id=row["id"],
+    teams: list[TeamEntry] = []
+    for row in team_rows:
+        gc_uuid_str: str = row["gc_uuid"]
+        try:
+            uuid.UUID(gc_uuid_str)
+        except ValueError:
+            logger.warning(
+                "Skipping team '%s' (id=%d): gc_uuid '%s' is not a valid UUID format",
+                row["name"],
+                row["id"],
+                gc_uuid_str,
+            )
+            continue
+        teams.append(
+            TeamEntry(
+                id=gc_uuid_str,
+                name=row["name"],
+                classification=row["classification"] or "",
+                internal_id=row["id"],
+            )
         )
-        for row in team_rows
-    ]
 
     logger.debug(
         "Loaded DB config: season=%s, %d member teams", season_id, len(teams)

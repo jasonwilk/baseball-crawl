@@ -88,9 +88,13 @@ def _seed(db_file: Path, seasons: list[dict], teams: list[dict]) -> None:
 
 _SEASON = {"season_id": "2026-spring-hs", "name": "Spring 2026 HS", "season_type": "spring-hs", "year": 2026}
 
-_MEMBER_ACTIVE = {"gc_uuid": "team-varsity", "name": "LSB Varsity", "classification": "varsity", "membership_type": "member", "is_active": 1}
-_MEMBER_INACTIVE = {"gc_uuid": "team-jv", "name": "LSB JV", "classification": "jv", "membership_type": "member", "is_active": 0}
-_TRACKED_ACTIVE = {"gc_uuid": "team-opp", "name": "Opponent FC", "classification": None, "membership_type": "tracked", "is_active": 1}
+_UUID_VARSITY = "aaaaaaaa-0000-4000-8000-000000000001"
+_UUID_JV = "aaaaaaaa-0000-4000-8000-000000000002"
+_UUID_OPP = "aaaaaaaa-0000-4000-8000-000000000003"
+
+_MEMBER_ACTIVE = {"gc_uuid": _UUID_VARSITY, "name": "LSB Varsity", "classification": "varsity", "membership_type": "member", "is_active": 1}
+_MEMBER_INACTIVE = {"gc_uuid": _UUID_JV, "name": "LSB JV", "classification": "jv", "membership_type": "member", "is_active": 0}
+_TRACKED_ACTIVE = {"gc_uuid": _UUID_OPP, "name": "Opponent FC", "classification": None, "membership_type": "tracked", "is_active": 1}
 
 
 # ---------------------------------------------------------------------------
@@ -110,7 +114,7 @@ def test_load_config_from_db_returns_member_active_teams(tmp_path: Path) -> None
     assert len(config.member_teams) == 1
     team = config.member_teams[0]
     assert isinstance(team, TeamEntry)
-    assert team.id == "team-varsity"
+    assert team.id == _UUID_VARSITY
     assert team.name == "LSB Varsity"
     assert team.classification == "varsity"
 
@@ -123,8 +127,8 @@ def test_load_config_from_db_excludes_inactive_member_teams(tmp_path: Path) -> N
     config = load_config_from_db(db_file)
 
     team_ids = [t.id for t in config.member_teams]
-    assert "team-varsity" in team_ids
-    assert "team-jv" not in team_ids
+    assert _UUID_VARSITY in team_ids
+    assert _UUID_JV not in team_ids
 
 
 def test_load_config_from_db_excludes_tracked_teams(tmp_path: Path) -> None:
@@ -135,8 +139,8 @@ def test_load_config_from_db_excludes_tracked_teams(tmp_path: Path) -> None:
     config = load_config_from_db(db_file)
 
     team_ids = [t.id for t in config.member_teams]
-    assert "team-varsity" in team_ids
-    assert "team-opp" not in team_ids
+    assert _UUID_VARSITY in team_ids
+    assert _UUID_OPP not in team_ids
 
 
 def test_load_config_from_db_empty_teams_list(tmp_path: Path) -> None:
@@ -187,7 +191,7 @@ def test_load_config_from_db_raises_when_no_seasons(tmp_path: Path) -> None:
 def test_load_config_from_db_null_classification_becomes_empty_string(tmp_path: Path) -> None:
     """load_config_from_db converts NULL classification to empty string in TeamEntry."""
     db_file = _make_db(tmp_path)
-    team = {"gc_uuid": "team-no-class", "name": "No Class Team", "classification": None, "membership_type": "member", "is_active": 1}
+    team = {"gc_uuid": "aaaaaaaa-0000-4000-8000-000000000004", "name": "No Class Team", "classification": None, "membership_type": "member", "is_active": 1}
     _seed(db_file, [_SEASON], [team])
 
     config = load_config_from_db(db_file)
@@ -221,11 +225,11 @@ def test_load_config_yaml_populates_internal_id_when_db_path_given(tmp_path: Pat
     _seed(db_file, [_SEASON], [_MEMBER_ACTIVE])
 
     yaml_content = (
-        "season: '2026-spring-hs'\n"
-        "member_teams:\n"
-        "  - id: team-varsity\n"
-        "    name: LSB Varsity\n"
-        "    classification: varsity\n"
+        f"season: '2026-spring-hs'\n"
+        f"member_teams:\n"
+        f"  - id: {_UUID_VARSITY}\n"
+        f"    name: LSB Varsity\n"
+        f"    classification: varsity\n"
     )
     yaml_file = tmp_path / "teams.yaml"
     yaml_file.write_text(yaml_content)
@@ -290,3 +294,86 @@ def test_team_entry_has_classification_field() -> None:
     entry = TeamEntry(id="abc", name="Test", classification="jv")
     assert entry.classification == "jv"
     assert not hasattr(entry, "level")
+
+
+# ---------------------------------------------------------------------------
+# Tests: placeholder gc_uuid filtering (E-127-06)
+# ---------------------------------------------------------------------------
+
+_VALID_UUID = "ffffffff-0000-4000-a000-000000000099"
+_PLACEHOLDER_UUID = "lsb-varsity-uuid-2026"
+
+
+def test_load_config_from_db_skips_null_gc_uuid(tmp_path: Path) -> None:
+    """load_config_from_db skips teams with NULL gc_uuid (AC-1)."""
+    db_file = _make_db(tmp_path)
+    team_null = {"gc_uuid": None, "name": "Null UUID Team", "classification": "varsity", "membership_type": "member", "is_active": 1}
+    _seed(db_file, [_SEASON], [team_null])
+
+    config = load_config_from_db(db_file)
+
+    assert config.member_teams == []
+
+
+def test_load_config_from_db_skips_null_gc_uuid_logs_nothing(tmp_path: Path, caplog) -> None:
+    """NULL gc_uuid teams are excluded via SQL -- no Python-level warning needed."""
+    import logging
+    db_file = _make_db(tmp_path)
+    team_null = {"gc_uuid": None, "name": "Null UUID Team", "classification": "varsity", "membership_type": "member", "is_active": 1}
+    _seed(db_file, [_SEASON], [team_null])
+
+    with caplog.at_level(logging.WARNING, logger="src.gamechanger.config"):
+        config = load_config_from_db(db_file)
+
+    assert config.member_teams == []
+
+
+def test_load_config_from_db_skips_placeholder_gc_uuid(tmp_path: Path) -> None:
+    """load_config_from_db skips teams with non-UUID gc_uuid values (AC-2)."""
+    db_file = _make_db(tmp_path)
+    team_placeholder = {"gc_uuid": _PLACEHOLDER_UUID, "name": "LSB Varsity", "classification": "varsity", "membership_type": "member", "is_active": 1}
+    _seed(db_file, [_SEASON], [team_placeholder])
+
+    config = load_config_from_db(db_file)
+
+    assert config.member_teams == []
+
+
+def test_load_config_from_db_placeholder_logs_warning(tmp_path: Path, caplog) -> None:
+    """load_config_from_db logs a warning with team name and reason for placeholder gc_uuid (AC-4)."""
+    import logging
+    db_file = _make_db(tmp_path)
+    team_placeholder = {"gc_uuid": _PLACEHOLDER_UUID, "name": "LSB Varsity", "classification": "varsity", "membership_type": "member", "is_active": 1}
+    _seed(db_file, [_SEASON], [team_placeholder])
+
+    with caplog.at_level(logging.WARNING, logger="src.gamechanger.config"):
+        load_config_from_db(db_file)
+
+    assert any("LSB Varsity" in r.message and _PLACEHOLDER_UUID in r.message for r in caplog.records)
+
+
+def test_load_config_from_db_includes_valid_uuid_team(tmp_path: Path) -> None:
+    """load_config_from_db includes teams with valid UUID-format gc_uuid (AC-3)."""
+    db_file = _make_db(tmp_path)
+    team_valid = {"gc_uuid": _VALID_UUID, "name": "LSB JV", "classification": "jv", "membership_type": "member", "is_active": 1}
+    _seed(db_file, [_SEASON], [team_valid])
+
+    config = load_config_from_db(db_file)
+
+    assert len(config.member_teams) == 1
+    assert config.member_teams[0].id == _VALID_UUID
+    assert config.member_teams[0].name == "LSB JV"
+
+
+def test_load_config_from_db_mixed_gc_uuid_validity(tmp_path: Path) -> None:
+    """load_config_from_db includes valid UUID teams and skips placeholder teams (AC-3, AC-5)."""
+    db_file = _make_db(tmp_path)
+    team_valid = {"gc_uuid": _VALID_UUID, "name": "LSB Varsity", "classification": "varsity", "membership_type": "member", "is_active": 1}
+    team_placeholder = {"gc_uuid": _PLACEHOLDER_UUID, "name": "LSB JV", "classification": "jv", "membership_type": "member", "is_active": 1}
+    team_null = {"gc_uuid": None, "name": "LSB Freshman", "classification": "freshman", "membership_type": "member", "is_active": 1}
+    _seed(db_file, [_SEASON], [team_valid, team_placeholder, team_null])
+
+    config = load_config_from_db(db_file)
+
+    assert len(config.member_teams) == 1
+    assert config.member_teams[0].id == _VALID_UUID
