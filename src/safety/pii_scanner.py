@@ -137,23 +137,21 @@ def scan_file(file_path: str) -> list[Violation]:
             logger.debug("Skipping suppressed line %s:%d", file_path, line_number)
             continue
         for compiled in COMPILED_PATTERNS:
-            match = compiled["pattern"].search(line)
-            if not match:
-                continue
-            if compiled["name"] == "email" and is_rfc2606_email(match.group(0)):
-                logger.debug(
-                    "Skipping RFC 2606 email match on %s:%d",
-                    file_path,
-                    line_number,
+            for match in compiled["pattern"].finditer(line):
+                if compiled["name"] == "email" and is_rfc2606_email(match.group(0)):
+                    logger.debug(
+                        "Skipping RFC 2606 email match on %s:%d",
+                        file_path,
+                        line_number,
+                    )
+                    continue
+                violations.append(
+                    Violation(
+                        file_path=file_path,
+                        line_number=line_number,
+                        pattern_name=compiled["name"],
+                    )
                 )
-                continue
-            violations.append(
-                Violation(
-                    file_path=file_path,
-                    line_number=line_number,
-                    pattern_name=compiled["name"],
-                )
-            )
 
     return violations
 

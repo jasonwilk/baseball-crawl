@@ -489,13 +489,22 @@ class TestRfc2606DomainAllowlist:
         assert violations[0].pattern_name == "us_phone"
 
     def test_rfc2606_email_mixed_with_real_email(self, tmp_path: Path) -> None:
-        """A file with both a reserved and a real email: only real is flagged."""
+        """A file with both a reserved and a real email on separate lines: only real is flagged."""
         content = "Doc: user@example.com\nCoach: coach@school.org\n"
         path = _write_file(tmp_path, "mixed.txt", content)
         violations = scan_file(path)
         assert len(violations) == 1
         assert violations[0].pattern_name == "email"
         assert violations[0].line_number == 2
+
+    def test_rfc2606_and_real_email_on_same_line(self, tmp_path: Path) -> None:
+        """Regression: RFC 2606 email first on a line must not suppress real email on the same line."""
+        content = "Doc: user@example.com Coach: coach@school.org\n"
+        path = _write_file(tmp_path, "mixed.txt", content)
+        violations = scan_file(path)
+        assert len(violations) == 1
+        assert violations[0].pattern_name == "email"
+        assert violations[0].line_number == 1
 
 
 # ---------------------------------------------------------------------------
