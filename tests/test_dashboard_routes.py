@@ -1006,7 +1006,7 @@ class TestPitchingSortParams:
         assert names[-1] == "Carl Gamma"
 
     def test_unrecognized_sort_falls_back_to_default(self, tmp_path: Path) -> None:
-        """AC-8(c): unrecognized sort param does not crash, renders 200."""
+        """AC-8(c): unrecognized sort param falls back to default ERA asc order."""
         db_path, team_id = self._setup_db(tmp_path)
         with patch.dict(
             "os.environ",
@@ -1016,7 +1016,27 @@ class TestPitchingSortParams:
             with client:
                 resp = client.get(f"/dashboard/pitching?season_id={_CURRENT_SEASON}&sort=notvalid&dir=asc")
         assert resp.status_code == 200
-        assert "Ace Alpha" in resp.text
+        names = _extract_pitcher_order(resp.text)
+        # Falls back to ERA asc: Ace (lower ERA) before Bob; Carl (0 ip_outs) last
+        assert names.index("Ace Alpha") < names.index("Bob Beta")
+        assert names[-1] == "Carl Gamma"
+
+    def test_name_sort_desc(self, tmp_path: Path) -> None:
+        """sort=name&dir=desc produces reverse-alphabetical order, zero-ip rows last."""
+        db_path, team_id = self._setup_db(tmp_path)
+        with patch.dict(
+            "os.environ",
+            {"DATABASE_PATH": str(db_path), "DEV_USER_EMAIL": "dev@example.com"},
+        ):
+            client = _make_dev_client(db_path, team_id)
+            with client:
+                resp = client.get(f"/dashboard/pitching?season_id={_CURRENT_SEASON}&sort=name&dir=desc")
+        assert resp.status_code == 200
+        names = _extract_pitcher_order(resp.text)
+        # "Bob Beta" > "Ace Alpha" alphabetically, so desc puts Bob first
+        assert names.index("Bob Beta") < names.index("Ace Alpha")
+        # Carl Gamma (0 ip_outs) is still last regardless of direction
+        assert names[-1] == "Carl Gamma"
 
     def test_direction_toggle_reflected_in_url(self, tmp_path: Path) -> None:
         """AC-8(d): sort=k9&dir=desc -> k9 header link toggles to asc."""
