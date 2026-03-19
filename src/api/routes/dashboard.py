@@ -47,6 +47,138 @@ templates.env.filters["format_date"] = format_date
 templates.env.filters["season_display"] = format_season_display
 
 
+_BATTING_SORT_KEYS: set[str] = {
+    "name", "avg", "obp", "gp", "bb", "so", "slg", "h", "ab", "2b", "3b", "hr", "sb", "rbi",
+}
+_BATTING_DEFAULT_DIR: dict[str, str] = {
+    "name": "asc", "so": "asc",
+    "avg": "desc", "obp": "desc", "slg": "desc", "h": "desc", "ab": "desc",
+    "2b": "desc", "3b": "desc", "hr": "desc", "rbi": "desc", "sb": "desc",
+    "bb": "desc", "gp": "desc",
+}
+
+_PITCHING_SORT_KEYS: set[str] = {
+    "name", "era", "k9", "bb9", "whip", "gp", "ip", "h", "er", "bb", "so", "hr",
+}
+_PITCHING_DEFAULT_DIR: dict[str, str] = {
+    "name": "asc", "era": "asc", "bb9": "asc", "whip": "asc",
+    "er": "asc", "bb": "asc", "h": "asc", "hr": "asc",
+    "k9": "desc", "so": "desc", "ip": "desc", "gp": "desc",
+}
+
+
+def _sort_batting(players: list[dict], sort_key: str, direction: str) -> list[dict]:
+    """Sort batting rows by the given key, zero-denominator rows always last.
+
+    Args:
+        players:   List of player dicts from ``db.get_team_batting_stats``.
+        sort_key:  Column key from ``_BATTING_SORT_KEYS``.
+        direction: ``"asc"`` or ``"desc"``.
+
+    Returns:
+        Sorted list (new list, original untouched).
+    """
+    reverse = direction == "desc"
+
+    def _key(row: dict) -> tuple:
+        ab = row.get("ab") or 0
+        ip_zero = ab == 0  # sentinel for zero-denominator
+
+        if sort_key == "name":
+            val: float | str = row.get("name") or ""
+            return (1 if ip_zero else 0, val if not reverse else "")
+        if sort_key == "avg":
+            val = (row.get("h") or 0) / ab if ab else 0.0
+        elif sort_key == "obp":
+            h = row.get("h") or 0
+            bb = row.get("bb") or 0
+            hbp = row.get("hbp") or 0
+            shf = row.get("shf") or 0
+            denom = ab + bb + hbp + shf
+            val = (h + bb + hbp) / denom if denom else 0.0
+        elif sort_key == "slg":
+            h = row.get("h") or 0
+            doubles = row.get("doubles") or 0
+            triples = row.get("triples") or 0
+            hr = row.get("hr") or 0
+            val = (h + doubles + 2 * triples + 3 * hr) / ab if ab else 0.0
+        elif sort_key == "gp":
+            val = float(row.get("games") or 0)
+        elif sort_key == "h":
+            val = float(row.get("h") or 0)
+        elif sort_key == "ab":
+            val = float(row.get("ab") or 0)
+        elif sort_key == "2b":
+            val = float(row.get("doubles") or 0)
+        elif sort_key == "3b":
+            val = float(row.get("triples") or 0)
+        elif sort_key == "hr":
+            val = float(row.get("hr") or 0)
+        elif sort_key == "rbi":
+            val = float(row.get("rbi") or 0)
+        elif sort_key == "bb":
+            val = float(row.get("bb") or 0)
+        elif sort_key == "so":
+            val = float(row.get("so") or 0)
+        elif sort_key == "sb":
+            val = float(row.get("sb") or 0)
+        else:
+            val = 0.0
+        # Zero-denominator rows always sort last; within those, stable by name
+        return (1 if ip_zero else 0, -val if reverse else val)
+
+    return sorted(players, key=_key)
+
+
+def _sort_pitching(pitchers: list[dict], sort_key: str, direction: str) -> list[dict]:
+    """Sort pitching rows by the given key, zero ip_outs rows always last.
+
+    Args:
+        pitchers:  List of pitcher dicts (after ``_compute_pitching_rates``).
+        sort_key:  Column key from ``_PITCHING_SORT_KEYS``.
+        direction: ``"asc"`` or ``"desc"``.
+
+    Returns:
+        Sorted list (new list, original untouched).
+    """
+    reverse = direction == "desc"
+
+    def _key(row: dict) -> tuple:
+        ip_outs = row.get("ip_outs") or 0
+        zero_ip = ip_outs == 0
+
+        if sort_key == "name":
+            val: float | str = row.get("name") or ""
+            return (1 if zero_ip else 0, val if not reverse else "")
+        if sort_key == "era":
+            val = (row.get("er") or 0) * 27 / ip_outs if ip_outs else float("inf")
+        elif sort_key == "k9":
+            val = (row.get("so") or 0) * 27 / ip_outs if ip_outs else 0.0
+        elif sort_key == "bb9":
+            val = (row.get("bb") or 0) * 27 / ip_outs if ip_outs else float("inf")
+        elif sort_key == "whip":
+            val = ((row.get("bb") or 0) + (row.get("h") or 0)) * 3 / ip_outs if ip_outs else float("inf")
+        elif sort_key == "gp":
+            val = float(row.get("games") or 0)
+        elif sort_key == "ip":
+            val = float(ip_outs)
+        elif sort_key == "h":
+            val = float(row.get("h") or 0)
+        elif sort_key == "er":
+            val = float(row.get("er") or 0)
+        elif sort_key == "bb":
+            val = float(row.get("bb") or 0)
+        elif sort_key == "so":
+            val = float(row.get("so") or 0)
+        elif sort_key == "hr":
+            val = float(row.get("hr") or 0)
+        else:
+            val = 0.0
+        return (1 if zero_ip else 0, -val if reverse else val)
+
+    return sorted(pitchers, key=_key)
+
+
 @router.get("/dashboard", response_model=None)
 async def team_stats(request: Request) -> Response:
     """Render the team batting stats dashboard page.
@@ -116,13 +248,31 @@ async def team_stats(request: Request) -> Response:
         active_team_id, season_id, permitted_teams
     )
 
+    # Sort params (AC-1)
+    raw_sort = request.query_params.get("sort", "").strip().lower()
+    raw_dir = request.query_params.get("dir", "").strip().lower()
+    if raw_sort in _BATTING_SORT_KEYS:
+        current_sort = raw_sort
+    else:
+        current_sort = "avg"
+    if raw_dir in ("asc", "desc"):
+        current_dir = raw_dir
+    else:
+        current_dir = _BATTING_DEFAULT_DIR.get(current_sort, "desc")
+
+    if raw_sort in _BATTING_SORT_KEYS:
+        players = _sort_batting(players, current_sort, current_dir)
+    # Default sort (avg desc) already applied by the SQL query; no re-sort needed unless
+    # an explicit sort param was provided.
+
     team_name = next(
         (t["name"] for t in team_infos if t["id"] == active_team_id),
         str(active_team_id),
     )
 
     logger.debug(
-        "Dashboard: team=%s season_id=%s players=%d", active_team_id, season_id, len(players)
+        "Dashboard: team=%s season_id=%s players=%d sort=%s dir=%s",
+        active_team_id, season_id, len(players), current_sort, current_dir,
     )
 
     return templates.TemplateResponse(
@@ -139,6 +289,8 @@ async def team_stats(request: Request) -> Response:
             "current_year": current_year,
             "user": user,
             "no_assignments": False,
+            "current_sort": current_sort,
+            "current_dir": current_dir,
         },
     )
 
@@ -263,16 +415,29 @@ async def team_pitching(request: Request) -> Response:
 
     pitchers = _compute_pitching_rates(pitchers_raw)
 
+    # Sort params (AC-2)
+    raw_sort_p = request.query_params.get("sort", "").strip().lower()
+    raw_dir_p = request.query_params.get("dir", "").strip().lower()
+    if raw_sort_p in _PITCHING_SORT_KEYS:
+        current_sort_p = raw_sort_p
+    else:
+        current_sort_p = "era"
+    if raw_dir_p in ("asc", "desc"):
+        current_dir_p = raw_dir_p
+    else:
+        current_dir_p = _PITCHING_DEFAULT_DIR.get(current_sort_p, "asc")
+
+    if raw_sort_p in _PITCHING_SORT_KEYS:
+        pitchers = _sort_pitching(pitchers, current_sort_p, current_dir_p)
+
     team_name = next(
         (t["name"] for t in team_infos if t["id"] == active_team_id_p),
         str(active_team_id_p),
     )
 
     logger.debug(
-        "Pitching dashboard: team=%s season_id=%s pitchers=%d",
-        active_team_id_p,
-        season_id,
-        len(pitchers),
+        "Pitching dashboard: team=%s season_id=%s pitchers=%d sort=%s dir=%s",
+        active_team_id_p, season_id, len(pitchers), current_sort_p, current_dir_p,
     )
 
     return templates.TemplateResponse(
@@ -289,6 +454,8 @@ async def team_pitching(request: Request) -> Response:
             "current_year": current_year,
             "user": user,
             "no_assignments": False,
+            "current_sort": current_sort_p,
+            "current_dir": current_dir_p,
         },
     )
 

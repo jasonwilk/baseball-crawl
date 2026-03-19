@@ -681,3 +681,363 @@ class TestFreshnessIndicator:
 
         assert resp.status_code == 200
         assert "bg-yellow-50" not in resp.text
+
+
+# ---------------------------------------------------------------------------
+# AC-8: Sort parameter tests
+# ---------------------------------------------------------------------------
+
+
+def _insert_batting_stats_full(
+    db_path: Path,
+    player_id: str,
+    team_id: int,
+    season_id: str,
+    ab: int,
+    h: int,
+    bb: int = 0,
+    so: int = 0,
+    hr: int = 0,
+    rbi: int = 0,
+    sb: int = 0,
+    hbp: int = 0,
+    shf: int = 0,
+    doubles: int = 0,
+    triples: int = 0,
+    gp: int = 1,
+) -> None:
+    """Insert a player_season_batting row with specific stat values."""
+    conn = sqlite3.connect(str(db_path))
+    conn.execute("PRAGMA foreign_keys=ON;")
+    conn.execute(
+        "INSERT OR REPLACE INTO player_season_batting"
+        " (player_id, team_id, season_id, gp, ab, h, bb, so, hr, rbi, sb, hbp, shf,"
+        "  doubles, triples)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (player_id, team_id, season_id, gp, ab, h, bb, so, hr, rbi, sb, hbp, shf, doubles, triples),
+    )
+    conn.commit()
+    conn.close()
+
+
+def _insert_pitching_stats_full(
+    db_path: Path,
+    player_id: str,
+    team_id: int,
+    season_id: str,
+    ip_outs: int,
+    er: int,
+    so: int = 0,
+    bb: int = 0,
+    h: int = 0,
+    hr: int = 0,
+    gp: int = 1,
+) -> None:
+    """Insert a player_season_pitching row with specific stat values."""
+    conn = sqlite3.connect(str(db_path))
+    conn.execute("PRAGMA foreign_keys=ON;")
+    conn.execute(
+        "INSERT OR REPLACE INTO player_season_pitching"
+        " (player_id, team_id, season_id, gp_pitcher, ip_outs, h, er, bb, so, hr)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (player_id, team_id, season_id, gp, ip_outs, h, er, bb, so, hr),
+    )
+    conn.commit()
+    conn.close()
+
+
+def _extract_player_order(html: str) -> list[str]:
+    """Extract player names from dashboard HTML in table row order.
+
+    Looks for links to /dashboard/players/... and returns the visible
+    text portions to determine sort order.
+    """
+    import re
+    # Match player name text from the anchor tags in table rows
+    # Pattern: href="/dashboard/players/..." class="...">...name text...
+    pattern = r'href="/dashboard/players/[^"]*"[^>]*>\s*(?:#\d+\s+)?([^<]+?)\s*</a>'
+    return re.findall(pattern, html)
+
+
+def _extract_pitcher_order(html: str) -> list[str]:
+    """Extract pitcher names from pitching dashboard HTML in table row order."""
+    import re
+    pattern = r'href="/dashboard/players/[^"]*" class="text-blue-900[^"]*">\s*(?:#\d+\s+)?([^<]+?)\s*</a>'
+    return re.findall(pattern, html)
+
+
+class TestBattingSortParams:
+    """AC-8: Sort parameter tests for /dashboard batting table."""
+
+    def _setup_db(self, tmp_path: Path) -> tuple[Path, int]:
+        """DB with three players of distinct batting stats."""
+        db_path = _make_db(tmp_path)
+        team_id = _insert_team(db_path)
+        _insert_season(db_path, _CURRENT_SEASON)
+        # Player A: high AVG (.500), low HR (0)
+        _insert_player(db_path, "bat-a", "Alice", "Alpha")
+        _insert_batting_stats_full(db_path, "bat-a", team_id, _CURRENT_SEASON,
+                                   ab=10, h=5, hr=0, rbi=2, so=1)
+        # Player B: mid AVG (.300), mid HR (1)
+        _insert_player(db_path, "bat-b", "Bob", "Beta")
+        _insert_batting_stats_full(db_path, "bat-b", team_id, _CURRENT_SEASON,
+                                   ab=10, h=3, hr=1, rbi=3, so=2)
+        # Player C: zero AB (should always sort last)
+        _insert_player(db_path, "bat-c", "Carol", "Gamma")
+        _insert_batting_stats_full(db_path, "bat-c", team_id, _CURRENT_SEASON,
+                                   ab=0, h=0, hr=0, rbi=0, so=0)
+        return db_path, team_id
+
+    def test_default_sort_avg_desc(self, tmp_path: Path) -> None:
+        """AC-8(a): default sort is AVG descending (highest first)."""
+        db_path, team_id = self._setup_db(tmp_path)
+        with patch.dict(
+            "os.environ",
+            {"DATABASE_PATH": str(db_path), "DEV_USER_EMAIL": "dev@example.com"},
+        ):
+            client = _make_dev_client(db_path, team_id)
+            with client:
+                resp = client.get(f"/dashboard?season_id={_CURRENT_SEASON}")
+        assert resp.status_code == 200
+        names = _extract_player_order(resp.text)
+        # Alice (.500) before Bob (.300); Carol (0 AB) last
+        assert names.index("Alice Alpha") < names.index("Bob Beta")
+        assert names[-1] == "Carol Gamma"
+
+    def test_sort_by_hr_desc(self, tmp_path: Path) -> None:
+        """AC-8(b): sort=hr&dir=desc puts Bob (1 HR) before Alice (0 HR)."""
+        db_path, team_id = self._setup_db(tmp_path)
+        with patch.dict(
+            "os.environ",
+            {"DATABASE_PATH": str(db_path), "DEV_USER_EMAIL": "dev@example.com"},
+        ):
+            client = _make_dev_client(db_path, team_id)
+            with client:
+                resp = client.get(f"/dashboard?season_id={_CURRENT_SEASON}&sort=hr&dir=desc")
+        assert resp.status_code == 200
+        names = _extract_player_order(resp.text)
+        assert names.index("Bob Beta") < names.index("Alice Alpha")
+        assert names[-1] == "Carol Gamma"
+
+    def test_sort_by_so_asc(self, tmp_path: Path) -> None:
+        """AC-8(b): sort=so&dir=asc puts Alice (1 SO) before Bob (2 SO)."""
+        db_path, team_id = self._setup_db(tmp_path)
+        with patch.dict(
+            "os.environ",
+            {"DATABASE_PATH": str(db_path), "DEV_USER_EMAIL": "dev@example.com"},
+        ):
+            client = _make_dev_client(db_path, team_id)
+            with client:
+                resp = client.get(f"/dashboard?season_id={_CURRENT_SEASON}&sort=so&dir=asc")
+        assert resp.status_code == 200
+        names = _extract_player_order(resp.text)
+        assert names.index("Alice Alpha") < names.index("Bob Beta")
+        assert names[-1] == "Carol Gamma"
+
+    def test_unrecognized_sort_falls_back_to_default(self, tmp_path: Path) -> None:
+        """AC-8(c): unrecognized sort param falls back to default AVG desc."""
+        db_path, team_id = self._setup_db(tmp_path)
+        with patch.dict(
+            "os.environ",
+            {"DATABASE_PATH": str(db_path), "DEV_USER_EMAIL": "dev@example.com"},
+        ):
+            client = _make_dev_client(db_path, team_id)
+            with client:
+                resp = client.get(f"/dashboard?season_id={_CURRENT_SEASON}&sort=notacolumn&dir=desc")
+        assert resp.status_code == 200
+        # Should still render 200 without error
+        assert "Alice Alpha" in resp.text
+
+    def test_direction_toggle_reflected_in_url(self, tmp_path: Path) -> None:
+        """AC-8(d): when current_sort=hr and dir=desc, hr header link should toggle to asc."""
+        db_path, team_id = self._setup_db(tmp_path)
+        with patch.dict(
+            "os.environ",
+            {"DATABASE_PATH": str(db_path), "DEV_USER_EMAIL": "dev@example.com"},
+        ):
+            client = _make_dev_client(db_path, team_id)
+            with client:
+                resp = client.get(f"/dashboard?season_id={_CURRENT_SEASON}&sort=hr&dir=desc")
+        assert resp.status_code == 200
+        html = resp.text
+        # The HR header link should now toggle to asc (& is autoescaped to &amp; in HTML)
+        assert "sort=hr&amp;dir=asc" in html or "sort=hr&dir=asc" in html
+
+    def test_zero_ab_rows_sort_to_bottom_asc(self, tmp_path: Path) -> None:
+        """AC-8(e): player with 0 AB sorts to bottom regardless of asc direction."""
+        db_path, team_id = self._setup_db(tmp_path)
+        with patch.dict(
+            "os.environ",
+            {"DATABASE_PATH": str(db_path), "DEV_USER_EMAIL": "dev@example.com"},
+        ):
+            client = _make_dev_client(db_path, team_id)
+            with client:
+                resp = client.get(f"/dashboard?season_id={_CURRENT_SEASON}&sort=hr&dir=asc")
+        assert resp.status_code == 200
+        names = _extract_player_order(resp.text)
+        assert names[-1] == "Carol Gamma"
+
+    def test_sort_indicator_shown_on_active_column(self, tmp_path: Path) -> None:
+        """AC-5: active sort column shows direction indicator in header (HTML entity or unicode)."""
+        db_path, team_id = self._setup_db(tmp_path)
+        with patch.dict(
+            "os.environ",
+            {"DATABASE_PATH": str(db_path), "DEV_USER_EMAIL": "dev@example.com"},
+        ):
+            client = _make_dev_client(db_path, team_id)
+            with client:
+                resp = client.get(f"/dashboard?season_id={_CURRENT_SEASON}&sort=hr&dir=desc")
+        assert resp.status_code == 200
+        html = resp.text
+        # Descending indicator: either unicode ▼ or HTML entity &#9660;
+        assert "&#9660;" in html or "▼" in html
+
+    def test_sort_params_preserved_in_team_selector(self, tmp_path: Path) -> None:
+        """AC-7: team selector preserves sort/dir params."""
+        db_path = _make_db(tmp_path)
+        team_id_a = _insert_team(db_path, "Alpha Team")
+        team_id_b = _insert_team(db_path, "Beta Team")
+        _insert_player(db_path, "p-sel1", "Frank", "Green")
+        _insert_season(db_path, _CURRENT_SEASON)
+        _insert_batting_stats_full(db_path, "p-sel1", team_id_a, _CURRENT_SEASON, ab=5, h=2)
+        _insert_batting_stats_full(db_path, "p-sel1", team_id_b, _CURRENT_SEASON, ab=5, h=2)
+
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("PRAGMA foreign_keys=ON;")
+        user_id = conn.execute(
+            "INSERT INTO users (email) VALUES (?) RETURNING id", ("devsel@example.com",)
+        ).fetchone()[0]
+        for tid in (team_id_a, team_id_b):
+            conn.execute(
+                "INSERT OR IGNORE INTO user_team_access (user_id, team_id) VALUES (?, ?)",
+                (user_id, tid),
+            )
+        conn.commit()
+        conn.close()
+
+        with patch.dict(
+            "os.environ",
+            {"DATABASE_PATH": str(db_path), "DEV_USER_EMAIL": "devsel@example.com"},
+        ):
+            with TestClient(app, follow_redirects=False) as client:
+                resp = client.get(
+                    f"/dashboard?team_id={team_id_a}&season_id={_CURRENT_SEASON}&sort=hr&dir=desc"
+                )
+
+        assert resp.status_code == 200
+        html = resp.text
+        # Team selector link for the other team should carry sort/dir params
+        # (& is autoescaped to &amp; in HTML)
+        assert (
+            f"team_id={team_id_b}&amp;sort=hr&amp;dir=desc" in html
+            or f"team_id={team_id_b}&sort=hr&dir=desc" in html
+        )
+
+
+class TestPitchingSortParams:
+    """AC-8: Sort parameter tests for /dashboard/pitching table."""
+
+    def _setup_db(self, tmp_path: Path) -> tuple[Path, int]:
+        """DB with three pitchers of distinct stats."""
+        db_path = _make_db(tmp_path)
+        team_id = _insert_team(db_path)
+        _insert_season(db_path, _CURRENT_SEASON)
+        # Pitcher A: low ERA (9 ip_outs = 3IP, 1 ER => ERA=3.00), high K/9
+        _insert_player(db_path, "pit-a", "Ace", "Alpha")
+        _insert_pitching_stats_full(db_path, "pit-a", team_id, _CURRENT_SEASON,
+                                    ip_outs=9, er=1, so=9, bb=1, h=3)
+        # Pitcher B: high ERA (9 ip_outs, 5 ER => ERA=15.00), low K/9
+        _insert_player(db_path, "pit-b", "Bob", "Beta")
+        _insert_pitching_stats_full(db_path, "pit-b", team_id, _CURRENT_SEASON,
+                                    ip_outs=9, er=5, so=3, bb=4, h=8)
+        # Pitcher C: 0 ip_outs (should always sort last)
+        _insert_player(db_path, "pit-c", "Carl", "Gamma")
+        _insert_pitching_stats_full(db_path, "pit-c", team_id, _CURRENT_SEASON,
+                                    ip_outs=0, er=0, so=0, bb=0, h=0)
+        return db_path, team_id
+
+    def test_default_sort_era_asc(self, tmp_path: Path) -> None:
+        """AC-8(a): default sort is ERA ascending (lowest ERA first)."""
+        db_path, team_id = self._setup_db(tmp_path)
+        with patch.dict(
+            "os.environ",
+            {"DATABASE_PATH": str(db_path), "DEV_USER_EMAIL": "dev@example.com"},
+        ):
+            client = _make_dev_client(db_path, team_id)
+            with client:
+                resp = client.get(f"/dashboard/pitching?season_id={_CURRENT_SEASON}")
+        assert resp.status_code == 200
+        names = _extract_pitcher_order(resp.text)
+        assert names.index("Ace Alpha") < names.index("Bob Beta")
+        assert names[-1] == "Carl Gamma"
+
+    def test_sort_by_k9_desc(self, tmp_path: Path) -> None:
+        """AC-8(b): sort=k9&dir=desc puts Ace (high K/9) before Bob."""
+        db_path, team_id = self._setup_db(tmp_path)
+        with patch.dict(
+            "os.environ",
+            {"DATABASE_PATH": str(db_path), "DEV_USER_EMAIL": "dev@example.com"},
+        ):
+            client = _make_dev_client(db_path, team_id)
+            with client:
+                resp = client.get(f"/dashboard/pitching?season_id={_CURRENT_SEASON}&sort=k9&dir=desc")
+        assert resp.status_code == 200
+        names = _extract_pitcher_order(resp.text)
+        assert names.index("Ace Alpha") < names.index("Bob Beta")
+        assert names[-1] == "Carl Gamma"
+
+    def test_unrecognized_sort_falls_back_to_default(self, tmp_path: Path) -> None:
+        """AC-8(c): unrecognized sort param does not crash, renders 200."""
+        db_path, team_id = self._setup_db(tmp_path)
+        with patch.dict(
+            "os.environ",
+            {"DATABASE_PATH": str(db_path), "DEV_USER_EMAIL": "dev@example.com"},
+        ):
+            client = _make_dev_client(db_path, team_id)
+            with client:
+                resp = client.get(f"/dashboard/pitching?season_id={_CURRENT_SEASON}&sort=notvalid&dir=asc")
+        assert resp.status_code == 200
+        assert "Ace Alpha" in resp.text
+
+    def test_direction_toggle_reflected_in_url(self, tmp_path: Path) -> None:
+        """AC-8(d): sort=k9&dir=desc -> k9 header link toggles to asc."""
+        db_path, team_id = self._setup_db(tmp_path)
+        with patch.dict(
+            "os.environ",
+            {"DATABASE_PATH": str(db_path), "DEV_USER_EMAIL": "dev@example.com"},
+        ):
+            client = _make_dev_client(db_path, team_id)
+            with client:
+                resp = client.get(f"/dashboard/pitching?season_id={_CURRENT_SEASON}&sort=k9&dir=desc")
+        assert resp.status_code == 200
+        html = resp.text
+        assert "sort=k9&amp;dir=asc" in html or "sort=k9&dir=asc" in html
+
+    def test_zero_ip_rows_sort_to_bottom_asc(self, tmp_path: Path) -> None:
+        """AC-8(e): pitcher with 0 ip_outs sorts to bottom regardless of direction."""
+        db_path, team_id = self._setup_db(tmp_path)
+        with patch.dict(
+            "os.environ",
+            {"DATABASE_PATH": str(db_path), "DEV_USER_EMAIL": "dev@example.com"},
+        ):
+            client = _make_dev_client(db_path, team_id)
+            with client:
+                resp = client.get(f"/dashboard/pitching?season_id={_CURRENT_SEASON}&sort=k9&dir=asc")
+        assert resp.status_code == 200
+        names = _extract_pitcher_order(resp.text)
+        assert names[-1] == "Carl Gamma"
+
+    def test_sort_indicator_shown_on_active_column(self, tmp_path: Path) -> None:
+        """AC-5: active sort column shows direction indicator (HTML entity or unicode)."""
+        db_path, team_id = self._setup_db(tmp_path)
+        with patch.dict(
+            "os.environ",
+            {"DATABASE_PATH": str(db_path), "DEV_USER_EMAIL": "dev@example.com"},
+        ):
+            client = _make_dev_client(db_path, team_id)
+            with client:
+                resp = client.get(f"/dashboard/pitching?season_id={_CURRENT_SEASON}&sort=era&dir=asc")
+        assert resp.status_code == 200
+        html = resp.text
+        # Ascending indicator: either unicode ▲ or HTML entity &#9650;
+        assert "&#9650;" in html or "▲" in html

@@ -23,7 +23,7 @@
 {% endif %}
 {% else %}
 
-{{ team_selector(permitted_team_infos, active_team_id, "/dashboard") }}
+{{ team_selector(permitted_team_infos, active_team_id, "/dashboard", current_sort, current_dir) }}
 
 {{ season_selector(available_seasons, season_id, "/dashboard", active_team_id) }}
 
@@ -33,25 +33,46 @@
 </div>
 {% endif %}
 
+{# Helper macro: render a sortable column header #}
+{#   col_key: the sort param value (e.g. "avg")                              #}
+{#   label:   display text (e.g. "AVG")                                      #}
+{#   align:   "left" or "center" (default center)                            #}
+{% macro sort_header(col_key, label, align="center") %}
+  {%- set is_active = (current_sort == col_key) -%}
+  {%- if is_active -%}
+    {%- set next_dir = "asc" if current_dir == "desc" else "desc" -%}
+  {%- else -%}
+    {# Default directions from TN-4 #}
+    {%- set _asc_cols = ["name", "so", "era", "bb9", "whip", "er", "bb"] -%}
+    {%- set next_dir = "asc" if col_key in _asc_cols else "desc" -%}
+  {%- endif -%}
+  {%- set _href = "/dashboard?team_id=" ~ active_team_id ~ "&season_id=" ~ season_id ~ "&sort=" ~ col_key ~ "&dir=" ~ next_dir -%}
+  <th class="py-2 px-3 {% if align == 'left' %}text-left{% else %}text-center{% endif %}">
+    <a href="{{ _href }}" class="hover:underline whitespace-nowrap">
+      {{ label }}{% if is_active %} {% if current_dir == "asc" %}&#9650;{% else %}&#9660;{% endif %}{% endif %}
+    </a>
+  </th>
+{% endmacro %}
+
 <h1 class="text-xl font-bold mb-4">{{ team_name }} &mdash; Batting Stats</h1>
 <div class="overflow-x-auto">
   <table class="min-w-full text-sm bg-white rounded shadow">
     <thead class="bg-blue-900 text-white sticky top-0">
       <tr>
-        <th class="text-left py-2 px-3">Player</th>
-        <th class="py-2 px-3 text-center">AVG</th>
-        <th class="py-2 px-3 text-center">OBP</th>
-        <th class="py-2 px-3 text-center">GP</th>
-        <th class="py-2 px-3 text-center">BB</th>
-        <th class="py-2 px-3 text-center">SO</th>
-        <th class="py-2 px-3 text-center">SLG</th>
-        <th class="py-2 px-3 text-center">H</th>
-        <th class="py-2 px-3 text-center">AB</th>
-        <th class="py-2 px-3 text-center">2B</th>
-        <th class="py-2 px-3 text-center">3B</th>
-        <th class="py-2 px-3 text-center">HR</th>
-        <th class="py-2 px-3 text-center">SB</th>
-        <th class="py-2 px-3 text-center">RBI</th>
+        {{ sort_header("name", "Player", "left") }}
+        {{ sort_header("avg", "AVG") }}
+        {{ sort_header("obp", "OBP") }}
+        {{ sort_header("gp", "GP") }}
+        {{ sort_header("bb", "BB") }}
+        {{ sort_header("so", "SO") }}
+        {{ sort_header("slg", "SLG") }}
+        {{ sort_header("h", "H") }}
+        {{ sort_header("ab", "AB") }}
+        {{ sort_header("2b", "2B") }}
+        {{ sort_header("3b", "3B") }}
+        {{ sort_header("hr", "HR") }}
+        {{ sort_header("sb", "SB") }}
+        {{ sort_header("rbi", "RBI") }}
       </tr>
     </thead>
     <tbody>

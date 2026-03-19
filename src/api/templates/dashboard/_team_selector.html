@@ -1,9 +1,9 @@
-{% macro team_selector(permitted_team_infos, active_team_id, base_url) %}
+{% macro team_selector(permitted_team_infos, active_team_id, base_url, current_sort=None, current_dir=None) %}
 {% if permitted_team_infos|length > 1 %}
 <div class="mb-4 flex flex-wrap gap-2">
   {% for team in permitted_team_infos %}
   <a
-    href="{{ base_url }}?team_id={{ team.id }}"
+    href="{{ base_url }}?team_id={{ team.id }}{% if current_sort %}&sort={{ current_sort }}&dir={{ current_dir }}{% endif %}"
     class="px-3 py-2 rounded text-sm font-medium
       {% if team.id == active_team_id %}
         bg-blue-900 text-white

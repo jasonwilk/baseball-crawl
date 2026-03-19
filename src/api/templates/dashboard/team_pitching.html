@@ -19,7 +19,7 @@
 <p class="text-gray-600 mt-4">You have no team assignments. Contact your administrator.</p>
 {% else %}
 
-{{ team_selector(permitted_team_infos, active_team_id, "/dashboard/pitching") }}
+{{ team_selector(permitted_team_infos, active_team_id, "/dashboard/pitching", current_sort, current_dir) }}
 
 {{ season_selector(available_seasons, season_id, "/dashboard/pitching", active_team_id) }}
 
@@ -29,23 +29,40 @@
 </div>
 {% endif %}
 
+{# Helper macro: render a sortable column header for the pitching table #}
+{% macro sort_header(col_key, label, align="center") %}
+  {%- set is_active = (current_sort == col_key) -%}
+  {%- if is_active -%}
+    {%- set next_dir = "asc" if current_dir == "desc" else "desc" -%}
+  {%- else -%}
+    {%- set _asc_cols = ["name", "era", "bb9", "whip", "er", "bb", "h", "hr"] -%}
+    {%- set next_dir = "asc" if col_key in _asc_cols else "desc" -%}
+  {%- endif -%}
+  {%- set _href = "/dashboard/pitching?team_id=" ~ active_team_id ~ "&season_id=" ~ season_id ~ "&sort=" ~ col_key ~ "&dir=" ~ next_dir -%}
+  <th class="py-2 px-3 {% if align == 'left' %}text-left{% else %}text-center{% endif %}">
+    <a href="{{ _href }}" class="hover:underline whitespace-nowrap">
+      {{ label }}{% if is_active %} {% if current_dir == "asc" %}&#9650;{% else %}&#9660;{% endif %}{% endif %}
+    </a>
+  </th>
+{% endmacro %}
+
 <h1 class="text-xl font-bold mb-4">{{ team_name }} &mdash; Pitching Stats</h1>
 <div class="overflow-x-auto">
   <table class="min-w-full text-sm bg-white rounded shadow">
     <thead class="bg-blue-900 text-white sticky top-0">
       <tr>
-        <th class="text-left py-2 px-3">Player</th>
-        <th class="py-2 px-3 text-center">ERA</th>
-        <th class="py-2 px-3 text-center">K/9</th>
-        <th class="py-2 px-3 text-center">BB/9</th>
-        <th class="py-2 px-3 text-center">WHIP</th>
-        <th class="py-2 px-3 text-center">GP</th>
-        <th class="py-2 px-3 text-center">IP</th>
-        <th class="py-2 px-3 text-center">H</th>
-        <th class="py-2 px-3 text-center">ER</th>
-        <th class="py-2 px-3 text-center">BB</th>
-        <th class="py-2 px-3 text-center">SO</th>
-        <th class="py-2 px-3 text-center">HR</th>
+        {{ sort_header("name", "Player", "left") }}
+        {{ sort_header("era", "ERA") }}
+        {{ sort_header("k9", "K/9") }}
+        {{ sort_header("bb9", "BB/9") }}
+        {{ sort_header("whip", "WHIP") }}
+        {{ sort_header("gp", "GP") }}
+        {{ sort_header("ip", "IP") }}
+        {{ sort_header("h", "H") }}
+        {{ sort_header("er", "ER") }}
+        {{ sort_header("bb", "BB") }}
+        {{ sort_header("so", "SO") }}
+        {{ sort_header("hr", "HR") }}
       </tr>
     </thead>
     <tbody>
