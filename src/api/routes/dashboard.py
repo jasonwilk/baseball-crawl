@@ -104,8 +104,7 @@ async def team_stats(request: Request) -> Response:
     requested_season_id = request.query_params.get("season_id", "").strip()
 
     available_seasons = await run_in_threadpool(db.get_available_seasons, active_team_id)
-    valid_season_ids = {s["season_id"] for s in available_seasons}
-    if not requested_season_id or requested_season_id not in valid_season_ids:
+    if not requested_season_id:
         season_id = available_seasons[0]["season_id"] if available_seasons else f"{current_year}-spring-hs"
     else:
         season_id = requested_season_id
@@ -250,8 +249,7 @@ async def team_pitching(request: Request) -> Response:
     requested_season_id = request.query_params.get("season_id", "").strip()
 
     available_seasons = await run_in_threadpool(db.get_available_seasons, active_team_id_p)
-    valid_season_ids = {s["season_id"] for s in available_seasons}
-    if not requested_season_id or requested_season_id not in valid_season_ids:
+    if not requested_season_id:
         season_id = available_seasons[0]["season_id"] if available_seasons else f"{current_year}-spring-hs"
     else:
         season_id = requested_season_id
@@ -372,8 +370,7 @@ async def game_list(request: Request) -> Response:
     requested_season_id = request.query_params.get("season_id", "").strip()
 
     available_seasons = await run_in_threadpool(db.get_available_seasons, active_team_id_g)
-    valid_season_ids = {s["season_id"] for s in available_seasons}
-    if not requested_season_id or requested_season_id not in valid_season_ids:
+    if not requested_season_id:
         season_id = available_seasons[0]["season_id"] if available_seasons else f"{current_year}-spring-hs"
     else:
         season_id = requested_season_id
@@ -561,8 +558,7 @@ async def opponent_list(request: Request) -> Response:
     requested_season_id = request.query_params.get("season_id", "").strip()
 
     available_seasons = await run_in_threadpool(db.get_available_seasons, active_team_id_o)
-    valid_season_ids = {s["season_id"] for s in available_seasons}
-    if not requested_season_id or requested_season_id not in valid_season_ids:
+    if not requested_season_id:
         season_id = available_seasons[0]["season_id"] if available_seasons else f"{current_year}-spring-hs"
     else:
         season_id = requested_season_id
@@ -666,8 +662,7 @@ async def opponent_detail(request: Request, opponent_team_id: int) -> Response:
     requested_season_id = request.query_params.get("season_id", "").strip()
 
     available_seasons_opp = await run_in_threadpool(db.get_available_seasons, opponent_team_id)
-    valid_season_ids_opp = {s["season_id"] for s in available_seasons_opp}
-    if not requested_season_id or requested_season_id not in valid_season_ids_opp:
+    if not requested_season_id:
         season_id = (
             available_seasons_opp[0]["season_id"]
             if available_seasons_opp

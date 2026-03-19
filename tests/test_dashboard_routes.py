@@ -393,6 +393,39 @@ class TestNavigationLinks:
         assert f"team_id={team_id_b}&season_id=" not in html
         assert f"team_id={team_id_b}" in html
 
+    def test_game_list_row_links_carry_season_id(self, tmp_path: Path) -> None:
+        """Game row links in game_list.html carry season_id to game_detail."""
+        db_path = _make_db(tmp_path)
+        team_id = _insert_team(db_path, "Our Team")
+        opp_team_id = _insert_team(db_path, "Opponent")
+        _insert_player(db_path, "p-023", "Nina", "Park")
+        _insert_season(db_path, _CURRENT_SEASON)
+        _insert_batting_stats(db_path, "p-023", team_id, _CURRENT_SEASON)
+
+        # Create a game so the game list has rows
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("PRAGMA foreign_keys=ON;")
+        conn.execute(
+            "INSERT INTO games (game_id, season_id, home_team_id, away_team_id, game_date)"
+            " VALUES ('g-row-001', ?, ?, ?, '2026-04-10')",
+            (_CURRENT_SEASON, team_id, opp_team_id),
+        )
+        conn.commit()
+        conn.close()
+
+        with patch.dict(
+            "os.environ",
+            {"DATABASE_PATH": str(db_path), "DEV_USER_EMAIL": "dev@example.com"},
+        ):
+            client = _make_dev_client(db_path, team_id)
+            with client:
+                resp = client.get(f"/dashboard/games?season_id={_CURRENT_SEASON}")
+
+        assert resp.status_code == 200
+        html = resp.text
+        # Each game row link should carry season_id (template uses literal & in conditional, not &amp;)
+        assert f"/dashboard/games/g-row-001?team_id={team_id}&season_id={_CURRENT_SEASON}" in html
+
     def test_opponent_list_link_carries_season_id(self, tmp_path: Path) -> None:
         """Opponent links in opponent list carry season_id."""
         db_path = _make_db(tmp_path)
