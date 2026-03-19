@@ -4,9 +4,9 @@
 # Uses `codex exec --ephemeral -` (NOT `codex review`) because `codex review`
 # does not support custom review instructions alongside its diff-scope flags
 # (--uncommitted, --base, --commit). The [PROMPT] argument is mutually
-# exclusive with those flags. This script passes the rubric path and embeds
+# exclusive with those flags. This script embeds both the rubric content and
 # the diff into a prompt piped to `codex exec`, which accepts arbitrary prompt
-# content via stdin. Codex reads the rubric file itself via repository access.
+# content via stdin. No repository file access is needed in ephemeral mode.
 #
 # Verified against codex v0.107.0 (2026-03-03):
 #   `codex review --uncommitted` works but accepts NO custom instructions
@@ -61,17 +61,20 @@ if [[ ! -f "${RUBRIC_FILE}" ]]; then
 fi
 
 # ---------------------------------------------------------------------------
-# Assemble prompt: rubric path + diff + review request
-# The rubric is a path reference -- Codex reads it via repository access.
-# The diff is embedded because it is runtime-generated and not a file on disk.
+# Assemble prompt: embedded rubric + diff + review request
+# Both the rubric and the diff are embedded directly in the prompt so that
+# codex in --ephemeral mode can access them without repository file access.
 # ---------------------------------------------------------------------------
 assemble_review_prompt() {
     local diff_content="$1"
     local mode_label="$2"
+    local rubric_content
+    rubric_content="$(cat "${RUBRIC_FILE}")"
 
     echo "CODE-REVIEW REQUEST"
     echo ""
-    echo "Rubric: ${RUBRIC_FILE}"
+    echo "REVIEW RUBRIC"
+    echo "${rubric_content}"
 
     echo ""
     echo "CHANGES TO REVIEW (mode: ${mode_label})"
@@ -79,11 +82,10 @@ assemble_review_prompt() {
 
     echo ""
     echo "Instructions:"
-    echo "1. Read the rubric at the path above."
-    echo "2. Review the changes above against the rubric. Follow its Review Priorities in order."
-    echo "3. Cite file and line number for every finding."
-    echo "4. Group findings by priority level."
-    echo "5. If the review is clean, state explicitly: \"No findings.\""
+    echo "1. Review the changes above against the rubric. Follow its Review Priorities in order."
+    echo "2. Cite file and line number for every finding."
+    echo "3. Group findings by priority level."
+    echo "4. If the review is clean, state explicitly: \"No findings.\""
 }
 
 # ---------------------------------------------------------------------------

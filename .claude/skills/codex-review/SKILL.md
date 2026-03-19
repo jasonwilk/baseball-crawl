@@ -34,7 +34,7 @@ This skill supports two execution paths, detected from the user's trigger phrase
 
 Before executing either path, verify:
 
-1. **The rubric file exists.** Verify `/workspaces/baseball-crawl/.project/codex-review.md` is present. Do NOT read its contents. If missing, report the error and stop.
+1. **The rubric file exists.** Verify `/workspaces/baseball-crawl/.project/codex-review.md` is present. If missing, report the error and stop. For the prompt-generation path, also read the file contents (needed for embedding in Step 3).
 
 ---
 
@@ -110,7 +110,7 @@ After triage completes (whether via triage team or main session assessment), any
 
 **Spawning mechanics** depend on context:
 
-- **(a) "And review" chain** (invoked from implement skill Phase 4): The dispatch team is still active. The original implementer on the team validates and remediates findings. PM is already on the team for disposition tracking.
+- **(a) "And review" chain** (invoked from implement skill Phase 4): The dispatch team is still active. A fresh implementer is spawned into the **epic worktree** (without `isolation: "worktree"`) using the agent routing table to select the appropriate agent type for each finding's domain. The original dispatch team implementers may have been shut down, so a fresh spawn is the reliable path. PM is already on the team for disposition tracking. See the implement skill Phase 4a for the full remediation spawn context and epic worktree exception.
 - **(b) Standalone post-dev review** (invoked directly by the user): No dispatch team exists. The main session creates a remediation team using the agent routing table (`/.claude/rules/agent-routing.md`) to select the appropriate implementer type(s) for the findings' domains (not hard-coded to SE), plus PM for disposition tracking.
 
 For each finding confirmed for remediation, route it to the implementer with the finding details. The implementer:
@@ -138,7 +138,7 @@ PM records all findings with their dispositions. Each finding gets one of three 
 
 ### Step 7: Wrap up
 
-- If this was an "and review" chain, control returns to the implement skill's Phase 4, which proceeds to Phase 5 (closure).
+- If this was an "and review" chain, control returns to the implement skill's Phase 4, which proceeds to Phase 4b (CR integration review).
 - If this was a standalone review, present the disposition summary to the user and offer to commit changes.
 
 ---
@@ -232,22 +232,22 @@ Count the total lines in the assembled diff content:
 
 ### Step 3: Assemble the lean prompt
 
-Build the prompt matching the format used by `scripts/codex-review.sh`:
+Build the prompt matching the format used by `scripts/codex-review.sh`. The rubric content is **embedded directly** in the prompt (not referenced by path) so that codex in ephemeral mode can access it without repository file access:
 
 ```
 CODE-REVIEW REQUEST
 
-Rubric: /workspaces/baseball-crawl/.project/codex-review.md
+REVIEW RUBRIC
+{rubric file contents — read from /workspaces/baseball-crawl/.project/codex-review.md}
 
 CHANGES TO REVIEW (mode: {mode label})
 {diff content}
 
 Instructions:
-1. Read the rubric at the path above.
-2. Review the changes above against the rubric. Follow its Review Priorities in order.
-3. Cite file and line number for every finding.
-4. Group findings by priority level.
-5. If the review is clean, state explicitly: "No findings."
+1. Review the changes above against the rubric. Follow its Review Priorities in order.
+2. Cite file and line number for every finding.
+3. Group findings by priority level.
+4. If the review is clean, state explicitly: "No findings."
 ```
 
 The mode label is one of: `uncommitted`, `base <branch>`, or `commit <sha>`.
@@ -288,9 +288,9 @@ Determine diff mode (default: uncommitted)
   |       Triage complete, findings confirmed for remediation?
   |         NO -> Stop
   |         YES -> Remediation loop:
-  |           Spawn implementer (reuse dispatch team or create remediation team)
+  |           Spawn fresh implementer (epic worktree for "and review" chain, main checkout for standalone)
   |           Implementer validates each finding (real issue or false positive)
-  |           Implementer remediates confirmed issues in main checkout
+  |           Implementer remediates in epic worktree ("and review") or main checkout (standalone)
   |           PM records dispositions (FIXED/DISMISSED/FALSE POSITIVE)
   |             "And review" chain -> epic History section
   |             Standalone review -> .project/research/codex-review-YYYY-MM-DD-remediation.md
@@ -301,7 +301,7 @@ Determine diff mode (default: uncommitted)
           Gather diff via Bash + Read
           Empty diff? -> Report "no changes", stop
           Size check (5k warn, 10k refuse)
-          Assemble lean prompt (request header, rubric path, diff, instructions)
+          Assemble lean prompt (request header, embedded rubric, diff, instructions)
           Present in fenced code block
           Stop (no execution, no triage)
 ```
@@ -337,7 +337,7 @@ Detected via `file --brief --mime-type`. Binary files are skipped with a note. T
 
 1. **Do not hardcode an agent roster in this skill file.** Agent selection for triage uses CLAUDE.md's Agent Ecosystem table at runtime (ambient context). This keeps the roster current without manual sync.
 2. **Do not offer triage in the prompt-generation path.** Triage is headless-only. The prompt-gen path assembles and presents -- nothing more.
-3. **Do not embed rubric content in this skill file or in generated prompts.** The rubric is referenced by absolute path; Codex reads it directly.
+3. **Do not embed rubric content in this skill file.** The rubric is read at runtime and embedded in the generated prompt (both script and prompt-generation paths). The rubric's content is NOT hardcoded in this skill file -- it is always read fresh from `.project/codex-review.md`.
 4. **Do not summarize the diff in prompt-generation.** The prompt must contain the complete diff content. Codex needs the full code to perform a meaningful review.
 5. **Do not add separator walls, "Begin your response with" instructions, or team recommendation blocks to prompts.** The lean format has no ceremony.
 6. **Do not implement fixes during triage.** Triage is advisory -- the triage team assesses and recommends but does NOT write code. Implementation happens in the separate remediation phase (Step 5), which is authorized by the post-review remediation exception in `workflow-discipline.md`'s Work Authorization Gate.

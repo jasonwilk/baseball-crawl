@@ -4,7 +4,7 @@
 [E-138: Full Dispatch Pipeline](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the implement skill's Phase 5 closure sequence is wired to the full pipeline: after both review passes (codex + CR integration) complete, the pipeline runs the closure merge (epic worktree → main from E-137), PII scan, presents the commit summary, and waits for operator approval before committing. The "and review" pipeline ends with a clean, reviewed, operator-approved atomic commit.

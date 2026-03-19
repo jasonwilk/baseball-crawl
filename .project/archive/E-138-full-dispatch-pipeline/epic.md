@@ -1,7 +1,7 @@
 # E-138: Full Dispatch Pipeline
 
 ## Status
-`READY`
+`COMPLETED`
 
 ## Overview
 Automate the full post-dispatch pipeline — codex review, code-reviewer integration review, remediation, and commit — into a single "and review" modifier on the dispatch trigger. Today this requires 4+ manual interactions; the pipeline absorbs them all while gracefully degrading when the diff is too large for headless codex review.
@@ -58,9 +58,9 @@ Depends on E-137 (epic-level worktree isolation) for clean epic-scoped diffs.
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-138-01 | Codex review with graceful degradation | TODO | None (E-137 is epic-level dep) | - |
-| E-138-02 | Post-codex code-reviewer integration pass | TODO | E-138-01 | - |
-| E-138-03 | Automated commit gate | TODO | E-138-02 | - |
+| E-138-01 | Codex review with graceful degradation | DONE | None (E-137 is epic-level dep) | - |
+| E-138-02 | Post-codex code-reviewer integration pass | DONE | E-138-01 | - |
+| E-138-03 | Automated commit gate | DONE | E-138-02 | - |
 
 ## Dispatch Team
 - claude-architect
@@ -139,3 +139,4 @@ This epic depends on E-137 (epic-level worktree isolation). All diffs are genera
 ## History
 - 2026-03-19: Created during parallel-epic-design consultation team. PM, CA, SE contributed analysis. User validated two-epic plan (E-137 infrastructure, E-138 pipeline).
 - 2026-03-19: Codex spec review completed -- all findings fixed during refinement. User approved plan. Status set to READY.
+- 2026-03-19: All 3 stories completed. E-138-01: Codex review with graceful degradation (Phase 4a rewrite -- headless → timeout → prompt fallback, rubric embedding bug fix, epic worktree remediation). E-138-02: Code-reviewer integration review (Phase 4b -- full epic diff review for cross-story issues, large diff handling). E-138-03: Automated commit gate (Phase 5 commit summary with review outcomes, explicit approval gate, rejection/pause behavior, Phase 4/5 boundary documentation). Additional file modified: `.claude/rules/worktree-isolation.md` (Phase 4 remediation exception per E-137 dispatch signal). Note: E-138-03 AC-1 referenced "Phase 5 Step 10" but implementation correctly uses Step 8 per E-137's closure reordering -- cosmetic AC text staleness, not a functional gap. Epic status set to COMPLETED.

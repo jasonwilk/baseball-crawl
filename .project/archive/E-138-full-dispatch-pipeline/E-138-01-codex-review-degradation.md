@@ -4,7 +4,7 @@
 [E-138: Full Dispatch Pipeline](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the implement skill's Phase 4 runs codex review against the epic worktree diff with graceful degradation: if headless codex times out or fails, the pipeline generates a review prompt, pauses for the operator to run it async, and resumes when findings are pasted (or "skip" is entered).
@@ -59,3 +59,6 @@ claude-architect
 
 ## Notes
 This is the most complex story in E-138. It touches three files (mixed context-layer + script). Per routing precedence, this goes to claude-architect WITH worktree isolation.
+
+## History
+- 2026-03-19: Completed. All 10 ACs verified PASS. Additionally modified `.claude/rules/worktree-isolation.md` (not in original Files to Create or Modify) per dispatch signal from E-137 round 3 review — documents the Phase 4 remediation exception allowing implementers to work in the epic worktree during post-review remediation.

@@ -4,7 +4,7 @@
 [E-138: Full Dispatch Pipeline](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the implement skill includes a NEW Phase 4b: a code-reviewer integration review of the full epic diff. This holistic review catches cross-story interactions, naming inconsistencies, and architectural issues that per-story CR (Phase 3) cannot detect. The integration review runs after codex review (Phase 4a) and before the commit gate (Phase 5).
