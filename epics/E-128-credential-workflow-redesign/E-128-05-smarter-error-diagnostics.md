@@ -10,7 +10,7 @@
 After this story is complete, credential error messages will auto-diagnose the root cause (stale client key vs expired refresh token vs clock skew) and prescribe exactly one next command. The current pattern of branching error messages ("if X, do A; if Y, do B") is replaced with inline diagnosis that narrows to one remediation path.
 
 ## Context
-The current error messages for `bb creds refresh` failures present multiple possible causes and remediation paths, requiring the operator to parse the message and choose. The stale-client-key trap is especially confusing: it returns the same HTTP 401 as an expired refresh token, so the error message suggests both causes without distinguishing them. The UXD design (2026-03-18) proposed: diagnose further at the point of failure and prescribe one thing.
+The current error messages for `bb creds refresh` failures present multiple possible causes and remediation paths, requiring the operator to parse the message and choose. Two distinct failure modes exist: HTTP 400 = signature computation error (stale client key or clock skew, addressed by AC-1), HTTP 401 = token rejection (expired refresh token or stale key mimicking token expiry, addressed by AC-2). The stale-client-key trap is especially confusing: a stale key causes HTTP 401 identical to an expired refresh token. The UXD design (2026-03-18) proposed: diagnose further at the point of failure and prescribe one thing.
 
 ## Acceptance Criteria
 - [ ] **AC-1**: Given `bb creds refresh` fails with HTTP 400 (signature rejected), then the command runs an inline client key check (calls `extract_client_key()` and compares to `.env`). If the key changed: message says "Client key is stale" and prescribes `bb creds extract-key --apply`. If the key is current: message says "Signature rejected but key is current" and suggests checking system clock.
@@ -20,7 +20,7 @@ The current error messages for `bb creds refresh` failures present multiple poss
 - [ ] **AC-5**: Tests cover: stale key detection, expired token detection, non-expired token with 401, network error fallback.
 
 ## Technical Approach
-The diagnostic logic wraps the existing error handling in `bb creds refresh` per Technical Notes TN-4. On `AuthSigningError` (HTTP 400), call `extract_client_key()` in a try/except and compare. On `CredentialExpiredError` (HTTP 401), decode the refresh token JWT locally to check expiry. The inline diagnostics are best-effort -- if the additional check fails, fall back to the current error message.
+The diagnostic logic wraps the existing error handling in `bb creds refresh` per Technical Notes TN-4. On `AuthSigningError` (HTTP 400), call `extract_client_key()` in a try/except and compare. On `CredentialExpiredError` (HTTP 401), decode the refresh token JWT locally to check expiry. The inline diagnostics are best-effort -- if the additional check fails, fall back to AC-3's ordered fallback message.
 
 Key files to study: `src/cli/creds.py` (lines 234-268: refresh error handling), `src/gamechanger/token_manager.py` (error classes), `src/gamechanger/key_extractor.py` (`extract_client_key()`).
 
