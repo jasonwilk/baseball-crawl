@@ -52,11 +52,13 @@ No expert consultation required for baseball-coach -- sorting is a pure UI/UX ca
 
 ### TN-1: Server-Side Sort via Query Parameters
 
-The route handlers (`team_stats()`, `team_pitching()`, and `opponent_detail()`) accept two new optional query parameters:
+The route handlers `team_stats()` and `team_pitching()` accept two new optional query parameters:
 - `sort`: column key (e.g., `avg`, `obp`, `era`, `k9`, `name`)
 - `dir`: `asc` or `desc`
 
-If `sort` is not provided or is not a recognized column key, use the current default sort (AVG DESC for batting, ERA ASC for pitching). If `dir` is not provided, use the default direction for that column.
+The `opponent_detail()` handler uses a different param scheme -- see TN-7 (`bat_sort/bat_dir/pit_sort/pit_dir`).
+
+If a sort param is not provided or is not a recognized column key, use the current default sort (AVG DESC for batting, ERA ASC for pitching). If a direction param is not provided, use the default direction for that column.
 
 ### TN-2: Sort Key Computation for Rate Stats
 
@@ -90,8 +92,8 @@ Each sortable column needs a stable key used in the `sort` query parameter. Thes
 ### TN-4: Default Sort Directions
 
 When a column is clicked for the first time (no current sort on that column), use a sensible default direction:
-- **Descending by default** (higher is better): AVG, OBP, SLG, H, HR, RBI, SB, BB (batting), K/9, SO, IP, GP
-- **Ascending by default** (lower is better): SO (batting), ERA, BB/9, WHIP, ER, BB (pitching), HR (pitching)
+- **Descending by default** (higher is better): AVG, OBP, SLG, H, AB, 2B, 3B, HR, RBI, SB, BB (batting), K/9, SO, IP, GP
+- **Ascending by default** (lower is better): NAME, SO (batting), ERA, BB/9, WHIP, ER, BB (pitching), H (pitching), HR (pitching)
 
 When the column is already the active sort, toggle the direction.
 
@@ -99,13 +101,13 @@ When the column is already the active sort, toggle the direction.
 
 Sort params are **page-specific** -- batting sort params do not carry to the pitching page or opponent detail and vice versa. Bottom nav links should only carry `team_id` and `season_id` (not sort params).
 
-Sort params should be preserved within a page's own links: team selector on the same page and the active sort column header toggle link. On the opponent detail page, the `sort` and `dir` params apply to that page's URL and are independent of the team batting/pitching sort state.
+Sort params should be preserved within a page's own links: team selector on the same page and the active sort column header toggle link. On the opponent detail page, the `bat_sort`/`bat_dir`/`pit_sort`/`pit_dir` params apply to that page's URL and are independent of the team batting/pitching sort state.
 
 ### TN-7: Opponent Detail Sort Context
 
 The opponent detail page (`/dashboard/opponents/{opponent_team_id}`) has TWO tables (batting leaders and pitching leaders) on a single page. Both tables need independent sort controls.
 
-Approach: use separate query param namespaces -- e.g., `bat_sort`, `bat_dir` for the batting table and `pit_sort`, `pit_dir` for the pitching table. This allows both tables to be sorted independently on the same page load. Alternatively, use a single `sort`/`dir` pair that applies to the table identified by a `table` param (e.g., `?table=batting&sort=avg&dir=desc`). The implementing agent should choose the simpler approach.
+Use separate query param namespaces: `bat_sort` and `bat_dir` for the batting table, `pit_sort` and `pit_dir` for the pitching table. This allows both tables to be sorted independently on the same page load, and both tables' sort state survives in a single URL.
 
 ### TN-6: Template Header Pattern
 
@@ -119,3 +121,4 @@ The active sort column's header shows a Unicode indicator: `▲` for ascending, 
 ## History
 - 2026-03-19: Created. Scoped to team batting and pitching tables only. Season navigation and tab context persistence identified as fully covered by E-127-11/12 (not duplicated here). UXD, SE consulted. Server-side sorting chosen over client-side JS per UXD recommendation.
 - 2026-03-19: Expanded scope to include opponent scouting report tables (E-130-02) per UXD recommendation -- opponent sorting is the core coaching use case for pre-game prep. E-130-02 depends on E-130-01 (reuses sort pattern). Added TN-7 for opponent detail dual-table sort context.
+- 2026-03-19: Codex spec review triage. 5 findings assessed (all valid). Applied: (F1) pinned `bat_sort/bat_dir/pit_sort/pit_dir` param contract in TN-7, removed alternative; (F2) added explicit `team_id`/`season_id` preservation to E-130-02 AC-2/AC-3/AC-7; (F3) completed TN-4 default-direction map for all column keys; (F4) fixed one-sided dependency metadata in E-130-01; (F5) added AC-8 (invalid fallback) and AC-9 (direction toggle) to E-130-02, expanded test AC.
