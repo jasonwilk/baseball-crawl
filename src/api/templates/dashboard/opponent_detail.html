@@ -98,6 +98,48 @@ Scout: {{ scouting_report.team_name if scouting_report else opponent_team_id }}
   {% endif %}
 </div>
 
+{# Build the base URL fragment shared by both tables' sort links.
+   Each table's sort link must preserve team_id, season_id, and the OTHER table's sort state. #}
+{%- set _base = "/dashboard/opponents/" ~ opponent_team_id ~ "?" -%}
+{%- if active_team_id -%}{%- set _base = _base ~ "team_id=" ~ active_team_id ~ "&" -%}{%- endif -%}
+{%- if season_id -%}{%- set _base = _base ~ "season_id=" ~ season_id ~ "&" -%}{%- endif -%}
+
+{# Batting sort macro: preserves pit_sort/pit_dir when linking #}
+{%- set _pit_qs = "pit_sort=" ~ pit_sort ~ "&pit_dir=" ~ pit_dir -%}
+{%- set _bat_qs = "bat_sort=" ~ bat_sort ~ "&bat_dir=" ~ bat_dir -%}
+
+{% macro bat_sort_header(col_key, label, align="center") %}
+  {%- set is_active = (bat_sort == col_key) -%}
+  {%- if is_active -%}
+    {%- set next_dir = "asc" if bat_dir == "desc" else "desc" -%}
+  {%- else -%}
+    {%- set _asc_cols = ["name", "so"] -%}
+    {%- set next_dir = "asc" if col_key in _asc_cols else "desc" -%}
+  {%- endif -%}
+  {%- set _href = _base ~ "bat_sort=" ~ col_key ~ "&bat_dir=" ~ next_dir ~ "&" ~ _pit_qs -%}
+  <th class="py-2 px-3 {% if align == 'left' %}text-left{% else %}text-center{% endif %}">
+    <a href="{{ _href }}" class="hover:underline whitespace-nowrap">
+      {{ label }}{% if is_active %} {% if bat_dir == "asc" %}&#9650;{% else %}&#9660;{% endif %}{% endif %}
+    </a>
+  </th>
+{% endmacro %}
+
+{% macro pit_sort_header(col_key, label, align="center") %}
+  {%- set is_active = (pit_sort == col_key) -%}
+  {%- if is_active -%}
+    {%- set next_dir = "asc" if pit_dir == "desc" else "desc" -%}
+  {%- else -%}
+    {%- set _asc_cols = ["name", "era", "whip", "er", "bb", "h"] -%}
+    {%- set next_dir = "asc" if col_key in _asc_cols else "desc" -%}
+  {%- endif -%}
+  {%- set _href = _base ~ _bat_qs ~ "&pit_sort=" ~ col_key ~ "&pit_dir=" ~ next_dir -%}
+  <th class="py-2 px-3 {% if align == 'left' %}text-left{% else %}text-center{% endif %}">
+    <a href="{{ _href }}" class="hover:underline whitespace-nowrap">
+      {{ label }}{% if is_active %} {% if pit_dir == "asc" %}&#9650;{% else %}&#9660;{% endif %}{% endif %}
+    </a>
+  </th>
+{% endmacro %}
+
 {# Batting Leaders table #}
 <h2 class="text-base font-bold mb-2">Batting Leaders</h2>
 {% if scouting_report.batting %}
@@ -105,18 +147,18 @@ Scout: {{ scouting_report.team_name if scouting_report else opponent_team_id }}
   <table class="min-w-full text-sm bg-white rounded shadow">
     <thead class="bg-blue-900 text-white sticky top-0">
       <tr>
-        <th class="text-left py-2 px-3">Player</th>
-        <th class="py-2 px-3 text-center">AVG</th>
-        <th class="py-2 px-3 text-center">OBP</th>
-        <th class="py-2 px-3 text-center">GP</th>
-        <th class="py-2 px-3 text-center">AB</th>
-        <th class="py-2 px-3 text-center">BB</th>
-        <th class="py-2 px-3 text-center">SO</th>
-        <th class="py-2 px-3 text-center">SLG</th>
-        <th class="py-2 px-3 text-center">H</th>
-        <th class="py-2 px-3 text-center">HR</th>
-        <th class="py-2 px-3 text-center">SB</th>
-        <th class="py-2 px-3 text-center">RBI</th>
+        {{ bat_sort_header("name", "Player", "left") }}
+        {{ bat_sort_header("avg", "AVG") }}
+        {{ bat_sort_header("obp", "OBP") }}
+        {{ bat_sort_header("gp", "GP") }}
+        {{ bat_sort_header("ab", "AB") }}
+        {{ bat_sort_header("bb", "BB") }}
+        {{ bat_sort_header("so", "SO") }}
+        {{ bat_sort_header("slg", "SLG") }}
+        {{ bat_sort_header("h", "H") }}
+        {{ bat_sort_header("hr", "HR") }}
+        {{ bat_sort_header("sb", "SB") }}
+        {{ bat_sort_header("rbi", "RBI") }}
       </tr>
     </thead>
     <tbody>
@@ -150,16 +192,16 @@ Scout: {{ scouting_report.team_name if scouting_report else opponent_team_id }}
   <table class="min-w-full text-sm bg-white rounded shadow">
     <thead class="bg-blue-900 text-white sticky top-0">
       <tr>
-        <th class="text-left py-2 px-3">Player</th>
-        <th class="py-2 px-3 text-center">ERA</th>
-        <th class="py-2 px-3 text-center">K/9</th>
-        <th class="py-2 px-3 text-center">WHIP</th>
-        <th class="py-2 px-3 text-center">GP</th>
-        <th class="py-2 px-3 text-center">IP</th>
-        <th class="py-2 px-3 text-center">H</th>
-        <th class="py-2 px-3 text-center">ER</th>
-        <th class="py-2 px-3 text-center">BB</th>
-        <th class="py-2 px-3 text-center">SO</th>
+        {{ pit_sort_header("name", "Player", "left") }}
+        {{ pit_sort_header("era", "ERA") }}
+        {{ pit_sort_header("k9", "K/9") }}
+        {{ pit_sort_header("whip", "WHIP") }}
+        {{ pit_sort_header("gp", "GP") }}
+        {{ pit_sort_header("ip", "IP") }}
+        {{ pit_sort_header("h", "H") }}
+        {{ pit_sort_header("er", "ER") }}
+        {{ pit_sort_header("bb", "BB") }}
+        {{ pit_sort_header("so", "SO") }}
       </tr>
     </thead>
     <tbody>

@@ -1080,3 +1080,233 @@ class TestPitchingSortParams:
         html = resp.text
         # Ascending indicator: either unicode ▲ or HTML entity &#9650;
         assert "&#9650;" in html or "▲" in html
+
+
+# ---------------------------------------------------------------------------
+# AC-10: Opponent detail sort parameter tests
+# ---------------------------------------------------------------------------
+
+
+def _extract_names_from_table(html: str, table_heading: str) -> list[str]:
+    """Extract player name text from the table that follows a given heading.
+
+    Isolates the HTML between the given heading and the next heading (or end),
+    then finds all name cells within that slice.
+    """
+    import re
+    pattern = r'<td class="[^"]*font-medium[^"]*whitespace-nowrap[^"]*">\s*([^<]+?)\s*</td>'
+
+    if table_heading not in html:
+        return re.findall(pattern, html)
+
+    start = html.index(table_heading)
+    # Find the next heading after this one to delimit the slice
+    headings = ["Batting Leaders", "Pitching Leaders"]
+    end = len(html)
+    for h in headings:
+        if h == table_heading:
+            continue
+        idx = html.find(h, start + len(table_heading))
+        if idx != -1 and idx < end:
+            end = idx
+
+    return re.findall(pattern, html[start:end])
+
+
+def _setup_opponent_detail_db(tmp_path: Path) -> tuple[Path, int, int]:
+    """Create a DB with our team, an opponent, one game between them,
+    and three batters + three pitchers for the opponent.
+
+    Returns (db_path, our_team_id, opp_team_id).
+    """
+    db_path = _make_db(tmp_path)
+    our_team_id = _insert_team(db_path, "Our Team")
+    opp_team_id = _insert_team(db_path, "Opponent")
+    _insert_season(db_path, _CURRENT_SEASON)
+
+    # A game between the two teams is required for opponent auth.
+    # Also insert the dev user + team access (used by DEV_USER_EMAIL bypass).
+    conn = sqlite3.connect(str(db_path))
+    conn.execute("PRAGMA foreign_keys=ON;")
+    conn.execute(
+        "INSERT INTO games (game_id, season_id, home_team_id, away_team_id, game_date)"
+        " VALUES ('g-opp-001', ?, ?, ?, '2026-04-01')",
+        (_CURRENT_SEASON, our_team_id, opp_team_id),
+    )
+    user_id = conn.execute(
+        "INSERT INTO users (email) VALUES (?) RETURNING id", ("dev@example.com",)
+    ).fetchone()[0]
+    conn.execute(
+        "INSERT OR IGNORE INTO user_team_access (user_id, team_id) VALUES (?, ?)",
+        (user_id, our_team_id),
+    )
+    conn.commit()
+    conn.close()
+
+    # Batting: Alice (.500 AVG, 0 HR), Bob (.300 AVG, 2 HR), Carol (0 AB)
+    _insert_player(db_path, "opp-bat-a", "Alice", "Alpha")
+    _insert_batting_stats_full(db_path, "opp-bat-a", opp_team_id, _CURRENT_SEASON,
+                               ab=10, h=5, hr=0, rbi=1, so=1)
+    _insert_player(db_path, "opp-bat-b", "Bob", "Beta")
+    _insert_batting_stats_full(db_path, "opp-bat-b", opp_team_id, _CURRENT_SEASON,
+                               ab=10, h=3, hr=2, rbi=4, so=2)
+    _insert_player(db_path, "opp-bat-c", "Carol", "Gamma")
+    _insert_batting_stats_full(db_path, "opp-bat-c", opp_team_id, _CURRENT_SEASON,
+                               ab=0, h=0, hr=0, rbi=0, so=0)
+
+    # Pitching: Ace (low ERA), Bob (high ERA), Carl (0 ip_outs)
+    _insert_player(db_path, "opp-pit-a", "Ace", "Pitcher")
+    _insert_pitching_stats_full(db_path, "opp-pit-a", opp_team_id, _CURRENT_SEASON,
+                                ip_outs=9, er=1, so=9, bb=1, h=3)
+    _insert_player(db_path, "opp-pit-b", "Bob", "Hurler")
+    _insert_pitching_stats_full(db_path, "opp-pit-b", opp_team_id, _CURRENT_SEASON,
+                                ip_outs=9, er=5, so=3, bb=4, h=8)
+    _insert_player(db_path, "opp-pit-c", "Carl", "Zeroes")
+    _insert_pitching_stats_full(db_path, "opp-pit-c", opp_team_id, _CURRENT_SEASON,
+                                ip_outs=0, er=0, so=0, bb=0, h=0)
+
+    return db_path, our_team_id, opp_team_id
+
+
+class TestOpponentDetailSortParams:
+    """AC-10: Sort parameter tests for /dashboard/opponents/{id} dual-table page."""
+
+    def _get(
+        self,
+        db_path: Path,
+        our_team_id: int,
+        opp_team_id: int,
+        extra_params: str = "",
+    ) -> str:
+        """Helper: make a GET request and return response HTML.
+
+        Uses DEV_USER_EMAIL bypass; the dev user + team access are set up by
+        ``_setup_opponent_detail_db`` so we do NOT re-insert here.
+        """
+        url = (
+            f"/dashboard/opponents/{opp_team_id}"
+            f"?team_id={our_team_id}&season_id={_CURRENT_SEASON}{extra_params}"
+        )
+        with patch.dict(
+            "os.environ",
+            {"DATABASE_PATH": str(db_path), "DEV_USER_EMAIL": "dev@example.com"},
+        ):
+            with TestClient(app, follow_redirects=False) as client:
+                resp = client.get(url)
+        assert resp.status_code == 200
+        return resp.text
+
+    # AC-10(a): default sort matches current behavior --------------------------
+
+    def test_default_batting_sort_avg_desc(self, tmp_path: Path) -> None:
+        """AC-10(a): default batting sort is AVG desc (Alice .500 before Bob .300)."""
+        db_path, our_id, opp_id = _setup_opponent_detail_db(tmp_path)
+        html = self._get(db_path, our_id, opp_id)
+        names = _extract_names_from_table(html, "Batting Leaders")
+        assert names.index("Alice Alpha") < names.index("Bob Beta")
+        assert names[-1] == "Carol Gamma"
+
+    def test_default_pitching_sort_era_asc(self, tmp_path: Path) -> None:
+        """AC-10(a): default pitching sort is ERA asc (Ace before Bob)."""
+        db_path, our_id, opp_id = _setup_opponent_detail_db(tmp_path)
+        html = self._get(db_path, our_id, opp_id)
+        names = _extract_names_from_table(html, "Pitching Leaders")
+        assert names.index("Ace Pitcher") < names.index("Bob Hurler")
+        assert names[-1] == "Carl Zeroes"
+
+    # AC-10(b): recognized sort params produce correct order -------------------
+
+    def test_batting_sort_by_hr_desc(self, tmp_path: Path) -> None:
+        """AC-10(b): bat_sort=hr&bat_dir=desc puts Bob (2 HR) before Alice (0 HR)."""
+        db_path, our_id, opp_id = _setup_opponent_detail_db(tmp_path)
+        html = self._get(db_path, our_id, opp_id, "&bat_sort=hr&bat_dir=desc")
+        names = _extract_names_from_table(html, "Batting Leaders")
+        assert names.index("Bob Beta") < names.index("Alice Alpha")
+        assert names[-1] == "Carol Gamma"
+
+    def test_pitching_sort_by_k9_desc(self, tmp_path: Path) -> None:
+        """AC-10(b): pit_sort=k9&pit_dir=desc puts Ace (high K/9) before Bob."""
+        db_path, our_id, opp_id = _setup_opponent_detail_db(tmp_path)
+        html = self._get(db_path, our_id, opp_id, "&pit_sort=k9&pit_dir=desc")
+        names = _extract_names_from_table(html, "Pitching Leaders")
+        assert names.index("Ace Pitcher") < names.index("Bob Hurler")
+        assert names[-1] == "Carl Zeroes"
+
+    # AC-10(c): sorting one table preserves the other's sort state -------------
+
+    def test_batting_sort_preserves_pitching_sort_params_in_links(self, tmp_path: Path) -> None:
+        """AC-10(c): batting sort links carry pit_sort/pit_dir; pitching sort links carry bat_sort/bat_dir."""
+        db_path, our_id, opp_id = _setup_opponent_detail_db(tmp_path)
+        html = self._get(db_path, our_id, opp_id,
+                         "&bat_sort=hr&bat_dir=desc&pit_sort=k9&pit_dir=desc")
+        # Batting column links should carry pit_sort=k9&pit_dir=desc
+        assert "pit_sort=k9" in html
+        assert "pit_dir=desc" in html
+        # Pitching column links should carry bat_sort=hr&bat_dir=desc
+        assert "bat_sort=hr" in html
+        assert "bat_dir=desc" in html
+        # Sort links must also preserve team_id and season_id (AC-2/AC-3/AC-7)
+        assert f"team_id={our_id}" in html
+        assert f"season_id={_CURRENT_SEASON}" in html
+
+    # AC-10(d): zero-denominator rows sort to bottom --------------------------
+
+    def test_zero_ab_sorts_to_bottom_any_direction(self, tmp_path: Path) -> None:
+        """AC-10(d): Carol (0 AB) is always last in batting table."""
+        db_path, our_id, opp_id = _setup_opponent_detail_db(tmp_path)
+        for params in ("&bat_sort=hr&bat_dir=asc", "&bat_sort=hr&bat_dir=desc"):
+            html = self._get(db_path, our_id, opp_id, params)
+            names = _extract_names_from_table(html, "Batting Leaders")
+            assert names[-1] == "Carol Gamma", f"Carol not last for params={params}"
+
+    def test_zero_ip_sorts_to_bottom_any_direction(self, tmp_path: Path) -> None:
+        """AC-10(d): Carl (0 ip_outs) is always last in pitching table."""
+        db_path, our_id, opp_id = _setup_opponent_detail_db(tmp_path)
+        for params in ("&pit_sort=k9&pit_dir=asc", "&pit_sort=k9&pit_dir=desc"):
+            html = self._get(db_path, our_id, opp_id, params)
+            names = _extract_names_from_table(html, "Pitching Leaders")
+            assert names[-1] == "Carl Zeroes", f"Carl not last for params={params}"
+
+    # AC-10(e): unrecognized sort params fall back to default -----------------
+
+    def test_unrecognized_bat_sort_falls_back_to_avg_desc(self, tmp_path: Path) -> None:
+        """AC-10(e): unrecognized bat_sort falls back to AVG desc order."""
+        db_path, our_id, opp_id = _setup_opponent_detail_db(tmp_path)
+        html = self._get(db_path, our_id, opp_id, "&bat_sort=notvalid&bat_dir=asc")
+        names = _extract_names_from_table(html, "Batting Leaders")
+        assert names.index("Alice Alpha") < names.index("Bob Beta")
+        assert names[-1] == "Carol Gamma"
+
+    def test_unrecognized_pit_sort_falls_back_to_era_asc(self, tmp_path: Path) -> None:
+        """AC-10(e): unrecognized pit_sort falls back to ERA asc order."""
+        db_path, our_id, opp_id = _setup_opponent_detail_db(tmp_path)
+        html = self._get(db_path, our_id, opp_id, "&pit_sort=notvalid&pit_dir=desc")
+        names = _extract_names_from_table(html, "Pitching Leaders")
+        assert names.index("Ace Pitcher") < names.index("Bob Hurler")
+        assert names[-1] == "Carl Zeroes"
+
+    # AC-10(f): direction toggle -----------------------------------------------
+
+    def test_batting_direction_toggle_in_links(self, tmp_path: Path) -> None:
+        """AC-10(f): active bat_sort=hr dir=desc -> hr link toggles to asc."""
+        db_path, our_id, opp_id = _setup_opponent_detail_db(tmp_path)
+        html = self._get(db_path, our_id, opp_id, "&bat_sort=hr&bat_dir=desc")
+        assert "bat_sort=hr&amp;bat_dir=asc" in html or "bat_sort=hr&bat_dir=asc" in html
+
+    def test_pitching_direction_toggle_in_links(self, tmp_path: Path) -> None:
+        """AC-10(f): active pit_sort=k9 dir=desc -> k9 link toggles to asc."""
+        db_path, our_id, opp_id = _setup_opponent_detail_db(tmp_path)
+        html = self._get(db_path, our_id, opp_id, "&pit_sort=k9&pit_dir=desc")
+        assert "pit_sort=k9&amp;pit_dir=asc" in html or "pit_sort=k9&pit_dir=asc" in html
+
+    def test_sort_indicator_on_active_batting_column(self, tmp_path: Path) -> None:
+        """AC-4: active batting sort column shows direction indicator."""
+        db_path, our_id, opp_id = _setup_opponent_detail_db(tmp_path)
+        html = self._get(db_path, our_id, opp_id, "&bat_sort=hr&bat_dir=desc")
+        assert "&#9660;" in html or "▼" in html
+
+    def test_sort_indicator_on_active_pitching_column(self, tmp_path: Path) -> None:
+        """AC-4: active pitching sort column shows direction indicator."""
+        db_path, our_id, opp_id = _setup_opponent_detail_db(tmp_path)
+        html = self._get(db_path, our_id, opp_id, "&pit_sort=era&pit_dir=asc")
+        assert "&#9650;" in html or "▲" in html

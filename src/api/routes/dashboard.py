@@ -66,6 +66,32 @@ _PITCHING_DEFAULT_DIR: dict[str, str] = {
     "k9": "desc", "so": "desc", "ip": "desc", "gp": "desc",
 }
 
+# Opponent scouting report column subsets (per TN-3) -- no bb9/hr on opponent pitching.
+_OPP_BAT_KEYS: set[str] = {"name", "avg", "obp", "gp", "ab", "bb", "so", "slg", "h", "hr", "sb", "rbi"}
+_OPP_PIT_KEYS: set[str] = {"name", "era", "k9", "whip", "gp", "ip", "h", "er", "bb", "so"}
+
+
+def _parse_sort_params(
+    request: Request,
+    sort_param: str,
+    dir_param: str,
+    valid_keys: set[str],
+    default_sort: str,
+    default_dirs: dict[str, str],
+) -> tuple[str, str, bool]:
+    """Parse and validate sort query parameters.
+
+    Returns (sort_key, direction, is_explicit) where is_explicit is True when
+    the caller provided a recognized sort key (meaning the data needs re-sorting).
+    """
+    raw_sort = request.query_params.get(sort_param, "").strip().lower()
+    raw_dir = request.query_params.get(dir_param, "").strip().lower()
+    if raw_sort in valid_keys:
+        sort_key = raw_sort
+        direction = raw_dir if raw_dir in ("asc", "desc") else default_dirs.get(sort_key, "desc")
+        return sort_key, direction, True
+    return default_sort, default_dirs.get(default_sort, "desc"), False
+
 
 def _sort_batting(players: list[dict], sort_key: str, direction: str) -> list[dict]:
     """Sort batting rows by the given key, zero-denominator rows always last.
@@ -259,21 +285,11 @@ async def team_stats(request: Request) -> Response:
     )
 
     # Sort params (AC-1)
-    raw_sort = request.query_params.get("sort", "").strip().lower()
-    raw_dir = request.query_params.get("dir", "").strip().lower()
-    if raw_sort in _BATTING_SORT_KEYS:
-        current_sort = raw_sort
-    else:
-        current_sort = "avg"
-    if raw_dir in ("asc", "desc"):
-        current_dir = raw_dir
-    else:
-        current_dir = _BATTING_DEFAULT_DIR.get(current_sort, "desc")
-
-    if raw_sort in _BATTING_SORT_KEYS:
+    current_sort, current_dir, needs_sort = _parse_sort_params(
+        request, "sort", "dir", _BATTING_SORT_KEYS, "avg", _BATTING_DEFAULT_DIR,
+    )
+    if needs_sort:
         players = _sort_batting(players, current_sort, current_dir)
-    # When raw_sort is unrecognized, current_sort falls back to "avg" (shown as the active
-    # column in the template), and the SQL-level AVG desc order is preserved -- no re-sort.
 
     team_name = next(
         (t["name"] for t in team_infos if t["id"] == active_team_id),
@@ -426,18 +442,10 @@ async def team_pitching(request: Request) -> Response:
     pitchers = _compute_pitching_rates(pitchers_raw)
 
     # Sort params (AC-2)
-    raw_sort_p = request.query_params.get("sort", "").strip().lower()
-    raw_dir_p = request.query_params.get("dir", "").strip().lower()
-    if raw_sort_p in _PITCHING_SORT_KEYS:
-        current_sort_p = raw_sort_p
-    else:
-        current_sort_p = "era"
-    if raw_dir_p in ("asc", "desc"):
-        current_dir_p = raw_dir_p
-    else:
-        current_dir_p = _PITCHING_DEFAULT_DIR.get(current_sort_p, "asc")
-
-    if raw_sort_p in _PITCHING_SORT_KEYS:
+    current_sort_p, current_dir_p, needs_sort_p = _parse_sort_params(
+        request, "sort", "dir", _PITCHING_SORT_KEYS, "era", _PITCHING_DEFAULT_DIR,
+    )
+    if needs_sort_p:
         pitchers = _sort_pitching(pitchers, current_sort_p, current_dir_p)
 
     team_name = next(
@@ -861,6 +869,20 @@ async def opponent_detail(request: Request, opponent_team_id: int) -> Response:
 
     key_players = _pick_key_players(scouting_report.get("batting", []), pitchers)
 
+    # Opponent batting sort params (AC-1) -- subset per TN-3, see _OPP_BAT_KEYS
+    bat_sort, bat_dir, bat_needs_sort = _parse_sort_params(
+        request, "bat_sort", "bat_dir", _OPP_BAT_KEYS, "avg", _BATTING_DEFAULT_DIR,
+    )
+    if bat_needs_sort:
+        scouting_report["batting"] = _sort_batting(scouting_report.get("batting", []), bat_sort, bat_dir)
+
+    # Opponent pitching sort params (AC-1) -- subset per TN-3, see _OPP_PIT_KEYS
+    pit_sort, pit_dir, pit_needs_sort = _parse_sort_params(
+        request, "pit_sort", "pit_dir", _OPP_PIT_KEYS, "era", _PITCHING_DEFAULT_DIR,
+    )
+    if pit_needs_sort:
+        scouting_report["pitching"] = _sort_pitching(scouting_report.get("pitching", []), pit_sort, pit_dir)
+
     # Fetch last meeting
     last_meeting = None
     if active_team_id_od:
@@ -869,7 +891,8 @@ async def opponent_detail(request: Request, opponent_team_id: int) -> Response:
         )
 
     logger.debug(
-        "Opponent detail: opponent=%s season_id=%s", opponent_team_id, season_id
+        "Opponent detail: opponent=%s season_id=%s bat_sort=%s pit_sort=%s",
+        opponent_team_id, season_id, bat_sort, pit_sort,
     )
 
     return templates.TemplateResponse(
@@ -884,6 +907,10 @@ async def opponent_detail(request: Request, opponent_team_id: int) -> Response:
             "permitted_team_infos": team_infos,
             "season_id": season_id,
             "user": user,
+            "bat_sort": bat_sort,
+            "bat_dir": bat_dir,
+            "pit_sort": pit_sort,
+            "pit_dir": pit_dir,
         },
     )
 
