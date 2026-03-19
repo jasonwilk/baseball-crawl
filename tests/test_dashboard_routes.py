@@ -423,8 +423,8 @@ class TestNavigationLinks:
 
         assert resp.status_code == 200
         html = resp.text
-        # Each game row link should carry season_id (template uses literal & in conditional, not &amp;)
-        assert f"/dashboard/games/g-row-001?team_id={team_id}&season_id={_CURRENT_SEASON}" in html
+        # Each game row link should carry season_id
+        assert f"/dashboard/games/g-row-001?team_id={team_id}&amp;season_id={_CURRENT_SEASON}" in html
 
     def test_opponent_list_link_carries_season_id(self, tmp_path: Path) -> None:
         """Opponent links in opponent list carry season_id."""
