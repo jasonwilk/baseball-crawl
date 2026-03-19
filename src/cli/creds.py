@@ -25,13 +25,18 @@ from src.gamechanger.credentials import (
     check_profile_detailed,
 )
 from src.gamechanger.credential_parser import (
-    CurlParseError,
+    CredentialImportError,
     atomic_merge_env_file,
     merge_env_file,
-    parse_curl,
+    parse_credentials,
 )
 from src.gamechanger.exceptions import ConfigurationError, CredentialExpiredError
-from src.gamechanger.key_extractor import ExtractedKey, KeyExtractionError, extract_client_key
+from src.gamechanger.key_extractor import (
+    ExtractedKey,
+    KeyExtractionError,
+    MultipleKeysFoundError,
+    extract_client_key,
+)
 from src.gamechanger.token_manager import AuthSigningError, TokenManager
 from src.http.proxy_check import ProxyCheckOutcome
 
@@ -77,14 +82,14 @@ def import_creds(
         None,
         "--curl",
         metavar="CURL_COMMAND",
-        help="Inline curl command string.",
+        help="Inline credential input (curl command, JSON, or bare JWT).",
     ),
     file: Optional[Path] = typer.Option(
         None,
         "--file",
         metavar="PATH",
         help=(
-            "Path to a file containing the curl command. "
+            "Path to a file containing credentials (curl command, JSON, or bare JWT). "
             f"Defaults to {_DEFAULT_CURL_FILE} when neither --curl nor --file is given."
         ),
     ),
@@ -95,28 +100,28 @@ def import_creds(
         help="Credential profile: web (default) or mobile.",
     ),
 ) -> None:
-    """Extract credentials from a curl command and write them to .env."""
+    """Extract credentials from a curl command, JSON payload, or JWT and write them to .env."""
     if curl is not None and file is not None:
         _err_console.print("[red]Error:[/red] --curl and --file are mutually exclusive.")
         raise typer.Exit(code=1)
 
-    # Determine the curl command string.
+    # Determine the input string.
     if curl is not None:
-        curl_command = curl
+        input_text = curl
     else:
         source_path = file if file is not None else _DEFAULT_CURL_FILE
         if not source_path.exists():
             _err_console.print(
-                f"[red]Error:[/red] curl command file not found: {source_path}\n"
-                "Provide a curl command with --curl or --file, or save one to "
+                f"[red]Error:[/red] Input file not found: {source_path}\n"
+                "Provide credentials with --curl or --file, or save a curl command to "
                 f"{_DEFAULT_CURL_FILE}."
             )
             raise typer.Exit(code=1)
-        curl_command = source_path.read_text(encoding="utf-8")
+        input_text = source_path.read_text(encoding="utf-8")
 
     try:
-        new_credentials = parse_curl(curl_command, profile=profile)
-    except CurlParseError as exc:
+        new_credentials = parse_credentials(input_text, profile=profile)
+    except CredentialImportError as exc:
         _err_console.print(f"[red]Error:[/red] {exc}")
         raise typer.Exit(code=1)
 
@@ -243,7 +248,7 @@ def refresh(
             email=email,
             password=password,
         )
-        access_token = tm.force_refresh(allow_login_fallback=True)
+        refreshed_token = tm.force_refresh(allow_login_fallback=True)  # pii-ok
     except ConfigurationError as exc:
         _err_console.print(f"[red]Error:[/red] {exc}")
         raise typer.Exit(code=1)
@@ -267,7 +272,7 @@ def refresh(
         _err_console.print(f"[red]Error:[/red] {exc}")
         raise typer.Exit(code=1)
 
-    exp = _decode_jwt_exp(access_token)
+    exp = _decode_jwt_exp(refreshed_token)
     if exp is not None:
         remaining = exp - int(time.time())
         _console.print(
@@ -635,17 +640,32 @@ def extract_key(
         _console.print("[dim]Dry run -- pass --apply to write to .env[/dim]")
         _console.print("")
 
+    # Load .env values upfront: needed for disambiguation (known_client_id)
+    # and for the diff display after extraction.
+    env = dotenv_values(str(_ENV_FILE))
+    known_client_id = env.get("GAMECHANGER_CLIENT_ID_WEB") or None
+    current_client_id = env.get("GAMECHANGER_CLIENT_ID_WEB") or ""
+    current_client_key = env.get("GAMECHANGER_CLIENT_KEY_WEB") or ""
+
     _console.print("Fetching client key from GC JS bundle...")
     try:
-        extracted = extract_client_key()
+        extracted = extract_client_key(known_client_id=known_client_id)
+    except MultipleKeysFoundError as exc:
+        _err_console.print(
+            "[red]Error:[/red] Multiple EDEN_AUTH_CLIENT_KEY entries found in the JS bundle.\n"
+            "Cannot select automatically -- GAMECHANGER_CLIENT_ID_WEB is not set or did not match.\n"
+        )
+        _err_console.print("Candidates (UUID only):")
+        for candidate in exc.candidates:
+            _err_console.print(f"  {candidate.client_id}")
+        _err_console.print(
+            "\nSet GAMECHANGER_CLIENT_ID_WEB in .env to the UUID above that corresponds "
+            "to the web client,\nthen re-run: [bold]bb creds extract-key --apply[/bold]"
+        )
+        raise typer.Exit(code=1)
     except KeyExtractionError as exc:
         _err_console.print(f"[red]Error:[/red] {exc}")
         raise typer.Exit(code=1)
-
-    # Load current .env values for comparison.
-    env = dotenv_values(str(_ENV_FILE))
-    current_client_id = env.get("GAMECHANGER_CLIENT_ID_WEB") or ""
-    current_client_key = env.get("GAMECHANGER_CLIENT_KEY_WEB") or ""
 
     id_changed = extracted.client_id != current_client_id
     key_changed = extracted.client_key != current_client_key

@@ -9,6 +9,13 @@ Coverage:
 - Input that is not a curl command raises CurlParseError
 - Existing .env preservation: non-credential keys survive a merge
 - Existing .env update: credential keys are replaced by new values
+- parse_credentials: GC auth response JSON (with/without user_id/type fields)
+- parse_credentials: simple token map JSON
+- parse_credentials: single token JSON
+- parse_credentials: bare JWT (access and refresh)
+- parse_credentials: curl command unchanged
+- parse_credentials: unknown format raises CredentialImportError
+- parse_credentials: --profile mobile with JSON input
 """
 
 from __future__ import annotations
@@ -22,9 +29,11 @@ from pathlib import Path
 import pytest
 
 from src.gamechanger.credential_parser import (
+    CredentialImportError,
     CurlParseError,
     atomic_merge_env_file,
     merge_env_file,
+    parse_credentials,
     parse_curl,
 )
 
@@ -506,3 +515,263 @@ class TestMobileProfile:
         )
         with pytest.raises(CurlParseError, match="gc-token"):
             parse_curl(curl, profile="mobile")
+
+
+# ---------------------------------------------------------------------------
+# parse_credentials -- auto-detection: curl commands (AC-3)
+# ---------------------------------------------------------------------------
+
+
+class TestParseCredentialsCurl:
+    """parse_credentials delegates to parse_curl for curl-format inputs."""
+
+    def test_curl_command_routed_correctly(self) -> None:
+        result = parse_credentials(MINIMAL_CURL)
+        assert "GAMECHANGER_REFRESH_TOKEN_WEB" in result
+        assert "GAMECHANGER_BASE_URL" in result
+
+    def test_curl_command_case_insensitive(self) -> None:
+        curl = MINIMAL_CURL.replace("curl ", "CURL ", 1)
+        result = parse_credentials(curl)
+        assert "GAMECHANGER_REFRESH_TOKEN_WEB" in result
+
+    def test_curl_raises_curl_parse_error_as_credential_import_error(self) -> None:
+        """CurlParseError is a subclass of CredentialImportError."""
+        with pytest.raises(CredentialImportError):
+            parse_credentials("curl 'https://example.com'")  # no gc-token
+
+
+# ---------------------------------------------------------------------------
+# parse_credentials -- JSON: GC auth response (AC-1)
+# ---------------------------------------------------------------------------
+
+
+def _gc_auth_json(access_token: str, refresh_token: str, extra: dict | None = None) -> str:
+    """Build a GC auth response JSON string."""
+    payload: dict = {
+        "type": "token",
+        "access": {"data": access_token, "expires": int(time.time()) + 3600},
+        "refresh": {"data": refresh_token, "expires": int(time.time()) + 1209600},
+    }
+    if extra:
+        payload.update(extra)
+    return json.dumps(payload)
+
+
+class TestParseCredentialsGcAuthJson:
+    """AC-1: GC auth response JSON format."""
+
+    def test_extracts_refresh_token_web_profile(self) -> None:
+        refresh = _make_refresh_token()
+        access = _make_access_token()
+        input_json = _gc_auth_json(access, refresh)
+        result = parse_credentials(input_json, profile="web")
+        assert result["GAMECHANGER_REFRESH_TOKEN_WEB"] == refresh
+        # Access token not stored for web profile
+        assert "GAMECHANGER_ACCESS_TOKEN_WEB" not in result
+
+    def test_extracts_both_tokens_mobile_profile(self) -> None:
+        refresh = _make_refresh_token()
+        access = _make_access_token()
+        input_json = _gc_auth_json(access, refresh)
+        result = parse_credentials(input_json, profile="mobile")
+        assert result["GAMECHANGER_REFRESH_TOKEN_MOBILE"] == refresh
+        assert result["GAMECHANGER_ACCESS_TOKEN_MOBILE"] == access
+
+    def test_tolerates_extra_user_id_field(self) -> None:
+        """Top-level user_id field must be tolerated."""
+        refresh = _make_refresh_token()
+        access = _make_access_token()
+        input_json = _gc_auth_json(access, refresh, extra={"user_id": "some-uuid"})
+        result = parse_credentials(input_json, profile="web")
+        assert result["GAMECHANGER_REFRESH_TOKEN_WEB"] == refresh
+
+    def test_tolerates_missing_type_field(self) -> None:
+        """GC auth shape detected from 'access'/'refresh' keys, not 'type'."""
+        refresh = _make_refresh_token()
+        access = _make_access_token()
+        payload = {
+            "access": {"data": access, "expires": int(time.time()) + 3600},
+            "refresh": {"data": refresh, "expires": int(time.time()) + 1209600},
+        }
+        result = parse_credentials(json.dumps(payload), profile="web")
+        assert result["GAMECHANGER_REFRESH_TOKEN_WEB"] == refresh
+
+    def test_refresh_only_json_web_profile(self) -> None:
+        """JSON with only 'refresh' key works for web profile."""
+        refresh = _make_refresh_token()
+        payload = {"refresh": {"data": refresh, "expires": int(time.time()) + 1209600}}
+        result = parse_credentials(json.dumps(payload), profile="web")
+        assert result["GAMECHANGER_REFRESH_TOKEN_WEB"] == refresh
+
+
+# ---------------------------------------------------------------------------
+# parse_credentials -- JSON: simple token map (AC-1b)
+# ---------------------------------------------------------------------------
+
+
+class TestParseCredentialsTokenMap:
+    """AC-1b: Simple token map JSON format."""
+
+    def test_access_and_refresh_mobile_profile(self) -> None:
+        access = _make_access_token()
+        refresh = _make_refresh_token()
+        payload = {"access_token": access, "refresh_token": refresh}
+        result = parse_credentials(json.dumps(payload), profile="mobile")
+        assert result["GAMECHANGER_ACCESS_TOKEN_MOBILE"] == access
+        assert result["GAMECHANGER_REFRESH_TOKEN_MOBILE"] == refresh
+
+    def test_refresh_only_web_profile(self) -> None:
+        refresh = _make_refresh_token()
+        payload = {"refresh_token": refresh}
+        result = parse_credentials(json.dumps(payload), profile="web")
+        assert result["GAMECHANGER_REFRESH_TOKEN_WEB"] == refresh
+
+    def test_access_only_web_profile_raises(self) -> None:
+        """Web profile does not store access tokens -- error when that's all we have."""
+        access = _make_access_token()
+        payload = {"access_token": access}
+        with pytest.raises(CredentialImportError):
+            parse_credentials(json.dumps(payload), profile="web")
+
+
+# ---------------------------------------------------------------------------
+# parse_credentials -- JSON: single token (AC-1b)
+# ---------------------------------------------------------------------------
+
+
+class TestParseCredentialsSingleToken:
+    """AC-1b: Single token JSON format."""
+
+    def test_refresh_token_web_profile(self) -> None:
+        refresh = _make_refresh_token()
+        payload = {"token": refresh}
+        result = parse_credentials(json.dumps(payload), profile="web")
+        assert result["GAMECHANGER_REFRESH_TOKEN_WEB"] == refresh
+
+    def test_access_token_mobile_profile(self) -> None:
+        access = _make_access_token()
+        payload = {"token": access}
+        result = parse_credentials(json.dumps(payload), profile="mobile")
+        assert result["GAMECHANGER_ACCESS_TOKEN_MOBILE"] == access
+
+    def test_access_token_web_profile_raises(self) -> None:
+        access = _make_access_token()
+        payload = {"token": access}
+        with pytest.raises(CredentialImportError):
+            parse_credentials(json.dumps(payload), profile="web")
+
+    def test_unrecognised_json_shape_raises(self) -> None:
+        payload = {"something_else": "value"}
+        with pytest.raises(CredentialImportError):
+            parse_credentials(json.dumps(payload))
+
+
+# ---------------------------------------------------------------------------
+# parse_credentials -- bare JWT (AC-2)
+# ---------------------------------------------------------------------------
+
+
+class TestParseCredentialsBareJwt:
+    """AC-2: Bare JWT string auto-detection and routing."""
+
+    def test_refresh_token_web_profile(self) -> None:
+        refresh = _make_refresh_token()
+        result = parse_credentials(refresh, profile="web")
+        assert result["GAMECHANGER_REFRESH_TOKEN_WEB"] == refresh
+
+    def test_access_token_mobile_profile(self) -> None:
+        access = _make_access_token()
+        result = parse_credentials(access, profile="mobile")
+        assert result["GAMECHANGER_ACCESS_TOKEN_MOBILE"] == access
+
+    def test_refresh_token_mobile_profile(self) -> None:
+        refresh = _make_refresh_token()
+        result = parse_credentials(refresh, profile="mobile")
+        assert result["GAMECHANGER_REFRESH_TOKEN_MOBILE"] == refresh
+
+    def test_access_token_web_profile_raises(self) -> None:
+        """Access token passed with web profile should raise CredentialImportError."""
+        access = _make_access_token()
+        with pytest.raises(CredentialImportError):
+            parse_credentials(access, profile="web")
+
+    def test_bare_jwt_with_leading_whitespace(self) -> None:
+        """Leading whitespace is stripped before detection."""
+        refresh = _make_refresh_token()
+        result = parse_credentials("  \n" + refresh, profile="web")
+        assert result["GAMECHANGER_REFRESH_TOKEN_WEB"] == refresh
+
+
+# ---------------------------------------------------------------------------
+# parse_credentials -- unknown format (AC-4)
+# ---------------------------------------------------------------------------
+
+
+class TestParseCredentialsUnknownFormat:
+    """AC-4: Unknown input format raises CredentialImportError."""
+
+    def test_plain_text_raises(self) -> None:
+        with pytest.raises(CredentialImportError):
+            parse_credentials("not a curl, json, or jwt")
+
+    def test_empty_string_raises(self) -> None:
+        with pytest.raises((CredentialImportError, CurlParseError)):
+            parse_credentials("")
+
+    def test_error_message_mentions_accepted_formats(self) -> None:
+        with pytest.raises(CredentialImportError) as exc_info:
+            parse_credentials("totally unrecognized input here")
+        msg = str(exc_info.value)
+        assert "curl" in msg.lower() or "json" in msg.lower() or "jwt" in msg.lower()
+
+
+# ---------------------------------------------------------------------------
+# parse_credentials -- mobile profile with JSON input (AC-6)
+# ---------------------------------------------------------------------------
+
+
+class TestParseCredentialsMobileJson:
+    """AC-6: --profile mobile applies to all non-curl formats."""
+
+    def test_gc_auth_mobile_profile_stores_both_tokens(self) -> None:
+        access = _make_access_token()
+        refresh = _make_refresh_token()
+        input_json = _gc_auth_json(access, refresh)
+        result = parse_credentials(input_json, profile="mobile")
+        assert result["GAMECHANGER_ACCESS_TOKEN_MOBILE"] == access
+        assert result["GAMECHANGER_REFRESH_TOKEN_MOBILE"] == refresh
+        assert "GAMECHANGER_ACCESS_TOKEN_WEB" not in result
+        assert "GAMECHANGER_REFRESH_TOKEN_WEB" not in result
+
+    def test_token_map_mobile_profile_uses_mobile_keys(self) -> None:
+        access = _make_access_token()
+        refresh = _make_refresh_token()
+        payload = {"access_token": access, "refresh_token": refresh}
+        result = parse_credentials(json.dumps(payload), profile="mobile")
+        assert "GAMECHANGER_ACCESS_TOKEN_MOBILE" in result
+        assert "GAMECHANGER_REFRESH_TOKEN_MOBILE" in result
+        assert "GAMECHANGER_ACCESS_TOKEN_WEB" not in result
+        assert "GAMECHANGER_REFRESH_TOKEN_WEB" not in result
+
+    def test_bare_jwt_mobile_profile_access_token(self) -> None:
+        access = _make_access_token()
+        result = parse_credentials(access, profile="mobile")
+        assert result["GAMECHANGER_ACCESS_TOKEN_MOBILE"] == access
+
+
+# ---------------------------------------------------------------------------
+# CredentialImportError hierarchy
+# ---------------------------------------------------------------------------
+
+
+class TestCredentialImportErrorHierarchy:
+    """CurlParseError must be a subclass of CredentialImportError."""
+
+    def test_curl_parse_error_is_credential_import_error(self) -> None:
+        err = CurlParseError("test")
+        assert isinstance(err, CredentialImportError)
+
+    def test_catch_base_class_catches_curl_parse_error(self) -> None:
+        with pytest.raises(CredentialImportError):
+            parse_credentials("not a curl but looks like wget https://example.com")

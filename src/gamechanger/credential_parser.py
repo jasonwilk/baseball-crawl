@@ -1,9 +1,22 @@
-"""Parse GameChanger curl commands and extract authentication credentials.
+"""Parse GameChanger credentials from curl commands, JSON payloads, or bare JWTs.
 
-Accepts a raw curl command string (copied from browser dev tools), tokenises it
-with ``shlex.split()``, and extracts the headers and URL that carry persistent
-auth credentials.  The output is a flat ``dict[str, str]`` mapping .env key
-names to values -- ready to be merged into a ``.env`` file.
+The main entry point is ``parse_credentials()``, which auto-detects the input
+format.  ``parse_curl()`` is the original curl-only parser and is preserved for
+direct use.
+
+Accepted input formats
+----------------------
+1. **curl command** -- starts with ``curl `` (case-insensitive).  Tokenised with
+   ``shlex.split()``; headers and URL are extracted.
+2. **JSON object** -- starts with ``{``.  Recognised shapes:
+
+   - GC auth response: ``{"type": "token", "access": {"data": "jwt...", "expires": N},
+     "refresh": {"data": "jwt...", "expires": N}}`` (extra top-level fields tolerated)
+   - Token map: ``{"access_token": "jwt...", "refresh_token": "jwt..."}``
+   - Single token: ``{"token": "jwt..."}``
+
+3. **Bare JWT** -- three dot-separated base64url segments with no whitespace before
+   the first dot.  Token type is auto-detected from the JWT payload.
 
 Header-to-.env key mapping (profile-aware; keys use _WEB or _MOBILE suffix):
     gc-token (refresh)  -> GAMECHANGER_REFRESH_TOKEN_WEB / GAMECHANGER_REFRESH_TOKEN_MOBILE
@@ -103,7 +116,16 @@ _SKIP_HEADERS: frozenset[str] = frozenset(
 )
 
 
-class CurlParseError(ValueError):
+class CredentialImportError(ValueError):
+    """Raised when credentials cannot be extracted from the provided input.
+
+    Base exception for all credential import failures.  ``CurlParseError`` is a
+    subclass for curl-specific failures.  Callers that want to catch any import
+    failure should catch ``CredentialImportError``.
+    """
+
+
+class CurlParseError(CredentialImportError):
     """Raised when the curl command is malformed or missing required credentials."""
 
 
@@ -371,6 +393,195 @@ def _extract_cookies(cookie_str: str, credentials: dict[str, str]) -> None:
         env_key = f"GAMECHANGER_COOKIE_{cname.upper().replace('-', '_')}"
         credentials[env_key] = cvalue
         logger.debug("Extracted cookie %r -> %s", cname, env_key)
+
+
+def _detect_input_format(text: str) -> str:
+    """Detect the credential input format from a stripped string.
+
+    Detection heuristic:
+    1. Starts with ``curl `` (case-insensitive) -> ``"curl"``
+    2. Starts with ``{`` -> ``"json"``
+    3. Two or more ``.`` separators with no whitespace before the first dot -> ``"jwt"``
+    4. Anything else -> ``"unknown"``
+
+    Args:
+        text: Stripped input string.
+
+    Returns:
+        One of ``"curl"``, ``"json"``, ``"jwt"``, or ``"unknown"``.
+    """
+    if text.lower().startswith("curl "):
+        return "curl"
+    if text.startswith("{"):
+        return "json"
+    dot_pos = text.find(".")
+    if dot_pos > 0:
+        prefix = text[:dot_pos]
+        if not any(c in prefix for c in (" ", "\t", "\n", "\r")):
+            if text.count(".") >= 2:
+                return "jwt"
+    return "unknown"
+
+
+def _detect_json_shape(data: dict) -> str:
+    """Identify which JSON credential shape *data* represents.
+
+    Returns:
+        ``"gc_auth"`` for GC auth response, ``"token_map"`` for
+        ``{"access_token": ..., "refresh_token": ...}``, ``"single_token"``
+        for ``{"token": ...}``, or ``"unknown"`` if unrecognised.
+    """
+    has_access = isinstance(data.get("access"), dict) and "data" in data["access"]
+    has_refresh = isinstance(data.get("refresh"), dict) and "data" in data["refresh"]
+    if has_access or has_refresh:
+        return "gc_auth"
+    if "access_token" in data or "refresh_token" in data:
+        return "token_map"
+    if "token" in data:
+        return "single_token"
+    return "unknown"
+
+
+def _parse_json_credentials(text: str, profile: str = "web") -> dict[str, str]:
+    """Parse JSON credential input and return extracted credentials.
+
+    Recognises three JSON shapes: GC auth response, token map, and single token.
+    Token routing follows the same profile rules as ``parse_curl()``.
+
+    Args:
+        text: JSON string.
+        profile: ``"web"`` (default) or ``"mobile"``.
+
+    Returns:
+        A dict mapping .env key names to credential values.
+
+    Raises:
+        CredentialImportError: If the JSON is invalid, the shape is unrecognised,
+            or no credentials could be extracted for the given profile.
+    """
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise CredentialImportError(f"Invalid JSON: {exc}") from exc
+
+    if not isinstance(data, dict):
+        raise CredentialImportError(
+            "JSON credential input must be an object (dict), not an array or scalar."
+        )
+
+    shape = _detect_json_shape(data)
+    credentials: dict[str, str] = {}
+
+    if shape == "gc_auth":
+        access_obj = data.get("access") or {}
+        refresh_obj = data.get("refresh") or {}
+        access_token = access_obj.get("data") if isinstance(access_obj, dict) else None
+        refresh_token = refresh_obj.get("data") if isinstance(refresh_obj, dict) else None
+        if access_token:
+            _route_gc_token(access_token, profile, credentials)
+        if refresh_token:
+            _route_gc_token(refresh_token, profile, credentials)
+    elif shape == "token_map":
+        if "access_token" in data:
+            _route_gc_token(data["access_token"], profile, credentials)
+        if "refresh_token" in data:
+            _route_gc_token(data["refresh_token"], profile, credentials)
+    elif shape == "single_token":
+        _route_gc_token(data["token"], profile, credentials)
+    else:
+        raise CredentialImportError(
+            "JSON object does not match any recognised credential shape.\n"
+            "Expected one of:\n"
+            '  GC auth response: {"type": "token", "access": {"data": "jwt..."}, '
+            '"refresh": {"data": "jwt..."}}\n'
+            '  Token map:        {"access_token": "jwt...", "refresh_token": "jwt..."}\n'
+            '  Single token:     {"token": "jwt..."}'
+        )
+
+    if not credentials:
+        raise CredentialImportError(
+            f"No credentials could be extracted from JSON input for profile={profile!r}.\n"
+            "For web profile, only refresh tokens are stored.\n"
+            "For mobile profile, both access and refresh tokens are stored.\n"
+            "If this is an access token, use --profile mobile."
+        )
+
+    logger.debug("Parsed JSON credentials (%s): %s", shape, sorted(credentials.keys()))
+    return credentials
+
+
+def _parse_bare_jwt_credentials(text: str, profile: str = "web") -> dict[str, str]:
+    """Parse a bare JWT string and route to the correct .env key.
+
+    Token type is determined from the JWT payload (``type='user'`` = access token;
+    no ``type`` field = refresh token) using the same logic as ``parse_curl()``.
+
+    Args:
+        text: Raw JWT string (three dot-separated base64url segments).
+        profile: ``"web"`` (default) or ``"mobile"``.
+
+    Returns:
+        A dict mapping the appropriate .env key to the JWT value.
+
+    Raises:
+        CredentialImportError: If the token is not accepted for the given profile
+            (e.g. an access token passed with ``profile='web'``).
+    """
+    credentials: dict[str, str] = {}
+    _route_gc_token(text, profile, credentials)
+    if not credentials:
+        raise CredentialImportError(
+            f"JWT token was not stored for profile={profile!r}.\n"
+            "For web profile, only refresh tokens are stored "
+            "(JWT payload must have no 'type' field).\n"
+            "For mobile profile, both access tokens (type='user') and refresh tokens "
+            "are stored.\n"
+            "If this is an access token, pass --profile mobile."
+        )
+    logger.debug("Parsed bare JWT (%s profile) -> %s", profile, sorted(credentials.keys()))
+    return credentials
+
+
+def parse_credentials(input_text: str, profile: str = "web") -> dict[str, str]:
+    """Auto-detect input format and extract GameChanger credentials.
+
+    Accepts curl commands, JSON objects (GC auth response, token map, or single
+    token), and bare JWT strings.  Format is detected automatically from the
+    content -- no extra flags required.
+
+    For JSON and bare JWT inputs the same profile routing rules apply as for
+    curl commands: web profile stores only refresh tokens; mobile profile stores
+    both access and refresh tokens.
+
+    Args:
+        input_text: Raw input string in any accepted format.
+        profile: Credential profile -- ``"web"`` (default) or ``"mobile"``.
+
+    Returns:
+        A dict mapping .env key names to credential values.
+
+    Raises:
+        CredentialImportError: If the format is not recognised or credentials
+            cannot be extracted.  ``CurlParseError`` (a subclass) is raised for
+            malformed curl commands.
+    """
+    text = input_text.strip()
+    fmt = _detect_input_format(text)
+
+    if fmt == "curl":
+        return parse_curl(text, profile=profile)
+    if fmt == "json":
+        return _parse_json_credentials(text, profile=profile)
+    if fmt == "jwt":
+        return _parse_bare_jwt_credentials(text, profile=profile)
+
+    raise CredentialImportError(
+        "Unrecognised input format.\n"
+        "Accepted formats:\n"
+        "  1. curl command       -- starts with 'curl '\n"
+        "  2. JSON object        -- GC auth response, token map, or single token\n"
+        "  3. Bare JWT string    -- three dot-separated base64url segments"
+    )
 
 
 def _build_merged_lines(env_path: str, new_values: dict[str, str]) -> list[str]:
