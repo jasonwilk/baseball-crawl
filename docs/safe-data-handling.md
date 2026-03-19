@@ -49,6 +49,62 @@ For the authoritative pattern list with exact regexes, see
 Full names and GameChanger user IDs are also PII but cannot be reliably detected
 by regex. They are protected by the `/ephemeral/` directory convention instead.
 
+### What Gets Skipped
+
+Certain paths are excluded from scanning entirely. Files whose paths start with
+any of the following prefixes are never read by the scanner:
+
+| Path prefix | Reason |
+|-------------|--------|
+| `.git/` | Git internals |
+| `.claude/` | Agent context files |
+| `node_modules/`, `__pycache__/` | Generated artifacts |
+| `requirements.txt`, `requirements-dev.txt` | pip-compiled lockfiles (SHA256 hashes trigger phone pattern) |
+| `epics/` | Active epic and story files (planning artifacts) |
+| `.project/` | Archive, ideas, templates, and research (planning artifacts) |
+
+Planning artifacts (`epics/` and `.project/`) frequently reference PII-like
+patterns as documentation examples. They are excluded because real data from
+the API should never appear there in the first place -- if it does, the
+`/ephemeral/` convention was already violated earlier.
+
+`docs/` is intentionally **not** excluded -- documentation could contain real
+PII if someone pastes it carelessly. Use inline suppression (see below) for
+any legitimate PII-like pattern in documentation files.
+
+`tests/` is intentionally **not** excluded -- the `synthetic-test-data` marker
+handles test fixtures; inline suppression covers edge cases.
+
+## RFC 2606 Domain Allowlist
+
+RFC 2606 reserves certain domains for documentation and testing. Email
+addresses using these domains are never real, so the scanner allows them
+automatically without requiring a `synthetic-test-data` marker or `# pii-ok`
+comment.
+
+**Reserved second-level domains** (the domain itself and any subdomain):
+
+| Domain | Example |
+|--------|---------|
+| `example.com` | `user@example.com`, `user@sub.example.com` |
+| `example.org` | `coach@example.org` |
+| `example.net` | `player@example.net` |
+
+**Reserved top-level domains** (any domain ending in these TLDs):
+
+| TLD | Example |
+|-----|---------|
+| `.test` | `user@myapp.test` |
+| `.example` | `user@foo.example` |
+| `.invalid` | `user@fake.invalid` |
+| `.localhost` | `user@app.localhost` |
+
+`localhost` (without a TLD) is also treated as safe.
+
+The allowlist applies **only to the email pattern**. Phone numbers, bearer
+tokens, and API key assignments are unaffected -- use `# pii-ok` or the
+`synthetic-test-data` marker for those.
+
 ## Installing the Pre-Commit Hook
 
 After cloning the repository, run:
@@ -101,6 +157,50 @@ Each line names the file, line number, and which pattern matched.
    5 lines of the file (e.g., in a comment). See "Working with Test Fixtures"
    below.
 
+4. **Add a `# pii-ok` comment** if the match is a genuine false positive on a
+   single line -- for example, a regex pattern in source code that contains an
+   email-like structure, or a documented example in a Markdown file. Add the
+   comment at the end of the offending line. See "Inline Suppression" below.
+
+### Inline Suppression: `# pii-ok`
+
+A `# pii-ok` comment at the end of a line suppresses all scanner findings on
+that line. This is analogous to `# noqa` in flake8 or `# type: ignore` in
+mypy -- a surgical opt-out for a single line when the match is a known false
+positive.
+
+**Python and most text files:**
+
+```python
+EMAIL_PATTERN = r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'  # pii-ok
+```
+
+**YAML and shell:**
+
+```yaml
+example_contact: admin@fake-domain.example  # pii-ok
+```
+
+**HTML and XML** (`#` is not a comment character -- use an HTML comment):
+
+```html
+<p>Contact us at admin@internal.localhost</p> <!-- pii-ok -->
+```
+
+**When `# pii-ok` is appropriate:**
+- A regex string in source code that resembles an email or phone number
+- A documented example in a Markdown file that uses a pattern not covered by
+  the RFC 2606 allowlist
+- A configuration value that is structurally PII-like but is not real data
+  (e.g., a placeholder in a template)
+
+**When `# pii-ok` is NOT appropriate:**
+- Real data that ended up in a source file -- move to `/ephemeral/` and fix
+  the code that put it there
+- Bulk suppression of many lines -- use `synthetic-test-data` for test
+  fixtures instead
+- Suppressing a real credential or token -- remove or rotate it
+
 ### Legitimate Bypass
 
 ```bash
@@ -151,6 +251,64 @@ Rules for synthetic data:
 - Place the marker in a comment near the top of the file
 - The marker is case-sensitive: `synthetic-test-data` (all lowercase, hyphens)
 
+## Safe Fake Data Standards
+
+When writing tests, documentation examples, or code comments that need
+PII-like values, use these recommended patterns. They are either in the RFC
+2606 allowlist (emails) or are universally recognized as fictional (phones,
+tokens).
+
+### Email Addresses
+
+Use RFC 2606 reserved domains. The scanner allows these automatically -- no
+marker or suppression comment required.
+
+```
+user@example.com
+coach@example.org
+player@example.net
+admin@myapp.test
+```
+
+### US Phone Numbers
+
+The `555-01xx` range (`555-0100` through `555-0199`) is reserved by the North
+American Numbering Plan for fictional use. These numbers are universally
+understood to be fake and will never be assigned to a real subscriber.
+
+```
+555-0100
+555-0101
+(555) 555-0199
++1-555-555-0100
+```
+
+Avoid `555-867-5309` and similar well-known pop-culture numbers -- while fake,
+they are associated with real spam calls and are less clearly fictional in
+technical contexts.
+
+### Bearer Tokens
+
+Use a clearly fictional placeholder that matches the bearer pattern structure:
+
+```
+Bearer FAKE_TOKEN_FOR_DOCS
+Bearer TEST_CREDENTIAL_PLACEHOLDER
+```
+
+Files containing these will still trigger the scanner (bearer token pattern
+fires on any `Bearer <value>`) -- use `# pii-ok` or `synthetic-test-data` as
+appropriate.
+
+### Summary Table
+
+| PII type | Recommended fake value | Scanner behavior |
+|----------|----------------------|-----------------|
+| Email | `user@example.com` | Allowed automatically (RFC 2606) |
+| Phone | `555-0100` to `555-0199` | Still flagged -- use `# pii-ok` or `synthetic-test-data` |
+| Bearer token | `Bearer FAKE_TOKEN_FOR_DOCS` | Still flagged -- use `# pii-ok` or `synthetic-test-data` |
+| API key | `api_key = "PLACEHOLDER_NOT_REAL"` | Still flagged -- use `# pii-ok` or `synthetic-test-data` |
+
 ## Quick Reference
 
 | Scenario | What to do |
@@ -159,6 +317,11 @@ Rules for synthetic data:
 | **Commit a script** | Ensure no hardcoded tokens or credentials. The hook will catch common patterns. |
 | **Add a test fixture** | Use fake data. Add `synthetic-test-data` in the first 5 lines. Commit normally. |
 | **Share data with a teammate** | Describe the API call that produced it. Do not share the file -- it contains real data. |
+| **Use a fake email in code or docs** | Use `user@example.com` (RFC 2606). No marker needed. |
+| **Use a fake phone in code or docs** | Use `555-0100`. Add `# pii-ok` or `synthetic-test-data`. |
+| **Use a fake token in code or docs** | Use `Bearer FAKE_TOKEN_FOR_DOCS`. Add `# pii-ok` or `synthetic-test-data`. |
+| **Single false positive line** | Add `# pii-ok` at end of line (HTML: `<!-- pii-ok -->`). |
+| **False positives throughout a test file** | Add `synthetic-test-data` marker in first 5 lines. |
 
 ## Related Documents
 
