@@ -23,7 +23,7 @@ Create a new rule file per Technical Notes TN-5. Review the existing CLAUDE.md a
 
 **Overlapping glob scope**: `http-discipline.md` already fires on `src/gamechanger/**`. The auth-module rule is **additive** -- it covers auth-specific implementation constraints (exception hierarchy, env var access, write-back). It must NOT duplicate rate-limiting, browser headers, or other HTTP-level rules already in `http-discipline.md`.
 
-Key files to study: `.claude/rules/http-discipline.md` (existing rule format and overlapping scope), `src/gamechanger/token_manager.py` (implementation patterns to document), CLAUDE.md (Key Architectural Decisions section).
+Key files to study: `.claude/rules/http-discipline.md` (existing rule format and overlapping scope), `src/gamechanger/token_manager.py` (implementation patterns to document), CLAUDE.md (GameChanger API section).
 
 ## Dependencies
 - **Blocked by**: None

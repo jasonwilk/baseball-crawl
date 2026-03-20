@@ -73,15 +73,15 @@ During a real credential reset session (2026-03-18), the operator had to:
 - api-scout (advisory only -- no assigned story; available for auth flow questions during dispatch)
 
 ### Dispatch Sequencing
-- E-128-01 (login bootstrap) must be **merged before** E-128-02 (setup wizard) begins, because the wizard calls the login flow as its primary path.
+Stories execute serially in a single epic worktree. Dependency ordering:
+- E-128-01 (login bootstrap) must be **completed before** E-128-02 (setup wizard) begins, because the wizard calls the login flow as its primary path.
 - E-128-R-01 (device ID probe) must complete before E-128-02, because the probe result determines whether the wizard generates a synthetic device ID or prompts for browser capture.
-- E-128-02 depends on E-127-01 (multi-format import, used as curl fallback in wizard) and E-127-02 (extract-key fix, used in wizard key extraction step). These E-127 stories must be merged first.
+- E-128-02 depends on E-127-01 (multi-format import, used as curl fallback in wizard) and E-127-02 (extract-key fix, used in wizard key extraction step). These E-127 stories are already completed.
 - E-128-05 (error diagnostics) depends on E-128-01 (new login path introduces new error states).
-- E-128-07 (production runbook) should be dispatched after E-128-02 merges, since it documents the new setup flow.
-- E-128-03 (mobile wizard), E-128-04 (status dashboard), E-128-06 (auth rule), E-128-08 (PII redaction) are independent and can run in parallel with each other and with E-128-01.
-- E-128-03 and E-128-04 both add new code to `src/cli/creds.py` but in non-overlapping regions (new commands vs callback change). Safe to dispatch in parallel.
+- E-128-07 (production runbook) should be dispatched after E-128-02, since it documents the new setup flow.
+- E-128-03 (mobile wizard), E-128-04 (status dashboard), E-128-06 (auth rule), E-128-08 (PII redaction) have no intra-epic dependencies and can be dispatched in any order relative to each other.
 - E-128-09 (admin docs update) depends on E-128-02 and can be dispatched alongside E-128-07.
-- **Test file merge note**: Stories 01, 02, 03, 04, and 05 all add tests to `tests/test_cli_creds.py`. If dispatched in parallel worktrees, expect merge conflicts in the test file. The router should merge these stories sequentially -- E-128-01 first (it's a dependency for 02 and 05), then the remaining stories one at a time, resolving test file conflicts at each merge.
+- **Shared test file note**: Stories 01, 02, 03, 04, and 05 all add tests to `tests/test_cli_creds.py`. Serial execution in the shared epic worktree means each story builds on the prior story's test additions -- no merge conflicts expected.
 
 ## Technical Notes
 
@@ -197,3 +197,4 @@ The device ID (`gc-device-id`) is a 32-character hex string. **GC does NOT enfor
 - 2026-03-18: E-128-R-01 device ID probe complete. **Synthetic device IDs accepted by GC.** Full web bootstrap from email+password confirmed viable. TN-8 updated. Also discovered client key had rotated again during session -- reinforces E-128-05 auto-diagnostic need. Epic set to READY.
 - 2026-03-18: Full-team refinement pass (SE, DE, UXD, CA, api-scout, docs-writer). Key changes: (1) E-128-01 Technical Approach expanded with CLI pre-validation gap and device ID instance-state requirement; (2) E-128-02 AC-1 specifies CLIENT_ID+CLIENT_KEY extraction and .env reload; (3) E-128-03 AC-1 clarifies upfront step display with single Enter prompt; (4) E-128-04 adds indicator semantics and INCOMPLETE state; (5) E-128-05 AC-3 improves fallback message; (6) E-128-06 notes http-discipline overlap, AC-4 tightened; (7) E-128-07 AC-4 made self-contained (no stale bootstrap-guide link); (8) E-128-08 Technical Approach corrected (addon does NOT parse auth types), file paths specified; (9) New story E-128-09 added for admin docs updates; (10) TN-8 clarified R-01 probe scope; (11) Dispatch notes expanded with test file merge guidance and api-scout advisory role.
 - 2026-03-19: Codex spec review remediation -- 5 findings applied. (F2) E-128-06 AC-4 and Context: corrected CLAUDE.md section reference from "Key Architectural Decisions" to "GameChanger API" section's Auth bullet. (F3) E-128-04 AC-1: added mobile profile client key indicator clarification. (F4) epic.md test file merge note: expanded to list all 5 stories (01-05) touching test_cli_creds.py, changed guidance to sequential merging. (F5) E-128-05: fixed Technical Approach fallback reference to point to AC-3's ordered message; clarified Context with HTTP 400 vs 401 distinction. (F6) E-128-08 AC-1: corrected "address" to "email" in both body description and field name.
+- 2026-03-20: Post-E-141 refinement pass (PM, SE, DE, UXD, CA, api-scout). Verified all stories, dependencies, and technical assumptions against 13 completed epics (E-127 through E-141). All valid. Two changes applied: (1) Dispatch Sequencing rewritten for single epic worktree serial model (E-141) -- removed "merged before" language, replaced test file merge note with serial execution note, simplified parallelism notes; (2) E-128-06 Technical Approach corrected stale "Key Architectural Decisions section" reference to "GameChanger API section".
