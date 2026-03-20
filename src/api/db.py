@@ -1144,6 +1144,46 @@ def get_opponent_link_count_for_team(our_team_id: int) -> int:
         return 0
 
 
+def get_team_year_map(team_ids: list[int]) -> dict[int, int]:
+    """Return a mapping of team_id → year for the given team IDs.
+
+    Queries ``player_season_batting`` and ``player_season_pitching`` UNION joined
+    to ``seasons.year`` to determine which year each team has stat data for.
+    Teams with no stat data are omitted from the result.
+
+    Args:
+        team_ids: List of INTEGER team ids to look up.
+
+    Returns:
+        Dict mapping ``team_id → year``.  Empty dict if ``team_ids`` is empty
+        or on DB error.
+    """
+    if not team_ids:
+        return {}
+    placeholders = ",".join("?" for _ in team_ids)
+    query = f"""
+        SELECT t.team_id, MAX(s.year) AS year
+        FROM (
+            SELECT team_id, season_id FROM player_season_batting
+             WHERE team_id IN ({placeholders})
+            UNION
+            SELECT team_id, season_id FROM player_season_pitching
+             WHERE team_id IN ({placeholders})
+        ) t
+        JOIN seasons s ON s.season_id = t.season_id
+        GROUP BY t.team_id
+    """
+    params = list(team_ids) + list(team_ids)
+    try:
+        with closing(get_connection()) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(query, params).fetchall()
+        return {row["team_id"]: row["year"] for row in rows}
+    except sqlite3.Error:
+        logger.exception("Failed to fetch team year map")
+        return {}
+
+
 def get_available_seasons(team_id: int) -> list[dict[str, Any]]:
     """Return the distinct seasons for which a team has batting or pitching data.
 

@@ -29,7 +29,7 @@ from starlette.concurrency import run_in_threadpool
 from starlette.responses import Response
 
 from src.api import db
-from src.api.helpers import format_avg, format_date, format_season_display, ip_display
+from src.api.helpers import format_avg, format_date, ip_display
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +44,6 @@ router = APIRouter()
 templates.env.filters["ip_display"] = ip_display
 templates.env.filters["format_avg"] = format_avg
 templates.env.filters["format_date"] = format_date
-templates.env.filters["season_display"] = format_season_display
 
 
 _BATTING_SORT_KEYS: set[str] = {
@@ -69,6 +68,53 @@ _PITCHING_DEFAULT_DIR: dict[str, str] = {
 # Opponent scouting report column subsets (per TN-3) -- no bb9/hr on opponent pitching.
 _OPP_BAT_KEYS: set[str] = {"name", "avg", "obp", "gp", "ab", "bb", "so", "slg", "h", "hr", "sb", "rbi"}
 _OPP_PIT_KEYS: set[str] = {"name", "era", "k9", "whip", "gp", "ip", "h", "er", "bb", "so"}
+
+
+def _resolve_year_and_team(
+    team_year_map: dict[int, int],
+    permitted_teams: list[int],
+    team_id_param: int | None,
+    year_param: int | None,
+) -> tuple[int, int]:
+    """Resolve (active_team_id, active_year) per TN-2 parameter resolution order.
+
+    Args:
+        team_year_map: Mapping of team_id → year from ``db.get_team_year_map``.
+        permitted_teams: Ordered list of all permitted team ids.
+        team_id_param:  Parsed team_id query param (already validated), or None.
+        year_param:     Parsed year query param, or None.
+
+    Returns:
+        Tuple of (active_team_id, active_year).
+    """
+    current_year = datetime.date.today().year
+    available_years = sorted(set(team_year_map.values()), reverse=True)
+
+    # Path 2: team_id present → team wins; derive year from map
+    if team_id_param is not None and team_id_param in permitted_teams:
+        return team_id_param, team_year_map.get(team_id_param, current_year)
+
+    # Path 3: explicit year param with matching teams
+    if year_param is not None:
+        teams_for_year = [t for t in permitted_teams if team_year_map.get(t) == year_param]
+        if teams_for_year:
+            return teams_for_year[0], year_param
+        # Path 5: fall through — explicit year has no matching teams
+
+    # Path 4: default to current calendar year
+    teams_for_current = [t for t in permitted_teams if team_year_map.get(t) == current_year]
+    if teams_for_current:
+        return teams_for_current[0], current_year
+
+    # Fallback: most recent year with any data
+    if available_years:
+        fallback_year = available_years[0]
+        teams_for_fallback = [t for t in permitted_teams if team_year_map.get(t) == fallback_year]
+        if teams_for_fallback:
+            return teams_for_fallback[0], fallback_year
+
+    # No teams have data at all
+    return permitted_teams[0], current_year
 
 
 def _parse_sort_params(
@@ -255,24 +301,39 @@ async def team_stats(request: Request) -> Response:
             },
         )
 
-    # AC-2: respect team_id query param, validate against permitted list
+    # Parse team_id param and validate
     requested_team_id_raw = request.query_params.get("team_id")
+    team_id_param: int | None = None
     if requested_team_id_raw:
         try:
-            requested_team_id: int = int(requested_team_id_raw)
+            team_id_param = int(requested_team_id_raw)
         except (ValueError, TypeError):
             return HTMLResponse(content="Bad Request", status_code=400)
-        if requested_team_id not in permitted_teams:
+        if team_id_param not in permitted_teams:
             return HTMLResponse(content="Forbidden", status_code=403)
-        active_team_id: int = requested_team_id
-    else:
-        active_team_id = permitted_teams[0]
+
+    # Parse year param
+    year_raw = request.query_params.get("year")
+    year_param: int | None = None
+    if year_raw:
+        try:
+            year_param = int(year_raw)
+        except (ValueError, TypeError):
+            year_param = None
+
+    # Build team→year map and resolve active team + year (AC-1, AC-2, AC-3)
+    team_year_map = await run_in_threadpool(db.get_team_year_map, permitted_teams)
+    active_team_id, active_year = _resolve_year_and_team(
+        team_year_map, permitted_teams, team_id_param, year_param
+    )
+    available_years: list[int] = sorted(set(team_year_map.values()), reverse=True)
 
     current_year = datetime.date.today().year
     requested_season_id = request.query_params.get("season_id", "").strip()
 
     available_seasons = await run_in_threadpool(db.get_available_seasons, active_team_id)
-    if not requested_season_id:
+    # year takes precedence over season_id param (AC-8)
+    if not requested_season_id or year_param is not None:
         season_id = available_seasons[0]["season_id"] if available_seasons else f"{current_year}-spring-hs"
     else:
         season_id = requested_season_id
@@ -301,18 +362,22 @@ async def team_stats(request: Request) -> Response:
         active_team_id, season_id, len(players), current_sort, current_dir,
     )
 
+    # Filter team pills to only teams with data in the active year (Finding 1)
+    year_team_infos = [t for t in team_infos if team_year_map.get(t["id"]) == active_year]
+    if not year_team_infos:
+        year_team_infos = team_infos
+
     return templates.TemplateResponse(
         request,
         "dashboard/team_stats.html",
         {
             "players": players,
             "team_name": team_name,
-            "permitted_team_infos": team_infos,
+            "permitted_team_infos": year_team_infos,
             "active_team_id": active_team_id,
+            "active_year": active_year,
+            "available_years": available_years,
             "season_id": season_id,
-            "available_seasons": available_seasons,
-            "is_current_season": int(season_id[:4]) == current_year,
-            "current_year": current_year,
             "user": user,
             "no_assignments": False,
             "current_sort": current_sort,
@@ -414,23 +479,38 @@ async def team_pitching(request: Request) -> Response:
             },
         )
 
+    # Parse team_id param and validate
     requested_team_id_raw = request.query_params.get("team_id")
+    team_id_param_p: int | None = None
     if requested_team_id_raw:
         try:
-            requested_team_id_int: int = int(requested_team_id_raw)
+            team_id_param_p = int(requested_team_id_raw)
         except (ValueError, TypeError):
             return HTMLResponse(content="Bad Request", status_code=400)
-        if requested_team_id_int not in permitted_teams:
+        if team_id_param_p not in permitted_teams:
             return HTMLResponse(content="Forbidden", status_code=403)
-        active_team_id_p: int = requested_team_id_int
-    else:
-        active_team_id_p = permitted_teams[0]
+
+    # Parse year param
+    year_raw_p = request.query_params.get("year")
+    year_param_p: int | None = None
+    if year_raw_p:
+        try:
+            year_param_p = int(year_raw_p)
+        except (ValueError, TypeError):
+            year_param_p = None
+
+    # Build team→year map and resolve active team + year
+    team_year_map_p = await run_in_threadpool(db.get_team_year_map, permitted_teams)
+    active_team_id_p, active_year_p = _resolve_year_and_team(
+        team_year_map_p, permitted_teams, team_id_param_p, year_param_p
+    )
+    available_years_p: list[int] = sorted(set(team_year_map_p.values()), reverse=True)
 
     current_year = datetime.date.today().year
     requested_season_id = request.query_params.get("season_id", "").strip()
 
     available_seasons = await run_in_threadpool(db.get_available_seasons, active_team_id_p)
-    if not requested_season_id:
+    if not requested_season_id or year_param_p is not None:
         season_id = available_seasons[0]["season_id"] if available_seasons else f"{current_year}-spring-hs"
     else:
         season_id = requested_season_id
@@ -461,18 +541,22 @@ async def team_pitching(request: Request) -> Response:
         active_team_id_p, season_id, len(pitchers), current_sort_p, current_dir_p,
     )
 
+    # Filter team pills to only teams with data in the active year (Finding 1)
+    year_team_infos_p = [t for t in team_infos if team_year_map_p.get(t["id"]) == active_year_p]
+    if not year_team_infos_p:
+        year_team_infos_p = team_infos
+
     return templates.TemplateResponse(
         request,
         "dashboard/team_pitching.html",
         {
             "pitchers": pitchers,
             "team_name": team_name,
-            "permitted_team_infos": team_infos,
+            "permitted_team_infos": year_team_infos_p,
             "active_team_id": active_team_id_p,
+            "active_year": active_year_p,
+            "available_years": available_years_p,
             "season_id": season_id,
-            "available_seasons": available_seasons,
-            "is_current_season": int(season_id[:4]) == current_year,
-            "current_year": current_year,
             "user": user,
             "no_assignments": False,
             "current_sort": current_sort_p,
@@ -542,23 +626,38 @@ async def game_list(request: Request) -> Response:
             },
         )
 
+    # Parse team_id param and validate
     requested_team_id_raw = request.query_params.get("team_id")
+    team_id_param_g: int | None = None
     if requested_team_id_raw:
         try:
-            requested_team_id_g: int = int(requested_team_id_raw)
+            team_id_param_g = int(requested_team_id_raw)
         except (ValueError, TypeError):
             return HTMLResponse(content="Bad Request", status_code=400)
-        if requested_team_id_g not in permitted_teams:
+        if team_id_param_g not in permitted_teams:
             return HTMLResponse(content="Forbidden", status_code=403)
-        active_team_id_g: int = requested_team_id_g
-    else:
-        active_team_id_g = permitted_teams[0]
+
+    # Parse year param
+    year_raw_g = request.query_params.get("year")
+    year_param_g: int | None = None
+    if year_raw_g:
+        try:
+            year_param_g = int(year_raw_g)
+        except (ValueError, TypeError):
+            year_param_g = None
+
+    # Build team→year map and resolve active team + year
+    team_year_map_g = await run_in_threadpool(db.get_team_year_map, permitted_teams)
+    active_team_id_g, active_year_g = _resolve_year_and_team(
+        team_year_map_g, permitted_teams, team_id_param_g, year_param_g
+    )
+    available_years_g: list[int] = sorted(set(team_year_map_g.values()), reverse=True)
 
     current_year = datetime.date.today().year
     requested_season_id = request.query_params.get("season_id", "").strip()
 
     available_seasons = await run_in_threadpool(db.get_available_seasons, active_team_id_g)
-    if not requested_season_id:
+    if not requested_season_id or year_param_g is not None:
         season_id = available_seasons[0]["season_id"] if available_seasons else f"{current_year}-spring-hs"
     else:
         season_id = requested_season_id
@@ -580,18 +679,22 @@ async def game_list(request: Request) -> Response:
         "Game list: team=%s season_id=%s games=%d", active_team_id_g, season_id, len(games_raw)
     )
 
+    # Filter team pills to only teams with data in the active year (Finding 1)
+    year_team_infos_g = [t for t in team_infos if team_year_map_g.get(t["id"]) == active_year_g]
+    if not year_team_infos_g:
+        year_team_infos_g = team_infos
+
     return templates.TemplateResponse(
         request,
         "dashboard/game_list.html",
         {
             "games": games_raw,
             "team_name": team_name,
-            "permitted_team_infos": team_infos,
+            "permitted_team_infos": year_team_infos_g,
             "active_team_id": active_team_id_g,
+            "active_year": active_year_g,
+            "available_years": available_years_g,
             "season_id": season_id,
-            "available_seasons": available_seasons,
-            "is_current_season": int(season_id[:4]) == current_year,
-            "current_year": current_year,
             "user": user,
             "no_assignments": False,
         },
@@ -732,23 +835,38 @@ async def opponent_list(request: Request) -> Response:
             },
         )
 
+    # Parse team_id param and validate
     requested_team_id_raw = request.query_params.get("team_id")
+    team_id_param_o: int | None = None
     if requested_team_id_raw:
         try:
-            requested_team_id_o: int = int(requested_team_id_raw)
+            team_id_param_o = int(requested_team_id_raw)
         except (ValueError, TypeError):
             return HTMLResponse(content="Bad Request", status_code=400)
-        if requested_team_id_o not in permitted_teams:
+        if team_id_param_o not in permitted_teams:
             return HTMLResponse(content="Forbidden", status_code=403)
-        active_team_id_o: int = requested_team_id_o
-    else:
-        active_team_id_o = permitted_teams[0]
+
+    # Parse year param
+    year_raw_o = request.query_params.get("year")
+    year_param_o: int | None = None
+    if year_raw_o:
+        try:
+            year_param_o = int(year_raw_o)
+        except (ValueError, TypeError):
+            year_param_o = None
+
+    # Build team→year map and resolve active team + year
+    team_year_map_o = await run_in_threadpool(db.get_team_year_map, permitted_teams)
+    active_team_id_o, active_year_o = _resolve_year_and_team(
+        team_year_map_o, permitted_teams, team_id_param_o, year_param_o
+    )
+    available_years_o: list[int] = sorted(set(team_year_map_o.values()), reverse=True)
 
     current_year = datetime.date.today().year
     requested_season_id = request.query_params.get("season_id", "").strip()
 
     available_seasons = await run_in_threadpool(db.get_available_seasons, active_team_id_o)
-    if not requested_season_id:
+    if not requested_season_id or year_param_o is not None:
         season_id = available_seasons[0]["season_id"] if available_seasons else f"{current_year}-spring-hs"
     else:
         season_id = requested_season_id
@@ -769,18 +887,22 @@ async def opponent_list(request: Request) -> Response:
         len(opponents),
     )
 
+    # Filter team pills to only teams with data in the active year (Finding 1)
+    year_team_infos_o = [t for t in team_infos if team_year_map_o.get(t["id"]) == active_year_o]
+    if not year_team_infos_o:
+        year_team_infos_o = team_infos
+
     return templates.TemplateResponse(
         request,
         "dashboard/opponent_list.html",
         {
             "opponents": opponents,
             "team_name": team_name,
-            "permitted_team_infos": team_infos,
+            "permitted_team_infos": year_team_infos_o,
             "active_team_id": active_team_id_o,
+            "active_year": active_year_o,
+            "available_years": available_years_o,
             "season_id": season_id,
-            "available_seasons": available_seasons,
-            "is_current_season": int(season_id[:4]) == current_year,
-            "current_year": current_year,
             "user": user,
             "no_assignments": False,
         },
@@ -895,6 +1017,15 @@ async def opponent_detail(request: Request, opponent_team_id: int) -> Response:
             db.get_last_meeting, active_team_id_od, opponent_team_id, season_id
         )
 
+    # AC-7: pass year through for back-links
+    year_od_raw = request.query_params.get("year")
+    year_od: int | None = None
+    if year_od_raw:
+        try:
+            year_od = int(year_od_raw)
+        except (ValueError, TypeError):
+            year_od = None
+
     logger.debug(
         "Opponent detail: opponent=%s season_id=%s bat_sort=%s pit_sort=%s",
         opponent_team_id, season_id, bat_sort, pit_sort,
@@ -911,6 +1042,8 @@ async def opponent_detail(request: Request, opponent_team_id: int) -> Response:
             "active_team_id": active_team_id_od,
             "permitted_team_infos": team_infos,
             "season_id": season_id,
+            "year": year_od,
+            "active_year": year_od,
             "user": user,
             "bat_sort": bat_sort,
             "bat_dir": bat_dir,
@@ -1032,6 +1165,15 @@ async def game_detail(request: Request, game_id: str) -> Response:
     team_infos = await run_in_threadpool(db.get_teams_by_ids, list(permitted_teams))
     season_id_gd = request.query_params.get("season_id", "").strip()
 
+    # AC-7: pass year through for back-links
+    year_gd_raw = request.query_params.get("year")
+    year_gd: int | None = None
+    if year_gd_raw:
+        try:
+            year_gd = int(year_gd_raw)
+        except (ValueError, TypeError):
+            year_gd = None
+
     # Compute strike_pct for each team's pitching lines
     teams = box_score["teams"]
     for team in teams:
@@ -1047,6 +1189,8 @@ async def game_detail(request: Request, game_id: str) -> Response:
             "teams": teams,
             "active_team_id": active_team_id_gd,
             "season_id": season_id_gd,
+            "year": year_gd,
+            "active_year": year_gd,
             "permitted_team_infos": team_infos,
             "user": user,
         },
@@ -1196,6 +1340,15 @@ async def player_profile(request: Request, player_id: str) -> Response:
         ),
     )
 
+    # AC-7: pass year through for back-links
+    year_pp_raw = request.query_params.get("year")
+    year_pp: int | None = None
+    if year_pp_raw:
+        try:
+            year_pp = int(year_pp_raw)
+        except (ValueError, TypeError):
+            year_pp = None
+
     logger.debug("Player profile: player_id=%s", player_id)
 
     return templates.TemplateResponse(
@@ -1210,6 +1363,8 @@ async def player_profile(request: Request, player_id: str) -> Response:
             "current_pitching": current_pitching,
             "permitted_team_infos": team_infos,
             "backlink_team_id": backlink_team_id,
+            "year": year_pp,
+            "active_year": year_pp,
             "user": user,
         },
     )

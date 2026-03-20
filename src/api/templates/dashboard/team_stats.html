@@ -1,6 +1,5 @@
 {% extends "base.html" %}
 {% from "dashboard/_team_selector.html" import team_selector %}
-{% from "dashboard/_season_selector.html" import season_selector %}
 
 {% set active_nav = "batting" %}
 
@@ -23,15 +22,8 @@
 {% endif %}
 {% else %}
 
-{{ team_selector(permitted_team_infos, active_team_id, "/dashboard", current_sort, current_dir) }}
+{{ team_selector(permitted_team_infos, active_team_id, "/dashboard", current_sort, current_dir, active_year, available_years) }}
 
-{{ season_selector(available_seasons, season_id, "/dashboard", active_team_id) }}
-
-{% if not is_current_season %}
-<div class="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded text-sm text-yellow-900">
-  Showing {{ season_id | season_display }} data — no {{ current_year }} season data has been loaded for this team yet.
-</div>
-{% endif %}
 
 {# Helper macro: render a sortable column header #}
 {#   col_key: the sort param value (e.g. "avg")                              #}
@@ -46,7 +38,7 @@
     {%- set _asc_cols = ["name", "so"] -%}
     {%- set next_dir = "asc" if col_key in _asc_cols else "desc" -%}
   {%- endif -%}
-  {%- set _href = "/dashboard?team_id=" ~ active_team_id ~ "&season_id=" ~ season_id ~ "&sort=" ~ col_key ~ "&dir=" ~ next_dir -%}
+  {%- set _href = "/dashboard?team_id=" ~ active_team_id ~ "&year=" ~ active_year ~ "&season_id=" ~ season_id ~ "&sort=" ~ col_key ~ "&dir=" ~ next_dir -%}
   <th class="py-2 px-3 {% if align == 'left' %}text-left{% else %}text-center{% endif %}">
     <a href="{{ _href }}" class="hover:underline whitespace-nowrap">
       {{ label }}{% if is_active %} {% if current_dir == "asc" %}&#9650;{% else %}&#9660;{% endif %}{% endif %}
@@ -81,7 +73,7 @@
       {# format_avg filter: format_avg(numerator, denominator) -> ".333" or "—" #}
       <tr class="border-b border-gray-200 {% if loop.index is even %}bg-gray-50{% endif %}">
         <td class="py-2 px-3 font-medium whitespace-nowrap">
-          <a href="/dashboard/players/{{ player.player_id }}" class="text-blue-700 hover:underline">
+          <a href="/dashboard/players/{{ player.player_id }}{% if active_year %}?year={{ active_year }}{% endif %}" class="text-blue-700 hover:underline">
             {% if player.jersey_number %}#{{ player.jersey_number }} {% endif %}{{ player.name }}
           </a>
         </td>

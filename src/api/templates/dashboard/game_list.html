@@ -1,6 +1,5 @@
 {% extends "base.html" %}
 {% from "dashboard/_team_selector.html" import team_selector %}
-{% from "dashboard/_season_selector.html" import season_selector %}
 
 {% set active_nav = "games" %}
 
@@ -19,15 +18,8 @@
 <p class="text-gray-600 mt-4">You have no team assignments. Contact your administrator.</p>
 {% else %}
 
-{{ team_selector(permitted_team_infos, active_team_id, "/dashboard/games") }}
+{{ team_selector(permitted_team_infos, active_team_id, "/dashboard/games", active_year=active_year, available_years=available_years) }}
 
-{{ season_selector(available_seasons, season_id, "/dashboard/games", active_team_id) }}
-
-{% if not is_current_season %}
-<div class="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded text-sm text-yellow-900">
-  Showing {{ season_id | season_display }} data — no {{ current_year }} season data has been loaded for this team yet.
-</div>
-{% endif %}
 
 <h1 class="text-xl font-bold mb-4">{{ team_name }} &mdash; Games</h1>
 
@@ -49,17 +41,17 @@
       {% for game in games %}
       <tr class="border-b border-gray-200 {% if loop.index is even %}bg-gray-50{% endif %}">
         <td class="py-3 px-3 whitespace-nowrap">
-          <a href="/dashboard/games/{{ game.game_id }}?team_id={{ active_team_id }}{% if season_id %}&amp;season_id={{ season_id }}{% endif %}" class="block text-blue-900 hover:underline">
+          <a href="/dashboard/games/{{ game.game_id }}?team_id={{ active_team_id }}{% if active_year %}&amp;year={{ active_year }}{% endif %}{% if season_id %}&amp;season_id={{ season_id }}{% endif %}" class="block text-blue-900 hover:underline">
             {{ game.game_date | format_date }}
           </a>
         </td>
         <td class="py-3 px-3">
-          <a href="/dashboard/games/{{ game.game_id }}?team_id={{ active_team_id }}{% if season_id %}&amp;season_id={{ season_id }}{% endif %}" class="block text-blue-900 hover:underline">
+          <a href="/dashboard/games/{{ game.game_id }}?team_id={{ active_team_id }}{% if active_year %}&amp;year={{ active_year }}{% endif %}{% if season_id %}&amp;season_id={{ season_id }}{% endif %}" class="block text-blue-900 hover:underline">
             {{ game.opponent_name or game.opponent_team_id }}
           </a>
         </td>
         <td class="py-3 px-3 text-center whitespace-nowrap">
-          <a href="/dashboard/games/{{ game.game_id }}?team_id={{ active_team_id }}{% if season_id %}&amp;season_id={{ season_id }}{% endif %}" class="block">
+          <a href="/dashboard/games/{{ game.game_id }}?team_id={{ active_team_id }}{% if active_year %}&amp;year={{ active_year }}{% endif %}{% if season_id %}&amp;season_id={{ season_id }}{% endif %}" class="block">
             {% if game.home_score is not none and game.away_score is not none %}
               {% if game.is_home %}
                 {{ game.home_score }}-{{ game.away_score }}

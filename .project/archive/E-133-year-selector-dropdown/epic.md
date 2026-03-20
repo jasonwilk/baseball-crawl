@@ -1,7 +1,7 @@
 # E-133: Year Selector Dropdown
 
 ## Status
-`READY`
+`COMPLETED`
 
 ## Overview
 Add a year selector dropdown to all dashboard pages so coaches can view past seasons' data. In GameChanger, a "team" IS a team-for-a-season -- "Top Dogg 14U" for 2025 summer is a separate GC team entity from "Top Dogg 14U" for 2026 summer. The year dropdown filters which teams appear in the team selector, defaulting to the current year (used 97% of the time). This replaces the current season pill-button selector with a compact, unobtrusive dropdown.
@@ -41,8 +41,8 @@ No expert consultation required for coaching domain -- this is a pure UI/data-pl
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-133-01 | Year dropdown UI and route integration | TODO | None | - |
-| E-133-02 | Remove legacy season selector | TODO | E-133-01 | - |
+| E-133-01 | Year dropdown UI and route integration | DONE | None | - |
+| E-133-02 | Remove legacy season selector | DONE | E-133-01 | - |
 
 ## Dispatch Team
 - software-engineer
@@ -123,3 +123,19 @@ None -- all questions resolved during consultation.
 - 2026-03-19: Revised after full consultation synthesis. Removed migration story (DE: derive year from existing `seasons.year` join). Moved year dropdown from navbar to team selector row (UXD). Simplified from 3 stories to 2. Set to READY.
 - 2026-03-19: Codex spec review triage. P1 link propagation: refined -- added TN-5, expanded AC-6/AC-7/file list to cover all internal links. P2 TN-1 stale text: fixed -- clarified one function + derivation. P2 AC-3 ambiguity: fixed -- concrete decision to remove banner (TN-6). P2 missing tests: fixed -- added tests/ to E-133-02 file list.
 - 2026-03-19: Fresh refinement pass. Found backward-compat issue: old bookmarks with `?team_id=N` would break if year filtering runs first. Rewrote TN-2 with explicit parameter resolution order (team_id wins when present, year filters when team_id absent). Updated AC-2/AC-3 to match. Refined AC-7 (detail pages pass year through for links, don't filter by year). Fixed TN-3 JS terminology. Added backward-compat to Success Criteria.
+- 2026-03-20: COMPLETED. Both stories implemented, reviewed (codex review: 3 findings fixed; integration CR: 1 finding fixed), and verified. Year dropdown added to all dashboard pages with full parameter resolution (TN-2), link propagation across all surfaces (TN-5), and backward compatibility for existing bookmarks. Legacy season selector removed; year dropdown is the sole time-navigation mechanism. 275 tests passing.
+
+  **Documentation assessment**: Trigger 1 fires (new feature ships -- year selector dropdown changes how coaches navigate between seasons). Trigger 5 fires (changes how users interact with the dashboard). Recommend dispatching docs-writer to update `docs/coaching/` with year dropdown usage if coaching docs exist, and `docs/admin/` if dashboard admin docs reference the season selector.
+
+  **Context-layer assessment**:
+  1. New convention/pattern: **No** -- year param propagation follows existing query string patterns.
+  2. Architectural decision: **No** -- year derived from existing `seasons.year` join; no new infrastructure.
+  3. Footgun/boundary: **No** -- parameter resolution order (TN-2) is well-documented in code comments.
+  4. Agent behavior/routing: **No** -- no changes to agent dispatch or coordination.
+  5. Domain knowledge: **No** -- "one GC team = one season" is already documented in CLAUDE.md data model section.
+  6. New CLI/workflow: **No** -- no new commands or workflows.
+  Context-layer verdict: All six triggers **No**. No context-layer codification needed.
+
+  **Ideas backlog review**: No CANDIDATE ideas are directly unblocked by E-133. The year dropdown is UI-only and does not add data capabilities that would unblock data-layer ideas.
+
+  **Vision signals**: 22 unprocessed signals exist in `docs/vision-signals.md`. No new signals from this epic. User may want to "curate the vision" at a convenient pause point.

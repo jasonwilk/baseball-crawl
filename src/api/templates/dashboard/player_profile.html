@@ -17,11 +17,11 @@
 
 <div class="mb-4">
   {% if batting_seasons %}
-  <a href="/dashboard?team_id={{ backlink_team_id }}" class="text-blue-900 hover:underline text-sm">&larr; Back to Team Stats</a>
+  <a href="/dashboard?team_id={{ backlink_team_id }}{% if year %}&year={{ year }}{% endif %}" class="text-blue-900 hover:underline text-sm">&larr; Back to Team Stats</a>
   {% elif pitching_seasons %}
-  <a href="/dashboard/pitching?team_id={{ backlink_team_id }}" class="text-blue-900 hover:underline text-sm">&larr; Back to Team Pitching</a>
+  <a href="/dashboard/pitching?team_id={{ backlink_team_id }}{% if year %}&year={{ year }}{% endif %}" class="text-blue-900 hover:underline text-sm">&larr; Back to Team Pitching</a>
   {% else %}
-  <a href="/dashboard" class="text-blue-900 hover:underline text-sm">&larr; Back to Team Stats</a>
+  <a href="/dashboard{% if year %}?year={{ year }}{% endif %}" class="text-blue-900 hover:underline text-sm">&larr; Back to Team Stats</a>
   {% endif %}
 </div>
 
@@ -178,7 +178,7 @@
 {% if recent_games %}
 <div class="bg-white rounded shadow border border-gray-200 overflow-hidden mb-6">
   {% for game in recent_games %}
-  <a href="/dashboard/games/{{ game.game_id }}"
+  <a href="/dashboard/games/{{ game.game_id }}{% if year %}?year={{ year }}{% endif %}"
      class="flex items-center gap-3 px-4 border-b border-gray-200 last:border-b-0 hover:bg-gray-50 min-h-[44px]">
     <span class="text-gray-600 text-sm whitespace-nowrap w-20">
       {{ game.game_date | format_date }}

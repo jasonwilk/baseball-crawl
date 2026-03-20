@@ -16,7 +16,7 @@ Scout: {{ scouting_report.team_name if scouting_report else opponent_team_id }}
 {% block content %}
 
 <div class="mb-4">
-  <a href="/dashboard/opponents{% if active_team_id %}?team_id={{ active_team_id }}{% if season_id %}&season_id={{ season_id }}{% endif %}{% elif season_id %}?season_id={{ season_id }}{% endif %}" class="text-blue-900 hover:underline text-sm">&larr; Back to Opponents</a>
+  <a href="/dashboard/opponents{% if active_team_id %}?team_id={{ active_team_id }}{% if year %}&year={{ year }}{% endif %}{% if season_id %}&season_id={{ season_id }}{% endif %}{% elif year %}?year={{ year }}{% if season_id %}&season_id={{ season_id }}{% endif %}{% elif season_id %}?season_id={{ season_id }}{% endif %}" class="text-blue-900 hover:underline text-sm">&larr; Back to Opponents</a>
 </div>
 
 {% if scouting_report %}
@@ -91,7 +91,7 @@ Scout: {{ scouting_report.team_name if scouting_report else opponent_team_id }}
     {% else %}
     <span class="text-gray-600">-</span>
     {% endif %}
-    <a href="/dashboard/games/{{ last_meeting.game_id }}?team_id={{ active_team_id }}{% if season_id %}&amp;season_id={{ season_id }}{% endif %}" class="text-blue-900 hover:underline text-sm">Box Score</a>
+    <a href="/dashboard/games/{{ last_meeting.game_id }}?team_id={{ active_team_id }}{% if year %}&amp;year={{ year }}{% endif %}{% if season_id %}&amp;season_id={{ season_id }}{% endif %}" class="text-blue-900 hover:underline text-sm">Box Score</a>
   </div>
   {% else %}
   <p class="text-gray-600 text-sm">First meeting this season.</p>
@@ -102,6 +102,7 @@ Scout: {{ scouting_report.team_name if scouting_report else opponent_team_id }}
    Each table's sort link must preserve team_id, season_id, and the OTHER table's sort state. #}
 {%- set _base = "/dashboard/opponents/" ~ opponent_team_id ~ "?" -%}
 {%- if active_team_id -%}{%- set _base = _base ~ "team_id=" ~ active_team_id ~ "&" -%}{%- endif -%}
+{%- if year -%}{%- set _base = _base ~ "year=" ~ year ~ "&" -%}{%- endif -%}
 {%- if season_id -%}{%- set _base = _base ~ "season_id=" ~ season_id ~ "&" -%}{%- endif -%}
 
 {# Batting sort macro: preserves pit_sort/pit_dir when linking #}

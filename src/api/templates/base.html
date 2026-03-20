@@ -21,9 +21,10 @@
   </main>
   {% if not is_admin_page %}
   <!-- Bottom fixed navigation bar -->
-  {# Build query string from active_team_id and season_id context vars #}
+  {# Build query string from active_team_id, active_year, and season_id context vars #}
   {%- set _qs = "" -%}
   {%- if active_team_id %}{% set _qs = "team_id=" ~ active_team_id %}{% endif -%}
+  {%- if active_year %}{% if _qs %}{% set _qs = _qs ~ "&year=" ~ active_year %}{% else %}{% set _qs = "year=" ~ active_year %}{% endif %}{% endif -%}
   {%- if season_id %}{% if _qs %}{% set _qs = _qs ~ "&season_id=" ~ season_id %}{% else %}{% set _qs = "season_id=" ~ season_id %}{% endif %}{% endif -%}
   <nav class="fixed bottom-0 w-full bg-white border-t border-gray-200 z-10">
     <div class="flex justify-around">

@@ -4,7 +4,7 @@
 [E-133: Year Selector Dropdown](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, all four main dashboard pages will display a compact year dropdown in the team selector row. Selecting a year filters the team selector to show only teams from that year. The current calendar year is the default. Year selection persists across page navigation via query parameter propagation. A new DB function provides the team-to-year mapping that powers the dropdown and filtering.

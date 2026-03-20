@@ -353,8 +353,13 @@ class TestNavigationLinks:
 
         html = resp.text
         assert f"season_id={_PRIOR_SEASON}" in html
-        # Bottom nav links should have the prior season (HTML entity &amp; is standard)
-        assert f"/dashboard?team_id={team_id}&amp;season_id={_PRIOR_SEASON}" in html
+        # Bottom nav links should have the prior season (HTML entity &amp; is standard).
+        # year is now included between team_id and season_id.
+        _prior_year = _CURRENT_YEAR - 1
+        assert (
+            f"/dashboard?team_id={team_id}&amp;year={_prior_year}&amp;season_id={_PRIOR_SEASON}"
+            in html
+        )
 
     def test_team_selector_omits_season_id(self, tmp_path: Path) -> None:
         """Team selector links do NOT carry season_id (triggers auto-detection on switch)."""
@@ -424,7 +429,7 @@ class TestNavigationLinks:
         assert resp.status_code == 200
         html = resp.text
         # Each game row link should carry season_id
-        assert f"/dashboard/games/g-row-001?team_id={team_id}&amp;season_id={_CURRENT_SEASON}" in html
+        assert f"/dashboard/games/g-row-001?team_id={team_id}&amp;year={_CURRENT_YEAR}&amp;season_id={_CURRENT_SEASON}" in html
 
     def test_opponent_detail_box_score_link_carries_season_id(self, tmp_path: Path) -> None:
         """Box Score link on opponent detail page includes season_id as &amp;season_id=."""
@@ -572,15 +577,15 @@ class TestEmptyState:
 
 
 # ---------------------------------------------------------------------------
-# AC-6(f): season selector suppressed when only one season has data
+# AC-6(f): legacy season pill selector is absent (removed in E-133-02)
 # ---------------------------------------------------------------------------
 
 
 class TestSeasonSelectorSuppression:
-    """AC-6(f): season selector is not rendered when only one season has data."""
+    """Legacy season pill selector is not present; year dropdown is the sole time nav."""
 
-    def test_single_season_no_selector(self, tmp_path: Path) -> None:
-        """With only one season, the pill-button season selector is not rendered."""
+    def test_no_season_pill_selector(self, tmp_path: Path) -> None:
+        """The old pill-button season selector CSS class is never rendered."""
         db_path = _make_db(tmp_path)
         team_id = _insert_team(db_path)
         _insert_player(db_path, "p-030", "Henry", "King")
@@ -596,72 +601,17 @@ class TestSeasonSelectorSuppression:
                 resp = client.get("/dashboard")
 
         assert resp.status_code == 200
-        html = resp.text
-        # With only one season, the selector macro renders nothing (suppressed)
-        # The selector macro only renders when len(seasons) > 1
-        # Verify no season pill buttons linking to other seasons appear
-        # (There's no second season to link to)
-        # We confirm this by checking the season_display label doesn't appear as a link
-        label = format_season_display(_CURRENT_SEASON)
-        # If the selector were rendered, label would appear as a link text; but it's suppressed
-        # The label may still appear elsewhere (e.g. freshness bar), so check for the pill link
-        assert f'season_id={_CURRENT_SEASON}" class="px-3' not in html
-
-    def test_two_seasons_show_selector(self, tmp_path: Path) -> None:
-        """With two seasons, the season selector renders pill buttons for each."""
-        db_path = _make_db(tmp_path)
-        team_id = _insert_team(db_path)
-        _insert_player(db_path, "p-031", "Iris", "Lane")
-        _insert_season(db_path, _CURRENT_SEASON)
-        _insert_season(db_path, _PRIOR_SEASON)
-        _insert_batting_stats(db_path, "p-031", team_id, _CURRENT_SEASON)
-        _insert_batting_stats(db_path, "p-031", team_id, _PRIOR_SEASON)
-
-        with patch.dict(
-            "os.environ",
-            {"DATABASE_PATH": str(db_path), "DEV_USER_EMAIL": "dev@example.com"},
-        ):
-            client = _make_dev_client(db_path, team_id)
-            with client:
-                resp = client.get("/dashboard")
-
-        assert resp.status_code == 200
-        html = resp.text
-        # Both season labels should appear as pill buttons
-        assert format_season_display(_CURRENT_SEASON) in html
-        assert format_season_display(_PRIOR_SEASON) in html
-        assert f"season_id={_PRIOR_SEASON}" in html
+        # The old pill selector linked to season_id with class="px-3" -- confirm absent
+        assert f'season_id={_CURRENT_SEASON}" class="px-3' not in resp.text
 
 
 # ---------------------------------------------------------------------------
-# AC-7: data freshness indicator
+# AC-7: no freshness indicator banner (removed in E-133-02)
 # ---------------------------------------------------------------------------
 
 
 class TestFreshnessIndicator:
-    """AC-7: yellow info bar shown when active season is from a prior year."""
-
-    def test_prior_season_shows_freshness_bar(self, tmp_path: Path) -> None:
-        """When viewing a prior-year season, the yellow freshness bar appears."""
-        db_path = _make_db(tmp_path)
-        team_id = _insert_team(db_path)
-        _insert_player(db_path, "p-040", "Jack", "Moore")
-        _insert_season(db_path, _PRIOR_SEASON)
-        _insert_batting_stats(db_path, "p-040", team_id, _PRIOR_SEASON)
-
-        with patch.dict(
-            "os.environ",
-            {"DATABASE_PATH": str(db_path), "DEV_USER_EMAIL": "dev@example.com"},
-        ):
-            client = _make_dev_client(db_path, team_id)
-            with client:
-                resp = client.get("/dashboard")
-
-        assert resp.status_code == 200
-        html = resp.text
-        assert "bg-yellow-50" in html
-        assert str(_CURRENT_YEAR) in html
-        assert "no" in html.lower() and "season data has been loaded" in html.lower()
+    """Freshness warning banner (bg-yellow-50) is removed; year dropdown is explicit nav."""
 
     def test_current_season_no_freshness_bar(self, tmp_path: Path) -> None:
         """When viewing the current year's season, no freshness bar appears."""
@@ -948,8 +898,8 @@ class TestBattingSortParams:
         # Team selector link for the other team should carry sort/dir params
         # (& is autoescaped to &amp; in HTML)
         assert (
-            f"team_id={team_id_b}&amp;sort=hr&amp;dir=desc" in html
-            or f"team_id={team_id_b}&sort=hr&dir=desc" in html
+            f"team_id={team_id_b}&amp;year={_CURRENT_YEAR}&amp;sort=hr&amp;dir=desc" in html
+            or f"team_id={team_id_b}&year={_CURRENT_YEAR}&sort=hr&dir=desc" in html
         )
 
 

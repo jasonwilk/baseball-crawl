@@ -4,7 +4,7 @@
 [E-133: Year Selector Dropdown](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the legacy season pill-button selector (`_season_selector.html`) will be removed from all dashboard templates. The year dropdown from E-133-01 is the sole time-navigation mechanism. Dead code related to the old season selector (template macro, unused template variables, stale warning banner) is cleaned up.
