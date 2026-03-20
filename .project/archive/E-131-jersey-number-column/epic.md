@@ -1,7 +1,7 @@
 # E-131: Jersey Number as Distinct Dashboard Column
 
 ## Status
-`READY`
+`COMPLETED`
 
 ## Overview
 Display player jersey number as its own column in every dashboard stat table, separated from the player name. Currently jersey number is either inlined with the name (`#23 Smith`) or absent entirely on some views. After this epic, every stat table shows a dedicated `#` column as the first column, with consistent formatting and NULL handling across all views.
@@ -44,9 +44,9 @@ All stories and ACs must work correctly for both member-team data (roster-loaded
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-131-01 | Season stats jersey number column | TODO | None | - |
-| E-131-02 | Game box score jersey number column | TODO | None | - |
-| E-131-03 | Opponent scouting jersey number column | TODO | None | - |
+| E-131-01 | Season stats jersey number column | DONE | None | - |
+| E-131-02 | Game box score jersey number column | DONE | None | - |
+| E-131-03 | Opponent scouting jersey number column | DONE | None | - |
 
 ## Dispatch Team
 - software-engineer
@@ -90,3 +90,12 @@ None.
 - 2026-03-19: Refined per user feedback (round 2). Extended dual-path test coverage requirement to ALL stories, not just E-131-02/03. E-131-01 gained new ACs (AC-5, AC-6, AC-7) for dual-path rendering tests and NULL handling verification, plus `tests/test_dashboard.py` added to its files list. TN-4 header updated to "Applies to ALL Stories" with mandatory dual-path coverage for every story. E-131-02 AC-7 and E-131-03 AC-7 strengthened to explicitly name both membership_type values.
 - 2026-03-19: Codex spec review triage (5 findings, all valid, all fixed). (1-2) Removed impossible colspan ACs from E-131-02 and E-131-03 — those templates use `<p>` empty states, not `<tr colspan>`. Replaced with template rendering test ACs. Updated TN-1 to clarify colspan scope. (3-4) Added `tests/test_dashboard.py` to Files lists for E-131-02 and E-131-03 to cover template rendering ACs. (5) Fixed TN-3 and E-131-02 Context to note that `game_query` does NOT currently SELECT `g.season_id` — story must extend it.
 - 2026-03-19: Final quality sweep. Added TN-6 documenting shared file parallel safety — all three stories modify `tests/test_dashboard.py`, E-131-02 and E-131-03 share `src/api/db.py` and `tests/test_db.py`. Acknowledged as exception to the dependency rule since changes target non-overlapping functions. No other issues found. Status remains READY.
+- 2026-03-20: **COMPLETED.** All 3 stories DONE. Jersey number now displays as a dedicated `#` column (first column, before Player) across all four dashboard stat tables: team batting, team pitching, game box score, and opponent scouting report. Query layer updated with LEFT JOIN team_rosters for box score and scouting functions. 30 new tests (9 E-131-01, 8+7 E-131-02, 8+6 E-131-03) covering dual ingestion paths, NULL handling, and LEFT JOIN correctness. Codex integration review: 1 finding (test assertion tightening) fixed. Code review: clean across all 3 stories.
+- 2026-03-20: **Documentation assessment**: No documentation impact. This epic changed query-layer functions and HTML templates only — no new features requiring user-facing docs, no architecture changes, no schema changes, no new endpoints, no deployment changes.
+- 2026-03-20: **Context-layer assessment**:
+  1. New convention, pattern, or constraint established? **No.** The LEFT JOIN + em dash pattern was already established in TN-1/TN-2 during planning; no new convention emerged during implementation.
+  2. Architectural decision with ongoing implications? **No.** Pure query-layer and template changes within the existing architecture.
+  3. Footgun, failure mode, or boundary discovered? **No.** The pitching colspan discrepancy (AC-4 said 12→13, actual was 14→15) was a stale spec issue, not a systemic footgun.
+  4. Change to agent behavior, routing, or coordination? **No.**
+  5. Domain knowledge discovered that should influence future epics? **No.** Jersey number display is straightforward; no new domain insights surfaced.
+  6. New CLI command, workflow, or operational procedure? **No.**

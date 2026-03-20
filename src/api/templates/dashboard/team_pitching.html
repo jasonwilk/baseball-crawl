@@ -43,6 +43,7 @@
   <table class="min-w-full text-sm bg-white rounded shadow">
     <thead class="bg-blue-900 text-white sticky top-0">
       <tr>
+        <th class="py-2 px-2 text-center w-8">#</th>
         {{ sort_header("name", "Player", "left") }}
         {{ sort_header("era", "ERA") }}
         {{ sort_header("k9", "K/9") }}
@@ -62,9 +63,10 @@
     <tbody>
       {% for pitcher in pitchers %}
       <tr class="border-b border-gray-200 {% if loop.index is even %}bg-gray-50{% endif %}">
+        <td class="py-2 px-2 text-center">{% if pitcher.jersey_number %}{{ pitcher.jersey_number }}{% else %}&mdash;{% endif %}</td>
         <td class="py-2 px-3 font-medium">
           <a href="/dashboard/players/{{ pitcher.player_id }}{% if active_year %}?year={{ active_year }}{% endif %}" class="text-blue-900 hover:underline">
-            {% if pitcher.jersey_number %}#{{ pitcher.jersey_number }} {% endif %}{{ pitcher.name }}
+            {{ pitcher.name }}
           </a>
         </td>
         <td class="py-2 px-3 text-center">{{ pitcher.era }}</td>
@@ -83,7 +85,7 @@
       </tr>
       {% else %}
       <tr>
-        <td colspan="14" class="py-4 px-3 text-center text-gray-600">No pitching stats available.</td>
+        <td colspan="15" class="py-4 px-3 text-center text-gray-600">No pitching stats available.</td>
       </tr>
       {% endfor %}
     </tbody>

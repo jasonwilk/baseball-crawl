@@ -4,7 +4,7 @@
 [E-131: Jersey Number as Distinct Dashboard Column](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the team batting stats and team pitching stats tables will display jersey number as a dedicated `#` column (first column, before Player name) instead of inlining it with the player name. Players without a jersey number will show an em dash. No query changes needed -- both `get_team_batting_stats()` and `get_team_pitching_stats()` already return `jersey_number`.

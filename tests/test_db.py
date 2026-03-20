@@ -510,6 +510,196 @@ class TestGetGameBoxScore:
 
 
 # ---------------------------------------------------------------------------
+# E-131-02: get_game_box_score returns jersey_number via LEFT JOIN team_rosters
+# ---------------------------------------------------------------------------
+
+
+class TestGetGameBoxScoreJerseyNumber:
+    """E-131-02 AC-1/AC-2/AC-5/AC-6/AC-7: jersey_number in box score results."""
+
+    def _setup_game_with_rosters(
+        self,
+        tmp_path: Path,
+        *,
+        home_jersey: str | None = "12",
+        away_jersey: str | None = "7",
+        include_home_roster: bool = True,
+        include_away_roster: bool = True,
+    ) -> tuple[dict, int, int]:
+        """Set up a game with member home team and tracked away team.
+
+        Returns (env, home_id, away_id).
+        """
+        conn = _make_db()
+        season_id = _insert_season(conn)
+        home_id = _insert_team(conn, "Member Home", membership_type="member")
+        away_id = _insert_team(conn, "Tracked Away", membership_type="tracked")
+        _insert_game(conn, "jrsy-game-1", season_id, home_id, away_id, 5, 3)
+
+        _insert_player(conn, "jrsy-h-001", "Home", "Batter")
+        _insert_player(conn, "jrsy-a-001", "Away", "Batter")
+
+        if include_home_roster:
+            conn.execute(
+                "INSERT OR IGNORE INTO team_rosters (team_id, player_id, season_id, jersey_number)"
+                " VALUES (?, ?, ?, ?)",
+                (home_id, "jrsy-h-001", season_id, home_jersey),
+            )
+        if include_away_roster:
+            conn.execute(
+                "INSERT OR IGNORE INTO team_rosters (team_id, player_id, season_id, jersey_number)"
+                " VALUES (?, ?, ?, ?)",
+                (away_id, "jrsy-a-001", season_id, away_jersey),
+            )
+
+        # Batting rows for both teams
+        conn.execute(
+            "INSERT INTO player_game_batting (game_id, player_id, team_id, ab, h) VALUES (?, ?, ?, ?, ?)",
+            ("jrsy-game-1", "jrsy-h-001", home_id, 4, 2),
+        )
+        conn.execute(
+            "INSERT INTO player_game_batting (game_id, player_id, team_id, ab, h) VALUES (?, ?, ?, ?, ?)",
+            ("jrsy-game-1", "jrsy-a-001", away_id, 3, 1),
+        )
+        # Pitching rows for both teams
+        conn.execute(
+            "INSERT INTO player_game_pitching (game_id, player_id, team_id, ip_outs, so) VALUES (?, ?, ?, ?, ?)",
+            ("jrsy-game-1", "jrsy-h-001", home_id, 9, 5),
+        )
+        conn.execute(
+            "INSERT INTO player_game_pitching (game_id, player_id, team_id, ip_outs, so) VALUES (?, ?, ?, ?, ?)",
+            ("jrsy-game-1", "jrsy-a-001", away_id, 6, 3),
+        )
+        conn.commit()
+        return _db_env(tmp_path, conn), home_id, away_id
+
+    def test_batting_jersey_number_present_for_member_team(self, tmp_path: Path) -> None:
+        """AC-1/AC-6a: jersey_number appears in batting line when roster row exists (member path)."""
+        from importlib import reload
+        import src.api.db as db_module
+
+        env, home_id, _ = self._setup_game_with_rosters(tmp_path, home_jersey="12")
+        with patch.dict(os.environ, env):
+            reload(db_module)
+            result = db_module.get_game_box_score("jrsy-game-1")
+
+        home_batting = next(t["batting_lines"] for t in result["teams"] if t["id"] == home_id)
+        assert len(home_batting) == 1
+        assert home_batting[0]["jersey_number"] == "12"
+
+    def test_batting_jersey_number_present_for_tracked_team(self, tmp_path: Path) -> None:
+        """AC-1/AC-7: jersey_number appears in batting line when scouting-loaded roster row exists."""
+        from importlib import reload
+        import src.api.db as db_module
+
+        env, _, away_id = self._setup_game_with_rosters(tmp_path, away_jersey="7")
+        with patch.dict(os.environ, env):
+            reload(db_module)
+            result = db_module.get_game_box_score("jrsy-game-1")
+
+        away_batting = next(t["batting_lines"] for t in result["teams"] if t["id"] == away_id)
+        assert len(away_batting) == 1
+        assert away_batting[0]["jersey_number"] == "7"
+
+    def test_batting_jersey_number_none_when_no_roster_row(self, tmp_path: Path) -> None:
+        """AC-5/AC-6b: jersey_number is None (not missing key) when no roster row exists."""
+        from importlib import reload
+        import src.api.db as db_module
+
+        env, _, away_id = self._setup_game_with_rosters(
+            tmp_path, include_away_roster=False
+        )
+        with patch.dict(os.environ, env):
+            reload(db_module)
+            result = db_module.get_game_box_score("jrsy-game-1")
+
+        away_batting = next(t["batting_lines"] for t in result["teams"] if t["id"] == away_id)
+        assert len(away_batting) == 1
+        assert "jersey_number" in away_batting[0]
+        assert away_batting[0]["jersey_number"] is None
+
+    def test_batting_no_rows_lost_without_roster(self, tmp_path: Path) -> None:
+        """AC-5: LEFT JOIN does not drop batting rows when roster row is absent."""
+        from importlib import reload
+        import src.api.db as db_module
+
+        env, home_id, away_id = self._setup_game_with_rosters(
+            tmp_path, include_home_roster=False, include_away_roster=False
+        )
+        with patch.dict(os.environ, env):
+            reload(db_module)
+            result = db_module.get_game_box_score("jrsy-game-1")
+
+        home_batting = next(t["batting_lines"] for t in result["teams"] if t["id"] == home_id)
+        away_batting = next(t["batting_lines"] for t in result["teams"] if t["id"] == away_id)
+        assert len(home_batting) == 1
+        assert len(away_batting) == 1
+
+    def test_pitching_jersey_number_present_for_member_team(self, tmp_path: Path) -> None:
+        """AC-2/AC-6a: jersey_number appears in pitching line when roster row exists (member path)."""
+        from importlib import reload
+        import src.api.db as db_module
+
+        env, home_id, _ = self._setup_game_with_rosters(tmp_path, home_jersey="12")
+        with patch.dict(os.environ, env):
+            reload(db_module)
+            result = db_module.get_game_box_score("jrsy-game-1")
+
+        home_pitching = next(t["pitching_lines"] for t in result["teams"] if t["id"] == home_id)
+        assert len(home_pitching) == 1
+        assert home_pitching[0]["jersey_number"] == "12"
+
+    def test_pitching_jersey_number_present_for_tracked_team(self, tmp_path: Path) -> None:
+        """AC-2/AC-7: jersey_number appears in pitching line when scouting-loaded roster row exists."""
+        from importlib import reload
+        import src.api.db as db_module
+
+        env, _, away_id = self._setup_game_with_rosters(tmp_path, away_jersey="7")
+        with patch.dict(os.environ, env):
+            reload(db_module)
+            result = db_module.get_game_box_score("jrsy-game-1")
+
+        away_pitching = next(t["pitching_lines"] for t in result["teams"] if t["id"] == away_id)
+        assert len(away_pitching) == 1
+        assert away_pitching[0]["jersey_number"] == "7"
+
+    def test_pitching_jersey_number_none_when_no_roster_row(self, tmp_path: Path) -> None:
+        """AC-5/AC-6b: jersey_number is None in pitching line when no roster row."""
+        from importlib import reload
+        import src.api.db as db_module
+
+        env, _, away_id = self._setup_game_with_rosters(
+            tmp_path, include_away_roster=False
+        )
+        with patch.dict(os.environ, env):
+            reload(db_module)
+            result = db_module.get_game_box_score("jrsy-game-1")
+
+        away_pitching = next(t["pitching_lines"] for t in result["teams"] if t["id"] == away_id)
+        assert len(away_pitching) == 1
+        assert "jersey_number" in away_pitching[0]
+        assert away_pitching[0]["jersey_number"] is None
+
+    def test_dual_path_both_teams_same_box_score(self, tmp_path: Path) -> None:
+        """AC-7: member team (roster-loaded) and tracked team (scouting-loaded) in same game."""
+        from importlib import reload
+        import src.api.db as db_module
+
+        # home = member team with jersey, away = tracked with jersey
+        env, home_id, away_id = self._setup_game_with_rosters(
+            tmp_path, home_jersey="42", away_jersey="99"
+        )
+        with patch.dict(os.environ, env):
+            reload(db_module)
+            result = db_module.get_game_box_score("jrsy-game-1")
+
+        home_batting = next(t["batting_lines"] for t in result["teams"] if t["id"] == home_id)
+        away_batting = next(t["batting_lines"] for t in result["teams"] if t["id"] == away_id)
+        assert home_batting[0]["jersey_number"] == "42"
+        assert away_batting[0]["jersey_number"] == "99"
+
+
+# ---------------------------------------------------------------------------
 # AC-6: get_opponent_scouting_report and get_last_meeting accept int team_id
 # ---------------------------------------------------------------------------
 
@@ -564,6 +754,165 @@ class TestGetOpponentScoutingReport:
         assert result["pitching"][0]["ip_outs"] == 9
         assert result["pitching"][0]["er"] == 2
         assert result["pitching"][0]["so"] == 8
+
+
+class TestGetOpponentScoutingReportJerseyNumber:
+    """E-131-03 AC-1/AC-2/AC-5/AC-6/AC-7: jersey_number in scouting report results."""
+
+    def _setup_scouting_db(
+        self,
+        tmp_path: Path,
+        team_membership: str = "tracked",
+        jersey: str | None = "33",
+        include_roster: bool = True,
+    ) -> tuple[dict, int]:
+        """Set up a team with batting/pitching stats and optional roster entry.
+
+        Returns (env, team_id).
+        """
+        conn = _make_db()
+        season_id = _insert_season(conn)
+        team_id = _insert_team(conn, "Scouted Team", membership_type=team_membership)
+        player_id = _insert_player(conn, "scout-p-001", "Scout", "Player")
+
+        if include_roster:
+            conn.execute(
+                "INSERT OR IGNORE INTO team_rosters (team_id, player_id, season_id, jersey_number)"
+                " VALUES (?, ?, ?, ?)",
+                (team_id, player_id, season_id, jersey),
+            )
+        conn.execute(
+            "INSERT INTO player_season_batting (player_id, team_id, season_id, ab, h)"
+            " VALUES (?, ?, ?, 10, 3)",
+            (player_id, team_id, season_id),
+        )
+        conn.execute(
+            "INSERT INTO player_season_pitching (player_id, team_id, season_id, ip_outs, er, so)"
+            " VALUES (?, ?, ?, 9, 2, 7)",
+            (player_id, team_id, season_id),
+        )
+        conn.commit()
+        return _db_env(tmp_path, conn), team_id
+
+    def test_batting_jersey_present_for_tracked_team(self, tmp_path: Path) -> None:
+        """AC-1/AC-6a/AC-7a: jersey_number in batting row for tracked team (scouting path)."""
+        from importlib import reload
+        import src.api.db as db_module
+
+        env, team_id = self._setup_scouting_db(tmp_path, team_membership="tracked", jersey="33")
+        with patch.dict(os.environ, env):
+            reload(db_module)
+            result = db_module.get_opponent_scouting_report(
+                opponent_team_id=team_id, season_id="2026-spring-hs"
+            )
+
+        assert len(result["batting"]) == 1
+        assert result["batting"][0]["jersey_number"] == "33"
+
+    def test_batting_jersey_present_for_member_team(self, tmp_path: Path) -> None:
+        """AC-1/AC-7b: jersey_number in batting row when queried for member team_id."""
+        from importlib import reload
+        import src.api.db as db_module
+
+        env, team_id = self._setup_scouting_db(tmp_path, team_membership="member", jersey="88")
+        with patch.dict(os.environ, env):
+            reload(db_module)
+            result = db_module.get_opponent_scouting_report(
+                opponent_team_id=team_id, season_id="2026-spring-hs"
+            )
+
+        assert len(result["batting"]) == 1
+        assert result["batting"][0]["jersey_number"] == "88"
+
+    def test_batting_jersey_none_when_no_roster_row(self, tmp_path: Path) -> None:
+        """AC-5/AC-6b: jersey_number is None (not missing key) when no roster row."""
+        from importlib import reload
+        import src.api.db as db_module
+
+        env, team_id = self._setup_scouting_db(tmp_path, include_roster=False)
+        with patch.dict(os.environ, env):
+            reload(db_module)
+            result = db_module.get_opponent_scouting_report(
+                opponent_team_id=team_id, season_id="2026-spring-hs"
+            )
+
+        assert len(result["batting"]) == 1
+        assert "jersey_number" in result["batting"][0]
+        assert result["batting"][0]["jersey_number"] is None
+
+    def test_batting_no_rows_lost_without_roster(self, tmp_path: Path) -> None:
+        """AC-5: LEFT JOIN does not drop batting rows when roster row is absent."""
+        from importlib import reload
+        import src.api.db as db_module
+
+        env, team_id = self._setup_scouting_db(tmp_path, include_roster=False)
+        with patch.dict(os.environ, env):
+            reload(db_module)
+            result = db_module.get_opponent_scouting_report(
+                opponent_team_id=team_id, season_id="2026-spring-hs"
+            )
+
+        assert len(result["batting"]) == 1
+
+    def test_pitching_jersey_present_for_tracked_team(self, tmp_path: Path) -> None:
+        """AC-2/AC-6a/AC-7a: jersey_number in pitching row for tracked team."""
+        from importlib import reload
+        import src.api.db as db_module
+
+        env, team_id = self._setup_scouting_db(tmp_path, team_membership="tracked", jersey="33")
+        with patch.dict(os.environ, env):
+            reload(db_module)
+            result = db_module.get_opponent_scouting_report(
+                opponent_team_id=team_id, season_id="2026-spring-hs"
+            )
+
+        assert len(result["pitching"]) == 1
+        assert result["pitching"][0]["jersey_number"] == "33"
+
+    def test_pitching_jersey_present_for_member_team(self, tmp_path: Path) -> None:
+        """AC-2/AC-7b: jersey_number in pitching row when queried for member team_id."""
+        from importlib import reload
+        import src.api.db as db_module
+
+        env, team_id = self._setup_scouting_db(tmp_path, team_membership="member", jersey="88")
+        with patch.dict(os.environ, env):
+            reload(db_module)
+            result = db_module.get_opponent_scouting_report(
+                opponent_team_id=team_id, season_id="2026-spring-hs"
+            )
+
+        assert len(result["pitching"]) == 1
+        assert result["pitching"][0]["jersey_number"] == "88"
+
+    def test_pitching_jersey_none_when_no_roster_row(self, tmp_path: Path) -> None:
+        """AC-5/AC-6b: jersey_number is None in pitching row when no roster row."""
+        from importlib import reload
+        import src.api.db as db_module
+
+        env, team_id = self._setup_scouting_db(tmp_path, include_roster=False)
+        with patch.dict(os.environ, env):
+            reload(db_module)
+            result = db_module.get_opponent_scouting_report(
+                opponent_team_id=team_id, season_id="2026-spring-hs"
+            )
+
+        assert len(result["pitching"]) == 1
+        assert "jersey_number" in result["pitching"][0]
+        assert result["pitching"][0]["jersey_number"] is None
+
+    def test_pitching_no_rows_lost_without_roster(self, tmp_path: Path) -> None:
+        """AC-5: LEFT JOIN does not drop pitching rows when roster row is absent."""
+        from importlib import reload
+        import src.api.db as db_module
+
+        env, team_id = self._setup_scouting_db(tmp_path, include_roster=False)
+        with patch.dict(os.environ, env):
+            reload(db_module)
+            result = db_module.get_opponent_scouting_report(
+                opponent_team_id=team_id, season_id="2026-spring-hs"
+            )
+
+        assert len(result["pitching"]) == 1
 
 
 class TestGetLastMeeting:

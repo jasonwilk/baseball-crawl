@@ -294,6 +294,7 @@ def get_game_box_score(game_id: str) -> dict[str, Any]:
         SELECT
             g.game_id,
             g.game_date,
+            g.season_id,
             g.home_team_id,
             g.away_team_id,
             g.home_score,
@@ -318,9 +319,14 @@ def get_game_box_score(game_id: str) -> dict[str, Any]:
             COALESCE(pgb.rbi, 0)     AS rbi,
             COALESCE(pgb.bb, 0)      AS bb,
             COALESCE(pgb.so, 0)      AS so,
-            COALESCE(pgb.sb, 0)      AS sb
+            COALESCE(pgb.sb, 0)      AS sb,
+            tr.jersey_number
         FROM player_game_batting pgb
         JOIN players p ON p.player_id = pgb.player_id
+        LEFT JOIN team_rosters tr
+            ON tr.player_id = pgb.player_id
+            AND tr.team_id = pgb.team_id
+            AND tr.season_id = ?
         WHERE pgb.game_id = ?
         ORDER BY pgb.team_id, p.last_name
     """
@@ -335,9 +341,14 @@ def get_game_box_score(game_id: str) -> dict[str, Any]:
             COALESCE(pgp.bb, 0)            AS bb,
             COALESCE(pgp.so, 0)            AS so,
             COALESCE(pgp.pitches, 0)       AS pitches,
-            COALESCE(pgp.total_strikes, 0) AS total_strikes
+            COALESCE(pgp.total_strikes, 0) AS total_strikes,
+            tr.jersey_number
         FROM player_game_pitching pgp
         JOIN players p ON p.player_id = pgp.player_id
+        LEFT JOIN team_rosters tr
+            ON tr.player_id = pgp.player_id
+            AND tr.team_id = pgp.team_id
+            AND tr.season_id = ?
         WHERE pgp.game_id = ?
         ORDER BY pgp.team_id, p.last_name
     """
@@ -348,8 +359,15 @@ def get_game_box_score(game_id: str) -> dict[str, Any]:
             if game_row is None:
                 return {}
             game = dict(game_row)
-            batting_rows = [dict(r) for r in conn.execute(batting_query, (game_id,)).fetchall()]
-            pitching_rows = [dict(r) for r in conn.execute(pitching_query, (game_id,)).fetchall()]
+            season_id = game["season_id"]
+            batting_rows = [
+                dict(r)
+                for r in conn.execute(batting_query, (season_id, game_id)).fetchall()
+            ]
+            pitching_rows = [
+                dict(r)
+                for r in conn.execute(pitching_query, (season_id, game_id)).fetchall()
+            ]
     except sqlite3.Error:
         logger.exception("Failed to fetch game box score")
         return {}
@@ -509,9 +527,14 @@ def get_opponent_scouting_report(
             COALESCE(psb.so, 0)      AS so,
             COALESCE(psb.sb, 0)      AS sb,
             COALESCE(psb.hbp, 0)     AS hbp,
-            COALESCE(psb.shf, 0)     AS shf
+            COALESCE(psb.shf, 0)     AS shf,
+            tr.jersey_number
         FROM player_season_batting psb
         JOIN players p ON p.player_id = psb.player_id
+        LEFT JOIN team_rosters tr
+            ON tr.player_id = psb.player_id
+            AND tr.team_id = psb.team_id
+            AND tr.season_id = psb.season_id
         WHERE psb.team_id = ? AND psb.season_id = ?
         ORDER BY
             CASE WHEN COALESCE(psb.ab, 0) = 0 THEN 1 ELSE 0 END ASC,
@@ -529,9 +552,14 @@ def get_opponent_scouting_report(
             COALESCE(psp.bb, 0)            AS bb,
             COALESCE(psp.so, 0)            AS so,
             COALESCE(psp.pitches, 0)       AS pitches,
-            COALESCE(psp.total_strikes, 0) AS total_strikes
+            COALESCE(psp.total_strikes, 0) AS total_strikes,
+            tr.jersey_number
         FROM player_season_pitching psp
         JOIN players p ON p.player_id = psp.player_id
+        LEFT JOIN team_rosters tr
+            ON tr.player_id = psp.player_id
+            AND tr.team_id = psp.team_id
+            AND tr.season_id = psp.season_id
         WHERE psp.team_id = ? AND psp.season_id = ?
         ORDER BY
             CASE WHEN COALESCE(psp.ip_outs, 0) = 0 THEN 1 ELSE 0 END ASC,

@@ -1770,3 +1770,506 @@ class TestOBPFormula:
         html = response.text
         # With NULL hbp/shf coalesced to 0: OBP = (3+3+0)/(9+3+0+0) = 6/12 = .500
         assert ".500" in html
+
+
+class TestJerseyNumberColumn:
+    """Tests for jersey number as a distinct # column in team_stats and team_pitching (E-131-01)."""
+
+    @pytest.fixture()
+    def jersey_client(self, tmp_path: Path):
+        """TestClient with both member and tracked teams, plus roster and stat data.
+
+        Yields (client, member_team_id, tracked_team_id, user_id).
+        """
+        db_path = tmp_path / "test_jersey.db"
+        _apply_schema(db_path)
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("PRAGMA foreign_keys=ON;")
+
+        # Member team (simulates roster-loaded path)
+        cursor = conn.execute(
+            "INSERT INTO teams (name, membership_type, classification) VALUES (?, ?, ?)",
+            ("LSB Varsity", "member", "varsity"),
+        )
+        member_team_id: int = cursor.lastrowid  # type: ignore[assignment]
+
+        # Tracked team (simulates scouting-loaded path)
+        cursor = conn.execute(
+            "INSERT INTO teams (name, membership_type) VALUES (?, ?)",
+            ("Rival HS", "tracked"),
+        )
+        tracked_team_id: int = cursor.lastrowid  # type: ignore[assignment]
+
+        conn.execute(
+            "INSERT OR IGNORE INTO seasons (season_id, name, season_type, year) VALUES (?, ?, ?, ?)",
+            (
+                _CURRENT_SEASON_ID,
+                f"Spring {datetime.date.today().year} High School",
+                "spring-hs",
+                datetime.date.today().year,
+            ),
+        )
+
+        cursor = conn.execute(
+            "INSERT OR IGNORE INTO users (email) VALUES (?)",
+            ("testdev@example.com",),
+        )
+        user_id: int = cursor.lastrowid or conn.execute(  # type: ignore[assignment]
+            "SELECT id FROM users WHERE email = ?", ("testdev@example.com",)
+        ).fetchone()[0]
+
+        conn.execute(
+            "INSERT OR IGNORE INTO user_team_access (user_id, team_id) VALUES (?, ?)",
+            (user_id, member_team_id),
+        )
+        conn.execute(
+            "INSERT OR IGNORE INTO user_team_access (user_id, team_id) VALUES (?, ?)",
+            (user_id, tracked_team_id),
+        )
+
+        # Players
+        conn.executemany(
+            "INSERT OR IGNORE INTO players (player_id, first_name, last_name) VALUES (?, ?, ?)",
+            [
+                ("jrsy-p-001", "Alice", "Numbered"),   # has jersey number
+                ("jrsy-p-002", "Bob", "Nonumber"),     # no jersey number (NULL)
+                ("jrsy-p-003", "Carlos", "Tracked"),   # tracked team, has jersey number
+                ("jrsy-p-004", "Dan", "TrackedNull"),  # tracked team, no jersey number
+            ],
+        )
+
+        # Roster entries: member team players
+        conn.executemany(
+            "INSERT OR IGNORE INTO team_rosters (team_id, player_id, season_id, jersey_number)"
+            " VALUES (?, ?, ?, ?)",
+            [
+                (member_team_id, "jrsy-p-001", _CURRENT_SEASON_ID, "42"),
+                (member_team_id, "jrsy-p-002", _CURRENT_SEASON_ID, None),  # NULL jersey
+                (tracked_team_id, "jrsy-p-003", _CURRENT_SEASON_ID, "7"),
+                (tracked_team_id, "jrsy-p-004", _CURRENT_SEASON_ID, None),  # NULL jersey
+            ],
+        )
+
+        # Batting stats
+        conn.executemany(
+            "INSERT OR IGNORE INTO player_season_batting"
+            " (player_id, team_id, season_id, gp, ab, h, doubles, triples, hr, rbi, bb, so, sb)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [
+                ("jrsy-p-001", member_team_id, _CURRENT_SEASON_ID, 3, 10, 4, 1, 0, 0, 2, 2, 2, 1),
+                ("jrsy-p-002", member_team_id, _CURRENT_SEASON_ID, 3, 8, 2, 0, 0, 0, 1, 1, 3, 0),
+                ("jrsy-p-003", tracked_team_id, _CURRENT_SEASON_ID, 3, 9, 3, 1, 0, 1, 3, 1, 2, 0),
+                ("jrsy-p-004", tracked_team_id, _CURRENT_SEASON_ID, 2, 6, 1, 0, 0, 0, 0, 2, 3, 1),
+            ],
+        )
+
+        # Pitching stats
+        conn.executemany(
+            "INSERT OR IGNORE INTO player_season_pitching"
+            " (player_id, team_id, season_id, gp_pitcher, ip_outs, h, er, bb, so, hr)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [
+                ("jrsy-p-001", member_team_id, _CURRENT_SEASON_ID, 2, 12, 3, 1, 2, 6, 0),
+                ("jrsy-p-002", member_team_id, _CURRENT_SEASON_ID, 1, 6, 2, 2, 1, 3, 0),
+                ("jrsy-p-003", tracked_team_id, _CURRENT_SEASON_ID, 2, 9, 4, 2, 1, 5, 0),
+                ("jrsy-p-004", tracked_team_id, _CURRENT_SEASON_ID, 1, 6, 1, 0, 0, 4, 0),
+            ],
+        )
+
+        conn.commit()
+        conn.close()
+
+        env_overrides = {
+            "DATABASE_PATH": str(db_path),
+            "DEV_USER_EMAIL": "testdev@example.com",
+        }
+        with patch.dict("os.environ", env_overrides):
+            with TestClient(app) as client:
+                yield client, member_team_id, tracked_team_id
+
+    # --- Batting (team_stats) tests ---
+
+    def test_batting_member_team_jersey_in_distinct_column(self, jersey_client) -> None:
+        """AC-1/AC-5: Member team jersey number renders in # column, not inline with name."""
+        client, member_team_id, _ = jersey_client
+        response = client.get(f"/dashboard?team_id={member_team_id}")
+        assert response.status_code == 200
+        html = response.text
+        # Jersey appears in a td cell
+        assert ">42<" in html
+        # Not rendered inline as "#42 " before the name
+        assert "#42" not in html
+
+    def test_batting_tracked_team_jersey_in_distinct_column(self, jersey_client) -> None:
+        """AC-1/AC-5: Tracked team jersey number renders in # column, not inline with name."""
+        client, _, tracked_team_id = jersey_client
+        response = client.get(f"/dashboard?team_id={tracked_team_id}")
+        assert response.status_code == 200
+        html = response.text
+        assert ">7<" in html
+        assert "#7" not in html
+
+    def test_batting_null_jersey_shows_em_dash(self, jersey_client) -> None:
+        """AC-3/AC-6: NULL jersey_number renders em dash in # cell."""
+        client, member_team_id, _ = jersey_client
+        response = client.get(f"/dashboard?team_id={member_team_id}")
+        assert response.status_code == 200
+        # Em dash entity or character in the cell
+        assert "&mdash;" in response.text or "—" in response.text
+
+    def test_batting_hash_column_header_present(self, jersey_client) -> None:
+        """AC-1: team_stats.html has a # column header."""
+        client, member_team_id, _ = jersey_client
+        response = client.get(f"/dashboard?team_id={member_team_id}")
+        assert response.status_code == 200
+        assert ">#<" in response.text
+
+    # --- Pitching (team_pitching) tests ---
+
+    def test_pitching_member_team_jersey_in_distinct_column(self, jersey_client) -> None:
+        """AC-2/AC-5: Member team jersey number in pitching # column, not inline."""
+        client, member_team_id, _ = jersey_client
+        response = client.get(f"/dashboard/pitching?team_id={member_team_id}")
+        assert response.status_code == 200
+        html = response.text
+        assert ">42<" in html
+        assert "#42" not in html
+
+    def test_pitching_tracked_team_jersey_in_distinct_column(self, jersey_client) -> None:
+        """AC-2/AC-5: Tracked team jersey number in pitching # column, not inline."""
+        client, _, tracked_team_id = jersey_client
+        response = client.get(f"/dashboard/pitching?team_id={tracked_team_id}")
+        assert response.status_code == 200
+        html = response.text
+        assert ">7<" in html
+        assert "#7" not in html
+
+    def test_pitching_null_jersey_shows_em_dash(self, jersey_client) -> None:
+        """AC-3/AC-6: NULL jersey_number in pitching renders em dash."""
+        client, member_team_id, _ = jersey_client
+        response = client.get(f"/dashboard/pitching?team_id={member_team_id}")
+        assert response.status_code == 200
+        assert "&mdash;" in response.text or "—" in response.text
+
+    def test_batting_empty_state_colspan_15(self, tmp_path: Path) -> None:
+        """AC-4: team_stats.html empty state uses colspan=15."""
+        db_path = tmp_path / "test_empty_batting.db"
+        _apply_schema(db_path)
+        conn = sqlite3.connect(str(db_path))
+        lsb_team_id, _ = _insert_lsb_team_and_user(conn)
+        conn.commit()
+        conn.close()
+        env_overrides = {
+            "DATABASE_PATH": str(db_path),
+            "DEV_USER_EMAIL": "testdev@example.com",
+        }
+        with patch.dict("os.environ", env_overrides):
+            with TestClient(app) as client:
+                response = client.get("/dashboard")
+        assert response.status_code == 200
+        assert 'colspan="15"' in response.text
+
+    def test_pitching_empty_state_colspan_15(self, tmp_path: Path) -> None:
+        """AC-4: team_pitching.html empty state uses colspan=15."""
+        db_path = tmp_path / "test_empty_pitching.db"
+        _apply_schema(db_path)
+        conn = sqlite3.connect(str(db_path))
+        lsb_team_id, _ = _insert_lsb_team_and_user(conn)
+        conn.commit()
+        conn.close()
+        env_overrides = {
+            "DATABASE_PATH": str(db_path),
+            "DEV_USER_EMAIL": "testdev@example.com",
+        }
+        with patch.dict("os.environ", env_overrides):
+            with TestClient(app) as client:
+                response = client.get("/dashboard/pitching")
+        assert response.status_code == 200
+        assert 'colspan="15"' in response.text
+
+
+class TestGameDetailJerseyNumber:
+    """E-131-02 AC-8: game_detail.html renders jersey # column (template rendering tests)."""
+
+    @pytest.fixture()
+    def game_jersey_client(self, tmp_path: Path):
+        """TestClient with game box score data including roster entries.
+
+        home team = member (jersey 55), away team = tracked (jersey 99, and one with no roster row).
+        Yields (client, lsb_team_id, opp_team_id, game_id).
+        """
+        db_path = tmp_path / "test_game_jersey.db"
+        _apply_schema(db_path)
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("PRAGMA foreign_keys=ON;")
+
+        # Member home team
+        cursor = conn.execute(
+            "INSERT INTO teams (name, membership_type, classification) VALUES (?, ?, ?)",
+            ("Home Team", "member", "varsity"),
+        )
+        home_id: int = cursor.lastrowid  # type: ignore[assignment]
+
+        # Tracked away team
+        cursor = conn.execute(
+            "INSERT INTO teams (name, membership_type) VALUES (?, ?)",
+            ("Away Team", "tracked"),
+        )
+        away_id: int = cursor.lastrowid  # type: ignore[assignment]
+
+        conn.execute(
+            "INSERT OR IGNORE INTO seasons (season_id, name, season_type, year) VALUES (?, ?, ?, ?)",
+            (
+                _CURRENT_SEASON_ID,
+                f"Spring {datetime.date.today().year} High School",
+                "spring-hs",
+                datetime.date.today().year,
+            ),
+        )
+
+        cursor = conn.execute(
+            "INSERT OR IGNORE INTO users (email) VALUES (?)",
+            ("testdev@example.com",),
+        )
+        user_id: int = cursor.lastrowid or conn.execute(  # type: ignore[assignment]
+            "SELECT id FROM users WHERE email = ?", ("testdev@example.com",)
+        ).fetchone()[0]
+        conn.execute(
+            "INSERT OR IGNORE INTO user_team_access (user_id, team_id) VALUES (?, ?)",
+            (user_id, home_id),
+        )
+
+        conn.executemany(
+            "INSERT OR IGNORE INTO players (player_id, first_name, last_name) VALUES (?, ?, ?)",
+            [
+                ("gd-p-home", "Home", "Player"),
+                ("gd-p-away-j", "Away", "WithJersey"),
+                ("gd-p-away-nj", "Away", "NoJersey"),
+            ],
+        )
+
+        # Roster: member player has jersey, tracked player has jersey, third has no roster row
+        conn.executemany(
+            "INSERT OR IGNORE INTO team_rosters (team_id, player_id, season_id, jersey_number)"
+            " VALUES (?, ?, ?, ?)",
+            [
+                (home_id, "gd-p-home", _CURRENT_SEASON_ID, "55"),
+                (away_id, "gd-p-away-j", _CURRENT_SEASON_ID, "99"),
+                # gd-p-away-nj intentionally has no roster entry
+            ],
+        )
+
+        conn.execute(
+            "INSERT INTO games (game_id, season_id, game_date, home_team_id, away_team_id,"
+            " home_score, away_score, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            ("gd-game-1", _CURRENT_SEASON_ID, "2026-04-01", home_id, away_id, 5, 3, "completed"),
+        )
+
+        # Batting rows
+        conn.executemany(
+            "INSERT OR IGNORE INTO player_game_batting (game_id, player_id, team_id, ab, h)"
+            " VALUES (?, ?, ?, ?, ?)",
+            [
+                ("gd-game-1", "gd-p-home", home_id, 4, 2),
+                ("gd-game-1", "gd-p-away-j", away_id, 3, 1),
+                ("gd-game-1", "gd-p-away-nj", away_id, 2, 0),
+            ],
+        )
+        # Pitching rows
+        conn.executemany(
+            "INSERT OR IGNORE INTO player_game_pitching (game_id, player_id, team_id, ip_outs, so)"
+            " VALUES (?, ?, ?, ?, ?)",
+            [
+                ("gd-game-1", "gd-p-home", home_id, 9, 5),
+                ("gd-game-1", "gd-p-away-j", away_id, 6, 3),
+                ("gd-game-1", "gd-p-away-nj", away_id, 3, 1),
+            ],
+        )
+
+        conn.commit()
+        conn.close()
+
+        env_overrides = {
+            "DATABASE_PATH": str(db_path),
+            "DEV_USER_EMAIL": "testdev@example.com",
+        }
+        with patch.dict("os.environ", env_overrides):
+            with TestClient(app) as client:
+                yield client, home_id, away_id
+
+    def _batting_html(self, html: str) -> str:
+        """Extract batting-table HTML: everything before the first Pitching heading."""
+        return html.split(">Pitching</h2>")[0]
+
+    def _pitching_html(self, html: str) -> str:
+        """Extract pitching-table HTML: everything after the first Pitching heading."""
+        return ">Pitching</h2>".join(html.split(">Pitching</h2>")[1:])
+
+    def test_game_detail_batting_table_has_jersey_column(self, game_jersey_client) -> None:
+        """AC-8a/b: # column header and jersey values appear in batting table section."""
+        client, home_id, _ = game_jersey_client
+        response = client.get(f"/dashboard/games/gd-game-1?team_id={home_id}")
+        assert response.status_code == 200
+        batting = self._batting_html(response.text)
+        assert ">#<" in batting, "# column header missing from batting table"
+        assert ">55<" in batting, "home jersey 55 missing from batting table"
+        assert ">99<" in batting, "away jersey 99 missing from batting table"
+
+    def test_game_detail_batting_null_jersey_shows_em_dash(self, game_jersey_client) -> None:
+        """AC-8c: em dash renders in batting table for NULL jersey_number."""
+        client, home_id, _ = game_jersey_client
+        response = client.get(f"/dashboard/games/gd-game-1?team_id={home_id}")
+        assert response.status_code == 200
+        batting = self._batting_html(response.text)
+        assert "&mdash;" in batting or "—" in batting, "em dash missing from batting table"
+
+    def test_game_detail_pitching_table_has_jersey_column(self, game_jersey_client) -> None:
+        """AC-8a/b: # column header and jersey values appear in pitching table section."""
+        client, home_id, _ = game_jersey_client
+        response = client.get(f"/dashboard/games/gd-game-1?team_id={home_id}")
+        assert response.status_code == 200
+        pitching = self._pitching_html(response.text)
+        assert ">#<" in pitching, "# column header missing from pitching table"
+        assert ">55<" in pitching, "home jersey 55 missing from pitching table"
+        assert ">99<" in pitching, "away jersey 99 missing from pitching table"
+
+    def test_game_detail_pitching_null_jersey_shows_em_dash(self, game_jersey_client) -> None:
+        """AC-8c: em dash renders in pitching table for NULL jersey_number."""
+        client, home_id, _ = game_jersey_client
+        response = client.get(f"/dashboard/games/gd-game-1?team_id={home_id}")
+        assert response.status_code == 200
+        pitching = self._pitching_html(response.text)
+        assert "&mdash;" in pitching or "—" in pitching, "em dash missing from pitching table"
+
+
+class TestOpponentDetailJerseyNumber:
+    """E-131-03 AC-8: opponent_detail.html renders jersey # column (template rendering tests)."""
+
+    @pytest.fixture()
+    def opp_jersey_client(self, tmp_path: Path):
+        """TestClient with opponent scouting data including roster entries.
+
+        Opponent team has: one player with jersey (tracked, scouting path),
+        one player without roster row (jersey NULL).
+        Yields (client, lsb_team_id, opp_team_id).
+        """
+        db_path = tmp_path / "test_opp_jersey.db"
+        _apply_schema(db_path)
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("PRAGMA foreign_keys=ON;")
+
+        lsb_team_id, _ = _insert_lsb_team_and_user(conn)
+
+        # Tracked opponent team
+        cursor = conn.execute(
+            "INSERT INTO teams (name, membership_type) VALUES (?, ?)",
+            ("Scout Opponent", "tracked"),
+        )
+        opp_team_id: int = cursor.lastrowid  # type: ignore[assignment]
+
+        conn.executemany(
+            "INSERT OR IGNORE INTO players (player_id, first_name, last_name) VALUES (?, ?, ?)",
+            [
+                ("opp-jrsy-001", "WithJersey", "Player"),
+                ("opp-jrsy-002", "NoJersey", "Player"),
+            ],
+        )
+
+        # Roster: one player has jersey (scouting path), other has no row
+        conn.execute(
+            "INSERT OR IGNORE INTO team_rosters (team_id, player_id, season_id, jersey_number)"
+            " VALUES (?, ?, ?, ?)",
+            (opp_team_id, "opp-jrsy-001", _CURRENT_SEASON_ID, "77"),
+        )
+        # opp-jrsy-002 intentionally has no roster entry
+
+        # Game to establish the opponent link
+        conn.execute(
+            "INSERT INTO games (game_id, season_id, game_date, home_team_id, away_team_id,"
+            " home_score, away_score, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            ("opp-j-game", _CURRENT_SEASON_ID, "2026-04-05", lsb_team_id, opp_team_id,
+             4, 2, "completed"),
+        )
+
+        # Batting stats for both opponent players
+        conn.executemany(
+            "INSERT OR IGNORE INTO player_season_batting"
+            " (player_id, team_id, season_id, gp, ab, h, doubles, triples, hr, rbi, bb, so, sb)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [
+                ("opp-jrsy-001", opp_team_id, _CURRENT_SEASON_ID, 3, 10, 4, 1, 0, 0, 2, 2, 2, 1),
+                ("opp-jrsy-002", opp_team_id, _CURRENT_SEASON_ID, 3, 8, 2, 0, 0, 0, 1, 1, 3, 0),
+            ],
+        )
+
+        # Pitching stats for both
+        conn.executemany(
+            "INSERT OR IGNORE INTO player_season_pitching"
+            " (player_id, team_id, season_id, gp_pitcher, ip_outs, h, er, bb, so, hr)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [
+                ("opp-jrsy-001", opp_team_id, _CURRENT_SEASON_ID, 2, 12, 3, 1, 1, 6, 0),
+                ("opp-jrsy-002", opp_team_id, _CURRENT_SEASON_ID, 1, 6, 2, 1, 1, 3, 0),
+            ],
+        )
+
+        conn.commit()
+        conn.close()
+
+        env_overrides = {
+            "DATABASE_PATH": str(db_path),
+            "DEV_USER_EMAIL": "testdev@example.com",
+        }
+        with patch.dict("os.environ", env_overrides):
+            with TestClient(app) as client:
+                yield client, lsb_team_id, opp_team_id
+
+    def _batting_html(self, html: str) -> str:
+        """Extract batting-table HTML: everything before the Pitching Leaders heading."""
+        return html.split("Pitching Leaders</h2>")[0]
+
+    def _pitching_html(self, html: str) -> str:
+        """Extract pitching-table HTML: everything after the Pitching Leaders heading."""
+        return html.split("Pitching Leaders</h2>", 1)[1]
+
+    def test_opponent_detail_batting_table_has_jersey_column(self, opp_jersey_client) -> None:
+        """AC-8a/b: # column header and jersey value appear in batting table section."""
+        client, lsb_team_id, opp_team_id = opp_jersey_client
+        response = client.get(
+            f"/dashboard/opponents/{opp_team_id}?team_id={lsb_team_id}"
+        )
+        assert response.status_code == 200
+        batting = self._batting_html(response.text)
+        assert ">#<" in batting, "# column header missing from batting table"
+        assert ">77<" in batting, "jersey 77 missing from batting table"
+
+    def test_opponent_detail_batting_null_jersey_em_dash(self, opp_jersey_client) -> None:
+        """AC-8c: em dash renders in batting table for NULL jersey_number."""
+        client, lsb_team_id, opp_team_id = opp_jersey_client
+        response = client.get(
+            f"/dashboard/opponents/{opp_team_id}?team_id={lsb_team_id}"
+        )
+        assert response.status_code == 200
+        batting = self._batting_html(response.text)
+        assert "&mdash;" in batting or "—" in batting, "em dash missing from batting table"
+
+    def test_opponent_detail_pitching_table_has_jersey_column(self, opp_jersey_client) -> None:
+        """AC-8a/b: # column header and jersey value appear in pitching table section."""
+        client, lsb_team_id, opp_team_id = opp_jersey_client
+        response = client.get(
+            f"/dashboard/opponents/{opp_team_id}?team_id={lsb_team_id}"
+        )
+        assert response.status_code == 200
+        pitching = self._pitching_html(response.text)
+        assert ">#<" in pitching, "# column header missing from pitching table"
+        assert ">77<" in pitching, "jersey 77 missing from pitching table"
+
+    def test_opponent_detail_pitching_null_jersey_em_dash(self, opp_jersey_client) -> None:
+        """AC-8c: em dash renders in pitching table for NULL jersey_number."""
+        client, lsb_team_id, opp_team_id = opp_jersey_client
+        response = client.get(
+            f"/dashboard/opponents/{opp_team_id}?team_id={lsb_team_id}"
+        )
+        assert response.status_code == 200
+        pitching = self._pitching_html(response.text)
+        assert "&mdash;" in pitching or "—" in pitching, "em dash missing from pitching table"

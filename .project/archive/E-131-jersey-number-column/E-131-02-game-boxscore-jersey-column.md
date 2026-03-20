@@ -4,7 +4,7 @@
 [E-131: Jersey Number as Distinct Dashboard Column](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the game detail box score tables (batting and pitching for both teams) will display jersey number as a dedicated `#` column. This requires both a query-layer change (adding a `LEFT JOIN team_rosters` to `get_game_box_score()`) and a template change (adding the column to `game_detail.html`).

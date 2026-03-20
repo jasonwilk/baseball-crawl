@@ -51,6 +51,7 @@
   <table class="min-w-full text-sm bg-white rounded shadow">
     <thead class="bg-blue-900 text-white sticky top-0">
       <tr>
+        <th class="py-2 px-2 text-center w-8">#</th>
         {{ sort_header("name", "Player", "left") }}
         {{ sort_header("avg", "AVG") }}
         {{ sort_header("obp", "OBP") }}
@@ -72,9 +73,10 @@
       {# Compute rate stats: AVG = h/ab, OBP = (h+bb+hbp)/(ab+bb+hbp+shf), SLG = (h+2B+2*3B+3*HR)/ab #}
       {# format_avg filter: format_avg(numerator, denominator) -> ".333" or "—" #}
       <tr class="border-b border-gray-200 {% if loop.index is even %}bg-gray-50{% endif %}">
+        <td class="py-2 px-2 text-center">{% if player.jersey_number %}{{ player.jersey_number }}{% else %}&mdash;{% endif %}</td>
         <td class="py-2 px-3 font-medium whitespace-nowrap">
           <a href="/dashboard/players/{{ player.player_id }}{% if active_year %}?year={{ active_year }}{% endif %}" class="text-blue-700 hover:underline">
-            {% if player.jersey_number %}#{{ player.jersey_number }} {% endif %}{{ player.name }}
+            {{ player.name }}
           </a>
         </td>
         <td class="py-2 px-3 text-center">{{ player.h | format_avg(player.ab) }}</td>
@@ -93,7 +95,7 @@
       </tr>
       {% else %}
       <tr>
-        <td colspan="14" class="py-4 px-3 text-center text-gray-600">No stats available.</td>
+        <td colspan="15" class="py-4 px-3 text-center text-gray-600">No stats available.</td>
       </tr>
       {% endfor %}
     </tbody>

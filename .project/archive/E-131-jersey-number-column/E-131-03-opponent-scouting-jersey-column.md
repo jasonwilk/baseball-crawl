@@ -4,7 +4,7 @@
 [E-131: Jersey Number as Distinct Dashboard Column](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the opponent scouting report batting and pitching tables will display jersey number as a dedicated `#` column. This requires both a query-layer change (adding a `LEFT JOIN team_rosters` to `get_opponent_scouting_report()`) and a template change (adding the column to `opponent_detail.html`).
