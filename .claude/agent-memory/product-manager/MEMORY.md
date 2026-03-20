@@ -2,7 +2,7 @@
 
 ## Numbering State
 - Next available epic number: E-143
-- Epics created: E-001 through E-142 (E-001, E-003, E-005, E-006, E-007, E-008, E-010, E-011, E-012, E-013, E-014, E-015, E-016, E-017, E-018, E-019, E-020, E-021, E-022, E-024, E-025, E-026, E-027, E-028, E-029, E-030, E-031, E-032, E-033, E-034, E-035, E-036, E-037, E-038, E-042, E-044, E-046, E-048, E-049, E-050, E-052, E-053, E-054, E-056, E-057, E-058, E-055, E-059, E-060, E-061, E-075, E-081, E-084, E-087, E-088, E-089, E-090, E-091, E-092 archived; E-093, E-094, E-095 archived; E-096 archived; E-097 archived; E-098 archived; E-099 archived; E-100 archived; E-101 archived; E-102 archived; E-103 archived; E-104 ready; E-105 archived; E-106 draft; E-107 archived; E-108 archived; E-109 archived; E-110 ready; E-111 archived; E-112 archived; E-114 archived; E-115 archived; E-116 archived; E-113 completed; E-117 completed; E-118 archived; E-119 ready; E-120 archived; E-121 archived; E-122 archived; E-123 archived; E-124 completed; E-125 archived; E-126 completed; E-127 archived; E-128 ready; E-129 archived; E-130 archived; E-131 archived; E-132 ready; E-133 archived; E-134 ready; E-135 abandoned; E-136 ready; E-137 ready; E-138 archived; E-139 archived; E-140 archived; E-142 ready)
+- Epics created: E-001 through E-142 (E-001, E-003, E-005, E-006, E-007, E-008, E-010, E-011, E-012, E-013, E-014, E-015, E-016, E-017, E-018, E-019, E-020, E-021, E-022, E-024, E-025, E-026, E-027, E-028, E-029, E-030, E-031, E-032, E-033, E-034, E-035, E-036, E-037, E-038, E-042, E-044, E-046, E-048, E-049, E-050, E-052, E-053, E-054, E-056, E-057, E-058, E-055, E-059, E-060, E-061, E-075, E-081, E-084, E-087, E-088, E-089, E-090, E-091, E-092 archived; E-093, E-094, E-095 archived; E-096 archived; E-097 archived; E-098 archived; E-099 archived; E-100 archived; E-101 archived; E-102 archived; E-103 archived; E-104 ready; E-105 archived; E-106 draft; E-107 archived; E-108 archived; E-109 archived; E-110 ready; E-111 archived; E-112 archived; E-114 archived; E-115 archived; E-116 archived; E-113 completed; E-117 completed; E-118 archived; E-119 ready; E-120 archived; E-121 archived; E-122 archived; E-123 archived; E-124 completed; E-125 archived; E-126 completed; E-127 archived; E-128 archived; E-129 archived; E-130 archived; E-131 archived; E-132 ready; E-133 archived; E-134 ready; E-135 abandoned; E-136 ready; E-137 ready; E-138 archived; E-139 archived; E-140 archived; E-142 ready)
 - Next available idea number: IDEA-043
 - Ideas created: IDEA-001 through IDEA-042
 
@@ -11,7 +11,7 @@
 - Tech stack: Python end-to-end. FastAPI+Jinja2 serving layer. Docker Compose + Cloudflare Tunnel. SQLite.
 - Architecture: src/ for source (gamechanger/, api/, http/, safety/, cli/), tests/ for tests, data/ for local dev outputs, migrations/ for SQL
 - Operator CLI: `bb` command (Typer) -- unified entry point for all operator scripts. src/cli/ package. Entry point in pyproject.toml. Devcontainer-only (not in production image).
-- Credentials: short-lived, profile-scoped (_WEB/_MOBILE env keys). Two capture paths: mitmproxy extractor (auto-detects web/ios) or scripts/refresh_credentials.py (web-only curl paste). No flat-key fallback.
+- Credentials: short-lived, profile-scoped (_WEB/_MOBILE env keys). Primary web path: `bb creds setup web` (email+password → full login bootstrap, auto-generates device ID). Fallbacks: mitmproxy extractor (auto-detects web/ios), `bb creds import` (curl paste). Mobile: mitmproxy only (iOS client key unknown). Auth-module rule at `.claude/rules/auth-module.md`.
 - See CLAUDE.md for full project conventions
 
 ## Active Epics (Summary)
@@ -24,7 +24,6 @@
 | E-106 | Evaluate Unauthorized E-100-01 Implementation | DRAFT | Evaluate DE's unauthorized E-100-01 work |
 | E-110 | Iterative Review Rounds Convention | READY | Codify iterative review/refinement pattern |
 | E-125 | Full-Project Code Review Remediation | READY | 6 stories: CSRF (01), SQL injection + magic link hashing (02), OBP formula + broken backlink (03), Docker non-root + executescript FK (04), HTTP client hardening (05), security hygiene (06). All parallel, SE only. Highest priority -- security + correctness. |
-| E-128 | Credential Workflow Redesign | READY | 9 stories + 1 research spike (R-01 DONE). Keystone: login bootstrap (01). Setup wizards (02 web, 03 mobile), status dashboard (04), error diagnostics (05), auth-module rule (06), prod runbook (07), PII redaction (08), admin docs update (09). 02 depends on 01+R-01; E-127 dependency resolved (E-127-01/02 complete). SE + CA + docs-writer + api-scout (advisory). |
 | E-134 | Strike % and # Pitches Columns | READY | 1 story. Add pitches + strike_pct to all 5 pitching display surfaces. Pure query+template, no schema changes. SE only. |
 | E-142 | Team Visibility Overhaul | READY | 5 stories. Fix invisible teams after add: access fan-out (01), year map fallback (02), opponent list fallback (04), dashboard empty state UI (03), post-add flash (05). No schema changes. SE only. |
 
