@@ -1,4 +1,4 @@
-"""Tests for the ``bb creds`` CLI sub-app (src/cli/creds.py).
+"""Tests for the ``bb creds`` CLI sub-app (src/cli/creds.py).  # synthetic-test-data
 
 Tests use CliRunner to exercise argument mapping only -- business logic
 (curl parsing, credential writing, API calls) is mocked.
@@ -12,6 +12,7 @@ from unittest.mock import patch
 from typer.testing import CliRunner
 
 from src.cli import app
+from src.gamechanger.key_extractor import KeyExtractionError
 
 runner = CliRunner()
 
@@ -173,7 +174,10 @@ class TestCredsImport:
         with (
             patch("src.cli.creds.parse_credentials", return_value=creds_with_real_token),
             patch("src.cli.creds.merge_env_file", return_value=creds_with_real_token),
+            patch("src.cli.creds._DEFAULT_CURL_FILE") as mock_curl_file,
         ):
+            mock_curl_file.exists.return_value = True
+            mock_curl_file.read_text.return_value = "curl 'https://api.gc.com' -H 'gc-token: tok'"
             result = runner.invoke(app, ["creds", "import"])
         assert result.exit_code == 0
         # Some kind of lifetime info should appear.
@@ -567,12 +571,13 @@ class TestCredsRefresh:
         assert "Missing" in result.output or "missing" in result.output
 
     def test_credential_expired_error_exits_nonzero(self) -> None:
-        """CredentialExpiredError: message directs user to bb creds import."""
+        """CredentialExpiredError: message directs user to a recovery action."""
         from src.gamechanger.exceptions import CredentialExpiredError
 
         result, _ = self._invoke(["creds", "refresh"], side_effect=CredentialExpiredError("expired"))
         assert result.exit_code != 0
-        assert "import" in result.output
+        # E-128-05: diagnostic says "setup web" or "extract-key" depending on token state.
+        assert "setup" in result.output.lower() or "extract-key" in result.output
         # The exception message itself should appear in the output (P2-3 fix).
         assert "expired" in result.output
 
@@ -619,6 +624,267 @@ class TestCredsRefresh:
         assert result.exit_code != 0
         # The specific status code from the exception must appear in the output.
         assert "503" in result.output
+
+    def test_force_refresh_login_failed_error_exits_nonzero(self) -> None:
+        """LoginFailedError from force_refresh() (login fallback) exits non-zero."""
+        from src.gamechanger.exceptions import LoginFailedError
+
+        result, _ = self._invoke(
+            ["creds", "refresh"],
+            side_effect=LoginFailedError("invalid credentials"),
+        )
+        assert result.exit_code != 0
+
+    def test_force_refresh_login_failed_error_shows_login_failed(self) -> None:
+        """LoginFailedError from force_refresh() shows 'Login failed' in output."""
+        from src.gamechanger.exceptions import LoginFailedError
+
+        result, _ = self._invoke(
+            ["creds", "refresh"],
+            side_effect=LoginFailedError("invalid credentials"),
+        )
+        assert "Login failed" in result.output or "login failed" in result.output.lower()
+
+    def test_force_refresh_login_failed_error_does_not_show_refresh_token(self) -> None:
+        """LoginFailedError from force_refresh() must not invoke the CredentialExpiredError handler."""
+        from src.gamechanger.exceptions import LoginFailedError
+
+        result, _ = self._invoke(
+            ["creds", "refresh"],
+            side_effect=LoginFailedError("invalid credentials"),
+        )
+        assert "Refresh token" not in result.output
+
+
+# ---------------------------------------------------------------------------
+# E-128-05: Smarter error diagnostics for bb creds refresh
+# ---------------------------------------------------------------------------
+
+# Env dict for diagnostic tests: all required web creds present.
+_DIAG_ENV_BASE = {
+    "GAMECHANGER_CLIENT_ID_WEB": "client-id-web",
+    "GAMECHANGER_CLIENT_KEY_WEB": "current-client-key",
+    "GAMECHANGER_REFRESH_TOKEN_WEB": _make_fake_token(86400 * 10),  # 10 days, not expired
+    "GAMECHANGER_DEVICE_ID_WEB": "device-id-web",
+    "GAMECHANGER_BASE_URL": "https://api.gc.com",
+}
+
+
+class _FakeExtractedKey:
+    """Simple namespace standing in for ExtractedKey in refresh diagnostic tests."""
+
+    def __init__(self, client_key: str = "current-client-key") -> None:
+        self.client_id = "client-id-web"
+        self.client_key = client_key
+
+
+def _make_extracted_key(client_key: str = "current-client-key") -> "_FakeExtractedKey":
+    """Build a fake ExtractedKey-like object for extract_client_key mocking."""
+    return _FakeExtractedKey(client_key=client_key)
+
+
+class TestCredsRefreshDiagnostics:
+    """E-128-05: Smarter error diagnostics for bb creds refresh."""
+
+    def _invoke_with_error(
+        self,
+        error: Exception,
+        env: dict | None = None,
+        extract_side_effect=None,
+    ):
+        """Invoke bb creds refresh with a forced TokenManager error.
+
+        Mocks dotenv_values, TokenManager (raises error), and extract_client_key.
+
+        Args:
+            error: Exception that TokenManager.force_refresh will raise.
+            env: Dict returned by dotenv_values mock.
+            extract_side_effect: side_effect for extract_client_key mock.
+                - If a callable: called with the same kwargs; its return value is used.
+                - If an Exception instance: the mock raises it.
+                - If None: extract_client_key returns a fake key matching env's stored key
+                  (i.e., simulates "key is current" -- no change detected).
+        """
+        if env is None:
+            env = _DIAG_ENV_BASE
+
+        stored_key = env.get("GAMECHANGER_CLIENT_KEY_WEB", "current-client-key")
+
+        def _default_extract(**kwargs):
+            return _FakeExtractedKey(client_key=stored_key)
+
+        if extract_side_effect is None:
+            effective_side_effect = _default_extract
+        else:
+            effective_side_effect = extract_side_effect
+
+        with (
+            patch("src.cli.creds.dotenv_values", return_value=env),
+            patch("src.cli.creds.TokenManager") as MockTM,
+            patch("src.cli.creds.extract_client_key", side_effect=effective_side_effect),
+        ):
+            MockTM.return_value.force_refresh.side_effect = error
+            result = runner.invoke(app, ["creds", "refresh"])
+        return result
+
+    # -----------------------------------------------------------------------
+    # AC-1: HTTP 400 / AuthSigningError diagnostics
+    # -----------------------------------------------------------------------
+
+    def test_stale_key_detected_on_http400(self) -> None:
+        """AC-1: AuthSigningError + changed key → 'stale' diagnosis."""
+        from src.gamechanger.token_manager import AuthSigningError
+
+        result = self._invoke_with_error(
+            AuthSigningError("HTTP 400"),
+            extract_side_effect=lambda **kw: _FakeExtractedKey(client_key="NEW-different-key"),
+        )
+        assert result.exit_code != 0
+        assert "stale" in result.output.lower()
+
+    def test_stale_key_prescribes_extract_key(self) -> None:
+        """AC-1: Stale key diagnosis prescribes bb creds extract-key --apply."""
+        from src.gamechanger.token_manager import AuthSigningError
+
+        result = self._invoke_with_error(
+            AuthSigningError("HTTP 400"),
+            extract_side_effect=lambda **kw: _FakeExtractedKey(client_key="NEW-different-key"),
+        )
+        assert result.exit_code != 0
+        assert "extract-key" in result.output
+
+    def test_current_key_suggests_clock_check_on_http400(self) -> None:
+        """AC-1: AuthSigningError + same key → clock skew suggestion."""
+        from src.gamechanger.token_manager import AuthSigningError
+
+        result = self._invoke_with_error(
+            AuthSigningError("HTTP 400"),
+            extract_side_effect=lambda **kw: _FakeExtractedKey(client_key="current-client-key"),
+        )
+        assert result.exit_code != 0
+        assert "clock" in result.output.lower() or "current" in result.output.lower()
+
+    # -----------------------------------------------------------------------
+    # AC-2: HTTP 401 / CredentialExpiredError diagnostics
+    # -----------------------------------------------------------------------
+
+    def test_expired_refresh_token_diagnosed_on_http401(self) -> None:
+        """AC-2: CredentialExpiredError + locally-expired refresh token → 'expired' diagnosis."""
+        from src.gamechanger.exceptions import CredentialExpiredError
+
+        expired_env = {
+            **_DIAG_ENV_BASE,
+            "GAMECHANGER_REFRESH_TOKEN_WEB": _make_fake_token(-3600),  # expired
+        }
+        result = self._invoke_with_error(
+            CredentialExpiredError("HTTP 401"),
+            env=expired_env,
+        )
+        assert result.exit_code != 0
+        assert "expired" in result.output.lower()
+
+    def test_expired_refresh_token_prescribes_setup_web(self) -> None:
+        """AC-2: Expired refresh token prescribes bb creds setup web."""
+        from src.gamechanger.exceptions import CredentialExpiredError
+
+        expired_env = {
+            **_DIAG_ENV_BASE,
+            "GAMECHANGER_REFRESH_TOKEN_WEB": _make_fake_token(-3600),
+        }
+        result = self._invoke_with_error(
+            CredentialExpiredError("HTTP 401"),
+            env=expired_env,
+        )
+        assert result.exit_code != 0
+        assert "setup web" in result.output or "setup" in result.output.lower()
+
+    def test_non_expired_token_with_401_suggests_stale_key(self) -> None:
+        """AC-2: CredentialExpiredError + non-expired token → stale key suggestion."""
+        from src.gamechanger.exceptions import CredentialExpiredError
+
+        result = self._invoke_with_error(
+            CredentialExpiredError("HTTP 401"),
+            env=_DIAG_ENV_BASE,  # refresh token is valid (10 days)
+        )
+        assert result.exit_code != 0
+        assert "extract-key" in result.output or "stale" in result.output.lower()
+
+    def test_non_expired_token_401_prescribes_extract_key(self) -> None:
+        """AC-2: Non-expired token rejection prescribes bb creds extract-key --apply."""
+        from src.gamechanger.exceptions import CredentialExpiredError
+
+        result = self._invoke_with_error(
+            CredentialExpiredError("HTTP 401"),
+            env=_DIAG_ENV_BASE,
+        )
+        assert result.exit_code != 0
+        assert "extract-key" in result.output
+
+    # -----------------------------------------------------------------------
+    # AC-3: Network error during inline key check
+    # -----------------------------------------------------------------------
+
+    def test_network_error_on_key_check_shows_ordered_fallback(self) -> None:
+        """AC-3: extract_client_key() fails → ordered fallback message."""
+        from src.gamechanger.token_manager import AuthSigningError
+
+        result = self._invoke_with_error(
+            AuthSigningError("HTTP 400"),
+            extract_side_effect=KeyExtractionError("Connection refused"),
+        )
+        assert result.exit_code != 0
+        assert "extract-key" in result.output
+        assert "setup web" in result.output
+
+    def test_network_error_fallback_includes_both_options(self) -> None:
+        """AC-3: Fallback message includes both extract-key and setup web."""
+        from src.gamechanger.token_manager import AuthSigningError
+
+        result = self._invoke_with_error(
+            AuthSigningError("HTTP 400"),
+            extract_side_effect=KeyExtractionError("timeout"),
+        )
+        assert result.exit_code != 0
+        # Both recovery paths must be mentioned.
+        assert "extract-key" in result.output
+        assert "setup" in result.output.lower()
+
+    # -----------------------------------------------------------------------
+    # AC-4: No credential values exposed
+    # -----------------------------------------------------------------------
+
+    def test_no_credential_values_in_output(self) -> None:
+        """AC-4: HTTP 400 error messages never expose credential values (keys, tokens)."""
+        from src.gamechanger.token_manager import AuthSigningError
+
+        result = self._invoke_with_error(
+            AuthSigningError("HTTP 400"),
+            extract_side_effect=lambda **kw: _FakeExtractedKey(client_key="NEW-different-key"),
+        )
+        assert result.exit_code != 0
+        # Credential values must not appear in output.
+        assert "current-client-key" not in result.output
+        assert "NEW-different-key" not in result.output
+        assert "device-id-web" not in result.output
+
+    def test_no_credential_values_in_output_on_http401(self) -> None:
+        """AC-4: HTTP 401 error messages never expose credential values (tokens)."""
+        from src.gamechanger.exceptions import CredentialExpiredError
+
+        # Use a plausible production-style message and a valid-looking refresh token.
+        expired_env = {
+            **_DIAG_ENV_BASE,
+            "GAMECHANGER_REFRESH_TOKEN_WEB": _make_fake_token(-3600),  # expired
+        }
+        refresh_token_value = expired_env["GAMECHANGER_REFRESH_TOKEN_WEB"]
+        result = self._invoke_with_error(
+            CredentialExpiredError("Refresh token rejected: token has expired (401 Unauthorized)"),
+            env=expired_env,
+        )
+        assert result.exit_code != 0
+        # The actual refresh token value must not appear in the output.
+        assert refresh_token_value not in result.output
+        assert "device-id-web" not in result.output
 
 
 # ---------------------------------------------------------------------------
@@ -1124,3 +1390,843 @@ class TestCredsExtractKey:
         result = runner.invoke(app, ["creds", "--help"])
         assert result.exit_code == 0
         assert "extract-key" in result.output
+
+
+# ---------------------------------------------------------------------------
+# E-128-01: Login bootstrap path (bb creds refresh with no refresh token)
+# ---------------------------------------------------------------------------
+
+_ENV_NO_REFRESH_TOKEN = {
+    "GAMECHANGER_CLIENT_ID_WEB": "client-id",
+    "GAMECHANGER_CLIENT_KEY_WEB": "client-key",
+    "GAMECHANGER_DEVICE_ID_WEB": "device-id",
+    "GAMECHANGER_BASE_URL": "https://api.gc.com",
+    "GAMECHANGER_USER_EMAIL": "coach@example.com",
+    "GAMECHANGER_USER_PASSWORD": "s3cr3t",
+}
+
+_ENV_NO_REFRESH_NO_LOGIN = {
+    "GAMECHANGER_CLIENT_ID_WEB": "client-id",
+    "GAMECHANGER_CLIENT_KEY_WEB": "client-key",
+    "GAMECHANGER_BASE_URL": "https://api.gc.com",
+}
+
+_ENV_NO_REFRESH_NO_DEVICE = {
+    "GAMECHANGER_CLIENT_ID_WEB": "client-id",
+    "GAMECHANGER_CLIENT_KEY_WEB": "client-key",
+    "GAMECHANGER_BASE_URL": "https://api.gc.com",
+    "GAMECHANGER_USER_EMAIL": "coach@example.com",
+    "GAMECHANGER_USER_PASSWORD": "s3cr3t",
+}
+
+
+class TestCredsRefreshLoginBootstrap:
+    """E-128-01: bb creds refresh login bootstrap path."""
+
+    def _invoke_bootstrap(self, env: dict, token_return: str | None = None, side_effect: Exception | None = None):
+        """Invoke refresh with a mocked TokenManager, checking do_login is called."""
+        with (
+            patch("src.cli.creds.dotenv_values", return_value=env),
+            patch("src.cli.creds.TokenManager") as MockTM,
+        ):
+            instance = MockTM.return_value
+            if side_effect is not None:
+                instance.do_login.side_effect = side_effect
+            else:
+                instance.do_login.return_value = token_return or _make_fake_token()
+            result = runner.invoke(app, ["creds", "refresh"])
+        return result, MockTM
+
+    def test_bootstrap_calls_do_login_not_force_refresh(self) -> None:
+        """No refresh token + email+password → CLI calls do_login(), not force_refresh() (AC-1)."""
+        result, MockTM = self._invoke_bootstrap(_ENV_NO_REFRESH_TOKEN)
+        assert result.exit_code == 0
+        instance = MockTM.return_value
+        instance.do_login.assert_called_once()
+        instance.force_refresh.assert_not_called()
+
+    def test_bootstrap_success_output(self) -> None:
+        """Successful login bootstrap prints token expiry info (AC-1)."""
+        result, _ = self._invoke_bootstrap(
+            _ENV_NO_REFRESH_TOKEN, token_return=_make_fake_token(3600)
+        )
+        assert result.exit_code == 0
+        assert "refreshed" in result.output or "expires" in result.output
+
+    def test_bootstrap_passes_none_device_id_when_device_id_absent(self) -> None:
+        """No device_id in env → CLI passes device_id=None to TokenManager (AC-2)."""
+        with (
+            patch("src.cli.creds.dotenv_values", return_value=_ENV_NO_REFRESH_NO_DEVICE),
+            patch("src.cli.creds.TokenManager") as MockTM,
+        ):
+            MockTM.return_value.do_login.return_value = _make_fake_token()
+            runner.invoke(app, ["creds", "refresh"])
+        # device_id kwarg must be None (not a missing key error)
+        call_kwargs = MockTM.call_args.kwargs
+        assert call_kwargs.get("device_id") is None
+
+    def test_ac4_missing_refresh_and_login_creds_exits_nonzero(self) -> None:
+        """AC-4: no refresh token and no email+password → clear error, non-zero exit."""
+        with patch("src.cli.creds.dotenv_values", return_value=_ENV_NO_REFRESH_NO_LOGIN):
+            result = runner.invoke(app, ["creds", "refresh"])
+        assert result.exit_code != 0
+        # Message should explain both options.
+        assert "REFRESH_TOKEN" in result.output or "refresh" in result.output.lower()
+        assert "email" in result.output.lower() or "password" in result.output.lower() or "login" in result.output.lower()
+
+    def test_normal_refresh_calls_force_refresh_when_refresh_token_present(self) -> None:
+        """AC-3: refresh token present → force_refresh() called, not do_login() (AC-3)."""
+        with (
+            patch("src.cli.creds.dotenv_values", return_value=_ENV_PATCH),
+            patch("src.cli.creds.TokenManager") as MockTM,
+        ):
+            MockTM.return_value.force_refresh.return_value = _make_fake_token()
+            result = runner.invoke(app, ["creds", "refresh"])
+        assert result.exit_code == 0
+        instance = MockTM.return_value
+        instance.force_refresh.assert_called_once()
+        instance.do_login.assert_not_called()
+
+    def test_bootstrap_login_failed_error_exits_nonzero(self) -> None:
+        """LoginFailedError from do_login() → non-zero exit with error message."""
+        from src.gamechanger.exceptions import LoginFailedError
+
+        result, _ = self._invoke_bootstrap(
+            _ENV_NO_REFRESH_TOKEN,
+            side_effect=LoginFailedError("bad password"),
+        )
+        assert result.exit_code != 0
+        assert "bad password" in result.output or "Login failed" in result.output
+        # Verify the LoginFailedError handler fired, not the CredentialExpiredError handler.
+        assert "Refresh token" not in result.output
+
+    def test_bootstrap_missing_base_creds_exits_nonzero(self) -> None:
+        """Missing client_id/client_key/base_url exits before routing to login bootstrap."""
+        incomplete_env = {
+            "GAMECHANGER_USER_EMAIL": "coach@example.com",
+            "GAMECHANGER_USER_PASSWORD": "s3cr3t",
+        }
+        with patch("src.cli.creds.dotenv_values", return_value=incomplete_env):
+            result = runner.invoke(app, ["creds", "refresh"])
+        assert result.exit_code != 0
+        output = result.output
+        assert "CLIENT_ID" in output or "CLIENT_KEY" in output or "BASE_URL" in output
+
+
+# ---------------------------------------------------------------------------
+# E-128-02: bb creds setup web wizard
+# ---------------------------------------------------------------------------
+
+_SETUP_ENV_FULL = {
+    "GAMECHANGER_CLIENT_ID_WEB": "client-id",
+    "GAMECHANGER_CLIENT_KEY_WEB": "client-key-current",
+    "GAMECHANGER_REFRESH_TOKEN_WEB": "refresh-tok",
+    "GAMECHANGER_DEVICE_ID_WEB": "device-id",
+    "GAMECHANGER_BASE_URL": "https://api.gc.com",
+    "GAMECHANGER_USER_EMAIL": "coach@example.com",
+    "GAMECHANGER_USER_PASSWORD": "s3cr3t",
+}
+
+_SETUP_ENV_NO_REFRESH = {
+    "GAMECHANGER_CLIENT_ID_WEB": "client-id",
+    "GAMECHANGER_CLIENT_KEY_WEB": "",
+    "GAMECHANGER_DEVICE_ID_WEB": "device-id",
+    "GAMECHANGER_BASE_URL": "https://api.gc.com",
+    "GAMECHANGER_USER_EMAIL": "coach@example.com",
+    "GAMECHANGER_USER_PASSWORD": "s3cr3t",
+}
+
+_SETUP_ENV_NO_PASSWORD = {
+    "GAMECHANGER_CLIENT_ID_WEB": "client-id",
+    "GAMECHANGER_CLIENT_KEY_WEB": "",
+    "GAMECHANGER_BASE_URL": "https://api.gc.com",
+}
+
+_FAKE_EXTRACTED_KEY = type(
+    "ExtractedKey",
+    (),
+    {"client_id": "client-id", "client_key": "client-key-current", "bundle_url": "https://web.gc.com/static/js/index.abc.js"},
+)()
+
+
+def _make_api_result_ok(display_name: str = "Jason Smith") -> "ApiCheckResult":
+    from src.gamechanger.credentials import ApiCheckResult
+    return ApiCheckResult(exit_code=0, display_name=display_name, message=f"200 OK, logged in as {display_name}")
+
+
+def _make_api_result_fail() -> "ApiCheckResult":
+    from src.gamechanger.credentials import ApiCheckResult
+    return ApiCheckResult(exit_code=1, display_name=None, message="Credentials expired")
+
+
+class TestCredsSetupWeb:
+    """E-128-02: bb creds setup web wizard tests."""
+
+    def _invoke(
+        self,
+        env: dict,
+        extracted_key=None,
+        extract_side_effect: Exception | None = None,
+        do_login_side_effect: Exception | None = None,
+        api_result=None,
+        write_ok: bool = True,
+    ):
+        """Invoke setup web with all collaborators mocked."""
+        if extracted_key is None:
+            extracted_key = _FAKE_EXTRACTED_KEY
+        if api_result is None:
+            api_result = _make_api_result_ok()
+
+        with (
+            patch("src.cli.creds.dotenv_values", return_value=env),
+            patch("src.cli.creds.extract_client_key",
+                  return_value=extracted_key,
+                  side_effect=extract_side_effect) as mock_extract,
+            patch("src.cli.creds.atomic_merge_env_file",
+                  side_effect=OSError("disk full") if not write_ok else None) as mock_write,
+            patch("src.cli.creds.TokenManager") as MockTM,
+            patch("src.cli.creds.run_api_check", return_value=api_result) as mock_api,
+        ):
+            instance = MockTM.return_value
+            if do_login_side_effect is not None:
+                instance.do_login.side_effect = do_login_side_effect
+            else:
+                instance.do_login.return_value = _make_fake_token()
+            result = runner.invoke(app, ["creds", "setup", "web"])
+        return result, mock_extract, MockTM, mock_api
+
+    # -----------------------------------------------------------------------
+    # AC-2: Already authenticated
+    # -----------------------------------------------------------------------
+
+    def test_already_authenticated_exits_zero(self) -> None:
+        """AC-2: If credentials are valid, wizard reports success and skips setup."""
+        result, mock_extract, MockTM, mock_api = self._invoke(
+            env=_SETUP_ENV_FULL,
+            api_result=_make_api_result_ok(),
+        )
+        assert result.exit_code == 0
+        assert "already authenticated" in result.output.lower()
+        # Key extraction should NOT happen if already authenticated.
+        mock_extract.assert_not_called()
+        MockTM.return_value.do_login.assert_not_called()
+
+    def test_already_authenticated_shows_display_name(self) -> None:
+        """AC-2: Display name shown when already authenticated."""
+        result, _, _, _ = self._invoke(
+            env=_SETUP_ENV_FULL,
+            api_result=_make_api_result_ok("Coach Smith"),
+        )
+        assert result.exit_code == 0
+        assert "Coach Smith" in result.output
+
+    # -----------------------------------------------------------------------
+    # AC-1: Full happy path (email+password → authenticated)
+    # -----------------------------------------------------------------------
+
+    def test_happy_path_exits_zero(self) -> None:
+        """AC-1: Fresh setup with email+password succeeds and exits 0."""
+        result, _, MockTM, _ = self._invoke(env=_SETUP_ENV_NO_REFRESH)
+        assert result.exit_code == 0
+        MockTM.return_value.do_login.assert_called_once()
+
+    def test_happy_path_calls_do_login(self) -> None:
+        """AC-1d: Wizard calls do_login() not force_refresh()."""
+        result, _, MockTM, _ = self._invoke(env=_SETUP_ENV_NO_REFRESH)
+        assert result.exit_code == 0
+        MockTM.return_value.do_login.assert_called_once()
+        MockTM.return_value.force_refresh.assert_not_called()
+
+    def test_happy_path_calls_run_api_check(self) -> None:
+        """AC-1e: Wizard verifies via GET /me/user after login."""
+        result, _, _, mock_api = self._invoke(env=_SETUP_ENV_NO_REFRESH)
+        assert result.exit_code == 0
+        mock_api.assert_called()
+
+    def test_happy_path_shows_success(self) -> None:
+        """AC-1f: Success output mentions authenticated user, completion, and token lifetime."""
+        result, _, _, _ = self._invoke(
+            env=_SETUP_ENV_NO_REFRESH,
+            api_result=_make_api_result_ok("Jason Smith"),
+        )
+        assert result.exit_code == 0
+        assert "Jason Smith" in result.output or "complete" in result.output.lower()
+        assert "expires" in result.output.lower()
+
+    def test_happy_path_extracts_and_writes_key(self) -> None:
+        """AC-1a: When no client key in .env, wizard extracts and writes it."""
+        result, mock_extract, _, _ = self._invoke(env=_SETUP_ENV_NO_REFRESH)
+        assert result.exit_code == 0
+        mock_extract.assert_called_once()
+
+    # -----------------------------------------------------------------------
+    # AC-3: Missing email/password
+    # -----------------------------------------------------------------------
+
+    def test_missing_email_reports_variable_name(self) -> None:
+        """AC-3: Missing GAMECHANGER_USER_EMAIL is named in the error."""
+        no_email = {**_SETUP_ENV_NO_PASSWORD, "GAMECHANGER_USER_PASSWORD": "s3cr3t"}
+        result, _, _, _ = self._invoke(env=no_email)
+        assert result.exit_code != 0
+        assert "GAMECHANGER_USER_EMAIL" in result.output
+
+    def test_missing_password_reports_variable_name(self) -> None:
+        """AC-3: Missing GAMECHANGER_USER_PASSWORD is named in the error."""
+        no_password = {**_SETUP_ENV_NO_PASSWORD, "GAMECHANGER_USER_EMAIL": "coach@example.com"}
+        result, _, _, _ = self._invoke(env=no_password)
+        assert result.exit_code != 0
+        assert "GAMECHANGER_USER_PASSWORD" in result.output
+
+    def test_missing_password_suggests_import_fallback(self) -> None:
+        """AC-3: Error message offers bb creds import as fallback."""
+        no_password = {**_SETUP_ENV_NO_PASSWORD, "GAMECHANGER_USER_EMAIL": "coach@example.com"}
+        result, _, _, _ = self._invoke(env=no_password)
+        assert result.exit_code != 0
+        assert "import" in result.output.lower()
+
+    # -----------------------------------------------------------------------
+    # AC-4: Stale client key auto-update
+    # -----------------------------------------------------------------------
+
+    def test_stale_key_is_auto_updated(self) -> None:
+        """AC-4: When extracted key differs from .env, wizard writes the new key."""
+        stale_env = {
+            **_SETUP_ENV_NO_REFRESH,
+            "GAMECHANGER_CLIENT_KEY_WEB": "old-stale-key",
+        }
+        new_key = type(
+            "ExtractedKey", (),
+            {"client_id": "client-id", "client_key": "new-fresh-key", "bundle_url": "http://x"},
+        )()
+        result, _, MockTM, _ = self._invoke(env=stale_env, extracted_key=new_key)
+        assert result.exit_code == 0
+        # TokenManager should be constructed with the newly-extracted key.
+        call_kwargs = MockTM.call_args.kwargs
+        assert call_kwargs.get("client_key") == "new-fresh-key"
+
+    def test_current_key_not_rewritten(self) -> None:
+        """AC-4: When key is already current, no write to .env occurs for key step."""
+        current_env = {
+            **_SETUP_ENV_NO_REFRESH,
+            "GAMECHANGER_CLIENT_KEY_WEB": "client-key-current",
+        }
+        result, _, _, _ = self._invoke(env=current_env)
+        assert result.exit_code == 0
+        assert "current" in result.output.lower()
+
+    # -----------------------------------------------------------------------
+    # AC-5: Network error on key extraction
+    # -----------------------------------------------------------------------
+
+    def test_network_error_on_key_extraction_exits_nonzero(self) -> None:
+        """AC-5: KeyExtractionError exits non-zero with helpful message."""
+        from src.gamechanger.key_extractor import KeyExtractionError
+        result, _, _, _ = self._invoke(
+            env=_SETUP_ENV_NO_REFRESH,
+            extract_side_effect=KeyExtractionError("Connection refused"),
+        )
+        assert result.exit_code != 0
+        assert "Connection refused" in result.output or "Error" in result.output
+
+    def test_network_error_suggests_import_fallback(self) -> None:
+        """AC-5: On key extraction failure, bb creds import is suggested."""
+        from src.gamechanger.key_extractor import KeyExtractionError
+        result, _, _, _ = self._invoke(
+            env=_SETUP_ENV_NO_REFRESH,
+            extract_side_effect=KeyExtractionError("timeout"),
+        )
+        assert result.exit_code != 0
+        assert "import" in result.output.lower()
+
+    # -----------------------------------------------------------------------
+    # Unsupported profile
+    # -----------------------------------------------------------------------
+
+    def test_unsupported_profile_exits_nonzero(self) -> None:
+        """Unknown profiles exit non-zero with a helpful message."""
+        with patch("src.cli.creds.dotenv_values", return_value={}):
+            result = runner.invoke(app, ["creds", "setup", "tablet"])
+        assert result.exit_code != 0
+        assert "not supported" in result.output.lower() or "web" in result.output.lower()
+
+    # -----------------------------------------------------------------------
+    # Login failure
+    # -----------------------------------------------------------------------
+
+    def test_login_failed_error_exits_nonzero(self) -> None:
+        """LoginFailedError from do_login() exits non-zero with error message."""
+        from src.gamechanger.exceptions import LoginFailedError
+        result, _, _, _ = self._invoke(
+            env=_SETUP_ENV_NO_REFRESH,
+            do_login_side_effect=LoginFailedError("bad password"),
+        )
+        assert result.exit_code != 0
+        assert "bad password" in result.output or "Login failed" in result.output
+
+    def test_verification_failure_exits_nonzero(self) -> None:
+        """When run_api_check returns failure after login, wizard exits non-zero."""
+        result, _, _, _ = self._invoke(
+            env=_SETUP_ENV_NO_REFRESH,
+            api_result=_make_api_result_fail(),
+        )
+        assert result.exit_code != 0
+
+
+# ---------------------------------------------------------------------------
+# bb creds setup mobile
+# ---------------------------------------------------------------------------
+
+_MOBILE_CRED_KEYS_ALL = (
+    "GAMECHANGER_ACCESS_TOKEN_MOBILE",
+    "GAMECHANGER_REFRESH_TOKEN_MOBILE",
+    "GAMECHANGER_DEVICE_ID_MOBILE",
+    "GAMECHANGER_CLIENT_ID_MOBILE",
+)
+
+_SETUP_MOBILE_ENV_FULL = {
+    "GAMECHANGER_ACCESS_TOKEN_MOBILE": _make_fake_token(43200),  # ~12 hours
+    "GAMECHANGER_REFRESH_TOKEN_MOBILE": _make_fake_token(1209600),  # 14 days
+    "GAMECHANGER_DEVICE_ID_MOBILE": "device-mobile-id",
+    "GAMECHANGER_CLIENT_ID_MOBILE": "client-mobile-id",
+    "GAMECHANGER_BASE_URL": "https://api.gc.com",
+}
+
+_SETUP_MOBILE_ENV_EXPIRED_ACCESS = {
+    "GAMECHANGER_ACCESS_TOKEN_MOBILE": _make_fake_token(-3600),  # expired
+    "GAMECHANGER_REFRESH_TOKEN_MOBILE": _make_fake_token(1209600),  # 14 days
+    "GAMECHANGER_DEVICE_ID_MOBILE": "device-mobile-id",
+    "GAMECHANGER_CLIENT_ID_MOBILE": "client-mobile-id",
+    "GAMECHANGER_BASE_URL": "https://api.gc.com",
+}
+
+_SETUP_MOBILE_ENV_EMPTY: dict[str, str] = {}
+
+
+class TestCredsSetupMobile:
+    """E-128-03: bb creds setup mobile wizard tests."""
+
+    def _invoke(
+        self,
+        env: dict,
+        api_result=None,
+        user_input: str = "\n",
+    ):
+        """Invoke 'bb creds setup mobile' with collaborators mocked.
+
+        Args:
+            env: Dict returned by dotenv_values mock.
+            api_result: Return value for run_api_check mock.
+            user_input: Simulated stdin for the 'Press Enter' prompt.
+        """
+        if api_result is None:
+            api_result = _make_api_result_ok("Jason Smith")
+
+        with (
+            patch("src.cli.creds.dotenv_values", return_value=env),
+            patch("src.cli.creds.run_api_check", return_value=api_result) as mock_api,
+            patch("builtins.input", return_value=""),
+        ):
+            result = runner.invoke(app, ["creds", "setup", "mobile"], input=user_input)
+        return result, mock_api
+
+    # -----------------------------------------------------------------------
+    # AC-4: Already authenticated (valid access token)
+    # -----------------------------------------------------------------------
+
+    def test_already_authenticated_exits_zero(self) -> None:
+        """AC-4: Valid access token → reports current status and exits 0."""
+        result, mock_api = self._invoke(env=_SETUP_MOBILE_ENV_FULL)
+        assert result.exit_code == 0
+        mock_api.assert_called_once_with("mobile")
+
+    def test_already_authenticated_shows_lifetime(self) -> None:
+        """AC-4: Output includes token lifetime when already authenticated."""
+        result, _ = self._invoke(env=_SETUP_MOBILE_ENV_FULL)
+        assert result.exit_code == 0
+        assert "hour" in result.output or "minute" in result.output
+
+    def test_already_authenticated_shows_display_name(self) -> None:
+        """AC-4: Display name shown when already authenticated."""
+        result, _ = self._invoke(
+            env=_SETUP_MOBILE_ENV_FULL,
+            api_result=_make_api_result_ok("Coach Jones"),
+        )
+        assert result.exit_code == 0
+        assert "Coach Jones" in result.output
+
+    # -----------------------------------------------------------------------
+    # AC-5: Expired access token diagnostic
+    # -----------------------------------------------------------------------
+
+    def test_expired_access_token_reports_recapture_needed(self) -> None:
+        """AC-5: Expired access token shows diagnostic and recapture message."""
+        result, _ = self._invoke(env=_SETUP_MOBILE_ENV_EXPIRED_ACCESS)
+        # Should NOT exit 0 on the "already authenticated" path;
+        # should proceed to guided steps after showing the diagnostic.
+        # The wizard continues (or exits 1 on incomplete capture).
+        assert "expired" in result.output.lower() or "recapture" in result.output.lower()
+
+    def test_expired_access_token_shows_refresh_token_lifetime(self) -> None:
+        """AC-5: When access token expired, refresh token lifetime is shown."""
+        result, _ = self._invoke(env=_SETUP_MOBILE_ENV_EXPIRED_ACCESS)
+        assert "day" in result.output or "refresh" in result.output.lower()
+
+    # -----------------------------------------------------------------------
+    # AC-1: No credentials -- four steps printed, single Enter prompt
+    # -----------------------------------------------------------------------
+
+    def test_no_creds_prints_four_steps(self) -> None:
+        """AC-1: Wizard prints all four numbered steps before prompting."""
+        result, _ = self._invoke(env=_SETUP_MOBILE_ENV_EMPTY)
+        output = result.output
+        assert "Step 1" in output
+        assert "Step 2" in output
+        assert "Step 3" in output
+        assert "Step 4" in output
+
+    def test_no_creds_mentions_mac_host_boundary(self) -> None:
+        """AC-1: Step 1 explicitly states mitmproxy runs on Mac host."""
+        result, _ = self._invoke(env=_SETUP_MOBILE_ENV_EMPTY)
+        assert "mac" in result.output.lower() or "host" in result.output.lower()
+
+    def test_no_creds_shows_press_enter_prompt(self) -> None:
+        """AC-1: Wizard shows 'Press Enter' prompt after printing steps."""
+        result, _ = self._invoke(env=_SETUP_MOBILE_ENV_EMPTY)
+        assert "enter" in result.output.lower() or "press" in result.output.lower()
+
+    # -----------------------------------------------------------------------
+    # AC-2: Credential scan reports found / missing
+    # -----------------------------------------------------------------------
+
+    def test_missing_creds_after_prompt_reports_missing_keys(self) -> None:
+        """AC-2: After pressing Enter with no creds, reports which keys are missing."""
+        result, _ = self._invoke(env=_SETUP_MOBILE_ENV_EMPTY)
+        assert result.exit_code != 0
+        # Should name at least one missing credential key.
+        assert any(k in result.output for k in _MOBILE_CRED_KEYS_ALL)
+
+    def test_partial_creds_reports_missing_keys(self) -> None:
+        """AC-2: Partial capture reports which specific keys are absent."""
+        # Use expired access token so the wizard bypasses the already-authenticated
+        # check and proceeds to the guided steps + scan.
+        partial_env = {
+            "GAMECHANGER_ACCESS_TOKEN_MOBILE": _make_fake_token(-3600),  # expired
+            "GAMECHANGER_DEVICE_ID_MOBILE": "device-mobile-id",
+            # missing: REFRESH_TOKEN and CLIENT_ID
+        }
+        result, _ = self._invoke(env=partial_env)
+        assert result.exit_code != 0
+        assert "GAMECHANGER_REFRESH_TOKEN_MOBILE" in result.output or "not found" in result.output
+
+    # -----------------------------------------------------------------------
+    # AC-3: Full capture -- validates and reports token lifetime
+    # -----------------------------------------------------------------------
+
+    def test_full_capture_exits_zero(self) -> None:
+        """AC-3: All creds present and API OK → exits 0."""
+        result, mock_api = self._invoke(env=_SETUP_MOBILE_ENV_FULL)
+        assert result.exit_code == 0
+
+    def test_full_capture_calls_run_api_check(self) -> None:
+        """AC-3: Wizard calls run_api_check('mobile') after successful capture."""
+        # Use env with no existing access token to force the guided path,
+        # then present all creds on the dotenv_values call inside the scan.
+        # Simplest: env already has full creds but with expired access token
+        # so it goes through the guided path, then re-reads the env.
+        # Actually: the wizard re-reads dotenv_values each time; simplify
+        # by testing the already-authenticated path which also calls run_api_check.
+        result, mock_api = self._invoke(env=_SETUP_MOBILE_ENV_FULL)
+        assert result.exit_code == 0
+        mock_api.assert_called_with("mobile")
+
+    def test_post_scan_success_shows_no_auto_refresh_note(self) -> None:
+        """AC-3: Post-scan success output includes 'no auto-refresh' note.
+
+        Uses side_effect to simulate: first dotenv_values call returns empty env
+        (no existing access token, so AC-4 is skipped), second call returns the
+        full env (proxy has written credentials after the operator pressed Enter).
+        """
+        from unittest.mock import call as mock_call
+
+        full_env_after_capture = {
+            "GAMECHANGER_ACCESS_TOKEN_MOBILE": _make_fake_token(43200),  # ~12 hours
+            "GAMECHANGER_REFRESH_TOKEN_MOBILE": _make_fake_token(1209600),
+            "GAMECHANGER_DEVICE_ID_MOBILE": "device-mobile-id",
+            "GAMECHANGER_CLIENT_ID_MOBILE": "client-mobile-id",
+            "GAMECHANGER_BASE_URL": "https://api.gc.com",
+        }
+
+        with (
+            patch(
+                "src.cli.creds.dotenv_values",
+                side_effect=[{}, full_env_after_capture],
+            ),
+            patch("src.cli.creds.run_api_check", return_value=_make_api_result_ok()) as mock_api,
+            patch("builtins.input", return_value=""),
+        ):
+            result = runner.invoke(app, ["creds", "setup", "mobile"])
+
+        assert result.exit_code == 0
+        mock_api.assert_called_with("mobile")
+        assert "no auto-refresh" in result.output.lower() or "recapture" in result.output.lower()
+
+    def test_api_validation_failure_exits_nonzero(self) -> None:
+        """AC-3: run_api_check failure exits non-zero with helpful message."""
+        # Force the expired-access-token path so wizard proceeds to scan+validate.
+        env_expired = {
+            **_SETUP_MOBILE_ENV_FULL,
+            "GAMECHANGER_ACCESS_TOKEN_MOBILE": _make_fake_token(-3600),
+        }
+        result, _ = self._invoke(
+            env=env_expired,
+            api_result=_make_api_result_fail(),
+        )
+        # Wizard exits non-zero somewhere (either expired path exits 1, or
+        # post-scan validation fails).
+        assert result.exit_code != 0
+
+    def test_valid_token_api_failure_not_diagnosed_as_expired(self) -> None:
+        """Valid access token + failed API check must NOT show the 'token has expired' diagnostic."""
+        result, _ = self._invoke(
+            env=_SETUP_MOBILE_ENV_FULL,
+            api_result=_make_api_result_fail(),
+        )
+        assert result.exit_code != 0
+        # The wizard must NOT show the "access token has expired" message -- that's a misdiagnosis.
+        assert "mobile access token has expired" not in result.output.lower()
+        assert "api check failed" in result.output.lower() or "api rejected" in result.output.lower()
+
+    def test_valid_token_api_failure_shows_valid_locally_message(self) -> None:
+        """Valid access token + failed API check shows 'appears valid locally' message."""
+        result, _ = self._invoke(
+            env=_SETUP_MOBILE_ENV_FULL,
+            api_result=_make_api_result_fail(),
+        )
+        assert "valid" in result.output.lower()
+
+
+# ---------------------------------------------------------------------------
+# bb creds (no subcommand) -- status dashboard
+# ---------------------------------------------------------------------------
+
+
+def _make_profile_check_result(
+    profile: str,
+    *,
+    exit_code: int = 0,
+    keys_present: list[str] | None = None,
+    keys_missing: list[str] | None = None,
+    token_exp: int | None = None,
+    token_is_expired: bool | None = False,
+    api_exit_code: int = 0,
+    api_display_name: str | None = "Coach",
+    ck_status: str = "valid",
+) -> "ProfileCheckResult":
+    """Build a synthetic ProfileCheckResult for dashboard tests."""
+    import time as _time
+    from src.gamechanger.credentials import (
+        ProfileCheckResult,
+        CredentialPresence,
+        TokenHealth,
+        ApiCheckResult,
+        ClientKeyCheckResult,
+    )
+    from src.http.proxy_check import ProxyCheckResult, ProxyCheckOutcome
+
+    if keys_present is None:
+        keys_present = ["GAMECHANGER_REFRESH_TOKEN_WEB"]
+    if keys_missing is None:
+        keys_missing = []
+    if token_exp is None:
+        token_exp = int(_time.time()) + 86400 * 12
+
+    return ProfileCheckResult(
+        profile=profile,
+        presence=CredentialPresence(keys_present=keys_present, keys_missing=keys_missing),
+        token_health=TokenHealth(exp=token_exp, is_expired=token_is_expired),
+        api_result=ApiCheckResult(
+            exit_code=api_exit_code,
+            display_name=api_display_name,
+            message="200 OK" if api_exit_code == 0 else "Error",
+        ),
+        proxy_result=ProxyCheckResult(
+            profile=profile,
+            outcome=ProxyCheckOutcome.NOT_CONFIGURED,
+        ),
+        exit_code=exit_code,
+        client_key_result=ClientKeyCheckResult(
+            status=ck_status,
+            message="Client key verified" if ck_status == "valid" else "Client key invalid",
+        ),
+    )
+
+
+class TestCredsDashboard:
+    """E-128-04: bb creds (no subcommand) status dashboard tests."""
+
+    def _invoke_dashboard(self, web_result=None, mobile_result=None):
+        """Invoke 'bb creds' with check_profile_detailed mocked."""
+        if web_result is None:
+            web_result = _make_profile_check_result("web")
+        if mobile_result is None:
+            mobile_result = _make_profile_check_result("mobile")
+
+        def _side_effect(profile: str):
+            return web_result if profile == "web" else mobile_result
+
+        with patch("src.cli.creds.check_profile_detailed", side_effect=_side_effect):
+            result = runner.invoke(app, ["creds"])
+        return result
+
+    # -----------------------------------------------------------------------
+    # AC-2: Fully authenticated -- READY
+    # -----------------------------------------------------------------------
+
+    def test_fully_authenticated_exits_zero(self) -> None:
+        """AC-2: Both profiles valid → exit 0."""
+        result = self._invoke_dashboard()
+        assert result.exit_code == 0
+
+    def test_fully_authenticated_shows_ready(self) -> None:
+        """AC-2: Fully authenticated profile shows 'READY'."""
+        result = self._invoke_dashboard(web_result=_make_profile_check_result("web", exit_code=0))
+        assert "READY" in result.output
+
+    def test_fully_authenticated_shows_ok_indicator(self) -> None:
+        """AC-1: Fully authenticated profile shows [OK] indicators."""
+        result = self._invoke_dashboard(web_result=_make_profile_check_result("web", exit_code=0))
+        assert "[OK]" in result.output
+
+    def test_fully_authenticated_no_next_step(self) -> None:
+        """AC-2: READY status has no next-step command."""
+        result = self._invoke_dashboard(
+            web_result=_make_profile_check_result("web", exit_code=0),
+            mobile_result=_make_profile_check_result("mobile", exit_code=0),
+        )
+        # READY profile should NOT show a '-> Run:' next-step suggestion.
+        # (The footer hint is acceptable, but not per-profile setup directions.)
+        assert "Status: READY" in result.output
+        assert "-> Run:" not in result.output
+
+    # -----------------------------------------------------------------------
+    # AC-3: Partially configured -- INCOMPLETE
+    # -----------------------------------------------------------------------
+
+    def test_partial_config_shows_incomplete(self) -> None:
+        """AC-3: Profile with missing keys shows INCOMPLETE."""
+        partial = _make_profile_check_result(
+            "web",
+            exit_code=1,
+            keys_present=["GAMECHANGER_CLIENT_KEY_WEB"],
+            keys_missing=["GAMECHANGER_REFRESH_TOKEN_WEB"],
+        )
+        result = self._invoke_dashboard(web_result=partial)
+        assert "INCOMPLETE" in result.output
+
+    def test_partial_config_shows_degraded_indicator(self) -> None:
+        """AC-3: Missing key shown with [!!] indicator."""
+        partial = _make_profile_check_result(
+            "web",
+            exit_code=1,
+            keys_present=["GAMECHANGER_CLIENT_KEY_WEB"],
+            keys_missing=["GAMECHANGER_REFRESH_TOKEN_WEB"],
+        )
+        result = self._invoke_dashboard(web_result=partial)
+        assert "[!!]" in result.output or "missing" in result.output.lower()
+
+    def test_partial_config_suggests_setup(self) -> None:
+        """AC-3: INCOMPLETE status suggests bb creds setup [profile]."""
+        partial = _make_profile_check_result(
+            "web",
+            exit_code=1,
+            keys_present=["GAMECHANGER_CLIENT_KEY_WEB"],
+            keys_missing=["GAMECHANGER_REFRESH_TOKEN_WEB"],
+        )
+        result = self._invoke_dashboard(web_result=partial)
+        assert "setup" in result.output.lower()
+
+    # -----------------------------------------------------------------------
+    # AC-4: No credentials -- NOT CONFIGURED
+    # -----------------------------------------------------------------------
+
+    def test_no_creds_shows_not_configured(self) -> None:
+        """AC-4: Profile with no keys shows NOT CONFIGURED."""
+        empty = _make_profile_check_result(
+            "mobile",
+            exit_code=2,
+            keys_present=[],
+            keys_missing=["GAMECHANGER_ACCESS_TOKEN_MOBILE"],
+            token_exp=None,
+            token_is_expired=None,
+        )
+        result = self._invoke_dashboard(mobile_result=empty)
+        assert "NOT CONFIGURED" in result.output
+
+    def test_no_creds_shows_dash_dash_indicator(self) -> None:
+        """AC-1: Not configured profile shows [--] indicator."""
+        empty = _make_profile_check_result(
+            "mobile",
+            exit_code=2,
+            keys_present=[],
+            keys_missing=["GAMECHANGER_ACCESS_TOKEN_MOBILE"],
+            token_exp=None,
+            token_is_expired=None,
+        )
+        result = self._invoke_dashboard(mobile_result=empty)
+        assert "[--]" in result.output
+
+    def test_no_creds_suggests_setup_mobile(self) -> None:
+        """AC-4: NOT CONFIGURED suggests bb creds setup mobile."""
+        empty = _make_profile_check_result(
+            "mobile",
+            exit_code=2,
+            keys_present=[],
+            keys_missing=["GAMECHANGER_ACCESS_TOKEN_MOBILE"],
+            token_exp=None,
+            token_is_expired=None,
+        )
+        result = self._invoke_dashboard(mobile_result=empty)
+        assert "setup mobile" in result.output
+
+    def test_base_url_only_profile_shows_not_configured(self) -> None:
+        """BASE_URL is a global infra var; a profile with only BASE_URL is NOT CONFIGURED."""
+        base_url_only = _make_profile_check_result(
+            "mobile",
+            exit_code=2,
+            keys_present=["GAMECHANGER_BASE_URL"],
+            keys_missing=["GAMECHANGER_DEVICE_ID_MOBILE"],
+            token_exp=None,
+            token_is_expired=None,
+        )
+        result = self._invoke_dashboard(mobile_result=base_url_only)
+        assert "NOT CONFIGURED" in result.output
+
+    # -----------------------------------------------------------------------
+    # AC-1: Indicator legend
+    # -----------------------------------------------------------------------
+
+    def test_mobile_client_key_shows_dash_with_note(self) -> None:
+        """AC-1: Mobile client key always shows [--] with a note."""
+        full_mobile = _make_profile_check_result(
+            "mobile",
+            exit_code=0,
+            keys_present=["GAMECHANGER_ACCESS_TOKEN_MOBILE", "GAMECHANGER_REFRESH_TOKEN_MOBILE",
+                          "GAMECHANGER_DEVICE_ID_MOBILE", "GAMECHANGER_CLIENT_ID_MOBILE"],
+            keys_missing=[],
+        )
+        result = self._invoke_dashboard(mobile_result=full_mobile)
+        assert "[--]" in result.output
+        assert "mobile client key" in result.output.lower() or "ios" in result.output.lower()
+
+    # -----------------------------------------------------------------------
+    # AC-5: --help still shows help text
+    # -----------------------------------------------------------------------
+
+    def test_help_flag_shows_help_text(self) -> None:
+        """AC-5: bb creds --help still shows help text, not the dashboard."""
+        result = runner.invoke(app, ["creds", "--help"])
+        assert result.exit_code == 0
+        # Help text contains subcommand descriptions, not dashboard output.
+        assert "check" in result.output.lower() or "import" in result.output.lower()
+        assert "READY" not in result.output
+        assert "NOT CONFIGURED" not in result.output

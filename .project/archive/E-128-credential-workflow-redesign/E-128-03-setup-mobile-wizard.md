@@ -4,7 +4,7 @@
 [E-128: Credential Workflow Redesign](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, `bb creds setup mobile` will be a guided step-by-step wizard that walks the operator through the mitmproxy capture process for mobile credentials. It explicitly acknowledges the Mac-host boundary, guides the operator through iPhone proxy configuration, and validates captured credentials. This replaces the confusing split between `bb creds capture` (which scans for already-captured creds) and documentation the operator must find and follow separately.

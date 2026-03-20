@@ -1071,3 +1071,182 @@ class TestLoginFallback:
             tm.get_access_token()
         warning_msgs = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
         assert any("gc-signature" in m and "password" in m for m in warning_msgs)
+
+
+# ---------------------------------------------------------------------------
+# E-128-01: Login bootstrap path (do_login())
+# ---------------------------------------------------------------------------
+
+
+def _three_step_side_effects(
+    step2_status: int = 200,
+    step3_status: int = 200,
+    step4_status: int = 200,
+    step2_body: dict | None = None,
+    step2_headers: dict | None = None,
+    step3_headers: dict | None = None,
+    step4_headers: dict | None = None,
+) -> list[httpx.Response]:
+    """Build the 3-response side_effect list for a direct login bootstrap sequence.
+
+    Unlike ``_four_step_side_effects``, there is no initial HTTP 401 because
+    ``do_login()`` calls ``_do_login_fallback()`` directly without attempting a
+    refresh first.
+    """
+    r2_body = step2_body if step2_body is not None else _CLIENT_AUTH_RESPONSE
+    r2_hdrs = step2_headers if step2_headers is not None else {"gc-signature": _GC_SIG_2}
+    r3_hdrs = step3_headers if step3_headers is not None else {"gc-signature": _GC_SIG_3}
+    r4_hdrs = step4_headers if step4_headers is not None else {"gc-signature": _GC_SIG_4}
+
+    return [
+        httpx.Response(step2_status, json=r2_body, headers=r2_hdrs),
+        httpx.Response(step3_status, json=_USER_AUTH_RESPONSE, headers=r3_hdrs),
+        httpx.Response(step4_status, json=_LOGIN_FINAL_RESPONSE, headers=r4_hdrs),
+    ]
+
+
+def make_bootstrap_manager(tmp_env: Path, **kwargs: object) -> TokenManager:
+    """Build a TokenManager in login-bootstrap mode (no refresh token)."""
+    defaults: dict[str, object] = {
+        "profile": "web",
+        "client_id": _CLIENT_ID,
+        "client_key": _CLIENT_KEY_B64,
+        "refresh_token": None,
+        "device_id": _DEVICE_ID,
+        "base_url": _BASE_URL,
+        "env_path": tmp_env,
+        "email": _EMAIL,
+        "password": _PASSWORD,
+    }
+    defaults.update(kwargs)
+    return TokenManager(**defaults)  # type: ignore[arg-type]
+
+
+class TestLoginBootstrap:
+    """Tests for E-128-01: do_login() bootstrap path."""
+
+    # -----------------------------------------------------------------------
+    # Construction: no refresh token allowed when email+password are present
+    # -----------------------------------------------------------------------
+
+    def test_construction_succeeds_without_refresh_token_when_login_creds_present(
+        self, tmp_path: Path
+    ) -> None:
+        """TokenManager constructs without refresh token when email+password are set (AC-1)."""
+        tm = make_bootstrap_manager(tmp_path / ".env")
+        assert tm is not None
+
+    def test_construction_still_requires_refresh_token_without_login_creds(
+        self, tmp_path: Path
+    ) -> None:
+        """Without login creds, refresh_token is still required (existing behaviour)."""
+        with pytest.raises(ConfigurationError, match="REFRESH_TOKEN"):
+            TokenManager(
+                profile="web",
+                client_id=_CLIENT_ID,
+                client_key=_CLIENT_KEY_B64,
+                refresh_token=None,
+                device_id=_DEVICE_ID,
+                base_url=_BASE_URL,
+                env_path=tmp_path / ".env",
+            )
+
+    # -----------------------------------------------------------------------
+    # do_login(): happy path
+    # -----------------------------------------------------------------------
+
+    @respx.mock
+    def test_do_login_returns_access_token(self, tmp_path: Path) -> None:
+        """do_login() executes 3-step login flow and returns the access token (AC-1)."""
+        env = tmp_path / ".env"
+        respx.post(_AUTH_URL).mock(side_effect=_three_step_side_effects())
+        with patch("src.gamechanger.token_manager.time.time", return_value=float(_NOW)):
+            tm = make_bootstrap_manager(env)
+            token = tm.do_login()
+        assert token == _LOGIN_ACCESS_TOKEN
+
+    @respx.mock
+    def test_do_login_persists_refresh_token_to_env(self, tmp_path: Path) -> None:
+        """do_login() persists the new refresh token to .env (AC-5)."""
+        env = tmp_path / ".env"
+        respx.post(_AUTH_URL).mock(side_effect=_three_step_side_effects())
+        with patch("src.gamechanger.token_manager.time.time", return_value=float(_NOW)):
+            tm = make_bootstrap_manager(env)
+            tm.do_login()
+        contents = env.read_text()
+        assert "GAMECHANGER_REFRESH_TOKEN_WEB" in contents
+        assert _LOGIN_REFRESH_TOKEN in contents
+
+    @respx.mock
+    def test_do_login_makes_exactly_three_http_requests(self, tmp_path: Path) -> None:
+        """do_login() makes exactly 3 POST /auth requests (steps 2, 3, 4) -- no initial refresh."""
+        env = tmp_path / ".env"
+        route = respx.post(_AUTH_URL).mock(side_effect=_three_step_side_effects())
+        with patch("src.gamechanger.token_manager.time.time", return_value=float(_NOW)):
+            tm = make_bootstrap_manager(env)
+            tm.do_login()
+        assert route.call_count == 3
+
+    # -----------------------------------------------------------------------
+    # do_login(): device ID synthesis (AC-2)
+    # -----------------------------------------------------------------------
+
+    @respx.mock
+    def test_do_login_synthesizes_device_id_when_absent(self, tmp_path: Path) -> None:
+        """do_login() generates a synthetic device ID when device_id is None (AC-2)."""
+        env = tmp_path / ".env"
+        respx.post(_AUTH_URL).mock(side_effect=_three_step_side_effects())
+        with patch("src.gamechanger.token_manager.time.time", return_value=float(_NOW)):
+            tm = make_bootstrap_manager(env, device_id=None)
+            tm.do_login()
+        # Synthetic device ID is 32-char hex (token_hex(16) = 32 hex chars).
+        assert tm._device_id is not None
+        assert len(tm._device_id) == 32
+        assert all(c in "0123456789abcdef" for c in tm._device_id)
+
+    @respx.mock
+    def test_do_login_persists_synthetic_device_id_to_env(self, tmp_path: Path) -> None:
+        """Synthesized device ID is written to .env before login proceeds (AC-2)."""
+        env = tmp_path / ".env"
+        respx.post(_AUTH_URL).mock(side_effect=_three_step_side_effects())
+        with patch("src.gamechanger.token_manager.time.time", return_value=float(_NOW)):
+            tm = make_bootstrap_manager(env, device_id=None)
+            tm.do_login()
+        contents = env.read_text()
+        assert "GAMECHANGER_DEVICE_ID_WEB" in contents
+        assert tm._device_id in contents
+
+    @respx.mock
+    def test_do_login_uses_existing_device_id_when_present(self, tmp_path: Path) -> None:
+        """do_login() uses the provided device_id without synthesizing a new one (AC-2)."""
+        env = tmp_path / ".env"
+        respx.post(_AUTH_URL).mock(side_effect=_three_step_side_effects())
+        existing_device_id = "a1b2c3d4" * 4
+        with (
+            patch("src.gamechanger.token_manager.time.time", return_value=float(_NOW)),
+            patch("src.gamechanger.token_manager.secrets.token_hex") as mock_token_hex,
+        ):
+            tm = make_bootstrap_manager(env, device_id=existing_device_id)
+            tm.do_login()
+        mock_token_hex.assert_not_called()
+        assert tm._device_id == existing_device_id
+
+    # -----------------------------------------------------------------------
+    # do_login(): error paths
+    # -----------------------------------------------------------------------
+
+    def test_do_login_raises_without_email(self, tmp_path: Path) -> None:
+        """do_login() raises ConfigurationError when email is missing (defensive guard)."""
+        # Construct with valid credentials, then clear email to exercise the do_login guard.
+        tm = make_bootstrap_manager(tmp_path / ".env")
+        tm._email = None  # simulate edge case bypassing constructor
+        with pytest.raises(ConfigurationError, match="USER_EMAIL"):
+            tm.do_login()
+
+    def test_do_login_raises_without_password(self, tmp_path: Path) -> None:
+        """do_login() raises ConfigurationError when password is missing (defensive guard)."""
+        # Construct with valid credentials, then clear password to exercise the do_login guard.
+        tm = make_bootstrap_manager(tmp_path / ".env")
+        tm._password = None  # simulate edge case bypassing constructor
+        with pytest.raises(ConfigurationError, match="USER_PASSWORD"):
+            tm.do_login()

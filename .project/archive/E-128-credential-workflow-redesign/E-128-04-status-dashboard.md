@@ -4,7 +4,7 @@
 [E-128: Credential Workflow Redesign](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, running `bb creds` with no subcommand will display a compact credential status dashboard for all profiles instead of the current help text. The dashboard answers "am I authenticated right now?" in one command and provides actionable next steps for each profile.

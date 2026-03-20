@@ -22,12 +22,13 @@ Usage::
         device_id="...",
         base_url="https://api.team-manager.gc.com",
     )
-    access_token = tm.get_access_token()
+    access_token = tm.get_access_token()  # pii-ok
 """
 
 from __future__ import annotations
 
 import logging
+import secrets
 import time
 from pathlib import Path
 from typing import Any
@@ -108,7 +109,7 @@ class TokenManager:
         client_id: str | None = None,
         client_key: str | None = None,
         refresh_token: str | None = None,
-        device_id: str,
+        device_id: str | None = None,
         base_url: str,
         access_token: str | None = None,
         app_name_mobile: str | None = None,
@@ -138,7 +139,8 @@ class TokenManager:
             missing = []
             if not self._client_id:
                 missing.append(f"GAMECHANGER_CLIENT_ID_{self._profile.upper()}")
-            if not self._refresh_token:
+            # refresh_token is optional for web profile when email+password are provided (login bootstrap).
+            if not self._refresh_token and not (self._profile == "web" and self._email and self._password):
                 missing.append(f"GAMECHANGER_REFRESH_TOKEN_{self._profile.upper()}")
             if missing:
                 raise ConfigurationError(
@@ -270,6 +272,10 @@ class TokenManager:
         assert self._client_key is not None
         assert self._client_id is not None
         assert self._refresh_token is not None
+        assert self._device_id is not None, (
+            f"device_id is required for token refresh ({self._profile} profile) "
+            f"but was not provided. Set GAMECHANGER_DEVICE_ID_{self._profile.upper()} in .env."
+        )
 
         sig_headers = build_signature_headers(
             client_id=self._client_id,
@@ -325,7 +331,7 @@ class TokenManager:
         new_access_expires: int = int(data["access"]["expires"])
         new_refresh_token: str = data["refresh"]["data"]
 
-        self._access_token = new_access_token
+        self._access_token = new_access_token  # pii-ok
         self._access_token_expires_at = new_access_expires
         self._refresh_token = new_refresh_token
 
@@ -608,7 +614,7 @@ class TokenManager:
                 client, url, profile_hdrs, client_token, prev_sig3
             )
 
-        self._access_token = new_access_token
+        self._access_token = new_access_token  # pii-ok
         self._access_token_expires_at = new_access_expires
         self._refresh_token = new_refresh_token
 
@@ -620,6 +626,49 @@ class TokenManager:
         )
         self._persist_refresh_token(new_refresh_token)
         return new_access_token
+
+    def do_login(self) -> str:
+        """Execute the 3-step login flow directly as the primary bootstrap path.
+
+        Called by the CLI when no refresh token exists but email + password are
+        configured.  If ``device_id`` was not provided at construction time, a
+        synthetic 32-char hex value is generated via ``secrets.token_hex(16)``
+        and persisted to ``.env`` before the login flow runs.
+
+        Returns:
+            New access token JWT string (refresh token is also persisted to
+            ``.env`` via ``_do_login_fallback``).
+
+        Raises:
+            ConfigurationError: If email or password are not configured.
+            AuthSigningError: If any login step returns HTTP 400.
+            LoginFailedError: If any login step fails.
+        """
+        if not self._email or not self._password:
+            raise ConfigurationError(
+                "Login bootstrap requires GAMECHANGER_USER_EMAIL and "
+                "GAMECHANGER_USER_PASSWORD in .env."
+            )
+
+        if not self._device_id:
+            new_device_id = secrets.token_hex(16)
+            self._device_id = new_device_id
+            logger.info("Generated synthetic device ID for %s profile", self._profile)
+            env_key = f"GAMECHANGER_DEVICE_ID_{self._profile.upper()}"
+            try:
+                atomic_merge_env_file(self._env_path, {env_key: new_device_id})
+                logger.debug("Persisted synthetic device ID to %s", self._env_path)
+            except OSError as exc:
+                logger.warning(
+                    "Failed to persist synthetic device ID to %s (%s: %s). "
+                    "Login will proceed but device ID will not be saved for next run.",
+                    self._env_path,
+                    type(exc).__name__,
+                    exc.strerror,
+                )
+
+        logger.info("Running login bootstrap flow for %s profile", self._profile)
+        return self._do_login_fallback()
 
     def _persist_refresh_token(self, new_refresh_token: str) -> None:
         """Write the rotated refresh token back to .env atomically.

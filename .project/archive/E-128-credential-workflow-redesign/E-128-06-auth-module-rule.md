@@ -4,7 +4,7 @@
 [E-128: Credential Workflow Redesign](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, agents editing auth module source files will automatically receive implementation constraints via a glob-triggered rule file. This prevents recurring discovery costs (e.g., using `os.environ` instead of `dotenv_values()`, routing refresh through `create_session()`, misinterpreting HTTP 400 vs 401).

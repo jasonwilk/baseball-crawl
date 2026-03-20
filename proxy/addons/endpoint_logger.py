@@ -55,6 +55,39 @@ def _is_binary_content_type(content_type: str) -> bool:
     return ct == _BINARY_CT_EXACT or any(ct.startswith(p) for p in _BINARY_CT_PREFIXES)
 
 
+_PII_FIELDS = frozenset({"email", "password"})
+
+
+def _redact_auth_body(body: str | None) -> str | None:
+    """Redact PII fields from a POST /auth request body string.
+
+    Parses the body as JSON and replaces the values of ``email`` and
+    ``password`` keys with ``"[REDACTED]"``.  The ``type`` field and all
+    other fields are preserved.  Returns the body unchanged when it is
+    ``None``, empty, or not valid JSON.
+
+    Args:
+        body: Decoded request body string (may be ``None``).
+
+    Returns:
+        Redacted JSON string, or the original value if redaction is not
+        applicable.
+    """
+    if not body:
+        return body
+    try:
+        parsed = json.loads(body)
+    except (ValueError, TypeError):
+        return body
+    if not isinstance(parsed, dict):
+        return body
+    redacted = {
+        k: "[REDACTED]" if k in _PII_FIELDS else v
+        for k, v in parsed.items()
+    }
+    return json.dumps(redacted)
+
+
 def _extract_body(content: bytes, content_type: str, max_bytes: int) -> str | None:
     """Extract a request or response body as a string.
 
@@ -146,11 +179,18 @@ def _build_capture_fields(
     if strip_auth_headers:
         req_headers = {k: v for k, v in req_headers.items() if k not in _SENSITIVE_HEADERS}
         resp_headers = {k: v for k, v in resp_headers.items() if k not in _SENSITIVE_HEADERS}
+
+    request_body = _extract_body(flow.request.content, request_content_type, max_body_bytes)
+    # Redact PII fields from POST /auth request bodies before logging.
+    parsed_path = urlparse(flow.request.pretty_url).path
+    if flow.request.method == "POST" and parsed_path.endswith("/auth"):
+        request_body = _redact_auth_body(request_body)
+
     return {
         "query_params": dict(parse_qsl(query, keep_blank_values=True)),
         "request_headers": req_headers,
         "response_headers": resp_headers,
-        "request_body": _extract_body(flow.request.content, request_content_type, max_body_bytes),
+        "request_body": request_body,
         "response_body": _extract_body(flow.response.content, response_content_type, max_body_bytes),
     }
 

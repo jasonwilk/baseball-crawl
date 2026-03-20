@@ -4,7 +4,7 @@
 [E-128: Credential Workflow Redesign](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, `bb creds setup web` will be a guided wizard that reads current credential state, skips steps that are already complete, and walks the operator through the minimum steps to achieve a fully authenticated web profile. The primary path is email+password (fully automated). The fallback path is curl/token import (for operators who don't want to store their password).

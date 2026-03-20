@@ -1,4 +1,4 @@
-"""Unit tests for proxy/addons/endpoint_logger.py.
+"""Unit tests for proxy/addons/endpoint_logger.py.  # synthetic-test-data
 
 All tests use lightweight mock flow objects -- no running mitmproxy instance required.
 """
@@ -13,6 +13,7 @@ from proxy.addons.endpoint_logger import (
     EndpointLogger,
     _build_entry,
     _append_entry,
+    _redact_auth_body,
     LOG_PATH,
     _DEFAULT_MAX_BODY_BYTES,
 )
@@ -556,3 +557,105 @@ class TestAppendEntry:
         # We just verify the attribute -- don't actually write to /app/proxy/data/
         import proxy.addons.endpoint_logger as mod
         assert mod.LOG_PATH == Path("/app/proxy/data/endpoint-log.jsonl")
+
+
+# ---------------------------------------------------------------------------
+# _redact_auth_body() -- PII redaction unit tests (AC-1 through AC-4)
+# ---------------------------------------------------------------------------
+
+
+class TestRedactAuthBody:
+    """Unit tests for _redact_auth_body()."""
+
+    def test_email_field_is_redacted(self) -> None:
+        """AC-1: email value is replaced with [REDACTED]."""
+        body = json.dumps({"type": "user-auth", "email": "coach@example.com"})
+        result = json.loads(_redact_auth_body(body))
+        assert result["email"] == "[REDACTED]"
+
+    def test_type_preserved_on_email_redaction(self) -> None:
+        """AC-1: type field is preserved after email redaction."""
+        body = json.dumps({"type": "user-auth", "email": "coach@example.com"})
+        result = json.loads(_redact_auth_body(body))
+        assert result["type"] == "user-auth"
+
+    def test_password_field_is_redacted(self) -> None:
+        """AC-2: password value is replaced with [REDACTED]."""
+        body = json.dumps({"type": "password", "password": "s3cr3t!"})
+        result = json.loads(_redact_auth_body(body))
+        assert result["password"] == "[REDACTED]"
+
+    def test_type_preserved_on_password_redaction(self) -> None:
+        """AC-2: type field is preserved after password redaction."""
+        body = json.dumps({"type": "password", "password": "s3cr3t!"})
+        result = json.loads(_redact_auth_body(body))
+        assert result["type"] == "password"
+
+    def test_refresh_body_passes_through_unchanged(self) -> None:
+        """AC-4: {"type": "refresh"} has no PII fields -- body unchanged."""
+        body = json.dumps({"type": "refresh"})
+        result = json.loads(_redact_auth_body(body))
+        assert result == {"type": "refresh"}
+
+    def test_none_body_returns_none(self) -> None:
+        """None body (e.g. empty request) passes through unchanged."""
+        assert _redact_auth_body(None) is None
+
+    def test_non_json_body_passes_through_unchanged(self) -> None:
+        """Non-JSON body (e.g. binary or plain text) passes through unchanged."""
+        body = "not-json"
+        assert _redact_auth_body(body) == body
+
+
+# ---------------------------------------------------------------------------
+# Integration: POST /auth redaction via _build_entry() (AC-1 through AC-3)
+# ---------------------------------------------------------------------------
+
+
+class TestAuthBodyRedactionIntegration:
+    """Verify PII redaction is applied (or not) by _build_entry() via _build_capture_fields()."""
+
+    def _make_auth_flow(self, body: dict, method: str = "POST") -> SimpleNamespace:
+        return _make_flow(
+            method=method,
+            url="https://api.gc.com/auth",
+            request_content_type="application/json",
+            request_body=json.dumps(body).encode(),
+        )
+
+    def test_user_auth_email_redacted_in_log_entry(self) -> None:
+        """AC-1: POST /auth with email → email field is [REDACTED] in log."""
+        flow = self._make_auth_flow({"type": "user-auth", "email": "coach@example.com"})
+        entry = _build_entry(flow, "api.gc.com", "web", capture_bodies=True)
+        body = json.loads(entry["request_body"])
+        assert body["email"] == "[REDACTED]"
+        assert body["type"] == "user-auth"
+        assert "coach@example.com" not in entry["request_body"]
+
+    def test_password_auth_redacted_in_log_entry(self) -> None:
+        """AC-2: POST /auth with password → password field is [REDACTED] in log."""
+        flow = self._make_auth_flow({"type": "password", "password": "s3cr3t!"})
+        entry = _build_entry(flow, "api.gc.com", "web", capture_bodies=True)
+        body = json.loads(entry["request_body"])
+        assert body["password"] == "[REDACTED]"
+        assert body["type"] == "password"
+        assert "s3cr3t!" not in entry["request_body"]
+
+    def test_non_auth_request_not_redacted(self) -> None:
+        """AC-3: POST to a non-/auth path is not redacted."""
+        flow = _make_flow(
+            method="POST",
+            url="https://api.gc.com/teams/123/games",
+            request_content_type="application/json",
+            request_body=json.dumps({"email": "should-not-redact@example.com"}).encode(),
+        )
+        entry = _build_entry(flow, "api.gc.com", "web", capture_bodies=True)
+        body = json.loads(entry["request_body"])
+        assert body["email"] == "should-not-redact@example.com"
+
+    def test_refresh_auth_passes_through_unchanged(self) -> None:
+        """AC-4: POST /auth with type=refresh → no redaction."""
+        flow = self._make_auth_flow({"type": "refresh"})
+        entry = _build_entry(flow, "api.gc.com", "web", capture_bodies=True)
+        body = json.loads(entry["request_body"])
+        assert body == {"type": "refresh"}

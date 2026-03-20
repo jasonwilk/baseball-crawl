@@ -116,9 +116,25 @@ Optional but recommended:
 
 Leave these commented out or unset:
 - `DEV_USER_EMAIL` -- dev bypass, must not be set in production
-- `GC_TOKEN`, `GC_COOKIE` -- managed by `scripts/refresh_credentials.py`
 
-### 2.4 Seed the first admin user
+### 2.4 Bootstrap GameChanger credentials
+
+Add your GameChanger account credentials to `.env`:
+
+| Variable | Value |
+|----------|-------|
+| `GAMECHANGER_USER_EMAIL` | Your GameChanger account email |
+| `GAMECHANGER_USER_PASSWORD` | Your GameChanger account password |
+
+Then run the credential bootstrap command:
+
+```bash
+bb creds setup web
+```
+
+This executes the programmatic login flow using your credentials, stores the resulting session tokens, and verifies API connectivity. For details on the authentication architecture and token lifetimes, see [docs/api/auth.md](api/auth.md).
+
+### 2.5 Seed the first admin user
 
 The admin UI requires at least one user in the database before the first login. After
 starting the stack (Step 4), run:

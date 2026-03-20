@@ -4,7 +4,7 @@
 [E-128: Credential Workflow Redesign](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, `bb creds refresh --profile web` will detect when no refresh token exists but email + password are configured in `.env`, and execute the 3-step login flow directly to obtain tokens. This eliminates the catch-22 where the operator needs a refresh token to get a refresh token. The login flow (`_do_login_fallback()`) is already fully implemented -- this story wires it as a primary bootstrap path.

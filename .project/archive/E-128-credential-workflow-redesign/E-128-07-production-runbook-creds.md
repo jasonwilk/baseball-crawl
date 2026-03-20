@@ -4,7 +4,7 @@
 [E-128: Credential Workflow Redesign](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, `docs/production-deployment.md` will include a GameChanger credential setup step with current variable names and a reference to `bb creds setup web`. The deprecated variable names (`GC_TOKEN`, `GC_COOKIE`) will be removed. An operator following the production runbook will have a complete path from stack deployment to authenticated API access.

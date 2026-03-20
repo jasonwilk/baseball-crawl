@@ -4,7 +4,7 @@
 [E-128: Credential Workflow Redesign](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the mitmproxy addon will redact email and password values from POST /auth request bodies before writing them to proxy session logs. The `type` field (which identifies the auth step) is preserved. This is defense-in-depth -- session data is gitignored but exists on disk and was observed to contain plaintext credentials.

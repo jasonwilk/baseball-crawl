@@ -1,7 +1,7 @@
 # E-128: Credential Workflow Redesign
 
 ## Status
-`READY`
+`COMPLETED`
 <!-- Lifecycle: DRAFT -> READY -> ACTIVE -> COMPLETED (or BLOCKED / ABANDONED) -->
 
 ## Overview
@@ -56,15 +56,15 @@ During a real credential reset session (2026-03-18), the operator had to:
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
 | E-128-R-01 | Device ID synthesis probe | DONE | None | - |
-| E-128-01 | Login bootstrap path | TODO | None | - |
-| E-128-02 | `bb creds setup web` wizard | TODO | E-128-01, E-128-R-01, E-127-01, E-127-02 | - |
-| E-128-03 | `bb creds setup mobile` wizard | TODO | None | - |
-| E-128-04 | `bb creds` status dashboard | TODO | None | - |
-| E-128-05 | Smarter error diagnostics | TODO | E-128-01 | - |
-| E-128-06 | Auth-module rule file | TODO | None | - |
-| E-128-07 | Production runbook credential step | TODO | E-128-02 | - |
-| E-128-08 | Proxy session PII redaction | TODO | None | - |
-| E-128-09 | Admin docs credential update | TODO | E-128-02 | - |
+| E-128-01 | Login bootstrap path | DONE | None | - |
+| E-128-02 | `bb creds setup web` wizard | DONE | E-128-01, E-128-R-01, E-127-01, E-127-02 | - |
+| E-128-03 | `bb creds setup mobile` wizard | DONE | None | - |
+| E-128-04 | `bb creds` status dashboard | DONE | None | - |
+| E-128-05 | Smarter error diagnostics | DONE | E-128-01 | - |
+| E-128-06 | Auth-module rule file | DONE | None | - |
+| E-128-07 | Production runbook credential step | DONE | E-128-02 | - |
+| E-128-08 | Proxy session PII redaction | DONE | None | - |
+| E-128-09 | Admin docs credential update | DONE | E-128-02 | - |
 
 ## Dispatch Team
 - software-engineer
@@ -198,3 +198,14 @@ The device ID (`gc-device-id`) is a 32-character hex string. **GC does NOT enfor
 - 2026-03-18: Full-team refinement pass (SE, DE, UXD, CA, api-scout, docs-writer). Key changes: (1) E-128-01 Technical Approach expanded with CLI pre-validation gap and device ID instance-state requirement; (2) E-128-02 AC-1 specifies CLIENT_ID+CLIENT_KEY extraction and .env reload; (3) E-128-03 AC-1 clarifies upfront step display with single Enter prompt; (4) E-128-04 adds indicator semantics and INCOMPLETE state; (5) E-128-05 AC-3 improves fallback message; (6) E-128-06 notes http-discipline overlap, AC-4 tightened; (7) E-128-07 AC-4 made self-contained (no stale bootstrap-guide link); (8) E-128-08 Technical Approach corrected (addon does NOT parse auth types), file paths specified; (9) New story E-128-09 added for admin docs updates; (10) TN-8 clarified R-01 probe scope; (11) Dispatch notes expanded with test file merge guidance and api-scout advisory role.
 - 2026-03-19: Codex spec review remediation -- 5 findings applied. (F2) E-128-06 AC-4 and Context: corrected CLAUDE.md section reference from "Key Architectural Decisions" to "GameChanger API" section's Auth bullet. (F3) E-128-04 AC-1: added mobile profile client key indicator clarification. (F4) epic.md test file merge note: expanded to list all 5 stories (01-05) touching test_cli_creds.py, changed guidance to sequential merging. (F5) E-128-05: fixed Technical Approach fallback reference to point to AC-3's ordered message; clarified Context with HTTP 400 vs 401 distinction. (F6) E-128-08 AC-1: corrected "address" to "email" in both body description and field name.
 - 2026-03-20: Post-E-141 refinement pass (PM, SE, DE, UXD, CA, api-scout). Verified all stories, dependencies, and technical assumptions against 13 completed epics (E-127 through E-141). All valid. Two changes applied: (1) Dispatch Sequencing rewritten for single epic worktree serial model (E-141) -- removed "merged before" language, replaced test file merge note with serial execution note, simplified parallelism notes; (2) E-128-06 Technical Approach corrected stale "Key Architectural Decisions section" reference to "GameChanger API section".
+- 2026-03-20: **Epic COMPLETED.** All 10 work items (R-01, 01-09) passed AC verification and code review. Post-dispatch reviews: Codex review (4 findings fixed), integration code review (1 finding fixed). Summary: Operator now provides only email+password and runs `bb creds setup web` for full web authentication. Login bootstrap bypasses the refresh-token gate. Device IDs are synthesized automatically. Status dashboard (`bb creds`) shows compact credential health. Error diagnostics identify stale keys vs expired tokens. Auth-module rule file codified. Production runbook and admin docs updated. Proxy PII redaction strips email/password from POST /auth logs.
+  - **Documentation assessment**: Triggers 1 (new feature) and 5 (epic changes how users interact) fire. Already addressed: E-128-07 updated `docs/production-deployment.md`, E-128-09 updated `docs/admin/bootstrap-guide.md` and `docs/admin/credential-refresh.md`. No additional docs-writer dispatch needed.
+  - **Context-layer assessment**:
+    1. New convention/pattern/constraint: **YES** -- E-128-06 created `.claude/rules/auth-module.md` (already codified during dispatch).
+    2. Architectural decision with ongoing implications: **NO** -- login bootstrap and device ID synthesis are implementation details within the existing auth architecture.
+    3. Footgun/failure mode/boundary: **NO** -- the stale-key-mimics-expired-token trap was already documented in `docs/api/auth.md` prior to E-128. E-128-05 automates the diagnostic but adds no new boundary.
+    4. Agent behavior/routing/coordination change: **NO** -- no changes to agent dispatch, routing, or coordination.
+    5. Domain knowledge for future epics: **NO** -- device ID synthesis (R-01) and login flow details are documented in TN-8 and the auth-module rule file.
+    6. New CLI command/workflow/procedure: **YES** -- `bb creds setup web`, `bb creds setup mobile`, and `bb creds` status dashboard are new subcommands. CLAUDE.md Commands section says "Run `bb --help` for the full command list" which covers new subcommands dynamically. No workflow skill was added. The auth-module rule file (trigger 1) already covers the context-layer codification. Recommend: team-lead evaluate whether CLAUDE.md needs explicit mention of `bb creds setup web` as the primary credential bootstrap command.
+  - **Ideas backlog review**: No CANDIDATE ideas are newly unblocked by E-128. IDEA-032 (Multi-Credential per Program) remains CANDIDATE -- E-128 doesn't change its trigger conditions. IDEA-023 (Automated .env backup) is tangentially related but not unblocked.
+  - **Vision signals**: 20 unprocessed signals in `docs/vision-signals.md`. Not blocking archival. Recommend mentioning to user during closure summary.

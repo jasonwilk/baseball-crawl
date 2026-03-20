@@ -4,7 +4,7 @@
 [E-128: Credential Workflow Redesign](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, `docs/admin/bootstrap-guide.md` and `docs/admin/credential-refresh.md` reflect the new credential workflow introduced by E-128. The primary web path is `bb creds setup web` (email+password), the device ID is auto-generated, and curl/proxy capture are documented as fallback paths. These docs were identified as stale during the E-128 refinement pass (docs-writer consultation, 2026-03-18).

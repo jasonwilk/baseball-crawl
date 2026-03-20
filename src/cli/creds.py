@@ -30,7 +30,7 @@ from src.gamechanger.credential_parser import (
     merge_env_file,
     parse_credentials,
 )
-from src.gamechanger.exceptions import ConfigurationError, CredentialExpiredError
+from src.gamechanger.exceptions import ConfigurationError, CredentialExpiredError, LoginFailedError
 from src.gamechanger.key_extractor import (
     ExtractedKey,
     KeyExtractionError,
@@ -51,7 +51,7 @@ app = typer.Typer(
 def _creds_group(ctx: typer.Context) -> None:
     """Manage GameChanger credentials."""
     if ctx.invoked_subcommand is None:
-        typer.echo(ctx.get_help())
+        _render_creds_dashboard()
         raise typer.Exit()
 
 _console = Console()
@@ -64,6 +64,10 @@ _ENV_FILE = _PROJECT_ROOT / ".env"
 # Test endpoint displayed in the API health section (AC-6)
 _ME_USER_ENDPOINT = "GET /me/user"
 
+# Infrastructure (global) env vars that are not profile-specific credentials.
+# Excluded from NOT CONFIGURED / INCOMPLETE detection in the dashboard.
+_INFRA_KEYS: frozenset[str] = frozenset({"GAMECHANGER_BASE_URL"})
+
 # Mobile credential keys written by the proxy addon during capture sessions.
 _MOBILE_CRED_KEYS: tuple[str, ...] = (
     "GAMECHANGER_ACCESS_TOKEN_MOBILE",
@@ -74,6 +78,96 @@ _MOBILE_CRED_KEYS: tuple[str, ...] = (
 
 # Proxy sessions directory -- scan this to detect recent iOS traffic.
 _SESSIONS_DIR = _PROJECT_ROOT / "proxy" / "data" / "sessions"
+
+
+# ---------------------------------------------------------------------------
+# Status dashboard (bb creds with no subcommand)
+# ---------------------------------------------------------------------------
+
+
+def _render_creds_dashboard() -> None:
+    """Print a compact credential status dashboard for all profiles."""
+    _console.print("\n[bold]GameChanger Credentials[/bold]\n")
+    for profile in ALL_PROFILES:
+        result = check_profile_detailed(profile)
+        _render_profile_dashboard_section(profile, result)
+    _console.print(
+        "Run [bold]bb creds check[/bold] for full diagnostics, "
+        "[bold]bb creds setup \\[profile][/bold] to configure a profile."
+    )
+
+
+def _render_profile_dashboard_section(profile: str, result: ProfileCheckResult) -> None:
+    """Print one profile's compact status block."""
+    _console.print(f"[bold]{profile.capitalize()} Profile[/bold]")
+
+    # Filter out infra vars (e.g. BASE_URL) -- they are global, not profile credentials.
+    profile_cred_keys_present = [
+        k for k in result.presence.keys_present if k not in _INFRA_KEYS
+    ]
+
+    # No credentials at all → AC-4 / NOT CONFIGURED
+    if not profile_cred_keys_present:
+        _console.print("  [dim][--][/dim]  No credentials configured")
+        _console.print("  Status: [bold red]NOT CONFIGURED[/bold red]")
+        _console.print(f"  -> Run: bb creds setup {profile}")
+        _console.print("")
+        return
+
+    # Some credentials missing → degraded
+    if result.presence.keys_missing:
+        for key in result.presence.keys_missing:
+            _console.print(f"  [yellow][!!][/yellow]  {key}  (missing)")
+        _console.print("  Status: [bold yellow]INCOMPLETE[/bold yellow]")
+        _console.print(f"  -> Run: bb creds setup {profile}")
+        _console.print("")
+        return
+
+    # All keys present -- show health indicators.
+    if profile == "web":
+        # Client key status
+        ck = result.client_key_result
+        if ck is None or ck.status == "skipped":
+            _console.print("  [dim][--][/dim]  Client key  (not checked)")
+        elif ck.status == "valid":
+            _console.print("  [green][OK][/green]  Client key  current")
+        else:
+            _console.print(f"  [yellow][!!][/yellow]  Client key  {ck.message}")
+
+    if profile == "mobile":
+        _console.print("  [dim][--][/dim]  Mobile client key  (not extractable -- iOS binary only)")
+
+    # Refresh token health
+    th = result.token_health
+    if th is None:
+        _console.print("  [red][XX][/red]  Refresh token  (missing)")
+    elif th.is_expired:
+        _console.print("  [red][XX][/red]  Refresh token  expired")
+    elif th.exp is not None:
+        now = int(time.time())
+        days_left = max(0, (th.exp - now) // 86400)
+        _console.print(f"  [green][OK][/green]  Refresh token  valid ({days_left} days)")
+    else:
+        _console.print("  [yellow][!!][/yellow]  Refresh token  present but undecodable")
+
+    # API / authentication status
+    api = result.api_result
+    if api.exit_code == 0:
+        name_str = f"  ({api.display_name})" if api.display_name else ""
+        _console.print(f"  [green][OK][/green]  API  authenticated{name_str}")
+    elif api.exit_code == 2:
+        _console.print("  [dim][--][/dim]  API  (not checked -- credentials missing)")
+    else:
+        _console.print(f"  [red][XX][/red]  API  {api.message}")
+
+    # Overall status
+    if result.exit_code == 0:
+        _console.print("  Status: [bold green]READY[/bold green]")
+    else:
+        _console.print("  Status: [bold yellow]INCOMPLETE[/bold yellow]")
+        _console.print(f"  -> Run: bb creds setup {profile}")
+
+    _console.print("")
 
 
 @app.command(name="import")
@@ -217,22 +311,40 @@ def refresh(
     email = env.get("GAMECHANGER_USER_EMAIL") or None
     password = env.get("GAMECHANGER_USER_PASSWORD") or None
 
+    has_login_creds = bool(email and password)
+
+    # Check always-required credentials.
     missing = []
     if not client_id:
         missing.append(f"GAMECHANGER_CLIENT_ID{suffix}")
     if not client_key:
         missing.append(f"GAMECHANGER_CLIENT_KEY{suffix}")
-    if not refresh_token:
-        missing.append(f"GAMECHANGER_REFRESH_TOKEN{suffix}")
-    if not device_id:
-        missing.append(f"GAMECHANGER_DEVICE_ID{suffix}")
     if not base_url:
         missing.append("GAMECHANGER_BASE_URL")
-
     if missing:
         _err_console.print(
             "[red]Error:[/red] Missing required credentials in .env:\n"
             + "\n".join(f"  {k}" for k in missing)
+        )
+        raise typer.Exit(code=1)
+
+    # Determine auth path: login bootstrap or standard refresh.
+    use_login_bootstrap = not refresh_token
+    if use_login_bootstrap and not has_login_creds:
+        # AC-4: no refresh token and no email+password -- explain both options.
+        _err_console.print(
+            f"[red]Error:[/red] Cannot authenticate: no refresh token available.\n"
+            "Provide one of:\n"
+            f"  • GAMECHANGER_REFRESH_TOKEN{suffix} in .env (from a prior session), or\n"
+            "  • GAMECHANGER_USER_EMAIL + GAMECHANGER_USER_PASSWORD in .env (login bootstrap)."
+        )
+        raise typer.Exit(code=1)
+
+    # device_id is required for the standard refresh path; login bootstrap synthesizes it.
+    if not use_login_bootstrap and not device_id:
+        _err_console.print(
+            "[red]Error:[/red] Missing required credentials in .env:\n"
+            f"  GAMECHANGER_DEVICE_ID{suffix}"
         )
         raise typer.Exit(code=1)
 
@@ -242,31 +354,28 @@ def refresh(
             client_id=client_id,
             client_key=client_key,
             refresh_token=refresh_token,
-            device_id=device_id,  # type: ignore[arg-type]
+            device_id=device_id,
             base_url=base_url,  # type: ignore[arg-type]
             env_path=_ENV_FILE,
             email=email,
             password=password,
         )
-        refreshed_token = tm.force_refresh(allow_login_fallback=True)  # pii-ok
+        if use_login_bootstrap:
+            refreshed_token = tm.do_login()  # pii-ok
+        else:
+            refreshed_token = tm.force_refresh(allow_login_fallback=True)  # pii-ok
     except ConfigurationError as exc:
         _err_console.print(f"[red]Error:[/red] {exc}")
         raise typer.Exit(code=1)
+    except LoginFailedError as exc:
+        _err_console.print(f"[red]Error:[/red] Login failed: {exc}")
+        _err_console.print(f"Fix: [bold]bb creds setup {profile}[/bold]")
+        raise typer.Exit(code=1)
     except CredentialExpiredError as exc:
-        _err_console.print(
-            f"[red]Error:[/red] {exc}\n"
-            "Run `bb creds check --profile web` -- if Client Key Validation shows [XX], "
-            "run `bb creds extract-key` to update it.\n"
-            "If the key is valid, re-capture credentials via the proxy and run `bb creds import`."
-        )
+        _diagnose_credential_expired_error(exc, env, profile)
         raise typer.Exit(code=1)
     except AuthSigningError:
-        _err_console.print(
-            "[red]Error:[/red] Signature rejected. "
-            "Run `bb creds check --profile web` to diagnose. "
-            "If Client Key shows [XX], run `bb creds extract-key` to update it. "
-            "If clock skew is suspected, check your system clock."
-        )
+        _diagnose_auth_signing_error(env, profile)
         raise typer.Exit(code=1)
     except Exception as exc:  # noqa: BLE001
         _err_console.print(f"[red]Error:[/red] {exc}")
@@ -282,6 +391,84 @@ def refresh(
     else:
         _console.print(f"[green]Access token refreshed for {profile} profile.[/green]")
     _console.print("TokenManager wrote rotated refresh token to .env (check logs if write-back failed).")
+
+
+# ---------------------------------------------------------------------------
+# Smarter error diagnostics for bb creds refresh
+# ---------------------------------------------------------------------------
+
+
+def _diagnose_auth_signing_error(env: dict, profile: str) -> None:
+    """Diagnose an HTTP 400 signature rejection (AC-1).
+
+    Runs ``extract_client_key()`` inline to compare the live key with the
+    stored one.  Prescribes one specific next command.
+
+    Args:
+        env: Current .env values (from ``dotenv_values``).
+        profile: The credential profile that failed (e.g. ``"web"``).
+    """
+    _err_console.print("[red]Error:[/red] Signature rejected (HTTP 400).")
+    suffix = f"_{profile.upper()}"
+    current_key = env.get(f"GAMECHANGER_CLIENT_KEY{suffix}") or ""
+    known_client_id = env.get(f"GAMECHANGER_CLIENT_ID{suffix}") or None
+
+    try:
+        extracted = extract_client_key(known_client_id=known_client_id)
+    except (KeyExtractionError, MultipleKeysFoundError):
+        # AC-3: network/parse failure -- ordered fallback.
+        _err_console.print(
+            "Could not fetch the live client key to diagnose the cause.\n"
+            "Try:\n"
+            "  • `bb creds extract-key --apply`  (if client key may be stale)\n"
+            "  • `bb creds setup web`            (to re-authenticate from scratch)"
+        )
+        return
+
+    if extracted.client_key != current_key:
+        # AC-1: key changed -- stale.
+        _err_console.print(
+            "[yellow]Diagnosis:[/yellow] Client key is stale (live key differs from .env).\n"
+            "Fix: [bold]bb creds extract-key --apply[/bold]"
+        )
+    else:
+        # AC-1: key current -- clock skew.
+        _err_console.print(
+            "[yellow]Diagnosis:[/yellow] Signature rejected but client key is current.\n"
+            "Check your system clock (clock skew can cause signature validation failures)."
+        )
+
+
+def _diagnose_credential_expired_error(exc: Exception, env: dict, profile: str) -> None:
+    """Diagnose an HTTP 401 token rejection (AC-2).
+
+    Decodes the refresh token JWT expiry locally to distinguish a genuinely
+    expired token from a rejected-but-valid token (which suggests a stale key).
+
+    Args:
+        exc: The ``CredentialExpiredError`` instance.
+        env: Current .env values (from ``dotenv_values``).
+        profile: The credential profile that failed (e.g. ``"web"``).
+    """
+    _err_console.print(f"[red]Error:[/red] {exc}")
+    suffix = f"_{profile.upper()}"
+    refresh_token = env.get(f"GAMECHANGER_REFRESH_TOKEN{suffix}") or ""
+    exp = _decode_jwt_exp(refresh_token)
+    now = int(time.time())
+
+    if exp is None or exp <= now:
+        # AC-2: token is expired (or undecodable -- treat as expired).
+        _err_console.print(
+            "[yellow]Diagnosis:[/yellow] Refresh token has expired.\n"
+            f"Fix: [bold]bb creds setup {profile}[/bold]"
+        )
+    else:
+        # AC-2: token not expired locally -- key may be stale.
+        _err_console.print(
+            "[yellow]Diagnosis:[/yellow] Token rejected but refresh token has not expired locally.\n"
+            "The client key may be stale.\n"
+            "Fix: [bold]bb creds extract-key --apply[/bold]"
+        )
 
 
 def _indicator(style: str) -> Text:
@@ -725,3 +912,361 @@ def capture(
 
     _print_capture_guidance(_SESSIONS_DIR)
     raise typer.Exit(code=1)
+
+
+# ---------------------------------------------------------------------------
+# bb creds setup
+# ---------------------------------------------------------------------------
+
+
+@app.command()
+def setup(
+    profile: str = typer.Argument(
+        "web",
+        help="Profile to set up: web (default). Guided wizard for first-time setup.",
+        metavar="PROFILE",
+    ),
+) -> None:
+    """Guided setup wizard for GameChanger credentials.
+
+    Reads current credential state, skips steps already complete, and walks
+    through only what is needed for a fully authenticated profile.
+
+    The primary web path uses email + password for fully automated setup.
+    If you prefer not to store your password, use ``bb creds import`` instead
+    (paste a curl from browser DevTools or a raw token).
+
+    Examples:
+        bb creds setup web    # set up web profile (email+password path)
+        bb creds setup        # same (web is the default)
+    """
+    if profile == "web":
+        _setup_web()
+    elif profile == "mobile":
+        _setup_mobile()
+    else:
+        _err_console.print(
+            f"[red]Error:[/red] 'bb creds setup {profile}' is not supported.\n"
+            "Supported profiles: web, mobile"
+        )
+        raise typer.Exit(code=1)
+
+
+def _setup_web() -> None:
+    """Guided setup flow for the web credential profile.
+
+    Orchestrates existing building blocks: extract_client_key(), TokenManager.do_login(),
+    and run_api_check() -- no duplicated logic.
+    """
+    # ------------------------------------------------------------------
+    # AC-2: Check if already fully authenticated.
+    # ------------------------------------------------------------------
+    env = dotenv_values(str(_ENV_FILE))
+    if env.get("GAMECHANGER_REFRESH_TOKEN_WEB") and env.get("GAMECHANGER_CLIENT_KEY_WEB"):
+        _console.print("Checking existing web profile credentials...")
+        api = run_api_check("web")
+        if api.exit_code == 0:
+            _console.print("[green][OK][/green]  Web profile is already authenticated.")
+            if api.display_name:
+                _console.print(f"      Logged in as: {api.display_name}")
+            _console.print(
+                "\nRun [bold]bb creds check --profile web[/bold] for a detailed diagnostic."
+            )
+            raise typer.Exit(code=0)
+        _console.print(
+            "[yellow][!!][/yellow]  Existing credentials need refreshing. Re-running setup..."
+        )
+
+    # ------------------------------------------------------------------
+    # Step 1/3: Extract / update client key (AC-1a, AC-4, AC-5).
+    # ------------------------------------------------------------------
+    _console.print("\n[bold]Step 1/3:[/bold] Fetching client key from GC JS bundle...")
+    env = dotenv_values(str(_ENV_FILE))
+    known_client_id = env.get("GAMECHANGER_CLIENT_ID_WEB") or None
+    current_client_key = env.get("GAMECHANGER_CLIENT_KEY_WEB") or ""
+
+    try:
+        extracted = extract_client_key(known_client_id=known_client_id)
+    except MultipleKeysFoundError as exc:
+        _err_console.print(
+            "[red]Error:[/red] Multiple client keys found in the JS bundle. "
+            "Set GAMECHANGER_CLIENT_ID_WEB in .env to the correct UUID and re-run.\n"
+            "Candidates:"
+        )
+        for candidate in exc.candidates:
+            _err_console.print(f"  {candidate.client_id}")
+        raise typer.Exit(code=1)
+    except KeyExtractionError as exc:
+        # AC-5: network or parse failure.
+        _err_console.print(
+            f"[red]Error:[/red] Failed to fetch client key: {exc}\n"
+            "\nTip: check your network connection and retry, or use the fallback path:\n"
+            "  [bold]bb creds import[/bold]  (paste a curl from browser DevTools)"
+        )
+        raise typer.Exit(code=1)
+
+    client_id_missing = not env.get("GAMECHANGER_CLIENT_ID_WEB")
+    if extracted.client_key != current_client_key or client_id_missing:
+        # Key is new/stale, or CLIENT_ID absent -- write both to .env (AC-1a, AC-4).
+        try:
+            atomic_merge_env_file(str(_ENV_FILE), {
+                "GAMECHANGER_CLIENT_ID_WEB": extracted.client_id,
+                "GAMECHANGER_CLIENT_KEY_WEB": extracted.client_key,
+            })
+        except OSError as exc:
+            _err_console.print(f"[red]Error:[/red] Failed to write .env: {exc}")
+            raise typer.Exit(code=1)
+        action = "updated" if current_client_key else "extracted and saved"
+        _console.print(f"[green][OK][/green]  Client key {action}.")
+    else:
+        _console.print("[green][OK][/green]  Client key is current.")
+
+    # AC-1c: Reload .env after key extraction so downstream steps see fresh values.
+    env = dotenv_values(str(_ENV_FILE))
+
+    # ------------------------------------------------------------------
+    # Step 2/3: Check email + password (AC-3).
+    # ------------------------------------------------------------------
+    _console.print("\n[bold]Step 2/3:[/bold] Checking login credentials...")
+    email = env.get("GAMECHANGER_USER_EMAIL") or None
+    password = env.get("GAMECHANGER_USER_PASSWORD") or None
+
+    if not email or not password:
+        missing = []
+        if not email:
+            missing.append("GAMECHANGER_USER_EMAIL")
+        if not password:
+            missing.append("GAMECHANGER_USER_PASSWORD")
+        _err_console.print(
+            f"[red]Error:[/red] Missing: {', '.join(missing)}\n"
+            "\nAdd the missing variable(s) to .env, then re-run: "
+            "[bold]bb creds setup web[/bold]\n"
+            "\nAlternatively, capture a curl from browser DevTools and run "
+            "[bold]bb creds import[/bold]."
+        )
+        raise typer.Exit(code=1)
+
+    _console.print("[green][OK][/green]  Login credentials found.")
+
+    # ------------------------------------------------------------------
+    # Step 3/3: Run the login flow (AC-1b, AC-1d).
+    # ------------------------------------------------------------------
+    _console.print("\n[bold]Step 3/3:[/bold] Authenticating...")
+    client_id = env.get("GAMECHANGER_CLIENT_ID_WEB") or None
+    device_id = env.get("GAMECHANGER_DEVICE_ID_WEB") or None
+    _default_base_url = "https://api.team-manager.gc.com"
+    base_url = env.get("GAMECHANGER_BASE_URL") or _default_base_url
+    if not env.get("GAMECHANGER_BASE_URL"):
+        # Write the default so that subsequent commands (bb creds refresh, etc.) work
+        # without requiring the operator to add it manually.
+        try:
+            atomic_merge_env_file(str(_ENV_FILE), {"GAMECHANGER_BASE_URL": _default_base_url})
+        except OSError as exc:
+            _err_console.print(f"[red]Error:[/red] Failed to write GAMECHANGER_BASE_URL to .env: {exc}")
+            raise typer.Exit(code=1)
+
+    try:
+        tm = TokenManager(
+            profile="web",
+            client_id=client_id,
+            client_key=extracted.client_key,
+            device_id=device_id,
+            base_url=base_url,
+            env_path=_ENV_FILE,
+            email=email,
+            password=password,
+        )
+        login_token = tm.do_login()  # pii-ok
+    except ConfigurationError as exc:
+        _err_console.print(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(code=1)
+    except LoginFailedError as exc:
+        _err_console.print(
+            f"[red]Error:[/red] Login failed: {exc}\n"
+            "Check that GAMECHANGER_USER_EMAIL and GAMECHANGER_USER_PASSWORD are correct."
+        )
+        raise typer.Exit(code=1)
+    except Exception as exc:  # noqa: BLE001
+        _err_console.print(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(code=1)
+
+    # ------------------------------------------------------------------
+    # Step 4: Verify via GET /me/user (AC-1e).
+    # ------------------------------------------------------------------
+    _console.print("[green][OK][/green]  Login successful. Verifying access...")
+    api = run_api_check("web")
+    if api.exit_code != 0:
+        _err_console.print(
+            f"[yellow][!!][/yellow]  Tokens written but verification failed: {api.message}\n"
+            "Run [bold]bb creds check --profile web[/bold] for details."
+        )
+        raise typer.Exit(code=1)
+
+    # AC-1f: Print success with token lifetime information.
+    _console.print(f"[green][OK][/green]  Authenticated as: {api.display_name or '(user)'}")
+    exp = _decode_jwt_exp(login_token)
+    if exp is not None:
+        remaining = exp - int(time.time())
+        _console.print(f"      Access token expires in {remaining}s")
+    _console.print("\n[bold green]Web profile setup complete.[/bold green]")
+    _console.print(
+        "Refresh token written to .env. "
+        "Run [bold]bb creds check --profile web[/bold] for a full status report."
+    )
+
+
+def _setup_mobile() -> None:
+    """Guided setup flow for the mobile credential profile.
+
+    Walks the operator through the mitmproxy capture process for mobile
+    credentials, explicitly acknowledging the Mac-host boundary.
+    """
+    # ------------------------------------------------------------------
+    # AC-4 / AC-5: Check if mobile credentials already present.
+    # ------------------------------------------------------------------
+    env = dotenv_values(str(_ENV_FILE))
+    access_token = env.get("GAMECHANGER_ACCESS_TOKEN_MOBILE") or ""
+    refresh_token = env.get("GAMECHANGER_REFRESH_TOKEN_MOBILE") or ""
+
+    if access_token:
+        access_exp = _decode_jwt_exp(access_token)
+        now = int(time.time())
+        if access_exp is not None and access_exp > now:
+            # AC-4: fully authenticated -- valid access token.
+            remaining = access_exp - now
+            hours = remaining // 3600
+            mins = (remaining % 3600) // 60
+            lifetime = f"~{hours} hour(s)" if remaining >= 3600 else f"~{mins} minute(s)"
+            api = run_api_check("mobile")
+            if api.exit_code == 0:
+                _console.print(
+                    f"[green][OK][/green]  Mobile profile authenticated. "
+                    f"Access token valid for {lifetime}."
+                )
+                if api.display_name:
+                    _console.print(f"      Logged in as: {api.display_name}")
+                _console.print(
+                    "\nRun [bold]bb creds check --profile mobile[/bold] "
+                    "for a detailed diagnostic."
+                )
+                raise typer.Exit(code=0)
+            else:
+                _console.print(
+                    f"[yellow][!!][/yellow]  API check failed -- token appears valid locally "
+                    f"({lifetime} remaining) but API rejected it."
+                )
+                if api.message:
+                    _console.print(f"      API response: {api.message}")
+                _console.print(
+                    "\nRun [bold]bb creds check --profile mobile[/bold] "
+                    "for a detailed diagnostic."
+                )
+                raise typer.Exit(code=1)
+
+        # AC-5: access token expired -- show diagnostic if refresh token present.
+        if access_exp is not None:
+            _console.print(
+                "[yellow][!!][/yellow]  Mobile access token has expired. "
+                "Auto-refresh is not available for the mobile profile -- "
+                "recapture is required.\n"
+            )
+            if refresh_token:
+                refresh_exp = _decode_jwt_exp(refresh_token)
+                if refresh_exp is not None:
+                    now = int(time.time())
+                    refresh_remaining = refresh_exp - now
+                    if refresh_remaining > 0:
+                        days = max(refresh_remaining // 86400, 1)
+                        _console.print(
+                            f"      GAMECHANGER_REFRESH_TOKEN_MOBILE is still valid "
+                            f"(~{days} day(s)). Follow the steps below to recapture a "
+                            f"fresh access token."
+                        )
+                    else:
+                        _console.print(
+                            "      GAMECHANGER_REFRESH_TOKEN_MOBILE has also expired. "
+                            "Both tokens will be replaced on recapture."
+                        )
+            _console.print("")
+
+    # ------------------------------------------------------------------
+    # AC-1: Print all four steps upfront, then prompt.
+    # ------------------------------------------------------------------
+    _console.print("[bold]Mobile credential setup[/bold]\n")
+    _console.print(
+        "Step 1: Start mitmproxy on your [bold]Mac host[/bold] (not from the devcontainer):\n"
+        "          cd proxy && ./start.sh\n"
+        "\n"
+        "Step 2: Configure your iPhone proxy:\n"
+        "          Settings → Wi-Fi → [network] → HTTP Proxy → Manual\n"
+        "          Server: <your Mac IP>   Port: 8080\n"
+        "\n"
+        "Step 3: Force-quit the GameChanger app on your iPhone, then reopen it.\n"
+        "          (The app sends POST /auth on cold start, not on resume.)\n"
+        "\n"
+        "Step 4: The wizard will scan .env for captured credentials and validate them."
+    )
+    _console.print("")
+    _console.print("Press Enter when you've completed steps 1-3.", end=" ")
+    input()
+
+    # ------------------------------------------------------------------
+    # AC-2: Scan .env for captured credential keys.
+    # ------------------------------------------------------------------
+    _console.print("\nScanning .env for captured credentials...")
+    env = dotenv_values(str(_ENV_FILE))
+    found = [k for k in _MOBILE_CRED_KEYS if env.get(k)]
+    missing = [k for k in _MOBILE_CRED_KEYS if not env.get(k)]
+
+    for key in found:
+        _console.print(f"  [green][OK][/green]  {key}")
+    for key in missing:
+        _console.print(f"  [yellow][--][/yellow]  {key}  (not found)")
+
+    if missing:
+        _err_console.print(
+            f"\n[red]Error:[/red] {len(missing)} credential(s) not found in .env.\n"
+            "The proxy may not have captured a POST /auth request. Try:\n"
+            "  1. Ensure mitmproxy is running on the Mac host.\n"
+            "  2. Verify iPhone proxy settings point to the correct host/port.\n"
+            "  3. Force-quit the GC app and reopen it while the proxy is running.\n"
+            "  4. Re-run: [bold]bb creds setup mobile[/bold]\n"
+            "\nSee docs/admin/mitmproxy-guide.md for detailed instructions."
+        )
+        raise typer.Exit(code=1)
+
+    _console.print(f"\n[green][OK][/green]  All {len(found)} credential keys found.")
+
+    # ------------------------------------------------------------------
+    # AC-3: Validate via GET /me/user.
+    # ------------------------------------------------------------------
+    _console.print("\nValidating mobile access token via GET /me/user...")
+    api = run_api_check("mobile")
+    if api.exit_code != 0:
+        _err_console.print(
+            f"[yellow][!!][/yellow]  API validation failed: {api.message}\n"
+            "Credentials were written to .env but could not be verified.\n"
+            "Run [bold]bb creds check --profile mobile[/bold] for details."
+        )
+        raise typer.Exit(code=1)
+
+    access_token = env.get("GAMECHANGER_ACCESS_TOKEN_MOBILE") or ""
+    access_exp = _decode_jwt_exp(access_token)
+    now = int(time.time())
+    if access_exp is not None:
+        remaining = access_exp - now
+        hours = remaining // 3600
+        mins = (remaining % 3600) // 60
+        lifetime = f"~{hours} hour(s)" if remaining >= 3600 else f"~{mins} minute(s)"
+        _console.print(
+            f"[green][OK][/green]  Authenticated as: {api.display_name or '(user)'}\n"
+            f"      Access token valid for {lifetime} -- no auto-refresh available. "
+            f"Recapture when expired."
+        )
+    else:
+        _console.print(f"[green][OK][/green]  Authenticated as: {api.display_name or '(user)'}")
+
+    _console.print("\n[bold green]Mobile profile setup complete.[/bold green]")
+    _console.print(
+        "Run [bold]bb creds check --profile mobile[/bold] for a full status report."
+    )

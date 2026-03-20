@@ -4,7 +4,7 @@
 [E-128: Credential Workflow Redesign](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, credential error messages will auto-diagnose the root cause (stale client key vs expired refresh token vs clock skew) and prescribe exactly one next command. The current pattern of branching error messages ("if X, do A; if Y, do B") is replaced with inline diagnosis that narrows to one remediation path.

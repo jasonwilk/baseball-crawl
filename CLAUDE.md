@@ -69,7 +69,7 @@ These are the statistics and dimensions that matter for coaching decisions:
 The authoritative data dictionary mapping all GameChanger stat abbreviations to their definitions is at `docs/gamechanger-stat-glossary.md`. It includes batting, pitching, fielding, catcher, and positional innings stats, plus an API field name mapping table for cases where the API uses different abbreviations than the UI.
 
 ## GameChanger API
-- **Auth**: Three-token architecture (client, access, refresh) with programmatic token refresh and login fallback. See `docs/api/auth.md` for the full auth architecture, token lifetimes, credential variables, and mobile profile details.
+- **Auth**: Three-token architecture (client, access, refresh) with programmatic token refresh and login fallback. Auth module implementation constraints (exception hierarchy, client pattern, env var access) are in `.claude/rules/auth-module.md`. See `docs/api/auth.md` for the full auth architecture, token lifetimes, credential variables, and mobile profile details.
 - NEVER log, commit, display, or hardcode credentials in source code
 - The API is undocumented; we maintain our own spec at `docs/api/README.md` (index) and per-endpoint files in `docs/api/endpoints/`
 - API limitations are discovered iteratively -- document everything
