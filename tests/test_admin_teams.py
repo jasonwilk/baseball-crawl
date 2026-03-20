@@ -278,6 +278,41 @@ class TestTeamsFlatList:
                 response = client.get("/admin/teams?msg=Team+added")
         assert "Team added" in response.text
 
+    def test_added_flash_shows_team_name_and_hint(self, team_db: Path) -> None:
+        """AC-1: ?added=1&team_name= renders enhanced flash with team name and bb data sync hint."""
+        user_id = _insert_user(team_db, "admin@example.com")
+        token = _insert_session(team_db, user_id)
+
+        with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
+            with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
+                response = client.get("/admin/teams?added=1&team_name=River+Hawks")
+        assert "River Hawks" in response.text
+        assert "bb data sync" in response.text
+        assert "<code>" in response.text
+        assert "bg-green-100" in response.text
+
+    def test_added_flash_no_duplicate_banner(self, team_db: Path) -> None:
+        """AC-4: When ?added=1 is set, ?msg= is absent so only one banner renders."""
+        user_id = _insert_user(team_db, "admin@example.com")
+        token = _insert_session(team_db, user_id)
+
+        with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
+            with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
+                response = client.get("/admin/teams?added=1&team_name=River+Hawks")
+        # Count occurrences of the green banner div opening tag
+        assert response.text.count("bg-green-100") == 1
+
+    def test_added_flash_team_name_is_autoescaped(self, team_db: Path) -> None:
+        """AC-3/AC-4: XSS attempt in team_name is autoescaped, not rendered as HTML."""
+        user_id = _insert_user(team_db, "admin@example.com")
+        token = _insert_session(team_db, user_id)
+
+        with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
+            with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
+                response = client.get("/admin/teams?added=1&team_name=%3Cscript%3Ealert(1)%3C%2Fscript%3E")
+        assert "<script>" not in response.text
+        assert "&lt;script&gt;" in response.text
+
     def test_flash_error_displayed(self, team_db: Path) -> None:
         """?error= query param renders an error banner on teams page."""
         user_id = _insert_user(team_db, "admin@example.com")
@@ -693,7 +728,7 @@ class TestPhase2ConfirmSubmit:
         assert _count_rows(team_db, "teams", "public_id = ?", ("newteam1",)) == 1
 
     def test_confirm_submit_redirects_with_flash(self, team_db: Path) -> None:
-        """POST /admin/teams/confirm on success redirects with ?msg= flash."""
+        """POST /admin/teams/confirm on success redirects with ?added=1 flash (E-142-05)."""
         user_id = _insert_user(team_db, "admin@example.com")
         token = _insert_session(team_db, user_id)
 
@@ -718,7 +753,8 @@ class TestPhase2ConfirmSubmit:
                         },
                     )
 
-        assert "msg=" in response.headers["location"]
+        assert "added=1" in response.headers["location"]
+        assert "team_name=Flash+Team" in response.headers["location"]
 
     def test_confirm_submit_duplicate_shows_error(self, team_db: Path) -> None:
         """POST /admin/teams/confirm with duplicate public_id shows error, no insert."""
@@ -1261,3 +1297,128 @@ class TestUserTeamAssignmentIntegerIds:
                 response = client.get(f"/admin/users/{coach_id}/edit")
         # The checkbox value should be the integer id (e.g., "1"), not a text slug
         assert f'value="{team_id}"' in response.text
+
+
+# ---------------------------------------------------------------------------
+# E-142-01: user_team_access fan-out on member team create
+# ---------------------------------------------------------------------------
+
+
+class TestMemberTeamAccessFanOut:
+    """Fan-out inserts user_team_access for all users when a member team is created (E-142-01)."""
+
+    def _post_new_team(
+        self,
+        client,
+        public_id: str,
+        team_name: str,
+        membership_type: str,
+    ) -> None:
+        client.post(
+            "/admin/teams/confirm",
+            data={
+                "public_id": public_id,
+                "team_name": team_name,
+                "gc_uuid": "",
+                "membership_type": membership_type,
+                "program_id": "",
+                "classification": "",
+                "csrf_token": _CSRF,
+            },
+        )
+
+    def test_member_team_create_inserts_access_for_all_users(self, team_db: Path) -> None:
+        """Creating a member team inserts user_team_access rows for every existing user (AC-1)."""
+        admin_id = _insert_user(team_db, "admin@example.com")
+        coach_id = _insert_user(team_db, "coach@example.com")
+        token = _insert_session(team_db, admin_id)
+
+        from src.gamechanger.bridge import BridgeForbiddenError
+
+        with patch(
+            "src.api.routes.admin.resolve_public_id_to_uuid",
+            side_effect=BridgeForbiddenError("403"),
+        ):
+            with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
+                with TestClient(
+                    app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
+                ) as client:
+                    self._post_new_team(client, "newmember1", "New Member Team", "member")
+
+        conn = sqlite3.connect(str(team_db))
+        team_id = conn.execute(
+            "SELECT id FROM teams WHERE public_id = ?", ("newmember1",)
+        ).fetchone()[0]
+        admin_access = conn.execute(
+            "SELECT 1 FROM user_team_access WHERE user_id = ? AND team_id = ?",
+            (admin_id, team_id),
+        ).fetchone()
+        coach_access = conn.execute(
+            "SELECT 1 FROM user_team_access WHERE user_id = ? AND team_id = ?",
+            (coach_id, team_id),
+        ).fetchone()
+        conn.close()
+
+        assert admin_access is not None, "Admin user should have access to new member team"
+        assert coach_access is not None, "Coach user should have access to new member team"
+
+    def test_tracked_team_create_does_not_insert_access(self, team_db: Path) -> None:
+        """Creating a tracked team does NOT insert user_team_access rows (AC-3)."""
+        admin_id = _insert_user(team_db, "admin@example.com")
+        token = _insert_session(team_db, admin_id)
+
+        from src.gamechanger.bridge import BridgeForbiddenError
+
+        with patch(
+            "src.api.routes.admin.resolve_public_id_to_uuid",
+            side_effect=BridgeForbiddenError("403"),
+        ):
+            with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
+                with TestClient(
+                    app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
+                ) as client:
+                    self._post_new_team(client, "trackedteam1", "Tracked Opponent", "tracked")
+
+        conn = sqlite3.connect(str(team_db))
+        team_id = conn.execute(
+            "SELECT id FROM teams WHERE public_id = ?", ("trackedteam1",)
+        ).fetchone()[0]
+        count = conn.execute(
+            "SELECT COUNT(*) FROM user_team_access WHERE team_id = ?", (team_id,)
+        ).fetchone()[0]
+        conn.close()
+
+        assert count == 0, "Tracked team must not generate user_team_access rows"
+
+    def test_fan_out_is_idempotent(self, team_db: Path) -> None:
+        """Duplicate fan-out INSERT for the same (user_id, team_id) is silently ignored (AC-4)."""
+        from src.api.routes.admin import _insert_team_new
+
+        # Insert a user and create one member team via the function under test.
+        conn = sqlite3.connect(str(team_db))
+        conn.execute("PRAGMA foreign_keys=ON;")
+        cursor = conn.execute(
+            "INSERT INTO users (email, hashed_password) VALUES (?, '')", ("user@example.com",)
+        )
+        user_id = cursor.lastrowid
+        conn.commit()
+
+        with patch.dict("os.environ", {"DATABASE_PATH": str(team_db)}):
+            team_id = _insert_team_new("Idempotent Team", "idempotent1", None, "member", None, None)
+
+        # Manually re-run the fan-out INSERT for the same (user_id, team_id).
+        # This exercises INSERT OR IGNORE directly: the second attempt must not raise
+        # and must leave exactly one row.
+        conn.execute(
+            "INSERT OR IGNORE INTO user_team_access (user_id, team_id) VALUES (?, ?)",
+            (user_id, team_id),
+        )
+        conn.commit()
+
+        count = conn.execute(
+            "SELECT COUNT(*) FROM user_team_access WHERE user_id = ? AND team_id = ?",
+            (user_id, team_id),
+        ).fetchone()[0]
+        conn.close()
+
+        assert count == 1, "INSERT OR IGNORE must keep exactly one access row per user/team"

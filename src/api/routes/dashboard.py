@@ -362,10 +362,15 @@ async def team_stats(request: Request) -> Response:
         active_team_id, season_id, len(players), current_sort, current_dir,
     )
 
+    # Determine which teams have real stat data (E-142-03 empty state)
+    teams_with_stat_data = await run_in_threadpool(db.get_teams_with_stat_data, permitted_teams)
+
     # Filter team pills to only teams with data in the active year (Finding 1)
     year_team_infos = [t for t in team_infos if team_year_map.get(t["id"]) == active_year]
     if not year_team_infos:
         year_team_infos = team_infos
+    for t in year_team_infos:
+        t["has_stat_data"] = t["id"] in teams_with_stat_data
 
     return templates.TemplateResponse(
         request,
@@ -382,6 +387,7 @@ async def team_stats(request: Request) -> Response:
             "no_assignments": False,
             "current_sort": current_sort,
             "current_dir": current_dir,
+            "active_team_has_stat_data": active_team_id in teams_with_stat_data,
         },
     )
 
@@ -541,10 +547,15 @@ async def team_pitching(request: Request) -> Response:
         active_team_id_p, season_id, len(pitchers), current_sort_p, current_dir_p,
     )
 
+    # Determine which teams have real stat data (E-142-03 empty state)
+    teams_with_stat_data_p = await run_in_threadpool(db.get_teams_with_stat_data, permitted_teams)
+
     # Filter team pills to only teams with data in the active year (Finding 1)
     year_team_infos_p = [t for t in team_infos if team_year_map_p.get(t["id"]) == active_year_p]
     if not year_team_infos_p:
         year_team_infos_p = team_infos
+    for t in year_team_infos_p:
+        t["has_stat_data"] = t["id"] in teams_with_stat_data_p
 
     return templates.TemplateResponse(
         request,
@@ -561,6 +572,7 @@ async def team_pitching(request: Request) -> Response:
             "no_assignments": False,
             "current_sort": current_sort_p,
             "current_dir": current_dir_p,
+            "active_team_has_stat_data": active_team_id_p in teams_with_stat_data_p,
         },
     )
 
@@ -679,10 +691,15 @@ async def game_list(request: Request) -> Response:
         "Game list: team=%s season_id=%s games=%d", active_team_id_g, season_id, len(games_raw)
     )
 
+    # Determine which teams have real stat data (E-142-03 empty state)
+    teams_with_stat_data_g = await run_in_threadpool(db.get_teams_with_stat_data, permitted_teams)
+
     # Filter team pills to only teams with data in the active year (Finding 1)
     year_team_infos_g = [t for t in team_infos if team_year_map_g.get(t["id"]) == active_year_g]
     if not year_team_infos_g:
         year_team_infos_g = team_infos
+    for t in year_team_infos_g:
+        t["has_stat_data"] = t["id"] in teams_with_stat_data_g
 
     return templates.TemplateResponse(
         request,
@@ -697,6 +714,7 @@ async def game_list(request: Request) -> Response:
             "season_id": season_id,
             "user": user,
             "no_assignments": False,
+            "active_team_has_stat_data": active_team_id_g in teams_with_stat_data_g,
         },
     )
 
@@ -887,10 +905,15 @@ async def opponent_list(request: Request) -> Response:
         len(opponents),
     )
 
+    # Determine which teams have real stat data (E-142-03 empty state)
+    teams_with_stat_data_o = await run_in_threadpool(db.get_teams_with_stat_data, permitted_teams)
+
     # Filter team pills to only teams with data in the active year (Finding 1)
     year_team_infos_o = [t for t in team_infos if team_year_map_o.get(t["id"]) == active_year_o]
     if not year_team_infos_o:
         year_team_infos_o = team_infos
+    for t in year_team_infos_o:
+        t["has_stat_data"] = t["id"] in teams_with_stat_data_o
 
     return templates.TemplateResponse(
         request,
@@ -905,6 +928,7 @@ async def opponent_list(request: Request) -> Response:
             "season_id": season_id,
             "user": user,
             "no_assignments": False,
+            "active_team_has_stat_data": active_team_id_o in teams_with_stat_data_o,
         },
     )
 

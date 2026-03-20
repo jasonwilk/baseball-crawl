@@ -1250,3 +1250,350 @@ class TestGetDbPathDefault:
             path = db_module.get_db_path()
 
         assert path == custom_path.resolve()
+
+
+# ---------------------------------------------------------------------------
+# E-142-02: get_team_year_map fallback and get_teams_with_stat_data
+# ---------------------------------------------------------------------------
+
+
+class TestGetTeamYearMapFallback:
+    """get_team_year_map returns current year for teams with no stat data (E-142-02 AC-1..4)."""
+
+    def _insert_batting_row(
+        self, conn: sqlite3.Connection, team_id: int, season_id: str, player_id: str
+    ) -> None:
+        conn.execute(
+            "INSERT INTO player_season_batting (player_id, team_id, season_id, ab, h)"
+            " VALUES (?, ?, ?, 10, 3)",
+            (player_id, team_id, season_id),
+        )
+        conn.commit()
+
+    def test_no_stat_data_returns_current_year(self, tmp_path: Path) -> None:
+        """Team with no stat rows maps to the current calendar year (AC-1)."""
+        import datetime
+
+        conn = _make_db()
+        team_id = _insert_team(conn, "No Data Team")
+        env = _db_env(tmp_path, conn)
+
+        with patch.dict(os.environ, env):
+            from src.api.db import get_team_year_map
+
+            result = get_team_year_map([team_id])
+
+        assert team_id in result
+        assert result[team_id] == datetime.date.today().year
+
+    def test_team_with_stat_data_returns_actual_year(self, tmp_path: Path) -> None:
+        """Team with stat rows returns the actual year from seasons, not the fallback (AC-2)."""
+        conn = _make_db()
+        team_id = _insert_team(conn, "Data Team")
+        season_id = "2025-spring-hs"
+        conn.execute(
+            "INSERT OR IGNORE INTO seasons (season_id, name, season_type, year)"
+            " VALUES (?, 'Spring 2025 HS', 'spring-hs', 2025)",
+            (season_id,),
+        )
+        player_id = _insert_player(conn, "p-2025")
+        self._insert_batting_row(conn, team_id, season_id, player_id)
+        env = _db_env(tmp_path, conn)
+
+        with patch.dict(os.environ, env):
+            from src.api.db import get_team_year_map
+
+            result = get_team_year_map([team_id])
+
+        assert result[team_id] == 2025
+
+    def test_mixed_teams_use_real_and_fallback_years(self, tmp_path: Path) -> None:
+        """Mix of stat and no-stat teams: stat team gets real year, no-stat gets current (AC-2)."""
+        import datetime
+
+        conn = _make_db()
+        data_team = _insert_team(conn, "Has Data")
+        no_data_team = _insert_team(conn, "No Data")
+
+        season_id = "2025-spring-hs"
+        conn.execute(
+            "INSERT OR IGNORE INTO seasons (season_id, name, season_type, year)"
+            " VALUES (?, 'Spring 2025 HS', 'spring-hs', 2025)",
+            (season_id,),
+        )
+        player_id = _insert_player(conn, "p-mixed")
+        self._insert_batting_row(conn, data_team, season_id, player_id)
+        env = _db_env(tmp_path, conn)
+
+        with patch.dict(os.environ, env):
+            from src.api.db import get_team_year_map
+
+            result = get_team_year_map([data_team, no_data_team])
+
+        assert result[data_team] == 2025
+        assert result[no_data_team] == datetime.date.today().year
+
+    def test_all_no_data_teams_include_current_year_in_values(self, tmp_path: Path) -> None:
+        """When no team has stat data, the current year appears in result values (AC-3)."""
+        import datetime
+
+        conn = _make_db()
+        team_a = _insert_team(conn, "Team A")
+        team_b = _insert_team(conn, "Team B")
+        env = _db_env(tmp_path, conn)
+
+        with patch.dict(os.environ, env):
+            from src.api.db import get_team_year_map
+
+            result = get_team_year_map([team_a, team_b])
+
+        current_year = datetime.date.today().year
+        assert current_year in result.values()
+
+    def test_empty_input_returns_empty_dict(self, tmp_path: Path) -> None:
+        """Empty team_ids returns empty dict without hitting the DB."""
+        conn = _make_db()
+        env = _db_env(tmp_path, conn)
+
+        with patch.dict(os.environ, env):
+            from src.api.db import get_team_year_map
+
+            result = get_team_year_map([])
+
+        assert result == {}
+
+
+class TestGetTeamsWithStatData:
+    """get_teams_with_stat_data returns only teams with actual stat rows (E-142-02 AC-5)."""
+
+    def test_team_with_batting_row_is_included(self, tmp_path: Path) -> None:
+        """Team with a player_season_batting row is in the result set."""
+        conn = _make_db()
+        team_id = _insert_team(conn, "Batting Team")
+        season_id = _insert_season(conn)
+        player_id = _insert_player(conn, "p-bat")
+        conn.execute(
+            "INSERT INTO player_season_batting (player_id, team_id, season_id, ab, h)"
+            " VALUES (?, ?, ?, 5, 2)",
+            (player_id, team_id, season_id),
+        )
+        conn.commit()
+        env = _db_env(tmp_path, conn)
+
+        with patch.dict(os.environ, env):
+            from src.api.db import get_teams_with_stat_data
+
+            result = get_teams_with_stat_data([team_id])
+
+        assert team_id in result
+
+    def test_team_with_pitching_row_is_included(self, tmp_path: Path) -> None:
+        """Team with a player_season_pitching row is in the result set."""
+        conn = _make_db()
+        team_id = _insert_team(conn, "Pitching Team")
+        season_id = _insert_season(conn)
+        player_id = _insert_player(conn, "p-pitch")
+        conn.execute(
+            "INSERT INTO player_season_pitching (player_id, team_id, season_id, ip_outs, er)"
+            " VALUES (?, ?, ?, 9, 2)",
+            (player_id, team_id, season_id),
+        )
+        conn.commit()
+        env = _db_env(tmp_path, conn)
+
+        with patch.dict(os.environ, env):
+            from src.api.db import get_teams_with_stat_data
+
+            result = get_teams_with_stat_data([team_id])
+
+        assert team_id in result
+
+    def test_team_with_no_stat_rows_is_excluded(self, tmp_path: Path) -> None:
+        """Team with no stat rows is NOT in the result set."""
+        conn = _make_db()
+        team_id = _insert_team(conn, "Empty Team")
+        env = _db_env(tmp_path, conn)
+
+        with patch.dict(os.environ, env):
+            from src.api.db import get_teams_with_stat_data
+
+            result = get_teams_with_stat_data([team_id])
+
+        assert team_id not in result
+
+    def test_only_teams_with_stat_data_included_in_mixed_list(self, tmp_path: Path) -> None:
+        """Only teams with stat rows appear when passing a mixed list."""
+        conn = _make_db()
+        data_team = _insert_team(conn, "Data Team")
+        empty_team = _insert_team(conn, "Empty Team")
+        season_id = _insert_season(conn)
+        player_id = _insert_player(conn, "p-only")
+        conn.execute(
+            "INSERT INTO player_season_batting (player_id, team_id, season_id, ab, h)"
+            " VALUES (?, ?, ?, 8, 2)",
+            (player_id, data_team, season_id),
+        )
+        conn.commit()
+        env = _db_env(tmp_path, conn)
+
+        with patch.dict(os.environ, env):
+            from src.api.db import get_teams_with_stat_data
+
+            result = get_teams_with_stat_data([data_team, empty_team])
+
+        assert data_team in result
+        assert empty_team not in result
+
+    def test_empty_input_returns_empty_set(self, tmp_path: Path) -> None:
+        """Empty team_ids returns empty set without hitting the DB."""
+        conn = _make_db()
+        env = _db_env(tmp_path, conn)
+
+        with patch.dict(os.environ, env):
+            from src.api.db import get_teams_with_stat_data
+
+            result = get_teams_with_stat_data([])
+
+        assert result == set()
+
+
+# ---------------------------------------------------------------------------
+# E-142-04: get_team_opponents UNION fallback from team_opponents
+# ---------------------------------------------------------------------------
+
+
+def _insert_team_opponent(
+    conn: sqlite3.Connection,
+    our_team_id: int,
+    opponent_team_id: int,
+    first_seen_year: int,
+) -> None:
+    conn.execute(
+        "INSERT OR IGNORE INTO team_opponents (our_team_id, opponent_team_id, first_seen_year)"
+        " VALUES (?, ?, ?)",
+        (our_team_id, opponent_team_id, first_seen_year),
+    )
+    conn.commit()
+
+
+class TestGetTeamOpponentsUnionFallback:
+    """get_team_opponents includes team_opponents rows when no game data exists (E-142-04)."""
+
+    _SEASON = "2026-spring-hs"
+    _YEAR = 2026
+
+    def _setup_teams(self, conn: sqlite3.Connection) -> tuple[int, int]:
+        """Insert a member team and a tracked opponent; return (our_id, opponent_id)."""
+        our_id = _insert_team(conn, "LSB Varsity", membership_type="member")
+        opp_id = _insert_team(conn, "Rival Hawks", membership_type="tracked")
+        return our_id, opp_id
+
+    def test_junction_only_opponent_appears(self, tmp_path: Path) -> None:
+        """Opponent in team_opponents but no game row appears in result (AC-1, AC-2)."""
+        conn = _make_db()
+        our_id, opp_id = self._setup_teams(conn)
+        _insert_team_opponent(conn, our_id, opp_id, self._YEAR)
+        env = _db_env(tmp_path, conn)
+
+        with patch.dict(os.environ, env):
+            from src.api.db import get_team_opponents
+
+            result = get_team_opponents(our_id, self._SEASON)
+
+        assert len(result) == 1
+        row = result[0]
+        assert row["opponent_team_id"] == opp_id
+        assert row["opponent_name"] == "Rival Hawks"
+        assert row["games_played"] == 0
+        assert row["wins"] == 0
+        assert row["losses"] == 0
+        assert row["next_game_date"] is None
+        assert row["last_game_date"] is None
+
+    def test_games_only_opponent_appears_with_full_stats(self, tmp_path: Path) -> None:
+        """Opponent with game data appears with real stats (AC-6 regression guard)."""
+        conn = _make_db()
+        our_id, opp_id = self._setup_teams(conn)
+        _insert_season(conn, self._SEASON)
+        _insert_game(conn, "g-001", self._SEASON, our_id, opp_id, home_score=5, away_score=2)
+        env = _db_env(tmp_path, conn)
+
+        with patch.dict(os.environ, env):
+            from src.api.db import get_team_opponents
+
+            result = get_team_opponents(our_id, self._SEASON)
+
+        assert len(result) == 1
+        row = result[0]
+        assert row["games_played"] == 1
+        assert row["wins"] == 1
+        assert row["losses"] == 0
+
+    def test_opponent_in_both_sources_not_duplicated(self, tmp_path: Path) -> None:
+        """Opponent in both games and team_opponents appears once with game stats (AC-3)."""
+        conn = _make_db()
+        our_id, opp_id = self._setup_teams(conn)
+        _insert_season(conn, self._SEASON)
+        _insert_game(conn, "g-002", self._SEASON, our_id, opp_id, home_score=3, away_score=4)
+        _insert_team_opponent(conn, our_id, opp_id, self._YEAR)
+        env = _db_env(tmp_path, conn)
+
+        with patch.dict(os.environ, env):
+            from src.api.db import get_team_opponents
+
+            result = get_team_opponents(our_id, self._SEASON)
+
+        # Must be exactly one row, with game-based stats (not zero)
+        assert len(result) == 1
+        assert result[0]["games_played"] == 1
+        assert result[0]["losses"] == 1
+
+    def test_first_seen_year_filters_out_wrong_year(self, tmp_path: Path) -> None:
+        """team_opponents row with wrong first_seen_year is excluded (AC-4)."""
+        conn = _make_db()
+        our_id, opp_id = self._setup_teams(conn)
+        # Link with prior year -- should NOT appear in 2026 season query
+        _insert_team_opponent(conn, our_id, opp_id, self._YEAR - 1)
+        env = _db_env(tmp_path, conn)
+
+        with patch.dict(os.environ, env):
+            from src.api.db import get_team_opponents
+
+            result = get_team_opponents(our_id, self._SEASON)
+
+        assert result == []
+
+    def test_first_seen_year_matches_correct_year(self, tmp_path: Path) -> None:
+        """team_opponents row with matching first_seen_year is included (AC-4)."""
+        conn = _make_db()
+        our_id, opp_id = self._setup_teams(conn)
+        _insert_team_opponent(conn, our_id, opp_id, self._YEAR)
+        env = _db_env(tmp_path, conn)
+
+        with patch.dict(os.environ, env):
+            from src.api.db import get_team_opponents
+
+            result = get_team_opponents(our_id, self._SEASON)
+
+        assert len(result) == 1
+        assert result[0]["opponent_team_id"] == opp_id
+
+    def test_multiple_junction_opponents_all_appear(self, tmp_path: Path) -> None:
+        """Multiple team_opponents entries all appear when none have game data."""
+        conn = _make_db()
+        our_id = _insert_team(conn, "LSB Varsity", membership_type="member")
+        opp_a = _insert_team(conn, "Alpha Wolves", membership_type="tracked")
+        opp_b = _insert_team(conn, "Beta Bears", membership_type="tracked")
+        _insert_team_opponent(conn, our_id, opp_a, self._YEAR)
+        _insert_team_opponent(conn, our_id, opp_b, self._YEAR)
+        env = _db_env(tmp_path, conn)
+
+        with patch.dict(os.environ, env):
+            from src.api.db import get_team_opponents
+
+            result = get_team_opponents(our_id, self._SEASON)
+
+        opp_ids = {r["opponent_team_id"] for r in result}
+        assert opp_a in opp_ids
+        assert opp_b in opp_ids
+        assert len(result) == 2

@@ -11,6 +11,7 @@ Configuration:
 
 from __future__ import annotations
 
+import datetime
 import logging
 import os
 import sqlite3
@@ -404,11 +405,18 @@ def get_team_opponents(
     team_id: int,
     season_id: str,
 ) -> list[dict[str, Any]]:
-    """Return all opponents the given team has faced or will face in a season.
+    """Return all opponents the given team has faced, will face, or is linked to in a season.
 
-    Groups games by opponent and computes: game count, W-L record against the
-    opponent, and either the next scheduled game date (if one exists in the
-    future) or the most recent completed game date.
+    Primary source: ``games`` table (grouped by opponent, with W-L record and dates).
+    Fallback source: ``team_opponents`` junction table for opponents with no game rows yet.
+    The two sources are merged in Python; games-based rows always take precedence.
+
+    For opponents from ``team_opponents`` with no game data, ``games_played``,
+    ``wins``, and ``losses`` are 0 and date columns are None.  The template
+    renders ``games_played == 0`` as ``--`` per TN-3.
+
+    The ``first_seen_year`` filter uses the first 4 characters of ``season_id``
+    to bridge the INTEGER/TEXT impedance mismatch (e.g. ``"2026-spring-hs"`` → 2026).
 
     Args:
         team_id:   The INTEGER team id to query (home or away side).
@@ -417,10 +425,10 @@ def get_team_opponents(
     Returns:
         List of dicts with keys: opponent_team_id, opponent_name, games_played,
         wins, losses, next_game_date (ISO date str or None), last_game_date
-        (ISO date str or None).
+        (ISO date str or None).  Sorted by opponent_name ASC.
         Returns an empty list on DB error.
     """
-    query = """
+    games_query = """
         SELECT
             CASE WHEN g.home_team_id = :team_id
                  THEN g.away_team_id
@@ -456,12 +464,34 @@ def get_team_opponents(
         GROUP BY opponent_team_id, opponent_name
         ORDER BY opponent_name ASC
     """
+    junction_query = """
+        SELECT
+            to_.opponent_team_id,
+            t.name AS opponent_name,
+            0 AS games_played,
+            0 AS wins,
+            0 AS losses,
+            NULL AS next_game_date,
+            NULL AS last_game_date
+        FROM team_opponents to_
+        JOIN teams t ON t.id = to_.opponent_team_id
+        WHERE to_.our_team_id = :team_id
+          AND to_.first_seen_year = CAST(substr(:season_id, 1, 4) AS INTEGER)
+        ORDER BY t.name ASC
+    """
+    params = {"team_id": team_id, "season_id": season_id}
     try:
         with closing(get_connection()) as conn:
             conn.row_factory = sqlite3.Row
-            cursor = conn.execute(query, {"team_id": team_id, "season_id": season_id})
-            rows = cursor.fetchall()
-        return [dict(row) for row in rows]
+            games_rows = [dict(r) for r in conn.execute(games_query, params).fetchall()]
+            junction_rows = [dict(r) for r in conn.execute(junction_query, params).fetchall()]
+
+        # Build result from games rows; supplement with junction rows not already present.
+        seen_ids = {r["opponent_team_id"] for r in games_rows}
+        fallback_rows = [r for r in junction_rows if r["opponent_team_id"] not in seen_ids]
+        combined = games_rows + fallback_rows
+        combined.sort(key=lambda r: (r["opponent_name"] or "").lower())
+        return combined
     except sqlite3.Error:
         logger.exception("Failed to fetch team opponents")
         return []
@@ -1177,14 +1207,17 @@ def get_team_year_map(team_ids: list[int]) -> dict[int, int]:
 
     Queries ``player_season_batting`` and ``player_season_pitching`` UNION joined
     to ``seasons.year`` to determine which year each team has stat data for.
-    Teams with no stat data are omitted from the result.
+    Teams with no stat data fall back to the current calendar year so they
+    remain visible in the dashboard year selector and team pill list.
 
     Args:
         team_ids: List of INTEGER team ids to look up.
 
     Returns:
-        Dict mapping ``team_id → year``.  Empty dict if ``team_ids`` is empty
-        or on DB error.
+        Dict mapping ``team_id → year`` for every id in ``team_ids``.
+        Teams with stat data use their actual data year (MAX); teams without
+        stat data map to the current calendar year.  Empty dict if
+        ``team_ids`` is empty or on DB error.
     """
     if not team_ids:
         return {}
@@ -1206,10 +1239,52 @@ def get_team_year_map(team_ids: list[int]) -> dict[int, int]:
         with closing(get_connection()) as conn:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(query, params).fetchall()
-        return {row["team_id"]: row["year"] for row in rows}
+        result = {row["team_id"]: row["year"] for row in rows}
+        current_year = datetime.date.today().year
+        for team_id in team_ids:
+            if team_id not in result:
+                result[team_id] = current_year
+        return result
     except sqlite3.Error:
         logger.exception("Failed to fetch team year map")
         return {}
+
+
+def get_teams_with_stat_data(team_ids: list[int]) -> set[int]:
+    """Return the subset of team ids that have actual rows in the stat tables.
+
+    Queries ``player_season_batting`` and ``player_season_pitching`` for the
+    given team ids and returns only those with at least one row.  This is the
+    authoritative ``has_stat_data`` signal -- after the year-map fallback,
+    every team appears in ``get_team_year_map``, so callers must use this
+    function to distinguish teams with real data from fallback teams.
+
+    Args:
+        team_ids: List of INTEGER team ids to check.
+
+    Returns:
+        Set of INTEGER team ids that have at least one stat row.  Empty set
+        if ``team_ids`` is empty or on DB error.
+    """
+    if not team_ids:
+        return set()
+    placeholders = ",".join("?" for _ in team_ids)
+    query = f"""
+        SELECT DISTINCT team_id
+        FROM (
+            SELECT team_id FROM player_season_batting WHERE team_id IN ({placeholders})
+            UNION
+            SELECT team_id FROM player_season_pitching WHERE team_id IN ({placeholders})
+        )
+    """
+    params = list(team_ids) + list(team_ids)
+    try:
+        with closing(get_connection()) as conn:
+            rows = conn.execute(query, params).fetchall()
+        return {row[0] for row in rows}
+    except sqlite3.Error:
+        logger.exception("Failed to fetch teams with stat data")
+        return set()
 
 
 def get_available_seasons(team_id: int) -> list[dict[str, Any]]:

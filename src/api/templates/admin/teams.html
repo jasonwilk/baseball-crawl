@@ -20,7 +20,11 @@
      class="font-medium text-gray-600 hover:text-blue-900">Opponents</a>
 </nav>
 
-{% if msg %}
+{% if added %}
+<div class="mb-4 p-3 bg-green-100 text-green-800 rounded border border-green-300">
+  Team <strong>{{ added_team_name }}</strong> added. Run <code>bb data sync</code> to load stats for this team.
+</div>
+{% elif msg %}
 <div class="mb-4 p-3 bg-green-100 text-green-800 rounded border border-green-300">
   {{ msg }}
 </div>

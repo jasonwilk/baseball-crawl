@@ -1,7 +1,7 @@
 # E-142: Team Visibility Overhaul -- Fix Invisible Teams After Add
 
 ## Status
-`READY`
+`COMPLETED`
 <!-- Lifecycle: DRAFT → READY → ACTIVE → COMPLETED (or BLOCKED / ABANDONED) -->
 
 ## Overview
@@ -41,11 +41,11 @@ Jason reported that team 954 (Standing Bear Freshman Grizzlies 2026) was added v
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-142-01 | Access fan-out on member team create | TODO | None | - |
-| E-142-02 | Year map fallback for no-data teams | TODO | None | - |
-| E-142-04 | Opponent list fallback to team_opponents | TODO | E-142-02 | - |
-| E-142-03 | Dashboard empty state UI | TODO | E-142-02, E-142-04 | - |
-| E-142-05 | Post-add flash with next-step hint | TODO | E-142-01 | - |
+| E-142-01 | Access fan-out on member team create | DONE | None | - |
+| E-142-02 | Year map fallback for no-data teams | DONE | None | - |
+| E-142-04 | Opponent list fallback to team_opponents | DONE | E-142-02 | - |
+| E-142-03 | Dashboard empty state UI | DONE | E-142-02, E-142-04 | - |
+| E-142-05 | Post-add flash with next-step hint | DONE | E-142-01 | - |
 
 ## Dispatch Team
 - software-engineer
@@ -92,3 +92,27 @@ The success flash after team creation must include a next-step hint with the `bb
 - 2026-03-20: Spec review iteration 1 (6 findings, all accepted). Refinement: added `get_teams_with_stat_data()` to E-142-02; fixed AC-2 tabs scope; fixed opponent data/display layer separation; rewrote E-142-05 for flash safety; fixed all dependency fields.
 - 2026-03-20: Spec review iteration 2 (3 findings, all accepted). Tightened duplicate banner prevention; updated stale scope narrative; made AC-4 concrete.
 - 2026-03-20: Spec review iteration 3 (5 findings, all accepted). Year-scoped AC-7 to E-142-04 result; normalized year selector contract (dropdown vs label); fixed "No games yet" → `--` in E-142-04 description; added test files to E-142-03 and E-142-05 file lists.
+- 2026-03-20: All 5 stories DONE. Epic COMPLETED. Summary: Fixed 3 independent bugs making newly added teams invisible (access fan-out, year map fallback, opponent list fallback), added dashboard empty-state UX, and enhanced post-add flash with next-step hint. No schema changes. 15+ new tests across test_admin_teams.py, test_db.py, and test_dashboard.py.
+
+### Documentation Assessment
+- Trigger 1 (new feature/endpoint): **YES** -- new dashboard empty state UI, muted pill styling, enhanced flash message, opponent list fallback. These change how coaches and operators interact with the admin and dashboard UIs.
+- Trigger 2 (architecture/deployment): No.
+- Trigger 3 (new/modified agent): No.
+- Trigger 4 (schema changes): No.
+- Trigger 5 (changes how system works or users interact): **YES** -- teams are now visible immediately after add, empty states guide operators to next steps.
+- **Verdict**: Documentation update needed. Dispatch docs-writer to update `docs/admin/` (team management workflow) and potentially `docs/coaching/` (dashboard behavior for new teams).
+
+### Context-Layer Assessment
+1. **New convention, pattern, or constraint**: **No** -- the fixes use existing patterns (post-query backfill, junction UNION, template conditionals). No new conventions established.
+2. **Architectural decision with ongoing implications**: **No** -- no technology choices or structural decisions. Calendar-year fallback and `get_teams_with_stat_data()` are localized to db.py.
+3. **Footgun, failure mode, or boundary discovered**: **No** -- the bugs were data-dependency gaps, not systemic gotchas. The `| safe` prohibition was already in `.claude/rules/jinja-safety.md`; TN-5's approach followed the existing rule.
+4. **Change to agent behavior, routing, or coordination**: **No** -- no changes to agent dispatch, coordination, or context-layer files.
+5. **Domain knowledge discovered**: **No** -- coaching expectations (immediate visibility, "ready and waiting" tone) are reflected in the implementation but are specific to this epic's UX, not generalizable domain knowledge needing codification.
+6. **New CLI command, workflow, or operational procedure**: **No** -- no new `bb` subcommands, scripts, skills, or workflows. The `bb data sync` reference in the flash is existing.
+- **Context-layer verdict**: No triggers fired. No context-layer changes needed.
+
+### Ideas Review
+- No CANDIDATE ideas are directly unblocked by E-142. IDEA-035 (Opponent Page Redesign) is tangentially related (E-142 adds opponent fallback) but its trigger ("after scouting data flows") is not yet met.
+
+### Vision Signals
+- 27 unprocessed signals exist in `docs/vision-signals.md`. Advisory: suggest "curate the vision" at a convenient pause.

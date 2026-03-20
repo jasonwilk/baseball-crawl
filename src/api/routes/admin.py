@@ -477,8 +477,12 @@ def _insert_team_new(
     membership_type: str,
     program_id: str | None,
     classification: str | None,
-) -> None:
+) -> int:
     """Insert a new team row with INTEGER PK auto-assigned.
+
+    For member teams, also inserts ``user_team_access`` rows for every
+    existing user so the new team is immediately visible in their session
+    without requiring a logout/login.
 
     Args:
         name: Team display name.
@@ -487,9 +491,12 @@ def _insert_team_new(
         membership_type: 'member' or 'tracked'.
         program_id: Program slug or None.
         classification: Classification string or None.
+
+    Returns:
+        The INTEGER primary key of the newly inserted team.
     """
     with closing(get_connection()) as conn:
-        conn.execute(
+        cursor = conn.execute(
             """
             INSERT INTO teams
                 (name, public_id, gc_uuid, membership_type, program_id,
@@ -498,7 +505,16 @@ def _insert_team_new(
             """,
             (name, public_id, gc_uuid, membership_type, program_id, classification),
         )
+        new_team_id = cursor.lastrowid
+        if membership_type == "member":
+            user_rows = conn.execute("SELECT id FROM users").fetchall()
+            for (user_id,) in user_rows:
+                conn.execute(
+                    "INSERT OR IGNORE INTO user_team_access (user_id, team_id) VALUES (?, ?)",
+                    (user_id, new_team_id),
+                )
         conn.commit()
+    return new_team_id
 
 
 # ---------------------------------------------------------------------------
@@ -818,6 +834,8 @@ async def list_teams(request: Request) -> Response:
 
     msg = request.query_params.get("msg", "")
     error = request.query_params.get("error", "")
+    added = request.query_params.get("added", "")
+    added_team_name = request.query_params.get("team_name", "")
 
     teams = await run_in_threadpool(_get_all_teams_flat)
 
@@ -828,6 +846,8 @@ async def list_teams(request: Request) -> Response:
             "teams": teams,
             "msg": msg,
             "error": error,
+            "added": added,
+            "added_team_name": added_team_name,
             "admin_user": guard,
             "is_admin_page": True,
         },
@@ -1164,7 +1184,7 @@ async def confirm_team_submit(
             status_code=303,
         )
     return RedirectResponse(
-        url=f"/admin/teams?msg={quote_plus(f'Team added: {team_name}')}",
+        url=f"/admin/teams?added=1&team_name={quote_plus(team_name)}",
         status_code=303,
     )
 

@@ -185,8 +185,8 @@ class TestGetTeamYearMap:
         result = api_db.get_team_year_map([])
         assert result == {}
 
-    def test_teams_with_no_stat_data_omitted(self, tmp_path: Path) -> None:
-        """Teams with no batting or pitching stats are omitted from the result."""
+    def test_teams_with_no_stat_data_fall_back_to_current_year(self, tmp_path: Path) -> None:
+        """Teams with no batting or pitching stats map to the current calendar year (E-142-02)."""
         db_path = _make_db(tmp_path)
         team_with_data = _insert_team(db_path, "LSB Varsity")
         team_no_data = _insert_team(db_path, "LSB JV")
@@ -198,7 +198,9 @@ class TestGetTeamYearMap:
             result = api_db.get_team_year_map([team_with_data, team_no_data])
 
         assert team_with_data in result
-        assert team_no_data not in result
+        assert result[team_with_data] == _CURRENT_YEAR
+        assert team_no_data in result
+        assert result[team_no_data] == _CURRENT_YEAR
 
     def test_multiple_teams_multiple_years(self, tmp_path: Path) -> None:
         """Multiple teams with different years each get correct mapping."""
@@ -395,6 +397,32 @@ class TestRouteYearFiltering:
                 ]:
                     resp = client.get(url)
                     assert resp.status_code == 200, f"Route {url} returned {resp.status_code}"
+
+    def test_no_data_team_appears_in_team_pills_for_current_year(self, tmp_path: Path) -> None:
+        """No-data team appears in team pills when dashboard is loaded for the current year (AC-4).
+
+        A team with stat data anchors the current year in the year selector.
+        A second team with no stat data falls back to the current year via the
+        get_team_year_map fallback, so it must appear in the team pill list.
+        """
+        db_path = _make_db(tmp_path)
+        team_with_data = _insert_team(db_path, "LSB Varsity")
+        team_no_data = _insert_team(db_path, "LSB Freshman")
+        _insert_player(db_path, "p-nd-001", "Sam", "Rivera")
+        _insert_season(db_path, _CURRENT_SEASON, _CURRENT_YEAR)
+        _insert_batting_stats(db_path, "p-nd-001", team_with_data, _CURRENT_SEASON)
+        # team_no_data has no stat rows -- relies on year-map fallback
+
+        with patch.dict(
+            "os.environ",
+            {"DATABASE_PATH": str(db_path), "DEV_USER_EMAIL": "dev@example.com"},
+        ):
+            client = _make_dev_client_multi(db_path, [team_with_data, team_no_data])
+            with client:
+                resp = client.get(f"/dashboard?year={_CURRENT_YEAR}")
+
+        assert resp.status_code == 200
+        assert "LSB Freshman" in resp.text
 
 
 # ---------------------------------------------------------------------------

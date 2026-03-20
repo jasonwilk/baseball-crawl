@@ -1951,8 +1951,8 @@ class TestJerseyNumberColumn:
         assert response.status_code == 200
         assert "&mdash;" in response.text or "—" in response.text
 
-    def test_batting_empty_state_colspan_15(self, tmp_path: Path) -> None:
-        """AC-4: team_stats.html empty state uses colspan=15."""
+    def test_batting_empty_state_shows_yellow_card(self, tmp_path: Path) -> None:
+        """AC-4 (updated for E-142-03): team_stats.html shows yellow info card when team has no stat data."""
         db_path = tmp_path / "test_empty_batting.db"
         _apply_schema(db_path)
         conn = sqlite3.connect(str(db_path))
@@ -1967,10 +1967,12 @@ class TestJerseyNumberColumn:
             with TestClient(app) as client:
                 response = client.get("/dashboard")
         assert response.status_code == 200
-        assert 'colspan="15"' in response.text
+        assert "bg-yellow-50" in response.text
+        assert "Stats haven't been loaded" in response.text
+        assert "<table" not in response.text
 
-    def test_pitching_empty_state_colspan_15(self, tmp_path: Path) -> None:
-        """AC-4: team_pitching.html empty state uses colspan=15."""
+    def test_pitching_empty_state_shows_yellow_card(self, tmp_path: Path) -> None:
+        """AC-4 (updated for E-142-03): team_pitching.html shows yellow info card when team has no stat data."""
         db_path = tmp_path / "test_empty_pitching.db"
         _apply_schema(db_path)
         conn = sqlite3.connect(str(db_path))
@@ -1985,7 +1987,9 @@ class TestJerseyNumberColumn:
             with TestClient(app) as client:
                 response = client.get("/dashboard/pitching")
         assert response.status_code == 200
-        assert 'colspan="15"' in response.text
+        assert "bg-yellow-50" in response.text
+        assert "Stats haven't been loaded" in response.text
+        assert "<table" not in response.text
 
 
 class TestGameDetailJerseyNumber:
@@ -2273,3 +2277,242 @@ class TestOpponentDetailJerseyNumber:
         assert response.status_code == 200
         pitching = self._pitching_html(response.text)
         assert "&mdash;" in pitching or "—" in pitching, "em dash missing from pitching table"
+
+
+# ---------------------------------------------------------------------------
+# E-142-03: Dashboard Empty State UI
+# ---------------------------------------------------------------------------
+
+_CURRENT_YEAR_E142 = datetime.date.today().year
+
+
+def _make_no_data_db(tmp_path: Path, *, second_team_has_data: bool = False) -> tuple[Path, int, int]:
+    """Database with one no-data team and an optional second team with data.
+
+    Returns (db_path, no_data_team_id, data_team_id).
+    data_team_id is 0 if second_team_has_data is False.
+    """
+    db_path = tmp_path / "test_empty_state.db"
+    _apply_schema(db_path)
+    conn = sqlite3.connect(str(db_path))
+    conn.execute("PRAGMA foreign_keys=ON")
+
+    conn.execute(
+        "INSERT OR IGNORE INTO seasons (season_id, name, season_type, year) VALUES (?, ?, ?, ?)",
+        (_CURRENT_SEASON_ID, f"Spring {_CURRENT_YEAR_E142} High School", "spring-hs", _CURRENT_YEAR_E142),
+    )
+
+    # No-data team
+    cursor = conn.execute(
+        "INSERT INTO teams (name, membership_type, classification) VALUES (?, ?, ?)",
+        ("No Data FC", "member", "varsity"),
+    )
+    no_data_team_id: int = cursor.lastrowid  # type: ignore[assignment]
+
+    cursor = conn.execute(
+        "INSERT OR IGNORE INTO users (email) VALUES (?)",
+        ("testdev@example.com",),
+    )
+    user_id: int = cursor.lastrowid or conn.execute(  # type: ignore[assignment]
+        "SELECT id FROM users WHERE email = ?", ("testdev@example.com",)
+    ).fetchone()[0]
+    conn.execute(
+        "INSERT OR IGNORE INTO user_team_access (user_id, team_id) VALUES (?, ?)",
+        (user_id, no_data_team_id),
+    )
+
+    data_team_id = 0
+    if second_team_has_data:
+        cursor = conn.execute(
+            "INSERT INTO teams (name, membership_type, classification) VALUES (?, ?, ?)",
+            ("Data Loaded HS", "member", "varsity"),
+        )
+        data_team_id = cursor.lastrowid  # type: ignore[assignment]
+        conn.execute(
+            "INSERT OR IGNORE INTO user_team_access (user_id, team_id) VALUES (?, ?)",
+            (user_id, data_team_id),
+        )
+        # Give the data team a batting stat row
+        conn.execute(
+            "INSERT OR IGNORE INTO players (player_id, first_name, last_name) VALUES (?, ?, ?)",
+            ("e142-p-001", "Real", "Stats"),
+        )
+        conn.execute(
+            "INSERT OR IGNORE INTO player_season_batting"
+            " (player_id, team_id, season_id, gp, ab, h, doubles, triples, hr, rbi, bb, so, sb)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("e142-p-001", data_team_id, _CURRENT_SEASON_ID, 2, 6, 2, 0, 0, 0, 1, 1, 1, 0),
+        )
+
+    conn.commit()
+    conn.close()
+    return db_path, no_data_team_id, data_team_id
+
+
+def _make_no_data_with_junction_opponent(tmp_path: Path) -> tuple[Path, int, int]:
+    """DB with one no-data team linked to a tracked opponent via team_opponents.
+
+    No games exist, so the junction fallback (E-142-04) supplies the opponent.
+    Returns (db_path, no_data_team_id, opp_team_id).
+    """
+    db_path = tmp_path / "test_junction_opp.db"
+    _apply_schema(db_path)
+    conn = sqlite3.connect(str(db_path))
+    conn.execute("PRAGMA foreign_keys=ON")
+
+    conn.execute(
+        "INSERT OR IGNORE INTO seasons (season_id, name, season_type, year) VALUES (?, ?, ?, ?)",
+        (_CURRENT_SEASON_ID, f"Spring {_CURRENT_YEAR_E142} High School", "spring-hs", _CURRENT_YEAR_E142),
+    )
+
+    cursor = conn.execute(
+        "INSERT INTO teams (name, membership_type) VALUES (?, ?)",
+        ("LSB No Stats", "member"),
+    )
+    our_team_id: int = cursor.lastrowid  # type: ignore[assignment]
+
+    cursor = conn.execute(
+        "INSERT OR IGNORE INTO users (email) VALUES (?)",
+        ("testdev@example.com",),
+    )
+    user_id: int = cursor.lastrowid or conn.execute(  # type: ignore[assignment]
+        "SELECT id FROM users WHERE email = ?", ("testdev@example.com",)
+    ).fetchone()[0]
+    conn.execute(
+        "INSERT OR IGNORE INTO user_team_access (user_id, team_id) VALUES (?, ?)",
+        (user_id, our_team_id),
+    )
+
+    cursor = conn.execute(
+        "INSERT INTO teams (name, membership_type) VALUES (?, ?)",
+        ("Junction Opponent", "tracked"),
+    )
+    opp_team_id: int = cursor.lastrowid  # type: ignore[assignment]
+
+    conn.execute(
+        "INSERT INTO team_opponents (our_team_id, opponent_team_id, first_seen_year) VALUES (?, ?, ?)",
+        (our_team_id, opp_team_id, _CURRENT_YEAR_E142),
+    )
+
+    conn.commit()
+    conn.close()
+    return db_path, our_team_id, opp_team_id
+
+
+class TestEmptyStateUI:
+    """E-142-03: Dashboard empty state card and muted pill rendering."""
+
+    def test_batting_tab_shows_yellow_card_for_no_data_team(self, tmp_path: Path) -> None:
+        """AC-1: Batting tab shows yellow info card when active team has no stat data."""
+        db_path, no_data_id, _ = _make_no_data_db(tmp_path)
+        env = {"DATABASE_PATH": str(db_path), "DEV_USER_EMAIL": "testdev@example.com"}
+        with patch.dict("os.environ", env):
+            with TestClient(app) as client:
+                response = client.get(f"/dashboard?team_id={no_data_id}&year={_CURRENT_YEAR_E142}")
+        assert response.status_code == 200
+        assert "bg-yellow-50" in response.text
+        assert "Stats haven't been loaded" in response.text
+        assert "<table" not in response.text
+
+    def test_pitching_tab_shows_yellow_card_for_no_data_team(self, tmp_path: Path) -> None:
+        """AC-2: Pitching tab shows yellow info card when active team has no stat data."""
+        db_path, no_data_id, _ = _make_no_data_db(tmp_path)
+        env = {"DATABASE_PATH": str(db_path), "DEV_USER_EMAIL": "testdev@example.com"}
+        with patch.dict("os.environ", env):
+            with TestClient(app) as client:
+                response = client.get(f"/dashboard/pitching?team_id={no_data_id}&year={_CURRENT_YEAR_E142}")
+        assert response.status_code == 200
+        assert "bg-yellow-50" in response.text
+        assert "Stats haven't been loaded" in response.text
+        assert "<table" not in response.text
+
+    def test_games_tab_shows_yellow_card_for_no_data_team(self, tmp_path: Path) -> None:
+        """AC-2: Games tab shows yellow info card when active team has no stat data."""
+        db_path, no_data_id, _ = _make_no_data_db(tmp_path)
+        env = {"DATABASE_PATH": str(db_path), "DEV_USER_EMAIL": "testdev@example.com"}
+        with patch.dict("os.environ", env):
+            with TestClient(app) as client:
+                response = client.get(f"/dashboard/games?team_id={no_data_id}&year={_CURRENT_YEAR_E142}")
+        assert response.status_code == 200
+        assert "bg-yellow-50" in response.text
+        assert "Stats haven't been loaded" in response.text
+        assert "<table" not in response.text
+
+    def test_opponents_tab_shows_yellow_card_when_no_opponents_and_no_data(
+        self, tmp_path: Path
+    ) -> None:
+        """AC-7: Opponents tab shows yellow card when no opponents AND no stat data."""
+        db_path, no_data_id, _ = _make_no_data_db(tmp_path)
+        env = {"DATABASE_PATH": str(db_path), "DEV_USER_EMAIL": "testdev@example.com"}
+        with patch.dict("os.environ", env):
+            with TestClient(app) as client:
+                response = client.get(
+                    f"/dashboard/opponents?team_id={no_data_id}&year={_CURRENT_YEAR_E142}"
+                )
+        assert response.status_code == 200
+        assert "bg-yellow-50" in response.text
+        assert "Stats haven't been loaded" in response.text
+        assert "<table" not in response.text
+
+    def test_opponents_tab_shows_list_when_junction_opponent_exists_no_data(
+        self, tmp_path: Path
+    ) -> None:
+        """AC-7: Opponents tab shows opponent list (not yellow card) when junction opponents exist."""
+        db_path, our_id, _opp_id = _make_no_data_with_junction_opponent(tmp_path)
+        env = {"DATABASE_PATH": str(db_path), "DEV_USER_EMAIL": "testdev@example.com"}
+        with patch.dict("os.environ", env):
+            with TestClient(app) as client:
+                response = client.get(
+                    f"/dashboard/opponents?team_id={our_id}&year={_CURRENT_YEAR_E142}"
+                )
+        assert response.status_code == 200
+        assert "Junction Opponent" in response.text
+        assert "<table" in response.text
+        assert "bg-yellow-50" not in response.text
+
+    def test_unselected_no_data_pill_uses_muted_styling(self, tmp_path: Path) -> None:
+        """AC-3: Unselected pill for a no-data team uses gray muted styling."""
+        db_path, no_data_id, data_id = _make_no_data_db(tmp_path, second_team_has_data=True)
+        env = {"DATABASE_PATH": str(db_path), "DEV_USER_EMAIL": "testdev@example.com"}
+        with patch.dict("os.environ", env):
+            with TestClient(app) as client:
+                # Select the data team so no_data pill is unselected
+                response = client.get(f"/dashboard?team_id={data_id}&year={_CURRENT_YEAR_E142}")
+        assert response.status_code == 200
+        assert "bg-gray-50" in response.text
+        assert "text-gray-400" in response.text
+
+    def test_selected_no_data_pill_uses_normal_selected_styling(self, tmp_path: Path) -> None:
+        """AC-4: The active pill for a no-data team uses normal selected styling (bg-blue-900)."""
+        db_path, no_data_id, _ = _make_no_data_db(tmp_path)
+        env = {"DATABASE_PATH": str(db_path), "DEV_USER_EMAIL": "testdev@example.com"}
+        with patch.dict("os.environ", env):
+            with TestClient(app) as client:
+                response = client.get(f"/dashboard?team_id={no_data_id}&year={_CURRENT_YEAR_E142}")
+        assert response.status_code == 200
+        # Active pill class
+        assert "bg-blue-900 text-white" in response.text
+
+    def test_single_year_shows_year_label(self, tmp_path: Path) -> None:
+        """AC-5a: When only one year exists, a static year label is visible."""
+        db_path, no_data_id, _ = _make_no_data_db(tmp_path)
+        env = {"DATABASE_PATH": str(db_path), "DEV_USER_EMAIL": "testdev@example.com"}
+        with patch.dict("os.environ", env):
+            with TestClient(app) as client:
+                response = client.get(f"/dashboard?team_id={no_data_id}&year={_CURRENT_YEAR_E142}")
+        assert response.status_code == 200
+        # Year label should appear as plain text (not dropdown)
+        assert str(_CURRENT_YEAR_E142) in response.text
+        # There should be no year dropdown
+        assert 'name="year"' not in response.text
+
+    def test_data_team_still_renders_table(self, tmp_path: Path) -> None:
+        """AC-6: A team with stat data still renders the batting table (no regression)."""
+        db_path, _no_data_id, data_id = _make_no_data_db(tmp_path, second_team_has_data=True)
+        env = {"DATABASE_PATH": str(db_path), "DEV_USER_EMAIL": "testdev@example.com"}
+        with patch.dict("os.environ", env):
+            with TestClient(app) as client:
+                response = client.get(f"/dashboard?team_id={data_id}&year={_CURRENT_YEAR_E142}")
+        assert response.status_code == 200
+        assert "<table" in response.text
+        assert "bg-yellow-50" not in response.text
