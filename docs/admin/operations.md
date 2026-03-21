@@ -81,7 +81,8 @@ The teams page (`/admin/teams`) shows a single flat table of all teams -- member
 | Membership | **Member** badge (blue) or **Tracked** badge (gray) |
 | Opponents | Count of opponent connections; links to `/admin/opponents?team_id={id}` |
 | Status | **Active** or **Inactive** |
-| Actions | Edit link, Activate/Deactivate button, Discover button (active teams with a public ID only) |
+| Last Synced | Timestamp of the last completed sync, or **Never** if the team has never been synced. If a sync is currently running, the current-job status badge is shown alongside the previous sync timestamp. |
+| Actions | Edit link, Activate/Deactivate button, Discover button (active teams with a public ID only), Sync button (eligible teams only), Delete button (inactive teams only) |
 
 ### Editing a Team
 
@@ -94,7 +95,53 @@ Click **Edit** on any row to open the edit form at `/admin/teams/{id}/edit` (INT
 
 ### Activating and Deactivating Teams
 
-The **Activate/Deactivate** button on each row calls `POST /admin/teams/{id}/toggle-active`. Active teams (`is_active = 1`) are included when crawling with `--source db`. Deactivated teams are preserved in the database but excluded from crawls.
+The **Activate/Deactivate** button on each row calls `POST /admin/teams/{id}/toggle-active`. Active teams (`is_active = 1`) are included when crawling. Deactivated teams are preserved in the database but excluded from crawls and show no Sync button.
+
+### Syncing Team Data
+
+The **Sync** button on each row triggers a data refresh for that team. It calls `POST /admin/teams/{id}/sync`, enqueues the crawl as a background task, and redirects immediately to the teams page with a flash message: "Sync started for [team name]."
+
+The correct pipeline runs automatically based on membership type:
+- **Member teams**: Full crawl + load via `crawl.run(source="db", team_ids=[id])` then `load.run(source="db", team_ids=[id])`.
+- **Tracked teams**: Scouting crawler + loader (`ScoutingCrawler.scout_team(public_id)` plus loader step).
+
+Both the crawl and load steps always run -- crawled data stays in `data/raw/` and dashboards remain stale without the load step.
+
+**Sync button eligibility**: The Sync button appears only for active teams that are ready to crawl:
+- Active member teams (always eligible).
+- Active tracked teams where a `public_id` has been mapped (either auto-resolved or manually connected).
+- Inactive teams show no Sync button.
+- Unresolved tracked teams (`public_id IS NULL`) show a muted "Unresolved -- map first" indicator instead.
+
+**Last Synced column**: Updated to the current timestamp on each successful sync completion. A status badge on the latest crawl job shows the current run state:
+
+| Badge | Meaning |
+|-------|---------|
+| ✓ Success (green) | Last sync completed without errors |
+| ✗ Failed (red) | Last sync encountered an error |
+| Running... (yellow) | Sync is currently in progress; Sync button is disabled |
+
+**Auth token refresh**: Each background sync refreshes the GameChanger access token at the start of the run, before invoking the pipeline. This prevents mid-run authentication failures.
+
+**CLI alternative**: `bb data sync`, `bb data crawl --source db`, and `bb data load --source db` are still available and continue to work for scripting or automation. The UI Sync button is preferred for ad-hoc refreshes.
+
+### Deleting a Team
+
+The **Delete** button appears only on rows where the team is **deactivated** (`is_active = 0`). Active teams do not show a delete option. Clicking Delete shows a browser confirmation dialog with the team name before submitting.
+
+`POST /admin/teams/{id}/delete` checks two preconditions before proceeding:
+1. The team is deactivated.
+2. No associated data rows exist in: `games`, `player_game_batting`, `player_game_pitching`, `player_season_batting`, `player_season_pitching`, `scouting_runs`, `spray_charts`.
+
+If either check fails, the page redirects to the teams list with an error flash explaining the team has associated data and cannot be deleted. Teams with historical game or stat data should remain deactivated, not deleted.
+
+When deletion proceeds (both checks pass), the operation runs in a single transaction:
+1. Clears junction/access rows: `team_opponents`, `team_rosters`, `opponent_links`, `user_team_access`, `coaching_assignments`, `crawl_jobs`.
+2. Deletes the `teams` row.
+
+After a successful deletion, the teams list shows a success flash confirming which team was removed.
+
+**Use case**: Removing mis-entered or duplicate tracked teams before any data has been crawled for them. Once data exists, soft-deactivation (`is_active = 0`) is the only option.
 
 ### Discovering Opponents
 
@@ -102,7 +149,9 @@ For any active team that has a public ID, the **Discover** button calls `POST /a
 
 **Important limitation**: The public games endpoint returns opponent names only -- no public ID or other identifier. Discovered opponents are inserted as placeholder rows in the `teams` table with `membership_type = 'tracked'`, `is_active = 0`, and `public_id = NULL`. To upgrade a placeholder to a full record, paste the team's GameChanger URL into the Add Team form at `/admin/teams`.
 
-### Database-Driven Crawl Configuration
+After running discovery, navigate to the **Opponents** tab to see which opponents were auto-resolved and which need manual mapping.
+
+### Database-Driven Crawl Configuration (CLI)
 
 By default, `scripts/crawl.py` and `scripts/load.py` read team configuration from `config/teams.yaml`. Pass `--source db` to read active member teams directly from the database instead:
 
@@ -120,7 +169,107 @@ SELECT id, name, classification, gc_uuid FROM teams WHERE is_active = 1 AND memb
 
 The database path defaults to `./data/app.db` or the `DATABASE_PATH` environment variable.
 
-`config/teams.yaml` remains functional as a bootstrap and seed mechanism. YAML is still the default to preserve backward compatibility; once all teams are in the database, switching to `--source db` is the recommended workflow.
+`config/teams.yaml` remains functional as a bootstrap and seed mechanism. YAML is still the default for the CLI to preserve backward compatibility; the UI Sync button is preferred for per-team ad-hoc refreshes.
+
+## Programs Management
+
+Programs are umbrella entities that group teams under a shared organizational identity (e.g., `lsb-hs` = Lincoln Standing Bear High School). Navigate to the **Programs** tab (`/admin/programs`) in the admin sub-navigation.
+
+### Programs List
+
+The Programs page lists all programs with these columns:
+
+| Column | Contents |
+|--------|---------|
+| Name | Display name (e.g., "Lincoln Standing Bear HS") |
+| Program ID | Operator-chosen slug used as the primary key (e.g., `lsb-hs`) |
+| Type | `hs`, `usssa`, or `legion` |
+| Org Name | Optional organization name |
+| Teams | Count of teams assigned to this program |
+| Created | Creation timestamp |
+
+### Adding a Program
+
+The "Add Program" form is on the Programs page itself. Fill in:
+
+| Field | Notes |
+|-------|-------|
+| **Program ID** | Short slug (e.g., `lsb-hs`). Must be unique -- duplicate IDs return an error flash, not a 500. |
+| **Display Name** | Human-readable name shown in dropdowns and tables. |
+| **Type** | `hs`, `usssa`, or `legion`. |
+| **Org Name** | Optional. |
+
+Click **Add Program**. The new program appears immediately in the programs list and in the program dropdown on the team add/edit pages -- no app restart required.
+
+**Note**: Program edit and delete are not available in the UI. To rename a program, update the `programs` table directly with `sqlite3 data/app.db`. Program deletion is only safe when no teams reference the program.
+
+## User Role Management
+
+The admin UI enforces role-based access. Two roles exist:
+
+| Role | Access |
+|------|--------|
+| `admin` | Full access: team CRUD, program CRUD, user CRUD, crawl triggers, opponent mapping. |
+| `user` | Read-only: coaching dashboards and reports. Cannot access management routes. |
+
+### Granting Admin Access
+
+Admin access is granted via either of two mechanisms (both are checked):
+
+1. **`ADMIN_EMAIL` environment variable** (bootstrap path): If the authenticated user's email matches `ADMIN_EMAIL` in `.env`, they receive admin access regardless of their database role. Use this to bootstrap the first admin account.
+
+2. **Database role** (ongoing): Set `role = 'admin'` on the user's row. Once set, the user has permanent admin access even if `ADMIN_EMAIL` is changed or removed.
+
+To promote a user to admin via SQL:
+
+```sql
+UPDATE users SET role = 'admin' WHERE id = <user_id>;
+```
+
+After promotion, the user's Role column on the Users page shows `admin`.
+
+### Role Field in User Forms
+
+The **Users** page (`/admin/users`) displays a **Role** column. The **Add User** form and **Edit User** form both include a Role field (radio: Admin / User, default: User).
+
+**Self-demotion guard**: An admin cannot set their own role to `user` via the edit form -- a server-side validation error prevents accidental lockout.
+
+### Revoking Admin Access
+
+Change the user's role to `user` on the Edit User page (`/admin/users/{id}/edit`). The change takes effect immediately on the next request.
+
+## Opponent Mapping
+
+The Opponents page (`/admin/opponents`) shows all opponent links discovered for member teams. Navigate there via the **Opponents** tab in the admin sub-navigation, or via the Opponents count link on any team row.
+
+### Reading the Opponents Page
+
+A summary stat line at the top of the page shows the current mapping state:
+
+```
+14 opponents -- 10 resolved, 4 need mapping.
+```
+
+The table shows each opponent with a **Status** badge:
+
+| Badge | Meaning |
+|-------|---------|
+| Resolved (green) | `public_id` is known; the team can be crawled for scouting data. |
+| Unresolved (orange) | `public_id IS NULL`; scouting data cannot be fetched until the team is mapped. |
+
+Auto-resolved opponents (~86%) are linked automatically via the `progenitor_team_id` field on the schedule. The remaining ~14% require manual mapping.
+
+### Manually Connecting an Opponent
+
+For any **Unresolved** row, click the **Connect** button (blue primary button). This opens the URL paste form where you provide the opponent team's GameChanger URL. The system shows a preview before saving.
+
+To find the URL: navigate to the team's page on [web.gc.com](https://web.gc.com) and copy the URL.
+
+After connecting, the row shows a **Resolved** badge and a gray **Disconnect** button (in case of mis-mapping).
+
+### Running Opponent Discovery
+
+The **Run Discovery** link at the top of the Opponents page navigates to the Teams page where the per-team **Discover** buttons are available. Run discovery for each of your member teams to import opponents from their schedules.
 
 ---
 
@@ -303,4 +452,4 @@ For the expected data volume (~30 games x 4 teams x a few seasons), the database
 
 ---
 
-*Last updated: 2026-03-17 | Source: E-120-06 (bare UUID input documented), E-055 (unified CLI), E-115-01 (E-100 team management model), E-028-03 (original)*
+*Last updated: 2026-03-21 | Source: E-143 (programs, user roles, team delete, opponent mapping UX, crawl trigger UI), E-120-06 (bare UUID input documented), E-055 (unified CLI), E-115-01 (E-100 team management model), E-028-03 (original)*

@@ -81,11 +81,13 @@ class TestMigrationFiles:
         for f in files:
             assert f.suffix == ".sql", f"Unexpected file: {f}"
 
-    def test_only_001_initial_schema_exists(self) -> None:
-        """After E-100-01 archive, only 001_initial_schema.sql exists in migrations/."""
+    def test_expected_migrations_exist(self) -> None:
+        """Exactly the expected migration files exist in migrations/."""
         files = collect_migration_files()
         names = [f.name for f in files]
         assert "001_initial_schema.sql" in names
+        assert "002_add_user_role.sql" in names
+        assert "003_add_crawl_jobs.sql" in names
         # Archived migrations should not be present
         archived = {
             "003_auth.sql",
@@ -143,6 +145,7 @@ class TestRunMigrations:
             "passkey_credentials",
             "sessions",
             "coaching_assignments",
+            "crawl_jobs",
         }
         conn = sqlite3.connect(str(fresh_db))
         cursor = conn.execute(
@@ -234,6 +237,44 @@ class TestRunMigrations:
         assert row[2] == "hs"
 
 
+class TestUserRoleMigration:
+    """Verify migration 002_add_user_role.sql behavior."""
+
+    def test_users_table_has_role_column(self, fresh_db: Path) -> None:
+        """After migrations, users table has a role column."""
+        run_migrations(db_path=fresh_db)
+        conn = sqlite3.connect(str(fresh_db))
+        cursor = conn.execute("PRAGMA table_info(users);")
+        columns = {row[1] for row in cursor.fetchall()}
+        conn.close()
+        assert "role" in columns, "role column not found in users table"
+
+    def test_role_column_defaults_to_user(self, fresh_db: Path) -> None:
+        """Inserting a user row without specifying role yields role='user'."""
+        run_migrations(db_path=fresh_db)
+        conn = sqlite3.connect(str(fresh_db))
+        conn.execute(
+            "INSERT INTO users (email, created_at) VALUES ('test@example.com', datetime('now'));"
+        )
+        conn.commit()
+        row = conn.execute(
+            "SELECT role FROM users WHERE email = 'test@example.com';"
+        ).fetchone()
+        conn.close()
+        assert row is not None, "Inserted user row not found"
+        assert row[0] == "user", f"Expected role='user', got role='{row[0]}'"
+
+    def test_role_migration_recorded_in_tracking_table(self, fresh_db: Path) -> None:
+        """002_add_user_role.sql is recorded in _migrations after apply."""
+        run_migrations(db_path=fresh_db)
+        conn = sqlite3.connect(str(fresh_db))
+        applied = get_applied_migrations(conn)
+        conn.close()
+        assert "002_add_user_role.sql" in applied, (
+            "002_add_user_role.sql not found in _migrations tracking table"
+        )
+
+
 class TestFKEnforcementDuringMigration:
     """Verify that FK constraints are enforced during migration execution.
 
@@ -290,3 +331,48 @@ class TestFKEnforcementDuringMigration:
             )
         finally:
             conn.close()
+
+
+class TestCrawlJobsMigration:
+    """Verify migration 003_add_crawl_jobs.sql behavior."""
+
+    def test_crawl_jobs_table_exists(self, fresh_db: Path) -> None:
+        """After migrations, crawl_jobs table exists."""
+        run_migrations(db_path=fresh_db)
+        conn = sqlite3.connect(str(fresh_db))
+        cursor = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='crawl_jobs';"
+        )
+        result = cursor.fetchone()
+        conn.close()
+        assert result is not None, "crawl_jobs table not found after migration"
+
+    def test_crawl_jobs_has_expected_columns(self, fresh_db: Path) -> None:
+        """crawl_jobs table has all required columns including sync_type."""
+        run_migrations(db_path=fresh_db)
+        conn = sqlite3.connect(str(fresh_db))
+        cursor = conn.execute("PRAGMA table_info(crawl_jobs);")
+        columns = {row[1] for row in cursor.fetchall()}
+        conn.close()
+        expected = {
+            "id",
+            "team_id",
+            "sync_type",
+            "status",
+            "started_at",
+            "completed_at",
+            "error_message",
+            "games_crawled",
+        }
+        missing = expected - columns
+        assert not missing, f"crawl_jobs missing columns: {missing}"
+
+    def test_crawl_jobs_migration_recorded(self, fresh_db: Path) -> None:
+        """003_add_crawl_jobs.sql is recorded in _migrations after apply."""
+        run_migrations(db_path=fresh_db)
+        conn = sqlite3.connect(str(fresh_db))
+        applied = get_applied_migrations(conn)
+        conn.close()
+        assert "003_add_crawl_jobs.sql" in applied, (
+            "003_add_crawl_jobs.sql not found in _migrations tracking table"
+        )

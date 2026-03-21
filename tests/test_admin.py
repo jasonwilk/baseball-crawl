@@ -158,6 +158,36 @@ def _count_rows(db_path: Path, table: str, where_clause: str, params: tuple) -> 
     return count
 
 
+def _set_user_role(db_path: Path, user_id: int, role: str) -> None:
+    """Update a user's role column.
+
+    Args:
+        db_path: Path to the database file.
+        user_id: User primary key.
+        role: Role value to set ('admin' or 'user').
+    """
+    conn = sqlite3.connect(str(db_path))
+    conn.execute("UPDATE users SET role = ? WHERE id = ?", (role, user_id))
+    conn.commit()
+    conn.close()
+
+
+def _get_user_role(db_path: Path, user_id: int) -> str:
+    """Fetch a user's role from the database.
+
+    Args:
+        db_path: Path to the database file.
+        user_id: User primary key.
+
+    Returns:
+        Role string ('admin' or 'user').
+    """
+    conn = sqlite3.connect(str(db_path))
+    row = conn.execute("SELECT role FROM users WHERE id = ?", (user_id,)).fetchone()
+    conn.close()
+    return row[0] if row else "user"
+
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -190,24 +220,40 @@ class TestAdminAuthRequired:
                 response = client.get("/admin/users")
         assert response.status_code == 200
 
-    def test_dev_mode_any_session_can_access_users_page(self, admin_db: Path) -> None:
-        """When ADMIN_EMAIL is unset, any authenticated user gets 200."""
-        user_id = _insert_user(admin_db, "coach@example.com")
+    def test_db_role_admin_can_access_users_page(self, admin_db: Path) -> None:
+        """When ADMIN_EMAIL is unset, a user with role='admin' in DB gets 200."""
+        import os
+        user_id = _insert_user(admin_db, "dbroleadmin@example.com")
+        _set_user_role(admin_db, user_id, "admin")
         raw_token = _insert_session(admin_db, user_id)
 
-        env = {"DATABASE_PATH": str(admin_db)}
-        env.pop("ADMIN_EMAIL", None)  # ensure not set
-        with patch.dict("os.environ", env, clear=False):
-            # Remove ADMIN_EMAIL if it was set in environment
-            import os
-            old = os.environ.pop("ADMIN_EMAIL", None)
-            try:
+        old = os.environ.pop("ADMIN_EMAIL", None)
+        try:
+            with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db)}, clear=False):
                 with TestClient(app, cookies={"session": raw_token, "csrf_token": _CSRF}) as client:
                     response = client.get("/admin/users")
-                assert response.status_code == 200
-            finally:
-                if old is not None:
-                    os.environ["ADMIN_EMAIL"] = old
+            assert response.status_code == 200
+        finally:
+            if old is not None:
+                os.environ["ADMIN_EMAIL"] = old
+
+    def test_no_admin_email_and_no_db_role_gets_403(self, admin_db: Path) -> None:
+        """When ADMIN_EMAIL is unset and user role is 'user', access is denied (403)."""
+        import os
+        user_id = _insert_user(admin_db, "norole@example.com")
+        raw_token = _insert_session(admin_db, user_id)
+
+        old = os.environ.pop("ADMIN_EMAIL", None)
+        try:
+            with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db)}, clear=False):
+                with TestClient(
+                    app, follow_redirects=False, cookies={"session": raw_token, "csrf_token": _CSRF}
+                ) as client:
+                    response = client.get("/admin/users")
+            assert response.status_code == 403
+        finally:
+            if old is not None:
+                os.environ["ADMIN_EMAIL"] = old
 
     def test_admin_page_contains_user_table(self, admin_db: Path) -> None:
         """Admin page HTML includes a users table header."""
@@ -777,6 +823,211 @@ class TestCascadeDelete:
         # No IntegrityError -- deletion succeeded and redirected.
         assert response.status_code == 303
         assert _count_rows(admin_db, "coaching_assignments", "user_id = ?", (user_id,)) == 0
+
+
+# ---------------------------------------------------------------------------
+# Role enforcement -- AC-1, AC-2, AC-3, AC-4, AC-5, AC-6
+# ---------------------------------------------------------------------------
+
+
+class TestRoleEnforcement:
+    """Role field in user forms, display, and self-demotion guard."""
+
+    def test_users_list_shows_role_column(self, admin_db: Path) -> None:
+        """GET /admin/users includes a Role column header."""
+        admin_id = _insert_user(admin_db, "rolelistadmin@example.com")
+        _set_user_role(admin_db, admin_id, "admin")
+        raw_token = _insert_session(admin_db, admin_id)
+
+        with patch.dict(
+            "os.environ",
+            {"DATABASE_PATH": str(admin_db), "ADMIN_EMAIL": "rolelistadmin@example.com"},
+        ):
+            with TestClient(app, cookies={"session": raw_token, "csrf_token": _CSRF}) as client:
+                response = client.get("/admin/users")
+        assert response.status_code == 200
+        assert "Role" in response.text
+
+    def test_users_list_shows_admin_badge(self, admin_db: Path) -> None:
+        """GET /admin/users shows 'Admin' badge for an admin-role user."""
+        admin_id = _insert_user(admin_db, "badgeadmin@example.com")
+        _set_user_role(admin_db, admin_id, "admin")
+        raw_token = _insert_session(admin_db, admin_id)
+
+        with patch.dict(
+            "os.environ",
+            {"DATABASE_PATH": str(admin_db), "ADMIN_EMAIL": "badgeadmin@example.com"},
+        ):
+            with TestClient(app, cookies={"session": raw_token, "csrf_token": _CSRF}) as client:
+                response = client.get("/admin/users")
+        assert "Admin" in response.text
+
+    def test_add_user_form_includes_role_field(self, admin_db: Path) -> None:
+        """GET /admin/users renders a role radio input in the Add User form."""
+        admin_id = _insert_user(admin_db, "roleformadmin@example.com")
+        raw_token = _insert_session(admin_db, admin_id)
+
+        with patch.dict(
+            "os.environ",
+            {"DATABASE_PATH": str(admin_db), "ADMIN_EMAIL": "roleformadmin@example.com"},
+        ):
+            with TestClient(app, cookies={"session": raw_token, "csrf_token": _CSRF}) as client:
+                response = client.get("/admin/users")
+        assert 'name="role"' in response.text
+
+    def test_create_user_stores_role_admin(self, admin_db: Path) -> None:
+        """POST /admin/users with role=admin creates a user with admin role in DB."""
+        admin_id = _insert_user(admin_db, "rolecreatadmin@example.com")
+        raw_token = _insert_session(admin_db, admin_id)
+
+        with patch.dict(
+            "os.environ",
+            {"DATABASE_PATH": str(admin_db), "ADMIN_EMAIL": "rolecreatadmin@example.com"},
+        ):
+            with TestClient(
+                app, follow_redirects=False, cookies={"session": raw_token, "csrf_token": _CSRF}
+            ) as client:
+                client.post(
+                    "/admin/users",
+                    data={"email": "newadmin@example.com", "role": "admin", "csrf_token": _CSRF},
+                )
+
+        conn = sqlite3.connect(str(admin_db))
+        row = conn.execute("SELECT role FROM users WHERE email = ?", ("newadmin@example.com",)).fetchone()
+        conn.close()
+        assert row is not None
+        assert row[0] == "admin"
+
+    def test_create_user_defaults_to_user_role(self, admin_db: Path) -> None:
+        """POST /admin/users without role field creates a user with 'user' role."""
+        admin_id = _insert_user(admin_db, "roledefaultadmin@example.com")
+        raw_token = _insert_session(admin_db, admin_id)
+
+        with patch.dict(
+            "os.environ",
+            {"DATABASE_PATH": str(admin_db), "ADMIN_EMAIL": "roledefaultadmin@example.com"},
+        ):
+            with TestClient(
+                app, follow_redirects=False, cookies={"session": raw_token, "csrf_token": _CSRF}
+            ) as client:
+                client.post(
+                    "/admin/users",
+                    data={"email": "defaultrole@example.com", "csrf_token": _CSRF},
+                )
+
+        conn = sqlite3.connect(str(admin_db))
+        row = conn.execute("SELECT role FROM users WHERE email = ?", ("defaultrole@example.com",)).fetchone()
+        conn.close()
+        assert row is not None
+        assert row[0] == "user"
+
+    def test_create_user_invalid_role_shows_error(self, admin_db: Path) -> None:
+        """POST /admin/users with invalid role value returns error."""
+        admin_id = _insert_user(admin_db, "invalidroleadmin@example.com")
+        raw_token = _insert_session(admin_db, admin_id)
+
+        with patch.dict(
+            "os.environ",
+            {"DATABASE_PATH": str(admin_db), "ADMIN_EMAIL": "invalidroleadmin@example.com"},
+        ):
+            with TestClient(app, cookies={"session": raw_token, "csrf_token": _CSRF}) as client:
+                response = client.post(
+                    "/admin/users",
+                    data={"email": "badrole@example.com", "role": "superuser", "csrf_token": _CSRF},
+                )
+        assert response.status_code == 200
+        assert "invalid role" in response.text.lower()
+
+    def test_edit_user_form_includes_role_field(self, admin_db: Path) -> None:
+        """GET /admin/users/{id}/edit renders a role radio input."""
+        admin_id = _insert_user(admin_db, "editroleadmin@example.com")
+        coach_id = _insert_user(admin_db, "editrolecoach@example.com")
+        raw_token = _insert_session(admin_db, admin_id)
+
+        with patch.dict(
+            "os.environ",
+            {"DATABASE_PATH": str(admin_db), "ADMIN_EMAIL": "editroleadmin@example.com"},
+        ):
+            with TestClient(app, cookies={"session": raw_token, "csrf_token": _CSRF}) as client:
+                response = client.get(f"/admin/users/{coach_id}/edit")
+        assert response.status_code == 200
+        assert 'name="role"' in response.text
+
+    def test_update_user_role_changes_in_db(self, admin_db: Path) -> None:
+        """POST /admin/users/{id}/edit with role=admin updates role in DB."""
+        admin_id = _insert_user(admin_db, "updateroleadmin@example.com")
+        coach_id = _insert_user(admin_db, "updaterolecoach@example.com")
+        raw_token = _insert_session(admin_db, admin_id)
+
+        assert _get_user_role(admin_db, coach_id) == "user"
+
+        with patch.dict(
+            "os.environ",
+            {"DATABASE_PATH": str(admin_db), "ADMIN_EMAIL": "updateroleadmin@example.com"},
+        ):
+            with TestClient(
+                app, follow_redirects=False, cookies={"session": raw_token, "csrf_token": _CSRF}
+            ) as client:
+                response = client.post(
+                    f"/admin/users/{coach_id}/edit",
+                    data={"role": "admin", "csrf_token": _CSRF},
+                )
+        assert response.status_code == 303
+        assert _get_user_role(admin_db, coach_id) == "admin"
+
+    def test_update_user_invalid_role_shows_error(self, admin_db: Path) -> None:
+        """POST /admin/users/{id}/edit with invalid role returns error and does not update DB."""
+        admin_id = _insert_user(admin_db, "editinvalidroleadmin@example.com")
+        coach_id = _insert_user(admin_db, "editinvalidrolecoach@example.com")
+        raw_token = _insert_session(admin_db, admin_id)
+
+        with patch.dict(
+            "os.environ",
+            {"DATABASE_PATH": str(admin_db), "ADMIN_EMAIL": "editinvalidroleadmin@example.com"},
+        ):
+            with TestClient(app, cookies={"session": raw_token, "csrf_token": _CSRF}) as client:
+                response = client.post(
+                    f"/admin/users/{coach_id}/edit",
+                    data={"role": "superuser", "csrf_token": _CSRF},
+                )
+        assert response.status_code == 200
+        assert "invalid role" in response.text.lower()
+        assert _get_user_role(admin_db, coach_id) == "user"
+
+    def test_self_demotion_is_rejected(self, admin_db: Path) -> None:
+        """POST /admin/users/{own_id}/edit with role=user returns error for self-demotion."""
+        admin_id = _insert_user(admin_db, "selfdemoteadmin@example.com")
+        _set_user_role(admin_db, admin_id, "admin")
+        raw_token = _insert_session(admin_db, admin_id)
+
+        with patch.dict(
+            "os.environ",
+            {"DATABASE_PATH": str(admin_db), "ADMIN_EMAIL": "selfdemoteadmin@example.com"},
+        ):
+            with TestClient(app, cookies={"session": raw_token, "csrf_token": _CSRF}) as client:
+                response = client.post(
+                    f"/admin/users/{admin_id}/edit",
+                    data={"role": "user", "csrf_token": _CSRF},
+                )
+        assert response.status_code == 200
+        assert "demot" in response.text.lower()
+
+    def test_self_demotion_does_not_change_role(self, admin_db: Path) -> None:
+        """POST /admin/users/{own_id}/edit with role=user leaves admin role intact."""
+        admin_id = _insert_user(admin_db, "selfkeeprolead@example.com")
+        _set_user_role(admin_db, admin_id, "admin")
+        raw_token = _insert_session(admin_db, admin_id)
+
+        with patch.dict(
+            "os.environ",
+            {"DATABASE_PATH": str(admin_db), "ADMIN_EMAIL": "selfkeeprolead@example.com"},
+        ):
+            with TestClient(app, cookies={"session": raw_token, "csrf_token": _CSRF}) as client:
+                client.post(
+                    f"/admin/users/{admin_id}/edit",
+                    data={"role": "user", "csrf_token": _CSRF},
+                )
+        assert _get_user_role(admin_db, admin_id) == "admin"
 
 
 # ---------------------------------------------------------------------------

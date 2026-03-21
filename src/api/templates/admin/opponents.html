@@ -16,6 +16,8 @@
      class="font-medium text-gray-600 hover:text-blue-900">Users</a>
   <a href="/admin/teams"
      class="font-medium text-gray-600 hover:text-blue-900">Teams</a>
+  <a href="/admin/programs"
+     class="font-medium text-gray-600 hover:text-blue-900">Programs</a>
   <a href="/admin/opponents"
      class="font-bold underline text-blue-900">Opponents</a>
 </nav>
@@ -65,6 +67,19 @@
   </a>
 </div>
 
+<!-- Summary stat line + Run Discovery link -->
+<div class="mb-4 flex items-center justify-between">
+  <p class="text-sm text-gray-700">
+    {{ counts.total }} opponents &mdash;
+    {{ counts.full_stats }} resolved,
+    <strong>{{ counts.scoresheet_only }} need mapping</strong>.
+  </p>
+  <a href="/admin/teams"
+     class="inline-block bg-blue-900 text-white px-4 py-2 rounded text-sm hover:bg-blue-800">
+    Run Discovery
+  </a>
+</div>
+
 <!-- Opponents table -->
 <div class="overflow-x-auto">
   <table class="min-w-full text-sm bg-white rounded shadow">
@@ -82,31 +97,28 @@
         <td class="py-2 px-3 font-medium">{{ link.opponent_name }}</td>
         <td class="py-2 px-3 text-gray-600 text-xs">{{ link.our_team_name }}</td>
         <td class="py-2 px-3 text-center">
-          {% if link.resolution_method == 'auto' %}
+          {% if link.public_id %}
             <span class="inline-flex items-center gap-1">
-              <span class="px-2 py-0.5 rounded text-xs font-semibold bg-green-100 text-green-800 border border-green-300">Full stats</span>
-              <span class="text-xs text-gray-400">auto</span>
-            </span>
-          {% elif link.resolution_method == 'manual' %}
-            <span class="inline-flex items-center gap-1">
-              <span class="px-2 py-0.5 rounded text-xs font-semibold bg-blue-100 text-blue-800 border border-blue-300">Full stats</span>
-              <span class="text-xs text-gray-400">manual</span>
+              <span class="px-2 py-0.5 rounded text-xs font-semibold bg-green-100 text-green-800 border border-green-300">Resolved</span>
+              {% if link.resolution_method %}
+              <span class="text-xs text-gray-400">{{ link.resolution_method }}</span>
+              {% endif %}
             </span>
           {% else %}
-            <span class="px-2 py-0.5 rounded text-xs font-semibold bg-yellow-100 text-yellow-800 border border-yellow-300">Scoresheet only</span>
+            <span class="px-2 py-0.5 rounded text-xs font-semibold bg-orange-100 text-orange-800 border border-orange-300">Unresolved</span>
           {% endif %}
         </td>
         <td class="py-2 px-3 text-center">
           <div class="flex items-center justify-center gap-2">
             {% if not link.public_id %}
             <a href="/admin/opponents/{{ link.id }}/connect"
-               class="text-blue-700 hover:underline text-xs">Connect</a>
+               class="inline-block bg-blue-900 text-white px-3 py-1 rounded text-xs hover:bg-blue-800">Connect</a>
             {% endif %}
             {% if link.resolution_method == 'manual' %}
             <form method="post" action="/admin/opponents/{{ link.id }}/disconnect" class="inline">
               <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
               <button type="submit"
-                      class="text-red-600 hover:underline text-xs"
+                      class="bg-gray-200 text-gray-700 px-3 py-1 rounded text-xs hover:bg-gray-300"
                       data-name="{{ link.opponent_name }}"
                       onclick="return confirm('Disconnect ' + this.dataset.name + '?')">
                 Disconnect
@@ -125,4 +137,5 @@
       {% endfor %}
     </tbody>
   </table>
+</div>
 {% endblock %}

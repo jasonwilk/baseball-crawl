@@ -16,13 +16,15 @@
      class="font-medium text-gray-600 hover:text-blue-900">Users</a>
   <a href="/admin/teams"
      class="font-bold underline text-blue-900">Teams</a>
+  <a href="/admin/programs"
+     class="font-medium text-gray-600 hover:text-blue-900">Programs</a>
   <a href="/admin/opponents"
      class="font-medium text-gray-600 hover:text-blue-900">Opponents</a>
 </nav>
 
 {% if added %}
 <div class="mb-4 p-3 bg-green-100 text-green-800 rounded border border-green-300">
-  Team <strong>{{ added_team_name }}</strong> added. Run <code>bb data sync</code> to load stats for this team.
+  Team <strong>{{ added_team_name }}</strong> added. Use the <strong>Sync</strong> button in the table to load stats for this team.
 </div>
 {% elif msg %}
 <div class="mb-4 p-3 bg-green-100 text-green-800 rounded border border-green-300">
@@ -47,6 +49,7 @@
         <th class="py-2 px-3 text-center">Membership</th>
         <th class="py-2 px-3 text-center">Opponents</th>
         <th class="py-2 px-3 text-center">Status</th>
+        <th class="py-2 px-3 text-center">Last Synced</th>
         <th class="py-2 px-3 text-center">Actions</th>
       </tr>
     </thead>
@@ -74,6 +77,22 @@
             <span class="text-gray-500">Inactive</span>
           {% endif %}
         </td>
+        <td class="py-2 px-3 text-center text-xs">
+          <div>
+            {% if team.last_synced %}
+              <span class="text-gray-700">{{ team.last_synced[:10] }}</span>
+            {% else %}
+              <span class="text-gray-400">Never</span>
+            {% endif %}
+          </div>
+          {% if team.latest_job_status == 'completed' %}
+            <span class="px-1.5 py-0.5 rounded bg-green-100 text-green-800">done</span>
+          {% elif team.latest_job_status == 'failed' %}
+            <span class="px-1.5 py-0.5 rounded bg-red-100 text-red-800">failed</span>
+          {% elif team.latest_job_status == 'running' %}
+            <span class="px-1.5 py-0.5 rounded bg-yellow-100 text-yellow-800">running</span>
+          {% endif %}
+        </td>
         <td class="py-2 px-3 text-center">
           <div class="flex items-center justify-center gap-2">
             <a href="/admin/teams/{{ team.id }}/edit"
@@ -94,12 +113,44 @@
               </button>
             </form>
             {% endif %}
+            {% if team.is_active and (team.membership_type == 'member' or team.public_id) %}
+              {% if team.latest_job_status == 'running' %}
+              <form method="post" action="/admin/teams/{{ team.id }}/sync" class="inline">
+                <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+                <button type="submit" disabled
+                        class="text-xs text-yellow-700 cursor-not-allowed opacity-60">
+                  Running&hellip;
+                </button>
+              </form>
+              {% else %}
+              <form method="post" action="/admin/teams/{{ team.id }}/sync" class="inline">
+                <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+                <button type="submit"
+                        class="text-xs text-emerald-700 hover:underline">
+                  Sync
+                </button>
+              </form>
+              {% endif %}
+            {% elif team.is_active and team.membership_type == 'tracked' and not team.public_id %}
+              <span class="text-xs text-gray-400 italic">Unresolved &mdash; map first</span>
+            {% endif %}
+            {% if not team.is_active %}
+            <form method="post" action="/admin/teams/{{ team.id }}/delete"
+                  class="inline"
+                  data-name="{{ team.name }}"
+                  onsubmit="return confirm('Delete ' + this.dataset.name + '? This cannot be undone.');">
+              <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+              <button type="submit" class="text-xs text-red-700 hover:underline">
+                Delete
+              </button>
+            </form>
+            {% endif %}
           </div>
         </td>
       </tr>
       {% else %}
       <tr>
-        <td colspan="7" class="py-4 px-3 text-center text-gray-500">
+        <td colspan="8" class="py-4 px-3 text-center text-gray-500">
           No teams found.
         </td>
       </tr>

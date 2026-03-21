@@ -450,6 +450,97 @@ def test_yaml_source_teamref_has_valid_db_id(tmp_path: Path) -> None:
     assert team_ref.gc_uuid == gc_uuid
 
 
+# ---------------------------------------------------------------------------
+# AC-2 / AC-3: team_ids filter (source="db")
+# ---------------------------------------------------------------------------
+
+
+def _make_db_config_with_ids(
+    season: str = "2025",
+    teams: list[tuple[str, int]] | None = None,
+) -> MagicMock:
+    """Return a mock CrawlConfig with internal_id populated (simulates source='db')."""
+    config = MagicMock()
+    config.season = season
+    team_list = teams or [("team-001", 1)]
+    config.member_teams = [MagicMock(id=gc_uuid, internal_id=iid) for gc_uuid, iid in team_list]
+    return config
+
+
+def test_load_team_ids_filter_db_source(tmp_path: Path) -> None:
+    """team_ids=[2] with source='db' passes only the matching team to loaders."""
+    teams = [("team-a", 1), ("team-b", 2), ("team-c", 3)]
+    db_config = _make_db_config_with_ids(teams=teams)
+
+    teams_seen_per_loader: list[list] = []
+
+    def _capturing_runner(db: object, config: object, data_root: object) -> LoadResult:
+        teams_seen_per_loader.append(list(config.member_teams))
+        return _make_result()
+
+    fake_loaders = [("roster", _capturing_runner), ("game", _capturing_runner)]
+
+    with patch("src.pipeline.load.load_config_from_db", return_value=db_config):
+        with patch("src.pipeline.load._LOADERS", fake_loaders):
+            exit_code = run(source="db", team_ids=[2], data_root=tmp_path, db_path=tmp_path / "app.db")
+
+    assert exit_code == 0
+    assert len(teams_seen_per_loader) == 2
+    for teams_seen in teams_seen_per_loader:
+        assert len(teams_seen) == 1
+        assert teams_seen[0].internal_id == 2
+
+
+def test_load_team_ids_none_db_source_processes_all_teams(tmp_path: Path) -> None:
+    """team_ids=None with source='db' passes all teams to loaders (unfiltered)."""
+    teams = [("team-a", 1), ("team-b", 2), ("team-c", 3)]
+    db_config = _make_db_config_with_ids(teams=teams)
+
+    teams_seen_per_loader: list[list] = []
+
+    def _capturing_runner(db: object, config: object, data_root: object) -> LoadResult:
+        teams_seen_per_loader.append(list(config.member_teams))
+        return _make_result()
+
+    with patch("src.pipeline.load.load_config_from_db", return_value=db_config):
+        with patch("src.pipeline.load._LOADERS", [("roster", _capturing_runner)]):
+            exit_code = run(source="db", team_ids=None, data_root=tmp_path, db_path=tmp_path / "app.db")
+
+    assert exit_code == 0
+    assert len(teams_seen_per_loader) == 1
+    assert len(teams_seen_per_loader[0]) == 3
+
+
+def test_load_team_ids_with_loader_filter(tmp_path: Path) -> None:
+    """team_ids=[3] + loader_filter='game' processes only game loader for team 3."""
+    teams = [("team-a", 1), ("team-b", 2), ("team-c", 3)]
+    db_config = _make_db_config_with_ids(teams=teams)
+
+    teams_seen: list[list] = []
+
+    def _capturing_game_runner(db: object, config: object, data_root: object) -> LoadResult:
+        teams_seen.append(list(config.member_teams))
+        return _make_result()
+
+    with patch("src.pipeline.load.load_config_from_db", return_value=db_config):
+        with patch("src.pipeline.load._LOADERS", [
+            ("roster", lambda *a: _make_result()),
+            ("game", _capturing_game_runner),
+            ("season-stats", lambda *a: _make_result()),
+        ]):
+            exit_code = run(
+                source="db",
+                team_ids=[3],
+                loader_filter="game",
+                data_root=tmp_path,
+                db_path=tmp_path / "app.db",
+            )
+
+    assert exit_code == 0
+    assert len(teams_seen) == 1
+    assert teams_seen[0][0].internal_id == 3
+
+
 def test_yaml_source_raises_when_team_not_in_db(tmp_path: Path) -> None:
     """AC-4: YAML-sourced config raises a clear error when team is absent from DB.
 

@@ -1003,3 +1003,124 @@ class TestDiscoverOpponents:
 
         assert response.status_code == 303
         assert "error=" in response.headers["location"]
+
+
+# ---------------------------------------------------------------------------
+# E-143-04: Summary stat line, badge styling, Connect button style
+# ---------------------------------------------------------------------------
+
+
+class TestSummaryStatLine:
+    """Opponents page displays summary stat line above the table (AC-1)."""
+
+    def test_summary_shows_total_resolved_unresolved_counts(
+        self, opp_db: Path
+    ) -> None:
+        """Summary line shows total (3), resolved (2), and need-mapping (1) counts."""
+        admin_id = _insert_user(opp_db, "summary_e143_1@test.com")
+        token = _insert_session(opp_db, admin_id)
+
+        with patch.dict("os.environ", _admin_env(opp_db, "summary_e143_1@test.com")):
+            with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
+                response = client.get("/admin/opponents")
+
+        assert "3 opponents" in response.text
+        assert "2 resolved" in response.text
+        assert "1 need mapping" in response.text
+
+    def test_summary_shows_run_discovery_link(self, opp_db: Path) -> None:
+        """Summary area includes a Run Discovery link to /admin/teams."""
+        admin_id = _insert_user(opp_db, "summary_e143_2@test.com")
+        token = _insert_session(opp_db, admin_id)
+
+        with patch.dict("os.environ", _admin_env(opp_db, "summary_e143_2@test.com")):
+            with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
+                response = client.get("/admin/opponents")
+
+        assert "Run Discovery" in response.text
+        assert "/admin/teams" in response.text
+
+
+class TestResolutionBadges:
+    """Resolved/Unresolved badges display correctly in the Status column (AC-2)."""
+
+    def test_unresolved_row_shows_unresolved_badge(self, opp_db: Path) -> None:
+        """Ridgecrest Rockets (public_id=NULL) shows Unresolved badge."""
+        admin_id = _insert_user(opp_db, "badge_e143_1@test.com")
+        token = _insert_session(opp_db, admin_id)
+
+        with patch.dict("os.environ", _admin_env(opp_db, "badge_e143_1@test.com")):
+            with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
+                response = client.get("/admin/opponents")
+
+        assert "Unresolved" in response.text
+
+    def test_resolved_row_shows_resolved_badge(self, opp_db: Path) -> None:
+        """Northside Eagles (auto) and Westview Tigers (manual) show Resolved badge."""
+        admin_id = _insert_user(opp_db, "badge_e143_2@test.com")
+        token = _insert_session(opp_db, admin_id)
+
+        with patch.dict("os.environ", _admin_env(opp_db, "badge_e143_2@test.com")):
+            with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
+                response = client.get("/admin/opponents")
+
+        assert "Resolved" in response.text
+
+    def test_unresolved_badge_uses_orange_tailwind_classes(
+        self, opp_db: Path
+    ) -> None:
+        """Unresolved badge has orange Tailwind classes (bg-orange-100, text-orange-800)."""
+        admin_id = _insert_user(opp_db, "badge_e143_3@test.com")
+        token = _insert_session(opp_db, admin_id)
+
+        with patch.dict("os.environ", _admin_env(opp_db, "badge_e143_3@test.com")):
+            with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
+                response = client.get("/admin/opponents")
+
+        assert "bg-orange-100" in response.text
+        assert "text-orange-800" in response.text
+
+    def test_resolved_badge_uses_green_tailwind_classes(self, opp_db: Path) -> None:
+        """Resolved badge has green Tailwind classes (bg-green-100, text-green-800)."""
+        admin_id = _insert_user(opp_db, "badge_e143_4@test.com")
+        token = _insert_session(opp_db, admin_id)
+
+        with patch.dict("os.environ", _admin_env(opp_db, "badge_e143_4@test.com")):
+            with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
+                response = client.get("/admin/opponents")
+
+        assert "bg-green-100" in response.text
+        assert "text-green-800" in response.text
+
+
+class TestConnectButtonStyle:
+    """Connect button uses primary blue filled style for unresolved rows (AC-3)."""
+
+    def test_connect_button_is_filled_not_text_link(self, opp_db: Path) -> None:
+        """Connect link for unresolved row uses filled style, not old plain text-link."""
+        admin_id = _insert_user(opp_db, "btn_e143_1@test.com")
+        token = _insert_session(opp_db, admin_id)
+        unlinked_id = _get_link_id_by_name(opp_db, "Ridgecrest Rockets")
+        assert unlinked_id is not None
+
+        with patch.dict("os.environ", _admin_env(opp_db, "btn_e143_1@test.com")):
+            with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
+                response = client.get("/admin/opponents")
+
+        assert f"/admin/opponents/{unlinked_id}/connect" in response.text
+        # Old plain text-link class must not be present for the connect action
+        assert 'class="text-blue-700 hover:underline text-xs"' not in response.text
+
+    def test_disconnect_button_uses_gray_style(self, opp_db: Path) -> None:
+        """Disconnect button for manual row uses gray background style."""
+        admin_id = _insert_user(opp_db, "btn_e143_2@test.com")
+        token = _insert_session(opp_db, admin_id)
+        manual_id = _get_link_id_by_name(opp_db, "Westview Tigers")
+        assert manual_id is not None
+
+        with patch.dict("os.environ", _admin_env(opp_db, "btn_e143_2@test.com")):
+            with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
+                response = client.get("/admin/opponents")
+
+        assert "bg-gray-200" in response.text
+        assert f"/admin/opponents/{manual_id}/disconnect" in response.text

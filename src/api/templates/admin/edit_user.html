@@ -10,12 +10,20 @@
 {% block content %}
 <h1 class="text-xl font-bold mb-4">Edit User</h1>
 
+{% if error %}
+<div class="mb-4 p-3 bg-red-100 text-red-800 rounded border border-red-300">
+  {{ error }}
+</div>
+{% endif %}
+
 <!-- Admin sub-navigation -->
 <nav class="mb-6 flex gap-4 border-b border-gray-300 pb-2 text-sm">
   <a href="/admin/users"
      class="font-medium text-gray-600 hover:text-blue-900">Users</a>
   <a href="/admin/teams"
      class="font-medium text-gray-600 hover:text-blue-900">Teams</a>
+  <a href="/admin/programs"
+     class="font-medium text-gray-600 hover:text-blue-900">Programs</a>
   <a href="/admin/opponents"
      class="font-medium text-gray-600 hover:text-blue-900">Opponents</a>
 </nav>
@@ -26,6 +34,18 @@
     <div class="mb-4">
       <label class="block text-sm font-medium text-gray-700 mb-1">Email</label>
       <p class="text-sm text-gray-600 py-2">{{ edit_user.email }}</p>
+    </div>
+
+    <div class="mb-4">
+      <p class="block text-sm font-medium text-gray-700 mb-1">Role</p>
+      <label class="flex items-center gap-2 text-sm text-gray-700 mb-1 cursor-pointer">
+        <input type="radio" name="role" value="user" {% if edit_user.role != 'admin' %}checked{% endif %}>
+        User (read-only dashboard access)
+      </label>
+      <label class="flex items-center gap-2 text-sm text-gray-700 mb-1 cursor-pointer">
+        <input type="radio" name="role" value="admin" {% if edit_user.role == 'admin' %}checked{% endif %}>
+        Admin (full management access)
+      </label>
     </div>
 
     {% if teams %}

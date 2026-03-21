@@ -1,8 +1,8 @@
 """Admin CRUD routes for the baseball-crawl application.
 
 Provides server-rendered HTML views for managing user accounts and team
-assignments.  All routes require an active session matching ADMIN_EMAIL
-(or any authenticated user when ADMIN_EMAIL is unset in dev mode).
+assignments.  All routes require admin access, granted via ADMIN_EMAIL env
+var (bootstrap/fallback) OR ``users.role = 'admin'`` in the database.
 
 Routes:
     GET  /admin/users                                    -- List all users
@@ -17,7 +17,11 @@ Routes:
     GET  /admin/teams/{team_id}/edit                     -- Edit team form (INTEGER team_id)
     POST /admin/teams/{team_id}/edit                     -- Update team metadata (INTEGER team_id)
     POST /admin/teams/{id}/toggle-active                 -- Toggle team is_active flag (INTEGER id)
+    POST /admin/teams/{id}/delete                        -- Delete deactivated zero-data team (INTEGER id)
+    POST /admin/teams/{id}/sync                          -- Enqueue per-team crawl as BackgroundTask (INTEGER id)
     POST /admin/teams/{id}/discover-opponents            -- Discover opponent placeholders (INTEGER id)
+    GET  /admin/programs                                 -- List all programs + add form
+    POST /admin/programs                                 -- Create a new program
     GET  /admin/opponents                                -- Opponent link states listing
     GET  /admin/opponents/{link_id}/connect              -- URL-paste form
     GET  /admin/opponents/{link_id}/connect/confirm      -- Confirmation page (fetches team info)
@@ -36,7 +40,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote_plus, urlencode
 
-from fastapi import APIRouter, Form, Request
+from fastapi import APIRouter, BackgroundTasks, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from starlette.concurrency import run_in_threadpool
@@ -66,6 +70,7 @@ from src.gamechanger.team_resolver import (
     resolve_team,
 )
 from src.gamechanger.url_parser import parse_team_url
+from src.pipeline import trigger
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +88,9 @@ _VALID_CLASSIFICATIONS = {
 
 # Valid membership_type values (must match schema CHECK constraint)
 _VALID_MEMBERSHIP_TYPES = {"member", "tracked"}
+
+# Valid role values (application-layer validation; SQLite cannot add CHECK via ALTER)
+_VALID_ROLES = {"admin", "user"}
 
 
 # ---------------------------------------------------------------------------
@@ -114,9 +122,12 @@ async def _require_admin(request: Request) -> dict[str, Any] | Response:
     user dict for admins, a redirect for unauthenticated requests, or a 403
     page for non-admin authenticated users.
 
-    Admin access is controlled by the ``ADMIN_EMAIL`` environment variable.
-    If ``ADMIN_EMAIL`` is set, only that email address is treated as admin.
-    If ``ADMIN_EMAIL`` is unset (dev mode), all authenticated users are admin.
+    Admin access is granted if EITHER:
+    - The user's email matches the ``ADMIN_EMAIL`` env var (bootstrap/fallback), OR
+    - The user has ``role = 'admin'`` in the database.
+
+    If ``ADMIN_EMAIL`` is unset AND the user does not have ``role = 'admin'``,
+    access is denied (403).
 
     Args:
         request: The incoming HTTP request.
@@ -127,10 +138,18 @@ async def _require_admin(request: Request) -> dict[str, Any] | Response:
     user = getattr(request.state, "user", None)
     if not user:
         return RedirectResponse(url="/auth/login", status_code=302)
+
+    # Bootstrap/fallback: ADMIN_EMAIL env var grants admin access.
     admin_email = os.environ.get("ADMIN_EMAIL", "")
-    if admin_email and user.get("email") != admin_email:
-        return _forbidden_response(request)
-    return user
+    if admin_email and user.get("email") == admin_email:
+        return user
+
+    # Primary path: database role check.
+    user_role = await run_in_threadpool(_get_user_role_by_id, user["id"])
+    if user_role == "admin":
+        return user
+
+    return _forbidden_response(request)
 
 
 # ---------------------------------------------------------------------------
@@ -150,7 +169,7 @@ def _get_all_users() -> list[dict[str, Any]]:
         users = [
             dict(row)
             for row in conn.execute(
-                "SELECT id, email FROM users ORDER BY email"
+                "SELECT id, email, role FROM users ORDER BY email"
             ).fetchall()
         ]
         for user in users:
@@ -196,10 +215,26 @@ def _get_user_by_id(user_id: int) -> dict[str, Any] | None:
     with closing(get_connection()) as conn:
         conn.row_factory = sqlite3.Row
         row = conn.execute(
-            "SELECT id, email FROM users WHERE id = ?",
+            "SELECT id, email, role FROM users WHERE id = ?",
             (user_id,),
         ).fetchone()
         return dict(row) if row else None
+
+
+def _get_user_role_by_id(user_id: int) -> str:
+    """Fetch the role value for a user by id.
+
+    Args:
+        user_id: The user's primary key.
+
+    Returns:
+        Role string ('admin' or 'user'); defaults to 'user' if not found.
+    """
+    with closing(get_connection()) as conn:
+        row = conn.execute(
+            "SELECT role FROM users WHERE id = ?", (user_id,)
+        ).fetchone()
+        return row[0] if row else "user"
 
 
 def _get_user_team_ids(user_id: int) -> list[int]:
@@ -221,12 +256,14 @@ def _get_user_team_ids(user_id: int) -> list[int]:
 def _create_user(
     email: str,
     team_ids: list[int],
+    role: str = "user",
 ) -> str | None:
     """Insert a new user and their team assignments.
 
     Args:
         email: Normalized (lowercase) email address.
         team_ids: List of INTEGER team ids to assign.
+        role: User role ('admin' or 'user').
 
     Returns:
         None on success, or an error message string on failure.
@@ -235,8 +272,8 @@ def _create_user(
         with closing(get_connection()) as conn:
             try:
                 cursor = conn.execute(
-                    "INSERT INTO users (email) VALUES (?)",
-                    (email,),
+                    "INSERT INTO users (email, role) VALUES (?, ?)",
+                    (email, role),
                 )
                 new_user_id = cursor.lastrowid
             except sqlite3.IntegrityError:
@@ -257,14 +294,17 @@ def _create_user(
 def _update_user(
     user_id: int,
     team_ids: list[int],
+    role: str = "user",
 ) -> None:
-    """Replace a user's team assignments with the provided list.
+    """Replace a user's team assignments and update their role.
 
     Args:
         user_id: The user's primary key.
         team_ids: Complete list of INTEGER team ids (replaces existing).
+        role: User role ('admin' or 'user').
     """
     with closing(get_connection()) as conn:
+        conn.execute("UPDATE users SET role = ? WHERE id = ?", (role, user_id))
         conn.execute(
             "DELETE FROM user_team_access WHERE user_id = ?", (user_id,)
         )
@@ -301,12 +341,13 @@ def _delete_user(user_id: int) -> None:
 
 
 def _get_all_teams_flat() -> list[dict[str, Any]]:
-    """Return all teams in a flat list with program name and opponent count.
+    """Return all teams in a flat list with program name, opponent count, and latest crawl job.
 
     Returns:
         List of dicts with keys: id, name, program_id, membership_type,
         classification, is_active, public_id, gc_uuid, last_synced,
-        program_name (nullable), opponent_count.
+        program_name (nullable), opponent_count, latest_job_status (nullable),
+        latest_job_started_at (nullable).
     """
     with closing(get_connection()) as conn:
         conn.row_factory = sqlite3.Row
@@ -328,9 +369,17 @@ def _get_all_teams_flat() -> list[dict[str, Any]]:
                     FROM opponent_links ol
                     WHERE ol.our_team_id = t.id
                       AND ol.is_hidden = 0
-                ) AS opponent_count
+                ) AS opponent_count,
+                cj.status AS latest_job_status,
+                cj.started_at AS latest_job_started_at
             FROM teams t
             LEFT JOIN programs p ON t.program_id = p.program_id
+            LEFT JOIN crawl_jobs cj ON cj.id = (
+                SELECT id FROM crawl_jobs
+                WHERE team_id = t.id
+                ORDER BY started_at DESC
+                LIMIT 1
+            )
             ORDER BY t.name
             """
         ).fetchall()
@@ -349,6 +398,67 @@ def _get_programs() -> list[dict[str, Any]]:
             "SELECT program_id, name FROM programs ORDER BY name"
         ).fetchall()
     return [dict(r) for r in rows]
+
+
+def _get_all_programs() -> list[dict[str, Any]]:
+    """Return all programs with team count and metadata for the programs list page.
+
+    Returns:
+        List of dicts with keys: program_id, name, program_type, org_name,
+        team_count, created_at.
+    """
+    with closing(get_connection()) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            """
+            SELECT
+                p.program_id,
+                p.name,
+                p.program_type,
+                p.org_name,
+                p.created_at,
+                (SELECT COUNT(*) FROM teams t WHERE t.program_id = p.program_id) AS team_count
+            FROM programs p
+            ORDER BY p.name
+            """
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def _create_program(
+    program_id: str,
+    name: str,
+    program_type: str,
+    org_name: str | None,
+) -> str | None:
+    """Insert a new program row.
+
+    Args:
+        program_id: Operator-chosen slug (TEXT PK).
+        name: Display name.
+        program_type: One of 'hs', 'usssa', 'legion'.
+        org_name: Optional organization name.
+
+    Returns:
+        None on success, or an error message string on failure.
+    """
+    try:
+        with closing(get_connection()) as conn:
+            try:
+                conn.execute(
+                    """
+                    INSERT INTO programs (program_id, name, program_type, org_name)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (program_id, name, program_type, org_name or None),
+                )
+                conn.commit()
+            except sqlite3.IntegrityError:
+                return f"A program with ID '{program_id}' already exists"
+    except sqlite3.Error:
+        logger.exception("Failed to create program %s", program_id)
+        return "Database error while creating program"
+    return None
 
 
 def _get_team_by_integer_id(team_id: int) -> dict[str, Any] | None:
@@ -426,6 +536,105 @@ def _toggle_team_active_integer(team_id: int) -> int:
         )
         conn.commit()
         return new_value
+
+
+def _check_team_has_data(team_id: int) -> bool:
+    """Return True if any data table has rows referencing this team.
+
+    Queries all seven data tables listed in TN-3: games (both FK columns),
+    player_game_batting, player_game_pitching, player_season_batting,
+    player_season_pitching, scouting_runs, spray_charts.
+
+    Args:
+        team_id: The team's INTEGER primary key.
+
+    Returns:
+        True if any dependent data rows exist, False otherwise.
+    """
+    checks: list[tuple[str, tuple[int, ...]]] = [
+        (
+            "SELECT 1 FROM games WHERE home_team_id = ? OR away_team_id = ? LIMIT 1",
+            (team_id, team_id),
+        ),
+        ("SELECT 1 FROM player_game_batting WHERE team_id = ? LIMIT 1", (team_id,)),
+        ("SELECT 1 FROM player_game_pitching WHERE team_id = ? LIMIT 1", (team_id,)),
+        ("SELECT 1 FROM player_season_batting WHERE team_id = ? LIMIT 1", (team_id,)),
+        ("SELECT 1 FROM player_season_pitching WHERE team_id = ? LIMIT 1", (team_id,)),
+        ("SELECT 1 FROM scouting_runs WHERE team_id = ? LIMIT 1", (team_id,)),
+        ("SELECT 1 FROM spray_charts WHERE team_id = ? LIMIT 1", (team_id,)),
+    ]
+    with closing(get_connection()) as conn:
+        for sql, params in checks:
+            if conn.execute(sql, params).fetchone():
+                return True
+    return False
+
+
+def _delete_team_cascade(team_id: int) -> None:
+    """Delete a team and all its junction/access rows in a single transaction.
+
+    Deletes junction/access rows first, then the teams row.  Caller must
+    verify zero data rows (via _check_team_has_data) before calling.
+
+    Deletion order:
+        team_opponents (both FK columns), team_rosters, opponent_links
+        (both FK columns), user_team_access, coaching_assignments,
+        crawl_jobs, teams.
+
+    Args:
+        team_id: The team's INTEGER primary key.
+    """
+    with closing(get_connection()) as conn:
+        conn.execute(
+            "DELETE FROM team_opponents WHERE our_team_id = ? OR opponent_team_id = ?",
+            (team_id, team_id),
+        )
+        conn.execute("DELETE FROM team_rosters WHERE team_id = ?", (team_id,))
+        conn.execute(
+            "DELETE FROM opponent_links WHERE our_team_id = ? OR resolved_team_id = ?",
+            (team_id, team_id),
+        )
+        conn.execute("DELETE FROM user_team_access WHERE team_id = ?", (team_id,))
+        conn.execute("DELETE FROM coaching_assignments WHERE team_id = ?", (team_id,))
+        conn.execute("DELETE FROM crawl_jobs WHERE team_id = ?", (team_id,))
+        conn.execute("DELETE FROM teams WHERE id = ?", (team_id,))
+        conn.commit()
+
+
+def _create_crawl_job(team_id: int, sync_type: str) -> int:
+    """Insert a new crawl_jobs row with status='running' and return its id.
+
+    Args:
+        team_id: The team's INTEGER primary key.
+        sync_type: Either 'member_crawl' or 'scouting_crawl'.
+
+    Returns:
+        The INTEGER primary key of the newly inserted crawl_jobs row.
+    """
+    with closing(get_connection()) as conn:
+        cursor = conn.execute(
+            "INSERT INTO crawl_jobs (team_id, sync_type, status) VALUES (?, ?, 'running')",
+            (team_id, sync_type),
+        )
+        conn.commit()
+        return cursor.lastrowid
+
+
+def _has_running_job(team_id: int) -> bool:
+    """Return True if a crawl_jobs row with status='running' exists for team_id.
+
+    Args:
+        team_id: The team's INTEGER primary key.
+
+    Returns:
+        True if an in-progress job exists, False otherwise.
+    """
+    with closing(get_connection()) as conn:
+        row = conn.execute(
+            "SELECT 1 FROM crawl_jobs WHERE team_id = ? AND status = 'running' LIMIT 1",
+            (team_id,),
+        ).fetchone()
+    return row is not None
 
 
 def _check_duplicate_new(
@@ -628,16 +837,19 @@ async def create_user(
     request: Request,
     email: str = Form(...),
     team_ids: list[str] = Form(default=[]),
+    role: str = Form(default="user"),
 ) -> Response:
     """Create a new user with team assignments.
 
     Normalizes email to lowercase.  Redirects back to /admin/users with a
-    flash message on success, or re-renders with an error on duplicate email.
+    flash message on success, or re-renders with an error on duplicate email
+    or invalid role.
 
     Args:
         request: The incoming HTTP request.
         email: User email address (required).
         team_ids: List of INTEGER team id values from checkboxes (as strings).
+        role: User role ('admin' or 'user', default: 'user').
 
     Returns:
         Redirect on success, or HTMLResponse with error on failure.
@@ -649,9 +861,13 @@ async def create_user(
     normalized_email = email.strip().lower()
     int_team_ids = [int(tid) for tid in team_ids if tid.strip().isdigit()]
 
-    error = await run_in_threadpool(_create_user, normalized_email, int_team_ids)
+    if role not in _VALID_ROLES:
+        error_msg: str | None = "Invalid role; must be 'admin' or 'user'"
+        role = "user"
+    else:
+        error_msg = await run_in_threadpool(_create_user, normalized_email, int_team_ids, role)
 
-    if error:
+    if error_msg:
         users, teams = await run_in_threadpool(
             _get_all_users
         ), await run_in_threadpool(_get_available_teams)
@@ -662,9 +878,10 @@ async def create_user(
                 "users": users,
                 "teams": teams,
                 "msg": "",
-                "error": error,
+                "error": error_msg,
                 "admin_user": guard,
                 "form_email": normalized_email,
+                "form_role": role,
                 "is_admin_page": True,
             },
         )
@@ -705,6 +922,7 @@ async def edit_user_form(request: Request, user_id: int) -> Response:
             "edit_user": user,
             "teams": teams,
             "assigned_team_ids": assigned_team_ids,
+            "error": "",
             "admin_user": guard,
             "is_admin_page": True,
         },
@@ -716,13 +934,17 @@ async def update_user(
     request: Request,
     user_id: int,
     team_ids: list[str] = Form(default=[]),
+    role: str = Form(default="user"),
 ) -> Response:
-    """Update a user's team assignments.
+    """Update a user's team assignments and role.
+
+    Self-demotion guard: an admin cannot set their own role to 'user'.
 
     Args:
         request: The incoming HTTP request.
         user_id: The user's primary key from the URL path.
         team_ids: Complete list of INTEGER team id values (replaces existing).
+        role: User role ('admin' or 'user').
 
     Returns:
         Redirect on success, or 404/auth response.
@@ -735,8 +957,43 @@ async def update_user(
     if not user:
         return HTMLResponse(content="User not found", status_code=404)
 
+    if role not in _VALID_ROLES:
+        assigned_team_ids = await run_in_threadpool(_get_user_team_ids, user_id)
+        teams = await run_in_threadpool(_get_available_teams)
+        return templates.TemplateResponse(
+            request,
+            "admin/edit_user.html",
+            {
+                "edit_user": user,
+                "teams": teams,
+                "assigned_team_ids": assigned_team_ids,
+                "error": "Invalid role; must be 'admin' or 'user'.",
+                "admin_user": guard,
+                "is_admin_page": True,
+            },
+            status_code=200,
+        )
+
+    # Self-demotion guard: prevent an admin from removing their own admin role.
+    if guard["id"] == user_id and role != "admin":
+        assigned_team_ids = await run_in_threadpool(_get_user_team_ids, user_id)
+        teams = await run_in_threadpool(_get_available_teams)
+        return templates.TemplateResponse(
+            request,
+            "admin/edit_user.html",
+            {
+                "edit_user": user,
+                "teams": teams,
+                "assigned_team_ids": assigned_team_ids,
+                "error": "You cannot demote your own admin role.",
+                "admin_user": guard,
+                "is_admin_page": True,
+            },
+            status_code=200,
+        )
+
     int_team_ids = [int(tid) for tid in team_ids if tid.strip().isdigit()]
-    await run_in_threadpool(_update_user, user_id, int_team_ids)
+    await run_in_threadpool(_update_user, user_id, int_team_ids, role)
 
     return RedirectResponse(
         url="/admin/users?msg=User+updated+successfully", status_code=303
@@ -1306,6 +1563,133 @@ async def toggle_team_active(request: Request, id: int) -> Response:
     )
 
 
+@router.post("/teams/{id}/delete", response_model=None)
+async def delete_team(request: Request, id: int) -> Response:
+    """Permanently delete a deactivated team with no associated data.
+
+    Checks two preconditions before deletion:
+      (a) is_active = 0 (team must be deactivated)
+      (b) zero dependent rows in all data tables (games, player_game_batting,
+          player_game_pitching, player_season_batting, player_season_pitching,
+          scouting_runs, spray_charts)
+
+    If either check fails, redirects to /admin/teams with an error flash.
+    When deletion proceeds, removes junction/access rows in a single
+    transaction, then removes the teams row.
+
+    Args:
+        request: The incoming HTTP request.
+        id: The team's INTEGER primary key from the URL path.
+
+    Returns:
+        Redirect to /admin/teams with success or error flash message.
+    """
+    guard = await _require_admin(request)
+    if isinstance(guard, Response):
+        return guard
+
+    team = await run_in_threadpool(_get_team_by_integer_id, id)
+    if not team:
+        return HTMLResponse(content="Team not found", status_code=404)
+
+    if team["is_active"]:
+        return RedirectResponse(
+            url="/admin/teams?error=Team+must+be+deactivated+before+deletion",
+            status_code=303,
+        )
+
+    has_data = await run_in_threadpool(_check_team_has_data, id)
+    if has_data:
+        return RedirectResponse(
+            url="/admin/teams?error=Team+has+associated+data+and+cannot+be+deleted",
+            status_code=303,
+        )
+
+    team_name = team["name"]
+    await run_in_threadpool(_delete_team_cascade, id)
+
+    return RedirectResponse(
+        url=f"/admin/teams?msg={quote_plus(f'Team \"{team_name}\" deleted.')}",
+        status_code=303,
+    )
+
+
+@router.post("/teams/{id}/sync", response_model=None)
+async def sync_team(
+    request: Request, id: int, background_tasks: BackgroundTasks
+) -> Response:
+    """Enqueue a per-team data sync as a FastAPI BackgroundTask.
+
+    Creates a ``crawl_jobs`` row with ``status='running'`` and enqueues the
+    appropriate pipeline:
+    - Member teams: ``trigger.run_member_sync`` (crawl.run + load.run).
+    - Tracked teams: ``trigger.run_scouting_sync`` (ScoutingCrawler + ScoutingLoader).
+
+    Eligibility (enforced server-side):
+    - Active member teams are always eligible.
+    - Active tracked teams are eligible only when ``public_id IS NOT NULL``.
+    - Inactive teams and unresolved tracked teams (``public_id IS NULL``) are rejected.
+
+    Args:
+        request: The incoming HTTP request.
+        id: The team's INTEGER primary key from the URL path.
+        background_tasks: FastAPI BackgroundTasks injected by the framework.
+
+    Returns:
+        Redirect to /admin/teams with a flash message on success or error.
+    """
+    guard = await _require_admin(request)
+    if isinstance(guard, Response):
+        return guard
+
+    team = await run_in_threadpool(_get_team_by_integer_id, id)
+    if not team:
+        return HTMLResponse(content="Team not found", status_code=404)
+
+    # Eligibility check (AC-3 server-side enforcement).
+    if not team["is_active"]:
+        return RedirectResponse(
+            url="/admin/teams?error=" + quote_plus("Cannot sync an inactive team."),
+            status_code=303,
+        )
+
+    if team["membership_type"] == "tracked" and not team.get("public_id"):
+        return RedirectResponse(
+            url="/admin/teams?error="
+            + quote_plus("Cannot sync unresolved team. Map a public ID first."),
+            status_code=303,
+        )
+
+    # Running-job guard: reject duplicate submits / direct POSTs.
+    if await run_in_threadpool(_has_running_job, id):
+        team_name = team["name"]
+        return RedirectResponse(
+            url="/admin/teams?error="
+            + quote_plus(f"Sync already in progress for {team_name}."),
+            status_code=303,
+        )
+
+    sync_type = (
+        "member_crawl" if team["membership_type"] == "member" else "scouting_crawl"
+    )
+    crawl_job_id = await run_in_threadpool(_create_crawl_job, id, sync_type)
+
+    if team["membership_type"] == "member":
+        background_tasks.add_task(
+            trigger.run_member_sync, id, team["name"], crawl_job_id
+        )
+    else:
+        background_tasks.add_task(
+            trigger.run_scouting_sync, id, team["public_id"], crawl_job_id
+        )
+
+    team_name = team["name"]
+    return RedirectResponse(
+        url=f"/admin/teams?msg={quote_plus(f'Sync started for {team_name}.')}",
+        status_code=303,
+    )
+
+
 @router.post("/teams/{id}/discover-opponents", response_model=None)
 async def discover_team_opponents(request: Request, id: int) -> Response:
     """Trigger opponent auto-discovery from a team's public game schedule.
@@ -1691,4 +2075,124 @@ async def disconnect_opponent(request: Request, link_id: int) -> Response:
     return RedirectResponse(
         url=f"/admin/opponents?team_id={our_team_id}&msg={msg}",
         status_code=303,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Program management routes
+# ---------------------------------------------------------------------------
+
+_VALID_PROGRAM_TYPES = {"hs", "usssa", "legion"}
+
+
+@router.get("/programs", response_model=None)
+async def list_programs(request: Request) -> Response:
+    """Render the program management page.
+
+    Requires admin session.  Lists all programs and provides an Add Program form.
+
+    Args:
+        request: The incoming HTTP request.
+
+    Returns:
+        HTMLResponse with the program list, or an auth redirect/403.
+    """
+    guard = await _require_admin(request)
+    if isinstance(guard, Response):
+        return guard
+
+    msg = request.query_params.get("msg", "")
+    error = request.query_params.get("error", "")
+
+    programs = await run_in_threadpool(_get_all_programs)
+
+    return templates.TemplateResponse(
+        request,
+        "admin/programs.html",
+        {
+            "programs": programs,
+            "msg": msg,
+            "error": error,
+            "admin_user": guard,
+            "is_admin_page": True,
+        },
+    )
+
+
+@router.post("/programs", response_model=None)
+async def create_program(
+    request: Request,
+    program_id: str = Form(...),
+    name: str = Form(...),
+    program_type: str = Form(...),
+    org_name: str = Form(default=""),
+) -> Response:
+    """Create a new program.
+
+    Validates program_type, then inserts the program row.  Redirects back to
+    /admin/programs with a success flash, or re-renders with an error on
+    duplicate program_id or invalid input.
+
+    Args:
+        request: The incoming HTTP request.
+        program_id: Operator-chosen slug (TEXT PK).
+        name: Display name.
+        program_type: One of 'hs', 'usssa', 'legion'.
+        org_name: Optional organization name.
+
+    Returns:
+        Redirect on success, or HTMLResponse with error on failure.
+    """
+    guard = await _require_admin(request)
+    if isinstance(guard, Response):
+        return guard
+
+    cleaned_id = program_id.strip()
+    cleaned_name = name.strip()
+    cleaned_type = program_type.strip().lower()
+    cleaned_org = org_name.strip() or None
+
+    if cleaned_type not in _VALID_PROGRAM_TYPES:
+        programs = await run_in_threadpool(_get_all_programs)
+        return templates.TemplateResponse(
+            request,
+            "admin/programs.html",
+            {
+                "programs": programs,
+                "msg": "",
+                "error": "Invalid program type. Must be hs, usssa, or legion.",
+                "admin_user": guard,
+                "is_admin_page": True,
+                "form_program_id": cleaned_id,
+                "form_name": cleaned_name,
+                "form_program_type": cleaned_type,
+                "form_org_name": org_name.strip(),
+            },
+        )
+
+    error = await run_in_threadpool(
+        _create_program, cleaned_id, cleaned_name, cleaned_type, cleaned_org
+    )
+
+    if error:
+        programs = await run_in_threadpool(_get_all_programs)
+        return templates.TemplateResponse(
+            request,
+            "admin/programs.html",
+            {
+                "programs": programs,
+                "msg": "",
+                "error": error,
+                "admin_user": guard,
+                "is_admin_page": True,
+                "form_program_id": cleaned_id,
+                "form_name": cleaned_name,
+                "form_program_type": cleaned_type,
+                "form_org_name": org_name.strip(),
+            },
+        )
+
+    success_msg = quote_plus(f"Program '{cleaned_name}' created successfully.")
+    return RedirectResponse(
+        url=f"/admin/programs?msg={success_msg}", status_code=303
     )

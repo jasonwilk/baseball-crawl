@@ -362,3 +362,129 @@ def test_write_manifest_overwrites_existing(tmp_path: Path) -> None:
     manifest = json.loads(manifest_path.read_text())
     assert "old" not in manifest
     assert manifest["crawlers"]["roster"]["files_written"] == 99
+
+
+# ---------------------------------------------------------------------------
+# AC-1 / AC-3: team_ids filter (source="db")
+# ---------------------------------------------------------------------------
+
+
+def _make_db_config(
+    season: str = "2025",
+    teams: list[tuple[str, int]] | None = None,
+) -> MagicMock:
+    """Return a mock CrawlConfig with internal_id populated (simulates source='db')."""
+    config = MagicMock()
+    config.season = season
+    team_list = teams or [("team-001", 1)]
+    config.member_teams = [MagicMock(id=gc_uuid, internal_id=iid) for gc_uuid, iid in team_list]
+    return config
+
+
+def test_team_ids_filter_db_source_single_team(tmp_path: Path) -> None:
+    """team_ids=[2] with source='db' passes only the matching team to crawlers."""
+    teams = [("team-a", 1), ("team-b", 2), ("team-c", 3)]
+    db_config = _make_db_config(teams=teams)
+
+    captured_configs: list[list] = []
+
+    class _CapturingCrawler:
+        def __init__(self, client: object, config: object) -> None:
+            captured_configs.append(list(config.member_teams))
+
+        def crawl_all(self) -> CrawlResult:
+            return _make_result()
+
+    patches = {
+        "RosterCrawler": _CapturingCrawler,
+        "ScheduleCrawler": _CapturingCrawler,
+        "OpponentCrawler": _CapturingCrawler,
+        "PlayerStatsCrawler": _CapturingCrawler,
+        "GameStatsCrawler": _CapturingCrawler,
+        "GameChangerClient": MagicMock,
+        "load_config_from_db": lambda _: db_config,
+    }
+
+    with patch.multiple("src.pipeline.crawl", **patches):
+        exit_code = run(source="db", team_ids=[2], data_root=tmp_path, db_path=tmp_path / "app.db")
+
+    assert exit_code == 0
+    # All 5 crawlers should have seen exactly 1 team (internal_id=2)
+    assert len(captured_configs) == 5
+    for teams_seen in captured_configs:
+        assert len(teams_seen) == 1
+        assert teams_seen[0].internal_id == 2
+
+
+def test_team_ids_none_db_source_processes_all_teams(tmp_path: Path) -> None:
+    """team_ids=None with source='db' passes all teams to crawlers (unfiltered)."""
+    teams = [("team-a", 1), ("team-b", 2), ("team-c", 3)]
+    db_config = _make_db_config(teams=teams)
+
+    captured_configs: list[list] = []
+
+    class _CapturingCrawler:
+        def __init__(self, client: object, config: object) -> None:
+            captured_configs.append(list(config.member_teams))
+
+        def crawl_all(self) -> CrawlResult:
+            return _make_result()
+
+    patches = {
+        "RosterCrawler": _CapturingCrawler,
+        "ScheduleCrawler": _CapturingCrawler,
+        "OpponentCrawler": _CapturingCrawler,
+        "PlayerStatsCrawler": _CapturingCrawler,
+        "GameStatsCrawler": _CapturingCrawler,
+        "GameChangerClient": MagicMock,
+        "load_config_from_db": lambda _: db_config,
+    }
+
+    with patch.multiple("src.pipeline.crawl", **patches):
+        exit_code = run(source="db", team_ids=None, data_root=tmp_path, db_path=tmp_path / "app.db")
+
+    assert exit_code == 0
+    # Each crawler sees all 3 teams
+    for teams_seen in captured_configs:
+        assert len(teams_seen) == 3
+
+
+def test_team_ids_with_crawler_filter(tmp_path: Path) -> None:
+    """team_ids=[2] + crawler_filter='game-stats' runs only game-stats for team 2."""
+    teams = [("team-a", 1), ("team-b", 2)]
+    db_config = _make_db_config(teams=teams)
+
+    captured_configs: list[list] = []
+    called: list[str] = []
+
+    class _CapturingGameStats:
+        def __init__(self, client: object, config: object) -> None:
+            captured_configs.append(list(config.member_teams))
+
+        def crawl_all(self) -> CrawlResult:
+            called.append("game-stats")
+            return _make_result()
+
+    patches = {
+        "RosterCrawler": _make_crawler_class("roster", []),
+        "ScheduleCrawler": _make_crawler_class("schedule", []),
+        "OpponentCrawler": _make_crawler_class("opponent", []),
+        "PlayerStatsCrawler": _make_crawler_class("player-stats", []),
+        "GameStatsCrawler": _CapturingGameStats,
+        "GameChangerClient": MagicMock,
+        "load_config_from_db": lambda _: db_config,
+    }
+
+    with patch.multiple("src.pipeline.crawl", **patches):
+        exit_code = run(
+            source="db",
+            team_ids=[2],
+            crawler_filter="game-stats",
+            data_root=tmp_path,
+            db_path=tmp_path / "app.db",
+        )
+
+    assert exit_code == 0
+    assert called == ["game-stats"]
+    assert len(captured_configs) == 1
+    assert captured_configs[0][0].internal_id == 2

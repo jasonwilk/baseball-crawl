@@ -118,6 +118,8 @@ After changing `src/`, `migrations/`, `Dockerfile`, `docker-compose.yml`, or `re
 - **Repo-root resolution**: Modules in `src/` use `Path(__file__).resolve().parents[N]` to derive repo-root-relative paths (e.g., `parents[2]` for a module three levels deep like `src/db/reset.py`). Never use cwd-relative paths or `sys.path.insert()` in `src/` modules.
 - **`migrations/` is a Python package**: It has `__init__.py` and is included in `pyproject.toml` `[tool.setuptools.packages]` because `src/db/reset.py` imports from it. Do not remove `migrations/__init__.py` or the pyproject.toml include without understanding this dependency.
 - **Scouting pipeline**: `src/gamechanger/crawlers/scouting.py` (crawler) and `src/gamechanger/loaders/scouting_loader.py` (loader) implement the opponent scouting data flow. The crawler fetches opponent schedules, rosters, and boxscores; the loader aggregates boxscores into season stats and writes to the database. Entry point: `bb data scout`.
+- **Background pipeline trigger**: `src/pipeline/trigger.py` provides fire-and-forget pipeline execution from HTTP routes (FastAPI `BackgroundTasks`). Each trigger function creates its own DB connection, refreshes auth eagerly, tracks status via `crawl_jobs` rows, and updates `teams.last_synced` on success. Two pipelines: `run_member_sync` (crawl+load for owned teams) and `run_scouting_sync` (ScoutingCrawler+ScoutingLoader for tracked teams).
+- **Pipeline caller convention (`source` and `team_ids`)**: `crawl.run()` and `load.run()` both default to `source="yaml"` (reads team config from YAML files). For per-team DB-backed filtering, callers MUST pass `source="db"` AND `team_ids=[team_id]` to both functions. Omitting either parameter silently processes the wrong set of teams -- `source="yaml"` ignores the database entirely, and omitting `team_ids` processes all teams. See `src/pipeline/trigger.py` for the correct calling pattern.
 
 ## Data Model
 
@@ -133,9 +135,12 @@ The schema is defined in a single migration (`migrations/001_initial_schema.sql`
 
 ## Admin UI
 
+The admin UI (`/admin/`) is the **primary operational interface** for routine team management, crawl triggering, and program administration. The `bb` CLI remains available for automation and scripting but is no longer the sole path for day-to-day operations.
+
 - **Team list**: Flat table of all teams at `/admin/teams/`. Columns: team name, program, division (classification), membership badge, active/inactive, opponent count, edit link.
 - **Two-phase add-team flow**: Phase 1 = URL input (paste a GameChanger team URL). Phase 2 = confirm page showing resolved team info, gc_uuid status (from reverse bridge lookup), membership radio (`member`/`tracked`, default: `tracked`), optional program dropdown and division dropdown.
 - **Edit page**: Program assignment, division, name override, active toggle. Membership type is editable (radio button) as a correction path for misclassification.
+- **Crawl triggering**: Admin UI triggers background crawl/load pipelines per-team via `src/pipeline/trigger.py`. Job status tracked in `crawl_jobs` table. See Architecture section for pipeline caller conventions.
 
 ## Project Management
 

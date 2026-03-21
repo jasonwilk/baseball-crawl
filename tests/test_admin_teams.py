@@ -279,7 +279,7 @@ class TestTeamsFlatList:
         assert "Team added" in response.text
 
     def test_added_flash_shows_team_name_and_hint(self, team_db: Path) -> None:
-        """AC-1: ?added=1&team_name= renders enhanced flash with team name and bb data sync hint."""
+        """AC-8: ?added=1&team_name= renders enhanced flash with team name and Sync button hint."""
         user_id = _insert_user(team_db, "admin@example.com")
         token = _insert_session(team_db, user_id)
 
@@ -287,8 +287,7 @@ class TestTeamsFlatList:
             with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
                 response = client.get("/admin/teams?added=1&team_name=River+Hawks")
         assert "River Hawks" in response.text
-        assert "bb data sync" in response.text
-        assert "<code>" in response.text
+        assert "Sync" in response.text
         assert "bg-green-100" in response.text
 
     def test_added_flash_no_duplicate_banner(self, team_db: Path) -> None:
@@ -1422,3 +1421,478 @@ class TestMemberTeamAccessFanOut:
         conn.close()
 
         assert count == 1, "INSERT OR IGNORE must keep exactly one access row per user/team"
+
+
+# ---------------------------------------------------------------------------
+# E-143-03: POST /admin/teams/{id}/delete -- delete deactivated zero-data teams
+# ---------------------------------------------------------------------------
+
+
+def _set_team_inactive(db_path: Path, team_id: int) -> None:
+    """Set a team's is_active flag to 0."""
+    conn = sqlite3.connect(str(db_path))
+    conn.execute("PRAGMA foreign_keys=ON;")
+    conn.execute("UPDATE teams SET is_active = 0 WHERE id = ?", (team_id,))
+    conn.commit()
+    conn.close()
+
+
+def _insert_spray_chart_for_team(db_path: Path, team_id: int) -> None:
+    """Insert a spray_charts row referencing the given team_id."""
+    conn = sqlite3.connect(str(db_path))
+    conn.execute("PRAGMA foreign_keys=ON;")
+    conn.execute(
+        "INSERT INTO spray_charts (team_id, chart_type) VALUES (?, ?)",
+        (team_id, "offensive"),
+    )
+    conn.commit()
+    conn.close()
+
+
+class TestDeleteTeam:
+    """POST /admin/teams/{id}/delete (E-143-03, AC-1 through AC-6)."""
+
+    def test_delete_button_absent_for_active_team(self, team_db: Path) -> None:
+        """Delete button does NOT appear for active teams (AC-1)."""
+        user_id = _insert_user(team_db, "admin@example.com")
+        token = _insert_session(team_db, user_id)
+
+        with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
+            with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
+                response = client.get("/admin/teams")
+        # The seeded team (LSB Varsity 2026) is active; its row must not include the delete URL.
+        assert response.status_code == 200
+        conn = sqlite3.connect(str(team_db))
+        team_id = conn.execute("SELECT id FROM teams LIMIT 1").fetchone()[0]
+        conn.close()
+        assert f"/admin/teams/{team_id}/delete" not in response.text
+
+    def test_delete_button_shown_for_inactive_team(self, team_db: Path) -> None:
+        """Delete button appears for deactivated teams (AC-1)."""
+        user_id = _insert_user(team_db, "admin@example.com")
+        token = _insert_session(team_db, user_id)
+        team_id = _insert_team(team_db, "Inactive Opponent", membership_type="tracked")
+        _set_team_inactive(team_db, team_id)
+
+        with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
+            with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
+                response = client.get("/admin/teams")
+        assert response.status_code == 200
+        assert f"/admin/teams/{team_id}/delete" in response.text
+        # AC-2: confirm() dialog is wired to the delete form
+        assert "confirm(" in response.text
+
+    def test_delete_active_team_returns_error_flash(self, team_db: Path) -> None:
+        """Deleting an active team redirects to /admin/teams with error flash (AC-3a)."""
+        user_id = _insert_user(team_db, "admin@example.com")
+        token = _insert_session(team_db, user_id)
+        conn = sqlite3.connect(str(team_db))
+        team_id = conn.execute("SELECT id FROM teams LIMIT 1").fetchone()[0]
+        conn.close()
+
+        with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
+            with TestClient(
+                app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
+            ) as client:
+                response = client.post(
+                    f"/admin/teams/{team_id}/delete", data={"csrf_token": _CSRF}
+                )
+        assert response.status_code == 303
+        assert "error=" in response.headers["location"]
+        assert "deactivated" in response.headers["location"]
+        # Team must still exist
+        assert _count_rows(team_db, "teams", "id = ?", (team_id,)) == 1
+
+    def test_delete_team_with_data_returns_error_flash(self, team_db: Path) -> None:
+        """Deleting a team with associated data redirects with error flash (AC-3b)."""
+        user_id = _insert_user(team_db, "admin@example.com")
+        token = _insert_session(team_db, user_id)
+        team_id = _insert_team(team_db, "Data Team", membership_type="tracked")
+        _set_team_inactive(team_db, team_id)
+        # Seed a spray_charts row to simulate existing data
+        _insert_spray_chart_for_team(team_db, team_id)
+
+        with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
+            with TestClient(
+                app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
+            ) as client:
+                response = client.post(
+                    f"/admin/teams/{team_id}/delete", data={"csrf_token": _CSRF}
+                )
+        assert response.status_code == 303
+        location = response.headers["location"]
+        assert "error=" in location
+        assert "associated+data" in location or "associated data" in location.replace("+", " ")
+        # Team must still exist
+        assert _count_rows(team_db, "teams", "id = ?", (team_id,)) == 1
+
+    def test_delete_zero_data_team_removes_row(self, team_db: Path) -> None:
+        """Successful delete removes the teams row (AC-4)."""
+        user_id = _insert_user(team_db, "admin@example.com")
+        token = _insert_session(team_db, user_id)
+        team_id = _insert_team(team_db, "Clean Opponent", membership_type="tracked")
+        _set_team_inactive(team_db, team_id)
+
+        with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
+            with TestClient(
+                app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
+            ) as client:
+                response = client.post(
+                    f"/admin/teams/{team_id}/delete", data={"csrf_token": _CSRF}
+                )
+        assert response.status_code == 303
+        assert _count_rows(team_db, "teams", "id = ?", (team_id,)) == 0
+
+    def test_delete_success_redirects_with_success_flash(self, team_db: Path) -> None:
+        """Successful delete redirects to /admin/teams with a success flash (AC-5)."""
+        user_id = _insert_user(team_db, "admin@example.com")
+        token = _insert_session(team_db, user_id)
+        team_id = _insert_team(team_db, "Gone Team", membership_type="tracked")
+        _set_team_inactive(team_db, team_id)
+
+        with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
+            with TestClient(
+                app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
+            ) as client:
+                response = client.post(
+                    f"/admin/teams/{team_id}/delete", data={"csrf_token": _CSRF}
+                )
+        assert response.status_code == 303
+        location = response.headers["location"]
+        assert location.startswith("/admin/teams")
+        assert "msg=" in location
+        assert "Gone+Team" in location or "Gone Team" in location.replace("+", " ")
+
+    def test_delete_cleans_up_junction_rows(self, team_db: Path) -> None:
+        """Successful delete removes junction/access rows before the teams row (AC-4)."""
+        admin_id = _insert_user(team_db, "admin@example.com")
+        token = _insert_session(team_db, admin_id)
+        team_id = _insert_team(team_db, "Junction Team", membership_type="tracked")
+        _set_team_inactive(team_db, team_id)
+
+        # Seed a team_opponents row (team as opponent_team_id)
+        conn = sqlite3.connect(str(team_db))
+        conn.execute("PRAGMA foreign_keys=ON;")
+        member_id = conn.execute("SELECT id FROM teams LIMIT 1").fetchone()[0]
+        conn.execute(
+            "INSERT INTO team_opponents (our_team_id, opponent_team_id) VALUES (?, ?)",
+            (member_id, team_id),
+        )
+        # Seed a coaching_assignments row
+        conn.execute(
+            "INSERT INTO coaching_assignments (user_id, team_id) VALUES (?, ?)",
+            (admin_id, team_id),
+        )
+        conn.commit()
+        conn.close()
+
+        with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
+            with TestClient(
+                app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
+            ) as client:
+                client.post(f"/admin/teams/{team_id}/delete", data={"csrf_token": _CSRF})
+
+        assert _count_rows(team_db, "teams", "id = ?", (team_id,)) == 0
+        assert (
+            _count_rows(team_db, "team_opponents", "opponent_team_id = ?", (team_id,)) == 0
+        )
+        assert (
+            _count_rows(team_db, "coaching_assignments", "team_id = ?", (team_id,)) == 0
+        )
+
+    def test_delete_requires_admin(self, team_db: Path) -> None:
+        """Non-admin user gets 403 on POST /admin/teams/{id}/delete (AC-6)."""
+        user_id = _insert_user(team_db, "coach@example.com")
+        token = _insert_session(team_db, user_id)
+        team_id = _insert_team(team_db, "Secret Team", membership_type="tracked")
+        _set_team_inactive(team_db, team_id)
+
+        with patch.dict(
+            "os.environ",
+            {"DATABASE_PATH": str(team_db), "ADMIN_EMAIL": "other@example.com"},
+        ):
+            with TestClient(
+                app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
+            ) as client:
+                response = client.post(
+                    f"/admin/teams/{team_id}/delete", data={"csrf_token": _CSRF}
+                )
+        assert response.status_code == 403
+        # Team must still exist
+        assert _count_rows(team_db, "teams", "id = ?", (team_id,)) == 1
+
+
+# ---------------------------------------------------------------------------
+# AC-1, AC-2, AC-3, AC-4, AC-5, AC-6: POST /admin/teams/{id}/sync
+# ---------------------------------------------------------------------------
+
+
+def _insert_crawl_job(
+    db_path: Path,
+    team_id: int,
+    sync_type: str = "member_crawl",
+    status: str = "running",
+    started_at: str = "2026-01-01T10:00:00.000Z",
+) -> int:
+    """Insert a crawl_jobs row and return its id."""
+    conn = sqlite3.connect(str(db_path))
+    conn.execute("PRAGMA foreign_keys=ON;")
+    cursor = conn.execute(
+        "INSERT INTO crawl_jobs (team_id, sync_type, status, started_at) VALUES (?, ?, ?, ?)",
+        (team_id, sync_type, status, started_at),
+    )
+    conn.commit()
+    job_id = cursor.lastrowid
+    conn.close()
+    return job_id
+
+
+class TestSyncRoute:
+    """POST /admin/teams/{id}/sync -- AC-1, AC-2, AC-3, AC-5, AC-6."""
+
+    def test_sync_requires_admin(self, team_db: Path) -> None:
+        """Non-admin user gets 403 on POST /admin/teams/{id}/sync (AC-6)."""
+        user_id = _insert_user(team_db, "coach@example.com")
+        token = _insert_session(team_db, user_id)
+        team_id = _insert_team(team_db, "Hawks Varsity", membership_type="member", public_id="pub1")
+
+        with patch.dict(
+            "os.environ",
+            {"DATABASE_PATH": str(team_db), "ADMIN_EMAIL": "other@example.com"},
+        ):
+            with TestClient(
+                app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
+            ) as client:
+                response = client.post(
+                    f"/admin/teams/{team_id}/sync", data={"csrf_token": _CSRF}
+                )
+        assert response.status_code == 403
+
+    def test_sync_inactive_team_redirects_with_error(self, team_db: Path) -> None:
+        """Inactive teams are rejected with an error flash (AC-3)."""
+        user_id = _insert_user(team_db, "admin@example.com")
+        token = _insert_session(team_db, user_id)
+        team_id = _insert_team(team_db, "Inactive Team", membership_type="member", public_id="pub2")
+        _set_team_inactive(team_db, team_id)
+
+        with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
+            with TestClient(
+                app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
+            ) as client:
+                response = client.post(
+                    f"/admin/teams/{team_id}/sync", data={"csrf_token": _CSRF}
+                )
+        assert response.status_code == 303
+        assert "error=" in response.headers["location"]
+        assert "inactive" in response.headers["location"].lower()
+
+    def test_sync_unresolved_tracked_redirects_with_error(self, team_db: Path) -> None:
+        """Tracked teams with no public_id are rejected with an error flash (AC-3)."""
+        user_id = _insert_user(team_db, "admin@example.com")
+        token = _insert_session(team_db, user_id)
+        # No public_id -- unresolved tracked team
+        team_id = _insert_team(team_db, "Unknown Opponent", membership_type="tracked")
+
+        with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
+            with TestClient(
+                app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
+            ) as client:
+                response = client.post(
+                    f"/admin/teams/{team_id}/sync", data={"csrf_token": _CSRF}
+                )
+        assert response.status_code == 303
+        assert "error=" in response.headers["location"]
+
+    def test_sync_active_member_enqueues_task_and_creates_job(self, team_db: Path) -> None:
+        """Active member team: crawl_jobs row created with status='running' (AC-1)."""
+        user_id = _insert_user(team_db, "admin@example.com")
+        token = _insert_session(team_db, user_id)
+        team_id = _insert_team(team_db, "LSB JV", membership_type="member", public_id="pub3")
+
+        with patch("src.api.routes.admin.trigger.run_member_sync") as mock_task, \
+             patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
+            with TestClient(
+                app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
+            ) as client:
+                response = client.post(
+                    f"/admin/teams/{team_id}/sync", data={"csrf_token": _CSRF}
+                )
+
+        assert response.status_code == 303
+        assert "msg=" in response.headers["location"]
+        assert "Sync+started" in response.headers["location"]
+
+        # A crawl_jobs row should have been created.
+        conn = sqlite3.connect(str(team_db))
+        conn.execute("PRAGMA foreign_keys=ON;")
+        row = conn.execute(
+            "SELECT status, sync_type FROM crawl_jobs WHERE team_id = ?", (team_id,)
+        ).fetchone()
+        conn.close()
+        assert row is not None
+        assert row[0] == "running"
+        assert row[1] == "member_crawl"
+
+        # Background task should have been enqueued with correct team_id.
+        mock_task.assert_called_once()
+        call_args = mock_task.call_args[0]
+        assert call_args[0] == team_id  # team_id
+
+    def test_sync_active_tracked_with_public_id_enqueues_scouting_task(
+        self, team_db: Path
+    ) -> None:
+        """Active tracked team with public_id: scouting pipeline enqueued (AC-2)."""
+        user_id = _insert_user(team_db, "admin@example.com")
+        token = _insert_session(team_db, user_id)
+        team_id = _insert_team(
+            team_db, "Rival Hawks", membership_type="tracked", public_id="rival-pub-id"
+        )
+
+        with patch("src.api.routes.admin.trigger.run_scouting_sync") as mock_task, \
+             patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
+            with TestClient(
+                app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
+            ) as client:
+                response = client.post(
+                    f"/admin/teams/{team_id}/sync", data={"csrf_token": _CSRF}
+                )
+
+        assert response.status_code == 303
+        assert "Sync+started" in response.headers["location"]
+
+        conn = sqlite3.connect(str(team_db))
+        conn.execute("PRAGMA foreign_keys=ON;")
+        row = conn.execute(
+            "SELECT status, sync_type FROM crawl_jobs WHERE team_id = ?", (team_id,)
+        ).fetchone()
+        conn.close()
+        assert row is not None
+        assert row[0] == "running"
+        assert row[1] == "scouting_crawl"
+
+        mock_task.assert_called_once()
+        call_args = mock_task.call_args[0]
+        assert call_args[0] == team_id
+        assert call_args[1] == "rival-pub-id"  # public_id
+
+    def test_sync_running_job_guard_rejects_duplicate(self, team_db: Path) -> None:
+        """Double-submit or direct POST is rejected when a job is already running (server-side guard)."""
+        user_id = _insert_user(team_db, "admin@example.com")
+        token = _insert_session(team_db, user_id)
+        team_id = _insert_team(team_db, "Hawks Varsity", membership_type="member", public_id="pub-guard")
+        _insert_crawl_job(team_db, team_id, sync_type="member_crawl", status="running")
+
+        with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
+            with TestClient(
+                app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
+            ) as client:
+                response = client.post(
+                    f"/admin/teams/{team_id}/sync", data={"csrf_token": _CSRF}
+                )
+
+        assert response.status_code == 303
+        location = response.headers["location"]
+        assert "error=" in location
+        assert "already+in+progress" in location or "already in progress" in location
+
+        # No new crawl_jobs row created -- only the pre-existing one.
+        conn = sqlite3.connect(str(team_db))
+        count = conn.execute(
+            "SELECT COUNT(*) FROM crawl_jobs WHERE team_id = ?", (team_id,)
+        ).fetchone()[0]
+        conn.close()
+        assert count == 1
+
+
+class TestTeamsSyncDisplay:
+    """Last Synced column and status indicators -- AC-4, AC-5."""
+
+    def test_never_synced_shows_never(self, team_db: Path) -> None:
+        """Team with no last_synced shows 'Never' in the Last Synced column (AC-4)."""
+        user_id = _insert_user(team_db, "admin@example.com")
+        token = _insert_session(team_db, user_id)
+        # Seeded team has no last_synced
+
+        with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
+            with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
+                response = client.get("/admin/teams")
+        assert "Never" in response.text
+
+    def test_completed_job_shows_green_badge(self, team_db: Path) -> None:
+        """Completed crawl_job shows a green 'done' badge (AC-4)."""
+        user_id = _insert_user(team_db, "admin@example.com")
+        token = _insert_session(team_db, user_id)
+
+        # Get the seeded team id.
+        conn = sqlite3.connect(str(team_db))
+        row = conn.execute("SELECT id FROM teams LIMIT 1").fetchone()
+        conn.close()
+        team_id = row[0]
+
+        _insert_crawl_job(team_db, team_id, status="completed")
+
+        with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
+            with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
+                response = client.get("/admin/teams")
+        assert "bg-green-100" in response.text
+        assert "done" in response.text
+
+    def test_failed_job_shows_red_badge(self, team_db: Path) -> None:
+        """Failed crawl_job shows a red 'failed' badge (AC-4)."""
+        user_id = _insert_user(team_db, "admin@example.com")
+        token = _insert_session(team_db, user_id)
+
+        conn = sqlite3.connect(str(team_db))
+        row = conn.execute("SELECT id FROM teams LIMIT 1").fetchone()
+        conn.close()
+        team_id = row[0]
+
+        _insert_crawl_job(team_db, team_id, status="failed")
+
+        with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
+            with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
+                response = client.get("/admin/teams")
+        assert "bg-red-100" in response.text
+        assert "failed" in response.text
+
+    def test_running_job_shows_running_badge(self, team_db: Path) -> None:
+        """Running crawl_job shows a yellow 'running' badge (AC-4 / AC-5)."""
+        user_id = _insert_user(team_db, "admin@example.com")
+        token = _insert_session(team_db, user_id)
+
+        conn = sqlite3.connect(str(team_db))
+        row = conn.execute("SELECT id FROM teams LIMIT 1").fetchone()
+        conn.close()
+        team_id = row[0]
+
+        _insert_crawl_job(team_db, team_id, status="running")
+
+        with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
+            with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
+                response = client.get("/admin/teams")
+        assert "bg-yellow-100" in response.text
+        assert "running" in response.text
+
+    def test_unresolved_tracked_shows_map_first_indicator(self, team_db: Path) -> None:
+        """Active tracked team without public_id shows 'map first' indicator (AC-3)."""
+        user_id = _insert_user(team_db, "admin@example.com")
+        token = _insert_session(team_db, user_id)
+        _insert_team(team_db, "Unknown Rival", membership_type="tracked")  # no public_id
+
+        with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
+            with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
+                response = client.get("/admin/teams")
+        assert "map first" in response.text.lower()
+
+    def test_sync_button_absent_for_inactive_team(self, team_db: Path) -> None:
+        """Inactive teams do not show a Sync button (AC-3)."""
+        user_id = _insert_user(team_db, "admin@example.com")
+        token = _insert_session(team_db, user_id)
+        team_id = _insert_team(team_db, "Old Team", membership_type="member", public_id="oldpub")
+        _set_team_inactive(team_db, team_id)
+
+        with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
+            with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
+                response = client.get("/admin/teams")
+        # The /sync action URL for this specific team should not appear.
+        assert f"/admin/teams/{team_id}/sync" not in response.text

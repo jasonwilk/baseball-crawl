@@ -1,7 +1,7 @@
 # E-143: Admin Management Overhaul -- Operational Usability
 
 ## Status
-`READY`
+`COMPLETED`
 
 ## Overview
 Make the admin UI a complete operational interface so the system operator can manage teams, programs, opponents, crawls, and users entirely through the browser -- eliminating CLI commands and manual SQL for routine operations. This is the bridge from "developer tool" to "usable system" and directly enables pre-game scouting workflows.
@@ -53,14 +53,14 @@ The user asked "what am I missing?" Expert consultation surfaced two additional 
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-143-01 | Program list and create admin page | TODO | None | SE |
-| E-143-02 | User role schema migration | TODO | None | DE |
-| E-143-05 | Per-team crawl pipeline scoping | TODO | None | DE |
-| E-143-06a | Crawl jobs schema migration | TODO | E-143-02 | DE |
-| E-143-02b | Admin role enforcement in UI | TODO | E-143-01, E-143-02 | SE |
-| E-143-04 | Opponent mapping UX polish | TODO | E-143-01 | SE |
-| E-143-03 | Delete deactivated zero-data teams | TODO | E-143-02b, E-143-06a | SE |
-| E-143-06 | Crawl trigger UI with status display | TODO | E-143-03, E-143-05, E-143-06a | SE |
+| E-143-01 | Program list and create admin page | DONE | None | SE |
+| E-143-02 | User role schema migration | DONE | None | DE |
+| E-143-05 | Per-team crawl pipeline scoping | DONE | None | DE |
+| E-143-06a | Crawl jobs schema migration | DONE | E-143-02 | DE |
+| E-143-02b | Admin role enforcement in UI | DONE | E-143-01, E-143-02 | SE |
+| E-143-04 | Opponent mapping UX polish | DONE | E-143-01 | SE |
+| E-143-03 | Delete deactivated zero-data teams | DONE | E-143-02b, E-143-06a | SE |
+| E-143-06 | Crawl trigger UI with status display | DONE | E-143-03, E-143-05, E-143-06a | SE |
 
 ## Dispatch Team
 - software-engineer
@@ -134,3 +134,13 @@ Current admin sub-nav: **Users | Teams | Opponents**. E-143-01 adds a **Programs
 ## History
 - 2026-03-21: Created (DRAFT). Expert consultations: baseball-coach, api-scout, software-engineer, data-engineer, ux-designer.
 - 2026-03-21: Spec review complete. 7 codex rounds + 1 code-reviewer round. All findings resolved. Marked READY.
+- 2026-03-21: Dispatch started. Epic set to ACTIVE. E-143-01 assigned to SE.
+- 2026-03-21: All 8 stories implemented, reviewed (per-story CR + codex + integration CR), and verified. Codex found 1 Priority 1 issue (missing server-side running-job guard on sync route) -- remediated. Integration review clean. Epic COMPLETED.
+- 2026-03-21: Documentation assessment: Triggers fired -- (1) new features shipped (program admin, role enforcement, team delete, opponent mapping polish, crawl trigger UI), (2) schema changes (user role column, crawl_jobs table), (5) changes to how users interact with the system (admin UI is now the primary operational interface). Dispatch docs-writer required.
+- 2026-03-21: Context-layer assessment:
+  1. New convention/pattern: YES -- background crawl trigger pattern (src/pipeline/trigger.py) establishes the convention for fire-and-forget pipeline execution from HTTP routes with crawl_jobs tracking. Also: per-team pipeline scoping via team_ids parameter.
+  2. Architectural decision: YES -- admin UI is now the primary operational interface for team CRUD, crawl triggering, and user management. CLI remains for automation/scripting but is no longer the only path for routine operations.
+  3. Footgun/boundary discovered: YES -- crawl.run() defaults to source="yaml"; per-team DB-backed filtering requires source="db". Also: load.run() needed team_ids scoping added (E-143-05). Both are non-obvious requirements for future pipeline callers.
+  4. Agent behavior change: NO -- no changes to agent routing, dispatch, or coordination.
+  5. Domain knowledge: NO -- no new baseball domain insights or API behavior patterns discovered.
+  6. New CLI command/workflow: NO -- no new bb subcommands or skills added. Existing CLI commands unchanged.

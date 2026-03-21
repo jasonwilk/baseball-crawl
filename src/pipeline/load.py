@@ -140,6 +140,7 @@ def run(
     data_root: Path = _DATA_ROOT,
     db_path: Path = _DB_PATH,
     source: str = "yaml",
+    team_ids: list[int] | None = None,
 ) -> int:
     """Execute the load orchestration.
 
@@ -149,6 +150,10 @@ def run(
         data_root: Override the raw data root (used in tests).
         db_path: Override the database path (used in tests).
         source: Config source -- ``"yaml"`` (default) or ``"db"``.
+        team_ids: Optional list of ``teams.id`` integers.  When provided and
+            ``source="db"``, only teams whose ``TeamEntry.internal_id`` is in
+            this list are loaded.  Has no effect when ``source="yaml"``.
+            Defaults to ``None`` (all active member teams).
 
     Returns:
         Exit code: 0 if all loaders completed, 1 if any raised an exception.
@@ -163,6 +168,10 @@ def run(
             resolved_db = db_path
         config = load_config_from_db(resolved_db)
         db_path = resolved_db
+        if team_ids is not None:
+            config.member_teams = [
+                t for t in config.member_teams if t.internal_id in team_ids
+            ]
     else:
         config = load_config(db_path=db_path)
 

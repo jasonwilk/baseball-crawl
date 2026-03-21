@@ -99,6 +99,7 @@ def run(
     profile: str = "web",
     source: str = "yaml",
     db_path: Path | None = None,
+    team_ids: list[int] | None = None,
 ) -> int:
     """Execute the crawl orchestration.
 
@@ -112,6 +113,10 @@ def run(
         db_path: Override the database path (used in tests; only relevant when
             ``source="db"``).  Defaults to ``DATABASE_PATH`` env var or
             ``data/app.db``.
+        team_ids: Optional list of ``teams.id`` integers.  When provided and
+            ``source="db"``, only teams whose ``TeamEntry.internal_id`` is in
+            this list are processed.  Has no effect when ``source="yaml"``.
+            Defaults to ``None`` (all active member teams).
 
     Returns:
         Exit code: 0 if all crawlers completed, 1 if any raised an exception.
@@ -129,6 +134,10 @@ def run(
             else:
                 resolved_db = default_db
         config = load_config_from_db(resolved_db)
+        if team_ids is not None:
+            config.member_teams = [
+                t for t in config.member_teams if t.internal_id in team_ids
+            ]
     else:
         config = load_config()
 
