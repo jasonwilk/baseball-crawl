@@ -82,7 +82,7 @@ All sections should show `[OK]`. Done.
 
 The normal day-to-day flow. Requires a valid client key. No browser interaction needed.
 
-If the refresh token is still valid (within 14 days), it refreshes normally. If the refresh token is expired, the command automatically falls back to the full login flow using `GAMECHANGER_USER_EMAIL` and `GAMECHANGER_USER_PASSWORD` from `.env`.
+If the refresh token is still valid (within 14 days), it refreshes normally. If the refresh token is expired, the command automatically falls back to the full login flow using `GAMECHANGER_USER_EMAIL` and `GAMECHANGER_USER_PASSWORD` from `.env` or the Docker environment.
 
 ### Steps
 
@@ -92,7 +92,7 @@ If the refresh token is still valid (within 14 days), it refreshes normally. If 
 bb creds refresh --profile web
 ```
 
-This calls `POST /auth {type:"refresh"}` using the stored refresh token and client key. If the refresh token is expired and email + password are in `.env`, it automatically performs the full login flow instead. On success, it writes a new access token and a new refresh token to `.env`.
+This calls `POST /auth {type:"refresh"}` using the stored refresh token and client key. If the refresh token is expired and email + password are available (in `.env` or the Docker environment), it automatically performs the full login flow instead. On success, it writes a new access token and a new refresh token to `.env`.
 
 **2. Verify:**
 
@@ -106,7 +106,7 @@ If this fails with a signature error, the client key may be stale -- go to **Pat
 
 ## Path C: Full Re-Capture (Browser)
 
-Use this only when Path B fails **and** login fallback also fails (e.g., email/password not in `.env`, or password changed). This should be rare.
+Use this only when Path B fails **and** login fallback also fails (e.g., email/password not configured in `.env` or the Docker environment, or password changed). This should be rare.
 
 ### Steps
 
@@ -224,9 +224,9 @@ The access token is generated on demand by `TokenManager` -- you almost never ne
 
 ## Login Fallback
 
-When the refresh token expires and `GAMECHANGER_USER_EMAIL` + `GAMECHANGER_USER_PASSWORD` are set in `.env`, the system automatically performs the full login flow (client-auth, user-auth, password) to obtain new tokens. This means **Path C is rarely needed** as long as email and password are in `.env`.
+When the refresh token expires and `GAMECHANGER_USER_EMAIL` + `GAMECHANGER_USER_PASSWORD` are available (set in `.env` or the Docker environment), the system automatically performs the full login flow (client-auth, user-auth, password) to obtain new tokens. This means **Path C is rarely needed** as long as email and password are configured.
 
-The login fallback triggers on the `get_access_token()` path only -- `force_refresh()` does not attempt login.
+The login fallback triggers on the `get_access_token()` path and on `force_refresh(allow_login_fallback=True)` calls.
 
 ---
 

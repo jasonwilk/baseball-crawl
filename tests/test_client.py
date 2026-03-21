@@ -1465,3 +1465,114 @@ def test_paginated_allows_same_host_next_page(monkeypatch: pytest.MonkeyPatch) -
     result = client.get_paginated("/teams/abc/game-summaries")
 
     assert result == [{"id": "game-1"}, {"id": "game-2"}]
+
+
+# ---------------------------------------------------------------------------
+# E-145-01: env-var fallback covers all credential keys (AC-1, AC-2, AC-3, AC-5)
+# ---------------------------------------------------------------------------
+
+
+def test_load_credentials_env_fallback_login_keys(monkeypatch: pytest.MonkeyPatch) -> None:
+    """AC-1 / AC-5: Optional login keys populated from os.environ when .env is absent."""
+    from src.gamechanger.client import GameChangerClient
+
+    required = {
+        "GAMECHANGER_REFRESH_TOKEN_WEB": "rt",
+        "GAMECHANGER_CLIENT_ID_WEB": "cid",
+        "GAMECHANGER_CLIENT_KEY_WEB": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+        "GAMECHANGER_DEVICE_ID_WEB": "dev",
+        "GAMECHANGER_BASE_URL": "https://api.team-manager.gc.com",
+    }
+    monkeypatch.setattr(
+        "src.gamechanger.client.dotenv_values",
+        lambda *_a, **_kw: {},  # simulate Docker: no .env file
+    )
+    for k, v in required.items():
+        monkeypatch.setenv(k, v)
+    monkeypatch.setenv("GAMECHANGER_USER_EMAIL", "coach@example.com")
+    monkeypatch.setenv("GAMECHANGER_USER_PASSWORD", "s3cret")
+
+    client = GameChangerClient.__new__(GameChangerClient)
+    creds = client._load_credentials("web")
+
+    assert creds["GAMECHANGER_USER_EMAIL"] == "coach@example.com"
+    assert creds["GAMECHANGER_USER_PASSWORD"] == "s3cret"
+
+
+def test_load_credentials_env_fallback_profile_scoped_optional_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AC-3 / AC-5: Profile-scoped optional keys (e.g. ACCESS_TOKEN) populated from os.environ."""
+    from src.gamechanger.client import GameChangerClient
+
+    required = {
+        "GAMECHANGER_REFRESH_TOKEN_WEB": "rt",
+        "GAMECHANGER_CLIENT_ID_WEB": "cid",
+        "GAMECHANGER_CLIENT_KEY_WEB": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+        "GAMECHANGER_DEVICE_ID_WEB": "dev",
+        "GAMECHANGER_BASE_URL": "https://api.team-manager.gc.com",
+    }
+    monkeypatch.setattr(
+        "src.gamechanger.client.dotenv_values",
+        lambda *_a, **_kw: {},
+    )
+    for k, v in required.items():
+        monkeypatch.setenv(k, v)
+    monkeypatch.setenv("GAMECHANGER_ACCESS_TOKEN_WEB", "fake-at")
+
+    client = GameChangerClient.__new__(GameChangerClient)
+    creds = client._load_credentials("web")
+
+    assert creds["GAMECHANGER_ACCESS_TOKEN_WEB"] == "fake-at"
+
+
+def test_load_credentials_env_fallback_proxy_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    """AC-5: Proxy keys populated from os.environ when .env is absent."""
+    from src.gamechanger.client import GameChangerClient
+
+    required = {
+        "GAMECHANGER_REFRESH_TOKEN_WEB": "rt",
+        "GAMECHANGER_CLIENT_ID_WEB": "cid",
+        "GAMECHANGER_CLIENT_KEY_WEB": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+        "GAMECHANGER_DEVICE_ID_WEB": "dev",
+        "GAMECHANGER_BASE_URL": "https://api.team-manager.gc.com",
+    }
+    monkeypatch.setattr(
+        "src.gamechanger.client.dotenv_values",
+        lambda *_a, **_kw: {},
+    )
+    for k, v in required.items():
+        monkeypatch.setenv(k, v)
+    monkeypatch.setenv("PROXY_ENABLED", "true")
+
+    client = GameChangerClient.__new__(GameChangerClient)
+    creds = client._load_credentials("web")
+
+    assert creds["PROXY_ENABLED"] == "true"
+
+
+def test_load_credentials_dotenv_takes_precedence_over_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AC-2: .env values take precedence over os.environ for the same key."""
+    from src.gamechanger.client import GameChangerClient
+
+    dotenv_creds = {
+        "GAMECHANGER_REFRESH_TOKEN_WEB": "rt",
+        "GAMECHANGER_CLIENT_ID_WEB": "cid",
+        "GAMECHANGER_CLIENT_KEY_WEB": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+        "GAMECHANGER_DEVICE_ID_WEB": "dev",
+        "GAMECHANGER_BASE_URL": "https://api.team-manager.gc.com",
+        "GAMECHANGER_USER_EMAIL": "from-dotenv@example.com",
+    }
+    monkeypatch.setattr(
+        "src.gamechanger.client.dotenv_values",
+        lambda *_a, **_kw: dotenv_creds,
+    )
+    # os.environ has a different value for the same key
+    monkeypatch.setenv("GAMECHANGER_USER_EMAIL", "from-environ@example.com")
+
+    client = GameChangerClient.__new__(GameChangerClient)
+    creds = client._load_credentials("web")
+
+    assert creds["GAMECHANGER_USER_EMAIL"] == "from-dotenv@example.com"

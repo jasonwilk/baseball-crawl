@@ -134,6 +134,8 @@ bb creds setup web
 
 This executes the programmatic login flow using your credentials, stores the resulting session tokens, and verifies API connectivity. For details on the authentication architecture and token lifetimes, see [docs/api/auth.md](api/auth.md).
 
+> **Keep these variables in `.env` for ongoing resilience.** `GAMECHANGER_USER_EMAIL` and `GAMECHANGER_USER_PASSWORD` are not just for one-time bootstrap. When the refresh token expires (every 14 days if not renewed sooner), the system uses these credentials to perform the full login flow automatically. If they are absent, expiry causes a `CredentialExpiredError` requiring manual intervention. Retaining them means routine token expiry is handled without operator action.
+
 ### 2.5 Seed the first admin user
 
 The admin UI requires at least one user in the database before the first login. After

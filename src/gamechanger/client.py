@@ -629,16 +629,17 @@ class GameChangerClient:
         # Fall back to process environment for keys not found in .env file
         # (e.g., when running inside a Docker container where env vars are
         # injected by Docker Compose rather than read from a mounted file).
-        for key in _required_keys(profile):
-            if not env_values.get(key):
-                val = os.environ.get(key)
-                if val:
-                    env_values[key] = val
+        # Covers all keys -- required, optional, and proxy -- not just
+        # _required_keys(), so that GAMECHANGER_USER_EMAIL/PASSWORD and
+        # profile-scoped optional keys are available in Docker deployments.
+        for key, val in os.environ.items():
+            if not env_values.get(key) and val:
+                env_values[key] = val
         required = _required_keys(profile)
         missing = [key for key in required if not env_values.get(key)]
         if missing:
             raise ConfigurationError(
                 f"Missing required environment variable(s): {', '.join(missing)}. "
-                "Ensure they are set in your .env file."
+                "Ensure they are set in your .env file or environment."
             )
         return {k: v for k, v in env_values.items() if v is not None}

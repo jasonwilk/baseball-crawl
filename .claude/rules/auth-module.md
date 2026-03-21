@@ -33,7 +33,7 @@ Catch order matters: catch `ForbiddenError` / `LoginFailedError` before `Credent
 ## Environment Variable Access
 
 - Use `dotenv_values()` to read `.env` -- this returns a dict without populating `os.environ`.
-- `GameChangerClient._load_credentials()` falls back to `os.environ` only for Docker container compatibility (env vars injected by Compose).
+- `GameChangerClient._load_credentials()` falls back to `os.environ` for **all** credential keys (required, optional, and proxy) for Docker container compatibility (env vars injected by Compose rather than read from a mounted `.env` file).
 - Default `.env` path: `Path(__file__).resolve().parents[2] / ".env"` (repo root).
 
 ## .env Write-Back

@@ -313,7 +313,7 @@ class TokenManager:
         raise CredentialExpiredError(
             "Refresh token expired (HTTP 401). "
             "Auto-recovery requires GAMECHANGER_USER_EMAIL and "
-            "GAMECHANGER_USER_PASSWORD in .env. "
+            "GAMECHANGER_USER_PASSWORD in .env or environment. "
             "Set login credentials for automatic recovery, or re-import: bb creds import"
         )
 
@@ -647,7 +647,7 @@ class TokenManager:
         if not self._email or not self._password:
             raise ConfigurationError(
                 "Login bootstrap requires GAMECHANGER_USER_EMAIL and "
-                "GAMECHANGER_USER_PASSWORD in .env."
+                "GAMECHANGER_USER_PASSWORD in .env or environment."
             )
 
         if not self._device_id:

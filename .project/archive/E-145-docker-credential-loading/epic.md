@@ -1,7 +1,7 @@
 # E-145: Fix Docker Credential Loading for Optional Env Vars
 
 ## Status
-`READY`
+`COMPLETED`
 
 ## Overview
 Fix `GameChangerClient._load_credentials()` so that ALL credential environment variables -- not just the required ones -- fall back to `os.environ` when absent from the `.env` file. This unblocks the UI Sync feature (E-143) inside Docker, where env vars are injected by Docker Compose and no `.env` file exists.
@@ -36,9 +36,9 @@ Other optional keys similarly affected (read from `self._credentials` dict downs
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-145-01 | Fix env-var fallback to cover all credential keys | TODO | None | - |
-| E-145-02 | Update auth-module rule for corrected fallback behavior | TODO | E-145-01 | - |
-| E-145-03 | Document Docker credential auto-recovery in admin docs | TODO | E-145-01 | - |
+| E-145-01 | Fix env-var fallback to cover all credential keys | DONE | None | - |
+| E-145-02 | Update auth-module rule for corrected fallback behavior | DONE | E-145-01 | - |
+| E-145-03 | Document Docker credential auto-recovery in admin docs | DONE | E-145-01 | - |
 
 ## Dispatch Team
 - software-engineer
@@ -97,3 +97,20 @@ Updates needed (single docs story):
 ## History
 - 2026-03-21: Created. Bug blocks E-143 UI Sync in production Docker deployment.
 - 2026-03-21: Spec review complete. 3 iterations (2 codex + 1 code-reviewer), 8 findings accepted, 2 dismissed. All consistency sweeps clean. Status set to READY.
+- 2026-03-21: Dispatch started. Epic set to ACTIVE. E-145-01 assigned to SE.
+- 2026-03-21: All stories implemented and reviewed. Codex found 1 finding (client.py error message) -- remediated. Integration CR clean. Epic COMPLETED.
+
+### Documentation Assessment
+Documentation impact addressed by E-145-03 (dedicated docs story updating operations.md, production-deployment.md, credential-refresh.md, and auth.md).
+
+### Context-Layer Assessment
+Context-layer impact addressed by E-145-02 (dedicated CA story updating auth-module.md).
+
+| Trigger | Verdict | Notes |
+|---------|---------|-------|
+| New agent or agent role change | NO | No agent changes |
+| New rule, skill, or hook | NO | No new rules/skills/hooks |
+| CLAUDE.md update needed | NO | CLAUDE.md already points to auth-module.md at correct abstraction |
+| Agent memory update needed | NO | PM memory updated separately during closure |
+| Existing rule/skill content invalidated | NO | E-145-02 already updated auth-module.md |
+| New convention or workflow pattern | NO | No new conventions introduced |
