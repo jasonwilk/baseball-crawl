@@ -27,6 +27,7 @@ from typing import NamedTuple
 
 from src.safety.pii_patterns import (
     COMPILED_PATTERNS,
+    PLACEHOLDER_EMAILS,
     PII_OK_MARKER,
     RFC2606_DOMAINS,
     SCANNABLE_EXTENSIONS,
@@ -60,6 +61,14 @@ def is_rfc2606_email(email: str) -> bool:
         if domain == entry_norm or domain.endswith("." + entry_norm):
             return True
     return False
+
+
+def is_placeholder_email(email: str) -> bool:
+    """Return True if the email is a known placeholder address.
+
+    Performs case-insensitive exact matching against PLACEHOLDER_EMAILS.
+    """
+    return email.lower() in PLACEHOLDER_EMAILS
 
 
 def should_skip_path(file_path: str) -> bool:
@@ -138,13 +147,22 @@ def scan_file(file_path: str) -> list[Violation]:
             continue
         for compiled in COMPILED_PATTERNS:
             for match in compiled["pattern"].finditer(line):
-                if compiled["name"] == "email" and is_rfc2606_email(match.group(0)):
-                    logger.debug(
-                        "Skipping RFC 2606 email match on %s:%d",
-                        file_path,
-                        line_number,
-                    )
-                    continue
+                if compiled["name"] == "email":
+                    email = match.group(0)
+                    if is_rfc2606_email(email):
+                        logger.debug(
+                            "Skipping RFC 2606 email match on %s:%d",
+                            file_path,
+                            line_number,
+                        )
+                        continue
+                    if is_placeholder_email(email):
+                        logger.debug(
+                            "Skipping placeholder email match on %s:%d",
+                            file_path,
+                            line_number,
+                        )
+                        continue
                 violations.append(
                     Violation(
                         file_path=file_path,

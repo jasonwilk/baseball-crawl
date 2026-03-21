@@ -17,10 +17,12 @@ from pathlib import Path
 
 import pytest
 
+from src.safety.pii_patterns import PLACEHOLDER_EMAILS
 from src.safety.pii_scanner import (
     Violation,
     _count_scannable,
     has_synthetic_marker,
+    is_placeholder_email,
     is_rfc2606_email,
     is_scannable,
     main,
@@ -689,6 +691,79 @@ class TestReportViolations:
 # ---------------------------------------------------------------------------
 # Tests: success confirmation output (E-022-01)
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Integration tests: placeholder email allowlist (E-144-01)
+# ---------------------------------------------------------------------------
+
+class TestPlaceholderEmailAllowlist:
+    """AC-1 through AC-5: Placeholder email allowlist filtering tests."""
+
+    # (a) Each seeded email produces no violations via scan_file
+    @pytest.mark.parametrize("email", [
+        "your@email.com",
+        "user@email.com",
+        "user@domain.com",
+        "admin@domain.com",
+        "admin@yourcompany.com",
+        "info@yourcompany.com",
+        "user@yourdomain.com",
+        "admin@yourdomain.com",
+    ])
+    def test_seeded_email_not_reported(self, tmp_path: Path, email: str) -> None:
+        """Each seed placeholder email produces no violation."""
+        path = _write_file(tmp_path, "doc.md", f"Contact: {email}\n")
+        violations = scan_file(path)
+        assert violations == [], f"Expected no violation for {email}"
+
+    # (b) A similar-but-not-listed email still gets flagged
+    def test_similar_email_still_flagged(self, tmp_path: Path) -> None:
+        """me@domain.com is not in the allowlist and must still be reported."""
+        path = _write_file(tmp_path, "doc.md", "Contact: me@domain.com\n")
+        violations = scan_file(path)
+        assert len(violations) == 1
+        assert violations[0].pattern_name == "email"
+
+    # (c) Case-insensitive matching
+    def test_uppercase_placeholder_not_reported(self, tmp_path: Path) -> None:
+        """Uppercase variant of a seeded email is also skipped."""
+        path = _write_file(tmp_path, "doc.md", "Contact: USER@DOMAIN.COM\n")
+        violations = scan_file(path)
+        assert violations == []
+
+    def test_mixed_case_placeholder_not_reported(self, tmp_path: Path) -> None:
+        """Mixed-case variant of a seeded email is also skipped."""
+        path = _write_file(tmp_path, "doc.md", "Contact: Admin@YourCompany.com\n")
+        violations = scan_file(path)
+        assert violations == []
+
+    # Unit tests for is_placeholder_email directly
+    def test_is_placeholder_email_match(self) -> None:
+        assert is_placeholder_email("user@domain.com") is True
+
+    def test_is_placeholder_email_case_insensitive(self) -> None:
+        assert is_placeholder_email("USER@DOMAIN.COM") is True
+
+    def test_is_placeholder_email_not_in_list(self) -> None:
+        assert is_placeholder_email("me@domain.com") is False
+
+    def test_is_placeholder_email_real_domain(self) -> None:
+        assert is_placeholder_email("jason@realdomain.com") is False
+
+    def test_placeholder_emails_allowlist_exact_contents(self) -> None:
+        """Guard: PLACEHOLDER_EMAILS must equal the exact TN-1 seed set -- no more, no less."""
+        expected: frozenset[str] = frozenset({
+            "your@email.com",
+            "user@email.com",
+            "user@domain.com",
+            "admin@domain.com",
+            "admin@yourcompany.com",
+            "info@yourcompany.com",
+            "user@yourdomain.com",
+            "admin@yourdomain.com",
+        })
+        assert PLACEHOLDER_EMAILS == expected
+
 
 class TestSuccessConfirmation:
     """E-022-01: Scanner prints confirmation on clean scans."""

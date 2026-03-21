@@ -116,6 +116,23 @@ RFC2606_DOMAINS: frozenset[str] = frozenset({
     "localhost",
 })
 
+# Exact-match allowlist for known placeholder email addresses that appear in
+# documentation, admin guides, and template text. These are never real contact
+# information and should not require per-line pii-ok markers.
+#
+# Matching rule: normalize to lowercase, then check set membership.
+# Scope: seed list only -- do not add entries without a clear justification.
+PLACEHOLDER_EMAILS: frozenset[str] = frozenset({
+    "your@email.com",        # generic template in onboarding docs
+    "user@email.com",        # generic template in onboarding docs
+    "user@domain.com",       # template placeholder in admin docs
+    "admin@domain.com",      # template placeholder in admin docs
+    "admin@yourcompany.com", # template placeholder in admin docs
+    "info@yourcompany.com",  # template placeholder in admin docs
+    "user@yourdomain.com",   # template placeholder in admin docs
+    "admin@yourdomain.com",  # template placeholder in admin docs
+})
+
 # Inline suppression marker. A line containing this string (as a substring,
 # case-sensitive) is excluded from all findings on that line. Language-agnostic:
 # works in Python, YAML, shell, etc. (`# pii-ok`). For HTML/XML where `#` is
