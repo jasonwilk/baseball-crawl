@@ -223,7 +223,7 @@ Admin access is granted via either of two mechanisms (both are checked):
 To promote a user to admin via SQL:
 
 ```sql
-UPDATE users SET role = 'admin' WHERE id = <user_id>;
+UPDATE users SET role = 'admin' WHERE email = 'your@email.com';  <!-- pii-ok -->
 ```
 
 After promotion, the user's Role column on the Users page shows `admin`.
