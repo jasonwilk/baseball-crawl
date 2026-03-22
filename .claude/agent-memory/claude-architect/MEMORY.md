@@ -52,6 +52,9 @@ IMPORTANT -- This is the governing design principle for the entire project.
 - Values detailed context in agent prompts (full operational manuals)
 - Wants all architectural details preserved (stack decisions, metrics, collaboration patterns)
 
+## Pending Context-Layer Updates
+- `review-cycle-reordering.md` -- Internal reviews (CR + team) before Codex in plan and implement skills; review scorecard pattern for epic History. Approved 2026-03-22, awaiting epic.
+
 ## Topic File Index
 - `claude-practices.md` -- CLAUDE.md design, context management
 - `agent-design.md` -- Subagent architecture, ecosystem patterns

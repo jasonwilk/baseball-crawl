@@ -5,7 +5,7 @@
 <!-- Lifecycle: DRAFT → READY → ACTIVE → COMPLETED (or BLOCKED / ABANDONED) -->
 
 ## Overview
-Reorder the review phases in both the plan and implement skills so that cheap, fast internal reviews (code-reviewer spec audit + holistic team review) run before expensive external reviews (Codex). E-147 demonstrated that internal reviews find more practical implementation issues (wrong function names, missing code paths, form flow gaps) while Codex finds rubric-level issues (AC testability, dependency declarations). Running internal reviews first cleans up mechanical and feasibility issues so Codex runs as a systematic final validation pass on an already-clean spec.
+Reorder the review phases in both the plan and implement skills so that cheap, fast internal reviews (code-reviewer spec audit + holistic team review) run before expensive external reviews (Codex), and add atomic commit discipline so that ALL session artifacts (epic files, agent memory, vision signals) are captured in a single commit per workflow pass. E-147 demonstrated that internal reviews find more practical implementation issues (wrong function names, missing code paths, form flow gaps) while Codex finds rubric-level issues (AC testability, dependency declarations). Running internal reviews first cleans up mechanical and feasibility issues so Codex runs as a systematic final validation pass on an already-clean spec.
 
 ## Background & Context
 During E-147 planning, the review process ran in the current order: Codex spec review first (2 iterations, 8 findings accepted), then code-reviewer and holistic team reviews (4 passes, 14 findings accepted), then a final Codex pass (4 findings, 2 dismissed). The internal reviews found different and often more practical issues than Codex -- wrong function signatures, missing API calls, inverted phase labels, form flow gaps. Codex found rubric-level issues like AC testability and dependency declarations.
@@ -14,13 +14,14 @@ The ordering is backwards. Internal reviews are fast (already-spawned agents, no
 
 The same principle applies to the implement skill's optional review chain: the code-reviewer integration review (fast, cross-story interactions) should run before the Codex code review (systematic rubric validation).
 
-No expert consultation required -- this is a pure process/workflow change to context-layer files. The architect's analysis (`.claude/agent-memory/claude-architect/review-cycle-reordering.md`) provides the approved direction and E-147 evidence.
+Architect consultation occurred for all three stories. The architect's pre-planning analysis (`.claude/agent-memory/claude-architect/review-cycle-reordering.md`) provides the approved direction and E-147 evidence for review reordering (E-148-01, E-148-02). The atomic session commit approach (E-148-03) was designed by the architect via live team consultation during epic expansion -- there is no pre-existing artifact for that design; the design is captured in TN-8 and TN-10.
 
 ## Goals
 - Internal reviews (CR spec audit + holistic team review) run before Codex in the plan skill's review phases
 - CR integration review runs before Codex code review in the implement skill's optional review chain
 - Review scorecard table is recorded in epic History at both READY gate (planning) and closure (implementation) for convergence visibility
 - User retains judgment over when to advance from internal review tier to Codex tier
+- Both plan and implement skills have explicit commit steps that capture ALL session artifacts (epic files + agent memory + vision signals + research + ideas) rather than leaving ancillary files uncommitted
 
 ## Non-Goals
 - Changes to the code-reviewer agent definition (spec review rubric is delivered via assignment message, not codified in the agent definition)
@@ -35,12 +36,16 @@ No expert consultation required -- this is a pure process/workflow change to con
 - Implement skill Phase 4a is CR integration review; Phase 4b is Codex code review (swapped from current)
 - Review scorecard table appears in epic History at READY gate and at closure
 - All existing edge cases (timeout, codex not installed, clean review, circuit breaker) are preserved
+- Plan skill Phase 5 includes a new Step 2a (atomic planning commit) that stages all session artifacts per TN-8 and commits with user approval
+- Implement skill Phase 5 includes a new Step 7a (ancillary file sweep) that commits main-checkout session artifacts before the closure merge, clearing the way for the clean-tree preflight
+- Commit messages follow the convention in TN-10
 
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
 | E-148-01 | Restructure plan skill review phases | TODO | None | - |
-| E-148-02 | Reorder implement skill review phases and add scorecard | TODO | None | - |
+| E-148-02 | Reorder implement skill review phases and add scorecard | TODO | E-148-01 | - |
+| E-148-03 | Atomic session commits for plan and implement skills | TODO | E-148-01, E-148-02 | - |
 
 ## Dispatch Team
 - claude-architect
@@ -143,21 +148,76 @@ All existing edge cases from the current plan and implement skills must be prese
 - Per-story code review in Phase 3 Step 5 of the implement skill
 - The codex-spec-review and codex-review skills themselves
 - The code-reviewer agent definition
-- Phase 5 closure sequence in the implement skill (except adding scorecard)
+- Phase 5 closure merge mechanics in the implement skill (Step 8 patch generation, dry-run, apply, user approval -- unchanged)
+- Phase 5 archive commit in the implement skill (Step 11 -- unchanged)
+- Phase 5 clean-tree preflight in the implement skill (Step 8 -- unchanged, serves as safety net after Step 7a sweep)
 
-Note: Phase 5 compound dispatch handoff logic in the plan skill requires a minor update to handle CR already being on the team (spawned during Phase 3). This is not "unchanged" -- see E-148-01 AC-8.
+Note: Phase 5 compound dispatch handoff logic in the plan skill requires a minor update to handle CR already being on the team (spawned during Phase 3). This is not "unchanged" -- see E-148-01 AC-8. E-148-03 adds new steps (plan skill Step 2a, implement skill Step 7a) but does not modify existing steps.
+
+### TN-8: Recognized Session Artifact Categories
+
+Both skills produce artifacts beyond their primary outputs. These are the recognized path patterns for atomic commit steps.
+
+**Planning commit (plan skill Step 2a) -- stages from main checkout:**
+- `epics/E-NNN-slug/` (epic and story files)
+- `.claude/agent-memory/` (all agent memory updates from the planning session)
+- `docs/vision-signals.md` (if modified)
+- `.project/research/E-NNN-*` (research artifacts, if any)
+- `.project/ideas/` (if any ideas captured during session)
+
+During planning, all agents work in the main checkout, so all session artifacts are here.
+
+**Ancillary sweep (implement skill Step 7a) -- stages from main checkout:**
+- `docs/vision-signals.md` (if captured by the main session during dispatch)
+- `.claude/agent-memory/` (leftover planning artifacts not committed by Step 2a, if any)
+- `.project/ideas/` (if any ideas captured by the main session during dispatch)
+
+During dispatch, agents work in the epic worktree. Agent memory writes made by dispatch agents go to the worktree and are captured by the closure merge patch (Step 8). Step 7a only sweeps main-checkout changes -- typically vision signals from the main session or leftovers from prior sessions. Most dispatch runs will have a clean main checkout if the plan skill's Step 2a committed properly.
+
+**Not staged by either step (separate existing commits):**
+- Implementation code -- existing closure merge (Step 8, worktree patch, includes dispatch agent memory writes)
+- Archive moves + PM dispatch memory update -- existing archive commit (Step 11)
+
+**File enumeration (both steps):** Use `git status --porcelain` (without `-uall` per CLAUDE.md) for modified/staged files. For untracked files in mixed directories (e.g., `.claude/agent-memory/`), use `git ls-files --others --exclude-standard -- <path>` to enumerate individual files without the memory risks of `-uall`. This is scoped to specific recognized paths, not the whole repo.
+
+**Staging precision (both steps):**
+- **Wholly-owned directories** (`epics/E-NNN-slug/`, `.project/research/E-NNN-*`): `git add <directory>` is acceptable because the entire directory is a session artifact.
+- **Mixed directories** (`.claude/agent-memory/`, `.project/ideas/`): Stage individual files only -- enumerate with `git ls-files --others --exclude-standard -- <path>` for untracked files, `git diff --name-only -- <path>` for modified files, then `git add` each matching file.
+- **Single files** (`docs/vision-signals.md`): `git add <file>` directly.
+
+**Classification (both steps):** Files matching recognized patterns are staged and committed. Files NOT matching any recognized pattern are reported to the user and the step waits for instructions -- preserving safety behavior against pre-existing dirty state or unrelated edits.
+
+### TN-10: Commit Message Convention
+
+| Workflow Gate | Commit Message | Scope |
+|---|---|---|
+| Plan READY gate (Step 2a) | `feat(E-NNN): plan <epic title> (READY)` | Epic files + all session artifacts |
+| Implement pre-closure (Step 7a) | `chore(E-NNN): session artifacts` | Main checkout ancillary files only |
+| Implement closure (Step 8) | `feat(E-NNN): <epic title>` | Implementation code (worktree patch) -- **existing, unchanged** |
+| Implement archive (Step 11) | `chore(E-NNN): archive epic` | Archive move -- **existing, unchanged** |
+
+The `feat` prefix for plan commits is intentional: creating the epic IS the feature deliverable of the planning workflow. The `chore` prefix for dispatch session artifacts is correct because they're housekeeping alongside the real deliverable (the implementation code).
 
 ## Open Questions
 None -- direction approved by user, architect analysis comprehensive.
 
 ## History
 - 2026-03-22: Created. Based on E-147 planning experience and architect analysis.
-- 2026-03-22: READY. 2 review rounds (1 internal, 1 Codex). 12 findings, 12 accepted, 0 dismissed.
+- 2026-03-22: Expanded with E-148-03 (atomic session commits). Architect designed the approach; PM framed ACs. Dependencies restructured to fully serial chain (01→02→03).
+- 2026-03-22: READY. 11 review passes (6 internal iterations, 4 Codex iterations, 1 async Codex). 25 findings, 25 accepted, 0 dismissed.
 
 ### Review Scorecard
 | Review Pass | Findings | Accepted | Dismissed |
 |---|---|---|---|
-| Internal iteration 1 -- CR + Holistic | 9 | 9 | 0 |
+| Internal iteration 1 -- CR spec audit | 4 | 4 | 0 |
+| Internal iteration 1 -- Holistic (PM + Architect) | 5 | 5 | 0 |
 | Internal iteration 2 -- CR + Holistic | 0 | 0 | 0 |
 | Codex iteration 1 | 3 | 3 | 0 |
-| **Total** | **12** | **12** | **0** |
+| Internal iteration 3 -- CR + Holistic | 2 | 2 | 0 |
+| Internal iteration 4 -- CR + Holistic | 0 | 0 | 0 |
+| Codex iteration 2 | 5 | 5 | 0 |
+| Internal iteration 5 -- CR + Holistic | 0 | 0 | 0 |
+| Codex iteration 3 | 4 | 4 | 0 |
+| Codex iteration 4 (async) | 2 | 2 | 0 |
+| Internal iteration 6 -- CR + Holistic + SE | 0 | 0 | 0 |
+| **Total** | **25** | **25** | **0** |
