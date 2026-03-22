@@ -1576,3 +1576,120 @@ def test_load_credentials_dotenv_takes_precedence_over_env(
     creds = client._load_credentials("web")
 
     assert creds["GAMECHANGER_USER_EMAIL"] == "from-dotenv@example.com"
+
+
+# ---------------------------------------------------------------------------
+# AC-2 (E-146-02): post() and delete() methods
+# ---------------------------------------------------------------------------
+
+
+@respx.mock
+def test_post_204_returns_none(monkeypatch: pytest.MonkeyPatch) -> None:
+    """post() returns None on 204 No Content."""
+    respx.post(f"{_BASE_URL}/teams/abc/follow").mock(
+        return_value=httpx.Response(204)
+    )
+    client = _make_client(monkeypatch)
+    result = client.post("/teams/abc/follow")
+    assert result is None
+
+
+@respx.mock
+def test_post_does_not_parse_json_on_204(monkeypatch: pytest.MonkeyPatch) -> None:
+    """post() returns None on 204 without attempting to parse a (non-existent) body."""
+    respx.post(f"{_BASE_URL}/teams/abc/follow").mock(
+        return_value=httpx.Response(204, content=b"")
+    )
+    client = _make_client(monkeypatch)
+    result = client.post("/teams/abc/follow")
+    assert result is None
+
+
+@respx.mock
+def test_post_403_raises_forbidden_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """post() raises ForbiddenError on 403."""
+    respx.post(f"{_BASE_URL}/teams/abc/follow").mock(
+        return_value=httpx.Response(403)
+    )
+    client = _make_client(monkeypatch)
+    with pytest.raises(ForbiddenError):
+        client.post("/teams/abc/follow")
+
+
+@respx.mock
+def test_post_401_raises_credential_expired_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """post() raises CredentialExpiredError on 401 after refresh retry."""
+    respx.post(f"{_BASE_URL}/teams/abc/follow").mock(
+        return_value=httpx.Response(401)
+    )
+    client = _make_client(monkeypatch)
+    with pytest.raises(CredentialExpiredError) as exc_info:
+        client.post("/teams/abc/follow")
+    assert not isinstance(exc_info.value, ForbiddenError)
+
+
+@respx.mock
+def test_post_unexpected_status_raises_api_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """post() raises GameChangerAPIError on unexpected status codes."""
+    respx.post(f"{_BASE_URL}/teams/abc/follow").mock(
+        return_value=httpx.Response(500)
+    )
+    client = _make_client(monkeypatch)
+    with pytest.raises(GameChangerAPIError):
+        client.post("/teams/abc/follow")
+
+
+@respx.mock
+def test_delete_204_returns_none(monkeypatch: pytest.MonkeyPatch) -> None:
+    """delete() returns None on 204 No Content."""
+    respx.delete(f"{_BASE_URL}/teams/abc/users/user-uuid").mock(
+        return_value=httpx.Response(204)
+    )
+    client = _make_client(monkeypatch)
+    result = client.delete("/teams/abc/users/user-uuid")
+    assert result is None
+
+
+@respx.mock
+def test_delete_200_ok_returns_none(monkeypatch: pytest.MonkeyPatch) -> None:
+    """delete() returns None on 200 with text body 'OK'."""
+    respx.delete(f"{_BASE_URL}/me/relationship-requests/abc").mock(
+        return_value=httpx.Response(200, text="OK")
+    )
+    client = _make_client(monkeypatch)
+    result = client.delete("/me/relationship-requests/abc")
+    assert result is None
+
+
+@respx.mock
+def test_delete_403_raises_forbidden_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """delete() raises ForbiddenError on 403."""
+    respx.delete(f"{_BASE_URL}/teams/abc/users/user-uuid").mock(
+        return_value=httpx.Response(403)
+    )
+    client = _make_client(monkeypatch)
+    with pytest.raises(ForbiddenError):
+        client.delete("/teams/abc/users/user-uuid")
+
+
+@respx.mock
+def test_delete_401_raises_credential_expired_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """delete() raises CredentialExpiredError on 401 after refresh retry."""
+    respx.delete(f"{_BASE_URL}/teams/abc/users/user-uuid").mock(
+        return_value=httpx.Response(401)
+    )
+    client = _make_client(monkeypatch)
+    with pytest.raises(CredentialExpiredError) as exc_info:
+        client.delete("/teams/abc/users/user-uuid")
+    assert not isinstance(exc_info.value, ForbiddenError)
+
+
+@respx.mock
+def test_delete_unexpected_status_raises_api_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """delete() raises GameChangerAPIError on unexpected status codes."""
+    respx.delete(f"{_BASE_URL}/teams/abc/users/user-uuid").mock(
+        return_value=httpx.Response(500)
+    )
+    client = _make_client(monkeypatch)
+    with pytest.raises(GameChangerAPIError):
+        client.delete("/teams/abc/users/user-uuid")

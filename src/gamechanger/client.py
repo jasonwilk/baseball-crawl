@@ -608,6 +608,151 @@ class GameChangerClient:
                 f"Unexpected status {response.status_code} for {path}."
             )
 
+    def post(
+        self,
+        path: str,
+        timeout: int = 30,
+    ) -> None:
+        """Make an authenticated POST request. Returns None on 204 No Content success.
+
+        Does not attempt JSON parsing.  Used for state-changing endpoints that
+        return no body (e.g., ``POST /teams/{id}/follow``).
+
+        Args:
+            path: API path (e.g. ``"/teams/abc/follow"``).  Must start with ``/``.
+            timeout: Request timeout in seconds (default: 30).
+
+        Returns:
+            None on 204 success.
+
+        Raises:
+            CredentialExpiredError: On 401 (after refresh retry) or 403.
+            RateLimitError: On 429 responses.
+            GameChangerAPIError: On unexpected status codes.
+        """
+        self._ensure_access_token()
+        url = f"{self._base_url}{path}"
+        headers = {"Content-Type": _GC_CONTENT_TYPE}
+        logger.debug("POST %s", url)
+        response = self._session.post(url, timeout=timeout, headers=headers)
+        logger.debug("POST %s -> %d", path, response.status_code)
+
+        if response.status_code == 204:
+            return None
+
+        if response.status_code == 401:
+            new_token = self._token_manager.force_refresh()
+            self._session.headers["gc-token"] = new_token
+            retry_response = self._session.post(url, timeout=timeout, headers=headers)
+            if retry_response.status_code == 204:
+                return None
+            if retry_response.status_code == 401:
+                raise CredentialExpiredError(
+                    f"Credentials rejected for {path} "
+                    f"(HTTP {retry_response.status_code}). "
+                    "Credentials may be expired -- check .env or run: bb creds check"
+                )
+            response = retry_response
+
+        if response.status_code == 403:
+            raise ForbiddenError(
+                f"Access denied for {path} "
+                f"(HTTP {response.status_code}). "
+                "Credentials may be expired -- check .env or run: bb creds check"
+            )
+
+        if response.status_code == 429:
+            retry_after = _parse_retry_after(
+                response.headers.get("Retry-After", str(_DEFAULT_RETRY_AFTER_SECONDS))
+            )
+            logger.warning(
+                "Rate limit hit on %s (HTTP 429). Waiting %ds before raising.",
+                path,
+                retry_after,
+            )
+            time.sleep(retry_after)
+            raise RateLimitError(
+                f"Rate limit exceeded for {path} (HTTP 429). "
+                f"Waited {retry_after}s."
+            )
+
+        raise GameChangerAPIError(
+            f"Unexpected status {response.status_code} for {path}."
+        )
+
+    def delete(
+        self,
+        path: str,
+        timeout: int = 30,
+    ) -> None:
+        """Make an authenticated DELETE request. Returns None on success.
+
+        Accepts both 204 No Content and 200 with text body ``"OK"`` as success
+        (the GameChanger API uses both depending on the endpoint).
+
+        Args:
+            path: API path (e.g. ``"/teams/abc/users/user-id"``).  Must start
+                with ``/``.
+            timeout: Request timeout in seconds (default: 30).
+
+        Returns:
+            None on 200 or 204 success.
+
+        Raises:
+            CredentialExpiredError: On 401 (after refresh retry) or 403.
+            RateLimitError: On 429 responses.
+            GameChangerAPIError: On unexpected status codes.
+        """
+        self._ensure_access_token()
+        url = f"{self._base_url}{path}"
+        headers = {"Content-Type": _GC_CONTENT_TYPE}
+        logger.debug("DELETE %s", url)
+        response = self._session.delete(url, timeout=timeout, headers=headers)
+        logger.debug("DELETE %s -> %d", path, response.status_code)
+
+        if response.status_code in (200, 204):
+            return None
+
+        if response.status_code == 401:
+            new_token = self._token_manager.force_refresh()
+            self._session.headers["gc-token"] = new_token
+            retry_response = self._session.delete(url, timeout=timeout, headers=headers)
+            if retry_response.status_code in (200, 204):
+                return None
+            if retry_response.status_code == 401:
+                raise CredentialExpiredError(
+                    f"Credentials rejected for {path} "
+                    f"(HTTP {retry_response.status_code}). "
+                    "Credentials may be expired -- check .env or run: bb creds check"
+                )
+            response = retry_response
+
+        if response.status_code == 403:
+            raise ForbiddenError(
+                f"Access denied for {path} "
+                f"(HTTP {response.status_code}). "
+                "Credentials may be expired -- check .env or run: bb creds check"
+            )
+
+        if response.status_code == 429:
+            retry_after = _parse_retry_after(
+                response.headers.get("Retry-After", str(_DEFAULT_RETRY_AFTER_SECONDS))
+            )
+            logger.warning(
+                "Rate limit hit on %s (HTTP 429). Waiting %ds before raising.",
+                path,
+                retry_after,
+            )
+            time.sleep(retry_after)
+            raise RateLimitError(
+                f"Rate limit exceeded for {path} (HTTP 429). "
+                f"Waited {retry_after}s."
+            )
+
+        raise GameChangerAPIError(
+            f"Unexpected status {response.status_code} for {path}."
+        )
+
     def _load_credentials(self, profile: str) -> dict[str, str]:
         """Load profile-scoped credentials from the .env file.
 

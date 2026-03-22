@@ -56,6 +56,9 @@ logger = logging.getLogger(__name__)
 _OPPONENTS_ACCEPT = "application/vnd.gc.com.opponent_team:list+json; version=0.0.0"
 _TEAM_ACCEPT = "application/vnd.gc.com.team+json; version=0.10.0"
 _DELAY_SECONDS = 1.5
+_FOLLOW_BRIDGE_DELAY_SECONDS = 2.0
+_ME_USER_ACCEPT = "application/vnd.gc.com.user+json; version=0.3.0"
+_BRIDGE_ACCEPT = "application/vnd.gc.com.team_public_profile_id+json; version=0.0.0"
 
 # SQL for the auto-resolved upsert with manual-link protection (TN-5).
 # Manual links (resolution_method='manual') preserve resolved_team_id, public_id,
@@ -99,12 +102,15 @@ class ResolveResult:
         unlinked: Opponents inserted as unlinked (no progenitor_team_id).
         stored_hidden: Opponents stored with is_hidden=1.
         errors: Opponents where a skippable error was encountered.
+        follow_bridge_failed: Distinct root_team_ids where the follow→bridge
+            flow failed to produce a public_id (follow failure or bridge failure).
     """
 
     resolved: int = field(default=0)
     unlinked: int = field(default=0)
     stored_hidden: int = field(default=0)
     errors: int = field(default=0)
+    follow_bridge_failed: int = field(default=0)
 
 
 class OpponentResolver:
@@ -417,6 +423,144 @@ class OpponentResolver:
                 1 if is_hidden else 0,
             ),
         )
+
+    # ------------------------------------------------------------------
+    # Experimental: follow→bridge→unfollow resolution
+    # ------------------------------------------------------------------
+
+    def resolve_unlinked(self) -> ResolveResult:
+        """Attempt auto-resolution of null-progenitor opponents via follow→bridge→unfollow.
+
+        For each distinct ``root_team_id`` in ``opponent_links`` with no
+        ``public_id`` and no ``resolution_method``, this method:
+
+        1. Follows the team via ``POST /teams/{root_team_id}/follow``.
+        2. Fetches ``public_id`` via the bridge endpoint.
+        3. Fan-out updates all matching ``opponent_links`` rows.
+        4. Unfollows via two DELETE calls (best-effort cleanup).
+
+        This is an experimental flow -- whether ``root_team_id`` works with the
+        follow/bridge endpoints is unverified.  All failures are handled
+        gracefully and logged.
+
+        Returns:
+            A ``ResolveResult`` with ``resolved`` (successful public_id stored)
+            and ``follow_bridge_failed`` (follow or bridge failure) counts.
+        """
+        result = ResolveResult()
+
+        # Fetch user UUID once for the unfollow DELETE step.
+        user_data = self._client.get("/me/user", accept=_ME_USER_ACCEPT)
+        user_id: str = user_data["id"]
+
+        rows = self._db.execute(
+            "SELECT DISTINCT root_team_id FROM opponent_links "
+            "WHERE public_id IS NULL AND resolution_method IS NULL AND is_hidden = 0"
+        ).fetchall()
+        root_team_ids = [row[0] for row in rows]
+
+        for root_team_id in root_team_ids:
+            try:
+                self._follow_bridge_unfollow(root_team_id, user_id, result)
+            except Exception as exc:  # noqa: BLE001
+                logger.error(
+                    "Unexpected error in follow-bridge cycle for root_team_id=%s: %s",
+                    root_team_id,
+                    exc,
+                )
+                result.errors += 1
+            time.sleep(_FOLLOW_BRIDGE_DELAY_SECONDS)
+
+        logger.info(
+            "resolve_unlinked complete -- resolved=%d follow_bridge_failed=%d errors=%d",
+            result.resolved,
+            result.follow_bridge_failed,
+            result.errors,
+        )
+        return result
+
+    def _follow_bridge_unfollow(
+        self,
+        root_team_id: str,
+        user_id: str,
+        result: ResolveResult,
+    ) -> None:
+        """Execute the follow→bridge→unfollow cycle for one root_team_id.
+
+        Args:
+            root_team_id: The team UUID to follow, query, and unfollow.
+            user_id: The authenticated user's UUID (for the unfollow DELETE).
+            result: Mutable ``ResolveResult`` to accumulate counts into.
+        """
+        # Step 1: Follow the team.  Any exception means skip the cycle entirely.
+        try:
+            self._client.post(f"/teams/{root_team_id}/follow")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Follow failed for root_team_id=%s: %s -- skipping cycle",
+                root_team_id,
+                exc,
+            )
+            result.follow_bridge_failed += 1
+            return
+
+        # Step 2: Fetch public_id via bridge endpoint.
+        public_id: str | None = None
+        try:
+            bridge_data = self._client.get(
+                f"/teams/{root_team_id}/public-team-profile-id",
+                accept=_BRIDGE_ACCEPT,
+            )
+            public_id = bridge_data.get("id")
+            if public_id is None:
+                logger.warning(
+                    "Bridge returned 200 but no 'id' field for root_team_id=%s "
+                    "-- proceeding to unfollow",
+                    root_team_id,
+                )
+                result.follow_bridge_failed += 1
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Bridge failed for root_team_id=%s: %s -- proceeding to unfollow",
+                root_team_id,
+                exc,
+            )
+            result.follow_bridge_failed += 1
+
+        # Step 3: Store public_id if bridge succeeded.
+        if public_id is not None:
+            self._db.execute(
+                """
+                UPDATE opponent_links
+                SET public_id = ?,
+                    resolution_method = 'follow-bridge',
+                    resolved_at = datetime('now')
+                WHERE root_team_id = ? AND resolution_method IS NULL
+                """,
+                (public_id, root_team_id),
+            )
+            self._db.commit()
+            result.resolved += 1
+            logger.debug(
+                "Stored public_id=%s for root_team_id=%s via follow-bridge",
+                public_id,
+                root_team_id,
+            )
+
+        # Step 4: Unfollow (best-effort cleanup -- failures logged but not counted).
+        try:
+            self._client.delete(f"/teams/{root_team_id}/users/{user_id}")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Unfollow step 1 failed for root_team_id=%s: %s", root_team_id, exc
+            )
+
+        try:
+            self._client.delete(f"/me/relationship-requests/{root_team_id}")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Unfollow step 2 failed for root_team_id=%s: %s", root_team_id, exc
+            )
 
     def _upsert_unlinked(
         self,

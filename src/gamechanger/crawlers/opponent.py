@@ -1,22 +1,12 @@
 """Opponent crawler for the GameChanger data ingestion pipeline.
 
-Fetches opponent registry data for each configured owned team and then
-fetches rosters for each unique opponent with a canonical team UUID.
+Fetches opponent registry data for each configured owned team.
 
 Phase 1 -- Opponent registry:
     For each owned team, calls ``GET /teams/{team_id}/opponents`` (with
     cursor-based pagination) and writes the full paginated response to::
 
         data/raw/{season}/teams/{team_id}/opponents.json
-
-Phase 2 -- Opponent rosters:
-    Extracts unique ``progenitor_team_id`` values from all opponents.json
-    files (filtering out ``is_hidden: true`` and entries without
-    ``progenitor_team_id``).  For each unique opponent UUID (excluding
-    owned-team UUIDs), calls ``GET /teams/{progenitor_team_id}/players``
-    and writes the result to::
-
-        data/raw/{season}/teams/{opponent_team_id}/roster.json
 
 The crawl is idempotent: files younger than ``freshness_hours`` (default 24)
 are skipped.
@@ -42,10 +32,9 @@ import time
 from pathlib import Path
 from typing import Any
 
-from src.gamechanger.client import CredentialExpiredError, ForbiddenError, GameChangerAPIError, GameChangerClient
+from src.gamechanger.client import GameChangerAPIError, GameChangerClient
 from src.gamechanger.config import CrawlConfig
 from src.gamechanger.crawlers import CrawlResult
-from src.gamechanger.crawlers.roster import RosterCrawler
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +43,7 @@ _DATA_ROOT = Path(__file__).resolve().parents[3] / "data" / "raw"
 
 
 class OpponentCrawler:
-    """Crawls opponent registry and roster data for all configured owned teams.
+    """Crawls opponent registry data for all configured owned teams.
 
     Args:
         client: Authenticated ``GameChangerClient`` used for all HTTP requests.
@@ -76,24 +65,19 @@ class OpponentCrawler:
         self._config = config
         self._freshness_hours = freshness_hours
         self._data_root = data_root
-        self._roster_crawler = RosterCrawler(
-            client, config, freshness_hours=freshness_hours, data_root=data_root
-        )
 
     def crawl_all(self) -> CrawlResult:
-        """Run the two-phase opponent crawl.
+        """Fetch the opponent registry for each owned team.
 
-        Phase 1 fetches and writes the opponents.json registry for each owned
-        team.  Phase 2 extracts unique progenitor_team_id values and fetches a
-        roster for each.
+        Fetches and writes the opponents.json registry for each owned team,
+        then logs a summary of opponent counts by progenitor status.
 
         Returns:
             A ``CrawlResult`` summarising files written, files skipped, and
-            errors encountered (across both phases).
+            errors encountered from registry fetches only.
         """
         result = CrawlResult()
 
-        # Phase 1: fetch opponent registry for each owned team.
         all_opponents: list[dict[str, Any]] = []
         for team in self._config.member_teams:
             try:
@@ -116,14 +100,7 @@ class OpponentCrawler:
                 )
                 result.errors += 1
 
-        # Phase 2: deduplicate and fetch rosters.
-        owned_ids = {t.id for t in self._config.member_teams}
-        phase2_result = self._crawl_opponent_rosters(all_opponents, owned_ids)
-
-        result.files_written += phase2_result.files_written
-        result.files_skipped += phase2_result.files_skipped
-        result.errors += phase2_result.errors
-
+        self._log_registry_summary(all_opponents)
         return result
 
     # ------------------------------------------------------------------
@@ -177,137 +154,39 @@ class OpponentCrawler:
         return opponents, True
 
     # ------------------------------------------------------------------
-    # Phase 2 helpers
+    # Summary helpers
     # ------------------------------------------------------------------
 
-    def _crawl_opponent_rosters(
-        self,
-        all_opponents: list[dict[str, Any]],
-        owned_ids: set[str],
-    ) -> CrawlResult:
-        """Fetch rosters for all unique opponent teams.
-
-        Deduplicates on ``progenitor_team_id``, skips hidden opponents and
-        opponents without a canonical UUID, and excludes owned teams.
+    def _log_registry_summary(self, all_opponents: list[dict[str, Any]]) -> None:
+        """Log a summary of opponent registry statistics.
 
         Args:
-            all_opponents: Combined list of all opponent records from all registry files.
-            owned_ids: Set of owned team UUIDs to exclude.
-
-        Returns:
-            A ``CrawlResult`` for the roster-fetching phase only.
+            all_opponents: Combined list of opponent records from all registry files.
         """
-        result = CrawlResult()
-
-        # Stats counters for summary log (AC-7).
         total = len(all_opponents)
         with_progenitor = 0
         without_progenitor = 0
         hidden = 0
-        successfully_crawled = 0
-        access_denied = 0
-        unexpected_errors = 0
-
-        seen_ids: set[str] = set()
 
         for opponent in all_opponents:
             if opponent.get("is_hidden", False):
                 hidden += 1
-                continue
-
-            progenitor_id: str | None = opponent.get("progenitor_team_id")
-            name: str = opponent.get("name", "<unnamed>")
-
-            if not progenitor_id:
+            elif opponent.get("progenitor_team_id"):
+                with_progenitor += 1
+            else:
                 without_progenitor += 1
-                logger.info(
-                    "Skipping opponent '%s' -- no canonical team UUID (progenitor_team_id absent).",
-                    name,
-                )
-                continue
 
-            with_progenitor += 1
-
-            if progenitor_id in owned_ids:
-                logger.debug(
-                    "Skipping opponent '%s' (%s) -- is an owned team.", name, progenitor_id
-                )
-                seen_ids.add(progenitor_id)
-                continue
-
-            if progenitor_id in seen_ids:
-                logger.debug(
-                    "Skipping opponent '%s' (%s) -- already processed.", name, progenitor_id
-                )
-                continue
-
-            seen_ids.add(progenitor_id)
-
-            try:
-                path = self._roster_crawler.crawl_team(progenitor_id, self._config.season)
-                if path is None:
-                    result.files_skipped += 1
-                else:
-                    result.files_written += 1
-                successfully_crawled += 1
-            except ForbiddenError as exc:
-                # 403 -- per-opponent access denial, expected for some opponents.
-                logger.warning(
-                    "Access denied fetching roster for opponent '%s' (%s): %s",
-                    name,
-                    progenitor_id,
-                    exc,
-                )
-                access_denied += 1
-                result.errors += 1
-            except CredentialExpiredError as exc:
-                # 401 -- token has expired, abort the entire crawl immediately.
-                logger.error(
-                    "Token expired during opponent roster crawl for '%s' (%s): %s",
-                    name,
-                    progenitor_id,
-                    exc,
-                )
-                raise
-            except GameChangerAPIError as exc:
-                logger.warning(
-                    "API error fetching roster for opponent '%s' (%s): %s",
-                    name,
-                    progenitor_id,
-                    exc,
-                )
-                unexpected_errors += 1
-                result.errors += 1
-            except Exception as exc:  # noqa: BLE001
-                logger.warning(
-                    "Unexpected error fetching roster for opponent '%s' (%s): %s",
-                    name,
-                    progenitor_id,
-                    exc,
-                )
-                unexpected_errors += 1
-                result.errors += 1
-
-        # AC-7: summary log.
         logger.info(
             "Opponent crawl summary -- "
             "total_unique_opponents=%d, "
             "with_progenitor_id=%d, "
             "without_progenitor_id=%d, "
-            "hidden=%d, "
-            "successfully_crawled=%d, "
-            "access_denied=%d, "
-            "unexpected_errors=%d",
+            "hidden=%d",
             total,
             with_progenitor,
             without_progenitor,
             hidden,
-            successfully_crawled,
-            access_denied,
-            unexpected_errors,
         )
-
-        return result
 
     # ------------------------------------------------------------------
     # Utility helpers

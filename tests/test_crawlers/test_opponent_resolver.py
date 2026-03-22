@@ -24,7 +24,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from migrations.apply_migrations import run_migrations
-from src.gamechanger.client import CredentialExpiredError, ForbiddenError, GameChangerAPIError
+from src.gamechanger.client import CredentialExpiredError, ForbiddenError, GameChangerAPIError, RateLimitError
 from src.gamechanger.config import CrawlConfig, TeamEntry
 from src.gamechanger.crawlers.opponent_resolver import OpponentResolver, ResolveResult
 
@@ -634,6 +634,372 @@ def test_resolve_team_none_internal_id_counted_as_error(db: sqlite3.Connection) 
     assert _fetch_links(db) == []
 
 
+# ---------------------------------------------------------------------------
+# resolve_unlinked() tests (E-146-02)
+# ---------------------------------------------------------------------------
+
+_USER_ID = "user-uuid-001"
+_USER_RESPONSE = {"id": _USER_ID, "email": "user@example.com"}
+_ROOT_TEAM_ID_A = "root-aaa-unlinked"
+_ROOT_TEAM_ID_B = "root-bbb-unlinked"
+_PUBLIC_ID_A = "pubSlugA"
+
+
+def _insert_unlinked_link(
+    db: sqlite3.Connection,
+    our_team_id: int,
+    root_team_id: str,
+    opponent_name: str = "Test Opponent",
+    is_hidden: int = 0,
+    resolution_method: str | None = None,
+    public_id: str | None = None,
+) -> None:
+    """Insert an opponent_links row directly."""
+    db.execute(
+        """
+        INSERT INTO opponent_links
+            (our_team_id, root_team_id, opponent_name, is_hidden,
+             resolution_method, public_id)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (our_team_id, root_team_id, opponent_name, is_hidden, resolution_method, public_id),
+    )
+    db.commit()
+
+
+def _make_unlinked_client(
+    user_response: dict | None = None,
+    bridge_response: dict | None = None,
+    follow_side_effect: Exception | None = None,
+    bridge_side_effect: Exception | None = None,
+    delete_side_effect: Exception | None = None,
+) -> MagicMock:
+    """Return a mock GameChangerClient configured for resolve_unlinked tests.
+
+    client.get is called twice per cycle:
+      1. /me/user -> user_response (or _USER_RESPONSE)
+      2. /teams/{id}/public-team-profile-id -> bridge_response (or {"id": "pubSlugA"})
+    """
+    client = MagicMock()
+    user_resp = user_response or _USER_RESPONSE
+    bridge_resp = bridge_response or {"id": _PUBLIC_ID_A}
+
+    if bridge_side_effect is not None:
+        # First call returns user, second raises bridge error
+        client.get.side_effect = [user_resp, bridge_side_effect]
+    else:
+        client.get.side_effect = [user_resp, bridge_resp]
+
+    if follow_side_effect is not None:
+        client.post.side_effect = follow_side_effect
+    else:
+        client.post.return_value = None
+
+    if delete_side_effect is not None:
+        client.delete.side_effect = delete_side_effect
+    else:
+        client.delete.return_value = None
+
+    return client
+
+
+def test_resolve_unlinked_full_cycle_stores_public_id(db: sqlite3.Connection) -> None:
+    """Full cycle: follow succeeds, bridge returns public_id, row updated."""
+    own_pk = _insert_team(db, _OWN_TEAM_GC_UUID, _OWN_TEAM_NAME)
+    _insert_unlinked_link(db, own_pk, _ROOT_TEAM_ID_A)
+    client = _make_unlinked_client()
+    config = _make_config([(_OWN_TEAM_GC_UUID, own_pk)])
+    resolver = OpponentResolver(client, config, db)
+
+    with patch("src.gamechanger.crawlers.opponent_resolver.time.sleep"):
+        result = resolver.resolve_unlinked()
+
+    assert result.resolved == 1
+    assert result.follow_bridge_failed == 0
+
+    links = _fetch_links(db)
+    assert len(links) == 1
+    assert links[0]["public_id"] == _PUBLIC_ID_A
+    assert links[0]["resolution_method"] == "follow-bridge"
+    assert links[0]["resolved_at"] is not None
+
+
+def test_resolve_unlinked_fan_out_updates_all_rows_for_root_team_id(
+    db: sqlite3.Connection,
+) -> None:
+    """Fan-out UPDATE touches all opponent_links rows sharing root_team_id."""
+    own_pk_a = _insert_team(db, "team-a", "Team A")
+    own_pk_b = _insert_team(db, "team-b", "Team B")
+    # Two rows with same root_team_id from different member teams
+    _insert_unlinked_link(db, own_pk_a, _ROOT_TEAM_ID_A, "Opp A")
+    _insert_unlinked_link(db, own_pk_b, _ROOT_TEAM_ID_A, "Opp A (from B)")
+    client = _make_unlinked_client()
+    config = _make_config([("team-a", own_pk_a)])
+    resolver = OpponentResolver(client, config, db)
+
+    with patch("src.gamechanger.crawlers.opponent_resolver.time.sleep"):
+        result = resolver.resolve_unlinked()
+
+    assert result.resolved == 1  # one distinct root_team_id resolved
+
+    links = {row["our_team_id"]: row for row in _fetch_links(db)}
+    assert links[own_pk_a]["public_id"] == _PUBLIC_ID_A
+    assert links[own_pk_a]["resolution_method"] == "follow-bridge"
+    assert links[own_pk_b]["public_id"] == _PUBLIC_ID_A
+    assert links[own_pk_b]["resolution_method"] == "follow-bridge"
+
+
+def test_resolve_unlinked_follow_failure_skips_no_unfollow(
+    db: sqlite3.Connection, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Follow failure: skip cycle, log WARNING, no DELETE called, row unchanged."""
+    import logging
+
+    own_pk = _insert_team(db, _OWN_TEAM_GC_UUID, _OWN_TEAM_NAME)
+    _insert_unlinked_link(db, own_pk, _ROOT_TEAM_ID_A)
+    client = _make_unlinked_client(follow_side_effect=GameChangerAPIError("500 error"))
+    config = _make_config([(_OWN_TEAM_GC_UUID, own_pk)])
+    resolver = OpponentResolver(client, config, db)
+
+    with patch("src.gamechanger.crawlers.opponent_resolver.time.sleep"):
+        with caplog.at_level(logging.WARNING, logger="src.gamechanger.crawlers.opponent_resolver"):
+            result = resolver.resolve_unlinked()
+
+    assert result.follow_bridge_failed == 1
+    assert result.resolved == 0
+    client.delete.assert_not_called()
+
+    links = _fetch_links(db)
+    assert links[0]["public_id"] is None
+    assert links[0]["resolution_method"] is None
+    assert any("Follow failed" in r.message for r in caplog.records)
+
+
+def test_resolve_unlinked_follow_failure_forbidden_skips(db: sqlite3.Connection) -> None:
+    """Follow failure with ForbiddenError: skip cycle, no unfollow."""
+    own_pk = _insert_team(db, _OWN_TEAM_GC_UUID, _OWN_TEAM_NAME)
+    _insert_unlinked_link(db, own_pk, _ROOT_TEAM_ID_A)
+    client = _make_unlinked_client(follow_side_effect=ForbiddenError("403"))
+    config = _make_config([(_OWN_TEAM_GC_UUID, own_pk)])
+    resolver = OpponentResolver(client, config, db)
+
+    with patch("src.gamechanger.crawlers.opponent_resolver.time.sleep"):
+        result = resolver.resolve_unlinked()
+
+    assert result.follow_bridge_failed == 1
+    client.delete.assert_not_called()
+
+
+def test_resolve_unlinked_bridge_failure_proceeds_to_unfollow(
+    db: sqlite3.Connection, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Bridge failure: log warning, proceed to unfollow, row stays unlinked."""
+    import logging
+
+    own_pk = _insert_team(db, _OWN_TEAM_GC_UUID, _OWN_TEAM_NAME)
+    _insert_unlinked_link(db, own_pk, _ROOT_TEAM_ID_A)
+    client = _make_unlinked_client(bridge_side_effect=ForbiddenError("403"))
+    config = _make_config([(_OWN_TEAM_GC_UUID, own_pk)])
+    resolver = OpponentResolver(client, config, db)
+
+    with patch("src.gamechanger.crawlers.opponent_resolver.time.sleep"):
+        with caplog.at_level(logging.WARNING, logger="src.gamechanger.crawlers.opponent_resolver"):
+            result = resolver.resolve_unlinked()
+
+    assert result.follow_bridge_failed == 1
+    assert result.resolved == 0
+    # Unfollow should still have been called
+    assert client.delete.call_count >= 1
+
+    links = _fetch_links(db)
+    assert links[0]["public_id"] is None
+    assert any("Bridge failed" in r.message for r in caplog.records)
+
+
+def test_resolve_unlinked_unfollow_failure_resolution_counted(
+    db: sqlite3.Connection, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Unfollow failure: resolution still counted, WARNING logged."""
+    import logging
+
+    own_pk = _insert_team(db, _OWN_TEAM_GC_UUID, _OWN_TEAM_NAME)
+    _insert_unlinked_link(db, own_pk, _ROOT_TEAM_ID_A)
+    client = _make_unlinked_client(
+        delete_side_effect=GameChangerAPIError("delete failed")
+    )
+    config = _make_config([(_OWN_TEAM_GC_UUID, own_pk)])
+    resolver = OpponentResolver(client, config, db)
+
+    with patch("src.gamechanger.crawlers.opponent_resolver.time.sleep"):
+        with caplog.at_level(logging.WARNING, logger="src.gamechanger.crawlers.opponent_resolver"):
+            result = resolver.resolve_unlinked()
+
+    assert result.resolved == 1
+    assert result.follow_bridge_failed == 0
+    links = _fetch_links(db)
+    assert links[0]["public_id"] == _PUBLIC_ID_A
+    assert any("Unfollow" in r.message for r in caplog.records)
+
+
+def test_resolve_unlinked_manual_link_not_overwritten(db: sqlite3.Connection) -> None:
+    """Manual link in same root_team_id is protected by resolution_method IS NULL WHERE clause."""
+    own_pk_a = _insert_team(db, "team-a", "Team A")
+    own_pk_b = _insert_team(db, "team-b", "Team B")
+    # Unlinked row (should get updated)
+    _insert_unlinked_link(db, own_pk_a, _ROOT_TEAM_ID_A, "Opp A")
+    # Manual row (same root_team_id -- should NOT be touched by fan-out UPDATE)
+    manual_public_id = "manual-public-id"
+    _insert_unlinked_link(
+        db, own_pk_b, _ROOT_TEAM_ID_A, "Opp A manual",
+        resolution_method="manual", public_id=manual_public_id,
+    )
+    client = _make_unlinked_client()
+    config = _make_config([("team-a", own_pk_a)])
+    resolver = OpponentResolver(client, config, db)
+
+    with patch("src.gamechanger.crawlers.opponent_resolver.time.sleep"):
+        result = resolver.resolve_unlinked()
+
+    assert result.resolved == 1
+
+    links = {row["our_team_id"]: row for row in _fetch_links(db)}
+    # Unlinked row updated
+    assert links[own_pk_a]["public_id"] == _PUBLIC_ID_A
+    assert links[own_pk_a]["resolution_method"] == "follow-bridge"
+    # Manual row unchanged
+    assert links[own_pk_b]["public_id"] == manual_public_id
+    assert links[own_pk_b]["resolution_method"] == "manual"
+
+
+def test_resolve_unlinked_query_excludes_already_resolved(db: sqlite3.Connection) -> None:
+    """Rows with public_id already set are not included in the query (AC-1)."""
+    own_pk = _insert_team(db, _OWN_TEAM_GC_UUID, _OWN_TEAM_NAME)
+    # Already resolved row - should not appear in query
+    _insert_unlinked_link(
+        db, own_pk, _ROOT_TEAM_ID_A, "Already Resolved",
+        public_id="existing-public-id", resolution_method="follow-bridge",
+    )
+    client = _make_unlinked_client()
+    config = _make_config([(_OWN_TEAM_GC_UUID, own_pk)])
+    resolver = OpponentResolver(client, config, db)
+
+    with patch("src.gamechanger.crawlers.opponent_resolver.time.sleep"):
+        result = resolver.resolve_unlinked()
+
+    assert result.resolved == 0
+    assert result.follow_bridge_failed == 0
+    # post() should not have been called since no rows match the query
+    client.post.assert_not_called()
+
+
+def test_resolve_unlinked_user_id_fetched_once_per_run(db: sqlite3.Connection) -> None:
+    """GET /me/user is called exactly once regardless of how many root_team_ids exist."""
+    own_pk = _insert_team(db, _OWN_TEAM_GC_UUID, _OWN_TEAM_NAME)
+    _insert_unlinked_link(db, own_pk, _ROOT_TEAM_ID_A, "Opp A")
+    _insert_unlinked_link(db, own_pk, _ROOT_TEAM_ID_B, "Opp B")
+
+    # Two bridge calls needed (one per root_team_id)
+    client = MagicMock()
+    client.get.side_effect = [
+        _USER_RESPONSE,
+        {"id": "pubA"},
+        {"id": "pubB"},
+    ]
+    client.post.return_value = None
+    client.delete.return_value = None
+
+    config = _make_config([(_OWN_TEAM_GC_UUID, own_pk)])
+    resolver = OpponentResolver(client, config, db)
+
+    with patch("src.gamechanger.crawlers.opponent_resolver.time.sleep"):
+        result = resolver.resolve_unlinked()
+
+    assert result.resolved == 2
+    # First call is /me/user, remaining are bridge calls
+    calls = client.get.call_args_list
+    assert calls[0].args[0] == "/me/user"
+    assert len(calls) == 3  # 1 user + 2 bridge
+
+
+def test_resolve_unlinked_sleeps_between_cycles(db: sqlite3.Connection) -> None:
+    """time.sleep(2.0) is called once per root_team_id cycle."""
+    own_pk = _insert_team(db, _OWN_TEAM_GC_UUID, _OWN_TEAM_NAME)
+    _insert_unlinked_link(db, own_pk, _ROOT_TEAM_ID_A, "Opp A")
+    _insert_unlinked_link(db, own_pk, _ROOT_TEAM_ID_B, "Opp B")
+
+    client = MagicMock()
+    client.get.side_effect = [_USER_RESPONSE, {"id": "pubA"}, {"id": "pubB"}]
+    client.post.return_value = None
+    client.delete.return_value = None
+
+    config = _make_config([(_OWN_TEAM_GC_UUID, own_pk)])
+    resolver = OpponentResolver(client, config, db)
+
+    with patch("src.gamechanger.crawlers.opponent_resolver.time.sleep") as mock_sleep:
+        resolver.resolve_unlinked()
+
+    sleep_calls = [c.args[0] for c in mock_sleep.call_args_list]
+    assert sleep_calls.count(2.0) == 2  # once per root_team_id
+
+
+def test_resolve_unlinked_no_teams_row_created(db: sqlite3.Connection) -> None:
+    """resolve_unlinked() does not create any new teams rows (TN-3)."""
+    own_pk = _insert_team(db, _OWN_TEAM_GC_UUID, _OWN_TEAM_NAME)
+    _insert_unlinked_link(db, own_pk, _ROOT_TEAM_ID_A)
+    client = _make_unlinked_client()
+    config = _make_config([(_OWN_TEAM_GC_UUID, own_pk)])
+    resolver = OpponentResolver(client, config, db)
+
+    teams_before = db.execute("SELECT COUNT(*) FROM teams").fetchone()[0]
+    with patch("src.gamechanger.crawlers.opponent_resolver.time.sleep"):
+        resolver.resolve_unlinked()
+    teams_after = db.execute("SELECT COUNT(*) FROM teams").fetchone()[0]
+
+    assert teams_after == teams_before
+
+
+def test_resolve_unlinked_bridge_200_missing_id_field(
+    db: sqlite3.Connection, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Bridge returns 200 but without 'id' field: counted as follow_bridge_failed, unfollow attempted."""
+    import logging
+
+    own_pk = _insert_team(db, _OWN_TEAM_GC_UUID, _OWN_TEAM_NAME)
+    _insert_unlinked_link(db, own_pk, _ROOT_TEAM_ID_A)
+    # Bridge returns 200 with no 'id' field
+    client = _make_unlinked_client(bridge_response={"name": "foo"})
+    config = _make_config([(_OWN_TEAM_GC_UUID, own_pk)])
+    resolver = OpponentResolver(client, config, db)
+
+    with patch("src.gamechanger.crawlers.opponent_resolver.time.sleep"):
+        with caplog.at_level(logging.WARNING, logger="src.gamechanger.crawlers.opponent_resolver"):
+            result = resolver.resolve_unlinked()
+
+    assert result.follow_bridge_failed == 1
+    assert result.resolved == 0
+    # Unfollow should still be attempted
+    assert client.delete.call_count >= 1
+    # Row stays unlinked
+    links = _fetch_links(db)
+    assert links[0]["public_id"] is None
+    assert any("no 'id' field" in r.message for r in caplog.records)
+
+
+def test_resolve_unlinked_hidden_rows_excluded_from_query(db: sqlite3.Connection) -> None:
+    """Rows with is_hidden=1 are excluded from the AC-1 query."""
+    own_pk = _insert_team(db, _OWN_TEAM_GC_UUID, _OWN_TEAM_NAME)
+    _insert_unlinked_link(db, own_pk, _ROOT_TEAM_ID_A, is_hidden=1)
+    client = _make_unlinked_client()
+    config = _make_config([(_OWN_TEAM_GC_UUID, own_pk)])
+    resolver = OpponentResolver(client, config, db)
+
+    with patch("src.gamechanger.crawlers.opponent_resolver.time.sleep"):
+        result = resolver.resolve_unlinked()
+
+    assert result.resolved == 0
+    client.post.assert_not_called()
+
+
 def test_resolve_copies_is_hidden_flag(db: sqlite3.Connection) -> None:
     """is_hidden is copied from the API response into opponent_links on update."""
     hidden_with_progenitor = {
@@ -672,3 +1038,94 @@ def test_resolve_copies_is_hidden_flag(db: sqlite3.Connection) -> None:
     assert result2.stored_hidden == 1
     link2 = _fetch_links(db)[0]
     assert link2["is_hidden"] == 1
+
+
+# ---------------------------------------------------------------------------
+# RateLimitError handling in follow/bridge steps (codex finding)
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_unlinked_rate_limit_during_follow_skips_cycle(
+    db: sqlite3.Connection, caplog: pytest.LogCaptureFixture
+) -> None:
+    """RateLimitError during follow step: skip cycle, increment follow_bridge_failed, no unfollow."""
+    import logging
+
+    own_pk = _insert_team(db, _OWN_TEAM_GC_UUID, _OWN_TEAM_NAME)
+    _insert_unlinked_link(db, own_pk, _ROOT_TEAM_ID_A)
+    client = _make_unlinked_client(follow_side_effect=RateLimitError("429 Too Many Requests"))
+    config = _make_config([(_OWN_TEAM_GC_UUID, own_pk)])
+    resolver = OpponentResolver(client, config, db)
+
+    with patch("src.gamechanger.crawlers.opponent_resolver.time.sleep"):
+        with caplog.at_level(logging.WARNING, logger="src.gamechanger.crawlers.opponent_resolver"):
+            result = resolver.resolve_unlinked()
+
+    assert result.follow_bridge_failed == 1
+    assert result.resolved == 0
+    assert result.errors == 0
+    # Unfollow must NOT be called -- follow never succeeded
+    client.delete.assert_not_called()
+    # Row stays unlinked
+    links = _fetch_links(db)
+    assert links[0]["public_id"] is None
+    assert any("Follow failed" in r.message for r in caplog.records)
+
+
+def test_resolve_unlinked_rate_limit_during_bridge_proceeds_to_unfollow(
+    db: sqlite3.Connection, caplog: pytest.LogCaptureFixture
+) -> None:
+    """RateLimitError during bridge step: increment follow_bridge_failed, proceed to unfollow."""
+    import logging
+
+    own_pk = _insert_team(db, _OWN_TEAM_GC_UUID, _OWN_TEAM_NAME)
+    _insert_unlinked_link(db, own_pk, _ROOT_TEAM_ID_A)
+    client = _make_unlinked_client(bridge_side_effect=RateLimitError("429 Too Many Requests"))
+    config = _make_config([(_OWN_TEAM_GC_UUID, own_pk)])
+    resolver = OpponentResolver(client, config, db)
+
+    with patch("src.gamechanger.crawlers.opponent_resolver.time.sleep"):
+        with caplog.at_level(logging.WARNING, logger="src.gamechanger.crawlers.opponent_resolver"):
+            result = resolver.resolve_unlinked()
+
+    assert result.follow_bridge_failed == 1
+    assert result.resolved == 0
+    assert result.errors == 0
+    # Unfollow must still be attempted -- follow succeeded
+    assert client.delete.call_count >= 1
+    # Row stays unlinked
+    links = _fetch_links(db)
+    assert links[0]["public_id"] is None
+    assert any("Bridge failed" in r.message for r in caplog.records)
+
+
+# ---------------------------------------------------------------------------
+# Unexpected per-root_team_id exception counted in errors (codex finding)
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_unlinked_unexpected_exception_increments_errors(
+    db: sqlite3.Connection, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Unexpected crash bubbling from _follow_bridge_unfollow increments result.errors."""
+    import logging
+    from unittest.mock import patch as _patch
+
+    own_pk = _insert_team(db, _OWN_TEAM_GC_UUID, _OWN_TEAM_NAME)
+    _insert_unlinked_link(db, own_pk, _ROOT_TEAM_ID_A)
+
+    client = _make_unlinked_client()
+    config = _make_config([(_OWN_TEAM_GC_UUID, own_pk)])
+    resolver = OpponentResolver(client, config, db)
+
+    # Patch the internal method to raise an unexpected error that bypasses
+    # internal step handlers (simulates e.g. DB failure in the store step).
+    with patch("src.gamechanger.crawlers.opponent_resolver.time.sleep"):
+        with _patch.object(resolver, "_follow_bridge_unfollow", side_effect=RuntimeError("db crash")):
+            with caplog.at_level(logging.ERROR, logger="src.gamechanger.crawlers.opponent_resolver"):
+                result = resolver.resolve_unlinked()
+
+    assert result.errors == 1
+    assert result.follow_bridge_failed == 0
+    assert result.resolved == 0
+    assert any("Unexpected error" in r.message for r in caplog.records)

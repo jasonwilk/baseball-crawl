@@ -1,7 +1,7 @@
 # E-146: Crawl Pipeline Guards and Null-Progenitor Auto-Resolution
 
 ## Status
-`READY`
+`COMPLETED`
 <!-- Lifecycle: DRAFT → READY → ACTIVE → COMPLETED (or BLOCKED / ABANDONED) -->
 
 ## Overview
@@ -42,9 +42,9 @@ For these opponents, we have `root_team_id` -- a UUID that GC accepts in some te
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-146-01 | Remove OpponentCrawler Phase 2 roster fetch | TODO | None | - |
-| E-146-02 | Add follow→bridge→unfollow auto-resolution for null-progenitor opponents | TODO | None | - |
-| E-146-03 | Wire resolve_unlinked into CLI | TODO | E-146-02 | - |
+| E-146-01 | Remove OpponentCrawler Phase 2 roster fetch | DONE | None | SE |
+| E-146-02 | Add follow→bridge→unfollow auto-resolution for null-progenitor opponents | DONE | None | SE |
+| E-146-03 | Wire resolve_unlinked into CLI | DONE | E-146-02 | SE |
 
 ## Dispatch Team
 - software-engineer
@@ -123,3 +123,18 @@ The unfollow Step 1 (`DELETE /teams/{team_id}/users/{user_id}`) requires the aut
 ## History
 - 2026-03-22: Created. Expert consultation: api-scout (endpoint safety, follow/bridge/unfollow flow analysis, root_team_id scope assessment), software-engineer (crawler architecture, guard placement, code locations). api-scout flagged root_team_id viability risk for Goal 2; addressed via defensive design rather than research spike.
 - 2026-03-22: 3 spec review iterations, 12 findings accepted and incorporated, 2 dismissed (DE consultation -- single UPDATE, SE-owned). Consistency sweeps clean. Status set to READY.
+- 2026-03-22: Dispatch started. Epic set to ACTIVE. E-146-01 assigned to SE.
+- 2026-03-22: All 3 stories DONE. Review chain: codex review (3 findings remediated -- RateLimitError handling, errors accounting), per-story CR (2 MUST FIX on E-146-02 resolved), integration CR (clean after full suite). Epic set to COMPLETED.
+
+### Documentation Assessment
+- **Trigger fired**: `docs/api/flows/opponent-resolution.md` § "Null-Progenitor Fallback" states null-progenitor opponents "require manual linking." E-146 adds an automated follow→bridge→unfollow alternative. The doc needs updating to describe the experimental auto-resolution path alongside manual linking.
+- **Action**: Dispatch docs-writer to update `docs/api/flows/opponent-resolution.md` before archiving.
+
+### Context-Layer Assessment
+1. **New agent capability or tool?** NO -- no new agents or tools added. `post()` and `delete()` extend an existing client class, not the agent ecosystem.
+2. **New rule, convention, or workflow?** NO -- no new workflow conventions introduced. The resolve_unlinked flow is a feature, not a process change.
+3. **Change to existing agent definitions?** NO -- no agent definitions modified.
+4. **New skill or skill modification?** NO -- no skills added or changed.
+5. **CLAUDE.md update needed?** NO -- the crawl pipeline changes are implementation details. CLAUDE.md already describes the opponent resolution pipeline and scouting flow at an appropriate level; the addition of `resolve_unlinked()` is an extension within that existing scope, not a new architectural pattern.
+6. **Hook or settings change?** NO -- no hooks or settings modified.
+- **Verdict**: No context-layer impact. No claude-architect dispatch needed.

@@ -458,7 +458,7 @@ def resolve_opponents(
     Uses YAML team config (config/teams.yaml).  Database path is read from
     the DATABASE_PATH environment variable, defaulting to data/app.db.
     """
-    from src.gamechanger.client import GameChangerClient
+    from src.gamechanger.client import CredentialExpiredError, GameChangerClient
     from src.gamechanger.config import load_config
     from src.gamechanger.crawlers.opponent_resolver import OpponentResolver
 
@@ -474,11 +474,37 @@ def resolve_opponents(
         resolver = OpponentResolver(client, config, conn)
         try:
             result = resolver.resolve()
+        except CredentialExpiredError as exc:
+            logger.error("Opponent resolution failed (credentials expired): %s", exc)
+            typer.echo(f"Error: {exc}", err=True)
+            raise SystemExit(1) from exc
         except Exception as exc:
             logger.error("Opponent resolution failed: %s", exc)
             typer.echo(f"Error: {exc}", err=True)
             raise SystemExit(1) from exc
 
-    typer.echo(f"Opponent resolution complete: resolved={result.resolved} unlinked={result.unlinked} stored_hidden={result.stored_hidden} errors={result.errors}")
-    raise SystemExit(1 if result.errors else 0)
+        typer.echo(
+            f"Progenitor resolution complete: "
+            f"resolved={result.resolved} unlinked={result.unlinked} "
+            f"stored_hidden={result.stored_hidden} errors={result.errors}"
+        )
+
+        unlinked_failed = False
+        try:
+            unlinked_result = resolver.resolve_unlinked()
+        except Exception as exc:
+            logger.error("resolve_unlinked failed: %s", exc)
+            typer.echo(f"resolve-unlinked error: {exc}", err=True)
+            unlinked_failed = True
+        else:
+            typer.echo(
+                f"Follow-bridge resolution complete: "
+                f"resolved={unlinked_result.resolved} "
+                f"follow_bridge_failed={unlinked_result.follow_bridge_failed} "
+                f"errors={unlinked_result.errors}"
+            )
+            if unlinked_result.errors:
+                unlinked_failed = True
+
+    raise SystemExit(1 if (result.errors or unlinked_failed) else 0)
 

@@ -49,7 +49,7 @@ Both bridges only work for **teams the authenticated user follows** (operator-re
 
 ## Null-Progenitor Fallback
 
-~14% of opponents have `progenitor_team_id: null`. These cannot be auto-resolved through the chain above. They require manual linking -- an operator identifies the team and provides the mapping.
+~14% of opponents have `progenitor_team_id: null`. These cannot be auto-resolved through the chain above. As of E-146, `bb data resolve-opponents` runs an automated follow→bridge→unfollow flow via `resolve_unlinked()` that attempts to resolve null-progenitor opponents by temporarily following the team to unlock the bridge endpoints (experimental -- may not work for all opponents). If the automated flow fails, manual linking remains the fallback: an operator identifies the team and provides the mapping.
 
 ## Resolution Statistics
 

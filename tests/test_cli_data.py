@@ -275,6 +275,33 @@ def test_data_help_lists_commands() -> None:
 # ---------------------------------------------------------------------------
 
 
+def _make_mock_resolver(
+    resolved: int = 1,
+    unlinked: int = 0,
+    stored_hidden: int = 0,
+    resolve_errors: int = 0,
+    unlinked_resolved: int = 0,
+    follow_bridge_failed: int = 0,
+    unlinked_errors: int = 0,
+) -> MagicMock:
+    """Build a mock OpponentResolver with pre-configured resolve() and resolve_unlinked() return values."""
+    mock_resolve_result = MagicMock()
+    mock_resolve_result.resolved = resolved
+    mock_resolve_result.unlinked = unlinked
+    mock_resolve_result.stored_hidden = stored_hidden
+    mock_resolve_result.errors = resolve_errors
+
+    mock_unlinked_result = MagicMock()
+    mock_unlinked_result.resolved = unlinked_resolved
+    mock_unlinked_result.follow_bridge_failed = follow_bridge_failed
+    mock_unlinked_result.errors = unlinked_errors
+
+    mock_resolver = MagicMock()
+    mock_resolver.resolve.return_value = mock_resolve_result
+    mock_resolver.resolve_unlinked.return_value = mock_unlinked_result
+    return mock_resolver
+
+
 def test_resolve_opponents_passes_db_path_to_load_config() -> None:
     """resolve_opponents() calls load_config with the db_path keyword argument.
 
@@ -282,12 +309,6 @@ def test_resolve_opponents_passes_db_path_to_load_config() -> None:
     was called without db_path, causing it to always use the default path.
     """
     fake_db_path = Path("/fake/path/app.db")
-
-    mock_result = MagicMock()
-    mock_result.resolved = 1
-    mock_result.unlinked = 0
-    mock_result.stored_hidden = 0
-    mock_result.errors = 0
 
     with (
         patch("src.cli.data._resolve_db_path", return_value=fake_db_path),
@@ -298,10 +319,166 @@ def test_resolve_opponents_passes_db_path_to_load_config() -> None:
         ) as mock_resolver_cls,
         patch("src.cli.data.sqlite3.connect"),
     ):
-        mock_resolver_cls.return_value.resolve.return_value = mock_result
+        mock_resolver_cls.return_value = _make_mock_resolver()
         result = runner.invoke(app, ["data", "resolve-opponents"])
 
     mock_load_config.assert_called_once_with(db_path=fake_db_path)
+    assert result.exit_code == 0
+
+
+def test_resolve_opponents_calls_resolve_unlinked_after_resolve() -> None:
+    """resolve_opponents() calls resolve_unlinked() after resolve() succeeds."""
+    fake_db_path = Path("/fake/path/app.db")
+
+    with (
+        patch("src.cli.data._resolve_db_path", return_value=fake_db_path),
+        patch("src.gamechanger.config.load_config"),
+        patch("src.gamechanger.client.GameChangerClient"),
+        patch(
+            "src.gamechanger.crawlers.opponent_resolver.OpponentResolver"
+        ) as mock_resolver_cls,
+        patch("src.cli.data.sqlite3.connect"),
+    ):
+        mock_resolver = _make_mock_resolver(resolved=5, unlinked=2, unlinked_resolved=1)
+        mock_resolver_cls.return_value = mock_resolver
+        result = runner.invoke(app, ["data", "resolve-opponents"])
+
+    mock_resolver.resolve.assert_called_once()
+    mock_resolver.resolve_unlinked.assert_called_once()
+    assert result.exit_code == 0
+
+
+def test_resolve_opponents_output_includes_both_phases() -> None:
+    """resolve_opponents() output includes progenitor and follow-bridge counts."""
+    fake_db_path = Path("/fake/path/app.db")
+
+    with (
+        patch("src.cli.data._resolve_db_path", return_value=fake_db_path),
+        patch("src.gamechanger.config.load_config"),
+        patch("src.gamechanger.client.GameChangerClient"),
+        patch(
+            "src.gamechanger.crawlers.opponent_resolver.OpponentResolver"
+        ) as mock_resolver_cls,
+        patch("src.cli.data.sqlite3.connect"),
+    ):
+        mock_resolver = _make_mock_resolver(
+            resolved=5,
+            unlinked=2,
+            stored_hidden=1,
+            unlinked_resolved=1,
+            follow_bridge_failed=1,
+        )
+        mock_resolver_cls.return_value = mock_resolver
+        result = runner.invoke(app, ["data", "resolve-opponents"])
+
+    assert "resolved=5" in result.output
+    assert "follow_bridge_failed=1" in result.output
+    assert result.exit_code == 0
+
+
+def test_resolve_opponents_credential_expired_skips_resolve_unlinked() -> None:
+    """If resolve() raises CredentialExpiredError, resolve_unlinked() is not called."""
+    from src.gamechanger.client import CredentialExpiredError
+
+    fake_db_path = Path("/fake/path/app.db")
+
+    with (
+        patch("src.cli.data._resolve_db_path", return_value=fake_db_path),
+        patch("src.gamechanger.config.load_config"),
+        patch("src.gamechanger.client.GameChangerClient"),
+        patch(
+            "src.gamechanger.crawlers.opponent_resolver.OpponentResolver"
+        ) as mock_resolver_cls,
+        patch("src.cli.data.sqlite3.connect"),
+    ):
+        mock_resolver = _make_mock_resolver()
+        mock_resolver.resolve.side_effect = CredentialExpiredError("token expired")
+        mock_resolver_cls.return_value = mock_resolver
+        result = runner.invoke(app, ["data", "resolve-opponents"])
+
+    mock_resolver.resolve_unlinked.assert_not_called()
+    assert result.exit_code == 1
+
+
+def test_resolve_opponents_resolve_unlinked_exception_caught() -> None:
+    """If resolve_unlinked() raises an exception, it is caught and CLI exits with 1."""
+    fake_db_path = Path("/fake/path/app.db")
+
+    with (
+        patch("src.cli.data._resolve_db_path", return_value=fake_db_path),
+        patch("src.gamechanger.config.load_config"),
+        patch("src.gamechanger.client.GameChangerClient"),
+        patch(
+            "src.gamechanger.crawlers.opponent_resolver.OpponentResolver"
+        ) as mock_resolver_cls,
+        patch("src.cli.data.sqlite3.connect"),
+    ):
+        mock_resolver = _make_mock_resolver(resolved=3)
+        mock_resolver.resolve_unlinked.side_effect = RuntimeError("network failure")
+        mock_resolver_cls.return_value = mock_resolver
+        result = runner.invoke(app, ["data", "resolve-opponents"])
+
+    assert result.exit_code == 1
+
+
+def test_resolve_opponents_exit_1_if_resolve_has_errors() -> None:
+    """Exit code is 1 if resolve() returns errors > 0, even if resolve_unlinked() succeeds."""
+    fake_db_path = Path("/fake/path/app.db")
+
+    with (
+        patch("src.cli.data._resolve_db_path", return_value=fake_db_path),
+        patch("src.gamechanger.config.load_config"),
+        patch("src.gamechanger.client.GameChangerClient"),
+        patch(
+            "src.gamechanger.crawlers.opponent_resolver.OpponentResolver"
+        ) as mock_resolver_cls,
+        patch("src.cli.data.sqlite3.connect"),
+    ):
+        mock_resolver = _make_mock_resolver(resolved=3, resolve_errors=2)
+        mock_resolver_cls.return_value = mock_resolver
+        result = runner.invoke(app, ["data", "resolve-opponents"])
+
+    assert result.exit_code == 1
+
+
+def test_resolve_opponents_exit_1_if_resolve_unlinked_has_errors() -> None:
+    """Exit code is 1 if resolve_unlinked() returns errors > 0."""
+    fake_db_path = Path("/fake/path/app.db")
+
+    with (
+        patch("src.cli.data._resolve_db_path", return_value=fake_db_path),
+        patch("src.gamechanger.config.load_config"),
+        patch("src.gamechanger.client.GameChangerClient"),
+        patch(
+            "src.gamechanger.crawlers.opponent_resolver.OpponentResolver"
+        ) as mock_resolver_cls,
+        patch("src.cli.data.sqlite3.connect"),
+    ):
+        mock_resolver = _make_mock_resolver(resolved=3, follow_bridge_failed=1, unlinked_errors=1)
+        mock_resolver_cls.return_value = mock_resolver
+        result = runner.invoke(app, ["data", "resolve-opponents"])
+
+    assert result.exit_code == 1
+
+
+def test_resolve_opponents_dry_run_skips_resolve_unlinked() -> None:
+    """--dry-run skips resolve_unlinked() (regression guard for AC-5)."""
+    fake_db_path = Path("/fake/path/app.db")
+
+    with (
+        patch("src.cli.data._resolve_db_path", return_value=fake_db_path),
+        patch("src.gamechanger.config.load_config"),
+        patch("src.gamechanger.client.GameChangerClient"),
+        patch(
+            "src.gamechanger.crawlers.opponent_resolver.OpponentResolver"
+        ) as mock_resolver_cls,
+        patch("src.cli.data.sqlite3.connect"),
+    ):
+        mock_resolver = _make_mock_resolver()
+        mock_resolver_cls.return_value = mock_resolver
+        result = runner.invoke(app, ["data", "resolve-opponents", "--dry-run"])
+
+    mock_resolver.resolve_unlinked.assert_not_called()
     assert result.exit_code == 0
 
 
