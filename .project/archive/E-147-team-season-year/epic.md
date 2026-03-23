@@ -1,7 +1,7 @@
 # E-147: Team Season Year and Cohort-Based Dashboard Navigation
 
 ## Status
-`READY`
+`COMPLETED`
 <!-- Lifecycle: DRAFT → READY → ACTIVE → COMPLETED (or BLOCKED / ABANDONED) -->
 
 ## Overview
@@ -37,10 +37,10 @@ Two teams named "Standing Bear Freshman Grizzlies" appear side-by-side in the da
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-147-01 | Migration, backfill, and year-map rewrite | TODO | None | - |
-| E-147-02 | Admin add-team: thread season_year into INSERT | TODO | E-147-01 | - |
-| E-147-03 | Pipeline self-healing: propagate season_year on sync | TODO | E-147-01 | - |
-| E-147-04 | Cohort-based dashboard navigation | TODO | E-147-01 | - |
+| E-147-01 | Migration, backfill, and year-map rewrite | DONE | None | - |
+| E-147-02 | Admin add-team: thread season_year into INSERT | DONE | E-147-01 | - |
+| E-147-03 | Pipeline self-healing: propagate season_year on sync | DONE | E-147-01 | - |
+| E-147-04 | Cohort-based dashboard navigation | DONE | E-147-01 | - |
 
 ## Dispatch Team
 - software-engineer
@@ -110,3 +110,13 @@ None -- all resolved during exploration.
 - 2026-03-22: PM self-review -- 2 implementer-convenience notes added to E-147-03 (gc_uuid vs integer PK clarification, skip API call when season_year already set)
 - 2026-03-22: Spec review iteration 3 -- 2 of 4 findings accepted and incorporated (available_years must derive from get_team_year_map() values not SQL DISTINCT which drops NULLs; nullable-safe encoding of season_year in redirect params to avoid str(None)="None" bug). 2 dismissed (gc_uuid URL pattern already clarified in Notes; SE routing correct for crawler/loader work).
 - 2026-03-22: Epic set to READY after 3 spec review iterations + 2 holistic reviews (18 findings total: 16 accepted, 2 dismissed)
+- 2026-03-23: Epic COMPLETED. All 4 stories DONE. Review scorecard: 10 findings across 4 per-story CRs + 1 integration review + 1 Codex code review; 10 accepted, 0 dismissed. Delivered: `season_year` column on teams (migration 004), admin add-team threading, pipeline self-healing (member + scouting), cohort-based dashboard navigation with year dropdown, "(current)" label, and "← Current season" back-link.
+- **Documentation assessment**: No documentation impact -- schema column addition, pipeline self-healing, and dashboard cohort nav are internal implementation details not covered by admin or coaching docs.
+- **Context-layer assessment**:
+  - New agent or agent role change? **No**
+  - New rule, skill, or hook? **No**
+  - New convention or workflow? **No**
+  - CLAUDE.md factual update needed? **Yes** -- Data Model section needs `season_year` column documented (teams table), `get_team_year_map()` now reads from column not stat tables, migration 004 added.
+  - Agent memory update needed? **No**
+  - Settings or permissions change? **No**
+  - **Action required**: claude-architect to update CLAUDE.md Data Model section with `season_year` column before archiving.

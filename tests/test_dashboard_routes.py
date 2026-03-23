@@ -110,6 +110,14 @@ def _insert_batting_stats(
     conn.close()
 
 
+def _set_season_year(db_path: Path, team_id: int, year: int) -> None:
+    """Set teams.season_year for a given team."""
+    conn = sqlite3.connect(str(db_path))
+    conn.execute("UPDATE teams SET season_year = ? WHERE id = ?", (year, team_id))
+    conn.commit()
+    conn.close()
+
+
 def _insert_pitching_stats(
     db_path: Path,
     player_id: str,
@@ -339,6 +347,7 @@ class TestNavigationLinks:
         """Bottom nav hrefs include season_id when it is available."""
         db_path = _make_db(tmp_path)
         team_id = _insert_team(db_path)
+        _set_season_year(db_path, team_id, _CURRENT_YEAR - 1)
         _insert_player(db_path, "p-020", "Eve", "Brown")
         _insert_season(db_path, _PRIOR_SEASON)
         _insert_batting_stats(db_path, "p-020", team_id, _PRIOR_SEASON)
@@ -511,9 +520,10 @@ class TestEmptyState:
     """AC-6(d): teams with no data show appropriate empty state, not a broken page."""
 
     def test_batting_no_data_shows_no_stats(self, tmp_path: Path) -> None:
-        """A team with zero batting/pitching records renders 200 with 'No stats available'."""
+        """A team with zero batting/pitching records renders 200 with empty-state banner."""
         db_path = _make_db(tmp_path)
         team_id = _insert_team(db_path)
+        _set_season_year(db_path, team_id, _CURRENT_YEAR)
 
         with patch.dict(
             "os.environ",
@@ -524,11 +534,12 @@ class TestEmptyState:
                 resp = client.get("/dashboard")
 
         assert resp.status_code == 200
-        assert "No stats available" in resp.text
+        assert "Stats haven&#x27;t been loaded" in resp.text or "Stats haven't been loaded" in resp.text
 
     def test_pitching_no_data_shows_no_stats(self, tmp_path: Path) -> None:
         db_path = _make_db(tmp_path)
         team_id = _insert_team(db_path)
+        _set_season_year(db_path, team_id, _CURRENT_YEAR)
 
         with patch.dict(
             "os.environ",
@@ -539,7 +550,7 @@ class TestEmptyState:
                 resp = client.get("/dashboard/pitching")
 
         assert resp.status_code == 200
-        assert "No pitching stats available" in resp.text
+        assert "Stats haven&#x27;t been loaded" in resp.text or "Stats haven't been loaded" in resp.text
 
     def test_no_data_fallback_season_id_is_current_year(self, tmp_path: Path) -> None:
         """With no data, the fallback season_id uses the current year."""
@@ -558,10 +569,11 @@ class TestEmptyState:
         # The fallback season_id should start with the current year
         assert str(_CURRENT_YEAR) in resp.text
 
-    def test_no_data_no_freshness_indicator(self, tmp_path: Path) -> None:
-        """With no data, fallback is current year so freshness indicator is NOT shown."""
+    def test_no_data_shows_empty_state_banner(self, tmp_path: Path) -> None:
+        """With no data, the empty-state banner (bg-yellow-50) is shown."""
         db_path = _make_db(tmp_path)
         team_id = _insert_team(db_path)
+        _set_season_year(db_path, team_id, _CURRENT_YEAR)
 
         with patch.dict(
             "os.environ",
@@ -572,8 +584,8 @@ class TestEmptyState:
                 resp = client.get("/dashboard")
 
         assert resp.status_code == 200
-        # bg-yellow-50 is the freshness indicator class -- should not appear
-        assert "bg-yellow-50" not in resp.text
+        # bg-yellow-50 is the empty-state banner class for teams with no loaded stats
+        assert "bg-yellow-50" in resp.text
 
 
 # ---------------------------------------------------------------------------

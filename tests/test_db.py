@@ -32,6 +32,9 @@ def _make_db() -> sqlite3.Connection:
     conn.execute("PRAGMA foreign_keys=ON;")
     schema_sql = _SCHEMA_PATH.read_text()
     conn.executescript(schema_sql)
+    # Migration 004: season_year column on teams (E-147-01).
+    conn.execute("ALTER TABLE teams ADD COLUMN season_year INTEGER")
+    conn.commit()
     return conn
 
 
@@ -1258,24 +1261,18 @@ class TestGetDbPathDefault:
 
 
 class TestGetTeamYearMapFallback:
-    """get_team_year_map returns current year for teams with no stat data (E-142-02 AC-1..4)."""
+    """get_team_year_map reads teams.season_year, falls back to current year for NULLs.
 
-    def _insert_batting_row(
-        self, conn: sqlite3.Connection, team_id: int, season_id: str, player_id: str
-    ) -> None:
-        conn.execute(
-            "INSERT INTO player_season_batting (player_id, team_id, season_id, ab, h)"
-            " VALUES (?, ?, ?, 10, 3)",
-            (player_id, team_id, season_id),
-        )
-        conn.commit()
+    Updated for E-147-01: function now reads from teams.season_year column
+    instead of deriving years from stat tables.
+    """
 
-    def test_no_stat_data_returns_current_year(self, tmp_path: Path) -> None:
-        """Team with no stat rows maps to the current calendar year (AC-1)."""
+    def test_no_season_year_returns_current_year(self, tmp_path: Path) -> None:
+        """Team with NULL season_year maps to the current calendar year."""
         import datetime
 
         conn = _make_db()
-        team_id = _insert_team(conn, "No Data Team")
+        team_id = _insert_team(conn, "No Year Team")
         env = _db_env(tmp_path, conn)
 
         with patch.dict(os.environ, env):
@@ -1286,18 +1283,12 @@ class TestGetTeamYearMapFallback:
         assert team_id in result
         assert result[team_id] == datetime.date.today().year
 
-    def test_team_with_stat_data_returns_actual_year(self, tmp_path: Path) -> None:
-        """Team with stat rows returns the actual year from seasons, not the fallback (AC-2)."""
+    def test_team_with_season_year_returns_that_year(self, tmp_path: Path) -> None:
+        """Team with explicit season_year returns that value, not the fallback."""
         conn = _make_db()
         team_id = _insert_team(conn, "Data Team")
-        season_id = "2025-spring-hs"
-        conn.execute(
-            "INSERT OR IGNORE INTO seasons (season_id, name, season_type, year)"
-            " VALUES (?, 'Spring 2025 HS', 'spring-hs', 2025)",
-            (season_id,),
-        )
-        player_id = _insert_player(conn, "p-2025")
-        self._insert_batting_row(conn, team_id, season_id, player_id)
+        conn.execute("UPDATE teams SET season_year = 2025 WHERE id = ?", (team_id,))
+        conn.commit()
         env = _db_env(tmp_path, conn)
 
         with patch.dict(os.environ, env):
@@ -1307,22 +1298,15 @@ class TestGetTeamYearMapFallback:
 
         assert result[team_id] == 2025
 
-    def test_mixed_teams_use_real_and_fallback_years(self, tmp_path: Path) -> None:
-        """Mix of stat and no-stat teams: stat team gets real year, no-stat gets current (AC-2)."""
+    def test_mixed_teams_use_set_and_fallback_years(self, tmp_path: Path) -> None:
+        """Mix of set and NULL season_year: set team gets its year, NULL gets current."""
         import datetime
 
         conn = _make_db()
-        data_team = _insert_team(conn, "Has Data")
-        no_data_team = _insert_team(conn, "No Data")
-
-        season_id = "2025-spring-hs"
-        conn.execute(
-            "INSERT OR IGNORE INTO seasons (season_id, name, season_type, year)"
-            " VALUES (?, 'Spring 2025 HS', 'spring-hs', 2025)",
-            (season_id,),
-        )
-        player_id = _insert_player(conn, "p-mixed")
-        self._insert_batting_row(conn, data_team, season_id, player_id)
+        data_team = _insert_team(conn, "Has Year")
+        no_data_team = _insert_team(conn, "No Year")
+        conn.execute("UPDATE teams SET season_year = 2025 WHERE id = ?", (data_team,))
+        conn.commit()
         env = _db_env(tmp_path, conn)
 
         with patch.dict(os.environ, env):
@@ -1333,8 +1317,8 @@ class TestGetTeamYearMapFallback:
         assert result[data_team] == 2025
         assert result[no_data_team] == datetime.date.today().year
 
-    def test_all_no_data_teams_include_current_year_in_values(self, tmp_path: Path) -> None:
-        """When no team has stat data, the current year appears in result values (AC-3)."""
+    def test_all_null_teams_include_current_year_in_values(self, tmp_path: Path) -> None:
+        """When all teams have NULL season_year, the current year appears in result values."""
         import datetime
 
         conn = _make_db()
@@ -1597,3 +1581,68 @@ class TestGetTeamOpponentsUnionFallback:
         assert opp_a in opp_ids
         assert opp_b in opp_ids
         assert len(result) == 2
+
+
+# ---------------------------------------------------------------------------
+# get_team_year_map tests (E-147-01)
+# ---------------------------------------------------------------------------
+
+
+class TestGetTeamYearMap:
+    """Tests for get_team_year_map reading from teams.season_year."""
+
+    def test_returns_season_year_when_set(self, tmp_path: Path) -> None:
+        """AC-4a: returns season_year when the column has a value."""
+        conn = _make_db()
+        tid = _insert_team(conn, "LSB Varsity")
+        conn.execute("UPDATE teams SET season_year = 2025 WHERE id = ?", (tid,))
+        conn.commit()
+        env = _db_env(tmp_path, conn)
+
+        with patch.dict(os.environ, env):
+            from src.api.db import get_team_year_map
+
+            result = get_team_year_map([tid])
+
+        assert result[tid] == 2025
+
+    def test_falls_back_to_current_year_when_null(self, tmp_path: Path) -> None:
+        """AC-4b: returns current calendar year when season_year is NULL."""
+        conn = _make_db()
+        tid = _insert_team(conn, "LSB JV")
+        # season_year defaults to NULL -- don't set it.
+        env = _db_env(tmp_path, conn)
+
+        with patch.dict(os.environ, env):
+            from src.api.db import get_team_year_map
+
+            result = get_team_year_map([tid])
+
+        import datetime
+
+        assert result[tid] == datetime.date.today().year
+
+    def test_empty_input_returns_empty_dict(self, tmp_path: Path) -> None:
+        """AC-4c: empty input → empty dict (no DB hit needed)."""
+        from src.api.db import get_team_year_map
+
+        assert get_team_year_map([]) == {}
+
+    def test_mixed_set_and_null(self, tmp_path: Path) -> None:
+        """Teams with and without season_year are handled correctly together."""
+        conn = _make_db()
+        t1 = _insert_team(conn, "Team A")
+        t2 = _insert_team(conn, "Team B")
+        conn.execute("UPDATE teams SET season_year = 2024 WHERE id = ?", (t1,))
+        conn.commit()
+        env = _db_env(tmp_path, conn)
+
+        with patch.dict(os.environ, env):
+            from src.api.db import get_team_year_map
+
+            result = get_team_year_map([t1, t2])
+
+        import datetime
+
+        assert result[t1] == 2024
+        assert result[t2] == datetime.date.today().year

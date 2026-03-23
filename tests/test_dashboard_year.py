@@ -101,6 +101,14 @@ def _insert_batting_stats(db_path: Path, player_id: str, team_id: int, season_id
     conn.close()
 
 
+def _set_season_year(db_path: Path, team_id: int, year: int) -> None:
+    """Set teams.season_year for a given team (E-147-01 column-based year mapping)."""
+    conn = sqlite3.connect(str(db_path))
+    conn.execute("UPDATE teams SET season_year = ? WHERE id = ?", (year, team_id))
+    conn.commit()
+    conn.close()
+
+
 def _insert_pitching_stats(db_path: Path, player_id: str, team_id: int, season_id: str) -> None:
     conn = sqlite3.connect(str(db_path))
     conn.execute("PRAGMA foreign_keys=ON;")
@@ -167,13 +175,11 @@ class TestGetTeamYearMap:
 
         assert result == {team_id: _CURRENT_YEAR}
 
-    def test_returns_correct_mapping_from_pitching(self, tmp_path: Path) -> None:
-        """Team with only pitching stats gets correct year mapped."""
+    def test_returns_correct_mapping_from_season_year(self, tmp_path: Path) -> None:
+        """Team with explicit season_year gets that year mapped (E-147-01)."""
         db_path = _make_db(tmp_path)
         team_id = _insert_team(db_path, "LSB JV")
-        _insert_player(db_path, "p-y-002", "Bob", "Jones")
-        _insert_season(db_path, _PRIOR_SEASON, _PRIOR_YEAR)
-        _insert_pitching_stats(db_path, "p-y-002", team_id, _PRIOR_SEASON)
+        _set_season_year(db_path, team_id, _PRIOR_YEAR)
 
         with patch("src.api.db.get_db_path", return_value=db_path):
             result = api_db.get_team_year_map([team_id])
@@ -203,22 +209,31 @@ class TestGetTeamYearMap:
         assert result[team_no_data] == _CURRENT_YEAR
 
     def test_multiple_teams_multiple_years(self, tmp_path: Path) -> None:
-        """Multiple teams with different years each get correct mapping."""
+        """Multiple teams with different season_year values each get correct mapping."""
         db_path = _make_db(tmp_path)
         team_cur = _insert_team(db_path, "LSB Varsity")
         team_pri = _insert_team(db_path, "LSB JV")
-        _insert_player(db_path, "p-y-010", "Dan", "White")
-        _insert_player(db_path, "p-y-011", "Eve", "Brown")
-        _insert_season(db_path, _CURRENT_SEASON, _CURRENT_YEAR)
-        _insert_season(db_path, _PRIOR_SEASON, _PRIOR_YEAR)
-        _insert_batting_stats(db_path, "p-y-010", team_cur, _CURRENT_SEASON)
-        _insert_batting_stats(db_path, "p-y-011", team_pri, _PRIOR_SEASON)
+        _set_season_year(db_path, team_cur, _CURRENT_YEAR)
+        _set_season_year(db_path, team_pri, _PRIOR_YEAR)
 
         with patch("src.api.db.get_db_path", return_value=db_path):
             result = api_db.get_team_year_map([team_cur, team_pri])
 
         assert result[team_cur] == _CURRENT_YEAR
         assert result[team_pri] == _PRIOR_YEAR
+
+    def test_stale_id_omitted_from_result(self, tmp_path: Path) -> None:
+        """Team IDs not in the teams table are silently omitted."""
+        db_path = _make_db(tmp_path)
+        real_team = _insert_team(db_path, "Real Team")
+        _set_season_year(db_path, real_team, _PRIOR_YEAR)
+        stale_id = 9999  # does not exist in teams table
+
+        with patch("src.api.db.get_db_path", return_value=db_path):
+            result = api_db.get_team_year_map([real_team, stale_id])
+
+        assert result[real_team] == _PRIOR_YEAR
+        assert stale_id not in result
 
 
 # ---------------------------------------------------------------------------
@@ -312,6 +327,7 @@ class TestRouteYearFiltering:
         """When only prior-year data exists, route falls back to prior year."""
         db_path = _make_db(tmp_path)
         team_id = _insert_team(db_path)
+        _set_season_year(db_path, team_id, _PRIOR_YEAR)
         _insert_player(db_path, "p-r-002", "Bob", "Jones")
         _insert_season(db_path, _PRIOR_SEASON, _PRIOR_YEAR)
         _insert_batting_stats(db_path, "p-r-002", team_id, _PRIOR_SEASON)
@@ -354,6 +370,8 @@ class TestRouteYearFiltering:
         # Two teams: team_a in current year, team_b in prior year
         team_a = _insert_team(db_path, "LSB Varsity")
         team_b = _insert_team(db_path, "LSB JV")
+        _set_season_year(db_path, team_a, _CURRENT_YEAR)
+        _set_season_year(db_path, team_b, _PRIOR_YEAR)
         _insert_player(db_path, "p-r-010", "Dan", "White")
         _insert_player(db_path, "p-r-011", "Eve", "Brown")
         _insert_season(db_path, _CURRENT_SEASON, _CURRENT_YEAR)
@@ -461,6 +479,8 @@ class TestYearPropagationInContext:
         db_path = _make_db(tmp_path)
         team_cur = _insert_team(db_path, "LSB Varsity")
         team_pri = _insert_team(db_path, "LSB Varsity Old")
+        _set_season_year(db_path, team_cur, _CURRENT_YEAR)
+        _set_season_year(db_path, team_pri, _PRIOR_YEAR)
         _insert_player(db_path, "p-c-010", "Hank", "Moore")
         _insert_player(db_path, "p-c-011", "Ina", "Clark")
         _insert_season(db_path, _CURRENT_SEASON, _CURRENT_YEAR)
@@ -559,6 +579,8 @@ class TestYearFilteredTeamPills:
         db_path = _make_db(tmp_path)
         team_cur = _insert_team(db_path, "LSB Varsity")
         team_pri = _insert_team(db_path, "LSB Varsity Old")
+        _set_season_year(db_path, team_cur, _CURRENT_YEAR)
+        _set_season_year(db_path, team_pri, _PRIOR_YEAR)
         _insert_player(db_path, "p-f1-001", "Liam", "Ford")
         _insert_player(db_path, "p-f1-002", "Mia", "Grant")
         _insert_season(db_path, _CURRENT_SEASON, _CURRENT_YEAR)
@@ -585,6 +607,8 @@ class TestYearFilteredTeamPills:
         db_path = _make_db(tmp_path)
         team_cur = _insert_team(db_path, "LSB JV")
         team_pri = _insert_team(db_path, "LSB JV Old")
+        _set_season_year(db_path, team_cur, _CURRENT_YEAR)
+        _set_season_year(db_path, team_pri, _PRIOR_YEAR)
         _insert_player(db_path, "p-f1-003", "Noah", "Hayes")
         _insert_player(db_path, "p-f1-004", "Olivia", "James")
         _insert_season(db_path, _CURRENT_SEASON, _CURRENT_YEAR)
@@ -676,3 +700,193 @@ class TestDetailPageBottomNav:
 
         assert resp.status_code == 200
         assert f"year={_CURRENT_YEAR}" in resp.text
+
+
+# ---------------------------------------------------------------------------
+# E-147-04: Cohort-based dashboard navigation
+# ---------------------------------------------------------------------------
+
+
+class TestCohortNavigation:
+    """E-147-04: current_year in context, back-link, and (current) label."""
+
+    def _setup_multi_year(self, tmp_path: Path) -> tuple[Path, int, int]:
+        """Create DB with two teams in different years."""
+        db_path = _make_db(tmp_path)
+        team_cur = _insert_team(db_path, "LSB Varsity 2026")
+        team_pri = _insert_team(db_path, "LSB Varsity 2025")
+        _set_season_year(db_path, team_cur, _CURRENT_YEAR)
+        _set_season_year(db_path, team_pri, _PRIOR_YEAR)
+        _insert_player(db_path, "p-e147-01", "Alex", "Smith")
+        _insert_player(db_path, "p-e147-02", "Ben", "Jones")
+        _insert_season(db_path, _CURRENT_SEASON, _CURRENT_YEAR)
+        _insert_season(db_path, _PRIOR_SEASON, _PRIOR_YEAR)
+        _insert_batting_stats(db_path, "p-e147-01", team_cur, _CURRENT_SEASON)
+        _insert_batting_stats(db_path, "p-e147-02", team_pri, _PRIOR_SEASON)
+        _insert_pitching_stats(db_path, "p-e147-01", team_cur, _CURRENT_SEASON)
+        _insert_pitching_stats(db_path, "p-e147-02", team_pri, _PRIOR_SEASON)
+        return db_path, team_cur, team_pri
+
+    def test_current_year_in_context_batting(self, tmp_path: Path) -> None:
+        """AC-1/AC-5: /dashboard passes current_year to template context."""
+        db_path, team_cur, team_pri = self._setup_multi_year(tmp_path)
+
+        with patch.dict(
+            "os.environ",
+            {"DATABASE_PATH": str(db_path), "DEV_USER_EMAIL": "dev@example.com"},
+        ):
+            client = _make_dev_client_multi(db_path, [team_cur, team_pri])
+            with client:
+                resp = client.get("/dashboard")
+
+        assert resp.status_code == 200
+        html = resp.text
+        # "(current)" label should appear in dropdown for current year
+        assert f"{_CURRENT_YEAR} (current)" in html
+
+    def test_historical_view_shows_back_link(self, tmp_path: Path) -> None:
+        """AC-3: Viewing a historical year shows '← Current season' back-link."""
+        db_path, team_cur, team_pri = self._setup_multi_year(tmp_path)
+
+        with patch.dict(
+            "os.environ",
+            {"DATABASE_PATH": str(db_path), "DEV_USER_EMAIL": "dev@example.com"},
+        ):
+            client = _make_dev_client_multi(db_path, [team_cur, team_pri])
+            with client:
+                resp = client.get(f"/dashboard?year={_PRIOR_YEAR}")
+
+        assert resp.status_code == 200
+        html = resp.text
+        assert "Current season" in html
+
+    def test_current_year_no_back_link(self, tmp_path: Path) -> None:
+        """AC-3: Current year view does NOT show the back-link."""
+        db_path, team_cur, team_pri = self._setup_multi_year(tmp_path)
+
+        with patch.dict(
+            "os.environ",
+            {"DATABASE_PATH": str(db_path), "DEV_USER_EMAIL": "dev@example.com"},
+        ):
+            client = _make_dev_client_multi(db_path, [team_cur, team_pri])
+            with client:
+                resp = client.get(f"/dashboard?year={_CURRENT_YEAR}")
+
+        assert resp.status_code == 200
+        assert "Current season" not in resp.text
+
+    def test_single_year_no_current_label(self, tmp_path: Path) -> None:
+        """AC-6: Single year → static span, no '(current)' label, no dropdown."""
+        db_path = _make_db(tmp_path)
+        team_id = _insert_team(db_path, "LSB JV")
+        _set_season_year(db_path, team_id, _CURRENT_YEAR)
+        _insert_player(db_path, "p-e147-03", "Chris", "Lee")
+        _insert_season(db_path, _CURRENT_SEASON, _CURRENT_YEAR)
+        _insert_batting_stats(db_path, "p-e147-03", team_id, _CURRENT_SEASON)
+
+        with patch.dict(
+            "os.environ",
+            {"DATABASE_PATH": str(db_path), "DEV_USER_EMAIL": "dev@example.com"},
+        ):
+            client = _make_dev_client(db_path, team_id)
+            with client:
+                resp = client.get("/dashboard")
+
+        assert resp.status_code == 200
+        html = resp.text
+        assert "(current)" not in html
+        assert "Current season" not in html
+
+    def test_back_link_on_pitching_route(self, tmp_path: Path) -> None:
+        """AC-5: Back-link works on /dashboard/pitching too."""
+        db_path, team_cur, team_pri = self._setup_multi_year(tmp_path)
+
+        with patch.dict(
+            "os.environ",
+            {"DATABASE_PATH": str(db_path), "DEV_USER_EMAIL": "dev@example.com"},
+        ):
+            client = _make_dev_client_multi(db_path, [team_cur, team_pri])
+            with client:
+                resp = client.get(f"/dashboard/pitching?year={_PRIOR_YEAR}")
+
+        assert resp.status_code == 200
+        assert "Current season" in resp.text
+
+    def test_stale_bookmark_fallback(self, tmp_path: Path) -> None:
+        """AC-2: ?year=1999 (no matching teams) falls back to current year silently."""
+        db_path, team_cur, team_pri = self._setup_multi_year(tmp_path)
+
+        with patch.dict(
+            "os.environ",
+            {"DATABASE_PATH": str(db_path), "DEV_USER_EMAIL": "dev@example.com"},
+        ):
+            client = _make_dev_client_multi(db_path, [team_cur, team_pri])
+            with client:
+                resp = client.get("/dashboard?year=1999")
+
+        assert resp.status_code == 200
+        html = resp.text
+        # Should fall back to current year — current team pill should appear
+        assert f"team_id={team_cur}" in html
+
+
+# ---------------------------------------------------------------------------
+# Remediation: _pick_season_for_year and cohort/season alignment
+# ---------------------------------------------------------------------------
+
+
+class TestPickSeasonForYear:
+    """Unit tests for _pick_season_for_year helper."""
+
+    def test_picks_matching_year(self) -> None:
+        from src.api.routes.dashboard import _pick_season_for_year
+
+        seasons = [
+            {"season_id": "2026-spring-hs"},
+            {"season_id": "2025-spring-hs"},
+        ]
+        assert _pick_season_for_year(seasons, 2025, 2026) == "2025-spring-hs"
+
+    def test_falls_back_to_first_when_no_match(self) -> None:
+        from src.api.routes.dashboard import _pick_season_for_year
+
+        seasons = [{"season_id": "2026-spring-hs"}]
+        assert _pick_season_for_year(seasons, 2024, 2026) == "2026-spring-hs"
+
+    def test_empty_seasons_uses_fallback_year(self) -> None:
+        from src.api.routes.dashboard import _pick_season_for_year
+
+        assert _pick_season_for_year([], 2025, 2026) == "2026-spring-hs"
+
+
+class TestCohortSeasonAlignment:
+    """When ?year=PRIOR selects a prior-year cohort, season_id should match."""
+
+    def test_prior_year_uses_prior_season(self, tmp_path: Path) -> None:
+        """Selecting year=PRIOR should use PRIOR-spring-hs season for stats."""
+        db_path = _make_db(tmp_path)
+        team_cur = _insert_team(db_path, "LSB Varsity")
+        team_pri = _insert_team(db_path, "LSB Varsity Old")
+        _set_season_year(db_path, team_cur, _CURRENT_YEAR)
+        _set_season_year(db_path, team_pri, _PRIOR_YEAR)
+
+        _insert_player(db_path, "p-cs-001", "Alpha", "One")
+        _insert_player(db_path, "p-cs-002", "Beta", "Two")
+        _insert_season(db_path, _CURRENT_SEASON, _CURRENT_YEAR)
+        _insert_season(db_path, _PRIOR_SEASON, _PRIOR_YEAR)
+        _insert_batting_stats(db_path, "p-cs-001", team_cur, _CURRENT_SEASON)
+        _insert_batting_stats(db_path, "p-cs-002", team_pri, _PRIOR_SEASON)
+
+        with patch.dict(
+            "os.environ",
+            {"DATABASE_PATH": str(db_path), "DEV_USER_EMAIL": "dev@example.com"},
+        ):
+            client = _make_dev_client_multi(db_path, [team_cur, team_pri])
+            with client:
+                resp = client.get(f"/dashboard?year={_PRIOR_YEAR}")
+
+        assert resp.status_code == 200
+        html = resp.text
+        # Prior year player should be visible, current year player should not
+        assert "Beta" in html
+        assert "Alpha" not in html

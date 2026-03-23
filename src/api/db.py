@@ -1205,46 +1205,38 @@ def get_opponent_link_count_for_team(our_team_id: int) -> int:
 def get_team_year_map(team_ids: list[int]) -> dict[int, int]:
     """Return a mapping of team_id → year for the given team IDs.
 
-    Queries ``player_season_batting`` and ``player_season_pitching`` UNION joined
-    to ``seasons.year`` to determine which year each team has stat data for.
-    Teams with no stat data fall back to the current calendar year so they
-    remain visible in the dashboard year selector and team pill list.
+    Reads ``teams.season_year`` directly.  Teams whose ``season_year`` is
+    NULL fall back to the current calendar year so they remain visible in
+    the dashboard year selector and team pill list.
+
+    Only team IDs that exist in the ``teams`` table are included in the
+    result.  Stale IDs (e.g. from permission lists referencing deleted
+    teams) are silently omitted -- callers should not assume every input
+    ID appears in the output.
 
     Args:
         team_ids: List of INTEGER team ids to look up.
 
     Returns:
-        Dict mapping ``team_id → year`` for every id in ``team_ids``.
-        Teams with stat data use their actual data year (MAX); teams without
-        stat data map to the current calendar year.  Empty dict if
-        ``team_ids`` is empty or on DB error.
+        Dict mapping ``team_id → year`` for every id in ``team_ids``
+        that exists in the ``teams`` table.  Teams with an explicit
+        ``season_year`` use that value; teams with NULL map to the
+        current calendar year.  Empty dict if ``team_ids`` is empty or
+        on DB error.
     """
     if not team_ids:
         return {}
     placeholders = ",".join("?" for _ in team_ids)
-    query = f"""
-        SELECT t.team_id, MAX(s.year) AS year
-        FROM (
-            SELECT team_id, season_id FROM player_season_batting
-             WHERE team_id IN ({placeholders})
-            UNION
-            SELECT team_id, season_id FROM player_season_pitching
-             WHERE team_id IN ({placeholders})
-        ) t
-        JOIN seasons s ON s.season_id = t.season_id
-        GROUP BY t.team_id
-    """
-    params = list(team_ids) + list(team_ids)
+    query = f"SELECT id, season_year FROM teams WHERE id IN ({placeholders})"
     try:
         with closing(get_connection()) as conn:
             conn.row_factory = sqlite3.Row
-            rows = conn.execute(query, params).fetchall()
-        result = {row["team_id"]: row["year"] for row in rows}
+            rows = conn.execute(query, list(team_ids)).fetchall()
         current_year = datetime.date.today().year
-        for team_id in team_ids:
-            if team_id not in result:
-                result[team_id] = current_year
-        return result
+        return {
+            row["id"]: row["season_year"] if row["season_year"] is not None else current_year
+            for row in rows
+        }
     except sqlite3.Error:
         logger.exception("Failed to fetch team year map")
         return {}

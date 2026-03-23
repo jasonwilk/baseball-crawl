@@ -2009,8 +2009,8 @@ class TestGameDetailJerseyNumber:
 
         # Member home team
         cursor = conn.execute(
-            "INSERT INTO teams (name, membership_type, classification) VALUES (?, ?, ?)",
-            ("Home Team", "member", "varsity"),
+            "INSERT INTO teams (name, membership_type, classification, season_year) VALUES (?, ?, ?, ?)",
+            ("Home Team", "member", "varsity", datetime.date.today().year),
         )
         home_id: int = cursor.lastrowid  # type: ignore[assignment]
 

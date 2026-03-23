@@ -52,7 +52,7 @@ import sqlite3
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from src.gamechanger.loaders import LoadResult
+from src.gamechanger.loaders import LoadResult, warn_season_year_mismatch
 from src.gamechanger.types import TeamRef
 
 logger = logging.getLogger(__name__)
@@ -240,6 +240,7 @@ class GameLoader:
         Returns:
             Aggregated ``LoadResult`` across all game files.
         """
+        warn_season_year_mismatch(self._db, self._team_ref.id, self._season_id, "GameLoader")
         summaries_index = self._build_summaries_index(team_dir)
         if summaries_index is None:
             return LoadResult(errors=1)

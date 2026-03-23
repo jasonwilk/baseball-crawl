@@ -46,7 +46,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
-from src.gamechanger.loaders import LoadResult
+from src.gamechanger.loaders import LoadResult, warn_season_year_mismatch
 from src.gamechanger.loaders.game_loader import GameLoader, GameSummaryEntry
 from src.gamechanger.types import TeamRef
 
@@ -101,6 +101,7 @@ class ScoutingLoader:
             Aggregated ``LoadResult`` across roster and boxscore loading.
         """
         self._ensure_season_row(season_id)
+        warn_season_year_mismatch(self._db, team_id, season_id, "ScoutingLoader")
 
         total = self._load_roster_section(scouting_dir, team_id, season_id)
 

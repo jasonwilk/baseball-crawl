@@ -18,7 +18,7 @@
 <p class="text-gray-600 mt-4">You have no team assignments. Contact your administrator.</p>
 {% else %}
 
-{{ team_selector(permitted_team_infos, active_team_id, "/dashboard/pitching", current_sort, current_dir, active_year, available_years) }}
+{{ team_selector(permitted_team_infos, active_team_id, "/dashboard/pitching", current_sort, current_dir, active_year, available_years, current_year) }}
 
 
 {# Helper macro: render a sortable column header for the pitching table #}

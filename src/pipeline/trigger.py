@@ -25,6 +25,7 @@ from src.api.db import get_db_path
 from src.gamechanger.client import GameChangerClient
 from src.gamechanger.crawlers.scouting import ScoutingCrawler
 from src.gamechanger.loaders.scouting_loader import ScoutingLoader
+from src.gamechanger.team_resolver import resolve_team
 from src.pipeline import crawl as crawl_module
 from src.pipeline import load as load_module
 
@@ -101,6 +102,77 @@ def _refresh_auth_token() -> GameChangerClient:
 
 
 # ---------------------------------------------------------------------------
+# Self-healing: season_year propagation
+# ---------------------------------------------------------------------------
+
+
+def _heal_season_year_member(
+    conn: sqlite3.Connection, team_id: int, client: GameChangerClient
+) -> None:
+    """Backfill season_year for a member team if NULL.
+
+    Looks up gc_uuid, calls the authenticated team endpoint, and UPDATEs
+    season_year WHERE IS NULL.  Best-effort: any failure is logged and skipped.
+    """
+    row = conn.execute(
+        "SELECT gc_uuid, season_year FROM teams WHERE id = ?", (team_id,)
+    ).fetchone()
+    if row is None:
+        return
+    gc_uuid, season_year = row
+    if season_year is not None:
+        return  # already populated
+    if not gc_uuid:
+        logger.debug("No gc_uuid for team_id=%d; skipping season_year heal.", team_id)
+        return
+    try:
+        team_data = client.get(
+            f"/teams/{gc_uuid}",
+            accept="application/vnd.gc.com.team+json; version=0.10.0",
+        )
+        api_year = (
+            team_data.get("season_year")
+            if isinstance(team_data, dict)
+            else None
+        )
+        if api_year is not None:
+            conn.execute(
+                "UPDATE teams SET season_year = ? WHERE id = ? AND season_year IS NULL",
+                (int(api_year), team_id),
+            )
+            conn.commit()
+            logger.info("Healed season_year=%s for team_id=%d", api_year, team_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("season_year heal failed for team_id=%d: %s", team_id, exc)
+
+
+def _heal_season_year_scouting(
+    conn: sqlite3.Connection, team_id: int, public_id: str
+) -> None:
+    """Backfill season_year for a tracked team if NULL.
+
+    Calls resolve_team (public, no auth) and UPDATEs season_year WHERE IS NULL.
+    Best-effort: any failure is logged and skipped.
+    """
+    row = conn.execute(
+        "SELECT season_year FROM teams WHERE id = ?", (team_id,)
+    ).fetchone()
+    if row is None or row[0] is not None:
+        return  # already populated or missing
+    try:
+        profile = resolve_team(public_id)
+        if profile.year is not None:
+            conn.execute(
+                "UPDATE teams SET season_year = ? WHERE id = ? AND season_year IS NULL",
+                (profile.year, team_id),
+            )
+            conn.commit()
+            logger.info("Healed season_year=%s for team_id=%d (scouting)", profile.year, team_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("season_year heal (scouting) failed for team_id=%d: %s", team_id, exc)
+
+
+# ---------------------------------------------------------------------------
 # Member team sync
 # ---------------------------------------------------------------------------
 
@@ -127,12 +199,12 @@ def run_member_sync(team_id: int, team_name: str, crawl_job_id: int) -> None:
     db_path = get_db_path()
 
     # 1. Refresh auth token before pipeline starts.
-    # The returned client is intentionally discarded here: force_refresh() persists
-    # the refreshed credentials to the external credential store, so the crawl
-    # pipeline (which creates its own GameChangerClient internally) will pick up
+    # The returned client is kept for the season_year heal call below;
+    # force_refresh() also persists credentials so the crawl pipeline
+    # (which creates its own GameChangerClient internally) picks up
     # the fresh token automatically.
     try:
-        _refresh_auth_token()
+        client = _refresh_auth_token()
         logger.info("Auth token refreshed for member sync team_id=%d", team_id)
     except Exception as exc:  # noqa: BLE001
         logger.error("Auth refresh failed for team_id=%d: %s", team_id, exc)
@@ -140,6 +212,11 @@ def run_member_sync(team_id: int, team_name: str, crawl_job_id: int) -> None:
             conn.execute("PRAGMA foreign_keys=ON;")
             _mark_job_terminal(conn, crawl_job_id, "failed", f"Auth refresh failed: {exc}")
         return
+
+    # 1b. Self-heal season_year if NULL.
+    with closing(sqlite3.connect(str(db_path))) as conn:
+        conn.execute("PRAGMA foreign_keys=ON;")
+        _heal_season_year_member(conn, team_id, client)
 
     # 2. Run crawl then load (each stage opens its own connection).
     try:
@@ -207,6 +284,11 @@ def run_scouting_sync(team_id: int, public_id: str, crawl_job_id: int) -> None:
             conn.execute("PRAGMA foreign_keys=ON;")
             _mark_job_terminal(conn, crawl_job_id, "failed", f"Auth refresh failed: {exc}")
         return
+
+    # 1b. Self-heal season_year if NULL (public endpoint, no auth needed).
+    with closing(sqlite3.connect(str(db_path))) as conn:
+        conn.execute("PRAGMA foreign_keys=ON;")
+        _heal_season_year_scouting(conn, team_id, public_id)
 
     # 2. Run crawl + load within a single shared connection.
     try:

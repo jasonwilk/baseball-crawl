@@ -686,6 +686,7 @@ def _insert_team_new(
     membership_type: str,
     program_id: str | None,
     classification: str | None,
+    season_year: int | None = None,
 ) -> int:
     """Insert a new team row with INTEGER PK auto-assigned.
 
@@ -700,19 +701,24 @@ def _insert_team_new(
         membership_type: 'member' or 'tracked'.
         program_id: Program slug or None.
         classification: Classification string or None.
+        season_year: Season year from GC profile or None.
 
     Returns:
         The INTEGER primary key of the newly inserted team.
     """
+    # season_year column added in migration 004.  Safe because the Dockerfile
+    # CMD runs apply_migrations.py before uvicorn starts (no route handler can
+    # execute before all migrations have been applied).
     with closing(get_connection()) as conn:
         cursor = conn.execute(
             """
             INSERT INTO teams
                 (name, public_id, gc_uuid, membership_type, program_id,
-                 classification, source, is_active)
-            VALUES (?, ?, ?, ?, ?, ?, 'gamechanger', 1)
+                 classification, season_year, source, is_active)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'gamechanger', 1)
             """,
-            (name, public_id, gc_uuid, membership_type, program_id, classification),
+            (name, public_id, gc_uuid, membership_type, program_id,
+             classification, season_year),
         )
         new_team_id = cursor.lastrowid
         if membership_type == "member":
@@ -1244,6 +1250,8 @@ async def add_team_phase1(
     }
     if gc_uuid:
         params["gc_uuid"] = gc_uuid
+    if profile.year is not None:
+        params["season_year"] = str(profile.year)
     return RedirectResponse(
         url=f"/admin/teams/confirm?{urlencode(params)}", status_code=303
     )
@@ -1260,6 +1268,7 @@ async def _render_confirm_team_page(
     programs: list[dict[str, Any]],
     inferred_classification: str | None,
     inferred_program_id: str | None,
+    season_year: int | None = None,
 ) -> Response:
     """Render the confirm-add-team page with the given context.
 
@@ -1274,6 +1283,7 @@ async def _render_confirm_team_page(
         programs: List of program dicts for the dropdown.
         inferred_classification: Pre-selected division or None.
         inferred_program_id: Pre-selected program slug or None.
+        season_year: Season year from GC profile or None.
 
     Returns:
         TemplateResponse for the confirm page.
@@ -1289,6 +1299,7 @@ async def _render_confirm_team_page(
             "programs": programs,
             "inferred_classification": inferred_classification,
             "inferred_program_id": inferred_program_id,
+            "season_year": season_year,
             "error": error,
             "admin_user": guard,
             "is_admin_page": True,
@@ -1324,6 +1335,11 @@ async def confirm_team_form(request: Request) -> Response:
     gc_uuid = request.query_params.get("gc_uuid", "") or None
     gc_uuid_status = request.query_params.get("gc_uuid_status", "forbidden")
     error = request.query_params.get("error", "")
+    season_year_raw = request.query_params.get("season_year", "")
+    try:
+        season_year = int(season_year_raw) if season_year_raw.strip() else None
+    except ValueError:
+        season_year = None
 
     programs = await run_in_threadpool(_get_programs)
     if not error and await run_in_threadpool(_check_duplicate_new, public_id, gc_uuid):
@@ -1334,6 +1350,7 @@ async def confirm_team_form(request: Request) -> Response:
         error, programs,
         _infer_classification(team_name),
         _infer_program_id(team_name, programs),
+        season_year=season_year,
     )
 
 
@@ -1390,6 +1407,7 @@ async def confirm_team_submit(
     membership_type: str = Form(default="tracked"),
     program_id: str = Form(default=""),
     classification: str = Form(default=""),
+    season_year: str = Form(default=""),
 ) -> Response:
     """Phase 2: TOCTOU guard, duplicate check, then insert team.
 
@@ -1404,6 +1422,10 @@ async def confirm_team_submit(
     gc_uuid_value, program_id_value, classification_value = _normalize_confirm_inputs(
         gc_uuid, program_id, classification
     )
+    try:
+        season_year_value = int(season_year) if season_year.strip() else None
+    except ValueError:
+        season_year_value = None
 
     if membership_type not in _VALID_MEMBERSHIP_TYPES:
         return HTMLResponse(
@@ -1427,13 +1449,14 @@ async def confirm_team_submit(
             programs,
             _infer_classification(team_name),
             _infer_program_id(team_name, programs),
+            season_year=season_year_value,
         )
 
     try:
         await run_in_threadpool(
             _insert_team_new,
             team_name, public_id, gc_uuid_value, membership_type,
-            program_id_value, classification_value,
+            program_id_value, classification_value, season_year_value,
         )
     except sqlite3.IntegrityError:
         return RedirectResponse(

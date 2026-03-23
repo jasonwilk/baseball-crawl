@@ -123,11 +123,12 @@ After changing `src/`, `migrations/`, `Dockerfile`, `docker-compose.yml`, or `re
 
 ## Data Model
 
-The schema is defined in a single migration (`migrations/001_initial_schema.sql`). Key design decisions:
+The schema is defined in `migrations/001_initial_schema.sql` (base) with incremental migrations (`004_add_team_season_year.sql`, etc.). Key design decisions:
 
 - **Programs**: Umbrella entity grouping teams under an organizational program (e.g., `lsb-hs` = Lincoln Standing Bear HS). Types: `hs`, `usssa`, `legion`.
 - **Teams**: INTEGER PRIMARY KEY AUTOINCREMENT (`teams.id`). External GC identifiers live in dedicated UNIQUE columns: `gc_uuid` (authenticated API) and `public_id` (public URL slug). All FK references to teams use `teams(id)`. INTEGER PK applies to `teams` only -- programs, seasons, and players keep TEXT PKs.
 - **Membership type**: `teams.membership_type` (`member` or `tracked`). Member teams are those the operator manages in GameChanger; tracked teams are opponents or other teams added for scouting.
+- **Season year**: `teams.season_year INTEGER` -- the year this team belongs to, populated from GameChanger API (`season_year` on authenticated endpoints, `team_season.year` on public). NULL falls back to current calendar year in `get_team_year_map()`. Self-healed by pipeline on sync.
 - **Classification**: `teams.classification` column. Valid values: `varsity`, `jv`, `freshman`, `reserve` (HS); `8U`-`14U` (USSSA); `legion`. Division dropdown in the admin UI.
 - **team_opponents**: Junction table linking member teams to their tracked opponents (`our_team_id` -> `opponent_team_id`), with `first_seen_year` for historical context.
 - **TeamRef pattern**: Pipeline code uses a `TeamRef` dataclass (`id: int`, `gc_uuid: str | None`, `public_id: str | None`). `.id` for all DB operations; `.gc_uuid` / `.public_id` for API calls. Tracked teams may have `gc_uuid=None`.

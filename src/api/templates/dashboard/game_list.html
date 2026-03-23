@@ -18,7 +18,7 @@
 <p class="text-gray-600 mt-4">You have no team assignments. Contact your administrator.</p>
 {% else %}
 
-{{ team_selector(permitted_team_infos, active_team_id, "/dashboard/games", active_year=active_year, available_years=available_years) }}
+{{ team_selector(permitted_team_infos, active_team_id, "/dashboard/games", active_year=active_year, available_years=available_years, current_year=current_year) }}
 
 
 <h1 class="text-xl font-bold mb-4">{{ team_name }} &mdash; Games</h1>

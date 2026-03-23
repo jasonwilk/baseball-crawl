@@ -75,6 +75,8 @@ def _resolve_year_and_team(
     permitted_teams: list[int],
     team_id_param: int | None,
     year_param: int | None,
+    *,
+    current_year: int | None = None,
 ) -> tuple[int, int]:
     """Resolve (active_team_id, active_year) per TN-2 parameter resolution order.
 
@@ -83,11 +85,16 @@ def _resolve_year_and_team(
         permitted_teams: Ordered list of all permitted team ids.
         team_id_param:  Parsed team_id query param (already validated), or None.
         year_param:     Parsed year query param, or None.
+        current_year:   The "current" year to use for defaults.  When *None*,
+            falls back to ``max(team_year_map.values())`` (consistent with
+            route handlers) or ``datetime.date.today().year`` if the map is
+            empty.
 
     Returns:
         Tuple of (active_team_id, active_year).
     """
-    current_year = datetime.date.today().year
+    if current_year is None:
+        current_year = max(team_year_map.values()) if team_year_map else datetime.date.today().year
     available_years = sorted(set(team_year_map.values()), reverse=True)
 
     # Path 2: team_id present → team wins; derive year from map
@@ -115,6 +122,29 @@ def _resolve_year_and_team(
 
     # No teams have data at all
     return permitted_teams[0], current_year
+
+
+def _pick_season_for_year(
+    available_seasons: list[dict[str, str]],
+    active_year: int,
+    fallback_year: int,
+) -> str:
+    """Choose the best season_id matching *active_year*.
+
+    Season IDs follow the ``YYYY-type[-class]`` convention (e.g.
+    ``2025-spring-hs``).  The function returns the first season whose
+    leading four digits match *active_year*.  If none match, it falls
+    back to ``available_seasons[0]`` (most-recent) or synthesises a
+    placeholder using *fallback_year*.
+    """
+    year_prefix = str(active_year)
+    for s in available_seasons:
+        if s["season_id"].startswith(year_prefix):
+            return s["season_id"]
+    # No season matches the active year — fall back to newest available
+    if available_seasons:
+        return available_seasons[0]["season_id"]
+    return f"{fallback_year}-spring-hs"
 
 
 def _parse_sort_params(
@@ -323,18 +353,18 @@ async def team_stats(request: Request) -> Response:
 
     # Build team→year map and resolve active team + year (AC-1, AC-2, AC-3)
     team_year_map = await run_in_threadpool(db.get_team_year_map, permitted_teams)
+    current_year = max(team_year_map.values()) if team_year_map else datetime.date.today().year
     active_team_id, active_year = _resolve_year_and_team(
-        team_year_map, permitted_teams, team_id_param, year_param
+        team_year_map, permitted_teams, team_id_param, year_param,
+        current_year=current_year,
     )
     available_years: list[int] = sorted(set(team_year_map.values()), reverse=True)
-
-    current_year = datetime.date.today().year
     requested_season_id = request.query_params.get("season_id", "").strip()
 
     available_seasons = await run_in_threadpool(db.get_available_seasons, active_team_id)
     # year takes precedence over season_id param (AC-8)
     if not requested_season_id or year_param is not None:
-        season_id = available_seasons[0]["season_id"] if available_seasons else f"{current_year}-spring-hs"
+        season_id = _pick_season_for_year(available_seasons, active_year, current_year)
     else:
         season_id = requested_season_id
     if not available_seasons:
@@ -382,6 +412,7 @@ async def team_stats(request: Request) -> Response:
             "active_team_id": active_team_id,
             "active_year": active_year,
             "available_years": available_years,
+            "current_year": current_year,
             "season_id": season_id,
             "user": user,
             "no_assignments": False,
@@ -507,17 +538,17 @@ async def team_pitching(request: Request) -> Response:
 
     # Build team→year map and resolve active team + year
     team_year_map_p = await run_in_threadpool(db.get_team_year_map, permitted_teams)
+    current_year = max(team_year_map_p.values()) if team_year_map_p else datetime.date.today().year
     active_team_id_p, active_year_p = _resolve_year_and_team(
-        team_year_map_p, permitted_teams, team_id_param_p, year_param_p
+        team_year_map_p, permitted_teams, team_id_param_p, year_param_p,
+        current_year=current_year,
     )
     available_years_p: list[int] = sorted(set(team_year_map_p.values()), reverse=True)
-
-    current_year = datetime.date.today().year
     requested_season_id = request.query_params.get("season_id", "").strip()
 
     available_seasons = await run_in_threadpool(db.get_available_seasons, active_team_id_p)
     if not requested_season_id or year_param_p is not None:
-        season_id = available_seasons[0]["season_id"] if available_seasons else f"{current_year}-spring-hs"
+        season_id = _pick_season_for_year(available_seasons, active_year_p, current_year)
     else:
         season_id = requested_season_id
     if not available_seasons:
@@ -567,6 +598,7 @@ async def team_pitching(request: Request) -> Response:
             "active_team_id": active_team_id_p,
             "active_year": active_year_p,
             "available_years": available_years_p,
+            "current_year": current_year,
             "season_id": season_id,
             "user": user,
             "no_assignments": False,
@@ -660,17 +692,17 @@ async def game_list(request: Request) -> Response:
 
     # Build team→year map and resolve active team + year
     team_year_map_g = await run_in_threadpool(db.get_team_year_map, permitted_teams)
+    current_year = max(team_year_map_g.values()) if team_year_map_g else datetime.date.today().year
     active_team_id_g, active_year_g = _resolve_year_and_team(
-        team_year_map_g, permitted_teams, team_id_param_g, year_param_g
+        team_year_map_g, permitted_teams, team_id_param_g, year_param_g,
+        current_year=current_year,
     )
     available_years_g: list[int] = sorted(set(team_year_map_g.values()), reverse=True)
-
-    current_year = datetime.date.today().year
     requested_season_id = request.query_params.get("season_id", "").strip()
 
     available_seasons = await run_in_threadpool(db.get_available_seasons, active_team_id_g)
     if not requested_season_id or year_param_g is not None:
-        season_id = available_seasons[0]["season_id"] if available_seasons else f"{current_year}-spring-hs"
+        season_id = _pick_season_for_year(available_seasons, active_year_g, current_year)
     else:
         season_id = requested_season_id
     if not available_seasons:
@@ -711,6 +743,7 @@ async def game_list(request: Request) -> Response:
             "active_team_id": active_team_id_g,
             "active_year": active_year_g,
             "available_years": available_years_g,
+            "current_year": current_year,
             "season_id": season_id,
             "user": user,
             "no_assignments": False,
@@ -875,17 +908,17 @@ async def opponent_list(request: Request) -> Response:
 
     # Build team→year map and resolve active team + year
     team_year_map_o = await run_in_threadpool(db.get_team_year_map, permitted_teams)
+    current_year = max(team_year_map_o.values()) if team_year_map_o else datetime.date.today().year
     active_team_id_o, active_year_o = _resolve_year_and_team(
-        team_year_map_o, permitted_teams, team_id_param_o, year_param_o
+        team_year_map_o, permitted_teams, team_id_param_o, year_param_o,
+        current_year=current_year,
     )
     available_years_o: list[int] = sorted(set(team_year_map_o.values()), reverse=True)
-
-    current_year = datetime.date.today().year
     requested_season_id = request.query_params.get("season_id", "").strip()
 
     available_seasons = await run_in_threadpool(db.get_available_seasons, active_team_id_o)
     if not requested_season_id or year_param_o is not None:
-        season_id = available_seasons[0]["season_id"] if available_seasons else f"{current_year}-spring-hs"
+        season_id = _pick_season_for_year(available_seasons, active_year_o, current_year)
     else:
         season_id = requested_season_id
     if not available_seasons:
@@ -925,6 +958,7 @@ async def opponent_list(request: Request) -> Response:
             "active_team_id": active_team_id_o,
             "active_year": active_year_o,
             "available_years": available_years_o,
+            "current_year": current_year,
             "season_id": season_id,
             "user": user,
             "no_assignments": False,

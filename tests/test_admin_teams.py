@@ -1896,3 +1896,161 @@ class TestTeamsSyncDisplay:
                 response = client.get("/admin/teams")
         # The /sync action URL for this specific team should not appear.
         assert f"/admin/teams/{team_id}/sync" not in response.text
+
+
+# ---------------------------------------------------------------------------
+# E-147-02: Admin add-team threads season_year through INSERT
+# ---------------------------------------------------------------------------
+
+
+class TestAddTeamSeasonYear:
+    """E-147-02: season_year flows through Phase 1 redirect → confirm form → INSERT."""
+
+    def test_confirm_submit_stores_season_year(self, team_db: Path) -> None:
+        """POST /admin/teams/confirm with season_year populates teams.season_year."""
+        user_id = _insert_user(team_db, "admin@example.com")
+        token = _insert_session(team_db, user_id)
+
+        with patch(
+            "src.api.routes.admin.resolve_public_id_to_uuid",
+            return_value="gc-uuid-sy",
+        ):
+            with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
+                with TestClient(
+                    app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
+                ) as client:
+                    response = client.post(
+                        "/admin/teams/confirm",
+                        data={
+                            "public_id": "syteam1",
+                            "team_name": "Season Year Team",
+                            "gc_uuid": "gc-uuid-sy",
+                            "membership_type": "tracked",
+                            "program_id": "",
+                            "classification": "",
+                            "season_year": "2026",
+                            "csrf_token": _CSRF,
+                        },
+                    )
+
+        assert response.status_code == 303
+
+        conn = sqlite3.connect(str(team_db))
+        row = conn.execute(
+            "SELECT season_year FROM teams WHERE public_id = ?", ("syteam1",)
+        ).fetchone()
+        conn.close()
+        assert row is not None
+        assert row[0] == 2026
+
+    def test_confirm_submit_season_year_empty_stores_null(self, team_db: Path) -> None:
+        """POST /admin/teams/confirm with empty season_year stores NULL."""
+        user_id = _insert_user(team_db, "admin@example.com")
+        token = _insert_session(team_db, user_id)
+
+        with patch(
+            "src.api.routes.admin.resolve_public_id_to_uuid",
+            return_value="gc-uuid-synull",
+        ):
+            with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
+                with TestClient(
+                    app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
+                ) as client:
+                    response = client.post(
+                        "/admin/teams/confirm",
+                        data={
+                            "public_id": "syteam2",
+                            "team_name": "No Season Year Team",
+                            "gc_uuid": "gc-uuid-synull",
+                            "membership_type": "tracked",
+                            "program_id": "",
+                            "classification": "",
+                            "season_year": "",
+                            "csrf_token": _CSRF,
+                        },
+                    )
+
+        assert response.status_code == 303
+
+        conn = sqlite3.connect(str(team_db))
+        row = conn.execute(
+            "SELECT season_year FROM teams WHERE public_id = ?", ("syteam2",)
+        ).fetchone()
+        conn.close()
+        assert row is not None
+        assert row[0] is None
+
+    def test_phase1_includes_season_year_in_redirect(self, team_db: Path) -> None:
+        """Phase 1 redirect includes season_year param when profile.year is set."""
+        user_id = _insert_user(team_db, "admin@example.com")
+        token = _insert_session(team_db, user_id)
+
+        profile = TeamProfile(
+            public_id="syredirect1",
+            name="Redirect Team",
+            sport="baseball",
+            year=2026,
+        )
+        with patch(
+            "src.api.routes.admin._parse_url_to_public_id",
+            return_value=("syredirect1", None),
+        ):
+            with patch(
+                "src.api.routes.admin._call_bridge",
+                return_value=(None, "forbidden"),
+            ):
+                with patch(
+                    "src.api.routes.admin._fetch_public_profile",
+                    return_value=profile,
+                ):
+                    with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
+                        with TestClient(
+                            app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
+                        ) as client:
+                            response = client.post(
+                                "/admin/teams",
+                                data={
+                                    "url_input": "https://web.gc.com/teams/syredirect1",
+                                    "csrf_token": _CSRF,
+                                },
+                            )
+
+        assert response.status_code == 303
+        assert "season_year=2026" in response.headers["location"]
+
+    def test_phase1_omits_season_year_when_none(self, team_db: Path) -> None:
+        """Phase 1 redirect omits season_year param when profile.year is None."""
+        user_id = _insert_user(team_db, "admin@example.com")
+        token = _insert_session(team_db, user_id)
+
+        profile = TeamProfile(
+            public_id="syredirect2",
+            name="No Year Team",
+            sport="baseball",
+        )
+        with patch(
+            "src.api.routes.admin._parse_url_to_public_id",
+            return_value=("syredirect2", None),
+        ):
+            with patch(
+                "src.api.routes.admin._call_bridge",
+                return_value=(None, "forbidden"),
+            ):
+                with patch(
+                    "src.api.routes.admin._fetch_public_profile",
+                    return_value=profile,
+                ):
+                    with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
+                        with TestClient(
+                            app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
+                        ) as client:
+                            response = client.post(
+                                "/admin/teams",
+                                data={
+                                    "url_input": "https://web.gc.com/teams/syredirect2",
+                                    "csrf_token": _CSRF,
+                                },
+                            )
+
+        assert response.status_code == 303
+        assert "season_year" not in response.headers["location"]

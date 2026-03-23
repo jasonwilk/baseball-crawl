@@ -49,7 +49,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
-from src.gamechanger.loaders import LoadResult
+from src.gamechanger.loaders import LoadResult, warn_season_year_mismatch
 
 logger = logging.getLogger(__name__)
 
@@ -127,6 +127,7 @@ class SeasonStatsLoader:
         # Ensure FK prerequisite rows before any stat inserts.
         team_int = self._ensure_team_row(team_id)
         self._ensure_season_row(season_id)
+        warn_season_year_mismatch(self._db, team_int, season_id, "SeasonStatsLoader")
 
         result = LoadResult()
         for player_id, player_data in players_by_uuid.items():

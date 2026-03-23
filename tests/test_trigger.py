@@ -289,3 +289,341 @@ class TestScoutingSync:
         assert job["error_message"] is None
         mock_crawler.update_run_load_status.assert_called_once_with(1, "2025", "completed")
         assert _get_last_synced(db_path, 1) is not None
+
+
+# ---------------------------------------------------------------------------
+# E-147-03: Self-healing season_year propagation
+# ---------------------------------------------------------------------------
+
+
+def _get_season_year(db_path: Path, team_id: int) -> int | None:
+    """Return teams.season_year for the given team."""
+    with closing(sqlite3.connect(str(db_path))) as conn:
+        row = conn.execute(
+            "SELECT season_year FROM teams WHERE id = ?", (team_id,)
+        ).fetchone()
+    return row[0] if row else None
+
+
+def _set_team_gc_uuid(db_path: Path, team_id: int, gc_uuid: str) -> None:
+    """Set gc_uuid on a team row."""
+    with closing(sqlite3.connect(str(db_path))) as conn:
+        conn.execute("UPDATE teams SET gc_uuid = ? WHERE id = ?", (gc_uuid, team_id))
+        conn.commit()
+
+
+def _set_team_public_id(db_path: Path, team_id: int, public_id: str) -> None:
+    """Set public_id on a team row."""
+    with closing(sqlite3.connect(str(db_path))) as conn:
+        conn.execute("UPDATE teams SET public_id = ? WHERE id = ?", (public_id, team_id))
+        conn.commit()
+
+
+def _set_season_year(db_path: Path, team_id: int, year: int) -> None:
+    """Set season_year on a team row."""
+    with closing(sqlite3.connect(str(db_path))) as conn:
+        conn.execute("UPDATE teams SET season_year = ? WHERE id = ?", (year, team_id))
+        conn.commit()
+
+
+class TestMemberSyncSeasonYearHeal:
+    """E-147-03 AC-1: member sync heals NULL season_year."""
+
+    def test_null_season_year_updated_on_sync(self, tmp_path: Path) -> None:
+        """When season_year is NULL and gc_uuid exists, sync populates it."""
+        db_path = _make_db(tmp_path)
+        _set_team_gc_uuid(db_path, 1, "gc-uuid-123")
+        job_id = _insert_crawl_job(db_path, 1, "member_crawl")
+
+        mock_client = MagicMock()
+        mock_client.get.return_value = {"season_year": 2026}
+
+        with (
+            patch("src.pipeline.trigger.get_db_path", return_value=db_path),
+            patch("src.pipeline.trigger._refresh_auth_token", return_value=mock_client),
+            patch("src.pipeline.trigger.crawl_module.run", return_value=0),
+            patch("src.pipeline.trigger.load_module.run", return_value=0),
+        ):
+            trigger.run_member_sync(1, "LSB Varsity", job_id)
+
+        assert _get_season_year(db_path, 1) == 2026
+        mock_client.get.assert_called_once_with(
+            "/teams/gc-uuid-123",
+            accept="application/vnd.gc.com.team+json; version=0.10.0",
+        )
+
+    def test_non_null_season_year_not_overwritten(self, tmp_path: Path) -> None:
+        """When season_year is already set, sync does not make the API call."""
+        db_path = _make_db(tmp_path)
+        _set_team_gc_uuid(db_path, 1, "gc-uuid-123")
+        _set_season_year(db_path, 1, 2025)
+        job_id = _insert_crawl_job(db_path, 1, "member_crawl")
+
+        mock_client = MagicMock()
+
+        with (
+            patch("src.pipeline.trigger.get_db_path", return_value=db_path),
+            patch("src.pipeline.trigger._refresh_auth_token", return_value=mock_client),
+            patch("src.pipeline.trigger.crawl_module.run", return_value=0),
+            patch("src.pipeline.trigger.load_module.run", return_value=0),
+        ):
+            trigger.run_member_sync(1, "LSB Varsity", job_id)
+
+        assert _get_season_year(db_path, 1) == 2025
+        mock_client.get.assert_not_called()
+
+    def test_no_gc_uuid_skips_gracefully(self, tmp_path: Path) -> None:
+        """When gc_uuid is NULL, no API call is made."""
+        db_path = _make_db(tmp_path)
+        job_id = _insert_crawl_job(db_path, 1, "member_crawl")
+
+        mock_client = MagicMock()
+
+        with (
+            patch("src.pipeline.trigger.get_db_path", return_value=db_path),
+            patch("src.pipeline.trigger._refresh_auth_token", return_value=mock_client),
+            patch("src.pipeline.trigger.crawl_module.run", return_value=0),
+            patch("src.pipeline.trigger.load_module.run", return_value=0),
+        ):
+            trigger.run_member_sync(1, "LSB Varsity", job_id)
+
+        assert _get_season_year(db_path, 1) is None
+        mock_client.get.assert_not_called()
+
+
+class TestScoutingSyncSeasonYearHeal:
+    """E-147-03 AC-2: scouting sync heals NULL season_year."""
+
+    def test_null_season_year_updated_on_scouting_sync(self, tmp_path: Path) -> None:
+        """When season_year is NULL, scouting sync populates via resolve_team."""
+        db_path = _make_db(tmp_path)
+        _set_team_public_id(db_path, 1, "test-slug")
+        job_id = _insert_crawl_job(db_path, 1, "scouting_crawl")
+        _insert_scouting_run(db_path, 1)
+
+        from src.gamechanger.team_resolver import TeamProfile
+        mock_profile = TeamProfile(public_id="test-slug", name="Test", sport="baseball", year=2026)
+
+        mock_crawler = MagicMock()
+        mock_crawler.scout_team.return_value = CrawlResult(files_written=3)
+        mock_loader = MagicMock()
+        mock_loader.load_team.return_value = LoadResult(loaded=5, errors=0)
+
+        scouting_dir = tmp_path / "raw" / "2025" / "scouting" / "test-slug"
+        scouting_dir.mkdir(parents=True)
+
+        with (
+            patch("src.pipeline.trigger.get_db_path", return_value=db_path),
+            patch("src.pipeline.trigger._refresh_auth_token"),
+            patch("src.pipeline.trigger.resolve_team", return_value=mock_profile),
+            patch("src.pipeline.trigger.ScoutingCrawler", return_value=mock_crawler),
+            patch("src.pipeline.trigger.ScoutingLoader", return_value=mock_loader),
+            patch("src.pipeline.trigger._DATA_ROOT", tmp_path / "raw"),
+        ):
+            trigger.run_scouting_sync(1, "test-slug", job_id)
+
+        assert _get_season_year(db_path, 1) == 2026
+
+    def test_non_null_season_year_not_overwritten_scouting(self, tmp_path: Path) -> None:
+        """When season_year is already set, scouting sync does not call resolve_team."""
+        db_path = _make_db(tmp_path)
+        _set_team_public_id(db_path, 1, "test-slug")
+        _set_season_year(db_path, 1, 2025)
+        job_id = _insert_crawl_job(db_path, 1, "scouting_crawl")
+        _insert_scouting_run(db_path, 1)
+
+        mock_crawler = MagicMock()
+        mock_crawler.scout_team.return_value = CrawlResult(files_written=3)
+        mock_loader = MagicMock()
+        mock_loader.load_team.return_value = LoadResult(loaded=5, errors=0)
+
+        scouting_dir = tmp_path / "raw" / "2025" / "scouting" / "test-slug"
+        scouting_dir.mkdir(parents=True)
+
+        with (
+            patch("src.pipeline.trigger.get_db_path", return_value=db_path),
+            patch("src.pipeline.trigger._refresh_auth_token"),
+            patch("src.pipeline.trigger.resolve_team") as mock_resolve,
+            patch("src.pipeline.trigger.ScoutingCrawler", return_value=mock_crawler),
+            patch("src.pipeline.trigger.ScoutingLoader", return_value=mock_loader),
+            patch("src.pipeline.trigger._DATA_ROOT", tmp_path / "raw"),
+        ):
+            trigger.run_scouting_sync(1, "test-slug", job_id)
+
+        assert _get_season_year(db_path, 1) == 2025
+        mock_resolve.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# E-147-03: Season year mismatch warning guard
+# ---------------------------------------------------------------------------
+
+
+class TestSeasonYearMismatchWarning:
+    """E-147-03 AC-3: loaders emit WARNING on year mismatch."""
+
+    def test_mismatch_warning_logged(self, tmp_path: Path) -> None:
+        """warn_season_year_mismatch emits WARNING when years differ."""
+        from src.gamechanger.loaders import warn_season_year_mismatch
+
+        db_path = tmp_path / "test_warn.db"
+        run_migrations(db_path=db_path)
+        with closing(sqlite3.connect(str(db_path))) as conn:
+            conn.execute("PRAGMA foreign_keys=ON;")
+            conn.execute(
+                "INSERT INTO teams (id, name, membership_type, season_year) "
+                "VALUES (1, 'Test Team', 'member', 2025)"
+            )
+            conn.commit()
+
+            import logging
+            with patch.object(logging.getLogger("src.gamechanger.loaders"), "warning") as mock_warn:
+                warn_season_year_mismatch(conn, 1, "2026-spring-hs", "TestLoader")
+            mock_warn.assert_called_once()
+            call_msg = mock_warn.call_args[0][0] % mock_warn.call_args[0][1:]
+            assert "mismatch" in call_msg.lower()
+            assert "2025" in call_msg
+            assert "2026" in call_msg
+
+    def test_no_warning_when_years_match(self, tmp_path: Path) -> None:
+        """No warning when teams.season_year matches the data year."""
+        from src.gamechanger.loaders import warn_season_year_mismatch
+
+        db_path = tmp_path / "test_warn.db"
+        run_migrations(db_path=db_path)
+        with closing(sqlite3.connect(str(db_path))) as conn:
+            conn.execute("PRAGMA foreign_keys=ON;")
+            conn.execute(
+                "INSERT INTO teams (id, name, membership_type, season_year) "
+                "VALUES (1, 'Test Team', 'member', 2025)"
+            )
+            conn.commit()
+
+            import logging
+            with patch.object(logging.getLogger("src.gamechanger.loaders"), "warning") as mock_warn:
+                warn_season_year_mismatch(conn, 1, "2025-spring-hs", "TestLoader")
+            mock_warn.assert_not_called()
+
+    def test_no_warning_when_season_year_null(self, tmp_path: Path) -> None:
+        """No warning when teams.season_year is NULL."""
+        from src.gamechanger.loaders import warn_season_year_mismatch
+
+        db_path = tmp_path / "test_warn.db"
+        run_migrations(db_path=db_path)
+        with closing(sqlite3.connect(str(db_path))) as conn:
+            conn.execute("PRAGMA foreign_keys=ON;")
+            conn.execute(
+                "INSERT INTO teams (id, name, membership_type) "
+                "VALUES (1, 'Test Team', 'member')"
+            )
+            conn.commit()
+
+            import logging
+            with patch.object(logging.getLogger("src.gamechanger.loaders"), "warning") as mock_warn:
+                warn_season_year_mismatch(conn, 1, "2026-spring-hs", "TestLoader")
+            mock_warn.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# CLI scouting season_year self-heal
+# ---------------------------------------------------------------------------
+
+
+class TestCliScoutingSeasonYearHeal:
+    """CLI scouting pipeline heals season_year via _heal_season_year_cli."""
+
+    def _make_tracked_db(self, tmp_path: Path) -> Path:
+        db_path = tmp_path / "test_cli_heal.db"
+        run_migrations(db_path=db_path)
+        with closing(sqlite3.connect(str(db_path))) as conn:
+            conn.execute("PRAGMA foreign_keys=ON;")
+            conn.execute(
+                "INSERT INTO teams (id, name, membership_type, public_id) "
+                "VALUES (1, 'Opponent A', 'tracked', 'opp-slug-a')"
+            )
+            conn.execute(
+                "INSERT INTO teams (id, name, membership_type, public_id) "
+                "VALUES (2, 'Opponent B', 'tracked', 'opp-slug-b')"
+            )
+            conn.commit()
+        return db_path
+
+    def test_single_team_heal(self, tmp_path: Path) -> None:
+        """_heal_season_year_cli heals a single team by public_id."""
+        from src.cli.data import _heal_season_year_cli
+
+        db_path = self._make_tracked_db(tmp_path)
+        mock_profile = MagicMock()
+        mock_profile.year = 2025
+
+        with closing(sqlite3.connect(str(db_path))) as conn:
+            conn.execute("PRAGMA foreign_keys=ON;")
+            with patch("src.gamechanger.team_resolver.resolve_team", return_value=mock_profile) as mock_resolve:
+                _heal_season_year_cli(conn, "opp-slug-a")
+
+            row = conn.execute("SELECT season_year FROM teams WHERE id = 1").fetchone()
+            assert row[0] == 2025
+            mock_resolve.assert_called_once_with("opp-slug-a")
+
+            # Team 2 should be untouched
+            row2 = conn.execute("SELECT season_year FROM teams WHERE id = 2").fetchone()
+            assert row2[0] is None
+
+    def test_all_teams_heal(self, tmp_path: Path) -> None:
+        """_heal_season_year_cli heals all tracked teams when team=None."""
+        from src.cli.data import _heal_season_year_cli
+
+        db_path = self._make_tracked_db(tmp_path)
+        mock_profile = MagicMock()
+        mock_profile.year = 2026
+
+        with closing(sqlite3.connect(str(db_path))) as conn:
+            conn.execute("PRAGMA foreign_keys=ON;")
+            with patch("src.gamechanger.team_resolver.resolve_team", return_value=mock_profile) as mock_resolve:
+                _heal_season_year_cli(conn, None)
+
+            row1 = conn.execute("SELECT season_year FROM teams WHERE id = 1").fetchone()
+            row2 = conn.execute("SELECT season_year FROM teams WHERE id = 2").fetchone()
+            assert row1[0] == 2026
+            assert row2[0] == 2026
+            assert mock_resolve.call_count == 2
+
+    def test_already_populated_skipped(self, tmp_path: Path) -> None:
+        """Teams with season_year already set are not healed."""
+        from src.cli.data import _heal_season_year_cli
+
+        db_path = self._make_tracked_db(tmp_path)
+        with closing(sqlite3.connect(str(db_path))) as conn:
+            conn.execute("PRAGMA foreign_keys=ON;")
+            conn.execute("UPDATE teams SET season_year = 2024 WHERE id = 1")
+            conn.commit()
+
+            with patch("src.gamechanger.team_resolver.resolve_team") as mock_resolve:
+                _heal_season_year_cli(conn, "opp-slug-a")
+
+            mock_resolve.assert_not_called()
+            row = conn.execute("SELECT season_year FROM teams WHERE id = 1").fetchone()
+            assert row[0] == 2024
+
+    def test_pre_migration_db_degrades_gracefully(self, tmp_path: Path) -> None:
+        """On a DB without the season_year column, heal silently returns."""
+        from src.cli.data import _heal_season_year_cli
+
+        db_path = tmp_path / "test_pre_mig.db"
+        with closing(sqlite3.connect(str(db_path))) as conn:
+            conn.execute(
+                "CREATE TABLE teams ("
+                "  id INTEGER PRIMARY KEY,"
+                "  name TEXT NOT NULL,"
+                "  membership_type TEXT NOT NULL DEFAULT 'tracked',"
+                "  public_id TEXT"
+                ")"
+            )
+            conn.execute(
+                "INSERT INTO teams (id, name, public_id) VALUES (1, 'Old Team', 'old-slug')"
+            )
+            conn.commit()
+
+            # Should not raise -- OperationalError is caught internally
+            _heal_season_year_cli(conn, "old-slug")
+            _heal_season_year_cli(conn, None)

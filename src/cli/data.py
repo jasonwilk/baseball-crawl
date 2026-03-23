@@ -216,6 +216,34 @@ def _scout_dry_run(
         typer.echo(f"Season override: {season}")
 
 
+def _heal_season_year_scouting(
+    conn: sqlite3.Connection, team_id: int, public_id: str
+) -> None:
+    """Backfill season_year for a tracked team if NULL.
+
+    Calls resolve_team (public, no auth) and UPDATEs season_year WHERE IS NULL.
+    Best-effort: any failure is logged and skipped.
+    """
+    from src.gamechanger.team_resolver import resolve_team
+
+    row = conn.execute(
+        "SELECT season_year FROM teams WHERE id = ?", (team_id,)
+    ).fetchone()
+    if row is None or row[0] is not None:
+        return  # already populated or missing
+    try:
+        profile = resolve_team(public_id)
+        if profile.year is not None:
+            conn.execute(
+                "UPDATE teams SET season_year = ? WHERE id = ? AND season_year IS NULL",
+                (profile.year, team_id),
+            )
+            conn.commit()
+            logger.info("Healed season_year=%s for team_id=%d (scouting/cli)", profile.year, team_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("season_year heal failed for team_id=%d: %s", team_id, exc)
+
+
 def _scout_live(
     profile: str,
     team: Optional[str],
@@ -236,6 +264,10 @@ def _scout_live(
     with closing(sqlite3.connect(str(db_path))) as conn:
         conn.execute("PRAGMA journal_mode=WAL;")
         conn.execute("PRAGMA foreign_keys=ON;")
+
+        # Self-heal season_year before crawl starts.
+        _heal_season_year_cli(conn, team)
+
         crawler = ScoutingCrawler(client, conn)
         loader = _ScoutingLoader(conn)
         try:
@@ -246,6 +278,36 @@ def _scout_live(
             exit_code = 1
 
     raise SystemExit(exit_code)
+
+
+def _heal_season_year_cli(
+    conn: sqlite3.Connection, team_public_id: Optional[str]
+) -> None:
+    """Heal season_year for tracked teams before CLI scouting.
+
+    When *team_public_id* is provided, heals only that team.  Otherwise
+    heals all tracked teams with ``season_year IS NULL``.
+
+    Silently returns if the ``season_year`` column does not exist
+    (pre-migration-004 database).
+    """
+    try:
+        if team_public_id:
+            row = conn.execute(
+                "SELECT id FROM teams WHERE public_id = ? LIMIT 1",
+                (team_public_id,),
+            ).fetchone()
+            if row is not None:
+                _heal_season_year_scouting(conn, row[0], team_public_id)
+        else:
+            rows = conn.execute(
+                "SELECT id, public_id FROM teams "
+                "WHERE membership_type = 'tracked' AND season_year IS NULL AND public_id IS NOT NULL"
+            ).fetchall()
+            for team_id, pub_id in rows:
+                _heal_season_year_scouting(conn, team_id, pub_id)
+    except sqlite3.OperationalError:
+        logger.debug("season_year column not available, skipping heal")
 
 
 def _run_scout_pipeline(
