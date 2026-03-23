@@ -71,3 +71,32 @@ def test_scout_command_surfaces_loader_failure(tmp_path, monkeypatch):
 ```
 
 Mock the fallible dependency to raise or return a failure indicator. Assert the caller's exit code and output reflect the failure.
+
+## Test-Validates-Spec
+
+When writing tests that mock external data (API responses, database query results, file contents), verify the mock data matches the **authoritative spec** -- not the implementation under test. Sources of truth:
+
+- `docs/api/endpoints/` for API response shapes and field names
+- `migrations/*.sql` for database schemas (column names, types, constraints)
+- Function docstrings for return value contracts
+
+A test whose mock data mirrors a buggy implementation passes vacuously and provides false confidence. The test confirms the code does what it does, not that it does what it should.
+
+### Example: E-147 Finding #2 (API field path divergence)
+
+The GameChanger authenticated team endpoint (`docs/api/endpoints/get-teams-team_id.md`) returns `season_year` as a top-level integer field. The public team endpoint (`docs/api/endpoints/get-public-teams-public_id.md`) nests the year at `team_season.season.year` (inside a `team_season` object containing a `season` sub-object). Code that reads the authenticated endpoint but accesses `data["team_season"]["season"]["year"]` is wrong -- but a test that mocks the response with `{"team_season": {"season": {"year": 2026}}}` will pass, because the mock mirrors the buggy field path instead of the authenticated endpoint's actual schema.
+
+**Wrong** -- mock mirrors the implementation's (incorrect) field path:
+
+```python
+mock_response = {"team_season": {"season": {"year": 2026}}}  # matches buggy code, not the API
+```
+
+**Right** -- mock mirrors the API endpoint doc's actual response shape:
+
+```python
+# Per docs/api/endpoints/get-teams-team_id.md, season_year is top-level
+mock_response = {"season_year": 2026}
+```
+
+Before writing a mock, open the authoritative spec and copy the field structure from there. If the spec and the implementation disagree, the test should fail -- that disagreement is the bug.

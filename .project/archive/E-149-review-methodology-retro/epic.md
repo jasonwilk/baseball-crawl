@@ -1,7 +1,7 @@
 # E-149: Review Methodology Retro and Gap-Filling
 
 ## Status
-`READY`
+`COMPLETED`
 <!-- Lifecycle: DRAFT -> READY -> ACTIVE -> COMPLETED (or BLOCKED / ABANDONED) -->
 
 ## Overview
@@ -46,9 +46,9 @@ Expert consultation completed:
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-149-01 | CR agent definition: bug pattern checklist expansion | TODO | None | - |
-| E-149-02 | Implement skill: assignment template and completion report enrichment | TODO | E-149-01 | - |
-| E-149-03 | Testing rule and Codex rubric alignment | TODO | E-149-01 | - |
+| E-149-01 | CR agent definition: bug pattern checklist expansion | DONE | None | - |
+| E-149-02 | Implement skill: assignment template and completion report enrichment | DONE | E-149-01 | - |
+| E-149-03 | Testing rule and Codex rubric alignment | DONE | E-149-01 | - |
 
 ## Dispatch Team
 - claude-architect
@@ -219,6 +219,7 @@ None -- all resolved during team consultation.
 ## History
 - 2026-03-23: Created. Full team retro with architect (retro lead), CR (self-assessment), SE (practitioner input). 18 findings cataloged, 11 gap types classified, 6 in-scope gap types mapped to 3 stories.
 - 2026-03-23: Set to READY after 8 review passes (27 findings, 21 accepted, 6 dismissed).
+- 2026-03-23: COMPLETED. All 3 stories DONE. Added 6 new + 1 enhanced Bug Pattern Checklist items to CR rubric (caller audit, API field contract, function contract preservation, deploy-time safety, remediation regression guard, test-validates-spec, status lifecycle extension). Enriched implement skill with structured CR assignment context (API endpoints, migration files, behavioral changes) and implementer completion report template. Added test-validates-spec clause to testing rule. Aligned Codex rubric with CR checklist via inline summaries. TN-7 regression test matrix verified: all 13 in-scope findings map to shipped checklist items.
 
 ### Review Scorecard
 | Review Pass | Findings | Accepted | Dismissed |
@@ -231,4 +232,23 @@ None -- all resolved during team consultation.
 | Context-fundamentals (Architect) | 0 | 0 | 0 |
 | Codex iteration 1 | 2 | 2 | 0 |
 | Codex iteration 2 | 4 | 2 | 2 |
-| **Total** | **27** | **21** | **6** |
+| Per-story PM AC verification -- E-149-01 | 0 | 0 | 0 |
+| Per-story PM AC verification -- E-149-02 | 0 | 0 | 0 |
+| Per-story PM AC verification -- E-149-03 | 0 | 0 | 0 |
+| CR integration review | 2 | 2 | 0 |
+| Codex code review | 2 | 2 | 0 |
+| **Total** | **31** | **25** | **6** |
+
+### Documentation Assessment
+No documentation impact. This epic modifies only context-layer files (agent definitions, rules, skills, rubric). No `docs/admin/` or `docs/coaching/` updates required.
+
+### Context-Layer Assessment
+All changes are context-layer by nature -- the entire epic delivers context-layer artifacts. Per-trigger verdicts:
+1. **New or changed agent behavior**: YES -- CR agent definition expanded with 7 checklist items. Satisfied by E-149-01.
+2. **New or changed rules**: YES -- testing rule updated with test-validates-spec clause. Satisfied by E-149-03.
+3. **New or changed skills**: YES -- implement skill enriched with assignment template and completion report changes. Satisfied by E-149-02.
+4. **New or changed hooks**: NO.
+5. **CLAUDE.md updates needed**: NO -- no new conventions, commands, or architecture changes requiring CLAUDE.md update.
+6. **Agent memory updates needed**: NO -- no new patterns or decisions requiring agent memory codification beyond what the epic itself delivers.
+
+No separate architect dispatch needed -- the epic's own deliverables ARE the context-layer changes.

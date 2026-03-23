@@ -211,7 +211,7 @@ Use ABSOLUTE PATHS under this directory for ALL file operations.
 
 **Permitted**: `git status/diff/log` from worktree. `git diff` = your unstaged changes (this story). `git diff --cached main` = prior stories' staged changes. Edit files via Write/Edit tools with absolute worktree paths.
 
-**Completion**: Report with `## Files Changed` (absolute worktree paths, e.g., `[epic-worktree-path]/src/foo.py (modified)`) and `## Test Results` (command, pass/fail, failures). Do NOT run `git add -A` (main session manages staging). Do not modify story status files or epic tables.
+**Completion**: Report with `## Files Changed` (absolute worktree paths, e.g., `[epic-worktree-path]/src/foo.py (modified)`), `## Test Results` (command, pass/fail, failures), and `## Behavioral Changes`. The Behavioral Changes section is ALWAYS present. List any function whose signature, return type, raised exceptions, or documented side effects changed. Internal refactors that preserve the function's contract are NOT behavioral changes. Format: `- \`function_name()\` in \`file.py\`: [what changed]`. Write "None" when no behavioral changes occurred -- this makes it explicit that you considered the question. This section supplements (does not replace) the code-reviewer's own caller audit -- CR still independently scans the diff for non-obvious behavioral changes. Do NOT run `git add -A` (main session manages staging). Do not modify story status files or epic tables.
 ```
 
 **Context block requirements**: Include the full story file text and full Technical Notes verbatim (never summarize). Include Handoff Context from completed upstream dependencies.
@@ -237,9 +237,21 @@ Epic worktree path: [epic-worktree-path]
 Review via `cd [epic-worktree-path] && git diff` (unstaged = this story). Do NOT run pytest -- verify through file inspection.
 Implementer files changed: [Files Changed section]
 Implementer test results: [Test Results section]
+[If applicable] ## API Endpoints Touched
+[List of docs/api/endpoints/*.md files -- include when Files Changed or Files to Create or Modify contains paths under src/gamechanger/crawlers/, src/gamechanger/loaders/, src/gamechanger/client.py, or src/pipeline/. Derive specific endpoint docs from the story description/Technical Approach. If specific endpoints cannot be determined, include all docs/api/endpoints/*.md files. Omit this section entirely when no API-touching files are involved. See TN-4a heuristics.]
+[If applicable] ## Migration Files
+[List of migrations/*.sql files -- include when Files Changed or Files to Create or Modify contains paths under src/api/, src/gamechanger/loaders/, src/db/, src/pipeline/, migrations/, or templates referencing database columns. Omit this section entirely when no database code is involved. See TN-4a heuristics.]
+[If applicable] ## Behavioral Changes
+[From implementer's completion report. List of functions whose signature, return type, or observable behavior changed. This supplements CR's own caller audit -- CR still independently scans the diff for non-obvious behavioral changes the implementer may not have recognized. Omit this section when the implementer declared "None."]
 Review round: 1 of 2 (circuit breaker)
 Review against all ACs and the review rubric. Cross-reference Files Changed against "Files to Create or Modify" to flag missing/unexpected files.
 ```
+
+**Derivation heuristics for structured context fields** (TN-4a): The main session uses these rules to decide which optional context sections to include in the CR assignment. Check both the story's "Files to Create or Modify" and the implementer's Files Changed list:
+
+- **API Endpoints Touched**: Include when any file is under `src/gamechanger/crawlers/`, `src/gamechanger/loaders/`, `src/gamechanger/client.py`, or `src/pipeline/` (modules that parse API responses, make HTTP calls, or orchestrate API-dependent pipelines). `src/gamechanger/config.py`, `src/gamechanger/types.py`, and similar utility modules do NOT trigger this field. Derive specific endpoint docs from the story's Technical Approach or description (e.g., if the story mentions "public team endpoint," include `docs/api/endpoints/get-public-teams-public_id.md`). If specific endpoints cannot be determined, include all files matching `docs/api/endpoints/*.md`.
+- **Migration Files**: Include when any file is under `src/api/`, `src/gamechanger/loaders/`, `src/db/`, `src/pipeline/`, `migrations/`, or templates referencing database columns.
+- **Behavioral Changes**: Include when the implementer's completion report contains a `## Behavioral Changes` section with content other than "None." Omit when the implementer declared "None."
 
 3. **Triage ALL findings.** Before any routing decision, the main session classifies every finding (MUST FIX and SHOULD FIX) as **valid** or **invalid**:
    - **Valid finding** (correct analysis of the code): Route to the implementer for fixing, regardless of severity (MUST FIX or SHOULD FIX), size, or cosmetic nature. "Correct but too small to fix" is NOT a valid dismissal reason.
@@ -253,7 +265,7 @@ Review against all ACs and the review rubric. Cross-reference Files Changed agai
 
    **PM-Reviewer AC Disagreement**: PM can override AC-related MUST FIX items (remove them from the valid findings list). Non-AC findings (bugs, security, conventions) are the reviewer's exclusive domain -- PM cannot override. If removing AC items empties the list, the story passes. PM fail always routes feedback to implementer regardless of reviewer verdict.
 
-5. **If the reviewer returns NOT APPROVED** (MUST FIX findings): Triage all findings per step 3 above. Route all valid findings to the implementer with "Round 1 of 2 -- items to fix below." The implementer fixes in the epic worktree and reports again. Send updated work to the reviewer for Round 2 using the same template as round 1, adding: the round 1 findings verbatim, updated Files Changed and Test Results, and "Review round: 2 of 2 (circuit breaker)" with instructions to focus on whether round 1 findings are resolved and whether fixes introduced new issues.
+5. **If the reviewer returns NOT APPROVED** (MUST FIX findings): Triage all findings per step 3 above. Route all valid findings to the implementer with "Round 1 of 2 -- items to fix below." The implementer fixes in the epic worktree and reports again. Send updated work to the reviewer for Round 2 using the same template as round 1, adding: the round 1 findings verbatim, updated Files Changed and Test Results (annotating which files are new or changed in the remediation vs. carried forward from Round 1, so CR can focus the remediation regression guard on the new/changed files), updated Behavioral Changes from the implementer's revised completion report, the same structured context sections (API Endpoints Touched, Migration Files) from Round 1, and "Review round: 2 of 2 (circuit breaker)" with instructions to focus on whether round 1 findings are resolved and whether fixes introduced new issues.
 
 6. **Circuit breaker.** Max 2 review rounds per story. If the 2nd review still has MUST FIX findings, escalate to the user with the findings summary and present options:
    - (a) Fix it themselves
