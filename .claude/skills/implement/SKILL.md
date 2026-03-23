@@ -72,7 +72,7 @@ Do not report the result to the user or treat a failure as an error. Proceed to 
 
 ## Phase 1: Team Composition
 
-**If `handoff_from_plan = true`** (plan skill handoff): The planning team is already active with PM and domain experts. The plan skill has already performed the team transition (PM role change, consultation-mode agents transitioned to implementation mode, code-reviewer spawned fresh). Skip the team composition analysis below and proceed to Phase 2, which will detect the handoff and skip team/agent creation.
+**If `handoff_from_plan = true`** (plan skill handoff): The planning team is already active with PM and domain experts. The plan skill has already performed the team transition (PM role change, consultation-mode agents transitioned to implementation mode, code-reviewer either reused from plan Phase 3 or spawned fresh during handoff). Skip the team composition analysis below and proceed to Phase 2, which will detect the handoff and skip team/agent creation.
 
 **If `handoff_from_plan = false`** (standard dispatch): Read the epic's `## Dispatch Team` section.
 
@@ -83,7 +83,7 @@ Do not report the result to the user or treat a failure as an error. Proceed to 
 
 ## Phase 2: Dispatch
 
-**If `handoff_from_plan = true`** (plan skill handoff): The planning team is already active, the epic worktree was created by the plan skill's handoff sequence, and agents have been transitioned. Skip Steps 1-3 (epic worktree creation, team creation, agent spawning). Proceed directly to Step 4 (set epic to ACTIVE). Code-reviewer is already on the team (spawned by the plan skill's Phase 5 Step 3a) -- do not re-spawn it. If any additional implementer types are needed that were not on the planning team, spawn them now using the universal spawn context below.
+**If `handoff_from_plan = true`** (plan skill handoff): The planning team is already active, the epic worktree was created by the plan skill's handoff sequence, and agents have been transitioned. Skip Steps 1-3 (epic worktree creation, team creation, agent spawning). Proceed directly to Step 4 (set epic to ACTIVE). Code-reviewer is already on the team -- either spawned during the plan skill's Phase 3 (internal review cycle) and transitioned to code-review mode, or spawned fresh during Phase 5 Step 3a if Phase 3 was skipped. Do not re-spawn it. If any additional implementer types are needed that were not on the planning team, spawn them now using the universal spawn context below.
 
 **If `handoff_from_plan = false`** (standard dispatch): Create the epic worktree, the team, and spawn all agents as described below.
 
@@ -291,66 +291,13 @@ After PM marks a story DONE, check for newly unblocked stories (stories whose bl
 
 ## Phase 4: Optional Review Chain
 
-If the user specified the "and review" modifier (e.g., "implement E-NNN and review"), run Phase 4a (codex review) followed by Phase 4b (integration review). If the modifier was not specified, skip this phase and proceed directly to Phase 5.
+If the user specified the "and review" modifier (e.g., "implement E-NNN and review"), run Phase 4a (CR integration review) followed by Phase 4b (Codex code review). If the modifier was not specified, skip this phase and proceed directly to Phase 5.
 
-### Phase 4a: Codex Review with Graceful Degradation
+### Phase 4a: Code-Reviewer Integration Review
 
-After all stories are verified DONE, the main session runs a codex review against the epic worktree diff. This uses a degradation chain: headless first, prompt-generation fallback on failure.
+After all stories are verified DONE, Phase 4a runs a holistic code-reviewer pass over the full epic diff. Per-story CR (Phase 3) reviews changes in isolation; the integration review catches cross-story interactions, naming inconsistencies, import conflicts, and architectural issues that only appear when stories are combined.
 
-#### Step 1: Attempt headless codex review
-
-Run the codex-review script with the epic worktree path via Bash:
-
-```
-timeout 600 ./scripts/codex-review.sh --workdir <epic-worktree-path> uncommitted
-```
-
-Capture the exit code and output.
-
-#### Step 2: Evaluate the result
-
-- **Exit 0, output contains "No findings."** (clean review): Report "Codex review completed with no findings -- clean review" to the user. Skip to Phase 4b.
-
-- **Exit 0, output contains findings**: Proceed to Step 3 (triage and remediation).
-
-- **Exit 124 (timeout)**: Fall to Step 4 (prompt-generation fallback). The pause message is:
-  > Pipeline paused at codex review. Headless review timed out. Run this prompt async and paste findings when ready. Enter 'skip' to proceed without codex review.
-
-- **Other non-zero exit** (codex not installed, script error, API outage): Fall to Step 4 (prompt-generation fallback). The pause message is:
-  > Pipeline paused at codex review. Headless review failed: [error message from script]. Run this prompt async and paste findings when ready. Enter 'skip' to proceed without codex review.
-
-- **Exit 0, output contains "No uncommitted changes to review"**: Report this to the user and skip to Phase 4b.
-
-#### Step 3: Triage and remediation (headless findings)
-
-When headless codex succeeds with findings:
-
-1. Present the full codex findings to the user.
-2. Classify each finding as **valid** or **invalid** using the same triage rules as Phase 3 Step 5 item 3.
-3. Remediate valid findings **one at a time** (serial, not parallel). For each finding: spawn an implementer, wait for completion, stage with `git add -A`, then proceed to the next finding. Select agent type via the routing table. Spawn WITHOUT `isolation: "worktree"`. Provide the **remediation spawn context**:
-
-```
-You are a [agent-type] agent spawned for post-review remediation on the [team-name] team.
-Working directory: <epic-worktree-path> -- use absolute paths for ALL file operations.
-Constraints: no git commit (git add -A only), no docker/bb/proxy commands, no .env/data/ access, no git merge/rebase/worktree/branch commands, no Bash file writes (echo/sed/cat/cp/mv) to src/tests/migrations/scripts/ -- use Write/Edit tools.
-Remediation authorized by post-review remediation exception in workflow-discipline.md.
-Finding to remediate: [finding details]
-Fix and report with ## Files Changed (absolute paths) and ## Test Results.
-```
-
-4. PM records dispositions in the epic's History section.
-5. **Remediation fixes are NOT re-reviewed**. After remediation, proceed to Phase 4b.
-6. **Circuit breaker (2 rounds)**: If round 2 still has unresolved findings, escalate to the user: (a) fix it themselves, (b) retry (resets breaker), (c) override and proceed, (d) abandon.
-
-#### Step 4: Prompt-generation fallback (graceful degradation)
-
-When headless codex times out or fails: generate a review prompt using the codex-review skill's prompt-generation path (`.claude/skills/codex-review/SKILL.md`, Steps 1-3) with the epic worktree diff. Present the pause message + prompt to the user. Wait for: "no findings" (clean, skip to 4b), pasted findings (enter Step 3 triage), or "skip" (advance to 4b without findings).
-
-### Phase 4b: Code-Reviewer Integration Review
-
-After Phase 4a completes (whether codex findings were remediated, the review was clean, or it was skipped), Phase 4b runs a holistic code-reviewer pass over the full epic diff. Per-story CR (Phase 3) reviews changes in isolation; the integration review catches cross-story interactions, naming inconsistencies, import conflicts, and architectural issues that only appear when stories are combined.
-
-Phase 4b is skipped if the "and review" modifier was not specified.
+Phase 4a is skipped if the "and review" modifier was not specified.
 
 #### Step 1: Generate the full epic diff
 
@@ -374,9 +321,67 @@ Send the integration review assignment to the code-reviewer via `SendMessage` wi
 
 #### Step 4: Triage, remediation, and circuit breaker
 
-Triage findings using the same rules as Phase 3 Step 5 item 3. Remediate valid findings using the same spawn mechanics as Phase 4a Step 3 (remediation spawn context). Stage fixes with `git add -A`. PM records dispositions. If NOT APPROVED, send Round 2 to the code-reviewer with round 1 findings and updated diff. Max 2 rounds -- if round 2 still has MUST FIX, escalate to the user: (a) fix, (b) retry, (c) override to Phase 5, (d) abandon.
+Triage findings using the same rules as Phase 3 Step 5 item 3. Remediate valid findings **one at a time** (serial, not parallel). For each finding: spawn an implementer, wait for completion, stage with `git add -A`, then proceed to the next finding. Select agent type via the routing table. Spawn WITHOUT `isolation: "worktree"`. Provide the **remediation spawn context**:
 
-After integration review completes (clean, remediated, or user override), proceed to Phase 5.
+```
+You are a [agent-type] agent spawned for post-review remediation on the [team-name] team.
+Working directory: <epic-worktree-path> -- use absolute paths for ALL file operations.
+Constraints: no git commit (git add -A only), no docker/bb/proxy commands, no .env/data/ access, no git merge/rebase/worktree/branch commands, no Bash file writes (echo/sed/cat/cp/mv) to src/tests/migrations/scripts/ -- use Write/Edit tools.
+Remediation authorized by post-review remediation exception in workflow-discipline.md.
+Finding to remediate: [finding details]
+Fix and report with ## Files Changed (absolute paths) and ## Test Results.
+```
+
+PM records dispositions. If NOT APPROVED, send Round 2 to the code-reviewer with round 1 findings and updated diff. Max 2 rounds -- if round 2 still has MUST FIX, escalate to the user: (a) fix, (b) retry (resets breaker), (c) override to Phase 4b, (d) abandon.
+
+After integration review completes (clean, remediated, or user override), proceed to Phase 4b.
+
+### Phase 4b: Codex Code Review
+
+After Phase 4a completes (whether CR findings were remediated, the review was clean, or it was skipped), Phase 4b runs a Codex review against the epic worktree diff as a systematic final validation pass. This uses a degradation chain: headless first, prompt-generation fallback on failure.
+
+Phase 4b is skipped if the "and review" modifier was not specified.
+
+#### Step 1: Attempt headless codex review
+
+Run the codex-review script with the epic worktree path via Bash:
+
+```
+timeout 600 ./scripts/codex-review.sh --workdir <epic-worktree-path> uncommitted
+```
+
+Capture the exit code and output.
+
+#### Step 2: Evaluate the result
+
+- **Exit 0, output contains "No findings."** (clean review): Report "Codex review completed with no findings -- clean review" to the user. Skip to Phase 5.
+
+- **Exit 0, output contains findings**: Proceed to Step 3 (triage and remediation).
+
+- **Exit 124 (timeout)**: Fall to Step 4 (prompt-generation fallback). The pause message is:
+  > Pipeline paused at codex review. Headless review timed out. Run this prompt async and paste findings when ready. Enter 'skip' to proceed without codex review.
+
+- **Other non-zero exit** (codex not installed, script error, API outage): Fall to Step 4 (prompt-generation fallback). The pause message is:
+  > Pipeline paused at codex review. Headless review failed: [error message from script]. Run this prompt async and paste findings when ready. Enter 'skip' to proceed without codex review.
+
+- **Exit 0, output contains "No uncommitted changes to review"**: Report this to the user and skip to Phase 5.
+
+#### Step 3: Triage and remediation (headless findings)
+
+When headless codex succeeds with findings:
+
+1. Present the full codex findings to the user.
+2. Classify each finding as **valid** or **invalid** using the same triage rules as Phase 3 Step 5 item 3.
+3. Remediate valid findings using the same spawn mechanics as Phase 4a Step 4 (remediation spawn context). Stage fixes with `git add -A`.
+4. PM records dispositions in the epic's History section.
+5. **Remediation fixes are NOT re-reviewed**. After remediation, proceed to Phase 5.
+6. **Circuit breaker (2 rounds)**: If round 2 still has unresolved findings, escalate to the user: (a) fix it themselves, (b) retry (resets breaker), (c) override and proceed to Phase 5, (d) abandon.
+
+#### Step 4: Prompt-generation fallback (graceful degradation)
+
+When headless codex times out or fails: generate a review prompt using the codex-review skill's prompt-generation path (`.claude/skills/codex-review/SKILL.md`, Steps 1-3) with the epic worktree diff. Present the pause message + prompt to the user. Wait for: "no findings" (clean, skip to Phase 5), pasted findings (enter Step 3 triage), or "skip" (advance to Phase 5 without findings).
+
+After Codex review completes (clean, remediated, skipped, or user override), proceed to Phase 5.
 
 ---
 
@@ -400,6 +405,21 @@ Route to PM, who performs:
 - Epic Stories table reflects current reality (all rows DONE).
 - Epic status updated to COMPLETED.
 - History entry added with the completion date and a summary of what was accomplished.
+- Record a review scorecard table in the epic's History section using this format:
+
+```
+### Review Scorecard
+| Review Pass | Findings | Accepted | Dismissed |
+|---|---|---|---|
+| Per-story CR -- E-NNN-01 | N | N | N |
+| Per-story CR -- E-NNN-02 | N | N | N |
+| CR integration review | N | N | N |
+| Codex code review | N | N | N |
+| **Total** | **N** | **N** | **N** |
+```
+
+Only include rows for review passes that actually ran. Per-story CR rows show aggregated finding totals across all review rounds for that story (e.g., if round 1 had 3 MUST FIX and round 2 had 1, the row shows 4 findings total). CR integration and Codex rows show findings from Phase 4a and 4b respectively. If the "and review" modifier was not specified, omit Phase 4 rows. Reconstruct finding counts from triage summaries recorded during each story's review loop and Phase 4 reviews.
+
 - Record any notable implementation details, decisions, or deviations in the epic's Technical Notes or History. Keep sensitive information out of epic files.
 
 ### Step 3: Documentation assessment
@@ -420,7 +440,7 @@ PM checks `docs/vision-signals.md` for unprocessed signals. Advisory, not blocki
 
 ### Step 6: Present a summary to the user
 
-Before closure merge: epic ID/title, stories completed, review outcomes (codex: clean/N fixed/skipped/not run; CR integration: clean/N fixed/not run), file list (`git diff --stat main` from epic worktree), key artifacts, follow-up work, promotable ideas.
+Before closure merge: epic ID/title, stories completed, review outcomes (per-story CR: N stories reviewed; CR integration: clean/N fixed/not run; Codex: clean/N fixed/skipped/not run), file list (`git diff --stat main` from epic worktree), key artifacts, follow-up work, promotable ideas.
 
 ### Step 7: Shut down implementers and code-reviewer
 
@@ -428,13 +448,52 @@ Send a `shutdown_request` to each implementer and to the code-reviewer. Wait for
 
 **After spinning down implementers and code-reviewer:**
 
+### Step 7a: Ancillary file sweep
+
+Stage any main-checkout session artifacts before the closure merge. During dispatch, agents write to the epic worktree (those changes are captured by Step 8's worktree patch). This step stages main-checkout changes: vision signals from the main session, leftover planning artifacts, or idea captures. These staged files are included in Step 8's closure commit alongside the worktree patch -- no separate commit is made here, because committing on main would advance HEAD and cause Step 8's `git diff --cached main` to generate reverse patches for the committed files.
+
+**Preflight**: Run `cd /workspaces/baseball-crawl && git status --porcelain` (without `-uall`). If the output is empty, skip this step silently and proceed to Step 8.
+
+**Enumerate main-checkout changes**: Use the TN-8 approach to identify ancillary artifacts:
+
+1. **Recognized artifact paths** (stage these):
+   - `docs/vision-signals.md` (if modified) -- single file, `git add docs/vision-signals.md`
+   - `.claude/agent-memory/` (leftover planning artifacts not committed by plan skill Step 2a, if any) -- mixed directory, enumerate with:
+     ```
+     git diff --name-only -- .claude/agent-memory/
+     git ls-files --others --exclude-standard -- .claude/agent-memory/
+     ```
+     Stage each matching file individually with `git add <file>`.
+   - `.project/ideas/` (if any ideas captured by the main session during dispatch) -- mixed directory, enumerate with:
+     ```
+     git diff --name-only -- .project/ideas/
+     git ls-files --others --exclude-standard -- .project/ideas/
+     ```
+     Stage each matching file individually with `git add <file>`.
+
+2. **Classification**: Files matching recognized patterns above are staged. Files NOT matching any recognized pattern are **unrecognized** -- report them to the user and wait for instructions before proceeding. Do not stage unrecognized files automatically.
+
+**Present staged changes**: After staging recognized files, run `git diff --cached --stat` and present the summary to the user.
+
+**User approval**: Require explicit approval before staging is finalized. Only "yes", "approve", "go ahead" proceed.
+
+**User rejects**: Pause and wait for instructions. The user can:
+- (a) Adjust staged files and retry (e.g., unstage something with `git reset HEAD <file>`)
+- (b) Inspect staged changes (`git diff --cached`)
+- (c) Skip (unstage all with `git reset HEAD`, proceed to Step 8 -- the clean-tree preflight will catch remaining changes)
+
 ### Step 8: Closure merge and commit
 
 Merge the epic worktree's accumulated changes into the main checkout and produce a single commit.
 
 **Migration merge-time scan:** If the epic includes new migrations AND main has added migrations since the worktree branched, flag the numbering conflict to the user before proceeding.
 
-**Clean-tree preflight:** Before starting the merge, verify the main checkout has no uncommitted changes: `cd /workspaces/baseball-crawl && git status --porcelain`. If the output is non-empty, report the unexpected changes to the user and wait for instructions before proceeding. Do NOT proceed with `git apply` on a dirty working tree -- it may silently merge unrelated changes into the epic commit.
+**Clean-tree preflight:** Before starting the merge, verify the main checkout has no unstaged or untracked changes. Step 7a may have legitimately staged ancillary files, so check unstaged/untracked only:
+```
+cd /workspaces/baseball-crawl && git diff --name-only     # unstaged modifications
+cd /workspaces/baseball-crawl && git ls-files --others --exclude-standard  # untracked files
+```
+If either command produces output, report the unexpected changes to the user and wait for instructions before proceeding. Do NOT proceed with `git apply` on a dirty working tree -- it may silently merge unrelated changes into the epic commit. Staged files from Step 7a are expected and will be captured in the closure commit.
 
 **Closure merge sequence:**
 
@@ -490,12 +549,13 @@ Phase 3: Serial coordination loop (one story at a time)
   -> staging boundary: `git add -A` -> PM marks DONE -> cascade to next story
   |
   v
-Phase 4 (if "and review"): 4a codex review (headless -> prompt fallback) + 4b integration CR
+Phase 4 (if "and review"): 4a CR integration review + 4b Codex code review (headless -> prompt fallback)
   Both use triage + remediation in epic worktree, 2-round circuit breakers
   |
   v
 Phase 5: Validate -> PM completes epic -> doc + context-layer assessments -> summary
-  -> shut down implementers + CR -> closure merge (patch -> dry-run -> apply -> commit)
+  -> shut down implementers + CR -> ancillary file sweep (stage session artifacts, user approval)
+  -> closure merge (patch -> dry-run -> apply -> single commit incl. ancillary files)
   -> archive -> PM memory -> archive commit -> shut down PM + delete team
 ```
 
@@ -506,8 +566,8 @@ Phase 5: Validate -> PM completes epic -> doc + context-layer assessments -> sum
 - **Epic not found / DRAFT / COMPLETED / ABANDONED / BLOCKED**: Report status to user and stop. Do not search the archive for completed epics.
 - **No eligible stories**: Report to user (all BLOCKED or all DONE).
 - **Spawn fails**: Follow Dispatch Failure Protocol (`workflow-discipline.md`) -- report and ask, do not improvise.
-- **No uncommitted changes for review**: Phase 4a handles (skip to 4b).
-- **Codex timeout/failure**: Phase 4a degrades to prompt-generation fallback.
+- **No uncommitted changes for review**: Phase 4a handles (skip to Phase 5 -- if no diff for CR, Codex also has nothing to review).
+- **Codex timeout/failure**: Phase 4b degrades to prompt-generation fallback.
 - **CR or PM context fills**: Respawn with fresh state summary. No data lost (work products persist on disk).
 
 ---

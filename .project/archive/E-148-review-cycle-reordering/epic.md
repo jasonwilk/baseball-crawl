@@ -1,7 +1,7 @@
 # E-148: Review Cycle Reordering for Plan and Implement Skills
 
 ## Status
-`READY`
+`COMPLETED`
 <!-- Lifecycle: DRAFT → READY → ACTIVE → COMPLETED (or BLOCKED / ABANDONED) -->
 
 ## Overview
@@ -43,9 +43,9 @@ Architect consultation occurred for all three stories. The architect's pre-plann
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-148-01 | Restructure plan skill review phases | TODO | None | - |
-| E-148-02 | Reorder implement skill review phases and add scorecard | TODO | E-148-01 | - |
-| E-148-03 | Atomic session commits for plan and implement skills | TODO | E-148-01, E-148-02 | - |
+| E-148-01 | Restructure plan skill review phases | DONE | None | - |
+| E-148-02 | Reorder implement skill review phases and add scorecard | DONE | E-148-01 | - |
+| E-148-03 | Atomic session commits for plan and implement skills | DONE | E-148-01, E-148-02 | - |
 
 ## Dispatch Team
 - claude-architect
@@ -205,6 +205,15 @@ None -- direction approved by user, architect analysis comprehensive.
 - 2026-03-22: Created. Based on E-147 planning experience and architect analysis.
 - 2026-03-22: Expanded with E-148-03 (atomic session commits). Architect designed the approach; PM framed ACs. Dependencies restructured to fully serial chain (01→02→03).
 - 2026-03-22: READY. 11 review passes (6 internal iterations, 4 Codex iterations, 1 async Codex). 25 findings, 25 accepted, 0 dismissed.
+- 2026-03-22: COMPLETED. All 3 stories implemented by claude-architect and verified by PM. Restructured plan skill review phases (internal review cycle before Codex), reordered implement skill review chain (CR integration before Codex), added review scorecard pattern to both skills, and added atomic session commit steps (plan Step 2a, implement Step 7a) to capture all session artifacts.
+
+### Implementation Review Scorecard
+| Review Pass | Findings | Accepted | Dismissed |
+|---|---|---|---|
+| Codex code review | 3 | 3 | 0 |
+| **Total** | **3** | **3** | **0** |
+
+All 3 stories were context-layer-only (skill files). Per-story code review was skipped; PM verified ACs alone. Post-implementation Codex code review found 3 P1 logic bugs (Step 7a/Step 8 revert regression, cr_spawned flag race, findings routing gap) -- all accepted and remediated.
 
 ### Review Scorecard
 | Review Pass | Findings | Accepted | Dismissed |
