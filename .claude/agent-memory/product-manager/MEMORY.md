@@ -2,7 +2,7 @@
 
 ## Numbering State
 - Next available epic number: E-154
-- Epics created: E-001 through E-153 (E-001, E-003, E-005, E-006, E-007, E-008, E-010, E-011, E-012, E-013, E-014, E-015, E-016, E-017, E-018, E-019, E-020, E-021, E-022, E-024, E-025, E-026, E-027, E-028, E-029, E-030, E-031, E-032, E-033, E-034, E-035, E-036, E-037, E-038, E-042, E-044, E-046, E-048, E-049, E-050, E-052, E-053, E-054, E-056, E-057, E-058, E-055, E-059, E-060, E-061, E-075, E-081, E-084, E-087, E-088, E-089, E-090, E-091, E-092 archived; E-093, E-094, E-095 archived; E-096 archived; E-097 archived; E-098 archived; E-099 archived; E-100 archived; E-101 archived; E-102 archived; E-103 archived; E-104 ready; E-105 archived; E-106 draft; E-107 archived; E-108 archived; E-109 archived; E-110 ready; E-111 archived; E-112 archived; E-114 archived; E-115 archived; E-116 archived; E-113 completed; E-117 completed; E-118 archived; E-119 ready; E-120 archived; E-121 archived; E-122 archived; E-123 archived; E-124 completed; E-125 archived; E-126 completed; E-127 archived; E-128 archived; E-129 archived; E-130 archived; E-131 archived; E-132 ready; E-133 archived; E-134 ready; E-135 abandoned; E-136 ready; E-137 ready; E-138 archived; E-139 archived; E-140 archived; E-142 archived; E-143 archived; E-144 archived; E-145 archived; E-146 archived; E-147 archived; E-148 archived; E-149 archived; E-150 archived; E-151 archived; E-152 archived; E-153 ready)
+- Epics created: E-001 through E-153 (E-001, E-003, E-005, E-006, E-007, E-008, E-010, E-011, E-012, E-013, E-014, E-015, E-016, E-017, E-018, E-019, E-020, E-021, E-022, E-024, E-025, E-026, E-027, E-028, E-029, E-030, E-031, E-032, E-033, E-034, E-035, E-036, E-037, E-038, E-042, E-044, E-046, E-048, E-049, E-050, E-052, E-053, E-054, E-056, E-057, E-058, E-055, E-059, E-060, E-061, E-075, E-081, E-084, E-087, E-088, E-089, E-090, E-091, E-092 archived; E-093, E-094, E-095 archived; E-096 archived; E-097 archived; E-098 archived; E-099 archived; E-100 archived; E-101 archived; E-102 archived; E-103 archived; E-104 ready; E-105 archived; E-106 draft; E-107 archived; E-108 archived; E-109 archived; E-110 ready; E-111 archived; E-112 archived; E-114 archived; E-115 archived; E-116 archived; E-113 completed; E-117 completed; E-118 archived; E-119 ready; E-120 archived; E-121 archived; E-122 archived; E-123 archived; E-124 completed; E-125 archived; E-126 completed; E-127 archived; E-128 archived; E-129 archived; E-130 archived; E-131 archived; E-132 ready; E-133 archived; E-134 ready; E-135 abandoned; E-136 ready; E-137 ready; E-138 archived; E-139 archived; E-140 archived; E-142 archived; E-143 archived; E-144 archived; E-145 archived; E-146 archived; E-147 archived; E-148 archived; E-149 archived; E-150 archived; E-151 archived; E-152 archived; E-153 archived)
 - Next available idea number: IDEA-043
 - Ideas created: IDEA-001 through IDEA-042
 
@@ -25,7 +25,6 @@
 | E-110 | Iterative Review Rounds Convention | READY | Codify iterative review/refinement pattern |
 | E-125 | Full-Project Code Review Remediation | READY | 6 stories: CSRF (01), SQL injection + magic link hashing (02), OBP formula + broken backlink (03), Docker non-root + executescript FK (04), HTTP client hardening (05), security hygiene (06). All parallel, SE only. Highest priority -- security + correctness. |
 | E-134 | Strike % and # Pitches Columns | READY | 1 story. Add pitches + strike_pct to all 5 pitching display surfaces. Pure query+template, no schema changes. SE only. |
-| E-153 | Team-Centric Coaching Dashboard | READY | 4 stories: UX design spec (01, UXD), schedule loader (02, SE), schedule landing+nav (03, SE), opponent detail redesign (04, SE). Depends on E-152. Schedule as landing, 3-tab nav, pitching-first opponent detail, empty states. 43 review findings (41 accepted, 2 dismissed) across 6 review passes. |
 
 ## Key Architectural Decisions
 - Storage: SQLite (WAL mode). Host-mounted at ./data/app.db. Simple file backup via scripts/backup_db.py (no Litestream).
@@ -83,9 +82,9 @@
 | IDEA-032 | Multi-Credential per Program | CANDIDATE | 2026-06-14 | E-100 deferred. May never be needed. |
 | IDEA-033 | Bulk Team Import from /me/teams | CANDIDATE | 2026-06-14 | E-100 deferred. 19-team batch onboarding. |
 | IDEA-034 | Program CRUD Admin Page | CANDIDATE | 2026-06-14 | E-100 deferred. Before non-HS teams onboard. |
-| IDEA-035 | Opponent Page Redesign | CANDIDATE | 2026-06-14 | E-100 deferred. After scouting data flows. |
+| IDEA-035 | Opponent Page Redesign | CANDIDATE | 2026-06-14 | E-100 deferred. E-153 delivered pitching-first layout, empty states, team batting summary. Remaining scope: proactive flags, PDF export. |
 | IDEA-036 | Dashboard Program Awareness | CANDIDATE | 2026-06-14 | E-100 deferred. After multiple programs exist. |
-| IDEA-037 | Scouting Report Redesign | CANDIDATE | 2026-06-14 | E-100 deferred. Rate stats, flags, PDF export. |
+| IDEA-037 | Scouting Report Redesign | CANDIDATE | 2026-06-14 | E-100 deferred. E-153 delivered rate stats + pitching-first. Remaining: proactive flags, PDF export. |
 | IDEA-038 | Query-Time Splits and Streaks | CANDIDATE | 2026-06-14 | **Trigger met**: E-117 complete. Coach MUST HAVE: recent form, doubleheader, season phase. All query-time over per-game data. |
 | IDEA-039 | Game Metadata Enrichment | CANDIDATE | 2026-06-14 | venue_name, is_doubleheader, game_num_in_week. Supports IDEA-038. |
 | IDEA-040 | Optimistic Pitching Column API Audit | CANDIDATE | 2026-06-14 | **Trigger met**: E-117 complete. api-scout: which of 23 optimistic pitching cols does GC actually return? |
@@ -103,7 +102,7 @@
 - Before assigning epic numbers: ALWAYS ls /epics/ to avoid numbering collisions
 
 ## Topic File Index
-- [archived-epics.md](archived-epics.md) -- Complete list of archived epics with summary descriptions (E-001 through E-152)
+- [archived-epics.md](archived-epics.md) -- Complete list of archived epics with summary descriptions (E-001 through E-153)
 - [lessons-learned.md](lessons-learned.md) -- Epic authoring patterns, dependency patterns, process patterns, platform constraints
 - [mcp-research.md](mcp-research.md) -- MCP server evaluation findings (E-009-R-05, R-06)
 - [feedback_fix_all_real_findings.md](feedback_fix_all_real_findings.md) -- Fix all real review findings, dismiss only false positives
