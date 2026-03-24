@@ -17,7 +17,8 @@ Routes:
     GET  /admin/teams/{team_id}/edit                     -- Edit team form (INTEGER team_id)
     POST /admin/teams/{team_id}/edit                     -- Update team metadata (INTEGER team_id)
     POST /admin/teams/{id}/toggle-active                 -- Toggle team is_active flag (INTEGER id)
-    POST /admin/teams/{id}/delete                        -- Delete deactivated zero-data team (INTEGER id)
+    GET  /admin/teams/{id}/delete                        -- Delete confirmation page (INTEGER id)
+    POST /admin/teams/{id}/delete                        -- Cascade delete team and all related data (INTEGER id)
     POST /admin/teams/{id}/sync                          -- Enqueue per-team crawl as BackgroundTask (INTEGER id)
     POST /admin/teams/{id}/discover-opponents            -- Discover opponent placeholders (INTEGER id)
     GET  /admin/programs                                 -- List all programs + add form
@@ -538,65 +539,236 @@ def _toggle_team_active_integer(team_id: int) -> int:
         return new_value
 
 
-def _check_team_has_data(team_id: int) -> bool:
-    """Return True if any data table has rows referencing this team.
+def _get_delete_confirmation_data(team_id: int) -> dict[str, Any]:
+    """Gather row counts and relationship data for the delete confirmation page.
 
-    Queries all seven data tables listed in TN-3: games (both FK columns),
-    player_game_batting, player_game_pitching, player_season_batting,
-    player_season_pitching, scouting_runs, spray_charts.
+    Queries row counts for all tables in the 4-phase cascade deletion order
+    (TN-1), shared-opponent linkages (TN-2), and orphaned-opponent detection.
+    The spray_charts count uses the combined condition (game_id IN subquery
+    OR team_id = T) to match what the cascade actually deletes.
 
     Args:
         team_id: The team's INTEGER primary key.
 
     Returns:
-        True if any dependent data rows exist, False otherwise.
+        Dict with per-table row counts, total_count, affected_opponent_teams
+        (count of distinct opponent teams whose per-game stats are affected),
+        shared_member_teams (list of member team names that reference this
+        team as an opponent -- non-empty only for tracked teams), and
+        orphaned_opponents (list of tracked opponent names that would be
+        linked from no member team after deletion -- non-empty only for
+        member teams).
     """
-    checks: list[tuple[str, tuple[int, ...]]] = [
-        (
-            "SELECT 1 FROM games WHERE home_team_id = ? OR away_team_id = ? LIMIT 1",
-            (team_id, team_id),
-        ),
-        ("SELECT 1 FROM player_game_batting WHERE team_id = ? LIMIT 1", (team_id,)),
-        ("SELECT 1 FROM player_game_pitching WHERE team_id = ? LIMIT 1", (team_id,)),
-        ("SELECT 1 FROM player_season_batting WHERE team_id = ? LIMIT 1", (team_id,)),
-        ("SELECT 1 FROM player_season_pitching WHERE team_id = ? LIMIT 1", (team_id,)),
-        ("SELECT 1 FROM scouting_runs WHERE team_id = ? LIMIT 1", (team_id,)),
-        ("SELECT 1 FROM spray_charts WHERE team_id = ? LIMIT 1", (team_id,)),
-    ]
+    _game_ids = "SELECT game_id FROM games WHERE home_team_id = ? OR away_team_id = ?"
+
     with closing(get_connection()) as conn:
-        for sql, params in checks:
-            if conn.execute(sql, params).fetchone():
-                return True
-    return False
+        conn.row_factory = sqlite3.Row
+
+        pgb_count: int = conn.execute(
+            f"SELECT COUNT(*) FROM player_game_batting WHERE game_id IN ({_game_ids})",
+            (team_id, team_id),
+        ).fetchone()[0]
+
+        pgp_count: int = conn.execute(
+            f"SELECT COUNT(*) FROM player_game_pitching WHERE game_id IN ({_game_ids})",
+            (team_id, team_id),
+        ).fetchone()[0]
+
+        games_count: int = conn.execute(
+            "SELECT COUNT(*) FROM games WHERE home_team_id = ? OR away_team_id = ?",
+            (team_id, team_id),
+        ).fetchone()[0]
+
+        affected_opponent_teams: int = conn.execute(
+            """
+            SELECT COUNT(DISTINCT CASE
+                WHEN home_team_id = ? THEN away_team_id
+                ELSE home_team_id
+            END)
+            FROM games
+            WHERE (home_team_id = ? OR away_team_id = ?)
+              AND home_team_id != away_team_id
+            """,
+            (team_id, team_id, team_id),
+        ).fetchone()[0]
+
+        psb_count: int = conn.execute(
+            "SELECT COUNT(*) FROM player_season_batting WHERE team_id = ?",
+            (team_id,),
+        ).fetchone()[0]
+
+        psp_count: int = conn.execute(
+            "SELECT COUNT(*) FROM player_season_pitching WHERE team_id = ?",
+            (team_id,),
+        ).fetchone()[0]
+
+        # Combined condition: game-linked rows (Phase 1) + direct team_id rows (Phase 3)
+        sc_count: int = conn.execute(
+            f"SELECT COUNT(*) FROM spray_charts WHERE game_id IN ({_game_ids}) OR team_id = ?",
+            (team_id, team_id, team_id),
+        ).fetchone()[0]
+
+        tr_count: int = conn.execute(
+            "SELECT COUNT(*) FROM team_rosters WHERE team_id = ?",
+            (team_id,),
+        ).fetchone()[0]
+
+        sr_count: int = conn.execute(
+            "SELECT COUNT(*) FROM scouting_runs WHERE team_id = ?",
+            (team_id,),
+        ).fetchone()[0]
+
+        cj_count: int = conn.execute(
+            "SELECT COUNT(*) FROM crawl_jobs WHERE team_id = ?",
+            (team_id,),
+        ).fetchone()[0]
+
+        uta_count: int = conn.execute(
+            "SELECT COUNT(*) FROM user_team_access WHERE team_id = ?",
+            (team_id,),
+        ).fetchone()[0]
+
+        ca_count: int = conn.execute(
+            "SELECT COUNT(*) FROM coaching_assignments WHERE team_id = ?",
+            (team_id,),
+        ).fetchone()[0]
+
+        to_count: int = conn.execute(
+            "SELECT COUNT(*) FROM team_opponents WHERE our_team_id = ? OR opponent_team_id = ?",
+            (team_id, team_id),
+        ).fetchone()[0]
+
+        ol_count: int = conn.execute(
+            "SELECT COUNT(*) FROM opponent_links WHERE our_team_id = ? OR resolved_team_id = ?",
+            (team_id, team_id),
+        ).fetchone()[0]
+
+        team_row = conn.execute(
+            "SELECT membership_type FROM teams WHERE id = ?", (team_id,)
+        ).fetchone()
+        membership_type = team_row["membership_type"] if team_row else None
+
+        shared_member_teams: list[str] = []
+        if membership_type == "tracked":
+            shared_rows = conn.execute(
+                """
+                SELECT DISTINCT t.name
+                FROM team_opponents link
+                JOIN teams t ON t.id = link.our_team_id
+                WHERE link.opponent_team_id = ?
+                UNION
+                SELECT DISTINCT t.name
+                FROM opponent_links ol
+                JOIN teams t ON t.id = ol.our_team_id
+                WHERE ol.resolved_team_id = ?
+                """,
+                (team_id, team_id),
+            ).fetchall()
+            shared_member_teams = [row[0] for row in shared_rows]
+
+        orphaned_opponents: list[str] = []
+        if membership_type == "member":
+            orphaned_rows = conn.execute(
+                """
+                SELECT t.name
+                FROM team_opponents link
+                JOIN teams t ON t.id = link.opponent_team_id
+                WHERE link.our_team_id = ?
+                  AND (
+                    SELECT COUNT(*) FROM team_opponents other
+                    WHERE other.opponent_team_id = link.opponent_team_id
+                      AND other.our_team_id != ?
+                  ) = 0
+                """,
+                (team_id, team_id),
+            ).fetchall()
+            orphaned_opponents = [row[0] for row in orphaned_rows]
+
+    total_count = (
+        pgb_count + pgp_count + games_count + psb_count + psp_count
+        + sc_count + tr_count + sr_count + cj_count + uta_count + ca_count
+        + to_count + ol_count
+    )
+
+    return {
+        "games": games_count,
+        "player_game_batting": pgb_count,
+        "player_game_pitching": pgp_count,
+        "player_season_batting": psb_count,
+        "player_season_pitching": psp_count,
+        "spray_charts": sc_count,
+        "team_rosters": tr_count,
+        "scouting_runs": sr_count,
+        "crawl_jobs": cj_count,
+        "user_team_access": uta_count,
+        "coaching_assignments": ca_count,
+        "team_opponents": to_count,
+        "opponent_links": ol_count,
+        "total_count": total_count,
+        "affected_opponent_teams": affected_opponent_teams,
+        "shared_member_teams": shared_member_teams,
+        "orphaned_opponents": orphaned_opponents,
+    }
 
 
 def _delete_team_cascade(team_id: int) -> None:
-    """Delete a team and all its junction/access rows in a single transaction.
+    """Delete a team and all related data rows in a single transaction.
 
-    Deletes junction/access rows first, then the teams row.  Caller must
-    verify zero data rows (via _check_team_has_data) before calling.
-
-    Deletion order:
-        team_opponents (both FK columns), team_rosters, opponent_links
-        (both FK columns), user_team_access, coaching_assignments,
-        crawl_jobs, teams.
+    Implements the 4-phase cascade deletion order from TN-1:
+      Phase 1 -- game-child rows (player_game_batting, player_game_pitching,
+                 spray_charts linked via game_id)
+      Phase 2 -- games (home_team_id=T OR away_team_id=T)
+      Phase 3 -- direct team_id FK rows (player_season_batting,
+                 player_season_pitching, spray_charts with game_id NULL,
+                 team_rosters, scouting_runs, crawl_jobs, user_team_access,
+                 coaching_assignments, team_opponents, opponent_links)
+      Phase 4 -- teams row
 
     Args:
         team_id: The team's INTEGER primary key.
     """
+    _game_ids = "SELECT game_id FROM games WHERE home_team_id = ? OR away_team_id = ?"
+
     with closing(get_connection()) as conn:
+        # Phase 1 -- game-child rows
+        conn.execute(
+            f"DELETE FROM player_game_batting WHERE game_id IN ({_game_ids})",
+            (team_id, team_id),
+        )
+        conn.execute(
+            f"DELETE FROM player_game_pitching WHERE game_id IN ({_game_ids})",
+            (team_id, team_id),
+        )
+        conn.execute(
+            f"DELETE FROM spray_charts WHERE game_id IN ({_game_ids})",
+            (team_id, team_id),
+        )
+
+        # Phase 2 -- games
+        conn.execute(
+            "DELETE FROM games WHERE home_team_id = ? OR away_team_id = ?",
+            (team_id, team_id),
+        )
+
+        # Phase 3 -- direct team_id FKs
+        conn.execute("DELETE FROM player_season_batting WHERE team_id = ?", (team_id,))
+        conn.execute("DELETE FROM player_season_pitching WHERE team_id = ?", (team_id,))
+        conn.execute("DELETE FROM spray_charts WHERE team_id = ?", (team_id,))
+        conn.execute("DELETE FROM team_rosters WHERE team_id = ?", (team_id,))
+        conn.execute("DELETE FROM scouting_runs WHERE team_id = ?", (team_id,))
+        conn.execute("DELETE FROM crawl_jobs WHERE team_id = ?", (team_id,))
+        conn.execute("DELETE FROM user_team_access WHERE team_id = ?", (team_id,))
+        conn.execute("DELETE FROM coaching_assignments WHERE team_id = ?", (team_id,))
         conn.execute(
             "DELETE FROM team_opponents WHERE our_team_id = ? OR opponent_team_id = ?",
             (team_id, team_id),
         )
-        conn.execute("DELETE FROM team_rosters WHERE team_id = ?", (team_id,))
         conn.execute(
             "DELETE FROM opponent_links WHERE our_team_id = ? OR resolved_team_id = ?",
             (team_id, team_id),
         )
-        conn.execute("DELETE FROM user_team_access WHERE team_id = ?", (team_id,))
-        conn.execute("DELETE FROM coaching_assignments WHERE team_id = ?", (team_id,))
-        conn.execute("DELETE FROM crawl_jobs WHERE team_id = ?", (team_id,))
+
+        # Phase 4 -- team row
         conn.execute("DELETE FROM teams WHERE id = ?", (team_id,))
         conn.commit()
 
@@ -1586,26 +1758,21 @@ async def toggle_team_active(request: Request, id: int) -> Response:
     )
 
 
-@router.post("/teams/{id}/delete", response_model=None)
-async def delete_team(request: Request, id: int) -> Response:
-    """Permanently delete a deactivated team with no associated data.
+@router.get("/teams/{id}/delete", response_model=None)
+async def confirm_delete_team(request: Request, id: int) -> Response:
+    """Render the cascade-delete confirmation page for a team.
 
-    Checks two preconditions before deletion:
-      (a) is_active = 0 (team must be deactivated)
-      (b) zero dependent rows in all data tables (games, player_game_batting,
-          player_game_pitching, player_season_batting, player_season_pitching,
-          scouting_runs, spray_charts)
-
-    If either check fails, redirects to /admin/teams with an error flash.
-    When deletion proceeds, removes junction/access rows in a single
-    transaction, then removes the teams row.
+    Displays the team's name, membership type, active status, per-table row
+    counts, total row count, affected-game/opponent summary, shared-opponent
+    warnings (for tracked teams), and orphaned-opponent notices (for member
+    teams).
 
     Args:
         request: The incoming HTTP request.
         id: The team's INTEGER primary key from the URL path.
 
     Returns:
-        Redirect to /admin/teams with success or error flash message.
+        TemplateResponse with confirmation page, or 403/404.
     """
     guard = await _require_admin(request)
     if isinstance(guard, Response):
@@ -1615,18 +1782,37 @@ async def delete_team(request: Request, id: int) -> Response:
     if not team:
         return HTMLResponse(content="Team not found", status_code=404)
 
-    if team["is_active"]:
-        return RedirectResponse(
-            url="/admin/teams?error=Team+must+be+deactivated+before+deletion",
-            status_code=303,
-        )
+    counts = await run_in_threadpool(_get_delete_confirmation_data, id)
 
-    has_data = await run_in_threadpool(_check_team_has_data, id)
-    if has_data:
-        return RedirectResponse(
-            url="/admin/teams?error=Team+has+associated+data+and+cannot+be+deleted",
-            status_code=303,
-        )
+    return templates.TemplateResponse(
+        request,
+        "admin/confirm_delete.html",
+        {"team": team, "counts": counts},
+    )
+
+
+@router.post("/teams/{id}/delete", response_model=None)
+async def delete_team(request: Request, id: int) -> Response:
+    """Permanently delete a team and all related data rows in a single transaction.
+
+    Performs the full 4-phase cascade deletion (TN-1). The is_active guard
+    is removed -- any team can be deleted regardless of active status. The
+    GET confirmation page provides the safety mechanism.
+
+    Args:
+        request: The incoming HTTP request.
+        id: The team's INTEGER primary key from the URL path.
+
+    Returns:
+        Redirect to /admin/teams with success flash message.
+    """
+    guard = await _require_admin(request)
+    if isinstance(guard, Response):
+        return guard
+
+    team = await run_in_threadpool(_get_team_by_integer_id, id)
+    if not team:
+        return HTMLResponse(content="Team not found", status_code=404)
 
     team_name = team["name"]
     await run_in_threadpool(_delete_team_cascade, id)

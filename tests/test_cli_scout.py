@@ -153,6 +153,7 @@ def test_scout_without_team_calls_scout_all(
          patch("src.cli.data._resolve_db_path", return_value=db_path):
         result = runner.invoke(app, ["data", "scout"])
 
+    mock_crawler.resolve_missing_public_ids.assert_called_once()
     mock_crawler.scout_all.assert_called_once_with(season_id=None)
     mock_crawler.scout_team.assert_not_called()
 

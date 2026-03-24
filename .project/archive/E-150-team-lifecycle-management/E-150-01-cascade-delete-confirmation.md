@@ -4,7 +4,7 @@
 [E-150: Team Lifecycle Management](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the admin UI will support full deletion of any team -- including all related data -- through a two-step flow: a GET confirmation page that shows exactly what will be deleted, followed by a POST that performs the cascade. The current zero-data-only restriction is replaced with a deliberate confirmation workflow that surfaces row counts, game-sharing implications, and shared opponent warnings.

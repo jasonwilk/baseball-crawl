@@ -1,7 +1,7 @@
 # E-150: Team Lifecycle Management
 
 ## Status
-`READY`
+`COMPLETED`
 <!-- Lifecycle: DRAFT → READY → ACTIVE → COMPLETED (or BLOCKED / ABANDONED) -->
 
 ## Overview
@@ -37,8 +37,8 @@ Enable full team deletion with cascade data removal and resolve the public_id ga
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-150-01 | Cascade Delete with Confirmation Page | TODO | None | - |
-| E-150-02 | Public ID Bridge Resolution in Scouting | TODO | None | - |
+| E-150-01 | Cascade Delete with Confirmation Page | DONE | None | - |
+| E-150-02 | Public ID Bridge Resolution in Scouting | DONE | None | - |
 
 ## Dispatch Team
 - software-engineer
@@ -131,3 +131,40 @@ None -- all questions resolved via DE and SE consultation.
 | Codex iteration 1 | 6 | 4 | 2 |
 | Codex iteration 2 | 7 | 4 | 3 |
 | **Total** | **31** | **26** | **5** |
+
+- 2026-03-24: All stories DONE. Implementation complete: (1) Full cascade delete with server-rendered confirmation page replacing the old zero-data-only guard and browser confirm() dialog; admin can now delete any team regardless of active status or data presence, with per-table row counts, game-sharing impact notice, shared-opponent warnings, and orphaned-opponent notices. (2) Bridge resolution pre-step in scouting pipeline: attempts to resolve public_id for opponents with gc_uuid before filtering, updating both teams and opponent_links tables; handles 403, credential errors, and UNIQUE collisions gracefully. 37 new tests across 2 test files.
+
+### Implementation Review Scorecard
+| Review Pass | Findings | Accepted | Dismissed |
+|---|---|---|---|
+| Per-story CR -- E-150-01 | 1 | 0 | 1 |
+| Per-story CR -- E-150-02 | 2 | 2 | 0 |
+| CR integration review | 0 | 0 | 0 |
+| Codex code review | 0 | 0 | 0 |
+| **Total** | **3** | **2** | **1** |
+
+### Documentation Assessment
+Trigger 1 (new feature ships): **Yes** -- new cascade delete confirmation page and modified deletion behavior. However, `docs/admin/` does not exist (no admin docs have been created yet). There are no existing admin docs to update. No documentation impact -- no existing docs to update. When admin documentation is eventually created, this feature should be included.
+
+Trigger 2 (architecture/deployment changes): No.
+Trigger 3 (agent changes): No.
+Trigger 4 (schema changes): No -- no migration changes.
+Trigger 5 (changes how system works): The deletion behavior changed significantly, but there are no existing user-facing docs that describe the old behavior. No documentation impact.
+
+**Verdict**: No documentation update required (no existing docs to update).
+
+### Context-Layer Assessment
+1. **New convention, pattern, or constraint established**: **No.** The 4-phase cascade deletion order is specific to this feature, not a reusable convention. The bridge-as-pre-step pattern is a one-off integration.
+2. **Architectural decision with ongoing implications**: **No.** Application-code cascade ordering (vs. ON DELETE CASCADE migration) was already the established pattern. No new architectural decision.
+3. **Footgun, failure mode, or boundary discovered**: **Yes.** TN-3 documents that CLAUDE.md describes the UUID-to-public_id bridge (`GET /teams/{team_id}/public-team-profile-id`) as working for "any team UUID" -- but the bridge.py implementation confirms it returns 403 for teams not on the authenticated account. CLAUDE.md line 76 says "returns the `public_id` slug for any team UUID" which is misleading. This should be corrected.
+4. **Change to agent behavior, routing, or coordination**: **No.**
+5. **Domain knowledge discovered that should influence agent decisions**: **No.** The 403 constraint was already known (documented in bridge.py); the CLAUDE.md description just needs to match reality.
+6. **New CLI command, workflow, or operational procedure introduced**: **No.** No new `bb` commands or workflows.
+
+**Verdict**: Trigger 3 fires. CLAUDE.md line 76 should be corrected to note that the bridge endpoint returns 403 for teams not on the authenticated account. Dispatch claude-architect for this correction.
+
+### Ideas Backlog Review
+No CANDIDATE ideas are directly unblocked by E-150. IDEA-035 (Opponent Page Redesign) remains blocked on scouting data flow maturity. IDEA-042 (bulk_create_opponents missing links) is unrelated to lifecycle management. No promotions warranted.
+
+### Vision Signals
+`docs/vision-signals.md` does not exist -- no unprocessed signals to report.

@@ -1450,25 +1450,25 @@ def _insert_spray_chart_for_team(db_path: Path, team_id: int) -> None:
 
 
 class TestDeleteTeam:
-    """POST /admin/teams/{id}/delete (E-143-03, AC-1 through AC-6)."""
+    """GET+POST /admin/teams/{id}/delete -- two-step confirm/execute flow (E-150-01)."""
 
-    def test_delete_button_absent_for_active_team(self, team_db: Path) -> None:
-        """Delete button does NOT appear for active teams (AC-1)."""
+    def test_delete_link_shown_for_active_team(self, team_db: Path) -> None:
+        """Delete link appears for active teams (AC-8: no deactivation guard)."""
         user_id = _insert_user(team_db, "admin@example.com")
         token = _insert_session(team_db, user_id)
 
         with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
             with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
                 response = client.get("/admin/teams")
-        # The seeded team (LSB Varsity 2026) is active; its row must not include the delete URL.
         assert response.status_code == 200
         conn = sqlite3.connect(str(team_db))
         team_id = conn.execute("SELECT id FROM teams LIMIT 1").fetchone()[0]
         conn.close()
-        assert f"/admin/teams/{team_id}/delete" not in response.text
+        # Delete link is always present regardless of active status
+        assert f"/admin/teams/{team_id}/delete" in response.text
 
-    def test_delete_button_shown_for_inactive_team(self, team_db: Path) -> None:
-        """Delete button appears for deactivated teams (AC-1)."""
+    def test_delete_link_shown_for_inactive_team(self, team_db: Path) -> None:
+        """Delete link appears for inactive teams."""
         user_id = _insert_user(team_db, "admin@example.com")
         token = _insert_session(team_db, user_id)
         team_id = _insert_team(team_db, "Inactive Opponent", membership_type="tracked")
@@ -1479,11 +1479,11 @@ class TestDeleteTeam:
                 response = client.get("/admin/teams")
         assert response.status_code == 200
         assert f"/admin/teams/{team_id}/delete" in response.text
-        # AC-2: confirm() dialog is wired to the delete form
-        assert "confirm(" in response.text
+        # No JS confirm() dialog -- the GET confirmation page replaces it
+        assert "confirm(" not in response.text
 
-    def test_delete_active_team_returns_error_flash(self, team_db: Path) -> None:
-        """Deleting an active team redirects to /admin/teams with error flash (AC-3a)."""
+    def test_delete_active_team_succeeds(self, team_db: Path) -> None:
+        """POST delete proceeds for an active team (AC-8: is_active guard removed)."""
         user_id = _insert_user(team_db, "admin@example.com")
         token = _insert_session(team_db, user_id)
         conn = sqlite3.connect(str(team_db))
@@ -1498,18 +1498,15 @@ class TestDeleteTeam:
                     f"/admin/teams/{team_id}/delete", data={"csrf_token": _CSRF}
                 )
         assert response.status_code == 303
-        assert "error=" in response.headers["location"]
-        assert "deactivated" in response.headers["location"]
-        # Team must still exist
-        assert _count_rows(team_db, "teams", "id = ?", (team_id,)) == 1
+        assert "msg=" in response.headers["location"]
+        # Team is deleted
+        assert _count_rows(team_db, "teams", "id = ?", (team_id,)) == 0
 
-    def test_delete_team_with_data_returns_error_flash(self, team_db: Path) -> None:
-        """Deleting a team with associated data redirects with error flash (AC-3b)."""
+    def test_delete_team_with_data_removes_row(self, team_db: Path) -> None:
+        """POST delete removes a team that has associated data (AC-5: full cascade)."""
         user_id = _insert_user(team_db, "admin@example.com")
         token = _insert_session(team_db, user_id)
         team_id = _insert_team(team_db, "Data Team", membership_type="tracked")
-        _set_team_inactive(team_db, team_id)
-        # Seed a spray_charts row to simulate existing data
         _insert_spray_chart_for_team(team_db, team_id)
 
         with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
@@ -1520,18 +1517,14 @@ class TestDeleteTeam:
                     f"/admin/teams/{team_id}/delete", data={"csrf_token": _CSRF}
                 )
         assert response.status_code == 303
-        location = response.headers["location"]
-        assert "error=" in location
-        assert "associated+data" in location or "associated data" in location.replace("+", " ")
-        # Team must still exist
-        assert _count_rows(team_db, "teams", "id = ?", (team_id,)) == 1
+        assert "msg=" in response.headers["location"]
+        assert _count_rows(team_db, "teams", "id = ?", (team_id,)) == 0
 
     def test_delete_zero_data_team_removes_row(self, team_db: Path) -> None:
-        """Successful delete removes the teams row (AC-4)."""
+        """Successful delete removes the teams row (AC-7: zero-data path still works)."""
         user_id = _insert_user(team_db, "admin@example.com")
         token = _insert_session(team_db, user_id)
         team_id = _insert_team(team_db, "Clean Opponent", membership_type="tracked")
-        _set_team_inactive(team_db, team_id)
 
         with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
             with TestClient(
@@ -1548,7 +1541,6 @@ class TestDeleteTeam:
         user_id = _insert_user(team_db, "admin@example.com")
         token = _insert_session(team_db, user_id)
         team_id = _insert_team(team_db, "Gone Team", membership_type="tracked")
-        _set_team_inactive(team_db, team_id)
 
         with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
             with TestClient(
@@ -1564,11 +1556,10 @@ class TestDeleteTeam:
         assert "Gone+Team" in location or "Gone Team" in location.replace("+", " ")
 
     def test_delete_cleans_up_junction_rows(self, team_db: Path) -> None:
-        """Successful delete removes junction/access rows before the teams row (AC-4)."""
+        """Successful delete removes junction/access rows before the teams row (AC-5)."""
         admin_id = _insert_user(team_db, "admin@example.com")
         token = _insert_session(team_db, admin_id)
         team_id = _insert_team(team_db, "Junction Team", membership_type="tracked")
-        _set_team_inactive(team_db, team_id)
 
         # Seed a team_opponents row (team as opponent_team_id)
         conn = sqlite3.connect(str(team_db))
@@ -1605,7 +1596,6 @@ class TestDeleteTeam:
         user_id = _insert_user(team_db, "coach@example.com")
         token = _insert_session(team_db, user_id)
         team_id = _insert_team(team_db, "Secret Team", membership_type="tracked")
-        _set_team_inactive(team_db, team_id)
 
         with patch.dict(
             "os.environ",

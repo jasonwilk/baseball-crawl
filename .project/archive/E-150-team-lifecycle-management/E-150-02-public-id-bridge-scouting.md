@@ -4,7 +4,7 @@
 [E-150: Team Lifecycle Management](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the scouting pipeline will attempt to resolve `public_id` for opponents that have `gc_uuid` but no `public_id` before filtering them out. Opponents whose `public_id` is successfully resolved via the forward bridge are written to the database and included in the scouting run. Opponents where resolution fails (403) are logged with a clear warning so the operator knows which need manual attention.

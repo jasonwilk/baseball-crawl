@@ -134,17 +134,8 @@
             {% elif team.is_active and team.membership_type == 'tracked' and not team.public_id %}
               <span class="text-xs text-gray-400 italic">Unresolved &mdash; map first</span>
             {% endif %}
-            {% if not team.is_active %}
-            <form method="post" action="/admin/teams/{{ team.id }}/delete"
-                  class="inline"
-                  data-name="{{ team.name }}"
-                  onsubmit="return confirm('Delete ' + this.dataset.name + '? This cannot be undone.');">
-              <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
-              <button type="submit" class="text-xs text-red-700 hover:underline">
-                Delete
-              </button>
-            </form>
-            {% endif %}
+            <a href="/admin/teams/{{ team.id }}/delete"
+               class="text-xs text-red-700 hover:underline">Delete</a>
           </div>
         </td>
       </tr>

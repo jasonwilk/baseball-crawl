@@ -1,0 +1,175 @@
+{% extends "base.html" %}
+
+{% block title %}Admin -- Confirm Delete Team{% endblock %}
+
+{% block header_extras %}
+  <a href="/admin/teams" class="text-blue-200 hover:text-white">Back to Teams</a>
+  <form method="post" action="/auth/logout" class="inline"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><button type="submit" class="text-blue-200 hover:text-white bg-transparent border-0 cursor-pointer p-0 font-[inherit] text-[length:inherit]">Logout</button></form>
+{% endblock %}
+
+{% block content %}
+<h1 class="text-xl font-bold mb-4">Confirm Delete Team</h1>
+
+<!-- Admin sub-navigation -->
+<nav class="mb-6 flex gap-4 border-b border-gray-300 pb-2 text-sm">
+  <a href="/admin/users"
+     class="font-medium text-gray-600 hover:text-blue-900">Users</a>
+  <a href="/admin/teams"
+     class="font-bold underline text-blue-900">Teams</a>
+  <a href="/admin/programs"
+     class="font-medium text-gray-600 hover:text-blue-900">Programs</a>
+  <a href="/admin/opponents"
+     class="font-medium text-gray-600 hover:text-blue-900">Opponents</a>
+</nav>
+
+<div class="bg-white rounded shadow p-6 max-w-2xl">
+
+  <!-- Team info -->
+  <div class="mb-6">
+    <h2 class="text-base font-semibold text-gray-800 mb-3">Team</h2>
+    <dl class="text-sm grid grid-cols-2 gap-x-4 gap-y-2">
+      <dt class="text-gray-600 font-medium">Name</dt>
+      <dd class="text-gray-800 font-semibold">{{ team.name }}</dd>
+      <dt class="text-gray-600 font-medium">Membership</dt>
+      <dd>
+        {% if team.membership_type == 'member' %}
+          <span class="px-2 py-0.5 rounded text-xs font-semibold bg-blue-100 text-blue-800 border border-blue-300">Member</span>
+        {% else %}
+          <span class="px-2 py-0.5 rounded text-xs font-semibold bg-gray-100 text-gray-700 border border-gray-300">Tracked</span>
+        {% endif %}
+      </dd>
+      <dt class="text-gray-600 font-medium">Status</dt>
+      <dd>
+        {% if team.is_active %}
+          <span class="text-green-700 font-medium">Active</span>
+        {% else %}
+          <span class="text-gray-500">Inactive</span>
+        {% endif %}
+      </dd>
+    </dl>
+  </div>
+
+  <!-- Shared opponent warning (tracked teams only) -->
+  {% if counts.shared_member_teams %}
+  <div class="mb-5 p-4 bg-orange-50 border border-orange-300 rounded text-sm text-orange-900">
+    <p class="font-semibold mb-1">Shared Opponent Warning</p>
+    <p class="mb-2">This tracked team is referenced by the following member teams. Deleting it will remove this opponent from their scouting records.</p>
+    <ul class="list-disc list-inside">
+      {% for member_name in counts.shared_member_teams %}
+      <li>{{ member_name }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+
+  <!-- Orphaned opponents notice (member teams only) -->
+  {% if counts.orphaned_opponents %}
+  <div class="mb-5 p-4 bg-yellow-50 border border-yellow-300 rounded text-sm text-yellow-900">
+    <p class="font-semibold mb-1">Orphaned Opponents Notice</p>
+    <p class="mb-2">The following tracked opponents are linked only from this team and will no longer be associated with any member team after deletion.</p>
+    <ul class="list-disc list-inside">
+      {% for opp_name in counts.orphaned_opponents %}
+      <li>{{ opp_name }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+
+  <!-- Game sharing notice -->
+  {% if counts.games > 0 and counts.affected_opponent_teams > 0 %}
+  <div class="mb-5 p-4 bg-blue-50 border border-blue-200 rounded text-sm text-blue-900">
+    <p>Deleting this team will also remove per-game stats from {{ counts.games }} game{{ 's' if counts.games != 1 else '' }} involving {{ counts.affected_opponent_teams }} other team{{ 's' if counts.affected_opponent_teams != 1 else '' }}.</p>
+  </div>
+  {% endif %}
+
+  <!-- Row count table -->
+  <div class="mb-6">
+    <h2 class="text-base font-semibold text-gray-800 mb-3">Rows to be deleted</h2>
+    <table class="w-full text-sm border border-gray-200 rounded">
+      <thead class="bg-gray-100 text-gray-700">
+        <tr>
+          <th class="text-left py-1.5 px-3">Table</th>
+          <th class="text-right py-1.5 px-3">Rows</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr class="border-t border-gray-100">
+          <td class="py-1.5 px-3">games</td>
+          <td class="py-1.5 px-3 text-right">{{ counts.games }}</td>
+        </tr>
+        <tr class="border-t border-gray-100 bg-gray-50">
+          <td class="py-1.5 px-3">player_game_batting</td>
+          <td class="py-1.5 px-3 text-right">{{ counts.player_game_batting }}</td>
+        </tr>
+        <tr class="border-t border-gray-100">
+          <td class="py-1.5 px-3">player_game_pitching</td>
+          <td class="py-1.5 px-3 text-right">{{ counts.player_game_pitching }}</td>
+        </tr>
+        <tr class="border-t border-gray-100 bg-gray-50">
+          <td class="py-1.5 px-3">player_season_batting</td>
+          <td class="py-1.5 px-3 text-right">{{ counts.player_season_batting }}</td>
+        </tr>
+        <tr class="border-t border-gray-100">
+          <td class="py-1.5 px-3">player_season_pitching</td>
+          <td class="py-1.5 px-3 text-right">{{ counts.player_season_pitching }}</td>
+        </tr>
+        <tr class="border-t border-gray-100 bg-gray-50">
+          <td class="py-1.5 px-3">spray_charts</td>
+          <td class="py-1.5 px-3 text-right">{{ counts.spray_charts }}</td>
+        </tr>
+        <tr class="border-t border-gray-100">
+          <td class="py-1.5 px-3">team_rosters</td>
+          <td class="py-1.5 px-3 text-right">{{ counts.team_rosters }}</td>
+        </tr>
+        <tr class="border-t border-gray-100 bg-gray-50">
+          <td class="py-1.5 px-3">scouting_runs</td>
+          <td class="py-1.5 px-3 text-right">{{ counts.scouting_runs }}</td>
+        </tr>
+        <tr class="border-t border-gray-100">
+          <td class="py-1.5 px-3">crawl_jobs</td>
+          <td class="py-1.5 px-3 text-right">{{ counts.crawl_jobs }}</td>
+        </tr>
+        <tr class="border-t border-gray-100 bg-gray-50">
+          <td class="py-1.5 px-3">user_team_access</td>
+          <td class="py-1.5 px-3 text-right">{{ counts.user_team_access }}</td>
+        </tr>
+        <tr class="border-t border-gray-100">
+          <td class="py-1.5 px-3">coaching_assignments</td>
+          <td class="py-1.5 px-3 text-right">{{ counts.coaching_assignments }}</td>
+        </tr>
+        <tr class="border-t border-gray-100 bg-gray-50">
+          <td class="py-1.5 px-3">team_opponents</td>
+          <td class="py-1.5 px-3 text-right">{{ counts.team_opponents }}</td>
+        </tr>
+        <tr class="border-t border-gray-100">
+          <td class="py-1.5 px-3">opponent_links</td>
+          <td class="py-1.5 px-3 text-right">{{ counts.opponent_links }}</td>
+        </tr>
+        <tr class="border-t-2 border-gray-400 font-semibold bg-gray-100">
+          <td class="py-1.5 px-3">Total</td>
+          <td class="py-1.5 px-3 text-right">{{ counts.total_count }}</td>
+        </tr>
+      </tbody>
+    </table>
+    {% if counts.total_count == 0 %}
+    <p class="mt-2 text-sm text-gray-500 italic">No associated data found. Only the team row will be removed.</p>
+    {% endif %}
+  </div>
+
+  <!-- Action buttons -->
+  <div class="flex gap-3">
+    <form method="post" action="/admin/teams/{{ team.id }}/delete">
+      <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+      <button type="submit"
+              class="bg-red-700 text-white px-4 py-2 rounded text-sm hover:bg-red-800 font-medium">
+        Confirm Delete
+      </button>
+    </form>
+    <a href="/admin/teams"
+       class="px-4 py-2 rounded text-sm border border-gray-300 text-gray-700 hover:bg-gray-50">
+      Cancel
+    </a>
+  </div>
+
+</div>
+{% endblock %}
