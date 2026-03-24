@@ -22,7 +22,7 @@ The identifier mapping has been confirmed by API Scout: `pregame_data.opponent_i
 - [ ] **AC-5**: The seeder follows the identifier mapping and insertion path defined in Technical Notes "GC Identifier Mapping" section and the division of responsibility in "Division of Labor" section.
 - [ ] **AC-6**: The seeder's upsert always updates `opponent_name` regardless of existing resolution state. For all other fields, writes are suppressed when the existing row has a non-NULL `resolution_method` (`'auto'`, `'follow-bridge'`, `'manual'`) -- those rows are protected from overwrite. Per Technical Notes "Division of Labor" section.
 - [ ] **AC-7**: Schedule events without `pregame_data` or without `opponent_id` (e.g., practices, bye weeks) are skipped without error.
-- [ ] **AC-8**: Given the schedule or opponents JSON file does not exist or is empty, when the seeder runs, then it returns 0 and raises no exception.
+- [ ] **AC-8**: Given `schedule.json` does not exist or is empty, when the seeder runs, then it returns 0 and raises no exception. If `opponents.json` is missing but `schedule.json` exists, the seeder still processes all schedule opponents (they get name-only rows using `pregame_data.opponent_name` as the name source, per AC-3).
 
 ## Technical Approach
 The seeder reads two JSON files for a given team, cross-references them per Technical Notes "Two Data Sources, One Pipeline Step" section, and upserts results into `opponent_links`. The identifier mapping is confirmed (see Technical Notes "GC Identifier Mapping"). The function accepts `team_id` (int), paths to the schedule and opponents JSON files, and a DB connection (matching Handoff Context), making it testable with fixture data.
@@ -45,7 +45,7 @@ Reference files:
 software-engineer
 
 ## Handoff Context
-- **Produces for E-152-02**: A callable seeder function importable from `src/gamechanger/loaders/opponent_seeder.py`. Required interface: accepts `team_id` (int), path to schedule JSON, path to opponents JSON, and a DB connection. Returns the count of rows upserted (int). Raises exceptions on unrecoverable errors (e.g., malformed JSON, DB write failure) -- E-152-02 wraps the call in try/except for error isolation. Missing or empty JSON files are handled internally (returns 0, no exception).
+- **Produces for E-152-02**: A callable seeder function importable from `src/gamechanger/loaders/opponent_seeder.py`. Required interface: accepts `team_id` (int), path to schedule JSON, path to opponents JSON, and a DB connection. Returns the count of rows upserted (int). Raises exceptions on unrecoverable errors (e.g., malformed JSON, DB write failure) -- E-152-02 wraps the call in try/except for error isolation. Missing or empty `schedule.json` is handled internally (returns 0, no exception). Missing `opponents.json` is non-fatal -- the seeder still processes schedule opponents using `pregame_data.opponent_name` as the name source.
 
 ## Definition of Done
 - [ ] All acceptance criteria pass

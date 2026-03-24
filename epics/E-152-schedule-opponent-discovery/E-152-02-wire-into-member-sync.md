@@ -18,7 +18,7 @@ The baseball coach was clear: "Discovery is a side effect of having a schedule, 
 - [ ] **AC-3**: Given the sync pipeline runs for SB Freshman (team 89), then `opponent_links` contains a row for every unique opponent that appears in the team's schedule (not just "non-empty" -- the count must match the number of distinct opponents in `schedule.json`).
 - [ ] **AC-4a**: The seeder is wrapped in try/except with WARNING-level logging. A seeder failure is non-fatal -- the pipeline continues.
 - [ ] **AC-4b**: The resolver's `CredentialExpiredError` must NOT be swallowed -- it propagates up (signals dead auth, consistent with resolver's intentional re-raise design). All other resolver errors are handled internally per-opponent by the resolver itself.
-- [ ] **AC-4c**: The `crawl_jobs` row is NOT marked as failed for non-auth discovery errors. Game loading and stat loading proceed normally after seeder/resolver regardless of discovery outcome.
+- [ ] **AC-4c**: The `crawl_jobs` row is NOT marked as failed for non-auth discovery errors. Game loading and stat loading proceed normally after seeder/resolver regardless of non-auth discovery errors (auth errors per AC-4b are the exception -- they propagate).
 - [ ] **AC-5**: Given the pipeline runs twice for the same team, then no duplicate `opponent_links` rows are created (idempotent end-to-end).
 - [ ] **AC-6**: The `OpponentResolver` is invoked with a `CrawlConfig` filtered to only the syncing team, per Technical Notes "Existing OpponentResolver" section. A per-team sync must NOT trigger resolution for other member teams.
 
