@@ -26,7 +26,7 @@
 | E-125 | Full-Project Code Review Remediation | READY | 6 stories: CSRF (01), SQL injection + magic link hashing (02), OBP formula + broken backlink (03), Docker non-root + executescript FK (04), HTTP client hardening (05), security hygiene (06). All parallel, SE only. Highest priority -- security + correctness. |
 | E-134 | Strike % and # Pitches Columns | READY | 1 story. Add pitches + strike_pct to all 5 pitching display surfaces. Pure query+template, no schema changes. SE only. |
 | E-150 | Team Lifecycle Management | READY | 2 stories: cascade delete with confirmation page (01), public_id bridge resolution in scouting (02). Both SE. Independent, no shared files. 31 review findings (26 accepted, 5 dismissed). |
-| E-151 | GC UUID Manual Edit | DRAFT | 1 story: make gc_uuid editable on Edit Team page with UUID validation and uniqueness enforcement. SE only. |
+| E-151 | GC UUID Manual Edit | READY | 1 story (9 ACs): make gc_uuid editable on Edit Team page with UUID validation, uniqueness enforcement, and conditional validation for legacy placeholders. SE only. 13 review findings (11 accepted, 2 dismissed). |
 
 ## Key Architectural Decisions
 - Storage: SQLite (WAL mode). Host-mounted at ./data/app.db. Simple file backup via scripts/backup_db.py (no Litestream).
