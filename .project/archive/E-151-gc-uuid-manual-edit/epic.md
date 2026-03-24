@@ -1,7 +1,7 @@
 # E-151: GC UUID Manual Edit
 
 ## Status
-`READY`
+`COMPLETED`
 <!-- Lifecycle: DRAFT → READY → ACTIVE → COMPLETED (or BLOCKED / ABANDONED) -->
 
 ## Overview
@@ -36,7 +36,7 @@ The `gc_uuid` is critical for authenticated API calls (crawl, sync, bridge resol
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-151-01 | Editable gc_uuid on Edit Team Page | TODO | None | - |
+| E-151-01 | Editable gc_uuid on Edit Team Page | DONE | None | software-engineer |
 
 ## Dispatch Team
 - software-engineer
@@ -93,3 +93,32 @@ None -- all questions resolved via SE consultation.
 | Internal iteration 2 -- Holistic team (SE) | 1 | 1 | 0 |
 | Codex iteration 1 | 3 | 1 | 2 |
 | **Total** | **13** | **11** | **2** |
+
+- 2026-03-24: E-151-01 completed. All 9 ACs verified by PM. Epic set to COMPLETED.
+
+### Implementation Review Scorecard
+| Review Pass | Findings | Accepted | Dismissed |
+|---|---|---|---|
+| Per-story CR -- E-151-01 | 1 | 1 | 0 |
+| CR integration review | 1 | 1 | 0 |
+| Codex code review | 3 | 3 | 0 |
+| **Total** | **5** | **5** | **0** |
+
+### Documentation Assessment
+No documentation impact. This epic adds an editable field to an existing admin page. No `docs/admin/` files exist to update, and the change does not introduce a new feature, endpoint, architecture change, schema change, or new user workflow -- it extends an existing edit form with one additional field.
+
+### Context-Layer Assessment
+1. **New convention, pattern, or constraint established?** No -- the conditional UUID validation pattern (TN-1) is specific to this form, not a project-wide convention.
+2. **Architectural decision with ongoing implications?** No -- minor form field addition with no architectural impact.
+3. **Footgun, failure mode, or boundary discovered?** No -- the legacy placeholder handling was already known and documented in TN-1.
+4. **Change to agent behavior, routing, or coordination?** No.
+5. **Domain knowledge discovered that should influence future epics?** No.
+6. **New CLI command, workflow, or operational procedure introduced?** No.
+
+All six triggers: **No**. No context-layer codification needed.
+
+### Ideas Backlog Review
+No CANDIDATE ideas are newly unblocked by this epic. E-151 is a narrow admin UI fix with no downstream dependencies.
+
+### Vision Signals
+29 unprocessed signals exist in `docs/vision-signals.md`. No new signals from this epic. Signals are advisory -- does not block archival.

@@ -93,6 +93,11 @@ _VALID_MEMBERSHIP_TYPES = {"member", "tracked"}
 # Valid role values (application-layer validation; SQLite cannot add CHECK via ALTER)
 _VALID_ROLES = {"admin", "user"}
 
+# Lowercase UUID format: 8-4-4-4-12 hex groups
+_UUID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+)
+
 
 # ---------------------------------------------------------------------------
 # Admin guard dependency
@@ -493,8 +498,9 @@ def _update_team_integer(
     program_id: str | None,
     classification: str | None,
     membership_type: str,
+    gc_uuid: str | None,
 ) -> None:
-    """Update a team's name, program, classification, and membership_type.
+    """Update a team's name, program, classification, membership_type, and gc_uuid.
 
     Args:
         team_id: The team's INTEGER primary key.
@@ -502,17 +508,43 @@ def _update_team_integer(
         program_id: Program slug or None.
         classification: Classification string or None.
         membership_type: 'member' or 'tracked'.
+        gc_uuid: GameChanger UUID string or None (stores NULL).
+
+    Raises:
+        sqlite3.IntegrityError: If gc_uuid conflicts with an existing team's UUID.
     """
     with closing(get_connection()) as conn:
         conn.execute(
             """
             UPDATE teams
-            SET name = ?, program_id = ?, classification = ?, membership_type = ?
+            SET name = ?, program_id = ?, classification = ?, membership_type = ?,
+                gc_uuid = ?
             WHERE id = ?
             """,
-            (name, program_id, classification, membership_type, team_id),
+            (name, program_id, classification, membership_type, gc_uuid, team_id),
         )
         conn.commit()
+
+
+def _check_gc_uuid_duplicate_ci(gc_uuid_lower: str, exclude_team_id: int) -> bool:
+    """Return True if any other team already has this UUID (case-insensitive).
+
+    The unique index idx_teams_gc_uuid is case-sensitive.  This pre-save check
+    catches legacy uppercase UUIDs that the index would miss.
+
+    Args:
+        gc_uuid_lower: Lowercased UUID to check.
+        exclude_team_id: The team being edited -- excluded from the check.
+
+    Returns:
+        True if a duplicate exists on a different team, False otherwise.
+    """
+    with closing(get_connection()) as conn:
+        row = conn.execute(
+            "SELECT id FROM teams WHERE LOWER(gc_uuid) = ? AND id != ?",
+            (gc_uuid_lower, exclude_team_id),
+        ).fetchone()
+        return row is not None
 
 
 def _toggle_team_active_integer(team_id: int) -> int:
@@ -835,7 +867,7 @@ def _check_duplicate_new(
             return True
         if gc_uuid:
             row = conn.execute(
-                "SELECT 1 FROM teams WHERE gc_uuid = ?", (gc_uuid,)
+                "SELECT 1 FROM teams WHERE LOWER(gc_uuid) = LOWER(?)", (gc_uuid,)
             ).fetchone()
             if row:
                 return True
@@ -844,7 +876,7 @@ def _check_duplicate_new(
         # (e.g., created by opponent_resolver) -- public_id check above misses it.
         if phase1_gc_uuid and phase1_gc_uuid != gc_uuid:
             row = conn.execute(
-                "SELECT 1 FROM teams WHERE gc_uuid = ?", (phase1_gc_uuid,)
+                "SELECT 1 FROM teams WHERE LOWER(gc_uuid) = LOWER(?)", (phase1_gc_uuid,)
             ).fetchone()
             if row:
                 return True
@@ -1673,6 +1705,7 @@ async def edit_team_form(request: Request, team_id: int) -> Response:
             "edit_team": team,
             "programs": programs,
             "opponent_link_count": opponent_link_count,
+            "error": "",
             "admin_user": guard,
             "is_admin_page": True,
         },
@@ -1687,8 +1720,16 @@ async def update_team(
     program_id: str = Form(default=""),
     classification: str = Form(default=""),
     membership_type: str = Form(default="tracked"),
+    gc_uuid: str = Form(default=""),
 ) -> Response:
-    """Update a team's name, program, division, and membership type.
+    """Update a team's name, program, division, membership type, and gc_uuid.
+
+    UUID validation is conditional (TN-1): if the submitted gc_uuid (after
+    trimming) exactly matches the current DB value, validation is skipped and
+    the value is preserved as-is.  New or changed non-empty values are
+    lowercased and must match the standard UUID format.  Empty input stores
+    NULL.  Duplicate UUID raises IntegrityError which is caught and returned
+    as a form re-render with an error banner.
 
     Args:
         request: The incoming HTTP request.
@@ -1697,9 +1738,11 @@ async def update_team(
         program_id: Program slug (optional).
         classification: Classification string (optional).
         membership_type: 'member' or 'tracked'.
+        gc_uuid: GameChanger UUID string (optional; empty → NULL).
 
     Returns:
-        Redirect on success, or 404/auth response.
+        Redirect on success, re-rendered form on validation/uniqueness error,
+        or 404/auth response.
     """
     guard = await _require_admin(request)
     if isinstance(guard, Response):
@@ -1719,14 +1762,79 @@ async def update_team(
     if classification_value not in _VALID_CLASSIFICATIONS:
         classification_value = None
 
-    await run_in_threadpool(
-        _update_team_integer,
-        team_id,
-        name.strip(),
-        program_id.strip() or None,
-        classification_value,
-        membership_type,
-    )
+    # Normalize and conditionally validate gc_uuid (TN-1, TN-3).
+    gc_uuid_str = gc_uuid.strip()
+    current_gc_uuid = team["gc_uuid"]
+    error = ""
+    gc_uuid_value: str | None
+    gc_uuid_changed = False  # True when gc_uuid_value is a newly computed lowercase value
+
+    if not gc_uuid_str:
+        # Empty → NULL (TN-3)
+        gc_uuid_value = None
+    elif gc_uuid_str == current_gc_uuid:
+        # Unchanged (exact match against raw DB value) → preserve as-is, skip validation
+        gc_uuid_value = current_gc_uuid
+    else:
+        # New or changed value → lowercase, then validate format
+        gc_uuid_lower = gc_uuid_str.lower()
+        if not _UUID_RE.match(gc_uuid_lower):
+            error = "Invalid UUID format"
+            gc_uuid_value = None  # unused on error path
+        else:
+            gc_uuid_value = gc_uuid_lower
+            gc_uuid_changed = True
+
+    async def _rerender(err: str) -> Response:
+        edit_team_ctx = {
+            **team,
+            "name": name.strip(),
+            "program_id": program_id.strip() or None,
+            "classification": classification_value,
+            "membership_type": membership_type,
+            "gc_uuid": gc_uuid.strip() or None,
+        }
+        programs_list = await run_in_threadpool(_get_programs)
+        opp_count = await run_in_threadpool(get_opponent_link_count_for_team, team_id)
+        return templates.TemplateResponse(
+            request,
+            "admin/edit_team.html",
+            {
+                "edit_team": edit_team_ctx,
+                "programs": programs_list,
+                "opponent_link_count": opp_count,
+                "error": err,
+                "admin_user": guard,
+                "is_admin_page": True,
+            },
+        )
+
+    if error:
+        return await _rerender(error)
+
+    # Pre-save case-insensitive duplicate check.  The unique index is
+    # case-sensitive so it misses existing uppercase UUIDs.  This catches them.
+    if gc_uuid_changed and await run_in_threadpool(
+        _check_gc_uuid_duplicate_ci, gc_uuid_value, team_id
+    ):
+        return await _rerender("This UUID is already assigned to another team")
+
+    try:
+        await run_in_threadpool(
+            _update_team_integer,
+            team_id,
+            name.strip(),
+            program_id.strip() or None,
+            classification_value,
+            membership_type,
+            gc_uuid_value,
+        )
+    except sqlite3.IntegrityError as exc:
+        # Only treat as duplicate-UUID error when the constraint involves gc_uuid.
+        # Other IntegrityError causes (e.g. FK violations) are re-raised.
+        if "gc_uuid" in str(exc).lower():
+            return await _rerender("This UUID is already assigned to another team")
+        raise
 
     return RedirectResponse(url="/admin/teams?msg=Team+updated", status_code=303)
 

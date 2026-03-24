@@ -4,7 +4,7 @@
 [E-151: GC UUID Manual Edit](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the admin Edit Team page will display `gc_uuid` as an editable text input instead of read-only text. The admin can set, change, or clear a team's `gc_uuid` with UUID format validation and uniqueness enforcement. Invalid or duplicate values re-render the form with an error banner preserving all submitted field values (per Technical Notes TN-4).

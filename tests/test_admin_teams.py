@@ -787,6 +787,40 @@ class TestPhase2ConfirmSubmit:
         # Only 1 row (the existing one)
         assert _count_rows(team_db, "teams", "public_id = ?", ("dup123",)) == 1
 
+    def test_confirm_submit_duplicate_gc_uuid_case_insensitive(self, team_db: Path) -> None:
+        """POST /admin/teams/confirm rejects gc_uuid that differs only by case from existing."""
+        user_id = _insert_user(team_db, "admin@example.com")
+        token = _insert_session(team_db, user_id)
+        existing_uuid = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+        # Store UUID in uppercase on an existing team.
+        _insert_team(team_db, "Other Team", public_id="other-pub-id", gc_uuid=existing_uuid.upper())
+
+        with patch(
+            "src.api.routes.admin.resolve_public_id_to_uuid",
+            return_value=existing_uuid,  # lowercase from bridge
+        ):
+            with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
+                with TestClient(
+                    app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
+                ) as client:
+                    response = client.post(
+                        "/admin/teams/confirm",
+                        data={
+                            "public_id": "new-team-pub",
+                            "team_name": "New Team",
+                            "gc_uuid": existing_uuid,
+                            "membership_type": "member",
+                            "program_id": "",
+                            "classification": "",
+                            "csrf_token": _CSRF,
+                        },
+                    )
+
+        assert response.status_code == 200
+        assert "already in the system" in response.text
+        # New team must not have been inserted.
+        assert _count_rows(team_db, "teams", "public_id = ?", ("new-team-pub",)) == 0
+
     def test_confirm_submit_toctou_refreshes_gc_uuid(self, team_db: Path) -> None:
         """POST: TOCTOU guard calls bridge again to refresh gc_uuid before insert."""
         user_id = _insert_user(team_db, "admin@example.com")
