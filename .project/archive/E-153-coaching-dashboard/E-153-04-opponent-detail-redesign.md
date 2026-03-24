@@ -4,7 +4,7 @@
 [E-153: Team-Centric Coaching Dashboard](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the opponent scouting detail page (`/dashboard/opponents/{opponent_team_id}`) leads with pitching data, shows game count alongside all rate stats, and handles three distinct states gracefully: full stats available, linked but unscouted, and unlinked (name-only). Admin users see a contextual shortcut to the admin linking page for unlinked opponents.

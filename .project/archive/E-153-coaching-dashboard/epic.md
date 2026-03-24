@@ -1,7 +1,7 @@
 # E-153: Team-Centric Coaching Dashboard
 
 ## Status
-`READY`
+`COMPLETED`
 <!-- Lifecycle: DRAFT -> READY -> ACTIVE -> COMPLETED (or BLOCKED / ABANDONED) -->
 
 ## Overview
@@ -44,10 +44,10 @@ The user (Jason, system operator and SB Freshman coach) identified the core gap:
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-153-01 | UX design spec for coaching dashboard | TODO | None | - |
-| E-153-02 | Schedule loader | TODO | None | - |
-| E-153-03 | Schedule landing page and navigation restructure | TODO | E-153-01, E-153-02 | - |
-| E-153-04 | Opponent detail redesign | TODO | E-153-01, E-153-03 | - |
+| E-153-01 | UX design spec for coaching dashboard | DONE | None | - |
+| E-153-02 | Schedule loader | DONE | None | - |
+| E-153-03 | Schedule landing page and navigation restructure | DONE | E-153-01, E-153-02 | - |
+| E-153-04 | Opponent detail redesign | DONE | E-153-01, E-153-03 | - |
 
 ## Dispatch Team
 - ux-designer
@@ -143,6 +143,41 @@ This epic depends on E-152 (Schedule-Based Opponent Discovery) being deployed be
 
 ## History
 - 2026-03-24: Created. Expert consultation with baseball-coach, ux-designer, software-engineer, data-engineer.
+- 2026-03-24: Dispatch completed. 4 stories implemented (UXD: E-153-01, SE: E-153-02/03/04). Per-story CR: E-153-01 skipped (context-layer-only); E-153-02 APPROVED round 2 (1 MUST FIX fixed); E-153-03 APPROVED round 1 (1 SHOULD FIX dismissed); E-153-04 APPROVED round 2 (4 MUST FIX fixed, 1 SHOULD FIX fixed). CR integration review: APPROVED (1 SHOULD FIX fixed -- game_detail active_nav, 1 dismissed). Codex code review: 4 findings, all dismissed (pre-existing architecture, schema constraint, domain inapplicable). Epic COMPLETED.
+
+### Dispatch Review Scorecard
+| Review Pass | Findings | Accepted | Dismissed |
+|---|---|---|---|
+| Per-story CR -- E-153-01 | 0 | 0 | 0 |
+| Per-story CR -- E-153-02 | 1 | 1 | 0 |
+| Per-story CR -- E-153-03 | 1 | 0 | 1 |
+| Per-story CR -- E-153-04 | 5 | 5 | 0 |
+| CR integration review | 2 | 1 | 1 |
+| Codex code review | 4 | 0 | 4 |
+| **Total** | **13** | **7** | **6** |
+
+### Documentation Assessment
+Triggers fired: (1) New feature shipped -- schedule landing page, 3-tab navigation, opponent detail redesign; (5) Epic changes how users interact with the system -- `/dashboard/` now serves schedule instead of batting, navigation restructured from 4 tabs to 3. `docs/coaching/scouting-reports.md` describes a "Coming Soon" scouting report feature that is now partially live -- needs updating to reflect the current dashboard layout, schedule-first workflow, and opponent detail page structure. **Action required**: dispatch docs-writer to update `docs/coaching/scouting-reports.md`.
+
+### Context-Layer Assessment
+1. **New convention, pattern, or constraint?** No. Schedule loader follows the existing loader pattern (added to `_LOADERS` list). No new conventions established.
+2. **Architectural decision with ongoing implications?** No. The URL restructuring (`/dashboard/` → schedule, `/dashboard/batting` → batting) is an app-level routing change, not an architectural decision that affects future epic planning.
+3. **Footgun, failure mode, or boundary discovered?** No. The `_check_opponent_authorization` pattern (games-table-based auth for stub opponents) follows existing patterns. No new gotchas discovered.
+4. **Change to agent behavior, routing, or coordination?** No. No agent definitions, rules, skills, or hooks were modified.
+5. **Domain knowledge discovered?** No. All domain insights (pitching-first, schedule-as-landing, 3-tab nav) were captured during E-153 planning and already reflected in the UX design spec. No new domain discoveries during implementation.
+6. **New CLI command, workflow, or operational procedure?** No. No new `bb` commands or scripts added. The schedule loader runs automatically as part of the existing sync pipeline.
+
+All context-layer triggers: **No**. No claude-architect dispatch required.
+
+### Ideas Backlog Review
+- **IDEA-035 (Opponent Page Redesign)**: E-153-04 delivered the opponent detail redesign (pitching-first, empty states, team batting summary). IDEA-035 scope ("rate stats, flags, PDF export") is partially addressed -- rate stats done, proactive flags and PDF export remain. Recommend updating IDEA-035 to reflect reduced scope (flags + PDF only).
+- **IDEA-037 (Scouting Report Redesign)**: Overlaps with E-153-04. Rate stats and pitching-first are done. Remaining scope: proactive flags, PDF export, further enhancements. Recommend updating to note E-153 partial delivery.
+- Other CANDIDATEs: No additional ideas unblocked by E-153.
+
+### Vision Signals
+10+ unprocessed signals exist in `docs/vision-signals.md`. Advisory: consider "curate the vision" when convenient. This does not block archival.
+
+- 2026-03-24: Epic set to ACTIVE. Dispatch started.
 - 2026-03-24: READY. 7 review passes, 47 total findings (45 accepted, 2 dismissed). Review scorecard:
 
 | Review Pass | Findings | Accepted | Dismissed |

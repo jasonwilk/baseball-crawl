@@ -249,7 +249,7 @@ class TestTeamAccessControl:
     ) -> None:
         """AC-1: /dashboard with no team_id defaults to first permitted team."""
         client, _, _ = single_team_client
-        response = client.get("/dashboard")
+        response = client.get("/dashboard/batting")
         assert response.status_code == 200
         assert "Alpha Team" in response.text
 
@@ -265,7 +265,7 @@ class TestTeamSelectorVisibility:
     def test_multi_team_user_sees_selector(self, multi_team_client) -> None:
         """AC-3, AC-9: multi-team user sees team selector with all permitted teams."""
         client, _, _ = multi_team_client
-        response = client.get("/dashboard")
+        response = client.get("/dashboard/batting")
         assert response.status_code == 200
         html = response.text
         # Both team names must appear as selector links
@@ -277,7 +277,7 @@ class TestTeamSelectorVisibility:
     def test_single_team_user_no_selector(self, single_team_client) -> None:
         """AC-4, AC-9: single-team user does not see team selector."""
         client, team_alpha_id, team_beta_id = single_team_client
-        response = client.get("/dashboard")
+        response = client.get("/dashboard/batting")
         assert response.status_code == 200
         html = response.text
         # team_id link for team-beta should not appear (not permitted)
@@ -306,7 +306,7 @@ class TestLogoutLink:
     ) -> None:
         """AC-10: logout link present for single-team user."""
         client, _, _ = single_team_client
-        response = client.get("/dashboard")
+        response = client.get("/dashboard/batting")
         assert response.status_code == 200
         assert "/auth/logout" in response.text
         assert "Logout" in response.text
@@ -316,7 +316,7 @@ class TestLogoutLink:
     ) -> None:
         """AC-10: logout link present for multi-team user."""
         client, _, _ = multi_team_client
-        response = client.get("/dashboard")
+        response = client.get("/dashboard/batting")
         assert response.status_code == 200
         assert "/auth/logout" in response.text
         assert "Logout" in response.text
@@ -324,7 +324,7 @@ class TestLogoutLink:
     def test_user_email_shown(self, single_team_client) -> None:
         """AC-5: user's email shown in dashboard header (display_name removed in E-100)."""
         client, _, _ = single_team_client
-        response = client.get("/dashboard")
+        response = client.get("/dashboard/batting")
         assert response.status_code == 200
         # E-100: no display_name column; email is the identity shown
         assert "coach-alpha@example.com" in response.text
@@ -368,7 +368,7 @@ class TestIntegerTeamSelectorLinks:
     ) -> None:
         """AC-8(c): team selector href contains the INTEGER team_id, not a text slug."""
         client, team_alpha_id, team_beta_id = multi_team_client
-        response = client.get("/dashboard")
+        response = client.get("/dashboard/batting")
         assert response.status_code == 200
         html = response.text
         # The team selector must render links with integer team IDs

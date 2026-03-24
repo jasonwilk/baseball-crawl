@@ -4,7 +4,7 @@
 [E-153: Team-Centric Coaching Dashboard](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the sync pipeline loads upcoming (not-yet-completed) games from `schedule.json` into the `games` table with `status='scheduled'`. When a game completes and its boxscore is loaded, the existing game loader's upsert naturally upgrades the row to `status='completed'` with scores. The coaching dashboard can then query both upcoming and past games from one table.

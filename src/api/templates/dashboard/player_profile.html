@@ -17,11 +17,11 @@
 
 <div class="mb-4">
   {% if batting_seasons %}
-  <a href="/dashboard?team_id={{ backlink_team_id }}{% if year %}&year={{ year }}{% endif %}" class="text-blue-900 hover:underline text-sm">&larr; Back to Team Stats</a>
+  <a href="/dashboard/batting?team_id={{ backlink_team_id }}{% if year %}&year={{ year }}{% endif %}" class="text-blue-900 hover:underline text-sm">&larr; Back to Team Stats</a>
   {% elif pitching_seasons %}
   <a href="/dashboard/pitching?team_id={{ backlink_team_id }}{% if year %}&year={{ year }}{% endif %}" class="text-blue-900 hover:underline text-sm">&larr; Back to Team Pitching</a>
   {% else %}
-  <a href="/dashboard{% if year %}?year={{ year }}{% endif %}" class="text-blue-900 hover:underline text-sm">&larr; Back to Team Stats</a>
+  <a href="/dashboard/batting{% if year %}?year={{ year }}{% endif %}" class="text-blue-900 hover:underline text-sm">&larr; Back to Team Stats</a>
   {% endif %}
 </div>
 

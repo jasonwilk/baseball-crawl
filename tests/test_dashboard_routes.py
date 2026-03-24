@@ -217,7 +217,7 @@ class TestSeasonAutoDetection:
         ):
             client = _make_dev_client(db_path, team_id)
             with client:
-                resp = client.get("/dashboard")
+                resp = client.get("/dashboard/batting")
 
         assert resp.status_code == 200
         # current season should be auto-selected (most recent)
@@ -257,7 +257,7 @@ class TestSeasonAutoDetection:
             client = _make_dev_client(db_path, team_id)
             with client:
                 # Request a non-existent season; should fall back to current
-                resp = client.get(f"/dashboard?season_id={_PRIOR_SEASON}")
+                resp = client.get(f"/dashboard/batting?season_id={_PRIOR_SEASON}")
 
         assert resp.status_code == 200
         # The active season pill should be for _CURRENT_SEASON (auto-detected)
@@ -294,7 +294,7 @@ class TestContextVarsInHTML:
         ):
             client = _make_dev_client(db_path, team_id)
             with client:
-                resp = client.get("/dashboard")
+                resp = client.get("/dashboard/batting")
         assert resp.status_code == 200
         assert f"season_id={_CURRENT_SEASON}" in resp.text
 
@@ -358,7 +358,7 @@ class TestNavigationLinks:
         ):
             client = _make_dev_client(db_path, team_id)
             with client:
-                resp = client.get("/dashboard")
+                resp = client.get("/dashboard/batting")
 
         html = resp.text
         assert f"season_id={_PRIOR_SEASON}" in html
@@ -366,7 +366,7 @@ class TestNavigationLinks:
         # year is now included between team_id and season_id.
         _prior_year = _CURRENT_YEAR - 1
         assert (
-            f"/dashboard?team_id={team_id}&amp;year={_prior_year}&amp;season_id={_PRIOR_SEASON}"
+            f"/dashboard/batting?team_id={team_id}&amp;year={_prior_year}&amp;season_id={_PRIOR_SEASON}"
             in html
         )
 
@@ -398,7 +398,7 @@ class TestNavigationLinks:
             {"DATABASE_PATH": str(db_path), "DEV_USER_EMAIL": "dev2@example.com"},
         ):
             with TestClient(app, follow_redirects=False) as client:
-                resp = client.get(f"/dashboard?team_id={team_id_a}&season_id={_PRIOR_SEASON}")
+                resp = client.get(f"/dashboard/batting?team_id={team_id_a}&season_id={_PRIOR_SEASON}")
 
         assert resp.status_code == 200
         html = resp.text
@@ -447,7 +447,8 @@ class TestNavigationLinks:
         opp_team_id = _insert_team(db_path, "Opponent Team")
         _insert_season(db_path, _CURRENT_SEASON)
 
-        # Insert a completed game so last_meeting is non-None and Box Score link renders
+        # Insert a completed game so last_meeting is non-None and Box Score link renders.
+        # E-153-04: Box Score link only appears in full_stats state, so also add batting stats.
         conn = sqlite3.connect(str(db_path))
         conn.execute("PRAGMA foreign_keys=ON;")
         conn.execute(
@@ -458,6 +459,9 @@ class TestNavigationLinks:
         )
         conn.commit()
         conn.close()
+        # Add a player + batting stats for the opponent so the page enters full_stats state.
+        _insert_player(db_path, "opp-bx-001", "Box", "Scout")
+        _insert_batting_stats(db_path, "opp-bx-001", opp_team_id, _CURRENT_SEASON)
 
         with patch.dict(
             "os.environ",
@@ -531,7 +535,7 @@ class TestEmptyState:
         ):
             client = _make_dev_client(db_path, team_id)
             with client:
-                resp = client.get("/dashboard")
+                resp = client.get("/dashboard/batting")
 
         assert resp.status_code == 200
         assert "Stats haven&#x27;t been loaded" in resp.text or "Stats haven't been loaded" in resp.text
@@ -563,7 +567,7 @@ class TestEmptyState:
         ):
             client = _make_dev_client(db_path, team_id)
             with client:
-                resp = client.get("/dashboard")
+                resp = client.get("/dashboard/batting")
 
         assert resp.status_code == 200
         # The fallback season_id should start with the current year
@@ -581,7 +585,7 @@ class TestEmptyState:
         ):
             client = _make_dev_client(db_path, team_id)
             with client:
-                resp = client.get("/dashboard")
+                resp = client.get("/dashboard/batting")
 
         assert resp.status_code == 200
         # bg-yellow-50 is the empty-state banner class for teams with no loaded stats
@@ -610,7 +614,7 @@ class TestSeasonSelectorSuppression:
         ):
             client = _make_dev_client(db_path, team_id)
             with client:
-                resp = client.get("/dashboard")
+                resp = client.get("/dashboard/batting")
 
         assert resp.status_code == 200
         # The old pill selector linked to season_id with class="px-3" -- confirm absent
@@ -639,7 +643,7 @@ class TestFreshnessIndicator:
         ):
             client = _make_dev_client(db_path, team_id)
             with client:
-                resp = client.get("/dashboard")
+                resp = client.get("/dashboard/batting")
 
         assert resp.status_code == 200
         assert "bg-yellow-50" not in resp.text
@@ -759,7 +763,7 @@ class TestBattingSortParams:
         ):
             client = _make_dev_client(db_path, team_id)
             with client:
-                resp = client.get(f"/dashboard?season_id={_CURRENT_SEASON}")
+                resp = client.get(f"/dashboard/batting?season_id={_CURRENT_SEASON}")
         assert resp.status_code == 200
         names = _extract_player_order(resp.text)
         # Alice (.500) before Bob (.300); Carol (0 AB) last
@@ -775,7 +779,7 @@ class TestBattingSortParams:
         ):
             client = _make_dev_client(db_path, team_id)
             with client:
-                resp = client.get(f"/dashboard?season_id={_CURRENT_SEASON}&sort=hr&dir=desc")
+                resp = client.get(f"/dashboard/batting?season_id={_CURRENT_SEASON}&sort=hr&dir=desc")
         assert resp.status_code == 200
         names = _extract_player_order(resp.text)
         assert names.index("Bob Beta") < names.index("Alice Alpha")
@@ -790,7 +794,7 @@ class TestBattingSortParams:
         ):
             client = _make_dev_client(db_path, team_id)
             with client:
-                resp = client.get(f"/dashboard?season_id={_CURRENT_SEASON}&sort=so&dir=asc")
+                resp = client.get(f"/dashboard/batting?season_id={_CURRENT_SEASON}&sort=so&dir=asc")
         assert resp.status_code == 200
         names = _extract_player_order(resp.text)
         assert names.index("Alice Alpha") < names.index("Bob Beta")
@@ -805,7 +809,7 @@ class TestBattingSortParams:
         ):
             client = _make_dev_client(db_path, team_id)
             with client:
-                resp = client.get(f"/dashboard?season_id={_CURRENT_SEASON}&sort=notacolumn&dir=desc")
+                resp = client.get(f"/dashboard/batting?season_id={_CURRENT_SEASON}&sort=notacolumn&dir=desc")
         assert resp.status_code == 200
         names = _extract_player_order(resp.text)
         # Falls back to AVG desc: Alice (.500) before Bob (.300); Carol (0 AB) last
@@ -821,7 +825,7 @@ class TestBattingSortParams:
         ):
             client = _make_dev_client(db_path, team_id)
             with client:
-                resp = client.get(f"/dashboard?season_id={_CURRENT_SEASON}&sort=name&dir=desc")
+                resp = client.get(f"/dashboard/batting?season_id={_CURRENT_SEASON}&sort=name&dir=desc")
         assert resp.status_code == 200
         names = _extract_player_order(resp.text)
         # "Bob Beta" > "Alice Alpha" alphabetically, so desc puts Bob first
@@ -838,7 +842,7 @@ class TestBattingSortParams:
         ):
             client = _make_dev_client(db_path, team_id)
             with client:
-                resp = client.get(f"/dashboard?season_id={_CURRENT_SEASON}&sort=hr&dir=desc")
+                resp = client.get(f"/dashboard/batting?season_id={_CURRENT_SEASON}&sort=hr&dir=desc")
         assert resp.status_code == 200
         html = resp.text
         # The HR header link should now toggle to asc (& is autoescaped to &amp; in HTML)
@@ -853,7 +857,7 @@ class TestBattingSortParams:
         ):
             client = _make_dev_client(db_path, team_id)
             with client:
-                resp = client.get(f"/dashboard?season_id={_CURRENT_SEASON}&sort=hr&dir=asc")
+                resp = client.get(f"/dashboard/batting?season_id={_CURRENT_SEASON}&sort=hr&dir=asc")
         assert resp.status_code == 200
         names = _extract_player_order(resp.text)
         assert names[-1] == "Carol Gamma"
@@ -867,7 +871,7 @@ class TestBattingSortParams:
         ):
             client = _make_dev_client(db_path, team_id)
             with client:
-                resp = client.get(f"/dashboard?season_id={_CURRENT_SEASON}&sort=hr&dir=desc")
+                resp = client.get(f"/dashboard/batting?season_id={_CURRENT_SEASON}&sort=hr&dir=desc")
         assert resp.status_code == 200
         html = resp.text
         # Descending indicator: either unicode ▼ or HTML entity &#9660;
@@ -902,7 +906,7 @@ class TestBattingSortParams:
         ):
             with TestClient(app, follow_redirects=False) as client:
                 resp = client.get(
-                    f"/dashboard?team_id={team_id_a}&season_id={_CURRENT_SEASON}&sort=hr&dir=desc"
+                    f"/dashboard/batting?team_id={team_id_a}&season_id={_CURRENT_SEASON}&sort=hr&dir=desc"
                 )
 
         assert resp.status_code == 200

@@ -5,7 +5,8 @@ calls are executed via ``run_in_threadpool`` to avoid blocking the async
 event loop.
 
 Routes:
-    GET /dashboard            -- Team season batting stats, scoped to the authenticated
+    GET /dashboard            -- Season schedule (upcoming + completed games).
+    GET /dashboard/batting    -- Team season batting stats, scoped to the authenticated
                                  user's permitted teams.
     GET /dashboard/pitching   -- Team season pitching stats.
     GET /dashboard/games      -- Game log with scores and W/L indicators.
@@ -292,6 +293,179 @@ def _sort_pitching(pitchers: list[dict], sort_key: str, direction: str) -> list[
 
 
 @router.get("/dashboard", response_model=None)
+async def schedule(request: Request) -> Response:
+    """Render the schedule landing page for the active team.
+
+    Shows upcoming games (status='scheduled') as cards sorted by date ascending
+    and completed games as a compact table sorted by date descending.  The nearest
+    upcoming game receives visual emphasis (NEXT badge).  Each game row links to
+    the opponent scouting page; completed game scores link to the box score.
+
+    The active team is determined by:
+    1. The ``team_id`` query parameter, if provided and permitted.
+    2. The first entry in ``request.state.permitted_teams`` otherwise.
+
+    Returns a 403 if the requested team_id is not in the user's permitted list.
+    Returns a "no assignments" page if the user has no permitted teams.
+
+    Args:
+        request: The incoming HTTP request.
+
+    Returns:
+        HTMLResponse containing the rendered schedule page, or a 403.
+    """
+    permitted_teams: list[int] = getattr(request.state, "permitted_teams", [])
+    user: dict = getattr(request.state, "user", {})
+
+    if not permitted_teams:
+        return templates.TemplateResponse(
+            request,
+            "dashboard/schedule.html",
+            {
+                "upcoming_games": [],
+                "completed_games": [],
+                "next_game_id": None,
+                "team_name": "",
+                "permitted_team_infos": [],
+                "active_team_id": None,
+                "user": user,
+                "no_assignments": True,
+                "is_dev_mode": bool(os.environ.get("DEV_USER_EMAIL")),
+            },
+        )
+
+    # Parse team_id param and validate
+    requested_team_id_raw = request.query_params.get("team_id")
+    team_id_param_s: int | None = None
+    if requested_team_id_raw:
+        try:
+            team_id_param_s = int(requested_team_id_raw)
+        except (ValueError, TypeError):
+            return HTMLResponse(content="Bad Request", status_code=400)
+        if team_id_param_s not in permitted_teams:
+            return HTMLResponse(content="Forbidden", status_code=403)
+
+    # Parse year param
+    year_raw_s = request.query_params.get("year")
+    year_param_s: int | None = None
+    if year_raw_s:
+        try:
+            year_param_s = int(year_raw_s)
+        except (ValueError, TypeError):
+            year_param_s = None
+
+    # Build team→year map and resolve active team + year
+    team_year_map_s = await run_in_threadpool(db.get_team_year_map, permitted_teams)
+    current_year = max(team_year_map_s.values()) if team_year_map_s else datetime.date.today().year
+    active_team_id_s, active_year_s = _resolve_year_and_team(
+        team_year_map_s, permitted_teams, team_id_param_s, year_param_s,
+        current_year=current_year,
+    )
+    available_years_s: list[int] = sorted(set(team_year_map_s.values()), reverse=True)
+    requested_season_id = request.query_params.get("season_id", "").strip()
+
+    available_seasons = await run_in_threadpool(db.get_available_seasons, active_team_id_s)
+    if not requested_season_id or year_param_s is not None:
+        season_id = _pick_season_for_year(available_seasons, active_year_s, current_year)
+    else:
+        season_id = requested_season_id
+    if not available_seasons:
+        available_seasons = [{"season_id": season_id}]
+
+    games_raw, team_infos = await _fetch_schedule_data(active_team_id_s, season_id, permitted_teams)
+
+    # Split into upcoming (scheduled) and completed, in correct display order
+    today = datetime.date.today()
+    upcoming: list[dict] = [g for g in games_raw if g.get("status") == "scheduled"]
+    completed: list[dict] = list(reversed([g for g in games_raw if g.get("status") == "completed"]))
+
+    # Identify the nearest upcoming game
+    next_game_id: str | None = None
+    for g in upcoming:
+        date_str = g.get("game_date", "")
+        if date_str:
+            try:
+                game_date = datetime.date.fromisoformat(date_str[:10])
+                if game_date >= today:
+                    next_game_id = g["game_id"]
+                    break
+            except ValueError:
+                pass
+
+    # Add days_until to each upcoming game
+    for g in upcoming:
+        date_str = g.get("game_date", "")
+        if date_str:
+            try:
+                game_date = datetime.date.fromisoformat(date_str[:10])
+                g["days_until"] = (game_date - today).days
+            except ValueError:
+                g["days_until"] = None
+        else:
+            g["days_until"] = None
+
+    # Add W/L indicator to completed games
+    for g in completed:
+        g["wl"] = _compute_wl(g, active_team_id_s)
+
+    team_name = next(
+        (t["name"] for t in team_infos if t["id"] == active_team_id_s),
+        str(active_team_id_s),
+    )
+
+    logger.debug(
+        "Schedule: team=%s season_id=%s upcoming=%d completed=%d",
+        active_team_id_s, season_id, len(upcoming), len(completed),
+    )
+
+    teams_with_stat_data_s = await run_in_threadpool(db.get_teams_with_stat_data, permitted_teams)
+    year_team_infos_s = [t for t in team_infos if team_year_map_s.get(t["id"]) == active_year_s]
+    if not year_team_infos_s:
+        year_team_infos_s = team_infos
+    for t in year_team_infos_s:
+        t["has_stat_data"] = t["id"] in teams_with_stat_data_s
+
+    return templates.TemplateResponse(
+        request,
+        "dashboard/schedule.html",
+        {
+            "upcoming_games": upcoming,
+            "completed_games": completed,
+            "next_game_id": next_game_id,
+            "team_name": team_name,
+            "permitted_team_infos": year_team_infos_s,
+            "active_team_id": active_team_id_s,
+            "active_year": active_year_s,
+            "available_years": available_years_s,
+            "current_year": current_year,
+            "season_id": season_id,
+            "user": user,
+            "no_assignments": False,
+        },
+    )
+
+
+async def _fetch_schedule_data(
+    active_team_id: int,
+    season_id: str,
+    permitted_teams: list[int],
+) -> tuple[list, list]:
+    """Fetch schedule games and team display names concurrently.
+
+    Args:
+        active_team_id: The team_id whose schedule to fetch.
+        season_id: The season slug.
+        permitted_teams: All team_ids the user can access.
+
+    Returns:
+        Tuple of (games list, team_infos list).
+    """
+    games = await run_in_threadpool(db.get_schedule_games, active_team_id, season_id)
+    team_infos = await run_in_threadpool(db.get_teams_by_ids, permitted_teams)
+    return games, team_infos
+
+
+@router.get("/dashboard/batting", response_model=None)
 async def team_stats(request: Request) -> Response:
     """Render the team batting stats dashboard page.
 
@@ -773,10 +947,11 @@ async def _fetch_game_list_data(
 
 
 def _compute_opponent_pitching_rates(pitchers: list[dict]) -> list[dict]:
-    """Compute ERA, K/9, and WHIP for each pitcher row in the scouting report.
+    """Compute ERA, K/9, BB/9, WHIP, K/BB, and usage stats for each pitcher.
 
-    Mutates each row in place by adding ``era``, ``k9``, ``whip``, and
-    ``avg_pitches`` string keys.  Division by zero (ip_outs == 0) yields ``"-"``.
+    Mutates each row in place by adding ``era``, ``k9``, ``bb9``, ``whip``,
+    ``k_bb_ratio``, ``avg_pitches``, and ``strike_pct`` string keys.
+    Division by zero (ip_outs == 0) yields ``"-"``.
 
     Args:
         pitchers: List of pitcher dicts from ``db.get_opponent_scouting_report``.
@@ -796,14 +971,116 @@ def _compute_opponent_pitching_rates(pitchers: list[dict]) -> list[dict]:
         if ip_outs == 0:
             row["era"] = "-"
             row["k9"] = "-"
+            row["bb9"] = "-"
             row["whip"] = "-"
         else:
             row["era"] = f"{(er * 27) / ip_outs:.2f}"
             row["k9"] = f"{(so * 27) / ip_outs:.1f}"
+            row["bb9"] = f"{(bb * 27) / ip_outs:.1f}"
             row["whip"] = f"{(bb + h) * 3 / ip_outs:.2f}"
+        row["k_bb_ratio"] = f"{so / bb:.1f}" if bb > 0 else "--"
         row["avg_pitches"] = str(pitches // games) if games > 0 else "-"
         row["strike_pct"] = f"{(total_strikes / pitches) * 100:.1f}%" if pitches > 0 else "-"
     return pitchers
+
+
+def _get_top_pitchers(pitchers: list[dict], n: int = 3) -> list[dict]:
+    """Return the top N pitchers sorted by innings pitched descending.
+
+    Args:
+        pitchers: List of pitcher dicts (with ``ip_outs`` already populated
+                  and rate fields computed by ``_compute_opponent_pitching_rates``).
+        n:        Maximum number of pitchers to return.
+
+    Returns:
+        List of up to *n* pitcher dicts, highest ip_outs first.
+    """
+    return sorted(
+        (p for p in pitchers if (p.get("ip_outs") or 0) > 0),
+        key=lambda p: p.get("ip_outs") or 0,
+        reverse=True,
+    )[:n]
+
+
+def _compute_team_batting(batting: list[dict]) -> dict:
+    """Compute team-level aggregate batting tendencies from player season rows.
+
+    Aggregates OBP, K%, BB%, and SLG across all batters.  Returns a dict
+    of formatted string values plus a ``has_data`` flag.
+
+    Args:
+        batting: List of batter dicts from ``db.get_opponent_scouting_report``
+                 (must include ``tb`` field added in this story).
+
+    Returns:
+        Dict with keys: ``obp``, ``k_pct``, ``bb_pct``, ``slg``, ``has_data``.
+        Rate values are formatted strings (e.g., ``".345"``, ``"18.2%"``).
+        ``has_data`` is ``True`` when the denominators are non-zero.
+    """
+    total_h = sum(p.get("h") or 0 for p in batting)
+    total_bb = sum(p.get("bb") or 0 for p in batting)
+    total_hbp = sum(p.get("hbp") or 0 for p in batting)
+    total_shf = sum(p.get("shf") or 0 for p in batting)
+    total_so = sum(p.get("so") or 0 for p in batting)
+    total_ab = sum(p.get("ab") or 0 for p in batting)
+    total_tb = sum(p.get("tb") or 0 for p in batting)
+
+    pa_denom = total_ab + total_bb + total_hbp + total_shf
+    has_data = pa_denom > 0
+
+    if not has_data:
+        return {"obp": "-", "k_pct": "-", "bb_pct": "-", "slg": "-", "has_data": False}
+
+    obp_num = total_h + total_bb + total_hbp
+    obp_val = obp_num / pa_denom
+    k_pct_val = total_so / pa_denom * 100
+    bb_pct_val = total_bb / pa_denom * 100
+    slg_val = total_tb / total_ab if total_ab > 0 else 0.0
+
+    obp_str = f"{obp_val:.3f}".lstrip("0") if obp_val < 1 else f"{obp_val:.3f}"
+    slg_str = f"{slg_val:.3f}".lstrip("0") if slg_val < 1 else f"{slg_val:.3f}"
+
+    return {
+        "obp": obp_str or ".000",
+        "k_pct": f"{k_pct_val:.1f}%",
+        "bb_pct": f"{bb_pct_val:.1f}%",
+        "slg": slg_str or ".000",
+        "has_data": True,
+    }
+
+
+def _is_admin_user(user: dict) -> bool:
+    """Return True if *user* has admin access (ADMIN_EMAIL match or DB role).
+
+    Mirrors the logic in ``admin.py::_require_admin`` without raising
+    HTTP exceptions -- used for soft admin checks in dashboard routes.
+
+    Args:
+        user: The user dict from ``request.state.user``.
+
+    Returns:
+        True if the user has admin access, False otherwise.
+    """
+    import sqlite3 as _sqlite3
+    from contextlib import closing as _closing
+
+    if not user:
+        return False
+    admin_email = os.environ.get("ADMIN_EMAIL", "")
+    if admin_email and user.get("email") == admin_email:
+        return True
+    user_id = user.get("id")
+    if not user_id:
+        return False
+    try:
+        with _closing(db.get_connection()) as conn:
+            row = conn.execute(
+                "SELECT role FROM users WHERE id = ?", (user_id,)
+            ).fetchone()
+        return row is not None and row[0] == "admin"
+    except _sqlite3.Error:
+        logger.exception("Failed to check admin role for user %s", user_id)
+        return False
 
 
 def _pick_key_players(
@@ -991,8 +1268,9 @@ async def _fetch_opponent_list_data(
 async def opponent_detail(request: Request, opponent_team_id: int) -> Response:
     """Render the opponent scouting report page.
 
-    Shows Key Players card, Last Meeting card, batting leaders, and pitching
-    leaders for the opponent team.
+    Shows pitching card, team batting summary, last meeting, and full stat
+    tables for the opponent team.  Handles three states: full stats, linked
+    but unscouted, and unlinked.
 
     Authorization: the opponent must appear in games for at least one of the
     user's permitted teams.  Returns 403 otherwise.
@@ -1007,14 +1285,14 @@ async def opponent_detail(request: Request, opponent_team_id: int) -> Response:
     permitted_teams: list[int] = getattr(request.state, "permitted_teams", [])
     user: dict = getattr(request.state, "user", {})
 
-    # AC-11: verify opponent appears in games for at least one permitted team
+    # Verify opponent appears in games for at least one permitted team.
     authorized = await run_in_threadpool(
         _check_opponent_authorization, opponent_team_id, permitted_teams
     )
     if not authorized:
         return HTMLResponse(content="Forbidden", status_code=403)
 
-    # Determine active team for Last Meeting query (AC-16)
+    # Determine active team for Last Meeting and opponent_links scope.
     requested_team_id_raw = request.query_params.get("team_id")
     if requested_team_id_raw:
         try:
@@ -1048,34 +1326,58 @@ async def opponent_detail(request: Request, opponent_team_id: int) -> Response:
     if not scouting_report:
         return HTMLResponse(content="Internal error fetching scouting report", status_code=500)
 
-    # Compute pitching rates before key player selection
+    # Determine empty state (unlinked / linked_unscouted / full_stats).
+    scouting_status = await run_in_threadpool(
+        db.get_opponent_scouting_status,
+        opponent_team_id,
+        active_team_id_od,
+        season_id,
+    )
+    empty_state: str = scouting_status["status"]
+    link_id: int | None = scouting_status["link_id"]
+
+    # Admin detection for conditional shortcut link.
+    is_admin = await run_in_threadpool(_is_admin_user, user)
+    if link_id is not None:
+        admin_link_url = f"/admin/opponents/{link_id}/connect"
+    else:
+        admin_link_url = "/admin/opponents"
+
+    # Compute pitching rates.
     pitchers = _compute_opponent_pitching_rates(scouting_report.get("pitching", []))
     scouting_report["pitching"] = pitchers
 
-    key_players = _pick_key_players(scouting_report.get("batting", []), pitchers)
+    # Top 3 pitchers for the pitching card (by innings pitched).
+    top_pitchers = _get_top_pitchers(pitchers)
 
-    # Opponent batting sort params (AC-1) -- subset per TN-3, see _OPP_BAT_KEYS
+    # Team batting summary card.
+    team_batting = _compute_team_batting(scouting_report.get("batting", []))
+
+    # Game count from the season record.
+    record = scouting_report.get("record")
+    game_count = (record["wins"] + record["losses"]) if record else 0
+
+    # Opponent batting sort params -- subset per TN-3, see _OPP_BAT_KEYS
     bat_sort, bat_dir, bat_needs_sort = _parse_sort_params(
         request, "bat_sort", "bat_dir", _OPP_BAT_KEYS, "avg", _BATTING_DEFAULT_DIR,
     )
     if bat_needs_sort:
         scouting_report["batting"] = _sort_batting(scouting_report.get("batting", []), bat_sort, bat_dir)
 
-    # Opponent pitching sort params (AC-1) -- subset per TN-3, see _OPP_PIT_KEYS
+    # Opponent pitching sort params -- subset per TN-3, see _OPP_PIT_KEYS
     pit_sort, pit_dir, pit_needs_sort = _parse_sort_params(
         request, "pit_sort", "pit_dir", _OPP_PIT_KEYS, "era", _PITCHING_DEFAULT_DIR,
     )
     if pit_needs_sort:
         scouting_report["pitching"] = _sort_pitching(scouting_report.get("pitching", []), pit_sort, pit_dir)
 
-    # Fetch last meeting
+    # Fetch last meeting.
     last_meeting = None
     if active_team_id_od:
         last_meeting = await run_in_threadpool(
             db.get_last_meeting, active_team_id_od, opponent_team_id, season_id
         )
 
-    # AC-7: pass year through for back-links
     year_od_raw = request.query_params.get("year")
     year_od: int | None = None
     if year_od_raw:
@@ -1085,8 +1387,8 @@ async def opponent_detail(request: Request, opponent_team_id: int) -> Response:
             year_od = None
 
     logger.debug(
-        "Opponent detail: opponent=%s season_id=%s bat_sort=%s pit_sort=%s",
-        opponent_team_id, season_id, bat_sort, pit_sort,
+        "Opponent detail: opponent=%s season_id=%s empty_state=%s bat_sort=%s pit_sort=%s",
+        opponent_team_id, season_id, empty_state, bat_sort, pit_sort,
     )
 
     return templates.TemplateResponse(
@@ -1095,7 +1397,6 @@ async def opponent_detail(request: Request, opponent_team_id: int) -> Response:
         {
             "scouting_report": scouting_report,
             "opponent_team_id": opponent_team_id,
-            "key_players": key_players,
             "last_meeting": last_meeting,
             "active_team_id": active_team_id_od,
             "permitted_team_infos": team_infos,
@@ -1107,6 +1408,12 @@ async def opponent_detail(request: Request, opponent_team_id: int) -> Response:
             "bat_dir": bat_dir,
             "pit_sort": pit_sort,
             "pit_dir": pit_dir,
+            "empty_state": empty_state,
+            "is_admin": is_admin,
+            "admin_link_url": admin_link_url,
+            "top_pitchers": top_pitchers,
+            "team_batting": team_batting,
+            "game_count": game_count,
         },
     )
 

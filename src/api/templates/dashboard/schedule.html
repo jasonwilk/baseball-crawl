@@ -1,0 +1,150 @@
+{% extends "base.html" %}
+{% from "dashboard/_team_selector.html" import team_selector %}
+
+{% set active_nav = "schedule" %}
+
+{% block title %}Schedule{% if team_name %} -- {{ team_name }}{% endif %}{% endblock %}
+
+{% block header_extras %}
+  {% if user and user.email %}
+  <span class="text-blue-200">{{ user.email }}</span>
+  {% endif %}
+  <form method="post" action="/auth/logout" class="inline"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><button type="submit" class="text-blue-200 hover:text-white bg-transparent border-0 cursor-pointer p-0 font-[inherit] text-[length:inherit]">Logout</button></form>
+{% endblock %}
+
+{% block content %}
+
+{% if no_assignments %}
+{% if is_dev_mode %}
+<p class="text-gray-600 mt-4">You have no team assignments. <a href="/admin/teams" class="text-blue-700 hover:underline">Add a team in Admin</a> to get started.</p>
+{% else %}
+<p class="text-gray-600 mt-4">You have no team assignments. Contact your administrator.</p>
+{% endif %}
+{% else %}
+
+{{ team_selector(permitted_team_infos, active_team_id, "/dashboard", None, None, active_year, available_years, current_year) }}
+
+{# Build query string for links within the page #}
+{%- set _qs = "" -%}
+{%- if active_team_id %}{% set _qs = "team_id=" ~ active_team_id %}{% endif -%}
+{%- if active_year %}{% if _qs %}{% set _qs = _qs ~ "&year=" ~ active_year %}{% else %}{% set _qs = "year=" ~ active_year %}{% endif %}{% endif -%}
+{%- if season_id %}{% if _qs %}{% set _qs = _qs ~ "&season_id=" ~ season_id %}{% else %}{% set _qs = "season_id=" ~ season_id %}{% endif %}{% endif -%}
+
+<h1 class="text-xl font-bold mb-4">{{ team_name }} &mdash; Schedule</h1>
+
+{% if not upcoming_games and not completed_games %}
+<div class="bg-yellow-50 border border-yellow-200 rounded p-4 text-sm text-yellow-900">
+  No schedule data yet. Run a data sync to load your team's schedule.
+</div>
+{% else %}
+
+{# ── Upcoming Games ──────────────────────────────────── #}
+<div class="text-sm font-bold text-gray-500 uppercase tracking-wide border-b border-gray-300 pb-1 mb-3">Upcoming</div>
+
+{% if not upcoming_games %}
+<p class="text-sm text-gray-500 py-4">No upcoming games on the schedule.</p>
+{% else %}
+{% for game in upcoming_games %}
+{%- set is_next = (game.game_id == next_game_id) -%}
+{%- set opp_href = "/dashboard/opponents/" ~ game.opponent_team_id ~ "?" ~ _qs if game.opponent_team_id else None -%}
+<a href="{{ opp_href if opp_href else '#' }}"
+   class="block {% if is_next %}bg-blue-50 rounded shadow-sm border-2 border-blue-900 p-3 mb-2{% else %}bg-white rounded shadow-sm border border-gray-200 p-3 mb-2{% endif %}">
+  {# Row 1: date + countdown #}
+  <div class="flex items-center mb-1">
+    {% if is_next %}<span class="inline-block bg-blue-900 text-white text-xs font-bold px-2 py-0.5 rounded mr-2">NEXT</span>{% endif %}
+    <span class="text-sm font-medium text-gray-900">{{ game.game_date | format_date }}</span>
+    {% if game.days_until is not none %}
+    <span class="text-sm text-gray-500 ml-1">
+      {%- if game.days_until == 0 %}(Today)
+      {%- elif game.days_until == 1 %}(Tomorrow)
+      {%- else %}({{ game.days_until }} days)
+      {%- endif -%}
+    </span>
+    {% endif %}
+  </div>
+  {# Row 2: opponent + home/away #}
+  <div class="flex items-center justify-between mb-1">
+    <div>
+      {% if game.is_home is not none %}
+        {% if game.is_home %}<span class="text-sm text-gray-500 mr-1">vs</span>{% else %}<span class="text-sm text-gray-500 mr-1">@</span>{% endif %}
+      {% endif %}
+      <span class="text-sm font-bold text-blue-900">{{ game.opponent_name or "Unknown Opponent" }}</span>
+      {% if game.opponent_wins is not none and (game.opponent_wins + game.opponent_losses) > 0 %}
+      <span class="text-sm text-gray-500 ml-1">({{ game.opponent_wins }}-{{ game.opponent_losses }})</span>
+      {% endif %}
+    </div>
+    {% if game.is_home is not none %}
+    <span class="text-xs font-medium text-gray-500">{% if game.is_home %}H{% else %}A{% endif %}</span>
+    {% endif %}
+  </div>
+  {# Row 3: scouted indicator #}
+  <div>
+    {% if game.has_stats %}
+    <span class="text-xs text-green-700">&#9679; Scouted</span>
+    {% else %}
+    <span class="text-xs text-gray-400">&#9675; Not scouted</span>
+    {% endif %}
+  </div>
+</a>
+{% endfor %}
+{% endif %}
+
+{# ── Completed Games ─────────────────────────────────── #}
+<div class="text-sm font-bold text-gray-500 uppercase tracking-wide border-b border-gray-300 pb-1 mb-3 mt-6">Completed</div>
+
+{% if not completed_games %}
+<p class="text-sm text-gray-500 py-4">No completed games yet this season.</p>
+{% else %}
+<div class="overflow-x-auto">
+  <table class="min-w-full text-sm bg-white rounded shadow">
+    <thead class="bg-blue-900 text-white">
+      <tr>
+        <th class="py-2 px-3 text-left">Date</th>
+        <th class="py-2 px-3 text-left">Opponent</th>
+        <th class="py-2 px-3 text-center w-14">Score</th>
+        <th class="py-2 px-3 text-center w-8">W/L</th>
+        <th class="py-2 px-3 text-center w-8 hidden sm:table-cell">H/A</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for game in completed_games %}
+      <tr class="border-b border-gray-200 {% if loop.index is even %}bg-gray-50{% endif %}">
+        <td class="py-3 px-3 whitespace-nowrap">{{ game.game_date | format_date }}</td>
+        <td class="py-3 px-3">
+          {% if game.opponent_team_id %}
+          <a href="/dashboard/opponents/{{ game.opponent_team_id }}{% if _qs %}?{{ _qs }}{% endif %}" class="text-blue-900 hover:underline">{{ game.opponent_name or "Unknown Opponent" }}</a>
+          {% else %}
+          {{ game.opponent_name or "Unknown Opponent" }}
+          {% endif %}
+        </td>
+        <td class="py-3 px-3 text-center">
+          {% if game.home_score is not none and game.away_score is not none %}
+          {% if game.game_id %}
+          <a href="/dashboard/games/{{ game.game_id }}{% if _qs %}?{{ _qs }}{% endif %}" class="text-blue-900 hover:underline">
+            {% if game.is_home %}{{ game.home_score }}-{{ game.away_score }}{% else %}{{ game.away_score }}-{{ game.home_score }}{% endif %}
+          </a>
+          {% else %}
+          {% if game.is_home %}{{ game.home_score }}-{{ game.away_score }}{% else %}{{ game.away_score }}-{{ game.home_score }}{% endif %}
+          {% endif %}
+          {% else %}&mdash;{% endif %}
+        </td>
+        <td class="py-3 px-3 text-center">
+          {% if game.wl == "W" %}<span class="text-green-700 font-bold">W</span>
+          {% elif game.wl == "L" %}<span class="text-red-700 font-bold">L</span>
+          {% elif game.wl == "T" %}<span class="text-gray-600">T</span>
+          {% else %}&mdash;{% endif %}
+        </td>
+        <td class="py-3 px-3 text-center hidden sm:table-cell">
+          {% if game.is_home is not none %}{% if game.is_home %}H{% else %}A{% endif %}{% else %}&mdash;{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+{% endif %}{# end has games #}
+
+{% endif %}{# end no_assignments #}
+{% endblock %}

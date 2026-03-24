@@ -267,6 +267,97 @@ def get_team_games(
         return []
 
 
+def get_schedule_games(
+    team_id: int,
+    season_id: str,
+) -> list[dict[str, Any]]:
+    """Return all games for a team in a season sorted by date ascending.
+
+    Extends ``get_team_games`` with game status, scouting status (has_stats),
+    and opponent win/loss record.  Intended for the schedule landing page.
+
+    Args:
+        team_id:   The INTEGER team id (home or away).
+        season_id: The season slug (e.g. ``"2026-spring-hs"``).
+
+    Returns:
+        List of dicts with keys: game_id, game_date, status,
+        home_score, away_score, is_home (1 or 0), opponent_team_id,
+        opponent_name, has_stats (1 or 0), opponent_wins, opponent_losses.
+        Returns an empty list on DB error.
+    """
+    query = """
+        WITH opp_has_stats AS (
+            SELECT DISTINCT team_id FROM player_season_batting WHERE season_id = :season_id
+            UNION
+            SELECT DISTINCT team_id FROM player_season_pitching WHERE season_id = :season_id
+        ),
+        opp_game_results AS (
+            SELECT home_team_id AS team_id,
+                   CASE WHEN home_score > away_score THEN 1 ELSE 0 END AS is_win,
+                   CASE WHEN away_score > home_score THEN 1 ELSE 0 END AS is_loss
+            FROM games
+            WHERE season_id = :season_id
+              AND home_score IS NOT NULL AND away_score IS NOT NULL
+              AND status = 'completed'
+            UNION ALL
+            SELECT away_team_id AS team_id,
+                   CASE WHEN away_score > home_score THEN 1 ELSE 0 END AS is_win,
+                   CASE WHEN home_score > away_score THEN 1 ELSE 0 END AS is_loss
+            FROM games
+            WHERE season_id = :season_id
+              AND home_score IS NOT NULL AND away_score IS NOT NULL
+              AND status = 'completed'
+        ),
+        opp_records AS (
+            SELECT team_id,
+                   SUM(is_win) AS wins,
+                   SUM(is_loss) AS losses
+            FROM opp_game_results
+            GROUP BY team_id
+        )
+        SELECT
+            g.game_id,
+            g.game_date,
+            g.status,
+            g.home_score,
+            g.away_score,
+            CASE WHEN g.home_team_id = :team_id THEN 1 ELSE 0 END AS is_home,
+            CASE WHEN g.home_team_id = :team_id
+                 THEN g.away_team_id
+                 ELSE g.home_team_id
+            END AS opponent_team_id,
+            CASE WHEN g.home_team_id = :team_id
+                 THEN opp_away.name
+                 ELSE opp_home.name
+            END AS opponent_name,
+            CASE WHEN ohs.team_id IS NOT NULL THEN 1 ELSE 0 END AS has_stats,
+            COALESCE(opp_rec.wins, 0) AS opponent_wins,
+            COALESCE(opp_rec.losses, 0) AS opponent_losses
+        FROM games g
+        LEFT JOIN teams opp_away ON opp_away.id = g.away_team_id
+        LEFT JOIN teams opp_home ON opp_home.id = g.home_team_id
+        LEFT JOIN opp_has_stats ohs ON ohs.team_id = (
+            CASE WHEN g.home_team_id = :team_id THEN g.away_team_id ELSE g.home_team_id END
+        )
+        LEFT JOIN opp_records opp_rec ON opp_rec.team_id = (
+            CASE WHEN g.home_team_id = :team_id THEN g.away_team_id ELSE g.home_team_id END
+        )
+        WHERE g.season_id = :season_id
+          AND (g.home_team_id = :team_id OR g.away_team_id = :team_id)
+        ORDER BY g.game_date ASC
+    """
+    try:
+        with closing(get_connection()) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.execute(query, {"team_id": team_id, "season_id": season_id})
+            rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+    except sqlite3.Error:
+        logger.exception("Failed to fetch schedule games")
+        return []
+
+
 def get_game_box_score(game_id: str) -> dict[str, Any]:
     """Return the full box score for a game: batting and pitching lines for both teams.
 
@@ -558,6 +649,7 @@ def get_opponent_scouting_report(
             COALESCE(psb.sb, 0)      AS sb,
             COALESCE(psb.hbp, 0)     AS hbp,
             COALESCE(psb.shf, 0)     AS shf,
+            COALESCE(psb.tb, 0)      AS tb,
             tr.jersey_number
         FROM player_season_batting psb
         JOIN players p ON p.player_id = psb.player_id
@@ -583,6 +675,7 @@ def get_opponent_scouting_report(
             COALESCE(psp.so, 0)            AS so,
             COALESCE(psp.pitches, 0)       AS pitches,
             COALESCE(psp.total_strikes, 0) AS total_strikes,
+            p.throws,
             tr.jersey_number
         FROM player_season_pitching psp
         JOIN players p ON p.player_id = psp.player_id
@@ -1307,6 +1400,119 @@ def get_available_seasons(team_id: int) -> list[dict[str, Any]]:
     except sqlite3.Error:
         logger.exception("Failed to fetch available seasons for team %d", team_id)
         return []
+
+
+def get_opponent_scouting_status(
+    opponent_team_id: int,
+    our_team_id: int | None,
+    season_id: str,
+) -> dict[str, Any]:
+    """Determine the scouting status of an opponent team.
+
+    Three mutually exclusive states:
+    - ``'full_stats'``: at least one row in ``player_season_batting`` or
+      ``player_season_pitching`` for this team_id + season_id.
+    - ``'linked_unscouted'``: opponent has a resolved ``opponent_links`` row
+      for ``our_team_id`` (``resolved_team_id IS NOT NULL``), or the opponent's
+      ``teams.public_id IS NOT NULL`` -- but no stat rows.
+    - ``'unlinked'``: no resolved link and no public_id and no stat rows.
+
+    Args:
+        opponent_team_id: The opponent's INTEGER team id.
+        our_team_id:      The active member team's INTEGER id; used to scope
+                          the ``opponent_links`` lookup.  May be None.
+        season_id:        The season slug (e.g. ``"2026-spring-hs"``).
+
+    Returns:
+        Dict with keys:
+            - ``status``: ``'full_stats'`` | ``'linked_unscouted'`` | ``'unlinked'``
+            - ``link_id``: ``opponent_links.id`` (int) if any ``opponent_links``
+              row exists for ``our_team_id`` -- either a resolved row
+              (``resolved_team_id = opponent_team_id``) or an unresolved row
+              matched by opponent name (``resolved_team_id IS NULL``).  ``None``
+              when no row exists.  Used by the caller to construct the admin
+              shortcut URL (``/admin/opponents/{link_id}/connect``).
+    """
+    try:
+        with closing(get_connection()) as conn:
+            # 1. Check if stat rows exist for this opponent + season.
+            stats_row = conn.execute(
+                """
+                SELECT 1 FROM (
+                    SELECT 1 FROM player_season_batting
+                     WHERE team_id = ? AND season_id = ?
+                    UNION ALL
+                    SELECT 1 FROM player_season_pitching
+                     WHERE team_id = ? AND season_id = ?
+                ) LIMIT 1
+                """,
+                (opponent_team_id, season_id, opponent_team_id, season_id),
+            ).fetchone()
+            has_stats = stats_row is not None
+
+            # 2. Look for opponent_links rows scoped to our_team_id.
+            #
+            #    resolved_link_id: a row where resolved_team_id = opponent_team_id.
+            #      Used for both state detection (linked_unscouted) and the admin URL.
+            #
+            #    unresolved_link_id: a row where resolved_team_id IS NULL, matched by
+            #      team name.  OpponentSeeder creates rows before OpponentResolver runs,
+            #      so this provides the link_id for the admin shortcut even when the
+            #      opponent hasn't been resolved yet.  Does NOT count as "linked" for
+            #      state purposes -- only a resolved row or non-null public_id does.
+            resolved_link_id: int | None = None
+            unresolved_link_id: int | None = None
+            if our_team_id is not None:
+                link_row = conn.execute(
+                    """
+                    SELECT id FROM opponent_links
+                    WHERE resolved_team_id = ? AND our_team_id = ?
+                    LIMIT 1
+                    """,
+                    (opponent_team_id, our_team_id),
+                ).fetchone()
+                if link_row:
+                    resolved_link_id = link_row[0]
+                else:
+                    # Fallback: unresolved row whose opponent_name matches the team name.
+                    unresolved_row = conn.execute(
+                        """
+                        SELECT ol.id FROM opponent_links ol
+                        JOIN teams t ON t.name = ol.opponent_name
+                        WHERE ol.our_team_id = ? AND t.id = ?
+                          AND ol.resolved_team_id IS NULL
+                        LIMIT 1
+                        """,
+                        (our_team_id, opponent_team_id),
+                    ).fetchone()
+                    if unresolved_row:
+                        unresolved_link_id = unresolved_row[0]
+
+            # link_id for the admin URL: prefer resolved, fall back to unresolved.
+            link_id: int | None = resolved_link_id if resolved_link_id is not None else unresolved_link_id
+
+            if has_stats:
+                return {"status": "full_stats", "link_id": link_id}
+
+            # 3. State is linked_unscouted if there is a RESOLVED link or a non-null
+            #    public_id.  An unresolved link does not count as linked.
+            is_linked = resolved_link_id is not None
+            if not is_linked:
+                team_row = conn.execute(
+                    "SELECT public_id FROM teams WHERE id = ?",
+                    (opponent_team_id,),
+                ).fetchone()
+                if team_row and team_row[0]:
+                    is_linked = True
+
+            status = "linked_unscouted" if is_linked else "unlinked"
+            return {"status": status, "link_id": link_id}
+
+    except sqlite3.Error:
+        logger.exception(
+            "Failed to get opponent scouting status for team %d", opponent_team_id
+        )
+        return {"status": "unlinked", "link_id": None}
 
 
 def check_connection() -> bool:

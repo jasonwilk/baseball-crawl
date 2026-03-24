@@ -4,7 +4,7 @@
 [E-153: Team-Centric Coaching Dashboard](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the coaching dashboard landing page (`/dashboard/`) shows the team's full season schedule (upcoming and past games) in chronological order. The bottom navigation has 3 tabs (Schedule | Batting | Pitching). Each schedule row links to opponent scouting (upcoming games) or box score (completed games). Coaches can see at a glance which opponents have been scouted and how many days until the next game.

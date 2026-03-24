@@ -514,29 +514,29 @@ class TestDashboardEndpoint:
 
     def test_dashboard_returns_200(self, seeded_client: TestClient) -> None:
         """GET /dashboard returns HTTP 200 with a seeded database."""
-        response = seeded_client.get("/dashboard")
+        response = seeded_client.get("/dashboard/batting")
         assert response.status_code == 200
 
     def test_dashboard_returns_html_content_type(
         self, seeded_client: TestClient
     ) -> None:
         """GET /dashboard response Content-Type is text/html."""
-        response = seeded_client.get("/dashboard")
+        response = seeded_client.get("/dashboard/batting")
         assert "text/html" in response.headers.get("content-type", "")
 
     def test_dashboard_contains_title_tag(self, seeded_client: TestClient) -> None:
         """GET /dashboard response HTML includes a <title> tag."""
-        response = seeded_client.get("/dashboard")
+        response = seeded_client.get("/dashboard/batting")
         assert "<title>" in response.text
 
     def test_dashboard_contains_table(self, seeded_client: TestClient) -> None:
         """GET /dashboard response HTML includes a <table> element."""
-        response = seeded_client.get("/dashboard")
+        response = seeded_client.get("/dashboard/batting")
         assert "<table" in response.text
 
     def test_dashboard_contains_player_name(self, seeded_client: TestClient) -> None:
         """GET /dashboard HTML contains at least one seeded player name (AC-5)."""
-        response = seeded_client.get("/dashboard")
+        response = seeded_client.get("/dashboard/batting")
         html = response.text
         player_names = [
             "Whitehorse",
@@ -551,7 +551,7 @@ class TestDashboardEndpoint:
 
     def test_dashboard_contains_stat_value(self, seeded_client: TestClient) -> None:
         """GET /dashboard HTML contains at least one recognisable stat value (AC-5)."""
-        response = seeded_client.get("/dashboard")
+        response = seeded_client.get("/dashboard/batting")
         html = response.text
         assert any(str(v) in html for v in [6, 8, 7]), (
             "Expected at least one stat value in dashboard HTML."
@@ -561,7 +561,7 @@ class TestDashboardEndpoint:
         self, seeded_client: TestClient
     ) -> None:
         """GET /dashboard renders at least 3 players in the table (AC-3)."""
-        response = seeded_client.get("/dashboard")
+        response = seeded_client.get("/dashboard/batting")
         html = response.text
         last_names = [
             "Whitehorse",
@@ -579,7 +579,7 @@ class TestDashboardEndpoint:
         self, seeded_client: TestClient
     ) -> None:
         """GET /dashboard HTML includes stat column headers (AB, H, BB, SO)."""
-        response = seeded_client.get("/dashboard")
+        response = seeded_client.get("/dashboard/batting")
         html = response.text
         for header in ("AB", "H", "BB", "SO"):
             assert header in html, (
@@ -590,12 +590,12 @@ class TestDashboardEndpoint:
         self, seeded_client: TestClient
     ) -> None:
         """GET /dashboard HTML includes a viewport meta tag for mobile."""
-        response = seeded_client.get("/dashboard")
+        response = seeded_client.get("/dashboard/batting")
         assert 'name="viewport"' in response.text
 
     def test_dashboard_contains_tailwind_cdn(self, seeded_client: TestClient) -> None:
         """GET /dashboard HTML includes the Tailwind CSS CDN script tag."""
-        response = seeded_client.get("/dashboard")
+        response = seeded_client.get("/dashboard/batting")
         assert "cdn.tailwindcss.com" in response.text
 
     def test_health_endpoint_unaffected(self, tmp_path: Path) -> None:
@@ -613,7 +613,7 @@ class TestDashboardEndpoint:
 
     def test_dashboard_overflow_x_container(self, seeded_client: TestClient) -> None:
         """GET /dashboard HTML includes an overflow-x-auto container."""
-        response = seeded_client.get("/dashboard")
+        response = seeded_client.get("/dashboard/batting")
         assert "overflow-x-auto" in response.text
 
 
@@ -622,12 +622,12 @@ class TestEnhancedBattingStats:
 
     def test_batting_returns_200(self, seeded_client: TestClient) -> None:
         """GET /dashboard returns HTTP 200 with seeded data."""
-        response = seeded_client.get("/dashboard")
+        response = seeded_client.get("/dashboard/batting")
         assert response.status_code == 200
 
     def test_batting_contains_seeded_player_name(self, seeded_client: TestClient) -> None:
         """GET /dashboard HTML contains at least one seeded player last name."""
-        response = seeded_client.get("/dashboard")
+        response = seeded_client.get("/dashboard/batting")
         html = response.text
         player_names = ["Whitehorse", "Runningwater", "Strongbow", "Redcloud", "Eagleheart"]
         assert any(name in html for name in player_names)
@@ -637,26 +637,26 @@ class TestEnhancedBattingStats:
 
         gc-p-001 has 3 H in 6 AB => AVG = .500.
         """
-        response = seeded_client.get("/dashboard")
+        response = seeded_client.get("/dashboard/batting")
         assert ".500" in response.text
 
     def test_batting_column_headers(self, seeded_client: TestClient) -> None:
         """GET /dashboard HTML includes AVG, OBP, SLG column headers."""
-        response = seeded_client.get("/dashboard")
+        response = seeded_client.get("/dashboard/batting")
         html = response.text
         for header in ("AVG", "OBP", "SLG"):
             assert header in html, f"Expected column header '{header}' in batting stats HTML."
 
     def test_batting_all_column_headers_present(self, seeded_client: TestClient) -> None:
         """GET /dashboard HTML includes all expected column headers (AC-1)."""
-        response = seeded_client.get("/dashboard")
+        response = seeded_client.get("/dashboard/batting")
         html = response.text
         for header in ("AVG", "OBP", "GP", "BB", "SO", "SLG", "AB", "2B", "3B", "HR", "SB", "RBI"):
             assert header in html, f"Expected column header '{header}' in batting stats HTML."
 
     def test_batting_player_links(self, seeded_client: TestClient) -> None:
         """GET /dashboard HTML contains player profile links."""
-        response = seeded_client.get("/dashboard")
+        response = seeded_client.get("/dashboard/batting")
         assert "/dashboard/players/" in response.text
 
     def test_batting_zero_ab_shows_dash(self, seeded_client: TestClient) -> None:
@@ -664,19 +664,19 @@ class TestEnhancedBattingStats:
 
         gc-p-006 has 0 AB; all rate stats should display '-'.
         """
-        response = seeded_client.get("/dashboard")
+        response = seeded_client.get("/dashboard/batting")
         html = response.text
         assert "Noatbats" in html
         assert "-" in html
 
     def test_batting_sticky_thead(self, seeded_client: TestClient) -> None:
         """GET /dashboard HTML uses sticky top-0 on thead."""
-        response = seeded_client.get("/dashboard")
+        response = seeded_client.get("/dashboard/batting")
         assert "sticky top-0" in response.text
 
     def test_batting_overflow_x_auto(self, seeded_client: TestClient) -> None:
         """GET /dashboard HTML wraps table in overflow-x-auto."""
-        response = seeded_client.get("/dashboard")
+        response = seeded_client.get("/dashboard/batting")
         assert "overflow-x-auto" in response.text
 
 
@@ -1086,10 +1086,13 @@ class TestOpponentDetail:
             assert header in html, f"Expected pitching header '{header}' in opponent detail."
 
     def test_opponent_detail_key_players_card(self, opponent_client) -> None:
-        """GET /dashboard/opponents/{id} shows Key Players card (AC-5, AC-15)."""
+        """GET /dashboard/opponents/{id} shows Their Pitchers card (AC-2, E-153-04).
+
+        'Key Players' was replaced by 'Their Pitchers' pitching summary card in E-153-04.
+        """
         client, _, opp_team_id, _ = opponent_client
         response = client.get(f"/dashboard/opponents/{opp_team_id}")
-        assert "Key Players" in response.text
+        assert "Their Pitchers" in response.text
 
     def test_opponent_detail_key_hitter_name_and_avg(self, opponent_client) -> None:
         """Key Players card shows best hitter name and AVG (AC-15).
@@ -1116,24 +1119,26 @@ class TestOpponentDetail:
     def test_opponent_detail_insufficient_data_when_no_stats(
         self, games_client
     ) -> None:
-        """Key Players card shows 'Insufficient data.' when no players meet threshold (AC-15).
+        """Opponent with games but no stats and no opponent_link shows unlinked state (E-153-04 AC-5).
 
-        games_client has games vs opp but no opponent batting/pitching rows.
+        games_client has games vs opp but no opponent batting/pitching rows and no opponent_links.
+        E-153-04 replaced 'Insufficient data.' with a three-state model; unlinked => 'Stats not available.'
         """
         client, _, opp_team_id = games_client
         response = client.get(f"/dashboard/opponents/{opp_team_id}")
         assert response.status_code == 200
-        assert "Insufficient data." in response.text
+        assert "Stats not available." in response.text
 
     def test_opponent_detail_no_stats_shows_message(self, games_client) -> None:
-        """GET /dashboard/opponents/{id} shows 'Insufficient data.' when no stats loaded (AC-5).
+        """GET /dashboard/opponents/{id} shows 'Stats not available.' when no stats loaded (E-153-04 AC-5).
 
-        games_client has games vs opp but no opponent batting/pitching rows.
+        games_client has games vs opp but no opponent batting/pitching rows and no opponent_links.
+        E-153-04 three-state model: unlinked => 'Stats not available.'
         """
         client, _, opp_team_id = games_client
         response = client.get(f"/dashboard/opponents/{opp_team_id}")
         assert response.status_code == 200
-        assert "Insufficient data." in response.text
+        assert "Stats not available." in response.text
 
     def test_opponent_detail_last_meeting_card(self, opponent_client) -> None:
         """GET /dashboard/opponents/{id} shows Last Meeting card (AC-16)."""
@@ -1165,7 +1170,11 @@ class TestOpponentDetail:
     def test_opponent_detail_first_meeting_via_scheduled_game(
         self, tmp_path: Path
     ) -> None:
-        """'First meeting this season.' shown when only scheduled (not completed) games exist."""
+        """'First meeting this season.' shown when only scheduled (not completed) games exist.
+
+        E-153-04: Last Meeting section only renders in full_stats state.  Must add batting/pitching
+        rows to reach full_stats state; only scheduled game means last_meeting=None => 'First meeting'.
+        """
         db_path = tmp_path / "test_no_completed.db"
         _apply_schema(db_path)
         conn = sqlite3.connect(str(db_path))
@@ -1180,6 +1189,17 @@ class TestOpponentDetail:
             "INSERT INTO games (game_id, season_id, game_date, home_team_id, away_team_id, status)"
             " VALUES (?, ?, ?, ?, ?, ?)",
             ("game-sched", _CURRENT_SEASON_ID, "2099-03-01", lsb_team_id, future_opp_id, "scheduled"),
+        )
+        # Add a player and batting stats so the page enters full_stats state (required by E-153-04).
+        conn.execute(
+            "INSERT OR IGNORE INTO players (player_id, first_name, last_name) VALUES (?, ?, ?)",
+            ("fut-p-001", "Future", "Pitcher"),
+        )
+        conn.execute(
+            "INSERT OR IGNORE INTO player_season_batting"
+            " (player_id, team_id, season_id, gp, ab, h, doubles, triples, hr, rbi, bb, so, sb)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("fut-p-001", future_opp_id, _CURRENT_SEASON_ID, 1, 4, 1, 0, 0, 0, 1, 0, 1, 0),
         )
         conn.commit()
         conn.close()
@@ -1210,6 +1230,9 @@ class TestOpponentDetail:
 
         game-tie: lsb home 4-4 vs tie-opp => equal scores => should display T badge.
         The old template had no elif for ties, so ties rendered as losses.
+
+        E-153-04: Last Meeting section only renders in full_stats state. Batting stats row added
+        so opponent reaches full_stats state.
         """
         db_path = tmp_path / "test_tie.db"
         _apply_schema(db_path)
@@ -1230,6 +1253,17 @@ class TestOpponentDetail:
             " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             ("game-tie", _CURRENT_SEASON_ID, "2026-03-10", lsb_team_id, tie_opp_id, 4, 4, "completed"),
         )
+        # Add stats so the page enters full_stats state (required by E-153-04 three-state model).
+        conn.execute(
+            "INSERT OR IGNORE INTO players (player_id, first_name, last_name) VALUES (?, ?, ?)",
+            ("tie-p-001", "Tie", "Batter"),
+        )
+        conn.execute(
+            "INSERT OR IGNORE INTO player_season_batting"
+            " (player_id, team_id, season_id, gp, ab, h, doubles, triples, hr, rbi, bb, so, sb)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("tie-p-001", tie_opp_id, _CURRENT_SEASON_ID, 1, 4, 2, 0, 0, 0, 1, 0, 1, 0),
+        )
         conn.commit()
         conn.close()
 
@@ -1247,11 +1281,14 @@ class TestOpponentDetail:
         assert 'text-red-700">L' not in html  # loss badge must not appear
 
     def test_opponent_detail_back_link_preserves_team_id(self, opponent_client) -> None:
-        """Back-link to opponents list includes ?team_id= to preserve team context (AC-3 E-122-02)."""
+        """Back-link goes to schedule and includes ?team_id= to preserve team context (E-153-04 AC-6).
+
+        E-153-04 changed the back link from /dashboard/opponents to /dashboard (the schedule page).
+        """
         client, lsb_team_id, opp_team_id, _ = opponent_client
         response = client.get(f"/dashboard/opponents/{opp_team_id}?team_id={lsb_team_id}")
         assert response.status_code == 200
-        assert f"/dashboard/opponents?team_id={lsb_team_id}" in response.text
+        assert f"/dashboard?team_id={lsb_team_id}" in response.text
 
 
 class TestPlayerProfile:
@@ -1495,8 +1532,8 @@ class TestPlayerProfile:
         assert response.status_code == 200
         html = response.text
         # Backlink must point to the permitted LSB team, not the scouting opponent
-        assert f"/dashboard?team_id={lsb_team_id}" in html
-        assert f"/dashboard?team_id={opp_team_id}" not in html
+        assert f"/dashboard/batting?team_id={lsb_team_id}" in html
+        assert f"/dashboard/batting?team_id={opp_team_id}" not in html
 
 
 class TestTemplateStaleRefs:
@@ -1529,8 +1566,15 @@ class TestTemplateStaleRefs:
             )
 
     def test_dashboard_templates_no_is_admin(self) -> None:
-        """All six dashboard templates contain no 'is_admin' references (AC-4)."""
+        """Dashboard templates (excluding opponent_detail.html) contain no 'is_admin' references (AC-4).
+
+        opponent_detail.html is intentionally excluded: E-153-04 added an is_admin check
+        to show the admin shortcut link to unlinked opponents.
+        """
         for filename in self._DASHBOARD_TEMPLATES:
+            if filename == "opponent_detail.html":
+                # E-153-04 intentionally uses is_admin for the admin shortcut link.
+                continue
             path = self._TEMPLATES_DIR / "dashboard" / filename
             content = path.read_text()
             assert "is_admin" not in content, (
@@ -1678,7 +1722,7 @@ class TestOBPFormula:
     def test_team_stats_obp_includes_hbp(self, obp_client) -> None:
         """AC-1: OBP on team_stats uses (H+BB+HBP)/(AB+BB+HBP+SF)."""
         client, lsb_team_id, _ = obp_client
-        response = client.get(f"/dashboard?team_id={lsb_team_id}")
+        response = client.get(f"/dashboard/batting?team_id={lsb_team_id}")
         assert response.status_code == 200
         html = response.text
         # obp-p-001: (3+2+1)/(10+2+1+1) = 6/14 = .429
@@ -1689,7 +1733,7 @@ class TestOBPFormula:
     def test_team_stats_obp_hbp_raises_obp(self, obp_client) -> None:
         """AC-6: Player with HBP gets higher OBP than old formula would produce."""
         client, lsb_team_id, _ = obp_client
-        response = client.get(f"/dashboard?team_id={lsb_team_id}")
+        response = client.get(f"/dashboard/batting?team_id={lsb_team_id}")
         html = response.text
         # Old formula for obp-p-001: (3+2)/(10+2) = 5/12 = .417
         # New formula: .429 -- the old value should NOT appear
@@ -1699,7 +1743,7 @@ class TestOBPFormula:
     def test_team_stats_obp_zero_denom_shows_dash(self, obp_client) -> None:
         """AC-8: Zero denominator displays '-' instead of division error."""
         client, lsb_team_id, _ = obp_client
-        response = client.get(f"/dashboard?team_id={lsb_team_id}")
+        response = client.get(f"/dashboard/batting?team_id={lsb_team_id}")
         assert response.status_code == 200
         # obp-p-003 has 0 AB, 0 BB, 0 HBP, 0 SF => denom=0 => "-"
         # We can't easily isolate which "-" is for OBP, but we confirm no error
@@ -1731,7 +1775,7 @@ class TestOBPFormula:
         assert response.status_code == 200
         html = response.text
         assert "/dashboard/stats" not in html
-        assert f"/dashboard?team_id={lsb_team_id}" in html
+        assert f"/dashboard/batting?team_id={lsb_team_id}" in html
 
     def test_null_hbp_shf_coalesced_to_zero(self, tmp_path: Path) -> None:
         """AC-4/AC-7: NULL hbp and shf are treated as 0 via COALESCE."""
@@ -1765,7 +1809,7 @@ class TestOBPFormula:
         }
         with patch.dict("os.environ", env_overrides):
             with TestClient(app) as client:
-                response = client.get(f"/dashboard?team_id={lsb_team_id}")
+                response = client.get(f"/dashboard/batting?team_id={lsb_team_id}")
         assert response.status_code == 200
         html = response.text
         # With NULL hbp/shf coalesced to 0: OBP = (3+3+0)/(9+3+0+0) = 6/12 = .500
@@ -1892,7 +1936,7 @@ class TestJerseyNumberColumn:
     def test_batting_member_team_jersey_in_distinct_column(self, jersey_client) -> None:
         """AC-1/AC-5: Member team jersey number renders in # column, not inline with name."""
         client, member_team_id, _ = jersey_client
-        response = client.get(f"/dashboard?team_id={member_team_id}")
+        response = client.get(f"/dashboard/batting?team_id={member_team_id}")
         assert response.status_code == 200
         html = response.text
         # Jersey appears in a td cell
@@ -1903,7 +1947,7 @@ class TestJerseyNumberColumn:
     def test_batting_tracked_team_jersey_in_distinct_column(self, jersey_client) -> None:
         """AC-1/AC-5: Tracked team jersey number renders in # column, not inline with name."""
         client, _, tracked_team_id = jersey_client
-        response = client.get(f"/dashboard?team_id={tracked_team_id}")
+        response = client.get(f"/dashboard/batting?team_id={tracked_team_id}")
         assert response.status_code == 200
         html = response.text
         assert ">7<" in html
@@ -1912,7 +1956,7 @@ class TestJerseyNumberColumn:
     def test_batting_null_jersey_shows_em_dash(self, jersey_client) -> None:
         """AC-3/AC-6: NULL jersey_number renders em dash in # cell."""
         client, member_team_id, _ = jersey_client
-        response = client.get(f"/dashboard?team_id={member_team_id}")
+        response = client.get(f"/dashboard/batting?team_id={member_team_id}")
         assert response.status_code == 200
         # Em dash entity or character in the cell
         assert "&mdash;" in response.text or "—" in response.text
@@ -1920,7 +1964,7 @@ class TestJerseyNumberColumn:
     def test_batting_hash_column_header_present(self, jersey_client) -> None:
         """AC-1: team_stats.html has a # column header."""
         client, member_team_id, _ = jersey_client
-        response = client.get(f"/dashboard?team_id={member_team_id}")
+        response = client.get(f"/dashboard/batting?team_id={member_team_id}")
         assert response.status_code == 200
         assert ">#<" in response.text
 
@@ -1965,7 +2009,7 @@ class TestJerseyNumberColumn:
         }
         with patch.dict("os.environ", env_overrides):
             with TestClient(app) as client:
-                response = client.get("/dashboard")
+                response = client.get("/dashboard/batting")
         assert response.status_code == 200
         assert "bg-yellow-50" in response.text
         assert "Stats haven't been loaded" in response.text
@@ -2229,12 +2273,17 @@ class TestOpponentDetailJerseyNumber:
                 yield client, lsb_team_id, opp_team_id
 
     def _batting_html(self, html: str) -> str:
-        """Extract batting-table HTML: everything before the Pitching Leaders heading."""
-        return html.split("Pitching Leaders</h2>")[0]
+        """Extract batting-table HTML: everything after the Batting Leaders heading.
+
+        E-153-04 reordered sections: pitching comes before batting, so batting is
+        after 'Batting Leaders</h2>' rather than before 'Pitching Leaders</h2>'.
+        """
+        return html.split("Batting Leaders</h2>", 1)[1]
 
     def _pitching_html(self, html: str) -> str:
-        """Extract pitching-table HTML: everything after the Pitching Leaders heading."""
-        return html.split("Pitching Leaders</h2>", 1)[1]
+        """Extract pitching-table HTML: content between Pitching Leaders and Batting Leaders headings."""
+        after_pit = html.split("Pitching Leaders</h2>", 1)[1]
+        return after_pit.split("Batting Leaders</h2>")[0]
 
     def test_opponent_detail_batting_table_has_jersey_column(self, opp_jersey_client) -> None:
         """AC-8a/b: # column header and jersey value appear in batting table section."""
@@ -2408,7 +2457,7 @@ class TestEmptyStateUI:
         env = {"DATABASE_PATH": str(db_path), "DEV_USER_EMAIL": "testdev@example.com"}
         with patch.dict("os.environ", env):
             with TestClient(app) as client:
-                response = client.get(f"/dashboard?team_id={no_data_id}&year={_CURRENT_YEAR_E142}")
+                response = client.get(f"/dashboard/batting?team_id={no_data_id}&year={_CURRENT_YEAR_E142}")
         assert response.status_code == 200
         assert "bg-yellow-50" in response.text
         assert "Stats haven't been loaded" in response.text
@@ -2477,7 +2526,7 @@ class TestEmptyStateUI:
         with patch.dict("os.environ", env):
             with TestClient(app) as client:
                 # Select the data team so no_data pill is unselected
-                response = client.get(f"/dashboard?team_id={data_id}&year={_CURRENT_YEAR_E142}")
+                response = client.get(f"/dashboard/batting?team_id={data_id}&year={_CURRENT_YEAR_E142}")
         assert response.status_code == 200
         assert "bg-gray-50" in response.text
         assert "text-gray-400" in response.text
@@ -2488,7 +2537,7 @@ class TestEmptyStateUI:
         env = {"DATABASE_PATH": str(db_path), "DEV_USER_EMAIL": "testdev@example.com"}
         with patch.dict("os.environ", env):
             with TestClient(app) as client:
-                response = client.get(f"/dashboard?team_id={no_data_id}&year={_CURRENT_YEAR_E142}")
+                response = client.get(f"/dashboard/batting?team_id={no_data_id}&year={_CURRENT_YEAR_E142}")
         assert response.status_code == 200
         # Active pill class
         assert "bg-blue-900 text-white" in response.text
@@ -2499,7 +2548,7 @@ class TestEmptyStateUI:
         env = {"DATABASE_PATH": str(db_path), "DEV_USER_EMAIL": "testdev@example.com"}
         with patch.dict("os.environ", env):
             with TestClient(app) as client:
-                response = client.get(f"/dashboard?team_id={no_data_id}&year={_CURRENT_YEAR_E142}")
+                response = client.get(f"/dashboard/batting?team_id={no_data_id}&year={_CURRENT_YEAR_E142}")
         assert response.status_code == 200
         # Year label should appear as plain text (not dropdown)
         assert str(_CURRENT_YEAR_E142) in response.text
@@ -2512,7 +2561,7 @@ class TestEmptyStateUI:
         env = {"DATABASE_PATH": str(db_path), "DEV_USER_EMAIL": "testdev@example.com"}
         with patch.dict("os.environ", env):
             with TestClient(app) as client:
-                response = client.get(f"/dashboard?team_id={data_id}&year={_CURRENT_YEAR_E142}")
+                response = client.get(f"/dashboard/batting?team_id={data_id}&year={_CURRENT_YEAR_E142}")
         assert response.status_code == 200
         assert "<table" in response.text
         assert "bg-yellow-50" not in response.text

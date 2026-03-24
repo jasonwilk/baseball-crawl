@@ -22,7 +22,7 @@
 {% endif %}
 {% else %}
 
-{{ team_selector(permitted_team_infos, active_team_id, "/dashboard", current_sort, current_dir, active_year, available_years, current_year) }}
+{{ team_selector(permitted_team_infos, active_team_id, "/dashboard/batting", current_sort, current_dir, active_year, available_years, current_year) }}
 
 
 {# Helper macro: render a sortable column header #}
@@ -38,7 +38,7 @@
     {%- set _asc_cols = ["name", "so"] -%}
     {%- set next_dir = "asc" if col_key in _asc_cols else "desc" -%}
   {%- endif -%}
-  {%- set _href = "/dashboard?team_id=" ~ active_team_id ~ "&year=" ~ active_year ~ "&season_id=" ~ season_id ~ "&sort=" ~ col_key ~ "&dir=" ~ next_dir -%}
+  {%- set _href = "/dashboard/batting?team_id=" ~ active_team_id ~ "&year=" ~ active_year ~ "&season_id=" ~ season_id ~ "&sort=" ~ col_key ~ "&dir=" ~ next_dir -%}
   <th class="py-2 px-3 {% if align == 'left' %}text-left{% else %}text-center{% endif %}">
     <a href="{{ _href }}" class="hover:underline whitespace-nowrap">
       {{ label }}{% if is_active %} {% if current_dir == "asc" %}&#9650;{% else %}&#9660;{% endif %}{% endif %}

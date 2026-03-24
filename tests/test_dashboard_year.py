@@ -317,7 +317,7 @@ class TestRouteYearFiltering:
         ):
             client = _make_dev_client(db_path, team_id)
             with client:
-                resp = client.get("/dashboard")
+                resp = client.get("/dashboard/batting")
 
         assert resp.status_code == 200
         # Active year should appear in the response
@@ -338,7 +338,7 @@ class TestRouteYearFiltering:
         ):
             client = _make_dev_client(db_path, team_id)
             with client:
-                resp = client.get("/dashboard")
+                resp = client.get("/dashboard/batting")
 
         assert resp.status_code == 200
         # Prior year should appear (fallback)
@@ -360,7 +360,7 @@ class TestRouteYearFiltering:
         ):
             client = _make_dev_client(db_path, team_id)
             with client:
-                resp = client.get(f"/dashboard?year={_PRIOR_YEAR}")
+                resp = client.get(f"/dashboard/batting?year={_PRIOR_YEAR}")
 
         assert resp.status_code == 200
 
@@ -386,7 +386,7 @@ class TestRouteYearFiltering:
             client = _make_dev_client_multi(db_path, [team_a, team_b])
             with client:
                 # Request team_a with year=PRIOR_YEAR — team_a should still be active
-                resp = client.get(f"/dashboard?team_id={team_a}&year={_PRIOR_YEAR}")
+                resp = client.get(f"/dashboard/batting?team_id={team_a}&year={_PRIOR_YEAR}")
 
         assert resp.status_code == 200
         # Page should show team_a's data (current year), not team_b's
@@ -437,7 +437,7 @@ class TestRouteYearFiltering:
         ):
             client = _make_dev_client_multi(db_path, [team_with_data, team_no_data])
             with client:
-                resp = client.get(f"/dashboard?year={_CURRENT_YEAR}")
+                resp = client.get(f"/dashboard/batting?year={_CURRENT_YEAR}")
 
         assert resp.status_code == 200
         assert "LSB Freshman" in resp.text
@@ -465,7 +465,7 @@ class TestYearPropagationInContext:
         ):
             client = _make_dev_client(db_path, team_id)
             with client:
-                resp = client.get("/dashboard")
+                resp = client.get("/dashboard/batting")
 
         assert resp.status_code == 200
         assert str(_CURRENT_YEAR) in resp.text
@@ -494,7 +494,7 @@ class TestYearPropagationInContext:
         ):
             client = _make_dev_client_multi(db_path, [team_cur, team_pri])
             with client:
-                resp = client.get("/dashboard")
+                resp = client.get("/dashboard/batting")
 
         assert resp.status_code == 200
         # Year dropdown should be present (select with name="year")
@@ -516,7 +516,7 @@ class TestYearPropagationInContext:
         ):
             client = _make_dev_client(db_path, team_id)
             with client:
-                resp = client.get("/dashboard")
+                resp = client.get("/dashboard/batting")
 
         assert resp.status_code == 200
         # No year dropdown when only one year (AC-4)
@@ -536,7 +536,7 @@ class TestYearPropagationInContext:
         ):
             client = _make_dev_client(db_path, team_id)
             with client:
-                resp = client.get("/dashboard")
+                resp = client.get("/dashboard/batting")
 
         assert resp.status_code == 200
         # Bottom nav should have year in links
@@ -558,7 +558,7 @@ class TestYearPropagationInContext:
         ):
             client = _make_dev_client_multi(db_path, [team_a, team_b])
             with client:
-                resp = client.get("/dashboard")
+                resp = client.get("/dashboard/batting")
 
         assert resp.status_code == 200
         # Team pill links should include year
@@ -594,7 +594,7 @@ class TestYearFilteredTeamPills:
         ):
             client = _make_dev_client_multi(db_path, [team_cur, team_pri])
             with client:
-                resp = client.get(f"/dashboard?year={_PRIOR_YEAR}")
+                resp = client.get(f"/dashboard/batting?year={_PRIOR_YEAR}")
 
         assert resp.status_code == 200
         html = resp.text
@@ -622,7 +622,7 @@ class TestYearFilteredTeamPills:
         ):
             client = _make_dev_client_multi(db_path, [team_cur, team_pri])
             with client:
-                resp = client.get(f"/dashboard?year={_CURRENT_YEAR}")
+                resp = client.get(f"/dashboard/batting?year={_CURRENT_YEAR}")
 
         assert resp.status_code == 200
         html = resp.text
@@ -737,7 +737,7 @@ class TestCohortNavigation:
         ):
             client = _make_dev_client_multi(db_path, [team_cur, team_pri])
             with client:
-                resp = client.get("/dashboard")
+                resp = client.get("/dashboard/batting")
 
         assert resp.status_code == 200
         html = resp.text
@@ -754,7 +754,7 @@ class TestCohortNavigation:
         ):
             client = _make_dev_client_multi(db_path, [team_cur, team_pri])
             with client:
-                resp = client.get(f"/dashboard?year={_PRIOR_YEAR}")
+                resp = client.get(f"/dashboard/batting?year={_PRIOR_YEAR}")
 
         assert resp.status_code == 200
         html = resp.text
@@ -770,7 +770,7 @@ class TestCohortNavigation:
         ):
             client = _make_dev_client_multi(db_path, [team_cur, team_pri])
             with client:
-                resp = client.get(f"/dashboard?year={_CURRENT_YEAR}")
+                resp = client.get(f"/dashboard/batting?year={_CURRENT_YEAR}")
 
         assert resp.status_code == 200
         assert "Current season" not in resp.text
@@ -790,7 +790,7 @@ class TestCohortNavigation:
         ):
             client = _make_dev_client(db_path, team_id)
             with client:
-                resp = client.get("/dashboard")
+                resp = client.get("/dashboard/batting")
 
         assert resp.status_code == 200
         html = resp.text
@@ -822,7 +822,7 @@ class TestCohortNavigation:
         ):
             client = _make_dev_client_multi(db_path, [team_cur, team_pri])
             with client:
-                resp = client.get("/dashboard?year=1999")
+                resp = client.get("/dashboard/batting?year=1999")
 
         assert resp.status_code == 200
         html = resp.text
@@ -883,7 +883,7 @@ class TestCohortSeasonAlignment:
         ):
             client = _make_dev_client_multi(db_path, [team_cur, team_pri])
             with client:
-                resp = client.get(f"/dashboard?year={_PRIOR_YEAR}")
+                resp = client.get(f"/dashboard/batting?year={_PRIOR_YEAR}")
 
         assert resp.status_code == 200
         html = resp.text

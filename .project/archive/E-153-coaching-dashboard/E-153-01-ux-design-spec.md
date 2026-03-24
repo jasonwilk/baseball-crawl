@@ -4,7 +4,7 @@
 [E-153: Team-Centric Coaching Dashboard](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, a text-based design spec exists that defines the layout, component structure, and interaction patterns for the coaching dashboard redesign. This spec covers: the schedule landing page, the 3-tab navigation, the opponent detail page (pitching-first), and all empty states. Subsequent implementation stories (E-153-03, E-153-04) build from this spec.

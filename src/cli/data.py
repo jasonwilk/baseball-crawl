@@ -40,7 +40,7 @@ def _data_group(ctx: typer.Context) -> None:
         raise typer.Exit()
 
 _CRAWLER_CHOICES = ["roster", "schedule", "opponent", "player-stats", "game-stats"]
-_LOADER_CHOICES = ["roster", "game", "season-stats"]
+_LOADER_CHOICES = ["roster", "schedule", "game", "season-stats"]
 
 
 class SourceOption(str, Enum):

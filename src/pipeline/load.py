@@ -15,6 +15,7 @@ from src.gamechanger.config import load_config, load_config_from_db
 from src.gamechanger.loaders import LoadResult
 from src.gamechanger.loaders.game_loader import GameLoader
 from src.gamechanger.loaders.roster import RosterLoader
+from src.gamechanger.loaders.schedule_loader import ScheduleLoader
 from src.gamechanger.loaders.season_stats_loader import SeasonStatsLoader
 from src.gamechanger.types import TeamRef
 
@@ -48,6 +49,45 @@ def _run_roster_loader(db: sqlite3.Connection, config: object, data_root: Path) 
             )
             continue
         result = loader.load_file(roster_path)
+        combined.loaded += result.loaded
+        combined.skipped += result.skipped
+        combined.errors += result.errors
+
+    return combined
+
+
+def _run_schedule_loader(db: sqlite3.Connection, config: object, data_root: Path) -> LoadResult:
+    """Run the schedule loader for all member teams.
+
+    Args:
+        db: Open SQLite connection.
+        config: Parsed CrawlConfig (season + member_teams).
+        data_root: Raw data root directory.
+
+    Returns:
+        Aggregated LoadResult across all teams.
+    """
+    combined = LoadResult()
+
+    for team in config.member_teams:
+        if team.internal_id is None:
+            raise ValueError(
+                f"Team '{team.name}' (gc_uuid={team.id!r}) was not found in the database. "
+                "Ensure the team exists in the teams table before running the schedule loader."
+            )
+        team_ref = TeamRef(
+            id=team.internal_id,
+            gc_uuid=team.id,
+            public_id=None,
+        )
+        schedule_path = data_root / config.season / "teams" / team.id / "schedule.json"
+        if not schedule_path.exists():
+            logger.warning(
+                "Schedule file not found for team %s at %s; skipping.", team.id, schedule_path
+            )
+            continue
+        loader = ScheduleLoader(db, season_id=config.season, owned_team_ref=team_ref)
+        result = loader.load_file(schedule_path)
         combined.loaded += result.loaded
         combined.skipped += result.skipped
         combined.errors += result.errors
@@ -127,6 +167,7 @@ def _run_season_stats_loader(db: sqlite3.Connection, config: object, data_root: 
 # runner signature: (db, config, data_root) -> LoadResult
 _LOADERS: list[tuple[str, object]] = [
     ("roster", _run_roster_loader),
+    ("schedule", _run_schedule_loader),
     ("game", _run_game_loader),
     ("season-stats", _run_season_stats_loader),
 ]

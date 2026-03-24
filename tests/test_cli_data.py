@@ -244,7 +244,7 @@ def test_load_invalid_loader_name() -> None:
 
 def test_load_all_valid_loader_names() -> None:
     """load accepts all documented loader names."""
-    valid_names = ["roster", "game", "season-stats"]
+    valid_names = ["roster", "schedule", "game", "season-stats"]
     for name in valid_names:
         with patch("src.pipeline.load.run", return_value=0) as mock_run:
             result = runner.invoke(app, ["data", "load", "--loader", name])
