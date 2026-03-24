@@ -140,7 +140,7 @@ The `location` object has variable shape depending on whether venue data was res
 | `id` | UUID | Yes | Always equals `event.id` and `game_id`. |
 | `game_id` | UUID | Yes | Always equals `event.id` and `pregame_data.id`. |
 | `opponent_name` | string | Yes | Opponent team name. Non-null on all 103 game records. |
-| `opponent_id` | UUID | Yes | Opponent team UUID. **CONFIRMED** usable as `team_id` in `GET /teams/{team_id}`. |
+| `opponent_id` | UUID | Yes | Opponent team UUID. **Same namespace as `root_team_id` in `GET /teams/{team_id}/opponents` response** (confirmed by cross-referencing `schedule-sample.json` vs `opponents-sample.json` -- 54/54 matches, 0 matches with `progenitor_team_id`). Use to join against the opponent registry. Do NOT use as `gc_uuid` -- that must be `progenitor_team_id`. |
 | `home_away` | string | No | `"home"`, `"away"`, or `null`. All three values observed. |
 | `lineup_id` | UUID | No | UUID of the pre-set lineup. Null on 25/103, non-null on 78/103. Links to `GET /bats-starting-lineups/{event_id}`. |
 
@@ -213,7 +213,7 @@ The `location` object has variable shape depending on whether venue data was res
 - `home_away` can be `null` even for game events. Null vs. explicit value semantics unclear.
 - No pagination observed. All 228 events returned in a single response. Behavior with very large histories (500+ events) untested.
 - Location coordinates appear in two formats with different key names -- handle both when parsing.
-- `opponent_id` usability with season-stats, players, and game-summaries endpoints is structurally consistent but not all have been independently confirmed beyond `GET /teams/{team_id}`.
+- `opponent_id` is in the `root_team_id` namespace (local registry key), NOT `progenitor_team_id` (canonical UUID). Confirmed 2026-03-24 by cross-referencing 54 unique opponent_ids against `data/raw/opponents-sample.json` -- 54/54 matched `root_team_id`, 0 matched `progenitor_team_id`. Do not use `opponent_id` directly with `GET /teams/{team_id}` for team metadata -- use `progenitor_team_id` from the opponents endpoint instead.
 - Filter canceled events (`status: "canceled"`) in ETL pipelines.
 
 **Discovered:** Pre-2026-03-01 (initial capture). **Schema fully documented:** 2026-03-04.

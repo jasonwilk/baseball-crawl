@@ -1,7 +1,7 @@
 # E-152: Schedule-Based Opponent Discovery
 
 ## Status
-`READY`
+`COMPLETED`
 <!-- Lifecycle: DRAFT -> READY -> ACTIVE -> COMPLETED (or BLOCKED / ABANDONED) -->
 
 ## Overview
@@ -44,8 +44,8 @@ Two data sources contain opponent information:
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-152-01 | Schedule opponent seeder | TODO | None | - |
-| E-152-02 | Wire opponent discovery into member sync | TODO | E-152-01 | - |
+| E-152-01 | Schedule opponent seeder | DONE | None | - |
+| E-152-02 | Wire opponent discovery into member sync | DONE | E-152-01 | - |
 
 ## Dispatch Team
 - software-engineer
@@ -116,6 +116,7 @@ The `UNIQUE(our_team_id, root_team_id)` constraint combined with `ON CONFLICT DO
 - 2026-03-24: Iteration 2 review. Accepted SE findings: OpponentResolver must be filtered to single team (added to "Existing OpponentResolver" section + E-152-02 AC-6); path construction must use `config.season` slug not `season_year` INT (rewrote "Data File Path Discovery"). Accepted DE finding (same path issue, confirmed with evidence from crawlers). Accepted CR N-1 (Technical Approach / Handoff Context API mismatch). Cleaned up AC-5 progenitor_team_id mention.
 - 2026-03-24: Codex spec review. Accepted all 5 findings: P1-1 (tightened AC-3 to require ALL schedule opponents, fixed stale "empty" baseline in Background), P1-2 (OpponentResolver makes live API calls -- updated Division of Labor with auth/network requirements, specified only resolve() not resolve_unlinked(), CredentialExpiredError must propagate in AC-4), P2-1 (explicit name precedence: opponents.json primary, schedule.json fallback), P2-2 (fixed wrong crawl.py path), P3-1 (simplified AC-5 to reference TNs).
 - 2026-03-24: Codex iteration 2. Accepted all 3 findings: P2-1 (Technical Approach contradicted AC-4 on resolver error isolation -- tightened to match), P2-2 (3 stale "cached opponents.json" references -- propagation failures from iter 1 fix, updated in E-152-01 Context, E-152-02 Context, and epic TN "Existing OpponentResolver"), P3-1 (split overloaded AC-4 into AC-4a seeder isolation / AC-4b resolver auth propagation / AC-4c pipeline continuation). Consistency sweep clean. Epic set to READY.
+- 2026-03-24: Epic set to ACTIVE. Dispatch started.
 - 2026-03-24: Codex iteration 3. Accepted all 3 findings: P1 (AC-8 wrongly treated missing opponents.json as no-op -- fixed to only no-op when schedule.json is missing; opponents.json absence still seeds schedule opponents as name-only rows; updated Handoff Context), P2 (AC-4c "regardless of discovery outcome" conflicted with AC-4b auth propagation -- clarified to "regardless of non-auth discovery errors"), P3 (standardized stale `schedule.opponent_id` to `schedule.pregame_data.opponent_id` in TN Verified line). Consistency sweep clean.
 
 ### Review Scorecard
@@ -130,3 +131,27 @@ The `UNIQUE(our_team_id, root_team_id)` constraint combined with `ON CONFLICT DO
 | Final review -- Holistic (SE+DE) | 0 | 0 | 0 |
 | Codex iteration 3 | 3 | 3 | 0 |
 | **Total** | **~30** | **~28** | **2** |
+
+- 2026-03-24: Dispatch completed. Both stories implemented by SE. Per-story CR (E-152-01: APPROVED round 1; E-152-02: NOT APPROVED round 1, APPROVED round 2 after 3 fixes). Holistic team review #1: clean. CR integration review: APPROVED. Holistic team review #2: 1 SHOULD FIX (gc_uuid lookup guard), remediated. Codex code review: 1 finding dismissed (pipeline ordering is correct as implemented). Epic COMPLETED.
+
+### Dispatch Review Scorecard
+| Review Pass | Findings | Accepted | Dismissed |
+|---|---|---|---|
+| Per-story CR -- E-152-01 | 2 | 0 | 2 |
+| Per-story CR -- E-152-02 | 3 | 3 | 0 |
+| Holistic team review #1 | 0 | 0 | 0 |
+| CR integration review | 0 | 0 | 0 |
+| Holistic team review #2 | 1 | 1 | 0 |
+| Codex code review | 1 | 0 | 1 |
+| **Total** | **7** | **4** | **3** |
+
+### Context-Layer Assessment
+- New agent definition: NO
+- New/modified rule: NO
+- New/modified skill: NO
+- New/modified hook: NO
+- CLAUDE.md update needed: YES -- `run_member_sync()` behavioral change (now runs opponent discovery). Add to Architecture section under "Pipeline caller convention" or "Background pipeline trigger" noting that `run_member_sync` now includes opponent discovery (seeder + resolver).
+- Agent memory update: NO (PM memory update handled separately at Step 10)
+
+### Documentation Assessment
+No documentation triggers fired. New internal pipeline code only -- no user-facing changes, no new CLI commands, no API endpoint changes, no admin UI changes.

@@ -22,8 +22,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from src.api.db import get_db_path
-from src.gamechanger.client import GameChangerClient
+from src.gamechanger.client import CredentialExpiredError, GameChangerClient
+from src.gamechanger.config import CrawlConfig, load_config_from_db
+from src.gamechanger.crawlers.opponent_resolver import OpponentResolver
 from src.gamechanger.crawlers.scouting import ScoutingCrawler
+from src.gamechanger.loaders.opponent_seeder import seed_schedule_opponents
 from src.gamechanger.loaders.scouting_loader import ScoutingLoader
 from src.gamechanger.team_resolver import resolve_team
 from src.pipeline import crawl as crawl_module
@@ -173,6 +176,125 @@ def _heal_season_year_scouting(
 
 
 # ---------------------------------------------------------------------------
+# Opponent discovery helpers
+# ---------------------------------------------------------------------------
+
+
+def _discover_opponents(
+    team_id: int,
+    client: GameChangerClient,
+    db_path: Path,
+    crawl_job_id: int,
+) -> None:
+    """Run schedule seeder then ``OpponentResolver`` for one member team.
+
+    Called from ``run_member_sync`` after crawl+load complete.  Provides
+    automatic opponent discovery as a side effect of syncing the schedule.
+
+    Error contract:
+    - Seeder failures are non-fatal (WARNING-logged; pipeline continues).
+    - ``CredentialExpiredError`` from the resolver marks the ``crawl_jobs``
+      row as ``failed`` and propagates to the caller (signals dead auth,
+      consistent with OpponentResolver's intentional re-raise design).
+    - All other per-opponent resolver errors are handled internally by
+      ``OpponentResolver.resolve()``.
+
+    Args:
+        team_id: INTEGER PK of the member team (``our_team_id`` in
+            ``opponent_links``).
+        client: Authenticated ``GameChangerClient`` (token already refreshed
+            at sync start).
+        db_path: Path to the SQLite database.
+        crawl_job_id: ``crawl_jobs.id`` to update if a fatal auth error
+            occurs during resolution.
+    """
+    # Load DB config to obtain the season slug and member team list.
+    # Non-fatal if this fails (e.g. no seasons row configured yet).
+    try:
+        config = load_config_from_db(db_path)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "Opponent discovery skipped for team_id=%d: config load failed: %s",
+            team_id,
+            exc,
+        )
+        return
+
+    # Resolve gc_uuid for path construction.
+    try:
+        with closing(sqlite3.connect(str(db_path))) as conn:
+            row = conn.execute(
+                "SELECT gc_uuid FROM teams WHERE id = ?", (team_id,)
+            ).fetchone()
+    except sqlite3.OperationalError as exc:
+        logger.warning(
+            "Opponent discovery skipped for team_id=%d: gc_uuid lookup failed: %s",
+            team_id,
+            exc,
+        )
+        return
+    gc_uuid: str | None = row[0] if row else None
+
+    if not gc_uuid:
+        logger.info(
+            "Opponent discovery skipped for team_id=%d: no gc_uuid.", team_id
+        )
+        return
+
+    # Filter config to just the syncing team (AC-6: prevents cross-team resolution).
+    filtered_teams = [t for t in config.member_teams if t.internal_id == team_id]
+    if not filtered_teams:
+        logger.info(
+            "Opponent discovery skipped for team_id=%d: "
+            "team not found in active member config.",
+            team_id,
+        )
+        return
+    filtered_config = CrawlConfig(season=config.season, member_teams=filtered_teams)
+
+    schedule_path = _DATA_ROOT / config.season / "teams" / gc_uuid / "schedule.json"
+    opponents_path = _DATA_ROOT / config.season / "teams" / gc_uuid / "opponents.json"
+
+    # 1. Schedule seeder -- non-fatal (AC-4a).
+    with closing(sqlite3.connect(str(db_path))) as conn:
+        conn.execute("PRAGMA foreign_keys=ON;")
+        try:
+            seeded = seed_schedule_opponents(team_id, schedule_path, opponents_path, conn)
+            logger.info(
+                "Schedule seeder: %d opponent(s) seeded for team_id=%d.",
+                seeded,
+                team_id,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Schedule seeder failed for team_id=%d (non-fatal): %s",
+                team_id,
+                exc,
+            )
+
+    # 2. OpponentResolver -- CredentialExpiredError marks job failed and propagates (AC-4b).
+    with closing(sqlite3.connect(str(db_path))) as conn:
+        conn.execute("PRAGMA foreign_keys=ON;")
+        resolver = OpponentResolver(client, filtered_config, conn)
+        try:
+            resolver.resolve()
+            logger.info("OpponentResolver complete for team_id=%d.", team_id)
+        except CredentialExpiredError as exc:
+            logger.error(
+                "Credential expired during opponent resolution for team_id=%d: %s",
+                team_id,
+                exc,
+            )
+            _mark_job_terminal(
+                conn,
+                crawl_job_id,
+                "failed",
+                f"Credential expired during opponent resolution: {exc}",
+            )
+            raise
+
+
+# ---------------------------------------------------------------------------
 # Member team sync
 # ---------------------------------------------------------------------------
 
@@ -228,6 +350,11 @@ def run_member_sync(team_id: int, team_name: str, crawl_job_id: int) -> None:
             conn.execute("PRAGMA foreign_keys=ON;")
             _mark_job_terminal(conn, crawl_job_id, "failed", str(exc))
         return
+
+    # 2b. Opponent discovery: schedule seeder + OpponentResolver.
+    # Runs after crawl+load (data is on disk).  Seeder failures are non-fatal.
+    # CredentialExpiredError from the resolver marks job failed and propagates.
+    _discover_opponents(team_id, client, db_path, crawl_job_id)
 
     # 3. Record outcome.
     success = crawl_exit == 0 and load_exit == 0

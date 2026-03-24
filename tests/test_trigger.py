@@ -14,6 +14,7 @@ Run with:
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import sys
 from contextlib import closing
@@ -627,3 +628,352 @@ class TestCliScoutingSeasonYearHeal:
             # Should not raise -- OperationalError is caught internally
             _heal_season_year_cli(conn, "old-slug")
             _heal_season_year_cli(conn, None)
+
+
+# ---------------------------------------------------------------------------
+# E-152-02: Opponent discovery wired into run_member_sync
+# ---------------------------------------------------------------------------
+
+# A valid UUID for the test member team.
+_TEST_GC_UUID = "72bb77d8-54ca-42d2-8547-9da4880d0cb4"
+_TEST_SEASON_ID = "2026-spring-hs"
+
+
+def _make_db_with_season(
+    tmp_path: Path,
+    gc_uuid: str = _TEST_GC_UUID,
+    season_id: str = _TEST_SEASON_ID,
+) -> Path:
+    """Create a migrated test DB with a member team + seasons row."""
+    db_path = tmp_path / "test_trigger_disc.db"
+    run_migrations(db_path=db_path)
+    with closing(sqlite3.connect(str(db_path))) as conn:
+        conn.execute(
+            "INSERT INTO seasons (season_id, name, season_type, year) "
+            "VALUES (?, 'Spring 2026', 'spring-hs', 2026)",
+            (season_id,),
+        )
+        conn.execute(
+            "INSERT INTO teams (id, name, membership_type, gc_uuid, is_active) "
+            "VALUES (1, 'LSB Varsity', 'member', ?, 1)",
+            (gc_uuid,),
+        )
+        conn.commit()
+    return db_path
+
+
+class TestMemberSyncOpponentDiscovery:
+    """E-152-02: Schedule seeder + OpponentResolver wired into run_member_sync."""
+
+    def test_ac2_seeder_called_before_resolver(self, tmp_path: Path) -> None:
+        """AC-2: Both seeder and resolver called; seeder executes before resolver."""
+        db_path = _make_db_with_season(tmp_path)
+        job_id = _insert_crawl_job(db_path, 1, "member_crawl")
+        call_order: list[str] = []
+
+        def _mock_seeder(*_args, **_kwargs) -> int:
+            call_order.append("seeder")
+            return 3
+
+        mock_resolver_instance = MagicMock()
+        mock_resolver_instance.resolve.side_effect = lambda: call_order.append("resolver")
+        mock_resolver_class = MagicMock(return_value=mock_resolver_instance)
+
+        with (
+            patch("src.pipeline.trigger.get_db_path", return_value=db_path),
+            patch("src.pipeline.trigger._refresh_auth_token"),
+            patch("src.pipeline.trigger.crawl_module.run", return_value=0),
+            patch("src.pipeline.trigger.load_module.run", return_value=0),
+            patch("src.pipeline.trigger.seed_schedule_opponents", side_effect=_mock_seeder),
+            patch("src.pipeline.trigger.OpponentResolver", mock_resolver_class),
+        ):
+            trigger.run_member_sync(1, "LSB Varsity", job_id)
+
+        assert call_order == ["seeder", "resolver"], (
+            f"Expected seeder then resolver; got: {call_order}"
+        )
+        assert mock_resolver_instance.resolve.call_count == 1
+
+    def test_ac2_resolve_unlinked_not_called(self, tmp_path: Path) -> None:
+        """AC-2: resolve_unlinked() must NOT be called -- only resolve()."""
+        db_path = _make_db_with_season(tmp_path)
+        job_id = _insert_crawl_job(db_path, 1, "member_crawl")
+
+        mock_resolver_instance = MagicMock()
+        mock_resolver_instance.resolve.return_value = None
+        mock_resolver_class = MagicMock(return_value=mock_resolver_instance)
+
+        with (
+            patch("src.pipeline.trigger.get_db_path", return_value=db_path),
+            patch("src.pipeline.trigger._refresh_auth_token"),
+            patch("src.pipeline.trigger.crawl_module.run", return_value=0),
+            patch("src.pipeline.trigger.load_module.run", return_value=0),
+            patch("src.pipeline.trigger.seed_schedule_opponents", return_value=0),
+            patch("src.pipeline.trigger.OpponentResolver", mock_resolver_class),
+        ):
+            trigger.run_member_sync(1, "LSB Varsity", job_id)
+
+        mock_resolver_instance.resolve_unlinked.assert_not_called()
+
+    def test_ac3_opponent_count_matches_schedule(self, tmp_path: Path) -> None:
+        """AC-3: opponent_links count matches distinct opponents in schedule.json."""
+        db_path = _make_db_with_season(tmp_path)
+
+        # Write a fake schedule.json with 3 distinct opponents across 5 events.
+        season_dir = tmp_path / "raw" / _TEST_SEASON_ID / "teams" / _TEST_GC_UUID
+        season_dir.mkdir(parents=True)
+        schedule = [
+            {"event": {"event_type": "game"}, "pregame_data": {"opponent_id": "opp-a", "opponent_name": "Team A"}},
+            {"event": {"event_type": "game"}, "pregame_data": {"opponent_id": "opp-b", "opponent_name": "Team B"}},
+            {"event": {"event_type": "game"}, "pregame_data": {"opponent_id": "opp-a", "opponent_name": "Team A"}},  # duplicate
+            {"event": {"event_type": "game"}, "pregame_data": {"opponent_id": "opp-c", "opponent_name": "Team C"}},
+            {"event": {"event_type": "practice"}},  # skipped
+        ]
+        (season_dir / "schedule.json").write_text(json.dumps(schedule), encoding="utf-8")
+
+        job_id = _insert_crawl_job(db_path, 1, "member_crawl")
+
+        mock_resolver_instance = MagicMock()
+        mock_resolver_instance.resolve.return_value = None
+        mock_resolver_class = MagicMock(return_value=mock_resolver_instance)
+
+        with (
+            patch("src.pipeline.trigger.get_db_path", return_value=db_path),
+            patch("src.pipeline.trigger._refresh_auth_token"),
+            patch("src.pipeline.trigger.crawl_module.run", return_value=0),
+            patch("src.pipeline.trigger.load_module.run", return_value=0),
+            patch("src.pipeline.trigger.OpponentResolver", mock_resolver_class),
+            patch("src.pipeline.trigger._DATA_ROOT", tmp_path / "raw"),
+        ):
+            trigger.run_member_sync(1, "LSB Varsity", job_id)
+
+        with closing(sqlite3.connect(str(db_path))) as conn:
+            count = conn.execute(
+                "SELECT COUNT(*) FROM opponent_links WHERE our_team_id = 1"
+            ).fetchone()[0]
+        assert count == 3, f"Expected 3 unique opponents; got {count}"
+
+    def test_ac4a_seeder_failure_nonfatal_job_completes(self, tmp_path: Path) -> None:
+        """AC-4a: Seeder failure is non-fatal -- job completes and resolver still runs."""
+        db_path = _make_db_with_season(tmp_path)
+        job_id = _insert_crawl_job(db_path, 1, "member_crawl")
+
+        mock_resolver_instance = MagicMock()
+        mock_resolver_instance.resolve.return_value = None
+        mock_resolver_class = MagicMock(return_value=mock_resolver_instance)
+
+        with (
+            patch("src.pipeline.trigger.get_db_path", return_value=db_path),
+            patch("src.pipeline.trigger._refresh_auth_token"),
+            patch("src.pipeline.trigger.crawl_module.run", return_value=0),
+            patch("src.pipeline.trigger.load_module.run", return_value=0),
+            patch(
+                "src.pipeline.trigger.seed_schedule_opponents",
+                side_effect=RuntimeError("seeder crash"),
+            ),
+            patch("src.pipeline.trigger.OpponentResolver", mock_resolver_class),
+        ):
+            trigger.run_member_sync(1, "LSB Varsity", job_id)
+
+        job = _get_crawl_job(db_path, job_id)
+        assert job["status"] == "completed"
+        assert _get_last_synced(db_path, 1) is not None
+        # Resolver still runs after seeder failure.
+        assert mock_resolver_instance.resolve.call_count == 1
+
+    def test_ac4b_credential_expired_propagates_marks_job_failed(
+        self, tmp_path: Path
+    ) -> None:
+        """AC-4b: CredentialExpiredError from resolver propagates; job marked failed."""
+        from src.gamechanger.client import CredentialExpiredError as CrError
+
+        db_path = _make_db_with_season(tmp_path)
+        job_id = _insert_crawl_job(db_path, 1, "member_crawl")
+
+        mock_resolver_instance = MagicMock()
+        mock_resolver_instance.resolve.side_effect = CrError("token dead")
+        mock_resolver_class = MagicMock(return_value=mock_resolver_instance)
+
+        with (
+            patch("src.pipeline.trigger.get_db_path", return_value=db_path),
+            patch("src.pipeline.trigger._refresh_auth_token"),
+            patch("src.pipeline.trigger.crawl_module.run", return_value=0),
+            patch("src.pipeline.trigger.load_module.run", return_value=0),
+            patch("src.pipeline.trigger.seed_schedule_opponents", return_value=0),
+            patch("src.pipeline.trigger.OpponentResolver", mock_resolver_class),
+        ):
+            with pytest.raises(CrError):
+                trigger.run_member_sync(1, "LSB Varsity", job_id)
+
+        job = _get_crawl_job(db_path, job_id)
+        assert job["status"] == "failed"
+        assert "Credential expired" in job["error_message"]
+
+    def test_ac4c_non_auth_resolver_errors_dont_fail_job(
+        self, tmp_path: Path
+    ) -> None:
+        """AC-4c: Non-auth resolver errors handled internally; job completes normally."""
+        from src.gamechanger.crawlers.opponent_resolver import ResolveResult
+
+        db_path = _make_db_with_season(tmp_path)
+        job_id = _insert_crawl_job(db_path, 1, "member_crawl")
+
+        mock_resolver_instance = MagicMock()
+        # Resolver returns normally with per-opponent errors (handled internally).
+        mock_resolver_instance.resolve.return_value = ResolveResult(resolved=3, errors=2)
+        mock_resolver_class = MagicMock(return_value=mock_resolver_instance)
+
+        with (
+            patch("src.pipeline.trigger.get_db_path", return_value=db_path),
+            patch("src.pipeline.trigger._refresh_auth_token"),
+            patch("src.pipeline.trigger.crawl_module.run", return_value=0),
+            patch("src.pipeline.trigger.load_module.run", return_value=0),
+            patch("src.pipeline.trigger.seed_schedule_opponents", return_value=5),
+            patch("src.pipeline.trigger.OpponentResolver", mock_resolver_class),
+        ):
+            trigger.run_member_sync(1, "LSB Varsity", job_id)
+
+        job = _get_crawl_job(db_path, job_id)
+        assert job["status"] == "completed"
+        assert _get_last_synced(db_path, 1) is not None
+
+    def test_ac5_idempotent_discovery_no_duplicates(self, tmp_path: Path) -> None:
+        """AC-5: Two syncs with the same schedule produce no duplicate opponent_links rows."""
+        db_path = _make_db_with_season(tmp_path)
+
+        # Write a fake schedule.json with 2 distinct opponents (real seeder, no mock).
+        season_dir = tmp_path / "raw" / _TEST_SEASON_ID / "teams" / _TEST_GC_UUID
+        season_dir.mkdir(parents=True)
+        schedule = [
+            {"event": {"event_type": "game"}, "pregame_data": {"opponent_id": "opp-a", "opponent_name": "Team A"}},
+            {"event": {"event_type": "game"}, "pregame_data": {"opponent_id": "opp-b", "opponent_name": "Team B"}},
+            {"event": {"event_type": "game"}, "pregame_data": {"opponent_id": "opp-a", "opponent_name": "Team A"}},  # duplicate
+        ]
+        (season_dir / "schedule.json").write_text(json.dumps(schedule), encoding="utf-8")
+
+        mock_resolver_instance = MagicMock()
+        mock_resolver_instance.resolve.return_value = None
+        mock_resolver_class = MagicMock(return_value=mock_resolver_instance)
+
+        for run_num in (1, 2):
+            job_id = _insert_crawl_job(db_path, 1, "member_crawl")
+            with (
+                patch("src.pipeline.trigger.get_db_path", return_value=db_path),
+                patch("src.pipeline.trigger._refresh_auth_token"),
+                patch("src.pipeline.trigger.crawl_module.run", return_value=0),
+                patch("src.pipeline.trigger.load_module.run", return_value=0),
+                patch("src.pipeline.trigger.OpponentResolver", mock_resolver_class),
+                patch("src.pipeline.trigger._DATA_ROOT", tmp_path / "raw"),
+            ):
+                trigger.run_member_sync(1, "LSB Varsity", job_id)
+            job = _get_crawl_job(db_path, job_id)
+            assert job["status"] == "completed", f"Run {run_num} failed unexpectedly"
+
+        # No duplicate rows: exactly 2 distinct opponents in opponent_links.
+        with closing(sqlite3.connect(str(db_path))) as conn:
+            count = conn.execute(
+                "SELECT COUNT(*) FROM opponent_links WHERE our_team_id = 1"
+            ).fetchone()[0]
+        assert count == 2, f"Expected 2 unique opponent rows; got {count}"
+
+    def test_ac6_resolver_receives_filtered_config(self, tmp_path: Path) -> None:
+        """AC-6: OpponentResolver receives CrawlConfig filtered to only the syncing team."""
+        gc_uuid_2 = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+        db_path = _make_db_with_season(tmp_path)
+
+        # Add a second member team.
+        with closing(sqlite3.connect(str(db_path))) as conn:
+            conn.execute(
+                "INSERT INTO teams (id, name, membership_type, gc_uuid, is_active) "
+                "VALUES (2, 'LSB JV', 'member', ?, 1)",
+                (gc_uuid_2,),
+            )
+            conn.commit()
+
+        job_id = _insert_crawl_job(db_path, 1, "member_crawl")
+        captured: dict = {}
+
+        def _mock_resolver_factory(client, config, db):
+            captured["config"] = config
+            inst = MagicMock()
+            inst.resolve.return_value = None
+            return inst
+
+        with (
+            patch("src.pipeline.trigger.get_db_path", return_value=db_path),
+            patch("src.pipeline.trigger._refresh_auth_token"),
+            patch("src.pipeline.trigger.crawl_module.run", return_value=0),
+            patch("src.pipeline.trigger.load_module.run", return_value=0),
+            patch("src.pipeline.trigger.seed_schedule_opponents", return_value=0),
+            patch("src.pipeline.trigger.OpponentResolver", _mock_resolver_factory),
+        ):
+            trigger.run_member_sync(1, "LSB Varsity", job_id)
+
+        assert "config" in captured, "OpponentResolver was never constructed"
+        cfg = captured["config"]
+        assert len(cfg.member_teams) == 1, (
+            f"Expected 1 team in filtered config; got {len(cfg.member_teams)}"
+        )
+        assert cfg.member_teams[0].internal_id == 1
+
+    def test_discovery_skipped_when_no_seasons_configured(
+        self, tmp_path: Path
+    ) -> None:
+        """Discovery is skipped gracefully when no seasons row exists; job completes."""
+        db_path = _make_db(tmp_path)  # no seasons row
+        job_id = _insert_crawl_job(db_path, 1, "member_crawl")
+
+        mock_seeder = MagicMock()
+        mock_resolver_class = MagicMock()
+
+        with (
+            patch("src.pipeline.trigger.get_db_path", return_value=db_path),
+            patch("src.pipeline.trigger._refresh_auth_token"),
+            patch("src.pipeline.trigger.crawl_module.run", return_value=0),
+            patch("src.pipeline.trigger.load_module.run", return_value=0),
+            patch("src.pipeline.trigger.seed_schedule_opponents", mock_seeder),
+            patch("src.pipeline.trigger.OpponentResolver", mock_resolver_class),
+        ):
+            trigger.run_member_sync(1, "LSB Varsity", job_id)
+
+        job = _get_crawl_job(db_path, job_id)
+        assert job["status"] == "completed"
+        mock_seeder.assert_not_called()
+        mock_resolver_class.assert_not_called()
+
+    def test_discovery_skipped_when_no_gc_uuid(self, tmp_path: Path) -> None:
+        """Discovery is skipped gracefully when the team has no gc_uuid; job completes."""
+        db_path = tmp_path / "test_no_uuid.db"
+        run_migrations(db_path=db_path)
+        with closing(sqlite3.connect(str(db_path))) as conn:
+            conn.execute(
+                "INSERT INTO seasons (season_id, name, season_type, year) "
+                "VALUES ('2026-spring-hs', 'Spring 2026', 'spring-hs', 2026)"
+            )
+            # Team has no gc_uuid (membership_type='member' but gc_uuid NULL).
+            conn.execute(
+                "INSERT INTO teams (id, name, membership_type) VALUES (1, 'LSB Varsity', 'member')"
+            )
+            conn.commit()
+
+        job_id = _insert_crawl_job(db_path, 1, "member_crawl")
+
+        mock_seeder = MagicMock()
+        mock_resolver_class = MagicMock()
+
+        with (
+            patch("src.pipeline.trigger.get_db_path", return_value=db_path),
+            patch("src.pipeline.trigger._refresh_auth_token"),
+            patch("src.pipeline.trigger.crawl_module.run", return_value=0),
+            patch("src.pipeline.trigger.load_module.run", return_value=0),
+            patch("src.pipeline.trigger.seed_schedule_opponents", mock_seeder),
+            patch("src.pipeline.trigger.OpponentResolver", mock_resolver_class),
+        ):
+            trigger.run_member_sync(1, "LSB Varsity", job_id)
+
+        job = _get_crawl_job(db_path, job_id)
+        assert job["status"] == "completed"
+        mock_seeder.assert_not_called()
+        mock_resolver_class.assert_not_called()
+
+

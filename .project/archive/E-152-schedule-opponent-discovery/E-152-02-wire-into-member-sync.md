@@ -4,7 +4,7 @@
 [E-152: Schedule-Based Opponent Discovery](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, every member team sync (`run_member_sync`) will automatically run opponent discovery as part of the pipeline. The schedule opponent seeder from E-152-01 will execute after the schedule is crawled, populating `opponent_links` for all opponents on the schedule. If the existing `OpponentResolver` is not already in the sync pipeline, it will be wired in alongside the seeder so that both data sources (opponents.json and schedule.json) contribute to a complete `opponent_links` table.

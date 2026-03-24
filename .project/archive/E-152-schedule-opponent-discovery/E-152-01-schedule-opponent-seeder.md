@@ -4,7 +4,7 @@
 [E-152: Schedule-Based Opponent Discovery](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, a standalone function will parse a team's `schedule.json` and `opponents.json` files, extract all unique opponents, and upsert them into the `opponent_links` table. Both "linked" opponents (those with a `progenitor_team_id` in opponents.json, bridgeable to a real GC team) and "name-only" opponents (just a typed name, no GC link) will be recorded. The function will be testable in isolation without requiring the full sync pipeline.
