@@ -327,16 +327,24 @@ class OpponentResolver:
             f"/teams/{progenitor_team_id}",
             accept=_TEAM_ACCEPT,
         )
-        public_id: str = team_data["public_id"]
+        public_id: str | None = team_data.get("public_id")
+        if public_id is None:
+            logger.warning(
+                "Team detail for %r missing public_id -- continuing without it",
+                progenitor_team_id,
+            )
         team_name: str = team_data.get("name", progenitor_team_id)
+        season_year: int | None = team_data.get("season_year")
 
-        resolved_team_id = self._ensure_opponent_team_row(progenitor_team_id, team_name)
+        resolved_team_id, effective_public_id = self._ensure_opponent_team_row(
+            progenitor_team_id, team_name, public_id=public_id, season_year=season_year
+        )
         self._upsert_resolved(
             our_team_id=our_team_id,
             root_team_id=root_team_id,
             opponent_name=opponent_name,
             resolved_team_id=resolved_team_id,
-            public_id=public_id,
+            public_id=effective_public_id,
             is_hidden=is_hidden,
         )
 
@@ -345,37 +353,63 @@ class OpponentResolver:
             opponent_name,
             progenitor_team_id,
             resolved_team_id,
-            public_id,
+            effective_public_id,
         )
 
-    def _ensure_opponent_team_row(self, gc_uuid: str, team_name: str) -> int:
+    def _ensure_opponent_team_row(
+        self,
+        gc_uuid: str,
+        team_name: str,
+        public_id: str | None = None,
+        season_year: int | None = None,
+    ) -> tuple[int, str | None]:
         """Ensure a teams row exists for the resolved opponent team.
 
         Uses INSERT OR IGNORE with membership_type='tracked'.  If the row
         already exists (IGNORE fires), falls back to SELECT to retrieve the
-        INTEGER PK.
+        INTEGER PK.  Updates ``public_id`` and ``season_year`` only when the
+        existing row has NULL values for those columns (only-write-when-NULL).
+
+        UNIQUE collision handling for ``public_id``: if another row already
+        has the same ``public_id``, a WARNING is logged and the write is
+        skipped (manual row reconciliation is needed).
 
         Args:
             gc_uuid: Canonical GC team UUID (progenitor_team_id).
             team_name: Human-readable name from the team detail endpoint.
+            public_id: Public slug from the team detail response, or None.
+            season_year: Four-digit season year from the team detail response,
+                or None if absent.
 
         Returns:
-            The INTEGER PK (``teams.id``) for the opponent team row.
+            A tuple of (teams.id, effective_public_id) where effective_public_id
+            is the public_id value to use for opponent_links -- None when the
+            write was skipped due to a UNIQUE collision so that downstream callers
+            do not propagate a colliding public_id to other tables.
         """
+        # public_id is intentionally excluded from INSERT to avoid triggering the
+        # UNIQUE constraint on teams.public_id when another row already holds the
+        # same slug.  It is written after INSERT via the shared _write_public_id
+        # helper, which performs the collision check regardless of code path.
         cursor = self._db.execute(
-            "INSERT OR IGNORE INTO teams (name, membership_type, gc_uuid, is_active) "
-            "VALUES (?, 'tracked', ?, 0)",
-            (team_name, gc_uuid),
+            "INSERT OR IGNORE INTO teams "
+            "(name, membership_type, gc_uuid, is_active, season_year) "
+            "VALUES (?, 'tracked', ?, 0, ?)",
+            (team_name, gc_uuid, season_year),
         )
         if cursor.rowcount:
-            return cursor.lastrowid
+            new_id: int = cursor.lastrowid
+            written = self._write_public_id(new_id, gc_uuid, public_id)
+            return new_id, (public_id if written else None)
 
         row = self._db.execute(
-            "SELECT id, name FROM teams WHERE gc_uuid = ?", (gc_uuid,)
+            "SELECT id, name, public_id, season_year FROM teams WHERE gc_uuid = ?",
+            (gc_uuid,),
         ).fetchone()
         if row is None:
             raise RuntimeError(f"Failed to find or create teams row for gc_uuid={gc_uuid!r}")
-        existing_id, existing_name = row
+        existing_id, existing_name, existing_public_id, existing_season_year = row
+
         # Update UUID-as-name stubs (created by game_loader before team resolution)
         # with the real team name. Preserve any existing non-UUID name.
         if existing_name == gc_uuid:
@@ -386,7 +420,54 @@ class OpponentResolver:
                 "Updated UUID-stub name for team %d: %r -> %r",
                 existing_id, existing_name, team_name,
             )
-        return existing_id
+
+        # Write public_id only when existing row has NULL (only-write-when-NULL).
+        if existing_public_id is None:
+            written = self._write_public_id(existing_id, gc_uuid, public_id)
+            effective_public_id: str | None = public_id if written else None
+        else:
+            effective_public_id = existing_public_id
+
+        # Write season_year only when existing row has NULL (only-write-when-NULL).
+        if season_year is not None and existing_season_year is None:
+            self._db.execute(
+                "UPDATE teams SET season_year = ? WHERE id = ?", (season_year, existing_id)
+            )
+
+        return existing_id, effective_public_id
+
+    def _write_public_id(self, team_id: int, gc_uuid: str, public_id: str | None) -> bool:
+        """Write public_id to a teams row, checking for UNIQUE collisions first.
+
+        Skips the write if ``public_id`` is None.  Logs a WARNING and skips if
+        another row already holds the same ``public_id``.
+
+        Args:
+            team_id: INTEGER PK of the target teams row.
+            gc_uuid: GC UUID of the target team (for log context).
+            public_id: Slug to write, or None to skip entirely.
+
+        Returns:
+            True if the write was performed, False if skipped (None input or collision).
+        """
+        if public_id is None:
+            return False
+        collision = self._db.execute(
+            "SELECT id FROM teams WHERE public_id = ? AND id != ?",
+            (public_id, team_id),
+        ).fetchone()
+        if collision:
+            logger.warning(
+                "UNIQUE collision: public_id=%r already assigned to team id=%d; "
+                "skipping public_id write for team id=%d (gc_uuid=%r)",
+                public_id, collision[0], team_id, gc_uuid,
+            )
+            return False
+        else:
+            self._db.execute(
+                "UPDATE teams SET public_id = ? WHERE id = ?", (public_id, team_id)
+            )
+            return True
 
     def _upsert_resolved(
         self,
@@ -394,7 +475,7 @@ class OpponentResolver:
         root_team_id: str,
         opponent_name: str,
         resolved_team_id: int,
-        public_id: str,
+        public_id: str | None,
         is_hidden: bool,
     ) -> None:
         """Upsert an auto-resolved opponent_links row with manual-link protection.

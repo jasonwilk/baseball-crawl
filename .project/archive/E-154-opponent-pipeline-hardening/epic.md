@@ -1,7 +1,7 @@
 # E-154: Opponent Resolution Pipeline Hardening
 
 ## Status
-`READY`
+`COMPLETED`
 
 ## Overview
 Fix the critical data-flow break in the opponent discovery → resolution → scouting pipeline where `OpponentResolver._ensure_opponent_team_row()` writes `gc_uuid` to the `teams` table but never writes `public_id`, even though `public_id` is available from the same API call. This causes admin UI scouting to fail for auto-resolved opponents and leaves dead bridge-resolution code that can never succeed for opponent teams.
@@ -42,9 +42,9 @@ Expert consultation: api-scout confirmed `public_id` is NOT nullable in the GC t
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-154-01 | Fix resolver to write public_id and season_year to teams | TODO | None | - |
-| E-154-02 | Remove dead resolve_missing_public_ids bridge code | TODO | None | - |
-| E-154-03 | Backfill migration for teams.public_id | TODO | None | - |
+| E-154-01 | Fix resolver to write public_id and season_year to teams | DONE | None | - |
+| E-154-02 | Remove dead resolve_missing_public_ids bridge code | DONE | None | - |
+| E-154-03 | Backfill migration for teams.public_id | DONE | None | - |
 
 ## Dispatch Team
 - software-engineer
@@ -122,3 +122,35 @@ None remaining — all resolved during discovery.
 | **Total** | **20** | **16** | **4** |
 
 Key dismissed findings: DE-2 (E-154-02 dependency on E-154-01 — bridge was already non-functional), Codex-3 (admin integration AC — AC-1 already covers the data contract), Codex-4 (routing mismatch — trivial migration doesn't warrant DE agent), Codex-4 repeat (iteration 2).
+
+- 2026-03-25: All 3 stories DONE. Implementation dispatch complete.
+- 2026-03-25: COMPLETED after implementation review chain (4 CR passes + 4 Codex passes).
+
+### Implementation Review Scorecard
+| Review Pass | Findings | Accepted | Dismissed |
+|---|---|---|---|
+| Per-story CR — E-154-01 (2 rounds) | 2 | 2 | 0 |
+| Per-story CR — E-154-02 (2 rounds) | 1 | 1 | 0 |
+| Per-story CR — E-154-03 | 0 | 0 | 0 |
+| CR integration review | 0 | 0 | 0 |
+| PM holistic review | 0 | 0 | 0 |
+| CR second pass | 0 | 0 | 0 |
+| Codex iteration 1 | 3 | 2 | 1 |
+| Codex iteration 2 | 1 | 1 | 0 |
+| Codex iteration 3 | 1 | 1 | 0 |
+| Thorough CR review | 1 | 1 | 0 |
+| Codex iteration 4 | 2 | 0 | 2 |
+| **Total** | **11** | **8** | **3** |
+
+Key findings: Per-story CR caught test scope gaps and new-row INSERT collision path. Codex iteration 1 caught cross-story data integrity bug (collision-skipped public_id still written to opponent_links). Codex iteration 2 caught migration batch-duplicate UNIQUE violation. Codex iteration 3 caught wrong fix (arbitrary MIN(id) assignment). Thorough CR confirmed all fixes correct. Codex iteration 4 clean (only worktree artifacts and low-severity test hardening).
+
+### Documentation Assessment
+No documentation impact — no new user-facing features, no API changes, no new CLI commands.
+
+### Context-Layer Assessment
+- New agent capabilities or tools: No
+- New rules or conventions: No
+- New skills or workflows: No
+- CLAUDE.md updates needed: No — describes pipeline at correct abstraction level
+- Agent memory updates needed: Yes — PM memory updated separately
+- Hook changes: No

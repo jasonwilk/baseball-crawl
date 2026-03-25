@@ -1129,3 +1129,398 @@ def test_resolve_unlinked_unexpected_exception_increments_errors(
     assert result.follow_bridge_failed == 0
     assert result.resolved == 0
     assert any("Unexpected error" in r.message for r in caplog.records)
+
+
+# ---------------------------------------------------------------------------
+# E-154-01: AC-1 -- public_id written to teams row during resolution
+# ---------------------------------------------------------------------------
+
+
+def test_ensure_opponent_team_row_writes_public_id_new_row(db: sqlite3.Connection) -> None:
+    """AC-1: New teams row gets public_id from team detail API response."""
+    own_pk = _insert_team(db, _OWN_TEAM_GC_UUID, _OWN_TEAM_NAME)
+    team_detail_with_season = dict(_TEAM_DETAIL, season_year=2025)
+    client = _make_client(
+        paginated_return=[_OPPONENT_WITH_PROGENITOR],
+        get_return=team_detail_with_season,
+    )
+    config = _make_config([(_OWN_TEAM_GC_UUID, own_pk)])
+    resolver = OpponentResolver(client, config, db)
+
+    with patch("src.gamechanger.crawlers.opponent_resolver.time.sleep"):
+        resolver.resolve()
+
+    row = db.execute(
+        "SELECT public_id FROM teams WHERE gc_uuid = ?", (_PROGENITOR_ID,)
+    ).fetchone()
+    assert row is not None
+    assert row[0] == _PUBLIC_ID
+
+
+def test_ensure_opponent_team_row_writes_public_id_existing_null_row(
+    db: sqlite3.Connection,
+) -> None:
+    """AC-1: Existing teams row with NULL public_id gets public_id written."""
+    own_pk = _insert_team(db, _OWN_TEAM_GC_UUID, _OWN_TEAM_NAME)
+    # Pre-insert a stub row for the opponent with public_id=NULL
+    db.execute(
+        "INSERT INTO teams (gc_uuid, name, membership_type, is_active) VALUES (?, ?, 'tracked', 0)",
+        (_PROGENITOR_ID, _TEAM_NAME),
+    )
+    db.commit()
+    client = _make_client(
+        paginated_return=[_OPPONENT_WITH_PROGENITOR],
+        get_return=_TEAM_DETAIL,
+    )
+    config = _make_config([(_OWN_TEAM_GC_UUID, own_pk)])
+    resolver = OpponentResolver(client, config, db)
+
+    with patch("src.gamechanger.crawlers.opponent_resolver.time.sleep"):
+        resolver.resolve()
+
+    row = db.execute(
+        "SELECT public_id FROM teams WHERE gc_uuid = ?", (_PROGENITOR_ID,)
+    ).fetchone()
+    assert row[0] == _PUBLIC_ID
+
+
+# ---------------------------------------------------------------------------
+# E-154-01: AC-2 -- season_year written to teams row during resolution
+# ---------------------------------------------------------------------------
+
+
+def test_ensure_opponent_team_row_writes_season_year_new_row(db: sqlite3.Connection) -> None:
+    """AC-2: New teams row gets season_year from team detail API response."""
+    own_pk = _insert_team(db, _OWN_TEAM_GC_UUID, _OWN_TEAM_NAME)
+    team_detail_with_season = dict(_TEAM_DETAIL, season_year=2025)
+    client = _make_client(
+        paginated_return=[_OPPONENT_WITH_PROGENITOR],
+        get_return=team_detail_with_season,
+    )
+    config = _make_config([(_OWN_TEAM_GC_UUID, own_pk)])
+    resolver = OpponentResolver(client, config, db)
+
+    with patch("src.gamechanger.crawlers.opponent_resolver.time.sleep"):
+        resolver.resolve()
+
+    row = db.execute(
+        "SELECT season_year FROM teams WHERE gc_uuid = ?", (_PROGENITOR_ID,)
+    ).fetchone()
+    assert row[0] == 2025
+
+
+def test_ensure_opponent_team_row_writes_season_year_existing_null_row(
+    db: sqlite3.Connection,
+) -> None:
+    """AC-2: Existing teams row with NULL season_year gets season_year written."""
+    own_pk = _insert_team(db, _OWN_TEAM_GC_UUID, _OWN_TEAM_NAME)
+    db.execute(
+        "INSERT INTO teams (gc_uuid, name, membership_type, is_active) VALUES (?, ?, 'tracked', 0)",
+        (_PROGENITOR_ID, _TEAM_NAME),
+    )
+    db.commit()
+    team_detail_with_season = dict(_TEAM_DETAIL, season_year=2026)
+    client = _make_client(
+        paginated_return=[_OPPONENT_WITH_PROGENITOR],
+        get_return=team_detail_with_season,
+    )
+    config = _make_config([(_OWN_TEAM_GC_UUID, own_pk)])
+    resolver = OpponentResolver(client, config, db)
+
+    with patch("src.gamechanger.crawlers.opponent_resolver.time.sleep"):
+        resolver.resolve()
+
+    row = db.execute(
+        "SELECT season_year FROM teams WHERE gc_uuid = ?", (_PROGENITOR_ID,)
+    ).fetchone()
+    assert row[0] == 2026
+
+
+# ---------------------------------------------------------------------------
+# E-154-01: AC-3 -- existing non-NULL public_id and season_year preserved
+# ---------------------------------------------------------------------------
+
+
+def test_ensure_opponent_team_row_preserves_existing_public_id(
+    db: sqlite3.Connection,
+) -> None:
+    """AC-3: Existing non-NULL public_id on teams row is not overwritten."""
+    own_pk = _insert_team(db, _OWN_TEAM_GC_UUID, _OWN_TEAM_NAME)
+    existing_public_id = "already-set-pub-id"
+    db.execute(
+        "INSERT INTO teams (gc_uuid, name, membership_type, is_active, public_id) "
+        "VALUES (?, ?, 'tracked', 0, ?)",
+        (_PROGENITOR_ID, _TEAM_NAME, existing_public_id),
+    )
+    db.commit()
+    # API returns a different public_id -- should be ignored
+    different_public_id = "different-pub-id"
+    team_detail_different = dict(_TEAM_DETAIL, public_id=different_public_id)
+    client = _make_client(
+        paginated_return=[_OPPONENT_WITH_PROGENITOR],
+        get_return=team_detail_different,
+    )
+    config = _make_config([(_OWN_TEAM_GC_UUID, own_pk)])
+    resolver = OpponentResolver(client, config, db)
+
+    with patch("src.gamechanger.crawlers.opponent_resolver.time.sleep"):
+        resolver.resolve()
+
+    row = db.execute(
+        "SELECT public_id FROM teams WHERE gc_uuid = ?", (_PROGENITOR_ID,)
+    ).fetchone()
+    assert row[0] == existing_public_id  # unchanged
+
+
+def test_ensure_opponent_team_row_preserves_existing_season_year(
+    db: sqlite3.Connection,
+) -> None:
+    """AC-6: Existing non-NULL season_year on teams row is not overwritten."""
+    own_pk = _insert_team(db, _OWN_TEAM_GC_UUID, _OWN_TEAM_NAME)
+    db.execute(
+        "INSERT INTO teams (gc_uuid, name, membership_type, is_active, season_year) "
+        "VALUES (?, ?, 'tracked', 0, 2024)",
+        (_PROGENITOR_ID, _TEAM_NAME),
+    )
+    db.commit()
+    team_detail_with_season = dict(_TEAM_DETAIL, season_year=2025)
+    client = _make_client(
+        paginated_return=[_OPPONENT_WITH_PROGENITOR],
+        get_return=team_detail_with_season,
+    )
+    config = _make_config([(_OWN_TEAM_GC_UUID, own_pk)])
+    resolver = OpponentResolver(client, config, db)
+
+    with patch("src.gamechanger.crawlers.opponent_resolver.time.sleep"):
+        resolver.resolve()
+
+    row = db.execute(
+        "SELECT season_year FROM teams WHERE gc_uuid = ?", (_PROGENITOR_ID,)
+    ).fetchone()
+    assert row[0] == 2024  # unchanged
+
+
+# ---------------------------------------------------------------------------
+# E-154-01: AC-4 -- UNIQUE collision on public_id logs WARNING, skips write
+# ---------------------------------------------------------------------------
+
+
+def test_ensure_opponent_team_row_unique_collision_logs_warning_and_skips(
+    db: sqlite3.Connection, caplog: pytest.LogCaptureFixture
+) -> None:
+    """AC-4: UNIQUE collision on public_id logs WARNING and skips the write."""
+    import logging
+
+    own_pk = _insert_team(db, _OWN_TEAM_GC_UUID, _OWN_TEAM_NAME)
+    # Pre-insert a *different* team that already holds the same public_id
+    collision_gc_uuid = "collision-team-uuid"
+    db.execute(
+        "INSERT INTO teams (gc_uuid, name, membership_type, is_active, public_id) "
+        "VALUES (?, 'Collision Team', 'tracked', 0, ?)",
+        (collision_gc_uuid, _PUBLIC_ID),
+    )
+    db.commit()
+    # Pre-insert the opponent team row with NULL public_id
+    db.execute(
+        "INSERT INTO teams (gc_uuid, name, membership_type, is_active) VALUES (?, ?, 'tracked', 0)",
+        (_PROGENITOR_ID, _TEAM_NAME),
+    )
+    db.commit()
+    client = _make_client(
+        paginated_return=[_OPPONENT_WITH_PROGENITOR],
+        get_return=_TEAM_DETAIL,
+    )
+    config = _make_config([(_OWN_TEAM_GC_UUID, own_pk)])
+    resolver = OpponentResolver(client, config, db)
+
+    with patch("src.gamechanger.crawlers.opponent_resolver.time.sleep"):
+        with caplog.at_level(logging.WARNING, logger="src.gamechanger.crawlers.opponent_resolver"):
+            result = resolver.resolve()
+
+    # Resolution still succeeds (not an error)
+    assert result.resolved == 1
+    assert result.errors == 0
+    # WARNING logged about collision
+    assert any("UNIQUE collision" in r.message for r in caplog.records)
+    # public_id NOT written to the opponent team row
+    row = db.execute(
+        "SELECT public_id FROM teams WHERE gc_uuid = ?", (_PROGENITOR_ID,)
+    ).fetchone()
+    assert row[0] is None  # write was skipped
+
+
+# ---------------------------------------------------------------------------
+# E-154-01: AC-5 -- missing public_id in API response logs WARNING, continues
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_opponent_missing_public_id_logs_warning_and_continues(
+    db: sqlite3.Connection, caplog: pytest.LogCaptureFixture
+) -> None:
+    """AC-5: Missing public_id in team detail logs WARNING; resolution continues."""
+    import logging
+
+    own_pk = _insert_team(db, _OWN_TEAM_GC_UUID, _OWN_TEAM_NAME)
+    team_detail_no_pub_id = {
+        "id": _PROGENITOR_ID,
+        "name": _TEAM_NAME,
+        # no public_id key
+        "season_year": 2025,
+    }
+    client = _make_client(
+        paginated_return=[_OPPONENT_WITH_PROGENITOR],
+        get_return=team_detail_no_pub_id,
+    )
+    config = _make_config([(_OWN_TEAM_GC_UUID, own_pk)])
+    resolver = OpponentResolver(client, config, db)
+
+    with patch("src.gamechanger.crawlers.opponent_resolver.time.sleep"):
+        with caplog.at_level(logging.WARNING, logger="src.gamechanger.crawlers.opponent_resolver"):
+            result = resolver.resolve()
+
+    # Resolution still counted as successful (not an error)
+    assert result.resolved == 1
+    assert result.errors == 0
+    # WARNING logged about missing public_id
+    assert any("missing public_id" in r.message for r in caplog.records)
+    # teams row still created with gc_uuid and name
+    row = db.execute(
+        "SELECT gc_uuid, name, public_id, season_year FROM teams WHERE gc_uuid = ?",
+        (_PROGENITOR_ID,),
+    ).fetchone()
+    assert row is not None
+    assert row[0] == _PROGENITOR_ID
+    assert row[1] == _TEAM_NAME
+    assert row[2] is None  # public_id stays NULL
+    assert row[3] == 2025  # season_year still captured
+    # opponent_links row created with public_id=NULL
+    links = _fetch_links(db)
+    assert len(links) == 1
+    assert links[0]["public_id"] is None
+    assert links[0]["resolution_method"] == "auto"
+
+
+def test_resolve_opponent_null_public_id_in_response_logs_warning(
+    db: sqlite3.Connection, caplog: pytest.LogCaptureFixture
+) -> None:
+    """AC-5: Explicit null public_id in team detail logs WARNING; resolution continues."""
+    import logging
+
+    own_pk = _insert_team(db, _OWN_TEAM_GC_UUID, _OWN_TEAM_NAME)
+    team_detail_null_pub_id = dict(_TEAM_DETAIL, public_id=None)
+    client = _make_client(
+        paginated_return=[_OPPONENT_WITH_PROGENITOR],
+        get_return=team_detail_null_pub_id,
+    )
+    config = _make_config([(_OWN_TEAM_GC_UUID, own_pk)])
+    resolver = OpponentResolver(client, config, db)
+
+    with patch("src.gamechanger.crawlers.opponent_resolver.time.sleep"):
+        with caplog.at_level(logging.WARNING, logger="src.gamechanger.crawlers.opponent_resolver"):
+            result = resolver.resolve()
+
+    assert result.resolved == 1
+    assert result.errors == 0
+    assert any("missing public_id" in r.message for r in caplog.records)
+    links = _fetch_links(db)
+    assert links[0]["public_id"] is None
+
+
+# ---------------------------------------------------------------------------
+# E-154-01: AC-4 (new-row path) -- UNIQUE collision on INSERT path
+# ---------------------------------------------------------------------------
+
+
+def test_ensure_opponent_team_row_unique_collision_on_new_row_logs_warning_and_skips(
+    db: sqlite3.Connection, caplog: pytest.LogCaptureFixture
+) -> None:
+    """AC-4 (new-row path): UNIQUE collision when gc_uuid is new — WARNING logged, no crash."""
+    import logging
+
+    own_pk = _insert_team(db, _OWN_TEAM_GC_UUID, _OWN_TEAM_NAME)
+    # A completely different team already holds the public_id the API will return.
+    # The progenitor gc_uuid does NOT yet exist in teams.
+    db.execute(
+        "INSERT INTO teams (gc_uuid, name, membership_type, is_active, public_id) "
+        "VALUES ('other-gc-uuid', 'Other Team', 'tracked', 0, ?)",
+        (_PUBLIC_ID,),
+    )
+    db.commit()
+
+    client = _make_client(
+        paginated_return=[_OPPONENT_WITH_PROGENITOR],
+        get_return=_TEAM_DETAIL,  # returns public_id=_PUBLIC_ID
+    )
+    config = _make_config([(_OWN_TEAM_GC_UUID, own_pk)])
+    resolver = OpponentResolver(client, config, db)
+
+    with patch("src.gamechanger.crawlers.opponent_resolver.time.sleep"):
+        with caplog.at_level(logging.WARNING, logger="src.gamechanger.crawlers.opponent_resolver"):
+            result = resolver.resolve()
+
+    # Resolution succeeds (not counted as error)
+    assert result.resolved == 1
+    assert result.errors == 0
+    # WARNING logged about collision
+    assert any("UNIQUE collision" in r.message for r in caplog.records)
+    # New teams row created for the progenitor, but public_id write was skipped
+    row = db.execute(
+        "SELECT public_id FROM teams WHERE gc_uuid = ?", (_PROGENITOR_ID,)
+    ).fetchone()
+    assert row is not None
+    assert row[0] is None  # write was skipped due to collision
+
+
+# ---------------------------------------------------------------------------
+# E-154 post-review: end-to-end collision invariant for opponent_links
+# ---------------------------------------------------------------------------
+
+
+def test_unique_collision_nulls_both_teams_and_opponent_links_public_id(
+    db: sqlite3.Connection, caplog: pytest.LogCaptureFixture
+) -> None:
+    """When public_id collision occurs, both teams.public_id and opponent_links.public_id are NULL.
+
+    Verifies the downstream _resolve_team_id invariant: ScoutingCrawler must not
+    see a public_id in opponent_links that points to the wrong (colliding) teams row.
+    """
+    import logging
+
+    own_pk = _insert_team(db, _OWN_TEAM_GC_UUID, _OWN_TEAM_NAME)
+    # A different team already holds the public_id the API will return.
+    db.execute(
+        "INSERT INTO teams (gc_uuid, name, membership_type, is_active, public_id) "
+        "VALUES ('other-gc-uuid', 'Other Team', 'tracked', 0, ?)",
+        (_PUBLIC_ID,),
+    )
+    db.commit()
+
+    client = _make_client(
+        paginated_return=[_OPPONENT_WITH_PROGENITOR],
+        get_return=_TEAM_DETAIL,  # returns public_id=_PUBLIC_ID
+    )
+    config = _make_config([(_OWN_TEAM_GC_UUID, own_pk)])
+    resolver = OpponentResolver(client, config, db)
+
+    with patch("src.gamechanger.crawlers.opponent_resolver.time.sleep"):
+        with caplog.at_level(logging.WARNING, logger="src.gamechanger.crawlers.opponent_resolver"):
+            result = resolver.resolve()
+
+    assert result.resolved == 1
+    assert result.errors == 0
+    assert any("UNIQUE collision" in r.message for r in caplog.records)
+
+    # teams.public_id must be NULL for the resolved row (collision prevented the write)
+    teams_row = db.execute(
+        "SELECT public_id FROM teams WHERE gc_uuid = ?", (_PROGENITOR_ID,)
+    ).fetchone()
+    assert teams_row is not None
+    assert teams_row[0] is None, "teams.public_id should be NULL when collision occurred"
+
+    # opponent_links.public_id must also be NULL -- not the colliding slug
+    links = _fetch_links(db)
+    assert len(links) == 1
+    assert links[0]["public_id"] is None, (
+        "opponent_links.public_id must be NULL when collision prevented teams write; "
+        "otherwise ScoutingCrawler would look up the wrong team via _resolve_team_id"
+    )

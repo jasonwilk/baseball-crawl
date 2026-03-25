@@ -51,9 +51,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from src.gamechanger.bridge import BridgeForbiddenError, resolve_uuid_to_public_id
 from src.gamechanger.client import (
-    ConfigurationError,
     CredentialExpiredError,
     ForbiddenError,
     GameChangerAPIError,
@@ -349,107 +347,6 @@ class ScoutingCrawler:
             total.errors += result.errors
 
         return total
-
-    def resolve_missing_public_ids(self) -> None:
-        """Attempt to resolve public_id for opponents that have gc_uuid but no public_id.
-
-        Queries for distinct resolved teams in ``opponent_links`` whose
-        ``teams.gc_uuid IS NOT NULL`` and ``opponent_links.public_id IS NULL``.
-        Calls the forward bridge (``resolve_uuid_to_public_id``) for each.
-
-        On success: updates ``teams.public_id`` first (to prevent
-        ``_ensure_team_row`` from creating a duplicate row), then updates
-        ``opponent_links.public_id``, ``resolved_at``, and
-        ``resolution_method = 'bridge'`` for all matching rows.
-
-        On ``BridgeForbiddenError`` (403): logs WARNING with gc_uuid and name,
-        skips this opponent, and continues with the rest.
-
-        On ``CredentialExpiredError`` or ``ConfigurationError``: logs WARNING
-        and aborts the entire bridge resolution step. Scouting proceeds with
-        whatever public_ids are already populated.
-
-        If the resolved public_id is already assigned to a different teams row,
-        logs WARNING with gc_uuid, public_id, and conflicting teams.id, and
-        skips both table updates for that opponent.
-
-        This is a best-effort pre-step before ``scout_all()``. It is a no-op
-        when no candidates exist.
-        """
-        candidates = self._db.execute(
-            """
-            SELECT DISTINCT ol.resolved_team_id, t.gc_uuid, t.name
-            FROM opponent_links ol
-            JOIN teams t ON t.id = ol.resolved_team_id
-            WHERE t.gc_uuid IS NOT NULL
-              AND ol.public_id IS NULL
-              AND ol.is_hidden = 0
-            """
-        ).fetchall()
-
-        if not candidates:
-            logger.debug("resolve_missing_public_ids: no candidates found.")
-            return
-
-        logger.info(
-            "resolve_missing_public_ids: %d opponent(s) with gc_uuid but no public_id.",
-            len(candidates),
-        )
-
-        for team_id, gc_uuid, team_name in candidates:
-            try:
-                public_id = resolve_uuid_to_public_id(gc_uuid)
-            except BridgeForbiddenError:
-                logger.warning(
-                    "Bridge resolution skipped for gc_uuid=%s name=%r: "
-                    "team not on authenticated account.",
-                    gc_uuid,
-                    team_name,
-                )
-                continue
-            except (CredentialExpiredError, ConfigurationError) as exc:
-                logger.warning(
-                    "Bridge resolution aborted due to credential/config error: %s. "
-                    "Scouting will proceed with already-populated public_ids.",
-                    exc,
-                )
-                return
-
-            # Check for UNIQUE constraint collision on teams.public_id
-            existing = self._db.execute(
-                "SELECT id FROM teams WHERE public_id = ? LIMIT 1", (public_id,)
-            ).fetchone()
-            if existing is not None and existing[0] != team_id:
-                logger.warning(
-                    "Bridge resolution skipped for gc_uuid=%s: public_id=%r already "
-                    "assigned to teams.id=%d. Manual row reconciliation may be needed.",
-                    gc_uuid,
-                    public_id,
-                    existing[0],
-                )
-                continue
-
-            # Update teams.public_id first to prevent _ensure_team_row from creating a duplicate
-            self._db.execute(
-                "UPDATE teams SET public_id = ? WHERE id = ?",
-                (public_id, team_id),
-            )
-            now = _utcnow_iso()
-            self._db.execute(
-                """
-                UPDATE opponent_links
-                SET public_id = ?, resolved_at = ?, resolution_method = 'bridge'
-                WHERE resolved_team_id = ? AND public_id IS NULL
-                """,
-                (public_id, now, team_id),
-            )
-            self._db.commit()
-            logger.info(
-                "Bridge resolved gc_uuid=%s -> public_id=%s (teams.id=%d).",
-                gc_uuid,
-                public_id,
-                team_id,
-            )
 
     # ------------------------------------------------------------------
     # DB helpers

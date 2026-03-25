@@ -329,7 +329,6 @@ def _run_scout_pipeline(
         )
         load_errors = _load_scouted_team(conn, crawler, loader, data_root, team, started_at)
     else:
-        crawler.resolve_missing_public_ids()
         crawl_result = crawler.scout_all(season_id=season)
         typer.echo(
             f"Crawl complete: "
