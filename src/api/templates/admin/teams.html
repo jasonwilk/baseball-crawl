@@ -29,12 +29,37 @@
 {% elif msg %}
 <div class="mb-4 p-3 bg-green-100 text-green-800 rounded border border-green-300">
   {{ msg }}
+  {% if merged_canonical_id %}
+  &nbsp;
+  <form method="post" action="/admin/teams/{{ merged_canonical_id }}/sync" class="inline">
+    <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+    <button type="submit" class="underline font-semibold text-green-900 hover:text-green-700">Sync Now</button>
+  </form>
+  {% endif %}
 </div>
 {% endif %}
 
 {% if error %}
 <div class="mb-4 p-3 bg-red-100 text-red-800 rounded border border-red-300">
   {{ error }}
+</div>
+{% endif %}
+
+{% if duplicate_groups %}
+<div class="mb-6 p-4 bg-yellow-50 border border-yellow-300 rounded">
+  <h2 class="text-sm font-bold text-yellow-900 mb-2">Potential Duplicates Detected</h2>
+  <ul class="space-y-1">
+    {% for group in duplicate_groups %}
+    <li class="text-sm text-yellow-800 flex items-center gap-3">
+      <span>
+        {{ group | map(attribute='name') | join(', ') }}
+        <span class="text-yellow-600">({{ group | length }} teams)</span>
+      </span>
+      <a href="/admin/teams/merge?team_ids={{ group | map(attribute='id') | join(',') }}"
+         class="text-blue-700 hover:underline font-medium">Resolve</a>
+    </li>
+    {% endfor %}
+  </ul>
 </div>
 {% endif %}
 

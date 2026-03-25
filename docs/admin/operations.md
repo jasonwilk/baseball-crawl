@@ -151,6 +151,58 @@ For any active team that has a public ID, the **Discover** button calls `POST /a
 
 After running discovery, navigate to the **Opponents** tab to see which opponents were auto-resolved and which need manual mapping.
 
+### Merging Duplicate Teams
+
+When the system detects tracked teams with identical names and the same season year, a **Potential Duplicates** banner appears above the team table on `/admin/teams`. Each duplicate group shows the team names, the number of teams in the group, and a **Resolve** link.
+
+**When duplicates appear**: The banner triggers automatically on page load whenever two or more tracked teams share the same display name and `season_year`. This commonly happens when the same opponent is added twice from different schedule imports.
+
+**Note**: Merging is only available for tracked teams. Member teams cannot be merged -- if you need to combine member teams, correct them individually in GameChanger and re-sync.
+
+#### Running a Merge
+
+**Step 1 -- Open the merge page**: Click **Resolve** on any duplicate group. The merge page at `/admin/teams/merge` shows each team's key details side-by-side:
+
+| Field | What it tells you |
+|-------|------------------|
+| Name | Display name |
+| GameChanger UUID | Whether the GC API UUID is known |
+| Public ID | Whether the public URL slug is known |
+| Games | Number of game records attached |
+| Has Stats | Whether season stats have been loaded |
+| Membership | Tracked or Member |
+| Season Year | Which season this team belongs to |
+| Last Synced | When data was last refreshed |
+
+**Step 2 -- Choose the canonical team**: Select which team to keep using the radio buttons. Default selection favors the team with stats (`has_stats = true`) or the higher game count. Click **Preview Merge** to reload the page with a full directional preview showing:
+
+- Identifier gap-fill: if the canonical team is missing a `gc_uuid` or `public_id` that the duplicate has, those identifiers are carried over automatically.
+- Reassignment counts: how many rows in each table will be re-pointed to the canonical team.
+- Warnings: games played *between* the two teams (the game record will be reassigned, making it a self-referencing row -- check whether this is expected).
+- Blocking issues: shown in a red warning box if present; the **Confirm Merge** button is disabled until resolved.
+
+**Step 3 -- Confirm**: Click **Confirm Merge**. The merge runs atomically -- all foreign key references across 16 columns in 13 tables are reassigned to the canonical team, and the duplicate row is deleted. On success, the teams list shows a flash message:
+
+```
+Merged [duplicate name] into [canonical name]. Stats will update on next sync.
+```
+
+**Step 4 -- Sync**: A **Sync Now** button appears in the success message. Click it to trigger a data refresh for the canonical team immediately, or let the next scheduled sync handle it.
+
+#### When a Merge Is Blocked
+
+The **Confirm Merge** button is disabled if blocking issues exist. Common causes:
+
+- One of the team IDs no longer exists.
+- The two IDs are the same (can't merge a team with itself).
+- Either team is a Member team (not permitted).
+
+Resolve the blocking issue (usually by refreshing the page to reload current state), then retry.
+
+#### If 3+ Teams Are in a Group
+
+For groups with three or more duplicates, the merge page lists all teams in the group. Select any two to merge pairwise. After the merge, refresh the teams list -- if duplicates remain, the banner reappears with the remaining group, and you can run another merge.
+
 ### Database-Driven Crawl Configuration (CLI)
 
 By default, `scripts/crawl.py` and `scripts/load.py` read team configuration from `config/teams.yaml`. Pass `--source db` to read active member teams directly from the database instead:
@@ -454,4 +506,4 @@ For the expected data volume (~30 games x 4 teams x a few seasons), the database
 
 ---
 
-*Last updated: 2026-03-21 | Source: E-143 (programs, user roles, team delete, opponent mapping UX, crawl trigger UI), E-120-06 (bare UUID input documented), E-055 (unified CLI), E-115-01 (E-100 team management model), E-028-03 (original)*
+*Last updated: 2026-03-25 | Source: E-155 (duplicate team detection and merge UI), E-143 (programs, user roles, team delete, opponent mapping UX, crawl trigger UI), E-120-06 (bare UUID input documented), E-055 (unified CLI), E-115-01 (E-100 team management model), E-028-03 (original)*

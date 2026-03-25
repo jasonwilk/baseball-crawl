@@ -4,7 +4,7 @@
 [E-155: Combine Duplicate Teams](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the admin team list will display a "Potential Duplicates" banner when duplicate teams are detected, and a dedicated merge page will allow the admin to preview and execute a team merge with full confirmation.

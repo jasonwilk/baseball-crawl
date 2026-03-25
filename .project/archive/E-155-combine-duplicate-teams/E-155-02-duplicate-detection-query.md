@@ -4,7 +4,7 @@
 [E-155: Combine Duplicate Teams](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the system will have a `find_duplicate_teams(db)` function that returns groups of tracked teams with identical names (case-insensitive) within the same season year. This powers the "Potential Duplicates" banner on the admin team list.

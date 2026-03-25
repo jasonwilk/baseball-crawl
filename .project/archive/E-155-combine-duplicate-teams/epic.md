@@ -1,7 +1,7 @@
 # E-155: Combine Duplicate Teams
 
 ## Status
-`READY`
+`COMPLETED`
 <!-- Lifecycle: DRAFT → READY → ACTIVE → COMPLETED (or BLOCKED / ABANDONED) -->
 
 ## Overview
@@ -44,9 +44,9 @@ The result: a coach sees "Lincoln East" multiple times in their schedule/opponen
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-155-01 | Team merge core logic | TODO | None | - |
-| E-155-02 | Duplicate detection query | TODO | E-155-01 | - |
-| E-155-03 | Admin merge UI | TODO | E-155-01, E-155-02 | - |
+| E-155-01 | Team merge core logic | DONE | None | - |
+| E-155-02 | Duplicate detection query | DONE | E-155-01 | - |
+| E-155-03 | Admin merge UI | DONE | E-155-01, E-155-02 | - |
 
 ## Dispatch Team
 - software-engineer
@@ -133,6 +133,31 @@ None -- all resolved during discovery.
 - 2026-03-25: Review iteration 3 (circuit breaker). Incorporated 2 stale-wording fixes (CR-1: TN-1 opponent_links conflict resolution column, PM-6: Success Criteria bullet). Consistency sweep clean.
 - 2026-03-25: Codex spec review iteration 1. Incorporated 3 findings: P1-1 (3+ team group UX -- pairwise merge from N-team list), P1-2 (AC-7 reworded to account for deleted rows), P2-1 (TN-3 warning #4 surfaced in preview payload and UI).
 - 2026-03-25: Set to READY. 24 findings across 7 review passes, all accepted, 0 dismissed.
+- 2026-03-25: Epic set to ACTIVE. Dispatch started.
+- 2026-03-25: Dispatch completed. 3 stories implemented by SE. Per-story CR: E-155-01 APPROVED R2 (2 fixed); E-155-02 APPROVED R1 (0 findings); E-155-03 APPROVED R2 (3 fixed). Custom review chain: CR integration APPROVED (1 fixed), holistic review clean (2 tests added), CR #2 APPROVED (1 dismissed), Codex 0 P1s / 3 P2s (2 fixed, 1 dismissed). Epic COMPLETED.
+
+### Dispatch Review Scorecard
+| Review Pass | Findings | Accepted | Dismissed |
+|---|---|---|---|
+| Per-story CR -- E-155-01 | 2 | 2 | 0 |
+| Per-story CR -- E-155-02 | 0 | 0 | 0 |
+| Per-story CR -- E-155-03 | 3 | 3 | 0 |
+| CR integration review | 1 | 1 | 0 |
+| Holistic review (CR+SE) | 2 | 2 | 0 |
+| CR review #2 | 1 | 0 | 1 |
+| Codex code review | 3 | 2 | 1 |
+| **Total** | **12** | **10** | **2** |
+
+### Documentation Assessment
+**Trigger fired: Yes.** E-155 adds a new admin-facing feature (duplicate team detection banner + merge page at `/admin/teams/merge`). `docs/admin/operations.md` documents the Admin Team Management section and does not cover merge workflows. Dispatch docs-writer to update `docs/admin/operations.md` with the new merge feature before archiving.
+
+### Context-Layer Assessment
+1. **New agent, rule, or skill added?** No -- no new agents, rules, or skills.
+2. **Existing agent definition needs update?** No -- no agent behavior changes.
+3. **CLAUDE.md sections outdated?** No -- E-155 adds a new module (`src/db/merge.py`) and new admin routes, but these don't change any architectural patterns described in CLAUDE.md. The Admin UI section already describes `/admin/teams/` generically.
+4. **New convention or pattern emerged?** No -- follows existing patterns (SQLite transactions, FastAPI routes, Jinja2 templates, CSRF protection).
+5. **Hook or settings change needed?** No.
+6. **Memory update needed?** No -- no new architectural decisions or data model changes beyond what's already in the epic.
 
 ### Review Scorecard
 | Review Pass | Findings | Accepted | Dismissed |

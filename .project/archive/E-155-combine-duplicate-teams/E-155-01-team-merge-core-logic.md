@@ -4,7 +4,7 @@
 [E-155: Combine Duplicate Teams](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the system will have a `merge_teams(canonical_id, duplicate_id, db)` function that atomically reassigns all FK references from the duplicate team to the canonical team and deletes the duplicate. A companion `preview_merge(canonical_id, duplicate_id, db)` function will return a structured summary of what the merge will do (conflict counts, games to reassign, identifier status, blocking issues) without modifying data.

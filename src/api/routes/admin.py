@@ -14,6 +14,8 @@ Routes:
     POST /admin/teams                                    -- Phase 1: resolve URL, redirect to confirm
     GET  /admin/teams/confirm                            -- Phase 2: confirm page
     POST /admin/teams/confirm                            -- Phase 2: create team
+    GET  /admin/teams/merge                              -- Team merge preview page
+    POST /admin/teams/merge                              -- Execute team merge
     GET  /admin/teams/{team_id}/edit                     -- Edit team form (INTEGER team_id)
     POST /admin/teams/{team_id}/edit                     -- Update team metadata (INTEGER team_id)
     POST /admin/teams/{id}/toggle-active                 -- Toggle team is_active flag (INTEGER id)
@@ -69,6 +71,13 @@ from src.gamechanger.team_resolver import (
     TeamNotFoundError,
     discover_opponents,
     resolve_team,
+)
+from src.db.merge import (
+    MergeBlockedError,
+    MergePreview,
+    find_duplicate_teams,
+    merge_teams as _merge_teams_core,
+    preview_merge,
 )
 from src.gamechanger.url_parser import parse_team_url
 from src.pipeline import trigger
@@ -404,6 +413,88 @@ def _get_programs() -> list[dict[str, Any]]:
             "SELECT program_id, name FROM programs ORDER BY name"
         ).fetchall()
     return [dict(r) for r in rows]
+
+
+def _get_duplicate_groups() -> list[list[Any]]:
+    """Return groups of duplicate tracked teams for the banner.
+
+    Returns:
+        List of duplicate groups from find_duplicate_teams(). Each group is a
+        list of DuplicateTeam dataclass instances.
+    """
+    with closing(get_connection()) as conn:
+        return find_duplicate_teams(conn)
+
+
+def _get_teams_for_merge(team_ids: list[int]) -> list[dict[str, Any]]:
+    """Fetch team details needed for the merge preview page.
+
+    Args:
+        team_ids: List of INTEGER team primary keys.
+
+    Returns:
+        List of dicts with keys: id, name, gc_uuid, public_id, membership_type,
+        season_year, last_synced, game_count, has_stats. Order matches team_ids.
+    """
+    if not team_ids:
+        return []
+    placeholders = ",".join("?" * len(team_ids))
+    with closing(get_connection()) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            f"""
+            SELECT
+                t.id,
+                t.name,
+                t.gc_uuid,
+                t.public_id,
+                t.membership_type,
+                t.season_year,
+                t.last_synced,
+                (
+                    SELECT COUNT(*) FROM games g
+                    WHERE g.home_team_id = t.id OR g.away_team_id = t.id
+                ) AS game_count,
+                CASE WHEN (
+                    EXISTS (SELECT 1 FROM player_season_batting  WHERE team_id = t.id)
+                    OR EXISTS (SELECT 1 FROM player_season_pitching WHERE team_id = t.id)
+                    OR EXISTS (SELECT 1 FROM scouting_runs        WHERE team_id = t.id)
+                ) THEN 1 ELSE 0 END AS has_stats
+            FROM teams t
+            WHERE t.id IN ({placeholders})
+            """,  # noqa: S608
+            tuple(team_ids),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def _run_preview_merge(canonical_id: int, duplicate_id: int) -> MergePreview:
+    """Call preview_merge() with a fresh DB connection.
+
+    Args:
+        canonical_id: The team id to keep.
+        duplicate_id: The team id to delete.
+
+    Returns:
+        MergePreview dataclass instance.
+    """
+    with closing(get_connection()) as conn:
+        return preview_merge(canonical_id, duplicate_id, conn)
+
+
+def _run_merge_teams(canonical_id: int, duplicate_id: int) -> None:
+    """Call merge_teams() with a fresh DB connection.
+
+    Args:
+        canonical_id: The team id to keep.
+        duplicate_id: The team id to delete.
+
+    Raises:
+        MergeBlockedError: If the merge is not allowed.
+        sqlite3.Error: On database failure.
+    """
+    with closing(get_connection()) as conn:
+        _merge_teams_core(canonical_id, duplicate_id, conn)
 
 
 def _get_all_programs() -> list[dict[str, Any]]:
@@ -1303,18 +1394,28 @@ async def list_teams(request: Request) -> Response:
     error = request.query_params.get("error", "")
     added = request.query_params.get("added", "")
     added_team_name = request.query_params.get("team_name", "")
+    merged_canonical_id_raw = request.query_params.get("merged_canonical_id", "")
+    merged_canonical_id: int | None = None
+    try:
+        if merged_canonical_id_raw:
+            merged_canonical_id = int(merged_canonical_id_raw)
+    except ValueError:
+        pass
 
     teams = await run_in_threadpool(_get_all_teams_flat)
+    duplicate_groups = await run_in_threadpool(_get_duplicate_groups)
 
     return templates.TemplateResponse(
         request,
         "admin/teams.html",
         {
             "teams": teams,
+            "duplicate_groups": duplicate_groups,
             "msg": msg,
             "error": error,
             "added": added,
             "added_team_name": added_team_name,
+            "merged_canonical_id": merged_canonical_id,
             "admin_user": guard,
             "is_admin_page": True,
         },
@@ -1669,6 +1770,192 @@ async def confirm_team_submit(
         )
     return RedirectResponse(
         url=f"/admin/teams?added=1&team_name={quote_plus(team_name)}",
+        status_code=303,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Team merge routes
+# ---------------------------------------------------------------------------
+
+
+def _parse_team_ids(raw: str) -> list[int] | None:
+    """Parse a comma-separated string of integer team IDs.
+
+    Args:
+        raw: Comma-separated string, e.g. "1,2,3".
+
+    Returns:
+        List of ints, or None if parsing fails or list has fewer than 2 items.
+    """
+    try:
+        ids = [int(x.strip()) for x in raw.split(",") if x.strip()]
+    except ValueError:
+        return None
+    return ids if len(ids) >= 2 else None
+
+
+@router.get("/teams/merge", response_model=None)
+async def merge_teams_page(request: Request) -> Response:
+    """Render the team merge preview page.
+
+    Accepts ``team_ids`` (comma-separated) and optionally ``canonical_id``
+    (and ``duplicate_id`` for groups of 3+) as query parameters.
+
+    On initial load (no canonical_id): renders team comparison with radio
+    buttons to select the canonical team.  On reload with canonical_id:
+    renders the full directional preview from preview_merge().
+
+    Args:
+        request: The incoming HTTP request.
+
+    Returns:
+        HTMLResponse with the merge preview, or redirect on invalid params.
+    """
+    guard = await _require_admin(request)
+    if isinstance(guard, Response):
+        return guard
+
+    team_ids_raw = request.query_params.get("team_ids", "")
+    canonical_id_raw = request.query_params.get("canonical_id", "")
+    duplicate_id_raw = request.query_params.get("duplicate_id", "")
+    error = request.query_params.get("error", "")
+
+    team_ids = _parse_team_ids(team_ids_raw)
+    if team_ids is None:
+        return RedirectResponse(
+            url="/admin/teams?error=" + quote_plus("Merge requires at least 2 valid team IDs."),
+            status_code=302,
+        )
+
+    team_rows = await run_in_threadpool(_get_teams_for_merge, team_ids)
+    found_ids = {t["id"] for t in team_rows}
+    if len(found_ids) < 2 or any(tid not in found_ids for tid in team_ids):
+        return RedirectResponse(
+            url="/admin/teams?error=" + quote_plus("One or more teams not found."),
+            status_code=302,
+        )
+
+    # Order team_rows to match the team_ids order
+    id_to_team = {t["id"]: t for t in team_rows}
+    teams = [id_to_team[tid] for tid in team_ids if tid in id_to_team]
+
+    # Parse canonical_id and duplicate_id from query params
+    canonical_id: int | None = None
+    duplicate_id: int | None = None
+    try:
+        if canonical_id_raw:
+            canonical_id = int(canonical_id_raw)
+            if canonical_id not in found_ids:
+                canonical_id = None
+    except ValueError:
+        canonical_id = None
+
+    try:
+        if duplicate_id_raw:
+            duplicate_id = int(duplicate_id_raw)
+            if duplicate_id not in found_ids:
+                duplicate_id = None
+    except ValueError:
+        duplicate_id = None
+
+    # For 2-team case, derive duplicate automatically
+    if canonical_id and len(team_ids) == 2:
+        duplicate_id = next((tid for tid in team_ids if tid != canonical_id), None)
+
+    # Run directional preview when both IDs are known
+    merge_preview: MergePreview | None = None
+    if canonical_id and duplicate_id and canonical_id != duplicate_id:
+        merge_preview = await run_in_threadpool(_run_preview_merge, canonical_id, duplicate_id)
+
+    # Build the team_ids query string for form actions
+    team_ids_str = ",".join(str(tid) for tid in team_ids)
+
+    return templates.TemplateResponse(
+        request,
+        "admin/merge_teams.html",
+        {
+            "teams": teams,
+            "team_ids_str": team_ids_str,
+            "canonical_id": canonical_id,
+            "duplicate_id": duplicate_id,
+            "merge_preview": merge_preview,
+            "is_pairwise": len(team_ids) == 2,
+            "error": error,
+            "admin_user": guard,
+            "is_admin_page": True,
+        },
+    )
+
+
+@router.post("/teams/merge", response_model=None)
+async def execute_merge(
+    request: Request,
+    canonical_id: int = Form(...),
+    duplicate_id: int = Form(...),
+    team_ids_str: str = Form(...),
+    csrf_token: str = Form(...),  # noqa: ARG001 -- validated by middleware
+) -> Response:
+    """Execute a team merge and redirect.
+
+    Calls merge_teams() with the provided canonical and duplicate IDs.  On
+    success redirects to /admin/teams with a confirmation message and a
+    Sync Now button.  On MergeBlockedError redirects back to the merge page.
+
+    Args:
+        request: The incoming HTTP request.
+        canonical_id: The team id to keep (from form).
+        duplicate_id: The team id to delete (from form).
+        team_ids_str: Comma-separated team IDs for the Resolve link back (from form).
+        csrf_token: CSRF token validated by the session middleware.
+
+    Returns:
+        Redirect to /admin/teams on success, or back to merge page on failure.
+    """
+    guard = await _require_admin(request)
+    if isinstance(guard, Response):
+        return guard
+
+    # Fetch team names for the success/error messages
+    team_rows = await run_in_threadpool(_get_teams_for_merge, [canonical_id, duplicate_id])
+    id_to_team = {t["id"]: t for t in team_rows}
+    canonical_team = id_to_team.get(canonical_id)
+    duplicate_team = id_to_team.get(duplicate_id)
+
+    if not canonical_team or not duplicate_team:
+        return RedirectResponse(
+            url="/admin/teams?error=" + quote_plus("One or both teams not found."),
+            status_code=303,
+        )
+
+    canonical_name = canonical_team["name"]
+    duplicate_name = duplicate_team["name"]
+
+    try:
+        await run_in_threadpool(_run_merge_teams, canonical_id, duplicate_id)
+    except MergeBlockedError as exc:
+        merge_url = (
+            f"/admin/teams/merge?team_ids={quote_plus(team_ids_str)}"
+            f"&canonical_id={canonical_id}&duplicate_id={duplicate_id}"
+            f"&error={quote_plus(str(exc))}"
+        )
+        return RedirectResponse(url=merge_url, status_code=303)
+    except Exception:
+        logger.exception(
+            "Unexpected error during merge: canonical=%d duplicate=%d",
+            canonical_id,
+            duplicate_id,
+        )
+        merge_url = (
+            f"/admin/teams/merge?team_ids={quote_plus(team_ids_str)}"
+            f"&canonical_id={canonical_id}&duplicate_id={duplicate_id}"
+            f"&error={quote_plus('Database error during merge. No changes were made.')}"
+        )
+        return RedirectResponse(url=merge_url, status_code=303)
+
+    msg = f"Merged {duplicate_name} into {canonical_name}. Stats will update on next sync."
+    return RedirectResponse(
+        url=f"/admin/teams?msg={quote_plus(msg)}&merged_canonical_id={canonical_id}",
         status_code=303,
     )
 

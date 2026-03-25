@@ -1,0 +1,301 @@
+{% extends "base.html" %}
+
+{% block title %}Admin -- Merge Teams{% endblock %}
+
+{% block header_extras %}
+  <a href="/dashboard" class="text-blue-200 hover:text-white">Dashboard</a>
+  <form method="post" action="/auth/logout" class="inline"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><button type="submit" class="text-blue-200 hover:text-white bg-transparent border-0 cursor-pointer p-0 font-[inherit] text-[length:inherit]">Logout</button></form>
+{% endblock %}
+
+{% block content %}
+<h1 class="text-xl font-bold mb-2">Merge Duplicate Teams</h1>
+
+<!-- Admin sub-navigation -->
+<nav class="mb-6 flex gap-4 border-b border-gray-300 pb-2 text-sm">
+  <a href="/admin/users"
+     class="font-medium text-gray-600 hover:text-blue-900">Users</a>
+  <a href="/admin/teams"
+     class="font-bold underline text-blue-900">Teams</a>
+  <a href="/admin/programs"
+     class="font-medium text-gray-600 hover:text-blue-900">Programs</a>
+  <a href="/admin/opponents"
+     class="font-medium text-gray-600 hover:text-blue-900">Opponents</a>
+</nav>
+
+<p class="text-sm text-gray-600 mb-4">
+  <a href="/admin/teams" class="text-blue-700 hover:underline">&larr; Back to Teams</a>
+</p>
+
+{% if error %}
+<div class="mb-4 p-3 bg-red-100 text-red-800 rounded border border-red-300">
+  {{ error }}
+</div>
+{% endif %}
+
+<!-- -----------------------------------------------------------------------
+     Team comparison cards
+     ----------------------------------------------------------------------- -->
+<div class="mb-6 {% if is_pairwise %}grid grid-cols-1 sm:grid-cols-2 gap-4{% else %}space-y-3{% endif %}">
+  {% for team in teams %}
+  <div class="bg-white rounded shadow p-4 border {% if canonical_id == team.id %}border-blue-500{% else %}border-gray-200{% endif %}">
+    <div class="flex items-start justify-between mb-2">
+      <h2 class="font-semibold text-base">{{ team.name }}</h2>
+      <div class="flex gap-1 flex-wrap justify-end">
+        {% if team.has_stats %}
+          <span class="px-2 py-0.5 rounded text-xs font-semibold bg-green-100 text-green-800 border border-green-300">Has stats</span>
+        {% endif %}
+        {% if team.membership_type == 'member' %}
+          <span class="px-2 py-0.5 rounded text-xs font-semibold bg-blue-100 text-blue-800 border border-blue-300">Member</span>
+        {% else %}
+          <span class="px-2 py-0.5 rounded text-xs font-semibold bg-gray-100 text-gray-700 border border-gray-300">Tracked</span>
+        {% endif %}
+        {% if canonical_id == team.id %}
+          <span class="px-2 py-0.5 rounded text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-400">Canonical</span>
+        {% elif duplicate_id == team.id %}
+          <span class="px-2 py-0.5 rounded text-xs font-semibold bg-red-50 text-red-700 border border-red-400">Will be deleted</span>
+        {% endif %}
+      </div>
+    </div>
+    <table class="text-xs text-gray-700 w-full">
+      <tr>
+        <td class="pr-3 text-gray-500 py-0.5 w-28">ID</td>
+        <td class="py-0.5 font-mono">{{ team.id }}</td>
+      </tr>
+      <tr>
+        <td class="pr-3 text-gray-500 py-0.5">Season year</td>
+        <td class="py-0.5">{{ team.season_year or "—" }}</td>
+      </tr>
+      <tr>
+        <td class="pr-3 text-gray-500 py-0.5">gc_uuid</td>
+        <td class="py-0.5 font-mono break-all">
+          {% if team.gc_uuid %}
+            <span class="text-green-700">{{ team.gc_uuid }}</span>
+          {% else %}
+            <span class="text-gray-400 italic">none</span>
+          {% endif %}
+        </td>
+      </tr>
+      <tr>
+        <td class="pr-3 text-gray-500 py-0.5">public_id</td>
+        <td class="py-0.5 font-mono break-all">
+          {% if team.public_id %}
+            <span class="text-green-700">{{ team.public_id }}</span>
+          {% else %}
+            <span class="text-gray-400 italic">none</span>
+          {% endif %}
+        </td>
+      </tr>
+      <tr>
+        <td class="pr-3 text-gray-500 py-0.5">Games</td>
+        <td class="py-0.5 font-semibold {% if team.game_count > 0 %}text-gray-900{% else %}text-gray-400{% endif %}">{{ team.game_count }}</td>
+      </tr>
+      <tr>
+        <td class="pr-3 text-gray-500 py-0.5">Last synced</td>
+        <td class="py-0.5">{{ (team.last_synced or "")[:10] or "Never" }}</td>
+      </tr>
+    </table>
+  </div>
+  {% endfor %}
+</div>
+
+<!-- -----------------------------------------------------------------------
+     Step 1: Select canonical (and duplicate for 3+ teams)
+     Shown when canonical not yet selected, or always as "change" option.
+     ----------------------------------------------------------------------- -->
+{% if not canonical_id or not merge_preview %}
+<div class="bg-white rounded shadow p-5 mb-6 max-w-lg">
+  <h2 class="font-semibold text-sm mb-3">
+    {% if not canonical_id %}Select Canonical Team{% else %}Change Selection{% endif %}
+  </h2>
+  <form method="get" action="/admin/teams/merge">
+    <input type="hidden" name="team_ids" value="{{ team_ids_str }}">
+    <div class="mb-4">
+      <label class="block text-xs font-medium text-gray-700 mb-1">Keep (canonical team) &mdash; this team&rsquo;s data wins</label>
+      {% for team in teams %}
+      <label class="flex items-center gap-2 mb-1 text-sm cursor-pointer">
+        <input type="radio" name="canonical_id" value="{{ team.id }}"
+               {% if canonical_id == team.id %}checked{% endif %}
+               class="accent-blue-700">
+        <span>{{ team.name }}</span>
+        {% if team.has_stats %}<span class="text-xs text-green-700">(has stats)</span>{% endif %}
+        <span class="text-xs text-gray-500">({{ team.game_count }} games)</span>
+      </label>
+      {% endfor %}
+    </div>
+    {% if not is_pairwise %}
+    <div class="mb-4">
+      <label class="block text-xs font-medium text-gray-700 mb-1">Delete (duplicate team) &mdash; this team will be removed</label>
+      {% for team in teams %}
+      <label class="flex items-center gap-2 mb-1 text-sm cursor-pointer">
+        <input type="radio" name="duplicate_id" value="{{ team.id }}"
+               {% if duplicate_id == team.id %}checked{% endif %}
+               class="accent-red-600">
+        <span>{{ team.name }}</span>
+        {% if team.has_stats %}<span class="text-xs text-green-700">(has stats)</span>{% endif %}
+        <span class="text-xs text-gray-500">({{ team.game_count }} games)</span>
+      </label>
+      {% endfor %}
+    </div>
+    {% endif %}
+    <button type="submit"
+            class="bg-blue-900 text-white px-4 py-2 rounded text-sm hover:bg-blue-800">
+      Preview Merge
+    </button>
+  </form>
+</div>
+{% endif %}
+
+<!-- -----------------------------------------------------------------------
+     Step 2: Directional preview (shown when canonical_id is set)
+     ----------------------------------------------------------------------- -->
+{% if merge_preview %}
+
+{% set blocking = merge_preview.blocking_issues %}
+
+{% if blocking %}
+<div class="mb-4 p-4 bg-red-50 border border-red-400 rounded">
+  <h3 class="font-semibold text-sm text-red-800 mb-2">Cannot Merge &mdash; Blocking Issues</h3>
+  <ul class="list-disc list-inside text-sm text-red-700 space-y-1">
+    {% for issue in blocking %}
+    <li>{{ issue }}</li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
+
+<!-- Identifier gap-fill summary -->
+{% set will_fill_uuid = (not merge_preview.canonical_gc_uuid) and merge_preview.duplicate_gc_uuid %}
+{% set will_fill_public_id = (not merge_preview.canonical_public_id) and merge_preview.duplicate_public_id %}
+{% set uuid_conflict = merge_preview.canonical_gc_uuid and merge_preview.duplicate_gc_uuid and (merge_preview.canonical_gc_uuid != merge_preview.duplicate_gc_uuid) %}
+{% set pubid_conflict = merge_preview.canonical_public_id and merge_preview.duplicate_public_id and (merge_preview.canonical_public_id != merge_preview.duplicate_public_id) %}
+
+<div class="mb-4 bg-white rounded shadow p-4">
+  <h3 class="font-semibold text-sm mb-3">Identifier Gap-Fill</h3>
+  <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+    <div>
+      <div class="text-gray-500 mb-1">gc_uuid after merge</div>
+      {% if will_fill_uuid %}
+        <div class="text-green-700 font-mono">{{ merge_preview.duplicate_gc_uuid }} <span class="text-green-600">(filled from duplicate)</span></div>
+      {% elif merge_preview.canonical_gc_uuid %}
+        <div class="font-mono text-gray-800">{{ merge_preview.canonical_gc_uuid }} <span class="text-gray-500">(unchanged)</span></div>
+      {% else %}
+        <div class="text-gray-400 italic">none</div>
+      {% endif %}
+      {% if uuid_conflict %}
+        <div class="text-yellow-700 mt-1">&#9888; Mismatch: duplicate has <span class="font-mono">{{ merge_preview.duplicate_gc_uuid }}</span> (will be discarded)</div>
+      {% endif %}
+    </div>
+    <div>
+      <div class="text-gray-500 mb-1">public_id after merge</div>
+      {% if will_fill_public_id %}
+        <div class="text-green-700 font-mono">{{ merge_preview.duplicate_public_id }} <span class="text-green-600">(filled from duplicate)</span></div>
+      {% elif merge_preview.canonical_public_id %}
+        <div class="font-mono text-gray-800">{{ merge_preview.canonical_public_id }} <span class="text-gray-500">(unchanged)</span></div>
+      {% else %}
+        <div class="text-gray-400 italic">none</div>
+      {% endif %}
+      {% if pubid_conflict %}
+        <div class="text-yellow-700 mt-1">&#9888; Mismatch: duplicate has <span class="font-mono">{{ merge_preview.duplicate_public_id }}</span> (will be discarded)</div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<!-- Warning signals -->
+{% if merge_preview.games_between_teams > 0 or merge_preview.duplicate_has_our_team_entries or merge_preview.duplicate_is_member %}
+<div class="mb-4 p-3 bg-yellow-50 border border-yellow-400 rounded text-sm text-yellow-800">
+  <p class="font-semibold mb-1">&#9888; Warnings</p>
+  <ul class="list-disc list-inside space-y-1">
+    {% if merge_preview.games_between_teams > 0 %}
+    <li>
+      {{ merge_preview.games_between_teams }} game(s) recorded between these two teams &mdash;
+      they may <strong>not</strong> be the same team.
+    </li>
+    {% endif %}
+    {% if merge_preview.duplicate_has_our_team_entries %}
+    <li>
+      The duplicate team appears as a member&rsquo;s tracked team in opponent_links &mdash;
+      it may have been treated as an owned team.
+    </li>
+    {% endif %}
+    {% if merge_preview.duplicate_is_member %}
+    <li>
+      The duplicate has <code>membership_type = 'member'</code>. This is a blocking issue.
+    </li>
+    {% endif %}
+  </ul>
+</div>
+{% endif %}
+
+<!-- Data movement summary -->
+{% if merge_preview.reassignment_counts or merge_preview.conflict_counts %}
+<div class="mb-4 bg-white rounded shadow p-4">
+  <h3 class="font-semibold text-sm mb-3">Data Movement</h3>
+  <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+    {% if merge_preview.reassignment_counts %}
+    <div>
+      <div class="text-gray-500 font-medium mb-1">Rows to reassign to canonical</div>
+      <table class="w-full">
+        {% for table, count in merge_preview.reassignment_counts.items() %}
+        <tr>
+          <td class="pr-2 text-gray-700 font-mono">{{ table }}</td>
+          <td class="text-right font-semibold text-gray-900">{{ count }}</td>
+        </tr>
+        {% endfor %}
+      </table>
+    </div>
+    {% endif %}
+    {% if merge_preview.conflict_counts %}
+    <div>
+      <div class="text-gray-500 font-medium mb-1">Conflicting rows to delete (canonical wins)</div>
+      <table class="w-full">
+        {% for table, count in merge_preview.conflict_counts.items() %}
+        <tr>
+          <td class="pr-2 text-gray-700 font-mono">{{ table }}</td>
+          <td class="text-right font-semibold text-red-700">{{ count }}</td>
+        </tr>
+        {% endfor %}
+      </table>
+    </div>
+    {% endif %}
+  </div>
+  {% if merge_preview.self_ref_deletions > 0 %}
+  <p class="text-xs text-gray-500 mt-2">
+    {{ merge_preview.self_ref_deletions }} self-referencing row(s) in opponent_links/team_opponents will be auto-deleted.
+  </p>
+  {% endif %}
+</div>
+{% endif %}
+
+<!-- Confirm Merge form -->
+<div class="bg-white rounded shadow p-5 max-w-lg">
+  <h3 class="font-semibold text-sm mb-3">Confirm Merge</h3>
+  <p class="text-xs text-gray-600 mb-4">
+    This will permanently delete the duplicate team and reassign all its data to the canonical team.
+    This action <strong>cannot be undone</strong>.
+  </p>
+  <form method="post" action="/admin/teams/merge">
+    <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+    <input type="hidden" name="canonical_id" value="{{ canonical_id }}">
+    <input type="hidden" name="duplicate_id" value="{{ duplicate_id }}">
+    <input type="hidden" name="team_ids_str" value="{{ team_ids_str }}">
+    <div class="flex items-center gap-3">
+      <button type="submit"
+              {% if blocking %}disabled{% endif %}
+              class="bg-red-700 text-white px-4 py-2 rounded text-sm hover:bg-red-600 disabled:opacity-40 disabled:cursor-not-allowed">
+        Confirm Merge
+      </button>
+      <a href="/admin/teams" class="text-sm text-gray-600 hover:underline">Cancel</a>
+    </div>
+  </form>
+
+  <!-- Change selection link -->
+  <p class="text-xs text-gray-500 mt-3">
+    Wrong direction?
+    <a href="/admin/teams/merge?team_ids={{ team_ids_str }}"
+       class="text-blue-700 hover:underline">Change selection</a>
+  </p>
+</div>
+
+{% endif %}
+{% endblock %}
