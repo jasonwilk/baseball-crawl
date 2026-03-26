@@ -198,6 +198,52 @@ def _insert_opponent_link(
     return link_id
 
 
+def _insert_tracked_team(
+    db_path: Path,
+    name: str,
+    public_id: str | None = None,
+) -> int:
+    """Insert a tracked team and return its INTEGER PK."""
+    conn = sqlite3.connect(str(db_path))
+    conn.execute("PRAGMA foreign_keys=ON;")
+    cursor = conn.execute(
+        "INSERT INTO teams (name, membership_type, public_id, source, is_active)"
+        " VALUES (?, 'tracked', ?, 'gamechanger', 0)",
+        (name, public_id),
+    )
+    conn.commit()
+    team_id = cursor.lastrowid
+    conn.close()
+    return team_id
+
+
+def _insert_team_opponents(
+    db_path: Path,
+    our_team_id: int,
+    opponent_team_id: int,
+) -> None:
+    """Insert a team_opponents row linking a member team to a tracked team."""
+    conn = sqlite3.connect(str(db_path))
+    conn.execute("PRAGMA foreign_keys=ON;")
+    conn.execute(
+        "INSERT OR IGNORE INTO team_opponents (our_team_id, opponent_team_id)"
+        " VALUES (?, ?)",
+        (our_team_id, opponent_team_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def _get_team_row(db_path: Path, team_id: int) -> dict | None:
+    """Fetch a teams row by INTEGER PK."""
+    conn = sqlite3.connect(str(db_path))
+    conn.execute("PRAGMA foreign_keys=ON;")
+    conn.row_factory = sqlite3.Row
+    row = conn.execute("SELECT * FROM teams WHERE id = ?", (team_id,)).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
 def _admin_env(db_path: Path, admin_email: str) -> dict[str, str]:
     return {"DATABASE_PATH": str(db_path), "ADMIN_EMAIL": admin_email}
 
@@ -1124,3 +1170,331 @@ class TestConnectButtonStyle:
 
         assert "bg-gray-200" in response.text
         assert f"/admin/opponents/{manual_id}/disconnect" in response.text
+
+
+# ---------------------------------------------------------------------------
+# E-160-01: connect sets teams.public_id and resolved_team_id; disconnect clears
+# ---------------------------------------------------------------------------
+
+
+class TestConnectSetsTeamsPublicId:
+    """E-160-01: Manual connect sets teams.public_id and opponent_links.resolved_team_id."""
+
+    def test_ac1_stub_via_team_opponents(self, opp_db_with_ids: tuple) -> None:
+        """AC-1 (primary path): stub found via team_opponents → teams.public_id set, resolved_team_id set."""
+        opp_db, team_ids = opp_db_with_ids
+        varsity_id = team_ids["varsity"]
+
+        stub_id = _insert_tracked_team(opp_db, "Shadow Wolves")
+        _insert_team_opponents(opp_db, varsity_id, stub_id)
+        link_id = _insert_opponent_link(opp_db, varsity_id, "gc-root-sw", "Shadow Wolves")
+
+        admin_id = _insert_user(opp_db, "e160ac1a@test.com")
+        token = _insert_session(opp_db, admin_id)
+
+        with patch.dict("os.environ", _admin_env(opp_db, "e160ac1a@test.com")):
+            with TestClient(
+                app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
+            ) as client:
+                response = client.post(
+                    f"/admin/opponents/{link_id}/connect",
+                    data={"public_id": "shadowWolves01", "csrf_token": _CSRF},
+                )
+        assert response.status_code == 303
+
+        link_row = _get_link_row(opp_db, link_id)
+        assert link_row["resolved_team_id"] == stub_id
+        assert link_row["public_id"] == "shadowWolves01"
+
+        team_row = _get_team_row(opp_db, stub_id)
+        assert team_row["public_id"] == "shadowWolves01"
+
+    def test_ac1_stub_via_direct_name_match(self, opp_db_with_ids: tuple) -> None:
+        """AC-1 (fallback path): stub found via direct name match (no team_opponents row) → both fields set."""
+        opp_db, team_ids = opp_db_with_ids
+        varsity_id = team_ids["varsity"]
+
+        # No team_opponents row — discovery-path stub (bulk_create_opponents scenario)
+        stub_id = _insert_tracked_team(opp_db, "Desert Hawks")
+        link_id = _insert_opponent_link(opp_db, varsity_id, "gc-root-dh", "Desert Hawks")
+
+        admin_id = _insert_user(opp_db, "e160ac1b@test.com")
+        token = _insert_session(opp_db, admin_id)
+
+        with patch.dict("os.environ", _admin_env(opp_db, "e160ac1b@test.com")):
+            with TestClient(
+                app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
+            ) as client:
+                response = client.post(
+                    f"/admin/opponents/{link_id}/connect",
+                    data={"public_id": "desertHawks01", "csrf_token": _CSRF},
+                )
+        assert response.status_code == 303
+
+        link_row = _get_link_row(opp_db, link_id)
+        assert link_row["resolved_team_id"] == stub_id
+
+        team_row = _get_team_row(opp_db, stub_id)
+        assert team_row["public_id"] == "desertHawks01"
+
+    def test_ac2a_overwrite_when_no_collision(self, opp_db_with_ids: tuple) -> None:
+        """AC-2a: Stub has non-null public_id; new slug has no collision → overwrite + resolved_team_id set."""
+        opp_db, team_ids = opp_db_with_ids
+        varsity_id = team_ids["varsity"]
+
+        stub_id = _insert_tracked_team(opp_db, "Steel Pines", public_id="oldSlug01")
+        _insert_team_opponents(opp_db, varsity_id, stub_id)
+        link_id = _insert_opponent_link(opp_db, varsity_id, "gc-root-sp", "Steel Pines")
+
+        admin_id = _insert_user(opp_db, "e160ac2a@test.com")
+        token = _insert_session(opp_db, admin_id)
+
+        with patch.dict("os.environ", _admin_env(opp_db, "e160ac2a@test.com")):
+            with TestClient(
+                app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
+            ) as client:
+                response = client.post(
+                    f"/admin/opponents/{link_id}/connect",
+                    data={"public_id": "newSlug01", "csrf_token": _CSRF},
+                )
+        assert response.status_code == 303
+
+        link_row = _get_link_row(opp_db, link_id)
+        assert link_row["resolved_team_id"] == stub_id
+
+        team_row = _get_team_row(opp_db, stub_id)
+        assert team_row["public_id"] == "newSlug01"
+
+    def test_ac2b_skip_overwrite_when_slug_collision(self, opp_db_with_ids: tuple) -> None:
+        """AC-2b: New slug already owned by another team → skip overwrite, still set resolved_team_id."""
+        opp_db, team_ids = opp_db_with_ids
+        varsity_id = team_ids["varsity"]
+
+        stub_id = _insert_tracked_team(opp_db, "Iron Foxes", public_id="oldIronSlug")
+        _insert_team_opponents(opp_db, varsity_id, stub_id)
+        _insert_tracked_team(opp_db, "Rival Owls", public_id="takenSlug01")
+        link_id = _insert_opponent_link(opp_db, varsity_id, "gc-root-if", "Iron Foxes")
+
+        admin_id = _insert_user(opp_db, "e160ac2b@test.com")
+        token = _insert_session(opp_db, admin_id)
+
+        with patch.dict("os.environ", _admin_env(opp_db, "e160ac2b@test.com")):
+            with TestClient(
+                app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
+            ) as client:
+                response = client.post(
+                    f"/admin/opponents/{link_id}/connect",
+                    data={"public_id": "takenSlug01", "csrf_token": _CSRF},
+                )
+        assert response.status_code == 303
+
+        link_row = _get_link_row(opp_db, link_id)
+        assert link_row["resolved_team_id"] == stub_id
+
+        # teams.public_id must remain unchanged on the stub
+        team_row = _get_team_row(opp_db, stub_id)
+        assert team_row["public_id"] == "oldIronSlug"
+
+    def test_ac3_no_stub_graceful_degradation(self, opp_db_with_ids: tuple) -> None:
+        """AC-3: No matching stub → resolved_team_id stays NULL, no crash, 303 returned."""
+        opp_db, team_ids = opp_db_with_ids
+        varsity_id = team_ids["varsity"]
+
+        # No stub team for "Phantom Lions" exists in the database
+        link_id = _insert_opponent_link(opp_db, varsity_id, "gc-root-pl", "Phantom Lions")
+
+        admin_id = _insert_user(opp_db, "e160ac3@test.com")
+        token = _insert_session(opp_db, admin_id)
+
+        with patch.dict("os.environ", _admin_env(opp_db, "e160ac3@test.com")):
+            with TestClient(
+                app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
+            ) as client:
+                response = client.post(
+                    f"/admin/opponents/{link_id}/connect",
+                    data={"public_id": "phantomLions01", "csrf_token": _CSRF},
+                )
+        assert response.status_code == 303
+
+        link_row = _get_link_row(opp_db, link_id)
+        assert link_row["resolved_team_id"] is None
+        assert link_row["public_id"] == "phantomLions01"
+
+    def test_ac4_insert_or_ignore_no_duplicate(self, opp_db_with_ids: tuple) -> None:
+        """AC-4 (DB-layer): After connect sets teams.public_id, INSERT OR IGNORE with same slug is a no-op."""
+        from src.api.db import save_manual_opponent_link
+
+        opp_db, team_ids = opp_db_with_ids
+        varsity_id = team_ids["varsity"]
+
+        stub_id = _insert_tracked_team(opp_db, "Tide Runners")
+        _insert_team_opponents(opp_db, varsity_id, stub_id)
+        link_id = _insert_opponent_link(opp_db, varsity_id, "gc-root-tr", "Tide Runners")
+
+        with patch.dict("os.environ", {"DATABASE_PATH": str(opp_db)}):
+            save_manual_opponent_link(link_id, "tideRunners01", varsity_id, "Tide Runners")
+
+        # Verify public_id was set
+        team_row = _get_team_row(opp_db, stub_id)
+        assert team_row["public_id"] == "tideRunners01"
+
+        # Attempt INSERT OR IGNORE with the same public_id — should produce no new row
+        conn = sqlite3.connect(str(opp_db))
+        conn.execute("PRAGMA foreign_keys=ON;")
+        before = conn.execute(
+            "SELECT COUNT(*) FROM teams WHERE public_id = 'tideRunners01'"
+        ).fetchone()[0]
+        conn.execute(
+            "INSERT OR IGNORE INTO teams (name, membership_type, public_id, source, is_active)"
+            " VALUES ('Tide Runners Dup', 'tracked', 'tideRunners01', 'gamechanger', 0)"
+        )
+        conn.commit()
+        after = conn.execute(
+            "SELECT COUNT(*) FROM teams WHERE public_id = 'tideRunners01'"
+        ).fetchone()[0]
+        conn.close()
+
+        assert before == 1
+        assert after == 1  # no duplicate created
+
+    def test_ac5_disconnect_clears_teams_public_id(self, opp_db_with_ids: tuple) -> None:
+        """AC-5: Disconnect clears teams.public_id on stub when no other links reference it."""
+        opp_db, team_ids = opp_db_with_ids
+        varsity_id = team_ids["varsity"]
+
+        stub_id = _insert_tracked_team(opp_db, "Gravel Cats")
+        _insert_team_opponents(opp_db, varsity_id, stub_id)
+        link_id = _insert_opponent_link(opp_db, varsity_id, "gc-root-gc", "Gravel Cats")
+
+        admin_id = _insert_user(opp_db, "e160ac5@test.com")
+        token = _insert_session(opp_db, admin_id)
+
+        with patch.dict("os.environ", _admin_env(opp_db, "e160ac5@test.com")):
+            with TestClient(
+                app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
+            ) as client:
+                client.post(
+                    f"/admin/opponents/{link_id}/connect",
+                    data={"public_id": "gravelCats01", "csrf_token": _CSRF},
+                )
+                response = client.post(
+                    f"/admin/opponents/{link_id}/disconnect",
+                    data={"csrf_token": _CSRF},
+                )
+        assert response.status_code == 303
+
+        team_row = _get_team_row(opp_db, stub_id)
+        assert team_row["public_id"] is None
+
+    def test_ac5_shared_reference_guard(self, opp_db_with_ids: tuple) -> None:
+        """AC-5 guard: Disconnect preserves teams.public_id when another link references the same stub."""
+        opp_db, team_ids = opp_db_with_ids
+        varsity_id = team_ids["varsity"]
+        jv_id = team_ids["jv"]
+
+        stub_id = _insert_tracked_team(opp_db, "Coastal Crabs", public_id="coastalCrabs01")
+
+        # Set up two manual links both pointing at the stub
+        link_id_1 = _insert_opponent_link(opp_db, varsity_id, "gc-root-cc1", "Coastal Crabs")
+        link_id_2 = _insert_opponent_link(opp_db, jv_id, "gc-root-cc2", "Coastal Crabs")
+
+        conn = sqlite3.connect(str(opp_db))
+        conn.execute(
+            "UPDATE opponent_links SET public_id='coastalCrabs01', resolution_method='manual',"
+            " resolved_team_id=?, resolved_at=datetime('now') WHERE id=?",
+            (stub_id, link_id_1),
+        )
+        conn.execute(
+            "UPDATE opponent_links SET public_id='coastalCrabs01', resolution_method='manual',"
+            " resolved_team_id=?, resolved_at=datetime('now') WHERE id=?",
+            (stub_id, link_id_2),
+        )
+        conn.commit()
+        conn.close()
+
+        admin_id = _insert_user(opp_db, "e160ac5guard@test.com")
+        token = _insert_session(opp_db, admin_id)
+
+        # Disconnect link_id_1; link_id_2 still references stub — public_id must be preserved
+        with patch.dict("os.environ", _admin_env(opp_db, "e160ac5guard@test.com")):
+            with TestClient(
+                app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
+            ) as client:
+                response = client.post(
+                    f"/admin/opponents/{link_id_1}/disconnect",
+                    data={"csrf_token": _CSRF},
+                )
+        assert response.status_code == 303
+
+        team_row = _get_team_row(opp_db, stub_id)
+        assert team_row["public_id"] == "coastalCrabs01"
+
+    def test_ac6_disconnect_then_reconnect(self, opp_db_with_ids: tuple) -> None:
+        """AC-6: Disconnect clears teams.public_id; reconnect writes correct new slug cleanly."""
+        opp_db, team_ids = opp_db_with_ids
+        varsity_id = team_ids["varsity"]
+
+        stub_id = _insert_tracked_team(opp_db, "River Herons")
+        _insert_team_opponents(opp_db, varsity_id, stub_id)
+        link_id = _insert_opponent_link(opp_db, varsity_id, "gc-root-rh", "River Herons")
+
+        admin_id = _insert_user(opp_db, "e160ac6@test.com")
+        token = _insert_session(opp_db, admin_id)
+
+        with patch.dict("os.environ", _admin_env(opp_db, "e160ac6@test.com")):
+            with TestClient(
+                app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
+            ) as client:
+                client.post(
+                    f"/admin/opponents/{link_id}/connect",
+                    data={"public_id": "wrongSlugRH", "csrf_token": _CSRF},
+                )
+                client.post(f"/admin/opponents/{link_id}/disconnect", data={"csrf_token": _CSRF})
+                response = client.post(
+                    f"/admin/opponents/{link_id}/connect",
+                    data={"public_id": "correctSlugRH", "csrf_token": _CSRF},
+                )
+        assert response.status_code == 303
+
+        link_row = _get_link_row(opp_db, link_id)
+        assert link_row["resolved_team_id"] == stub_id
+        assert link_row["public_id"] == "correctSlugRH"
+
+        team_row = _get_team_row(opp_db, stub_id)
+        assert team_row["public_id"] == "correctSlugRH"
+
+    def test_ac7_multi_match_highest_id_selected(self, opp_db_with_ids: tuple) -> None:
+        """AC-7: Multiple stubs with same name and NULL public_id → highest id (most recent) selected."""
+        opp_db, team_ids = opp_db_with_ids
+        varsity_id = team_ids["varsity"]
+
+        # Two stubs with same name and NULL public_id
+        stub_id_1 = _insert_tracked_team(opp_db, "Cinder Block Blues")
+        stub_id_2 = _insert_tracked_team(opp_db, "Cinder Block Blues")
+        assert stub_id_2 > stub_id_1
+
+        link_id = _insert_opponent_link(opp_db, varsity_id, "gc-root-cbb", "Cinder Block Blues")
+
+        admin_id = _insert_user(opp_db, "e160ac7@test.com")
+        token = _insert_session(opp_db, admin_id)
+
+        with patch.dict("os.environ", _admin_env(opp_db, "e160ac7@test.com")):
+            with TestClient(
+                app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
+            ) as client:
+                response = client.post(
+                    f"/admin/opponents/{link_id}/connect",
+                    data={"public_id": "cinderBlock01", "csrf_token": _CSRF},
+                )
+        assert response.status_code == 303
+
+        link_row = _get_link_row(opp_db, link_id)
+        # Must select highest-id stub
+        assert link_row["resolved_team_id"] == stub_id_2
+
+        team_row_2 = _get_team_row(opp_db, stub_id_2)
+        assert team_row_2["public_id"] == "cinderBlock01"
+
+        # Lower-id stub must be untouched
+        team_row_1 = _get_team_row(opp_db, stub_id_1)
+        assert team_row_1["public_id"] is None

@@ -2634,7 +2634,13 @@ async def connect_opponent(
     duplicate_name = await run_in_threadpool(
         get_duplicate_opponent_name, public_id, our_team_id, link_id
     )
-    await run_in_threadpool(save_manual_opponent_link, link_id, public_id)
+    await run_in_threadpool(
+        save_manual_opponent_link,
+        link_id,
+        public_id,
+        our_team_id,
+        link["opponent_name"],
+    )
     msg = _build_connect_success_msg(link["opponent_name"], duplicate_name)
     return RedirectResponse(
         url=f"/admin/opponents?team_id={our_team_id}&msg={msg}",

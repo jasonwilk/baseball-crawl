@@ -1187,15 +1187,86 @@ def get_duplicate_opponent_name(
         return None
 
 
-def save_manual_opponent_link(link_id: int, public_id: str) -> None:
+def _find_tracked_stub(
+    conn: sqlite3.Connection,
+    our_team_id: int,
+    opponent_name: str,
+) -> int | None:
+    """Find the INTEGER PK of a tracked team stub for the given opponent.
+
+    Two-tier lookup:
+    (a) Primary: team_opponents join to teams where our_team_id matches,
+        teams.name = opponent_name, teams.membership_type = 'tracked'.
+    (b) Fallback: direct teams match on name + membership_type = 'tracked'.
+
+    Tie-break: prefer rows with public_id IS NULL; if multiple null-slug stubs,
+    prefer highest id.  If no null-slug candidates and multiple non-null stubs,
+    return None (graceful degradation).
+
+    Args:
+        conn: An open SQLite connection.
+        our_team_id: The member team's INTEGER PK.
+        opponent_name: The opponent name to match.
+
+    Returns:
+        The stub team's INTEGER PK, or None if not found.
+    """
+    rows = conn.execute(
+        """
+        SELECT t.id, t.public_id
+        FROM teams t
+        JOIN team_opponents toop ON toop.opponent_team_id = t.id
+        WHERE toop.our_team_id = ?
+          AND t.name = ?
+          AND t.membership_type = 'tracked'
+        """,
+        (our_team_id, opponent_name),
+    ).fetchall()
+
+    if not rows:
+        rows = conn.execute(
+            """
+            SELECT id, public_id
+            FROM teams
+            WHERE name = ?
+              AND membership_type = 'tracked'
+            """,
+            (opponent_name,),
+        ).fetchall()
+
+    if not rows:
+        return None
+
+    null_rows = [r[0] for r in rows if r[1] is None]
+    if null_rows:
+        return max(null_rows)
+    if len(rows) == 1:
+        return rows[0][0]
+    return None
+
+
+def save_manual_opponent_link(
+    link_id: int,
+    public_id: str,
+    our_team_id: int,
+    opponent_name: str,
+) -> None:
     """Set public_id and resolution_method='manual' on an opponent_links row.
 
-    Sets resolved_team_id=NULL (manual links cannot obtain a UUID via the
-    reverse bridge endpoint, which returns 403 for opponent teams).
+    Also finds the existing tracked team stub (via team_opponents or direct name
+    match) and sets teams.public_id and opponent_links.resolved_team_id.
+
+    If the stub already has a non-NULL public_id that differs from the new slug:
+    - If the new slug is not owned by another teams row, overwrites with a WARNING.
+    - If the new slug is already owned by another teams row, skips the overwrite
+      and logs a WARNING ("slug already owned — manual merge required").
+    In all cases where a stub is found, resolved_team_id is set.
 
     Args:
         link_id: The opponent_links primary key.
         public_id: The GameChanger public_id slug.
+        our_team_id: The member team's INTEGER PK.
+        opponent_name: The opponent name (used for stub team lookup).
     """
     try:
         with closing(get_connection()) as conn:
@@ -1210,6 +1281,47 @@ def save_manual_opponent_link(link_id: int, public_id: str) -> None:
                 """,
                 (public_id, link_id),
             )
+
+            stub_id = _find_tracked_stub(conn, our_team_id, opponent_name)
+
+            if stub_id is not None:
+                existing_row = conn.execute(
+                    "SELECT public_id FROM teams WHERE id = ?", (stub_id,)
+                ).fetchone()
+                existing_public_id = existing_row[0] if existing_row else None
+
+                if existing_public_id is None:
+                    conn.execute(
+                        "UPDATE teams SET public_id = ? WHERE id = ?",
+                        (public_id, stub_id),
+                    )
+                elif existing_public_id != public_id:
+                    collision = conn.execute(
+                        "SELECT id FROM teams WHERE public_id = ? AND id != ?",
+                        (public_id, stub_id),
+                    ).fetchone()
+                    if collision:
+                        logger.warning(
+                            "Slug %r already owned by teams.id=%d — manual merge required "
+                            "(opponent link %d, stub team %d)",
+                            public_id, collision[0], link_id, stub_id,
+                        )
+                    else:
+                        logger.warning(
+                            "Overwriting existing public_id=%r with %r on stub team %d "
+                            "(opponent link %d)",
+                            existing_public_id, public_id, stub_id, link_id,
+                        )
+                        conn.execute(
+                            "UPDATE teams SET public_id = ? WHERE id = ?",
+                            (public_id, stub_id),
+                        )
+
+                conn.execute(
+                    "UPDATE opponent_links SET resolved_team_id = ? WHERE id = ?",
+                    (stub_id, link_id),
+                )
+
             conn.commit()
     except sqlite3.Error:
         logger.exception("Failed to save manual opponent link %s -> %s", link_id, public_id)
@@ -1223,6 +1335,10 @@ def disconnect_opponent_link(link_id: int) -> bool:
     link is auto-resolved (which would be re-created by the resolver) or if the
     row does not exist.
 
+    When the link has a resolved_team_id, also clears teams.public_id on the
+    stub team — unless other opponent_links rows reference the same
+    resolved_team_id (shared-reference guard).
+
     Args:
         link_id: The opponent_links primary key.
 
@@ -1232,12 +1348,13 @@ def disconnect_opponent_link(link_id: int) -> bool:
     try:
         with closing(get_connection()) as conn:
             row = conn.execute(
-                "SELECT resolution_method FROM opponent_links WHERE id = ?",
+                "SELECT resolution_method, resolved_team_id FROM opponent_links WHERE id = ?",
                 (link_id,),
             ).fetchone()
             if row is None:
                 return False
-            if row[0] != "manual":
+            resolution_method, resolved_team_id = row
+            if resolution_method != "manual":
                 return False
             conn.execute(
                 """
@@ -1250,6 +1367,16 @@ def disconnect_opponent_link(link_id: int) -> bool:
                 """,
                 (link_id,),
             )
+            if resolved_team_id is not None:
+                other = conn.execute(
+                    "SELECT 1 FROM opponent_links WHERE resolved_team_id = ? AND id != ?",
+                    (resolved_team_id, link_id),
+                ).fetchone()
+                if other is None:
+                    conn.execute(
+                        "UPDATE teams SET public_id = NULL WHERE id = ?",
+                        (resolved_team_id,),
+                    )
             conn.commit()
         return True
     except sqlite3.Error:
@@ -1513,172 +1640,6 @@ def get_opponent_scouting_status(
             "Failed to get opponent scouting status for team %d", opponent_team_id
         )
         return {"status": "unlinked", "link_id": None}
-
-
-def get_current_season_id() -> str | None:
-    """Return the most recent season_id from the seasons table.
-
-    Returns:
-        The most recent season slug (e.g. ``"2026-spring-hs"``), or ``None``
-        if no seasons exist or on DB error.
-    """
-    try:
-        with closing(get_connection()) as conn:
-            row = conn.execute(
-                "SELECT season_id FROM seasons "
-                "ORDER BY CAST(SUBSTR(season_id, 1, 4) AS INTEGER) DESC, "
-                "season_id DESC LIMIT 1"
-            ).fetchone()
-        return row[0] if row else None
-    except sqlite3.Error:
-        logger.exception("Failed to get current season ID")
-        return None
-
-
-def get_player_spray_bip_count(player_id: str, season_id: str) -> int:
-    """Count offensive ball-in-play events for a player in a season.
-
-    Used to drive threshold logic for the spray chart card on the player
-    profile page (TN-7).
-
-    Args:
-        player_id: The player's UUID.
-        season_id: The season slug (e.g. ``"2026-spring-hs"``).
-
-    Returns:
-        Count of offensive spray chart events; 0 on DB error.
-    """
-    try:
-        with closing(get_connection()) as conn:
-            row = conn.execute(
-                "SELECT COUNT(*) FROM spray_charts "
-                "WHERE player_id = ? AND season_id = ? AND chart_type = 'offensive'",
-                (player_id, season_id),
-            ).fetchone()
-        return row[0] if row else 0
-    except sqlite3.Error:
-        logger.exception("Failed to count spray BIP for player %s", player_id)
-        return 0
-
-
-def get_player_spray_events(player_id: str, season_id: str) -> list[dict[str, Any]]:
-    """Return offensive spray chart events for a player in a season.
-
-    Returns only the columns needed by the renderer: ``x``, ``y``,
-    ``play_result``.  Used by the spray chart image route.
-
-    Args:
-        player_id: The player's UUID.
-        season_id: The season slug (e.g. ``"2026-spring-hs"``).
-
-    Returns:
-        List of dicts with keys ``x``, ``y``, ``play_result``.
-        Returns an empty list on DB error.
-    """
-    try:
-        with closing(get_connection()) as conn:
-            conn.row_factory = sqlite3.Row
-            rows = conn.execute(
-                "SELECT x, y, play_result FROM spray_charts "
-                "WHERE player_id = ? AND season_id = ? AND chart_type = 'offensive'",
-                (player_id, season_id),
-            ).fetchall()
-        return [dict(r) for r in rows]
-    except sqlite3.Error:
-        logger.exception("Failed to fetch spray events for player %s", player_id)
-        return []
-
-
-def get_team_spray_bip_count(team_id: int, season_id: str) -> int:
-    """Count offensive ball-in-play events for a team in a season.
-
-    Used to drive threshold logic for the team spray chart card on the
-    opponent detail page (TN-7 team aggregate thresholds).
-
-    Args:
-        team_id: The team's integer primary key.
-        season_id: The season slug (e.g. ``"2026-spring-hs"``).
-
-    Returns:
-        Count of offensive spray chart events; 0 on DB error.
-    """
-    try:
-        with closing(get_connection()) as conn:
-            row = conn.execute(
-                "SELECT COUNT(*) FROM spray_charts "
-                "WHERE team_id = ? AND season_id = ? AND chart_type = 'offensive'",
-                (team_id, season_id),
-            ).fetchone()
-        return row[0] if row else 0
-    except sqlite3.Error:
-        logger.exception("Failed to count spray BIP for team %d", team_id)
-        return 0
-
-
-def get_team_spray_events(team_id: int, season_id: str) -> list[dict[str, Any]]:
-    """Return offensive spray chart events for a team in a season.
-
-    Returns only the columns needed by the renderer: ``x``, ``y``,
-    ``play_result``.  Used by the team spray chart image route.
-
-    Args:
-        team_id: The team's integer primary key.
-        season_id: The season slug (e.g. ``"2026-spring-hs"``).
-
-    Returns:
-        List of dicts with keys ``x``, ``y``, ``play_result``.
-        Returns an empty list on DB error.
-    """
-    try:
-        with closing(get_connection()) as conn:
-            conn.row_factory = sqlite3.Row
-            rows = conn.execute(
-                "SELECT x, y, play_result FROM spray_charts "
-                "WHERE team_id = ? AND season_id = ? AND chart_type = 'offensive'",
-                (team_id, season_id),
-            ).fetchall()
-        return [dict(r) for r in rows]
-    except sqlite3.Error:
-        logger.exception("Failed to fetch spray events for team %d", team_id)
-        return []
-
-
-def get_players_spray_bip_counts(
-    player_ids: list[str], season_id: str, team_id: int
-) -> dict[str, int]:
-    """Return per-player offensive BIP counts for a list of players in a season.
-
-    Used to populate spray chart link visibility in the batting leaders table
-    on the opponent detail page.
-
-    Args:
-        player_ids: List of player UUID strings to look up.
-        season_id:  The season slug (e.g. ``"2026-spring-hs"``).
-        team_id:    The team's integer primary key.  Scopes counts to a single
-                    team so players who appear on multiple teams in the same
-                    season are not double-counted.
-
-    Returns:
-        Dict mapping player_id to BIP count.  Players with no events are
-        absent from the dict (caller treats missing keys as 0).
-        Returns an empty dict on DB error or empty input.
-    """
-    if not player_ids:
-        return {}
-    try:
-        placeholders = ",".join("?" * len(player_ids))
-        with closing(get_connection()) as conn:
-            rows = conn.execute(
-                f"SELECT player_id, COUNT(*) FROM spray_charts "
-                f"WHERE player_id IN ({placeholders}) "
-                f"AND season_id = ? AND team_id = ? AND chart_type = 'offensive' "
-                f"GROUP BY player_id",
-                (*player_ids, season_id, team_id),
-            ).fetchall()
-        return {row[0]: row[1] for row in rows}
-    except sqlite3.Error:
-        logger.exception("Failed to count spray BIP for player list")
-        return {}
 
 
 def check_connection() -> bool:

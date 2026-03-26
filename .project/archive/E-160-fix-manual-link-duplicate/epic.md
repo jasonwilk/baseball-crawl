@@ -1,7 +1,7 @@
 # E-160: Fix save_manual_opponent_link Duplicate Team Bug
 
 ## Status
-`READY`
+`COMPLETED`
 <!-- Lifecycle: DRAFT → READY → ACTIVE → COMPLETED (or BLOCKED / ABANDONED) -->
 <!-- PM sets READY explicitly after: expert consultation done, all stories have testable ACs, quality checklist passed. -->
 <!-- Only READY and ACTIVE epics can be dispatched. -->
@@ -43,7 +43,7 @@ No expert consultation required — this is a straightforward bug fix with a cle
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-160-01 | Fix save_manual_opponent_link to update teams and set resolved_team_id | TODO | None | - |
+| E-160-01 | Fix save_manual_opponent_link to update teams and set resolved_team_id | DONE | None | - |
 
 ## Dispatch Team
 - software-engineer
@@ -84,8 +84,9 @@ None.
 ## History
 - 2026-03-26: Created
 - 2026-03-26: Marked READY after 4 Codex iterations and 2 internal review rounds.
+- 2026-03-26: Dispatched and completed. Fixed `save_manual_opponent_link` to find existing tracked team stubs (two-tier lookup via `team_opponents` junction or direct name match), set `teams.public_id`, and set `opponent_links.resolved_team_id`. Added TN-3 overwrite rule with collision guard, TN-5 disconnect symmetry with shared-reference guard. 10 new tests covering all 8 ACs. Updated `disconnect_opponent_link` to clear `teams.public_id` on manual disconnect (when safe). All existing tests pass.
 
-### Review Scorecard
+### Planning Review Scorecard
 | Review Pass | Findings | Accepted | Dismissed |
 |---|---|---|---|
 | Internal iteration 1 — CR spec audit | 6 | 4 | 2 |
@@ -97,3 +98,34 @@ None.
 | Codex iteration 3 | 3 | 3 | 0 |
 | Codex iteration 4 | 4 | 4 | 0 |
 | **Total** | **~35** | **~32** | **~3** |
+
+### Dispatch Review Scorecard
+| Review Pass | Findings | Accepted | Dismissed |
+|---|---|---|---|
+| Per-story CR — E-160-01 | 1 | 1 | 0 |
+| CR integration review | 0 | 0 | 0 |
+| Codex code review | 2 | 0 | 2 |
+| **Total** | **3** | **1** | **2** |
+
+Notes: Per-story finding was a missing test scope (test_admin.py + test_admin_teams.py not reported — resolved in round 2 by confirming 134 tests pass). Codex findings were both false positives caused by the worktree branching from a commit that predates E-158 (worktree baseline divergence — not E-160 code issues). Both dismissed.
+
+### Documentation Assessment
+No documentation impact. E-160 is a bug fix to the manual connect flow — it corrects existing behavior (prevents duplicate team creation) but does not add features, change the admin UI layout, alter the schema, or change how operators interact with the system. No update triggers fired.
+
+### Context-Layer Assessment
+1. **New convention, pattern, or constraint established?** No — the two-tier stub lookup and overwrite rule are implementation details within `save_manual_opponent_link`, not conventions for other code to follow.
+2. **Architectural decision with ongoing implications?** No — no new technology choices, integration patterns, or structural decisions. The fix brings the manual path to parity with the existing auto-resolve path.
+3. **Footgun, failure mode, or boundary discovered?** No — the root cause (manual connect not updating `teams` table) was a known bug, not a newly discovered boundary. The worktree-main divergence issue during closure was captured as IDEA-045 but is a dispatch-process concern, not an E-160 concern.
+4. **Change to agent behavior, routing, or coordination?** No — no agent definitions, dispatch procedures, or routing rules were changed.
+5. **Domain knowledge discovered that should influence agent decisions?** No — the opponent lifecycle (auto-resolve vs. manual connect) was already documented in the epic's Technical Notes and is specific to this bug fix.
+6. **New CLI command, workflow, or operational procedure introduced?** No — no new commands, scripts, or workflows were added.
+
+All six triggers: **No**. No claude-architect dispatch required.
+
+### Ideas Backlog Review
+- IDEA-043 (Fuzzy Duplicate Team Detection) and IDEA-044 (Prevent Duplicate Team Creation) remain CANDIDATE — E-160 fixes the manual-connect duplication path but does not address the broader duplicate detection/prevention scope those ideas cover.
+- IDEA-045 (Worktree Divergence Detection) was created during this dispatch session — no action needed.
+- No ideas newly unblocked by E-160.
+
+### Vision Signals
+26 unprocessed signals in `docs/vision-signals.md` (last curation: 2026-03-13). Advisory — does not block archival. User may wish to "curate the vision" at a convenient time.
