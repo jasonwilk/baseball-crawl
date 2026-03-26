@@ -1,7 +1,7 @@
 # IDEA-046: OpponentResolver Creates Duplicate gc_uuid Team Instead of Merging with Existing public_id Stub
 
 ## Status
-`CANDIDATE`
+`PROMOTED`
 
 ## Summary
 `_ensure_opponent_team_row` in `src/gamechanger/crawlers/opponent_resolver.py` does `INSERT OR IGNORE INTO teams WHERE gc_uuid=?` without first checking whether any existing team already owns the target `public_id`. When a stub team already has the public_id (e.g., from a manual connect or earlier seeding), the resolver creates a NEW team row with the gc_uuid, hits a UNIQUE collision on public_id, logs a warning, and leaves the new team orphaned with a gc_uuid but no public_id.
@@ -20,6 +20,9 @@ Duplicate team rows cause data fragmentation: stats, opponent links, and scoutin
 ## Open Questions
 - Should the merge also update other fields (e.g., team name, classification) from the resolver's API response, or only backfill gc_uuid onto the existing stub?
 - Are there other code paths beyond the resolver and manual connect that can create duplicate teams? (IDEA-044 captures the broader prevention question.)
+
+## Promotion
+Promoted to E-162 on 2026-03-26.
 
 ## Notes
 - **Relationship to E-160**: E-160 fixes the manual connect path (admin UI "connect" action). This idea fixes the resolver path (`OpponentResolver._ensure_opponent_team_row`). They are complementary fixes for different code paths that both produce the same symptom (duplicate team rows).
