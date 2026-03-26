@@ -436,7 +436,7 @@ These endpoints have complete schema documentation in the monolith's main Endpoi
 | 14 | GET | `/public/teams/{public_id}/games/preview` | CONFIRMED | `get-public-teams-public_id-games-preview.md` | inline |
 | 15 | GET | `/teams/{team_id}/opponents` | CONFIRMED | `get-teams-team_id-opponents.md` | inline |
 | 16 | GET | `/game-stream-processing/{game_stream_id}/boxscore` | CONFIRMED | `get-game-stream-processing-game_stream_id-boxscore.md` | inline |
-| 17 | GET | `/game-stream-processing/{game_stream_id}/plays` | CONFIRMED | `get-game-stream-processing-game_stream_id-plays.md` | inline |
+| 17 | GET | `/game-stream-processing/{event_id}/plays` | CONFIRMED | `get-game-stream-processing-event_id-plays.md` | inline |
 | 18 | GET | `/public/game-stream-processing/{game_stream_id}/details` | CONFIRMED | `get-public-game-stream-processing-game_stream_id-details.md` | inline |
 | 19 | GET | `/events/{event_id}/best-game-stream-id` | CONFIRMED | `get-events-event_id-best-game-stream-id.md` | inline |
 | 20 | GET | `/teams/{team_id}/users` | CONFIRMED | `get-teams-team_id-users.md` | inline |

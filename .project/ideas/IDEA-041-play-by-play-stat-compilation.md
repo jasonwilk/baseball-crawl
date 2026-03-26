@@ -19,7 +19,7 @@ After E-117 is complete (boxscore foundation must be solid first). This is a maj
 
 ## Dependencies & Blockers
 - [ ] E-117 (Loader Stat Population) must be complete — boxscore foundation
-- [ ] Plays endpoint already documented (`docs/api/endpoints/get-game-stream-processing-game_stream_id-plays.md`)
+- [ ] Plays endpoint already documented (`docs/api/endpoints/get-game-stream-processing-event_id-plays.md`)
 - [ ] Stat glossary has play event types documented (`docs/gamechanger-stat-glossary.md` — Play Event Types section)
 - [ ] May need baseball-coach consultation on which advanced stats matter most for scouting
 

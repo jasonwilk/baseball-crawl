@@ -38,6 +38,8 @@ see_also:
 
 Returns per-game statistics for one player across all games in the season. Includes batting, pitching/fielding stats per game, rolling cumulative season totals, and spray chart data (ball-in-play coordinates). Must be called once per player to build a full team box score.
 
+**Usage context:** This endpoint is called by the GC web player profile page (confirmed in proxy session 2026-03-11_032625). `offensive_spray_charts` is present in ~93% of game records; `defensive_spray_charts` is present in ~16% (spike observation 2026-03-26).
+
 **ID routing for this endpoint:**
 ```
 GET /teams/{team_id}/players  -> player UUID list
@@ -84,8 +86,8 @@ Bare JSON array of per-game stat records. 80 records in a single response (no pa
 | `player_stats` | object | No | Per-game statistics for this player. |
 | `player_stats.stats` | object | No | Contains `offense` (conditional), `defense` (conditional), `general` (always). |
 | `cumulative_stats` | object | No | Rolling season totals through and including this game. Same structure. |
-| `offensive_spray_charts` | array or null | Yes | Ball-in-play locations for batting. Null on 24/80 games. |
-| `defensive_spray_charts` | array or null | Yes | Ball-in-play locations for fielding. Null on 67/80 games. |
+| `offensive_spray_charts` | array or null | Yes | Ball-in-play locations for batting. Present on ~93% of game records (spike observation 2026-03-26). |
+| `defensive_spray_charts` | array or null | Yes | Ball-in-play locations for fielding. Present on ~16% of game records (spike observation 2026-03-26). |
 
 ### player_stats.stats Sections (Conditional)
 
@@ -157,7 +159,7 @@ Each item in `offensive_spray_charts` or `defensive_spray_charts`:
 
 **Multiple items per game:** 1-3 spray chart items observed per game (max 3 in this capture). Multiple items = multiple balls in play for that player in that role.
 
-**Counts:** Offensive charts present on 56/80 games (70%), defensive on 13/80 games (16%).
+**Counts:** Offensive charts present on ~93% of game records, defensive on ~16% (spike observations 2026-03-26; earlier capture showed 56/80 offensive = 70%, 13/80 defensive = 16% -- the higher offensive rate may reflect improved data quality or different player population).
 
 ## Cumulative Stats Behavior
 

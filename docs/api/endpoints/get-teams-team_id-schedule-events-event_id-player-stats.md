@@ -15,7 +15,9 @@ profiles:
       55 hits, all HTTP 200. Observed 2026-03-09 (session 063531). All calls used
       opponent progenitor_team_id (14fd6cb6) as the path team_id, CONFIRMING this
       endpoint works with opponent team IDs from search. See caveats update.
+      All 206 calls in session 034739 used Accept: application/vnd.gc.com.player_game_stats+json; version=0.2.0. Response structure identical to web profile.
 accept: "application/json, text/plain, */*"
+accept_mobile: "application/vnd.gc.com.player_game_stats+json; version=0.2.0"
 gc_user_action: null
 query_params: []
 pagination: false
@@ -23,7 +25,7 @@ response_shape: object
 response_sample: data/raw/player-stats-sample.json
 raw_sample_size: "~106 KB (25 players, full season cumulative stats)"
 discovered: "2026-03-05"
-last_confirmed: "2026-03-05"
+last_confirmed: "2026-03-26"
 tags: [games, player, stats, spray-chart]
 caveats:
   - >
@@ -44,11 +46,20 @@ caveats:
     IP IN FRACTIONAL THIRDS: Innings pitched is a float where 1 1/3 IP = 1.333...
     (not 1.1). Convert with: full_innings + (fraction * 3) / 10 for display.
   - >
-    TEAM_ID SCOPE CONFIRMED BROAD (2026-03-09): Contrary to earlier assumption, this
-    endpoint DOES work with opponent team IDs. In session 063531, 55 calls were made
-    using the Nighthawks progenitor_team_id (14fd6cb6) as the path team_id, all
+    TEAM_ID SCOPE CONFIRMED BROAD (2026-03-09): This endpoint works with opponent
+    team IDs (progenitor_team_id), not just teams the authenticated user manages. In
+    session 063531, 55 calls were made using an opponent progenitor_team_id, all
     returning HTTP 200. This means the mobile app (and likely the web app) can fetch
-    any team's per-game player-stats using that team's progenitor_team_id.
+    any team's per-game player-stats using that team's progenitor_team_id. The
+    authenticated user's team membership is NOT required for access.
+  - >
+    PLAY RESULT ENUM COMPLETENESS (2026-03-26): Mobile data (session 034739) exposes
+    additional playResult values not in the original web capture: other_out,
+    offensive_interference, sacrifice_bunt_error, sacrifice_fly_error. Full observed
+    set: single, double, triple, home_run, batter_out, batter_out_advance_runners,
+    fielders_choice, error, sac_fly, dropped_third_strike, other_out,
+    offensive_interference, sacrifice_bunt_error, sacrifice_fly_error. Treat as
+    open enum -- additional values may exist.
 related_schemas: []
 see_also:
   - path: /teams/{team_id}/schedule
@@ -63,7 +74,7 @@ see_also:
 
 # GET /teams/{team_id}/schedule/events/{event_id}/player-stats
 
-**Status:** CONFIRMED LIVE -- 200 OK. Both teams' players, three data sections. Last verified: 2026-03-05.
+**Status:** CONFIRMED LIVE -- 200 OK. Both teams' players, three data sections. Last verified: 2026-03-26 (mobile session 034739).
 
 Returns per-player stats for a specific game event. Returns three sections: `player_stats` (this-game per-player stats), `cumulative_player_stats` (season-to-date for own-team players; single-game for opponent players), and `spray_chart_data` (ball-in-play x/y coordinates). Both own-team and opponent players are included in the same response, keyed by player UUID.
 
@@ -94,7 +105,18 @@ Accept: application/json, text/plain, */*
 User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36
 ```
 
-**Note:** Accept header is `application/json, text/plain, */*` -- NOT a vendor-typed `application/vnd.gc.com.*` header. This is the only authenticated endpoint in the API with this Accept pattern.
+**Note:** Web Accept header is `application/json, text/plain, */*` -- NOT a vendor-typed `application/vnd.gc.com.*` header. This is unusual for this API.
+
+## Headers (Mobile Profile)
+
+```
+gc-token: {GC_TOKEN}
+gc-device-id: {GC_DEVICE_ID}
+Accept: application/vnd.gc.com.player_game_stats+json; version=0.2.0
+User-Agent: {MOBILE_USER_AGENT}
+```
+
+**Note:** Mobile profile uses a standard vendor-typed Accept header (`application/vnd.gc.com.player_game_stats+json; version=0.2.0`). Response structure is identical to the web profile. Confirmed across 206 calls in session 034739 (2026-03-26).
 
 ## Response
 
@@ -236,7 +258,7 @@ No explicit team flag per player. Use `cumulative_player_stats.players[uuid].sta
 | Field | Type | Description |
 |-------|------|-------------|
 | `code` | string | Always `"ball_in_play"` |
-| `attributes.playResult` | string | `"single"`, `"double"`, `"triple"`, `"home_run"`, `"out"`, `"error"`, `"field_choice"`, ... |
+| `attributes.playResult` | string | Open enum. Confirmed values: `single`, `double`, `triple`, `home_run`, `batter_out`, `batter_out_advance_runners`, `fielders_choice`, `error`, `sac_fly`, `dropped_third_strike`, `other_out`, `offensive_interference`, `sacrifice_bunt_error`, `sacrifice_fly_error` |
 | `attributes.playType` | string | `"hard_ground_ball"`, `"ground_ball"`, `"line_drive"`, `"fly_ball"`, `"bunt"`, ... |
 | `attributes.defenders` | array | Fielders involved: each has `error` (bool), `position` (string), `location.x` (float), `location.y` (float) |
 | `createdAt` | int | Unix millisecond timestamp |
@@ -321,7 +343,7 @@ No explicit team flag per player. Use `cumulative_player_stats.players[uuid].sta
 - **No batting order:** `players` dict is keyed by UUID with no ordering.
 - **Opponent cumulative stats are single-game:** Opponents' GP = 1; their season history not available.
 - **IP in fractional thirds:** 1 1/3 IP = 1.333 (not 1.1). Convert for display.
-- **team_id scope:** Must be a team the authenticated user manages. Using opponent UUID as team_id may return 403 (not tested).
-- **Confirmed once (200 OK):** Single observation 2026-03-05. Mark as stable after 3+ independent verifications.
+- **team_id scope:** Works with opponent `progenitor_team_id` values -- NOT restricted to teams the authenticated user manages. Confirmed in session 063531 (2026-03-09) with 55 successful calls using an opponent team ID. Earlier assumption that this required own-team membership was WRONG.
+- **playResult enum is open:** Mobile traffic (session 034739, 2026-03-26) surfaced additional values beyond web capture: `other_out`, `offensive_interference`, `sacrifice_bunt_error`, `sacrifice_fly_error`. Always parse defensively; do not use an exhaustive enum.
 
-**Discovered:** 2026-03-05. **Confirmed:** 2026-03-05.
+**Discovered:** 2026-03-05. **Last confirmed:** 2026-03-26 (mobile session 034739, 206 calls).
