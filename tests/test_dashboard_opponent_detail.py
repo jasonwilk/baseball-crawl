@@ -795,3 +795,290 @@ class TestGetTopPitchers:
         pitchers = [{"name": "Only", "ip_outs": 15}]
         result = _get_top_pitchers(pitchers)
         assert len(result) == 1
+
+
+# ---------------------------------------------------------------------------
+# Tests for the opponent print route (E-159-01: AC-16)
+# ---------------------------------------------------------------------------
+
+
+class TestOpponentPrintRoute:
+    """AC-16: Print route returns 200 with correct content for all empty states."""
+
+    def test_full_stats_returns_200_with_print_elements(self, tmp_path):
+        """AC-16(a): full_stats state renders 200 with 'Scouting Report' and window.print()."""
+        db_path, member_id, opp_id, _ = _make_full_db(tmp_path)
+        env = {"DATABASE_PATH": str(db_path), "DEV_USER_EMAIL": _USER_EMAIL}
+        with patch.dict("os.environ", env):
+            with TestClient(app) as client:
+                resp = client.get(
+                    f"/dashboard/opponents/{opp_id}/print",
+                    params={"team_id": member_id, "season_id": _SEASON_ID},
+                )
+        assert resp.status_code == 200
+        body = resp.text
+        assert "Scouting Report" in body
+        assert "window.print()" in body
+
+    def test_full_stats_contains_pitching_and_batting_tables(self, tmp_path):
+        """Full stats shows both pitching and batting sections."""
+        db_path, member_id, opp_id, _ = _make_full_db(tmp_path)
+        env = {"DATABASE_PATH": str(db_path), "DEV_USER_EMAIL": _USER_EMAIL}
+        with patch.dict("os.environ", env):
+            with TestClient(app) as client:
+                resp = client.get(
+                    f"/dashboard/opponents/{opp_id}/print",
+                    params={"team_id": member_id, "season_id": _SEASON_ID},
+                )
+        assert resp.status_code == 200
+        body = resp.text
+        assert "Pitching" in body
+        assert "Batting" in body
+        assert "Batter Tendencies" in body
+        assert "Spray chart coming soon" in body
+
+    def test_full_stats_pitcher_handedness_in_print_table(self, tmp_path):
+        """Pitcher handedness appears in the print pitching table."""
+        db_path, member_id, opp_id, _ = _make_full_db(tmp_path)
+        env = {"DATABASE_PATH": str(db_path), "DEV_USER_EMAIL": _USER_EMAIL}
+        with patch.dict("os.environ", env):
+            with TestClient(app) as client:
+                resp = client.get(
+                    f"/dashboard/opponents/{opp_id}/print",
+                    params={"team_id": member_id, "season_id": _SEASON_ID},
+                )
+        assert resp.status_code == 200
+        body = resp.text
+        assert "(R)" in body
+        assert "(L)" in body
+
+    def test_full_stats_view_online_link_present(self, tmp_path):
+        """'View online' back-link is present on the print page."""
+        db_path, member_id, opp_id, _ = _make_full_db(tmp_path)
+        env = {"DATABASE_PATH": str(db_path), "DEV_USER_EMAIL": _USER_EMAIL}
+        with patch.dict("os.environ", env):
+            with TestClient(app) as client:
+                resp = client.get(
+                    f"/dashboard/opponents/{opp_id}/print",
+                    params={"team_id": member_id, "season_id": _SEASON_ID},
+                )
+        assert resp.status_code == 200
+        assert "View online" in resp.text
+
+    def test_unlinked_returns_200_with_stats_not_available(self, tmp_path):
+        """AC-16(b): unlinked state returns 200 with 'Stats not available.' message."""
+        db_path = _make_db(tmp_path)
+        with sqlite3.connect(str(db_path)) as conn:
+            conn.execute("PRAGMA foreign_keys=ON")
+            member_id = _insert_member_team(conn, "LSB Varsity")
+            opp_id = _insert_opponent_team(conn, "Unknown Rival")
+            _insert_season(conn)
+            _insert_game(conn, "g-print-unlinked", member_id, opp_id)
+            user_id = _insert_user(conn)
+            _grant_team_access(conn, user_id, member_id)
+        env = {"DATABASE_PATH": str(db_path), "DEV_USER_EMAIL": _USER_EMAIL}
+        with patch.dict("os.environ", env):
+            with TestClient(app) as client:
+                resp = client.get(
+                    f"/dashboard/opponents/{opp_id}/print",
+                    params={"team_id": member_id, "season_id": _SEASON_ID},
+                )
+        assert resp.status_code == 200
+        assert "Stats not available." in resp.text
+
+    def test_linked_unscouted_returns_200_with_stats_not_loaded(self, tmp_path):
+        """AC-16(b): linked_unscouted state returns 200 with 'Stats not loaded yet.' message."""
+        db_path = _make_db(tmp_path)
+        with sqlite3.connect(str(db_path)) as conn:
+            conn.execute("PRAGMA foreign_keys=ON")
+            member_id = _insert_member_team(conn, "LSB Varsity")
+            opp_id = _insert_opponent_team(conn, "Linked Rival", public_id="linked-rival-slug")
+            _insert_season(conn)
+            _insert_game(conn, "g-print-linked", member_id, opp_id)
+            user_id = _insert_user(conn)
+            _grant_team_access(conn, user_id, member_id)
+        env = {"DATABASE_PATH": str(db_path), "DEV_USER_EMAIL": _USER_EMAIL}
+        with patch.dict("os.environ", env):
+            with TestClient(app) as client:
+                resp = client.get(
+                    f"/dashboard/opponents/{opp_id}/print",
+                    params={"team_id": member_id, "season_id": _SEASON_ID},
+                )
+        assert resp.status_code == 200
+        assert "Stats not loaded yet." in resp.text
+
+    def test_unauthorized_returns_403(self, tmp_path):
+        """Opponent not in any game for permitted team returns 403."""
+        db_path = _make_db(tmp_path)
+        with sqlite3.connect(str(db_path)) as conn:
+            conn.execute("PRAGMA foreign_keys=ON")
+            member_id = _insert_member_team(conn, "LSB Varsity")
+            unrelated_opp_id = _insert_opponent_team(conn, "No Game Rival")
+            _insert_season(conn)
+            user_id = _insert_user(conn)
+            _grant_team_access(conn, user_id, member_id)
+        env = {"DATABASE_PATH": str(db_path), "DEV_USER_EMAIL": _USER_EMAIL}
+        with patch.dict("os.environ", env):
+            with TestClient(app) as client:
+                resp = client.get(
+                    f"/dashboard/opponents/{unrelated_opp_id}/print",
+                    params={"team_id": member_id, "season_id": _SEASON_ID},
+                )
+        assert resp.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# Tests for the print link on the interactive scouting report (E-159-02)
+# ---------------------------------------------------------------------------
+
+
+class TestOpponentDetailPrintLink:
+    """AC-4: Print link visibility across empty states on the interactive page."""
+
+    def test_print_link_present_in_full_stats(self, tmp_path):
+        """AC-1/AC-3: Print link appears in full_stats state."""
+        db_path, member_id, opp_id, _ = _make_full_db(tmp_path)
+        env = {"DATABASE_PATH": str(db_path), "DEV_USER_EMAIL": _USER_EMAIL}
+        with patch.dict("os.environ", env):
+            with TestClient(app) as client:
+                resp = client.get(
+                    f"/dashboard/opponents/{opp_id}",
+                    params={"team_id": member_id, "season_id": _SEASON_ID},
+                )
+        assert resp.status_code == 200
+        body = resp.text
+        assert "Print / Save as PDF" in body
+        assert f"/dashboard/opponents/{opp_id}/print" in body
+
+    def test_print_link_url_contains_team_id_and_season_id(self, tmp_path):
+        """AC-2: Print link URL includes team_id and season_id params."""
+        db_path, member_id, opp_id, _ = _make_full_db(tmp_path)
+        env = {"DATABASE_PATH": str(db_path), "DEV_USER_EMAIL": _USER_EMAIL}
+        with patch.dict("os.environ", env):
+            with TestClient(app) as client:
+                resp = client.get(
+                    f"/dashboard/opponents/{opp_id}",
+                    params={"team_id": member_id, "season_id": _SEASON_ID},
+                )
+        assert resp.status_code == 200
+        body = resp.text
+        assert f"team_id={member_id}" in body
+        assert f"season_id={_SEASON_ID}" in body
+
+    def test_print_link_absent_in_unlinked_state(self, tmp_path):
+        """AC-3: Print link does not appear in unlinked state."""
+        db_path = _make_db(tmp_path)
+        with sqlite3.connect(str(db_path)) as conn:
+            conn.execute("PRAGMA foreign_keys=ON")
+            member_id = _insert_member_team(conn, "LSB Varsity")
+            opp_id = _insert_opponent_team(conn, "Unlinked Rival")
+            _insert_season(conn)
+            _insert_game(conn, "g-link-test-1", member_id, opp_id)
+            user_id = _insert_user(conn)
+            _grant_team_access(conn, user_id, member_id)
+        env = {"DATABASE_PATH": str(db_path), "DEV_USER_EMAIL": _USER_EMAIL}
+        with patch.dict("os.environ", env):
+            with TestClient(app) as client:
+                resp = client.get(
+                    f"/dashboard/opponents/{opp_id}",
+                    params={"team_id": member_id, "season_id": _SEASON_ID},
+                )
+        assert resp.status_code == 200
+        assert "Print / Save as PDF" not in resp.text
+
+    def test_print_link_absent_in_linked_unscouted_state(self, tmp_path):
+        """AC-3: Print link does not appear in linked_unscouted state."""
+        db_path = _make_db(tmp_path)
+        with sqlite3.connect(str(db_path)) as conn:
+            conn.execute("PRAGMA foreign_keys=ON")
+            member_id = _insert_member_team(conn, "LSB Varsity")
+            opp_id = _insert_opponent_team(conn, "Linked No Stats", public_id="linked-no-stats")
+            _insert_season(conn)
+            _insert_game(conn, "g-link-test-2", member_id, opp_id)
+            user_id = _insert_user(conn)
+            _grant_team_access(conn, user_id, member_id)
+        env = {"DATABASE_PATH": str(db_path), "DEV_USER_EMAIL": _USER_EMAIL}
+        with patch.dict("os.environ", env):
+            with TestClient(app) as client:
+                resp = client.get(
+                    f"/dashboard/opponents/{opp_id}",
+                    params={"team_id": member_id, "season_id": _SEASON_ID},
+                )
+        assert resp.status_code == 200
+        assert "Print / Save as PDF" not in resp.text
+
+
+# ---------------------------------------------------------------------------
+# Year round-trip tests (E-159 Codex remediation)
+# ---------------------------------------------------------------------------
+
+
+class TestYearRoundTrip:
+    """Verify year param include/omit behavior per AC-12 (print page) and AC-2 (detail page)."""
+
+    def test_print_page_view_online_includes_year_when_provided(self, tmp_path):
+        """AC-12: 'View online' link on print page includes year= when year param is set."""
+        db_path, member_id, opp_id, _ = _make_full_db(tmp_path)
+        env = {"DATABASE_PATH": str(db_path), "DEV_USER_EMAIL": _USER_EMAIL}
+        with patch.dict("os.environ", env):
+            with TestClient(app) as client:
+                resp = client.get(
+                    f"/dashboard/opponents/{opp_id}/print",
+                    params={"team_id": member_id, "season_id": _SEASON_ID, "year": "2025"},
+                )
+        assert resp.status_code == 200
+        assert "year=2025" in resp.text
+
+    def test_print_page_view_online_omits_year_when_not_provided(self, tmp_path):
+        """AC-12: 'View online' link omits year param entirely when not set."""
+        db_path, member_id, opp_id, _ = _make_full_db(tmp_path)
+        env = {"DATABASE_PATH": str(db_path), "DEV_USER_EMAIL": _USER_EMAIL}
+        with patch.dict("os.environ", env):
+            with TestClient(app) as client:
+                resp = client.get(
+                    f"/dashboard/opponents/{opp_id}/print",
+                    params={"team_id": member_id, "season_id": _SEASON_ID},
+                )
+        assert resp.status_code == 200
+        body = resp.text
+        assert "year=None" not in body
+        # year= should not appear in the View online href at all
+        view_online_pos = body.find("View online")
+        assert view_online_pos != -1
+        surrounding = body[max(0, view_online_pos - 200):view_online_pos]
+        assert "year=" not in surrounding
+
+    def test_detail_print_link_includes_year_when_provided(self, tmp_path):
+        """AC-2: Print link on detail page includes year= when year param is set."""
+        db_path, member_id, opp_id, _ = _make_full_db(tmp_path)
+        env = {"DATABASE_PATH": str(db_path), "DEV_USER_EMAIL": _USER_EMAIL}
+        with patch.dict("os.environ", env):
+            with TestClient(app) as client:
+                resp = client.get(
+                    f"/dashboard/opponents/{opp_id}",
+                    params={"team_id": member_id, "season_id": _SEASON_ID, "year": "2025"},
+                )
+        assert resp.status_code == 200
+        body = resp.text
+        print_link_start = body.find("/print")
+        assert print_link_start != -1
+        print_href = body[print_link_start:print_link_start + 200]
+        assert "year=2025" in print_href
+
+    def test_detail_print_link_omits_year_when_not_provided(self, tmp_path):
+        """AC-2: Print link on detail page omits year param entirely when year not set."""
+        db_path, member_id, opp_id, _ = _make_full_db(tmp_path)
+        env = {"DATABASE_PATH": str(db_path), "DEV_USER_EMAIL": _USER_EMAIL}
+        with patch.dict("os.environ", env):
+            with TestClient(app) as client:
+                resp = client.get(
+                    f"/dashboard/opponents/{opp_id}",
+                    params={"team_id": member_id, "season_id": _SEASON_ID},
+                )
+        assert resp.status_code == 200
+        body = resp.text
+        print_link_start = body.find("/print")
+        assert print_link_start != -1
+        print_href = body[print_link_start:print_link_start + 200]
+        assert "year=None" not in print_href
+        assert "year=" not in print_href

@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Scouting Report &mdash; {{ scouting_report.team_name if scouting_report else opponent_team_id }}</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: Arial, Helvetica, sans-serif;
+      font-size: 8.5pt;
+      color: #000;
+      background: #fff;
+      padding: 0.5in;
+    }
+
+    /* ---- Report header ---- */
+    .report-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      border-bottom: 2px solid #000;
+      padding-bottom: 6px;
+      margin-bottom: 8px;
+    }
+    .report-team-name {
+      font-size: 18pt;
+      font-weight: bold;
+      line-height: 1.1;
+    }
+    .report-record {
+      font-size: 9pt;
+      color: #444;
+      margin-top: 2px;
+    }
+    .report-label {
+      font-size: 11pt;
+      font-weight: bold;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      text-align: right;
+    }
+    .report-date {
+      font-size: 9pt;
+      color: #444;
+      text-align: right;
+      margin-top: 2px;
+    }
+
+    /* ---- Context bar ---- */
+    .context-bar {
+      font-size: 9pt;
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      padding: 4px 8px;
+      background: #f0f0f0;
+      margin-bottom: 10px;
+    }
+    .context-bar-label {
+      font-weight: bold;
+      text-transform: uppercase;
+      font-size: 8pt;
+      letter-spacing: 0.05em;
+      margin-right: 3px;
+    }
+    .context-sep { color: #999; }
+
+    /* ---- Screen-only interactive bar ---- */
+    .screen-only { margin-bottom: 10px; }
+    .screen-btn {
+      margin-right: 8px;
+      padding: 5px 12px;
+      font-size: 9pt;
+      cursor: pointer;
+    }
+    .screen-link { font-size: 9pt; }
+
+    /* ---- Section headers ---- */
+    .section-header {
+      font-size: 11pt;
+      font-weight: bold;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 4px;
+      margin-top: 8px;
+    }
+
+    /* ---- Tables ---- */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 10px;
+    }
+    thead th {
+      font-size: 8pt;
+      font-weight: bold;
+      text-transform: uppercase;
+      color: #000;
+      border-bottom: 2px solid #000;
+      padding: 3px 4px;
+      text-align: center;
+      white-space: nowrap;
+    }
+    thead th.col-player { text-align: left; }
+    tbody td {
+      font-size: 8.5pt;
+      padding: 2px 4px;
+      text-align: center;
+    }
+    tbody td.col-player {
+      text-align: left;
+      font-weight: 500;
+      white-space: nowrap;
+    }
+    tbody tr:nth-child(even) { background-color: #f5f5f5; }
+
+    /* ---- Spray chart grid ---- */
+    .tendencies-section { margin-top: 12px; }
+    .tendencies-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+    }
+    .tendency-card {
+      border: 1px solid #ddd;
+      padding: 6px;
+      text-align: center;
+    }
+    .tendency-card-name {
+      font-size: 8.5pt;
+      font-weight: bold;
+      margin-bottom: 4px;
+    }
+    .spray-placeholder {
+      width: 160px;
+      height: 160px;
+      border: 1px solid #ccc;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto;
+      color: #999;
+      font-size: 8pt;
+    }
+
+    /* ---- Footer ---- */
+    .report-footer {
+      margin-top: 16px;
+      padding-top: 6px;
+      border-top: 1px solid #ccc;
+      font-size: 8pt;
+      color: #555;
+    }
+
+    /* ---- Print rules ---- */
+    @media print {
+      @page { size: landscape; margin: 0.5in; }
+      body { padding: 0; }
+      .screen-only { display: none !important; }
+      .batting-section { page-break-before: always; }
+      tr { page-break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+
+{% if scouting_report %}
+
+{# Screen-only: print button and view-online link #}
+<div class="screen-only">
+  <button onclick="window.print()" class="screen-btn">Print / Save as PDF</button>
+  <a href="/dashboard/opponents/{{ opponent_team_id }}?team_id={{ active_team_id }}{% if year %}&amp;year={{ year }}{% endif %}&amp;season_id={{ season_id }}" class="screen-link">View online</a>
+</div>
+
+{# Report header: team name, record, label, date #}
+<div class="report-header">
+  <div>
+    <div class="report-team-name">{{ scouting_report.team_name }}</div>
+    {% if scouting_report.record %}
+    <div class="report-record">{{ scouting_report.record.wins }}-{{ scouting_report.record.losses }}</div>
+    {% endif %}
+  </div>
+  <div>
+    <div class="report-label">Scouting Report</div>
+    <div class="report-date">{{ print_date }}</div>
+  </div>
+</div>
+
+{# Context bar: last meeting + team batting tendencies #}
+<div class="context-bar">
+  <span>
+    <span class="context-bar-label">Last Meeting:</span>
+    {% if last_meeting %}
+      {% set home_score = last_meeting.home_score %}
+      {% set away_score = last_meeting.away_score %}
+      {% if last_meeting.is_home %}
+        {% set my_score = home_score %}
+        {% set their_score = away_score %}
+      {% else %}
+        {% set my_score = away_score %}
+        {% set their_score = home_score %}
+      {% endif %}
+      {% if my_score is not none and their_score is not none %}
+        {% if my_score > their_score %}{% set wl = "W" %}
+        {% elif my_score == their_score %}{% set wl = "T" %}
+        {% else %}{% set wl = "L" %}{% endif %}
+      {% else %}
+        {% set wl = "-" %}
+      {% endif %}
+      {{ last_meeting.game_date | format_date }} &middot;
+      {{ my_score if my_score is not none else "-" }}-{{ their_score if their_score is not none else "-" }} &middot;
+      <strong>{{ wl }}</strong>
+    {% else %}
+      No previous meetings
+    {% endif %}
+  </span>
+  <span class="context-sep">|</span>
+  <span>
+    <span class="context-bar-label">Team Batting:</span>
+    OBP {{ team_batting.obp if team_batting.has_data else "&mdash;" | safe }}
+    &nbsp;&middot;&nbsp;
+    K% {{ team_batting.k_pct if team_batting.has_data else "&mdash;" | safe }}
+    &nbsp;&middot;&nbsp;
+    BB% {{ team_batting.bb_pct if team_batting.has_data else "&mdash;" | safe }}
+    &nbsp;&middot;&nbsp;
+    SLG {{ team_batting.slg if team_batting.has_data else "&mdash;" | safe }}
+  </span>
+</div>
+
+{# ------------------------------------------------------------------ #}
+{# Empty states #}
+{# ------------------------------------------------------------------ #}
+{% if empty_state == "unlinked" %}
+<p>Stats not available.</p>
+
+{% elif empty_state == "linked_unscouted" %}
+<p>Stats not loaded yet.</p>
+
+{% else %}
+
+{# ===== PAGE 1: Pitching table ===== #}
+<h2 class="section-header">Pitching</h2>
+{% if scouting_report.pitching %}
+<table>
+  <thead>
+    <tr>
+      <th>#</th>
+      <th class="col-player">Player</th>
+      <th>ERA</th>
+      <th>K/9</th>
+      <th>WHIP</th>
+      <th>GP</th>
+      <th>IP</th>
+      <th>BB</th>
+      <th>SO</th>
+      <th>Strike%</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for pitcher in scouting_report.pitching %}
+    <tr>
+      <td>{% if pitcher.jersey_number %}{{ pitcher.jersey_number }}{% else %}&mdash;{% endif %}</td>
+      <td class="col-player">{{ pitcher.name }}{% if pitcher.throws %} ({{ pitcher.throws }}){% endif %}</td>
+      <td>{{ pitcher.era }}</td>
+      <td>{{ pitcher.k9 }}</td>
+      <td>{{ pitcher.whip }}</td>
+      <td>{{ pitcher.games }}</td>
+      <td>{{ pitcher.ip_outs | ip_display }}</td>
+      <td>{{ pitcher.bb }}</td>
+      <td>{{ pitcher.so }}</td>
+      <td>{{ pitcher.strike_pct }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p>No pitching data available.</p>
+{% endif %}
+
+{# ===== PAGE 2+: Batting table + Batter Tendencies ===== #}
+<div class="batting-section">
+
+<h2 class="section-header">Batting</h2>
+{% if scouting_report.batting %}
+<table>
+  <thead>
+    <tr>
+      <th>#</th>
+      <th class="col-player">Player</th>
+      <th>AVG</th>
+      <th>OBP</th>
+      <th>SLG</th>
+      <th>GP</th>
+      <th>AB</th>
+      <th>BB</th>
+      <th>SO</th>
+      <th>HR</th>
+      <th>SB</th>
+      <th>RBI</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for player in scouting_report.batting %}
+    <tr>
+      <td>{% if player.jersey_number %}{{ player.jersey_number }}{% else %}&mdash;{% endif %}</td>
+      <td class="col-player">{{ player.name }}</td>
+      <td>{{ player.h | format_avg(player.ab) }}</td>
+      <td>{{ (player.h + player.bb + player.hbp) | format_avg(player.ab + player.bb + player.hbp + player.shf) }}</td>
+      <td>{{ (player.h + player.doubles + 2 * player.triples + 3 * player.hr) | format_avg(player.ab) }}</td>
+      <td>{{ player.games }}</td>
+      <td>{{ player.ab }}</td>
+      <td>{{ player.bb }}</td>
+      <td>{{ player.so }}</td>
+      <td>{{ player.hr }}</td>
+      <td>{{ player.sb }}</td>
+      <td>{{ player.rbi }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p>No batting data available.</p>
+{% endif %}
+
+{# Batter Tendencies — spray chart placeholder grid (3 per row) #}
+<div class="tendencies-section">
+  <h2 class="section-header">Batter Tendencies</h2>
+  <div class="tendencies-grid">
+    {% for player in scouting_report.batting %}
+    <div class="tendency-card">
+      <div class="tendency-card-name">
+        {% if player.jersey_number %}#{{ player.jersey_number }} {% endif %}{{ player.name }}
+      </div>
+      <div class="spray-placeholder">Spray chart coming soon</div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+
+</div>{# end .batting-section #}
+
+{% endif %}{# end full_stats #}
+
+{% else %}
+<p>No scouting report available.</p>
+{% endif %}
+
+{# Document-end footer — visible on screen, prints on last page only #}
+<div class="report-footer">
+  {{ scouting_report.team_name if scouting_report else "" }}
+</div>
+
+</body>
+</html>

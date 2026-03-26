@@ -1,7 +1,7 @@
 # E-159: Print-Optimized Scouting Report View
 
 ## Status
-`READY`
+`COMPLETED`
 <!-- Lifecycle: DRAFT → READY → ACTIVE → COMPLETED (or BLOCKED / ABANDONED) -->
 <!-- PM sets READY explicitly after: expert consultation done, all stories have testable ACs, quality checklist passed. -->
 <!-- Only READY and ACTIVE epics can be dispatched. -->
@@ -34,8 +34,8 @@ Expert consultation: UX designer consulted on print layout design — specified 
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-159-01 | Print route and template | TODO | None | - |
-| E-159-02 | Add print link to existing scouting report | TODO | E-159-01 | - |
+| E-159-01 | Print route and template | DONE | None | - |
+| E-159-02 | Add print link to existing scouting report | DONE | E-159-01 | - |
 
 ## Dispatch Team
 - software-engineer
@@ -115,8 +115,9 @@ None.
 - 2026-03-26: Created
 - 2026-03-26: Updated with UXD print layout spec (section order, typography, column trimming, spray chart grid, page breaks)
 - 2026-03-26: Marked READY after 4 Codex iterations and 2 internal review rounds.
+- 2026-03-26: COMPLETED. Delivered print-optimized scouting report route (`GET /dashboard/opponents/{id}/print`) with self-contained CSS, landscape layout, pitching-first page order, context bar, spray chart placeholder grid, and print link on the existing interactive scouting report. 2 stories, 11 new tests (49 total passing), 0 regressions.
 
-### Review Scorecard
+### Spec Review Scorecard
 | Review Pass | Findings | Accepted | Dismissed |
 |---|---|---|---|
 | Internal iteration 1 — CR spec audit | 6 | 4 | 2 |
@@ -128,3 +129,23 @@ None.
 | Codex iteration 3 | 3 | 3 | 0 |
 | Codex iteration 4 | 4 | 4 | 0 |
 | **Total** | **~37** | **~33** | **~4** |
+
+### Implementation Review Scorecard
+| Review Pass | Findings | Accepted | Dismissed |
+|---|---|---|---|
+| Per-story CR — E-159-01 | 0 | 0 | 0 |
+| Per-story CR — E-159-02 | 0 | 0 | 0 |
+| CR integration review | 0 | 0 | 0 |
+| Codex code review | 2 | 2 | 0 |
+| **Total** | **2** | **2** | **0** |
+
+### Documentation Assessment
+Trigger 1 (new feature ships): **YES** — new print route and template for scouting reports. Affects `docs/coaching/` (scouting report documentation should mention the print view). Dispatch docs-writer before archiving.
+
+### Context-Layer Assessment
+1. **New convention, pattern, or constraint established?** No — the print template follows existing patterns (standalone route, Jinja2 template, inline CSS for self-containment).
+2. **Architectural decision with ongoing implications?** No — self-contained print template is a local design choice, not an architectural pattern future epics must follow.
+3. **Footgun, failure mode, or boundary discovered?** No — no new gotchas discovered.
+4. **Change to agent behavior, routing, or coordination?** No — no agent changes.
+5. **Domain knowledge discovered that should influence agent decisions?** No — the print layout spec is fully captured in the epic's Technical Notes and the template itself.
+6. **New CLI command, workflow, or operational procedure introduced?** No — no new CLI commands or workflows.
