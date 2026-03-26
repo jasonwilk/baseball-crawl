@@ -28,7 +28,7 @@ Expert consultation: UX designer consulted on print layout design — specified 
 
 ## Success Criteria
 - Opening `/dashboard/opponents/{id}/print` renders a print-optimized page with all scouting data
-- Ctrl+P / browser print produces a clean landscape layout with no clipped tables (Page 1: header + pitching; Page 2+: batting + Batter Tendencies, which may span additional pages for large rosters)
+- Ctrl+P / browser print produces a clean landscape layout with no clipped tables (Page 1: header + pitching + batting; Page 2+: Batter Tendencies spray chart grid, which may span additional pages for large rosters)
 - The existing scouting report page has a visible "Print / Save as PDF" link
 
 ## Stories
@@ -56,9 +56,13 @@ Context bar       — Last meeting (date · score · W/L inline) + OBP / K% / BB
 Pitching table    — Full table (pitchers first — pre-game primary concern)
 ```
 
-**Page 2** (forced page break before batting section):
+**Page 1 (continued):**
 ```
-Batting table     — Full table
+Batting table     — Full table (flows naturally after pitching)
+```
+
+**Page 2+** (forced page break before Batter Tendencies):
+```
 Batter Tendencies — Spray chart placeholder grid (3 cards per row)
 ```
 
@@ -95,7 +99,7 @@ Batter Tendencies — Spray chart placeholder grid (3 cards per row)
 
 ### TN-6: Print-Specific CSS
 - `@page { size: landscape; margin: 0.5in; }` inside `@media print`
-- `page-break-before: always` on the batting section
+- `page-break-before: always` on the Batter Tendencies section (pitching and batting flow together on page 1; spray chart grid starts on page 2)
 - `page-break-inside: avoid` on table rows
 - Tables: `width: 100%` to prevent overflow — column trimming (TN-4) and font sizes (TN-3) ensure content fits at this width
 - Table headers: dark text + thick bottom border (no dark background — saves ink)
