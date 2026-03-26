@@ -14,3 +14,5 @@ python-dotenv~=1.0   # Environment variable loading from .env files
 pyyaml~=6.0          # YAML config parsing (teams.yaml)
 typer[all]>=0.9      # CLI framework for operator commands (rich + shellingham extras)
 brotlicffi~=1.0     # Brotli decompression for httpx (mobile profile uses br encoding)
+matplotlib~=3.9     # Spray chart rendering (PNG generation via Agg backend)
+numpy~=2.0          # Required by matplotlib; used in chart calculations

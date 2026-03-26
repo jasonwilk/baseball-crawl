@@ -5,8 +5,25 @@
 - `docs/coaching/` -- End-user documentation (audience: coaching staff)
 - `docs/api/` -- API spec directory (owned by api-scout, read-only for docs-writer). Index at `docs/api/README.md`, per-endpoint files in `docs/api/endpoints/`.
 
+## Admin Docs -- File Map
+- `docs/admin/README.md` -- Index of all admin docs
+- `docs/admin/architecture.md` -- System overview, components, data flow, directory structure, schema changes
+- `docs/admin/operations.md` -- Deployment, CLI pipeline reference, admin UI reference, credential rotation, backup/restore, troubleshooting
+- `docs/admin/getting-started.md` -- Dev environment setup, credentials, running tests
+- `docs/admin/agent-guide.md` -- Agent ecosystem overview and workflow guide
+
+## Coaching Docs -- File Map
+- `docs/coaching/README.md` -- Entry point for coaching staff
+- `docs/coaching/scouting-reports.md` -- Dashboard layout, schedule/scouting views, spray charts, reading rate stats
+- `docs/coaching/understanding-stats.md` -- Plain-language stats glossary (OBP, SLG, K%, BB%, BABIP, K/9, BB/9, K/BB, FIP) with sample size guidance
+
 ## Conventions
-(To be populated as documentation work begins)
+- **Last updated line format**: `*Last updated: YYYY-MM-DD | Source: E-NNN (description), E-NNN-SS (description)*`
+- Pipeline commands documented in operations.md under the Admin Team Management section (CLI subsections follow the UI section)
+- Schema changes go in architecture.md under `## Schema Changes`, newest first
+- Coaching explanations should not mention technical details (routes, SQL, Python modules)
+- Coaching docs use plain prose and "what it means in practice" examples, not formulas
+- Audience: coaching docs assume zero technical knowledge; admin docs assume Python/Docker/SQL competence
 
 ## Topic File Index
-(To be populated as needed)
+- [Conventions file](conventions.md) -- (this MEMORY.md serves as the index; no separate topic files yet)

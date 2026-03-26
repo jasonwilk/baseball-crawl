@@ -1515,6 +1515,172 @@ def get_opponent_scouting_status(
         return {"status": "unlinked", "link_id": None}
 
 
+def get_current_season_id() -> str | None:
+    """Return the most recent season_id from the seasons table.
+
+    Returns:
+        The most recent season slug (e.g. ``"2026-spring-hs"``), or ``None``
+        if no seasons exist or on DB error.
+    """
+    try:
+        with closing(get_connection()) as conn:
+            row = conn.execute(
+                "SELECT season_id FROM seasons "
+                "ORDER BY CAST(SUBSTR(season_id, 1, 4) AS INTEGER) DESC, "
+                "season_id DESC LIMIT 1"
+            ).fetchone()
+        return row[0] if row else None
+    except sqlite3.Error:
+        logger.exception("Failed to get current season ID")
+        return None
+
+
+def get_player_spray_bip_count(player_id: str, season_id: str) -> int:
+    """Count offensive ball-in-play events for a player in a season.
+
+    Used to drive threshold logic for the spray chart card on the player
+    profile page (TN-7).
+
+    Args:
+        player_id: The player's UUID.
+        season_id: The season slug (e.g. ``"2026-spring-hs"``).
+
+    Returns:
+        Count of offensive spray chart events; 0 on DB error.
+    """
+    try:
+        with closing(get_connection()) as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) FROM spray_charts "
+                "WHERE player_id = ? AND season_id = ? AND chart_type = 'offensive'",
+                (player_id, season_id),
+            ).fetchone()
+        return row[0] if row else 0
+    except sqlite3.Error:
+        logger.exception("Failed to count spray BIP for player %s", player_id)
+        return 0
+
+
+def get_player_spray_events(player_id: str, season_id: str) -> list[dict[str, Any]]:
+    """Return offensive spray chart events for a player in a season.
+
+    Returns only the columns needed by the renderer: ``x``, ``y``,
+    ``play_result``.  Used by the spray chart image route.
+
+    Args:
+        player_id: The player's UUID.
+        season_id: The season slug (e.g. ``"2026-spring-hs"``).
+
+    Returns:
+        List of dicts with keys ``x``, ``y``, ``play_result``.
+        Returns an empty list on DB error.
+    """
+    try:
+        with closing(get_connection()) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                "SELECT x, y, play_result FROM spray_charts "
+                "WHERE player_id = ? AND season_id = ? AND chart_type = 'offensive'",
+                (player_id, season_id),
+            ).fetchall()
+        return [dict(r) for r in rows]
+    except sqlite3.Error:
+        logger.exception("Failed to fetch spray events for player %s", player_id)
+        return []
+
+
+def get_team_spray_bip_count(team_id: int, season_id: str) -> int:
+    """Count offensive ball-in-play events for a team in a season.
+
+    Used to drive threshold logic for the team spray chart card on the
+    opponent detail page (TN-7 team aggregate thresholds).
+
+    Args:
+        team_id: The team's integer primary key.
+        season_id: The season slug (e.g. ``"2026-spring-hs"``).
+
+    Returns:
+        Count of offensive spray chart events; 0 on DB error.
+    """
+    try:
+        with closing(get_connection()) as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) FROM spray_charts "
+                "WHERE team_id = ? AND season_id = ? AND chart_type = 'offensive'",
+                (team_id, season_id),
+            ).fetchone()
+        return row[0] if row else 0
+    except sqlite3.Error:
+        logger.exception("Failed to count spray BIP for team %d", team_id)
+        return 0
+
+
+def get_team_spray_events(team_id: int, season_id: str) -> list[dict[str, Any]]:
+    """Return offensive spray chart events for a team in a season.
+
+    Returns only the columns needed by the renderer: ``x``, ``y``,
+    ``play_result``.  Used by the team spray chart image route.
+
+    Args:
+        team_id: The team's integer primary key.
+        season_id: The season slug (e.g. ``"2026-spring-hs"``).
+
+    Returns:
+        List of dicts with keys ``x``, ``y``, ``play_result``.
+        Returns an empty list on DB error.
+    """
+    try:
+        with closing(get_connection()) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                "SELECT x, y, play_result FROM spray_charts "
+                "WHERE team_id = ? AND season_id = ? AND chart_type = 'offensive'",
+                (team_id, season_id),
+            ).fetchall()
+        return [dict(r) for r in rows]
+    except sqlite3.Error:
+        logger.exception("Failed to fetch spray events for team %d", team_id)
+        return []
+
+
+def get_players_spray_bip_counts(
+    player_ids: list[str], season_id: str, team_id: int
+) -> dict[str, int]:
+    """Return per-player offensive BIP counts for a list of players in a season.
+
+    Used to populate spray chart link visibility in the batting leaders table
+    on the opponent detail page.
+
+    Args:
+        player_ids: List of player UUID strings to look up.
+        season_id:  The season slug (e.g. ``"2026-spring-hs"``).
+        team_id:    The team's integer primary key.  Scopes counts to a single
+                    team so players who appear on multiple teams in the same
+                    season are not double-counted.
+
+    Returns:
+        Dict mapping player_id to BIP count.  Players with no events are
+        absent from the dict (caller treats missing keys as 0).
+        Returns an empty dict on DB error or empty input.
+    """
+    if not player_ids:
+        return {}
+    try:
+        placeholders = ",".join("?" * len(player_ids))
+        with closing(get_connection()) as conn:
+            rows = conn.execute(
+                f"SELECT player_id, COUNT(*) FROM spray_charts "
+                f"WHERE player_id IN ({placeholders}) "
+                f"AND season_id = ? AND team_id = ? AND chart_type = 'offensive' "
+                f"GROUP BY player_id",
+                (*player_ids, season_id, team_id),
+            ).fetchall()
+        return {row[0]: row[1] for row in rows}
+    except sqlite3.Error:
+        logger.exception("Failed to count spray BIP for player list")
+        return {}
+
+
 def check_connection() -> bool:
     """Verify that the database is accessible and the schema is initialized.
 

@@ -22,9 +22,9 @@ from migrations.apply_migrations import run_migrations
 # Loader registry
 # ---------------------------------------------------------------------------
 
-def test_loader_names_contains_all_three() -> None:
-    """_LOADER_NAMES must contain roster, game, and season-stats in order."""
-    assert _LOADER_NAMES == ["roster", "game", "season-stats"]
+def test_loader_names_contains_all_loaders() -> None:
+    """_LOADER_NAMES must contain all loaders in pipeline order."""
+    assert _LOADER_NAMES == ["roster", "schedule", "game", "season-stats", "spray-chart"]
 
 
 # ---------------------------------------------------------------------------

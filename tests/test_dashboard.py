@@ -2565,3 +2565,518 @@ class TestEmptyStateUI:
         assert response.status_code == 200
         assert "<table" in response.text
         assert "bg-yellow-50" not in response.text
+
+
+# ---------------------------------------------------------------------------
+# E-158-05: Player profile spray chart image route + spray chart card
+# ---------------------------------------------------------------------------
+
+
+def _insert_spray_chart_events(
+    conn: sqlite3.Connection,
+    player_id: str,
+    team_id: int,
+    season_id: str,
+    count: int,
+) -> None:
+    """Insert ``count`` offensive spray_charts rows for a player in a season."""
+    for i in range(count):
+        conn.execute(
+            "INSERT OR IGNORE INTO spray_charts "
+            "(player_id, team_id, chart_type, play_result, x, y, season_id, event_gc_id) "
+            "VALUES (?, ?, 'offensive', 'single', ?, ?, ?, ?)",
+            (player_id, team_id, 100.0 + i, 150.0 + i, season_id, f"evt-{player_id}-{i}"),
+        )
+
+
+def _make_spray_chart_seeded_db(tmp_path: Path) -> tuple[Path, int]:
+    """Create a database with spray chart data for image route tests.
+
+    Inserts:
+    - gc-p-001: 12 offensive events (>= 10 threshold — should render)
+    - gc-p-002: 5 offensive events (5-9 tier — "Small sample")
+    - gc-p-003: 3 offensive events (1-4 tier — "Not enough data yet")
+
+    Returns:
+        Tuple of (db_path, lsb_team_id).
+    """
+    db_path = tmp_path / "test_spray_chart.db"
+    _apply_schema(db_path)
+    conn = sqlite3.connect(str(db_path))
+    lsb_team_id, _ = _insert_lsb_team_and_user(conn)
+    _insert_players_and_batting(conn, lsb_team_id)
+    cursor = conn.execute(
+        "INSERT OR IGNORE INTO teams (name, membership_type) VALUES (?, ?)",
+        ("Rival High School", "tracked"),
+    )
+    opp_team_id: int = cursor.lastrowid  # type: ignore[assignment]
+    _insert_player_profile_data(conn, lsb_team_id, opp_team_id)
+    # Add team_rosters entry for gc-p-003 so the profile page returns 200 (not 403)
+    conn.execute(
+        "INSERT OR IGNORE INTO team_rosters (team_id, player_id, season_id) VALUES (?, ?, ?)",
+        (lsb_team_id, "gc-p-003", _CURRENT_SEASON_ID),
+    )
+    _insert_spray_chart_events(conn, "gc-p-001", lsb_team_id, _CURRENT_SEASON_ID, 12)
+    _insert_spray_chart_events(conn, "gc-p-002", lsb_team_id, _CURRENT_SEASON_ID, 5)
+    _insert_spray_chart_events(conn, "gc-p-003", lsb_team_id, _CURRENT_SEASON_ID, 3)
+    conn.commit()
+    conn.close()
+    return db_path, lsb_team_id
+
+
+class TestPlayerSprayChartImage:
+    """Tests for GET /dashboard/charts/spray/player/{player_id}.png (E-158-05 AC-9)."""
+
+    @pytest.fixture()
+    def spray_chart_client(self, tmp_path: Path):
+        """TestClient with spray chart data. Yields (client, lsb_team_id)."""
+        db_path, lsb_team_id = _make_spray_chart_seeded_db(tmp_path)
+        env_overrides = {
+            "DATABASE_PATH": str(db_path),
+            "DEV_USER_EMAIL": "testdev@example.com",
+        }
+        with patch.dict("os.environ", env_overrides):
+            with TestClient(app) as client:
+                yield client, lsb_team_id
+
+    def test_image_route_returns_200_for_player_with_10_plus_events(
+        self, spray_chart_client
+    ) -> None:
+        """Image route returns 200 for player with >= 10 offensive BIP (AC-9)."""
+        client, _ = spray_chart_client
+        response = client.get(
+            f"/dashboard/charts/spray/player/gc-p-001.png?season_id={_CURRENT_SEASON_ID}"
+        )
+        assert response.status_code == 200
+
+    def test_image_route_returns_png_content_type(self, spray_chart_client) -> None:
+        """Image route returns content-type image/png (AC-1, AC-9)."""
+        client, _ = spray_chart_client
+        response = client.get(
+            f"/dashboard/charts/spray/player/gc-p-001.png?season_id={_CURRENT_SEASON_ID}"
+        )
+        assert response.headers["content-type"] == "image/png"
+
+    def test_image_route_returns_png_bytes(self, spray_chart_client) -> None:
+        """Image route response body is valid PNG bytes (AC-9)."""
+        client, _ = spray_chart_client
+        response = client.get(
+            f"/dashboard/charts/spray/player/gc-p-001.png?season_id={_CURRENT_SEASON_ID}"
+        )
+        # PNG magic bytes: \x89PNG\r\n\x1a\n
+        assert response.content[:8] == b"\x89PNG\r\n\x1a\n"
+
+    def test_image_route_returns_non_empty_body(self, spray_chart_client) -> None:
+        """Image route returns non-empty body for player with enough events (AC-9)."""
+        client, _ = spray_chart_client
+        response = client.get(
+            f"/dashboard/charts/spray/player/gc-p-001.png?season_id={_CURRENT_SEASON_ID}"
+        )
+        assert len(response.content) > 0
+
+    def test_image_route_returns_204_for_player_with_fewer_than_10_events(
+        self, spray_chart_client
+    ) -> None:
+        """Image route returns 204 No Content for player with < 10 BIP (AC-3, AC-9)."""
+        client, _ = spray_chart_client
+        response = client.get(
+            f"/dashboard/charts/spray/player/gc-p-002.png?season_id={_CURRENT_SEASON_ID}"
+        )
+        assert response.status_code == 204
+
+    def test_image_route_returns_204_for_player_with_no_events(
+        self, spray_chart_client
+    ) -> None:
+        """Image route returns 204 No Content for player with 0 BIP (AC-3)."""
+        client, _ = spray_chart_client
+        response = client.get(
+            f"/dashboard/charts/spray/player/gc-p-nostats.png?season_id={_CURRENT_SEASON_ID}"
+        )
+        assert response.status_code == 204
+
+    def test_image_route_default_season_returns_204_when_no_events(
+        self, spray_chart_client
+    ) -> None:
+        """Image route defaults to current season when no season_id param (AC-2)."""
+        client, _ = spray_chart_client
+        # gc-p-nostats has no spray events in any season
+        response = client.get("/dashboard/charts/spray/player/gc-p-nostats.png")
+        assert response.status_code == 204
+
+
+class TestPlayerProfileSprayCard:
+    """Tests for spray chart card on player profile page (E-158-05 AC-4 through AC-7)."""
+
+    @pytest.fixture()
+    def spray_chart_client(self, tmp_path: Path):
+        """TestClient with spray chart data. Yields (client, lsb_team_id)."""
+        db_path, lsb_team_id = _make_spray_chart_seeded_db(tmp_path)
+        env_overrides = {
+            "DATABASE_PATH": str(db_path),
+            "DEV_USER_EMAIL": "testdev@example.com",
+        }
+        with patch.dict("os.environ", env_overrides):
+            with TestClient(app) as client:
+                yield client, lsb_team_id
+
+    def test_spray_chart_card_heading_present(self, spray_chart_client) -> None:
+        """Player profile page includes 'Spray Chart' card heading (AC-4)."""
+        client, _ = spray_chart_client
+        response = client.get("/dashboard/players/gc-p-001")
+        assert "Spray Chart" in response.text
+
+    def test_spray_chart_card_shows_bip_subtitle_for_10_plus_events(
+        self, spray_chart_client
+    ) -> None:
+        """Player with >= 10 BIP shows 'Based on N balls in play' subtitle (AC-5, AC-6)."""
+        client, _ = spray_chart_client
+        response = client.get("/dashboard/players/gc-p-001")
+        assert "Based on 12 balls in play" in response.text
+
+    def test_spray_chart_card_shows_img_tag_for_10_plus_events(
+        self, spray_chart_client
+    ) -> None:
+        """Player with >= 10 BIP shows <img> tag pointing to the image route (AC-5)."""
+        client, _ = spray_chart_client
+        response = client.get("/dashboard/players/gc-p-001")
+        assert "/dashboard/charts/spray/player/gc-p-001.png" in response.text
+
+    def test_spray_chart_card_small_sample_message_for_5_to_9_events(
+        self, spray_chart_client
+    ) -> None:
+        """Player with 5-9 BIP shows 'Small sample' message (AC-7b).
+
+        gc-p-002 has 5 spray events, which is in the 5-9 range.
+        """
+        client, _ = spray_chart_client
+        response = client.get("/dashboard/players/gc-p-002")
+        assert "Small sample" in response.text
+        assert "5 balls in play" in response.text
+
+    def test_spray_chart_card_not_enough_data_message_for_1_to_4_events(
+        self, spray_chart_client
+    ) -> None:
+        """Player with 1-4 BIP shows 'Not enough data yet' message (AC-7c).
+
+        gc-p-003 has 3 spray events, which is in the 1-4 range.
+        """
+        client, _ = spray_chart_client
+        response = client.get("/dashboard/players/gc-p-003")
+        assert "Not enough data yet" in response.text
+        assert "balls in play recorded" in response.text
+
+    def test_spray_chart_card_zero_bip_shows_sync_message(
+        self, spray_chart_client
+    ) -> None:
+        """Player with 0 BIP shows 'Charts will appear after the next sync.' (AC-7d)."""
+        client, _ = spray_chart_client
+        response = client.get("/dashboard/players/gc-p-nostats")
+        assert "Charts will appear after the next sync." in response.text
+
+
+# ---------------------------------------------------------------------------
+# E-158-06: Team spray chart image route and opponent detail template
+# ---------------------------------------------------------------------------
+
+
+def _make_opponent_spray_seeded_db(
+    tmp_path: Path,
+) -> tuple[Path, int, int]:
+    """Create a database with opponent scouting data plus spray chart events.
+
+    Extends the standard opponent fixture with:
+    - opp-p-001: 12 offensive spray events for opp_team_id (per-player >= 10 threshold)
+    - opp-p-002: 5 offensive spray events for opp_team_id (< 10 threshold)
+    - Additional events to reach 20+ total for the team aggregate render threshold
+
+    Returns:
+        Tuple of (db_path, lsb_team_id, opp_team_id).
+    """
+    db_path = tmp_path / "test_opp_spray.db"
+    _apply_schema(db_path)
+    conn = sqlite3.connect(str(db_path))
+    lsb_team_id, _ = _insert_lsb_team_and_user(conn)
+    _insert_players_and_batting(conn, lsb_team_id)
+    opp_team_id, _ = _insert_game_data(conn, lsb_team_id)
+    _insert_opponent_stats(conn, lsb_team_id, opp_team_id)
+
+    # opp-p-001: 12 events (>= 10 — should get "View spray →" link)
+    _insert_spray_chart_events(conn, "opp-p-001", opp_team_id, _CURRENT_SEASON_ID, 12)
+    # opp-p-002: 5 events (< 10 — no link)
+    _insert_spray_chart_events(conn, "opp-p-002", opp_team_id, _CURRENT_SEASON_ID, 5)
+    # Add 3 more events for opp-p-003 to push team total to 20 (12+5+3=20)
+    _insert_spray_chart_events(conn, "opp-p-003", opp_team_id, _CURRENT_SEASON_ID, 3)
+
+    conn.commit()
+    conn.close()
+    return db_path, lsb_team_id, opp_team_id
+
+
+class TestTeamSprayChartImage:
+    """Tests for GET /dashboard/charts/spray/team/{team_id}.png (E-158-06 AC-11)."""
+
+    @pytest.fixture()
+    def opp_spray_client(self, tmp_path: Path):
+        """TestClient with opponent spray chart data. Yields (client, lsb_team_id, opp_team_id)."""
+        db_path, lsb_team_id, opp_team_id = _make_opponent_spray_seeded_db(tmp_path)
+        env_overrides = {
+            "DATABASE_PATH": str(db_path),
+            "DEV_USER_EMAIL": "testdev@example.com",
+        }
+        with patch.dict("os.environ", env_overrides):
+            with TestClient(app) as client:
+                yield client, lsb_team_id, opp_team_id
+
+    def test_team_image_route_returns_200_for_20_plus_events(
+        self, opp_spray_client
+    ) -> None:
+        """Team image route returns 200 when >= 20 offensive BIP events exist (AC-11)."""
+        client, _, opp_team_id = opp_spray_client
+        response = client.get(
+            f"/dashboard/charts/spray/team/{opp_team_id}.png"
+            f"?season_id={_CURRENT_SEASON_ID}"
+        )
+        assert response.status_code == 200
+
+    def test_team_image_route_returns_png_content_type(
+        self, opp_spray_client
+    ) -> None:
+        """Team image route returns content-type image/png (AC-11)."""
+        client, _, opp_team_id = opp_spray_client
+        response = client.get(
+            f"/dashboard/charts/spray/team/{opp_team_id}.png"
+            f"?season_id={_CURRENT_SEASON_ID}"
+        )
+        assert response.headers["content-type"] == "image/png"
+
+    def test_team_image_route_aggregates_multiple_players(
+        self, opp_spray_client
+    ) -> None:
+        """Team image route aggregates events across multiple players (AC-11).
+
+        Total events: opp-p-001 (12) + opp-p-002 (5) + opp-p-003 (3) = 20.
+        Route should render PNG rather than returning 204.
+        """
+        client, _, opp_team_id = opp_spray_client
+        response = client.get(
+            f"/dashboard/charts/spray/team/{opp_team_id}.png"
+            f"?season_id={_CURRENT_SEASON_ID}"
+        )
+        # If aggregation works, 20 events >= threshold, so PNG is returned.
+        assert response.content[:8] == b"\x89PNG\r\n\x1a\n"
+
+    def test_team_image_route_returns_204_for_fewer_than_20_events(
+        self, tmp_path: Path
+    ) -> None:
+        """Team image route returns 204 No Content when < 20 BIP events exist (AC-11).
+
+        Uses a fresh DB with only 19 events for the opponent team.
+        """
+        db_path = tmp_path / "test_opp_spray_sparse.db"
+        _apply_schema(db_path)
+        conn = sqlite3.connect(str(db_path))
+        lsb_team_id, _ = _insert_lsb_team_and_user(conn)
+        _insert_players_and_batting(conn, lsb_team_id)
+        opp_team_id, _ = _insert_game_data(conn, lsb_team_id)
+        _insert_opponent_stats(conn, lsb_team_id, opp_team_id)
+        # Insert only 19 events total (below the 20-event team threshold)
+        _insert_spray_chart_events(conn, "opp-p-001", opp_team_id, _CURRENT_SEASON_ID, 19)
+        conn.commit()
+        conn.close()
+
+        env_overrides = {
+            "DATABASE_PATH": str(db_path),
+            "DEV_USER_EMAIL": "testdev@example.com",
+        }
+        with patch.dict("os.environ", env_overrides):
+            with TestClient(app) as client:
+                response = client.get(
+                    f"/dashboard/charts/spray/team/{opp_team_id}.png"
+                    f"?season_id={_CURRENT_SEASON_ID}"
+                )
+        assert response.status_code == 204
+
+    def test_team_image_route_filters_by_season_id(
+        self, tmp_path: Path
+    ) -> None:
+        """Team image route counts only events matching the requested season_id (AC-11).
+
+        Events in _ALT_SEASON_ID do not count toward the _CURRENT_SEASON_ID threshold.
+        """
+        db_path = tmp_path / "test_opp_spray_season.db"
+        _apply_schema(db_path)
+        conn = sqlite3.connect(str(db_path))
+        lsb_team_id, _ = _insert_lsb_team_and_user(conn)
+        _insert_players_and_batting(conn, lsb_team_id)
+        opp_team_id, _ = _insert_game_data(conn, lsb_team_id)
+        _insert_opponent_stats(conn, lsb_team_id, opp_team_id)
+        # 20 events in alt season, 0 in current — should return 204 for current
+        _insert_spray_chart_events(conn, "opp-p-001", opp_team_id, _ALT_SEASON_ID, 20)
+        conn.commit()
+        conn.close()
+
+        env_overrides = {
+            "DATABASE_PATH": str(db_path),
+            "DEV_USER_EMAIL": "testdev@example.com",
+        }
+        with patch.dict("os.environ", env_overrides):
+            with TestClient(app) as client:
+                response = client.get(
+                    f"/dashboard/charts/spray/team/{opp_team_id}.png"
+                    f"?season_id={_CURRENT_SEASON_ID}"
+                )
+        assert response.status_code == 204
+
+
+class TestOpponentDetailSprayCard:
+    """Tests for spray chart card and batting leaders links on opponent detail (E-158-06)."""
+
+    @pytest.fixture()
+    def opp_spray_client(self, tmp_path: Path):
+        """TestClient with opponent spray chart data. Yields (client, lsb_team_id, opp_team_id)."""
+        db_path, lsb_team_id, opp_team_id = _make_opponent_spray_seeded_db(tmp_path)
+        env_overrides = {
+            "DATABASE_PATH": str(db_path),
+            "DEV_USER_EMAIL": "testdev@example.com",
+        }
+        with patch.dict("os.environ", env_overrides):
+            with TestClient(app) as client:
+                yield client, lsb_team_id, opp_team_id
+
+    def _get_opponent_detail(self, client, lsb_team_id: int, opp_team_id: int):
+        return client.get(
+            f"/dashboard/opponents/{opp_team_id}"
+            f"?team_id={lsb_team_id}&season_id={_CURRENT_SEASON_ID}"
+        )
+
+    def test_team_spray_card_heading_present(self, opp_spray_client) -> None:
+        """Opponent detail page includes 'Team Spray Chart' card heading (E-158-06 AC-11)."""
+        client, lsb_team_id, opp_team_id = opp_spray_client
+        response = self._get_opponent_detail(client, lsb_team_id, opp_team_id)
+        assert "Team Spray Chart" in response.text
+
+    def test_team_spray_card_shows_img_tag_for_20_plus_events(
+        self, opp_spray_client
+    ) -> None:
+        """Opponent detail page shows <img> tag when >= 20 team BIP events exist (AC-11)."""
+        client, lsb_team_id, opp_team_id = opp_spray_client
+        response = self._get_opponent_detail(client, lsb_team_id, opp_team_id)
+        assert f"/dashboard/charts/spray/team/{opp_team_id}.png" in response.text
+
+    def test_team_spray_card_shows_bip_subtitle_for_20_plus_events(
+        self, opp_spray_client
+    ) -> None:
+        """Opponent detail page shows 'Based on N balls in play' subtitle for >= 20 BIP (AC-11)."""
+        client, lsb_team_id, opp_team_id = opp_spray_client
+        response = self._get_opponent_detail(client, lsb_team_id, opp_team_id)
+        assert "Based on 20 balls in play" in response.text
+
+    def test_team_spray_card_small_sample_for_10_to_19_events(
+        self, tmp_path: Path
+    ) -> None:
+        """Opponent detail shows 'Small sample' when team BIP is 10-19 (AC-11 tier b)."""
+        db_path = tmp_path / "test_opp_spray_small.db"
+        _apply_schema(db_path)
+        conn = sqlite3.connect(str(db_path))
+        lsb_team_id, _ = _insert_lsb_team_and_user(conn)
+        _insert_players_and_batting(conn, lsb_team_id)
+        opp_team_id, _ = _insert_game_data(conn, lsb_team_id)
+        _insert_opponent_stats(conn, lsb_team_id, opp_team_id)
+        _insert_spray_chart_events(conn, "opp-p-001", opp_team_id, _CURRENT_SEASON_ID, 15)
+        conn.commit()
+        conn.close()
+
+        env_overrides = {
+            "DATABASE_PATH": str(db_path),
+            "DEV_USER_EMAIL": "testdev@example.com",
+        }
+        with patch.dict("os.environ", env_overrides):
+            with TestClient(app) as client:
+                response = client.get(
+                    f"/dashboard/opponents/{opp_team_id}"
+                    f"?team_id={lsb_team_id}&season_id={_CURRENT_SEASON_ID}"
+                )
+        assert "Small sample" in response.text
+        assert "balls in play against our teams" in response.text
+
+    def test_team_spray_card_zero_bip_shows_sync_message(
+        self, tmp_path: Path
+    ) -> None:
+        """Opponent detail shows 'Charts will appear' when no BIP events exist (AC-11 tier d)."""
+        db_path = tmp_path / "test_opp_spray_zero.db"
+        _apply_schema(db_path)
+        conn = sqlite3.connect(str(db_path))
+        lsb_team_id, _ = _insert_lsb_team_and_user(conn)
+        _insert_players_and_batting(conn, lsb_team_id)
+        opp_team_id, _ = _insert_game_data(conn, lsb_team_id)
+        _insert_opponent_stats(conn, lsb_team_id, opp_team_id)
+        # No spray events inserted
+        conn.commit()
+        conn.close()
+
+        env_overrides = {
+            "DATABASE_PATH": str(db_path),
+            "DEV_USER_EMAIL": "testdev@example.com",
+        }
+        with patch.dict("os.environ", env_overrides):
+            with TestClient(app) as client:
+                response = client.get(
+                    f"/dashboard/opponents/{opp_team_id}"
+                    f"?team_id={lsb_team_id}&season_id={_CURRENT_SEASON_ID}"
+                )
+        assert "Charts will appear after the next sync." in response.text
+
+    def test_team_spray_card_not_enough_data_for_1_to_9_events(
+        self, tmp_path: Path
+    ) -> None:
+        """Opponent detail shows 'Not enough data yet' when team BIP is 1-9 (AC-7 tier c).
+
+        Uses 5 events — clearly in the 1-9 range.
+        """
+        db_path = tmp_path / "test_opp_spray_tiny.db"
+        _apply_schema(db_path)
+        conn = sqlite3.connect(str(db_path))
+        lsb_team_id, _ = _insert_lsb_team_and_user(conn)
+        _insert_players_and_batting(conn, lsb_team_id)
+        opp_team_id, _ = _insert_game_data(conn, lsb_team_id)
+        _insert_opponent_stats(conn, lsb_team_id, opp_team_id)
+        _insert_spray_chart_events(conn, "opp-p-001", opp_team_id, _CURRENT_SEASON_ID, 5)
+        conn.commit()
+        conn.close()
+
+        env_overrides = {
+            "DATABASE_PATH": str(db_path),
+            "DEV_USER_EMAIL": "testdev@example.com",
+        }
+        with patch.dict("os.environ", env_overrides):
+            with TestClient(app) as client:
+                response = client.get(
+                    f"/dashboard/opponents/{opp_team_id}"
+                    f"?team_id={lsb_team_id}&season_id={_CURRENT_SEASON_ID}"
+                )
+        assert "Not enough data yet" in response.text
+        assert "balls in play recorded" in response.text
+
+    def test_batting_table_note_above_table(self, opp_spray_client) -> None:
+        """Opponent detail batting table has note about 10+ BIP threshold (E-158-06 AC-11)."""
+        client, lsb_team_id, opp_team_id = opp_spray_client
+        response = self._get_opponent_detail(client, lsb_team_id, opp_team_id)
+        assert "Only showing spray charts for players with 10+ balls in play." in response.text
+
+    def test_batting_table_view_spray_link_for_player_with_10_plus_bip(
+        self, opp_spray_client
+    ) -> None:
+        """Batting leaders shows 'View spray' link for opp-p-001 with 12 BIP (AC-11)."""
+        client, lsb_team_id, opp_team_id = opp_spray_client
+        response = self._get_opponent_detail(client, lsb_team_id, opp_team_id)
+        assert "/dashboard/charts/spray/player/opp-p-001.png" in response.text
+        assert "View spray" in response.text
+
+    def test_batting_table_no_spray_link_for_player_with_fewer_than_10_bip(
+        self, opp_spray_client
+    ) -> None:
+        """Batting leaders shows no spray link for opp-p-002 with 5 BIP (< 10 threshold)."""
+        client, lsb_team_id, opp_team_id = opp_spray_client
+        response = self._get_opponent_detail(client, lsb_team_id, opp_team_id)
+        # opp-p-002 has 5 BIP — link should not appear
+        assert "/dashboard/charts/spray/player/opp-p-002.png" not in response.text

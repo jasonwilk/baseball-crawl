@@ -20,6 +20,7 @@ from src.gamechanger.crawlers.schedule import ScheduleCrawler
 from src.gamechanger.crawlers.opponent import OpponentCrawler
 from src.gamechanger.crawlers.player_stats import PlayerStatsCrawler
 from src.gamechanger.crawlers.game_stats import GameStatsCrawler
+from src.gamechanger.crawlers.spray_chart import SprayChartCrawler
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +38,7 @@ _CRAWLER_NAMES: list[str] = [
     "opponent",
     "player-stats",
     "game-stats",
+    "spray-chart",
 ]
 
 
@@ -52,6 +54,7 @@ def _build_crawlers() -> list[tuple[str, object]]:
         ("opponent", lambda client, config: OpponentCrawler(client, config)),
         ("player-stats", lambda client, config: PlayerStatsCrawler(client, config)),
         ("game-stats", lambda client, config: GameStatsCrawler(client, config)),
+        ("spray-chart", lambda client, config: SprayChartCrawler(client, config)),
     ]
 
 

@@ -17,6 +17,7 @@ from src.gamechanger.loaders.game_loader import GameLoader
 from src.gamechanger.loaders.roster import RosterLoader
 from src.gamechanger.loaders.schedule_loader import ScheduleLoader
 from src.gamechanger.loaders.season_stats_loader import SeasonStatsLoader
+from src.gamechanger.loaders.spray_chart_loader import SprayChartLoader
 from src.gamechanger.types import TeamRef
 
 logger = logging.getLogger(__name__)
@@ -163,6 +164,37 @@ def _run_season_stats_loader(db: sqlite3.Connection, config: object, data_root: 
     return combined
 
 
+def _run_spray_chart_loader(
+    db: sqlite3.Connection, config: object, data_root: Path
+) -> LoadResult:
+    """Run the spray chart loader for all member teams.
+
+    Args:
+        db: Open SQLite connection.
+        config: Parsed CrawlConfig (season + member_teams).
+        data_root: Raw data root directory.
+
+    Returns:
+        Aggregated LoadResult across all teams.
+    """
+    loader = SprayChartLoader(db)
+    combined = LoadResult()
+
+    for team in config.member_teams:
+        spray_dir = data_root / config.season / "teams" / team.id / "spray"
+        if not spray_dir.is_dir():
+            logger.debug(
+                "Spray dir not found for team %s at %s; skipping.", team.id, spray_dir
+            )
+            continue
+        result = loader.load_dir(spray_dir)
+        combined.loaded += result.loaded
+        combined.skipped += result.skipped
+        combined.errors += result.errors
+
+    return combined
+
+
 # Ordered list of (name, runner) pairs.
 # runner signature: (db, config, data_root) -> LoadResult
 _LOADERS: list[tuple[str, object]] = [
@@ -170,6 +202,7 @@ _LOADERS: list[tuple[str, object]] = [
     ("schedule", _run_schedule_loader),
     ("game", _run_game_loader),
     ("season-stats", _run_season_stats_loader),
+    ("spray-chart", _run_spray_chart_loader),
 ]
 
 _LOADER_NAMES = [name for name, _ in _LOADERS]

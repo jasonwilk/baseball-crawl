@@ -157,7 +157,7 @@ def test_crawl_invalid_crawler_name() -> None:
 
 def test_crawl_all_valid_crawler_names() -> None:
     """crawl accepts all documented crawler names."""
-    valid_names = ["roster", "schedule", "opponent", "player-stats", "game-stats"]
+    valid_names = ["roster", "schedule", "opponent", "player-stats", "game-stats", "spray-chart"]
     for name in valid_names:
         with patch("src.pipeline.crawl.run", return_value=0) as mock_run:
             result = runner.invoke(app, ["data", "crawl", "--crawler", name])

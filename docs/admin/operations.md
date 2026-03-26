@@ -261,6 +261,79 @@ If errors occur during crawl or load, the command exits with status code 1.
 
 **UI alternative**: For ad-hoc per-team refreshes, the **Sync** button on the Teams page is preferred. The CLI `bb data scout` command is suited for batch re-scouting, scripting, or forced refreshes across all opponents.
 
+### Spray Chart Pipeline (`bb data crawl --crawler spray-chart` / `bb data load --loader spray-chart`)
+
+The spray chart pipeline populates the `spray_charts` table with ball-in-play coordinate data for both own-team and opponent players. Spray charts are rendered on-the-fly as PNG images and displayed on the player profile page and opponent scouting report.
+
+**Pipeline steps -- run in order:**
+
+```bash
+# Step 1: Crawl spray chart data from the GameChanger API
+bb data crawl --crawler spray-chart
+
+# Step 2: Load crawled data into the spray_charts table
+bb data load --loader spray-chart
+```
+
+**What the crawler does**: For each completed game in `data/raw/{season}/teams/{gc_uuid}/game-summaries/`, fetches `GET /teams/{team_id}/schedule/events/{event_id}/player-stats` and writes the full JSON response to `data/raw/{season}/teams/{gc_uuid}/spray/{event_id}.json`. One API call returns spray data for both teams (own team and opponent). Files are skipped if they already exist (existence-only check -- completed game data does not change).
+
+**What the loader does**: Reads each spray JSON file, splits ball-in-play events by player ownership (determined via the `games` and `team_rosters` tables), and inserts rows into `spray_charts` using `INSERT OR IGNORE` keyed on the `event_gc_id` UNIQUE column. This means re-running the loader for the same games is safe -- no duplicate records are created.
+
+**Dependency**: The spray chart crawler reads game-summaries files written by `ScheduleCrawler`. Run the main crawl pipeline first for the team before running the spray crawler.
+
+**Integration with the normal sync**: The Admin UI **Sync** button runs the full member-team pipeline (crawl + load) but does not currently include the spray crawler. Run the spray chart pipeline separately via CLI after a team sync:
+
+```bash
+# After a team sync via admin UI or bb data crawl --source db:
+bb data crawl --crawler spray-chart
+bb data load --loader spray-chart
+```
+
+**Selective crawl**: The `--crawler spray-chart` flag targets only the spray crawler, leaving all other crawlers untouched.
+
+**Requirements**: `matplotlib~=3.9` and `numpy~=2.0` are required for chart rendering. These are included in `requirements.txt`. If you added these dependencies after building the Docker image, rebuild before running the load step:
+
+```bash
+docker compose up -d --build app
+```
+
+**Raw data location**: `data/raw/{season}/teams/{gc_uuid}/spray/{event_id}.json`
+
+**Output**: Crawl and load each print a summary line:
+
+```
+Crawl complete: files_written=N files_skipped=N errors=N
+Load complete for {gc_uuid} (season={season_id}).
+```
+
+### Migration 006: Spray Chart Schema Additions
+
+Migration `migrations/006_spray_charts_indexes.sql` adds three columns and three indexes to the `spray_charts` table (which existed in the base schema but was unpopulated):
+
+| Addition | Type | Purpose |
+|----------|------|---------|
+| `event_gc_id` column | `TEXT` | GC UUID per ball-in-play event. UNIQUE -- enables `INSERT OR IGNORE` idempotency. |
+| `created_at_ms` column | `INTEGER` | API's `createdAt` timestamp in Unix milliseconds. |
+| `season_id` column | `TEXT` | Season slug from the file path (e.g., `2026-spring-hs`). Enables per-season filtering per the fresh-start philosophy. |
+| `idx_spray_charts_event_gc_id` index | UNIQUE | On `event_gc_id`. Enforces idempotency at the DB level. |
+| `idx_spray_charts_player` index | | On `(player_id, team_id, season_id)`. Serves player profile and per-player chart queries. |
+| `idx_spray_charts_game` index | | On `game_id`. Serves game-level spray queries. |
+
+The migration is applied automatically on container startup by `migrations/apply_migrations.py`. The table was unpopulated when this migration was written -- no backfill was needed.
+
+### Spray Chart Rendering
+
+Charts are rendered on-the-fly by `src/charts/spray.py` using `matplotlib` and `numpy`. The renderer is not called directly -- it is invoked by two dashboard image routes:
+
+| Route | What it renders |
+|-------|----------------|
+| `GET /dashboard/charts/spray/player/{player_id}.png` | Per-player offensive spray chart for the current (or `?season_id=`) season. Returns 204 if the player has fewer than 10 BIP. |
+| `GET /dashboard/charts/spray/team/{team_id}.png` | Team aggregate offensive spray chart. Returns 204 if the team has fewer than 20 BIP. |
+
+Charts render as 4×6 inch PNGs at 150 DPI, matching the 320×480 coordinate space used by GameChanger's own UI. Both routes require an authenticated session (Cloudflare Access) but do **not** perform `permitted_teams` team membership checks -- this is intentional so opponent player charts load correctly from the scouting report.
+
+**Threshold behavior**: The BIP thresholds (10 per player, 20 for team aggregate) are enforced by the image routes (204 response) and separately by the HTML templates (which show threshold-appropriate messages before even attempting to load the image). The 204 response is a defensive fallback for direct URL access.
+
 ## Programs Management
 
 Programs are umbrella entities that group teams under a shared organizational identity (e.g., `lsb-hs` = Lincoln Standing Bear High School). Navigate to the **Programs** tab (`/admin/programs`) in the admin sub-navigation.
@@ -544,4 +617,4 @@ For the expected data volume (~30 games x 4 teams x a few seasons), the database
 
 ---
 
-*Last updated: 2026-03-26 | Source: E-156 (bb data scout --force flag), E-155 (duplicate team detection and merge UI), E-143 (programs, user roles, team delete, opponent mapping UX, crawl trigger UI), E-120-06 (bare UUID input documented), E-055 (unified CLI), E-115-01 (E-100 team management model), E-028-03 (original)*
+*Last updated: 2026-03-26 | Source: E-158 (spray chart pipeline, migration 006, chart routes), E-156 (bb data scout --force flag), E-155 (duplicate team detection and merge UI), E-143 (programs, user roles, team delete, opponent mapping UX, crawl trigger UI), E-120-06 (bare UUID input documented), E-055 (unified CLI), E-115-01 (E-100 team management model), E-028-03 (original)*

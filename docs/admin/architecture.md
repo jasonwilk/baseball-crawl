@@ -56,6 +56,7 @@ Dashboard (browser)  <--  Traefik  <--  Cloudflare Tunnel  <--  Internet
 baseball-crawl/
   src/
     api/              # FastAPI app: routes, templates, static files, db module
+    charts/           # Chart rendering modules (spray.py -- matplotlib/numpy)
     gamechanger/      # GameChanger API client and credential parser
     http/             # Shared HTTP session factory and browser headers
     safety/           # PII scanning module
@@ -89,6 +90,19 @@ baseball-crawl/
 | **Container** | Docker Compose | Single `docker-compose.yml` defines all services. The app container runs migrations on startup. |
 
 ## Schema Changes
+
+### E-158: Migration 006 -- Spray Chart Schema Additions
+
+`migrations/006_spray_charts_indexes.sql` adds three columns and three indexes to the `spray_charts` table (base table defined in 001, previously unpopulated):
+
+| Addition | Notes |
+|----------|-------|
+| `event_gc_id TEXT` column | GC UUID per ball-in-play event. UNIQUE index enforces idempotent ingestion. |
+| `created_at_ms INTEGER` column | API's `createdAt` timestamp in Unix milliseconds. |
+| `season_id TEXT` column | Season slug (e.g., `2026-spring-hs`) for per-season filtering. |
+| `idx_spray_charts_event_gc_id` UNIQUE index | Enforces the `event_gc_id` uniqueness constraint used by `INSERT OR IGNORE`. |
+| `idx_spray_charts_player` index | On `(player_id, team_id, season_id)`. Serves player and team chart queries. |
+| `idx_spray_charts_game` index | On `game_id`. Serves game-level spray queries. |
 
 ### E-100 Fresh-Start Schema Rewrite
 
@@ -196,4 +210,4 @@ Sub-navigation links Users, Teams, and Opponents pages across all admin views.
 
 ---
 
-*Last updated: 2026-03-17 | Source: E-120-06 (opponent_links table, sub-nav Opponents, url_parser correction, port 8001, teams columns), E-115-02 (schema and admin sections rewritten for E-100 fresh-start schema), E-042 (admin team management, url_parser, team_resolver), E-003-02 (original)*
+*Last updated: 2026-03-26 | Source: E-158 (src/charts/ module, migration 006 spray chart additions), E-120-06 (opponent_links table, sub-nav Opponents, url_parser correction, port 8001, teams columns), E-115-02 (schema and admin sections rewritten for E-100 fresh-start schema), E-042 (admin team management, url_parser, team_resolver), E-003-02 (original)*

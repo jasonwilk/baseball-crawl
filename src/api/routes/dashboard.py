@@ -14,6 +14,7 @@ Routes:
     GET /dashboard/opponents      -- Opponent list with record and next/last game date.
     GET /dashboard/opponents/{opponent_team_id} -- Opponent scouting report.
     GET /dashboard/players/{player_id} -- Player career profile across seasons and teams.
+    GET /dashboard/charts/spray/player/{player_id}.png -- Player spray chart PNG image.
 """
 
 from __future__ import annotations
@@ -31,6 +32,7 @@ from starlette.responses import Response
 
 from src.api import db
 from src.api.helpers import format_avg, format_date, ip_display
+from src.charts.spray import render_spray_chart
 
 logger = logging.getLogger(__name__)
 
@@ -1386,6 +1388,20 @@ async def opponent_detail(request: Request, opponent_team_id: int) -> Response:
         except (ValueError, TypeError):
             year_od = None
 
+    # Spray chart context (E-158-06).  Only meaningful in State C but
+    # fetched unconditionally to keep the template context consistent.
+    spray_team_bip_count = await run_in_threadpool(
+        db.get_team_spray_bip_count, opponent_team_id, season_id
+    )
+    batting_player_ids = [
+        p["player_id"]
+        for p in scouting_report.get("batting", [])
+        if p.get("player_id")
+    ]
+    player_spray_bip_counts: dict[str, int] = await run_in_threadpool(
+        db.get_players_spray_bip_counts, batting_player_ids, season_id, opponent_team_id
+    )
+
     logger.debug(
         "Opponent detail: opponent=%s season_id=%s empty_state=%s bat_sort=%s pit_sort=%s",
         opponent_team_id, season_id, empty_state, bat_sort, pit_sort,
@@ -1414,6 +1430,8 @@ async def opponent_detail(request: Request, opponent_team_id: int) -> Response:
             "top_pitchers": top_pitchers,
             "team_batting": team_batting,
             "game_count": game_count,
+            "spray_team_bip_count": spray_team_bip_count,
+            "player_spray_bip_counts": player_spray_bip_counts,
         },
     )
 
@@ -1714,6 +1732,14 @@ async def player_profile(request: Request, player_id: str) -> Response:
         except (ValueError, TypeError):
             year_pp = None
 
+    # Spray chart BIP count for current season (TN-11: fresh-start philosophy).
+    spray_season_id = await run_in_threadpool(db.get_current_season_id)
+    spray_bip_count: int = 0
+    if spray_season_id:
+        spray_bip_count = await run_in_threadpool(
+            db.get_player_spray_bip_count, player_id, spray_season_id
+        )
+
     logger.debug("Player profile: player_id=%s", player_id)
 
     return templates.TemplateResponse(
@@ -1731,5 +1757,78 @@ async def player_profile(request: Request, player_id: str) -> Response:
             "year": year_pp,
             "active_year": year_pp,
             "user": user,
+            "spray_bip_count": spray_bip_count,
+            "spray_season_id": spray_season_id,
         },
     )
+
+
+@router.get("/dashboard/charts/spray/player/{player_id}.png", response_model=None)
+async def player_spray_chart_image(
+    request: Request,
+    player_id: str,
+    season_id: str | None = None,
+) -> Response:
+    """Serve a spray chart PNG image for a player.
+
+    Requires an authenticated session.  Does NOT check team membership --
+    opponent players on tracked teams would fail a ``permitted_teams`` check.
+
+    Returns 204 No Content if the player has fewer than 10 offensive BIP events
+    in the given season (defensive fallback for direct URL access).
+
+    Args:
+        request:   The incoming HTTP request.
+        player_id: The player's UUID from the URL path.
+        season_id: Optional season slug.  Defaults to the current season.
+
+    Returns:
+        PNG image response (content-type image/png), or 204 No Content if
+        below the 10-event rendering threshold.
+    """
+    if season_id is None:
+        season_id = await run_in_threadpool(db.get_current_season_id)
+    if season_id is None:
+        return Response(status_code=204)
+
+    events = await run_in_threadpool(db.get_player_spray_events, player_id, season_id)
+    if len(events) < 10:
+        return Response(status_code=204)
+
+    png_bytes = await run_in_threadpool(render_spray_chart, events)
+    return Response(content=png_bytes, media_type="image/png")
+
+
+@router.get("/dashboard/charts/spray/team/{team_id}.png", response_model=None)
+async def team_spray_chart_image(
+    request: Request,
+    team_id: int,
+    season_id: str | None = None,
+) -> Response:
+    """Serve the team aggregate spray chart as a PNG image.
+
+    No team membership check -- session authentication is sufficient.
+    Returns 204 No Content when fewer than 20 offensive BIP events are
+    recorded (team aggregate threshold per TN-7).
+
+    Args:
+        request:   The incoming HTTP request (session auth enforced by
+                   SessionMiddleware).
+        team_id:   The team's integer primary key from the URL path.
+        season_id: Optional season slug.  Defaults to the most recent season.
+
+    Returns:
+        PNG image response (content-type image/png), or 204 No Content if
+        below the 20-event rendering threshold.
+    """
+    if season_id is None:
+        season_id = await run_in_threadpool(db.get_current_season_id)
+    if season_id is None:
+        return Response(status_code=204)
+
+    events = await run_in_threadpool(db.get_team_spray_events, team_id, season_id)
+    if len(events) < 20:
+        return Response(status_code=204)
+
+    png_bytes = await run_in_threadpool(render_spray_chart, events)
+    return Response(content=png_bytes, media_type="image/png")

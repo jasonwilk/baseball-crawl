@@ -1,7 +1,7 @@
 # E-158: Spray Chart Pipeline and Dashboard Integration
 
 ## Status
-`READY`
+`COMPLETED`
 
 ## Overview
 Build a complete spray chart pipeline — crawl, load, render, display — so coaches can see where players (own and opponent) put the ball in play. Spray charts are a core scouting tool for defensive positioning and identifying hitter tendencies. This epic delivers PNG-rendered spray charts on the player profile and opponent scouting pages, updated automatically after each crawl.
@@ -53,12 +53,12 @@ A research spike (`.project/research/spray-chart-spike/`) confirmed:
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-158-01 | Spray chart schema migration | TODO | None | - |
-| E-158-02 | Spray chart crawler | TODO | None | - |
-| E-158-03 | Spray chart loader | TODO | E-158-01, E-158-02 | - |
-| E-158-04 | Spray chart rendering module | TODO | None | - |
-| E-158-05 | Player profile spray chart | TODO | E-158-03, E-158-04 | - |
-| E-158-06 | Opponent scouting spray chart | TODO | E-158-05 | - |
+| E-158-01 | Spray chart schema migration | DONE | None | - |
+| E-158-02 | Spray chart crawler | DONE | None | - |
+| E-158-03 | Spray chart loader | DONE | E-158-01, E-158-02 | - |
+| E-158-04 | Spray chart rendering module | DONE | None | - |
+| E-158-05 | Player profile spray chart | DONE | E-158-03, E-158-04 | - |
+| E-158-06 | Opponent scouting spray chart | DONE | E-158-05 | - |
 
 ## Dispatch Team
 - software-engineer
@@ -152,6 +152,44 @@ Spray data is scorekeeper-dependent (~93% offensive, ~16% defensive). The `spray
 ## History
 - 2026-03-26: Created. Expert consultation completed with DE, api-scout, UXD, baseball-coach, SE.
 - 2026-03-26: Review process completed. 3 internal holistic review iterations + 2 CR spec audits + 2 Codex spec review iterations. Epic set to READY.
+- 2026-03-26: All 6 stories implemented and verified. Full spray chart pipeline delivered: schema migration (006), SprayChartCrawler (player-stats endpoint), SprayChartLoader (idempotent ingestion with team_id resolution via TN-10), rendering module (exact GC field geometry, coordinate transform, hit/out colors, HR zone bubbles), player profile spray chart card (4 TN-7 threshold tiers, image endpoint), and opponent scouting spray chart (team aggregate + per-player "View spray" links). 16 total CR/Codex findings, all accepted. matplotlib + numpy added as dependencies. Epic set to COMPLETED.
+
+### Documentation Assessment
+Triggers fired: **1** (new feature: spray chart pipeline + dashboard cards), **4** (schema change: migration 006), **5** (system change: new CLI crawler/loader, new image routes). Docs-writer dispatch required for:
+- `docs/admin/` — new `bb data crawl --crawler spray-chart` and `bb data load --loader spray-chart` CLI commands, migration 006, new image routes (`/dashboard/charts/spray/player/{id}.png`, `/dashboard/charts/spray/team/{id}.png`), matplotlib+numpy dependency addition
+- `docs/coaching/` — new spray chart cards on player profile and opponent scouting pages, threshold behavior (TN-7 tiers), "View spray" links in batting leaders table
+
+### Context-Layer Assessment
+1. **New convention, pattern, or constraint established?** — **Yes.** The `src/charts/` package establishes a rendering module pattern (function returns PNG bytes, called from routes via `run_in_threadpool`). The image endpoint pattern (`.png` route returning `content-type: image/png` with 204 for below-threshold) is new. CLAUDE.md should document the charts package and image route pattern.
+2. **Architectural decision with ongoing implications?** — **Yes.** matplotlib + numpy are new dependencies. The `src/charts/` package location (not under `src/api/`) was a deliberate SE consultation decision. The coordinate transform constants and field geometry are derived from GC's JS bundle — future chart types may reuse this approach. CLAUDE.md Data Model section should note `spray_charts` table population status change (was "unpopulated", now populated by E-158).
+3. **Footgun, failure mode, or boundary discovered?** — **No.** No novel gotchas beyond what's already documented in the epic's Technical Notes.
+4. **Change to agent behavior, routing, or coordination?** — **No.** Standard dispatch, no agent changes.
+5. **Domain knowledge discovered that should influence agent decisions in future epics?** — **Yes.** Spray chart coverage is scorekeeper-dependent (~93% offensive, ~16% defensive). The `progenitor_team_id` pattern for opponent access via the player-stats endpoint. The TN-7 threshold tiers (10 BIP per-player, 20 BIP team aggregate) are coaching-validated decisions. These should be captured in CLAUDE.md or agent memory.
+6. **New CLI command, workflow, or operational procedure introduced?** — **Yes.** `bb data crawl --crawler spray-chart` and `bb data load --loader spray-chart` are new CLI options. No new `bb` subcommand or skill, but the existing `bb data` command group gained new choices. CLAUDE.md should reflect the spray-chart crawler/loader availability.
+
+**Verdicts**: Triggers 1, 2, 5, 6 = **yes**. Triggers 3, 4 = **no**. Claude-architect dispatch required.
+
+### Ideas Backlog Review
+- **IDEA-009** (Per-Player Per-Game Stats and Spray Charts): Trigger partially met — spray charts are now delivered. The "per-player per-game stats" portion remains independent. Consider updating the idea to note spray charts are done and narrowing scope to per-game stats only.
+- **IDEA-035** (Opponent Page Redesign): E-158 added spray chart card and "View spray" links to the opponent detail page — partial progress toward this idea's scope. Remaining: proactive flags, PDF export.
+- **IDEA-037** (Scouting Report Redesign): Same partial progress as IDEA-035 — spray charts now integrated.
+- No ideas are fully unblocked by E-158 alone; spray charts are additive to existing pages rather than a prerequisite for other ideas.
+
+### Vision Signals Review
+26 unprocessed signals in `docs/vision-signals.md` (last curation: 2026-03-13). Signals span coaching UX, auth evolution, opponent identity, stat compilation, and dashboard customization. Recommend asking the user if they want to "curate the vision" at a natural pause.
+
+### Per-Story Review Scorecard
+| Review Pass | Findings | Accepted | Dismissed |
+|---|---|---|---|
+| Per-story CR — E-158-01 | 0 | 0 | 0 |
+| Per-story CR — E-158-02 | 5 | 5 | 0 |
+| Per-story CR — E-158-03 | 3 | 3 | 0 |
+| Per-story CR — E-158-04 | 1 | 1 | 0 |
+| Per-story CR — E-158-05 | 1 | 1 | 0 |
+| Per-story CR — E-158-06 | 2 | 2 | 0 |
+| CR integration review | 1 | 1 | 0 |
+| Codex code review | 3 | 3 | 0 |
+| **Total** | **16** | **16** | **0** |
 
 ### Review Scorecard
 | Review Pass | Findings | Accepted | Dismissed |
