@@ -176,6 +176,11 @@ def scout(
         "web",
         help="HTTP header profile for API requests (web or mobile).",
     ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Bypass the 24-hour freshness check and re-scout all opponents.",
+    ),
 ) -> None:
     """Scout opponent teams: fetch schedule, roster, and boxscores from public endpoints.
 
@@ -190,24 +195,33 @@ def scout(
         bb data scout                           # scout all opponents
         bb data scout --team QTiLIb2Lui3b      # scout one opponent by public_id
         bb data scout --dry-run                 # show what would be scouted
+        bb data scout --force                   # re-scout all, bypassing freshness check
     """
     if dry_run:
-        _scout_dry_run(profile=profile, team=team, season=season)
+        _scout_dry_run(profile=profile, team=team, season=season, force=force)
         raise SystemExit(0)
 
-    _scout_live(profile=profile, team=team, season=season)
+    _scout_live(profile=profile, team=team, season=season, force=force)
 
 
 def _scout_dry_run(
     profile: str,
     team: Optional[str],
     season: Optional[str],
+    force: bool = False,
 ) -> None:
     """Print dry-run summary for the scout command and return."""
     db_path = _resolve_db_path()
     typer.echo("Dry run -- no API calls or DB writes will be performed.")
     typer.echo(f"Profile: {profile}")
     typer.echo(f"DB path: {db_path}")
+    if force:
+        if team:
+            typer.echo(
+                "Force mode active (has no effect with --team; single-team mode already bypasses freshness)."
+            )
+        else:
+            typer.echo("Force mode: freshness check bypassed -- all opponents will be re-scouted.")
     if team:
         typer.echo(f"Would scout: public_id={team}")
     else:
@@ -248,6 +262,7 @@ def _scout_live(
     profile: str,
     team: Optional[str],
     season: Optional[str],
+    force: bool = False,
 ) -> None:
     """Execute the scouting pipeline (crawl + load) and exit with a status code."""
     from datetime import datetime, timezone
@@ -268,7 +283,8 @@ def _scout_live(
         # Self-heal season_year before crawl starts.
         _heal_season_year_cli(conn, team)
 
-        crawler = ScoutingCrawler(client, conn)
+        freshness_hours = 0 if force else 24
+        crawler = ScoutingCrawler(client, conn, freshness_hours=freshness_hours)
         loader = _ScoutingLoader(conn)
         try:
             exit_code = _run_scout_pipeline(conn, crawler, loader, data_root, team, season, started_at)

@@ -223,6 +223,44 @@ The database path defaults to `./data/app.db` or the `DATABASE_PATH` environment
 
 `config/teams.yaml` remains functional as a bootstrap and seed mechanism. YAML is still the default for the CLI to preserve backward compatibility; the UI Sync button is preferred for per-team ad-hoc refreshes.
 
+### Scouting Opponents via CLI (`bb data scout`)
+
+The `bb data scout` command runs the opponent scouting pipeline from the CLI. It queries `opponent_links` for all tracked teams with a `public_id`, then crawls their schedule (public endpoint), roster, and boxscores (authenticated endpoints -- valid GameChanger credentials must be configured in `.env`) and loads the results into the database.
+
+**Commands**:
+
+```bash
+# Scout all opponents with a public_id (skips any scouted within the last 24 hours)
+bb data scout
+
+# Scout a single opponent by public_id slug (always runs, regardless of freshness)
+bb data scout --team QTiLIb2Lui3b
+
+# Re-scout all opponents, bypassing the 24-hour freshness check
+bb data scout --force
+
+# Preview what would be scouted without making any API calls or DB writes
+bb data scout --dry-run
+```
+
+**Freshness check**: By default, `bb data scout` skips any opponent scouted within the last 24 hours. Use `--force` to override this and re-scout all opponents unconditionally. The `--team` flag always scouts the specified opponent regardless of when it was last scouted -- `--force --team PUBLIC_ID` is valid but redundant.
+
+**Output**: After the crawl phase, the command prints a summary line:
+
+```
+Crawl complete: files_written=N files_skipped=N errors=N
+```
+
+Followed by a load status line per team:
+
+```
+Load complete for QTiLIb2Lui3b (season=2025-spring-hs).
+```
+
+If errors occur during crawl or load, the command exits with status code 1.
+
+**UI alternative**: For ad-hoc per-team refreshes, the **Sync** button on the Teams page is preferred. The CLI `bb data scout` command is suited for batch re-scouting, scripting, or forced refreshes across all opponents.
+
 ## Programs Management
 
 Programs are umbrella entities that group teams under a shared organizational identity (e.g., `lsb-hs` = Lincoln Standing Bear High School). Navigate to the **Programs** tab (`/admin/programs`) in the admin sub-navigation.
@@ -506,4 +544,4 @@ For the expected data volume (~30 games x 4 teams x a few seasons), the database
 
 ---
 
-*Last updated: 2026-03-25 | Source: E-155 (duplicate team detection and merge UI), E-143 (programs, user roles, team delete, opponent mapping UX, crawl trigger UI), E-120-06 (bare UUID input documented), E-055 (unified CLI), E-115-01 (E-100 team management model), E-028-03 (original)*
+*Last updated: 2026-03-26 | Source: E-156 (bb data scout --force flag), E-155 (duplicate team detection and merge UI), E-143 (programs, user roles, team delete, opponent mapping UX, crawl trigger UI), E-120-06 (bare UUID input documented), E-055 (unified CLI), E-115-01 (E-100 team management model), E-028-03 (original)*

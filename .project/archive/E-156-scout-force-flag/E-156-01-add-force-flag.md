@@ -4,7 +4,7 @@
 [E-156: Add --force Flag to bb data scout](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, `bb data scout --force` will bypass the 24-hour freshness check and re-scout all opponents regardless of when they were last scouted. The flag passes through to the existing `ScoutingCrawler` constructor's `freshness_hours` parameter. Default behavior (without `--force`) is unchanged.

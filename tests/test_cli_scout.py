@@ -158,6 +158,113 @@ def test_scout_without_team_calls_scout_all(
 
 
 # ---------------------------------------------------------------------------
+# E-156-01: --force flag tests
+# ---------------------------------------------------------------------------
+
+
+def test_scout_force_dry_run_shows_force_indication(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """--force --dry-run output includes an indication that force mode is active (AC-4)."""
+    _patch_credentials(monkeypatch)
+    _patch_token_manager(monkeypatch)
+
+    with patch("src.cli.data._resolve_db_path", return_value=Path("/tmp/test.db")):
+        result = runner.invoke(app, ["data", "scout", "--dry-run", "--force"])
+
+    assert result.exit_code == 0
+    assert "force" in result.output.lower(), f"Expected 'force' in output: {result.output!r}"
+    assert "all opponents" in result.output.lower(), (
+        f"Expected 'all opponents' in output (no --team given): {result.output!r}"
+    )
+
+
+def test_scout_force_dry_run_with_team_shows_redundancy_note(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """--force --dry-run --team output notes that force has no effect with --team."""
+    _patch_credentials(monkeypatch)
+    _patch_token_manager(monkeypatch)
+
+    with patch("src.cli.data._resolve_db_path", return_value=Path("/tmp/test.db")):
+        result = runner.invoke(
+            app, ["data", "scout", "--dry-run", "--force", "--team", "abc123"]
+        )
+
+    assert result.exit_code == 0
+    assert "force" in result.output.lower(), f"Expected 'force' in output: {result.output!r}"
+    assert "no effect" in result.output.lower(), (
+        f"Expected 'no effect' note in output: {result.output!r}"
+    )
+
+
+def test_scout_force_constructs_crawler_with_freshness_zero(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """--force passes freshness_hours=0 to ScoutingCrawler (AC-2)."""
+    _patch_credentials(monkeypatch)
+    _patch_token_manager(monkeypatch)
+
+    from src.gamechanger.crawlers import CrawlResult
+
+    mock_crawler = MagicMock()
+    mock_crawler.scout_all.return_value = CrawlResult(files_written=5)
+
+    db_path = tmp_path / "test.db"
+    from migrations.apply_migrations import run_migrations
+    run_migrations(db_path=db_path)
+
+    captured_kwargs: dict = {}
+
+    def capture_crawler(*args: object, **kwargs: object) -> MagicMock:
+        captured_kwargs.update(kwargs)
+        return mock_crawler
+
+    with patch("src.gamechanger.client.GameChangerClient"), \
+         patch("src.gamechanger.crawlers.scouting.ScoutingCrawler", side_effect=capture_crawler), \
+         patch("src.gamechanger.loaders.scouting_loader.ScoutingLoader"), \
+         patch("src.cli.data._resolve_db_path", return_value=db_path):
+        runner.invoke(app, ["data", "scout", "--force"])
+
+    assert captured_kwargs.get("freshness_hours") == 0, (
+        f"Expected freshness_hours=0, got {captured_kwargs.get('freshness_hours')!r}"
+    )
+
+
+def test_scout_without_force_constructs_crawler_with_default_freshness(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Without --force, ScoutingCrawler is constructed with freshness_hours=24 (AC-3)."""
+    _patch_credentials(monkeypatch)
+    _patch_token_manager(monkeypatch)
+
+    from src.gamechanger.crawlers import CrawlResult
+
+    mock_crawler = MagicMock()
+    mock_crawler.scout_all.return_value = CrawlResult(files_written=5)
+
+    db_path = tmp_path / "test.db"
+    from migrations.apply_migrations import run_migrations
+    run_migrations(db_path=db_path)
+
+    captured_kwargs: dict = {}
+
+    def capture_crawler(*args: object, **kwargs: object) -> MagicMock:
+        captured_kwargs.update(kwargs)
+        return mock_crawler
+
+    with patch("src.gamechanger.client.GameChangerClient"), \
+         patch("src.gamechanger.crawlers.scouting.ScoutingCrawler", side_effect=capture_crawler), \
+         patch("src.gamechanger.loaders.scouting_loader.ScoutingLoader"), \
+         patch("src.cli.data._resolve_db_path", return_value=db_path):
+        runner.invoke(app, ["data", "scout"])
+
+    assert captured_kwargs.get("freshness_hours") == 24, (
+        f"Expected freshness_hours=24, got {captured_kwargs.get('freshness_hours')!r}"
+    )
+
+
+# ---------------------------------------------------------------------------
 # AC-17: get_public() sends no auth headers
 # ---------------------------------------------------------------------------
 

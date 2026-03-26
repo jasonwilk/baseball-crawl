@@ -1,7 +1,7 @@
 # E-156: Add --force Flag to bb data scout
 
 ## Status
-`READY`
+`COMPLETED`
 <!-- Lifecycle: DRAFT → READY → ACTIVE → COMPLETED (or BLOCKED / ABANDONED) -->
 <!-- PM sets READY explicitly after: expert consultation done, all stories have testable ACs, quality checklist passed. -->
 <!-- Only READY and ACTIVE epics can be dispatched. -->
@@ -32,7 +32,7 @@ No expert consultation required -- this is a pure CLI pass-through to an existin
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-156-01 | Add --force flag to scout CLI command | TODO | None | - |
+| E-156-01 | Add --force flag to scout CLI command | DONE | None | - |
 
 ## Dispatch Team
 - software-engineer
@@ -65,3 +65,26 @@ None.
 ## History
 - 2026-03-25: Created
 - 2026-03-25: READY after 2 review iterations (8 findings, 8 accepted, 0 dismissed)
+- 2026-03-26: COMPLETED. Added `--force` flag to `bb data scout` that bypasses the 24-hour freshness check by passing `freshness_hours=0` to `ScoutingCrawler`. Dry-run output reports force mode. Default behavior (no `--force`) unchanged. 3 new tests added (17 total, 0 failures).
+
+### Implementation Review Scorecard
+
+| Review Pass | Findings | Accepted | Dismissed |
+|---|---|---|---|
+| Per-story CR — E-156-01 | 2 | 1 | 0 (round 1 scope gap, round 2 clean) |
+| CR integration review | 0 | 0 | 0 |
+| Codex code review | 3 | 2 | 1 |
+| **Total** | **5** | **3** | **1** |
+
+Codex dismissed: story status "DONE" (false positive — correct per dispatch workflow). Codex finding 1: devcontainer (confirmed no change in worktree — no fix needed). Codex finding 2: misleading dry-run message (fixed with conditional output).
+
+### Context-Layer Assessment (2026-03-26)
+
+1. New convention, pattern, or constraint? **No**
+2. Architectural decision with ongoing implications? **No**
+3. Footgun, failure mode, or boundary discovered? **No**
+4. Change to agent behavior, routing, or coordination? **No**
+5. Domain knowledge discovered? **No**
+6. New CLI command, workflow, or operational procedure? **No** — `--force` is a minor flag addition to an existing command, not a new workflow
+
+All 6 triggers: No. No context-layer codification required.
