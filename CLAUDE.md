@@ -30,9 +30,10 @@ Coaching analytics platform for **Lincoln Standing Bear High School** baseball p
 A queryable database containing team and opponent statistics, sufficient for scouting reports and game prep. Dashboards come after the data layer is solid.
 
 ### Deployment Target
-- **Local dev**: `docker compose up` starts the full stack at http://localhost:8000
+- **Local dev**: `docker compose up` starts the full stack at http://localhost:8001
 - **Production**: Docker Compose on a Linux server (home server or any machine with Docker)
-- **Network**: Cloudflare Tunnel (no exposed ports); Zero Trust Access for auth
+- **Production URL**: `https://bbstats.ai`
+- **Network**: Cloudflare Tunnel for ingress (no exposed ports). App-internal auth via magic links and passkeys (E-023). Cloudflare Access is present but passive (no enforcing policies).
 - **Database**: SQLite at `./data/app.db` (host-mounted, WAL mode, simple file backup via `scripts/backup_db.py`)
 - See `docs/production-deployment.md` for the verified deployment runbook
 
@@ -51,7 +52,7 @@ This guides our data-source decisions:
 - FastAPI + Jinja2 for the serving layer (server-rendered HTML)
 - SQLite (WAL mode, host-mounted Docker volume at `./data/app.db`) for structured storage
 - Docker Compose for local development and production deployment
-- Cloudflare Tunnel + Zero Trust Access for network ingress and authentication
+- Cloudflare Tunnel for network ingress; app-internal authentication (magic links + passkeys)
 - **Dependency management**: pip-tools (`*.in` → `*.txt`). See `.claude/rules/dependency-management.md` for workflow, file layout, and Python version policy.
 
 ## Key Metrics We Track

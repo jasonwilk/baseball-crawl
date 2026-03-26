@@ -1,7 +1,7 @@
 # E-157: Cloudflare Production Deployment for bbstats.ai
 
 ## Status
-`READY`
+`COMPLETED`
 
 ## Overview
 Prepare the baseball-crawl coaching analytics platform for production deployment at **bbstats.ai** via Cloudflare Tunnel. This epic covers Docker Compose production hardening, environment configuration, deployment documentation, and context-layer updates -- producing a production-ready repo that an operator can deploy by following the runbook. Actual tunnel creation, DNS cutover, and go-live are operator actions documented in the runbook but not executed by stories.
@@ -51,9 +51,9 @@ The application stack (FastAPI + Traefik + cloudflared) is already containerized
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-157-01 | Production Docker Compose configuration | TODO | None | - |
-| E-157-02 | Production deployment documentation update | TODO | E-157-01 | - |
-| E-157-03 | Context-layer updates for bbstats.ai | TODO | E-157-01 | - |
+| E-157-01 | Production Docker Compose configuration | DONE | None | - |
+| E-157-02 | Production deployment documentation update | DONE | E-157-01 | - |
+| E-157-03 | Context-layer updates for bbstats.ai | DONE | E-157-01 | - |
 
 ## Dispatch Team
 - software-engineer
@@ -162,8 +162,9 @@ This token is stored in `.env` as `CLOUDFLARE_API_TOKEN` for programmatic Cloudf
 ## History
 - 2026-03-25: Created. Vision signal captured for CF Email OTP future auth option.
 - 2026-03-26: Set to READY after 6 review passes (38 findings, 31 accepted, 7 dismissed).
+- 2026-03-26: COMPLETED. Production deployment infrastructure for bbstats.ai: Docker Compose hardened (Traefik dashboard/ports moved to override, cloudflared pinned), deployment runbook and CF setup guide updated for bbstats.ai domain with pre-go-live CF Access policy removal instructions, context layer (CLAUDE.md + PM memory) updated to reflect passive CF Access model and app-internal auth.
 
-### Review Scorecard
+### Spec Review Scorecard
 | Review Pass | Findings | Accepted | Dismissed |
 |---|---|---|---|
 | Internal iteration 1 — CR spec audit | 8 | 6 | 2 |
@@ -173,3 +174,31 @@ This token is stored in `.env` as `CLOUDFLARE_API_TOKEN` for programmatic Cloudf
 | Internal iteration 2 — CR spec audit | 2 | 2 | 0 |
 | Internal iteration 2 — Holistic team | 2 | 2 | 0 |
 | **Total** | **38** | **31** | **7** |
+
+### Implementation Review Scorecard
+| Review Pass | Findings | Accepted | Dismissed |
+|---|---|---|---|
+| Per-story CR — E-157-01 | 1 | 1 | 0 |
+| Per-story CR — E-157-02 | 0 | 0 | 0 |
+| Per-story CR — E-157-03 (context-layer only, CR skipped) | — | — | — |
+| CR integration review — pass 1 | 1 | 1 | 0 |
+| CR integration review — pass 2 | 1 | 1 | 0 |
+| Full-team review — pass 1 (SE+CA+CR+PM) | 5 | 3 | 2 |
+| Full-team review — pass 2 (SE+CA+CR+PM) | 8 | 4 | 4 |
+| Codex — pass 1 | 2 | 1 | 1 |
+| Full-team review — pass 3 (SE+CA+CR+PM) | 0 | 0 | 0 |
+| Codex — pass 2 (final) | 1 | 0 | 1 |
+| **Total** | **19** | **11** | **8** |
+
+### Documentation Assessment
+Trigger 2 (deployment config changes) and Trigger 5 (system behavior changes) both fire. Satisfied by E-157-02, which updated both docs/production-deployment.md and docs/cloudflare-access-setup.md as part of this epic. No additional docs-writer dispatch needed. Note: docs/admin/operations.md and docs/admin/architecture.md have stale CF Access references (flagged by review but pre-existing/out-of-scope for this epic — deferred to future docs cleanup).
+
+### Context-Layer Assessment
+1. **New convention/pattern**: YES — production hardening pattern (base compose = production-safe; dev features in override); Docker Compose command replace-not-merge semantics documented. Codified in E-157-01 (compose files) and epic Technical Notes.
+2. **Architectural decision**: YES — CF Access passive model (no enforcing policies), bbstats.ai as canonical production URL, Cloudflare Tunnel for ingress, app-internal auth (magic links/passkeys). Codified in E-157-03 (CLAUDE.md + PM MEMORY.md).
+3. **Footgun discovered**: YES — CF Access blocking policies must be removed before go-live; Docker Compose command replace-not-merge (silent breakage if base flags not duplicated). Codified in docs/cloudflare-access-setup.md Section 2 and docker-compose.override.yml.example comments.
+4. **Agent behavior/routing**: NO
+5. **Domain knowledge**: NO
+6. **New CLI/workflow**: NO
+
+Triggers 1-3 fire but were all satisfied by stories in this epic. No additional claude-architect dispatch needed.

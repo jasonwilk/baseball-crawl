@@ -1,13 +1,13 @@
 # Production Deployment Runbook
 
 This runbook covers every step from a bare Linux server to a running baseball-crawl stack
-accessible over HTTPS via Cloudflare Access. A developer who has never touched this project
-can follow these steps end-to-end.
+accessible over HTTPS at https://bbstats.ai via Cloudflare Tunnel. A developer who has
+never touched this project can follow these steps end-to-end.
 
 **Architecture overview**:
 
 ```
-Internet  -->  Cloudflare (SSL, Zero Trust Access)  -->  Cloudflare Tunnel
+Internet  -->  Cloudflare (SSL termination)  -->  Cloudflare Tunnel bbstats-ai
     -->  Traefik (reverse proxy, port 80 inside Docker network)
     -->  FastAPI app (port 8000 inside Docker network)
     -->  SQLite (host-mounted at ./data/app.db)
@@ -100,22 +100,28 @@ Required settings for production:
 | `APP_ENV` | `production` | Enables production logging, disables debug features |
 | `LOG_LEVEL` | `INFO` | Or `WARNING` to reduce noise |
 | `CLOUDFLARE_TUNNEL_TOKEN` | `<token>` | From Step 3 below |
-| `APP_URL` | `https://baseball.<your-domain>` | Used to construct magic link URLs |
-| `WEBAUTHN_RP_ID` | `baseball.<your-domain>` | Must match the hostname browsers see |
-| `WEBAUTHN_ORIGIN` | `https://baseball.<your-domain>` | Must be HTTPS in production |
+| `APP_URL` | `https://bbstats.ai` | Used to construct magic link URLs |
+| `WEBAUTHN_RP_ID` | `bbstats.ai` | Must match the hostname browsers see |
+| `WEBAUTHN_ORIGIN` | `https://bbstats.ai` | Must be HTTPS in production |
 | `MAILGUN_API_KEY` | `<key>` | Required for magic link email delivery |
-| `MAILGUN_DOMAIN` | `mg.<your-domain>` | Your Mailgun sending domain |
-| `MAILGUN_FROM_EMAIL` | `noreply@mg.<your-domain>` | From address for magic link emails |
+| `MAILGUN_DOMAIN` | `mg.bbstats.ai` | Sending domain (see Mailgun DNS prerequisite below) |
+| `MAILGUN_FROM_EMAIL` | `noreply@` + your `MAILGUN_DOMAIN` | From address for magic link emails (see `.env.example`) |
+| `ADMIN_EMAIL` | `<jason's-email>` | Bootstrap admin access |
 
-Optional but recommended:
+Optional -- Cloudflare management (not needed for tunnel runtime):
 
 | Variable | Value | Notes |
 |----------|-------|-------|
-| `CF_ACCESS_CLIENT_ID` | `<client-id>` | Service token for crawler -> API calls |
-| `CF_ACCESS_CLIENT_SECRET` | `<client-secret>` | Service token secret |
+| `CLOUDFLARE_API_TOKEN` | `<token>` | Scoped management token (see [cloudflare-access-setup.md](cloudflare-access-setup.md) Section 6) -- NOT the tunnel token |
 
-Leave these commented out or unset:
-- `DEV_USER_EMAIL` -- dev bypass, must not be set in production
+Leave these unset in production:
+- `DEV_USER_EMAIL` -- dev bypass, must not be set when `APP_ENV=production` (app fails to start)
+- `CF_ACCESS_CLIENT_ID` / `CF_ACCESS_CLIENT_SECRET` -- not needed; CF Access is not enforcing policies for bbstats.ai
+
+> **Mailgun DNS prerequisite**: Before magic link emails will deliver from `mg.bbstats.ai`,
+> complete Mailgun DNS verification: add the SPF and DKIM TXT records Mailgun provides to
+> the `bbstats.ai` zone in Cloudflare DNS. Without these records, Mailgun silently
+> refuses delivery.
 
 ### 2.4 Bootstrap GameChanger credentials
 
@@ -151,14 +157,20 @@ Replace the email with the actual admin user's email. This is a one-time bootstr
 
 ## Step 3: Configure Cloudflare Tunnel
 
-Full Cloudflare Tunnel and Zero Trust Access setup is documented in
+Full Cloudflare setup is documented in
 [docs/cloudflare-access-setup.md](cloudflare-access-setup.md). Summary of the steps
 needed before first startup:
+
+> **⚠️ Pre-go-live required**: Before bringing the tunnel live, you MUST remove the two
+> blocking CF Access policies from the `bbstats-ai` Access application. If active policies
+> remain, all non-Jason traffic will be blocked by Cloudflare Access and coaches will be
+> locked out of the dashboard. See the mandatory pre-go-live step in
+> [docs/cloudflare-access-setup.md](cloudflare-access-setup.md) Section 2.
 
 ### 3.1 Create a tunnel and get the token
 
 1. Go to [Cloudflare Zero Trust](https://one.dash.cloudflare.com/) -> **Networks** -> **Tunnels**.
-2. Click **Create a Tunnel** -> choose **Cloudflared** -> name it (e.g., `baseball-crawl-prod`).
+2. Click **Create a Tunnel** -> choose **Cloudflared** -> name it **`bbstats-ai`**.
 3. On the next screen, Cloudflare shows a Docker run command with `--token <TOKEN>`. Copy the token value.
 4. Set it in `.env`: `CLOUDFLARE_TUNNEL_TOKEN=<TOKEN>`
 
@@ -168,20 +180,23 @@ In the tunnel configuration -> **Public Hostnames**, add:
 
 | Subdomain | Domain | Type | URL |
 |-----------|--------|------|-----|
-| `baseball` | `<your-domain>` | HTTP | `traefik:80` |
-| `api.baseball` | `<your-domain>` | HTTP | `traefik:80` |
+| *(leave blank)* | `bbstats.ai` | HTTP | `traefik:80` |
 
-Cloudflare creates DNS CNAME records automatically when you use the Public Hostnames tab.
+Leave the Subdomain field blank to route the apex domain `bbstats.ai`. Cloudflare creates
+the DNS CNAME record automatically when you use the Public Hostnames tab.
 
-### 3.3 Create Zero Trust Access applications
+### 3.3 Remove blocking CF Access policies (pre-go-live required)
 
-See [docs/cloudflare-access-setup.md](cloudflare-access-setup.md) sections 4 and 5 for
-detailed steps. At minimum:
+See [docs/cloudflare-access-setup.md](cloudflare-access-setup.md) Section 2 for the
+full removal procedure. The `bbstats-ai` Access application currently has two active
+blocking policies that must be removed before the tunnel goes live. Skipping this step
+blocks all coaching staff.
 
-- Create a **Self-hosted application** for `baseball.<your-domain>` with a policy allowing
-  coaching staff emails.
-- Create a **Service Token** (`CF_ACCESS_CLIENT_ID` / `CF_ACCESS_CLIENT_SECRET`) for
-  crawler machine-to-machine access.
+### 3.4 Scoped API token (optional)
+
+A scoped management token (`CLOUDFLARE_API_TOKEN`) enables programmatic Cloudflare API
+access (DNS updates, Access config). See [docs/cloudflare-access-setup.md](cloudflare-access-setup.md)
+Section 6 for permissions, creation steps, and the distinction from the tunnel token.
 
 ---
 
@@ -256,27 +271,19 @@ INF Registered tunnel connection ...
 ### 5.4 Health check through the tunnel
 
 ```bash
-# Unauthenticated (health endpoint is excluded from Access policy)
-curl -v https://baseball.<your-domain>/health
-
-# Authenticated using CF Access service token
-curl -s \
-  -H "CF-Access-Client-Id: <your-client-id>" \
-  -H "CF-Access-Client-Secret: <your-client-secret>" \
-  https://baseball.<your-domain>/health
+# Health endpoint -- no authentication required
+curl -v https://bbstats.ai/health
 ```
 
-Expected: HTTP 200 with `{"status": "ok", "db": "connected"}` for both requests.
+Expected: HTTP 200 with `{"status": "ok", "db": "connected"}`.
 
-Note: `/health` is excluded from Cloudflare Access authentication so the unauthenticated
-request should succeed without a browser login. The authenticated request verifies that
-the CF Access service token is accepted end-to-end.
+The health endpoint is publicly accessible -- no CF Access authentication or app login required.
 
 ### 5.5 Dashboard access
 
-1. Open `https://baseball.<your-domain>` in a browser.
-2. Cloudflare redirects to the Access login page.
-3. Authenticate using your email (a magic link will be emailed to you).
+1. Open `https://bbstats.ai` in a browser.
+2. The app login page loads directly (no CF Access redirect).
+3. Log in via magic link (email) or passkey.
 4. The dashboard should load.
 
 ### 5.6 Backup script available
@@ -473,10 +480,10 @@ backups only. The active database file (`data/app.db`) is what matters.
 |-------|--------|------|-------|
 | All services start within 60s, healthy/running | Verified on: | | |
 | `restart: unless-stopped` on all services | Verified on: | | |
-| Dashboard reachable at `https://baseball.<domain>` from external browser | Verified on: | | |
+| Dashboard reachable at `https://bbstats.ai` from external browser | Verified on: | | |
 | Health check returns 200 from external curl | Verified on: | | |
 | Backup script creates backup file | Verified on: | | |
 
 ---
 
-*Last updated: 2026-03-04 | Story: E-009-07*
+*Last updated: 2026-03-26 | Story: E-157-02*

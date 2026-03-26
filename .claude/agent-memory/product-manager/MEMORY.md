@@ -30,7 +30,7 @@
 ## Key Architectural Decisions
 - Storage: SQLite (WAL mode). Host-mounted at ./data/app.db. Simple file backup via scripts/backup_db.py (no Litestream).
 - Serving layer: FastAPI + Jinja2 (Python). Single monolithic app. No TypeScript.
-- Deployment: Docker Compose (local + prod). Home Linux server (no VPS, no hosting cost). Cloudflare Tunnel + Zero Trust.
+- Deployment: Docker Compose (local + prod). Home Linux server (no VPS, no hosting cost). Cloudflare Tunnel (ingress). App-internal auth (magic links + passkeys). Production: https://bbstats.ai.
 - Migrations: numbered SQL scripts (migrations/001_*.sql). No Alembic. apply_migrations.py at startup.
 - HTTP layer: src/http/headers.py + src/http/session.py. Dual-header system: BROWSER_HEADERS (Chrome 145/macOS) + MOBILE_HEADERS (iOS Odyssey). create_session(profile="web"|"mobile"). Profile-aware proxy: PROXY_ENABLED + PROXY_URL_WEB/PROXY_URL_MOBILE env vars.
 - Dependency management: pip-tools. `.in` files (human-edited, `~=` ranges) -> `.txt` files (pip-compile output, exact pins + hashes).
@@ -39,7 +39,7 @@
 - FK-safe orphan handling: unknown player_ids get a stub row inserted before the stat row
 - Data model (revised 2026-03-21, E-143): Fresh-start schema rewrite in single migration `001_initial_schema.sql` (old 001-008 archived). Key changes: programs table (hs/usssa/legion umbrella entity); teams use INTEGER PK AUTOINCREMENT with gc_uuid/public_id as UNIQUE external identifier columns; `membership_type` (member/tracked) replaces is_owned; `classification` replaces level (varsity/jv/freshman/reserve/8U-14U/legion); team_opponents junction table for opponent relationships; TeamRef dataclass pattern (id/gc_uuid/public_id) for pipeline code; enriched stat columns -- game_stream_id + all counting stats now populated by E-117 (game loader: 12 stats + game_stream_id; season stats: 47 batting + 47 pitching; scouting aggregates: 5 batting + 6 pitching cascade). Still unpopulated: bats/throws, splits, batting_order, spray_charts table. Auth tables simplified (users/sessions/magic_link_tokens/passkey_credentials/coaching_assignments). E-143 added: migration 002 (users.role column), migration 003 (crawl_jobs table). Next migration: 004 (reserved for E-147 season_year).
 - Routing model (2026-03-03): Orchestrator removed (E-030). PM is the direct entry point for all work.
-- Auth model (revised 2026-03-21, E-143): ALL users = magic link email + optional passkey. No separate admin login path. Cloudflare Access for /admin/*. Dev bypass via DEV_USER_EMAIL. Role-based access: `users.role` column (admin/user, migration 003). `_require_admin()` accepts EITHER `ADMIN_EMAIL` env var match OR `role='admin'`. Auth tables in 001_initial_schema.sql (folded in during E-100 rewrite).
+- Auth model (revised 2026-03-26, E-157): ALL users = magic link email + optional passkey. No separate admin login path. Cloudflare Access present but passive (no enforcing policies). Dev bypass via DEV_USER_EMAIL. Role-based access: `users.role` column (admin/user, migration 003). `_require_admin()` accepts EITHER `ADMIN_EMAIL` env var match OR `role='admin'`. Auth tables in 001_initial_schema.sql (folded in during E-100 rewrite).
 
 ## User Preferences
 - Build it right, no rush

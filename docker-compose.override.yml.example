@@ -1,18 +1,43 @@
 # docker-compose.override.yml.example
 #
 # Copy this file to docker-compose.override.yml for local development.
-# This moves the cloudflared service behind a Docker Compose profile so it
-# does not start when you run `docker compose up` without a profile flag.
+# This file:
+#   1. Enables the Traefik dashboard and exposes Traefik to localhost (loopback
+#      only, dev-only -- not safe for production).
+#   2. Moves the cloudflared service behind a Docker Compose profile so it
+#      does not start when you run `docker compose up` without a profile flag.
 #
 # Usage:
 #   cp docker-compose.override.yml.example docker-compose.override.yml
-#   docker compose up -d          # starts app and traefik only
+#   docker compose up -d          # starts app and traefik only (no cloudflared)
 #   docker compose --profile production-only up -d  # starts all services
 #
 # In production, do NOT use this file -- docker-compose.yml runs cloudflared
-# unconditionally, which is the correct production behavior.
+# unconditionally and Traefik is not exposed to the host network.
 
 services:
+  traefik:
+    # Dev-only: re-enables the Traefik dashboard (--api.insecure=true) and
+    # exposes Traefik to localhost (loopback only, dev-only).
+    #
+    # NOTE: Docker Compose replaces the entire `command` array when overriding --
+    # it does NOT merge with the base command. All base flags are duplicated here.
+    command:
+      # Base flags (duplicated from docker-compose.yml -- required for correct operation)
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      # Dev-only: exposes the Traefik dashboard without authentication.
+      - "--api.insecure=true"
+    ports:
+      # Traefik listens at http://localhost:8000. Requests require Host: baseball.localhost
+      # (e.g. curl -H "Host: baseball.localhost" http://localhost:8000/health)
+      # Or access via http://baseball.localhost:8000 in a browser with /etc/hosts configured.
+      # A plain request to http://localhost:8000 gets a 404 (Host header mismatch).
+      - "127.0.0.1:8000:80"
+      # Traefik dashboard (dev only): http://localhost:8180
+      - "127.0.0.1:8180:8080"
+
   cloudflared:
     profiles:
       - production-only

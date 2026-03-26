@@ -5,7 +5,7 @@ services:
     ports:
       # Direct access from the devcontainer shell (bypasses Traefik).
       # curl http://localhost:8001/health works inside the devcontainer.
-      # Port 8001 avoids conflict with Traefik's 8000:80 mapping.
+      # Port 8001 provides direct access to the app, bypassing Traefik.
       - "127.0.0.1:8001:8000"
     volumes:
       # Host-mount the data directory so the SQLite database is visible on the
@@ -22,24 +22,21 @@ services:
       start_period: 15s
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.app.rule=Host(`baseball.localhost`)"
+      # Dual-host rule: serves bbstats.ai in production and baseball.localhost in dev.
+      - "traefik.http.routers.app.rule=Host(`bbstats.ai`) || Host(`baseball.localhost`)"
       - "traefik.http.services.app.loadbalancer.server.port=8000"
     restart: unless-stopped
 
   traefik:
     image: traefik:v3
     command:
-      # Dev-only: exposes the Traefik dashboard without authentication.
-      # Remove --api.insecure=true in production; use Cloudflare Access instead.
-      - "--api.insecure=true"
       - "--providers.docker=true"
       - "--providers.docker.exposedbydefault=false"
       - "--entrypoints.web.address=:80"
-    ports:
-      # App traffic: http://localhost:8000 -> Traefik -> FastAPI container
-      - "8000:80"
-      # Traefik dashboard (dev only): http://localhost:8180
-      - "8180:8080"
+    # No host ports in the base config. In production, all traffic arrives via
+    # the Cloudflare Tunnel -> Docker-internal traefik:80 (no host binding needed).
+    # Dev-only ports (8000:80 app traffic, 8180:8080 dashboard) are in
+    # docker-compose.override.yml.
     volumes:
       # Traefik reads Docker labels to configure routing.
       - /var/run/docker.sock:/var/run/docker.sock:ro
@@ -52,7 +49,9 @@ services:
     restart: unless-stopped
 
   cloudflared:
-    image: cloudflare/cloudflared:latest
+    # Pinned to a specific stable version to prevent unexpected upstream changes.
+    # Update this tag intentionally when upgrading cloudflared.
+    image: cloudflare/cloudflared:2024.12.2
     command: tunnel --no-autoupdate run
     environment:
       # Tunnel token from Cloudflare Zero Trust dashboard -> Networks -> Tunnels.
