@@ -73,7 +73,7 @@ Route consultation requests through the PM. Do not invoke baseball-coach directl
 IMPORTANT: Before beginning any documentation task, verify that the task prompt contains a story reference. Acceptable formats:
 
 - **Story ID**: e.g., `E-028-03`
-- **Absolute file path**: e.g., `/workspaces/baseball-crawl/epics/E-028-documentation-system/E-028-03.md`
+- **Absolute file path**: e.g., `<worktree-path>/epics/E-028-documentation-system/E-028-03.md`
 
 If no story reference is found in the task prompt, DO NOT begin work. Instead, respond:
 

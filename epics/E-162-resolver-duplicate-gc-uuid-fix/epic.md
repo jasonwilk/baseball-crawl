@@ -80,4 +80,5 @@ None — the fix is well-scoped and the merge strategy is clear from the product
 | Review Pass | Findings | Accepted | Dismissed |
 |---|---|---|---|
 | Codex iteration 1 | 3 | 3 | 0 |
-| **Total** | **3** | **3** | **0** |
+| Codex iteration 2 | 2 | 2 (refined) | 0 |
+| **Total** | **5** | **5** | **0** |

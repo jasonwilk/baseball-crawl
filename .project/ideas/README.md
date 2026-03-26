@@ -65,6 +65,7 @@ Review this list every 90 days, or when completing an epic. Ask:
 | [IDEA-044](IDEA-044-prevent-duplicate-team-creation.md) | Prevent Duplicate Team Creation | CANDIDATE | 2026-06-23 |
 | [IDEA-045](IDEA-045-worktree-divergence-detection.md) | Detect Main-Branch Divergence Before Epic Closure Patch | CANDIDATE | 2026-06-24 |
 | [IDEA-046](IDEA-046-resolver-duplicate-gc-uuid.md) | OpponentResolver Creates Duplicate gc_uuid Team Instead of Merging | PROMOTED | 2026-03-26 -- promoted to E-162 |
+| [IDEA-047](IDEA-047-worktree-diff-phantom-deletions.md) | Epic Worktree `git diff main` Shows Phantom File Deletions | CANDIDATE | 2026-06-24 |
 
 ## Status Definitions
 

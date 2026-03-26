@@ -3,8 +3,8 @@
 ## Numbering State
 - Next available epic number: E-164
 - Epics created: E-001 through E-163 (E-001, E-003, E-005, E-006, E-007, E-008, E-010, E-011, E-012, E-013, E-014, E-015, E-016, E-017, E-018, E-019, E-020, E-021, E-022, E-024, E-025, E-026, E-027, E-028, E-029, E-030, E-031, E-032, E-033, E-034, E-035, E-036, E-037, E-038, E-042, E-044, E-046, E-048, E-049, E-050, E-052, E-053, E-054, E-056, E-057, E-058, E-055, E-059, E-060, E-061, E-075, E-081, E-084, E-087, E-088, E-089, E-090, E-091, E-092 archived; E-093, E-094, E-095 archived; E-096 archived; E-097 archived; E-098 archived; E-099 archived; E-100 archived; E-101 archived; E-102 archived; E-103 archived; E-104 ready; E-105 archived; E-106 draft; E-107 archived; E-108 archived; E-109 archived; E-110 ready; E-111 archived; E-112 archived; E-114 archived; E-115 archived; E-116 archived; E-113 completed; E-117 completed; E-118 archived; E-119 ready; E-120 archived; E-121 archived; E-122 archived; E-123 archived; E-124 completed; E-125 archived; E-126 completed; E-127 archived; E-128 archived; E-129 archived; E-130 archived; E-131 archived; E-132 ready; E-133 archived; E-134 ready; E-135 abandoned; E-136 ready; E-137 ready; E-138 archived; E-139 archived; E-140 archived; E-142 archived; E-143 archived; E-144 archived; E-145 archived; E-146 archived; E-147 archived; E-148 archived; E-149 archived; E-150 archived; E-151 archived; E-152 archived; E-153 archived; E-155 archived; E-156 archived; E-157 archived; E-158 completed; E-159 archived; E-160 archived; E-161 ready; E-162 ready; E-163 ready)
-- Next available idea number: IDEA-047
-- Ideas created: IDEA-001 through IDEA-046
+- Next available idea number: IDEA-048
+- Ideas created: IDEA-001 through IDEA-047
 
 ## Project Context
 - Project: baseball-crawl -- GameChanger API -> database -> coaching dashboard
@@ -25,7 +25,7 @@
 | E-110 | Iterative Review Rounds Convention | READY | Codify iterative review/refinement pattern |
 | E-125 | Full-Project Code Review Remediation | READY | 6 stories: CSRF (01), SQL injection + magic link hashing (02), OBP formula + broken backlink (03), Docker non-root + executescript FK (04), HTTP client hardening (05), security hygiene (06). All parallel, SE only. Highest priority -- security + correctness. |
 | E-134 | Strike % and # Pitches Columns | READY | 1 story. Add pitches + strike_pct to all 5 pitching display surfaces. Pure query+template, no schema changes. SE only. |
-| E-161 | Agent Worktree Compliance Audit | READY | 2 stories: hook allowlist with dispatch detection (01), spawn context + doc hardening (02). Serial (02 depends on 01). CA only. |
+| E-161 | Agent Worktree Compliance Audit | COMPLETED | Hook expanded to allowlist mode during dispatch; spawn context hardened; docs updated. Ready to archive. |
 | E-162 | OpponentResolver Duplicate gc_uuid Fix | READY | 1 story. Fix _ensure_opponent_team_row to merge gc_uuid onto existing public_id stub. SE only. Promoted from IDEA-046. |
 | E-163 | Full-Season Opponent Spray Charts + Dashboard Display | READY | 5 stories: scouting spray crawler (01), scouting spray loader (02), image routes (03), player profile fix (04), opponent pages (05). Two chains: 01→02 (pipeline), 03→04→05 (dashboard). SE only. |
 
@@ -96,6 +96,7 @@
 | IDEA-044 | Prevent Duplicate Team Creation | CANDIDATE | 2026-06-23 | **Trigger met**: E-155 complete. Prevent duplicates at creation time (schedule loader, resolver, admin). |
 | IDEA-045 | Detect Main-Branch Divergence Before Closure Patch | CANDIDATE | 2026-06-24 | Context-layer: add `git log epic/E-NNN..main` check to implement skill Phase 5. |
 | IDEA-046 | OpponentResolver Duplicate gc_uuid Bug | PROMOTED | 2026-03-26 | Promoted to E-162. |
+| IDEA-047 | Worktree `git diff main` Phantom Deletions | CANDIDATE | 2026-06-24 | Misleading diff output during dispatch; closure merge unaffected. |
 
 ## Key Workflow Contract
 - Routing model: planning (user -> PM), dispatch (user/main session -> implementers directly). PM plans and closes; main session dispatches.

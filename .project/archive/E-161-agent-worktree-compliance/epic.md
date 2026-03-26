@@ -1,7 +1,7 @@
 # E-161: Agent Worktree Compliance Audit and Hardening
 
 ## Status
-`READY`
+`COMPLETED`
 <!-- Lifecycle: DRAFT -> READY -> ACTIVE -> COMPLETED (or BLOCKED / ABANDONED) -->
 <!-- PM sets READY explicitly after: expert consultation done, all stories have testable ACs, quality checklist passed. -->
 <!-- Only READY and ACTIVE epics can be dispatched. -->
@@ -60,8 +60,8 @@ During E-158 dispatch, docs-writer was spawned with explicit worktree path instr
 
 | ID | Title | Status | Agent | Deps |
 |----|-------|--------|-------|------|
-| E-161-01 | Expand worktree-guard hook to allowlist mode with dispatch detection | TODO | claude-architect | None |
-| E-161-02 | Harden spawn context and update context-layer references | TODO | claude-architect | E-161-01 |
+| E-161-01 | Expand worktree-guard hook to allowlist mode with dispatch detection | DONE | claude-architect | None |
+| E-161-02 | Harden spawn context and update context-layer references | DONE | claude-architect | E-161-01 |
 
 ## Dispatch Team
 
@@ -143,3 +143,33 @@ All resolved. See TN-2 for the allowlist/dispatch-detection decision, TN-5 for t
 
 - 2026-03-26: Created (DRAFT). Prompted by docs-writer writing to main checkout during E-158 dispatch.
 - 2026-03-26: CA consultation completed. Allowlist with dispatch detection chosen. Agent audit findings added to TN-5. Two stories written. P2/P3 findings from Codex spec review addressed (templates/ removed from TN-1, SC agent-memory misattribution fixed, Success Criteria broadened to full risk surface). Set to READY.
+- 2026-03-26: COMPLETED. Both stories delivered by claude-architect. Worktree-guard hook expanded to allowlist mode with dispatch detection (E-161-01). Spawn context hardened with explicit main-checkout Write/Edit prohibition; worktree-isolation.md and CLAUDE.md updated to document both modes; docs-writer hardcoded example path fixed (E-161-02). One integration review finding (comment glob pattern) and one Codex finding (missing AC-1 prohibition in universal spawn context) accepted and remediated. Phantom `git diff main` bug captured as IDEA-047.
+
+### Review Scorecard
+
+| Review Pass | Findings | Accepted | Dismissed |
+|---|---|---|---|
+| Per-story CR -- E-161-01 | 0 | 0 | 0 |
+| Per-story CR -- E-161-02 | 0 | 0 | 0 |
+| CR integration review | 1 | 1 | 0 |
+| Codex code review | 2 | 1 | 1 |
+| **Total** | **3** | **2** | **1** |
+
+Notes: Per-story CR skipped (context-layer-only). CR integration: 1 SHOULD FIX (comment glob pattern, accepted+fixed). Codex: P1 branch divergence (dismissed — phantom diff bug, IDEA-047), P5 missing AC-1 prohibition in universal spawn context (accepted+fixed).
+
+### Documentation Assessment
+
+No documentation impact. All changes are context-layer (hook, rules, spawn context, CLAUDE.md). No new features, endpoints, schema changes, or user-facing behavior.
+
+### Context-Layer Assessment
+
+| Trigger | Fires? | Verdict |
+|---------|--------|---------|
+| T1: New convention/pattern | Yes | Dispatch-active allowlist mode is a new enforcement pattern — codified by this epic itself (hook, worktree-isolation.md, CLAUDE.md, spawn context) |
+| T2: Architectural decision | No | Refinement of existing hook infrastructure, not a new architecture choice |
+| T3: Footgun/failure mode | Yes | E-158 wrong-checkout write incident now documented and enforced — codified by this epic itself |
+| T4: Agent behavior change | Yes | Agents are now blocked from main-checkout Write/Edit during dispatch — codified by this epic itself |
+| T5: Domain knowledge | No | No domain knowledge changes |
+| T6: New CLI/workflow | No | No new CLI commands or workflows |
+
+T1, T3, T4 all fire but are already codified by the epic's own deliverables (hook changes, rule updates, CLAUDE.md updates, spawn context hardening). No additional claude-architect dispatch needed.

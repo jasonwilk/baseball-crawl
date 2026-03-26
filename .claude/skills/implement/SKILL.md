@@ -27,7 +27,7 @@ Load this skill when the user says any of:
 
 Codify the full workflow for dispatching and coordinating an epic when the user requests implementation. The main session (user-facing agent) is the spawner and router: it reads the epic, creates an epic worktree, spawns implementers, code-reviewer, and PM (all working in the epic worktree), assigns stories serially, routes completion reports through review and AC verification, manages the staging boundary between stories, and runs the closure sequence (merge epic worktree to main, commit, cleanup). The main session does not own statuses, verify ACs, or create, modify, or delete any file. The main session's only direct file operations are git commands (`git worktree add/remove` for epic worktree lifecycle, `git diff`/`git apply` for closure merge to main, `git add -A` for staging boundary and closure commit, `git commit` for the closure commit, `git branch -D` for branch cleanup, `git mv` for archival) and writes to its own memory directory (`/home/vscode/.claude/projects/*/memory/`).
 
-**Enforcement model**: A PreToolUse hook (`.claude/hooks/worktree-guard.sh`) blocks Write and Edit operations to implementation paths (`src/`, `tests/`, `migrations/`, `scripts/`) when the target is the main checkout. This provides deterministic enforcement that implementation work happens in worktrees. The hook is the primary mechanism; instruction-based constraints in this skill are backup for edge cases the hook cannot cover (e.g., Bash file writes).
+**Enforcement model**: A PreToolUse hook (`.claude/hooks/worktree-guard.sh`) blocks Write and Edit operations to the main checkout during dispatch (all paths except `.claude/agent-memory/`). Outside dispatch, it blocks implementation paths only (`src/`, `tests/`, `migrations/`, `scripts/`). This provides deterministic enforcement that dispatch work happens in worktrees. The hook is the primary mechanism; instruction-based constraints in this skill are backup for edge cases the hook cannot cover (e.g., Bash file writes).
 
 When invoked via plan skill handoff (`handoff_from_plan = true`), the planning team is already active with PM and domain experts. The implement skill reuses these agents rather than creating a fresh team, preserving expert context from the planning session (unified team lifecycle).
 
@@ -120,6 +120,7 @@ Your working directory for all file operations: [epic-worktree-path]
 (e.g., /tmp/.worktrees/baseball-crawl-E-NNN/)
 
 Use absolute paths under this directory for ALL file reads, writes, and git commands.
+Do NOT use Write/Edit on paths starting with `/workspaces/baseball-crawl/` -- that is the main checkout, not your worktree.
 ```
 
 **Spawn the code-reviewer** alongside the implementing agents. The code-reviewer is infrastructure, not a story-specific implementer -- it is NOT listed in the epic's Dispatch Team section. The implement skill spawns it automatically for every dispatch. Code-reviewer spawn context:
@@ -131,6 +132,7 @@ Epic worktree path: [epic-worktree-path]
 All story work happens in this worktree. Use it when reading files and running git diff.
 Review the current story's changes via `cd [epic-worktree-path] && git diff` (unstaged changes = current story).
 Review all accumulated changes via `cd [epic-worktree-path] && git diff --cached main` (staged = prior stories).
+Do NOT use Write/Edit on paths starting with `/workspaces/baseball-crawl/` -- that is the main checkout, not your worktree.
 ```
 
 **Spawn the product-manager (PM)** alongside implementers and code-reviewer. PM is infrastructure -- it is NOT listed in the epic's Dispatch Team section. The implement skill spawns it automatically for every dispatch. PM spawn context:
@@ -141,6 +143,7 @@ You are the product-manager agent on the [team-name] team. Your role during disp
 Epic file: [absolute path to epic.md in epic worktree]
 Epic worktree path: [epic-worktree-path]
 All story work happens in this worktree. Use absolute paths under the epic worktree for all file operations (story files, epic files, status updates).
+Do NOT use Write/Edit on paths starting with `/workspaces/baseball-crawl/` -- that is the main checkout, not your worktree. Exception: `.claude/agent-memory/product-manager/` (your persistent memory in the main checkout).
 ```
 
 **PM context window recovery**: If PM's context fills during large epics, the main session respawns PM with a fresh summary of current epic state: which stories are DONE, which are IN_PROGRESS, and a reminder of PM's role. No state is lost because PM's work products (status files, epic table) persist on disk.
@@ -197,9 +200,10 @@ Use ABSOLUTE PATHS under this directory for ALL file operations.
 
 ## Epic Worktree Constraints
 
-**Enforcement**: A PreToolUse hook blocks Write/Edit to `src/`, `tests/`, `migrations/`, `scripts/` in the main checkout. You are in the epic worktree, so your writes pass. Do NOT use main-checkout paths.
+**Enforcement**: A PreToolUse hook blocks Write/Edit to the main checkout during dispatch. You are in the epic worktree, so your writes pass. Do NOT use main-checkout paths.
 
 **Prohibited:**
+- Do NOT use Write/Edit on paths starting with `/workspaces/baseball-crawl/` -- that is the main checkout, not your worktree
 - Bash file writes (`echo >`, `sed -i`, `cat >`, `cp`, `mv`) to `src/`, `tests/`, `migrations/`, `scripts/` -- use Write/Edit tools instead (hook-covered, reviewable diffs)
 - `docker compose`, `curl localhost:8001`, app health checks (Docker reads from main, not worktree)
 - `bb data *`, `bb creds *`, `bb db *`, `bb status`, `bb proxy *`, `./scripts/proxy-*.sh` (assume main checkout)
@@ -338,7 +342,7 @@ Triage findings using the same rules as Phase 3 Step 5 item 3. Remediate valid f
 ```
 You are a [agent-type] agent spawned for post-review remediation on the [team-name] team.
 Working directory: <epic-worktree-path> -- use absolute paths for ALL file operations.
-Constraints: no git commit (git add -A only), no docker/bb/proxy commands, no .env/data/ access, no git merge/rebase/worktree/branch commands, no Bash file writes (echo/sed/cat/cp/mv) to src/tests/migrations/scripts/ -- use Write/Edit tools.
+Constraints: Do NOT use Write/Edit on paths starting with `/workspaces/baseball-crawl/`. No git commit (git add -A only), no docker/bb/proxy commands, no .env/data/ access, no git merge/rebase/worktree/branch commands, no Bash file writes (echo/sed/cat/cp/mv) to src/tests/migrations/scripts/ -- use Write/Edit tools.
 Remediation authorized by post-review remediation exception in workflow-discipline.md.
 Finding to remediate: [finding details]
 Fix and report with ## Files Changed (absolute paths) and ## Test Results.

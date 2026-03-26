@@ -16,7 +16,12 @@ If your cwd is NOT `/workspaces/baseball-crawl` (e.g., `/tmp/.worktrees/baseball
 
 ## Hook Enforcement
 
-A PreToolUse hook (`.claude/hooks/worktree-guard.sh`) blocks Write and Edit operations to implementation paths (`src/`, `tests/`, `migrations/`, `scripts/`) when the target is the main checkout. Worktree writes pass unconditionally.
+A PreToolUse hook (`.claude/hooks/worktree-guard.sh`) guards Write and Edit operations on the main checkout. Two modes:
+
+1. **Dispatch active** (epic worktree at `/tmp/.worktrees/baseball-crawl-E-*` exists): Blocks ALL Write/Edit to `/workspaces/baseball-crawl/` except `.claude/agent-memory/*`. This fails closed -- new paths are automatically protected without hook updates.
+2. **No dispatch** (no epic worktree): Blocks Write/Edit to implementation paths only (`src/`, `tests/`, `migrations/`, `scripts/`). All other main-checkout writes are allowed.
+
+Worktree writes (`/tmp/.worktrees/...`) always pass unconditionally in both modes. The hook intercepts Write and Edit tool calls only (not Bash commands), so git operations are unaffected.
 
 ## Epic Worktree Constraints
 
