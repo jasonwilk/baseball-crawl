@@ -45,7 +45,7 @@ The operator wants: (1) full-season spray charts for all opponents, not just BIP
 | E-163-02 | Scouting Spray Chart Loader | TODO | E-163-01 | - |
 | E-163-03 | Spray Chart Image Routes | TODO | None | - |
 | E-163-04 | Fix Player Profile Spray Chart Display | TODO | E-163-03 | - |
-| E-163-05 | Opponent Page Spray Charts | TODO | E-163-04 | - |
+| E-163-05 | Opponent Page Spray Charts | TODO | E-163-03, E-163-04 | - |
 
 ## Dispatch Team
 - software-engineer
@@ -149,6 +149,7 @@ None.
 - 2026-03-26: Created. SE, api-scout, and UXD consulted during discovery. api-scout confirmed event_id == game_id and endpoint availability.
 - 2026-03-26: Iteration 1 review — 24 findings (6 CR, 18 domain expert). 19 accepted, 5 dismissed. Key fixes: removed crawl.py factory routing (B-1), fixed gc_uuid lookup to use teams.public_id (S-3), prescribed skip behavior for missing games (M-3), named all specific tests requiring update across 3 stories, added season_id derivation and null handling guidance, standardized empty state wording, added db.py and test_cli_scout.py to file lists.
 - 2026-03-26: Codex spec review iteration 1 — 6 findings, 4 accepted, 2 dismissed. Key fixes: narrowed AC-5 to member/permitted-team players (opponent profiles are 403), added AC-7 edge case rationale, added ?season_id= to all image URLs, added test_cli_data.py to Files lists.
+- 2026-03-26: Codex spec review iteration 2 — 4 findings, 2 accepted, 2 dismissed. Accepted: aligned E-163-02 Notes/Technical Approach with AC-7 rationale (game rows exist after normal scouting run; skip is defensive), added explicit E-163-03 dependency to E-163-05. Dismissed: SE routing correct (E-163-02 is implementation, not ETL architecture), DE consultation not required (adapts existing SprayChartLoader patterns to existing spray_charts table with no schema changes).
 - 2026-03-26: Set to READY. Review scorecard:
 
 | Review Pass | Findings | Accepted | Dismissed |
