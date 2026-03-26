@@ -1,7 +1,7 @@
 ---
 name: software-engineer
 description: "Python implementation agent for crawlers, parsers, loaders, utilities, and tests. Executes stories by writing code against specifications produced by other agents. Requires a story reference before beginning any work."
-model: sonnet
+model: sonnet[1m]
 color: blue
 memory: project
 tools:

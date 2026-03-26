@@ -1,7 +1,7 @@
 ---
 name: product-manager
 description: "Strategic product manager for the baseball-crawl project. Owns what to build, why, and in what order. Creates epics and stories, captures ideas, prioritizes the backlog, consults domain experts, and closes completed work. Writes specification files only -- never code."
-model: opus
+model: opus[1m]
 color: green
 memory: project
 tools:
