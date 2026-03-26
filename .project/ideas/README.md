@@ -63,6 +63,7 @@ Review this list every 90 days, or when completing an epic. Ask:
 | [IDEA-042](IDEA-042-bulk-create-opponents-missing-links.md) | bulk_create_opponents Should Create team_opponents Links | CANDIDATE | 2026-06-15 |
 | [IDEA-043](IDEA-043-fuzzy-duplicate-detection.md) | Fuzzy Duplicate Team Detection | CANDIDATE | 2026-06-23 |
 | [IDEA-044](IDEA-044-prevent-duplicate-team-creation.md) | Prevent Duplicate Team Creation | CANDIDATE | 2026-06-23 |
+| [IDEA-045](IDEA-045-worktree-divergence-detection.md) | Detect Main-Branch Divergence Before Epic Closure Patch | CANDIDATE | 2026-06-24 |
 
 ## Status Definitions
 
