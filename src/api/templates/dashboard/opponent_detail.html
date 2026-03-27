@@ -267,9 +267,10 @@ Scout: {{ scouting_report.team_name if scouting_report else opponent_team_id }}
         <td class="py-2 px-3 font-medium whitespace-nowrap">
           {{ player.name }}
           {% if player_spray_bip_counts.get(player.player_id, 0) >= 1 %}
-          <a href="/dashboard/charts/spray/player/{{ player.player_id }}.png?season_id={{ season_id }}"
-             class="ml-1 text-xs text-blue-600 underline whitespace-nowrap"
-             target="_blank">View spray</a>
+          <button type="button"
+             class="ml-1 text-xs text-blue-600 underline whitespace-nowrap cursor-zoom-in"
+             onclick="openChartModal(this.dataset.src)"
+             data-src="/dashboard/charts/spray/player/{{ player.player_id }}.png?season_id={{ season_id }}">View spray</button>
           {% endif %}
         </td>
         <td class="py-2 px-3 text-center whitespace-nowrap">{{ player.h | format_avg(player.ab) }} <span class="text-xs text-gray-400">({{ player.games }} GP)</span></td>
@@ -297,9 +298,15 @@ Scout: {{ scouting_report.team_name if scouting_report else opponent_team_id }}
   <h2 class="text-base font-bold text-blue-900 mb-1">Team Spray Chart</h2>
   {% if team_spray_bip_count >= 1 %}
   <p class="text-xs text-gray-600 mb-3">Based on {{ team_spray_bip_count }} balls in play</p>
-  <img src="/dashboard/charts/spray/team/{{ opponent_team_id }}.png?season_id={{ season_id }}"
-       alt="Team spray chart"
-       class="w-full block">
+  <button type="button"
+          class="w-full cursor-zoom-in bg-transparent border-0 p-0"
+          aria-label="Enlarge spray chart"
+          onclick="openChartModal(this.dataset.src)"
+          data-src="/dashboard/charts/spray/team/{{ opponent_team_id }}.png?season_id={{ season_id }}">
+    <img src="/dashboard/charts/spray/team/{{ opponent_team_id }}.png?season_id={{ season_id }}"
+         alt="Team spray chart"
+         class="w-full block">
+  </button>
   {% else %}
   <p class="text-sm text-gray-600">No spray chart data available</p>
   {% endif %}
@@ -311,4 +318,40 @@ Scout: {{ scouting_report.team_name if scouting_report else opponent_team_id }}
 <p class="text-gray-600">No stats available for this opponent.</p>
 {% endif %}
 
+{% endblock %}
+
+{% block scripts %}
+<!-- Spray chart modal viewer (E-166-02) -->
+<div id="chart-modal"
+     class="fixed inset-0 z-50 hidden items-start pt-8 md:items-center justify-center bg-black/75"
+     role="dialog"
+     aria-modal="true"
+     onclick="closeChartModal()">
+  <div class="max-w-2xl w-full mx-4 bg-white rounded-lg shadow-xl relative"
+       onclick="event.stopPropagation()">
+    <button type="button"
+            class="absolute top-2 right-2 w-11 h-11 flex items-center justify-center text-gray-500 hover:text-gray-900 text-2xl font-bold"
+            aria-label="Close"
+            onclick="closeChartModal()">&times;</button>
+    <img id="chart-modal-img" src="" alt="Spray chart" class="w-full rounded-lg">
+  </div>
+</div>
+<script>
+function openChartModal(src) {
+  var modal = document.getElementById('chart-modal');
+  document.getElementById('chart-modal-img').src = src;
+  modal.classList.remove('hidden');
+  modal.classList.add('flex');
+  document.body.style.overflow = 'hidden';
+}
+function closeChartModal() {
+  var modal = document.getElementById('chart-modal');
+  modal.classList.add('hidden');
+  modal.classList.remove('flex');
+  document.body.style.overflow = '';
+}
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') closeChartModal();
+});
+</script>
 {% endblock %}

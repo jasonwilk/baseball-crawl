@@ -1,11 +1,36 @@
 """Tests for src/charts/spray.py -- spray chart rendering module."""
 from __future__ import annotations
 
+import contextlib
+import io
 import struct
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.charts.spray import _classify, _raw_to_svg, render_spray_chart
+from src.charts.spray import (
+    _classify,
+    _marker_for_play_type,
+    _raw_to_svg,
+    render_spray_chart,
+)
+
+
+@contextlib.contextmanager
+def _mock_subplots():
+    """Patch plt.subplots to return (mock_fig, mock_ax) tuple with fake PNG savefig."""
+    mock_fig = MagicMock()
+    mock_ax = MagicMock()
+    mock_fig.get_facecolor.return_value = "#FFFFFF"
+
+    def fake_savefig(buf, **kwargs):
+        buf.write(b"\x89PNG\r\n\x1a\n" + b"\x00" * 100)
+
+    mock_fig.savefig.side_effect = fake_savefig
+
+    with patch("src.charts.spray.plt.subplots", return_value=(mock_fig, mock_ax)):
+        yield mock_fig, mock_ax
+
 
 # ---------------------------------------------------------------------------
 # Coordinate transform tests (AC-2)
@@ -86,15 +111,41 @@ def test_classify_out_results(play_result: str | None) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Play type marker mapping tests (E-166 AC-1, AC-2)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("play_type,expected_marker", [
+    ("ground_ball", "o"),
+    ("hard_ground_ball", "o"),
+    ("bunt", "o"),
+    ("line_drive", "^"),
+    ("hard_line_drive", "^"),
+    ("fly_ball", "D"),
+    ("popup", "s"),
+    ("pop_fly", "s"),
+    ("pop_up", "s"),
+])
+def test_marker_for_known_play_types(play_type: str, expected_marker: str) -> None:
+    """Each known play_type maps to the correct marker shape (TN-1)."""
+    assert _marker_for_play_type(play_type) == expected_marker
+
+
+@pytest.mark.parametrize("play_type", [None, "other", "unknown_type", ""])
+def test_marker_fallback_for_unknown_play_types(play_type: str | None) -> None:
+    """NULL, 'other', and unrecognized play_type values fall back to circle."""
+    assert _marker_for_play_type(play_type) == "o"
+
+
+# ---------------------------------------------------------------------------
 # render_spray_chart output tests (AC-1, AC-8, AC-11)
 # ---------------------------------------------------------------------------
 
 def _sample_events() -> list[dict]:
     return [
-        {"x": 160.0, "y": 150.0, "play_result": "single"},
-        {"x": 200.0, "y": 200.0, "play_result": "batter_out"},
-        {"x": 100.0, "y": 180.0, "play_result": "double"},
-        {"x": 120.0, "y": 220.0, "play_result": "batter_out"},
+        {"x": 160.0, "y": 150.0, "play_result": "single", "play_type": "line_drive"},
+        {"x": 200.0, "y": 200.0, "play_result": "batter_out", "play_type": "ground_ball"},
+        {"x": 100.0, "y": 180.0, "play_result": "double", "play_type": "fly_ball"},
+        {"x": 120.0, "y": 220.0, "play_result": "batter_out", "play_type": "popup"},
     ]
 
 
@@ -143,8 +194,8 @@ def test_render_without_title() -> None:
 def test_render_skips_none_xy_non_hr() -> None:
     """Non-HR events with None x/y are silently skipped (no crash)."""
     events = [
-        {"x": None, "y": None, "play_result": "batter_out"},
-        {"x": 160.0, "y": 150.0, "play_result": "single"},
+        {"x": None, "y": None, "play_result": "batter_out", "play_type": "ground_ball"},
+        {"x": 160.0, "y": 150.0, "play_result": "single", "play_type": "line_drive"},
     ]
     result = render_spray_chart(events)
     assert result[:8] == b"\x89PNG\r\n\x1a\n"
@@ -153,7 +204,7 @@ def test_render_skips_none_xy_non_hr() -> None:
 def test_render_hr_none_coords_counts_center_bubble() -> None:
     """Over-the-fence HR with None coords increments center HR bubble (no crash)."""
     events = [
-        {"x": None, "y": None, "play_result": "home_run"},
+        {"x": None, "y": None, "play_result": "home_run", "play_type": "fly_ball"},
     ]
     result = render_spray_chart(events)
     assert result[:8] == b"\x89PNG\r\n\x1a\n"
@@ -163,12 +214,118 @@ def test_render_hr_with_coords_counts_zone_bubble() -> None:
     """HR with x/y coords classifies into left/center/right zone (no crash)."""
     events = [
         # left zone: svg_x < 109, so raw x near 0 → svg_x ≈ 49 (< 109)
-        {"x": 0.0, "y": 100.0, "play_result": "home_run"},
+        {"x": 0.0, "y": 100.0, "play_result": "home_run", "play_type": "fly_ball"},
         # right zone: svg_x > 211, so raw x near 240 → svg_x ≈ 49 + 240*0.6926 ≈ 215
-        {"x": 240.0, "y": 100.0, "play_result": "home_run"},
+        {"x": 240.0, "y": 100.0, "play_result": "home_run", "play_type": "fly_ball"},
     ]
     result = render_spray_chart(events)
     assert result[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+# ---------------------------------------------------------------------------
+# Play type marker differentiation tests (E-166 AC-1, AC-2, AC-3)
+# ---------------------------------------------------------------------------
+
+def test_render_uses_scatter_with_play_type_markers() -> None:
+    """Renderer calls ax.scatter with correct marker codes for each play type group."""
+    events = [
+        {"x": 160.0, "y": 150.0, "play_result": "single", "play_type": "line_drive"},
+        {"x": 200.0, "y": 200.0, "play_result": "batter_out", "play_type": "fly_ball"},
+    ]
+    with _mock_subplots() as (_mock_fig, mock_ax):
+        render_spray_chart(events)
+
+        scatter_calls = mock_ax.scatter.call_args_list
+        assert len(scatter_calls) >= 1
+
+        markers_used = {call.kwargs.get("marker") for call in scatter_calls}
+        assert "^" in markers_used  # line_drive → triangle
+        assert "D" in markers_used  # fly_ball → diamond
+
+
+def test_render_null_play_type_uses_circle_marker() -> None:
+    """Events with play_type=None use circle ('o') marker (AC-2 fallback)."""
+    events = [
+        {"x": 160.0, "y": 150.0, "play_result": "single", "play_type": None},
+        {"x": 200.0, "y": 200.0, "play_result": "batter_out"},  # missing key
+    ]
+    with _mock_subplots() as (_mock_fig, mock_ax):
+        render_spray_chart(events)
+
+        scatter_calls = mock_ax.scatter.call_args_list
+        markers_used = {call.kwargs.get("marker") for call in scatter_calls}
+        assert markers_used == {"o"}
+
+
+def test_render_preserves_hit_out_colors_with_play_types() -> None:
+    """Hit/out color scheme is unchanged when play_type markers are applied (AC-3)."""
+    events = [
+        {"x": 160.0, "y": 150.0, "play_result": "single", "play_type": "fly_ball"},
+        {"x": 200.0, "y": 200.0, "play_result": "batter_out", "play_type": "fly_ball"},
+    ]
+    with _mock_subplots() as (_mock_fig, mock_ax):
+        render_spray_chart(events)
+
+        scatter_calls = mock_ax.scatter.call_args_list
+        colors_used = {call.kwargs.get("c") for call in scatter_calls}
+        assert "#00D682" in colors_used  # hit fill
+        assert "#B90018" in colors_used  # out fill
+
+
+def test_render_events_without_play_type_key() -> None:
+    """Events missing the play_type key entirely render without error (fallback to circle)."""
+    events = [
+        {"x": 160.0, "y": 150.0, "play_result": "single"},
+        {"x": 200.0, "y": 200.0, "play_result": "batter_out"},
+    ]
+    result = render_spray_chart(events)
+    assert result[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+# ---------------------------------------------------------------------------
+# Two-row legend structure tests (E-166 AC-4)
+# ---------------------------------------------------------------------------
+
+def test_legend_has_two_rows() -> None:
+    """Chart has two legend objects: outcome (hit/out) and play type shapes."""
+    events = _sample_events()
+    with _mock_subplots() as (_mock_fig, mock_ax):
+        render_spray_chart(events)
+
+        # Two legend calls: one via ax.legend (outcome) + ax.add_artist,
+        # then another ax.legend (play type)
+        assert mock_ax.add_artist.call_count >= 1  # outcome legend added as artist
+        assert mock_ax.legend.call_count >= 2  # two legend() calls
+
+
+def test_legend_outcome_row_has_hit_and_out() -> None:
+    """First legend row contains Hit and Out labels."""
+    events = _sample_events()
+    with _mock_subplots() as (_mock_fig, mock_ax):
+        render_spray_chart(events)
+
+        # First legend call is the outcome row
+        first_legend_call = mock_ax.legend.call_args_list[0]
+        handles = first_legend_call.kwargs.get("handles", first_legend_call[1].get("handles", []))
+        labels = [h.get_label() for h in handles]
+        assert "Hit" in labels
+        assert "Out" in labels
+
+
+def test_legend_play_type_row_has_four_shapes() -> None:
+    """Second legend row contains Ground Ball, Line Drive, Fly Ball, Popup labels."""
+    events = _sample_events()
+    with _mock_subplots() as (_mock_fig, mock_ax):
+        render_spray_chart(events)
+
+        # Second legend call is the play type row
+        second_legend_call = mock_ax.legend.call_args_list[1]
+        handles = second_legend_call.kwargs.get("handles", second_legend_call[1].get("handles", []))
+        labels = [h.get_label() for h in handles]
+        assert "Ground Ball" in labels
+        assert "Line Drive" in labels
+        assert "Fly Ball" in labels
+        assert "Popup" in labels
 
 
 # ---------------------------------------------------------------------------

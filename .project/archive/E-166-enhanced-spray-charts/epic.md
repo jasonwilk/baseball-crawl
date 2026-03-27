@@ -1,7 +1,7 @@
 # E-166: Enhanced Spray Charts
 
 ## Status
-`READY`
+`COMPLETED`
 
 ## Overview
 Enhance the spray chart system with two improvements: (1) differentiate ball-in-play types using marker shapes so coaches can read contact quality (ground ball vs. line drive vs. fly ball vs. popup) at a glance alongside hit/out outcomes, and (2) replace the current "open in new tab" pattern with a mobile-friendly modal overlay for enlarging spray chart images without leaving the page.
@@ -35,8 +35,8 @@ UX designer delivered a complete design spec covering marker shape assignments, 
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-166-01 | Play type marker shapes and legend | TODO | None | - |
-| E-166-02 | Modal spray chart viewer | TODO | None | - |
+| E-166-01 | Play type marker shapes and legend | DONE | None | - |
+| E-166-02 | Modal spray chart viewer | DONE | None | - |
 
 ## Dispatch Team
 - software-engineer
@@ -140,8 +140,9 @@ None — design spec is complete and implementation path is clear.
 ## History
 - 2026-03-27: Created. UX designer provided full design spec. SE confirmed play_type is in DB but not queried downstream.
 - 2026-03-27: READY after 4-round review process.
+- 2026-03-27: COMPLETED. Both stories delivered: play type marker shapes with two-row legend (E-166-01) and modal spray chart viewer (E-166-02). All 19 ACs verified. 5 code review findings across 4 review passes (3 accepted, 2 dismissed).
 
-### Review Scorecard
+### Spec Review Scorecard
 
 | Round | Source | Findings | Accepted | Dismissed |
 |-------|--------|----------|----------|-----------|
@@ -156,3 +157,35 @@ None — design spec is complete and implementation path is clear.
 - P2: Duplicate of CR-1; already addressed by F7 testing scope note.
 - C2-1: Third appearance of same finding (CR-1 → P2 → C2-1); already addressed.
 - C2-4: AC-4's four clauses form a cohesive logical group (dismiss behaviors); scroll lock already extracted to AC-11 in iteration 1.
+
+### Code Review Scorecard
+
+| Review Pass | Findings | Accepted | Dismissed |
+|---|---|---|---|
+| Per-story CR -- E-166-01 | 2 | 2 | 0 |
+| Per-story CR -- E-166-02 | 0 | 0 | 0 |
+| CR integration review | 0 | 0 | 0 |
+| Codex code review | 3 | 1 | 2 |
+| **Total** | **5** | **3** | **2** |
+
+**Per-story CR E-166-01**: 2 SHOULD FIX — dead `mpatches` import removed, test scope confirmed. Both accepted and fixed.
+**Per-story CR E-166-02**: APPROVED, no findings.
+**CR integration review**: APPROVED, clean.
+**Codex code review**: Finding 1 (broken mock tests) accepted and remediated. Finding 2 (missing dashboard tests for modal) dismissed — addressed by F7 planning finding (modal JS is manual verification per story Notes). Finding 3 (XSS in data-src) dismissed — URL assignment via `dataset` property, not JS `eval`; Jinja2 autoescaping sufficient.
+
+### Documentation Assessment
+No documentation update triggers fire — no new endpoints, no architecture changes, no schema changes, no new agents, no deployment changes. This is a rendering enhancement and frontend UX improvement within existing surfaces.
+
+### Context-Layer Assessment
+
+1. **New convention, pattern, or constraint established**: No. The `{% block scripts %}` pattern in `base.html` and the modal reuse pattern are standard Jinja2/Tailwind practices, not project-specific conventions requiring codification.
+2. **Architectural decision with ongoing implications**: No. Scatter-based rendering and modal overlay are implementation details within existing architecture. No new services, data flows, or integration patterns.
+3. **Footgun, failure mode, or boundary discovered**: No. No gotchas or operational boundaries discovered.
+4. **Change to agent behavior, routing, or coordination**: No. No agent changes.
+5. **Domain knowledge discovered that should influence agent decisions**: No. The play_type enum values were already documented in API endpoint docs; the marker shape mapping is implementation detail in the renderer code.
+6. **New CLI command, workflow, or operational procedure introduced**: No. No new commands, scripts, or workflows.
+
+All six triggers: **No**. No context-layer codification required.
+
+### Ideas Backlog Review
+Spray chart ideas (IDEA-048 through IDEA-051) remain CANDIDATE — none are unblocked or promoted by E-166. E-166 enhances the existing renderer but does not change the data pipeline or schema, so these ideas' blockers are unchanged.

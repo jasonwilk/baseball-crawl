@@ -4,7 +4,7 @@
 [E-166: Enhanced Spray Charts](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the spray chart renderer will differentiate BIP events by play type using four distinct marker shapes (circle, triangle, diamond, square) while preserving the existing hit/out color coding. The DB queries will include `play_type` in the result set, and the legend will use a two-row layout showing both outcome colors and play type shapes.

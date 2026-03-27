@@ -4,7 +4,7 @@
 [E-166: Enhanced Spray Charts](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, all spray chart images on the opponent detail and player profile pages will be tappable to open in a full-screen modal overlay. The "View spray" text links in the opponent detail batting table will become buttons that open the modal instead of navigating to a new tab. The modal will be dismissible via outside click, Escape key, or a close button, and will work well on mobile devices.

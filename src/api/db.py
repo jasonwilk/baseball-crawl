@@ -1781,7 +1781,7 @@ def get_player_spray_events(
             )
 
             rows = conn.execute(
-                "SELECT x, y, play_result FROM spray_charts "
+                "SELECT x, y, play_result, play_type FROM spray_charts "
                 "WHERE player_id = ? AND chart_type = 'offensive' AND season_id = ?",
                 (player_id, season_id),
             ).fetchall()
@@ -1834,7 +1834,7 @@ def get_team_spray_events(
             title = team_row["name"] if team_row else None
 
             rows = conn.execute(
-                "SELECT x, y, play_result FROM spray_charts "
+                "SELECT x, y, play_result, play_type FROM spray_charts "
                 "WHERE team_id = ? AND chart_type = 'offensive' AND season_id = ?",
                 (team_id, season_id),
             ).fetchall()

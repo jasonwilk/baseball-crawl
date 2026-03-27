@@ -2,7 +2,7 @@
 
 Generates a PNG spray chart image from a list of ball-in-play events,
 replicating GameChanger's exact field geometry, coordinate transforms,
-and binary hit/out color scheme.
+and binary hit/out color scheme with play-type marker differentiation.
 
 The rendering logic (coordinate transform, field geometry paths, hit/out
 classification, HR zone bubbles) is ported from the spike at
@@ -20,6 +20,7 @@ Each event dict must contain at minimum:
 - ``x`` (float | None): raw API x coordinate
 - ``y`` (float | None): raw API y coordinate
 - ``play_result`` (str): e.g. ``"single"``, ``"batter_out"``, ``"home_run"``
+- ``play_type`` (str | None): e.g. ``"ground_ball"``, ``"line_drive"``, ``"fly_ball"``
 """
 
 from __future__ import annotations
@@ -32,7 +33,7 @@ import matplotlib
 
 matplotlib.use("Agg")  # headless rendering -- must precede pyplot import
 
-import matplotlib.patches as mpatches  # noqa: E402
+import matplotlib.lines as mlines  # noqa: E402
 import matplotlib.pyplot as plt  # noqa: E402
 from matplotlib.patches import PathPatch, Polygon  # noqa: E402
 from matplotlib.path import Path as MplPath  # noqa: E402
@@ -78,6 +79,30 @@ _OUT_STROKE = "#61000D"
 _FIELD_LINE = "#667C8C"
 _BASE_FILL = "#9DB2C4"
 _BG_COLOR = "#FFFFFF"
+_LEGEND_GRAY = "#888888"
+
+# ---------------------------------------------------------------------------
+# Play type → marker shape mapping (TN-1)
+# ---------------------------------------------------------------------------
+_PLAY_TYPE_MARKERS: dict[str, str] = {
+    "ground_ball": "o",
+    "hard_ground_ball": "o",
+    "bunt": "o",
+    "line_drive": "^",
+    "hard_line_drive": "^",
+    "fly_ball": "D",
+    "popup": "s",
+    "pop_fly": "s",
+    "pop_up": "s",
+}
+_FALLBACK_MARKER = "o"
+
+
+def _marker_for_play_type(play_type: str | None) -> str:
+    """Return the matplotlib marker code for a play_type value."""
+    if play_type is None:
+        return _FALLBACK_MARKER
+    return _PLAY_TYPE_MARKERS.get(play_type, _FALLBACK_MARKER)
 
 
 # ---------------------------------------------------------------------------
@@ -237,6 +262,103 @@ def _draw_hr_bubbles(ax: plt.Axes, events: list[dict]) -> None:
         )
 
 
+def _draw_events(ax: plt.Axes, events: list[dict]) -> None:
+    """Draw BIP events as scatter markers grouped by (outcome, play_type).
+
+    Outs render before hits (z-order 4 vs 4.5) to preserve GC render order.
+    Marker shape encodes contact type; color encodes outcome (TN-2).
+    """
+    # Group events by (outcome, marker) for efficient scatter calls
+    groups: dict[tuple[str, str], tuple[list[float], list[float]]] = {}
+    for ev in events:
+        x = ev.get("x")
+        y = ev.get("y")
+        if x is None or y is None:
+            continue
+        sx, sy = _raw_to_svg(x, y)
+        outcome = _classify(ev.get("play_result"))
+        marker = _marker_for_play_type(ev.get("play_type"))
+        key = (outcome, marker)
+        if key not in groups:
+            groups[key] = ([], [])
+        groups[key][0].append(sx)
+        groups[key][1].append(sy)
+
+    # Marker size: 36 (6^2) gives ~6pt diameter, distinguishable at mobile widths
+    marker_size = 36
+
+    # Render outs first (lower z-order), then hits on top
+    for outcome, zorder in [("out", 4), ("hit", 4.5)]:
+        if outcome == "hit":
+            fill, stroke = _HIT_FILL, _HIT_STROKE
+        else:
+            fill, stroke = _OUT_FILL, _OUT_STROKE
+        for (grp_outcome, marker), (xs, ys) in groups.items():
+            if grp_outcome != outcome:
+                continue
+            ax.scatter(
+                xs, ys,
+                marker=marker,
+                s=marker_size,
+                c=fill,
+                edgecolors=stroke,
+                linewidths=0.75,
+                zorder=zorder,
+            )
+
+
+def _draw_legend(ax: plt.Axes) -> None:
+    """Draw a two-row legend: Row 1 = outcome colors, Row 2 = play type shapes."""
+    # Row 1: Outcome colors (hit/out) using circles
+    hit_handle = mlines.Line2D(
+        [], [], marker="o", color="none", markerfacecolor=_HIT_FILL,
+        markeredgecolor=_HIT_STROKE, markersize=6, label="Hit",
+    )
+    out_handle = mlines.Line2D(
+        [], [], marker="o", color="none", markerfacecolor=_OUT_FILL,
+        markeredgecolor=_OUT_STROKE, markersize=6, label="Out",
+    )
+    outcome_legend = ax.legend(
+        handles=[hit_handle, out_handle],
+        loc="lower right",
+        fontsize=6,
+        framealpha=0.8,
+        ncols=2,
+        bbox_to_anchor=(1.0, 0.04),
+        handletextpad=0.3,
+        columnspacing=0.8,
+    )
+    ax.add_artist(outcome_legend)
+
+    # Row 2: Play type shapes in neutral gray
+    gb_handle = mlines.Line2D(
+        [], [], marker="o", color="none", markerfacecolor=_LEGEND_GRAY,
+        markeredgecolor=_LEGEND_GRAY, markersize=5, label="Ground Ball",
+    )
+    ld_handle = mlines.Line2D(
+        [], [], marker="^", color="none", markerfacecolor=_LEGEND_GRAY,
+        markeredgecolor=_LEGEND_GRAY, markersize=5, label="Line Drive",
+    )
+    fb_handle = mlines.Line2D(
+        [], [], marker="D", color="none", markerfacecolor=_LEGEND_GRAY,
+        markeredgecolor=_LEGEND_GRAY, markersize=5, label="Fly Ball",
+    )
+    pu_handle = mlines.Line2D(
+        [], [], marker="s", color="none", markerfacecolor=_LEGEND_GRAY,
+        markeredgecolor=_LEGEND_GRAY, markersize=5, label="Popup",
+    )
+    ax.legend(
+        handles=[gb_handle, ld_handle, fb_handle, pu_handle],
+        loc="lower right",
+        fontsize=5,
+        framealpha=0.8,
+        ncols=4,
+        bbox_to_anchor=(1.0, 0.0),
+        handletextpad=0.2,
+        columnspacing=0.5,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -249,15 +371,19 @@ def render_spray_chart(
 
     Replicates GameChanger's exact field geometry, coordinate transforms,
     and binary hit/out color scheme.  Events with ``x=None`` or ``y=None``
-    skip the circle-rendering loop (no coordinate transform possible); for
+    skip the marker-rendering loop (no coordinate transform possible); for
     ``home_run`` events with None coordinates the HR zone bubble count is
     still incremented (center zone).
+
+    Marker shape encodes contact type (play_type); marker color encodes
+    outcome (hit/out).  See TN-1 for the play_type → marker mapping.
 
     Args:
         events: List of event dicts.  Each must contain:
             - ``x`` (float | None): raw API x coordinate
             - ``y`` (float | None): raw API y coordinate
             - ``play_result`` (str | None): e.g. ``"single"``, ``"batter_out"``
+            - ``play_type`` (str | None): e.g. ``"ground_ball"``, ``"fly_ball"``
         title: Optional chart title rendered above the image.  When ``None``
             no title is drawn (dashboard routes use the HTML card heading).
 
@@ -273,38 +399,13 @@ def render_spray_chart(
     ax.axis("off")
 
     _draw_field(ax)
-
-    # Separate outs and hits so hits render on top (GC render order) -- AC-6
-    outs = [e for e in events if _classify(e.get("play_result")) == "out"]
-    hits = [e for e in events if _classify(e.get("play_result")) == "hit"]
-
-    for ev_list in [outs, hits]:
-        for ev in ev_list:
-            x = ev.get("x")
-            y = ev.get("y")
-            if x is None or y is None:
-                # AC-5a: skip circle rendering for events without coordinates
-                continue
-            sx, sy = _raw_to_svg(x, y)
-            if _classify(ev.get("play_result")) == "hit":
-                fill, stroke = _HIT_FILL, _HIT_STROKE
-            else:
-                fill, stroke = _OUT_FILL, _OUT_STROKE
-            circle = plt.Circle((sx, sy), 4, color=fill, ec=stroke, lw=1.14, zorder=4)
-            ax.add_patch(circle)
-
-    # HR zone bubbles for home runs (in-the-park HRs have coords and render normally)
+    _draw_events(ax, events)
     _draw_hr_bubbles(ax, events)
 
     if title is not None:
         ax.set_title(title, fontsize=9, pad=4, color="#333")
 
-    # Standard hit/out legend
-    legend_patches = [
-        mpatches.Patch(color=_HIT_FILL, label="Hit"),
-        mpatches.Patch(color=_OUT_FILL, label="Out"),
-    ]
-    ax.legend(handles=legend_patches, loc="lower right", fontsize=7, framealpha=0.8)
+    _draw_legend(ax)
 
     buf = io.BytesIO()
     fig.savefig(buf, format="png", dpi=150, bbox_inches="tight",
