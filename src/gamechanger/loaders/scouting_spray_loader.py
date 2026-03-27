@@ -25,13 +25,42 @@ Key data decisions
   These events are stored with NULL x, y, fielder_position, and error.
 - **Missing x/y with defender present**: skip the event (log debug).
 - **Null spray_chart_data**: entire game skipped gracefully with INFO log (AC-5).
-- **Stub players**: unknown player UUIDs receive a stub row
-  (first_name='Unknown', last_name='Unknown') before the spray row (AC-4).
+- **Unresolvable players**: players not found in ``team_rosters`` for either the
+  home or away team are skipped entirely -- all their events are counted in
+  ``LoadResult.skipped`` and no rows are inserted (no stub player, no spray row).
+- **Per-game DEBUG summary**: when at least one player in a game is unresolvable,
+  one DEBUG line is emitted with the count of skipped events and players.
+- **Stub players**: players who ARE found in ``team_rosters`` but lack a ``players``
+  row receive a stub row (first_name='Unknown', last_name='Unknown') before
+  the spray row is inserted.
 - **Game not in DB**: spray events for an unknown game_id are skipped at
   DEBUG level rather than causing an error (AC-7).  In a normal scouting
   pipeline run, game rows are loaded by the boxscore loader before this
   loader runs, so missing rows indicate an edge case (independent run or
   failed boxscore fetch).
+
+Operator cleanup procedure (for removing previously misattributed rows)
+-----------------------------------------------------------------------
+If the database contains rows loaded before this fix was deployed, run::
+
+    DELETE FROM spray_charts
+    WHERE id IN (
+        SELECT sc.id FROM spray_charts sc
+        JOIN games g ON g.game_id = sc.game_id
+        WHERE NOT EXISTS (
+            SELECT 1 FROM team_rosters tr
+            WHERE tr.player_id = sc.player_id
+              AND tr.team_id IN (g.home_team_id, g.away_team_id)
+              AND tr.season_id = sc.season_id
+        )
+    );
+
+This query targets exactly the misattributed rows (players not in
+``team_rosters`` for either game team) and is idempotent.  No reload is
+required -- the loader's ``INSERT OR IGNORE`` will skip correctly-loaded rows
+on any subsequent run.  To load rows for players that are now resolvable (e.g.
+after roster data improves), delete the relevant rows and re-run
+``bb data load --loader scouting-spray``.
 
 Usage::
 
@@ -237,23 +266,19 @@ class ScoutingSprayChartLoader:
 
         home_team_id, away_team_id = game_row
 
-        # Opponent team = whichever side the scouted team is NOT on.
-        if team_id == home_team_id:
-            opponent_team_id = away_team_id
-        elif team_id == away_team_id:
-            opponent_team_id = home_team_id
-        else:
+        # Warn if the scouted team does not appear in this game's home/away slots.
+        if team_id not in (home_team_id, away_team_id):
             logger.warning(
                 "Scouted team public_id=%s (id=%d) is not home or away for "
-                "game %s; using away_team_id=%d as opponent fallback.",
+                "game %s; player team resolution may be unreliable.",
                 public_id,
                 team_id,
                 game_id,
-                away_team_id,
             )
-            opponent_team_id = away_team_id
 
         result = LoadResult()
+        unresolvable_players = 0
+        unresolvable_events = 0
         section_map = [
             ("offense", "offensive"),
             ("defense", "defensive"),
@@ -276,8 +301,12 @@ class ScoutingSprayChartLoader:
                     home_team_id,
                     away_team_id,
                     season_id,
-                    opponent_team_id,
                 )
+                if player_team_id is None:
+                    unresolvable_players += 1
+                    unresolvable_events += len(events)
+                    result.skipped += len(events)
+                    continue
                 for event in events:
                     r = self._insert_event(
                         event, game_id, player_uuid, player_team_id, chart_type, season_id
@@ -285,6 +314,16 @@ class ScoutingSprayChartLoader:
                     result.loaded += r.loaded
                     result.skipped += r.skipped
                     result.errors += r.errors
+
+        if unresolvable_players > 0:
+            logger.debug(
+                "Game %s: skipped %d events for %d unresolvable players "
+                "(not found in team_rosters for home/away teams in season %s).",
+                game_id,
+                unresolvable_events,
+                unresolvable_players,
+                season_id,
+            )
 
         self._db.commit()
         return result
@@ -307,39 +346,29 @@ class ScoutingSprayChartLoader:
         home_team_id: int,
         away_team_id: int,
         season_id: str,
-        fallback_team_id: int,
-    ) -> int:
+    ) -> int | None:
         """Determine which team a player belongs to for this game.
 
         Checks ``team_rosters`` for home and away teams filtered by season.
-        Falls back to ``fallback_team_id`` when not found in either.
+        Returns ``None`` when the player is not found in either roster --
+        the caller skips all events for that player rather than guessing.
 
         Args:
             player_uuid: GC player UUID from the API response.
             home_team_id: ``home_team_id`` from the games table.
             away_team_id: ``away_team_id`` from the games table.
             season_id: Season slug for roster lookup scoping.
-            fallback_team_id: Team ID to assign when player is in neither roster.
 
         Returns:
-            Integer ``teams.id`` for the player's team.
+            Integer ``teams.id`` for the player's team, or ``None`` if the
+            player is not in ``team_rosters`` for either team.
         """
         row = self._db.execute(
             "SELECT team_id FROM team_rosters "
             "WHERE player_id = ? AND team_id IN (?, ?) AND season_id = ? LIMIT 1",
             (player_uuid, home_team_id, away_team_id, season_id),
         ).fetchone()
-        if row is not None:
-            return row[0]
-
-        logger.warning(
-            "Player %s not found in team_rosters for season %s; "
-            "assigning opponent team_id=%d as best-guess.",
-            player_uuid,
-            season_id,
-            fallback_team_id,
-        )
-        return fallback_team_id
+        return row[0] if row is not None else None
 
     def _ensure_stub_player(self, player_id: str) -> None:
         """Ensure a player row exists; insert stub if not present (AC-4).

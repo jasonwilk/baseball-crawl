@@ -1,7 +1,7 @@
 # E-165: Fix Scouting Spray Chart Team Misattribution
 
 ## Status
-`READY`
+`COMPLETED`
 
 ## Overview
 The scouting spray chart loader guesses team assignment when a player cannot be resolved via roster lookup, resulting in 46.4% of scouting spray chart rows (1,275 of 2,745) assigned to the wrong team. This epic eliminates the guessing -- unresolvable players are skipped instead of misattributed -- and cleans up existing bad data.
@@ -36,7 +36,7 @@ Note: success criteria are fully met after the code fix is deployed AND the oper
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-165-01 | Stop guessing team assignment and clean up bad data | TODO | None | - |
+| E-165-01 | Stop guessing team assignment and clean up bad data | DONE | None | - |
 
 ## Dispatch Team
 - software-engineer
@@ -103,6 +103,7 @@ The loader uses `INSERT OR IGNORE` on `event_gc_id`. Previously-inserted bad row
 - 2026-03-27: Created. SE consulted on fix approach, cleanup strategy, and log level. DE consulted on cleanup query correctness.
 - 2026-03-27: Internal review iteration 1. 8 findings accepted: TN-6 expanded to 11 tests (from 2), cleanup query replaced with roster-join (DE), Non-Goals wording narrowed, AC-3/AC-4/AC-5 clarified, operator cleanup command specified.
 - 2026-03-27: Internal review iteration 2. 1 finding accepted: operator note expanded for member chart recovery. Codex spec review: 3 findings accepted: Success Criteria clarified as post-deployment+operator, member reload suggestion removed (member loader has same bug), AC-5 decomposed (test churn moved to DoD). Codex iteration 2: 3 findings dismissed (baseball-coach consultation not needed for loader bug fix; member note deliberately reverted; AC-5 sub-clauses are tightly related). Set to READY.
+- 2026-03-27: Dispatched. E-165-01 implemented by SE, CR found 1 MUST FIX (test scope gap -- 75 additional tests not run), resolved. All ACs verified by PM. Epic COMPLETED.
 
 ### Review Scorecard
 | Review Pass | Findings | Accepted | Dismissed |
@@ -116,3 +117,9 @@ The loader uses `INSERT OR IGNORE` on `event_gc_id`. Previously-inserted bad row
 | **Total** | **16** | **13** | **3** |
 
 Note: Internal iteration 1 CR-2 and H-3 overlap, so 8 unique findings from 9 raw. Total unique accepted: 12.
+
+### Dispatch Review Scorecard
+| Review Pass | Findings | Accepted | Dismissed |
+|---|---|---|---|
+| Per-story CR -- E-165-01 | 1 | 1 | 0 |
+| **Total** | **1** | **1** | **0** |

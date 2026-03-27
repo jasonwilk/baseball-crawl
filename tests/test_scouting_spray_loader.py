@@ -6,11 +6,14 @@ No network calls are made.
 Tests cover:
 - AC-1: BIP events inserted with correct columns
 - AC-2: Team resolution uses public_id (not gc_uuid)
-- AC-3: Idempotency via INSERT OR IGNORE
-- AC-4: Stub player inserted for unknown player_id + WARNING log
-- AC-5: Null spray_chart_data games skipped with INFO log
-- AC-6: load_all() scans scouting spray dirs and loads each
-- AC-7: Games not in DB are skipped at DEBUG level (not an error)
+- AC-3 (old): Idempotency via INSERT OR IGNORE
+- AC-4 (old): Stub player inserted for resolvable-but-unknown player_id
+- AC-5 (old): Null spray_chart_data games skipped with INFO log
+- AC-6 (old): load_all() scans scouting spray dirs and loads each
+- AC-7 (old): Games not in DB are skipped at DEBUG level (not an error)
+- AC-1 (E-165-01): Unresolvable players are skipped (not inserted, no stub)
+- AC-3 (E-165-01): Per-game DEBUG summary emitted only when unresolvable players exist
+- AC-5 (E-165-01): New tests -- unresolvable skip, DEBUG summary, mixed scenario
 """
 
 from __future__ import annotations
@@ -256,6 +259,7 @@ def test_defensive_chart_type_is_stored(
     own_id = _seed_team(db, name="Own")
     _seed_game(db, _GAME_ID, home_team_id=opp_id, away_team_id=own_id)
     _seed_player(db, _PLAYER_A)
+    _seed_roster(db, _PLAYER_A, opp_id)
 
     payload = {
         "spray_chart_data": {
@@ -334,6 +338,7 @@ def test_reloading_same_file_produces_zero_new_inserts(
     own_id = _seed_team(db, name="Own")
     _seed_game(db, _GAME_ID, home_team_id=opp_id, away_team_id=own_id)
     _seed_player(db, _PLAYER_A)
+    _seed_roster(db, _PLAYER_A, opp_id)
 
     payload = _make_spray_json()
     _write_spray_file(tmp_path, _SEASON_ID, _PUBLIC_ID, _GAME_ID, payload)
@@ -350,57 +355,40 @@ def test_reloading_same_file_produces_zero_new_inserts(
 
 
 # ---------------------------------------------------------------------------
-# AC-4: Stub player for unknown player_id
+# AC-4: Stub player for resolvable-but-missing player_id
+# (Players NOT in team_rosters are now skipped entirely -- see AC-1 / E-165-01)
 # ---------------------------------------------------------------------------
 
 
-def test_unknown_player_gets_stub_row(
+def test_resolvable_unknown_player_gets_stub_row(
     db: sqlite3.Connection, tmp_path: Path
 ) -> None:
-    """Unknown player_id causes a stub player row to be inserted."""
+    """Player in team_rosters but not in players table receives a stub players row."""
     _seed_season(db)
     opp_id = _seed_team(db, public_id=_PUBLIC_ID)
     own_id = _seed_team(db, name="Own")
     _seed_game(db, _GAME_ID, home_team_id=opp_id, away_team_id=own_id)
-    # PLAYER_UNKNOWN is not seeded
+    # _PLAYER_A is in team_rosters but NOT in players table
+    _seed_roster(db, _PLAYER_A, opp_id)
 
-    payload = _make_spray_json(player_id=_PLAYER_UNKNOWN)
+    payload = _make_spray_json(player_id=_PLAYER_A)
     _write_spray_file(tmp_path, _SEASON_ID, _PUBLIC_ID, _GAME_ID, payload)
 
     loader = ScoutingSprayChartLoader(db)
-    loader.load_dir(tmp_path / _SEASON_ID / "scouting" / _PUBLIC_ID / "spray")
+    result = loader.load_dir(tmp_path / _SEASON_ID / "scouting" / _PUBLIC_ID / "spray")
 
+    assert result.loaded == 1
     row = db.execute(
         "SELECT first_name, last_name FROM players WHERE player_id = ?",
-        (_PLAYER_UNKNOWN,),
+        (_PLAYER_A,),
     ).fetchone()
     assert row is not None
     assert row[0] == "Unknown"
     assert row[1] == "Unknown"
 
 
-def test_unknown_player_logs_warning(
-    db: sqlite3.Connection, tmp_path: Path, caplog: pytest.LogCaptureFixture
-) -> None:
-    """Stub player insertion emits a WARNING log."""
-    _seed_season(db)
-    opp_id = _seed_team(db, public_id=_PUBLIC_ID)
-    own_id = _seed_team(db, name="Own")
-    _seed_game(db, _GAME_ID, home_team_id=opp_id, away_team_id=own_id)
-
-    payload = _make_spray_json(player_id=_PLAYER_UNKNOWN)
-    _write_spray_file(tmp_path, _SEASON_ID, _PUBLIC_ID, _GAME_ID, payload)
-
-    loader = ScoutingSprayChartLoader(db)
-    with caplog.at_level(logging.WARNING, logger="src.gamechanger.loaders.scouting_spray_loader"):
-        loader.load_dir(tmp_path / _SEASON_ID / "scouting" / _PUBLIC_ID / "spray")
-
-    assert _PLAYER_UNKNOWN in caplog.text
-    assert "stub" in caplog.text.lower() or "Unknown" in caplog.text
-
-
 # ---------------------------------------------------------------------------
-# AC-5: Null spray_chart_data skipped gracefully
+# AC-5 (old): Null spray_chart_data skipped gracefully
 # ---------------------------------------------------------------------------
 
 
@@ -427,7 +415,7 @@ def test_null_spray_chart_data_skipped_with_info(
 
 
 # ---------------------------------------------------------------------------
-# AC-6: load_all scans scouting spray dirs
+# AC-6 (old): load_all scans scouting spray dirs
 # ---------------------------------------------------------------------------
 
 
@@ -447,6 +435,8 @@ def test_load_all_processes_all_opponents(
     _seed_game(db, game_a, home_team_id=id_a, away_team_id=own_id)
     _seed_game(db, game_b, home_team_id=id_b, away_team_id=own_id)
     _seed_player(db, _PLAYER_A)
+    _seed_roster(db, _PLAYER_A, id_a)
+    _seed_roster(db, _PLAYER_A, id_b)
 
     _write_spray_file(
         tmp_path, _SEASON_ID, pub_a, game_a,
@@ -480,6 +470,8 @@ def test_load_all_with_public_id_filter(
     _seed_game(db, game_a, home_team_id=id_a, away_team_id=own_id)
     _seed_game(db, game_b, home_team_id=id_b, away_team_id=own_id)
     _seed_player(db, _PLAYER_A)
+    _seed_roster(db, _PLAYER_A, id_a)
+    _seed_roster(db, _PLAYER_A, id_b)
 
     _write_spray_file(
         tmp_path, _SEASON_ID, pub_a, game_a,
@@ -517,7 +509,7 @@ def test_load_all_no_dirs_returns_empty_result(
 
 
 # ---------------------------------------------------------------------------
-# AC-7: Games not in DB are skipped at DEBUG level
+# AC-7 (old): Games not in DB are skipped at DEBUG level
 # ---------------------------------------------------------------------------
 
 
@@ -570,6 +562,7 @@ def test_empty_defenders_stored_with_null_coords(
     own_id = _seed_team(db, name="Own")
     _seed_game(db, _GAME_ID, home_team_id=opp_id, away_team_id=own_id)
     _seed_player(db, _PLAYER_A)
+    _seed_roster(db, _PLAYER_A, opp_id)
 
     hr_event = _make_spray_event_no_defenders()
     payload = {
@@ -600,6 +593,7 @@ def test_defender_missing_location_skipped(
     own_id = _seed_team(db, name="Own")
     _seed_game(db, _GAME_ID, home_team_id=opp_id, away_team_id=own_id)
     _seed_player(db, _PLAYER_A)
+    _seed_roster(db, _PLAYER_A, opp_id)  # roster entry so player reaches _insert_event
 
     bad_event = {
         "id": _EVENT_GC_1,
@@ -631,6 +625,7 @@ def test_event_missing_id_field_is_skipped(
     own_id = _seed_team(db, name="Own")
     _seed_game(db, _GAME_ID, home_team_id=opp_id, away_team_id=own_id)
     _seed_player(db, _PLAYER_A)
+    _seed_roster(db, _PLAYER_A, opp_id)  # roster entry so player reaches _insert_event
 
     bad_event = {"attributes": {"playResult": "single", "defenders": []}}
     payload = {
@@ -679,6 +674,7 @@ def test_multi_game_across_season(
     _seed_game(db, game_1, home_team_id=opp_id, away_team_id=own_id)
     _seed_game(db, game_2, home_team_id=opp_id, away_team_id=own_id)
     _seed_player(db, _PLAYER_A)
+    _seed_roster(db, _PLAYER_A, opp_id)
 
     ev1 = _make_spray_event(_EVENT_GC_1)
     ev2 = _make_spray_event(_EVENT_GC_2)
@@ -713,6 +709,7 @@ def test_season_id_inferred_from_path(
     own_id = _seed_team(db, name="Own")
     _seed_game(db, _GAME_ID, home_team_id=opp_id, away_team_id=own_id, season_id=season)
     _seed_player(db, _PLAYER_A)
+    _seed_roster(db, _PLAYER_A, opp_id, season_id=season)
 
     payload = _make_spray_json()
     _write_spray_file(tmp_path, season, _PUBLIC_ID, _GAME_ID, payload)
@@ -722,3 +719,146 @@ def test_season_id_inferred_from_path(
 
     row = db.execute("SELECT season_id FROM spray_charts LIMIT 1").fetchone()
     assert row[0] == season
+
+
+# ---------------------------------------------------------------------------
+# E-165-01 AC-1 / AC-3 / AC-5: Unresolvable player skip behavior
+# ---------------------------------------------------------------------------
+
+
+def test_unresolvable_player_events_are_skipped(
+    db: sqlite3.Connection, tmp_path: Path
+) -> None:
+    """Player not in team_rosters: all events skipped, no spray row, no stub player row."""
+    _seed_season(db)
+    opp_id = _seed_team(db, public_id=_PUBLIC_ID)
+    own_id = _seed_team(db, name="Own")
+    _seed_game(db, _GAME_ID, home_team_id=opp_id, away_team_id=own_id)
+    # _PLAYER_UNKNOWN not seeded in players or team_rosters
+
+    payload = _make_spray_json(player_id=_PLAYER_UNKNOWN)
+    _write_spray_file(tmp_path, _SEASON_ID, _PUBLIC_ID, _GAME_ID, payload)
+
+    loader = ScoutingSprayChartLoader(db)
+    result = loader.load_dir(tmp_path / _SEASON_ID / "scouting" / _PUBLIC_ID / "spray")
+
+    assert result.loaded == 0
+    assert result.skipped == 1
+    assert result.errors == 0
+    assert db.execute("SELECT COUNT(*) FROM spray_charts").fetchone()[0] == 0
+    assert db.execute(
+        "SELECT COUNT(*) FROM players WHERE player_id = ?", (_PLAYER_UNKNOWN,)
+    ).fetchone()[0] == 0
+
+
+def test_unresolvable_player_no_per_player_warning(
+    db: sqlite3.Connection, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Unresolvable player emits no per-player WARNING; only a DEBUG summary is used."""
+    _seed_season(db)
+    opp_id = _seed_team(db, public_id=_PUBLIC_ID)
+    own_id = _seed_team(db, name="Own")
+    _seed_game(db, _GAME_ID, home_team_id=opp_id, away_team_id=own_id)
+    # _PLAYER_UNKNOWN not in team_rosters
+
+    payload = _make_spray_json(player_id=_PLAYER_UNKNOWN)
+    _write_spray_file(tmp_path, _SEASON_ID, _PUBLIC_ID, _GAME_ID, payload)
+
+    loader = ScoutingSprayChartLoader(db)
+    with caplog.at_level(logging.WARNING, logger="src.gamechanger.loaders.scouting_spray_loader"):
+        loader.load_dir(tmp_path / _SEASON_ID / "scouting" / _PUBLIC_ID / "spray")
+
+    # No per-player WARNING for unresolvable player (TN-4)
+    warning_records = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert not any(_PLAYER_UNKNOWN in r.message for r in warning_records)
+    assert not any("best-guess" in r.message for r in warning_records)
+
+
+def test_per_game_debug_summary_emitted_when_unresolvable(
+    db: sqlite3.Connection, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """When a game has unresolvable players, exactly one DEBUG summary line is emitted."""
+    _seed_season(db)
+    opp_id = _seed_team(db, public_id=_PUBLIC_ID)
+    own_id = _seed_team(db, name="Own")
+    _seed_game(db, _GAME_ID, home_team_id=opp_id, away_team_id=own_id)
+    # _PLAYER_UNKNOWN not in team_rosters
+
+    payload = _make_spray_json(player_id=_PLAYER_UNKNOWN)
+    _write_spray_file(tmp_path, _SEASON_ID, _PUBLIC_ID, _GAME_ID, payload)
+
+    loader = ScoutingSprayChartLoader(db)
+    with caplog.at_level(logging.DEBUG, logger="src.gamechanger.loaders.scouting_spray_loader"):
+        loader.load_dir(tmp_path / _SEASON_ID / "scouting" / _PUBLIC_ID / "spray")
+
+    debug_lines = [
+        r for r in caplog.records
+        if r.levelno == logging.DEBUG and "unresolvable" in r.message
+    ]
+    assert len(debug_lines) == 1
+    assert _GAME_ID in debug_lines[0].message
+
+
+def test_no_debug_summary_when_all_players_resolvable(
+    db: sqlite3.Connection, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """When all players are resolvable, no unresolvable-player DEBUG line is emitted."""
+    _seed_season(db)
+    opp_id = _seed_team(db, public_id=_PUBLIC_ID)
+    own_id = _seed_team(db, name="Own")
+    _seed_game(db, _GAME_ID, home_team_id=opp_id, away_team_id=own_id)
+    _seed_player(db, _PLAYER_A)
+    _seed_roster(db, _PLAYER_A, opp_id)
+
+    payload = _make_spray_json(player_id=_PLAYER_A)
+    _write_spray_file(tmp_path, _SEASON_ID, _PUBLIC_ID, _GAME_ID, payload)
+
+    loader = ScoutingSprayChartLoader(db)
+    with caplog.at_level(logging.DEBUG, logger="src.gamechanger.loaders.scouting_spray_loader"):
+        loader.load_dir(tmp_path / _SEASON_ID / "scouting" / _PUBLIC_ID / "spray")
+
+    debug_lines = [
+        r for r in caplog.records
+        if r.levelno == logging.DEBUG and "unresolvable" in r.message
+    ]
+    assert len(debug_lines) == 0
+
+
+def test_mixed_resolvable_and_unresolvable_players(
+    db: sqlite3.Connection, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Game with resolvable and unresolvable players: correct counts, one DEBUG summary."""
+    _seed_season(db)
+    opp_id = _seed_team(db, public_id=_PUBLIC_ID)
+    own_id = _seed_team(db, name="Own")
+    _seed_game(db, _GAME_ID, home_team_id=opp_id, away_team_id=own_id)
+    _seed_player(db, _PLAYER_A)
+    _seed_roster(db, _PLAYER_A, opp_id)  # resolvable
+    # _PLAYER_UNKNOWN not in team_rosters -- unresolvable
+
+    payload = {
+        "spray_chart_data": {
+            "offense": {
+                _PLAYER_A: [_make_spray_event(_EVENT_GC_1)],
+                _PLAYER_UNKNOWN: [_make_spray_event(_EVENT_GC_2)],
+            },
+            "defense": {},
+        }
+    }
+    _write_spray_file(tmp_path, _SEASON_ID, _PUBLIC_ID, _GAME_ID, payload)
+
+    loader = ScoutingSprayChartLoader(db)
+    with caplog.at_level(logging.DEBUG, logger="src.gamechanger.loaders.scouting_spray_loader"):
+        result = loader.load_dir(tmp_path / _SEASON_ID / "scouting" / _PUBLIC_ID / "spray")
+
+    assert result.loaded == 1    # _PLAYER_A's event inserted
+    assert result.skipped == 1   # _PLAYER_UNKNOWN's event skipped
+    assert result.errors == 0
+    assert db.execute("SELECT COUNT(*) FROM spray_charts").fetchone()[0] == 1
+
+    debug_lines = [
+        r for r in caplog.records
+        if r.levelno == logging.DEBUG and "unresolvable" in r.message
+    ]
+    assert len(debug_lines) == 1
+    assert _GAME_ID in debug_lines[0].message
