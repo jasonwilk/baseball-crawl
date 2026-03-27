@@ -39,8 +39,8 @@ For `is_hidden` filtering: in the seeder, filter the parsed `opponents.json` lis
 - `src/gamechanger/loaders/season_stats_loader.py` (modify)
 - `src/gamechanger/loaders/scouting_loader.py` (modify)
 - `src/gamechanger/loaders/opponent_seeder.py` (modify)
-- `tests/test_schedule_loader.py` (create -- schedule_loader has no existing test file)
-- `tests/test_team_resolver.py` (modify -- shared function usage)
+- `tests/test_loaders/test_schedule_loader.py` (modify -- shared function usage)
+- `tests/test_crawlers/test_opponent_resolver.py` (modify -- shared function usage, is_hidden filtering)
 - `tests/test_opponent_seeder.py` (modify -- is_hidden filtering)
 
 ## Agent Hint

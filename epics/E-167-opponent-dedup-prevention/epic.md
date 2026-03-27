@@ -1,7 +1,7 @@
 # E-167: Opponent Dedup Prevention and Resolution
 
 ## Status
-`DRAFT`
+`READY`
 <!-- Lifecycle: DRAFT → READY → ACTIVE → COMPLETED (or BLOCKED / ABANDONED) -->
 <!-- PM sets READY explicitly after: expert consultation done, all stories have testable ACs, quality checklist passed. -->
 <!-- Only READY and ACTIVE epics can be dispatched. -->
@@ -149,8 +149,8 @@ The auto-merge CLI (`bb data dedup`) uses existing E-155 infrastructure:
 - `POST /admin/opponents/{link_id}/skip` -- Mark as "no match" (sets `is_hidden = 1` on the opponent_link row)
 
 **GC Search Integration**:
-- Pre-fill search with opponent's `opponent_name` + `sport=baseball` + `year={current_season_year}`
-- Display results as cards: team name, location (city/state), age group, record, public_id
+- Pre-fill search with opponent's `opponent_name` + `sport=baseball` + `year={season_year}` (member team's `season_year`, falling back to current calendar year)
+- Display results as cards: team name (required minimum), plus location (city/state), age group, record, public_id when available in the response
 - Admin selects a result → confirm page shows full team profile + duplicate detection
 
 **Duplicate Detection at Confirm Time**:
@@ -161,14 +161,14 @@ The auto-merge CLI (`bb data dedup`) uses existing E-155 infrastructure:
 **"No Match" Outcome**:
 - `POST /admin/opponents/{link_id}/skip` sets `is_hidden = 1` on the `opponent_links` row
 - Opponents with `is_hidden = 1` are excluded from the unresolved count and banner (they are also filtered out by the pipeline per TN-4, so the flag has dual purpose)
-- This is reversible -- the admin can un-hide from the opponents list (an "Unhide" button on hidden rows) which sets `is_hidden = 0`
+- This is reversible -- a new `hidden` filter tab on the opponents page shows only hidden rows, each with an "Unhide" button that sets `is_hidden = 0`
 
 **Race Condition Guard (Confirm Step)**:
 - Between the admin selecting a GC team and clicking "Confirm," another pipeline run could create a row for the same team. The confirm POST must use `ensure_team_row()` (which handles this atomically) rather than a raw INSERT.
 - The confirm step unconditionally sets `resolution_method = 'search'` on the opponent_link row (overwriting any previous value including 'auto' or 'manual') -- the admin's explicit action is the most authoritative resolution.
 
 **GC Search Parameter Passthrough**:
-- The suggestion page pre-fills the search with `opponent_name + sport=baseball + year={current_season_year}`. The "Refine Search" form allows the admin to override `name`, `state`, and `city`.
+- The suggestion page pre-fills the search with `opponent_name + sport=baseball + year={season_year}` (member team's `season_year`, falling back to current calendar year). The "Refine Search" form allows the admin to override `name`, `state`, and `city`.
 - The refine form submits as GET params (`?q=...&state=...&city=...`); these are passed through to the GC search endpoint in addition to the fixed `sport=baseball` and `year` params.
 
 **Error Handling**:
@@ -202,3 +202,13 @@ This serves both the dedup detection query in `find_duplicate_teams()` and the n
 
 ## History
 - 2026-03-27: Created. Expert consultations with SE, DE, api-scout, and UXD complete. Promotes IDEA-044 (Prevent Duplicate Team Creation). Partially addresses IDEA-043 scope (exact-match detection) without fuzzy matching.
+- 2026-03-27: Set to READY after holistic team review and two Codex spec review iterations.
+
+### Review Scorecard
+| Review Pass | Findings | Accepted | Dismissed |
+|---|---|---|---|
+| Internal iteration 1 -- CR spec audit | 8 | 5 | 3 |
+| Internal iteration 1 -- Holistic team (PM+SE+DE+api-scout+UXD) | 12 | 12 | 0 |
+| Codex iteration 1 | 6 | 6 | 0 |
+| Codex iteration 2 | 5 | 4 | 1 |
+| **Total** | **31** | **27** | **4** |
