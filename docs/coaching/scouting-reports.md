@@ -92,6 +92,38 @@ From the print view, use your browser's print command (**Ctrl+P** on Windows/Lin
 
 ---
 
+## Spray Charts
+
+Spray charts show where each batter hits the ball — ground balls, line drives, and fly balls plotted on a baseball field diagram. They're useful for defensive positioning: if a batter consistently pulls the ball or hits to the opposite field, the chart will show it clearly.
+
+### Where Spray Charts Appear
+
+Spray charts show up in three places:
+
+**Player profile page** — Each player on your roster or a scouted opponent has a profile page. If we have ball-in-play data for that player, their spray chart appears inline on the page. The subtitle under the chart reads "Based on N balls in play" — that's how many batted balls went into the chart.
+
+**Opponent detail page** — The opponent scouting page now includes a **Team Spray Chart** card showing the aggregate spray pattern for the entire opposing lineup. It gives you a quick read on the team's overall hit direction tendencies before diving into individual matchups.
+
+The batting table on the opponent page also has a **View spray** link for each individual batter who has spray data. Tap the link to open that batter's spray chart.
+
+**Opponent print page** — When you print a scouting report (or save it as a PDF), each batter's spray chart is included on the page. "Spray chart coming soon" placeholders no longer appear — if data exists, the chart prints; if not, the row shows "No spray chart data available."
+
+### What "Based on N balls in play" Means
+
+The subtitle under every chart tells you the sample size. A chart based on 3 balls in play is just three data points — don't over-weight it. A chart based on 20+ balls tells a more reliable story. Use spray charts as one input alongside your own scouting, not as a definitive answer.
+
+### "No Spray Chart Data Available"
+
+This message means the system doesn't have any batted-ball data for this player yet. It can happen because:
+
+- The opponent's scorekeeper didn't record spray data in GameChanger (some scorekeepers track this, some don't)
+- The player hasn't appeared at bat in any game we've scouted yet
+- A scouting sync hasn't been run for this opponent — ask Jason to pull the latest data
+
+If you see this message for a player you expect to face, let Jason know so he can check whether a sync is needed.
+
+---
+
 ## Reading Rate Stats
 
 A quick reference for stats shown throughout the dashboard:
@@ -108,4 +140,4 @@ A quick reference for stats shown throughout the dashboard:
 
 ---
 
-*Last updated: 2026-03-26 | Story references: E-153-03, E-153-04, E-159*
+*Last updated: 2026-03-27 | Story references: E-163 (spray charts on player profile, opponent detail, and print pages), E-153-03, E-153-04, E-159*

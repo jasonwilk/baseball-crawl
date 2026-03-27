@@ -14,6 +14,8 @@ Routes:
     GET /dashboard/opponents      -- Opponent list with record and next/last game date.
     GET /dashboard/opponents/{opponent_team_id} -- Opponent scouting report.
     GET /dashboard/players/{player_id} -- Player career profile across seasons and teams.
+    GET /dashboard/charts/spray/player/{player_id}.png -- Per-player offensive spray chart PNG.
+    GET /dashboard/charts/spray/team/{team_id}.png     -- Team aggregate offensive spray chart PNG.
 """
 
 from __future__ import annotations
@@ -31,6 +33,7 @@ from starlette.responses import Response
 
 from src.api import db
 from src.api.helpers import format_avg, format_date, ip_display
+from src.charts.spray import render_spray_chart
 
 logger = logging.getLogger(__name__)
 
@@ -1386,6 +1389,15 @@ async def opponent_detail(request: Request, opponent_team_id: int) -> Response:
         except (ValueError, TypeError):
             year_od = None
 
+    # Spray chart context: team aggregate count + per-player counts.
+    team_spray_bip_count: int = await run_in_threadpool(
+        db.get_team_spray_bip_count, opponent_team_id, season_id
+    )
+    batting_player_ids = [p["player_id"] for p in scouting_report.get("batting", [])]
+    player_spray_bip_counts: dict[str, int] = await run_in_threadpool(
+        db.get_player_spray_bip_counts, batting_player_ids, season_id
+    )
+
     logger.debug(
         "Opponent detail: opponent=%s season_id=%s empty_state=%s bat_sort=%s pit_sort=%s",
         opponent_team_id, season_id, empty_state, bat_sort, pit_sort,
@@ -1414,6 +1426,8 @@ async def opponent_detail(request: Request, opponent_team_id: int) -> Response:
             "top_pitchers": top_pitchers,
             "team_batting": team_batting,
             "game_count": game_count,
+            "team_spray_bip_count": team_spray_bip_count,
+            "player_spray_bip_counts": player_spray_bip_counts,
         },
     )
 
@@ -1514,6 +1528,12 @@ async def opponent_print(request: Request, opponent_team_id: int) -> Response:
     today = datetime.date.today()
     print_date = f"{today.strftime('%B')} {today.day}, {today.year}"
 
+    # Per-player spray BIP counts for the Batter Tendencies grid.
+    batting_player_ids_pr = [p["player_id"] for p in scouting_report.get("batting", [])]
+    player_spray_bip_counts_pr: dict[str, int] = await run_in_threadpool(
+        db.get_player_spray_bip_counts, batting_player_ids_pr, season_id
+    )
+
     logger.debug(
         "Opponent print: opponent=%s season_id=%s empty_state=%s",
         opponent_team_id,
@@ -1534,6 +1554,7 @@ async def opponent_print(request: Request, opponent_team_id: int) -> Response:
             "team_batting": team_batting,
             "empty_state": empty_state,
             "print_date": print_date,
+            "player_spray_bip_counts": player_spray_bip_counts_pr,
         },
     )
 
@@ -1834,6 +1855,21 @@ async def player_profile(request: Request, player_id: str) -> Response:
         except (ValueError, TypeError):
             year_pp = None
 
+    # Resolve spray chart season: use the most recent batting season when available,
+    # otherwise fall back to the most recent season with spray data.
+    spray_season_id: str | None = (
+        current_batting["season_id"] if current_batting is not None else None
+    )
+    if spray_season_id is None and pitching_seasons:
+        spray_season_id = pitching_seasons[0]["season_id"]
+
+    if spray_season_id is not None:
+        spray_bip_count: int = await run_in_threadpool(
+            db.get_player_spray_bip_count, player_id, spray_season_id
+        )
+    else:
+        spray_bip_count = 0
+
     logger.debug("Player profile: player_id=%s", player_id)
 
     return templates.TemplateResponse(
@@ -1851,5 +1887,89 @@ async def player_profile(request: Request, player_id: str) -> Response:
             "year": year_pp,
             "active_year": year_pp,
             "user": user,
+            "spray_bip_count": spray_bip_count,
+            "spray_season_id": spray_season_id,
         },
     )
+
+
+@router.get("/dashboard/charts/spray/player/{player_id}.png", response_model=None)
+async def player_spray_chart_image(
+    request: Request,
+    player_id: str,
+    season_id: str | None = None,
+) -> Response:
+    """Render an offensive spray chart PNG for a single player.
+
+    Returns the rendered PNG image when the player has ≥1 offensive BIP event
+    for the requested season.  Returns 204 No Content when no events exist.
+
+    When ``season_id`` is omitted, uses the most recent season with spray data
+    for this player.
+
+    Authorization: requires an authenticated session (``permitted_teams`` must
+    be non-empty) but deliberately skips the per-player ``permitted_teams``
+    check.  Reason: opponent players cannot pass ``permitted_teams`` but their
+    spray data is legitimately viewable (spray chart auth exception, per
+    CLAUDE.md Architecture section).
+
+    Args:
+        request:   The incoming HTTP request.
+        player_id: The player's UUID from the URL path.
+        season_id: Optional season slug query parameter.
+
+    Returns:
+        200 ``image/png`` response with rendered PNG bytes, or 204 No Content.
+    """
+    permitted_teams: list[int] = getattr(request.state, "permitted_teams", [])
+    if not permitted_teams:
+        return HTMLResponse(content="Forbidden", status_code=403)
+
+    events, title = await run_in_threadpool(db.get_player_spray_events, player_id, season_id)
+
+    if not events:
+        return Response(status_code=204)
+
+    png_bytes: bytes = await run_in_threadpool(render_spray_chart, events, title)
+    return Response(content=png_bytes, media_type="image/png")
+
+
+@router.get("/dashboard/charts/spray/team/{team_id}.png", response_model=None)
+async def team_spray_chart_image(
+    request: Request,
+    team_id: int,
+    season_id: str | None = None,
+) -> Response:
+    """Render an offensive spray chart PNG aggregating all players on a team.
+
+    Returns the rendered PNG image when the team has ≥1 offensive BIP event
+    for the requested season.  Returns 204 No Content when no events exist.
+
+    When ``season_id`` is omitted, uses the most recent season with spray data
+    for this team.
+
+    Authorization: requires an authenticated session (``permitted_teams`` must
+    be non-empty) but deliberately skips the per-team ``permitted_teams``
+    check.  Reason: opponent teams cannot pass ``permitted_teams`` but their
+    spray data is legitimately viewable (spray chart auth exception, per
+    CLAUDE.md Architecture section).
+
+    Args:
+        request:   The incoming HTTP request.
+        team_id:   The INTEGER team id from the URL path.
+        season_id: Optional season slug query parameter.
+
+    Returns:
+        200 ``image/png`` response with rendered PNG bytes, or 204 No Content.
+    """
+    permitted_teams: list[int] = getattr(request.state, "permitted_teams", [])
+    if not permitted_teams:
+        return HTMLResponse(content="Forbidden", status_code=403)
+
+    events, title = await run_in_threadpool(db.get_team_spray_events, team_id, season_id)
+
+    if not events:
+        return Response(status_code=204)
+
+    png_bytes: bytes = await run_in_threadpool(render_spray_chart, events, title)
+    return Response(content=png_bytes, media_type="image/png")

@@ -1642,6 +1642,209 @@ def get_opponent_scouting_status(
         return {"status": "unlinked", "link_id": None}
 
 
+def get_team_spray_bip_count(team_id: int, season_id: str) -> int:
+    """Return the count of offensive BIP events for a team in a season.
+
+    Args:
+        team_id:   The INTEGER team id.
+        season_id: Season slug to filter events.
+
+    Returns:
+        Integer count of ``chart_type = 'offensive'`` rows, or 0 on error.
+    """
+    try:
+        with closing(get_connection()) as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) FROM spray_charts "
+                "WHERE team_id = ? AND chart_type = 'offensive' AND season_id = ?",
+                (team_id, season_id),
+            ).fetchone()
+        return row[0] if row else 0
+    except sqlite3.Error:
+        logger.exception(
+            "Failed to fetch spray BIP count for team_id=%s season_id=%s",
+            team_id,
+            season_id,
+        )
+        return 0
+
+
+def get_player_spray_bip_counts(
+    player_ids: list[str],
+    season_id: str,
+) -> dict[str, int]:
+    """Return a mapping of player_id → offensive BIP count for a season.
+
+    Runs a single query covering all requested player IDs.  Players with no
+    spray data are absent from the returned dict (callers should use
+    ``dict.get(player_id, 0)``).
+
+    Args:
+        player_ids: List of GC player UUIDs to look up.
+        season_id:  Season slug to filter events.
+
+    Returns:
+        Dict mapping ``player_id`` → count.  Returns ``{}`` on error or when
+        ``player_ids`` is empty.
+    """
+    if not player_ids:
+        return {}
+    placeholders = ",".join("?" for _ in player_ids)
+    query = (
+        f"SELECT player_id, COUNT(*) AS bip_count FROM spray_charts "
+        f"WHERE player_id IN ({placeholders}) "
+        f"AND chart_type = 'offensive' AND season_id = ? "
+        f"GROUP BY player_id"
+    )
+    try:
+        with closing(get_connection()) as conn:
+            rows = conn.execute(query, [*player_ids, season_id]).fetchall()
+        return {row[0]: row[1] for row in rows}
+    except sqlite3.Error:
+        logger.exception(
+            "Failed to fetch spray BIP counts for %d players season_id=%s",
+            len(player_ids),
+            season_id,
+        )
+        return {}
+
+
+def get_player_spray_bip_count(player_id: str, season_id: str) -> int:
+    """Return the count of offensive BIP events for a player in a season.
+
+    Args:
+        player_id: The player's UUID.
+        season_id: Season slug to filter events.
+
+    Returns:
+        Integer count of ``chart_type = 'offensive'`` rows, or 0 on error.
+    """
+    try:
+        with closing(get_connection()) as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) FROM spray_charts "
+                "WHERE player_id = ? AND chart_type = 'offensive' AND season_id = ?",
+                (player_id, season_id),
+            ).fetchone()
+        return row[0] if row else 0
+    except sqlite3.Error:
+        logger.exception(
+            "Failed to fetch spray BIP count for player_id=%s season_id=%s",
+            player_id,
+            season_id,
+        )
+        return 0
+
+
+def get_player_spray_events(
+    player_id: str,
+    season_id: str | None = None,
+) -> tuple[list[dict[str, Any]], str | None]:
+    """Return offensive BIP events and display title for a player's spray chart.
+
+    When ``season_id`` is omitted, uses the most recent season that has
+    spray chart data for this player.
+
+    Args:
+        player_id: The player's UUID.
+        season_id: Season slug to filter events.  When ``None``, uses the most
+                   recent season with spray data for this player.
+
+    Returns:
+        Tuple of ``(events, title)`` where:
+        - ``events``: list of dicts with ``x``, ``y``, ``play_result``
+        - ``title``: ``"{first_name} {last_name}"`` or ``None`` if not found
+        Returns ``([], None)`` on DB error or when no spray data exists.
+    """
+    try:
+        with closing(get_connection()) as conn:
+            conn.row_factory = sqlite3.Row
+
+            if season_id is None:
+                season_row = conn.execute(
+                    "SELECT season_id FROM spray_charts "
+                    "WHERE player_id = ? AND chart_type = 'offensive' "
+                    "ORDER BY season_id DESC LIMIT 1",
+                    (player_id,),
+                ).fetchone()
+                if season_row is None:
+                    return [], None
+                season_id = season_row["season_id"]
+
+            player_row = conn.execute(
+                "SELECT first_name, last_name FROM players WHERE player_id = ?",
+                (player_id,),
+            ).fetchone()
+            title = (
+                f"{player_row['first_name']} {player_row['last_name']}"
+                if player_row else None
+            )
+
+            rows = conn.execute(
+                "SELECT x, y, play_result FROM spray_charts "
+                "WHERE player_id = ? AND chart_type = 'offensive' AND season_id = ?",
+                (player_id, season_id),
+            ).fetchall()
+
+        return [dict(row) for row in rows], title
+    except sqlite3.Error:
+        logger.exception("Failed to fetch player spray events for player_id=%s", player_id)
+        return [], None
+
+
+def get_team_spray_events(
+    team_id: int,
+    season_id: str | None = None,
+) -> tuple[list[dict[str, Any]], str | None]:
+    """Return offensive BIP events and display title for a team's spray chart.
+
+    When ``season_id`` is omitted, uses the most recent season that has
+    spray chart data for this team.
+
+    Args:
+        team_id: The INTEGER team id.
+        season_id: Season slug to filter events.  When ``None``, uses the most
+                   recent season with spray data for this team.
+
+    Returns:
+        Tuple of ``(events, title)`` where:
+        - ``events``: list of dicts with ``x``, ``y``, ``play_result``
+        - ``title``: team name or ``None`` if team not found
+        Returns ``([], None)`` on DB error or when no spray data exists.
+    """
+    try:
+        with closing(get_connection()) as conn:
+            conn.row_factory = sqlite3.Row
+
+            if season_id is None:
+                season_row = conn.execute(
+                    "SELECT season_id FROM spray_charts "
+                    "WHERE team_id = ? AND chart_type = 'offensive' "
+                    "ORDER BY season_id DESC LIMIT 1",
+                    (team_id,),
+                ).fetchone()
+                if season_row is None:
+                    return [], None
+                season_id = season_row["season_id"]
+
+            team_row = conn.execute(
+                "SELECT name FROM teams WHERE id = ?",
+                (team_id,),
+            ).fetchone()
+            title = team_row["name"] if team_row else None
+
+            rows = conn.execute(
+                "SELECT x, y, play_result FROM spray_charts "
+                "WHERE team_id = ? AND chart_type = 'offensive' AND season_id = ?",
+                (team_id, season_id),
+            ).fetchall()
+
+        return [dict(row) for row in rows], title
+    except sqlite3.Error:
+        logger.exception("Failed to fetch team spray events for team_id=%s", team_id)
+        return [], None
+
+
 def check_connection() -> bool:
     """Verify that the database is accessible and the schema is initialized.
 

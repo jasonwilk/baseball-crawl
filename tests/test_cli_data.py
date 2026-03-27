@@ -632,3 +632,207 @@ def test_load_all_scouted_skips_pending_runs(tmp_path: Path) -> None:
 
     assert errors == 0
     mock_loader.load_team.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# bb data crawl --crawler scouting-spray (E-163-01)
+# ---------------------------------------------------------------------------
+
+
+def test_crawl_scouting_spray_is_accepted_as_valid_crawler() -> None:
+    """'scouting-spray' is a valid --crawler choice (not rejected with exit 1)."""
+    mock_spray_crawler = MagicMock()
+    mock_spray_crawler.crawl_all.return_value = MagicMock(
+        files_written=0, files_skipped=0, errors=0
+    )
+
+    with (
+        patch("src.cli.data._resolve_db_path", return_value=Path("/fake/app.db")),
+        patch("src.gamechanger.client.GameChangerClient"),
+        patch("src.cli.data.sqlite3.connect"),
+        patch(
+            "src.gamechanger.crawlers.scouting_spray.ScoutingSprayChartCrawler",
+            return_value=mock_spray_crawler,
+        ),
+    ):
+        result = runner.invoke(app, ["data", "crawl", "--crawler", "scouting-spray"])
+
+    # Should not produce an "Invalid crawler" error.
+    assert "Invalid crawler" not in result.output
+
+
+def test_crawl_scouting_spray_does_not_call_pipeline_factory() -> None:
+    """--crawler scouting-spray does not route through pipeline/crawl.py factory."""
+    mock_spray_crawler = MagicMock()
+    mock_spray_crawler.crawl_all.return_value = MagicMock(
+        files_written=1, files_skipped=0, errors=0
+    )
+
+    with (
+        patch("src.pipeline.crawl.run") as mock_factory,
+        patch("src.cli.data._resolve_db_path", return_value=Path("/fake/app.db")),
+        patch("src.gamechanger.client.GameChangerClient"),
+        patch("src.cli.data.sqlite3.connect"),
+        patch(
+            "src.gamechanger.crawlers.scouting_spray.ScoutingSprayChartCrawler",
+            return_value=mock_spray_crawler,
+        ),
+    ):
+        runner.invoke(app, ["data", "crawl", "--crawler", "scouting-spray"])
+
+    mock_factory.assert_not_called()
+
+
+def test_crawl_scouting_spray_calls_crawl_all() -> None:
+    """--crawler scouting-spray invokes ScoutingSprayChartCrawler.crawl_all()."""
+    mock_spray_crawler = MagicMock()
+    mock_spray_crawler.crawl_all.return_value = MagicMock(
+        files_written=3, files_skipped=1, errors=0
+    )
+
+    with (
+        patch("src.cli.data._resolve_db_path", return_value=Path("/fake/app.db")),
+        patch("src.gamechanger.client.GameChangerClient"),
+        patch("src.cli.data.sqlite3.connect"),
+        patch(
+            "src.gamechanger.crawlers.scouting_spray.ScoutingSprayChartCrawler",
+            return_value=mock_spray_crawler,
+        ),
+    ):
+        result = runner.invoke(app, ["data", "crawl", "--crawler", "scouting-spray"])
+
+    mock_spray_crawler.crawl_all.assert_called_once()
+    assert result.exit_code == 0
+
+
+def test_crawl_scouting_spray_errors_exit_code_1() -> None:
+    """--crawler scouting-spray exits with code 1 if crawl_all reports errors."""
+    mock_spray_crawler = MagicMock()
+    mock_spray_crawler.crawl_all.return_value = MagicMock(
+        files_written=0, files_skipped=0, errors=2
+    )
+
+    with (
+        patch("src.cli.data._resolve_db_path", return_value=Path("/fake/app.db")),
+        patch("src.gamechanger.client.GameChangerClient"),
+        patch("src.cli.data.sqlite3.connect"),
+        patch(
+            "src.gamechanger.crawlers.scouting_spray.ScoutingSprayChartCrawler",
+            return_value=mock_spray_crawler,
+        ),
+    ):
+        result = runner.invoke(app, ["data", "crawl", "--crawler", "scouting-spray"])
+
+    assert result.exit_code == 1
+
+
+# ---------------------------------------------------------------------------
+# bb data load --loader scouting-spray (E-163-02)
+# ---------------------------------------------------------------------------
+
+
+def test_load_scouting_spray_is_accepted_as_valid_loader() -> None:
+    """'scouting-spray' is a valid --loader choice (not rejected with exit 1)."""
+    mock_spray_loader = MagicMock()
+    mock_spray_loader.load_all.return_value = MagicMock(loaded=0, skipped=0, errors=0)
+
+    with (
+        patch("src.cli.data._resolve_db_path", return_value=Path("/fake/app.db")),
+        patch("src.cli.data.sqlite3.connect"),
+        patch(
+            "src.gamechanger.loaders.scouting_spray_loader.ScoutingSprayChartLoader",
+            return_value=mock_spray_loader,
+        ),
+    ):
+        result = runner.invoke(app, ["data", "load", "--loader", "scouting-spray"])
+
+    assert "Invalid loader" not in result.output
+
+
+def test_load_scouting_spray_does_not_call_pipeline_factory() -> None:
+    """--loader scouting-spray does not route through pipeline/load.py factory."""
+    mock_spray_loader = MagicMock()
+    mock_spray_loader.load_all.return_value = MagicMock(loaded=1, skipped=0, errors=0)
+
+    with (
+        patch("src.pipeline.load.run") as mock_factory,
+        patch("src.cli.data._resolve_db_path", return_value=Path("/fake/app.db")),
+        patch("src.cli.data.sqlite3.connect"),
+        patch(
+            "src.gamechanger.loaders.scouting_spray_loader.ScoutingSprayChartLoader",
+            return_value=mock_spray_loader,
+        ),
+    ):
+        runner.invoke(app, ["data", "load", "--loader", "scouting-spray"])
+
+    mock_factory.assert_not_called()
+
+
+def test_load_scouting_spray_calls_load_all() -> None:
+    """--loader scouting-spray invokes ScoutingSprayChartLoader.load_all()."""
+    mock_spray_loader = MagicMock()
+    mock_spray_loader.load_all.return_value = MagicMock(loaded=3, skipped=1, errors=0)
+
+    with (
+        patch("src.cli.data._resolve_db_path", return_value=Path("/fake/app.db")),
+        patch("src.cli.data.sqlite3.connect"),
+        patch(
+            "src.gamechanger.loaders.scouting_spray_loader.ScoutingSprayChartLoader",
+            return_value=mock_spray_loader,
+        ),
+    ):
+        result = runner.invoke(app, ["data", "load", "--loader", "scouting-spray"])
+
+    mock_spray_loader.load_all.assert_called_once()
+    assert result.exit_code == 0
+
+
+def test_load_scouting_spray_errors_exit_code_1() -> None:
+    """--loader scouting-spray exits with code 1 if load_all reports errors."""
+    mock_spray_loader = MagicMock()
+    mock_spray_loader.load_all.return_value = MagicMock(loaded=0, skipped=0, errors=2)
+
+    with (
+        patch("src.cli.data._resolve_db_path", return_value=Path("/fake/app.db")),
+        patch("src.cli.data.sqlite3.connect"),
+        patch(
+            "src.gamechanger.loaders.scouting_spray_loader.ScoutingSprayChartLoader",
+            return_value=mock_spray_loader,
+        ),
+    ):
+        result = runner.invoke(app, ["data", "load", "--loader", "scouting-spray"])
+
+    assert result.exit_code == 1
+
+
+# ---------------------------------------------------------------------------
+# Finding 1: dry_run bypass fix
+# ---------------------------------------------------------------------------
+
+
+def test_crawl_scouting_spray_dry_run_skips_crawl() -> None:
+    """--dry-run + --crawler scouting-spray prints message and exits 0 without crawling."""
+    with patch(
+        "src.gamechanger.crawlers.scouting_spray.ScoutingSprayChartCrawler"
+    ) as mock_cls:
+        result = runner.invoke(
+            app, ["data", "crawl", "--dry-run", "--crawler", "scouting-spray"]
+        )
+
+    mock_cls.assert_not_called()
+    assert result.exit_code == 0
+    assert "Dry run" in result.output
+
+
+def test_load_scouting_spray_dry_run_skips_load() -> None:
+    """--dry-run + --loader scouting-spray prints message and exits 0 without loading."""
+    with patch(
+        "src.gamechanger.loaders.scouting_spray_loader.ScoutingSprayChartLoader"
+    ) as mock_cls:
+        result = runner.invoke(
+            app, ["data", "load", "--dry-run", "--loader", "scouting-spray"]
+        )
+
+    mock_cls.assert_not_called()
+    assert result.exit_code == 0
+    assert "Dry run" in result.output

@@ -576,3 +576,486 @@ def test_load_scouted_team_sets_completed_status_on_success(tmp_path: Path) -> N
     assert row is not None
     assert row[0] == "completed", f"Expected status='completed', got '{row[0]}'"
     assert row[1] is not None, "Expected completed_at to be set for completed run"
+
+
+# ---------------------------------------------------------------------------
+# E-163-01: scout triggers scouting spray crawl (AC-5)
+# ---------------------------------------------------------------------------
+
+
+def _mock_spray_result(
+    files_written: int = 1,
+    files_skipped: int = 0,
+    errors: int = 0,
+) -> MagicMock:
+    """Build a mock CrawlResult for the scouting spray crawl."""
+    r = MagicMock()
+    r.files_written = files_written
+    r.files_skipped = files_skipped
+    r.errors = errors
+    return r
+
+
+def test_scout_triggers_scouting_spray_crawl_all(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """bb data scout calls ScoutingSprayChartCrawler.crawl_all() (AC-5)."""
+    _patch_credentials(monkeypatch)
+    _patch_token_manager(monkeypatch)
+
+    from src.gamechanger.crawlers import CrawlResult
+
+    mock_crawler = MagicMock()
+    mock_crawler.scout_all.return_value = CrawlResult(files_written=2)
+    mock_spray_crawler = MagicMock()
+    mock_spray_crawler.crawl_all.return_value = _mock_spray_result()
+
+    db_path = tmp_path / "test.db"
+    from migrations.apply_migrations import run_migrations
+    run_migrations(db_path=db_path)
+
+    with (
+        patch("src.gamechanger.client.GameChangerClient"),
+        patch("src.gamechanger.crawlers.scouting.ScoutingCrawler", return_value=mock_crawler),
+        patch("src.gamechanger.loaders.scouting_loader.ScoutingLoader"),
+        patch("src.cli.data._load_all_scouted", return_value=0),
+        patch(
+            "src.gamechanger.crawlers.scouting_spray.ScoutingSprayChartCrawler",
+            return_value=mock_spray_crawler,
+        ),
+        patch("src.cli.data._resolve_db_path", return_value=db_path),
+    ):
+        result = runner.invoke(app, ["data", "scout"])
+
+    mock_spray_crawler.crawl_all.assert_called_once()
+    assert result.exit_code == 0
+
+
+def test_scout_with_team_calls_spray_crawl_team(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """bb data scout --team calls ScoutingSprayChartCrawler.crawl_team(public_id) (AC-5)."""
+    _patch_credentials(monkeypatch)
+    _patch_token_manager(monkeypatch)
+
+    from src.gamechanger.crawlers import CrawlResult
+
+    mock_crawler = MagicMock()
+    mock_crawler.scout_team.return_value = CrawlResult(files_written=2)
+    mock_spray_crawler = MagicMock()
+    mock_spray_crawler.crawl_team.return_value = _mock_spray_result()
+
+    db_path = tmp_path / "test.db"
+    from migrations.apply_migrations import run_migrations
+    run_migrations(db_path=db_path)
+
+    with (
+        patch("src.gamechanger.client.GameChangerClient"),
+        patch("src.gamechanger.crawlers.scouting.ScoutingCrawler", return_value=mock_crawler),
+        patch("src.gamechanger.loaders.scouting_loader.ScoutingLoader"),
+        patch("src.cli.data._load_scouted_team", return_value=0),
+        patch(
+            "src.gamechanger.crawlers.scouting_spray.ScoutingSprayChartCrawler",
+            return_value=mock_spray_crawler,
+        ),
+        patch("src.cli.data._resolve_db_path", return_value=db_path),
+    ):
+        result = runner.invoke(app, ["data", "scout", "--team", "some-public-id"])
+
+    mock_spray_crawler.crawl_team.assert_called_once_with("some-public-id", season_id=None)
+    assert result.exit_code == 0
+
+
+def test_scout_spray_errors_cause_exit_code_1(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """bb data scout exits 1 when the spray crawl reports errors (AC-5)."""
+    _patch_credentials(monkeypatch)
+    _patch_token_manager(monkeypatch)
+
+    from src.gamechanger.crawlers import CrawlResult
+
+    mock_crawler = MagicMock()
+    mock_crawler.scout_all.return_value = CrawlResult(files_written=2)
+    mock_spray_crawler = MagicMock()
+    mock_spray_crawler.crawl_all.return_value = _mock_spray_result(errors=1)
+
+    db_path = tmp_path / "test.db"
+    from migrations.apply_migrations import run_migrations
+    run_migrations(db_path=db_path)
+
+    with (
+        patch("src.gamechanger.client.GameChangerClient"),
+        patch("src.gamechanger.crawlers.scouting.ScoutingCrawler", return_value=mock_crawler),
+        patch("src.gamechanger.loaders.scouting_loader.ScoutingLoader"),
+        patch("src.cli.data._load_all_scouted", return_value=0),
+        patch(
+            "src.gamechanger.crawlers.scouting_spray.ScoutingSprayChartCrawler",
+            return_value=mock_spray_crawler,
+        ),
+        patch("src.cli.data._resolve_db_path", return_value=db_path),
+    ):
+        result = runner.invoke(app, ["data", "scout"])
+
+    assert result.exit_code == 1
+
+
+def test_scout_spray_exception_causes_exit_code_1(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """bb data scout exits 1 when the spray crawl raises an exception (AC-5)."""
+    _patch_credentials(monkeypatch)
+    _patch_token_manager(monkeypatch)
+
+    from src.gamechanger.crawlers import CrawlResult
+
+    mock_crawler = MagicMock()
+    mock_crawler.scout_all.return_value = CrawlResult(files_written=2)
+    mock_spray_crawler = MagicMock()
+    mock_spray_crawler.crawl_all.side_effect = RuntimeError("network failure")
+
+    db_path = tmp_path / "test.db"
+    from migrations.apply_migrations import run_migrations
+    run_migrations(db_path=db_path)
+
+    with (
+        patch("src.gamechanger.client.GameChangerClient"),
+        patch("src.gamechanger.crawlers.scouting.ScoutingCrawler", return_value=mock_crawler),
+        patch("src.gamechanger.loaders.scouting_loader.ScoutingLoader"),
+        patch("src.cli.data._load_all_scouted", return_value=0),
+        patch(
+            "src.gamechanger.crawlers.scouting_spray.ScoutingSprayChartCrawler",
+            return_value=mock_spray_crawler,
+        ),
+        patch("src.cli.data._resolve_db_path", return_value=db_path),
+    ):
+        result = runner.invoke(app, ["data", "scout"])
+
+    assert result.exit_code == 1
+
+
+def test_scout_dry_run_skips_spray_crawl(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """bb data scout --dry-run does not invoke ScoutingSprayChartCrawler (AC-5)."""
+    _patch_credentials(monkeypatch)
+    _patch_token_manager(monkeypatch)
+
+    with (
+        patch("src.cli.data._resolve_db_path", return_value=Path("/tmp/test.db")),
+        patch(
+            "src.gamechanger.crawlers.scouting_spray.ScoutingSprayChartCrawler"
+        ) as mock_spray_cls,
+    ):
+        result = runner.invoke(app, ["data", "scout", "--dry-run"])
+
+    mock_spray_cls.assert_not_called()
+    assert result.exit_code == 0
+
+
+# ---------------------------------------------------------------------------
+# Finding 2: spray stages skipped when main pipeline fails
+# ---------------------------------------------------------------------------
+
+
+def test_scout_spray_stages_skipped_when_main_pipeline_fails(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """When main scouting pipeline fails, spray crawl and load are not run."""
+    _patch_credentials(monkeypatch)
+    _patch_token_manager(monkeypatch)
+
+    mock_spray_crawler = MagicMock()
+    mock_spray_loader = MagicMock()
+
+    db_path = tmp_path / "test.db"
+    from migrations.apply_migrations import run_migrations
+    run_migrations(db_path=db_path)
+
+    with (
+        patch("src.gamechanger.client.GameChangerClient"),
+        patch("src.cli.data._run_scout_pipeline", return_value=1),  # main pipeline fails
+        patch(
+            "src.gamechanger.crawlers.scouting_spray.ScoutingSprayChartCrawler",
+            return_value=mock_spray_crawler,
+        ),
+        patch(
+            "src.gamechanger.loaders.scouting_spray_loader.ScoutingSprayChartLoader",
+            return_value=mock_spray_loader,
+        ),
+        patch("src.cli.data._resolve_db_path", return_value=db_path),
+    ):
+        result = runner.invoke(app, ["data", "scout"])
+
+    mock_spray_crawler.crawl_all.assert_not_called()
+    mock_spray_loader.load_all.assert_not_called()
+    assert result.exit_code == 1
+
+
+# ---------------------------------------------------------------------------
+# Finding 3: --season passed to spray stages
+# ---------------------------------------------------------------------------
+
+
+def test_scout_season_passed_to_spray_crawl_all(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """--season override is forwarded to spray_crawler.crawl_all(season_id=...)."""
+    _patch_credentials(monkeypatch)
+    _patch_token_manager(monkeypatch)
+
+    from src.gamechanger.crawlers import CrawlResult
+
+    mock_crawler = MagicMock()
+    mock_crawler.scout_all.return_value = CrawlResult(files_written=0)
+    mock_spray_crawler = MagicMock()
+    mock_spray_crawler.crawl_all.return_value = _mock_spray_result()
+    mock_spray_loader = MagicMock()
+    mock_spray_loader.load_all.return_value = _mock_spray_load_result()
+
+    db_path = tmp_path / "test.db"
+    from migrations.apply_migrations import run_migrations
+    run_migrations(db_path=db_path)
+
+    with (
+        patch("src.gamechanger.client.GameChangerClient"),
+        patch("src.gamechanger.crawlers.scouting.ScoutingCrawler", return_value=mock_crawler),
+        patch("src.gamechanger.loaders.scouting_loader.ScoutingLoader"),
+        patch("src.cli.data._load_all_scouted", return_value=0),
+        patch(
+            "src.gamechanger.crawlers.scouting_spray.ScoutingSprayChartCrawler",
+            return_value=mock_spray_crawler,
+        ),
+        patch(
+            "src.gamechanger.loaders.scouting_spray_loader.ScoutingSprayChartLoader",
+            return_value=mock_spray_loader,
+        ),
+        patch("src.cli.data._resolve_db_path", return_value=db_path),
+    ):
+        result = runner.invoke(app, ["data", "scout", "--season", "2025-spring-hs"])
+
+    mock_spray_crawler.crawl_all.assert_called_once_with(season_id="2025-spring-hs")
+    assert result.exit_code == 0
+
+
+def test_scout_season_passed_to_spray_load_all(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """--season override is forwarded to spray_loader.load_all(season_id=...)."""
+    _patch_credentials(monkeypatch)
+    _patch_token_manager(monkeypatch)
+
+    from src.gamechanger.crawlers import CrawlResult
+
+    mock_crawler = MagicMock()
+    mock_crawler.scout_all.return_value = CrawlResult(files_written=0)
+    mock_spray_crawler = MagicMock()
+    mock_spray_crawler.crawl_all.return_value = _mock_spray_result()
+    mock_spray_loader = MagicMock()
+    mock_spray_loader.load_all.return_value = _mock_spray_load_result()
+
+    db_path = tmp_path / "test.db"
+    from migrations.apply_migrations import run_migrations
+    run_migrations(db_path=db_path)
+
+    with (
+        patch("src.gamechanger.client.GameChangerClient"),
+        patch("src.gamechanger.crawlers.scouting.ScoutingCrawler", return_value=mock_crawler),
+        patch("src.gamechanger.loaders.scouting_loader.ScoutingLoader"),
+        patch("src.cli.data._load_all_scouted", return_value=0),
+        patch(
+            "src.gamechanger.crawlers.scouting_spray.ScoutingSprayChartCrawler",
+            return_value=mock_spray_crawler,
+        ),
+        patch(
+            "src.gamechanger.loaders.scouting_spray_loader.ScoutingSprayChartLoader",
+            return_value=mock_spray_loader,
+        ),
+        patch("src.cli.data._resolve_db_path", return_value=db_path),
+    ):
+        result = runner.invoke(app, ["data", "scout", "--season", "2025-spring-hs"])
+
+    _, kwargs = mock_spray_loader.load_all.call_args
+    assert kwargs.get("season_id") == "2025-spring-hs"
+    assert result.exit_code == 0
+
+
+# ---------------------------------------------------------------------------
+# E-163-02: scout triggers scouting spray load (AC-6)
+# ---------------------------------------------------------------------------
+
+
+def _mock_spray_load_result(
+    loaded: int = 1,
+    skipped: int = 0,
+    errors: int = 0,
+) -> MagicMock:
+    r = MagicMock()
+    r.loaded = loaded
+    r.skipped = skipped
+    r.errors = errors
+    return r
+
+
+def test_scout_triggers_scouting_spray_load(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """bb data scout calls ScoutingSprayChartLoader.load_all() after the spray crawl (AC-6)."""
+    _patch_credentials(monkeypatch)
+    _patch_token_manager(monkeypatch)
+
+    from src.gamechanger.crawlers import CrawlResult
+
+    mock_crawler = MagicMock()
+    mock_crawler.scout_all.return_value = CrawlResult(files_written=2)
+    mock_spray_crawler = MagicMock()
+    mock_spray_crawler.crawl_all.return_value = _mock_spray_result()
+    mock_spray_loader = MagicMock()
+    mock_spray_loader.load_all.return_value = _mock_spray_load_result()
+
+    db_path = tmp_path / "test.db"
+    from migrations.apply_migrations import run_migrations
+    run_migrations(db_path=db_path)
+
+    with (
+        patch("src.gamechanger.client.GameChangerClient"),
+        patch("src.gamechanger.crawlers.scouting.ScoutingCrawler", return_value=mock_crawler),
+        patch("src.gamechanger.loaders.scouting_loader.ScoutingLoader"),
+        patch("src.cli.data._load_all_scouted", return_value=0),
+        patch(
+            "src.gamechanger.crawlers.scouting_spray.ScoutingSprayChartCrawler",
+            return_value=mock_spray_crawler,
+        ),
+        patch(
+            "src.gamechanger.loaders.scouting_spray_loader.ScoutingSprayChartLoader",
+            return_value=mock_spray_loader,
+        ),
+        patch("src.cli.data._resolve_db_path", return_value=db_path),
+    ):
+        result = runner.invoke(app, ["data", "scout"])
+
+    mock_spray_loader.load_all.assert_called_once()
+    assert result.exit_code == 0
+
+
+def test_scout_with_team_calls_spray_load_all_with_public_id(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """bb data scout --team passes public_id to load_all() (AC-6)."""
+    _patch_credentials(monkeypatch)
+    _patch_token_manager(monkeypatch)
+
+    from src.gamechanger.crawlers import CrawlResult
+
+    mock_crawler = MagicMock()
+    mock_crawler.scout_team.return_value = CrawlResult(files_written=2)
+    mock_spray_crawler = MagicMock()
+    mock_spray_crawler.crawl_team.return_value = _mock_spray_result()
+    mock_spray_loader = MagicMock()
+    mock_spray_loader.load_all.return_value = _mock_spray_load_result()
+
+    db_path = tmp_path / "test.db"
+    from migrations.apply_migrations import run_migrations
+    run_migrations(db_path=db_path)
+
+    with (
+        patch("src.gamechanger.client.GameChangerClient"),
+        patch("src.gamechanger.crawlers.scouting.ScoutingCrawler", return_value=mock_crawler),
+        patch("src.gamechanger.loaders.scouting_loader.ScoutingLoader"),
+        patch("src.cli.data._load_scouted_team", return_value=0),
+        patch(
+            "src.gamechanger.crawlers.scouting_spray.ScoutingSprayChartCrawler",
+            return_value=mock_spray_crawler,
+        ),
+        patch(
+            "src.gamechanger.loaders.scouting_spray_loader.ScoutingSprayChartLoader",
+            return_value=mock_spray_loader,
+        ),
+        patch("src.cli.data._resolve_db_path", return_value=db_path),
+    ):
+        result = runner.invoke(app, ["data", "scout", "--team", "my-pub-id"])
+
+    mock_spray_loader.load_all.assert_called_once()
+    _, kwargs = mock_spray_loader.load_all.call_args
+    assert kwargs.get("public_id") == "my-pub-id"
+    assert result.exit_code == 0
+
+
+def test_scout_spray_load_errors_cause_exit_code_1(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """bb data scout exits 1 when the spray load reports errors (AC-6)."""
+    _patch_credentials(monkeypatch)
+    _patch_token_manager(monkeypatch)
+
+    from src.gamechanger.crawlers import CrawlResult
+
+    mock_crawler = MagicMock()
+    mock_crawler.scout_all.return_value = CrawlResult(files_written=2)
+    mock_spray_crawler = MagicMock()
+    mock_spray_crawler.crawl_all.return_value = _mock_spray_result()
+    mock_spray_loader = MagicMock()
+    mock_spray_loader.load_all.return_value = _mock_spray_load_result(errors=1)
+
+    db_path = tmp_path / "test.db"
+    from migrations.apply_migrations import run_migrations
+    run_migrations(db_path=db_path)
+
+    with (
+        patch("src.gamechanger.client.GameChangerClient"),
+        patch("src.gamechanger.crawlers.scouting.ScoutingCrawler", return_value=mock_crawler),
+        patch("src.gamechanger.loaders.scouting_loader.ScoutingLoader"),
+        patch("src.cli.data._load_all_scouted", return_value=0),
+        patch(
+            "src.gamechanger.crawlers.scouting_spray.ScoutingSprayChartCrawler",
+            return_value=mock_spray_crawler,
+        ),
+        patch(
+            "src.gamechanger.loaders.scouting_spray_loader.ScoutingSprayChartLoader",
+            return_value=mock_spray_loader,
+        ),
+        patch("src.cli.data._resolve_db_path", return_value=db_path),
+    ):
+        result = runner.invoke(app, ["data", "scout"])
+
+    assert result.exit_code == 1
+
+
+def test_scout_spray_load_exception_causes_exit_code_1(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """bb data scout exits 1 when the spray load raises an exception (AC-6)."""
+    _patch_credentials(monkeypatch)
+    _patch_token_manager(monkeypatch)
+
+    from src.gamechanger.crawlers import CrawlResult
+
+    mock_crawler = MagicMock()
+    mock_crawler.scout_all.return_value = CrawlResult(files_written=2)
+    mock_spray_crawler = MagicMock()
+    mock_spray_crawler.crawl_all.return_value = _mock_spray_result()
+    mock_spray_loader = MagicMock()
+    mock_spray_loader.load_all.side_effect = RuntimeError("db error")
+
+    db_path = tmp_path / "test.db"
+    from migrations.apply_migrations import run_migrations
+    run_migrations(db_path=db_path)
+
+    with (
+        patch("src.gamechanger.client.GameChangerClient"),
+        patch("src.gamechanger.crawlers.scouting.ScoutingCrawler", return_value=mock_crawler),
+        patch("src.gamechanger.loaders.scouting_loader.ScoutingLoader"),
+        patch("src.cli.data._load_all_scouted", return_value=0),
+        patch(
+            "src.gamechanger.crawlers.scouting_spray.ScoutingSprayChartCrawler",
+            return_value=mock_spray_crawler,
+        ),
+        patch(
+            "src.gamechanger.loaders.scouting_spray_loader.ScoutingSprayChartLoader",
+            return_value=mock_spray_loader,
+        ),
+        patch("src.cli.data._resolve_db_path", return_value=db_path),
+    ):
+        result = runner.invoke(app, ["data", "scout"])
+
+    assert result.exit_code == 1

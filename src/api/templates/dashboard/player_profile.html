@@ -201,17 +201,13 @@
 {# Spray Chart card (E-158-05, TN-7) #}
 <div class="mb-4 bg-white rounded shadow border border-gray-200 p-4">
   <h2 class="text-base font-bold text-blue-900 mb-1">Spray Chart</h2>
-  {% if spray_bip_count >= 10 %}
+  {% if spray_bip_count >= 1 %}
   <p class="text-xs text-gray-600 mb-3">Based on {{ spray_bip_count }} balls in play</p>
   <img src="/dashboard/charts/spray/player/{{ player.player_id }}.png{% if spray_season_id %}?season_id={{ spray_season_id }}{% endif %}"
        alt="Spray chart for {{ player.first_name }} {{ player.last_name }}"
        class="w-full block">
-  {% elif spray_bip_count >= 5 %}
-  <p class="text-sm text-gray-600">Small sample &mdash; {{ spray_bip_count }} balls in play</p>
-  {% elif spray_bip_count > 0 %}
-  <p class="text-sm text-gray-600">Not enough data yet &mdash; {{ spray_bip_count }} balls in play recorded</p>
   {% else %}
-  <p class="text-sm text-gray-600">Charts will appear after the next sync.</p>
+  <p class="text-sm text-gray-600">No spray chart data available</p>
   {% endif %}
 </div>
 

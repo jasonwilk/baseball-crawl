@@ -2639,10 +2639,10 @@ class TestPlayerSprayChartImage:
             with TestClient(app) as client:
                 yield client, lsb_team_id
 
-    def test_image_route_returns_200_for_player_with_10_plus_events(
+    def test_image_route_returns_200_for_player_with_1_plus_events(
         self, spray_chart_client
     ) -> None:
-        """Image route returns 200 for player with >= 10 offensive BIP (AC-9)."""
+        """Image route returns 200 for player with >= 1 offensive BIP (TN-5 threshold)."""
         client, _ = spray_chart_client
         response = client.get(
             f"/dashboard/charts/spray/player/gc-p-001.png?season_id={_CURRENT_SEASON_ID}"
@@ -2674,15 +2674,19 @@ class TestPlayerSprayChartImage:
         )
         assert len(response.content) > 0
 
-    def test_image_route_returns_204_for_player_with_fewer_than_10_events(
+    def test_image_route_returns_200_for_player_with_any_events(
         self, spray_chart_client
     ) -> None:
-        """Image route returns 204 No Content for player with < 10 BIP (AC-3, AC-9)."""
+        """Image route returns 200 for player with any BIP events (TN-5: ≥1 threshold).
+
+        gc-p-002 has 5 spray events -- under the old 10-event threshold this
+        returned 204, but TN-5 removed the threshold gate.
+        """
         client, _ = spray_chart_client
         response = client.get(
             f"/dashboard/charts/spray/player/gc-p-002.png?season_id={_CURRENT_SEASON_ID}"
         )
-        assert response.status_code == 204
+        assert response.status_code == 200
 
     def test_image_route_returns_204_for_player_with_no_events(
         self, spray_chart_client
@@ -2702,6 +2706,27 @@ class TestPlayerSprayChartImage:
         # gc-p-nostats has no spray events in any season
         response = client.get("/dashboard/charts/spray/player/gc-p-nostats.png")
         assert response.status_code == 204
+
+    def test_image_route_default_season_returns_200_when_events_exist(
+        self, spray_chart_client
+    ) -> None:
+        """Image route infers most recent season and returns 200 when events exist (AC-4 positive path)."""
+        client, _ = spray_chart_client
+        # gc-p-001 has 12 events -- omit season_id so the route must infer the season
+        response = client.get("/dashboard/charts/spray/player/gc-p-001.png")
+        assert response.status_code == 200
+
+    def test_image_route_title_is_player_full_name(self, spray_chart_client) -> None:
+        """render_spray_chart is called with title '{first_name} {last_name}' (AC-7)."""
+        client, _ = spray_chart_client
+        with patch("src.api.routes.dashboard.render_spray_chart") as mock_render:
+            mock_render.return_value = b"\x89PNG\r\n\x1a\n" + b"\x00" * 100
+            client.get(
+                f"/dashboard/charts/spray/player/gc-p-001.png?season_id={_CURRENT_SEASON_ID}"
+            )
+        mock_render.assert_called_once()
+        _, called_title = mock_render.call_args.args
+        assert called_title == "Marcus Whitehorse"
 
 
 class TestPlayerProfileSprayCard:
@@ -2741,37 +2766,42 @@ class TestPlayerProfileSprayCard:
         response = client.get("/dashboard/players/gc-p-001")
         assert "/dashboard/charts/spray/player/gc-p-001.png" in response.text
 
-    def test_spray_chart_card_small_sample_message_for_5_to_9_events(
+    def test_spray_chart_card_shows_img_and_subtitle_for_5_events(
         self, spray_chart_client
     ) -> None:
-        """Player with 5-9 BIP shows 'Small sample' message (AC-7b).
+        """Player with 5 BIP shows spray chart image and 'Based on 5 balls in play' (TN-5 ≥1 threshold).
 
-        gc-p-002 has 5 spray events, which is in the 5-9 range.
+        gc-p-002 has 5 spray events -- old behavior showed 'Small sample' but
+        TN-5 removes threshold gates and shows the chart for any BIP count.
         """
         client, _ = spray_chart_client
         response = client.get("/dashboard/players/gc-p-002")
-        assert "Small sample" in response.text
-        assert "5 balls in play" in response.text
+        assert "Based on 5 balls in play" in response.text
+        assert "/dashboard/charts/spray/player/gc-p-002.png" in response.text
+        assert "Small sample" not in response.text
 
-    def test_spray_chart_card_not_enough_data_message_for_1_to_4_events(
+    def test_spray_chart_card_shows_img_and_subtitle_for_3_events(
         self, spray_chart_client
     ) -> None:
-        """Player with 1-4 BIP shows 'Not enough data yet' message (AC-7c).
+        """Player with 3 BIP shows spray chart image and 'Based on 3 balls in play' (TN-5 ≥1 threshold).
 
-        gc-p-003 has 3 spray events, which is in the 1-4 range.
+        gc-p-003 has 3 spray events -- old behavior showed 'Not enough data yet' but
+        TN-5 removes threshold gates and shows the chart for any BIP count.
         """
         client, _ = spray_chart_client
         response = client.get("/dashboard/players/gc-p-003")
-        assert "Not enough data yet" in response.text
-        assert "balls in play recorded" in response.text
+        assert "Based on 3 balls in play" in response.text
+        assert "/dashboard/charts/spray/player/gc-p-003.png" in response.text
+        assert "Not enough data yet" not in response.text
 
-    def test_spray_chart_card_zero_bip_shows_sync_message(
+    def test_spray_chart_card_zero_bip_shows_no_data_message(
         self, spray_chart_client
     ) -> None:
-        """Player with 0 BIP shows 'Charts will appear after the next sync.' (AC-7d)."""
+        """Player with 0 BIP shows 'No spray chart data available' (TN-5 canonical empty state)."""
         client, _ = spray_chart_client
         response = client.get("/dashboard/players/gc-p-nostats")
-        assert "Charts will appear after the next sync." in response.text
+        assert "No spray chart data available" in response.text
+        assert "Charts will appear after the next sync." not in response.text
 
 
 # ---------------------------------------------------------------------------
@@ -2865,12 +2895,13 @@ class TestTeamSprayChartImage:
         # If aggregation works, 20 events >= threshold, so PNG is returned.
         assert response.content[:8] == b"\x89PNG\r\n\x1a\n"
 
-    def test_team_image_route_returns_204_for_fewer_than_20_events(
+    def test_team_image_route_returns_200_for_any_events(
         self, tmp_path: Path
     ) -> None:
-        """Team image route returns 204 No Content when < 20 BIP events exist (AC-11).
+        """Team image route returns 200 when any BIP events exist (TN-5: ≥1 threshold).
 
-        Uses a fresh DB with only 19 events for the opponent team.
+        Uses a fresh DB with 19 events — under the old 20-event threshold this
+        returned 204, but TN-5 removed the threshold gate.
         """
         db_path = tmp_path / "test_opp_spray_sparse.db"
         _apply_schema(db_path)
@@ -2879,7 +2910,6 @@ class TestTeamSprayChartImage:
         _insert_players_and_batting(conn, lsb_team_id)
         opp_team_id, _ = _insert_game_data(conn, lsb_team_id)
         _insert_opponent_stats(conn, lsb_team_id, opp_team_id)
-        # Insert only 19 events total (below the 20-event team threshold)
         _insert_spray_chart_events(conn, "opp-p-001", opp_team_id, _CURRENT_SEASON_ID, 19)
         conn.commit()
         conn.close()
@@ -2894,7 +2924,7 @@ class TestTeamSprayChartImage:
                     f"/dashboard/charts/spray/team/{opp_team_id}.png"
                     f"?season_id={_CURRENT_SEASON_ID}"
                 )
-        assert response.status_code == 204
+        assert response.status_code == 200
 
     def test_team_image_route_filters_by_season_id(
         self, tmp_path: Path
@@ -2926,6 +2956,29 @@ class TestTeamSprayChartImage:
                     f"?season_id={_CURRENT_SEASON_ID}"
                 )
         assert response.status_code == 204
+
+    def test_team_image_route_default_season_returns_200_when_events_exist(
+        self, opp_spray_client
+    ) -> None:
+        """Team image route infers most recent season and returns 200 when events exist (AC-4 positive path)."""
+        client, _, opp_team_id = opp_spray_client
+        # opp_team_id has 20 events -- omit season_id so the route must infer the season
+        response = client.get(f"/dashboard/charts/spray/team/{opp_team_id}.png")
+        assert response.status_code == 200
+
+    def test_team_image_route_title_is_team_name(self, opp_spray_client) -> None:
+        """render_spray_chart is called with the team's name as title (AC-7)."""
+        client, _, opp_team_id = opp_spray_client
+        # opp_team_id = "Rival High School" (from _insert_game_data)
+        with patch("src.api.routes.dashboard.render_spray_chart") as mock_render:
+            mock_render.return_value = b"\x89PNG\r\n\x1a\n" + b"\x00" * 100
+            client.get(
+                f"/dashboard/charts/spray/team/{opp_team_id}.png"
+                f"?season_id={_CURRENT_SEASON_ID}"
+            )
+        mock_render.assert_called_once()
+        _, called_title = mock_render.call_args.args
+        assert called_title == "Rival High School"
 
 
 class TestOpponentDetailSprayCard:
@@ -2963,18 +3016,21 @@ class TestOpponentDetailSprayCard:
         response = self._get_opponent_detail(client, lsb_team_id, opp_team_id)
         assert f"/dashboard/charts/spray/team/{opp_team_id}.png" in response.text
 
-    def test_team_spray_card_shows_bip_subtitle_for_20_plus_events(
+    def test_team_spray_card_shows_bip_subtitle_for_any_events(
         self, opp_spray_client
     ) -> None:
-        """Opponent detail page shows 'Based on N balls in play' subtitle for >= 20 BIP (AC-11)."""
+        """Opponent detail page shows 'Based on N balls in play' subtitle for ≥1 BIP (TN-5)."""
         client, lsb_team_id, opp_team_id = opp_spray_client
         response = self._get_opponent_detail(client, lsb_team_id, opp_team_id)
         assert "Based on 20 balls in play" in response.text
 
-    def test_team_spray_card_small_sample_for_10_to_19_events(
+    def test_team_spray_card_shows_chart_for_15_events(
         self, tmp_path: Path
     ) -> None:
-        """Opponent detail shows 'Small sample' when team BIP is 10-19 (AC-11 tier b)."""
+        """Opponent detail shows spray chart image for 15 BIP (TN-5 ≥1 threshold).
+
+        Old behavior: 15 BIP showed 'Small sample'. New: shows chart with subtitle.
+        """
         db_path = tmp_path / "test_opp_spray_small.db"
         _apply_schema(db_path)
         conn = sqlite3.connect(str(db_path))
@@ -2996,13 +3052,14 @@ class TestOpponentDetailSprayCard:
                     f"/dashboard/opponents/{opp_team_id}"
                     f"?team_id={lsb_team_id}&season_id={_CURRENT_SEASON_ID}"
                 )
-        assert "Small sample" in response.text
-        assert "balls in play against our teams" in response.text
+        assert "Based on 15 balls in play" in response.text
+        assert f"/dashboard/charts/spray/team/{opp_team_id}.png" in response.text
+        assert "Small sample" not in response.text
 
-    def test_team_spray_card_zero_bip_shows_sync_message(
+    def test_team_spray_card_zero_bip_shows_no_data_message(
         self, tmp_path: Path
     ) -> None:
-        """Opponent detail shows 'Charts will appear' when no BIP events exist (AC-11 tier d)."""
+        """Opponent detail shows 'No spray chart data available' when 0 BIP (TN-5)."""
         db_path = tmp_path / "test_opp_spray_zero.db"
         _apply_schema(db_path)
         conn = sqlite3.connect(str(db_path))
@@ -3024,14 +3081,15 @@ class TestOpponentDetailSprayCard:
                     f"/dashboard/opponents/{opp_team_id}"
                     f"?team_id={lsb_team_id}&season_id={_CURRENT_SEASON_ID}"
                 )
-        assert "Charts will appear after the next sync." in response.text
+        assert "No spray chart data available" in response.text
+        assert "Charts will appear after the next sync." not in response.text
 
-    def test_team_spray_card_not_enough_data_for_1_to_9_events(
+    def test_team_spray_card_shows_chart_for_5_events(
         self, tmp_path: Path
     ) -> None:
-        """Opponent detail shows 'Not enough data yet' when team BIP is 1-9 (AC-7 tier c).
+        """Opponent detail shows spray chart image for 5 BIP (TN-5 ≥1 threshold).
 
-        Uses 5 events — clearly in the 1-9 range.
+        Old behavior: 5 BIP showed 'Not enough data yet'. New: shows chart with subtitle.
         """
         db_path = tmp_path / "test_opp_spray_tiny.db"
         _apply_schema(db_path)
@@ -3054,29 +3112,25 @@ class TestOpponentDetailSprayCard:
                     f"/dashboard/opponents/{opp_team_id}"
                     f"?team_id={lsb_team_id}&season_id={_CURRENT_SEASON_ID}"
                 )
-        assert "Not enough data yet" in response.text
-        assert "balls in play recorded" in response.text
+        assert "Based on 5 balls in play" in response.text
+        assert f"/dashboard/charts/spray/team/{opp_team_id}.png" in response.text
+        assert "Not enough data yet" not in response.text
 
-    def test_batting_table_note_above_table(self, opp_spray_client) -> None:
-        """Opponent detail batting table has note about 10+ BIP threshold (E-158-06 AC-11)."""
-        client, lsb_team_id, opp_team_id = opp_spray_client
-        response = self._get_opponent_detail(client, lsb_team_id, opp_team_id)
-        assert "Only showing spray charts for players with 10+ balls in play." in response.text
-
-    def test_batting_table_view_spray_link_for_player_with_10_plus_bip(
+    def test_batting_table_view_spray_link_for_player_with_any_bip(
         self, opp_spray_client
     ) -> None:
-        """Batting leaders shows 'View spray' link for opp-p-001 with 12 BIP (AC-11)."""
+        """Batting leaders shows 'View spray' link for any player with ≥1 BIP (TN-5 threshold)."""
         client, lsb_team_id, opp_team_id = opp_spray_client
         response = self._get_opponent_detail(client, lsb_team_id, opp_team_id)
+        # opp-p-001 has 12 BIP — link must appear
         assert "/dashboard/charts/spray/player/opp-p-001.png" in response.text
         assert "View spray" in response.text
 
-    def test_batting_table_no_spray_link_for_player_with_fewer_than_10_bip(
+    def test_batting_table_spray_link_also_shown_for_player_with_5_bip(
         self, opp_spray_client
     ) -> None:
-        """Batting leaders shows no spray link for opp-p-002 with 5 BIP (< 10 threshold)."""
+        """Batting leaders shows spray link for opp-p-002 with 5 BIP (TN-5 removes threshold gate)."""
         client, lsb_team_id, opp_team_id = opp_spray_client
         response = self._get_opponent_detail(client, lsb_team_id, opp_team_id)
-        # opp-p-002 has 5 BIP — link should not appear
-        assert "/dashboard/charts/spray/player/opp-p-002.png" not in response.text
+        # opp-p-002 has 5 BIP — under TN-5 (≥1), the link must appear
+        assert "/dashboard/charts/spray/player/opp-p-002.png" in response.text

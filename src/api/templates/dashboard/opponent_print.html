@@ -333,7 +333,13 @@
       <div class="tendency-card-name">
         {% if player.jersey_number %}#{{ player.jersey_number }} {% endif %}{{ player.name }}
       </div>
-      <div class="spray-placeholder">Spray chart coming soon</div>
+      {% if player_spray_bip_counts.get(player.player_id, 0) >= 1 %}
+      <img src="/dashboard/charts/spray/player/{{ player.player_id }}.png?season_id={{ season_id }}"
+           alt="Spray chart"
+           style="width: 100%; display: block;">
+      {% else %}
+      <p style="font-size: 8pt; color: #999; margin: 0;">No spray chart data available</p>
+      {% endif %}
     </div>
     {% endfor %}
   </div>

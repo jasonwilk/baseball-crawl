@@ -1,7 +1,7 @@
 # E-163: Full-Season Opponent Spray Charts and Dashboard Display
 
 ## Status
-`READY`
+`COMPLETED`
 <!-- Lifecycle: DRAFT → READY → ACTIVE → COMPLETED (or BLOCKED / ABANDONED) -->
 <!-- PM sets READY explicitly after: expert consultation done, all stories have testable ACs, quality checklist passed. -->
 <!-- Only READY and ACTIVE epics can be dispatched. -->
@@ -41,11 +41,11 @@ The operator wants: (1) full-season spray charts for all opponents, not just BIP
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-163-01 | Scouting Spray Chart Crawler | TODO | None | - |
-| E-163-02 | Scouting Spray Chart Loader | TODO | E-163-01 | - |
-| E-163-03 | Spray Chart Image Routes | TODO | None | - |
-| E-163-04 | Fix Player Profile Spray Chart Display | TODO | E-163-03 | - |
-| E-163-05 | Opponent Page Spray Charts | TODO | E-163-03, E-163-04 | - |
+| E-163-01 | Scouting Spray Chart Crawler | DONE | None | - |
+| E-163-02 | Scouting Spray Chart Loader | DONE | E-163-01 | - |
+| E-163-03 | Spray Chart Image Routes | DONE | None | - |
+| E-163-04 | Fix Player Profile Spray Chart Display | DONE | E-163-03 | - |
+| E-163-05 | Opponent Page Spray Charts | DONE | E-163-03, E-163-04 | - |
 
 ## Dispatch Team
 - software-engineer
@@ -158,3 +158,32 @@ None.
 | Internal iteration 1 — Holistic team | 18 | 13 | 5 |
 | Codex iteration 1 | 6 | 4 | 2 |
 | **Total** | **30** | **23** | **7** |
+
+- 2026-03-27: All 5 stories DONE. Codex code review (Phase 4b) — 3 findings, 3 accepted, 0 dismissed:
+  1. P1 FIXED: dry_run bypass for scouting-spray in crawl/load commands — added dry_run check before special case
+  2. P1 FIXED: spray stages ran after failed main scout — now skip with WARNING when pipeline exit_code != 0
+  3. P2 FIXED: --season override not scoped to spray stages — season_id now forwarded to crawler and loader
+- 2026-03-27: Epic COMPLETED. All 5 stories DONE, all review gates passed. Fixed 46 pre-existing test failures. Implementation review scorecard:
+
+| Review Pass | Findings | Accepted | Dismissed |
+|---|---|---|---|
+| Per-story CR — E-163-01 | 0 | 0 | 0 |
+| Per-story CR — E-163-02 | 0 | 0 | 0 |
+| Per-story CR — E-163-03 | 3 | 3 | 0 |
+| Per-story CR — E-163-04 | 0 | 0 | 0 |
+| Per-story CR — E-163-05 | 0 | 0 | 0 |
+| CR integration review | 0 | 0 | 0 |
+| Codex code review | 3 | 3 | 0 |
+| **Total** | **6** | **6** | **0** |
+
+- 2026-03-27: Documentation assessment — **Update required.** Triggers fired: (1) New feature shipped: scouting spray chart pipeline, spray chart image routes, spray chart display on 3 dashboard surfaces. (2) New CLI commands: `--crawler scouting-spray`, `--loader scouting-spray`. (5) Epic changes how coaches interact with spray data on opponent pages. Recommend dispatching docs-writer to update `docs/admin/` (CLI reference for new crawler/loader commands) and `docs/coaching/` (spray chart feature for coaching staff).
+- 2026-03-27: Context-layer assessment:
+  1. **New convention, pattern, or constraint?** No. Adapts existing patterns (SprayChartLoader, ScoutingCrawler, CLI special-casing).
+  2. **Architectural decision with ongoing implications?** No. Scouting spray is an additive pipeline step following established patterns.
+  3. **Footgun, failure mode, or boundary discovered?** No. The dry_run bypass and pipeline failure propagation were bugs fixed during review, not new boundaries.
+  4. **Change to agent behavior, routing, or coordination?** No.
+  5. **Domain knowledge for future epics?** No. The API constraint (gc_uuid required, 33/63 opponents have it) and player-stats endpoint behavior are already documented in the epic and API docs.
+  6. **New CLI command, workflow, or operational procedure?** Yes — `--crawler scouting-spray` and `--loader scouting-spray` added to `bb data`. However, CLAUDE.md already documents the `bb data` command group generically ("supports `--crawler` and `--loader` flags for targeted pipeline runs") with examples. The new values are self-documenting within the CLI `--help`. No context-layer update needed — the existing CLAUDE.md description covers the pattern.
+  Context-layer verdict: All triggers NO (trigger 6 fires technically but existing CLAUDE.md coverage is sufficient). No claude-architect dispatch needed.
+- 2026-03-27: Ideas backlog review — No newly unblocked ideas from E-163. IDEA-009 (Per-Player Game Stats + Spray Charts) was already triggered; E-163 partially overlaps (spray charts delivered) but per-player per-game stats remain outstanding. IDEA-035 (Opponent Page Redesign) and IDEA-037 (Scouting Report Redesign) note E-153 delivered pitching-first layout; E-163 adds spray charts but proactive flags and PDF export remain.
+- 2026-03-27: Vision signals — 26 unprocessed signals in `docs/vision-signals.md` (last curation: 2026-03-13). Signal from 2026-03-26 about full-season opponent spray charts is now delivered by this epic. Recommend curating vision at next natural pause.

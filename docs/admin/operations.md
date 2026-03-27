@@ -243,6 +243,15 @@ bb data scout --force
 bb data scout --dry-run
 ```
 
+**What `bb data scout` runs**: Four steps in order:
+
+1. **Scouting crawl** (`ScoutingCrawler`) — fetches schedule, roster, and boxscores for each opponent.
+2. **Scouting-spray crawl** (`ScoutingSprayCrawler`) — fetches spray chart data for each scouted opponent.
+3. **Scouting load** (`ScoutingLoader`) — aggregates boxscores into season stats and writes to the database.
+4. **Scouting-spray load** (`ScoutingSprayLoader`) — writes opponent spray chart coordinate data to the `spray_charts` table.
+
+All four steps run automatically when you run `bb data scout`. You can also run the spray steps individually (see [Scouting Spray Chart Pipeline](#scouting-spray-chart-pipeline-bb-data-crawl---crawler-scouting-spray--bb-data-load---loader-scouting-spray) below).
+
 **Freshness check**: By default, `bb data scout` skips any opponent scouted within the last 24 hours. Use `--force` to override this and re-scout all opponents unconditionally. The `--team` flag always scouts the specified opponent regardless of when it was last scouted -- `--force --team PUBLIC_ID` is valid but redundant.
 
 **Output**: After the crawl phase, the command prints a summary line:
@@ -306,6 +315,33 @@ Crawl complete: files_written=N files_skipped=N errors=N
 Load complete for {gc_uuid} (season={season_id}).
 ```
 
+### Scouting Spray Chart Pipeline (`bb data crawl --crawler scouting-spray` / `bb data load --loader scouting-spray`)
+
+The scouting spray chart pipeline fetches and loads spray chart coordinate data for **opponent (tracked) teams**. It complements the own-team spray chart pipeline and is automatically included as steps 2 and 3 of `bb data scout`.
+
+**Pipeline steps -- run in order:**
+
+```bash
+# Step 1: Crawl scouting spray chart data for all tracked opponents
+bb data crawl --crawler scouting-spray
+
+# Step 2: Load crawled data into the spray_charts table
+bb data load --loader scouting-spray
+```
+
+**When to run separately**: `bb data scout` runs both steps automatically. Use these standalone commands when you want to re-load spray data without re-running the full scouting crawl, or when troubleshooting a specific step.
+
+**Dependency**: The scouting-spray crawler reads scouting files written by `ScoutingCrawler`. Run `bb data scout` (or the scouting crawl step manually) before running the scouting-spray crawler in isolation.
+
+**Raw data location**: `data/raw/{season}/teams/{public_id}/scouting-spray/{event_id}.json`
+
+**Output**:
+
+```
+Scouting spray crawl complete: files_written=N files_skipped=N errors=N
+Scouting spray load complete: loaded=N skipped=N errors=N
+```
+
 ### Migration 006: Spray Chart Schema Additions
 
 Migration `migrations/006_spray_charts_indexes.sql` adds three columns and three indexes to the `spray_charts` table (which existed in the base schema but was unpopulated):
@@ -327,12 +363,12 @@ Charts are rendered on-the-fly by `src/charts/spray.py` using `matplotlib` and `
 
 | Route | What it renders |
 |-------|----------------|
-| `GET /dashboard/charts/spray/player/{player_id}.png` | Per-player offensive spray chart for the current (or `?season_id=`) season. Returns 204 if the player has fewer than 10 BIP. |
-| `GET /dashboard/charts/spray/team/{team_id}.png` | Team aggregate offensive spray chart. Returns 204 if the team has fewer than 20 BIP. |
+| `GET /dashboard/charts/spray/player/{player_id}.png` | Per-player offensive spray chart for the current (or `?season_id=`) season. Returns 204 if the player has 0 BIP. |
+| `GET /dashboard/charts/spray/team/{team_id}.png` | Team aggregate offensive spray chart. Returns 204 if the team has 0 BIP. |
 
 Charts render as 4×6 inch PNGs at 150 DPI, matching the 320×480 coordinate space used by GameChanger's own UI. Both routes require an authenticated session (Cloudflare Access) but do **not** perform `permitted_teams` team membership checks -- this is intentional so opponent player charts load correctly from the scouting report.
 
-**Threshold behavior**: The BIP thresholds (10 per player, 20 for team aggregate) are enforced by the image routes (204 response) and separately by the HTML templates (which show threshold-appropriate messages before even attempting to load the image). The 204 response is a defensive fallback for direct URL access.
+**Threshold behavior**: A chart is displayed for any player or team with at least 1 BIP. Players or teams with 0 BIP receive "No spray chart data available" in the dashboard UI; the image route returns HTTP 204 as a defensive fallback for direct URL access.
 
 ## Programs Management
 
@@ -617,4 +653,4 @@ For the expected data volume (~30 games x 4 teams x a few seasons), the database
 
 ---
 
-*Last updated: 2026-03-26 | Source: E-158 (spray chart pipeline, migration 006, chart routes), E-156 (bb data scout --force flag), E-155 (duplicate team detection and merge UI), E-143 (programs, user roles, team delete, opponent mapping UX, crawl trigger UI), E-120-06 (bare UUID input documented), E-055 (unified CLI), E-115-01 (E-100 team management model), E-028-03 (original)*
+*Last updated: 2026-03-27 | Source: E-163 (scouting spray pipeline, updated thresholds, bb data scout 4-step flow), E-158 (spray chart pipeline, migration 006, chart routes), E-156 (bb data scout --force flag), E-155 (duplicate team detection and merge UI), E-143 (programs, user roles, team delete, opponent mapping UX, crawl trigger UI), E-120-06 (bare UUID input documented), E-055 (unified CLI), E-115-01 (E-100 team management model), E-028-03 (original)*
