@@ -1,7 +1,7 @@
 ---
 name: data-engineer
 description: "Database schema design, SQL migration management, ETL pipeline architecture, and query optimization specialist. Designs and implements the data layer against coaching analytics requirements. Requires a story reference before beginning any work."
-model: sonnet
+model: opus[1m]
 color: blue
 memory: project
 tools:
