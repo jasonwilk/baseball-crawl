@@ -91,6 +91,16 @@ baseball-crawl/
 
 ## Schema Changes
 
+### E-167: Migration 007 -- Case-Insensitive Name+Season Year Index
+
+`migrations/007_teams_name_index.sql` adds one index to the `teams` table:
+
+| Addition | Notes |
+|----------|-------|
+| `idx_teams_name_season_year` index | On `(name COLLATE NOCASE, season_year)`. Supports the name-based lookup step in `ensure_team_row()` and the duplicate detection query in `find_duplicate_teams()`. |
+
+The migration is applied automatically on container startup. No column additions or backfills were needed.
+
 ### E-158: Migration 006 -- Spray Chart Schema Additions
 
 `migrations/006_spray_charts_indexes.sql` adds three columns and three indexes to the `spray_charts` table (base table defined in 001, previously unpopulated):
@@ -210,4 +220,4 @@ Sub-navigation links Users, Teams, and Opponents pages across all admin views.
 
 ---
 
-*Last updated: 2026-03-26 | Source: E-158 (src/charts/ module, migration 006 spray chart additions), E-120-06 (opponent_links table, sub-nav Opponents, url_parser correction, port 8001, teams columns), E-115-02 (schema and admin sections rewritten for E-100 fresh-start schema), E-042 (admin team management, url_parser, team_resolver), E-003-02 (original)*
+*Last updated: 2026-03-27 | Source: E-167 (migration 007 name+season_year index), E-158 (src/charts/ module, migration 006 spray chart additions), E-120-06 (opponent_links table, sub-nav Opponents, url_parser correction, port 8001, teams columns), E-115-02 (schema and admin sections rewritten for E-100 fresh-start schema), E-042 (admin team management, url_parser, team_resolver), E-003-02 (original)*

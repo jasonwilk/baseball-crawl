@@ -4,7 +4,7 @@
 [E-167: Opponent Dedup Prevention and Resolution](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, a new `src/db/teams.py` module will provide an `ensure_team_row()` function that implements the deterministic dedup cascade (gc_uuid → public_id → name+season_year → INSERT) with a self-tracking guard. A new migration adds a COLLATE NOCASE index on `name + season_year` to support name-based lookups. This is the foundation that all other stories in the epic depend on.

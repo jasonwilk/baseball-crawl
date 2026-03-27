@@ -2721,6 +2721,251 @@ async def disconnect_opponent(request: Request, link_id: int) -> Response:
 
 
 # ---------------------------------------------------------------------------
+# Opponent resolve / skip / unhide routes (E-167-04)
+# ---------------------------------------------------------------------------
+
+_SEARCH_ACCEPT = "application/vnd.gc.com.none+json; version=0.0.0"
+
+
+def _gc_search_teams(
+    name: str,
+    year: int | None = None,
+    state: str | None = None,
+    city: str | None = None,
+) -> list[dict[str, Any]]:
+    """Search the GC opponent-import endpoint. Returns list of team dicts."""
+    from src.gamechanger.client import GameChangerClient
+
+    client = GameChangerClient()
+    params: dict[str, Any] = {"name": name, "sport": "baseball"}
+    if year:
+        params["year"] = year
+    if state:
+        params["state"] = state
+    if city:
+        params["city"] = city
+    result = client.get(
+        "/search/opponent-import",
+        params=params,
+        accept=_SEARCH_ACCEPT,
+    )
+    if isinstance(result, list):
+        return result
+    return []
+
+
+def _get_member_team_season_year(db_conn: sqlite3.Connection, our_team_id: int) -> int | None:
+    """Get the season_year of the member team that owns this opponent link."""
+    row = db_conn.execute(
+        "SELECT season_year FROM teams WHERE id = ?", (our_team_id,)
+    ).fetchone()
+    return row[0] if row else None
+
+
+@router.get("/opponents/{link_id}/resolve", response_model=None)
+async def resolve_opponent_page(request: Request, link_id: int) -> Response:
+    """Render the search-powered suggestion page or confirm page for opponent resolution."""
+    guard = await _require_admin(request)
+    if isinstance(guard, Response):
+        return guard
+
+    link = await run_in_threadpool(get_opponent_link_by_id, link_id)
+    if not link:
+        return HTMLResponse(content="Opponent link not found", status_code=404)
+
+    confirm_id = request.query_params.get("confirm", "").strip()
+
+    if confirm_id:
+        # Confirm page: fetch team detail and check for duplicates
+        try:
+            profile = await run_in_threadpool(resolve_team, confirm_id)
+        except (TeamNotFoundError, GameChangerAPIError) as exc:
+            return templates.TemplateResponse(
+                request,
+                "admin/opponent_resolve.html",
+                {
+                    "link": link, "mode": "confirm_error",
+                    "error": f"Could not fetch team: {exc}",
+                    "admin_user": guard, "is_admin_page": True,
+                },
+            )
+        public_id = profile.public_id
+        duplicate_team = None
+        if public_id:
+            with closing(get_connection()) as conn:
+                dup_row = conn.execute(
+                    "SELECT id, name FROM teams WHERE public_id = ?", (public_id,)
+                ).fetchone()
+                if dup_row:
+                    duplicate_team = {"id": dup_row[0], "name": dup_row[1]}
+        return templates.TemplateResponse(
+            request,
+            "admin/opponent_resolve.html",
+            {
+                "link": link, "mode": "confirm",
+                "profile": profile, "confirm_id": confirm_id,
+                "duplicate_team": duplicate_team,
+                "admin_user": guard, "is_admin_page": True,
+            },
+        )
+
+    # Search mode
+    q = request.query_params.get("q", "").strip() or link["opponent_name"]
+    state = request.query_params.get("state", "").strip()
+    city = request.query_params.get("city", "").strip()
+
+    from datetime import datetime
+    with closing(get_connection()) as conn:
+        year = _get_member_team_season_year(conn, link["our_team_id"])
+    if year is None:
+        year = datetime.now().year
+
+    results: list[dict[str, Any]] = []
+    search_error: str | None = None
+    try:
+        results = await run_in_threadpool(
+            _gc_search_teams, q, year, state or None, city or None
+        )
+    except Exception as exc:
+        search_error = str(exc)
+        logger.warning("GC search failed for link %d: %s", link_id, exc)
+
+    return templates.TemplateResponse(
+        request,
+        "admin/opponent_resolve.html",
+        {
+            "link": link, "mode": "search",
+            "results": results, "search_error": search_error,
+            "q": q, "state": state, "city": city, "year": year,
+            "admin_user": guard, "is_admin_page": True,
+        },
+    )
+
+
+@router.post("/opponents/{link_id}/resolve", response_model=None)
+async def resolve_opponent_confirm(
+    request: Request,
+    link_id: int,
+    confirm_id: str = Form(...),
+) -> Response:
+    """Confirm opponent resolution from a GC search result."""
+    guard = await _require_admin(request)
+    if isinstance(guard, Response):
+        return guard
+
+    link = await run_in_threadpool(get_opponent_link_by_id, link_id)
+    if not link:
+        return HTMLResponse(content="Opponent link not found", status_code=404)
+
+    # resolve_team() expects a public_id slug (calls GET /public/teams/{public_id}).
+    # The GC search results' 'id' field may be a UUID rather than a public_id.
+    # If resolve_team() 404s, fall back to using confirm_id as gc_uuid directly
+    # (best-effort path until search response schema is verified live).
+    from src.db.teams import ensure_team_row
+
+    profile = None
+    try:
+        profile = await run_in_threadpool(resolve_team, confirm_id)
+    except (TeamNotFoundError, GameChangerAPIError):
+        logger.info(
+            "resolve_team(%r) failed; treating confirm_id as gc_uuid fallback",
+            confirm_id,
+        )
+
+    if profile is not None:
+        team_name = profile.name
+        gc_uuid = confirm_id
+        input_public_id = profile.public_id
+        season_year = profile.year
+    else:
+        team_name = link["opponent_name"]
+        gc_uuid = confirm_id
+        input_public_id = None
+        season_year = None
+
+    with closing(get_connection()) as conn:
+        conn.execute("PRAGMA foreign_keys = ON")
+        team_id = ensure_team_row(
+            conn,
+            gc_uuid=gc_uuid,
+            public_id=input_public_id,
+            name=team_name,
+            season_year=season_year,
+            source="admin_resolve",
+        )
+        # Read back the team's actual public_id (ensure_team_row may have
+        # skipped the public_id backfill due to a collision).
+        actual_pub = conn.execute(
+            "SELECT public_id FROM teams WHERE id = ?", (team_id,)
+        ).fetchone()
+        effective_public_id = actual_pub[0] if actual_pub else None
+        conn.execute(
+            """
+            UPDATE opponent_links
+            SET resolved_team_id = ?, public_id = ?,
+                resolution_method = 'search', resolved_at = datetime('now')
+            WHERE id = ?
+            """,
+            (team_id, effective_public_id, link_id),
+        )
+        conn.commit()
+
+    msg = quote_plus(f"Resolved {link['opponent_name']} via search.")
+    return RedirectResponse(
+        url=f"/admin/opponents?filter=unresolved&msg={msg}",
+        status_code=303,
+    )
+
+
+@router.post("/opponents/{link_id}/skip", response_model=None)
+async def skip_opponent(request: Request, link_id: int) -> Response:
+    """Mark an opponent as 'no match' by setting is_hidden = 1."""
+    guard = await _require_admin(request)
+    if isinstance(guard, Response):
+        return guard
+
+    link = await run_in_threadpool(get_opponent_link_by_id, link_id)
+    if not link:
+        return HTMLResponse(content="Opponent link not found", status_code=404)
+
+    with closing(get_connection()) as conn:
+        conn.execute(
+            "UPDATE opponent_links SET is_hidden = 1 WHERE id = ?", (link_id,)
+        )
+        conn.commit()
+
+    msg = quote_plus(f"Skipped {link['opponent_name']} (hidden).")
+    return RedirectResponse(
+        url=f"/admin/opponents?filter=unresolved&msg={msg}",
+        status_code=303,
+    )
+
+
+@router.post("/opponents/{link_id}/unhide", response_model=None)
+async def unhide_opponent(request: Request, link_id: int) -> Response:
+    """Restore a hidden opponent by setting is_hidden = 0."""
+    guard = await _require_admin(request)
+    if isinstance(guard, Response):
+        return guard
+
+    link = await run_in_threadpool(get_opponent_link_by_id, link_id)
+    if not link:
+        return HTMLResponse(content="Opponent link not found", status_code=404)
+
+    with closing(get_connection()) as conn:
+        conn.execute(
+            "UPDATE opponent_links SET is_hidden = 0 WHERE id = ?", (link_id,)
+        )
+        conn.commit()
+
+    msg = quote_plus(f"Unhid {link['opponent_name']}.")
+    return RedirectResponse(
+        url=f"/admin/opponents?filter=hidden&msg={msg}",
+        status_code=303,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Program management routes
 # ---------------------------------------------------------------------------
 

@@ -1,0 +1,168 @@
+{% extends "base.html" %}
+
+{% block title %}Admin -- Resolve {{ link.opponent_name }}{% endblock %}
+
+{% block header_extras %}
+  <a href="/dashboard" class="text-blue-200 hover:text-white">Dashboard</a>
+  <form method="post" action="/auth/logout" class="inline"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><button type="submit" class="text-blue-200 hover:text-white bg-transparent border-0 cursor-pointer p-0 font-[inherit] text-[length:inherit]">Logout</button></form>
+{% endblock %}
+
+{% block content %}
+<h1 class="text-xl font-bold mb-2">Resolve: {{ link.opponent_name }}</h1>
+
+<nav class="mb-6 flex gap-4 border-b border-gray-300 pb-2 text-sm">
+  <a href="/admin/users" class="font-medium text-gray-600 hover:text-blue-900">Users</a>
+  <a href="/admin/teams" class="font-medium text-gray-600 hover:text-blue-900">Teams</a>
+  <a href="/admin/programs" class="font-medium text-gray-600 hover:text-blue-900">Programs</a>
+  <a href="/admin/opponents" class="font-bold underline text-blue-900">Opponents</a>
+</nav>
+
+<p class="text-sm text-gray-600 mb-4">
+  Our team: <strong>{{ link.our_team_name }}</strong>
+</p>
+
+{% if mode == 'confirm' %}
+<!-- ========== CONFIRM MODE ========== -->
+<div class="mb-4 p-4 bg-white rounded shadow border">
+  <h2 class="text-lg font-semibold mb-2">Confirm Connection</h2>
+  <div class="text-sm space-y-1 mb-4">
+    <p><strong>Team:</strong> {{ profile.name if profile else confirm_id }}</p>
+    {% if profile and (profile.city or profile.state) %}
+    <p><strong>Location:</strong>
+      {{ profile.city or '' }}{% if profile.city and profile.state %}, {% endif %}{{ profile.state or '' }}
+    </p>
+    {% endif %}
+    {% if profile and (profile.record_wins is not none or profile.record_losses is not none) %}
+    <p><strong>Record:</strong> {{ profile.record_wins|default(0) }}-{{ profile.record_losses|default(0) }}</p>
+    {% endif %}
+    {% if profile and profile.public_id %}
+    <p><strong>Public ID:</strong> {{ profile.public_id }}</p>
+    {% endif %}
+  </div>
+
+  {% if duplicate_team %}
+  <div class="mb-4 p-3 bg-yellow-50 text-yellow-800 rounded border border-yellow-300">
+    <strong>Duplicate warning:</strong> A team named "{{ duplicate_team.name }}" (id={{ duplicate_team.id }})
+    already exists with this public_id.
+    <a href="/admin/teams/merge" class="underline text-yellow-900 hover:text-yellow-700">Go to merge page</a>.
+  </div>
+  {% endif %}
+
+  <form method="post" action="/admin/opponents/{{ link.id }}/resolve">
+    <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+    <input type="hidden" name="confirm_id" value="{{ confirm_id }}">
+    <div class="flex gap-2">
+      <button type="submit" class="bg-green-700 text-white px-4 py-2 rounded text-sm hover:bg-green-800">
+        Confirm connection
+      </button>
+      <a href="/admin/opponents/{{ link.id }}/resolve"
+         class="bg-gray-200 text-gray-700 px-4 py-2 rounded text-sm hover:bg-gray-300">
+        Back to search
+      </a>
+    </div>
+  </form>
+</div>
+
+{% elif mode == 'confirm_error' %}
+<!-- ========== CONFIRM ERROR MODE ========== -->
+<div class="mb-4 p-3 bg-red-100 text-red-800 rounded border border-red-300">
+  {{ error }}
+</div>
+<a href="/admin/opponents/{{ link.id }}/resolve"
+   class="inline-block bg-gray-200 text-gray-700 px-4 py-2 rounded text-sm hover:bg-gray-300">
+  Back to search
+</a>
+
+{% elif mode == 'search' %}
+<!-- ========== SEARCH MODE ========== -->
+
+{% if search_error %}
+<div class="mb-4 p-3 bg-red-100 text-red-800 rounded border border-red-300">
+  Search failed: {{ search_error }}
+</div>
+<div class="mb-4">
+  <a href="/admin/opponents/{{ link.id }}/connect"
+     class="inline-block bg-blue-900 text-white px-4 py-2 rounded text-sm hover:bg-blue-800">
+    Paste URL manually
+  </a>
+</div>
+{% endif %}
+
+<!-- Refine search form -->
+<form method="get" action="/admin/opponents/{{ link.id }}/resolve" class="mb-6 p-4 bg-gray-50 rounded border">
+  <h2 class="text-sm font-semibold mb-2">Search GameChanger</h2>
+  <div class="flex flex-wrap gap-2 items-end">
+    <div>
+      <label class="block text-xs text-gray-600">Team name</label>
+      <input type="text" name="q" value="{{ q }}"
+             class="border rounded px-2 py-1 text-sm w-48">
+    </div>
+    <div>
+      <label class="block text-xs text-gray-600">State</label>
+      <input type="text" name="state" value="{{ state }}"
+             class="border rounded px-2 py-1 text-sm w-24">
+    </div>
+    <div>
+      <label class="block text-xs text-gray-600">City</label>
+      <input type="text" name="city" value="{{ city }}"
+             class="border rounded px-2 py-1 text-sm w-24">
+    </div>
+    <button type="submit" class="bg-blue-900 text-white px-4 py-1 rounded text-sm hover:bg-blue-800">
+      Search
+    </button>
+  </div>
+</form>
+
+{% if not search_error %}
+{% if results %}
+<p class="text-sm text-gray-600 mb-2">{{ results | length }} result{{ 's' if results | length != 1 else '' }} found:</p>
+<div class="grid gap-3 mb-6">
+  {% for team in results %}
+  <div class="p-3 bg-white rounded shadow border flex items-center justify-between">
+    <div class="text-sm">
+      <p class="font-semibold">{{ team.name if team.name else team.id }}</p>
+      {% if team.location %}
+      <p class="text-gray-500 text-xs">
+        {{ team.location.city or '' }}{% if team.location.city and team.location.state %}, {% endif %}{{ team.location.state or '' }}
+      </p>
+      {% endif %}
+      {% if team.age_group %}
+      <span class="text-xs text-gray-400">{{ team.age_group }}</span>
+      {% endif %}
+      {% if team.record %}
+      <span class="text-xs text-gray-400">{{ team.record.wins|default(0) }}-{{ team.record.losses|default(0) }}</span>
+      {% endif %}
+    </div>
+    <a href="/admin/opponents/{{ link.id }}/resolve?confirm={{ team.id }}"
+       class="bg-blue-900 text-white px-3 py-1 rounded text-xs hover:bg-blue-800">
+      Select
+    </a>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="mb-6 p-4 bg-gray-50 rounded border text-center text-gray-600">
+  <p class="mb-2">No teams found matching "{{ q }}".</p>
+  <p class="text-sm">Try refining your search above, or use the options below.</p>
+</div>
+{% endif %}
+{% endif %}
+
+<!-- Fallback actions -->
+<div class="flex gap-3 items-center border-t pt-4 mt-4">
+  <a href="/admin/opponents/{{ link.id }}/connect"
+     class="text-sm text-blue-900 underline hover:text-blue-700">
+    Paste URL manually
+  </a>
+  <form method="post" action="/admin/opponents/{{ link.id }}/skip" class="inline">
+    <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+    <button type="submit"
+            class="text-sm text-gray-500 underline hover:text-gray-700"
+            onclick="return confirm('Skip this opponent? It will be hidden from the unresolved list.')">
+      No match -- skip
+    </button>
+  </form>
+</div>
+{% endif %}
+
+{% endblock %}

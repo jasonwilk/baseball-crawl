@@ -925,14 +925,17 @@ def test_find_duplicates_both_null_season_year_are_grouped() -> None:
     assert ids == {t1, t2}
 
 
-def test_find_duplicates_null_vs_nonnull_season_year_not_grouped() -> None:
-    """AC-4: NULL season_year and non-NULL season_year with same name are NOT grouped."""
+def test_find_duplicates_null_vs_nonnull_season_year_cross_matched() -> None:
+    """E-167 AC-4: NULL season_year and non-NULL season_year with same name ARE grouped
+    as a cross-match (pass 2) -- a stub with NULL and a resolved team with 2026."""
     conn = _make_db()
-    _team_year(conn, "Lincoln East", season_year=None)
-    _team_year(conn, "Lincoln East", season_year=2026)
+    t1 = _team_year(conn, "Lincoln East", season_year=None)
+    t2 = _team_year(conn, "Lincoln East", season_year=2026)
 
     groups = find_duplicate_teams(conn)
-    assert groups == []
+    assert len(groups) == 1
+    ids = {t.id for t in groups[0]}
+    assert ids == {t1, t2}
 
 
 def test_find_duplicates_game_count() -> None:
@@ -1141,3 +1144,122 @@ def test_find_duplicates_multiple_groups() -> None:
     assert len(groups) == 2
     all_ids = {t.id for group in groups for t in group}
     assert all_ids == {a1, a2, b1, b2}
+
+
+# ---------------------------------------------------------------------------
+# E-167: Enhanced duplicate detection -- cross-match and non-overlap
+# ---------------------------------------------------------------------------
+
+
+def test_find_duplicates_cross_match_null_vs_nonnull() -> None:
+    """E-167: NULL-vs-non-NULL season_year pair with same name is detected."""
+    conn = _make_db()
+    t1 = _team_year(conn, "Rival HS", season_year=None)
+    t2 = _team_year(conn, "Rival HS", season_year=2026)
+
+    groups = find_duplicate_teams(conn)
+    assert len(groups) == 1
+    ids = {t.id for t in groups[0]}
+    assert ids == {t1, t2}
+
+
+def test_find_duplicates_cross_match_case_insensitive() -> None:
+    """E-167: Cross-match is case-insensitive."""
+    conn = _make_db()
+    t1 = _team_year(conn, "rival hs", season_year=None)
+    t2 = _team_year(conn, "Rival HS", season_year=2026)
+
+    groups = find_duplicate_teams(conn)
+    assert len(groups) == 1
+    ids = {t.id for t in groups[0]}
+    assert ids == {t1, t2}
+
+
+def test_find_duplicates_non_overlap_guarantee() -> None:
+    """E-167 AC-4: Teams in exact-match groups are excluded from cross-match groups."""
+    conn = _make_db()
+    # Exact match group: two teams with same name and season_year=2026
+    t1 = _team_year(conn, "Rival HS", season_year=2026)
+    t2 = _team_year(conn, "Rival HS", season_year=2026)
+    # A third team with NULL season_year -- would cross-match with Rival HS
+    t3 = _team_year(conn, "Rival HS", season_year=None)
+
+    groups = find_duplicate_teams(conn)
+
+    # Should have the exact-match group (t1, t2) and a cross-match group (t3 alone)
+    # But t3 alone is not a group (need 2+). And t1/t2 are excluded from cross.
+    # Actually t3 cross-matches with t1 and t2, but t1/t2 are excluded.
+    # So the cross group would only have t3 -> not 2+ -> dropped.
+    # Result: just the exact group.
+    assert len(groups) == 1
+    exact_ids = {t.id for t in groups[0]}
+    assert exact_ids == {t1, t2}
+    # t3 is NOT in any group (non-overlap guarantee)
+    all_ids = {t.id for g in groups for t in g}
+    assert t3 not in all_ids
+
+
+def test_find_duplicates_non_overlap_mixed_groups() -> None:
+    """E-167: Exact and cross groups for different names coexist correctly."""
+    conn = _make_db()
+    # Exact-match group for "Team A"
+    a1 = _team_year(conn, "Team A", season_year=2026)
+    a2 = _team_year(conn, "Team A", season_year=2026)
+    # Cross-match group for "Team B" (NULL vs 2026)
+    b1 = _team_year(conn, "Team B", season_year=None)
+    b2 = _team_year(conn, "Team B", season_year=2026)
+
+    groups = find_duplicate_teams(conn)
+
+    assert len(groups) == 2
+    all_ids = {t.id for g in groups for t in g}
+    assert all_ids == {a1, a2, b1, b2}
+
+
+def test_find_duplicates_different_nonnull_season_years_not_cross_matched() -> None:
+    """E-167: Teams with different non-NULL season_years are not cross-matched."""
+    conn = _make_db()
+    _team_year(conn, "Rival HS", season_year=2025)
+    _team_year(conn, "Rival HS", season_year=2026)
+
+    groups = find_duplicate_teams(conn)
+    assert groups == []
+
+
+def test_find_duplicates_cross_match_excludes_nonnull_nonnull_pairs() -> None:
+    """E-167: Cross-match groups only pair NULL with non-NULL, not different non-NULLs.
+
+    If "Rival HS" has rows {NULL, 2025, 2026} and none are in exact groups,
+    the cross-match group should contain all three (NULL pairs with both 2025
+    and 2026). But it must NOT merge 2025 into 2026 -- the safe-merge predicate
+    (games-between check) handles that at the CLI layer.
+    """
+    conn = _make_db()
+    t_null = _team_year(conn, "Rival HS", season_year=None)
+    t_2025 = _team_year(conn, "Rival HS", season_year=2025)
+    t_2026 = _team_year(conn, "Rival HS", season_year=2026)
+
+    groups = find_duplicate_teams(conn)
+    # All three are cross-match candidates (NULL pairs with both non-NULLs)
+    assert len(groups) == 1
+    ids = {t.id for t in groups[0]}
+    assert ids == {t_null, t_2025, t_2026}
+
+
+def test_find_duplicates_exact_match_comes_before_cross_match() -> None:
+    """E-167: Exact-match groups come before cross-match groups in the result."""
+    conn = _make_db()
+    # Cross-match for "AAA" (sorts first alphabetically)
+    _team_year(conn, "AAA Team", season_year=None)
+    _team_year(conn, "AAA Team", season_year=2026)
+    # Exact match for "ZZZ" (sorts last alphabetically)
+    _team_year(conn, "ZZZ Team", season_year=2026)
+    _team_year(conn, "ZZZ Team", season_year=2026)
+
+    groups = find_duplicate_teams(conn)
+    assert len(groups) == 2
+    # Exact groups come first regardless of name ordering
+    assert all(t.season_year == 2026 for t in groups[0])  # exact match
+    # Cross match second
+    season_years = {t.season_year for t in groups[1]}
+    assert None in season_years  # cross match has the NULL

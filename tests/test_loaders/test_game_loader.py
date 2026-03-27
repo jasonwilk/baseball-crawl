@@ -41,6 +41,7 @@ def db() -> sqlite3.Connection:
     conn.execute("PRAGMA foreign_keys=ON;")
     conn.commit()
     conn.executescript(_MIGRATION_FILE.read_text(encoding="utf-8"))
+    conn.execute("ALTER TABLE teams ADD COLUMN season_year INTEGER")
     conn.commit()
     yield conn
     conn.close()

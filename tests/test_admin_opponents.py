@@ -86,6 +86,12 @@ def _make_db(tmp_path: Path) -> tuple[Path, dict[str, int]]:
     )
     northside_id = cur.lastrowid
 
+    cur = conn.execute(
+        "INSERT INTO teams (name, membership_type, source, is_active) "
+        "VALUES ('Westview Tigers', 'tracked', 'gamechanger', 0)"
+    )
+    westview_id = cur.lastrowid
+
     # Three opponent_links rows: auto, manual, unlinked
     conn.execute(
         """
@@ -102,10 +108,10 @@ def _make_db(tmp_path: Path) -> tuple[Path, dict[str, int]]:
         INSERT INTO opponent_links
             (our_team_id, root_team_id, opponent_name, resolved_team_id,
              public_id, resolution_method, resolved_at, is_hidden)
-        VALUES (?, 'gc-root-002', 'Westview Tigers', NULL, 'QTiLIb2Lui3b', 'manual',
+        VALUES (?, 'gc-root-002', 'Westview Tigers', ?, 'QTiLIb2Lui3b', 'manual',
                 '2026-03-05 00:00:00', 0)
         """,
-        (jv_id,),
+        (jv_id, westview_id),
     )
     conn.execute(
         """
@@ -457,7 +463,7 @@ class TestConnectButton:
         with patch.dict("os.environ", _admin_env(opp_db, "connect1@test.com")):
             with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
                 response = client.get("/admin/opponents")
-        assert f"/admin/opponents/{unlinked_id}/connect" in response.text
+        assert f"/admin/opponents/{unlinked_id}/resolve" in response.text
 
     def test_auto_resolved_row_has_no_connect_link(self, opp_db: Path) -> None:
         admin_id = _insert_user(opp_db, "connect2@test.com")
@@ -1062,7 +1068,7 @@ class TestSummaryStatLine:
     def test_summary_shows_total_resolved_unresolved_counts(
         self, opp_db: Path
     ) -> None:
-        """Summary line shows total (3), resolved (2), and need-mapping (1) counts."""
+        """Summary line shows total (3), resolved (2), and unresolved (1) counts."""
         admin_id = _insert_user(opp_db, "summary_e143_1@test.com")
         token = _insert_session(opp_db, admin_id)
 
@@ -1072,7 +1078,7 @@ class TestSummaryStatLine:
 
         assert "3 opponents" in response.text
         assert "2 resolved" in response.text
-        assert "1 need mapping" in response.text
+        assert "1 unresolved" in response.text
 
     def test_summary_shows_run_discovery_link(self, opp_db: Path) -> None:
         """Summary area includes a Run Discovery link to /admin/teams."""
@@ -1153,8 +1159,8 @@ class TestConnectButtonStyle:
             with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
                 response = client.get("/admin/opponents")
 
-        assert f"/admin/opponents/{unlinked_id}/connect" in response.text
-        # Old plain text-link class must not be present for the connect action
+        assert f"/admin/opponents/{unlinked_id}/resolve" in response.text
+        # Old plain text-link class must not be present for the resolve action
         assert 'class="text-blue-700 hover:underline text-xs"' not in response.text
 
     def test_disconnect_button_uses_gray_style(self, opp_db: Path) -> None:

@@ -807,12 +807,19 @@ def merge_teams(
 
 
 def find_duplicate_teams(db: sqlite3.Connection) -> list[list[DuplicateTeam]]:
-    """Return groups of tracked teams with identical names and the same season_year.
+    """Return groups of tracked teams that are likely duplicates.
 
-    Only ``membership_type = 'tracked'`` teams are considered. Member teams are
-    excluded. Name matching is case-insensitive. Teams with the same name but
-    different ``season_year`` values are NOT grouped together. Two teams with
-    the same name and both having ``season_year IS NULL`` ARE grouped together.
+    Two-pass detection:
+
+    **Pass 1 -- Exact matches**: Teams with the same name (case-insensitive)
+    AND the same ``season_year`` value (including both NULL).
+
+    **Pass 2 -- Cross matches**: Teams with the same name where one has
+    ``season_year IS NULL`` and the other has a non-NULL value.  Teams already
+    appearing in a pass-1 group are excluded (non-overlap guarantee).
+
+    Only ``membership_type = 'tracked'`` teams are considered.  Member teams are
+    excluded.
 
     Each team in a group includes ``game_count`` (appearances as home or away
     team) and ``has_stats`` (True when any row exists in player_season_batting,
@@ -822,21 +829,21 @@ def find_duplicate_teams(db: sqlite3.Connection) -> list[list[DuplicateTeam]]:
         db: An open sqlite3.Connection.
 
     Returns:
-        A list of duplicate groups. Each group is a list of 2+ DuplicateTeam
-        records sharing the same normalized name and season_year. Returns an
-        empty list when no duplicates exist.
+        A list of duplicate groups.  Exact-match groups come first, then
+        cross-match groups.  Returns an empty list when no duplicates exist.
     """
-    # COALESCE(season_year, -1) is a sentinel so NULLs group together.
-    # Real years are ≥ 2024, so -1 is safe as a NULL stand-in.
-    rows = db.execute(
+    # ------------------------------------------------------------------
+    # Pass 1: Exact season_year matches (including both-NULL)
+    # ------------------------------------------------------------------
+    exact_rows = db.execute(
         """
         WITH dup_groups AS (
             SELECT
-                LOWER(name)              AS norm_name,
-                COALESCE(season_year, -1) AS sy_key
+                name COLLATE NOCASE        AS norm_name,
+                COALESCE(season_year, -1)  AS sy_key
             FROM teams
             WHERE membership_type = 'tracked'
-            GROUP BY LOWER(name), COALESCE(season_year, -1)
+            GROUP BY name COLLATE NOCASE, COALESCE(season_year, -1)
             HAVING COUNT(*) >= 2
         )
         SELECT
@@ -856,32 +863,93 @@ def find_duplicate_teams(db: sqlite3.Connection) -> list[list[DuplicateTeam]]:
             ) THEN 1 ELSE 0 END AS has_stats
         FROM teams t
         JOIN dup_groups dg
-            ON  LOWER(t.name)               = dg.norm_name
+            ON  t.name = dg.norm_name COLLATE NOCASE
             AND COALESCE(t.season_year, -1) = dg.sy_key
         WHERE t.membership_type = 'tracked'
-        ORDER BY LOWER(t.name), COALESCE(t.season_year, -1), t.id
+        ORDER BY t.name COLLATE NOCASE, COALESCE(t.season_year, -1), t.id
         """
     ).fetchall()
 
-    if not rows:
-        return []
+    exact_groups: dict[tuple[str, int], list[DuplicateTeam]] = {}
+    exact_team_ids: set[int] = set()
+    for row in exact_rows:
+        team = _row_to_duplicate_team(row)
+        key = (team.name.lower(), team.season_year if team.season_year is not None else -1)
+        exact_groups.setdefault(key, []).append(team)
+        exact_team_ids.add(team.id)
 
-    groups: dict[tuple[str, int], list[DuplicateTeam]] = {}
-    for row in rows:
-        team_id, name, season_year, gc_uuid, public_id, game_count, has_stats_int = row
-        key = (name.lower(), season_year if season_year is not None else -1)
-        if key not in groups:
-            groups[key] = []
-        groups[key].append(
-            DuplicateTeam(
-                id=team_id,
-                name=name,
-                season_year=season_year,
-                gc_uuid=gc_uuid,
-                public_id=public_id,
-                game_count=game_count,
-                has_stats=bool(has_stats_int),
-            )
-        )
+    # ------------------------------------------------------------------
+    # Pass 2: NULL-vs-non-NULL season_year cross-matches
+    # ------------------------------------------------------------------
+    # Cross-match candidates: only teams with season_year IS NULL that share a
+    # name with at least one non-NULL team, PLUS the non-NULL counterpart(s).
+    # Rows with two different non-NULL season_years are NOT cross-matched --
+    # only NULL-vs-non-NULL pairs qualify.
+    cross_rows = db.execute(
+        """
+        SELECT
+            t.id,
+            t.name,
+            t.season_year,
+            t.gc_uuid,
+            t.public_id,
+            (
+                SELECT COUNT(*) FROM games g
+                WHERE g.home_team_id = t.id OR g.away_team_id = t.id
+            ) AS game_count,
+            CASE WHEN (
+                EXISTS (SELECT 1 FROM player_season_batting  WHERE team_id = t.id)
+                OR EXISTS (SELECT 1 FROM player_season_pitching WHERE team_id = t.id)
+                OR EXISTS (SELECT 1 FROM scouting_runs        WHERE team_id = t.id)
+            ) THEN 1 ELSE 0 END AS has_stats
+        FROM teams t
+        WHERE t.membership_type = 'tracked'
+          AND (
+              -- NULL rows that have a non-NULL counterpart with the same name
+              (t.season_year IS NULL AND EXISTS (
+                  SELECT 1 FROM teams t2
+                  WHERE t2.name = t.name COLLATE NOCASE
+                    AND t2.id != t.id
+                    AND t2.membership_type = 'tracked'
+                    AND t2.season_year IS NOT NULL
+              ))
+              OR
+              -- Non-NULL rows that have a NULL counterpart with the same name
+              (t.season_year IS NOT NULL AND EXISTS (
+                  SELECT 1 FROM teams t2
+                  WHERE t2.name = t.name COLLATE NOCASE
+                    AND t2.id != t.id
+                    AND t2.membership_type = 'tracked'
+                    AND t2.season_year IS NULL
+              ))
+          )
+        ORDER BY t.name COLLATE NOCASE, COALESCE(t.season_year, -1), t.id
+        """
+    ).fetchall()
 
-    return list(groups.values())
+    cross_groups: dict[str, list[DuplicateTeam]] = {}
+    for row in cross_rows:
+        team = _row_to_duplicate_team(row)
+        if team.id in exact_team_ids:
+            continue  # non-overlap guarantee
+        norm = team.name.lower()
+        cross_groups.setdefault(norm, []).append(team)
+
+    # Only keep cross-match groups with 2+ members after filtering
+    result = list(exact_groups.values())
+    result.extend(g for g in cross_groups.values() if len(g) >= 2)
+    return result
+
+
+def _row_to_duplicate_team(row: tuple) -> DuplicateTeam:
+    """Convert a raw SQL row to a DuplicateTeam dataclass."""
+    team_id, name, season_year, gc_uuid, public_id, game_count, has_stats_int = row
+    return DuplicateTeam(
+        id=team_id,
+        name=name,
+        season_year=season_year,
+        gc_uuid=gc_uuid,
+        public_id=public_id,
+        game_count=game_count,
+        has_stats=bool(has_stats_int),
+    )

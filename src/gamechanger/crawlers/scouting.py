@@ -51,6 +51,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from src.db.teams import ensure_team_row
 from src.gamechanger.client import (
     CredentialExpiredError,
     ForbiddenError,
@@ -376,8 +377,7 @@ class ScoutingCrawler:
     ) -> int:
         """Ensure a ``teams`` row exists and return its INTEGER primary key.
 
-        Inserts a stub tracked row if none exists.  Uses the partial unique
-        index on ``public_id`` or ``gc_uuid`` to detect an existing row.
+        Delegates to the shared ``ensure_team_row()`` dedup cascade.
 
         Args:
             public_id: The opponent's public_id slug (preferred lookup key).
@@ -389,33 +389,14 @@ class ScoutingCrawler:
         Raises:
             ValueError: If both ``public_id`` and ``gc_uuid`` are ``None``.
         """
-        if public_id is not None:
-            cursor = self._db.execute(
-                "INSERT OR IGNORE INTO teams (name, membership_type, public_id, is_active) "
-                "VALUES (?, 'tracked', ?, 0)",
-                (public_id, public_id),
-            )
-            if cursor.rowcount:
-                return cursor.lastrowid
-            row = self._db.execute(
-                "SELECT id FROM teams WHERE public_id = ? LIMIT 1", (public_id,)
-            ).fetchone()
-            return row[0]
-
-        if gc_uuid is not None:
-            cursor = self._db.execute(
-                "INSERT OR IGNORE INTO teams (name, membership_type, gc_uuid, is_active) "
-                "VALUES (?, 'tracked', ?, 0)",
-                (gc_uuid, gc_uuid),
-            )
-            if cursor.rowcount:
-                return cursor.lastrowid
-            row = self._db.execute(
-                "SELECT id FROM teams WHERE gc_uuid = ? LIMIT 1", (gc_uuid,)
-            ).fetchone()
-            return row[0]
-
-        raise ValueError("_ensure_team_row requires at least one of public_id or gc_uuid")
+        if public_id is None and gc_uuid is None:
+            raise ValueError("_ensure_team_row requires at least one of public_id or gc_uuid")
+        return ensure_team_row(
+            self._db,
+            public_id=public_id,
+            gc_uuid=gc_uuid,
+            source="scouting",
+        )
 
     def _ensure_season_row(self, season_id: str) -> None:
         """Ensure a ``seasons`` row exists for ``season_id``."""
@@ -525,19 +506,15 @@ class ScoutingCrawler:
         """Ensure a stub teams row exists for any UUID key discovered in the boxscore.
 
         When a boxscore response contains a UUID top-level key, this method
-        inserts a stub tracked row for that UUID if one does not already exist.
-        This is best-effort; errors are silently ignored.
+        ensures a tracked team row exists for that UUID via the shared dedup
+        cascade. This is best-effort; errors are silently ignored.
 
         Args:
             boxscore: Top-level boxscore dict (keys are team identifiers).
         """
         for key in boxscore:
             if _UUID_RE.match(key):
-                self._db.execute(
-                    "INSERT OR IGNORE INTO teams (name, membership_type, gc_uuid, is_active) "
-                    "VALUES (?, 'tracked', ?, 0)",
-                    (key, key),
-                )
+                ensure_team_row(self._db, gc_uuid=key, source="scouting")
                 logger.debug("UUID opportunism: ensured stub row for gc_uuid=%s", key)
 
 

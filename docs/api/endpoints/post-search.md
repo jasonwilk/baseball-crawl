@@ -5,8 +5,10 @@ status: CONFIRMED
 auth: required
 profiles:
   web:
-    status: unverified
-    notes: Not captured from web profile. Web may use GET /search/opponent-import instead.
+    status: confirmed
+    notes: >
+      Live curl from devcontainer (web headers) returned 200 OK, 2026-03-27.
+      Content-Type uses underscore: post_search (not post-search).
   mobile:
     status: confirmed
     notes: >
@@ -19,28 +21,28 @@ query_params:
   - name: start_at_page
     required: false
     description: >
-      Pagination: page number to start at. Present on all 6 observed calls (including
-      first page). Value not captured from proxy metadata.
+      Pagination: zero-indexed page number. Page 0 is the first page.
+      25 results per page.
+  - name: search_source
+    required: false
+    description: >
+      Observed value: "search". Purpose unclear -- may distinguish search origin
+      (e.g., search bar vs. opponent import). Observed on web 2026-03-27.
 pagination: true
 response_shape: object
 response_sample: null
 raw_sample_size: null
 discovered: "2026-03-09"
-last_confirmed: null
+last_confirmed: "2026-03-27"
 tags: [search]
 caveats:
   - >
-    SCHEMA UNKNOWN: Request body and response body not captured by proxy -- only
-    the content-type and query key metadata are available. Body schema requires
-    live curl to determine.
+    CONTENT-TYPE UNDERSCORE: The working Content-Type uses an underscore (`post_search`),
+    not a hyphen (`post-search`). The underscore variant was confirmed to return 200 OK
+    on 2026-03-27. The hyphen variant has not been tested.
   - >
-    MOBILE-ONLY CONFIRMED: This is the main mobile app search endpoint (GC app search bar).
-    The web equivalent may be GET /search/opponent-import, which is documented separately.
-    Whether POST /search works on web is unknown.
-  - >
-    SEARCH-AS-YOU-TYPE: 6 calls were observed in ~10 seconds of user typing "nighthawks".
-    The mobile app fires this endpoint repeatedly as the user types. Likely has query params
-    in the body to filter by sport, age group, or result type -- unknown without body capture.
+    SEARCH-AS-YOU-TYPE: On mobile, 6 calls were observed in ~10 seconds of user typing
+    "nighthawks". The mobile app fires this endpoint repeatedly as the user types.
 see_also:
   - path: /search/opponent-import
     reason: Alternative search endpoint (GET, web/mobile) for opponent import flow -- known response schema
@@ -50,14 +52,16 @@ see_also:
 
 # POST /search
 
-**Status:** CONFIRMED (observed 6 hits, HTTP 200). Request/response body schema unknown.
+**Status:** CONFIRMED -- live curl returned 200 OK (2026-03-27). Full request/response schema documented.
 
-Main general-purpose team search in the iOS GC app. Triggered when the user types in the primary search bar -- fires repeatedly as the user types (search-as-you-type). Distinct from `GET /search/opponent-import`, which is used specifically in the "add opponent" import flow.
+Main general-purpose team search. Used by the iOS GC app search bar (search-as-you-type) and confirmed working from web profile. Distinct from `GET /search/opponent-import`, which is used specifically in the "add opponent" import flow.
 
 ```
-POST https://api.team-manager.gc.com/search?start_at_page={page}
-Content-Type: application/vnd.gc.com.post-search+json; version=0.0.0
+POST https://api.team-manager.gc.com/search?start_at_page={page}&search_source=search
+Content-Type: application/vnd.gc.com.post_search+json; version=0.0.0
 ```
+
+**Note:** The Content-Type uses `post_search` (underscore), not `post-search` (hyphen).
 
 ## Path Parameters
 
@@ -67,30 +71,123 @@ None.
 
 | Parameter | Required | Description |
 |-----------|----------|-------------|
-| `start_at_page` | optional | Pagination page number. Observed on all calls including page 1. |
+| `start_at_page` | optional | Zero-indexed page number. 25 results per page. |
+| `search_source` | optional | Observed value: `"search"`. Purpose unclear -- may indicate search origin context. |
 
 ## Request Body
 
-Body schema unknown -- not captured by proxy. Expected to contain the search query string and possibly filters (sport, age group, competition level, result type).
+```json
+{
+  "name": "search query string"
+}
+```
 
-Content-Type: `application/vnd.gc.com.post-search+json; version=0.0.0`
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | string | yes | Search query. Matches against team names. |
+
+Content-Type: `application/vnd.gc.com.post_search+json; version=0.0.0`
+
+### Example Request Body
+
+```json
+{
+  "name": "example team varsity"
+}
+```
 
 ## Response
 
-Response body schema unknown -- not captured by proxy.
-
 Response Content-Type: `application/json; charset=utf-8`
 
-Based on the `GET /search/history` response shape (which stores past search results), expected response fields per result item include:
-- `id` (UUID)
-- `public_id` (slug)
-- `name` (team name)
-- `sport`
-- `season` (name, year)
-- `location` (city, state, country)
-- `staff` (array of strings)
-- `number_of_players` (int)
-- `avatar_url` (optional, signed URL)
+### Schema
+
+```json
+{
+  "total_count": 263,
+  "hits": [
+    {
+      "type": "team",
+      "result": {
+        "id": "UUID",
+        "public_id": "string (slug)",
+        "name": "string",
+        "sport": "string",
+        "location": {
+          "city": "string",
+          "country": "string",
+          "state": "string"
+        },
+        "season": {
+          "name": "string",
+          "year": 2026
+        },
+        "number_of_players": 15,
+        "staff": ["string"]
+      }
+    }
+  ],
+  "next_page": 1
+}
+```
+
+### Field Reference
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `total_count` | int | Total number of matching results across all pages. |
+| `hits` | array | Array of search result objects for the current page. 25 per page. |
+| `hits[].type` | string | Result type. Observed value: `"team"`. |
+| `hits[].result.id` | UUID | The `progenitor_team_id` -- canonical GC team UUID used with all `/teams/{team_id}/*` authenticated endpoints. |
+| `hits[].result.public_id` | string | Public slug for the team. Used with `/public/teams/{public_id}` endpoints. |
+| `hits[].result.name` | string | Team display name (typically includes year, e.g., "Team Name 2026"). |
+| `hits[].result.sport` | string | Sport identifier (e.g., `"baseball"`). |
+| `hits[].result.location.city` | string | Team city. |
+| `hits[].result.location.country` | string | Team country. |
+| `hits[].result.location.state` | string | Team state. |
+| `hits[].result.season.name` | string | Season name (e.g., `"spring"`). |
+| `hits[].result.season.year` | int | Season year. |
+| `hits[].result.number_of_players` | int | Number of players on the roster. |
+| `hits[].result.staff` | array of strings | Coach/staff names. |
+| `next_page` | int or null | Next page number for pagination, or null if no more pages. |
+
+### Example Response
+
+```json
+{
+  "total_count": 42,
+  "hits": [
+    {
+      "type": "team",
+      "result": {
+        "id": "00000000-0000-0000-0000-000000000001",
+        "public_id": "xXxXxXxXxXxX",
+        "name": "Example Team Varsity 2026",
+        "sport": "baseball",
+        "location": {
+          "city": "Anytown",
+          "country": "US",
+          "state": "XX"
+        },
+        "season": {
+          "name": "spring",
+          "year": 2026
+        },
+        "number_of_players": 15,
+        "staff": ["Jane Doe", "Player One"]
+      }
+    }
+  ],
+  "next_page": 1
+}
+```
+
+## Pagination
+
+- 25 results per page.
+- Use `start_at_page=0` for the first page.
+- `next_page` in the response provides the next page number; null when no more pages.
+- `total_count` gives the total matching results across all pages.
 
 ## Navigation Flow (Mobile)
 
@@ -102,12 +199,13 @@ The mobile app uses this endpoint in the following sequence:
 4. App navigates to team page → `GET /teams/{progenitor_team_id}` (team metadata)
 5. App loads full team context → bulk parallel requests to team sub-resources
 
-The UUID returned in the search result is the `progenitor_team_id` that is used with all `/teams/{team_id}/*` authenticated endpoints.
+The `result.id` UUID returned in each search hit is the `progenitor_team_id` used with all `/teams/{team_id}/*` authenticated endpoints. The `result.public_id` slug is used with `/public/teams/{public_id}` public endpoints.
 
 ## Known Limitations
 
-- Body and response schema not captured -- live curl needed for full documentation.
-- Number of results per page unknown.
-- Filtering capabilities (sport, level, age group) unknown.
+- Only `"team"` result type observed. Unknown if other types (player, org) exist.
+- Whether `search_source` affects results is unknown.
+- Filtering capabilities beyond the `name` field (sport, level, age group) are unknown.
+- The hyphen variant of Content-Type (`post-search`) has not been tested.
 
-**Discovered:** 2026-03-09.
+**Discovered:** 2026-03-09. **Last confirmed:** 2026-03-27.

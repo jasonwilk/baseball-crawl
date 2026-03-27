@@ -4,7 +4,7 @@
 [E-167: Opponent Dedup Prevention and Resolution](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the admin opponents page shows an "Unresolved Opponents" banner, and clicking "Resolve" on an unresolved opponent opens a search-powered suggestion page with GC team matches. The admin can select a match (with duplicate detection at confirm time), refine the search, dismiss as "no match", or fall back to manual URL paste. This replaces the blank "connect opponent" form with a guided resolution workflow.

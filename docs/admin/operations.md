@@ -203,6 +203,59 @@ Resolve the blocking issue (usually by refreshing the page to reload current sta
 
 For groups with three or more duplicates, the merge page lists all teams in the group. Select any two to merge pairwise. After the merge, refresh the teams list -- if duplicates remain, the banner reappears with the remaining group, and you can run another merge.
 
+### Auto-Merging Duplicate Teams via CLI (`bb data dedup`)
+
+`bb data dedup` identifies and auto-merges duplicate tracked teams using the same merge infrastructure as the admin UI. It is useful for clearing a backlog of existing duplicates, or for confirming there are none.
+
+**Dry run (default -- no writes)**:
+
+```bash
+bb data dedup
+```
+
+Prints all duplicate groups found, the chosen canonical team for each, and whether each pair would be merged or skipped. No database changes are made.
+
+**Execute merges**:
+
+```bash
+bb data dedup --execute
+```
+
+Performs the merges. Same output as dry run, plus `MERGED` confirmation lines for each completed merge.
+
+**What counts as a duplicate**: Two or more tracked teams with the same name (case-insensitive) and the same `season_year` (or both NULL, or a NULL vs. non-NULL year pair sharing the same name). Member teams are never included.
+
+**Canonical selection** (highest priority wins):
+1. Has stats loaded (`has_stats = true`)
+2. More games linked (higher `game_count`)
+3. Older row (lower `id`)
+
+**Auto-merge safety guard**: A pair is skipped (not merged) if any games exist between the two teams -- teams that played each other are not the same team. Skipped pairs are listed with reasons in the summary output.
+
+**Output format**:
+
+```
+[DRY RUN] Found 3 duplicate group(s).
+
+--- Group 1 (2 teams) ---
+  id=42  name='Eagle Creek HS'  season_year=2026  games=3  has_stats  gc_uuid  no public_id  << canonical
+  id=87  name='Eagle Creek HS'  season_year=None  games=0  no stats  no gc_uuid  no public_id
+  Canonical: id=42 (has_stats=True games=3 id=42)
+  Would merge id=87 -> id=42
+
+Summary: 3 group(s) found, 3 merged, 0 skipped.
+```
+
+**Custom database path**:
+
+```bash
+bb data dedup --db /path/to/app.db
+```
+
+Defaults to `data/app.db` (or `DATABASE_PATH` env var).
+
+**Note**: After running with `--execute`, sync any affected teams that have scouting data: `bb data scout --team {public_id}` or the **Sync** button on the Teams page.
+
 ### Database-Driven Crawl Configuration (CLI)
 
 By default, `scripts/crawl.py` and `scripts/load.py` read team configuration from `config/teams.yaml`. Pass `--source db` to read active member teams directly from the database instead:
@@ -446,25 +499,64 @@ The Opponents page (`/admin/opponents`) shows all opponent links discovered for 
 A summary stat line at the top of the page shows the current mapping state:
 
 ```
-14 opponents -- 10 resolved, 4 need mapping.
+14 opponents -- 10 resolved, 4 unresolved.
 ```
+
+**Filter tabs** above the table narrow the list:
+
+| Tab | Shows |
+|-----|-------|
+| All | All non-hidden opponents |
+| Full stats | Opponents with a `public_id` (full scouting data available) |
+| Scoresheet only | Opponents without a `public_id` (scoresheet-level data only) |
+| Unresolved (N) | Opponents with no team linked (`resolved_team_id IS NULL`) |
+| Hidden (N) | Opponents marked "no match" and excluded from the active pipeline |
+
+When unresolved opponents exist, an **Unresolved Opponents** banner appears at the top of the page (unless the Unresolved filter is already active). Click **Start resolving** to switch to the unresolved view.
 
 The table shows each opponent with a **Status** badge:
 
 | Badge | Meaning |
 |-------|---------|
-| Resolved (green) | `public_id` is known; the team can be crawled for scouting data. |
-| Unresolved (orange) | `public_id IS NULL`; scouting data cannot be fetched until the team is mapped. |
+| Resolved (green) | `public_id` is known; the team can be crawled for scouting data. Resolution method shown in gray. |
+| Unresolved (orange) | No team linked yet; scouting data unavailable until resolved. |
+| Hidden (gray) | Marked "no match" by the admin; excluded from the active pipeline. |
 
-Auto-resolved opponents (~86%) are linked automatically via the `progenitor_team_id` field on the schedule. The remaining ~14% require manual mapping.
+Auto-resolved opponents (~86%) are linked automatically via the `progenitor_team_id` field on the schedule. The remaining ~14% require admin action.
 
-### Manually Connecting an Opponent
+### Resolving Opponents via GC Search
 
-For any **Unresolved** row, click the **Connect** button (blue primary button). This opens the URL paste form where you provide the opponent team's GameChanger URL. The system shows a preview before saving.
+For any **Unresolved** row, click the **Resolve** button (blue primary). This opens a search-powered suggestion page pre-filled with the opponent's name, the member team's season year, and `sport=baseball`.
+
+**Step 1 -- Review suggestions**: The page displays GameChanger search results as cards showing team name, location, age group, and record (where available). If suggestions are not useful, use the **Refine Search** form to adjust the name, state, or city fields.
+
+**Step 2 -- Select and confirm**: Click a result card to open the confirm page with the full team profile. If the selected team's `public_id` already exists in the database, a yellow duplicate warning appears with a link to the merge page.
+
+**Step 3 -- Confirm**: Click **Confirm** to save. The opponent link is updated with `resolved_team_id`, `public_id`, `gc_uuid`, and `resolution_method = 'search'`. You are redirected to the Unresolved filter so the next opponent is immediately visible.
+
+**If GC search fails**: A flash error appears and the manual URL-paste link becomes prominent.
+
+**If no suggestion matches**: Click **No match -- skip for now** to hide the opponent (see below).
+
+### Dismissing Unresolvable Opponents
+
+When a search produces no valid match, click **No match -- skip for now** on the resolve page. This sets `is_hidden = 1` on the opponent link, which:
+
+- Removes the opponent from the Unresolved count and banner.
+- Excludes the opponent from the scouting pipeline (resolver and seeder skip hidden entries).
+- Does **not** delete the row -- it is reversible.
+
+### Viewing and Restoring Hidden Opponents
+
+Click the **Hidden (N)** filter tab to see all opponents marked "no match." Each row shows an **Unhide** button. Clicking it sets `is_hidden = 0` and returns the opponent to the active unresolved list.
+
+### Manually Connecting an Opponent (URL Paste)
+
+For opponents with a `resolved_team_id` but no `public_id` (partial resolution), a **Connect** button appears. This opens the URL-paste form where you provide the opponent team's GameChanger URL directly.
 
 To find the URL: navigate to the team's page on [web.gc.com](https://web.gc.com) and copy the URL.
 
-After connecting, the row shows a **Resolved** badge and a gray **Disconnect** button (in case of mis-mapping).
+After connecting, the row shows a **Resolved** badge and a gray **Disconnect** button (in case of mis-mapping). Only links with `resolution_method = 'manual'` can be disconnected -- auto-resolved links cannot be disconnected because they would be re-created on the next pipeline run.
 
 ### Running Opponent Discovery
 
@@ -653,4 +745,4 @@ For the expected data volume (~30 games x 4 teams x a few seasons), the database
 
 ---
 
-*Last updated: 2026-03-27 | Source: E-163 (scouting spray pipeline, updated thresholds, bb data scout 4-step flow), E-158 (spray chart pipeline, migration 006, chart routes), E-156 (bb data scout --force flag), E-155 (duplicate team detection and merge UI), E-143 (programs, user roles, team delete, opponent mapping UX, crawl trigger UI), E-120-06 (bare UUID input documented), E-055 (unified CLI), E-115-01 (E-100 team management model), E-028-03 (original)*
+*Last updated: 2026-03-27 | Source: E-167 (bb data dedup CLI, GC search-powered opponent resolution, skip/unhide workflow), E-163 (scouting spray pipeline, updated thresholds, bb data scout 4-step flow), E-158 (spray chart pipeline, migration 006, chart routes), E-156 (bb data scout --force flag), E-155 (duplicate team detection and merge UI), E-143 (programs, user roles, team delete, opponent mapping UX, crawl trigger UI), E-120-06 (bare UUID input documented), E-055 (unified CLI), E-115-01 (E-100 team management model), E-028-03 (original)*

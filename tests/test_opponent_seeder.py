@@ -579,3 +579,65 @@ def test_malformed_opponents_json_raises(db, tmp_path):
 
     with pytest.raises(json.JSONDecodeError):
         seed_schedule_opponents(1, schedule_path=schedule, opponents_path=opponents_path, db=db)
+
+
+# ---------------------------------------------------------------------------
+# E-167: is_hidden filtering
+# ---------------------------------------------------------------------------
+
+
+def _opponent_entry_hidden(root_team_id: str, name: str) -> dict:
+    """Build an opponents.json entry with is_hidden=true."""
+    return {
+        "root_team_id": root_team_id,
+        "name": name,
+        "progenitor_team_id": None,
+        "is_hidden": True,
+    }
+
+
+def test_is_hidden_opponents_filtered_from_seeding(db, tmp_path):
+    """Opponents with is_hidden=true in opponents.json are not seeded."""
+    schedule = _write_schedule(tmp_path, [
+        _game_event("opp-visible", "Visible Team"),
+        _game_event("opp-hidden", "Hidden Team"),
+    ])
+    opponents = _write_opponents(tmp_path, [
+        _opponent_entry("opp-visible", "Visible Team"),
+        _opponent_entry_hidden("opp-hidden", "Hidden Team"),
+    ])
+
+    count = seed_schedule_opponents(1, schedule, opponents, db)
+
+    assert count == 1
+    rows = _fetch_links(db)
+    assert len(rows) == 1
+    assert rows[0]["root_team_id"] == "opp-visible"
+
+
+def test_is_hidden_all_opponents_hidden_returns_zero(db, tmp_path):
+    """When all opponents are hidden, seeder returns 0."""
+    schedule = _write_schedule(tmp_path, [
+        _game_event("opp-hidden", "Hidden Team"),
+    ])
+    opponents = _write_opponents(tmp_path, [
+        _opponent_entry_hidden("opp-hidden", "Hidden Team"),
+    ])
+
+    count = seed_schedule_opponents(1, schedule, opponents, db)
+
+    assert count == 0
+    assert db.execute("SELECT COUNT(*) FROM opponent_links").fetchone()[0] == 0
+
+
+def test_is_hidden_without_opponents_json_does_not_filter(db, tmp_path):
+    """Without opponents.json, no is_hidden info available -- all are seeded."""
+    from pathlib import Path
+    schedule = _write_schedule(tmp_path, [
+        _game_event("opp-001", "Team A"),
+    ])
+    opponents_path = tmp_path / "opponents.json"  # does not exist
+
+    count = seed_schedule_opponents(1, schedule, opponents_path, db)
+
+    assert count == 1

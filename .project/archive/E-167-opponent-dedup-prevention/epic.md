@@ -1,7 +1,7 @@
 # E-167: Opponent Dedup Prevention and Resolution
 
 ## Status
-`READY`
+`COMPLETED`
 <!-- Lifecycle: DRAFT → READY → ACTIVE → COMPLETED (or BLOCKED / ABANDONED) -->
 <!-- PM sets READY explicitly after: expert consultation done, all stories have testable ACs, quality checklist passed. -->
 <!-- Only READY and ACTIVE epics can be dispatched. -->
@@ -64,10 +64,11 @@ The same real-world opponent can appear as multiple `teams` rows due to four roo
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-167-01 | Shared `ensure_team_row()` function and name index migration | TODO | None | - |
-| E-167-02 | Migrate pipeline INSERT paths to shared function | TODO | E-167-01 | - |
-| E-167-03 | Auto-merge CLI and enhanced duplicate detection | TODO | None | - |
-| E-167-04 | Admin opponent resolution workflow with GC search suggestions | TODO | E-167-01 | - |
+| E-167-01 | Shared `ensure_team_row()` function and name index migration | DONE | None | - |
+| E-167-02 | Migrate pipeline INSERT paths to shared function | DONE | E-167-01 | - |
+| E-167-03 | Auto-merge CLI and enhanced duplicate detection | DONE | None | - |
+| E-167-04 | Admin opponent resolution workflow with GC search suggestions | DONE | E-167-01 | - |
+| E-167-05 | Documentation Update for E-167 | DONE | E-167-01, E-167-02, E-167-03, E-167-04 | - |
 
 ## Dispatch Team
 - software-engineer
@@ -203,12 +204,39 @@ This serves both the dedup detection query in `find_duplicate_teams()` and the n
 ## History
 - 2026-03-27: Created. Expert consultations with SE, DE, api-scout, and UXD complete. Promotes IDEA-044 (Prevent Duplicate Team Creation). Partially addresses IDEA-043 scope (exact-match detection) without fuzzy matching.
 - 2026-03-27: Set to READY after holistic team review and two Codex spec review iterations.
+- 2026-03-27: Dispatch started.
+- 2026-03-27: All 4 stories DONE (01: shared ensure_team_row + migration, 02: 8-module pipeline migration + is_hidden filtering, 03: auto-merge CLI + enhanced duplicate detection, 04: admin resolution workflow with GC search). Epic COMPLETED. Key findings fixed during dispatch: TeamProfile dataclass vs dict mismatch (CR), test fixture season_year column regression (Codex), is_active default regression (Codex), public_id collision in confirm POST (Codex). Documentation and context-layer assessments complete.
+
+**Documentation assessment**: DONE -- docs-writer updated `docs/admin/operations.md` (dedup CLI, opponent resolution workflow) and `docs/admin/architecture.md` (migration 007).
+
+**Context-layer assessment**:
+1. New convention (ensure_team_row canonical path): **YES** -- codified in CLAUDE.md Architecture
+2. Architectural decision (dedup cascade): **YES** -- codified in CLAUDE.md Architecture
+3. Footgun (template test scope): **YES** -- noted (not codified as rule, CR practice insight)
+4. Agent behavior change: **NO**
+5. Domain knowledge (GC opponent duality): **YES** -- codified in CLAUDE.md GameChanger API
+6. New CLI command (bb data dedup): **YES** -- codified in CLAUDE.md Commands
 
 ### Review Scorecard
+
+**Spec reviews (pre-dispatch):**
+
 | Review Pass | Findings | Accepted | Dismissed |
 |---|---|---|---|
 | Internal iteration 1 -- CR spec audit | 8 | 5 | 3 |
 | Internal iteration 1 -- Holistic team (PM+SE+DE+api-scout+UXD) | 12 | 12 | 0 |
 | Codex iteration 1 | 6 | 6 | 0 |
 | Codex iteration 2 | 5 | 4 | 1 |
-| **Total** | **31** | **27** | **4** |
+| **Spec total** | **31** | **27** | **4** |
+
+**Code reviews (dispatch):**
+
+| Review Pass | Findings | Accepted | Dismissed |
+|---|---|---|---|
+| Per-story CR -- E-167-01 | 1 | 1 | 0 |
+| Per-story CR -- E-167-02 | 2 | 2 | 0 |
+| Per-story CR -- E-167-03 (2 rounds) | 6 | 6 | 0 |
+| Per-story CR -- E-167-04 (2 rounds) | 5 | 4 | 1 |
+| CR integration review (2 rounds) | 1 | 1 | 0 |
+| Codex code review | 5 | 4 | 1 |
+| **Code total** | **20** | **18** | **2** |

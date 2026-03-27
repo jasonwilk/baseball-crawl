@@ -1189,7 +1189,7 @@ def test_record_uuid_from_boxscore_path_uses_opponent_name(
     }
     bs_path.write_text(json.dumps(boxscore), encoding="utf-8")
 
-    loader._record_uuid_from_boxscore_path(bs_path, opponent_name="Safety Net Team")
+    loader._record_uuid_from_boxscore_path(bs_path, season_id="2025-spring-hs", opponent_name="Safety Net Team")
 
     row = db.execute("SELECT name FROM teams WHERE gc_uuid = ?", (uuid_key,)).fetchone()
     assert row is not None
@@ -1214,7 +1214,7 @@ def test_record_uuid_from_boxscore_path_updates_uuid_stub_with_name(
     boxscore = {uuid_key: {"players": [], "groups": []}}
     bs_path.write_text(json.dumps(boxscore), encoding="utf-8")
 
-    loader._record_uuid_from_boxscore_path(bs_path, opponent_name="Healed Team Name")
+    loader._record_uuid_from_boxscore_path(bs_path, season_id="2025-spring-hs", opponent_name="Healed Team Name")
 
     row = db.execute("SELECT name FROM teams WHERE id = ?", (stub_pk,)).fetchone()
     assert row[0] == "Healed Team Name"
@@ -1231,7 +1231,7 @@ def test_record_uuid_from_boxscore_path_fallback_without_name(
     boxscore = {uuid_key: {"players": [], "groups": []}}
     bs_path.write_text(json.dumps(boxscore), encoding="utf-8")
 
-    loader._record_uuid_from_boxscore_path(bs_path)
+    loader._record_uuid_from_boxscore_path(bs_path, season_id="2025-spring-hs")
 
     row = db.execute("SELECT name FROM teams WHERE gc_uuid = ?", (uuid_key,)).fetchone()
     assert row is not None

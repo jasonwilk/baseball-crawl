@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from src.gamechanger.crawlers.scouting import ScoutingCrawler
     from src.gamechanger.loaders.scouting_loader import ScoutingLoader
 
+from src.db.merge import DuplicateTeam
 from src.pipeline import bootstrap as bootstrap_module
 from src.pipeline import crawl as crawl_module
 from src.pipeline import load as load_module
@@ -703,7 +704,7 @@ def resolve_opponents(
         typer.echo(
             f"Progenitor resolution complete: "
             f"resolved={result.resolved} unlinked={result.unlinked} "
-            f"stored_hidden={result.stored_hidden} errors={result.errors}"
+            f"skipped_hidden={result.skipped_hidden} errors={result.errors}"
         )
 
         unlinked_failed = False
@@ -724,4 +725,161 @@ def resolve_opponents(
                 unlinked_failed = True
 
     raise SystemExit(1 if (result.errors or unlinked_failed) else 0)
+
+
+# ---------------------------------------------------------------------------
+# dedup command
+# ---------------------------------------------------------------------------
+
+
+def _select_canonical(
+    group: list[DuplicateTeam],
+) -> tuple[DuplicateTeam, list[DuplicateTeam]]:
+    """Select the canonical team from a duplicate group using the heuristic.
+
+    Priority order: has_stats > game_count > lowest id.
+
+    Args:
+        group: List of DuplicateTeam records.
+
+    Returns:
+        Tuple of (canonical, duplicates) where duplicates is sorted weakest-first.
+    """
+    sorted_group = sorted(
+        group,
+        key=lambda t: (t.has_stats, t.game_count, -t.id),
+        reverse=True,
+    )
+    return sorted_group[0], sorted_group[1:]
+
+
+def _format_team(t: DuplicateTeam) -> str:
+    """Format a DuplicateTeam for CLI output."""
+    gc = "gc_uuid" if t.gc_uuid else "no gc_uuid"
+    pub = "public_id" if t.public_id else "no public_id"
+    stats = "has_stats" if t.has_stats else "no stats"
+    return (
+        f"  id={t.id}  name={t.name!r}  season_year={t.season_year}  "
+        f"games={t.game_count}  {stats}  {gc}  {pub}"
+    )
+
+
+@app.command()
+def dedup(
+    execute: bool = typer.Option(
+        False,
+        "--execute",
+        help="Perform the merges. Without this flag, only a dry-run preview is shown.",
+    ),
+    db_path: Path = typer.Option(
+        _DEFAULT_DB_PATH,
+        "--db",
+        help="Path to the SQLite database.",
+    ),
+) -> None:
+    """Identify and auto-merge duplicate tracked teams."""
+    from src.db.merge import (
+        find_duplicate_teams,
+        merge_teams,
+        preview_merge,
+    )
+
+    with closing(sqlite3.connect(str(db_path))) as conn:
+        conn.execute("PRAGMA foreign_keys = ON")
+
+        try:
+            groups = find_duplicate_teams(conn)
+        except Exception as exc:
+            typer.echo(f"Error finding duplicates: {exc}", err=True)
+            raise SystemExit(1) from exc
+
+        if not groups:
+            typer.echo("No duplicate teams found.")
+            raise SystemExit(0)
+
+        mode = "EXECUTE" if execute else "DRY RUN"
+        typer.echo(f"[{mode}] Found {len(groups)} duplicate group(s).\n")
+
+        merged = 0
+        skipped = 0
+        skip_reasons: list[str] = []
+
+        for i, group in enumerate(groups, 1):
+            canonical, duplicates = _select_canonical(group)
+
+            typer.echo(f"--- Group {i} ({len(group)} teams) ---")
+            for t in group:
+                marker = " << canonical" if t.id == canonical.id else ""
+                typer.echo(f"{_format_team(t)}{marker}")
+
+            reason = f"has_stats={canonical.has_stats} games={canonical.game_count} id={canonical.id}"
+            typer.echo(f"  Canonical: id={canonical.id} ({reason})")
+
+            # Merge pairwise: weakest into canonical
+            group_merged = 0
+            group_skipped = 0
+            for dup in duplicates:
+                # Safety: never merge two teams that both have different non-NULL
+                # season_year values -- that would be cross-season dedup.
+                if (
+                    canonical.season_year is not None
+                    and dup.season_year is not None
+                    and canonical.season_year != dup.season_year
+                ):
+                    typer.echo(
+                        f"  SKIP merge {dup.id} -> {canonical.id}: "
+                        f"different season_years ({dup.season_year} vs {canonical.season_year})"
+                    )
+                    group_skipped += 1
+                    skip_reasons.append(
+                        f"group {i}: cross-season merge blocked for "
+                        f"id={dup.id} (year={dup.season_year}) vs "
+                        f"id={canonical.id} (year={canonical.season_year})"
+                    )
+                    continue
+
+                try:
+                    preview = preview_merge(canonical.id, dup.id, conn)
+                except Exception as exc:
+                    typer.echo(f"  SKIP merge {dup.id} -> {canonical.id}: preview error: {exc}")
+                    group_skipped += 1
+                    skip_reasons.append(f"group {i}: preview error for id={dup.id}")
+                    continue
+
+                if preview.games_between_teams > 0:
+                    typer.echo(
+                        f"  SKIP merge {dup.id} -> {canonical.id}: "
+                        f"{preview.games_between_teams} game(s) between teams"
+                    )
+                    group_skipped += 1
+                    skip_reasons.append(
+                        f"group {i}: {preview.games_between_teams} games between "
+                        f"id={dup.id} and id={canonical.id}"
+                    )
+                    continue
+
+                if execute:
+                    try:
+                        merge_teams(canonical.id, dup.id, conn)
+                        typer.echo(f"  MERGED id={dup.id} -> id={canonical.id}")
+                        group_merged += 1
+                    except Exception as exc:
+                        typer.echo(f"  ERROR merging {dup.id} -> {canonical.id}: {exc}")
+                        group_skipped += 1
+                        skip_reasons.append(f"group {i}: merge error for id={dup.id}: {exc}")
+                else:
+                    typer.echo(f"  Would merge id={dup.id} -> id={canonical.id}")
+                    group_merged += 1
+
+            merged += group_merged
+            skipped += group_skipped
+            typer.echo("")
+
+        typer.echo(f"Summary: {len(groups)} group(s) found, {merged} merged, {skipped} skipped.")
+        if skip_reasons:
+            typer.echo("Skip reasons:")
+            for reason in skip_reasons:
+                typer.echo(f"  - {reason}")
+
+    raise SystemExit(0)
 

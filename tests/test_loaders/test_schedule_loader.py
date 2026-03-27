@@ -42,6 +42,7 @@ def db() -> sqlite3.Connection:
     conn.execute("PRAGMA foreign_keys=ON;")
     conn.commit()
     conn.executescript(_MIGRATION_FILE.read_text(encoding="utf-8"))
+    conn.execute("ALTER TABLE teams ADD COLUMN season_year INTEGER")
     conn.commit()
     yield conn
     conn.close()
@@ -471,8 +472,8 @@ class TestOpponentResolution:
 
         # Pre-create stub team
         db.execute(
-            "INSERT INTO teams (name, membership_type, source, is_active) "
-            "VALUES (?, 'tracked', 'schedule', 0)",
+            "INSERT INTO teams (name, membership_type, source, is_active, season_year) "
+            "VALUES (?, 'tracked', 'schedule', 0, 2025)",
             (_OPP_NAME,),
         )
         existing_id = db.execute("SELECT last_insert_rowid()").fetchone()[0]

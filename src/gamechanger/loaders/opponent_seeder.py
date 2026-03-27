@@ -123,7 +123,7 @@ def seed_schedule_opponents(
         return 0
 
     # --- Load opponents.json for name lookup -- missing is non-fatal ---
-    opponents_lookup: dict[str, str] = _load_opponents_lookup(team_id, opponents_path)
+    opponents_lookup, hidden_ids = _load_opponents_lookup(team_id, opponents_path)
 
     # --- Collect unique opponents from schedule events ---
     # Key:   root_team_id (= pregame_data.opponent_id, confirmed identical)
@@ -143,6 +143,13 @@ def seed_schedule_opponents(
             continue
 
         if opponent_id not in unique_opponents:
+            # Skip hidden opponents (is_hidden=true in opponents.json)
+            if opponent_id in hidden_ids:
+                logger.debug(
+                    "Skipping hidden opponent root_team_id=%s for team %d.",
+                    opponent_id, team_id,
+                )
+                continue
             # opponents.json name is primary; schedule name is fallback.
             name = opponents_lookup.get(opponent_id) or pregame.get("opponent_name") or ""
             unique_opponents[opponent_id] = name
@@ -178,17 +185,21 @@ def seed_schedule_opponents(
     return count
 
 
-def _load_opponents_lookup(team_id: int, opponents_path: Path) -> dict[str, str]:
-    """Load a ``root_team_id -> name`` mapping from ``opponents.json``.
+def _load_opponents_lookup(
+    team_id: int, opponents_path: Path
+) -> tuple[dict[str, str], set[str]]:
+    """Load a ``root_team_id -> name`` mapping and hidden IDs from ``opponents.json``.
 
-    Missing or empty ``opponents.json`` returns an empty dict (non-fatal).
+    Missing or empty ``opponents.json`` returns empty collections (non-fatal).
 
     Args:
         team_id: Member team ID (used in log messages only).
         opponents_path: Path to the team's cached ``opponents.json`` file.
 
     Returns:
-        Mapping of ``root_team_id`` to ``name`` for all valid entries.
+        Tuple of (name_lookup, hidden_ids):
+        - name_lookup: Mapping of ``root_team_id`` to ``name`` for all valid entries.
+        - hidden_ids: Set of ``root_team_id`` values where ``is_hidden=true``.
 
     Raises:
         json.JSONDecodeError: If the file exists but contains malformed JSON.
@@ -200,26 +211,30 @@ def _load_opponents_lookup(team_id: int, opponents_path: Path) -> dict[str, str]
             team_id,
             opponents_path,
         )
-        return {}
+        return {}, set()
 
     opponents_text = opponents_path.read_text(encoding="utf-8").strip()
     if not opponents_text:
         logger.debug(
             "opponents.json is empty for team %d; using schedule names.", team_id
         )
-        return {}
+        return {}, set()
 
     opponents_data: list[Any] = json.loads(opponents_text)
     lookup: dict[str, str] = {}
+    hidden: set[str] = set()
     for opp in opponents_data:
         root_id: str | None = opp.get("root_team_id")
         name: str | None = opp.get("name")
         if root_id and name:
             lookup[root_id] = name
+        if root_id and opp.get("is_hidden", False):
+            hidden.add(root_id)
 
     logger.debug(
-        "Loaded %d opponent name(s) from opponents.json for team %d.",
+        "Loaded %d opponent name(s) (%d hidden) from opponents.json for team %d.",
         len(lookup),
+        len(hidden),
         team_id,
     )
-    return lookup
+    return lookup, hidden

@@ -34,6 +34,7 @@ import logging
 import sqlite3
 from pathlib import Path
 
+from src.db.teams import ensure_team_row
 from src.gamechanger.loaders import LoadResult, extract_year_from_season_id
 from src.gamechanger.types import TeamRef
 
@@ -281,8 +282,7 @@ class ScheduleLoader:
     def _find_or_create_stub_team(self, name: str) -> int:
         """Find an existing team by name or create a stub team row.
 
-        Stub teams use ``membership_type='tracked'``, ``source='schedule'``,
-        and ``is_active=0``.
+        Delegates to the shared ``ensure_team_row()`` dedup cascade.
 
         Args:
             name: Team name to search for or create.
@@ -290,22 +290,13 @@ class ScheduleLoader:
         Returns:
             INTEGER PK from the ``teams`` table.
         """
-        # Try to find existing team by name
-        row = self._db.execute(
-            "SELECT id FROM teams WHERE name = ? AND membership_type = 'tracked'",
-            (name,),
-        ).fetchone()
-        if row:
-            return row[0]
-
-        # Create stub team
-        cursor = self._db.execute(
-            "INSERT INTO teams (name, membership_type, source, is_active) "
-            "VALUES (?, 'tracked', 'schedule', 0)",
-            (name,),
+        season_year = extract_year_from_season_id(self._season_id)
+        return ensure_team_row(
+            self._db,
+            name=name,
+            season_year=season_year,
+            source="schedule",
         )
-        logger.info("Created stub team '%s' (id=%d, source=schedule)", name, cursor.lastrowid)
-        return cursor.lastrowid
 
     def _ensure_season_row(self) -> None:
         """Ensure a seasons row exists for the configured season_id."""

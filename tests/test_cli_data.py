@@ -278,7 +278,7 @@ def test_data_help_lists_commands() -> None:
 def _make_mock_resolver(
     resolved: int = 1,
     unlinked: int = 0,
-    stored_hidden: int = 0,
+    skipped_hidden: int = 0,
     resolve_errors: int = 0,
     unlinked_resolved: int = 0,
     follow_bridge_failed: int = 0,
@@ -288,7 +288,7 @@ def _make_mock_resolver(
     mock_resolve_result = MagicMock()
     mock_resolve_result.resolved = resolved
     mock_resolve_result.unlinked = unlinked
-    mock_resolve_result.stored_hidden = stored_hidden
+    mock_resolve_result.skipped_hidden = skipped_hidden
     mock_resolve_result.errors = resolve_errors
 
     mock_unlinked_result = MagicMock()
@@ -364,7 +364,7 @@ def test_resolve_opponents_output_includes_both_phases() -> None:
         mock_resolver = _make_mock_resolver(
             resolved=5,
             unlinked=2,
-            stored_hidden=1,
+            skipped_hidden=1,
             unlinked_resolved=1,
             follow_bridge_failed=1,
         )
@@ -836,3 +836,180 @@ def test_load_scouting_spray_dry_run_skips_load() -> None:
     mock_cls.assert_not_called()
     assert result.exit_code == 0
     assert "Dry run" in result.output
+
+
+# ---------------------------------------------------------------------------
+# bb data dedup
+# ---------------------------------------------------------------------------
+
+
+def _make_dup_team(
+    id: int,
+    name: str = "Rival HS",
+    season_year: int | None = 2026,
+    gc_uuid: str | None = None,
+    public_id: str | None = None,
+    game_count: int = 0,
+    has_stats: bool = False,
+):
+    """Build a DuplicateTeam for dedup tests."""
+    from src.db.merge import DuplicateTeam
+    return DuplicateTeam(
+        id=id, name=name, season_year=season_year, gc_uuid=gc_uuid,
+        public_id=public_id, game_count=game_count, has_stats=has_stats,
+    )
+
+
+def test_dedup_dry_run_no_duplicates() -> None:
+    """dedup with no duplicates prints message and exits 0."""
+    with patch("src.db.merge.find_duplicate_teams", return_value=[]):
+        with patch("src.cli.data.sqlite3.connect"):
+            result = runner.invoke(app, ["data", "dedup", "--db", "/tmp/test.db"])
+    assert result.exit_code == 0
+    assert "No duplicate teams found" in result.output
+
+
+def test_dedup_dry_run_shows_preview() -> None:
+    """dedup dry-run shows group info, canonical, and 'Would merge'."""
+    groups = [[
+        _make_dup_team(1, has_stats=True, game_count=5),
+        _make_dup_team(2, game_count=0),
+    ]]
+    mock_preview = MagicMock()
+    mock_preview.games_between_teams = 0
+
+    with (
+        patch("src.db.merge.find_duplicate_teams", return_value=groups),
+        patch("src.db.merge.preview_merge", return_value=mock_preview),
+        patch("src.cli.data.sqlite3.connect"),
+    ):
+        result = runner.invoke(app, ["data", "dedup", "--db", "/tmp/test.db"])
+
+    assert result.exit_code == 0
+    assert "DRY RUN" in result.output
+    assert "Would merge id=2 -> id=1" in result.output
+    assert "canonical" in result.output.lower()
+
+
+def test_dedup_execute_performs_merge() -> None:
+    """dedup --execute calls merge_teams."""
+    groups = [[
+        _make_dup_team(1, has_stats=True),
+        _make_dup_team(2),
+    ]]
+    mock_preview = MagicMock()
+    mock_preview.games_between_teams = 0
+
+    with (
+        patch("src.db.merge.find_duplicate_teams", return_value=groups),
+        patch("src.db.merge.preview_merge", return_value=mock_preview),
+        patch("src.db.merge.merge_teams") as mock_merge,
+        patch("src.cli.data.sqlite3.connect"),
+    ):
+        result = runner.invoke(app, ["data", "dedup", "--execute", "--db", "/tmp/test.db"])
+
+    assert result.exit_code == 0
+    assert "EXECUTE" in result.output
+    assert "MERGED id=2 -> id=1" in result.output
+    mock_merge.assert_called_once()
+
+
+def test_dedup_skips_games_between() -> None:
+    """dedup skips groups where teams played each other."""
+    groups = [[
+        _make_dup_team(1, game_count=3),
+        _make_dup_team(2, game_count=1),
+    ]]
+    mock_preview = MagicMock()
+    mock_preview.games_between_teams = 2
+
+    with (
+        patch("src.db.merge.find_duplicate_teams", return_value=groups),
+        patch("src.db.merge.preview_merge", return_value=mock_preview),
+        patch("src.cli.data.sqlite3.connect"),
+    ):
+        result = runner.invoke(app, ["data", "dedup", "--execute", "--db", "/tmp/test.db"])
+
+    assert result.exit_code == 0
+    assert "SKIP" in result.output
+    assert "game(s) between teams" in result.output
+    assert "1 group(s) found, 0 merged, 1 skipped" in result.output
+
+
+def test_dedup_canonical_heuristic_has_stats_wins() -> None:
+    """Canonical selection: has_stats beats higher game_count."""
+    from src.cli.data import _select_canonical
+    group = [
+        _make_dup_team(1, game_count=10, has_stats=False),
+        _make_dup_team(2, game_count=1, has_stats=True),
+    ]
+    canonical, dups = _select_canonical(group)
+    assert canonical.id == 2
+
+
+def test_dedup_canonical_heuristic_game_count_wins() -> None:
+    """Canonical selection: higher game_count beats lower id."""
+    from src.cli.data import _select_canonical
+    group = [
+        _make_dup_team(1, game_count=0),
+        _make_dup_team(2, game_count=5),
+    ]
+    canonical, dups = _select_canonical(group)
+    assert canonical.id == 2
+
+
+def test_dedup_canonical_heuristic_lowest_id_wins() -> None:
+    """Canonical selection: lowest id when all else equal."""
+    from src.cli.data import _select_canonical
+    group = [
+        _make_dup_team(5),
+        _make_dup_team(3),
+        _make_dup_team(7),
+    ]
+    canonical, dups = _select_canonical(group)
+    assert canonical.id == 3
+
+
+def test_dedup_3_team_group_merges_pairwise() -> None:
+    """dedup --execute merges N-1 times for an N-team group."""
+    groups = [[
+        _make_dup_team(1, has_stats=True, game_count=5),
+        _make_dup_team(2, game_count=1),
+        _make_dup_team(3, game_count=0),
+    ]]
+    mock_preview = MagicMock()
+    mock_preview.games_between_teams = 0
+
+    with (
+        patch("src.db.merge.find_duplicate_teams", return_value=groups),
+        patch("src.db.merge.preview_merge", return_value=mock_preview),
+        patch("src.db.merge.merge_teams") as mock_merge,
+        patch("src.cli.data.sqlite3.connect"),
+    ):
+        result = runner.invoke(app, ["data", "dedup", "--execute", "--db", "/tmp/test.db"])
+
+    assert result.exit_code == 0
+    # 3-team group -> 2 merges (each duplicate into canonical)
+    assert mock_merge.call_count == 2
+    assert "MERGED id=3 -> id=1" in result.output
+    assert "MERGED id=2 -> id=1" in result.output
+    assert "1 group(s) found, 2 merged, 0 skipped" in result.output
+
+
+def test_dedup_summary_output() -> None:
+    """dedup shows a summary line at the end."""
+    groups = [
+        [_make_dup_team(1), _make_dup_team(2)],
+        [_make_dup_team(3), _make_dup_team(4)],
+    ]
+    mock_preview = MagicMock()
+    mock_preview.games_between_teams = 0
+
+    with (
+        patch("src.db.merge.find_duplicate_teams", return_value=groups),
+        patch("src.db.merge.preview_merge", return_value=mock_preview),
+        patch("src.cli.data.sqlite3.connect"),
+    ):
+        result = runner.invoke(app, ["data", "dedup", "--db", "/tmp/test.db"])
+
+    assert "2 group(s) found, 2 merged, 0 skipped" in result.output

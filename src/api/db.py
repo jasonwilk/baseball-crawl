@@ -1016,7 +1016,10 @@ def _opponent_links_where(
     our_team_id: int | None, status_filter: str | None
 ) -> tuple[str, list[Any]]:
     """Build WHERE clause and params for opponent_links queries."""
-    conditions: list[str] = ["ol.is_hidden = 0"]
+    if status_filter == "hidden":
+        conditions: list[str] = ["ol.is_hidden = 1"]
+    else:
+        conditions = ["ol.is_hidden = 0"]
     params: list[Any] = []
     if our_team_id is not None:
         conditions.append("ol.our_team_id = ?")
@@ -1025,6 +1028,8 @@ def _opponent_links_where(
         conditions.append("ol.public_id IS NOT NULL")
     elif status_filter == "scoresheet":
         conditions.append("ol.public_id IS NULL")
+    elif status_filter == "unresolved":
+        conditions.append("ol.resolved_team_id IS NULL")
     return " AND ".join(conditions), params
 
 
@@ -1056,27 +1061,28 @@ def get_opponent_links(
 
 
 def get_opponent_link_counts(our_team_id: int | None = None) -> dict[str, int]:
-    """Return total, full_stats, and scoresheet_only counts for opponent links.
+    """Return opponent link counts by resolution state.
 
     Args:
         our_team_id: INTEGER team id to scope to a specific team, or None for all teams.
 
     Returns:
-        Dict with keys: total, full_stats, scoresheet_only.
+        Dict with keys: total, full_stats, scoresheet_only, unresolved, hidden.
     """
-    conditions: list[str] = ["is_hidden = 0"]
+    team_cond = ""
     params: list[Any] = []
     if our_team_id is not None:
-        conditions.append("our_team_id = ?")
+        team_cond = "AND our_team_id = ?"
         params.append(our_team_id)
-    where = " AND ".join(conditions)
     query = f"""
         SELECT
-            COUNT(*) AS total,
-            SUM(CASE WHEN public_id IS NOT NULL THEN 1 ELSE 0 END) AS full_stats,
-            SUM(CASE WHEN public_id IS NULL THEN 1 ELSE 0 END) AS scoresheet_only
+            SUM(CASE WHEN is_hidden = 0 THEN 1 ELSE 0 END) AS total,
+            SUM(CASE WHEN is_hidden = 0 AND public_id IS NOT NULL THEN 1 ELSE 0 END) AS full_stats,
+            SUM(CASE WHEN is_hidden = 0 AND public_id IS NULL THEN 1 ELSE 0 END) AS scoresheet_only,
+            SUM(CASE WHEN is_hidden = 0 AND resolved_team_id IS NULL THEN 1 ELSE 0 END) AS unresolved,
+            SUM(CASE WHEN is_hidden = 1 THEN 1 ELSE 0 END) AS hidden
         FROM opponent_links
-        WHERE {where}
+        WHERE 1=1 {team_cond}
     """
     try:
         with closing(get_connection()) as conn:
@@ -1088,10 +1094,12 @@ def get_opponent_link_counts(our_team_id: int | None = None) -> dict[str, int]:
                 "total": r["total"] or 0,
                 "full_stats": r["full_stats"] or 0,
                 "scoresheet_only": r["scoresheet_only"] or 0,
+                "unresolved": r["unresolved"] or 0,
+                "hidden": r["hidden"] or 0,
             }
     except sqlite3.Error:
         logger.exception("Failed to count opponent links")
-    return {"total": 0, "full_stats": 0, "scoresheet_only": 0}
+    return {"total": 0, "full_stats": 0, "scoresheet_only": 0, "unresolved": 0, "hidden": 0}
 
 
 def get_opponent_link_by_id(link_id: int) -> dict[str, Any] | None:

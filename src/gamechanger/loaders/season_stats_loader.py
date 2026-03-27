@@ -49,6 +49,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
+from src.db.teams import ensure_team_row
 from src.gamechanger.loaders import LoadResult, warn_season_year_mismatch
 
 logger = logging.getLogger(__name__)
@@ -585,8 +586,7 @@ class SeasonStatsLoader:
     def _ensure_team_row(self, gc_uuid: str) -> int:
         """Ensure a ``teams`` row exists for ``gc_uuid`` and return its INTEGER PK.
 
-        Inserts a stub row (membership_type='tracked') if none exists.  If the
-        row already exists (IGNORE fires), falls back to SELECT.
+        Delegates to the shared ``ensure_team_row()`` dedup cascade.
 
         Args:
             gc_uuid: GameChanger team UUID.
@@ -594,21 +594,7 @@ class SeasonStatsLoader:
         Returns:
             The ``teams.id`` INTEGER PK for the row.
         """
-        cursor = self._db.execute(
-            "INSERT OR IGNORE INTO teams (name, membership_type, gc_uuid, is_active) "
-            "VALUES (?, 'tracked', ?, 0)",
-            (gc_uuid, gc_uuid),
-        )
-        if cursor.rowcount:
-            logger.debug("Created teams row for gc_uuid=%s id=%d", gc_uuid, cursor.lastrowid)
-            return cursor.lastrowid
-        row = self._db.execute(
-            "SELECT id FROM teams WHERE gc_uuid = ?", (gc_uuid,)
-        ).fetchone()
-        if row:
-            logger.debug("Found existing teams row for gc_uuid=%s id=%d", gc_uuid, row[0])
-            return row[0]
-        raise RuntimeError(f"Failed to find or create teams row for gc_uuid={gc_uuid!r}")
+        return ensure_team_row(self._db, gc_uuid=gc_uuid, source="season_stats")
 
     def _ensure_season_row(self, season_id: str) -> None:
         """Ensure a ``seasons`` row exists for ``season_id``.

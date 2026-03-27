@@ -4,7 +4,7 @@
 [E-167: Opponent Dedup Prevention and Resolution](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the operator can run `bb data dedup` to identify and auto-merge duplicate tracked teams. The command defaults to dry-run (preview only) and requires `--execute` to perform merges. The duplicate detection query is enhanced to also catch NULL-vs-non-NULL season_year pairs.

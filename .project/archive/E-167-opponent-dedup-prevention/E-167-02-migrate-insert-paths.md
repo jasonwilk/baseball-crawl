@@ -4,7 +4,7 @@
 [E-167: Opponent Dedup Prevention and Resolution](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, all pipeline team-INSERT paths will use `ensure_team_row()` from `src/db/teams.py` instead of their own inline dedup logic. The opponent seeder and resolver will also filter out `is_hidden=true` opponents. This eliminates the root cause of duplicate team creation.

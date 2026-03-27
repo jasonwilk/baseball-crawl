@@ -52,7 +52,8 @@ import sqlite3
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from src.gamechanger.loaders import LoadResult, warn_season_year_mismatch
+from src.db.teams import ensure_team_row
+from src.gamechanger.loaders import LoadResult, extract_year_from_season_id, warn_season_year_mismatch
 from src.gamechanger.types import TeamRef
 
 logger = logging.getLogger(__name__)
@@ -1066,14 +1067,7 @@ class GameLoader:
     def _ensure_team_row(self, gc_uuid: str, opponent_name: str | None = None) -> int:
         """Ensure a ``teams`` row exists for ``gc_uuid`` and return its INTEGER PK.
 
-        Uses INSERT OR IGNORE with membership_type='tracked'.  If the row
-        already exists, falls back to SELECT.
-
-        When ``opponent_name`` is provided:
-        - New rows are created with ``name = opponent_name`` instead of the UUID.
-        - Existing rows whose ``name == gc_uuid`` (UUID-stub from a prior load)
-          are updated to the real name.  Existing rows with a non-UUID name are
-          NOT overwritten.
+        Delegates to the shared ``ensure_team_row()`` dedup cascade.
 
         Args:
             gc_uuid: GameChanger team UUID (or placeholder string).
@@ -1083,30 +1077,14 @@ class GameLoader:
         Returns:
             The ``teams.id`` INTEGER PK for the row.
         """
-        name = opponent_name or gc_uuid
-        cursor = self._db.execute(
-            "INSERT OR IGNORE INTO teams (name, membership_type, gc_uuid, is_active) "
-            "VALUES (?, 'tracked', ?, 0)",
-            (name, gc_uuid),
+        season_year = extract_year_from_season_id(self._season_id)
+        return ensure_team_row(
+            self._db,
+            gc_uuid=gc_uuid,
+            name=opponent_name,
+            season_year=season_year,
+            source="game_loader",
         )
-        if cursor.rowcount:
-            return cursor.lastrowid
-        row = self._db.execute(
-            "SELECT id, name FROM teams WHERE gc_uuid = ?", (gc_uuid,)
-        ).fetchone()
-        if row:
-            existing_id, existing_name = row
-            # Self-heal UUID-stub rows created by a prior load without a name.
-            if opponent_name and existing_name == gc_uuid:
-                self._db.execute(
-                    "UPDATE teams SET name = ? WHERE id = ?", (opponent_name, existing_id)
-                )
-                logger.debug(
-                    "Updated UUID-stub name for team %d: %r -> %r",
-                    existing_id, existing_name, opponent_name,
-                )
-            return existing_id
-        raise RuntimeError(f"Failed to find or create teams row for gc_uuid={gc_uuid!r}")
 
     def _ensure_season_row(self, season_id: str) -> None:
         """Ensure a ``seasons`` row exists for ``season_id``.

@@ -46,7 +46,8 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
-from src.gamechanger.loaders import LoadResult, warn_season_year_mismatch
+from src.db.teams import ensure_team_row
+from src.gamechanger.loaders import LoadResult, extract_year_from_season_id, warn_season_year_mismatch
 from src.gamechanger.loaders.game_loader import GameLoader, GameSummaryEntry
 from src.gamechanger.types import TeamRef
 
@@ -118,6 +119,7 @@ class ScoutingLoader:
         opponent_name_index = self._build_opponent_name_index(games_path)
         bs_result = self._load_boxscores(
             game_loader, games_index, boxscores_dir,
+            season_id=season_id,
             opponent_name_index=opponent_name_index,
             own_gc_uuid=team_ref.gc_uuid,
         )
@@ -175,6 +177,7 @@ class ScoutingLoader:
         game_loader: GameLoader,
         games_index: dict,
         boxscores_dir: Path,
+        season_id: str,
         opponent_name_index: dict[str, str] | None = None,
         own_gc_uuid: str | None = None,
     ) -> LoadResult:
@@ -184,6 +187,8 @@ class ScoutingLoader:
             game_loader: Configured ``GameLoader`` for the scouted team.
             games_index: Mapping of ``game_stream_id`` → ``GameSummaryEntry``.
             boxscores_dir: Directory containing ``{game_stream_id}.json`` files.
+            season_id: Season slug (e.g. ``"2025-spring-hs"``), used to pass
+                ``season_year`` into ``ensure_team_row()`` for UUID opportunism.
             opponent_name_index: Optional mapping of ``game_stream_id`` →
                 opponent team name.  When provided, real names are used for
                 opponent team rows instead of UUID placeholders.
@@ -211,7 +216,8 @@ class ScoutingLoader:
             total.skipped += result.skipped
             total.errors += result.errors
             self._record_uuid_from_boxscore_path(
-                bs_path, opponent_name=opponent_name, own_gc_uuid=own_gc_uuid
+                bs_path, season_id=season_id,
+                opponent_name=opponent_name, own_gc_uuid=own_gc_uuid,
             )
         return total
 
@@ -515,7 +521,8 @@ class ScoutingLoader:
     # ------------------------------------------------------------------
 
     def _record_uuid_from_boxscore_path(
-        self, bs_path: Path, opponent_name: str | None = None, own_gc_uuid: str | None = None
+        self, bs_path: Path, *, season_id: str,
+        opponent_name: str | None = None, own_gc_uuid: str | None = None,
     ) -> None:
         """Ensure a ``teams`` stub row exists for any UUID key found in a boxscore.
 
@@ -552,29 +559,17 @@ class ScoutingLoader:
 
         for key in uuid_keys:
             is_own_team = bool(own_gc_uuid and key.lower() == own_gc_uuid.lower())
-            # When own_gc_uuid is unknown and the boxscore has multiple UUID keys
-            # we cannot distinguish own vs opponent — fall back to UUID-as-name for all.
             ambiguous = own_gc_uuid is None and multi_uuid
             name = key if (is_own_team or ambiguous) else (opponent_name or key)
 
-            cursor = self._db.execute(
-                "INSERT OR IGNORE INTO teams (name, membership_type, gc_uuid, is_active) "
-                "VALUES (?, 'tracked', ?, 0)",
-                (name, key),
+            season_year = extract_year_from_season_id(season_id)
+            ensure_team_row(
+                self._db,
+                gc_uuid=key,
+                name=name,
+                season_year=season_year,
+                source="scouting_loader",
             )
-            if not cursor.rowcount and opponent_name and not is_own_team and not ambiguous:
-                # Row existed; self-heal UUID-stub if name is still the UUID placeholder.
-                row = self._db.execute(
-                    "SELECT id, name FROM teams WHERE gc_uuid = ?", (key,)
-                ).fetchone()
-                if row and row[1] == key:
-                    self._db.execute(
-                        "UPDATE teams SET name = ? WHERE id = ?", (opponent_name, row[0])
-                    )
-                    logger.debug(
-                        "UUID opportunism: updated UUID-stub name for gc_uuid=%s -> %r",
-                        key, opponent_name,
-                    )
             logger.debug("UUID opportunism (loader): ensured stub row for gc_uuid=%s", key)
 
     # ------------------------------------------------------------------
