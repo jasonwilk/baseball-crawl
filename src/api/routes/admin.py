@@ -434,7 +434,8 @@ def _get_teams_for_merge(team_ids: list[int]) -> list[dict[str, Any]]:
 
     Returns:
         List of dicts with keys: id, name, gc_uuid, public_id, membership_type,
-        season_year, last_synced, game_count, has_stats. Order matches team_ids.
+        season_year, last_synced, game_count, has_stats, opponent_of (list of
+        dicts with member team name/id/classification/season_year).
     """
     if not team_ids:
         return []
@@ -465,7 +466,38 @@ def _get_teams_for_merge(team_ids: list[int]) -> list[dict[str, Any]]:
             """,  # noqa: S608
             tuple(team_ids),
         ).fetchall()
-    return [dict(r) for r in rows]
+
+        # Which member teams list each merge candidate as an opponent?
+        opponent_of_rows = conn.execute(
+            f"""
+            SELECT
+                tpo.opponent_team_id,
+                mt.id              AS member_id,
+                mt.name            AS member_name,
+                mt.season_year     AS member_season_year,
+                mt.classification  AS member_classification
+            FROM team_opponents tpo
+            JOIN teams mt ON mt.id = tpo.our_team_id
+            WHERE tpo.opponent_team_id IN ({placeholders})
+            ORDER BY mt.name
+            """,  # noqa: S608
+            tuple(team_ids),
+        ).fetchall()
+
+        opponent_of_map: dict[int, list[dict[str, Any]]] = {}
+        for row in opponent_of_rows:
+            opp_id = row["opponent_team_id"]
+            opponent_of_map.setdefault(opp_id, []).append({
+                "id": row["member_id"],
+                "name": row["member_name"],
+                "season_year": row["member_season_year"],
+                "classification": row["member_classification"],
+            })
+
+    result = [dict(r) for r in rows]
+    for team in result:
+        team["opponent_of"] = opponent_of_map.get(team["id"], [])
+    return result
 
 
 def _run_preview_merge(canonical_id: int, duplicate_id: int) -> MergePreview:

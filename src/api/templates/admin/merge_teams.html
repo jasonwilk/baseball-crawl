@@ -56,6 +56,27 @@
         {% endif %}
       </div>
     </div>
+    <!-- Tracked by: promoted above attribute table per UXD review -->
+    <div class="mb-3 text-xs">
+      <span class="text-gray-500 font-medium">Tracked by:</span>
+      {% if team.opponent_of %}
+        <div class="flex flex-wrap gap-1.5 mt-1">
+          {% for member in team.opponent_of %}
+          <span class="inline-flex items-center gap-1 bg-blue-50 border border-blue-200 rounded px-2 py-0.5">
+            <span class="font-semibold text-blue-900">{{ member.name }}</span>
+            {% if member.classification %}
+              <span class="bg-blue-200 text-blue-800 rounded px-1 font-medium">{{ member.classification }}</span>
+            {% endif %}
+            {% if member.season_year %}
+              <span class="text-gray-400">{{ member.season_year }}</span>
+            {% endif %}
+          </span>
+          {% endfor %}
+        </div>
+      {% else %}
+        <span class="text-gray-400 italic ml-1">Not tracked by any team</span>
+      {% endif %}
+    </div>
     <table class="text-xs text-gray-700 w-full">
       <tr>
         <td class="pr-3 text-gray-500 py-0.5 w-28">ID</td>
