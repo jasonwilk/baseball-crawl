@@ -1,7 +1,7 @@
 # E-162: Fix OpponentResolver Duplicate Team Creation
 
 ## Status
-`READY`
+`COMPLETED`
 <!-- Lifecycle: DRAFT → READY → ACTIVE → COMPLETED (or BLOCKED / ABANDONED) -->
 <!-- PM sets READY explicitly after: expert consultation done, all stories have testable ACs, quality checklist passed. -->
 <!-- Only READY and ACTIVE epics can be dispatched. -->
@@ -34,7 +34,7 @@ Promoted from IDEA-046. Complementary to E-160 (manual connect fix). Together th
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-162-01 | Merge gc_uuid onto existing public_id stub in OpponentResolver | TODO | None | - |
+| E-162-01 | Merge gc_uuid onto existing public_id stub in OpponentResolver | DONE | None | SE |
 
 ## Dispatch Team
 - software-engineer
@@ -82,3 +82,24 @@ None — the fix is well-scoped and the merge strategy is clear from the product
 | Codex iteration 1 | 3 | 3 | 0 |
 | Codex iteration 2 | 2 | 2 (refined) | 0 |
 | **Total** | **5** | **5** | **0** |
+
+- 2026-03-27: COMPLETED. Single-story epic: refactored `_ensure_opponent_team_row` from INSERT-first to three-step SELECT lookup (gc_uuid → public_id → INSERT), added symmetric `_write_gc_uuid` helper. AC-2 wording updated during CR to reflect canonical gc_uuid-match behavior per TN-1. 50 tests passing (48 existing + 2 new).
+
+  Implementation review scorecard:
+
+  | Review Pass | Findings | Accepted | Dismissed |
+  |---|---|---|---|
+  | Per-story CR -- E-162-01 | 2 | 1 | 1 |
+  | CR integration review | 0 | 0 | 0 |
+  | Codex code review | 3 | 3 | 0 |
+  | **Total** | **5** | **4** | **1** |
+
+  **Documentation assessment**: No documentation impact. No new features/endpoints, no architecture changes, no schema changes, no new agents.
+
+  **Context-layer assessment**:
+  1. New convention, pattern, or constraint established? **No** — the three-step lookup and `_write_gc_uuid` helper are localized to OpponentResolver internals.
+  2. Architectural decision with ongoing implications? **No** — bug fix within existing architecture.
+  3. Footgun, failure mode, or boundary discovered? **No** — the duplicate-creation footgun was already known (IDEA-046); this epic fixes it rather than discovering a new one.
+  4. Change to agent behavior, routing, or coordination? **No** — pure implementation work.
+  5. Domain knowledge discovered that should influence agent decisions? **No** — the gc_uuid/public_id merge semantics are implementation details, not domain knowledge.
+  6. New CLI command, workflow, or operational procedure? **No** — no new commands or workflows.

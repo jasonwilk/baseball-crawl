@@ -365,14 +365,25 @@ class OpponentResolver:
     ) -> tuple[int, str | None]:
         """Ensure a teams row exists for the resolved opponent team.
 
-        Uses INSERT OR IGNORE with membership_type='tracked'.  If the row
-        already exists (IGNORE fires), falls back to SELECT to retrieve the
-        INTEGER PK.  Updates ``public_id`` and ``season_year`` only when the
-        existing row has NULL values for those columns (only-write-when-NULL).
+        Lookup order:
 
-        UNIQUE collision handling for ``public_id``: if another row already
-        has the same ``public_id``, a WARNING is logged and the write is
-        skipped (manual row reconciliation is needed).
+        1. Check by ``gc_uuid``.  If found, apply field updates and return.
+        2. Check by ``public_id`` (when non-null).  If found, back-fill
+           ``gc_uuid`` onto the existing stub via ``_write_gc_uuid`` and apply
+           field updates.  Return the stub's ID.
+        3. Neither found: INSERT a new row with ``gc_uuid`` only (no
+           ``public_id`` in the INSERT).  Then write ``public_id`` via
+           ``_write_public_id`` (collision-safe).
+
+        Field update rules:
+        - ``gc_uuid`` (step 2 only): write only when existing row has NULL,
+          with UNIQUE collision check via ``_write_gc_uuid``.
+        - ``name``: update only if existing name equals the ``gc_uuid`` string
+          (UUID-as-name stub pattern).  Real names are preserved.
+        - ``public_id``: write only when existing row has NULL
+          (only-write-when-NULL), with collision check via ``_write_public_id``.
+        - ``season_year``: write only when existing row has NULL
+          (only-write-when-NULL).
 
         Args:
             gc_uuid: Canonical GC team UUID (progenitor_team_id).
@@ -387,54 +398,96 @@ class OpponentResolver:
             write was skipped due to a UNIQUE collision so that downstream callers
             do not propagate a colliding public_id to other tables.
         """
-        # public_id is intentionally excluded from INSERT to avoid triggering the
-        # UNIQUE constraint on teams.public_id when another row already holds the
-        # same slug.  It is written after INSERT via the shared _write_public_id
-        # helper, which performs the collision check regardless of code path.
-        cursor = self._db.execute(
-            "INSERT OR IGNORE INTO teams "
-            "(name, membership_type, gc_uuid, is_active, season_year) "
-            "VALUES (?, 'tracked', ?, 0, ?)",
-            (team_name, gc_uuid, season_year),
-        )
-        if cursor.rowcount:
-            new_id: int = cursor.lastrowid
-            written = self._write_public_id(new_id, gc_uuid, public_id)
-            return new_id, (public_id if written else None)
-
+        # ------------------------------------------------------------------
+        # Step 1: Look up by gc_uuid.
+        # ------------------------------------------------------------------
         row = self._db.execute(
             "SELECT id, name, public_id, season_year FROM teams WHERE gc_uuid = ?",
             (gc_uuid,),
         ).fetchone()
-        if row is None:
-            raise RuntimeError(f"Failed to find or create teams row for gc_uuid={gc_uuid!r}")
-        existing_id, existing_name, existing_public_id, existing_season_year = row
+        if row is not None:
+            existing_id, existing_name, existing_public_id, existing_season_year = row
 
-        # Update UUID-as-name stubs (created by game_loader before team resolution)
-        # with the real team name. Preserve any existing non-UUID name.
-        if existing_name == gc_uuid:
-            self._db.execute(
-                "UPDATE teams SET name = ? WHERE id = ?", (team_name, existing_id)
-            )
-            logger.debug(
-                "Updated UUID-stub name for team %d: %r -> %r",
-                existing_id, existing_name, team_name,
-            )
+            # Update UUID-as-name stubs (created by game_loader before team resolution)
+            # with the real team name. Preserve any existing non-UUID name.
+            if existing_name == gc_uuid:
+                self._db.execute(
+                    "UPDATE teams SET name = ? WHERE id = ?", (team_name, existing_id)
+                )
+                logger.debug(
+                    "Updated UUID-stub name for team %d: %r -> %r",
+                    existing_id, existing_name, team_name,
+                )
 
-        # Write public_id only when existing row has NULL (only-write-when-NULL).
-        if existing_public_id is None:
-            written = self._write_public_id(existing_id, gc_uuid, public_id)
-            effective_public_id: str | None = public_id if written else None
-        else:
-            effective_public_id = existing_public_id
+            # Write public_id only when existing row has NULL (only-write-when-NULL).
+            if existing_public_id is None:
+                written = self._write_public_id(existing_id, gc_uuid, public_id)
+                effective_public_id: str | None = public_id if written else None
+            else:
+                effective_public_id = existing_public_id
 
-        # Write season_year only when existing row has NULL (only-write-when-NULL).
-        if season_year is not None and existing_season_year is None:
-            self._db.execute(
-                "UPDATE teams SET season_year = ? WHERE id = ?", (season_year, existing_id)
-            )
+            # Write season_year only when existing row has NULL (only-write-when-NULL).
+            if season_year is not None and existing_season_year is None:
+                self._db.execute(
+                    "UPDATE teams SET season_year = ? WHERE id = ?",
+                    (season_year, existing_id),
+                )
 
-        return existing_id, effective_public_id
+            return existing_id, effective_public_id
+
+        # ------------------------------------------------------------------
+        # Step 2: Look up by public_id (stub that exists without a gc_uuid).
+        # Only matches rows with gc_uuid IS NULL (true stubs).  Rows that
+        # already carry a different gc_uuid fall through to Step 3, where
+        # _write_public_id handles the public_id collision safely.
+        # ------------------------------------------------------------------
+        if public_id is not None:
+            row = self._db.execute(
+                "SELECT id, name, season_year FROM teams "
+                "WHERE public_id = ? AND gc_uuid IS NULL",
+                (public_id,),
+            ).fetchone()
+            if row is not None:
+                existing_id, existing_name, existing_season_year = row
+
+                # Back-fill gc_uuid onto the stub (with UNIQUE collision check).
+                self._write_gc_uuid(existing_id, public_id, gc_uuid)
+
+                # Update name if UUID-as-name stub.
+                if existing_name == gc_uuid:
+                    self._db.execute(
+                        "UPDATE teams SET name = ? WHERE id = ?", (team_name, existing_id)
+                    )
+                    logger.debug(
+                        "Updated UUID-stub name for team %d: %r -> %r",
+                        existing_id, existing_name, team_name,
+                    )
+
+                # Write season_year only when existing row has NULL (only-write-when-NULL).
+                if season_year is not None and existing_season_year is None:
+                    self._db.execute(
+                        "UPDATE teams SET season_year = ? WHERE id = ?",
+                        (season_year, existing_id),
+                    )
+
+                return existing_id, public_id
+
+        # ------------------------------------------------------------------
+        # Step 3: Neither found -- INSERT a new row.
+        # ------------------------------------------------------------------
+        # public_id is intentionally excluded from INSERT to avoid triggering
+        # the UNIQUE constraint on teams.public_id when another row already
+        # holds the same slug.  It is written after INSERT via _write_public_id,
+        # which performs the collision check regardless of code path.
+        cursor = self._db.execute(
+            "INSERT INTO teams "
+            "(name, membership_type, gc_uuid, is_active, season_year) "
+            "VALUES (?, 'tracked', ?, 0, ?)",
+            (team_name, gc_uuid, season_year),
+        )
+        new_id: int = cursor.lastrowid
+        written = self._write_public_id(new_id, gc_uuid, public_id)
+        return new_id, (public_id if written else None)
 
     def _write_public_id(self, team_id: int, gc_uuid: str, public_id: str | None) -> bool:
         """Write public_id to a teams row, checking for UNIQUE collisions first.
@@ -466,6 +519,40 @@ class OpponentResolver:
         else:
             self._db.execute(
                 "UPDATE teams SET public_id = ? WHERE id = ?", (public_id, team_id)
+            )
+            return True
+
+    def _write_gc_uuid(self, team_id: int, public_id: str, gc_uuid: str) -> bool:
+        """Write gc_uuid to a teams row, checking for UNIQUE collisions first.
+
+        Skips the write if another row already holds the same ``gc_uuid``.
+        Logs a WARNING and skips if collision detected.
+
+        This is the symmetric counterpart to ``_write_public_id`` for the
+        gc_uuid merge path in ``_ensure_opponent_team_row`` step 2.
+
+        Args:
+            team_id: INTEGER PK of the target teams row.
+            public_id: Public ID of the target team (for log context).
+            gc_uuid: GC UUID to write.
+
+        Returns:
+            True if the write was performed, False if skipped (collision).
+        """
+        collision = self._db.execute(
+            "SELECT id FROM teams WHERE gc_uuid = ? AND id != ?",
+            (gc_uuid, team_id),
+        ).fetchone()
+        if collision:
+            logger.warning(
+                "UNIQUE collision: gc_uuid=%r already assigned to team id=%d; "
+                "skipping gc_uuid write for team id=%d (public_id=%r)",
+                gc_uuid, collision[0], team_id, public_id,
+            )
+            return False
+        else:
+            self._db.execute(
+                "UPDATE teams SET gc_uuid = ? WHERE id = ?", (gc_uuid, team_id)
             )
             return True
 

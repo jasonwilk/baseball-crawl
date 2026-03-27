@@ -1524,3 +1524,138 @@ def test_unique_collision_nulls_both_teams_and_opponent_links_public_id(
         "opponent_links.public_id must be NULL when collision prevented teams write; "
         "otherwise ScoutingCrawler would look up the wrong team via _resolve_team_id"
     )
+
+
+# ---------------------------------------------------------------------------
+# E-162-01: TN-4 scenario 1 -- happy path merge (public_id stub + gc_uuid backfill)
+# ---------------------------------------------------------------------------
+
+
+def test_ensure_opponent_team_row_merges_gc_uuid_onto_public_id_stub(
+    db: sqlite3.Connection,
+) -> None:
+    """TN-4 scenario 1: public_id stub gets gc_uuid and season_year backfilled; no new row (AC-1, AC-5)."""
+    own_pk = _insert_team(db, _OWN_TEAM_GC_UUID, _OWN_TEAM_NAME)
+    # Insert a stub with public_id but no gc_uuid or season_year.
+    cursor = db.execute(
+        "INSERT INTO teams (name, membership_type, public_id, is_active) "
+        "VALUES (?, 'tracked', ?, 0)",
+        (_TEAM_NAME, _PUBLIC_ID),
+    )
+    stub_id = cursor.lastrowid
+    db.commit()
+
+    team_detail_with_season = dict(_TEAM_DETAIL, season_year=2025)
+    client = _make_client(
+        paginated_return=[_OPPONENT_WITH_PROGENITOR],
+        get_return=team_detail_with_season,
+    )
+    config = _make_config([(_OWN_TEAM_GC_UUID, own_pk)])
+    resolver = OpponentResolver(client, config, db)
+
+    with patch("src.gamechanger.crawlers.opponent_resolver.time.sleep"):
+        result = resolver.resolve()
+
+    assert result.resolved == 1
+    assert result.errors == 0
+
+    # No new team row should be created -- exactly own team + stub.
+    team_count = db.execute("SELECT COUNT(*) FROM teams").fetchone()[0]
+    assert team_count == 2
+
+    # gc_uuid, public_id, and season_year must all be set on the existing stub row.
+    row = db.execute(
+        "SELECT gc_uuid, public_id, season_year FROM teams WHERE id = ?", (stub_id,)
+    ).fetchone()
+    assert row[0] == _PROGENITOR_ID  # gc_uuid backfilled
+    assert row[1] == _PUBLIC_ID      # public_id unchanged
+    assert row[2] == 2025            # season_year written (was NULL)
+
+    # opponent_links must reference the existing stub's id, not a new row.
+    links = _fetch_links(db)
+    assert len(links) == 1
+    assert links[0]["resolved_team_id"] == stub_id
+    assert links[0]["public_id"] == _PUBLIC_ID
+    assert links[0]["resolution_method"] == "auto"
+
+
+def test_ensure_opponent_team_row_merge_updates_uuid_stub_name(
+    db: sqlite3.Connection,
+) -> None:
+    """TN-4 / AC-5: name updated to real name when stub's name equals gc_uuid (UUID-stub pattern)."""
+    own_pk = _insert_team(db, _OWN_TEAM_GC_UUID, _OWN_TEAM_NAME)
+    # Insert a stub where name = gc_uuid (UUID-as-name pattern from game_loader).
+    cursor = db.execute(
+        "INSERT INTO teams (name, membership_type, public_id, is_active) "
+        "VALUES (?, 'tracked', ?, 0)",
+        (_PROGENITOR_ID, _PUBLIC_ID),  # name == gc_uuid
+    )
+    stub_id = cursor.lastrowid
+    db.commit()
+
+    client = _make_client(
+        paginated_return=[_OPPONENT_WITH_PROGENITOR],
+        get_return=_TEAM_DETAIL,  # team_name = _TEAM_NAME
+    )
+    config = _make_config([(_OWN_TEAM_GC_UUID, own_pk)])
+    resolver = OpponentResolver(client, config, db)
+
+    with patch("src.gamechanger.crawlers.opponent_resolver.time.sleep"):
+        result = resolver.resolve()
+
+    assert result.resolved == 1
+
+    # Name must be updated from UUID-stub to real name.
+    row = db.execute("SELECT name FROM teams WHERE id = ?", (stub_id,)).fetchone()
+    assert row[0] == _TEAM_NAME
+
+
+# ---------------------------------------------------------------------------
+# E-162-01: TN-4 scenario 2 -- gc_uuid collision on merge
+# ---------------------------------------------------------------------------
+
+
+def test_write_gc_uuid_collision_logs_warning_and_skips_write(
+    db: sqlite3.Connection, caplog: pytest.LogCaptureFixture
+) -> None:
+    """TN-4 scenario 2: _write_gc_uuid logs WARNING and returns False when gc_uuid
+    already exists on a different row (AC-2).
+
+    Note: this collision path is tested directly on the helper because the
+    three-step lookup in _ensure_opponent_team_row would catch a pre-existing
+    gc_uuid row in Step 1, making Step 2 unreachable for that gc_uuid.  Testing
+    the helper directly verifies the collision-detection logic that guards
+    against data anomalies.
+    """
+    import logging
+
+    # Team A: public_id stub, no gc_uuid.
+    cursor_a = db.execute(
+        "INSERT INTO teams (name, membership_type, public_id, is_active) "
+        "VALUES ('Team A', 'tracked', 'pubSlugA', 0)",
+    )
+    team_a_id = cursor_a.lastrowid
+
+    # Team B: already holds gc_uuid=Y via a different code path.
+    db.execute(
+        "INSERT INTO teams (name, membership_type, gc_uuid, is_active) "
+        "VALUES ('Team B', 'tracked', 'gc-uuid-Y', 0)",
+    )
+    db.commit()
+
+    config = _make_config()
+    client = _make_client()
+    resolver = OpponentResolver(client, config, db)
+
+    with caplog.at_level(
+        logging.WARNING, logger="src.gamechanger.crawlers.opponent_resolver"
+    ):
+        result = resolver._write_gc_uuid(team_a_id, "pubSlugA", "gc-uuid-Y")
+
+    # Write must be skipped.
+    assert result is False
+    # Team A's gc_uuid must remain NULL.
+    row = db.execute("SELECT gc_uuid FROM teams WHERE id = ?", (team_a_id,)).fetchone()
+    assert row[0] is None
+    # WARNING must be logged.
+    assert any("UNIQUE collision" in r.message for r in caplog.records)
