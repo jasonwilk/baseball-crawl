@@ -160,7 +160,7 @@ However, the search fallback (E-168-02) has **verified identity** — exact name
 
 ## History
 - 2026-03-27: Created. Expert consultation: SE (implementation scope, ambiguity handling) + api-scout (endpoint verification, rate limiting, disambiguation).
-- 2026-03-28: Set to READY after 6 review passes (29 findings: 27 accepted, 2 dismissed).
+- 2026-03-28: Set to READY after 7 review passes (33 findings: 31 accepted, 2 dismissed).
 
 ### Review Scorecard
 | Review Pass | Findings | Accepted | Dismissed |
@@ -171,6 +171,7 @@ However, the search fallback (E-168-02) has **verified identity** — exact name
 | Internal iteration 2 — Holistic team | 3 | 3 | 0 |
 | Codex iteration 1 | 6 | 5 | 1 |
 | Codex iteration 2 | 6 | 5 | 1 |
-| **Total** | **29** | **27** | **2** |
+| Codex iteration 3 | 4 | 4 | 0 |
+| **Total** | **33** | **31** | **2** |
 
-Dismissed findings (both iterations): DE consultation for E-168-02 — no schema changes, no migrations, uses only existing write infrastructure (`ensure_team_row()` + existing upsert pattern).
+Dismissed findings (Codex iterations 1 and 2): DE consultation for E-168-02 — no schema changes, no migrations, uses only existing write infrastructure (`ensure_team_row()` + existing upsert pattern).
