@@ -31,7 +31,7 @@
 | E-166 | Enhanced Spray Charts | COMPLETED | 2 stories delivered: play type marker shapes + legend (01), modal spray chart viewer (02). 19 ACs verified. Ready to archive. |
 | E-167 | Opponent Dedup Prevention and Resolution | ARCHIVED | 5 stories (4 code + 1 docs). Shared ensure_team_row() dedup cascade, 8 pipeline paths migrated, bb data dedup CLI, admin resolution workflow with GC search. 51 total review findings (45 accepted, 6 dismissed). Promoted from IDEA-044. |
 | E-168 | Switch Opponent Resolution to POST /search | READY | 3 stories: admin search switch (01), auto-resolver search fallback (02), flow doc update (03). SE + api-scout. 6 review passes, 29 findings (27 accepted, 2 dismissed). Fixes UUID/slug mismatch in admin confirm, adds fallback for ~14% null-progenitor opponents. |
-| E-169 | Fix Unknown Player Names in Scouting Data | DRAFT | 2 stories: extract names from boxscore players array in GameLoader (01), fallback display for unresolved players (02). SE only. No schema changes. Conditional UPSERT upgrades stubs without overwriting real names. |
+| E-169 | Fix Unknown Player Names in Scouting Data | READY | 2 stories: extract names from boxscore players array in GameLoader (01), fallback display for unresolved players (02). SE only. No schema changes. Conditional UPSERT upgrades stubs without overwriting real names. 32 review findings (26 accepted, 2 dismissed). |
 | E-170 | Fix Opponent Connect public_id Collision | READY | 1 story. Fix 500 error when connecting opponent whose public_id already exists on another team row. Merge by repointing resolved_team_id + flash message + confirm page hardening. SE only. |
 
 ## Key Architectural Decisions
