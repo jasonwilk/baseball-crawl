@@ -137,11 +137,17 @@ class ScoutingSprayChartCrawler:
         )
         return total
 
-    def crawl_team(self, public_id: str, season_id: str | None = None) -> CrawlResult:
+    def crawl_team(
+        self,
+        public_id: str,
+        season_id: str | None = None,
+        gc_uuid: str | None = None,
+    ) -> CrawlResult:
         """Crawl spray data for a single opponent.
 
-        Looks up the opponent's ``gc_uuid`` from the database.  If no
-        ``gc_uuid`` is present, logs an INFO message and returns an empty
+        Looks up the opponent's ``gc_uuid`` from the database unless
+        ``gc_uuid`` is provided directly (bypasses the lookup).  If no
+        ``gc_uuid`` is available, logs an INFO message and returns an empty
         result.  Otherwise, finds cached ``games.json`` files for the
         opponent and fetches player-stats for each completed game not already
         cached.
@@ -151,11 +157,15 @@ class ScoutingSprayChartCrawler:
             season_id: When provided, only process the games.json file for
                        this specific season.  When ``None``, process all
                        seasons found on disk.
+            gc_uuid: When provided, skip the database lookup and use this
+                     value directly.  Useful when the caller has already
+                     resolved the ``gc_uuid``.
 
         Returns:
             ``CrawlResult`` for this opponent's games.
         """
-        gc_uuid = self._lookup_gc_uuid(public_id)
+        if gc_uuid is None:
+            gc_uuid = self._lookup_gc_uuid(public_id)
         if gc_uuid is None:
             logger.info(
                 "No gc_uuid for opponent public_id=%s; skipping spray crawl.",

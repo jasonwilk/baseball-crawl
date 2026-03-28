@@ -463,11 +463,13 @@ def _resolve_and_crawl_spray(
             )
             return
 
-    # Run spray chart crawl + load
+    # Run spray chart crawl + load — pass gc_uuid directly to avoid
+    # re-derivation via public_id lookup (fails when identifiers are
+    # partially populated on tracked/opponent teams).
     try:
         with closing(get_connection()) as conn:
             spray_crawler = ScoutingSprayChartCrawler(client, conn, data_root=_DATA_ROOT)
-            spray_crawler.crawl_team(public_id, season_id=season_id)
+            spray_crawler.crawl_team(public_id, season_id=season_id, gc_uuid=gc_uuid)
 
         with closing(get_connection()) as conn:
             spray_loader = ScoutingSprayChartLoader(conn)
