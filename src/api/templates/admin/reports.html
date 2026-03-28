@@ -101,7 +101,7 @@
         <td class="py-2 px-3 text-center">
           {% if report.status == 'ready' and not report.is_expired %}
           <button type="button"
-                  onclick="copyLink(this, {{ report.url | tojson }})"
+                  onclick='copyLink(this, {{ report.url | tojson }})'
                   class="text-xs text-blue-900 underline hover:text-blue-700 cursor-pointer bg-transparent border-0 p-0 font-[inherit]">
             Copy Link
           </button>

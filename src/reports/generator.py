@@ -42,7 +42,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 _DATA_ROOT = _REPO_ROOT / "data" / "raw"
 _REPORTS_DIR = _REPO_ROOT / "data" / "reports"
 _EXPIRY_DAYS = 14
-_BASE_URL_DEFAULT = "http://localhost:8001"
+_APP_URL_DEFAULT = "http://localhost:8001"
 _SEARCH_CONTENT_TYPE = "application/vnd.gc.com.post_search+json; version=0.0.0"
 
 
@@ -59,7 +59,7 @@ class GenerationResult:
 
 def _get_base_url() -> str:
     """Return the base URL for public report links."""
-    return os.environ.get("BASE_URL", _BASE_URL_DEFAULT).rstrip("/")
+    return os.environ.get("APP_URL", _APP_URL_DEFAULT).rstrip("/")
 
 
 def _utcnow_iso() -> str:
@@ -511,11 +511,33 @@ def generate_report(gc_url: str) -> GenerationResult:
 
     public_id = parsed.value
 
+    # Step 1b: Fetch team name + season year from public API (no auth needed)
+    team_name_from_api: str | None = None
+    season_year_from_api: int | None = None
+    try:
+        from src.http.session import create_session
+
+        session = create_session()
+        resp = session.get(
+            f"https://api.team-manager.gc.com/public/teams/{public_id}",
+            timeout=15,
+        )
+        if resp.status_code == 200:
+            pub_data = resp.json()
+            team_name_from_api = pub_data.get("name")
+            ts = pub_data.get("team_season") or {}
+            season_year_from_api = ts.get("year")
+        session.close()
+    except Exception:  # noqa: BLE001
+        logger.warning("Could not fetch public team info for %s", public_id)
+
     # Step 2: Ensure team row
     with closing(get_connection()) as conn:
         team_id = ensure_team_row(
             conn,
             public_id=public_id,
+            name=team_name_from_api,
+            season_year=season_year_from_api,
             source="report_generator",
         )
         conn.commit()
@@ -527,8 +549,9 @@ def generate_report(gc_url: str) -> GenerationResult:
     expires_at = expires_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
     with closing(get_connection()) as conn:
+        initial_title = f"Scouting Report — {team_name_from_api or public_id}"
         report_id = _create_report_row(
-            conn, slug, team_id, f"Scouting Report — {public_id}",
+            conn, slug, team_id, initial_title,
             generated_at, expires_at,
         )
 
