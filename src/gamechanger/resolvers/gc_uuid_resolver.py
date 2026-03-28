@@ -26,7 +26,8 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _UUID_RE = re.compile(
-    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+    re.IGNORECASE,
 )
 
 _SEARCH_CONTENT_TYPE = "application/vnd.gc.com.post_search+json; version=0.0.0"
@@ -124,7 +125,7 @@ def resolve_gc_uuid(
             return uuid
     except CredentialExpiredError:
         raise
-    except Exception:
+    except Exception:  # noqa: BLE001
         logger.warning(
             "Tier 3 (search) failed for team_id=%d", team_id, exc_info=True,
         )
@@ -156,7 +157,7 @@ def _tier1_boxscore_extraction(
         teams_glob = data_root.glob(f"*/teams/{member_gc_uuid}/boxscores/*.json")
         for boxscore_path in teams_glob:
             try:
-                with open(boxscore_path) as f:
+                with boxscore_path.open(encoding="utf-8") as f:
                     data = json.load(f)
             except (json.JSONDecodeError, OSError):
                 continue
@@ -212,7 +213,7 @@ def _tier2_progenitor(
         opponents_files = data_root.glob(f"*/teams/{member_gc_uuid}/opponents.json")
         for opp_path in opponents_files:
             try:
-                with open(opp_path) as f:
+                with opp_path.open(encoding="utf-8") as f:
                     entries = json.load(f)
             except (json.JSONDecodeError, OSError):
                 continue
