@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from contextlib import closing
 from pathlib import Path
@@ -11,6 +12,7 @@ import pytest
 
 from src.reports.generator import (
     GenerationResult,
+    _build_boxscore_uuid_map,
     _create_report_row,
     _query_batting,
     _query_freshness,
@@ -18,6 +20,7 @@ from src.reports.generator import (
     _query_recent_games,
     _query_record,
     _query_roster,
+    _resolve_and_crawl_spray,
     _update_report_failed,
     _update_report_ready,
     generate_report,
@@ -628,3 +631,247 @@ class TestListReportsFunction:
         assert reports[1]["slug"] == "slug-old"
         assert "url" in reports[0]
         assert "is_expired" in reports[0]
+
+
+# ---------------------------------------------------------------------------
+# Boxscore UUID extraction and fallback spray crawl
+# ---------------------------------------------------------------------------
+
+
+class TestBuildBoxscoreUuidMap:
+    """Test _build_boxscore_uuid_map extracts opponent UUIDs from boxscore files."""
+
+    def test_extracts_uuid_keys(self, tmp_path):
+        """UUID keys (not matching public_id) are extracted per event_id."""
+        public_id = "abc123"
+        season_id = "2026-spring-hs"
+        bs_dir = tmp_path / season_id / "scouting" / public_id / "boxscores"
+        bs_dir.mkdir(parents=True)
+
+        # Write two boxscore files with public_id + opponent UUID keys
+        (bs_dir / "event-1.json").write_text(json.dumps({
+            public_id: {"players": {}},
+            "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee": {"players": {}},
+        }))
+        (bs_dir / "event-2.json").write_text(json.dumps({
+            public_id: {"players": {}},
+            "11111111-2222-3333-4444-555555555555": {"players": {}},
+        }))
+
+        with patch("src.reports.generator._DATA_ROOT", tmp_path):
+            result = _build_boxscore_uuid_map(public_id, season_id)
+
+        assert result == {
+            "event-1": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+            "event-2": "11111111-2222-3333-4444-555555555555",
+        }
+
+    def test_returns_empty_when_no_boxscores_dir(self, tmp_path):
+        with patch("src.reports.generator._DATA_ROOT", tmp_path):
+            result = _build_boxscore_uuid_map("no-such-team", "2026-spring-hs")
+        assert result == {}
+
+    def test_skips_malformed_json(self, tmp_path):
+        public_id = "teamX"
+        season_id = "2026-spring-hs"
+        bs_dir = tmp_path / season_id / "scouting" / public_id / "boxscores"
+        bs_dir.mkdir(parents=True)
+
+        (bs_dir / "bad.json").write_text("not valid json")
+        (bs_dir / "good.json").write_text(json.dumps({
+            public_id: {},
+            "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee": {},
+        }))
+
+        with patch("src.reports.generator._DATA_ROOT", tmp_path):
+            result = _build_boxscore_uuid_map(public_id, season_id)
+
+        assert len(result) == 1
+        assert "good" in result
+
+    def test_skips_boxscore_with_no_uuid_key(self, tmp_path):
+        """Boxscores that have only non-UUID keys produce no mapping."""
+        public_id = "teamY"
+        season_id = "2026-spring-hs"
+        bs_dir = tmp_path / season_id / "scouting" / public_id / "boxscores"
+        bs_dir.mkdir(parents=True)
+
+        (bs_dir / "event-1.json").write_text(json.dumps({
+            public_id: {},
+            "other-slug": {},
+        }))
+
+        with patch("src.reports.generator._DATA_ROOT", tmp_path):
+            result = _build_boxscore_uuid_map(public_id, season_id)
+
+        assert result == {}
+
+
+class TestResolveAndCrawlSprayFallback:
+    """Test that _resolve_and_crawl_spray falls back to boxscore UUIDs."""
+
+    @patch("src.reports.generator.get_connection")
+    @patch("src.reports.generator._resolve_gc_uuid_via_search", return_value=(None, None))
+    @patch("src.reports.generator._build_boxscore_uuid_map")
+    @patch("src.reports.generator._crawl_spray_via_boxscore_uuids")
+    @patch("src.reports.generator.ScoutingSprayChartLoader")
+    def test_fallback_to_boxscore_uuids_when_search_fails(
+        self,
+        mock_loader_cls,
+        mock_crawl_via_bs,
+        mock_build_map,
+        mock_search,
+        mock_get_conn,
+        db,
+    ):
+        """When gc_uuid is NULL and search returns no match, use boxscore UUIDs."""
+        team_id = _seed_team(db)
+
+        # DB returns gc_uuid=NULL
+        mock_get_conn.return_value = db
+
+        uuid_map = {"event-1": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"}
+        mock_build_map.return_value = uuid_map
+
+        mock_loader = MagicMock()
+        mock_loader_cls.return_value = mock_loader
+
+        client = MagicMock()
+
+        _resolve_and_crawl_spray(
+            client,
+            team_id=team_id,
+            public_id="abc123",
+            season_id="2026-spring-hs",
+            team_info={"name": "Test Tigers", "season_year": 2026},
+        )
+
+        # Search was attempted
+        mock_search.assert_called_once_with(client, "Test Tigers", 2026)
+        # Boxscore UUID map was built
+        mock_build_map.assert_called_once_with("abc123", "2026-spring-hs")
+        # Crawl via boxscore UUIDs was called
+        mock_crawl_via_bs.assert_called_once_with(
+            client, "abc123", "2026-spring-hs", uuid_map
+        )
+        # Loader was called
+        mock_loader.load_all.assert_called_once()
+
+    @patch("src.reports.generator.get_connection")
+    @patch("src.reports.generator._resolve_gc_uuid_via_search", return_value=(None, None))
+    @patch("src.reports.generator._build_boxscore_uuid_map", return_value={})
+    @patch("src.reports.generator._crawl_spray_via_boxscore_uuids")
+    def test_no_boxscores_logs_warning_and_returns(
+        self,
+        mock_crawl_via_bs,
+        mock_build_map,
+        mock_search,
+        mock_get_conn,
+        db,
+    ):
+        """When search fails AND no boxscore files exist, spray is omitted."""
+        team_id = _seed_team(db)
+        mock_get_conn.return_value = db
+
+        client = MagicMock()
+
+        _resolve_and_crawl_spray(
+            client,
+            team_id=team_id,
+            public_id="abc123",
+            season_id="2026-spring-hs",
+            team_info={"name": "Test Tigers", "season_year": 2026},
+        )
+
+        # Boxscore UUID crawl should NOT be called
+        mock_crawl_via_bs.assert_not_called()
+
+    @patch("src.reports.generator._resolve_gc_uuid_via_search")
+    @patch("src.reports.generator.ScoutingSprayChartCrawler")
+    @patch("src.reports.generator.ScoutingSprayChartLoader")
+    def test_gc_uuid_from_search_uses_normal_path(
+        self,
+        mock_loader_cls,
+        mock_crawler_cls,
+        mock_search,
+        db,
+        tmp_path,
+    ):
+        """When search resolves gc_uuid, the normal crawler path is used."""
+        team_id = _seed_team(db)
+
+        db_path = str(tmp_path / "test.db")
+        def _fresh_conn():
+            conn = sqlite3.connect(db_path)
+            conn.execute("PRAGMA foreign_keys=ON;")
+            return conn
+
+        mock_search.return_value = ("resolved-uuid-1234", "abc123")
+
+        mock_crawler = MagicMock()
+        mock_crawler_cls.return_value = mock_crawler
+        mock_loader = MagicMock()
+        mock_loader_cls.return_value = mock_loader
+
+        client = MagicMock()
+
+        with patch("src.reports.generator.get_connection", side_effect=_fresh_conn):
+            _resolve_and_crawl_spray(
+                client,
+                team_id=team_id,
+                public_id="abc123",
+                season_id="2026-spring-hs",
+                team_info={"name": "Test Tigers", "season_year": 2026},
+            )
+
+        # Normal crawler was used with the resolved gc_uuid
+        mock_crawler.crawl_team.assert_called_once_with(
+            "abc123", season_id="2026-spring-hs", gc_uuid="resolved-uuid-1234"
+        )
+
+    @patch("src.reports.generator.ScoutingSprayChartCrawler")
+    @patch("src.reports.generator.ScoutingSprayChartLoader")
+    def test_gc_uuid_already_in_db_skips_search(
+        self,
+        mock_loader_cls,
+        mock_crawler_cls,
+        db,
+        tmp_path,
+    ):
+        """When gc_uuid is already in the DB, search is not attempted."""
+        db.execute(
+            "INSERT INTO teams (name, public_id, gc_uuid, season_year) VALUES (?, ?, ?, 2026)",
+            ("DB Team", "dbteam", "existing-uuid-5678"),
+        )
+        db.commit()
+        team_id = db.execute(
+            "SELECT id FROM teams WHERE public_id = 'dbteam'"
+        ).fetchone()[0]
+
+        db_path = str(tmp_path / "test.db")
+        def _fresh_conn():
+            conn = sqlite3.connect(db_path)
+            conn.execute("PRAGMA foreign_keys=ON;")
+            return conn
+
+        mock_crawler = MagicMock()
+        mock_crawler_cls.return_value = mock_crawler
+        mock_loader = MagicMock()
+        mock_loader_cls.return_value = mock_loader
+
+        client = MagicMock()
+
+        with (
+            patch("src.reports.generator.get_connection", side_effect=_fresh_conn),
+            patch("src.reports.generator._resolve_gc_uuid_via_search") as mock_search,
+        ):
+            _resolve_and_crawl_spray(
+                client,
+                team_id=team_id,
+                public_id="dbteam",
+                season_id="2026-spring-hs",
+                team_info={"name": "DB Team", "season_year": 2026},
+            )
+            mock_search.assert_not_called()
+
+        mock_crawler.crawl_team.assert_called_once()
