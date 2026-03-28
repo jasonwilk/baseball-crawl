@@ -1,10 +1,10 @@
 # Product Manager -- Agent Memory
 
 ## Numbering State
-- Next available epic number: E-172
-- Epics created: E-001 through E-171 (E-001, E-003, E-005, E-006, E-007, E-008, E-010, E-011, E-012, E-013, E-014, E-015, E-016, E-017, E-018, E-019, E-020, E-021, E-022, E-024, E-025, E-026, E-027, E-028, E-029, E-030, E-031, E-032, E-033, E-034, E-035, E-036, E-037, E-038, E-042, E-044, E-046, E-048, E-049, E-050, E-052, E-053, E-054, E-056, E-057, E-058, E-055, E-059, E-060, E-061, E-075, E-081, E-084, E-087, E-088, E-089, E-090, E-091, E-092 archived; E-093, E-094, E-095 archived; E-096 archived; E-097 archived; E-098 archived; E-099 archived; E-100 archived; E-101 archived; E-102 archived; E-103 archived; E-104 ready; E-105 archived; E-106 draft; E-107 archived; E-108 archived; E-109 archived; E-110 ready; E-111 archived; E-112 archived; E-114 archived; E-115 archived; E-116 archived; E-113 completed; E-117 completed; E-118 archived; E-119 ready; E-120 archived; E-121 archived; E-122 archived; E-123 archived; E-124 completed; E-125 archived; E-126 completed; E-127 archived; E-128 archived; E-129 archived; E-130 archived; E-131 archived; E-132 ready; E-133 archived; E-134 ready; E-135 abandoned; E-136 ready; E-137 ready; E-138 archived; E-139 archived; E-140 archived; E-142 archived; E-143 archived; E-144 archived; E-145 archived; E-146 archived; E-147 archived; E-148 archived; E-149 archived; E-150 archived; E-151 archived; E-152 archived; E-153 archived; E-155 archived; E-156 archived; E-157 archived; E-158 completed; E-159 archived; E-160 archived; E-161 completed; E-162 ready; E-163 archived; E-165 ready; E-166 completed; E-167 archived; E-168 archived; E-169 draft; E-170 ready; E-171 draft)
-- Next available idea number: IDEA-052
-- Ideas created: IDEA-001 through IDEA-051
+- Next available epic number: E-173
+- Epics created: E-001 through E-172 (E-001, E-003, E-005, E-006, E-007, E-008, E-010, E-011, E-012, E-013, E-014, E-015, E-016, E-017, E-018, E-019, E-020, E-021, E-022, E-024, E-025, E-026, E-027, E-028, E-029, E-030, E-031, E-032, E-033, E-034, E-035, E-036, E-037, E-038, E-042, E-044, E-046, E-048, E-049, E-050, E-052, E-053, E-054, E-056, E-057, E-058, E-055, E-059, E-060, E-061, E-075, E-081, E-084, E-087, E-088, E-089, E-090, E-091, E-092 archived; E-093, E-094, E-095 archived; E-096 archived; E-097 archived; E-098 archived; E-099 archived; E-100 archived; E-101 archived; E-102 archived; E-103 archived; E-104 ready; E-105 archived; E-106 draft; E-107 archived; E-108 archived; E-109 archived; E-110 ready; E-111 archived; E-112 archived; E-114 archived; E-115 archived; E-116 archived; E-113 completed; E-117 completed; E-118 archived; E-119 ready; E-120 archived; E-121 archived; E-122 archived; E-123 archived; E-124 completed; E-125 archived; E-126 completed; E-127 archived; E-128 archived; E-129 archived; E-130 archived; E-131 archived; E-132 ready; E-133 archived; E-134 ready; E-135 abandoned; E-136 ready; E-137 ready; E-138 archived; E-139 archived; E-140 archived; E-142 archived; E-143 archived; E-144 archived; E-145 archived; E-146 archived; E-147 archived; E-148 archived; E-149 archived; E-150 archived; E-151 archived; E-152 archived; E-153 archived; E-155 archived; E-156 archived; E-157 archived; E-158 completed; E-159 archived; E-160 archived; E-161 completed; E-162 ready; E-163 archived; E-165 ready; E-166 completed; E-167 archived; E-168 archived; E-169 draft; E-170 ready; E-171 draft; E-172 ready)
+- Next available idea number: IDEA-054
+- Ideas created: IDEA-001 through IDEA-052
 
 ## Project Context
 - Project: baseball-crawl -- GameChanger API -> database -> coaching dashboard
@@ -34,6 +34,7 @@
 | E-169 | Fix Unknown Player Names in Scouting Data | READY | 2 stories: extract names from boxscore players array in GameLoader (01), fallback display for unresolved players (02). SE only. No schema changes. Conditional UPSERT upgrades stubs without overwriting real names. 32 review findings (26 accepted, 2 dismissed). |
 | E-170 | Fix Opponent Connect public_id Collision | READY | 1 story. Fix 500 error when connecting opponent whose public_id already exists on another team row. Merge by repointing resolved_team_id + flash message + confirm page hardening. SE only. |
 | E-171 | Enrich Resolve Search Results | READY | 1 story: promote season year prominence, add player count + staff display. SE only. Record fetch deferred per coach. |
+| E-172 | Standalone Scouting Report Generator | READY | 4 stories: schema+renderer (01), generation pipeline+CLI (02), public serving route (03), admin reports page (04). Paste GC URL → crawl → self-contained HTML snapshot → shareable public link. 14-day expiry. SE only. Original opponent-workflow scope deferred to IDEA-053. |
 
 ## Key Architectural Decisions
 - Storage: SQLite (WAL mode). Host-mounted at ./data/app.db. Simple file backup via scripts/backup_db.py (no Litestream).
@@ -107,6 +108,8 @@
 | IDEA-049 | Pull/Center/Oppo Tendency Summary on Spray Charts | CANDIDATE | 2026-06-25 | Text summary of directional tendencies on spray chart images. |
 | IDEA-050 | Count Overlay / Hot-Cold Zones on Spray Charts | CANDIDATE | 2026-06-25 | Heat-map density visualization on spray charts. |
 | IDEA-051 | Title with Stats on Spray Charts | CANDIDATE | 2026-06-25 | Enhanced titles with BA, BIP count, pull% on spray chart images. |
+| IDEA-052 | Familiar Faces Indicator | CANDIDATE | 2026-06-26 | Show when opponent roster includes players coach has seen before (cross-team identity). |
+| IDEA-053 | Opponent Workflow Fix E2E | CANDIDATE | 2026-06-26 | Resolution write-through, auto-scout, unified resolve, dashboard sort, terminology cleanup. Was original E-172 scope. Full content in git history. |
 
 ## Key Workflow Contract
 - Routing model: planning (user -> PM), dispatch (user/main session -> implementers directly). PM plans and closes; main session dispatches.

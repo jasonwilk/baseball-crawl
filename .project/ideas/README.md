@@ -70,6 +70,8 @@ Review this list every 90 days, or when completing an epic. Ask:
 | [IDEA-049](IDEA-049-spray-chart-pull-center-oppo.md) | Pull/Center/Oppo Tendency Summary on Spray Charts | CANDIDATE | 2026-06-25 |
 | [IDEA-050](IDEA-050-spray-chart-hot-cold-zones.md) | Count Overlay / Hot-Cold Zones on Spray Charts | CANDIDATE | 2026-06-25 |
 | [IDEA-051](IDEA-051-spray-chart-title-stats.md) | Title with Stats on Spray Charts | CANDIDATE | 2026-06-25 |
+| [IDEA-052](IDEA-052-familiar-faces-indicator.md) | Familiar Faces Indicator on Opponent Rosters | CANDIDATE | 2026-06-26 |
+| [IDEA-053](IDEA-053-opponent-workflow-fix.md) | Fix Opponent Scouting Workflow End-to-End | CANDIDATE | 2026-06-26 |
 
 ## Status Definitions
 
