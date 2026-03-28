@@ -106,9 +106,14 @@ class ScoutingSprayChartCrawler:
            ``public_id`` that have NO ``opponent_links`` row at all (teams
            added directly via the admin "generate report" flow).
 
-        Teams that appear in ``opponent_links`` with ``is_hidden = 1`` are
-        excluded from both branches.  UNION deduplicates teams that appear
-        in both sources.
+        Teams with *only* ``is_hidden = 1`` rows in ``opponent_links`` are
+        excluded: branch 1 filters on ``is_hidden = 0``, and branch 2's
+        ``NOT EXISTS`` matches *any* ``opponent_links`` row regardless of
+        ``is_hidden``.  If a ``public_id`` has both hidden and visible rows
+        (possible when multiple member teams share an opponent), branch 1
+        still includes it via the visible row -- this is per-link visibility,
+        not global suppression.  UNION deduplicates teams that appear in
+        both sources.
 
         ``CredentialExpiredError`` propagates immediately; other exceptions
         per opponent are caught, logged, and counted.

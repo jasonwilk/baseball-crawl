@@ -273,7 +273,10 @@ def _tier3_search(
         return None
 
     gc_uuid: str = matches[0].get("id", "")
-    if not gc_uuid:
+    if not gc_uuid or not _UUID_RE.match(gc_uuid.lower()):
+        logger.debug(
+            "Tier 3: match id '%s' is not a valid UUID -- skipping", gc_uuid,
+        )
         return None
 
     return gc_uuid

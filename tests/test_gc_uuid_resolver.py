@@ -401,6 +401,35 @@ class TestTier3Search:
         )
         assert result is None
 
+    def test_tier3_rejects_non_uuid_search_result(
+        self, db: sqlite3.Connection, data_root: Path
+    ) -> None:
+        """Tier 3 returns None when search result id is not a valid UUID."""
+        tracked_id = _seed_tracked_team(db, name="Bad ID Team", season_year=2026)
+
+        mock_client = MagicMock()
+        mock_client.post_json.return_value = {
+            "hits": [
+                {"result": {"id": "not-a-uuid", "name": "Bad ID", "season": {"year": 2026}}},
+            ],
+        }
+
+        result = resolve_gc_uuid(
+            team_id=tracked_id,
+            public_id="bad-id-slug",
+            team_name="Bad ID Team",
+            season_year=2026,
+            conn=db,
+            data_root=data_root,
+            client=mock_client,
+        )
+        assert result is None
+        # Verify gc_uuid was NOT stored
+        row = db.execute(
+            "SELECT gc_uuid FROM teams WHERE id = ?", (tracked_id,)
+        ).fetchone()
+        assert row[0] is None
+
     def test_tier3_propagates_credential_expired_error(
         self, db: sqlite3.Connection, data_root: Path
     ) -> None:
