@@ -24,8 +24,6 @@ from typing import Any
 from jinja2 import Environment, FileSystemLoader
 
 from src.api.helpers import format_avg, format_date, ip_display
-from src.charts.spray import render_spray_chart
-
 logger = logging.getLogger(__name__)
 
 _TEMPLATE_DIR = Path(__file__).resolve().parents[1] / "api" / "templates"
@@ -53,6 +51,8 @@ def _build_jinja_env() -> Environment:
 
 def _encode_spray_chart(events: list[dict], title: str | None = None) -> str:
     """Render a spray chart and return a base64-encoded data URI string."""
+    from src.charts.spray import render_spray_chart
+
     png_bytes = render_spray_chart(events, title=title)
     b64 = base64.b64encode(png_bytes).decode("ascii")
     return f"data:image/png;base64,{b64}"
