@@ -24,7 +24,7 @@ logging.basicConfig(
 
 import typer  # noqa: E402 -- after logging setup
 
-from src.cli import creds, data, db, proxy, status  # noqa: E402
+from src.cli import creds, data, db, proxy, report, status  # noqa: E402
 
 app = typer.Typer(
     name="bb",
@@ -38,6 +38,7 @@ app.add_typer(creds.app, name="creds")
 app.add_typer(data.app, name="data")
 app.add_typer(proxy.app, name="proxy")
 app.add_typer(db.app, name="db")
+app.add_typer(report.app, name="report")
 app.command(name="status")(status.run)
 
 

@@ -36,6 +36,7 @@ from src.api.routes.admin import router as admin_router
 from src.api.routes.auth import router as auth_router
 from src.api.routes.health import router as health_router
 from src.api.routes.dashboard import router as dashboard_router
+from src.api.routes.reports import router as reports_router
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -144,3 +145,4 @@ app.include_router(health_router)
 app.include_router(auth_router)
 app.include_router(dashboard_router)
 app.include_router(admin_router)
+app.include_router(reports_router)

@@ -41,6 +41,7 @@ def test_help_lists_all_command_groups() -> None:
     assert "data" in result.output
     assert "proxy" in result.output
     assert "db" in result.output
+    assert "report" in result.output
     assert "status" in result.output
 
 

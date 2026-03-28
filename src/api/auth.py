@@ -14,7 +14,7 @@ Dev bypass:
     that email on every request, creating the user in the DB if needed.
 
 Excluded paths (no session check):
-    /  /auth/*  /health  /static/*
+    /  /auth/*  /health  /static/*  /reports/*
 """
 
 from __future__ import annotations
@@ -41,7 +41,7 @@ _SESSION_TTL_DAYS = 7
 _SESSION_MAX_AGE = 604800  # 7 days in seconds
 
 # Paths excluded from session validation
-_EXCLUDED_PREFIXES = ("/auth/", "/health", "/static/")
+_EXCLUDED_PREFIXES = ("/auth/", "/health", "/static/", "/reports/")
 # Exact paths excluded from session validation (matched before prefix check)
 _EXCLUDED_EXACT = ("/",)
 

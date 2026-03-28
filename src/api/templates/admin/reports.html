@@ -1,0 +1,149 @@
+{% extends "base.html" %}
+
+{% block title %}Admin -- Reports{% endblock %}
+
+{% block header_extras %}
+  <a href="/dashboard" class="text-blue-200 hover:text-white">Dashboard</a>
+  <form method="post" action="/auth/logout" class="inline"><input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}"><button type="submit" class="text-blue-200 hover:text-white bg-transparent border-0 cursor-pointer p-0 font-[inherit] text-[length:inherit]">Logout</button></form>
+{% endblock %}
+
+{% block content %}
+<h1 class="text-xl font-bold mb-2">Reports</h1>
+
+<!-- Admin sub-navigation -->
+<nav class="mb-6 flex gap-4 border-b border-gray-300 pb-2 text-sm">
+  <a href="/admin/users"
+     class="font-medium text-gray-600 hover:text-blue-900">Users</a>
+  <a href="/admin/teams"
+     class="font-medium text-gray-600 hover:text-blue-900">Teams</a>
+  <a href="/admin/programs"
+     class="font-medium text-gray-600 hover:text-blue-900">Programs</a>
+  <a href="/admin/opponents"
+     class="font-medium text-gray-600 hover:text-blue-900">Opponents</a>
+  <a href="/admin/reports"
+     class="font-bold underline text-blue-900">Reports</a>
+</nav>
+
+{% if msg %}
+<div class="mb-4 p-3 bg-green-100 text-green-800 rounded border border-green-300">
+  {{ msg }}
+</div>
+{% endif %}
+
+{% if error %}
+<div class="mb-4 p-3 bg-red-100 text-red-800 rounded border border-red-300">
+  {{ error }}
+</div>
+{% endif %}
+
+{# Auto-refresh when any report is generating #}
+{% if has_generating %}
+<meta http-equiv="refresh" content="15">
+{% endif %}
+
+<!-- Generate form -->
+<div class="mb-6 p-4 bg-gray-50 border border-gray-200 rounded">
+  <h2 class="text-sm font-bold mb-2">Generate New Report</h2>
+  <form method="post" action="/admin/reports/generate" class="flex gap-2 items-end">
+    <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+    <div class="flex-1">
+      <label for="gc_url" class="block text-xs text-gray-600 mb-1">GameChanger Team URL</label>
+      <input type="text" name="gc_url" id="gc_url"
+             placeholder="https://web.gc.com/teams/abc123/team-name"
+             class="w-full border border-gray-300 rounded px-3 py-2 text-sm"
+             required>
+    </div>
+    <button type="submit"
+            class="bg-blue-900 text-white px-4 py-2 rounded text-sm font-medium hover:bg-blue-800">
+      Generate Report
+    </button>
+  </form>
+</div>
+
+<!-- Reports table -->
+{% if reports %}
+<div class="overflow-x-auto">
+  <table class="min-w-full text-sm bg-white rounded shadow">
+    <thead class="bg-blue-900 text-white">
+      <tr>
+        <th class="py-2 px-3 text-left">Report</th>
+        <th class="py-2 px-3 text-center">Status</th>
+        <th class="py-2 px-3 text-center">Generated</th>
+        <th class="py-2 px-3 text-center">Expires</th>
+        <th class="py-2 px-3 text-center">Link</th>
+        <th class="py-2 px-3 text-center">Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for report in reports %}
+      <tr class="border-b border-gray-200 {% if loop.index is even %}bg-gray-50{% endif %}">
+        <td class="py-2 px-3 font-medium">
+          {{ report.title }}
+          {% if report.status == 'failed' and report.error_message %}
+          <span class="ml-1 cursor-help text-red-600" title="{{ report.error_message }}">&#9432;</span>
+          {% endif %}
+        </td>
+        <td class="py-2 px-3 text-center">
+          {% if report.is_expired %}
+          <span class="inline-block px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600">Expired</span>
+          {% elif report.status == 'ready' %}
+          <span class="inline-block px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">Ready</span>
+          {% elif report.status == 'generating' %}
+          <span class="inline-block px-2 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800">Generating...</span>
+          {% elif report.status == 'failed' %}
+          <span class="inline-block px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800">Failed</span>
+          {% else %}
+          <span class="inline-block px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600">{{ report.status }}</span>
+          {% endif %}
+        </td>
+        <td class="py-2 px-3 text-center text-gray-600">{{ report.generated_at[:10] }}</td>
+        <td class="py-2 px-3 text-center text-gray-600">{{ report.expires_at[:10] }}</td>
+        <td class="py-2 px-3 text-center">
+          {% if report.status == 'ready' and not report.is_expired %}
+          <button type="button"
+                  onclick="copyLink(this, {{ report.url | tojson }})"
+                  class="text-xs text-blue-900 underline hover:text-blue-700 cursor-pointer bg-transparent border-0 p-0 font-[inherit]">
+            Copy Link
+          </button>
+          {% else %}
+          <span class="text-xs text-gray-400">&mdash;</span>
+          {% endif %}
+        </td>
+        <td class="py-2 px-3 text-center">
+          {% if report.status != 'generating' %}
+          <form method="post" action="/admin/reports/{{ report.id }}/delete"
+                onsubmit="return confirm('Delete this report? This cannot be undone.')"
+                class="inline">
+            <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+            <button type="submit" class="text-xs text-red-600 hover:text-red-800 underline bg-transparent border-0 p-0 cursor-pointer font-[inherit]">Delete</button>
+          </form>
+          {% else %}
+          <span class="text-xs text-gray-400">&mdash;</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<p class="text-gray-600 text-sm">No reports yet. Paste a GameChanger team URL above to generate one.</p>
+{% endif %}
+
+<script>
+function copyLink(btn, url) {
+  navigator.clipboard.writeText(url).then(function() {
+    var orig = btn.textContent;
+    btn.textContent = 'Copied!';
+    btn.classList.add('text-green-700');
+    btn.classList.remove('text-blue-900');
+    setTimeout(function() {
+      btn.textContent = orig;
+      btn.classList.remove('text-green-700');
+      btn.classList.add('text-blue-900');
+    }, 1500);
+  });
+}
+</script>
+
+{% endblock %}

@@ -3068,3 +3068,135 @@ async def create_program(
     return RedirectResponse(
         url=f"/admin/programs?msg={success_msg}", status_code=303
     )
+
+
+# ---------------------------------------------------------------------------
+# Reports management
+# ---------------------------------------------------------------------------
+
+
+def _get_all_reports() -> list[dict[str, Any]]:
+    """Return all reports sorted by generated_at descending."""
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    base_url = os.environ.get("BASE_URL", "http://localhost:8001").rstrip("/")
+    with closing(get_connection()) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            "SELECT id, slug, title, status, generated_at, expires_at, "
+            "report_path, error_message FROM reports ORDER BY generated_at DESC"
+        ).fetchall()
+    result = []
+    for row in rows:
+        r = dict(row)
+        r["url"] = f"{base_url}/reports/{r['slug']}"
+        r["is_expired"] = r["expires_at"] < now
+        result.append(r)
+    return result
+
+
+def _delete_report(report_id: int) -> None:
+    """Delete a report row and its HTML file from disk."""
+    with closing(get_connection()) as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT report_path FROM reports WHERE id = ?", (report_id,)
+        ).fetchone()
+        if row and row["report_path"]:
+            file_path = Path(__file__).resolve().parents[3] / "data" / row["report_path"]
+            if file_path.is_file():
+                file_path.unlink()
+                logger.info("Deleted report file: %s", file_path)
+        conn.execute("DELETE FROM reports WHERE id = ?", (report_id,))
+        conn.commit()
+
+
+@router.get("/reports", response_model=None)
+async def list_reports(request: Request) -> Response:
+    """Render the admin reports management page.
+
+    Shows a URL input form for generating new reports and a table of all
+    existing reports with status badges, links, and delete actions.
+    """
+    guard = await _require_admin(request)
+    if isinstance(guard, Response):
+        return guard
+
+    msg = request.query_params.get("msg", "")
+    error = request.query_params.get("error", "")
+
+    reports = await run_in_threadpool(_get_all_reports)
+    has_generating = any(r["status"] == "generating" for r in reports)
+
+    return templates.TemplateResponse(
+        request,
+        "admin/reports.html",
+        {
+            "reports": reports,
+            "msg": msg,
+            "error": error,
+            "has_generating": has_generating,
+        },
+    )
+
+
+@router.post("/reports/generate", response_model=None)
+async def generate_report_admin(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    gc_url: str = Form(...),
+) -> Response:
+    """Start report generation as a background task.
+
+    Validates the URL, then enqueues ``generate_report()`` via FastAPI
+    BackgroundTasks. Redirects to the reports list with a flash message.
+    """
+    guard = await _require_admin(request)
+    if isinstance(guard, Response):
+        return guard
+
+    gc_url = gc_url.strip()
+    if not gc_url:
+        return RedirectResponse(
+            url="/admin/reports?error=" + quote_plus("Please enter a GameChanger URL."),
+            status_code=303,
+        )
+
+    # Validate the URL
+    try:
+        parsed = parse_team_url(gc_url)
+    except ValueError as exc:
+        return RedirectResponse(
+            url="/admin/reports?error=" + quote_plus(f"Invalid URL: {exc}"),
+            status_code=303,
+        )
+
+    if parsed.is_uuid:
+        return RedirectResponse(
+            url="/admin/reports?error=" + quote_plus(
+                "UUID-based URLs are not supported. Use a public team URL."
+            ),
+            status_code=303,
+        )
+
+    from src.reports.generator import generate_report
+    background_tasks.add_task(generate_report, gc_url)
+
+    msg = f"Report generation started for {gc_url}. This may take a few minutes."
+    return RedirectResponse(
+        url=f"/admin/reports?msg={quote_plus(msg)}", status_code=303
+    )
+
+
+@router.post("/reports/{report_id}/delete", response_model=None)
+async def delete_report(request: Request, report_id: int) -> Response:
+    """Delete a report (DB row + file on disk)."""
+    guard = await _require_admin(request)
+    if isinstance(guard, Response):
+        return guard
+
+    await run_in_threadpool(_delete_report, report_id)
+    return RedirectResponse(
+        url="/admin/reports?msg=" + quote_plus("Report deleted."),
+        status_code=303,
+    )

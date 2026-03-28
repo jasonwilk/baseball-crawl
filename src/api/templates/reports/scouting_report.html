@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Scouting Report &mdash; {{ team.name | e }}</title>
+  <style>
+    /* ---- Reset & base ---- */
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: Arial, Helvetica, sans-serif;
+      font-size: 9pt;
+      color: #111;
+      background: #fff;
+      padding: 0.5in;
+      line-height: 1.4;
+    }
+
+    /* ---- Report header ---- */
+    .report-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      border-bottom: 2px solid #111;
+      padding-bottom: 6px;
+      margin-bottom: 8px;
+    }
+    .report-team-name {
+      font-size: 18pt;
+      font-weight: bold;
+      line-height: 1.1;
+    }
+    .report-meta {
+      font-size: 9pt;
+      color: #444;
+      margin-top: 2px;
+    }
+    .report-label {
+      font-size: 11pt;
+      font-weight: bold;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      text-align: right;
+    }
+    .report-date {
+      font-size: 9pt;
+      color: #444;
+      text-align: right;
+      margin-top: 2px;
+    }
+
+    /* ---- Freshness bar ---- */
+    .freshness-bar {
+      font-size: 9pt;
+      padding: 4px 8px;
+      background: #f0f0f0;
+      margin-bottom: 10px;
+      color: #333;
+    }
+
+    /* ---- Recent form ---- */
+    .recent-form {
+      font-size: 9pt;
+      margin-bottom: 10px;
+      padding: 4px 8px;
+      background: #f7f7f7;
+      border-left: 3px solid #2563eb;
+    }
+    .recent-form-label {
+      font-weight: bold;
+      text-transform: uppercase;
+      font-size: 8pt;
+      letter-spacing: 0.05em;
+      margin-right: 6px;
+    }
+
+    /* ---- Section headers ---- */
+    .section-header {
+      font-size: 11pt;
+      font-weight: bold;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 4px;
+      margin-top: 12px;
+      color: #1e3a5f;
+    }
+
+    /* ---- Tables ---- */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 10px;
+    }
+    thead th {
+      font-size: 8pt;
+      font-weight: bold;
+      text-transform: uppercase;
+      color: #fff;
+      background: #1e3a5f;
+      border-bottom: 2px solid #111;
+      padding: 4px 5px;
+      text-align: center;
+      white-space: nowrap;
+    }
+    thead th.col-player { text-align: left; }
+    tbody td {
+      font-size: 8.5pt;
+      padding: 3px 5px;
+      text-align: center;
+    }
+    tbody td.col-player {
+      text-align: left;
+      font-weight: 500;
+      white-space: nowrap;
+    }
+    tbody tr:nth-child(even) { background-color: #f5f5f5; }
+
+    .no-data-msg {
+      font-size: 9pt;
+      color: #666;
+      font-style: italic;
+      margin-bottom: 10px;
+    }
+
+    .small-sample-footnote {
+      font-size: 8pt;
+      color: #666;
+      margin-top: 2px;
+      margin-bottom: 10px;
+    }
+
+    /* ---- Spray chart grid ---- */
+    .spray-section { margin-top: 12px; }
+    .spray-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+    }
+    .spray-card {
+      border: 1px solid #ddd;
+      padding: 6px;
+      text-align: center;
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+    .spray-card-name {
+      font-size: 8.5pt;
+      font-weight: bold;
+      margin-bottom: 4px;
+    }
+    .spray-card img {
+      width: 100%;
+      display: block;
+    }
+
+    /* ---- Roster ---- */
+    .roster-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 4px 12px;
+      font-size: 8.5pt;
+      margin-bottom: 10px;
+    }
+    .roster-entry {
+      padding: 2px 0;
+    }
+    .roster-number {
+      display: inline-block;
+      width: 24px;
+      font-weight: bold;
+      color: #1e3a5f;
+    }
+    .roster-pos {
+      color: #666;
+      font-size: 8pt;
+    }
+
+    /* ---- Footer ---- */
+    .report-footer {
+      margin-top: 16px;
+      padding-top: 6px;
+      border-top: 1px solid #ccc;
+      font-size: 8pt;
+      color: #555;
+    }
+
+    /* ---- Screen-only elements ---- */
+    .screen-only { margin-bottom: 10px; }
+    .print-btn {
+      padding: 6px 16px;
+      font-size: 10pt;
+      cursor: pointer;
+      background: #1e3a5f;
+      color: #fff;
+      border: none;
+      border-radius: 4px;
+    }
+    .print-btn:hover { background: #2c5282; }
+
+    /* ---- Print rules ---- */
+    @media print {
+      @page { size: landscape; margin: 0.5in; }
+      body { padding: 0; }
+      .screen-only { display: none !important; }
+      table { page-break-inside: avoid; }
+      .spray-section { page-break-before: always; }
+      .spray-card { page-break-inside: avoid; }
+      tr { page-break-inside: avoid; }
+      .section-header { page-break-after: avoid; }
+    }
+
+    /* ---- Mobile responsive (screen only) ---- */
+    @media screen and (max-width: 640px) {
+      body { padding: 8px; font-size: 8pt; }
+      .report-team-name { font-size: 14pt; }
+      table { font-size: 7pt; }
+      thead th { padding: 3px 2px; font-size: 7pt; }
+      tbody td { padding: 2px 2px; font-size: 7pt; }
+      .spray-grid { grid-template-columns: repeat(2, 1fr); }
+      .roster-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+  </style>
+</head>
+<body>
+
+{# Screen-only: print/save button #}
+<div class="screen-only">
+  <button onclick="window.print()" class="print-btn">Print / Save as PDF</button>
+</div>
+
+{# ===== HEADER ===== #}
+<div class="report-header">
+  <div>
+    <div class="report-team-name">{{ team.name | e }}</div>
+    <div class="report-meta">
+      {% if team.season_year %}{{ team.season_year }} &middot; {% endif %}
+      {% if team.record %}{{ team.record.wins }}-{{ team.record.losses }}{% endif %}
+    </div>
+  </div>
+  <div>
+    <div class="report-label">Scouting Report</div>
+    <div class="report-date">{{ generated_at[:10] if generated_at else "" }}</div>
+  </div>
+</div>
+
+{# Data freshness line (AC-6) #}
+{% if freshness_date or game_count %}
+<div class="freshness-bar">
+  {% if freshness_date %}Stats through {{ freshness_date | format_date }}{% endif %}
+  {% if freshness_date and game_count %} &middot; {% endif %}
+  {% if game_count %}{{ game_count }} game{{ "s" if game_count != 1 else "" }}{% endif %}
+</div>
+{% endif %}
+
+{# ===== RECENT FORM ===== #}
+{% if has_recent_form %}
+<div class="recent-form">
+  <span class="recent-form-label">Recent Form:</span>
+  {{ recent_form_str }}
+</div>
+{% endif %}
+
+{# ===== PITCHING ===== #}
+<h2 class="section-header">Pitching</h2>
+{% if has_pitching %}
+<table>
+  <thead>
+    <tr>
+      <th>#</th>
+      <th class="col-player">Player</th>
+      <th>ERA</th>
+      <th>K/9</th>
+      <th>WHIP</th>
+      <th>GP</th>
+      <th>IP</th>
+      <th>H</th>
+      <th>ER</th>
+      <th>BB</th>
+      <th>SO</th>
+      <th>#P</th>
+      <th>Strike%</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for pitcher in pitching %}
+    <tr>
+      <td>{% if pitcher.jersey_number %}{{ pitcher.jersey_number }}{% else %}&mdash;{% endif %}</td>
+      <td class="col-player">{{ pitcher.name | e }}{% if pitcher._small_sample %} *{% endif %}</td>
+      <td>{{ pitcher.era }}</td>
+      <td>{{ pitcher.k9 }}</td>
+      <td>{{ pitcher.whip }}</td>
+      <td>{{ pitcher.games }}</td>
+      <td>{{ pitcher.ip_outs | ip_display }}</td>
+      <td>{{ pitcher.h }}</td>
+      <td>{{ pitcher.er }}</td>
+      <td>{{ pitcher.bb }}</td>
+      <td>{{ pitcher.so }}</td>
+      <td>{{ pitcher.pitches if pitcher.pitches else "&mdash;" | safe }}</td>
+      <td>{{ pitcher.strike_pct if pitcher.strike_pct else "&mdash;" | safe }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% if pitching | selectattr("_small_sample") | list %}
+<div class="small-sample-footnote">* Small sample size (fewer than 15 IP)</div>
+{% endif %}
+{% else %}
+<p class="no-data-msg">No data available</p>
+{% endif %}
+
+{# ===== BATTING ===== #}
+<h2 class="section-header">Batting</h2>
+{% if has_batting %}
+<table>
+  <thead>
+    <tr>
+      <th>#</th>
+      <th class="col-player">Player</th>
+      <th>AVG</th>
+      <th>OBP</th>
+      <th>SLG</th>
+      <th>GP</th>
+      <th>AB</th>
+      <th>H</th>
+      <th>2B</th>
+      <th>3B</th>
+      <th>HR</th>
+      <th>RBI</th>
+      <th>BB</th>
+      <th>SO</th>
+      <th>SB</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for player in batting %}
+    <tr>
+      <td>{% if player.jersey_number %}{{ player.jersey_number }}{% else %}&mdash;{% endif %}</td>
+      <td class="col-player">{{ player.name | e }}{% if player._small_sample %} *{% endif %}</td>
+      <td>{{ player.h | format_avg(player.ab) }}</td>
+      <td>{{ (player.h + player.bb + player.hbp) | format_avg(player.ab + player.bb + player.hbp + player.shf) }}</td>
+      <td>{{ (player.h + player.doubles + 2 * player.triples + 3 * player.hr) | format_avg(player.ab) }}</td>
+      <td>{{ player.games }}</td>
+      <td>{{ player.ab }}</td>
+      <td>{{ player.h }}</td>
+      <td>{{ player.doubles }}</td>
+      <td>{{ player.triples }}</td>
+      <td>{{ player.hr }}</td>
+      <td>{{ player.rbi }}</td>
+      <td>{{ player.bb }}</td>
+      <td>{{ player.so }}</td>
+      <td>{{ player.sb }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% if batting | selectattr("_small_sample") | list %}
+<div class="small-sample-footnote">* Small sample size (fewer than 20 PA)</div>
+{% endif %}
+{% else %}
+<p class="no-data-msg">No data available</p>
+{% endif %}
+
+{# ===== SPRAY CHARTS ===== #}
+{% if has_spray %}
+<div class="spray-section">
+  <h2 class="section-header">Batter Tendencies</h2>
+  <div class="spray-grid">
+    {% for player_id, data_uri in spray_data.items() %}
+    <div class="spray-card">
+      <img src="{{ data_uri }}" alt="Spray chart">
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+{# ===== ROSTER ===== #}
+{% if roster %}
+<h2 class="section-header">Roster</h2>
+<div class="roster-grid">
+  {% for player in roster %}
+  <div class="roster-entry">
+    <span class="roster-number">{% if player.jersey_number %}#{{ player.jersey_number }}{% else %}&mdash;{% endif %}</span>
+    {{ player.name | e }}
+    {% if player.position %}<span class="roster-pos">({{ player.position }})</span>{% endif %}
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+{# ===== FOOTER ===== #}
+<div class="report-footer">
+  Generated by bbstats.ai on {{ generated_at[:10] if generated_at else "unknown" }}.
+  Expires {{ expires_at[:10] if expires_at else "unknown" }}.
+</div>
+
+</body>
+</html>
