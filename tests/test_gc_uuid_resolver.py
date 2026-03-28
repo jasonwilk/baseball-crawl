@@ -309,7 +309,7 @@ class TestTier3Search:
             "hits": [
                 {
                     "result": {
-                        "id": "search-uuid-0001",
+                        "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
                         "name": "Rival",
                         "public_id": "rival-pub",
                         "season": {"year": 2026},
@@ -328,7 +328,7 @@ class TestTier3Search:
             client=mock_client,
         )
 
-        assert result == "search-uuid-0001"
+        assert result == "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
         # Verify the search was called with shortened name.
         call_args = mock_client.post_json.call_args
         assert call_args[1]["body"]["name"] == "Rival"
@@ -336,7 +336,7 @@ class TestTier3Search:
         stored = db.execute(
             "SELECT gc_uuid FROM teams WHERE id = ?", (tracked_id,)
         ).fetchone()
-        assert stored[0] == "search-uuid-0001"
+        assert stored[0] == "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
 
     def test_tier3_skipped_when_no_client(
         self, db: sqlite3.Connection, data_root: Path
