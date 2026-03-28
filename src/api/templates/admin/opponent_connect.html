@@ -93,6 +93,12 @@
 <div class="bg-white rounded shadow p-6 max-w-lg">
   <h2 class="text-lg font-semibold mb-4">Confirm Connection</h2>
 
+  {% if teams_collision_name %}
+  <div class="mb-4 p-3 bg-orange-100 text-orange-800 rounded border border-orange-300 text-sm">
+    <strong>Warning:</strong> A team with this URL already exists as <strong>{{ teams_collision_name }}</strong>. Confirming will link this opponent to that existing team.
+  </div>
+  {% endif %}
+
   {% if duplicate_name %}
   <div class="mb-4 p-3 bg-yellow-100 text-yellow-800 rounded border border-yellow-300 text-sm">
     <strong>Warning:</strong> This URL is already linked to <strong>{{ duplicate_name }}</strong>. Proceeding will create a duplicate link.

@@ -1258,16 +1258,21 @@ def save_manual_opponent_link(
     public_id: str,
     our_team_id: int,
     opponent_name: str,
-) -> None:
+) -> dict[str, Any]:
     """Set public_id and resolution_method='manual' on an opponent_links row.
 
     Also finds the existing tracked team stub (via team_opponents or direct name
     match) and sets teams.public_id and opponent_links.resolved_team_id.
 
+    If the stub has no public_id (None) and the target public_id is already owned
+    by another teams row, the stub is left unchanged and resolved_team_id is set to
+    the existing team's id (merge path).  The return value signals this to the caller.
+
     If the stub already has a non-NULL public_id that differs from the new slug:
     - If the new slug is not owned by another teams row, overwrites with a WARNING.
-    - If the new slug is already owned by another teams row, skips the overwrite
-      and logs a WARNING ("slug already owned — manual merge required").
+    - If the new slug is already owned by another teams row, merges like the None
+      branch: skips the overwrite, sets resolved_team_id to the existing team, and
+      returns merged=True.
     In all cases where a stub is found, resolved_team_id is set.
 
     Args:
@@ -1275,7 +1280,15 @@ def save_manual_opponent_link(
         public_id: The GameChanger public_id slug.
         our_team_id: The member team's INTEGER PK.
         opponent_name: The opponent name (used for stub team lookup).
+
+    Returns:
+        A dict with keys:
+        - ``merged`` (bool): True when resolved_team_id was pointed to an existing
+          team that already owned the public_id (instead of the stub).
+        - ``merged_team_name`` (str | None): Name of the existing team when merged,
+          else None.
     """
+    result: dict[str, Any] = {"merged": False, "merged_team_name": None}
     try:
         with closing(get_connection()) as conn:
             conn.execute(
@@ -1298,22 +1311,39 @@ def save_manual_opponent_link(
                 ).fetchone()
                 existing_public_id = existing_row[0] if existing_row else None
 
+                resolved_id = stub_id
+
                 if existing_public_id is None:
-                    conn.execute(
-                        "UPDATE teams SET public_id = ? WHERE id = ?",
-                        (public_id, stub_id),
-                    )
-                elif existing_public_id != public_id:
                     collision = conn.execute(
-                        "SELECT id FROM teams WHERE public_id = ? AND id != ?",
+                        "SELECT id, name FROM teams WHERE public_id = ? AND id != ?",
                         (public_id, stub_id),
                     ).fetchone()
                     if collision:
                         logger.warning(
-                            "Slug %r already owned by teams.id=%d — manual merge required "
-                            "(opponent link %d, stub team %d)",
-                            public_id, collision[0], link_id, stub_id,
+                            "Slug %r already owned by teams.id=%d (%r) — merging link %d "
+                            "to existing team (stub team %d left unchanged)",
+                            public_id, collision[0], collision[1], link_id, stub_id,
                         )
+                        resolved_id = collision[0]
+                        result = {"merged": True, "merged_team_name": collision[1]}
+                    else:
+                        conn.execute(
+                            "UPDATE teams SET public_id = ? WHERE id = ?",
+                            (public_id, stub_id),
+                        )
+                elif existing_public_id != public_id:
+                    collision = conn.execute(
+                        "SELECT id, name FROM teams WHERE public_id = ? AND id != ?",
+                        (public_id, stub_id),
+                    ).fetchone()
+                    if collision:
+                        logger.warning(
+                            "Slug %r already owned by teams.id=%d (%r) — merging link %d "
+                            "to existing team (stub team %d left unchanged)",
+                            public_id, collision[0], collision[1], link_id, stub_id,
+                        )
+                        resolved_id = collision[0]
+                        result = {"merged": True, "merged_team_name": collision[1]}
                     else:
                         logger.warning(
                             "Overwriting existing public_id=%r with %r on stub team %d "
@@ -1327,13 +1357,38 @@ def save_manual_opponent_link(
 
                 conn.execute(
                     "UPDATE opponent_links SET resolved_team_id = ? WHERE id = ?",
-                    (stub_id, link_id),
+                    (resolved_id, link_id),
                 )
 
             conn.commit()
     except sqlite3.Error:
         logger.exception("Failed to save manual opponent link %s -> %s", link_id, public_id)
         raise
+
+    return result
+
+
+def get_team_name_by_public_id(public_id: str) -> str | None:
+    """Return the name of any team row that owns the given public_id.
+
+    Used by the confirm page to warn when a public_id is already claimed by an
+    existing teams row (a different check from the opponent_links duplicate warning).
+
+    Args:
+        public_id: The GameChanger public_id slug to look up.
+
+    Returns:
+        The team name if a row exists, else None.
+    """
+    try:
+        with closing(get_connection()) as conn:
+            row = conn.execute(
+                "SELECT name FROM teams WHERE public_id = ?", (public_id,)
+            ).fetchone()
+        return row[0] if row else None
+    except sqlite3.Error:
+        logger.exception("Failed to look up team name for public_id %s", public_id)
+        return None
 
 
 def disconnect_opponent_link(link_id: int) -> bool:
@@ -1356,12 +1411,13 @@ def disconnect_opponent_link(link_id: int) -> bool:
     try:
         with closing(get_connection()) as conn:
             row = conn.execute(
-                "SELECT resolution_method, resolved_team_id FROM opponent_links WHERE id = ?",
+                "SELECT resolution_method, resolved_team_id, our_team_id, opponent_name"
+                " FROM opponent_links WHERE id = ?",
                 (link_id,),
             ).fetchone()
             if row is None:
                 return False
-            resolution_method, resolved_team_id = row
+            resolution_method, resolved_team_id, our_team_id, opponent_name = row
             if resolution_method != "manual":
                 return False
             conn.execute(
@@ -1376,15 +1432,25 @@ def disconnect_opponent_link(link_id: int) -> bool:
                 (link_id,),
             )
             if resolved_team_id is not None:
-                other = conn.execute(
-                    "SELECT 1 FROM opponent_links WHERE resolved_team_id = ? AND id != ?",
-                    (resolved_team_id, link_id),
-                ).fetchone()
-                if other is None:
-                    conn.execute(
-                        "UPDATE teams SET public_id = NULL WHERE id = ?",
-                        (resolved_team_id,),
-                    )
+                # Guard: do not clear public_id when the link was resolved via
+                # the merge path (collision found in the None-branch of
+                # save_manual_opponent_link).  In that path, resolved_team_id
+                # points to a pre-existing team whose public_id was NOT set by
+                # this link.  Detect merge by re-running the stub lookup: if
+                # the current stub (public_id-NULL tracked team) differs from
+                # resolved_team_id, this was a merge and we must skip the clear.
+                stub_id = _find_tracked_stub(conn, our_team_id, opponent_name)
+                is_merge = stub_id is not None and stub_id != resolved_team_id
+                if not is_merge:
+                    other = conn.execute(
+                        "SELECT 1 FROM opponent_links WHERE resolved_team_id = ? AND id != ?",
+                        (resolved_team_id, link_id),
+                    ).fetchone()
+                    if other is None:
+                        conn.execute(
+                            "UPDATE teams SET public_id = NULL WHERE id = ?",
+                            (resolved_team_id,),
+                        )
             conn.commit()
         return True
     except sqlite3.Error:

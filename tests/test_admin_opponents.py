@@ -1272,13 +1272,17 @@ class TestConnectSetsTeamsPublicId:
         assert team_row["public_id"] == "newSlug01"
 
     def test_ac2b_skip_overwrite_when_slug_collision(self, opp_db_with_ids: tuple) -> None:
-        """AC-2b: New slug already owned by another team → skip overwrite, still set resolved_team_id."""
+        """AC-2b: New slug already owned by another team → skip overwrite, merge to existing team.
+
+        Updated per E-170-01: elif-branch collisions now merge like the None-branch.
+        resolved_team_id points to the team that owns the slug, not the stub.
+        """
         opp_db, team_ids = opp_db_with_ids
         varsity_id = team_ids["varsity"]
 
         stub_id = _insert_tracked_team(opp_db, "Iron Foxes", public_id="oldIronSlug")
         _insert_team_opponents(opp_db, varsity_id, stub_id)
-        _insert_tracked_team(opp_db, "Rival Owls", public_id="takenSlug01")
+        rival_owls_id = _insert_tracked_team(opp_db, "Rival Owls", public_id="takenSlug01")
         link_id = _insert_opponent_link(opp_db, varsity_id, "gc-root-if", "Iron Foxes")
 
         admin_id = _insert_user(opp_db, "e160ac2b@test.com")
@@ -1295,9 +1299,10 @@ class TestConnectSetsTeamsPublicId:
         assert response.status_code == 303
 
         link_row = _get_link_row(opp_db, link_id)
-        assert link_row["resolved_team_id"] == stub_id
+        # Merges to the team that owns the slug, not the stub
+        assert link_row["resolved_team_id"] == rival_owls_id
 
-        # teams.public_id must remain unchanged on the stub
+        # Stub's original public_id must remain unchanged
         team_row = _get_team_row(opp_db, stub_id)
         assert team_row["public_id"] == "oldIronSlug"
 
@@ -1504,3 +1509,361 @@ class TestConnectSetsTeamsPublicId:
         # Lower-id stub must be untouched
         team_row_1 = _get_team_row(opp_db, stub_id_1)
         assert team_row_1["public_id"] is None
+
+
+# ---------------------------------------------------------------------------
+# E-170: public_id collision -- stub has None, target public_id already owned
+# ---------------------------------------------------------------------------
+
+
+class TestPublicIdCollisionOnConnect:
+    """POST /connect and GET confirm handle teams-table public_id collision (E-170-01)."""
+
+    def test_post_connect_collision_returns_303_not_500(
+        self, opp_db_with_ids: tuple
+    ) -> None:
+        """AC-1/AC-6: POST /connect with a public_id already owned by another team
+        returns 303 (not 500) and sets resolved_team_id to the existing team."""
+        opp_db, team_ids = opp_db_with_ids
+        varsity_id = team_ids["varsity"]
+
+        # Insert a stub tracked team with no public_id
+        stub_id = _insert_tracked_team(opp_db, "Ridgecrest Rockets Stub")
+        _insert_team_opponents(opp_db, varsity_id, stub_id)
+
+        # Insert an unlinked opponent_link for this stub
+        link_id = _insert_opponent_link(
+            opp_db,
+            our_team_id=varsity_id,
+            root_team_id="gc-root-e170-01",
+            opponent_name="Ridgecrest Rockets Stub",
+        )
+
+        # Insert a DIFFERENT tracked team that already owns the target public_id
+        existing_team_id = _insert_tracked_team(
+            opp_db, "Ridgecrest Rockets Existing", public_id="e170CollidePub"
+        )
+
+        admin_id = _insert_user(opp_db, "e170post1@test.com")
+        token = _insert_session(opp_db, admin_id)
+
+        with patch.dict("os.environ", _admin_env(opp_db, "e170post1@test.com")):
+            with TestClient(
+                app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
+            ) as client:
+                response = client.post(
+                    f"/admin/opponents/{link_id}/connect",
+                    data={"public_id": "e170CollidePub", "csrf_token": _CSRF},
+                )
+
+        # AC-1: must be 303 redirect, not 500
+        assert response.status_code == 303
+
+        # AC-2: resolved_team_id must point to the existing team, not the stub
+        link_row = _get_link_row(opp_db, link_id)
+        assert link_row is not None
+        assert link_row["resolved_team_id"] == existing_team_id
+
+        # AC-3: flash message must mention the existing team name
+        location = response.headers["location"]
+        assert "Ridgecrest+Rockets+Existing" in location or "Ridgecrest Rockets Existing" in location
+
+        # stub's public_id must remain None (not overwritten)
+        stub_row = _get_team_row(opp_db, stub_id)
+        assert stub_row is not None
+        assert stub_row["public_id"] is None
+
+    def test_post_connect_collision_flash_takes_priority_over_duplicate_warning(
+        self, opp_db_with_ids: tuple
+    ) -> None:
+        """AC-3: Merge flash message takes priority over duplicate-link noise.
+
+        Sets up BOTH a teams-table collision (existing team owns target public_id)
+        AND an opponent_links duplicate (another link already resolved to the same
+        public_id for the same our_team_id).  Without merge-priority logic, both
+        a merge result and get_duplicate_opponent_name would fire -- the test verifies
+        only the merge flash message appears.
+        """
+        opp_db, team_ids = opp_db_with_ids
+        varsity_id = team_ids["varsity"]
+
+        stub_id = _insert_tracked_team(opp_db, "Flash Priority Stub")
+        _insert_team_opponents(opp_db, varsity_id, stub_id)
+
+        link_id = _insert_opponent_link(
+            opp_db,
+            our_team_id=varsity_id,
+            root_team_id="gc-root-e170-fp",
+            opponent_name="Flash Priority Stub",
+        )
+
+        # teams-table collision: a team already owns the target public_id
+        _insert_tracked_team(opp_db, "Flash Priority Existing", public_id="e170FlashPub")
+
+        # opponent_links duplicate: another link for the same team already uses the
+        # same public_id -- this would trigger get_duplicate_opponent_name if the
+        # merge-priority check were absent
+        _insert_opponent_link(
+            opp_db,
+            our_team_id=varsity_id,
+            root_team_id="gc-root-e170-fp2",
+            opponent_name="Flash Priority Other Link",
+            public_id="e170FlashPub",
+            resolution_method="manual",
+        )
+
+        admin_id = _insert_user(opp_db, "e170fp@test.com")
+        token = _insert_session(opp_db, admin_id)
+
+        with patch.dict("os.environ", _admin_env(opp_db, "e170fp@test.com")):
+            with TestClient(
+                app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
+            ) as client:
+                response = client.post(
+                    f"/admin/opponents/{link_id}/connect",
+                    data={"public_id": "e170FlashPub", "csrf_token": _CSRF},
+                )
+
+        assert response.status_code == 303
+        location = response.headers["location"]
+        # Merge message must be present (mentions the existing team)
+        assert "existing+team" in location.lower() or "existing team" in location.lower()
+        # Duplicate-link noise ("note:") must NOT appear -- merge takes priority
+        assert "note" not in location.lower()
+
+    def test_post_connect_no_collision_preserves_existing_behavior(
+        self, opp_db_with_ids: tuple
+    ) -> None:
+        """AC-5: When no collision, stub gets the public_id and resolved_team_id = stub."""
+        opp_db, team_ids = opp_db_with_ids
+        varsity_id = team_ids["varsity"]
+
+        stub_id = _insert_tracked_team(opp_db, "No Collision Team")
+        _insert_team_opponents(opp_db, varsity_id, stub_id)
+
+        link_id = _insert_opponent_link(
+            opp_db,
+            our_team_id=varsity_id,
+            root_team_id="gc-root-e170-nc",
+            opponent_name="No Collision Team",
+        )
+
+        admin_id = _insert_user(opp_db, "e170nc@test.com")
+        token = _insert_session(opp_db, admin_id)
+
+        with patch.dict("os.environ", _admin_env(opp_db, "e170nc@test.com")):
+            with TestClient(
+                app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
+            ) as client:
+                response = client.post(
+                    f"/admin/opponents/{link_id}/connect",
+                    data={"public_id": "e170NoPub999", "csrf_token": _CSRF},
+                )
+
+        assert response.status_code == 303
+
+        link_row = _get_link_row(opp_db, link_id)
+        assert link_row is not None
+        assert link_row["resolved_team_id"] == stub_id
+
+        stub_row = _get_team_row(opp_db, stub_id)
+        assert stub_row is not None
+        assert stub_row["public_id"] == "e170NoPub999"
+
+    def test_confirm_page_shows_teams_collision_warning(
+        self, opp_db_with_ids: tuple
+    ) -> None:
+        """AC-4/AC-7: Confirm page shows a teams-table collision warning when
+        the target public_id is already owned by another team row."""
+        from src.gamechanger.team_resolver import TeamProfile
+
+        opp_db, team_ids = opp_db_with_ids
+        varsity_id = team_ids["varsity"]
+
+        link_id = _insert_opponent_link(
+            opp_db,
+            our_team_id=varsity_id,
+            root_team_id="gc-root-e170-conf",
+            opponent_name="Confirm Collision Opponent",
+        )
+
+        # Insert an existing team that already owns the target public_id
+        _insert_tracked_team(opp_db, "Confirm Existing Team", public_id="e170ConfPub")
+
+        admin_id = _insert_user(opp_db, "e170conf@test.com")
+        token = _insert_session(opp_db, admin_id)
+
+        mock_profile = TeamProfile(
+            public_id="e170ConfPub",
+            name="Confirm Existing Team",
+            sport="baseball",
+        )
+
+        with patch.dict("os.environ", _admin_env(opp_db, "e170conf@test.com")):
+            with patch("src.api.routes.admin.resolve_team", return_value=mock_profile):
+                with TestClient(
+                    app, cookies={"session": token, "csrf_token": _CSRF}
+                ) as client:
+                    response = client.get(
+                        f"/admin/opponents/{link_id}/connect/confirm",
+                        params={"url": "https://web.gc.com/teams/e170ConfPub/slug"},
+                    )
+
+        assert response.status_code == 200
+        # AC-4: teams-table collision warning must appear with distinct text
+        assert "A team with this URL already exists" in response.text
+        assert "Confirm Existing Team" in response.text
+
+    def test_confirm_page_no_teams_collision_warning_when_public_id_is_new(
+        self, opp_db_with_ids: tuple
+    ) -> None:
+        """AC-4 negative: No teams-table collision warning when the public_id is fresh."""
+        from src.gamechanger.team_resolver import TeamProfile
+
+        opp_db, team_ids = opp_db_with_ids
+        varsity_id = team_ids["varsity"]
+
+        link_id = _insert_opponent_link(
+            opp_db,
+            our_team_id=varsity_id,
+            root_team_id="gc-root-e170-confneg",
+            opponent_name="No Collision Confirm Opponent",
+        )
+
+        admin_id = _insert_user(opp_db, "e170confneg@test.com")
+        token = _insert_session(opp_db, admin_id)
+
+        mock_profile = TeamProfile(
+            public_id="e170BrandNew",
+            name="Brand New Team",
+            sport="baseball",
+        )
+
+        with patch.dict("os.environ", _admin_env(opp_db, "e170confneg@test.com")):
+            with patch("src.api.routes.admin.resolve_team", return_value=mock_profile):
+                with TestClient(
+                    app, cookies={"session": token, "csrf_token": _CSRF}
+                ) as client:
+                    response = client.get(
+                        f"/admin/opponents/{link_id}/connect/confirm",
+                        params={"url": "https://web.gc.com/teams/e170BrandNew/slug"},
+                    )
+
+        assert response.status_code == 200
+        assert "A team with this URL already exists" not in response.text
+
+    def test_disconnect_after_merge_does_not_null_existing_team_public_id(
+        self, opp_db_with_ids: tuple
+    ) -> None:
+        """Disconnect after merge path must NOT clear the existing team's public_id.
+
+        Sequence: connect (merge collision) → disconnect.  The existing team that
+        was merged into must retain its public_id after disconnect.
+        """
+        opp_db, team_ids = opp_db_with_ids
+        varsity_id = team_ids["varsity"]
+
+        # Stub tracked team with no public_id
+        stub_id = _insert_tracked_team(opp_db, "Merge Disconnect Stub")
+        _insert_team_opponents(opp_db, varsity_id, stub_id)
+
+        link_id = _insert_opponent_link(
+            opp_db,
+            our_team_id=varsity_id,
+            root_team_id="gc-root-e170-disc",
+            opponent_name="Merge Disconnect Stub",
+        )
+
+        # Existing team already owns the target public_id
+        existing_team_id = _insert_tracked_team(
+            opp_db, "Merge Disconnect Existing", public_id="e170DiscPub"
+        )
+
+        admin_id = _insert_user(opp_db, "e170disc@test.com")
+        token = _insert_session(opp_db, admin_id)
+
+        with patch.dict("os.environ", _admin_env(opp_db, "e170disc@test.com")):
+            with TestClient(
+                app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
+            ) as client:
+                # Step 1: connect (merge path -- existing team owns the public_id)
+                connect_resp = client.post(
+                    f"/admin/opponents/{link_id}/connect",
+                    data={"public_id": "e170DiscPub", "csrf_token": _CSRF},
+                )
+                assert connect_resp.status_code == 303
+
+                # Verify merge occurred: resolved_team_id → existing team
+                link_row = _get_link_row(opp_db, link_id)
+                assert link_row["resolved_team_id"] == existing_team_id
+
+                # Step 2: disconnect
+                disc_resp = client.post(
+                    f"/admin/opponents/{link_id}/disconnect",
+                    data={"csrf_token": _CSRF},
+                )
+                assert disc_resp.status_code == 303
+
+        # The existing team's public_id must NOT have been cleared
+        existing_row = _get_team_row(opp_db, existing_team_id)
+        assert existing_row is not None
+        assert existing_row["public_id"] == "e170DiscPub"
+
+    def test_elif_branch_collision_also_merges(
+        self, opp_db_with_ids: tuple
+    ) -> None:
+        """elif branch (stub already has a DIFFERENT public_id) merges when collision found.
+
+        Scenario: stub already has public_id='e170ElsePubOld'. Operator tries to
+        connect to 'e170ElsePubNew', which is already owned by another team row.
+        Before this fix the link resolved to the stub (wrong).  After the fix it
+        merges to the existing team that owns 'e170ElsePubNew'.
+        """
+        opp_db, team_ids = opp_db_with_ids
+        varsity_id = team_ids["varsity"]
+
+        # Stub tracked team that ALREADY has a different public_id
+        stub_id = _insert_tracked_team(
+            opp_db, "Elif Collision Stub", public_id="e170ElsePubOld"
+        )
+        _insert_team_opponents(opp_db, varsity_id, stub_id)
+
+        link_id = _insert_opponent_link(
+            opp_db,
+            our_team_id=varsity_id,
+            root_team_id="gc-root-e170-elif",
+            opponent_name="Elif Collision Stub",
+        )
+
+        # A different team already owns the target public_id
+        existing_team_id = _insert_tracked_team(
+            opp_db, "Elif Collision Existing", public_id="e170ElsePubNew"
+        )
+
+        admin_id = _insert_user(opp_db, "e170elif@test.com")
+        token = _insert_session(opp_db, admin_id)
+
+        with patch.dict("os.environ", _admin_env(opp_db, "e170elif@test.com")):
+            with TestClient(
+                app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
+            ) as client:
+                response = client.post(
+                    f"/admin/opponents/{link_id}/connect",
+                    data={"public_id": "e170ElsePubNew", "csrf_token": _CSRF},
+                )
+
+        assert response.status_code == 303
+
+        # resolved_team_id must point to the existing team, not the stub
+        link_row = _get_link_row(opp_db, link_id)
+        assert link_row is not None
+        assert link_row["resolved_team_id"] == existing_team_id
+
+        # Flash message must mention the existing team (merge path)
+        location = response.headers["location"]
+        assert "Elif+Collision+Existing" in location or "Elif Collision Existing" in location
+
+        # Stub's original public_id must be unchanged
+        stub_row = _get_team_row(opp_db, stub_id)
+        assert stub_row is not None
+        assert stub_row["public_id"] == "e170ElsePubOld"

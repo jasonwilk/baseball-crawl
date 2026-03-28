@@ -58,6 +58,7 @@ from src.api.db import (
     get_opponent_link_count_for_team,
     get_opponent_link_counts,
     get_opponent_links,
+    get_team_name_by_public_id,
     is_member_team_public_id,
     save_manual_opponent_link,
 )
@@ -2586,6 +2587,7 @@ async def connect_opponent_confirm(request: Request, link_id: int) -> Response:
         return err
 
     duplicate_name = await _get_duplicate_name_for_link(link, public_id, link_id)
+    teams_collision_name = await run_in_threadpool(get_team_name_by_public_id, public_id)
     profile, err = await _fetch_team_profile(request, link, guard, public_id)
     if err is not None:
         return err
@@ -2599,6 +2601,7 @@ async def connect_opponent_confirm(request: Request, link_id: int) -> Response:
             "profile": profile,
             "public_id": public_id,
             "duplicate_name": duplicate_name,
+            "teams_collision_name": teams_collision_name,
             "admin_user": guard,
             "is_admin_page": True,
         },
@@ -2666,14 +2669,20 @@ async def connect_opponent(
     duplicate_name = await run_in_threadpool(
         get_duplicate_opponent_name, public_id, our_team_id, link_id
     )
-    await run_in_threadpool(
+    merge_result = await run_in_threadpool(
         save_manual_opponent_link,
         link_id,
         public_id,
         our_team_id,
         link["opponent_name"],
     )
-    msg = _build_connect_success_msg(link["opponent_name"], duplicate_name)
+    if merge_result["merged"]:
+        msg = quote_plus(
+            f"Linked {link['opponent_name']} -- pointed to existing team"
+            f" {merge_result['merged_team_name']}."
+        )
+    else:
+        msg = _build_connect_success_msg(link["opponent_name"], duplicate_name)
     return RedirectResponse(
         url=f"/admin/opponents?team_id={our_team_id}&msg={msg}",
         status_code=303,

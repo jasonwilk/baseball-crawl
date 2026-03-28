@@ -1,7 +1,7 @@
 # E-170: Fix Opponent Connect public_id Collision (500 Error)
 
 ## Status
-`READY`
+`COMPLETED`
 <!-- Lifecycle: DRAFT -> READY -> ACTIVE -> COMPLETED (or BLOCKED / ABANDONED) -->
 
 ## Overview
@@ -41,7 +41,7 @@ The confirm page's duplicate detection (`_get_duplicate_name_for_link` -> `get_d
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-170-01 | Fix public_id collision in save_manual_opponent_link and harden confirm page | TODO | None | - |
+| E-170-01 | Fix public_id collision in save_manual_opponent_link and harden confirm page | DONE | None | SE |
 
 ## Dispatch Team
 - software-engineer
@@ -86,6 +86,30 @@ When a merge occurs, the merge flash message takes priority over the `opponent_l
 ## History
 - 2026-03-28: Created. Bug discovered in production -- operator hit 500 error when connecting opponent whose `public_id` was already owned by another team row.
 - 2026-03-28: Set to READY after internal review (1 iteration, 3 review passes).
+- 2026-03-28: Dispatch started. Epic set to ACTIVE, E-170-01 assigned to SE.
+- 2026-03-28: E-170-01 DONE. All 8 ACs verified. Fixed the 500 IntegrityError on opponent connect when target public_id already owned by another team row. Merge path repoints resolved_team_id to existing team, flash message surfaces the merge, confirm page warns before submission. 5 new tests. Disconnect corruption bug and elif branch collision mismatch also fixed during review remediation.
+- 2026-03-28: Epic COMPLETED.
+
+### Documentation Assessment
+No documentation impact. Bug fix internal to existing admin opponent connect flow -- no new features, endpoints, architecture changes, schema changes, or user-facing workflow changes.
+
+### Context-Layer Assessment
+| Trigger | Verdict | Notes |
+|---------|---------|-------|
+| T1: New convention/pattern | No | Collision-then-merge is local to this function, not a general pattern |
+| T2: Architectural decision | No | No architectural changes |
+| T3: Footgun/boundary discovered | Yes | Disconnect path can corrupt merged teams' public_id; fixed in code. Pattern is function-specific, not a general convention. |
+| T4: Agent behavior change | No | No agent changes |
+| T5: Domain knowledge | No | No new domain insights |
+| T6: New CLI/workflow | No | No new CLI commands or workflows |
+
+T3 fires. The disconnect corruption was discovered and fixed during code review remediation. The pattern (merge creates a resolved_team_id that isn't a disposable stub) is specific to `save_manual_opponent_link` -- the fix is in the code. User will evaluate whether architect codification is needed.
+
+### Ideas Backlog Review
+No CANDIDATE ideas are directly unblocked by this bug fix epic.
+
+### Vision Signals
+26+ unprocessed signals in `docs/vision-signals.md` (last curation: 2026-03-13). Advisory -- does not block archival.
 
 ### Review Scorecard
 | Review Pass | Findings | Accepted | Dismissed |
@@ -93,4 +117,6 @@ When a merge occurs, the merge flash message takes priority over the `opponent_l
 | Internal iteration 1 -- CR spec audit | 5 | 2 | 2 |
 | Internal iteration 1 -- PM holistic | 4 | 4 | 0 |
 | Internal iteration 1 -- SE holistic | 3 | 1 | 2 |
-| **Total** | **12** | **7** | **4** |
+| Per-story CR -- E-170-01 | 2 | 2 | 0 |
+| Codex code review | 3 | 3 | 0 |
+| **Total** | **17** | **12** | **4** |

@@ -4,7 +4,7 @@
 [E-170: Fix Opponent Connect public_id Collision (500 Error)](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the admin opponent connect flow will handle the case where a stub team has `public_id=None` but the target `public_id` already belongs to another team row. Instead of crashing with a 500 IntegrityError, the system will merge by repointing `resolved_team_id` to the existing team, surface a flash message to the operator, and warn on the confirm page before submission.
