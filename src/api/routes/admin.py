@@ -3079,7 +3079,7 @@ def _get_all_reports() -> list[dict[str, Any]]:
     """Return all reports sorted by generated_at descending."""
     from datetime import datetime, timezone
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    base_url = os.environ.get("BASE_URL", "http://localhost:8001").rstrip("/")
+    base_url = os.environ.get("APP_URL", "http://localhost:8001").rstrip("/")
     with closing(get_connection()) as conn:
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
