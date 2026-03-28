@@ -4,7 +4,7 @@
 [E-173: Fix Opponent Scouting Workflow End-to-End](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, all pipeline jargon is replaced with plain English across admin and dashboard templates. The "Discover Opponents" button is removed (discovery is automatic after member sync). Filter pills on the admin opponents page use coaching-friendly labels. Dashboard empty states use clear, non-technical language. The "Tracked" membership badge says "Opponent." The Opponents tab in admin sub-nav shows an unresolved count badge.

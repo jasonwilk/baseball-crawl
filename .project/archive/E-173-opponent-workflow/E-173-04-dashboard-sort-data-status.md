@@ -4,7 +4,7 @@
 [E-173: Fix Opponent Scouting Workflow End-to-End](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the dashboard opponent list defaults to sorting by next game date (upcoming opponents first) instead of alphabetically, and each opponent row displays a data-availability indicator showing one of three states: stats loaded, syncing, or scoresheet-only.

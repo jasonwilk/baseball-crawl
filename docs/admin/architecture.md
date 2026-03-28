@@ -195,13 +195,13 @@ All routes are under `/admin/` and require an active session. Team routes use IN
 | `/admin/teams/{id}/edit` | GET | Edit form: name, program, division (classification), membership type |
 | `/admin/teams/{id}/edit` | POST | Save team edits |
 | `/admin/teams/{id}/toggle-active` | POST | Toggle `is_active` between 0 and 1 |
-| `/admin/teams/{id}/discover-opponents` | POST | Discover opponent placeholder entries from team's public schedule |
+| `/admin/opponents/{link_id}/resolve` | GET/POST | Unified "Find on GameChanger" page -- search by name or paste URL to link an opponent; triggers auto-scout on confirm |
 
 The team list is a flat table showing all teams (no Lincoln/Opponents split). Columns: name, program, division (classification), membership badge (member/tracked), active/inactive status, opponent count, and an edit link.
 
 The add-team flow is two-phase: Phase 1 accepts a GameChanger team URL or bare identifier. Phase 2 shows the resolved team information and lets the operator set membership type (default: `tracked`), program, and division before saving.
 
-Sub-navigation links Users, Teams, and Opponents pages across all admin views.
+Sub-navigation links Users, Teams, and Opponents pages across all admin views. The Opponents tab shows a badge with the count of opponents that need linking.
 
 ### Supporting Modules
 
@@ -220,4 +220,4 @@ Sub-navigation links Users, Teams, and Opponents pages across all admin views.
 
 ---
 
-*Last updated: 2026-03-27 | Source: E-167 (migration 007 name+season_year index), E-158 (src/charts/ module, migration 006 spray chart additions), E-120-06 (opponent_links table, sub-nav Opponents, url_parser correction, port 8001, teams columns), E-115-02 (schema and admin sections rewritten for E-100 fresh-start schema), E-042 (admin team management, url_parser, team_resolver), E-003-02 (original)*
+*Last updated: 2026-03-28 | Source: E-173 (unified resolve route, subnav badge, discover-opponents route removed), E-167 (migration 007 name+season_year index), E-158 (src/charts/ module, migration 006 spray chart additions), E-120-06 (opponent_links table, sub-nav Opponents, url_parser correction, port 8001, teams columns), E-115-02 (schema and admin sections rewritten for E-100 fresh-start schema), E-042 (admin team management, url_parser, team_resolver), E-003-02 (original)*

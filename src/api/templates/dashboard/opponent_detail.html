@@ -36,7 +36,7 @@ Scout: {{ scouting_report.team_name if scouting_report else opponent_team_id }}
 {% if empty_state == "unlinked" %}
 <div class="bg-yellow-50 border border-yellow-200 rounded p-4 text-sm text-yellow-900 mb-4">
   <p class="font-bold mb-1">Stats not available.</p>
-  <p>This opponent hasn't been linked to a GameChanger team yet.</p>
+  <p>Scouting stats aren't available for this team. Only scoresheet data from your games is shown.</p>
   {% if is_admin %}
   <a href="{{ admin_link_url }}" class="inline-block mt-2 text-sm font-medium text-blue-900 hover:underline py-2">Link in Admin &rarr;</a>
   {% endif %}
@@ -48,7 +48,7 @@ Scout: {{ scouting_report.team_name if scouting_report else opponent_team_id }}
 {% elif empty_state == "linked_unscouted" %}
 <div class="bg-yellow-50 border border-yellow-200 rounded p-4 text-sm text-yellow-900 mb-4">
   <p class="font-bold mb-1">Stats not loaded yet.</p>
-  <p>This team is linked but stats haven't been loaded yet. They will appear after the next scouting sync.</p>
+  <p>Stats are on their way. Check back soon.</p>
 </div>
 
 {# ------------------------------------------------------------------ #}

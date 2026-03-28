@@ -79,8 +79,8 @@ Teams are configured through the admin UI, not by editing configuration files di
 
 1. Start the stack and visit `http://localhost:8001/admin/teams`.
 2. Paste a GameChanger team URL for each LSB team (Freshman, JV, Varsity, Reserve) and select **Lincoln Program** as the team type.
-3. Click **Discover Opponents** on each Lincoln team to populate tracked opponents from their schedules.
-4. Activate any opponents you want to track.
+3. Click **Sync** on each Lincoln team. This crawls the schedule, loads game data, and automatically discovers opponents from the schedule (no separate Discover step needed).
+4. Visit the **Opponents** tab to see which opponents were auto-linked and which still need to be found on GameChanger.
 
 The admin UI calls the public GameChanger API (no credentials required) to resolve the team name and location from the URL.
 

@@ -4,7 +4,7 @@
 [E-173: Fix Opponent Scouting Workflow End-to-End](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, resolving an opponent in the admin UI (via search or manual connect) automatically triggers a scouting sync in the background. The operator no longer needs to run `bb data scout` manually after resolution. A `crawl_jobs` row is created for tracking, and `run_scouting_sync` is enqueued as a FastAPI `BackgroundTask`.

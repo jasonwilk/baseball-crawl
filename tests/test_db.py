@@ -1851,3 +1851,188 @@ class TestGameBoxScoreNameCascade:
         assert len(home_team["batting_lines"]) == 1
         assert home_team["batting_lines"][0]["name"] == "Tyler Brown"
         assert home_team["batting_lines"][0]["name_unresolved"] is False
+
+
+# ---------------------------------------------------------------------------
+# E-173-04: get_team_opponents sort order and data_status
+# ---------------------------------------------------------------------------
+
+_CRAWL_JOBS_DDL = """
+CREATE TABLE IF NOT EXISTS crawl_jobs (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    team_id       INTEGER NOT NULL REFERENCES teams(id),
+    sync_type     TEXT    NOT NULL CHECK(sync_type IN ('member_crawl', 'scouting_crawl')),
+    status        TEXT    NOT NULL CHECK(status IN ('running', 'completed', 'failed')),
+    started_at    TEXT    NOT NULL DEFAULT (datetime('now')),
+    completed_at  TEXT,
+    error_message TEXT,
+    games_crawled INTEGER
+);
+"""
+
+
+def _make_db_full() -> sqlite3.Connection:
+    """Return an in-memory DB with all schemas needed for data_status tests."""
+    conn = _make_db()
+    conn.executescript(_CRAWL_JOBS_DDL)
+    conn.commit()
+    return conn
+
+
+def _insert_game_with_date(
+    conn: sqlite3.Connection,
+    game_id: str,
+    season_id: str,
+    home_team_id: int,
+    away_team_id: int,
+    game_date: str,
+    status: str = "scheduled",
+) -> None:
+    conn.execute(
+        "INSERT INTO games (game_id, season_id, game_date, home_team_id, away_team_id, status)"
+        " VALUES (?, ?, ?, ?, ?, ?)",
+        (game_id, season_id, game_date, home_team_id, away_team_id, status),
+    )
+    conn.commit()
+
+
+class TestGetTeamOpponentsSortAndDataStatus:
+    """E-173-04: Sort by next_game_date ASC (NULLs last) and include data_status."""
+
+    _SEASON = "2026-spring-hs"
+    _YEAR = 2026
+
+    def test_sort_by_next_game_date_nulls_last(self, tmp_path: Path) -> None:
+        """AC-1, AC-6: Opponents sorted by next_game_date ASC with NULLs last."""
+        conn = _make_db_full()
+        our_id = _insert_team(conn, "LSB Varsity", membership_type="member")
+        opp_a = _insert_team(conn, "Alpha Team", membership_type="tracked")
+        opp_b = _insert_team(conn, "Beta Team", membership_type="tracked")
+        opp_c = _insert_team(conn, "Charlie Team", membership_type="tracked")
+        _insert_season(conn, self._SEASON)
+
+        # opp_b has nearest game, opp_a has later game, opp_c has no upcoming game
+        _insert_game_with_date(conn, "g-b", self._SEASON, our_id, opp_b, "2099-04-01")
+        _insert_game_with_date(conn, "g-a", self._SEASON, our_id, opp_a, "2099-04-15")
+        # opp_c only via team_opponents (no game)
+        _insert_team_opponent(conn, our_id, opp_c, self._YEAR)
+        env = _db_env(tmp_path, conn)
+
+        with patch.dict(os.environ, env):
+            from src.api.db import get_team_opponents
+
+            result = get_team_opponents(our_id, self._SEASON)
+
+        assert len(result) == 3
+        # opp_b first (nearest date), opp_a second, opp_c last (NULL)
+        assert result[0]["opponent_team_id"] == opp_b
+        assert result[1]["opponent_team_id"] == opp_a
+        assert result[2]["opponent_team_id"] == opp_c
+
+    def test_data_status_stats_loaded(self, tmp_path: Path) -> None:
+        """AC-2, AC-6: data_status='stats' when season batting data exists."""
+        conn = _make_db_full()
+        our_id = _insert_team(conn, "LSB Varsity", membership_type="member")
+        opp_id = _insert_team(conn, "Rival Hawks", membership_type="tracked")
+        _insert_season(conn, self._SEASON)
+        _insert_game(conn, "g-001", self._SEASON, our_id, opp_id, home_score=5, away_score=2)
+        # Insert season batting data for the opponent
+        _insert_player(conn, "p-001")
+        conn.execute(
+            "INSERT INTO player_season_batting (player_id, team_id, season_id) VALUES (?, ?, ?)",
+            ("p-001", opp_id, self._SEASON),
+        )
+        conn.commit()
+        env = _db_env(tmp_path, conn)
+
+        with patch.dict(os.environ, env):
+            from src.api.db import get_team_opponents
+
+            result = get_team_opponents(our_id, self._SEASON)
+
+        assert len(result) == 1
+        assert result[0]["data_status"] == "stats"
+
+    def test_data_status_syncing(self, tmp_path: Path) -> None:
+        """AC-2, AC-6: data_status='syncing' when crawl_jobs has running row."""
+        conn = _make_db_full()
+        our_id = _insert_team(conn, "LSB Varsity", membership_type="member")
+        opp_id = _insert_team(conn, "Rival Hawks", membership_type="tracked")
+        _insert_team_opponent(conn, our_id, opp_id, self._YEAR)
+        # Insert running crawl job
+        conn.execute(
+            "INSERT INTO crawl_jobs (team_id, sync_type, status) VALUES (?, 'scouting_crawl', 'running')",
+            (opp_id,),
+        )
+        conn.commit()
+        env = _db_env(tmp_path, conn)
+
+        with patch.dict(os.environ, env):
+            from src.api.db import get_team_opponents
+
+            result = get_team_opponents(our_id, self._SEASON)
+
+        assert len(result) == 1
+        assert result[0]["data_status"] == "syncing"
+
+    def test_data_status_scoresheet(self, tmp_path: Path) -> None:
+        """AC-2, AC-6: data_status='scoresheet' when no stats and no running job."""
+        conn = _make_db_full()
+        our_id = _insert_team(conn, "LSB Varsity", membership_type="member")
+        opp_id = _insert_team(conn, "Rival Hawks", membership_type="tracked")
+        _insert_team_opponent(conn, our_id, opp_id, self._YEAR)
+        env = _db_env(tmp_path, conn)
+
+        with patch.dict(os.environ, env):
+            from src.api.db import get_team_opponents
+
+            result = get_team_opponents(our_id, self._SEASON)
+
+        assert len(result) == 1
+        assert result[0]["data_status"] == "scoresheet"
+
+    def test_stats_takes_priority_over_syncing(self, tmp_path: Path) -> None:
+        """AC-2: 'stats' takes priority even when a crawl job is also running."""
+        conn = _make_db_full()
+        our_id = _insert_team(conn, "LSB Varsity", membership_type="member")
+        opp_id = _insert_team(conn, "Rival Hawks", membership_type="tracked")
+        _insert_season(conn, self._SEASON)
+        _insert_game(conn, "g-001", self._SEASON, our_id, opp_id, home_score=5, away_score=2)
+        _insert_player(conn, "p-001")
+        conn.execute(
+            "INSERT INTO player_season_batting (player_id, team_id, season_id) VALUES (?, ?, ?)",
+            ("p-001", opp_id, self._SEASON),
+        )
+        conn.execute(
+            "INSERT INTO crawl_jobs (team_id, sync_type, status) VALUES (?, 'scouting_crawl', 'running')",
+            (opp_id,),
+        )
+        conn.commit()
+        env = _db_env(tmp_path, conn)
+
+        with patch.dict(os.environ, env):
+            from src.api.db import get_team_opponents
+
+            result = get_team_opponents(our_id, self._SEASON)
+
+        assert result[0]["data_status"] == "stats"
+
+    def test_completed_job_not_syncing(self, tmp_path: Path) -> None:
+        """AC-2: Completed crawl jobs do NOT show as 'syncing'."""
+        conn = _make_db_full()
+        our_id = _insert_team(conn, "LSB Varsity", membership_type="member")
+        opp_id = _insert_team(conn, "Rival Hawks", membership_type="tracked")
+        _insert_team_opponent(conn, our_id, opp_id, self._YEAR)
+        conn.execute(
+            "INSERT INTO crawl_jobs (team_id, sync_type, status) VALUES (?, 'scouting_crawl', 'completed')",
+            (opp_id,),
+        )
+        conn.commit()
+        env = _db_env(tmp_path, conn)
+
+        with patch.dict(os.environ, env):
+            from src.api.db import get_team_opponents
+
+            result = get_team_opponents(our_id, self._SEASON)
+
+        assert result[0]["data_status"] == "scoresheet"

@@ -11,18 +11,7 @@
 <h1 class="text-xl font-bold mb-4">Edit Team</h1>
 
 <!-- Admin sub-navigation -->
-<nav class="mb-6 flex gap-4 border-b border-gray-300 pb-2 text-sm">
-  <a href="/admin/users"
-     class="font-medium text-gray-600 hover:text-blue-900">Users</a>
-  <a href="/admin/teams"
-     class="font-bold underline text-blue-900">Teams</a>
-  <a href="/admin/programs"
-     class="font-medium text-gray-600 hover:text-blue-900">Programs</a>
-  <a href="/admin/opponents"
-     class="font-medium text-gray-600 hover:text-blue-900">Opponents</a>
-  <a href="/admin/reports"
-     class="font-medium text-gray-600 hover:text-blue-900">Reports</a>
-</nav>
+{% with active_tab='teams' %}{% include "admin/_subnav.html" %}{% endwith %}
 
 <div class="bg-white rounded shadow p-6 max-w-lg">
 
@@ -130,7 +119,7 @@
       <label class="flex items-center gap-2 text-sm text-gray-700 mb-1 cursor-pointer">
         <input type="radio" name="membership_type" value="tracked"
                {% if edit_team.membership_type != 'member' %}checked{% endif %}>
-        Tracked (opponent / external team)
+        Opponent (tracked / external team)
       </label>
       <label class="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
         <input type="radio" name="membership_type" value="member"

@@ -11,18 +11,7 @@
 <h1 class="text-xl font-bold mb-4">Confirm Add Team</h1>
 
 <!-- Admin sub-navigation -->
-<nav class="mb-6 flex gap-4 border-b border-gray-300 pb-2 text-sm">
-  <a href="/admin/users"
-     class="font-medium text-gray-600 hover:text-blue-900">Users</a>
-  <a href="/admin/teams"
-     class="font-bold underline text-blue-900">Teams</a>
-  <a href="/admin/programs"
-     class="font-medium text-gray-600 hover:text-blue-900">Programs</a>
-  <a href="/admin/opponents"
-     class="font-medium text-gray-600 hover:text-blue-900">Opponents</a>
-  <a href="/admin/reports"
-     class="font-medium text-gray-600 hover:text-blue-900">Reports</a>
-</nav>
+{% with active_tab='teams' %}{% include "admin/_subnav.html" %}{% endwith %}
 
 {% if error %}
 <div class="mb-4 p-3 bg-red-100 text-red-800 rounded border border-red-300">
@@ -69,7 +58,7 @@
       <p class="block text-sm font-medium text-gray-700 mb-1">Membership</p>
       <label class="flex items-center gap-2 text-sm text-gray-700 mb-1 cursor-pointer">
         <input type="radio" name="membership_type" value="tracked" checked class="rounded">
-        Tracked (opponent / external team)
+        Opponent (tracked / external team)
       </label>
       <label class="flex items-center gap-2 text-sm {% if gc_uuid_status != 'found' %}text-gray-400{% else %}text-gray-700{% endif %} cursor-pointer">
         <input type="radio" name="membership_type" value="member" class="rounded"
@@ -78,7 +67,7 @@
       </label>
       {% if gc_uuid_status != 'found' %}
       <p class="mt-1 text-xs text-yellow-700">
-        Member teams require a GameChanger UUID for crawling. UUID not available — add as Tracked instead.
+        Member teams require a GameChanger UUID. UUID not available — add as Opponent instead.
       </p>
       {% endif %}
     </div>

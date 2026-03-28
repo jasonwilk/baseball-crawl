@@ -1,7 +1,7 @@
 # E-173: Fix Opponent Scouting Workflow End-to-End
 
 ## Status
-`READY`
+`COMPLETED`
 
 ## Overview
 Fix the broken opponent scouting workflow so that resolving an opponent in the admin UI causes stats to appear in the dashboard. Currently, resolution updates `opponent_links` but never propagates to `team_opponents` (which the dashboard queries), leaving coaches with empty scouting reports. This epic fixes the data disconnect, auto-triggers scouting after resolution, unifies the fragmented admin workflow, and replaces pipeline jargon with plain English throughout.
@@ -49,12 +49,12 @@ Additionally, the admin workflow requires 5 manual steps across 3 UI surfaces + 
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-173-01 | Resolution write-through to team_opponents | TODO | None | - |
-| E-173-02 | Auto-scout after resolution | TODO | E-173-01 | - |
-| E-173-03 | Unified resolve page (Find on GC) | TODO | E-173-01, E-173-02 | - |
-| E-173-04 | Dashboard opponent sort and data status | TODO | E-173-01 | - |
-| E-173-05 | Admin and dashboard terminology cleanup | TODO | E-173-03, E-173-04 | - |
-| E-173-06 | One-time opponent data repair command | TODO | E-173-01 | - |
+| E-173-01 | Resolution write-through to team_opponents | DONE | None | - |
+| E-173-02 | Auto-scout after resolution | DONE | E-173-01 | - |
+| E-173-03 | Unified resolve page (Find on GC) | DONE | E-173-01, E-173-02 | - |
+| E-173-04 | Dashboard opponent sort and data status | DONE | E-173-01 | - |
+| E-173-05 | Admin and dashboard terminology cleanup | DONE | E-173-03, E-173-04 | - |
+| E-173-06 | One-time opponent data repair command | DONE | E-173-01 | - |
 
 ## Dispatch Team
 - software-engineer
@@ -148,8 +148,29 @@ None -- all resolved during discovery.
 - 2026-03-28: Three internal review iterations + Codex spec review completed. 72 total findings (52 accepted, 20 dismissed).
 - 2026-03-28: Renumbered to E-173 (E-172 reassigned to Standalone Scouting Report Generator before commit).
 - 2026-03-28: Set to READY.
+- 2026-03-28: Dispatched. All 6 stories implemented, reviewed, and verified. 19 implementation review findings (14 accepted, 5 dismissed). 6 Codex code review findings (all accepted and remediated).
+- 2026-03-28: COMPLETED. Epic delivers: resolution write-through to team_opponents, auto-scout after resolution, unified "Find on GC" resolve page (absorbing E-171), dashboard sort by next game date with data status indicators, full terminology cleanup across admin+dashboard (shared subnav, pipeline-aware badges, "Tracked"→"Opponent"), and one-time data repair CLI command.
+
+### Documentation Assessment
+Triggers fired:
+1. **New feature shipped** -- YES: unified resolve page, auto-scout trigger, dashboard data status indicators, `bb data repair-opponents` CLI command, shared admin subnav with badge.
+5. **Epic changes how users interact** -- YES: admin workflow reduced from 5 steps to 2, dashboard sort order changed, terminology overhauled.
+
+**Action required**: Dispatch docs-writer to update `docs/admin/` with the new opponent resolution workflow and `bb data repair-opponents` command.
+
+### Context-Layer Assessment
+1. **New convention/pattern**: YES -- `finalize_opponent_resolution()` is the canonical resolution write-through function; all resolution paths must call it. Shared `_subnav.html` partial pattern for admin nav badge injection via Jinja2 global.
+2. **Architectural decision**: YES -- Resolution is now a write-through operation (opponent_links + team_opponents + is_active + FK reassignment atomic). Auto-scout fires as BackgroundTask after resolution.
+3. **Footgun/boundary discovered**: NO.
+4. **Agent behavior change**: NO.
+5. **Domain knowledge**: YES -- Three dashboard data states (stats/syncing/scoresheet) derived from season stats + crawl_jobs. Coaches think schedule-first (sort by next game date). "Discover" is automatic after member sync (no manual button needed).
+6. **New CLI command**: YES -- `bb data repair-opponents` (dry-run default, `--execute` to apply).
+
+**Action required**: Dispatch claude-architect to codify: `finalize_opponent_resolution()` as canonical resolution function in CLAUDE.md Architecture section, `bb data repair-opponents` in Commands section, auto-scout trigger pattern, shared admin subnav partial.
 
 ## Review Scorecard
+
+### Spec Review
 | Review Pass | Findings | Accepted | Dismissed |
 |---|---|---|---|
 | Internal iteration 1 -- CR spec audit | 12 | 7 | 5 |
@@ -167,3 +188,16 @@ None -- all resolved during discovery.
 | Internal iteration 3 -- SE holistic | 0 | 0 | 0 |
 | Codex iteration 1 | 4 | 4 | 0 |
 | **Total** | **72** | **52** | **20** |
+
+### Implementation Review
+| Review Pass | Findings | Accepted | Dismissed |
+|---|---|---|---|
+| Per-story CR -- E-173-01 | 3 | 2 | 1 |
+| Per-story CR -- E-173-02 | 2 | 2 | 0 |
+| Per-story CR -- E-173-03 | 2 | 2 | 0 |
+| Per-story CR -- E-173-04 | 1 | 0 | 1 |
+| Per-story CR -- E-173-05 | 1 | 1 | 0 |
+| Per-story CR -- E-173-06 | 2 | 0 | 2 |
+| CR integration review | 2 | 1 | 1 |
+| Codex code review | 6 | 6 | 0 |
+| **Total** | **19** | **14** | **5** |

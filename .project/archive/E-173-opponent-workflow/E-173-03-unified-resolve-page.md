@@ -4,7 +4,7 @@
 [E-173: Fix Opponent Scouting Workflow End-to-End](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the separate "Resolve" (search-based) and "Connect" (URL-paste) flows are merged into a single admin page titled "Find [opponent] on GameChanger." Search is the primary action with URL paste as a fallback below a divider. Search result cards display enriched fields (season year badge, player count, staff names) per the absorbed E-171 scope. Both paths lead to the same confirm step and auto-scout trigger.

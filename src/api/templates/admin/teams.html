@@ -11,18 +11,7 @@
 <h1 class="text-xl font-bold mb-2">Manage Teams</h1>
 
 <!-- Admin sub-navigation -->
-<nav class="mb-6 flex gap-4 border-b border-gray-300 pb-2 text-sm">
-  <a href="/admin/users"
-     class="font-medium text-gray-600 hover:text-blue-900">Users</a>
-  <a href="/admin/teams"
-     class="font-bold underline text-blue-900">Teams</a>
-  <a href="/admin/programs"
-     class="font-medium text-gray-600 hover:text-blue-900">Programs</a>
-  <a href="/admin/opponents"
-     class="font-medium text-gray-600 hover:text-blue-900">Opponents</a>
-  <a href="/admin/reports"
-     class="font-medium text-gray-600 hover:text-blue-900">Reports</a>
-</nav>
+{% with active_tab='teams' %}{% include "admin/_subnav.html" %}{% endwith %}
 
 {% if added %}
 <div class="mb-4 p-3 bg-green-100 text-green-800 rounded border border-green-300">
@@ -90,7 +79,7 @@
           {% if team.membership_type == 'member' %}
             <span class="px-2 py-0.5 rounded text-xs font-semibold bg-blue-100 text-blue-800 border border-blue-300">Member</span>
           {% else %}
-            <span class="px-2 py-0.5 rounded text-xs font-semibold bg-gray-100 text-gray-700 border border-gray-300">Tracked</span>
+            <span class="px-2 py-0.5 rounded text-xs font-semibold bg-gray-100 text-gray-700 border border-gray-300">Opponent</span>
           {% endif %}
         </td>
         <td class="py-2 px-3 text-center">
@@ -131,15 +120,6 @@
                 {% if team.is_active %}Deactivate{% else %}Activate{% endif %}
               </button>
             </form>
-            {% if team.is_active and team.public_id %}
-            <form method="post" action="/admin/teams/{{ team.id }}/discover-opponents" class="inline">
-              <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
-              <button type="submit"
-                      class="text-xs text-indigo-700 hover:underline">
-                Discover
-              </button>
-            </form>
-            {% endif %}
             {% if team.is_active and (team.membership_type == 'member' or team.public_id) %}
               {% if team.latest_job_status == 'running' %}
               <form method="post" action="/admin/teams/{{ team.id }}/sync" class="inline">

@@ -82,7 +82,7 @@ The teams page (`/admin/teams`) shows a single flat table of all teams -- member
 | Opponents | Count of opponent connections; links to `/admin/opponents?team_id={id}` |
 | Status | **Active** or **Inactive** |
 | Last Synced | Timestamp of the last completed sync, or **Never** if the team has never been synced. If a sync is currently running, the current-job status badge is shown alongside the previous sync timestamp. |
-| Actions | Edit link, Activate/Deactivate button, Discover button (active teams with a public ID only), Sync button (eligible teams only), Delete button (inactive teams only) |
+| Actions | Edit link, Activate/Deactivate button, Sync button (eligible teams only), Delete button (inactive teams only) |
 
 ### Editing a Team
 
@@ -102,7 +102,7 @@ The **Activate/Deactivate** button on each row calls `POST /admin/teams/{id}/tog
 The **Sync** button on each row triggers a data refresh for that team. It calls `POST /admin/teams/{id}/sync`, enqueues the crawl as a background task, and redirects immediately to the teams page with a flash message: "Sync started for [team name]."
 
 The correct pipeline runs automatically based on membership type:
-- **Member teams**: Full crawl + load via `crawl.run(source="db", team_ids=[id])` then `load.run(source="db", team_ids=[id])`.
+- **Member teams**: Full crawl + load via `crawl.run(source="db", team_ids=[id])` then `load.run(source="db", team_ids=[id])`, followed automatically by opponent discovery (seeds `opponent_links` from the team's cached schedule and opponent data, then runs `OpponentResolver.resolve()` to auto-link known opponents via `progenitor_team_id`).
 - **Tracked teams**: Scouting crawler + loader (`ScoutingCrawler.scout_team(public_id)` plus loader step).
 
 Both the crawl and load steps always run -- crawled data stays in `data/raw/` and dashboards remain stale without the load step.
@@ -143,13 +143,13 @@ After a successful deletion, the teams list shows a success flash confirming whi
 
 **Use case**: Removing mis-entered or duplicate tracked teams before any data has been crawled for them. Once data exists, soft-deactivation (`is_active = 0`) is the only option.
 
-### Discovering Opponents
+### Opponent Discovery (Automatic)
 
-For any active team that has a public ID, the **Discover** button calls `POST /admin/teams/{id}/discover-opponents`. The system fetches `GET /public/teams/{public_id}/games`, extracts unique opponent names, and inserts placeholder rows for any opponents not already in the database.
+Opponent discovery runs automatically at the end of every member team sync -- there is no separate Discover button. After the crawl and load steps complete, the pipeline seeds `opponent_links` from the team's cached schedule and opponents data, then runs the auto-resolver to link any opponents whose `progenitor_team_id` (a stable GameChanger identifier) is available.
 
-**Important limitation**: The public games endpoint returns opponent names only -- no public ID or other identifier. Discovered opponents are inserted as placeholder rows in the `teams` table with `membership_type = 'tracked'`, `is_active = 0`, and `public_id = NULL`. To upgrade a placeholder to a full record, paste the team's GameChanger URL into the Add Team form at `/admin/teams`.
+**What gets discovered**: Opponents are seeded as placeholder rows in `opponent_links` (and stub rows in `teams` where needed). The auto-resolver upgrades approximately 86% of these to full records using `progenitor_team_id`. The remaining ~14% appear on the Opponents page as **Needs linking** and require a one-time admin action to find and connect them on GameChanger.
 
-After running discovery, navigate to the **Opponents** tab to see which opponents were auto-resolved and which need manual mapping.
+**After a sync**: Navigate to the **Opponents** tab to see which opponents were auto-resolved and which need manual linking.
 
 ### Merging Duplicate Teams
 
@@ -255,6 +255,54 @@ bb data dedup --db /path/to/app.db
 Defaults to `data/app.db` (or `DATABASE_PATH` env var).
 
 **Note**: After running with `--execute`, sync any affected teams that have scouting data: `bb data scout --team {public_id}` or the **Sync** button on the Teams page.
+
+### Back-Filling Pre-Existing Resolutions (`bb data repair-opponents`)
+
+`bb data repair-opponents` propagates existing `opponent_links` resolutions that were never written through to `team_opponents`. This is a one-time repair command for opponents that were resolved before E-173 was deployed -- any opponent resolved after E-173 is automatically handled at resolution time and does not need this command.
+
+**Dry run (default -- no writes)**:
+
+```bash
+bb data repair-opponents
+```
+
+Prints each resolved opponent link and what action would be taken. No database changes are made.
+
+**Execute repairs**:
+
+```bash
+bb data repair-opponents --execute
+```
+
+Performs the repairs atomically. For each resolved `opponent_links` row:
+- Upserts a `team_opponents` row linking the member team to the resolved team.
+- Sets `is_active = 1` on the resolved team.
+- If a stub team exists for the same opponent name, reassigns all FK references from the stub to the resolved team (games, stats, spray charts, rosters).
+
+**Output format**:
+
+```
+[DRY RUN] Found 8 resolved opponent link(s) to process.
+
+  CREATE: Eagle Creek HS (our_team=LSB Varsity, resolved_id=44)
+  REPLACE stub (team 27): Sunset Ridge HS (our_team=LSB JV, resolved_id=55) + activate
+  VERIFY: Millbrook HS (our_team=LSB Varsity, resolved_id=61)
+
+Summary (DRY RUN):
+  total to process: 8
+
+Run with --execute to apply changes.
+```
+
+After `--execute`, the summary shows counts for `team_opponents` rows created, stub replacements, teams activated, FK reassignments, and no-ops.
+
+**Idempotent**: Safe to run multiple times -- already-correct rows are reported as `VERIFY` and skipped.
+
+**Custom database path**:
+
+```bash
+bb data repair-opponents --db /path/to/app.db
+```
 
 ### Database-Driven Crawl Configuration (CLI)
 
@@ -496,71 +544,65 @@ The Opponents page (`/admin/opponents`) shows all opponent links discovered for 
 
 ### Reading the Opponents Page
 
-A summary stat line at the top of the page shows the current mapping state:
+A summary stat line at the top of the page shows the current state:
 
 ```
-14 opponents -- 10 resolved, 4 unresolved.
+14 opponents -- 10 with stats, 2 syncing, 2 need linking.
 ```
 
-**Filter tabs** above the table narrow the list:
+The admin subnav **Opponents** tab shows a badge with the count of opponents that need linking, so you can spot outstanding work at a glance.
 
-| Tab | Shows |
-|-----|-------|
+**Filter pills** above the table narrow the list:
+
+| Pill | Shows |
+|------|-------|
 | All | All non-hidden opponents |
-| Full stats | Opponents with a `public_id` (full scouting data available) |
-| Scoresheet only | Opponents without a `public_id` (scoresheet-level data only) |
-| Unresolved (N) | Opponents with no team linked (`resolved_team_id IS NULL`) |
-| Hidden (N) | Opponents marked "no match" and excluded from the active pipeline |
+| Stats loaded | Opponents with scouting stats available in the dashboard |
+| Needs linking | Opponents with no GameChanger team linked yet |
+| Hidden | Opponents marked "no match" and excluded from the active pipeline |
 
-When unresolved opponents exist, an **Unresolved Opponents** banner appears at the top of the page (unless the Unresolved filter is already active). Click **Start resolving** to switch to the unresolved view.
+When opponents need linking, a banner appears at the top of the page. Click **Start linking** to switch to that view.
 
 The table shows each opponent with a **Status** badge:
 
 | Badge | Meaning |
 |-------|---------|
-| Resolved (green) | `public_id` is known; the team can be crawled for scouting data. Resolution method shown in gray. |
-| Unresolved (orange) | No team linked yet; scouting data unavailable until resolved. |
+| Stats loaded (green) | Scouting stats are available; the team has been synced. |
+| Syncing... (yellow) | A scouting sync is currently running for this team. |
+| Sync failed (red) | The last scouting sync encountered an error. |
+| Needs linking (orange) | No GameChanger team has been linked yet; scouting stats unavailable. |
 | Hidden (gray) | Marked "no match" by the admin; excluded from the active pipeline. |
 
 Auto-resolved opponents (~86%) are linked automatically via the `progenitor_team_id` field on the schedule. The remaining ~14% require admin action.
 
-### Resolving Opponents via GC Search
+### Linking an Opponent (Find on GameChanger)
 
-For any **Unresolved** row, click the **Resolve** button (blue primary). This opens a search-powered suggestion page pre-filled with the opponent's name, the member team's season year, and `sport=baseball`.
+For any **Needs linking** row, click **Find on GameChanger**. This opens the unified resolve page titled "Find [opponent] on GameChanger", which combines a search path (primary) and a URL-paste path (fallback) in a single page.
 
-**Step 1 -- Review suggestions**: The page displays GameChanger search results as cards showing team name, location, age group, and record (where available). If suggestions are not useful, use the **Refine Search** form to adjust the name, state, or city fields.
+**Search path (primary)**:
 
-**Step 2 -- Select and confirm**: Click a result card to open the confirm page with the full team profile. If the selected team's `public_id` already exists in the database, a yellow duplicate warning appears with a link to the merge page.
+1. The page opens pre-filled with the opponent's name, the member team's season year, and `sport=baseball`. Review the result cards -- each shows: team name, season year, location, player count, and staff names.
+2. Use the **Refine Search** form to adjust name, state, or city if the default results are not helpful.
+3. Click a card to open the confirm page with the full team profile. If the selected team's `public_id` already exists in the database, a yellow duplicate warning appears with a link to the merge page.
+4. Click **Confirm** to save. The system atomically updates `opponent_links`, links the team in `team_opponents`, activates the team, and starts a background scouting sync. You are redirected to the Needs linking filter so the next opponent is immediately visible.
 
-**Step 3 -- Confirm**: Click **Confirm** to save. The opponent link is updated with `resolved_team_id`, `public_id`, `gc_uuid`, and `resolution_method = 'search'`. You are redirected to the Unresolved filter so the next opponent is immediately visible.
+**URL-paste path (fallback)**:
 
-**If GC search fails**: A flash error appears and the manual URL-paste link becomes prominent.
+Below a "-- or --" divider, paste the team's GameChanger URL directly (find it at [web.gc.com](https://web.gc.com)). Click **Look up**, review the confirm page, and click **Confirm** -- the same write-through and auto-scout steps run.
 
-**If no suggestion matches**: Click **No match -- skip for now** to hide the opponent (see below).
+**Auto-scout after linking**: As soon as you confirm, a background scouting sync starts automatically for the linked opponent. The row status changes to **Syncing...** and then to **Stats loaded** when complete. No CLI command is needed.
 
 ### Dismissing Unresolvable Opponents
 
-When a search produces no valid match, click **No match -- skip for now** on the resolve page. This sets `is_hidden = 1` on the opponent link, which:
+When no valid match exists, click **No match -- skip** at the bottom of the resolve page. This sets `is_hidden = 1` on the opponent link, which:
 
-- Removes the opponent from the Unresolved count and banner.
+- Removes the opponent from the Needs linking count and banner.
 - Excludes the opponent from the scouting pipeline (resolver and seeder skip hidden entries).
 - Does **not** delete the row -- it is reversible.
 
 ### Viewing and Restoring Hidden Opponents
 
-Click the **Hidden (N)** filter tab to see all opponents marked "no match." Each row shows an **Unhide** button. Clicking it sets `is_hidden = 0` and returns the opponent to the active unresolved list.
-
-### Manually Connecting an Opponent (URL Paste)
-
-For opponents with a `resolved_team_id` but no `public_id` (partial resolution), a **Connect** button appears. This opens the URL-paste form where you provide the opponent team's GameChanger URL directly.
-
-To find the URL: navigate to the team's page on [web.gc.com](https://web.gc.com) and copy the URL.
-
-After connecting, the row shows a **Resolved** badge and a gray **Disconnect** button (in case of mis-mapping). Only links with `resolution_method = 'manual'` can be disconnected -- auto-resolved links cannot be disconnected because they would be re-created on the next pipeline run.
-
-### Running Opponent Discovery
-
-The **Run Discovery** link at the top of the Opponents page navigates to the Teams page where the per-team **Discover** buttons are available. Run discovery for each of your member teams to import opponents from their schedules.
+Click the **Hidden** filter pill to see all opponents marked "no match." Each row shows an **Unhide** button. Clicking it sets `is_hidden = 0` and returns the opponent to the active list.
 
 ---
 
@@ -745,4 +787,4 @@ For the expected data volume (~30 games x 4 teams x a few seasons), the database
 
 ---
 
-*Last updated: 2026-03-27 | Source: E-167 (bb data dedup CLI, GC search-powered opponent resolution, skip/unhide workflow), E-163 (scouting spray pipeline, updated thresholds, bb data scout 4-step flow), E-158 (spray chart pipeline, migration 006, chart routes), E-156 (bb data scout --force flag), E-155 (duplicate team detection and merge UI), E-143 (programs, user roles, team delete, opponent mapping UX, crawl trigger UI), E-120-06 (bare UUID input documented), E-055 (unified CLI), E-115-01 (E-100 team management model), E-028-03 (original)*
+*Last updated: 2026-03-28 | Source: E-173 (resolution write-through, auto-scout after linking, unified Find on GC resolve page, dashboard sort by next game date, terminology cleanup, bb data repair-opponents), E-167 (bb data dedup CLI, GC search-powered opponent resolution, skip/unhide workflow), E-163 (scouting spray pipeline, updated thresholds, bb data scout 4-step flow), E-158 (spray chart pipeline, migration 006, chart routes), E-156 (bb data scout --force flag), E-155 (duplicate team detection and merge UI), E-143 (programs, user roles, team delete, opponent mapping UX, crawl trigger UI), E-120-06 (bare UUID input documented), E-055 (unified CLI), E-115-01 (E-100 team management model), E-028-03 (original)*

@@ -11,18 +11,7 @@
 <h1 class="text-xl font-bold mb-2">Manage Programs</h1>
 
 <!-- Admin sub-navigation -->
-<nav class="mb-6 flex gap-4 border-b border-gray-300 pb-2 text-sm">
-  <a href="/admin/users"
-     class="font-medium text-gray-600 hover:text-blue-900">Users</a>
-  <a href="/admin/teams"
-     class="font-medium text-gray-600 hover:text-blue-900">Teams</a>
-  <a href="/admin/programs"
-     class="font-bold underline text-blue-900">Programs</a>
-  <a href="/admin/opponents"
-     class="font-medium text-gray-600 hover:text-blue-900">Opponents</a>
-  <a href="/admin/reports"
-     class="font-medium text-gray-600 hover:text-blue-900">Reports</a>
-</nav>
+{% with active_tab='programs' %}{% include "admin/_subnav.html" %}{% endwith %}
 
 {% if msg %}
 <div class="mb-4 p-3 bg-green-100 text-green-800 rounded border border-green-300">

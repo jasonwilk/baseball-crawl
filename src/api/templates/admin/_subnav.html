@@ -1,0 +1,16 @@
+{# Shared admin sub-navigation with unresolved opponent count badge. #}
+{# Requires `active_tab` variable in context (e.g., "users", "teams", "programs", "opponents", "reports"). #}
+{# `get_unresolved_opponent_count` is a Jinja2 global function registered in admin.py. #}
+{% set unresolved_count = get_unresolved_opponent_count() %}
+<nav class="mb-6 flex gap-4 border-b border-gray-300 pb-2 text-sm">
+  <a href="/admin/users"
+     class="{% if active_tab == 'users' %}font-bold underline text-blue-900{% else %}font-medium text-gray-600 hover:text-blue-900{% endif %}">Users</a>
+  <a href="/admin/teams"
+     class="{% if active_tab == 'teams' %}font-bold underline text-blue-900{% else %}font-medium text-gray-600 hover:text-blue-900{% endif %}">Teams</a>
+  <a href="/admin/programs"
+     class="{% if active_tab == 'programs' %}font-bold underline text-blue-900{% else %}font-medium text-gray-600 hover:text-blue-900{% endif %}">Programs</a>
+  <a href="/admin/opponents"
+     class="{% if active_tab == 'opponents' %}font-bold underline text-blue-900{% else %}font-medium text-gray-600 hover:text-blue-900{% endif %}">Opponents{% if unresolved_count %} <span class="text-orange-600 font-bold">({{ unresolved_count }})</span>{% endif %}</a>
+  <a href="/admin/reports"
+     class="{% if active_tab == 'reports' %}font-bold underline text-blue-900{% else %}font-medium text-gray-600 hover:text-blue-900{% endif %}">Reports</a>
+</nav>

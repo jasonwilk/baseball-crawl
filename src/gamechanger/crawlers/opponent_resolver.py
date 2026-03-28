@@ -43,6 +43,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
+from src.api.db import finalize_opponent_resolution
 from src.db.teams import ensure_team_row
 from src.gamechanger.client import (
     CredentialExpiredError,
@@ -372,6 +373,15 @@ class OpponentResolver:
             is_hidden=is_hidden,
         )
 
+        # Write-through: propagate resolution to team_opponents, activate team,
+        # and reassign FK references from any old stub.
+        finalize_opponent_resolution(
+            self._db,
+            our_team_id=our_team_id,
+            resolved_team_id=resolved_team_id,
+            opponent_name=opponent_name,
+        )
+
         logger.debug(
             "Resolved opponent '%s' -> team %s (id=%d, public_id=%s)",
             opponent_name,
@@ -642,6 +652,15 @@ class OpponentResolver:
             WHERE id = ? AND resolution_method IS NULL
             """,
             (team_id, effective_public_id, link_id),
+        )
+
+        # Write-through: propagate resolution to team_opponents, activate team,
+        # and reassign FK references from any old stub.
+        finalize_opponent_resolution(
+            self._db,
+            our_team_id=our_team_id,
+            resolved_team_id=team_id,
+            opponent_name=opponent_name,
         )
 
         logger.info(

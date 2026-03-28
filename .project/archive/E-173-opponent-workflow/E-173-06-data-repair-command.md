@@ -4,7 +4,7 @@
 [E-173: Fix Opponent Scouting Workflow End-to-End](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, a `bb data repair-opponents` CLI command exists that propagates all existing `opponent_links` resolutions to `team_opponents` and activates resolved teams. This fixes the data disconnect for opponents that were resolved before E-173-01 shipped.

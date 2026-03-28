@@ -1013,3 +1013,252 @@ def test_dedup_summary_output() -> None:
         result = runner.invoke(app, ["data", "dedup", "--db", "/tmp/test.db"])
 
     assert "2 group(s) found, 2 merged, 0 skipped" in result.output
+
+
+# ---------------------------------------------------------------------------
+# bb data repair-opponents (E-173-06)
+# ---------------------------------------------------------------------------
+
+
+def _make_repair_db(tmp_path: Path) -> tuple[Path, dict[str, int]]:
+    """Create a test DB with resolved opponent_links but missing team_opponents."""
+    from migrations.apply_migrations import run_migrations
+
+    db_path = tmp_path / "repair_test.db"
+    run_migrations(db_path=db_path)
+    conn = sqlite3.connect(str(db_path))
+    conn.execute("PRAGMA foreign_keys=ON;")
+
+    # Member team
+    cur = conn.execute(
+        "INSERT INTO teams (name, membership_type, source, is_active, season_year) "
+        "VALUES ('LSB Varsity', 'member', 'test', 1, 2026)"
+    )
+    our_id = cur.lastrowid
+
+    # Resolved opponent team (inactive -- should be activated)
+    cur = conn.execute(
+        "INSERT INTO teams (name, membership_type, public_id, source, is_active) "
+        "VALUES ('Rival HS', 'tracked', 'rival-slug', 'test', 0)"
+    )
+    resolved_id = cur.lastrowid
+
+    # Resolved opponent_links row -- but NO team_opponents row
+    cur = conn.execute(
+        "INSERT INTO opponent_links "
+        "(our_team_id, root_team_id, opponent_name, resolved_team_id, "
+        "public_id, resolution_method) "
+        "VALUES (?, 'gc-root-001', 'Rival HS', ?, 'rival-slug', 'auto')",
+        (our_id, resolved_id),
+    )
+    link_id = cur.lastrowid
+
+    conn.commit()
+    conn.close()
+    return db_path, {"our_id": our_id, "resolved_id": resolved_id, "link_id": link_id}
+
+
+def test_repair_opponents_dry_run_no_resolved(tmp_path: Path) -> None:
+    """Dry run with no resolved links prints nothing-to-do message."""
+    from migrations.apply_migrations import run_migrations
+
+    db_path = tmp_path / "empty.db"
+    run_migrations(db_path=db_path)
+
+    result = runner.invoke(app, ["data", "repair-opponents", "--db", str(db_path)])
+    assert result.exit_code == 0
+    assert "Nothing to repair" in result.output
+
+
+def test_repair_opponents_dry_run_shows_preview(tmp_path: Path) -> None:
+    """Dry run shows what would be processed without making changes."""
+    db_path, ids = _make_repair_db(tmp_path)
+
+    result = runner.invoke(app, ["data", "repair-opponents", "--db", str(db_path)])
+    assert result.exit_code == 0
+    assert "DRY RUN" in result.output
+    assert "Rival HS" in result.output
+    assert "total to process: 1" in result.output
+
+    # Verify no changes were made
+    conn = sqlite3.connect(str(db_path))
+    row = conn.execute(
+        "SELECT COUNT(*) FROM team_opponents WHERE our_team_id = ?",
+        (ids["our_id"],),
+    ).fetchone()
+    conn.close()
+    assert row[0] == 0
+
+
+def test_repair_opponents_execute_creates_team_opponents(tmp_path: Path) -> None:
+    """Execute mode creates team_opponents row and activates the team."""
+    db_path, ids = _make_repair_db(tmp_path)
+
+    result = runner.invoke(
+        app, ["data", "repair-opponents", "--execute", "--db", str(db_path)]
+    )
+    assert result.exit_code == 0
+    assert "EXECUTE" in result.output
+    assert "team_opponents created: 1" in result.output
+
+    conn = sqlite3.connect(str(db_path))
+    # team_opponents row exists
+    row = conn.execute(
+        "SELECT opponent_team_id FROM team_opponents WHERE our_team_id = ?",
+        (ids["our_id"],),
+    ).fetchone()
+    assert row is not None
+    assert row[0] == ids["resolved_id"]
+
+    # Team is now active
+    active = conn.execute(
+        "SELECT is_active FROM teams WHERE id = ?", (ids["resolved_id"],)
+    ).fetchone()
+    assert active[0] == 1
+    conn.close()
+
+
+def test_repair_opponents_idempotent(tmp_path: Path) -> None:
+    """Running repair twice does not error or create duplicates."""
+    db_path, ids = _make_repair_db(tmp_path)
+
+    # First run
+    result1 = runner.invoke(
+        app, ["data", "repair-opponents", "--execute", "--db", str(db_path)]
+    )
+    assert result1.exit_code == 0
+
+    # Second run -- should report no-op
+    result2 = runner.invoke(
+        app, ["data", "repair-opponents", "--execute", "--db", str(db_path)]
+    )
+    assert result2.exit_code == 0
+    assert "no-op" in result2.output
+
+    # Still only one team_opponents row
+    conn = sqlite3.connect(str(db_path))
+    count = conn.execute(
+        "SELECT COUNT(*) FROM team_opponents WHERE our_team_id = ?",
+        (ids["our_id"],),
+    ).fetchone()[0]
+    conn.close()
+    assert count == 1
+
+
+def test_repair_opponents_replaces_stub(tmp_path: Path) -> None:
+    """When a stub exists in team_opponents, repair replaces it with resolved team."""
+    db_path, ids = _make_repair_db(tmp_path)
+    conn = sqlite3.connect(str(db_path))
+    conn.execute("PRAGMA foreign_keys=ON;")
+
+    # Create a stub team and link it in team_opponents
+    cur = conn.execute(
+        "INSERT INTO teams (name, membership_type, source, is_active) "
+        "VALUES ('Rival HS', 'tracked', 'test', 0)"
+    )
+    stub_id = cur.lastrowid
+    conn.execute(
+        "INSERT INTO team_opponents (our_team_id, opponent_team_id) VALUES (?, ?)",
+        (ids["our_id"], stub_id),
+    )
+    conn.commit()
+    conn.close()
+
+    result = runner.invoke(
+        app, ["data", "repair-opponents", "--execute", "--db", str(db_path)]
+    )
+    assert result.exit_code == 0
+    assert "stub replaced" in result.output
+
+    # team_opponents should now point to resolved_id, not stub_id
+    conn = sqlite3.connect(str(db_path))
+    rows = conn.execute(
+        "SELECT opponent_team_id FROM team_opponents WHERE our_team_id = ?",
+        (ids["our_id"],),
+    ).fetchall()
+    conn.close()
+    team_ids = [r[0] for r in rows]
+    assert ids["resolved_id"] in team_ids
+    assert stub_id not in team_ids
+
+
+def test_repair_opponents_fixes_stale_fk_despite_correct_team_opponents(tmp_path: Path) -> None:
+    """Repair reassigns stale FK refs even when team_opponents already points to resolved team.
+
+    Scenario: team_opponents correctly links to resolved_id and team is active,
+    but game rows still reference an old stub. The old `already_ok` shortcut
+    would have skipped this; the fix always calls finalize which cleans up FKs.
+    """
+    from migrations.apply_migrations import run_migrations
+
+    db_path = tmp_path / "stale_fk.db"
+    run_migrations(db_path=db_path)
+    conn = sqlite3.connect(str(db_path))
+    conn.execute("PRAGMA foreign_keys=ON;")
+
+    # Member team
+    cur = conn.execute(
+        "INSERT INTO teams (name, membership_type, source, is_active, season_year) "
+        "VALUES ('LSB Varsity', 'member', 'test', 1, 2026)"
+    )
+    our_id = cur.lastrowid
+
+    # Old stub team
+    cur = conn.execute(
+        "INSERT INTO teams (name, membership_type, source, is_active) "
+        "VALUES ('Rival HS', 'tracked', 'test', 0)"
+    )
+    stub_id = cur.lastrowid
+
+    # Resolved team (already active)
+    cur = conn.execute(
+        "INSERT INTO teams (name, membership_type, public_id, source, is_active) "
+        "VALUES ('Rival HS', 'tracked', 'rival-slug', 'test', 1)"
+    )
+    resolved_id = cur.lastrowid
+
+    # team_opponents correctly points to resolved_id
+    conn.execute(
+        "INSERT INTO team_opponents (our_team_id, opponent_team_id) VALUES (?, ?)",
+        (our_id, resolved_id),
+    )
+    # But the stub also has a team_opponents row (stale)
+    conn.execute(
+        "INSERT INTO team_opponents (our_team_id, opponent_team_id) VALUES (?, ?)",
+        (our_id, stub_id),
+    )
+
+    # opponent_links points to resolved
+    conn.execute(
+        "INSERT INTO opponent_links "
+        "(our_team_id, root_team_id, opponent_name, resolved_team_id, "
+        "public_id, resolution_method) "
+        "VALUES (?, 'gc-root-001', 'Rival HS', ?, 'rival-slug', 'auto')",
+        (our_id, resolved_id),
+    )
+
+    # Game row with FK pointing to old STUB (stale)
+    conn.execute(
+        "INSERT INTO seasons (season_id, name, season_type, year) "
+        "VALUES ('2026-spring-hs', 'Spring 2026', 'spring-hs', 2026)"
+    )
+    conn.execute(
+        "INSERT INTO games (game_id, season_id, game_date, home_team_id, away_team_id) "
+        "VALUES ('stale-g1', '2026-spring-hs', '2026-04-01', ?, ?)",
+        (our_id, stub_id),
+    )
+    conn.commit()
+    conn.close()
+
+    result = runner.invoke(
+        app, ["data", "repair-opponents", "--execute", "--db", str(db_path)]
+    )
+    assert result.exit_code == 0
+
+    # The game's away_team_id should now point to resolved_id, not stub_id
+    conn = sqlite3.connect(str(db_path))
+    game = conn.execute(
+        "SELECT away_team_id FROM games WHERE game_id = 'stale-g1'"
+    ).fetchone()
+    conn.close()
+    assert game[0] == resolved_id

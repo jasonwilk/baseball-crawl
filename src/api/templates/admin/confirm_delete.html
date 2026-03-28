@@ -11,18 +11,7 @@
 <h1 class="text-xl font-bold mb-4">Confirm Delete Team</h1>
 
 <!-- Admin sub-navigation -->
-<nav class="mb-6 flex gap-4 border-b border-gray-300 pb-2 text-sm">
-  <a href="/admin/users"
-     class="font-medium text-gray-600 hover:text-blue-900">Users</a>
-  <a href="/admin/teams"
-     class="font-bold underline text-blue-900">Teams</a>
-  <a href="/admin/programs"
-     class="font-medium text-gray-600 hover:text-blue-900">Programs</a>
-  <a href="/admin/opponents"
-     class="font-medium text-gray-600 hover:text-blue-900">Opponents</a>
-  <a href="/admin/reports"
-     class="font-medium text-gray-600 hover:text-blue-900">Reports</a>
-</nav>
+{% with active_tab='teams' %}{% include "admin/_subnav.html" %}{% endwith %}
 
 <div class="bg-white rounded shadow p-6 max-w-2xl">
 
@@ -37,7 +26,7 @@
         {% if team.membership_type == 'member' %}
           <span class="px-2 py-0.5 rounded text-xs font-semibold bg-blue-100 text-blue-800 border border-blue-300">Member</span>
         {% else %}
-          <span class="px-2 py-0.5 rounded text-xs font-semibold bg-gray-100 text-gray-700 border border-gray-300">Tracked</span>
+          <span class="px-2 py-0.5 rounded text-xs font-semibold bg-gray-100 text-gray-700 border border-gray-300">Opponent</span>
         {% endif %}
       </dd>
       <dt class="text-gray-600 font-medium">Status</dt>

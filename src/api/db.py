@@ -541,7 +541,8 @@ def get_team_opponents(
     Returns:
         List of dicts with keys: opponent_team_id, opponent_name, games_played,
         wins, losses, next_game_date (ISO date str or None), last_game_date
-        (ISO date str or None).  Sorted by opponent_name ASC.
+        (ISO date str or None), data_status ('stats' | 'syncing' | 'scoresheet').
+        Sorted by next_game_date ASC (NULLs last), then opponent_name ASC.
         Returns an empty list on DB error.
     """
     games_query = """
@@ -578,7 +579,6 @@ def get_team_opponents(
         WHERE g.season_id = :season_id
           AND (g.home_team_id = :team_id OR g.away_team_id = :team_id)
         GROUP BY opponent_team_id, opponent_name
-        ORDER BY opponent_name ASC
     """
     junction_query = """
         SELECT
@@ -593,7 +593,6 @@ def get_team_opponents(
         JOIN teams t ON t.id = to_.opponent_team_id
         WHERE to_.our_team_id = :team_id
           AND to_.first_seen_year = CAST(substr(:season_id, 1, 4) AS INTEGER)
-        ORDER BY t.name ASC
     """
     params = {"team_id": team_id, "season_id": season_id}
     try:
@@ -602,11 +601,41 @@ def get_team_opponents(
             games_rows = [dict(r) for r in conn.execute(games_query, params).fetchall()]
             junction_rows = [dict(r) for r in conn.execute(junction_query, params).fetchall()]
 
-        # Build result from games rows; supplement with junction rows not already present.
-        seen_ids = {r["opponent_team_id"] for r in games_rows}
-        fallback_rows = [r for r in junction_rows if r["opponent_team_id"] not in seen_ids]
-        combined = games_rows + fallback_rows
-        combined.sort(key=lambda r: (r["opponent_name"] or "").lower())
+            # Build result from games rows; supplement with junction rows not already present.
+            seen_ids = {r["opponent_team_id"] for r in games_rows}
+            fallback_rows = [r for r in junction_rows if r["opponent_team_id"] not in seen_ids]
+            combined = games_rows + fallback_rows
+
+            # Compute data_status for each opponent
+            for row in combined:
+                opp_id = row["opponent_team_id"]
+                try:
+                    has_stats = conn.execute(
+                        "SELECT 1 FROM player_season_batting WHERE team_id = ? AND season_id = ? "
+                        "UNION ALL "
+                        "SELECT 1 FROM player_season_pitching WHERE team_id = ? AND season_id = ? "
+                        "LIMIT 1",
+                        (opp_id, season_id, opp_id, season_id),
+                    ).fetchone()
+                except sqlite3.OperationalError:
+                    has_stats = None
+                if has_stats:
+                    row["data_status"] = "stats"
+                    continue
+                try:
+                    is_syncing = conn.execute(
+                        "SELECT 1 FROM crawl_jobs WHERE team_id = ? AND status = 'running' LIMIT 1",
+                        (opp_id,),
+                    ).fetchone()
+                    row["data_status"] = "syncing" if is_syncing else "scoresheet"
+                except sqlite3.OperationalError:
+                    row["data_status"] = "scoresheet"
+
+        # Sort: next_game_date ASC (NULLs last), then opponent_name ASC
+        combined.sort(key=lambda r: (
+            (0, r["next_game_date"]) if r["next_game_date"] else (1, ""),
+            (r["opponent_name"] or "").lower(),
+        ))
         return combined
     except sqlite3.Error:
         logger.exception("Failed to fetch team opponents")
@@ -1052,9 +1081,10 @@ def _opponent_links_where(
         conditions.append("ol.our_team_id = ?")
         params.append(our_team_id)
     if status_filter == "full":
-        conditions.append("ol.public_id IS NOT NULL")
-    elif status_filter == "scoresheet":
-        conditions.append("ol.public_id IS NULL")
+        conditions.append(
+            "(EXISTS (SELECT 1 FROM player_season_batting WHERE team_id = ol.resolved_team_id)"
+            " OR EXISTS (SELECT 1 FROM player_season_pitching WHERE team_id = ol.resolved_team_id))"
+        )
     elif status_filter == "unresolved":
         conditions.append("ol.resolved_team_id IS NULL")
     return " AND ".join(conditions), params
@@ -1080,8 +1110,41 @@ def get_opponent_links(
     try:
         with closing(get_connection()) as conn:
             conn.row_factory = sqlite3.Row
-            rows = conn.execute(query, params).fetchall()
-        return [dict(r) for r in rows]
+            rows = [dict(r) for r in conn.execute(query, params).fetchall()]
+            # Enrich with pipeline_status for resolved links
+            for row in rows:
+                rtid = row.get("resolved_team_id")
+                if not rtid or row.get("is_hidden"):
+                    row["pipeline_status"] = None
+                    continue
+                try:
+                    has_stats = conn.execute(
+                        "SELECT 1 FROM player_season_batting WHERE team_id = ? "
+                        "UNION ALL "
+                        "SELECT 1 FROM player_season_pitching WHERE team_id = ? "
+                        "LIMIT 1",
+                        (rtid, rtid),
+                    ).fetchone()
+                except sqlite3.OperationalError:
+                    has_stats = None
+                if has_stats:
+                    row["pipeline_status"] = "stats"
+                    continue
+                try:
+                    job = conn.execute(
+                        "SELECT status FROM crawl_jobs WHERE team_id = ? "
+                        "ORDER BY started_at DESC LIMIT 1",
+                        (rtid,),
+                    ).fetchone()
+                    if job and job[0] == "running":
+                        row["pipeline_status"] = "syncing"
+                    elif job and job[0] == "failed":
+                        row["pipeline_status"] = "failed"
+                    else:
+                        row["pipeline_status"] = None
+                except sqlite3.OperationalError:
+                    row["pipeline_status"] = None
+        return rows
     except sqlite3.Error:
         logger.exception("Failed to fetch opponent links")
         return []
@@ -1094,7 +1157,7 @@ def get_opponent_link_counts(our_team_id: int | None = None) -> dict[str, int]:
         our_team_id: INTEGER team id to scope to a specific team, or None for all teams.
 
     Returns:
-        Dict with keys: total, full_stats, scoresheet_only, unresolved, hidden.
+        Dict with keys: total, full_stats, unresolved, hidden.
     """
     team_cond = ""
     params: list[Any] = []
@@ -1104,11 +1167,13 @@ def get_opponent_link_counts(our_team_id: int | None = None) -> dict[str, int]:
     query = f"""
         SELECT
             SUM(CASE WHEN is_hidden = 0 THEN 1 ELSE 0 END) AS total,
-            SUM(CASE WHEN is_hidden = 0 AND public_id IS NOT NULL THEN 1 ELSE 0 END) AS full_stats,
-            SUM(CASE WHEN is_hidden = 0 AND public_id IS NULL THEN 1 ELSE 0 END) AS scoresheet_only,
+            SUM(CASE WHEN is_hidden = 0 AND (
+                EXISTS (SELECT 1 FROM player_season_batting WHERE team_id = ol.resolved_team_id)
+                OR EXISTS (SELECT 1 FROM player_season_pitching WHERE team_id = ol.resolved_team_id)
+            ) THEN 1 ELSE 0 END) AS full_stats,
             SUM(CASE WHEN is_hidden = 0 AND resolved_team_id IS NULL THEN 1 ELSE 0 END) AS unresolved,
             SUM(CASE WHEN is_hidden = 1 THEN 1 ELSE 0 END) AS hidden
-        FROM opponent_links
+        FROM opponent_links ol
         WHERE 1=1 {team_cond}
     """
     try:
@@ -1120,13 +1185,12 @@ def get_opponent_link_counts(our_team_id: int | None = None) -> dict[str, int]:
             return {
                 "total": r["total"] or 0,
                 "full_stats": r["full_stats"] or 0,
-                "scoresheet_only": r["scoresheet_only"] or 0,
                 "unresolved": r["unresolved"] or 0,
                 "hidden": r["hidden"] or 0,
             }
     except sqlite3.Error:
         logger.exception("Failed to count opponent links")
-    return {"total": 0, "full_stats": 0, "scoresheet_only": 0, "unresolved": 0, "hidden": 0}
+    return {"total": 0, "full_stats": 0, "unresolved": 0, "hidden": 0}
 
 
 def get_opponent_link_by_id(link_id: int) -> dict[str, Any] | None:
@@ -1222,6 +1286,231 @@ def get_duplicate_opponent_name(
         return None
 
 
+def finalize_opponent_resolution(
+    conn: sqlite3.Connection,
+    our_team_id: int,
+    resolved_team_id: int,
+    opponent_name: str,
+    first_seen_year: int | None = None,
+) -> dict[str, Any]:
+    """Write-through resolution to team_opponents, with stub discovery and FK reassignment.
+
+    Must be called within the caller's existing transaction (does not commit).
+    Performs five operations atomically per TN-1:
+
+    1. Discover the old stub team via _find_tracked_stub() pattern.
+    2. Upsert a team_opponents row linking our_team_id to resolved_team_id.
+    3. Set teams.is_active = 1 on the resolved team.
+    4. Reassign FK references from old stub to resolved team (when stub differs).
+    5. Return result dict.
+
+    Args:
+        conn: An open SQLite connection (caller manages transaction).
+        our_team_id: The member team's INTEGER PK.
+        resolved_team_id: The resolved opponent team's INTEGER PK.
+        opponent_name: The opponent name for stub discovery.
+        first_seen_year: Year for team_opponents.first_seen_year. Derived from
+            the member team's season_year if None, falling back to current year.
+
+    Returns:
+        Dict with keys: resolved_team_id, public_id, old_stub_team_id, fk_rows_moved.
+    """
+    # Derive first_seen_year from our_team's season_year if not provided
+    if first_seen_year is None:
+        row = conn.execute(
+            "SELECT season_year FROM teams WHERE id = ?", (our_team_id,)
+        ).fetchone()
+        first_seen_year = (
+            row[0]
+            if row and row[0] is not None
+            else datetime.datetime.now(datetime.timezone.utc).year
+        )
+
+    # Step 1: Discover old stub
+    old_stub_team_id = _find_tracked_stub(conn, our_team_id, opponent_name)
+    if old_stub_team_id == resolved_team_id:
+        old_stub_team_id = None  # Not actually a stub replacement
+
+    # Step 2: Upsert team_opponents row
+    existing_resolved_row = conn.execute(
+        "SELECT id FROM team_opponents WHERE our_team_id = ? AND opponent_team_id = ?",
+        (our_team_id, resolved_team_id),
+    ).fetchone()
+
+    if old_stub_team_id is not None:
+        if existing_resolved_row is not None:
+            # Resolved team already has a team_opponents row -- delete the stub row
+            conn.execute(
+                "DELETE FROM team_opponents WHERE our_team_id = ? AND opponent_team_id = ?",
+                (our_team_id, old_stub_team_id),
+            )
+        else:
+            # Update stub row to point to resolved team
+            existing_stub_row = conn.execute(
+                "SELECT id FROM team_opponents WHERE our_team_id = ? AND opponent_team_id = ?",
+                (our_team_id, old_stub_team_id),
+            ).fetchone()
+            if existing_stub_row is not None:
+                conn.execute(
+                    "UPDATE team_opponents SET opponent_team_id = ?, first_seen_year = COALESCE(first_seen_year, ?) "
+                    "WHERE our_team_id = ? AND opponent_team_id = ?",
+                    (resolved_team_id, first_seen_year, our_team_id, old_stub_team_id),
+                )
+            else:
+                # No stub row exists, insert new
+                conn.execute(
+                    "INSERT INTO team_opponents (our_team_id, opponent_team_id, first_seen_year) "
+                    "VALUES (?, ?, ?)",
+                    (our_team_id, resolved_team_id, first_seen_year),
+                )
+    elif existing_resolved_row is None:
+        # No stub, no existing row -- insert new
+        conn.execute(
+            "INSERT INTO team_opponents (our_team_id, opponent_team_id, first_seen_year) "
+            "VALUES (?, ?, ?)",
+            (our_team_id, resolved_team_id, first_seen_year),
+        )
+
+    # Step 3: Activate the resolved team
+    conn.execute(
+        "UPDATE teams SET is_active = 1 WHERE id = ?", (resolved_team_id,)
+    )
+
+    # Step 4: Reassign FK references from stub to resolved team
+    fk_rows_moved = 0
+    if old_stub_team_id is not None:
+        fk_rows_moved = _reassign_fk_references(conn, old_stub_team_id, resolved_team_id)
+
+    # Step 5: Read public_id and return result
+    pub_row = conn.execute(
+        "SELECT public_id FROM teams WHERE id = ?", (resolved_team_id,)
+    ).fetchone()
+    public_id = pub_row[0] if pub_row else None
+
+    return {
+        "resolved_team_id": resolved_team_id,
+        "public_id": public_id,
+        "old_stub_team_id": old_stub_team_id,
+        "fk_rows_moved": fk_rows_moved,
+    }
+
+
+def _reassign_fk_references(
+    conn: sqlite3.Connection,
+    old_team_id: int,
+    new_team_id: int,
+) -> int:
+    """Reassign all FK references from old_team_id to new_team_id.
+
+    Skips rows where the new team already has a matching record to avoid
+    duplicate constraint violations.
+
+    Args:
+        conn: An open SQLite connection (caller manages transaction).
+        old_team_id: The stub team's INTEGER PK to reassign from.
+        new_team_id: The resolved team's INTEGER PK to reassign to.
+
+    Returns:
+        Total number of rows affected across all tables.
+    """
+    total_rows = 0
+    # games.home_team_id -- dedup on game_stream_id (same real-world game
+    # may have been loaded under different game_ids for stub vs resolved team).
+    # NULL game_stream_id: skip dedup check, just reassign.
+    cur = conn.execute(
+        "UPDATE games SET home_team_id = ? "
+        "WHERE home_team_id = ? AND ("
+        "  game_stream_id IS NULL OR game_stream_id NOT IN ("
+        "    SELECT game_stream_id FROM games "
+        "    WHERE home_team_id = ? AND game_stream_id IS NOT NULL"
+        "  )"
+        ")",
+        (new_team_id, old_team_id, new_team_id),
+    )
+    total_rows += cur.rowcount
+    # games.away_team_id -- dedup on game_stream_id
+    cur = conn.execute(
+        "UPDATE games SET away_team_id = ? "
+        "WHERE away_team_id = ? AND ("
+        "  game_stream_id IS NULL OR game_stream_id NOT IN ("
+        "    SELECT game_stream_id FROM games "
+        "    WHERE away_team_id = ? AND game_stream_id IS NOT NULL"
+        "  )"
+        ")",
+        (new_team_id, old_team_id, new_team_id),
+    )
+    total_rows += cur.rowcount
+
+    # player_game_batting -- dedup on UNIQUE(game_id, player_id)
+    cur = conn.execute(
+        "UPDATE player_game_batting SET team_id = ? "
+        "WHERE team_id = ? AND NOT EXISTS ("
+        "  SELECT 1 FROM player_game_batting pgb2 "
+        "  WHERE pgb2.team_id = ? AND pgb2.game_id = player_game_batting.game_id "
+        "    AND pgb2.player_id = player_game_batting.player_id"
+        ")",
+        (new_team_id, old_team_id, new_team_id),
+    )
+    total_rows += cur.rowcount
+
+    # player_game_pitching -- dedup on UNIQUE(game_id, player_id)
+    cur = conn.execute(
+        "UPDATE player_game_pitching SET team_id = ? "
+        "WHERE team_id = ? AND NOT EXISTS ("
+        "  SELECT 1 FROM player_game_pitching pgp2 "
+        "  WHERE pgp2.team_id = ? AND pgp2.game_id = player_game_pitching.game_id "
+        "    AND pgp2.player_id = player_game_pitching.player_id"
+        ")",
+        (new_team_id, old_team_id, new_team_id),
+    )
+    total_rows += cur.rowcount
+
+    # player_season_batting -- dedup on UNIQUE(player_id, team_id, season_id)
+    cur = conn.execute(
+        "UPDATE player_season_batting SET team_id = ? "
+        "WHERE team_id = ? AND NOT EXISTS ("
+        "  SELECT 1 FROM player_season_batting psb2 "
+        "  WHERE psb2.team_id = ? AND psb2.player_id = player_season_batting.player_id "
+        "    AND psb2.season_id = player_season_batting.season_id"
+        ")",
+        (new_team_id, old_team_id, new_team_id),
+    )
+    total_rows += cur.rowcount
+
+    # player_season_pitching -- dedup on UNIQUE(player_id, team_id, season_id)
+    cur = conn.execute(
+        "UPDATE player_season_pitching SET team_id = ? "
+        "WHERE team_id = ? AND NOT EXISTS ("
+        "  SELECT 1 FROM player_season_pitching psp2 "
+        "  WHERE psp2.team_id = ? AND psp2.player_id = player_season_pitching.player_id "
+        "    AND psp2.season_id = player_season_pitching.season_id"
+        ")",
+        (new_team_id, old_team_id, new_team_id),
+    )
+    total_rows += cur.rowcount
+
+    # spray_charts -- dedup on team_id (no unique constraint per se, but
+    # spray_charts have game_stream_id + team_id as natural key)
+    cur = conn.execute(
+        "UPDATE spray_charts SET team_id = ? WHERE team_id = ?",
+        (new_team_id, old_team_id),
+    )
+    total_rows += cur.rowcount
+
+    # team_rosters -- PK is (team_id, player_id, season_id)
+    cur = conn.execute(
+        "UPDATE team_rosters SET team_id = ? "
+        "WHERE team_id = ? AND NOT EXISTS ("
+        "  SELECT 1 FROM team_rosters tr2 "
+        "  WHERE tr2.team_id = ? AND tr2.player_id = team_rosters.player_id "
+        "    AND tr2.season_id = team_rosters.season_id"
+        ")",
+        (new_team_id, old_team_id, new_team_id),
+    )
+    total_rows += cur.rowcount
+    return total_rows
+
+
 def _find_tracked_stub(
     conn: sqlite3.Connection,
     our_team_id: int,
@@ -1314,8 +1603,17 @@ def save_manual_opponent_link(
           team that already owned the public_id (instead of the stub).
         - ``merged_team_name`` (str | None): Name of the existing team when merged,
           else None.
+        - ``resolved_team_id`` (int | None): INTEGER PK of the resolved team, or
+          None if no stub was found.
+        - ``effective_public_id`` (str | None): The resolved team's public_id after
+          all operations, or None.
     """
-    result: dict[str, Any] = {"merged": False, "merged_team_name": None}
+    result: dict[str, Any] = {
+        "merged": False,
+        "merged_team_name": None,
+        "resolved_team_id": None,
+        "effective_public_id": None,
+    }
     try:
         with closing(get_connection()) as conn:
             conn.execute(
@@ -1386,6 +1684,36 @@ def save_manual_opponent_link(
                     "UPDATE opponent_links SET resolved_team_id = ? WHERE id = ?",
                     (resolved_id, link_id),
                 )
+            else:
+                # No stub found -- resolve directly via public_id.
+                # Find or create the team by public_id.
+                existing_team = conn.execute(
+                    "SELECT id FROM teams WHERE public_id = ?", (public_id,)
+                ).fetchone()
+                if existing_team:
+                    resolved_id = existing_team[0]
+                else:
+                    cur = conn.execute(
+                        "INSERT INTO teams (name, membership_type, public_id, source, is_active) "
+                        "VALUES (?, 'tracked', ?, 'admin_connect', 0)",
+                        (opponent_name, public_id),
+                    )
+                    resolved_id = cur.lastrowid
+                conn.execute(
+                    "UPDATE opponent_links SET resolved_team_id = ? WHERE id = ?",
+                    (resolved_id, link_id),
+                )
+
+            # Write-through: propagate resolution to team_opponents,
+            # activate team, and reassign FK references from any old stub.
+            wt_result = finalize_opponent_resolution(
+                conn,
+                our_team_id=our_team_id,
+                resolved_team_id=resolved_id,
+                opponent_name=opponent_name,
+            )
+            result["resolved_team_id"] = resolved_id
+            result["effective_public_id"] = wt_result["public_id"]
 
             conn.commit()
     except sqlite3.Error:
@@ -1499,6 +1827,24 @@ def count_all_opponent_links() -> int:
         return row[0] if row else 0
     except sqlite3.Error:
         logger.exception("Failed to count all opponent links")
+        return 0
+
+
+def get_unresolved_opponent_count() -> int:
+    """Return the count of opponent_links that need linking (unresolved and not hidden).
+
+    Returns:
+        Integer count of rows where resolved_team_id IS NULL AND is_hidden = 0.
+    """
+    try:
+        with closing(get_connection()) as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) FROM opponent_links "
+                "WHERE resolved_team_id IS NULL AND is_hidden = 0"
+            ).fetchone()
+        return row[0] if row else 0
+    except sqlite3.Error:
+        logger.exception("Failed to count unresolved opponent links")
         return 0
 
 

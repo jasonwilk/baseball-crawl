@@ -883,3 +883,125 @@ def dedup(
 
     raise SystemExit(0)
 
+
+# ---------------------------------------------------------------------------
+# bb data repair-opponents
+# ---------------------------------------------------------------------------
+
+
+@app.command("repair-opponents")
+def repair_opponents(
+    execute: bool = typer.Option(
+        False,
+        "--execute",
+        help="Apply changes. Without this flag, only a dry-run preview is shown.",
+    ),
+    db_path: Path = typer.Option(
+        _DEFAULT_DB_PATH,
+        "--db",
+        help="Path to the SQLite database.",
+    ),
+) -> None:
+    """Propagate existing opponent_links resolutions to team_opponents.
+
+    Fixes the data disconnect for opponents resolved before write-through was
+    implemented.  For each resolved opponent_links row, upserts a team_opponents
+    row, activates the resolved team, and reassigns FK references from any old
+    stub to the resolved team.
+
+    Dry-run by default -- pass --execute to apply changes.
+    """
+    from src.api.db import _find_tracked_stub, finalize_opponent_resolution
+
+    with closing(sqlite3.connect(str(db_path))) as conn:
+        conn.execute("PRAGMA foreign_keys = ON")
+
+        rows = conn.execute(
+            """
+            SELECT ol.id, ol.our_team_id, ol.resolved_team_id, ol.opponent_name,
+                   our_t.name AS our_team_name, our_t.season_year
+            FROM opponent_links ol
+            JOIN teams our_t ON our_t.id = ol.our_team_id
+            WHERE ol.resolved_team_id IS NOT NULL
+            """,
+        ).fetchall()
+
+        if not rows:
+            typer.echo("No resolved opponent_links found. Nothing to repair.")
+            raise SystemExit(0)
+
+        mode = "EXECUTE" if execute else "DRY RUN"
+        typer.echo(f"[{mode}] Found {len(rows)} resolved opponent link(s) to process.\n")
+
+        created = 0
+        updated = 0
+        activated = 0
+        no_op = 0
+        fk_reassigned = 0
+
+        for row in rows:
+            link_id, our_team_id, resolved_team_id, opponent_name, our_team_name, season_year = row
+
+            # Preview: describe what finalize will do
+            existing = conn.execute(
+                "SELECT opponent_team_id FROM team_opponents "
+                "WHERE our_team_id = ? AND opponent_team_id = ?",
+                (our_team_id, resolved_team_id),
+            ).fetchone()
+            is_active_row = conn.execute(
+                "SELECT is_active FROM teams WHERE id = ?", (resolved_team_id,)
+            ).fetchone()
+            is_active = is_active_row[0] == 1 if is_active_row else False
+            stub_id = _find_tracked_stub(conn, our_team_id, opponent_name)
+            has_stub = stub_id is not None and stub_id != resolved_team_id
+
+            if has_stub:
+                action = f"REPLACE stub (team {stub_id})"
+            elif not existing:
+                action = "CREATE"
+            elif not is_active:
+                action = "ACTIVATE"
+            else:
+                action = "VERIFY"
+
+            active_note = "" if is_active else " + activate"
+            typer.echo(
+                f"  {action}: {opponent_name} "
+                f"(our_team={our_team_name}, resolved_id={resolved_team_id}){active_note}"
+            )
+
+            if execute:
+                was_active_before = is_active
+                had_row_before = existing is not None
+                result = finalize_opponent_resolution(
+                    conn,
+                    our_team_id=our_team_id,
+                    resolved_team_id=resolved_team_id,
+                    opponent_name=opponent_name,
+                    first_seen_year=season_year,
+                )
+                old_stub = result.get("old_stub_team_id")
+                if old_stub:
+                    updated += 1
+                    fk_reassigned += result.get("fk_rows_moved", 0)
+                elif not had_row_before:
+                    created += 1
+                else:
+                    no_op += 1
+                if not was_active_before:
+                    activated += 1
+
+        if execute:
+            conn.commit()
+
+        typer.echo(f"\nSummary ({mode}):")
+        if execute:
+            typer.echo(f"  team_opponents created: {created}")
+            typer.echo(f"  team_opponents updated (stub replaced): {updated}")
+            typer.echo(f"  teams activated: {activated}")
+            typer.echo(f"  FK rows reassigned: {fk_reassigned}")
+            typer.echo(f"  no-op (already correct): {no_op}")
+        else:
+            typer.echo(f"  total to process: {len(rows)}")
+            typer.echo("\nRun with --execute to apply changes.")
+

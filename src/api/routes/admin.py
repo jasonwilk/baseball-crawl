@@ -22,7 +22,6 @@ Routes:
     GET  /admin/teams/{id}/delete                        -- Delete confirmation page (INTEGER id)
     POST /admin/teams/{id}/delete                        -- Cascade delete team and all related data (INTEGER id)
     POST /admin/teams/{id}/sync                          -- Enqueue per-team crawl as BackgroundTask (INTEGER id)
-    POST /admin/teams/{id}/discover-opponents            -- Discover opponent placeholders (INTEGER id)
     GET  /admin/programs                                 -- List all programs + add form
     POST /admin/programs                                 -- Create a new program
     GET  /admin/opponents                                -- Opponent link states listing
@@ -50,14 +49,15 @@ from starlette.concurrency import run_in_threadpool
 from starlette.responses import Response
 
 from src.api.db import (
-    bulk_create_opponents,
     disconnect_opponent_link,
+    finalize_opponent_resolution,
     get_connection,
     get_duplicate_opponent_name,
     get_opponent_link_by_id,
     get_opponent_link_count_for_team,
     get_opponent_link_counts,
     get_opponent_links,
+    get_unresolved_opponent_count,
     is_member_team_public_id,
     save_manual_opponent_link,
 )
@@ -69,7 +69,6 @@ from src.gamechanger.exceptions import ConfigurationError, CredentialExpiredErro
 from src.gamechanger.team_resolver import (
     GameChangerAPIError,
     TeamNotFoundError,
-    discover_opponents,
     resolve_team,
 )
 from src.db.merge import (
@@ -86,6 +85,7 @@ logger = logging.getLogger(__name__)
 
 _TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
 templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
+templates.env.globals["get_unresolved_opponent_count"] = get_unresolved_opponent_count
 
 router = APIRouter(prefix="/admin")
 
@@ -2326,57 +2326,6 @@ async def sync_team(
     )
 
 
-@router.post("/teams/{id}/discover-opponents", response_model=None)
-async def discover_team_opponents(request: Request, id: int) -> Response:
-    """Trigger opponent auto-discovery from a team's public game schedule.
-
-    Fetches ``GET /public/teams/{public_id}/games``, extracts unique opponent
-    names, and inserts placeholder team rows for any opponents not already in
-    the database.  Requires the team to have a ``public_id``.
-
-    Args:
-        request: The incoming HTTP request.
-        id: The team's INTEGER primary key from the URL path.
-
-    Returns:
-        Redirect to /admin/teams with a success or error flash message.
-    """
-    guard = await _require_admin(request)
-    if isinstance(guard, Response):
-        return guard
-
-    team = await run_in_threadpool(_get_team_by_integer_id, id)
-    if not team:
-        return HTMLResponse(content="Team not found", status_code=404)
-
-    public_id = team.get("public_id")
-    if not public_id:
-        return RedirectResponse(
-            url="/admin/teams?error="
-            + quote_plus("Cannot discover opponents: team has no public ID."),
-            status_code=303,
-        )
-
-    try:
-        discovered = await run_in_threadpool(discover_opponents, public_id)
-    except GameChangerAPIError as exc:
-        logger.warning("Opponent discovery failed for team %s: %s", id, exc)
-        return RedirectResponse(
-            url="/admin/teams?error="
-            + quote_plus("Could not reach GameChanger API. Try again later."),
-            status_code=303,
-        )
-
-    names = [opp.name for opp in discovered]
-    count = await run_in_threadpool(bulk_create_opponents, names)
-
-    team_name = team.get("name", str(id))
-    msg = f"Discovered {count} new opponent{'s' if count != 1 else ''} for {team_name}"
-    return RedirectResponse(
-        url=f"/admin/teams?msg={quote_plus(msg)}", status_code=303
-    )
-
-
 # ---------------------------------------------------------------------------
 # Opponent link management routes
 # ---------------------------------------------------------------------------
@@ -2435,136 +2384,26 @@ async def list_opponents(request: Request) -> Response:
     )
 
 
-def _render_connect_error(
-    request: Request, link: dict[str, Any], admin_user: Any, error: str
-) -> Response:
-    """Return the opponent_connect.html template in error mode."""
-    return templates.TemplateResponse(
-        request,
-        "admin/opponent_connect.html",
-        {"link": link, "mode": "error", "error": error, "admin_user": admin_user, "is_admin_page": True},
-    )
-
-
 @router.get("/opponents/{link_id}/connect", response_model=None)
 async def connect_opponent_form(request: Request, link_id: int) -> Response:
-    """Render the URL-paste form for manually linking an unlinked opponent.
+    """Redirect to the unified resolve page.
 
-    Args:
-        request: The incoming HTTP request.
-        link_id: The opponent_links primary key from the URL path.
-
-    Returns:
-        HTMLResponse with the connect form, or 404/auth response.
+    The old connect URL-paste form is now integrated into the resolve page.
+    This redirect preserves backward compatibility for bookmarks.
     """
-    guard = await _require_admin(request)
-    if isinstance(guard, Response):
-        return guard
-
-    link = await run_in_threadpool(get_opponent_link_by_id, link_id)
-    if not link:
-        return HTMLResponse(content="Opponent link not found", status_code=404)
-
-    return templates.TemplateResponse(
-        request,
-        "admin/opponent_connect.html",
-        {
-            "link": link,
-            "mode": "form",
-            "admin_user": guard,
-            "is_admin_page": True,
-        },
+    return RedirectResponse(
+        url=f"/admin/opponents/{link_id}/resolve",
+        status_code=303,
     )
-
-
-async def _fetch_team_profile(
-    request: Request, link: dict[str, Any], guard: Any, public_id: str
-) -> tuple[Any | None, Response | None]:
-    """Fetch team profile via public API; return (profile, None) or (None, error_response)."""
-    try:
-        profile = await run_in_threadpool(resolve_team, public_id)
-        return profile, None
-    except TeamNotFoundError:
-        return None, _render_connect_error(
-            request, link, guard,
-            "Team not found on GameChanger. Check the URL and try again.",
-        )
-    except GameChangerAPIError:
-        return None, _render_connect_error(
-            request, link, guard,
-            "Could not reach GameChanger API. Try again later.",
-        )
-
-
-async def _get_duplicate_name_for_link(
-    link: dict, public_id: str, link_id: int
-) -> str | None:
-    """Look up any existing opponent link that already uses the given public_id.
-
-    Args:
-        link: The opponent link row dict (must contain ``our_team_id``).
-        public_id: The GameChanger public_id slug to check for duplicates.
-        link_id: The current link's primary key, excluded from the duplicate search.
-
-    Returns:
-        The name of the duplicate opponent if one exists, otherwise None.
-    """
-    our_team_id = link["our_team_id"]
-    return await run_in_threadpool(
-        get_duplicate_opponent_name, public_id, our_team_id, link_id
-    )
-
-
-async def _parse_and_validate_opponent_url(
-    request: Request,
-    link: dict[str, Any],
-    guard: Any,
-    url_input: str,
-) -> tuple[str, None] | tuple[None, Response]:
-    """Parse and validate a URL input for opponent connect confirm.
-
-    Parses the raw URL/public_id, rejects UUIDs, and rejects member-team
-    public_ids.
-
-    Args:
-        request: The incoming HTTP request.
-        link: The opponent link row dict.
-        guard: Admin user dict.
-        url_input: Raw URL/public_id string from query params.
-
-    Returns:
-        ``(public_id, None)`` on success, or ``(None, error_response)`` on
-        parse/validation failure.
-    """
-    try:
-        id_result = parse_team_url(url_input)
-    except ValueError as exc:
-        return None, _render_connect_error(request, link, guard, str(exc))
-    if id_result.is_uuid:
-        return None, _render_connect_error(
-            request, link, guard,
-            "Opponent teams require a GameChanger URL or public_id, not a UUID.",
-        )
-    public_id = id_result.value
-    is_own_team = await run_in_threadpool(is_member_team_public_id, public_id)
-    if is_own_team:
-        return None, _render_connect_error(
-            request, link, guard,
-            "This URL belongs to a Lincoln program team. You cannot link an opponent to an owned team.",
-        )
-    return public_id, None
 
 
 @router.get("/opponents/{link_id}/connect/confirm", response_model=None)
 async def connect_opponent_confirm(request: Request, link_id: int) -> Response:
-    """Render the confirmation page for a manual opponent link.
+    """Redirect to the unified resolve page with parsed URL.
 
-    Args:
-        request: The incoming HTTP request.
-        link_id: The opponent_links primary key from the URL path.
-
-    Returns:
-        HTMLResponse with team profile confirmation or error, or 404/auth.
+    Preserves backward compatibility for bookmarked connect/confirm URLs.
+    Parses the ``url`` query param and redirects to the resolve confirm mode.
+    Retains the already-resolved guard for links that have already been connected.
     """
     guard = await _require_admin(request)
     if isinstance(guard, Response):
@@ -2579,39 +2418,37 @@ async def connect_opponent_confirm(request: Request, link_id: int) -> Response:
         return already_resolved
 
     url_input = request.query_params.get("url", "").strip()
-    public_id, err = await _parse_and_validate_opponent_url(
-        request, link, guard, url_input
-    )
-    if err is not None:
-        return err
-
-    duplicate_name = await _get_duplicate_name_for_link(link, public_id, link_id)
-    profile, err = await _fetch_team_profile(request, link, guard, public_id)
-    if err is not None:
-        return err
-
-    return templates.TemplateResponse(
-        request,
-        "admin/opponent_connect.html",
-        {
-            "link": link,
-            "mode": "confirm",
-            "profile": profile,
-            "public_id": public_id,
-            "duplicate_name": duplicate_name,
-            "admin_user": guard,
-            "is_admin_page": True,
-        },
+    if url_input:
+        try:
+            id_result = parse_team_url(url_input)
+        except ValueError:
+            pass
+        else:
+            if not id_result.is_uuid:
+                return RedirectResponse(
+                    url=f"/admin/opponents/{link_id}/resolve?confirm={quote_plus(id_result.value)}",
+                    status_code=303,
+                )
+    # Fallback: redirect to the unified resolve page
+    return RedirectResponse(
+        url=f"/admin/opponents/{link_id}/resolve",
+        status_code=303,
     )
 
 
-def _build_connect_success_msg(opponent_name: str, duplicate_name: str | None) -> str:
+def _build_connect_success_msg(
+    opponent_name: str,
+    duplicate_name: str | None,
+    *,
+    scouting_triggered: bool = False,
+) -> str:
     """Build the flash message for a successful manual link save."""
+    scout_suffix = " Stats syncing in the background." if scouting_triggered else ""
     if duplicate_name:
         return quote_plus(
-            f"Linked {opponent_name} -- note: this URL is already used by {duplicate_name}."
+            f"Linked {opponent_name} -- note: this URL is already used by {duplicate_name}.{scout_suffix}"
         )
-    return quote_plus(f"Linked {opponent_name} successfully.")
+    return quote_plus(f"Linked {opponent_name} successfully.{scout_suffix}")
 
 
 def _check_already_resolved(link: dict) -> HTMLResponse | None:
@@ -2631,6 +2468,7 @@ def _check_already_resolved(link: dict) -> HTMLResponse | None:
 async def connect_opponent(
     request: Request,
     link_id: int,
+    background_tasks: BackgroundTasks,
     public_id: str = Form(...),
 ) -> Response:
     """Save a manual opponent link.
@@ -2666,14 +2504,40 @@ async def connect_opponent(
     duplicate_name = await run_in_threadpool(
         get_duplicate_opponent_name, public_id, our_team_id, link_id
     )
-    await run_in_threadpool(
+    save_result = await run_in_threadpool(
         save_manual_opponent_link,
         link_id,
         public_id,
         our_team_id,
         link["opponent_name"],
     )
-    msg = _build_connect_success_msg(link["opponent_name"], duplicate_name)
+
+    # Auto-scout: enqueue scouting sync if the resolved team has a public_id.
+    resolved_team_id = save_result.get("resolved_team_id")
+    effective_public_id = save_result.get("effective_public_id")
+    scouting_triggered = False
+    if resolved_team_id and effective_public_id:
+        crawl_job_id = await run_in_threadpool(
+            _create_crawl_job, resolved_team_id, "scouting_crawl"
+        )
+        background_tasks.add_task(
+            trigger.run_scouting_sync,
+            resolved_team_id,
+            effective_public_id,
+            crawl_job_id,
+        )
+        scouting_triggered = True
+    elif resolved_team_id:
+        logger.warning(
+            "Connected opponent '%s' (team_id=%d) has no public_id — "
+            "skipping auto-scout",
+            link["opponent_name"],
+            resolved_team_id,
+        )
+
+    msg = _build_connect_success_msg(
+        link["opponent_name"], duplicate_name, scouting_triggered=scouting_triggered,
+    )
     return RedirectResponse(
         url=f"/admin/opponents?team_id={our_team_id}&msg={msg}",
         status_code=303,
@@ -2808,6 +2672,48 @@ async def resolve_opponent_page(request: Request, link_id: int) -> Response:
             },
         )
 
+    # URL-paste mode: parse URL and redirect to confirm
+    url_input = request.query_params.get("url", "").strip()
+    if url_input:
+        try:
+            id_result = parse_team_url(url_input)
+        except ValueError as exc:
+            return templates.TemplateResponse(
+                request,
+                "admin/opponent_resolve.html",
+                {
+                    "link": link, "mode": "confirm_error",
+                    "error": str(exc),
+                    "admin_user": guard, "is_admin_page": True,
+                },
+            )
+        if id_result.is_uuid:
+            return templates.TemplateResponse(
+                request,
+                "admin/opponent_resolve.html",
+                {
+                    "link": link, "mode": "confirm_error",
+                    "error": "Opponent teams require a GameChanger URL or public_id, not a UUID.",
+                    "admin_user": guard, "is_admin_page": True,
+                },
+            )
+        parsed_public_id = id_result.value
+        # Guard: reject member-team slugs
+        if await run_in_threadpool(is_member_team_public_id, parsed_public_id):
+            return templates.TemplateResponse(
+                request,
+                "admin/opponent_resolve.html",
+                {
+                    "link": link, "mode": "confirm_error",
+                    "error": "This URL belongs to a Lincoln program team. You cannot link an opponent to an owned team.",
+                    "admin_user": guard, "is_admin_page": True,
+                },
+            )
+        return RedirectResponse(
+            url=f"/admin/opponents/{link_id}/resolve?confirm={quote_plus(parsed_public_id)}",
+            status_code=303,
+        )
+
     # Search mode
     q = request.query_params.get("q", "").strip() or link["opponent_name"]
 
@@ -2835,6 +2741,7 @@ async def resolve_opponent_page(request: Request, link_id: int) -> Response:
 async def resolve_opponent_confirm(
     request: Request,
     link_id: int,
+    background_tasks: BackgroundTasks,
     confirm_id: str = Form(...),
     gc_uuid: str = Form(""),
 ) -> Response:
@@ -2846,6 +2753,14 @@ async def resolve_opponent_confirm(
     link = await run_in_threadpool(get_opponent_link_by_id, link_id)
     if not link:
         return HTMLResponse(content="Opponent link not found", status_code=404)
+
+    # Guard: reject member-team slugs
+    if await run_in_threadpool(is_member_team_public_id, confirm_id):
+        msg = quote_plus("Cannot link an opponent to a Lincoln program team.")
+        return RedirectResponse(
+            url=f"/admin/opponents/{link_id}/resolve?error={msg}",
+            status_code=303,
+        )
 
     from src.db.teams import ensure_team_row
 
@@ -2893,9 +2808,37 @@ async def resolve_opponent_confirm(
             """,
             (team_id, effective_public_id, link_id),
         )
+        # Write-through: propagate resolution to team_opponents, activate team,
+        # and reassign FK references from any old stub.
+        wt_result = finalize_opponent_resolution(
+            conn,
+            our_team_id=link["our_team_id"],
+            resolved_team_id=team_id,
+            opponent_name=link["opponent_name"],
+        )
         conn.commit()
 
-    msg = quote_plus(f"Resolved {link['opponent_name']} via search.")
+    # Auto-scout: enqueue scouting sync if the resolved team has a public_id.
+    resolved_public_id = wt_result["public_id"]
+    if resolved_public_id:
+        crawl_job_id = await run_in_threadpool(
+            _create_crawl_job, team_id, "scouting_crawl"
+        )
+        background_tasks.add_task(
+            trigger.run_scouting_sync, team_id, resolved_public_id, crawl_job_id
+        )
+        msg = quote_plus(
+            f"Resolved {link['opponent_name']} via search. Stats syncing in the background."
+        )
+    else:
+        logger.warning(
+            "Resolved opponent '%s' (team_id=%d) has no public_id — "
+            "skipping auto-scout",
+            link["opponent_name"],
+            team_id,
+        )
+        msg = quote_plus(f"Resolved {link['opponent_name']} via search.")
+
     return RedirectResponse(
         url=f"/admin/opponents?filter=unresolved&msg={msg}",
         status_code=303,

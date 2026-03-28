@@ -4,7 +4,7 @@
 [E-173: Fix Opponent Scouting Workflow End-to-End](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, resolving an opponent (via search, manual connect, or auto-resolver) atomically propagates `resolved_team_id` to `team_opponents`, activates the resolved team, and reassigns FK references from the old stub to the resolved team. A shared `finalize_opponent_resolution()` function encapsulates the write-through logic and is called from all three resolution paths.
