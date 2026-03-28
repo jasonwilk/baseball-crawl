@@ -262,7 +262,7 @@
     {% for pitcher in scouting_report.pitching %}
     <tr>
       <td>{% if pitcher.jersey_number %}{{ pitcher.jersey_number }}{% else %}&mdash;{% endif %}</td>
-      <td class="col-player">{{ pitcher.name }}{% if pitcher.throws %} ({{ pitcher.throws }}){% endif %}</td>
+      <td class="col-player"{% if pitcher.name_unresolved %} style="color: #6b7280; font-style: italic"{% endif %}>{{ pitcher.name }}{% if pitcher.throws %} ({{ pitcher.throws }}){% endif %}</td>
       <td>{{ pitcher.era }}</td>
       <td>{{ pitcher.k9 }}</td>
       <td>{{ pitcher.whip }}</td>
@@ -305,7 +305,7 @@
     {% for player in scouting_report.batting %}
     <tr>
       <td>{% if player.jersey_number %}{{ player.jersey_number }}{% else %}&mdash;{% endif %}</td>
-      <td class="col-player">{{ player.name }}</td>
+      <td class="col-player"{% if player.name_unresolved %} style="color: #6b7280; font-style: italic"{% endif %}>{{ player.name }}</td>
       <td>{{ player.h | format_avg(player.ab) }}</td>
       <td>{{ (player.h + player.bb + player.hbp) | format_avg(player.ab + player.bb + player.hbp + player.shf) }}</td>
       <td>{{ (player.h + player.doubles + 2 * player.triples + 3 * player.hr) | format_avg(player.ab) }}</td>
@@ -331,7 +331,7 @@
     {% for player in scouting_report.batting %}
     <div class="tendency-card">
       <div class="tendency-card-name">
-        {% if player.jersey_number %}#{{ player.jersey_number }} {% endif %}{{ player.name }}
+        {% if player.name_unresolved %}<span style="color: #6b7280; font-style: italic">{{ player.name }}</span>{% else %}{% if player.jersey_number %}#{{ player.jersey_number }} {% endif %}{{ player.name }}{% endif %}
       </div>
       {% if player_spray_bip_counts.get(player.player_id, 0) >= 1 %}
       <img src="/dashboard/charts/spray/player/{{ player.player_id }}.png?season_id={{ season_id }}"

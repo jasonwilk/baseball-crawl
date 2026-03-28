@@ -4,7 +4,7 @@
 [E-169: Fix Unknown Player Names in Scouting Data](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, any remaining players whose names could not be resolved will display as "Player #NN" (using jersey number) or "Unknown Player" (no jersey number) instead of "Unknown Unknown". These entries will have muted, italic visual styling to signal provisional data to coaching staff. The display name cascade is computed in the data/view layer, keeping template logic minimal.

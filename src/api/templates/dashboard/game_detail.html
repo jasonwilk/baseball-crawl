@@ -74,10 +74,8 @@ Game Detail{% if game %} -- {{ game.game_date }}{% endif %}
               {% for batter in team.batting_lines %}
               <tr class="border-b border-gray-200 {% if loop.index is even %}bg-gray-50{% endif %}">
                 <td class="py-2 px-2 text-center">{% if batter.jersey_number %}{{ batter.jersey_number }}{% else %}&mdash;{% endif %}</td>
-                <td class="py-2 px-3 font-medium">
-                  <a href="/dashboard/players/{{ batter.player_id }}{% if year %}?year={{ year }}{% endif %}" class="text-blue-900 hover:underline">
-                    {{ batter.name }}
-                  </a>
+                <td class="py-2 px-3 {% if batter.name_unresolved %}text-gray-500 italic{% else %}font-medium{% endif %}">
+                  {% if batter.name_unresolved %}{{ batter.name }}{% else %}<a href="/dashboard/players/{{ batter.player_id }}{% if year %}?year={{ year }}{% endif %}" class="text-blue-900 hover:underline">{{ batter.name }}</a>{% endif %}
                 </td>
                 <td class="py-2 px-3 text-center">{{ batter.ab }}</td>
                 <td class="py-2 px-3 text-center">{{ batter.h }}</td>
@@ -119,10 +117,8 @@ Game Detail{% if game %} -- {{ game.game_date }}{% endif %}
               {% for pitcher in team.pitching_lines %}
               <tr class="border-b border-gray-200 {% if loop.index is even %}bg-gray-50{% endif %}">
                 <td class="py-2 px-2 text-center">{% if pitcher.jersey_number %}{{ pitcher.jersey_number }}{% else %}&mdash;{% endif %}</td>
-                <td class="py-2 px-3 font-medium">
-                  <a href="/dashboard/players/{{ pitcher.player_id }}{% if year %}?year={{ year }}{% endif %}" class="text-blue-900 hover:underline">
-                    {{ pitcher.name }}
-                  </a>
+                <td class="py-2 px-3 {% if pitcher.name_unresolved %}text-gray-500 italic{% else %}font-medium{% endif %}">
+                  {% if pitcher.name_unresolved %}{{ pitcher.name }}{% else %}<a href="/dashboard/players/{{ pitcher.player_id }}{% if year %}?year={{ year }}{% endif %}" class="text-blue-900 hover:underline">{{ pitcher.name }}</a>{% endif %}
                 </td>
                 <td class="py-2 px-3 text-center">{{ pitcher.ip_outs | ip_display }}</td>
                 <td class="py-2 px-3 text-center">{{ pitcher.h }}</td>

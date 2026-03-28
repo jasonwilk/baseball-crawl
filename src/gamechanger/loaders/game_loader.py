@@ -676,6 +676,10 @@ class GameLoader:
     ) -> LoadResult:
         """Parse and load batting + pitching lines for one team in a boxscore.
 
+        Also extracts player names from the ``players`` array and uses them
+        for player row creation/upgrade (conditional UPSERT: only overwrites
+        "Unknown" stubs).  Jersey numbers are backfilled into ``team_rosters``.
+
         Args:
             team_data: Value under one team key in the boxscore (contains
                 ``players`` and ``groups``).
@@ -685,15 +689,22 @@ class GameLoader:
         Returns:
             ``LoadResult`` for this team's players.
         """
+        # Build player info lookup from the boxscore players array.
+        player_info: dict[str, dict] = {}
+        for p in team_data.get("players") or []:
+            pid = p.get("id")
+            if pid:
+                player_info[pid] = p
+
         result = LoadResult()
         groups: list[dict] = team_data.get("groups") or []
 
         for group in groups:
             category = group.get("category")
             if category == "lineup":
-                r = self._load_batting_group(group, team_id, game_id)
+                r = self._load_batting_group(group, team_id, game_id, player_info)
             elif category == "pitching":
-                r = self._load_pitching_group(group, team_id, game_id)
+                r = self._load_pitching_group(group, team_id, game_id, player_info)
             else:
                 logger.debug("Unknown boxscore category %r for team %s; ignoring.", category, team_id)
                 continue
@@ -708,7 +719,8 @@ class GameLoader:
     # ------------------------------------------------------------------
 
     def _load_batting_group(
-        self, group: dict, team_id: int, game_id: str
+        self, group: dict, team_id: int, game_id: str,
+        player_info: dict[str, dict] | None = None,
     ) -> LoadResult:
         """Parse and upsert batting lines from a lineup group.
 
@@ -716,10 +728,14 @@ class GameLoader:
             group: The ``category="lineup"`` group dict from the boxscore.
             team_id: INTEGER PK from the ``teams`` table for this batting side.
             game_id: Canonical event_id.
+            player_info: Lookup from the boxscore ``players`` array
+                (``{player_id: {first_name, last_name, number, ...}}``).
 
         Returns:
             ``LoadResult`` for this batting group.
         """
+        if player_info is None:
+            player_info = {}
         result = LoadResult()
 
         # Build extras lookup: {player_id: {stat_name: value}}
@@ -752,7 +768,15 @@ class GameLoader:
                 setattr(batting, db_col, int(val) if val is not None else None)
 
             try:
-                self._ensure_stub_player(player_id)
+                info = player_info.get(player_id, {})
+                self._ensure_player(
+                    player_id,
+                    first_name=info.get("first_name"),
+                    last_name=info.get("last_name"),
+                )
+                self._upsert_roster_jersey(
+                    team_id, player_id, info.get("number"),
+                )
                 self._upsert_batting(batting, team_id, game_id)
                 result.loaded += 1
             except sqlite3.Error as exc:
@@ -771,7 +795,8 @@ class GameLoader:
     # ------------------------------------------------------------------
 
     def _load_pitching_group(
-        self, group: dict, team_id: int, game_id: str
+        self, group: dict, team_id: int, game_id: str,
+        player_info: dict[str, dict] | None = None,
     ) -> LoadResult:
         """Parse and upsert pitching lines from a pitching group.
 
@@ -779,10 +804,13 @@ class GameLoader:
             group: The ``category="pitching"`` group dict from the boxscore.
             team_id: INTEGER PK from the ``teams`` table for this pitching side.
             game_id: Canonical event_id.
+            player_info: Lookup from the boxscore ``players`` array.
 
         Returns:
             ``LoadResult`` for this pitching group.
         """
+        if player_info is None:
+            player_info = {}
         result = LoadResult()
 
         extras = self._build_extras_index(group.get("extra") or [])
@@ -822,7 +850,15 @@ class GameLoader:
                     )
 
             try:
-                self._ensure_stub_player(player_id)
+                info = player_info.get(player_id, {})
+                self._ensure_player(
+                    player_id,
+                    first_name=info.get("first_name"),
+                    last_name=info.get("last_name"),
+                )
+                self._upsert_roster_jersey(
+                    team_id, player_id, info.get("number"),
+                )
                 self._upsert_pitching(pitching, team_id, game_id)
                 result.loaded += 1
             except sqlite3.Error as exc:
@@ -1039,30 +1075,87 @@ class GameLoader:
             ),
         )
 
-    def _ensure_stub_player(self, player_id: str) -> None:
-        """Ensure a player row exists; insert stub if not present.
+    def _ensure_player(
+        self,
+        player_id: str,
+        first_name: str | None = None,
+        last_name: str | None = None,
+    ) -> None:
+        """Ensure a player row exists with the best available name.
 
-        Logs WARNING when a stub is created (FK-safe orphan handling).
+        When ``first_name`` and ``last_name`` are provided, uses a conditional
+        UPSERT: new rows get the real name; existing stub rows ("Unknown Unknown")
+        are upgraded; existing rows with real names are left untouched.
+
+        When names are not provided, falls back to the legacy "Unknown" stub
+        behaviour.
 
         Args:
             player_id: GameChanger player UUID.
+            first_name: Player first name from boxscore (or ``None``).
+            last_name: Player last name from boxscore (or ``None``).
         """
-        existing = self._db.execute(
-            "SELECT 1 FROM players WHERE player_id = ?;", (player_id,)
-        ).fetchone()
-        if existing is None:
+        fn = first_name or "Unknown"
+        ln = last_name or "Unknown"
+
+        self._db.execute(
+            """
+            INSERT INTO players (player_id, first_name, last_name)
+            VALUES (?, ?, ?)
+            ON CONFLICT(player_id) DO UPDATE
+            SET first_name = excluded.first_name,
+                last_name  = excluded.last_name
+            WHERE players.first_name = 'Unknown'
+              AND players.last_name  = 'Unknown'
+            """,
+            (player_id, fn, ln),
+        )
+        if fn == "Unknown" and ln == "Unknown":
             logger.warning(
-                "Unknown player_id=%s; inserting stub row (first_name='Unknown', last_name='Unknown').",
+                "No name data for player_id=%s; inserting/keeping stub row.",
                 player_id,
             )
+
+    def _upsert_roster_jersey(
+        self,
+        team_id: int,
+        player_id: str,
+        jersey_number: str | None,
+    ) -> None:
+        """Upsert a ``team_rosters`` row with jersey number backfill.
+
+        Creates a new roster row if none exists, or backfills ``jersey_number``
+        on an existing row only when the current value is NULL.  ``position``
+        is left NULL on boxscore-sourced rows; existing values are never
+        overwritten.
+
+        Args:
+            team_id: INTEGER PK from the ``teams`` table.
+            player_id: GameChanger player UUID.
+            jersey_number: Jersey number string from boxscore (or ``None``).
+        """
+        if jersey_number is None:
+            # Still ensure the roster row exists (position stays NULL).
             self._db.execute(
                 """
-                INSERT INTO players (player_id, first_name, last_name)
-                VALUES (?, 'Unknown', 'Unknown')
-                ON CONFLICT(player_id) DO NOTHING
+                INSERT INTO team_rosters (team_id, player_id, season_id)
+                VALUES (?, ?, ?)
+                ON CONFLICT(team_id, player_id, season_id) DO NOTHING
                 """,
-                (player_id,),
+                (team_id, player_id, self._season_id),
             )
+            return
+
+        self._db.execute(
+            """
+            INSERT INTO team_rosters (team_id, player_id, season_id, jersey_number)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(team_id, player_id, season_id) DO UPDATE
+            SET jersey_number = excluded.jersey_number
+            WHERE team_rosters.jersey_number IS NULL
+            """,
+            (team_id, player_id, self._season_id, jersey_number),
+        )
 
     def _ensure_team_row(self, gc_uuid: str, opponent_name: str | None = None) -> int:
         """Ensure a ``teams`` row exists for ``gc_uuid`` and return its INTEGER PK.

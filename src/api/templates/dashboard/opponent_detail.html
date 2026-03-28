@@ -79,7 +79,7 @@ Scout: {{ scouting_report.team_name if scouting_report else opponent_team_id }}
   <div class="{% if not loop.first %}border-t border-gray-100 pt-2 mt-2{% endif %}">
     <div class="flex justify-between items-baseline">
       <span>
-        {% if pitcher.jersey_number %}<span class="text-sm text-gray-500">#{{ pitcher.jersey_number }}</span> {% endif %}<span class="text-sm font-bold text-gray-900">{{ pitcher.name }}</span>{% if pitcher.throws %} <span class="text-sm text-gray-500">({{ pitcher.throws }})</span>{% endif %}
+        {% if pitcher.jersey_number %}<span class="text-sm text-gray-500">#{{ pitcher.jersey_number }}</span> {% endif %}{% if pitcher.name_unresolved and pitcher.jersey_number %}{# jersey prefix is sufficient #}{% elif pitcher.name_unresolved %}<span class="text-sm text-gray-500 italic">{{ pitcher.name }}</span>{% else %}<span class="text-sm font-bold text-gray-900">{{ pitcher.name }}</span>{% endif %}{% if pitcher.throws %} <span class="text-sm text-gray-500">({{ pitcher.throws }})</span>{% endif %}
       </span>
       <span class="text-sm text-gray-500">{{ pitcher.games }} GP</span>
     </div>
@@ -217,7 +217,7 @@ Scout: {{ scouting_report.team_name if scouting_report else opponent_team_id }}
       {% for pitcher in scouting_report.pitching %}
       <tr class="border-b border-gray-200 {% if loop.index is even %}bg-gray-50{% endif %}">
         <td class="py-2 px-2 text-center">{% if pitcher.jersey_number %}{{ pitcher.jersey_number }}{% else %}&mdash;{% endif %}</td>
-        <td class="py-2 px-3 font-medium whitespace-nowrap">{{ pitcher.name }}</td>
+        <td class="py-2 px-3 whitespace-nowrap {% if pitcher.name_unresolved %}text-gray-500 italic{% else %}font-medium{% endif %}">{{ pitcher.name }}</td>
         <td class="py-2 px-3 text-center whitespace-nowrap">{{ pitcher.era }} <span class="text-xs text-gray-400">({{ pitcher.games }} GP)</span></td>
         <td class="py-2 px-3 text-center whitespace-nowrap">{{ pitcher.k9 }} <span class="text-xs text-gray-400">({{ pitcher.games }} GP)</span></td>
         <td class="py-2 px-3 text-center whitespace-nowrap">{{ pitcher.whip }} <span class="text-xs text-gray-400">({{ pitcher.games }} GP)</span></td>
@@ -264,7 +264,7 @@ Scout: {{ scouting_report.team_name if scouting_report else opponent_team_id }}
       {% for player in scouting_report.batting %}
       <tr class="border-b border-gray-200 {% if loop.index is even %}bg-gray-50{% endif %}">
         <td class="py-2 px-2 text-center">{% if player.jersey_number %}{{ player.jersey_number }}{% else %}&mdash;{% endif %}</td>
-        <td class="py-2 px-3 font-medium whitespace-nowrap">
+        <td class="py-2 px-3 whitespace-nowrap {% if player.name_unresolved %}text-gray-500 italic{% else %}font-medium{% endif %}">
           {{ player.name }}
           {% if player_spray_bip_counts.get(player.player_id, 0) >= 1 %}
           <button type="button"

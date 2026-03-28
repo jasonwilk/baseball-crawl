@@ -4,7 +4,7 @@
 [E-169: Fix Unknown Player Names in Scouting Data](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the GameLoader will extract player names from the boxscore `players` array and use them when creating player rows, instead of inserting "Unknown Unknown" stubs. Existing stub rows will be upgraded to real names when the pipeline is re-run, because the UPSERT is conditional — it only overwrites when the current name is "Unknown". Jersey numbers from the boxscore will also populate `team_rosters.jersey_number` when not already set.

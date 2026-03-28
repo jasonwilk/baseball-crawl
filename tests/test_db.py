@@ -1646,3 +1646,208 @@ class TestGetTeamYearMap:
 
         assert result[t1] == 2024
         assert result[t2] == datetime.date.today().year
+
+
+# ---------------------------------------------------------------------------
+# E-169-02: name cascade wired into get_opponent_scouting_report
+# ---------------------------------------------------------------------------
+
+
+class TestScoutingReportNameCascade:
+    """Verify _apply_name_cascade is applied in get_opponent_scouting_report."""
+
+    def test_stub_with_jersey_becomes_player_number(self, tmp_path: Path) -> None:
+        """Unknown Unknown + jersey → 'Player #NN' with name_unresolved=True."""
+        conn = _make_db()
+        season_id = _insert_season(conn)
+        opp_id = _insert_team(conn, "Rival Team", membership_type="tracked")
+        player_id = _insert_player(conn, "stub-bat-1", "Unknown", "Unknown")
+
+        conn.execute(
+            "INSERT INTO team_rosters (team_id, player_id, season_id, jersey_number)"
+            " VALUES (?, ?, ?, '7')",
+            (opp_id, player_id, season_id),
+        )
+        conn.execute(
+            "INSERT INTO player_season_batting (player_id, team_id, season_id, ab, h)"
+            " VALUES (?, ?, ?, 10, 3)",
+            (player_id, opp_id, season_id),
+        )
+        conn.commit()
+
+        env = _db_env(tmp_path, conn)
+        with patch.dict(os.environ, env):
+            from importlib import reload
+
+            import src.api.db as db_module
+
+            reload(db_module)
+            result = db_module.get_opponent_scouting_report(
+                opponent_team_id=opp_id, season_id=season_id
+            )
+
+        assert len(result["batting"]) == 1
+        assert result["batting"][0]["name"] == "Player #7"
+        assert result["batting"][0]["name_unresolved"] is True
+
+    def test_stub_without_jersey_becomes_unknown_player(self, tmp_path: Path) -> None:
+        """Unknown Unknown + no jersey → 'Unknown Player' with name_unresolved=True."""
+        conn = _make_db()
+        season_id = _insert_season(conn)
+        opp_id = _insert_team(conn, "Rival Team", membership_type="tracked")
+        player_id = _insert_player(conn, "stub-pit-1", "Unknown", "Unknown")
+
+        conn.execute(
+            "INSERT INTO player_season_pitching (player_id, team_id, season_id, ip_outs, er, so)"
+            " VALUES (?, ?, ?, 9, 2, 5)",
+            (player_id, opp_id, season_id),
+        )
+        conn.commit()
+
+        env = _db_env(tmp_path, conn)
+        with patch.dict(os.environ, env):
+            from importlib import reload
+
+            import src.api.db as db_module
+
+            reload(db_module)
+            result = db_module.get_opponent_scouting_report(
+                opponent_team_id=opp_id, season_id=season_id
+            )
+
+        assert len(result["pitching"]) == 1
+        assert result["pitching"][0]["name"] == "Unknown Player"
+        assert result["pitching"][0]["name_unresolved"] is True
+
+    def test_real_name_not_affected(self, tmp_path: Path) -> None:
+        """Players with real names keep original name and name_unresolved=False."""
+        conn = _make_db()
+        season_id = _insert_season(conn)
+        opp_id = _insert_team(conn, "Rival Team", membership_type="tracked")
+        player_id = _insert_player(conn, "real-bat-1", "Jake", "Miller")
+
+        conn.execute(
+            "INSERT INTO player_season_batting (player_id, team_id, season_id, ab, h)"
+            " VALUES (?, ?, ?, 20, 8)",
+            (player_id, opp_id, season_id),
+        )
+        conn.commit()
+
+        env = _db_env(tmp_path, conn)
+        with patch.dict(os.environ, env):
+            from importlib import reload
+
+            import src.api.db as db_module
+
+            reload(db_module)
+            result = db_module.get_opponent_scouting_report(
+                opponent_team_id=opp_id, season_id=season_id
+            )
+
+        assert len(result["batting"]) == 1
+        assert result["batting"][0]["name"] == "Jake Miller"
+        assert result["batting"][0]["name_unresolved"] is False
+
+
+# ---------------------------------------------------------------------------
+# E-169-02: name cascade wired into get_game_box_score
+# ---------------------------------------------------------------------------
+
+
+class TestGameBoxScoreNameCascade:
+    """Verify _apply_name_cascade is applied in get_game_box_score."""
+
+    def test_stub_batting_with_jersey_becomes_player_number(self, tmp_path: Path) -> None:
+        """Unknown Unknown batter + jersey → 'Player #NN' in box score."""
+        conn = _make_db()
+        season_id = _insert_season(conn)
+        home_id = _insert_team(conn, "Home Team", membership_type="member")
+        away_id = _insert_team(conn, "Away Team", membership_type="tracked")
+        _insert_game(conn, "cascade-g1", season_id, home_id, away_id, 4, 2)
+
+        player_id = _insert_player(conn, "cascade-stub-1", "Unknown", "Unknown")
+        conn.execute(
+            "INSERT INTO team_rosters (team_id, player_id, season_id, jersey_number)"
+            " VALUES (?, ?, ?, '15')",
+            (away_id, player_id, season_id),
+        )
+        conn.execute(
+            "INSERT INTO player_game_batting (game_id, player_id, team_id, ab, h)"
+            " VALUES (?, ?, ?, 3, 1)",
+            ("cascade-g1", player_id, away_id),
+        )
+        conn.commit()
+
+        env = _db_env(tmp_path, conn)
+        with patch.dict(os.environ, env):
+            from importlib import reload
+
+            import src.api.db as db_module
+
+            reload(db_module)
+            result = db_module.get_game_box_score("cascade-g1")
+
+        away_team = [t for t in result["teams"] if t["id"] == away_id][0]
+        assert len(away_team["batting_lines"]) == 1
+        assert away_team["batting_lines"][0]["name"] == "Player #15"
+        assert away_team["batting_lines"][0]["name_unresolved"] is True
+
+    def test_stub_pitching_without_jersey_becomes_unknown_player(self, tmp_path: Path) -> None:
+        """Unknown Unknown pitcher + no jersey → 'Unknown Player' in box score."""
+        conn = _make_db()
+        season_id = _insert_season(conn)
+        home_id = _insert_team(conn, "Home Team", membership_type="member")
+        away_id = _insert_team(conn, "Away Team", membership_type="tracked")
+        _insert_game(conn, "cascade-g2", season_id, home_id, away_id, 4, 2)
+
+        player_id = _insert_player(conn, "cascade-stub-2", "Unknown", "Unknown")
+        conn.execute(
+            "INSERT INTO player_game_pitching (game_id, player_id, team_id, ip_outs, h, er, bb, so)"
+            " VALUES (?, ?, ?, 9, 3, 2, 1, 5)",
+            ("cascade-g2", player_id, away_id),
+        )
+        conn.commit()
+
+        env = _db_env(tmp_path, conn)
+        with patch.dict(os.environ, env):
+            from importlib import reload
+
+            import src.api.db as db_module
+
+            reload(db_module)
+            result = db_module.get_game_box_score("cascade-g2")
+
+        away_team = [t for t in result["teams"] if t["id"] == away_id][0]
+        assert len(away_team["pitching_lines"]) == 1
+        assert away_team["pitching_lines"][0]["name"] == "Unknown Player"
+        assert away_team["pitching_lines"][0]["name_unresolved"] is True
+
+    def test_real_name_unchanged_in_box_score(self, tmp_path: Path) -> None:
+        """Real-name players in box score keep name and name_unresolved=False."""
+        conn = _make_db()
+        season_id = _insert_season(conn)
+        home_id = _insert_team(conn, "Home Team", membership_type="member")
+        away_id = _insert_team(conn, "Away Team", membership_type="tracked")
+        _insert_game(conn, "cascade-g3", season_id, home_id, away_id, 4, 2)
+
+        player_id = _insert_player(conn, "cascade-real-1", "Tyler", "Brown")
+        conn.execute(
+            "INSERT INTO player_game_batting (game_id, player_id, team_id, ab, h)"
+            " VALUES (?, ?, ?, 4, 2)",
+            ("cascade-g3", player_id, home_id),
+        )
+        conn.commit()
+
+        env = _db_env(tmp_path, conn)
+        with patch.dict(os.environ, env):
+            from importlib import reload
+
+            import src.api.db as db_module
+
+            reload(db_module)
+            result = db_module.get_game_box_score("cascade-g3")
+
+        home_team = [t for t in result["teams"] if t["id"] == home_id][0]
+        assert len(home_team["batting_lines"]) == 1
+        assert home_team["batting_lines"][0]["name"] == "Tyler Brown"
+        assert home_team["batting_lines"][0]["name_unresolved"] is False

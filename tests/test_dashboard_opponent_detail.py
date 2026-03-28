@@ -1082,3 +1082,71 @@ class TestYearRoundTrip:
         print_href = body[print_link_start:print_link_start + 200]
         assert "year=None" not in print_href
         assert "year=" not in print_href
+
+
+# ---------------------------------------------------------------------------
+# E-169-02: _apply_name_cascade unit tests
+# ---------------------------------------------------------------------------
+
+
+class TestApplyNameCascade:
+    """Test the display name fallback cascade in src/api/db.py."""
+
+    def test_real_name_unchanged(self):
+        """AC-5: Players with real names are displayed normally."""
+        from src.api.db import _apply_name_cascade
+
+        rows = [{"name": "Caleb Davis", "jersey_number": "23"}]
+        result = _apply_name_cascade(rows)
+        assert result[0]["name"] == "Caleb Davis"
+        assert result[0]["name_unresolved"] is False
+
+    def test_unknown_with_jersey_becomes_player_number(self):
+        """AC-1: Unknown Unknown + jersey_number → 'Player #NN'."""
+        from src.api.db import _apply_name_cascade
+
+        rows = [{"name": "Unknown Unknown", "jersey_number": "7"}]
+        result = _apply_name_cascade(rows)
+        assert result[0]["name"] == "Player #7"
+        assert result[0]["name_unresolved"] is True
+
+    def test_unknown_without_jersey_becomes_unknown_player(self):
+        """AC-2: Unknown Unknown + no jersey_number → 'Unknown Player'."""
+        from src.api.db import _apply_name_cascade
+
+        rows = [{"name": "Unknown Unknown", "jersey_number": None}]
+        result = _apply_name_cascade(rows)
+        assert result[0]["name"] == "Unknown Player"
+        assert result[0]["name_unresolved"] is True
+
+    def test_multiple_rows_mixed(self):
+        """Cascade applies correctly to a mix of resolved and unresolved rows."""
+        from src.api.db import _apply_name_cascade
+
+        rows = [
+            {"name": "Jake Miller", "jersey_number": "12"},
+            {"name": "Unknown Unknown", "jersey_number": "5"},
+            {"name": "Unknown Unknown", "jersey_number": None},
+        ]
+        result = _apply_name_cascade(rows)
+        assert result[0]["name"] == "Jake Miller"
+        assert result[0]["name_unresolved"] is False
+        assert result[1]["name"] == "Player #5"
+        assert result[1]["name_unresolved"] is True
+        assert result[2]["name"] == "Unknown Player"
+        assert result[2]["name_unresolved"] is True
+
+    def test_empty_list(self):
+        """Cascade handles an empty list gracefully."""
+        from src.api.db import _apply_name_cascade
+
+        assert _apply_name_cascade([]) == []
+
+    def test_mutates_in_place(self):
+        """Cascade modifies dicts in place and returns the same list."""
+        from src.api.db import _apply_name_cascade
+
+        rows = [{"name": "Unknown Unknown", "jersey_number": "10"}]
+        result = _apply_name_cascade(rows)
+        assert result is rows
+        assert rows[0]["name"] == "Player #10"

@@ -358,6 +358,28 @@ def get_schedule_games(
         return []
 
 
+def _apply_name_cascade(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Apply the fallback display name cascade to player rows.
+
+    Transforms ``name`` from ``'Unknown Unknown'`` to ``'Player #NN'`` (when
+    ``jersey_number`` is available) or ``'Unknown Player'`` (no jersey number).
+    Sets ``name_unresolved = True`` on affected rows for template styling.
+
+    Rows with real names are returned unchanged (``name_unresolved = False``).
+    """
+    for row in rows:
+        if row.get("name") == "Unknown Unknown":
+            jersey = row.get("jersey_number")
+            if jersey:
+                row["name"] = f"Player #{jersey}"
+            else:
+                row["name"] = "Unknown Player"
+            row["name_unresolved"] = True
+        else:
+            row["name_unresolved"] = False
+    return rows
+
+
 def get_game_box_score(game_id: str) -> dict[str, Any]:
     """Return the full box score for a game: batting and pitching lines for both teams.
 
@@ -463,6 +485,9 @@ def get_game_box_score(game_id: str) -> dict[str, Any]:
     except sqlite3.Error:
         logger.exception("Failed to fetch game box score")
         return {}
+
+    _apply_name_cascade(batting_rows)
+    _apply_name_cascade(pitching_rows)
 
     # Group batting and pitching lines by team_id (INTEGER)
     batting_by_team: dict[int, list[dict[str, Any]]] = {}
@@ -709,6 +734,8 @@ def get_opponent_scouting_report(
                 dict(r)
                 for r in conn.execute(pitching_query, (opponent_team_id, season_id)).fetchall()
             ]
+        _apply_name_cascade(batting_rows)
+        _apply_name_cascade(pitching_rows)
         return {
             "team_name": team_name,
             "record": record,

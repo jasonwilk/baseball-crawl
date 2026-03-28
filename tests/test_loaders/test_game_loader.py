@@ -92,6 +92,8 @@ def _make_boxscore(
     own_pitching: list[dict] | None = None,
     opp_pitching: list[dict] | None = None,
     batting_extra: list[dict] | None = None,
+    own_players: list[dict] | None = None,
+    opp_players: list[dict] | None = None,
 ) -> dict:
     """Build a minimal but valid boxscore dict."""
     if own_batting is None:
@@ -131,9 +133,14 @@ def _make_boxscore(
     if batting_extra is None:
         batting_extra = []
 
+    if own_players is None:
+        own_players = []
+    if opp_players is None:
+        opp_players = []
+
     return {
         own_key: {
-            "players": [],
+            "players": own_players,
             "groups": [
                 {
                     "category": "lineup",
@@ -150,7 +157,7 @@ def _make_boxscore(
             ],
         },
         opp_key: {
-            "players": [],
+            "players": opp_players,
             "groups": [
                 {
                     "category": "lineup",
@@ -1633,3 +1640,236 @@ def test_load_file_uses_opponent_name(db: sqlite3.Connection, tmp_path: Path) ->
     ).fetchone()
     assert row is not None
     assert row[0] == "Provided Opponent Name"
+
+
+# ---------------------------------------------------------------------------
+# E-169-01: Player name extraction from boxscore players array
+# ---------------------------------------------------------------------------
+
+
+def _ensure_season(db: sqlite3.Connection, season_id: str = _SEASON_ID) -> None:
+    """Insert a season row for FK satisfaction in load_file tests."""
+    db.execute(
+        "INSERT OR IGNORE INTO seasons (season_id, name, season_type, year) VALUES (?, ?, 'unknown', 2025)",
+        (season_id, season_id),
+    )
+    db.commit()
+
+
+def test_new_player_gets_real_name_from_boxscore(db: sqlite3.Connection, tmp_path: Path) -> None:
+    """AC-1: New player row is created with real name from boxscore players array."""
+    _ensure_season(db)
+    boxscore = _make_boxscore(
+        own_players=[
+            {"id": _PLAYER_OWN_1, "first_name": "Caleb", "last_name": "Davis", "number": "23"},
+            {"id": _PLAYER_OWN_P1, "first_name": "Marcus", "last_name": "Lee", "number": "11"},
+        ],
+        opp_players=[
+            {"id": _PLAYER_OPP_1, "first_name": "Jake", "last_name": "Miller", "number": "7"},
+            {"id": _PLAYER_OPP_P1, "first_name": "Tyler", "last_name": "Brown", "number": "15"},
+        ],
+    )
+    bs_path = _write_boxscore(tmp_path, boxscore)
+    loader = _make_loader(db)
+
+    loader.load_file(bs_path, _make_summary())
+
+    row = db.execute(
+        "SELECT first_name, last_name FROM players WHERE player_id = ?",
+        (_PLAYER_OWN_1,),
+    ).fetchone()
+    assert row == ("Caleb", "Davis"), f"Expected real name, got {row}"
+
+
+def test_stub_player_upgraded_to_real_name(db: sqlite3.Connection, tmp_path: Path) -> None:
+    """AC-2: Existing stub player (Unknown Unknown) is upgraded to real name."""
+    _ensure_season(db)
+    # Pre-insert a stub player row.
+    db.execute(
+        "INSERT INTO players (player_id, first_name, last_name) VALUES (?, 'Unknown', 'Unknown')",
+        (_PLAYER_OWN_1,),
+    )
+    db.commit()
+
+    boxscore = _make_boxscore(
+        own_players=[
+            {"id": _PLAYER_OWN_1, "first_name": "Caleb", "last_name": "Davis", "number": "23"},
+            {"id": _PLAYER_OWN_P1, "first_name": "Marcus", "last_name": "Lee"},
+        ],
+    )
+    bs_path = _write_boxscore(tmp_path, boxscore)
+    loader = _make_loader(db)
+
+    loader.load_file(bs_path, _make_summary())
+
+    row = db.execute(
+        "SELECT first_name, last_name FROM players WHERE player_id = ?",
+        (_PLAYER_OWN_1,),
+    ).fetchone()
+    assert row == ("Caleb", "Davis"), f"Expected stub to be upgraded, got {row}"
+
+
+def test_existing_real_name_not_overwritten(db: sqlite3.Connection, tmp_path: Path) -> None:
+    """AC-3: Existing player with real name is NOT overwritten by boxscore data."""
+    _ensure_season(db)
+    # Pre-insert a player with a real name (e.g., from roster loader).
+    db.execute(
+        "INSERT INTO players (player_id, first_name, last_name) VALUES (?, 'RealFirst', 'RealLast')",
+        (_PLAYER_OWN_1,),
+    )
+    db.commit()
+
+    boxscore = _make_boxscore(
+        own_players=[
+            {"id": _PLAYER_OWN_1, "first_name": "Caleb", "last_name": "Davis", "number": "23"},
+            {"id": _PLAYER_OWN_P1, "first_name": "Marcus", "last_name": "Lee"},
+        ],
+    )
+    bs_path = _write_boxscore(tmp_path, boxscore)
+    loader = _make_loader(db)
+
+    loader.load_file(bs_path, _make_summary())
+
+    row = db.execute(
+        "SELECT first_name, last_name FROM players WHERE player_id = ?",
+        (_PLAYER_OWN_1,),
+    ).fetchone()
+    assert row == ("RealFirst", "RealLast"), f"Expected real name preserved, got {row}"
+
+
+def test_jersey_number_creates_roster_row(db: sqlite3.Connection, tmp_path: Path) -> None:
+    """AC-4: Jersey number from boxscore creates a team_rosters row."""
+    _ensure_season(db)
+    boxscore = _make_boxscore(
+        own_players=[
+            {"id": _PLAYER_OWN_1, "first_name": "Caleb", "last_name": "Davis", "number": "23"},
+            {"id": _PLAYER_OWN_P1, "first_name": "Marcus", "last_name": "Lee", "number": "11"},
+        ],
+    )
+    bs_path = _write_boxscore(tmp_path, boxscore)
+    loader = _make_loader(db)
+
+    loader.load_file(bs_path, _make_summary())
+
+    own_team_id = db.execute("SELECT id FROM teams WHERE gc_uuid = ?", (_OWN_TEAM_ID,)).fetchone()[0]
+    row = db.execute(
+        "SELECT jersey_number, position FROM team_rosters WHERE team_id = ? AND player_id = ? AND season_id = ?",
+        (own_team_id, _PLAYER_OWN_1, _SEASON_ID),
+    ).fetchone()
+    assert row is not None, "Expected team_rosters row to be created"
+    assert row[0] == "23", f"Expected jersey_number='23', got {row[0]!r}"
+    assert row[1] is None, "position should be NULL for boxscore-sourced rows"
+
+
+def test_jersey_number_backfills_null(db: sqlite3.Connection, tmp_path: Path) -> None:
+    """AC-4: Existing roster row with NULL jersey_number gets backfilled."""
+    _ensure_season(db)
+    # Create the player and roster row first (as if roster loader ran without jersey number).
+    db.execute(
+        "INSERT INTO players (player_id, first_name, last_name) VALUES (?, 'Caleb', 'Davis')",
+        (_PLAYER_OWN_1,),
+    )
+    loader = _make_loader(db)
+    own_team_id = db.execute("SELECT id FROM teams WHERE gc_uuid = ?", (_OWN_TEAM_ID,)).fetchone()[0]
+    db.execute(
+        "INSERT INTO team_rosters (team_id, player_id, season_id, jersey_number, position) VALUES (?, ?, ?, NULL, 'CF')",
+        (own_team_id, _PLAYER_OWN_1, _SEASON_ID),
+    )
+    db.commit()
+
+    boxscore = _make_boxscore(
+        own_players=[
+            {"id": _PLAYER_OWN_1, "first_name": "Caleb", "last_name": "Davis", "number": "23"},
+            {"id": _PLAYER_OWN_P1, "first_name": "Marcus", "last_name": "Lee"},
+        ],
+    )
+    bs_path = _write_boxscore(tmp_path, boxscore)
+    loader.load_file(bs_path, _make_summary())
+
+    row = db.execute(
+        "SELECT jersey_number, position FROM team_rosters WHERE team_id = ? AND player_id = ? AND season_id = ?",
+        (own_team_id, _PLAYER_OWN_1, _SEASON_ID),
+    ).fetchone()
+    assert row[0] == "23", f"Expected jersey_number backfilled to '23', got {row[0]!r}"
+    assert row[1] == "CF", "Existing position should NOT be overwritten"
+
+
+def test_jersey_number_not_overwritten_when_set(db: sqlite3.Connection, tmp_path: Path) -> None:
+    """AC-4: Existing roster row with non-NULL jersey_number is NOT overwritten."""
+    _ensure_season(db)
+    db.execute(
+        "INSERT INTO players (player_id, first_name, last_name) VALUES (?, 'Caleb', 'Davis')",
+        (_PLAYER_OWN_1,),
+    )
+    loader = _make_loader(db)
+    own_team_id = db.execute("SELECT id FROM teams WHERE gc_uuid = ?", (_OWN_TEAM_ID,)).fetchone()[0]
+    db.execute(
+        "INSERT INTO team_rosters (team_id, player_id, season_id, jersey_number) VALUES (?, ?, ?, '99')",
+        (own_team_id, _PLAYER_OWN_1, _SEASON_ID),
+    )
+    db.commit()
+
+    boxscore = _make_boxscore(
+        own_players=[
+            {"id": _PLAYER_OWN_1, "first_name": "Caleb", "last_name": "Davis", "number": "23"},
+            {"id": _PLAYER_OWN_P1, "first_name": "Marcus", "last_name": "Lee"},
+        ],
+    )
+    bs_path = _write_boxscore(tmp_path, boxscore)
+    loader.load_file(bs_path, _make_summary())
+
+    row = db.execute(
+        "SELECT jersey_number FROM team_rosters WHERE team_id = ? AND player_id = ? AND season_id = ?",
+        (own_team_id, _PLAYER_OWN_1, _SEASON_ID),
+    ).fetchone()
+    assert row[0] == "99", f"Expected jersey_number to stay '99', got {row[0]!r}"
+
+
+def test_opponent_player_names_extracted(db: sqlite3.Connection, tmp_path: Path) -> None:
+    """AC-5: Player names are extracted from both own and opponent teams."""
+    _ensure_season(db)
+    boxscore = _make_boxscore(
+        own_players=[
+            {"id": _PLAYER_OWN_1, "first_name": "Caleb", "last_name": "Davis"},
+            {"id": _PLAYER_OWN_P1, "first_name": "Marcus", "last_name": "Lee"},
+        ],
+        opp_players=[
+            {"id": _PLAYER_OPP_1, "first_name": "Jake", "last_name": "Miller"},
+            {"id": _PLAYER_OPP_P1, "first_name": "Tyler", "last_name": "Brown"},
+        ],
+    )
+    bs_path = _write_boxscore(tmp_path, boxscore)
+    loader = _make_loader(db)
+
+    loader.load_file(bs_path, _make_summary())
+
+    opp_row = db.execute(
+        "SELECT first_name, last_name FROM players WHERE player_id = ?",
+        (_PLAYER_OPP_1,),
+    ).fetchone()
+    assert opp_row == ("Jake", "Miller"), f"Expected opponent player real name, got {opp_row}"
+
+    opp_pitcher = db.execute(
+        "SELECT first_name, last_name FROM players WHERE player_id = ?",
+        (_PLAYER_OPP_P1,),
+    ).fetchone()
+    assert opp_pitcher == ("Tyler", "Brown"), f"Expected opponent pitcher real name, got {opp_pitcher}"
+
+
+def test_player_without_name_in_players_array_gets_stub(db: sqlite3.Connection, tmp_path: Path) -> None:
+    """When a player appears in stats but not in players array, they get a stub."""
+    _ensure_season(db)
+    boxscore = _make_boxscore(
+        own_players=[],  # No player info provided
+        opp_players=[],
+    )
+    bs_path = _write_boxscore(tmp_path, boxscore)
+    loader = _make_loader(db)
+
+    loader.load_file(bs_path, _make_summary())
+
+    row = db.execute(
+        "SELECT first_name, last_name FROM players WHERE player_id = ?",
+        (_PLAYER_OWN_1,),
+    ).fetchone()
+    assert row == ("Unknown", "Unknown"), f"Expected stub name, got {row}"

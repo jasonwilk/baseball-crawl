@@ -1,7 +1,7 @@
 # E-169: Fix Unknown Player Names in Scouting Data
 
 ## Status
-`READY`
+`COMPLETED`
 <!-- Lifecycle: DRAFT → READY → ACTIVE → COMPLETED (or BLOCKED / ABANDONED) -->
 <!-- PM sets READY explicitly after: expert consultation done, all stories have testable ACs, quality checklist passed. -->
 <!-- Only READY and ACTIVE epics can be dispatched. -->
@@ -39,8 +39,8 @@ Team 13 (Pius X Varsity 2026) has 10 "Unknown Unknown" players in season batting
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-169-01 | Extract player names from boxscore data in GameLoader | TODO | None | - |
-| E-169-02 | Fallback display for unresolved player names | TODO | E-169-01 | - |
+| E-169-01 | Extract player names from boxscore data in GameLoader | DONE | None | - |
+| E-169-02 | Fallback display for unresolved player names | DONE | E-169-01 | - |
 
 ## Dispatch Team
 - software-engineer
@@ -134,8 +134,9 @@ None — all questions resolved during expert consultation.
 ## History
 - 2026-03-27: Created. Expert consultations with SE, DE, api-scout, UXD completed.
 - 2026-03-28: Set to READY after 5 review passes (32 findings, 26 accepted, 2 dismissed).
+- 2026-03-28: COMPLETED. Both stories delivered. E-169-01: GameLoader conditional UPSERT extracts player names from boxscore `players` array, upgrades Unknown stubs, backfills jersey numbers into team_rosters. E-169-02: `_apply_name_cascade()` transforms remaining Unknown Unknown → "Player #NN" / "Unknown Player" with muted italic styling across all 5 display surfaces (opponent detail, print view, game detail). 14 new tests, zero regressions.
 
-### Review Scorecard
+### Spec Review Scorecard
 | Review Pass | Findings | Accepted | Dismissed |
 |---|---|---|---|
 | Internal iteration 1 — CR spec audit | 6 | 6 | 0 |
@@ -144,3 +145,23 @@ None — all questions resolved during expert consultation.
 | Codex iteration 2 | 3 | 3 | 0 |
 | Codex iteration 3 | 2 | 2 | 0 |
 | **Total** | **32** | **26** | **2** |
+
+### Code Review Scorecard
+| Review Pass | Findings | Accepted | Dismissed |
+|---|---|---|---|
+| Per-story CR — E-169-01 | 0 | 0 | 0 |
+| Per-story CR — E-169-02 | 0 | 0 | 0 |
+| CR integration review | 0 | 0 | 0 |
+| Codex code review | 1 | 1 | 0 |
+| **Total** | **1** | **1** | **0** |
+
+### Documentation Assessment
+No documentation impact. This epic changes internal data layer logic (conditional UPSERT in GameLoader) and template styling for edge-case unresolved player names. No new features, endpoints, CLI commands, schema changes, or architectural changes that would trigger doc updates per `docs/` update triggers. The display name cascade is a UX polish — coaches see better names, not a new workflow.
+
+### Context-Layer Assessment
+1. **New convention, pattern, or constraint established?** No — the conditional UPSERT and `_apply_name_cascade()` are localized implementation patterns, not project-wide conventions.
+2. **Architectural decision with ongoing implications?** No — no technology choices or structural decisions; uses existing SQLite UPSERT and Jinja2 patterns.
+3. **Footgun, failure mode, or boundary discovered?** No — the boxscore `players` array was a known but unused data source; no new gotchas discovered.
+4. **Change to agent behavior, routing, or coordination?** No.
+5. **Domain knowledge discovered that should influence agent decisions?** No — the name resolution precedence (roster > boxscore > stub) is documented in the epic's Technical Notes and implemented in code; no broader domain insight beyond what was already known.
+6. **New CLI command, workflow, or operational procedure introduced?** No.
