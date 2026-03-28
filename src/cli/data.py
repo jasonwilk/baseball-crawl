@@ -389,6 +389,11 @@ def _scout_live(
                 exit_code,
             )
         else:
+            # Step 1.5: opportunistic gc_uuid resolution for tracked teams.
+            # Runs after main crawl/load (which populates games table) and
+            # before spray crawl (which benefits from resolved gc_uuids).
+            _resolve_missing_gc_uuids(conn, data_root, client, team)
+
             # Step 2: scouting spray crawl (runs after main crawl+load).
             spray_crawler = ScoutingSprayChartCrawler(client, conn, data_root=data_root)
             try:
@@ -434,6 +439,70 @@ def _scout_live(
                     exit_code = 1
 
     raise SystemExit(exit_code)
+
+
+def _resolve_missing_gc_uuids(
+    conn: sqlite3.Connection,
+    data_root: Path,
+    client: GameChangerClient,
+    team_public_id: Optional[str] = None,
+) -> None:
+    """Run the gc_uuid resolution cascade for tracked teams missing gc_uuid.
+
+    When *team_public_id* is given, resolves only that single team (if it
+    lacks gc_uuid).  Otherwise resolves all tracked teams with
+    ``gc_uuid IS NULL``.
+
+    Errors are logged but never propagated -- the spray crawl stage
+    proceeds regardless.  ``CredentialExpiredError`` from tier 3 is also
+    caught here (the spray crawl may still succeed using the boxscore
+    fallback path even without gc_uuid).
+    """
+    from src.gamechanger.exceptions import CredentialExpiredError
+    from src.gamechanger.resolvers.gc_uuid_resolver import resolve_gc_uuid
+
+    try:
+        if team_public_id:
+            rows = conn.execute(
+                "SELECT id, public_id, name, season_year FROM teams "
+                "WHERE public_id = ? AND gc_uuid IS NULL AND membership_type = 'tracked' "
+                "LIMIT 1",
+                (team_public_id,),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT id, public_id, name, season_year FROM teams "
+                "WHERE gc_uuid IS NULL AND membership_type = 'tracked' AND is_active = 1"
+            ).fetchall()
+
+        resolved_count = 0
+        for tid, pub_id, name, syear in rows:
+            try:
+                result = resolve_gc_uuid(
+                    team_id=tid,
+                    public_id=pub_id,
+                    team_name=name,
+                    season_year=syear,
+                    conn=conn,
+                    data_root=data_root,
+                    client=client,
+                )
+                if result:
+                    resolved_count += 1
+            except CredentialExpiredError:
+                logger.warning(
+                    "gc_uuid resolution stopped: credentials expired (team_id=%d)", tid,
+                )
+                break
+            except Exception:  # noqa: BLE001
+                logger.warning(
+                    "gc_uuid resolution failed for team_id=%d", tid, exc_info=True,
+                )
+
+        if resolved_count:
+            typer.echo(f"gc_uuid resolved for {resolved_count} tracked team(s).")
+    except Exception:  # noqa: BLE001
+        logger.warning("gc_uuid resolution query failed", exc_info=True)
 
 
 def _heal_season_year_cli(

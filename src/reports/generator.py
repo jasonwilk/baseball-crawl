@@ -17,10 +17,8 @@ Public API::
 
 from __future__ import annotations
 
-import json
 import logging
 import os
-import re
 import secrets
 import sqlite3
 from contextlib import closing
@@ -45,12 +43,6 @@ _DATA_ROOT = _REPO_ROOT / "data" / "raw"
 _REPORTS_DIR = _REPO_ROOT / "data" / "reports"
 _EXPIRY_DAYS = 14
 _APP_URL_DEFAULT = "http://localhost:8001"
-_SEARCH_CONTENT_TYPE = "application/vnd.gc.com.post_search+json; version=0.0.0"
-_UUID_RE = re.compile(
-    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-    re.IGNORECASE,
-)
-_PLAYER_STATS_ACCEPT = "application/json, text/plain, */*"
 
 
 @dataclass
@@ -375,250 +367,31 @@ def _query_spray_charts(
     return result
 
 
-def _resolve_gc_uuid_via_search(
+def _crawl_and_load_spray(
     client: GameChangerClient,
-    team_name: str,
-    season_year: int | None,
-) -> tuple[str | None, str | None]:
-    """Attempt to resolve gc_uuid via POST /search.
-
-    Searches for an exact name + season year match. Returns (gc_uuid, public_id)
-    on single match, or (None, None) if no match or ambiguous.
-    """
-    try:
-        result = client.post_json(
-            "/search",
-            body={"name": team_name},
-            params={"start_at_page": 0, "search_source": "search"},
-            content_type=_SEARCH_CONTENT_TYPE,
-        )
-    except Exception:  # noqa: BLE001
-        logger.warning("Search API call failed for '%s'", team_name, exc_info=True)
-        return None, None
-
-    hits = result.get("hits", []) if isinstance(result, dict) else []
-    matches = []
-    for hit in hits:
-        r = hit.get("result", {})
-        name = r.get("name", "")
-        season = r.get("season") or {}
-        hit_year = season.get("year")
-        if name.lower() == team_name.lower() and hit_year == season_year:
-            matches.append(r)
-
-    if len(matches) != 1:
-        if matches:
-            logger.info(
-                "gc_uuid search: %d matches for '%s' (year=%s) — ambiguous, skipping",
-                len(matches), team_name, season_year,
-            )
-        else:
-            logger.info(
-                "gc_uuid search: no exact match for '%s' (year=%s)",
-                team_name, season_year,
-            )
-        return None, None
-
-    match = matches[0]
-    return match.get("id"), match.get("public_id")
-
-
-def _build_boxscore_uuid_map(
     public_id: str,
     season_id: str,
-) -> dict[str, str]:
-    """Build a mapping of event_id -> opponent gc_uuid from cached boxscore files.
+) -> None:
+    """Delegate spray chart crawl/load to the scouting spray pipeline.
 
-    Each boxscore JSON has two top-level keys: one is the scouted team's
-    ``public_id`` slug (non-UUID), the other is the opponent's gc_uuid (UUID).
-    This function scans all cached boxscore files for the given team/season
-    and returns a mapping from event_id (boxscore filename stem) to the
-    opponent UUID found in that boxscore.
+    Instantiates ``ScoutingSprayChartCrawler`` and ``ScoutingSprayChartLoader``
+    and runs them for a single opponent/season. The crawler handles
+    ``gc_uuid=NULL`` teams via its boxscore-UUID fallback (E-176-01), so no
+    inline UUID resolution is needed here.
 
-    The spray chart endpoint (``GET /teams/{team_id}/schedule/events/{event_id}/player-stats``)
-    accepts any team's gc_uuid that participated in the game and returns both
-    teams' data. So the opponent's UUID from each boxscore can substitute for
-    the scouted team's own gc_uuid when calling the spray endpoint for that game.
+    ``CredentialExpiredError`` propagates to the caller. All other exceptions
+    are caught and logged as warnings -- spray failure is non-fatal and the
+    report renders without spray charts.
 
     Args:
-        public_id: The scouted team's public_id slug.
+        client: Authenticated ``GameChangerClient``.
+        public_id: The scouted team's ``public_id`` slug.
         season_id: Season slug (e.g., ``"2026-spring-hs"``).
-
-    Returns:
-        Dict mapping ``event_id`` to the opponent's gc_uuid. Empty if no
-        boxscore files exist or none contain a UUID key.
     """
-    boxscores_dir = _DATA_ROOT / season_id / "scouting" / public_id / "boxscores"
-    if not boxscores_dir.is_dir():
-        return {}
-
-    uuid_map: dict[str, str] = {}
-    for bs_path in boxscores_dir.glob("*.json"):
-        event_id = bs_path.stem
-        try:
-            with bs_path.open(encoding="utf-8") as fh:
-                boxscore = json.load(fh)
-        except (json.JSONDecodeError, OSError) as exc:
-            logger.debug("Could not read boxscore %s for UUID extraction: %s", bs_path, exc)
-            continue
-
-        if not isinstance(boxscore, dict):
-            continue
-
-        for key in boxscore:
-            if _UUID_RE.match(key) and key != public_id:
-                uuid_map[event_id] = key
-                break
-
-    if uuid_map:
-        logger.info(
-            "Extracted %d opponent UUIDs from boxscores for public_id=%s season=%s",
-            len(uuid_map), public_id, season_id,
-        )
-    return uuid_map
-
-
-def _crawl_spray_via_boxscore_uuids(
-    client: GameChangerClient,
-    public_id: str,
-    season_id: str,
-    uuid_map: dict[str, str],
-) -> None:
-    """Crawl spray chart data using per-game opponent UUIDs from boxscores.
-
-    When the scouted team's own gc_uuid is unavailable, each game's spray data
-    can still be fetched by using the opponent's gc_uuid (extracted from
-    boxscore top-level keys). The spray endpoint returns both teams' data
-    regardless of which team's UUID is in the path.
-
-    Files are written to the same location as the normal spray crawler::
-
-        data/raw/{season_id}/scouting/{public_id}/spray/{event_id}.json
-
-    Args:
-        client: Authenticated GameChangerClient.
-        public_id: The scouted team's public_id slug.
-        season_id: Season slug.
-        uuid_map: Mapping of event_id -> opponent gc_uuid from boxscores.
-    """
-    spray_dir = _DATA_ROOT / season_id / "scouting" / public_id / "spray"
-    spray_dir.mkdir(parents=True, exist_ok=True)
-
-    fetched = 0
-    skipped = 0
-    errors = 0
-
-    for event_id, opponent_uuid in uuid_map.items():
-        dest = spray_dir / f"{event_id}.json"
-        if dest.exists():
-            skipped += 1
-            continue
-
-        try:
-            data = client.get(
-                f"/teams/{opponent_uuid}/schedule/events/{event_id}/player-stats",
-                accept=_PLAYER_STATS_ACCEPT,
-            )
-            dest.write_text(json.dumps(data, indent=2), encoding="utf-8")
-            fetched += 1
-        except CredentialExpiredError:
-            raise
-        except Exception:  # noqa: BLE001
-            logger.warning(
-                "Spray chart fetch failed for event=%s via opponent_uuid=%s",
-                event_id, opponent_uuid, exc_info=True,
-            )
-            errors += 1
-
-    logger.info(
-        "Boxscore-UUID spray crawl for public_id=%s: fetched=%d, skipped=%d, errors=%d",
-        public_id, fetched, skipped, errors,
-    )
-
-
-def _resolve_and_crawl_spray(
-    client: GameChangerClient,
-    team_id: int,
-    public_id: str,
-    season_id: str,
-    team_info: dict,
-) -> None:
-    """Attempt gc_uuid resolution and spray chart crawl/load (non-fatal).
-
-    If gc_uuid is already known, uses it directly. Otherwise attempts
-    resolution via POST /search. If gc_uuid is resolved, runs the
-    ScoutingSprayChartCrawler + ScoutingSprayChartLoader. If resolution
-    fails, logs a warning and returns (spray charts omitted from report).
-    """
-    # Check if gc_uuid already exists
-    with closing(get_connection()) as conn:
-        row = conn.execute(
-            "SELECT gc_uuid FROM teams WHERE id = ?", (team_id,)
-        ).fetchone()
-        gc_uuid = row[0] if row else None
-
-    # Attempt resolution if needed
-    if not gc_uuid:
-        team_name = team_info.get("name", "")
-        season_year = team_info.get("season_year")
-        gc_uuid, _search_public_id = _resolve_gc_uuid_via_search(
-            client, team_name, season_year
-        )
-        if gc_uuid:
-            # Update the team row with the resolved gc_uuid
-            with closing(get_connection()) as conn:
-                conn.execute(
-                    "UPDATE teams SET gc_uuid = COALESCE(gc_uuid, ?) WHERE id = ? AND gc_uuid IS NULL",
-                    (gc_uuid, team_id),
-                )
-                conn.commit()
-            logger.info(
-                "Resolved gc_uuid=%s for team_id=%d via search", gc_uuid, team_id
-            )
-        else:
-            # Fallback: extract per-game opponent UUIDs from cached boxscores.
-            # The spray endpoint returns both teams' data regardless of which
-            # team's UUID is in the path, so using the opponent's UUID works.
-            uuid_map = _build_boxscore_uuid_map(public_id, season_id)
-            if uuid_map:
-                logger.info(
-                    "gc_uuid search failed for team_id=%d (%s); "
-                    "falling back to boxscore-UUID approach (%d games)",
-                    team_id, team_name, len(uuid_map),
-                )
-                try:
-                    _crawl_spray_via_boxscore_uuids(
-                        client, public_id, season_id, uuid_map
-                    )
-                    with closing(get_connection()) as conn:
-                        spray_loader = ScoutingSprayChartLoader(conn)
-                        spray_loader.load_all(
-                            _DATA_ROOT, public_id=public_id, season_id=season_id
-                        )
-                except CredentialExpiredError:
-                    raise
-                except Exception:  # noqa: BLE001
-                    logger.warning(
-                        "Boxscore-UUID spray crawl/load failed for team_id=%d; "
-                        "continuing without spray charts.",
-                        team_id,
-                        exc_info=True,
-                    )
-                return
-            logger.warning(
-                "Could not resolve gc_uuid for team_id=%d (%s) and no "
-                "boxscore files available; spray charts will be omitted.",
-                team_id, team_name,
-            )
-            return
-
-    # Run spray chart crawl + load — pass gc_uuid directly to avoid
-    # re-derivation via public_id lookup (fails when identifiers are
-    # partially populated on tracked/opponent teams).
     try:
         with closing(get_connection()) as conn:
             spray_crawler = ScoutingSprayChartCrawler(client, conn, data_root=_DATA_ROOT)
-            spray_crawler.crawl_team(public_id, season_id=season_id, gc_uuid=gc_uuid)
+            spray_crawler.crawl_team(public_id, season_id=season_id)
 
         with closing(get_connection()) as conn:
             spray_loader = ScoutingSprayChartLoader(conn)
@@ -629,8 +402,9 @@ def _resolve_and_crawl_spray(
         raise
     except Exception:  # noqa: BLE001
         logger.warning(
-            "Spray chart crawl/load failed for team_id=%d; continuing without spray charts.",
-            team_id,
+            "Spray chart crawl/load failed for public_id=%s; "
+            "continuing without spray charts.",
+            public_id,
             exc_info=True,
         )
 
@@ -773,8 +547,8 @@ def generate_report(gc_url: str) -> GenerationResult:
             )
             conn.commit()
 
-        # Step 4b: Attempt gc_uuid resolution + spray chart crawl/load
-        _resolve_and_crawl_spray(client, team_id, public_id, season_id, team_info)
+        # Step 4b: Spray chart crawl/load via scouting spray pipeline
+        _crawl_and_load_spray(client, public_id, season_id)
 
     except CredentialExpiredError:
         msg = "Authentication credentials expired — refresh with `bb creds setup web`"

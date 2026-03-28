@@ -1,7 +1,7 @@
 # E-176: Fix Spray Charts for Scouting Reports and Opponent Pipeline
 
 ## Status
-`READY`
+`COMPLETED`
 
 ## Overview
 Spray charts are completely broken for tracked opponent teams that lack a `gc_uuid`. The scouting spray crawler skips them, and the report generator works around this with inline API crawling that duplicates crawler logic, uses fragile exact-name matching, and was never deployed. This epic fixes the pipeline properly: the crawler learns a boxscore-UUID fallback, the report generator stops doing inline crawl/load, gc_uuid is opportunistically resolved where possible, and all tracked teams get spray coverage regardless of how they were added to the system.
@@ -52,10 +52,10 @@ No expert consultation required -- this is a pure Python pipeline fix with well-
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-176-01 | Boxscore-UUID fallback in scouting spray crawler | TODO | None | - |
-| E-176-02 | Report generator spray cleanup | TODO | E-176-01 | - |
-| E-176-03 | Opportunistic gc_uuid resolution cascade | TODO | None | - |
-| E-176-04 | Spray pipeline coverage for direct-add teams | TODO | E-176-01 | - |
+| E-176-01 | Boxscore-UUID fallback in scouting spray crawler | DONE | None | - |
+| E-176-02 | Report generator spray cleanup | DONE | E-176-01 | - |
+| E-176-03 | Opportunistic gc_uuid resolution cascade | DONE | None | - |
+| E-176-04 | Spray pipeline coverage for direct-add teams | DONE | E-176-01 | - |
 
 ## Dispatch Team
 - software-engineer
@@ -119,8 +119,30 @@ M = modify, C = create. Stories 01 and 04 touch the same files -- Story 04 depen
 ## History
 - 2026-03-28: Created
 - 2026-03-28: Set to READY after 3 review passes (23 findings: 13 accepted, 10 dismissed). E-173 compatibility verified -- no stale assumptions.
+- 2026-03-28: Set to ACTIVE, dispatch started
+- 2026-03-28: All stories DONE, epic COMPLETED
 
-### Review Scorecard
+### Review Scorecard (Dispatch)
+| Review Pass | Findings | Accepted | Dismissed |
+|---|---|---|---|
+| Per-story CR -- E-176-01 | 4 | 4 | 0 |
+| Per-story CR -- E-176-02 | 0 | 0 | 0 |
+| Per-story CR -- E-176-03 | 2 | 1 | 1 |
+| Per-story CR -- E-176-04 | 2 | 1 | 1 |
+| **Total** | **8** | **6** | **2** |
+
+### Documentation Assessment
+No documentation impact -- this epic fixes internal pipeline behavior without changing user-facing features, CLI commands, or deployment configuration.
+
+### Context-Layer Assessment
+1. New convention/pattern: No
+2. Architectural decision: No
+3. Footgun/failure mode: No
+4. Agent behavior change: No
+5. Domain knowledge: No
+6. New CLI command/workflow: No
+
+### Review Scorecard (Planning)
 | Review Pass | Findings | Accepted | Dismissed |
 |---|---|---|---|
 | Internal iteration 1 -- CR spec audit | 7 | 3 | 4 |
