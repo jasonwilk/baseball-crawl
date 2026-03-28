@@ -1,7 +1,7 @@
 # E-171: Enrich Resolve Search Results
 
 ## Status
-`READY`
+`ABANDONED`
 
 ## Overview
 Enrich the admin opponent-resolve search results page so the operator can make confident disambiguation decisions without leaving the page. Season year is currently rendered but too subtle (tiny gray text); player count and staff names are already in the API response but not displayed.
@@ -63,6 +63,7 @@ None.
 ## History
 - 2026-03-28: Created. Coach and SE consultations completed. Record fetch deferred per coach recommendation.
 - 2026-03-28: Set to READY. Single-story epic — internal and Codex review skipped (minimal scope).
+- 2026-03-28: ABANDONED. Scope absorbed into E-173-03 (unified resolve page). Search result enrichment (season year badge, player count, staff names) is now part of E-173's unified resolve page story.
 
 ## Review Scorecard
 | Round | Source | Findings | Accepted | Dismissed | Notes |
