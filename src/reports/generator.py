@@ -540,6 +540,15 @@ def generate_report(gc_url: str) -> GenerationResult:
             season_year=season_year_from_api,
             source="report_generator",
         )
+        # ensure_team_row doesn't overwrite existing names (conservative backfill).
+        # Force-update name/season_year from the public API when available, since
+        # earlier failed attempts may have left the row with placeholder values.
+        if team_name_from_api:
+            conn.execute(
+                "UPDATE teams SET name = ?, season_year = COALESCE(?, season_year) "
+                "WHERE id = ?",
+                (team_name_from_api, season_year_from_api, team_id),
+            )
         conn.commit()
 
     # Step 3: Create reports row (placeholder title — updated after crawl)
