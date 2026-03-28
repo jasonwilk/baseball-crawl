@@ -1661,3 +1661,379 @@ def test_gc_uuid_collision_on_public_id_match_logs_warning(
     # gc_uuid="gc-uuid-NEW" back-filled (no collision)
     row = db.execute("SELECT gc_uuid FROM teams WHERE id = ?", (team_a_id,)).fetchone()
     assert row[0] == "gc-uuid-NEW"
+
+
+# ---------------------------------------------------------------------------
+# E-168-02: Search fallback tests
+# ---------------------------------------------------------------------------
+
+_SEARCH_HIT_EXACT = {
+    "type": "team",
+    "result": {
+        "id": "search-uuid-001",
+        "public_id": "search-slug-001",
+        "name": "Unknown Team",
+        "sport": "baseball",
+        "location": {"city": "Lincoln", "state": "NE"},
+        "season": {"name": "spring", "year": 2026},
+        "number_of_players": 15,
+        "staff": ["Coach A"],
+    },
+}
+
+
+def _setup_unlinked(db: sqlite3.Connection) -> tuple[int, int]:
+    """Insert a member team (season_year=2026) and an unlinked opponent link.
+
+    Returns (our_team_id, link_id).
+    """
+    cur = db.execute(
+        "INSERT INTO teams (gc_uuid, name, membership_type, is_active, season_year) "
+        "VALUES (?, ?, 'member', 1, 2026)",
+        (_OWN_TEAM_GC_UUID, _OWN_TEAM_NAME),
+    )
+    our_pk = cur.lastrowid
+    cur2 = db.execute(
+        "INSERT INTO opponent_links (our_team_id, root_team_id, opponent_name, is_hidden) "
+        "VALUES (?, 'root-bbb-002', 'Unknown Team', 0)",
+        (our_pk,),
+    )
+    link_id = cur2.lastrowid
+    db.commit()
+    return our_pk, link_id
+
+
+@patch("src.gamechanger.crawlers.opponent_resolver.time.sleep")
+def test_search_fallback_single_exact_match_resolves(
+    mock_sleep: MagicMock, db: sqlite3.Connection
+) -> None:
+    """AC-1/AC-2/AC-4: Single exact name+year match auto-resolves."""
+    our_pk, link_id = _setup_unlinked(db)
+    client = _make_client(paginated_return=[], get_return=_TEAM_DETAIL)
+    client.post_json.return_value = {"total_count": 1, "hits": [_SEARCH_HIT_EXACT]}
+
+    config = _make_config([(_OWN_TEAM_GC_UUID, our_pk)])
+    resolver = OpponentResolver(client, config, db)
+    result = resolver.resolve()
+
+    assert result.search_resolved == 1
+    # Finding 1 fix: unlinked should be decremented when search resolves
+    assert result.unlinked == 0
+
+    # Verify opponent_links row
+    row = db.execute(
+        "SELECT resolved_team_id, public_id, resolution_method "
+        "FROM opponent_links WHERE id = ?", (link_id,)
+    ).fetchone()
+    assert row[0] is not None  # resolved_team_id
+    assert row[1] == "search-slug-001"
+    assert row[2] == "search"
+
+    # Verify teams row has gc_uuid and public_id
+    team_row = db.execute(
+        "SELECT gc_uuid, public_id FROM teams WHERE id = ?", (row[0],)
+    ).fetchone()
+    assert team_row[0] == "search-uuid-001"
+    assert team_row[1] == "search-slug-001"
+
+
+@patch("src.gamechanger.crawlers.opponent_resolver.time.sleep")
+def test_search_fallback_multiple_matches_stays_unlinked(
+    mock_sleep: MagicMock, db: sqlite3.Connection
+) -> None:
+    """AC-3: Multiple name+year matches -> stays unlinked."""
+    our_pk, link_id = _setup_unlinked(db)
+    hit2 = {
+        "type": "team",
+        "result": {
+            "id": "search-uuid-002",
+            "public_id": "search-slug-002",
+            "name": "Unknown Team",
+            "sport": "baseball",
+            "season": {"name": "fall", "year": 2026},
+        },
+    }
+    client = _make_client(paginated_return=[], get_return=_TEAM_DETAIL)
+    client.post_json.return_value = {
+        "total_count": 2, "hits": [_SEARCH_HIT_EXACT, hit2],
+    }
+
+    config = _make_config([(_OWN_TEAM_GC_UUID, our_pk)])
+    resolver = OpponentResolver(client, config, db)
+    result = resolver.resolve()
+
+    assert result.search_resolved == 0
+    row = db.execute(
+        "SELECT resolution_method FROM opponent_links WHERE id = ?", (link_id,)
+    ).fetchone()
+    assert row[0] is None
+
+
+@patch("src.gamechanger.crawlers.opponent_resolver.time.sleep")
+def test_search_fallback_zero_matches_stays_unlinked(
+    mock_sleep: MagicMock, db: sqlite3.Connection
+) -> None:
+    """AC-3: No matches -> stays unlinked."""
+    our_pk, link_id = _setup_unlinked(db)
+    client = _make_client(paginated_return=[], get_return=_TEAM_DETAIL)
+    client.post_json.return_value = {"total_count": 0, "hits": []}
+
+    config = _make_config([(_OWN_TEAM_GC_UUID, our_pk)])
+    resolver = OpponentResolver(client, config, db)
+    result = resolver.resolve()
+
+    assert result.search_resolved == 0
+    row = db.execute(
+        "SELECT resolution_method FROM opponent_links WHERE id = ?", (link_id,)
+    ).fetchone()
+    assert row[0] is None
+
+
+@patch("src.gamechanger.crawlers.opponent_resolver.time.sleep")
+def test_search_fallback_case_insensitive_match(
+    mock_sleep: MagicMock, db: sqlite3.Connection
+) -> None:
+    """AC-2: Case-insensitive name matching works."""
+    our_pk, link_id = _setup_unlinked(db)
+    # API returns "UNKNOWN TEAM" (uppercase) while link has "Unknown Team"
+    hit = {
+        "type": "team",
+        "result": {
+            "id": "search-uuid-ci",
+            "public_id": "search-slug-ci",
+            "name": "UNKNOWN TEAM",
+            "sport": "baseball",
+            "season": {"name": "spring", "year": 2026},
+        },
+    }
+    client = _make_client(paginated_return=[], get_return=_TEAM_DETAIL)
+    client.post_json.return_value = {"total_count": 1, "hits": [hit]}
+
+    config = _make_config([(_OWN_TEAM_GC_UUID, our_pk)])
+    resolver = OpponentResolver(client, config, db)
+    result = resolver.resolve()
+
+    assert result.search_resolved == 1
+    row = db.execute(
+        "SELECT resolution_method FROM opponent_links WHERE id = ?", (link_id,)
+    ).fetchone()
+    assert row[0] == "search"
+
+
+@patch("src.gamechanger.crawlers.opponent_resolver.time.sleep")
+def test_search_fallback_wrong_year_stays_unlinked(
+    mock_sleep: MagicMock, db: sqlite3.Connection
+) -> None:
+    """AC-2: Name matches but year doesn't -> stays unlinked."""
+    our_pk, link_id = _setup_unlinked(db)
+    hit = {
+        "type": "team",
+        "result": {
+            "id": "search-uuid-yr",
+            "public_id": "search-slug-yr",
+            "name": "Unknown Team",
+            "sport": "baseball",
+            "season": {"name": "spring", "year": 2025},  # wrong year
+        },
+    }
+    client = _make_client(paginated_return=[], get_return=_TEAM_DETAIL)
+    client.post_json.return_value = {"total_count": 1, "hits": [hit]}
+
+    config = _make_config([(_OWN_TEAM_GC_UUID, our_pk)])
+    resolver = OpponentResolver(client, config, db)
+    result = resolver.resolve()
+
+    assert result.search_resolved == 0
+
+
+@patch("src.gamechanger.crawlers.opponent_resolver.time.sleep")
+def test_search_fallback_api_error_continues(
+    mock_sleep: MagicMock, db: sqlite3.Connection
+) -> None:
+    """AC-5: Non-credential API error is logged and skipped."""
+    our_pk, link_id = _setup_unlinked(db)
+    client = _make_client(paginated_return=[], get_return=_TEAM_DETAIL)
+    client.post_json.side_effect = GameChangerAPIError("Server error 502")
+
+    config = _make_config([(_OWN_TEAM_GC_UUID, our_pk)])
+    resolver = OpponentResolver(client, config, db)
+    result = resolver.resolve()
+
+    # Should not abort -- search_resolved stays 0, no exception raised
+    assert result.search_resolved == 0
+    # Finding 2 fix: error should be counted
+    assert result.errors >= 1
+    row = db.execute(
+        "SELECT resolution_method FROM opponent_links WHERE id = ?", (link_id,)
+    ).fetchone()
+    assert row[0] is None
+
+
+@patch("src.gamechanger.crawlers.opponent_resolver.time.sleep")
+def test_search_fallback_rate_limit_continues(
+    mock_sleep: MagicMock, db: sqlite3.Connection
+) -> None:
+    """AC-5: RateLimitError is logged and skipped."""
+    our_pk, link_id = _setup_unlinked(db)
+    client = _make_client(paginated_return=[], get_return=_TEAM_DETAIL)
+    client.post_json.side_effect = RateLimitError("429 Too Many Requests")
+
+    config = _make_config([(_OWN_TEAM_GC_UUID, our_pk)])
+    resolver = OpponentResolver(client, config, db)
+    result = resolver.resolve()
+
+    assert result.search_resolved == 0
+    # Finding 2 fix: error should be counted
+    assert result.errors >= 1
+
+
+@patch("src.gamechanger.crawlers.opponent_resolver.time.sleep")
+def test_search_fallback_credential_expired_propagates(
+    mock_sleep: MagicMock, db: sqlite3.Connection
+) -> None:
+    """AC-6: CredentialExpiredError propagates to caller."""
+    our_pk, link_id = _setup_unlinked(db)
+    client = _make_client(paginated_return=[], get_return=_TEAM_DETAIL)
+    client.post_json.side_effect = CredentialExpiredError("401 Unauthorized")
+
+    config = _make_config([(_OWN_TEAM_GC_UUID, our_pk)])
+    resolver = OpponentResolver(client, config, db)
+    with pytest.raises(CredentialExpiredError):
+        resolver.resolve()
+
+
+@patch("src.gamechanger.crawlers.opponent_resolver.time.sleep")
+def test_search_fallback_forbidden_propagates(
+    mock_sleep: MagicMock, db: sqlite3.Connection
+) -> None:
+    """AC-6: ForbiddenError (subclass of CredentialExpiredError) propagates."""
+    our_pk, link_id = _setup_unlinked(db)
+    client = _make_client(paginated_return=[], get_return=_TEAM_DETAIL)
+    client.post_json.side_effect = ForbiddenError("403 Forbidden")
+
+    config = _make_config([(_OWN_TEAM_GC_UUID, our_pk)])
+    resolver = OpponentResolver(client, config, db)
+    with pytest.raises(ForbiddenError):
+        resolver.resolve()
+
+
+@patch("src.gamechanger.crawlers.opponent_resolver.time.sleep")
+def test_search_fallback_skips_already_resolved(
+    mock_sleep: MagicMock, db: sqlite3.Connection
+) -> None:
+    """AC-7/AC-8: Already-resolved opponents are not re-processed."""
+    our_pk, link_id = _setup_unlinked(db)
+
+    # Add a resolved opponent (resolution_method='auto')
+    opp_pk = db.execute(
+        "INSERT INTO teams (name, membership_type, is_active) "
+        "VALUES ('Resolved Opp', 'tracked', 0)"
+    ).lastrowid
+    db.execute(
+        "INSERT INTO opponent_links "
+        "(our_team_id, root_team_id, opponent_name, resolved_team_id, "
+        "resolution_method, is_hidden) "
+        "VALUES (?, 'root-resolved', 'Resolved Opp', ?, 'auto', 0)",
+        (our_pk, opp_pk),
+    )
+    # Add a manual-resolved opponent
+    manual_pk = db.execute(
+        "INSERT INTO teams (name, membership_type, is_active) "
+        "VALUES ('Manual Opp', 'tracked', 0)"
+    ).lastrowid
+    db.execute(
+        "INSERT INTO opponent_links "
+        "(our_team_id, root_team_id, opponent_name, resolved_team_id, "
+        "resolution_method, is_hidden) "
+        "VALUES (?, 'root-manual', 'Manual Opp', ?, 'manual', 0)",
+        (our_pk, manual_pk),
+    )
+    db.commit()
+
+    client = _make_client(paginated_return=[], get_return=_TEAM_DETAIL)
+    # If search were called for resolved opponents, this would match
+    client.post_json.return_value = {"total_count": 1, "hits": [_SEARCH_HIT_EXACT]}
+
+    config = _make_config([(_OWN_TEAM_GC_UUID, our_pk)])
+    resolver = OpponentResolver(client, config, db)
+    result = resolver.resolve()
+
+    # Only the unlinked opponent should trigger a search call
+    assert client.post_json.call_count == 1
+    assert result.search_resolved == 1
+
+
+@patch("src.gamechanger.crawlers.opponent_resolver.time.sleep")
+def test_search_fallback_result_in_summary_log(
+    mock_sleep: MagicMock, db: sqlite3.Connection
+) -> None:
+    """AC-9: ResolveResult includes search_resolved count."""
+    our_pk, link_id = _setup_unlinked(db)
+    client = _make_client(paginated_return=[], get_return=_TEAM_DETAIL)
+    client.post_json.return_value = {"total_count": 1, "hits": [_SEARCH_HIT_EXACT]}
+
+    config = _make_config([(_OWN_TEAM_GC_UUID, our_pk)])
+    resolver = OpponentResolver(client, config, db)
+    result = resolver.resolve()
+
+    assert result.search_resolved == 1
+    assert hasattr(result, "search_resolved")
+
+
+@patch("src.gamechanger.crawlers.opponent_resolver.time.sleep")
+def test_search_fallback_backfills_name_only_stub(
+    mock_sleep: MagicMock, db: sqlite3.Connection
+) -> None:
+    """TN-8: Search fallback backfills gc_uuid/public_id on name-only stubs."""
+    our_pk, link_id = _setup_unlinked(db)
+
+    # Pre-create a name-only stub (no gc_uuid, no public_id) matching the opponent
+    stub_pk = db.execute(
+        "INSERT INTO teams (name, membership_type, is_active, season_year) "
+        "VALUES ('Unknown Team', 'tracked', 0, 2026)"
+    ).lastrowid
+    db.commit()
+
+    client = _make_client(paginated_return=[], get_return=_TEAM_DETAIL)
+    client.post_json.return_value = {"total_count": 1, "hits": [_SEARCH_HIT_EXACT]}
+
+    config = _make_config([(_OWN_TEAM_GC_UUID, our_pk)])
+    resolver = OpponentResolver(client, config, db)
+    result = resolver.resolve()
+
+    assert result.search_resolved == 1
+
+    # The stub should now have gc_uuid and public_id backfilled
+    team_row = db.execute(
+        "SELECT gc_uuid, public_id FROM teams WHERE id = ?", (stub_pk,)
+    ).fetchone()
+    assert team_row[0] == "search-uuid-001"
+    assert team_row[1] == "search-slug-001"
+
+
+@patch("src.gamechanger.crawlers.opponent_resolver.time.sleep")
+def test_search_fallback_sleeps_between_calls(
+    mock_sleep: MagicMock, db: sqlite3.Connection
+) -> None:
+    """Search fallback uses _DELAY_SECONDS between search calls."""
+    our_pk, _ = _setup_unlinked(db)
+    # Add a second unlinked opponent
+    db.execute(
+        "INSERT INTO opponent_links (our_team_id, root_team_id, opponent_name, is_hidden) "
+        "VALUES (?, 'root-ccc-004', 'Another Team', 0)",
+        (our_pk,),
+    )
+    db.commit()
+
+    client = _make_client(paginated_return=[], get_return=_TEAM_DETAIL)
+    client.post_json.return_value = {"total_count": 0, "hits": []}
+
+    config = _make_config([(_OWN_TEAM_GC_UUID, our_pk)])
+    resolver = OpponentResolver(client, config, db)
+    resolver.resolve()
+
+    # Sleep should be called for each opponent in the search fallback
+    # (plus any sleeps from the progenitor pass)
+    sleep_calls = [c.args[0] for c in mock_sleep.call_args_list]
+    # At least 2 search fallback sleeps (1.5s each)
+    assert sleep_calls.count(1.5) >= 2

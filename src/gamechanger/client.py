@@ -608,6 +608,117 @@ class GameChangerClient:
                 f"Unexpected status {response.status_code} for {path}."
             )
 
+    def post_json(
+        self,
+        path: str,
+        body: dict[str, Any],
+        *,
+        params: dict[str, Any] | None = None,
+        content_type: str = "application/json",
+        timeout: int = 30,
+    ) -> Any:
+        """Make an authenticated POST request with a JSON body and return parsed JSON.
+
+        Unlike ``post()`` (which is fire-and-forget for 204 endpoints), this
+        method sends a JSON body, accepts a custom Content-Type, and parses the
+        JSON response.  Error handling mirrors ``get()``: 401 retry via token
+        refresh, then ``CredentialExpiredError``; 403 → ``ForbiddenError``;
+        429 → ``RateLimitError``; 5xx → retried 3 times then
+        ``GameChangerAPIError``.
+
+        Args:
+            path: API path (e.g. ``"/search"``).  Must start with ``/``.
+            body: JSON-serializable dict for the request body.
+            params: Optional query parameters dict.
+            content_type: Content-Type header for the request.
+            timeout: Request timeout in seconds (default: 30).
+
+        Returns:
+            Parsed JSON response (dict or list depending on the endpoint).
+
+        Raises:
+            CredentialExpiredError: On 401 (after refresh retry) or 403.
+            ForbiddenError: On 403 responses.
+            RateLimitError: On 429 responses (after waiting Retry-After).
+            GameChangerAPIError: On 5xx responses after 3 retries.
+        """
+        self._ensure_access_token()
+
+        url = f"{self._base_url}{path}"
+        headers: dict[str, str] = {"Content-Type": content_type}
+
+        backoff_delays = [1, 2, 4]
+        last_error: GameChangerAPIError | None = None
+
+        for attempt, backoff in enumerate(backoff_delays):
+            logger.debug("POST %s (attempt %d)", url, attempt + 1)
+            response = self._session.post(
+                url, json=body, params=params, timeout=timeout, headers=headers
+            )
+            logger.debug("POST %s -> %d", path, response.status_code)
+
+            if response.status_code == 200:
+                return response.json()
+
+            if response.status_code == 401:
+                new_token = self._token_manager.force_refresh()
+                self._session.headers["gc-token"] = new_token
+                retry_response = self._session.post(
+                    url, json=body, params=params, timeout=timeout, headers=headers
+                )
+                if retry_response.status_code == 200:
+                    return retry_response.json()
+                if retry_response.status_code == 401:
+                    raise CredentialExpiredError(
+                        f"Credentials rejected for {path} "
+                        f"(HTTP {retry_response.status_code}). "
+                        "Credentials may be expired -- check .env or run: bb creds check"
+                    )
+                response = retry_response
+
+            if response.status_code == 403:
+                raise ForbiddenError(
+                    f"Access denied for {path} "
+                    f"(HTTP {response.status_code}). "
+                    "Credentials may be expired -- check .env or run: bb creds check"
+                )
+
+            if response.status_code == 429:
+                retry_after = _parse_retry_after(
+                    response.headers.get("Retry-After", str(_DEFAULT_RETRY_AFTER_SECONDS))
+                )
+                logger.warning(
+                    "Rate limit hit on %s (HTTP 429). Waiting %ds before raising.",
+                    path,
+                    retry_after,
+                )
+                time.sleep(retry_after)
+                raise RateLimitError(
+                    f"Rate limit exceeded for {path} (HTTP 429). "
+                    f"Waited {retry_after}s."
+                )
+
+            if 500 <= response.status_code < 600:
+                last_error = GameChangerAPIError(
+                    f"Server error for {path} "
+                    f"(HTTP {response.status_code}) after {attempt + 1} attempt(s)."
+                )
+                if attempt < len(backoff_delays) - 1:
+                    logger.warning(
+                        "Server error %d on %s -- retrying in %ds (attempt %d/3)",
+                        response.status_code,
+                        path,
+                        backoff,
+                        attempt + 1,
+                    )
+                    time.sleep(backoff)
+                    continue
+                raise last_error
+
+            raise GameChangerAPIError(
+                f"Unexpected status {response.status_code} for {path}."
+            )
+
     def post(
         self,
         path: str,

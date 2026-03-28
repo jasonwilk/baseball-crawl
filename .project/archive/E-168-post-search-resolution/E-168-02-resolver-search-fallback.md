@@ -4,7 +4,7 @@
 [E-168: Switch Opponent Resolution to POST /search](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the `OpponentResolver` will attempt to resolve unlinked opponents via `POST /search` after the primary progenitor chain completes. Opponents matching the auto-accept criteria (exact name + season year + single result) are resolved automatically with `resolution_method='search'`. Ambiguous or unmatched opponents remain unlinked for manual resolution.

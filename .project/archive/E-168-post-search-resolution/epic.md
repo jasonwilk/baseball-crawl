@@ -1,7 +1,7 @@
 # E-168: Switch Opponent Resolution to POST /search
 
 ## Status
-`READY`
+`COMPLETED`
 <!-- Lifecycle: DRAFT → READY → ACTIVE → COMPLETED (or BLOCKED / ABANDONED) -->
 
 ## Overview
@@ -45,9 +45,9 @@ Replace the unverified `GET /search/opponent-import` endpoint in the admin resol
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-168-01 | Switch admin resolve search to POST /search | TODO | None | - |
-| E-168-02 | Add POST /search fallback to OpponentResolver | TODO | E-168-01 | - |
-| E-168-03 | Update opponent resolution flow documentation | TODO | E-168-01, E-168-02 | - |
+| E-168-01 | Switch admin resolve search to POST /search | DONE | None | - |
+| E-168-02 | Add POST /search fallback to OpponentResolver | DONE | E-168-01 | - |
+| E-168-03 | Update opponent resolution flow documentation | DONE | E-168-01, E-168-02 | - |
 
 ## Dispatch Team
 - software-engineer
@@ -175,3 +175,34 @@ However, the search fallback (E-168-02) has **verified identity** — exact name
 | **Total** | **33** | **31** | **2** |
 
 Dismissed findings (Codex iterations 1 and 2): DE consultation for E-168-02 — no schema changes, no migrations, uses only existing write infrastructure (`ensure_team_row()` + existing upsert pattern).
+
+- 2026-03-28: **COMPLETED.** All 3 stories DONE. 30 ACs verified (11 + 10 + 9). Implementation review: 4 findings from Codex code review, all accepted and remediated. Summary: Admin resolve search switched from unverified GET /search/opponent-import to live-confirmed POST /search with normalized response shape. Auto-resolver gained POST /search fallback for ~14% null-progenitor opponents (exact name + season year + single result auto-accept). TN-8 backfill ensures name-only stubs get gc_uuid/public_id. Resolution flow docs updated across 4 files.
+
+### Implementation Review Scorecard
+| Review Pass | Findings | Accepted | Dismissed |
+|---|---|---|---|
+| Per-story CR -- E-168-01 | 0 | 0 | 0 |
+| Per-story CR -- E-168-02 | 0 | 0 | 0 |
+| Per-story CR -- E-168-03 | 0 | 0 | 0 |
+| CR integration review | 0 | 0 | 0 |
+| Codex code review | 4 | 4 | 0 |
+| **Total** | **4** | **4** | **0** |
+
+### Documentation Assessment
+Documentation impact addressed by E-168-03 (updated opponent-resolution flow doc, POST /search endpoint spec, GET /search/opponent-import deprecation note, API README).
+
+### Context-Layer Assessment
+1. **New agent capability or tool?** No — no new agents, tools, or MCP servers.
+2. **New workflow or skill?** No — no new skills or workflow triggers.
+3. **Changed project conventions?** No — no new conventions (resolution_method='search' is a data value, not a convention).
+4. **New architectural pattern?** No — follows existing patterns (ensure_team_row, client methods, admin routes).
+5. **Lessons learned that should be codified?** No — no novel failure modes or process insights beyond what's already captured.
+6. **Changed deployment or infrastructure?** No — no Docker, env var, or infrastructure changes.
+
+No context-layer impact. All 6 triggers: **No**.
+
+### Ideas Review
+No CANDIDATE ideas are directly unblocked by E-168. IDEA-043 (fuzzy duplicate detection) remains a separate concern from search-based resolution. IDEA-018 (fuzzy LLM opponent resolution) is partially addressed by the search fallback but remains relevant for ambiguous multi-match cases.
+
+### Vision Signals
+28 unprocessed vision signals exist in `docs/vision-signals.md` (last curation: 2026-03-13). Consider "curate the vision" at a natural pause.

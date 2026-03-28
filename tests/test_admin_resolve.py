@@ -146,16 +146,28 @@ def _get_link_row(db_path: Path, link_id: int) -> dict | None:
 
 _MOCK_SEARCH_RESULTS = [
     {
-        "id": "uuid-rival-001",
         "name": "Rival HS Eagles",
-        "location": {"city": "Lincoln", "state": "NE"},
-        "age_group": "varsity",
-        "record": {"wins": 10, "losses": 3},
+        "gc_uuid": "uuid-rival-001",
+        "public_id": "rival-eagles-slug",
+        "city": "Lincoln",
+        "state": "NE",
+        "season_year": 2026,
+        "season_name": "spring",
+        "sport": "baseball",
+        "num_players": 15,
+        "staff": ["Coach Smith"],
     },
     {
-        "id": "uuid-rival-002",
         "name": "Rival HS Hawks",
-        "location": {"city": "Omaha", "state": "NE"},
+        "gc_uuid": "uuid-rival-002",
+        "public_id": "rival-hawks-slug",
+        "city": "Omaha",
+        "state": "NE",
+        "season_year": 2026,
+        "season_name": "spring",
+        "sport": "baseball",
+        "num_players": 12,
+        "staff": [],
     },
 ]
 
@@ -243,8 +255,9 @@ class TestSuggestionPage:
             client, _ = _auth_client(db_path, "search2@example.com")
             resp = client.get(f"/admin/opponents/{ids['unresolved_link']}/resolve")
         assert 'name="q"' in resp.text
-        assert 'name="state"' in resp.text
-        assert 'name="city"' in resp.text
+        # State/city filters removed (AC-10: POST /search only supports name)
+        assert 'name="state"' not in resp.text
+        assert 'name="city"' not in resp.text
 
     def test_no_results_message(self, tmp_path: Path) -> None:
         db_path, ids = _make_db(tmp_path)
@@ -277,9 +290,115 @@ class TestSuggestionPage:
         ):
             client, _ = _auth_client(db_path, "search5@example.com")
             resp = client.get(
-                f"/admin/opponents/{ids['unresolved_link']}/resolve?q=Eagles&state=NE&city=Lincoln"
+                f"/admin/opponents/{ids['unresolved_link']}/resolve?q=Eagles"
             )
-        mock_search.assert_called_once_with("Eagles", 2026, "NE", "Lincoln")
+        mock_search.assert_called_once_with("Eagles")
+
+
+class TestSearchResultRendering:
+    """AC-3, AC-4: Search result display and Select link format."""
+
+    def test_select_link_uses_public_id_and_gc_uuid(self, tmp_path: Path) -> None:
+        db_path, ids = _make_db(tmp_path)
+        with (
+            patch.dict("os.environ", _admin_env(db_path, "render1@example.com")),
+            patch("src.api.routes.admin._gc_search_teams", return_value=_MOCK_SEARCH_RESULTS),
+        ):
+            client, _ = _auth_client(db_path, "render1@example.com")
+            resp = client.get(f"/admin/opponents/{ids['unresolved_link']}/resolve")
+        assert "confirm=rival-eagles-slug" in resp.text
+        assert "gc_uuid=uuid-rival-001" in resp.text
+
+    def test_location_and_season_year_displayed(self, tmp_path: Path) -> None:
+        db_path, ids = _make_db(tmp_path)
+        with (
+            patch.dict("os.environ", _admin_env(db_path, "render2@example.com")),
+            patch("src.api.routes.admin._gc_search_teams", return_value=_MOCK_SEARCH_RESULTS),
+        ):
+            client, _ = _auth_client(db_path, "render2@example.com")
+            resp = client.get(f"/admin/opponents/{ids['unresolved_link']}/resolve")
+        assert "Lincoln" in resp.text
+        assert "NE" in resp.text
+        assert "2026" in resp.text
+
+
+class TestSearchNormalization:
+    """AC-2: _gc_search_teams returns normalized flat dicts."""
+
+    def test_normalize_post_search_response(self) -> None:
+        from src.api.routes.admin import _gc_search_teams
+
+        mock_api_response = {
+            "total_count": 1,
+            "hits": [
+                {
+                    "type": "team",
+                    "result": {
+                        "id": "uuid-123",
+                        "public_id": "slug-abc",
+                        "name": "Test Team",
+                        "sport": "baseball",
+                        "location": {"city": "Omaha", "state": "NE", "country": "US"},
+                        "season": {"name": "spring", "year": 2026},
+                        "number_of_players": 15,
+                        "staff": ["Coach A"],
+                    },
+                }
+            ],
+            "next_page": None,
+        }
+        with patch("src.gamechanger.client.GameChangerClient") as MockClient:
+            MockClient.return_value.post_json.return_value = mock_api_response
+            results = _gc_search_teams("Test Team")
+
+        assert len(results) == 1
+        r = results[0]
+        assert r["name"] == "Test Team"
+        assert r["gc_uuid"] == "uuid-123"
+        assert r["public_id"] == "slug-abc"
+        assert r["city"] == "Omaha"
+        assert r["state"] == "NE"
+        assert r["season_year"] == 2026
+        assert r["season_name"] == "spring"
+        assert r["sport"] == "baseball"
+        assert r["num_players"] == 15
+        assert r["staff"] == ["Coach A"]
+
+    def test_normalize_empty_hits(self) -> None:
+        from src.api.routes.admin import _gc_search_teams
+
+        with patch("src.gamechanger.client.GameChangerClient") as MockClient:
+            MockClient.return_value.post_json.return_value = {"total_count": 0, "hits": []}
+            results = _gc_search_teams("Nothing")
+
+        assert results == []
+
+    def test_normalize_missing_optional_fields(self) -> None:
+        from src.api.routes.admin import _gc_search_teams
+
+        mock_response = {
+            "hits": [
+                {
+                    "type": "team",
+                    "result": {
+                        "id": "uuid-456",
+                        "public_id": "slug-def",
+                        "name": "Sparse Team",
+                    },
+                }
+            ],
+        }
+        with patch("src.gamechanger.client.GameChangerClient") as MockClient:
+            MockClient.return_value.post_json.return_value = mock_response
+            results = _gc_search_teams("Sparse")
+
+        assert len(results) == 1
+        r = results[0]
+        assert r["name"] == "Sparse Team"
+        assert r["city"] is None
+        assert r["state"] is None
+        assert r["season_year"] is None
+        assert r["staff"] == []
 
 
 class TestSkipFlow:
@@ -316,7 +435,7 @@ class TestPasteURLLink:
 
 
 class TestConfirmFlow:
-    """AC-7a, AC-7b: Confirm page and POST."""
+    """Confirm page and POST with public_id + gc_uuid."""
 
     def test_confirm_page_shows_profile(self, tmp_path: Path) -> None:
         db_path, ids = _make_db(tmp_path)
@@ -326,11 +445,15 @@ class TestConfirmFlow:
         ):
             client, _ = _auth_client(db_path, "confirm1@example.com")
             resp = client.get(
-                f"/admin/opponents/{ids['unresolved_link']}/resolve?confirm=uuid-rival-001"
+                f"/admin/opponents/{ids['unresolved_link']}/resolve"
+                "?confirm=rival-eagles-slug&gc_uuid=uuid-rival-001"
             )
         assert resp.status_code == 200
         assert "Rival HS Eagles" in resp.text
         assert "Confirm connection" in resp.text
+        # gc_uuid should be in a hidden field
+        assert 'name="gc_uuid"' in resp.text
+        assert "uuid-rival-001" in resp.text
 
     def test_confirm_duplicate_warning(self, tmp_path: Path) -> None:
         db_path, ids = _make_db(tmp_path)
@@ -349,12 +472,13 @@ class TestConfirmFlow:
         ):
             client, _ = _auth_client(db_path, "confirm2@example.com")
             resp = client.get(
-                f"/admin/opponents/{ids['unresolved_link']}/resolve?confirm=uuid-rival-001"
+                f"/admin/opponents/{ids['unresolved_link']}/resolve"
+                "?confirm=rival-eagles-slug&gc_uuid=uuid-rival-001"
             )
         assert "Duplicate warning" in resp.text
         assert "merge" in resp.text.lower()
 
-    def test_confirm_post_resolves(self, tmp_path: Path) -> None:
+    def test_confirm_post_resolves_with_public_id_and_gc_uuid(self, tmp_path: Path) -> None:
         db_path, ids = _make_db(tmp_path)
         with (
             patch.dict("os.environ", _admin_env(db_path, "confirm3@example.com")),
@@ -363,7 +487,11 @@ class TestConfirmFlow:
             client, _ = _auth_client(db_path, "confirm3@example.com")
             resp = client.post(
                 f"/admin/opponents/{ids['unresolved_link']}/resolve",
-                data={"csrf_token": _CSRF, "confirm_id": "uuid-rival-001"},
+                data={
+                    "csrf_token": _CSRF,
+                    "confirm_id": "rival-eagles-slug",
+                    "gc_uuid": "uuid-rival-001",
+                },
                 follow_redirects=False,
             )
         assert resp.status_code == 303
@@ -373,6 +501,35 @@ class TestConfirmFlow:
         assert row["resolved_team_id"] is not None
         assert row["resolution_method"] == "search"
         assert row["public_id"] == "rival-eagles-slug"
+
+        # Verify the team row has the gc_uuid
+        conn = sqlite3.connect(str(db_path))
+        conn.row_factory = sqlite3.Row
+        team_row = conn.execute(
+            "SELECT gc_uuid, public_id FROM teams WHERE id = ?",
+            (row["resolved_team_id"],),
+        ).fetchone()
+        conn.close()
+        assert team_row["gc_uuid"] == "uuid-rival-001"
+        assert team_row["public_id"] == "rival-eagles-slug"
+
+    def test_confirm_post_without_gc_uuid_still_works(self, tmp_path: Path) -> None:
+        """POST without gc_uuid (edge case) should still resolve."""
+        db_path, ids = _make_db(tmp_path)
+        with (
+            patch.dict("os.environ", _admin_env(db_path, "confirm4@example.com")),
+            patch("src.api.routes.admin.resolve_team", return_value=_MOCK_PROFILE),
+        ):
+            client, _ = _auth_client(db_path, "confirm4@example.com")
+            resp = client.post(
+                f"/admin/opponents/{ids['unresolved_link']}/resolve",
+                data={"csrf_token": _CSRF, "confirm_id": "rival-eagles-slug"},
+                follow_redirects=False,
+            )
+        assert resp.status_code == 303
+        row = _get_link_row(db_path, ids["unresolved_link"])
+        assert row["resolved_team_id"] is not None
+        assert row["resolution_method"] == "search"
 
 
 class TestHiddenFilter:

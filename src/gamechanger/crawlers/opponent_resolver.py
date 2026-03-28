@@ -49,6 +49,7 @@ from src.gamechanger.client import (
     ForbiddenError,
     GameChangerAPIError,
     GameChangerClient,
+    RateLimitError,
 )
 from src.gamechanger.config import CrawlConfig, TeamEntry
 
@@ -60,6 +61,7 @@ _DELAY_SECONDS = 1.5
 _FOLLOW_BRIDGE_DELAY_SECONDS = 2.0
 _ME_USER_ACCEPT = "application/vnd.gc.com.user+json; version=0.3.0"
 _BRIDGE_ACCEPT = "application/vnd.gc.com.team_public_profile_id+json; version=0.0.0"
+_SEARCH_CONTENT_TYPE = "application/vnd.gc.com.post_search+json; version=0.0.0"
 
 # SQL for the auto-resolved upsert with manual-link protection (TN-5).
 # Manual links (resolution_method='manual') preserve resolved_team_id, public_id,
@@ -105,6 +107,7 @@ class ResolveResult:
         errors: Opponents where a skippable error was encountered.
         follow_bridge_failed: Distinct root_team_ids where the follow→bridge
             flow failed to produce a public_id (follow failure or bridge failure).
+        search_resolved: Opponents resolved via POST /search fallback.
     """
 
     resolved: int = field(default=0)
@@ -112,6 +115,7 @@ class ResolveResult:
     skipped_hidden: int = field(default=0)
     errors: int = field(default=0)
     follow_bridge_failed: int = field(default=0)
+    search_resolved: int = field(default=0)
 
 
 class OpponentResolver:
@@ -162,11 +166,29 @@ class OpponentResolver:
                     "Unexpected error resolving team %s: %s", team.id, exc
                 )
                 result.errors += 1
+                continue
+
+            # Search fallback pass for unlinked opponents of this member team
+            try:
+                search_count, search_errors = self._search_fallback_team(team)
+                result.search_resolved += search_count
+                result.unlinked -= search_count
+                result.errors += search_errors
+            except CredentialExpiredError:
+                raise
+            except Exception as exc:  # noqa: BLE001
+                logger.error(
+                    "Unexpected error in search fallback for team %s: %s",
+                    team.id, exc,
+                )
+                result.errors += 1
 
         logger.info(
             "Opponent resolution complete -- "
-            "resolved=%d unlinked=%d skipped_hidden=%d errors=%d",
+            "resolved=%d search_resolved=%d unlinked=%d "
+            "skipped_hidden=%d errors=%d",
             result.resolved,
+            result.search_resolved,
             result.unlinked,
             result.skipped_hidden,
             result.errors,
@@ -432,6 +454,201 @@ class OpponentResolver:
                 1 if is_hidden else 0,
             ),
         )
+
+    # ------------------------------------------------------------------
+    # Search fallback pass (POST /search)
+    # ------------------------------------------------------------------
+
+    def _search_fallback_team(self, team: TeamEntry) -> tuple[int, int]:
+        """Run the POST /search fallback for unlinked opponents of one member team.
+
+        Queries ``opponent_links`` rows where ``our_team_id`` matches this team,
+        ``resolution_method`` is NULL, and ``is_hidden=0``.  For each, calls
+        ``POST /search`` and auto-resolves on exact name + season year match
+        with a single result.
+
+        Args:
+            team: ``TeamEntry`` for the member team.
+
+        Returns:
+            Tuple of (search_resolved_count, error_count).
+
+        Raises:
+            CredentialExpiredError: On 401/403 -- propagated to caller.
+        """
+        if team.internal_id is None:
+            return 0, 0
+
+        our_team_id: int = team.internal_id
+
+        # Fetch member team's season_year once for the entire pass.
+        row = self._db.execute(
+            "SELECT season_year FROM teams WHERE id = ?", (our_team_id,)
+        ).fetchone()
+        if row and row[0] is not None:
+            member_season_year: int = row[0]
+        else:
+            from datetime import datetime
+            member_season_year = datetime.now().year
+
+        unlinked_rows = self._db.execute(
+            "SELECT id, opponent_name, root_team_id FROM opponent_links "
+            "WHERE our_team_id = ? AND resolution_method IS NULL AND is_hidden = 0",
+            (our_team_id,),
+        ).fetchall()
+
+        if not unlinked_rows:
+            return 0
+
+        logger.info(
+            "Search fallback: %d unlinked opponents for team '%s'",
+            len(unlinked_rows), team.name,
+        )
+
+        search_count = 0
+        error_count = 0
+        for link_id, opponent_name, root_team_id in unlinked_rows:
+            try:
+                resolved = self._search_resolve_opponent(
+                    link_id, opponent_name, root_team_id,
+                    our_team_id, member_season_year,
+                )
+                if resolved:
+                    search_count += 1
+            except (CredentialExpiredError, ForbiddenError):
+                raise
+            except (GameChangerAPIError, RateLimitError) as exc:
+                logger.warning(
+                    "Search API error for opponent '%s': %s -- skipping",
+                    opponent_name, exc,
+                )
+                error_count += 1
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "Unexpected error in search fallback for opponent '%s': %s",
+                    opponent_name, exc,
+                )
+                error_count += 1
+            finally:
+                time.sleep(_DELAY_SECONDS)
+
+        if search_count:
+            self._db.commit()
+        return search_count, error_count
+
+    def _search_resolve_opponent(
+        self,
+        link_id: int,
+        opponent_name: str,
+        root_team_id: str,
+        our_team_id: int,
+        member_season_year: int,
+    ) -> bool:
+        """Attempt to resolve one opponent via POST /search.
+
+        Args:
+            link_id: Primary key of the ``opponent_links`` row.
+            opponent_name: Display name to search for.
+            root_team_id: Local registry key for this opponent.
+            our_team_id: INTEGER PK of the member team.
+            member_season_year: Season year of the member team.
+
+        Returns:
+            True if the opponent was resolved, False otherwise.
+
+        Raises:
+            CredentialExpiredError: On 401 (propagated).
+            ForbiddenError: On 403 (propagated).
+            GameChangerAPIError: On 5xx (propagated to caller for logging).
+            RateLimitError: On 429 (propagated to caller for logging).
+        """
+        result = self._client.post_json(
+            "/search",
+            body={"name": opponent_name},
+            params={"start_at_page": 0, "search_source": "search"},
+            content_type=_SEARCH_CONTENT_TYPE,
+        )
+
+        hits = result.get("hits", []) if isinstance(result, dict) else []
+
+        # Filter: exact name match (case-insensitive) + season year match
+        matches = []
+        for hit in hits:
+            r = hit.get("result", {})
+            name = r.get("name", "")
+            season = r.get("season") or {}
+            season_year = season.get("year")
+            if (
+                name.lower() == opponent_name.lower()
+                and season_year == member_season_year
+            ):
+                matches.append(r)
+
+        if len(matches) != 1:
+            if matches:
+                logger.debug(
+                    "Search fallback: %d matches for '%s' (year=%d) -- skipping",
+                    len(matches), opponent_name, member_season_year,
+                )
+            else:
+                logger.debug(
+                    "Search fallback: no exact match for '%s' (year=%d)",
+                    opponent_name, member_season_year,
+                )
+            return False
+
+        match = matches[0]
+        gc_uuid: str = match["id"]
+        public_id: str = match["public_id"]
+        match_name: str = match.get("name", opponent_name)
+        season = match.get("season") or {}
+        season_year: int | None = season.get("year")
+
+        # Ensure team row exists with both identifiers.
+        team_id = ensure_team_row(
+            self._db,
+            gc_uuid=gc_uuid,
+            public_id=public_id,
+            name=match_name,
+            season_year=season_year,
+            source="search_resolver",
+        )
+
+        # TN-8: ensure_team_row step-3 may return a name-only stub without
+        # attaching gc_uuid/public_id.  The search fallback has verified
+        # identity, so explicitly backfill if missing.
+        self._db.execute(
+            """
+            UPDATE teams
+            SET gc_uuid = COALESCE(gc_uuid, ?),
+                public_id = COALESCE(public_id, ?)
+            WHERE id = ? AND (gc_uuid IS NULL OR public_id IS NULL)
+            """,
+            (gc_uuid, public_id, team_id),
+        )
+
+        # Read back effective public_id for the opponent_links row.
+        row = self._db.execute(
+            "SELECT public_id FROM teams WHERE id = ?", (team_id,)
+        ).fetchone()
+        effective_public_id = row[0] if row else None
+
+        # Update the opponent_links row with search resolution.
+        self._db.execute(
+            """
+            UPDATE opponent_links
+            SET resolved_team_id = ?, public_id = ?,
+                resolution_method = 'search', resolved_at = datetime('now')
+            WHERE id = ? AND resolution_method IS NULL
+            """,
+            (team_id, effective_public_id, link_id),
+        )
+
+        logger.info(
+            "Search fallback resolved '%s' -> team %d (gc_uuid=%s, public_id=%s)",
+            opponent_name, team_id, gc_uuid, effective_public_id,
+        )
+        return True
 
     # ------------------------------------------------------------------
     # Experimental: follow→bridge→unfollow resolution

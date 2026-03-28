@@ -1583,6 +1583,149 @@ def test_load_credentials_dotenv_takes_precedence_over_env(
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# post_json() tests (E-168-01)
+# ---------------------------------------------------------------------------
+
+
+@respx.mock
+def test_post_json_returns_parsed_json(monkeypatch: pytest.MonkeyPatch) -> None:
+    """post_json() returns parsed JSON on 200."""
+    respx.post(f"{_BASE_URL}/search").mock(
+        return_value=httpx.Response(200, json={"total_count": 1, "hits": []})
+    )
+    client = _make_client(monkeypatch)
+    result = client.post_json("/search", body={"name": "test"})
+    assert result == {"total_count": 1, "hits": []}
+
+
+@respx.mock
+def test_post_json_sends_json_body(monkeypatch: pytest.MonkeyPatch) -> None:
+    """post_json() sends the body dict as JSON."""
+    route = respx.post(f"{_BASE_URL}/search").mock(
+        return_value=httpx.Response(200, json={"hits": []})
+    )
+    client = _make_client(monkeypatch)
+    client.post_json("/search", body={"name": "eagles"})
+    assert route.called
+    req = route.calls[0].request
+    assert b'"name"' in req.content
+    assert b'"eagles"' in req.content
+
+
+@respx.mock
+def test_post_json_sends_custom_content_type(monkeypatch: pytest.MonkeyPatch) -> None:
+    """post_json() uses the caller-specified Content-Type."""
+    route = respx.post(f"{_BASE_URL}/search").mock(
+        return_value=httpx.Response(200, json={"hits": []})
+    )
+    client = _make_client(monkeypatch)
+    ct = "application/vnd.gc.com.post_search+json; version=0.0.0"
+    client.post_json("/search", body={"name": "test"}, content_type=ct)
+    req = route.calls[0].request
+    assert ct in req.headers.get("content-type", "")
+
+
+@respx.mock
+def test_post_json_sends_query_params(monkeypatch: pytest.MonkeyPatch) -> None:
+    """post_json() forwards query params."""
+    route = respx.post(f"{_BASE_URL}/search").mock(
+        return_value=httpx.Response(200, json={"hits": []})
+    )
+    client = _make_client(monkeypatch)
+    client.post_json("/search", body={"name": "t"}, params={"start_at_page": 0})
+    req = route.calls[0].request
+    assert "start_at_page=0" in str(req.url)
+
+
+@respx.mock
+def test_post_json_401_retries_then_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    """post_json() retries on 401 via token refresh, then raises CredentialExpiredError."""
+    respx.post(f"{_BASE_URL}/search").mock(
+        return_value=httpx.Response(401)
+    )
+    client = _make_client(monkeypatch)
+    with pytest.raises(CredentialExpiredError):
+        client.post_json("/search", body={"name": "test"})
+
+
+@respx.mock
+def test_post_json_401_retry_succeeds(monkeypatch: pytest.MonkeyPatch) -> None:
+    """post_json() succeeds after 401 + refresh + retry returning 200."""
+    respx.post(f"{_BASE_URL}/search").mock(
+        side_effect=[
+            httpx.Response(401),
+            httpx.Response(200, json={"hits": []}),
+        ]
+    )
+    client = _make_client(monkeypatch)
+    result = client.post_json("/search", body={"name": "test"})
+    assert result == {"hits": []}
+
+
+@respx.mock
+def test_post_json_403_raises_forbidden(monkeypatch: pytest.MonkeyPatch) -> None:
+    """post_json() raises ForbiddenError on 403."""
+    respx.post(f"{_BASE_URL}/search").mock(
+        return_value=httpx.Response(403)
+    )
+    client = _make_client(monkeypatch)
+    with pytest.raises(ForbiddenError):
+        client.post_json("/search", body={"name": "test"})
+
+
+@respx.mock
+def test_post_json_429_raises_rate_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    """post_json() raises RateLimitError on 429."""
+    respx.post(f"{_BASE_URL}/search").mock(
+        return_value=httpx.Response(429, headers={"Retry-After": "1"})
+    )
+    client = _make_client(monkeypatch)
+    with pytest.raises(RateLimitError):
+        client.post_json("/search", body={"name": "test"})
+
+
+@respx.mock
+def test_post_json_5xx_retries_then_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    """post_json() retries 3 times on 5xx then raises GameChangerAPIError."""
+    respx.post(f"{_BASE_URL}/search").mock(
+        return_value=httpx.Response(502)
+    )
+    client = _make_client(monkeypatch)
+    with pytest.raises(GameChangerAPIError):
+        client.post_json("/search", body={"name": "test"})
+
+
+@respx.mock
+def test_post_json_5xx_succeeds_on_retry(monkeypatch: pytest.MonkeyPatch) -> None:
+    """post_json() succeeds after initial 5xx then 200."""
+    respx.post(f"{_BASE_URL}/search").mock(
+        side_effect=[
+            httpx.Response(502),
+            httpx.Response(200, json={"hits": [{"type": "team"}]}),
+        ]
+    )
+    client = _make_client(monkeypatch)
+    result = client.post_json("/search", body={"name": "test"})
+    assert result == {"hits": [{"type": "team"}]}
+
+
+@respx.mock
+def test_post_json_unexpected_status_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    """post_json() raises GameChangerAPIError on unexpected status."""
+    respx.post(f"{_BASE_URL}/search").mock(
+        return_value=httpx.Response(418)
+    )
+    client = _make_client(monkeypatch)
+    with pytest.raises(GameChangerAPIError, match="418"):
+        client.post_json("/search", body={"name": "test"})
+
+
+# ---------------------------------------------------------------------------
+# Existing post() tests
+# ---------------------------------------------------------------------------
+
+
 @respx.mock
 def test_post_204_returns_none(monkeypatch: pytest.MonkeyPatch) -> None:
     """post() returns None on 204 No Content."""

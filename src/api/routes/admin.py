@@ -58,7 +58,6 @@ from src.api.db import (
     get_opponent_link_count_for_team,
     get_opponent_link_counts,
     get_opponent_links,
-    get_team_name_by_public_id,
     is_member_team_public_id,
     save_manual_opponent_link,
 )
@@ -2587,7 +2586,6 @@ async def connect_opponent_confirm(request: Request, link_id: int) -> Response:
         return err
 
     duplicate_name = await _get_duplicate_name_for_link(link, public_id, link_id)
-    teams_collision_name = await run_in_threadpool(get_team_name_by_public_id, public_id)
     profile, err = await _fetch_team_profile(request, link, guard, public_id)
     if err is not None:
         return err
@@ -2601,7 +2599,6 @@ async def connect_opponent_confirm(request: Request, link_id: int) -> Response:
             "profile": profile,
             "public_id": public_id,
             "duplicate_name": duplicate_name,
-            "teams_collision_name": teams_collision_name,
             "admin_user": guard,
             "is_admin_page": True,
         },
@@ -2669,20 +2666,14 @@ async def connect_opponent(
     duplicate_name = await run_in_threadpool(
         get_duplicate_opponent_name, public_id, our_team_id, link_id
     )
-    merge_result = await run_in_threadpool(
+    await run_in_threadpool(
         save_manual_opponent_link,
         link_id,
         public_id,
         our_team_id,
         link["opponent_name"],
     )
-    if merge_result["merged"]:
-        msg = quote_plus(
-            f"Linked {link['opponent_name']} -- pointed to existing team"
-            f" {merge_result['merged_team_name']}."
-        )
-    else:
-        msg = _build_connect_success_msg(link["opponent_name"], duplicate_name)
+    msg = _build_connect_success_msg(link["opponent_name"], duplicate_name)
     return RedirectResponse(
         url=f"/admin/opponents?team_id={our_team_id}&msg={msg}",
         status_code=303,
@@ -2733,42 +2724,39 @@ async def disconnect_opponent(request: Request, link_id: int) -> Response:
 # Opponent resolve / skip / unhide routes (E-167-04)
 # ---------------------------------------------------------------------------
 
-_SEARCH_ACCEPT = "application/vnd.gc.com.none+json; version=0.0.0"
+_SEARCH_CONTENT_TYPE = "application/vnd.gc.com.post_search+json; version=0.0.0"
 
 
-def _gc_search_teams(
-    name: str,
-    year: int | None = None,
-    state: str | None = None,
-    city: str | None = None,
-) -> list[dict[str, Any]]:
-    """Search the GC opponent-import endpoint. Returns list of team dicts."""
+def _gc_search_teams(name: str) -> list[dict[str, Any]]:
+    """Search GC teams via POST /search. Returns normalized flat dicts."""
     from src.gamechanger.client import GameChangerClient
 
     client = GameChangerClient()
-    params: dict[str, Any] = {"name": name, "sport": "baseball"}
-    if year:
-        params["year"] = year
-    if state:
-        params["state"] = state
-    if city:
-        params["city"] = city
-    result = client.get(
-        "/search/opponent-import",
-        params=params,
-        accept=_SEARCH_ACCEPT,
+    result = client.post_json(
+        "/search",
+        body={"name": name},
+        params={"start_at_page": 0, "search_source": "search"},
+        content_type=_SEARCH_CONTENT_TYPE,
     )
-    if isinstance(result, list):
-        return result
-    return []
-
-
-def _get_member_team_season_year(db_conn: sqlite3.Connection, our_team_id: int) -> int | None:
-    """Get the season_year of the member team that owns this opponent link."""
-    row = db_conn.execute(
-        "SELECT season_year FROM teams WHERE id = ?", (our_team_id,)
-    ).fetchone()
-    return row[0] if row else None
+    hits = result.get("hits", []) if isinstance(result, dict) else []
+    normalized: list[dict[str, Any]] = []
+    for hit in hits:
+        r = hit.get("result", {})
+        location = r.get("location") or {}
+        season = r.get("season") or {}
+        normalized.append({
+            "name": r.get("name"),
+            "gc_uuid": r.get("id"),
+            "public_id": r.get("public_id"),
+            "city": location.get("city"),
+            "state": location.get("state"),
+            "season_year": season.get("year"),
+            "season_name": season.get("name"),
+            "sport": r.get("sport"),
+            "num_players": r.get("number_of_players"),
+            "staff": r.get("staff", []),
+        })
+    return normalized
 
 
 @router.get("/opponents/{link_id}/resolve", response_model=None)
@@ -2783,6 +2771,7 @@ async def resolve_opponent_page(request: Request, link_id: int) -> Response:
         return HTMLResponse(content="Opponent link not found", status_code=404)
 
     confirm_id = request.query_params.get("confirm", "").strip()
+    gc_uuid = request.query_params.get("gc_uuid", "").strip()
 
     if confirm_id:
         # Confirm page: fetch team detail and check for duplicates
@@ -2813,6 +2802,7 @@ async def resolve_opponent_page(request: Request, link_id: int) -> Response:
             {
                 "link": link, "mode": "confirm",
                 "profile": profile, "confirm_id": confirm_id,
+                "gc_uuid": gc_uuid,
                 "duplicate_team": duplicate_team,
                 "admin_user": guard, "is_admin_page": True,
             },
@@ -2820,21 +2810,11 @@ async def resolve_opponent_page(request: Request, link_id: int) -> Response:
 
     # Search mode
     q = request.query_params.get("q", "").strip() or link["opponent_name"]
-    state = request.query_params.get("state", "").strip()
-    city = request.query_params.get("city", "").strip()
-
-    from datetime import datetime
-    with closing(get_connection()) as conn:
-        year = _get_member_team_season_year(conn, link["our_team_id"])
-    if year is None:
-        year = datetime.now().year
 
     results: list[dict[str, Any]] = []
     search_error: str | None = None
     try:
-        results = await run_in_threadpool(
-            _gc_search_teams, q, year, state or None, city or None
-        )
+        results = await run_in_threadpool(_gc_search_teams, q)
     except Exception as exc:
         search_error = str(exc)
         logger.warning("GC search failed for link %d: %s", link_id, exc)
@@ -2845,7 +2825,7 @@ async def resolve_opponent_page(request: Request, link_id: int) -> Response:
         {
             "link": link, "mode": "search",
             "results": results, "search_error": search_error,
-            "q": q, "state": state, "city": city, "year": year,
+            "q": q,
             "admin_user": guard, "is_admin_page": True,
         },
     )
@@ -2856,6 +2836,7 @@ async def resolve_opponent_confirm(
     request: Request,
     link_id: int,
     confirm_id: str = Form(...),
+    gc_uuid: str = Form(""),
 ) -> Response:
     """Confirm opponent resolution from a GC search result."""
     guard = await _require_admin(request)
@@ -2866,37 +2847,32 @@ async def resolve_opponent_confirm(
     if not link:
         return HTMLResponse(content="Opponent link not found", status_code=404)
 
-    # resolve_team() expects a public_id slug (calls GET /public/teams/{public_id}).
-    # The GC search results' 'id' field may be a UUID rather than a public_id.
-    # If resolve_team() 404s, fall back to using confirm_id as gc_uuid directly
-    # (best-effort path until search response schema is verified live).
     from src.db.teams import ensure_team_row
 
+    # confirm_id is a public_id slug; gc_uuid is the progenitor_team_id UUID.
+    # resolve_team() fetches the public profile to get name/year.
     profile = None
     try:
         profile = await run_in_threadpool(resolve_team, confirm_id)
     except (TeamNotFoundError, GameChangerAPIError):
-        logger.info(
-            "resolve_team(%r) failed; treating confirm_id as gc_uuid fallback",
-            confirm_id,
+        logger.warning(
+            "resolve_team(%r) failed during confirm POST", confirm_id,
         )
 
     if profile is not None:
         team_name = profile.name
-        gc_uuid = confirm_id
-        input_public_id = profile.public_id
+        input_public_id = profile.public_id or confirm_id
         season_year = profile.year
     else:
         team_name = link["opponent_name"]
-        gc_uuid = confirm_id
-        input_public_id = None
+        input_public_id = confirm_id
         season_year = None
 
     with closing(get_connection()) as conn:
         conn.execute("PRAGMA foreign_keys = ON")
         team_id = ensure_team_row(
             conn,
-            gc_uuid=gc_uuid,
+            gc_uuid=gc_uuid or None,
             public_id=input_public_id,
             name=team_name,
             season_year=season_year,

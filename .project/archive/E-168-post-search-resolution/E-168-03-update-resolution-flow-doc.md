@@ -4,7 +4,7 @@
 [E-168: Switch Opponent Resolution to POST /search](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, `docs/api/flows/opponent-resolution.md` will document the POST /search resolution path alongside the existing progenitor chain, covering both the admin resolve workflow and the auto-resolver search fallback. The doc will accurately reflect the two-pass resolution strategy.

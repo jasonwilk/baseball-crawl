@@ -4,7 +4,7 @@
 [E-168: Switch Opponent Resolution to POST /search](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the admin opponent resolve workflow will search for teams using `POST /search` instead of `GET /search/opponent-import`. Search results will display correctly with data from the verified response schema, and clicking "Select" will pass both `public_id` and `gc_uuid` through the confirm flow so `resolve_team()` receives a valid `public_id` slug and succeeds without the UUID-mismatch fallback.

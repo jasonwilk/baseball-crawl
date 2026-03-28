@@ -125,9 +125,11 @@ see_also:
 
 **Status:** CONFIRMED LIVE -- 200 OK. **Response body schema not yet captured.** Last verified: 2026-03-09.
 
-The team search endpoint used by the GC UI when a coach searches for opponent teams to import. This is a search-as-you-type endpoint -- the UI fires requests on each keystroke (debounced). It is the primary mechanism for automated opponent resolution by team name.
+> **Note (E-168):** This endpoint is no longer the primary search mechanism for opponent resolution in our pipeline. As of E-168, both the admin resolve workflow and the automated opponent resolver use [`POST /search`](post-search.md) instead, which has a fully documented request/response schema. This endpoint remains available in the GC UI for the "add opponent" import flow.
 
-**Coaching relevance: CRITICAL.** This endpoint enables programmatic search of any team in the GameChanger database by name, sport, age group, location, and season -- the key to building an automated opponent discovery pipeline.
+The team search endpoint used by the GC UI when a coach searches for opponent teams to import. This is a search-as-you-type endpoint -- the UI fires requests on each keystroke (debounced).
+
+**Coaching relevance:** This endpoint enables search of any team in the GameChanger database by name, sport, age group, location, and season. For programmatic opponent resolution, prefer [`POST /search`](post-search.md) which has a confirmed response schema.
 
 ```
 GET https://api.team-manager.gc.com/search/opponent-import

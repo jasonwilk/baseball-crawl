@@ -51,6 +51,7 @@
   <form method="post" action="/admin/opponents/{{ link.id }}/resolve">
     <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
     <input type="hidden" name="confirm_id" value="{{ confirm_id }}">
+    <input type="hidden" name="gc_uuid" value="{{ gc_uuid }}">
     <div class="flex gap-2">
       <button type="submit" class="bg-green-700 text-white px-4 py-2 rounded text-sm hover:bg-green-800">
         Confirm connection
@@ -97,16 +98,6 @@
       <input type="text" name="q" value="{{ q }}"
              class="border rounded px-2 py-1 text-sm w-48">
     </div>
-    <div>
-      <label class="block text-xs text-gray-600">State</label>
-      <input type="text" name="state" value="{{ state }}"
-             class="border rounded px-2 py-1 text-sm w-24">
-    </div>
-    <div>
-      <label class="block text-xs text-gray-600">City</label>
-      <input type="text" name="city" value="{{ city }}"
-             class="border rounded px-2 py-1 text-sm w-24">
-    </div>
     <button type="submit" class="bg-blue-900 text-white px-4 py-1 rounded text-sm hover:bg-blue-800">
       Search
     </button>
@@ -120,20 +111,17 @@
   {% for team in results %}
   <div class="p-3 bg-white rounded shadow border flex items-center justify-between">
     <div class="text-sm">
-      <p class="font-semibold">{{ team.name if team.name else team.id }}</p>
-      {% if team.location %}
+      <p class="font-semibold">{{ team.name }}</p>
+      {% if team.city or team.state %}
       <p class="text-gray-500 text-xs">
-        {{ team.location.city or '' }}{% if team.location.city and team.location.state %}, {% endif %}{{ team.location.state or '' }}
+        {{ team.city or '' }}{% if team.city and team.state %}, {% endif %}{{ team.state or '' }}
       </p>
       {% endif %}
-      {% if team.age_group %}
-      <span class="text-xs text-gray-400">{{ team.age_group }}</span>
-      {% endif %}
-      {% if team.record %}
-      <span class="text-xs text-gray-400">{{ team.record.wins|default(0) }}-{{ team.record.losses|default(0) }}</span>
+      {% if team.season_year %}
+      <span class="text-xs text-gray-400">{{ team.season_year }}</span>
       {% endif %}
     </div>
-    <a href="/admin/opponents/{{ link.id }}/resolve?confirm={{ team.id }}"
+    <a href="/admin/opponents/{{ link.id }}/resolve?confirm={{ team.public_id }}&gc_uuid={{ team.gc_uuid }}"
        class="bg-blue-900 text-white px-3 py-1 rounded text-xs hover:bg-blue-800">
       Select
     </a>

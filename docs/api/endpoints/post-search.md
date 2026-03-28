@@ -45,7 +45,7 @@ caveats:
     "nighthawks". The mobile app fires this endpoint repeatedly as the user types.
 see_also:
   - path: /search/opponent-import
-    reason: Alternative search endpoint (GET, web/mobile) for opponent import flow -- known response schema
+    reason: Legacy opponent import search endpoint (GET). POST /search is now the primary search mechanism for opponent resolution (E-168).
   - path: /search/history
     reason: GET to read search history; POST to record a completed search
 ---
@@ -54,7 +54,7 @@ see_also:
 
 **Status:** CONFIRMED -- live curl returned 200 OK (2026-03-27). Full request/response schema documented.
 
-Main general-purpose team search. Used by the iOS GC app search bar (search-as-you-type) and confirmed working from web profile. Distinct from `GET /search/opponent-import`, which is used specifically in the "add opponent" import flow.
+Main general-purpose team search. Used by the iOS GC app search bar (search-as-you-type), confirmed working from web profile, and used programmatically for opponent resolution (both admin resolve and automated fallback -- see [opponent-resolution.md](../flows/opponent-resolution.md)).
 
 ```
 POST https://api.team-manager.gc.com/search?start_at_page={page}&search_source=search
