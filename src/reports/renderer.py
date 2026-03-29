@@ -34,7 +34,7 @@ _MIN_PA_BATTING = 20
 _MIN_IP_OUTS_PITCHING = 45  # 15 IP = 45 outs
 
 # Spray chart minimum BIP threshold (consistent with dashboard display)
-_MIN_BIP_SPRAY = 10
+_MIN_BIP_SPRAY = 3
 
 
 def _build_jinja_env() -> Environment:
