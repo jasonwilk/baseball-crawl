@@ -1,7 +1,7 @@
 # E-182: Document GC Client ID Rotation Behavior
 
 ## Status
-`READY`
+`COMPLETED`
 
 ## Overview
 Document GameChanger's web client ID and key rotation as a known, recurring operational event. The auth docs currently cover extraction mechanics but do not frame rotation as a durable behavior pattern with a clear symptom-diagnosis-recovery workflow. This epic closes that gap and records the knowledge in api-scout's agent memory so future sessions never assume client IDs are permanent.
@@ -31,8 +31,8 @@ No expert consultation required beyond api-scout (API knowledge owner) and claud
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-182-01 | Document Client ID Rotation in Auth Docs | TODO | None | - |
-| E-182-02 | Add Client ID Rotation to api-scout Memory | TODO | None | - |
+| E-182-01 | Document Client ID Rotation in Auth Docs | DONE | None | - |
+| E-182-02 | Add Client ID Rotation to api-scout Memory | DONE | None | - |
 
 ## Dispatch Team
 - api-scout
@@ -70,6 +70,17 @@ None -- scope is clear and well-bounded.
 
 ## History
 - 2026-03-29: Created. Expert consultation: claude-architect (memory file structure -- reference type, Credential Lifecycle placement), api-scout (all 6 technical points confirmed -- rotation trigger, symptom pattern with 401 ambiguity nuance, recovery path, unpredictable frequency, dual-value scope, mobile parallel with extraction limitation).
+- 2026-03-29: COMPLETED. Both stories delivered. Per-story CR E-182-01: NOT APPROVED round 1 (2 MUST FIX, 1 SHOULD FIX -- all fixed), APPROVED round 2. E-182-02 context-layer-only, CR skipped. All ACs verified.
+- **Documentation assessment**: No additional impact -- the epic deliverables ARE the documentation.
+- **Context-layer assessment**:
+  - New agent capability or tool pattern introduced? **No** -- no new agent capabilities.
+  - New rule, convention, or workflow constraint discovered? **No** -- rotation was known; this documents it.
+  - CLAUDE.md or agent definition needs updating? **No** -- auth.md is the right home for this content.
+  - New skill or hook needed? **No**.
+  - Agent memory pattern changed? **Yes** -- E-182-02 already delivered the api-scout memory file. No additional codification needed.
+  - Routing or dispatch pattern affected? **No**.
+- No unprocessed vision signals observed during dispatch.
+- 2026-03-29: Set to ACTIVE, dispatch begun.
 - 2026-03-29: Set to READY after 4 review passes (2 internal, 2 Codex). 15 findings accepted, 5 dismissed. Key refinements: AC-2 narrowed to net-new content only, permanence claim reconciliation added (AC-4), mobile parallel tightened to reference existing section, env vars named explicitly, "Manual Extraction" aligned across all references, cascade drift caught and fixed.
 
 ### Review Scorecard
@@ -79,4 +90,5 @@ None -- scope is clear and well-bounded.
 | Internal iteration 1 -- Holistic team (PM 4, api-scout 0, CA 1) | 5 | 5 | 0 |
 | Codex iteration 1 | 4 | 3 | 1 |
 | Codex iteration 2 | 4 | 3 | 1 |
-| **Total** | **20** | **15** | **5** |
+| Per-story CR -- E-182-01 | 3 | 3 | 0 |
+| **Total** | **23** | **18** | **5** |

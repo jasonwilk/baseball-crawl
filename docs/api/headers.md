@@ -106,7 +106,7 @@ These headers are used exclusively by `POST /auth` and are not required for any 
 |--------|-------------|
 | `gc-signature` | HMAC-SHA256 signature computed from `clientKey`. Format: `{nonce}.{hmac}` where nonce is Base64(random 32 bytes) and hmac is HMAC-SHA256(clientKey, timestamp\|nonce_bytes\|sorted_body_values[\|previousSig_bytes]). Algorithm fully reverse-engineered 2026-03-07. See `auth.md` for full details. |
 | `gc-timestamp` | Unix timestamp in seconds at signing time. Must be current -- stale timestamps (~6+ hours) are rejected with HTTP 400. |
-| `gc-client-id` | Stable UUID matching the `cid` field in the JWT payload. The `clientId` half of the app bundle's `clientId:clientKey` string. |
+| `gc-client-id` | UUID matching the `cid` field in the JWT payload. The `clientId` half of the app bundle's `clientId:clientKey` string. Stable between GC web bundle redeployments; see `auth.md` [Client ID Rotation](auth.md#client-id-rotation). |
 | `gc-app-version` | Always `"0.0.0"` (web profile). Absent on GET endpoints; present on POST /auth. |
 
 ### Pagination Request Header

@@ -4,7 +4,7 @@
 [E-182: Document GC Client ID Rotation Behavior](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, `docs/api/auth.md` will contain a dedicated subsection documenting client ID and key rotation as a recurring operational event. A first-time reader encountering auth failures will be able to follow a clear path from symptom recognition through diagnosis to recovery, without needing to piece together information from scattered subsections.

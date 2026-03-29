@@ -137,7 +137,7 @@ gc-signature: {nonce}.{hmac}
 
 ### Client Key
 
-`clientKey` is a static Base64-encoded 32-byte secret hardcoded in the web app bundle as `{clientId}:{clientKey}`. Same for all users; store as `GAMECHANGER_CLIENT_KEY_WEB` in `.env`.
+`clientKey` is a Base64-encoded 32-byte secret hardcoded in the web app bundle as `{clientId}:{clientKey}`. Same for all users; stable between GC web bundle redeployments. Store as `GAMECHANGER_CLIENT_KEY_WEB` in `.env`. See `auth.md` [Client ID Rotation](../auth.md#client-id-rotation) for rotation details.
 
 **Freshness:** The `gc-timestamp` must be current. A timestamp 22,316 seconds (~6.2 hours) stale was rejected with HTTP 400.
 

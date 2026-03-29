@@ -4,7 +4,7 @@
 [E-182: Document GC Client ID Rotation Behavior](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, api-scout's agent memory will contain a reference-type file documenting that GC client IDs are not stable across deployments. Future api-scout sessions will know that client IDs rotate and should never be assumed permanent.

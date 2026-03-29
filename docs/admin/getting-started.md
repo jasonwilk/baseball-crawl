@@ -196,8 +196,8 @@ Key variables in `.env`:
 | `APP_ENV` | Runtime environment (`development` or `production`). |
 | `LOG_LEVEL` | Logging level for the FastAPI app (`DEBUG`, `INFO`, `WARNING`, `ERROR`). |
 | `GAMECHANGER_REFRESH_TOKEN_WEB` | GameChanger refresh token JWT (14-day, self-renewing). See `docs/api/auth.md`. |
-| `GAMECHANGER_CLIENT_ID_WEB` | GameChanger client ID (static, from app bundle). |
-| `GAMECHANGER_CLIENT_KEY_WEB` | GameChanger HMAC signing key (static, from app bundle). **Secret.** |
+| `GAMECHANGER_CLIENT_ID_WEB` | GameChanger client ID (from app bundle; stable between GC redeployments). See `docs/api/auth.md`. |
+| `GAMECHANGER_CLIENT_KEY_WEB` | GameChanger HMAC signing key (from app bundle; stable between GC redeployments). **Secret.** See `docs/api/auth.md`. |
 | `GAMECHANGER_DEVICE_ID_WEB` | GameChanger device identifier (stable hex string). |
 | `GAMECHANGER_ACCESS_TOKEN_MOBILE` | Mobile access token (~12-hour lifetime, proxy-captured). |
 | `GAMECHANGER_REFRESH_TOKEN_MOBILE` | Mobile refresh token (14-day lifetime, proxy-captured). |

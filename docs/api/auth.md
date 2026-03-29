@@ -1,5 +1,8 @@
 # Authentication
 
+**Last updated**: 2026-03-29
+**Source**: E-182 (client ID rotation documentation)
+
 GameChanger uses a custom JWT-based authentication scheme with a three-token architecture. There is no standard OAuth or API key flow. The signing algorithm has been fully reverse-engineered (2026-03-07), enabling fully programmatic token refresh and login without browser captures.
 
 ## Three-Token Architecture (Confirmed 2026-03-07)
@@ -19,7 +22,7 @@ GC uses three distinct JWT types with different lifetimes and purposes:
 - Quick heuristic without decoding: `exp - iat < 50,000` → access token (covers both web ~3,600s and mobile ~43,997s); `exp - iat > 1,000,000` → refresh token. Note: the old threshold of `< 10,000` is too narrow for mobile access tokens.
 
 **Credential tier durability (most to least durable):**
-1. **Client ID + Client Key** -- static app-wide secret; only changes on app deploys (potentially months or years)
+1. **Client ID + Client Key** -- app-wide secret; stable between GC web bundle redeployments (potentially months apart, but unpredictable)
 2. **Refresh token** -- 14-day lifetime; self-renewing (each refresh call returns a new refresh token)
 3. **Access token** -- ~61-minute lifetime; generated on demand via refresh; should not be stored
 
@@ -145,13 +148,13 @@ headers["gc-timestamp"] = String(timestamp);
 
 ### Client Key
 
-The `clientKey` is a **static, app-wide secret** hardcoded in the main web bundle as:
+The `clientKey` is an **app-wide secret** (stable between GC web bundle redeployments) hardcoded in the main web bundle as:
 
 ```
 {clientId}:{clientKey}
 ```
 
-The JS splits this on `:` and passes the two parts to the `AuthClient` constructor. The `clientKey` is a Base64-encoded 32-byte HMAC secret. It is the same for all users and only changes when the app bundle is redeployed.
+The JS splits this on `:` and passes the two parts to the `AuthClient` constructor. The `clientKey` is a Base64-encoded 32-byte HMAC secret. It is the same for all users, stable between GC web bundle redeployments (potentially months apart, but unpredictable). See [Client ID Rotation](#client-id-rotation) for details.
 
 Store in `.env` as `GAMECHANGER_CLIENT_KEY_WEB`. Store the `clientId` as `GAMECHANGER_CLIENT_ID_WEB`.
 
@@ -251,8 +254,8 @@ Updated credential architecture as of 2026-03-07. The `gc-signature` field is no
 | Variable | Description | Source |
 |----------|-------------|--------|
 | `GAMECHANGER_REFRESH_TOKEN_WEB` | Refresh token JWT (14-day lifetime). Used as `gc-token` in `POST /auth {type:"refresh"}`. Self-renewing -- updated after each refresh call. | Browser capture (once), then programmatic renewal |
-| `GAMECHANGER_CLIENT_ID_WEB` | Stable UUID. The `clientId` half of the `clientId:clientKey` string from the app bundle. Used as `gc-client-id` header and as body field in `client-auth`. Matches `cid` in JWT payload. | App bundle (static) |
-| `GAMECHANGER_CLIENT_KEY_WEB` | Base64-encoded 32-byte HMAC key. The `clientKey` half of the app bundle's `clientId:clientKey` string. Used to compute `gc-signature`. **Treat as a secret -- never log or commit.** | App bundle (static) |
+| `GAMECHANGER_CLIENT_ID_WEB` | UUID, stable between GC web bundle redeployments. The `clientId` half of the `clientId:clientKey` string from the app bundle. Used as `gc-client-id` header and as body field in `client-auth`. Matches `cid` in JWT payload. Rotates when GC redeploys -- see [Client ID Rotation](#client-id-rotation). | App bundle (rotates on redeployment) |
+| `GAMECHANGER_CLIENT_KEY_WEB` | Base64-encoded 32-byte HMAC key, stable between GC web bundle redeployments. The `clientKey` half of the app bundle's `clientId:clientKey` string. Used to compute `gc-signature`. **Treat as a secret -- never log or commit.** Rotates when GC redeploys -- see [Client ID Rotation](#client-id-rotation). | App bundle (rotates on redeployment) |
 | `GAMECHANGER_DEVICE_ID_WEB` | Stable 32-character hex device identifier. Used as `gc-device-id` header. | Browser capture (stable) |
 | `GAMECHANGER_USER_EMAIL` | User account email. Used in `user-auth` step of full login flow. **PII -- never log or commit.** | Manual |
 | `GAMECHANGER_USER_PASSWORD` | User account password. Used in `password` step of full login flow. **Sensitive -- never log or commit.** | Manual |
@@ -277,6 +280,21 @@ The client key (`GAMECHANGER_CLIENT_KEY_WEB`) is embedded in the GameChanger web
 - The JS bundle URL pattern is `https://web.gc.com/static/js/index.{hash}.js` -- the hash changes with each deployment
 - Rotations are unpredictable (potentially months apart), but always coincide with a GC web bundle redeployment
 - **Never cache the bundle URL between extraction runs** -- always fetch the HTML page fresh, since the hash changes on every GC deployment
+
+### Client ID Rotation
+
+**Client ID rotation** is a recurring operational event -- not an exception. When GameChanger redeploys their web JavaScript bundle, the `EDEN_AUTH_CLIENT_KEY` composite string (`clientId:clientKey`) may change. Both `GAMECHANGER_CLIENT_ID_WEB` and `GAMECHANGER_CLIENT_KEY_WEB` can rotate simultaneously since they are two halves of the same embedded value.
+
+**Trigger:** A GC JS bundle redeployment. The bundle URL hash changes (e.g., `index.abc123.js` → `index.def456.js`), and the new bundle may contain a different `EDEN_AUTH_CLIENT_KEY`. Rotations are unpredictable -- they can be months apart or days apart.
+
+**Symptoms and diagnosis:** A stale client key is indistinguishable from an expired refresh token at the HTTP level. See [How to Know the Key Is Stale](#how-to-know-the-key-is-stale) for symptoms and the full diagnostic path.
+
+**Recovery:**
+1. `bb creds extract-key --apply` -- see [Automated Extraction](#automated-extraction)
+2. `bb creds check --profile web`
+3. `bb creds refresh --profile web` -- see [Verification](#verification)
+
+**Mobile parallel:** iOS client IDs are also version-specific and rotate with app updates (not bundle redeployments). Unlike the web key, the mobile client key cannot be programmatically extracted -- it is embedded in the iOS binary. See [Mobile Profile Differences](#mobile-profile-differences-confirmed-2026-03-08) for details on mobile client identity and token lifetimes.
 
 ### How to Know the Key Is Stale
 
