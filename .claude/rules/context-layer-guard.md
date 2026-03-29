@@ -33,3 +33,4 @@ Each piece of project context belongs in exactly one delivery mechanism:
 
 - New rules MUST have `paths:` frontmatter scoping. Universal rules (`paths: "**"`) must justify why they need to load on every interaction.
 - Before creating a new rule file, consider whether the content fits in an existing thematic rule (extend rather than create). Single-purpose rules under 15 lines are candidates for consolidation.
+- **Don't steer when you can define.** Scoped rules define principles for an area -- they don't steer implementation into that area. A rule loading on `dashboard.py` says "if you're working here, keep this principle in mind," not "you should add this feature here." A rule's `paths:` frontmatter controls when it LOADS into context, not what gets ADDED to the matched files. Do not flag a rule's scope as contradicting a "non-goal" simply because the rule loads on files the non-goal excludes from modification.
