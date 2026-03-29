@@ -1,7 +1,7 @@
 # E-177: Reports Page View Link + Copy Icon
 
 ## Status
-`READY`
+`COMPLETED`
 
 ## Overview
 Replace the "Copy Link" button on the admin reports page with a "View" link that opens the report directly, plus a clipboard copy icon for sharing. The View link becomes the primary action; clipboard copy becomes a secondary icon action.
@@ -33,7 +33,7 @@ No expert consultation required -- this is a self-contained UI change with clear
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-177-01 | Replace Copy Link with View link + copy icon | TODO | None | - |
+| E-177-01 | Replace Copy Link with View link + copy icon | DONE | None | SE |
 
 ## Dispatch Team
 - software-engineer
@@ -61,10 +61,21 @@ None -- all questions resolved during discovery.
 ## History
 - 2026-03-28: Created
 - 2026-03-28: Set to READY after internal review
+- 2026-03-29: Set to ACTIVE, dispatch begun.
+- 2026-03-29: COMPLETED. Single story delivered. Per-story CR: APPROVED (no findings). All ACs verified.
+  - **Documentation assessment**: No documentation impact -- UI-only template change, no new features, routes, or workflows.
+  - **Context-layer assessment**:
+    - New agent capability or tool? **NO**
+    - New convention or pattern? **NO**
+    - New rule or constraint? **NO**
+    - CLAUDE.md update needed? **NO**
+    - Agent memory update needed? **NO**
+    - Skill or hook change? **NO**
 
 ### Review Scorecard
 | Review Pass | Findings | Accepted | Dismissed |
 |---|---|---|---|
 | Internal iteration 1 -- CR spec audit | 3 | 2 | 1 |
 | Internal iteration 1 -- Holistic team | 3 | 1 | 2 |
+| Per-story CR -- E-177-01 | 0 | 0 | 0 |
 | **Total** | **6** | **3** | **3** |

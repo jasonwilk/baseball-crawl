@@ -4,7 +4,7 @@
 [E-177: Reports Page View Link + Copy Icon](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the admin reports page Link column will show a "View" text link that opens the report in a new tab, alongside a small clipboard copy icon (inline SVG, double-document pattern). Clicking the icon copies the report URL to clipboard with visual feedback. The old "Copy Link" text button is removed.
