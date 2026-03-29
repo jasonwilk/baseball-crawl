@@ -1,7 +1,7 @@
 # E-184: Fix Opponent Resolver Phantom Errors and Negative Unlinked Count
 
 ## Status
-`READY`
+`COMPLETED`
 
 ## Overview
 Two production bugs in the opponent resolver produce incorrect error and unlinked counts on every resolution run. One bug inflates errors by +1 per member team (return type mismatch), the other produces negative unlinked counts (counter subtraction logic). Both were flagged as P1 findings in the E-179 Codex code review, and E-179 updated 13 test assertions to match the buggy behavior rather than fixing the production code. This epic fixes both bugs and reverts the test workarounds in a single atomic story.
@@ -34,7 +34,7 @@ Promoted from [IDEA-056](/.project/ideas/IDEA-056-search-fallback-team-return-bu
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-184-01 | Fix resolver bugs and revert test workarounds | TODO | None | - |
+| E-184-01 | Fix resolver bugs and revert test workarounds | DONE | None | SE |
 
 ## Dispatch Team
 - software-engineer
@@ -88,6 +88,21 @@ E-179 commit `8391bd5` modified 13 assertions and 3 comments in `tests/test_craw
 - 2026-03-29: Created. Promoted from IDEA-056.
 - 2026-03-29: Internal review round 1. Merged 2 stories into 1 (DoD contradiction). Fixed TN-3: corrected line numbers, switched to pattern-based guidance, added missing 3rd comment reversion, included original comment text. Rewrote ACs as outcome-based.
 - 2026-03-29: Codex spec review round 1. 2 findings, both dismissed (already fixed by internal review). Set to READY.
+- 2026-03-29: Set to ACTIVE, dispatch begun.
+- 2026-03-29: COMPLETED. Single story delivered. Per-story CR: APPROVED (1 SHOULD FIX accepted -- misleading comment fixed). All ACs verified.
+
+### Documentation Assessment
+No documentation impact -- bug fix only, no new features or changed interfaces.
+
+### Context-Layer Assessment
+1. **New convention or pattern**: No -- bug fix, no new conventions.
+2. **Changed architectural decision**: No -- no architecture changes.
+3. **New agent capability or workflow**: No -- no agent changes.
+4. **Lessons learned worth codifying**: No -- straightforward bug fix.
+5. **New integration or external dependency**: No -- no new integrations.
+6. **Changed data model or API contract**: No -- `ResolveResult` fields unchanged, only corrected values.
+
+No context-layer impact.
 
 ### Review Scorecard
 | Review Pass | Findings | Accepted | Dismissed |
@@ -96,4 +111,5 @@ E-179 commit `8391bd5` modified 13 assertions and 3 comments in `tests/test_craw
 | Internal iteration 1 -- SE holistic | 2 | 2 | 0 |
 | Internal iteration 1 -- PM self-review | 3 | 3 | 0 |
 | Codex iteration 1 | 2 | 0 | 2 |
-| **Total** | **10** | **8** | **2** |
+| Per-story CR -- E-184-01 | 1 | 1 | 0 |
+| **Total** | **11** | **9** | **2** |

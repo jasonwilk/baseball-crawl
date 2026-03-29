@@ -173,7 +173,6 @@ class OpponentResolver:
             try:
                 search_count, search_errors = self._search_fallback_team(team)
                 result.search_resolved += search_count
-                result.unlinked -= search_count
                 result.errors += search_errors
             except CredentialExpiredError:
                 raise
@@ -508,7 +507,7 @@ class OpponentResolver:
         ).fetchall()
 
         if not unlinked_rows:
-            return 0
+            return 0, 0
 
         logger.info(
             "Search fallback: %d unlinked opponents for team '%s'",

@@ -215,9 +215,7 @@ def test_resolve_auto_resolves_opponent(db: sqlite3.Connection) -> None:
 
     assert result.resolved == 1
     assert result.unlinked == 0
-    # +1 error from _search_fallback_team returning bare int (not tuple) when
-    # no unlinked rows remain, causing unpacking error in resolve()
-    assert result.errors == 1
+    assert result.errors == 0
 
     links = _fetch_links(db)
     assert len(links) == 1
@@ -431,7 +429,7 @@ def test_resolve_403_logs_warning_and_skips(
         with caplog.at_level(logging.WARNING, logger="src.gamechanger.crawlers.opponent_resolver"):
             result = resolver.resolve()
 
-    assert result.errors == 2
+    assert result.errors == 1
     assert result.resolved == 0
     assert any("Access denied" in r.message for r in caplog.records)
     assert _fetch_links(db) == []  # nothing inserted
@@ -470,7 +468,7 @@ def test_resolve_5xx_logs_warning_and_skips(
         with caplog.at_level(logging.WARNING, logger="src.gamechanger.crawlers.opponent_resolver"):
             result = resolver.resolve()
 
-    assert result.errors == 2
+    assert result.errors == 1
     assert result.resolved == 0
     assert any("API error" in r.message for r in caplog.records)
 
@@ -493,7 +491,7 @@ def test_resolve_404_logs_warning_and_skips(
         with caplog.at_level(logging.WARNING, logger="src.gamechanger.crawlers.opponent_resolver"):
             result = resolver.resolve()
 
-    assert result.errors == 2
+    assert result.errors == 1
     assert result.resolved == 0
 
 
@@ -559,7 +557,7 @@ def test_resolve_hidden_opponent_with_progenitor_skipped(db: sqlite3.Connection)
     assert result.skipped_hidden == 1
     assert result.resolved == 0
     assert result.unlinked == 0
-    assert result.errors == 1
+    assert result.errors == 0
 
     # No opponent_links row created for hidden opponent
     links = _fetch_links(db)
@@ -587,7 +585,7 @@ def test_resolve_hidden_opponent_without_progenitor_skipped(db: sqlite3.Connecti
     assert result.skipped_hidden == 1
     assert result.unlinked == 0
     assert result.resolved == 0
-    assert result.errors == 1
+    assert result.errors == 0
 
     links = _fetch_links(db)
     assert len(links) == 0
@@ -1342,9 +1340,9 @@ def test_ensure_opponent_team_row_unique_collision_logs_warning_and_skips(
         with caplog.at_level(logging.WARNING, logger="src.gamechanger.crawlers.opponent_resolver"):
             result = resolver.resolve()
 
-    # Resolution still succeeds (not an error from the resolver itself)
+    # Resolution still succeeds (not an error)
     assert result.resolved == 1
-    assert result.errors == 1
+    assert result.errors == 0
     # WARNING logged about collision
     assert any("UNIQUE collision" in r.message for r in caplog.records)
     # public_id NOT written to the opponent team row
@@ -1383,9 +1381,9 @@ def test_resolve_opponent_missing_public_id_logs_warning_and_continues(
         with caplog.at_level(logging.WARNING, logger="src.gamechanger.crawlers.opponent_resolver"):
             result = resolver.resolve()
 
-    # Resolution still counted as successful (not an error from the resolver itself)
+    # Resolution still counted as successful (not an error)
     assert result.resolved == 1
-    assert result.errors == 1
+    assert result.errors == 0
     # WARNING logged about missing public_id
     assert any("missing public_id" in r.message for r in caplog.records)
     # teams row still created with gc_uuid and name
@@ -1425,7 +1423,7 @@ def test_resolve_opponent_null_public_id_in_response_logs_warning(
             result = resolver.resolve()
 
     assert result.resolved == 1
-    assert result.errors == 1
+    assert result.errors == 0
     assert any("missing public_id" in r.message for r in caplog.records)
     links = _fetch_links(db)
     assert links[0]["public_id"] is None
@@ -1467,7 +1465,7 @@ def test_ensure_opponent_team_row_unique_collision_on_new_row_logs_warning_and_s
     # The existing row already has gc_uuid='other-gc-uuid' (non-NULL),
     # so gc_uuid backfill is skipped (only writes when NULL). No new row.
     assert result.resolved == 1
-    assert result.errors == 1
+    assert result.errors == 0
     row = db.execute(
         "SELECT id, gc_uuid, public_id FROM teams WHERE public_id = ?", (_PUBLIC_ID,)
     ).fetchone()
@@ -1511,7 +1509,7 @@ def test_unique_collision_nulls_both_teams_and_opponent_links_public_id(
         result = resolver.resolve()
 
     assert result.resolved == 1
-    assert result.errors == 1
+    assert result.errors == 0
 
     # E-167 fix: ensure_team_row matches the existing "Other Team" row by
     # public_id (step 2, no gc_uuid IS NULL filter). The existing row already
@@ -1560,7 +1558,7 @@ def test_ensure_opponent_team_row_merges_gc_uuid_onto_public_id_stub(
         result = resolver.resolve()
 
     assert result.resolved == 1
-    assert result.errors == 1
+    assert result.errors == 0
 
     # No new team row should be created -- exactly own team + stub.
     team_count = db.execute("SELECT COUNT(*) FROM teams").fetchone()[0]
@@ -1720,8 +1718,8 @@ def test_search_fallback_single_exact_match_resolves(
     result = resolver.resolve()
 
     assert result.search_resolved == 1
-    # unlinked starts at 0 (no opponents from API), search resolves 1 → -1
-    assert result.unlinked == -1
+    # unlinked stays 0 (no opponents from API); search resolution does not affect unlinked count
+    assert result.unlinked == 0
 
     # Verify opponent_links row
     row = db.execute(

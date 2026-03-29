@@ -4,7 +4,7 @@
 [E-184: Fix Opponent Resolver Phantom Errors and Negative Unlinked Count](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, `_search_fallback_team()` will return the correct tuple on all early-exit paths, `resolve()` will no longer produce negative unlinked counts, and all 13 test assertions plus 3 comments that E-179 modified to match the buggy behavior will be reverted to their correct intended values.
