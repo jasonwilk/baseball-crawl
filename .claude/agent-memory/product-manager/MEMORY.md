@@ -31,8 +31,8 @@
 | E-178 | Teams Page UX Overhaul | READY | 3 stories: terminology cleanup across 10 files/28 items (01), auto-refresh + failed badge error display (02), merge page "keep" language + minor text (03). SE only. |
 | E-180 | Codify E-178 Planning Knowledge | READY | 2 stories: UXD memory design principles + terminology refresh (01), PM memory audit-first lesson (02). CA only. |
 | E-181 | Auto-Sync and Experience Polish | READY | 3 stories: auto-sync on add/merge (01), game coverage indicators on dashboard (02), empty states + schedule links + welcome state (03). SE only. Promoted from IDEA-055. Epic-level dep: E-178. |
-| E-183 | Codify Opponent Flow vs Reports Flow | DRAFT | 2 stories: scouting data flows section + reports flow in CLAUDE.md (01, CA), standalone reports coaching docs (02, docs-writer). Context-layer epic. |
-| E-182 | Document GC Client ID Rotation Behavior | DRAFT | 2 stories: auth docs rotation section (01, api-scout), api-scout memory file (02, CA). No code changes. |
+| E-183 | Codify Opponent Flow vs Reports Flow | READY | 2 stories: scouting data flows section + reports flow in CLAUDE.md (01, CA), standalone reports coaching docs (02, docs-writer). Context-layer epic. |
+| E-182 | Document GC Client ID Rotation Behavior | READY | 2 stories: auth docs rotation section (01, api-scout), api-scout memory file (02, CA). No code changes. 20 review findings (15 accepted, 5 dismissed). |
 
 ## Key Architectural Decisions
 - Storage: SQLite (WAL mode). Host-mounted at ./data/app.db. Simple file backup via scripts/backup_db.py (no Litestream).
