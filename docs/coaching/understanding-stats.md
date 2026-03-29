@@ -176,7 +176,7 @@ Here is when to trust the stats and when to take them with a grain of salt:
 
 | Plate Appearances | How Reliable? |
 |---|---|
-| Fewer than 20 PA | **Do not rely on these numbers.** One hot or cold week can make the stats look wildly different than reality. Use the eye test instead. |
+| Fewer than 5 PA | **Do not rely on these numbers.** One hot or cold week can make the stats look wildly different than reality. Use the eye test instead. |
 | 20-50 PA | **Emerging picture.** You can start to see tendencies, but expect the numbers to move. Use them alongside what you see in practice and games. |
 | 50-80 PA | **Reasonably trustworthy.** The stats are starting to stabilize. Good enough for lineup decisions and scouting reports. |
 | 80+ PA | **Solid.** This is a meaningful sample for high school. Trust these numbers for decisions. |
@@ -185,7 +185,7 @@ Here is when to trust the stats and when to take them with a grain of salt:
 
 | Innings Pitched | How Reliable? |
 |---|---|
-| Fewer than 15 IP | **Do not rely on these numbers.** One bad start can wreck or inflate every stat. Watch the pitcher; do not let the numbers override what you see. |
+| Fewer than 6 IP | **Do not rely on these numbers.** One bad start can wreck or inflate every stat. Watch the pitcher; do not let the numbers override what you see. |
 | 15-30 IP | **Emerging picture.** You can see patterns forming, but the numbers can still shift significantly. |
 | 30-50 IP | **Reasonably trustworthy.** Enough innings for the stats to reflect real ability. Suitable for scouting reports and matchup planning. |
 | 50+ IP | **Solid.** Unusual to see at the high school level except for a team's ace. Very reliable. |

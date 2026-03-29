@@ -912,6 +912,65 @@ class TestResolveGcUuid:
             content_type="application/vnd.gc.com.post_search+json; version=0.0.0",
         )
 
+    def test_pagination_match_on_page_1(self):
+        """AC-1: Match found on page 1 after 25 non-matching hits on page 0."""
+        client = MagicMock()
+        non_matching_hits = [
+            {"result": {"id": f"uuid-{i}", "public_id": f"other-{i}"}}
+            for i in range(25)
+        ]
+        matching_page = {
+            "hits": [
+                {"result": {"id": "target-uuid", "public_id": "target-slug"}}
+            ]
+        }
+        client.post_json.side_effect = [
+            {"hits": non_matching_hits},
+            matching_page,
+        ]
+
+        result = _resolve_gc_uuid(client, "Some Team", "target-slug")
+
+        assert result == "target-uuid"
+        assert client.post_json.call_count == 2
+        # Verify page numbers
+        calls = client.post_json.call_args_list
+        assert calls[0][1]["params"]["start_at_page"] == 0
+        assert calls[1][1]["params"]["start_at_page"] == 1
+
+    def test_pagination_short_circuit_on_partial_page(self):
+        """AC-2: Partial page (< 25 hits) with no match -> return None, no page 1."""
+        client = MagicMock()
+        client.post_json.return_value = {
+            "hits": [
+                {"result": {"id": "uuid-1", "public_id": "other-team"}}
+            ]
+        }
+
+        result = _resolve_gc_uuid(client, "Test Team", "target-slug")
+
+        assert result is None
+        client.post_json.assert_called_once()
+
+    def test_pagination_cap_at_max_pages(self):
+        """AC-3: 25 non-matching hits on each of 5 pages -> None after 5 requests."""
+        client = MagicMock()
+        full_page = {
+            "hits": [
+                {"result": {"id": f"uuid-{i}", "public_id": f"other-{i}"}}
+                for i in range(25)
+            ]
+        }
+        client.post_json.return_value = full_page
+
+        result = _resolve_gc_uuid(client, "Test Team", "target-slug")
+
+        assert result is None
+        assert client.post_json.call_count == 5
+        # Verify pages 0-4 were requested
+        for i, call in enumerate(client.post_json.call_args_list):
+            assert call[1]["params"]["start_at_page"] == i
+
     @patch("src.reports.generator.get_connection")
     @patch("src.reports.generator._crawl_and_load_spray")
     @patch("src.reports.generator._resolve_gc_uuid")
@@ -1247,3 +1306,90 @@ class TestRunsAvg:
         scored, allowed = _query_runs_avg(db, team_id, "2026-spring-hs")
         assert scored == 10.0
         assert allowed == 2.0
+
+
+# ===========================================================================
+# E-187-01: gc_uuid resolution wiring integration test
+# ===========================================================================
+
+
+class TestResolveGcUuidIntegration:
+    """AC-4: gc_uuid resolution persists to DB and flows to spray crawler."""
+
+    @patch("src.http.session.create_session")
+    @patch("src.reports.generator.get_connection")
+    @patch("src.reports.generator.GameChangerClient")
+    @patch("src.reports.generator.ensure_team_row", return_value=1)
+    @patch("src.reports.generator.render_report", return_value="<html>test</html>")
+    @patch("src.reports.generator._crawl_and_load_spray")
+    def test_resolved_gc_uuid_persisted_and_passed_to_spray(
+        self, mock_spray, mock_render, mock_ensure, mock_client_cls, mock_get_conn,
+        mock_create_session, db, tmp_path,
+    ):
+        """Given a team with gc_uuid=NULL, search match persists gc_uuid and
+        passes it to _crawl_and_load_spray."""
+        from src.gamechanger.crawlers import CrawlResult
+        from src.gamechanger.loaders import LoadResult
+
+        # Seed team WITHOUT gc_uuid
+        db.execute(
+            "INSERT INTO teams (name, public_id, season_year) "
+            "VALUES ('Test Tigers', 'abc123', 2026)"
+        )
+        db.execute(
+            "INSERT INTO scouting_runs (team_id, season_id, run_type, started_at, status) "
+            "VALUES (1, '2026-spring-hs', 'full', '2026-03-28T00:00:00Z', 'completed')"
+        )
+        db.commit()
+
+        db_path = str(tmp_path / "test.db")
+
+        def _fresh_conn():
+            conn = sqlite3.connect(db_path)
+            conn.execute("PRAGMA foreign_keys=ON;")
+            return conn
+
+        mock_get_conn.side_effect = lambda: _fresh_conn()
+
+        # Mock client: post_json returns a search hit matching public_id
+        mock_client = MagicMock()
+        mock_client_cls.return_value = mock_client
+        mock_client.post_json.return_value = {
+            "hits": [
+                {
+                    "result": {
+                        "id": "resolved-uuid-abc",
+                        "public_id": "abc123",
+                        "name": "Test Tigers",
+                    }
+                }
+            ]
+        }
+
+        mock_crawler = MagicMock()
+        mock_crawler.scout_team.return_value = CrawlResult(files_written=5)
+        mock_loader = MagicMock()
+        mock_loader.load_team.return_value = LoadResult(loaded=5)
+
+        with (
+            patch("src.reports.generator.ScoutingCrawler", return_value=mock_crawler),
+            patch("src.reports.generator.ScoutingLoader", return_value=mock_loader),
+            patch("src.reports.generator._REPO_ROOT", tmp_path),
+            patch("src.reports.generator._REPORTS_DIR", tmp_path / "data" / "reports"),
+        ):
+            result = generate_report("abc123")
+
+        assert result.success is True
+
+        # Verify gc_uuid was persisted to the teams table
+        verify_conn = _fresh_conn()
+        row = verify_conn.execute(
+            "SELECT gc_uuid FROM teams WHERE id = 1"
+        ).fetchone()
+        verify_conn.close()
+        assert row[0] == "resolved-uuid-abc"
+
+        # Verify _crawl_and_load_spray received the resolved gc_uuid
+        mock_spray.assert_called_once()
+        _, spray_kwargs = mock_spray.call_args
+        assert spray_kwargs.get("gc_uuid") == "resolved-uuid-abc"

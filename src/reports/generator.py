@@ -406,6 +406,10 @@ def _query_spray_charts(
     return result
 
 
+_SEARCH_PAGE_SIZE = 25
+_SEARCH_MAX_PAGES = 5
+
+
 def _resolve_gc_uuid(
     client: GameChangerClient,
     team_name: str,
@@ -414,31 +418,39 @@ def _resolve_gc_uuid(
     """Resolve a team's gc_uuid via POST /search + public_id filtering.
 
     Searches for the team by name and filters results for an exact
-    ``public_id`` match.  Returns the matching ``result.id`` (which is
-    the ``progenitor_team_id`` / gc_uuid), or ``None`` if no match.
+    ``public_id`` match.  Paginates through up to 5 pages (125 results)
+    using the ``start_at_page`` parameter.  Returns immediately when a
+    match is found, or short-circuits when a page returns fewer than 25
+    hits (indicating no more pages).
 
     ``CredentialExpiredError`` propagates.  All other exceptions are
     caught and logged as warnings (resolution failure is non-fatal).
     """
     try:
-        result = client.post_json(
-            "/search",
-            body={"name": team_name},
-            params={"start_at_page": 0, "search_source": "search"},
-            content_type=_SEARCH_CONTENT_TYPE,
-        )
-        hits = result.get("hits", []) if isinstance(result, dict) else []
-        for hit in hits:
-            r = hit.get("result", {})
-            if r.get("public_id") == public_id:
-                gc_uuid = r.get("id")
-                if gc_uuid:
-                    logger.info(
-                        "Resolved gc_uuid=%s for public_id=%s via search.",
-                        gc_uuid,
-                        public_id,
-                    )
-                    return gc_uuid
+        for page in range(_SEARCH_MAX_PAGES):
+            result = client.post_json(
+                "/search",
+                body={"name": team_name},
+                params={"start_at_page": page, "search_source": "search"},
+                content_type=_SEARCH_CONTENT_TYPE,
+            )
+            hits = result.get("hits", []) if isinstance(result, dict) else []
+            for hit in hits:
+                r = hit.get("result", {})
+                if r.get("public_id") == public_id:
+                    gc_uuid = r.get("id")
+                    if gc_uuid:
+                        logger.info(
+                            "Resolved gc_uuid=%s for public_id=%s via search "
+                            "(page %d).",
+                            gc_uuid,
+                            public_id,
+                            page,
+                        )
+                        return gc_uuid
+            # Short-circuit: partial page means no more results
+            if len(hits) < _SEARCH_PAGE_SIZE:
+                break
         logger.info(
             "POST /search returned no hit matching public_id=%s; "
             "spray charts unavailable.",

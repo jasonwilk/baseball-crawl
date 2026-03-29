@@ -29,9 +29,9 @@ logger = logging.getLogger(__name__)
 _TEMPLATE_DIR = Path(__file__).resolve().parents[1] / "api" / "templates"
 _TEMPLATE_NAME = "reports/scouting_report.html"
 
-# Thresholds per coaching consultation and AC-7
-_MIN_PA_BATTING = 20
-_MIN_IP_OUTS_PITCHING = 45  # 15 IP = 45 outs
+# Thresholds per coaching consultation and E-187
+_MIN_PA_BATTING = 5
+_MIN_IP_OUTS_PITCHING = 18  # 6 IP = 18 outs
 
 # Spray chart minimum BIP thresholds
 _MIN_BIP_SPRAY = 3
@@ -41,9 +41,14 @@ _MIN_BIP_TEAM_SPRAY = 20
 # 0-19% -> 1, 20-39% -> 2, 40-69% -> 3, 70-100% -> 4
 _HEAT_THRESHOLDS = [(0.70, 4), (0.40, 3), (0.20, 2), (0.0, 1)]
 
+# Graduated heat intensity tiers (TN-2a)
+# (min_qualified_count, max_heat_level) -- iterate top-down, first match wins
+_BATTING_HEAT_TIERS = [(9, 4), (7, 3), (5, 2), (3, 1)]   # 0-2: max=0
+_PITCHING_HEAT_TIERS = [(6, 4), (4, 3), (3, 2), (2, 1)]  # 0-1: max=0
+
 # Key-player thresholds
-_KEY_PITCHER_MIN_OUTS = 45   # 15 IP
-_KEY_BATTER_MIN_PA = 20
+_KEY_PITCHER_MIN_OUTS = 18   # 6 IP
+_KEY_BATTER_MIN_PA = 5
 
 
 def _build_jinja_env() -> Environment:
@@ -100,6 +105,22 @@ def _percentile_to_level(pct: float) -> int:
 def _safe_div(numerator: float, denominator: float) -> float:
     """Safe division returning 0.0 when denominator is zero."""
     return numerator / denominator if denominator else 0.0
+
+
+def _max_heat_for_depth(
+    qualified_count: int,
+    tiers: list[tuple[int, int]],
+) -> int:
+    """Return the maximum heat level allowed for a given number of qualified players.
+
+    Iterates *tiers* top-down; returns the max_level from the first entry
+    whose threshold is met.  Falls back to 0 (no heat) when the count is
+    below the lowest tier.
+    """
+    for min_count, max_level in tiers:
+        if qualified_count >= min_count:
+            return max_level
+    return 0
 
 
 def _compute_batting_enrichments(batting: list[dict]) -> None:
@@ -174,13 +195,14 @@ def _compute_batting_heat(batting: list[dict]) -> None:
         p["_thr_score"] = round(thr, 4)
         thr_vals.append(p["_thr_score"])
 
-    # Assign heat levels to qualified players
+    # Assign heat levels to qualified players, clamped by graduated depth cap
+    cap = _max_heat_for_depth(len(qualified), _BATTING_HEAT_TIERS)
     for p in qualified:
         heat = {}
-        heat["avg"] = _percentile_to_level(_percentile_rank(p["_avg_raw"], avg_vals))
-        heat["obp"] = _percentile_to_level(_percentile_rank(p["_obp_raw"], obp_vals))
-        heat["slg"] = _percentile_to_level(_percentile_rank(p["_slg_raw"], slg_vals))
-        heat["thr"] = _percentile_to_level(_percentile_rank(p["_thr_score"], thr_vals))
+        heat["avg"] = min(_percentile_to_level(_percentile_rank(p["_avg_raw"], avg_vals)), cap)
+        heat["obp"] = min(_percentile_to_level(_percentile_rank(p["_obp_raw"], obp_vals)), cap)
+        heat["slg"] = min(_percentile_to_level(_percentile_rank(p["_slg_raw"], slg_vals)), cap)
+        heat["thr"] = min(_percentile_to_level(_percentile_rank(p["_thr_score"], thr_vals)), cap)
         p["_heat"] = heat
 
     # Small-sample players: zero heat, no THR score
@@ -232,20 +254,25 @@ def _compute_pitching_heat(pitching: list[dict]) -> None:
         p["_thr_score"] = round(thr, 4)
         thr_vals.append(p["_thr_score"])
 
+    cap = _max_heat_for_depth(len(qualified), _PITCHING_HEAT_TIERS)
     for p in qualified:
         heat = {}
         # ERA inverted: lower ERA -> higher percentile -> higher heat
-        heat["era"] = _percentile_to_level(
-            _percentile_rank(-p["_era_raw"], neg_era_vals)
+        heat["era"] = min(
+            _percentile_to_level(_percentile_rank(-p["_era_raw"], neg_era_vals)),
+            cap,
         )
-        heat["k9"] = _percentile_to_level(
-            _percentile_rank(p["_k9_raw"], k9_vals)
+        heat["k9"] = min(
+            _percentile_to_level(_percentile_rank(p["_k9_raw"], k9_vals)),
+            cap,
         )
-        heat["whip"] = _percentile_to_level(
-            _percentile_rank(-p["_whip_raw"], neg_whip_vals)
+        heat["whip"] = min(
+            _percentile_to_level(_percentile_rank(-p["_whip_raw"], neg_whip_vals)),
+            cap,
         )
-        heat["thr"] = _percentile_to_level(
-            _percentile_rank(p["_thr_score"], thr_vals)
+        heat["thr"] = min(
+            _percentile_to_level(_percentile_rank(p["_thr_score"], thr_vals)),
+            cap,
         )
         p["_heat"] = heat
 

@@ -1,7 +1,7 @@
 # E-187: Threshold Calibration for Youth/HS Seasons
 
 ## Status
-`READY`
+`COMPLETED`
 <!-- Lifecycle: DRAFT → READY → ACTIVE → COMPLETED (or BLOCKED / ABANDONED) -->
 
 ## Overview
@@ -48,9 +48,9 @@ Separately, E-186 Codex post-dispatch review identified: (1) `_resolve_gc_uuid` 
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-187-01 | Fix search pagination and add integration tests | TODO | None | - |
-| E-187-02 | Replace stat suppression with contextual display | TODO | None | - |
-| E-187-03 | Codify display philosophy and season-length calibration in context layer | TODO | None | - |
+| E-187-01 | Fix search pagination and add integration tests | DONE | None | - |
+| E-187-02 | Replace stat suppression with contextual display | DONE | None | - |
+| E-187-03 | Codify display philosophy and season-length calibration in context layer | DONE | None | - |
 
 ## Dispatch Team
 - software-engineer
@@ -165,6 +165,30 @@ At minimum 12 tests in `tests/test_report_renderer.py` require updates. The impl
 - 2026-03-29: Scope expanded after report evaluation: E-187-02 grew from "lower thresholds" to "replace suppression with contextual display" (PA/IP badges, graduated heat). E-187-03 expanded to codify "never suppress, always contextualize." Reverted to DRAFT for re-review.
 - 2026-03-29: Codex review round 2 (5 findings: all accepted -- stale gate references, history/status mismatch, propagation cleanup, docs contradiction).
 - 2026-03-29: Final holistic review (CR + PM + CA + SE + UXD). CR: 3 low findings (all fixed). PM: verified all ACs achievable, TNs sufficient. CA: confirmed context-layer design sound. SE: confirmed implementation feasible, flagged PA=5 boundary test grep-miss risk (added to TN-6). UXD: 2 minor findings (badge mobile sizing, print border -- deferred to implementation). Set to READY.
+- 2026-03-29: Set to ACTIVE, dispatch started.
+- 2026-03-29: All stories DONE. CR integration review: APPROVED (0 findings). Codex code review: 4 findings (2 valid and fixed, 2 dismissed). Epic COMPLETED.
+
+### Documentation Assessment
+- `docs/coaching/understanding-stats.md` has stale "20 PA / 15 IP" thresholds at lines 179, 188. Routed to docs-writer for update.
+
+### Context-Layer Assessment
+- New convention/pattern: **YES** -- display-philosophy.md rule (codified in E-187-03)
+- Architectural decision: **YES** -- graduated heat intensity tiers (codified in E-187-03)
+- Footgun/failure mode: **No**
+- Agent behavior change: **YES** -- baseball-coach agent updated (done in E-187-03)
+- Domain knowledge: **YES** -- season-length calibration (codified in E-187-03)
+- New CLI command/workflow: **No**
+
+All "yes" items codified during the epic itself (E-187-03). No additional context-layer work needed.
+
+### Review Scorecard (Dispatch)
+| Review Pass | Findings | Accepted | Dismissed |
+|---|---|---|---|
+| Per-story CR -- E-187-01 | 1 | 1 | 0 |
+| Per-story CR -- E-187-02 | 0 | 0 | 0 |
+| CR integration review | 0 | 0 | 0 |
+| Codex code review | 4 | 2 | 2 |
+| **Total** | **5** | **3** | **2** |
 
 ### Review Scorecard (Planning)
 | Review Pass | Findings | Accepted | Dismissed |

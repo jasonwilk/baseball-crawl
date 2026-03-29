@@ -8,12 +8,15 @@ import pytest
 
 from src.reports.renderer import (
     render_report,
+    _BATTING_HEAT_TIERS,
+    _PITCHING_HEAT_TIERS,
     _compute_batting_enrichments,
     _compute_batting_heat,
     _compute_key_players,
     _compute_pa,
     _compute_pitching_heat,
     _build_spray_player_stats,
+    _max_heat_for_depth,
     _percentile_rank,
     _percentile_to_level,
     _safe_div,
@@ -369,61 +372,60 @@ class TestFreshnessLine:
 # ---------------------------------------------------------------------------
 
 
-class TestSmallSampleFlags:
-    """Test small sample size asterisk indicators."""
+class TestNoSuppression:
+    """E-187: Verify suppression artifacts are removed."""
 
-    def test_pitching_small_sample_asterisk(self):
-        """Pitcher with < 15 IP (45 outs) gets asterisk."""
-        pitcher = _make_pitcher(ip_outs=30, name="Low IP Pitcher")  # 10 IP
+    def test_no_dimming_class_on_any_row(self):
+        """AC-16: No batting or pitching row has the small-sample CSS class."""
+        # Include a low-IP pitcher and a low-PA batter
+        pitcher = _make_pitcher(ip_outs=10, name="Low IP Pitcher")
+        batter = _make_batter(ab=1, bb=0, hbp=0, shf=0, name="Low PA Batter")
+        data = _make_full_data(pitching=[pitcher], batting=[batter])
+        html = render_report(data)
+
+        assert 'class="small-sample"' not in html
+        assert "tr.small-sample" not in html
+
+    def test_no_asterisk_on_any_player_name(self):
+        """AC-17: No player name contains an asterisk between name and badge."""
+        pitcher = _make_pitcher(ip_outs=10, name="Low IP Pitcher")
+        batter = _make_batter(ab=1, bb=0, hbp=0, shf=0, name="Low PA Batter")
+        data = _make_full_data(pitching=[pitcher], batting=[batter])
+        html = render_report(data)
+
+        # No asterisk anywhere between player name and depth badge
+        assert "Low IP Pitcher *" not in html
+        assert "Low PA Batter *" not in html
+        # Also check the generic patterns
+        assert " *<" not in html
+        assert " * <span" not in html
+
+    def test_no_footnote_div(self):
+        """AC-18: No footnote div containing 'Small sample size' is present."""
+        pitcher = _make_pitcher(ip_outs=10, name="Low IP Pitcher")
+        batter = _make_batter(ab=1, bb=0, hbp=0, shf=0, name="Low PA Batter")
+        data = _make_full_data(pitching=[pitcher], batting=[batter])
+        html = render_report(data)
+
+        assert "Small sample size" not in html
+        assert "fewer than" not in html
+        assert "small-sample-footnote" not in html
+
+    def test_low_ip_pitcher_still_displays(self):
+        """Pitcher below threshold is still displayed at full weight."""
+        pitcher = _make_pitcher(ip_outs=10, name="Low IP Pitcher")
         data = _make_full_data(pitching=[pitcher])
         html = render_report(data)
 
         assert "Low IP Pitcher" in html
-        assert " *" in html  # asterisk present somewhere for small sample
-        assert "Small sample size" in html
-        assert "fewer than 15 IP" in html
 
-    def test_pitching_no_asterisk_above_threshold(self):
-        """Pitcher with >= 15 IP (45 outs) has no asterisk."""
-        pitcher = _make_pitcher(ip_outs=60, name="High IP Pitcher")  # 20 IP
-        data = _make_full_data(pitching=[pitcher])
-        html = render_report(data)
-
-        # Footnote should not appear if no small samples
-        assert "fewer than 15 IP" not in html
-
-    def test_batting_small_sample_asterisk(self):
-        """Batter with < 20 PA gets asterisk."""
-        batter = _make_batter(ab=10, name="Low PA Batter")
-        # PA = ab + bb + hbp + shf = 10 + 8 + 1 + 0 = 19 < 20
+    def test_low_pa_batter_still_displays(self):
+        """Batter below threshold is still displayed at full weight."""
+        batter = _make_batter(ab=1, bb=0, hbp=0, shf=0, name="Low PA Batter")
         data = _make_full_data(batting=[batter])
         html = render_report(data)
 
         assert "Low PA Batter" in html
-        assert " *" in html
-        assert "Small sample size" in html
-        assert "fewer than 20 PA" in html
-
-    def test_batting_no_asterisk_above_threshold(self):
-        """Batter with >= 20 PA has no asterisk."""
-        batter = _make_batter(ab=50, name="High PA Batter")
-        # PA = 50 + 8 + 1 + 0 = 59 >= 20
-        data = _make_full_data(batting=[batter])
-        html = render_report(data)
-
-        assert "fewer than 20 PA" not in html
-
-    def test_mixed_sample_sizes_only_flags_small(self):
-        """Only players below threshold get the asterisk."""
-        small = _make_batter(ab=5, name="Small Sample", player_id=1)
-        # PA = 5 + 8 + 1 + 0 = 14 < 20
-        large = _make_batter(ab=50, name="Large Sample", player_id=2)
-        # PA = 50 + 8 + 1 + 0 = 59 >= 20
-        data = _make_full_data(batting=[small, large])
-        html = render_report(data)
-
-        assert "Small Sample" in html
-        assert "fewer than 20 PA" in html
 
 
 # ---------------------------------------------------------------------------
@@ -557,14 +559,26 @@ class TestBattingEnrichments:
         assert batting[0]["_small_sample"] is True
 
     def test_small_sample_flag(self):
-        batting = [self._player(ab=10, bb=2, hbp=0, shf=0)]  # PA=12 < 20
+        batting = [self._player(ab=2, bb=1, hbp=0, shf=0)]  # PA=3 < 5
         _compute_batting_enrichments(batting)
         assert batting[0]["_small_sample"] is True
 
     def test_large_sample_flag(self):
-        batting = [self._player()]  # PA=63 >= 20
+        batting = [self._player()]  # PA=63 >= 5
         _compute_batting_enrichments(batting)
         assert batting[0]["_small_sample"] is False
+
+    def test_boundary_pa_5_is_qualified(self):
+        """AC-3: PA=5 is exactly at threshold -- NOT small sample."""
+        batting = [self._player(ab=3, bb=1, hbp=1, shf=0)]  # PA=5
+        _compute_batting_enrichments(batting)
+        assert batting[0]["_small_sample"] is False
+
+    def test_boundary_pa_4_is_small_sample(self):
+        """PA=4 is below threshold -- IS small sample."""
+        batting = [self._player(ab=3, bb=1, hbp=0, shf=0)]  # PA=4
+        _compute_batting_enrichments(batting)
+        assert batting[0]["_small_sample"] is True
 
 
 # ---------------------------------------------------------------------------
@@ -624,39 +638,37 @@ class TestBattingHeat:
         return p
 
     def test_small_sample_all_zero(self):
-        batting = [self._player(ab=5, h=2, bb=0, hbp=0, shf=0)]  # PA=5
+        batting = [self._player(ab=4, h=2, bb=0, hbp=0, shf=0)]  # PA=4 < 5
         _compute_batting_enrichments(batting)
         _compute_batting_heat(batting)
         assert batting[0]["_heat"] == {"avg": 0, "obp": 0, "slg": 0, "thr": 0}
         assert batting[0]["_thr_score"] == 0.0
 
-    def test_single_qualified_player(self):
-        """A single qualified player should get level 4 (100th percentile)."""
+    def test_single_qualified_player_depth_cap(self):
+        """A single qualified player: depth cap = 0 (1 qualified < 3), so heat-0."""
         batting = [self._player(ab=50, h=15, bb=5, hbp=2, shf=1, doubles=3)]
         _compute_batting_enrichments(batting)
         _compute_batting_heat(batting)
         heat = batting[0]["_heat"]
-        assert heat["avg"] == 4
-        assert heat["obp"] == 4
-        assert heat["slg"] == 4
-        assert heat["thr"] == 4
-        assert batting[0]["_thr_score"] > 0
+        # Only 1 qualified player: below the minimum tier of 3 -> cap=0
+        assert heat == {"avg": 0, "obp": 0, "slg": 0, "thr": 0}
 
     def test_mixed_small_and_large_sample(self):
-        """Small sample player gets 0 heat, large sample gets assigned heat."""
+        """Small sample player gets 0 heat, large sample constrained by depth cap."""
         large = self._player(ab=50, h=15, bb=5, hbp=2, shf=1)
-        small = self._player(ab=5, h=2, bb=0, hbp=0, shf=0)
+        small = self._player(ab=2, h=1, bb=0, hbp=0, shf=0)  # PA=2 < 5
         batting = [large, small]
         _compute_batting_enrichments(batting)
         _compute_batting_heat(batting)
         assert batting[1]["_heat"] == {"avg": 0, "obp": 0, "slg": 0, "thr": 0}
-        assert all(v > 0 for v in batting[0]["_heat"].values())
+        # Only 1 qualified: depth cap is 0
+        assert batting[0]["_heat"] == {"avg": 0, "obp": 0, "slg": 0, "thr": 0}
 
-    def test_all_same_value_players(self):
-        """When all qualified players have identical stats, all get level 4."""
+    def test_all_same_value_players_9_qualified(self):
+        """When 9+ qualified players have identical stats, all get level 4 (full cap)."""
         batting = [
             self._player(ab=50, h=15, bb=5, hbp=2, shf=1)
-            for _ in range(5)
+            for _ in range(9)
         ]
         _compute_batting_enrichments(batting)
         _compute_batting_heat(batting)
@@ -665,7 +677,7 @@ class TestBattingHeat:
             assert p["_heat"]["thr"] == 4
 
     def test_multiple_qualified_players_ranked(self):
-        """Better hitters should get higher THR scores."""
+        """Better hitters should get higher THR scores (3 qualified -> cap=1)."""
         weak = self._player(ab=50, h=5, bb=2, hbp=0, shf=0)   # .100 AVG
         strong = self._player(ab=50, h=20, bb=10, hbp=3, shf=1, doubles=5, hr=3)
         mid = self._player(ab=50, h=12, bb=5, hbp=1, shf=0)   # .240 AVG
@@ -674,6 +686,9 @@ class TestBattingHeat:
         _compute_batting_heat(batting)
         # Strong should have higher THR score than weak
         assert batting[1]["_thr_score"] > batting[0]["_thr_score"]
+        # 3 qualified -> cap=1, heat levels capped at 1
+        for p in batting:
+            assert all(v <= 1 for v in p["_heat"].values())
 
     def test_no_internal_raw_fields_leaked(self):
         batting = [self._player(ab=50, h=15, bb=5, hbp=2, shf=1)]
@@ -695,38 +710,37 @@ class TestPitchingHeat:
         return p
 
     def test_small_sample_all_zero(self):
-        pitching = [self._pitcher(ip_outs=10)]  # 10 outs < 45
+        pitching = [self._pitcher(ip_outs=10)]  # 10 outs < 18
         for p in pitching:
-            p["_small_sample"] = (p.get("ip_outs") or 0) < 45
+            p["_small_sample"] = (p.get("ip_outs") or 0) < 18
         _compute_pitching_heat(pitching)
         assert pitching[0]["_heat"] == {"era": 0, "k9": 0, "whip": 0, "thr": 0}
 
-    def test_single_qualified_pitcher(self):
+    def test_single_qualified_pitcher_depth_cap(self):
+        """Single qualified pitcher: depth cap 0 (1 < 2), so heat-0."""
         pitching = [self._pitcher(ip_outs=60, er=5, so=40, bb=10, h=20)]
         for p in pitching:
-            p["_small_sample"] = (p.get("ip_outs") or 0) < 45
+            p["_small_sample"] = (p.get("ip_outs") or 0) < 18
         _compute_pitching_heat(pitching)
         heat = pitching[0]["_heat"]
-        assert heat["era"] == 4
-        assert heat["k9"] == 4
-        assert heat["whip"] == 4
-        assert heat["thr"] == 4
+        # 1 qualified < 2 -> cap=0
+        assert heat == {"era": 0, "k9": 0, "whip": 0, "thr": 0}
 
     def test_era_inverted(self):
-        """Lower ERA should get higher heat (inverted)."""
+        """Lower ERA should get higher heat (inverted). 2 qualified -> cap=1."""
         good = self._pitcher(ip_outs=60, er=2, so=30, bb=5, h=15)
         bad = self._pitcher(ip_outs=60, er=20, so=10, bb=20, h=30)
         pitching = [good, bad]
         for p in pitching:
-            p["_small_sample"] = (p.get("ip_outs") or 0) < 45
+            p["_small_sample"] = (p.get("ip_outs") or 0) < 18
         _compute_pitching_heat(pitching)
-        # Good pitcher (lower ERA) should have higher ERA heat than bad pitcher
+        # 2 qualified -> cap=1; good pitcher still >= bad pitcher
         assert pitching[0]["_heat"]["era"] >= pitching[1]["_heat"]["era"]
 
     def test_no_internal_raw_fields_leaked(self):
         pitching = [self._pitcher(ip_outs=60, er=5, so=30)]
         for p in pitching:
-            p["_small_sample"] = (p.get("ip_outs") or 0) < 45
+            p["_small_sample"] = (p.get("ip_outs") or 0) < 18
         _compute_pitching_heat(pitching)
         assert "_era_raw" not in pitching[0]
         assert "_k9_raw" not in pitching[0]
@@ -764,10 +778,10 @@ class TestKeyPlayers:
         _compute_batting_enrichments(batting)
         pitching = [
             self._pitcher("Ace", ip_outs=60),   # 20 IP
-            self._pitcher("Relief", ip_outs=45), # 15 IP
+            self._pitcher("Relief", ip_outs=18), # 6 IP (boundary)
         ]
         for p in pitching:
-            p["_small_sample"] = (p.get("ip_outs") or 0) < 45
+            p["_small_sample"] = (p.get("ip_outs") or 0) < 18
         result = _compute_key_players(batting, pitching)
         assert result["top_pitcher"]["name"] == "Ace"
         assert result["top_pitcher"]["ip"] == "20.0"
@@ -780,25 +794,25 @@ class TestKeyPlayers:
         _compute_batting_enrichments(batting)
         pitching = [self._pitcher("P", ip_outs=60)]
         for p in pitching:
-            p["_small_sample"] = (p.get("ip_outs") or 0) < 45
+            p["_small_sample"] = (p.get("ip_outs") or 0) < 18
         result = _compute_key_players(batting, pitching)
         assert result["top_batter"]["name"] == "High"
 
     def test_no_qualified_pitcher(self):
         batting = [self._batter("B", ab=50, h=15, bb=5)]
         _compute_batting_enrichments(batting)
-        pitching = [self._pitcher("P", ip_outs=30)]  # < 45 outs
+        pitching = [self._pitcher("P", ip_outs=15)]  # < 18 outs
         for p in pitching:
-            p["_small_sample"] = (p.get("ip_outs") or 0) < 45
+            p["_small_sample"] = (p.get("ip_outs") or 0) < 18
         result = _compute_key_players(batting, pitching)
         assert result["top_pitcher"] is None
 
     def test_no_qualified_batter(self):
-        batting = [self._batter("B", ab=10, h=3, bb=2)]  # PA=12 < 20
+        batting = [self._batter("B", ab=2, h=1, bb=1)]  # PA=3 < 5
         _compute_batting_enrichments(batting)
         pitching = [self._pitcher("P", ip_outs=60)]
         for p in pitching:
-            p["_small_sample"] = (p.get("ip_outs") or 0) < 45
+            p["_small_sample"] = (p.get("ip_outs") or 0) < 18
         result = _compute_key_players(batting, pitching)
         assert result["top_batter"] is None
 
@@ -810,7 +824,10 @@ class TestKeyPlayers:
     def test_top_batter_includes_pa(self):
         batting = [self._batter("B", ab=50, h=15, bb=5, hbp=2, shf=1)]
         _compute_batting_enrichments(batting)
-        result = _compute_key_players(batting, [])
+        pitching = [self._pitcher("P", ip_outs=60)]
+        for p in pitching:
+            p["_small_sample"] = (p.get("ip_outs") or 0) < 18
+        result = _compute_key_players(batting, pitching)
         assert result["top_batter"]["pa"] == 58
 
 
@@ -952,3 +969,193 @@ class TestRecentFormBackwardCompat:
             pitcher = call_kwargs["pitching"][0]
             assert "_heat" in pitcher
             assert "_thr_score" in pitcher
+
+
+# ===========================================================================
+# E-187-02: PA/IP badge rendering
+# ===========================================================================
+
+
+class TestDepthBadge:
+    """AC-9, AC-10, AC-11, AC-15: Depth badges on every player row."""
+
+    def test_batting_pa_badge_renders(self):
+        """AC-15: PA badge span renders in every batting row."""
+        high_pa = _make_batter(ab=50, name="High PA", player_id=1)
+        low_pa = _make_batter(ab=1, bb=0, hbp=0, shf=0, name="Low PA", player_id=2)
+        data = _make_full_data(batting=[high_pa, low_pa])
+        html = render_report(data)
+
+        # Both players get a badge
+        assert 'class="depth-badge"' in html
+        assert "59 PA" in html   # 50+8+1+0
+        assert "1 PA" in html    # 1+0+0+0
+
+    def test_pitching_ip_badge_renders(self):
+        """AC-10: IP badge span renders in every pitching row."""
+        high_ip = _make_pitcher(ip_outs=60, name="Ace")
+        low_ip = _make_pitcher(ip_outs=3, name="Mop Up")
+        data = _make_full_data(pitching=[high_ip, low_ip])
+        html = render_report(data)
+
+        assert 'class="depth-badge"' in html
+        assert "20.0 IP" in html   # 60 outs
+        assert "1.0 IP" in html    # 3 outs
+
+    def test_badge_css_class_in_style(self):
+        """AC-9: .depth-badge CSS class is defined in the template."""
+        data = _make_full_data()
+        html = render_report(data)
+
+        assert ".depth-badge" in html
+
+
+# ===========================================================================
+# E-187-02: Graduated heat intensity (TN-2a)
+# ===========================================================================
+
+
+class TestMaxHeatForDepth:
+    """AC-19: _max_heat_for_depth helper tests."""
+
+    def test_batting_tier_boundaries(self):
+        assert _max_heat_for_depth(0, _BATTING_HEAT_TIERS) == 0
+        assert _max_heat_for_depth(2, _BATTING_HEAT_TIERS) == 0
+        assert _max_heat_for_depth(3, _BATTING_HEAT_TIERS) == 1
+        assert _max_heat_for_depth(4, _BATTING_HEAT_TIERS) == 1
+        assert _max_heat_for_depth(5, _BATTING_HEAT_TIERS) == 2
+        assert _max_heat_for_depth(6, _BATTING_HEAT_TIERS) == 2
+        assert _max_heat_for_depth(7, _BATTING_HEAT_TIERS) == 3
+        assert _max_heat_for_depth(8, _BATTING_HEAT_TIERS) == 3
+        assert _max_heat_for_depth(9, _BATTING_HEAT_TIERS) == 4
+        assert _max_heat_for_depth(15, _BATTING_HEAT_TIERS) == 4
+
+    def test_pitching_tier_boundaries(self):
+        assert _max_heat_for_depth(0, _PITCHING_HEAT_TIERS) == 0
+        assert _max_heat_for_depth(1, _PITCHING_HEAT_TIERS) == 0
+        assert _max_heat_for_depth(2, _PITCHING_HEAT_TIERS) == 1
+        assert _max_heat_for_depth(3, _PITCHING_HEAT_TIERS) == 2
+        assert _max_heat_for_depth(4, _PITCHING_HEAT_TIERS) == 3
+        assert _max_heat_for_depth(5, _PITCHING_HEAT_TIERS) == 3
+        assert _max_heat_for_depth(6, _PITCHING_HEAT_TIERS) == 4
+        assert _max_heat_for_depth(10, _PITCHING_HEAT_TIERS) == 4
+
+
+class TestGraduatedHeatIntegration:
+    """AC-12, AC-13, AC-19: Graduated heat in compute functions."""
+
+    def _batter(self, ab, h, bb=5, hbp=1, shf=0, **kw):
+        p = {
+            "ab": ab, "h": h, "bb": bb, "hbp": hbp, "shf": shf,
+            "doubles": 1, "triples": 0, "hr": 1, "so": 5,
+            "sb": 0, "cs": 0, "rbi": 0, "games": 10,
+        }
+        p.update(kw)
+        return p
+
+    def _pitcher(self, ip_outs, er=5, so=20, bb=5, h=15, **kw):
+        p = {
+            "ip_outs": ip_outs, "er": er, "so": so, "bb": bb, "h": h,
+            "games": 5, "pitches": 100, "total_strikes": 60,
+            "era": "3.00", "k9": "9.0", "whip": "1.20", "strike_pct": "60.0%",
+        }
+        p.update(kw)
+        return p
+
+    def test_batting_3_qualified_cap_1(self):
+        """3 qualified batters -> max heat 1."""
+        batting = [
+            self._batter(ab=50, h=20),
+            self._batter(ab=40, h=10),
+            self._batter(ab=30, h=5),
+        ]
+        _compute_batting_enrichments(batting)
+        _compute_batting_heat(batting)
+        for p in batting:
+            assert all(v <= 1 for v in p["_heat"].values())
+            # At least one should be non-zero (they're qualified)
+        assert any(v > 0 for p in batting for v in p["_heat"].values())
+
+    def test_batting_5_qualified_cap_2(self):
+        """5 qualified batters -> max heat 2."""
+        batting = [self._batter(ab=50 - i * 5, h=15 - i) for i in range(5)]
+        _compute_batting_enrichments(batting)
+        _compute_batting_heat(batting)
+        for p in batting:
+            assert all(v <= 2 for v in p["_heat"].values())
+
+    def test_batting_9_qualified_full_gradient(self):
+        """9 qualified batters -> max heat 4 (full gradient)."""
+        batting = [self._batter(ab=50 - i * 3, h=15 - i) for i in range(9)]
+        _compute_batting_enrichments(batting)
+        _compute_batting_heat(batting)
+        # At least one player should have heat-4
+        assert any(v == 4 for p in batting for v in p["_heat"].values())
+
+    def test_unqualified_always_heat_0(self):
+        """AC-13: Players below per-player threshold always get heat-0."""
+        qualified = [self._batter(ab=50, h=15) for _ in range(9)]
+        unqualified = self._batter(ab=2, h=1, bb=0, hbp=0, shf=0)  # PA=2
+        batting = qualified + [unqualified]
+        _compute_batting_enrichments(batting)
+        _compute_batting_heat(batting)
+        assert batting[-1]["_heat"] == {"avg": 0, "obp": 0, "slg": 0, "thr": 0}
+
+    def test_pitching_2_qualified_cap_1(self):
+        """2 qualified pitchers -> max heat 1."""
+        pitching = [
+            self._pitcher(ip_outs=60, er=2, so=40),
+            self._pitcher(ip_outs=45, er=10, so=15),
+        ]
+        for p in pitching:
+            p["_small_sample"] = (p.get("ip_outs") or 0) < 18
+        _compute_pitching_heat(pitching)
+        for p in pitching:
+            assert all(v <= 1 for v in p["_heat"].values())
+
+    def test_pitching_6_qualified_full_gradient(self):
+        """6 qualified pitchers -> max heat 4 (full gradient)."""
+        pitching = [
+            self._pitcher(ip_outs=60 - i * 5, er=2 + i, so=40 - i * 3)
+            for i in range(6)
+        ]
+        for p in pitching:
+            p["_small_sample"] = (p.get("ip_outs") or 0) < 18
+        _compute_pitching_heat(pitching)
+        assert any(v == 4 for p in pitching for v in p["_heat"].values())
+
+    def test_pitching_unqualified_always_heat_0(self):
+        """AC-13: Pitchers below threshold always get heat-0."""
+        qualified = [self._pitcher(ip_outs=60, er=3, so=30) for _ in range(6)]
+        unqualified = self._pitcher(ip_outs=10, er=5, so=2)
+        pitching = qualified + [unqualified]
+        for p in pitching:
+            p["_small_sample"] = (p.get("ip_outs") or 0) < 18
+        _compute_pitching_heat(pitching)
+        assert pitching[-1]["_heat"] == {"era": 0, "k9": 0, "whip": 0, "thr": 0}
+
+    def test_boundary_pa_5_with_3_qualified_gets_heat(self):
+        """AC-3: PA=5 boundary player gets non-zero heat when 3+ qualified."""
+        batting = [
+            self._batter(ab=3, h=2, bb=1, hbp=1, shf=0),  # PA=5, boundary
+            self._batter(ab=50, h=15),
+            self._batter(ab=40, h=10),
+        ]
+        _compute_batting_enrichments(batting)
+        _compute_batting_heat(batting)
+        # PA=5 player is qualified, 3 qualified -> cap=1
+        assert batting[0]["_small_sample"] is False
+        assert any(v > 0 for v in batting[0]["_heat"].values())
+
+    def test_boundary_ip_18_with_2_qualified_gets_heat(self):
+        """AC-4: ip_outs=18 boundary pitcher gets non-zero heat when 2+ qualified."""
+        pitching = [
+            self._pitcher(ip_outs=18, er=3, so=10),   # boundary
+            self._pitcher(ip_outs=60, er=5, so=30),
+        ]
+        for p in pitching:
+            p["_small_sample"] = (p.get("ip_outs") or 0) < 18
+        _compute_pitching_heat(pitching)
+        # ip_outs=18 is qualified, 2 qualified -> cap=1
+        assert pitching[0]["_small_sample"] is False
+        assert any(v > 0 for v in pitching[0]["_heat"].values())

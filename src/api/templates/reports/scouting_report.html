@@ -184,15 +184,8 @@
       margin-bottom: 10px;
     }
 
-    .small-sample-footnote {
-      font-size: 8pt;
-      color: #666;
-      margin-top: 2px;
-      margin-bottom: 10px;
-    }
-
-    /* Small-sample row dimming (TN-1) */
-    tr.small-sample td { color: #9ca3af; }
+    /* PA/IP depth badge (E-187, TN-2) */
+    .depth-badge { display: inline-block; font-size: 7pt; font-weight: 600; color: #6b7280; background: #f3f4f6; border-radius: 3px; padding: 0 3px; margin-left: 3px; }
 
     /* Diamond indicator for spray chart data (TN-11) */
     .spray-indicator { color: #2563eb; margin-left: 2px; }
@@ -395,9 +388,9 @@
   </thead>
   <tbody>
     {% for pitcher in pitching %}
-    <tr{% if pitcher._small_sample %} class="small-sample"{% endif %}>
+    <tr>
       <td>{% if pitcher.jersey_number %}{{ pitcher.jersey_number }}{% else %}&mdash;{% endif %}</td>
-      <td class="col-player">{{ pitcher.name | e }}{% if pitcher.throws %} ({{ pitcher.throws }}){% endif %}{% if pitcher._small_sample %} *{% endif %}</td>
+      <td class="col-player">{{ pitcher.name | e }}{% if pitcher.throws %} ({{ pitcher.throws }}){% endif %} <span class="depth-badge">{{ pitcher.ip_outs | ip_display }} IP</span></td>
       <td class="col-thr col-sep heat-{{ pitcher._heat.thr }}">&nbsp;</td>
       <td class="heat-{{ pitcher._heat.era }}">{{ pitcher.era }}</td>
       <td class="heat-{{ pitcher._heat.k9 }}">{{ pitcher.k9 }}</td>
@@ -414,9 +407,6 @@
     {% endfor %}
   </tbody>
 </table>
-{% if pitching | selectattr("_small_sample") | list %}
-<div class="small-sample-footnote">* Small sample size (fewer than 15 IP)</div>
-{% endif %}
 {% else %}
 <p class="no-data-msg">No data available</p>
 {% endif %}
@@ -451,9 +441,9 @@
   </thead>
   <tbody>
     {% for player in batting %}
-    <tr{% if player._small_sample %} class="small-sample"{% endif %}>
+    <tr>
       <td>{% if player.jersey_number %}{{ player.jersey_number }}{% else %}&mdash;{% endif %}</td>
-      <td class="col-player">{{ player.name | e }}{% if player.player_id in spray_data %}<span class="spray-indicator"> &#9670;</span>{% endif %}{% if player._small_sample %} *{% endif %}</td>
+      <td class="col-player">{{ player.name | e }}{% if player.player_id in spray_data %}<span class="spray-indicator"> &#9670;</span>{% endif %} <span class="depth-badge">{{ player._pa }} PA</span></td>
       <td class="col-thr col-sep heat-{{ player._heat.thr }}">&nbsp;</td>
       <td class="heat-{{ player._heat.obp }}">{{ (player.h + player.bb + player.hbp) | format_avg(player._pa) }}</td>
       <td class="heat-{{ player._heat.avg }}">{{ player.h | format_avg(player.ab) }}</td>
@@ -475,9 +465,6 @@
     {% endfor %}
   </tbody>
 </table>
-{% if batting | selectattr("_small_sample") | list %}
-<div class="small-sample-footnote">* Small sample size (fewer than 20 PA)</div>
-{% endif %}
 {% else %}
 <p class="no-data-msg">No data available</p>
 {% endif %}

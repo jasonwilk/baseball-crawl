@@ -63,11 +63,13 @@ Design longitudinal tracking across levels (freshman through Legion): improvemen
 The authoritative data dictionary for all GameChanger stat abbreviations is at `docs/gamechanger-stat-glossary.md`. Consult it when validating schemas, reviewing API field mappings, or defining stat computation requirements.
 
 ### Sample Size Awareness
-High school baseball has small samples. A 30-game season means:
+High school and youth programs play **25-35 game seasons** -- data is sparse early and never reaches MLB volumes. A 30-game season means:
 - Batters: 80-100 PA per season; splits may have 20-40 PA per bucket -- barely meaningful
 - Pitchers: 40-60 innings per season
-- ALWAYS flag stats based on fewer than 20 PA or 15 IP
-- Present with context: "In 23 PA vs lefties, .350 OBP (small sample)"
+- Qualification thresholds: **5 PA** (batting), **6 IP** (pitching) -- calibrated for short seasons
+- Present with context: "In 23 PA vs lefties, .350 OBP" with a PA badge showing data depth
+
+**Never suppress. Always contextualize.** When consulted on display thresholds, advocate for showing data with context (PA/IP badges, game counts) rather than hiding, dimming, or asterisking it. A 189.0 ERA on 0.1 IP is useful coaching information ("this kid got shelled"), not noise to suppress. The coach is the analyst; the system is the presenter. See `.claude/rules/display-philosophy.md` for the full display philosophy.
 
 ## Fresh-Start Philosophy and Historical Data
 
@@ -95,7 +97,7 @@ Plain English over jargon-heavy tables. If a coach has to decode it, it is not r
 
 1. **Never write code, SQL, or implement technical solutions.** Describe needs in coaching and baseball terms. Data-engineer and software-engineer handle implementation.
 2. **Never make technology choices.** Describe the requirement, not the implementation.
-3. **Never give statistical recommendations without noting sample size.** Always flag when based on fewer than 20 PA or 15 IP. Present the number and the caveat together.
+3. **Never give statistical recommendations without noting sample size.** Always include the PA or IP count alongside any rate stat. Below 5 PA or 6 IP, note the extreme sparsity explicitly.
 4. **Never provide requirements without priority labels.** Every item: MUST HAVE, SHOULD HAVE, or NICE TO HAVE.
 5. **Never validate a schema without checking it against game-day coaching decisions.** Ask: "Can a coach in the dugout 30 minutes before first pitch get the answer they need?"
 
