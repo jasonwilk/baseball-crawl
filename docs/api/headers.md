@@ -148,6 +148,7 @@ Quick reference table:
 | `GET /me/organizations` | `application/vnd.gc.com.organization_with_role:list+json; version=0.3.2` |
 | `GET /teams/public/{public_id}/access-level` | `application/vnd.gc.com.team_access_level+json; version=0.0.0` |
 | `GET /teams/public/{public_id}/id` | `application/vnd.gc.com.team_id+json; version=0.0.0` |
+| `POST /search` | `application/vnd.gc.com.search_results+json; version=0.0.0` |
 | `POST /auth` | `*/*` (not vendor-typed -- unique exception) |
 
 ## Implementation Notes

@@ -1,12 +1,12 @@
 ---
 name: ingest-workflow-log
-description: Per-endpoint integration history from ingest-endpoint skill executions (19 endpoints, 2026-03-04)
+description: Per-endpoint integration history from ingest-endpoint skill executions (20 integrations: 19 endpoints 2026-03-04, plus POST /search re-ingestion 2026-03-29)
 type: reference
 ---
 
 # Ingest-Endpoint Workflow Executions
 
-19 endpoints ingested on 2026-03-04. Each entry records the endpoint, impact level, which agent memories and context-layer files were updated, and key discoveries.
+20 integrations total (19 endpoints on 2026-03-04, plus 1 re-ingestion on 2026-03-29). Each entry records the endpoint, impact level, which agent memories and context-layer files were updated, and key discoveries.
 
 - **player-stats**: Third execution. Phase 2 updates: data-engineer memory (spray chart schema implications, per-game stat structure), software-engineer memory (raw sample path, endpoint parsing notes), baseball-coach memory (coaching value of per-game stats and spray charts), CLAUDE.md Key Metrics (added per-game splits and spray charts). No new stat abbreviations -- all fields already in glossary.
 
@@ -41,3 +41,5 @@ type: reference
 - **public-team-profile-id**: Eighteenth integration. NEW endpoint (`GET /teams/{team_id}/public-team-profile-id`), UUID-to-public_id bridge. Single-field response `{"id": "<slug>"}`. MEDIUM-IMPACT: missing link between authenticated API (UUIDs) and public API (`public_id` slugs). Enables programmatic public_id resolution for opponents. Opponent UUID behavior unverified (highest priority follow-up). Phase 2 updates: data-engineer memory (bridge pattern for two-tier ETL, Team entity public_id column, opponent UUID follow-up), software-engineer memory (raw sample path, bridge pattern, opponent scouting pipeline note, opponent UUID follow-up), baseball-coach memory (updated scouting pipeline with step 2a for public_id resolution, opponent UUID follow-up as highest priority), CLAUDE.md GameChanger API section (added UUID-to-public_id bridge note). No stat glossary changes.
 
 - **auth-refresh**: Nineteenth integration. NEW endpoint (`POST /auth`), first POST endpoint, token refresh flow. HTTP 400 received (stale gc-signature, not expired token). HIGH-IMPACT on context layer: corrected pervasive factual error (token lifetime is 14 DAYS, not 1 hour). Key discovery: `gc-signature` HMAC header blocks programmatic token refresh. Four new headers documented (gc-signature, gc-timestamp, gc-client-id, gc-app-version). JWT payload schema corrected. Phase 2 updates: CLAUDE.md GameChanger API section (corrected credential lifetime to accurate 14-day), ingest-endpoint skill (corrected three references to ~1-hour credential lifetime), data-engineer memory (new Token Lifetime and ETL Scheduling section -- 14-day window enables batch pipelines), software-engineer memory (corrected JWT `userId` to `uid`, new Token Lifetime section with JWT fields, new headers, programmatic refresh status). No baseball-coach memory changes. No stat glossary changes.
+
+- **search (re-ingestion)**: Twentieth integration. Existing endpoint (`POST /search`), re-confirmed 2026-03-29 with live curl. Previously had proxy-only observation (mobile, 2026-03-09) with no request/response schema. LOW-IMPACT on context layer (endpoint doc already existed with partial data). Key discoveries: Accept header uses `search_results` resource name (different from Content-Type `post_search`), `avatar_url` optional signed CloudFront URL field, `location` can be empty `{}`, `location.country` has three variants, `staff` can be `[]`, `number_of_players` can be `0`. Phase 2 updates: api-scout operational-notes (removed POST /search from high-priority unexplored list), content-type.md (fixed "only POST endpoint" claim, added vendor-typed POST Content-Type table), headers.md (added POST /search to Accept quick reference table). No CLAUDE.md changes. No stat glossary changes. No other agent memory changes. Context: ingestion was part of investigating spray chart failures in reports (search is the public_id-to-gc_uuid bridge).

@@ -2,8 +2,7 @@
 
 ## Areas Not Yet Explored / High-Priority
 
-- **`POST /search` BODY SCHEMA** -- request body and response body not captured. Live curl needed to see query field names and response structure.
-- **`GET /search/opponent-import` RESPONSE BODY** -- endpoint confirmed 200 OK (both mobile and web profiles) but proxy only captures metadata, not JSON. Live curl needed.
+- **`GET /search/opponent-import` RESPONSE BODY** -- endpoint confirmed 200 OK (both mobile and web profiles) but proxy only captures metadata, not JSON. Live curl needed. (Note: this endpoint is superseded by POST /search for programmatic use, but schema still undocumented.)
 - **`GET /teams/{team_id}/import-summary` RESPONSE BODY** -- endpoint confirmed 200 OK but body not captured. Schema unknown.
 - **LSB coaching account credentials** -- current credentials are travel ball only. LSB HS teams not visible.
 - **`PATCH /players/{player_id}` schema** -- body and response format unknown.

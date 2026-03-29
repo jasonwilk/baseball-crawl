@@ -94,7 +94,7 @@ Four skills in `.claude/skills/`:
 - `docs/gamechanger-stat-glossary.md` -- stat abbreviation data dictionary (owned by api-scout, created 2026-03-04). Referenced from: CLAUDE.md (Key Metrics), api-scout agent def + memory, data-engineer agent def + memory, software-engineer agent def + memory, baseball-coach agent def + memory. Integration audit completed 2026-03-04.
 
 ## Ingest-Endpoint Workflow Executions
-19 endpoints ingested (2026-03-04). Full per-endpoint integration log: `ingest-workflow-log.md`
+20 integrations (19 endpoints 2026-03-04, plus POST /search re-ingestion 2026-03-29). Full per-endpoint integration log: `ingest-workflow-log.md`
 
 ## Codex Configuration
 Details in topic file: `codex-config.md`

@@ -26,7 +26,7 @@ Two endpoints do NOT use vendor-typed Accept headers:
 
 | Endpoint | Accept value | Reason |
 |----------|-------------|--------|
-| `POST /auth` | `*/*` | The only POST endpoint. Uses `Content-Type: application/json; charset=utf-8` for the request body. |
+| `POST /auth` | `*/*` | Auth lifecycle endpoint. Uses `Content-Type: application/json; charset=utf-8` for the request body. |
 | `GET /teams/{team_id}/schedule/events/{event_id}/player-stats` | `application/json, text/plain, */*` | Unique exception -- this endpoint accepts a generic JSON accept header rather than a vendor type. |
 
 ## Request Content-Type
@@ -44,6 +44,17 @@ For `POST /auth`, the request body uses:
 ```
 Content-Type: application/json; charset=utf-8
 ```
+
+### POST Endpoints with Vendor-Typed Content-Type
+
+Some POST endpoints use vendor-typed Content-Type headers for the request body (distinct from the Accept header):
+
+| Endpoint | Content-Type | Accept | Notes |
+|----------|-------------|--------|-------|
+| `POST /search` | `application/vnd.gc.com.post_search+json; version=0.0.0` | `application/vnd.gc.com.search_results+json; version=0.0.0` | Content-Type uses underscore (`post_search`). Accept uses a different resource name (`search_results`). |
+| `POST /clips/search` | See endpoint file | See endpoint file | |
+
+Note: The Content-Type and Accept resource names can differ on the same endpoint (as with POST /search: `post_search` vs `search_results`). Always check the endpoint file for the confirmed values.
 
 ## Response Content-Type
 
