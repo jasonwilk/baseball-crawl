@@ -1581,9 +1581,9 @@ class TestTemplateStaleRefs:
                 f"{filename} still contains 'is_admin'"
             )
 
-    def test_admin_opponent_connect_no_display_name(self) -> None:
-        """admin/opponent_connect.html contains no 'display_name' references (AC-4)."""
-        path = self._TEMPLATES_DIR / "admin" / "opponent_connect.html"
+    def test_admin_opponent_resolve_no_display_name(self) -> None:
+        """admin/opponent_resolve.html contains no 'display_name' references (AC-4)."""
+        path = self._TEMPLATES_DIR / "admin" / "opponent_resolve.html"
         content = path.read_text()
         assert "display_name" not in content
 
@@ -2012,7 +2012,7 @@ class TestJerseyNumberColumn:
                 response = client.get("/dashboard/batting")
         assert response.status_code == 200
         assert "bg-yellow-50" in response.text
-        assert "Stats haven't been loaded" in response.text
+        assert "Stats aren" in response.text and "available yet" in response.text
         assert "<table" not in response.text
 
     def test_pitching_empty_state_shows_yellow_card(self, tmp_path: Path) -> None:
@@ -2032,7 +2032,7 @@ class TestJerseyNumberColumn:
                 response = client.get("/dashboard/pitching")
         assert response.status_code == 200
         assert "bg-yellow-50" in response.text
-        assert "Stats haven't been loaded" in response.text
+        assert "Stats aren" in response.text and "available yet" in response.text
         assert "<table" not in response.text
 
 
@@ -2154,14 +2154,26 @@ class TestGameDetailJerseyNumber:
         return ">Pitching</h2>".join(html.split(">Pitching</h2>")[1:])
 
     def test_game_detail_batting_table_has_jersey_column(self, game_jersey_client) -> None:
-        """AC-8a/b: # column header and jersey values appear in batting table section."""
+        """AC-8a/b: # column header and jersey values appear in batting table sections.
+
+        The game_detail template renders per-team sections (batting + pitching),
+        so the away team's batting table comes after the home team's pitching heading.
+        """
         client, home_id, _ = game_jersey_client
         response = client.get(f"/dashboard/games/gd-game-1?team_id={home_id}")
         assert response.status_code == 200
-        batting = self._batting_html(response.text)
+        html = response.text
+        batting = self._batting_html(html)
         assert ">#<" in batting, "# column header missing from batting table"
         assert ">55<" in batting, "home jersey 55 missing from batting table"
-        assert ">99<" in batting, "away jersey 99 missing from batting table"
+        # Away team's batting section is in the second <details> block.
+        # Split by <details to isolate per-team sections, then check batting
+        # portion of the away block (before its Pitching heading).
+        details_blocks = html.split("<details")
+        assert len(details_blocks) >= 3, "expected at least 2 <details> blocks (home + away)"
+        away_block = details_blocks[2]  # index 0 is before first <details>
+        away_batting = away_block.split(">Pitching</h2>")[0]
+        assert ">99<" in away_batting, "away jersey 99 missing from away batting table"
 
     def test_game_detail_batting_null_jersey_shows_em_dash(self, game_jersey_client) -> None:
         """AC-8c: em dash renders in batting table for NULL jersey_number."""
@@ -2460,7 +2472,7 @@ class TestEmptyStateUI:
                 response = client.get(f"/dashboard/batting?team_id={no_data_id}&year={_CURRENT_YEAR_E142}")
         assert response.status_code == 200
         assert "bg-yellow-50" in response.text
-        assert "Stats haven't been loaded" in response.text
+        assert "Stats aren" in response.text and "available yet" in response.text
         assert "<table" not in response.text
 
     def test_pitching_tab_shows_yellow_card_for_no_data_team(self, tmp_path: Path) -> None:
@@ -2472,7 +2484,7 @@ class TestEmptyStateUI:
                 response = client.get(f"/dashboard/pitching?team_id={no_data_id}&year={_CURRENT_YEAR_E142}")
         assert response.status_code == 200
         assert "bg-yellow-50" in response.text
-        assert "Stats haven't been loaded" in response.text
+        assert "Stats aren" in response.text and "available yet" in response.text
         assert "<table" not in response.text
 
     def test_games_tab_shows_yellow_card_for_no_data_team(self, tmp_path: Path) -> None:
@@ -2484,7 +2496,7 @@ class TestEmptyStateUI:
                 response = client.get(f"/dashboard/games?team_id={no_data_id}&year={_CURRENT_YEAR_E142}")
         assert response.status_code == 200
         assert "bg-yellow-50" in response.text
-        assert "Stats haven't been loaded" in response.text
+        assert "Stats aren" in response.text and "available yet" in response.text
         assert "<table" not in response.text
 
     def test_opponents_tab_shows_yellow_card_when_no_opponents_and_no_data(
@@ -2500,7 +2512,7 @@ class TestEmptyStateUI:
                 )
         assert response.status_code == 200
         assert "bg-yellow-50" in response.text
-        assert "Stats haven't been loaded" in response.text
+        assert "Stats aren" in response.text and "available yet" in response.text
         assert "<table" not in response.text
 
     def test_opponents_tab_shows_list_when_junction_opponent_exists_no_data(

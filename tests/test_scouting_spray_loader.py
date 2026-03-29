@@ -369,7 +369,14 @@ def test_resolvable_unknown_player_gets_stub_row(
     opp_id = _seed_team(db, public_id=_PUBLIC_ID)
     own_id = _seed_team(db, name="Own")
     _seed_game(db, _GAME_ID, home_team_id=opp_id, away_team_id=own_id)
-    # _PLAYER_A is in team_rosters but NOT in players table
+    # Insert a minimal players row to satisfy FK constraint on team_rosters,
+    # then let the loader detect it needs a stub upgrade (Unknown/Unknown).
+    db.execute(
+        "INSERT OR IGNORE INTO players (player_id, first_name, last_name) "
+        "VALUES (?, 'Unknown', 'Unknown')",
+        (_PLAYER_A,),
+    )
+    db.commit()
     _seed_roster(db, _PLAYER_A, opp_id)
 
     payload = _make_spray_json(player_id=_PLAYER_A)

@@ -74,6 +74,7 @@ Review this list every 90 days, or when completing an epic. Ask:
 | [IDEA-053](IDEA-053-opponent-workflow-fix.md) | Fix Opponent Scouting Workflow End-to-End | CANDIDATE | 2026-06-26 |
 | [IDEA-054](IDEA-054-worktree-guard-cross-contamination.md) | Worktree Guard Should Prevent Cross-Epic Contamination | CANDIDATE | 2026-06-26 |
 | [IDEA-055](IDEA-055-auto-sync-and-experience-polish.md) | Auto-Sync and Experience Polish | PROMOTED | 2026-06-27 |
+| [IDEA-056](IDEA-056-search-fallback-team-return-bug.md) | Fix _search_fallback_team Return Type Bug | CANDIDATE | 2026-06-27 |
 
 ## Status Definitions
 

@@ -1,7 +1,7 @@
 # E-179: Fix Pre-Existing Test Failures from E-173 UI Changes
 
 ## Status
-`READY`
+`COMPLETED`
 <!-- Lifecycle: DRAFT -> READY -> ACTIVE -> COMPLETED (or BLOCKED / ABANDONED) -->
 
 ## Overview
@@ -28,15 +28,15 @@ No expert consultation required -- this is primarily mechanical test alignment w
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-179-01 | Fix test_admin_opponents.py label, route, filter, and badge failures | TODO | None | - |
-| E-179-02 | Fix test_admin_delete_cascade.py label failure | TODO | None | - |
-| E-179-03 | Fix test_dashboard_opponent_detail.py label and mock failures | TODO | None | - |
-| E-179-04 | Fix test_dashboard_routes.py empty state and sort test failures | TODO | None | - |
-| E-179-05 | Fix test_report_renderer.py data model failures | TODO | None | - |
-| E-179-06 | Fix test_pii_hook_integration.py, test_scouting_spray_loader.py, test_admin_teams.py, and test_admin_routes.py failures | TODO | None | - |
-| E-179-07 | Full test suite green verification | TODO | E-179-01 thru 06, 08, 09 | - |
-| E-179-08 | Fix test_opponent_resolver.py assertion failures | TODO | None | - |
-| E-179-09 | Fix test_dashboard.py empty state and stale reference failures | TODO | None | - |
+| E-179-01 | Fix test_admin_opponents.py label, route, filter, and badge failures | DONE | None | - |
+| E-179-02 | Fix test_admin_delete_cascade.py label failure | DONE | None | - |
+| E-179-03 | Fix test_dashboard_opponent_detail.py label and mock failures | DONE | None | - |
+| E-179-04 | Fix test_dashboard_routes.py empty state and sort test failures | DONE | None | - |
+| E-179-05 | Fix test_report_renderer.py data model failures | DONE | None | - |
+| E-179-06 | Fix test_pii_hook_integration.py, test_scouting_spray_loader.py, test_admin_teams.py, and test_admin_routes.py failures | DONE | None | - |
+| E-179-07 | Full test suite green verification | DONE | E-179-01 thru 06, 08, 09 | - |
+| E-179-08 | Fix test_opponent_resolver.py assertion failures | DONE | None | - |
+| E-179-09 | Fix test_dashboard.py empty state and stale reference failures | DONE | None | - |
 
 ## Dispatch Team
 - software-engineer
@@ -109,8 +109,32 @@ SE-confirmed current template text for opponent detail pages:
 ## History
 - 2026-03-28: Created
 - 2026-03-29: Set to READY after 3-round internal review + 2-round Codex spec review
+- 2026-03-29: Set to ACTIVE, dispatch started
+- 2026-03-29: All 9 stories DONE. COMPLETED. Fixed 69 pre-existing test failures across 11 test files (8 implementation stories + 1 verification gate). All 3401 tests in E-179 target files pass. 25 failures in test_seed.py are pre-existing and unrelated. No production files modified. Follow-up: `_search_fallback_team` return bug captured as IDEA-056.
+- Documentation assessment: No documentation impact -- test-only epic, no user-facing changes.
+- Context-layer assessment:
+  1. New convention/pattern: No
+  2. Architectural decision: No
+  3. Footgun/failure mode: Yes -- RTK hiding pytest failures (already codified in `.claude/rules/pytest-verbose.md`)
+  4. Agent behavior change: No
+  5. Domain knowledge: No
+  6. New CLI command/workflow: No
+  All triggers assessed. Trigger 3 already addressed by pytest-verbose rule committed earlier. No additional context-layer work needed.
 
-### Review Scorecard
+### Review Scorecard (Dispatch)
+| Review Pass | Findings | Accepted | Dismissed |
+|---|---|---|---|
+| Per-story CR -- E-179-01 | 2 | 2 | 0 |
+| Per-story CR -- E-179-02 | 0 | 0 | 0 |
+| Per-story CR -- E-179-03 | 0 | 0 | 0 |
+| Per-story CR -- E-179-04 | 0 | 0 | 0 |
+| Per-story CR -- E-179-05 | 0 | 0 | 0 |
+| Per-story CR -- E-179-06 | 0 | 0 | 0 |
+| Per-story CR -- E-179-08 | 0 | 0 | 0 |
+| Per-story CR -- E-179-09 | 0 | 0 | 0 |
+| **Total** | **2** | **2** | **0** |
+
+### Review Scorecard (Planning)
 | Review Pass | Findings | Accepted | Dismissed |
 |---|---|---|---|
 | Internal iteration 1 -- CR spec audit | 7 | 6 | 1 |

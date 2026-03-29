@@ -62,6 +62,7 @@ def _init_repo(tmp_path: Path) -> Path:
     # Symlink src/safety/ into the temp repo so the hook can resolve the scanner
     src_dir = tmp_path / "src"
     src_dir.mkdir()
+    (src_dir / "__init__.py").touch()
     (src_dir / "safety").symlink_to(PROJECT_ROOT / "src" / "safety")
 
     return tmp_path
@@ -101,13 +102,13 @@ class TestHookBlocksPII:
 
     def test_email_blocks_commit(self, tmp_path: Path) -> None:
         repo = _init_repo(tmp_path)
-        _stage_file(repo, "contact.json", '{"email": "test@example.com"}\n')
+        _stage_file(repo, "contact.json", '{"email": "coach.jones@realschool.edu"}\n')
         result = _git_commit(repo)
         assert result.returncode != 0
 
     def test_blocked_output_contains_pii_blocked_and_pattern(self, tmp_path: Path) -> None:
         repo = _init_repo(tmp_path)
-        _stage_file(repo, "contact.json", '{"email": "test@example.com"}\n')
+        _stage_file(repo, "contact.json", '{"email": "coach.jones@realschool.edu"}\n')
         result = _git_commit(repo)
         combined = result.stdout + result.stderr
         assert "[PII BLOCKED]" in combined

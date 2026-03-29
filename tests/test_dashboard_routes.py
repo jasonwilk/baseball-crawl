@@ -538,7 +538,7 @@ class TestEmptyState:
                 resp = client.get("/dashboard/batting")
 
         assert resp.status_code == 200
-        assert "Stats haven&#x27;t been loaded" in resp.text or "Stats haven't been loaded" in resp.text
+        assert "Stats aren&#x27;t available yet" in resp.text or "Stats aren't available yet" in resp.text
 
     def test_pitching_no_data_shows_no_stats(self, tmp_path: Path) -> None:
         db_path = _make_db(tmp_path)
@@ -554,7 +554,7 @@ class TestEmptyState:
                 resp = client.get("/dashboard/pitching")
 
         assert resp.status_code == 200
-        assert "Stats haven&#x27;t been loaded" in resp.text or "Stats haven't been loaded" in resp.text
+        assert "Stats aren&#x27;t available yet" in resp.text or "Stats aren't available yet" in resp.text
 
     def test_no_data_fallback_season_id_is_current_year(self, tmp_path: Path) -> None:
         """With no data, the fallback season_id uses the current year."""
@@ -1060,7 +1060,7 @@ def _extract_names_from_table(html: str, table_heading: str) -> list[str]:
     then finds all name cells within that slice.
     """
     import re
-    pattern = r'<td class="[^"]*font-medium[^"]*whitespace-nowrap[^"]*">\s*([^<]+?)\s*</td>'
+    pattern = r'<td class="[^"]*whitespace-nowrap[^"]*font-medium[^"]*">\s*([^<]+?)\s*</td>'
 
     if table_heading not in html:
         return re.findall(pattern, html)

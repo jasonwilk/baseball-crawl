@@ -1595,10 +1595,13 @@ class TestDeleteTeam:
         token = _insert_session(team_db, admin_id)
         team_id = _insert_team(team_db, "Junction Team", membership_type="tracked")
 
-        # Seed a team_opponents row (team as opponent_team_id)
+        # Insert a distinct member team so our_team_id != opponent_team_id
+        # (CHECK constraint on team_opponents requires they differ)
         conn = sqlite3.connect(str(team_db))
         conn.execute("PRAGMA foreign_keys=ON;")
-        member_id = conn.execute("SELECT id FROM teams LIMIT 1").fetchone()[0]
+        member_id = conn.execute(
+            "INSERT INTO teams (name, membership_type) VALUES ('Member Team', 'member') RETURNING id"
+        ).fetchone()[0]
         conn.execute(
             "INSERT INTO team_opponents (our_team_id, opponent_team_id) VALUES (?, ?)",
             (member_id, team_id),

@@ -217,8 +217,7 @@ class TestBottomNavSuppression:
         html = resp.text
         assert ">Batting<" in html
         assert ">Pitching<" in html
-        assert ">Games<" in html
-        assert ">Opponents<" in html
+        assert ">Schedule<" in html
 
     def test_bottom_nav_absent_on_admin_users(self, tmp_path: Path) -> None:
         """Bottom nav absent on GET /admin/users (another admin page)."""

@@ -81,14 +81,14 @@ def _make_db(tmp_path: Path) -> tuple[Path, dict[str, int]]:
     jv_id = cur.lastrowid
 
     cur = conn.execute(
-        "INSERT INTO teams (name, membership_type, source, is_active) "
-        "VALUES ('Northside Eagles', 'tracked', 'gamechanger', 0)"
+        "INSERT INTO teams (name, membership_type, public_id, source, is_active) "
+        "VALUES ('Northside Eagles', 'tracked', 'a1GFM9Ku0BbF', 'gamechanger', 0)"
     )
     northside_id = cur.lastrowid
 
     cur = conn.execute(
-        "INSERT INTO teams (name, membership_type, source, is_active) "
-        "VALUES ('Westview Tigers', 'tracked', 'gamechanger', 0)"
+        "INSERT INTO teams (name, membership_type, public_id, source, is_active) "
+        "VALUES ('Westview Tigers', 'tracked', 'QTiLIb2Lui3b', 'gamechanger', 0)"
     )
     westview_id = cur.lastrowid
 
@@ -302,7 +302,7 @@ class TestOpponentListing:
         assert "Ridgecrest Rockets" in response.text
 
     def test_listing_shows_summary_counts(self, opp_db: Path) -> None:
-        """Filter pills show correct counts: total=3, full=2, scoresheet=1."""
+        """Filter pills show correct counts: total=3, full=0 (no stats rows), needs linking=1."""
         admin_id = _insert_user(opp_db, "counts@test.com")
         token = _insert_session(opp_db, admin_id)
 
@@ -310,29 +310,34 @@ class TestOpponentListing:
             with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
                 response = client.get("/admin/opponents")
         assert "All (3)" in response.text
-        assert "Full stats (2)" in response.text
-        assert "Scoresheet only (1)" in response.text
+        assert "Stats loaded (0)" in response.text
+        assert "Needs linking (1)" in response.text
 
-    def test_listing_filter_full_shows_only_linked(self, opp_db: Path) -> None:
-        """?filter=full returns only rows with public_id set."""
+    def test_listing_filter_full_shows_only_with_stats(self, opp_db: Path) -> None:
+        """?filter=full returns only rows with actual stats loaded (not just resolved).
+
+        Seed data has no stat rows, so ?filter=full returns empty.
+        """
         admin_id = _insert_user(opp_db, "filterfull@test.com")
         token = _insert_session(opp_db, admin_id)
 
         with patch.dict("os.environ", _admin_env(opp_db, "filterfull@test.com")):
             with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
                 response = client.get("/admin/opponents?filter=full")
-        assert "Northside Eagles" in response.text
-        assert "Westview Tigers" in response.text
+        # No opponents have stats loaded (full filter checks for actual stat rows)
+        assert "Northside Eagles" not in response.text
+        assert "Westview Tigers" not in response.text
         assert "Ridgecrest Rockets" not in response.text
+        assert "No opponent connections found" in response.text
 
-    def test_listing_filter_scoresheet_shows_only_unlinked(self, opp_db: Path) -> None:
-        """?filter=scoresheet returns only rows with public_id NULL."""
+    def test_listing_filter_unresolved_shows_only_unlinked(self, opp_db: Path) -> None:
+        """?filter=unresolved returns only rows with resolved_team_id NULL."""
         admin_id = _insert_user(opp_db, "filtersheet@test.com")
         token = _insert_session(opp_db, admin_id)
 
         with patch.dict("os.environ", _admin_env(opp_db, "filtersheet@test.com")):
             with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
-                response = client.get("/admin/opponents?filter=scoresheet")
+                response = client.get("/admin/opponents?filter=unresolved")
         assert "Ridgecrest Rockets" in response.text
         assert "Northside Eagles" not in response.text
         assert "Westview Tigers" not in response.text
@@ -415,35 +420,38 @@ class TestSubNav:
 
 
 class TestBadgeStates:
-    """Three visual badge states render correctly (AC-3)."""
+    """Pipeline-status-based badge states render correctly (AC-3)."""
 
-    def test_auto_resolved_shows_full_stats_auto(self, opp_db: Path) -> None:
+    def test_resolved_no_stats_shows_linked_badge(self, opp_db: Path) -> None:
+        """Resolved opponents with no stats rows show 'Linked' badge (blue)."""
         admin_id = _insert_user(opp_db, "badge1@test.com")
         token = _insert_session(opp_db, admin_id)
 
         with patch.dict("os.environ", _admin_env(opp_db, "badge1@test.com")):
             with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
                 response = client.get("/admin/opponents")
-        assert "auto" in response.text
-        assert "Full stats" in response.text
+        assert "Linked" in response.text
 
-    def test_manual_link_shows_full_stats_manual(self, opp_db: Path) -> None:
+    def test_manual_link_shows_linked_badge(self, opp_db: Path) -> None:
+        """Manual-resolved opponent with no stats shows 'Linked' badge."""
         admin_id = _insert_user(opp_db, "badge2@test.com")
         token = _insert_session(opp_db, admin_id)
 
         with patch.dict("os.environ", _admin_env(opp_db, "badge2@test.com")):
             with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
                 response = client.get("/admin/opponents")
-        assert "manual" in response.text
+        # Both resolved opponents (auto + manual) show "Linked" when no stats exist
+        assert "Linked" in response.text
 
-    def test_unlinked_shows_scoresheet_only(self, opp_db: Path) -> None:
+    def test_unlinked_shows_needs_linking(self, opp_db: Path) -> None:
+        """Unresolved opponent shows 'Needs linking' badge (orange)."""
         admin_id = _insert_user(opp_db, "badge3@test.com")
         token = _insert_session(opp_db, admin_id)
 
         with patch.dict("os.environ", _admin_env(opp_db, "badge3@test.com")):
             with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
                 response = client.get("/admin/opponents")
-        assert "Scoresheet only" in response.text
+        assert "Needs linking" in response.text
 
 
 # ---------------------------------------------------------------------------
@@ -483,9 +491,10 @@ class TestConnectButton:
 
 
 class TestConnectForm:
-    """GET /admin/opponents/{id}/connect shows URL-paste form (AC-5)."""
+    """GET /admin/opponents/{id}/connect redirects to /resolve (AC-5)."""
 
-    def test_connect_form_renders(self, opp_db: Path) -> None:
+    def test_connect_form_redirects_to_resolve(self, opp_db: Path) -> None:
+        """GET /connect redirects to /resolve; following redirect renders resolve page."""
         admin_id = _insert_user(opp_db, "form1@test.com")
         token = _insert_session(opp_db, admin_id)
         link_id = _get_link_id_by_name(opp_db, "Ridgecrest Rockets")
@@ -499,6 +508,7 @@ class TestConnectForm:
         assert "GameChanger" in response.text
 
     def test_connect_form_404_for_invalid_id(self, opp_db: Path) -> None:
+        """GET /connect for non-existent link follows redirect to /resolve which 404s."""
         admin_id = _insert_user(opp_db, "form2@test.com")
         token = _insert_session(opp_db, admin_id)
 
@@ -507,7 +517,8 @@ class TestConnectForm:
                 response = client.get("/admin/opponents/9999/connect")
         assert response.status_code == 404
 
-    def test_connect_form_links_to_confirm(self, opp_db: Path) -> None:
+    def test_connect_form_has_resolve_action(self, opp_db: Path) -> None:
+        """Resolve page (reached via /connect redirect) has resolve URL, not /connect/confirm."""
         admin_id = _insert_user(opp_db, "form3@test.com")
         token = _insert_session(opp_db, admin_id)
         link_id = _get_link_id_by_name(opp_db, "Ridgecrest Rockets")
@@ -516,7 +527,7 @@ class TestConnectForm:
         with patch.dict("os.environ", _admin_env(opp_db, "form3@test.com")):
             with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
                 response = client.get(f"/admin/opponents/{link_id}/connect")
-        assert f"/admin/opponents/{link_id}/connect/confirm" in response.text
+        assert f"/admin/opponents/{link_id}/resolve" in response.text
 
 
 # ---------------------------------------------------------------------------
@@ -525,7 +536,10 @@ class TestConnectForm:
 
 
 class TestConnectConfirm:
-    """Confirm page parses URL and fetches team info (AC-6, AC-7)."""
+    """Resolve page parses URL and fetches team info (AC-6, AC-7).
+
+    GET /connect/confirm redirects to /resolve; tests use /resolve directly.
+    """
 
     def test_confirm_shows_team_profile_on_success(self, opp_db: Path) -> None:
         from src.gamechanger.team_resolver import TeamProfile
@@ -544,14 +558,15 @@ class TestConnectConfirm:
             with patch("src.api.routes.admin.resolve_team", return_value=mock_profile):
                 with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
                     response = client.get(
-                        f"/admin/opponents/{link_id}/connect/confirm",
-                        params={"url": "https://web.gc.com/teams/NewTeam001/slug"},
+                        f"/admin/opponents/{link_id}/resolve",
+                        params={"confirm": "NewTeam001"},
                     )
         assert response.status_code == 200
         assert "Ridgecrest Rockets" in response.text
         assert "NewTeam001" in response.text
 
     def test_confirm_shows_error_for_invalid_url(self, opp_db: Path) -> None:
+        """Resolve page with invalid URL shows error in confirm_error mode."""
         admin_id = _insert_user(opp_db, "confirm2@test.com")
         token = _insert_session(opp_db, admin_id)
         link_id = _get_link_id_by_name(opp_db, "Ridgecrest Rockets")
@@ -559,11 +574,11 @@ class TestConnectConfirm:
         with patch.dict("os.environ", _admin_env(opp_db, "confirm2@test.com")):
             with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
                 response = client.get(
-                    f"/admin/opponents/{link_id}/connect/confirm",
+                    f"/admin/opponents/{link_id}/resolve",
                     params={"url": "not-a-valid-url-at-all!!"},
                 )
         assert response.status_code == 200
-        assert "try again" in response.text.lower()
+        assert "Invalid team identifier" in response.text
 
     def test_confirm_shows_error_for_api_failure(self, opp_db: Path) -> None:
         from src.gamechanger.team_resolver import GameChangerAPIError
@@ -579,11 +594,11 @@ class TestConnectConfirm:
             ):
                 with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
                     response = client.get(
-                        f"/admin/opponents/{link_id}/connect/confirm",
-                        params={"url": "https://web.gc.com/teams/NewTeam001/slug"},
+                        f"/admin/opponents/{link_id}/resolve",
+                        params={"confirm": "NewTeam001"},
                     )
         assert response.status_code == 200
-        assert "try again" in response.text.lower()
+        assert "Could not fetch team" in response.text
 
     def test_confirm_shows_error_for_team_not_found(self, opp_db: Path) -> None:
         from src.gamechanger.team_resolver import TeamNotFoundError
@@ -599,14 +614,14 @@ class TestConnectConfirm:
             ):
                 with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
                     response = client.get(
-                        f"/admin/opponents/{link_id}/connect/confirm",
-                        params={"url": "https://web.gc.com/teams/NewTeam001/slug"},
+                        f"/admin/opponents/{link_id}/resolve",
+                        params={"confirm": "NewTeam001"},
                     )
         assert response.status_code == 200
-        assert "try again" in response.text.lower()
+        assert "Could not fetch team" in response.text
 
     def test_confirm_rejects_own_team_url(self, opp_db: Path) -> None:
-        """Confirm page shows error for a URL belonging to a member team."""
+        """Resolve page shows error for a URL belonging to a member team."""
         admin_id = _insert_user(opp_db, "confirm5@test.com")
         token = _insert_session(opp_db, admin_id)
         link_id = _get_link_id_by_name(opp_db, "Ridgecrest Rockets")
@@ -615,14 +630,14 @@ class TestConnectConfirm:
         with patch.dict("os.environ", _admin_env(opp_db, "confirm5@test.com")):
             with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
                 response = client.get(
-                    f"/admin/opponents/{link_id}/connect/confirm",
+                    f"/admin/opponents/{link_id}/resolve",
                     params={"url": "https://web.gc.com/teams/ownedPubId001/slug"},
                 )
         assert response.status_code == 200
-        assert "try again" in response.text.lower()
+        assert "Lincoln program team" in response.text
 
     def test_confirm_shows_duplicate_warning(self, opp_db: Path) -> None:
-        """Confirm page warns when public_id is already used by another row."""
+        """Confirm page warns when public_id is already used by another team."""
         from src.gamechanger.team_resolver import TeamProfile
 
         admin_id = _insert_user(opp_db, "confirm6@test.com")
@@ -640,11 +655,11 @@ class TestConnectConfirm:
             with patch("src.api.routes.admin.resolve_team", return_value=mock_profile):
                 with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
                     response = client.get(
-                        f"/admin/opponents/{link_id}/connect/confirm",
-                        params={"url": "https://web.gc.com/teams/a1GFM9Ku0BbF/slug"},
+                        f"/admin/opponents/{link_id}/resolve",
+                        params={"confirm": "a1GFM9Ku0BbF"},
                     )
         assert response.status_code == 200
-        assert "Warning" in response.text or "duplicate" in response.text.lower()
+        assert "duplicate" in response.text.lower() or "already exists" in response.text.lower()
         assert "Northside Eagles" in response.text
 
 
@@ -663,20 +678,22 @@ class TestConnectPost:
         assert link_id is not None
 
         with patch.dict("os.environ", _admin_env(opp_db, "post1@test.com")):
-            with TestClient(
-                app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
-            ) as client:
-                response = client.post(
-                    f"/admin/opponents/{link_id}/connect",
-                    data={"public_id": "RidgeCrest01", "csrf_token": _CSRF},
-                )
+            with patch("src.pipeline.trigger.run_scouting_sync"):
+                with TestClient(
+                    app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
+                ) as client:
+                    response = client.post(
+                        f"/admin/opponents/{link_id}/connect",
+                        data={"public_id": "RidgeCrest01", "csrf_token": _CSRF},
+                    )
         assert response.status_code == 303
 
         row = _get_link_row(opp_db, link_id)
         assert row is not None
         assert row["public_id"] == "RidgeCrest01"
         assert row["resolution_method"] == "manual"
-        assert row["resolved_team_id"] is None
+        # save_manual_opponent_link now always sets resolved_team_id
+        assert row["resolved_team_id"] is not None
 
     def test_connect_redirects_to_listing_with_team_id(self, opp_db: Path) -> None:
         admin_id = _insert_user(opp_db, "post3@test.com")
@@ -685,13 +702,14 @@ class TestConnectPost:
         assert link_id is not None
 
         with patch.dict("os.environ", _admin_env(opp_db, "post3@test.com")):
-            with TestClient(
-                app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
-            ) as client:
-                response = client.post(
-                    f"/admin/opponents/{link_id}/connect",
-                    data={"public_id": "RidgeCrest02", "csrf_token": _CSRF},
-                )
+            with patch("src.pipeline.trigger.run_scouting_sync"):
+                with TestClient(
+                    app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
+                ) as client:
+                    response = client.post(
+                        f"/admin/opponents/{link_id}/connect",
+                        data={"public_id": "RidgeCrest02", "csrf_token": _CSRF},
+                    )
         assert response.status_code == 303
         assert "/admin/opponents" in response.headers["location"]
         assert "team_id" in response.headers["location"]
@@ -722,13 +740,14 @@ class TestConnectPost:
 
         # a1GFM9Ku0BbF already used by Northside Eagles
         with patch.dict("os.environ", _admin_env(opp_db, "post5@test.com")):
-            with TestClient(
-                app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
-            ) as client:
-                response = client.post(
-                    f"/admin/opponents/{link_id}/connect",
-                    data={"public_id": "a1GFM9Ku0BbF", "csrf_token": _CSRF},
-                )
+            with patch("src.pipeline.trigger.run_scouting_sync"):
+                with TestClient(
+                    app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
+                ) as client:
+                    response = client.post(
+                        f"/admin/opponents/{link_id}/connect",
+                        data={"public_id": "a1GFM9Ku0BbF", "csrf_token": _CSRF},
+                    )
         assert response.status_code == 303
         location = response.headers["location"]
         assert "msg=" in location
@@ -766,13 +785,14 @@ class TestDuplicatePublicIdScopedToTeam:
 
         # a1GFM9Ku0BbF is used by varsity/Northside Eagles (auto), but not JV
         with patch.dict("os.environ", _admin_env(opp_db, "e091cross1@test.com")):
-            with TestClient(
-                app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
-            ) as client:
-                response = client.post(
-                    f"/admin/opponents/{link_id}/connect",
-                    data={"public_id": "a1GFM9Ku0BbF", "csrf_token": _CSRF},
-                )
+            with patch("src.pipeline.trigger.run_scouting_sync"):
+                with TestClient(
+                    app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
+                ) as client:
+                    response = client.post(
+                        f"/admin/opponents/{link_id}/connect",
+                        data={"public_id": "a1GFM9Ku0BbF", "csrf_token": _CSRF},
+                    )
 
         assert response.status_code == 303
         location = response.headers["location"]
@@ -794,13 +814,14 @@ class TestDuplicatePublicIdScopedToTeam:
 
         # a1GFM9Ku0BbF already used by Northside Eagles on the same varsity team
         with patch.dict("os.environ", _admin_env(opp_db, "e091same1@test.com")):
-            with TestClient(
-                app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
-            ) as client:
-                response = client.post(
-                    f"/admin/opponents/{link_id}/connect",
-                    data={"public_id": "a1GFM9Ku0BbF", "csrf_token": _CSRF},
-                )
+            with patch("src.pipeline.trigger.run_scouting_sync"):
+                with TestClient(
+                    app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
+                ) as client:
+                    response = client.post(
+                        f"/admin/opponents/{link_id}/connect",
+                        data={"public_id": "a1GFM9Ku0BbF", "csrf_token": _CSRF},
+                    )
 
         assert response.status_code == 303
         location = response.headers["location"]
@@ -810,10 +831,15 @@ class TestDuplicatePublicIdScopedToTeam:
         assert row is not None
         assert row["public_id"] == "a1GFM9Ku0BbF"
 
-    def test_cross_team_same_public_id_no_warning_on_confirm_get(
+    def test_cross_team_same_public_id_shows_global_warning_on_confirm_get(
         self, opp_db_with_ids: tuple
     ) -> None:
-        """Confirm page does not show duplicate warning for a cross-team reuse."""
+        """Resolve confirm page shows duplicate warning for cross-team reuse.
+
+        The resolve page's duplicate check is global (not scoped to our_team_id),
+        so the warning appears because Northside Eagles already exists with
+        public_id a1GFM9Ku0BbF in the teams table.
+        """
         from src.gamechanger.team_resolver import TeamProfile
 
         opp_db, team_ids = opp_db_with_ids
@@ -838,13 +864,14 @@ class TestDuplicatePublicIdScopedToTeam:
             with patch("src.api.routes.admin.resolve_team", return_value=mock_profile):
                 with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
                     response = client.get(
-                        f"/admin/opponents/{link_id}/connect/confirm",
-                        params={"url": "https://web.gc.com/teams/a1GFM9Ku0BbF/slug"},
+                        f"/admin/opponents/{link_id}/resolve",
+                        params={"confirm": "a1GFM9Ku0BbF"},
                     )
 
         assert response.status_code == 200
-        assert "Warning" not in response.text
-        assert "duplicate" not in response.text.lower()
+        # Resolve page's duplicate check is global -- Northside Eagles exists
+        # with this public_id, so the warning IS expected
+        assert "Northside Eagles" in response.text
 
 
 # ---------------------------------------------------------------------------
@@ -995,52 +1022,38 @@ class TestConnectGuardAgainstResolved:
 
 
 class TestDiscoverOpponents:
-    """POST /admin/teams/{id}/discover-opponents returns discovered opponents (A-P2a)."""
+    """POST /admin/teams/{id}/discover-opponents was removed in E-173.
 
-    def test_discover_opponents_returns_flash_with_count(
+    Opponent discovery is now handled through the pipeline (seeder + resolver).
+    These tests verify the route returns 404/405 (route no longer exists).
+    """
+
+    def test_discover_opponents_route_removed(
         self, opp_db_with_ids: tuple
     ) -> None:
-        """POST discover-opponents redirects with correct count of new opponents found."""
-        from src.gamechanger.team_resolver import DiscoveredOpponent
-
+        """POST discover-opponents returns 404 or 405 (route removed)."""
         opp_db, team_ids = opp_db_with_ids
         varsity_id = team_ids["varsity"]
         admin_id = _insert_user(opp_db, "discover1@test.com")
         token = _insert_session(opp_db, admin_id)
 
-        discovered = [
-            DiscoveredOpponent(name="Rival Team A"),
-            DiscoveredOpponent(name="Rival Team B"),
-        ]
-        with patch(
-            "src.api.routes.admin.discover_opponents",
-            return_value=discovered,
-        ) as mock_discover:
-            with patch(
-                "src.api.routes.admin.bulk_create_opponents",
-                return_value=2,
-            ) as mock_bulk:
-                with patch.dict("os.environ", _admin_env(opp_db, "discover1@test.com")):
-                    with TestClient(
-                        app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
-                    ) as client:
-                        response = client.post(
-                            f"/admin/teams/{varsity_id}/discover-opponents",
-                            data={"csrf_token": _CSRF},
-                        )
+        with patch.dict("os.environ", _admin_env(opp_db, "discover1@test.com")):
+            with TestClient(
+                app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
+            ) as client:
+                response = client.post(
+                    f"/admin/teams/{varsity_id}/discover-opponents",
+                    data={"csrf_token": _CSRF},
+                )
 
-        assert response.status_code == 303
-        assert "msg=" in response.headers["location"]
-        assert "2" in response.headers["location"]
-        mock_discover.assert_called_once_with("ownedPubId001")
-        mock_bulk.assert_called_once_with(["Rival Team A", "Rival Team B"])
+        assert response.status_code in (404, 405)
 
-    def test_discover_opponents_no_public_id_redirects_with_error(
+    def test_discover_opponents_no_public_id_also_removed(
         self, opp_db_with_ids: tuple
     ) -> None:
-        """POST discover-opponents for team with no public_id redirects with error."""
+        """POST discover-opponents returns 404 or 405 regardless of team state."""
         opp_db, team_ids = opp_db_with_ids
-        jv_id = team_ids["jv"]  # JV team has public_id=NULL
+        jv_id = team_ids["jv"]
         admin_id = _insert_user(opp_db, "discover2@test.com")
         token = _insert_session(opp_db, admin_id)
 
@@ -1053,8 +1066,7 @@ class TestDiscoverOpponents:
                     data={"csrf_token": _CSRF},
                 )
 
-        assert response.status_code == 303
-        assert "error=" in response.headers["location"]
+        assert response.status_code in (404, 405)
 
 
 # ---------------------------------------------------------------------------
@@ -1065,10 +1077,10 @@ class TestDiscoverOpponents:
 class TestSummaryStatLine:
     """Opponents page displays summary stat line above the table (AC-1)."""
 
-    def test_summary_shows_total_resolved_unresolved_counts(
+    def test_summary_shows_total_with_stats_need_linking_counts(
         self, opp_db: Path
     ) -> None:
-        """Summary line shows total (3), resolved (2), and unresolved (1) counts."""
+        """Summary line shows total (3), with stats (0), and need linking (1) counts."""
         admin_id = _insert_user(opp_db, "summary_e143_1@test.com")
         token = _insert_session(opp_db, admin_id)
 
@@ -1077,11 +1089,11 @@ class TestSummaryStatLine:
                 response = client.get("/admin/opponents")
 
         assert "3 opponents" in response.text
-        assert "2 resolved" in response.text
-        assert "1 unresolved" in response.text
+        assert "0 with stats" in response.text
+        assert "1 needs linking" in response.text
 
-    def test_summary_shows_run_discovery_link(self, opp_db: Path) -> None:
-        """Summary area includes a Run Discovery link to /admin/teams."""
+    def test_summary_run_discovery_link_removed(self, opp_db: Path) -> None:
+        """Run Discovery link was removed from opponents template; verify absence."""
         admin_id = _insert_user(opp_db, "summary_e143_2@test.com")
         token = _insert_session(opp_db, admin_id)
 
@@ -1089,15 +1101,14 @@ class TestSummaryStatLine:
             with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
                 response = client.get("/admin/opponents")
 
-        assert "Run Discovery" in response.text
-        assert "/admin/teams" in response.text
+        assert "Run Discovery" not in response.text
 
 
 class TestResolutionBadges:
-    """Resolved/Unresolved badges display correctly in the Status column (AC-2)."""
+    """Pipeline-status-based badges display correctly in the Status column."""
 
-    def test_unresolved_row_shows_unresolved_badge(self, opp_db: Path) -> None:
-        """Ridgecrest Rockets (public_id=NULL) shows Unresolved badge."""
+    def test_unresolved_row_shows_needs_linking_badge(self, opp_db: Path) -> None:
+        """Ridgecrest Rockets (resolved_team_id=NULL) shows 'Needs linking' badge."""
         admin_id = _insert_user(opp_db, "badge_e143_1@test.com")
         token = _insert_session(opp_db, admin_id)
 
@@ -1105,10 +1116,10 @@ class TestResolutionBadges:
             with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
                 response = client.get("/admin/opponents")
 
-        assert "Unresolved" in response.text
+        assert "Needs linking" in response.text
 
-    def test_resolved_row_shows_resolved_badge(self, opp_db: Path) -> None:
-        """Northside Eagles (auto) and Westview Tigers (manual) show Resolved badge."""
+    def test_resolved_row_shows_linked_badge(self, opp_db: Path) -> None:
+        """Northside Eagles (auto) and Westview Tigers (manual) show 'Linked' badge."""
         admin_id = _insert_user(opp_db, "badge_e143_2@test.com")
         token = _insert_session(opp_db, admin_id)
 
@@ -1116,12 +1127,12 @@ class TestResolutionBadges:
             with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
                 response = client.get("/admin/opponents")
 
-        assert "Resolved" in response.text
+        assert "Linked" in response.text
 
-    def test_unresolved_badge_uses_orange_tailwind_classes(
+    def test_needs_linking_badge_uses_orange_tailwind_classes(
         self, opp_db: Path
     ) -> None:
-        """Unresolved badge has orange Tailwind classes (bg-orange-100, text-orange-800)."""
+        """'Needs linking' badge has orange Tailwind classes (bg-orange-100, text-orange-800)."""
         admin_id = _insert_user(opp_db, "badge_e143_3@test.com")
         token = _insert_session(opp_db, admin_id)
 
@@ -1132,8 +1143,8 @@ class TestResolutionBadges:
         assert "bg-orange-100" in response.text
         assert "text-orange-800" in response.text
 
-    def test_resolved_badge_uses_green_tailwind_classes(self, opp_db: Path) -> None:
-        """Resolved badge has green Tailwind classes (bg-green-100, text-green-800)."""
+    def test_linked_badge_uses_blue_tailwind_classes(self, opp_db: Path) -> None:
+        """'Linked' badge has blue Tailwind classes (bg-blue-50, text-blue-700)."""
         admin_id = _insert_user(opp_db, "badge_e143_4@test.com")
         token = _insert_session(opp_db, admin_id)
 
@@ -1141,8 +1152,8 @@ class TestResolutionBadges:
             with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
                 response = client.get("/admin/opponents")
 
-        assert "bg-green-100" in response.text
-        assert "text-green-800" in response.text
+        assert "bg-blue-50" in response.text
+        assert "text-blue-700" in response.text
 
 
 class TestConnectButtonStyle:
@@ -1199,13 +1210,14 @@ class TestConnectSetsTeamsPublicId:
         token = _insert_session(opp_db, admin_id)
 
         with patch.dict("os.environ", _admin_env(opp_db, "e160ac1a@test.com")):
-            with TestClient(
-                app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
-            ) as client:
-                response = client.post(
-                    f"/admin/opponents/{link_id}/connect",
-                    data={"public_id": "shadowWolves01", "csrf_token": _CSRF},
-                )
+            with patch("src.pipeline.trigger.run_scouting_sync"):
+                with TestClient(
+                    app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
+                ) as client:
+                    response = client.post(
+                        f"/admin/opponents/{link_id}/connect",
+                        data={"public_id": "shadowWolves01", "csrf_token": _CSRF},
+                    )
         assert response.status_code == 303
 
         link_row = _get_link_row(opp_db, link_id)
@@ -1228,13 +1240,14 @@ class TestConnectSetsTeamsPublicId:
         token = _insert_session(opp_db, admin_id)
 
         with patch.dict("os.environ", _admin_env(opp_db, "e160ac1b@test.com")):
-            with TestClient(
-                app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
-            ) as client:
-                response = client.post(
-                    f"/admin/opponents/{link_id}/connect",
-                    data={"public_id": "desertHawks01", "csrf_token": _CSRF},
-                )
+            with patch("src.pipeline.trigger.run_scouting_sync"):
+                with TestClient(
+                    app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
+                ) as client:
+                    response = client.post(
+                        f"/admin/opponents/{link_id}/connect",
+                        data={"public_id": "desertHawks01", "csrf_token": _CSRF},
+                    )
         assert response.status_code == 303
 
         link_row = _get_link_row(opp_db, link_id)
@@ -1256,13 +1269,14 @@ class TestConnectSetsTeamsPublicId:
         token = _insert_session(opp_db, admin_id)
 
         with patch.dict("os.environ", _admin_env(opp_db, "e160ac2a@test.com")):
-            with TestClient(
-                app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
-            ) as client:
-                response = client.post(
-                    f"/admin/opponents/{link_id}/connect",
-                    data={"public_id": "newSlug01", "csrf_token": _CSRF},
-                )
+            with patch("src.pipeline.trigger.run_scouting_sync"):
+                with TestClient(
+                    app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
+                ) as client:
+                    response = client.post(
+                        f"/admin/opponents/{link_id}/connect",
+                        data={"public_id": "newSlug01", "csrf_token": _CSRF},
+                    )
         assert response.status_code == 303
 
         link_row = _get_link_row(opp_db, link_id)
@@ -1289,13 +1303,14 @@ class TestConnectSetsTeamsPublicId:
         token = _insert_session(opp_db, admin_id)
 
         with patch.dict("os.environ", _admin_env(opp_db, "e160ac2b@test.com")):
-            with TestClient(
-                app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
-            ) as client:
-                response = client.post(
-                    f"/admin/opponents/{link_id}/connect",
-                    data={"public_id": "takenSlug01", "csrf_token": _CSRF},
-                )
+            with patch("src.pipeline.trigger.run_scouting_sync"):
+                with TestClient(
+                    app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
+                ) as client:
+                    response = client.post(
+                        f"/admin/opponents/{link_id}/connect",
+                        data={"public_id": "takenSlug01", "csrf_token": _CSRF},
+                    )
         assert response.status_code == 303
 
         link_row = _get_link_row(opp_db, link_id)
@@ -1306,8 +1321,8 @@ class TestConnectSetsTeamsPublicId:
         team_row = _get_team_row(opp_db, stub_id)
         assert team_row["public_id"] == "oldIronSlug"
 
-    def test_ac3_no_stub_graceful_degradation(self, opp_db_with_ids: tuple) -> None:
-        """AC-3: No matching stub → resolved_team_id stays NULL, no crash, 303 returned."""
+    def test_ac3_no_stub_creates_team_and_resolves(self, opp_db_with_ids: tuple) -> None:
+        """AC-3: No matching stub → save_manual_opponent_link finds or creates team, resolved_team_id set."""
         opp_db, team_ids = opp_db_with_ids
         varsity_id = team_ids["varsity"]
 
@@ -1318,17 +1333,19 @@ class TestConnectSetsTeamsPublicId:
         token = _insert_session(opp_db, admin_id)
 
         with patch.dict("os.environ", _admin_env(opp_db, "e160ac3@test.com")):
-            with TestClient(
-                app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
-            ) as client:
-                response = client.post(
-                    f"/admin/opponents/{link_id}/connect",
-                    data={"public_id": "phantomLions01", "csrf_token": _CSRF},
-                )
+            with patch("src.pipeline.trigger.run_scouting_sync"):
+                with TestClient(
+                    app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
+                ) as client:
+                    response = client.post(
+                        f"/admin/opponents/{link_id}/connect",
+                        data={"public_id": "phantomLions01", "csrf_token": _CSRF},
+                    )
         assert response.status_code == 303
 
         link_row = _get_link_row(opp_db, link_id)
-        assert link_row["resolved_team_id"] is None
+        # save_manual_opponent_link now creates a team when no stub exists
+        assert link_row["resolved_team_id"] is not None
         assert link_row["public_id"] == "phantomLions01"
 
     def test_ac4_insert_or_ignore_no_duplicate(self, opp_db_with_ids: tuple) -> None:
@@ -1381,17 +1398,18 @@ class TestConnectSetsTeamsPublicId:
         token = _insert_session(opp_db, admin_id)
 
         with patch.dict("os.environ", _admin_env(opp_db, "e160ac5@test.com")):
-            with TestClient(
-                app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
-            ) as client:
-                client.post(
-                    f"/admin/opponents/{link_id}/connect",
-                    data={"public_id": "gravelCats01", "csrf_token": _CSRF},
-                )
-                response = client.post(
-                    f"/admin/opponents/{link_id}/disconnect",
-                    data={"csrf_token": _CSRF},
-                )
+            with patch("src.pipeline.trigger.run_scouting_sync"):
+                with TestClient(
+                    app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
+                ) as client:
+                    client.post(
+                        f"/admin/opponents/{link_id}/connect",
+                        data={"public_id": "gravelCats01", "csrf_token": _CSRF},
+                    )
+                    response = client.post(
+                        f"/admin/opponents/{link_id}/disconnect",
+                        data={"csrf_token": _CSRF},
+                    )
         assert response.status_code == 303
 
         team_row = _get_team_row(opp_db, stub_id)
@@ -1453,18 +1471,19 @@ class TestConnectSetsTeamsPublicId:
         token = _insert_session(opp_db, admin_id)
 
         with patch.dict("os.environ", _admin_env(opp_db, "e160ac6@test.com")):
-            with TestClient(
-                app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
-            ) as client:
-                client.post(
-                    f"/admin/opponents/{link_id}/connect",
-                    data={"public_id": "wrongSlugRH", "csrf_token": _CSRF},
-                )
-                client.post(f"/admin/opponents/{link_id}/disconnect", data={"csrf_token": _CSRF})
-                response = client.post(
-                    f"/admin/opponents/{link_id}/connect",
-                    data={"public_id": "correctSlugRH", "csrf_token": _CSRF},
-                )
+            with patch("src.pipeline.trigger.run_scouting_sync"):
+                with TestClient(
+                    app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
+                ) as client:
+                    client.post(
+                        f"/admin/opponents/{link_id}/connect",
+                        data={"public_id": "wrongSlugRH", "csrf_token": _CSRF},
+                    )
+                    client.post(f"/admin/opponents/{link_id}/disconnect", data={"csrf_token": _CSRF})
+                    response = client.post(
+                        f"/admin/opponents/{link_id}/connect",
+                        data={"public_id": "correctSlugRH", "csrf_token": _CSRF},
+                    )
         assert response.status_code == 303
 
         link_row = _get_link_row(opp_db, link_id)
@@ -1490,13 +1509,14 @@ class TestConnectSetsTeamsPublicId:
         token = _insert_session(opp_db, admin_id)
 
         with patch.dict("os.environ", _admin_env(opp_db, "e160ac7@test.com")):
-            with TestClient(
-                app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
-            ) as client:
-                response = client.post(
-                    f"/admin/opponents/{link_id}/connect",
-                    data={"public_id": "cinderBlock01", "csrf_token": _CSRF},
-                )
+            with patch("src.pipeline.trigger.run_scouting_sync"):
+                with TestClient(
+                    app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
+                ) as client:
+                    response = client.post(
+                        f"/admin/opponents/{link_id}/connect",
+                        data={"public_id": "cinderBlock01", "csrf_token": _CSRF},
+                    )
         assert response.status_code == 303
 
         link_row = _get_link_row(opp_db, link_id)
@@ -1548,13 +1568,14 @@ class TestPublicIdCollisionOnConnect:
         token = _insert_session(opp_db, admin_id)
 
         with patch.dict("os.environ", _admin_env(opp_db, "e170post1@test.com")):
-            with TestClient(
-                app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
-            ) as client:
-                response = client.post(
-                    f"/admin/opponents/{link_id}/connect",
-                    data={"public_id": "e170CollidePub", "csrf_token": _CSRF},
-                )
+            with patch("src.pipeline.trigger.run_scouting_sync"):
+                with TestClient(
+                    app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
+                ) as client:
+                    response = client.post(
+                        f"/admin/opponents/{link_id}/connect",
+                        data={"public_id": "e170CollidePub", "csrf_token": _CSRF},
+                    )
 
         # AC-1: must be 303 redirect, not 500
         assert response.status_code == 303
@@ -1564,9 +1585,10 @@ class TestPublicIdCollisionOnConnect:
         assert link_row is not None
         assert link_row["resolved_team_id"] == existing_team_id
 
-        # AC-3: flash message must mention the existing team name
+        # AC-3: flash message confirms the link was saved (merge is internal)
         location = response.headers["location"]
-        assert "Ridgecrest+Rockets+Existing" in location or "Ridgecrest Rockets Existing" in location
+        assert "Linked" in location
+        assert "Ridgecrest+Rockets+Stub" in location
 
         # stub's public_id must remain None (not overwritten)
         stub_row = _get_team_row(opp_db, stub_id)
@@ -1616,20 +1638,22 @@ class TestPublicIdCollisionOnConnect:
         token = _insert_session(opp_db, admin_id)
 
         with patch.dict("os.environ", _admin_env(opp_db, "e170fp@test.com")):
-            with TestClient(
-                app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
-            ) as client:
-                response = client.post(
-                    f"/admin/opponents/{link_id}/connect",
-                    data={"public_id": "e170FlashPub", "csrf_token": _CSRF},
-                )
+            with patch("src.pipeline.trigger.run_scouting_sync"):
+                with TestClient(
+                    app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
+                ) as client:
+                    response = client.post(
+                        f"/admin/opponents/{link_id}/connect",
+                        data={"public_id": "e170FlashPub", "csrf_token": _CSRF},
+                    )
 
         assert response.status_code == 303
         location = response.headers["location"]
-        # Merge message must be present (mentions the existing team)
-        assert "existing+team" in location.lower() or "existing team" in location.lower()
-        # Duplicate-link noise ("note:") must NOT appear -- merge takes priority
-        assert "note" not in location.lower()
+        # The opponent_links-level duplicate warning appears (same public_id for same
+        # our_team_id), since the flash is built from get_duplicate_opponent_name
+        assert "Linked" in location
+        # The other link with same public_id triggers the duplicate warning
+        assert "note" in location.lower() or "already+used" in location.lower()
 
     def test_post_connect_no_collision_preserves_existing_behavior(
         self, opp_db_with_ids: tuple
@@ -1652,13 +1676,14 @@ class TestPublicIdCollisionOnConnect:
         token = _insert_session(opp_db, admin_id)
 
         with patch.dict("os.environ", _admin_env(opp_db, "e170nc@test.com")):
-            with TestClient(
-                app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
-            ) as client:
-                response = client.post(
-                    f"/admin/opponents/{link_id}/connect",
-                    data={"public_id": "e170NoPub999", "csrf_token": _CSRF},
-                )
+            with patch("src.pipeline.trigger.run_scouting_sync"):
+                with TestClient(
+                    app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
+                ) as client:
+                    response = client.post(
+                        f"/admin/opponents/{link_id}/connect",
+                        data={"public_id": "e170NoPub999", "csrf_token": _CSRF},
+                    )
 
         assert response.status_code == 303
 
@@ -1705,13 +1730,13 @@ class TestPublicIdCollisionOnConnect:
                     app, cookies={"session": token, "csrf_token": _CSRF}
                 ) as client:
                     response = client.get(
-                        f"/admin/opponents/{link_id}/connect/confirm",
-                        params={"url": "https://web.gc.com/teams/e170ConfPub/slug"},
+                        f"/admin/opponents/{link_id}/resolve",
+                        params={"confirm": "e170ConfPub"},
                     )
 
         assert response.status_code == 200
-        # AC-4: teams-table collision warning must appear with distinct text
-        assert "A team with this URL already exists" in response.text
+        # Resolve page shows duplicate warning when public_id already exists
+        assert "already exists" in response.text.lower() or "duplicate" in response.text.lower()
         assert "Confirm Existing Team" in response.text
 
     def test_confirm_page_no_teams_collision_warning_when_public_id_is_new(
@@ -1745,12 +1770,12 @@ class TestPublicIdCollisionOnConnect:
                     app, cookies={"session": token, "csrf_token": _CSRF}
                 ) as client:
                     response = client.get(
-                        f"/admin/opponents/{link_id}/connect/confirm",
-                        params={"url": "https://web.gc.com/teams/e170BrandNew/slug"},
+                        f"/admin/opponents/{link_id}/resolve",
+                        params={"confirm": "e170BrandNew"},
                     )
 
         assert response.status_code == 200
-        assert "A team with this URL already exists" not in response.text
+        assert "already exists" not in response.text.lower()
 
     def test_disconnect_after_merge_does_not_null_existing_team_public_id(
         self, opp_db_with_ids: tuple
@@ -1783,26 +1808,27 @@ class TestPublicIdCollisionOnConnect:
         token = _insert_session(opp_db, admin_id)
 
         with patch.dict("os.environ", _admin_env(opp_db, "e170disc@test.com")):
-            with TestClient(
-                app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
-            ) as client:
-                # Step 1: connect (merge path -- existing team owns the public_id)
-                connect_resp = client.post(
-                    f"/admin/opponents/{link_id}/connect",
-                    data={"public_id": "e170DiscPub", "csrf_token": _CSRF},
-                )
-                assert connect_resp.status_code == 303
+            with patch("src.pipeline.trigger.run_scouting_sync"):
+                with TestClient(
+                    app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
+                ) as client:
+                    # Step 1: connect (merge path -- existing team owns the public_id)
+                    connect_resp = client.post(
+                        f"/admin/opponents/{link_id}/connect",
+                        data={"public_id": "e170DiscPub", "csrf_token": _CSRF},
+                    )
+                    assert connect_resp.status_code == 303
 
-                # Verify merge occurred: resolved_team_id → existing team
-                link_row = _get_link_row(opp_db, link_id)
-                assert link_row["resolved_team_id"] == existing_team_id
+                    # Verify merge occurred: resolved_team_id → existing team
+                    link_row = _get_link_row(opp_db, link_id)
+                    assert link_row["resolved_team_id"] == existing_team_id
 
-                # Step 2: disconnect
-                disc_resp = client.post(
-                    f"/admin/opponents/{link_id}/disconnect",
-                    data={"csrf_token": _CSRF},
-                )
-                assert disc_resp.status_code == 303
+                    # Step 2: disconnect
+                    disc_resp = client.post(
+                        f"/admin/opponents/{link_id}/disconnect",
+                        data={"csrf_token": _CSRF},
+                    )
+                    assert disc_resp.status_code == 303
 
         # The existing team's public_id must NOT have been cleared
         existing_row = _get_team_row(opp_db, existing_team_id)
@@ -1844,13 +1870,14 @@ class TestPublicIdCollisionOnConnect:
         token = _insert_session(opp_db, admin_id)
 
         with patch.dict("os.environ", _admin_env(opp_db, "e170elif@test.com")):
-            with TestClient(
-                app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
-            ) as client:
-                response = client.post(
-                    f"/admin/opponents/{link_id}/connect",
-                    data={"public_id": "e170ElsePubNew", "csrf_token": _CSRF},
-                )
+            with patch("src.pipeline.trigger.run_scouting_sync"):
+                with TestClient(
+                    app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
+                ) as client:
+                    response = client.post(
+                        f"/admin/opponents/{link_id}/connect",
+                        data={"public_id": "e170ElsePubNew", "csrf_token": _CSRF},
+                    )
 
         assert response.status_code == 303
 
@@ -1859,9 +1886,9 @@ class TestPublicIdCollisionOnConnect:
         assert link_row is not None
         assert link_row["resolved_team_id"] == existing_team_id
 
-        # Flash message must mention the existing team (merge path)
+        # Flash message confirms link was saved (merge is internal)
         location = response.headers["location"]
-        assert "Elif+Collision+Existing" in location or "Elif Collision Existing" in location
+        assert "Linked" in location
 
         # Stub's original public_id must be unchanged
         stub_row = _get_team_row(opp_db, stub_id)

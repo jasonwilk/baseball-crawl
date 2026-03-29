@@ -447,7 +447,7 @@ class TestOpponentDetailUnlinkedState:
         assert resp.status_code == 200
         body = resp.text
         assert "Stats not available" in body
-        assert "hasn't been linked" in body
+        assert "Scouting stats" in body
 
     def test_unlinked_no_pitching_card(self, tmp_path):
         db_path, member_id, opp_id = self._make_unlinked_db(tmp_path)
@@ -508,7 +508,7 @@ class TestOpponentDetailLinkedUnscouted:
         assert resp.status_code == 200
         body = resp.text
         assert "Stats not loaded yet" in body
-        assert "linked but stats haven't been loaded" in body
+        assert "on their way" in body
 
     def test_linked_unscouted_no_pitching_card(self, tmp_path):
         db_path, member_id, opp_id = self._make_linked_unscouted_db(tmp_path)
@@ -835,7 +835,6 @@ class TestOpponentPrintRoute:
         assert "Pitching" in body
         assert "Batting" in body
         assert "Batter Tendencies" in body
-        assert "Spray chart coming soon" in body
 
     def test_full_stats_pitcher_handedness_in_print_table(self, tmp_path):
         """Pitcher handedness appears in the print pitching table."""

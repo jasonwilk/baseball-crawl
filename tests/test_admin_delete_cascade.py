@@ -568,7 +568,7 @@ class TestConfirmDeleteRouteWithData:
 
         assert resp.status_code == 200
         assert "Eastside Eagles" in resp.text
-        assert "Tracked" in resp.text
+        assert "Opponent" in resp.text
 
 
 # ---------------------------------------------------------------------------
