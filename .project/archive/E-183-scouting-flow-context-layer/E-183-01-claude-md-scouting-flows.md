@@ -4,7 +4,7 @@
 [E-183: Codify Opponent Flow vs Reports Flow in Context Layer](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, CLAUDE.md will contain a "Scouting Data Flows" section that clearly distinguishes the opponent flow (dashboard exploration) from the reports flow (ad-hoc snapshots). The section will include a comparison table, naming convention, architectural conventions, and a routing note. The reports flow will also be represented in the Commands and Architecture sections, achieving parity with the opponent flow's existing coverage.

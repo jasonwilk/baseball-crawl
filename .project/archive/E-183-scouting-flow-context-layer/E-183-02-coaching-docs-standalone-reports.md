@@ -4,7 +4,7 @@
 [E-183: Codify Opponent Flow vs Reports Flow in Context Layer](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the coaching documentation will cover the standalone reports feature so coaching staff know it exists, how to request one, and how to use the link they receive. This closes the gap where `docs/coaching/scouting-reports.md` covers the coaching dashboard but does not mention standalone reports.

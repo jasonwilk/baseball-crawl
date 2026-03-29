@@ -124,6 +124,16 @@ If you see this message for a player you expect to face, let Jason know so he ca
 
 ---
 
+## Standalone Reports
+
+The dashboard is the main tool for scouting scheduled opponents, but sometimes you need to share scouting information with someone who doesn't have dashboard access -- or scout a team that isn't on your schedule yet.
+
+For those cases, Jason can generate a **standalone report**: a shareable link that opens a frozen scouting snapshot anyone can view, no login required.
+
+See the full guide: [Standalone Reports](standalone-reports.md)
+
+---
+
 ## Reading Rate Stats
 
 A quick reference for stats shown throughout the dashboard:
@@ -140,4 +150,4 @@ A quick reference for stats shown throughout the dashboard:
 
 ---
 
-*Last updated: 2026-03-27 | Story references: E-163 (spray charts on player profile, opponent detail, and print pages), E-153-03, E-153-04, E-159*
+*Last updated: 2026-03-29 | Story references: E-163 (spray charts on player profile, opponent detail, and print pages), E-153-03, E-153-04, E-159, E-183 (standalone reports cross-reference)*

@@ -82,7 +82,7 @@ The authoritative data dictionary mapping all GameChanger stat abbreviations to 
 
 ## Commands
 
-The `bb` CLI is the primary operator interface. Run `bb --help` for the full command list. Key command groups: `bb status`, `bb creds`, `bb data`, `bb proxy`, `bb db`. The `bb data` group supports `--crawler` and `--loader` flags for targeted pipeline runs (e.g., `bb data crawl --crawler spray-chart`, `bb data load --loader spray-chart`). `bb data dedup` detects and merges duplicate tracked teams (`--dry-run` by default, `--execute` to apply). `bb data repair-opponents` back-fills `opponent_links` resolutions to `team_opponents` for opponents resolved before write-through was implemented (`--dry-run` by default, `--execute` to apply). Underlying scripts in `scripts/` still work directly but `bb` is preferred.
+The `bb` CLI is the primary operator interface. Run `bb --help` for the full command list. Key command groups: `bb status`, `bb creds`, `bb data`, `bb proxy`, `bb db`. The `bb data` group supports `--crawler` and `--loader` flags for targeted pipeline runs (e.g., `bb data crawl --crawler spray-chart`, `bb data load --loader spray-chart`). `bb data dedup` detects and merges duplicate tracked teams (`--dry-run` by default, `--execute` to apply). `bb data repair-opponents` back-fills `opponent_links` resolutions to `team_opponents` for opponents resolved before write-through was implemented (`--dry-run` by default, `--execute` to apply). `bb report generate` produces a standalone report for any GC `public_id` (no `team_opponents` link required). `bb report list` shows all generated reports with status and expiry. Underlying scripts in `scripts/` still work directly but `bb` is preferred.
 
 ## Workflows
 - **Plan**: When the user says "plan an epic for X" (or similar -- "plan E-NNN", "create an epic for X", "write stories for X", "let's plan X", "design an epic for X"), load `.claude/skills/plan/SKILL.md` and follow its workflow. The main session suggests a planning team based on domain signals, spawns PM and domain experts, guides through discovery, planning, automatic spec review, refinement, and READY gate. Supports a "plan and dispatch" compound modifier to chain into the implement skill after READY.
@@ -128,6 +128,29 @@ After changing `src/`, `migrations/`, `Dockerfile`, `docker-compose.yml`, or `re
 - **Spray chart pipeline**: `src/gamechanger/crawlers/spray_chart.py` (crawler) and `src/gamechanger/loaders/spray_chart_loader.py` (loader). The crawler uses `progenitor_team_id` (not `gc_uuid`) as the API parameter -- one call returns both teams' spray data per game. Entry points: `bb data crawl --crawler spray-chart`, `bb data load --loader spray-chart`.
 - **Spray chart auth exception**: Image routes (`/dashboard/charts/spray/player/{id}.png`, `/dashboard/charts/spray/team/{id}.png`) require an authenticated session but deliberately skip the `permitted_teams` authorization check. Reason: opponent players cannot pass `permitted_teams` but their spray data is legitimately viewable. This is a documented exception to the normal dashboard auth pattern.
 - **Worktree guard hook**: `.claude/hooks/worktree-guard.sh` is a PreToolUse hook that blocks Write/Edit operations to the main checkout. Two modes: (1) **Dispatch active** (epic worktree at `/tmp/.worktrees/baseball-crawl-E-*` exists): blocks ALL Write/Edit to `/workspaces/baseball-crawl/` except `.claude/agent-memory/`; (2) **No dispatch**: blocks only implementation paths (`src/`, `tests/`, `migrations/`, `scripts/`). Worktree writes always pass. See `.claude/rules/worktree-isolation.md` for full details.
+- **Reports package**: `src/reports/` is a self-contained package for standalone report generation. `generator.py` orchestrates crawl→load→query→render→write; `renderer.py` produces self-contained HTML files written to `data/reports/`. The reports serving route (`/reports/{slug}`) requires no authentication and is separate from the dashboard.
+
+### Scouting Data Flows
+
+Two distinct flows produce scouting intelligence. Confusing them causes wrong auth, wrong data source, or wrong lifecycle assumptions.
+
+| | Opponent Flow (dashboard) | Reports Flow (standalone) |
+|-|--------------------------|--------------------------|
+| **Entry** | `/dashboard/opponents` | `/admin/reports` or `bb report generate` |
+| **Auth** | Session + permitted_teams | Web: admin auth. CLI: none. Serving: none (`/reports/{slug}` is public) |
+| **Data** | Live DB queries per page load | Frozen HTML snapshot at generation time |
+| **Lifecycle** | Persistent (exists while `team_opponents` link exists) | Ephemeral (14-day expiry, deletable) |
+| **Data source** | `team_opponents` + scouting pipeline (tracked teams) | Ad-hoc crawl of any GC `public_id` (no `team_opponents` required) |
+
+**Naming convention**: "scouting report" or "opponent scouting" = opponent flow. "Standalone report" or "generated report" = reports flow.
+
+**Architectural conventions**:
+- `/reports/{slug}` MUST NOT query stats tables or render Jinja2 templates at serve time -- only `reports` table lookup + file read from disk
+- Reports have no `team_opponents` dependency; generation takes any GC `public_id`
+- Reports are ephemeral: 14-day expiry, no versioning, no update-in-place
+- `src/reports/` is self-contained (`generator.py`, `renderer.py`); neither module is imported by the opponent flow
+
+**Routing note**: Stories modifying `src/reports/`, `src/api/routes/reports.py`, report handlers in `src/api/routes/admin.py`, or `src/api/templates/admin/reports.html` belong to the reports flow. Stories modifying opponent dashboard routes/templates or `src/gamechanger/loaders/scouting_loader.py` belong to the opponent flow.
 
 ## Data Model
 

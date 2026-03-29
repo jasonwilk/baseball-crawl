@@ -1,7 +1,7 @@
 # E-183: Codify Opponent Flow vs Reports Flow in Context Layer
 
 ## Status
-`READY`
+`COMPLETED`
 
 ## Overview
 Codify the architectural distinction between the two scouting data flows -- the opponent flow (dashboard exploration) and the reports flow (ad-hoc snapshots) -- in the project's context layer. E-172 shipped the reports flow but no context-layer update captured it, leaving agents without guidance on which flow a story belongs to or how the two differ.
@@ -40,8 +40,8 @@ No expert consultation required for baseball-coach (no coaching domain questions
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-183-01 | Add scouting data flows distinction to CLAUDE.md | TODO | None | - |
-| E-183-02 | Add standalone reports to coaching docs | TODO | None | - |
+| E-183-01 | Add scouting data flows distinction to CLAUDE.md | DONE | None | - |
+| E-183-02 | Add standalone reports to coaching docs | DONE | None | - |
 
 ## Dispatch Team
 - claude-architect
@@ -97,6 +97,20 @@ None -- all questions resolved during discovery and CA consultation.
 ## History
 - 2026-03-29: Created. CA consultation completed during discovery.
 - 2026-03-29: Set to READY after 2 internal review iterations and 2 Codex spec review iterations.
+- 2026-03-29: Re-dispatched after worktree loss during E-184 work. Previous implementation lost before closure merge.
+- 2026-03-29: COMPLETED (re-dispatch). Both stories delivered. Per-story CR E-183-02: APPROVED (no findings). CR integration review: APPROVED (no findings). Codex review: 2 findings, both accepted and fixed (auth description for CLI path, naming inconsistency in Commands section).
+
+Documentation assessment: No additional documentation impact -- epic deliverables are the documentation updates themselves.
+
+Context-layer assessment:
+- New agent definition or routing change? **No** -- no agent definitions changed.
+- New rule, skill, or hook? **No** -- no new rules, skills, or hooks created.
+- CLAUDE.md update needed? **No** -- E-183-01 already updated CLAUDE.md as its deliverable.
+- Agent memory update needed? **No** -- no new patterns or decisions requiring agent memory.
+- Naming convention or terminology change? **No** -- naming convention codified in CLAUDE.md by E-183-01; no further context-layer action needed.
+- Workflow or process change? **No** -- no workflow changes.
+
+No context-layer impact beyond what was already delivered by E-183-01.
 
 ### Review Scorecard
 | Review Pass | Findings | Accepted | Dismissed |
@@ -106,6 +120,9 @@ None -- all questions resolved during discovery and CA consultation.
 | Internal iteration 1 -- Holistic team (CA) | 2 | 2 | 0 |
 | Codex iteration 1 | 5 | 4 | 1 |
 | Codex iteration 2 | 4 | 3 | 1 |
-| **Total** | **15** | **13** | **2** |
+| Per-story CR -- E-183-02 | 0 | 0 | 0 |
+| CR integration review | 0 | 0 | 0 |
+| Codex code review | 2 | 2 | 0 |
+| **Total** | **17** | **15** | **2** |
 
-Note: Some internal review findings overlapped (dedup to 4 unique). Counts above are raw per-source. Both dismissals were the same underlying issue (AC-5 file-level metadata for existing file's pre-existing format -- out of scope).
+Note: Some internal review findings overlapped (dedup to 4 unique). Counts above are raw per-source. Both spec review dismissals were the same underlying issue (AC-5 file-level metadata for existing file's pre-existing format -- out of scope). E-183-01 was context-layer-only; CR skipped for that story.
