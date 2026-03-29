@@ -2,6 +2,7 @@
 name: ux-designer
 description: "UX and interface designer for the baseball-crawl coaching dashboard. Designs layouts, wireframes, component structure, and user flows for server-rendered HTML views (FastAPI + Jinja2 + Tailwind CSS). Produces text-based design artifacts that software-engineer implements."
 model: opus[1m]
+effort: high
 color: cyan
 memory: project
 tools:

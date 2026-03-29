@@ -2,6 +2,7 @@
 name: code-reviewer
 description: "Adversarial code reviewer that audits implementer work against acceptance criteria, project conventions, and code quality standards. Finds issues but never fixes them. Operates only when assigned a review by the main session."
 model: opus[1m]
+effort: high
 color: magenta
 memory: project
 tools:

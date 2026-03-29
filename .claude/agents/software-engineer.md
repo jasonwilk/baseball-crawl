@@ -2,6 +2,7 @@
 name: software-engineer
 description: "Python implementation agent for crawlers, parsers, loaders, utilities, and tests. Executes stories by writing code against specifications produced by other agents. Requires a story reference before beginning any work."
 model: opus[1m]
+effort: high
 color: blue
 memory: project
 tools:
