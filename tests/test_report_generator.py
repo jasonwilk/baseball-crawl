@@ -1,4 +1,4 @@
-"""Tests for the report generation pipeline (E-172-02, E-176-02)."""
+"""Tests for the report generation pipeline (E-172-02, E-176-02, E-185-01)."""
 
 from __future__ import annotations
 
@@ -17,6 +17,7 @@ from src.reports.generator import (
     _query_recent_games,
     _query_record,
     _query_roster,
+    _query_runs_avg,
     _update_report_failed,
     _update_report_ready,
     generate_report,
@@ -770,3 +771,205 @@ class TestCrawlAndLoadSpray:
 
         # Should NOT raise -- non-fatal
         _crawl_and_load_spray(client, "abc123", "2026-spring-hs")
+
+
+# ===========================================================================
+# E-185-01: Sort order, CS column, runs avg, recent form opponent names
+# ===========================================================================
+
+
+class TestBattingSortOrder:
+    """AC-9: Batting sorted by PA descending."""
+
+    def test_batting_sorted_by_pa_desc(self, db):
+        team_id = _seed_team(db)
+        _seed_season(db)
+        # Player with higher PA should come first
+        _seed_player(db, "p1", "High", "PA")
+        _seed_player(db, "p2", "Low", "PA")
+        db.execute(
+            "INSERT INTO player_season_batting "
+            "(player_id, team_id, season_id, gp, ab, h, bb, hbp, shf) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("p1", team_id, "2026-spring-hs", 10, 50, 15, 10, 2, 1),  # PA=63
+        )
+        db.execute(
+            "INSERT INTO player_season_batting "
+            "(player_id, team_id, season_id, gp, ab, h, bb, hbp, shf) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("p2", team_id, "2026-spring-hs", 10, 20, 8, 3, 0, 0),  # PA=23
+        )
+        db.commit()
+        db.row_factory = sqlite3.Row
+        batting = _query_batting(db, team_id, "2026-spring-hs")
+        assert len(batting) == 2
+        assert batting[0]["name"] == "High PA"
+        assert batting[1]["name"] == "Low PA"
+
+
+class TestPitchingSortOrder:
+    """AC-9: Pitching sorted by ip_outs DESC."""
+
+    def test_pitching_sorted_by_ip_outs_desc(self, db):
+        team_id = _seed_team(db)
+        _seed_season(db)
+        _seed_player(db, "p1", "Ace", "Pitcher")
+        _seed_player(db, "p2", "Relief", "Pitcher")
+        db.execute(
+            "INSERT INTO player_season_pitching "
+            "(player_id, team_id, season_id, gp_pitcher, ip_outs, er, so, bb, h, pitches, total_strikes) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("p1", team_id, "2026-spring-hs", 8, 60, 5, 40, 10, 20, 400, 250),
+        )
+        db.execute(
+            "INSERT INTO player_season_pitching "
+            "(player_id, team_id, season_id, gp_pitcher, ip_outs, er, so, bb, h, pitches, total_strikes) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("p2", team_id, "2026-spring-hs", 5, 30, 3, 15, 8, 12, 200, 120),
+        )
+        db.commit()
+        db.row_factory = sqlite3.Row
+        pitching = _query_pitching(db, team_id, "2026-spring-hs")
+        assert len(pitching) == 2
+        assert pitching[0]["name"] == "Ace Pitcher"  # 60 outs first
+        assert pitching[1]["name"] == "Relief Pitcher"  # 30 outs second
+
+
+class TestBattingCSColumn:
+    """AC-1: Batting query includes CS."""
+
+    def test_batting_includes_cs(self, db):
+        team_id = _seed_team(db)
+        _seed_season(db)
+        _seed_player(db, "p1", "Jane", "Doe")
+        db.execute(
+            "INSERT INTO player_season_batting "
+            "(player_id, team_id, season_id, gp, ab, h, sb, cs) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            ("p1", team_id, "2026-spring-hs", 10, 30, 10, 5, 3),
+        )
+        db.commit()
+        db.row_factory = sqlite3.Row
+        batting = _query_batting(db, team_id, "2026-spring-hs")
+        assert batting[0]["cs"] == 3
+
+
+class TestRecentFormOpponentNames:
+    """AC-6: Recent form includes opponent_name and is_home."""
+
+    def test_opponent_name_resolved(self, db):
+        team_id = _seed_team(db, name="Us", public_id="us123")
+        opp_id = _seed_team(db, name="Rival Team", public_id="rival456")
+        _seed_season(db)
+        db.execute(
+            "INSERT INTO games (game_id, season_id, home_team_id, away_team_id, "
+            "home_score, away_score, game_date) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            ("g1", "2026-spring-hs", team_id, opp_id, 7, 3, "2026-03-25"),
+        )
+        db.commit()
+        db.row_factory = sqlite3.Row
+        games = _query_recent_games(db, team_id, "2026-spring-hs")
+        assert len(games) == 1
+        assert games[0]["opponent_name"] == "Rival Team"
+        assert games[0]["is_home"] is True
+
+    def test_away_game(self, db):
+        team_id = _seed_team(db, name="Us", public_id="us123")
+        opp_id = _seed_team(db, name="Away Rival", public_id="away789")
+        _seed_season(db)
+        db.execute(
+            "INSERT INTO games (game_id, season_id, home_team_id, away_team_id, "
+            "home_score, away_score, game_date) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            ("g1", "2026-spring-hs", opp_id, team_id, 3, 7, "2026-03-25"),
+        )
+        db.commit()
+        db.row_factory = sqlite3.Row
+        games = _query_recent_games(db, team_id, "2026-spring-hs")
+        assert games[0]["opponent_name"] == "Away Rival"
+        assert games[0]["is_home"] is False
+
+    def test_null_opponent_name_fallback(self, db):
+        team_id = _seed_team(db, name="Us", public_id="us123")
+        # Insert opponent with NULL name
+        cursor = db.execute(
+            "INSERT INTO teams (name, public_id, season_year) VALUES (NULL, 'unk999', 2026)"
+        )
+        opp_id = cursor.lastrowid
+        db.commit()
+        _seed_season(db)
+        db.execute(
+            "INSERT INTO games (game_id, season_id, home_team_id, away_team_id, "
+            "home_score, away_score, game_date) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            ("g1", "2026-spring-hs", team_id, opp_id, 5, 2, "2026-03-25"),
+        )
+        db.commit()
+        db.row_factory = sqlite3.Row
+        games = _query_recent_games(db, team_id, "2026-spring-hs")
+        assert games[0]["opponent_name"] == "Unknown"
+
+
+class TestRunsAvg:
+    """AC-8: Average runs scored and allowed."""
+
+    def test_runs_avg_basic(self, db):
+        team_id = _seed_team(db)
+        _seed_season(db)
+        # Game 1: home, scored 7, allowed 3
+        db.execute(
+            "INSERT INTO games (game_id, season_id, home_team_id, away_team_id, "
+            "home_score, away_score, game_date) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            ("g1", "2026-spring-hs", team_id, 999, 7, 3, "2026-03-20"),
+        )
+        # Game 2: away, scored 5, allowed 2
+        db.execute(
+            "INSERT INTO games (game_id, season_id, home_team_id, away_team_id, "
+            "home_score, away_score, game_date) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            ("g2", "2026-spring-hs", 999, team_id, 2, 5, "2026-03-21"),
+        )
+        db.commit()
+        db.row_factory = sqlite3.Row
+        scored, allowed = _query_runs_avg(db, team_id, "2026-spring-hs")
+        assert scored == 6.0   # (7 + 5) / 2
+        assert allowed == 2.5  # (3 + 2) / 2
+
+    def test_runs_avg_no_games(self, db):
+        team_id = _seed_team(db)
+        _seed_season(db)
+        db.row_factory = sqlite3.Row
+        scored, allowed = _query_runs_avg(db, team_id, "2026-spring-hs")
+        assert scored is None
+        assert allowed is None
+
+    def test_runs_avg_scoped_to_team_and_season(self, db):
+        """Verify WHERE filters exclude other teams and seasons."""
+        team_id = _seed_team(db, name="Target", public_id="target1")
+        other_id = _seed_team(db, name="Other", public_id="other1")
+        _seed_season(db, season_id="2026-spring-hs")
+        db.execute(
+            "INSERT INTO seasons (season_id, name, season_type, year) "
+            "VALUES ('2025-spring-hs', '2025-spring-hs', 'spring', 2025)"
+        )
+        db.commit()
+        # Target team, target season: scored 10, allowed 2
+        db.execute(
+            "INSERT INTO games (game_id, season_id, home_team_id, away_team_id, "
+            "home_score, away_score, game_date) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            ("g1", "2026-spring-hs", team_id, 999, 10, 2, "2026-03-20"),
+        )
+        # Other team, same season: scored 20, allowed 0 (should be excluded)
+        db.execute(
+            "INSERT INTO games (game_id, season_id, home_team_id, away_team_id, "
+            "home_score, away_score, game_date) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            ("g2", "2026-spring-hs", other_id, 999, 20, 0, "2026-03-20"),
+        )
+        # Target team, wrong season: scored 30, allowed 1 (should be excluded)
+        db.execute(
+            "INSERT INTO games (game_id, season_id, home_team_id, away_team_id, "
+            "home_score, away_score, game_date) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            ("g3", "2025-spring-hs", team_id, 999, 30, 1, "2025-03-20"),
+        )
+        db.commit()
+        db.row_factory = sqlite3.Row
+        scored, allowed = _query_runs_avg(db, team_id, "2026-spring-hs")
+        assert scored == 10.0
+        assert allowed == 2.0

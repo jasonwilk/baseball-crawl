@@ -173,6 +173,7 @@ def _query_batting(
             COALESCE(psb.bb, 0) AS bb,
             COALESCE(psb.so, 0) AS so,
             COALESCE(psb.sb, 0) AS sb,
+            COALESCE(psb.cs, 0) AS cs,
             COALESCE(psb.hbp, 0) AS hbp,
             COALESCE(psb.shf, 0) AS shf,
             tr.jersey_number
@@ -184,8 +185,8 @@ def _query_batting(
             AND tr.season_id = psb.season_id
         WHERE psb.team_id = ? AND psb.season_id = ?
         ORDER BY
-            CASE WHEN COALESCE(psb.ab, 0) = 0 THEN 1 ELSE 0 END ASC,
-            CAST(COALESCE(psb.h, 0) AS REAL) / NULLIF(psb.ab, 0) DESC NULLS LAST,
+            (COALESCE(psb.ab, 0) + COALESCE(psb.bb, 0)
+             + COALESCE(psb.hbp, 0) + COALESCE(psb.shf, 0)) DESC,
             p.last_name ASC
         """,
         (team_id, season_id),
@@ -222,8 +223,7 @@ def _query_pitching(
             AND tr.season_id = psp.season_id
         WHERE psp.team_id = ? AND psp.season_id = ?
         ORDER BY
-            CASE WHEN COALESCE(psp.ip_outs, 0) = 0 THEN 1 ELSE 0 END ASC,
-            CAST(COALESCE(psp.er, 0) AS REAL) * 27 / NULLIF(psp.ip_outs, 0) ASC NULLS LAST,
+            COALESCE(psp.ip_outs, 0) DESC,
             p.last_name ASC
         """,
         (team_id, season_id),
@@ -268,7 +268,10 @@ def _apply_name_cascade(rows: list[dict]) -> None:
 def _query_recent_games(
     conn: sqlite3.Connection, team_id: int, season_id: str, limit: int = 5
 ) -> list[dict]:
-    """Query the most recent completed games for recent form display."""
+    """Query the most recent completed games for recent form display.
+
+    Joins the teams table to resolve opponent names.
+    """
     rows = conn.execute(
         """
         SELECT
@@ -276,8 +279,12 @@ def _query_recent_games(
             g.home_team_id,
             g.away_team_id,
             g.home_score,
-            g.away_score
+            g.away_score,
+            t_home.name AS home_name,
+            t_away.name AS away_name
         FROM games g
+        LEFT JOIN teams t_home ON t_home.id = g.home_team_id
+        LEFT JOIN teams t_away ON t_away.id = g.away_team_id
         WHERE g.season_id = ?
           AND (g.home_team_id = ? OR g.away_team_id = ?)
           AND g.home_score IS NOT NULL AND g.away_score IS NOT NULL
@@ -287,10 +294,16 @@ def _query_recent_games(
         (season_id, team_id, team_id, limit),
     ).fetchall()
     results = []
-    for game_date, home_id, away_id, home_score, away_score in rows:
+    for row in rows:
+        home_id = row[1]
+        home_score = row[3]
+        away_score = row[4]
+        home_name = row[5]
+        away_name = row[6]
         is_home = home_id == team_id
         our_score = home_score if is_home else away_score
         their_score = away_score if is_home else home_score
+        opponent_name = (away_name if is_home else home_name) or "Unknown"
         if our_score > their_score:
             result = "W"
         elif our_score < their_score:
@@ -301,8 +314,33 @@ def _query_recent_games(
             "result": result,
             "our_score": our_score,
             "their_score": their_score,
+            "opponent_name": opponent_name,
+            "is_home": is_home,
         })
     return results
+
+
+def _query_runs_avg(
+    conn: sqlite3.Connection, team_id: int, season_id: str
+) -> tuple[float | None, float | None]:
+    """Return (avg_runs_scored, avg_runs_allowed) per game for the team/season."""
+    row = conn.execute(
+        """
+        SELECT
+            AVG(CASE WHEN home_team_id = :tid THEN home_score
+                     ELSE away_score END) AS avg_scored,
+            AVG(CASE WHEN home_team_id = :tid THEN away_score
+                     ELSE home_score END) AS avg_allowed
+        FROM games
+        WHERE season_id = :season_id
+          AND (home_team_id = :tid OR away_team_id = :tid)
+          AND home_score IS NOT NULL AND away_score IS NOT NULL
+        """,
+        {"tid": team_id, "season_id": season_id},
+    ).fetchone()
+    if row and row[0] is not None:
+        return row[0], row[1]
+    return None, None
 
 
 def _query_freshness(
@@ -572,6 +610,9 @@ def generate_report(gc_url: str) -> GenerationResult:
             recent_form = _query_recent_games(conn, team_id, season_id)
             freshness_date, game_count = _query_freshness(conn, team_id, season_id)
             spray_charts = _query_spray_charts(conn, team_id, season_id)
+            runs_scored_avg, runs_allowed_avg = _query_runs_avg(
+                conn, team_id, season_id
+            )
 
         # Render HTML
         team_info["record"] = record
@@ -586,6 +627,8 @@ def generate_report(gc_url: str) -> GenerationResult:
             "batting": batting,
             "spray_charts": spray_charts,
             "roster": roster,
+            "runs_scored_avg": runs_scored_avg,
+            "runs_allowed_avg": runs_allowed_avg,
         }
         html = render_report(data)
 

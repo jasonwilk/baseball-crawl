@@ -1,7 +1,7 @@
 # E-185: Scouting Report Redesign
 
 ## Status
-`READY`
+`COMPLETED`
 
 ## Overview
 Redesign standalone scouting reports to be more informative and visually useful for coaching staff. Adds coaching-requested data columns (K%, BB%, PA, SB-CS, handedness), heat-map color coding that instantly highlights threatening players, key-players callout, enriched recent form with opponent names and colored chips, team spray chart, and a print-optimized layout -- all within the existing self-contained HTML report format.
@@ -41,8 +41,8 @@ Expert consultation: Baseball-coach (completed -- data requirements, sort priori
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-185-01 | Enrich report data pipeline | TODO | None | SE |
-| E-185-02 | Redesign report template | TODO | E-185-01 | SE |
+| E-185-01 | Enrich report data pipeline | DONE | None | SE |
+| E-185-02 | Redesign report template | DONE | E-185-01 | SE |
 
 ## Dispatch Team
 - software-engineer
@@ -149,8 +149,9 @@ Query average runs scored and allowed per game from the `games` table for the te
 ## History
 - 2026-03-29: Created. Promotes IDEA-037 coaching-relevant scope. Coach and UXD consultation completed during pre-discovery phase.
 - 2026-03-29: Set to READY after 5 review passes.
+- 2026-03-29: COMPLETED. Both stories delivered: enriched data pipeline (heat maps, key players, K%/BB%/XBH/SB-CS, structured recent form, team spray chart, runs averages, sort order changes) and complete template redesign (heat-map color coding, executive summary strip, recent form chips, key players callout, expanded columns, 2-per-row spray charts, print-optimized layout). All 30 ACs verified.
 
-### Review Scorecard
+### Spec Review Scorecard
 | Review Pass | Findings | Accepted | Dismissed |
 |---|---|---|---|
 | Internal iteration 1 -- CR spec audit | 9 | 9 | 0 |
@@ -161,3 +162,12 @@ Query average runs scored and allowed per game from the `games` table for the te
 | **Total** | **33** | **27** | **3** |
 
 Note: Some findings overlapped across sources (deduped during triage). Raw totals above.
+
+### Code Review Scorecard
+| Review Pass | Findings | Accepted | Dismissed |
+|---|---|---|---|
+| Per-story CR -- E-185-01 | 2 | 0 | 2 |
+| Per-story CR -- E-185-02 | 2 | 0 | 2 |
+| CR integration review | 0 | 0 | 0 |
+| Codex code review | 3 | 2 | 1 |
+| **Total** | **7** | **2** | **5** |

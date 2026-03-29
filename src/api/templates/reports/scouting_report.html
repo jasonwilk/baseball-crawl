@@ -15,9 +15,18 @@
       background: #fff;
       padding: 0.5in;
       line-height: 1.4;
+      print-color-adjust: exact;
+      -webkit-print-color-adjust: exact;
     }
 
-    /* ---- Report header ---- */
+    /* ---- Heat-map levels (TN-1) ---- */
+    .heat-0 { background-color: #ffffff; }
+    .heat-1 { background-color: #f0fdf4; }
+    .heat-2 { background-color: #dcfce7; }
+    .heat-3 { background-color: #86efac; }
+    .heat-4 { background-color: #16a34a; color: #fff; }
+
+    /* ---- Report header (TN-10) ---- */
     .report-header {
       display: flex;
       justify-content: space-between;
@@ -25,6 +34,14 @@
       border-bottom: 2px solid #111;
       padding-bottom: 6px;
       margin-bottom: 8px;
+    }
+    .report-label {
+      font-size: 8pt;
+      font-weight: bold;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: #6b7280;
+      font-variant: small-caps;
     }
     .report-team-name {
       font-size: 18pt;
@@ -36,13 +53,6 @@
       color: #444;
       margin-top: 2px;
     }
-    .report-label {
-      font-size: 11pt;
-      font-weight: bold;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      text-align: right;
-    }
     .report-date {
       font-size: 9pt;
       color: #444;
@@ -50,29 +60,64 @@
       margin-top: 2px;
     }
 
-    /* ---- Freshness bar ---- */
-    .freshness-bar {
+    /* ---- Executive summary strip (TN-10) ---- */
+    .exec-summary {
       font-size: 9pt;
-      padding: 4px 8px;
+      padding: 5px 10px;
       background: #f0f0f0;
-      margin-bottom: 10px;
+      margin-bottom: 8px;
       color: #333;
     }
 
-    /* ---- Recent form ---- */
-    .recent-form {
-      font-size: 9pt;
+    /* ---- Recent form chips (TN-5) ---- */
+    .recent-form-section {
       margin-bottom: 10px;
-      padding: 4px 8px;
-      background: #f7f7f7;
-      border-left: 3px solid #2563eb;
     }
     .recent-form-label {
       font-weight: bold;
       text-transform: uppercase;
       font-size: 8pt;
       letter-spacing: 0.05em;
-      margin-right: 6px;
+      margin-right: 4px;
+      color: #374151;
+    }
+    .form-chip {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 8pt;
+      margin: 2px;
+      white-space: nowrap;
+    }
+    .form-chip-w { background: #dcfce7; color: #166534; border: 1px solid #bbf7d0; }
+    .form-chip-l { background: #fee2e2; color: #991b1b; border: 1px solid #fecaca; }
+    .form-chip-t { background: #f3f4f6; color: #374151; border: 1px solid #e5e7eb; }
+
+    /* ---- Key players callout (TN-6, TN-11) ---- */
+    .key-players {
+      border: 1px solid #d1d5db;
+      border-radius: 6px;
+      padding: 10px 14px;
+      margin: 8px 0;
+      background: #f9fafb;
+      display: flex;
+      gap: 24px;
+    }
+    .key-player-col { flex: 1; }
+    .key-player-label {
+      font-size: 7pt;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: #6b7280;
+      margin-bottom: 2px;
+    }
+    .key-player-name {
+      font-weight: bold;
+      font-size: 9pt;
+    }
+    .key-player-stats {
+      font-size: 8pt;
+      color: #374151;
     }
 
     /* ---- Section headers ---- */
@@ -81,9 +126,15 @@
       font-weight: bold;
       text-transform: uppercase;
       letter-spacing: 0.05em;
-      margin-bottom: 4px;
+      margin-bottom: 2px;
       margin-top: 12px;
       color: #1e3a5f;
+    }
+    .sort-annotation {
+      font-size: 8pt;
+      font-style: italic;
+      color: #6b7280;
+      margin-bottom: 4px;
     }
 
     /* ---- Tables ---- */
@@ -104,17 +155,27 @@
       white-space: nowrap;
     }
     thead th.col-player { text-align: left; }
+    /* Heat-mapped column header green underline (TN-11) */
+    thead th.heat-header { border-bottom: 2px solid #16a34a; }
+
     tbody td {
       font-size: 8.5pt;
       padding: 3px 5px;
       text-align: center;
+      border-bottom: 1px solid #e5e7eb;
     }
     tbody td.col-player {
       text-align: left;
       font-weight: 500;
       white-space: nowrap;
     }
-    tbody tr:nth-child(even) { background-color: #f5f5f5; }
+    /* No zebra striping on heat-mapped tables (TN-11) */
+
+    /* Column group separators (TN-11) */
+    .col-sep { border-left: 1px solid #d1d5db; }
+
+    /* THR column -- narrow visual-only block (TN-1) */
+    th.col-thr, td.col-thr { width: 24px; min-width: 24px; max-width: 24px; padding: 3px 2px; }
 
     .no-data-msg {
       font-size: 9pt;
@@ -130,11 +191,26 @@
       margin-bottom: 10px;
     }
 
-    /* ---- Spray chart grid ---- */
+    /* Small-sample row dimming (TN-1) */
+    tr.small-sample td { color: #9ca3af; }
+
+    /* Diamond indicator for spray chart data (TN-11) */
+    .spray-indicator { color: #2563eb; margin-left: 2px; }
+
+    /* ---- Spray chart section ---- */
     .spray-section { margin-top: 12px; }
+    .spray-team-chart {
+      margin-bottom: 10px;
+      text-align: center;
+    }
+    .spray-team-chart img {
+      max-width: 100%;
+      display: block;
+      margin: 0 auto;
+    }
     .spray-grid {
       display: grid;
-      grid-template-columns: repeat(3, 1fr);
+      grid-template-columns: repeat(2, 1fr);
       gap: 8px;
     }
     .spray-card {
@@ -147,6 +223,11 @@
     .spray-card-name {
       font-size: 8.5pt;
       font-weight: bold;
+      margin-bottom: 2px;
+    }
+    .spray-card-stats {
+      font-size: 7.5pt;
+      color: #6b7280;
       margin-bottom: 4px;
     }
     .spray-card img {
@@ -176,7 +257,7 @@
       font-size: 8pt;
     }
 
-    /* ---- Footer ---- */
+    /* ---- Footer (TN-10) ---- */
     .report-footer {
       margin-top: 16px;
       padding-top: 6px;
@@ -198,7 +279,7 @@
     }
     .print-btn:hover { background: #2c5282; }
 
-    /* ---- Print rules ---- */
+    /* ---- Print rules (TN-9) ---- */
     @media print {
       @page { size: landscape; margin: 0.5in; }
       body { padding: 0; }
@@ -210,15 +291,17 @@
       .section-header { page-break-after: avoid; }
     }
 
-    /* ---- Mobile responsive (screen only) ---- */
+    /* ---- Mobile responsive (TN-11) ---- */
     @media screen and (max-width: 640px) {
       body { padding: 8px; font-size: 8pt; }
       .report-team-name { font-size: 14pt; }
       table { font-size: 7pt; }
       thead th { padding: 3px 2px; font-size: 7pt; }
       tbody td { padding: 2px 2px; font-size: 7pt; }
-      .spray-grid { grid-template-columns: repeat(2, 1fr); }
+      .key-players { flex-direction: column; gap: 8px; }
       .roster-grid { grid-template-columns: repeat(2, 1fr); }
+      /* Hide volume/counting columns on mobile (AC-16) */
+      .mob-hide { display: none; }
     }
   </style>
 </head>
@@ -229,74 +312,103 @@
   <button onclick="window.print()" class="print-btn">Print / Save as PDF</button>
 </div>
 
-{# ===== HEADER ===== #}
+{# ===== HEADER (AC-1, TN-10) ===== #}
 <div class="report-header">
   <div>
+    <div class="report-label">Scouting Report</div>
     <div class="report-team-name">{{ team.name | e }}</div>
     <div class="report-meta">
-      {% if team.season_year %}{{ team.season_year }} &middot; {% endif %}
+      {% if team.season_year %}{{ team.season_year }}{% endif %}
+      {% if team.season_year and team.record %} &middot; {% endif %}
       {% if team.record %}{{ team.record.wins }}-{{ team.record.losses }}{% endif %}
     </div>
   </div>
   <div>
-    <div class="report-label">Scouting Report</div>
     <div class="report-date">{{ generated_at[:10] if generated_at else "" }}</div>
   </div>
 </div>
 
-{# Data freshness line (AC-6) #}
-{% if freshness_date or game_count %}
-<div class="freshness-bar">
-  {% if freshness_date %}Stats through {{ freshness_date | format_date }}{% endif %}
-  {% if freshness_date and game_count %} &middot; {% endif %}
+{# ===== EXECUTIVE SUMMARY STRIP (AC-2, TN-8, TN-10) ===== #}
+{% if team.record or game_count or freshness_date or runs_scored_avg %}
+<div class="exec-summary">
+  {% if team.record %}{{ team.record.wins }}-{{ team.record.losses }} record{% endif %}
+  {% if team.record and game_count %} &middot; {% endif %}
   {% if game_count %}{{ game_count }} game{{ "s" if game_count != 1 else "" }}{% endif %}
+  {% if freshness_date %} &middot; through {{ freshness_date | format_date }}{% endif %}
+  {% if runs_scored_avg %} &middot; Avg: {{ runs_scored_avg }} scored{% endif %}
+  {% if runs_allowed_avg %} / {{ runs_allowed_avg }} allowed{% endif %}
 </div>
 {% endif %}
 
-{# ===== RECENT FORM ===== #}
-{% if has_recent_form %}
-<div class="recent-form">
+{# ===== RECENT FORM CHIPS (AC-3, TN-5) ===== #}
+{% if recent_form %}
+<div class="recent-form-section">
   <span class="recent-form-label">Recent Form:</span>
-  {{ recent_form_str }}
+  {% for game in recent_form[:5] %}
+  <span class="form-chip form-chip-{{ game.result | lower }}">{{ game.result }} {{ game.our_score }}-{{ game.their_score }} {% if game.is_home %}vs{% else %}@{% endif %} {{ game.opponent_name | e }}</span>
+  {% endfor %}
 </div>
 {% endif %}
 
-{# ===== PITCHING ===== #}
+{# ===== KEY PLAYERS CALLOUT (AC-4, TN-6) ===== #}
+{% if key_players and (key_players.top_pitcher or key_players.top_batter) %}
+<div class="key-players">
+  {% if key_players.top_pitcher %}
+  <div class="key-player-col">
+    <div class="key-player-label">Ace</div>
+    <div class="key-player-name">{{ key_players.top_pitcher.name | e }}</div>
+    <div class="key-player-stats">{{ key_players.top_pitcher.era }} ERA &middot; {{ key_players.top_pitcher.k9 }} K/9 &middot; {{ key_players.top_pitcher.ip }} IP</div>
+  </div>
+  {% endif %}
+  {% if key_players.top_batter %}
+  <div class="key-player-col">
+    <div class="key-player-label">Top Bat</div>
+    <div class="key-player-name">{{ key_players.top_batter.name | e }}</div>
+    <div class="key-player-stats">{{ key_players.top_batter.obp }} OBP &middot; {{ key_players.top_batter.slg }} SLG &middot; {{ key_players.top_batter.pa }} PA</div>
+  </div>
+  {% endif %}
+</div>
+{% endif %}
+
+{# ===== PITCHING (AC-5, AC-7, AC-8, AC-9, AC-12, AC-15, AC-16, TN-4) ===== #}
 <h2 class="section-header">Pitching</h2>
+<div class="sort-annotation">Sorted by innings pitched</div>
 {% if has_pitching %}
 <table>
   <thead>
     <tr>
       <th>#</th>
       <th class="col-player">Player</th>
-      <th>ERA</th>
-      <th>K/9</th>
-      <th>WHIP</th>
-      <th>GP</th>
+      <th class="col-thr col-sep heat-header">THR</th>
+      <th class="heat-header">ERA</th>
+      <th class="heat-header">K/9</th>
+      <th class="heat-header">WHIP</th>
+      <th class="col-sep">GP</th>
       <th>IP</th>
-      <th>H</th>
-      <th>ER</th>
-      <th>BB</th>
-      <th>SO</th>
-      <th>#P</th>
+      <th class="col-sep mob-hide">H</th>
+      <th class="mob-hide">ER</th>
+      <th class="mob-hide">BB</th>
+      <th class="mob-hide">SO</th>
+      <th class="mob-hide">#P</th>
       <th>Strike%</th>
     </tr>
   </thead>
   <tbody>
     {% for pitcher in pitching %}
-    <tr>
+    <tr{% if pitcher._small_sample %} class="small-sample"{% endif %}>
       <td>{% if pitcher.jersey_number %}{{ pitcher.jersey_number }}{% else %}&mdash;{% endif %}</td>
-      <td class="col-player">{{ pitcher.name | e }}{% if pitcher._small_sample %} *{% endif %}</td>
-      <td>{{ pitcher.era }}</td>
-      <td>{{ pitcher.k9 }}</td>
-      <td>{{ pitcher.whip }}</td>
-      <td>{{ pitcher.games }}</td>
+      <td class="col-player">{{ pitcher.name | e }}{% if pitcher.throws %} ({{ pitcher.throws }}){% endif %}{% if pitcher._small_sample %} *{% endif %}</td>
+      <td class="col-thr col-sep heat-{{ pitcher._heat.thr }}">&nbsp;</td>
+      <td class="heat-{{ pitcher._heat.era }}">{{ pitcher.era }}</td>
+      <td class="heat-{{ pitcher._heat.k9 }}">{{ pitcher.k9 }}</td>
+      <td class="heat-{{ pitcher._heat.whip }}">{{ pitcher.whip }}</td>
+      <td class="col-sep">{{ pitcher.games }}</td>
       <td>{{ pitcher.ip_outs | ip_display }}</td>
-      <td>{{ pitcher.h }}</td>
-      <td>{{ pitcher.er }}</td>
-      <td>{{ pitcher.bb }}</td>
-      <td>{{ pitcher.so }}</td>
-      <td>{{ pitcher.pitches if pitcher.pitches else "&mdash;" | safe }}</td>
+      <td class="col-sep mob-hide">{{ pitcher.h }}</td>
+      <td class="mob-hide">{{ pitcher.er }}</td>
+      <td class="mob-hide">{{ pitcher.bb }}</td>
+      <td class="mob-hide">{{ pitcher.so }}</td>
+      <td class="mob-hide">{{ pitcher.pitches if pitcher.pitches else "&mdash;" | safe }}</td>
       <td>{{ pitcher.strike_pct if pitcher.strike_pct else "&mdash;" | safe }}</td>
     </tr>
     {% endfor %}
@@ -309,47 +421,56 @@
 <p class="no-data-msg">No data available</p>
 {% endif %}
 
-{# ===== BATTING ===== #}
+{# ===== BATTING (AC-6, AC-7, AC-8, AC-9, AC-12, AC-15, AC-16, TN-3) ===== #}
 <h2 class="section-header">Batting</h2>
+<div class="sort-annotation">Sorted by plate appearances</div>
 {% if has_batting %}
 <table>
   <thead>
     <tr>
       <th>#</th>
       <th class="col-player">Player</th>
-      <th>AVG</th>
-      <th>OBP</th>
-      <th>SLG</th>
-      <th>GP</th>
-      <th>AB</th>
-      <th>H</th>
-      <th>2B</th>
-      <th>3B</th>
-      <th>HR</th>
-      <th>RBI</th>
-      <th>BB</th>
-      <th>SO</th>
-      <th>SB</th>
+      <th class="col-thr col-sep heat-header">THR</th>
+      <th class="heat-header">OBP</th>
+      <th class="heat-header">AVG</th>
+      <th class="heat-header">SLG</th>
+      <th class="col-sep">K%</th>
+      <th>BB%</th>
+      <th class="col-sep mob-hide">GP</th>
+      <th>PA</th>
+      <th class="mob-hide">AB</th>
+      <th class="mob-hide">H</th>
+      <th class="mob-hide">XBH</th>
+      <th class="mob-hide">HR</th>
+      <th class="mob-hide">RBI</th>
+      <th class="mob-hide">BB</th>
+      <th class="mob-hide">SO</th>
+      <th>SB-CS</th>
+      <th class="mob-hide">HBP</th>
     </tr>
   </thead>
   <tbody>
     {% for player in batting %}
-    <tr>
+    <tr{% if player._small_sample %} class="small-sample"{% endif %}>
       <td>{% if player.jersey_number %}{{ player.jersey_number }}{% else %}&mdash;{% endif %}</td>
-      <td class="col-player">{{ player.name | e }}{% if player._small_sample %} *{% endif %}</td>
-      <td>{{ player.h | format_avg(player.ab) }}</td>
-      <td>{{ (player.h + player.bb + player.hbp) | format_avg(player.ab + player.bb + player.hbp + player.shf) }}</td>
-      <td>{{ (player.h + player.doubles + 2 * player.triples + 3 * player.hr) | format_avg(player.ab) }}</td>
-      <td>{{ player.games }}</td>
-      <td>{{ player.ab }}</td>
-      <td>{{ player.h }}</td>
-      <td>{{ player.doubles }}</td>
-      <td>{{ player.triples }}</td>
-      <td>{{ player.hr }}</td>
-      <td>{{ player.rbi }}</td>
-      <td>{{ player.bb }}</td>
-      <td>{{ player.so }}</td>
-      <td>{{ player.sb }}</td>
+      <td class="col-player">{{ player.name | e }}{% if player.player_id in spray_data %}<span class="spray-indicator"> &#9670;</span>{% endif %}{% if player._small_sample %} *{% endif %}</td>
+      <td class="col-thr col-sep heat-{{ player._heat.thr }}">&nbsp;</td>
+      <td class="heat-{{ player._heat.obp }}">{{ (player.h + player.bb + player.hbp) | format_avg(player._pa) }}</td>
+      <td class="heat-{{ player._heat.avg }}">{{ player.h | format_avg(player.ab) }}</td>
+      <td class="heat-{{ player._heat.slg }}">{{ (player.h + player.doubles + 2 * player.triples + 3 * player.hr) | format_avg(player.ab) }}</td>
+      <td class="col-sep">{{ player._k_pct }}</td>
+      <td>{{ player._bb_pct }}</td>
+      <td class="col-sep mob-hide">{{ player.games }}</td>
+      <td>{{ player._pa }}</td>
+      <td class="mob-hide">{{ player.ab }}</td>
+      <td class="mob-hide">{{ player.h }}</td>
+      <td class="mob-hide">{{ player._xbh }}</td>
+      <td class="mob-hide">{{ player.hr }}</td>
+      <td class="mob-hide">{{ player.rbi }}</td>
+      <td class="mob-hide">{{ player.bb }}</td>
+      <td class="mob-hide">{{ player.so }}</td>
+      <td>{{ player._sb_cs }}</td>
+      <td class="mob-hide">{{ player.hbp }}</td>
     </tr>
     {% endfor %}
   </tbody>
@@ -361,21 +482,37 @@
 <p class="no-data-msg">No data available</p>
 {% endif %}
 
-{# ===== SPRAY CHARTS ===== #}
-{% if has_spray %}
+{# ===== SPRAY CHARTS (AC-10, TN-7, TN-10) ===== #}
+{% if has_spray or team_spray_uri %}
 <div class="spray-section">
   <h2 class="section-header">Batter Tendencies</h2>
+
+  {# Team spray chart -- full width (AC-10) #}
+  {% if team_spray_uri %}
+  <div class="spray-team-chart">
+    <img src="{{ team_spray_uri }}" alt="Team spray chart">
+  </div>
+  {% endif %}
+
+  {# Individual player spray charts -- 2-per-row (AC-10) #}
+  {% if has_spray %}
   <div class="spray-grid">
     {% for player_id, data_uri in spray_data.items() %}
     <div class="spray-card">
+      {% set pstats = spray_player_stats.get(player_id, {}) %}
+      <div class="spray-card-name">
+        {% set _name = [] %}{% for p in batting if p.player_id == player_id %}{% if _name.append(p.name) %}{% endif %}{% endfor %}{{ (_name[0] | e) if _name else ("Player " ~ player_id) }}
+      </div>
+      <div class="spray-card-stats">{{ pstats.get("avg", "-") }} AVG &middot; {{ pstats.get("pa", 0) }} PA &middot; {{ pstats.get("bip_count", 0) }} BIP</div>
       <img src="{{ data_uri }}" alt="Spray chart">
     </div>
     {% endfor %}
   </div>
+  {% endif %}
 </div>
 {% endif %}
 
-{# ===== ROSTER ===== #}
+{# ===== ROSTER (AC-14) ===== #}
 {% if roster %}
 <h2 class="section-header">Roster</h2>
 <div class="roster-grid">
@@ -389,9 +526,9 @@
 </div>
 {% endif %}
 
-{# ===== FOOTER ===== #}
+{# ===== FOOTER (AC-11, TN-10) ===== #}
 <div class="report-footer">
-  Generated {{ generated_at[:10] if generated_at else "" }}.
+  Generated {{ generated_at[:10] if generated_at else "" }}{% if expires_at %} &middot; Expires {{ expires_at[:10] }}{% endif %} &middot; bbstats.ai
 </div>
 
 </body>
