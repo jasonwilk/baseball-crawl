@@ -18,6 +18,7 @@ from src.reports.generator import (
     _query_record,
     _query_roster,
     _query_runs_avg,
+    _resolve_gc_uuid,
     _update_report_failed,
     _update_report_ready,
     generate_report,
@@ -30,7 +31,6 @@ _REMOVED_NAMES = [
     "_build_boxscore_uuid_map",
     "_crawl_spray_via_boxscore_uuids",
     "_resolve_gc_uuid_via_search",
-    "_SEARCH_CONTENT_TYPE",
     "_UUID_RE",
     "_PLAYER_STATS_ACCEPT",
 ]
@@ -706,7 +706,7 @@ class TestCrawlAndLoadSpray:
         _crawl_and_load_spray(client, "abc123", "2026-spring-hs")
 
         mock_crawler.crawl_team.assert_called_once_with(
-            "abc123", season_id="2026-spring-hs"
+            "abc123", season_id="2026-spring-hs", gc_uuid=None
         )
         mock_loader.load_all.assert_called_once()
         # Verify load_all received public_id and season_id kwargs
@@ -771,6 +771,280 @@ class TestCrawlAndLoadSpray:
 
         # Should NOT raise -- non-fatal
         _crawl_and_load_spray(client, "abc123", "2026-spring-hs")
+
+    @patch("src.reports.generator.get_connection")
+    @patch("src.reports.generator.ScoutingSprayChartCrawler")
+    @patch("src.reports.generator.ScoutingSprayChartLoader")
+    def test_gc_uuid_passed_through_to_crawler(
+        self,
+        mock_loader_cls,
+        mock_crawler_cls,
+        mock_get_conn,
+        db,
+        tmp_path,
+    ):
+        """AC-4: gc_uuid parameter is forwarded to crawl_team."""
+        db_path = str(tmp_path / "test.db")
+
+        def _fresh_conn():
+            conn = sqlite3.connect(db_path)
+            conn.execute("PRAGMA foreign_keys=ON;")
+            return conn
+
+        mock_get_conn.side_effect = lambda: _fresh_conn()
+
+        mock_crawler = MagicMock()
+        mock_crawler_cls.return_value = mock_crawler
+        mock_loader = MagicMock()
+        mock_loader_cls.return_value = mock_loader
+
+        client = MagicMock()
+
+        _crawl_and_load_spray(client, "abc123", "2026-spring-hs", gc_uuid="resolved-uuid")
+
+        mock_crawler.crawl_team.assert_called_once_with(
+            "abc123", season_id="2026-spring-hs", gc_uuid="resolved-uuid"
+        )
+
+
+# ===========================================================================
+# E-186-02: gc_uuid resolution via POST /search
+# ===========================================================================
+
+
+class TestResolveGcUuid:
+    """Test _resolve_gc_uuid function."""
+
+    def test_successful_resolution_returns_gc_uuid(self):
+        """AC-1: Search returns a hit matching public_id -> returns result.id."""
+        client = MagicMock()
+        client.post_json.return_value = {
+            "hits": [
+                {
+                    "result": {
+                        "id": "resolved-gc-uuid-123",
+                        "public_id": "my-team-slug",
+                        "name": "Test Team",
+                    }
+                },
+                {
+                    "result": {
+                        "id": "other-uuid",
+                        "public_id": "other-team",
+                        "name": "Other Team",
+                    }
+                },
+            ]
+        }
+
+        result = _resolve_gc_uuid(client, "Test Team", "my-team-slug")
+
+        assert result == "resolved-gc-uuid-123"
+        client.post_json.assert_called_once()
+
+    def test_no_match_returns_none(self):
+        """AC-2: No hit matches public_id -> returns None."""
+        client = MagicMock()
+        client.post_json.return_value = {
+            "hits": [
+                {
+                    "result": {
+                        "id": "some-uuid",
+                        "public_id": "different-team",
+                        "name": "Different Team",
+                    }
+                },
+            ]
+        }
+
+        result = _resolve_gc_uuid(client, "Test Team", "my-team-slug")
+
+        assert result is None
+
+    def test_empty_hits_returns_none(self):
+        """No hits at all -> returns None."""
+        client = MagicMock()
+        client.post_json.return_value = {"hits": []}
+
+        result = _resolve_gc_uuid(client, "Test Team", "my-team-slug")
+
+        assert result is None
+
+    def test_credential_expired_propagates(self):
+        """AC-6: CredentialExpiredError propagates."""
+        from src.gamechanger.client import CredentialExpiredError
+
+        client = MagicMock()
+        client.post_json.side_effect = CredentialExpiredError("expired")
+
+        with pytest.raises(CredentialExpiredError):
+            _resolve_gc_uuid(client, "Test Team", "my-team-slug")
+
+    def test_search_failure_returns_none(self):
+        """AC-6: Network/API errors are caught, returns None."""
+        client = MagicMock()
+        client.post_json.side_effect = RuntimeError("network error")
+
+        result = _resolve_gc_uuid(client, "Test Team", "my-team-slug")
+
+        assert result is None
+
+    def test_unexpected_response_shape_returns_none(self):
+        """AC-6: Unexpected response shape (not a dict) returns None."""
+        client = MagicMock()
+        client.post_json.return_value = "not a dict"
+
+        result = _resolve_gc_uuid(client, "Test Team", "my-team-slug")
+
+        assert result is None
+
+    def test_uses_correct_content_type_and_params(self):
+        """Verify the search call uses the correct GC content type."""
+        client = MagicMock()
+        client.post_json.return_value = {"hits": []}
+
+        _resolve_gc_uuid(client, "Test Team", "my-team-slug")
+
+        client.post_json.assert_called_once_with(
+            "/search",
+            body={"name": "Test Team"},
+            params={"start_at_page": 0, "search_source": "search"},
+            content_type="application/vnd.gc.com.post_search+json; version=0.0.0",
+        )
+
+    @patch("src.reports.generator.get_connection")
+    @patch("src.reports.generator._crawl_and_load_spray")
+    @patch("src.reports.generator._resolve_gc_uuid")
+    def test_existing_gc_uuid_skips_search(
+        self,
+        mock_resolve,
+        mock_spray,
+        mock_get_conn,
+        tmp_path,
+    ):
+        """AC-7(c): Team with non-NULL gc_uuid skips the search call entirely."""
+        db_path = str(tmp_path / "test.db")
+        conn_template = sqlite3.connect(db_path)
+        conn_template.execute("PRAGMA foreign_keys=ON;")
+        conn_template.executescript("""
+            CREATE TABLE IF NOT EXISTS teams (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT,
+                gc_uuid TEXT UNIQUE,
+                public_id TEXT UNIQUE,
+                season_year INTEGER,
+                membership_type TEXT DEFAULT 'tracked',
+                classification TEXT,
+                active INTEGER DEFAULT 1
+            );
+            CREATE TABLE IF NOT EXISTS seasons (
+                season_id TEXT PRIMARY KEY, name TEXT, season_type TEXT, year INTEGER
+            );
+            CREATE TABLE IF NOT EXISTS scouting_runs (
+                team_id INTEGER, season_id TEXT, run_type TEXT,
+                started_at TEXT, completed_at TEXT, status TEXT,
+                last_checked TEXT, games_found INTEGER, games_crawled INTEGER,
+                players_found INTEGER, error_message TEXT,
+                PRIMARY KEY (team_id, season_id, run_type)
+            );
+            CREATE TABLE IF NOT EXISTS reports (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                slug TEXT UNIQUE NOT NULL,
+                team_id INTEGER NOT NULL,
+                title TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'generating',
+                generated_at TEXT,
+                expires_at TEXT,
+                report_path TEXT,
+                error_message TEXT
+            );
+            CREATE TABLE IF NOT EXISTS games (
+                game_id TEXT PRIMARY KEY, season_id TEXT,
+                home_team_id INTEGER, away_team_id INTEGER,
+                home_score INTEGER, away_score INTEGER,
+                game_date TEXT, status TEXT
+            );
+            CREATE TABLE IF NOT EXISTS players (
+                player_id TEXT PRIMARY KEY, first_name TEXT, last_name TEXT,
+                bats TEXT, throws TEXT
+            );
+            CREATE TABLE IF NOT EXISTS player_season_batting (
+                player_id TEXT, team_id INTEGER, season_id TEXT,
+                gp INTEGER DEFAULT 0, games_tracked INTEGER DEFAULT 0,
+                ab INTEGER DEFAULT 0, h INTEGER DEFAULT 0, doubles INTEGER DEFAULT 0,
+                triples INTEGER DEFAULT 0, hr INTEGER DEFAULT 0, rbi INTEGER DEFAULT 0,
+                r INTEGER DEFAULT 0, bb INTEGER DEFAULT 0, so INTEGER DEFAULT 0,
+                sb INTEGER DEFAULT 0, tb INTEGER DEFAULT 0, hbp INTEGER DEFAULT 0,
+                shf INTEGER DEFAULT 0, cs INTEGER DEFAULT 0,
+                PRIMARY KEY (player_id, team_id, season_id)
+            );
+            CREATE TABLE IF NOT EXISTS player_season_pitching (
+                player_id TEXT, team_id INTEGER, season_id TEXT,
+                gp_pitcher INTEGER DEFAULT 0, games_tracked INTEGER DEFAULT 0,
+                ip_outs INTEGER DEFAULT 0, h INTEGER DEFAULT 0, r INTEGER DEFAULT 0,
+                er INTEGER DEFAULT 0, bb INTEGER DEFAULT 0, so INTEGER DEFAULT 0,
+                wp INTEGER DEFAULT 0, hbp INTEGER DEFAULT 0,
+                pitches INTEGER DEFAULT 0, total_strikes INTEGER DEFAULT 0,
+                bf INTEGER DEFAULT 0,
+                PRIMARY KEY (player_id, team_id, season_id)
+            );
+            CREATE TABLE IF NOT EXISTS team_rosters (
+                team_id INTEGER, player_id TEXT, season_id TEXT,
+                jersey_number TEXT, position TEXT,
+                PRIMARY KEY (team_id, player_id, season_id)
+            );
+            CREATE TABLE IF NOT EXISTS spray_charts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                team_id INTEGER, player_id TEXT, season_id TEXT,
+                chart_type TEXT, x REAL, y REAL, play_result TEXT, play_type TEXT
+            );
+        """)
+        # Seed team WITH gc_uuid already set
+        conn_template.execute(
+            "INSERT INTO teams (name, public_id, gc_uuid, season_year) "
+            "VALUES ('Test Tigers', 'abc123', 'existing-uuid-999', 2026)"
+        )
+        conn_template.execute(
+            "INSERT INTO scouting_runs (team_id, season_id, run_type, started_at, status) "
+            "VALUES (1, '2026-spring-hs', 'full', '2026-03-28T00:00:00Z', 'completed')"
+        )
+        conn_template.commit()
+        conn_template.close()
+
+        def _fresh_conn():
+            c = sqlite3.connect(db_path)
+            c.execute("PRAGMA foreign_keys=ON;")
+            return c
+
+        mock_get_conn.side_effect = lambda: _fresh_conn()
+
+        from src.gamechanger.crawlers import CrawlResult
+        from src.gamechanger.loaders import LoadResult
+
+        mock_client = MagicMock()
+        mock_crawler = MagicMock()
+        mock_crawler.scout_team.return_value = CrawlResult(files_written=5)
+        mock_loader = MagicMock()
+        mock_loader.load_team.return_value = LoadResult(loaded=5)
+
+        with (
+            patch("src.reports.generator.GameChangerClient", return_value=mock_client),
+            patch("src.reports.generator.ensure_team_row", return_value=1),
+            patch("src.reports.generator.render_report", return_value="<html>test</html>"),
+            patch("src.reports.generator.ScoutingCrawler", return_value=mock_crawler),
+            patch("src.reports.generator.ScoutingLoader", return_value=mock_loader),
+            patch("src.reports.generator._REPO_ROOT", tmp_path),
+            patch("src.reports.generator._REPORTS_DIR", tmp_path / "data" / "reports"),
+        ):
+            result = generate_report("abc123")
+
+        assert result.success is True
+        # _resolve_gc_uuid should never be called -- existing gc_uuid skips search
+        mock_resolve.assert_not_called()
+        # Spray pipeline should receive the existing gc_uuid
+        mock_spray.assert_called_once()
+        _, spray_kwargs = mock_spray.call_args
+        assert spray_kwargs.get("gc_uuid") == "existing-uuid-999"
 
 
 # ===========================================================================

@@ -1,7 +1,7 @@
 # E-186: Fix Spray Charts for Standalone Reports
 
 ## Status
-`READY`
+`COMPLETED`
 
 ## Overview
 Spray charts do not appear in standalone scouting reports for any tracked team that lacks a `gc_uuid`. This is the third attempt at fixing spray chart scouting (after E-158 and E-176). The root cause is a false premise embedded across code and documentation: that the spray endpoint returns both teams' data regardless of which team's UUID is used. Live API verification on 2026-03-29 proved the endpoint is **asymmetric** -- it returns both teams' data ONLY when called with the owning team's own gc_uuid. This epic removes the harmful boxscore-UUID fallback, wires in a verified gc_uuid resolution path, corrects documentation, and codifies the resolution pattern into the context layer.
@@ -54,10 +54,10 @@ No expert consultation required for coaching value -- this is a bug fix restorin
 
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-186-01 | Remove boxscore-UUID fallback and fix test failures | TODO | None | - |
-| E-186-02 | Wire gc_uuid resolution into report generator | TODO | E-186-01 | - |
-| E-186-03 | Correct API documentation and CLAUDE.md | TODO | None | - |
-| E-186-04 | Codify public_id-to-gc_uuid bridge pattern | TODO | E-186-03 | - |
+| E-186-01 | Remove boxscore-UUID fallback and fix test failures | DONE | None | SE |
+| E-186-02 | Wire gc_uuid resolution into report generator | DONE | E-186-01 | SE |
+| E-186-03 | Correct API documentation and CLAUDE.md | DONE | None | CA |
+| E-186-04 | Codify public_id-to-gc_uuid bridge pattern | DONE | E-186-03 | CA |
 
 ## Dispatch Team
 - software-engineer (E-186-01, E-186-02)
@@ -134,6 +134,7 @@ None -- all questions resolved by live API verification and expert consultation.
 ## History
 - 2026-03-29: Created. Third attempt at fixing spray charts after E-158 and E-176. Based on live API verification proving endpoint asymmetry.
 - 2026-03-29: Set to READY after internal review.
+- 2026-03-29: Set to ACTIVE, dispatch started.
 
 ### Review Scorecard
 | Review Pass | Findings | Accepted | Dismissed |
@@ -143,3 +144,29 @@ None -- all questions resolved by live API verification and expert consultation.
 | **Total** | **10** | **7** | **3** |
 
 Codex validation: skipped (findings were spec-precision, not architectural).
+
+- 2026-03-29: All stories DONE, epic COMPLETED.
+
+### Review Scorecard (Dispatch)
+| Review Pass | Findings | Accepted | Dismissed |
+|---|---|---|---|
+| Per-story CR -- E-186-01 | 0 | 0 | 0 |
+| Per-story CR -- E-186-02 | 2 | 1 | 1 |
+| **Total** | **2** | **1** | **1** |
+
+E-186-03 and E-186-04 were context-layer-only -- CR skipped, PM verified ACs alone.
+
+### Documentation Assessment
+No documentation impact -- this epic fixes internal pipeline behavior and corrects existing documentation. No new user-facing features requiring `docs/admin/` or `docs/coaching/` updates.
+
+### Context-Layer Assessment
+| Trigger | Verdict | Notes |
+|---------|---------|-------|
+| New convention/pattern | YES | gc-uuid-bridge.md rule -- codified in E-186-04 |
+| Architectural decision | YES | Spray endpoint asymmetry -- codified in E-186-03 |
+| Footgun/failure mode | YES | False "both teams" premise -- warned in gc-uuid-bridge.md |
+| Agent behavior change | No | |
+| Domain knowledge | YES | Spray endpoint behavior -- codified in E-186-03 |
+| New CLI command/workflow | No | |
+
+All "yes" items were codified during the epic itself (stories 03 and 04). No additional context-layer work needed.

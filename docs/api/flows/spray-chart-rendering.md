@@ -41,7 +41,7 @@ Response structure:
 
 `offense` and `defense` are dicts keyed by player UUID. Each value is an array of spray chart entries (see Section 2).
 
-**Works for both own teams and opponents.** Pass the opponent's `progenitor_team_id` as `team_id` — confirmed working 2026-03-09. This is the efficient path: both teams' all players in a single API call.
+**Works for both own teams and opponents.** Pass the opponent's `progenitor_team_id` as `team_id` — confirmed working 2026-03-09. However, the response is **asymmetric** (verified 2026-03-29): when called with the owning team's UUID (the team whose schedule contains the game), both teams' players are returned in a single call; when called with a participant's UUID, only that team's players are returned.
 
 `event_id` is the boxscore path parameter from game-summaries (not `game_stream_id` — see CLAUDE.md Data Model note on this distinction).
 
@@ -362,7 +362,7 @@ Both are standard data-stack packages. No additional GC-specific dependencies.
 
 | Claim | Evidence |
 |---|---|
-| Per-game endpoint returns spray data for both teams | Fetched 150 BIP events from 4 Freshman Grizzlies games (own team); opponent data present in same response |
+| Per-game endpoint returns spray data for both teams when called with the owning team's UUID | Fetched 150 BIP events from 4 Freshman Grizzlies games (own team); opponent data present in same response. Asymmetric behavior verified 2026-03-29: participant UUID returns only that team's data. |
 | Opponent access via `progenitor_team_id` | Confirmed 2026-03-09 |
 | Coordinate transform matches GC rendering | Fetched 92 BIP events for Reid Wilkinson (#28, Lincoln Rebels 14U, UUID prefix `77c74470`); Python-rendered chart matched GC's player profile chart visually |
 | Mobile Accept header works | 206 calls in session `2026-03-11_034739`, all 200 OK |

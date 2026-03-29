@@ -4,7 +4,7 @@
 [E-186: Fix Spray Charts for Standalone Reports](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, all active documentation accurately describes the spray endpoint's asymmetric behavior. The false "both teams regardless of which UUID" claim is replaced with the verified behavior: returns both teams' data only when called with the owning team's UUID.

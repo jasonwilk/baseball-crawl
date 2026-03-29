@@ -4,7 +4,7 @@
 [E-186: Fix Spray Charts for Standalone Reports](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the public_id-to-gc_uuid resolution pattern (POST /search + public_id filtering) is codified in the context layer so that agents working on gc_uuid resolution instinctively reach for this approach. The pattern is documented with its verification evidence, constraints, and usage guidance.

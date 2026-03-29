@@ -222,9 +222,13 @@ class TestSprayCharts:
             spray_charts={42: events},
         )
 
-        # Mock render_spray_chart to avoid matplotlib rendering in tests
+        # Mock render_spray_chart to avoid matplotlib rendering in tests.
+        # src.charts.spray has a top-level matplotlib import, so inject a
+        # mock module into sys.modules before patching the function.
         fake_png = b"\x89PNG_FAKE_DATA"
-        with patch("src.charts.spray.render_spray_chart", return_value=fake_png):
+        mock_spray_mod = MagicMock()
+        mock_spray_mod.render_spray_chart = MagicMock(return_value=fake_png)
+        with patch.dict("sys.modules", {"src.charts.spray": mock_spray_mod}):
             html = render_report(data)
 
         assert "data:image/png;base64," in html
@@ -469,7 +473,9 @@ class TestEdgeCases:
         ]
         data = _make_full_data(batting=[batter], spray_charts={42: events})
 
-        with patch("src.charts.spray.render_spray_chart", side_effect=RuntimeError("render failed")):
+        mock_spray_mod = MagicMock()
+        mock_spray_mod.render_spray_chart = MagicMock(side_effect=RuntimeError("render failed"))
+        with patch.dict("sys.modules", {"src.charts.spray": mock_spray_mod}):
             html = render_report(data)
 
         # Should not crash; spray section should be omitted

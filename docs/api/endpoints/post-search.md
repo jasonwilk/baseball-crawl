@@ -65,7 +65,7 @@ see_also:
 
 **Status:** CONFIRMED -- live curl returned 200 OK (2026-03-29). Full request/response schema documented.
 
-Main general-purpose team search. Used by the iOS GC app search bar (search-as-you-type), confirmed working from web profile, and used programmatically for opponent resolution (both admin resolve and automated fallback -- see [opponent-resolution.md](../flows/opponent-resolution.md)).
+Main general-purpose team search. Used by the iOS GC app search bar (search-as-you-type), confirmed working from web profile, and used programmatically for opponent resolution (both admin resolve and automated fallback -- see [opponent-resolution.md](../flows/opponent-resolution.md)). Also used as the **public_id-to-gc_uuid bridge**: search by team name, filter hits by `result.public_id`, and extract `result.id` as the `gc_uuid`. See `.claude/rules/gc-uuid-bridge.md` for the full pattern.
 
 ```
 POST https://api.team-manager.gc.com/search?start_at_page={page}&search_source=search

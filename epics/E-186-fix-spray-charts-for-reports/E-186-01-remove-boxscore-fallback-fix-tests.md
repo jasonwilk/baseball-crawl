@@ -4,7 +4,7 @@
 [E-186: Fix Spray Charts for Standalone Reports](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the scouting spray crawler no longer contains the harmful boxscore-UUID fallback that fetches spray data for opponents instead of the scouted team. When a team has no `gc_uuid`, the crawler logs an INFO message and returns an empty result. Additionally, the two pre-existing E-185 test failures in `tests/test_report_renderer.py` are fixed.

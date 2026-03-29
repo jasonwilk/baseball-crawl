@@ -7,7 +7,8 @@ profiles:
   web:
     status: confirmed
     notes: >
-      HTTP 200. Both teams' players, three data sections in one call. No game_stream_id
+      HTTP 200. Three data sections in one call (both teams' players when called with
+      the owning team's UUID; only that team's players otherwise). No game_stream_id
       resolution needed. Confirmed 2026-03-05.
   mobile:
     status: observed
@@ -53,6 +54,13 @@ caveats:
     any team's per-game player-stats using that team's progenitor_team_id. The
     authenticated user's team membership is NOT required for access.
   - >
+    ASYMMETRIC TEAM SCOPE (2026-03-29): This endpoint is team-scoped and asymmetric.
+    When called with the owning team's UUID (the team whose schedule contains the game),
+    the response includes both teams' players. When called with a participant's UUID
+    (a team that played but does not own the schedule entry), only that team's players
+    are returned. An unrelated team's UUID returns 404. Earlier documentation stated
+    "both teams" unconditionally -- this was incorrect.
+  - >
     PLAY RESULT ENUM COMPLETENESS (2026-03-26): Mobile data (session 034739) exposes
     additional playResult values not in the original web capture: other_out,
     offensive_interference, sacrifice_bunt_error, sacrifice_fly_error. Full observed
@@ -74,9 +82,9 @@ see_also:
 
 # GET /teams/{team_id}/schedule/events/{event_id}/player-stats
 
-**Status:** CONFIRMED LIVE -- 200 OK. Both teams' players, three data sections. Last verified: 2026-03-26 (mobile session 034739).
+**Status:** CONFIRMED LIVE -- 200 OK. Three data sections (both teams' players when called with the owning team's UUID; only that team's players otherwise). Last verified: 2026-03-26 (mobile session 034739).
 
-Returns per-player stats for a specific game event. Returns three sections: `player_stats` (this-game per-player stats), `cumulative_player_stats` (season-to-date for own-team players; single-game for opponent players), and `spray_chart_data` (ball-in-play x/y coordinates). Both own-team and opponent players are included in the same response, keyed by player UUID.
+Returns per-player stats for a specific game event. Returns three sections: `player_stats` (this-game per-player stats), `cumulative_player_stats` (season-to-date for own-team players; single-game for opponent players), and `spray_chart_data` (ball-in-play x/y coordinates). When called with the owning team's UUID (the team whose schedule contains the game), both own-team and opponent players are included in the same response. When called with a participant's UUID, only that team's players are returned. All players are keyed by player UUID.
 
 This is potentially the most efficient single API call for comprehensive stat ingestion:
 - Per-game batting and pitching lines for both teams
@@ -276,7 +284,7 @@ No explicit team flag per player. Use `cumulative_player_stats.players[uuid].sta
 | **Player names** | No -- UUID keys only (join needed) | Yes -- first_name, last_name, number included |
 | **Batting order** | No -- dict keyed by UUID (unordered) | Yes -- array order = batting order |
 | **Position data** | No explicit position field | Yes -- player_text (e.g., "(CF)") |
-| **Both teams** | Yes | Yes |
+| **Both teams** | Yes -- when called with the owning team's UUID; only that team's data otherwise (asymmetric, verified 2026-03-29) | Yes |
 | **Response size** | ~106 KB | Smaller (~13 KB) |
 
 **Recommendation:** Use this endpoint for full per-player stat ingestion (game and cumulative). Use boxscore when batting order, positions, or player names are required without a separate join.

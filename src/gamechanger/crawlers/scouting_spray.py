@@ -11,19 +11,17 @@ and calls::
 
     GET /teams/{gc_uuid}/schedule/events/{event_id}/player-stats
 
-for each completed game not already cached.  The endpoint returns both teams'
-spray data in a single call; the full response is saved and team-separation
-happens in the loader (E-163-02).
+for each completed game not already cached.
 
-The ``gc_uuid`` lookup uses ``SELECT gc_uuid FROM teams WHERE public_id = ?``
-(``teams.public_id`` is UNIQUE).  When an opponent has no ``gc_uuid``, the
-crawler falls back to extracting per-game opponent UUIDs from cached boxscore
-files in ``data/raw/{season_id}/scouting/{public_id}/boxscores/``.  Each
-boxscore JSON has two top-level keys: the scouted team's ``public_id`` slug
-and the other team's ``gc_uuid``.  The spray endpoint returns both teams'
-data regardless of which team's UUID is in the path, so using the opponent's
-UUID produces complete spray data.  If no boxscores are cached either, the
-opponent is skipped with an INFO log.
+**Endpoint behavior is asymmetric** (verified 2026-03-29): the player-stats
+endpoint is team-scoped.  The *owning team* (whose schedule contains the
+game) receives both teams' spray data; a *participant* (played in the game
+but does not own the schedule entry) receives only its own data.  Therefore
+the ``gc_uuid`` used in the request path must belong to the scouted team
+itself -- using an opponent's UUID would return only the opponent's data.
+
+When an opponent has no ``gc_uuid``, the crawler cannot call the endpoint and
+skips that team with an INFO log.
 
 Idempotency is existence-only: if the file already exists it is skipped
 regardless of age.  Files are written even when ``spray_chart_data`` is null
@@ -50,7 +48,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 import sqlite3
 from pathlib import Path
 from typing import Any
@@ -63,10 +60,6 @@ logger = logging.getLogger(__name__)
 _PLAYER_STATS_ACCEPT = "application/json, text/plain, */*"
 _DATA_ROOT = Path(__file__).resolve().parents[3] / "data" / "raw"
 _COMPLETED_STATUS = "completed"
-_UUID_RE = re.compile(
-    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-    re.IGNORECASE,
-)
 
 
 class ScoutingSprayChartCrawler:
@@ -182,11 +175,9 @@ class ScoutingSprayChartCrawler:
         Looks up the opponent's ``gc_uuid`` from the database unless
         ``gc_uuid`` is provided directly (bypasses the lookup).  When
         ``gc_uuid`` is available, fetches player-stats using that UUID for
-        all completed games.  When ``gc_uuid`` is NULL, falls back to
-        extracting per-game opponent UUIDs from cached boxscore files and
-        uses those for the spray endpoint calls.  If neither ``gc_uuid`` nor
-        boxscore UUIDs are available, logs an INFO message and returns an
-        empty result.
+        all completed games.  When ``gc_uuid`` is NULL, logs an INFO
+        message and returns an empty result -- the endpoint is team-scoped
+        and requires the scouted team's own UUID.
 
         Args:
             public_id: The opponent's ``public_id`` slug.
@@ -202,6 +193,13 @@ class ScoutingSprayChartCrawler:
         """
         if gc_uuid is None:
             gc_uuid = self._lookup_gc_uuid(public_id)
+
+        if gc_uuid is None:
+            logger.info(
+                "No gc_uuid for opponent public_id=%s; skipping spray crawl.",
+                public_id,
+            )
+            return CrawlResult()
 
         if season_id is not None:
             season_globs = [season_id]
@@ -221,45 +219,15 @@ class ScoutingSprayChartCrawler:
             )
             return CrawlResult()
 
-        # If gc_uuid is available, use the direct path for all seasons.
-        if gc_uuid is not None:
-            result = CrawlResult()
-            for sid in season_globs:
-                games_file = self._data_root / sid / "scouting" / public_id / "games.json"
-                if not games_file.exists():
-                    continue
-                partial = self._crawl_team_season(public_id, gc_uuid, games_file, sid)
-                result.files_written += partial.files_written
-                result.files_skipped += partial.files_skipped
-                result.errors += partial.errors
-            return result
-
-        # Fallback: gc_uuid is NULL. Extract per-game UUIDs from cached
-        # boxscore files (the other team's UUID in each boxscore).
         result = CrawlResult()
-        any_uuid_found = False
         for sid in season_globs:
-            uuid_map = self._build_boxscore_uuid_map(public_id, sid)
-            if not uuid_map:
-                continue
-            any_uuid_found = True
             games_file = self._data_root / sid / "scouting" / public_id / "games.json"
             if not games_file.exists():
                 continue
-            partial = self._crawl_team_season_with_uuid_map(
-                public_id, uuid_map, games_file, sid,
-            )
+            partial = self._crawl_team_season(public_id, gc_uuid, games_file, sid)
             result.files_written += partial.files_written
             result.files_skipped += partial.files_skipped
             result.errors += partial.errors
-
-        if not any_uuid_found:
-            logger.info(
-                "No gc_uuid and no boxscore UUIDs for opponent public_id=%s; "
-                "skipping spray crawl.",
-                public_id,
-            )
-
         return result
 
     def _crawl_team_season(
@@ -347,156 +315,6 @@ class ScoutingSprayChartCrawler:
                 )
                 result.errors += 1
             except Exception as exc:  # noqa: BLE001 -- broad catch intentional; log and continue
-                logger.error(
-                    "Unexpected error fetching player-stats for event_id=%s public_id=%s: %s",
-                    event_id,
-                    public_id,
-                    exc,
-                )
-                result.errors += 1
-
-        return result
-
-    def _build_boxscore_uuid_map(
-        self,
-        public_id: str,
-        season_id: str,
-    ) -> dict[str, str]:
-        """Build a mapping of event_id -> opponent gc_uuid from cached boxscore files.
-
-        Each scouting boxscore JSON has two top-level keys: one is the scouted
-        team's ``public_id`` slug (not a UUID), the other is the opponent's
-        ``gc_uuid`` (matches UUID regex).  This extracts the UUID key for each
-        boxscore file.
-
-        Args:
-            public_id: The scouted team's ``public_id`` slug.
-            season_id: Season label (e.g., ``"2026-spring-hs"``).
-
-        Returns:
-            Dict mapping ``event_id`` (boxscore filename stem) to the opponent's
-            gc_uuid.  Empty if no boxscore files exist or none contain a UUID key.
-        """
-        boxscores_dir = self._data_root / season_id / "scouting" / public_id / "boxscores"
-        if not boxscores_dir.is_dir():
-            return {}
-
-        uuid_map: dict[str, str] = {}
-        for bs_path in boxscores_dir.glob("*.json"):
-            event_id = bs_path.stem
-            try:
-                with bs_path.open(encoding="utf-8") as fh:
-                    boxscore = json.load(fh)
-            except (json.JSONDecodeError, OSError) as exc:
-                logger.debug(
-                    "Could not read boxscore %s for UUID extraction: %s",
-                    bs_path,
-                    exc,
-                )
-                continue
-
-            if not isinstance(boxscore, dict):
-                continue
-
-            for key in boxscore:
-                # Defensive: guard against theoretical UUID-formatted public_id
-                if _UUID_RE.match(key) and key != public_id:
-                    uuid_map[event_id] = key
-                    break
-
-        if uuid_map:
-            logger.info(
-                "Extracted %d opponent UUIDs from boxscores for public_id=%s season=%s.",
-                len(uuid_map),
-                public_id,
-                season_id,
-            )
-        return uuid_map
-
-    def _crawl_team_season_with_uuid_map(
-        self,
-        public_id: str,
-        uuid_map: dict[str, str],
-        games_file: Path,
-        season_id: str,
-    ) -> CrawlResult:
-        """Fetch spray data using per-game UUIDs from boxscore extraction.
-
-        Similar to ``_crawl_team_season`` but instead of using a single
-        ``gc_uuid`` for all games, looks up each game's UUID from the
-        ``uuid_map``.  Games without a UUID in the map are skipped silently
-        (they simply had no boxscore cached).
-
-        Args:
-            public_id: The opponent's ``public_id`` slug (used for file paths).
-            uuid_map: Mapping of ``event_id`` to the opponent's gc_uuid for
-                      that specific game.
-            games_file: Path to the cached ``games.json`` file.
-            season_id: Season label extracted from the file path.
-
-        Returns:
-            ``CrawlResult`` for this season's games.
-        """
-        result = CrawlResult()
-
-        games_data = self._load_games(games_file)
-        completed = [g for g in games_data if g.get("game_status") == _COMPLETED_STATUS]
-
-        if not completed:
-            return result
-
-        spray_dir = self._data_root / season_id / "scouting" / public_id / "spray"
-
-        for game in completed:
-            event_id = game.get("id")
-            if not event_id:
-                logger.warning(
-                    "Game missing 'id' for public_id=%s season=%s; skipping.",
-                    public_id,
-                    season_id,
-                )
-                result.errors += 1
-                continue
-
-            game_uuid = uuid_map.get(event_id)
-            if game_uuid is None:
-                # No boxscore cached for this game -- skip silently.
-                continue
-
-            dest = spray_dir / f"{event_id}.json"
-
-            if dest.exists():
-                logger.debug(
-                    "Scouting spray file for game %s already cached; skipping.",
-                    event_id,
-                )
-                result.files_skipped += 1
-                continue
-
-            try:
-                data = self._client.get(
-                    f"/teams/{game_uuid}/schedule/events/{event_id}/player-stats",
-                    accept=_PLAYER_STATS_ACCEPT,
-                )
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                dest.write_text(json.dumps(data, indent=2), encoding="utf-8")
-                logger.info(
-                    "Wrote scouting spray chart (fallback) event_id=%s -> %s.",
-                    event_id,
-                    dest,
-                )
-                result.files_written += 1
-            except CredentialExpiredError:
-                raise
-            except GameChangerAPIError as exc:
-                logger.error(
-                    "API error fetching player-stats for event_id=%s public_id=%s: %s",
-                    event_id,
-                    public_id,
-                    exc,
-                )
-                result.errors += 1
-            except Exception as exc:  # noqa: BLE001
                 logger.error(
                     "Unexpected error fetching player-stats for event_id=%s public_id=%s: %s",
                     event_id,

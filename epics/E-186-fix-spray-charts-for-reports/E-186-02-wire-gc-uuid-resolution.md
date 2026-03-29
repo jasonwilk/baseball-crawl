@@ -4,7 +4,7 @@
 [E-186: Fix Spray Charts for Standalone Reports](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the report generator resolves a tracked team's `gc_uuid` via `POST /search` + `public_id` filtering before invoking the spray chart pipeline. The resolved gc_uuid is persisted on the team row and passed to the spray crawler. Reports for teams whose gc_uuid can be resolved now include spray charts.

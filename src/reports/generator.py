@@ -43,6 +43,7 @@ _DATA_ROOT = _REPO_ROOT / "data" / "raw"
 _REPORTS_DIR = _REPO_ROOT / "data" / "reports"
 _EXPIRY_DAYS = 14
 _APP_URL_DEFAULT = "http://localhost:8001"
+_SEARCH_CONTENT_TYPE = "application/vnd.gc.com.post_search+json; version=0.0.0"
 
 
 @dataclass
@@ -405,17 +406,68 @@ def _query_spray_charts(
     return result
 
 
+def _resolve_gc_uuid(
+    client: GameChangerClient,
+    team_name: str,
+    public_id: str,
+) -> str | None:
+    """Resolve a team's gc_uuid via POST /search + public_id filtering.
+
+    Searches for the team by name and filters results for an exact
+    ``public_id`` match.  Returns the matching ``result.id`` (which is
+    the ``progenitor_team_id`` / gc_uuid), or ``None`` if no match.
+
+    ``CredentialExpiredError`` propagates.  All other exceptions are
+    caught and logged as warnings (resolution failure is non-fatal).
+    """
+    try:
+        result = client.post_json(
+            "/search",
+            body={"name": team_name},
+            params={"start_at_page": 0, "search_source": "search"},
+            content_type=_SEARCH_CONTENT_TYPE,
+        )
+        hits = result.get("hits", []) if isinstance(result, dict) else []
+        for hit in hits:
+            r = hit.get("result", {})
+            if r.get("public_id") == public_id:
+                gc_uuid = r.get("id")
+                if gc_uuid:
+                    logger.info(
+                        "Resolved gc_uuid=%s for public_id=%s via search.",
+                        gc_uuid,
+                        public_id,
+                    )
+                    return gc_uuid
+        logger.info(
+            "POST /search returned no hit matching public_id=%s; "
+            "spray charts unavailable.",
+            public_id,
+        )
+        return None
+    except CredentialExpiredError:
+        raise
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "gc_uuid resolution via search failed for public_id=%s; "
+            "continuing without spray charts.",
+            public_id,
+            exc_info=True,
+        )
+        return None
+
+
 def _crawl_and_load_spray(
     client: GameChangerClient,
     public_id: str,
     season_id: str,
+    gc_uuid: str | None = None,
 ) -> None:
     """Delegate spray chart crawl/load to the scouting spray pipeline.
 
     Instantiates ``ScoutingSprayChartCrawler`` and ``ScoutingSprayChartLoader``
-    and runs them for a single opponent/season. The crawler handles
-    ``gc_uuid=NULL`` teams via its boxscore-UUID fallback (E-176-01), so no
-    inline UUID resolution is needed here.
+    and runs them for a single opponent/season.  When ``gc_uuid`` is provided,
+    it is passed directly to the crawler (bypassing the DB lookup).
 
     ``CredentialExpiredError`` propagates to the caller. All other exceptions
     are caught and logged as warnings -- spray failure is non-fatal and the
@@ -425,11 +477,12 @@ def _crawl_and_load_spray(
         client: Authenticated ``GameChangerClient``.
         public_id: The scouted team's ``public_id`` slug.
         season_id: Season slug (e.g., ``"2026-spring-hs"``).
+        gc_uuid: When provided, passed to the crawler to bypass DB lookup.
     """
     try:
         with closing(get_connection()) as conn:
             spray_crawler = ScoutingSprayChartCrawler(client, conn, data_root=_DATA_ROOT)
-            spray_crawler.crawl_team(public_id, season_id=season_id)
+            spray_crawler.crawl_team(public_id, season_id=season_id, gc_uuid=gc_uuid)
 
         with closing(get_connection()) as conn:
             spray_loader = ScoutingSprayChartLoader(conn)
@@ -585,8 +638,28 @@ def generate_report(gc_url: str) -> GenerationResult:
             )
             conn.commit()
 
-        # Step 4b: Spray chart crawl/load via scouting spray pipeline
-        _crawl_and_load_spray(client, public_id, season_id)
+        # Step 4b: Resolve gc_uuid if the team row doesn't have one
+        resolved_gc_uuid: str | None = None
+        with closing(get_connection()) as conn:
+            row = conn.execute(
+                "SELECT gc_uuid FROM teams WHERE id = ?", (team_id,)
+            ).fetchone()
+            existing_gc_uuid = row[0] if row else None
+
+        if existing_gc_uuid:
+            resolved_gc_uuid = existing_gc_uuid
+        elif team_info.get("name"):
+            resolved_gc_uuid = _resolve_gc_uuid(client, team_info["name"], public_id)
+            if resolved_gc_uuid:
+                with closing(get_connection()) as conn:
+                    conn.execute(
+                        "UPDATE teams SET gc_uuid = ? WHERE id = ? AND gc_uuid IS NULL",
+                        (resolved_gc_uuid, team_id),
+                    )
+                    conn.commit()
+
+        # Step 4c: Spray chart crawl/load via scouting spray pipeline
+        _crawl_and_load_spray(client, public_id, season_id, gc_uuid=resolved_gc_uuid)
 
     except CredentialExpiredError:
         msg = "Authentication credentials expired — refresh with `bb creds setup web`"
