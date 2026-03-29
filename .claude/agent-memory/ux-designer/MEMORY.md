@@ -69,6 +69,10 @@ Designed for opponent link state. Uses filled/unfilled dot + colored pill patter
 
 See E-088 design advisory for full HTML/Tailwind markup.
 
+## Feedback
+
+- [Coach async workflow reality](feedback_coach_async_workflow.md) -- Coaches trigger actions and come back later; design for "return" not "wait"
+
 ## Key File Paths
 
 - Base template: `src/api/templates/base.html`
