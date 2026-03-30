@@ -1,7 +1,7 @@
 # IDEA-058: Proper Python Dependency Management via pyproject.toml
 
 ## Status
-`CANDIDATE`
+`PROMOTED` -- promoted to E-190 (2026-03-29)
 
 ## Summary
 `pyproject.toml` declares zero runtime dependencies. Runtime deps (matplotlib, httpx, fastapi, etc.) only exist in `requirements.in`/`requirements.txt`. The Dockerfile installs `requirements.txt` directly so production works, but the devcontainer's `pip install -e .` pulls in nothing -- causing `ModuleNotFoundError` for any runtime dependency not separately installed. The devcontainer hacks around this with `pip install -r requirements-dev.txt` in `postCreateCommand` instead of using Python's packaging system properly.
