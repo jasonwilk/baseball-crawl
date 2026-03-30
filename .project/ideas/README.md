@@ -71,13 +71,13 @@ Review this list every 90 days, or when completing an epic. Ask:
 | [IDEA-050](IDEA-050-spray-chart-hot-cold-zones.md) | Count Overlay / Hot-Cold Zones on Spray Charts | CANDIDATE | 2026-06-25 |
 | [IDEA-051](IDEA-051-spray-chart-title-stats.md) | Title with Stats on Spray Charts | CANDIDATE | 2026-06-25 |
 | [IDEA-052](IDEA-052-familiar-faces-indicator.md) | Familiar Faces Indicator on Opponent Rosters | CANDIDATE | 2026-06-26 |
-| [IDEA-053](IDEA-053-opponent-workflow-fix.md) | Fix Opponent Scouting Workflow End-to-End | CANDIDATE | 2026-06-26 |
+| [IDEA-053](IDEA-053-opponent-workflow-fix.md) | Fix Opponent Scouting Workflow End-to-End | PROMOTED | 2026-03-28 -- delivered by E-173 |
 | [IDEA-054](IDEA-054-worktree-guard-cross-contamination.md) | Worktree Guard Should Prevent Cross-Epic Contamination | CANDIDATE | 2026-06-26 |
 | [IDEA-055](IDEA-055-auto-sync-and-experience-polish.md) | Auto-Sync and Experience Polish | PROMOTED | 2026-06-27 |
 | [IDEA-056](IDEA-056-search-fallback-team-return-bug.md) | Fix _search_fallb
 | [IDEA-057](IDEA-057-report-flow-orphan-team-stubs.md) | Report Flow Orphan Team Stubs | PROMOTED | 2026-03-29 -- promoted to E-188 |
 | [IDEA-058](IDEA-058-pyproject-dependency-management.md) | Proper Python Dependency Management via pyproject.toml | CANDIDATE | 2026-06-27 |
-| [IDEA-059](IDEA-059-opponent-flow-spray-gaps.md) | Opponent Flow Spray Chart and Display Gaps | CANDIDATE | 2026-06-27 |
+| [IDEA-059](IDEA-059-opponent-flow-spray-gaps.md) | Opponent Flow Spray Chart and Display Gaps | PROMOTED | 2026-03-29 -- promoted to E-189 |
 | [IDEA-060](IDEA-060-flow-testing-and-validation.md) | Comprehensive Flow Testing and Validation | CANDIDATE | 2026-06-27 |ack_team Return Type Bug | CANDIDATE | 2026-06-27 |
 
 ## Status Definitions

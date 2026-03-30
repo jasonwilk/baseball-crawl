@@ -1,7 +1,7 @@
 # IDEA-053: Fix Opponent Scouting Workflow End-to-End
 
 ## Status
-`CANDIDATE`
+`PROMOTED` -- Delivered by E-173 (completed 2026-03-28). All scope items (resolution write-through, auto-scout, unified resolve, dashboard sort, terminology cleanup, data repair) were implemented.
 
 ## Summary
 Fix the broken opponent scouting workflow so that resolving an opponent in the admin UI causes stats to appear in the dashboard. Currently, resolution updates `opponent_links` but never propagates to `team_opponents` (which the dashboard queries), leaving coaches with empty scouting reports. Includes: resolution write-through, auto-scout after resolution, unified resolve page, dashboard sort by next game date, terminology cleanup, and one-time data repair.

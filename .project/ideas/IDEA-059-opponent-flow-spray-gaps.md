@@ -1,7 +1,7 @@
 # IDEA-059: Opponent Flow Pipeline and Display Gaps
 
 ## Status
-`CANDIDATE`
+`PROMOTED` -- Promoted to E-189 (2026-03-29)
 
 ## Summary
 The opponent scouting flow (dashboard + `bb data scout`) has four gaps discovered during E-187 evaluation and live testing: (1) the web pipeline (`run_scouting_sync`) has no spray crawl or gc_uuid resolution, (2) the member sync's `_discover_opponents()` auto-resolves opponents but never triggers scouting for them, (3) the three-tier gc_uuid resolver doesn't use public_id filtering, and (4) the dashboard opponent detail page has no data-depth context. The reports flow was fixed by E-186/E-187; the opponent flow was not.
