@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import io
 import logging
+import math
 import re
 
 import matplotlib
@@ -87,7 +88,7 @@ _LEGEND_GRAY = "#888888"
 _PLAY_TYPE_MARKERS: dict[str, str] = {
     "ground_ball": "o",
     "hard_ground_ball": "o",
-    "bunt": "o",
+    "bunt": "v",
     "line_drive": "^",
     "hard_line_drive": "^",
     "fly_ball": "D",
@@ -103,6 +104,83 @@ def _marker_for_play_type(play_type: str | None) -> str:
     if play_type is None:
         return _FALLBACK_MARKER
     return _PLAY_TYPE_MARKERS.get(play_type, _FALLBACK_MARKER)
+
+
+# ---------------------------------------------------------------------------
+# Baseball stat formatting (TN-3)
+# ---------------------------------------------------------------------------
+
+
+def format_baseball_stat(numerator: float, denominator: float) -> str:
+    """Format a rate stat using baseball convention.
+
+    ``.342`` for values < 1.0, ``1.000`` for values >= 1.0.
+    Returns ``"-"`` when denominator is zero.
+    """
+    if not denominator:
+        return "-"
+    val = numerator / denominator
+    if val >= 1.0:
+        return f"{val:.3f}"
+    rounded = round(val * 1000)
+    if rounded >= 1000:
+        return f"{val:.3f}"
+    return f".{rounded:03d}"
+
+
+# ---------------------------------------------------------------------------
+# Field zone classification (TN-4)
+# ---------------------------------------------------------------------------
+# Home plate in SVG space
+_HOME_X = 160
+_HOME_Y = 295
+
+# Equal angular thirds of fair territory (~11.8°)
+ZONE_ANGLE_THRESHOLD = 0.206
+
+
+def classify_field_zone(x: float, y: float) -> str:
+    """Classify a ball-in-play into Left/Center/Right field zone.
+
+    Coordinates are raw API values, transformed to SVG space internally.
+    Returns ``"left"``, ``"center"``, or ``"right"``.
+    """
+    svg_x, svg_y = _raw_to_svg(x, y)
+    dx = svg_x - _HOME_X
+    dy = svg_y - _HOME_Y
+    angle = math.atan2(dx, -dy)
+    if angle < -ZONE_ANGLE_THRESHOLD:
+        return "left"
+    elif angle > ZONE_ANGLE_THRESHOLD:
+        return "right"
+    return "center"
+
+
+# ---------------------------------------------------------------------------
+# Contact type classification (TN-5)
+# ---------------------------------------------------------------------------
+_CONTACT_TYPE_MAP: dict[str, str] = {
+    "ground_ball": "gb",
+    "hard_ground_ball": "gb",
+    "line_drive": "ld",
+    "hard_line_drive": "ld",
+    "fly_ball": "fb",
+    "popup": "pu",
+    "pop_fly": "pu",
+    "pop_up": "pu",
+    "bunt": "bu",
+}
+
+
+def contact_type_label(play_type: str | None) -> str | None:
+    """Map a play_type API value to a contact type category.
+
+    Returns one of ``"gb"``, ``"ld"``, ``"fb"``, ``"pu"``, ``"bu"``,
+    or ``None`` if the play_type is unmapped or None.
+    """
+    if play_type is None:
+        return None
+    return _CONTACT_TYPE_MAP.get(play_type)
 
 
 # ---------------------------------------------------------------------------
@@ -347,12 +425,16 @@ def _draw_legend(ax: plt.Axes) -> None:
         [], [], marker="s", color="none", markerfacecolor=_LEGEND_GRAY,
         markeredgecolor=_LEGEND_GRAY, markersize=5, label="Popup",
     )
+    bu_handle = mlines.Line2D(
+        [], [], marker="v", color="none", markerfacecolor=_LEGEND_GRAY,
+        markeredgecolor=_LEGEND_GRAY, markersize=5, label="Bunt",
+    )
     ax.legend(
-        handles=[gb_handle, ld_handle, fb_handle, pu_handle],
+        handles=[gb_handle, ld_handle, fb_handle, pu_handle, bu_handle],
         loc="lower right",
         fontsize=5,
         framealpha=0.8,
-        ncols=4,
+        ncols=5,
         bbox_to_anchor=(1.0, 0.0),
         handletextpad=0.2,
         columnspacing=0.5,
@@ -390,7 +472,7 @@ def render_spray_chart(
     Returns:
         PNG image as raw bytes.
     """
-    fig, ax = plt.subplots(figsize=(4, 6))
+    fig, ax = plt.subplots(figsize=(3, 4))
     ax.set_facecolor(_BG_COLOR)
     fig.patch.set_facecolor(_BG_COLOR)
     ax.set_xlim(0, 320)

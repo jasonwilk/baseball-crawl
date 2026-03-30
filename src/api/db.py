@@ -2239,6 +2239,49 @@ def get_player_spray_events(
         return [], None
 
 
+def get_players_spray_events_batch(
+    player_ids: list[str],
+    season_id: str,
+) -> dict[str, list[dict[str, Any]]]:
+    """Return raw offensive spray events for multiple players in a single query.
+
+    Args:
+        player_ids: List of GC player UUIDs.
+        season_id:  Season slug to filter events.
+
+    Returns:
+        Dict mapping player_id to list of event dicts (x, y, play_type, play_result).
+        Players with no data are absent from the dict.
+    """
+    if not player_ids:
+        return {}
+    placeholders = ",".join("?" for _ in player_ids)
+    query = (
+        f"SELECT player_id, x, y, play_type, play_result FROM spray_charts "
+        f"WHERE player_id IN ({placeholders}) "
+        f"AND chart_type = 'offensive' AND season_id = ? "
+        f"ORDER BY player_id"
+    )
+    try:
+        with closing(get_connection()) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(query, [*player_ids, season_id]).fetchall()
+        result: dict[str, list[dict[str, Any]]] = {}
+        for row in rows:
+            pid = row["player_id"]
+            if pid not in result:
+                result[pid] = []
+            result[pid].append(dict(row))
+        return result
+    except sqlite3.Error:
+        logger.exception(
+            "Failed to fetch batch spray events for %d players season_id=%s",
+            len(player_ids),
+            season_id,
+        )
+        return {}
+
+
 def get_team_spray_events(
     team_id: int,
     season_id: str | None = None,

@@ -228,9 +228,12 @@ class TestSprayCharts:
         # Mock render_spray_chart to avoid matplotlib rendering in tests.
         # src.charts.spray has a top-level matplotlib import, so inject a
         # mock module into sys.modules before patching the function.
+        from src.charts.spray import classify_field_zone, contact_type_label
         fake_png = b"\x89PNG_FAKE_DATA"
         mock_spray_mod = MagicMock()
         mock_spray_mod.render_spray_chart = MagicMock(return_value=fake_png)
+        mock_spray_mod.classify_field_zone = classify_field_zone
+        mock_spray_mod.contact_type_label = contact_type_label
         with patch.dict("sys.modules", {"src.charts.spray": mock_spray_mod}):
             html = render_report(data)
 
@@ -475,8 +478,11 @@ class TestEdgeCases:
         ]
         data = _make_full_data(batting=[batter], spray_charts={42: events})
 
+        from src.charts.spray import classify_field_zone, contact_type_label
         mock_spray_mod = MagicMock()
         mock_spray_mod.render_spray_chart = MagicMock(side_effect=RuntimeError("render failed"))
+        mock_spray_mod.classify_field_zone = classify_field_zone
+        mock_spray_mod.contact_type_label = contact_type_label
         with patch.dict("sys.modules", {"src.charts.spray": mock_spray_mod}):
             html = render_report(data)
 
@@ -837,26 +843,115 @@ class TestKeyPlayers:
 
 
 class TestSprayPlayerStats:
-    def test_basic(self):
-        spray = {"p1": [{"x": 1, "y": 1}] * 5}
-        lookup = {"p1": {"h": 10, "ab": 30, "_pa": 35}}
+    def _lookup(self, **overrides):
+        base = {
+            "h": 10, "ab": 30, "bb": 5, "hbp": 1, "shf": 0,
+            "doubles": 2, "triples": 1, "hr": 1, "_pa": 36,
+            "jersey_number": "24",
+        }
+        base.update(overrides)
+        return base
+
+    def _events(self, n=5):
+        """Create n events with distinct play_types and coordinates."""
+        types = ["ground_ball", "line_drive", "fly_ball", "popup", "bunt"]
+        return [
+            {"x": 100.0 + i * 30, "y": 100.0, "play_result": "single",
+             "play_type": types[i % len(types)]}
+            for i in range(n)
+        ]
+
+    def test_basic_fields(self):
+        spray = {"p1": self._events(5)}
+        lookup = {"p1": self._lookup()}
         result = _build_spray_player_stats(spray, lookup)
         assert result["p1"]["bip_count"] == 5
-        assert result["p1"]["pa"] == 35
+        assert result["p1"]["pa"] == 36
         assert result["p1"]["avg"] == ".333"
+        assert result["p1"]["jersey_number"] == "24"
+
+    def test_obp_slg_computation(self):
+        # h=10, bb=5, hbp=1, shf=0 -> OBP = 16/36 = .444
+        # tb = 10 + 2 + 2*1 + 3*1 = 17, ab=30 -> SLG = 17/30 = .567 (rounds to .567)
+        spray = {"p1": self._events(3)}
+        lookup = {"p1": self._lookup()}
+        result = _build_spray_player_stats(spray, lookup)
+        assert result["p1"]["obp"] == ".444"
+        assert result["p1"]["slg"] == ".567"
+
+    def test_zone_counts(self):
+        spray = {"p1": self._events(5)}
+        lookup = {"p1": self._lookup()}
+        result = _build_spray_player_stats(spray, lookup)
+        zones = result["p1"]["zones"]
+        assert set(zones.keys()) == {"left", "center", "right"}
+        assert sum(zones.values()) == 5  # all events have x,y
+
+    def test_contact_counts(self):
+        spray = {"p1": self._events(5)}
+        lookup = {"p1": self._lookup()}
+        result = _build_spray_player_stats(spray, lookup)
+        contacts = result["p1"]["contacts"]
+        assert set(contacts.keys()) == {"gb", "ld", "fb", "pu", "bu"}
+        # 5 events cycling through types: 1 each
+        assert contacts["gb"] == 1
+        assert contacts["ld"] == 1
+        assert contacts["fb"] == 1
+        assert contacts["pu"] == 1
+        assert contacts["bu"] == 1
 
     def test_missing_batter(self):
-        spray = {"p2": [{"x": 1, "y": 1}] * 3}
+        spray = {"p2": [{"x": 1.0, "y": 1.0, "play_result": "single", "play_type": "ground_ball"}] * 3}
         result = _build_spray_player_stats(spray, {})
         assert result["p2"]["avg"] == "-"
+        assert result["p2"]["obp"] == "-"
+        assert result["p2"]["slg"] == "-"
         assert result["p2"]["pa"] == 0
         assert result["p2"]["bip_count"] == 3
+        assert result["p2"]["jersey_number"] is None
 
     def test_empty_events(self):
         spray = {"p1": []}
-        lookup = {"p1": {"h": 5, "ab": 20, "_pa": 25}}
+        lookup = {"p1": self._lookup()}
         result = _build_spray_player_stats(spray, lookup)
         assert result["p1"]["bip_count"] == 0
+        assert result["p1"]["zones"] == {"left": 0, "center": 0, "right": 0}
+        assert result["p1"]["contacts"] == {"gb": 0, "ld": 0, "fb": 0, "pu": 0, "bu": 0}
+
+    def test_none_coords_excluded_from_zones(self):
+        events = [
+            {"x": None, "y": None, "play_result": "single", "play_type": "ground_ball"},
+            {"x": 160.0, "y": 100.0, "play_result": "single", "play_type": "ground_ball"},
+        ]
+        spray = {"p1": events}
+        lookup = {"p1": self._lookup()}
+        result = _build_spray_player_stats(spray, lookup)
+        assert sum(result["p1"]["zones"].values()) == 1
+
+    def test_unmapped_play_type_excluded_from_contacts(self):
+        events = [
+            {"x": 160.0, "y": 100.0, "play_result": "single", "play_type": "unknown_type"},
+            {"x": 160.0, "y": 100.0, "play_result": "single", "play_type": None},
+            {"x": 160.0, "y": 100.0, "play_result": "single", "play_type": "ground_ball"},
+        ]
+        spray = {"p1": events}
+        lookup = {"p1": self._lookup()}
+        result = _build_spray_player_stats(spray, lookup)
+        assert sum(result["p1"]["contacts"].values()) == 1  # only ground_ball
+
+    def test_zero_ab_returns_dash_for_avg_slg(self):
+        spray = {"p1": self._events(3)}
+        lookup = {"p1": self._lookup(ab=0, h=0)}
+        result = _build_spray_player_stats(spray, lookup)
+        assert result["p1"]["avg"] == "-"
+        assert result["p1"]["slg"] == "-"
+
+    def test_baseball_formatting_convention(self):
+        # 3/3 = 1.000 (not .999 or similar)
+        spray = {"p1": self._events(3)}
+        lookup = {"p1": self._lookup(h=3, ab=3, bb=0, hbp=0, shf=0, doubles=0, triples=0, hr=0)}
+        result = _build_spray_player_stats(spray, lookup)
+        assert result["p1"]["avg"] == "1.000"
 
 
 # ---------------------------------------------------------------------------

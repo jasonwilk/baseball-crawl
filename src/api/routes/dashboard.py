@@ -1528,6 +1528,24 @@ async def opponent_detail(request: Request, opponent_team_id: int) -> Response:
         db.get_player_spray_bip_counts, batting_player_ids, season_id
     )
 
+    # Classify team-level spray events for zone/contact stats below team chart.
+    team_spray_events_od, _ = await run_in_threadpool(
+        db.get_team_spray_events, opponent_team_id, season_id
+    )
+    from src.charts.spray import classify_field_zone, contact_type_label
+
+    team_spray_zones: dict[str, int] = {"left": 0, "center": 0, "right": 0}
+    team_spray_contacts: dict[str, int] = {"gb": 0, "ld": 0, "fb": 0, "pu": 0, "bu": 0}
+    for ev in team_spray_events_od:
+        x = ev.get("x")
+        y = ev.get("y")
+        if x is not None and y is not None:
+            zone = classify_field_zone(x, y)
+            team_spray_zones[zone] += 1
+        ct = contact_type_label(ev.get("play_type"))
+        if ct:
+            team_spray_contacts[ct] += 1
+
     logger.debug(
         "Opponent detail: opponent=%s season_id=%s empty_state=%s bat_sort=%s pit_sort=%s",
         opponent_team_id, season_id, empty_state, bat_sort, pit_sort,
@@ -1558,6 +1576,8 @@ async def opponent_detail(request: Request, opponent_team_id: int) -> Response:
             "game_count": game_count,
             "team_spray_bip_count": team_spray_bip_count,
             "player_spray_bip_counts": player_spray_bip_counts,
+            "team_spray_zones": team_spray_zones,
+            "team_spray_contacts": team_spray_contacts,
         },
     )
 
@@ -1661,11 +1681,63 @@ async def opponent_print(request: Request, opponent_team_id: int) -> Response:
     today = datetime.date.today()
     print_date = f"{today.strftime('%B')} {today.day}, {today.year}"
 
-    # Per-player spray BIP counts for the Batter Tendencies grid.
-    batting_player_ids_pr = [p["player_id"] for p in scouting_report.get("batting", [])]
-    player_spray_bip_counts_pr: dict[str, int] = await run_in_threadpool(
-        db.get_player_spray_bip_counts, batting_player_ids_pr, season_id
+    # Per-player spray events for the Batter Tendencies grid.
+    batting_list_pr = scouting_report.get("batting", [])
+    batting_player_ids_pr = [p["player_id"] for p in batting_list_pr]
+    player_spray_events_pr: dict[str, list[dict]] = await run_in_threadpool(
+        db.get_players_spray_events_batch, batting_player_ids_pr, season_id
     )
+
+    # Build per-player BIP counts (backward compat) and enriched spray stats.
+    player_spray_bip_counts_pr: dict[str, int] = {
+        pid: len(evts) for pid, evts in player_spray_events_pr.items()
+    }
+
+    # Build enriched stats dict for all batters.
+    from src.charts.spray import classify_field_zone, contact_type_label, format_baseball_stat
+
+    tendency_stats_pr: dict[str, dict] = {}
+    for player in batting_list_pr:
+        pid = player["player_id"]
+        h = player.get("h") or 0
+        ab = player.get("ab") or 0
+        bb = player.get("bb") or 0
+        hbp = player.get("hbp") or 0
+        shf = player.get("shf") or 0
+        doubles = player.get("doubles") or 0
+        triples = player.get("triples") or 0
+        hr = player.get("hr") or 0
+        pa = player.get("_pa", 0)
+
+        # OBP/SLG recomputed from raw fields per TN-3
+        obp_denom = ab + bb + hbp + shf
+        avg = format_baseball_stat(h, ab)
+        obp = format_baseball_stat(h + bb + hbp, obp_denom)
+        slg = format_baseball_stat(h + doubles + 2 * triples + 3 * hr, ab)
+
+        events = player_spray_events_pr.get(pid, [])
+        zones: dict[str, int] = {"left": 0, "center": 0, "right": 0}
+        contacts: dict[str, int] = {"gb": 0, "ld": 0, "fb": 0, "pu": 0, "bu": 0}
+        for ev in events:
+            x = ev.get("x")
+            y = ev.get("y")
+            if x is not None and y is not None:
+                zone = classify_field_zone(x, y)
+                zones[zone] += 1
+            ct = contact_type_label(ev.get("play_type"))
+            if ct:
+                contacts[ct] += 1
+
+        tendency_stats_pr[pid] = {
+            "avg": avg,
+            "obp": obp,
+            "slg": slg,
+            "pa": pa,
+            "bip_count": len(events),
+            "jersey_number": player.get("jersey_number"),
+            "zones": zones,
+            "contacts": contacts,
+        }
 
     logger.debug(
         "Opponent print: opponent=%s season_id=%s empty_state=%s",
@@ -1688,6 +1760,7 @@ async def opponent_print(request: Request, opponent_team_id: int) -> Response:
             "empty_state": empty_state,
             "print_date": print_date,
             "player_spray_bip_counts": player_spray_bip_counts_pr,
+            "tendency_stats": tendency_stats_pr,
         },
     )
 
@@ -1997,11 +2070,28 @@ async def player_profile(request: Request, player_id: str) -> Response:
         spray_season_id = pitching_seasons[0]["season_id"]
 
     if spray_season_id is not None:
-        spray_bip_count: int = await run_in_threadpool(
-            db.get_player_spray_bip_count, player_id, spray_season_id
+        spray_events_pp, _ = await run_in_threadpool(
+            db.get_player_spray_events, player_id, spray_season_id
         )
+        spray_bip_count: int = len(spray_events_pp)
     else:
+        spray_events_pp = []
         spray_bip_count = 0
+
+    # Classify spray events into zones and contact types.
+    from src.charts.spray import classify_field_zone, contact_type_label
+
+    spray_zones: dict[str, int] = {"left": 0, "center": 0, "right": 0}
+    spray_contacts: dict[str, int] = {"gb": 0, "ld": 0, "fb": 0, "pu": 0, "bu": 0}
+    for ev in spray_events_pp:
+        x = ev.get("x")
+        y = ev.get("y")
+        if x is not None and y is not None:
+            zone = classify_field_zone(x, y)
+            spray_zones[zone] += 1
+        ct = contact_type_label(ev.get("play_type"))
+        if ct:
+            spray_contacts[ct] += 1
 
     logger.debug("Player profile: player_id=%s", player_id)
 
@@ -2022,6 +2112,8 @@ async def player_profile(request: Request, player_id: str) -> Response:
             "user": user,
             "spray_bip_count": spray_bip_count,
             "spray_season_id": spray_season_id,
+            "spray_zones": spray_zones,
+            "spray_contacts": spray_contacts,
         },
     )
 
@@ -2058,12 +2150,12 @@ async def player_spray_chart_image(
     if not permitted_teams:
         return HTMLResponse(content="Forbidden", status_code=403)
 
-    events, title = await run_in_threadpool(db.get_player_spray_events, player_id, season_id)
+    events, _title = await run_in_threadpool(db.get_player_spray_events, player_id, season_id)
 
     if not events:
         return Response(status_code=204)
 
-    png_bytes: bytes = await run_in_threadpool(render_spray_chart, events, title)
+    png_bytes: bytes = await run_in_threadpool(render_spray_chart, events, None)
     return Response(content=png_bytes, media_type="image/png")
 
 

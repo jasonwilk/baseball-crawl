@@ -2728,8 +2728,8 @@ class TestPlayerSprayChartImage:
         response = client.get("/dashboard/charts/spray/player/gc-p-001.png")
         assert response.status_code == 200
 
-    def test_image_route_title_is_player_full_name(self, spray_chart_client) -> None:
-        """render_spray_chart is called with title '{first_name} {last_name}' (AC-7)."""
+    def test_image_route_title_is_none(self, spray_chart_client) -> None:
+        """render_spray_chart is called with title=None (E-194 TN-11: global title removal)."""
         client, _ = spray_chart_client
         with patch("src.api.routes.dashboard.render_spray_chart") as mock_render:
             mock_render.return_value = b"\x89PNG\r\n\x1a\n" + b"\x00" * 100
@@ -2738,7 +2738,7 @@ class TestPlayerSprayChartImage:
             )
         mock_render.assert_called_once()
         _, called_title = mock_render.call_args.args
-        assert called_title == "Marcus Whitehorse"
+        assert called_title is None
 
 
 class TestPlayerProfileSprayCard:
@@ -2814,6 +2814,26 @@ class TestPlayerProfileSprayCard:
         response = client.get("/dashboard/players/gc-p-nostats")
         assert "No spray chart data available" in response.text
         assert "Charts will appear after the next sync." not in response.text
+
+    def test_spray_chart_card_shows_zone_stats(self, spray_chart_client) -> None:
+        """E-194-04: Player profile spray card shows Left/Ctr/Right zone counts."""
+        client, _ = spray_chart_client
+        response = client.get("/dashboard/players/gc-p-001")
+        body = response.text
+        assert "Left" in body
+        assert "Ctr" in body
+        assert "Right" in body
+
+    def test_spray_chart_card_shows_contact_stats(self, spray_chart_client) -> None:
+        """E-194-04: Player profile spray card shows GB/LD/FB/PU/BU contact counts."""
+        client, _ = spray_chart_client
+        response = client.get("/dashboard/players/gc-p-001")
+        body = response.text
+        assert "GB" in body
+        assert "LD" in body
+        assert "FB" in body
+        assert "PU" in body
+        assert "BU" in body
 
 
 # ---------------------------------------------------------------------------
@@ -3146,3 +3166,20 @@ class TestOpponentDetailSprayCard:
         response = self._get_opponent_detail(client, lsb_team_id, opp_team_id)
         # opp-p-002 has 5 BIP — under TN-5 (≥1), the link must appear
         assert "/dashboard/charts/spray/player/opp-p-002.png" in response.text
+
+    def test_team_spray_card_shows_zone_stats(self, opp_spray_client) -> None:
+        """E-194-04: Opponent detail team spray card shows Left/Ctr/Right zone counts."""
+        client, lsb_team_id, opp_team_id = opp_spray_client
+        response = self._get_opponent_detail(client, lsb_team_id, opp_team_id)
+        body = response.text
+        assert "Left" in body
+        assert "Ctr" in body
+        assert "Right" in body
+
+    def test_team_spray_card_shows_contact_stats(self, opp_spray_client) -> None:
+        """E-194-04: Opponent detail team spray card shows contact type counts."""
+        client, lsb_team_id, opp_team_id = opp_spray_client
+        response = self._get_opponent_detail(client, lsb_team_id, opp_team_id)
+        body = response.text
+        assert "GB" in body
+        assert "BU" in body

@@ -1272,6 +1272,191 @@ class TestComputePitchingHeat:
         assert pitching[-1]["_heat"] == {"era": 0, "k9": 0, "whip": 0}
 
 
+# ---------------------------------------------------------------------------
+# E-194-03: get_players_spray_events_batch and tendency_stats enrichment
+# ---------------------------------------------------------------------------
+
+
+def _insert_spray_event(
+    conn: sqlite3.Connection,
+    player_id: str,
+    team_id: int,
+    game_id: str,
+    season_id: str = _SEASON_ID,
+    x: float | None = 160.0,
+    y: float | None = 100.0,
+    play_type: str = "ground_ball",
+    play_result: str = "single",
+) -> None:
+    conn.execute(
+        "INSERT INTO spray_charts"
+        " (player_id, team_id, game_id, season_id, chart_type, x, y, play_type, play_result)"
+        " VALUES (?, ?, ?, ?, 'offensive', ?, ?, ?, ?)",
+        (player_id, team_id, game_id, season_id, x, y, play_type, play_result),
+    )
+    conn.commit()
+
+
+class TestGetPlayersSprayEventsBatch:
+    """Tests for db.get_players_spray_events_batch."""
+
+    def test_returns_events_grouped_by_player(self, tmp_path):
+        db_path = _make_db(tmp_path)
+        with sqlite3.connect(str(db_path)) as conn:
+            conn.execute("PRAGMA foreign_keys=ON")
+            opp_id = _insert_opponent_team(conn, "Test Team")
+            _insert_season(conn)
+            member_id = _insert_member_team(conn)
+            _insert_game(conn, "g-spray-1", member_id, opp_id)
+            _insert_player(conn, "p1", "A", "One")
+            _insert_player(conn, "p2", "B", "Two")
+            _insert_spray_event(conn, "p1", opp_id, "g-spray-1", play_type="ground_ball")
+            _insert_spray_event(conn, "p1", opp_id, "g-spray-1", play_type="fly_ball")
+            _insert_spray_event(conn, "p2", opp_id, "g-spray-1", play_type="line_drive")
+
+        from src.api import db as _db
+        env = {"DATABASE_PATH": str(db_path)}
+        with patch.dict("os.environ", env):
+            result = _db.get_players_spray_events_batch(["p1", "p2"], _SEASON_ID)
+
+        assert "p1" in result
+        assert "p2" in result
+        assert len(result["p1"]) == 2
+        assert len(result["p2"]) == 1
+        # Each event has the expected keys
+        ev = result["p1"][0]
+        assert "x" in ev and "y" in ev and "play_type" in ev and "play_result" in ev
+
+    def test_empty_player_ids(self, tmp_path):
+        from src.api import db as _db
+        db_path = _make_db(tmp_path)
+        env = {"DATABASE_PATH": str(db_path)}
+        with patch.dict("os.environ", env):
+            result = _db.get_players_spray_events_batch([], _SEASON_ID)
+        assert result == {}
+
+    def test_no_data_returns_empty(self, tmp_path):
+        from src.api import db as _db
+        db_path = _make_db(tmp_path)
+        with sqlite3.connect(str(db_path)) as conn:
+            conn.execute("PRAGMA foreign_keys=ON")
+            _insert_season(conn)
+        env = {"DATABASE_PATH": str(db_path)}
+        with patch.dict("os.environ", env):
+            result = _db.get_players_spray_events_batch(["nonexistent"], _SEASON_ID)
+        assert result == {}
+
+    def test_cross_season_filtering(self, tmp_path):
+        """Only events for the requested season are returned."""
+        from src.api import db as _db
+        other_season = "2025-spring-hs"
+        db_path = _make_db(tmp_path)
+        with sqlite3.connect(str(db_path)) as conn:
+            conn.execute("PRAGMA foreign_keys=ON")
+            opp_id = _insert_opponent_team(conn, "Test Team")
+            _insert_season(conn, _SEASON_ID)
+            _insert_season(conn, other_season)
+            member_id = _insert_member_team(conn)
+            _insert_game(conn, "g-cs-1", member_id, opp_id)
+            _insert_player(conn, "p1", "A", "One")
+            _insert_spray_event(conn, "p1", opp_id, "g-cs-1", season_id=_SEASON_ID, play_type="ground_ball")
+            _insert_spray_event(conn, "p1", opp_id, "g-cs-1", season_id=_SEASON_ID, play_type="fly_ball")
+            _insert_spray_event(conn, "p1", opp_id, "g-cs-1", season_id=other_season, play_type="line_drive")
+
+        env = {"DATABASE_PATH": str(db_path)}
+        with patch.dict("os.environ", env):
+            current = _db.get_players_spray_events_batch(["p1"], _SEASON_ID)
+            other = _db.get_players_spray_events_batch(["p1"], other_season)
+
+        assert len(current["p1"]) == 2
+        assert len(other["p1"]) == 1
+        assert other["p1"][0]["play_type"] == "line_drive"
+
+
+class TestTendencyStatsEnrichment:
+    """Tests for the tendency_stats enrichment logic in the opponent print route."""
+
+    def test_enriched_stats_in_print_response(self, tmp_path):
+        """Full stats print view includes enriched tendency card data."""
+        db_path, member_id, opp_id, _ = _make_full_db(tmp_path)
+        # Add spray events for one batter
+        with sqlite3.connect(str(db_path)) as conn:
+            conn.execute("PRAGMA foreign_keys=ON")
+            _insert_spray_event(conn, "opp-bat-1", opp_id, "g-001", play_type="ground_ball", x=0.0, y=100.0)
+            _insert_spray_event(conn, "opp-bat-1", opp_id, "g-001", play_type="fly_ball", x=300.0, y=100.0)
+            _insert_spray_event(conn, "opp-bat-1", opp_id, "g-001", play_type="bunt", x=160.0, y=100.0)
+        env = {"DATABASE_PATH": str(db_path), "DEV_USER_EMAIL": _USER_EMAIL}
+        with patch.dict("os.environ", env):
+            with TestClient(app) as client:
+                resp = client.get(
+                    f"/dashboard/opponents/{opp_id}/print",
+                    params={"team_id": member_id, "season_id": _SEASON_ID},
+                )
+        assert resp.status_code == 200
+        body = resp.text
+        # Card should contain slash line stats
+        assert "AVG" in body
+        assert "OBP" in body
+        assert "SLG" in body
+        # Direction row
+        assert "Left" in body
+        assert "Ctr" in body
+        assert "Right" in body
+        # Contact row
+        assert "GB" in body
+        assert "BU" in body
+
+    def test_zero_bip_player_shows_empty_placeholder(self, tmp_path):
+        """Player with 0 BIP gets card with placeholder, no direction/contact rows."""
+        db_path, member_id, opp_id, _ = _make_full_db(tmp_path)
+        # No spray events inserted for any player
+        env = {"DATABASE_PATH": str(db_path), "DEV_USER_EMAIL": _USER_EMAIL}
+        with patch.dict("os.environ", env):
+            with TestClient(app) as client:
+                resp = client.get(
+                    f"/dashboard/opponents/{opp_id}/print",
+                    params={"team_id": member_id, "season_id": _SEASON_ID},
+                )
+        assert resp.status_code == 200
+        body = resp.text
+        assert "No spray chart data available" in body
+        # Slash line still present for 0-BIP players
+        assert "AVG" in body
+        assert "PA" in body
+
+    def test_tendency_card_css_classes(self, tmp_path):
+        """Print view uses .tendency-card-* CSS classes per TN-7."""
+        db_path, member_id, opp_id, _ = _make_full_db(tmp_path)
+        env = {"DATABASE_PATH": str(db_path), "DEV_USER_EMAIL": _USER_EMAIL}
+        with patch.dict("os.environ", env):
+            with TestClient(app) as client:
+                resp = client.get(
+                    f"/dashboard/opponents/{opp_id}/print",
+                    params={"team_id": member_id, "season_id": _SEASON_ID},
+                )
+        assert resp.status_code == 200
+        body = resp.text
+        assert "tendency-card-identity" in body
+        assert "tendency-card-slash" in body
+        assert "tendency-card-pa" in body
+        assert "tendency-card-empty" in body
+
+    def test_flexbox_layout_in_print(self, tmp_path):
+        """Tendencies grid uses flexbox, not CSS Grid."""
+        db_path, member_id, opp_id, _ = _make_full_db(tmp_path)
+        env = {"DATABASE_PATH": str(db_path), "DEV_USER_EMAIL": _USER_EMAIL}
+        with patch.dict("os.environ", env):
+            with TestClient(app) as client:
+                resp = client.get(
+                    f"/dashboard/opponents/{opp_id}/print",
+                    params={"team_id": member_id, "season_id": _SEASON_ID},
+                )
+        assert resp.status_code == 200
+        body = resp.text
+        assert "display: flex" in body
+        assert "flex-wrap: wrap" in body
+
+
 class TestOpponentDetailPABadges:
     """E-189-04: PA/IP badges render in HTML output."""
 

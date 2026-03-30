@@ -212,6 +212,12 @@
          alt="Spray chart for {{ player.first_name }} {{ player.last_name }}"
          class="w-full block">
   </button>
+  <div class="text-sm font-semibold text-gray-700 mt-2">
+    Left <span class="font-bold">{{ spray_zones.left }}</span> &nbsp; Ctr <span class="font-bold">{{ spray_zones.center }}</span> &nbsp; Right <span class="font-bold">{{ spray_zones.right }}</span>
+  </div>
+  <div class="text-xs text-gray-500 mt-1">
+    {{ spray_contacts.gb }}GB &middot; {{ spray_contacts.ld }}LD &middot; {{ spray_contacts.fb }}FB &middot; {{ spray_contacts.pu }}PU &middot; {{ spray_contacts.bu }}BU
+  </div>
   {% else %}
   <p class="text-sm text-gray-600">No spray chart data available</p>
   {% endif %}

@@ -315,6 +315,12 @@ Scout: {{ scouting_report.team_name if scouting_report else opponent_team_id }}
          alt="Team spray chart"
          class="w-full block">
   </button>
+  <div class="text-sm font-semibold text-gray-700 mt-2">
+    Left <span class="font-bold">{{ team_spray_zones.left }}</span> &nbsp; Ctr <span class="font-bold">{{ team_spray_zones.center }}</span> &nbsp; Right <span class="font-bold">{{ team_spray_zones.right }}</span>
+  </div>
+  <div class="text-xs text-gray-500 mt-1">
+    {{ team_spray_contacts.gb }}GB &middot; {{ team_spray_contacts.ld }}LD &middot; {{ team_spray_contacts.fb }}FB &middot; {{ team_spray_contacts.pu }}PU &middot; {{ team_spray_contacts.bu }}BU
+  </div>
   {% else %}
   <p class="text-sm text-gray-600">No spray chart data available</p>
   {% endif %}

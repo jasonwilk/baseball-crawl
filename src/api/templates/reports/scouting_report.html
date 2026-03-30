@@ -202,26 +202,56 @@
       margin: 0 auto;
     }
     .spray-grid {
-      display: grid;
-      grid-template-columns: repeat(2, 1fr);
+      display: flex;
+      flex-wrap: wrap;
       gap: 8px;
     }
     .spray-card {
-      border: 1px solid #ddd;
-      padding: 6px;
+      flex: 0 0 calc(33.333% - 6px);
+      border: 1px solid #d1d5db;
+      padding: 6px 8px;
       text-align: center;
       break-inside: avoid;
       page-break-inside: avoid;
     }
-    .spray-card-name {
-      font-size: 8.5pt;
-      font-weight: bold;
-      margin-bottom: 2px;
+    .spray-card-identity {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
-    .spray-card-stats {
-      font-size: 7.5pt;
+    .spray-card-jersey {
+      font-size: 11pt;
+      font-weight: 900;
+      color: #1e3a5f;
+      margin-right: 4px;
+    }
+    .spray-card-name {
+      font-size: 11pt;
+      font-weight: 700;
+      color: #111;
+    }
+    .spray-card-slash {
+      font-size: 9pt;
+      color: #374151;
+    }
+    .spray-card-pa {
+      display: inline-block;
+      font-size: 8pt;
+      font-weight: 600;
       color: #6b7280;
-      margin-bottom: 4px;
+      background: #f3f4f6;
+      border-radius: 3px;
+      padding: 0 3px;
+      margin: 2px 0;
+    }
+    .spray-card-direction {
+      font-size: 8.5pt;
+      color: #374151;
+    }
+    .spray-card-contact {
+      font-size: 8pt;
+      color: #6b7280;
+      font-weight: 500;
     }
     .spray-card img {
       width: 100%;
@@ -279,12 +309,10 @@
       .screen-only { display: none !important; }
       table { page-break-inside: avoid; }
       .spray-section { page-break-before: always; }
-      .spray-card { width: calc(25% - 5px); break-inside: avoid; page-break-inside: avoid; padding: 4px; }
+      .spray-grid { gap: 6px; }
+      .spray-card { break-inside: avoid; page-break-inside: avoid; }
       tr { page-break-inside: avoid; }
       .section-header { page-break-after: avoid; }
-      .spray-grid { display: flex; flex-wrap: wrap; gap: 6px; }
-      .spray-card-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-      .spray-card-stats { display: none; }
     }
 
     /* ---- Mobile responsive (TN-11) ---- */
@@ -484,17 +512,22 @@
   </div>
   {% endif %}
 
-  {# Individual player spray charts -- 2-per-row (AC-10) #}
+  {# Individual player spray charts -- 3-per-row flexbox (TN-6, TN-8) #}
   {% if has_spray %}
   <div class="spray-grid">
     {% for player_id, data_uri in spray_data.items() %}
+    {% set pstats = spray_player_stats.get(player_id, {}) %}
     <div class="spray-card">
-      {% set pstats = spray_player_stats.get(player_id, {}) %}
-      <div class="spray-card-name">
-        {% set _name = [] %}{% for p in batting if p.player_id == player_id %}{% if _name.append(p.name) %}{% endif %}{% endfor %}{{ (_name[0] | e) if _name else ("Player " ~ player_id) }}
+      <div class="spray-card-identity">
+        {% if pstats.get("jersey_number") %}<span class="spray-card-jersey">#{{ pstats.jersey_number }}</span>{% endif %}<span class="spray-card-name">{% set _name = [] %}{% for p in batting if p.player_id == player_id %}{% if _name.append(p.name) %}{% endif %}{% endfor %}{{ (_name[0] | e) if _name else ("Player " ~ player_id) }}</span>
       </div>
-      <div class="spray-card-stats">{{ pstats.get("avg", "-") }} AVG &middot; {{ pstats.get("pa", 0) }} PA &middot; {{ pstats.get("bip_count", 0) }} BIP</div>
+      <div class="spray-card-slash"><b>{{ pstats.get("avg", "-") }}</b> AVG  <b>{{ pstats.get("obp", "-") }}</b> OBP  <b>{{ pstats.get("slg", "-") }}</b> SLG</div>
+      <div><span class="spray-card-pa">{{ pstats.get("pa", 0) }} PA</span></div>
       <img src="{{ data_uri }}" alt="Spray chart">
+      {% set zones = pstats.get("zones", {}) %}
+      <div class="spray-card-direction">Left <b>{{ zones.get("left", 0) }}</b>  Ctr <b>{{ zones.get("center", 0) }}</b>  Right <b>{{ zones.get("right", 0) }}</b></div>
+      {% set contacts = pstats.get("contacts", {}) %}
+      <div class="spray-card-contact">{{ contacts.get("gb", 0) }}GB  {{ contacts.get("ld", 0) }}LD  {{ contacts.get("fb", 0) }}FB  {{ contacts.get("pu", 0) }}PU  {{ contacts.get("bu", 0) }}BU</div>
     </div>
     {% endfor %}
   </div>

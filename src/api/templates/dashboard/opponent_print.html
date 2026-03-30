@@ -119,31 +119,64 @@
     /* ---- Spray chart grid ---- */
     .tendencies-section { margin-top: 12px; }
     .tendencies-grid {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
+      display: flex;
+      flex-wrap: wrap;
       gap: 8px;
     }
     .tendency-card {
-      border: 1px solid #ddd;
-      padding: 6px;
+      flex: 0 0 calc(33.333% - 6px);
+      border: 1px solid #d1d5db;
+      padding: 6px 8px;
       text-align: center;
       break-inside: avoid;
+      page-break-inside: avoid;
+    }
+    .tendency-card-identity {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .tendency-card-jersey {
+      font-size: 11pt;
+      font-weight: 900;
+      color: #1e3a5f;
+      margin-right: 4px;
     }
     .tendency-card-name {
-      font-size: 8.5pt;
-      font-weight: bold;
-      margin-bottom: 4px;
+      font-size: 11pt;
+      font-weight: 700;
+      color: #111;
     }
-    .spray-placeholder {
-      width: 160px;
-      height: 160px;
-      border: 1px solid #ccc;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      margin: 0 auto;
-      color: #999;
+    .tendency-card-slash {
+      font-size: 9pt;
+      color: #374151;
+    }
+    .tendency-card-pa {
+      display: inline-block;
       font-size: 8pt;
+      font-weight: 600;
+      color: #6b7280;
+      background: #f3f4f6;
+      border-radius: 3px;
+      padding: 0 3px;
+      margin: 2px 0;
+    }
+    .tendency-card-direction {
+      font-size: 8.5pt;
+      color: #374151;
+    }
+    .tendency-card-contact {
+      font-size: 8pt;
+      color: #6b7280;
+      font-weight: 500;
+    }
+    .tendency-card-empty {
+      font-size: 8pt;
+      color: #999;
+    }
+    .tendency-card img {
+      width: 100%;
+      display: block;
     }
 
     /* ---- Footer ---- */
@@ -162,9 +195,8 @@
       .screen-only { display: none !important; }
       .tendencies-section { page-break-before: always; }
       tr { page-break-inside: avoid; }
-      .tendencies-grid { display: flex; flex-wrap: wrap; gap: 6px; }
-      .tendency-card { width: calc(25% - 5px); break-inside: avoid; page-break-inside: avoid; padding: 4px; }
-      .tendency-card-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .tendencies-grid { gap: 6px; }
+      .tendency-card { break-inside: avoid; page-break-inside: avoid; }
     }
   </style>
 </head>
@@ -328,21 +360,26 @@
 <p>No batting data available.</p>
 {% endif %}
 
-{# Batter Tendencies — spray chart placeholder grid (3 per row) #}
+{# Batter Tendencies — enriched spray card grid (3 per row, TN-6/TN-8) #}
 <div class="tendencies-section">
   <h2 class="section-header">Batter Tendencies</h2>
   <div class="tendencies-grid">
     {% for player in scouting_report.batting %}
+    {% set tstats = tendency_stats.get(player.player_id, {}) %}
     <div class="tendency-card">
-      <div class="tendency-card-name">
-        {% if player.name_unresolved %}<span style="color: #6b7280; font-style: italic">{{ player.name }}</span>{% else %}{% if player.jersey_number %}#{{ player.jersey_number }} {% endif %}{{ player.name }}{% endif %}
+      <div class="tendency-card-identity">
+        {% if player.name_unresolved %}<span class="tendency-card-name" style="color: #6b7280; font-style: italic">{{ player.name }}</span>{% else %}{% if tstats.get("jersey_number") %}<span class="tendency-card-jersey">#{{ tstats.jersey_number }}</span>{% endif %}<span class="tendency-card-name">{{ player.name }}</span>{% endif %}
       </div>
+      <div class="tendency-card-slash"><b>{{ tstats.get("avg", "-") }}</b> AVG  <b>{{ tstats.get("obp", "-") }}</b> OBP  <b>{{ tstats.get("slg", "-") }}</b> SLG</div>
+      <div><span class="tendency-card-pa">{{ tstats.get("pa", 0) }} PA</span></div>
       {% if player_spray_bip_counts.get(player.player_id, 0) >= 1 %}
-      <img src="/dashboard/charts/spray/player/{{ player.player_id }}.png?season_id={{ season_id }}"
-           alt="Spray chart"
-           style="width: 100%; display: block;">
+      <img src="/dashboard/charts/spray/player/{{ player.player_id }}.png?season_id={{ season_id }}" alt="Spray chart">
+      {% set zones = tstats.get("zones", {}) %}
+      <div class="tendency-card-direction">Left <b>{{ zones.get("left", 0) }}</b>  Ctr <b>{{ zones.get("center", 0) }}</b>  Right <b>{{ zones.get("right", 0) }}</b></div>
+      {% set contacts = tstats.get("contacts", {}) %}
+      <div class="tendency-card-contact">{{ contacts.get("gb", 0) }}GB  {{ contacts.get("ld", 0) }}LD  {{ contacts.get("fb", 0) }}FB  {{ contacts.get("pu", 0) }}PU  {{ contacts.get("bu", 0) }}BU</div>
       {% else %}
-      <p style="font-size: 8pt; color: #999; margin: 0;">No spray chart data available</p>
+      <p class="tendency-card-empty">No spray chart data available</p>
       {% endif %}
     </div>
     {% endfor %}

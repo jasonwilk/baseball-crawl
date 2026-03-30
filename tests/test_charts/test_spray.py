@@ -9,9 +9,13 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from src.charts.spray import (
+    ZONE_ANGLE_THRESHOLD,
     _classify,
     _marker_for_play_type,
     _raw_to_svg,
+    classify_field_zone,
+    contact_type_label,
+    format_baseball_stat,
     render_spray_chart,
 )
 
@@ -117,7 +121,7 @@ def test_classify_out_results(play_result: str | None) -> None:
 @pytest.mark.parametrize("play_type,expected_marker", [
     ("ground_ball", "o"),
     ("hard_ground_ball", "o"),
-    ("bunt", "o"),
+    ("bunt", "v"),
     ("line_drive", "^"),
     ("hard_line_drive", "^"),
     ("fly_ball", "D"),
@@ -185,6 +189,19 @@ def test_render_without_title() -> None:
     """render_spray_chart with title=None returns valid PNG."""
     result = render_spray_chart(_sample_events(), title=None)
     assert result[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+# ---------------------------------------------------------------------------
+# figsize tests (E-194 AC-1)
+# ---------------------------------------------------------------------------
+
+def test_render_uses_3x4_figsize() -> None:
+    """render_spray_chart creates figure with figsize=(3, 4)."""
+    with patch("src.charts.spray.plt.subplots", return_value=(MagicMock(), MagicMock())) as mock_sub:
+        mock_sub.return_value[0].get_facecolor.return_value = "#FFFFFF"
+        mock_sub.return_value[0].savefig.side_effect = lambda buf, **kw: buf.write(b"\x89PNG\r\n\x1a\n" + b"\x00" * 100)
+        render_spray_chart(_sample_events())
+        mock_sub.assert_called_once_with(figsize=(3, 4))
 
 
 # ---------------------------------------------------------------------------
@@ -312,8 +329,8 @@ def test_legend_outcome_row_has_hit_and_out() -> None:
         assert "Out" in labels
 
 
-def test_legend_play_type_row_has_four_shapes() -> None:
-    """Second legend row contains Ground Ball, Line Drive, Fly Ball, Popup labels."""
+def test_legend_play_type_row_has_five_entries() -> None:
+    """Second legend row contains Ground Ball, Line Drive, Fly Ball, Popup, Bunt in order with ncols=5."""
     events = _sample_events()
     with _mock_subplots() as (_mock_fig, mock_ax):
         render_spray_chart(events)
@@ -322,14 +339,16 @@ def test_legend_play_type_row_has_four_shapes() -> None:
         second_legend_call = mock_ax.legend.call_args_list[1]
         handles = second_legend_call.kwargs.get("handles", second_legend_call[1].get("handles", []))
         labels = [h.get_label() for h in handles]
-        assert "Ground Ball" in labels
-        assert "Line Drive" in labels
-        assert "Fly Ball" in labels
-        assert "Popup" in labels
+        assert labels == ["Ground Ball", "Line Drive", "Fly Ball", "Popup", "Bunt"]
+        # Bunt entry uses "v" marker
+        bunt_handle = handles[4]
+        assert bunt_handle.get_marker() == "v"
+        # ncols=5
+        assert second_legend_call.kwargs.get("ncols") == 5
 
 
 # ---------------------------------------------------------------------------
-# PNG dimension sanity check (AC-8: 4x6 inches at 150 DPI = 600x900 pixels)
+# PNG dimension sanity check (3x4 inches at 150 DPI = 450x600 pixels)
 # ---------------------------------------------------------------------------
 
 def _png_dimensions(png_bytes: bytes) -> tuple[int, int]:
@@ -340,17 +359,101 @@ def _png_dimensions(png_bytes: bytes) -> tuple[int, int]:
     return width, height
 
 
-def test_render_png_dimensions_approx_4x6_at_150dpi() -> None:
-    """Output PNG dimensions should be in the right ballpark for a 4×6 @ 150 DPI figure.
+def test_render_png_dimensions_approx_3x4_at_150dpi() -> None:
+    """Output PNG dimensions should be in the right ballpark for a 3×4 @ 150 DPI figure.
 
     ``bbox_inches='tight'`` trims figure whitespace (particularly with equal-aspect
-    axes), so the actual pixel size is smaller than the nominal 600×900.  We verify
+    axes), so the actual pixel size is smaller than the nominal 450×600.  We verify
     the image is substantively sized rather than a thumbnail.
     """
     result = render_spray_chart(_sample_events())
     width, height = _png_dimensions(result)
-    # Minimum threshold: at least 300×450 (half of nominal 600×900)
-    assert width >= 300, f"Width {width} too small (expected >= 300)"
-    assert height >= 450, f"Height {height} too small (expected >= 450)"
-    # Height should exceed width (portrait orientation: 2:3 ratio)
+    # Minimum threshold: at least 200×300 (roughly half of nominal 450×600)
+    assert width >= 200, f"Width {width} too small (expected >= 200)"
+    assert height >= 300, f"Height {height} too small (expected >= 300)"
+    # Height should exceed width (portrait orientation)
     assert height > width, f"Expected portrait PNG but got width={width}, height={height}"
+
+
+# ---------------------------------------------------------------------------
+# classify_field_zone tests (E-194 AC-3, AC-5)
+# ---------------------------------------------------------------------------
+
+def test_classify_field_zone_dead_center() -> None:
+    """Ball hit dead center (raw x=160) classifies as center."""
+    # raw x=160 maps to svg_x=160 (anchor point), which is dead center
+    zone = classify_field_zone(160.0, 100.0)
+    assert zone == "center"
+
+
+def test_classify_field_zone_left() -> None:
+    """Ball hit to the left side of the field."""
+    # raw x=0 maps to svg_x ≈ 49 (well left of center)
+    zone = classify_field_zone(0.0, 100.0)
+    assert zone == "left"
+
+
+def test_classify_field_zone_right() -> None:
+    """Ball hit to the right side of the field."""
+    # raw x=300 maps to svg_x ≈ 257 (well right of center)
+    zone = classify_field_zone(300.0, 100.0)
+    assert zone == "right"
+
+
+def test_classify_field_zone_threshold_constant() -> None:
+    """ZONE_ANGLE_THRESHOLD is the authoritative value (~11.8°)."""
+    assert abs(ZONE_ANGLE_THRESHOLD - 0.206) < 0.001
+
+
+# ---------------------------------------------------------------------------
+# contact_type_label tests (E-194 AC-4, AC-5)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("play_type,expected", [
+    ("ground_ball", "gb"),
+    ("hard_ground_ball", "gb"),
+    ("line_drive", "ld"),
+    ("hard_line_drive", "ld"),
+    ("fly_ball", "fb"),
+    ("popup", "pu"),
+    ("pop_fly", "pu"),
+    ("pop_up", "pu"),
+    ("bunt", "bu"),
+])
+def test_contact_type_label_known(play_type: str, expected: str) -> None:
+    assert contact_type_label(play_type) == expected
+
+
+@pytest.mark.parametrize("play_type", [None, "unknown", ""])
+def test_contact_type_label_unmapped(play_type: str | None) -> None:
+    assert contact_type_label(play_type) is None
+
+
+# ---------------------------------------------------------------------------
+# format_baseball_stat tests (E-194 AC-2)
+# ---------------------------------------------------------------------------
+
+def test_format_baseball_stat_normal() -> None:
+    assert format_baseball_stat(1, 3) == ".333"
+
+
+def test_format_baseball_stat_zero_denominator() -> None:
+    assert format_baseball_stat(0, 0) == "-"
+
+
+def test_format_baseball_stat_perfect() -> None:
+    assert format_baseball_stat(3, 3) == "1.000"
+
+
+def test_format_baseball_stat_zero_numerator() -> None:
+    assert format_baseball_stat(0, 10) == ".000"
+
+
+def test_format_baseball_stat_over_one() -> None:
+    assert format_baseball_stat(4, 3) == "1.333"
+
+
+def test_format_baseball_stat_rounds_to_1000() -> None:
+    """Value just below 1.0 that rounds to 1000 should display as 1.000."""
+    # 1999/2000 = 0.9995, round(999.5) = 1000 -> should be "1.000" not ".1000"
+    assert format_baseball_stat(1999, 2000) == "1.000"

@@ -1,7 +1,7 @@
 # E-194: Spray Chart Card Redesign
 
 ## Status
-`READY`
+`COMPLETED`
 
 ## Overview
 Redesign spray chart cards across scouting report templates (standalone and opponent print) to use a compact 3-column layout with enriched per-player scouting stats, and extend direction/contact enrichments to all dashboard spray chart views. The current 2-column layout produces oversized cards that break across PDF pages and omit OBP, SLG, field zone tendencies, and contact type breakdowns -- data coaches need to make pre-game decisions. Individual player chart images also bake in a title that duplicates the HTML card header -- titles are removed globally since all views now show the name in HTML context.
@@ -40,10 +40,10 @@ All design decisions were validated during the experiment session. No expert con
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-194-01 | Chart rendering: figsize, bunt marker, legend | TODO | None | - |
-| E-194-02 | Data enrichment + scouting report template redesign | TODO | E-194-01 | - |
-| E-194-03 | Opponent print template card redesign | TODO | E-194-01, E-194-02 | - |
-| E-194-04 | Dashboard spray chart enrichments + global title removal | TODO | E-194-02, E-194-03 | - |
+| E-194-01 | Chart rendering: figsize, bunt marker, legend | DONE | None | se |
+| E-194-02 | Data enrichment + scouting report template redesign | DONE | E-194-01 | se |
+| E-194-03 | Opponent print template card redesign | DONE | E-194-01, E-194-02 | se |
+| E-194-04 | Dashboard spray chart enrichments + global title removal | DONE | E-194-02, E-194-03 | se |
 
 ## Dispatch Team
 - software-engineer
@@ -188,8 +188,21 @@ Contact row:
 - 2026-03-30: Created from experiment session findings (PM + UXD + SE)
 - 2026-03-30: Scope expanded to include dashboard views (player_profile.html, opponent_detail.html) per user decision. Added E-194-04. Removed Non-Goal about dashboard views. Global chart title removal replaces per-view workaround.
 - 2026-03-30: Set to READY after 6 review passes.
+- 2026-03-30: Set to ACTIVE. Dispatch started.
+- 2026-03-30: All 4 stories DONE. Epic COMPLETED. 12 implementation review findings (11 accepted, 1 dismissed). Documentation assessment: No documentation impact -- spray chart rendering and template changes. Context-layer assessment: No context-layer impact -- no new patterns (triggers: new agent patterns? no; new API endpoints? no; new architectural decisions? no; new rules/conventions? no; changed file organization? no; changed deployment/infra? no).
 
-### Review Scorecard
+### Implementation Review Scorecard
+| Review Pass | Findings | Accepted | Dismissed |
+|---|---|---|---|
+| Per-story CR -- E-194-01 | 2 | 2 | 0 |
+| Per-story CR -- E-194-02 | 3 | 3 | 0 |
+| Per-story CR -- E-194-03 (R1+R2) | 2 | 2 | 0 |
+| Per-story CR -- E-194-04 | 1 | 0 | 1 |
+| CR integration review | 1 | 1 | 0 |
+| Codex code review | 3 | 3 | 0 |
+| **Total** | **12** | **11** | **1** |
+
+### Spec Review Scorecard
 | Review Pass | Findings | Accepted | Dismissed |
 |---|---|---|---|
 | Internal iteration 1 -- CR spec audit | 8 | 8 | 0 |

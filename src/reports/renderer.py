@@ -377,23 +377,60 @@ def _build_spray_player_stats(
 ) -> dict[str, dict]:
     """Build per-player stats dict for spray chart display.
 
-    Returns a dict mapping player_id to {"avg": str, "pa": int, "bip_count": int}.
+    Returns a dict mapping player_id to enriched stats including:
+    avg, obp, slg (str), pa, bip_count (int), jersey_number (str|None),
+    zones (dict[str, int]), contacts (dict[str, int]).
     """
+    from src.charts.spray import classify_field_zone, contact_type_label, format_baseball_stat
+
     result: dict[str, dict] = {}
     for player_id, events in spray_charts_raw.items():
         batter = batting_lookup.get(player_id)
         if batter:
             h = batter.get("h") or 0
             ab = batter.get("ab") or 0
-            avg = format_avg(h, ab)
+            bb = batter.get("bb") or 0
+            hbp = batter.get("hbp") or 0
+            shf = batter.get("shf") or 0
+            doubles = batter.get("doubles") or 0
+            triples = batter.get("triples") or 0
+            hr = batter.get("hr") or 0
             pa = batter.get("_pa", 0)
+            jersey_number = batter.get("jersey_number")
+
+            avg = format_baseball_stat(h, ab)
+            obp = format_baseball_stat(h + bb + hbp, ab + bb + hbp + shf)
+            slg = format_baseball_stat(
+                h + doubles + 2 * triples + 3 * hr, ab,
+            )
         else:
             avg = "-"
+            obp = "-"
+            slg = "-"
             pa = 0
+            jersey_number = None
+
+        # Zone classification
+        zones = {"left": 0, "center": 0, "right": 0}
+        contacts = {"gb": 0, "ld": 0, "fb": 0, "pu": 0, "bu": 0}
+        for ev in (events or []):
+            x = ev.get("x")
+            y = ev.get("y")
+            if x is not None and y is not None:
+                zones[classify_field_zone(x, y)] += 1
+            ct = contact_type_label(ev.get("play_type"))
+            if ct:
+                contacts[ct] += 1
+
         result[player_id] = {
             "avg": avg,
+            "obp": obp,
+            "slg": slg,
             "pa": pa,
             "bip_count": len(events) if events else 0,
+            "jersey_number": jersey_number,
+            "zones": zones,
+            "contacts": contacts,
         }
     return result
 
@@ -468,12 +505,8 @@ def render_report(data: dict[str, Any]) -> str:
     for player_id, events in spray_charts_raw.items():
         if not events or len(events) < _MIN_BIP_SPRAY:
             continue
-        player = batting_lookup.get(player_id)
-        player_name = player["name"] if player else f"Player {player_id}"
-        jersey = player.get("jersey_number") if player else None
-        title = f"#{jersey} {player_name}" if jersey else player_name
         try:
-            data_uri = _encode_spray_chart(events, title=title)
+            data_uri = _encode_spray_chart(events, title=None)
             spray_data[player_id] = data_uri
         except Exception:  # noqa: BLE001
             logger.warning(
