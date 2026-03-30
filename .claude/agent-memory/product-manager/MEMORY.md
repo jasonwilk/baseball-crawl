@@ -1,10 +1,10 @@
 # Product Manager -- Agent Memory
 
 ## Numbering State
-- Next available epic number: E-188
-- Epics created: E-001 through E-187 (E-001, E-003, E-005, E-006, E-007, E-008, E-010, E-011, E-012, E-013, E-014, E-015, E-016, E-017, E-018, E-019, E-020, E-021, E-022, E-024, E-025, E-026, E-027, E-028, E-029, E-030, E-031, E-032, E-033, E-034, E-035, E-036, E-037, E-038, E-042, E-044, E-046, E-048, E-049, E-050, E-052, E-053, E-054, E-056, E-057, E-058, E-055, E-059, E-060, E-061, E-075, E-081, E-084, E-087, E-088, E-089, E-090, E-091, E-092 archived; E-093, E-094, E-095 archived; E-096 archived; E-097 archived; E-098 archived; E-099 archived; E-100 archived; E-101 archived; E-102 archived; E-103 archived; E-104 ready; E-105 archived; E-106 draft; E-107 archived; E-108 archived; E-109 archived; E-110 ready; E-111 archived; E-112 archived; E-114 archived; E-115 archived; E-116 archived; E-113 completed; E-117 completed; E-118 archived; E-119 ready; E-120 archived; E-121 archived; E-122 archived; E-123 archived; E-124 completed; E-125 archived; E-126 completed; E-127 archived; E-128 archived; E-129 archived; E-130 archived; E-131 archived; E-132 ready; E-133 archived; E-134 ready; E-135 abandoned; E-136 ready; E-137 ready; E-138 archived; E-139 archived; E-140 archived; E-142 archived; E-143 archived; E-144 archived; E-145 archived; E-146 archived; E-147 archived; E-148 archived; E-149 archived; E-150 archived; E-151 archived; E-152 archived; E-153 archived; E-155 archived; E-156 archived; E-157 archived; E-158 completed; E-159 archived; E-160 archived; E-161 completed; E-162 ready; E-163 archived; E-165 ready; E-166 completed; E-167 archived; E-168 archived; E-169 draft; E-170 ready; E-171 abandoned; E-172 draft; E-173 archived; E-178 ready; E-179 completed; E-180 draft; E-181 draft; E-182 archived; E-177 archived; E-183 archived; E-184 archived; E-185 archived; E-186 archived; E-187 archived)
-- Next available idea number: IDEA-057
-- Ideas created: IDEA-001 through IDEA-056
+- Next available epic number: E-189
+- Epics created: E-001 through E-188 (E-001, E-003, E-005, E-006, E-007, E-008, E-010, E-011, E-012, E-013, E-014, E-015, E-016, E-017, E-018, E-019, E-020, E-021, E-022, E-024, E-025, E-026, E-027, E-028, E-029, E-030, E-031, E-032, E-033, E-034, E-035, E-036, E-037, E-038, E-042, E-044, E-046, E-048, E-049, E-050, E-052, E-053, E-054, E-056, E-057, E-058, E-055, E-059, E-060, E-061, E-075, E-081, E-084, E-087, E-088, E-089, E-090, E-091, E-092 archived; E-093, E-094, E-095 archived; E-096 archived; E-097 archived; E-098 archived; E-099 archived; E-100 archived; E-101 archived; E-102 archived; E-103 archived; E-104 ready; E-105 archived; E-106 draft; E-107 archived; E-108 archived; E-109 archived; E-110 ready; E-111 archived; E-112 archived; E-114 archived; E-115 archived; E-116 archived; E-113 completed; E-117 completed; E-118 archived; E-119 ready; E-120 archived; E-121 archived; E-122 archived; E-123 archived; E-124 completed; E-125 archived; E-126 completed; E-127 archived; E-128 archived; E-129 archived; E-130 archived; E-131 archived; E-132 ready; E-133 archived; E-134 ready; E-135 abandoned; E-136 ready; E-137 ready; E-138 archived; E-139 archived; E-140 archived; E-142 archived; E-143 archived; E-144 archived; E-145 archived; E-146 archived; E-147 archived; E-148 archived; E-149 archived; E-150 archived; E-151 archived; E-152 archived; E-153 archived; E-155 archived; E-156 archived; E-157 archived; E-158 completed; E-159 archived; E-160 archived; E-161 completed; E-162 ready; E-163 archived; E-165 ready; E-166 completed; E-167 archived; E-168 archived; E-169 draft; E-170 ready; E-171 abandoned; E-172 draft; E-173 archived; E-178 ready; E-179 completed; E-180 draft; E-181 draft; E-182 archived; E-177 archived; E-183 archived; E-184 archived; E-185 archived; E-186 archived; E-187 archived; E-188 draft)
+- Next available idea number: IDEA-061
+- Ideas created: IDEA-001 through IDEA-060
 
 ## Project Context
 - Project: baseball-crawl -- GameChanger API -> database -> coaching dashboard
@@ -34,6 +34,7 @@
 | E-185 | Scouting Report Redesign | COMPLETED | Archived 2026-03-29. Heat-map color coding, key players callout, enriched columns, team spray chart, recent form chips, print-optimized template. |
 | E-186 | Fix Spray Charts for Standalone Reports | COMPLETED | Archived 2026-03-29. Removed harmful boxscore-UUID fallback, wired gc_uuid resolution via POST /search + public_id filtering, corrected "both teams" doc error, codified bridge pattern. Third and final attempt after E-158/E-176. |
 | E-187 | Threshold Calibration for Youth/HS Seasons | COMPLETED | Archived 2026-03-29. Search pagination fix, stat suppression replaced with PA/IP badges + graduated heat intensity, display philosophy codified in context layer. |
+| E-188 | Eliminate Orphan Team Stubs from Report Generation | READY | 2 stories: snapshot-and-diff orphan cleanup in generator (01), one-time CLI cleanup command (02). SE only. Promoted from IDEA-057. Serial: 01->02. 13 review findings (7 accepted, 6 dismissed). Critical FK violation caught and fixed during internal review. |
 
 ## Key Architectural Decisions
 - Storage: SQLite (WAL mode). Host-mounted at ./data/app.db. Simple file backup via scripts/backup_db.py (no Litestream).
@@ -112,6 +113,7 @@
 | IDEA-054 | Worktree Guard Cross-Epic Contamination | CANDIDATE | 2026-06-26 | Prevent writes into another epic's worktree. |
 | IDEA-055 | Auto-Sync and Experience Polish | PROMOTED | 2026-06-27 | Promoted to E-181. |
 | IDEA-056 | Fix _search_fallback_team Return Type Bug | PROMOTED | 2026-03-29 | Promoted to E-184. |
+| IDEA-057 | Report Flow Orphan Team Stubs | PROMOTED | 2026-03-29 | Promoted to E-188. |
 
 ## Key Workflow Contract
 - Routing model: planning (user -> PM), dispatch (user/main session -> implementers directly). PM plans and closes; main session dispatches.

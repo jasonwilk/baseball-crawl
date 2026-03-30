@@ -1,7 +1,7 @@
 # IDEA-057: Eliminate Orphan Team Stubs from Report Generation Flow
 
 ## Status
-`CANDIDATE`
+`PROMOTED` -- promoted to E-188 (2026-03-29)
 
 ## Summary
 The report generation flow creates orphan team rows for every opponent encountered in boxscores. A report for a team with 56 games creates ~30 stub team rows named with UUIDs (e.g., `521a249b-528c-4db5-b43d-ec893b07ad02`). These stubs serve the opponent scouting flow but are unnecessary noise for standalone reports.

@@ -75,7 +75,7 @@ Review this list every 90 days, or when completing an epic. Ask:
 | [IDEA-054](IDEA-054-worktree-guard-cross-contamination.md) | Worktree Guard Should Prevent Cross-Epic Contamination | CANDIDATE | 2026-06-26 |
 | [IDEA-055](IDEA-055-auto-sync-and-experience-polish.md) | Auto-Sync and Experience Polish | PROMOTED | 2026-06-27 |
 | [IDEA-056](IDEA-056-search-fallback-team-return-bug.md) | Fix _search_fallb
-| [IDEA-057](IDEA-057-report-flow-orphan-team-stubs.md) | Report Flow Orphan Team Stubs | CANDIDATE | 2026-06-27 |
+| [IDEA-057](IDEA-057-report-flow-orphan-team-stubs.md) | Report Flow Orphan Team Stubs | PROMOTED | 2026-03-29 -- promoted to E-188 |
 | [IDEA-058](IDEA-058-pyproject-dependency-management.md) | Proper Python Dependency Management via pyproject.toml | CANDIDATE | 2026-06-27 |
 | [IDEA-059](IDEA-059-opponent-flow-spray-gaps.md) | Opponent Flow Spray Chart and Display Gaps | CANDIDATE | 2026-06-27 |
 | [IDEA-060](IDEA-060-flow-testing-and-validation.md) | Comprehensive Flow Testing and Validation | CANDIDATE | 2026-06-27 |ack_team Return Type Bug | CANDIDATE | 2026-06-27 |
