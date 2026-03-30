@@ -1,7 +1,7 @@
 # E-190: Declare Dependencies in pyproject.toml
 
 ## Status
-`READY`
+`COMPLETED`
 
 ## Overview
 Add `[project.dependencies]` to `pyproject.toml` so the editable install (`pip install -e .`) pulls in runtime dependencies. This fixes `ModuleNotFoundError` failures in the devcontainer (e.g., `bb report generate` failing on matplotlib) and aligns the project with standard Python packaging.
@@ -38,8 +38,8 @@ Discovered during E-187 evaluation: `bb report generate` failed with `ModuleNotF
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-190-01 | Add runtime dependencies to pyproject.toml | TODO | None | - |
-| E-190-02 | Update dependency-management rule for dual-source workflow | TODO | E-190-01 | - |
+| E-190-01 | Add runtime dependencies to pyproject.toml | DONE | None | - |
+| E-190-02 | Update dependency-management rule for dual-source workflow | DONE | E-190-01 | - |
 
 ## Dispatch Team
 - software-engineer
@@ -84,6 +84,33 @@ None.
 ## History
 - 2026-03-29: Created from IDEA-058
 - 2026-03-30: Set to READY after internal review + Codex review.
+- 2026-03-30: COMPLETED. Both stories delivered: pyproject.toml now declares all 14 runtime dependencies with `>=` constraints (E-190-01), and the dependency-management rule documents the dual-source workflow (E-190-02). `pip install -e .` now installs runtime deps; pip-tools workflow unchanged.
+
+### Review Scorecard (Implementation)
+| Review Pass | Findings | Accepted | Dismissed |
+|---|---|---|---|
+| Per-story CR -- E-190-01 | 0 | 0 | 0 |
+| Per-story CR -- E-190-02 | skipped (context-layer only) | - | - |
+| CR integration review | 0 | 0 | 0 |
+| Codex code review | 2 | 1 | 1 |
+| **Total** | **2** | **1** | **1** |
+
+Codex finding details:
+- Finding 1 (dismissed): False positive about story DONE status being premature -- misunderstood the serial staging boundary protocol
+- Finding 2 (accepted, fixed): `dependency-management.md` claimed `~=` for all `requirements.in` entries but `typer[all]>=0.9` uses `>=`. CA softened the claim.
+
+### Documentation Assessment
+No documentation impact -- config-only change with context-layer rule update already included as E-190-02.
+
+### Context-Layer Assessment
+1. New agent capability or tool? **No** -- no new agents or tools.
+2. New rule, convention, or workflow? **No** -- existing rule updated (E-190-02 already handled this).
+3. Changed file routing or agent boundaries? **No**.
+4. New skill or skill modification? **No**.
+5. Hook changes? **No**.
+6. Lesson learned worth codifying? **No** -- straightforward epic, no process surprises.
+
+No additional context-layer action required.
 
 ### Review Scorecard (Planning)
 | Review Pass | Findings | Accepted | Dismissed |
