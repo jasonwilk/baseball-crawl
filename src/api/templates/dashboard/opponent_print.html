@@ -162,6 +162,9 @@
       .screen-only { display: none !important; }
       .tendencies-section { page-break-before: always; }
       tr { page-break-inside: avoid; }
+      .tendencies-grid { display: flex; flex-wrap: wrap; gap: 6px; }
+      .tendency-card { width: calc(25% - 5px); break-inside: avoid; page-break-inside: avoid; padding: 4px; }
+      .tendency-card-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     }
   </style>
 </head>

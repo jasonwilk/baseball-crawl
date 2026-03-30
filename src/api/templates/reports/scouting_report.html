@@ -279,9 +279,12 @@
       .screen-only { display: none !important; }
       table { page-break-inside: avoid; }
       .spray-section { page-break-before: always; }
-      .spray-card { page-break-inside: avoid; }
+      .spray-card { width: calc(25% - 5px); break-inside: avoid; page-break-inside: avoid; padding: 4px; }
       tr { page-break-inside: avoid; }
       .section-header { page-break-after: avoid; }
+      .spray-grid { display: flex; flex-wrap: wrap; gap: 6px; }
+      .spray-card-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .spray-card-stats { display: none; }
     }
 
     /* ---- Mobile responsive (TN-11) ---- */

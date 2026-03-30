@@ -4,7 +4,7 @@
 [E-192: Fix Spray Chart PDF Page Breaks](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, printing either scouting report template to PDF via the browser print dialog will produce pages where spray charts do not split across page boundaries. Individual spray charts will render in a 4-column flexbox layout that fits 8+ charts per landscape page. The screen layout remains unchanged.

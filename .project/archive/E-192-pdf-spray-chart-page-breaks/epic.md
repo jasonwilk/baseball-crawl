@@ -1,7 +1,7 @@
 # E-192: Fix Spray Chart PDF Page Breaks
 
 ## Status
-`READY`
+`COMPLETED`
 
 ## Overview
 Spray charts in scouting reports break across pages when printing to PDF via the browser print dialog. Charts split mid-image because Chrome's print engine ignores `page-break-inside: avoid` inside CSS Grid containers. This epic switches both affected templates to flexbox layout with a 4-column grid so that 8+ spray charts fit per printed page without splitting.
@@ -38,7 +38,7 @@ Same root cause, same fix pattern, different CSS class names and data sources.
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-192-01 | Fix spray chart print layout in both templates | TODO | None | - |
+| E-192-01 | Fix spray chart print layout in both templates | DONE | None | se |
 
 ## Dispatch Team
 - software-engineer
@@ -113,6 +113,29 @@ None.
 - 2026-03-30: Iteration 1 review. 9 findings accepted (CR-1 through CR-8, PM-1, PM-3), 3 dismissed (PM-2, UXD-4, UXD-5). ACs reframed for implementer verifiability; fragmentation properties specified per-template; TN-4/TN-5 updated with selector mappings.
 - 2026-03-30: Codex iteration 1. 2 findings accepted (AC-6 ambiguity, AC-7 font-size gap), 1 dismissed (DoD manual print step -- unverifiable in devcontainer). AC-6/TN-6 reframed as no-touch rule; AC-7 adds font-size preservation.
 - 2026-03-30: Set to READY.
+- 2026-03-30: Set to ACTIVE. Dispatch started.
+- 2026-03-30: All stories DONE. CR integration review: APPROVED (no findings). Codex code review: 1 finding dismissed (false positive -- DONE status is correct per workflow). Set to COMPLETED.
+
+### Implementation Review Scorecard
+| Review Pass | Findings | Accepted | Dismissed |
+|---|---|---|---|
+| Per-story CR -- E-192-01 | 0 | 0 | 0 |
+| CR integration review | 0 | 0 | 0 |
+| Codex code review | 1 | 0 | 1 |
+| **Total** | **1** | **0** | **1** |
+
+### Documentation Assessment
+No documentation impact -- CSS-only change to print styling.
+
+### Context-Layer Assessment
+- New agent pattern or convention: No
+- New rule or workflow change: No
+- New skill or skill modification: No
+- CLAUDE.md update needed: No
+- New architectural decision: No
+- New API pattern or endpoint: No
+
+No context-layer impact.
 
 ### Review Scorecard
 | Review Pass | Findings | Accepted | Dismissed |
