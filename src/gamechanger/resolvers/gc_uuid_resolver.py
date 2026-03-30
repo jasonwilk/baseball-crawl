@@ -101,21 +101,24 @@ def resolve_gc_uuid(
             "Tier 2 (progenitor) failed for team_id=%d", team_id, exc_info=True,
         )
 
-    # Tier 3: POST /search (only with client and season_year)
+    # Tier 3: POST /search (requires client; season_year or public_id)
     if client is None:
         logger.debug(
             "Tier 3 skipped for team_id=%d: no client provided", team_id,
         )
         return None
 
-    if season_year is None:
+    if season_year is None and not public_id:
         logger.debug(
-            "Tier 3 skipped for team_id=%d: season_year is None", team_id,
+            "Tier 3 skipped for team_id=%d: season_year is None and no public_id",
+            team_id,
         )
         return None
 
     try:
-        uuid = _tier3_search(team_name, season_year, client)
+        uuid = _tier3_search(
+            team_name, season_year, client, public_id=public_id,
+        )
         if uuid:
             _store_gc_uuid(conn, team_id, uuid)
             logger.info(
@@ -235,12 +238,17 @@ def _tier2_progenitor(
 
 def _tier3_search(
     team_name: str,
-    season_year: int,
+    season_year: int | None,
     client: GameChangerClient,
+    *,
+    public_id: str | None = None,
 ) -> str | None:
     """Tier 3: POST /search with classification-suffix-stripped name.
 
-    Accepts only a single unambiguous match for the correct season year.
+    When ``public_id`` is available, filters search results by exact
+    ``public_id`` match first (unambiguous). Falls back to the existing
+    name + ``season_year`` logic when the ``public_id`` filter finds no
+    match or when ``public_id`` is not available.
     """
     shortened = _strip_classification_suffix(team_name)
 
@@ -252,6 +260,35 @@ def _tier3_search(
     )
 
     hits = result.get("hits", []) if isinstance(result, dict) else []
+
+    # Preferred path: filter by public_id (exact match, unambiguous).
+    if public_id:
+        for hit in hits:
+            r = hit.get("result", {})
+            if r.get("public_id") == public_id:
+                gc_uuid: str = r.get("id", "")
+                if gc_uuid and _UUID_RE.match(gc_uuid.lower()):
+                    logger.debug(
+                        "Tier 3: public_id match for '%s' -> %s",
+                        public_id, gc_uuid,
+                    )
+                    return gc_uuid
+                logger.debug(
+                    "Tier 3: public_id match but id '%s' is not a valid UUID",
+                    gc_uuid,
+                )
+                return None
+        logger.debug(
+            "Tier 3: no public_id match for '%s' in %d hits; trying name+year fallback",
+            public_id, len(hits),
+        )
+
+    # Fallback path: filter by season_year (requires season_year).
+    if season_year is None:
+        logger.debug(
+            "Tier 3: name+year fallback skipped -- season_year is None",
+        )
+        return None
 
     matches = []
     for hit in hits:
@@ -273,7 +310,7 @@ def _tier3_search(
             )
         return None
 
-    gc_uuid: str = matches[0].get("id", "")
+    gc_uuid = matches[0].get("id", "")
     if not gc_uuid or not _UUID_RE.match(gc_uuid.lower()):
         logger.debug(
             "Tier 3: match id '%s' is not a valid UUID -- skipping", gc_uuid,

@@ -309,7 +309,7 @@ class TestTier3Search:
             "hits": [
                 {
                     "result": {
-                        "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+                        "id": "a1b2c3d4-e5f6-4a2b-abcd-ef12345678ab",
                         "name": "Rival",
                         "public_id": "rival-pub",
                         "season": {"year": 2026},
@@ -328,7 +328,7 @@ class TestTier3Search:
             client=mock_client,
         )
 
-        assert result == "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+        assert result == "a1b2c3d4-e5f6-4a2b-abcd-ef12345678ab"
         # Verify the search was called with shortened name.
         call_args = mock_client.post_json.call_args
         assert call_args[1]["body"]["name"] == "Rival"
@@ -336,7 +336,7 @@ class TestTier3Search:
         stored = db.execute(
             "SELECT gc_uuid FROM teams WHERE id = ?", (tracked_id,)
         ).fetchone()
-        assert stored[0] == "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+        assert stored[0] == "a1b2c3d4-e5f6-4a2b-abcd-ef12345678ab"
 
     def test_tier3_skipped_when_no_client(
         self, db: sqlite3.Connection, data_root: Path
@@ -355,17 +355,19 @@ class TestTier3Search:
         )
         assert result is None
 
-    def test_tier3_skipped_when_season_year_is_none(
+    def test_tier3_skipped_when_season_year_none_and_no_public_id(
         self, db: sqlite3.Connection, data_root: Path
     ) -> None:
-        """AC-8g: Tier 3 is skipped when season_year is None."""
-        tracked_id = _seed_tracked_team(db, name="No Year Team", season_year=None)
+        """Tier 3 is skipped when both season_year and public_id are unavailable."""
+        tracked_id = _seed_tracked_team(
+            db, name="No Year Team", season_year=None, public_id=None,
+        )
 
         mock_client = MagicMock()
 
         result = resolve_gc_uuid(
             team_id=tracked_id,
-            public_id="ny-slug",
+            public_id=None,
             team_name="No Year Team",
             season_year=None,
             conn=db,
@@ -687,3 +689,228 @@ class TestScoutLiveResolverIntegration:
             "spray_crawl",
             "spray_load",
         ]
+
+
+# ---------------------------------------------------------------------------
+# E-189-03: Tier 3 public_id filtering
+# ---------------------------------------------------------------------------
+
+_VALID_UUID = "a1b2c3d4-e5f6-4a2b-abcd-ef12345678ab"
+
+
+def _make_search_hit(
+    gc_uuid: str = _VALID_UUID,
+    public_id: str = "target-slug",
+    year: int = 2026,
+) -> dict:
+    """Build a single search hit dict."""
+    return {
+        "result": {
+            "id": gc_uuid,
+            "name": "Some Team",
+            "public_id": public_id,
+            "season": {"year": year},
+        }
+    }
+
+
+class TestTier3PublicIdFiltering:
+    """E-189-03: public_id preferred path in Tier 3."""
+
+    def test_ac1_public_id_filter_preferred(
+        self, db: sqlite3.Connection, data_root: Path
+    ) -> None:
+        """AC-1: When public_id is available, search results are filtered by it."""
+        tracked_id = _seed_tracked_team(
+            db, name="Target Varsity", public_id="target-slug", season_year=2026,
+        )
+
+        mock_client = MagicMock()
+        mock_client.post_json.return_value = {
+            "hits": [
+                _make_search_hit(gc_uuid=_VALID_UUID, public_id="target-slug", year=2026),
+                _make_search_hit(gc_uuid="other-uuid-0000-0000-000000000000", public_id="other-slug", year=2026),
+            ],
+        }
+
+        result = resolve_gc_uuid(
+            team_id=tracked_id,
+            public_id="target-slug",
+            team_name="Target Varsity",
+            season_year=2026,
+            conn=db,
+            data_root=data_root,
+            client=mock_client,
+        )
+
+        assert result == _VALID_UUID
+
+    def test_ac2_public_id_match_stores_gc_uuid(
+        self, db: sqlite3.Connection, data_root: Path
+    ) -> None:
+        """AC-2: public_id match stores result.id as gc_uuid."""
+        tracked_id = _seed_tracked_team(
+            db, name="Target Varsity", public_id="target-slug", season_year=2026,
+        )
+
+        mock_client = MagicMock()
+        mock_client.post_json.return_value = {
+            "hits": [_make_search_hit(gc_uuid=_VALID_UUID, public_id="target-slug")],
+        }
+
+        result = resolve_gc_uuid(
+            team_id=tracked_id,
+            public_id="target-slug",
+            team_name="Target Varsity",
+            season_year=2026,
+            conn=db,
+            data_root=data_root,
+            client=mock_client,
+        )
+
+        assert result == _VALID_UUID
+        stored = db.execute(
+            "SELECT gc_uuid FROM teams WHERE id = ?", (tracked_id,)
+        ).fetchone()
+        assert stored[0] == _VALID_UUID
+
+    def test_ac3_no_public_id_match_falls_back_to_name_year(
+        self, db: sqlite3.Connection, data_root: Path
+    ) -> None:
+        """AC-3: No public_id match falls back to name+year logic."""
+        tracked_id = _seed_tracked_team(
+            db, name="Fallback Varsity", public_id="missing-slug", season_year=2026,
+        )
+
+        fallback_uuid = "bbbbbbbb-cccc-dddd-eeee-ffffffffffff"
+        mock_client = MagicMock()
+        mock_client.post_json.return_value = {
+            "hits": [
+                # No hit has public_id="missing-slug", but one matches year=2026.
+                _make_search_hit(gc_uuid=fallback_uuid, public_id="other-slug", year=2026),
+            ],
+        }
+
+        result = resolve_gc_uuid(
+            team_id=tracked_id,
+            public_id="missing-slug",
+            team_name="Fallback Varsity",
+            season_year=2026,
+            conn=db,
+            data_root=data_root,
+            client=mock_client,
+        )
+
+        assert result == fallback_uuid
+
+    def test_ac4_null_public_id_uses_name_year_only(
+        self, db: sqlite3.Connection, data_root: Path
+    ) -> None:
+        """AC-4: public_id=NULL uses existing name+year logic unchanged."""
+        tracked_id = _seed_tracked_team(
+            db, name="Legacy Varsity", public_id=None, season_year=2026,
+        )
+
+        mock_client = MagicMock()
+        mock_client.post_json.return_value = {
+            "hits": [
+                _make_search_hit(gc_uuid=_VALID_UUID, public_id="any-slug", year=2026),
+            ],
+        }
+
+        result = resolve_gc_uuid(
+            team_id=tracked_id,
+            public_id=None,
+            team_name="Legacy Varsity",
+            season_year=2026,
+            conn=db,
+            data_root=data_root,
+            client=mock_client,
+        )
+
+        # Falls through to name+year matching (single match for year=2026).
+        assert result == _VALID_UUID
+
+    def test_ac5_public_id_with_null_season_year_proceeds(
+        self, db: sqlite3.Connection, data_root: Path
+    ) -> None:
+        """AC-5: public_id available + season_year NULL -> Tier 3 proceeds via public_id path."""
+        tracked_id = _seed_tracked_team(
+            db, name="No Year Team", public_id="noyear-slug", season_year=None,
+        )
+
+        mock_client = MagicMock()
+        mock_client.post_json.return_value = {
+            "hits": [
+                _make_search_hit(gc_uuid=_VALID_UUID, public_id="noyear-slug", year=2025),
+            ],
+        }
+
+        result = resolve_gc_uuid(
+            team_id=tracked_id,
+            public_id="noyear-slug",
+            team_name="No Year Team",
+            season_year=None,
+            conn=db,
+            data_root=data_root,
+            client=mock_client,
+        )
+
+        assert result == _VALID_UUID
+        # Verify search WAS called (not skipped).
+        mock_client.post_json.assert_called_once()
+
+    def test_ac5_public_id_no_match_and_null_season_year_returns_none(
+        self, db: sqlite3.Connection, data_root: Path
+    ) -> None:
+        """AC-5: public_id miss + season_year NULL -> name+year fallback skipped, returns None."""
+        tracked_id = _seed_tracked_team(
+            db, name="No Year Team", public_id="noyear-slug", season_year=None,
+        )
+
+        mock_client = MagicMock()
+        mock_client.post_json.return_value = {
+            "hits": [
+                _make_search_hit(gc_uuid=_VALID_UUID, public_id="other-slug", year=2025),
+            ],
+        }
+
+        result = resolve_gc_uuid(
+            team_id=tracked_id,
+            public_id="noyear-slug",
+            team_name="No Year Team",
+            season_year=None,
+            conn=db,
+            data_root=data_root,
+            client=mock_client,
+        )
+
+        # public_id miss, season_year=None -> name+year fallback skipped.
+        assert result is None
+
+    def test_public_id_match_with_invalid_uuid_returns_none(
+        self, db: sqlite3.Connection, data_root: Path
+    ) -> None:
+        """public_id matches but result.id is not a valid UUID -> returns None."""
+        tracked_id = _seed_tracked_team(
+            db, name="Bad UUID Team", public_id="bad-uuid-slug", season_year=2026,
+        )
+
+        mock_client = MagicMock()
+        mock_client.post_json.return_value = {
+            "hits": [
+                {"result": {"id": "not-a-uuid", "public_id": "bad-uuid-slug", "season": {"year": 2026}}},
+            ],
+        }
+
+        result = resolve_gc_uuid(
+            team_id=tracked_id,
+            public_id="bad-uuid-slug",
+            team_name="Bad UUID Team",
+            season_year=2026,
+            conn=db,
+            data_root=data_root,
+            client=mock_client,
+        )
+
+        assert result is None

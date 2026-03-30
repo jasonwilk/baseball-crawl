@@ -4,7 +4,7 @@
 [E-189: Opponent Flow Pipeline and Display Parity](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, `_discover_opponents()` in `src/pipeline/trigger.py` will trigger scouting for opponents that were newly resolved during the discovery phase. When a member team syncs and the resolver auto-matches opponents to GC teams, those opponents will be scouted automatically -- eliminating the need for the operator to manually click "Sync" on each one.

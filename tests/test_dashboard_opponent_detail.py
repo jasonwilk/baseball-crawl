@@ -1149,3 +1149,223 @@ class TestApplyNameCascade:
         result = _apply_name_cascade(rows)
         assert result is rows
         assert rows[0]["name"] == "Player #10"
+
+
+# ---------------------------------------------------------------------------
+# E-189-04: Heat-map computation unit tests
+# ---------------------------------------------------------------------------
+
+
+class TestComputeBattingHeat:
+    """E-189-04: PA computation and heat-map levels for batting."""
+
+    def test_pa_computed_correctly(self):
+        """AC-1: PA = AB + BB + HBP + SHF."""
+        from src.api.routes.dashboard import _compute_batting_heat
+
+        batting = [{"ab": 20, "bb": 5, "hbp": 2, "shf": 1, "h": 8, "doubles": 1, "triples": 0, "hr": 1, "so": 3}]
+        _compute_batting_heat(batting)
+        assert batting[0]["_pa"] == 28  # 20 + 5 + 2 + 1
+
+    def test_heat_zero_when_few_qualified(self):
+        """AC-3: 0-2 qualified batters -> max heat = 0."""
+        from src.api.routes.dashboard import _compute_batting_heat
+
+        # Two batters, both with 5+ PA -> 2 qualified -> max heat 0 (0-2 tier).
+        batting = [
+            {"ab": 10, "bb": 1, "hbp": 0, "shf": 0, "h": 3, "doubles": 0, "triples": 0, "hr": 0, "so": 2},
+            {"ab": 8, "bb": 2, "hbp": 0, "shf": 0, "h": 2, "doubles": 0, "triples": 0, "hr": 0, "so": 1},
+        ]
+        _compute_batting_heat(batting)
+        for p in batting:
+            assert p["_heat"]["avg"] == 0
+            assert p["_heat"]["obp"] == 0
+            assert p["_heat"]["slg"] == 0
+
+    def test_heat_nonzero_when_enough_qualified(self):
+        """AC-3: 3+ qualified batters -> some heat assigned."""
+        from src.api.routes.dashboard import _compute_batting_heat
+
+        # 4 batters with varying stats, all 5+ PA -> max heat 1 (3-4 tier).
+        batting = [
+            {"ab": 20, "bb": 2, "hbp": 0, "shf": 0, "h": 8, "doubles": 2, "triples": 0, "hr": 1, "so": 3},
+            {"ab": 18, "bb": 3, "hbp": 1, "shf": 0, "h": 5, "doubles": 1, "triples": 0, "hr": 0, "so": 4},
+            {"ab": 15, "bb": 1, "hbp": 0, "shf": 0, "h": 3, "doubles": 0, "triples": 0, "hr": 0, "so": 5},
+            {"ab": 12, "bb": 4, "hbp": 1, "shf": 0, "h": 6, "doubles": 1, "triples": 1, "hr": 0, "so": 2},
+        ]
+        _compute_batting_heat(batting)
+        # With 4 qualified, max heat is 1 (lightest).
+        for p in batting:
+            assert p["_heat"]["avg"] <= 1
+            assert p["_heat"]["obp"] <= 1
+            assert p["_heat"]["slg"] <= 1
+        # At least one should have heat 1 (the best performer).
+        assert any(p["_heat"]["avg"] == 1 for p in batting)
+
+    def test_unqualified_batters_get_zero_heat(self):
+        """AC-3: Players below 5 PA get heat 0 regardless."""
+        from src.api.routes.dashboard import _compute_batting_heat
+
+        batting = [
+            # 10 qualified batters (enough for full heat).
+            *[{"ab": 20, "bb": 2, "hbp": 0, "shf": 0, "h": 5 + i, "doubles": 0, "triples": 0, "hr": 0, "so": 2}
+              for i in range(10)],
+            # 1 unqualified (3 PA < 5 threshold).
+            {"ab": 2, "bb": 1, "hbp": 0, "shf": 0, "h": 1, "doubles": 0, "triples": 0, "hr": 0, "so": 0},
+        ]
+        _compute_batting_heat(batting)
+        # Unqualified player (last) gets zero heat.
+        assert batting[-1]["_heat"] == {"avg": 0, "obp": 0, "slg": 0}
+        assert batting[-1]["_pa"] == 3
+
+    def test_no_stats_suppressed(self):
+        """AC-7: All players get _pa and _heat, none are hidden."""
+        from src.api.routes.dashboard import _compute_batting_heat
+
+        batting = [
+            {"ab": 1, "bb": 0, "hbp": 0, "shf": 0, "h": 0, "doubles": 0, "triples": 0, "hr": 0, "so": 1},
+        ]
+        _compute_batting_heat(batting)
+        assert "_pa" in batting[0]
+        assert "_heat" in batting[0]
+
+
+class TestComputePitchingHeat:
+    """E-189-04: Heat-map levels for pitching."""
+
+    def test_heat_zero_when_few_qualified(self):
+        """AC-4: 0-1 qualified pitchers -> max heat = 0."""
+        from src.api.routes.dashboard import _compute_pitching_heat
+
+        pitching = [
+            {"ip_outs": 21, "er": 2, "so": 10, "h": 5, "bb": 3},  # 7 IP = qualified
+        ]
+        _compute_pitching_heat(pitching)
+        assert pitching[0]["_heat"]["era"] == 0
+        assert pitching[0]["_heat"]["k9"] == 0
+
+    def test_heat_nonzero_when_enough_qualified(self):
+        """AC-4: 2+ qualified pitchers -> some heat assigned."""
+        from src.api.routes.dashboard import _compute_pitching_heat
+
+        pitching = [
+            {"ip_outs": 30, "er": 3, "so": 15, "h": 8, "bb": 4},
+            {"ip_outs": 24, "er": 6, "so": 8, "h": 12, "bb": 6},
+        ]
+        _compute_pitching_heat(pitching)
+        # 2 qualified -> max heat = 1.
+        for p in pitching:
+            assert p["_heat"]["era"] <= 1
+            assert p["_heat"]["k9"] <= 1
+            assert p["_heat"]["whip"] <= 1
+
+    def test_unqualified_pitcher_gets_zero_heat(self):
+        """AC-4: Pitcher below 18 outs (6 IP) gets heat 0."""
+        from src.api.routes.dashboard import _compute_pitching_heat
+
+        pitching = [
+            {"ip_outs": 30, "er": 3, "so": 15, "h": 8, "bb": 4},
+            {"ip_outs": 24, "er": 6, "so": 8, "h": 12, "bb": 6},
+            {"ip_outs": 9, "er": 1, "so": 5, "h": 2, "bb": 1},  # 3 IP, unqualified
+        ]
+        _compute_pitching_heat(pitching)
+        assert pitching[-1]["_heat"] == {"era": 0, "k9": 0, "whip": 0}
+
+
+class TestOpponentDetailPABadges:
+    """E-189-04: PA/IP badges render in HTML output."""
+
+    def setup_method(self, method):
+        import tempfile
+        self._tmpdir = tempfile.mkdtemp()
+        self.db_path = _make_db(Path(self._tmpdir))
+        with sqlite3.connect(str(self.db_path)) as conn:
+            conn.execute("PRAGMA foreign_keys=ON")
+            self.member_id = _insert_member_team(conn, "LSB Varsity")
+            self.opp_id = _insert_opponent_team(conn, "Rival High", public_id="rival-slug")
+            _insert_season(conn)
+            _insert_game(conn, "g-1", self.member_id, self.opp_id)
+            user_id = _insert_user(conn)
+            _grant_team_access(conn, user_id, self.member_id)
+            # Insert batting data for a player.
+            _insert_player(conn, "bat-1", "John", "Doe")
+            _insert_batting(conn, "bat-1", self.opp_id, ab=20, h=6, bb=3, so=4, hbp=1, shf=0)
+            # Insert pitching data.
+            _insert_player(conn, "pit-1", "Jane", "Smith")
+            _insert_pitching(conn, "pit-1", self.opp_id, ip_outs=21, h=8, er=3, bb=2, so=14)
+
+    def test_ac1_batting_pa_badge_in_html(self):
+        """AC-1: Batting rows show PA badge instead of GP."""
+        client = _make_client(self.db_path)
+        resp = client.get(
+            f"/dashboard/opponents/{self.opp_id}?team_id={self.member_id}&season_id={_SEASON_ID}"
+        )
+        assert resp.status_code == 200
+        html = resp.text
+        # PA = 20 + 3 + 1 + 0 = 24
+        assert "24 PA" in html
+        # Should NOT contain GP annotation on rate stats.
+        assert "(5 GP)" not in html or "GP</span>" not in html
+
+    def test_ac2_pitching_ip_badge_in_html(self):
+        """AC-2: Pitching rows show IP badge instead of GP."""
+        client = _make_client(self.db_path)
+        resp = client.get(
+            f"/dashboard/opponents/{self.opp_id}?team_id={self.member_id}&season_id={_SEASON_ID}"
+        )
+        assert resp.status_code == 200
+        html = resp.text
+        # ip_outs=21 -> 7.0 IP
+        assert "7.0 IP" in html
+
+    def test_ac5_top_pitchers_card_ip_badge(self):
+        """AC-5: Their Pitchers card shows IP badge, not GP."""
+        client = _make_client(self.db_path)
+        resp = client.get(
+            f"/dashboard/opponents/{self.opp_id}?team_id={self.member_id}&season_id={_SEASON_ID}"
+        )
+        html = resp.text
+        # The top pitchers card should contain IP badge.
+        assert "7.0 IP</span>" in html
+
+    def test_ac3_heat_css_classes_present(self):
+        """AC-3: Heat-map CSS classes are present in the HTML."""
+        client = _make_client(self.db_path)
+        resp = client.get(
+            f"/dashboard/opponents/{self.opp_id}?team_id={self.member_id}&season_id={_SEASON_ID}"
+        )
+        html = resp.text
+        # Heat-0 should appear (since < 3 qualified batters -> all heat-0).
+        assert "heat-0" in html
+
+    def test_ac6_print_view_pa_badge(self):
+        """AC-6: Print view has PA badge."""
+        client = _make_client(self.db_path)
+        resp = client.get(
+            f"/dashboard/opponents/{self.opp_id}/print?team_id={self.member_id}&season_id={_SEASON_ID}"
+        )
+        assert resp.status_code == 200
+        html = resp.text
+        assert "24 PA" in html
+
+    def test_ac6_print_view_ip_badge(self):
+        """AC-6: Print view has IP badge on pitching rate stats."""
+        client = _make_client(self.db_path)
+        resp = client.get(
+            f"/dashboard/opponents/{self.opp_id}/print?team_id={self.member_id}&season_id={_SEASON_ID}"
+        )
+        assert resp.status_code == 200
+        html = resp.text
+        assert "7.0 IP" in html
+
+    def test_ac6_print_view_no_heat_classes(self):
+        """AC-6: Print view does NOT have heat-map CSS classes."""
+        client = _make_client(self.db_path)
+        resp = client.get(
+            f"/dashboard/opponents/{self.opp_id}/print?team_id={self.member_id}&season_id={_SEASON_ID}"
+        )
+        html = resp.text
+        assert "heat-1" not in html
+        assert "heat-2" not in html
+        assert "heat-3" not in html
+        assert "heat-4" not in html

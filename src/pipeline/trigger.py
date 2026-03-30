@@ -26,8 +26,11 @@ from src.gamechanger.client import CredentialExpiredError, GameChangerClient
 from src.gamechanger.config import CrawlConfig, load_config_from_db
 from src.gamechanger.crawlers.opponent_resolver import OpponentResolver
 from src.gamechanger.crawlers.scouting import ScoutingCrawler
+from src.gamechanger.crawlers.scouting_spray import ScoutingSprayChartCrawler
 from src.gamechanger.loaders.opponent_seeder import seed_schedule_opponents
 from src.gamechanger.loaders.scouting_loader import ScoutingLoader
+from src.gamechanger.loaders.scouting_spray_loader import ScoutingSprayChartLoader
+from src.gamechanger.resolvers.gc_uuid_resolver import resolve_gc_uuid
 from src.gamechanger.team_resolver import resolve_team
 from src.pipeline import crawl as crawl_module
 from src.pipeline import load as load_module
@@ -180,6 +183,109 @@ def _heal_season_year_scouting(
 # ---------------------------------------------------------------------------
 
 
+def _auto_scout_resolved_opponents(
+    our_team_id: int,
+    resolve_start: str,
+    db_path: Path,
+) -> None:
+    """Trigger scouting for opponents newly resolved during discovery.
+
+    Queries ``opponent_links`` for rows resolved after ``resolve_start``
+    whose resolved team has a ``public_id`` and that pass the freshness
+    filter (no running job, no completed job within 24 hours).  For each,
+    creates a ``crawl_jobs`` row and calls ``run_scouting_sync`` sequentially.
+
+    Non-fatal: errors for individual opponents are logged and skipped.
+    Auth failures (detected via crawl_job status) stop further attempts.
+
+    Args:
+        our_team_id: The member team whose discovery triggered resolution.
+        resolve_start: UTC ISO timestamp recorded before the resolver ran.
+        db_path: Path to the SQLite database.
+    """
+    with closing(sqlite3.connect(str(db_path))) as conn:
+        conn.execute("PRAGMA foreign_keys=ON;")
+        rows = conn.execute(
+            """
+            SELECT DISTINCT t.id, t.public_id
+            FROM opponent_links ol
+            JOIN teams t ON ol.resolved_team_id = t.id
+            WHERE ol.our_team_id = ?
+              AND datetime(ol.resolved_at) >= datetime(?)
+              AND t.public_id IS NOT NULL
+              AND t.id NOT IN (
+                  SELECT cj.team_id FROM crawl_jobs cj
+                  WHERE cj.status = 'running'
+              )
+              AND t.id NOT IN (
+                  SELECT cj.team_id FROM crawl_jobs cj
+                  WHERE cj.status = 'completed'
+                    AND datetime(cj.completed_at) >= datetime('now', '-24 hours')
+              )
+            """,
+            (our_team_id, resolve_start),
+        ).fetchall()
+
+    if not rows:
+        logger.info(
+            "Auto-scout: no newly resolved opponents to scout for team_id=%d.",
+            our_team_id,
+        )
+        return
+
+    logger.info(
+        "Auto-scout: %d newly resolved opponent(s) to scout for team_id=%d.",
+        len(rows),
+        our_team_id,
+    )
+
+    for opponent_team_id, public_id in rows:
+        # Create a crawl_jobs row so the admin UI shows "Syncing..." status.
+        with closing(sqlite3.connect(str(db_path))) as conn:
+            conn.execute("PRAGMA foreign_keys=ON;")
+            cur = conn.execute(
+                "INSERT INTO crawl_jobs (team_id, sync_type, status, started_at) "
+                "VALUES (?, 'scouting_crawl', 'running', datetime('now'))",
+                (opponent_team_id,),
+            )
+            conn.commit()
+            scout_job_id = cur.lastrowid
+
+        logger.info(
+            "Auto-scout: starting scouting for opponent team_id=%d "
+            "public_id=%s crawl_job_id=%d",
+            opponent_team_id,
+            public_id,
+            scout_job_id,
+        )
+
+        try:
+            run_scouting_sync(opponent_team_id, public_id, scout_job_id)
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Auto-scout failed for opponent team_id=%d (non-fatal)",
+                opponent_team_id,
+                exc_info=True,
+            )
+
+        # Check if auth failed -- stop further auto-scout attempts (AC-6).
+        with closing(sqlite3.connect(str(db_path))) as conn:
+            job_row = conn.execute(
+                "SELECT status, error_message FROM crawl_jobs WHERE id = ?",
+                (scout_job_id,),
+            ).fetchone()
+        if job_row and job_row[0] == "failed" and job_row[1]:
+            err_msg = job_row[1]
+            if "Auth refresh failed" in err_msg or "Credential expired" in err_msg:
+                logger.warning(
+                    "Auto-scout: stopping due to auth failure for opponent "
+                    "team_id=%d: %s",
+                    opponent_team_id,
+                    err_msg,
+                )
+                break
+
+
 def _discover_opponents(
     team_id: int,
     client: GameChangerClient,
@@ -273,6 +379,8 @@ def _discover_opponents(
             )
 
     # 2. OpponentResolver -- CredentialExpiredError marks job failed and propagates (AC-4b).
+    # Record timestamp before resolver runs so we can identify newly resolved opponents.
+    resolve_start = _utcnow_iso()
     with closing(sqlite3.connect(str(db_path))) as conn:
         conn.execute("PRAGMA foreign_keys=ON;")
         resolver = OpponentResolver(client, filtered_config, conn)
@@ -292,6 +400,9 @@ def _discover_opponents(
                 f"Credential expired during opponent resolution: {exc}",
             )
             raise
+
+    # 3. Auto-scout newly resolved opponents (E-189-02).
+    _auto_scout_resolved_opponents(team_id, resolve_start, db_path)
 
 
 # ---------------------------------------------------------------------------
@@ -368,6 +479,147 @@ def run_member_sync(team_id: int, team_name: str, crawl_job_id: int) -> None:
             _update_last_synced(conn, team_id)
 
     logger.info("Member sync complete: team_id=%d status=%s", team_id, status)
+
+
+# ---------------------------------------------------------------------------
+# Spray chart enrichment (scouting pipeline)
+# ---------------------------------------------------------------------------
+
+
+def _resolve_team_gc_uuid(
+    conn: sqlite3.Connection,
+    team_id: int,
+    public_id: str,
+    client: GameChangerClient,
+) -> str | None:
+    """Attempt gc_uuid resolution for a tracked team if gc_uuid is NULL.
+
+    Returns the gc_uuid (existing or newly resolved), or None if unavailable.
+    Errors are logged but never propagated -- spray stages degrade gracefully.
+    """
+    row = conn.execute(
+        "SELECT gc_uuid, name, season_year FROM teams WHERE id = ?", (team_id,)
+    ).fetchone()
+    if row is None:
+        return None
+
+    gc_uuid, team_name, season_year = row
+    if gc_uuid:
+        return gc_uuid
+
+    if not public_id:
+        logger.info(
+            "gc_uuid resolution skipped for team_id=%d: no public_id.", team_id
+        )
+        return None
+
+    try:
+        resolved = resolve_gc_uuid(
+            team_id=team_id,
+            public_id=public_id,
+            team_name=team_name or "",
+            season_year=season_year,
+            conn=conn,
+            data_root=_DATA_ROOT,
+            client=client,
+        )
+        if resolved:
+            logger.info(
+                "gc_uuid resolved for team_id=%d: %s", team_id, resolved
+            )
+        else:
+            logger.info(
+                "gc_uuid resolution returned no result for team_id=%d.", team_id
+            )
+        return resolved
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "gc_uuid resolution failed for team_id=%d", team_id, exc_info=True
+        )
+        return None
+
+
+def _run_spray_stages(
+    conn: sqlite3.Connection,
+    client: GameChangerClient,
+    team_id: int,
+    public_id: str,
+    gc_uuid: str | None,
+    season_id: str | None,
+) -> None:
+    """Run spray chart crawl + load for a scouted team (non-fatal).
+
+    If gc_uuid is None, both stages are skipped with an INFO log.
+    Any exception is logged at WARNING and swallowed -- spray data is
+    additive enrichment that must not fail the overall scouting sync.
+
+    Args:
+        conn: Open SQLite connection.
+        client: Authenticated GameChangerClient.
+        team_id: The team's INTEGER PK.
+        public_id: The team's public_id slug.
+        gc_uuid: The team's gc_uuid (may be None).
+        season_id: Season to scope spray crawl/load (may be None).
+    """
+    if not gc_uuid:
+        logger.info(
+            "Spray stages skipped for team_id=%d: no gc_uuid available.", team_id
+        )
+        return
+
+    # Spray crawl
+    try:
+        spray_crawler = ScoutingSprayChartCrawler(client, conn, data_root=_DATA_ROOT)
+        spray_result = spray_crawler.crawl_team(
+            public_id, season_id=season_id, gc_uuid=gc_uuid
+        )
+        logger.info(
+            "Spray crawl done: team_id=%d written=%d skipped=%d errors=%d",
+            team_id,
+            spray_result.files_written,
+            spray_result.files_skipped,
+            spray_result.errors,
+        )
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "Spray crawl failed for team_id=%d (non-fatal)", team_id, exc_info=True
+        )
+        return
+
+    # Skip spray load if crawl had errors (parity with CLI behavior).
+    if spray_result.errors:
+        logger.warning(
+            "Spray crawl had %d error(s) for team_id=%d; skipping spray load.",
+            spray_result.errors,
+            team_id,
+        )
+        return
+
+    # Spray load
+    try:
+        spray_loader = ScoutingSprayChartLoader(conn)
+        spray_load_result = spray_loader.load_all(
+            _DATA_ROOT,
+            public_id=public_id,
+            season_id=season_id,
+        )
+        if spray_load_result.errors:
+            logger.warning(
+                "Spray load had %d error(s) for team_id=%d (non-fatal)",
+                spray_load_result.errors,
+                team_id,
+            )
+        else:
+            logger.info(
+                "Spray load done: team_id=%d loaded=%d skipped=%d",
+                team_id,
+                spray_load_result.loaded,
+                spray_load_result.skipped,
+            )
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "Spray load failed for team_id=%d (non-fatal)", team_id, exc_info=True
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -490,6 +742,12 @@ def run_scouting_sync(team_id: int, public_id: str, crawl_job_id: int) -> None:
                 crawler.update_run_load_status(team_id, season_id, "completed")
                 _mark_job_terminal(conn, crawl_job_id, "completed", None)
                 _update_last_synced(conn, team_id)
+
+                # 3. Spray chart enrichment (non-fatal; job stays "completed").
+                gc_uuid = _resolve_team_gc_uuid(conn, team_id, public_id, client)
+                _run_spray_stages(
+                    conn, client, team_id, public_id, gc_uuid, season_id
+                )
 
             logger.info(
                 "Scouting sync complete: team_id=%d public_id=%s loaded=%d errors=%d",

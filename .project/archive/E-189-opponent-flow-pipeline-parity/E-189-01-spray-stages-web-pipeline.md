@@ -4,7 +4,7 @@
 [E-189: Opponent Flow Pipeline and Display Parity](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, `run_scouting_sync` in `src/pipeline/trigger.py` will run gc_uuid resolution, spray chart crawl, and spray chart load after the main scouting crawl+load -- matching the CLI's behavior. Opponents synced via the admin UI will have spray chart data fetched and loaded without requiring CLI intervention.

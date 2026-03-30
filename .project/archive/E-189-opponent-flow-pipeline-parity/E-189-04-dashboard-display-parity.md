@@ -4,7 +4,7 @@
 [E-189: Opponent Flow Pipeline and Display Parity](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the dashboard opponent detail page will display PA badges on batting rows, IP badges on pitching rows, and graduated heat-map coloring on rate stats -- matching the standalone reports' display quality and following the "never suppress, always contextualize" display philosophy from `.claude/rules/display-philosophy.md`.

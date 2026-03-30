@@ -15,6 +15,14 @@ Scout: {{ scouting_report.team_name if scouting_report else opponent_team_id }}
 
 {% block content %}
 
+<style>
+  .heat-0 { }
+  .heat-1 { background-color: #dbeafe; }
+  .heat-2 { background-color: #bfdbfe; }
+  .heat-3 { background-color: #93c5fd; }
+  .heat-4 { background-color: #60a5fa; }
+</style>
+
 {# Back to Schedule link #}
 <div class="mb-4">
   <a href="/dashboard{% if active_team_id %}?team_id={{ active_team_id }}{% if year %}&amp;year={{ year }}{% endif %}{% if season_id %}&amp;season_id={{ season_id }}{% endif %}{% elif year %}?year={{ year }}{% if season_id %}&amp;season_id={{ season_id }}{% endif %}{% elif season_id %}?season_id={{ season_id }}{% endif %}" class="text-blue-900 hover:underline text-sm py-2 inline-block">&larr; Back to Schedule</a>
@@ -81,7 +89,7 @@ Scout: {{ scouting_report.team_name if scouting_report else opponent_team_id }}
       <span>
         {% if pitcher.jersey_number %}<span class="text-sm text-gray-500">#{{ pitcher.jersey_number }}</span> {% endif %}{% if pitcher.name_unresolved and pitcher.jersey_number %}{# jersey prefix is sufficient #}{% elif pitcher.name_unresolved %}<span class="text-sm text-gray-500 italic">{{ pitcher.name }}</span>{% else %}<span class="text-sm font-bold text-gray-900">{{ pitcher.name }}</span>{% endif %}{% if pitcher.throws %} <span class="text-sm text-gray-500">({{ pitcher.throws }})</span>{% endif %}
       </span>
-      <span class="text-sm text-gray-500">{{ pitcher.games }} GP</span>
+      <span class="text-sm text-gray-500">{{ pitcher.ip_outs | ip_display }} IP</span>
     </div>
     <p class="text-sm text-gray-700 mt-0.5">{{ pitcher.era }} ERA &middot; {{ pitcher.k9 }} K/9 &middot; {{ pitcher.whip }} WHIP</p>
     <p class="text-sm text-gray-500">{{ pitcher.bb9 }} BB/9 &middot; {{ pitcher.k_bb_ratio }} K/BB</p>
@@ -97,19 +105,19 @@ Scout: {{ scouting_report.team_name if scouting_report else opponent_team_id }}
   <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
     <div>
       <p class="text-xs text-gray-500 uppercase tracking-wide">OBP</p>
-      <p class="text-lg font-bold text-gray-900">{{ team_batting.obp }} <span class="text-xs font-normal text-gray-400">({{ game_count }} GP)</span></p>
+      <p class="text-lg font-bold text-gray-900">{{ team_batting.obp }} <span class="text-xs font-normal text-gray-400">({{ game_count }} G)</span></p>
     </div>
     <div>
       <p class="text-xs text-gray-500 uppercase tracking-wide">K%</p>
-      <p class="text-lg font-bold text-gray-900">{{ team_batting.k_pct }} <span class="text-xs font-normal text-gray-400">({{ game_count }} GP)</span></p>
+      <p class="text-lg font-bold text-gray-900">{{ team_batting.k_pct }} <span class="text-xs font-normal text-gray-400">({{ game_count }} G)</span></p>
     </div>
     <div>
       <p class="text-xs text-gray-500 uppercase tracking-wide">BB%</p>
-      <p class="text-lg font-bold text-gray-900">{{ team_batting.bb_pct }} <span class="text-xs font-normal text-gray-400">({{ game_count }} GP)</span></p>
+      <p class="text-lg font-bold text-gray-900">{{ team_batting.bb_pct }} <span class="text-xs font-normal text-gray-400">({{ game_count }} G)</span></p>
     </div>
     <div>
       <p class="text-xs text-gray-500 uppercase tracking-wide">SLG</p>
-      <p class="text-lg font-bold text-gray-900">{{ team_batting.slg }} <span class="text-xs font-normal text-gray-400">({{ game_count }} GP)</span></p>
+      <p class="text-lg font-bold text-gray-900">{{ team_batting.slg }} <span class="text-xs font-normal text-gray-400">({{ game_count }} G)</span></p>
     </div>
   </div>
 </div>
@@ -218,9 +226,9 @@ Scout: {{ scouting_report.team_name if scouting_report else opponent_team_id }}
       <tr class="border-b border-gray-200 {% if loop.index is even %}bg-gray-50{% endif %}">
         <td class="py-2 px-2 text-center">{% if pitcher.jersey_number %}{{ pitcher.jersey_number }}{% else %}&mdash;{% endif %}</td>
         <td class="py-2 px-3 whitespace-nowrap {% if pitcher.name_unresolved %}text-gray-500 italic{% else %}font-medium{% endif %}">{{ pitcher.name }}</td>
-        <td class="py-2 px-3 text-center whitespace-nowrap">{{ pitcher.era }} <span class="text-xs text-gray-400">({{ pitcher.games }} GP)</span></td>
-        <td class="py-2 px-3 text-center whitespace-nowrap">{{ pitcher.k9 }} <span class="text-xs text-gray-400">({{ pitcher.games }} GP)</span></td>
-        <td class="py-2 px-3 text-center whitespace-nowrap">{{ pitcher.whip }} <span class="text-xs text-gray-400">({{ pitcher.games }} GP)</span></td>
+        <td class="py-2 px-3 text-center whitespace-nowrap heat-{{ pitcher._heat.era }}">{{ pitcher.era }} <span class="text-xs text-gray-400">({{ pitcher.ip_outs | ip_display }} IP)</span></td>
+        <td class="py-2 px-3 text-center whitespace-nowrap heat-{{ pitcher._heat.k9 }}">{{ pitcher.k9 }} <span class="text-xs text-gray-400">({{ pitcher.ip_outs | ip_display }} IP)</span></td>
+        <td class="py-2 px-3 text-center whitespace-nowrap heat-{{ pitcher._heat.whip }}">{{ pitcher.whip }} <span class="text-xs text-gray-400">({{ pitcher.ip_outs | ip_display }} IP)</span></td>
         <td class="py-2 px-3 text-center">{{ pitcher.games }}</td>
         <td class="py-2 px-3 text-center">{{ pitcher.ip_outs | ip_display }}</td>
         <td class="py-2 px-3 text-center">{{ pitcher.h }}</td>
@@ -273,13 +281,13 @@ Scout: {{ scouting_report.team_name if scouting_report else opponent_team_id }}
              data-src="/dashboard/charts/spray/player/{{ player.player_id }}.png?season_id={{ season_id }}">View spray</button>
           {% endif %}
         </td>
-        <td class="py-2 px-3 text-center whitespace-nowrap">{{ player.h | format_avg(player.ab) }} <span class="text-xs text-gray-400">({{ player.games }} GP)</span></td>
-        <td class="py-2 px-3 text-center whitespace-nowrap">{{ (player.h + player.bb + player.hbp) | format_avg(player.ab + player.bb + player.hbp + player.shf) }} <span class="text-xs text-gray-400">({{ player.games }} GP)</span></td>
+        <td class="py-2 px-3 text-center whitespace-nowrap heat-{{ player._heat.avg }}">{{ player.h | format_avg(player.ab) }} <span class="text-xs text-gray-400">({{ player._pa }} PA)</span></td>
+        <td class="py-2 px-3 text-center whitespace-nowrap heat-{{ player._heat.obp }}">{{ (player.h + player.bb + player.hbp) | format_avg(player.ab + player.bb + player.hbp + player.shf) }} <span class="text-xs text-gray-400">({{ player._pa }} PA)</span></td>
         <td class="py-2 px-3 text-center">{{ player.games }}</td>
         <td class="py-2 px-3 text-center">{{ player.ab }}</td>
         <td class="py-2 px-3 text-center">{{ player.bb }}</td>
         <td class="py-2 px-3 text-center">{{ player.so }}</td>
-        <td class="py-2 px-3 text-center whitespace-nowrap">{{ (player.h + player.doubles + 2 * player.triples + 3 * player.hr) | format_avg(player.ab) }} <span class="text-xs text-gray-400">({{ player.games }} GP)</span></td>
+        <td class="py-2 px-3 text-center whitespace-nowrap heat-{{ player._heat.slg }}">{{ (player.h + player.doubles + 2 * player.triples + 3 * player.hr) | format_avg(player.ab) }} <span class="text-xs text-gray-400">({{ player._pa }} PA)</span></td>
         <td class="py-2 px-3 text-center">{{ player.h }}</td>
         <td class="py-2 px-3 text-center">{{ player.hr }}</td>
         <td class="py-2 px-3 text-center">{{ player.sb }}</td>

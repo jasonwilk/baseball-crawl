@@ -1267,6 +1267,132 @@ async def _fetch_opponent_list_data(
     return opponents, team_infos
 
 
+# ---------------------------------------------------------------------------
+# Heat-map helpers for opponent detail (E-189-04)
+# ---------------------------------------------------------------------------
+
+_BATTING_HEAT_TIERS = [(9, 4), (7, 3), (5, 2), (3, 1)]   # 0-2 qualified = max 0
+_PITCHING_HEAT_TIERS = [(6, 4), (4, 3), (3, 2), (2, 1)]   # 0-1 qualified = max 0
+_HEAT_THRESHOLDS = [(0.70, 4), (0.40, 3), (0.20, 2), (0.0, 1)]
+_MIN_PA_BATTING = 5
+_MIN_OUTS_PITCHING = 18  # 6 IP
+
+
+def _max_heat_for_depth(
+    qualified_count: int,
+    tiers: list[tuple[int, int]],
+) -> int:
+    """Return the maximum heat level for a given number of qualified players."""
+    for min_count, max_level in tiers:
+        if qualified_count >= min_count:
+            return max_level
+    return 0
+
+
+def _percentile_rank(value: float, values: list[float]) -> float:
+    """Compute percentile rank of value within values. Returns 0-1."""
+    if not values:
+        return 0.0
+    count_le = sum(1 for v in values if v <= value)
+    return count_le / len(values)
+
+
+def _percentile_to_level(pct: float) -> int:
+    """Map a percentile (0-1) to a heat level (1-4)."""
+    for threshold, level in _HEAT_THRESHOLDS:
+        if pct >= threshold:
+            return level
+    return 1
+
+
+def _compute_batting_heat(batting: list[dict]) -> None:
+    """Compute PA and heat levels for each batter. Mutates rows in place.
+
+    Adds ``_pa`` (int) and ``_heat`` (dict with avg/obp/slg keys, values 0-4)
+    to each player dict.
+    """
+    for p in batting:
+        pa = (p.get("ab") or 0) + (p.get("bb") or 0) + (p.get("hbp") or 0) + (p.get("shf") or 0)
+        p["_pa"] = pa
+
+    qualified = [p for p in batting if p["_pa"] >= _MIN_PA_BATTING]
+    cap = _max_heat_for_depth(len(qualified), _BATTING_HEAT_TIERS)
+
+    if cap == 0 or not qualified:
+        for p in batting:
+            p["_heat"] = {"avg": 0, "obp": 0, "slg": 0}
+        return
+
+    # Compute raw rate values for qualified players.
+    for p in qualified:
+        pa = p["_pa"]
+        ab = p.get("ab") or 0
+        p["_avg_raw"] = (p.get("h") or 0) / ab if ab else 0.0
+        p["_obp_raw"] = ((p.get("h") or 0) + (p.get("bb") or 0) + (p.get("hbp") or 0)) / pa if pa else 0.0
+        tb = (p.get("h") or 0) + (p.get("doubles") or 0) + 2 * (p.get("triples") or 0) + 3 * (p.get("hr") or 0)
+        p["_slg_raw"] = tb / ab if ab else 0.0
+
+    avg_vals = [p["_avg_raw"] for p in qualified]
+    obp_vals = [p["_obp_raw"] for p in qualified]
+    slg_vals = [p["_slg_raw"] for p in qualified]
+
+    for p in qualified:
+        p["_heat"] = {
+            "avg": min(_percentile_to_level(_percentile_rank(p["_avg_raw"], avg_vals)), cap),
+            "obp": min(_percentile_to_level(_percentile_rank(p["_obp_raw"], obp_vals)), cap),
+            "slg": min(_percentile_to_level(_percentile_rank(p["_slg_raw"], slg_vals)), cap),
+        }
+        # Clean up temp keys.
+        p.pop("_avg_raw", None)
+        p.pop("_obp_raw", None)
+        p.pop("_slg_raw", None)
+
+    # Unqualified players get zero heat.
+    for p in batting:
+        if "_heat" not in p:
+            p["_heat"] = {"avg": 0, "obp": 0, "slg": 0}
+
+
+def _compute_pitching_heat(pitching: list[dict]) -> None:
+    """Compute heat levels for each pitcher. Mutates rows in place.
+
+    Adds ``_heat`` (dict with era/k9/whip keys, values 0-4) to each pitcher dict.
+    """
+    qualified = [p for p in pitching if (p.get("ip_outs") or 0) >= _MIN_OUTS_PITCHING]
+    cap = _max_heat_for_depth(len(qualified), _PITCHING_HEAT_TIERS)
+
+    if cap == 0 or not qualified:
+        for p in pitching:
+            p["_heat"] = {"era": 0, "k9": 0, "whip": 0}
+        return
+
+    for p in qualified:
+        outs = p.get("ip_outs") or 0
+        ip = outs / 3.0
+        p["_era_raw"] = ((p.get("er") or 0) * 9.0 / ip) if ip else 99.0
+        p["_k9_raw"] = ((p.get("so") or 0) * 9.0 / ip) if ip else 0.0
+        p["_whip_raw"] = (((p.get("bb") or 0) + (p.get("h") or 0)) / ip) if ip else 99.0
+
+    # ERA and WHIP are inverted (lower is better).
+    neg_era_vals = [-p["_era_raw"] for p in qualified]
+    k9_vals = [p["_k9_raw"] for p in qualified]
+    neg_whip_vals = [-p["_whip_raw"] for p in qualified]
+
+    for p in qualified:
+        p["_heat"] = {
+            "era": min(_percentile_to_level(_percentile_rank(-p["_era_raw"], neg_era_vals)), cap),
+            "k9": min(_percentile_to_level(_percentile_rank(p["_k9_raw"], k9_vals)), cap),
+            "whip": min(_percentile_to_level(_percentile_rank(-p["_whip_raw"], neg_whip_vals)), cap),
+        }
+        p.pop("_era_raw", None)
+        p.pop("_k9_raw", None)
+        p.pop("_whip_raw", None)
+
+    for p in pitching:
+        if "_heat" not in p:
+            p["_heat"] = {"era": 0, "k9": 0, "whip": 0}
+
+
 @router.get("/dashboard/opponents/{opponent_team_id}", response_model=None)
 async def opponent_detail(request: Request, opponent_team_id: int) -> Response:
     """Render the opponent scouting report page.
@@ -1373,6 +1499,10 @@ async def opponent_detail(request: Request, opponent_team_id: int) -> Response:
     )
     if pit_needs_sort:
         scouting_report["pitching"] = _sort_pitching(scouting_report.get("pitching", []), pit_sort, pit_dir)
+
+    # Compute heat-map levels (E-189-04).
+    _compute_batting_heat(scouting_report.get("batting", []))
+    _compute_pitching_heat(scouting_report.get("pitching", []))
 
     # Fetch last meeting.
     last_meeting = None
@@ -1508,6 +1638,9 @@ async def opponent_print(request: Request, opponent_team_id: int) -> Response:
 
     # Team batting summary for context bar.
     team_batting = _compute_team_batting(scouting_report.get("batting", []))
+
+    # Compute PA for badges (E-189-04). Heat computed but only PA/IP used in print.
+    _compute_batting_heat(scouting_report.get("batting", []))
 
     # Fetch last meeting.
     last_meeting = None

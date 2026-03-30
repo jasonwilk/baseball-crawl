@@ -4,7 +4,7 @@
 [E-189: Opponent Flow Pipeline and Display Parity](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the context layer will document the requirement that the web scouting pipeline (`run_scouting_sync`) and CLI scouting pipeline (`bb data scout`) must produce equivalent data artifacts. Future changes to either pipeline must maintain parity.

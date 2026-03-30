@@ -264,9 +264,9 @@
     <tr>
       <td>{% if pitcher.jersey_number %}{{ pitcher.jersey_number }}{% else %}&mdash;{% endif %}</td>
       <td class="col-player"{% if pitcher.name_unresolved %} style="color: #6b7280; font-style: italic"{% endif %}>{{ pitcher.name }}{% if pitcher.throws %} ({{ pitcher.throws }}){% endif %}</td>
-      <td>{{ pitcher.era }}</td>
-      <td>{{ pitcher.k9 }}</td>
-      <td>{{ pitcher.whip }}</td>
+      <td>{{ pitcher.era }} <span style="font-size: 7pt; color: #888;">({{ pitcher.ip_outs | ip_display }} IP)</span></td>
+      <td>{{ pitcher.k9 }} <span style="font-size: 7pt; color: #888;">({{ pitcher.ip_outs | ip_display }} IP)</span></td>
+      <td>{{ pitcher.whip }} <span style="font-size: 7pt; color: #888;">({{ pitcher.ip_outs | ip_display }} IP)</span></td>
       <td>{{ pitcher.games }}</td>
       <td>{{ pitcher.ip_outs | ip_display }}</td>
       <td>{{ pitcher.bb }}</td>
@@ -307,9 +307,9 @@
     <tr>
       <td>{% if player.jersey_number %}{{ player.jersey_number }}{% else %}&mdash;{% endif %}</td>
       <td class="col-player"{% if player.name_unresolved %} style="color: #6b7280; font-style: italic"{% endif %}>{{ player.name }}</td>
-      <td>{{ player.h | format_avg(player.ab) }}</td>
-      <td>{{ (player.h + player.bb + player.hbp) | format_avg(player.ab + player.bb + player.hbp + player.shf) }}</td>
-      <td>{{ (player.h + player.doubles + 2 * player.triples + 3 * player.hr) | format_avg(player.ab) }}</td>
+      <td>{{ player.h | format_avg(player.ab) }} <span style="font-size: 7pt; color: #888;">({{ player._pa }} PA)</span></td>
+      <td>{{ (player.h + player.bb + player.hbp) | format_avg(player.ab + player.bb + player.hbp + player.shf) }} <span style="font-size: 7pt; color: #888;">({{ player._pa }} PA)</span></td>
+      <td>{{ (player.h + player.doubles + 2 * player.triples + 3 * player.hr) | format_avg(player.ab) }} <span style="font-size: 7pt; color: #888;">({{ player._pa }} PA)</span></td>
       <td>{{ player.games }}</td>
       <td>{{ player.ab }}</td>
       <td>{{ player.bb }}</td>

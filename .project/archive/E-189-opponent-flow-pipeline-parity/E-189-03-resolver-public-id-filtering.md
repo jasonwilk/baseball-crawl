@@ -4,7 +4,7 @@
 [E-189: Opponent Flow Pipeline and Display Parity](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the gc_uuid resolver's Tier 3 search will prefer public_id-based filtering when the team's public_id is available, falling back to the existing name+season_year matching when public_id is NULL or when the public_id filter finds no match. This eliminates ambiguous matches for common team names (e.g., "Lincoln" returning dozens of results).

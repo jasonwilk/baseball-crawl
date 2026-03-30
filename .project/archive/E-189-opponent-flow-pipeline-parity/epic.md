@@ -1,7 +1,7 @@
 # E-189: Opponent Flow Pipeline and Display Parity
 
 ## Status
-`READY`
+`COMPLETED`
 <!-- Lifecycle: DRAFT -> READY -> ACTIVE -> COMPLETED (or BLOCKED / ABANDONED) -->
 <!-- PM sets READY explicitly after: expert consultation done, all stories have testable ACs, quality checklist passed. -->
 <!-- Only READY and ACTIVE epics can be dispatched. -->
@@ -46,11 +46,11 @@ Promoted from IDEA-059. No expert consultation required for Gaps 1-3 (pure pipel
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-189-01 | Add spray stages and gc_uuid resolution to web scouting pipeline | TODO | None | - |
-| E-189-02 | Auto-scout opponents resolved during member sync | TODO | E-189-01 | - |
-| E-189-03 | Add public_id filtering to gc_uuid resolver Tier 3 | TODO | None | - |
-| E-189-04 | Add PA/IP badges and heat-map coloring to dashboard opponent detail | TODO | None | - |
-| E-189-05 | Context-layer: codify pipeline parity requirement | TODO | E-189-01, E-189-02 | - |
+| E-189-01 | Add spray stages and gc_uuid resolution to web scouting pipeline | DONE | None | - |
+| E-189-02 | Auto-scout opponents resolved during member sync | DONE | E-189-01 | - |
+| E-189-03 | Add public_id filtering to gc_uuid resolver Tier 3 | DONE | None | - |
+| E-189-04 | Add PA/IP badges and heat-map coloring to dashboard opponent detail | DONE | None | - |
+| E-189-05 | Context-layer: codify pipeline parity requirement | DONE | E-189-01, E-189-02 | - |
 
 ## Dispatch Team
 - software-engineer
@@ -136,6 +136,19 @@ None -- all gaps are well-characterized from IDEA-059 research and code reading.
 ## History
 - 2026-03-29: Created. Promoted from IDEA-059. Expert consultations with baseball-coach (display priorities) and software-engineer (implementation feasibility) completed during discovery.
 - 2026-03-30: Set to READY after 2 internal review iterations + Codex review (23 findings: 19 accepted, 4 dismissed).
+- 2026-03-30: COMPLETED. All 5 stories DONE. Delivered: (1) web scouting pipeline parity with CLI -- spray crawl/load + gc_uuid resolution added to `run_scouting_sync`; (2) auto-scout for opponents resolved during member sync -- eliminates manual "Sync" clicks; (3) gc_uuid resolver Tier 3 uses public_id filtering for unambiguous resolution of common team names; (4) dashboard opponent detail page now shows PA/IP badges and graduated heat-map coloring matching standalone reports; (5) CLAUDE.md codifies pipeline parity requirement and auto-scout trigger pattern.
+
+### Documentation Assessment
+Trigger 1 (new feature ships): YES -- PA/IP badges and heat-map coloring on dashboard opponent detail. However, `docs/coaching/scouting-reports.md` already documents the opponent detail page and was updated 2026-03-29 for E-163. The new badges are visual enhancements to existing stats (no new data or workflow), and `docs/coaching/understanding-stats.md` already covers PA thresholds and sample size guidance. The web pipeline parity (spray stages, auto-scout) is operator-invisible -- it just makes the existing "Sync" button produce more complete data. No new admin workflows or commands. **Verdict: No documentation update required** -- the feature is a display enhancement to documented pages, not a new workflow or concept.
+
+### Context-Layer Assessment
+1. **New convention or pattern introduced?** YES -- pipeline parity requirement (web = CLI). Handled by E-189-05 (CLAUDE.md updated).
+2. **Existing convention changed or deprecated?** NO -- no conventions changed.
+3. **New agent capability or workflow?** NO -- no agent changes.
+4. **File path or architecture change that affects routing?** NO -- no new files that change routing.
+5. **Lesson learned that should inform future work?** NO -- execution was clean (6 findings, all accepted, 0 dismissed).
+6. **Integration pattern that other agents need to know?** YES -- auto-scout trigger pattern (three resolution paths). Handled by E-189-05 (CLAUDE.md updated).
+**Verdict: Context-layer impact fully addressed by E-189-05.** No additional claude-architect dispatch needed.
 
 ### Review Scorecard (Planning)
 | Review Pass | Findings | Accepted | Dismissed |
@@ -146,3 +159,17 @@ None -- all gaps are well-characterized from IDEA-059 research and code reading.
 | Internal iteration 2 -- CR spec audit | 0 | 0 | 0 |
 | Internal iteration 2 -- Holistic team (PM) | 0 | 0 | 0 |
 | **Total** | **23** | **19** | **4** |
+
+### Review Scorecard (Implementation)
+| Review Pass | Findings | Accepted | Dismissed |
+|---|---|---|---|
+| Per-story CR -- E-189-01 (2 rounds) | 1 | 1 | 0 |
+| Per-story CR -- E-189-02 | 0 | 0 | 0 |
+| Per-story CR -- E-189-03 | 0 | 0 | 0 |
+| Per-story CR -- E-189-04 | 0 | 0 | 0 |
+| Per-story CR -- E-189-05 | skipped (context-layer) | - | - |
+| CR integration review (pass 1) | 0 | 0 | 0 |
+| CR integration review (pass 2, post-remediation) | 0 | 0 | 0 |
+| Codex code review (round 1) | 5 | 5 | 0 |
+| Codex code review (round 2) | 5 | 4 | 1 |
+| **Total** | **11** | **10** | **1** |
