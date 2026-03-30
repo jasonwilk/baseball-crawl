@@ -4,7 +4,9 @@
 [E-188: Eliminate Orphan Team Stubs from Report Generation](epic.md)
 
 ## Status
-`TODO`
+`ABANDONED`
+
+**Reason**: One-time cleanup tasks should not be permanent CLI commands. Existing orphans can be cleaned with documented SQL.
 
 ## Description
 After this story is complete, a `bb data cleanup-orphans` CLI command exists that identifies and deletes orphan team stubs from prior report generations. The command follows the `--dry-run` (default) / `--execute` pattern used by `bb data dedup` and `bb data repair-opponents`.

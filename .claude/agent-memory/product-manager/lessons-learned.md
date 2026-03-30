@@ -89,6 +89,10 @@ Three recurring violations identified in 2026-03-02 audit:
 
 **Pattern reinforced**: Prose rules fail; procedural checkpoints succeed. This is the same lesson from E-029 (routing errors) and E-059 (consultation compliance), now applied to the main session itself.
 
+## Story Scoping
+
+**Lesson (E-188, 2026-03-30)**: One-time data cleanup tasks should not be permanent CLI commands. If a task is truly one-off, documented SQL is sufficient -- it does not justify a permanent code artifact with tests and maintenance burden. Reserve CLI commands for recurring operator workflows. When scoping "cleanup existing X" stories, ask: will this command be used more than once? If not, document the SQL instead.
+
 ## Implementation Prescriptiveness
 
 **Incident (E-058 formation)**: PM prescribed specific bash patterns (e.g., `${BASH_SOURCE[0]}` vs `$0`) in story Technical Approach sections, crossing the Technical Delegation Boundary.

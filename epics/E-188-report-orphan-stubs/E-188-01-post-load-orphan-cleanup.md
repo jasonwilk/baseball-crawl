@@ -4,7 +4,7 @@
 [E-188: Eliminate Orphan Team Stubs from Report Generation](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the report generator will snapshot team IDs before the scouting load, identify orphan opponent team rows created during the load, query all game-dependent data, then delete the orphans and their dependent rows. New report generations will create zero net new orphan team rows in the `teams` table.

@@ -592,6 +592,10 @@ def generate_report(gc_url: str) -> GenerationResult:
             generated_at, expires_at,
         )
 
+    # Snapshot team IDs before scouting load (for orphan cleanup)
+    with closing(get_connection()) as conn:
+        pre_team_ids = _snapshot_team_ids(conn)
+
     # Step 4: Run scouting pipeline synchronously
     try:
         client = GameChangerClient()
@@ -683,9 +687,15 @@ def generate_report(gc_url: str) -> GenerationResult:
         _fail_report(report_id, msg)
         return GenerationResult(success=False, slug=slug, error_message=msg)
 
+    # Compute orphan team IDs created during the scouting load
+    with closing(get_connection()) as conn:
+        post_team_ids = _snapshot_team_ids(conn)
+    orphan_ids = post_team_ids - pre_team_ids - {team_id}
+
     # Step 5: Query stats, render, save, and mark ready — all in one
     # failure-handling block so the report never gets stuck in 'generating'.
     try:
+        # Query BEFORE cleanup -- game-dependent queries need game rows
         with closing(get_connection()) as conn:
             conn.row_factory = sqlite3.Row
             batting = _query_batting(conn, team_id, season_id)
@@ -698,6 +708,18 @@ def generate_report(gc_url: str) -> GenerationResult:
             runs_scored_avg, runs_allowed_avg = _query_runs_avg(
                 conn, team_id, season_id
             )
+
+        # Orphan cleanup -- after queries, before render (non-fatal)
+        if orphan_ids:
+            try:
+                with closing(get_connection()) as conn:
+                    _cleanup_orphan_teams(conn, orphan_ids)
+            except Exception:  # noqa: BLE001
+                logger.warning(
+                    "Orphan cleanup failed for %d team(s); report continues.",
+                    len(orphan_ids),
+                    exc_info=True,
+                )
 
         # Render HTML
         team_info["record"] = record
@@ -742,6 +764,55 @@ def generate_report(gc_url: str) -> GenerationResult:
         title=title,
         url=url,
     )
+
+
+def _snapshot_team_ids(conn: sqlite3.Connection) -> set[int]:
+    """Return all current team IDs as a set."""
+    return {row[0] for row in conn.execute("SELECT id FROM teams")}
+
+
+def _cleanup_orphan_teams(
+    conn: sqlite3.Connection, orphan_ids: set[int]
+) -> int:
+    """Delete orphan teams and their dependent rows in FK-safe order.
+
+    Two-phase deletion per TN-1:
+    Phase 1 -- game-scoped (by game_id, covers both teams' data):
+      player_game_batting, player_game_pitching, spray_charts, games
+    Phase 2 -- team-scoped (by orphan team_id):
+      team_rosters, player_season_batting, player_season_pitching, teams
+    """
+    if not orphan_ids:
+        return 0
+
+    placeholders = ",".join("?" for _ in orphan_ids)
+    id_list = list(orphan_ids)
+
+    # Phase 1: identify affected games, then delete game-scoped data
+    game_rows = conn.execute(
+        f"SELECT game_id FROM games WHERE home_team_id IN ({placeholders}) "
+        f"OR away_team_id IN ({placeholders})",
+        id_list + id_list,
+    ).fetchall()
+    game_ids = [r[0] for r in game_rows]
+
+    if game_ids:
+        gp = ",".join("?" for _ in game_ids)
+        conn.execute(f"DELETE FROM player_game_batting WHERE game_id IN ({gp})", game_ids)
+        conn.execute(f"DELETE FROM player_game_pitching WHERE game_id IN ({gp})", game_ids)
+        conn.execute(f"DELETE FROM spray_charts WHERE game_id IN ({gp})", game_ids)
+        conn.execute(f"DELETE FROM games WHERE game_id IN ({gp})", game_ids)
+
+    # Phase 2: delete team-scoped data
+    conn.execute(f"DELETE FROM team_rosters WHERE team_id IN ({placeholders})", id_list)
+    conn.execute(f"DELETE FROM player_season_batting WHERE team_id IN ({placeholders})", id_list)
+    conn.execute(f"DELETE FROM player_season_pitching WHERE team_id IN ({placeholders})", id_list)
+    conn.execute(f"DELETE FROM teams WHERE id IN ({placeholders})", id_list)
+    conn.commit()
+
+    count = len(orphan_ids)
+    logger.info("Cleaned up %d orphan team(s) from report generation.", count)
+    return count
 
 
 def _fail_report(report_id: int, error_message: str) -> None:

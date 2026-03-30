@@ -1,10 +1,10 @@
 # E-188: Eliminate Orphan Team Stubs from Report Generation
 
 ## Status
-`READY`
+`COMPLETED`
 
 ## Overview
-The standalone report generation flow creates ~30 orphan team rows per report, accumulating UUID-named junk in the `teams` table and risking name-collision bugs that cause spray chart failures. This epic eliminates the orphans via a snapshot-and-diff cleanup after each report generation, and provides a one-time CLI command to clean up existing orphans from prior reports.
+The standalone report generation flow creates ~30 orphan team rows per report, accumulating UUID-named junk in the `teams` table and risking name-collision bugs that cause spray chart failures. This epic eliminates the orphans via a snapshot-and-diff cleanup after each report generation.
 
 ## Background & Context
 Promoted from IDEA-057. The report generator (`src/reports/generator.py`) calls `ScoutingLoader.load_team()`, which delegates boxscore loading to `GameLoader.load_file()`. The `games` table has `NOT NULL` FK references to `teams(id)` for both `home_team_id` and `away_team_id`, forcing the GameLoader to create a tracked team row for every opponent encountered in boxscores. Additionally, `ScoutingLoader._record_uuid_from_boxscore_path()` creates stubs as a redundant safety net.
@@ -17,27 +17,26 @@ A report for a team with 30 games creates ~30 UUID-named stub rows with no `publ
 
 ## Goals
 - Eliminate orphan team stubs created by report generation without breaking the opponent scouting flow
-- Clean up existing orphan stubs from prior report generations
 - Prevent the name-collision class of bugs (North Star pattern) by reducing junk in the teams table
 
 ## Non-Goals
 - Refactoring the GameLoader or ScoutingLoader to avoid game-row creation (the FK constraint is legitimate for the scouting flow)
 - Changing the `games` table schema (nullable FKs would weaken integrity for the scouting flow)
 - Addressing orphan stubs from the opponent scouting flow itself (those stubs are legitimate)
+- Building a CLI command for one-time data cleanup (one-off tasks are documented SQL, not permanent CLI commands)
 - Building a general-purpose team dedup/merge tool (covered by IDEA-043)
 - Adding gc_uuid verification to the report generator (violates the "never overwrite" storage rule; address as separate data quality tooling if needed)
 
 ## Success Criteria
 - Generating a standalone report creates zero net new orphan team rows in the `teams` table
-- Existing orphan stubs from prior reports are cleanable via a CLI command
 - The opponent scouting flow (`bb data scout`, admin opponent resolution) continues to work unchanged
 - All existing tests pass; new tests cover the cleanup paths
 
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-188-01 | Post-load orphan cleanup in report generator | TODO | None | - |
-| E-188-02 | One-time cleanup of existing orphan stubs | TODO | E-188-01 | - |
+| E-188-01 | Post-load orphan cleanup in report generator | DONE | None | - |
+| E-188-02 | One-time cleanup of existing orphan stubs | ABANDONED | E-188-01 | - |
 
 ## Dispatch Team
 - software-engineer
@@ -122,8 +121,28 @@ None -- all approach questions resolved during SE and DE consultation.
 
 Codex validation: skipped (small epic, critical FK issue caught and fixed during internal review).
 
+### Review Scorecard (Dispatch)
+| Review Pass | Findings | Accepted | Dismissed |
+|---|---|---|---|
+| Per-story CR -- E-188-01 | 1 | 0 | 1 |
+| Per-story CR -- E-188-02 | 2 | 2 | 0 |
+| CR integration review | 0 | 0 | 0 |
+| Codex code review | 1 | 1 | 0 |
+| **Total** | **4** | **3** | **1** |
+
 ## History
 - 2026-03-29: Created (promoted from IDEA-057)
 - 2026-03-29: Revised based on SE consultation -- dropped gc_uuid verification story (violates "never overwrite" rule), adopted snapshot-and-diff approach, added critical query-before-cleanup ordering
 - 2026-03-29: Incorporated review findings -- fixed FK violation in TN-1 deletion order (game_id-scoped Phase 1 + team_id-scoped Phase 2), added excluded tables documentation (players, scouting_runs, crawl_jobs, opponent_links), removed stale line references
 - 2026-03-29: Set to READY after internal review
+- 2026-03-30: Set to ACTIVE, dispatch started.
+- 2026-03-30: All stories DONE. CR integration: APPROVED (0). Codex: 1 P1 (opponent_links guard -- fixed). Epic COMPLETED.
+- 2026-03-30: E-188-02 dropped -- one-time cleanup tasks should not be permanent CLI commands. Existing orphans can be cleaned with documented SQL.
+- Documentation assessment: No documentation impact (E-188-02 dropped; no new CLI command shipped).
+- Context-layer assessment:
+  - New convention/pattern: YES (snapshot-and-diff cleanup, shared cleanup module at `src/db/cleanup.py`) -- small enough to not require separate codification.
+  - Architectural decision: No
+  - Footgun: No
+  - Agent behavior: No
+  - Domain knowledge: No
+  - New CLI command: No (E-188-02 dropped)

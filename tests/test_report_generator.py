@@ -9,6 +9,7 @@ import pytest
 
 from src.reports.generator import (
     GenerationResult,
+    _cleanup_orphan_teams,
     _crawl_and_load_spray,
     _create_report_row,
     _query_batting,
@@ -19,6 +20,7 @@ from src.reports.generator import (
     _query_roster,
     _query_runs_avg,
     _resolve_gc_uuid,
+    _snapshot_team_ids,
     _update_report_failed,
     _update_report_ready,
     generate_report,
@@ -132,8 +134,26 @@ def db(tmp_path):
             bf INTEGER DEFAULT 0,
             PRIMARY KEY (player_id, team_id, season_id)
         );
+        CREATE TABLE player_game_batting (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            game_id TEXT NOT NULL REFERENCES games(game_id),
+            player_id TEXT NOT NULL REFERENCES players(player_id),
+            team_id INTEGER NOT NULL REFERENCES teams(id),
+            ab INTEGER, r INTEGER, h INTEGER, rbi INTEGER,
+            bb INTEGER, so INTEGER,
+            UNIQUE(game_id, player_id)
+        );
+        CREATE TABLE player_game_pitching (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            game_id TEXT NOT NULL REFERENCES games(game_id),
+            player_id TEXT NOT NULL REFERENCES players(player_id),
+            team_id INTEGER NOT NULL REFERENCES teams(id),
+            ip_outs INTEGER, h INTEGER, er INTEGER, bb INTEGER, so INTEGER,
+            UNIQUE(game_id, player_id)
+        );
         CREATE TABLE spray_charts (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            game_id TEXT REFERENCES games(game_id),
             team_id INTEGER,
             player_id TEXT,
             season_id TEXT,
@@ -1393,3 +1413,353 @@ class TestResolveGcUuidIntegration:
         mock_spray.assert_called_once()
         _, spray_kwargs = mock_spray.call_args
         assert spray_kwargs.get("gc_uuid") == "resolved-uuid-abc"
+
+
+# ===========================================================================
+# E-188-01: Post-load orphan cleanup
+# ===========================================================================
+
+
+class TestSnapshotTeamIds:
+    """Test _snapshot_team_ids helper."""
+
+    def test_returns_all_team_ids(self, db):
+        _seed_team(db, "Team A", "a1")
+        _seed_team(db, "Team B", "b2")
+        ids = _snapshot_team_ids(db)
+        assert len(ids) == 2
+
+    def test_empty_table(self, db):
+        ids = _snapshot_team_ids(db)
+        assert ids == set()
+
+
+class TestCleanupOrphanTeams:
+    """AC-1, AC-2, AC-4: FK-safe orphan deletion."""
+
+    def test_deletes_orphan_teams_and_dependent_rows(self, db):
+        """AC-1: Orphan teams and all dependent data are deleted."""
+        # Subject team (should survive)
+        subject_id = _seed_team(db, "Subject Team", "subject1")
+        _seed_season(db)
+        _seed_player(db, "p1", "Subject", "Player")
+
+        # Orphan team
+        cursor = db.execute(
+            "INSERT INTO teams (name, public_id, season_year) "
+            "VALUES ('Orphan Team', 'orphan1', 2026)"
+        )
+        orphan_id = cursor.lastrowid
+        db.commit()
+
+        _seed_player(db, "p2", "Orphan", "Player")
+
+        # Game between subject and orphan
+        db.execute(
+            "INSERT INTO games (game_id, season_id, home_team_id, away_team_id, "
+            "home_score, away_score, game_date) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            ("g1", "2026-spring-hs", subject_id, orphan_id, 5, 3, "2026-03-20"),
+        )
+        db.commit()
+
+        # Per-game batting for both teams (both reference game g1)
+        db.execute(
+            "INSERT INTO player_game_batting (game_id, player_id, team_id, ab, h) "
+            "VALUES ('g1', 'p1', ?, 4, 2)",
+            (subject_id,),
+        )
+        db.execute(
+            "INSERT INTO player_game_batting (game_id, player_id, team_id, ab, h) "
+            "VALUES ('g1', 'p2', ?, 3, 1)",
+            (orphan_id,),
+        )
+        # Spray chart for the game
+        db.execute(
+            "INSERT INTO spray_charts (game_id, team_id, player_id, season_id, "
+            "chart_type, x, y) VALUES ('g1', ?, 'p2', '2026-spring-hs', 'offensive', 0.5, 0.5)",
+            (orphan_id,),
+        )
+        # Roster and season stats for orphan
+        db.execute(
+            "INSERT INTO team_rosters (team_id, player_id, season_id, jersey_number) "
+            "VALUES (?, 'p2', '2026-spring-hs', '99')",
+            (orphan_id,),
+        )
+        db.execute(
+            "INSERT INTO player_season_batting (player_id, team_id, season_id, gp, ab, h) "
+            "VALUES ('p2', ?, '2026-spring-hs', 5, 20, 8)",
+            (orphan_id,),
+        )
+        db.execute(
+            "INSERT INTO player_season_pitching (player_id, team_id, season_id, gp_pitcher, ip_outs) "
+            "VALUES ('p2', ?, '2026-spring-hs', 2, 12)",
+            (orphan_id,),
+        )
+        db.commit()
+
+        count = _cleanup_orphan_teams(db, {orphan_id})
+
+        assert count == 1
+        # Orphan team deleted
+        assert db.execute("SELECT id FROM teams WHERE id = ?", (orphan_id,)).fetchone() is None
+        # Subject team still exists
+        assert db.execute("SELECT id FROM teams WHERE id = ?", (subject_id,)).fetchone() is not None
+        # Game deleted (both teams' per-game data goes with it)
+        assert db.execute("SELECT game_id FROM games WHERE game_id = 'g1'").fetchone() is None
+        # Per-game batting for both teams deleted
+        assert db.execute("SELECT id FROM player_game_batting WHERE game_id = 'g1'").fetchone() is None
+        # Spray chart deleted
+        assert db.execute("SELECT id FROM spray_charts WHERE game_id = 'g1'").fetchone() is None
+        # Orphan roster deleted
+        assert db.execute(
+            "SELECT team_id FROM team_rosters WHERE team_id = ?", (orphan_id,)
+        ).fetchone() is None
+        # Orphan season stats deleted
+        assert db.execute(
+            "SELECT team_id FROM player_season_batting WHERE team_id = ?", (orphan_id,)
+        ).fetchone() is None
+        assert db.execute(
+            "SELECT team_id FROM player_season_pitching WHERE team_id = ?", (orphan_id,)
+        ).fetchone() is None
+        # Players NOT deleted (shared across teams)
+        assert db.execute("SELECT player_id FROM players WHERE player_id = 'p2'").fetchone() is not None
+
+    def test_pre_existing_teams_preserved(self, db):
+        """AC-2: Only teams in orphan_ids are deleted; pre-existing teams untouched."""
+        pre_existing_id = _seed_team(db, "Pre-existing", "pre1")
+        cursor = db.execute(
+            "INSERT INTO teams (name, public_id, season_year) "
+            "VALUES ('Orphan', 'orphan2', 2026)"
+        )
+        orphan_id = cursor.lastrowid
+        db.commit()
+
+        _cleanup_orphan_teams(db, {orphan_id})
+
+        # Pre-existing team still there
+        assert db.execute(
+            "SELECT id FROM teams WHERE id = ?", (pre_existing_id,)
+        ).fetchone() is not None
+        # Orphan gone
+        assert db.execute(
+            "SELECT id FROM teams WHERE id = ?", (orphan_id,)
+        ).fetchone() is None
+
+    def test_empty_orphan_set_is_noop(self, db):
+        """No orphans means no deletions."""
+        team_id = _seed_team(db)
+        count = _cleanup_orphan_teams(db, set())
+        assert count == 0
+        assert db.execute("SELECT id FROM teams WHERE id = ?", (team_id,)).fetchone() is not None
+
+    def test_fk_safe_deletion_order(self, db):
+        """AC-4: Deletes respect FK constraints with PRAGMA foreign_keys=ON."""
+        # This test verifies that the deletion order doesn't violate FK constraints.
+        # The db fixture already has PRAGMA foreign_keys=ON.
+        subject_id = _seed_team(db, "Subject", "subj1")
+        _seed_season(db)
+        _seed_player(db, "p1", "A", "Player")
+        _seed_player(db, "p2", "B", "Player")
+
+        cursor = db.execute(
+            "INSERT INTO teams (name, public_id, season_year) "
+            "VALUES ('Orphan', 'orp1', 2026)"
+        )
+        orphan_id = cursor.lastrowid
+        db.commit()
+
+        db.execute(
+            "INSERT INTO games (game_id, season_id, home_team_id, away_team_id, "
+            "home_score, away_score, game_date) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            ("g1", "2026-spring-hs", subject_id, orphan_id, 5, 3, "2026-03-20"),
+        )
+        db.execute(
+            "INSERT INTO player_game_batting (game_id, player_id, team_id, ab, h) "
+            "VALUES ('g1', 'p1', ?, 4, 2)",
+            (subject_id,),
+        )
+        db.execute(
+            "INSERT INTO player_game_pitching (game_id, player_id, team_id, ip_outs, er) "
+            "VALUES ('g1', 'p2', ?, 9, 2)",
+            (orphan_id,),
+        )
+        db.commit()
+
+        # Should not raise FK constraint error
+        count = _cleanup_orphan_teams(db, {orphan_id})
+        assert count == 1
+
+
+class TestCleanupNonFatal:
+    """AC-3: Cleanup failure is non-fatal."""
+
+    @patch("src.reports.generator.get_connection")
+    @patch("src.reports.generator.GameChangerClient")
+    @patch("src.reports.generator.ensure_team_row", return_value=1)
+    @patch("src.reports.generator.render_report", return_value="<html>ok</html>")
+    @patch("src.reports.generator._crawl_and_load_spray")
+    def test_cleanup_error_does_not_fail_report(
+        self, mock_spray, mock_render, mock_ensure, mock_client_cls, mock_get_conn,
+        db, tmp_path,
+    ):
+        """AC-3: Cleanup DB error -> report still marked 'ready'."""
+        from src.gamechanger.crawlers import CrawlResult
+        from src.gamechanger.loaders import LoadResult
+
+        _seed_team(db)
+        _seed_season(db)
+        db.execute(
+            "INSERT INTO scouting_runs (team_id, season_id, run_type, started_at, status) "
+            "VALUES (1, '2026-spring-hs', 'full', '2026-03-28T00:00:00Z', 'completed')"
+        )
+        db.commit()
+
+        db_path = str(tmp_path / "test.db")
+
+        def _fresh_conn():
+            conn = sqlite3.connect(db_path)
+            conn.execute("PRAGMA foreign_keys=ON;")
+            return conn
+
+        # Track connection call count to inject failure on the cleanup connection
+        call_count = [0]
+        original_fresh = _fresh_conn
+
+        def _tracked_conn():
+            call_count[0] += 1
+            conn = original_fresh()
+            return conn
+
+        mock_get_conn.side_effect = _tracked_conn
+
+        mock_client = MagicMock()
+        mock_client_cls.return_value = mock_client
+        mock_crawler = MagicMock()
+        mock_crawler.scout_team.return_value = CrawlResult(files_written=5)
+        mock_loader = MagicMock()
+
+        # Make loader create an orphan team during load
+        def _load_side_effect(scouting_dir, team_id, season_id):
+            conn = original_fresh()
+            conn.execute(
+                "INSERT INTO teams (name, public_id, season_year) "
+                "VALUES ('Orphan', 'orphan99', 2026)"
+            )
+            conn.commit()
+            conn.close()
+            return LoadResult(loaded=5)
+
+        mock_loader.load_team.side_effect = _load_side_effect
+
+        with (
+            patch("src.reports.generator.ScoutingCrawler", return_value=mock_crawler),
+            patch("src.reports.generator.ScoutingLoader", return_value=mock_loader),
+            patch("src.reports.generator._REPO_ROOT", tmp_path),
+            patch("src.reports.generator._REPORTS_DIR", tmp_path / "data" / "reports"),
+            patch(
+                "src.reports.generator._cleanup_orphan_teams",
+                side_effect=sqlite3.OperationalError("disk I/O error"),
+            ),
+        ):
+            result = generate_report("abc123")
+
+        # Report should still succeed despite cleanup failure
+        assert result.success is True
+
+        verify_conn = original_fresh()
+        row = verify_conn.execute(
+            "SELECT status FROM reports WHERE slug = ?", (result.slug,)
+        ).fetchone()
+        verify_conn.close()
+        assert row[0] == "ready"
+
+
+class TestQueryBeforeCleanup:
+    """AC-6: Game-dependent queries execute before cleanup."""
+
+    @patch("src.reports.generator.get_connection")
+    @patch("src.reports.generator.GameChangerClient")
+    @patch("src.reports.generator.ensure_team_row", return_value=1)
+    @patch("src.reports.generator.render_report", return_value="<html>ok</html>")
+    @patch("src.reports.generator._crawl_and_load_spray")
+    def test_queries_run_before_cleanup(
+        self, mock_spray, mock_render, mock_ensure, mock_client_cls, mock_get_conn,
+        db, tmp_path,
+    ):
+        """AC-6: Verify queries see game data that cleanup will delete."""
+        from src.gamechanger.crawlers import CrawlResult
+        from src.gamechanger.loaders import LoadResult
+
+        _seed_team(db)
+        _seed_season(db)
+        _seed_player(db, "p1", "Test", "Player")
+        db.execute(
+            "INSERT INTO scouting_runs (team_id, season_id, run_type, started_at, status) "
+            "VALUES (1, '2026-spring-hs', 'full', '2026-03-28T00:00:00Z', 'completed')"
+        )
+        db.commit()
+
+        db_path = str(tmp_path / "test.db")
+
+        def _fresh_conn():
+            conn = sqlite3.connect(db_path)
+            conn.execute("PRAGMA foreign_keys=ON;")
+            return conn
+
+        mock_get_conn.side_effect = lambda: _fresh_conn()
+
+        mock_client = MagicMock()
+        mock_client_cls.return_value = mock_client
+        mock_crawler = MagicMock()
+        mock_crawler.scout_team.return_value = CrawlResult(files_written=5)
+        mock_loader = MagicMock()
+
+        # Loader creates orphan team + game so queries have data to find
+        def _load_side_effect(scouting_dir, team_id, season_id):
+            conn = _fresh_conn()
+            cursor = conn.execute(
+                "INSERT INTO teams (name, public_id, season_year) "
+                "VALUES ('Opponent', 'opp99', 2026)"
+            )
+            opp_id = cursor.lastrowid
+            conn.execute(
+                "INSERT INTO games (game_id, season_id, home_team_id, away_team_id, "
+                "home_score, away_score, game_date) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                ("g1", "2026-spring-hs", 1, opp_id, 7, 3, "2026-03-20"),
+            )
+            conn.commit()
+            conn.close()
+            return LoadResult(loaded=5)
+
+        mock_loader.load_team.side_effect = _load_side_effect
+
+        cleanup_called = []
+        original_cleanup = _cleanup_orphan_teams
+
+        def _tracking_cleanup(conn, orphan_ids):
+            cleanup_called.append(orphan_ids.copy())
+            return original_cleanup(conn, orphan_ids)
+
+        with (
+            patch("src.reports.generator.ScoutingCrawler", return_value=mock_crawler),
+            patch("src.reports.generator.ScoutingLoader", return_value=mock_loader),
+            patch("src.reports.generator._REPO_ROOT", tmp_path),
+            patch("src.reports.generator._REPORTS_DIR", tmp_path / "data" / "reports"),
+            patch(
+                "src.reports.generator._cleanup_orphan_teams",
+                side_effect=_tracking_cleanup,
+            ),
+        ):
+            result = generate_report("abc123")
+
+        assert result.success is True
+        # Cleanup was called (orphan detected)
+        assert len(cleanup_called) == 1
+        # The rendered report should contain data from the game that existed
+        # during query time (the render_report mock was called, confirming
+        # the query block completed before cleanup)
+        mock_render.assert_called_once()
+        render_data = mock_render.call_args[0][0]
+        # Record should show the game that cleanup will delete
+        assert render_data["team"]["record"] is not None
+        assert render_data["team"]["record"]["wins"] == 1
