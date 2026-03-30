@@ -558,7 +558,7 @@ async def get_passkey_register(request: Request) -> HTMLResponse | RedirectRespo
 
     registration_options = generate_registration_options(
         rp_id=rp_id,
-        rp_name="LSB Baseball",
+        rp_name="Baseball Stats",
         user_name=email,
         user_id=str(user_id).encode(),
         user_display_name=email,

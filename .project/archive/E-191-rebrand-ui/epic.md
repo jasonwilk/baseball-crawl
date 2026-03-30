@@ -1,7 +1,7 @@
 # E-191: Rebrand User-Facing UI from "LSB Baseball" to "Baseball Stats"
 
 ## Status
-`READY`
+`COMPLETED`
 <!-- Lifecycle: DRAFT -> READY -> ACTIVE -> COMPLETED (or BLOCKED / ABANDONED) -->
 
 ## Overview
@@ -36,7 +36,7 @@ A full-codebase inventory was conducted (2026-03-30) covering 8 categories of re
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-191-01 | Replace brand strings in templates, email, and API config | TODO | None | - |
+| E-191-01 | Replace brand strings in templates, email, and API config | DONE | None | - |
 
 ## Dispatch Team
 - software-engineer
@@ -161,8 +161,9 @@ The following categories were inventoried but explicitly deferred by the user. P
 - 2026-03-30: Codex spec review iteration 1. 2 findings accepted (scope overclaim narrowed, E-178/E-181 clarify pass strengthened). Consistency sweep completed.
 - 2026-03-30: Codex spec review iteration 2. 1 finding accepted (scope language further tightened from "categories 1-3 surfaces" to "17 inventoried in-scope items across 14 files"). Consistency sweep completed.
 - 2026-03-30: Set to READY after 4 review passes.
+- 2026-03-30: COMPLETED. All 17 brand string replacements applied across 14 files. "LSB Baseball" and "Lincoln Standing Bear" removed from all public-facing UI surfaces (auth templates, error pages, base layouts, email, passkey config, FastAPI description). Zero findings across CR and Codex code review. No ideas unblocked. 26+ unprocessed vision signals exist (pre-existing, advisory). Open question remains: PM must perform E-178/E-181 clarify pass to update dependent ACs before those epics are dispatched.
 
-### Review Scorecard
+### Spec Review Scorecard
 | Review Pass | Findings | Accepted | Dismissed |
 |---|---|---|---|
 | Internal iteration 1 -- CR spec audit | 4 | 4 | 0 |
@@ -172,3 +173,11 @@ The following categories were inventoried but explicitly deferred by the user. P
 | **Total** | **12** | **9** | **3** |
 
 Note: Some findings were duplicates across reviewers (e.g., file count found by CR, CA, UXD, and PM). The counts above are deduplicated by unique finding.
+
+### Code Review Scorecard
+| Review Pass | Findings | Accepted | Dismissed |
+|---|---|---|---|
+| Per-story CR -- E-191-01 | 0 | 0 | 0 |
+| CR integration review | 0 | 0 | 0 |
+| Codex code review | 0 | 0 | 0 |
+| **Total** | **0** | **0** | **0** |

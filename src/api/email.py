@@ -19,7 +19,7 @@ import httpx
 logger = logging.getLogger(__name__)
 
 _MAILGUN_API_BASE = "https://api.mailgun.net/v3"
-_SUBJECT = "Your login link for LSB Baseball"
+_SUBJECT = "Your login link for Baseball Stats"
 
 
 async def send_magic_link_email(to_email: str, magic_link_url: str) -> bool:
@@ -48,7 +48,7 @@ async def send_magic_link_email(to_email: str, magic_link_url: str) -> bool:
 
     from_email = os.environ.get("MAILGUN_FROM_EMAIL", f"noreply@{domain}")
     body = (
-        f"Click the link below to log in to LSB Baseball.\n\n"
+        f"Click the link below to log in to Baseball Stats.\n\n"
         f"{magic_link_url}\n\n"
         f"This link expires in 15 minutes and can only be used once.\n"
         f"If you did not request this, you can safely ignore this email."

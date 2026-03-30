@@ -78,7 +78,7 @@ async def lifespan(application: FastAPI) -> AsyncGenerator[None, None]:
 app = FastAPI(
     title="baseball-crawl API",
     description=(
-        "Coaching analytics platform for Lincoln Standing Bear High School. "
+        "High school baseball coaching analytics platform. "
         "Provides access to GameChanger game data, player stats, and scouting reports."
     ),
     version="0.1.0",
