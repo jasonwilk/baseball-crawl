@@ -25,20 +25,9 @@
 </div>
 {% endif %}
 
-{% if added %}
-<div class="mb-4 p-3 bg-green-100 text-green-800 rounded border border-green-300">
-  Team <strong>{{ added_team_name }}</strong> added. Use the <strong>Update Stats</strong> button in the table to load stats for this team.
-</div>
-{% elif msg %}
+{% if msg %}
 <div class="mb-4 p-3 bg-green-100 text-green-800 rounded border border-green-300">
   {{ msg }}
-  {% if merged_canonical_id %}
-  &nbsp;
-  <form method="post" action="/admin/teams/{{ merged_canonical_id }}/sync" class="inline">
-    <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
-    <button type="submit" class="underline font-semibold text-green-900 hover:text-green-700">Update Stats Now</button>
-  </form>
-  {% endif %}
 </div>
 {% endif %}
 
@@ -66,6 +55,7 @@
 </div>
 {% endif %}
 
+{% if teams %}
 <!-- Flat team list -->
 <div class="overflow-x-auto mb-8">
   <table class="min-w-full text-sm bg-white rounded shadow">
@@ -162,19 +152,24 @@
           </div>
         </td>
       </tr>
-      {% else %}
-      <tr>
-        <td colspan="8" class="py-4 px-3 text-center text-gray-500">
-          No teams found.
-        </td>
-      </tr>
       {% endfor %}
     </tbody>
   </table>
 </div>
+{% else %}
+<!-- Welcome state for empty teams list -->
+<div class="bg-white rounded shadow border border-gray-200 p-8 text-center mb-8">
+  <h2 class="text-xl font-bold text-gray-900 mb-2">Welcome to LSB Baseball.</h2>
+  <p class="text-gray-600 mb-4">Get started by adding your first team.</p>
+  <a href="#add-team"
+     class="inline-block bg-blue-900 text-white px-6 py-2 rounded text-sm font-medium hover:bg-blue-800">
+    Add Team
+  </a>
+</div>
+{% endif %}
 
 <!-- Add Team (Phase 1): URL input only -->
-<div class="bg-white rounded shadow p-6 max-w-lg">
+<div id="add-team" class="bg-white rounded shadow p-6 max-w-lg">
   <h2 class="text-lg font-semibold mb-4">Add Team</h2>
   <form method="post" action="/admin/teams">
     <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">

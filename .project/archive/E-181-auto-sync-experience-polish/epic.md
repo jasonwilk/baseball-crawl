@@ -1,7 +1,7 @@
 # E-181: Auto-Sync and Experience Polish
 
 ## Status
-`READY`
+`COMPLETED`
 
 ## Overview
 Make the system proactive: automatically trigger stat updates after team add and merge instead of requiring manual clicks, show coaches what data they're looking at (game coverage, not sync timestamps), and polish dashboard empty states so every page has a clear next step. Follow-up to E-178's terminology and UX overhaul.
@@ -46,9 +46,9 @@ Coach's game-coverage approach wins over UXD's sync-timestamp design. "Through M
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-181-01 | Auto-sync on team add and after merge | TODO | None | - |
-| E-181-02 | Game coverage indicators on dashboard pages | TODO | None | - |
-| E-181-03 | Dashboard empty states, schedule links, and welcome state | TODO | E-181-01, E-181-02 | - |
+| E-181-01 | Auto-sync on team add and after merge | DONE | None | - |
+| E-181-02 | Game coverage indicators on dashboard pages | DONE | None | - |
+| E-181-03 | Dashboard empty states, schedule links, and welcome state | DONE | E-181-01, E-181-02 | - |
 
 ## Dispatch Team
 - software-engineer
@@ -112,9 +112,35 @@ None.
 - 2026-03-29: Created as DRAFT. Coach's game-coverage approach adopted over sync-timestamp design.
 - 2026-03-29: Codex spec review. 6 findings, all accepted: phantom pages removed, query shape fixed, E-178 dep explicit, is_admin route gap noted, file conflict resolved, empty state text specified.
 - 2026-03-29: Epic set to READY.
+- 2026-03-31: Epic set to ACTIVE. Dispatch started.
 
-### Review Scorecard
+- 2026-03-31: All stories DONE. E-181-01: 5 MUST FIX + 2 SHOULD FIX from CR round 1, all fixed in round 2. E-181-02: clean. E-181-03: 2 SHOULD FIX dismissed (nested anchors per AC/TN, #add-team adaptation).
+- 2026-03-31: CR integration review: APPROVED, 1 SHOULD FIX dismissed (noqa annotation follows existing pattern).
+- 2026-03-31: Codex code review: 2 findings. 1 fixed (Link CTA showed for resolved opponents), 1 dismissed (welcome CTA #add-team is correct adaptation).
+- 2026-03-31: Documentation assessment: Trigger 5 fires (new feature ships -- auto-sync, game coverage indicators, empty states, welcome state, schedule link CTA). `docs/coaching/README.md` says "A coaching dashboard is coming soon" -- the dashboard is live and this epic adds user-facing features coaches will encounter. Docs-writer dispatch warranted for `docs/coaching/` updates. However, no docs-writer dispatch is possible from this closure context -- flagging for main session to dispatch if desired.
+- 2026-03-31: Context-layer assessment:
+  - Trigger 1 (new convention): YES -- _prepare_auto_sync/_enqueue_from_prep pattern for background task resilience (try/except around auto-sync, separating DB work from async add_task).
+  - Trigger 2 (architectural decision): NO -- uses existing pipeline triggers, no new technology.
+  - Trigger 3 (footgun discovered): YES -- status='completed' vs 'final' discrepancy in story spec vs codebase (AC-6 specified 'final' but codebase uses 'completed').
+  - Trigger 4 (agent behavior change): NO.
+  - Trigger 5 (domain knowledge): YES -- coaches think in games not sync dates; "Through [date] ([N] games)" is the coaching-friendly freshness format.
+  - Trigger 6 (new CLI/workflow): NO.
+  - Verdicts: 3 YES (triggers 1, 3, 5), 3 NO (triggers 2, 4, 6). Claude-architect dispatch warranted to codify findings.
+- 2026-03-31: Ideas review: No CANDIDATE ideas have E-181 as an explicit blocker. IDEA-035 (Opponent Page Redesign) partially addressed by E-181's empty states and freshness indicators; remaining scope (proactive flags, PDF export) unchanged.
+- 2026-03-31: Epic COMPLETED.
+
+### Spec Review Scorecard
 | Review Pass | Findings | Accepted | Dismissed |
 |---|---|---|---|
 | Codex iteration 1 | 6 | 6 | 0 |
 | **Total** | **6** | **6** | **0** |
+
+### Implementation Review Scorecard
+| Review Pass | Findings | Accepted | Dismissed |
+|---|---|---|---|
+| Per-story CR -- E-181-01 | 7 | 7 | 0 |
+| Per-story CR -- E-181-02 | 0 | 0 | 0 |
+| Per-story CR -- E-181-03 | 2 | 0 | 2 |
+| CR integration review | 1 | 0 | 1 |
+| Codex code review | 2 | 1 | 1 |
+| **Total** | **12** | **8** | **4** |

@@ -435,7 +435,7 @@ class TestOpponentDetailUnlinkedState:
             _grant_team_access(conn, user_id, member_id)
         return db_path, member_id, opp_id
 
-    def test_unlinked_shows_stats_not_available_card(self, tmp_path):
+    def test_unlinked_shows_not_linked_card(self, tmp_path):
         db_path, member_id, opp_id = self._make_unlinked_db(tmp_path)
         env = {"DATABASE_PATH": str(db_path), "DEV_USER_EMAIL": _USER_EMAIL}
         with patch.dict("os.environ", env):
@@ -446,8 +446,7 @@ class TestOpponentDetailUnlinkedState:
                 )
         assert resp.status_code == 200
         body = resp.text
-        assert "Stats not available" in body
-        assert "Scouting stats" in body
+        assert "linked to GameChanger yet" in body
 
     def test_unlinked_no_pitching_card(self, tmp_path):
         db_path, member_id, opp_id = self._make_unlinked_db(tmp_path)
@@ -461,7 +460,7 @@ class TestOpponentDetailUnlinkedState:
         assert resp.status_code == 200
         assert "Their Pitchers" not in resp.text
 
-    def test_unlinked_no_admin_link_for_non_admin(self, tmp_path):
+    def test_unlinked_non_admin_sees_ask_admin_text(self, tmp_path):
         db_path, member_id, opp_id = self._make_unlinked_db(tmp_path)
         env = {
             "DATABASE_PATH": str(db_path),
@@ -475,7 +474,8 @@ class TestOpponentDetailUnlinkedState:
                     params={"team_id": member_id, "season_id": _SEASON_ID},
                 )
         assert resp.status_code == 200
-        assert "Link in Admin" not in resp.text
+        assert "Ask your admin to link this team." in resp.text
+        assert "Link this team" not in resp.text
 
 
 class TestOpponentDetailLinkedUnscouted:
@@ -507,8 +507,8 @@ class TestOpponentDetailLinkedUnscouted:
                 )
         assert resp.status_code == 200
         body = resp.text
-        assert "Stats aren't ready yet" in body
-        assert "on their way" in body
+        assert "No scouting data yet." in body
+        assert "Stats will appear after the next update." in body
 
     def test_linked_unscouted_no_pitching_card(self, tmp_path):
         db_path, member_id, opp_id = self._make_linked_unscouted_db(tmp_path)
@@ -532,7 +532,7 @@ class TestOpponentDetailLinkedUnscouted:
                     params={"team_id": member_id, "season_id": _SEASON_ID},
                 )
         assert resp.status_code == 200
-        assert "Stats not available" not in resp.text
+        assert "linked to GameChanger yet" not in resp.text
 
 
 class TestOpponentDetailAdminShortcut:
@@ -550,7 +550,7 @@ class TestOpponentDetailAdminShortcut:
             _grant_team_access(conn, user_id, member_id)
         return db_path, member_id, opp_id
 
-    def test_admin_sees_link_in_admin_shortcut_via_email(self, tmp_path):
+    def test_admin_sees_link_shortcut_via_email(self, tmp_path):
         """Admin via ADMIN_EMAIL env var sees the shortcut."""
         db_path, member_id, opp_id = self._make_admin_db(tmp_path, user_role="user")
         env = {
@@ -566,7 +566,7 @@ class TestOpponentDetailAdminShortcut:
                 )
         assert resp.status_code == 200
         body = resp.text
-        assert "Link in Admin" in body
+        assert "Link this team" in body
         assert "/admin/opponents" in body
 
     def test_admin_sees_link_via_db_role(self, tmp_path):
@@ -585,7 +585,7 @@ class TestOpponentDetailAdminShortcut:
                         params={"team_id": member_id, "season_id": _SEASON_ID},
                     )
         assert resp.status_code == 200
-        assert "Link in Admin" in resp.text
+        assert "Link this team" in resp.text
 
     def test_non_admin_does_not_see_admin_shortcut(self, tmp_path):
         """Regular user (role='user', no ADMIN_EMAIL match) doesn't see shortcut."""
@@ -602,7 +602,7 @@ class TestOpponentDetailAdminShortcut:
                     params={"team_id": member_id, "season_id": _SEASON_ID},
                 )
         assert resp.status_code == 200
-        assert "Link in Admin" not in resp.text
+        assert "Link this team" not in resp.text
 
     def test_admin_with_resolved_link_gets_connect_url(self, tmp_path):
         """When a resolved link exists, admin shortcut points to /connect page."""
@@ -630,7 +630,7 @@ class TestOpponentDetailAdminShortcut:
         # Full stats state does not show admin shortcuts (only unlinked does)
         assert resp.status_code == 200
         # Stats should render (full_stats), no empty state card
-        assert "Stats not available" not in resp.text
+        assert "linked to GameChanger yet" not in resp.text
 
 
 class TestOpponentDetailStubTeamAccess:
@@ -1554,3 +1554,99 @@ class TestOpponentDetailPABadges:
         assert "heat-2" not in html
         assert "heat-3" not in html
         assert "heat-4" not in html
+
+
+# ---------------------------------------------------------------------------
+# E-181-03: Richer opponent detail empty states
+# ---------------------------------------------------------------------------
+
+
+class TestE181EmptyStateLinkedUnscouted:
+    """E-181-03 AC-5: linked opponent with no scouting data shows correct text."""
+
+    def test_linked_unscouted_heading_and_subtext(self, tmp_path):
+        """AC-5: Heading 'No scouting data yet.' with subtext about next update."""
+        db_path = _make_db(tmp_path)
+        with sqlite3.connect(str(db_path)) as conn:
+            conn.execute("PRAGMA foreign_keys=ON")
+            member_id = _insert_member_team(conn, "LSB Varsity")
+            opp_id = _insert_opponent_team(conn, "Linked Lions", public_id="linked-lions")
+            _insert_season(conn)
+            _insert_game(conn, "g-e181-linked", member_id, opp_id)
+            user_id = _insert_user(conn)
+            _grant_team_access(conn, user_id, member_id)
+        env = {"DATABASE_PATH": str(db_path), "DEV_USER_EMAIL": _USER_EMAIL}
+        with patch.dict("os.environ", env):
+            with TestClient(app) as client:
+                resp = client.get(
+                    f"/dashboard/opponents/{opp_id}",
+                    params={"team_id": member_id, "season_id": _SEASON_ID},
+                )
+        assert resp.status_code == 200
+        assert "No scouting data yet." in resp.text
+        assert "Stats will appear after the next update." in resp.text
+
+
+class TestE181EmptyStateUnlinked:
+    """E-181-03 AC-6: unlinked opponent shows correct text with admin/non-admin variants."""
+
+    def _make_unlinked(self, tmp_path: Path) -> tuple[Path, int, int]:
+        db_path = _make_db(tmp_path)
+        with sqlite3.connect(str(db_path)) as conn:
+            conn.execute("PRAGMA foreign_keys=ON")
+            member_id = _insert_member_team(conn, "LSB Varsity")
+            opp_id = _insert_opponent_team(conn, "Mystery Team")
+            _insert_season(conn)
+            _insert_game(conn, "g-e181-unlinked", member_id, opp_id)
+            user_id = _insert_user(conn)
+            _grant_team_access(conn, user_id, member_id)
+        return db_path, member_id, opp_id
+
+    def test_unlinked_heading(self, tmp_path):
+        """AC-6: Unlinked heading mentions GameChanger."""
+        db_path, member_id, opp_id = self._make_unlinked(tmp_path)
+        env = {"DATABASE_PATH": str(db_path), "DEV_USER_EMAIL": _USER_EMAIL}
+        with patch.dict("os.environ", env):
+            with TestClient(app) as client:
+                resp = client.get(
+                    f"/dashboard/opponents/{opp_id}",
+                    params={"team_id": member_id, "season_id": _SEASON_ID},
+                )
+        assert resp.status_code == 200
+        assert "linked to GameChanger yet" in resp.text
+
+    def test_unlinked_admin_sees_link(self, tmp_path):
+        """AC-6: Admin users see a link to the resolution workflow."""
+        db_path, member_id, opp_id = self._make_unlinked(tmp_path)
+        env = {
+            "DATABASE_PATH": str(db_path),
+            "DEV_USER_EMAIL": _USER_EMAIL,
+            "ADMIN_EMAIL": _USER_EMAIL,
+        }
+        with patch.dict("os.environ", env):
+            with TestClient(app) as client:
+                resp = client.get(
+                    f"/dashboard/opponents/{opp_id}",
+                    params={"team_id": member_id, "season_id": _SEASON_ID},
+                )
+        assert resp.status_code == 200
+        assert "Link this team" in resp.text
+        assert "/admin/opponents" in resp.text
+
+    def test_unlinked_non_admin_sees_ask_admin(self, tmp_path):
+        """AC-6: Non-admin users see 'Ask your admin to link this team.'"""
+        db_path, member_id, opp_id = self._make_unlinked(tmp_path)
+        env = {
+            "DATABASE_PATH": str(db_path),
+            "DEV_USER_EMAIL": _USER_EMAIL,
+            "ADMIN_EMAIL": "admin@other.edu",
+        }
+        with patch.dict("os.environ", env):
+            with TestClient(app) as client:
+                resp = client.get(
+                    f"/dashboard/opponents/{opp_id}",
+                    params={"team_id": member_id, "season_id": _SEASON_ID},
+                )
+        assert resp.status_code == 200
+        assert "Ask your admin to link this team." in resp.text
+        assert "Link this team" not in resp.text

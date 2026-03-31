@@ -410,7 +410,9 @@ class TestMergePost:
 
         assert resp.status_code == 303
         assert "/admin/teams" in resp.headers["location"]
-        assert "merged_canonical_id" in resp.headers["location"]
+        # E-181-01: merged_canonical_id no longer in URL (auto-sync replaces
+        # manual "Update Stats" button).  Message uses ?msg= parameter.
+        assert "msg=" in resp.headers["location"]
 
     def test_success_message_contains_team_names(self, tmp_path):
         db_path = _make_db(tmp_path)
@@ -602,23 +604,219 @@ class TestBlockingIssues:
 
 
 class TestMergeSuccessFlash:
-    """AC-3: After merge redirect, teams list shows success message and Sync Now."""
+    """AC-3: After merge redirect, teams list shows success message."""
 
-    def test_teams_page_shows_sync_now_after_merge(self, tmp_path):
+    def test_teams_page_shows_merge_success_message(self, tmp_path):
         db_path = _make_db(tmp_path)
         with sqlite3.connect(str(db_path)) as conn:
-            id1 = _insert_team(conn, "Flash Team", season_year=2026)
+            _insert_team(conn, "Flash Team", season_year=2026)
 
         _, env = _make_client(db_path)
         # Simulate the redirect URL that POST /admin/teams/merge produces
-        msg = "Merged Dup into Flash Team. Click Update Stats to load fresh data."
+        # (E-181-01: auto-sync replaces the manual "Update Stats" button)
         from urllib.parse import quote_plus
-        url = f"/admin/teams?msg={quote_plus(msg)}&merged_canonical_id={id1}"
+        msg = "Merged Dup into Flash Team. Stats updating in the background."
+        url = f"/admin/teams?msg={quote_plus(msg)}"
 
         with patch.dict("os.environ", env):
             with TestClient(app) as c:
                 resp = c.get(url)
 
         assert resp.status_code == 200
-        assert "Update Stats Now" in resp.text
-        assert str(id1) in resp.text
+        assert "Merged Dup into Flash Team" in resp.text
+        assert "Stats updating in the background" in resp.text
+
+
+# ---------------------------------------------------------------------------
+# E-181-01: Auto-sync after merge
+# ---------------------------------------------------------------------------
+
+
+class TestAutoSyncAfterMerge:
+    """E-181-01: Background sync automatically enqueued after merge."""
+
+    def _csrf_post(
+        self,
+        db_path: Path,
+        data: dict,
+        env: dict[str, str],
+        mock_member_sync=None,
+        mock_scout_sync=None,
+    ) -> "Response":  # type: ignore[name-defined]
+        """POST to /admin/teams/merge with CSRF cookie and pipeline mocks."""
+        with patch.dict("os.environ", env), \
+             patch("src.api.routes.admin.trigger.run_member_sync") as ms, \
+             patch("src.api.routes.admin.trigger.run_scouting_sync") as ss:
+            with TestClient(app) as c:
+                get_resp = c.get("/admin/teams", follow_redirects=True)
+                csrf = get_resp.cookies.get("csrf_token", "")
+                post_data = {**data, "csrf_token": csrf}
+                resp = c.post(
+                    "/admin/teams/merge",
+                    data=post_data,
+                    cookies={"csrf_token": csrf},
+                    follow_redirects=False,
+                )
+            # Stash mocks on response for inspection
+            resp._mock_member_sync = ms  # type: ignore[attr-defined]
+            resp._mock_scout_sync = ss  # type: ignore[attr-defined]
+        return resp
+
+    def test_auto_sync_enqueued_for_tracked_merge(self, tmp_path):
+        """AC-4/AC-10: Merge enqueues run_scouting_sync for a tracked canonical team."""
+        db_path = _make_db(tmp_path)
+        with sqlite3.connect(str(db_path)) as conn:
+            id1 = _insert_team(
+                conn, "Keep Tracked", membership_type="tracked",
+                public_id="pub-keep", season_year=2026,
+            )
+            id2 = _insert_team(conn, "Dup Tracked", season_year=2026)
+
+        _, env = _make_client(db_path)
+        resp = self._csrf_post(
+            db_path,
+            {
+                "canonical_id": str(id1),
+                "duplicate_id": str(id2),
+                "team_ids_str": f"{id1},{id2}",
+            },
+            env,
+        )
+
+        assert resp.status_code == 303
+        assert resp._mock_scout_sync.called  # type: ignore[attr-defined]
+        assert not resp._mock_member_sync.called  # type: ignore[attr-defined]
+
+        # Verify crawl_job created
+        with sqlite3.connect(str(db_path)) as conn:
+            job = conn.execute(
+                "SELECT sync_type, status FROM crawl_jobs WHERE team_id = ?",
+                (id1,),
+            ).fetchone()
+        assert job is not None
+        assert job[0] == "scouting_crawl"
+        assert job[1] == "running"
+
+    def test_auto_sync_enqueued_for_member_merge(self, tmp_path):
+        """AC-4/AC-10: Merge enqueues run_member_sync for a member canonical team."""
+        db_path = _make_db(tmp_path)
+        with sqlite3.connect(str(db_path)) as conn:
+            id1 = _insert_team(
+                conn, "Keep Member", membership_type="member",
+                gc_uuid="uuid-keep", public_id="pub-member", season_year=2026,
+            )
+            id2 = _insert_team(conn, "Dup", season_year=2026)
+
+        _, env = _make_client(db_path)
+        resp = self._csrf_post(
+            db_path,
+            {
+                "canonical_id": str(id1),
+                "duplicate_id": str(id2),
+                "team_ids_str": f"{id1},{id2}",
+            },
+            env,
+        )
+
+        assert resp.status_code == 303
+        assert resp._mock_member_sync.called  # type: ignore[attr-defined]
+        assert not resp._mock_scout_sync.called  # type: ignore[attr-defined]
+
+    def test_merge_flash_message_includes_stats_updating(self, tmp_path):
+        """AC-5: Flash message confirms auto-sync after merge."""
+        db_path = _make_db(tmp_path)
+        with sqlite3.connect(str(db_path)) as conn:
+            id1 = _insert_team(
+                conn, "Canonical Team", membership_type="tracked",
+                public_id="pub-canonical", season_year=2026,
+            )
+            id2 = _insert_team(conn, "Dup Team", season_year=2026)
+
+        _, env = _make_client(db_path)
+        resp = self._csrf_post(
+            db_path,
+            {
+                "canonical_id": str(id1),
+                "duplicate_id": str(id2),
+                "team_ids_str": f"{id1},{id2}",
+            },
+            env,
+        )
+
+        location = resp.headers.get("location", "")
+        assert "Stats+updating+in+the+background" in location or \
+            "Stats%20updating%20in%20the%20background" in location
+
+    def test_auto_sync_skipped_when_job_already_running(self, tmp_path):
+        """AC-6/AC-11: Auto-sync skipped if crawl_jobs entry already running."""
+        db_path = _make_db(tmp_path)
+        with sqlite3.connect(str(db_path)) as conn:
+            id1 = _insert_team(
+                conn, "Busy Team", membership_type="tracked",
+                public_id="pub-busy", season_year=2026,
+            )
+            id2 = _insert_team(conn, "Dup Busy", season_year=2026)
+            # Pre-insert a running job for the canonical team
+            conn.execute(
+                "INSERT INTO crawl_jobs (team_id, sync_type, status) VALUES (?, 'scouting_crawl', 'running')",
+                (id1,),
+            )
+            conn.commit()
+
+        _, env = _make_client(db_path)
+        resp = self._csrf_post(
+            db_path,
+            {
+                "canonical_id": str(id1),
+                "duplicate_id": str(id2),
+                "team_ids_str": f"{id1},{id2}",
+            },
+            env,
+        )
+
+        assert resp.status_code == 303
+        # Neither pipeline should have been called
+        assert not resp._mock_member_sync.called  # type: ignore[attr-defined]
+        assert not resp._mock_scout_sync.called  # type: ignore[attr-defined]
+        # Message should NOT say "Stats updating"
+        location = resp.headers.get("location", "")
+        assert "updating" not in location.lower()
+
+    def test_merge_success_even_when_auto_sync_fails(self, tmp_path):
+        """AC-8: Merge completes with 303 redirect even if auto-sync raises."""
+        db_path = _make_db(tmp_path)
+        with sqlite3.connect(str(db_path)) as conn:
+            id1 = _insert_team(
+                conn, "Stable Team", membership_type="tracked",
+                public_id="pub-stable", season_year=2026,
+            )
+            id2 = _insert_team(conn, "Dup Stable", season_year=2026)
+
+        _, env = _make_client(db_path)
+        with patch.dict("os.environ", env), \
+             patch("src.api.routes.admin._prepare_auto_sync", side_effect=Exception("boom")):
+            with TestClient(app) as c:
+                get_resp = c.get("/admin/teams", follow_redirects=True)
+                csrf = get_resp.cookies.get("csrf_token", "")
+                post_data = {
+                    "canonical_id": str(id1),
+                    "duplicate_id": str(id2),
+                    "team_ids_str": f"{id1},{id2}",
+                    "csrf_token": csrf,
+                }
+                resp = c.post(
+                    "/admin/teams/merge",
+                    data=post_data,
+                    cookies={"csrf_token": csrf},
+                    follow_redirects=False,
+                )
+
+        # Handler catches sync failure and still returns 303 redirect
+        assert resp.status_code == 303
+        location = resp.headers.get("location", "")
+        assert "/admin/teams" in location
+
+        # Duplicate should still have been deleted (merge completed)
+        with sqlite3.connect(str(db_path)) as conn:
+            row = conn.execute("SELECT id FROM teams WHERE id = ?", (id2,)).fetchone()
+        assert row is None, "Duplicate team should have been deleted despite sync failure"

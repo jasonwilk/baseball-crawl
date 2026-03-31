@@ -332,6 +332,7 @@ async def schedule(request: Request) -> Response:
                 "permitted_team_infos": [],
                 "active_team_id": None,
                 "user": user,
+                "is_admin": False,
                 "no_assignments": True,
                 "is_dev_mode": bool(os.environ.get("DEV_USER_EMAIL")),
             },
@@ -428,6 +429,9 @@ async def schedule(request: Request) -> Response:
     for t in year_team_infos_s:
         t["has_stat_data"] = t["id"] in teams_with_stat_data_s
 
+    # Admin detection for conditional "Link" CTA on unscouted schedule cards.
+    is_admin_s = await run_in_threadpool(_is_admin_user, user)
+
     return templates.TemplateResponse(
         request,
         "dashboard/schedule.html",
@@ -443,6 +447,7 @@ async def schedule(request: Request) -> Response:
             "current_year": current_year,
             "season_id": season_id,
             "user": user,
+            "is_admin": is_admin_s,
             "no_assignments": False,
         },
     )
@@ -947,6 +952,26 @@ async def _fetch_game_list_data(
     games = await run_in_threadpool(db.get_team_games, active_team_id, season_id)
     team_infos = await run_in_threadpool(db.get_teams_by_ids, permitted_teams)
     return games, team_infos
+
+
+def _format_coverage_text(latest_game_date: str, game_count: int) -> str:
+    """Format game coverage data as 'Through [date] ([N] games)'.
+
+    Args:
+        latest_game_date: Date string in ``YYYY-MM-DD`` format.
+        game_count:       Number of completed games.
+
+    Returns:
+        Formatted coverage string, e.g. ``"Through Mar 25 (5 games)"``.
+    """
+    try:
+        dt = datetime.datetime.strptime(latest_game_date, "%Y-%m-%d")
+        # Abbreviated month + day without leading zero (e.g., "Mar 25").
+        formatted_date = f"{dt.strftime('%b')} {dt.day}"
+    except (ValueError, TypeError):
+        formatted_date = latest_game_date
+    game_word = "game" if game_count == 1 else "games"
+    return f"Through {formatted_date} ({game_count} {game_word})"
 
 
 def _compute_opponent_pitching_rates(pitchers: list[dict]) -> list[dict]:
@@ -1546,6 +1571,14 @@ async def opponent_detail(request: Request, opponent_team_id: int) -> Response:
         if ct:
             team_spray_contacts[ct] += 1
 
+    # Game coverage indicator (E-181-02): "Through [date] ([N] games)".
+    game_coverage = await run_in_threadpool(db.get_game_coverage, opponent_team_id)
+    coverage_text: str | None = None
+    if game_coverage:
+        coverage_text = _format_coverage_text(
+            game_coverage["latest_game_date"], game_coverage["game_count"]
+        )
+
     logger.debug(
         "Opponent detail: opponent=%s season_id=%s empty_state=%s bat_sort=%s pit_sort=%s",
         opponent_team_id, season_id, empty_state, bat_sort, pit_sort,
@@ -1578,6 +1611,7 @@ async def opponent_detail(request: Request, opponent_team_id: int) -> Response:
             "player_spray_bip_counts": player_spray_bip_counts,
             "team_spray_zones": team_spray_zones,
             "team_spray_contacts": team_spray_contacts,
+            "coverage_text": coverage_text,
         },
     )
 
@@ -1739,6 +1773,14 @@ async def opponent_print(request: Request, opponent_team_id: int) -> Response:
             "contacts": contacts,
         }
 
+    # Game coverage indicator (E-181-02): "Through [date] ([N] games)".
+    game_coverage_pr = await run_in_threadpool(db.get_game_coverage, opponent_team_id)
+    coverage_text_pr: str | None = None
+    if game_coverage_pr:
+        coverage_text_pr = _format_coverage_text(
+            game_coverage_pr["latest_game_date"], game_coverage_pr["game_count"]
+        )
+
     logger.debug(
         "Opponent print: opponent=%s season_id=%s empty_state=%s",
         opponent_team_id,
@@ -1761,6 +1803,7 @@ async def opponent_print(request: Request, opponent_team_id: int) -> Response:
             "print_date": print_date,
             "player_spray_bip_counts": player_spray_bip_counts_pr,
             "tendency_stats": tendency_stats_pr,
+            "coverage_text": coverage_text_pr,
         },
     )
 

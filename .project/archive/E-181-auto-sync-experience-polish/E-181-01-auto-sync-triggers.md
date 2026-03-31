@@ -4,7 +4,7 @@
 [E-181: Auto-Sync and Experience Polish](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, adding a team or merging teams automatically triggers a background stat update on the resulting team. The operator no longer needs to manually click "Update Stats" after these operations. Flash messages confirm the auto-sync is running.

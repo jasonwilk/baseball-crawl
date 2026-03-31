@@ -217,6 +217,9 @@
     {% if scouting_report.record %}
     <div class="report-record">{{ scouting_report.record.wins }}-{{ scouting_report.record.losses }}</div>
     {% endif %}
+    {% if coverage_text %}
+    <div class="report-record">{{ coverage_text }}</div>
+    {% endif %}
   </div>
   <div>
     <div class="report-label">Scouting Report</div>

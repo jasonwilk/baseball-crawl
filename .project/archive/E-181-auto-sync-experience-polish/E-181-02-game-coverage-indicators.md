@@ -4,7 +4,7 @@
 [E-181: Auto-Sync and Experience Polish](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, opponent dashboard pages (detail and print) show a game coverage indicator that tells coaches what data backs their decisions: "Through [date] ([N] games)". This replaces the need for coaches to guess whether scouting data is current.

@@ -274,7 +274,8 @@ def get_schedule_games(
     """Return all games for a team in a season sorted by date ascending.
 
     Extends ``get_team_games`` with game status, scouting status (has_stats),
-    and opponent win/loss record.  Intended for the schedule landing page.
+    opponent resolution status (is_resolved), and opponent win/loss record.
+    Intended for the schedule landing page.
 
     Args:
         team_id:   The INTEGER team id (home or away).
@@ -283,7 +284,8 @@ def get_schedule_games(
     Returns:
         List of dicts with keys: game_id, game_date, status,
         home_score, away_score, is_home (1 or 0), opponent_team_id,
-        opponent_name, has_stats (1 or 0), opponent_wins, opponent_losses.
+        opponent_name, has_stats (1 or 0), is_resolved (1 or 0),
+        opponent_wins, opponent_losses.
         Returns an empty list on DB error.
     """
     query = """
@@ -291,6 +293,13 @@ def get_schedule_games(
             SELECT DISTINCT team_id FROM player_season_batting WHERE season_id = :season_id
             UNION
             SELECT DISTINCT team_id FROM player_season_pitching WHERE season_id = :season_id
+        ),
+        opp_resolved AS (
+            SELECT DISTINCT resolved_team_id AS team_id
+            FROM opponent_links
+            WHERE our_team_id = :team_id
+              AND resolved_team_id IS NOT NULL
+              AND is_hidden = 0
         ),
         opp_game_results AS (
             SELECT home_team_id AS team_id,
@@ -332,12 +341,16 @@ def get_schedule_games(
                  ELSE opp_home.name
             END AS opponent_name,
             CASE WHEN ohs.team_id IS NOT NULL THEN 1 ELSE 0 END AS has_stats,
+            CASE WHEN ores.team_id IS NOT NULL THEN 1 ELSE 0 END AS is_resolved,
             COALESCE(opp_rec.wins, 0) AS opponent_wins,
             COALESCE(opp_rec.losses, 0) AS opponent_losses
         FROM games g
         LEFT JOIN teams opp_away ON opp_away.id = g.away_team_id
         LEFT JOIN teams opp_home ON opp_home.id = g.home_team_id
         LEFT JOIN opp_has_stats ohs ON ohs.team_id = (
+            CASE WHEN g.home_team_id = :team_id THEN g.away_team_id ELSE g.home_team_id END
+        )
+        LEFT JOIN opp_resolved ores ON ores.team_id = (
             CASE WHEN g.home_team_id = :team_id THEN g.away_team_id ELSE g.home_team_id END
         )
         LEFT JOIN opp_records opp_rec ON opp_rec.team_id = (
@@ -825,6 +838,42 @@ def get_last_meeting(
         return dict(row) if row else None
     except sqlite3.Error:
         logger.exception("Failed to fetch last meeting")
+        return None
+
+
+def get_game_coverage(team_id: int) -> dict[str, Any] | None:
+    """Return game coverage data for a team: most recent game date and game count.
+
+    Queries completed games where the team appears as either home or away.
+    Used to display "Through [date] ([N] games)" on opponent dashboard pages.
+
+    Args:
+        team_id: The team's INTEGER primary key.
+
+    Returns:
+        Dict with ``latest_game_date`` (str, YYYY-MM-DD) and ``game_count``
+        (int), or None if no completed games exist.
+    """
+    query = """
+        SELECT
+            MAX(g.game_date) AS latest_game_date,
+            COUNT(*) AS game_count
+        FROM games g
+        WHERE (g.home_team_id = :team_id OR g.away_team_id = :team_id)
+          AND g.status = 'completed'
+    """
+    try:
+        with closing(get_connection()) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(query, {"team_id": team_id}).fetchone()
+        if row and row["latest_game_date"] is not None:
+            return {
+                "latest_game_date": row["latest_game_date"],
+                "game_count": row["game_count"],
+            }
+        return None
+    except sqlite3.Error:
+        logger.exception("Failed to fetch game coverage for team %s", team_id)
         return None
 
 

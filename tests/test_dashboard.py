@@ -1119,26 +1119,26 @@ class TestOpponentDetail:
     def test_opponent_detail_insufficient_data_when_no_stats(
         self, games_client
     ) -> None:
-        """Opponent with games but no stats and no opponent_link shows unlinked state (E-153-04 AC-5).
+        """Opponent with games but no stats and no opponent_link shows unlinked state (E-181-03 AC-6).
 
         games_client has games vs opp but no opponent batting/pitching rows and no opponent_links.
-        E-153-04 replaced 'Insufficient data.' with a three-state model; unlinked => 'Stats not available.'
+        E-181-03 replaced old text with 'This opponent isn't linked to GameChanger yet.'
         """
         client, _, opp_team_id = games_client
         response = client.get(f"/dashboard/opponents/{opp_team_id}")
         assert response.status_code == 200
-        assert "Stats not available." in response.text
+        assert "linked to GameChanger yet" in response.text
 
     def test_opponent_detail_no_stats_shows_message(self, games_client) -> None:
-        """GET /dashboard/opponents/{id} shows 'Stats not available.' when no stats loaded (E-153-04 AC-5).
+        """GET /dashboard/opponents/{id} shows unlinked empty state when no stats loaded (E-181-03 AC-6).
 
         games_client has games vs opp but no opponent batting/pitching rows and no opponent_links.
-        E-153-04 three-state model: unlinked => 'Stats not available.'
+        E-181-03 three-state model: unlinked => 'This opponent isn't linked to GameChanger yet.'
         """
         client, _, opp_team_id = games_client
         response = client.get(f"/dashboard/opponents/{opp_team_id}")
         assert response.status_code == 200
-        assert "Stats not available." in response.text
+        assert "linked to GameChanger yet" in response.text
 
     def test_opponent_detail_last_meeting_card(self, opponent_client) -> None:
         """GET /dashboard/opponents/{id} shows Last Meeting card (AC-16)."""
@@ -3183,3 +3183,94 @@ class TestOpponentDetailSprayCard:
         body = response.text
         assert "GB" in body
         assert "BU" in body
+
+
+# ---------------------------------------------------------------------------
+# E-181-02: Game Coverage Indicators
+# ---------------------------------------------------------------------------
+
+
+def _make_coverage_no_games_db(tmp_path: Path) -> tuple[Path, int, int]:
+    """Create database with opponent authorized via scheduled game only (no completed).
+
+    Returns (db_path, lsb_team_id, opp_team_id).
+    """
+    db_path = tmp_path / "test_coverage_no_games.db"
+    _apply_schema(db_path)
+    conn = sqlite3.connect(str(db_path))
+    lsb_team_id, _ = _insert_lsb_team_and_user(conn)
+
+    cursor = conn.execute(
+        "INSERT OR IGNORE INTO teams (name, membership_type) VALUES (?, ?)",
+        ("No Games Opponent", "tracked"),
+    )
+    opp_team_id: int = cursor.lastrowid  # type: ignore[assignment]
+
+    # Insert a scheduled (not completed) game so opponent passes authorization.
+    conn.execute(
+        "INSERT OR IGNORE INTO games"
+        " (game_id, season_id, game_date, home_team_id, away_team_id, status)"
+        " VALUES (?, ?, ?, ?, ?, ?)",
+        ("game-sched", _CURRENT_SEASON_ID, "2026-04-15", lsb_team_id, opp_team_id, "scheduled"),
+    )
+    conn.commit()
+    conn.close()
+    return db_path, lsb_team_id, opp_team_id
+
+
+@pytest.fixture()
+def coverage_no_games_client(tmp_path: Path):
+    """TestClient with opponent that has no completed games. Yields (client, lsb_team_id, opp_team_id)."""
+    db_path, lsb_team_id, opp_team_id = _make_coverage_no_games_db(tmp_path)
+    env_overrides = {
+        "DATABASE_PATH": str(db_path),
+        "DEV_USER_EMAIL": "testdev@example.com",
+    }
+    with patch.dict("os.environ", env_overrides):
+        with TestClient(app) as client:
+            yield client, lsb_team_id, opp_team_id
+
+
+class TestGameCoverageIndicator:
+    """E-181-02: Game coverage indicators on opponent dashboard pages."""
+
+    def test_opponent_detail_shows_coverage_indicator(self, opponent_client) -> None:
+        """AC-1, AC-3, AC-7: Opponent detail shows 'Through [date] ([N] games)'.
+
+        The opponent_client fixture seeds 3 completed games involving opp_team_id:
+        game-001 (2026-03-01), game-002 (2026-02-20), game-2025 (2025-03-15).
+        Expected: 'Through Mar 1 (3 games)'.
+        """
+        client, _, opp_team_id, _ = opponent_client
+        response = client.get(f"/dashboard/opponents/{opp_team_id}")
+        assert response.status_code == 200
+        html = response.text
+        assert "Through Mar 1 (3 games)" in html
+
+    def test_opponent_detail_no_coverage_when_no_completed_games(
+        self, coverage_no_games_client
+    ) -> None:
+        """AC-5, AC-8: Coverage indicator absent when no completed games exist."""
+        client, _, opp_team_id = coverage_no_games_client
+        response = client.get(f"/dashboard/opponents/{opp_team_id}")
+        assert response.status_code == 200
+        html = response.text
+        assert "Through" not in html
+
+    def test_opponent_print_shows_coverage_indicator(self, opponent_client) -> None:
+        """AC-2: Opponent print page shows the same coverage indicator."""
+        client, _, opp_team_id, _ = opponent_client
+        response = client.get(f"/dashboard/opponents/{opp_team_id}/print")
+        assert response.status_code == 200
+        html = response.text
+        assert "Through Mar 1 (3 games)" in html
+
+    def test_opponent_print_no_coverage_when_no_completed_games(
+        self, coverage_no_games_client
+    ) -> None:
+        """AC-5: Print page omits coverage indicator when no completed games."""
+        client, _, opp_team_id = coverage_no_games_client
+        response = client.get(f"/dashboard/opponents/{opp_team_id}/print")
+        assert response.status_code == 200
+        html = response.text
+        assert "Through" not in html

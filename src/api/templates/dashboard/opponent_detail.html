@@ -36,6 +36,9 @@ Scout: {{ scouting_report.team_name if scouting_report else opponent_team_id }}
   {% if scouting_report.record %}
   <p class="text-gray-600 text-sm mt-1">{{ scouting_report.record.wins }}-{{ scouting_report.record.losses }} &middot; {{ game_count }} game{{ "s" if game_count != 1 else "" }}</p>
   {% endif %}
+  {% if coverage_text %}
+  <p class="text-gray-500 text-xs mt-1">{{ coverage_text }}</p>
+  {% endif %}
 </div>
 
 {# ------------------------------------------------------------------ #}
@@ -43,10 +46,11 @@ Scout: {{ scouting_report.team_name if scouting_report else opponent_team_id }}
 {# ------------------------------------------------------------------ #}
 {% if empty_state == "unlinked" %}
 <div class="bg-yellow-50 border border-yellow-200 rounded p-4 text-sm text-yellow-900 mb-4">
-  <p class="font-bold mb-1">Stats not available.</p>
-  <p>Scouting stats aren't available for this team. Only scoresheet data from your games is shown.</p>
+  <p class="font-bold mb-1">This opponent isn't linked to GameChanger yet.</p>
   {% if is_admin %}
-  <a href="{{ admin_link_url }}" class="inline-block mt-2 text-sm font-medium text-blue-900 hover:underline py-2">Link in Admin &rarr;</a>
+  <p><a href="{{ admin_link_url }}" class="text-blue-900 hover:underline font-medium">Link this team &rarr;</a></p>
+  {% else %}
+  <p>Ask your admin to link this team.</p>
   {% endif %}
 </div>
 
@@ -55,8 +59,8 @@ Scout: {{ scouting_report.team_name if scouting_report else opponent_team_id }}
 {# ------------------------------------------------------------------ #}
 {% elif empty_state == "linked_unscouted" %}
 <div class="bg-yellow-50 border border-yellow-200 rounded p-4 text-sm text-yellow-900 mb-4">
-  <p class="font-bold mb-1">Stats aren't ready yet.</p>
-  <p>Stats are on their way. Check back soon.</p>
+  <p class="font-bold mb-1">No scouting data yet.</p>
+  <p>Stats will appear after the next update.</p>
 </div>
 
 {# ------------------------------------------------------------------ #}

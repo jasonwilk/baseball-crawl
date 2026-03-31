@@ -81,8 +81,17 @@
   <div>
     {% if game.has_stats %}
     <span class="text-xs text-green-700">&#9679; Scouted</span>
-    {% else %}
+    {% elif game.is_resolved %}
     <span class="text-xs text-gray-400">&#9675; Not scouted</span>
+    {% else %}
+      {% if is_admin %}
+      <span class="text-xs text-gray-400">&#9675;</span>
+      <a href="/admin/opponents?filter=unresolved&amp;team_id={{ active_team_id }}"
+         class="text-xs text-blue-700 hover:underline"
+         onclick="event.stopPropagation()">Link &gt;</a>
+      {% else %}
+      <span class="text-xs text-gray-400">&#9675; Not scouted</span>
+      {% endif %}
     {% endif %}
   </div>
 </a>

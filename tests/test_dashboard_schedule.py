@@ -523,3 +523,130 @@ class TestTeamIsolation:
         assert resp.status_code == 200
         # Common Opponent only played team_b; must not appear in team_a's schedule
         assert "Common Opponent" not in resp.text
+
+
+# ---------------------------------------------------------------------------
+# E-181-03: Schedule card "Link" micro-CTA (admin vs non-admin)
+# ---------------------------------------------------------------------------
+
+
+class TestScheduleLinkCTA:
+    """E-181-03 AC-1 through AC-4: admin 'Link >' CTA on unscouted schedule cards."""
+
+    def _make_db(self, tmp_path: Path) -> tuple[Path, int, int]:
+        """Create DB with one upcoming game vs unscouted opponent.
+
+        Returns (db_path, lsb_team_id, opp_team_id).
+        """
+        db_path = tmp_path / "link_cta.db"
+        _apply_schema(db_path)
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("PRAGMA foreign_keys=ON;")
+        lsb_id, _ = _insert_base(conn)
+        opp_id = _insert_opponent(conn, "Unscouted Rival")
+        # Upcoming game -- opponent has no stats (not scouted)
+        _insert_game(conn, "g-unscouted", lsb_id, opp_id, _UPCOMING_DATE_NEAR, "scheduled")
+        conn.commit()
+        conn.close()
+        return db_path, lsb_id, opp_id
+
+    def test_admin_sees_link_cta_on_unscouted_opponent(self, tmp_path: Path) -> None:
+        """AC-1: Admin users see 'Link >' action on unscouted schedule cards."""
+        db_path, lsb_id, opp_id = self._make_db(tmp_path)
+        env = {
+            "DATABASE_PATH": str(db_path),
+            "DEV_USER_EMAIL": "dev@test.com",
+            "ADMIN_EMAIL": "dev@test.com",
+        }
+        with patch.dict("os.environ", env):
+            with TestClient(app) as client:
+                resp = client.get(f"/dashboard?team_id={lsb_id}")
+        assert resp.status_code == 200
+        body = resp.text
+        assert "Link &gt;" in body
+        assert f"/admin/opponents?filter=unresolved&amp;team_id={lsb_id}" in body
+
+    def test_non_admin_sees_not_scouted_text(self, tmp_path: Path) -> None:
+        """AC-2: Non-admin users see 'Not scouted' text without a link."""
+        db_path, lsb_id, opp_id = self._make_db(tmp_path)
+        env = {
+            "DATABASE_PATH": str(db_path),
+            "DEV_USER_EMAIL": "dev@test.com",
+            "ADMIN_EMAIL": "admin@other.edu",  # different from user
+        }
+        with patch.dict("os.environ", env):
+            with TestClient(app) as client:
+                resp = client.get(f"/dashboard?team_id={lsb_id}")
+        assert resp.status_code == 200
+        body = resp.text
+        assert "Not scouted" in body
+        assert "Link &gt;" not in body
+
+    def test_link_cta_has_stop_propagation(self, tmp_path: Path) -> None:
+        """AC-4: The 'Link' action uses event.stopPropagation()."""
+        db_path, lsb_id, opp_id = self._make_db(tmp_path)
+        env = {
+            "DATABASE_PATH": str(db_path),
+            "DEV_USER_EMAIL": "dev@test.com",
+            "ADMIN_EMAIL": "dev@test.com",
+        }
+        with patch.dict("os.environ", env):
+            with TestClient(app) as client:
+                resp = client.get(f"/dashboard?team_id={lsb_id}")
+        assert resp.status_code == 200
+        assert "event.stopPropagation()" in resp.text
+
+    def test_resolved_but_unscouted_hides_link_cta(self, tmp_path: Path) -> None:
+        """Resolved (linked) opponents without stats show 'Not scouted', not 'Link >'.
+
+        An opponent that has been resolved via opponent_links but hasn't had
+        scouting stats loaded yet should NOT show the 'Link >' CTA, since
+        clicking it would send the admin to the unresolved filter where this
+        opponent won't appear.
+        """
+        db_path, lsb_id, opp_id = self._make_db(tmp_path)
+        # Mark the opponent as resolved in opponent_links
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("PRAGMA foreign_keys=ON;")
+        conn.execute(
+            "INSERT INTO opponent_links (our_team_id, root_team_id, opponent_name,"
+            " resolved_team_id, public_id, resolution_method, resolved_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, datetime('now'))",
+            (lsb_id, "rt-001", "Unscouted Rival", opp_id, "unscouted-rival", "search"),
+        )
+        conn.commit()
+        conn.close()
+        env = {
+            "DATABASE_PATH": str(db_path),
+            "DEV_USER_EMAIL": "dev@test.com",
+            "ADMIN_EMAIL": "dev@test.com",
+        }
+        with patch.dict("os.environ", env):
+            with TestClient(app) as client:
+                resp = client.get(f"/dashboard?team_id={lsb_id}")
+        assert resp.status_code == 200
+        body = resp.text
+        # Should NOT show "Link >" since opponent is already resolved
+        assert "Link &gt;" not in body
+        # Should show "Not scouted" instead
+        assert "Not scouted" in body
+
+    def test_scouted_opponent_shows_scouted_badge(self, tmp_path: Path) -> None:
+        """Scouted opponents still show the 'Scouted' badge, not 'Link'."""
+        db_path, lsb_id, opp_id = self._make_db(tmp_path)
+        # Give opponent batting stats so it's considered scouted
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("PRAGMA foreign_keys=ON;")
+        _insert_opp_batting_stats(conn, opp_id)
+        conn.commit()
+        conn.close()
+        env = {
+            "DATABASE_PATH": str(db_path),
+            "DEV_USER_EMAIL": "dev@test.com",
+            "ADMIN_EMAIL": "dev@test.com",
+        }
+        with patch.dict("os.environ", env):
+            with TestClient(app) as client:
+                resp = client.get(f"/dashboard?team_id={lsb_id}")
+        assert resp.status_code == 200
+        assert "Scouted" in resp.text

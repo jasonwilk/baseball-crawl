@@ -278,37 +278,25 @@ class TestTeamsFlatList:
                 response = client.get("/admin/teams?msg=Team+added")
         assert "Team added" in response.text
 
-    def test_added_flash_shows_team_name_and_hint(self, team_db: Path) -> None:
-        """AC-8: ?added=1&team_name= renders enhanced flash with team name and Update Stats button hint."""
+    def test_msg_flash_renders_single_banner(self, team_db: Path) -> None:
+        """?msg= renders exactly one green banner on teams page."""
         user_id = _insert_user(team_db, "admin@example.com")
         token = _insert_session(team_db, user_id)
 
         with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
             with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
-                response = client.get("/admin/teams?added=1&team_name=River+Hawks")
-        assert "River Hawks" in response.text
-        assert "Update Stats" in response.text
-        assert "bg-green-100" in response.text
-
-    def test_added_flash_no_duplicate_banner(self, team_db: Path) -> None:
-        """AC-4: When ?added=1 is set, ?msg= is absent so only one banner renders."""
-        user_id = _insert_user(team_db, "admin@example.com")
-        token = _insert_session(team_db, user_id)
-
-        with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
-            with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
-                response = client.get("/admin/teams?added=1&team_name=River+Hawks")
-        # Count occurrences of the green banner div opening tag
+                response = client.get("/admin/teams?msg=River+Hawks+added.")
+        assert "River Hawks added." in response.text
         assert response.text.count("bg-green-100") == 1
 
-    def test_added_flash_team_name_is_autoescaped(self, team_db: Path) -> None:
-        """AC-3/AC-4: XSS attempt in team_name is autoescaped, not rendered as HTML."""
+    def test_msg_flash_is_autoescaped(self, team_db: Path) -> None:
+        """XSS attempt in ?msg= is autoescaped, not rendered as HTML."""
         user_id = _insert_user(team_db, "admin@example.com")
         token = _insert_session(team_db, user_id)
 
         with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
             with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
-                response = client.get("/admin/teams?added=1&team_name=%3Cscript%3Ealert(1)%3C%2Fscript%3E")
+                response = client.get("/admin/teams?msg=%3Cscript%3Ealert(1)%3C%2Fscript%3E")
         assert "<script>" not in response.text
         assert "&lt;script&gt;" in response.text
 
@@ -727,13 +715,15 @@ class TestPhase2ConfirmSubmit:
         assert _count_rows(team_db, "teams", "public_id = ?", ("newteam1",)) == 1
 
     def test_confirm_submit_redirects_with_flash(self, team_db: Path) -> None:
-        """POST /admin/teams/confirm on success redirects with ?added=1 flash (E-142-05)."""
+        """POST /admin/teams/confirm on success redirects with ?msg= flash (E-181-01)."""
         user_id = _insert_user(team_db, "admin@example.com")
         token = _insert_session(team_db, user_id)
 
         with patch(
             "src.api.routes.admin.resolve_public_id_to_uuid",
             return_value="gc-uuid-xyz",
+        ), patch(
+            "src.api.routes.admin.trigger.run_scouting_sync",
         ):
             with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
                 with TestClient(
@@ -752,8 +742,9 @@ class TestPhase2ConfirmSubmit:
                         },
                     )
 
-        assert "added=1" in response.headers["location"]
-        assert "team_name=Flash+Team" in response.headers["location"]
+        location = response.headers["location"]
+        assert "msg=" in location
+        assert "Flash+Team" in location or "Flash%20Team" in location
 
     def test_confirm_submit_duplicate_shows_error(self, team_db: Path) -> None:
         """POST /admin/teams/confirm with duplicate public_id shows error, no insert."""
@@ -2291,3 +2282,293 @@ class TestFailedBadgeErrorDisplay:
         assert "Cannot parse URL" in response.text
         assert '<meta http-equiv="refresh" content="8">' in response.text
         assert "Stats are updating" in response.text
+
+
+# ---------------------------------------------------------------------------
+# E-181-01: Auto-sync on team add
+# ---------------------------------------------------------------------------
+
+
+class TestAutoSyncOnTeamAdd:
+    """E-181-01: Background sync automatically enqueued after team add."""
+
+    def test_auto_sync_enqueued_for_member_team(self, team_db: Path) -> None:
+        """AC-1/AC-9: Adding a member team enqueues run_member_sync."""
+        user_id = _insert_user(team_db, "admin@example.com")
+        token = _insert_session(team_db, user_id)
+
+        with patch(
+            "src.api.routes.admin.resolve_public_id_to_uuid",
+            return_value="gc-uuid-member1",
+        ), patch(
+            "src.api.routes.admin.trigger.run_member_sync",
+        ) as mock_member_sync, patch(
+            "src.api.routes.admin.trigger.run_scouting_sync",
+        ) as mock_scout_sync, patch.dict(
+            "os.environ", _admin_env(team_db, "admin@example.com")
+        ):
+            with TestClient(
+                app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
+            ) as client:
+                response = client.post(
+                    "/admin/teams/confirm",
+                    data={
+                        "public_id": "autosync-member",
+                        "team_name": "AutoSync Member",
+                        "gc_uuid": "gc-uuid-member1",
+                        "membership_type": "member",
+                        "program_id": "",
+                        "classification": "",
+                        "csrf_token": _CSRF,
+                    },
+                )
+
+        assert response.status_code == 303
+        assert mock_member_sync.called
+        assert not mock_scout_sync.called
+        # Verify crawl_job was created
+        conn = sqlite3.connect(str(team_db))
+        team_row = conn.execute(
+            "SELECT id FROM teams WHERE public_id = ?", ("autosync-member",)
+        ).fetchone()
+        job_row = conn.execute(
+            "SELECT sync_type, status FROM crawl_jobs WHERE team_id = ?",
+            (team_row[0],),
+        ).fetchone()
+        conn.close()
+        assert job_row is not None
+        assert job_row[0] == "member_crawl"
+        assert job_row[1] == "running"
+
+    def test_auto_sync_enqueued_for_tracked_team(self, team_db: Path) -> None:
+        """AC-1/AC-9: Adding a tracked team enqueues run_scouting_sync."""
+        user_id = _insert_user(team_db, "admin@example.com")
+        token = _insert_session(team_db, user_id)
+
+        from src.gamechanger.bridge import BridgeForbiddenError
+
+        with patch(
+            "src.api.routes.admin.resolve_public_id_to_uuid",
+            side_effect=BridgeForbiddenError("403"),
+        ), patch(
+            "src.api.routes.admin.trigger.run_member_sync",
+        ) as mock_member_sync, patch(
+            "src.api.routes.admin.trigger.run_scouting_sync",
+        ) as mock_scout_sync, patch.dict(
+            "os.environ", _admin_env(team_db, "admin@example.com")
+        ):
+            with TestClient(
+                app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
+            ) as client:
+                response = client.post(
+                    "/admin/teams/confirm",
+                    data={
+                        "public_id": "autosync-tracked",
+                        "team_name": "AutoSync Tracked",
+                        "gc_uuid": "",
+                        "membership_type": "tracked",
+                        "program_id": "",
+                        "classification": "",
+                        "csrf_token": _CSRF,
+                    },
+                )
+
+        assert response.status_code == 303
+        assert not mock_member_sync.called
+        assert mock_scout_sync.called
+        # Verify crawl_job was created with scouting type
+        conn = sqlite3.connect(str(team_db))
+        team_row = conn.execute(
+            "SELECT id FROM teams WHERE public_id = ?", ("autosync-tracked",)
+        ).fetchone()
+        job_row = conn.execute(
+            "SELECT sync_type, status FROM crawl_jobs WHERE team_id = ?",
+            (team_row[0],),
+        ).fetchone()
+        conn.close()
+        assert job_row is not None
+        assert job_row[0] == "scouting_crawl"
+
+    def test_auto_sync_flash_message_on_add(self, team_db: Path) -> None:
+        """AC-2: Flash message confirms auto-sync after team add."""
+        user_id = _insert_user(team_db, "admin@example.com")
+        token = _insert_session(team_db, user_id)
+
+        with patch(
+            "src.api.routes.admin.resolve_public_id_to_uuid",
+            return_value="gc-uuid-flash",
+        ), patch(
+            "src.api.routes.admin.trigger.run_member_sync",
+        ), patch.dict(
+            "os.environ", _admin_env(team_db, "admin@example.com")
+        ):
+            with TestClient(
+                app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
+            ) as client:
+                response = client.post(
+                    "/admin/teams/confirm",
+                    data={
+                        "public_id": "flashmsg-team",
+                        "team_name": "Flash Msg Team",
+                        "gc_uuid": "gc-uuid-flash",
+                        "membership_type": "member",
+                        "program_id": "",
+                        "classification": "",
+                        "csrf_token": _CSRF,
+                    },
+                )
+
+        location = response.headers.get("location", "")
+        assert "Stats+updating+in+the+background" in location or \
+            "Stats%20updating%20in%20the%20background" in location
+
+    def test_auto_sync_skipped_when_job_running(self, team_db: Path) -> None:
+        """AC-3/AC-11: Auto-sync skipped if a crawl_jobs entry is already running."""
+        user_id = _insert_user(team_db, "admin@example.com")
+        token = _insert_session(team_db, user_id)
+
+        # We need to pre-insert a running job for the team that will be created.
+        # Since we don't know the team_id yet, we'll use a trick: insert a team
+        # with the same public_id first to discover the id pattern, then clean up.
+        # Actually, let's just mock _has_running_job to return True.
+        with patch(
+            "src.api.routes.admin.resolve_public_id_to_uuid",
+            return_value="gc-uuid-guard",
+        ), patch(
+            "src.api.routes.admin._has_running_job",
+            return_value=True,
+        ), patch(
+            "src.api.routes.admin.trigger.run_member_sync",
+        ) as mock_member_sync, patch(
+            "src.api.routes.admin.trigger.run_scouting_sync",
+        ) as mock_scout_sync, patch.dict(
+            "os.environ", _admin_env(team_db, "admin@example.com")
+        ):
+            with TestClient(
+                app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
+            ) as client:
+                response = client.post(
+                    "/admin/teams/confirm",
+                    data={
+                        "public_id": "guard-team",
+                        "team_name": "Guard Team",
+                        "gc_uuid": "gc-uuid-guard",
+                        "membership_type": "member",
+                        "program_id": "",
+                        "classification": "",
+                        "csrf_token": _CSRF,
+                    },
+                )
+
+        assert response.status_code == 303
+        assert not mock_member_sync.called
+        assert not mock_scout_sync.called
+        # Flash should say team was added but NOT mention stats updating
+        location = response.headers.get("location", "")
+        assert "Guard+Team+added" in location or "Guard%20Team%20added" in location
+        assert "updating" not in location.lower()
+
+    def test_auto_sync_failure_does_not_prevent_team_add(self, team_db: Path) -> None:
+        """AC-8: If auto-sync enqueue fails, team is still added with 303 redirect."""
+        user_id = _insert_user(team_db, "admin@example.com")
+        token = _insert_session(team_db, user_id)
+
+        with patch(
+            "src.api.routes.admin.resolve_public_id_to_uuid",
+            return_value="gc-uuid-fail",
+        ), patch(
+            "src.api.routes.admin._prepare_auto_sync",
+            side_effect=Exception("sync failed"),
+        ), patch.dict(
+            "os.environ", _admin_env(team_db, "admin@example.com")
+        ):
+            with TestClient(
+                app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
+            ) as client:
+                response = client.post(
+                    "/admin/teams/confirm",
+                    data={
+                        "public_id": "failsync-team",
+                        "team_name": "FailSync Team",
+                        "gc_uuid": "gc-uuid-fail",
+                        "membership_type": "member",
+                        "program_id": "",
+                        "classification": "",
+                        "csrf_token": _CSRF,
+                    },
+                )
+
+        # Handler catches sync failure and still returns 303 redirect
+        assert response.status_code == 303
+        location = response.headers.get("location", "")
+        assert "/admin/teams" in location
+        # Message should NOT mention "updating" since sync failed
+        assert "updating" not in location.lower()
+
+        # Team should still have been inserted
+        conn = sqlite3.connect(str(team_db))
+        row = conn.execute(
+            "SELECT id FROM teams WHERE public_id = ?", ("failsync-team",)
+        ).fetchone()
+        conn.close()
+        assert row is not None, "Team should exist even if auto-sync failed"
+
+
+# ---------------------------------------------------------------------------
+# E-181-03: Welcome state when teams list is empty
+# ---------------------------------------------------------------------------
+
+
+class TestWelcomeStateEmptyTeams:
+    """E-181-03 AC-8, AC-9: empty teams list shows welcome state."""
+
+    def _make_empty_db(self, tmp_path: Path) -> Path:
+        """Create a DB with schema but no teams (only what schema seeds)."""
+        db_path = tmp_path / "empty_teams.db"
+        run_migrations(db_path=db_path)
+        # Delete the seeded team so the teams list is truly empty
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("PRAGMA foreign_keys=ON;")
+        conn.execute("DELETE FROM teams")
+        conn.commit()
+        conn.close()
+        return db_path
+
+    def test_welcome_heading_appears_when_no_teams(self, tmp_path: Path) -> None:
+        """AC-8: Welcome heading and subtext appear instead of empty table."""
+        db_path = self._make_empty_db(tmp_path)
+        admin_email = "admin@test.com"
+        user_id = _insert_user(db_path, admin_email)
+        token = _insert_session(db_path, user_id)
+
+        with patch.dict("os.environ", _admin_env(db_path, admin_email)):
+            with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
+                resp = client.get("/admin/teams")
+        assert resp.status_code == 200
+        assert "Welcome to LSB Baseball." in resp.text
+        assert "Get started by adding your first team." in resp.text
+
+    def test_welcome_cta_links_to_add_team(self, tmp_path: Path) -> None:
+        """AC-9: CTA button links to the add-team flow."""
+        db_path = self._make_empty_db(tmp_path)
+        admin_email = "admin@test.com"
+        user_id = _insert_user(db_path, admin_email)
+        token = _insert_session(db_path, user_id)
+
+        with patch.dict("os.environ", _admin_env(db_path, admin_email)):
+            with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
+                resp = client.get("/admin/teams")
+        assert resp.status_code == 200
+        assert "#add-team" in resp.text
+
+    def test_no_welcome_state_when_teams_exist(self, team_db: Path) -> None:
+        """Welcome state does NOT appear when teams exist."""
+        admin_email = "admin@test.com"
+        user_id = _insert_user(team_db, admin_email)
+        token = _insert_session(team_db, user_id)
+
+        with patch.dict("os.environ", _admin_env(team_db, admin_email)):
+            with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
+                resp = client.get("/admin/teams")
+        assert resp.status_code == 200
+        assert "Welcome to LSB Baseball." not in resp.text

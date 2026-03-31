@@ -965,6 +965,82 @@ def _has_running_job(team_id: int) -> bool:
     return row is not None
 
 
+def _prepare_auto_sync(
+    team_id: int,
+    membership_type: str,
+    public_id: str | None,
+) -> tuple[str, int] | None:
+    """Check eligibility and create a crawl_job for auto-sync (DB work only).
+
+    This function performs the database-touching work for auto-sync: checks
+    for running jobs, validates eligibility, and creates the crawl_job row.
+    It does NOT call ``background_tasks.add_task()`` -- that must happen in
+    the async handler to avoid calling FastAPI internals from a thread pool.
+
+    Args:
+        team_id: The team's INTEGER primary key.
+        membership_type: 'member' or 'tracked'.
+        public_id: The GC public_id slug (required for tracked teams).
+
+    Returns:
+        A ``(sync_type, crawl_job_id)`` tuple if sync should proceed,
+        or ``None`` if skipped.
+    """
+    if _has_running_job(team_id):
+        logger.info(
+            "Auto-sync skipped for team_id=%d: running job exists", team_id
+        )
+        return None
+
+    if membership_type == "tracked" and not public_id:
+        logger.info(
+            "Auto-sync skipped for team_id=%d: tracked team without public_id",
+            team_id,
+        )
+        return None
+
+    sync_type = "member_crawl" if membership_type == "member" else "scouting_crawl"
+    crawl_job_id = _create_crawl_job(team_id, sync_type)
+    return sync_type, crawl_job_id
+
+
+def _enqueue_from_prep(
+    background_tasks: BackgroundTasks,
+    prep: tuple[str, int],
+    team_id: int,
+    team_name: str,
+    membership_type: str,
+    public_id: str | None,
+) -> None:
+    """Enqueue the appropriate background task from a _prepare_auto_sync result.
+
+    Must be called from the async handler (not from run_in_threadpool).
+
+    Args:
+        background_tasks: FastAPI BackgroundTasks instance.
+        prep: The ``(sync_type, crawl_job_id)`` tuple from _prepare_auto_sync.
+        team_id: The team's INTEGER primary key.
+        team_name: Team display name (for log messages).
+        membership_type: 'member' or 'tracked'.
+        public_id: The GC public_id slug (for tracked teams).
+    """
+    sync_type, crawl_job_id = prep
+
+    if membership_type == "member":
+        background_tasks.add_task(
+            trigger.run_member_sync, team_id, team_name, crawl_job_id
+        )
+    else:
+        background_tasks.add_task(
+            trigger.run_scouting_sync, team_id, public_id, crawl_job_id
+        )
+
+    logger.info(
+        "Auto-sync enqueued for team_id=%d sync_type=%s crawl_job_id=%d",
+        team_id, sync_type, crawl_job_id,
+    )
+
+
 def _check_duplicate_new(
     public_id: str,
     gc_uuid: str | None,
@@ -1427,15 +1503,6 @@ async def list_teams(request: Request) -> Response:
 
     msg = request.query_params.get("msg", "")
     error = request.query_params.get("error", "")
-    added = request.query_params.get("added", "")
-    added_team_name = request.query_params.get("team_name", "")
-    merged_canonical_id_raw = request.query_params.get("merged_canonical_id", "")
-    merged_canonical_id: int | None = None
-    try:
-        if merged_canonical_id_raw:
-            merged_canonical_id = int(merged_canonical_id_raw)
-    except ValueError:
-        pass
 
     teams = await run_in_threadpool(_get_all_teams_flat)
     duplicate_groups = await run_in_threadpool(_get_duplicate_groups)
@@ -1450,9 +1517,6 @@ async def list_teams(request: Request) -> Response:
             "any_running": any_running,
             "msg": msg,
             "error": error,
-            "added": added,
-            "added_team_name": added_team_name,
-            "merged_canonical_id": merged_canonical_id,
             "admin_user": guard,
             "is_admin_page": True,
         },
@@ -1743,6 +1807,7 @@ def _normalize_confirm_inputs(
 @router.post("/teams/confirm", response_model=None)
 async def confirm_team_submit(
     request: Request,
+    background_tasks: BackgroundTasks,
     public_id: str = Form(...),
     team_name: str = Form(...),
     gc_uuid: str = Form(default=""),
@@ -1752,6 +1817,9 @@ async def confirm_team_submit(
     season_year: str = Form(default=""),
 ) -> Response:
     """Phase 2: TOCTOU guard, duplicate check, then insert team.
+
+    After successful insert, enqueues a background stat update via
+    ``_prepare_auto_sync`` / ``_enqueue_from_prep`` (E-181-01).
 
     Returns:
         Redirect to /admin/teams on success, or re-rendered confirm page
@@ -1795,7 +1863,7 @@ async def confirm_team_submit(
         )
 
     try:
-        await run_in_threadpool(
+        new_team_id = await run_in_threadpool(
             _insert_team_new,
             team_name, public_id, gc_uuid_value, membership_type,
             program_id_value, classification_value, season_year_value,
@@ -1805,8 +1873,33 @@ async def confirm_team_submit(
             url=f"/admin/teams?error={quote_plus('Team already exists.')}",
             status_code=303,
         )
+
+    # Auto-sync: enqueue background stat update (E-181-01).
+    # DB prep runs in thread pool; task enqueue runs in async handler.
+    # Wrapped in try/except so sync failures never prevent team-add (AC-8).
+    synced = False
+    try:
+        prep = await run_in_threadpool(
+            _prepare_auto_sync, new_team_id, membership_type, public_id,
+        )
+        if prep is not None:
+            _enqueue_from_prep(
+                background_tasks, prep,
+                new_team_id, team_name, membership_type, public_id,
+            )
+            synced = True
+    except Exception:
+        logger.exception(
+            "Auto-sync failed for new team_id=%d; team was added successfully",
+            new_team_id,
+        )
+
+    if synced:
+        msg = f"Team {team_name} added. Stats updating in the background."
+    else:
+        msg = f"Team {team_name} added."
     return RedirectResponse(
-        url=f"/admin/teams?added=1&team_name={quote_plus(team_name)}",
+        url=f"/admin/teams?msg={quote_plus(msg)}",
         status_code=303,
     )
 
@@ -1928,6 +2021,7 @@ async def merge_teams_page(request: Request) -> Response:
 @router.post("/teams/merge", response_model=None)
 async def execute_merge(
     request: Request,
+    background_tasks: BackgroundTasks,
     canonical_id: int = Form(...),
     duplicate_id: int = Form(...),
     team_ids_str: str = Form(...),
@@ -1936,11 +2030,13 @@ async def execute_merge(
     """Execute a team merge and redirect.
 
     Calls merge_teams() with the provided canonical and duplicate IDs.  On
-    success redirects to /admin/teams with a confirmation message and a
-    Sync Now button.  On MergeBlockedError redirects back to the merge page.
+    success redirects to /admin/teams with a confirmation message.  After a
+    successful merge, enqueues a background stat update on the kept team
+    (E-181-01).  On MergeBlockedError redirects back to the merge page.
 
     Args:
         request: The incoming HTTP request.
+        background_tasks: FastAPI BackgroundTasks injected by the framework.
         canonical_id: The team id to keep (from form).
         duplicate_id: The team id to delete (from form).
         team_ids_str: Comma-separated team IDs for the Resolve link back (from form).
@@ -1990,9 +2086,41 @@ async def execute_merge(
         )
         return RedirectResponse(url=merge_url, status_code=303)
 
-    msg = f"Merged {duplicate_name} into {canonical_name}. Click Update Stats to load fresh data."
+    # Auto-sync on the kept team after merge (E-181-01).
+    # Re-fetch the canonical team to pick up any fields enriched by the merge
+    # (e.g., public_id or gc_uuid absorbed from the duplicate).
+    # Wrapped in try/except so sync failures never prevent merge (AC-8).
+    synced = False
+    try:
+        kept_team = await run_in_threadpool(_get_team_by_integer_id, canonical_id)
+        if kept_team:
+            prep = await run_in_threadpool(
+                _prepare_auto_sync,
+                canonical_id,
+                kept_team["membership_type"],
+                kept_team.get("public_id"),
+            )
+            if prep is not None:
+                _enqueue_from_prep(
+                    background_tasks, prep,
+                    canonical_id, canonical_name,
+                    kept_team["membership_type"],
+                    kept_team.get("public_id"),
+                )
+                synced = True
+    except Exception:
+        logger.exception(
+            "Auto-sync failed after merge canonical_id=%d; merge completed successfully",
+            canonical_id,
+        )
+
+    base_msg = f"Merged {duplicate_name} into {canonical_name}."
+    if synced:
+        msg = f"{base_msg} Stats updating in the background."
+    else:
+        msg = base_msg
     return RedirectResponse(
-        url=f"/admin/teams?msg={quote_plus(msg)}&merged_canonical_id={canonical_id}",
+        url=f"/admin/teams?msg={quote_plus(msg)}",
         status_code=303,
     )
 

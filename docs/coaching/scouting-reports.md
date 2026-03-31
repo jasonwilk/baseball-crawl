@@ -46,6 +46,16 @@ Each completed game row shows:
 
 Tap any upcoming opponent's name to open their scouting page. The page opens with pitching information first, since "who's on the mound?" is the first question before any game.
 
+### Game Coverage Indicator
+
+Near the top of the page you'll see a line like:
+
+> Through Mar 25 (8 games)
+
+This tells you two things at once: how current the scouting data is (the most recent game date) and how many games the stats are based on. Eight games tells a much more reliable story than three — keep the game count in mind when weighing the numbers.
+
+If no games have been loaded for this opponent yet, the coverage line won't appear. That means the system hasn't scouted this team yet — see the empty states section below.
+
 ### What You'll See
 
 **Pitching** — Top three pitchers by innings pitched this season. For each pitcher:
@@ -69,11 +79,11 @@ Not every opponent will have full data. The page handles three situations:
 
 | State | What you see | What it means |
 |-------|-------------|--------------|
-| **Full stats** | All sections populated | We've run a scouting sync and have season stats loaded |
-| **Linked, not scouted** | Yellow notice: "This team is linked but stats haven't been loaded yet" | The opponent is in the system but the sync hasn't run yet — ask Jason to trigger a scouting sync |
-| **Not linked** | Yellow notice: "Stats not available. This opponent hasn't been linked to a GameChanger team yet." | The opponent hasn't been connected to GameChanger yet — Jason handles this in the admin panel |
+| **Full stats** | Stats, coverage indicator, and spray charts all populated | Scouting data has been loaded for this opponent |
+| **Linked, not scouted yet** | "No scouting data yet. Stats will appear after the next update." | The opponent is in the system but the scouting pull hasn't run yet — this often resolves on its own within minutes; if it doesn't, ask Jason |
+| **Not linked** | "This opponent isn't linked to GameChanger yet." | The opponent hasn't been connected to GameChanger — Jason handles this in the admin panel |
 
-If you tap an upcoming opponent and see a yellow notice, ask Jason to pull the data before game day.
+If you open an opponent page and see one of these messages instead of stats, it is not a broken page — it is the system telling you exactly what the situation is. When in doubt, ask Jason to check on it before game day.
 
 ---
 
@@ -83,7 +93,7 @@ When full stats are loaded for an opponent, a **Print / Save as PDF** link appea
 
 The print view is formatted for a standard landscape page:
 
-- **Page 1**: Report header, context bar (last meeting result and batting tendencies), and the full pitching table
+- **Page 1**: Report header, game coverage indicator ("Through [date] ([N] games)"), context bar (last meeting result and batting tendencies), and the full pitching table
 - **Page 2+**: Full batting table and batter tendencies charts
 
 From the print view, use your browser's print command (**Ctrl+P** on Windows/Linux, **Cmd+P** on Mac) to print on paper or save as a PDF file. The page is self-contained — it works offline and prints cleanly without extra browser chrome.
@@ -150,4 +160,4 @@ A quick reference for stats shown throughout the dashboard:
 
 ---
 
-*Last updated: 2026-03-29 | Story references: E-163 (spray charts on player profile, opponent detail, and print pages), E-153-03, E-153-04, E-159, E-183 (standalone reports cross-reference)*
+*Last updated: 2026-03-31 | Story references: E-163 (spray charts), E-153-03, E-153-04, E-159, E-183 (standalone reports), E-181-02 (game coverage indicator), E-181-03 (richer empty states, print page coverage indicator)*

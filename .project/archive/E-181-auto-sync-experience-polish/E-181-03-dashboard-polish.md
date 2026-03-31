@@ -4,7 +4,7 @@
 [E-181: Auto-Sync and Experience Polish](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the dashboard has three polish improvements: schedule cards show a "Link" action for admin users when opponents aren't scouted, the opponent detail page shows actionable empty states that explain why there's no data and what to do next, and an empty teams list shows a welcome state with a clear path to adding the first team.
