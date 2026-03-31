@@ -161,7 +161,7 @@ class TestDuplicatesBanner:
         assert resp.status_code == 200
         assert "Potential Duplicates" in resp.text
         assert "Rival High" in resp.text
-        assert "Resolve" in resp.text
+        assert "Merge" in resp.text
 
     def test_banner_not_shown_when_no_duplicates(self, tmp_path):
         db_path = _make_db(tmp_path)
@@ -611,7 +611,7 @@ class TestMergeSuccessFlash:
 
         _, env = _make_client(db_path)
         # Simulate the redirect URL that POST /admin/teams/merge produces
-        msg = "Merged Dup into Flash Team. Stats will update on next sync."
+        msg = "Merged Dup into Flash Team. Click Update Stats to load fresh data."
         from urllib.parse import quote_plus
         url = f"/admin/teams?msg={quote_plus(msg)}&merged_canonical_id={id1}"
 
@@ -620,5 +620,5 @@ class TestMergeSuccessFlash:
                 resp = c.get(url)
 
         assert resp.status_code == 200
-        assert "Sync Now" in resp.text
+        assert "Update Stats Now" in resp.text
         assert str(id1) in resp.text

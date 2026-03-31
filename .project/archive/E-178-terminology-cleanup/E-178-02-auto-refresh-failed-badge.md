@@ -4,7 +4,7 @@
 [E-178: Teams Page UX Overhaul](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the teams list page auto-refreshes while any team has a running job, and failed sync badges show the error message as a tooltip with a retry action. The coach gets passive progress feedback without manually refreshing and can understand and recover from failures directly from the teams list.

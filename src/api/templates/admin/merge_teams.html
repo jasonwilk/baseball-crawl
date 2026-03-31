@@ -41,7 +41,7 @@
           <span class="px-2 py-0.5 rounded text-xs font-semibold bg-gray-100 text-gray-700 border border-gray-300">Opponent</span>
         {% endif %}
         {% if canonical_id == team.id %}
-          <span class="px-2 py-0.5 rounded text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-400">Canonical</span>
+          <span class="px-2 py-0.5 rounded text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-400">Keeping</span>
         {% elif duplicate_id == team.id %}
           <span class="px-2 py-0.5 rounded text-xs font-semibold bg-red-50 text-red-700 border border-red-400">Will be deleted</span>
         {% endif %}
@@ -102,7 +102,7 @@
         <td class="py-0.5 font-semibold {% if team.game_count > 0 %}text-gray-900{% else %}text-gray-400{% endif %}">{{ team.game_count }}</td>
       </tr>
       <tr>
-        <td class="pr-3 text-gray-500 py-0.5">Last synced</td>
+        <td class="pr-3 text-gray-500 py-0.5">Last updated</td>
         <td class="py-0.5">{{ (team.last_synced or "")[:10] or "Never" }}</td>
       </tr>
     </table>
@@ -117,12 +117,12 @@
 {% if not canonical_id or not merge_preview %}
 <div class="bg-white rounded shadow p-5 mb-6 max-w-lg">
   <h2 class="font-semibold text-sm mb-3">
-    {% if not canonical_id %}Select Canonical Team{% else %}Change Selection{% endif %}
+    {% if not canonical_id %}Which team do you want to keep?{% else %}Change Selection{% endif %}
   </h2>
   <form method="get" action="/admin/teams/merge">
     <input type="hidden" name="team_ids" value="{{ team_ids_str }}">
     <div class="mb-4">
-      <label class="block text-xs font-medium text-gray-700 mb-1">Keep (canonical team) &mdash; this team&rsquo;s data wins</label>
+      <label class="block text-xs font-medium text-gray-700 mb-1">Keep this team &mdash; this team&rsquo;s data wins</label>
       {% for team in teams %}
       <label class="flex items-center gap-2 mb-1 text-sm cursor-pointer">
         <input type="radio" name="canonical_id" value="{{ team.id }}"
@@ -246,7 +246,7 @@
   <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
     {% if merge_preview.reassignment_counts %}
     <div>
-      <div class="text-gray-500 font-medium mb-1">Rows to reassign to canonical</div>
+      <div class="text-gray-500 font-medium mb-1">Rows to reassign to kept team</div>
       <table class="w-full">
         {% for table, count in merge_preview.reassignment_counts.items() %}
         <tr>
@@ -259,7 +259,7 @@
     {% endif %}
     {% if merge_preview.conflict_counts %}
     <div>
-      <div class="text-gray-500 font-medium mb-1">Conflicting rows to delete (canonical wins)</div>
+      <div class="text-gray-500 font-medium mb-1">Conflicting rows to delete (kept team wins)</div>
       <table class="w-full">
         {% for table, count in merge_preview.conflict_counts.items() %}
         <tr>
@@ -283,7 +283,7 @@
 <div class="bg-white rounded shadow p-5 max-w-lg">
   <h3 class="font-semibold text-sm mb-3">Confirm Merge</h3>
   <p class="text-xs text-gray-600 mb-4">
-    This will permanently delete the duplicate team and reassign all its data to the canonical team.
+    This will permanently delete the duplicate team and reassign all its data to the kept team.
     This action <strong>cannot be undone</strong>.
   </p>
   <form method="post" action="/admin/teams/merge">

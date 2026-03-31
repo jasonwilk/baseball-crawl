@@ -1,7 +1,7 @@
 # E-178: Teams Page UX Overhaul
 
 ## Status
-`READY`
+`COMPLETED`
 
 ## Overview
 Fix the teams page experience: replace all remaining pipeline jargon with plain English, improve the merge page language, add auto-refresh while jobs are running, and surface error context on failed syncs. Everything that makes the current system feel right without adding new backend features.
@@ -65,9 +65,9 @@ A UXD journey audit walked all major user flows and identified friction points t
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-178-01 | Replace all remaining pipeline jargon across templates and route handlers | TODO | None | - |
-| E-178-02 | Auto-refresh while jobs running + failed badge error display | TODO | E-178-01 | - |
-| E-178-03 | Merge page "keep" language + minor text fixes | TODO | E-178-01 | - |
+| E-178-01 | Replace all remaining pipeline jargon across templates and route handlers | DONE | None | - |
+| E-178-02 | Auto-refresh while jobs running + failed badge error display | DONE | E-178-01 | - |
+| E-178-03 | Merge page "keep" language + minor text fixes | DONE | E-178-01 | - |
 
 ## Dispatch Team
 - software-engineer
@@ -208,6 +208,13 @@ None.
 - 2026-03-29: UXD holistic design completed. Scope revised per UXD recommendation: auto-sync deferred to follow-up epic. Badge labels refined: "Found"→"Connected", "Not available"→"Limited access" (consequence-oriented). "Not linked" text becomes clickable link. "Stats not loaded yet" added to scope (2 dashboard templates). Epic now 3 stories: terminology cleanup, auto-refresh + failed badge, merge language + minor text. Follow-up items captured as IDEA-054.
 - 2026-03-29: UXD deep audit (Flows 7-18) completed. 1 new item: 403 error page title tag. Added as TN-1 #28. Reports page noted as reference implementation for E-178-02.
 - 2026-03-29: Epic set to READY.
+- 2026-03-31: Epic set to ACTIVE. Dispatch started.
+- 2026-03-31: All stories DONE. E-178-01: 2 MUST FIX (test assertions in test_dashboard_opponent_detail.py), both fixed. E-178-02: 1 SHOULD FIX (missing any_running in error path), fixed. E-178-03: clean.
+- 2026-03-31: CR integration review: APPROVED, no findings.
+- 2026-03-31: Codex code review: 2 findings, both dismissed (meta refresh placement is a base.html constraint, not a defect).
+- 2026-03-31: Documentation assessment: No documentation impact. Changes are UI label/text replacements with no new features, architecture changes, or deployment changes.
+- 2026-03-31: Context-layer assessment: Trigger 1 (new convention): No. Trigger 2 (architectural decision): No. Trigger 3 (footgun discovered): No. Trigger 4 (agent behavior change): No. Trigger 5 (domain knowledge): No. Trigger 6 (new CLI/workflow): No. No context-layer impact.
+- 2026-03-31: Epic COMPLETED.
 
 ### Review Scorecard
 | Review Pass | Findings | Accepted | Dismissed |
@@ -219,3 +226,9 @@ None.
 | UXD journey audit (Flows 1-6) | 6 UX improvements | N/A | N/A |
 | UXD deep audit (Flows 7-18) | 1 new item (403 title) | N/A | N/A |
 | **Total spec findings** | **18** | **11** | **7** |
+| Per-story CR -- E-178-01 | 2 | 2 | 0 |
+| Per-story CR -- E-178-02 | 2 | 1 | 1 |
+| Per-story CR -- E-178-03 | 0 | 0 | 0 |
+| CR integration review | 0 | 0 | 0 |
+| Codex code review | 2 | 0 | 2 |
+| **Total** | **6** | **3** | **3** |

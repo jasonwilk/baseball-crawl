@@ -36,11 +36,11 @@
     <p class="text-sm font-medium text-gray-700 mb-1">GameChanger UUID</p>
     {% if gc_uuid_status == 'found' and gc_uuid %}
       <span class="inline-flex items-center gap-2">
-        <span class="px-2 py-0.5 rounded text-xs font-semibold bg-green-100 text-green-800 border border-green-300">Discovered</span>
+        <span class="px-2 py-0.5 rounded text-xs font-semibold bg-green-100 text-green-800 border border-green-300">Connected</span>
         <span class="text-xs font-mono text-gray-600">{{ gc_uuid }}</span>
       </span>
     {% else %}
-      <span class="px-2 py-0.5 rounded text-xs font-semibold bg-yellow-100 text-yellow-800 border border-yellow-300">Not available (403)</span>
+      <span class="px-2 py-0.5 rounded text-xs font-semibold bg-yellow-100 text-yellow-800 border border-yellow-300">Limited access</span>
     {% endif %}
   </div>
 

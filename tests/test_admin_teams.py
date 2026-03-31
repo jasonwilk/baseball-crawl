@@ -279,7 +279,7 @@ class TestTeamsFlatList:
         assert "Team added" in response.text
 
     def test_added_flash_shows_team_name_and_hint(self, team_db: Path) -> None:
-        """AC-8: ?added=1&team_name= renders enhanced flash with team name and Sync button hint."""
+        """AC-8: ?added=1&team_name= renders enhanced flash with team name and Update Stats button hint."""
         user_id = _insert_user(team_db, "admin@example.com")
         token = _insert_session(team_db, user_id)
 
@@ -287,7 +287,7 @@ class TestTeamsFlatList:
             with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
                 response = client.get("/admin/teams?added=1&team_name=River+Hawks")
         assert "River Hawks" in response.text
-        assert "Sync" in response.text
+        assert "Update Stats" in response.text
         assert "bg-green-100" in response.text
 
     def test_added_flash_no_duplicate_banner(self, team_db: Path) -> None:
@@ -569,7 +569,7 @@ class TestPhase2ConfirmForm:
         assert "abc123" in response.text
 
     def test_confirm_page_shows_gc_uuid_found_badge(self, team_db: Path) -> None:
-        """Confirm page shows Discovered badge when gc_uuid is found."""
+        """Confirm page shows Connected badge when gc_uuid is found."""
         user_id = _insert_user(team_db, "admin@example.com")
         token = _insert_session(team_db, user_id)
 
@@ -584,12 +584,12 @@ class TestPhase2ConfirmForm:
                         "gc_uuid_status": "found",
                     },
                 )
-        assert "Discovered" in response.text
+        assert "Connected" in response.text
 
     def test_confirm_page_shows_not_available_badge_on_forbidden(
         self, team_db: Path
     ) -> None:
-        """Confirm page shows Not available badge when gc_uuid is forbidden."""
+        """Confirm page shows Limited access badge when gc_uuid is forbidden."""
         user_id = _insert_user(team_db, "admin@example.com")
         token = _insert_session(team_db, user_id)
 
@@ -603,7 +603,7 @@ class TestPhase2ConfirmForm:
                         "gc_uuid_status": "forbidden",
                     },
                 )
-        assert "403" in response.text or "Not available" in response.text
+        assert "Limited access" in response.text
 
     def test_confirm_page_member_radio_disabled_when_gc_uuid_forbidden(
         self, team_db: Path
@@ -1660,13 +1660,15 @@ def _insert_crawl_job(
     sync_type: str = "member_crawl",
     status: str = "running",
     started_at: str = "2026-01-01T10:00:00.000Z",
+    error_message: str | None = None,
 ) -> int:
     """Insert a crawl_jobs row and return its id."""
     conn = sqlite3.connect(str(db_path))
     conn.execute("PRAGMA foreign_keys=ON;")
     cursor = conn.execute(
-        "INSERT INTO crawl_jobs (team_id, sync_type, status, started_at) VALUES (?, ?, ?, ?)",
-        (team_id, sync_type, status, started_at),
+        "INSERT INTO crawl_jobs (team_id, sync_type, status, started_at, error_message)"
+        " VALUES (?, ?, ?, ?, ?)",
+        (team_id, sync_type, status, started_at, error_message),
     )
     conn.commit()
     job_id = cursor.lastrowid
@@ -1747,7 +1749,7 @@ class TestSyncRoute:
 
         assert response.status_code == 303
         assert "msg=" in response.headers["location"]
-        assert "Sync+started" in response.headers["location"]
+        assert "Updating+stats" in response.headers["location"]
 
         # A crawl_jobs row should have been created.
         conn = sqlite3.connect(str(team_db))
@@ -1785,7 +1787,7 @@ class TestSyncRoute:
                 )
 
         assert response.status_code == 303
-        assert "Sync+started" in response.headers["location"]
+        assert "Updating+stats" in response.headers["location"]
 
         conn = sqlite3.connect(str(team_db))
         conn.execute("PRAGMA foreign_keys=ON;")
@@ -1832,10 +1834,10 @@ class TestSyncRoute:
 
 
 class TestTeamsSyncDisplay:
-    """Last Synced column and status indicators -- AC-4, AC-5."""
+    """Last Updated column and status indicators -- AC-4, AC-5."""
 
     def test_never_synced_shows_never(self, team_db: Path) -> None:
-        """Team with no last_synced shows 'Never' in the Last Synced column (AC-4)."""
+        """Team with no last_synced shows 'Never' in the Last Updated column (AC-4)."""
         user_id = _insert_user(team_db, "admin@example.com")
         token = _insert_session(team_db, user_id)
         # Seeded team has no last_synced
@@ -1901,7 +1903,7 @@ class TestTeamsSyncDisplay:
         assert "running" in response.text
 
     def test_unresolved_tracked_shows_map_first_indicator(self, team_db: Path) -> None:
-        """Active tracked team without public_id shows 'map first' indicator (AC-3)."""
+        """Active tracked team without public_id shows 'find on GameChanger first' indicator (AC-3)."""
         user_id = _insert_user(team_db, "admin@example.com")
         token = _insert_session(team_db, user_id)
         _insert_team(team_db, "Unknown Rival", membership_type="tracked")  # no public_id
@@ -1909,10 +1911,10 @@ class TestTeamsSyncDisplay:
         with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
             with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
                 response = client.get("/admin/teams")
-        assert "map first" in response.text.lower()
+        assert "find on gamechanger first" in response.text.lower()
 
     def test_sync_button_absent_for_inactive_team(self, team_db: Path) -> None:
-        """Inactive teams do not show a Sync button (AC-3)."""
+        """Inactive teams do not show an Update Stats button (AC-3)."""
         user_id = _insert_user(team_db, "admin@example.com")
         token = _insert_session(team_db, user_id)
         team_id = _insert_team(team_db, "Old Team", membership_type="member", public_id="oldpub")
@@ -2081,3 +2083,211 @@ class TestAddTeamSeasonYear:
 
         assert response.status_code == 303
         assert "season_year" not in response.headers["location"]
+
+
+# ---------------------------------------------------------------------------
+# E-178-02: Auto-refresh when jobs running + failed badge error display
+# ---------------------------------------------------------------------------
+
+
+class TestAutoRefreshWhileRunning:
+    """Meta refresh tag and yellow banner when any team has a running job (AC-1..AC-4, AC-8)."""
+
+    def test_meta_refresh_present_when_job_running(self, team_db: Path) -> None:
+        """Page includes meta refresh tag when a team has a running job (AC-1, AC-4)."""
+        user_id = _insert_user(team_db, "admin@example.com")
+        token = _insert_session(team_db, user_id)
+
+        conn = sqlite3.connect(str(team_db))
+        row = conn.execute("SELECT id FROM teams LIMIT 1").fetchone()
+        conn.close()
+        team_id = row[0]
+
+        _insert_crawl_job(team_db, team_id, status="running")
+
+        with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
+            with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
+                response = client.get("/admin/teams")
+        assert response.status_code == 200
+        assert '<meta http-equiv="refresh" content="8">' in response.text
+
+    def test_yellow_banner_present_when_job_running(self, team_db: Path) -> None:
+        """Yellow banner displayed when a team has a running job (AC-2)."""
+        user_id = _insert_user(team_db, "admin@example.com")
+        token = _insert_session(team_db, user_id)
+
+        conn = sqlite3.connect(str(team_db))
+        row = conn.execute("SELECT id FROM teams LIMIT 1").fetchone()
+        conn.close()
+        team_id = row[0]
+
+        _insert_crawl_job(team_db, team_id, status="running")
+
+        with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
+            with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
+                response = client.get("/admin/teams")
+        assert "Stats are updating" in response.text
+        assert "refreshes automatically" in response.text
+
+    def test_no_meta_refresh_when_no_running_jobs(self, team_db: Path) -> None:
+        """No meta refresh tag when no team has a running job (AC-3, AC-8)."""
+        user_id = _insert_user(team_db, "admin@example.com")
+        token = _insert_session(team_db, user_id)
+
+        conn = sqlite3.connect(str(team_db))
+        row = conn.execute("SELECT id FROM teams LIMIT 1").fetchone()
+        conn.close()
+        team_id = row[0]
+
+        _insert_crawl_job(team_db, team_id, status="completed")
+
+        with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
+            with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
+                response = client.get("/admin/teams")
+        assert response.status_code == 200
+        assert 'http-equiv="refresh"' not in response.text
+        assert "Stats are updating" not in response.text
+
+    def test_no_meta_refresh_when_no_jobs_at_all(self, team_db: Path) -> None:
+        """No meta refresh tag when no crawl_jobs exist (AC-3)."""
+        user_id = _insert_user(team_db, "admin@example.com")
+        token = _insert_session(team_db, user_id)
+
+        with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
+            with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
+                response = client.get("/admin/teams")
+        assert response.status_code == 200
+        assert 'http-equiv="refresh"' not in response.text
+        assert "Stats are updating" not in response.text
+
+    def test_meta_refresh_when_one_of_multiple_teams_running(self, team_db: Path) -> None:
+        """Meta refresh fires if any team is running, even if others are complete (AC-1)."""
+        user_id = _insert_user(team_db, "admin@example.com")
+        token = _insert_session(team_db, user_id)
+
+        conn = sqlite3.connect(str(team_db))
+        row = conn.execute("SELECT id FROM teams LIMIT 1").fetchone()
+        conn.close()
+        team_id_1 = row[0]
+
+        team_id_2 = _insert_team(team_db, "Other Team", membership_type="member", public_id="pub99")
+
+        _insert_crawl_job(team_db, team_id_1, status="completed")
+        _insert_crawl_job(team_db, team_id_2, status="running")
+
+        with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
+            with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
+                response = client.get("/admin/teams")
+        assert '<meta http-equiv="refresh" content="8">' in response.text
+        assert "Stats are updating" in response.text
+
+
+class TestFailedBadgeErrorDisplay:
+    """Failed badge tooltip and retry link (AC-5..AC-7, AC-9)."""
+
+    def test_failed_badge_shows_error_tooltip(self, team_db: Path) -> None:
+        """Failed badge title attribute shows the error message (AC-5, AC-9)."""
+        user_id = _insert_user(team_db, "admin@example.com")
+        token = _insert_session(team_db, user_id)
+
+        conn = sqlite3.connect(str(team_db))
+        row = conn.execute("SELECT id FROM teams LIMIT 1").fetchone()
+        conn.close()
+        team_id = row[0]
+
+        _insert_crawl_job(
+            team_db, team_id, status="failed", error_message="Credentials expired"
+        )
+
+        with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
+            with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
+                response = client.get("/admin/teams")
+        assert 'title="Credentials expired"' in response.text
+
+    def test_failed_badge_shows_unknown_error_when_null(self, team_db: Path) -> None:
+        """Failed badge title shows 'Unknown error' when error_message is NULL (AC-5)."""
+        user_id = _insert_user(team_db, "admin@example.com")
+        token = _insert_session(team_db, user_id)
+
+        conn = sqlite3.connect(str(team_db))
+        row = conn.execute("SELECT id FROM teams LIMIT 1").fetchone()
+        conn.close()
+        team_id = row[0]
+
+        _insert_crawl_job(team_db, team_id, status="failed", error_message=None)
+
+        with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
+            with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
+                response = client.get("/admin/teams")
+        assert 'title="Unknown error"' in response.text
+
+    def test_failed_badge_has_retry_link(self, team_db: Path) -> None:
+        """Failed badge includes a Retry link posting to /admin/teams/{id}/sync (AC-6, AC-7)."""
+        user_id = _insert_user(team_db, "admin@example.com")
+        token = _insert_session(team_db, user_id)
+
+        conn = sqlite3.connect(str(team_db))
+        row = conn.execute("SELECT id FROM teams LIMIT 1").fetchone()
+        conn.close()
+        team_id = row[0]
+
+        _insert_crawl_job(
+            team_db, team_id, status="failed", error_message="Network timeout"
+        )
+
+        with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
+            with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
+                response = client.get("/admin/teams")
+        # Retry link should post to the sync endpoint.
+        assert f"/admin/teams/{team_id}/sync" in response.text
+        assert "Retry" in response.text
+
+    def test_completed_badge_has_no_retry_link(self, team_db: Path) -> None:
+        """Completed badge does not show a Retry link."""
+        user_id = _insert_user(team_db, "admin@example.com")
+        token = _insert_session(team_db, user_id)
+
+        conn = sqlite3.connect(str(team_db))
+        row = conn.execute("SELECT id FROM teams LIMIT 1").fetchone()
+        conn.close()
+        team_id = row[0]
+
+        _insert_crawl_job(team_db, team_id, status="completed")
+
+        with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
+            with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
+                response = client.get("/admin/teams")
+        assert "Retry" not in response.text
+
+    def test_error_path_preserves_auto_refresh(self, team_db: Path) -> None:
+        """Error re-render via _render_teams_error still shows auto-refresh and banner.
+
+        When a team has a running crawl job and the admin submits an invalid
+        URL, the error path must pass ``any_running`` to the template so the
+        auto-refresh meta tag and yellow banner remain visible.
+        """
+        user_id = _insert_user(team_db, "admin@example.com")
+        token = _insert_session(team_db, user_id)
+
+        conn = sqlite3.connect(str(team_db))
+        row = conn.execute("SELECT id FROM teams LIMIT 1").fetchone()
+        conn.close()
+        team_id = row[0]
+
+        _insert_crawl_job(team_db, team_id, status="running")
+
+        with patch(
+            "src.api.routes.admin.parse_team_url",
+            side_effect=ValueError("Cannot parse URL"),
+        ):
+            with patch.dict("os.environ", _admin_env(team_db, "admin@example.com")):
+                with TestClient(app, cookies={"session": token, "csrf_token": _CSRF}) as client:
+                    response = client.post(
+                        "/admin/teams",
+                        data={"url_input": "not-a-valid-url", "csrf_token": _CSRF},
+                    )
+
+        assert response.status_code == 200
+        assert "Cannot parse URL" in response.text
+        assert '<meta http-equiv="refresh" content="8">' in response.text
+        assert "Stats are updating" in response.text

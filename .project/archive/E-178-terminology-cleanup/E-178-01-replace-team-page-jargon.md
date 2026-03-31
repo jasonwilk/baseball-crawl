@@ -4,7 +4,7 @@
 [E-178: Teams Page UX Overhaul](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, all 28 user-visible instances of pipeline jargon across admin templates, dashboard templates, an error template, and route handler flash/error messages are replaced with plain English per TN-1. The UI uses consistent, coaching-friendly terminology across all pages, with "Update Stats" as the unified verb for the data refresh action, "Linked"/"linked" replacing "resolved" in opponent contexts, and consequence-oriented badge labels ("Connected"/"Limited access") on the confirm page.

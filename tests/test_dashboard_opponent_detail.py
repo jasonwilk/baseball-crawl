@@ -507,7 +507,7 @@ class TestOpponentDetailLinkedUnscouted:
                 )
         assert resp.status_code == 200
         body = resp.text
-        assert "Stats not loaded yet" in body
+        assert "Stats aren't ready yet" in body
         assert "on their way" in body
 
     def test_linked_unscouted_no_pitching_card(self, tmp_path):
@@ -886,7 +886,7 @@ class TestOpponentPrintRoute:
         assert "Stats not available." in resp.text
 
     def test_linked_unscouted_returns_200_with_stats_not_loaded(self, tmp_path):
-        """AC-16(b): linked_unscouted state returns 200 with 'Stats not loaded yet.' message."""
+        """AC-16(b): linked_unscouted state returns 200 with 'Stats aren't ready yet.' message."""
         db_path = _make_db(tmp_path)
         with sqlite3.connect(str(db_path)) as conn:
             conn.execute("PRAGMA foreign_keys=ON")
@@ -904,7 +904,7 @@ class TestOpponentPrintRoute:
                     params={"team_id": member_id, "season_id": _SEASON_ID},
                 )
         assert resp.status_code == 200
-        assert "Stats not loaded yet." in resp.text
+        assert "Stats aren't ready yet." in resp.text
 
     def test_unauthorized_returns_403(self, tmp_path):
         """Opponent not in any game for permitted team returns 403."""

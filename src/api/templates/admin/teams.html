@@ -8,14 +8,26 @@
 {% endblock %}
 
 {% block content %}
+{# Auto-refresh when any team has a running job (AC-1, AC-4) #}
+{% if any_running %}
+<meta http-equiv="refresh" content="8">
+{% endif %}
+
 <h1 class="text-xl font-bold mb-2">Manage Teams</h1>
 
 <!-- Admin sub-navigation -->
 {% with active_tab='teams' %}{% include "admin/_subnav.html" %}{% endwith %}
 
+{# Yellow banner when jobs are running (AC-2) #}
+{% if any_running %}
+<div class="mb-4 p-3 bg-yellow-50 text-yellow-800 rounded border border-yellow-300 text-sm">
+  Stats are updating. This page refreshes automatically.
+</div>
+{% endif %}
+
 {% if added %}
 <div class="mb-4 p-3 bg-green-100 text-green-800 rounded border border-green-300">
-  Team <strong>{{ added_team_name }}</strong> added. Use the <strong>Sync</strong> button in the table to load stats for this team.
+  Team <strong>{{ added_team_name }}</strong> added. Use the <strong>Update Stats</strong> button in the table to load stats for this team.
 </div>
 {% elif msg %}
 <div class="mb-4 p-3 bg-green-100 text-green-800 rounded border border-green-300">
@@ -24,7 +36,7 @@
   &nbsp;
   <form method="post" action="/admin/teams/{{ merged_canonical_id }}/sync" class="inline">
     <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
-    <button type="submit" class="underline font-semibold text-green-900 hover:text-green-700">Sync Now</button>
+    <button type="submit" class="underline font-semibold text-green-900 hover:text-green-700">Update Stats Now</button>
   </form>
   {% endif %}
 </div>
@@ -47,7 +59,7 @@
         <span class="text-yellow-600">({{ group | length }} teams)</span>
       </span>
       <a href="/admin/teams/merge?team_ids={{ group | map(attribute='id') | join(',') }}"
-         class="text-blue-700 hover:underline font-medium">Resolve</a>
+         class="text-blue-700 hover:underline font-medium">Merge</a>
     </li>
     {% endfor %}
   </ul>
@@ -65,7 +77,7 @@
         <th class="py-2 px-3 text-center">Membership</th>
         <th class="py-2 px-3 text-center">Opponents</th>
         <th class="py-2 px-3 text-center">Status</th>
-        <th class="py-2 px-3 text-center">Last Synced</th>
+        <th class="py-2 px-3 text-center">Last Updated</th>
         <th class="py-2 px-3 text-center">Actions</th>
       </tr>
     </thead>
@@ -104,7 +116,11 @@
           {% if team.latest_job_status == 'completed' %}
             <span class="px-1.5 py-0.5 rounded bg-green-100 text-green-800">done</span>
           {% elif team.latest_job_status == 'failed' %}
-            <span class="px-1.5 py-0.5 rounded bg-red-100 text-red-800">failed</span>
+            <span class="px-1.5 py-0.5 rounded bg-red-100 text-red-800" title="{{ team.latest_job_error or 'Unknown error' }}">failed</span>
+            <form method="post" action="/admin/teams/{{ team.id }}/sync" class="inline ml-1">
+              <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+              <button type="submit" class="text-xs text-red-700 hover:underline">Retry</button>
+            </form>
           {% elif team.latest_job_status == 'running' %}
             <span class="px-1.5 py-0.5 rounded bg-yellow-100 text-yellow-800">running</span>
           {% endif %}
@@ -126,7 +142,7 @@
                 <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
                 <button type="submit" disabled
                         class="text-xs text-yellow-700 cursor-not-allowed opacity-60">
-                  Running&hellip;
+                  Updating&hellip;
                 </button>
               </form>
               {% else %}
@@ -134,12 +150,12 @@
                 <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
                 <button type="submit"
                         class="text-xs text-emerald-700 hover:underline">
-                  Sync
+                  Update Stats
                 </button>
               </form>
               {% endif %}
             {% elif team.is_active and team.membership_type == 'tracked' and not team.public_id %}
-              <span class="text-xs text-gray-400 italic">Unresolved &mdash; map first</span>
+              <a href="/admin/opponents?filter=unresolved" class="text-xs text-gray-400 italic hover:underline">Not linked &mdash; find on GameChanger first</a>
             {% endif %}
             <a href="/admin/teams/{{ team.id }}/delete"
                class="text-xs text-red-700 hover:underline">Delete</a>

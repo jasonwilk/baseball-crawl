@@ -362,7 +362,7 @@ def _get_all_teams_flat() -> list[dict[str, Any]]:
         List of dicts with keys: id, name, program_id, membership_type,
         classification, is_active, public_id, gc_uuid, last_synced,
         program_name (nullable), opponent_count, latest_job_status (nullable),
-        latest_job_started_at (nullable).
+        latest_job_started_at (nullable), latest_job_error (nullable).
     """
     with closing(get_connection()) as conn:
         conn.row_factory = sqlite3.Row
@@ -386,7 +386,8 @@ def _get_all_teams_flat() -> list[dict[str, Any]]:
                       AND ol.is_hidden = 0
                 ) AS opponent_count,
                 cj.status AS latest_job_status,
-                cj.started_at AS latest_job_started_at
+                cj.started_at AS latest_job_started_at,
+                cj.error_message AS latest_job_error
             FROM teams t
             LEFT JOIN programs p ON t.program_id = p.program_id
             LEFT JOIN crawl_jobs cj ON cj.id = (
@@ -1390,11 +1391,13 @@ async def _render_teams_error(
         HTMLResponse with the teams page and error banner.
     """
     teams = await run_in_threadpool(_get_all_teams_flat)
+    any_running = any(t.get("latest_job_status") == "running" for t in teams)
     return templates.TemplateResponse(
         request,
         "admin/teams.html",
         {
             "teams": teams,
+            "any_running": any_running,
             "msg": "",
             "error": error,
             "admin_user": guard,
@@ -1436,6 +1439,7 @@ async def list_teams(request: Request) -> Response:
 
     teams = await run_in_threadpool(_get_all_teams_flat)
     duplicate_groups = await run_in_threadpool(_get_duplicate_groups)
+    any_running = any(t.get("latest_job_status") == "running" for t in teams)
 
     return templates.TemplateResponse(
         request,
@@ -1443,6 +1447,7 @@ async def list_teams(request: Request) -> Response:
         {
             "teams": teams,
             "duplicate_groups": duplicate_groups,
+            "any_running": any_running,
             "msg": msg,
             "error": error,
             "added": added,
@@ -1797,7 +1802,7 @@ async def confirm_team_submit(
         )
     except sqlite3.IntegrityError:
         return RedirectResponse(
-            url=f"/admin/teams?error={quote_plus('Team already exists (concurrent insert).')}",
+            url=f"/admin/teams?error={quote_plus('Team already exists.')}",
             status_code=303,
         )
     return RedirectResponse(
@@ -1985,7 +1990,7 @@ async def execute_merge(
         )
         return RedirectResponse(url=merge_url, status_code=303)
 
-    msg = f"Merged {duplicate_name} into {canonical_name}. Stats will update on next sync."
+    msg = f"Merged {duplicate_name} into {canonical_name}. Click Update Stats to load fresh data."
     return RedirectResponse(
         url=f"/admin/teams?msg={quote_plus(msg)}&merged_canonical_id={canonical_id}",
         status_code=303,
@@ -2285,14 +2290,14 @@ async def sync_team(
     # Eligibility check (AC-3 server-side enforcement).
     if not team["is_active"]:
         return RedirectResponse(
-            url="/admin/teams?error=" + quote_plus("Cannot sync an inactive team."),
+            url="/admin/teams?error=" + quote_plus("Cannot update stats for an inactive team."),
             status_code=303,
         )
 
     if team["membership_type"] == "tracked" and not team.get("public_id"):
         return RedirectResponse(
             url="/admin/teams?error="
-            + quote_plus("Cannot sync unresolved team. Map a public ID first."),
+            + quote_plus("Cannot update stats — find this team on GameChanger first."),
             status_code=303,
         )
 
@@ -2301,7 +2306,7 @@ async def sync_team(
         team_name = team["name"]
         return RedirectResponse(
             url="/admin/teams?error="
-            + quote_plus(f"Sync already in progress for {team_name}."),
+            + quote_plus(f"Update already in progress for {team_name}."),
             status_code=303,
         )
 
@@ -2321,7 +2326,7 @@ async def sync_team(
 
     team_name = team["name"]
     return RedirectResponse(
-        url=f"/admin/teams?msg={quote_plus(f'Sync started for {team_name}.')}",
+        url=f"/admin/teams?msg={quote_plus(f'Updating stats for {team_name}.')}",
         status_code=303,
     )
 
@@ -2443,7 +2448,7 @@ def _build_connect_success_msg(
     scouting_triggered: bool = False,
 ) -> str:
     """Build the flash message for a successful manual link save."""
-    scout_suffix = " Stats syncing in the background." if scouting_triggered else ""
+    scout_suffix = " Stats updating in the background." if scouting_triggered else ""
     if duplicate_name:
         return quote_plus(
             f"Linked {opponent_name} -- note: this URL is already used by {duplicate_name}.{scout_suffix}"
@@ -2456,7 +2461,7 @@ def _check_already_resolved(link: dict) -> HTMLResponse | None:
     if link.get("public_id") is not None:
         return HTMLResponse(
             content=(
-                "This opponent is already resolved and cannot be manually linked. "
+                "This opponent is already linked and cannot be manually connected. "
                 "Disconnect the existing link first."
             ),
             status_code=400,
@@ -2568,7 +2573,7 @@ async def disconnect_opponent(request: Request, link_id: int) -> Response:
 
     if link.get("resolution_method") != "manual":
         return HTMLResponse(
-            content="Cannot disconnect an auto-resolved link. Only manual links can be disconnected.",
+            content="Cannot disconnect an automatically matched link. Only manual links can be disconnected.",
             status_code=400,
         )
 
@@ -2828,7 +2833,7 @@ async def resolve_opponent_confirm(
             trigger.run_scouting_sync, team_id, resolved_public_id, crawl_job_id
         )
         msg = quote_plus(
-            f"Resolved {link['opponent_name']} via search. Stats syncing in the background."
+            f"Linked {link['opponent_name']} via search. Stats updating in the background."
         )
     else:
         logger.warning(
@@ -2837,7 +2842,7 @@ async def resolve_opponent_confirm(
             link["opponent_name"],
             team_id,
         )
-        msg = quote_plus(f"Resolved {link['opponent_name']} via search.")
+        msg = quote_plus(f"Linked {link['opponent_name']} via search.")
 
     return RedirectResponse(
         url=f"/admin/opponents?filter=unresolved&msg={msg}",

@@ -4,7 +4,7 @@
 [E-178: Teams Page UX Overhaul](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the merge page uses "keep"/"remove" instead of "canonical"/"duplicate" in all user-visible text, and a minor confusing error message is cleaned up. The merge page becomes immediately understandable without database knowledge.
