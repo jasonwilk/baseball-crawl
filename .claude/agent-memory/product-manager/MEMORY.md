@@ -31,7 +31,7 @@
 | E-178 | Teams Page UX Overhaul | COMPLETED | 3 stories delivered: terminology cleanup (01), auto-refresh + failed badge (02), merge page language (03). SE only. Ready for archive. |
 | E-180 | Codify E-178 Planning Knowledge | READY | 2 stories: UXD memory design principles + terminology refresh (01), PM memory audit-first lesson (02). CA only. |
 | E-181 | Auto-Sync and Experience Polish | COMPLETED | 3 stories delivered: auto-sync on add/merge (01), game coverage indicators (02), empty states + schedule links + welcome state (03). Context-layer assessment: 3 YES triggers (convention, footgun, domain knowledge). Docs assessment: coaching docs update warranted. Ready for archive. |
-| E-196 | Pitching Availability and Game Ordering | DRAFT | 5 stories: start_time/timezone migration+loaders (01), game ordering fix (02), pitching workload query (03), dashboard availability columns (04), standalone report availability columns (05). SE only. Migration 010. All design decisions locked from consultation. |
+| E-196 | Pitching Availability and Game Ordering | READY | 5 stories: start_time/timezone migration+loaders (01), game ordering fix (02), pitching workload query (03), dashboard availability columns (04), standalone report availability columns (05). SE only. Migration 010. All design decisions locked from consultation. |
 
 ## Key Architectural Decisions
 - Storage: SQLite (WAL mode). Host-mounted at ./data/app.db. Simple file backup via scripts/backup_db.py (no Litestream).
