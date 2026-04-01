@@ -1,7 +1,9 @@
 # IDEA-061: Derive season_id from Team Context, Not Filesystem Path
 
 ## Status
-`CANDIDATE`
+`PROMOTED`
+
+Promoted to E-197.
 
 ## Summary
 Loaders (game_loader, plays_loader, season_stats_loader, and others) derive `season_id` from the crawl directory path (e.g., `2026-spring-hs`). This is wrong for teams whose real season context differs from the directory they were crawled into -- e.g., a 2025 summer USSSA team crawled under `2026-spring-hs/` gets all its data tagged with the wrong season_id.

@@ -79,7 +79,7 @@ Review this list every 90 days, or when completing an epic. Ask:
 | [IDEA-058](IDEA-058-pyproject-dependency-management.md) | Proper Python Dependency Management via pyproject.toml | PROMOTED | 2026-03-29 -- promoted to E-190 |
 | [IDEA-059](IDEA-059-opponent-flow-spray-gaps.md) | Opponent Flow Spray Chart and Display Gaps | PROMOTED | 2026-03-29 -- promoted to E-189 |
 | [IDEA-060](IDEA-060-flow-testing-and-validation.md) | Comprehensive Flow Testing and Validation | CANDIDATE | 2026-06-27 |ack_team Return Type Bug | CANDIDATE | 2026-06-27 |
-| [IDEA-061](IDEA-061-season-id-from-team-context.md) | Derive season_id from Team Context, Not Filesystem Path | CANDIDATE | 2026-06-30 |
+| [IDEA-061](IDEA-061-season-id-from-team-context.md) | Derive season_id from Team Context, Not Filesystem Path | PROMOTED | 2026-06-30 | → E-197 |
 | [IDEA-062](IDEA-062-plays-boxscore-reconciliation.md) | Plays-vs-Boxscore Reconciliation Engine | CANDIDATE | 2026-06-30 |
 
 ## Status Definitions
