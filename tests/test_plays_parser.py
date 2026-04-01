@@ -1126,6 +1126,114 @@ class TestPitcherIdentification:
         # Play 1: pitcher inherited via backfilled pitcher_state.
         assert result[1].pitcher_id == _PITCHER_UUID
 
+    def test_pitcher_backfill_retroactive_for_initial_plays(self):
+        """Post-parse backfill assigns pitcher to plays before the first explicit reference.
+
+        Scenario: 4 bottom-half plays.  Plays 0-1 have no pitcher in
+        final_details.  Play 2 is a Strikeout with explicit pitcher A.
+        Play 3 has no pitcher reference.  After backfill, all 4 plays
+        should have pitcher_id = pitcher A.
+        """
+        plays = [
+            # Play 0: Single, no pitcher reference.
+            _make_play(
+                order=0, inning=1, half="bottom",
+                outcome="Single",
+                at_plate_details=[{"template": "In play"}],
+                final_details=[
+                    {"template": f"${{{_BATTER_UUID}}} singles to left field"},
+                ],
+            ),
+            # Play 1: Single, no pitcher reference.
+            _make_play(
+                order=1, inning=1, half="bottom",
+                outcome="Single",
+                at_plate_details=[{"template": "In play"}],
+                final_details=[
+                    {"template": f"${{{_BATTER_UUID}}} singles to right field"},
+                ],
+            ),
+            # Play 2: Strikeout with explicit pitcher A.
+            _make_play(
+                order=2, inning=1, half="bottom",
+                outcome="Strikeout",
+                at_plate_details=[
+                    {"template": "Strike 1 looking"},
+                    {"template": "Strike 2 swinging"},
+                    {"template": "Strike 3 swinging"},
+                ],
+                final_details=[
+                    {"template": f"${{{_BATTER_UUID}}} strikes out swinging, ${{{_PITCHER_UUID}}} pitching"},
+                ],
+            ),
+            # Play 3: Single, no pitcher reference (inherits from state).
+            _make_play(
+                order=3, inning=1, half="bottom",
+                outcome="Single",
+                at_plate_details=[{"template": "In play"}],
+                final_details=[
+                    {"template": f"${{{_BATTER_UUID}}} singles to center field"},
+                ],
+            ),
+        ]
+        result = _parse(plays)
+        # All 4 plays should have pitcher A.
+        for i, play in enumerate(result):
+            assert play.pitcher_id == _PITCHER_UUID, f"Play {i} should have pitcher_id set"
+
+    def test_backfill_does_not_override_mid_pa_attribution(self):
+        """Post-parse backfill must not overwrite pitcher_id set by mid-PA logic.
+
+        Scenario: pitcher A is established via play 0 (explicit final_details).
+        Play 1 has a mid-PA pitching change (A -> B) -- mid-PA logic credits
+        play 1 to pitcher A (the pitcher who threw pitch 1).  Play 2 has
+        explicit pitcher B.  The backfill should NOT overwrite play 1's
+        pitcher_id because it is already non-None (set by mid-PA logic).
+        """
+        plays = [
+            # Play 0: establishes pitcher A via final_details.
+            _make_play(
+                order=0, inning=1, half="bottom",
+                outcome="Single",
+                at_plate_details=[{"template": "In play"}],
+                final_details=[
+                    {"template": f"${{{_BATTER_UUID}}} singles to left field, ${{{_PITCHER_UUID}}} pitching"},
+                ],
+            ),
+            # Play 1: mid-PA pitching change A -> B.
+            # pitcher_at_first_pitch = A, then sub brings in B.
+            # mid-PA logic credits play to A.
+            _make_play(
+                order=1, inning=1, half="bottom",
+                outcome="Strikeout",
+                at_plate_details=[
+                    {"template": "Strike 1 looking"},
+                    {"template": f"Lineup changed: ${{{_PITCHER2_UUID}}} in at pitcher for ${{{_PITCHER_UUID}}}"},
+                    {"template": "Strike 2 swinging"},
+                    {"template": "Strike 3 swinging"},
+                ],
+                final_details=[
+                    {"template": f"${{{_BATTER_UUID}}} strikes out swinging, ${{{_PITCHER2_UUID}}} pitching"},
+                ],
+            ),
+            # Play 2: explicit pitcher B in final_details.
+            _make_play(
+                order=2, inning=1, half="bottom",
+                outcome="Single",
+                at_plate_details=[{"template": "In play"}],
+                final_details=[
+                    {"template": f"${{{_BATTER_UUID}}} singles to center, ${{{_PITCHER2_UUID}}} pitching"},
+                ],
+            ),
+        ]
+        result = _parse(plays)
+        # Play 0: pitcher A from explicit final_details.
+        assert result[0].pitcher_id == _PITCHER_UUID
+        # Play 1: mid-PA logic credits original pitcher A (not overwritten by backfill).
+        assert result[1].pitcher_id == _PITCHER_UUID
+        # Play 2: explicit pitcher B.
+        assert result[2].pitcher_id == _PITCHER2_UUID
+
 
 # ---------------------------------------------------------------------------
 # Tests: Non-PA outcome skipping

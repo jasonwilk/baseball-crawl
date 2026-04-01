@@ -353,6 +353,29 @@ class PlaysParser:
                 events=events,
             ))
 
+        # Post-parse backfill: retroactively assign pitcher_id to plays at
+        # the start of a half that occurred before the first explicit pitcher
+        # reference.  Within a half, the same pitcher is pitching for all
+        # consecutive plays before any pitching change.
+        for half_key in ("top", "bottom"):
+            half_plays = [p for p in parsed if p.half == half_key]
+            if not half_plays:
+                continue
+            # Find the first play with a known pitcher.
+            first_known_pitcher: str | None = None
+            first_known_idx: int | None = None
+            for i, p in enumerate(half_plays):
+                if p.pitcher_id is not None:
+                    first_known_pitcher = p.pitcher_id
+                    first_known_idx = i
+                    break
+            if first_known_pitcher is None or first_known_idx == 0:
+                continue
+            # Backfill preceding plays in the same half.
+            for p in half_plays[:first_known_idx]:
+                if p.pitcher_id is None:
+                    p.pitcher_id = first_known_pitcher
+
         return parsed
 
     # ------------------------------------------------------------------
