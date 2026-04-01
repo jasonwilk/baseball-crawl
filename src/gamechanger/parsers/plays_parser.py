@@ -296,10 +296,18 @@ class PlaysParser:
             if mid_pa_sub:
                 pitcher_id = pitcher_at_first_pitch
             else:
-                pitcher_id = cls._extract_pitcher_from_final_details(
+                explicit_pitcher = cls._extract_pitcher_from_final_details(
                     final_details,
                 )
-                if pitcher_id is None:
+                if explicit_pitcher is not None:
+                    pitcher_id = explicit_pitcher
+                    # Backfill pitcher_state so subsequent plays in this
+                    # half inherit the pitcher when final_details omit the
+                    # explicit reference (e.g., Singles, Fly Outs).  This
+                    # handles the common case where the starting pitcher is
+                    # never announced via a "Lineup changed" substitution.
+                    pitcher_state[half] = explicit_pitcher
+                else:
                     pitcher_id = pitcher_at_first_pitch or pitcher_state.get(half)
 
             # Count pitches (only pitch events).

@@ -1081,6 +1081,51 @@ class TestPitcherIdentification:
         # Starter unknown + mid-PA sub -> pitcher stays None per TN-1.
         assert result[0].pitcher_id is None
 
+    def test_pitcher_backfill_from_final_details(self):
+        """Explicit pitcher in final_details backfills pitcher_state for subsequent plays.
+
+        Scenario: bottom-half starting pitcher is never announced via a
+        "Lineup changed: ... in at pitcher" substitution event.  The first
+        play is a Strikeout whose final_details contains "${uuid} pitching".
+        The second play is a Single with NO pitcher reference in
+        final_details.  After the fix, the second play should inherit the
+        pitcher discovered in the first play's final_details.
+        """
+        plays = [
+            # Play 0 (bottom): Strikeout with explicit pitcher in final_details.
+            # No "Lineup changed" event -- pitcher discovered only via final_details.
+            _make_play(
+                order=0, inning=1, half="bottom",
+                outcome="Strikeout",
+                at_plate_details=[
+                    {"template": "Strike 1 looking"},
+                    {"template": "Strike 2 swinging"},
+                    {"template": "Strike 3 swinging"},
+                ],
+                final_details=[
+                    {"template": f"${{{_BATTER_UUID}}} strikes out swinging, ${{{_PITCHER_UUID}}} pitching"},
+                ],
+            ),
+            # Play 1 (bottom): Single with NO pitcher reference in final_details.
+            # Should inherit pitcher from play 0 via backfilled pitcher_state.
+            _make_play(
+                order=1, inning=1, half="bottom",
+                outcome="Single",
+                at_plate_details=[
+                    {"template": "Ball 1"},
+                    {"template": "In play"},
+                ],
+                final_details=[
+                    {"template": f"${{{_BATTER_UUID}}} singles on a ground ball to shortstop ${{{_FIELDER_UUID}}}"},
+                ],
+            ),
+        ]
+        result = _parse(plays)
+        # Play 0: pitcher identified from final_details.
+        assert result[0].pitcher_id == _PITCHER_UUID
+        # Play 1: pitcher inherited via backfilled pitcher_state.
+        assert result[1].pitcher_id == _PITCHER_UUID
+
 
 # ---------------------------------------------------------------------------
 # Tests: Non-PA outcome skipping
