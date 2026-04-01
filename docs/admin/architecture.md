@@ -91,6 +91,28 @@ baseball-crawl/
 
 ## Schema Changes
 
+### E-195: Migration 009 -- Plays and Play Events Tables
+
+`migrations/009_plays_play_events.sql` adds two tables for play-by-play data ingestion.
+
+**`plays`** -- one row per plate appearance:
+
+| Addition | Notes |
+|----------|-------|
+| `plays` table | Core play-by-play record. Columns: `game_id`, `play_order`, `inning`, `half`, `season_id`, `batting_team_id`, `batter_id`, `pitcher_id`, `outcome`, `pitch_count`, `is_first_pitch_strike`, `is_qab`, score and outs context columns. UNIQUE on `(game_id, play_order)`. |
+| `idx_plays_game_id` index | On `plays(game_id)`. |
+| `idx_plays_batter_id` index | On `plays(batter_id)`. |
+| `idx_plays_pitcher_id` index | On `plays(pitcher_id)`. |
+| `idx_plays_fps` partial index | On `plays(pitcher_id, is_first_pitch_strike)` WHERE `outcome NOT IN ('Hit By Pitch', 'Intentional Walk')`. Serves FPS% queries. |
+
+**`play_events`** -- one row per event within a plate appearance:
+
+| Addition | Notes |
+|----------|-------|
+| `play_events` table | Individual pitch, baserunner, substitution, and other events. Columns: `play_id` (FK to `plays.id`), `event_order`, `event_type`, `pitch_result`, `is_first_pitch`, `raw_template`. UNIQUE on `(play_id, event_order)`. |
+
+Populated by the plays pipeline (`bb data crawl --crawler plays` + `bb data load --loader plays`). See [operations.md](operations.md) for the full pipeline reference.
+
 ### E-167: Migration 007 -- Case-Insensitive Name+Season Year Index
 
 `migrations/007_teams_name_index.sql` adds one index to the `teams` table:
@@ -220,4 +242,4 @@ Sub-navigation links Users, Teams, and Opponents pages across all admin views. T
 
 ---
 
-*Last updated: 2026-03-28 | Source: E-173 (unified resolve route, subnav badge, discover-opponents route removed), E-167 (migration 007 name+season_year index), E-158 (src/charts/ module, migration 006 spray chart additions), E-120-06 (opponent_links table, sub-nav Opponents, url_parser correction, port 8001, teams columns), E-115-02 (schema and admin sections rewritten for E-100 fresh-start schema), E-042 (admin team management, url_parser, team_resolver), E-003-02 (original)*
+*Last updated: 2026-04-01 | Source: E-195 (migration 009 plays/play_events tables), E-173 (unified resolve route, subnav badge, discover-opponents route removed), E-167 (migration 007 name+season_year index), E-158 (src/charts/ module, migration 006 spray chart additions), E-120-06 (opponent_links table, sub-nav Opponents, url_parser correction, port 8001, teams columns), E-115-02 (schema and admin sections rewritten for E-100 fresh-start schema), E-042 (admin team management, url_parser, team_resolver), E-003-02 (original)*

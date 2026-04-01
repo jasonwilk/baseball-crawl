@@ -40,8 +40,8 @@ def _data_group(ctx: typer.Context) -> None:
         typer.echo(ctx.get_help())
         raise typer.Exit()
 
-_CRAWLER_CHOICES = ["roster", "schedule", "opponent", "player-stats", "game-stats", "spray-chart", "scouting-spray"]
-_LOADER_CHOICES = ["roster", "schedule", "game", "season-stats", "spray-chart", "scouting-spray"]
+_CRAWLER_CHOICES = ["roster", "schedule", "opponent", "player-stats", "game-stats", "spray-chart", "plays", "scouting-spray"]
+_LOADER_CHOICES = ["roster", "schedule", "game", "plays", "season-stats", "spray-chart", "scouting-spray"]
 
 
 class SourceOption(str, Enum):

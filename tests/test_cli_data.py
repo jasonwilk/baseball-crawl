@@ -157,7 +157,7 @@ def test_crawl_invalid_crawler_name() -> None:
 
 def test_crawl_all_valid_crawler_names() -> None:
     """crawl accepts all documented crawler names."""
-    valid_names = ["roster", "schedule", "opponent", "player-stats", "game-stats", "spray-chart"]
+    valid_names = ["roster", "schedule", "opponent", "player-stats", "game-stats", "spray-chart", "plays"]
     for name in valid_names:
         with patch("src.pipeline.crawl.run", return_value=0) as mock_run:
             result = runner.invoke(app, ["data", "crawl", "--crawler", name])
@@ -244,7 +244,7 @@ def test_load_invalid_loader_name() -> None:
 
 def test_load_all_valid_loader_names() -> None:
     """load accepts all documented loader names."""
-    valid_names = ["roster", "schedule", "game", "season-stats"]
+    valid_names = ["roster", "schedule", "game", "plays", "season-stats"]
     for name in valid_names:
         with patch("src.pipeline.load.run", return_value=0) as mock_run:
             result = runner.invoke(app, ["data", "load", "--loader", name])
@@ -632,6 +632,82 @@ def test_load_all_scouted_skips_pending_runs(tmp_path: Path) -> None:
 
     assert errors == 0
     mock_loader.load_team.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# bb data crawl --crawler plays / bb data load --loader plays (E-195-04)
+# ---------------------------------------------------------------------------
+
+
+def test_crawl_help_lists_plays() -> None:
+    """bb data crawl --help lists 'plays' as a valid --crawler value (AC-5, AC-7)."""
+    result = runner.invoke(app, ["data", "crawl", "--help"])
+    assert result.exit_code == 0
+    assert "plays" in result.output
+
+
+def test_load_help_lists_plays() -> None:
+    """bb data load --help lists 'plays' as a valid --loader value (AC-5, AC-7)."""
+    result = runner.invoke(app, ["data", "load", "--help"])
+    assert result.exit_code == 0
+    assert "plays" in result.output
+
+
+def test_crawl_plays_dispatches_to_pipeline(  # noqa: D103
+) -> None:
+    """bb data crawl --crawler plays dispatches to pipeline crawl.run (AC-1)."""
+    with patch("src.pipeline.crawl.run", return_value=0) as mock_run:
+        result = runner.invoke(app, ["data", "crawl", "--crawler", "plays"])
+    assert result.exit_code == 0
+    mock_run.assert_called_once_with(
+        dry_run=False,
+        crawler_filter="plays",
+        profile="web",
+        source="yaml",
+    )
+
+
+def test_load_plays_dispatches_to_pipeline(  # noqa: D103
+) -> None:
+    """bb data load --loader plays dispatches to pipeline load.run (AC-2)."""
+    with patch("src.pipeline.load.run", return_value=0) as mock_run:
+        result = runner.invoke(app, ["data", "load", "--loader", "plays"])
+    assert result.exit_code == 0
+    mock_run.assert_called_once_with(
+        dry_run=False,
+        loader_filter="plays",
+        source="yaml",
+    )
+
+
+def test_plays_loader_runs_after_game_loader() -> None:
+    """Plays loader must execute after game loader in default ordering (AC-6).
+
+    The plays table has an FK to games; loading plays before games would
+    violate the constraint.
+    """
+    from src.pipeline.load import _LOADER_NAMES
+
+    game_idx = _LOADER_NAMES.index("game")
+    plays_idx = _LOADER_NAMES.index("plays")
+    assert plays_idx > game_idx, (
+        f"plays loader (index {plays_idx}) must come after game loader "
+        f"(index {game_idx}) due to FK dependency"
+    )
+
+
+def test_plays_crawler_in_default_crawl_order() -> None:
+    """Plays crawler is included in the default all-crawlers list (AC-3)."""
+    from src.pipeline.crawl import _CRAWLER_NAMES
+
+    assert "plays" in _CRAWLER_NAMES
+
+
+def test_plays_loader_in_default_load_order() -> None:
+    """Plays loader is included in the default all-loaders list (AC-4)."""
+    from src.pipeline.load import _LOADER_NAMES
+
+    assert "plays" in _LOADER_NAMES
 
 
 # ---------------------------------------------------------------------------

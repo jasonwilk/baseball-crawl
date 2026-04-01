@@ -14,6 +14,7 @@ from pathlib import Path
 from src.gamechanger.config import load_config, load_config_from_db
 from src.gamechanger.loaders import LoadResult
 from src.gamechanger.loaders.game_loader import GameLoader
+from src.gamechanger.loaders.plays_loader import PlaysLoader
 from src.gamechanger.loaders.roster import RosterLoader
 from src.gamechanger.loaders.schedule_loader import ScheduleLoader
 from src.gamechanger.loaders.season_stats_loader import SeasonStatsLoader
@@ -164,6 +165,45 @@ def _run_season_stats_loader(db: sqlite3.Connection, config: object, data_root: 
     return combined
 
 
+def _run_plays_loader(db: sqlite3.Connection, config: object, data_root: Path) -> LoadResult:
+    """Run the plays loader for all member teams.
+
+    Args:
+        db: Open SQLite connection.
+        config: Parsed CrawlConfig (season + member_teams).
+        data_root: Raw data root directory.
+
+    Returns:
+        Aggregated LoadResult across all teams.
+    """
+    combined = LoadResult()
+
+    for team in config.member_teams:
+        team_dir = data_root / config.season / "teams" / team.id
+        if team.internal_id is None:
+            raise ValueError(
+                f"Team '{team.name}' (gc_uuid={team.id!r}) was not found in the database. "
+                "Ensure the team exists in the teams table before running the plays loader."
+            )
+        team_ref = TeamRef(
+            id=team.internal_id,
+            gc_uuid=team.id,
+            public_id=None,
+        )
+        loader = PlaysLoader(db, season_id=config.season, owned_team_ref=team_ref)
+        if not team_dir.is_dir():
+            logger.warning(
+                "Team directory not found for team %s at %s; skipping.", team.id, team_dir
+            )
+            continue
+        result = loader.load_all(team_dir)
+        combined.loaded += result.loaded
+        combined.skipped += result.skipped
+        combined.errors += result.errors
+
+    return combined
+
+
 def _run_spray_chart_loader(
     db: sqlite3.Connection, config: object, data_root: Path
 ) -> LoadResult:
@@ -201,6 +241,7 @@ _LOADERS: list[tuple[str, object]] = [
     ("roster", _run_roster_loader),
     ("schedule", _run_schedule_loader),
     ("game", _run_game_loader),
+    ("plays", _run_plays_loader),
     ("season-stats", _run_season_stats_loader),
     ("spray-chart", _run_spray_chart_loader),
 ]

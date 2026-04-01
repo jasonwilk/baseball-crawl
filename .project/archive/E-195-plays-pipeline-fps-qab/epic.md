@@ -1,7 +1,7 @@
 # E-195: Plays Data Ingestion Pipeline -- FPS% and QAB
 
 ## Status
-`READY`
+`COMPLETED`
 
 ## Overview
 Build the play-by-play data ingestion pipeline from the GameChanger plays endpoint, storing parsed play and pitch event data in the database. First derived stats: FPS% (first pitch strike percentage) for pitchers and QAB (quality at-bat) for batters. This unlocks advanced analytics that are currently unavailable for opponents (season-stats API returns 403 for non-owned teams) and adds per-game granularity for own teams.
@@ -44,12 +44,12 @@ Promotes from IDEA-041 (Play-by-Play Stat Compilation Pipeline) -- this epic cov
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-195-01 | Plays Crawler | TODO | None | SE |
-| E-195-02 | Plays Schema and Parser | TODO | None | SE |
-| E-195-03 | Plays Loader | TODO | E-195-02 | SE |
-| E-195-04 | CLI Integration and Pipeline Wiring | TODO | E-195-01, E-195-03 | SE |
-| E-195-05 | Own-Team FPS/QAB Validation | TODO | E-195-04 | SE |
-| E-195-06 | Plays Endpoint Doc Vocabulary Update | TODO | None | api-scout |
+| E-195-01 | Plays Crawler | DONE | None | SE |
+| E-195-02 | Plays Schema and Parser | DONE | None | SE |
+| E-195-03 | Plays Loader | DONE | E-195-02 | SE |
+| E-195-04 | CLI Integration and Pipeline Wiring | DONE | E-195-01, E-195-03 | SE |
+| E-195-05 | Own-Team FPS/QAB Validation | DONE | E-195-04 | SE |
+| E-195-06 | Plays Endpoint Doc Vocabulary Update | DONE | None | api-scout |
 
 ## Dispatch Team
 - software-engineer
@@ -221,15 +221,59 @@ The validation should also report plays data coverage: what percentage of comple
 - 2026-03-31: Codex spec review. 5 of 6 findings accepted: "Foul bunt" pitch event pattern, LoadResult field alignment, pipeline orchestrator files (crawl.py/load.py), test_migrations.py, fixture adequacy for AC-11. Agent routing mismatch dismissed (migration too simple to split).
 - 2026-03-31: Added E-195-06 (Plays Endpoint Doc Vocabulary Update, api-scout) and AC-13 (unknown template logging) per user gaps.
 - 2026-03-31: Set to READY.
+- 2026-03-31: Epic set to ACTIVE. Dispatch started.
 
 ### Review Scorecard
+
+**Spec Review (pre-dispatch)**:
+
 | Review Pass | Findings | Accepted | Dismissed |
 |---|---|---|---|
 | Internal iteration 1 (PM + CR + DE + SE + Coach) | 30 | 20 | 10 |
 | Codex iteration 1 | 6 | 5 | 1 |
-| **Total** | **36** | **25** | **11** |
+| **Spec Total** | **36** | **25** | **11** |
 
-Key review milestones:
+Key spec review milestones:
 - Critical fix: TN-5 pitcher state tracking (persist per-half across innings)
 - Data exploration: 165 games / 9,398 plays resolved SAC and IBB open questions
 - Codex catch: "Foul bunt" pitch event pattern, pipeline orchestrator file gaps
+
+**Code Review (dispatch)**:
+
+| Review Pass | Story/Scope | Findings | Accepted | Dismissed |
+|---|---|---|---|---|
+| CR per-story: E-195-01 | Plays Crawler | 2 | 0 | 2 |
+| CR per-story: E-195-02 | Plays Schema and Parser | 1 | 0 | 1 |
+| CR per-story: E-195-03 | Plays Loader | 3 | 1 | 2 |
+| CR per-story: E-195-04 | CLI Integration | 1 | 0 | 1 |
+| CR per-story: E-195-05 | FPS/QAB Validation | 2 | 1 | 1 |
+| CR per-story: E-195-06 | Doc Vocabulary Update | 0 | 0 | 0 |
+| CR integration review (Phase 4a) | Cross-story integration | 3 | 3 | 0 |
+| Parallel CR (Phase 4a) | Additional integration findings | 2 | 1 | 1 |
+| Codex code review (Phase 4b) | Full epic code review | 4 | 3 | 1 |
+| **Code Total** | | **18** | **9** | **9** |
+
+Key code review milestones:
+- Integration review caught wrong game status ('final' instead of 'completed') in validation script + test fixture
+- Codex caught 4 findings, 3 accepted and fixed
+
+**Combined Totals**: 54 findings, 34 accepted, 20 dismissed.
+
+### Completion
+- 2026-03-31: All 6 stories DONE. Epic set to COMPLETED.
+
+### Documentation Assessment
+E-195 triggers documentation updates:
+- **Trigger 1 (new feature)**: New plays ingestion pipeline with CLI commands (`bb data crawl --crawler plays`, `bb data load --loader plays`)
+- **Trigger 4 (schema change)**: New `plays` and `play_events` tables (migration 009)
+- **Action**: Dispatch docs-writer to update admin docs with plays pipeline documentation.
+
+### Context-Layer Assessment
+1. **New convention, pattern, or constraint?** YES -- Whole-game idempotency pattern (check-before-insert, never delete-and-reinsert). Separate parser from loader pattern for testability. Pitcher state tracking across innings.
+2. **Architectural decision with ongoing implications?** YES -- Two-table schema (plays + play_events) with pre-computed boolean flags (is_first_pitch_strike, is_qab). Event ID chain (games.game_id = event_id for plays endpoint). Pipeline caller convention extended to plays crawler/loader.
+3. **Footgun, failure mode, or boundary?** YES -- event_id vs game_stream_id confusion (TN-6: NEVER use game_stream.id, causes HTTP 500). Whole-game idempotency requirement (parent-child re-insertion problem if using INSERT OR IGNORE). team_players asymmetric keys (own team uses public_id slug, opponent uses UUID).
+4. **Agent behavior, routing, or coordination change?** NO
+5. **Domain knowledge for future epics?** YES -- FPS% and QAB definitions with edge cases (HBP/IBB exclusions at query time, 2S+3 counting rules). Plays endpoint confirmed not ownership-gated (works for opponent games). 24 outcome types and 486 final_details patterns from data exploration.
+6. **New CLI command, workflow, or operational procedure?** YES -- `bb data crawl --crawler plays` and `bb data load --loader plays` CLI commands. Plays pipeline as a new stage in the data pipeline.
+
+**Triggers fired: 1, 2, 3, 5, 6 (5 of 6).** claude-architect dispatch required before archival.

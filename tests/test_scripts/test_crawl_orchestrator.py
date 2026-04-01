@@ -55,6 +55,7 @@ def _all_crawler_patches(
     player_stats_cls: type | None = None,
     game_stats_cls: type | None = None,
     spray_chart_cls: type | None = None,
+    plays_cls: type | None = None,
     called: list[str] | None = None,
 ) -> dict[str, object]:
     """Build a patches dict for patch.multiple('src.pipeline.crawl', ...)."""
@@ -70,6 +71,7 @@ def _all_crawler_patches(
         "PlayerStatsCrawler": _cls("player-stats", player_stats_cls),
         "GameStatsCrawler": _cls("game-stats", game_stats_cls),
         "SprayChartCrawler": _cls("spray-chart", spray_chart_cls),
+        "PlaysCrawler": _cls("plays", plays_cls),
         "GameChangerClient": MagicMock,
         "load_config": lambda: _make_mock_config(),
     }
@@ -80,14 +82,14 @@ def _all_crawler_patches(
 # ---------------------------------------------------------------------------
 
 def test_run_calls_all_crawlers(tmp_path: Path) -> None:
-    """run() calls all 6 crawlers when no filter is set."""
+    """run() calls all 7 crawlers when no filter is set."""
     called: list[str] = []
 
     with patch.multiple("src.pipeline.crawl",**_all_crawler_patches(called=called)):
         exit_code = run(data_root=tmp_path)
 
     assert exit_code == 0
-    assert called == ["roster", "schedule", "opponent", "player-stats", "game-stats", "spray-chart"]
+    assert called == ["roster", "schedule", "opponent", "player-stats", "game-stats", "spray-chart", "plays"]
 
 
 def test_run_roster_before_schedule_before_game_stats(tmp_path: Path) -> None:
@@ -199,6 +201,8 @@ def test_manifest_written_after_run(tmp_path: Path) -> None:
         "OpponentCrawler": _cls(5),
         "PlayerStatsCrawler": _cls(1),
         "GameStatsCrawler": _cls(10),
+        "SprayChartCrawler": _cls(7),
+        "PlaysCrawler": _cls(4),
         "GameChangerClient": MagicMock,
         "load_config": lambda: _make_mock_config(season="2025"),
     }
@@ -215,6 +219,7 @@ def test_manifest_written_after_run(tmp_path: Path) -> None:
     assert manifest["crawlers"]["roster"]["files_written"] == 3
     assert manifest["crawlers"]["schedule"]["files_written"] == 2
     assert manifest["crawlers"]["game-stats"]["files_written"] == 10
+    assert manifest["crawlers"]["plays"]["files_written"] == 4
 
 
 def test_manifest_includes_skipped_and_errors(tmp_path: Path) -> None:
@@ -233,6 +238,8 @@ def test_manifest_includes_skipped_and_errors(tmp_path: Path) -> None:
         "OpponentCrawler": _C,
         "PlayerStatsCrawler": _C,
         "GameStatsCrawler": _C,
+        "SprayChartCrawler": _C,
+        "PlaysCrawler": _C,
         "GameChangerClient": MagicMock,
         "load_config": lambda: _make_mock_config(),
     }
@@ -272,6 +279,8 @@ def test_unhandled_exception_continues_to_next_crawler(tmp_path: Path) -> None:
     assert "opponent" in called
     assert "player-stats" in called
     assert "game-stats" in called
+    assert "spray-chart" in called
+    assert "plays" in called
     # Exit code is 1 because one crawler raised.
     assert exit_code == 1
 
@@ -296,6 +305,8 @@ def test_exit_code_0_when_all_crawlers_succeed(tmp_path: Path) -> None:
         "OpponentCrawler": _C,
         "PlayerStatsCrawler": _C,
         "GameStatsCrawler": _C,
+        "SprayChartCrawler": _C,
+        "PlaysCrawler": _C,
         "GameChangerClient": MagicMock,
         "load_config": lambda: _make_mock_config(),
     }
@@ -404,6 +415,7 @@ def test_team_ids_filter_db_source_single_team(tmp_path: Path) -> None:
         "PlayerStatsCrawler": _CapturingCrawler,
         "GameStatsCrawler": _CapturingCrawler,
         "SprayChartCrawler": _CapturingCrawler,
+        "PlaysCrawler": _CapturingCrawler,
         "GameChangerClient": MagicMock,
         "load_config_from_db": lambda _: db_config,
     }
@@ -412,8 +424,8 @@ def test_team_ids_filter_db_source_single_team(tmp_path: Path) -> None:
         exit_code = run(source="db", team_ids=[2], data_root=tmp_path, db_path=tmp_path / "app.db")
 
     assert exit_code == 0
-    # All 6 crawlers should have seen exactly 1 team (internal_id=2)
-    assert len(captured_configs) == 6
+    # All 7 crawlers should have seen exactly 1 team (internal_id=2)
+    assert len(captured_configs) == 7
     for teams_seen in captured_configs:
         assert len(teams_seen) == 1
         assert teams_seen[0].internal_id == 2
@@ -440,6 +452,7 @@ def test_team_ids_none_db_source_processes_all_teams(tmp_path: Path) -> None:
         "PlayerStatsCrawler": _CapturingCrawler,
         "GameStatsCrawler": _CapturingCrawler,
         "SprayChartCrawler": _CapturingCrawler,
+        "PlaysCrawler": _CapturingCrawler,
         "GameChangerClient": MagicMock,
         "load_config_from_db": lambda _: db_config,
     }

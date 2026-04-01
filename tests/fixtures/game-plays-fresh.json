@@ -1,0 +1,288 @@
+{
+  "team_players": {
+    "xXxXxXxXxXxX": [
+      {
+        "id": "00000000-0000-0000-0000-000000000001",
+        "first_name": "Player",
+        "last_name": "One",
+        "number": "25"
+      },
+      {
+        "id": "00000000-0000-0000-0000-000000000002",
+        "first_name": "Player",
+        "last_name": "Two",
+        "number": "2"
+      },
+      {
+        "id": "00000000-0000-0000-0000-000000000003",
+        "first_name": "Player",
+        "last_name": "Three",
+        "number": "4"
+      },
+      {
+        "id": "00000000-0000-0000-0000-000000000004",
+        "first_name": "Player",
+        "last_name": "Four",
+        "number": "8"
+      },
+      {
+        "id": "00000000-0000-0000-0000-000000000005",
+        "first_name": "Player",
+        "last_name": "Five",
+        "number": "24"
+      },
+      {
+        "id": "00000000-0000-0000-0000-000000000006",
+        "first_name": "Player",
+        "last_name": "Six",
+        "number": "7"
+      },
+      {
+        "id": "00000000-0000-0000-0000-000000000007",
+        "first_name": "Player",
+        "last_name": "Seven",
+        "number": "5"
+      },
+      {
+        "id": "00000000-0000-0000-0000-000000000008",
+        "first_name": "Player",
+        "last_name": "Eight",
+        "number": "1"
+      },
+      {
+        "id": "00000000-0000-0000-0000-000000000009",
+        "first_name": "Player",
+        "last_name": "Nine",
+        "number": "3"
+      },
+      {
+        "id": "00000000-0000-0000-0000-000000000010",
+        "first_name": "Player",
+        "last_name": "Ten",
+        "number": "12"
+      },
+      {
+        "id": "00000000-0000-0000-0000-000000000011",
+        "first_name": "Player",
+        "last_name": "Eleven",
+        "number": "22"
+      },
+      {
+        "id": "00000000-0000-0000-0000-000000000012",
+        "first_name": "Player",
+        "last_name": "Twelve",
+        "number": "20"
+      },
+      {
+        "id": "00000000-0000-0000-0000-000000000013",
+        "first_name": "Player",
+        "last_name": "Thirteen",
+        "number": "0"
+      },
+      {
+        "id": "00000000-0000-0000-0000-000000000014",
+        "first_name": "Player",
+        "last_name": "Fourteen",
+        "number": "21"
+      }
+    ],
+    "00000000-0000-0000-0000-000000000002": [
+      {
+        "id": "00000000-0000-0000-0000-000000000001",
+        "first_name": "Player",
+        "last_name": "One",
+        "number": "17"
+      },
+      {
+        "id": "00000000-0000-0000-0000-000000000002",
+        "first_name": "Player",
+        "last_name": "Two",
+        "number": "10"
+      },
+      {
+        "id": "00000000-0000-0000-0000-000000000003",
+        "first_name": "Player",
+        "last_name": "Three",
+        "number": "22"
+      },
+      {
+        "id": "00000000-0000-0000-0000-000000000004",
+        "first_name": "Player",
+        "last_name": "Four",
+        "number": "4"
+      },
+      {
+        "id": "00000000-0000-0000-0000-000000000005",
+        "first_name": "Player",
+        "last_name": "Five",
+        "number": "7"
+      },
+      {
+        "id": "00000000-0000-0000-0000-000000000006",
+        "first_name": "Player",
+        "last_name": "Six",
+        "number": "9"
+      },
+      {
+        "id": "00000000-0000-0000-0000-000000000007",
+        "first_name": "Player",
+        "last_name": "Seven",
+        "number": "3"
+      },
+      {
+        "id": "00000000-0000-0000-0000-000000000008",
+        "first_name": "Player",
+        "last_name": "Eight",
+        "number": "8"
+      },
+      {
+        "id": "00000000-0000-0000-0000-000000000009",
+        "first_name": "Player",
+        "last_name": "Nine",
+        "number": "11"
+      },
+      {
+        "id": "00000000-0000-0000-0000-000000000010",
+        "first_name": "Player",
+        "last_name": "Ten",
+        "number": "2"
+      },
+      {
+        "id": "00000000-0000-0000-0000-000000000011",
+        "first_name": "Player",
+        "last_name": "Eleven",
+        "number": "14"
+      },
+      {
+        "id": "00000000-0000-0000-0000-000000000012",
+        "first_name": "Player",
+        "last_name": "Twelve",
+        "number": "5"
+      }
+    ]
+  },
+  "sport": "baseball",
+  "plays": [
+    {
+      "order": 0,
+      "inning": 1,
+      "half": "top",
+      "name_template": {
+        "template": "Walk"
+      },
+      "home_score": 0,
+      "away_score": 0,
+      "did_score_change": false,
+      "outs": 0,
+      "did_outs_change": false,
+      "at_plate_details": [
+        {
+          "template": "Lineup changed: ${00000000-0000-0000-0000-000000000001} in at pitcher"
+        },
+        {
+          "template": "Ball 1"
+        },
+        {
+          "template": "Ball 2"
+        },
+        {
+          "template": "Ball 3"
+        },
+        {
+          "template": "Ball 4"
+        }
+      ],
+      "final_details": [
+        {
+          "template": "${00000000-0000-0000-0000-000000000001} walks, ${00000000-0000-0000-0000-000000000001} pitching"
+        }
+      ],
+      "messages": []
+    },
+    {
+      "order": 1,
+      "inning": 1,
+      "half": "top",
+      "name_template": {
+        "template": "Walk"
+      },
+      "home_score": 0,
+      "away_score": 0,
+      "did_score_change": false,
+      "outs": 0,
+      "did_outs_change": false,
+      "at_plate_details": [
+        {
+          "template": "Strike 1 looking"
+        },
+        {
+          "template": "Pickoff attempt at 1st"
+        },
+        {
+          "template": "${00000000-0000-0000-0000-000000000001} advances to 2nd on error by pitcher ${00000000-0000-0000-0000-000000000001}"
+        },
+        {
+          "template": "Ball 1"
+        },
+        {
+          "template": "Foul"
+        },
+        {
+          "template": "Ball 2"
+        },
+        {
+          "template": "Ball 3"
+        },
+        {
+          "template": "Foul"
+        },
+        {
+          "template": "Ball 4"
+        }
+      ],
+      "final_details": [
+        {
+          "template": "${00000000-0000-0000-0000-000000000001} walks, ${00000000-0000-0000-0000-000000000001} pitching"
+        },
+        {
+          "template": "${00000000-0000-0000-0000-000000000001} remains at 2nd"
+        }
+      ],
+      "messages": []
+    },
+    {
+      "order": 2,
+      "inning": 1,
+      "half": "top",
+      "name_template": {
+        "template": "Fly Out"
+      },
+      "home_score": 0,
+      "away_score": 0,
+      "did_score_change": false,
+      "outs": 1,
+      "did_outs_change": true,
+      "at_plate_details": [
+        {
+          "template": "Ball 1"
+        },
+        {
+          "template": "In play"
+        }
+      ],
+      "final_details": [
+        {
+          "template": "${00000000-0000-0000-0000-000000000001} flies out to right fielder ${00000000-0000-0000-0000-000000000001}"
+        },
+        {
+          "template": "${00000000-0000-0000-0000-000000000001} remains at 2nd"
+        },
+        {
+          "template": "${00000000-0000-0000-0000-000000000001} remains at 1st"
+        }
+      ],
+      "messages": []
+    }
+  ],
+  "_note": "58 plays total; only first 3 shown. All UUIDs and names redacted."
+}

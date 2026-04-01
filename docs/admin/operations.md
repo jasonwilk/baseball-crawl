@@ -443,6 +443,130 @@ Scouting spray crawl complete: files_written=N files_skipped=N errors=N
 Scouting spray load complete: loaded=N skipped=N errors=N
 ```
 
+### Plays Pipeline (`bb data crawl --crawler plays` / `bb data load --loader plays`)
+
+The plays pipeline fetches and loads play-by-play data for all completed games for member teams. Each play record represents a single plate appearance; derived flags `is_first_pitch_strike` (FPS) and `is_qab` (Quality At-Bat) are computed during parsing and written to the `plays` table.
+
+**Pipeline steps -- run in order:**
+
+```bash
+# Step 1: Crawl play-by-play data from the GameChanger API
+bb data crawl --crawler plays
+
+# Step 2: Load crawled data into the plays and play_events tables
+bb data load --loader plays
+```
+
+**What the crawler does**: For each completed game in `data/raw/{season}/teams/{gc_uuid}/game_summaries.json`, fetches `GET /game-stream-processing/{event_id}/plays` and writes the raw JSON response to `data/raw/{season}/teams/{gc_uuid}/plays/{event_id}.json`. Files are skipped if they already exist -- completed game plays do not change.
+
+**What the loader does**: Reads each plays JSON file, parses plate appearances into `plays` rows and individual pitch, baserunner, and substitution events into `play_events` rows, and inserts them in a per-game transaction. Whole-game idempotency: if any `plays` row already exists for a game, the entire game is skipped. Stub player rows are created for any unknown batter or pitcher IDs to satisfy foreign key constraints.
+
+**Dependency**: The plays crawler reads `game_summaries.json` written by `ScheduleCrawler`. Run the main crawl pipeline for the team first:
+
+```bash
+# Full member-team sync first, then plays:
+bb data crawl --source db
+bb data load --source db
+bb data crawl --crawler plays
+bb data load --loader plays
+```
+
+**Integration with the normal sync**: The Admin UI Sync button does not currently run the plays pipeline automatically. Run it separately after a team sync.
+
+**Raw data location**: `data/raw/{season}/teams/{gc_uuid}/plays/{event_id}.json`
+
+**Output**:
+
+```
+Crawl complete: files_written=N files_skipped=N errors=N
+Plays load complete for {path}: loaded=N skipped=N errors=N
+```
+
+**ID mapping note**: The plays endpoint path parameter is `event_id` from game-summaries. This is NOT `game_stream.id` -- both fields appear in the game-summaries response but they are different values. The crawler uses `event_id` (which equals `game_stream.game_id`).
+
+### Validating Plays Data (`scripts/validate_plays_stats.py`)
+
+After running the plays pipeline, use `validate_plays_stats.py` to verify that derived FPS (First Pitch Strike) and QAB (Quality At-Bat) counts match the season-stats values from the GameChanger API. This is an operator validation tool, not part of the regular sync workflow.
+
+**Prerequisites**: Both plays data and season stats must be loaded in `data/app.db`.
+
+```bash
+# Validate with default database and output paths
+python scripts/validate_plays_stats.py
+
+# Specify a custom database path
+python scripts/validate_plays_stats.py --db-path /path/to/app.db
+
+# Write the report to a custom location
+python scripts/validate_plays_stats.py --output /path/to/report.md
+```
+
+The script compares plays-derived FPS per pitcher and QAB per batter against `player_season_pitching.fps` and `player_season_batting.qab` in the database. Players are compared only when data exists in both sources.
+
+**Output**: Prints a summary to stdout and writes a detailed Markdown report to `.project/research/E-195-validation-results.md` (configurable with `--output`). The report contains:
+
+- **Plays data coverage**: How many completed member-team games have plays data loaded, and which games are missing.
+- **FPS comparison table**: Per-pitcher derived vs. GC values, absolute difference, percentage difference, and match status.
+- **QAB comparison table**: Per-batter derived vs. GC values, same columns.
+- **Discrepancy diagnostics**: For any player exceeding the 5% tolerance threshold, a per-game FPS/QAB breakdown and sample plays for inspection.
+- **Summary**: Overall match rates and outlier counts.
+
+**Tolerance**: Players whose derived count differs from GC's by more than 5% are flagged `MISMATCH` and receive per-game diagnostic detail. Players within 5% are `OK`. Exit code is 0 on success regardless of mismatch count; 1 only on database connectivity errors.
+
+### Migration 009: Plays Schema
+
+Migration `migrations/009_plays_play_events.sql` adds two tables and four indexes to support play-by-play data ingestion.
+
+**Table: `plays`** (one row per plate appearance)
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `id` | `INTEGER PK` | Auto-increment internal key |
+| `game_id` | `TEXT` | FK to `games(game_id)` |
+| `play_order` | `INTEGER` | Sequential position within the game |
+| `inning` | `INTEGER` | Inning number |
+| `half` | `TEXT` | `'top'` or `'bottom'` |
+| `season_id` | `TEXT` | FK to `seasons(season_id)` |
+| `batting_team_id` | `INTEGER` | FK to `teams(id)` -- the team at bat |
+| `batter_id` | `TEXT` | FK to `players(player_id)` |
+| `pitcher_id` | `TEXT` | FK to `players(player_id)`; nullable (absent on some abandoned PAs) |
+| `outcome` | `TEXT` | Plate-appearance result string (e.g., `'Single'`, `'Strikeout'`) |
+| `pitch_count` | `INTEGER` | Total pitches in the plate appearance |
+| `is_first_pitch_strike` | `INTEGER` | 1 if the first pitch was a strike (FPS); 0 otherwise |
+| `is_qab` | `INTEGER` | 1 if the plate appearance meets Quality At-Bat criteria; 0 otherwise |
+| `home_score` | `INTEGER` | Score at end of plate appearance (nullable) |
+| `away_score` | `INTEGER` | Score at end of plate appearance (nullable) |
+| `did_score_change` | `INTEGER` | 1 if a run scored on this play (nullable) |
+| `outs_after` | `INTEGER` | Outs recorded after this play (nullable) |
+| `did_outs_change` | `INTEGER` | 1 if an out was recorded on this play (nullable) |
+
+UNIQUE constraint on `(game_id, play_order)`.
+
+**Table: `play_events`** (one row per event within a plate appearance)
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `id` | `INTEGER PK` | Auto-increment internal key |
+| `play_id` | `INTEGER` | FK to `plays(id)` |
+| `event_order` | `INTEGER` | Sequence position within the plate appearance |
+| `event_type` | `TEXT` | `'pitch'`, `'baserunner'`, `'substitution'`, or `'other'` |
+| `pitch_result` | `TEXT` | One of `'ball'`, `'strike_looking'`, `'strike_swinging'`, `'foul'`, `'foul_tip'`, `'in_play'`; null for non-pitch events |
+| `is_first_pitch` | `INTEGER` | 1 if this is the first pitch event in the plate appearance |
+| `raw_template` | `TEXT` | Raw GC template string from the API (nullable; useful for debugging) |
+
+UNIQUE constraint on `(play_id, event_order)`.
+
+**Indexes added**:
+
+| Index | Table / Columns | Notes |
+|-------|----------------|-------|
+| `idx_plays_game_id` | `plays(game_id)` | Game-level plays lookups |
+| `idx_plays_batter_id` | `plays(batter_id)` | Per-batter QAB aggregation |
+| `idx_plays_pitcher_id` | `plays(pitcher_id)` | Per-pitcher FPS aggregation |
+| `idx_plays_fps` (partial) | `plays(pitcher_id, is_first_pitch_strike)` WHERE `outcome NOT IN ('Hit By Pitch', 'Intentional Walk')` | Efficient FPS% queries; excludes HBP and IBB from the denominator per FPS% definition |
+
+The migration is applied automatically on container startup. No backfill was needed -- both tables are populated solely by the plays pipeline.
+
 ### Migration 006: Spray Chart Schema Additions
 
 Migration `migrations/006_spray_charts_indexes.sql` adds three columns and three indexes to the `spray_charts` table (which existed in the base schema but was unpopulated):
@@ -787,4 +911,4 @@ For the expected data volume (~30 games x 4 teams x a few seasons), the database
 
 ---
 
-*Last updated: 2026-03-28 | Source: E-173 (resolution write-through, auto-scout after linking, unified Find on GC resolve page, dashboard sort by next game date, terminology cleanup, bb data repair-opponents), E-167 (bb data dedup CLI, GC search-powered opponent resolution, skip/unhide workflow), E-163 (scouting spray pipeline, updated thresholds, bb data scout 4-step flow), E-158 (spray chart pipeline, migration 006, chart routes), E-156 (bb data scout --force flag), E-155 (duplicate team detection and merge UI), E-143 (programs, user roles, team delete, opponent mapping UX, crawl trigger UI), E-120-06 (bare UUID input documented), E-055 (unified CLI), E-115-01 (E-100 team management model), E-028-03 (original)*
+*Last updated: 2026-04-01 | Source: E-195 (plays pipeline, migration 009, validate_plays_stats.py), E-173 (resolution write-through, auto-scout after linking, unified Find on GC resolve page, dashboard sort by next game date, terminology cleanup, bb data repair-opponents), E-167 (bb data dedup CLI, GC search-powered opponent resolution, skip/unhide workflow), E-163 (scouting spray pipeline, updated thresholds, bb data scout 4-step flow), E-158 (spray chart pipeline, migration 006, chart routes), E-156 (bb data scout --force flag), E-155 (duplicate team detection and merge UI), E-143 (programs, user roles, team delete, opponent mapping UX, crawl trigger UI), E-120-06 (bare UUID input documented), E-055 (unified CLI), E-115-01 (E-100 team management model), E-028-03 (original)*

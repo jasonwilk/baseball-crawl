@@ -7,7 +7,7 @@ profiles:
   web:
     status: confirmed
     notes: >
-      Full schema documented. 58 plays from a 6-inning game (37 KB). Confirmed
+      Full schema documented. 9,398 plays across 165 games (4 teams). Confirmed
       2026-03-26 via fresh browser curl using event_id as path parameter.
   mobile:
     status: unverified
@@ -18,7 +18,7 @@ query_params: []
 pagination: false
 response_shape: object
 response_sample: data/raw/game-plays-fresh.json
-raw_sample_size: "58 plays, 37 KB, 6-inning game"
+raw_sample_size: "9,398 plays across 165 games (4 teams)"
 discovered: "2026-03-04"
 last_confirmed: "2026-03-26"
 tags: [games, events, player, stats]
@@ -60,7 +60,7 @@ see_also:
 
 # GET /game-stream-processing/{event_id}/plays
 
-**Status:** CONFIRMED LIVE -- 200 OK. 58 plays from a 6-inning game. Last verified: 2026-03-26.
+**Status:** CONFIRMED LIVE -- 200 OK. 9,398 plays across 165 games (4 teams). Last verified: 2026-03-26.
 
 Returns pitch-by-pitch play data for a game. Each play represents one plate appearance with the full pitch sequence, outcome, baserunner events, and in-game substitutions.
 
@@ -150,7 +150,7 @@ Each team key maps to an **array** of player objects (NOT a nested dict keyed by
 | `did_outs_change` | boolean | Whether outs changed on this play |
 | `at_plate_details` | array | Pitch-by-pitch sequence and in-AB events |
 | `final_details` | array | Outcome narration |
-| `messages` | array | Always empty in observed capture |
+| `messages` | array | Free-text scorekeeper notes (mound visits, delays, game times). Usually empty; ~130 non-empty across 165 games. |
 
 ### Player UUID Template Pattern
 
@@ -166,87 +166,207 @@ Then resolve against `team_players` by searching each team's player array for ma
 
 ### `at_plate_details` Array
 
-Each element has a single `template` string field. Observed values:
+Each element has a single `template` string field. 147 normalized unique patterns observed across 9,398 plays. Representative categories below.
 
 **Pitch events:**
 - `"Ball 1"`, `"Ball 2"`, `"Ball 3"`, `"Ball 4"`
 - `"Strike 1 looking"`, `"Strike 1 swinging"`
 - `"Strike 2 looking"`, `"Strike 2 swinging"`
 - `"Strike 3 looking"`, `"Strike 3 swinging"`
-- `"Foul"`, `"Foul tip"`
-- `"In play"`
+- `"Foul"` (4,389), `"Foul bunt"` (52), `"Foul tip"` (40)
+- `"In play"` (5,685)
 
-**Baserunner events (mid-AB):**
-- `"${uuid} advances to 2nd on error by pitcher ${uuid}"`
-- `"${uuid} advances to 2nd on the same pitch"`
-- `"${uuid} advances to 2nd on wild pitch"`
-- `"${uuid} advances to 3rd on passed ball"`
-- `"${uuid} advances to 3rd on wild pitch"`
-- `"${uuid} scores on error by catcher ${uuid}"`
-- `"${uuid} scores on error by shortstop ${uuid}"`
-- `"${uuid} scores on passed ball"`
-- `"${uuid} scores on wild pitch"`
-- `"${uuid} steals 2nd"`
-- `"${uuid} steals 3rd"`
-- `"Pickoff attempt at 1st"`
+**Steal events:**
+- `"${uuid} steals 2nd"` (656), `"${uuid} steals 3rd"` (180)
+- `"${uuid} scores on steal of home"` (43)
+
+**Wild pitch advances:**
+- `"${uuid} advances to 2nd on wild pitch"` (161)
+- `"${uuid} advances to 3rd on wild pitch"` (246)
+- `"${uuid} scores on wild pitch"` (127)
+
+**Passed ball advances:**
+- `"${uuid} advances to 2nd on passed ball"` (82)
+- `"${uuid} advances to 3rd on passed ball"` (88)
+- `"${uuid} scores on passed ball"` (51)
+
+**Same-pitch advances (secondary runner movement):**
+- `"${uuid} advances to 2nd on the same pitch"` (196)
+- `"${uuid} advances to 3rd on the same pitch"` (91)
+- `"${uuid} scores on the same pitch"` (5)
+
+**Same-error advances:**
+- `"${uuid} advances to {base} on the same error"` (various, ~39 total)
+
+**Error-specific advances:**
+- `"${uuid} advances to {base} on error by {position} ${uuid}"` (~55 total)
+- `"${uuid} scores on error by {position} ${uuid}"` (~40 total)
+- Positions observed: pitcher, catcher, first baseman, second baseman, shortstop, third baseman
+- Some error-by templates omit the fielder UUID (~5 instances)
+
+**Defensive indifference:**
+- `"${uuid} advances to 2nd on defensive indifference"` (26)
+- `"${uuid} advances to 3rd on defensive indifference"` (3)
+
+**Generic advances (no mechanism specified):**
+- `"${uuid} advances to 1st"` (8), `"${uuid} advances to 2nd"` (40)
+- `"${uuid} advances to 3rd"` (23), `"${uuid} scores"` (26)
+
+**Pickoff attempts (non-out):**
+- `"Pickoff attempt at 1st"` (1,059), `"Pickoff attempt at 2nd"` (193), `"Pickoff attempt at 3rd"` (51)
+
+**Caught stealing (out on steal attempt):**
+- `"${uuid} caught stealing {base}, catcher ${uuid} to {position} ${uuid}"` (most common)
+- Also: pitcher-initiated, single-fielder variants, relay chain variants (~100 total across ~20 patterns)
+
+**Picked off (out on pickoff play):**
+- `"${uuid} picked off at {base}, pitcher ${uuid} to {position} ${uuid}"` (most common)
+- Relay chains up to 7 fielders observed (~35 total across ~15 patterns)
+
+**Runner outs (during AB):**
+- `"${uuid} out at {base}, {fielder chain}"` (rare, ~3 total)
+- `"${uuid} out due to offensive interference"` (1)
+
+**Balk:**
+- `"Balk by pitcher ${uuid}"` (33)
+
+**Extra-inning runner placement:**
+- `"${uuid} gets placed on 2nd"` (4), `"${uuid} gets placed on 3rd"` (1)
+
+**Scorekeeper corrections:**
+- `"Outs changed to 1"` (4)
 
 **Substitution events:**
-- `"Lineup changed: ${uuid} in at pitcher"`
-- `"Lineup changed: ${uuid} in for batter ${uuid}"`
-- `"${uuid} in for pitcher ${uuid}"`
-- `"Courtesy runner ${uuid} in for ${uuid}"`
-- `"(Play Edit) ${uuid} in for ${uuid}"`
+- `"Lineup changed: ${uuid} in at pitcher"` (349)
+- `"Lineup changed: ${uuid} in for batter ${uuid}"` (93)
+- `"Lineup changed: Pinch runner ${uuid} in for {position} ${uuid}"` (~25; all 9 fielder positions + extra hitter observed)
+- `"${uuid} in for pitcher ${uuid}"` (63)
+- `"Courtesy runner ${uuid} in for ${uuid}"` (289)
+- `"(Play Edit) ${uuid} in for ${uuid}"` (17)
 
 ### `final_details` Array
 
-Each element has a `template` string field with the outcome narration. Observed values:
+Each element has a `template` string field with the outcome narration. 486 unique normalized patterns observed across 165 games -- the list below is representative, not exhaustive. Parsers should use regex-based pattern extraction, not exhaustive enum matching.
 
-**Outs:**
-- `"${uuid} flies out to right fielder ${uuid}"`
-- `"${uuid} grounds out to first baseman ${uuid}"`
-- `"${uuid} grounds out, pitcher ${uuid} to first baseman ${uuid}"`
-- `"${uuid} grounds out, second baseman ${uuid} to first baseman ${uuid}"`
-- `"${uuid} pops out in foul territory to first baseman ${uuid}"`
-- `"${uuid} pops out to first baseman ${uuid}"`
-- `"${uuid} pops out to third baseman ${uuid}"`
-- `"${uuid} is out on foul tip, ${uuid} pitching"`
-- `"${uuid} strikes out looking, ${uuid} pitching"`
-- `"${uuid} strikes out swinging, ${uuid} pitching"`
+**Baserunner outcomes (most frequent, trailing the primary outcome):**
+- `"${uuid} scores"` (1,445), `"${uuid} advances to 2nd"` (1,263), `"${uuid} advances to 3rd"` (1,125)
+- `"${uuid} remains at 2nd"` (1,086), `"${uuid} remains at 3rd"` (775), `"${uuid} remains at 1st"` (615)
+- `"${uuid} out advancing to {base}"` (various, ~402 total)
+- `"${uuid} held up at {base}"` (various, ~114 total)
+- `"${uuid} advances to {base} on the throw"` (various, ~162 total)
+- `"${uuid} advances to {base} on the same error"` / `"${uuid} scores on the same error"` (various, ~87 total)
+- `"${uuid} scores after tagging up"` (31), `"${uuid} advances to 3rd after tagging up"` (25)
+- `"${uuid} did not score"` (20)
+- `"Half-inning ended by out on the base paths"` (74; note: no UUID in this template)
 
-**Hits:**
-- `"${uuid} singles on a bunt to third baseman ${uuid}"`
-- `"${uuid} singles on a fly ball to {position} ${uuid}"`
-- `"${uuid} singles on a ground ball to second baseman ${uuid}"`
-- `"${uuid} singles on a hard ground ball to {position} ${uuid}"`
-- `"${uuid} singles on a line drive to center fielder ${uuid}"`
-- `"${uuid} doubles on a fly ball to left fielder ${uuid}"`
-- `"${uuid} doubles on a hard ground ball to left fielder ${uuid}"`
-- `"${uuid} doubles on a line drive to left fielder ${uuid}"`
+**Walk / HBP / IBB:**
+- `"${uuid} walks, ${uuid} pitching"` (1,414)
+- `"${uuid} walks"` (24; no pitcher UUID)
+- `"${uuid} is hit by pitch, ${uuid} pitching"` (391)
+- `"${uuid} is hit by pitch"` (21; no pitcher UUID)
+- `"${uuid} is intentionally walked, ${uuid} pitching"` (20)
 
-**Errors:**
-- `"${uuid} hits a ground ball and reaches on an error by shortstop ${uuid}"`
-- `"${uuid} hits a hard ground ball and reaches on an error by shortstop ${uuid}"`
-- `"${uuid} hits a hard ground ball and reaches on an error by third baseman ${uuid}"`
+**Strikeouts:**
+- `"${uuid} strikes out swinging, ${uuid} pitching"` (824)
+- `"${uuid} strikes out looking, ${uuid} pitching"` (676)
+- `"${uuid} strikes out swinging"` / `"${uuid} strikes out looking"` (8 each; no pitcher UUID)
+- `"${uuid} is out on foul tip, ${uuid} pitching"` (40)
+- `"${uuid} out at first on dropped 3rd strike"` (29)
 
-**Walks / HBP:**
-- `"${uuid} walks, ${uuid} pitching"`
-- `"${uuid} is hit by pitch, ${uuid} pitching"`
+**Groundouts (with fielding chain):**
+- `"${uuid} grounds out, {position} ${uuid} to {position} ${uuid}"` (most common; SS-1B, 2B-1B, 3B-1B, P-1B, C-1B, 1B-P chains)
+- `"${uuid} grounds out to {position} ${uuid}"` (unassisted; all infield positions)
+- Some omit fielder UUID (~12 instances)
 
-**Baserunner outcomes (trailing, accompanying primary outcome):**
-- `"${uuid} advances to 2nd"`, `"${uuid} advances to 3rd"`
-- `"${uuid} advances to 2nd on the same error"`
-- `"${uuid} advances to 2nd on the throw"`
-- `"${uuid} remains at 1st"`, `"${uuid} remains at 2nd"`, `"${uuid} remains at 3rd"`
-- `"${uuid} scores"`, `"${uuid} scores on the throw"`
+**Fly outs:**
+- `"${uuid} flies out to {position} ${uuid}"` (all 8 fielder positions; CF 331, LF 194, RF 178 most common)
+
+**Pop outs:**
+- `"${uuid} pops out to {position} ${uuid}"` (all infield positions + catcher + CF)
+- `"${uuid} pops out in foul territory to {position} ${uuid}"` (~100 total)
+
+**Line outs:**
+- `"${uuid} lines out to {position} ${uuid}"` (all 8 fielder positions, ~170 total)
+
+**Singles (contact quality + trajectory + fielder):**
+- `"${uuid} singles on a {quality} to {position} ${uuid}"`
+- Contact qualities: line drive, fly ball, ground ball, hard ground ball, bunt, pop fly
+
+**Doubles:**
+- `"${uuid} doubles on a {quality} to {position} ${uuid}"`
+- Contact qualities: fly ball, line drive, hard ground ball, ground ball, pop fly (rare)
+
+**Triples:**
+- `"${uuid} triples on a {quality} to {position} ${uuid}"`
+- Contact qualities: fly ball, line drive, hard ground ball
+
+**Home runs (distinct grammar -- zone names, no fielder UUID):**
+- `"${uuid} homers on a fly ball to {zone}"` (left field, center field, right field, right center, left center)
+- `"${uuid} homers on a line drive to {zone}"` (rare)
+
+**Sacrifice bunts:**
+- `"${uuid} sacrifices, {fielding chain}"` / `"${uuid} sacrifices to {position} ${uuid}"` (~79 total)
+
+**Sacrifice flies:**
+- `"${uuid} out on sacrifice fly to {position} ${uuid}"` (CF 24, RF 16, LF 15)
+
+**Errors (reaching on error):**
+- `"${uuid} hits a {quality} and reaches on an error by {position} ${uuid}"`
+- Contact qualities: ground ball, hard ground ball, fly ball, line drive, bunt
+- All 9 fielder positions observed
+
+**Fielder's choice:**
+- `"${uuid} grounds into fielder's choice to {position} ${uuid}"` (~50 total)
+- `"${uuid} grounds into fielder's choice, {pos} ${uuid} to {pos} ${uuid}"` (~60 total)
+
+**Double plays:**
+- `"${uuid} grounds into a double play, {fielding chain}"` (~40 total; up to 3 fielders in chain)
+
+**Infield fly:**
+- `"${uuid} out on infield fly to {position} ${uuid}"` (~25 total across 5 positions)
+
+**Bunt outs (non-sacrifice):**
+- `"${uuid} bunts out, {fielding chain}"` (~12 total)
+- `"${uuid} bunts into a double play, {fielding chain}"` (2)
+
+**Catcher's interference:**
+- `"${uuid} reaches on catcher's interference"` (4)
+
+**Missing fielder UUIDs:** ~50 templates across all categories omit the fielder UUID while keeping the position name. Parser must handle both `"to shortstop ${uuid}"` and `"to shortstop"` (no UUID).
 
 ### `name_template.template` Values
 
-Outcome label strings (access as `play["name_template"]["template"]`):
-- `"Fly Out"`, `"Ground Out"`, `"Pop Out"`, `"Line Out"`
-- `"Single"`, `"Double"`, `"Triple"`, `"Home Run"`
-- `"Walk"`, `"Strikeout"`, `"Hit By Pitch"`
-- `"Error"`, `"Fielder's Choice"`, `"Runner Out"`
-- `"${uuid} at bat"` -- incomplete/abandoned at-bat (see Known Limitations)
+Outcome label strings (access as `play["name_template"]["template"]`). Complete vocabulary from 9,398 plays across 165 games (4 teams):
+
+| Count | Template | Notes |
+|------:|----------|-------|
+| 1,557 | `"Strikeout"` | |
+| 1,545 | `"Single"` | |
+| 1,438 | `"Walk"` | |
+| 1,279 | `"Ground Out"` | |
+| 885 | `"Fly Out"` | |
+| 523 | `"Pop Out"` | |
+| 412 | `"Hit By Pitch"` | |
+| 374 | `"Double"` | |
+| 331 | `"Error"` | |
+| 200 | `"Fielder's Choice"` | |
+| 173 | `"Line Out"` | |
+| 165 | `"${uuid} at bat"` | Abandoned at-bat (1 per game, always last play, empty final_details) |
+| 91 | `"Double Play"` | |
+| 85 | `"Triple"` | |
+| 79 | `"Sacrifice Bunt"` | |
+| 74 | `"Runner Out"` | Runner caught out (not a batting outcome) |
+| 61 | `"Sacrifice Fly"` | |
+| 37 | `"Dropped 3rd Strike"` | Strikeout where catcher drops ball, batter may advance |
+| 26 | `"Infield Fly"` | Infield fly rule call |
+| 22 | `"Home Run"` | |
+| 20 | `"Intentional Walk"` | Distinct from regular Walk |
+| 7 | `"Batter Out"` | Generic out classification |
+| 6 | `"Inning Ended"` | Game-state marker, not a plate appearance |
+| 4 | `"FC Double Play"` | Fielder's Choice leading to double play |
+| 4 | `"Catcher's Interference"` | Batter awarded first base |
+
+25 unique values confirmed. Original spec listed 13; 12 new outcomes discovered in exploration.
 
 ## Example Response (Truncated, Redacted)
 
@@ -303,7 +423,7 @@ Outcome label strings (access as `play["name_template"]["template"]`):
 
 - **Access scope:** This endpoint is NOT restricted to teams the authenticated user manages. Confirmed 2026-03-26: a game not in our local `games` table (non-managed teams) returned HTTP 200 with full play-by-play data. Any `event_id` discoverable via the public API (e.g., from opponent schedules) can be fetched with a standard gc-token. This makes the endpoint suitable for opponent scouting without special access.
 - **Last play edge case:** The final play in some games has `name_template.template = "${uuid} at bat"` with empty `at_plate_details` and `final_details` arrays. This represents an incomplete/abandoned at-bat. Skip plays where `final_details` is empty.
-- **`messages` array:** Always empty in observed capture (58 plays). Purpose unknown when non-empty.
+- **`messages` array:** Free-text scorekeeper notes. Usually empty; ~130 non-empty instances observed across 165 games. Common patterns: mound visit notes (~130), game time notes (~15), weather delays, and miscellaneous commentary. Store as raw JSON array; do not parse.
 - **Python client 500 history:** Our client previously received HTTP 500 on this endpoint. Root cause was using `game_stream.id` instead of `event_id` as the path parameter. Confirmed fixed by using `event_id`.
 - Reuse boxscore key-detection logic for `team_players` asymmetric key pattern.
 

@@ -146,6 +146,8 @@ class TestRunMigrations:
             "sessions",
             "coaching_assignments",
             "crawl_jobs",
+            "plays",
+            "play_events",
         }
         conn = sqlite3.connect(str(fresh_db))
         cursor = conn.execute(
