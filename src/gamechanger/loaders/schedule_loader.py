@@ -23,7 +23,7 @@ Usage::
     conn = sqlite3.connect("./data/app.db")
     conn.execute("PRAGMA foreign_keys=ON;")
     team_ref = TeamRef(id=1, gc_uuid="abc-uuid")
-    loader = ScheduleLoader(conn, season_id="2025", owned_team_ref=team_ref)
+    loader = ScheduleLoader(conn, owned_team_ref=team_ref)
     result = loader.load_file(Path("data/raw/2025/teams/abc-uuid/schedule.json"))
 """
 
@@ -35,7 +35,7 @@ import sqlite3
 from pathlib import Path
 
 from src.db.teams import ensure_team_row
-from src.gamechanger.loaders import LoadResult, extract_year_from_season_id
+from src.gamechanger.loaders import LoadResult, derive_season_id_for_team, ensure_season_row
 from src.gamechanger.types import TeamRef
 
 logger = logging.getLogger(__name__)
@@ -46,19 +46,19 @@ class ScheduleLoader:
 
     Args:
         db: Open ``sqlite3.Connection`` with ``PRAGMA foreign_keys=ON`` set.
-        season_id: Season slug used as FK in all inserts (e.g. ``'2025'``).
         owned_team_ref: ``TeamRef`` for the team that owns the schedule data.
     """
 
     def __init__(
         self,
         db: sqlite3.Connection,
-        season_id: str,
         owned_team_ref: TeamRef,
     ) -> None:
         self._db = db
-        self._season_id = season_id
         self._team_ref = owned_team_ref
+        self._season_id, self._season_year = derive_season_id_for_team(
+            db, owned_team_ref.id
+        )
 
     def load_file(self, schedule_path: Path) -> LoadResult:
         """Load scheduled games from a schedule.json file.
@@ -91,7 +91,7 @@ class ScheduleLoader:
             )
             return LoadResult(errors=1)
 
-        self._ensure_season_row()
+        ensure_season_row(self._db, self._season_id)
 
         result = LoadResult()
         for item in raw:
@@ -195,7 +195,7 @@ class ScheduleLoader:
 
         # Upsert team_opponents junction row (AC-6)
         if opp_team_id != own_team_id:
-            first_seen_year = extract_year_from_season_id(self._season_id) or 0
+            first_seen_year = self._season_year or 0
             self._db.execute(
                 """
                 INSERT INTO team_opponents (our_team_id, opponent_team_id, first_seen_year)
@@ -290,22 +290,9 @@ class ScheduleLoader:
         Returns:
             INTEGER PK from the ``teams`` table.
         """
-        season_year = extract_year_from_season_id(self._season_id)
         return ensure_team_row(
             self._db,
             name=name,
-            season_year=season_year,
+            season_year=self._season_year,
             source="schedule",
-        )
-
-    def _ensure_season_row(self) -> None:
-        """Ensure a seasons row exists for the configured season_id."""
-        year = extract_year_from_season_id(self._season_id) or 0
-        self._db.execute(
-            """
-            INSERT INTO seasons (season_id, name, season_type, year)
-            VALUES (?, ?, 'unknown', ?)
-            ON CONFLICT(season_id) DO NOTHING
-            """,
-            (self._season_id, self._season_id, year),
         )

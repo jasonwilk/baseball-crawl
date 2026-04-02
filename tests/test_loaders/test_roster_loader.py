@@ -36,6 +36,10 @@ _MIGRATION_FILE = _PROJECT_ROOT / "migrations" / "001_initial_schema.sql"
 def db() -> sqlite3.Connection:
     """In-memory SQLite connection with the schema applied and FK enforcement on.
 
+    Pre-seeds a team row with ``season_year=2025`` so that
+    ``derive_season_id_for_team`` produces the deterministic ``_SEASON_ID``
+    value across all tests.
+
     Yields:
         Open sqlite3.Connection ready for loader tests.
     """
@@ -49,6 +53,14 @@ def db() -> sqlite3.Connection:
     conn.execute("ALTER TABLE teams ADD COLUMN season_year INTEGER")
     conn.commit()
 
+    # Pre-seed the default team so derive_season_id_for_team returns "2025"
+    conn.execute(
+        "INSERT INTO teams (gc_uuid, name, membership_type, is_active, season_year) "
+        "VALUES (?, ?, 'member', 1, 2025)",
+        (_TEAM_ID, _TEAM_ID),
+    )
+    conn.commit()
+
     yield conn
     conn.close()
 
@@ -59,6 +71,7 @@ def db() -> sqlite3.Connection:
 
 _TEAM_ID = "team-uuid-jv-001"
 _SEASON_ID = "2025"
+
 
 _SAMPLE_PLAYERS = [
     {
@@ -355,13 +368,9 @@ def test_missing_first_name_causes_skip(db: sqlite3.Connection, tmp_path: Path) 
 
 
 def test_teams_row_created_automatically(db: sqlite3.Connection, tmp_path: Path) -> None:
-    """AC-6: A teams row is created for the team_id before inserting team_rosters."""
+    """AC-6: A teams row exists for the team_id (fixture-seeded or auto-created)."""
     path = _write_roster(tmp_path, _SAMPLE_PLAYERS)
     loader = RosterLoader(db)
-
-    # No teams row exists yet.
-    count_before = db.execute("SELECT COUNT(*) FROM teams;").fetchone()[0]
-    assert count_before == 0
 
     loader.load_file(path)
 
@@ -402,10 +411,10 @@ def test_load_succeeds_when_fk_prerequisites_absent(db: sqlite3.Connection, tmp_
 
 def test_existing_team_row_not_overwritten(db: sqlite3.Connection, tmp_path: Path) -> None:
     """AC-6: If a teams row already exists, _ensure_team_row does not overwrite it."""
-    # Pre-insert a teams row with enriched data.
+    # Update the fixture-seeded team with enriched data.
     db.execute(
-        "INSERT INTO teams (gc_uuid, name, membership_type, is_active) VALUES (?, ?, 'member', 1);",
-        (_TEAM_ID, "Lincoln JV"),
+        "UPDATE teams SET name = 'Lincoln JV' WHERE gc_uuid = ?",
+        (_TEAM_ID,),
     )
     db.commit()
 
@@ -495,11 +504,22 @@ def test_avatar_url_empty_string_does_not_cause_error(db: sqlite3.Connection, tm
     assert result.errors == 0
 
 
-def test_path_inference_from_conventional_path(db: sqlite3.Connection, tmp_path: Path) -> None:
-    """team_id and season_id are correctly inferred from the path convention."""
+def test_path_inference_and_team_derived_season(db: sqlite3.Connection, tmp_path: Path) -> None:
+    """team_id inferred from path; season_id derived from team metadata."""
     team_id = "specific-team-uuid"
-    season = "2026-spring-hs"
-    path = _write_roster(tmp_path, _SAMPLE_PLAYERS, team_id=team_id, season=season)
+    # Pre-insert a team with HS program and season_year=2026
+    db.execute(
+        "INSERT OR IGNORE INTO programs (program_id, name, program_type) "
+        "VALUES ('lsb-hs', 'Lincoln Standing Bear HS', 'hs')"
+    )
+    db.execute(
+        "INSERT INTO teams (gc_uuid, name, membership_type, is_active, program_id, season_year) "
+        "VALUES (?, ?, 'member', 1, 'lsb-hs', 2026)",
+        (team_id, team_id),
+    )
+    db.commit()
+
+    path = _write_roster(tmp_path, _SAMPLE_PLAYERS, team_id=team_id, season="2026-spring-hs")
     loader = RosterLoader(db)
 
     loader.load_file(path)
@@ -509,7 +529,6 @@ def test_path_inference_from_conventional_path(db: sqlite3.Connection, tmp_path:
         "SELECT team_id, season_id FROM team_rosters WHERE player_id = 'player-aaa-001';"
     ).fetchone()
     assert row is not None
-    # team_rosters.team_id is now INTEGER FK -- resolve via gc_uuid lookup
     team_pk = db.execute("SELECT id FROM teams WHERE gc_uuid = ?", (team_id,)).fetchone()[0]
     assert row[0] == team_pk
-    assert row[1] == season
+    assert row[1] == "2026-spring-hs"

@@ -60,7 +60,8 @@ def db() -> sqlite3.Connection:
 
 _OWN_GC_UUID = "own-team-uuid-001"
 _OPP_GC_UUID = "opp-team-uuid-002"
-_SEASON_ID = "2026-spring-hs"
+# DB season_id is derived from team metadata (season_year=2026, no program).
+_SEASON_ID = "2026"
 _GAME_ID = "event-game-001"
 _PLAYER_A = "player-aaa-001"
 _PLAYER_B = "player-bbb-002"
@@ -78,10 +79,11 @@ def _seed_team(
     gc_uuid: str,
     name: str = "Test Team",
     membership_type: str = "member",
+    season_year: int = 2026,
 ) -> int:
     cur = conn.execute(
-        "INSERT INTO teams (name, membership_type, gc_uuid) VALUES (?, ?, ?)",
-        (name, membership_type, gc_uuid),
+        "INSERT INTO teams (name, membership_type, gc_uuid, season_year) VALUES (?, ?, ?, ?)",
+        (name, membership_type, gc_uuid, season_year),
     )
     conn.commit()
     return cur.lastrowid  # type: ignore[return-value]
@@ -91,7 +93,7 @@ def _seed_season(
     conn: sqlite3.Connection, season_id: str = _SEASON_ID, year: int = 2026
 ) -> None:
     conn.execute(
-        "INSERT OR IGNORE INTO seasons (season_id, name, season_type, year) VALUES (?, ?, 'spring-hs', ?)",
+        "INSERT OR IGNORE INTO seasons (season_id, name, season_type, year) VALUES (?, ?, 'default', ?)",
         (season_id, f"Season {season_id}", year),
     )
     conn.commit()
@@ -267,7 +269,7 @@ def test_load_dir_inserts_correct_columns(
     assert record["error"] == 0
     assert record["event_gc_id"] == _EVENT_ID_1
     assert record["created_at_ms"] == 9999
-    assert record["season_id"] == _SEASON_ID       # AC-3c: from path segment
+    assert record["season_id"] == _SEASON_ID       # AC-3c: from team metadata
 
 
 # ---------------------------------------------------------------------------

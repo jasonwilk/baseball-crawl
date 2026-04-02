@@ -222,12 +222,13 @@ def _insert_own_team(
     db: sqlite3.Connection,
     gc_uuid: str = _OWN_TEAM_ID,
     public_id: str = _OWN_TEAM_SLUG,
+    season_year: int = 2025,
 ) -> int:
     """Insert own team stub into teams table and return its INTEGER PK."""
     cur = db.execute(
-        "INSERT OR IGNORE INTO teams (gc_uuid, public_id, name, membership_type, is_active) "
-        "VALUES (?, ?, ?, 'member', 1)",
-        (gc_uuid, public_id, gc_uuid),
+        "INSERT OR IGNORE INTO teams (gc_uuid, public_id, name, membership_type, is_active, season_year) "
+        "VALUES (?, ?, ?, 'member', 1, ?)",
+        (gc_uuid, public_id, gc_uuid, season_year),
     )
     if cur.rowcount:
         return cur.lastrowid
@@ -237,7 +238,7 @@ def _insert_own_team(
 def _make_loader(db: sqlite3.Connection, gc_uuid: str = _OWN_TEAM_ID) -> GameLoader:
     from src.gamechanger.types import TeamRef
     pk = _insert_own_team(db, gc_uuid=gc_uuid)
-    return GameLoader(db, season_id=_SEASON_ID, owned_team_ref=TeamRef(id=pk, gc_uuid=gc_uuid, public_id=_OWN_TEAM_SLUG))
+    return GameLoader(db, owned_team_ref=TeamRef(id=pk, gc_uuid=gc_uuid, public_id=_OWN_TEAM_SLUG))
 
 
 # ---------------------------------------------------------------------------
@@ -541,8 +542,8 @@ def test_same_game_from_two_team_dirs_is_idempotent(db: sqlite3.Connection, tmp_
     from src.gamechanger.types import TeamRef
     pk_a = _insert_own_team(db, gc_uuid="team-aaa", public_id="slug-aaa")
     pk_b = _insert_own_team(db, gc_uuid=_OWN_TEAM_ID)
-    loader_a = GameLoader(db, season_id=_SEASON_ID, owned_team_ref=TeamRef(id=pk_a, gc_uuid="team-aaa", public_id="slug-aaa"))
-    loader_b = GameLoader(db, season_id=_SEASON_ID, owned_team_ref=TeamRef(id=pk_b, gc_uuid=_OWN_TEAM_ID, public_id=_OWN_TEAM_SLUG))
+    loader_a = GameLoader(db, owned_team_ref=TeamRef(id=pk_a, gc_uuid="team-aaa", public_id="slug-aaa"))
+    loader_b = GameLoader(db, owned_team_ref=TeamRef(id=pk_b, gc_uuid=_OWN_TEAM_ID, public_id=_OWN_TEAM_SLUG))
 
     loader_a.load_all(team_dir_a)
     loader_b.load_all(team_dir_b)
@@ -917,8 +918,8 @@ def _insert_team_no_uuid(
 ) -> int:
     """Insert a tracked team row without a gc_uuid (bridge returned 403 scenario)."""
     cur = db.execute(
-        "INSERT INTO teams (public_id, name, membership_type, is_active) "
-        "VALUES (?, 'Scouted Team', 'tracked', 0)",
+        "INSERT INTO teams (public_id, name, membership_type, is_active, season_year) "
+        "VALUES (?, 'Scouted Team', 'tracked', 0, 2025)",
         (public_id,),
     )
     db.commit()
@@ -938,7 +939,6 @@ def test_gc_uuid_none_no_phantom_team_row(db: sqlite3.Connection, tmp_path: Path
     pk = _insert_team_no_uuid(db)
     loader = GameLoader(
         db,
-        season_id=_SEASON_ID,
         owned_team_ref=TeamRef(id=pk, gc_uuid=None, public_id=_OWN_TEAM_SLUG),
     )
 
@@ -981,7 +981,6 @@ def test_detect_team_keys_uuid_only_gc_uuid_none(db: sqlite3.Connection) -> None
     pk = _insert_team_no_uuid(db)
     loader = GameLoader(
         db,
-        season_id=_SEASON_ID,
         owned_team_ref=TeamRef(id=pk, gc_uuid=None, public_id=_OWN_TEAM_SLUG),
     )
 
@@ -1304,7 +1303,7 @@ def test_dual_key_index_event_id_and_game_stream_id_both_resolve(db: sqlite3.Con
     from src.gamechanger.types import TeamRef
     pk_b = _insert_own_team(db, gc_uuid="team-b", public_id="slug-b")
     loader_b = GameLoader(
-        db, season_id=_SEASON_ID,
+        db,
         owned_team_ref=TeamRef(id=pk_b, gc_uuid="team-b", public_id="slug-b"),
     )
     summaries_b = [
@@ -1873,3 +1872,46 @@ def test_player_without_name_in_players_array_gets_stub(db: sqlite3.Connection, 
         (_PLAYER_OWN_1,),
     ).fetchone()
     assert row == ("Unknown", "Unknown"), f"Expected stub name, got {row}"
+
+
+# ---------------------------------------------------------------------------
+# E-197-02 AC-9: USSSA team produces correct derived season_id
+# ---------------------------------------------------------------------------
+
+
+def test_usssa_team_produces_correct_season_id(db: sqlite3.Connection, tmp_path: Path) -> None:
+    """AC-9: A USSSA team with season_year=2025 produces season_id='2025-summer-usssa' in the DB."""
+    # Set up a USSSA program and team
+    db.execute(
+        "INSERT OR IGNORE INTO programs (program_id, name, program_type) "
+        "VALUES ('rebels-usssa', 'Lincoln Rebels', 'usssa')"
+    )
+    gc_uuid = "usssa-team-uuid-001"
+    public_id = "usssaSlug123"
+    db.execute(
+        "INSERT INTO teams (gc_uuid, public_id, name, membership_type, is_active, program_id, season_year) "
+        "VALUES (?, ?, 'Rebels 14U', 'member', 1, 'rebels-usssa', 2025)",
+        (gc_uuid, public_id),
+    )
+    team_pk = db.execute("SELECT id FROM teams WHERE gc_uuid = ?", (gc_uuid,)).fetchone()[0]
+    db.commit()
+
+    from src.gamechanger.types import TeamRef
+    team_ref = TeamRef(id=team_pk, gc_uuid=gc_uuid, public_id=public_id)
+
+    boxscore = _make_boxscore(own_key=public_id, opp_key=_OPP_TEAM_ID)
+    team_dir = _write_team_dir(tmp_path, team_id=gc_uuid, boxscores={_GAME_STREAM_ID: boxscore})
+
+    loader = GameLoader(db, owned_team_ref=team_ref)
+    result = loader.load_all(team_dir)
+
+    assert result.errors == 0
+    assert result.loaded >= 1
+
+    row = db.execute(
+        "SELECT season_id FROM games WHERE game_id = ?", (_EVENT_ID,)
+    ).fetchone()
+    assert row is not None
+    assert row[0] == "2025-summer-usssa", (
+        f"Expected USSSA team to produce season_id='2025-summer-usssa', got '{row[0]}'"
+    )

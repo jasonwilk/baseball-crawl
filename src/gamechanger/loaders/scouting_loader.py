@@ -47,7 +47,7 @@ from pathlib import Path
 from typing import Any
 
 from src.db.teams import ensure_team_row
-from src.gamechanger.loaders import LoadResult, extract_year_from_season_id, warn_season_year_mismatch
+from src.gamechanger.loaders import LoadResult, derive_season_id_for_team, ensure_season_row
 from src.gamechanger.loaders.game_loader import GameLoader, GameSummaryEntry
 from src.gamechanger.types import TeamRef
 
@@ -96,15 +96,19 @@ class ScoutingLoader:
         Args:
             scouting_dir: Path to ``data/raw/{season_id}/scouting/{public_id}/``.
             team_id: The opponent's INTEGER PK in the ``teams`` table.
-            season_id: Season slug (e.g. ``"2025-spring-hs"``).
+            season_id: Season slug used for **file path construction only**
+                (locating the scouting directory on disk).  The DB season_id
+                for loaded data is derived from team metadata via
+                ``derive_season_id_for_team()``.
 
         Returns:
             Aggregated ``LoadResult`` across roster and boxscore loading.
         """
-        self._ensure_season_row(season_id)
-        warn_season_year_mismatch(self._db, team_id, season_id, "ScoutingLoader")
+        # Derive the canonical DB season_id from team metadata (not the crawl path).
+        db_season_id, db_season_year = derive_season_id_for_team(self._db, team_id)
+        ensure_season_row(self._db, db_season_id)
 
-        total = self._load_roster_section(scouting_dir, team_id, season_id)
+        total = self._load_roster_section(scouting_dir, team_id, db_season_id)
 
         boxscores_dir = scouting_dir / "boxscores"
         if not boxscores_dir.is_dir():
@@ -113,13 +117,13 @@ class ScoutingLoader:
 
         # Build TeamRef for GameLoader by looking up gc_uuid and public_id.
         team_ref = self._build_team_ref(team_id)
-        game_loader = GameLoader(db=self._db, season_id=season_id, owned_team_ref=team_ref)
+        game_loader = GameLoader(db=self._db, owned_team_ref=team_ref)
         games_path = scouting_dir / "games.json"
         games_index = self._build_games_index(games_path)
         opponent_name_index = self._build_opponent_name_index(games_path)
         bs_result = self._load_boxscores(
             game_loader, games_index, boxscores_dir,
-            season_id=season_id,
+            season_year=db_season_year,
             opponent_name_index=opponent_name_index,
             own_gc_uuid=team_ref.gc_uuid,
         )
@@ -127,11 +131,11 @@ class ScoutingLoader:
         total.skipped += bs_result.skipped
         total.errors += bs_result.errors
 
-        self._compute_season_aggregates(team_id, season_id)
+        self._compute_season_aggregates(team_id, db_season_id)
         self._db.commit()
         logger.info(
             "Scouting load complete for team_id=%d season=%s: loaded=%d skipped=%d errors=%d",
-            team_id, season_id, total.loaded, total.skipped, total.errors,
+            team_id, db_season_id, total.loaded, total.skipped, total.errors,
         )
         return total
 
@@ -177,7 +181,7 @@ class ScoutingLoader:
         game_loader: GameLoader,
         games_index: dict,
         boxscores_dir: Path,
-        season_id: str,
+        season_year: int | None = None,
         opponent_name_index: dict[str, str] | None = None,
         own_gc_uuid: str | None = None,
     ) -> LoadResult:
@@ -187,8 +191,8 @@ class ScoutingLoader:
             game_loader: Configured ``GameLoader`` for the scouted team.
             games_index: Mapping of ``game_stream_id`` → ``GameSummaryEntry``.
             boxscores_dir: Directory containing ``{game_stream_id}.json`` files.
-            season_id: Season slug (e.g. ``"2025-spring-hs"``), used to pass
-                ``season_year`` into ``ensure_team_row()`` for UUID opportunism.
+            season_year: Calendar year from team metadata, passed to
+                ``ensure_team_row()`` for UUID opportunism.
             opponent_name_index: Optional mapping of ``game_stream_id`` →
                 opponent team name.  When provided, real names are used for
                 opponent team rows instead of UUID placeholders.
@@ -215,8 +219,8 @@ class ScoutingLoader:
             total.loaded += result.loaded
             total.skipped += result.skipped
             total.errors += result.errors
-            self._record_uuid_from_boxscore_path(
-                bs_path, season_id=season_id,
+            self._record_uuid_from_boxscore(
+                bs_path, season_year=season_year,
                 opponent_name=opponent_name, own_gc_uuid=own_gc_uuid,
             )
         return total
@@ -520,8 +524,8 @@ class ScoutingLoader:
     # UUID opportunism
     # ------------------------------------------------------------------
 
-    def _record_uuid_from_boxscore_path(
-        self, bs_path: Path, *, season_id: str,
+    def _record_uuid_from_boxscore(
+        self, bs_path: Path, *, season_year: int | None = None,
         opponent_name: str | None = None, own_gc_uuid: str | None = None,
     ) -> None:
         """Ensure a ``teams`` stub row exists for any UUID key found in a boxscore.
@@ -562,7 +566,6 @@ class ScoutingLoader:
             ambiguous = own_gc_uuid is None and multi_uuid
             name = key if (is_own_team or ambiguous) else (opponent_name or key)
 
-            season_year = extract_year_from_season_id(season_id)
             ensure_team_row(
                 self._db,
                 gc_uuid=key,
@@ -576,23 +579,3 @@ class ScoutingLoader:
     # FK prerequisite helpers
     # ------------------------------------------------------------------
 
-    def _ensure_season_row(self, season_id: str) -> None:
-        """Ensure a ``seasons`` row exists for ``season_id``.
-
-        Args:
-            season_id: Season slug.
-        """
-        parts = season_id.split("-")
-        year = 0
-        for part in parts:
-            if part.isdigit() and len(part) == 4:
-                year = int(part)
-                break
-        self._db.execute(
-            """
-            INSERT INTO seasons (season_id, name, season_type, year)
-            VALUES (?, ?, 'unknown', ?)
-            ON CONFLICT(season_id) DO NOTHING
-            """,
-            (season_id, season_id, year),
-        )

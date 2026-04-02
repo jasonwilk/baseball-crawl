@@ -50,7 +50,7 @@ from pathlib import Path
 from typing import Any
 
 from src.db.teams import ensure_team_row
-from src.gamechanger.loaders import LoadResult, warn_season_year_mismatch
+from src.gamechanger.loaders import LoadResult, derive_season_id_for_team, ensure_season_row
 
 logger = logging.getLogger(__name__)
 
@@ -95,8 +95,9 @@ class SeasonStatsLoader:
     def load_file(self, path: Path) -> LoadResult:
         """Load a season stats JSON file into the database.
 
-        Infers ``team_id`` and ``season_id`` from the file path using the
-        convention ``data/raw/{season_id}/teams/{team_id}/stats.json``.
+        Infers ``team_id`` (gc_uuid) from the file path using the convention
+        ``data/raw/{season_id}/teams/{team_id}/stats.json``.  The DB
+        ``season_id`` is derived from team metadata, not the filesystem path.
 
         Args:
             path: Absolute or relative path to the ``stats.json`` file.
@@ -104,10 +105,8 @@ class SeasonStatsLoader:
         Returns:
             A ``LoadResult`` summarising records loaded, skipped, and errors.
         """
-        team_id, season_id = self._infer_ids_from_path(path)
-        logger.info(
-            "Loading season stats file: %s (team=%s, season=%s)", path, team_id, season_id
-        )
+        gc_uuid, path_year = self._infer_team_id_from_path(path)
+        logger.info("Loading season stats file: %s (team=%s)", path, gc_uuid)
 
         data = self._read_json(path)
         if data is None:
@@ -126,9 +125,10 @@ class SeasonStatsLoader:
             return LoadResult(errors=1)
 
         # Ensure FK prerequisite rows before any stat inserts.
-        team_int = self._ensure_team_row(team_id)
-        self._ensure_season_row(season_id)
-        warn_season_year_mismatch(self._db, team_int, season_id, "SeasonStatsLoader")
+        # Pass path_year so auto-created stub teams get a reasonable season_year.
+        team_int = self._ensure_team_row(gc_uuid, season_year=path_year)
+        season_id, _ = derive_season_id_for_team(self._db, team_int)
+        ensure_season_row(self._db, season_id)
 
         result = LoadResult()
         for player_id, player_data in players_by_uuid.items():
@@ -583,50 +583,31 @@ class SeasonStatsLoader:
                 (player_id,),
             )
 
-    def _ensure_team_row(self, gc_uuid: str) -> int:
+    def _ensure_team_row(
+        self, gc_uuid: str, *, season_year: int | None = None
+    ) -> int:
         """Ensure a ``teams`` row exists for ``gc_uuid`` and return its INTEGER PK.
 
         Delegates to the shared ``ensure_team_row()`` dedup cascade.
 
         Args:
             gc_uuid: GameChanger team UUID.
+            season_year: Year from the file path, passed to stub team creation
+                so ``derive_season_id_for_team()`` has a reasonable value.
 
         Returns:
             The ``teams.id`` INTEGER PK for the row.
         """
-        return ensure_team_row(self._db, gc_uuid=gc_uuid, source="season_stats")
-
-    def _ensure_season_row(self, season_id: str) -> None:
-        """Ensure a ``seasons`` row exists for ``season_id``.
-
-        Inserts a stub row if none exists.  Does nothing if already present.
-
-        Args:
-            season_id: Season slug (e.g. ``'2025'`` or ``'2026-spring-hs'``).
-        """
-        parts = season_id.split("-")
-        year = 0
-        for part in parts:
-            if part.isdigit() and len(part) == 4:
-                year = int(part)
-                break
-
-        self._db.execute(
-            """
-            INSERT INTO seasons (season_id, name, season_type, year)
-            VALUES (?, ?, 'unknown', ?)
-            ON CONFLICT(season_id) DO NOTHING
-            """,
-            (season_id, season_id, year),
+        return ensure_team_row(
+            self._db, gc_uuid=gc_uuid, season_year=season_year, source="season_stats"
         )
-        logger.debug("Ensured seasons row for season_id=%s", season_id)
 
     # ------------------------------------------------------------------
     # I/O helpers
     # ------------------------------------------------------------------
 
-    def _infer_ids_from_path(self, path: Path) -> tuple[str, str]:
-        """Extract ``team_id`` and ``season_id`` from the stats file path.
+    def _infer_team_id_from_path(self, path: Path) -> tuple[str, int | None]:
+        """Extract the team's ``gc_uuid`` and path year from the stats file path.
 
         Expects the convention ``.../{season_id}/teams/{team_id}/stats.json``.
 
@@ -634,25 +615,32 @@ class SeasonStatsLoader:
             path: Path to the stats JSON file.
 
         Returns:
-            Tuple of ``(team_id, season_id)``.
+            Tuple of ``(gc_uuid, path_year)``.  ``path_year`` is the 4-digit
+            year extracted from the season_id path segment, or ``None`` if
+            not parseable.
         """
         parts = path.parts
         for i, part in enumerate(parts):
             if part == "teams" and i + 1 < len(parts):
-                team_id = parts[i + 1]
-                season_id = parts[i - 1] if i > 0 else "unknown"
-                return team_id, season_id
+                gc_uuid = parts[i + 1]
+                path_year = self._extract_year(parts[i - 1]) if i > 0 else None
+                return gc_uuid, path_year
 
         team_id = path.parent.name
-        season_id = path.parent.parent.parent.name
         logger.warning(
-            "Could not infer team_id/season_id from path %s; "
-            "falling back to team_id=%s season_id=%s",
+            "Could not infer team_id from path %s; falling back to team_id=%s",
             path,
             team_id,
-            season_id,
         )
-        return team_id, season_id
+        return team_id, None
+
+    @staticmethod
+    def _extract_year(segment: str) -> int | None:
+        """Extract a 4-digit year from a path segment like '2025-spring-hs'."""
+        for part in segment.split("-"):
+            if part.isdigit() and len(part) == 4:
+                return int(part)
+        return None
 
     def _read_json(self, path: Path) -> dict | None:
         """Read and parse the JSON file at ``path``.

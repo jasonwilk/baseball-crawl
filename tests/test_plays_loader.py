@@ -92,7 +92,7 @@ def opponent_ref(db: sqlite3.Connection) -> TeamRef:
 @pytest.fixture()
 def loader(db: sqlite3.Connection, team_ref: TeamRef) -> PlaysLoader:
     """Return a PlaysLoader backed by the test database."""
-    return PlaysLoader(db, season_id=_SEASON_ID, owned_team_ref=team_ref)
+    return PlaysLoader(db, owned_team_ref=team_ref)
 
 
 def _insert_season(db: sqlite3.Connection, season_id: str = _SEASON_ID) -> None:
@@ -649,7 +649,7 @@ def test_per_game_transaction_rollback_on_error(
     team_dir = tmp_path / "team"
     _write_plays_file(team_dir, _GAME_ID_1, plays_json)
 
-    loader = PlaysLoader(db, season_id=_SEASON_ID, owned_team_ref=team_ref)
+    loader = PlaysLoader(db, owned_team_ref=team_ref)
     result = loader.load_all(team_dir)
 
     # The game should have errored due to the CHECK constraint violation.
@@ -796,7 +796,7 @@ def test_plays_scoped_to_correct_game_across_seasons(
     _write_plays_file(team_dir, _GAME_ID_2, _make_plays_json(batter_id=_BATTER_2))
 
     # Load both games using the same loader instance.
-    loader = PlaysLoader(db, season_id=season_1, owned_team_ref=team_ref)
+    loader = PlaysLoader(db, owned_team_ref=team_ref)
     result = loader.load_all(team_dir)
 
     assert result.loaded == 2

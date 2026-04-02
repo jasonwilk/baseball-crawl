@@ -69,12 +69,16 @@ _GAME_ID_3 = "6ae9b876-9999-0000-aaaa-bbbbbbbbbbbb"
 # ---------------------------------------------------------------------------
 
 
-def _seed_own_team(db: sqlite3.Connection) -> int:
-    """Insert the owned team row and return its integer PK."""
+def _seed_own_team(db: sqlite3.Connection, season_year: int = 2025) -> int:
+    """Insert the owned team row (with HS program) and return its integer PK."""
     db.execute(
-        "INSERT INTO teams (name, membership_type, gc_uuid, is_active) "
-        "VALUES ('LSB JV', 'member', ?, 1)",
-        (_OWN_TEAM_GC_UUID,),
+        "INSERT OR IGNORE INTO programs (program_id, name, program_type) "
+        "VALUES ('lsb-hs', 'Lincoln Standing Bear HS', 'hs')"
+    )
+    db.execute(
+        "INSERT INTO teams (name, membership_type, gc_uuid, is_active, program_id, season_year) "
+        "VALUES ('LSB JV', 'member', ?, 1, 'lsb-hs', ?)",
+        (_OWN_TEAM_GC_UUID, season_year),
     )
     row = db.execute("SELECT id FROM teams WHERE gc_uuid = ?", (_OWN_TEAM_GC_UUID,)).fetchone()
     db.commit()
@@ -137,11 +141,10 @@ def _write_schedule(tmp_path: Path, events: list[dict]) -> Path:
 def _make_loader(
     db: sqlite3.Connection,
     own_team_id: int,
-    season_id: str = _SEASON_ID,
 ) -> ScheduleLoader:
     """Create a ScheduleLoader with standard config."""
     team_ref = TeamRef(id=own_team_id, gc_uuid=_OWN_TEAM_GC_UUID)
-    return ScheduleLoader(db, season_id=season_id, owned_team_ref=team_ref)
+    return ScheduleLoader(db, owned_team_ref=team_ref)
 
 
 # ---------------------------------------------------------------------------
@@ -650,27 +653,37 @@ class TestMultiScope:
     def test_two_seasons_scoped_correctly(
         self, db: sqlite3.Connection, tmp_path: Path
     ) -> None:
-        """Games from different seasons get the correct season_id."""
-        own_id = _seed_own_team(db)
+        """Games from different team season_years get the correct season_id."""
+        # Team 1: 2025 season
+        own_id_s1 = _seed_own_team(db, season_year=2025)
 
-        # Season 1
         events_s1 = [_make_schedule_event(game_id=_GAME_ID_1)]
         s1_dir = tmp_path / "s1"
         s1_dir.mkdir()
         path_s1 = s1_dir / "schedule.json"
         path_s1.write_text(json.dumps(events_s1), encoding="utf-8")
 
-        loader_s1 = _make_loader(db, own_id, season_id="2025-spring-hs")
+        loader_s1 = _make_loader(db, own_id_s1)
         loader_s1.load_file(path_s1)
 
-        # Season 2
+        # Team 2: 2026 season (different gc_uuid to avoid UNIQUE conflict)
+        gc_uuid_s2 = "82cc88e9-bbbb-cccc-dddd-222222222222"
+        db.execute(
+            "INSERT INTO teams (name, membership_type, gc_uuid, is_active, program_id, season_year) "
+            "VALUES ('LSB Varsity', 'member', ?, 1, 'lsb-hs', 2026)",
+            (gc_uuid_s2,),
+        )
+        own_id_s2 = db.execute("SELECT id FROM teams WHERE gc_uuid = ?", (gc_uuid_s2,)).fetchone()[0]
+        db.commit()
+        team_ref_s2 = TeamRef(id=own_id_s2, gc_uuid=gc_uuid_s2)
+
         events_s2 = [_make_schedule_event(game_id=_GAME_ID_2)]
         s2_dir = tmp_path / "s2"
         s2_dir.mkdir()
         path_s2 = s2_dir / "schedule.json"
         path_s2.write_text(json.dumps(events_s2), encoding="utf-8")
 
-        loader_s2 = _make_loader(db, own_id, season_id="2026-spring-hs")
+        loader_s2 = ScheduleLoader(db, owned_team_ref=team_ref_s2)
         loader_s2.load_file(path_s2)
 
         row1 = db.execute(

@@ -31,6 +31,7 @@ from src.db.teams import ensure_team_row
 from src.gamechanger.client import CredentialExpiredError, GameChangerClient
 from src.gamechanger.crawlers.scouting import ScoutingCrawler
 from src.gamechanger.crawlers.scouting_spray import ScoutingSprayChartCrawler
+from src.gamechanger.loaders import derive_season_id_for_team
 from src.gamechanger.loaders.scouting_loader import ScoutingLoader
 from src.gamechanger.loaders.scouting_spray_loader import ScoutingSprayChartLoader
 from src.gamechanger.url_parser import parse_team_url
@@ -609,30 +610,30 @@ def generate_report(gc_url: str) -> GenerationResult:
                 success=False, slug=slug, error_message="Scouting crawl failed."
             )
 
-        # Find the season_id from the scouting run
+        # Find the crawl-path season_id from scouting_runs (file discovery only).
         with closing(get_connection()) as conn:
-            season_id = _query_season_id(conn, team_id)
+            crawl_season_id = _query_season_id(conn, team_id)
 
-        if not season_id:
-            # Derive a fallback so the report renders with "No data available"
-            # sections rather than hard-failing.
-            with closing(get_connection()) as conn:
-                row = conn.execute(
-                    "SELECT season_year FROM teams WHERE id = ?", (team_id,)
-                ).fetchone()
-            year = (row[0] if row and row[0] else datetime.now(timezone.utc).year)
-            season_id = f"{year}-spring-hs"
+        # Derive the canonical DB season_id from team metadata.
+        with closing(get_connection()) as conn:
+            season_id, _ = derive_season_id_for_team(conn, team_id)
+
+        if not crawl_season_id:
+            # Use the team-derived season_id as a plausible crawl directory
+            # name so the report renders with "No data available" sections
+            # rather than hard-failing.
+            crawl_season_id = season_id
             logger.warning(
-                "No scouting_runs season for team_id=%d; using fallback season_id=%s",
-                team_id, season_id,
+                "No scouting_runs season for team_id=%d; using fallback crawl_season_id=%s",
+                team_id, crawl_season_id,
             )
 
-        # Run the loader
+        # Run the loader (crawl_season_id locates files; loader derives DB season_id internally).
         with closing(get_connection()) as conn:
             loader = ScoutingLoader(conn)
-            scouting_dir = _DATA_ROOT / season_id / "scouting" / public_id
+            scouting_dir = _DATA_ROOT / crawl_season_id / "scouting" / public_id
             load_result = loader.load_team(
-                scouting_dir, team_id=team_id, season_id=season_id
+                scouting_dir, team_id=team_id, season_id=crawl_season_id
             )
 
         if load_result.loaded == 0 and load_result.errors > 0:
@@ -675,7 +676,8 @@ def generate_report(gc_url: str) -> GenerationResult:
                     conn.commit()
 
         # Step 4c: Spray chart crawl/load via scouting spray pipeline
-        _crawl_and_load_spray(client, public_id, season_id, gc_uuid=resolved_gc_uuid)
+        # crawl_season_id locates files; loaders derive DB season_id internally.
+        _crawl_and_load_spray(client, public_id, crawl_season_id, gc_uuid=resolved_gc_uuid)
 
     except CredentialExpiredError:
         msg = "Authentication credentials expired — refresh with `bb creds setup web`"

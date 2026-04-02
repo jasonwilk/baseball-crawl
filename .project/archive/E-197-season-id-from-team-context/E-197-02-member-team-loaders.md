@@ -4,7 +4,7 @@
 [E-197: Derive season_id from Team Context](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, all member-team loaders (GameLoader, ScheduleLoader, PlaysLoader, RosterLoader, SeasonStatsLoader) will derive season_id from team metadata via `derive_season_id_for_team()` instead of receiving it from the config or parsing it from the filesystem path. The load orchestrator (`src/pipeline/load.py`) will no longer pass `config.season` as season_id to loaders.

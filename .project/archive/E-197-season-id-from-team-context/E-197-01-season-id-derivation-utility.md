@@ -4,7 +4,7 @@
 [E-197: Derive season_id from Team Context](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, a shared `derive_season_id_for_team()` function will exist that takes a DB connection and team_id and returns the correct season_id string derived from team metadata. A shared `ensure_season_row()` function will replace the duplicated implementations across 4+ loaders. The legacy functions (`warn_season_year_mismatch()` and `extract_year_from_season_id()`) are kept in this story to avoid breaking imports; they are removed in Stories 02/03.

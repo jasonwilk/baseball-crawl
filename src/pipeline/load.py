@@ -88,7 +88,7 @@ def _run_schedule_loader(db: sqlite3.Connection, config: object, data_root: Path
                 "Schedule file not found for team %s at %s; skipping.", team.id, schedule_path
             )
             continue
-        loader = ScheduleLoader(db, season_id=config.season, owned_team_ref=team_ref)
+        loader = ScheduleLoader(db, owned_team_ref=team_ref)
         result = loader.load_file(schedule_path)
         combined.loaded += result.loaded
         combined.skipped += result.skipped
@@ -122,7 +122,7 @@ def _run_game_loader(db: sqlite3.Connection, config: object, data_root: Path) ->
             gc_uuid=team.id,
             public_id=None,
         )
-        loader = GameLoader(db, season_id=config.season, owned_team_ref=team_ref)
+        loader = GameLoader(db, owned_team_ref=team_ref)
         if not team_dir.is_dir():
             logger.warning(
                 "Team directory not found for team %s at %s; skipping.", team.id, team_dir
@@ -190,7 +190,7 @@ def _run_plays_loader(db: sqlite3.Connection, config: object, data_root: Path) -
             gc_uuid=team.id,
             public_id=None,
         )
-        loader = PlaysLoader(db, season_id=config.season, owned_team_ref=team_ref)
+        loader = PlaysLoader(db, owned_team_ref=team_ref)
         if not team_dir.is_dir():
             logger.warning(
                 "Team directory not found for team %s at %s; skipping.", team.id, team_dir

@@ -124,7 +124,7 @@ def test_unhandled_exception_continues_to_next_loader(tmp_path: Path) -> None:
 
 
 def test_exit_code_0_when_all_loaders_succeed(tmp_path: Path) -> None:
-    """Exit code is 0 when all loaders complete without exceptions."""
+    """Exit code is 0 when the roster loader completes without exceptions."""
     roster_dir = tmp_path / "2025" / "teams" / "team-001"
     roster_dir.mkdir(parents=True)
     (roster_dir / "roster.json").write_text("[]")
@@ -135,7 +135,11 @@ def test_exit_code_0_when_all_loaders_succeed(tmp_path: Path) -> None:
             mock_loader.load_file.return_value = _make_result()
             mock_loader_cls.return_value = mock_loader
 
-            exit_code = run(data_root=tmp_path, db_path=tmp_path / "app.db")
+            exit_code = run(
+                loader_filter="roster",
+                data_root=tmp_path,
+                db_path=tmp_path / "app.db",
+            )
 
     assert exit_code == 0
 
@@ -166,7 +170,11 @@ def test_missing_roster_file_skipped_gracefully(tmp_path: Path) -> None:
             mock_loader = MagicMock()
             mock_loader_cls.return_value = mock_loader
 
-            exit_code = run(data_root=tmp_path, db_path=tmp_path / "app.db")
+            exit_code = run(
+                loader_filter="roster",
+                data_root=tmp_path,
+                db_path=tmp_path / "app.db",
+            )
 
     assert exit_code == 0
     mock_loader.load_file.assert_not_called()
@@ -198,8 +206,8 @@ def test_loader_filter_runs_only_game(tmp_path: Path) -> None:
     mock_loader.load_all.assert_called_once_with(team_dir)
 
 
-def test_game_loader_constructs_with_correct_season_and_team(tmp_path: Path) -> None:
-    """GameLoader is constructed with season_id and owned_team_ref from config."""
+def test_game_loader_constructs_with_correct_team(tmp_path: Path) -> None:
+    """GameLoader is constructed with owned_team_ref from config (no season_id arg)."""
     team_dir = tmp_path / "2025" / "teams" / "team-abc"
     team_dir.mkdir(parents=True)
 
@@ -215,7 +223,7 @@ def test_game_loader_constructs_with_correct_season_and_team(tmp_path: Path) -> 
 
     mock_loader_cls.assert_called_once()
     _, kwargs = mock_loader_cls.call_args
-    assert kwargs["season_id"] == "2025"
+    assert "season_id" not in kwargs  # season_id is no longer passed
     assert kwargs["owned_team_ref"].gc_uuid == "team-abc"
 
 
@@ -428,7 +436,7 @@ def test_yaml_source_teamref_has_valid_db_id(tmp_path: Path) -> None:
         with patch("src.pipeline.load.GameLoader") as mock_loader_cls:
             mock_loader = MagicMock()
             mock_loader.load_all.return_value = _make_result()
-            mock_loader_cls.side_effect = lambda db, season_id, owned_team_ref: (
+            mock_loader_cls.side_effect = lambda db, owned_team_ref: (
                 captured_team_refs.append(owned_team_ref) or mock_loader
             )
 

@@ -1,7 +1,7 @@
 # E-197: Derive season_id from Team Context
 
 ## Status
-`READY`
+`COMPLETED`
 
 ## Overview
 Fix season_id derivation so it comes from team metadata (season_year + program type) instead of the crawl directory path. Currently, all loaders derive season_id from the filesystem path or a single global config value, which produces wrong season tags when a team's real season differs from the crawl directory -- e.g., Lincoln Rebels 14U (2025 summer USSSA) had all 92 games tagged as `2026-spring-hs`. This epic decouples DB season_id from filesystem paths and corrects existing mis-tagged data.
@@ -46,10 +46,10 @@ A `warn_season_year_mismatch()` function in `src/gamechanger/loaders/__init__.py
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-197-01 | Canonical season_id derivation utility | TODO | None | - |
-| E-197-02 | Update member-team loaders to use team-derived season_id | TODO | E-197-01 | - |
-| E-197-03 | Update scouting pipeline loaders to use team-derived season_id | TODO | E-197-01, E-197-02 | - |
-| E-197-04 | Data migration for existing mis-tagged season_id rows | TODO | None | - |
+| E-197-01 | Canonical season_id derivation utility | DONE | None | - |
+| E-197-02 | Update member-team loaders to use team-derived season_id | DONE | E-197-01 | - |
+| E-197-03 | Update scouting pipeline loaders to use team-derived season_id | DONE | E-197-01, E-197-02 | - |
+| E-197-04 | Data migration for existing mis-tagged season_id rows | DONE | None | - |
 
 ## Dispatch Team
 - software-engineer
@@ -176,8 +176,10 @@ Both formats must produce valid `seasons` rows (the `season_type NOT NULL` const
 ## History
 - 2026-04-01: Created from IDEA-061. SE and DE consulted during discovery.
 - 2026-04-01: Set to READY after 6 review passes (40 findings, 30 accepted, 5 dismissed, 5 duplicates/already-addressed).
+- 2026-04-02: Set to ACTIVE, dispatch started.
+- 2026-04-02: All 4 stories DONE. Epic COMPLETED. Decoupled DB season_id from filesystem paths across all loaders (member + scouting + spray), added canonical `derive_season_id_for_team()` utility, removed legacy `warn_season_year_mismatch()` and `extract_year_from_season_id()`, corrected Rebels 14U mis-tagged data via migration 011.
 
-### Review Scorecard
+### Spec Review Scorecard
 | Review Pass | Findings | Accepted | Dismissed |
 |---|---|---|---|
 | DE pre-review consultation | 5 | 5 | 0 |
@@ -189,3 +191,44 @@ Both formats must produce valid `seasons` rows (the `season_type NOT NULL` const
 | **Total** | **40** | **30** | **5** |
 
 Note: Some findings were duplicates across sources -- counts reflect raw finding count per source, not unique findings.
+
+### Code Review Scorecard
+| Review Pass | Findings | Accepted | Dismissed |
+|---|---|---|---|
+| Per-story CR -- E-197-01 | 0 | 0 | 0 |
+| Per-story CR -- E-197-02 | 2 | 2 | 0 |
+| Per-story CR -- E-197-03 | 2 | 2 | 0 |
+| Per-story CR -- E-197-04 | 2 | 0 | 2 |
+| CR integration review | 0 | 0 | 0 |
+| Codex code review | 2 | 2 | 0 |
+| **Total** | **8** | **6** | **2** |
+
+### Documentation Assessment
+
+Reviewing against doc update triggers:
+1. **New feature or endpoint**: No -- internal refactor, no new features or endpoints.
+2. **Architecture or deployment config changes**: No -- no deployment changes.
+3. **New agent or material agent modification**: No.
+4. **Database schema changes**: Yes -- migration 011 (data correction only, no DDL). However, this is a data fix migration, not a structural schema change. The migration corrects existing mis-tagged rows and creates a USSSA program row. No new tables or columns.
+5. **Epic changes how the system works or how users interact with it**: No -- internal loader refactor, invisible to users.
+
+**Verdict**: Trigger 4 fires marginally (migration 011), but it is a data correction migration with no DDL changes. The data model section in CLAUDE.md already documents the `programs` table and `season_year` column. No documentation update required beyond what CLAUDE.md already covers. **No documentation impact.**
+
+### Context-Layer Assessment
+
+- **T1 (New convention)**: **YES** -- Filesystem path season_id is decoupled from DB season_id. Loaders use `derive_season_id_for_team()` for DB writes and filesystem paths for file discovery. `scouting_runs.season_id` is a file-discovery column, not a data identity column.
+- **T2 (Architectural decision)**: **YES** -- `derive_season_id_for_team()` is the canonical season_id derivation utility. All loaders MUST use it for DB inserts. The `program_type → season suffix` mapping (`hs→spring-hs`, `usssa→summer-usssa`, `legion→summer-legion`) is codified.
+- **T3 (Footgun discovered)**: **YES** -- `derive_season_id_for_team()` return type changed to `tuple[str, int | None]` during implementation (Story 03 needed `season_year` for `ensure_team_row()`). Callers must unpack the tuple.
+- **T4 (Agent behavior change)**: **NO** -- No changes to agent routing, dispatch, or coordination.
+- **T5 (Domain knowledge)**: **YES** -- `program_type → season suffix` mapping is domain knowledge. Teams without a `program_id` get year-only season_id (correct for tracked opponents). `scouting_runs.season_id` semantic distinction (file discovery vs data identity) is important for future pipeline work.
+- **T6 (New CLI/workflow)**: **NO** -- No new commands or workflows.
+
+**Verdict**: 4 YES triggers (T1, T2, T3, T5). Claude-architect should codify these findings before archival.
+
+### Ideas Backlog Review
+
+No CANDIDATE ideas are directly unblocked by E-197. IDEA-061 was already promoted to this epic. The season_id derivation fix enables correct multi-program data tagging but does not unblock any specific pending idea.
+
+### Vision Signals
+
+Unprocessed signals exist in `docs/vision-signals.md` (26+ signals as of last count). Mentioning for user awareness -- does not block archival.

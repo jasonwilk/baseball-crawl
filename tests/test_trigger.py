@@ -463,69 +463,10 @@ class TestScoutingSyncSeasonYearHeal:
 # ---------------------------------------------------------------------------
 
 
-class TestSeasonYearMismatchWarning:
-    """E-147-03 AC-3: loaders emit WARNING on year mismatch."""
 
-    def test_mismatch_warning_logged(self, tmp_path: Path) -> None:
-        """warn_season_year_mismatch emits WARNING when years differ."""
-        from src.gamechanger.loaders import warn_season_year_mismatch
-
-        db_path = tmp_path / "test_warn.db"
-        run_migrations(db_path=db_path)
-        with closing(sqlite3.connect(str(db_path))) as conn:
-            conn.execute("PRAGMA foreign_keys=ON;")
-            conn.execute(
-                "INSERT INTO teams (id, name, membership_type, season_year) "
-                "VALUES (1, 'Test Team', 'member', 2025)"
-            )
-            conn.commit()
-
-            import logging
-            with patch.object(logging.getLogger("src.gamechanger.loaders"), "warning") as mock_warn:
-                warn_season_year_mismatch(conn, 1, "2026-spring-hs", "TestLoader")
-            mock_warn.assert_called_once()
-            call_msg = mock_warn.call_args[0][0] % mock_warn.call_args[0][1:]
-            assert "mismatch" in call_msg.lower()
-            assert "2025" in call_msg
-            assert "2026" in call_msg
-
-    def test_no_warning_when_years_match(self, tmp_path: Path) -> None:
-        """No warning when teams.season_year matches the data year."""
-        from src.gamechanger.loaders import warn_season_year_mismatch
-
-        db_path = tmp_path / "test_warn.db"
-        run_migrations(db_path=db_path)
-        with closing(sqlite3.connect(str(db_path))) as conn:
-            conn.execute("PRAGMA foreign_keys=ON;")
-            conn.execute(
-                "INSERT INTO teams (id, name, membership_type, season_year) "
-                "VALUES (1, 'Test Team', 'member', 2025)"
-            )
-            conn.commit()
-
-            import logging
-            with patch.object(logging.getLogger("src.gamechanger.loaders"), "warning") as mock_warn:
-                warn_season_year_mismatch(conn, 1, "2025-spring-hs", "TestLoader")
-            mock_warn.assert_not_called()
-
-    def test_no_warning_when_season_year_null(self, tmp_path: Path) -> None:
-        """No warning when teams.season_year is NULL."""
-        from src.gamechanger.loaders import warn_season_year_mismatch
-
-        db_path = tmp_path / "test_warn.db"
-        run_migrations(db_path=db_path)
-        with closing(sqlite3.connect(str(db_path))) as conn:
-            conn.execute("PRAGMA foreign_keys=ON;")
-            conn.execute(
-                "INSERT INTO teams (id, name, membership_type) "
-                "VALUES (1, 'Test Team', 'member')"
-            )
-            conn.commit()
-
-            import logging
-            with patch.object(logging.getLogger("src.gamechanger.loaders"), "warning") as mock_warn:
-                warn_season_year_mismatch(conn, 1, "2026-spring-hs", "TestLoader")
-            mock_warn.assert_not_called()
+# TestSeasonYearMismatchWarning removed -- warn_season_year_mismatch()
+# was removed in E-197-03 (no remaining callers after all loaders
+# switched to derive_season_id_for_team).
 
 
 # ---------------------------------------------------------------------------

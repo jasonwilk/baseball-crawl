@@ -38,7 +38,7 @@ Usage::
 
     conn = sqlite3.connect("./data/app.db")
     conn.execute("PRAGMA foreign_keys=ON;")
-    loader = GameLoader(conn, season_id="2025", owned_team_id="abc-team-uuid")
+    loader = GameLoader(conn, owned_team_ref=team_ref)
     result = loader.load_all(Path("data/raw/2025/teams/abc-team-uuid"))
     print(result)
 """
@@ -53,7 +53,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from src.db.teams import ensure_team_row
-from src.gamechanger.loaders import LoadResult, extract_year_from_season_id, warn_season_year_mismatch
+from src.gamechanger.loaders import LoadResult, derive_season_id_for_team, ensure_season_row
 from src.gamechanger.types import TeamRef
 
 logger = logging.getLogger(__name__)
@@ -203,7 +203,6 @@ class GameLoader:
     Args:
         db: Open ``sqlite3.Connection`` with ``PRAGMA foreign_keys=ON`` set.
             The caller owns the connection lifecycle.
-        season_id: Season slug used as FK in all inserts (e.g. ``'2025'``).
         owned_team_ref: ``TeamRef`` for the team that owns the data directory.
             Used to identify which boxscore key belongs to the owned team vs.
             the opponent.  ``gc_uuid`` is used for boxscore key detection;
@@ -213,12 +212,13 @@ class GameLoader:
     def __init__(
         self,
         db: sqlite3.Connection,
-        season_id: str,
         owned_team_ref: TeamRef,
     ) -> None:
         self._db = db
-        self._season_id = season_id
         self._team_ref = owned_team_ref
+        self._season_id, self._season_year = derive_season_id_for_team(
+            db, owned_team_ref.id
+        )
 
     # ------------------------------------------------------------------
     # Public API
@@ -241,7 +241,6 @@ class GameLoader:
         Returns:
             Aggregated ``LoadResult`` across all game files.
         """
-        warn_season_year_mismatch(self._db, self._team_ref.id, self._season_id, "GameLoader")
         summaries_index = self._build_summaries_index(team_dir)
         if summaries_index is None:
             return LoadResult(errors=1)
@@ -251,7 +250,7 @@ class GameLoader:
             logger.info("No games directory at %s; nothing to load.", games_dir)
             return LoadResult()
 
-        self._ensure_season_row(self._season_id)
+        ensure_season_row(self._db, self._season_id)
         opponent_name_lookup = self._build_opponent_name_lookup(team_dir)
 
         total = LoadResult()
@@ -1170,33 +1169,10 @@ class GameLoader:
         Returns:
             The ``teams.id`` INTEGER PK for the row.
         """
-        season_year = extract_year_from_season_id(self._season_id)
         return ensure_team_row(
             self._db,
             gc_uuid=gc_uuid,
             name=opponent_name,
-            season_year=season_year,
+            season_year=self._season_year,
             source="game_loader",
-        )
-
-    def _ensure_season_row(self, season_id: str) -> None:
-        """Ensure a ``seasons`` row exists for ``season_id``.
-
-        Args:
-            season_id: Season slug.
-        """
-        parts = season_id.split("-")
-        year = 0
-        for part in parts:
-            if part.isdigit() and len(part) == 4:
-                year = int(part)
-                break
-
-        self._db.execute(
-            """
-            INSERT INTO seasons (season_id, name, season_type, year)
-            VALUES (?, ?, 'unknown', ?)
-            ON CONFLICT(season_id) DO NOTHING
-            """,
-            (season_id, season_id, year),
         )

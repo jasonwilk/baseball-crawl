@@ -28,7 +28,7 @@ Usage::
     conn = sqlite3.connect("./data/app.db")
     conn.execute("PRAGMA foreign_keys=ON;")
     ref = TeamRef(id=1, gc_uuid="abc-team-uuid")
-    loader = PlaysLoader(conn, season_id="2025-spring-hs", owned_team_ref=ref)
+    loader = PlaysLoader(conn, owned_team_ref=ref)
     result = loader.load_all(Path("data/raw/2025-spring-hs/teams/abc-team-uuid"))
     print(result)
 """
@@ -58,18 +58,15 @@ class PlaysLoader:
     Args:
         db: Open ``sqlite3.Connection`` with ``PRAGMA foreign_keys=ON`` set.
             The caller owns the connection lifecycle.
-        season_id: Season slug used as FK in all inserts (e.g. ``'2025-spring-hs'``).
         owned_team_ref: ``TeamRef`` for the team that owns the data directory.
     """
 
     def __init__(
         self,
         db: sqlite3.Connection,
-        season_id: str,
         owned_team_ref: TeamRef,
     ) -> None:
         self._db = db
-        self._season_id = season_id
         self._team_ref = owned_team_ref
 
     # ------------------------------------------------------------------

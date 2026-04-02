@@ -59,7 +59,10 @@ def db() -> sqlite3.Connection:
 _PUBLIC_ID = "opp-public-id-001"
 _OPP_GC_UUID = "aaaabbbb-cccc-dddd-eeee-ffffffffffff"
 _OWN_GC_UUID = "11112222-3333-4444-5555-666677778888"
-_SEASON_ID = "2025-spring-hs"
+# DB season_id is derived from team metadata (season_year=2025, no program).
+_SEASON_ID = "2025"
+# Crawl-path season_id (used for file directory construction).
+_CRAWL_SEASON_ID = "2025-spring-hs"
 _GAME_ID = "event-game-001"
 _PLAYER_A = "player-aaa-001"
 _PLAYER_B = "player-bbb-002"
@@ -79,11 +82,12 @@ def _seed_team(
     public_id: str | None = None,
     gc_uuid: str | None = None,
     membership_type: str = "tracked",
+    season_year: int = 2025,
 ) -> int:
     cur = conn.execute(
-        "INSERT INTO teams (name, membership_type, public_id, gc_uuid, is_active) "
-        "VALUES (?, ?, ?, ?, 1)",
-        (name, membership_type, public_id, gc_uuid),
+        "INSERT INTO teams (name, membership_type, public_id, gc_uuid, is_active, season_year) "
+        "VALUES (?, ?, ?, ?, 1, ?)",
+        (name, membership_type, public_id, gc_uuid, season_year),
     )
     conn.commit()
     return cur.lastrowid
@@ -702,31 +706,35 @@ def test_multi_game_across_season(
     assert db.execute("SELECT COUNT(*) FROM spray_charts").fetchone()[0] == 2
 
 
-def test_season_id_inferred_from_path(
+def test_season_id_derived_from_team_metadata(
     db: sqlite3.Connection, tmp_path: Path
 ) -> None:
-    """season_id in spray_charts row comes from the directory path."""
-    season = "2024-fall-hs"
+    """season_id in spray_charts row comes from team metadata, not the directory path."""
+    crawl_season = "2024-fall-hs"
+    # Team has season_year=2025 (default from _seed_team), so DB season_id = "2025".
     db.execute(
         "INSERT OR IGNORE INTO seasons (season_id, name, season_type, year) "
-        "VALUES (?, ?, 'unknown', 2024)",
-        (season, season),
+        "VALUES (?, ?, 'default', 2025)",
+        (_SEASON_ID, _SEASON_ID),
     )
     db.commit()
     opp_id = _seed_team(db, public_id=_PUBLIC_ID)
     own_id = _seed_team(db, name="Own")
-    _seed_game(db, _GAME_ID, home_team_id=opp_id, away_team_id=own_id, season_id=season)
+    _seed_game(db, _GAME_ID, home_team_id=opp_id, away_team_id=own_id)
     _seed_player(db, _PLAYER_A)
-    _seed_roster(db, _PLAYER_A, opp_id, season_id=season)
+    _seed_roster(db, _PLAYER_A, opp_id)
 
     payload = _make_spray_json()
-    _write_spray_file(tmp_path, season, _PUBLIC_ID, _GAME_ID, payload)
+    # File written under a DIFFERENT crawl-path season than the DB season_id.
+    _write_spray_file(tmp_path, crawl_season, _PUBLIC_ID, _GAME_ID, payload)
 
     loader = ScoutingSprayChartLoader(db)
-    loader.load_dir(tmp_path / season / "scouting" / _PUBLIC_ID / "spray")
+    loader.load_dir(tmp_path / crawl_season / "scouting" / _PUBLIC_ID / "spray")
 
     row = db.execute("SELECT season_id FROM spray_charts LIMIT 1").fetchone()
-    assert row[0] == season
+    assert row is not None
+    # DB season_id comes from team metadata, not the crawl path.
+    assert row[0] == _SEASON_ID
 
 
 # ---------------------------------------------------------------------------

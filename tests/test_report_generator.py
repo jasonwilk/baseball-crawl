@@ -52,9 +52,17 @@ def db(tmp_path):
 
     # Minimal schema for the tables we touch
     conn.executescript("""
+        CREATE TABLE programs (
+            program_id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            program_type TEXT NOT NULL,
+            org_name TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
         CREATE TABLE teams (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT,
+            program_id TEXT REFERENCES programs(program_id),
             gc_uuid TEXT UNIQUE,
             public_id TEXT UNIQUE,
             season_year INTEGER,
@@ -1006,9 +1014,17 @@ class TestResolveGcUuid:
         conn_template = sqlite3.connect(db_path)
         conn_template.execute("PRAGMA foreign_keys=ON;")
         conn_template.executescript("""
+            CREATE TABLE IF NOT EXISTS programs (
+                program_id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                program_type TEXT NOT NULL,
+                org_name TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
             CREATE TABLE IF NOT EXISTS teams (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT,
+                program_id TEXT REFERENCES programs(program_id),
                 gc_uuid TEXT UNIQUE,
                 public_id TEXT UNIQUE,
                 season_year INTEGER,
@@ -1714,7 +1730,9 @@ class TestQueryBeforeCleanup:
         mock_crawler.scout_team.return_value = CrawlResult(files_written=5)
         mock_loader = MagicMock()
 
-        # Loader creates orphan team + game so queries have data to find
+        # Loader creates orphan team + game so queries have data to find.
+        # The DB season_id is derived from team metadata (season_year=2026,
+        # no program) = "2026".
         def _load_side_effect(scouting_dir, team_id, season_id):
             conn = _fresh_conn()
             cursor = conn.execute(
@@ -1723,9 +1741,13 @@ class TestQueryBeforeCleanup:
             )
             opp_id = cursor.lastrowid
             conn.execute(
+                "INSERT OR IGNORE INTO seasons (season_id, name, season_type, year) "
+                "VALUES ('2026', '2026', 'default', 2026)"
+            )
+            conn.execute(
                 "INSERT INTO games (game_id, season_id, home_team_id, away_team_id, "
                 "home_score, away_score, game_date) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                ("g1", "2026-spring-hs", 1, opp_id, 7, 3, "2026-03-20"),
+                ("g1", "2026", 1, opp_id, 7, 3, "2026-03-20"),
             )
             conn.commit()
             conn.close()

@@ -46,7 +46,12 @@ _MIGRATION_FILE = _PROJECT_ROOT / "migrations" / "001_initial_schema.sql"
 
 @pytest.fixture()
 def db() -> sqlite3.Connection:
-    """In-memory SQLite connection with the schema applied and FK enforcement on."""
+    """In-memory SQLite connection with the schema applied and FK enforcement on.
+
+    Pre-seeds a team row with ``season_year=2025`` so that
+    ``derive_season_id_for_team`` produces the deterministic ``_SEASON_ID``
+    value across all tests.
+    """
     conn = sqlite3.connect(":memory:")
     conn.execute("PRAGMA journal_mode=WAL;")
     conn.execute("PRAGMA foreign_keys=ON;")
@@ -55,6 +60,15 @@ def db() -> sqlite3.Connection:
     conn.executescript(sql)
     conn.execute("ALTER TABLE teams ADD COLUMN season_year INTEGER")
     conn.commit()
+
+    # Pre-seed the default team so derive_season_id_for_team returns "2025"
+    conn.execute(
+        "INSERT INTO teams (gc_uuid, name, membership_type, is_active, season_year) "
+        "VALUES (?, ?, 'member', 1, 2025)",
+        (_TEAM_ID, _TEAM_ID),
+    )
+    conn.commit()
+
     yield conn
     conn.close()
 
@@ -295,10 +309,8 @@ def test_load_file_creates_seasons_row(db: sqlite3.Connection, tmp_path: Path) -
 
 def test_load_file_does_not_duplicate_existing_teams_row(db: sqlite3.Connection, tmp_path: Path) -> None:
     """Existing teams row is not modified or duplicated."""
-    db.execute(
-        "INSERT INTO teams (gc_uuid, name, membership_type, is_active) VALUES (?, 'Lincoln JV', 'member', 1)",
-        (_TEAM_ID,),
-    )
+    # Update fixture-seeded team with enriched name
+    db.execute("UPDATE teams SET name = 'Lincoln JV' WHERE gc_uuid = ?", (_TEAM_ID,))
     db.commit()
     _seed_player(db, _PLAYER_A)
     payload = _make_stats_payload({_PLAYER_A: {"stats": {"offense": _OFFENSE_A}}})
@@ -743,25 +755,36 @@ def test_load_file_missing_optional_batting_fields(db: sqlite3.Connection, tmp_p
     assert row[2] is None  # HR absent -> NULL
 
 
-def test_load_file_infers_team_and_season_from_path(
+def test_load_file_infers_team_and_derives_season(
     db: sqlite3.Connection, tmp_path: Path
 ) -> None:
-    """team_id and season_id are correctly inferred from the file path."""
+    """team_id inferred from path; season_id derived from team metadata."""
     custom_team = "team-varsity-999"
-    custom_season = "2026-spring-hs"
+    # Pre-insert a team with HS program and season_year=2026
+    db.execute(
+        "INSERT OR IGNORE INTO programs (program_id, name, program_type) "
+        "VALUES ('lsb-hs', 'Lincoln Standing Bear HS', 'hs')"
+    )
+    db.execute(
+        "INSERT INTO teams (gc_uuid, name, membership_type, is_active, program_id, season_year) "
+        "VALUES (?, ?, 'member', 1, 'lsb-hs', 2026)",
+        (custom_team, custom_team),
+    )
+    db.commit()
+
     _seed_player(db, _PLAYER_A)
     payload = _make_stats_payload(
         {_PLAYER_A: {"stats": {"offense": _OFFENSE_A}}},
         team_id=custom_team,
     )
-    path = _write_stats(tmp_path, payload, team_id=custom_team, season=custom_season)
+    path = _write_stats(tmp_path, payload, team_id=custom_team, season="2026-spring-hs")
 
     SeasonStatsLoader(db).load_file(path)
 
     custom_team_pk = db.execute("SELECT id FROM teams WHERE gc_uuid = ?", (custom_team,)).fetchone()[0]
     row = db.execute(
         "SELECT player_id FROM player_season_batting WHERE team_id = ? AND season_id = ?",
-        (custom_team_pk, custom_season),
+        (custom_team_pk, "2026-spring-hs"),
     ).fetchone()
     assert row is not None
     assert row[0] == _PLAYER_A
@@ -899,9 +922,7 @@ def test_batting_expansion_upsert_overwrites_completeness(
     _seed_player(db, _PLAYER_A)
     # Manually insert a row with boxscore_only completeness.
     team_pk = db.execute(
-        "INSERT OR IGNORE INTO teams (name, membership_type, gc_uuid, is_active) "
-        "VALUES (?, 'tracked', ?, 0) RETURNING id",
-        (_TEAM_ID, _TEAM_ID),
+        "SELECT id FROM teams WHERE gc_uuid = ?", (_TEAM_ID,)
     ).fetchone()[0]
     db.execute(
         "INSERT OR IGNORE INTO seasons (season_id, name, season_type, year) VALUES (?, ?, 'unknown', 2025)",

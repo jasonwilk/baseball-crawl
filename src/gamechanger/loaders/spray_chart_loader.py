@@ -49,7 +49,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
-from src.gamechanger.loaders import LoadResult
+from src.gamechanger.loaders import LoadResult, derive_season_id_for_team
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +82,16 @@ class SprayChartLoader:
             Aggregated ``LoadResult`` across all game files.
         """
         gc_uuid = spray_dir.parent.name
-        season_id = spray_dir.parent.parent.parent.name
+
+        # Resolve team to derive DB season_id from team metadata (not the path).
+        crawling_team_id = self._resolve_team_id_by_gc_uuid(gc_uuid)
+        if crawling_team_id is None:
+            logger.warning(
+                "Team gc_uuid=%s not found in teams table; skipping spray dir %s.",
+                gc_uuid, spray_dir,
+            )
+            return LoadResult()
+        season_id, _ = derive_season_id_for_team(self._db, crawling_team_id)
 
         combined = LoadResult()
         json_files = sorted(spray_dir.glob("*.json"))

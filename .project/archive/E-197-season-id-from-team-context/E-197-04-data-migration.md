@@ -4,7 +4,7 @@
 [E-197: Derive season_id from Team Context](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, all existing database rows for the Lincoln Rebels 14U team (team_id 126) and any opponents scouted through it will have their season_id corrected from `2026-spring-hs` to `2025-summer-usssa`. A new season row for `2025-summer-usssa` will exist in the `seasons` table. This migration runs at app startup via `apply_migrations.py`.

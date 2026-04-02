@@ -4,7 +4,7 @@
 [E-197: Derive season_id from Team Context](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the scouting pipeline loaders and the member-team spray chart loader will derive season_id from team metadata via `derive_season_id_for_team()` instead of parsing it from filesystem paths or using a hardcoded suffix. The `ScoutingCrawler._derive_season_id()` hardcoded `"spring-hs"` suffix will no longer affect DB season_id values.
