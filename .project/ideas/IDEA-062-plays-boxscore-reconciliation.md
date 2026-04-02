@@ -1,7 +1,9 @@
 # IDEA-062: Plays-vs-Boxscore Reconciliation Engine
 
 ## Status
-`CANDIDATE`
+`PROMOTED`
+
+Promoted to E-198 (2026-04-01). Phase 1 covers pitcher attribution detection and correction (signals 1A-1L, 4A, 4C). Batter validation, lineup signals, and heuristic evolution deferred to Phase 2.
 
 ## Summary
 An exhaustive reconciliation engine that cross-checks plays-derived data (from the plays endpoint) against boxscore aggregates (from the boxscore endpoint), logs structured discrepancies, and enables iterative heuristic evolution to close gaps. The boxscore is the ground truth checksum; plays data provides the granular detail. Where they disagree, the reconciliation engine identifies correctable misattributions (primarily pitcher assignment) and logs ambiguous cases for future heuristic development.
