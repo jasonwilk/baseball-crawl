@@ -949,6 +949,7 @@ class GameLoader:
                  home_score, away_score, status, game_stream_id)
             VALUES (?, ?, ?, ?, ?, ?, ?, 'completed', ?)
             ON CONFLICT(game_id) DO UPDATE SET
+                season_id      = excluded.season_id,
                 game_date      = excluded.game_date,
                 home_team_id   = excluded.home_team_id,
                 away_team_id   = excluded.away_team_id,

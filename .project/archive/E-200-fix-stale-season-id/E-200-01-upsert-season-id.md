@@ -4,7 +4,7 @@
 [E-200: Fix Stale season_id on Pre-Existing Games](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the `_upsert_game` method in `game_loader.py` will include `season_id = excluded.season_id` in its ON CONFLICT DO UPDATE SET clause. This ensures that when a game row is re-upserted with a corrected season_id, the existing row's season_id is updated rather than left stale. A regression test will verify this behavior.

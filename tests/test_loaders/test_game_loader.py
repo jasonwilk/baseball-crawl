@@ -1915,3 +1915,68 @@ def test_usssa_team_produces_correct_season_id(db: sqlite3.Connection, tmp_path:
     assert row[0] == "2025-summer-usssa", (
         f"Expected USSSA team to produce season_id='2025-summer-usssa', got '{row[0]}'"
     )
+
+
+# ---------------------------------------------------------------------------
+# E-200-01: season_id updated on upsert (regression test)
+# ---------------------------------------------------------------------------
+
+
+def test_upsert_game_updates_season_id(db: sqlite3.Connection) -> None:
+    """Regression test: _upsert_game ON CONFLICT must update season_id.
+
+    1. Insert a game with season_id "old-season".
+    2. Upsert the same game_id with season_id "new-season".
+    3. Assert the row's season_id is "new-season".
+    """
+    from src.gamechanger.loaders import ensure_season_row
+    from src.gamechanger.types import TeamRef
+
+    # Seed prerequisite rows
+    pk = _insert_own_team(db)
+    opp_pk = db.execute(
+        "INSERT INTO teams (gc_uuid, name, membership_type, is_active) "
+        "VALUES ('opp-uuid', 'Opponent', 'tracked', 1)",
+    ).lastrowid
+    ensure_season_row(db, "old-season")
+    ensure_season_row(db, "new-season")
+    db.commit()
+
+    game_id = "evt-season-upsert-test"
+    game_stream_id = "stream-season-upsert-test"
+
+    # Step 1: Create loader and insert game with "old-season"
+    loader = GameLoader(db, owned_team_ref=TeamRef(id=pk, gc_uuid=_OWN_TEAM_ID, public_id=_OWN_TEAM_SLUG))
+    loader._season_id = "old-season"
+    loader._upsert_game(
+        game_id=game_id,
+        game_date="2025-05-01",
+        home_team_id=pk,
+        away_team_id=opp_pk,
+        home_score=3,
+        away_score=1,
+        game_stream_id=game_stream_id,
+    )
+    db.commit()
+
+    row = db.execute("SELECT season_id FROM games WHERE game_id = ?", (game_id,)).fetchone()
+    assert row[0] == "old-season"
+
+    # Step 2: Upsert same game with "new-season"
+    loader._season_id = "new-season"
+    loader._upsert_game(
+        game_id=game_id,
+        game_date="2025-05-01",
+        home_team_id=pk,
+        away_team_id=opp_pk,
+        home_score=3,
+        away_score=1,
+        game_stream_id=game_stream_id,
+    )
+    db.commit()
+
+    # Step 3: Verify season_id was updated
+    row = db.execute("SELECT season_id FROM games WHERE game_id = ?", (game_id,)).fetchone()
+    assert row[0] == "new-season", (
+        f"Expected season_id='new-season' after upsert, got '{row[0]}'"
+    )

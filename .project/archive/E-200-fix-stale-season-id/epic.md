@@ -1,7 +1,7 @@
 # E-200: Fix Stale season_id on Pre-Existing Games
 
 ## Status
-`READY`
+`COMPLETED`
 
 ## Overview
 Fix a bug where `_upsert_game` in `game_loader.py` omits `season_id` from its ON CONFLICT UPDATE clause, leaving pre-existing game rows with stale suffixed season_ids (e.g., `"2026-spring-hs"` instead of `"2026"`). This causes season aggregate queries to return zero rows for ~200+ opponent teams, making reports and dashboard scouting show "No data available."
@@ -32,8 +32,8 @@ No expert consultation required -- this is a pure code bug with a well-defined d
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-200-01 | Add season_id to _upsert_game ON CONFLICT clause | TODO | None | - |
-| E-200-02 | Migration 013: correct stale season_ids across all tables | TODO | E-200-01 | - |
+| E-200-01 | Add season_id to _upsert_game ON CONFLICT clause | DONE | None | - |
+| E-200-02 | Migration 013: correct stale season_ids across all tables | DONE | E-200-01 | - |
 
 ## Dispatch Team
 - software-engineer
@@ -101,3 +101,27 @@ Affected teams: all rows in `teams` where `program_id IS NULL`. These are predom
 | **Total (deduplicated)** | **6** | **6** | **0** |
 
 Note: CR findings 1/5 overlapped with PM-1/SE-1 (composite-PK dedup). Total unique findings: 6 accepted + 1 context-layer note (stale migrations.md numbering — not counted, not blocking).
+
+- 2026-04-02: All stories DONE. Epic COMPLETED.
+
+### Implementation Review Scorecard
+| Review Pass | Findings | Accepted | Dismissed |
+|---|---|---|---|
+| Per-story CR — E-200-01 | 0 | 0 | 0 |
+| Per-story CR — E-200-02 | 0 | 0 | 0 |
+| CR integration review | 0 | 0 | 0 |
+| Codex code review | 3 | 3 | 0 |
+| **Total** | **3** | **3** | **0** |
+
+Codex findings: 2 critical scope bugs in migration 013 (games and plays UPDATEs were over-scoped to include member-team games) + 1 missing regression test. All 3 fixed.
+
+### Documentation Assessment
+No documentation impact — bug fix + data migration only. No new features, endpoints, or architecture changes.
+
+### Context-Layer Assessment
+- **T1 (New convention or pattern)**: NO — uses existing migration and upsert patterns.
+- **T2 (Footgun or pitfall discovered)**: NO — the ON CONFLICT omission was specific to this method, not a recurring pattern.
+- **T3 (Domain knowledge codified)**: NO — no new domain concepts.
+- **T4 (Agent workflow improvement)**: NO — no process changes.
+- **T5 (New data flow or pipeline stage)**: NO — corrects existing data, no new pipeline.
+- **T6 (External system behavior documented)**: NO — no new API findings.

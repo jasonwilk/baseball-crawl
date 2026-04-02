@@ -4,7 +4,7 @@
 [E-200: Fix Stale season_id on Pre-Existing Games](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, migration 013 will correct all stale suffixed season_ids (e.g., `"2026-spring-hs"`) to year-only values (e.g., `"2026"`) for teams without a `program_id`. This restores season aggregate joins so that opponent batting, pitching, and spray chart data becomes visible again in reports and dashboards.
