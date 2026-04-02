@@ -15,6 +15,7 @@ import typer
 if TYPE_CHECKING:
     from src.gamechanger.crawlers.scouting import ScoutingCrawler
     from src.gamechanger.loaders.scouting_loader import ScoutingLoader
+    from src.reconciliation.engine import ReconciliationSummary
 
 from src.db.merge import DuplicateTeam
 from src.pipeline import bootstrap as bootstrap_module
@@ -951,6 +952,204 @@ def dedup(
                 typer.echo(f"  - {reason}")
 
     raise SystemExit(0)
+
+
+# ---------------------------------------------------------------------------
+# bb data reconcile
+# ---------------------------------------------------------------------------
+
+
+@app.command()
+def reconcile(
+    game_id: Optional[str] = typer.Option(
+        None,
+        "--game-id",
+        help="Reconcile a single game by game_id.",
+        metavar="GAME_ID",
+    ),
+    execute: bool = typer.Option(
+        False,
+        "--execute",
+        help="Apply pitcher attribution corrections. Default is dry-run detection only.",
+    ),
+    summary_flag: bool = typer.Option(
+        False,
+        "--summary",
+        help="Show aggregate statistics across ALL reconciliation records in the database.",
+    ),
+    db_path: Path = typer.Option(
+        _DEFAULT_DB_PATH,
+        "--db",
+        help="Path to the SQLite database.",
+    ),
+) -> None:
+    """Compare plays-derived stats against boxscore ground truth.
+
+    Default mode is dry-run: detects discrepancies and prints a summary
+    without modifying any data.
+
+    Examples:
+        bb data reconcile                   # dry-run all games
+        bb data reconcile --execute         # apply corrections
+        bb data reconcile --game-id abc123  # single game, verbose
+        bb data reconcile --summary         # aggregate stats from all runs
+    """
+    from src.reconciliation.engine import (
+        get_summary_from_db,
+        reconcile_all,
+        reconcile_game,
+    )
+
+    with closing(sqlite3.connect(str(db_path))) as conn:
+        conn.execute("PRAGMA journal_mode=WAL;")
+        conn.execute("PRAGMA foreign_keys=ON;")
+
+        if summary_flag:
+            db_summary = get_summary_from_db(conn)
+            _print_db_summary(db_summary)
+            raise SystemExit(0)
+
+        if game_id:
+            summary = reconcile_game(conn, game_id, dry_run=not execute)
+            if summary.games_skipped_no_plays:
+                typer.echo(f"Game {game_id}: no plays data found, skipped.")
+                raise SystemExit(0)
+            mode = "correction" if execute else "detection"
+            typer.echo(f"Game {game_id}: {mode} complete.")
+            _print_verbose_summary(summary, execute=execute)
+        else:
+            summary = reconcile_all(conn, dry_run=not execute)
+            _print_summary(summary, execute=execute)
+
+    raise SystemExit(0)
+
+
+def _print_summary(summary: ReconciliationSummary, *, execute: bool = False) -> None:
+    """Print aggregate reconciliation summary."""
+    typer.echo("\nReconciliation Summary")
+    typer.echo(f"  Total games processed: {summary.games_processed}")
+    typer.echo(f"  Games skipped (no plays): {summary.games_skipped_no_plays}")
+
+    if execute:
+        typer.echo(f"  Games corrected: {summary.games_corrected}")
+        typer.echo(f"  Games unchanged: {summary.games_unchanged}")
+        typer.echo(f"  Games with remaining ambiguity: {summary.games_with_remaining_ambiguity}")
+        typer.echo(f"  Total plays reassigned: {summary.total_plays_reassigned}")
+    else:
+        typer.echo(f"  Games with all signals matching: {summary.games_all_match}")
+        typer.echo(f"  Games with correctable pitcher errors: {summary.games_with_correctable}")
+        typer.echo(f"  Games with ambiguous errors: {summary.games_with_ambiguous}")
+
+    if not summary.signal_counts:
+        typer.echo("  No signals to report.")
+        return
+
+    # Separate pitcher vs batter signals
+    pitcher_signals: dict[str, dict[str, int]] = {}
+    batter_signals: dict[str, dict[str, int]] = {}
+    game_signals: dict[str, dict[str, int]] = {}
+
+    for sig, counts in summary.signal_counts.items():
+        if sig.startswith("pitcher_"):
+            pitcher_signals[sig] = counts
+        elif sig.startswith("batter_"):
+            batter_signals[sig] = counts
+        elif sig.startswith("game_"):
+            game_signals[sig] = counts
+
+    # In execute mode, show before/after comparison for pitcher signals
+    if execute and summary.pre_correction_signal_counts:
+        typer.echo("\n  Pitcher Signals (before -> after correction):")
+        for sig in sorted(pitcher_signals):
+            post = pitcher_signals[sig]
+            pre = summary.pre_correction_signal_counts.get(sig, {})
+            post_total = sum(post.values())
+            pre_total = sum(pre.values())
+            pre_match = pre.get("MATCH", 0)
+            post_match = post.get("MATCH", 0) + post.get("CORRECTED", 0)
+            pre_rate = pre_match / pre_total * 100 if pre_total else 0
+            post_rate = post_match / post_total * 100 if post_total else 0
+            typer.echo(
+                f"    {sig}: {pre_match}/{pre_total} ({pre_rate:.1f}%) -> "
+                f"{post_match}/{post_total} ({post_rate:.1f}%)"
+            )
+    else:
+        typer.echo("\n  Pitcher Signals:")
+        for sig in sorted(pitcher_signals):
+            counts = pitcher_signals[sig]
+            total = sum(counts.values())
+            match = counts.get("MATCH", 0)
+            rate = match / total * 100 if total else 0
+            typer.echo(f"    {sig}: {match}/{total} match ({rate:.1f}%)")
+
+    typer.echo("\n  Batter Signals:")
+    for sig in sorted(batter_signals):
+        counts = batter_signals[sig]
+        total = sum(counts.values())
+        match = counts.get("MATCH", 0)
+        rate = match / total * 100 if total else 0
+        typer.echo(f"    {sig}: {match}/{total} match ({rate:.1f}%)")
+
+    typer.echo("\n  Game-Level Signals:")
+    for sig in sorted(game_signals):
+        counts = game_signals[sig]
+        total = sum(counts.values())
+        match = counts.get("MATCH", 0)
+        rate = match / total * 100 if total else 0
+        typer.echo(f"    {sig}: {match}/{total} match ({rate:.1f}%)")
+
+    typer.echo("\n  Status Distribution:")
+    total_all = 0
+    status_totals: dict[str, int] = {}
+    for sig, counts in summary.signal_counts.items():
+        for status, n in counts.items():
+            status_totals[status] = status_totals.get(status, 0) + n
+            total_all += n
+    for status in ("MATCH", "CORRECTABLE", "CORRECTED", "AMBIGUOUS", "UNCORRECTABLE"):
+        n = status_totals.get(status, 0)
+        rate = n / total_all * 100 if total_all else 0
+        typer.echo(f"    {status}: {n} ({rate:.1f}%)")
+
+
+def _print_verbose_summary(
+    summary: ReconciliationSummary, *, execute: bool = False
+) -> None:
+    """Print verbose per-signal output for a single game."""
+    if not summary.signal_counts:
+        typer.echo("  No signals to report.")
+        return
+
+    if execute:
+        typer.echo(f"  Plays reassigned: {summary.total_plays_reassigned}")
+
+    for sig in sorted(summary.signal_counts):
+        counts = summary.signal_counts[sig]
+        total = sum(counts.values())
+        parts = [f"{status}={n}" for status, n in sorted(counts.items())]
+        typer.echo(f"  {sig}: {', '.join(parts)} (total={total})")
+
+
+def _print_db_summary(db_summary: dict) -> None:
+    """Print aggregate stats from all reconciliation records in the DB."""
+    typer.echo("\nReconciliation Database Summary (all runs)")
+    typer.echo(f"  Total records: {db_summary['total_records']}")
+    typer.echo(f"  Total corrected: {db_summary['total_corrected']}")
+
+    for label, key in [
+        ("Pitcher Signals", "pitcher_signals"),
+        ("Batter Signals", "batter_signals"),
+        ("Game-Level Signals", "game_signals"),
+    ]:
+        signals = db_summary[key]
+        if not signals:
+            continue
+        typer.echo(f"\n  {label}:")
+        for sig in sorted(signals):
+            counts = signals[sig]
+            total = sum(counts.values())
+            match = counts.get("MATCH", 0) + counts.get("CORRECTED", 0)
+            rate = match / total * 100 if total else 0
+            typer.echo(f"    {sig}: {match}/{total} match ({rate:.1f}%)")
 
 
 # ---------------------------------------------------------------------------

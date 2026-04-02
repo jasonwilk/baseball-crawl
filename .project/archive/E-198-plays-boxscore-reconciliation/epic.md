@@ -1,7 +1,7 @@
 # E-198: Plays-vs-Boxscore Reconciliation Engine
 
 ## Status
-`READY`
+`COMPLETED`
 
 ## Overview
 Build a reconciliation engine that cross-checks plays-derived aggregates against boxscore ground truth, detects pitcher attribution errors, and corrects them -- raising FPS% accuracy from ~55% to 90%+ at the per-pitcher level. The boxscore endpoint provides definitive per-pitcher and per-batter aggregates; the plays endpoint provides pitch-by-pitch granularity. Where they disagree on pitcher attribution, the boxscore wins and the engine reassigns plays accordingly.
@@ -51,8 +51,8 @@ Promoted from IDEA-062.
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-198-01 | Reconciliation detection engine + schema | TODO | None | - |
-| E-198-02 | Pitcher attribution correction + execute mode | TODO | E-198-01 | - |
+| E-198-01 | Reconciliation detection engine + schema | DONE | None | - |
+| E-198-02 | Pitcher attribution correction + execute mode | DONE | E-198-01 | - |
 
 ## Dispatch Team
 - software-engineer
@@ -213,6 +213,7 @@ Confirmed: `player_game_pitching` already stores BF, pitches, total_strikes, SO,
 ## History
 - 2026-04-01: Created (promoted from IDEA-062). Expert consultation with baseball-coach, data-engineer, and software-engineer completed.
 - 2026-04-02: Set to READY after 3 review iterations (69 findings: 51 accepted, 12 dismissed, 6 duplicate/recurring).
+- 2026-04-02: Set to ACTIVE, dispatch started.
 
 ### Review Scorecard
 | Review Pass | Findings | Accepted | Dismissed |
@@ -229,3 +230,32 @@ Confirmed: `player_game_pitching` already stores BF, pitches, total_strikes, SO,
 | Internal iteration 2 -- SE holistic | 6 | 4 | 2 |
 | Codex iteration 3 | 7 | 6 | 1 |
 | **Total** | **69** | **51** | **12** |
+
+### Dispatch Review Scorecard
+| Review Pass | Findings | Accepted | Dismissed |
+|---|---|---|---|
+| Per-story CR -- E-198-01 | 5 | 5 | 0 |
+| Per-story CR -- E-198-02 | 3 | 3 | 0 |
+| CR integration review | 1 | 1 | 0 |
+| Codex code review | 4 | 3 | 1 |
+| **Total** | **13** | **12** | **1** |
+
+- 2026-04-02: All 2 stories DONE. Epic set to COMPLETED.
+  - E-198-01: Reconciliation detection engine with migration 012, 11 pitcher signals, 5 batter signals, 3 game-level signals, `bb data reconcile` CLI (dry-run default).
+  - E-198-02: BF-boundary pitcher attribution correction algorithm, `--execute` mode, `--summary` aggregate stats, idempotent correction, edge case handling (re-entry, single pitcher, BF mismatch).
+  - Dispatch: 13 review findings (12 accepted, 1 dismissed). All corrections applied.
+
+### Documentation Assessment
+- **T1 (new feature/endpoint)**: YES -- new `bb data reconcile` CLI command with `--execute`, `--summary`, `--game-id` flags. New `src/reconciliation/` package.
+- **T4 (schema changes)**: YES -- migration 012 adds `reconciliation_discrepancies` table.
+- **T2, T3, T5**: No documentation impact (no architecture/deployment changes, no agent changes, no user-facing interaction changes).
+- **Action**: docs-writer dispatch warranted for admin docs (`bb` CLI reference update).
+
+### Context-Layer Assessment
+- **T1 (New convention)**: YES -- reconciliation as a post-load quality pass, separate `src/reconciliation/` package outside `src/gamechanger/`. New CLI subcommand `bb data reconcile`.
+- **T2 (Architectural decision)**: YES -- `src/reconciliation/` package location (reads from DB, not raw API), `reconcile_game(conn, game_id, dry_run=True)` API, detection-then-correction two-phase pattern.
+- **T3 (Footgun discovered)**: NO -- dry_run=True default is safe; no unexpected pitfalls discovered.
+- **T4 (Agent behavior change)**: NO -- no agent definition or skill changes.
+- **T5 (Domain knowledge)**: YES -- pitcher attribution accuracy thresholds (90% FPS%, 95% pitch count), BF boundary correction algorithm, boxscore pitcher order extraction from cached JSON.
+- **T6 (New CLI command)**: YES -- `bb data reconcile` with `--execute`, `--summary`, `--game-id`.
+- **Action**: claude-architect dispatch warranted for T1, T2, T5, T6 (codify reconciliation architecture, CLI command, accuracy thresholds in CLAUDE.md).

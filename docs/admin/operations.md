@@ -513,6 +513,77 @@ The script compares plays-derived FPS per pitcher and QAB per batter against `pl
 
 **Tolerance**: Players whose derived count differs from GC's by more than 5% are flagged `MISMATCH` and receive per-game diagnostic detail. Players within 5% are `OK`. Exit code is 0 on success regardless of mismatch count; 1 only on database connectivity errors.
 
+### Reconciliation Pipeline (`bb data reconcile`)
+
+`bb data reconcile` compares plays-derived stat aggregates against boxscore ground truth and (optionally) corrects pitcher attribution errors. It is an operator diagnostic and repair tool -- not part of the regular sync workflow.
+
+**Default mode is dry-run** (detection only): reads plays and boxscore data from the database, computes discrepancies, writes results to `reconciliation_discrepancies`, and prints a summary. No stat data is modified.
+
+**Commands**:
+
+```bash
+# Detect discrepancies across all completed games (dry-run)
+bb data reconcile
+
+# Apply pitcher attribution corrections
+bb data reconcile --execute
+
+# Detect (or correct) a single game -- prints verbose per-signal breakdown
+bb data reconcile --game-id abc123
+bb data reconcile --game-id abc123 --execute
+
+# Show aggregate stats from all reconciliation records stored in the database
+bb data reconcile --summary
+```
+
+**What the engine does**: For each completed game that has plays data loaded, it aggregates plays-derived stats (hits, strikeouts, walks, HBP, at-bats, pitch counts, total strikes) per pitcher and per batter, then compares them against the corresponding boxscore values. Each comparison is classified:
+
+| Status | Meaning |
+|--------|---------|
+| `MATCH` | Plays-derived value equals boxscore value |
+| `CORRECTABLE` | Mismatch caused by an identifiable pitcher attribution error -- can be fixed by reassigning `plays.pitcher_id` |
+| `CORRECTED` | Was `CORRECTABLE`; correction was applied in execute mode |
+| `AMBIGUOUS` | Mismatch exists but the engine cannot determine the correct pitcher with confidence |
+| `UNCORRECTABLE` | Mismatch exists and no correction path is available |
+
+**Detection mode output** (dry-run, all games):
+
+```
+Reconciliation Summary
+  Total games processed: N
+  Games skipped (no plays): N
+  Games with all signals matching: N
+  Games with correctable pitcher errors: N
+  Games with ambiguous errors: N
+
+  Pitcher Signals:
+    pitcher_hits: M/N match (X.X%)
+    ...
+  Batter Signals:
+    batter_strikeouts: M/N match (X.X%)
+    ...
+  Game-Level Signals:
+    game_total_runs: M/N match (X.X%)
+    ...
+
+  Status Distribution:
+    MATCH: N (X.X%)
+    CORRECTABLE: N (X.X%)
+    ...
+```
+
+**Execute mode output** (all games):
+
+Shows corrected/unchanged/remaining-ambiguity counts and total plays reassigned, plus a before → after comparison for each pitcher signal showing match rates pre- and post-correction.
+
+**Single-game output** (`--game-id`): Prints one line per signal showing status breakdown and total count. Verbose enough for per-game diagnosis.
+
+**`--summary` flag**: Reads aggregate stats from all `reconciliation_discrepancies` rows in the database (across all runs). Useful for tracking correction effectiveness over time. Does not re-run detection.
+
+**Dependency**: Requires both boxscore data (from the main crawl/load pipeline) and plays data (from `bb data crawl --crawler plays` + `bb data load --loader plays`) to be loaded for a game. Games with no plays data are skipped and counted in "Games skipped (no plays)".
+
+**Idempotency**: Each run is identified by a `run_id` UUID. Results are upserted into `reconciliation_discrepancies` using the UNIQUE constraint on `(run_id, game_id, team_id, player_id, signal_name)`. Re-running on the same games produces a new `run_id` and new rows.
+
 ### Migration 009: Plays Schema
 
 Migration `migrations/009_plays_play_events.sql` adds two tables and four indexes to support play-by-play data ingestion.
@@ -566,6 +637,40 @@ UNIQUE constraint on `(play_id, event_order)`.
 | `idx_plays_fps` (partial) | `plays(pitcher_id, is_first_pitch_strike)` WHERE `outcome NOT IN ('Hit By Pitch', 'Intentional Walk')` | Efficient FPS% queries; excludes HBP and IBB from the denominator per FPS% definition |
 
 The migration is applied automatically on container startup. No backfill was needed -- both tables are populated solely by the plays pipeline.
+
+### Migration 012: Reconciliation Discrepancies Schema
+
+Migration `migrations/012_reconciliation_discrepancies.sql` adds the `reconciliation_discrepancies` table and three indexes to support the plays-vs-boxscore reconciliation engine.
+
+**Table: `reconciliation_discrepancies`** (one row per signal per player per team per run)
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `id` | `INTEGER PK` | Auto-increment internal key |
+| `game_id` | `TEXT` | FK to `games(game_id)` |
+| `run_id` | `TEXT` | UUID assigned to each reconciliation run. Groups all rows produced by one `bb data reconcile` invocation. |
+| `team_id` | `INTEGER` | FK to `teams(id)` |
+| `player_id` | `TEXT` | Player identifier. Uses `__game__` sentinel string for game-level signals (not player-scoped). |
+| `signal_name` | `TEXT` | Name of the comparison (e.g., `pitcher_hits`, `batter_strikeouts`, `game_total_runs`) |
+| `category` | `TEXT` | Signal category (`pitcher`, `batter`, or `game`) |
+| `boxscore_value` | `INTEGER` | Boxscore ground-truth value; nullable if absent |
+| `plays_value` | `INTEGER` | Plays-derived aggregate value; nullable if absent |
+| `delta` | `INTEGER` | `plays_value - boxscore_value`; nullable when either source is absent |
+| `status` | `TEXT` | One of `MATCH`, `CORRECTABLE`, `CORRECTED`, `AMBIGUOUS`, `UNCORRECTABLE` |
+| `correction_detail` | `TEXT` | Human-readable description of what was corrected or why correction failed; nullable |
+| `created_at` | `TEXT` | UTC timestamp of the run (`datetime('now')`) |
+
+UNIQUE constraint on `(run_id, game_id, team_id, player_id, signal_name)`.
+
+**Indexes added**:
+
+| Index | Column | Notes |
+|-------|--------|-------|
+| `idx_recon_game_id` | `game_id` | Per-game discrepancy lookups |
+| `idx_recon_run_id` | `run_id` | Per-run result retrieval (used by `--summary`) |
+| `idx_recon_status` | `status` | Status-filtered queries (e.g., all CORRECTABLE rows) |
+
+The migration is applied automatically on container startup. The table is populated solely by `bb data reconcile`.
 
 ### Migration 006: Spray Chart Schema Additions
 
@@ -911,4 +1016,4 @@ For the expected data volume (~30 games x 4 teams x a few seasons), the database
 
 ---
 
-*Last updated: 2026-04-01 | Source: E-195 (plays pipeline, migration 009, validate_plays_stats.py), E-173 (resolution write-through, auto-scout after linking, unified Find on GC resolve page, dashboard sort by next game date, terminology cleanup, bb data repair-opponents), E-167 (bb data dedup CLI, GC search-powered opponent resolution, skip/unhide workflow), E-163 (scouting spray pipeline, updated thresholds, bb data scout 4-step flow), E-158 (spray chart pipeline, migration 006, chart routes), E-156 (bb data scout --force flag), E-155 (duplicate team detection and merge UI), E-143 (programs, user roles, team delete, opponent mapping UX, crawl trigger UI), E-120-06 (bare UUID input documented), E-055 (unified CLI), E-115-01 (E-100 team management model), E-028-03 (original)*
+*Last updated: 2026-04-02 | Source: E-198 (bb data reconcile, migration 012), E-195 (plays pipeline, migration 009, validate_plays_stats.py), E-173 (resolution write-through, auto-scout after linking, unified Find on GC resolve page, dashboard sort by next game date, terminology cleanup, bb data repair-opponents), E-167 (bb data dedup CLI, GC search-powered opponent resolution, skip/unhide workflow), E-163 (scouting spray pipeline, updated thresholds, bb data scout 4-step flow), E-158 (spray chart pipeline, migration 006, chart routes), E-156 (bb data scout --force flag), E-155 (duplicate team detection and merge UI), E-143 (programs, user roles, team delete, opponent mapping UX, crawl trigger UI), E-120-06 (bare UUID input documented), E-055 (unified CLI), E-115-01 (E-100 team management model), E-028-03 (original)*
