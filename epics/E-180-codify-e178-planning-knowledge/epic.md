@@ -4,7 +4,7 @@
 `READY`
 
 ## Overview
-Capture the design principles, terminology conventions, and process lessons generated during E-178's planning session into the appropriate context-layer locations (agent memory). This knowledge was produced by expert consultations but currently exists only in the E-178 epic file and conversation history.
+Capture the design principles and terminology conventions generated during E-178's planning session into UXD agent memory. This knowledge was produced by expert consultations but currently exists only in the E-178 epic file and conversation history.
 
 ## Background & Context
 
@@ -36,7 +36,6 @@ No additional expert consultation required — CA and DW covered the relevant do
 - UXD agent memory captures the design principles (consequence-oriented labels, question-as-heading, unified verbs, coach modes) as a reusable reference for future UI design work
 - UXD agent memory reflects post-E-178 terminology decisions, superseding stale E-088 conventions
 - UXD agent memory includes a pointer to the reports page as a reference implementation for auto-refresh and error tooltips
-- PM agent memory captures the "complete audit first" lesson for future epic scoping
 
 ## Non-Goals
 - Updating CLAUDE.md (CA assessed: describes architecture, not UI copy — no changes needed)
@@ -48,14 +47,12 @@ No additional expert consultation required — CA and DW covered the relevant do
 - UXD agent memory contains a topic file for design principles that names all four principles and is linked from MEMORY.md
 - UXD agent memory's "Coach-Friendly Language" section reflects E-178 terminology (not E-088 terminology)
 - UXD agent memory includes a reference implementation entry for the reports page
-- PM agent memory contains a feedback-type memory file capturing the "complete audit first" lesson and is linked from MEMORY.md
 - No stale E-088 terminology remains in UXD MEMORY.md that contradicts E-178 decisions
 
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
 | E-180-01 | UXD agent memory — design principles, terminology refresh, and reference implementations | TODO | None | - |
-| E-180-02 | PM agent memory — "complete audit first" scoping lesson | TODO | None | - |
 
 ## Dispatch Team
 - claude-architect
@@ -101,14 +98,7 @@ Update the section to reflect the current terminology, organized as "Current con
 **C. Reference implementation pointer**
 Add a memory entry noting that `src/api/templates/admin/reports.html` demonstrates the auto-refresh (meta tag) and error tooltip patterns. Future UX work requiring similar patterns should reference this page.
 
-### TN-2: PM Memory Update (Story 02)
-
-Create a feedback-type memory file in `.claude/agent-memory/product-manager/` capturing:
-- **Rule**: When the user says "front to back", "comprehensive", or "fix everything", audit the entire surface FIRST, then write the spec from the complete inventory.
-- **Why**: E-173 scoped a "fix everything" epic from a partial list and missed 25+ items. E-178 initially repeated the same mistake before UXD's comprehensive audit caught the gap.
-- **How to apply**: Before writing stories for any "fix all X" or "comprehensive cleanup" epic, require a complete inventory/audit step. The audit output becomes the spec's source of truth.
-
-### TN-3: Documentation Note
+### TN-2: Documentation Note
 
 DW assessed that `docs/admin/operations.md` and `docs/coaching/scouting-reports.md` will need targeted label updates after E-178 implementation ships. These updates are NOT in scope for this epic — they belong to E-178's normal closure documentation assessment per `.claude/rules/documentation.md`. This note exists so the PM remembers to flag it during E-178 closure.
 
@@ -119,6 +109,7 @@ None.
 - 2026-03-29: Created. CA and DW consultations completed. CA: all knowledge belongs in agent memory, no CLAUDE.md or rules changes needed. DW: doc updates belong to E-178 closure, not this epic.
 - 2026-03-29: Codex spec review iteration 1. 3 findings, all accepted: (1) wrong template path for reports reference implementation, (2) "Scoresheet only" assessment not testable — settled as retained term, (3) TN-1B terminology mapping incomplete — expanded to full 11-item table plus 4 retained terms.
 - 2026-03-29: Epic set to READY.
+- 2026-04-03: Refinement — dropped E-180-02 (PM "complete audit first" lesson). The lesson already exists in main session memory at `/home/vscode/.claude/projects/-workspaces-baseball-crawl/memory/feedback_complete_audit_first.md` with the same E-173/E-178 context. Story file removed. Epic scope reduced to single story (E-180-01 only). TN-2 removed, TN-3 renumbered to TN-2. Status remains READY.
 
 ### Review Scorecard
 | Review Pass | Findings | Accepted | Dismissed |
