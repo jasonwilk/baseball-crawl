@@ -1,4 +1,4 @@
-"""Tests for dashboard pitching availability columns (E-196-04).
+"""Tests for dashboard pitching availability columns (E-196-04, E-210-01).
 
 Tests the enrichment function, display formatting, and template rendering.
 """
@@ -47,13 +47,14 @@ class TestEnrichDashboardFormat:
                 "last_outing_days_ago": 2,
                 "pitches_7d": 85,
                 "span_days_7d": 3,
+                "appearances_7d": 2,
             }
         }
         _enrich_pitchers_with_workload(pitchers, workload)
 
         assert pitchers[0]["rest_display"] == "2d"
-        assert pitchers[0]["p7d_display"] == "85/3d"
-        assert pitchers[0]["workload_subline"] == "Last: 2d ago \u00b7 85/3d"
+        assert pitchers[0]["p7d_display"] == "85p (2g)"
+        assert pitchers[0]["workload_subline"] == "Last: 2d ago \u00b7 85p (2g)"
 
     def test_pitcher_outing_today(self) -> None:
         pitchers = [{"player_id": "p1", "name": "Ace"}]
@@ -63,13 +64,14 @@ class TestEnrichDashboardFormat:
                 "last_outing_days_ago": 0,
                 "pitches_7d": 90,
                 "span_days_7d": 1,
+                "appearances_7d": 1,
             }
         }
         _enrich_pitchers_with_workload(pitchers, workload)
 
         assert pitchers[0]["rest_display"] == "Today"
-        assert pitchers[0]["p7d_display"] == "90/1d"
-        assert pitchers[0]["workload_subline"] == "Last: Today \u00b7 90/1d"
+        assert pitchers[0]["p7d_display"] == "90p (1g)"
+        assert pitchers[0]["workload_subline"] == "Last: Today \u00b7 90p (1g)"
 
     def test_pitcher_no_appearances(self) -> None:
         """Pitcher not in workload dict at all."""
@@ -80,8 +82,24 @@ class TestEnrichDashboardFormat:
         assert pitchers[0]["p7d_display"] == "\u2014"
         assert pitchers[0]["workload_subline"] == "No recent outings"
 
+    def test_zero_pitches_recorded_shows_0p(self) -> None:
+        """AC-4: pitches_7d=0 with appearances shows '0p (1g)', not em-dash."""
+        pitchers = [{"player_id": "p1", "name": "Ace"}]
+        workload = {
+            "p1": {
+                "last_outing_date": "2025-04-25",
+                "last_outing_days_ago": 1,
+                "pitches_7d": 0,
+                "span_days_7d": 1,
+                "appearances_7d": 1,
+            }
+        }
+        _enrich_pitchers_with_workload(pitchers, workload)
+
+        assert pitchers[0]["p7d_display"] == "0p (1g)"
+
     def test_pitcher_appearances_outside_7d(self) -> None:
-        """Has appearances but none in 7d window: pitches_7d=0, span=None."""
+        """Has appearances but none in 7d window: pitches_7d=0, appearances_7d=None."""
         pitchers = [{"player_id": "p1", "name": "Ace"}]
         workload = {
             "p1": {
@@ -89,6 +107,7 @@ class TestEnrichDashboardFormat:
                 "last_outing_days_ago": 16,
                 "pitches_7d": 0,
                 "span_days_7d": None,
+                "appearances_7d": None,
             }
         }
         _enrich_pitchers_with_workload(pitchers, workload)
@@ -98,7 +117,7 @@ class TestEnrichDashboardFormat:
         assert pitchers[0]["workload_subline"] == "Last: 16d ago \u00b7 \u2014"
 
     def test_null_pitch_counts_shows_question_mark(self) -> None:
-        """All pitch counts NULL in 7d window: pitches_7d=None, span has value."""
+        """All pitch counts NULL in 7d window: pitches_7d=None, appearances has value."""
         pitchers = [{"player_id": "p1", "name": "Ace"}]
         workload = {
             "p1": {
@@ -106,11 +125,12 @@ class TestEnrichDashboardFormat:
                 "last_outing_days_ago": 1,
                 "pitches_7d": None,
                 "span_days_7d": 2,
+                "appearances_7d": 2,
             }
         }
         _enrich_pitchers_with_workload(pitchers, workload)
 
-        assert pitchers[0]["p7d_display"] == "?/2d"
+        assert pitchers[0]["p7d_display"] == "?p (2g)"
 
     def test_multiple_pitchers_enriched(self) -> None:
         pitchers = [
@@ -123,6 +143,7 @@ class TestEnrichDashboardFormat:
                 "last_outing_days_ago": 2,
                 "pitches_7d": 80,
                 "span_days_7d": 1,
+                "appearances_7d": 1,
             }
         }
         _enrich_pitchers_with_workload(pitchers, workload)
@@ -149,13 +170,14 @@ class TestEnrichPrintFormat:
                 "last_outing_days_ago": 2,
                 "pitches_7d": 85,
                 "span_days_7d": 3,
+                "appearances_7d": 2,
             }
         }
         _enrich_pitchers_with_workload(pitchers, workload, use_formatted_date=True)
 
         assert pitchers[0]["rest_display"] == "Apr 24"
         # p7d is same format on all surfaces
-        assert pitchers[0]["p7d_display"] == "85/3d"
+        assert pitchers[0]["p7d_display"] == "85p (2g)"
 
     def test_print_no_appearances(self) -> None:
         pitchers = [{"player_id": "p1", "name": "Ace"}]
@@ -173,6 +195,7 @@ class TestEnrichPrintFormat:
                 "last_outing_days_ago": None,
                 "pitches_7d": 0,
                 "span_days_7d": None,
+                "appearances_7d": None,
             }
         }
         _enrich_pitchers_with_workload(pitchers, workload, use_formatted_date=True)
@@ -221,8 +244,8 @@ class TestTemplateRendering:
             "avg_pitches": "60",
             "strike_pct": "66.7%",
             "rest_display": "Apr 24",
-            "p7d_display": "85/3d",
-            "workload_subline": "Last: Apr 24 \u00b7 85/3d",
+            "p7d_display": "85p (2g)",
+            "workload_subline": "Last: Apr 24 \u00b7 85p (2g)",
             "_heat": {"era": 0, "k9": 0, "whip": 0, "thr": 0},
             "_thr_score": 0.0,
             "_small_sample": False,
@@ -251,14 +274,14 @@ class TestTemplateRendering:
         html = self._render_print(jinja_env, [pitcher])
 
         assert ">Last<" in html
-        assert ">P (7d)<" in html
+        assert ">Pitches (7d)<" in html
 
     def test_workload_values_rendered_in_print(self, jinja_env: Environment) -> None:
         pitcher = self._make_pitcher()
         html = self._render_print(jinja_env, [pitcher])
 
         assert "Apr 24" in html
-        assert "85/3d" in html
+        assert "85p (2g)" in html
 
     def test_em_dash_in_print_when_no_workload(self, jinja_env: Environment) -> None:
         pitcher = self._make_pitcher()

@@ -1,6 +1,6 @@
 """Tests for the pitching workload query function.
 
-Covers AC-1 through AC-6 of E-196-03.
+Covers AC-1 through AC-6 of E-196-03 and AC-6 of E-210-01.
 """
 
 from __future__ import annotations
@@ -149,6 +149,7 @@ class TestBasicWorkload:
         assert "last_outing_days_ago" in data
         assert "pitches_7d" in data
         assert "span_days_7d" in data
+        assert "appearances_7d" in data
 
     def test_last_outing_date_is_most_recent(self, db: sqlite3.Connection) -> None:
         _insert_game(db, "g1", "2025-04-20")
@@ -189,6 +190,7 @@ class TestPitches7dZero:
 
         assert result["p3"]["pitches_7d"] == 0
         assert result["p3"]["span_days_7d"] is None
+        assert result["p3"]["appearances_7d"] is None
         assert result["p3"]["last_outing_date"] == "2025-04-11"
         assert result["p3"]["last_outing_days_ago"] == 15
 
@@ -244,6 +246,7 @@ class TestPitches7dNull:
         assert result["p4"]["pitches_7d"] is None
         # span_days_7d should still be computed (appearances exist)
         assert result["p4"]["span_days_7d"] == 2
+        assert result["p4"]["appearances_7d"] == 2
 
     def test_mixed_null_and_non_null_pitches(self, db: sqlite3.Connection) -> None:
         """Mixed NULL and non-NULL: pitches_7d = sum of non-NULL values."""
@@ -278,6 +281,7 @@ class TestMultipleAppearances:
         assert result["p1"]["pitches_7d"] == 95
         # span: Apr 22 to Apr 26 = 5 days
         assert result["p1"]["span_days_7d"] == 5
+        assert result["p1"]["appearances_7d"] == 3
 
     def test_span_days_single_appearance(self, db: sqlite3.Connection) -> None:
         _insert_game(db, "g1", "2025-04-25")
@@ -286,6 +290,7 @@ class TestMultipleAppearances:
         result = get_pitching_workload(1, SEASON_ID, REFERENCE_DATE, db=db)
 
         assert result["p2"]["span_days_7d"] == 1
+        assert result["p2"]["appearances_7d"] == 1
 
     def test_7d_window_boundary_inclusive(self, db: sqlite3.Connection) -> None:
         """Game exactly 6 days before reference date is included (7-day window)."""
@@ -297,6 +302,7 @@ class TestMultipleAppearances:
         result = get_pitching_workload(1, SEASON_ID, REFERENCE_DATE, db=db)
 
         assert result["p1"]["pitches_7d"] == 70
+        assert result["p1"]["appearances_7d"] == 1
 
     def test_7d_window_excludes_day_before_boundary(self, db: sqlite3.Connection) -> None:
         """Game 7 days before reference date is excluded (outside 7-day window)."""
@@ -306,6 +312,7 @@ class TestMultipleAppearances:
         result = get_pitching_workload(1, SEASON_ID, REFERENCE_DATE, db=db)
 
         assert result["p1"]["pitches_7d"] == 0
+        assert result["p1"]["appearances_7d"] is None
 
 
 # ---------------------------------------------------------------------------

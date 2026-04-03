@@ -1,7 +1,7 @@
-"""Tests for standalone report pitching availability columns (E-196-05).
+"""Tests for standalone report pitching availability columns (E-196-05, E-210-01).
 
 Tests the renderer's workload enrichment and template output for
-Last/P(7d) columns, CSS classes, data attributes, JS snippet, and
+Last/Pitches(7d) columns, CSS classes, data attributes, JS snippet, and
 key-player workload sub-line.
 """
 
@@ -43,13 +43,14 @@ class TestEnrichPitchersWorkload:
                 "last_outing_days_ago": 2,
                 "pitches_7d": 85,
                 "span_days_7d": 3,
+                "appearances_7d": 2,
             }
         }
         _enrich_pitchers_workload(pitching, workload)
 
         assert pitching[0]["_rest_date"] == "2025-04-24"
         assert pitching[0]["_rest_display"] == "Apr 24"
-        assert pitching[0]["_p7d_display"] == "85/3d"
+        assert pitching[0]["_p7d_display"] == "85p (2g)"
         assert "Last: Apr 24" in pitching[0]["_workload_subline"]
 
     def test_pitcher_no_workload(self) -> None:
@@ -69,11 +70,28 @@ class TestEnrichPitchersWorkload:
                 "last_outing_days_ago": 1,
                 "pitches_7d": None,
                 "span_days_7d": 2,
+                "appearances_7d": 2,
             }
         }
         _enrich_pitchers_workload(pitching, workload)
 
-        assert pitching[0]["_p7d_display"] == "?/2d"
+        assert pitching[0]["_p7d_display"] == "?p (2g)"
+
+    def test_zero_pitches_recorded_shows_0p(self) -> None:
+        """AC-4: pitches_7d=0 with appearances shows '0p (1g)', not em-dash."""
+        pitching = [{"player_id": "p1", "name": "Ace"}]
+        workload = {
+            "p1": {
+                "last_outing_date": "2025-04-25",
+                "last_outing_days_ago": 1,
+                "pitches_7d": 0,
+                "span_days_7d": 1,
+                "appearances_7d": 1,
+            }
+        }
+        _enrich_pitchers_workload(pitching, workload)
+
+        assert pitching[0]["_p7d_display"] == "0p (1g)"
 
     def test_no_7d_appearances(self) -> None:
         pitching = [{"player_id": "p1", "name": "Ace"}]
@@ -83,6 +101,7 @@ class TestEnrichPitchersWorkload:
                 "last_outing_days_ago": 16,
                 "pitches_7d": 0,
                 "span_days_7d": None,
+                "appearances_7d": None,
             }
         }
         _enrich_pitchers_workload(pitching, workload)
@@ -156,6 +175,7 @@ class TestReportHTMLOutput:
                 "last_outing_days_ago": 2,
                 "pitches_7d": 85,
                 "span_days_7d": 3,
+                "appearances_7d": 2,
             }
         }
         html = render_report(_minimal_report_data([pitcher], workload))
@@ -170,6 +190,7 @@ class TestReportHTMLOutput:
                 "last_outing_days_ago": 2,
                 "pitches_7d": 85,
                 "span_days_7d": 3,
+                "appearances_7d": 2,
             }
         }
         html = render_report(_minimal_report_data([pitcher], workload))
@@ -185,12 +206,13 @@ class TestReportHTMLOutput:
                 "last_outing_days_ago": 2,
                 "pitches_7d": 85,
                 "span_days_7d": 3,
+                "appearances_7d": 2,
             }
         }
         html = render_report(_minimal_report_data([pitcher], workload))
 
-        assert "P (7d)" in html
-        assert "85/3d" in html
+        assert "Pitches (7d)" in html
+        assert "85p (2g)" in html
 
     def test_pitching_annotation_class(self) -> None:
         pitcher = self._make_pitcher()
@@ -236,13 +258,14 @@ class TestReportHTMLOutput:
                 "last_outing_days_ago": 2,
                 "pitches_7d": 85,
                 "span_days_7d": 3,
+                "appearances_7d": 2,
             }
         }
         html = render_report(_minimal_report_data([pitcher], workload))
 
         # Key player callout should have a last-outing-cell with data-date
         assert "key-player-stats last-outing-cell" in html
-        assert "85/3d" in html
+        assert "85p (2g)" in html
 
     def test_graceful_fallback_no_js(self) -> None:
         """AC-6: Without JS, formatted dates and 'Last'/'Generated' headers remain."""
@@ -253,6 +276,7 @@ class TestReportHTMLOutput:
                 "last_outing_days_ago": 2,
                 "pitches_7d": 85,
                 "span_days_7d": 3,
+                "appearances_7d": 2,
             }
         }
         html = render_report(_minimal_report_data([pitcher], workload))

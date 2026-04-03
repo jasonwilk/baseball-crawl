@@ -513,15 +513,15 @@ def _enrich_pitchers_workload(
             pitcher["_rest_date"] = ""
             pitcher["_rest_display"] = "\u2014"
 
-        # P(7d) display
+        # P(7d) display -- branch on appearances_7d first (see E-210 TN)
+        appearances = w["appearances_7d"]
         pitches_7d = w["pitches_7d"]
-        span = w["span_days_7d"]
-        if pitches_7d is None and span is not None:
-            pitcher["_p7d_display"] = f"?/{span}d"
-        elif pitches_7d == 0 or span is None:
+        if appearances is None:
             pitcher["_p7d_display"] = "\u2014"
+        elif pitches_7d is None:
+            pitcher["_p7d_display"] = f"?p ({appearances}g)"
         else:
-            pitcher["_p7d_display"] = f"{pitches_7d}/{span}d"
+            pitcher["_p7d_display"] = f"{pitches_7d}p ({appearances}g)"
 
         # Workload sub-line for key-player callout
         if days_ago is None:

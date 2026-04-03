@@ -239,7 +239,8 @@ def get_pitching_workload(
     Returns:
         Dict keyed by ``player_id`` with values containing:
         ``last_outing_date``, ``last_outing_days_ago``, ``pitches_7d``,
-        ``span_days_7d``.  Returns empty dict on database error.
+        ``span_days_7d``, ``appearances_7d``.  Returns empty dict on
+        database error.
     """
     if reference_date is None:
         reference_date = datetime.date.today().isoformat()
@@ -287,7 +288,8 @@ def get_pitching_workload(
                 WHEN sd.non_null_pitch_count = 0 THEN NULL
                 ELSE sd.raw_sum
             END AS pitches_7d,
-            sd.span_days_7d
+            sd.span_days_7d,
+            sd.appearances_7d
         FROM last_outing lo
         LEFT JOIN seven_day sd ON sd.player_id = lo.player_id
     """
@@ -309,6 +311,7 @@ def get_pitching_workload(
                     "last_outing_days_ago": row["last_outing_days_ago"],
                     "pitches_7d": row["pitches_7d"],
                     "span_days_7d": row["span_days_7d"],
+                    "appearances_7d": row["appearances_7d"],
                 }
             return result
         finally:
