@@ -1,7 +1,7 @@
 # E-204: Starter vs. Relief Appearance Tracking
 
 ## Status
-`READY`
+`COMPLETED`
 <!-- Lifecycle: DRAFT -> READY -> ACTIVE -> COMPLETED (or BLOCKED / ABANDONED) -->
 
 ## Overview
@@ -37,9 +37,9 @@ Coach consultation confirmed that GS is the single most actionable pitching stat
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-204-01 | Schema + Loader Forward-Fill | TODO | None | - |
-| E-204-02 | Backfill Existing Rows | TODO | E-204-01 | - |
-| E-204-03 | GS/GR Display + Appearance-Order Sorting | TODO | E-204-01 | - |
+| E-204-01 | Schema + Loader Forward-Fill | DONE | None | - |
+| E-204-02 | Backfill Existing Rows | DONE | E-204-01 | - |
+| E-204-03 | GS/GR Display + Appearance-Order Sorting | DONE | E-204-01 | - |
 
 ## Dispatch Team
 - software-engineer
@@ -107,8 +107,9 @@ Step 3 is necessary because `player_season_pitching.gs` for tracked teams is com
 ## History
 - 2026-04-03: Created. Expert consultation: baseball-coach (coaching priorities), data-engineer (schema + backfill), software-engineer (loader + display surfaces). Display format refined through user iteration: GS-only -> GS/GMR/GC -> GS/GR. Coach validated GS/GR format and placement.
 - 2026-04-03: Set to READY after review and refinement.
+- 2026-04-03: All 3 stories completed. Migration 015 adds `appearance_order INTEGER` to `player_game_pitching`. Game loader populates it for all new loads (E-204-01). Backfill CLI command `bb data backfill-appearance-order` updates historical rows from cached boxscore JSON (E-204-02). GS/GR column on all 5 pitching season surfaces (dashboard team pitching, opponent detail, opponent print, standalone report) with delivery parity. Game boxscore sorted by appearance order. Scouting aggregation computes GS from `appearance_order = 1` for tracked teams (E-204-03).
 
-### Review Scorecard
+### Review Scorecard (Spec)
 | Review Pass | Findings | Accepted | Dismissed |
 |---|---|---|---|
 | Internal iteration 1 — CR spec audit | 8 | 7 | 1 |
@@ -120,3 +121,13 @@ Step 3 is necessary because `player_season_pitching.gs` for tracked teams is com
 | **Total (deduplicated)** | **16** | **12** | **4** |
 
 Key fixes from review: wrong function name (`get_game_boxscore` → `get_game_box_score`), GR derivation standardized to `g - gs`, opponent query surface corrected (`get_opponent_scouting_report()` not `get_team_pitching_stats()`), report template added to file list, ORDER BY team_id grouping specified, post-backfill re-aggregation contracted in AC-5 and TN-8.
+
+### Review Scorecard (Code)
+| Review Pass | Findings | Accepted | Dismissed |
+|---|---|---|---|
+| Per-story CR -- E-204-01 | 0 | 0 | 0 |
+| Per-story CR -- E-204-02 | 2 | 2 | 0 |
+| Per-story CR -- E-204-03 | 1 | 1 | 0 |
+| CR integration review | TBD | TBD | TBD |
+| Codex code review | TBD | TBD | TBD |
+| **Total** | **TBD** | **TBD** | **TBD** |

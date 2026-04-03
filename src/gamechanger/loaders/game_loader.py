@@ -190,6 +190,7 @@ class _PlayerPitching:
     pitches: int = 0
     total_strikes: int = 0
     bf: int = 0
+    appearance_order: int | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -820,7 +821,7 @@ class GameLoader:
 
         extras = self._build_extras_index(group.get("extra") or [])
 
-        for stat_row in group.get("stats") or []:
+        for idx, stat_row in enumerate(group.get("stats") or [], start=1):
             player_id = stat_row.get("player_id")
             if not player_id:
                 logger.error(
@@ -835,7 +836,7 @@ class GameLoader:
             raw_stats: dict = stat_row.get("stats") or {}
             player_extras = extras.get(player_id, {})
 
-            pitching = _PlayerPitching(player_id=player_id)
+            pitching = _PlayerPitching(player_id=player_id, appearance_order=idx)
             for api_key, db_col in _PITCHING_MAIN.items():
                 if api_key in raw_stats:
                     setattr(pitching, db_col, int(raw_stats[api_key]))
@@ -1054,21 +1055,22 @@ class GameLoader:
             """
             INSERT INTO player_game_pitching
                 (game_id, player_id, team_id, ip_outs, h, r, er, bb, so,
-                 wp, hbp, pitches, total_strikes, bf)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 wp, hbp, pitches, total_strikes, bf, appearance_order)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(game_id, player_id) DO UPDATE SET
-                team_id       = excluded.team_id,
-                ip_outs       = excluded.ip_outs,
-                h             = excluded.h,
-                r             = excluded.r,
-                er            = excluded.er,
-                bb            = excluded.bb,
-                so            = excluded.so,
-                wp            = excluded.wp,
-                hbp           = excluded.hbp,
-                pitches       = excluded.pitches,
-                total_strikes = excluded.total_strikes,
-                bf            = excluded.bf
+                team_id          = excluded.team_id,
+                ip_outs          = excluded.ip_outs,
+                h                = excluded.h,
+                r                = excluded.r,
+                er               = excluded.er,
+                bb               = excluded.bb,
+                so               = excluded.so,
+                wp               = excluded.wp,
+                hbp              = excluded.hbp,
+                pitches          = excluded.pitches,
+                total_strikes    = excluded.total_strikes,
+                bf               = excluded.bf,
+                appearance_order = excluded.appearance_order
             """,
             (
                 game_id,
@@ -1085,6 +1087,7 @@ class GameLoader:
                 pitching.pitches,
                 pitching.total_strikes,
                 pitching.bf,
+                pitching.appearance_order,
             ),
         )
 

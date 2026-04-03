@@ -34,6 +34,8 @@ def _make_db() -> sqlite3.Connection:
     conn.executescript(schema_sql)
     # Migration 004: season_year column on teams (E-147-01).
     conn.execute("ALTER TABLE teams ADD COLUMN season_year INTEGER")
+    # Migration 015: appearance_order column on player_game_pitching (E-204-01).
+    conn.execute("ALTER TABLE player_game_pitching ADD COLUMN appearance_order INTEGER")
     conn.commit()
     return conn
 

@@ -1,6 +1,6 @@
 # Standalone Reports
 
-*Last updated: 2026-04-03 | Source: E-183 (standalone reports coaching docs), E-199 (FPS%, P/BF, QAB%, P/PA columns), E-196 (Rest and P (7d) columns)*
+*Last updated: 2026-04-03 | Source: E-183 (standalone reports coaching docs), E-199 (FPS%, P/BF, QAB%, P/PA columns), E-196 (Rest and P (7d) columns), E-204 (GS/GR column)*
 
 ---
 
@@ -30,7 +30,8 @@ The report shows similar pitching and batting stats as the dashboard opponent vi
 
 **Executive summary** — Team-level numbers at a glance: OBP, strikeout rate, walk rate, plus FPS% (first-pitch strike percentage) and P/PA (pitches per plate appearance) when pitch data is available. The summary also shows how many games have pitch-by-pitch data, so you know whether those columns are based on the whole season or a subset of games.
 
-**Pitching table** — Stats for each pitcher who has appeared this season:
+**Pitching table** — Stats for each pitcher who has appeared this season (sorted starter-first by appearance order):
+- **GS / GR** — games started / games in relief: how this pitcher has been used this season
 - ERA, K/9, BB/9, K/BB — standard pitching numbers
 - **FPS%** — first-pitch strike percentage: how often this pitcher is ahead in the count from pitch one
 - **P/BF** — pitches per batter faced: a quick read on his efficiency and how long he'll last

@@ -221,7 +221,8 @@ def _query_pitching(
             COALESCE(psp.pitches, 0) AS pitches,
             COALESCE(psp.total_strikes, 0) AS total_strikes,
             p.throws,
-            tr.jersey_number
+            tr.jersey_number,
+            psp.gs
         FROM player_season_pitching psp
         JOIN players p ON p.player_id = psp.player_id
         LEFT JOIN team_rosters tr

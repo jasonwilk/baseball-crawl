@@ -1395,3 +1395,139 @@ def test_usssa_team_gets_correct_db_season_id(
     assert bat_row[0] == "2025-summer-usssa", (
         f"Expected DB season_id='2025-summer-usssa', got '{bat_row[0]}'"
     )
+
+
+# ---------------------------------------------------------------------------
+# E-204-03: GS computation from appearance_order
+# ---------------------------------------------------------------------------
+
+
+def test_pitching_aggregates_compute_gs_from_appearance_order(
+    loader: ScoutingLoader, db: sqlite3.Connection,
+) -> None:
+    """AC-1: _compute_pitching_aggregates counts appearance_order=1 as GS."""
+    season_id = "2025-gs-test"
+    db.execute(
+        "INSERT OR IGNORE INTO seasons (season_id, name, season_type, year) VALUES (?, ?, ?, ?)",
+        (season_id, season_id, "spring-hs", 2025),
+    )
+    own_pk = db.execute(
+        "INSERT INTO teams (name, membership_type, is_active, season_year) VALUES (?, 'tracked', 1, 2025)",
+        ("GS Test Team",),
+    ).lastrowid
+    db.execute(
+        "INSERT OR IGNORE INTO players (player_id, first_name, last_name) VALUES (?, 'Ace', 'Pitcher')",
+        (_PLAYER_1,),
+    )
+    db.execute(
+        "INSERT OR IGNORE INTO players (player_id, first_name, last_name) VALUES (?, 'Relief', 'Pitcher')",
+        (_PLAYER_2,),
+    )
+
+    # Game 1: PLAYER_1 starts (appearance_order=1), PLAYER_2 relieves (appearance_order=2)
+    db.execute(
+        "INSERT INTO games (game_id, season_id, game_date, status, home_team_id, away_team_id) VALUES (?, ?, '2025-04-01', 'completed', ?, ?)",
+        ("gs-game-1", season_id, own_pk, own_pk),
+    )
+    db.execute(
+        "INSERT INTO player_game_pitching (game_id, player_id, team_id, ip_outs, appearance_order) VALUES (?, ?, ?, 15, 1)",
+        ("gs-game-1", _PLAYER_1, own_pk),
+    )
+    db.execute(
+        "INSERT INTO player_game_pitching (game_id, player_id, team_id, ip_outs, appearance_order) VALUES (?, ?, ?, 6, 2)",
+        ("gs-game-1", _PLAYER_2, own_pk),
+    )
+
+    # Game 2: PLAYER_1 starts again, PLAYER_2 relieves
+    db.execute(
+        "INSERT INTO games (game_id, season_id, game_date, status, home_team_id, away_team_id) VALUES (?, ?, '2025-04-05', 'completed', ?, ?)",
+        ("gs-game-2", season_id, own_pk, own_pk),
+    )
+    db.execute(
+        "INSERT INTO player_game_pitching (game_id, player_id, team_id, ip_outs, appearance_order) VALUES (?, ?, ?, 18, 1)",
+        ("gs-game-2", _PLAYER_1, own_pk),
+    )
+    db.execute(
+        "INSERT INTO player_game_pitching (game_id, player_id, team_id, ip_outs, appearance_order) VALUES (?, ?, ?, 3, 2)",
+        ("gs-game-2", _PLAYER_2, own_pk),
+    )
+
+    # Game 3: PLAYER_2 starts, PLAYER_1 relieves
+    db.execute(
+        "INSERT INTO games (game_id, season_id, game_date, status, home_team_id, away_team_id) VALUES (?, ?, '2025-04-08', 'completed', ?, ?)",
+        ("gs-game-3", season_id, own_pk, own_pk),
+    )
+    db.execute(
+        "INSERT INTO player_game_pitching (game_id, player_id, team_id, ip_outs, appearance_order) VALUES (?, ?, ?, 9, 2)",
+        ("gs-game-3", _PLAYER_1, own_pk),
+    )
+    db.execute(
+        "INSERT INTO player_game_pitching (game_id, player_id, team_id, ip_outs, appearance_order) VALUES (?, ?, ?, 12, 1)",
+        ("gs-game-3", _PLAYER_2, own_pk),
+    )
+    db.commit()
+
+    loader._compute_pitching_aggregates(own_pk, season_id)
+    db.commit()
+
+    # PLAYER_1: started 2 games, relieved 1 → gs=2
+    p1 = db.execute(
+        "SELECT gs, gp_pitcher FROM player_season_pitching WHERE player_id = ? AND team_id = ? AND season_id = ?",
+        (_PLAYER_1, own_pk, season_id),
+    ).fetchone()
+    assert p1 is not None, "Expected player_season_pitching row for PLAYER_1"
+    assert p1[0] == 2, f"Expected gs=2 for PLAYER_1 (started 2 of 3), got {p1[0]}"
+    assert p1[1] == 3, f"Expected gp_pitcher=3, got {p1[1]}"
+
+    # PLAYER_2: started 1 game, relieved 2 → gs=1
+    p2 = db.execute(
+        "SELECT gs, gp_pitcher FROM player_season_pitching WHERE player_id = ? AND team_id = ? AND season_id = ?",
+        (_PLAYER_2, own_pk, season_id),
+    ).fetchone()
+    assert p2 is not None, "Expected player_season_pitching row for PLAYER_2"
+    assert p2[0] == 1, f"Expected gs=1 for PLAYER_2 (started 1 of 3), got {p2[0]}"
+    assert p2[1] == 3, f"Expected gp_pitcher=3, got {p2[1]}"
+
+
+def test_pitching_aggregates_gs_null_when_all_appearance_order_null(
+    loader: ScoutingLoader, db: sqlite3.Connection,
+) -> None:
+    """GS should be NULL (not 0) when all appearance_order values are NULL (pre-backfill)."""
+    season_id = "2025-gs-null"
+    db.execute(
+        "INSERT OR IGNORE INTO seasons (season_id, name, season_type, year) VALUES (?, ?, ?, ?)",
+        (season_id, season_id, "spring-hs", 2025),
+    )
+    own_pk = db.execute(
+        "INSERT INTO teams (name, membership_type, is_active, season_year) VALUES (?, 'tracked', 1, 2025)",
+        ("GS Null Team",),
+    ).lastrowid
+    db.execute(
+        "INSERT OR IGNORE INTO players (player_id, first_name, last_name) VALUES (?, 'Test', 'Pitcher')",
+        (_PLAYER_1,),
+    )
+
+    # Two games, appearance_order is NULL for all rows (pre-backfill state)
+    for i, gid in enumerate(["gs-null-game-1", "gs-null-game-2"], start=1):
+        db.execute(
+            "INSERT INTO games (game_id, season_id, game_date, status, home_team_id, away_team_id) "
+            "VALUES (?, ?, ?, 'completed', ?, ?)",
+            (gid, season_id, f"2025-04-0{i}", own_pk, own_pk),
+        )
+        db.execute(
+            "INSERT INTO player_game_pitching (game_id, player_id, team_id, ip_outs, appearance_order) "
+            "VALUES (?, ?, ?, 15, NULL)",
+            (gid, _PLAYER_1, own_pk),
+        )
+    db.commit()
+
+    loader._compute_pitching_aggregates(own_pk, season_id)
+    db.commit()
+
+    row = db.execute(
+        "SELECT gs, gp_pitcher FROM player_season_pitching WHERE player_id = ? AND team_id = ? AND season_id = ?",
+        (_PLAYER_1, own_pk, season_id),
+    ).fetchone()
+    assert row is not None, "Expected player_season_pitching row"
+    assert row[0] is None, f"Expected gs=NULL when all appearance_order NULL, got {row[0]}"
+    assert row[1] == 2, f"Expected gp_pitcher=2, got {row[1]}"

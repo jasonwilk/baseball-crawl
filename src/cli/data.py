@@ -1306,3 +1306,35 @@ def repair_opponents(
             typer.echo(f"  total to process: {len(rows)}")
             typer.echo("\nRun with --execute to apply changes.")
 
+
+@app.command("backfill-appearance-order")
+def backfill_appearance_order(
+    db_path: Path = typer.Option(
+        _DEFAULT_DB_PATH,
+        "--db",
+        help="Path to the SQLite database.",
+    ),
+) -> None:
+    """Backfill appearance_order for existing player_game_pitching rows.
+
+    Walks cached boxscore JSON files on disk and updates rows where
+    appearance_order IS NULL. Idempotent and re-runnable.
+
+    Examples:
+        bb data backfill-appearance-order
+    """
+    from src.gamechanger.loaders.backfill import backfill_appearance_order as _backfill
+
+    with closing(sqlite3.connect(str(db_path))) as conn:
+        conn.execute("PRAGMA journal_mode=WAL;")
+        conn.execute("PRAGMA foreign_keys=ON;")
+        summary = _backfill(conn)
+
+    typer.echo("\nBackfill Summary:")
+    typer.echo(f"  Games processed: {summary['games_processed']}")
+    typer.echo(f"  Rows updated: {summary['rows_updated']}")
+    typer.echo(f"  Games skipped (no cached file): {summary['games_skipped']}")
+    typer.echo(f"  Games with errors: {summary['games_with_errors']}")
+    typer.echo("\nReminder: run 'bb data scout' to recompute scouting season aggregates.")
+
+    raise SystemExit(0)

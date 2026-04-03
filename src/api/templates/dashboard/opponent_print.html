@@ -291,6 +291,7 @@
       <th>K/9</th>
       <th>WHIP</th>
       <th>GP</th>
+      <th>GS/GR</th>
       <th>IP</th>
       <th>BB</th>
       <th>SO</th>
@@ -308,6 +309,7 @@
       <td>{{ pitcher.k9 }} <span style="font-size: 7pt; color: #888;">({{ pitcher.ip_outs | ip_display }} IP)</span></td>
       <td>{{ pitcher.whip }} <span style="font-size: 7pt; color: #888;">({{ pitcher.ip_outs | ip_display }} IP)</span></td>
       <td>{{ pitcher.games }}</td>
+      <td>{% if pitcher.gs is none %}&mdash;{% else %}{{ pitcher.gs }}/{{ pitcher.games - pitcher.gs }}{% endif %}</td>
       <td>{{ pitcher.ip_outs | ip_display }}</td>
       <td>{{ pitcher.bb }}</td>
       <td>{{ pitcher.so }}</td>

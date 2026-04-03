@@ -42,6 +42,7 @@ def db() -> sqlite3.Connection:
     conn.commit()
     conn.executescript(_MIGRATION_FILE.read_text(encoding="utf-8"))
     conn.execute("ALTER TABLE teams ADD COLUMN season_year INTEGER")
+    conn.execute("ALTER TABLE player_game_pitching ADD COLUMN appearance_order INTEGER")
     conn.commit()
     yield conn
     conn.close()
@@ -1980,3 +1981,106 @@ def test_upsert_game_updates_season_id(db: sqlite3.Connection) -> None:
     assert row[0] == "new-season", (
         f"Expected season_id='new-season' after upsert, got '{row[0]}'"
     )
+
+
+# ---------------------------------------------------------------------------
+# E-204-01: appearance_order tracking
+# ---------------------------------------------------------------------------
+
+_PLAYER_OWN_P2 = "player-own-pitcher-002"
+_PLAYER_OWN_P3 = "player-own-pitcher-003"
+
+
+def test_appearance_order_populated_for_multiple_pitchers(
+    db: sqlite3.Connection, tmp_path: Path,
+) -> None:
+    """AC-2: Three pitchers get appearance_order 1, 2, 3 matching stats array order."""
+    pitching = [
+        {"player_id": _PLAYER_OWN_P1, "player_text": "(W)", "stats": {"IP": 5, "H": 3, "R": 2, "ER": 2, "BB": 1, "SO": 7}},
+        {"player_id": _PLAYER_OWN_P2, "player_text": "", "stats": {"IP": 2, "H": 1, "R": 0, "ER": 0, "BB": 0, "SO": 3}},
+        {"player_id": _PLAYER_OWN_P3, "player_text": "(SV)", "stats": {"IP": 2, "H": 0, "R": 0, "ER": 0, "BB": 1, "SO": 2}},
+    ]
+    boxscore = _make_boxscore(own_pitching=pitching)
+    team_dir = _write_team_dir(tmp_path, boxscores={_GAME_STREAM_ID: boxscore})
+    loader = _make_loader(db)
+
+    loader.load_all(team_dir)
+
+    rows = db.execute(
+        "SELECT player_id, appearance_order FROM player_game_pitching "
+        "WHERE game_id = ? ORDER BY appearance_order",
+        (_EVENT_ID,),
+    ).fetchall()
+
+    own_rows = [(r[0], r[1]) for r in rows if r[0].startswith("player-own")]
+    assert own_rows == [
+        (_PLAYER_OWN_P1, 1),
+        (_PLAYER_OWN_P2, 2),
+        (_PLAYER_OWN_P3, 3),
+    ]
+
+
+def test_appearance_order_updated_on_upsert(
+    db: sqlite3.Connection, tmp_path: Path,
+) -> None:
+    """AC-3: Re-loading same boxscore updates appearance_order via ON CONFLICT."""
+    pitching_v1 = [
+        {"player_id": _PLAYER_OWN_P1, "player_text": "", "stats": {"IP": 5, "H": 3, "R": 2, "ER": 2, "BB": 1, "SO": 7}},
+        {"player_id": _PLAYER_OWN_P2, "player_text": "", "stats": {"IP": 2, "H": 1, "R": 0, "ER": 0, "BB": 0, "SO": 3}},
+    ]
+    boxscore_v1 = _make_boxscore(own_pitching=pitching_v1)
+    team_dir = _write_team_dir(tmp_path, boxscores={_GAME_STREAM_ID: boxscore_v1})
+    loader = _make_loader(db)
+    loader.load_all(team_dir)
+
+    # Verify initial load
+    row = db.execute(
+        "SELECT appearance_order FROM player_game_pitching WHERE game_id = ? AND player_id = ?",
+        (_EVENT_ID, _PLAYER_OWN_P1),
+    ).fetchone()
+    assert row[0] == 1
+
+    # Re-load same data -- appearance_order should be preserved via upsert
+    loader.load_all(team_dir)
+
+    row = db.execute(
+        "SELECT appearance_order FROM player_game_pitching WHERE game_id = ? AND player_id = ?",
+        (_EVENT_ID, _PLAYER_OWN_P1),
+    ).fetchone()
+    assert row[0] == 1
+
+
+def test_appearance_order_single_pitcher(
+    db: sqlite3.Connection, tmp_path: Path,
+) -> None:
+    """Single pitcher gets appearance_order = 1."""
+    boxscore = _make_boxscore()  # default has 1 pitcher per side
+    team_dir = _write_team_dir(tmp_path, boxscores={_GAME_STREAM_ID: boxscore})
+    loader = _make_loader(db)
+
+    loader.load_all(team_dir)
+
+    row = db.execute(
+        "SELECT appearance_order FROM player_game_pitching WHERE game_id = ? AND player_id = ?",
+        (_EVENT_ID, _PLAYER_OWN_P1),
+    ).fetchone()
+    assert row[0] == 1
+
+    # Opponent pitcher also gets appearance_order = 1
+    opp_row = db.execute(
+        "SELECT appearance_order FROM player_game_pitching WHERE game_id = ? AND player_id = ?",
+        (_EVENT_ID, _PLAYER_OPP_P1),
+    ).fetchone()
+    assert opp_row[0] == 1
+
+
+def test_appearance_order_in_dataclass() -> None:
+    """AC-4: _PlayerPitching dataclass includes appearance_order field."""
+    from src.gamechanger.loaders.game_loader import _PlayerPitching
+
+    p = _PlayerPitching(player_id="test-player", appearance_order=3)
+    assert p.appearance_order == 3
+
+    # Default is None
+    p_default = _PlayerPitching(player_id="test-player-2")
+    assert p_default.appearance_order is None

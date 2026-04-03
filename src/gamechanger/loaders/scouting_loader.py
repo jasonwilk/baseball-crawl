@@ -483,7 +483,10 @@ class ScoutingLoader:
                 SUM(pgp.hbp)          AS hbp,
                 SUM(pgp.pitches)      AS pitches,
                 SUM(pgp.total_strikes) AS total_strikes,
-                SUM(pgp.bf)           AS bf
+                SUM(pgp.bf)           AS bf,
+                CASE WHEN MAX(pgp.appearance_order) IS NULL THEN NULL
+                     ELSE SUM(CASE WHEN pgp.appearance_order = 1 THEN 1 ELSE 0 END)
+                END AS gs
             FROM player_game_pitching pgp
             JOIN games g ON pgp.game_id = g.game_id
             WHERE pgp.team_id = ? AND g.season_id = ?
@@ -493,14 +496,14 @@ class ScoutingLoader:
         ).fetchall()
         for (player_id, games_tracked,
              ip_outs, h, r, er, bb, so,
-             wp, hbp, pitches, total_strikes, bf) in rows:
+             wp, hbp, pitches, total_strikes, bf, gs) in rows:
             self._db.execute(
                 """
                 INSERT INTO player_season_pitching
                     (player_id, team_id, season_id,
                      gp_pitcher, games_tracked, ip_outs, h, r, er, bb, so,
-                     wp, hbp, pitches, total_strikes, bf)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     wp, hbp, pitches, total_strikes, bf, gs)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(player_id, team_id, season_id) DO UPDATE SET
                     gp_pitcher    = excluded.gp_pitcher,
                     games_tracked = excluded.games_tracked,
@@ -514,11 +517,12 @@ class ScoutingLoader:
                     hbp           = excluded.hbp,
                     pitches       = excluded.pitches,
                     total_strikes = excluded.total_strikes,
-                    bf            = excluded.bf
+                    bf            = excluded.bf,
+                    gs            = excluded.gs
                 """,
                 (player_id, team_id, season_id, games_tracked, games_tracked,
                  ip_outs, h, r, er, bb, so,
-                 wp, hbp, pitches, total_strikes, bf),
+                 wp, hbp, pitches, total_strikes, bf, gs),
             )
         return len(rows)
 

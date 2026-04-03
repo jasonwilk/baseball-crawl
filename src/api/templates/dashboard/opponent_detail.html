@@ -217,6 +217,7 @@ Scout: {{ scouting_report.team_name if scouting_report else opponent_team_id }}
         {{ pit_sort_header("k9", "K/9") }}
         {{ pit_sort_header("whip", "WHIP") }}
         {{ pit_sort_header("gp", "GP") }}
+        <th class="py-2 px-3 text-center">GS/GR</th>
         {{ pit_sort_header("ip", "IP") }}
         {{ pit_sort_header("h", "H") }}
         {{ pit_sort_header("er", "ER") }}
@@ -237,6 +238,7 @@ Scout: {{ scouting_report.team_name if scouting_report else opponent_team_id }}
         <td class="py-2 px-3 text-center whitespace-nowrap heat-{{ pitcher._heat.k9 }}">{{ pitcher.k9 }} <span class="text-xs text-gray-400">({{ pitcher.ip_outs | ip_display }} IP)</span></td>
         <td class="py-2 px-3 text-center whitespace-nowrap heat-{{ pitcher._heat.whip }}">{{ pitcher.whip }} <span class="text-xs text-gray-400">({{ pitcher.ip_outs | ip_display }} IP)</span></td>
         <td class="py-2 px-3 text-center">{{ pitcher.games }}</td>
+        <td class="py-2 px-3 text-center">{% if pitcher.gs is none %}&mdash;{% else %}{{ pitcher.gs }}/{{ pitcher.games - pitcher.gs }}{% endif %}</td>
         <td class="py-2 px-3 text-center">{{ pitcher.ip_outs | ip_display }}</td>
         <td class="py-2 px-3 text-center">{{ pitcher.h }}</td>
         <td class="py-2 px-3 text-center">{{ pitcher.er }}</td>

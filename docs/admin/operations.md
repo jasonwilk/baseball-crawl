@@ -304,6 +304,38 @@ After `--execute`, the summary shows counts for `team_opponents` rows created, s
 bb data repair-opponents --db /path/to/app.db
 ```
 
+### Back-Filling Appearance Order (`bb data backfill-appearance-order`)
+
+`bb data backfill-appearance-order` populates the `appearance_order` column on existing `player_game_pitching` rows. It walks cached boxscore JSON files on disk to determine the order in which pitchers appeared in each game (1 = starter, 2+ = relievers in order of entry), then updates any row where `appearance_order IS NULL`.
+
+Run this command once after deploying Migration 015 on a database that has historical pitching data:
+
+```bash
+bb data backfill-appearance-order
+```
+
+**Output:**
+
+```
+Backfill Summary:
+  Games processed: 42
+  Rows updated: 87
+  Games skipped (no cached file): 3
+  Games with errors: 0
+
+Reminder: run 'bb data scout' to recompute scouting season aggregates.
+```
+
+After the backfill completes, run `bb data scout` (or use the **Sync** button in the admin UI) to recompute GS/GR counts in opponent scouting season aggregates.
+
+**Idempotent**: Safe to run multiple times -- only rows with `appearance_order IS NULL` are updated. Games with no cached boxscore file on disk are skipped and counted in "Games skipped".
+
+**Custom database path**:
+
+```bash
+bb data backfill-appearance-order --db /path/to/app.db
+```
+
 ### Database-Driven Crawl Configuration (CLI)
 
 By default, `scripts/crawl.py` and `scripts/load.py` read team configuration from `config/teams.yaml`. Pass `--source db` to read active member teams directly from the database instead:
@@ -637,6 +669,18 @@ UNIQUE constraint on `(play_id, event_order)`.
 | `idx_plays_fps` (partial) | `plays(pitcher_id, is_first_pitch_strike)` WHERE `outcome NOT IN ('Hit By Pitch', 'Intentional Walk')` | Designed for the old FPS% formula. Queries now use `FPS / BF` with no exclusions (matches GameChanger); the partial index WHERE filter is no longer leveraged. |
 
 The migration is applied automatically on container startup. No backfill was needed -- both tables are populated solely by the plays pipeline.
+
+### Migration 015: Appearance Order Column
+
+Migration `migrations/015_add_appearance_order.sql` adds a single nullable column to `player_game_pitching`:
+
+| Column | Type | Purpose |
+|--------|------|---------|
+| `appearance_order` | `INTEGER` (nullable) | Pitcher entry order within a game. 1 = starter; 2, 3, … = relievers in order of entry. NULL on historical rows until backfill runs. |
+
+**Backfill required for historical data**: Rows written before this migration have `appearance_order = NULL`. Run `bb data backfill-appearance-order` once to populate them from cached boxscore JSON. New rows written by the game loader after this migration are populated at load time.
+
+The migration is applied automatically on container startup.
 
 ### Migration 012: Reconciliation Discrepancies Schema
 

@@ -141,6 +141,7 @@ def db(tmp_path):
             pitches INTEGER DEFAULT 0,
             total_strikes INTEGER DEFAULT 0,
             bf INTEGER DEFAULT 0,
+            gs INTEGER,
             PRIMARY KEY (player_id, team_id, season_id)
         );
         CREATE TABLE player_game_batting (

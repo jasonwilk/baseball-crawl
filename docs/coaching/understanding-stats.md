@@ -235,6 +235,23 @@ An intentional walk, dropped third strike, or catcher's interference does **not*
 
 ---
 
+### GS / GR -- Games Started and Games in Relief
+
+**What it measures:** How a pitcher has been used -- how many times he started (took the mound first for his team) versus how many times he came in as a reliever (entered mid-game).
+
+**The format:** "2 / 3" means 2 games started, 3 games in relief. A starter-only pitcher shows "4 / 0". A reliever who never starts shows "0 / 5".
+
+**What the numbers mean:**
+- A high GS count (relative to total appearances) identifies the team's rotation starters -- the arms they build a game around.
+- A high GR count identifies relievers and closers -- pitchers who specialize in shorter, high-leverage appearances.
+- A mixed GS/GR split (e.g., "2 / 3") may mean a pitcher is used in both roles depending on matchup, or that the team is flexible with their rotation.
+
+**Why it matters:** Knowing a pitcher's role shapes how you read his other stats. A starter with a 5.00 ERA across 40 innings has faced lineups multiple times per outing -- that's a different workload than a reliever with the same ERA across 12 high-leverage innings. GS/GR lets you put the rest of the pitching line in context without needing to dig through box scores.
+
+**Example:** Their ace shows "5 / 0" -- he starts every fifth day and isn't used in relief. Their closer shows "0 / 8" -- he comes in only to protect leads. If you're down by two in the seventh, the closer isn't coming in yet; the guy with "1 / 4" is the one to watch.
+
+---
+
 ### Rest -- Days Since Last Outing
 
 **What it measures:** How long ago this pitcher last appeared in a game, in days.
@@ -342,4 +359,4 @@ Splits break down a player's stats by specific situations. The two most useful s
 
 ---
 
-*Last updated: 2026-04-03 | Source: E-028-04 (initial glossary), E-199 (FPS%, P/BF, QAB%, P/PA), E-196 (Rest, P (7d))*
+*Last updated: 2026-04-03 | Source: E-028-04 (initial glossary), E-199 (FPS%, P/BF, QAB%, P/PA), E-196 (Rest, P (7d)), E-204 (GS/GR)*

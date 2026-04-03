@@ -183,7 +183,8 @@ def get_team_pitching_stats(
             COALESCE(psp.so, 0)            AS so,
             COALESCE(psp.hr, 0)            AS hr,
             COALESCE(psp.pitches, 0)       AS pitches,
-            COALESCE(psp.total_strikes, 0) AS total_strikes
+            COALESCE(psp.total_strikes, 0) AS total_strikes,
+            psp.gs
         FROM player_season_pitching psp
         JOIN players p ON p.player_id = psp.player_id
         LEFT JOIN team_rosters tr
@@ -585,7 +586,7 @@ def get_game_box_score(game_id: str) -> dict[str, Any]:
             AND tr.team_id = pgp.team_id
             AND tr.season_id = ?
         WHERE pgp.game_id = ?
-        ORDER BY pgp.team_id, p.last_name
+        ORDER BY pgp.team_id, pgp.appearance_order ASC NULLS LAST, p.last_name
     """
     try:
         with closing(get_connection()) as conn:
@@ -851,7 +852,8 @@ def get_opponent_scouting_report(
             COALESCE(psp.pitches, 0)       AS pitches,
             COALESCE(psp.total_strikes, 0) AS total_strikes,
             p.throws,
-            tr.jersey_number
+            tr.jersey_number,
+            psp.gs
         FROM player_season_pitching psp
         JOIN players p ON p.player_id = psp.player_id
         LEFT JOIN team_rosters tr

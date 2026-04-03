@@ -476,6 +476,7 @@
       <th class="heat-header">K/9</th>
       <th class="heat-header">WHIP</th>
       <th class="col-sep">GP</th>
+      <th>GS/GR</th>
       <th>IP</th>
       <th class="col-sep mob-hide">H</th>
       <th class="mob-hide">ER</th>
@@ -499,6 +500,7 @@
       <td class="heat-{{ pitcher._heat.k9 }}">{{ pitcher.k9 }}</td>
       <td class="heat-{{ pitcher._heat.whip }}">{{ pitcher.whip }}</td>
       <td class="col-sep">{{ pitcher.games }}</td>
+      <td>{% if pitcher.gs is none %}&mdash;{% else %}{{ pitcher.gs }}/{{ pitcher.games - pitcher.gs }}{% endif %}</td>
       <td>{{ pitcher.ip_outs | ip_display }}</td>
       <td class="col-sep mob-hide">{{ pitcher.h }}</td>
       <td class="mob-hide">{{ pitcher.er }}</td>
