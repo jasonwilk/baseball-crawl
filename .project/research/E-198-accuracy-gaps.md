@@ -822,3 +822,122 @@ These are fixable but require the boxscore JSON files to be present. They'll be 
 - `src/reconciliation/engine.py` -- all changes
 - `tests/test_reconciliation.py` -- new tests
 - `data/app.db` -- live database for verification
+
+---
+
+## GAP 7: FPS% Formula Mismatch and Per-Pitcher Accuracy (2026-04-03)
+
+### Investigation Context
+
+Compared FPS% values between our standalone reports and GameChanger's official stats CSVs for two teams:
+- **Standing Bear Freshman Grizzlies** (Spring 2026): 15 pitchers, 259 total BF
+- **Lincoln Rebels 14U** (Summer 2025): 12 pitchers, 2,418 total BF (101 games)
+
+### Finding 1: Formula Mismatch (Systematic, Fixable)
+
+**Our formula** (in `src/reports/generator.py`, 3 queries): `FPS / (BF - HBP - IBB)` — excludes HBP and Intentional Walk PAs from the denominator.
+
+**GC's formula**: `FPS / BF` — uses total batters faced as denominator. HBP/IBB can never be a first-pitch strike, so they dilute the percentage but are included.
+
+This was a deliberate design choice documented in CLAUDE.md ("exclusions (HBP, Intentional Walk) applied at query time only"), but it diverges from what coaches see in the GC app and CSV exports.
+
+**Impact**: Systematic overcount of ~1-4pp for pitchers with HBP/IBB events. Extreme case: Caiden Strauss (14 BF, 4 excluded PAs) shows 70.0% (ours) vs 50.0% (GC) — a 20pp gap.
+
+**Fix**: Change the 3 FPS% queries in `generator.py` to use `COUNT(*)` as denominator. Epic E-203 planned.
+
+**Affected queries** (all in `src/reports/generator.py`):
+1. `_query_plays_pitching_stats()` (~line 665-675): per-pitcher FPS%
+2. `_query_plays_team_stats()` (~line 769-786): team-level FPS%
+3. CLAUDE.md FPS% definition needs updating
+
+### Finding 2: Per-Pitcher FPS Undercount (Plays Endpoint Data Gap)
+
+After correcting for the formula mismatch, residual per-pitcher deltas remain:
+
+**Freshman Grizzlies (w/o exclusion formula applied)**:
+| Pitcher | BF | Our FPS/BF | GC FPS% | Delta | Notes |
+|---------|-----|-----------|---------|-------|-------|
+| Grant Oliver | 13 | 5/13 = 38.5% | 46.15% | -7.6pp | 1 missing FPS event |
+| Jace Stanczyk | 41 | 21/41 = 51.2% | 51.22% | ~0.0pp | Matches after formula fix |
+| Brody Henninger | 36 | 26/36 = 72.2% | 72.22% | ~0.0pp | Matches after formula fix |
+| Liam Beiermann | 39 | 18/39 = 46.2% | 46.15% | ~0.0pp | Matches after formula fix |
+
+**Rebels 14U (report values include formula error + endpoint gaps)**:
+Average absolute delta: 0.90pp across 12 pitchers. Deltas go both directions (±1.5pp max). High-volume pitchers (200+ BF) are within ~0.5pp.
+
+### Grant Oliver Deep Dive
+
+All 13 BF correctly attributed (boxscore BF = plays BF = 13). All 8 non-FPS PAs verified against raw JSON (`at_plate_details`) — each genuinely starts with `Ball 1`. The plays endpoint reports one fewer first-pitch strike than GC's internal scoring data.
+
+**Games checked**:
+- `155bc5ef`: 4 PA, 1 FPS (ord 13-16, inning 2 top)
+- `757c024c`: 6 PA, 3 FPS (ord 59-64, inning 5 top)
+- `a31f3884`: 3 PA, 1 FPS (ord 50-52, inning 4 bottom)
+
+**Root cause**: Same class of issue as GAP 1 (pitcher pitches undercount). The plays endpoint's `at_plate_details` array occasionally omits or misreports pitch events relative to the boxscore/scoring data. For FPS%, this manifests as ~1 missing strike call per 100-200 BF, producing ±0.5-1.5pp noise for high-volume pitchers and larger swings for low-volume ones.
+
+**Not fixable from our side** with current data: The plays endpoint is the only source for per-PA first-pitch detail. The boxscore has aggregate counts (#P, TS) but not per-PA breakdown. There is no alternate data source for first-pitch results — unless a cross-referencing heuristic can be developed.
+
+### Accuracy Summary After Formula Fix
+
+| Team | Pitchers | Avg |Delta| | Max |Delta| | Notes |
+|------|----------|-------------|-------------|-------|
+| Freshman Grizzlies | 15 | ~0.5pp (est.) | ~7.6pp (Oliver, 13 BF) | Low-volume outlier |
+| Rebels 14U | 12 | ~0.9pp | ~1.5pp | High-volume, bidirectional |
+
+### Open Question: Can Boxscore Data Cross-Reference Improve FPS Accuracy?
+
+The boxscore provides per-pitcher aggregate `#P` (pitches) and `TS` (total strikes). While these don't give per-PA first-pitch detail, could a heuristic use them to detect or correct FPS miscounts? For example:
+- If boxscore strike count is significantly higher than plays-derived strike count for a pitcher, some strikes are missing — could any be attributed to first pitches?
+- Could the reconciliation engine add an FPS-specific signal that flags pitchers where plays-FPS seems low relative to their strike rate?
+
+This is speculative and may not be tractable. Documenting for Codex analysis.
+
+---
+
+## GAP 8: Strike% (S%) Accuracy Verification (2026-04-03)
+
+### Result: PERFECT — No Gap
+
+Compared S% (Strike percentage = `total_strikes / pitches`) between reports and GC CSVs for both teams:
+
+**Lincoln Rebels 14U** (12 pitchers, 101 games): All 12 match GC within ±0.04pp (rounding).
+**Standing Bear Freshman Grizzlies** (13 pitchers matched): All 13 match GC within ±0.04pp.
+
+S% is sourced from boxscore aggregates (`player_season_pitching.total_strikes / player_season_pitching.pitches`), which are loaded directly from GC boxscore data. This data path has zero accuracy issues.
+
+**Note**: An initial false alarm showed Austin Rodocker at -2.7pp, but this was a name-matching bug in the comparison script (matched "Owen Rodocker" to "Austin Rodocker" by last name). After fixing the match logic, Austin's S% is 57.7% vs GC 57.66% — within rounding.
+
+---
+
+## GAP 7 Addendum: Codex Analysis of FPS Accuracy Improvement Paths (2026-04-03)
+
+Codex (gpt-5.4, xhigh reasoning) analyzed the plays parser, reconciliation engine, report generator queries, and DB schema to evaluate improvement paths for the residual FPS gap after the formula fix.
+
+### Parser Verification
+
+The parser correctly handles all common edge cases:
+- 867 PAs with substitution/baserunner events before first pitch — all correctly attributed
+- `is_first_pitch` only set on `pitch` events (never substitution/baserunner)
+- 0 non-IBB zero-pitch PAs, 0 unknown `event_type='other'`
+- Mid-PA pitcher changes affect pitcher attribution, not first-pitch detection
+
+**One blind spot**: Abandoned/incomplete PAs (empty `final_details`) are dropped before FPS is computed (`plays_parser.py:244`). If GC's official FPS includes a dropped final PA, we miss it. Rare.
+
+### Key Discovery: Official FPS Already in Schema
+
+`player_season_pitching.fps` exists and is loaded from the season-stats endpoint for owned teams (`season_stats_loader.py:522`). This is GC's authoritative season-level FPS value. The validation script (`scripts/validate_plays_stats.py:107,148`) already compares plays-derived FPS against this official value.
+
+**Implication**: For owned teams, we could use official FPS as the display value and plays-derived FPS for per-game breakdowns only. For opponent teams (scouting/reports), plays-derived FPS is the only source available.
+
+### Ranked Approaches
+
+1. **Season-level official FPS fallback** (owned teams): Use `player_season_pitching.fps` where available. High accuracy, low complexity. Best ROI.
+2. **Parser telemetry**: Log abandoned PAs, unknown templates. Diagnostic value only — won't improve accuracy.
+3. **Recover incomplete PAs**: Persist abandoned PAs in a side table. Small gain for rare edge cases.
+4. **Boxscore heuristic inference**: NOT recommended. Aggregate strikes/pitches lack ordering info. High false-correction risk.
+5. **Raw game-stream event ingestion**: Highest potential accuracy but highest complexity. Long-term research spike.
+
+### Conclusion
+
+The residual FPS gap (~0.5-1.5pp for high-volume, up to ~7pp for low-volume) is inherent to the plays endpoint data. No deterministic parser fix or boxscore heuristic can close it from current data. The actionable path is: (1) fix the formula (E-203), (2) prefer official season FPS for owned teams where available.
