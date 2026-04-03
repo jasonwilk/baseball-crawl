@@ -109,8 +109,8 @@ def compute_derived_fps(
 ) -> dict[tuple[str, str], int]:
     """Aggregate derived FPS count per pitcher per season from the plays table.
 
-    Uses the FPS% query pattern from TN-9: counts ``is_first_pitch_strike``
-    where outcome is not in ('Hit By Pitch', 'Intentional Walk').
+    Counts ``is_first_pitch_strike`` across all plate appearances (no exclusions),
+    matching GameChanger's FPS / BF formula.
 
     Returns:
         Dict mapping (pitcher_player_id, season_id) to their derived FPS count.
@@ -120,7 +120,6 @@ def compute_derived_fps(
         SELECT pitcher_id, season_id, SUM(is_first_pitch_strike)
         FROM plays
         WHERE pitcher_id IS NOT NULL
-          AND outcome NOT IN ('Hit By Pitch', 'Intentional Walk')
         GROUP BY pitcher_id, season_id
         """
     ).fetchall()
@@ -343,7 +342,6 @@ def get_fps_game_diagnostics(
         FROM plays p
         LEFT JOIN games g ON p.game_id = g.game_id
         WHERE p.pitcher_id = ?
-          AND p.outcome NOT IN ('Hit By Pitch', 'Intentional Walk')
         GROUP BY p.game_id
         ORDER BY g.game_date ASC, g.start_time ASC NULLS LAST
         """,
@@ -408,7 +406,6 @@ def get_fps_sample_plays(
                is_first_pitch_strike
         FROM plays
         WHERE pitcher_id = ?
-          AND outcome NOT IN ('Hit By Pitch', 'Intentional Walk')
         ORDER BY game_id, play_order
         LIMIT ?
         """,

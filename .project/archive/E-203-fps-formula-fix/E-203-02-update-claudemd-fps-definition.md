@@ -4,7 +4,7 @@
 [E-203: Fix FPS% Formula to Match GameChanger](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the FPS% definition in CLAUDE.md will accurately reflect the implemented formula (`FPS / BF` with no query-time exclusions), matching GameChanger's calculation. This ensures agents and contributors understand the correct formula when working with FPS% in the codebase.

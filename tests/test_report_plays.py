@@ -164,10 +164,12 @@ class TestQueryPlaysPitchingStats:
         assert result[_PITCHER_A]["fps_pct"] == pytest.approx(3.0 / 4.0)
         assert result[_PITCHER_A]["pitches_per_bf"] == pytest.approx(4.0)
 
-    def test_fps_excludes_hbp_and_ibb(self, db: sqlite3.Connection) -> None:
-        """HBP and Intentional Walk outcomes are excluded from FPS% denominator."""
+    def test_fps_includes_hbp_and_ibb(self, db: sqlite3.Connection) -> None:
+        """HBP and Intentional Walk outcomes are included in FPS% denominator (matches GC)."""
         _seed_base(db)
-        # 2 normal PAs (1 FPS each), 1 HBP, 1 IBB
+        # 2 normal PAs (1 FPS each), 1 HBP (FPS=0), 1 IBB (FPS=0)
+        # Old formula (exclude HBP/IBB): 2/2 = 1.0
+        # New formula (all BF):          2/4 = 0.5
         _insert_play(
             db, _GAME_ID_1, 1,
             batting_team_id=_OPP_TEAM_ID, batter_id=_BATTER_Y,
@@ -178,13 +180,13 @@ class TestQueryPlaysPitchingStats:
             db, _GAME_ID_1, 2,
             batting_team_id=_OPP_TEAM_ID, batter_id=_BATTER_Y,
             pitcher_id=_PITCHER_A, outcome="Strikeout",
-            is_first_pitch_strike=0, pitch_count=5,
+            is_first_pitch_strike=1, pitch_count=5,
         )
         _insert_play(
             db, _GAME_ID_1, 3,
             batting_team_id=_OPP_TEAM_ID, batter_id=_BATTER_Y,
             pitcher_id=_PITCHER_A, outcome="Hit By Pitch",
-            is_first_pitch_strike=1, pitch_count=2,
+            is_first_pitch_strike=0, pitch_count=2,
         )
         _insert_play(
             db, _GAME_ID_1, 4,
@@ -196,8 +198,8 @@ class TestQueryPlaysPitchingStats:
 
         result = _query_plays_pitching_stats(db, _TEAM_ID, _SEASON_ID)
         stats = result[_PITCHER_A]
-        # FPS%: 1 FPS / 2 eligible PAs = 0.5 (HBP and IBB excluded from denom)
-        assert stats["fps_pct"] == pytest.approx(0.5)
+        # FPS%: 2 FPS / 4 total BF = 0.5 (HBP and IBB included in denom)
+        assert stats["fps_pct"] == pytest.approx(2.0 / 4.0)
         # Pitches per BF: (3 + 5 + 2 + 0) / 4 total BF = 2.5
         assert stats["pitches_per_bf"] == pytest.approx(2.5)
 
@@ -493,17 +495,19 @@ class TestMultiSeasonScoping:
 
 
 # ---------------------------------------------------------------------------
-# Tests: Team FPS% HBP/IBB exclusion (SHOULD FIX 2)
+# Tests: Team FPS% includes all BF (matches GameChanger)
 # ---------------------------------------------------------------------------
 
 
-class TestTeamFpsExclusion:
-    """Team-level FPS% must exclude HBP and Intentional Walk from denominator."""
+class TestTeamFpsInclusion:
+    """Team-level FPS% must include all PAs in denominator (matches GC)."""
 
-    def test_team_fps_excludes_hbp_and_ibb(self, db: sqlite3.Connection) -> None:
-        """HBP and IBB plays are excluded from team FPS% denominator."""
+    def test_team_fps_includes_hbp_and_ibb(self, db: sqlite3.Connection) -> None:
+        """HBP and IBB plays are included in team FPS% denominator."""
         _seed_base(db)
-        # Pitcher A (on roster): 1 normal FPS, 1 normal non-FPS, 1 HBP, 1 IBB
+        # Pitcher A (on roster): 2 normal FPS, 1 HBP (FPS=0), 1 IBB (FPS=0)
+        # Old formula (exclude HBP/IBB): 2/2 = 1.0
+        # New formula (all BF):          2/4 = 0.5
         _insert_play(
             db, _GAME_ID_1, 1,
             batting_team_id=_OPP_TEAM_ID, batter_id=_BATTER_Y,
@@ -514,13 +518,13 @@ class TestTeamFpsExclusion:
             db, _GAME_ID_1, 2,
             batting_team_id=_OPP_TEAM_ID, batter_id=_BATTER_Y,
             pitcher_id=_PITCHER_A, outcome="Single",
-            is_first_pitch_strike=0, pitch_count=4,
+            is_first_pitch_strike=1, pitch_count=4,
         )
         _insert_play(
             db, _GAME_ID_1, 3,
             batting_team_id=_OPP_TEAM_ID, batter_id=_BATTER_Y,
             pitcher_id=_PITCHER_A, outcome="Hit By Pitch",
-            is_first_pitch_strike=1, pitch_count=1,
+            is_first_pitch_strike=0, pitch_count=1,
         )
         _insert_play(
             db, _GAME_ID_1, 4,
@@ -531,8 +535,8 @@ class TestTeamFpsExclusion:
         db.commit()
 
         result = _query_plays_team_stats(db, _TEAM_ID, _SEASON_ID)
-        # Team FPS%: 1 FPS / 2 eligible (HBP + IBB excluded) = 0.5
-        assert result["team_fps_pct"] == pytest.approx(0.5)
+        # Team FPS%: 2 FPS / 4 total BF (HBP + IBB included) = 0.5
+        assert result["team_fps_pct"] == pytest.approx(2.0 / 4.0)
 
 
 # ---------------------------------------------------------------------------

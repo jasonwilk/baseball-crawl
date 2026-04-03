@@ -634,7 +634,7 @@ UNIQUE constraint on `(play_id, event_order)`.
 | `idx_plays_game_id` | `plays(game_id)` | Game-level plays lookups |
 | `idx_plays_batter_id` | `plays(batter_id)` | Per-batter QAB aggregation |
 | `idx_plays_pitcher_id` | `plays(pitcher_id)` | Per-pitcher FPS aggregation |
-| `idx_plays_fps` (partial) | `plays(pitcher_id, is_first_pitch_strike)` WHERE `outcome NOT IN ('Hit By Pitch', 'Intentional Walk')` | Efficient FPS% queries; excludes HBP and IBB from the denominator per FPS% definition |
+| `idx_plays_fps` (partial) | `plays(pitcher_id, is_first_pitch_strike)` WHERE `outcome NOT IN ('Hit By Pitch', 'Intentional Walk')` | Designed for the old FPS% formula. Queries now use `FPS / BF` with no exclusions (matches GameChanger); the partial index WHERE filter is no longer leveraged. |
 
 The migration is applied automatically on container startup. No backfill was needed -- both tables are populated solely by the plays pipeline.
 

@@ -4,7 +4,7 @@
 [E-203: Fix FPS% Formula to Match GameChanger](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, both FPS% queries in the report generator will use `FPS / BF` (total batters faced) as the denominator instead of excluding HBP and Intentional Walk plate appearances. This aligns our standalone reports with GameChanger's FPS% calculation, eliminating the systematic overstatement that confuses coaches cross-referencing our reports against the GC app.

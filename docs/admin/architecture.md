@@ -116,7 +116,7 @@ The migration is applied automatically on container startup. Existing rows recei
 | `idx_plays_game_id` index | On `plays(game_id)`. |
 | `idx_plays_batter_id` index | On `plays(batter_id)`. |
 | `idx_plays_pitcher_id` index | On `plays(pitcher_id)`. |
-| `idx_plays_fps` partial index | On `plays(pitcher_id, is_first_pitch_strike)` WHERE `outcome NOT IN ('Hit By Pitch', 'Intentional Walk')`. Serves FPS% queries. |
+| `idx_plays_fps` partial index | On `plays(pitcher_id, is_first_pitch_strike)` WHERE `outcome NOT IN ('Hit By Pitch', 'Intentional Walk')`. Designed for the old FPS% formula; queries now use `FPS / BF` with no exclusions (matches GameChanger). The index remains valid but its WHERE filter is no longer leveraged. |
 
 **`play_events`** -- one row per event within a plate appearance:
 

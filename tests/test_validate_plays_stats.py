@@ -212,14 +212,14 @@ def _insert_season_batting(
 class TestFPSComparison:
     """FPS derivation and comparison tests (AC-1)."""
 
-    def test_compute_derived_fps_counts_strikes_excluding_hbp_ibb(
+    def test_compute_derived_fps_includes_hbp_and_ibb(
         self, db: sqlite3.Connection,
     ):
-        """Derived FPS excludes HBP and IBB outcomes."""
+        """Derived FPS includes HBP and IBB outcomes (matches GC formula)."""
         home_id, away_id = _seed_base_data(db)
         _insert_game(db, _GAME_ID_1, home_id, away_id)
 
-        # 4 PAs for pitcher A: 2 with FPS=1, 1 with FPS=0, 1 HBP (excluded).
+        # 4 PAs for pitcher A: 2 with FPS=1, 1 with FPS=0, 1 HBP with FPS=1.
         _insert_play(db, _GAME_ID_1, 0, _BATTER_X, _PITCHER_A, away_id, is_fps=1)
         _insert_play(db, _GAME_ID_1, 1, _BATTER_X, _PITCHER_A, away_id, is_fps=1)
         _insert_play(db, _GAME_ID_1, 2, _BATTER_X, _PITCHER_A, away_id, is_fps=0)
@@ -230,13 +230,13 @@ class TestFPSComparison:
         db.commit()
 
         result = compute_derived_fps(db)
-        # Only the first 3 plays count (HBP excluded), so FPS = 2.
-        assert result[(_PITCHER_A, _SEASON_ID)] == 2
+        # All 4 plays count (HBP included), 3 have FPS=1.
+        assert result[(_PITCHER_A, _SEASON_ID)] == 3
 
-    def test_compute_derived_fps_excludes_intentional_walk(
+    def test_compute_derived_fps_includes_intentional_walk(
         self, db: sqlite3.Connection,
     ):
-        """Derived FPS excludes Intentional Walk outcomes."""
+        """Derived FPS includes Intentional Walk outcomes (IBB with FPS=0 adds 0)."""
         home_id, away_id = _seed_base_data(db)
         _insert_game(db, _GAME_ID_1, home_id, away_id)
 

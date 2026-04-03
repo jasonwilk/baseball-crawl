@@ -1,7 +1,7 @@
 # E-203: Fix FPS% Formula to Match GameChanger
 
 ## Status
-`READY`
+`COMPLETED`
 
 ## Overview
 Our FPS% calculation excludes HBP and Intentional Walk plate appearances from both the numerator and denominator, while GameChanger includes all plate appearances (`FPS / BF`). This causes our reports to show systematically higher FPS% than what coaches see in the GC app and CSV exports -- up to 20pp higher for pitchers with many HBP/IBB PAs. Aligning with GameChanger's formula eliminates coach confusion when cross-referencing our reports against the app.
@@ -32,8 +32,8 @@ No expert consultation required -- this is a straightforward formula correction 
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-203-01 | Fix FPS% SQL queries in report generator | TODO | None | - |
-| E-203-02 | Update CLAUDE.md FPS% definition | TODO | E-203-01 | - |
+| E-203-01 | Fix FPS% SQL queries in report generator | DONE | None | SE |
+| E-203-02 | Update CLAUDE.md FPS% definition | DONE | E-203-01 | CA |
 
 ## Dispatch Team
 - software-engineer
@@ -68,11 +68,36 @@ None -- formula is verified against GC CSV exports.
 ## History
 - 2026-04-03: Created
 - 2026-04-03: READY after 3 review passes (8 findings, 7 accepted, 1 dismissed)
+- 2026-04-03: COMPLETED. 2 stories delivered (SE: FPS% SQL query fix, CA: CLAUDE.md definition update). FPS% now uses `FPS / BF` with no exclusions, matching GameChanger.
 
-### Review Scorecard
+### Spec Review Scorecard
 | Review Pass | Findings | Accepted | Dismissed |
 |---|---|---|---|
 | Internal iteration 1 -- CR spec audit | 2 | 2 | 0 |
 | Internal iteration 1 -- PM holistic | 2 | 1 | 1 |
 | Codex iteration 1 | 4 | 4 | 0 |
 | **Total** | **8** | **7** | **1** |
+
+### Implementation Review Scorecard
+| Review Pass | Findings | Accepted | Dismissed |
+|---|---|---|---|
+| Per-story CR -- E-203-01 | 1 | 0 | 1 |
+| Per-story CR -- E-203-02 | 0 | 0 | 0 |
+| CR integration review | 4 | 3 | 1 |
+| Codex code review | TBD | TBD | TBD |
+| **Total** | **5+** | **3+** | **2+** |
+
+### Documentation Assessment
+Documentation impact: stale FPS% formula references in `docs/admin/operations.md:637` and `docs/admin/architecture.md:119` need updating. Dispatch docs-writer before archiving.
+
+### Context-Layer Assessment
+| Trigger | Verdict | Notes |
+|---------|---------|-------|
+| T1: New convention or workflow | NO | Formula change, not a new convention |
+| T2: Footgun or failure mode | NO | Old footgun (exclusion mismatch) eliminated by the fix |
+| T3: Architectural decision | NO | No new architecture; query simplification only |
+| T4: Domain knowledge | NO | FPS% formula already codified in CLAUDE.md by E-203-02 |
+| T5: Agent ecosystem change | NO | No agent changes |
+| T6: External integration | NO | No new external integrations |
+
+No context-layer dispatch needed.

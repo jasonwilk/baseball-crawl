@@ -666,10 +666,8 @@ def _query_plays_pitching_stats(
         """
         SELECT
             p.pitcher_id,
-            SUM(CASE WHEN p.outcome NOT IN ('Hit By Pitch', 'Intentional Walk')
-                     THEN p.is_first_pitch_strike ELSE 0 END) AS fps_sum,
-            SUM(CASE WHEN p.outcome NOT IN ('Hit By Pitch', 'Intentional Walk')
-                     THEN 1 ELSE 0 END) AS fps_denom,
+            SUM(p.is_first_pitch_strike) AS fps_sum,
+            COUNT(*) AS fps_denom,
             SUM(p.pitch_count) AS total_pitches,
             COUNT(*) AS total_bf
         FROM plays p
@@ -769,10 +767,8 @@ def _query_plays_team_stats(
     fps_row = conn.execute(
         """
         SELECT
-            SUM(CASE WHEN p.outcome NOT IN ('Hit By Pitch', 'Intentional Walk')
-                     THEN p.is_first_pitch_strike ELSE 0 END),
-            SUM(CASE WHEN p.outcome NOT IN ('Hit By Pitch', 'Intentional Walk')
-                     THEN 1 ELSE 0 END)
+            SUM(p.is_first_pitch_strike),
+            COUNT(*)
         FROM plays p
         JOIN games g ON g.game_id = p.game_id
         JOIN team_rosters tr ON tr.player_id = p.pitcher_id
