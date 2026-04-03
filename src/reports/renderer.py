@@ -63,11 +63,15 @@ def _build_jinja_env() -> Environment:
     return env
 
 
-def _encode_spray_chart(events: list[dict], title: str | None = None) -> str:
+def _encode_spray_chart(
+    events: list[dict],
+    title: str | None = None,
+    figsize: tuple[float, float] = (3, 3),
+) -> str:
     """Render a spray chart and return a base64-encoded data URI string."""
     from src.charts.spray import render_spray_chart
 
-    png_bytes = render_spray_chart(events, title=title)
+    png_bytes = render_spray_chart(events, title=title, figsize=figsize)
     b64 = base64.b64encode(png_bytes).decode("ascii")
     return f"data:image/png;base64,{b64}"
 
@@ -368,7 +372,7 @@ def _build_team_spray_uri(spray_charts_raw: dict[str, list[dict]]) -> str | None
     if len(all_events) < _MIN_BIP_TEAM_SPRAY:
         return None
     try:
-        return _encode_spray_chart(all_events, title="Team Spray Chart")
+        return _encode_spray_chart(all_events, title="Team Spray Chart", figsize=(6, 6))
     except Exception:  # noqa: BLE001
         logger.warning("Failed to render team spray chart", exc_info=True)
         return None
@@ -613,6 +617,15 @@ def render_report(data: dict[str, Any]) -> str:
                 "Failed to render spray chart for player %s", player_id,
                 exc_info=True,
             )
+
+    # Sort spray charts by PA descending (most plate appearances first)
+    spray_data = dict(
+        sorted(
+            spray_data.items(),
+            key=lambda item: _compute_pa(batting_lookup.get(item[0], {})),
+            reverse=True,
+        )
+    )
 
     # Team spray chart
     team_spray_uri = _build_team_spray_uri(spray_charts_raw)

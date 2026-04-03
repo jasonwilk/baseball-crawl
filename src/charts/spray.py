@@ -448,6 +448,7 @@ def _draw_legend(ax: plt.Axes) -> None:
 def render_spray_chart(
     events: list[dict],
     title: str | None = None,
+    figsize: tuple[float, float] = (3, 3),
 ) -> bytes:
     """Render a spray chart PNG from a list of ball-in-play events.
 
@@ -472,11 +473,11 @@ def render_spray_chart(
     Returns:
         PNG image as raw bytes.
     """
-    fig, ax = plt.subplots(figsize=(3, 4))
+    fig, ax = plt.subplots(figsize=figsize)
     ax.set_facecolor(_BG_COLOR)
     fig.patch.set_facecolor(_BG_COLOR)
-    ax.set_xlim(0, 320)
-    ax.set_ylim(480, 0)  # invert: SVG y=0 is top (CF), y=480 is bottom
+    ax.set_xlim(-4, 324)
+    ax.set_ylim(365, 8)  # invert: SVG y=0 is top (CF); cropped to field content + legend space
     ax.set_aspect("equal")
     ax.axis("off")
 
