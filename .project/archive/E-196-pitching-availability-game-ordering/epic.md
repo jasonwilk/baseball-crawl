@@ -1,7 +1,7 @@
 # E-196: Pitching Availability and Game Chronological Ordering
 
 ## Status
-`READY`
+`COMPLETED`
 
 ## Overview
 Add pitching staff availability columns (Rest/Last and 7-day rolling workload) to all pitching display surfaces, and fix non-deterministic game ordering for same-day games by loading start_time and timezone from API responses into the games table. Together these give coaches workload-aware scouting intelligence with games displayed in correct chronological order.
@@ -35,11 +35,11 @@ This epic was designed through a consultation session with baseball-coach (coach
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-196-01 | Add start_time and timezone to games table and loaders | TODO | None | - |
-| E-196-02 | Fix game chronological ordering across all surfaces | TODO | E-196-01 | - |
-| E-196-03 | Pitching workload query function | TODO | None | - |
-| E-196-04 | Dashboard pitching availability columns | TODO | E-196-03 | - |
-| E-196-05 | Standalone report pitching availability columns | TODO | E-196-03 | - |
+| E-196-01 | Add start_time and timezone to games table and loaders | DONE | None | - |
+| E-196-02 | Fix game chronological ordering across all surfaces | DONE | E-196-01 | - |
+| E-196-03 | Pitching workload query function | DONE | None | - |
+| E-196-04 | Dashboard pitching availability columns | DONE | E-196-03 | - |
+| E-196-05 | Standalone report pitching availability columns | DONE | E-196-03 | - |
 
 ## Dispatch Team
 - software-engineer
@@ -138,3 +138,29 @@ None -- all design decisions locked in from consultation session.
 - 2026-04-01: Incorporated 13 accepted review findings (CR spec audit + coach holistic + UXD holistic). 1 dismissed (P/Xd format tradeoff -- user locked in). Key changes: migration 010→009, renderer.py→generator.py refs, span formula fix, NULL pitch count display, shared-file notes, key-player workload sub-line AC, vague AC-3 tightened.
 - 2026-04-01: Incorporated 5 accepted Codex spec review findings (of 9 total; 4 dismissed). Key changes: migration 009→010 (E-195 committed 009), ORDER BY direction-preserving convention (not hardcoded DESC), ace-box dual-mode rendering specified, 7-day window boundary fixed (−6 days not −7), TN-4 pitches_7d NULL consistency fix, db.py shared-file annotations.
 - 2026-04-01: Final polish (3 minor fixes): Success Criteria ordering language aligned with TN-3, mixed NULL pitch count edge case added to E-196-03, format parentheticals removed from E-196-04/05 AC-2 (TN-5 is authoritative). Status set to READY.
+- 2026-04-03: Completed. All 5 stories delivered. Migration numbered 014 (not 010 as spec'd -- 011-013 shipped by E-197/E-198/E-200 during review pause). 62 new tests across 5 test files. Review scorecard below.
+
+### Review Scorecard
+| Review Pass | Findings | Accepted | Dismissed |
+|---|---|---|---|
+| Per-story CR — E-196-01 | 3 | 3 | 0 |
+| Per-story CR — E-196-02 | 1 | 1 | 0 |
+| Per-story CR — E-196-03 | 0 | 0 | 0 |
+| Per-story CR — E-196-04 | 1 | 1 | 0 |
+| Per-story CR — E-196-05 | 2 | 2 | 0 |
+| CR integration review | 0 | 0 | 0 |
+| Codex code review | 4 | 4 | 0 |
+| **Total** | **11** | **11** | **0** |
+
+### Documentation Assessment
+New feature (pitching availability columns on all surfaces), new migration (014), new display behavior (JS dual-mode rendering), new game ordering convention. **Triggers docs update**: coaching docs should explain Rest/Last and P(7d) columns; admin docs should note migration 014.
+
+### Context-Layer Assessment
+| Trigger | Verdict | Details |
+|---------|---------|---------|
+| T1: New convention established? | **YES** | TN-3 game ordering convention: every `ORDER BY game_date` must include `start_time` as same-direction tiebreaker with `NULLS LAST`. Project-wide SQL convention. |
+| T2: New footgun discovered? | **YES** | Game loader must preserve existing `start_time`/`timezone` via COALESCE (game-summaries lacks time data). 7-day window boundary must use `-6 days` not `-7` (8-day window bug). |
+| T3: Agent capability changed? | **NO** | No agent definitions or capabilities modified. |
+| T4: New domain knowledge codified? | **YES** | Pitching workload data model (TN-4: 4-field computation, 3-way pitches_7d semantics). Display format conventions (TN-5: per-surface rendering rules). JS snippet conventions for standalone reports (TN-6). Data parity requirement (TN-7). |
+| T5: Process or workflow changed? | **NO** | No workflow changes. |
+| T6: New integration pattern established? | **YES** | `get_pitching_workload()` shared query function pattern for dashboard/report data parity. Dual-mode rendering pattern (server-rendered fallback + JS upgrade) for standalone reports. `_enrich_pitchers_with_workload()` enrichment pattern reusable for future stat columns. |

@@ -1030,6 +1030,79 @@ def _get_top_pitchers(pitchers: list[dict], n: int = 3) -> list[dict]:
     )[:n]
 
 
+def _enrich_pitchers_with_workload(
+    pitchers: list[dict],
+    workload: dict[str, dict],
+    *,
+    use_formatted_date: bool = False,
+) -> None:
+    """Merge workload data into pitcher dicts in place.
+
+    Adds ``rest_display``, ``p7d_display``, and ``workload_subline`` keys to
+    each pitcher dict for template rendering.
+
+    Args:
+        pitchers: List of pitcher dicts (mutated in place).
+        workload: Dict from ``db.get_pitching_workload()`` keyed by player_id.
+        use_formatted_date: When True, ``rest_display`` uses ``"Mar 28"``
+            format (print view).  When False, uses ``"3d"`` / ``"Today"``
+            format (dashboard).
+    """
+    for pitcher in pitchers:
+        pid = pitcher.get("player_id")
+        w = workload.get(pid) if pid else None
+        if w is None:
+            pitcher["rest_display"] = "\u2014"
+            pitcher["p7d_display"] = "\u2014"
+            pitcher["workload_subline"] = "No recent outings"
+            continue
+
+        # Rest / Last display
+        days_ago = w["last_outing_days_ago"]
+        last_date = w["last_outing_date"]
+        if days_ago is None:
+            pitcher["rest_display"] = "\u2014"
+        elif use_formatted_date and last_date:
+            pitcher["rest_display"] = _format_short_date(last_date)
+        elif days_ago == 0:
+            pitcher["rest_display"] = "Today"
+        else:
+            pitcher["rest_display"] = f"{days_ago}d"
+
+        # P(7d) display
+        pitches_7d = w["pitches_7d"]
+        span = w["span_days_7d"]
+        if pitches_7d is None and span is not None:
+            pitcher["p7d_display"] = f"?/{span}d"
+        elif pitches_7d == 0 or span is None:
+            pitcher["p7d_display"] = "\u2014"
+        else:
+            pitcher["p7d_display"] = f"{pitches_7d}/{span}d"
+
+        # Workload sub-line for "Their Pitchers" card
+        if days_ago is None:
+            pitcher["workload_subline"] = "No recent outings"
+        else:
+            rest_part = "Today" if days_ago == 0 else f"{days_ago}d ago"
+            pitcher["workload_subline"] = f"Last: {rest_part} \u00b7 {pitcher['p7d_display']}"
+
+
+def _format_short_date(iso_date: str) -> str:
+    """Format an ISO date as ``'Mar 28'`` for print views.
+
+    Args:
+        iso_date: Date string in ``YYYY-MM-DD`` format.
+
+    Returns:
+        Formatted date string like ``"Mar 28"``.
+    """
+    try:
+        dt = datetime.datetime.strptime(iso_date, "%Y-%m-%d")
+        return f"{dt.strftime('%b')} {dt.day}"
+    except (ValueError, TypeError):
+        return iso_date
+
+
 def _compute_team_batting(batting: list[dict]) -> dict:
     """Compute team-level aggregate batting tendencies from player season rows.
 
@@ -1499,6 +1572,16 @@ async def opponent_detail(request: Request, opponent_team_id: int) -> Response:
 
     # Compute pitching rates.
     pitchers = _compute_opponent_pitching_rates(scouting_report.get("pitching", []))
+
+    # Enrich pitchers with workload data BEFORE _get_top_pitchers so cards
+    # also carry workload sub-lines.
+    workload = await run_in_threadpool(
+        db.get_pitching_workload,
+        opponent_team_id,
+        season_id,
+        datetime.date.today().isoformat(),
+    )
+    _enrich_pitchers_with_workload(pitchers, workload)
     scouting_report["pitching"] = pitchers
 
     # Top 3 pitchers for the pitching card (by innings pitched).
@@ -1685,8 +1768,15 @@ async def opponent_print(request: Request, opponent_team_id: int) -> Response:
     )
     empty_state: str = scouting_status["status"]
 
-    # Compute pitching rates and apply default sorts.
+    # Compute pitching rates and enrich with workload data.
     pitchers = _compute_opponent_pitching_rates(scouting_report.get("pitching", []))
+    workload_pr = await run_in_threadpool(
+        db.get_pitching_workload,
+        opponent_team_id,
+        season_id,
+        datetime.date.today().isoformat(),
+    )
+    _enrich_pitchers_with_workload(pitchers, workload_pr, use_formatted_date=True)
     scouting_report["pitching"] = _sort_pitching(pitchers, "era", "asc")
     scouting_report["batting"] = _sort_batting(scouting_report.get("batting", []), "avg", "desc")
 

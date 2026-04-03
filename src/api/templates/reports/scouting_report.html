@@ -386,6 +386,7 @@
     <div class="key-player-label">Ace</div>
     <div class="key-player-name">{{ key_players.top_pitcher.name | e }}</div>
     <div class="key-player-stats">{{ key_players.top_pitcher.era }} ERA &middot; {{ key_players.top_pitcher.k9 }} K/9 &middot; {{ key_players.top_pitcher.ip }} IP</div>
+    {% if key_players.top_pitcher.workload_subline %}<div class="key-player-stats last-outing-cell" data-date="{{ key_players.top_pitcher.rest_date }}">{{ key_players.top_pitcher.workload_subline }}</div>{% endif %}
   </div>
   {% endif %}
   {% if key_players.top_batter %}
@@ -401,6 +402,7 @@
 {# ===== PITCHING (AC-5, AC-7, AC-8, AC-9, AC-12, AC-15, AC-16, TN-4) ===== #}
 <h2 class="section-header">Pitching</h2>
 <div class="sort-annotation">Sorted by innings pitched</div>
+{% if generation_date %}<div class="sort-annotation pitching-annotation">Generated {{ generation_date | format_date }}</div>{% endif %}
 {% if has_pitching %}
 <table>
   <thead>
@@ -421,6 +423,8 @@
       <th>Strike%</th>
       <th class="mob-hide">FPS%</th>
       <th class="mob-hide">P/BF</th>
+      <th class="last-outing-header">Last</th>
+      <th>P (7d)</th>
     </tr>
   </thead>
   <tbody>
@@ -442,6 +446,8 @@
       <td>{{ pitcher.strike_pct if pitcher.strike_pct else "&mdash;" | safe }}</td>
       <td class="mob-hide">{{ pitcher._fps_pct }}</td>
       <td class="mob-hide">{{ pitcher._pitches_per_bf }}</td>
+      <td class="last-outing-cell" data-date="{{ pitcher._rest_date }}">{{ pitcher._rest_display }}</td>
+      <td>{{ pitcher._p7d_display }}</td>
     </tr>
     {% endfor %}
   </tbody>
@@ -566,5 +572,44 @@
   Generated {{ generated_at[:10] if generated_at else "" }}{% if expires_at %} &middot; Expires {{ expires_at[:10] }}{% endif %} &middot; bbstats.ai
 </div>
 
+<script>
+(function() {
+  var cells = document.querySelectorAll('.last-outing-cell');
+  var now = new Date();
+  var todayStr = now.getFullYear() + '-' +
+    ('0' + (now.getMonth() + 1)).slice(-2) + '-' +
+    ('0' + now.getDate()).slice(-2);
+  var todayMs = new Date(todayStr + 'T00:00:00').getTime();
+  var updated = false;
+  for (var i = 0; i < cells.length; i++) {
+    var dateStr = cells[i].getAttribute('data-date');
+    if (!dateStr) continue;
+    var dateMs = new Date(dateStr + 'T00:00:00').getTime();
+    if (isNaN(dateMs)) continue;
+    var days = Math.round((todayMs - dateMs) / 86400000);
+    var daysText = days === 0 ? 'Today' : days + 'd';
+    var el = cells[i];
+    if (el.classList.contains('key-player-stats')) {
+      var p7d = el.textContent.split('\u00b7');
+      if (p7d.length === 2) {
+        el.textContent = 'Rest: ' + daysText + ' \u00b7' + p7d[1];
+      }
+    } else {
+      el.textContent = daysText;
+    }
+    updated = true;
+  }
+  if (updated) {
+    var headers = document.querySelectorAll('.last-outing-header');
+    for (var j = 0; j < headers.length; j++) {
+      headers[j].textContent = 'Rest';
+    }
+    var annotations = document.querySelectorAll('.pitching-annotation');
+    for (var k = 0; k < annotations.length; k++) {
+      annotations[k].textContent = annotations[k].textContent.replace('Generated', 'Data through');
+    }
+  }
+})();
+</script>
 </body>
 </html>

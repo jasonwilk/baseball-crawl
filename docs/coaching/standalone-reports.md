@@ -1,6 +1,6 @@
 # Standalone Reports
 
-*Last updated: 2026-04-03 | Source: E-183 (standalone reports coaching docs), E-199 (FPS%, P/BF, QAB%, P/PA columns)*
+*Last updated: 2026-04-03 | Source: E-183 (standalone reports coaching docs), E-199 (FPS%, P/BF, QAB%, P/PA columns), E-196 (Rest and P (7d) columns)*
 
 ---
 
@@ -34,6 +34,8 @@ The report shows similar pitching and batting stats as the dashboard opponent vi
 - ERA, K/9, BB/9, K/BB — standard pitching numbers
 - **FPS%** — first-pitch strike percentage: how often this pitcher is ahead in the count from pitch one
 - **P/BF** — pitches per batter faced: a quick read on his efficiency and how long he'll last
+- **Rest** — how many days since this pitcher last appeared (e.g., "2d"). In the web view, this shows as days elapsed. In a printed or saved PDF, it shows the actual date of the last outing (e.g., "Mar 28") so the report stays readable days after you generate it.
+- **P (7d)** — total pitches thrown over the last 7 days, with the count of days worked in that span (e.g., "85/3d" = 85 pitches over 3 appearances in the last 7 days). "—" means no outings in the last 7 days; "?/2d" means the pitcher appeared but pitch counts weren't recorded in GameChanger.
 
 **Batting table** — Stats for each batter:
 - OBP, SLG, K%, BB% — standard batting numbers

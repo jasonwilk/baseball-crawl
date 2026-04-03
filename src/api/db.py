@@ -214,6 +214,111 @@ def get_team_pitching_stats(
         return []
 
 
+def get_pitching_workload(
+    team_id: int,
+    season_id: str,
+    reference_date: str | None = None,
+    *,
+    db: sqlite3.Connection | None = None,
+) -> dict[str, dict[str, Any]]:
+    """Return per-pitcher workload data for a team.
+
+    Computes last outing date, days since last outing, 7-day pitch total, and
+    7-day span from ``player_game_pitching`` joined to ``games``.
+
+    Args:
+        team_id: INTEGER PK of the team.
+        season_id: Season slug to scope the query.
+        reference_date: ISO date string (``YYYY-MM-DD``) used as "today" for
+            days-ago and 7-day window calculations.  Defaults to the current
+            date (``date('now')``).
+        db: Optional pre-existing connection (used by the report generator
+            which manages its own connection).  When ``None``, opens a new
+            connection via ``get_connection()``.
+
+    Returns:
+        Dict keyed by ``player_id`` with values containing:
+        ``last_outing_date``, ``last_outing_days_ago``, ``pitches_7d``,
+        ``span_days_7d``.  Returns empty dict on database error.
+    """
+    if reference_date is None:
+        reference_date = datetime.date.today().isoformat()
+
+    query = """
+        WITH pitcher_games AS (
+            SELECT
+                pgp.player_id,
+                g.game_date,
+                pgp.pitches
+            FROM player_game_pitching pgp
+            JOIN games g ON g.game_id = pgp.game_id
+            WHERE pgp.team_id = :team_id
+              AND g.season_id = :season_id
+        ),
+        last_outing AS (
+            SELECT
+                player_id,
+                MAX(game_date) AS last_outing_date
+            FROM pitcher_games
+            GROUP BY player_id
+        ),
+        seven_day AS (
+            SELECT
+                player_id,
+                -- appearances_7d: count of games in the 7-day window
+                COUNT(*) AS appearances_7d,
+                -- non_null_pitch_count: how many of those have non-NULL pitches
+                COUNT(pitches) AS non_null_pitch_count,
+                -- raw_sum: SUM of non-NULL pitches (NULL if all are NULL)
+                SUM(pitches) AS raw_sum,
+                -- span: days between first and last appearance + 1
+                CAST(julianday(MAX(game_date)) - julianday(MIN(game_date)) + 1 AS INTEGER) AS span_days_7d
+            FROM pitcher_games
+            WHERE game_date >= date(:ref_date, '-6 days')
+              AND game_date <= :ref_date
+            GROUP BY player_id
+        )
+        SELECT
+            lo.player_id,
+            lo.last_outing_date,
+            CAST(julianday(:ref_date) - julianday(lo.last_outing_date) AS INTEGER) AS last_outing_days_ago,
+            CASE
+                WHEN sd.appearances_7d IS NULL THEN 0
+                WHEN sd.non_null_pitch_count = 0 THEN NULL
+                ELSE sd.raw_sum
+            END AS pitches_7d,
+            sd.span_days_7d
+        FROM last_outing lo
+        LEFT JOIN seven_day sd ON sd.player_id = lo.player_id
+    """
+    params = {
+        "team_id": team_id,
+        "season_id": season_id,
+        "ref_date": reference_date,
+    }
+    own_conn = db is None
+    try:
+        conn = db if db is not None else get_connection()
+        try:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(query, params).fetchall()
+            result: dict[str, dict[str, Any]] = {}
+            for row in rows:
+                result[row["player_id"]] = {
+                    "last_outing_date": row["last_outing_date"],
+                    "last_outing_days_ago": row["last_outing_days_ago"],
+                    "pitches_7d": row["pitches_7d"],
+                    "span_days_7d": row["span_days_7d"],
+                }
+            return result
+        finally:
+            if own_conn:
+                conn.close()
+    except sqlite3.Error:
+        logger.exception("Failed to fetch pitching workload for team %d", team_id)
+        return {}
+
+
 def get_team_games(
     team_id: int,
     season_id: str,
@@ -254,7 +359,7 @@ def get_team_games(
         LEFT JOIN teams opp_home ON opp_home.id = g.home_team_id
         WHERE g.season_id = :season_id
           AND (g.home_team_id = :team_id OR g.away_team_id = :team_id)
-        ORDER BY g.game_date DESC
+        ORDER BY g.game_date DESC, g.start_time DESC NULLS LAST
     """
     try:
         with closing(get_connection()) as conn:
@@ -358,7 +463,7 @@ def get_schedule_games(
         )
         WHERE g.season_id = :season_id
           AND (g.home_team_id = :team_id OR g.away_team_id = :team_id)
-        ORDER BY g.game_date ASC
+        ORDER BY g.game_date ASC, g.start_time ASC NULLS LAST
     """
     try:
         with closing(get_connection()) as conn:
@@ -825,7 +930,7 @@ def get_last_meeting(
               OR
               (g.away_team_id = :team_id AND g.home_team_id = :opp_id)
           )
-        ORDER BY g.game_date DESC
+        ORDER BY g.game_date DESC, g.start_time DESC NULLS LAST
         LIMIT 1
     """
     try:
@@ -954,6 +1059,7 @@ def get_player_profile(player_id: str) -> dict[str, Any]:
         SELECT
             g.game_id,
             g.game_date,
+            g.start_time,
             CASE WHEN g.home_team_id = pgb.team_id
                  THEN opp_away.name
                  ELSE opp_home.name
@@ -977,6 +1083,7 @@ def get_player_profile(player_id: str) -> dict[str, Any]:
         SELECT
             g.game_id,
             g.game_date,
+            g.start_time,
             CASE WHEN g.home_team_id = pgp.team_id
                  THEN opp_away.name
                  ELSE opp_home.name
@@ -1031,14 +1138,19 @@ def get_player_profile(player_id: str) -> dict[str, Any]:
     # Return both batting and pitching rows for two-way games (a player who bats
     # and pitches in the same game has two rows -- both are needed for the full picture).
     # Identify the 5 most recent distinct games by date, then return all rows for those games.
-    game_dates: dict[str, str] = {row["game_id"]: row["game_date"] for row in raw_games}
+    game_sort_keys: dict[str, tuple[str, str]] = {}
+    for row in raw_games:
+        gid = row["game_id"]
+        if gid not in game_sort_keys:
+            # (game_date, start_time or empty for NULLS LAST in DESC)
+            game_sort_keys[gid] = (row["game_date"], row.get("start_time") or "")
     top_game_ids = {
         gid
-        for gid, _ in sorted(game_dates.items(), key=lambda x: x[1], reverse=True)[:5]
+        for gid, _ in sorted(game_sort_keys.items(), key=lambda x: x[1], reverse=True)[:5]
     }
     recent_games = sorted(
         [row for row in raw_games if row["game_id"] in top_game_ids],
-        key=lambda r: r["game_date"],
+        key=lambda r: (r["game_date"], r.get("start_time") or ""),
         reverse=True,
     )
 

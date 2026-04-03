@@ -63,6 +63,8 @@ If no games have been loaded for this opponent yet, the coverage line won't appe
 - K/BB ratio — a higher number means they pound the zone; a lower number means they struggle with control
 - Games pitched this season
 - Handedness (L/R) when available
+- **Rest** — how many days since this pitcher last appeared (e.g., "2d"). "Today" means they pitched in the most recent game. "—" means no outing data is available.
+- **P (7d)** — total pitches thrown over the last 7 days, plus how many of those days included an appearance (e.g., "85/3d" = 85 pitches across 3 outings in the last 7 days). "—" means no recent outings. "?/2d" means the pitcher appeared but pitch counts weren't recorded in GameChanger.
 
 **Team Batting Summary** — The opponent's team-wide tendencies for the season:
 - OBP (on-base percentage), strikeout rate, walk rate, SLG (slugging)
@@ -93,7 +95,7 @@ When full stats are loaded for an opponent, a **Print / Save as PDF** link appea
 
 The print view is formatted for a standard landscape page:
 
-- **Page 1**: Report header, game coverage indicator ("Through [date] ([N] games)"), context bar (last meeting result and batting tendencies), and the full pitching table
+- **Page 1**: Report header, game coverage indicator ("Through [date] ([N] games)"), context bar (last meeting result and batting tendencies), and the full pitching table. The **Rest** column in the print view shows the actual date of last outing (e.g., "Mar 28") rather than days elapsed — so the printed report is accurate even if it's read a few days later.
 - **Page 2+**: Full batting table and batter tendencies charts
 
 From the print view, use your browser's print command (**Ctrl+P** on Windows/Linux, **Cmd+P** on Mac) to print on paper or save as a PDF file. The page is self-contained — it works offline and prints cleanly without extra browser chrome.
@@ -160,4 +162,4 @@ A quick reference for stats shown throughout the dashboard:
 
 ---
 
-*Last updated: 2026-03-31 | Story references: E-163 (spray charts), E-153-03, E-153-04, E-159, E-183 (standalone reports), E-181-02 (game coverage indicator), E-181-03 (richer empty states, print page coverage indicator)*
+*Last updated: 2026-04-03 | Story references: E-163 (spray charts), E-153-03, E-153-04, E-159, E-183 (standalone reports), E-181-02 (game coverage indicator), E-181-03 (richer empty states, print page coverage indicator), E-196 (Rest and P (7d) pitching columns)*

@@ -345,7 +345,7 @@ def get_fps_game_diagnostics(
         WHERE p.pitcher_id = ?
           AND p.outcome NOT IN ('Hit By Pitch', 'Intentional Walk')
         GROUP BY p.game_id
-        ORDER BY g.game_date
+        ORDER BY g.game_date ASC, g.start_time ASC NULLS LAST
         """,
         (pitcher_id,),
     ).fetchall()
@@ -379,7 +379,7 @@ def get_qab_game_diagnostics(
         LEFT JOIN games g ON p.game_id = g.game_id
         WHERE p.batter_id = ?
         GROUP BY p.game_id
-        ORDER BY g.game_date
+        ORDER BY g.game_date ASC, g.start_time ASC NULLS LAST
         """,
         (batter_id,),
     ).fetchall()

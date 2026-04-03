@@ -27,7 +27,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from src.api.db import get_connection
+from src.api.db import get_connection, get_pitching_workload
 from src.db.teams import ensure_team_row
 from src.gamechanger.client import CredentialExpiredError, GameChangerClient
 from src.gamechanger.crawlers.scouting import ScoutingCrawler
@@ -295,7 +295,7 @@ def _query_recent_games(
         WHERE g.season_id = ?
           AND (g.home_team_id = ? OR g.away_team_id = ?)
           AND g.home_score IS NOT NULL AND g.away_score IS NOT NULL
-        ORDER BY g.game_date DESC
+        ORDER BY g.game_date DESC, g.start_time DESC NULLS LAST
         LIMIT ?
         """,
         (season_id, team_id, team_id, limit),
@@ -1044,6 +1044,12 @@ def generate_report(gc_url: str) -> GenerationResult:
                 conn, team_id, season_id
             )
 
+            # Pitching workload (uses generation date as reference)
+            generation_date = generated_at[:10]
+            pitching_workload = get_pitching_workload(
+                team_id, season_id, generation_date, db=conn,
+            )
+
             # Plays-derived stats
             plays_pitching = _query_plays_pitching_stats(conn, team_id, season_id)
             plays_batting = _query_plays_batting_stats(conn, team_id, season_id)
@@ -1108,6 +1114,8 @@ def generate_report(gc_url: str) -> GenerationResult:
             "team_pitches_per_pa": plays_team["team_pitches_per_pa"],
             "has_plays_data": plays_team["has_plays_data"],
             "plays_game_count": plays_team["plays_game_count"],
+            "pitching_workload": pitching_workload,
+            "generation_date": generation_date,
         }
         html = render_report(data)
 

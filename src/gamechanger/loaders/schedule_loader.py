@@ -147,8 +147,10 @@ class ScheduleLoader:
         if not game_id:
             raise ValueError("Event missing 'id' field")
 
-        # Extract game date from event.start
+        # Extract game date, start_time, and timezone from event
         game_date = self._extract_game_date(event)
+        start_time = self._extract_start_time(event)
+        timezone = event.get("timezone")
 
         # Resolve opponent team ID
         opponent_root_team_id = pregame.get("opponent_id")
@@ -174,8 +176,8 @@ class ScheduleLoader:
             """
             INSERT INTO games
                 (game_id, season_id, game_date, home_team_id, away_team_id,
-                 home_score, away_score, status)
-            VALUES (?, ?, ?, ?, ?, NULL, NULL, 'scheduled')
+                 home_score, away_score, status, start_time, timezone)
+            VALUES (?, ?, ?, ?, ?, NULL, NULL, 'scheduled', ?, ?)
             ON CONFLICT(game_id) DO UPDATE SET
                 game_date    = excluded.game_date,
                 home_team_id = excluded.home_team_id,
@@ -188,9 +190,12 @@ class ScheduleLoader:
                                     ELSE excluded.away_score END,
                 status       = CASE WHEN games.status = 'completed'
                                     THEN games.status
-                                    ELSE excluded.status END
+                                    ELSE excluded.status END,
+                start_time   = excluded.start_time,
+                timezone     = excluded.timezone
             """,
-            (game_id, self._season_id, game_date, home_team_id, away_team_id),
+            (game_id, self._season_id, game_date, home_team_id, away_team_id,
+             start_time, timezone),
         )
 
         # Upsert team_opponents junction row (AC-6)
@@ -240,6 +245,18 @@ class ScheduleLoader:
             event.get("id"),
         )
         return "1900-01-01"
+
+    def _extract_start_time(self, event: dict) -> str | None:
+        """Extract the full ISO 8601 start time from an event's start field.
+
+        Args:
+            event: The event object from schedule.json.
+
+        Returns:
+            ISO 8601 datetime string or ``None`` if unavailable.
+        """
+        start = event.get("start") or {}
+        return start.get("datetime")
 
     def _resolve_opponent(
         self,

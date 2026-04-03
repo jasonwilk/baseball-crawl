@@ -137,6 +137,8 @@ class GameSummaryEntry:
         opponent_team_score: Score for the opponent team.
         opponent_id: UUID of the opponent team.
         last_scoring_update: ISO 8601 timestamp string.
+        start_time: ISO 8601 datetime string from schedule/public endpoint, or None.
+        timezone: IANA timezone identifier (e.g., ``America/Chicago``), or None.
     """
 
     event_id: str
@@ -146,6 +148,8 @@ class GameSummaryEntry:
     opponent_team_score: int
     opponent_id: str
     last_scoring_update: str
+    start_time: str | None = None
+    timezone: str | None = None
 
 
 @dataclass
@@ -606,6 +610,8 @@ class GameLoader:
                 summary.event_id, game_date,
                 home_team_id, away_team_id, home_score, away_score,
                 summary.game_stream_id,
+                start_time=summary.start_time,
+                timezone=summary.timezone,
             )
         except sqlite3.Error as exc:
             logger.error("Failed to upsert game %s: %s", summary.event_id, exc)
@@ -930,6 +936,8 @@ class GameLoader:
         home_score: int,
         away_score: int,
         game_stream_id: str,
+        start_time: str | None = None,
+        timezone: str | None = None,
     ) -> None:
         """Upsert a game record into the ``games`` table.
 
@@ -941,13 +949,16 @@ class GameLoader:
             home_score: Final home score.
             away_score: Final away score.
             game_stream_id: Stream ID from game-summaries (boxscore file key).
+            start_time: ISO 8601 datetime string from schedule/public endpoint.
+            timezone: IANA timezone identifier (e.g., ``America/Chicago``).
         """
         self._db.execute(
             """
             INSERT INTO games
                 (game_id, season_id, game_date, home_team_id, away_team_id,
-                 home_score, away_score, status, game_stream_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, 'completed', ?)
+                 home_score, away_score, status, game_stream_id,
+                 start_time, timezone)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'completed', ?, ?, ?)
             ON CONFLICT(game_id) DO UPDATE SET
                 season_id      = excluded.season_id,
                 game_date      = excluded.game_date,
@@ -956,10 +967,12 @@ class GameLoader:
                 home_score     = excluded.home_score,
                 away_score     = excluded.away_score,
                 status         = excluded.status,
-                game_stream_id = excluded.game_stream_id
+                game_stream_id = excluded.game_stream_id,
+                start_time     = COALESCE(excluded.start_time, games.start_time),
+                timezone       = COALESCE(excluded.timezone, games.timezone)
             """,
             (game_id, self._season_id, game_date, home_team_id, away_team_id,
-             home_score, away_score, game_stream_id),
+             home_score, away_score, game_stream_id, start_time, timezone),
         )
         logger.debug(
             "Upserted game %s: %s vs %s (%d-%d) on %s",

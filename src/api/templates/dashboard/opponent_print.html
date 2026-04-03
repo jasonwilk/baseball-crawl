@@ -295,6 +295,8 @@
       <th>BB</th>
       <th>SO</th>
       <th>Strike%</th>
+      <th>Last</th>
+      <th>P (7d)</th>
     </tr>
   </thead>
   <tbody>
@@ -310,6 +312,8 @@
       <td>{{ pitcher.bb }}</td>
       <td>{{ pitcher.so }}</td>
       <td>{{ pitcher.strike_pct }}</td>
+      <td>{{ pitcher.rest_display }}</td>
+      <td>{{ pitcher.p7d_display }}</td>
     </tr>
     {% endfor %}
   </tbody>

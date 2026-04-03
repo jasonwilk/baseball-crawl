@@ -307,6 +307,9 @@ def _compute_key_players(
             "era": top_pitcher.get("era", "-"),
             "k9": top_pitcher.get("k9", "-"),
             "ip": ip_display(ip_outs),
+            "workload_subline": top_pitcher.get("_workload_subline", ""),
+            "rest_date": top_pitcher.get("_rest_date", ""),
+            "p7d_display": top_pitcher.get("_p7d_display", "\u2014"),
         }
 
     # Top batter: highest OBP among non-small-sample
@@ -463,6 +466,68 @@ def _format_plays_batting(batting: list[dict]) -> None:
         b["_pitches_per_pa"] = _format_rate(b.get("pitches_per_pa"))
 
 
+def _format_short_date(iso_date: str) -> str:
+    """Format an ISO date as ``'Mar 28'`` for print/PDF fallback."""
+    import datetime as _dt
+
+    try:
+        d = _dt.datetime.strptime(iso_date, "%Y-%m-%d")
+        return f"{d.strftime('%b')} {d.day}"
+    except (ValueError, TypeError):
+        return iso_date
+
+
+def _enrich_pitchers_workload(
+    pitching: list[dict],
+    workload: dict[str, dict],
+) -> None:
+    """Merge workload data into pitcher dicts for standalone report rendering.
+
+    Adds ``_rest_date``, ``_rest_display``, ``_p7d_display``, and
+    ``_workload_subline`` keys.  The report template uses ``_rest_date`` in a
+    ``data-date`` attribute for JS upgrade; ``_rest_display`` is the
+    server-rendered fallback (formatted date).
+    """
+    for pitcher in pitching:
+        pid = pitcher.get("player_id")
+        w = workload.get(pid) if pid else None
+        if w is None:
+            pitcher["_rest_date"] = ""
+            pitcher["_rest_display"] = "\u2014"
+            pitcher["_p7d_display"] = "\u2014"
+            pitcher["_workload_subline"] = "No recent outings"
+            continue
+
+        last_date = w["last_outing_date"]
+        days_ago = w["last_outing_days_ago"]
+
+        # Server-rendered date (PDF/print fallback)
+        if last_date:
+            pitcher["_rest_date"] = last_date
+            pitcher["_rest_display"] = _format_short_date(last_date)
+        else:
+            pitcher["_rest_date"] = ""
+            pitcher["_rest_display"] = "\u2014"
+
+        # P(7d) display
+        pitches_7d = w["pitches_7d"]
+        span = w["span_days_7d"]
+        if pitches_7d is None and span is not None:
+            pitcher["_p7d_display"] = f"?/{span}d"
+        elif pitches_7d == 0 or span is None:
+            pitcher["_p7d_display"] = "\u2014"
+        else:
+            pitcher["_p7d_display"] = f"{pitches_7d}/{span}d"
+
+        # Workload sub-line for key-player callout
+        if days_ago is None:
+            pitcher["_workload_subline"] = "No recent outings"
+        else:
+            pitcher["_workload_subline"] = (
+                f"Last: {pitcher['_rest_display']} \u00b7 {pitcher['_p7d_display']}"
+            )
+
+
 def render_report(data: dict[str, Any]) -> str:
     """Render a standalone scouting report HTML string.
 
@@ -517,6 +582,11 @@ def render_report(data: dict[str, Any]) -> str:
         pitcher["_small_sample"] = ip_outs < _MIN_IP_OUTS_PITCHING
     _format_plays_pitching(pitching)
     _compute_pitching_heat(pitching)
+
+    # Enrich pitchers with workload data
+    pitching_workload = data.get("pitching_workload") or {}
+    generation_date = data.get("generation_date") or ""
+    _enrich_pitchers_workload(pitching, pitching_workload)
 
     # Key players
     key_players = _compute_key_players(batting, pitching)
@@ -602,6 +672,7 @@ def render_report(data: dict[str, Any]) -> str:
         "plays_game_count": plays_game_count,
         "team_fps_pct": team_fps_pct,
         "team_pitches_per_pa": team_pitches_per_pa,
+        "generation_date": generation_date,
     }
 
     return template.render(**context)

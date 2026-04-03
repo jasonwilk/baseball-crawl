@@ -294,6 +294,8 @@ class ScoutingLoader:
                 opponent_team_score=int(score.get("opponent_team") or 0),
                 opponent_id="",
                 last_scoring_update=str(start_ts),
+                start_time=game.get("start_ts"),
+                timezone=game.get("timezone"),
             )
             index[entry.game_stream_id] = entry
 

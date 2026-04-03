@@ -235,6 +235,38 @@ An intentional walk, dropped third strike, or catcher's interference does **not*
 
 ---
 
+### Rest -- Days Since Last Outing
+
+**What it measures:** How long ago this pitcher last appeared in a game, in days.
+
+**What the numbers mean:**
+- **"Today"** — pitched in the most recent game. Likely on short rest or needing monitoring.
+- **"1d"** or **"2d"** — appeared very recently. High school pitch-count and workload rules apply; may not be available to pitch again.
+- **"4d" or more** — on regular rest. Standard availability.
+- **"—"** — no outing data is available for this pitcher.
+
+**Why it matters:** Rest directly affects a pitcher's availability. A pitcher who threw 80 pitches two days ago is not the same threat as one who has been off five days. Before a game, check Rest alongside P (7d) to know who in their bullpen they can actually use.
+
+**Display note:** In the live dashboard and browser view of a standalone report, Rest shows as days elapsed (e.g., "2d"). In a **printed or PDF** version of a scouting report, it shows the actual date of the last outing (e.g., "Mar 28") so the information stays accurate even if the printed copy is read a few days later.
+
+---
+
+### P (7d) -- 7-Day Pitch Workload
+
+**What it measures:** Total pitches this pitcher has thrown over the last 7 days, plus how many of those days included an appearance.
+
+**The format:** "85/3d" means 85 pitches across 3 days of work in the last 7 days. Only days with actual outings are counted in the day number -- rest days are not included.
+
+**What the numbers mean:**
+- **"—"** — no outings in the last 7 days. This pitcher is fresh.
+- Low total (e.g., "15/1d") — threw briefly in one appearance; likely available.
+- High total (e.g., "110/3d") — has worked a lot recently and across multiple appearances; may have limits on what he can throw today.
+- **"?/2d"** — appeared in games but pitch counts were not recorded in GameChanger for those outings; the day count is accurate but total pitches cannot be calculated.
+
+**Why it matters:** Workload is cumulative. A pitcher who threw 30 pitches on Tuesday and 50 on Thursday has 80 pitches on a 7-day frame even if his individual outings looked short. P (7d) lets you see the full picture at a glance and anticipate which arms they can lean on and which they need to protect.
+
+---
+
 ### P/BF -- Pitches Per Batter Faced
 
 **What it measures:** How many pitches a pitcher throws for each batter he faces, on average. A direct measure of efficiency.
@@ -310,4 +342,4 @@ Splits break down a player's stats by specific situations. The two most useful s
 
 ---
 
-*Last updated: 2026-04-03 | Source: E-028-04 (initial glossary), E-199 (FPS%, P/BF, QAB%, P/PA)*
+*Last updated: 2026-04-03 | Source: E-028-04 (initial glossary), E-199 (FPS%, P/BF, QAB%, P/PA), E-196 (Rest, P (7d))*

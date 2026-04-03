@@ -91,6 +91,19 @@ baseball-crawl/
 
 ## Schema Changes
 
+### E-196: Migration 014 -- Game Start Time and Timezone
+
+`migrations/014_games_start_time_timezone.sql` adds two columns to the `games` table:
+
+| Addition | Notes |
+|----------|-------|
+| `start_time TEXT` | ISO 8601 time-of-day string for the game start (e.g., `"17:00:00"`). Nullable; populated from GameChanger schedule data when available. |
+| `timezone TEXT` | IANA timezone identifier for the game (e.g., `"America/Chicago"`). Nullable. |
+
+**Why these columns exist:** GameChanger schedule responses include `start_time` and `timezone` fields for most games. These are stored to enable chronological ordering of same-day games (doubleheaders). Before this migration, doubleheader games were displayed in insertion order, which could differ from game time. After this migration, the schedule views sort by `(date, start_time)` so doubleheaders appear in the correct game-time sequence.
+
+The migration is applied automatically on container startup. Existing rows receive `NULL` for both columns; values are populated on the next schedule crawl and load.
+
 ### E-195: Migration 009 -- Plays and Play Events Tables
 
 `migrations/009_plays_play_events.sql` adds two tables for play-by-play data ingestion.
@@ -242,4 +255,4 @@ Sub-navigation links Users, Teams, and Opponents pages across all admin views. T
 
 ---
 
-*Last updated: 2026-04-01 | Source: E-195 (migration 009 plays/play_events tables), E-173 (unified resolve route, subnav badge, discover-opponents route removed), E-167 (migration 007 name+season_year index), E-158 (src/charts/ module, migration 006 spray chart additions), E-120-06 (opponent_links table, sub-nav Opponents, url_parser correction, port 8001, teams columns), E-115-02 (schema and admin sections rewritten for E-100 fresh-start schema), E-042 (admin team management, url_parser, team_resolver), E-003-02 (original)*
+*Last updated: 2026-04-03 | Source: E-196 (migration 014 start_time/timezone, game ordering), E-195 (migration 009 plays/play_events tables), E-173 (unified resolve route, subnav badge, discover-opponents route removed), E-167 (migration 007 name+season_year index), E-158 (src/charts/ module, migration 006 spray chart additions), E-120-06 (opponent_links table, sub-nav Opponents, url_parser correction, port 8001, teams columns), E-115-02 (schema and admin sections rewritten for E-100 fresh-start schema), E-042 (admin team management, url_parser, team_resolver), E-003-02 (original)*
