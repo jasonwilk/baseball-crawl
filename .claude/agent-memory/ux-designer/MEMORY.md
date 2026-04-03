@@ -46,17 +46,39 @@
 ### Back Link Pattern
 - `text-blue-900 hover:underline text-sm` with `&larr;` arrow prefix
 
-## Coach-Friendly Language (E-088 Design)
+## Coach-Friendly Language (Current Conventions — E-178, supersedes E-088)
 
-For opponent link states (approved during design advisory):
+### Terminology (E-178 replacements)
+
+These terms replaced E-088 / pre-E-178 equivalents. Use the E-178 term in all new work.
+
+| Old Term (E-088 / pre-E-178) | Current Term (E-178) | Context |
+|---|---|---|
+| "Discovered" (gc_uuid badge) | "Connected" | Consequence-oriented: tells coach they get full stats |
+| "Not available (403)" (gc_uuid badge) | "Limited access" | Consequence-oriented: tells coach data is partial |
+| "Sync" / "Sync Now" (action button) | "Update Stats" | Unified verb for all data refresh actions |
+| "Last Synced" (column/label) | "Last Updated" | Consistent with "Update Stats" verb |
+| "Syncing..." / "Running..." (status) | "Updating..." | Consistent with "Update Stats" verb |
+| "Sync failed" (status badge) | "Update failed" | Consistent with "Update Stats" verb |
+| "Resolve" (duplicate banner link) | "Merge" | User decision: merge duplicates, not "resolve" them |
+| "Canonical" (merge page labels) | "keep" / "remove" | Plain English for merge page decisions |
+| "Resolved" (flash messages) | "Linked" | Opponent connection language |
+| "Unresolved — map first" (inline text) | "Not linked — find on GameChanger first" | Action-oriented, explains what to do |
+| "Stats not loaded yet" (empty state) | "Stats aren't ready yet" | Softer, less technical |
+
+### Retained terms (unchanged by E-178)
+
+These E-088 terms remain current:
+- "Scoresheet only" (yellow badge)
+- "Full stats" (green badge)
+- "Connect to GameChanger" (opponent link action)
+- "Disconnect" (opponent unlink action)
+
+### Opponent link state badges
+
 - Auto-linked: "Full stats" (green badge) + "auto" micro-label (gray, secondary)
 - Manual-linked: "Full stats" (green badge) + "manual" micro-label (gray, secondary)
 - Unlinked: "Scoresheet only" (yellow badge)
-
-Actions:
-- Link: "Connect to GameChanger"
-- Unlink: "Disconnect"
-- Re-link: "Update connection"
 
 Key principle: Coaches care about "do I have their real stats?" not HOW the connection was made.
 
@@ -68,6 +90,14 @@ Designed for opponent link state. Uses filled/unfilled dot + colored pill patter
 - Auto/manual distinction shown as gray micro-text BESIDE the badge, not inside it
 
 See E-088 design advisory for full HTML/Tailwind markup.
+
+## Reference Implementations
+
+- `src/api/templates/admin/reports.html` — auto-refresh (meta tag) and error tooltip patterns. Reference this page when designing similar async-status or error-detail UX.
+
+## Topic Files
+
+- [Design Principles](design_principles.md) — Consequence-oriented labels, question-as-heading, unified verbs, coach modes (E-178)
 
 ## Feedback
 

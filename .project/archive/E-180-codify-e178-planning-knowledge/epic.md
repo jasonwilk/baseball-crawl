@@ -1,7 +1,7 @@
 # E-180: Codify E-178 Planning Knowledge
 
 ## Status
-`READY`
+`COMPLETED`
 
 ## Overview
 Capture the design principles and terminology conventions generated during E-178's planning session into UXD agent memory. This knowledge was produced by expert consultations but currently exists only in the E-178 epic file and conversation history.
@@ -52,7 +52,7 @@ No additional expert consultation required — CA and DW covered the relevant do
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-180-01 | UXD agent memory — design principles, terminology refresh, and reference implementations | TODO | None | - |
+| E-180-01 | UXD agent memory — design principles, terminology refresh, and reference implementations | DONE | None | claude-architect |
 
 ## Dispatch Team
 - claude-architect
@@ -115,4 +115,20 @@ None.
 | Review Pass | Findings | Accepted | Dismissed |
 |---|---|---|---|
 | Codex iteration 1 | 3 | 3 | 0 |
+| Per-story PM AC — E-180-01 | 0 | 0 | 0 |
 | **Total** | **3** | **3** | **0** |
+
+- 2026-04-03: Dispatched. E-180-01 completed by claude-architect, all 5 ACs verified by PM. Context-layer-only story — CR and Codex review skipped.
+- 2026-04-03: Epic COMPLETED.
+
+### Documentation Assessment
+No documentation impact — epic modifies agent memory files only, no feature/endpoint/architecture changes.
+
+### Context-Layer Assessment
+The epic IS the context-layer update (codifying E-178 knowledge into UXD agent memory). All 6 triggers evaluated:
+- **T1 (New convention or pattern)**: NO — design principles and terminology were already established by E-178; this epic only moved them to agent memory.
+- **T2 (Footgun discovered)**: NO — no new footgun discovered.
+- **T3 (Domain knowledge codified)**: NO — the domain knowledge was already codified by E-178; this epic relocated it.
+- **T4 (Agent behavior adjustment)**: NO — no agent behavior change beyond memory content.
+- **T5 (Architecture decision)**: NO — no architecture decision made.
+- **T6 (Process improvement)**: NO — no process change.
