@@ -1046,3 +1046,635 @@ class TestGetSummaryFromDB:
         assert result["total_corrected"] == 1
         assert result["pitcher_signals"]["pitcher_bf"]["MATCH"] == 1
         assert result["pitcher_signals"]["pitcher_so"]["CORRECTED"] == 1
+
+
+# ---------------------------------------------------------------------------
+# E-201-01: Five accuracy fixes
+# ---------------------------------------------------------------------------
+
+
+class TestBoxscoreSupplement:
+    """Fix 1: Boxscore pitches/total_strikes supplement for high-confidence pitchers."""
+
+    def test_supplement_applied_when_gate_passes(self, db: sqlite3.Connection) -> None:
+        """TN-4(a): BF+SO+BB all match -> plays_value = boxscore value, correction_detail set."""
+        _insert_game(db, "game-supp")
+
+        # Boxscore: 3 BF, 1 SO, 0 BB, 38 pitches, 25 total_strikes
+        _insert_pitching_boxscore(
+            db, "game-supp", "pitcher-h1", 1,
+            bf=3, so=1, bb=0, hbp=0, h=1, pitches=38, total_strikes=25,
+        )
+        _insert_pitching_boxscore(db, "game-supp", "pitcher-a1", 2, bf=2, pitches=10, total_strikes=6)
+
+        _insert_batting_boxscore(db, "game-supp", "batter-h1", 1, ab=1, h=0)
+        _insert_batting_boxscore(db, "game-supp", "batter-h2", 1, ab=1, h=0)
+        _insert_batting_boxscore(db, "game-supp", "batter-a1", 2, ab=2, h=1, so=1)
+        _insert_batting_boxscore(db, "game-supp", "batter-a2", 2, ab=1, h=0)
+
+        # Plays: 3 top-half plays (matching BF=3, SO=1, BB=0) but only 31 pitch_count total
+        p1 = _insert_play(db, "game-supp", 1, half="top", batting_team_id=2,
+                           batter_id="batter-a1", pitcher_id="pitcher-h1",
+                           outcome="Single", pitch_count=10, did_outs_change=0)
+        _insert_play_event(db, p1, 1, pitch_result="ball")
+        _insert_play_event(db, p1, 2, pitch_result="strike_looking")
+        _insert_play_event(db, p1, 3, pitch_result="in_play")
+
+        p2 = _insert_play(db, "game-supp", 2, half="top", batting_team_id=2,
+                           batter_id="batter-a2", pitcher_id="pitcher-h1",
+                           outcome="Strikeout", pitch_count=11, did_outs_change=1)
+        _insert_play_event(db, p2, 1, pitch_result="strike_swinging")
+        _insert_play_event(db, p2, 2, pitch_result="foul")
+        _insert_play_event(db, p2, 3, pitch_result="strike_looking")
+
+        p3 = _insert_play(db, "game-supp", 3, half="top", batting_team_id=2,
+                           batter_id="batter-a1", pitcher_id="pitcher-h1",
+                           outcome="Groundout", pitch_count=10, did_outs_change=1)
+        _insert_play_event(db, p3, 1, pitch_result="ball")
+        _insert_play_event(db, p3, 2, pitch_result="in_play")
+
+        # Bottom half
+        _insert_play(db, "game-supp", 4, half="bottom", batting_team_id=1,
+                      batter_id="batter-h1", pitcher_id="pitcher-a1",
+                      outcome="Flyout", pitch_count=5, did_outs_change=1)
+        _insert_play(db, "game-supp", 5, half="bottom", batting_team_id=1,
+                      batter_id="batter-h2", pitcher_id="pitcher-a1",
+                      outcome="Groundout", pitch_count=5, did_outs_change=1)
+
+        summary = reconcile_game(db, "game-supp")
+
+        # pitcher_pitches should be MATCH (supplemented: plays_value = boxscore = 38)
+        pitches_counts = summary.signal_counts.get("pitcher_pitches", {})
+        assert pitches_counts.get("MATCH", 0) == 2, f"pitcher_pitches: {pitches_counts}"
+
+        # pitcher_total_strikes should be MATCH (supplemented)
+        ts_counts = summary.signal_counts.get("pitcher_total_strikes", {})
+        assert ts_counts.get("MATCH", 0) == 2, f"pitcher_total_strikes: {ts_counts}"
+
+        # Verify correction_detail was written for the supplemented pitcher
+        rows = db.execute(
+            "SELECT correction_detail FROM reconciliation_discrepancies "
+            "WHERE game_id = 'game-supp' AND player_id = 'pitcher-h1' "
+            "AND signal_name = 'pitcher_pitches'"
+        ).fetchall()
+        assert len(rows) == 1
+        detail = json.loads(rows[0][0])
+        assert detail["boxscore_supplement"] is True
+        assert detail["plays_pitches"] == 31  # original plays-derived value
+        assert detail["boxscore_pitches"] == 38
+
+    def test_supplement_not_applied_when_gate_fails(self, db: sqlite3.Connection) -> None:
+        """TN-4(b): BF/SO/BB mismatch -> plays_value = raw plays-derived value."""
+        _insert_game(db, "game-nosupp")
+
+        # Boxscore: BF=3, SO=2, BB=0, pitches=38. Plays will have SO=1 (mismatch)
+        _insert_pitching_boxscore(
+            db, "game-nosupp", "pitcher-h1", 1,
+            bf=3, so=2, bb=0, pitches=38, total_strikes=25,
+        )
+        _insert_pitching_boxscore(db, "game-nosupp", "pitcher-a1", 2, bf=1)
+
+        _insert_batting_boxscore(db, "game-nosupp", "batter-a1", 2, ab=2, so=1)
+        _insert_batting_boxscore(db, "game-nosupp", "batter-a2", 2, ab=1)
+        _insert_batting_boxscore(db, "game-nosupp", "batter-h1", 1, ab=1)
+
+        # Plays: 3 BF but only 1 SO (boxscore says 2 -> gate fails on SO)
+        _insert_play(db, "game-nosupp", 1, half="top", batting_team_id=2,
+                      batter_id="batter-a1", pitcher_id="pitcher-h1",
+                      outcome="Strikeout", pitch_count=10, did_outs_change=1)
+        _insert_play(db, "game-nosupp", 2, half="top", batting_team_id=2,
+                      batter_id="batter-a2", pitcher_id="pitcher-h1",
+                      outcome="Flyout", pitch_count=11, did_outs_change=1)
+        _insert_play(db, "game-nosupp", 3, half="top", batting_team_id=2,
+                      batter_id="batter-a1", pitcher_id="pitcher-h1",
+                      outcome="Groundout", pitch_count=10, did_outs_change=1)
+        _insert_play(db, "game-nosupp", 4, half="bottom", batting_team_id=1,
+                      batter_id="batter-h1", pitcher_id="pitcher-a1",
+                      outcome="Flyout", pitch_count=3, did_outs_change=1)
+
+        summary = reconcile_game(db, "game-nosupp")
+
+        # pitcher_pitches for pitcher-h1: boxscore=38, plays=31 -> CORRECTABLE (no supplement)
+        pitches_counts = summary.signal_counts.get("pitcher_pitches", {})
+        assert "CORRECTABLE" in pitches_counts, f"pitcher_pitches: {pitches_counts}"
+
+    def test_partial_gate_failure(self, db: sqlite3.Connection) -> None:
+        """TN-4(h): BF matches but SO doesn't -> supplement not applied."""
+        _insert_game(db, "game-partial")
+
+        # BF=2 matches, SO=1 in boxscore but plays will show SO=0
+        _insert_pitching_boxscore(
+            db, "game-partial", "pitcher-h1", 1,
+            bf=2, so=1, bb=0, pitches=20, total_strikes=12,
+        )
+        _insert_pitching_boxscore(db, "game-partial", "pitcher-a1", 2, bf=1)
+
+        _insert_batting_boxscore(db, "game-partial", "batter-a1", 2, ab=2)
+        _insert_batting_boxscore(db, "game-partial", "batter-h1", 1, ab=1)
+
+        # Plays: 2 BF, 0 SO (boxscore says 1 SO -> gate fails)
+        _insert_play(db, "game-partial", 1, half="top", batting_team_id=2,
+                      batter_id="batter-a1", pitcher_id="pitcher-h1",
+                      outcome="Flyout", pitch_count=10, did_outs_change=1)
+        _insert_play(db, "game-partial", 2, half="top", batting_team_id=2,
+                      batter_id="batter-a1", pitcher_id="pitcher-h1",
+                      outcome="Groundout", pitch_count=10, did_outs_change=1)
+        _insert_play(db, "game-partial", 3, half="bottom", batting_team_id=1,
+                      batter_id="batter-h1", pitcher_id="pitcher-a1",
+                      outcome="Flyout", pitch_count=3, did_outs_change=1)
+
+        summary = reconcile_game(db, "game-partial")
+
+        # pitcher_pitches: box=20, plays=20 -> MATCH (pitch counts happen to match)
+        # But the point is: supplement was NOT applied (gate failed on SO)
+        # Verify no supplement correction_detail
+        rows = db.execute(
+            "SELECT correction_detail FROM reconciliation_discrepancies "
+            "WHERE game_id = 'game-partial' AND player_id = 'pitcher-h1' "
+            "AND signal_name = 'pitcher_pitches'"
+        ).fetchall()
+        assert len(rows) == 1
+        assert rows[0][0] is None  # No supplement detail
+
+    def test_pitcher_with_zero_plays_not_supplemented(self, db: sqlite3.Connection) -> None:
+        """TN-4(i): Pitcher with zero plays (UNCORRECTABLE) is not supplemented."""
+        _insert_game(db, "game-zeroplays")
+
+        # Boxscore has pitcher-h1 with 3 BF, but plays show different pitcher
+        _insert_pitching_boxscore(
+            db, "game-zeroplays", "pitcher-h1", 1,
+            bf=2, so=1, bb=0, pitches=20, total_strikes=12,
+        )
+        _insert_pitching_boxscore(
+            db, "game-zeroplays", "pitcher-h2", 1,
+            bf=1, so=0, bb=0, pitches=5, total_strikes=3,
+        )
+        _insert_pitching_boxscore(db, "game-zeroplays", "pitcher-a1", 2, bf=1)
+
+        _insert_batting_boxscore(db, "game-zeroplays", "batter-a1", 2, ab=2)
+        _insert_batting_boxscore(db, "game-zeroplays", "batter-a2", 2, ab=1)
+        _insert_batting_boxscore(db, "game-zeroplays", "batter-h1", 1, ab=1)
+
+        # All 3 top-half plays attributed to pitcher-h2 (pitcher-h1 has zero plays)
+        _insert_play(db, "game-zeroplays", 1, half="top", batting_team_id=2,
+                      batter_id="batter-a1", pitcher_id="pitcher-h2",
+                      outcome="Flyout", pitch_count=5, did_outs_change=1)
+        _insert_play(db, "game-zeroplays", 2, half="top", batting_team_id=2,
+                      batter_id="batter-a2", pitcher_id="pitcher-h2",
+                      outcome="Strikeout", pitch_count=5, did_outs_change=1)
+        _insert_play(db, "game-zeroplays", 3, half="top", batting_team_id=2,
+                      batter_id="batter-a1", pitcher_id="pitcher-h2",
+                      outcome="Groundout", pitch_count=5, did_outs_change=1)
+        _insert_play(db, "game-zeroplays", 4, half="bottom", batting_team_id=1,
+                      batter_id="batter-h1", pitcher_id="pitcher-a1",
+                      outcome="Flyout", pitch_count=3, did_outs_change=1)
+
+        summary = reconcile_game(db, "game-zeroplays")
+
+        # pitcher-h1 pitches: UNCORRECTABLE (missing from plays, no supplement)
+        pitches_counts = summary.signal_counts.get("pitcher_pitches", {})
+        assert "UNCORRECTABLE" in pitches_counts, f"pitcher_pitches: {pitches_counts}"
+
+    def test_supplement_skipped_when_boxscore_pitches_null(self, db: sqlite3.Connection) -> None:
+        """Bug fix: NULL boxscore pitches should not be supplemented as 0."""
+        _insert_game(db, "game-null-p")
+
+        # BF+SO+BB all match, but pitches is NULL in boxscore
+        _insert_pitching_boxscore(
+            db, "game-null-p", "pitcher-h1", 1,
+            bf=2, so=1, bb=0, hbp=0, h=0,
+            pitches=0, total_strikes=0,  # Will be inserted as 0
+        )
+        # Manually NULL-ify pitches to test the guard
+        db.execute(
+            "UPDATE player_game_pitching SET pitches = NULL, total_strikes = NULL "
+            "WHERE game_id = 'game-null-p' AND player_id = 'pitcher-h1'"
+        )
+        _insert_pitching_boxscore(db, "game-null-p", "pitcher-a1", 2, bf=1)
+
+        _insert_batting_boxscore(db, "game-null-p", "batter-a1", 2, ab=1, so=1)
+        _insert_batting_boxscore(db, "game-null-p", "batter-a2", 2, ab=1)
+        _insert_batting_boxscore(db, "game-null-p", "batter-h1", 1, ab=1)
+
+        p1 = _insert_play(db, "game-null-p", 1, half="top", batting_team_id=2,
+                           batter_id="batter-a1", pitcher_id="pitcher-h1",
+                           outcome="Strikeout", pitch_count=5, did_outs_change=1)
+        _insert_play_event(db, p1, 1, pitch_result="strike_swinging")
+        _insert_play_event(db, p1, 2, pitch_result="strike_swinging")
+        _insert_play_event(db, p1, 3, pitch_result="strike_swinging")
+
+        _insert_play(db, "game-null-p", 2, half="top", batting_team_id=2,
+                      batter_id="batter-a2", pitcher_id="pitcher-h1",
+                      outcome="Flyout", pitch_count=3, did_outs_change=1)
+        _insert_play(db, "game-null-p", 3, half="bottom", batting_team_id=1,
+                      batter_id="batter-h1", pitcher_id="pitcher-a1",
+                      outcome="Flyout", pitch_count=3, did_outs_change=1)
+
+        summary = reconcile_game(db, "game-null-p")
+
+        # pitcher_pitches: boxscore=0 (NULL→0), plays=8 -> should NOT be supplemented
+        # Without the fix, supplement would replace plays 8 with 0 (false MATCH)
+        pitches_counts = summary.signal_counts.get("pitcher_pitches", {})
+        assert "CORRECTABLE" in pitches_counts or "MATCH" not in pitches_counts or \
+            pitches_counts.get("MATCH", 0) <= 1, \
+            f"pitcher_pitches should not be false MATCH: {pitches_counts}"
+
+        # Verify no supplement correction_detail for pitcher-h1
+        rows = db.execute(
+            "SELECT correction_detail FROM reconciliation_discrepancies "
+            "WHERE game_id = 'game-null-p' AND player_id = 'pitcher-h1' "
+            "AND signal_name = 'pitcher_pitches'"
+        ).fetchall()
+        assert len(rows) == 1
+        assert rows[0][0] is None  # No supplement metadata
+
+    def test_supplement_preserved_when_corrected(self, db: sqlite3.Connection) -> None:
+        """Bug fix: correction_detail from supplement not overwritten by CORRECTED promotion."""
+        _insert_game(db, "game-supp-corr")
+
+        # Two home pitchers: pitcher-h1 faced 2, pitcher-h2 faced 1
+        # After BF correction, BF+SO+BB will match for pitcher-h1 -> supplement applies
+        _insert_pitching_boxscore(
+            db, "game-supp-corr", "pitcher-h1", 1,
+            bf=2, so=1, bb=0, h=0, pitches=20, total_strikes=12,
+        )
+        _insert_pitching_boxscore(
+            db, "game-supp-corr", "pitcher-h2", 1,
+            bf=1, so=0, bb=0, h=0, pitches=8, total_strikes=5,
+        )
+        _insert_pitching_boxscore(db, "game-supp-corr", "pitcher-a1", 2, bf=1, pitches=3)
+
+        _insert_batting_boxscore(db, "game-supp-corr", "batter-h1", 1, ab=1)
+        _insert_batting_boxscore(db, "game-supp-corr", "batter-a1", 2, ab=2, so=1)
+        _insert_batting_boxscore(db, "game-supp-corr", "batter-a2", 2, ab=1)
+
+        # All 3 top-half plays misattributed to pitcher-h1 (play 3 should be pitcher-h2)
+        p1 = _insert_play(db, "game-supp-corr", 1, half="top", batting_team_id=2,
+                           batter_id="batter-a1", pitcher_id="pitcher-h1",
+                           outcome="Strikeout", pitch_count=6, did_outs_change=1)
+        _insert_play_event(db, p1, 1, pitch_result="strike_looking")
+        _insert_play_event(db, p1, 2, pitch_result="foul")
+        _insert_play_event(db, p1, 3, pitch_result="strike_swinging")
+
+        p2 = _insert_play(db, "game-supp-corr", 2, half="top", batting_team_id=2,
+                           batter_id="batter-a2", pitcher_id="pitcher-h1",
+                           outcome="Flyout", pitch_count=4, did_outs_change=1)
+        _insert_play_event(db, p2, 1, pitch_result="ball")
+        _insert_play_event(db, p2, 2, pitch_result="in_play")
+
+        # Misattributed to pitcher-h1, should be pitcher-h2
+        p3 = _insert_play(db, "game-supp-corr", 3, half="top", batting_team_id=2,
+                           batter_id="batter-a1", pitcher_id="pitcher-h1",
+                           outcome="Groundout", pitch_count=5, did_outs_change=1)
+        _insert_play_event(db, p3, 1, pitch_result="ball")
+        _insert_play_event(db, p3, 2, pitch_result="in_play")
+
+        _insert_play(db, "game-supp-corr", 4, half="bottom", batting_team_id=1,
+                      batter_id="batter-h1", pitcher_id="pitcher-a1",
+                      outcome="Flyout", pitch_count=3, did_outs_change=1)
+
+        # Execute mode: will correct pitcher attribution AND supplement
+        summary = reconcile_game(db, "game-supp-corr", dry_run=False)
+
+        assert summary.total_plays_reassigned == 1
+
+        # Check that CORRECTED signals exist
+        pitches_counts = summary.signal_counts.get("pitcher_pitches", {})
+        assert pitches_counts.get("CORRECTED", 0) > 0 or pitches_counts.get("MATCH", 0) >= 1
+
+        # Verify correction_detail for pitcher-h1 pitcher_pitches retains supplement info
+        rows = db.execute(
+            "SELECT correction_detail FROM reconciliation_discrepancies "
+            "WHERE game_id = 'game-supp-corr' AND player_id = 'pitcher-h1' "
+            "AND signal_name = 'pitcher_pitches' AND status = 'CORRECTED'"
+        ).fetchall()
+        if rows:
+            detail = json.loads(rows[0][0])
+            # Should have supplement metadata preserved
+            assert "boxscore_supplement" in detail, \
+                f"Supplement metadata lost in CORRECTED promotion: {detail}"
+            # Should also have reassignment info merged in
+            assert "reassignments" in detail, \
+                f"Reassignment info missing in merged detail: {detail}"
+
+
+class TestIBBInBBOutcomes:
+    """Fix 2/3: Intentional Walk included in BB signals."""
+
+    def test_ibb_counted_in_pitcher_bb(self, db: sqlite3.Connection) -> None:
+        """TN-4(c): Intentional Walk counted in pitcher_bb signal."""
+        _insert_game(db, "game-ibb-p")
+
+        # Boxscore: 2 BF, 0 SO, 1 BB (the IBB)
+        _insert_pitching_boxscore(
+            db, "game-ibb-p", "pitcher-h1", 1,
+            bf=2, so=0, bb=1, pitches=5,
+        )
+        _insert_pitching_boxscore(db, "game-ibb-p", "pitcher-a1", 2, bf=1)
+
+        _insert_batting_boxscore(db, "game-ibb-p", "batter-a1", 2, ab=1, bb=1)
+        _insert_batting_boxscore(db, "game-ibb-p", "batter-a2", 2, ab=1)
+        _insert_batting_boxscore(db, "game-ibb-p", "batter-h1", 1, ab=1)
+
+        # Play 1: Intentional Walk
+        _insert_play(db, "game-ibb-p", 1, half="top", batting_team_id=2,
+                      batter_id="batter-a1", pitcher_id="pitcher-h1",
+                      outcome="Intentional Walk", pitch_count=0, did_outs_change=0)
+        _insert_play(db, "game-ibb-p", 2, half="top", batting_team_id=2,
+                      batter_id="batter-a2", pitcher_id="pitcher-h1",
+                      outcome="Flyout", pitch_count=5, did_outs_change=1)
+        _insert_play(db, "game-ibb-p", 3, half="bottom", batting_team_id=1,
+                      batter_id="batter-h1", pitcher_id="pitcher-a1",
+                      outcome="Flyout", pitch_count=3, did_outs_change=1)
+
+        summary = reconcile_game(db, "game-ibb-p")
+
+        # pitcher_bb should be MATCH (IBB counted)
+        bb_counts = summary.signal_counts.get("pitcher_bb", {})
+        assert bb_counts.get("MATCH", 0) >= 1, f"pitcher_bb: {bb_counts}"
+        non_match = sum(v for k, v in bb_counts.items() if k != "MATCH")
+        assert non_match == 0, f"pitcher_bb has non-MATCH: {bb_counts}"
+
+    def test_ibb_counted_in_batter_bb(self, db: sqlite3.Connection) -> None:
+        """TN-4(d): Intentional Walk counted in batter_bb signal."""
+        _insert_game(db, "game-ibb-b")
+
+        _insert_pitching_boxscore(db, "game-ibb-b", "pitcher-h1", 1, bf=2)
+        _insert_pitching_boxscore(db, "game-ibb-b", "pitcher-a1", 2, bf=1)
+
+        # Batter-a1: 0 AB (IBB excluded from AB), 1 BB
+        _insert_batting_boxscore(db, "game-ibb-b", "batter-a1", 2, ab=0, bb=1)
+        _insert_batting_boxscore(db, "game-ibb-b", "batter-a2", 2, ab=1)
+        _insert_batting_boxscore(db, "game-ibb-b", "batter-h1", 1, ab=1)
+
+        _insert_play(db, "game-ibb-b", 1, half="top", batting_team_id=2,
+                      batter_id="batter-a1", pitcher_id="pitcher-h1",
+                      outcome="Intentional Walk", pitch_count=0, did_outs_change=0)
+        _insert_play(db, "game-ibb-b", 2, half="top", batting_team_id=2,
+                      batter_id="batter-a2", pitcher_id="pitcher-h1",
+                      outcome="Flyout", pitch_count=3, did_outs_change=1)
+        _insert_play(db, "game-ibb-b", 3, half="bottom", batting_team_id=1,
+                      batter_id="batter-h1", pitcher_id="pitcher-a1",
+                      outcome="Flyout", pitch_count=3, did_outs_change=1)
+
+        summary = reconcile_game(db, "game-ibb-b")
+
+        # batter_bb should be MATCH (IBB counted)
+        bb_counts = summary.signal_counts.get("batter_bb", {})
+        non_match = sum(v for k, v in bb_counts.items() if k != "MATCH")
+        assert non_match == 0, f"batter_bb has non-MATCH: {bb_counts}"
+
+
+class TestGameRunsFromGamesTable:
+    """Fix 4: game_runs uses games.home_score/away_score."""
+
+    def test_game_runs_uses_games_table_scores(self, db: sqlite3.Connection) -> None:
+        """TN-4(e): game_runs uses games.home_score/away_score for both sides."""
+        # Insert game with known scores
+        conn = db
+        conn.execute(
+            "INSERT INTO games (game_id, season_id, game_date, home_team_id, away_team_id, "
+            "home_score, away_score, status) VALUES "
+            "('game-runs', '2025-spring-hs', '2025-04-01', 1, 2, 7, 3, 'completed')"
+        )
+
+        _insert_pitching_boxscore(conn, "game-runs", "pitcher-h1", 1, bf=1)
+        _insert_pitching_boxscore(conn, "game-runs", "pitcher-a1", 2, bf=1)
+        # Batting boxscores that DON'T match game scores (courtesy runner scenario)
+        _insert_batting_boxscore(conn, "game-runs", "batter-h1", 1, ab=1, r=5)  # only 5, game says 7
+        _insert_batting_boxscore(conn, "game-runs", "batter-a1", 2, ab=1, r=2)  # only 2, game says 3
+
+        _insert_play(conn, "game-runs", 1, half="top", batting_team_id=2,
+                      batter_id="batter-a1", pitcher_id="pitcher-h1",
+                      outcome="Flyout", pitch_count=3, did_outs_change=1)
+        _insert_play(conn, "game-runs", 2, half="bottom", batting_team_id=1,
+                      batter_id="batter-h1", pitcher_id="pitcher-a1",
+                      outcome="Flyout", pitch_count=3, did_outs_change=1)
+
+        summary = reconcile_game(conn, "game-runs")
+
+        # game_runs: MATCH for both teams (using games table scores)
+        runs_counts = summary.signal_counts.get("game_runs", {})
+        assert runs_counts.get("MATCH", 0) == 2, f"game_runs: {runs_counts}"
+        non_match = sum(v for k, v in runs_counts.items() if k != "MATCH")
+        assert non_match == 0, f"game_runs has non-MATCH: {runs_counts}"
+
+    def test_game_runs_skipped_when_both_scores_null(self, db: sqlite3.Connection) -> None:
+        """TN-4(g): game_runs skipped when both home_score and away_score are NULL."""
+        conn = db
+        conn.execute(
+            "INSERT INTO games (game_id, season_id, game_date, home_team_id, away_team_id, "
+            "home_score, away_score, status) VALUES "
+            "('game-null-score', '2025-spring-hs', '2025-04-01', 1, 2, NULL, NULL, 'completed')"
+        )
+
+        _insert_pitching_boxscore(conn, "game-null-score", "pitcher-h1", 1, bf=1)
+        _insert_pitching_boxscore(conn, "game-null-score", "pitcher-a1", 2, bf=1)
+        _insert_batting_boxscore(conn, "game-null-score", "batter-h1", 1, ab=1, r=1)
+        _insert_batting_boxscore(conn, "game-null-score", "batter-a1", 2, ab=1, r=0)
+
+        _insert_play(conn, "game-null-score", 1, half="top", batting_team_id=2,
+                      batter_id="batter-a1", pitcher_id="pitcher-h1",
+                      outcome="Flyout", pitch_count=3, did_outs_change=1)
+        _insert_play(conn, "game-null-score", 2, half="bottom", batting_team_id=1,
+                      batter_id="batter-h1", pitcher_id="pitcher-a1",
+                      outcome="Flyout", pitch_count=3, did_outs_change=1)
+
+        summary = reconcile_game(conn, "game-null-score")
+
+        assert "game_runs" not in summary.signal_counts, \
+            f"game_runs should be skipped: {summary.signal_counts.get('game_runs', {})}"
+
+    def test_game_runs_skipped_when_one_score_null(self, db: sqlite3.Connection) -> None:
+        """AC-4: game_runs skipped when only away_score is NULL (single-NULL case)."""
+        conn = db
+        conn.execute(
+            "INSERT INTO games (game_id, season_id, game_date, home_team_id, away_team_id, "
+            "home_score, away_score, status) VALUES "
+            "('game-one-null', '2025-spring-hs', '2025-04-01', 1, 2, 5, NULL, 'completed')"
+        )
+
+        _insert_pitching_boxscore(conn, "game-one-null", "pitcher-h1", 1, bf=1)
+        _insert_pitching_boxscore(conn, "game-one-null", "pitcher-a1", 2, bf=1)
+        _insert_batting_boxscore(conn, "game-one-null", "batter-h1", 1, ab=1, r=1)
+        _insert_batting_boxscore(conn, "game-one-null", "batter-a1", 2, ab=1, r=0)
+
+        _insert_play(conn, "game-one-null", 1, half="top", batting_team_id=2,
+                      batter_id="batter-a1", pitcher_id="pitcher-h1",
+                      outcome="Flyout", pitch_count=3, did_outs_change=1)
+        _insert_play(conn, "game-one-null", 2, half="bottom", batting_team_id=1,
+                      batter_id="batter-h1", pitcher_id="pitcher-a1",
+                      outcome="Flyout", pitch_count=3, did_outs_change=1)
+
+        summary = reconcile_game(conn, "game-one-null")
+
+        # Neither team should emit game_runs when either score is NULL
+        assert "game_runs" not in summary.signal_counts, \
+            f"game_runs should be skipped: {summary.signal_counts.get('game_runs', {})}"
+
+
+class TestGamePACountFromBoxscore:
+    """Fix 5: game_pa_count uses boxscore BF sum for both sides."""
+
+    def test_game_pa_count_uses_boxscore_bf(self, db: sqlite3.Connection) -> None:
+        """TN-4(f): game_pa_count uses SUM(bf) for both sides (always MATCH)."""
+        _insert_game(db, "game-pa-fix")
+
+        # Boxscore says 4 BF total, but plays only has 3 (abandoned final PA)
+        _insert_pitching_boxscore(db, "game-pa-fix", "pitcher-h1", 1, bf=4)
+        _insert_pitching_boxscore(db, "game-pa-fix", "pitcher-a1", 2, bf=2)
+
+        _insert_batting_boxscore(db, "game-pa-fix", "batter-h1", 1, ab=1)
+        _insert_batting_boxscore(db, "game-pa-fix", "batter-h2", 1, ab=1)
+        _insert_batting_boxscore(db, "game-pa-fix", "batter-a1", 2, ab=3)
+        _insert_batting_boxscore(db, "game-pa-fix", "batter-a2", 2, ab=1)
+
+        # Only 3 top-half plays (BF says 4 -- abandoned final PA)
+        _insert_play(db, "game-pa-fix", 1, half="top", batting_team_id=2,
+                      batter_id="batter-a1", pitcher_id="pitcher-h1",
+                      outcome="Flyout", pitch_count=3, did_outs_change=1)
+        _insert_play(db, "game-pa-fix", 2, half="top", batting_team_id=2,
+                      batter_id="batter-a2", pitcher_id="pitcher-h1",
+                      outcome="Groundout", pitch_count=3, did_outs_change=1)
+        _insert_play(db, "game-pa-fix", 3, half="top", batting_team_id=2,
+                      batter_id="batter-a1", pitcher_id="pitcher-h1",
+                      outcome="Flyout", pitch_count=3, did_outs_change=1)
+
+        _insert_play(db, "game-pa-fix", 4, half="bottom", batting_team_id=1,
+                      batter_id="batter-h1", pitcher_id="pitcher-a1",
+                      outcome="Flyout", pitch_count=3, did_outs_change=1)
+        _insert_play(db, "game-pa-fix", 5, half="bottom", batting_team_id=1,
+                      batter_id="batter-h2", pitcher_id="pitcher-a1",
+                      outcome="Groundout", pitch_count=3, did_outs_change=1)
+
+        summary = reconcile_game(db, "game-pa-fix")
+
+        # game_pa_count: MATCH for both teams (boxscore BF for both sides)
+        pa_counts = summary.signal_counts.get("game_pa_count", {})
+        assert pa_counts.get("MATCH", 0) == 2, f"game_pa_count: {pa_counts}"
+        non_match = sum(v for k, v in pa_counts.items() if k != "MATCH")
+        assert non_match == 0, f"game_pa_count has non-MATCH: {pa_counts}"
+
+    def test_game_pa_count_skipped_when_no_pitching_data(self, db: sqlite3.Connection) -> None:
+        """game_pa_count skipped when boxscore has no pitching data (box_pa=0)."""
+        conn = db
+        conn.execute(
+            "INSERT INTO games (game_id, season_id, game_date, home_team_id, away_team_id, "
+            "home_score, away_score, status) VALUES "
+            "('game-no-pitch', '2025-spring-hs', '2025-04-01', 1, 2, 1, 0, 'completed')"
+        )
+
+        # No pitching boxscore rows for home team (bf=0 for away team)
+        _insert_pitching_boxscore(conn, "game-no-pitch", "pitcher-a1", 2, bf=0)
+
+        _insert_batting_boxscore(conn, "game-no-pitch", "batter-h1", 1, ab=1)
+        _insert_batting_boxscore(conn, "game-no-pitch", "batter-a1", 2, ab=1)
+
+        _insert_play(conn, "game-no-pitch", 1, half="top", batting_team_id=2,
+                      batter_id="batter-a1", pitcher_id="pitcher-h1",
+                      outcome="Flyout", pitch_count=3, did_outs_change=1)
+        _insert_play(conn, "game-no-pitch", 2, half="bottom", batting_team_id=1,
+                      batter_id="batter-h1", pitcher_id="pitcher-a1",
+                      outcome="Flyout", pitch_count=3, did_outs_change=1)
+
+        summary = reconcile_game(conn, "game-no-pitch")
+
+        # game_pa_count should be emitted at most once (for the team WITH bf data)
+        # The away team has bf=0, so its game_pa_count should be skipped
+        pa_counts = summary.signal_counts.get("game_pa_count", {})
+        # Home team has no pitching boxscore at all -> skipped. Away has bf=0 -> skipped.
+        assert pa_counts.get("MATCH", 0) <= 1, \
+            f"game_pa_count should skip teams with no BF data: {pa_counts}"
+
+
+class TestCLIAvailabilitySignalSeparation:
+    """CLI summary separates tautological availability signals from cross-source reconciliation."""
+
+    def test_run_summary_separates_availability_signals(
+        self, db: sqlite3.Connection, capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """_print_summary puts game_runs/game_pa_count in 'Data Availability' not 'Game-Level'."""
+        from src.cli.data import _print_summary
+
+        _insert_game(db, "game-cli")
+
+        _insert_pitching_boxscore(db, "game-cli", "pitcher-h1", 1, bf=1, so=0)
+        _insert_pitching_boxscore(db, "game-cli", "pitcher-a1", 2, bf=1, so=0)
+        _insert_batting_boxscore(db, "game-cli", "batter-h1", 1, ab=1, h=0)
+        _insert_batting_boxscore(db, "game-cli", "batter-a1", 2, ab=1, h=0)
+
+        _insert_play(db, "game-cli", 1, half="top", batting_team_id=2,
+                      batter_id="batter-a1", pitcher_id="pitcher-h1",
+                      outcome="Flyout", pitch_count=3, did_outs_change=1)
+        _insert_play(db, "game-cli", 2, half="bottom", batting_team_id=1,
+                      batter_id="batter-h1", pitcher_id="pitcher-a1",
+                      outcome="Groundout", pitch_count=3, did_outs_change=1)
+
+        summary = reconcile_game(db, "game-cli")
+        _print_summary(summary)
+        output = capsys.readouterr().out
+
+        # game_runs and game_pa_count must appear under "Data Availability Checks"
+        assert "Data Availability Checks" in output, \
+            f"Missing 'Data Availability Checks' section in output:\n{output}"
+        assert "game_runs" in output, f"game_runs missing from output:\n{output}"
+        assert "game_pa_count" in output, f"game_pa_count missing from output:\n{output}"
+
+        # Extract the "Game-Level Signals" section and verify availability signals are NOT in it
+        lines = output.split("\n")
+        in_game_level = False
+        game_level_lines: list[str] = []
+        for line in lines:
+            if "Game-Level Signals" in line:
+                in_game_level = True
+                continue
+            if in_game_level:
+                if line.strip() == "" or (line.strip() and not line.startswith("    ")):
+                    break
+                game_level_lines.append(line)
+
+        game_level_text = "\n".join(game_level_lines)
+        assert "game_runs" not in game_level_text, \
+            f"game_runs should NOT be in Game-Level Signals section:\n{game_level_text}"
+        assert "game_pa_count" not in game_level_text, \
+            f"game_pa_count should NOT be in Game-Level Signals section:\n{game_level_text}"
+
+    def test_db_summary_separates_availability_signals(
+        self, db: sqlite3.Connection, capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """_print_db_summary puts game_runs/game_pa_count in 'Data Availability' not 'Game-Level'."""
+        from src.cli.data import _print_db_summary
+
+        db_summary = {
+            "total_records": 10,
+            "total_corrected": 2,
+            "pitcher_signals": {"pitcher_bf": {"MATCH": 5}},
+            "batter_signals": {"batter_ab": {"MATCH": 3}},
+            "game_signals": {
+                "game_hits": {"MATCH": 4, "AMBIGUOUS": 1},
+                "game_runs": {"MATCH": 4},
+                "game_pa_count": {"MATCH": 4},
+            },
+        }
+        _print_db_summary(db_summary)
+        output = capsys.readouterr().out
+
+        assert "Data Availability Checks" in output
+        assert "game_hits" in output  # real cross-source signal still shown
+
+        # game_runs/game_pa_count must NOT appear under "Game-Level Signals"
+        lines = output.split("\n")
+        in_game_level = False
+        game_level_lines: list[str] = []
+        for line in lines:
+            if "Game-Level Signals" in line:
+                in_game_level = True
+                continue
+            if in_game_level:
+                if line.strip() == "" or (line.strip() and not line.startswith("    ")):
+                    break
+                game_level_lines.append(line)
+
+        game_level_text = "\n".join(game_level_lines)
+        assert "game_runs" not in game_level_text
+        assert "game_pa_count" not in game_level_text

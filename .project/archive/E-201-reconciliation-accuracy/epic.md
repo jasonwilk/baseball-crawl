@@ -1,7 +1,7 @@
 # E-201: Close Reconciliation Accuracy Gaps
 
 ## Status
-`READY`
+`COMPLETED`
 
 ## Overview
 Close every actionable accuracy gap in the plays-vs-boxscore reconciliation engine. Five targeted fixes in `src/reconciliation/engine.py` raise all cross-source reconciliation signals (pitcher and batter stats) to 99%+ match rates and convert two unreliable game-level signals (`game_runs`, `game_pa_count`) to data-availability checks. ~35 lines of code changes. This unblocks E-199 (plays-derived stats in standalone reports), which depends on reconciliation being accurate before integrating it into the report pipeline.
@@ -48,7 +48,7 @@ No expert consultation required for domain experts beyond the research already c
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-201-01 | Implement five reconciliation accuracy fixes | TODO | None | - |
+| E-201-01 | Implement five reconciliation accuracy fixes | DONE | None | software-engineer |
 
 ## Dispatch Team
 - software-engineer
@@ -140,3 +140,25 @@ None -- all design decisions locked from 8 rounds of research investigation.
 | Codex iteration 1 | 3 | 3 | 0 |
 | Codex iteration 2 | 3 | 3 | 0 |
 | **Total** | **16** | **13** | **3** |
+
+- 2026-04-03: Dispatch completed. E-201-01 implemented by SE, reviewed by CR and Codex, AC-verified by PM. All 7 ACs passed. **Status → COMPLETED.**
+
+### Implementation Review Scorecard
+| Review Pass | Findings | Accepted | Dismissed |
+|---|---|---|---|
+| Per-story CR — E-201-01 | 1 | 1 | 0 |
+| Codex code review | 3 | 2 | 1 |
+| **Total** | **4** | **3** | **1** |
+
+CR finding: game_runs NULL skip scope (SHOULD FIX, fixed). Codex: 2 bugs accepted (nullable boxscore supplement, correction_detail overwrite in execute mode), 1 dismissed (pre-existing CLI smoke test failure).
+
+### Documentation Assessment
+No documentation impact. Bug fix only -- no new features, endpoints, architecture, CLI commands, or user-facing changes.
+
+### Context-Layer Assessment
+1. **New convention, pattern, or constraint established**: NO. The fixes follow the existing reconciliation engine patterns. The boxscore supplement gate pattern is localized to engine.py, not a project-wide convention.
+2. **Architectural decision with ongoing implications**: NO. No new architecture -- all changes are within the existing reconciliation engine's detection layer.
+3. **Footgun, failure mode, or boundary discovered**: NO. The IBB gap and courtesy runner gap were already documented in the E-198 research. The fixes close known gaps; no new footguns discovered.
+4. **Change to agent behavior, routing, or coordination**: NO. No agent infrastructure changes.
+5. **Domain knowledge discovered that should influence agent decisions in future epics**: NO. All domain knowledge (coaching accuracy thresholds, boxscore authoritativeness, IBB semantics) was already captured during E-198 research and incorporated into CLAUDE.md during E-198 closure.
+6. **New CLI command, workflow, or operational procedure introduced**: NO. No new commands or workflows. `bb data reconcile` already existed from E-198.

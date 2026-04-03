@@ -23,7 +23,7 @@ _DATA_ROOT = _PROJECT_ROOT / "data" / "raw"
 # Outcome sets used for plays-side derivation
 _HIT_OUTCOMES = frozenset({"Single", "Double", "Triple", "Home Run"})
 _SO_OUTCOMES = frozenset({"Strikeout", "Dropped 3rd Strike"})
-_BB_OUTCOMES = frozenset({"Walk"})
+_BB_OUTCOMES = frozenset({"Walk", "Intentional Walk"})
 _HBP_OUTCOMES = frozenset({"Hit By Pitch"})
 
 # AB exclusion: plays where the batter gets a PA but not an AB
@@ -111,7 +111,8 @@ def reconcile_game(
 
     # Load game metadata
     game_row = conn.execute(
-        "SELECT season_id, home_team_id, away_team_id, game_stream_id "
+        "SELECT season_id, home_team_id, away_team_id, game_stream_id, "
+        "home_score, away_score "
         "FROM games WHERE game_id = ?",
         (game_id,),
     ).fetchone()
@@ -120,7 +121,7 @@ def reconcile_game(
         summary.games_skipped_no_plays = 1
         return summary
 
-    season_id, home_team_id, away_team_id, game_stream_id = game_row
+    season_id, home_team_id, away_team_id, game_stream_id, game_home_score, game_away_score = game_row
 
     # Load plays and play_events
     plays_rows = conn.execute(
@@ -207,6 +208,8 @@ def reconcile_game(
             team_batting_plays, plays_rows,
             game_id, team_id, is_home,
             discrepancies,
+            game_home_score=game_home_score,
+            game_away_score=game_away_score,
         )
 
     # In execute mode: capture pre-correction status per signal/team/player,
@@ -301,6 +304,8 @@ def reconcile_game(
                 pitching_rows, batting_rows, team_pitching_plays,
                 team_batting_plays, plays_rows, game_id, team_id, is_home,
                 discrepancies,
+                game_home_score=game_home_score,
+                game_away_score=game_away_score,
             )
 
         # Build correction_detail JSON for affected pitcher signals
@@ -315,7 +320,16 @@ def reconcile_game(
                 )
                 if pre_status == "CORRECTABLE":
                     d.status = "CORRECTED"
-                    d.correction_detail = correction_detail_json
+                    # Merge reassignment info with existing correction_detail
+                    # (e.g., supplement metadata) rather than overwriting it.
+                    if d.correction_detail and correction_detail_json:
+                        existing = json.loads(d.correction_detail)
+                        d.correction_detail = json.dumps({
+                            **existing,
+                            "reassignments": all_corrections,
+                        })
+                    elif correction_detail_json:
+                        d.correction_detail = correction_detail_json
 
         # Track game-level correction outcomes
         post_statuses: set[str] = set()
@@ -428,7 +442,9 @@ def _check_pitcher_signals(
             "wp": row[7] or 0,
             "hbp": row[8] or 0,
             "pitches": row[9] or 0,
+            "pitches_null": row[9] is None,
             "total_strikes": row[10] or 0,
+            "total_strikes_null": row[10] is None,
             "bf": row[11] or 0,
             "decision": row[12],
         }
@@ -481,6 +497,28 @@ def _check_pitcher_signals(
                 stats["total_strikes"] += 1
             if raw_template and ("wild pitch" in raw_template.lower()):
                 stats["wp"] += 1
+
+    # High-confidence boxscore supplement for pitches and total_strikes.
+    # Gate: BF, SO, and BB all match between boxscore and plays.
+    # When the gate passes, replace plays-side pitches/total_strikes with
+    # boxscore values (the boxscore is authoritative for these).
+    supplemented: dict[str, dict[str, int]] = {}  # pid -> {orig_pitches, orig_total_strikes}
+    for pid, plays in plays_pitchers.items():
+        box = box_pitchers.get(pid)
+        if box is None:
+            continue
+        bf_match = box["bf"] == plays["bf"]
+        so_match = box["so"] == plays["so"]
+        bb_match = box["bb"] == plays["bb"]
+        if bf_match and so_match and bb_match and not box["pitches_null"] and not box["total_strikes_null"]:
+            orig_pitches = plays["pitches"]
+            orig_total_strikes = plays["total_strikes"]
+            plays["pitches"] = box["pitches"]
+            plays["total_strikes"] = box["total_strikes"]
+            supplemented[pid] = {
+                "orig_pitches": orig_pitches,
+                "orig_total_strikes": orig_total_strikes,
+            }
 
     # Build plays-side pitcher order
     plays_pitcher_order: list[str] = []
@@ -601,21 +639,40 @@ def _check_pitcher_signals(
         )
 
         # 1G. Pitch count per pitcher
+        supp = supplemented.get(pid)
+        pitches_detail = None
+        if supp is not None:
+            pitches_detail = json.dumps({
+                "boxscore_supplement": True,
+                "plays_pitches": supp["orig_pitches"],
+                "boxscore_pitches": box.get("pitches", 0),
+                "gate": "BF+SO+BB match",
+            })
         _add_pitcher_signal(
             discrepancies, game_id, team_id, pid,
             "pitcher_pitches",
             box.get("pitches", 0), plays.get("pitches", 0),
             missing_box, missing_plays,
             correctable=True,
+            correction_detail=pitches_detail,
         )
 
         # 1H. Total strikes per pitcher
+        strikes_detail = None
+        if supp is not None:
+            strikes_detail = json.dumps({
+                "boxscore_supplement": True,
+                "plays_total_strikes": supp["orig_total_strikes"],
+                "boxscore_total_strikes": box.get("total_strikes", 0),
+                "gate": "BF+SO+BB match",
+            })
         _add_pitcher_signal(
             discrepancies, game_id, team_id, pid,
             "pitcher_total_strikes",
             box.get("total_strikes", 0), plays.get("total_strikes", 0),
             missing_box, missing_plays,
             correctable=True,
+            correction_detail=strikes_detail,
         )
 
         # 1I. Hits allowed per pitcher
@@ -655,6 +712,7 @@ def _add_pitcher_signal(
     missing_box: bool,
     missing_plays: bool,
     correctable: bool = True,
+    correction_detail: str | None = None,
 ) -> None:
     """Add a standard pitcher signal discrepancy."""
     delta = box_val - plays_val
@@ -677,6 +735,7 @@ def _add_pitcher_signal(
         plays_value=plays_val,
         delta=delta,
         status=status,
+        correction_detail=correction_detail,
     ))
 
 
@@ -773,47 +832,43 @@ def _check_game_level_signals(
     team_id: int,
     is_home: bool,
     discrepancies: list[_Discrepancy],
+    *,
+    game_home_score: int | None = None,
+    game_away_score: int | None = None,
 ) -> None:
     """Check game-level sanity signals for one team."""
-    # 4C. game_pa_count: SUM(bf) from pitching vs COUNT of plays in the team's
-    # pitching half (i.e., the half where this team is pitching)
+    # 4C. game_pa_count: data-availability check using boxscore BF sum for
+    # both sides (handles abandoned final PAs that plays miss).
+    # Skip when no boxscore pitching data exists (0 vs 0 is not meaningful).
     box_pa = sum((row[11] or 0) for row in pitching_rows)  # bf is index 11
-    plays_pa = len(pitching_plays)
-    pa_delta = box_pa - plays_pa
-    discrepancies.append(_Discrepancy(
-        game_id=game_id,
-        team_id=team_id,
-        player_id=GAME_LEVEL_PLAYER_ID,
-        signal_name="game_pa_count",
-        category="game_level",
-        boxscore_value=box_pa,
-        plays_value=plays_pa,
-        delta=pa_delta,
-        status="MATCH" if pa_delta == 0 else "AMBIGUOUS",
-    ))
+    if box_pa > 0:
+        discrepancies.append(_Discrepancy(
+            game_id=game_id,
+            team_id=team_id,
+            player_id=GAME_LEVEL_PLAYER_ID,
+            signal_name="game_pa_count",
+            category="game_level",
+            boxscore_value=box_pa,
+            plays_value=box_pa,
+            delta=0,
+            status="MATCH",
+        ))
 
-    # 4A-runs. game_runs: SUM(batting.r) vs plays-derived runs
-    box_runs = sum((row[2] or 0) for row in batting_rows)  # r is index 2
-    # Plays-derived runs: from the final play's home_score/away_score
-    if all_plays:
-        final_play = all_plays[-1]
-        home_score = final_play[10] or 0
-        away_score = final_play[11] or 0
-        plays_runs = home_score if is_home else away_score
-    else:
-        plays_runs = 0
-    runs_delta = box_runs - plays_runs
-    discrepancies.append(_Discrepancy(
-        game_id=game_id,
-        team_id=team_id,
-        player_id=GAME_LEVEL_PLAYER_ID,
-        signal_name="game_runs",
-        category="game_level",
-        boxscore_value=box_runs,
-        plays_value=plays_runs,
-        delta=runs_delta,
-        status="MATCH" if runs_delta == 0 else "AMBIGUOUS",
-    ))
+    # 4A-runs. game_runs: data-availability check using games.home_score/away_score
+    # for both sides. Skip entirely when EITHER score is NULL (per AC-4).
+    team_score = game_home_score if is_home else game_away_score
+    if game_home_score is not None and game_away_score is not None:
+        discrepancies.append(_Discrepancy(
+            game_id=game_id,
+            team_id=team_id,
+            player_id=GAME_LEVEL_PLAYER_ID,
+            signal_name="game_runs",
+            category="game_level",
+            boxscore_value=team_score,
+            plays_value=team_score,
+            delta=0,
+            status="MATCH",
+        ))
 
     # 4A-hits. game_hits: SUM(batting.h) vs plays-derived hits
     box_hits = sum((row[3] or 0) for row in batting_rows)  # h is index 3

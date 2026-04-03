@@ -1044,13 +1044,20 @@ def _print_summary(summary: ReconciliationSummary, *, execute: bool = False) -> 
         typer.echo("  No signals to report.")
         return
 
-    # Separate pitcher vs batter signals
+    # Separate pitcher vs batter vs game signals.
+    # game_runs and game_pa_count are tautological data-availability checks
+    # (same source for both sides) -- exclude from cross-source reconciliation.
+    _AVAILABILITY_SIGNALS = frozenset({"game_runs", "game_pa_count"})
+
     pitcher_signals: dict[str, dict[str, int]] = {}
     batter_signals: dict[str, dict[str, int]] = {}
     game_signals: dict[str, dict[str, int]] = {}
+    availability_signals: dict[str, dict[str, int]] = {}
 
     for sig, counts in summary.signal_counts.items():
-        if sig.startswith("pitcher_"):
+        if sig in _AVAILABILITY_SIGNALS:
+            availability_signals[sig] = counts
+        elif sig.startswith("pitcher_"):
             pitcher_signals[sig] = counts
         elif sig.startswith("batter_"):
             batter_signals[sig] = counts
@@ -1090,18 +1097,29 @@ def _print_summary(summary: ReconciliationSummary, *, execute: bool = False) -> 
         rate = match / total * 100 if total else 0
         typer.echo(f"    {sig}: {match}/{total} match ({rate:.1f}%)")
 
-    typer.echo("\n  Game-Level Signals:")
-    for sig in sorted(game_signals):
-        counts = game_signals[sig]
-        total = sum(counts.values())
-        match = counts.get("MATCH", 0)
-        rate = match / total * 100 if total else 0
-        typer.echo(f"    {sig}: {match}/{total} match ({rate:.1f}%)")
+    if game_signals:
+        typer.echo("\n  Game-Level Signals:")
+        for sig in sorted(game_signals):
+            counts = game_signals[sig]
+            total = sum(counts.values())
+            match = counts.get("MATCH", 0)
+            rate = match / total * 100 if total else 0
+            typer.echo(f"    {sig}: {match}/{total} match ({rate:.1f}%)")
+
+    if availability_signals:
+        typer.echo("\n  Data Availability Checks (not cross-source reconciliation):")
+        for sig in sorted(availability_signals):
+            counts = availability_signals[sig]
+            total = sum(counts.values())
+            match = counts.get("MATCH", 0)
+            typer.echo(f"    {sig}: {match}/{total} present")
 
     typer.echo("\n  Status Distribution:")
     total_all = 0
     status_totals: dict[str, int] = {}
     for sig, counts in summary.signal_counts.items():
+        if sig in _AVAILABILITY_SIGNALS:
+            continue  # Exclude tautological signals from reconciliation totals
         for status, n in counts.items():
             status_totals[status] = status_totals.get(status, 0) + n
             total_all += n
@@ -1131,6 +1149,8 @@ def _print_verbose_summary(
 
 def _print_db_summary(db_summary: dict) -> None:
     """Print aggregate stats from all reconciliation records in the DB."""
+    _AVAILABILITY_SIGNALS = frozenset({"game_runs", "game_pa_count"})
+
     typer.echo("\nReconciliation Database Summary (all runs)")
     typer.echo(f"  Total records: {db_summary['total_records']}")
     typer.echo(f"  Total corrected: {db_summary['total_corrected']}")
@@ -1143,13 +1163,26 @@ def _print_db_summary(db_summary: dict) -> None:
         signals = db_summary[key]
         if not signals:
             continue
-        typer.echo(f"\n  {label}:")
-        for sig in sorted(signals):
-            counts = signals[sig]
-            total = sum(counts.values())
-            match = counts.get("MATCH", 0) + counts.get("CORRECTED", 0)
-            rate = match / total * 100 if total else 0
-            typer.echo(f"    {sig}: {match}/{total} match ({rate:.1f}%)")
+        # Separate cross-source reconciliation from availability checks
+        recon_sigs = {s: c for s, c in signals.items() if s not in _AVAILABILITY_SIGNALS}
+        avail_sigs = {s: c for s, c in signals.items() if s in _AVAILABILITY_SIGNALS}
+
+        if recon_sigs:
+            typer.echo(f"\n  {label}:")
+            for sig in sorted(recon_sigs):
+                counts = recon_sigs[sig]
+                total = sum(counts.values())
+                match = counts.get("MATCH", 0) + counts.get("CORRECTED", 0)
+                rate = match / total * 100 if total else 0
+                typer.echo(f"    {sig}: {match}/{total} match ({rate:.1f}%)")
+
+        if avail_sigs:
+            typer.echo(f"\n  Data Availability Checks (not cross-source reconciliation):")
+            for sig in sorted(avail_sigs):
+                counts = avail_sigs[sig]
+                total = sum(counts.values())
+                match = counts.get("MATCH", 0)
+                typer.echo(f"    {sig}: {match}/{total} present")
 
 
 # ---------------------------------------------------------------------------
