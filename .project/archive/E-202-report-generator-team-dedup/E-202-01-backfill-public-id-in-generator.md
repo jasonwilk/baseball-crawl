@@ -4,7 +4,7 @@
 [E-202: Fix Report Generator Team Deduplication Bug](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the report generator will backfill `public_id` on a team row when `ensure_team_row` matched via step 3 (name+season_year) and the generator has verified the association via the public API. This prevents the scouting crawler from creating a duplicate team row, ensuring reports display scouting data correctly.

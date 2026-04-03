@@ -1785,3 +1785,366 @@ class TestQueryBeforeCleanup:
         # Record should show the game that cleanup will delete
         assert render_data["team"]["record"] is not None
         assert render_data["team"]["record"]["wins"] == 1
+
+
+# ===========================================================================
+# E-202-01: public_id backfill in report generator force-update block
+# ===========================================================================
+
+
+class TestPublicIdBackfill:
+    """Tests for public_id backfill after step-3 (name+season_year) match."""
+
+    @patch("src.http.session.create_session")
+    @patch("src.reports.generator.get_connection")
+    @patch("src.reports.generator.GameChangerClient")
+    @patch("src.reports.generator.ensure_team_row", return_value=1)
+    @patch("src.reports.generator.render_report", return_value="<html>test</html>")
+    @patch("src.reports.generator._crawl_and_load_spray")
+    def test_ac1_backfills_public_id_when_null(
+        self, mock_spray, mock_render, mock_ensure, mock_client_cls, mock_get_conn,
+        mock_create_session, db, tmp_path,
+    ):
+        """AC-1: Team with matching name+season_year but NULL public_id gets
+        public_id backfilled from the generator's input slug."""
+        from src.gamechanger.crawlers import CrawlResult
+        from src.gamechanger.loaders import LoadResult
+
+        # Seed team WITHOUT public_id (simulates step-3 match)
+        db.execute(
+            "INSERT INTO teams (name, season_year, membership_type) "
+            "VALUES ('Waverly Vikings Varsity 2026', 2026, 'tracked')"
+        )
+        db.execute(
+            "INSERT INTO scouting_runs (team_id, season_id, run_type, started_at, status) "
+            "VALUES (1, '2026-spring-hs', 'full', '2026-03-28T00:00:00Z', 'completed')"
+        )
+        db.commit()
+
+        db_path = str(tmp_path / "test.db")
+
+        def _fresh_conn():
+            conn = sqlite3.connect(db_path)
+            conn.execute("PRAGMA foreign_keys=ON;")
+            return conn
+
+        mock_get_conn.side_effect = lambda: _fresh_conn()
+
+        # Mock public API to return matching name
+        mock_session = MagicMock()
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "name": "Waverly Vikings Varsity 2026",
+            "team_season": {"year": 2026},
+        }
+        mock_session.get.return_value = mock_resp
+        mock_create_session.return_value = mock_session
+
+        mock_client = MagicMock()
+        mock_client_cls.return_value = mock_client
+        mock_crawler = MagicMock()
+        mock_crawler.scout_team.return_value = CrawlResult(files_written=5)
+        mock_loader = MagicMock()
+        mock_loader.load_team.return_value = LoadResult(loaded=5)
+
+        with (
+            patch("src.reports.generator.ScoutingCrawler", return_value=mock_crawler),
+            patch("src.reports.generator.ScoutingLoader", return_value=mock_loader),
+            patch("src.reports.generator._REPO_ROOT", tmp_path),
+            patch("src.reports.generator._REPORTS_DIR", tmp_path / "data" / "reports"),
+        ):
+            result = generate_report("Xj9LlYlJklcl")
+
+        assert result.success is True
+
+        # AC-1 + AC-4: Verify public_id was backfilled
+        verify_conn = _fresh_conn()
+        row = verify_conn.execute(
+            "SELECT public_id FROM teams WHERE id = 1"
+        ).fetchone()
+        verify_conn.close()
+        assert row[0] == "Xj9LlYlJklcl"
+
+    @patch("src.http.session.create_session")
+    @patch("src.reports.generator.get_connection")
+    @patch("src.reports.generator.GameChangerClient")
+    @patch("src.reports.generator.ensure_team_row", return_value=1)
+    @patch("src.reports.generator.render_report", return_value="<html>test</html>")
+    @patch("src.reports.generator._crawl_and_load_spray")
+    def test_ac2_does_not_overwrite_existing_public_id(
+        self, mock_spray, mock_render, mock_ensure, mock_client_cls, mock_get_conn,
+        mock_create_session, db, tmp_path,
+    ):
+        """AC-2: Team with non-NULL public_id keeps original value; the
+        AND public_id IS NULL guard prevents overwrite."""
+        from src.gamechanger.crawlers import CrawlResult
+        from src.gamechanger.loaders import LoadResult
+
+        # Seed team WITH existing public_id
+        db.execute(
+            "INSERT INTO teams (name, public_id, season_year, membership_type) "
+            "VALUES ('Waverly Vikings Varsity 2026', 'existing-slug', 2026, 'tracked')"
+        )
+        db.execute(
+            "INSERT INTO scouting_runs (team_id, season_id, run_type, started_at, status) "
+            "VALUES (1, '2026-spring-hs', 'full', '2026-03-28T00:00:00Z', 'completed')"
+        )
+        db.commit()
+
+        db_path = str(tmp_path / "test.db")
+
+        def _fresh_conn():
+            conn = sqlite3.connect(db_path)
+            conn.execute("PRAGMA foreign_keys=ON;")
+            return conn
+
+        mock_get_conn.side_effect = lambda: _fresh_conn()
+
+        mock_session = MagicMock()
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "name": "Waverly Vikings Varsity 2026",
+            "team_season": {"year": 2026},
+        }
+        mock_session.get.return_value = mock_resp
+        mock_create_session.return_value = mock_session
+
+        mock_client = MagicMock()
+        mock_client_cls.return_value = mock_client
+        mock_crawler = MagicMock()
+        mock_crawler.scout_team.return_value = CrawlResult(files_written=5)
+        mock_loader = MagicMock()
+        mock_loader.load_team.return_value = LoadResult(loaded=5)
+
+        with (
+            patch("src.reports.generator.ScoutingCrawler", return_value=mock_crawler),
+            patch("src.reports.generator.ScoutingLoader", return_value=mock_loader),
+            patch("src.reports.generator._REPO_ROOT", tmp_path),
+            patch("src.reports.generator._REPORTS_DIR", tmp_path / "data" / "reports"),
+        ):
+            result = generate_report("DiFfErEnTsLuG1")
+
+        assert result.success is True
+
+        # AC-2: Verify public_id was NOT overwritten
+        verify_conn = _fresh_conn()
+        row = verify_conn.execute(
+            "SELECT public_id FROM teams WHERE id = 1"
+        ).fetchone()
+        verify_conn.close()
+        assert row[0] == "existing-slug"
+
+    @patch("src.http.session.create_session")
+    @patch("src.reports.generator.get_connection")
+    @patch("src.reports.generator.GameChangerClient")
+    @patch("src.reports.generator.ensure_team_row", return_value=1)
+    @patch("src.reports.generator.render_report", return_value="<html>test</html>")
+    @patch("src.reports.generator._crawl_and_load_spray")
+    def test_ac3_no_backfill_when_api_fails(
+        self, mock_spray, mock_render, mock_ensure, mock_client_cls, mock_get_conn,
+        mock_create_session, db, tmp_path,
+    ):
+        """AC-3: When the public API call fails, no public_id backfill is attempted."""
+        from src.gamechanger.crawlers import CrawlResult
+        from src.gamechanger.loaders import LoadResult
+
+        # Seed team WITHOUT public_id
+        db.execute(
+            "INSERT INTO teams (name, season_year, membership_type) "
+            "VALUES ('Waverly Vikings Varsity 2026', 2026, 'tracked')"
+        )
+        db.execute(
+            "INSERT INTO scouting_runs (team_id, season_id, run_type, started_at, status) "
+            "VALUES (1, '2026-spring-hs', 'full', '2026-03-28T00:00:00Z', 'completed')"
+        )
+        db.commit()
+
+        db_path = str(tmp_path / "test.db")
+
+        def _fresh_conn():
+            conn = sqlite3.connect(db_path)
+            conn.execute("PRAGMA foreign_keys=ON;")
+            return conn
+
+        mock_get_conn.side_effect = lambda: _fresh_conn()
+
+        # Mock public API to FAIL
+        mock_session = MagicMock()
+        mock_session.get.side_effect = RuntimeError("network error")
+        mock_create_session.return_value = mock_session
+
+        mock_client = MagicMock()
+        mock_client_cls.return_value = mock_client
+        mock_crawler = MagicMock()
+        mock_crawler.scout_team.return_value = CrawlResult(files_written=5)
+        mock_loader = MagicMock()
+        mock_loader.load_team.return_value = LoadResult(loaded=5)
+
+        with (
+            patch("src.reports.generator.ScoutingCrawler", return_value=mock_crawler),
+            patch("src.reports.generator.ScoutingLoader", return_value=mock_loader),
+            patch("src.reports.generator._REPO_ROOT", tmp_path),
+            patch("src.reports.generator._REPORTS_DIR", tmp_path / "data" / "reports"),
+        ):
+            result = generate_report("Xj9LlYlJklcl")
+
+        assert result.success is True
+
+        # AC-3: public_id should still be NULL (no backfill attempted)
+        verify_conn = _fresh_conn()
+        row = verify_conn.execute(
+            "SELECT public_id FROM teams WHERE id = 1"
+        ).fetchone()
+        verify_conn.close()
+        assert row[0] is None
+
+    @patch("src.http.session.create_session")
+    @patch("src.reports.generator.get_connection")
+    @patch("src.reports.generator.GameChangerClient")
+    @patch("src.reports.generator.ensure_team_row", return_value=1)
+    @patch("src.reports.generator.render_report", return_value="<html>test</html>")
+    @patch("src.reports.generator._crawl_and_load_spray")
+    def test_ac6_name_season_year_updated_regardless_of_public_id(
+        self, mock_spray, mock_render, mock_ensure, mock_client_cls, mock_get_conn,
+        mock_create_session, db, tmp_path,
+    ):
+        """AC-6: name and season_year are updated even when public_id is already set.
+        The backfill guard does not interfere with the unconditional name/season_year update."""
+        from src.gamechanger.crawlers import CrawlResult
+        from src.gamechanger.loaders import LoadResult
+
+        # Seed team with OLD name and existing public_id
+        db.execute(
+            "INSERT INTO teams (name, public_id, season_year, membership_type) "
+            "VALUES ('Old Name', 'existing-slug', 2025, 'tracked')"
+        )
+        db.execute(
+            "INSERT INTO scouting_runs (team_id, season_id, run_type, started_at, status) "
+            "VALUES (1, '2026-spring-hs', 'full', '2026-03-28T00:00:00Z', 'completed')"
+        )
+        db.commit()
+
+        db_path = str(tmp_path / "test.db")
+
+        def _fresh_conn():
+            conn = sqlite3.connect(db_path)
+            conn.execute("PRAGMA foreign_keys=ON;")
+            return conn
+
+        mock_get_conn.side_effect = lambda: _fresh_conn()
+
+        mock_session = MagicMock()
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "name": "New Name",
+            "team_season": {"year": 2026},
+        }
+        mock_session.get.return_value = mock_resp
+        mock_create_session.return_value = mock_session
+
+        mock_client = MagicMock()
+        mock_client_cls.return_value = mock_client
+        mock_crawler = MagicMock()
+        mock_crawler.scout_team.return_value = CrawlResult(files_written=5)
+        mock_loader = MagicMock()
+        mock_loader.load_team.return_value = LoadResult(loaded=5)
+
+        with (
+            patch("src.reports.generator.ScoutingCrawler", return_value=mock_crawler),
+            patch("src.reports.generator.ScoutingLoader", return_value=mock_loader),
+            patch("src.reports.generator._REPO_ROOT", tmp_path),
+            patch("src.reports.generator._REPORTS_DIR", tmp_path / "data" / "reports"),
+        ):
+            result = generate_report("DiFfErEnTsLuG1")
+
+        assert result.success is True
+
+        # AC-6: name and season_year updated, public_id unchanged
+        verify_conn = _fresh_conn()
+        row = verify_conn.execute(
+            "SELECT name, season_year, public_id FROM teams WHERE id = 1"
+        ).fetchone()
+        verify_conn.close()
+        assert row[0] == "New Name"
+        assert row[1] == 2026
+        assert row[2] == "existing-slug"
+
+    @patch("src.http.session.create_session")
+    @patch("src.reports.generator.get_connection")
+    @patch("src.reports.generator.GameChangerClient")
+    @patch("src.reports.generator.ensure_team_row", return_value=1)
+    @patch("src.reports.generator.render_report", return_value="<html>test</html>")
+    @patch("src.reports.generator._crawl_and_load_spray")
+    def test_unique_collision_does_not_abort_report(
+        self, mock_spray, mock_render, mock_ensure, mock_client_cls, mock_get_conn,
+        mock_create_session, db, tmp_path,
+    ):
+        """Edge case: another team already owns the public_id being backfilled.
+        The UNIQUE constraint violation should be caught and the report should
+        still generate successfully."""
+        from src.gamechanger.crawlers import CrawlResult
+        from src.gamechanger.loaders import LoadResult
+
+        # Team 1: NULL public_id (target for backfill)
+        db.execute(
+            "INSERT INTO teams (name, season_year, membership_type) "
+            "VALUES ('Waverly Vikings Varsity 2026', 2026, 'tracked')"
+        )
+        # Team 2: already owns the public_id we'd try to backfill
+        db.execute(
+            "INSERT INTO teams (name, public_id, season_year, membership_type) "
+            "VALUES ('Waverly Duplicate', 'Xj9LlYlJklcl', 2026, 'tracked')"
+        )
+        db.execute(
+            "INSERT INTO scouting_runs (team_id, season_id, run_type, started_at, status) "
+            "VALUES (1, '2026-spring-hs', 'full', '2026-03-28T00:00:00Z', 'completed')"
+        )
+        db.commit()
+
+        db_path = str(tmp_path / "test.db")
+
+        def _fresh_conn():
+            conn = sqlite3.connect(db_path)
+            conn.execute("PRAGMA foreign_keys=ON;")
+            return conn
+
+        mock_get_conn.side_effect = lambda: _fresh_conn()
+
+        mock_session = MagicMock()
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "name": "Waverly Vikings Varsity 2026",
+            "team_season": {"year": 2026},
+        }
+        mock_session.get.return_value = mock_resp
+        mock_create_session.return_value = mock_session
+
+        mock_client = MagicMock()
+        mock_client_cls.return_value = mock_client
+        mock_crawler = MagicMock()
+        mock_crawler.scout_team.return_value = CrawlResult(files_written=5)
+        mock_loader = MagicMock()
+        mock_loader.load_team.return_value = LoadResult(loaded=5)
+
+        with (
+            patch("src.reports.generator.ScoutingCrawler", return_value=mock_crawler),
+            patch("src.reports.generator.ScoutingLoader", return_value=mock_loader),
+            patch("src.reports.generator._REPO_ROOT", tmp_path),
+            patch("src.reports.generator._REPORTS_DIR", tmp_path / "data" / "reports"),
+        ):
+            result = generate_report("Xj9LlYlJklcl")
+
+        # Report should succeed despite UNIQUE collision on backfill
+        assert result.success is True
+
+        # Team 1 public_id should still be NULL (backfill failed gracefully)
+        verify_conn = _fresh_conn()
+        row = verify_conn.execute(
+            "SELECT public_id FROM teams WHERE id = 1"
+        ).fetchone()
+        verify_conn.close()
+        assert row[0] is None

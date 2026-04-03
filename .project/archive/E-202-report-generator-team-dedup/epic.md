@@ -1,7 +1,7 @@
 # E-202: Fix Report Generator Team Deduplication Bug
 
 ## Status
-`READY`
+`COMPLETED`
 <!-- Lifecycle: DRAFT -> READY -> ACTIVE -> COMPLETED (or BLOCKED / ABANDONED) -->
 <!-- PM sets READY explicitly after: expert consultation done, all stories have testable ACs, quality checklist passed. -->
 <!-- Only READY and ACTIVE epics can be dispatched. -->
@@ -47,7 +47,7 @@ No expert consultation required for baseball-coach (no coaching data changes), a
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-202-01 | Backfill public_id in report generator after step-3 match | TODO | None | - |
+| E-202-01 | Backfill public_id in report generator after step-3 match | DONE | None | SE |
 
 ## Dispatch Team
 - software-engineer
@@ -79,11 +79,30 @@ The fix adds a `public_id` backfill near the existing force-update block in `gen
 ## History
 - 2026-04-03: Created. SE consultation completed -- Approach B (caller-side backfill) selected.
 - 2026-04-03: READY. 14 review findings triaged (10 accepted, 4 dismissed). Epic refined through 3 review passes.
+- 2026-04-03: COMPLETED. 1 story delivered (E-202-01). Bug fix: report generator now backfills `public_id` after step-3 name match, preventing duplicate team creation during scouting crawl. Documentation assessment: No documentation impact -- bug fix with no user-visible behavior change, no schema change, no new endpoints. Context-layer assessment: see below.
 
-### Review Scorecard
+### Implementation Review Scorecard
+| Review Pass | Findings | Accepted | Dismissed |
+|---|---|---|---|
+| Per-story CR -- E-202-01 | 1 | 1 | 0 |
+| CR integration review | 0 | 0 | 0 |
+| Codex code review | 3 | 1 | 2 |
+| **Total** | **4** | **2** | **2** |
+
+### Spec Review Scorecard
 | Review Pass | Findings | Accepted | Dismissed |
 |---|---|---|---|
 | Internal iteration 1 -- CR spec audit | 4 | 2 | 2 |
 | Internal iteration 1 -- Holistic team (PM + SE) | 6 | 4 | 2 |
 | Codex iteration 1 | 4 | 4 | 0 |
 | **Total** | **14** | **10** | **4** |
+
+### Context-Layer Assessment
+| Trigger | Verdict | Notes |
+|---|---|---|
+| T1: New convention or pattern | NO | Uses existing `ensure_team_row` cascade; no new pattern introduced |
+| T2: Footgun or subtle trap | NO | The `AND public_id IS NULL` guard is self-documenting; no new trap |
+| T3: Domain knowledge | NO | No new coaching/stat domain knowledge |
+| T4: Agent workflow change | NO | No agent or workflow changes |
+| T5: Data model change | NO | No schema changes; `public_id` column already exists |
+| T6: Integration pattern | NO | No new API or integration patterns |

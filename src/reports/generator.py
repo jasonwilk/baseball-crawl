@@ -578,6 +578,22 @@ def generate_report(gc_url: str) -> GenerationResult:
                 "WHERE id = ?",
                 (team_name_from_api, season_year_from_api, team_id),
             )
+            # Backfill public_id when ensure_team_row matched by name+season_year
+            # (step 3) and left public_id NULL. Safe: AND public_id IS NULL guard
+            # prevents overwriting a value set through a more authoritative path.
+            try:
+                result = conn.execute(
+                    "UPDATE teams SET public_id = ? WHERE id = ? AND public_id IS NULL",
+                    (public_id, team_id),
+                )
+                if result.rowcount > 0:
+                    logger.info("Backfilled public_id=%s on team_id=%d", public_id, team_id)
+            except sqlite3.IntegrityError:
+                logger.warning(
+                    "Could not backfill public_id=%s on team_id=%d — "
+                    "another team already has this public_id",
+                    public_id, team_id,
+                )
         conn.commit()
 
     # Step 3: Create reports row (placeholder title — updated after crawl)
