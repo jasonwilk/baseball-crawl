@@ -9,7 +9,7 @@ import pytest
 
 from src.reports.generator import (
     GenerationResult,
-    _cleanup_orphan_teams,
+    cleanup_orphan_teams,
     _crawl_and_load_spray,
     _create_report_row,
     _query_batting,
@@ -68,7 +68,8 @@ def db(tmp_path):
             season_year INTEGER,
             membership_type TEXT DEFAULT 'tracked',
             classification TEXT,
-            active INTEGER DEFAULT 1
+            active INTEGER DEFAULT 1,
+            is_active INTEGER NOT NULL DEFAULT 1
         );
         CREATE TABLE seasons (
             season_id TEXT PRIMARY KEY,
@@ -198,6 +199,85 @@ def db(tmp_path):
         );
         CREATE INDEX idx_reports_slug ON reports(slug);
         CREATE INDEX idx_reports_team_id ON reports(team_id);
+        CREATE TABLE plays (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            game_id TEXT NOT NULL REFERENCES games(game_id),
+            play_order INTEGER NOT NULL,
+            inning INTEGER NOT NULL,
+            half TEXT NOT NULL,
+            season_id TEXT NOT NULL,
+            batting_team_id INTEGER NOT NULL REFERENCES teams(id),
+            batter_id TEXT NOT NULL REFERENCES players(player_id),
+            pitcher_id TEXT REFERENCES players(player_id),
+            outcome TEXT,
+            pitch_count INTEGER NOT NULL DEFAULT 0,
+            is_first_pitch_strike INTEGER NOT NULL DEFAULT 0,
+            is_qab INTEGER NOT NULL DEFAULT 0,
+            home_score INTEGER,
+            away_score INTEGER,
+            did_score_change INTEGER,
+            outs_after INTEGER,
+            did_outs_change INTEGER,
+            UNIQUE(game_id, play_order)
+        );
+        CREATE TABLE play_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            play_id INTEGER NOT NULL REFERENCES plays(id),
+            event_order INTEGER NOT NULL,
+            event_type TEXT NOT NULL,
+            pitch_result TEXT,
+            is_first_pitch INTEGER NOT NULL DEFAULT 0,
+            raw_template TEXT,
+            UNIQUE(play_id, event_order)
+        );
+        CREATE TABLE reconciliation_discrepancies (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            game_id TEXT NOT NULL REFERENCES games(game_id),
+            run_id TEXT NOT NULL,
+            team_id INTEGER NOT NULL,
+            player_id TEXT NOT NULL,
+            signal_name TEXT NOT NULL,
+            category TEXT NOT NULL,
+            status TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE TABLE crawl_jobs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            team_id INTEGER,
+            status TEXT
+        );
+        CREATE TABLE coaching_assignments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            team_id INTEGER
+        );
+        CREATE TABLE users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            email TEXT UNIQUE,
+            role TEXT,
+            hashed_password TEXT
+        );
+        CREATE TABLE user_team_access (
+            user_id INTEGER,
+            team_id INTEGER,
+            UNIQUE(user_id, team_id)
+        );
+        CREATE TABLE team_opponents (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            our_team_id INTEGER,
+            opponent_team_id INTEGER,
+            UNIQUE(our_team_id, opponent_team_id)
+        );
+        CREATE TABLE opponent_links (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            our_team_id INTEGER,
+            root_team_id TEXT NOT NULL,
+            opponent_name TEXT NOT NULL,
+            resolved_team_id INTEGER,
+            resolution_method TEXT,
+            resolved_at TEXT,
+            is_hidden INTEGER NOT NULL DEFAULT 0
+        );
     """)
     conn.commit()
     yield conn
@@ -364,6 +444,7 @@ class TestGenerateReportE2E:
             patch("src.reports.generator.ScoutingLoader", return_value=mock_loader),
             patch("src.reports.generator._REPO_ROOT", tmp_path),
             patch("src.reports.generator._REPORTS_DIR", tmp_path / "data" / "reports"),
+            patch("src.reports.generator._crawl_and_load_plays"),
         ):
             result = generate_report("abc123")
 
@@ -387,6 +468,68 @@ class TestGenerateReportE2E:
         verify_conn.close()
         assert row[0] == "ready"
         assert row[1] == f"reports/{result.slug}.html"
+
+
+# ---------------------------------------------------------------------------
+# E-199: Plays-stage auth expiry is non-fatal
+# ---------------------------------------------------------------------------
+
+
+class TestPlaysStageAuthExpiry:
+    """AC-5: Auth expiry during plays stage does not fail the report."""
+
+    @patch("src.reports.generator.get_connection")
+    @patch("src.reports.generator.GameChangerClient")
+    @patch("src.reports.generator.ensure_team_row", return_value=1)
+    @patch("src.reports.generator.render_report", return_value="<html>ok</html>")
+    @patch("src.reports.generator._crawl_and_load_spray")
+    @patch("src.reports.generator._crawl_and_load_plays")
+    def test_auth_expiry_in_plays_stage_yields_success(
+        self, mock_plays, mock_spray, mock_render, mock_ensure,
+        mock_client_cls, mock_get_conn, db, tmp_path,
+    ):
+        from src.gamechanger.client import CredentialExpiredError
+        from src.gamechanger.crawlers import CrawlResult
+        from src.gamechanger.loaders import LoadResult
+        from src.reports.generator import generate_report
+
+        _seed_team(db)
+        _seed_season(db)
+        db.execute(
+            "INSERT INTO scouting_runs (team_id, season_id, run_type, started_at, status) "
+            "VALUES (1, '2026-spring-hs', 'full', '2026-03-28T00:00:00Z', 'completed')"
+        )
+        db.commit()
+
+        db_path = str(tmp_path / "test.db")
+
+        def _fresh_conn():
+            conn = sqlite3.connect(db_path)
+            conn.execute("PRAGMA foreign_keys=ON;")
+            return conn
+
+        mock_get_conn.side_effect = lambda: _fresh_conn()
+
+        mock_client = MagicMock()
+        mock_client_cls.return_value = mock_client
+        mock_crawler = MagicMock()
+        mock_crawler.scout_team.return_value = CrawlResult(files_written=5)
+        mock_loader = MagicMock()
+        mock_loader.load_team.return_value = LoadResult(loaded=5)
+
+        # Plays stage raises CredentialExpiredError
+        mock_plays.side_effect = CredentialExpiredError("token expired")
+
+        with (
+            patch("src.reports.generator.ScoutingCrawler", return_value=mock_crawler),
+            patch("src.reports.generator.ScoutingLoader", return_value=mock_loader),
+            patch("src.reports.generator._REPO_ROOT", tmp_path),
+            patch("src.reports.generator._REPORTS_DIR", tmp_path / "data" / "reports"),
+        ):
+            result = generate_report("abc123")
+
+        assert result.success is True
+        assert result.slug is not None
 
 
 # ---------------------------------------------------------------------------
@@ -1093,6 +1236,57 @@ class TestResolveGcUuid:
                 team_id INTEGER, player_id TEXT, season_id TEXT,
                 chart_type TEXT, x REAL, y REAL, play_result TEXT, play_type TEXT
             );
+            CREATE TABLE IF NOT EXISTS plays (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                game_id TEXT NOT NULL,
+                play_order INTEGER NOT NULL,
+                inning INTEGER NOT NULL,
+                half TEXT NOT NULL,
+                season_id TEXT NOT NULL,
+                batting_team_id INTEGER NOT NULL,
+                batter_id TEXT NOT NULL,
+                pitcher_id TEXT,
+                outcome TEXT,
+                pitch_count INTEGER NOT NULL DEFAULT 0,
+                is_first_pitch_strike INTEGER NOT NULL DEFAULT 0,
+                is_qab INTEGER NOT NULL DEFAULT 0,
+                home_score INTEGER,
+                away_score INTEGER,
+                did_score_change INTEGER,
+                outs_after INTEGER,
+                did_outs_change INTEGER,
+                UNIQUE(game_id, play_order)
+            );
+            CREATE TABLE IF NOT EXISTS play_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                play_id INTEGER NOT NULL,
+                event_order INTEGER NOT NULL,
+                event_type TEXT NOT NULL,
+                UNIQUE(play_id, event_order)
+            );
+            CREATE TABLE IF NOT EXISTS reconciliation_discrepancies (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                game_id TEXT NOT NULL, run_id TEXT NOT NULL,
+                team_id INTEGER NOT NULL, player_id TEXT NOT NULL,
+                signal_name TEXT NOT NULL, category TEXT NOT NULL,
+                status TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+            CREATE TABLE IF NOT EXISTS crawl_jobs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, team_id INTEGER, status TEXT
+            );
+            CREATE TABLE IF NOT EXISTS coaching_assignments (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, team_id INTEGER
+            );
+            CREATE TABLE IF NOT EXISTS user_team_access (
+                user_id INTEGER, team_id INTEGER, UNIQUE(user_id, team_id)
+            );
+            CREATE TABLE IF NOT EXISTS opponent_links (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                our_team_id INTEGER, root_team_id TEXT NOT NULL,
+                opponent_name TEXT NOT NULL, resolved_team_id INTEGER,
+                resolution_method TEXT, resolved_at TEXT
+            );
         """)
         # Seed team WITH gc_uuid already set
         conn_template.execute(
@@ -1130,6 +1324,7 @@ class TestResolveGcUuid:
             patch("src.reports.generator.ScoutingLoader", return_value=mock_loader),
             patch("src.reports.generator._REPO_ROOT", tmp_path),
             patch("src.reports.generator._REPORTS_DIR", tmp_path / "data" / "reports"),
+            patch("src.reports.generator._crawl_and_load_plays"),
         ):
             result = generate_report("abc123")
 
@@ -1412,6 +1607,7 @@ class TestResolveGcUuidIntegration:
             patch("src.reports.generator.ScoutingLoader", return_value=mock_loader),
             patch("src.reports.generator._REPO_ROOT", tmp_path),
             patch("src.reports.generator._REPORTS_DIR", tmp_path / "data" / "reports"),
+            patch("src.reports.generator._crawl_and_load_plays"),
         ):
             result = generate_report("abc123")
 
@@ -1513,24 +1709,24 @@ class TestCleanupOrphanTeams:
         )
         db.commit()
 
-        count = _cleanup_orphan_teams(db, {orphan_id})
+        count = cleanup_orphan_teams(db, {orphan_id})
 
-        assert count == 1
-        # Orphan team deleted
-        assert db.execute("SELECT id FROM teams WHERE id = ?", (orphan_id,)).fetchone() is None
+        # Orphan team retained -- it still has a game FK reference (shared game)
+        assert count == 0
+        assert db.execute("SELECT id FROM teams WHERE id = ?", (orphan_id,)).fetchone() is not None
         # Subject team still exists
         assert db.execute("SELECT id FROM teams WHERE id = ?", (subject_id,)).fetchone() is not None
-        # Game deleted (both teams' per-game data goes with it)
-        assert db.execute("SELECT game_id FROM games WHERE game_id = 'g1'").fetchone() is None
-        # Per-game batting for both teams deleted
-        assert db.execute("SELECT id FROM player_game_batting WHERE game_id = 'g1'").fetchone() is None
-        # Spray chart deleted
-        assert db.execute("SELECT id FROM spray_charts WHERE game_id = 'g1'").fetchone() is None
-        # Orphan roster deleted
+        # Shared game preserved (subject team is a participant)
+        assert db.execute("SELECT game_id FROM games WHERE game_id = 'g1'").fetchone() is not None
+        # Per-game batting preserved (game still exists)
+        assert db.execute("SELECT id FROM player_game_batting WHERE game_id = 'g1'").fetchone() is not None
+        # Spray chart preserved (game still exists)
+        assert db.execute("SELECT id FROM spray_charts WHERE game_id = 'g1'").fetchone() is not None
+        # Orphan roster deleted (team-scoped data always cleaned)
         assert db.execute(
             "SELECT team_id FROM team_rosters WHERE team_id = ?", (orphan_id,)
         ).fetchone() is None
-        # Orphan season stats deleted
+        # Orphan season stats deleted (team-scoped data always cleaned)
         assert db.execute(
             "SELECT team_id FROM player_season_batting WHERE team_id = ?", (orphan_id,)
         ).fetchone() is None
@@ -1550,7 +1746,7 @@ class TestCleanupOrphanTeams:
         orphan_id = cursor.lastrowid
         db.commit()
 
-        _cleanup_orphan_teams(db, {orphan_id})
+        cleanup_orphan_teams(db, {orphan_id})
 
         # Pre-existing team still there
         assert db.execute(
@@ -1564,7 +1760,7 @@ class TestCleanupOrphanTeams:
     def test_empty_orphan_set_is_noop(self, db):
         """No orphans means no deletions."""
         team_id = _seed_team(db)
-        count = _cleanup_orphan_teams(db, set())
+        count = cleanup_orphan_teams(db, set())
         assert count == 0
         assert db.execute("SELECT id FROM teams WHERE id = ?", (team_id,)).fetchone() is not None
 
@@ -1601,9 +1797,59 @@ class TestCleanupOrphanTeams:
         )
         db.commit()
 
-        # Should not raise FK constraint error
-        count = _cleanup_orphan_teams(db, {orphan_id})
-        assert count == 1
+        # Should not raise FK constraint error — orphan retained (shared game)
+        count = cleanup_orphan_teams(db, {orphan_id})
+        assert count == 0  # orphan team kept due to shared game FK
+
+    def test_preserves_shared_game_with_non_orphan(self, db):
+        """Orphan cleanup preserves games where a non-orphan team participates."""
+        _seed_team(db)  # team_id=1 (non-orphan / report team)
+        _seed_season(db)
+
+        # Create orphan team
+        db.execute(
+            "INSERT INTO teams (name, membership_type, is_active) "
+            "VALUES ('Orphan Opp', 'tracked', 0)"
+        )
+        orphan_id = db.execute("SELECT last_insert_rowid()").fetchone()[0]
+
+        # Player for game data
+        db.execute(
+            "INSERT OR IGNORE INTO players (player_id, first_name, last_name) "
+            "VALUES ('p-shared', 'Shared', 'Player')"
+        )
+
+        # Game between report team (1) and orphan -- shared game
+        db.execute(
+            "INSERT INTO games (game_id, season_id, game_date, home_team_id, "
+            "away_team_id, status) VALUES ('g-shared', '2026-spring-hs', "
+            "'2026-03-15', 1, ?, 'completed')",
+            (orphan_id,),
+        )
+        # Plays for the shared game
+        db.execute(
+            "INSERT INTO plays (game_id, play_order, inning, half, season_id, "
+            "batting_team_id, batter_id, pitcher_id) VALUES ('g-shared', 1, 1, "
+            "'top', '2026-spring-hs', 1, 'p-shared', 'p-shared')"
+        )
+        db.commit()
+
+        # Cleanup orphan -- should NOT delete the shared game or its plays
+        count = cleanup_orphan_teams(db, {orphan_id})
+
+        # Orphan team row retained (still referenced by shared game FK)
+        assert db.execute(
+            "SELECT 1 FROM teams WHERE id = ?", (orphan_id,)
+        ).fetchone() is not None
+        assert count == 0  # no teams actually deleted
+
+        # Shared game and plays preserved (report team is still a participant)
+        assert db.execute(
+            "SELECT 1 FROM games WHERE game_id = 'g-shared'"
+        ).fetchone() is not None
+        assert db.execute(
+            "SELECT 1 FROM plays WHERE game_id = 'g-shared'"
+        ).fetchone() is not None
 
 
 class TestCleanupNonFatal:
@@ -1673,7 +1919,7 @@ class TestCleanupNonFatal:
             patch("src.reports.generator._REPO_ROOT", tmp_path),
             patch("src.reports.generator._REPORTS_DIR", tmp_path / "data" / "reports"),
             patch(
-                "src.reports.generator._cleanup_orphan_teams",
+                "src.reports.generator.cleanup_orphan_teams",
                 side_effect=sqlite3.OperationalError("disk I/O error"),
             ),
         ):
@@ -1756,7 +2002,7 @@ class TestQueryBeforeCleanup:
         mock_loader.load_team.side_effect = _load_side_effect
 
         cleanup_called = []
-        original_cleanup = _cleanup_orphan_teams
+        original_cleanup = cleanup_orphan_teams
 
         def _tracking_cleanup(conn, orphan_ids):
             cleanup_called.append(orphan_ids.copy())
@@ -1768,7 +2014,7 @@ class TestQueryBeforeCleanup:
             patch("src.reports.generator._REPO_ROOT", tmp_path),
             patch("src.reports.generator._REPORTS_DIR", tmp_path / "data" / "reports"),
             patch(
-                "src.reports.generator._cleanup_orphan_teams",
+                "src.reports.generator.cleanup_orphan_teams",
                 side_effect=_tracking_cleanup,
             ),
         ):
@@ -1853,6 +2099,7 @@ class TestPublicIdBackfill:
             patch("src.reports.generator.ScoutingLoader", return_value=mock_loader),
             patch("src.reports.generator._REPO_ROOT", tmp_path),
             patch("src.reports.generator._REPORTS_DIR", tmp_path / "data" / "reports"),
+            patch("src.reports.generator._crawl_and_load_plays"),
         ):
             result = generate_report("Xj9LlYlJklcl")
 
@@ -1923,6 +2170,7 @@ class TestPublicIdBackfill:
             patch("src.reports.generator.ScoutingLoader", return_value=mock_loader),
             patch("src.reports.generator._REPO_ROOT", tmp_path),
             patch("src.reports.generator._REPORTS_DIR", tmp_path / "data" / "reports"),
+            patch("src.reports.generator._crawl_and_load_plays"),
         ):
             result = generate_report("DiFfErEnTsLuG1")
 
@@ -1987,6 +2235,7 @@ class TestPublicIdBackfill:
             patch("src.reports.generator.ScoutingLoader", return_value=mock_loader),
             patch("src.reports.generator._REPO_ROOT", tmp_path),
             patch("src.reports.generator._REPORTS_DIR", tmp_path / "data" / "reports"),
+            patch("src.reports.generator._crawl_and_load_plays"),
         ):
             result = generate_report("Xj9LlYlJklcl")
 
@@ -2057,6 +2306,7 @@ class TestPublicIdBackfill:
             patch("src.reports.generator.ScoutingLoader", return_value=mock_loader),
             patch("src.reports.generator._REPO_ROOT", tmp_path),
             patch("src.reports.generator._REPORTS_DIR", tmp_path / "data" / "reports"),
+            patch("src.reports.generator._crawl_and_load_plays"),
         ):
             result = generate_report("DiFfErEnTsLuG1")
 
@@ -2135,6 +2385,7 @@ class TestPublicIdBackfill:
             patch("src.reports.generator.ScoutingLoader", return_value=mock_loader),
             patch("src.reports.generator._REPO_ROOT", tmp_path),
             patch("src.reports.generator._REPORTS_DIR", tmp_path / "data" / "reports"),
+            patch("src.reports.generator._crawl_and_load_plays"),
         ):
             result = generate_report("Xj9LlYlJklcl")
 

@@ -435,6 +435,34 @@ def _build_spray_player_stats(
     return result
 
 
+def _format_pct(value: float | None) -> str:
+    """Format a ratio as a percentage string, e.g. 0.625 -> '62.5%'."""
+    if value is None:
+        return "\u2014"
+    return f"{value * 100:.1f}%"
+
+
+def _format_rate(value: float | None) -> str:
+    """Format a rate stat to one decimal, e.g. 3.82 -> '3.8'."""
+    if value is None:
+        return "\u2014"
+    return f"{value:.1f}"
+
+
+def _format_plays_pitching(pitching: list[dict]) -> None:
+    """Add formatted plays-derived pitching columns (mutates in place)."""
+    for p in pitching:
+        p["_fps_pct"] = _format_pct(p.get("fps_pct"))
+        p["_pitches_per_bf"] = _format_rate(p.get("pitches_per_bf"))
+
+
+def _format_plays_batting(batting: list[dict]) -> None:
+    """Add formatted plays-derived batting columns (mutates in place)."""
+    for b in batting:
+        b["_qab_pct"] = _format_pct(b.get("qab_pct"))
+        b["_pitches_per_pa"] = _format_rate(b.get("pitches_per_pa"))
+
+
 def render_report(data: dict[str, Any]) -> str:
     """Render a standalone scouting report HTML string.
 
@@ -478,14 +506,16 @@ def render_report(data: dict[str, Any]) -> str:
     batting = [dict(b) for b in data.get("batting") or []]
     pitching = [dict(p) for p in data.get("pitching") or []]
 
-    # Enrich batting
+    # Enrich batting (including plays-derived stats formatting)
     _compute_batting_enrichments(batting)
+    _format_plays_batting(batting)
     _compute_batting_heat(batting)
 
-    # Enrich pitching
+    # Enrich pitching (including plays-derived stats formatting)
     for pitcher in pitching:
         ip_outs = pitcher.get("ip_outs") or 0
         pitcher["_small_sample"] = ip_outs < _MIN_IP_OUTS_PITCHING
+    _format_plays_pitching(pitching)
     _compute_pitching_heat(pitching)
 
     # Key players
@@ -540,12 +570,19 @@ def render_report(data: dict[str, Any]) -> str:
         f"{runs_allowed_raw:.1f}" if runs_allowed_raw is not None else None
     )
 
+    # Plays-derived team-level stats
+    has_plays_data = data.get("has_plays_data", False)
+    plays_game_count = data.get("plays_game_count", 0)
+    game_count = data.get("game_count", 0)
+    team_fps_pct = _format_pct(data.get("team_fps_pct"))
+    team_pitches_per_pa = _format_rate(data.get("team_pitches_per_pa"))
+
     context = {
         "team": data.get("team") or {},
         "generated_at": data.get("generated_at", ""),
         "expires_at": data.get("expires_at", ""),
         "freshness_date": data.get("freshness_date"),
-        "game_count": data.get("game_count", 0),
+        "game_count": game_count,
         "recent_form": recent_form,
         "recent_form_str": recent_form_str,
         "pitching": pitching,
@@ -561,6 +598,10 @@ def render_report(data: dict[str, Any]) -> str:
         "has_batting": bool(batting),
         "has_spray": bool(spray_data),
         "has_recent_form": bool(recent_form_str),
+        "has_plays_data": has_plays_data,
+        "plays_game_count": plays_game_count,
+        "team_fps_pct": team_fps_pct,
+        "team_pitches_per_pa": team_pitches_per_pa,
     }
 
     return template.render(**context)

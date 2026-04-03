@@ -700,6 +700,53 @@ Charts render as 4×6 inch PNGs at 150 DPI, matching the 320×480 coordinate spa
 
 **Threshold behavior**: A chart is displayed for any player or team with at least 1 BIP. Players or teams with 0 BIP receive "No spray chart data available" in the dashboard UI; the image route returns HTTP 204 as a defensive fallback for direct URL access.
 
+## Standalone Reports
+
+Standalone reports are shareable, frozen scouting snapshots generated on demand for any GameChanger team. They are separate from the live dashboard opponent view and do not require a database-tracked team. Manage them at `/admin/reports`.
+
+### Generating a Report
+
+From the admin Reports page, paste a GameChanger public URL or public ID slug and click **Generate**. The system crawls the team's schedule and stats, renders a self-contained HTML file, and saves it to `data/reports/`. Generation typically takes 10-30 seconds depending on how many games the team has played.
+
+**CLI alternative**:
+
+```bash
+bb report generate <public_id>
+```
+
+Reports expire 14 days after generation. After expiry, the link returns a 404 and the row is eligible for cleanup.
+
+### Listing Reports
+
+```bash
+bb report list
+```
+
+Shows all generated reports with their public ID, expiry date, and file status.
+
+### Deleting a Report
+
+Click **Delete** on any report row in the admin Reports page. A confirmation dialog appears before the deletion runs.
+
+**What happens when you delete a report** depends on whether the associated team has other data in the system:
+
+When all four conditions below are true, deletion is a **full cascade** -- the report, the HTML file, and the team row plus all its associated data are removed in a single transaction:
+
+| Condition | What it checks |
+|-----------|---------------|
+| Team is not active (`is_active = 0`) | Active teams are never auto-deleted |
+| No `team_opponents` links | Team is not linked as an opponent to any of your tracked teams |
+| No other reports reference this team | This was the only report for this team |
+| No shared games with tracked teams | No game rows in the DB link this team to a member team |
+
+If **any** condition fails, deletion is a **report-only** operation: only the report row and the `data/reports/` HTML file are removed. The team and its stats remain in the database.
+
+This behavior is automatic -- no operator decision is required. The system applies the guard conditions and does the right thing.
+
+**Typical use case**: A report generated for a tournament team that is not on your schedule will usually satisfy all four conditions. Deleting the report cleans up the team data completely. A report generated for an opponent who is also tracked on the dashboard (linked via `team_opponents`) will only remove the report file -- the scouting data stays.
+
+---
+
 ## Programs Management
 
 Programs are umbrella entities that group teams under a shared organizational identity (e.g., `lsb-hs` = Lincoln Standing Bear High School). Navigate to the **Programs** tab (`/admin/programs`) in the admin sub-navigation.
@@ -1016,4 +1063,4 @@ For the expected data volume (~30 games x 4 teams x a few seasons), the database
 
 ---
 
-*Last updated: 2026-04-02 | Source: E-198 (bb data reconcile, migration 012), E-195 (plays pipeline, migration 009, validate_plays_stats.py), E-173 (resolution write-through, auto-scout after linking, unified Find on GC resolve page, dashboard sort by next game date, terminology cleanup, bb data repair-opponents), E-167 (bb data dedup CLI, GC search-powered opponent resolution, skip/unhide workflow), E-163 (scouting spray pipeline, updated thresholds, bb data scout 4-step flow), E-158 (spray chart pipeline, migration 006, chart routes), E-156 (bb data scout --force flag), E-155 (duplicate team detection and merge UI), E-143 (programs, user roles, team delete, opponent mapping UX, crawl trigger UI), E-120-06 (bare UUID input documented), E-055 (unified CLI), E-115-01 (E-100 team management model), E-028-03 (original)*
+*Last updated: 2026-04-03 | Source: E-199 (standalone reports section, cascade-delete behavior), E-198 (bb data reconcile, migration 012), E-195 (plays pipeline, migration 009, validate_plays_stats.py), E-173 (resolution write-through, auto-scout after linking, unified Find on GC resolve page, dashboard sort by next game date, terminology cleanup, bb data repair-opponents), E-167 (bb data dedup CLI, GC search-powered opponent resolution, skip/unhide workflow), E-163 (scouting spray pipeline, updated thresholds, bb data scout 4-step flow), E-158 (spray chart pipeline, migration 006, chart routes), E-156 (bb data scout --force flag), E-155 (duplicate team detection and merge UI), E-143 (programs, user roles, team delete, opponent mapping UX, crawl trigger UI), E-120-06 (bare UUID input documented), E-055 (unified CLI), E-115-01 (E-100 team management model), E-028-03 (original)*

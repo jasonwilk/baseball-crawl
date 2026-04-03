@@ -75,6 +75,56 @@ This guide explains the statistics the LSB analytics system tracks. Each stat in
 
 ---
 
+### QAB% -- Quality At-Bat Percentage
+
+**What it measures:** How often a batter has a "quality at-bat" -- a plate appearance that puts real pressure on the pitcher, even if it does not end in a hit.
+
+**The formula:** Quality at-bats divided by Plate Appearances, expressed as a percentage.
+
+**What counts as a quality at-bat:** Any plate appearance that meets at least one of these conditions:
+- Sees 3 or more pitches after falling behind 0-2 (battles back instead of giving up)
+- Sees 6 or more total pitches
+- Gets an extra-base hit (double, triple, or home run)
+- Makes hard contact (line drive or hard ground ball)
+- Draws a walk (not an intentional walk)
+- Lays down a sacrifice bunt
+- Hits a sacrifice fly
+
+An intentional walk, dropped third strike, or catcher's interference does **not** count as a quality at-bat.
+
+**What the numbers mean:**
+- Above 45% is excellent -- the batter is consistently making the pitcher work
+- 35-45% is solid
+- Below 30% means the batter is giving away at-bats too easily
+
+**Why it matters:** QAB% tells you which batters compete, even when they are not hitting. A player with a high QAB% is running up pitch counts, wearing down opposing pitchers, and putting runners in motion even when the scorebook says "0 for 3." When you are late in a close game and need the opposing starter out, put your highest QAB% batters up.
+
+**Important note:** QAB% is computed from pitch-by-pitch data. It only appears for games where that data was recorded. If a player shows "—" for QAB%, the pitch data was not available for their at-bats.
+
+**Example:** Jordan Redhorse has a 42% QAB% through the first half of the season. He has only two hits this week, but he is fouling off pitches and working deep counts -- a pitcher facing him in the fifth inning has already thrown 30+ extra pitches because of him.
+
+---
+
+### P/PA -- Pitches Seen Per Plate Appearance
+
+**What it measures:** How many pitches a batter sees per plate appearance, on average.
+
+**The formula:** Total pitches seen divided by Plate Appearances.
+
+**What the numbers mean:**
+- Above 4.5 is exceptional plate discipline -- this batter is working counts and making the pitcher throw
+- 4.0-4.5 is very patient
+- 3.5-4.0 is average
+- Below 3.5 means the batter is swinging early in counts
+
+**Why it matters:** Batters who see a lot of pitches per PA drive up pitch counts for the entire game. A pitcher throwing 5+ pitches per batter will be out of the game by the fifth inning. When scouting your own lineup, high P/PA batters help the guys hitting behind them by tiring out opposing pitchers. When scouting an opponent, a high team P/PA means your pitcher needs to command the zone early in counts or he will struggle to go deep into the game.
+
+**Important note:** Like QAB%, P/PA is computed from pitch-by-pitch data and only appears when that data was recorded.
+
+**Example:** A team averaging 4.2 P/PA as a lineup will see roughly 150+ pitches in a nine-inning game. That kind of patience will knock most high school starters out before the sixth inning.
+
+---
+
 ### BABIP -- Batting Average on Balls in Play
 
 **What it measures:** How often a batter gets a hit when he puts the ball in play (excludes home runs, strikeouts, and walks).
@@ -166,6 +216,44 @@ This guide explains the statistics the LSB analytics system tracks. Each stat in
 
 ---
 
+### FPS% -- First-Pitch Strike Percentage
+
+**What it measures:** How often a pitcher throws a strike on the very first pitch of an at-bat.
+
+**The formula:** First-pitch strikes divided by plate appearances (excluding intentional walks and hit-by-pitches).
+
+**What the numbers mean:**
+- Above 65% is excellent -- this pitcher controls the count from pitch one
+- 55-65% is solid
+- Below 50% means the pitcher is consistently starting behind in the count
+
+**Why it matters:** The first pitch sets the tone for every at-bat. A pitcher who regularly gets ahead 0-1 can expand the zone, use off-speed pitches, and work efficiently. A pitcher who starts 1-0 is handing the hitter the advantage on every at-bat. FPS% is often the first number to check when scouting a pitching staff -- a low FPS% pitcher will run up his pitch count and be easier to work deep counts against.
+
+**Important note:** FPS% is computed from pitch-by-pitch data. It only appears for games where that data was recorded. If a pitcher shows "—" for FPS%, the pitch data was not available.
+
+**Example:** An opposing starter with a 48% FPS% is starting behind in more than half of all at-bats. Your lineup should be patient and look for fastballs early -- he needs to throw strikes.
+
+---
+
+### P/BF -- Pitches Per Batter Faced
+
+**What it measures:** How many pitches a pitcher throws for each batter he faces, on average. A direct measure of efficiency.
+
+**The formula:** Total pitches thrown divided by batters faced.
+
+**What the numbers mean:**
+- Below 3.5 is excellent efficiency -- this pitcher is getting outs quickly and can go deep into games
+- 3.5-4.0 is average
+- Above 4.5 means batters are consistently working deep counts against this pitcher
+
+**Why it matters:** P/BF tells you how long an opposing pitcher will last. A pitcher throwing 4.5 pitches per batter will hit 100 pitches by the fifth or sixth inning. A pitcher at 3.5 can easily go seven or eight. When you are building a game plan, knowing P/BF helps you set realistic expectations for when you will get to their bullpen.
+
+**Important note:** Like FPS%, P/BF is computed from pitch-by-pitch data and only appears when that data was recorded.
+
+**Example:** If their ace averages 3.4 P/BF, he will probably finish seven innings even if he faces 27 batters. Your lineup may only get two cracks at him before he hands it off to the bullpen.
+
+---
+
 ## When to Trust the Numbers -- Sample Size Warnings
 
 High school baseball has short seasons and small rosters. A 30-game season means a batter might only get 80-100 plate appearances all year. When you split those numbers by situation -- home vs. away, lefty vs. righty -- the sample gets even smaller.
@@ -222,4 +310,4 @@ Splits break down a player's stats by specific situations. The two most useful s
 
 ---
 
-*Last updated: 2026-03-03 | Story reference: E-028-04*
+*Last updated: 2026-04-03 | Source: E-028-04 (initial glossary), E-199 (FPS%, P/BF, QAB%, P/PA)*

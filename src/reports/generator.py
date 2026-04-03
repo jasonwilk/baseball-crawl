@@ -17,6 +17,7 @@ Public API::
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import secrets
@@ -32,9 +33,12 @@ from src.gamechanger.client import CredentialExpiredError, GameChangerClient
 from src.gamechanger.crawlers.scouting import ScoutingCrawler
 from src.gamechanger.crawlers.scouting_spray import ScoutingSprayChartCrawler
 from src.gamechanger.loaders import derive_season_id_for_team
+from src.gamechanger.loaders.plays_loader import PlaysLoader
 from src.gamechanger.loaders.scouting_loader import ScoutingLoader
 from src.gamechanger.loaders.scouting_spray_loader import ScoutingSprayChartLoader
+from src.gamechanger.types import TeamRef
 from src.gamechanger.url_parser import parse_team_url
+from src.reconciliation.engine import reconcile_game
 from src.reports.renderer import render_report
 
 logger = logging.getLogger(__name__)
@@ -45,6 +49,7 @@ _REPORTS_DIR = _REPO_ROOT / "data" / "reports"
 _EXPIRY_DAYS = 14
 _APP_URL_DEFAULT = "http://localhost:8001"
 _SEARCH_CONTENT_TYPE = "application/vnd.gc.com.post_search+json; version=0.0.0"
+_PLAYS_ACCEPT = "application/vnd.gc.com.event_plays+json; version=0.0.0"
 
 
 @dataclass
@@ -513,6 +518,299 @@ def _crawl_and_load_spray(
         )
 
 
+def _crawl_and_load_plays(
+    client: GameChangerClient,
+    public_id: str,
+    team_id: int,
+    season_id: str,
+    crawl_season_id: str,
+) -> None:
+    """Crawl, load, and reconcile plays data for a scouted team's games.
+
+    Queries completed game IDs from the DB, fetches plays via the API,
+    writes raw JSON to the scouting directory, loads via ``PlaysLoader``,
+    and runs ``reconcile_game()`` for each game to correct pitcher
+    attribution errors.
+
+    Failure handling is per-game: individual game failures are logged and
+    skipped.  ``CredentialExpiredError`` propagates as a stage-level failure.
+    All other stage-level exceptions are caught (non-fatal).
+
+    Args:
+        client: Authenticated ``GameChangerClient``.
+        public_id: The scouted team's ``public_id`` slug.
+        team_id: The team's DB integer PK.
+        season_id: Canonical DB season_id for query scoping.
+        crawl_season_id: File-discovery season slug for directory paths.
+    """
+    try:
+        scouting_dir = _DATA_ROOT / crawl_season_id / "scouting" / public_id
+        plays_dir = scouting_dir / "plays"
+        plays_dir.mkdir(parents=True, exist_ok=True)
+
+        # Query completed games for this team
+        with closing(get_connection()) as conn:
+            rows = conn.execute(
+                """
+                SELECT game_id FROM games
+                WHERE season_id = ?
+                  AND (home_team_id = ? OR away_team_id = ?)
+                  AND status = 'completed'
+                """,
+                (season_id, team_id, team_id),
+            ).fetchall()
+            game_ids = [r[0] for r in rows]
+
+        if not game_ids:
+            logger.info("No completed games for team_id=%d; skipping plays stage.", team_id)
+            return
+
+        # Crawl: fetch plays for each game (per-game error isolation)
+        fetched_game_ids: list[str] = []
+        for game_id in game_ids:
+            # Check DB idempotency
+            with closing(get_connection()) as conn:
+                existing = conn.execute(
+                    "SELECT 1 FROM plays WHERE game_id = ? LIMIT 1", (game_id,)
+                ).fetchone()
+            if existing is not None:
+                logger.debug("Plays already loaded for game %s; skipping crawl.", game_id)
+                fetched_game_ids.append(game_id)  # still reconcile/query
+                continue
+
+            plays_file = plays_dir / f"{game_id}.json"
+            if plays_file.is_file():
+                logger.debug("Plays file exists for game %s; skipping fetch.", game_id)
+                fetched_game_ids.append(game_id)
+                continue
+
+            try:
+                raw = client.get(
+                    f"/game-stream-processing/{game_id}/plays",
+                    accept=_PLAYS_ACCEPT,
+                )
+                plays_file.write_text(
+                    json.dumps(raw, indent=2), encoding="utf-8"
+                )
+                fetched_game_ids.append(game_id)
+                logger.debug("Fetched plays for game %s.", game_id)
+            except CredentialExpiredError:
+                raise
+            except Exception:  # noqa: BLE001
+                logger.warning(
+                    "Failed to fetch plays for game %s; skipping.",
+                    game_id,
+                    exc_info=True,
+                )
+
+        if not fetched_game_ids:
+            logger.info("No plays data fetched for team_id=%d.", team_id)
+            return
+
+        # Load: use PlaysLoader for all fetched games
+        with closing(get_connection()) as conn:
+            row = conn.execute(
+                "SELECT gc_uuid, public_id FROM teams WHERE id = ?", (team_id,)
+            ).fetchone()
+            gc_uuid = row[0] if row else None
+            team_public_id = row[1] if row else public_id
+
+        team_ref = TeamRef(id=team_id, gc_uuid=gc_uuid, public_id=team_public_id)
+        with closing(get_connection()) as conn:
+            loader = PlaysLoader(conn, owned_team_ref=team_ref)
+            load_result = loader.load_all(scouting_dir)
+        logger.info(
+            "Plays load for team_id=%d: loaded=%d skipped=%d errors=%d",
+            team_id, load_result.loaded, load_result.skipped, load_result.errors,
+        )
+
+        # Reconcile: correct pitcher attribution for each game
+        for game_id in fetched_game_ids:
+            try:
+                with closing(get_connection()) as conn:
+                    # Only reconcile games that have plays in DB
+                    has_plays = conn.execute(
+                        "SELECT 1 FROM plays WHERE game_id = ? LIMIT 1", (game_id,)
+                    ).fetchone()
+                    if has_plays:
+                        reconcile_game(conn, game_id, dry_run=False)
+            except Exception:  # noqa: BLE001
+                logger.warning(
+                    "Reconciliation failed for game %s; plays data still usable.",
+                    game_id,
+                    exc_info=True,
+                )
+
+    except CredentialExpiredError:
+        raise
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "Plays crawl/load/reconcile failed for public_id=%s; "
+            "continuing without plays data.",
+            public_id,
+            exc_info=True,
+        )
+
+
+def _query_plays_pitching_stats(
+    conn: sqlite3.Connection, team_id: int, season_id: str
+) -> dict[str, dict]:
+    """Aggregate plays-derived pitching stats grouped by pitcher_id.
+
+    Scoped to games involving the team (not filtered by batting_team_id).
+    Pitcher-to-team matching happens during the merge step.
+
+    Returns dict keyed by player_id with ``fps_pct`` and ``pitches_per_bf``.
+    """
+    rows = conn.execute(
+        """
+        SELECT
+            p.pitcher_id,
+            SUM(CASE WHEN p.outcome NOT IN ('Hit By Pitch', 'Intentional Walk')
+                     THEN p.is_first_pitch_strike ELSE 0 END) AS fps_sum,
+            SUM(CASE WHEN p.outcome NOT IN ('Hit By Pitch', 'Intentional Walk')
+                     THEN 1 ELSE 0 END) AS fps_denom,
+            SUM(p.pitch_count) AS total_pitches,
+            COUNT(*) AS total_bf
+        FROM plays p
+        JOIN games g ON g.game_id = p.game_id
+        WHERE g.season_id = ?
+          AND (g.home_team_id = ? OR g.away_team_id = ?)
+          AND p.pitcher_id IS NOT NULL
+        GROUP BY p.pitcher_id
+        """,
+        (season_id, team_id, team_id),
+    ).fetchall()
+
+    result: dict[str, dict] = {}
+    for row in rows:
+        pitcher_id = row[0]
+        fps_sum, fps_denom = row[1], row[2]
+        total_pitches, total_bf = row[3], row[4]
+        fps_pct = (fps_sum / fps_denom) if fps_denom and fps_denom > 0 else None
+        pitches_per_bf = (total_pitches / total_bf) if total_bf and total_bf > 0 else None
+        result[pitcher_id] = {
+            "fps_pct": fps_pct,
+            "pitches_per_bf": pitches_per_bf,
+        }
+    return result
+
+
+def _query_plays_batting_stats(
+    conn: sqlite3.Connection, team_id: int, season_id: str
+) -> dict[str, dict]:
+    """Aggregate plays-derived batting stats grouped by batter_id.
+
+    Scoped by ``batting_team_id = team_id`` to select plays where the
+    scouted team was batting.
+
+    Returns dict keyed by player_id with ``qab_pct`` and ``pitches_per_pa``.
+    """
+    rows = conn.execute(
+        """
+        SELECT
+            p.batter_id,
+            SUM(p.is_qab) AS qab_sum,
+            SUM(p.pitch_count) AS total_pitches,
+            COUNT(*) AS total_pa
+        FROM plays p
+        JOIN games g ON g.game_id = p.game_id
+        WHERE g.season_id = ?
+          AND p.batting_team_id = ?
+        GROUP BY p.batter_id
+        """,
+        (season_id, team_id),
+    ).fetchall()
+
+    result: dict[str, dict] = {}
+    for row in rows:
+        batter_id = row[0]
+        qab_sum, total_pitches, total_pa = row[1], row[2], row[3]
+        qab_pct = (qab_sum / total_pa) if total_pa and total_pa > 0 else None
+        pitches_per_pa = (total_pitches / total_pa) if total_pa and total_pa > 0 else None
+        result[batter_id] = {
+            "qab_pct": qab_pct,
+            "pitches_per_pa": pitches_per_pa,
+        }
+    return result
+
+
+def _query_plays_team_stats(
+    conn: sqlite3.Connection, team_id: int, season_id: str
+) -> dict:
+    """Compute team-level plays aggregates and metadata.
+
+    Returns dict with ``team_fps_pct``, ``team_pitches_per_pa``,
+    ``has_plays_data``, and ``plays_game_count``.
+    """
+    # Check how many games have plays data
+    row = conn.execute(
+        """
+        SELECT COUNT(DISTINCT p.game_id)
+        FROM plays p
+        JOIN games g ON g.game_id = p.game_id
+        WHERE g.season_id = ?
+          AND (g.home_team_id = ? OR g.away_team_id = ?)
+        """,
+        (season_id, team_id, team_id),
+    ).fetchone()
+    plays_game_count = row[0] if row else 0
+    has_plays_data = plays_game_count > 0
+
+    if not has_plays_data:
+        return {
+            "team_fps_pct": None,
+            "team_pitches_per_pa": None,
+            "has_plays_data": False,
+            "plays_game_count": 0,
+        }
+
+    # Team FPS%: pitchers for this team (matched via roster)
+    fps_row = conn.execute(
+        """
+        SELECT
+            SUM(CASE WHEN p.outcome NOT IN ('Hit By Pitch', 'Intentional Walk')
+                     THEN p.is_first_pitch_strike ELSE 0 END),
+            SUM(CASE WHEN p.outcome NOT IN ('Hit By Pitch', 'Intentional Walk')
+                     THEN 1 ELSE 0 END)
+        FROM plays p
+        JOIN games g ON g.game_id = p.game_id
+        JOIN team_rosters tr ON tr.player_id = p.pitcher_id
+            AND tr.team_id = ?
+            AND tr.season_id = ?
+        WHERE g.season_id = ?
+          AND (g.home_team_id = ? OR g.away_team_id = ?)
+          AND p.pitcher_id IS NOT NULL
+        """,
+        (team_id, season_id, season_id, team_id, team_id),
+    ).fetchone()
+    fps_sum = fps_row[0] if fps_row and fps_row[0] else 0
+    fps_denom = fps_row[1] if fps_row and fps_row[1] else 0
+    team_fps_pct = (fps_sum / fps_denom) if fps_denom > 0 else None
+
+    # Team pitches per PA (batting side)
+    ppa_row = conn.execute(
+        """
+        SELECT SUM(p.pitch_count), COUNT(*)
+        FROM plays p
+        JOIN games g ON g.game_id = p.game_id
+        WHERE g.season_id = ?
+          AND p.batting_team_id = ?
+        """,
+        (season_id, team_id),
+    ).fetchone()
+    total_pitches = ppa_row[0] if ppa_row and ppa_row[0] else 0
+    total_pa = ppa_row[1] if ppa_row and ppa_row[1] else 0
+    team_pitches_per_pa = (total_pitches / total_pa) if total_pa > 0 else None
+
+    return {
+        "team_fps_pct": team_fps_pct,
+        "team_pitches_per_pa": team_pitches_per_pa,
+        "has_plays_data": has_plays_data,
+        "plays_game_count": plays_game_count,
+    }
+
+
 def generate_report(gc_url: str) -> GenerationResult:
     """Generate a standalone scouting report for a GameChanger team.
 
@@ -695,6 +993,25 @@ def generate_report(gc_url: str) -> GenerationResult:
         # crawl_season_id locates files; loaders derive DB season_id internally.
         _crawl_and_load_spray(client, public_id, crawl_season_id, gc_uuid=resolved_gc_uuid)
 
+        # Step 4d: Plays crawl/load/reconcile (supplementary — auth expiry
+        # is non-fatal here, unlike the primary scouting crawl stage)
+        try:
+            _crawl_and_load_plays(
+                client, public_id, team_id, season_id, crawl_season_id,
+            )
+        except CredentialExpiredError:
+            logger.warning(
+                "Auth expired during plays stage for public_id=%s; "
+                "continuing without plays data.",
+                public_id,
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Plays stage failed for public_id=%s; continuing without plays data.",
+                public_id,
+                exc_info=True,
+            )
+
     except CredentialExpiredError:
         msg = "Authentication credentials expired — refresh with `bb creds setup web`"
         _fail_report(report_id, msg)
@@ -727,11 +1044,44 @@ def generate_report(gc_url: str) -> GenerationResult:
                 conn, team_id, season_id
             )
 
+            # Plays-derived stats
+            plays_pitching = _query_plays_pitching_stats(conn, team_id, season_id)
+            plays_batting = _query_plays_batting_stats(conn, team_id, season_id)
+            plays_team = _query_plays_team_stats(conn, team_id, season_id)
+
+        # Build roster set for pitcher matching (pitching query returns all
+        # pitchers in games involving this team; filter to team's own roster)
+        with closing(get_connection()) as conn:
+            roster_pids = {
+                row[0] for row in conn.execute(
+                    "SELECT player_id FROM team_rosters WHERE team_id = ? AND season_id = ?",
+                    (team_id, season_id),
+                ).fetchall()
+            }
+        for p in pitching:
+            pid = p.get("player_id")
+            if pid and pid in plays_pitching and pid in roster_pids:
+                p["fps_pct"] = plays_pitching[pid]["fps_pct"]
+                p["pitches_per_bf"] = plays_pitching[pid]["pitches_per_bf"]
+            else:
+                p["fps_pct"] = None
+                p["pitches_per_bf"] = None
+
+        # Merge plays stats into batter dicts
+        for b in batting:
+            pid = b.get("player_id")
+            if pid and pid in plays_batting:
+                b["qab_pct"] = plays_batting[pid]["qab_pct"]
+                b["pitches_per_pa"] = plays_batting[pid]["pitches_per_pa"]
+            else:
+                b["qab_pct"] = None
+                b["pitches_per_pa"] = None
+
         # Orphan cleanup -- after queries, before render (non-fatal)
         if orphan_ids:
             try:
                 with closing(get_connection()) as conn:
-                    _cleanup_orphan_teams(conn, orphan_ids)
+                    cleanup_orphan_teams(conn, orphan_ids)
             except Exception:  # noqa: BLE001
                 logger.warning(
                     "Orphan cleanup failed for %d team(s); report continues.",
@@ -754,6 +1104,10 @@ def generate_report(gc_url: str) -> GenerationResult:
             "roster": roster,
             "runs_scored_avg": runs_scored_avg,
             "runs_allowed_avg": runs_allowed_avg,
+            "team_fps_pct": plays_team["team_fps_pct"],
+            "team_pitches_per_pa": plays_team["team_pitches_per_pa"],
+            "has_plays_data": plays_team["has_plays_data"],
+            "plays_game_count": plays_team["plays_game_count"],
         }
         html = render_report(data)
 
@@ -789,16 +1143,87 @@ def _snapshot_team_ids(conn: sqlite3.Connection) -> set[int]:
     return {row[0] for row in conn.execute("SELECT id FROM teams")}
 
 
-def _cleanup_orphan_teams(
+def _delete_game_scoped_data(conn: sqlite3.Connection, game_ids: list[str]) -> None:
+    """Delete all game-scoped dependent rows for the given game IDs.
+
+    FK-safe order per TN-6 Phase 1: play_events → plays →
+    reconciliation_discrepancies → player_game_batting →
+    player_game_pitching → spray_charts → games.
+    """
+    if not game_ids:
+        return
+    gp = ",".join("?" for _ in game_ids)
+    conn.execute(
+        f"DELETE FROM play_events WHERE play_id IN "
+        f"(SELECT id FROM plays WHERE game_id IN ({gp}))",
+        game_ids,
+    )
+    conn.execute(f"DELETE FROM plays WHERE game_id IN ({gp})", game_ids)
+    conn.execute(
+        f"DELETE FROM reconciliation_discrepancies WHERE game_id IN ({gp})",
+        game_ids,
+    )
+    conn.execute(f"DELETE FROM player_game_batting WHERE game_id IN ({gp})", game_ids)
+    conn.execute(f"DELETE FROM player_game_pitching WHERE game_id IN ({gp})", game_ids)
+    conn.execute(f"DELETE FROM spray_charts WHERE game_id IN ({gp})", game_ids)
+    conn.execute(f"DELETE FROM games WHERE game_id IN ({gp})", game_ids)
+
+
+def _delete_team_scoped_data(
+    conn: sqlite3.Connection, team_ids: list[int], *, delete_team_rows: bool = True
+) -> None:
+    """Delete team-scoped dependent rows for the given team IDs.
+
+    FK-safe order per TN-6 Phase 2.  Optionally deletes the team rows
+    themselves (set ``delete_team_rows=False`` to skip when game FKs
+    still reference the team).
+    """
+    if not team_ids:
+        return
+    placeholders = ",".join("?" for _ in team_ids)
+    conn.execute(f"DELETE FROM team_rosters WHERE team_id IN ({placeholders})", team_ids)
+    conn.execute(f"DELETE FROM player_season_batting WHERE team_id IN ({placeholders})", team_ids)
+    conn.execute(f"DELETE FROM player_season_pitching WHERE team_id IN ({placeholders})", team_ids)
+    conn.execute(f"DELETE FROM scouting_runs WHERE team_id IN ({placeholders})", team_ids)
+    conn.execute(f"DELETE FROM crawl_jobs WHERE team_id IN ({placeholders})", team_ids)
+    conn.execute(f"DELETE FROM coaching_assignments WHERE team_id IN ({placeholders})", team_ids)
+    conn.execute(f"DELETE FROM user_team_access WHERE team_id IN ({placeholders})", team_ids)
+    conn.execute(
+        f"UPDATE opponent_links SET resolved_team_id = NULL, resolution_method = NULL, "
+        f"resolved_at = NULL WHERE resolved_team_id IN ({placeholders})",
+        team_ids,
+    )
+    if delete_team_rows:
+        conn.execute(f"DELETE FROM teams WHERE id IN ({placeholders})", team_ids)
+
+
+def cascade_delete_team(conn: sqlite3.Connection, team_id: int) -> None:
+    """Cascade-delete a single team and ALL its dependent data.
+
+    Used by the report-deletion path where the team is confirmed eligible
+    for cleanup (all guard conditions passed).  Deletes ALL games
+    involving this team (including shared games).
+    """
+    game_rows = conn.execute(
+        "SELECT game_id FROM games WHERE home_team_id = ? OR away_team_id = ?",
+        (team_id, team_id),
+    ).fetchall()
+    _delete_game_scoped_data(conn, [r[0] for r in game_rows])
+    _delete_team_scoped_data(conn, [team_id])
+    conn.commit()
+    logger.info("Cascade-deleted team_id=%d and all dependent data.", team_id)
+
+
+def cleanup_orphan_teams(
     conn: sqlite3.Connection, orphan_ids: set[int]
 ) -> int:
     """Delete orphan teams and their dependent rows in FK-safe order.
 
-    Two-phase deletion per TN-1:
-    Phase 1 -- game-scoped (by game_id, covers both teams' data):
-      player_game_batting, player_game_pitching, spray_charts, games
-    Phase 2 -- team-scoped (by orphan team_id):
-      team_rosters, player_season_batting, player_season_pitching, teams
+    Used during report generation to clean up auto-created opponent stubs.
+    Only deletes games where BOTH participants are orphans — shared games
+    between an orphan and a non-orphan (e.g., the report team) are
+    preserved.  Orphan teams that still have game FK references after
+    Phase 1 are retained (team-scoped data is still cleaned).
     """
     if not orphan_ids:
         return 0
@@ -806,31 +1231,107 @@ def _cleanup_orphan_teams(
     placeholders = ",".join("?" for _ in orphan_ids)
     id_list = list(orphan_ids)
 
-    # Phase 1: identify affected games, then delete game-scoped data
+    # Phase 1: delete games where BOTH participants are orphans
     game_rows = conn.execute(
         f"SELECT game_id FROM games WHERE home_team_id IN ({placeholders}) "
-        f"OR away_team_id IN ({placeholders})",
+        f"AND away_team_id IN ({placeholders})",
         id_list + id_list,
     ).fetchall()
-    game_ids = [r[0] for r in game_rows]
+    _delete_game_scoped_data(conn, [r[0] for r in game_rows])
 
-    if game_ids:
-        gp = ",".join("?" for _ in game_ids)
-        conn.execute(f"DELETE FROM player_game_batting WHERE game_id IN ({gp})", game_ids)
-        conn.execute(f"DELETE FROM player_game_pitching WHERE game_id IN ({gp})", game_ids)
-        conn.execute(f"DELETE FROM spray_charts WHERE game_id IN ({gp})", game_ids)
-        conn.execute(f"DELETE FROM games WHERE game_id IN ({gp})", game_ids)
+    # Determine which orphans still have remaining game FK references
+    remaining_rows = conn.execute(
+        f"SELECT DISTINCT home_team_id FROM games WHERE home_team_id IN ({placeholders}) "
+        f"UNION "
+        f"SELECT DISTINCT away_team_id FROM games WHERE away_team_id IN ({placeholders})",
+        id_list + id_list,
+    ).fetchall()
+    undeletable_ids = {r[0] for r in remaining_rows}
+    deletable_ids = orphan_ids - undeletable_ids
 
-    # Phase 2: delete team-scoped data
-    conn.execute(f"DELETE FROM team_rosters WHERE team_id IN ({placeholders})", id_list)
-    conn.execute(f"DELETE FROM player_season_batting WHERE team_id IN ({placeholders})", id_list)
-    conn.execute(f"DELETE FROM player_season_pitching WHERE team_id IN ({placeholders})", id_list)
-    conn.execute(f"DELETE FROM teams WHERE id IN ({placeholders})", id_list)
+    # Phase 2: clean team-scoped data for all orphans
+    _delete_team_scoped_data(
+        conn, id_list, delete_team_rows=False,
+    )
+    # Only delete team rows that have no remaining game references
+    if deletable_ids:
+        dp = ",".join("?" for _ in deletable_ids)
+        conn.execute(f"DELETE FROM teams WHERE id IN ({dp})", list(deletable_ids))
     conn.commit()
 
-    count = len(orphan_ids)
-    logger.info("Cleaned up %d orphan team(s) from report generation.", count)
+    count = len(deletable_ids)
+    if undeletable_ids:
+        logger.info(
+            "Cleaned up %d orphan team(s); %d retained (shared games).",
+            count, len(undeletable_ids),
+        )
+    else:
+        logger.info("Cleaned up %d orphan team(s) from report generation.", count)
     return count
+
+
+def is_team_eligible_for_cleanup(
+    conn: sqlite3.Connection, team_id: int, exclude_report_id: int
+) -> bool:
+    """Check whether a team is eligible for cascade-delete after report removal.
+
+    Guard conditions (all must pass):
+    1. ``is_active = 0``
+    2. No rows in ``team_opponents`` reference this team_id (either direction)
+    3. No other ``reports`` rows reference this team_id
+    4. No games involving this team also involve a tracked team (one that
+       appears in ``team_opponents``)
+
+    Args:
+        conn: Open SQLite connection.
+        team_id: The team to check.
+        exclude_report_id: The report being deleted (excluded from the
+            multi-report check).
+    """
+    # Guard 1: is_active
+    row = conn.execute(
+        "SELECT is_active FROM teams WHERE id = ?", (team_id,)
+    ).fetchone()
+    if row is None:
+        return False
+    if row[0] != 0:
+        return False
+
+    # Guard 2: team_opponents (either direction)
+    row = conn.execute(
+        "SELECT 1 FROM team_opponents "
+        "WHERE our_team_id = ? OR opponent_team_id = ? LIMIT 1",
+        (team_id, team_id),
+    ).fetchone()
+    if row is not None:
+        return False
+
+    # Guard 3: other reports
+    row = conn.execute(
+        "SELECT 1 FROM reports WHERE team_id = ? AND id != ? LIMIT 1",
+        (team_id, exclude_report_id),
+    ).fetchone()
+    if row is not None:
+        return False
+
+    # Guard 4: shared games with tracked teams
+    row = conn.execute(
+        """
+        SELECT 1 FROM games g
+        WHERE (g.home_team_id = :tid OR g.away_team_id = :tid)
+          AND EXISTS (
+              SELECT 1 FROM team_opponents to2
+              WHERE to2.our_team_id IN (g.home_team_id, g.away_team_id)
+                 OR to2.opponent_team_id IN (g.home_team_id, g.away_team_id)
+          )
+        LIMIT 1
+        """,
+        {"tid": team_id},
+    ).fetchone()
+    if row is not None:
+        return False
+
+    return True
 
 
 def _fail_report(report_id: int, error_message: str) -> None:

@@ -92,6 +92,7 @@ def setup(tmp_path):
     env = {"DATABASE_PATH": str(db_path), "DEV_USER_EMAIL": "user@example.com"}
     with patch("src.api.routes.admin.get_connection", side_effect=_mock_get_conn), \
          patch("src.api.db.get_connection", side_effect=_mock_get_conn), \
+         patch("src.reports.generator.get_connection", side_effect=_mock_get_conn), \
          patch.dict("os.environ", env, clear=False):
         client = TestClient(app, raise_server_exceptions=False, cookies={"csrf_token": _CSRF})
         yield db_path, client
@@ -303,3 +304,278 @@ class TestDeleteReport:
         )
 
         assert response.status_code == 303
+
+
+# ===========================================================================
+# E-199-03: Cascade-delete team data on report deletion
+# ===========================================================================
+
+
+def _get_conn(db_path: Path) -> sqlite3.Connection:
+    """Open a connection with FK enforcement."""
+    c = sqlite3.connect(str(db_path))
+    c.execute("PRAGMA foreign_keys=ON;")
+    return c
+
+
+def _insert_team_for_cascade(
+    db_path: Path,
+    *,
+    name: str = "Report Team",
+    is_active: int = 0,
+    membership_type: str = "tracked",
+) -> int:
+    conn = _get_conn(db_path)
+    cursor = conn.execute(
+        "INSERT INTO teams (name, membership_type, is_active) VALUES (?, ?, ?)",
+        (name, membership_type, is_active),
+    )
+    team_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    return team_id
+
+
+def _seed_full_team_data(db_path: Path, team_id: int) -> dict:
+    """Insert a full set of dependent data for a team. Returns metadata dict."""
+    conn = _get_conn(db_path)
+
+    season_id = "2026-spring-hs"
+    conn.execute(
+        "INSERT OR IGNORE INTO seasons (season_id, name, season_type, year) "
+        "VALUES (?, 'Spring 2026 HS', 'spring-hs', 2026)",
+        (season_id,),
+    )
+
+    opp_id = conn.execute(
+        "INSERT INTO teams (name, membership_type, is_active) VALUES ('Opp', 'tracked', 0)"
+    ).lastrowid
+
+    conn.execute(
+        "INSERT OR IGNORE INTO players (player_id, first_name, last_name) "
+        "VALUES ('player1', 'Test', 'Player')"
+    )
+    conn.execute(
+        "INSERT INTO team_rosters (player_id, team_id, season_id) VALUES ('player1', ?, ?)",
+        (team_id, season_id),
+    )
+    conn.execute(
+        "INSERT INTO player_season_batting (player_id, team_id, season_id) VALUES ('player1', ?, ?)",
+        (team_id, season_id),
+    )
+    conn.execute(
+        "INSERT INTO player_season_pitching (player_id, team_id, season_id) VALUES ('player1', ?, ?)",
+        (team_id, season_id),
+    )
+
+    game_id = "game-cascade-001"
+    conn.execute(
+        "INSERT INTO games (game_id, season_id, game_date, home_team_id, away_team_id, status) "
+        "VALUES (?, ?, '2026-03-15', ?, ?, 'completed')",
+        (game_id, season_id, team_id, opp_id),
+    )
+    conn.execute(
+        "INSERT INTO player_game_batting (game_id, player_id, team_id) VALUES (?, 'player1', ?)",
+        (game_id, team_id),
+    )
+    conn.execute(
+        "INSERT INTO player_game_pitching (game_id, player_id, team_id) VALUES (?, 'player1', ?)",
+        (game_id, team_id),
+    )
+    conn.execute(
+        "INSERT INTO spray_charts (game_id, team_id, player_id, season_id, chart_type, x, y) "
+        "VALUES (?, ?, 'player1', ?, 'offensive', 100, 200)",
+        (game_id, team_id, season_id),
+    )
+
+    cursor = conn.execute(
+        "INSERT INTO plays (game_id, play_order, inning, half, season_id, "
+        "batting_team_id, batter_id, pitcher_id) VALUES (?, 1, 1, 'top', ?, ?, 'player1', 'player1')",
+        (game_id, season_id, team_id),
+    )
+    play_id = cursor.lastrowid
+    conn.execute(
+        "INSERT INTO play_events (play_id, event_order, event_type) VALUES (?, 1, 'pitch')",
+        (play_id,),
+    )
+
+    conn.execute(
+        "INSERT INTO reconciliation_discrepancies (game_id, run_id, team_id, player_id, "
+        "signal_name, category, status) VALUES (?, 'run1', ?, 'player1', 'bf', 'pitching', 'MATCH')",
+        (game_id, team_id),
+    )
+    conn.execute(
+        "INSERT INTO scouting_runs (team_id, season_id, run_type, started_at, status) "
+        "VALUES (?, ?, 'full', '2026-03-28T00:00:00Z', 'completed')",
+        (team_id, season_id),
+    )
+
+    conn.commit()
+    conn.close()
+    return {"game_id": game_id, "opp_id": opp_id, "season_id": season_id}
+
+
+def _count_rows(db_path: Path, table: str, where: str = "", params: tuple = ()) -> int:
+    conn = _get_conn(db_path)
+    sql = f"SELECT COUNT(*) FROM {table}"
+    if where:
+        sql += f" WHERE {where}"
+    count = conn.execute(sql, params).fetchone()[0]
+    conn.close()
+    return count
+
+
+class TestCascadeDeleteOnReportDeletion:
+    """AC-1 through AC-8: Cascade-delete team data on report deletion."""
+
+    def test_ac1_clean_cascade_of_report_only_team(self, setup):
+        """Report-only team with full data: cascade deletes everything."""
+        db_path, client = setup
+        team_id = _insert_team_for_cascade(db_path, is_active=0)
+        data = _seed_full_team_data(db_path, team_id)
+        report_id = _insert_report(db_path, team_id, slug="cascade-1")
+
+        assert _count_rows(db_path, "teams", "id = ?", (team_id,)) == 1
+        assert _count_rows(db_path, "plays", "game_id = ?", (data["game_id"],)) == 1
+
+        response = client.post(
+            f"/admin/reports/{report_id}/delete",
+            data={"csrf_token": _CSRF},
+            follow_redirects=False,
+        )
+        assert response.status_code == 303
+
+        assert _count_rows(db_path, "reports", "id = ?", (report_id,)) == 0
+        assert _count_rows(db_path, "teams", "id = ?", (team_id,)) == 0
+        assert _count_rows(db_path, "games", "game_id = ?", (data["game_id"],)) == 0
+        assert _count_rows(db_path, "plays", "game_id = ?", (data["game_id"],)) == 0
+        assert _count_rows(db_path, "reconciliation_discrepancies", "game_id = ?", (data["game_id"],)) == 0
+        assert _count_rows(db_path, "player_game_batting", "game_id = ?", (data["game_id"],)) == 0
+        assert _count_rows(db_path, "player_game_pitching", "game_id = ?", (data["game_id"],)) == 0
+        assert _count_rows(db_path, "spray_charts", "team_id = ?", (team_id,)) == 0
+        assert _count_rows(db_path, "team_rosters", "team_id = ?", (team_id,)) == 0
+        assert _count_rows(db_path, "player_season_batting", "team_id = ?", (team_id,)) == 0
+        assert _count_rows(db_path, "player_season_pitching", "team_id = ?", (team_id,)) == 0
+        assert _count_rows(db_path, "scouting_runs", "team_id = ?", (team_id,)) == 0
+        assert _count_rows(db_path, "play_events") == 0
+
+    def test_ac2_preserved_when_tracked_via_team_opponents(self, setup):
+        """Team with team_opponents rows: data preserved on report delete."""
+        db_path, client = setup
+        team_id = _insert_team_for_cascade(db_path, is_active=0)
+        _seed_full_team_data(db_path, team_id)
+        report_id = _insert_report(db_path, team_id, slug="guard-opp")
+
+        conn = _get_conn(db_path)
+        other_team = conn.execute(
+            "INSERT INTO teams (name, membership_type, is_active) VALUES ('Other', 'member', 1)"
+        ).lastrowid
+        conn.execute(
+            "INSERT INTO team_opponents (our_team_id, opponent_team_id) VALUES (?, ?)",
+            (other_team, team_id),
+        )
+        conn.commit()
+        conn.close()
+
+        client.post(f"/admin/reports/{report_id}/delete", data={"csrf_token": _CSRF}, follow_redirects=False)
+
+        assert _count_rows(db_path, "reports", "id = ?", (report_id,)) == 0
+        assert _count_rows(db_path, "teams", "id = ?", (team_id,)) == 1
+
+    def test_ac3_preserved_when_is_active(self, setup):
+        """Active team: data preserved on report delete."""
+        db_path, client = setup
+        team_id = _insert_team_for_cascade(db_path, is_active=1)
+        _seed_full_team_data(db_path, team_id)
+        report_id = _insert_report(db_path, team_id, slug="guard-active")
+
+        client.post(f"/admin/reports/{report_id}/delete", data={"csrf_token": _CSRF}, follow_redirects=False)
+
+        assert _count_rows(db_path, "reports", "id = ?", (report_id,)) == 0
+        assert _count_rows(db_path, "teams", "id = ?", (team_id,)) == 1
+
+    def test_ac4_preserved_when_shared_games_with_tracked_team(self, setup):
+        """Shared games with a tracked team: data preserved."""
+        db_path, client = setup
+        team_id = _insert_team_for_cascade(db_path, is_active=0)
+        data = _seed_full_team_data(db_path, team_id)
+        report_id = _insert_report(db_path, team_id, slug="guard-shared")
+
+        # Make the opponent team a tracked team
+        conn = _get_conn(db_path)
+        tracked_team = conn.execute(
+            "INSERT INTO teams (name, membership_type, is_active) VALUES ('Tracked', 'member', 1)"
+        ).lastrowid
+        conn.execute(
+            "INSERT INTO team_opponents (our_team_id, opponent_team_id) VALUES (?, ?)",
+            (tracked_team, data["opp_id"]),
+        )
+        conn.commit()
+        conn.close()
+
+        client.post(f"/admin/reports/{report_id}/delete", data={"csrf_token": _CSRF}, follow_redirects=False)
+
+        assert _count_rows(db_path, "reports", "id = ?", (report_id,)) == 0
+        assert _count_rows(db_path, "teams", "id = ?", (team_id,)) == 1
+
+    def test_ac5_preserved_when_multiple_reports(self, setup):
+        """Multiple reports for same team: data preserved until last report."""
+        db_path, client = setup
+        team_id = _insert_team_for_cascade(db_path, is_active=0)
+        _seed_full_team_data(db_path, team_id)
+        report_1 = _insert_report(db_path, team_id, slug="multi-1")
+        report_2 = _insert_report(db_path, team_id, slug="multi-2")
+
+        client.post(f"/admin/reports/{report_1}/delete", data={"csrf_token": _CSRF}, follow_redirects=False)
+        assert _count_rows(db_path, "reports", "id = ?", (report_1,)) == 0
+        assert _count_rows(db_path, "teams", "id = ?", (team_id,)) == 1
+
+        client.post(f"/admin/reports/{report_2}/delete", data={"csrf_token": _CSRF}, follow_redirects=False)
+        assert _count_rows(db_path, "reports", "id = ?", (report_2,)) == 0
+        assert _count_rows(db_path, "teams", "id = ?", (team_id,)) == 0
+
+    def test_ac6_empty_team_row_cascade(self, setup):
+        """Empty team (no dependent data): cascade deletes cleanly."""
+        db_path, client = setup
+        team_id = _insert_team_for_cascade(db_path, is_active=0)
+        report_id = _insert_report(db_path, team_id, slug="empty-team")
+
+        client.post(f"/admin/reports/{report_id}/delete", data={"csrf_token": _CSRF}, follow_redirects=False)
+
+        assert _count_rows(db_path, "reports", "id = ?", (report_id,)) == 0
+        assert _count_rows(db_path, "teams", "id = ?", (team_id,)) == 0
+
+    def test_ac7_opponent_links_un_resolved(self, setup):
+        """Opponent links pointing to the team are un-resolved, not deleted."""
+        db_path, client = setup
+        team_id = _insert_team_for_cascade(db_path, is_active=0)
+        report_id = _insert_report(db_path, team_id, slug="ol-unres")
+
+        conn = _get_conn(db_path)
+        member_team = conn.execute(
+            "INSERT INTO teams (name, membership_type, is_active) VALUES ('Member', 'member', 1)"
+        ).lastrowid
+        conn.execute(
+            "INSERT INTO opponent_links (our_team_id, root_team_id, opponent_name, "
+            "resolved_team_id, resolution_method, resolved_at) "
+            "VALUES (?, 'root1', 'Some Opponent', ?, 'gc_search', '2026-03-20')",
+            (member_team, team_id),
+        )
+        conn.commit()
+        conn.close()
+
+        client.post(f"/admin/reports/{report_id}/delete", data={"csrf_token": _CSRF}, follow_redirects=False)
+
+        assert _count_rows(db_path, "teams", "id = ?", (team_id,)) == 0
+
+        conn = _get_conn(db_path)
+        ol = conn.execute(
+            "SELECT resolved_team_id, resolution_method, resolved_at "
+            "FROM opponent_links WHERE our_team_id = ?",
+            (member_team,),
+        ).fetchone()
+        conn.close()
+        assert ol is not None
+        assert ol[0] is None
+        assert ol[1] is None
+        assert ol[2] is None

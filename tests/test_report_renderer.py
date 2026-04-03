@@ -16,6 +16,10 @@ from src.reports.renderer import (
     _compute_pa,
     _compute_pitching_heat,
     _build_spray_player_stats,
+    _format_pct,
+    _format_plays_batting,
+    _format_plays_pitching,
+    _format_rate,
     _max_heat_for_depth,
     _percentile_rank,
     _percentile_to_level,
@@ -1254,3 +1258,201 @@ class TestGraduatedHeatIntegration:
         # ip_outs=18 is qualified, 2 qualified -> cap=1
         assert pitching[0]["_small_sample"] is False
         assert any(v > 0 for v in pitching[0]["_heat"].values())
+
+
+# ===========================================================================
+# E-199-02: Plays-derived stats formatting and rendering
+# ===========================================================================
+
+
+class TestFormatHelpers:
+    """AC-5: Formatting helpers produce correct output."""
+
+    def test_format_pct_normal(self):
+        assert _format_pct(0.625) == "62.5%"
+
+    def test_format_pct_zero(self):
+        assert _format_pct(0.0) == "0.0%"
+
+    def test_format_pct_one(self):
+        assert _format_pct(1.0) == "100.0%"
+
+    def test_format_pct_none(self):
+        assert _format_pct(None) == "\u2014"
+
+    def test_format_rate_normal(self):
+        assert _format_rate(3.82) == "3.8"
+
+    def test_format_rate_zero(self):
+        assert _format_rate(0.0) == "0.0"
+
+    def test_format_rate_none(self):
+        assert _format_rate(None) == "\u2014"
+
+
+class TestFormatPlaysPitching:
+    """AC-1: Pitching table gets formatted FPS% and P/BF."""
+
+    def test_formats_fps_and_pbf(self):
+        pitching = [{"fps_pct": 0.625, "pitches_per_bf": 3.82}]
+        _format_plays_pitching(pitching)
+        assert pitching[0]["_fps_pct"] == "62.5%"
+        assert pitching[0]["_pitches_per_bf"] == "3.8"
+
+    def test_missing_plays_data_shows_dash(self):
+        """AC-3: No plays data -> em dash."""
+        pitching = [{"fps_pct": None, "pitches_per_bf": None}]
+        _format_plays_pitching(pitching)
+        assert pitching[0]["_fps_pct"] == "\u2014"
+        assert pitching[0]["_pitches_per_bf"] == "\u2014"
+
+    def test_missing_keys_shows_dash(self):
+        """AC-3: Keys not present at all -> em dash."""
+        pitching = [{"name": "Test Pitcher"}]
+        _format_plays_pitching(pitching)
+        assert pitching[0]["_fps_pct"] == "\u2014"
+        assert pitching[0]["_pitches_per_bf"] == "\u2014"
+
+
+class TestFormatPlaysBatting:
+    """AC-2: Batting table gets formatted QAB% and P/PA."""
+
+    def test_formats_qab_and_ppa(self):
+        batting = [{"qab_pct": 0.45, "pitches_per_pa": 4.2}]
+        _format_plays_batting(batting)
+        assert batting[0]["_qab_pct"] == "45.0%"
+        assert batting[0]["_pitches_per_pa"] == "4.2"
+
+    def test_missing_plays_data_shows_dash(self):
+        """AC-3: No plays data -> em dash."""
+        batting = [{"qab_pct": None, "pitches_per_pa": None}]
+        _format_plays_batting(batting)
+        assert batting[0]["_qab_pct"] == "\u2014"
+        assert batting[0]["_pitches_per_pa"] == "\u2014"
+
+    def test_missing_keys_shows_dash(self):
+        """AC-3: Keys not present at all -> em dash."""
+        batting = [{"name": "Test Batter"}]
+        _format_plays_batting(batting)
+        assert batting[0]["_qab_pct"] == "\u2014"
+        assert batting[0]["_pitches_per_pa"] == "\u2014"
+
+
+class TestRenderReportPlaysIntegration:
+    """AC-4, AC-7: Executive summary and column rendering in full render."""
+
+    @pytest.fixture()
+    def plays_data(self) -> dict:
+        """Data dict with plays stats for render_report."""
+        return {
+            "team": {"name": "Test Team", "season_year": 2026, "record": {"wins": 5, "losses": 3}},
+            "generated_at": "2026-04-01T00:00:00Z",
+            "expires_at": "2026-04-15T00:00:00Z",
+            "freshness_date": "2026-03-30",
+            "game_count": 10,
+            "pitching": [
+                {
+                    "player_id": "p1", "name": "Ace Pitcher", "jersey_number": "12",
+                    "games": 5, "ip_outs": 30, "h": 10, "er": 4, "bb": 3, "so": 25,
+                    "pitches": 300, "total_strikes": 200, "throws": "R",
+                    "era": "2.80", "k9": "16.9", "whip": "0.87", "strike_pct": "66.7%",
+                    "fps_pct": 0.625, "pitches_per_bf": 3.8,
+                },
+            ],
+            "batting": [
+                {
+                    "player_id": "b1", "name": "Star Batter", "jersey_number": "7",
+                    "games": 8, "ab": 30, "h": 10, "doubles": 2, "triples": 0,
+                    "hr": 1, "rbi": 5, "bb": 4, "so": 6, "sb": 2, "cs": 1,
+                    "hbp": 1, "shf": 0,
+                    "qab_pct": 0.45, "pitches_per_pa": 4.2,
+                },
+            ],
+            "spray_charts": {},
+            "roster": [],
+            "runs_scored_avg": 5.0,
+            "runs_allowed_avg": 3.0,
+            "team_fps_pct": 0.625,
+            "team_pitches_per_pa": 4.2,
+            "has_plays_data": True,
+            "plays_game_count": 8,
+        }
+
+    def test_pitching_columns_rendered(self, plays_data: dict):
+        """AC-1: FPS% and P/BF appear in pitching table."""
+        html = render_report(plays_data)
+        assert "62.5%" in html
+        assert "FPS%" in html
+        assert "P/BF" in html
+
+    def test_batting_columns_rendered(self, plays_data: dict):
+        """AC-2: QAB% and P/PA appear in batting table."""
+        html = render_report(plays_data)
+        assert "45.0%" in html
+        assert "QAB%" in html
+        assert "P/PA" in html
+
+    def test_exec_summary_with_plays(self, plays_data: dict):
+        """AC-4: Team FPS% and P/PA in executive summary."""
+        html = render_report(plays_data)
+        assert "62.5% FPS" in html
+        assert "4.2 P/PA" in html
+
+    def test_exec_summary_partial_coverage(self, plays_data: dict):
+        """AC-7: Partial coverage shows game count context."""
+        html = render_report(plays_data)
+        # plays_game_count=8, game_count=10 -> "(8 of 10 games)"
+        assert "8 of 10 games" in html
+
+    def test_exec_summary_full_coverage_no_annotation(self, plays_data: dict):
+        """AC-7: Full coverage omits game count annotation."""
+        plays_data["plays_game_count"] = 10
+        html = render_report(plays_data)
+        assert "of 10 games" not in html
+
+    def test_no_plays_data_no_exec_plays_stats(self, plays_data: dict):
+        """AC-3: No plays data -> exec summary omits FPS/P/PA."""
+        plays_data["has_plays_data"] = False
+        plays_data["plays_game_count"] = 0
+        plays_data["team_fps_pct"] = None
+        plays_data["team_pitches_per_pa"] = None
+        plays_data["pitching"][0]["fps_pct"] = None
+        plays_data["pitching"][0]["pitches_per_bf"] = None
+        plays_data["batting"][0]["qab_pct"] = None
+        plays_data["batting"][0]["pitches_per_pa"] = None
+
+        html = render_report(plays_data)
+        assert "Test Team" in html
+        # Exec summary should NOT contain "FPS" before the pitching section
+        exec_section = html.split("Pitching")[0]
+        assert "FPS" not in exec_section
+
+    def test_render_without_plays_keys(self):
+        """AC-8: Data dict without plays keys renders successfully."""
+        data = {
+            "team": {"name": "Basic Team"},
+            "generated_at": "2026-04-01T00:00:00Z",
+            "expires_at": "2026-04-15T00:00:00Z",
+            "game_count": 5,
+            "pitching": [
+                {
+                    "player_id": "p1", "name": "Pitcher", "jersey_number": "1",
+                    "games": 3, "ip_outs": 9, "h": 5, "er": 2, "bb": 1, "so": 8,
+                    "pitches": 100, "total_strikes": 60, "throws": None,
+                    "era": "4.67", "k9": "18.0", "whip": "1.33", "strike_pct": "60.0%",
+                },
+            ],
+            "batting": [
+                {
+                    "player_id": "b1", "name": "Batter", "jersey_number": "2",
+                    "games": 5, "ab": 15, "h": 4, "doubles": 1, "triples": 0,
+                    "hr": 0, "rbi": 2, "bb": 2, "so": 3, "sb": 1, "cs": 0,
+                    "hbp": 0, "shf": 0,
+                },
+            ],
+            "spray_charts": {},
+            "roster": [],
+        }
+        html = render_report(data)
+        assert "Basic Team" in html
+        assert "FPS%" in html  # column header still present

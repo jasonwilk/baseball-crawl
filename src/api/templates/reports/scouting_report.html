@@ -361,6 +361,10 @@
   {% if freshness_date %} &middot; through {{ freshness_date | format_date }}{% endif %}
   {% if runs_scored_avg %} &middot; Avg: {{ runs_scored_avg }} scored{% endif %}
   {% if runs_allowed_avg %} / {{ runs_allowed_avg }} allowed{% endif %}
+  {% if has_plays_data %}
+  &middot; {{ team_fps_pct }} FPS
+  &middot; {{ team_pitches_per_pa }} P/PA{% if plays_game_count < game_count %} ({{ plays_game_count }} of {{ game_count }} games){% endif %}
+  {% endif %}
 </div>
 {% endif %}
 
@@ -415,6 +419,8 @@
       <th class="mob-hide">SO</th>
       <th class="mob-hide">#P</th>
       <th>Strike%</th>
+      <th class="mob-hide">FPS%</th>
+      <th class="mob-hide">P/BF</th>
     </tr>
   </thead>
   <tbody>
@@ -434,6 +440,8 @@
       <td class="mob-hide">{{ pitcher.so }}</td>
       <td class="mob-hide">{{ pitcher.pitches if pitcher.pitches else "&mdash;" | safe }}</td>
       <td>{{ pitcher.strike_pct if pitcher.strike_pct else "&mdash;" | safe }}</td>
+      <td class="mob-hide">{{ pitcher._fps_pct }}</td>
+      <td class="mob-hide">{{ pitcher._pitches_per_bf }}</td>
     </tr>
     {% endfor %}
   </tbody>
@@ -457,6 +465,8 @@
       <th class="heat-header">SLG</th>
       <th class="col-sep">K%</th>
       <th>BB%</th>
+      <th class="mob-hide">QAB%</th>
+      <th class="mob-hide">P/PA</th>
       <th class="col-sep mob-hide">GP</th>
       <th>PA</th>
       <th class="mob-hide">AB</th>
@@ -481,6 +491,8 @@
       <td class="heat-{{ player._heat.slg }}">{{ (player.h + player.doubles + 2 * player.triples + 3 * player.hr) | format_avg(player.ab) }}</td>
       <td class="col-sep">{{ player._k_pct }}</td>
       <td>{{ player._bb_pct }}</td>
+      <td class="mob-hide">{{ player._qab_pct }}</td>
+      <td class="mob-hide">{{ player._pitches_per_pa }}</td>
       <td class="col-sep mob-hide">{{ player.games }}</td>
       <td>{{ player._pa }}</td>
       <td class="mob-hide">{{ player.ab }}</td>

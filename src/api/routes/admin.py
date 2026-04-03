@@ -3172,19 +3172,60 @@ def _get_all_reports() -> list[dict[str, Any]]:
 
 
 def _delete_report(report_id: int) -> None:
-    """Delete a report row and its HTML file from disk."""
+    """Delete a report row, its HTML file, and cascade-delete team data if safe.
+
+    Reads ``team_id`` from the report row before deletion (the FK is lost
+    after the row is removed).  After removing the report row and file,
+    checks guard conditions and cascade-deletes the team and all dependent
+    data when the team is not independently tracked.
+    """
+    from src.reports.generator import (
+        cascade_delete_team,
+        is_team_eligible_for_cleanup,
+    )
+
     with closing(get_connection()) as conn:
         conn.row_factory = sqlite3.Row
         row = conn.execute(
-            "SELECT report_path FROM reports WHERE id = ?", (report_id,)
+            "SELECT report_path, team_id FROM reports WHERE id = ?", (report_id,)
         ).fetchone()
-        if row and row["report_path"]:
-            file_path = Path(__file__).resolve().parents[3] / "data" / row["report_path"]
+        if not row:
+            return
+
+        report_path = row["report_path"]
+        team_id = row["team_id"]
+
+        # Delete the HTML file from disk
+        if report_path:
+            file_path = Path(__file__).resolve().parents[3] / "data" / report_path
             if file_path.is_file():
                 file_path.unlink()
                 logger.info("Deleted report file: %s", file_path)
+
+        # Check guard conditions BEFORE deleting the report row
+        # (the multi-report guard needs the row to still exist, but we
+        # exclude this report_id from the count)
+        eligible = is_team_eligible_for_cleanup(conn, team_id, report_id)
+
+        # Delete the report row
         conn.execute("DELETE FROM reports WHERE id = ?", (report_id,))
         conn.commit()
+
+    # Cascade-delete team data if eligible
+    if eligible:
+        try:
+            with closing(get_connection()) as conn:
+                cascade_delete_team(conn, team_id)
+            logger.info(
+                "Cascade-deleted team_id=%d after report %d removal.",
+                team_id, report_id,
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Cascade-delete failed for team_id=%d after report %d removal.",
+                team_id, report_id,
+                exc_info=True,
+            )
 
 
 @router.get("/reports", response_model=None)

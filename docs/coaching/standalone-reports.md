@@ -1,6 +1,6 @@
 # Standalone Reports
 
-*Last updated: 2026-03-29 | Source: E-183 (standalone reports coaching docs)*
+*Last updated: 2026-04-03 | Source: E-183 (standalone reports coaching docs), E-199 (FPS%, P/BF, QAB%, P/PA columns)*
 
 ---
 
@@ -28,8 +28,21 @@ Jason will send you a link. Open it in any web browser on your phone, tablet, or
 
 The report shows similar pitching and batting stats as the dashboard opponent view, but in a self-contained format. You'll see:
 
-- Pitching stats for the opponent's active pitchers this season
-- Batting stats for each player
+**Executive summary** — Team-level numbers at a glance: OBP, strikeout rate, walk rate, plus FPS% (first-pitch strike percentage) and P/PA (pitches per plate appearance) when pitch data is available. The summary also shows how many games have pitch-by-pitch data, so you know whether those columns are based on the whole season or a subset of games.
+
+**Pitching table** — Stats for each pitcher who has appeared this season:
+- ERA, K/9, BB/9, K/BB — standard pitching numbers
+- **FPS%** — first-pitch strike percentage: how often this pitcher is ahead in the count from pitch one
+- **P/BF** — pitches per batter faced: a quick read on his efficiency and how long he'll last
+
+**Batting table** — Stats for each batter:
+- OBP, SLG, K%, BB% — standard batting numbers
+- **QAB%** — quality at-bat percentage: how often this batter puts real pressure on the pitcher, even without a hit
+- **P/PA** — pitches seen per plate appearance: how patiently this batter works counts
+
+**"—" in a stat column** means pitch-by-pitch data was not available for that player. This typically happens when the scorekeeper did not record pitch-level detail in GameChanger for some games. The stat is not zero -- it simply could not be calculated. Standard stats (ERA, OBP, etc.) are always shown; only the pitch-data columns (FPS%, P/BF, QAB%, P/PA) can show "—".
+
+See [Understanding the Stats](understanding-stats.md) for plain-language explanations of every number in the report.
 
 To print or save as a PDF: use your browser's print command (**Ctrl+P** on Windows, **Cmd+P** on Mac). Save it as a PDF before game day so you have it in the dugout without needing a connection.
 

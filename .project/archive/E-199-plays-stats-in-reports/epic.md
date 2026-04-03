@@ -1,7 +1,7 @@
 # E-199: Plays-Derived Stats in Standalone Reports
 
 ## Status
-`READY`
+`COMPLETED`
 
 ## Overview
 Add plays-derived statistics (FPS%, QAB%, pitch counts) to standalone scouting reports so coaches get the full picture in the one-pager they actually use. Reports are the primary delivery mechanism handed to coaches -- this closes the #1 delivery gap. Neither the dashboard nor standalone reports currently display plays-derived stats; this epic adds them to reports first (the primary coaching tool).
@@ -53,9 +53,9 @@ The user has an explicit delivery parity requirement: new data capabilities must
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-199-01 | Plays pipeline stage and query functions in report generator | TODO | None | - |
-| E-199-02 | Render plays-derived stats in report template | TODO | E-199-01 | - |
-| E-199-03 | Cascade-delete team data on report deletion | TODO | E-199-01 (shared file) | - |
+| E-199-01 | Plays pipeline stage and query functions in report generator | DONE | None | - |
+| E-199-02 | Render plays-derived stats in report template | DONE | E-199-01 | - |
+| E-199-03 | Cascade-delete team data on report deletion | DONE | E-199-01 (shared file) | - |
 
 ## Dispatch Team
 - software-engineer
@@ -221,3 +221,29 @@ None -- all design decisions locked from expert consultation, SE/DE review, and 
 | **Total** | **41** | **22** | **19** |
 
 Note: Many dismissals in iterations 2-3 were duplicates of findings already incorporated from other reviewers in the same iteration.
+
+- 2026-04-03: **Dispatch completed.** 3 stories delivered by SE. All ACs verified by PM. 226 tests passing, 0 failures.
+
+### Implementation Review Scorecard
+| Review Pass | Findings | Accepted | Dismissed |
+|---|---|---|---|
+| Per-story CR — E-199-01 | 4 | 4 | 0 |
+| Per-story CR — E-199-02 | 0 | 0 | 0 |
+| Per-story CR — E-199-03 | 1 | 1 | 0 |
+| CR integration review | 1 | 1 | 0 |
+| Codex code review | 3 | 3 | 0 |
+| **Total** | **9** | **9** | **0** |
+
+CR findings: E-199-01 had 2 MUST FIX (season_id on roster queries) + 2 SHOULD FIX (error-path test, team FPS% test). E-199-03 had 1 SHOULD FIX (play_events assertion). Integration had 1 SHOULD FIX (cleanup function rename). Codex: 2 high (auth expiry propagation, orphan cleanup scope) + 1 medium (missing tests). All fixed.
+
+- 2026-04-03: **Documentation assessment**: Trigger 1 fires (new feature: plays-derived stats in reports). Trigger 5 fires (epic changes how users interact with reports -- new columns, new deletion behavior). Docs-writer dispatch warranted for `docs/coaching/` (new stats explanation) and `docs/admin/` (report deletion cascade behavior).
+
+- 2026-04-03: **Context-layer assessment**:
+  - T1 (New convention/pattern): **YES** -- `is_team_eligible_for_cleanup()` guard-condition pattern for conditional cascade deletion; consolidated `_cleanup_orphan_teams()` as the single FK-safe cascade function.
+  - T2 (Architectural decision): **YES** -- Plays pipeline integrated into report generation flow (crawl → load → reconcile → query); report deletion now cascade-deletes team data with guard conditions.
+  - T3 (Footgun/boundary discovered): **NO** -- No new footguns beyond what was already documented.
+  - T4 (Agent behavior change): **NO** -- No changes to agent dispatch, routing, or coordination.
+  - T5 (Domain knowledge): **YES** -- Coach consultation confirmed FPS% is "the first number I look at when scouting a pitching staff"; QAB% and P/PA are inline stats (no separate advanced section); plays endpoint is NOT ownership-gated.
+  - T6 (New CLI/workflow): **NO** -- No new CLI commands or workflows added.
+
+- 2026-04-03: **Status → COMPLETED.**
