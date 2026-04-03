@@ -333,6 +333,7 @@
       table { page-break-inside: avoid; }
       tr { page-break-inside: avoid; }
       .section-header { page-break-after: avoid; }
+      .batting-section { page-break-before: always; }
 
       /* Team spray chart on its own page */
       .spray-team-chart {
@@ -518,7 +519,7 @@
 {% endif %}
 
 {# ===== BATTING (AC-6, AC-7, AC-8, AC-9, AC-12, AC-15, AC-16, TN-3) ===== #}
-<h2 class="section-header">Batting</h2>
+<h2 class="section-header batting-section">Batting</h2>
 <div class="sort-annotation">Sorted by plate appearances</div>
 {% if has_batting %}
 <table>
