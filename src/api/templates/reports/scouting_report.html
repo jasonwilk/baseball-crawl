@@ -209,6 +209,8 @@
     .spray-card {
       flex: 0 0 calc(33.333% - 6px);
       border: 1px solid #d1d5db;
+      border-radius: 6px;
+      overflow: hidden;
       padding: 6px 8px;
       text-align: center;
       break-inside: avoid;
@@ -387,6 +389,18 @@
       .roster-grid { grid-template-columns: repeat(2, 1fr); }
       /* Hide volume/counting columns on mobile (AC-16) */
       .mob-hide { display: none; }
+      /* Additional mobile-only column hides */
+      .mob-hide-extra { display: none; }
+      /* 2-column spray grid on mobile */
+      .spray-grid {
+        gap: 6px;
+      }
+      .spray-card {
+        flex: 0 0 calc(50% - 3px);
+      }
+      .spray-card img {
+        margin: 0 auto;
+      }
     }
   </style>
 </head>
@@ -471,23 +485,23 @@
     <tr>
       <th>#</th>
       <th class="col-player">Player</th>
-      <th class="col-thr col-sep heat-header">THR</th>
+      <th class="col-thr col-sep heat-header mob-hide-extra">THR</th>
       <th class="heat-header">ERA</th>
       <th class="heat-header">K/9</th>
-      <th class="heat-header">WHIP</th>
+      <th class="heat-header mob-hide-extra">WHIP</th>
       <th class="col-sep">GP</th>
-      <th>GS/GR</th>
+      <th class="mob-hide-extra">GS/GR</th>
       <th>IP</th>
       <th class="col-sep mob-hide">H</th>
       <th class="mob-hide">ER</th>
       <th class="mob-hide">BB</th>
       <th class="mob-hide">SO</th>
       <th class="mob-hide">#P</th>
-      <th>Strike%</th>
+      <th class="mob-hide-extra">Strike%</th>
       <th class="mob-hide">FPS%</th>
       <th class="mob-hide">P/BF</th>
-      <th class="last-outing-header">Last</th>
-      <th>Pitches (7d)</th>
+      <th class="last-outing-header mob-hide-extra">Last</th>
+      <th class="mob-hide-extra">Pitches (7d)</th>
     </tr>
   </thead>
   <tbody>
@@ -495,23 +509,23 @@
     <tr>
       <td>{% if pitcher.jersey_number %}{{ pitcher.jersey_number }}{% else %}&mdash;{% endif %}</td>
       <td class="col-player">{{ pitcher.name | e }}{% if pitcher.throws %} ({{ pitcher.throws }}){% endif %} <span class="depth-badge">{{ pitcher.ip_outs | ip_display }} IP</span></td>
-      <td class="col-thr col-sep heat-{{ pitcher._heat.thr }}">&nbsp;</td>
+      <td class="col-thr col-sep heat-{{ pitcher._heat.thr }} mob-hide-extra">&nbsp;</td>
       <td class="heat-{{ pitcher._heat.era }}">{{ pitcher.era }}</td>
       <td class="heat-{{ pitcher._heat.k9 }}">{{ pitcher.k9 }}</td>
-      <td class="heat-{{ pitcher._heat.whip }}">{{ pitcher.whip }}</td>
+      <td class="heat-{{ pitcher._heat.whip }} mob-hide-extra">{{ pitcher.whip }}</td>
       <td class="col-sep">{{ pitcher.games }}</td>
-      <td>{% if pitcher.gs is none %}&mdash;{% else %}{{ pitcher.gs }}/{{ pitcher.games - pitcher.gs }}{% endif %}</td>
+      <td class="mob-hide-extra">{% if pitcher.gs is none %}&mdash;{% else %}{{ pitcher.gs }}/{{ pitcher.games - pitcher.gs }}{% endif %}</td>
       <td>{{ pitcher.ip_outs | ip_display }}</td>
       <td class="col-sep mob-hide">{{ pitcher.h }}</td>
       <td class="mob-hide">{{ pitcher.er }}</td>
       <td class="mob-hide">{{ pitcher.bb }}</td>
       <td class="mob-hide">{{ pitcher.so }}</td>
       <td class="mob-hide">{{ pitcher.pitches if pitcher.pitches else "&mdash;" | safe }}</td>
-      <td>{{ pitcher.strike_pct if pitcher.strike_pct else "&mdash;" | safe }}</td>
+      <td class="mob-hide-extra">{{ pitcher.strike_pct if pitcher.strike_pct else "&mdash;" | safe }}</td>
       <td class="mob-hide">{{ pitcher._fps_pct }}</td>
       <td class="mob-hide">{{ pitcher._pitches_per_bf }}</td>
-      <td class="last-outing-cell" data-date="{{ pitcher._rest_date }}">{{ pitcher._rest_display }}</td>
-      <td>{{ pitcher._p7d_display }}</td>
+      <td class="last-outing-cell mob-hide-extra" data-date="{{ pitcher._rest_date }}">{{ pitcher._rest_display }}</td>
+      <td class="mob-hide-extra">{{ pitcher._p7d_display }}</td>
     </tr>
     {% endfor %}
   </tbody>
@@ -529,12 +543,12 @@
     <tr>
       <th>#</th>
       <th class="col-player">Player</th>
-      <th class="col-thr col-sep heat-header">THR</th>
+      <th class="col-thr col-sep heat-header mob-hide-extra">THR</th>
       <th class="heat-header">OBP</th>
       <th class="heat-header">AVG</th>
       <th class="heat-header">SLG</th>
       <th class="col-sep">K%</th>
-      <th>BB%</th>
+      <th class="mob-hide-extra">BB%</th>
       <th class="mob-hide">QAB%</th>
       <th class="mob-hide">P/PA</th>
       <th class="col-sep mob-hide">GP</th>
@@ -546,7 +560,7 @@
       <th class="mob-hide">RBI</th>
       <th class="mob-hide">BB</th>
       <th class="mob-hide">SO</th>
-      <th>SB-CS</th>
+      <th class="mob-hide-extra">SB-CS</th>
       <th class="mob-hide">HBP</th>
     </tr>
   </thead>
@@ -555,12 +569,12 @@
     <tr>
       <td>{% if player.jersey_number %}{{ player.jersey_number }}{% else %}&mdash;{% endif %}</td>
       <td class="col-player">{{ player.name | e }}{% if player.player_id in spray_data %}<span class="spray-indicator"> &#9670;</span>{% endif %} <span class="depth-badge">{{ player._pa }} PA</span></td>
-      <td class="col-thr col-sep heat-{{ player._heat.thr }}">&nbsp;</td>
+      <td class="col-thr col-sep heat-{{ player._heat.thr }} mob-hide-extra">&nbsp;</td>
       <td class="heat-{{ player._heat.obp }}">{{ (player.h + player.bb + player.hbp) | format_avg(player._pa) }}</td>
       <td class="heat-{{ player._heat.avg }}">{{ player.h | format_avg(player.ab) }}</td>
       <td class="heat-{{ player._heat.slg }}">{{ (player.h + player.doubles + 2 * player.triples + 3 * player.hr) | format_avg(player.ab) }}</td>
       <td class="col-sep">{{ player._k_pct }}</td>
-      <td>{{ player._bb_pct }}</td>
+      <td class="mob-hide-extra">{{ player._bb_pct }}</td>
       <td class="mob-hide">{{ player._qab_pct }}</td>
       <td class="mob-hide">{{ player._pitches_per_pa }}</td>
       <td class="col-sep mob-hide">{{ player.games }}</td>
@@ -572,7 +586,7 @@
       <td class="mob-hide">{{ player.rbi }}</td>
       <td class="mob-hide">{{ player.bb }}</td>
       <td class="mob-hide">{{ player.so }}</td>
-      <td>{{ player._sb_cs }}</td>
+      <td class="mob-hide-extra">{{ player._sb_cs }}</td>
       <td class="mob-hide">{{ player.hbp }}</td>
     </tr>
     {% endfor %}
