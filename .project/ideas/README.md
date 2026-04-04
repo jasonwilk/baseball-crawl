@@ -82,6 +82,8 @@ Review this list every 90 days, or when completing an epic. Ask:
 | [IDEA-061](IDEA-061-season-id-from-team-context.md) | Derive season_id from Team Context, Not Filesystem Path | PROMOTED | 2026-06-30 | → E-197 |
 | [IDEA-062](IDEA-062-plays-boxscore-reconciliation.md) | Plays-vs-Boxscore Reconciliation Engine | PROMOTED | 2026-04-01 |
 | [IDEA-063](IDEA-063-dump-game-skill.md) | /dump-game Diagnostic Skill | CANDIDATE | 2026-04-02 |
+| [IDEA-064](IDEA-064-dashboard-report-parity.md) | Dashboard-Report Feature Parity | CANDIDATE | 2026-07-03 |
+| [IDEA-065](IDEA-065-llm-eval-harness.md) | LLM Starter Prediction Evaluation Harness | CANDIDATE | 2026-07-03 |
 
 ## Status Definitions
 
