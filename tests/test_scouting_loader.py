@@ -392,14 +392,15 @@ def test_stub_player_created_for_unknown_player_in_boxscore(
 
 
 # ---------------------------------------------------------------------------
-# AC-13: UUID opportunism
+# AC-13: Team row creation without UUID contamination (E-211)
 # ---------------------------------------------------------------------------
 
 
-def test_loader_uuid_opportunism(
+def test_loader_creates_opponent_row_without_gc_uuid(
     loader: ScoutingLoader, db: sqlite3.Connection, tmp_path: Path
 ) -> None:
-    """When a UUID key appears in a boxscore, a stub teams row is created for it."""
+    """E-211: When an opponent UUID key appears in a boxscore, a teams row is created
+    with gc_uuid=NULL (not the boxscore key)."""
     team_pk = _insert_team(db)
     game_id = "game-stream-uuid-opp-001"
     uuid_key = "55556666-7777-8888-aaaa-bbbbcccc0005"
@@ -410,8 +411,18 @@ def test_loader_uuid_opportunism(
 
     loader.load_team(scouting_dir, team_pk, _CRAWL_SEASON_ID)
 
-    row = db.execute("SELECT id FROM teams WHERE gc_uuid = ?", (uuid_key,)).fetchone()
-    assert row is not None, f"Expected a teams stub row for gc_uuid={uuid_key}"
+    # No team row should have gc_uuid == uuid_key (UUID contamination fix).
+    row_by_uuid = db.execute("SELECT id FROM teams WHERE gc_uuid = ?", (uuid_key,)).fetchone()
+    assert row_by_uuid is None, (
+        f"No team should have gc_uuid={uuid_key} -- opponent-perspective UUIDs must not be stored"
+    )
+    # But the opponent row should exist by name (the UUID string as name fallback).
+    row_by_name = db.execute(
+        "SELECT id, gc_uuid FROM teams WHERE name = ? AND membership_type = 'tracked'",
+        (uuid_key,),
+    ).fetchone()
+    assert row_by_name is not None, "Opponent row should exist with UUID as name fallback"
+    assert row_by_name[1] is None, "gc_uuid must be NULL"
 
 
 def test_loader_uuid_opportunism_does_not_create_duplicate(
@@ -1105,7 +1116,10 @@ def test_build_opponent_name_index_missing_opponent_team_field(
 def test_load_team_creates_opponent_row_with_name_from_games_json(
     loader: ScoutingLoader, db: sqlite3.Connection, tmp_path: Path
 ) -> None:
-    """AC-2: load_team() creates opponent team row with name from games.json."""
+    """AC-2: load_team() creates opponent team row with name from games.json.
+
+    E-211: Opponent row is created with gc_uuid=NULL; looked up by name.
+    """
     team_pk = _insert_team(db)
     game_id = "game-stream-opp-name-001"
     opp_uuid = "aa11bb22-cc33-dd44-ee55-ff66aabb0099"
@@ -1116,15 +1130,26 @@ def test_load_team_creates_opponent_row_with_name_from_games_json(
 
     loader.load_team(scouting_dir, team_pk, _CRAWL_SEASON_ID)
 
-    row = db.execute("SELECT name FROM teams WHERE gc_uuid = ?", (opp_uuid,)).fetchone()
-    assert row is not None
-    assert row[0] == _OPP_NAME_SCOUTING, f"Expected '{_OPP_NAME_SCOUTING}', got {row[0]!r}"
+    # E-211: gc_uuid should NOT be set for opponent rows.
+    row_by_uuid = db.execute("SELECT name FROM teams WHERE gc_uuid = ?", (opp_uuid,)).fetchone()
+    assert row_by_uuid is None, "Opponent row must not have gc_uuid set"
+
+    # Look up by name instead.
+    row = db.execute(
+        "SELECT gc_uuid FROM teams WHERE name = ? AND membership_type = 'tracked'",
+        (_OPP_NAME_SCOUTING,),
+    ).fetchone()
+    assert row is not None, f"Expected opponent row with name='{_OPP_NAME_SCOUTING}'"
+    assert row[0] is None, "gc_uuid must be NULL"
 
 
 def test_load_team_fallback_to_uuid_when_games_json_has_no_name(
     loader: ScoutingLoader, db: sqlite3.Connection, tmp_path: Path
 ) -> None:
-    """AC-3: load_team() falls back to UUID when games.json lacks opponent_team.name."""
+    """AC-3: load_team() falls back to UUID as name when games.json lacks opponent_team.name.
+
+    E-211: The UUID string is used as the team name, but NOT stored as gc_uuid.
+    """
     team_pk = _insert_team(db)
     game_id = "game-stream-no-name-001"
     opp_uuid = "bb22cc33-dd44-ee55-ff66-001122334455"
@@ -1146,100 +1171,52 @@ def test_load_team_fallback_to_uuid_when_games_json_has_no_name(
     result = loader.load_team(scouting_dir, team_pk, _CRAWL_SEASON_ID)
 
     assert result.errors == 0
-    row = db.execute("SELECT name FROM teams WHERE gc_uuid = ?", (opp_uuid,)).fetchone()
-    assert row is not None
-    assert row[0] == opp_uuid, "UUID should be used as fallback name"
+    # E-211: UUID used as name fallback, but gc_uuid column stays NULL.
+    row = db.execute(
+        "SELECT name, gc_uuid FROM teams WHERE name = ? AND membership_type = 'tracked'",
+        (opp_uuid,),
+    ).fetchone()
+    assert row is not None, "Opponent row should exist with UUID as name"
+    assert row[1] is None, "gc_uuid must be NULL"
 
 
-def test_load_team_self_heals_uuid_stub_name_on_reload(
+def test_load_team_deduplicates_opponent_by_name_on_reload(
     loader: ScoutingLoader, db: sqlite3.Connection, tmp_path: Path
 ) -> None:
-    """AC-4: Re-running load_team() with games.json names updates existing UUID-stub rows."""
+    """E-211: Re-running load_team() deduplicates opponents by name+season_year.
+
+    With gc_uuid=NULL, the dedup cascade uses name+season_year matching (step 3)
+    to avoid creating duplicate rows on repeated loads.
+    """
     team_pk = _insert_team(db)
     game_id = "game-stream-heal-001"
     opp_uuid = "cc33dd44-ee55-ff66-aa77-112233445566"
 
-    # First load: games.json without name → UUID-stub created.
     scouting_dir = _make_roster(tmp_path, _PUBLIC_ID, _CRAWL_SEASON_ID)
-    _make_games_json(scouting_dir, game_id)  # no opponent_team.name
-    _make_boxscore(scouting_dir, game_id, own_key=_PUBLIC_ID, opp_key=opp_uuid)
-    loader.load_team(scouting_dir, team_pk, _CRAWL_SEASON_ID)
-
-    stub_row = db.execute("SELECT id, name FROM teams WHERE gc_uuid = ?", (opp_uuid,)).fetchone()
-    assert stub_row is not None
-    assert stub_row[1] == opp_uuid, "First load should create UUID-stub"
-
-    # Second load: games.json with name → stub should be updated.
     _make_games_json_with_opponent_name(scouting_dir, game_id, _OPP_NAME_SCOUTING)
+    _make_boxscore(scouting_dir, game_id, own_key=_PUBLIC_ID, opp_key=opp_uuid)
+
+    # First load.
     loader.load_team(scouting_dir, team_pk, _CRAWL_SEASON_ID)
+    first_row = db.execute(
+        "SELECT id FROM teams WHERE name = ? AND membership_type = 'tracked'",
+        (_OPP_NAME_SCOUTING,),
+    ).fetchone()
+    assert first_row is not None, "First load should create opponent row"
 
-    updated = db.execute("SELECT name FROM teams WHERE id = ?", (stub_row[0],)).fetchone()
-    assert updated[0] == _OPP_NAME_SCOUTING, (
-        f"Expected stub name to be healed to '{_OPP_NAME_SCOUTING}', got {updated[0]!r}"
-    )
-
-
-def test_record_uuid_from_boxscore_uses_opponent_name(
-    loader: ScoutingLoader, db: sqlite3.Connection, tmp_path: Path
-) -> None:
-    """AC-5: _record_uuid_from_boxscore() creates named rows when opponent_name provided."""
-    uuid_key = "dd44ee55-ff66-aa77-bb88-223344556677"
-    bs_dir = tmp_path / "boxscores"
-    bs_dir.mkdir()
-    bs_path = bs_dir / "game-safety-net-001.json"
-    boxscore = {
-        _PUBLIC_ID: {"players": [], "groups": []},
-        uuid_key: {"players": [], "groups": []},
-    }
-    bs_path.write_text(json.dumps(boxscore), encoding="utf-8")
-
-    loader._record_uuid_from_boxscore(bs_path, season_year=2025, opponent_name="Safety Net Team")
-
-    row = db.execute("SELECT name FROM teams WHERE gc_uuid = ?", (uuid_key,)).fetchone()
-    assert row is not None
-    assert row[0] == "Safety Net Team", f"Expected 'Safety Net Team', got {row[0]!r}"
+    # Second load with same data.
+    loader.load_team(scouting_dir, team_pk, _CRAWL_SEASON_ID)
+    second_row = db.execute(
+        "SELECT id FROM teams WHERE name = ? AND membership_type = 'tracked'",
+        (_OPP_NAME_SCOUTING,),
+    ).fetchone()
+    assert second_row is not None
+    assert second_row[0] == first_row[0], "Same name+season should reuse existing team row"
 
 
-def test_record_uuid_from_boxscore_updates_uuid_stub_with_name(
-    loader: ScoutingLoader, db: sqlite3.Connection, tmp_path: Path
-) -> None:
-    """AC-5: _record_uuid_from_boxscore() heals UUID-stub rows when name is available."""
-    uuid_key = "ee55ff66-aa77-bb88-cc99-334455667788"
-    # Pre-create a UUID-stub row.
-    stub_pk = db.execute(
-        "INSERT INTO teams (name, membership_type, gc_uuid, is_active) VALUES (?, 'tracked', ?, 0)",
-        (uuid_key, uuid_key),
-    ).lastrowid
-    db.commit()
 
-    bs_dir = tmp_path / "boxscores"
-    bs_dir.mkdir()
-    bs_path = bs_dir / "game-safety-heal-001.json"
-    boxscore = {uuid_key: {"players": [], "groups": []}}
-    bs_path.write_text(json.dumps(boxscore), encoding="utf-8")
-
-    loader._record_uuid_from_boxscore(bs_path, season_year=2025, opponent_name="Healed Team Name")
-
-    row = db.execute("SELECT name FROM teams WHERE id = ?", (stub_pk,)).fetchone()
-    assert row[0] == "Healed Team Name"
-
-
-def test_record_uuid_from_boxscore_fallback_without_name(
-    loader: ScoutingLoader, db: sqlite3.Connection, tmp_path: Path
-) -> None:
-    """AC-3: _record_uuid_from_boxscore() without name falls back to UUID as name."""
-    uuid_key = "ff66aa77-bb88-cc99-dd00-445566778899"
-    bs_dir = tmp_path / "boxscores"
-    bs_dir.mkdir()
-    bs_path = bs_dir / "game-no-name-001.json"
-    boxscore = {uuid_key: {"players": [], "groups": []}}
-    bs_path.write_text(json.dumps(boxscore), encoding="utf-8")
-
-    loader._record_uuid_from_boxscore(bs_path, season_year=2025)
-
-    row = db.execute("SELECT name FROM teams WHERE gc_uuid = ?", (uuid_key,)).fetchone()
-    assert row is not None
-    assert row[0] == uuid_key, "UUID fallback name should be used when no opponent_name"
+# E-211: _record_uuid_from_boxscore tests removed -- method deleted (UUID contamination fix).
+# See tests/test_uuid_contamination.py for replacement coverage.
 
 
 # ---------------------------------------------------------------------------
@@ -1251,14 +1228,14 @@ _SCOUTED_GC_UUID = "11111111-2222-3333-4444-555555555555"
 _OTHER_OPP_UUID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 
 
-def test_uuid_only_boxscore_labels_only_opponent_uuid_when_gc_uuid_known(
+def test_uuid_only_boxscore_does_not_store_gc_uuid(
     loader: ScoutingLoader, db: sqlite3.Connection, tmp_path: Path
 ) -> None:
-    """P1-1 regression: UUID-only boxscore only labels the opponent UUID with opponent_name.
+    """E-211: UUID-only boxscore creates opponent rows WITHOUT gc_uuid contamination.
 
-    When the scouted team has a known gc_uuid that matches one of the two UUID
-    keys, only the OTHER key (the actual opponent) should get opponent_name.
-    The own-team UUID must not be labeled as the opponent.
+    After E-211, the game loader's _ensure_team_row passes gc_uuid=None to the
+    shared ensure_team_row, so opponent rows are created by name only.  The
+    _record_uuid_from_boxscore safety net is removed entirely.
     """
     team_pk = _insert_team(db, gc_uuid=_SCOUTED_GC_UUID)
     game_id = "game-uuid-only-gc-known-001"
@@ -1276,65 +1253,22 @@ def test_uuid_only_boxscore_labels_only_opponent_uuid_when_gc_uuid_known(
 
     loader.load_team(scouting_dir, team_pk, _CRAWL_SEASON_ID)
 
-    # Opponent UUID should get the real name.
-    opp_row = db.execute("SELECT name FROM teams WHERE gc_uuid = ?", (_OTHER_OPP_UUID,)).fetchone()
-    assert opp_row is not None, "Opponent teams row should exist"
-    assert opp_row[0] == "Real Opponent FC", (
-        f"Expected opponent UUID to have name 'Real Opponent FC', got {opp_row[0]!r}"
+    # With UUID contamination fix, no team rows should have gc_uuid == _OTHER_OPP_UUID.
+    opp_row_by_uuid = db.execute(
+        "SELECT name FROM teams WHERE gc_uuid = ?", (_OTHER_OPP_UUID,)
+    ).fetchone()
+    assert opp_row_by_uuid is None, (
+        f"No team row should have gc_uuid={_OTHER_OPP_UUID} -- "
+        "opponent-perspective UUIDs must not be stored as gc_uuid"
     )
 
-    # Own-team UUID, if a row was created, must NOT have the opponent's name.
-    own_row = db.execute("SELECT name FROM teams WHERE gc_uuid = ?", (_SCOUTED_GC_UUID,)).fetchone()
-    if own_row is not None:
-        assert own_row[0] != "Real Opponent FC", (
-            f"Own team UUID was incorrectly labeled as opponent: {own_row[0]!r}"
-        )
-
-
-def test_uuid_only_boxscore_no_gc_uuid_does_not_mislabel_second_uuid(
-    loader: ScoutingLoader, db: sqlite3.Connection, tmp_path: Path
-) -> None:
-    """P1-1 regression: when gc_uuid is None, neither UUID gets opponent_name from safety net.
-
-    When the scouted team has no gc_uuid we cannot distinguish own vs opponent
-    UUID in a two-UUID boxscore.  The safety net must not apply opponent_name to
-    the second UUID (the scouted team's own UUID).  The game_loader correctly
-    labels the first UUID (opp_key) via _ensure_team_row; the second should
-    remain as a UUID-stub (name == gc_uuid).
-    """
-    # Team with no gc_uuid (tracked via public_id only).
-    team_pk = db.execute(
-        "INSERT INTO teams (name, membership_type, public_id, is_active) "
-        "VALUES ('No UUID Team', 'tracked', ?, 0)",
-        (_PUBLIC_ID,),
-    ).lastrowid
-    db.commit()
-
-    game_id = "game-no-gc-uuid-001"
-    scouting_dir = _make_roster(tmp_path, _PUBLIC_ID, _CRAWL_SEASON_ID)
-    _make_games_json_with_opponent_name(scouting_dir, game_id, "Some Opponent")
-
-    bs_dir = scouting_dir / "boxscores"
-    bs_dir.mkdir(parents=True, exist_ok=True)
-    # Insert scouted_uuid first so it becomes uuid_keys[0] (game_loader's opp_key fallback).
-    scouted_uuid = "11111111-2222-3333-4444-aaaaaaaaaaaa"
-    own_second_uuid = "bbbbbbbb-cccc-dddd-eeee-111111111111"
-    boxscore = {
-        scouted_uuid: {"players": [], "groups": []},
-        own_second_uuid: {"players": [], "groups": []},
-    }
-    (bs_dir / f"{game_id}.json").write_text(json.dumps(boxscore), encoding="utf-8")
-
-    loader.load_team(scouting_dir, team_pk, _CRAWL_SEASON_ID)
-
-    # The second UUID (the scouted team's own UUID) must not have "Some Opponent" as name.
-    second_row = db.execute(
-        "SELECT name FROM teams WHERE gc_uuid = ?", (own_second_uuid,)
+    # Opponent row should exist by name (created by game_loader via ensure_team_row with gc_uuid=None).
+    opp_row_by_name = db.execute(
+        "SELECT gc_uuid FROM teams WHERE name = 'Real Opponent FC'"
     ).fetchone()
-    if second_row is not None:
-        assert second_row[0] == own_second_uuid, (
-            f"Second UUID should be a UUID-stub (name==gc_uuid), "
-            f"got {second_row[0]!r} instead of {own_second_uuid!r}"
+    if opp_row_by_name is not None:
+        assert opp_row_by_name[0] is None, (
+            "Opponent team row gc_uuid must be NULL"
         )
 
 

@@ -525,13 +525,15 @@ def _crawl_and_load_plays(
     team_id: int,
     season_id: str,
     crawl_season_id: str,
-) -> None:
+) -> list[str]:
     """Crawl, load, and reconcile plays data for a scouted team's games.
 
-    Queries completed game IDs from the DB, fetches plays via the API,
-    writes raw JSON to the scouting directory, loads via ``PlaysLoader``,
-    and runs ``reconcile_game()`` for each game to correct pitcher
-    attribution errors.
+    Discovers game IDs from boxscore filenames on disk (not a DB query) to
+    ensure only games from this report's own crawl are processed -- games
+    loaded by other pipelines are excluded.  See E-211 TN-3.
+
+    Returns the list of game_ids that were processed, for use by downstream
+    plays query functions.
 
     Failure handling is per-game: individual game failures are logged and
     skipped.  ``CredentialExpiredError`` propagates as a stage-level failure.
@@ -543,28 +545,26 @@ def _crawl_and_load_plays(
         team_id: The team's DB integer PK.
         season_id: Canonical DB season_id for query scoping.
         crawl_season_id: File-discovery season slug for directory paths.
+
+    Returns:
+        List of game_id strings that were processed (crawled, loaded, or
+        already present).  Empty list if no games found.
     """
     try:
         scouting_dir = _DATA_ROOT / crawl_season_id / "scouting" / public_id
         plays_dir = scouting_dir / "plays"
         plays_dir.mkdir(parents=True, exist_ok=True)
 
-        # Query completed games for this team
-        with closing(get_connection()) as conn:
-            rows = conn.execute(
-                """
-                SELECT game_id FROM games
-                WHERE season_id = ?
-                  AND (home_team_id = ? OR away_team_id = ?)
-                  AND status = 'completed'
-                """,
-                (season_id, team_id, team_id),
-            ).fetchall()
-            game_ids = [r[0] for r in rows]
+        # Discover games from boxscore filenames on disk (E-211: filesystem-only).
+        boxscores_dir = scouting_dir / "boxscores"
+        if not boxscores_dir.is_dir():
+            logger.info("No boxscores directory for public_id=%s; skipping plays stage.", public_id)
+            return []
+        game_ids = sorted(p.stem for p in boxscores_dir.glob("*.json"))
 
         if not game_ids:
-            logger.info("No completed games for team_id=%d; skipping plays stage.", team_id)
-            return
+            logger.info("No boxscore files for public_id=%s; skipping plays stage.", public_id)
+            return []
 
         # Crawl: fetch plays for each game (per-game error isolation)
         fetched_game_ids: list[str] = []
@@ -606,7 +606,20 @@ def _crawl_and_load_plays(
 
         if not fetched_game_ids:
             logger.info("No plays data fetched for team_id=%d.", team_id)
-            return
+            return []
+
+        # Remove stale plays files not in the boxscore-derived game list.
+        # Pre-fix runs may have fetched plays for opponent-perspective games
+        # that are no longer in the boxscore inventory.  PlaysLoader loads
+        # every plays/*.json, so stale files would create stub player rows.
+        valid_game_id_set = set(game_ids)
+        for stale_file in plays_dir.glob("*.json"):
+            if stale_file.stem not in valid_game_id_set:
+                logger.info(
+                    "Removing stale plays file %s (not in boxscore inventory).",
+                    stale_file.name,
+                )
+                stale_file.unlink()
 
         # Load: use PlaysLoader for all fetched games
         with closing(get_connection()) as conn:
@@ -626,7 +639,7 @@ def _crawl_and_load_plays(
         )
 
         # Reconcile: correct pitcher attribution for each game
-        for game_id in fetched_game_ids:
+        for game_id in game_ids:
             try:
                 with closing(get_connection()) as conn:
                     # Only reconcile games that have plays in DB
@@ -642,6 +655,11 @@ def _crawl_and_load_plays(
                     exc_info=True,
                 )
 
+        # Return the full boxscore-derived game list (not just newly fetched).
+        # Games from prior runs are already loaded and should be included in
+        # the downstream query scope.
+        return game_ids
+
     except CredentialExpiredError:
         raise
     except Exception:  # noqa: BLE001
@@ -651,35 +669,59 @@ def _crawl_and_load_plays(
             public_id,
             exc_info=True,
         )
+        return []
 
 
 def _query_plays_pitching_stats(
-    conn: sqlite3.Connection, team_id: int, season_id: str
+    conn: sqlite3.Connection,
+    team_id: int,
+    season_id: str,
+    game_ids: list[str] | None = None,
 ) -> dict[str, dict]:
     """Aggregate plays-derived pitching stats grouped by pitcher_id.
 
-    Scoped to games involving the team (not filtered by batting_team_id).
-    Pitcher-to-team matching happens during the merge step.
+    When ``game_ids`` is provided, scopes to exactly those games (E-211:
+    prevents cross-pipeline game leakage).  Falls back to team_id scope.
 
     Returns dict keyed by player_id with ``fps_pct`` and ``pitches_per_bf``.
     """
-    rows = conn.execute(
-        """
-        SELECT
-            p.pitcher_id,
-            SUM(p.is_first_pitch_strike) AS fps_sum,
-            COUNT(*) AS fps_denom,
-            SUM(p.pitch_count) AS total_pitches,
-            COUNT(*) AS total_bf
-        FROM plays p
-        JOIN games g ON g.game_id = p.game_id
-        WHERE g.season_id = ?
-          AND (g.home_team_id = ? OR g.away_team_id = ?)
-          AND p.pitcher_id IS NOT NULL
-        GROUP BY p.pitcher_id
-        """,
-        (season_id, team_id, team_id),
-    ).fetchall()
+    if game_ids is not None:
+        if not game_ids:
+            return {}
+        placeholders = ",".join("?" for _ in game_ids)
+        rows = conn.execute(
+            f"""
+            SELECT
+                p.pitcher_id,
+                SUM(p.is_first_pitch_strike) AS fps_sum,
+                COUNT(*) AS fps_denom,
+                SUM(p.pitch_count) AS total_pitches,
+                COUNT(*) AS total_bf
+            FROM plays p
+            WHERE p.game_id IN ({placeholders})
+              AND p.pitcher_id IS NOT NULL
+            GROUP BY p.pitcher_id
+            """,
+            game_ids,
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            """
+            SELECT
+                p.pitcher_id,
+                SUM(p.is_first_pitch_strike) AS fps_sum,
+                COUNT(*) AS fps_denom,
+                SUM(p.pitch_count) AS total_pitches,
+                COUNT(*) AS total_bf
+            FROM plays p
+            JOIN games g ON g.game_id = p.game_id
+            WHERE g.season_id = ?
+              AND (g.home_team_id = ? OR g.away_team_id = ?)
+              AND p.pitcher_id IS NOT NULL
+            GROUP BY p.pitcher_id
+            """,
+            (season_id, team_id, team_id),
+        ).fetchall()
 
     result: dict[str, dict] = {}
     for row in rows:
@@ -696,30 +738,52 @@ def _query_plays_pitching_stats(
 
 
 def _query_plays_batting_stats(
-    conn: sqlite3.Connection, team_id: int, season_id: str
+    conn: sqlite3.Connection,
+    team_id: int,
+    season_id: str,
+    game_ids: list[str] | None = None,
 ) -> dict[str, dict]:
     """Aggregate plays-derived batting stats grouped by batter_id.
 
-    Scoped by ``batting_team_id = team_id`` to select plays where the
-    scouted team was batting.
+    When ``game_ids`` is provided, scopes to exactly those games (E-211).
+    Falls back to season_id + batting_team_id scope.
 
     Returns dict keyed by player_id with ``qab_pct`` and ``pitches_per_pa``.
     """
-    rows = conn.execute(
-        """
-        SELECT
-            p.batter_id,
-            SUM(p.is_qab) AS qab_sum,
-            SUM(p.pitch_count) AS total_pitches,
-            COUNT(*) AS total_pa
-        FROM plays p
-        JOIN games g ON g.game_id = p.game_id
-        WHERE g.season_id = ?
-          AND p.batting_team_id = ?
-        GROUP BY p.batter_id
-        """,
-        (season_id, team_id),
-    ).fetchall()
+    if game_ids is not None:
+        if not game_ids:
+            return {}
+        placeholders = ",".join("?" for _ in game_ids)
+        rows = conn.execute(
+            f"""
+            SELECT
+                p.batter_id,
+                SUM(p.is_qab) AS qab_sum,
+                SUM(p.pitch_count) AS total_pitches,
+                COUNT(*) AS total_pa
+            FROM plays p
+            WHERE p.game_id IN ({placeholders})
+              AND p.batting_team_id = ?
+            GROUP BY p.batter_id
+            """,
+            [*game_ids, team_id],
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            """
+            SELECT
+                p.batter_id,
+                SUM(p.is_qab) AS qab_sum,
+                SUM(p.pitch_count) AS total_pitches,
+                COUNT(*) AS total_pa
+            FROM plays p
+            JOIN games g ON g.game_id = p.game_id
+            WHERE g.season_id = ?
+              AND p.batting_team_id = ?
+            GROUP BY p.batter_id
+            """,
+            (season_id, team_id),
+        ).fetchall()
 
     result: dict[str, dict] = {}
     for row in rows:
@@ -735,24 +799,48 @@ def _query_plays_batting_stats(
 
 
 def _query_plays_team_stats(
-    conn: sqlite3.Connection, team_id: int, season_id: str
+    conn: sqlite3.Connection,
+    team_id: int,
+    season_id: str,
+    game_ids: list[str] | None = None,
 ) -> dict:
     """Compute team-level plays aggregates and metadata.
+
+    When ``game_ids`` is provided, scopes to exactly those games (E-211).
+    Falls back to team_id scope.
 
     Returns dict with ``team_fps_pct``, ``team_pitches_per_pa``,
     ``has_plays_data``, and ``plays_game_count``.
     """
     # Check how many games have plays data
-    row = conn.execute(
-        """
-        SELECT COUNT(DISTINCT p.game_id)
-        FROM plays p
-        JOIN games g ON g.game_id = p.game_id
-        WHERE g.season_id = ?
-          AND (g.home_team_id = ? OR g.away_team_id = ?)
-        """,
-        (season_id, team_id, team_id),
-    ).fetchone()
+    if game_ids is not None:
+        if not game_ids:
+            return {
+                "team_fps_pct": None,
+                "team_pitches_per_pa": None,
+                "has_plays_data": False,
+                "plays_game_count": 0,
+            }
+        placeholders = ",".join("?" for _ in game_ids)
+        row = conn.execute(
+            f"""
+            SELECT COUNT(DISTINCT p.game_id)
+            FROM plays p
+            WHERE p.game_id IN ({placeholders})
+            """,
+            game_ids,
+        ).fetchone()
+    else:
+        row = conn.execute(
+            """
+            SELECT COUNT(DISTINCT p.game_id)
+            FROM plays p
+            JOIN games g ON g.game_id = p.game_id
+            WHERE g.season_id = ?
+              AND (g.home_team_id = ? OR g.away_team_id = ?)
+            """,
+            (season_id, team_id, team_id),
+        ).fetchone()
     plays_game_count = row[0] if row else 0
     has_plays_data = plays_game_count > 0
 
@@ -765,37 +853,64 @@ def _query_plays_team_stats(
         }
 
     # Team FPS%: pitchers for this team (matched via roster)
-    fps_row = conn.execute(
-        """
-        SELECT
-            SUM(p.is_first_pitch_strike),
-            COUNT(*)
-        FROM plays p
-        JOIN games g ON g.game_id = p.game_id
-        JOIN team_rosters tr ON tr.player_id = p.pitcher_id
-            AND tr.team_id = ?
-            AND tr.season_id = ?
-        WHERE g.season_id = ?
-          AND (g.home_team_id = ? OR g.away_team_id = ?)
-          AND p.pitcher_id IS NOT NULL
-        """,
-        (team_id, season_id, season_id, team_id, team_id),
-    ).fetchone()
+    if game_ids is not None:
+        fps_row = conn.execute(
+            f"""
+            SELECT
+                SUM(p.is_first_pitch_strike),
+                COUNT(*)
+            FROM plays p
+            JOIN team_rosters tr ON tr.player_id = p.pitcher_id
+                AND tr.team_id = ?
+                AND tr.season_id = ?
+            WHERE p.game_id IN ({placeholders})
+              AND p.pitcher_id IS NOT NULL
+            """,
+            [team_id, season_id, *game_ids],
+        ).fetchone()
+    else:
+        fps_row = conn.execute(
+            """
+            SELECT
+                SUM(p.is_first_pitch_strike),
+                COUNT(*)
+            FROM plays p
+            JOIN games g ON g.game_id = p.game_id
+            JOIN team_rosters tr ON tr.player_id = p.pitcher_id
+                AND tr.team_id = ?
+                AND tr.season_id = ?
+            WHERE g.season_id = ?
+              AND (g.home_team_id = ? OR g.away_team_id = ?)
+              AND p.pitcher_id IS NOT NULL
+            """,
+            (team_id, season_id, season_id, team_id, team_id),
+        ).fetchone()
     fps_sum = fps_row[0] if fps_row and fps_row[0] else 0
     fps_denom = fps_row[1] if fps_row and fps_row[1] else 0
     team_fps_pct = (fps_sum / fps_denom) if fps_denom > 0 else None
 
     # Team pitches per PA (batting side)
-    ppa_row = conn.execute(
-        """
-        SELECT SUM(p.pitch_count), COUNT(*)
-        FROM plays p
-        JOIN games g ON g.game_id = p.game_id
-        WHERE g.season_id = ?
-          AND p.batting_team_id = ?
-        """,
-        (season_id, team_id),
-    ).fetchone()
+    if game_ids is not None:
+        ppa_row = conn.execute(
+            f"""
+            SELECT SUM(p.pitch_count), COUNT(*)
+            FROM plays p
+            WHERE p.game_id IN ({placeholders})
+              AND p.batting_team_id = ?
+            """,
+            [*game_ids, team_id],
+        ).fetchone()
+    else:
+        ppa_row = conn.execute(
+            """
+            SELECT SUM(p.pitch_count), COUNT(*)
+            FROM plays p
+            JOIN games g ON g.game_id = p.game_id
+            WHERE g.season_id = ?
+              AND p.batting_team_id = ?
+            """,
+            (season_id, team_id),
+        ).fetchone()
     total_pitches = ppa_row[0] if ppa_row and ppa_row[0] else 0
     total_pa = ppa_row[1] if ppa_row and ppa_row[1] else 0
     team_pitches_per_pa = (total_pitches / total_pa) if total_pa > 0 else None
@@ -966,22 +1081,28 @@ def generate_report(gc_url: str) -> GenerationResult:
             )
             conn.commit()
 
-        # Step 4b: Resolve gc_uuid if the team row doesn't have one
+        # Step 4b: Resolve gc_uuid for spray chart access.
+        # Tracked teams always search-resolve (stored gc_uuid may be
+        # contaminated by opponent-perspective boxscore keys -- see E-211).
+        # Member teams use stored gc_uuid (from authenticated API).
         resolved_gc_uuid: str | None = None
         with closing(get_connection()) as conn:
             row = conn.execute(
-                "SELECT gc_uuid FROM teams WHERE id = ?", (team_id,)
+                "SELECT gc_uuid, membership_type FROM teams WHERE id = ?",
+                (team_id,),
             ).fetchone()
             existing_gc_uuid = row[0] if row else None
+            membership_type = row[1] if row else "tracked"
 
-        if existing_gc_uuid:
+        if membership_type == "member" and existing_gc_uuid:
             resolved_gc_uuid = existing_gc_uuid
         elif team_info.get("name"):
             resolved_gc_uuid = _resolve_gc_uuid(client, team_info["name"], public_id)
             if resolved_gc_uuid:
                 with closing(get_connection()) as conn:
                     conn.execute(
-                        "UPDATE teams SET gc_uuid = ? WHERE id = ? AND gc_uuid IS NULL",
+                        "UPDATE teams SET gc_uuid = ? WHERE id = ? "
+                        "AND membership_type = 'tracked'",
                         (resolved_gc_uuid, team_id),
                     )
                     conn.commit()
@@ -991,9 +1112,11 @@ def generate_report(gc_url: str) -> GenerationResult:
         _crawl_and_load_spray(client, public_id, crawl_season_id, gc_uuid=resolved_gc_uuid)
 
         # Step 4d: Plays crawl/load/reconcile (supplementary — auth expiry
-        # is non-fatal here, unlike the primary scouting crawl stage)
+        # is non-fatal here, unlike the primary scouting crawl stage).
+        # Returns list of game_ids processed for scoped plays queries.
+        plays_game_ids: list[str] = []
         try:
-            _crawl_and_load_plays(
+            plays_game_ids = _crawl_and_load_plays(
                 client, public_id, team_id, season_id, crawl_season_id,
             )
         except CredentialExpiredError:
@@ -1048,9 +1171,15 @@ def generate_report(gc_url: str) -> GenerationResult:
             )
 
             # Plays-derived stats
-            plays_pitching = _query_plays_pitching_stats(conn, team_id, season_id)
-            plays_batting = _query_plays_batting_stats(conn, team_id, season_id)
-            plays_team = _query_plays_team_stats(conn, team_id, season_id)
+            plays_pitching = _query_plays_pitching_stats(
+                conn, team_id, season_id, game_ids=plays_game_ids,
+            )
+            plays_batting = _query_plays_batting_stats(
+                conn, team_id, season_id, game_ids=plays_game_ids,
+            )
+            plays_team = _query_plays_team_stats(
+                conn, team_id, season_id, game_ids=plays_game_ids,
+            )
 
         # Build roster set for pitcher matching (pitching query returns all
         # pitchers in games involving this team; filter to team's own roster)

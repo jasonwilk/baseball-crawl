@@ -445,7 +445,7 @@ class TestGenerateReportE2E:
             patch("src.reports.generator.ScoutingLoader", return_value=mock_loader),
             patch("src.reports.generator._REPO_ROOT", tmp_path),
             patch("src.reports.generator._REPORTS_DIR", tmp_path / "data" / "reports"),
-            patch("src.reports.generator._crawl_and_load_plays"),
+            patch("src.reports.generator._crawl_and_load_plays", return_value=[]),
         ):
             result = generate_report("abc123")
 
@@ -484,7 +484,7 @@ class TestPlaysStageAuthExpiry:
     @patch("src.reports.generator.ensure_team_row", return_value=1)
     @patch("src.reports.generator.render_report", return_value="<html>ok</html>")
     @patch("src.reports.generator._crawl_and_load_spray")
-    @patch("src.reports.generator._crawl_and_load_plays")
+    @patch("src.reports.generator._crawl_and_load_plays", return_value=[])
     def test_auth_expiry_in_plays_stage_yields_success(
         self, mock_plays, mock_spray, mock_render, mock_ensure,
         mock_client_cls, mock_get_conn, db, tmp_path,
@@ -1325,7 +1325,7 @@ class TestResolveGcUuid:
             patch("src.reports.generator.ScoutingLoader", return_value=mock_loader),
             patch("src.reports.generator._REPO_ROOT", tmp_path),
             patch("src.reports.generator._REPORTS_DIR", tmp_path / "data" / "reports"),
-            patch("src.reports.generator._crawl_and_load_plays"),
+            patch("src.reports.generator._crawl_and_load_plays", return_value=[]),
         ):
             result = generate_report("abc123")
 
@@ -1608,7 +1608,7 @@ class TestResolveGcUuidIntegration:
             patch("src.reports.generator.ScoutingLoader", return_value=mock_loader),
             patch("src.reports.generator._REPO_ROOT", tmp_path),
             patch("src.reports.generator._REPORTS_DIR", tmp_path / "data" / "reports"),
-            patch("src.reports.generator._crawl_and_load_plays"),
+            patch("src.reports.generator._crawl_and_load_plays", return_value=[]),
         ):
             result = generate_report("abc123")
 
@@ -2100,7 +2100,7 @@ class TestPublicIdBackfill:
             patch("src.reports.generator.ScoutingLoader", return_value=mock_loader),
             patch("src.reports.generator._REPO_ROOT", tmp_path),
             patch("src.reports.generator._REPORTS_DIR", tmp_path / "data" / "reports"),
-            patch("src.reports.generator._crawl_and_load_plays"),
+            patch("src.reports.generator._crawl_and_load_plays", return_value=[]),
         ):
             result = generate_report("Xj9LlYlJklcl")
 
@@ -2171,7 +2171,7 @@ class TestPublicIdBackfill:
             patch("src.reports.generator.ScoutingLoader", return_value=mock_loader),
             patch("src.reports.generator._REPO_ROOT", tmp_path),
             patch("src.reports.generator._REPORTS_DIR", tmp_path / "data" / "reports"),
-            patch("src.reports.generator._crawl_and_load_plays"),
+            patch("src.reports.generator._crawl_and_load_plays", return_value=[]),
         ):
             result = generate_report("DiFfErEnTsLuG1")
 
@@ -2236,7 +2236,7 @@ class TestPublicIdBackfill:
             patch("src.reports.generator.ScoutingLoader", return_value=mock_loader),
             patch("src.reports.generator._REPO_ROOT", tmp_path),
             patch("src.reports.generator._REPORTS_DIR", tmp_path / "data" / "reports"),
-            patch("src.reports.generator._crawl_and_load_plays"),
+            patch("src.reports.generator._crawl_and_load_plays", return_value=[]),
         ):
             result = generate_report("Xj9LlYlJklcl")
 
@@ -2307,7 +2307,7 @@ class TestPublicIdBackfill:
             patch("src.reports.generator.ScoutingLoader", return_value=mock_loader),
             patch("src.reports.generator._REPO_ROOT", tmp_path),
             patch("src.reports.generator._REPORTS_DIR", tmp_path / "data" / "reports"),
-            patch("src.reports.generator._crawl_and_load_plays"),
+            patch("src.reports.generator._crawl_and_load_plays", return_value=[]),
         ):
             result = generate_report("DiFfErEnTsLuG1")
 
@@ -2386,7 +2386,7 @@ class TestPublicIdBackfill:
             patch("src.reports.generator.ScoutingLoader", return_value=mock_loader),
             patch("src.reports.generator._REPO_ROOT", tmp_path),
             patch("src.reports.generator._REPORTS_DIR", tmp_path / "data" / "reports"),
-            patch("src.reports.generator._crawl_and_load_plays"),
+            patch("src.reports.generator._crawl_and_load_plays", return_value=[]),
         ):
             result = generate_report("Xj9LlYlJklcl")
 

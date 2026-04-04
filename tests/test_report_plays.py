@@ -584,6 +584,15 @@ class TestCrawlAndLoadPlaysFailureIsolation:
             c.row_factory = sqlite3.Row
             return c
 
+        # E-211: _crawl_and_load_plays now discovers games from boxscore
+        # filenames on disk, so we must create dummy boxscore files.
+        boxscores_dir = (
+            tmp_path / "data" / "raw" / _SEASON_ID / "scouting" / "test-team" / "boxscores"
+        )
+        boxscores_dir.mkdir(parents=True, exist_ok=True)
+        (boxscores_dir / f"{_GAME_ID_1}.json").write_text("{}", encoding="utf-8")
+        (boxscores_dir / f"{_GAME_ID_2}.json").write_text("{}", encoding="utf-8")
+
         from src.reports.generator import _crawl_and_load_plays
 
         with (

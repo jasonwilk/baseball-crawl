@@ -11,8 +11,6 @@ Additional responsibilities beyond ``GameLoader``:
 - Season aggregate computation: sums per-game stats from
   ``player_game_batting`` and ``player_game_pitching``, then upserts into
   ``player_season_batting`` and ``player_season_pitching``.
-- UUID opportunism: ensures a ``teams`` row exists for any UUID discovered
-  as a boxscore key.
 
 Expected raw file layout (written by ``ScoutingCrawler``)::
 
@@ -41,23 +39,15 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 import sqlite3
 from pathlib import Path
 from typing import Any
 
-from src.db.teams import ensure_team_row
 from src.gamechanger.loaders import LoadResult, derive_season_id_for_team, ensure_season_row
 from src.gamechanger.loaders.game_loader import GameLoader, GameSummaryEntry
 from src.gamechanger.types import TeamRef
 
 logger = logging.getLogger(__name__)
-
-# UUID pattern: 8-4-4-4-12 hex digits with dashes.
-_UUID_RE = re.compile(
-    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-    re.IGNORECASE,
-)
 
 # run_type used by the scouting crawler for scouting_runs.
 _RUN_TYPE = "full"
@@ -123,9 +113,7 @@ class ScoutingLoader:
         opponent_name_index = self._build_opponent_name_index(games_path)
         bs_result = self._load_boxscores(
             game_loader, games_index, boxscores_dir,
-            season_year=db_season_year,
             opponent_name_index=opponent_name_index,
-            own_gc_uuid=team_ref.gc_uuid,
         )
         total.loaded += bs_result.loaded
         total.skipped += bs_result.skipped
@@ -181,9 +169,7 @@ class ScoutingLoader:
         game_loader: GameLoader,
         games_index: dict,
         boxscores_dir: Path,
-        season_year: int | None = None,
         opponent_name_index: dict[str, str] | None = None,
-        own_gc_uuid: str | None = None,
     ) -> LoadResult:
         """Load all boxscore files in ``boxscores_dir`` via ``game_loader``.
 
@@ -191,13 +177,9 @@ class ScoutingLoader:
             game_loader: Configured ``GameLoader`` for the scouted team.
             games_index: Mapping of ``game_stream_id`` → ``GameSummaryEntry``.
             boxscores_dir: Directory containing ``{game_stream_id}.json`` files.
-            season_year: Calendar year from team metadata, passed to
-                ``ensure_team_row()`` for UUID opportunism.
             opponent_name_index: Optional mapping of ``game_stream_id`` →
                 opponent team name.  When provided, real names are used for
                 opponent team rows instead of UUID placeholders.
-            own_gc_uuid: The scouted team's own GameChanger UUID, used by the
-                safety-net to avoid labeling the own-team UUID as the opponent.
 
         Returns:
             Aggregated ``LoadResult`` across all boxscore files.
@@ -219,10 +201,6 @@ class ScoutingLoader:
             total.loaded += result.loaded
             total.skipped += result.skipped
             total.errors += result.errors
-            self._record_uuid_from_boxscore(
-                bs_path, season_year=season_year,
-                opponent_name=opponent_name, own_gc_uuid=own_gc_uuid,
-            )
         return total
 
     # ------------------------------------------------------------------
@@ -525,61 +503,6 @@ class ScoutingLoader:
                  wp, hbp, pitches, total_strikes, bf, gs),
             )
         return len(rows)
-
-    # ------------------------------------------------------------------
-    # UUID opportunism
-    # ------------------------------------------------------------------
-
-    def _record_uuid_from_boxscore(
-        self, bs_path: Path, *, season_year: int | None = None,
-        opponent_name: str | None = None, own_gc_uuid: str | None = None,
-    ) -> None:
-        """Ensure a ``teams`` stub row exists for any UUID key found in a boxscore.
-
-        The GameLoader already creates stubs during load_file(), so this is a
-        safety net for UUID keys not covered by normal team detection.
-
-        When ``opponent_name`` is provided, the row is created with the real name
-        instead of the UUID placeholder.  Existing rows with ``name == gc_uuid``
-        (UUID-stubs) are updated to the real name.
-
-        The ``own_gc_uuid`` parameter prevents mislabeling the scouted team's own
-        UUID as the opponent.  When a boxscore has two UUID keys and we cannot
-        identify which is the own team (``own_gc_uuid`` is ``None``), neither UUID
-        gets ``opponent_name`` — both fall back to UUID-as-name to avoid false labels.
-
-        Args:
-            bs_path: Path to a boxscore JSON file.
-            opponent_name: Human-readable opponent team name.
-            own_gc_uuid: The scouted team's own GC UUID.  When provided, the
-                matching key is not labeled as the opponent.
-        """
-        try:
-            with bs_path.open(encoding="utf-8") as fh:
-                boxscore = json.load(fh)
-        except (json.JSONDecodeError, OSError) as exc:
-            logger.debug("Could not read boxscore for UUID opportunism: %s", exc)
-            return
-
-        if not isinstance(boxscore, dict):
-            return
-
-        uuid_keys = [k for k in boxscore if _UUID_RE.match(k)]
-        multi_uuid = len(uuid_keys) >= 2
-
-        for key in uuid_keys:
-            is_own_team = bool(own_gc_uuid and key.lower() == own_gc_uuid.lower())
-            ambiguous = own_gc_uuid is None and multi_uuid
-            name = key if (is_own_team or ambiguous) else (opponent_name or key)
-
-            ensure_team_row(
-                self._db,
-                gc_uuid=key,
-                name=name,
-                season_year=season_year,
-                source="scouting_loader",
-            )
-            logger.debug("UUID opportunism (loader): ensured stub row for gc_uuid=%s", key)
 
     # ------------------------------------------------------------------
     # FK prerequisite helpers

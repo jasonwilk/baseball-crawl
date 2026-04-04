@@ -692,7 +692,10 @@ def test_home_away_none_defaults_to_own_team_as_home(db: sqlite3.Connection, tmp
 
 
 def test_teams_rows_created_before_game_insert(db: sqlite3.Connection, tmp_path: Path) -> None:
-    """AC-8: teams rows for both home and away are created automatically."""
+    """AC-8: teams rows for both home and away are created automatically.
+
+    E-211: Opponent team row has gc_uuid=NULL (not the boxscore key).
+    """
     boxscore = _make_boxscore()
     team_dir = _write_team_dir(tmp_path, boxscores={_GAME_STREAM_ID: boxscore})
 
@@ -703,12 +706,13 @@ def test_teams_rows_created_before_game_insert(db: sqlite3.Connection, tmp_path:
     loader = _make_loader(db)  # inserts own team as FK prerequisite
     loader.load_all(team_dir)  # inserts opponent team as FK prerequisite
 
-    gc_uuids = {
-        row[0]
-        for row in db.execute("SELECT gc_uuid FROM teams;").fetchall()
-    }
-    assert _OWN_TEAM_ID in gc_uuids
-    assert _OPP_TEAM_ID in gc_uuids
+    teams = db.execute("SELECT gc_uuid, name FROM teams;").fetchall()
+    gc_uuids = {row[0] for row in teams}
+    names = {row[1] for row in teams}
+    assert _OWN_TEAM_ID in gc_uuids, "Own team gc_uuid must be present"
+    # E-211: opponent gc_uuid is now NULL; verify by name instead.
+    assert _OPP_TEAM_ID in names, "Opponent row should exist with UUID as name fallback"
+    assert len(teams) >= 2, "At least own + opponent team rows expected"
 
 
 def test_seasons_row_created_automatically(db: sqlite3.Connection, tmp_path: Path) -> None:
@@ -1368,64 +1372,71 @@ def _write_schedule_json(team_dir: Path, events: list[dict] | None = None) -> No
 
 
 def test_ensure_team_row_with_name_creates_named_row(db: sqlite3.Connection) -> None:
-    """_ensure_team_row() uses opponent_name as teams.name when provided."""
-    loader = _make_loader(db)
-    gc_uuid = "aaaabbbb-cccc-dddd-eeee-111122223333"
-    pk = loader._ensure_team_row(gc_uuid, opponent_name="Kearney Mavericks 14U")
+    """_ensure_team_row() uses opponent_name as teams.name when provided.
 
-    row = db.execute("SELECT name FROM teams WHERE id = ?", (pk,)).fetchone()
+    E-211: gc_uuid is always None -- the boxscore identifier is never stored.
+    """
+    loader = _make_loader(db)
+    identifier = "aaaabbbb-cccc-dddd-eeee-111122223333"
+    pk = loader._ensure_team_row(identifier, opponent_name="Kearney Mavericks 14U")
+
+    row = db.execute("SELECT name, gc_uuid FROM teams WHERE id = ?", (pk,)).fetchone()
     assert row is not None
     assert row[0] == "Kearney Mavericks 14U"
+    assert row[1] is None, "gc_uuid must be NULL -- boxscore key must not be stored"
 
 
-def test_ensure_team_row_without_name_falls_back_to_uuid(db: sqlite3.Connection) -> None:
-    """_ensure_team_row() without opponent_name uses UUID as teams.name (legacy)."""
+def test_ensure_team_row_without_name_falls_back_to_identifier(db: sqlite3.Connection) -> None:
+    """_ensure_team_row() without opponent_name uses identifier as teams.name.
+
+    E-211: The identifier (boxscore key) is used only as a name fallback,
+    never stored as gc_uuid.
+    """
     loader = _make_loader(db)
-    gc_uuid = "bbbbcccc-dddd-eeee-ffff-222233334444"
-    pk = loader._ensure_team_row(gc_uuid)
+    identifier = "bbbbcccc-dddd-eeee-ffff-222233334444"
+    pk = loader._ensure_team_row(identifier)
 
-    row = db.execute("SELECT name FROM teams WHERE id = ?", (pk,)).fetchone()
+    row = db.execute("SELECT name, gc_uuid FROM teams WHERE id = ?", (pk,)).fetchone()
     assert row is not None
-    assert row[0] == gc_uuid
+    assert row[0] == identifier, "Name should be the identifier string"
+    assert row[1] is None, "gc_uuid must be NULL"
 
 
-def test_ensure_team_row_updates_uuid_stub_with_name(db: sqlite3.Connection) -> None:
-    """AC-4: When existing row has name == gc_uuid, it is updated to the real name."""
+def test_ensure_team_row_deduplicates_by_name_and_season(db: sqlite3.Connection) -> None:
+    """E-211: Repeated calls with same name match by name+season_year (step 3)."""
     loader = _make_loader(db)
-    gc_uuid = "ccccdddd-eeee-ffff-aaaa-333344445555"
+    identifier = "ccccdddd-eeee-ffff-aaaa-333344445555"
 
-    # Create UUID-stub row (name == gc_uuid).
-    stub_pk = db.execute(
-        "INSERT INTO teams (name, membership_type, gc_uuid, is_active) VALUES (?, 'tracked', ?, 0)",
-        (gc_uuid, gc_uuid),
-    ).lastrowid
-    db.commit()
+    pk1 = loader._ensure_team_row(identifier, opponent_name="Real Team Name")
+    pk2 = loader._ensure_team_row(identifier, opponent_name="Real Team Name")
 
-    returned_pk = loader._ensure_team_row(gc_uuid, opponent_name="Real Team Name")
-
-    assert returned_pk == stub_pk
-    row = db.execute("SELECT name FROM teams WHERE id = ?", (stub_pk,)).fetchone()
-    assert row[0] == "Real Team Name"
+    assert pk1 == pk2, "Same opponent_name + season_year should reuse the team row"
 
 
-def test_ensure_team_row_preserves_existing_non_uuid_name(db: sqlite3.Connection) -> None:
-    """AC-4: When existing row has a non-UUID name, it is NOT overwritten."""
+def test_ensure_team_row_does_not_match_by_gc_uuid(db: sqlite3.Connection) -> None:
+    """E-211: A pre-existing row with gc_uuid=X is NOT matched when identifier=X.
+
+    This is the core anti-contamination behavior: _ensure_team_row no longer
+    passes gc_uuid to the shared function, so gc_uuid-based matching does not occur.
+    """
     loader = _make_loader(db)
-    gc_uuid = "ddddeee-ffff-aaaa-bbbb-444455556666"
+    identifier = "ddddeee-ffff-aaaa-bbbb-444455556666"
 
-    # Pre-existing row with a real name (set by opponent_resolver or admin).
+    # Pre-existing row with gc_uuid set (e.g., by the search resolver).
     existing_pk = db.execute(
         "INSERT INTO teams (name, membership_type, gc_uuid, is_active) "
         "VALUES (?, 'tracked', ?, 0)",
-        ("Existing Real Name", gc_uuid),
+        ("Existing Real Name", identifier),
     ).lastrowid
     db.commit()
 
-    returned_pk = loader._ensure_team_row(gc_uuid, opponent_name="Different Name")
+    # _ensure_team_row with opponent_name creates a new row (name doesn't match).
+    returned_pk = loader._ensure_team_row(identifier, opponent_name="Different Name")
 
-    assert returned_pk == existing_pk
-    row = db.execute("SELECT name FROM teams WHERE id = ?", (existing_pk,)).fetchone()
-    assert row[0] == "Existing Real Name", "Non-UUID name must NOT be overwritten"
+    # Should NOT return the existing row (no gc_uuid match path).
+    assert returned_pk != existing_pk, (
+        "_ensure_team_row must not match by gc_uuid -- it passes gc_uuid=None"
+    )
 
 
 def test_build_opponent_name_lookup_reads_progenitor_team_id(

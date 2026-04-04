@@ -539,14 +539,14 @@ class GameLoader:
             if the opponent UUID cannot be determined.
         """
         own_team_id: int = self._team_ref.id
-        opp_gc_uuid = summary.opponent_id or opp_key
-        if not opp_gc_uuid:
+        opp_identifier = summary.opponent_id or opp_key
+        if not opp_identifier:
             logger.warning(
-                "Cannot determine opponent UUID for game %s; opponent stats will be skipped.",
+                "Cannot determine opponent identifier for game %s; opponent stats will be skipped.",
                 summary.event_id,
             )
             return own_team_id, None
-        return own_team_id, self._ensure_team_row(opp_gc_uuid, opponent_name=opponent_name)
+        return own_team_id, self._ensure_team_row(opp_identifier, opponent_name=opponent_name)
 
     def _resolve_home_away(
         self,
@@ -1173,23 +1173,26 @@ class GameLoader:
             (team_id, player_id, self._season_id, jersey_number),
         )
 
-    def _ensure_team_row(self, gc_uuid: str, opponent_name: str | None = None) -> int:
-        """Ensure a ``teams`` row exists for ``gc_uuid`` and return its INTEGER PK.
+    def _ensure_team_row(self, identifier: str, opponent_name: str | None = None) -> int:
+        """Ensure a ``teams`` row exists for an opponent and return its INTEGER PK.
 
-        Delegates to the shared ``ensure_team_row()`` dedup cascade.
+        Delegates to the shared ``ensure_team_row()`` dedup cascade with
+        ``gc_uuid=None`` to prevent boxscore-derived opponent-perspective
+        identifiers from contaminating the ``gc_uuid`` column.
 
         Args:
-            gc_uuid: GameChanger team UUID (or placeholder string).
+            identifier: Boxscore key or opponent_id string.  Used only as a
+                name fallback when ``opponent_name`` is ``None``.
             opponent_name: Human-readable team name.  When ``None``, falls back
-                to ``gc_uuid`` as the name (legacy behaviour).
+                to ``identifier`` as the name to preserve unique row naming.
 
         Returns:
             The ``teams.id`` INTEGER PK for the row.
         """
         return ensure_team_row(
             self._db,
-            gc_uuid=gc_uuid,
-            name=opponent_name,
+            gc_uuid=None,
+            name=opponent_name or identifier,
             season_year=self._season_year,
             source="game_loader",
         )

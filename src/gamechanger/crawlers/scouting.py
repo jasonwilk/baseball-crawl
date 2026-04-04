@@ -45,7 +45,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -70,11 +69,6 @@ _PUBLIC_GAMES_ACCEPT = "application/vnd.gc.com.public_team_schedule_event:list+j
 _ROSTER_ACCEPT = "application/vnd.gc.com.public_player:list+json; version=0.0.0"
 _BOXSCORE_ACCEPT = "application/vnd.gc.com.event_box_score+json; version=0.0.0"
 
-# UUID pattern for detecting UUID keys in boxscore responses.
-_UUID_RE = re.compile(
-    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-    re.IGNORECASE,
-)
 
 # Default data root: data/raw/ relative to the project root.
 _DATA_ROOT = Path(__file__).resolve().parents[3] / "data" / "raw"
@@ -268,7 +262,6 @@ class ScoutingCrawler:
                 json.dumps(boxscore, indent=2), encoding="utf-8"
             )
             games_crawled += 1
-            self._record_uuid_from_boxscore(boxscore)
         logger.info(
             "Boxscores for public_id=%s: crawled=%d / found=%d.",
             public_id, games_crawled, len(completed_games),
@@ -501,21 +494,6 @@ class ScoutingCrawler:
                 team_id, season_id, _RUN_TYPE,
             ),
         )
-
-    def _record_uuid_from_boxscore(self, boxscore: dict[str, Any]) -> None:
-        """Ensure a stub teams row exists for any UUID key discovered in the boxscore.
-
-        When a boxscore response contains a UUID top-level key, this method
-        ensures a tracked team row exists for that UUID via the shared dedup
-        cascade. This is best-effort; errors are silently ignored.
-
-        Args:
-            boxscore: Top-level boxscore dict (keys are team identifiers).
-        """
-        for key in boxscore:
-            if _UUID_RE.match(key):
-                ensure_team_row(self._db, gc_uuid=key, source="scouting")
-                logger.debug("UUID opportunism: ensured stub row for gc_uuid=%s", key)
 
 
 # ---------------------------------------------------------------------------

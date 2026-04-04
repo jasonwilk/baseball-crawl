@@ -547,22 +547,17 @@ def test_forbidden_on_boxscore_does_not_propagate(
 
 
 # ---------------------------------------------------------------------------
-# AC-16: UUID opportunism
+# E-211: UUID opportunism removed -- _record_uuid_from_boxscore deleted
 # ---------------------------------------------------------------------------
 
 
-def test_uuid_opportunism_creates_stub_row(
+def test_uuid_opportunism_removed(
     crawler: ScoutingCrawler, mock_client: MagicMock, db: sqlite3.Connection
 ) -> None:
-    """When a UUID is found as a boxscore key, a stub teams row is created."""
-    uuid_key = "aaaabbbb-cccc-dddd-eeee-ffff00001111"
-
-    _setup_client_happy_path(mock_client)
-    crawler.scout_team(_PUBLIC_ID, season_id="2025-spring-hs")
-
-    row = db.execute("SELECT id, gc_uuid FROM teams WHERE gc_uuid = ?", (uuid_key,)).fetchone()
-    assert row is not None, f"Expected teams stub row for gc_uuid={uuid_key}"
-    assert row[1] == uuid_key
+    """E-211: _record_uuid_from_boxscore is removed; no UUID stored as gc_uuid."""
+    assert not hasattr(crawler, "_record_uuid_from_boxscore"), (
+        "_record_uuid_from_boxscore must be removed from ScoutingCrawler"
+    )
 
 
 # ---------------------------------------------------------------------------

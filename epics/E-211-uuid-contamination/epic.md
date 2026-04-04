@@ -1,7 +1,7 @@
 # E-211: Fix Opponent-Perspective UUID Contamination
 
 ## Status
-`READY`
+`ACTIVE`
 
 ## Overview
 Stop opponent-perspective UUIDs from leaking into the `teams.gc_uuid` column and causing duplicate players and missing spray charts in standalone reports. The GameChanger API returns different UUIDs for the same team depending on the caller's perspective (own-team vs opponent); three pipeline paths currently store the wrong-perspective UUID as `gc_uuid`, which poisons downstream code that trusts it.
@@ -45,9 +45,9 @@ When generating standalone reports for scouted teams (e.g., Waverly Vikings Vars
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-211-01 | Stop UUID contamination at all three pipeline sources | TODO | None | - |
-| E-211-02 | Fix report generator gc_uuid resolution and plays scoping | TODO | None | - |
-| E-211-03 | Document and execute data cleanup | TODO | E-211-01, E-211-02 | - |
+| E-211-01 | Stop UUID contamination at all three pipeline sources | DONE | None | SE |
+| E-211-02 | Fix report generator gc_uuid resolution and plays scoping | DONE | None | SE |
+| E-211-03 | Document and execute data cleanup | DONE | E-211-01, E-211-02 | SE |
 
 ## Dispatch Team
 - software-engineer
