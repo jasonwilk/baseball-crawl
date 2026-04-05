@@ -1,6 +1,6 @@
 # Standalone Reports
 
-*Last updated: 2026-04-03 | Source: E-183 (standalone reports coaching docs), E-199 (FPS%, P/BF, QAB%, P/PA columns), E-196 (Rest and P (7d) columns), E-204 (GS/GR column)*
+*Last updated: 2026-04-04 | Source: E-183 (standalone reports coaching docs), E-199 (FPS%, P/BF, QAB%, P/PA columns), E-196 (Rest and P (7d) columns), E-204 (GS/GR column), E-212 (predicted starter section, scouting analysis narrative)*
 
 ---
 
@@ -42,6 +42,15 @@ The report shows similar pitching and batting stats as the dashboard opponent vi
 - OBP, SLG, K%, BB% — standard batting numbers
 - **QAB%** — quality at-bat percentage: how often this batter puts real pressure on the pitcher, even without a hit
 - **P/PA** — pitches seen per plate appearance: how patiently this batter works counts
+
+**Predicted Starter** — Who to expect on the mound next game. Appears between the executive summary and the pitching table. The section includes:
+- A named starter (or committee assessment) with plain-English reasoning based on rotation pattern, rest days, and recent workload
+- A rest and availability table for the top arms (starters and key relievers): last outing date, days rest, pitch count last outing, 7-day workload
+- The likely bullpen order (which relievers typically enter first)
+
+When fewer than 4 games are in the system, no starter is predicted — the rest table still appears so you can see who is available.
+
+**Scouting Analysis** *(when available)* — A narrative block below the predicted starter section. It appears when Jason has the system configured with an AI analysis key. It reads the same rotation and workload data and adds context: matchup factors, bullpen depth, notes on compressed schedules or heavy ace usage. When this block is present, the disclaimer at the bottom of the section reads "Based on rotation pattern, rest days, recent workload, and AI-assisted analysis." When it is not present, the section works exactly the same — only the narrative is missing.
 
 **"—" in a stat column** means pitch-by-pitch data was not available for that player. This typically happens when the scorekeeper did not record pitch-level detail in GameChanger for some games. The stat is not zero -- it simply could not be calculated. Standard stats (ERA, OBP, etc.) are always shown; only the pitch-data columns (FPS%, P/BF, QAB%, P/PA) can show "—".
 

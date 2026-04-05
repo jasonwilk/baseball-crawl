@@ -315,6 +315,50 @@
       margin: 0.3in;
     }
 
+    /* ---- Predicted Starter section (E-212) ---- */
+    .predicted-starter-section { break-inside: avoid; margin-bottom: 10px; }
+    .starter-card {
+      background: #f9fafb;
+      border: 1px solid #e5e7eb;
+      border-radius: 4px;
+      padding: 8px 10px;
+      margin: 6px 0;
+      break-inside: avoid;
+    }
+    .starter-card-primary { border-left: 3px solid #1e3a5f; }
+    .starter-card-name { font-weight: bold; font-size: 9pt; }
+    .starter-card-reasoning { font-size: 8.5pt; color: #374151; line-height: 1.4; margin-top: 2px; }
+    .starter-card-caveat { font-size: 8pt; color: #6b7280; font-style: italic; margin-top: 2px; }
+    .starter-game-log { width: 100%; border-collapse: collapse; margin-top: 4px; }
+    .starter-game-log th {
+      font-size: 7pt; font-weight: bold; text-transform: uppercase;
+      color: #6b7280; border-bottom: 1px solid #d1d5db; padding: 2px 4px; text-align: center;
+    }
+    .starter-game-log th:first-child { text-align: left; }
+    .starter-game-log td {
+      font-size: 8pt; padding: 2px 4px; text-align: center; border-bottom: 1px solid #f3f4f6;
+    }
+    .starter-game-log td:first-child { text-align: left; }
+    .starter-rest-table { width: 100%; border-collapse: collapse; margin-top: 4px; }
+    .starter-rest-table th {
+      font-size: 7pt; font-weight: bold; text-transform: uppercase;
+      color: #fff; background: #1e3a5f; padding: 3px 5px; text-align: center;
+    }
+    .starter-rest-table th:first-child { text-align: left; }
+    .starter-rest-table td {
+      font-size: 8pt; padding: 3px 5px; text-align: center; border-bottom: 1px solid #e5e7eb;
+    }
+    .starter-rest-table td:first-child { text-align: left; font-weight: 500; }
+    .starter-narrative {
+      border-left: 3px solid #d1d5db;
+      padding: 6px 10px;
+      margin: 8px 0;
+      break-inside: avoid;
+    }
+    .starter-narrative-header { font-size: 7pt; text-transform: uppercase; letter-spacing: 0.05em; color: #6b7280; margin-bottom: 2px; }
+    .starter-narrative-text { font-size: 8.5pt; line-height: 1.5; color: #374151; }
+    .starter-narrative-bullpen { font-size: 8.5pt; line-height: 1.5; color: #374151; margin-top: 4px; }
+
     /* ---- Print rules ---- */
     @media print {
       body { padding: 0; }
@@ -443,6 +487,154 @@
   {% endif %}
 </div>
 {% endif %}
+
+{# ===== PREDICTED STARTER (E-212) ===== #}
+<div class="predicted-starter-section">
+<h2 class="section-header">Predicted Starter</h2>
+{% if starter_prediction is none %}
+<div class="no-data-msg">No pitching data available</div>
+{% elif starter_prediction.confidence == "high" and starter_prediction.predicted_starter %}
+{# ---- HIGH CONFIDENCE ---- #}
+<div class="starter-card starter-card-primary">
+  <div class="starter-card-name">{{ starter_prediction.predicted_starter.name | e }} <span class="depth-badge">{{ starter_prediction.predicted_starter.games_started }} GS</span></div>
+  <div class="starter-card-reasoning">{{ starter_prediction.predicted_starter.reasoning | e }}</div>
+  {% if starter_prediction.predicted_starter.recent_starts %}
+  <table class="starter-game-log">
+    <thead><tr><th>Date</th><th>IP</th><th class="mob-hide-extra">#P</th><th>K</th><th class="mob-hide-extra">BB</th><th class="mob-hide-extra">Dec</th></tr></thead>
+    <tbody>
+    {% for g in starter_prediction.predicted_starter.recent_starts %}
+    <tr>
+      <td data-date="{{ g.game_date }}">{{ g.game_date }}</td>
+      <td>{{ "%.1f" | format(g.ip_outs / 3 if g.ip_outs else 0) }}</td>
+      <td class="mob-hide-extra">{{ g.pitches if g.pitches is not none else "—" }}</td>
+      <td>{{ g.so if g.so is not none else "—" }}</td>
+      <td class="mob-hide-extra">{{ g.bb if g.bb is not none else "—" }}</td>
+      <td class="mob-hide-extra">{{ g.decision or "—" }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>
+{% elif starter_prediction.confidence == "moderate" and starter_prediction.predicted_starter %}
+{# ---- MODERATE CONFIDENCE ---- #}
+<div class="starter-card starter-card-primary">
+  <div class="starter-card-name">{{ starter_prediction.predicted_starter.name | e }} <span class="depth-badge">{{ starter_prediction.predicted_starter.games_started }} GS</span></div>
+  <div class="starter-card-reasoning">{{ starter_prediction.predicted_starter.reasoning | e }}</div>
+  <div class="starter-card-caveat">Matchup alternative possible{% if starter_prediction.alternative %} — see {{ starter_prediction.alternative.name | e }}{% endif %}</div>
+  {% if starter_prediction.predicted_starter.recent_starts %}
+  <table class="starter-game-log">
+    <thead><tr><th>Date</th><th>IP</th><th class="mob-hide-extra">#P</th><th>K</th><th class="mob-hide-extra">BB</th><th class="mob-hide-extra">Dec</th></tr></thead>
+    <tbody>
+    {% for g in starter_prediction.predicted_starter.recent_starts %}
+    <tr>
+      <td data-date="{{ g.game_date }}">{{ g.game_date }}</td>
+      <td>{{ "%.1f" | format(g.ip_outs / 3 if g.ip_outs else 0) }}</td>
+      <td class="mob-hide-extra">{{ g.pitches if g.pitches is not none else "—" }}</td>
+      <td>{{ g.so if g.so is not none else "—" }}</td>
+      <td class="mob-hide-extra">{{ g.bb if g.bb is not none else "—" }}</td>
+      <td class="mob-hide-extra">{{ g.decision or "—" }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>
+{% if starter_prediction.alternative %}
+<div class="starter-card">
+  <div class="starter-card-name">{{ starter_prediction.alternative.name | e }} <span class="depth-badge">{{ starter_prediction.alternative.games_started }} GS</span></div>
+  <div class="starter-card-reasoning">{{ starter_prediction.alternative.reasoning | e }}</div>
+  {% if starter_prediction.alternative.recent_starts %}
+  <table class="starter-game-log">
+    <thead><tr><th>Date</th><th>IP</th><th class="mob-hide-extra">#P</th><th>K</th><th class="mob-hide-extra">BB</th></tr></thead>
+    <tbody>
+    {% for g in starter_prediction.alternative.recent_starts[:3] %}
+    <tr>
+      <td data-date="{{ g.game_date }}">{{ g.game_date }}</td>
+      <td>{{ "%.1f" | format(g.ip_outs / 3 if g.ip_outs else 0) }}</td>
+      <td class="mob-hide-extra">{{ g.pitches if g.pitches is not none else "—" }}</td>
+      <td>{{ g.so if g.so is not none else "—" }}</td>
+      <td class="mob-hide-extra">{{ g.bb if g.bb is not none else "—" }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>
+{% endif %}
+{% elif starter_prediction.confidence == "low" %}
+{# ---- LOW / COMMITTEE ---- #}
+<div class="sort-annotation">{{ starter_prediction.rotation_pattern | e }} — multiple candidates</div>
+{% for cand in starter_prediction.top_candidates[:3] %}
+<div class="starter-card">
+  <div class="starter-card-name">{{ cand.name | e }} <span class="depth-badge">{{ cand.games_started }} GS</span></div>
+  <div class="starter-card-reasoning">{{ cand.reasoning | e }}</div>
+  {% if cand.recent_starts %}
+  <table class="starter-game-log">
+    <thead><tr><th>Date</th><th>IP</th><th class="mob-hide-extra">#P</th><th>K</th></tr></thead>
+    <tbody>
+    {% for g in cand.recent_starts[:3] %}
+    <tr>
+      <td data-date="{{ g.game_date }}">{{ g.game_date }}</td>
+      <td>{{ "%.1f" | format(g.ip_outs / 3 if g.ip_outs else 0) }}</td>
+      <td class="mob-hide-extra">{{ g.pitches if g.pitches is not none else "—" }}</td>
+      <td>{{ g.so if g.so is not none else "—" }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>
+{% endfor %}
+{% elif starter_prediction.confidence == "suppress" %}
+{# ---- SUPPRESS ---- #}
+{% if starter_prediction.data_note %}
+<div class="sort-annotation">{{ starter_prediction.data_note | e }}</div>
+{% endif %}
+{% endif %}
+
+{# ---- Rest / Availability Table (always when data exists) ---- #}
+{% if starter_prediction and starter_prediction.rest_table %}
+<table class="starter-rest-table">
+  <thead><tr>
+    <th>Name</th><th>GS</th><th class="mob-hide-extra">Last Outing</th><th>Days Rest</th><th class="mob-hide-extra">Last #P</th><th class="mob-hide-extra">7d Workload</th>
+  </tr></thead>
+  <tbody>
+  {% for arm in starter_prediction.rest_table %}
+  <tr>
+    <td>{{ arm.name | e }}</td>
+    <td>{{ arm.games_started }}</td>
+    <td class="mob-hide-extra" data-date="{{ arm.last_outing_date or '' }}">{{ arm.last_outing_date or "—" }}</td>
+    <td>{{ arm.days_since_last_appearance if arm.days_since_last_appearance is not none else "—" }}</td>
+    <td class="mob-hide-extra">{{ arm.last_outing_pitches if arm.last_outing_pitches is not none else "—" }}</td>
+    <td class="mob-hide-extra">{{ arm.workload_7d if arm.workload_7d is not none else "—" }}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
+{# ---- Bullpen Order ---- #}
+{% if starter_prediction and starter_prediction.bullpen_order %}
+<div class="sort-annotation">Bullpen: {% for bp in starter_prediction.bullpen_order %}{{ bp.name | e }}{% if bp.jersey_number %} #{{ bp.jersey_number }}{% endif %} ({{ bp.frequency }}/{{ bp.games_sampled }}){% if not loop.last %}, {% endif %}{% endfor %}</div>
+{% endif %}
+
+{# ---- LLM Narrative (Tier 2) ---- #}
+{% if enriched_prediction %}
+<div class="starter-narrative">
+  <div class="starter-narrative-header">Scouting Analysis</div>
+  <div class="starter-narrative-text">{{ enriched_prediction.narrative | e }}</div>
+  {% if enriched_prediction.bullpen_sequence %}
+  <div class="starter-narrative-bullpen">{{ enriched_prediction.bullpen_sequence | e }}</div>
+  {% endif %}
+</div>
+{% endif %}
+
+{# ---- Disclaimer ---- #}
+{% if starter_prediction is not none %}
+<div class="sort-annotation">{% if enriched_prediction %}Based on rotation pattern, rest days, recent workload, and AI-assisted analysis. Actual starter may differ.{% else %}Based on rotation pattern, rest days, and recent workload. Actual starter may differ.{% endif %}</div>
+{% endif %}
+</div>
 
 {# ===== RECENT FORM CHIPS (AC-3, TN-5) ===== #}
 {% if recent_form %}

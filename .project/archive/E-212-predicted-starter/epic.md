@@ -1,7 +1,7 @@
 # E-212: Predicted Starter
 
 ## Status
-`READY`
+`COMPLETED`
 
 ## Overview
 Add a "Predicted Starter" section to both standalone scouting reports and the dashboard opponent detail page. Analyzes a team's pitching history and predicts who will start their next game. A deterministic rotation analysis engine (Tier 1) always produces a prediction; an optional LLM layer via OpenRouter (Tier 2) enriches it with narrative analysis in standalone reports when credentials are available. Coaches get the most actionable pre-game intelligence -- "who are we facing on the mound?" -- in both scouting surfaces.
@@ -50,11 +50,11 @@ No expert consultation required for: api-scout (no new GC API endpoints needed),
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-212-01 | Shared pitching history query and data extraction | TODO | None | - |
-| E-212-02 | Deterministic rotation analysis engine (Tier 1) | TODO | E-212-01 | - |
-| E-212-03 | OpenRouter LLM client and starter analysis (Tier 2) | TODO | E-212-02 | - |
-| E-212-04 | Report generator integration and template rendering | TODO | E-212-02, E-212-03 | - |
-| E-212-05 | Dashboard opponent detail integration | TODO | E-212-02 | - |
+| E-212-01 | Shared pitching history query and data extraction | DONE | None | - |
+| E-212-02 | Deterministic rotation analysis engine (Tier 1) | DONE | E-212-01 | - |
+| E-212-03 | OpenRouter LLM client and starter analysis (Tier 2) | DONE | E-212-02 | - |
+| E-212-04 | Report generator integration and template rendering | DONE | E-212-02, E-212-03 | - |
+| E-212-05 | Dashboard opponent detail integration | DONE | E-212-02 | - |
 
 ## Dispatch Team
 - software-engineer
@@ -188,6 +188,7 @@ Adding `httpx` to the OpenRouter client. `httpx` is already in `requirements.in`
 - 2026-04-04: Created. Expert consultations: baseball-coach (domain), data-engineer (query design), ux-designer (layout), software-engineer (architecture).
 - 2026-04-04: Review iteration 3 triage -- 19 findings (5 coach, 4 PM, 10 CR). 3 changes applied: TN-3/AC-6 W-L record language refined per coordinator correction (no conference data, don't overstate predictive value), TN-6 db parameter note added (CR-8). 16 findings were already addressed in prior iterations. User requirement (W-L records for matchup-strength context) confirmed already incorporated in TN-3 and E-212-03 AC-5/AC-6.
 - 2026-04-04: Epic set to READY. Expert consultations (baseball-coach, data-engineer, ux-designer, software-engineer, api-scout) during planning. 3 internal review iterations + 1 Codex validation pass. Coach domain sign-off on all confidence tiers, rest table, bullpen order, and matchup-strength handling. UXD clean sign-off on all rendering modes, mobile, and print. W-L record opponent-strength context added to LLM prompt per user request.
+- 2026-04-04: All 5 stories DONE. Delivered: shared pitching history query + pitcher profiles (E-212-01), deterministic rotation analysis engine with 4 confidence tiers, rest table, bullpen order, and edge case handling (E-212-02), OpenRouter LLM client + starter analysis enrichment (E-212-03), report generator integration with 4-mode template rendering and LLM narrative block (E-212-04), dashboard opponent detail integration with Tailwind styling and server-rendered relative dates (E-212-05). First LLM integration in the project. 146 tests total (23 + 45 + 38 + 37 + 3). Both scouting surfaces now show predicted starter intelligence.
 
 ### Review Scorecard
 | Review Pass | Findings | Accepted | Dismissed |
@@ -199,4 +200,31 @@ Adding `httpx` to the OpenRouter client. `httpx` is already in `requirements.in`
 | Codex iteration 1 | 6 | 2 | 4 |
 | Internal iteration 3 -- CR spec audit | 10 | 1 | 9 |
 | Internal iteration 3 -- Holistic team (PM + coach + UXD) | 9 | 3 | 6 |
-| **Total** | **69** | **36** | **33** |
+| Per-story CR -- E-212-01 | 2 | 2 | 0 |
+| Per-story CR -- E-212-02 | 4 | 4 | 0 |
+| Per-story CR -- E-212-03 | 2 | 2 | 0 |
+| Per-story CR -- E-212-04 | 4 | 4 | 0 |
+| Per-story CR -- E-212-05 | 0 | 0 | 0 |
+| CR integration review | 0 | 0 | 0 |
+| Codex code review | 4 | 2 | 2 |
+| **Total** | **85** | **50** | **35** |
+
+Codex dismissed findings:
+1. Rest anchoring divergence between engine and rest table -- by design (different perspectives for different purposes)
+2. "Most recent 2 full cycles" not implemented -- TN refinement detail, correct pattern detection verified by per-story CR and PM
+
+### Documentation Assessment
+Trigger 1 (new feature ships): **YES** -- predicted starter section is a new user-facing feature on both scouting surfaces. Coaching staff need to understand what the predicted starter section shows, confidence tiers, and the rest/availability table. `docs/coaching/` should be updated.
+Trigger 5 (epic changes how users interact): **YES** -- coaches now see starter predictions and rest tables on opponent detail pages and standalone reports.
+
+**Action required**: Dispatch docs-writer to update `docs/coaching/` with predicted starter feature documentation (confidence tiers, rest table, LLM narrative when available).
+
+### Context-Layer Assessment
+1. **New convention, pattern, or constraint established**: **YES** -- OpenRouter LLM client pattern (`src/llm/openrouter.py`) is the project's first LLM integration. Future LLM features should reuse this client. The `httpx.Client()` exception to HTTP discipline is documented in the module but should be noted in CLAUDE.md. The sequential enrichment pattern (Tier 1 deterministic → Tier 2 LLM optional) establishes a convention for future LLM-enhanced features.
+2. **Architectural decision with ongoing implications**: **YES** -- Two-tier architecture (deterministic always, LLM optional) is a reusable pattern. Dashboard = Tier 1 only (latency constraint); reports = Tier 1 + optional Tier 2. `OPENROUTER_API_KEY` / `OPENROUTER_MODEL` env vars. The `src/llm/` package is a new top-level package.
+3. **Footgun, failure mode, or boundary discovered**: **NO** -- No unexpected gotchas. The LLM non-fatal pattern follows the established plays stage pattern.
+4. **Change to agent behavior, routing, or coordination**: **NO** -- No agent infrastructure changes.
+5. **Domain knowledge discovered**: **YES** -- HS rotation patterns (ace-plus-committee most common, true 3-man at competitive varsity, 4-man rare/Legion), matchup deviation rate (~20-30%), within-1-day exclusion as near-universal HS behavioral constraint, 75+/4-day availability heuristic. These inform future pitching-related features.
+6. **New CLI command, workflow, or operational procedure**: **NO** -- No new `bb` commands or skills.
+
+**Triggers 1, 2, 5 fire**: Dispatch claude-architect to codify the LLM client pattern, two-tier architecture, env vars, and pitching domain knowledge in the context layer.

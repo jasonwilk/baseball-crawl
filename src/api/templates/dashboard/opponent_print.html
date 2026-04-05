@@ -116,6 +116,24 @@
     }
     tbody tr:nth-child(even) { background-color: #f5f5f5; }
 
+    /* ---- Predicted Starter (E-212) ---- */
+    .pred-starter-section { break-inside: avoid; page-break-inside: avoid; margin-bottom: 8px; }
+    .pred-card { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 3px; padding: 6px 8px; margin: 4px 0; break-inside: avoid; }
+    .pred-card-primary { border-left: 3px solid #1e3a5f; }
+    .pred-card-name { font-weight: bold; font-size: 9pt; }
+    .pred-card-reasoning { font-size: 8pt; color: #374151; margin-top: 1px; }
+    .pred-note { font-size: 8pt; font-style: italic; color: #6b7280; margin-bottom: 3px; }
+    .pred-rest-table { width: 100%; border-collapse: collapse; margin-top: 4px; }
+    .pred-rest-table th { font-size: 7pt; font-weight: bold; text-transform: uppercase; color: #fff; background: #1e3a5f; padding: 2px 4px; text-align: center; }
+    .pred-rest-table th:first-child { text-align: left; }
+    .pred-rest-table td { font-size: 8pt; padding: 2px 4px; text-align: center; border-bottom: 1px solid #e5e7eb; }
+    .pred-rest-table td:first-child { text-align: left; font-weight: 500; }
+    .pred-game-log { width: 100%; border-collapse: collapse; margin-top: 3px; }
+    .pred-game-log th { font-size: 7pt; font-weight: bold; text-transform: uppercase; color: #6b7280; border-bottom: 1px solid #d1d5db; padding: 2px 4px; text-align: center; }
+    .pred-game-log th:first-child { text-align: left; }
+    .pred-game-log td { font-size: 8pt; padding: 2px 4px; text-align: center; border-bottom: 1px solid #f3f4f6; }
+    .pred-game-log td:first-child { text-align: left; }
+
     /* ---- Spray chart grid ---- */
     .tendencies-section { margin-top: 12px; }
     .tendencies-grid {
@@ -278,6 +296,74 @@
 <p>Stats aren't ready yet.</p>
 
 {% else %}
+
+{# ===== Predicted Starter (E-212) ===== #}
+{% if starter_prediction %}
+<div class="pred-starter-section">
+<h2 class="section-header">Predicted Starter</h2>
+{% if starter_prediction.confidence == "high" and starter_prediction.predicted_starter %}
+<div class="pred-card pred-card-primary">
+  <div class="pred-card-name">{{ starter_prediction.predicted_starter.name | e }} <span style="font-size: 7pt; color: #6b7280; background: #f3f4f6; border-radius: 3px; padding: 0 3px;">{{ starter_prediction.predicted_starter.games_started }} GS</span></div>
+  <div class="pred-card-reasoning">{{ starter_prediction.predicted_starter.reasoning | e }}</div>
+  {% if starter_prediction.predicted_starter.recent_starts %}
+  <table class="pred-game-log">
+    <thead><tr><th>Date</th><th>IP</th><th>#P</th><th>K</th><th>BB</th><th>Dec</th></tr></thead>
+    <tbody>
+    {% for g in starter_prediction.predicted_starter.recent_starts %}
+    <tr><td>{{ g.game_date }}</td><td>{{ "%.1f" | format(g.ip_outs / 3 if g.ip_outs else 0) }}</td><td>{{ g.pitches if g.pitches is not none else "—" }}</td><td>{{ g.so if g.so is not none else "—" }}</td><td>{{ g.bb if g.bb is not none else "—" }}</td><td>{{ g.decision or "—" }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>
+{% elif starter_prediction.confidence == "moderate" and starter_prediction.predicted_starter %}
+<div class="pred-card pred-card-primary">
+  <div class="pred-card-name">{{ starter_prediction.predicted_starter.name | e }} <span style="font-size: 7pt; color: #6b7280; background: #f3f4f6; border-radius: 3px; padding: 0 3px;">{{ starter_prediction.predicted_starter.games_started }} GS</span></div>
+  <div class="pred-card-reasoning">{{ starter_prediction.predicted_starter.reasoning | e }}</div>
+  <div class="pred-note">Matchup alternative possible{% if starter_prediction.alternative %} — see {{ starter_prediction.alternative.name | e }}{% endif %}</div>
+</div>
+{% if starter_prediction.alternative %}
+<div class="pred-card">
+  <div class="pred-card-name">{{ starter_prediction.alternative.name | e }} <span style="font-size: 7pt; color: #6b7280;">{{ starter_prediction.alternative.games_started }} GS</span></div>
+  <div class="pred-card-reasoning">{{ starter_prediction.alternative.reasoning | e }}</div>
+</div>
+{% endif %}
+{% elif starter_prediction.confidence == "low" %}
+<div class="pred-note">{{ starter_prediction.rotation_pattern | e }} — multiple candidates</div>
+{% for cand in starter_prediction.top_candidates[:3] %}
+<div class="pred-card">
+  <div class="pred-card-name">{{ cand.name | e }} <span style="font-size: 7pt; color: #6b7280;">{{ cand.games_started }} GS</span></div>
+  <div class="pred-card-reasoning">{{ cand.reasoning | e }}</div>
+</div>
+{% endfor %}
+{% elif starter_prediction.confidence == "suppress" %}
+{% if starter_prediction.data_note %}
+<div class="pred-note">{{ starter_prediction.data_note | e }}</div>
+{% endif %}
+{% endif %}
+{% if starter_prediction.rest_table %}
+<table class="pred-rest-table">
+  <thead><tr><th>Name</th><th>GS</th><th>Last</th><th>Rest</th><th>#P</th><th>7d</th></tr></thead>
+  <tbody>
+  {% for arm in starter_prediction.rest_table %}
+  <tr>
+    <td>{{ arm.name | e }}</td>
+    <td>{{ arm.games_started }}</td>
+    <td>{{ arm.last_outing_date or "—" }}</td>
+    <td>{{ arm.days_since_last_appearance if arm.days_since_last_appearance is not none else "—" }}{% if arm.days_since_last_appearance is not none %}d{% endif %}</td>
+    <td>{{ arm.last_outing_pitches if arm.last_outing_pitches is not none else "—" }}</td>
+    <td>{{ arm.workload_7d if arm.workload_7d is not none else "—" }}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% if starter_prediction.bullpen_order %}
+<div class="pred-note">Bullpen: {% for bp in starter_prediction.bullpen_order %}{{ bp.name | e }}{% if bp.jersey_number %} #{{ bp.jersey_number }}{% endif %} ({{ bp.frequency }}/{{ bp.games_sampled }}){% if not loop.last %}, {% endif %}{% endfor %}</div>
+{% endif %}
+<div class="pred-note">Based on rotation pattern, rest days, and recent workload. Actual starter may differ.</div>
+</div>
+{% endif %}
 
 {# ===== PAGE 1: Pitching table ===== #}
 <h2 class="section-header">Pitching</h2>

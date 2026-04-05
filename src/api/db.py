@@ -15,6 +15,7 @@ import datetime
 import logging
 import os
 import sqlite3
+from collections import defaultdict
 from contextlib import closing
 from pathlib import Path
 from typing import Any
@@ -2499,6 +2500,170 @@ def get_team_spray_events(
     except sqlite3.Error:
         logger.exception("Failed to fetch team spray events for team_id=%s", team_id)
         return [], None
+
+
+def get_pitching_history(
+    team_id: int,
+    season_id: str,
+    *,
+    db: sqlite3.Connection | None = None,
+) -> list[dict]:
+    """Return all pitching appearances for a team/season, chronologically.
+
+    Includes computed ``rest_days`` (days since each pitcher's previous
+    appearance of any type) and ``team_game_number`` (sequential game index
+    for rotation cycle detection).
+
+    Args:
+        team_id: INTEGER PK of the team.
+        season_id: Season slug to scope the query.
+        db: Optional pre-existing connection.  When ``None``, opens a new
+            connection via ``get_connection()``.
+
+    Returns:
+        List of dicts, one per pitching appearance, ordered by game_date ASC,
+        start_time ASC NULLS LAST, appearance_order ASC NULLS LAST.
+    """
+    query = """
+        SELECT
+            pgp.player_id,
+            p.first_name,
+            p.last_name,
+            tr.jersey_number,
+            pgp.game_id,
+            g.game_date,
+            g.start_time,
+            pgp.ip_outs,
+            pgp.pitches,
+            pgp.so,
+            pgp.bb,
+            pgp.h,
+            pgp.r,
+            pgp.er,
+            pgp.bf,
+            pgp.decision,
+            pgp.appearance_order,
+            CAST(
+                julianday(g.game_date) - julianday(
+                    LAG(g.game_date) OVER (
+                        PARTITION BY pgp.player_id
+                        ORDER BY g.game_date ASC, g.start_time ASC NULLS LAST
+                    )
+                )
+            AS INTEGER) AS rest_days,
+            DENSE_RANK() OVER (
+                ORDER BY g.game_date ASC, g.start_time ASC NULLS LAST
+            ) AS team_game_number
+        FROM player_game_pitching pgp
+        JOIN games g ON g.game_id = pgp.game_id
+        JOIN players p ON p.player_id = pgp.player_id
+        LEFT JOIN team_rosters tr
+            ON tr.team_id = pgp.team_id
+           AND tr.player_id = pgp.player_id
+           AND tr.season_id = :season_id
+        WHERE pgp.team_id = :team_id
+          AND g.season_id = :season_id
+          AND g.status = 'completed'
+        ORDER BY g.game_date ASC,
+                 g.start_time ASC NULLS LAST,
+                 pgp.appearance_order ASC NULLS LAST
+    """
+    params = {"team_id": team_id, "season_id": season_id}
+    own_conn = db is None
+    try:
+        conn = db if db is not None else get_connection()
+        try:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(query, params).fetchall()
+            return [dict(row) for row in rows]
+        finally:
+            if own_conn:
+                conn.close()
+    except sqlite3.Error:
+        logger.exception(
+            "Failed to fetch pitching history for team %d", team_id
+        )
+        return []
+
+
+def build_pitcher_profiles(history: list[dict]) -> dict[str, dict]:
+    """Group pitching history rows into per-pitcher profile dicts.
+
+    Args:
+        history: Output from ``get_pitching_history()``.
+
+    Returns:
+        Dict keyed by ``player_id``.  Each value contains identity fields,
+        a chronological ``appearances`` list, a ``starts`` list (filtered
+        by ``appearance_order = 1`` when available, falling back to
+        most-IP-per-game heuristic), aggregate counts, and
+        ``start_to_start_rest`` intervals.
+    """
+    pitchers: dict[str, dict] = {}
+    # First pass: collect appearances per pitcher
+    for row in history:
+        pid = row["player_id"]
+        if pid not in pitchers:
+            pitchers[pid] = {
+                "player_id": pid,
+                "first_name": row["first_name"],
+                "last_name": row["last_name"],
+                "jersey_number": row["jersey_number"],
+                "appearances": [],
+            }
+        pitchers[pid]["appearances"].append(row)
+
+    for profile in pitchers.values():
+        apps = profile["appearances"]
+        profile["total_games"] = len(apps)
+        profile["season_ip_outs"] = sum(a.get("ip_outs") or 0 for a in apps)
+
+        # K/9 = (SO * 27) / ip_outs  (ip_outs is total outs, 27 = 9 innings)
+        total_so = sum(a.get("so") or 0 for a in apps)
+        if profile["season_ip_outs"] > 0:
+            profile["season_k9"] = round(
+                (total_so * 27) / profile["season_ip_outs"], 2
+            )
+        else:
+            profile["season_k9"] = None
+
+        # Determine starts: use appearance_order if available
+        has_appearance_order = any(
+            a.get("appearance_order") is not None for a in apps
+        )
+        if has_appearance_order:
+            starts = [a for a in apps if a.get("appearance_order") == 1]
+        else:
+            # Fallback: most IP per game = starter for that game
+            # Group all history rows by game, find max ip_outs pitcher per game
+            games_max_ip: dict[str, tuple[str, int]] = defaultdict(
+                lambda: ("", 0)
+            )
+            for row in history:
+                gid = row["game_id"]
+                ip = row.get("ip_outs") or 0
+                if ip > games_max_ip[gid][1]:
+                    games_max_ip[gid] = (row["player_id"], ip)
+            starter_game_ids = {
+                gid
+                for gid, (pid, _) in games_max_ip.items()
+                if pid == profile["player_id"]
+            }
+            starts = [a for a in apps if a["game_id"] in starter_game_ids]
+
+        profile["starts"] = starts
+        profile["total_starts"] = len(starts)
+
+        # Start-to-start rest: days between consecutive starts
+        start_dates = [s["game_date"] for s in starts]
+        rest_intervals: list[int] = []
+        for i in range(1, len(start_dates)):
+            d1 = datetime.date.fromisoformat(start_dates[i - 1])
+            d2 = datetime.date.fromisoformat(start_dates[i])
+            rest_intervals.append((d2 - d1).days)
+        profile["start_to_start_rest"] = rest_intervals
+
+    return pitchers
 
 
 def check_connection() -> bool:

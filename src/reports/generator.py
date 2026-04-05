@@ -27,7 +27,12 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from src.api.db import get_connection, get_pitching_workload
+from src.api.db import (
+    build_pitcher_profiles,
+    get_connection,
+    get_pitching_history,
+    get_pitching_workload,
+)
 from src.db.teams import ensure_team_row
 from src.gamechanger.client import CredentialExpiredError, GameChangerClient
 from src.gamechanger.crawlers.scouting import ScoutingCrawler
@@ -1170,6 +1175,46 @@ def generate_report(gc_url: str) -> GenerationResult:
                 team_id, season_id, generation_date, db=conn,
             )
 
+            # Predicted starter (Tier 1)
+            starter_prediction = None
+            enriched_prediction = None
+            pitching_history_rows = get_pitching_history(
+                team_id, season_id, db=conn,
+            )
+            if pitching_history_rows:
+                from src.reports.starter_prediction import (
+                    compute_starter_prediction,
+                )
+
+                pitcher_profiles = build_pitcher_profiles(pitching_history_rows)
+                starter_prediction = compute_starter_prediction(
+                    pitcher_profiles, pitching_history_rows,
+                    workload=pitching_workload,
+                )
+
+                # Tier 2: LLM enrichment (optional, non-fatal)
+                from src.llm.openrouter import is_llm_available
+
+                if is_llm_available():
+                    try:
+                        from src.reports.llm_analysis import enrich_prediction
+
+                        team_record_str = None
+                        if record:
+                            team_record_str = f"{record['wins']}-{record['losses']}"
+                        enriched_prediction = enrich_prediction(
+                            starter_prediction,
+                            pitching_history_rows,
+                            team_record=team_record_str,
+                        )
+                    except Exception:  # noqa: BLE001
+                        logger.warning(
+                            "LLM enrichment failed for public_id=%s; "
+                            "continuing with Tier 1 only.",
+                            public_id,
+                            exc_info=True,
+                        )
+
             # Plays-derived stats
             plays_pitching = _query_plays_pitching_stats(
                 conn, team_id, season_id, game_ids=plays_game_ids,
@@ -1242,6 +1287,8 @@ def generate_report(gc_url: str) -> GenerationResult:
             "plays_game_count": plays_team["plays_game_count"],
             "pitching_workload": pitching_workload,
             "generation_date": generation_date,
+            "starter_prediction": starter_prediction,
+            "enriched_prediction": enriched_prediction,
         }
         html = render_report(data)
 

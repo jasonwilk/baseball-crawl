@@ -686,6 +686,8 @@ def render_report(data: dict[str, Any]) -> str:
         "team_fps_pct": team_fps_pct,
         "team_pitches_per_pa": team_pitches_per_pa,
         "generation_date": generation_date,
+        "starter_prediction": data.get("starter_prediction"),
+        "enriched_prediction": data.get("enriched_prediction"),
     }
 
     return template.render(**context)

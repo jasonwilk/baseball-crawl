@@ -3,6 +3,7 @@ paths:
   - "src/http/**"
   - "src/gamechanger/**"
   - "src/pipeline/**"
+  - "src/llm/**"
   - "scripts/*crawl*"
   - "scripts/*fetch*"
 ---
@@ -49,6 +50,10 @@ All HTTP requests to GameChanger -- whether API calls or web scraping -- must pr
 - Set reasonable timeouts on all HTTP requests (30 seconds default).
 - Log the URL being fetched and the response status code.
 - NEVER log or store authentication headers or tokens.
+
+## Exceptions
+
+- **OpenRouter (`src/llm/openrouter.py`)**: Uses plain `httpx.Client()` without browser-identity headers. OpenRouter is a standard commercial API with proper API key auth -- it does not require GameChanger-style browser presentation. This exception applies only to `src/llm/`; all GameChanger HTTP code remains fully subject to these rules.
 
 ## Implementation Notes
 

@@ -73,6 +73,50 @@ Every rate stat shows the number of games it's based on (e.g., "2.10 ERA (8 GP)"
 
 **Full Pitching and Batting Tables** — Complete per-player breakdowns below the summary cards.
 
+**Predicted Starter** — Who to expect on the mound. See the section below for details.
+
+---
+
+## Predicted Starter
+
+The opponent scouting page includes a **Predicted Starter** section that answers the first question on any coach's mind: who is taking the ball next game?
+
+The system analyzes this opponent's pitching history — rotation sequence, rest days, and recent workload — and makes its best call on who to expect on the mound.
+
+### Confidence Tiers
+
+The prediction comes in four forms depending on how much data is available and how clear the rotation pattern is:
+
+| What you see | What it means |
+|---|---|
+| **Named starter, no qualifier** | Strong signal — rotation pattern is clear, rest lines up, this pitcher is the call |
+| **Named starter with a caveat** | Rotation pick is clear, but a matchup alternative is plausible — review both candidates |
+| **Multiple options shown equally** | No single clear pick — staff uses a committee or rotation is too irregular to call; use the rest table |
+| **Rest table only, no prediction** | Fewer than 4 games in the system — not enough data to predict a starter |
+
+When a starter is named, the reasoning line tells you why — for example: "Last pitched 5 days ago, leads rotation with 6 starts, averages 4.8 days rest between starts."
+
+### Rest and Availability Table
+
+Below the prediction (or alone when there isn't enough data) is a compact table showing the top arms on this staff — starters first, then key relievers:
+
+| Column | What it shows |
+|---|---|
+| **Name** | Pitcher name; **GS** badge shows starts this season |
+| **Last Outing** | How many days ago this pitcher last appeared (any role) |
+| **Last Outing #P** | Pitch count in their most recent outing |
+| **7d Workload** | Total pitches thrown across all appearances in the last 7 days |
+
+A pitcher who threw 85+ pitches with fewer than 4 days rest is unlikely to start — the system factors this in when ranking candidates. A pitcher flagged "availability unknown" hasn't appeared in 10+ days and may be injured or unavailable.
+
+### Bullpen Order
+
+Below the rest table you'll see the likely bullpen order: which relievers have most often been the first out of the pen after the starter exits. This helps you anticipate who you'll face if the starter is pulled early.
+
+### A Prediction, Not a Guarantee
+
+The system predicts based on rotation pattern, rest, and workload. The opposing coach may make a matchup decision that overrides the rotation — that happens. Treat the prediction as the most likely scenario, not a certainty. A note at the bottom of the section always states what the prediction is based on.
+
 ---
 
 ## Three Scouting States
@@ -162,4 +206,4 @@ A quick reference for stats shown throughout the dashboard:
 
 ---
 
-*Last updated: 2026-04-03 | Story references: E-163 (spray charts), E-153-03, E-153-04, E-159, E-183 (standalone reports), E-181-02 (game coverage indicator), E-181-03 (richer empty states, print page coverage indicator), E-196 (Rest and P (7d) pitching columns)*
+*Last updated: 2026-04-04 | Story references: E-163 (spray charts), E-153-03, E-153-04, E-159, E-183 (standalone reports), E-181-02 (game coverage indicator), E-181-03 (richer empty states, print page coverage indicator), E-196 (Rest and P (7d) pitching columns), E-212 (predicted starter section)*

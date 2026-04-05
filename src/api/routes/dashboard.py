@@ -50,6 +50,25 @@ templates.env.filters["format_avg"] = format_avg
 templates.env.filters["format_date"] = format_date
 
 
+def _relative_date(date_str: str | None) -> str:
+    """Format an ISO date string as relative days (e.g., '5d ago', 'Today')."""
+    if not date_str:
+        return "—"
+    try:
+        d = datetime.date.fromisoformat(date_str)
+        days = (datetime.date.today() - d).days
+        if days == 0:
+            return "Today"
+        if days == 1:
+            return "1d ago"
+        return f"{days}d ago"
+    except (ValueError, TypeError):
+        return date_str
+
+
+templates.env.filters["relative_date"] = _relative_date
+
+
 _BATTING_SORT_KEYS: set[str] = {
     "name", "avg", "obp", "gp", "bb", "so", "slg", "h", "ab", "2b", "3b", "hr", "sb", "rbi",
 }
@@ -1612,6 +1631,26 @@ async def opponent_detail(request: Request, opponent_team_id: int) -> Response:
     _compute_batting_heat(scouting_report.get("batting", []))
     _compute_pitching_heat(scouting_report.get("pitching", []))
 
+    # Predicted starter (Tier 1 only -- no LLM on dashboard).
+    starter_prediction = None
+    try:
+        pitching_history_rows = await run_in_threadpool(
+            db.get_pitching_history, opponent_team_id, season_id,
+        )
+        if pitching_history_rows:
+            from src.reports.starter_prediction import compute_starter_prediction
+
+            pitcher_profiles = db.build_pitcher_profiles(pitching_history_rows)
+            starter_prediction = compute_starter_prediction(
+                pitcher_profiles, pitching_history_rows, workload=workload,
+            )
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "Predicted starter failed for opponent %d; continuing without.",
+            opponent_team_id,
+            exc_info=True,
+        )
+
     # Fetch last meeting.
     last_meeting = None
     if active_team_id_od:
@@ -1695,6 +1734,7 @@ async def opponent_detail(request: Request, opponent_team_id: int) -> Response:
             "team_spray_zones": team_spray_zones,
             "team_spray_contacts": team_spray_contacts,
             "coverage_text": coverage_text,
+            "starter_prediction": starter_prediction,
         },
     )
 
@@ -1779,6 +1819,26 @@ async def opponent_print(request: Request, opponent_team_id: int) -> Response:
     _enrich_pitchers_with_workload(pitchers, workload_pr, use_formatted_date=True)
     scouting_report["pitching"] = _sort_pitching(pitchers, "era", "asc")
     scouting_report["batting"] = _sort_batting(scouting_report.get("batting", []), "avg", "desc")
+
+    # Predicted starter (Tier 1 only -- no LLM on dashboard).
+    starter_prediction_pr = None
+    try:
+        pitching_history_pr = await run_in_threadpool(
+            db.get_pitching_history, opponent_team_id, season_id,
+        )
+        if pitching_history_pr:
+            from src.reports.starter_prediction import compute_starter_prediction
+
+            pitcher_profiles_pr = db.build_pitcher_profiles(pitching_history_pr)
+            starter_prediction_pr = compute_starter_prediction(
+                pitcher_profiles_pr, pitching_history_pr, workload=workload_pr,
+            )
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "Predicted starter failed for opponent %d (print); continuing without.",
+            opponent_team_id,
+            exc_info=True,
+        )
 
     # Team batting summary for context bar.
     team_batting = _compute_team_batting(scouting_report.get("batting", []))
@@ -1894,6 +1954,7 @@ async def opponent_print(request: Request, opponent_team_id: int) -> Response:
             "player_spray_bip_counts": player_spray_bip_counts_pr,
             "tendency_stats": tendency_stats_pr,
             "coverage_text": coverage_text_pr,
+            "starter_prediction": starter_prediction_pr,
         },
     )
 
