@@ -1,5 +1,7 @@
 # Endpoint Parsing Notes
 
+Last updated: 2026-03-16
+
 Detailed parsing guidance for each GameChanger API endpoint discovered during the ingest-endpoint workflow.
 
 ## Token Health Check (confirmed 2026-03-04)

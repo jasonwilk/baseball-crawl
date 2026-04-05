@@ -14,6 +14,8 @@ paths:
 3. **Specialist agents (implementers)** -- Execute assigned stories in the epic worktree. Spawned per the epic's Dispatch Team section or the routing table in `/.claude/rules/agent-routing.md`.
 4. **Code-reviewer (quality gate)** -- Reviews every code story before DONE. Reviews via `git diff` in the epic worktree (unstaged = current story). Spawned as infrastructure.
 
+Both PM and code-reviewer must approve before the staging boundary advances. PM is authoritative on ACs -- see the implement skill for disagreement resolution.
+
 ## Domain Work During Dispatch
 
 **Litmus test:** If you are inspecting what was built or assessing quality, you are doing domain work. Route it.

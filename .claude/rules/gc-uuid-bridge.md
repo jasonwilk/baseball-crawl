@@ -1,6 +1,5 @@
 ---
-description: "Bridge pattern for resolving a team's public_id to its gc_uuid via POST /search"
-globs:
+paths:
   - "src/gamechanger/**"
   - "src/reports/**"
   - "docs/api/**"

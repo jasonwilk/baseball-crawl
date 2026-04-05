@@ -1,5 +1,7 @@
 # Endpoint Schema Notes
 
+Last updated: 2026-03-16
+
 Detailed schema implications for each GameChanger API endpoint discovered during the ingest-endpoint workflow.
 
 ## Team Detail Endpoint (confirmed 2026-03-04)

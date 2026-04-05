@@ -1,7 +1,7 @@
 # E-213: Context Layer Optimization
 
 ## Status
-`READY`
+`COMPLETED`
 <!-- Lifecycle: DRAFT -> READY -> ACTIVE -> COMPLETED (or BLOCKED / ABANDONED) -->
 <!-- PM sets READY explicitly after: expert consultation done, all stories have testable ACs, quality checklist passed. -->
 <!-- Only READY and ACTIVE epics can be dispatched. -->
@@ -43,11 +43,11 @@ Expert consultation: claude-architect performed the audit and designed all 5 sto
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-213-01 | Extract CLAUDE.md domain sections to scoped rules | TODO | None | claude-architect |
-| E-213-02 | Deduplicate dispatch-pattern.md and workflow-discipline.md | TODO | None | claude-architect |
-| E-213-03 | Restructure PM MEMORY.md and archived-epics.md | TODO | None | claude-architect |
-| E-213-04 | Fix rule frontmatter and compress universal rules | TODO | None | claude-architect |
-| E-213-05 | Recalibrate context-fundamentals budget and clean up memory | TODO | E-213-01, E-213-02, E-213-03, E-213-04 | claude-architect |
+| E-213-01 | Extract CLAUDE.md domain sections to scoped rules | DONE | None | claude-architect |
+| E-213-02 | Deduplicate dispatch-pattern.md and workflow-discipline.md | DONE | None | claude-architect |
+| E-213-03 | Restructure PM MEMORY.md and archived-epics.md | DONE | None | claude-architect |
+| E-213-04 | Fix rule frontmatter and compress universal rules | DONE | None | claude-architect |
+| E-213-05 | Recalibrate context-fundamentals budget and clean up memory | DONE | E-213-01, E-213-02, E-213-03, E-213-04 | claude-architect |
 
 ## Dispatch Team
 - claude-architect
@@ -112,8 +112,9 @@ E-213-05 AC-3 modifies user memory files at `/home/vscode/.claude/projects/-work
 ## History
 - 2026-04-05: Created (CA audit -> PM epic formation)
 - 2026-04-05: READY after 2 review rounds (13 findings accepted, 0 dismissed)
+- 2026-04-05: COMPLETED. All 5 stories delivered. CLAUDE.md reduced from 239 to 157 lines. 5 new scoped rules extracted (key-metrics, scouting-data-flows, data-model, admin-ui, architecture-subsystems). Workflow Routing Rule deduplicated (pointer replaces ~600 words). PM MEMORY.md reduced from 146 to 79 lines. archived-epics.md reduced from 152 to 39 lines. Rule frontmatter fixed (gc-uuid-bridge paths:, pytest-verbose explicit universal, agent-team-compliance Why compressed). Context-fundamentals budget recalibrated to post-optimization actuals (680-950 ambient). 5 agent memory topic files date-annotated. Superseded user memory entry cleaned up.
 
-### Review Scorecard
+### Spec Review Scorecard
 | Review Pass | Findings | Accepted | Dismissed |
 |---|---|---|---|
 | Internal iteration 1 — CR spec audit | 5 | 5 | 0 |
@@ -122,3 +123,28 @@ E-213-05 AC-3 modifies user memory files at `/home/vscode/.claude/projects/-work
 | **Total** | **19** | **18** | **0** |
 
 Note: PM+CA holistic review had 10 raw findings that deduplicated to 9 unique (1 overlap between PM-2 and CA-5). CR findings overlapped with PM/CA findings but were counted separately since they came from a different sub-pass.
+
+### Implementation Review Scorecard
+| Review Pass | Findings | Accepted | Dismissed |
+|---|---|---|---|
+| Per-story CR (context-layer-only — skipped) | 0 | 0 | 0 |
+| CR integration review | 0 | 0 | 0 |
+| Codex code review | 3 | 3 | 0 |
+| **Total** | **3** | **3** | **0** |
+
+Note: All 5 stories were context-layer-only, so per-story CR was skipped (PM verified ACs alone). CR integration review was clean. Codex found 3 scope gaps in scoped rule frontmatter — all remediated.
+
+### Documentation Assessment
+No documentation impact. This epic reorganized existing context-layer content only — no new features, endpoints, schema changes, or deployment changes.
+
+### Context-Layer Assessment
+| Trigger | Verdict | Notes |
+|---------|---------|-------|
+| T1: New convention | YES | Scoped rule extraction pattern established |
+| T2: Architectural decision | NO | Reorganization only |
+| T3: Footgun discovered | YES | Codex caught scope gaps (routes/queries need to be in scoped rule paths) |
+| T4: Agent behavior change | YES | Agents now load domain content on demand instead of universally |
+| T5: Domain knowledge | NO | |
+| T6: New CLI/workflow | NO | |
+
+All findings already codified in the files this epic produced. No additional CA dispatch needed.

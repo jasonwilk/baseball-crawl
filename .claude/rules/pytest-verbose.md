@@ -1,3 +1,8 @@
+---
+paths:
+  - "**"
+---
+
 # Pytest Verbose Flag Requirement
 
 **Always pass `-v` when running pytest.** This is a hard requirement, not a suggestion.

@@ -1,5 +1,7 @@
 # Agent Design -- Detailed Reference
 
+Last updated: 2026-03-02
+
 ## Subagent Architecture
 
 ### Configuration Format

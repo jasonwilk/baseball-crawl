@@ -1,5 +1,7 @@
 # API Exploration Findings
 
+Last updated: 2026-03-16
+
 Detailed findings from proxy sessions and API exploration beyond the core credential and endpoint basics.
 
 ## 2026-03-12 Key Findings (session 2026-03-12_034919, MOBILE)

@@ -1,5 +1,7 @@
 # Skills and Hooks -- Detailed Reference
 
+Last updated: 2026-03-04
+
 ## Skills System
 
 ### SKILL.md Format

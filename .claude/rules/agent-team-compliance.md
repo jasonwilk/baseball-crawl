@@ -11,14 +11,7 @@ When you receive a user message, scan it against the three patterns below BEFORE
 
 ## Why These Rules Exist
 
-Six prior epics (E-015, E-021, E-047, E-056, E-059, E-065) attempted to fix a recurring class of compliance failure where agents ignore explicit team-formation or consultation requests. Each fix targeted PM behavior or dispatch mechanics. None placed procedural checkpoints on the main session itself, which is where the failures actually occur.
-
-The core insight: **when a user names specific agents, they are requesting those agents' judgment -- not any correct answer.** The user may want:
-- A different perspective than your own
-- Domain expertise encoded in that agent's system prompt and memory
-- A verifiable record that the named expert actually participated
-
-Substituting your own answer -- even if factually correct -- violates the user's intent. The act of consulting is itself part of the deliverable.
+**When a user names specific agents, they are requesting those agents' judgment -- not any correct answer.** The act of consulting is itself part of the deliverable. Substituting your own answer -- even if factually correct -- violates the user's intent.
 
 ## Scope
 
