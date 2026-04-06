@@ -36,3 +36,4 @@ This file preserves only key milestones and architectural decision points from t
 - **E-199**: Plays-Derived Stats in Reports — FPS%, QAB%, P/BF, P/PA on both scouting surfaces
 - **E-204**: Starter vs. Relief Tracking — appearance_order, GS/GR display, backfill CLI
 - **E-212**: Predicted Starter — first LLM integration, two-tier enrichment pattern, both surfaces
+- **E-214**: Fix Predicted Starter Rest Day Anchoring — `reference_date` threading, `FEATURE_PREDICTED_STARTER` flag
