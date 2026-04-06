@@ -14,10 +14,19 @@ from __future__ import annotations
 
 import datetime
 import logging
+import os
 from dataclasses import dataclass, field
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+
+def is_predicted_starter_enabled() -> bool:
+    """Return True when the FEATURE_PREDICTED_STARTER env var is enabled."""
+    return os.environ.get("FEATURE_PREDICTED_STARTER", "").lower() in (
+        "1", "true", "yes",
+    )
+
 
 # ── Constants ───────────────────────────────────────────────────────────
 
@@ -119,7 +128,7 @@ def _detect_rotation_pattern(
 
 
 def _is_excluded_within_1_day(
-    profile: dict, latest_game_date: str,
+    profile: dict, reference_date: datetime.date,
 ) -> bool:
     """Check if pitcher's last appearance was within 1 calendar day."""
     apps = profile.get("appearances", [])
@@ -130,14 +139,13 @@ def _is_excluded_within_1_day(
         return False
     try:
         last_date = datetime.date.fromisoformat(last_date_str)
-        latest = datetime.date.fromisoformat(latest_game_date)
-        return (latest - last_date).days <= _WITHIN_1_DAY_REST
+        return (reference_date - last_date).days <= _WITHIN_1_DAY_REST
     except (ValueError, TypeError):
         return False
 
 
 def _is_excluded_high_pitch_short_rest(
-    profile: dict, latest_game_date: str,
+    profile: dict, reference_date: datetime.date,
 ) -> bool:
     """75+ pitches with fewer than 4 days rest -> excluded."""
     apps = profile.get("appearances", [])
@@ -152,8 +160,7 @@ def _is_excluded_high_pitch_short_rest(
         return False
     try:
         last_date = datetime.date.fromisoformat(last_date_str)
-        latest = datetime.date.fromisoformat(latest_game_date)
-        days_rest = (latest - last_date).days
+        days_rest = (reference_date - last_date).days
         return days_rest < _SHORT_REST_DAYS
     except (ValueError, TypeError):
         return False
@@ -163,7 +170,7 @@ def _build_reasoning(
     profile: dict,
     role: str,
     rotation_pattern: str,
-    latest_game_date: str,
+    reference_date: datetime.date,
     total_team_games: int,
     rank_context: str | None = None,
 ) -> str:
@@ -180,10 +187,8 @@ def _build_reasoning(
         last_date_str = last.get("game_date")
         if last_date_str:
             try:
-                days = (
-                    datetime.date.fromisoformat(latest_game_date)
-                    - datetime.date.fromisoformat(last_date_str)
-                ).days
+                last_date = datetime.date.fromisoformat(last_date_str)
+                days = (reference_date - last_date).days
                 parts.append(f"{days} days rest")
             except (ValueError, TypeError):
                 pass
@@ -201,10 +206,8 @@ def _build_reasoning(
         last_date_str = apps[-1].get("game_date")
         if last_date_str:
             try:
-                days = (
-                    datetime.date.fromisoformat(latest_game_date)
-                    - datetime.date.fromisoformat(last_date_str)
-                ).days
+                last_date = datetime.date.fromisoformat(last_date_str)
+                days = (reference_date - last_date).days
                 if days >= _AVAILABILITY_UNKNOWN_DAYS:
                     parts.append("availability unknown")
             except (ValueError, TypeError):
@@ -413,7 +416,7 @@ def _compute_rotation_likelihoods(
     profiles: dict[str, dict],
     history: list[dict],
     roles: dict[str, str],
-    latest_game_date: str,
+    reference_date: datetime.date,
 ) -> dict[str, float]:
     """Compute internal likelihood scores for each starter candidate.
 
@@ -497,10 +500,8 @@ def _compute_rotation_likelihoods(
         if not last_date_str:
             continue
         try:
-            days = (
-                datetime.date.fromisoformat(latest_game_date)
-                - datetime.date.fromisoformat(last_date_str)
-            ).days
+            last_date = datetime.date.fromisoformat(last_date_str)
+            days = (reference_date - last_date).days
             # More rest = more available. Normalize to 0-0.30.
             rest_score = min(days / 7.0, 1.0) * 0.30
             likelihoods[pid] = likelihoods.get(pid, 0) + rest_score
@@ -516,6 +517,7 @@ def _compute_rotation_likelihoods(
 def compute_starter_prediction(
     pitcher_profiles: dict[str, dict],
     pitching_history: list[dict],
+    reference_date: datetime.date,
     workload: dict[str, dict] | None = None,
 ) -> StarterPrediction:
     """Analyze pitching history and produce a starter prediction.
@@ -523,6 +525,7 @@ def compute_starter_prediction(
     Args:
         pitcher_profiles: Output from ``build_pitcher_profiles()``.
         pitching_history: Output from ``get_pitching_history()``.
+        reference_date: Anchor date for rest/availability calculations.
         workload: Output from ``get_pitching_workload()`` (optional).
 
     Returns:
@@ -569,7 +572,7 @@ def compute_starter_prediction(
 
     # ── Compute likelihoods ─────────────────────────────────────────
     likelihoods = _compute_rotation_likelihoods(
-        pitcher_profiles, pitching_history, roles, latest_game_date
+        pitcher_profiles, pitching_history, roles, reference_date
     )
 
     # ── Apply exclusions ────────────────────────────────────────────
@@ -577,9 +580,9 @@ def compute_starter_prediction(
     for pid, profile in pitcher_profiles.items():
         if profile["total_starts"] == 0:
             continue
-        if _is_excluded_within_1_day(profile, latest_game_date):
+        if _is_excluded_within_1_day(profile, reference_date):
             excluded.add(pid)
-        if _is_excluded_high_pitch_short_rest(profile, latest_game_date):
+        if _is_excluded_high_pitch_short_rest(profile, reference_date):
             excluded.add(pid)
 
     # Remove excluded from likelihoods
@@ -619,7 +622,7 @@ def compute_starter_prediction(
             rank_context = "Committee candidate"
 
         reasoning = _build_reasoning(
-            profile, role, rotation_pattern, latest_game_date,
+            profile, role, rotation_pattern, reference_date,
             total_team_games, rank_context=rank_context,
         )
         candidates.append({

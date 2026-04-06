@@ -13,7 +13,10 @@ import pytest
 from src.api.db import build_pitcher_profiles
 from src.reports.starter_prediction import (
     StarterPrediction,
+    _is_excluded_high_pitch_short_rest,
+    _is_excluded_within_1_day,
     compute_starter_prediction,
+    is_predicted_starter_enabled,
 )
 
 
@@ -147,7 +150,9 @@ class TestThreeManRotation:
         ]
         history = _build_rotation_history(rotation, dates, starter_pitches=70)
         profiles = build_pitcher_profiles(history)
-        return compute_starter_prediction(profiles, history)
+        return compute_starter_prediction(
+            profiles, history, reference_date=datetime.date(2026, 4, 12),
+        )
 
     def test_pattern_detected(self, prediction):
         assert prediction.rotation_pattern == "3-man rotation"
@@ -187,7 +192,9 @@ class TestTwoManRotation:
         ]
         history = _build_rotation_history(rotation, dates, starter_pitches=70)
         profiles = build_pitcher_profiles(history)
-        return compute_starter_prediction(profiles, history)
+        return compute_starter_prediction(
+            profiles, history, reference_date=datetime.date(2026, 3, 31),
+        )
 
     def test_pattern_detected(self, prediction):
         assert prediction.rotation_pattern == "2-man rotation"
@@ -221,7 +228,9 @@ class TestAceDominant:
         ]
         history = _build_rotation_history(rotation, dates, starter_pitches=70)
         profiles = build_pitcher_profiles(history)
-        return compute_starter_prediction(profiles, history)
+        return compute_starter_prediction(
+            profiles, history, reference_date=datetime.date(2026, 4, 6),
+        )
 
     def test_pattern_ace_dominant(self, prediction):
         assert prediction.rotation_pattern == "ace-dominant"
@@ -251,7 +260,9 @@ class TestCommittee:
         ]
         history = _build_rotation_history(rotation, dates)
         profiles = build_pitcher_profiles(history)
-        return compute_starter_prediction(profiles, history)
+        return compute_starter_prediction(
+            profiles, history, reference_date=datetime.date(2026, 3, 31),
+        )
 
     def test_pattern_committee(self, prediction):
         assert prediction.rotation_pattern == "committee"
@@ -275,7 +286,9 @@ class TestSuppressThreeGames:
         dates = ["2026-03-10", "2026-03-13", "2026-03-16"]
         history = _build_rotation_history(rotation, dates)
         profiles = build_pitcher_profiles(history)
-        return compute_starter_prediction(profiles, history)
+        return compute_starter_prediction(
+            profiles, history, reference_date=datetime.date(2026, 3, 16),
+        )
 
     def test_confidence_suppress(self, prediction):
         assert prediction.confidence == "suppress"
@@ -301,7 +314,9 @@ class TestSuppressTwoGames:
         dates = ["2026-03-10", "2026-03-13"]
         history = _build_rotation_history(rotation, dates)
         profiles = build_pitcher_profiles(history)
-        return compute_starter_prediction(profiles, history)
+        return compute_starter_prediction(
+            profiles, history, reference_date=datetime.date(2026, 3, 13),
+        )
 
     def test_confidence_suppress(self, prediction):
         assert prediction.confidence == "suppress"
@@ -324,7 +339,9 @@ class TestSuppressOneGame:
         dates = ["2026-03-10"]
         history = _build_rotation_history(rotation, dates)
         profiles = build_pitcher_profiles(history)
-        return compute_starter_prediction(profiles, history)
+        return compute_starter_prediction(
+            profiles, history, reference_date=datetime.date(2026, 3, 10),
+        )
 
     def test_data_note_1_game(self, prediction):
         assert prediction.data_note is not None
@@ -378,7 +395,9 @@ class TestNullAppearanceOrder:
             pitcher_last[reliever] = date
 
         profiles = build_pitcher_profiles(history)
-        return compute_starter_prediction(profiles, history)
+        return compute_starter_prediction(
+            profiles, history, reference_date=datetime.date(2026, 3, 25),
+        )
 
     def test_not_suppress(self, prediction):
         """Engine should not suppress with 6 games of data."""
@@ -406,7 +425,9 @@ class TestAvailabilityUnknown:
         rotation = ["ace", "bravo", "ace", "bravo", "ace"]
         history = _build_rotation_history(rotation, dates)
         profiles = build_pitcher_profiles(history)
-        return compute_starter_prediction(profiles, history)
+        return compute_starter_prediction(
+            profiles, history, reference_date=datetime.date(2026, 3, 28),
+        )
 
     @pytest.fixture
     def prediction_with_gap(self):
@@ -419,7 +440,9 @@ class TestAvailabilityUnknown:
         rotation = ["ace", "bravo", "ace", "bravo", "ace", "bravo"]
         history = _build_rotation_history(rotation, dates)
         profiles = build_pitcher_profiles(history)
-        return compute_starter_prediction(profiles, history)
+        return compute_starter_prediction(
+            profiles, history, reference_date=datetime.date(2026, 4, 2),
+        )
 
     def test_gap_flagged(self, prediction_with_gap):
         """Ace's last game is Mar 22, latest is Apr 2 = 11 days."""
@@ -456,7 +479,9 @@ class TestWithin1DayExclusion:
             rest_days=1, team_game_number=8,
         ))
         profiles = build_pitcher_profiles(history)
-        return compute_starter_prediction(profiles, history)
+        return compute_starter_prediction(
+            profiles, history, reference_date=datetime.date(2026, 3, 29),
+        )
 
     def test_ace_excluded(self, prediction):
         """Ace pitched on Mar 29 (latest game) so should be excluded."""
@@ -483,7 +508,9 @@ class TestHighPitchShortRest:
             rotation, dates, starter_pitches=90,
         )
         profiles = build_pitcher_profiles(history)
-        return compute_starter_prediction(profiles, history)
+        return compute_starter_prediction(
+            profiles, history, reference_date=datetime.date(2026, 3, 30),
+        )
 
     def test_ace_excluded_high_pitch(self, prediction):
         """Ace threw 90 pitches 2 days ago -- should be excluded."""
@@ -511,7 +538,9 @@ class TestHighPitchCountFlag:
             if row["game_id"] == "g07" and row["player_id"] == "ace":
                 row["pitches"] = 100
         profiles = build_pitcher_profiles(history)
-        return compute_starter_prediction(profiles, history)
+        return compute_starter_prediction(
+            profiles, history, reference_date=datetime.date(2026, 4, 2),
+        )
 
     def test_high_pitch_flag(self, prediction):
         ace_cand = None
@@ -542,7 +571,9 @@ class TestLowPitchCountFlag:
             if row["game_id"] == "g07" and row["player_id"] == "ace":
                 row["pitches"] = 35
         profiles = build_pitcher_profiles(history)
-        return compute_starter_prediction(profiles, history)
+        return compute_starter_prediction(
+            profiles, history, reference_date=datetime.date(2026, 4, 2),
+        )
 
     def test_low_pitch_flag(self, prediction):
         ace_cand = None
@@ -571,7 +602,9 @@ class TestSpotStarterAnomaly:
                      "ace", "ace", "ace", "ace"]
         history = _build_rotation_history(rotation, dates, reliever="closer")
         profiles = build_pitcher_profiles(history)
-        return compute_starter_prediction(profiles, history)
+        return compute_starter_prediction(
+            profiles, history, reference_date=datetime.date(2026, 3, 31),
+        )
 
     def test_spot_starter_flag(self, prediction):
         rg_cand = None
@@ -610,7 +643,9 @@ class TestModerateK9Delta:
             if row["player_id"] == "bravo":
                 row["so"] = 10  # high K/9
         profiles = build_pitcher_profiles(history)
-        return compute_starter_prediction(profiles, history)
+        return compute_starter_prediction(
+            profiles, history, reference_date=datetime.date(2026, 4, 3),
+        )
 
     def test_moderate_confidence(self, prediction):
         assert prediction.confidence == "moderate"
@@ -664,7 +699,9 @@ class TestBullpenOrder:
                 ))
 
         profiles = build_pitcher_profiles(history)
-        return compute_starter_prediction(profiles, history)
+        return compute_starter_prediction(
+            profiles, history, reference_date=datetime.date(2026, 3, 22),
+        )
 
     def test_bullpen_ranked(self, prediction):
         assert len(prediction.bullpen_order) >= 2
@@ -696,7 +733,9 @@ class TestTournamentDensity:
                      "bravo", "charlie", "ace"]
         history = _build_rotation_history(rotation, dates)
         profiles = build_pitcher_profiles(history)
-        return compute_starter_prediction(profiles, history)
+        return compute_starter_prediction(
+            profiles, history, reference_date=datetime.date(2026, 3, 28),
+        )
 
     def test_tournament_note(self, prediction):
         assert prediction.data_note is not None
@@ -757,7 +796,9 @@ class TestMixedStartsRelief:
                 pitcher_last["ace"] = date
 
         profiles = build_pitcher_profiles(history)
-        return compute_starter_prediction(profiles, history)
+        return compute_starter_prediction(
+            profiles, history, reference_date=datetime.date(2026, 4, 3),
+        )
 
     def test_mixed_pitcher_counted(self, prediction):
         """Ace should have both starts and relief appearances."""
@@ -790,7 +831,9 @@ class TestRecentStarts:
         ]
         history = _build_rotation_history(rotation, dates, starter_pitches=70)
         profiles = build_pitcher_profiles(history)
-        return compute_starter_prediction(profiles, history)
+        return compute_starter_prediction(
+            profiles, history, reference_date=datetime.date(2026, 4, 3),
+        )
 
     def test_recent_starts_fields(self, prediction):
         assert prediction.predicted_starter is not None
@@ -844,7 +887,11 @@ class TestRestTableWithWorkload:
                 "appearances_7d": 1,
             },
         }
-        return compute_starter_prediction(profiles, history, workload=workload)
+        return compute_starter_prediction(
+            profiles, history,
+            reference_date=datetime.date(2026, 3, 25),
+            workload=workload,
+        )
 
     def test_rest_table_has_workload_fields(self, prediction):
         assert len(prediction.rest_table) > 0
@@ -886,7 +933,11 @@ class TestRestTableWithoutWorkload:
         ]
         history = _build_rotation_history(rotation, dates)
         profiles = build_pitcher_profiles(history)
-        return compute_starter_prediction(profiles, history, workload=None)
+        return compute_starter_prediction(
+            profiles, history,
+            reference_date=datetime.date(2026, 3, 25),
+            workload=None,
+        )
 
     def test_rest_table_populated(self, prediction):
         assert len(prediction.rest_table) > 0
@@ -923,3 +974,156 @@ class TestDataclassStructure:
         assert pred.rest_table == []
         assert pred.bullpen_order == []
         assert pred.data_note is None
+
+
+# ── AC-4: reference_date anchors reasoning, not latest_game_date ──────
+
+
+class TestReferenceDateAnchorsReasoning:
+    """Prove rest days are computed from reference_date, not latest_game_date.
+
+    Pitcher last appeared 2026-03-28. Team game on 2026-03-31 means
+    latest_game_date = 2026-03-31. With reference_date = 2026-04-06,
+    rest = 9 days (not 3).
+    """
+
+    @pytest.fixture
+    def prediction(self):
+        # 4 games minimum to avoid suppress path.
+        # ace starts games 1-3, bravo starts game 4 (latest_game_date=2026-03-31).
+        rotation = ["ace", "ace", "ace", "bravo"]
+        dates = [
+            "2026-03-19", "2026-03-22", "2026-03-28", "2026-03-31",
+        ]
+        history = _build_rotation_history(rotation, dates, starter_pitches=70)
+        profiles = build_pitcher_profiles(history)
+        return compute_starter_prediction(
+            profiles, history, reference_date=datetime.date(2026, 4, 6),
+        )
+
+    def test_reasoning_uses_reference_date(self, prediction):
+        """Ace's last appearance was 2026-03-28; reference_date=2026-04-06 -> 9 days rest."""
+        ace_cand = None
+        for c in prediction.top_candidates:
+            if c["player_id"] == "ace":
+                ace_cand = c
+                break
+        assert ace_cand is not None
+        assert "9 days rest" in ace_cand["reasoning"]
+
+
+# ── AC-5: reference_date controls high-pitch/short-rest exclusion ─────
+
+
+class TestReferenceDateHighPitchExclusion:
+    """80 pitches, reference_date controls whether pitcher is excluded.
+
+    Last appearance 2026-03-28, 80 pitches (>= 75 threshold).
+    reference_date=2026-04-02 -> 5 days rest (>= 4) -> NOT excluded.
+    reference_date=2026-03-31 -> 3 days rest (< 4) -> excluded.
+    """
+
+    def _make_profile(self) -> dict:
+        return {
+            "total_starts": 3,
+            "total_games": 3,
+            "first_name": "Ace",
+            "last_name": "Pitcher",
+            "appearances": [
+                {"game_date": "2026-03-28", "pitches": 80},
+            ],
+        }
+
+    def test_not_excluded_with_enough_rest(self):
+        profile = self._make_profile()
+        assert not _is_excluded_high_pitch_short_rest(
+            profile, datetime.date(2026, 4, 2),
+        )
+
+    def test_excluded_with_short_rest(self):
+        profile = self._make_profile()
+        assert _is_excluded_high_pitch_short_rest(
+            profile, datetime.date(2026, 3, 31),
+        )
+
+
+# ── AC-6: reference_date controls within-1-day exclusion ─────────────
+
+
+class TestReferenceDateWithin1DayExclusion:
+    """Last appearance 2026-04-05, reference_date=2026-04-06 -> 1 day -> excluded."""
+
+    def test_excluded_within_1_day(self):
+        profile = {
+            "total_starts": 3,
+            "total_games": 3,
+            "first_name": "Ace",
+            "last_name": "Pitcher",
+            "appearances": [
+                {"game_date": "2026-04-05", "pitches": 70},
+            ],
+        }
+        assert _is_excluded_within_1_day(
+            profile, datetime.date(2026, 4, 6),
+        )
+
+
+# ── AC-5 (E-214-02): Same history, different reference_date → different rest ─
+
+
+class TestReferenceDateChangesRestInReasoning:
+    """Same pitching history, two different reference_date values.
+
+    Ace's last appearance is 2026-03-28. With reference_date=2026-04-02
+    rest = 5 days. With reference_date=2026-04-06 rest = 9 days.
+    Reasoning strings must reflect the respective reference_date.
+    """
+
+    def _build_history_and_profiles(self):
+        rotation = ["ace", "ace", "ace", "bravo"]
+        dates = ["2026-03-19", "2026-03-22", "2026-03-28", "2026-03-31"]
+        history = _build_rotation_history(rotation, dates, starter_pitches=70)
+        profiles = build_pitcher_profiles(history)
+        return profiles, history
+
+    def test_different_reference_dates_produce_different_rest(self):
+        profiles, history = self._build_history_and_profiles()
+
+        pred_early = compute_starter_prediction(
+            profiles, history, reference_date=datetime.date(2026, 4, 2),
+        )
+        pred_late = compute_starter_prediction(
+            profiles, history, reference_date=datetime.date(2026, 4, 6),
+        )
+
+        # Find ace in both predictions
+        ace_early = next(
+            c for c in pred_early.top_candidates if c["player_id"] == "ace"
+        )
+        ace_late = next(
+            c for c in pred_late.top_candidates if c["player_id"] == "ace"
+        )
+
+        assert "5 days rest" in ace_early["reasoning"]
+        assert "9 days rest" in ace_late["reasoning"]
+
+
+# ── AC-6 (E-214-03): is_predicted_starter_enabled() ─────────────────────
+
+
+class TestIsPredictedStarterEnabled:
+    """Feature flag returns True only for 1/true/yes (case-insensitive)."""
+
+    @pytest.mark.parametrize("val", ["1", "true", "yes", "TRUE", "True", "YES"])
+    def test_enabled_values(self, monkeypatch, val):
+        monkeypatch.setenv("FEATURE_PREDICTED_STARTER", val)
+        assert is_predicted_starter_enabled() is True
+
+    @pytest.mark.parametrize("val", ["", "0", "false", "no", "FALSE", "off"])
+    def test_disabled_values(self, monkeypatch, val):
+        monkeypatch.setenv("FEATURE_PREDICTED_STARTER", val)
+        assert is_predicted_starter_enabled() is False
+
+    def test_absent(self, monkeypatch):
+        monkeypatch.delenv("FEATURE_PREDICTED_STARTER", raising=False)
+        assert is_predicted_starter_enabled() is False

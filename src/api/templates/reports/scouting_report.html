@@ -489,6 +489,7 @@
 {% endif %}
 
 {# ===== PREDICTED STARTER (E-212) ===== #}
+{% if show_predicted_starter %}
 <div class="predicted-starter-section">
 <h2 class="section-header">Predicted Starter</h2>
 {% if starter_prediction is none %}
@@ -635,6 +636,7 @@
 <div class="sort-annotation">{% if enriched_prediction %}Based on rotation pattern, rest days, recent workload, and AI-assisted analysis. Actual starter may differ.{% else %}Based on rotation pattern, rest days, and recent workload. Actual starter may differ.{% endif %}</div>
 {% endif %}
 </div>
+{% endif %}{# show_predicted_starter #}
 
 {# ===== RECENT FORM CHIPS (AC-3, TN-5) ===== #}
 {% if recent_form %}

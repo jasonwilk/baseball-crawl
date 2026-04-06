@@ -1633,23 +1633,27 @@ async def opponent_detail(request: Request, opponent_team_id: int) -> Response:
 
     # Predicted starter (Tier 1 only -- no LLM on dashboard).
     starter_prediction = None
-    try:
-        pitching_history_rows = await run_in_threadpool(
-            db.get_pitching_history, opponent_team_id, season_id,
-        )
-        if pitching_history_rows:
-            from src.reports.starter_prediction import compute_starter_prediction
-
-            pitcher_profiles = db.build_pitcher_profiles(pitching_history_rows)
-            starter_prediction = compute_starter_prediction(
-                pitcher_profiles, pitching_history_rows, workload=workload,
+    from src.reports.starter_prediction import is_predicted_starter_enabled
+    if is_predicted_starter_enabled():
+        try:
+            pitching_history_rows = await run_in_threadpool(
+                db.get_pitching_history, opponent_team_id, season_id,
             )
-    except Exception:  # noqa: BLE001
-        logger.warning(
-            "Predicted starter failed for opponent %d; continuing without.",
-            opponent_team_id,
-            exc_info=True,
-        )
+            if pitching_history_rows:
+                from src.reports.starter_prediction import compute_starter_prediction
+
+                pitcher_profiles = db.build_pitcher_profiles(pitching_history_rows)
+                starter_prediction = compute_starter_prediction(
+                    pitcher_profiles, pitching_history_rows,
+                    reference_date=datetime.date.today(),
+                    workload=workload,
+                )
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Predicted starter failed for opponent %d; continuing without.",
+                opponent_team_id,
+                exc_info=True,
+            )
 
     # Fetch last meeting.
     last_meeting = None
@@ -1822,23 +1826,27 @@ async def opponent_print(request: Request, opponent_team_id: int) -> Response:
 
     # Predicted starter (Tier 1 only -- no LLM on dashboard).
     starter_prediction_pr = None
-    try:
-        pitching_history_pr = await run_in_threadpool(
-            db.get_pitching_history, opponent_team_id, season_id,
-        )
-        if pitching_history_pr:
-            from src.reports.starter_prediction import compute_starter_prediction
-
-            pitcher_profiles_pr = db.build_pitcher_profiles(pitching_history_pr)
-            starter_prediction_pr = compute_starter_prediction(
-                pitcher_profiles_pr, pitching_history_pr, workload=workload_pr,
+    from src.reports.starter_prediction import is_predicted_starter_enabled
+    if is_predicted_starter_enabled():
+        try:
+            pitching_history_pr = await run_in_threadpool(
+                db.get_pitching_history, opponent_team_id, season_id,
             )
-    except Exception:  # noqa: BLE001
-        logger.warning(
-            "Predicted starter failed for opponent %d (print); continuing without.",
-            opponent_team_id,
-            exc_info=True,
-        )
+            if pitching_history_pr:
+                from src.reports.starter_prediction import compute_starter_prediction
+
+                pitcher_profiles_pr = db.build_pitcher_profiles(pitching_history_pr)
+                starter_prediction_pr = compute_starter_prediction(
+                    pitcher_profiles_pr, pitching_history_pr,
+                    reference_date=datetime.date.today(),
+                    workload=workload_pr,
+                )
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Predicted starter failed for opponent %d (print); continuing without.",
+                opponent_team_id,
+                exc_info=True,
+            )
 
     # Team batting summary for context bar.
     team_batting = _compute_team_batting(scouting_report.get("batting", []))

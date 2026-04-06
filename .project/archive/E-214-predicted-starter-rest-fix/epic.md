@@ -1,7 +1,7 @@
 # E-214: Fix Predicted Starter Rest Day Anchoring
 
 ## Status
-`READY`
+`COMPLETED`
 <!-- Lifecycle: DRAFT → READY → ACTIVE → COMPLETED (or BLOCKED / ABANDONED) -->
 
 ## Overview
@@ -35,9 +35,9 @@ No expert consultation required for baseball-coach (no coaching domain changes -
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-214-01 | Thread `reference_date` through the prediction engine | TODO | None | - |
-| E-214-02 | Update callers to pass `reference_date` | TODO | E-214-01 | - |
-| E-214-03 | Add `FEATURE_PREDICTED_STARTER` feature flag | TODO | None | - |
+| E-214-01 | Thread `reference_date` through the prediction engine | DONE | None | - |
+| E-214-02 | Update callers to pass `reference_date` | DONE | E-214-01 | - |
+| E-214-03 | Add `FEATURE_PREDICTED_STARTER` feature flag | DONE | None | - |
 
 ## Dispatch Team
 - software-engineer
@@ -109,3 +109,26 @@ Dashboard templates need no template changes -- their existing `{% if starter_pr
 | **Total** | **22** | **13** | **9** |
 
 Key accepted findings: test fixture must prove anchor divergence (Codex-2-2), report template needs `show_predicted_starter` boolean via renderer plumbing (Codex iter 1 + 3), positive string matching for feature flag (CR-4), `_build_reasoning` has two date blocks (SE-3). Key dismissed findings: shared-file dependency (5x, serial dispatch with non-overlapping edits), `.env.example` convention (2x, standard pattern).
+
+#### Implementation Review Scorecard
+| Review Pass | Findings | Accepted | Dismissed |
+|---|---|---|---|
+| Per-story CR -- E-214-01 | 0 | 0 | 0 |
+| Per-story CR -- E-214-02 | 0 | 0 | 0 |
+| Per-story CR -- E-214-03 (2 rounds) | 1 | 1 | 0 |
+| CR integration review | 0 | 0 | 0 |
+| Codex code review | 2 | 2 | 0 |
+| **Total** | **3** | **3** | **0** |
+
+- 2026-04-06: COMPLETED. All 3 stories delivered. E-214-01 threaded `reference_date` through the prediction engine (4 internal functions). E-214-02 updated 3 callers. E-214-03 added `FEATURE_PREDICTED_STARTER` feature flag with template gating. Codex review caught a backward-incompatible renderer default and a test gap -- both remediated. 65 tests passing.
+
+### Documentation Assessment
+Trigger 1 fires: feature flag `FEATURE_PREDICTED_STARTER` is a new operational concern -- operators need to know about the env var, its values, and the enable/disable behavior. Dispatch docs-writer before archiving.
+
+### Context-Layer Assessment
+1. **New agent, rule, skill, or hook added?** No -- no new context-layer files.
+2. **Existing convention changed or superseded?** No -- `reference_date` threading is an internal fix, not a new convention. Feature flag is a one-off env var, not a framework.
+3. **New env var, config, or deployment requirement?** No -- `FEATURE_PREDICTED_STARTER` is already covered by `.env.example` and the documentation assessment above handles operator documentation. No CLAUDE.md or rules update needed since the env var is not an architectural pattern.
+4. **New cross-cutting pattern established?** No -- the feature flag is scoped to predicted starter only, not a generalized pattern.
+5. **Agent capability or routing change?** No -- no agent definitions or routing changes.
+6. **Lesson learned that should be codified?** No -- the rest-anchoring bug was a straightforward fix with no systemic lesson for the context layer.

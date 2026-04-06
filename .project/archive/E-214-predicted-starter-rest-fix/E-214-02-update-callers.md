@@ -4,7 +4,7 @@
 [E-214: Fix Predicted Starter Rest Day Anchoring](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, all three call sites that invoke `compute_starter_prediction()` will pass an explicit `reference_date` argument: `datetime.date.today()` for dashboard routes and `datetime.date.fromisoformat(generated_at[:10])` for the report generator.

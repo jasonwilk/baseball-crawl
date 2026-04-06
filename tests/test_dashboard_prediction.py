@@ -114,6 +114,10 @@ def _create_test_client():
 
 class TestOpponentDetailWithPrediction:
 
+    @pytest.fixture(autouse=True)
+    def _enable_flag(self, monkeypatch):
+        monkeypatch.setenv("FEATURE_PREDICTED_STARTER", "1")
+
     @patch("src.api.routes.dashboard._check_opponent_authorization", return_value=True)
     @patch("src.api.routes.dashboard.db")
     @patch("src.api.routes.dashboard._fetch_opponent_detail_data")
@@ -160,6 +164,10 @@ class TestOpponentDetailWithPrediction:
 
 class TestOpponentDetailWithoutPrediction:
 
+    @pytest.fixture(autouse=True)
+    def _enable_flag(self, monkeypatch):
+        monkeypatch.setenv("FEATURE_PREDICTED_STARTER", "1")
+
     @patch("src.api.routes.dashboard._check_opponent_authorization", return_value=True)
     @patch("src.api.routes.dashboard.db")
     @patch("src.api.routes.dashboard._fetch_opponent_detail_data")
@@ -188,6 +196,10 @@ class TestOpponentDetailWithoutPrediction:
 
 
 class TestPredictionFailure:
+
+    @pytest.fixture(autouse=True)
+    def _enable_flag(self, monkeypatch):
+        monkeypatch.setenv("FEATURE_PREDICTED_STARTER", "1")
 
     @patch("src.api.routes.dashboard._check_opponent_authorization", return_value=True)
     @patch("src.api.routes.dashboard.db")

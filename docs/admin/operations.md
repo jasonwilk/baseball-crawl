@@ -39,6 +39,14 @@ docker compose up -d --build app
 
 For the full Cloudflare Tunnel and Zero Trust Access setup, see [docs/cloudflare-access-setup.md](../cloudflare-access-setup.md).
 
+## Feature Flags
+
+Feature flags are set as environment variables in `.env`. Values `1`, `true`, or `yes` (case-insensitive) enable the flag; anything else or absent disables it.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `FEATURE_PREDICTED_STARTER` | off | Shows the Predicted Starter section on scouting reports and the dashboard opponent detail page. Temporary flag while the rest-days fix (E-214) is verified in production. Remove once verified stable. |
+
 ## Admin Team Management
 
 The admin interface at `/admin/teams` is the primary way to add and manage teams. Access requires an admin account.

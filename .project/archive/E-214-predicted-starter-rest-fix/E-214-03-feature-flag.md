@@ -4,7 +4,7 @@
 [E-214: Fix Predicted Starter Rest Day Anchoring](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the predicted starter section can be disabled in production by omitting `FEATURE_PREDICTED_STARTER` or setting it to any value other than `1`/`true`/`yes`. Dev environments enable it via `.env`. A helper function centralizes the env var check.

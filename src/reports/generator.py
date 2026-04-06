@@ -24,7 +24,7 @@ import secrets
 import sqlite3
 from contextlib import closing
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 from src.api.db import (
@@ -1178,42 +1178,52 @@ def generate_report(gc_url: str) -> GenerationResult:
             # Predicted starter (Tier 1)
             starter_prediction = None
             enriched_prediction = None
-            pitching_history_rows = get_pitching_history(
-                team_id, season_id, db=conn,
+            from src.reports.starter_prediction import (
+                is_predicted_starter_enabled,
             )
-            if pitching_history_rows:
-                from src.reports.starter_prediction import (
-                    compute_starter_prediction,
+            show_predicted_starter = is_predicted_starter_enabled()
+            if show_predicted_starter:
+                pitching_history_rows = get_pitching_history(
+                    team_id, season_id, db=conn,
                 )
+                if pitching_history_rows:
+                    from src.reports.starter_prediction import (
+                        compute_starter_prediction,
+                    )
 
-                pitcher_profiles = build_pitcher_profiles(pitching_history_rows)
-                starter_prediction = compute_starter_prediction(
-                    pitcher_profiles, pitching_history_rows,
-                    workload=pitching_workload,
-                )
+                    pitcher_profiles = build_pitcher_profiles(
+                        pitching_history_rows,
+                    )
+                    starter_prediction = compute_starter_prediction(
+                        pitcher_profiles, pitching_history_rows,
+                        reference_date=date.fromisoformat(generated_at[:10]),
+                        workload=pitching_workload,
+                    )
 
-                # Tier 2: LLM enrichment (optional, non-fatal)
-                from src.llm.openrouter import is_llm_available
+                    # Tier 2: LLM enrichment (optional, non-fatal)
+                    from src.llm.openrouter import is_llm_available
 
-                if is_llm_available():
-                    try:
-                        from src.reports.llm_analysis import enrich_prediction
+                    if is_llm_available():
+                        try:
+                            from src.reports.llm_analysis import enrich_prediction
 
-                        team_record_str = None
-                        if record:
-                            team_record_str = f"{record['wins']}-{record['losses']}"
-                        enriched_prediction = enrich_prediction(
-                            starter_prediction,
-                            pitching_history_rows,
-                            team_record=team_record_str,
-                        )
-                    except Exception:  # noqa: BLE001
-                        logger.warning(
-                            "LLM enrichment failed for public_id=%s; "
-                            "continuing with Tier 1 only.",
-                            public_id,
-                            exc_info=True,
-                        )
+                            team_record_str = None
+                            if record:
+                                team_record_str = (
+                                    f"{record['wins']}-{record['losses']}"
+                                )
+                            enriched_prediction = enrich_prediction(
+                                starter_prediction,
+                                pitching_history_rows,
+                                team_record=team_record_str,
+                            )
+                        except Exception:  # noqa: BLE001
+                            logger.warning(
+                                "LLM enrichment failed for public_id=%s; "
+                                "continuing with Tier 1 only.",
+                                public_id,
+                                exc_info=True,
+                            )
 
             # Plays-derived stats
             plays_pitching = _query_plays_pitching_stats(
@@ -1289,6 +1299,7 @@ def generate_report(gc_url: str) -> GenerationResult:
             "generation_date": generation_date,
             "starter_prediction": starter_prediction,
             "enriched_prediction": enriched_prediction,
+            "show_predicted_starter": show_predicted_starter,
         }
         html = render_report(data)
 

@@ -4,7 +4,7 @@
 [E-214: Fix Predicted Starter Rest Day Anchoring](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the predicted starter engine will accept a `reference_date: datetime.date` parameter and use it for all rest/availability calculations instead of the internally-computed `latest_game_date`. All internal functions that compute rest days, apply exclusions, or score rest-based likelihood will use `reference_date` as their anchor.

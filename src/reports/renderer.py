@@ -688,6 +688,7 @@ def render_report(data: dict[str, Any]) -> str:
         "generation_date": generation_date,
         "starter_prediction": data.get("starter_prediction"),
         "enriched_prediction": data.get("enriched_prediction"),
+        "show_predicted_starter": data.get("show_predicted_starter", True),
     }
 
     return template.render(**context)
