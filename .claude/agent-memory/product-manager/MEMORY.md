@@ -1,7 +1,7 @@
 # Product Manager -- Agent Memory
 
 ## Numbering State
-- Next available epic number: E-214
+- Next available epic number: E-215
 - Next available idea number: IDEA-066
 - Before assigning numbers: ALWAYS `ls /epics/` and `ls /.project/ideas/` to avoid collisions
 
@@ -23,6 +23,7 @@ For full details, read the epic file in `/epics/`. Only READY and ACTIVE epics a
 - **E-174** (READY): Fix Key Extractor to Search Asset Chunks
 - **E-175** (READY): Fix `bb creds import` for POST /auth Curl Commands
 - **E-193** (READY): Browser Automation Infrastructure
+- **E-214** (READY): Fix Predicted Starter Rest Day Anchoring
 
 ## Key Architectural Decisions
 - Storage: SQLite (WAL mode). Host-mounted at ./data/app.db. Simple file backup via scripts/backup_db.py (no Litestream).
