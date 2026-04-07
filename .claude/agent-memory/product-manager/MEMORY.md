@@ -1,8 +1,8 @@
 # Product Manager -- Agent Memory
 
 ## Numbering State
-- Next available epic number: E-217
-- Next available idea number: IDEA-066
+- Next available epic number: E-218
+- Next available idea number: IDEA-068
 - Before assigning numbers: ALWAYS `ls /epics/` and `ls /.project/ideas/` to avoid collisions
 
 ## Project Context
@@ -23,6 +23,7 @@ For full details, read the epic file in `/epics/`. Only READY and ACTIVE epics a
 - **E-174** (READY): Fix Key Extractor to Search Asset Chunks
 - **E-175** (READY): Fix `bb creds import` for POST /auth Curl Commands
 - **E-193** (READY): Browser Automation Infrastructure
+- **E-217** (READY): NSAA Pitch Count Availability Rules
 
 ## Key Architectural Decisions
 - Storage: SQLite (WAL mode). Host-mounted at ./data/app.db. Simple file backup via scripts/backup_db.py (no Litestream).
@@ -57,6 +58,8 @@ Full ideas list: `/.project/ideas/README.md`. Promotable ideas (trigger met or i
 - **IDEA-040**: Optimistic Pitching Column API Audit — trigger met (E-117 complete)
 - **IDEA-043**: Fuzzy Duplicate Team Detection — trigger met (E-155 complete)
 - **IDEA-064**: Dashboard-Report Feature Parity — immediately promotable (E-212 shipped). 7 gaps identified.
+- **IDEA-066**: League/Level Detection for Pitch Rules — blocked on E-217 completion + first non-HS team tracked
+- **IDEA-067**: Catcher-Pitcher Restriction (NSAA) — blocked on E-217 completion + catching innings data availability
 
 ## Key Workflow Contract
 - Routing model: planning (user -> PM), dispatch (user/main session -> implementers directly). PM plans and closes; main session dispatches.
