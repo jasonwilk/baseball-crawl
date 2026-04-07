@@ -53,7 +53,7 @@ Reference files:
 - **Blocks**: None
 
 ## Files to Create or Modify
-- `src/gamechanger/loaders/scouting_loader.py` -- add `_validate_game_count()` and `_validate_roster_count()` methods, call them in `load_team()`
+- `src/gamechanger/loaders/scouting_loader.py` -- add `_check_duplicate_games()` and `_validate_roster_count()` methods, call them in `load_team()`
 - `tests/test_scouting_loader.py` or `tests/test_post_load_validation.py` -- validation tests
 
 ## Agent Hint
@@ -69,4 +69,4 @@ software-engineer
 - This is ~20-30 lines of implementation code. Keep it simple.
 - The game count validation checks games where this team is home OR away — not just games "owned by" this team. This correctly catches cross-perspective duplicates.
 - Future enhancement: per-game batting row count validation (expected N batters per game from boxscore data vs. actual DB rows). Out of scope for this story but a natural extension.
-- The existing `dedup_team_players()` hook (E-215) runs between boxscore loading and these validations. That's correct — validation should see the post-dedup state.
+- The existing `dedup_team_players()` hook (E-215) runs after boxscore loading and before the game duplicate check (`_check_duplicate_games()`). That's correct — the game duplicate check should see the post-dedup state. Note: roster validation runs earlier (after `_load_roster_section()`, before boxscores) per AC-4, so it is unaffected by `dedup_team_players()`.

@@ -105,7 +105,7 @@ The game count query scopes to games where this team is home OR away, with `stat
 | File | E-216-01 | E-216-02 |
 |------|----------|----------|
 | `src/gamechanger/loaders/game_loader.py` | X | |
-| `tests/test_game_loader.py` or `tests/test_game_dedup.py` | X | |
+| `tests/test_loaders/test_game_loader.py` or `tests/test_loaders/test_game_dedup.py` | X | |
 | `src/gamechanger/loaders/scouting_loader.py` | | X |
 | `tests/test_scouting_loader.py` or `tests/test_post_load_validation.py` | | X |
 
@@ -127,4 +127,5 @@ No file conflicts between stories.
 | Internal iteration 2 — CR spec audit (v4) | 3 | 1 | 2 |
 | Internal iteration 2 — PM holistic (v4) | 2 | 2 | 0 |
 | Internal iteration 2 — SE/DE holistic (v4) | 14 | 0 | 14 |
-| **Total** | **37** | **6** | **31** |
+| Codex spec review | 4 | 4 | 0 |
+| **Total** | **41** | **10** | **31** |
