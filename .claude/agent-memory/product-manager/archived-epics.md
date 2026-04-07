@@ -37,3 +37,4 @@ This file preserves only key milestones and architectural decision points from t
 - **E-204**: Starter vs. Relief Tracking — appearance_order, GS/GR display, backfill CLI
 - **E-212**: Predicted Starter — first LLM integration, two-tier enrichment pattern, both surfaces
 - **E-214**: Fix Predicted Starter Rest Day Anchoring — `reference_date` threading, `FEATURE_PREDICTED_STARTER` flag
+- **E-215**: Fix Player-Level Duplicates — `ensure_player_row()` canonical upsert, prefix-matching detection, atomic merge, two-hook post-load dedup sweep in scouting pipeline
