@@ -43,6 +43,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
+from src.db.players import ensure_player_row
 from src.gamechanger.loaders import LoadResult, derive_season_id_for_team, ensure_season_row
 from src.gamechanger.loaders.game_loader import GameLoader, GameSummaryEntry
 from src.gamechanger.types import TeamRef
@@ -118,6 +119,24 @@ class ScoutingLoader:
         total.loaded += bs_result.loaded
         total.skipped += bs_result.skipped
         total.errors += bs_result.errors
+
+        # Hook 1: dedup sweep after boxscore loading, before aggregation.
+        # Uses manage_transaction=False since the loader's connection may
+        # have an implicit transaction open.
+        try:
+            from src.db.player_dedup import dedup_team_players
+
+            dedup_team_players(
+                self._db, team_id, db_season_id, manage_transaction=False
+            )
+        except Exception:  # noqa: BLE001
+            logger.error(
+                "Post-boxscore dedup sweep failed for team_id=%d season=%s; "
+                "continuing with aggregation",
+                team_id,
+                db_season_id,
+                exc_info=True,
+            )
 
         self._compute_season_aggregates(team_id, db_season_id)
         self._db.commit()
@@ -333,16 +352,7 @@ class ScoutingLoader:
     ) -> bool:
         """Upsert one player into players and team_rosters; return True on success."""
         try:
-            self._db.execute(
-                """
-                INSERT INTO players (player_id, first_name, last_name)
-                VALUES (?, ?, ?)
-                ON CONFLICT(player_id) DO UPDATE SET
-                    first_name = excluded.first_name,
-                    last_name  = excluded.last_name
-                """,
-                (player_id, first_name, last_name),
-            )
+            ensure_player_row(self._db, player_id, first_name, last_name)
             self._db.execute(
                 """
                 INSERT INTO team_rosters (team_id, player_id, season_id, jersey_number)

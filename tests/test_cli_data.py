@@ -1092,6 +1092,27 @@ def test_dedup_summary_output() -> None:
 
 
 # ---------------------------------------------------------------------------
+# bb data dedup-players (E-215-02)
+# ---------------------------------------------------------------------------
+
+
+def test_dedup_players_error_path() -> None:
+    """dedup-players prints error and exits 1 when detection raises."""
+    mock_conn = MagicMock()
+    mock_conn.execute = MagicMock()
+    with patch("src.cli.data.sqlite3.connect", return_value=mock_conn):
+        with patch(
+            "src.db.player_dedup.find_duplicate_players",
+            side_effect=RuntimeError("table missing"),
+        ):
+            result = runner.invoke(app, ["data", "dedup-players"])
+
+    assert result.exit_code != 0
+    assert "Error finding duplicate players" in result.output
+    assert "table missing" in result.output
+
+
+# ---------------------------------------------------------------------------
 # bb data repair-opponents (E-173-06)
 # ---------------------------------------------------------------------------
 

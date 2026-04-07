@@ -4,7 +4,7 @@
 [E-215: Fix Player-Level Duplicates from Cross-Perspective Boxscore Loading](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the scouting pipeline will automatically detect and merge same-team player duplicates at two points: (1) inside `ScoutingLoader.load_team()` after boxscore loading but before season aggregation, and (2) in the pipeline orchestrators (`_scout_live` and `run_scouting_sync`) after spray chart loading completes. This two-hook approach prevents duplicates from accumulating after the initial cleanup (E-215-03) and handles re-contamination from the spray chart loader's player stub creation. The detection and merge functions from E-215-02 and E-215-03 are reused, scoped to the freshly-loaded team.

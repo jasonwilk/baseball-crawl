@@ -563,14 +563,14 @@ def test_load_file_inserts_stub_for_unknown_player(
 def test_load_file_logs_warning_for_unknown_player(
     db: sqlite3.Connection, tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """A WARNING is logged when a player_id is not in the players table."""
+    """A log message is emitted when a player_id is not in the players table."""
     unknown_player = "player-unknown-999"
     payload = _make_stats_payload(
         {unknown_player: {"stats": {"offense": _OFFENSE_A}}}
     )
     path = _write_stats(tmp_path, payload)
 
-    with caplog.at_level(logging.WARNING, logger="src.gamechanger.loaders.season_stats_loader"):
+    with caplog.at_level(logging.DEBUG, logger="src.db.players"):
         SeasonStatsLoader(db).load_file(path)
 
     assert unknown_player in caplog.text

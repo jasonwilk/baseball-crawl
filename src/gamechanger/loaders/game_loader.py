@@ -52,6 +52,7 @@ import sqlite3
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from src.db.players import ensure_player_row
 from src.db.teams import ensure_team_row
 from src.gamechanger.loaders import LoadResult, derive_season_id_for_team, ensure_season_row
 from src.gamechanger.types import TeamRef
@@ -775,10 +776,11 @@ class GameLoader:
 
             try:
                 info = player_info.get(player_id, {})
-                self._ensure_player(
+                ensure_player_row(
+                    self._db,
                     player_id,
-                    first_name=info.get("first_name"),
-                    last_name=info.get("last_name"),
+                    info.get("first_name") or "Unknown",
+                    info.get("last_name") or "Unknown",
                 )
                 self._upsert_roster_jersey(
                     team_id, player_id, info.get("number"),
@@ -857,10 +859,11 @@ class GameLoader:
 
             try:
                 info = player_info.get(player_id, {})
-                self._ensure_player(
+                ensure_player_row(
+                    self._db,
                     player_id,
-                    first_name=info.get("first_name"),
-                    last_name=info.get("last_name"),
+                    info.get("first_name") or "Unknown",
+                    info.get("last_name") or "Unknown",
                 )
                 self._upsert_roster_jersey(
                     team_id, player_id, info.get("number"),
@@ -1090,47 +1093,6 @@ class GameLoader:
                 pitching.appearance_order,
             ),
         )
-
-    def _ensure_player(
-        self,
-        player_id: str,
-        first_name: str | None = None,
-        last_name: str | None = None,
-    ) -> None:
-        """Ensure a player row exists with the best available name.
-
-        When ``first_name`` and ``last_name`` are provided, uses a conditional
-        UPSERT: new rows get the real name; existing stub rows ("Unknown Unknown")
-        are upgraded; existing rows with real names are left untouched.
-
-        When names are not provided, falls back to the legacy "Unknown" stub
-        behaviour.
-
-        Args:
-            player_id: GameChanger player UUID.
-            first_name: Player first name from boxscore (or ``None``).
-            last_name: Player last name from boxscore (or ``None``).
-        """
-        fn = first_name or "Unknown"
-        ln = last_name or "Unknown"
-
-        self._db.execute(
-            """
-            INSERT INTO players (player_id, first_name, last_name)
-            VALUES (?, ?, ?)
-            ON CONFLICT(player_id) DO UPDATE
-            SET first_name = excluded.first_name,
-                last_name  = excluded.last_name
-            WHERE players.first_name = 'Unknown'
-              AND players.last_name  = 'Unknown'
-            """,
-            (player_id, fn, ln),
-        )
-        if fn == "Unknown" and ln == "Unknown":
-            logger.warning(
-                "No name data for player_id=%s; inserting/keeping stub row.",
-                player_id,
-            )
 
     def _upsert_roster_jersey(
         self,

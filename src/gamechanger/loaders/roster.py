@@ -34,6 +34,7 @@ import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
+from src.db.players import ensure_player_row
 from src.db.teams import ensure_team_row
 from src.gamechanger.loaders import LoadResult, derive_season_id_for_team, ensure_season_row
 
@@ -130,7 +131,7 @@ class RosterLoader:
                 result.skipped += 1
                 continue
             try:
-                self._upsert_player(player)
+                ensure_player_row(self._db, player.player_id, player.first_name, player.last_name)
                 self._upsert_roster_membership(player, team_int, season_id)
                 result.loaded += 1
             except sqlite3.Error as exc:
@@ -270,26 +271,6 @@ class RosterLoader:
             jersey_number=jersey_number,
             position=position,
         )
-
-    def _upsert_player(self, player: _Player) -> None:
-        """Upsert a player record into the ``players`` table.
-
-        Uses ``INSERT OR REPLACE`` so re-running the same data is idempotent.
-
-        Args:
-            player: Parsed player record.
-        """
-        self._db.execute(
-            """
-            INSERT INTO players (player_id, first_name, last_name)
-            VALUES (?, ?, ?)
-            ON CONFLICT(player_id) DO UPDATE SET
-                first_name = excluded.first_name,
-                last_name  = excluded.last_name
-            """,
-            (player.player_id, player.first_name, player.last_name),
-        )
-        logger.debug("Upserted player %s (%s %s)", player.player_id, player.first_name, player.last_name)
 
     def _upsert_roster_membership(
         self, player: _Player, team_id: int, season_id: str

@@ -4,7 +4,7 @@
 [E-215: Fix Player-Level Duplicates from Cross-Perspective Boxscore Loading](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the context layer (CLAUDE.md, scoped rules, agent memory) will document the patterns, conventions, and rough edges discovered during E-215. This ensures all agents and the operator understand the cross-perspective UUID behavior, the new canonical player upsert pattern, the dedup CLI command, and the known gaps in the self-healing pipeline.

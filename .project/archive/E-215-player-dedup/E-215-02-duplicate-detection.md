@@ -4,7 +4,7 @@
 [E-215: Fix Player-Level Duplicates from Cross-Perspective Boxscore Loading](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, a detection function will identify same-team duplicate player pairs using the prefix-matching signal described in TN-2. A CLI command `bb data dedup-players --dry-run` will report all detected pairs with their canonical/duplicate assignment per TN-3. The `--dry-run` flag is the default (no data modification).

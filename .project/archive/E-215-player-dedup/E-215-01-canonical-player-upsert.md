@@ -4,7 +4,7 @@
 [E-215: Fix Player-Level Duplicates from Cross-Perspective Boxscore Loading](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, a shared `ensure_player_row()` function will exist in `src/db/players.py` that all 7 loader paths use to create or update player rows. The function implements the name-preference rule (per TN-1): name components are only updated when the incoming value is strictly longer than the stored value, preventing initials from overwriting full names. All existing loader-specific player upsert functions are replaced with calls to this shared function.

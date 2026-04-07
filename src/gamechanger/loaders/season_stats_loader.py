@@ -49,6 +49,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
+from src.db.players import ensure_player_row
 from src.db.teams import ensure_team_row
 from src.gamechanger.loaders import LoadResult, derive_season_id_for_team, ensure_season_row
 
@@ -201,7 +202,7 @@ class SeasonStatsLoader:
             return 0
 
         # AC-4: ensure player stub exists before inserting FK-referencing rows.
-        self._ensure_player_row(player_id)
+        ensure_player_row(self._db, player_id, "Unknown", "Unknown")
 
         rows_upserted = 0
 
@@ -556,32 +557,6 @@ class SeasonStatsLoader:
     # ------------------------------------------------------------------
     # FK prerequisite helpers (mirrors RosterLoader pattern)
     # ------------------------------------------------------------------
-
-    def _ensure_player_row(self, player_id: str) -> None:
-        """Ensure a ``players`` row exists for ``player_id``.
-
-        Inserts a stub row (``first_name='Unknown'``, ``last_name='Unknown'``)
-        if none exists, logging a WARNING.  Does nothing if already present.
-
-        Args:
-            player_id: GameChanger player UUID.
-        """
-        existing = self._db.execute(
-            "SELECT 1 FROM players WHERE player_id = ?", (player_id,)
-        ).fetchone()
-
-        if existing is None:
-            logger.warning(
-                "Player %s not found in players table; inserting stub row.", player_id
-            )
-            self._db.execute(
-                """
-                INSERT INTO players (player_id, first_name, last_name)
-                VALUES (?, 'Unknown', 'Unknown')
-                ON CONFLICT(player_id) DO NOTHING
-                """,
-                (player_id,),
-            )
 
     def _ensure_team_row(
         self, gc_uuid: str, *, season_year: int | None = None

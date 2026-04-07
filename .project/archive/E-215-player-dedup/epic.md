@@ -1,7 +1,7 @@
 # E-215: Fix Player-Level Duplicates from Cross-Perspective Boxscore Loading
 
 ## Status
-`READY`
+`COMPLETED`
 
 ## Overview
 Fix same-team duplicate player entries caused by GameChanger's cross-perspective UUID mismatch. The scouting pipeline creates duplicate players when the same human appears with different `player_id` UUIDs and name formats across boxscores viewed from different team perspectives. This splits stats across two entries in reports and dashboards, understating player performance.
@@ -59,11 +59,11 @@ Both get inserted as separate `players` rows because they have different `player
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-215-01 | Canonical player upsert with name-preference logic | TODO | None | - |
-| E-215-02 | Duplicate player detection query and CLI | TODO | None | - |
-| E-215-03 | Player merge function and CLI execution | TODO | E-215-01, E-215-02 | - |
-| E-215-04 | Post-load dedup prevention in scouting pipeline | TODO | E-215-01, E-215-02, E-215-03 | - |
-| E-215-05 | Context-layer update for player dedup patterns | TODO | E-215-04 | - |
+| E-215-01 | Canonical player upsert with name-preference logic | DONE | None | - |
+| E-215-02 | Duplicate player detection query and CLI | DONE | None | - |
+| E-215-03 | Player merge function and CLI execution | DONE | E-215-01, E-215-02 | - |
+| E-215-04 | Post-load dedup prevention in scouting pipeline | DONE | E-215-01, E-215-02, E-215-03 | - |
+| E-215-05 | Context-layer update for player dedup patterns | DONE | E-215-04 | - |
 
 ## Dispatch Team
 - software-engineer
@@ -165,9 +165,11 @@ The plays pipeline (`bb data crawl --crawler plays` + `bb data load --loader pla
 
 ## History
 - 2026-04-06: Created. Triggered by user-reported duplicate player entries on Lincoln High standalone report. Expert consultation with DE, SE, and Coach completed same day.
-- 2026-04-06: Set to READY after spec review and refinement. E-215-05 (context-layer) added after initial DRAFT based on user requirement. Plays/spray pipeline re-contamination gap discovered during post-internal-review investigation and addressed in E-215-04 revision (two-hook architecture).
+- 2026-04-06: Set to READY after spec review and refinement.
+- 2026-04-07: Dispatch started. E-215-05 (context-layer) added after initial DRAFT based on user requirement. Plays/spray pipeline re-contamination gap discovered during post-internal-review investigation and addressed in E-215-04 revision (two-hook architecture).
+- 2026-04-07: All 5 stories implemented and reviewed. CR integration review clean. Codex code review skipped (epic branch not accessible to Codex sandbox). Epic COMPLETED.
 
-### Review Scorecard
+### Spec Review Scorecard
 | Review Pass | Findings | Accepted | Dismissed |
 |---|---|---|---|
 | Internal iteration 1 -- CR spec audit | 8 | 4 | 4 |
@@ -179,3 +181,39 @@ The plays pipeline (`bb data crawl --crawler plays` + `bb data load --loader pla
 | Codex iteration 1 | 7 | 5 | 2 |
 | Codex iteration 2 | 5 | 3 | 2 |
 | **Total** | **43** | **28** | **15** |
+
+### Implementation Review Scorecard
+| Review Pass | Findings | Accepted | Dismissed |
+|---|---|---|---|
+| Per-story CR -- E-215-01 | 1 | 0 | 1 |
+| Per-story CR -- E-215-02 | 1 | 1 | 0 |
+| Per-story CR -- E-215-03 | 0 | 0 | 0 |
+| Per-story CR -- E-215-04 | 1 | 1 | 0 |
+| CR integration review | 0 | 0 | 0 |
+| **Total** | **3** | **2** | **1** |
+
+(E-215-05 was context-layer only -- PM verified, no CR. Codex code review skipped.)
+
+### Documentation Assessment
+- Trigger 1 (new feature ships): **Yes** -- new `bb data dedup-players` CLI command and player dedup pipeline.
+- Trigger 2 (architecture/deployment changes): No.
+- Trigger 3 (agent changes): No.
+- Trigger 4 (schema changes): No (no new migrations; runtime merge only).
+- Trigger 5 (epic changes how system works): **Yes** -- scouting pipeline now includes automatic post-load dedup.
+- **Verdict**: Triggers 1 and 5 fire. However, the relevant documentation is all context-layer (CLAUDE.md Commands, data-model.md) which was already updated by E-215-05. No `docs/admin/` or `docs/coaching/` files require updates -- the dedup CLI is an operator tool (documented in CLAUDE.md), not a coaching-facing feature. No docs-writer dispatch needed.
+
+### Context-Layer Assessment
+Context-layer impact addressed by E-215-05. Per-trigger verdicts:
+1. **New convention/pattern**: Yes -- `ensure_player_row()` canonical upsert pattern. Codified in CLAUDE.md Architecture (E-215-05 AC-1).
+2. **Architectural decision**: Yes -- cross-perspective UUID duality is permanent API property; two-hook dedup architecture. Codified in data-model.md (E-215-05 AC-3, AC-5).
+3. **Footgun/failure mode**: Yes -- merge-every-run cycle, plays pipeline dedup gap. Codified in data-model.md (E-215-05 AC-5, AC-6).
+4. **Agent behavior change**: No.
+5. **Domain knowledge**: Yes -- `gc_athlete_profile_id` unpopulated status. Codified in data-model.md (E-215-05 AC-4).
+6. **New CLI command**: Yes -- `bb data dedup-players`. Codified in CLAUDE.md Commands (E-215-05 AC-2).
+- **Verdict**: 5 of 6 triggers fire. All addressed by E-215-05. No additional claude-architect dispatch needed.
+
+### Ideas Backlog Review
+Reviewed `/.project/ideas/README.md`. No ideas are directly unblocked by E-215. IDEA-052 (Familiar Faces Indicator) touches cross-team player identity but depends on E-104, not E-215. IDEA-043 (Fuzzy Duplicate Team Detection) is team-level, not player-level. No promotions or status changes triggered.
+
+### Vision Signals Check
+`docs/vision-signals.md` has unprocessed signals (last entry 2026-04-02). No new signals from E-215 to add. The user may want to "curate the vision" at a convenient pause point.

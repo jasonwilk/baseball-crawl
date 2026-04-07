@@ -439,7 +439,67 @@ def _scout_live(
                     typer.echo(f"Spray load error: {exc}", err=True)
                     exit_code = 1
 
+        # Step 4: post-spray dedup sweep (Hook 2).
+        # Catches duplicate player stubs re-created by the spray loader.
+        try:
+            _post_spray_dedup(conn, team, season, started_at)
+        except Exception:  # noqa: BLE001
+            logger.error(
+                "Post-spray dedup sweep failed (non-fatal)", exc_info=True
+            )
+
     raise SystemExit(exit_code)
+
+
+def _post_spray_dedup(
+    conn: sqlite3.Connection,
+    team_public_id: str | None,
+    season_filter: str | None,
+    started_at: str,
+) -> None:
+    """Run post-spray dedup sweep for teams scouted in this pipeline run.
+
+    Queries ``scouting_runs`` for teams with runs checked after ``started_at``
+    and runs ``dedup_team_players()`` for each with ``manage_transaction=True``.
+
+    Args:
+        conn: Open SQLite connection.
+        team_public_id: If given, scope to this single team's public_id.
+        season_filter: If given, scope to this season.
+        started_at: ISO timestamp marking the start of this pipeline run.
+    """
+    from src.db.player_dedup import dedup_team_players
+
+    if team_public_id:
+        # Single-team mode: look up team_id and season_id from scouting_runs.
+        lookup = _find_scouting_run(conn, team_public_id, started_at)
+        if lookup is None:
+            return
+        team_id, season_id = lookup
+        dedup_team_players(conn, team_id, season_id, manage_transaction=True)
+    else:
+        # All-teams mode: find all teams with recent scouting runs.
+        query = (
+            "SELECT DISTINCT sr.team_id, sr.season_id "
+            "FROM scouting_runs sr "
+            "WHERE sr.last_checked >= ?"
+        )
+        params: list[object] = [started_at]
+        if season_filter:
+            query += " AND sr.season_id = ?"
+            params.append(season_filter)
+
+        rows = conn.execute(query, params).fetchall()
+        for tid, sid in rows:
+            try:
+                dedup_team_players(conn, tid, sid, manage_transaction=True)
+            except Exception:  # noqa: BLE001
+                logger.error(
+                    "Post-spray dedup failed for team_id=%d season=%s (non-fatal)",
+                    tid,
+                    sid,
+                    exc_info=True,
+                )
 
 
 def _resolve_missing_gc_uuids(
@@ -950,6 +1010,143 @@ def dedup(
             typer.echo("Skip reasons:")
             for reason in skip_reasons:
                 typer.echo(f"  - {reason}")
+
+    raise SystemExit(0)
+
+
+# ---------------------------------------------------------------------------
+# bb data dedup-players
+# ---------------------------------------------------------------------------
+
+
+@app.command("dedup-players")
+def dedup_players(
+    execute: bool = typer.Option(
+        False,
+        "--execute",
+        help="Perform the merges. Without this flag, only a dry-run preview is shown.",
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Explicitly request dry-run mode (this is the default).",
+    ),
+    team_id: Optional[int] = typer.Option(
+        None,
+        "--team-id",
+        help="Scope detection to a single team.",
+    ),
+    season_id: Optional[str] = typer.Option(
+        None,
+        "--season-id",
+        help="Scope detection to a single season.",
+    ),
+    db_path: Path = typer.Option(
+        _DEFAULT_DB_PATH,
+        "--db",
+        help="Path to the SQLite database.",
+    ),
+) -> None:
+    """Detect and merge duplicate players on the same team.
+
+    Default is dry-run: prints detected pairs and per-table row counts
+    without modifying any data. Use --execute to perform the merges.
+    """
+    from src.db.player_dedup import (
+        find_duplicate_players,
+        merge_player_pair,
+        preview_player_merge,
+        recompute_affected_seasons,
+    )
+
+    # --dry-run is the default; --execute overrides it
+    is_dry_run = not execute
+
+    with closing(sqlite3.connect(str(db_path))) as conn:
+        conn.execute("PRAGMA foreign_keys = ON")
+
+        try:
+            pairs = find_duplicate_players(conn, team_id=team_id, season_id=season_id)
+        except Exception as exc:
+            typer.echo(f"Error finding duplicate players: {exc}", err=True)
+            raise SystemExit(1) from exc
+
+        if not pairs:
+            typer.echo("No duplicate players found.")
+            raise SystemExit(0)
+
+        mode = "DRY RUN" if is_dry_run else "EXECUTE"
+        team_ids_seen: set[int] = set()
+
+        typer.echo(f"[{mode}] Found {len(pairs)} duplicate pair(s).\n")
+
+        typer.echo(f"{'Canonical':<30s} {'Duplicate':<30s} {'Team':<30s} {'Confidence':<12s} Reason")
+        typer.echo("-" * 120)
+
+        for pair in pairs:
+            team_ids_seen.add(pair.team_id)
+            canonical_name = f"{pair.canonical_first_name} {pair.canonical_last_name}"
+            duplicate_name = f"{pair.duplicate_first_name} {pair.duplicate_last_name}"
+            confidence = "high" if pair.has_overlapping_games else "low"
+            typer.echo(
+                f"{canonical_name:<30s} {duplicate_name:<30s} {pair.team_name:<30s} "
+                f"{confidence:<12s} {pair.reason}"
+            )
+
+        if is_dry_run:
+            # Show per-table preview for each pair
+            typer.echo("\nPer-pair row counts:")
+            for pair in pairs:
+                preview = preview_player_merge(
+                    conn, pair.canonical_player_id, pair.duplicate_player_id
+                )
+                canonical_name = f"{pair.canonical_first_name} {pair.canonical_last_name}"
+                duplicate_name = f"{pair.duplicate_first_name} {pair.duplicate_last_name}"
+                if preview.table_counts:
+                    tables_str = ", ".join(
+                        f"{t}={n}" for t, n in sorted(preview.table_counts.items())
+                    )
+                    typer.echo(f"  {duplicate_name} -> {canonical_name}: {tables_str}")
+                else:
+                    typer.echo(f"  {duplicate_name} -> {canonical_name}: (no rows)")
+
+            typer.echo("")
+            typer.echo(f"Found {len(pairs)} duplicate pair(s) across {len(team_ids_seen)} team(s).")
+        else:
+            # Execute merges
+            merged = 0
+            failed = 0
+            all_affected: set[tuple[str, int, str]] = set()
+
+            typer.echo("")
+            for pair in pairs:
+                canonical_name = f"{pair.canonical_first_name} {pair.canonical_last_name}"
+                duplicate_name = f"{pair.duplicate_first_name} {pair.duplicate_last_name}"
+                try:
+                    affected = merge_player_pair(
+                        conn,
+                        pair.canonical_player_id,
+                        pair.duplicate_player_id,
+                    )
+                    all_affected.update(affected)
+                    typer.echo(f"  MERGED {duplicate_name} -> {canonical_name}")
+                    merged += 1
+                except Exception as exc:
+                    typer.echo(
+                        f"  ERROR {duplicate_name} -> {canonical_name}: {exc}"
+                    )
+                    failed += 1
+
+            # Recompute season aggregates
+            if all_affected:
+                typer.echo(f"\nRecomputing season aggregates for {len(all_affected)} tuple(s)...")
+                recompute_affected_seasons(conn, all_affected)
+                typer.echo("Season aggregates recomputed.")
+
+            typer.echo(
+                f"\nSummary: {len(pairs)} pair(s) detected, "
+                f"{merged} merged, {failed} failed."
+            )
 
     raise SystemExit(0)
 

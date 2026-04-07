@@ -749,6 +749,21 @@ def run_scouting_sync(team_id: int, public_id: str, crawl_job_id: int) -> None:
                     conn, client, team_id, public_id, gc_uuid, season_id
                 )
 
+                # 4. Post-spray dedup sweep (Hook 2).
+                # Catches duplicate player stubs re-created by the spray loader.
+                try:
+                    from src.db.player_dedup import dedup_team_players
+
+                    dedup_team_players(
+                        conn, team_id, season_id, manage_transaction=True
+                    )
+                except Exception:  # noqa: BLE001
+                    logger.error(
+                        "Post-spray dedup failed for team_id=%d (non-fatal)",
+                        team_id,
+                        exc_info=True,
+                    )
+
             logger.info(
                 "Scouting sync complete: team_id=%d public_id=%s loaded=%d errors=%d",
                 team_id, public_id, load_result.loaded, load_result.errors,

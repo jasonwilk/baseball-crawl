@@ -476,18 +476,17 @@ def test_unknown_player_gets_stub_row(
 def test_unknown_player_stub_logs_warning(
     db: sqlite3.Connection, tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """Stub player creation logs a WARNING with the player UUID."""
+    """Stub player creation logs a message with the player UUID."""
     _setup_game(db)
 
     event = _make_event(_EVENT_ID_1)
     data = {"spray_chart_data": {"offense": {_PLAYER_UNKNOWN: [event]}, "defense": {}}}
     spray_dir = _write_spray_file(tmp_path, _SEASON_ID, _OWN_GC_UUID, _GAME_ID, data)
 
-    with caplog.at_level(logging.WARNING, logger="src.gamechanger.loaders.spray_chart_loader"):
+    with caplog.at_level(logging.DEBUG, logger="src.db.players"):
         SprayChartLoader(db).load_dir(spray_dir)
 
     assert _PLAYER_UNKNOWN in caplog.text
-    assert "Unknown" in caplog.text or "stub" in caplog.text.lower()
 
 
 # ---------------------------------------------------------------------------

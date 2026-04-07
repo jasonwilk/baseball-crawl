@@ -49,6 +49,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
+from src.db.players import ensure_player_row
 from src.gamechanger.loaders import LoadResult, derive_season_id_for_team
 
 logger = logging.getLogger(__name__)
@@ -270,30 +271,6 @@ class SprayChartLoader:
         )
         return fallback_team_id
 
-    def _ensure_stub_player(self, player_id: str) -> None:
-        """Ensure a player row exists; insert stub if not present (AC-6).
-
-        Logs WARNING when a stub is created (FK-safe orphan handling).
-
-        Args:
-            player_id: GameChanger player UUID.
-        """
-        existing = self._db.execute(
-            "SELECT 1 FROM players WHERE player_id = ?", (player_id,)
-        ).fetchone()
-        if existing is None:
-            logger.warning(
-                "Unknown player_id=%s; inserting stub row "
-                "(first_name='Unknown', last_name='Unknown').",
-                player_id,
-            )
-            self._db.execute(
-                "INSERT INTO players (player_id, first_name, last_name) "
-                "VALUES (?, 'Unknown', 'Unknown') "
-                "ON CONFLICT(player_id) DO NOTHING",
-                (player_id,),
-            )
-
     # -----------------------------------------------------------------------
     # Event insertion
     # -----------------------------------------------------------------------
@@ -360,7 +337,7 @@ class SprayChartLoader:
             error_int = None
 
         # FK-safe: ensure player row exists before inserting spray row.
-        self._ensure_stub_player(player_uuid)
+        ensure_player_row(self._db, player_uuid, "Unknown", "Unknown")
 
         cursor = self._db.execute(
             """

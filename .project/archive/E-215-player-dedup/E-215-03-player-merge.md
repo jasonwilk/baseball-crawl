@@ -4,7 +4,7 @@
 [E-215: Fix Player-Level Duplicates from Cross-Perspective Boxscore Loading](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, a `merge_player_pair(db, canonical_id, duplicate_id)` function will atomically reassign all FK references from a duplicate player_id to the canonical player_id across all 8 affected tables, handling UNIQUE constraint conflicts with the delete-or-update pattern, then deleting the duplicate player row. The `bb data dedup-players --execute` CLI flag triggers the merge for all detected pairs. Season aggregates are recomputed after the merge.

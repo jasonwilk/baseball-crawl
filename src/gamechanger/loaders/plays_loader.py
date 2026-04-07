@@ -41,6 +41,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
+from src.db.players import ensure_player_row
 from src.gamechanger.loaders import LoadResult
 from src.gamechanger.parsers.plays_parser import ParsedPlay, PlaysParser
 from src.gamechanger.types import TeamRef
@@ -211,9 +212,9 @@ class PlaysLoader:
 
         for play in plays:
             # AC-3: Ensure stub player rows for batter and pitcher.
-            self._ensure_player_stub(play.batter_id)
+            ensure_player_row(self._db, play.batter_id, "Unknown", "Unknown")
             if play.pitcher_id is not None:
-                self._ensure_player_stub(play.pitcher_id)
+                ensure_player_row(self._db, play.pitcher_id, "Unknown", "Unknown")
 
             # Insert the parent plays row.
             cursor = self._db.execute(
@@ -271,30 +272,6 @@ class PlaysLoader:
             plays_inserted += 1
 
         return plays_inserted
-
-    def _ensure_player_stub(self, player_id: str) -> None:
-        """Ensure a player row exists, inserting a stub if needed.
-
-        Uses the FK-safe orphan handling pattern: insert a stub row with
-        ``first_name='Unknown'``, ``last_name='Unknown'``.  If a real row
-        already exists, the ``ON CONFLICT`` clause does nothing.
-
-        Args:
-            player_id: GameChanger player UUID.
-        """
-        row = self._db.execute(
-            "SELECT 1 FROM players WHERE player_id = ?",
-            (player_id,),
-        ).fetchone()
-
-        if row is None:
-            self._db.execute(
-                "INSERT INTO players (player_id, first_name, last_name) VALUES (?, 'Unknown', 'Unknown')",
-                (player_id,),
-            )
-            logger.warning(
-                "Inserted stub player row for player_id=%s.", player_id,
-            )
 
     # ------------------------------------------------------------------
     # File I/O
