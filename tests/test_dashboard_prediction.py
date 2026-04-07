@@ -225,3 +225,50 @@ class TestPredictionFailure:
         assert response.status_code == 200
         # No prediction section since it failed
         assert "Predicted Starter" not in response.text
+
+# ── Print view renders with prediction ────────────────────────────────
+
+
+class TestOpponentPrintWithPrediction:
+
+    @pytest.fixture(autouse=True)
+    def _enable_flag(self, monkeypatch):
+        monkeypatch.setenv("FEATURE_PREDICTED_STARTER", "1")
+
+    @patch("src.api.routes.dashboard._check_opponent_authorization", return_value=True)
+    @patch("src.api.routes.dashboard.db")
+    @patch("src.api.routes.dashboard._fetch_opponent_detail_data")
+    def test_print_renders_prediction_section(
+        self, mock_fetch, mock_db, mock_auth,
+    ):
+        mock_fetch.return_value = (_SCOUTING_REPORT, _TEAM_INFOS)
+        mock_db.get_available_seasons.return_value = [{"season_id": "2026-spring-hs"}]
+        mock_db.get_opponent_scouting_status.return_value = {"status": "full_stats", "link_id": 1}
+        mock_db.get_pitching_workload.return_value = {}
+        mock_db.get_pitching_history.return_value = _PITCHING_HISTORY
+        mock_db.build_pitcher_profiles.return_value = {
+            "p1": {
+                "player_id": "p1",
+                "first_name": "Ace",
+                "last_name": "Smith",
+                "jersey_number": "22",
+                "appearances": _PITCHING_HISTORY,
+                "starts": _PITCHING_HISTORY,
+                "total_games": 1,
+                "total_starts": 1,
+                "season_ip_outs": 18,
+                "season_k9": 9.0,
+                "start_to_start_rest": [],
+            },
+        }
+        mock_db.get_last_meeting.return_value = None
+        mock_db.get_players_spray_events_batch.return_value = {}
+        mock_db.get_game_coverage.return_value = None
+
+        client = _create_test_client()
+        response = client.get("/dashboard/opponents/99/print?team_id=1")
+
+        assert response.status_code == 200
+        html = response.text
+        assert "Predicted Starter" in html
+        assert "Ace Smith" in html

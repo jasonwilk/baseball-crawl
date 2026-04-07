@@ -139,7 +139,10 @@ def _is_excluded_within_1_day(
         return False
     try:
         last_date = datetime.date.fromisoformat(last_date_str)
-        return (reference_date - last_date).days <= _WITHIN_1_DAY_REST
+        days = (reference_date - last_date).days
+        if days < 0:
+            return False
+        return days <= _WITHIN_1_DAY_REST
     except (ValueError, TypeError):
         return False
 
@@ -161,6 +164,8 @@ def _is_excluded_high_pitch_short_rest(
     try:
         last_date = datetime.date.fromisoformat(last_date_str)
         days_rest = (reference_date - last_date).days
+        if days_rest < 0:
+            return False
         return days_rest < _SHORT_REST_DAYS
     except (ValueError, TypeError):
         return False
@@ -503,7 +508,7 @@ def _compute_rotation_likelihoods(
             last_date = datetime.date.fromisoformat(last_date_str)
             days = (reference_date - last_date).days
             # More rest = more available. Normalize to 0-0.30.
-            rest_score = min(days / 7.0, 1.0) * 0.30
+            rest_score = min(max(days, 0) / 7.0, 1.0) * 0.30
             likelihoods[pid] = likelihoods.get(pid, 0) + rest_score
         except (ValueError, TypeError):
             pass

@@ -449,3 +449,43 @@ class TestLLMFailureFallback:
         assert "Scouting Analysis" not in html
         # Disclaimer is Tier 1 variant
         assert "Based on rotation pattern, rest days, and recent workload. Actual starter may differ." in html
+
+# ── show_predicted_starter kill-switch ─────────────────────────────────
+
+
+class TestShowPredictedStarterFalse:
+    """show_predicted_starter=False removes the entire predicted starter section."""
+
+    def test_section_removed_when_flag_false(self):
+        pred = StarterPrediction(
+            confidence="high",
+            predicted_starter=_make_starter(),
+            rotation_pattern="ace-dominant",
+            rest_table=_make_rest_table(),
+            bullpen_order=_make_bullpen_order(),
+        )
+        html = render_report(_base_data(
+            starter_prediction=pred,
+            show_predicted_starter=False,
+        ))
+        # CSS styles always include the class name, so assert on the
+        # structural HTML element that only appears inside the guard.
+        assert '<div class="predicted-starter-section">' not in html
+        assert "Ace Smith" not in html
+        assert "No pitching data available" not in html
+
+    def test_section_present_when_flag_true(self):
+        pred = StarterPrediction(
+            confidence="high",
+            predicted_starter=_make_starter(),
+            rotation_pattern="ace-dominant",
+            rest_table=_make_rest_table(),
+            bullpen_order=_make_bullpen_order(),
+        )
+        html = render_report(_base_data(
+            starter_prediction=pred,
+            show_predicted_starter=True,
+        ))
+        assert "Predicted Starter" in html
+        assert "Ace Smith" in html
+        assert "starter-rest-table" in html
