@@ -101,6 +101,13 @@ class ScoutingLoader:
 
         total = self._load_roster_section(scouting_dir, team_id, db_season_id)
 
+        # Post-roster validation: compare DB roster count to source file count.
+        roster_path = scouting_dir / "roster.json"
+        if roster_path.exists():
+            expected_count = self._count_roster_entries(roster_path)
+            if expected_count is not None:
+                self._validate_roster_count(team_id, db_season_id, expected_count)
+
         boxscores_dir = scouting_dir / "boxscores"
         if not boxscores_dir.is_dir():
             logger.info("No boxscores directory at %s; nothing to load.", boxscores_dir)
@@ -119,6 +126,9 @@ class ScoutingLoader:
         total.loaded += bs_result.loaded
         total.skipped += bs_result.skipped
         total.errors += bs_result.errors
+
+        # Post-boxscore validation: check for duplicate game rows.
+        self._check_duplicate_games(team_id, db_season_id)
 
         # Hook 1: dedup sweep after boxscore loading, before aggregation.
         # Uses manage_transaction=False since the loader's connection may
@@ -366,6 +376,79 @@ class ScoutingLoader:
         except sqlite3.Error as exc:
             logger.error("DB error loading roster player %s for team %d: %s", player_id, team_id, exc)
             return False
+
+    # ------------------------------------------------------------------
+    # Post-load validation
+    # ------------------------------------------------------------------
+
+    def _check_duplicate_games(self, team_id: int, season_id: str) -> None:
+        """Check for duplicate game rows involving this team in a season.
+
+        Queries for ``(game_date, unordered team pair)`` groups with
+        ``COUNT(*) > 1`` among completed games where this team is home or
+        away within the given season.  Logs WARNING if any duplicates found.
+        """
+        rows = self._db.execute(
+            """
+            SELECT game_date,
+                   MIN(home_team_id, away_team_id) AS t1,
+                   MAX(home_team_id, away_team_id) AS t2,
+                   COUNT(*) AS cnt
+            FROM games
+            WHERE (home_team_id = ? OR away_team_id = ?)
+              AND status = 'completed'
+              AND season_id = ?
+            GROUP BY game_date, t1, t2
+            HAVING cnt > 1
+            """,
+            (team_id, team_id, season_id),
+        ).fetchall()
+
+        if rows:
+            details = "; ".join(
+                f"{r[0]} teams=({r[1]},{r[2]}) x{r[3]}" for r in rows
+            )
+            logger.warning(
+                "Post-load validation: %d duplicate game(s) detected for "
+                "team_id=%d: %s",
+                len(rows), team_id, details,
+            )
+
+    def _validate_roster_count(
+        self, team_id: int, season_id: str, expected_count: int
+    ) -> None:
+        """Warn if DB roster count exceeds the expected count from roster.json.
+
+        DB count may be *lower* after player dedup merges -- that is correct
+        behavior and not warned.
+        """
+        actual = self._db.execute(
+            "SELECT COUNT(*) FROM team_rosters WHERE team_id = ? AND season_id = ?",
+            (team_id, season_id),
+        ).fetchone()[0]
+
+        if actual > expected_count:
+            logger.warning(
+                "Post-load validation: expected %d roster entries for "
+                "team_id=%d, found %d in DB",
+                expected_count, team_id, actual,
+            )
+
+    @staticmethod
+    def _count_roster_entries(roster_path: Path) -> int | None:
+        """Count valid player entries in a roster.json file.
+
+        Returns the count of entries with an ``id`` field, or ``None`` if the
+        file cannot be read.
+        """
+        try:
+            with roster_path.open(encoding="utf-8") as fh:
+                raw = json.load(fh)
+        except (json.JSONDecodeError, OSError):
+            return None
+        if not isinstance(raw, list):
+            return None
+        return sum(1 for p in raw if p.get("id"))
 
     # ------------------------------------------------------------------
     # Season aggregate computation

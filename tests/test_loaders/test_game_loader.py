@@ -43,6 +43,8 @@ def db() -> sqlite3.Connection:
     conn.executescript(_MIGRATION_FILE.read_text(encoding="utf-8"))
     conn.execute("ALTER TABLE teams ADD COLUMN season_year INTEGER")
     conn.execute("ALTER TABLE player_game_pitching ADD COLUMN appearance_order INTEGER")
+    conn.execute("ALTER TABLE games ADD COLUMN start_time TEXT")
+    conn.execute("ALTER TABLE games ADD COLUMN timezone TEXT")
     conn.commit()
     yield conn
     conn.close()

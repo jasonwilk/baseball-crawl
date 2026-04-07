@@ -49,7 +49,7 @@ import json
 import logging
 import re
 import sqlite3
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from src.db.players import ensure_player_row
@@ -515,6 +515,21 @@ class GameLoader:
         # Game date from last_scoring_update (YYYY-MM-DD prefix).
         game_date = summary.last_scoring_update[:10] if summary.last_scoring_update else "1900-01-01"
 
+        # Pre-load dedup check: if a game already exists for this date and
+        # team pair (in either home/away order), reuse the existing game_id
+        # so all stat upserts merge into the canonical row.
+        canonical_id = self._find_duplicate_game(
+            summary.event_id, game_date,
+            home_team_id, away_team_id, home_score, away_score,
+            summary.start_time,
+        )
+        if canonical_id is not None:
+            logger.info(
+                "Dedup: redirecting game %s → %s (same date %s, same teams)",
+                summary.event_id, canonical_id, game_date,
+            )
+            summary = replace(summary, event_id=canonical_id)
+
         return self._upsert_game_and_stats(
             summary, game_date,
             home_team_id, away_team_id, home_score, away_score,
@@ -926,6 +941,105 @@ class GameLoader:
         except json.JSONDecodeError as exc:
             logger.error("JSON parse error in %s: %s", path, exc)
             return None
+
+    # ------------------------------------------------------------------
+    # Dedup check
+    # ------------------------------------------------------------------
+
+    def _find_duplicate_game(
+        self,
+        game_id: str,
+        game_date: str,
+        home_team_id: int,
+        away_team_id: int,
+        home_score: int | None,
+        away_score: int | None,
+        start_time: str | None,
+    ) -> str | None:
+        """Check if a game already exists for this date and team pair.
+
+        Searches for a completed game on the same date involving the same two
+        teams (order-insensitive).  Doubleheaders are distinguished by
+        ``start_time`` first, then by score totals as a fallback.
+
+        Args:
+            game_id: The incoming game's event_id.
+            game_date: ISO date string (YYYY-MM-DD).
+            home_team_id: INTEGER PK of the home team.
+            away_team_id: INTEGER PK of the away team.
+            home_score: Final home score.
+            away_score: Final away score.
+            start_time: ISO 8601 datetime string or None.
+
+        Returns:
+            The existing ``game_id`` to reuse, or ``None`` if no duplicate.
+        """
+        rows = self._db.execute(
+            """
+            SELECT game_id, home_team_id, away_team_id,
+                   home_score, away_score, start_time
+            FROM games
+            WHERE game_date = ?
+              AND status = 'completed'
+              AND game_id != ?
+              AND (
+                (home_team_id = ? AND away_team_id = ?)
+                OR (home_team_id = ? AND away_team_id = ?)
+              )
+            ORDER BY start_time ASC NULLS LAST
+            """,
+            (game_date, game_id,
+             home_team_id, away_team_id,
+             away_team_id, home_team_id),
+        ).fetchall()
+
+        if not rows:
+            return None
+
+        incoming_total = (
+            home_score + away_score
+            if home_score is not None and away_score is not None
+            else None
+        )
+
+        for row in rows:
+            existing_id = row[0]
+            existing_home_score = row[3]
+            existing_away_score = row[4]
+            existing_start_time = row[5]
+
+            # If both have start_time, compare them for doubleheader detection.
+            if start_time is not None and existing_start_time is not None:
+                if start_time != existing_start_time:
+                    # Different start times → distinct games (doubleheader).
+                    continue
+                # Same start time → duplicate.
+                return existing_id
+
+            # start_time is NULL on one or both sides; fall back to score.
+            existing_total = (
+                existing_home_score + existing_away_score
+                if existing_home_score is not None and existing_away_score is not None
+                else None
+            )
+
+            if incoming_total is not None and existing_total is not None:
+                if incoming_total != existing_total:
+                    # Different score totals → distinct games (doubleheader).
+                    continue
+                # Same score total → duplicate.
+                return existing_id
+
+            # Neither start_time nor score can distinguish → skip this
+            # candidate and check remaining rows.
+            logger.warning(
+                "Cannot distinguish game %s from existing %s on %s "
+                "(no start_time, no score to compare); skipping candidate.",
+                game_id, existing_id, game_date,
+            )
+            continue
+
+        return None
 
     # ------------------------------------------------------------------
     # DB write helpers

@@ -4,7 +4,7 @@
 [E-216: Cross-Perspective Game Dedup in the Scouting Pipeline](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, `GameLoader.load_file()` will detect when a game already exists in the database for the same date and team pair (in either home/away order) before inserting a new row. When a match is found, the loader reuses the existing game's `game_id` for all stat upserts instead of creating a duplicate row. This prevents the cross-perspective duplication that occurs when two tracked teams share a matchup. Because the check lives in `GameLoader` (not in any specific caller), it covers all three data loading paths: `bb data scout` (CLI), `run_scouting_sync` (web), and `bb report generate` (standalone reports). See Technical Notes "Data Loading Paths Covered" section.

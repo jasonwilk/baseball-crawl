@@ -1,7 +1,7 @@
 # E-216: Cross-Perspective Game Dedup in the Scouting Pipeline
 
 ## Status
-`READY`
+`COMPLETED`
 
 ## Overview
 When two tracked teams play each other, the GameChanger public games API returns different game IDs for the same real-world game depending on which team's perspective is queried. The scouting loader inserts both as separate `games` rows, inflating batting and pitching stats. This epic adds a pre-load dedup check that prevents duplicate game rows from being created, and post-load data validation that verifies the loaded data matches expectations before it's used.
@@ -37,8 +37,8 @@ When two tracked teams play each other, the GameChanger public games API returns
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-216-01 | Add pre-load game dedup check to GameLoader | TODO | None | - |
-| E-216-02 | Add post-load data validation to scouting loader | TODO | E-216-01 | - |
+| E-216-01 | Add pre-load game dedup check to GameLoader | DONE | None | - |
+| E-216-02 | Add post-load data validation to scouting loader | DONE | E-216-01 | - |
 
 ## Dispatch Team
 - software-engineer
@@ -117,8 +117,9 @@ No file conflicts between stories.
 ## History
 - 2026-04-07: Created (DRAFT). SE consulted (pre-load prevention). DE consulted (post-load sweep). User redirected approach: validation over cleanup tools. Revised to prevention (E-216-01) + post-load validation (E-216-02). Dropped global merge sweep, `bb data dedup-games` CLI, and `src/db/game_dedup.py`. Existing duplicate (Grand Island vs Lincoln High, 2026-03-19) manually resolved prior to epic creation.
 - 2026-04-07: Set to READY after 2 internal review iterations. Codex validation deferred to separate server.
+- 2026-04-07: COMPLETED. All 2 stories delivered. E-216-01 added pre-load game dedup via `_find_duplicate_game()` with order-insensitive team matching and doubleheader tiebreakers. E-216-02 added post-load validation (`_check_duplicate_games()` + `_validate_roster_count()`). Codex caught nondeterministic candidate ordering and missing season_id filter -- both remediated. 15 new tests (9 dedup + 6 validation).
 
-### Review Scorecard
+### Spec Review Scorecard
 | Review Pass | Findings | Accepted | Dismissed |
 |---|---|---|---|
 | Internal iteration 1 — CR spec audit (v1) | 7 | 0 | 7 |
@@ -129,3 +130,32 @@ No file conflicts between stories.
 | Internal iteration 2 — SE/DE holistic (v4) | 14 | 0 | 14 |
 | Codex spec review | 4 | 4 | 0 |
 | **Total** | **41** | **10** | **31** |
+
+### Code Review Scorecard
+| Review Pass | Findings | Accepted | Dismissed |
+|---|---|---|---|
+| Per-story CR -- E-216-01 (2 rounds) | 3 | 3 | 0 |
+| Per-story CR -- E-216-02 (2 rounds) | 3 | 3 | 0 |
+| CR integration review | 0 | 0 | 0 |
+| Codex code review | 4 | 4 | 0 |
+| **Total** | **10** | **10** | **0** |
+
+### Documentation Assessment
+
+Evaluated against documentation update triggers:
+1. New feature or endpoint ships: **No** -- internal pipeline fix, no new user-facing features.
+2. Architecture or deployment configuration changes: **No** -- no infra changes.
+3. New agent created or materially modified: **No**.
+4. Database schema changes: **No** -- no new migrations.
+5. Epic changes how the system works or how users interact with it: **No** -- behavior change is internal (preventing duplicates); no new CLI commands, no UI changes.
+
+**No documentation impact.**
+
+### Context-Layer Assessment
+
+1. **New convention, pattern, or constraint established**: **Yes** -- Game dedup natural key pattern (`game_date` + unordered `{home_team_id, away_team_id}`) with doubleheader tiebreakers (`start_time` then score total). Prevention-over-cleanup philosophy: prevent bad data at insert time rather than building cleanup tools after the fact.
+2. **Architectural decision with ongoing implications**: **No** -- the dedup check is localized to `GameLoader._find_duplicate_game()` and doesn't affect how future epics are planned.
+3. **Footgun, failure mode, or boundary discovered**: **Yes** -- The public games API returns perspective-specific game IDs (different `id` values for the same real-world game depending on which team's perspective is queried). This is a permanent API behavior that any future code touching public game data should be aware of.
+4. **Change to agent behavior, routing, or coordination**: **No**.
+5. **Domain knowledge discovered that should influence agent decisions**: **Yes** -- Cross-perspective ID instability is a fundamental GameChanger API characteristic. The authenticated `game-summaries` endpoint returns stable IDs; only the public endpoint has this problem.
+6. **New CLI command, workflow, or operational procedure introduced**: **No**.

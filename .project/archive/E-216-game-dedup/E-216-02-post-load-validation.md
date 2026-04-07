@@ -4,7 +4,7 @@
 [E-216: Cross-Perspective Game Dedup in the Scouting Pipeline](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the scouting loader will validate loaded data against expected counts from the crawled source files before computing season aggregates. If the DB game count or roster count doesn't match what was crawled, the loader logs a WARNING with expected vs. actual counts. This catches duplicates, missing data, and other integrity issues immediately at load time — not after coaches see wrong stats.
