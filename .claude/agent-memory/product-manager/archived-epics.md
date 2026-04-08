@@ -39,3 +39,4 @@ This file preserves only key milestones and architectural decision points from t
 - **E-214**: Fix Predicted Starter Rest Day Anchoring — `reference_date` threading, `FEATURE_PREDICTED_STARTER` flag
 - **E-215**: Fix Player-Level Duplicates — `ensure_player_row()` canonical upsert, prefix-matching detection, atomic merge, two-hook post-load dedup sweep in scouting pipeline
 - **E-216**: Cross-Perspective Game Dedup — pre-load dedup via natural key (`game_date` + unordered team pair) with doubleheader tiebreakers, post-load validation (game duplicate check + roster count). Prevention-over-cleanup pattern.
+- **E-217**: NSAA Pitch Count Availability Rules — replaced ad-hoc exclusion heuristics with NSAA-compliant frozen dataclass rule engine (tiered rest, consecutive-days, doubleheader aggregation, null pitch count handling). Bullpen shows available/unavailable with reasons. LLM rest table injection. Context-layer `pitch-rules.md` codifies NSAA/Legion/USSSA/PG rules.

@@ -1,7 +1,7 @@
 # Product Manager -- Agent Memory
 
 ## Numbering State
-- Next available epic number: E-218
+- Next available epic number: E-219
 - Next available idea number: IDEA-068
 - Before assigning numbers: ALWAYS `ls /epics/` and `ls /.project/ideas/` to avoid collisions
 
@@ -23,7 +23,6 @@ For full details, read the epic file in `/epics/`. Only READY and ACTIVE epics a
 - **E-174** (READY): Fix Key Extractor to Search Asset Chunks
 - **E-175** (READY): Fix `bb creds import` for POST /auth Curl Commands
 - **E-193** (READY): Browser Automation Infrastructure
-- **E-217** (READY): NSAA Pitch Count Availability Rules
 - **E-218** (READY): League/Level Detection for Pitch Rules
 
 ## Key Architectural Decisions
