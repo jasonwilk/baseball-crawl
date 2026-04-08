@@ -1,7 +1,7 @@
 # E-219: Own-Side-Only Boxscore Loading
 
 ## Status
-`READY`
+`ABANDONED`
 
 ## Overview
 Stop loading opponent player stats from boxscore data. GameChanger returns different player UUIDs depending on which team's perspective a boxscore is fetched from, so loading both sides creates phantom duplicate players. After this epic, a boxscore load inserts player stats only for the team whose perspective the boxscore was fetched from. Game-level data (scores, dates, team IDs) still loads from either perspective.
@@ -122,3 +122,5 @@ Tests that construct boxscore fixtures with opponent data and assert opponent pl
 | Codex iteration 1 | 5 | 4 | 1 |
 | Codex iteration 2 | 6 | 3 | 3 |
 | **Total** | **27** | **21** | **6** |
+
+- 2026-04-08: ABANDONED -- superseded by E-220 (Perspective-Aware Data Architecture). E-219's approach (discard opponent data) was rejected in favor of perspective provenance tracking that preserves both sides.
