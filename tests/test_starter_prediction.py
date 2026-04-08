@@ -12,10 +12,12 @@ import pytest
 
 from src.api.db import build_pitcher_profiles
 from src.reports.starter_prediction import (
+    NSAA_POST_APRIL,
+    NSAA_PRE_APRIL,
     StarterPrediction,
-    _is_excluded_high_pitch_short_rest,
-    _is_excluded_within_1_day,
+    _is_nsaa_excluded,
     compute_starter_prediction,
+    get_nsaa_rules,
     is_predicted_starter_enabled,
 )
 
@@ -456,11 +458,11 @@ class TestAvailabilityUnknown:
         assert "availability unknown" in ace_cand["reasoning"]
 
 
-# ── AC-13: Within-1-day exclusion ───────────────────────────────────────
+# ── AC-1: Low pitch count (1-30) yesterday → NOT excluded ─────────────
 
 
-class TestWithin1DayExclusion:
-    """Pitcher who pitched yesterday is excluded from candidates."""
+class TestLowPitchYesterdayNotExcluded:
+    """Pitcher who threw 1-30 pitches yesterday is NOT excluded (NSAA 0-day rest)."""
 
     @pytest.fixture
     def prediction(self):
@@ -468,32 +470,26 @@ class TestWithin1DayExclusion:
             "2026-03-10", "2026-03-13", "2026-03-16", "2026-03-19",
             "2026-03-22", "2026-03-25", "2026-03-28", "2026-03-29",
         ]
-        # ace-bravo rotation, but ace also pitches relief in game 8 (Mar 29)
         rotation = ["ace", "bravo", "ace", "bravo", "ace", "bravo", "ace", "bravo"]
-        history = _build_rotation_history(rotation, dates)
-        # Add ace as relief in game 8 (latest game, 1 day after his start)
-        history.append(_make_appearance(
-            "ace", "g08", "2026-03-29",
-            ip_outs=3, pitches=20, so=1,
-            appearance_order=2,
-            rest_days=1, team_game_number=8,
-        ))
+        history = _build_rotation_history(rotation, dates, starter_pitches=20)
         profiles = build_pitcher_profiles(history)
         return compute_starter_prediction(
             profiles, history, reference_date=datetime.date(2026, 3, 29),
         )
 
-    def test_ace_excluded(self, prediction):
-        """Ace pitched on Mar 29 (latest game) so should be excluded."""
+    def test_ace_not_excluded(self, prediction):
+        """Ace threw 20 pitches yesterday → 1-30 tier → 0 days rest → available."""
         candidate_ids = [c["player_id"] for c in prediction.top_candidates]
-        assert "ace" not in candidate_ids
+        # Bravo also pitched yesterday with 20 pitches (0 rest needed) so
+        # both should be available; ace is in candidates.
+        assert "ace" in candidate_ids
 
 
-# ── AC-13: 75+ pitch / short rest gate ──────────────────────────────────
+# ── AC-2: NSAA rest-tier exclusion ────────────────────────────────────
 
 
-class TestHighPitchShortRest:
-    """75+ pitches with < 4 days rest -> excluded from candidates."""
+class TestNSAARestTierExclusion:
+    """55 pitches with 1 day rest → excluded (needs 2 days for 51-70 tier)."""
 
     @pytest.fixture
     def prediction(self):
@@ -501,21 +497,27 @@ class TestHighPitchShortRest:
             "2026-03-10", "2026-03-13", "2026-03-16", "2026-03-19",
             "2026-03-22", "2026-03-25", "2026-03-28", "2026-03-30",
         ]
-        # ace-bravo rotation. ace starts game 7 (Mar 28) with 90 pitches.
-        # game 8 is Mar 30 (2 days later). ace should be excluded.
         rotation = ["ace", "bravo", "ace", "bravo", "ace", "bravo", "ace", "bravo"]
         history = _build_rotation_history(
-            rotation, dates, starter_pitches=90,
+            rotation, dates, starter_pitches=55,
         )
         profiles = build_pitcher_profiles(history)
+        # reference_date=Mar 30, ace last pitched Mar 28 (2 days rest),
+        # bravo last pitched Mar 30 (0 days rest). 55 pitches → 51-70 → 2d rest.
+        # Ace: 2 >= 2 → not excluded. Bravo: 0 < 2 → excluded.
         return compute_starter_prediction(
             profiles, history, reference_date=datetime.date(2026, 3, 30),
         )
 
-    def test_ace_excluded_high_pitch(self, prediction):
-        """Ace threw 90 pitches 2 days ago -- should be excluded."""
+    def test_bravo_excluded_short_rest(self, prediction):
+        """Bravo threw 55 pitches today (0 rest) → needs 2 → excluded."""
         candidate_ids = [c["player_id"] for c in prediction.top_candidates]
-        assert "ace" not in candidate_ids
+        assert "bravo" not in candidate_ids
+
+    def test_ace_not_excluded_enough_rest(self, prediction):
+        """Ace threw 55 pitches 2 days ago → needs 2 → exactly enough."""
+        candidate_ids = [c["player_id"] for c in prediction.top_candidates]
+        assert "ace" in candidate_ids
 
 
 # ── AC-13: High pitch count reasoning flag ──────────────────────────────
@@ -1012,60 +1014,109 @@ class TestReferenceDateAnchorsReasoning:
         assert "9 days rest" in ace_cand["reasoning"]
 
 
-# ── AC-5: reference_date controls high-pitch/short-rest exclusion ─────
+# ── AC-2/AC-3: NSAA rest tier unit tests via _is_nsaa_excluded ────────
 
 
-class TestReferenceDateHighPitchExclusion:
-    """80 pitches, reference_date controls whether pitcher is excluded.
+class TestNSAAExcludedUnit:
+    """Direct unit tests for _is_nsaa_excluded covering rest tiers."""
 
-    Last appearance 2026-03-28, 80 pitches (>= 75 threshold).
-    reference_date=2026-04-02 -> 5 days rest (>= 4) -> NOT excluded.
-    reference_date=2026-03-31 -> 3 days rest (< 4) -> excluded.
-    """
-
-    def _make_profile(self) -> dict:
+    def _make_profile(
+        self, pitches: int | None, game_date: str = "2026-03-28",
+    ) -> dict:
         return {
             "total_starts": 3,
             "total_games": 3,
             "first_name": "Ace",
             "last_name": "Pitcher",
             "appearances": [
-                {"game_date": "2026-03-28", "pitches": 80},
+                {"game_date": game_date, "pitches": pitches},
             ],
         }
 
-    def test_not_excluded_with_enough_rest(self):
-        profile = self._make_profile()
-        assert not _is_excluded_high_pitch_short_rest(
-            profile, datetime.date(2026, 4, 2),
-        )
+    # ── Pre-April tiers ────────────────────────────────────────────
+    def test_pre_april_1_30_pitches_0_rest_ok(self):
+        """1-30 pitches, 0 days rest → not excluded."""
+        profile = self._make_profile(25, "2026-03-28")
+        excluded, reason = _is_nsaa_excluded(profile, datetime.date(2026, 3, 28))
+        assert not excluded
 
-    def test_excluded_with_short_rest(self):
-        profile = self._make_profile()
-        assert _is_excluded_high_pitch_short_rest(
-            profile, datetime.date(2026, 3, 31),
-        )
+    def test_pre_april_31_50_needs_1_day(self):
+        """40 pitches, 0 days rest → excluded (needs 1)."""
+        profile = self._make_profile(40, "2026-03-28")
+        excluded, reason = _is_nsaa_excluded(profile, datetime.date(2026, 3, 28))
+        assert excluded
+        assert "needs 1" in reason
 
+    def test_pre_april_31_50_has_1_day_ok(self):
+        """40 pitches, 1 day rest → not excluded."""
+        profile = self._make_profile(40, "2026-03-28")
+        excluded, reason = _is_nsaa_excluded(profile, datetime.date(2026, 3, 29))
+        assert not excluded
 
-# ── AC-6: reference_date controls within-1-day exclusion ─────────────
+    def test_pre_april_51_70_needs_2(self):
+        """60 pitches, 1 day rest → excluded (needs 2)."""
+        profile = self._make_profile(60, "2026-03-28")
+        excluded, reason = _is_nsaa_excluded(profile, datetime.date(2026, 3, 29))
+        assert excluded
+        assert "needs 2" in reason
 
+    def test_pre_april_71_90_needs_3(self):
+        """80 pitches, 2 days rest → excluded (needs 3)."""
+        profile = self._make_profile(80, "2026-03-28")
+        excluded, reason = _is_nsaa_excluded(profile, datetime.date(2026, 3, 30))
+        assert excluded
+        assert "needs 3" in reason
 
-class TestReferenceDateWithin1DayExclusion:
-    """Last appearance 2026-04-05, reference_date=2026-04-06 -> 1 day -> excluded."""
+    def test_pre_april_71_90_has_3_ok(self):
+        """80 pitches, 3 days rest → not excluded."""
+        profile = self._make_profile(80, "2026-03-28")
+        excluded, reason = _is_nsaa_excluded(profile, datetime.date(2026, 3, 31))
+        assert not excluded
 
-    def test_excluded_within_1_day(self):
+    # ── Post-April tiers ───────────────────────────────────────────
+    def test_post_april_91_110_needs_4(self):
+        """100 pitches (post-April), 3 days rest → excluded (needs 4)."""
+        profile = self._make_profile(100, "2026-04-10")
+        excluded, reason = _is_nsaa_excluded(profile, datetime.date(2026, 4, 13))
+        assert excluded
+        assert "needs 4" in reason
+
+    def test_post_april_91_110_has_4_ok(self):
+        """100 pitches (post-April), 4 days rest → not excluded."""
+        profile = self._make_profile(100, "2026-04-10")
+        excluded, reason = _is_nsaa_excluded(profile, datetime.date(2026, 4, 14))
+        assert not excluded
+
+    # ── Null pitch count ───────────────────────────────────────────
+    def test_null_pitch_count_excluded(self):
+        """AC-9: null pitch count → excluded."""
+        profile = self._make_profile(None, "2026-04-05")
+        excluded, reason = _is_nsaa_excluded(profile, datetime.date(2026, 4, 6))
+        assert excluded
+        assert "pitch count unavailable" in reason
+
+    # ── Exceeds max pitches ───────────────────────────────────────
+    def test_pre_april_exceeds_max_needs_max_rest(self):
+        """95 pitches pre-April (max 90) → max tier rest (3 days)."""
+        profile = self._make_profile(95, "2026-03-28")
+        excluded, reason = _is_nsaa_excluded(profile, datetime.date(2026, 3, 30))
+        assert excluded
+        assert "needs 3" in reason
+
+    def test_pre_april_exceeds_max_with_enough_rest_ok(self):
+        """95 pitches pre-April, 3 days rest → not excluded."""
+        profile = self._make_profile(95, "2026-03-28")
+        excluded, reason = _is_nsaa_excluded(profile, datetime.date(2026, 3, 31))
+        assert not excluded
+
+    # ── No appearances ─────────────────────────────────────────────
+    def test_no_appearances_not_excluded(self):
         profile = {
-            "total_starts": 3,
-            "total_games": 3,
-            "first_name": "Ace",
-            "last_name": "Pitcher",
-            "appearances": [
-                {"game_date": "2026-04-05", "pitches": 70},
-            ],
+            "total_starts": 0, "total_games": 0,
+            "first_name": "X", "last_name": "Y", "appearances": [],
         }
-        assert _is_excluded_within_1_day(
-            profile, datetime.date(2026, 4, 6),
-        )
+        excluded, reason = _is_nsaa_excluded(profile, datetime.date(2026, 4, 6))
+        assert not excluded
 
 
 # ── AC-5 (E-214-02): Same history, different reference_date → different rest ─
@@ -1127,3 +1178,278 @@ class TestIsPredictedStarterEnabled:
     def test_absent(self, monkeypatch):
         monkeypatch.delenv("FEATURE_PREDICTED_STARTER", raising=False)
         assert is_predicted_starter_enabled() is False
+
+
+# ── AC-3: Pre/post April 1 rule selection ──────────────────────────────
+
+
+class TestNSAARuleSelection:
+    """get_nsaa_rules selects pre-April vs post-April based on date."""
+
+    def test_pre_april(self):
+        rules = get_nsaa_rules(datetime.date(2026, 3, 31))
+        assert rules is NSAA_PRE_APRIL
+        assert rules.max_pitches == 90
+        assert len(rules.rest_tiers) == 4
+
+    def test_post_april(self):
+        rules = get_nsaa_rules(datetime.date(2026, 4, 1))
+        assert rules is NSAA_POST_APRIL
+        assert rules.max_pitches == 110
+        assert len(rules.rest_tiers) == 5
+
+    def test_year_parameterized(self):
+        """April 1 boundary uses reference_date.year."""
+        rules_2027 = get_nsaa_rules(datetime.date(2027, 3, 31))
+        assert rules_2027 is NSAA_PRE_APRIL
+
+
+# ── AC-4: Consecutive-days rule ────────────────────────────────────────
+
+
+class TestConsecutiveDaysRule:
+    """NSAA max 2 appearances in 3-day window {ref-2, ref-1, ref}."""
+
+    def _make_profile_with_apps(self, app_dates: list[str]) -> dict:
+        apps = [{"game_date": d, "pitches": 15} for d in app_dates]
+        return {
+            "total_starts": 0, "total_games": len(apps),
+            "first_name": "Test", "last_name": "Pitcher",
+            "appearances": apps,
+        }
+
+    def test_2_appearances_in_window_excluded(self):
+        """2 appearances on ref-2 and ref-1 → pitching on ref = 3rd → excluded."""
+        profile = self._make_profile_with_apps(
+            ["2026-04-08", "2026-04-09"],
+        )
+        excluded, reason = _is_nsaa_excluded(profile, datetime.date(2026, 4, 10))
+        assert excluded
+        assert "2 appearances" in reason
+
+    def test_1_appearance_in_window_not_excluded(self):
+        """1 appearance in window → ok."""
+        profile = self._make_profile_with_apps(["2026-04-09"])
+        excluded, reason = _is_nsaa_excluded(profile, datetime.date(2026, 4, 10))
+        assert not excluded
+
+    def test_2_appearances_outside_window_not_excluded(self):
+        """2 appearances on ref-3 and ref-4 → outside window → not excluded."""
+        profile = self._make_profile_with_apps(
+            ["2026-04-06", "2026-04-07"],
+        )
+        excluded, reason = _is_nsaa_excluded(profile, datetime.date(2026, 4, 10))
+        assert not excluded
+
+    def test_doubleheader_counts_as_2_appearances(self):
+        """Two appearances on the same day = 2 appearances (doubleheader)."""
+        apps = [
+            {"game_date": "2026-04-09", "pitches": 15},
+            {"game_date": "2026-04-09", "pitches": 15},
+        ]
+        profile = {
+            "total_starts": 0, "total_games": 2,
+            "first_name": "Test", "last_name": "Pitcher",
+            "appearances": apps,
+        }
+        excluded, reason = _is_nsaa_excluded(profile, datetime.date(2026, 4, 10))
+        assert excluded
+        assert "2 appearances" in reason
+
+
+# ── AC-2: Doubleheader pitch aggregation ───────────────────────────────
+
+
+class TestDoubleheaderPitchAggregation:
+    """Same-day pitches aggregated for rest-tier lookup."""
+
+    def test_combined_pitches_determine_tier(self):
+        """25 pitches game 1 + 30 game 2 = 55 → 51-70 tier → needs 2 days."""
+        apps = [
+            {"game_date": "2026-04-05", "pitches": 25},
+            {"game_date": "2026-04-05", "pitches": 30},
+        ]
+        profile = {
+            "total_starts": 0, "total_games": 2,
+            "first_name": "Test", "last_name": "Pitcher",
+            "appearances": apps,
+        }
+        # 1 day rest → needs 2 → excluded
+        excluded, reason = _is_nsaa_excluded(profile, datetime.date(2026, 4, 6))
+        assert excluded
+        assert "needs 2" in reason
+
+    def test_combined_pitches_low_enough(self):
+        """15 + 10 = 25 → 1-30 tier → 0 rest needed → ok after window."""
+        apps = [
+            {"game_date": "2026-04-05", "pitches": 15},
+            {"game_date": "2026-04-05", "pitches": 10},
+        ]
+        profile = {
+            "total_starts": 0, "total_games": 2,
+            "first_name": "Test", "last_name": "Pitcher",
+            "appearances": apps,
+        }
+        # Use ref 3 days later so doubleheader appearances are outside
+        # the consecutive-days window (only rest-tier matters here).
+        excluded, reason = _is_nsaa_excluded(profile, datetime.date(2026, 4, 8))
+        assert not excluded
+
+
+# ── AC-9: Null pitch count edge cases ──────────────────────────────────
+
+
+class TestNullPitchCount:
+    """Null pitch count on most recent game date → unavailable."""
+
+    def test_single_game_null(self):
+        apps = [{"game_date": "2026-04-05", "pitches": None}]
+        profile = {
+            "total_starts": 1, "total_games": 1,
+            "first_name": "Test", "last_name": "Pitcher",
+            "appearances": apps,
+        }
+        excluded, reason = _is_nsaa_excluded(profile, datetime.date(2026, 4, 6))
+        assert excluded
+        assert "pitch count unavailable" in reason
+
+    def test_doubleheader_partial_null(self):
+        """One game has data, other null → still excluded."""
+        apps = [
+            {"game_date": "2026-04-05", "pitches": 25},
+            {"game_date": "2026-04-05", "pitches": None},
+        ]
+        profile = {
+            "total_starts": 0, "total_games": 2,
+            "first_name": "Test", "last_name": "Pitcher",
+            "appearances": apps,
+        }
+        excluded, reason = _is_nsaa_excluded(profile, datetime.date(2026, 4, 6))
+        assert excluded
+        assert "pitch count unavailable" in reason
+
+    def test_older_null_not_affected(self):
+        """Null on an older date, but most recent date has data → ok."""
+        apps = [
+            {"game_date": "2026-04-01", "pitches": None},
+            {"game_date": "2026-04-05", "pitches": 20},
+        ]
+        profile = {
+            "total_starts": 1, "total_games": 2,
+            "first_name": "Test", "last_name": "Pitcher",
+            "appearances": apps,
+        }
+        excluded, reason = _is_nsaa_excluded(profile, datetime.date(2026, 4, 7))
+        assert not excluded
+
+
+# ── AC-10: Relievers subject to same NSAA rules ───────────────────────
+
+
+class TestRelieverExclusion:
+    """Relievers are checked by NSAA rules, not skipped."""
+
+    @pytest.fixture
+    def prediction(self):
+        dates = [
+            "2026-04-01", "2026-04-04", "2026-04-07", "2026-04-10",
+            "2026-04-13",
+        ]
+        rotation = ["ace"] * 5
+        history = _build_rotation_history(
+            rotation, dates, reliever="closer", reliever_pitches=80,
+        )
+        profiles = build_pitcher_profiles(history)
+        # reference_date = Apr 14. Closer last pitched Apr 13 (1 day rest).
+        # 80 pitches → 71-90 tier → needs 3 days rest → excluded.
+        return compute_starter_prediction(
+            profiles, history, reference_date=datetime.date(2026, 4, 14),
+        )
+
+    def test_reliever_excluded_in_bullpen(self, prediction):
+        """Closer threw 80 pitches yesterday → needs 3 days → unavailable in bullpen."""
+        bp = prediction.bullpen_order
+        assert len(bp) > 0
+        closer_entry = next(b for b in bp if "Closer" in b["name"])
+        assert closer_entry["available"] is False
+        assert closer_entry["unavailability_reason"] is not None
+        assert "needs 3" in closer_entry["unavailability_reason"]
+
+
+# ── AC-5: Bullpen available/unavailable sorting ───────────────────────
+
+
+class TestBullpenAvailabilitySorting:
+    """Available pitchers sort before unavailable ones in bullpen order."""
+
+    @pytest.fixture
+    def prediction(self):
+        dates = [
+            "2026-04-01", "2026-04-03", "2026-04-05", "2026-04-07",
+            "2026-04-09",
+        ]
+        rotation = ["ace"] * 5
+        history = _build_rotation_history(rotation, dates)
+        # Add two relievers: "closer" in all 5 games, "setup" in 3 games
+        pitcher_last: dict[str, str] = {}
+        for i, date in enumerate(dates):
+            gid = f"g{i + 1:02d}"
+            gnum = i + 1
+            # closer appears as order=2 in all games, 80 pitches (high)
+            r_rest = None
+            if "closer" in pitcher_last:
+                d1 = datetime.date.fromisoformat(pitcher_last["closer"])
+                d2 = datetime.date.fromisoformat(date)
+                r_rest = (d2 - d1).days
+            history.append(_make_appearance(
+                "closer", gid, date,
+                ip_outs=3, pitches=80, so=1,
+                appearance_order=2,
+                rest_days=r_rest, team_game_number=gnum,
+            ))
+            pitcher_last["closer"] = date
+            # setup appears in games 1-3 only, 15 pitches (low)
+            if i < 3:
+                sr_rest = None
+                if "setup" in pitcher_last:
+                    d1 = datetime.date.fromisoformat(pitcher_last["setup"])
+                    d2 = datetime.date.fromisoformat(date)
+                    sr_rest = (d2 - d1).days
+                history.append(_make_appearance(
+                    "setup", gid, date,
+                    ip_outs=2, pitches=15, so=0,
+                    appearance_order=2,
+                    rest_days=sr_rest, team_game_number=gnum,
+                ))
+                pitcher_last["setup"] = date
+
+        profiles = build_pitcher_profiles(history)
+        # reference_date = Apr 10. Closer last pitched Apr 9 (1 day rest),
+        # 80 pitches → needs 3 → excluded. Setup last pitched Apr 5 (5d rest),
+        # 15 pitches → needs 0 → available.
+        return compute_starter_prediction(
+            profiles, history, reference_date=datetime.date(2026, 4, 10),
+        )
+
+    def test_available_sorts_first(self, prediction):
+        bp = prediction.bullpen_order
+        assert len(bp) >= 2
+        # Setup (available) should come before Closer (unavailable)
+        setup_idx = next(i for i, b in enumerate(bp) if "Setup" in b["name"])
+        closer_idx = next(i for i, b in enumerate(bp) if "Closer" in b["name"])
+        assert setup_idx < closer_idx
+
+    def test_bullpen_has_availability_fields(self, prediction):
+        for entry in prediction.bullpen_order:
+            assert "available" in entry
+            assert "unavailability_reason" in entry
+
+    def test_available_pitcher_fields(self, prediction):
+        setup = next(b for b in prediction.bullpen_order if "Setup" in b["name"])
+        assert setup["available"] is True
+        assert setup["unavailability_reason"] is None
+
+    def test_unavailable_pitcher_fields(self, prediction):
+        closer = next(b for b in prediction.bullpen_order if "Closer" in b["name"])
+        assert closer["available"] is False
+        assert closer["unavailability_reason"] is not None

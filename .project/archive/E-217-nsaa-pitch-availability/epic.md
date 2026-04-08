@@ -1,7 +1,7 @@
 # E-217: NSAA Pitch Count Availability Rules
 
 ## Status
-`READY`
+`COMPLETED`
 
 ## Overview
 Replace the ad-hoc pitch count exclusion heuristics in the starter prediction engine with NSAA (Nebraska) pitch count rules, filter the bullpen order by availability, and codify the rules in the context layer for LLM and future-feature consumption. The current engine has both over-restriction errors (blocking legal arms) and under-restriction errors (clearing ineligible ones), producing misleading scouting reports for coaches.
@@ -46,8 +46,8 @@ The engine also has NO consecutive-days rule. NSAA says no player may make more 
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-217-01 | NSAA availability engine + bullpen filtering | TODO | None | - |
-| E-217-02 | Context-layer pitch rules codification | TODO | None | - |
+| E-217-01 | NSAA availability engine + bullpen filtering | DONE | None | software-engineer |
+| E-217-02 | Context-layer pitch rules codification | DONE | None | claude-architect |
 
 ## Dispatch Team
 - software-engineer
@@ -171,3 +171,34 @@ Inject the active NSAA rest table (based on reference_date) into the Tier 2 syst
 | Codex iteration 2 | 5 | 4 | 1 |
 | Codex iteration 3 | 6 | 0 | 6 |
 | **Total** | **48** | **36** | **12** |
+
+- 2026-04-08: COMPLETED. Both stories DONE. E-217-01: NSAA availability engine replaced ad-hoc exclusion functions with frozen dataclass rule structures, tiered rest compliance (pre/post April 1), consecutive-days rule, doubleheader pitch aggregation, null pitch count handling, all-pitcher exclusion, bullpen available/unavailable sorting with reasons, LLM rest table injection. 87 new/updated tests, 153 targeted passed. E-217-02: Context-layer pitch rules codification in `.claude/rules/pitch-rules.md` covering NSAA, Legion, USSSA, Perfect Game with engine usage guidance and league-to-classification mapping. key-metrics.md updated to reference rule file.
+
+### Dispatch Review Scorecard
+| Review Pass | Findings | Accepted | Dismissed |
+|---|---|---|---|
+| Per-story CR -- E-217-01 | 3 | 2 | 1 |
+| Per-story CR -- E-217-02 | 0 | 0 | 0 |
+| CR integration review | 0 | 0 | 0 |
+| Codex code review | 5 | 0 | 5 |
+| **Total** | **8** | **2** | **6** |
+
+### Documentation Assessment
+Trigger 1 (new feature): YES -- pitcher availability now uses NSAA-compliant rules instead of ad-hoc heuristics; bullpen order now shows availability status with reasons. However, this changes internal engine behavior and report rendering. No user-facing workflows changed (no new CLI commands, no new pages, no deployment changes). The existing coaching docs do not document the starter prediction engine internals. No `docs/admin/` or `docs/coaching/` files cover this area. **No documentation impact** -- the changes are internal engine behavior and template rendering, not user-facing workflows or operational procedures.
+
+### Context-Layer Assessment
+1. **New convention, pattern, or constraint?** NO -- The frozen dataclass pattern for rule data is a standard Python pattern, not a project convention. E-217-02 already codified the rules in `.claude/rules/pitch-rules.md` (part of the epic scope, not a post-hoc finding).
+2. **Architectural decision with ongoing implications?** NO -- The rule engine replacement is self-contained within `starter_prediction.py`. The pattern for adding Legion (data change) vs USSSA/PG (code change) is already documented in `pitch-rules.md` (delivered by E-217-02).
+3. **Footgun, failure mode, or boundary discovered?** NO -- No unexpected failures or gotchas emerged during implementation.
+4. **Change to agent behavior, routing, or coordination?** NO -- No agent definitions, routing, or dispatch patterns changed.
+5. **Domain knowledge discovered?** NO -- All NSAA domain knowledge was captured during planning consultations and codified in E-217-02's deliverable (`pitch-rules.md`). No new domain knowledge emerged during implementation.
+6. **New CLI command, workflow, or operational procedure?** NO -- No new `bb` subcommands, scripts, or workflows added.
+
+All six triggers: NO. No context-layer codification required beyond what E-217-02 already delivered.
+
+### Ideas Backlog Review
+- **IDEA-066** (League/Level Detection): Already PROMOTED to E-218 during E-217 planning. No change.
+- **IDEA-067** (Catcher-Pitcher Restriction): E-217 completion clears one of two blockers (E-217 completion). Still blocked on catching innings data availability. Status unchanged (CANDIDATE).
+
+### Vision Signals
+31 unprocessed signals in `docs/vision-signals.md` (last curation: 2026-03-13). Advisory: consider scheduling a "curate the vision" session. This does not block archival.

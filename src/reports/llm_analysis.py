@@ -8,6 +8,7 @@ availability via ``is_llm_available()`` and handle ``LLMError`` as non-fatal.
 
 from __future__ import annotations
 
+import datetime
 import json
 import logging
 import os
@@ -15,7 +16,11 @@ from dataclasses import dataclass
 from typing import Any
 
 from src.llm.openrouter import LLMError, query_openrouter
-from src.reports.starter_prediction import StarterPrediction
+from src.reports.starter_prediction import (
+    StarterPrediction,
+    format_nsaa_rest_table,
+    get_nsaa_rules,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -32,22 +37,25 @@ class EnrichedPrediction:
 
 # ── Prompt construction ─────────────────────────────────────────────────
 
-_SYSTEM_PROMPT = """\
+_SYSTEM_PROMPT_TEMPLATE = """\
 You are a high school baseball coaching analyst. You analyze pitching \
 rotation data and produce concise, actionable scouting intelligence for \
 coaches preparing for their next game.
+
+{nsaa_rest_table}
 
 Your analysis should be practical and bench-ready. Coaches want to know:
 1. Who is most likely to start and why
 2. What bullpen sequence to expect
 3. Any workload or rest concerns
+4. Any NSAA pitch count compliance issues (unavailable arms, approaching limits)
 
 Respond ONLY with a JSON object (no markdown, no code fences) containing:
-{
+{{
   "narrative": "2-4 sentence analysis of the predicted starter and key factors",
   "bullpen_sequence": "Expected bullpen sequence after the starter (1-2 sentences, or null if insufficient data)",
   "confidence_adjustment": "agree" or "disagree-higher" or "disagree-lower" (your assessment vs the deterministic prediction)
-}
+}}
 
 Guidelines:
 - Use plain English a coach understands. No jargon like "WHIP" unless the data includes it.
@@ -56,6 +64,7 @@ Guidelines:
 - At LOW/COMMITTEE confidence: explain the ambiguity honestly. Do not manufacture a prediction.
 - If W-L records suggest a meaningful matchup (e.g., strong team vs weak), note that coaches sometimes elevate their top arm for big games (~25-30% of HS games), but do not overstate this -- record alone cannot predict deployment decisions.
 - If compressed schedule is noted, mention that rotation predictions are less reliable in tournament play.
+- If any bullpen pitcher is marked unavailable, note the reason and suggest skipping them in the sequence.
 """
 
 
@@ -100,12 +109,18 @@ def _format_pitcher_table(prediction: StarterPrediction) -> str:
     if prediction.bullpen_order:
         lines.append("")
         lines.append("## Bullpen Order (by first-relief frequency)")
-        lines.append(f"{'Name':<20} {'Freq':>4} {'Games Sampled':>13}")
-        lines.append("-" * 40)
+        lines.append(
+            f"{'Name':<20} {'Freq':>4} {'Games Sampled':>13} {'Status':<30}"
+        )
+        lines.append("-" * 70)
         for b in prediction.bullpen_order:
+            status = "available"
+            if not b.get("available", True):
+                reason = b.get("unavailability_reason") or "unavailable"
+                status = f"(unavailable: {reason})"
             lines.append(
                 f"{b['name']:<20} {b['frequency']:>4} "
-                f"{b['games_sampled']:>13}"
+                f"{b['games_sampled']:>13} {status}"
             )
 
     if prediction.predicted_starter and prediction.predicted_starter.get("recent_starts"):
@@ -193,6 +208,7 @@ def enrich_prediction(
     *,
     team_record: str | None = None,
     opponent_record: str | None = None,
+    reference_date: datetime.date | None = None,
 ) -> EnrichedPrediction:
     """Enrich a Tier 1 prediction with LLM-generated narrative.
 
@@ -202,6 +218,8 @@ def enrich_prediction(
             ``get_pitching_history()``.
         team_record: W-L record of the scouted team (e.g., ``"15-3"``).
         opponent_record: W-L record of our team (e.g., ``"12-6"``).
+        reference_date: Anchor date for NSAA rule selection (defaults to
+            today if not provided).
 
     Returns:
         ``EnrichedPrediction`` wrapping the base prediction with narrative.
@@ -211,12 +229,20 @@ def enrich_prediction(
     """
     model = os.environ.get("OPENROUTER_MODEL", "anthropic/claude-haiku-4-5-20251001")
 
+    if reference_date is None:
+        reference_date = datetime.date.today()
+
+    rules = get_nsaa_rules(reference_date)
+    system_prompt = _SYSTEM_PROMPT_TEMPLATE.format(
+        nsaa_rest_table=format_nsaa_rest_table(rules),
+    )
+
     user_prompt = _build_user_prompt(
         prediction, pitching_history,
         team_record=team_record, opponent_record=opponent_record,
     )
     messages = [
-        {"role": "system", "content": _SYSTEM_PROMPT},
+        {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_prompt},
     ]
 

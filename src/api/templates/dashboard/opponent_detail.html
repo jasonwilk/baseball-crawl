@@ -247,7 +247,7 @@ Scout: {{ scouting_report.team_name if scouting_report else opponent_team_id }}
 
   {# Bullpen Order #}
   {% if starter_prediction.bullpen_order %}
-  <p class="text-xs italic text-gray-500 mt-2">Bullpen: {% for bp in starter_prediction.bullpen_order %}{{ bp.name | e }}{% if bp.jersey_number %} #{{ bp.jersey_number }}{% endif %} ({{ bp.frequency }}/{{ bp.games_sampled }}){% if not loop.last %}, {% endif %}{% endfor %}</p>
+  <p class="text-xs italic text-gray-500 mt-2">Bullpen: {% for bp in starter_prediction.bullpen_order %}{% if not bp.get('available', true) %}<span class="line-through text-gray-400">{% endif %}{{ bp.name | e }}{% if bp.jersey_number %} #{{ bp.jersey_number }}{% endif %} ({{ bp.frequency }}/{{ bp.games_sampled }}){% if not bp.get('available', true) %}</span> <span class="text-red-600 text-[10px]">({{ bp.unavailability_reason }})</span>{% endif %}{% if not loop.last %}, {% endif %}{% endfor %}</p>
   {% endif %}
 
   <p class="text-xs italic text-gray-500 mt-2">Based on rotation pattern, rest days, and recent workload. Actual starter may differ.</p>

@@ -38,9 +38,6 @@ _TWO_MAN_THRESHOLD = 0.3
 _HIGH_CONFIDENCE_RATIO = 2.0
 _K9_ALTERNATIVE_DELTA = 2.0
 _COMMITTEE_TOP_THRESHOLD = 0.30
-_HIGH_PITCH_EXCLUSION = 75
-_SHORT_REST_DAYS = 4
-_WITHIN_1_DAY_REST = 1
 _AVAILABILITY_UNKNOWN_DAYS = 10
 _LOW_PITCH_THRESHOLD = 50
 _ACE_HEAVY_USAGE_GS_PCT = 0.70
@@ -68,6 +65,73 @@ class StarterPrediction:
     rest_table: list[dict[str, Any]] = field(default_factory=list)
     bullpen_order: list[dict[str, Any]] = field(default_factory=list)
     data_note: str | None = None
+
+
+# ── NSAA Pitch Count Rules ─────────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class RestTier:
+    """A single pitch-count-to-rest mapping."""
+
+    min_pitches: int
+    max_pitches: int
+    rest_days: int
+
+
+@dataclass(frozen=True)
+class PitchCountRules:
+    """A complete rule set for one season phase."""
+
+    max_pitches: int
+    rest_tiers: tuple[RestTier, ...]
+
+
+NSAA_PRE_APRIL = PitchCountRules(
+    max_pitches=90,
+    rest_tiers=(
+        RestTier(1, 30, 0),
+        RestTier(31, 50, 1),
+        RestTier(51, 70, 2),
+        RestTier(71, 90, 3),
+    ),
+)
+
+NSAA_POST_APRIL = PitchCountRules(
+    max_pitches=110,
+    rest_tiers=(
+        RestTier(1, 30, 0),
+        RestTier(31, 50, 1),
+        RestTier(51, 70, 2),
+        RestTier(71, 90, 3),
+        RestTier(91, 110, 4),
+    ),
+)
+
+_NSAA_CONSECUTIVE_DAYS_MAX_APPEARANCES = 2
+_NSAA_CONSECUTIVE_DAYS_WINDOW = 3
+
+
+def get_nsaa_rules(reference_date: datetime.date) -> PitchCountRules:
+    """Return the NSAA rule set active on *reference_date*."""
+    april_1 = datetime.date(reference_date.year, 4, 1)
+    if reference_date < april_1:
+        return NSAA_PRE_APRIL
+    return NSAA_POST_APRIL
+
+
+def format_nsaa_rest_table(rules: PitchCountRules) -> str:
+    """Format NSAA rest tiers as a compact text table for LLM prompts."""
+    lines = [
+        f"NSAA Pitch Count Rules (max {rules.max_pitches} pitches/game):",
+        f"{'Pitches':<12} {'Rest Days Required':<20}",
+    ]
+    for tier in rules.rest_tiers:
+        lines.append(f"{tier.min_pitches}-{tier.max_pitches:<9} {tier.rest_days}")
+    lines.append(
+        "Consecutive-days rule: max 2 pitching appearances in any 3-day period."
+    )
+    return "\n".join(lines)
 
 
 # ── Role classification ─────────────────────────────────────────────────
@@ -127,48 +191,83 @@ def _detect_rotation_pattern(
 # ── Rest / availability helpers ─────────────────────────────────────────
 
 
-def _is_excluded_within_1_day(
+def _is_nsaa_excluded(
     profile: dict, reference_date: datetime.date,
-) -> bool:
-    """Check if pitcher's last appearance was within 1 calendar day."""
+) -> tuple[bool, str | None]:
+    """Check NSAA pitch count rules and consecutive-days rule.
+
+    Returns ``(excluded, reason)`` where *reason* is a human-readable
+    string explaining the exclusion, or ``None`` when not excluded.
+    """
     apps = profile.get("appearances", [])
     if not apps:
-        return False
+        return False, None
+
+    # ── Find most recent game date ─────────────────────────────────
     last_date_str = apps[-1].get("game_date")
     if not last_date_str:
-        return False
+        return False, None
     try:
         last_date = datetime.date.fromisoformat(last_date_str)
-        days = (reference_date - last_date).days
-        if days < 0:
-            return False
-        return days <= _WITHIN_1_DAY_REST
     except (ValueError, TypeError):
-        return False
+        return False, None
 
+    days_rest = (reference_date - last_date).days
+    if days_rest < 0:
+        return False, None
 
-def _is_excluded_high_pitch_short_rest(
-    profile: dict, reference_date: datetime.date,
-) -> bool:
-    """75+ pitches with fewer than 4 days rest -> excluded."""
-    apps = profile.get("appearances", [])
-    if not apps:
-        return False
-    last = apps[-1]
-    pitches = last.get("pitches") or 0
-    if pitches < _HIGH_PITCH_EXCLUSION:
-        return False
-    last_date_str = last.get("game_date")
-    if not last_date_str:
-        return False
-    try:
-        last_date = datetime.date.fromisoformat(last_date_str)
-        days_rest = (reference_date - last_date).days
-        if days_rest < 0:
-            return False
-        return days_rest < _SHORT_REST_DAYS
-    except (ValueError, TypeError):
-        return False
+    # ── Gather appearances on the most recent game date ────────────
+    last_day_apps = [
+        a for a in apps if a.get("game_date") == last_date_str
+    ]
+
+    # ── AC-9: Null pitch count on most recent game date ────────────
+    if any(a.get("pitches") is None for a in last_day_apps):
+        return True, "pitch count unavailable -- cannot verify eligibility"
+
+    # ── Doubleheader aggregation: sum pitches on most recent day ───
+    total_pitches = sum(a["pitches"] for a in last_day_apps)
+
+    # ── Rest-tier compliance ───────────────────────────────────────
+    rules = get_nsaa_rules(reference_date)
+    required_rest = 0
+    for tier in rules.rest_tiers:
+        if tier.min_pitches <= total_pitches <= tier.max_pitches:
+            required_rest = tier.rest_days
+            break
+    else:
+        # Pitch count exceeds highest tier (e.g., 95 pitches pre-April
+        # when max is 90).  Apply the maximum rest requirement.
+        if total_pitches > 0 and rules.rest_tiers:
+            max_tier = rules.rest_tiers[-1]
+            if total_pitches > max_tier.max_pitches:
+                required_rest = max_tier.rest_days
+
+    if days_rest < required_rest:
+        return (
+            True,
+            f"{days_rest}d rest -- needs {required_rest} "
+            f"(threw {total_pitches} pitches on {last_date_str})",
+        )
+
+    # ── Consecutive-days rule ──────────────────────────────────────
+    # Window = {ref-2, ref-1, ref}. Count appearances on ref-2 and ref-1.
+    window_dates = {
+        (reference_date - datetime.timedelta(days=d)).isoformat()
+        for d in range(1, _NSAA_CONSECUTIVE_DAYS_WINDOW)
+    }
+    prior_appearances = sum(
+        1 for a in apps
+        if a.get("game_date") in window_dates
+    )
+    if prior_appearances >= _NSAA_CONSECUTIVE_DAYS_MAX_APPEARANCES:
+        return (
+            True,
+            f"{prior_appearances} appearances in last 3 days "
+            f"-- max 2 per 3-day period",
+        )
+
+    return False, None
 
 
 def _build_reasoning(
@@ -342,8 +441,17 @@ def _build_rest_table(
 def _build_bullpen_order(
     profiles: dict[str, dict],
     history: list[dict],
+    excluded: dict[str, str] | None = None,
 ) -> list[dict]:
-    """Rank relievers by frequency of first-relief-appearance (appearance_order=2)."""
+    """Rank relievers by frequency of first-relief-appearance (appearance_order=2).
+
+    Available pitchers sort first by frequency; unavailable ones sort after,
+    also by frequency.  Each entry includes ``available`` and
+    ``unavailability_reason`` fields.
+    """
+    if excluded is None:
+        excluded = {}
+
     # Count appearance_order == 2 per player
     relief_counts: dict[str, int] = {}
     total_games_with_relief = set()
@@ -359,16 +467,25 @@ def _build_bullpen_order(
     games_sampled = len(total_games_with_relief)
     ranked = sorted(relief_counts.items(), key=lambda x: x[1], reverse=True)
 
-    result = []
+    available: list[dict] = []
+    unavailable: list[dict] = []
     for pid, count in ranked[:_BULLPEN_SIZE]:
         p = profiles.get(pid, {})
-        result.append({
+        is_avail = pid not in excluded
+        entry = {
             "name": f"{p.get('first_name', '')} {p.get('last_name', '')}".strip(),
             "jersey_number": p.get("jersey_number"),
             "frequency": count,
             "games_sampled": games_sampled,
-        })
-    return result
+            "available": is_avail,
+            "unavailability_reason": excluded.get(pid),
+        }
+        if is_avail:
+            available.append(entry)
+        else:
+            unavailable.append(entry)
+
+    return available + unavailable
 
 
 # ── Tournament density ──────────────────────────────────────────────────
@@ -554,10 +671,18 @@ def compute_starter_prediction(
                 "rest data accumulating"
             )
         roles = {pid: _classify_role(p) for pid, p in pitcher_profiles.items()}
+        # NSAA compliance is valid even with < 4 games
+        suppress_excluded: dict[str, str] = {}
+        for pid, profile in pitcher_profiles.items():
+            is_excl, reason = _is_nsaa_excluded(profile, reference_date)
+            if is_excl:
+                suppress_excluded[pid] = reason  # type: ignore[assignment]
         return StarterPrediction(
             confidence="suppress",
             rest_table=_build_rest_table(pitcher_profiles, roles, workload),
-            bullpen_order=_build_bullpen_order(pitcher_profiles, pitching_history),
+            bullpen_order=_build_bullpen_order(
+                pitcher_profiles, pitching_history, suppress_excluded,
+            ),
             data_note=note,
         )
 
@@ -580,15 +705,12 @@ def compute_starter_prediction(
         pitcher_profiles, pitching_history, roles, reference_date
     )
 
-    # ── Apply exclusions ────────────────────────────────────────────
-    excluded: set[str] = set()
+    # ── Apply NSAA exclusions (all pitchers, not just starters) ──────
+    excluded: dict[str, str] = {}
     for pid, profile in pitcher_profiles.items():
-        if profile["total_starts"] == 0:
-            continue
-        if _is_excluded_within_1_day(profile, reference_date):
-            excluded.add(pid)
-        if _is_excluded_high_pitch_short_rest(profile, reference_date):
-            excluded.add(pid)
+        is_excl, reason = _is_nsaa_excluded(profile, reference_date)
+        if is_excl:
+            excluded[pid] = reason  # type: ignore[assignment]
 
     # Remove excluded from likelihoods
     for pid in excluded:
@@ -713,7 +835,9 @@ def compute_starter_prediction(
     rest_table = _build_rest_table(pitcher_profiles, roles, workload)
 
     # ── Bullpen order ───────────────────────────────────────────────
-    bullpen_order = _build_bullpen_order(pitcher_profiles, pitching_history)
+    bullpen_order = _build_bullpen_order(
+        pitcher_profiles, pitching_history, excluded,
+    )
 
     return StarterPrediction(
         confidence=confidence,

@@ -4,7 +4,7 @@
 [E-217: NSAA Pitch Count Availability Rules](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the starter prediction engine will use NSAA (Nebraska) pitch count rules instead of ad-hoc heuristics to determine pitcher availability. The two existing exclusion functions (`_is_excluded_within_1_day` and `_is_excluded_high_pitch_short_rest`) will be replaced by a single NSAA-based availability function that checks rest-tier compliance and the consecutive-days rule. The bullpen order will include all bullpen-ranked pitchers but mark unavailable ones with the specific reason. The Tier 2 LLM prompt will include the active NSAA rest table.

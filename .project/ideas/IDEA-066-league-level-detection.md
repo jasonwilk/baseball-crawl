@@ -1,7 +1,7 @@
 # IDEA-066: League/Level Detection for Pitch Rules
 
 ## Status
-`CANDIDATE`
+`PROMOTED` -- Promoted to E-218 (2026-04-07)
 
 ## Summary
 Automatically detect which league's pitch count rules apply to a given team (NSAA HS, American Legion, USSSA, Perfect Game) so the starter prediction engine can select the correct rule set without manual configuration. Sources: GC team metadata (may include classification), team name parsing ("Varsity"/"JV"/"Legion"/"14U"), `programs.program_type`, opponent name inference.

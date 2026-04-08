@@ -4,7 +4,7 @@
 [E-217: NSAA Pitch Count Availability Rules](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, pitching availability rules for all known leagues (NSAA, American Legion, USSSA, Perfect Game) will be codified in a dedicated context-layer rule file (`.claude/rules/pitch-rules.md`) that agents and the LLM can reference. The informal heuristics in `.claude/rules/key-metrics.md` will be updated to reference the authoritative rule file instead.

@@ -359,7 +359,7 @@
 </table>
 {% endif %}
 {% if starter_prediction.bullpen_order %}
-<div class="pred-note">Bullpen: {% for bp in starter_prediction.bullpen_order %}{{ bp.name | e }}{% if bp.jersey_number %} #{{ bp.jersey_number }}{% endif %} ({{ bp.frequency }}/{{ bp.games_sampled }}){% if not loop.last %}, {% endif %}{% endfor %}</div>
+<div class="pred-note">Bullpen: {% for bp in starter_prediction.bullpen_order %}{% if not bp.get('available', true) %}<span style="color:#9ca3af;text-decoration:line-through">{% endif %}{{ bp.name | e }}{% if bp.jersey_number %} #{{ bp.jersey_number }}{% endif %} ({{ bp.frequency }}/{{ bp.games_sampled }}){% if not bp.get('available', true) %}</span> <span style="color:#dc2626;font-size:7pt">({{ bp.unavailability_reason }})</span>{% endif %}{% if not loop.last %}, {% endif %}{% endfor %}</div>
 {% endif %}
 <div class="pred-note">Based on rotation pattern, rest days, and recent workload. Actual starter may differ.</div>
 </div>

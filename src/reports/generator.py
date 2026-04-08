@@ -1216,6 +1216,9 @@ def generate_report(gc_url: str) -> GenerationResult:
                                 starter_prediction,
                                 pitching_history_rows,
                                 team_record=team_record_str,
+                                reference_date=date.fromisoformat(
+                                    generated_at[:10],
+                                ),
                             )
                         except Exception:  # noqa: BLE001
                             logger.warning(

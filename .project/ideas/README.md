@@ -84,7 +84,7 @@ Review this list every 90 days, or when completing an epic. Ask:
 | [IDEA-063](IDEA-063-dump-game-skill.md) | /dump-game Diagnostic Skill | CANDIDATE | 2026-04-02 |
 | [IDEA-064](IDEA-064-dashboard-report-parity.md) | Dashboard-Report Feature Parity | CANDIDATE | 2026-07-03 |
 | [IDEA-065](IDEA-065-llm-eval-harness.md) | LLM Starter Prediction Evaluation Harness | CANDIDATE | 2026-07-03 |
-| [IDEA-066](IDEA-066-league-level-detection.md) | League/Level Detection for Pitch Rules | CANDIDATE | 2026-07-06 |
+| [IDEA-066](IDEA-066-league-level-detection.md) | League/Level Detection for Pitch Rules | PROMOTED | 2026-07-06 | -> E-218 |
 | [IDEA-067](IDEA-067-catcher-pitcher-restriction.md) | Catcher-Pitcher Restriction (NSAA) | CANDIDATE | 2026-07-06 |
 
 ## Status Definitions
