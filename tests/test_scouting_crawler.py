@@ -25,9 +25,9 @@ import pytest
 
 from migrations.apply_migrations import run_migrations
 from src.gamechanger.client import CredentialExpiredError, ForbiddenError
-from src.gamechanger.crawlers import CrawlResult
 from src.gamechanger.crawlers.scouting import (
     ScoutingCrawler,
+    ScoutingCrawlResult,
     _PUBLIC_GAMES_ACCEPT,
     _derive_season_id,
 )
@@ -258,11 +258,11 @@ def test_only_completed_games_are_scouted(
 def test_no_completed_games_returns_skipped(
     crawler: ScoutingCrawler, mock_client: MagicMock
 ) -> None:
-    """When no completed games exist, scout_team returns files_skipped=1."""
+    """When no completed games exist, scout_team returns skipped=True."""
     mock_client.get_public.return_value = [_SCHEDULED_GAME]
     result = crawler.scout_team(_PUBLIC_ID, season_id="2025-spring-hs")
-    assert result.files_skipped == 1
-    assert result.files_written == 0
+    assert result.skipped is True
+    assert result.games_crawled == 0
 
 
 # ---------------------------------------------------------------------------
@@ -270,17 +270,23 @@ def test_no_completed_games_returns_skipped(
 # ---------------------------------------------------------------------------
 
 
-def test_raw_files_written(
+def test_in_memory_data_returned(
     crawler: ScoutingCrawler, mock_client: MagicMock, tmp_path: Path
 ) -> None:
-    """scout_team() writes games.json, roster.json, and boxscore files."""
+    """scout_team() returns in-memory games, roster, and boxscores (no disk files)."""
     _setup_client_happy_path(mock_client)
-    crawler.scout_team(_PUBLIC_ID, season_id="2025-spring-hs")
+    result = crawler.scout_team(_PUBLIC_ID, season_id="2025-spring-hs")
 
+    assert isinstance(result, ScoutingCrawlResult)
+    assert len(result.games) > 0
+    assert len(result.roster) > 0
+    assert len(result.boxscores) > 0
+    assert "game-stream-uuid-001" in result.boxscores
+    assert result.games_crawled == 1
+
+    # No files should be written to disk.
     scouting_dir = tmp_path / "raw" / "2025-spring-hs" / "scouting" / _PUBLIC_ID
-    assert (scouting_dir / "games.json").exists()
-    assert (scouting_dir / "roster.json").exists()
-    assert (scouting_dir / "boxscores" / "game-stream-uuid-001.json").exists()
+    assert not scouting_dir.exists()
 
 
 # ---------------------------------------------------------------------------
@@ -362,7 +368,7 @@ def test_credential_error_on_schedule_logs_and_returns_error(
     mock_client.get_public.side_effect = CredentialExpiredError("token expired")
     result = crawler.scout_team(_PUBLIC_ID, season_id="2025-spring-hs")
     assert result.errors == 1
-    assert result.files_written == 0
+    assert result.games_crawled == 0
 
 
 def test_forbidden_error_on_schedule_logs_and_returns_error(

@@ -67,6 +67,7 @@ def _create_schema(conn: sqlite3.Connection) -> None:
             game_id TEXT NOT NULL REFERENCES games(game_id),
             player_id TEXT NOT NULL REFERENCES players(player_id),
             team_id INTEGER NOT NULL REFERENCES teams(id),
+            perspective_team_id INTEGER NOT NULL REFERENCES teams(id),
             decision TEXT,
             stat_completeness TEXT NOT NULL DEFAULT 'boxscore_only',
             ip_outs INTEGER,
@@ -81,7 +82,7 @@ def _create_schema(conn: sqlite3.Connection) -> None:
             total_strikes INTEGER,
             bf INTEGER,
             appearance_order INTEGER,
-            UNIQUE(game_id, player_id)
+            UNIQUE(game_id, player_id, perspective_team_id)
         );
     """)
 
@@ -150,10 +151,10 @@ def _insert_pitching_line(
     """Insert a player_game_pitching row."""
     conn.execute(
         "INSERT INTO player_game_pitching "
-        "(game_id, player_id, team_id, ip_outs, pitches, so, bb, h, r, er, bf, "
+        "(game_id, player_id, team_id, perspective_team_id, ip_outs, pitches, so, bb, h, r, er, bf, "
         "decision, appearance_order) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (game_id, player_id, team_id, ip_outs, pitches, so, bb, h, r, er, bf,
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (game_id, player_id, team_id, team_id, ip_outs, pitches, so, bb, h, r, er, bf,
          decision, appearance_order),
     )
 

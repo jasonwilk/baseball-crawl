@@ -20,6 +20,7 @@ import respx
 from typer.testing import CliRunner
 
 from src.cli import app
+from src.gamechanger.crawlers.scouting import ScoutingCrawlResult
 
 
 # ---------------------------------------------------------------------------
@@ -114,7 +115,7 @@ def test_scout_team_flag_calls_scout_team(
     from src.gamechanger.crawlers import CrawlResult
 
     mock_crawler = MagicMock()
-    mock_crawler.scout_team.return_value = CrawlResult(files_written=3)
+    mock_crawler.scout_team.return_value = ScoutingCrawlResult(team_id=1, season_id="2025-spring-hs", games_crawled=3)
 
     db_path = tmp_path / "test.db"
     from migrations.apply_migrations import run_migrations
@@ -141,7 +142,7 @@ def test_scout_without_team_calls_scout_all(
     from src.gamechanger.crawlers import CrawlResult
 
     mock_crawler = MagicMock()
-    mock_crawler.scout_all.return_value = CrawlResult(files_written=5)
+    mock_crawler.scout_all_in_memory.return_value = []
 
     db_path = tmp_path / "test.db"
     from migrations.apply_migrations import run_migrations
@@ -153,7 +154,7 @@ def test_scout_without_team_calls_scout_all(
          patch("src.cli.data._resolve_db_path", return_value=db_path):
         result = runner.invoke(app, ["data", "scout"])
 
-    mock_crawler.scout_all.assert_called_once_with(season_id=None)
+    mock_crawler.scout_all_in_memory.assert_called_once_with(season_id=None)
     mock_crawler.scout_team.assert_not_called()
 
 
@@ -208,7 +209,7 @@ def test_scout_force_constructs_crawler_with_freshness_zero(
     from src.gamechanger.crawlers import CrawlResult
 
     mock_crawler = MagicMock()
-    mock_crawler.scout_all.return_value = CrawlResult(files_written=5)
+    mock_crawler.scout_all_in_memory.return_value = [_mock_in_memory_crawl_result()]
 
     db_path = tmp_path / "test.db"
     from migrations.apply_migrations import run_migrations
@@ -241,7 +242,7 @@ def test_scout_without_force_constructs_crawler_with_default_freshness(
     from src.gamechanger.crawlers import CrawlResult
 
     mock_crawler = MagicMock()
-    mock_crawler.scout_all.return_value = CrawlResult(files_written=5)
+    mock_crawler.scout_all_in_memory.return_value = [_mock_in_memory_crawl_result()]
 
     db_path = tmp_path / "test.db"
     from migrations.apply_migrations import run_migrations
@@ -418,7 +419,7 @@ def test_scout_single_team_load_failure_exits_nonzero(
     run_migrations(db_path=db_path)
 
     mock_crawler = MagicMock()
-    mock_crawler.scout_team.return_value = CrawlResult(files_written=3)
+    mock_crawler.scout_team.return_value = ScoutingCrawlResult(team_id=1, season_id="2025-spring-hs", games_crawled=3)
 
     # Patch the load helper to simulate 2 load errors -- bypasses dir/DB timing concerns.
     with patch("src.gamechanger.client.GameChangerClient"), \
@@ -445,12 +446,12 @@ def test_scout_single_team_load_success_exits_zero(
     run_migrations(db_path=db_path)
 
     mock_crawler = MagicMock()
-    mock_crawler.scout_team.return_value = CrawlResult(files_written=3)
+    mock_crawler.scout_team.return_value = ScoutingCrawlResult(team_id=1, season_id="2025-spring-hs", games_crawled=3)
 
     with patch("src.gamechanger.client.GameChangerClient"), \
          patch("src.gamechanger.crawlers.scouting.ScoutingCrawler", return_value=mock_crawler), \
          patch("src.gamechanger.loaders.scouting_loader.ScoutingLoader"), \
-         patch("src.cli.data._load_scouted_team", return_value=0), \
+         patch("src.cli.data._load_scouted_team_in_memory", return_value=0), \
          patch("src.cli.data._resolve_db_path", return_value=db_path):
         result = runner.invoke(app, ["data", "scout", "--team", "mypubid"])
 
@@ -475,14 +476,18 @@ def test_scout_all_partial_load_failure_exits_nonzero(
     from migrations.apply_migrations import run_migrations
     run_migrations(db_path=db_path)
 
+    from src.gamechanger.crawlers.scouting import ScoutingCrawlResult
     mock_crawler = MagicMock()
-    mock_crawler.scout_all.return_value = CrawlResult(files_written=6)
+    # One in-memory crawl result so the loader loop runs once
+    mock_crawler.scout_all_in_memory.return_value = [
+        ScoutingCrawlResult(team_id=1, season_id="2026-spring-hs", public_id="opp-x"),
+    ]
 
-    # Return 1 error (one team failed) -- successful teams are irrelevant to exit code test.
+    # Return 1 error (the one team failed) -- exit code test.
     with patch("src.gamechanger.client.GameChangerClient"), \
          patch("src.gamechanger.crawlers.scouting.ScoutingCrawler", return_value=mock_crawler), \
          patch("src.gamechanger.loaders.scouting_loader.ScoutingLoader"), \
-         patch("src.cli.data._load_all_scouted", return_value=1), \
+         patch("src.cli.data._load_scouted_team_in_memory", return_value=1), \
          patch("src.cli.data._resolve_db_path", return_value=db_path):
         result = runner.invoke(app, ["data", "scout"])
 
@@ -588,12 +593,28 @@ def _mock_spray_result(
     files_skipped: int = 0,
     errors: int = 0,
 ) -> MagicMock:
-    """Build a mock CrawlResult for the scouting spray crawl."""
+    """Build a mock spray crawl result (compatible with both CrawlResult and SprayCrawlResult)."""
     r = MagicMock()
     r.files_written = files_written
     r.files_skipped = files_skipped
     r.errors = errors
+    # SprayCrawlResult attributes (for single-team in-memory flow).
+    r.games_crawled = files_written
+    r.games_skipped = files_skipped
+    r.spray_data = {}
     return r
+
+
+def _mock_in_memory_crawl_result(public_id: str = "opp-x") -> "ScoutingCrawlResult":
+    """Build a non-empty ScoutingCrawlResult for in-memory pipeline tests."""
+    return ScoutingCrawlResult(
+        team_id=1,
+        season_id="2025-spring-hs",
+        public_id=public_id,
+        games=[{"id": "g1", "game_status": "completed"}],
+        games_crawled=1,
+    )
+
 
 
 def test_scout_triggers_scouting_spray_crawl_all(
@@ -606,9 +627,9 @@ def test_scout_triggers_scouting_spray_crawl_all(
     from src.gamechanger.crawlers import CrawlResult
 
     mock_crawler = MagicMock()
-    mock_crawler.scout_all.return_value = CrawlResult(files_written=2)
+    mock_crawler.scout_all_in_memory.return_value = [_mock_in_memory_crawl_result()]
     mock_spray_crawler = MagicMock()
-    mock_spray_crawler.crawl_all.return_value = _mock_spray_result()
+    mock_spray_crawler.crawl_team.return_value = _mock_spray_result()
 
     db_path = tmp_path / "test.db"
     from migrations.apply_migrations import run_migrations
@@ -618,7 +639,7 @@ def test_scout_triggers_scouting_spray_crawl_all(
         patch("src.gamechanger.client.GameChangerClient"),
         patch("src.gamechanger.crawlers.scouting.ScoutingCrawler", return_value=mock_crawler),
         patch("src.gamechanger.loaders.scouting_loader.ScoutingLoader"),
-        patch("src.cli.data._load_all_scouted", return_value=0),
+        patch("src.cli.data._load_scouted_team_in_memory", return_value=0),
         patch(
             "src.gamechanger.crawlers.scouting_spray.ScoutingSprayChartCrawler",
             return_value=mock_spray_crawler,
@@ -627,7 +648,7 @@ def test_scout_triggers_scouting_spray_crawl_all(
     ):
         result = runner.invoke(app, ["data", "scout"])
 
-    mock_spray_crawler.crawl_all.assert_called_once()
+    mock_spray_crawler.crawl_team.assert_called_once()
     assert result.exit_code == 0
 
 
@@ -641,7 +662,7 @@ def test_scout_with_team_calls_spray_crawl_team(
     from src.gamechanger.crawlers import CrawlResult
 
     mock_crawler = MagicMock()
-    mock_crawler.scout_team.return_value = CrawlResult(files_written=2)
+    mock_crawler.scout_team.return_value = _mock_in_memory_crawl_result("some-public-id")
     mock_spray_crawler = MagicMock()
     mock_spray_crawler.crawl_team.return_value = _mock_spray_result()
 
@@ -653,7 +674,7 @@ def test_scout_with_team_calls_spray_crawl_team(
         patch("src.gamechanger.client.GameChangerClient"),
         patch("src.gamechanger.crawlers.scouting.ScoutingCrawler", return_value=mock_crawler),
         patch("src.gamechanger.loaders.scouting_loader.ScoutingLoader"),
-        patch("src.cli.data._load_scouted_team", return_value=0),
+        patch("src.cli.data._load_scouted_team_in_memory", return_value=0),
         patch(
             "src.gamechanger.crawlers.scouting_spray.ScoutingSprayChartCrawler",
             return_value=mock_spray_crawler,
@@ -662,7 +683,10 @@ def test_scout_with_team_calls_spray_crawl_team(
     ):
         result = runner.invoke(app, ["data", "scout", "--team", "some-public-id"])
 
-    mock_spray_crawler.crawl_team.assert_called_once_with("some-public-id", season_id=None)
+    mock_spray_crawler.crawl_team.assert_called_once()
+    args, kwargs = mock_spray_crawler.crawl_team.call_args
+    assert args[0] == "some-public-id"
+    assert kwargs.get("games_data")  # non-empty in-memory games passed
     assert result.exit_code == 0
 
 
@@ -676,9 +700,9 @@ def test_scout_spray_errors_cause_exit_code_1(
     from src.gamechanger.crawlers import CrawlResult
 
     mock_crawler = MagicMock()
-    mock_crawler.scout_all.return_value = CrawlResult(files_written=2)
+    mock_crawler.scout_all_in_memory.return_value = [_mock_in_memory_crawl_result()]
     mock_spray_crawler = MagicMock()
-    mock_spray_crawler.crawl_all.return_value = _mock_spray_result(errors=1)
+    mock_spray_crawler.crawl_team.return_value = _mock_spray_result(errors=1)
 
     db_path = tmp_path / "test.db"
     from migrations.apply_migrations import run_migrations
@@ -688,7 +712,7 @@ def test_scout_spray_errors_cause_exit_code_1(
         patch("src.gamechanger.client.GameChangerClient"),
         patch("src.gamechanger.crawlers.scouting.ScoutingCrawler", return_value=mock_crawler),
         patch("src.gamechanger.loaders.scouting_loader.ScoutingLoader"),
-        patch("src.cli.data._load_all_scouted", return_value=0),
+        patch("src.cli.data._load_scouted_team_in_memory", return_value=0),
         patch(
             "src.gamechanger.crawlers.scouting_spray.ScoutingSprayChartCrawler",
             return_value=mock_spray_crawler,
@@ -710,9 +734,9 @@ def test_scout_spray_exception_causes_exit_code_1(
     from src.gamechanger.crawlers import CrawlResult
 
     mock_crawler = MagicMock()
-    mock_crawler.scout_all.return_value = CrawlResult(files_written=2)
+    mock_crawler.scout_all_in_memory.return_value = [_mock_in_memory_crawl_result()]
     mock_spray_crawler = MagicMock()
-    mock_spray_crawler.crawl_all.side_effect = RuntimeError("network failure")
+    mock_spray_crawler.crawl_team.side_effect = RuntimeError("network failure")
 
     db_path = tmp_path / "test.db"
     from migrations.apply_migrations import run_migrations
@@ -722,7 +746,7 @@ def test_scout_spray_exception_causes_exit_code_1(
         patch("src.gamechanger.client.GameChangerClient"),
         patch("src.gamechanger.crawlers.scouting.ScoutingCrawler", return_value=mock_crawler),
         patch("src.gamechanger.loaders.scouting_loader.ScoutingLoader"),
-        patch("src.cli.data._load_all_scouted", return_value=0),
+        patch("src.cli.data._load_scouted_team_in_memory", return_value=0),
         patch(
             "src.gamechanger.crawlers.scouting_spray.ScoutingSprayChartCrawler",
             return_value=mock_spray_crawler,
@@ -807,11 +831,11 @@ def test_scout_season_passed_to_spray_crawl_all(
     from src.gamechanger.crawlers import CrawlResult
 
     mock_crawler = MagicMock()
-    mock_crawler.scout_all.return_value = CrawlResult(files_written=0)
+    mock_crawler.scout_all_in_memory.return_value = [_mock_in_memory_crawl_result()]
     mock_spray_crawler = MagicMock()
-    mock_spray_crawler.crawl_all.return_value = _mock_spray_result()
+    mock_spray_crawler.crawl_team.return_value = _mock_spray_result()
     mock_spray_loader = MagicMock()
-    mock_spray_loader.load_all.return_value = _mock_spray_load_result()
+    mock_spray_loader.load_from_data.return_value = _mock_spray_load_result()
 
     db_path = tmp_path / "test.db"
     from migrations.apply_migrations import run_migrations
@@ -821,7 +845,7 @@ def test_scout_season_passed_to_spray_crawl_all(
         patch("src.gamechanger.client.GameChangerClient"),
         patch("src.gamechanger.crawlers.scouting.ScoutingCrawler", return_value=mock_crawler),
         patch("src.gamechanger.loaders.scouting_loader.ScoutingLoader"),
-        patch("src.cli.data._load_all_scouted", return_value=0),
+        patch("src.cli.data._load_scouted_team_in_memory", return_value=0),
         patch(
             "src.gamechanger.crawlers.scouting_spray.ScoutingSprayChartCrawler",
             return_value=mock_spray_crawler,
@@ -834,7 +858,9 @@ def test_scout_season_passed_to_spray_crawl_all(
     ):
         result = runner.invoke(app, ["data", "scout", "--season", "2025-spring-hs"])
 
-    mock_spray_crawler.crawl_all.assert_called_once_with(season_id="2025-spring-hs")
+    assert mock_spray_crawler.crawl_team.call_count >= 1
+    call_kwargs = mock_spray_crawler.crawl_team.call_args[1]
+    assert call_kwargs.get("season_id") == "2025-spring-hs"
     assert result.exit_code == 0
 
 
@@ -848,11 +874,11 @@ def test_scout_season_passed_to_spray_load_all(
     from src.gamechanger.crawlers import CrawlResult
 
     mock_crawler = MagicMock()
-    mock_crawler.scout_all.return_value = CrawlResult(files_written=0)
+    mock_crawler.scout_all_in_memory.return_value = [_mock_in_memory_crawl_result()]
     mock_spray_crawler = MagicMock()
-    mock_spray_crawler.crawl_all.return_value = _mock_spray_result()
+    mock_spray_crawler.crawl_team.return_value = _mock_spray_result()
     mock_spray_loader = MagicMock()
-    mock_spray_loader.load_all.return_value = _mock_spray_load_result()
+    mock_spray_loader.load_from_data.return_value = _mock_spray_load_result()
 
     db_path = tmp_path / "test.db"
     from migrations.apply_migrations import run_migrations
@@ -862,7 +888,7 @@ def test_scout_season_passed_to_spray_load_all(
         patch("src.gamechanger.client.GameChangerClient"),
         patch("src.gamechanger.crawlers.scouting.ScoutingCrawler", return_value=mock_crawler),
         patch("src.gamechanger.loaders.scouting_loader.ScoutingLoader"),
-        patch("src.cli.data._load_all_scouted", return_value=0),
+        patch("src.cli.data._load_scouted_team_in_memory", return_value=0),
         patch(
             "src.gamechanger.crawlers.scouting_spray.ScoutingSprayChartCrawler",
             return_value=mock_spray_crawler,
@@ -875,7 +901,8 @@ def test_scout_season_passed_to_spray_load_all(
     ):
         result = runner.invoke(app, ["data", "scout", "--season", "2025-spring-hs"])
 
-    _, kwargs = mock_spray_loader.load_all.call_args
+    # season_id is passed via crawl_team in the in-memory pipeline.
+    _, kwargs = mock_spray_crawler.crawl_team.call_args
     assert kwargs.get("season_id") == "2025-spring-hs"
     assert result.exit_code == 0
 
@@ -907,11 +934,11 @@ def test_scout_triggers_scouting_spray_load(
     from src.gamechanger.crawlers import CrawlResult
 
     mock_crawler = MagicMock()
-    mock_crawler.scout_all.return_value = CrawlResult(files_written=2)
+    mock_crawler.scout_all_in_memory.return_value = [_mock_in_memory_crawl_result()]
     mock_spray_crawler = MagicMock()
-    mock_spray_crawler.crawl_all.return_value = _mock_spray_result()
+    mock_spray_crawler.crawl_team.return_value = _mock_spray_result()
     mock_spray_loader = MagicMock()
-    mock_spray_loader.load_all.return_value = _mock_spray_load_result()
+    mock_spray_loader.load_from_data.return_value = _mock_spray_load_result()
 
     db_path = tmp_path / "test.db"
     from migrations.apply_migrations import run_migrations
@@ -921,7 +948,7 @@ def test_scout_triggers_scouting_spray_load(
         patch("src.gamechanger.client.GameChangerClient"),
         patch("src.gamechanger.crawlers.scouting.ScoutingCrawler", return_value=mock_crawler),
         patch("src.gamechanger.loaders.scouting_loader.ScoutingLoader"),
-        patch("src.cli.data._load_all_scouted", return_value=0),
+        patch("src.cli.data._load_scouted_team_in_memory", return_value=0),
         patch(
             "src.gamechanger.crawlers.scouting_spray.ScoutingSprayChartCrawler",
             return_value=mock_spray_crawler,
@@ -934,25 +961,25 @@ def test_scout_triggers_scouting_spray_load(
     ):
         result = runner.invoke(app, ["data", "scout"])
 
-    mock_spray_loader.load_all.assert_called_once()
+    mock_spray_loader.load_from_data.assert_called_once()
     assert result.exit_code == 0
 
 
 def test_scout_with_team_calls_spray_load_all_with_public_id(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """bb data scout --team passes public_id to load_all() (AC-6)."""
+    """bb data scout --team passes public_id to load_from_data() (AC-6)."""
     _patch_credentials(monkeypatch)
     _patch_token_manager(monkeypatch)
 
     from src.gamechanger.crawlers import CrawlResult
 
     mock_crawler = MagicMock()
-    mock_crawler.scout_team.return_value = CrawlResult(files_written=2)
+    mock_crawler.scout_team.return_value = _mock_in_memory_crawl_result("my-pub-id")
     mock_spray_crawler = MagicMock()
     mock_spray_crawler.crawl_team.return_value = _mock_spray_result()
     mock_spray_loader = MagicMock()
-    mock_spray_loader.load_all.return_value = _mock_spray_load_result()
+    mock_spray_loader.load_from_data.return_value = _mock_spray_load_result()
 
     db_path = tmp_path / "test.db"
     from migrations.apply_migrations import run_migrations
@@ -962,7 +989,7 @@ def test_scout_with_team_calls_spray_load_all_with_public_id(
         patch("src.gamechanger.client.GameChangerClient"),
         patch("src.gamechanger.crawlers.scouting.ScoutingCrawler", return_value=mock_crawler),
         patch("src.gamechanger.loaders.scouting_loader.ScoutingLoader"),
-        patch("src.cli.data._load_scouted_team", return_value=0),
+        patch("src.cli.data._load_scouted_team_in_memory", return_value=0),
         patch(
             "src.gamechanger.crawlers.scouting_spray.ScoutingSprayChartCrawler",
             return_value=mock_spray_crawler,
@@ -975,8 +1002,8 @@ def test_scout_with_team_calls_spray_load_all_with_public_id(
     ):
         result = runner.invoke(app, ["data", "scout", "--team", "my-pub-id"])
 
-    mock_spray_loader.load_all.assert_called_once()
-    _, kwargs = mock_spray_loader.load_all.call_args
+    mock_spray_loader.load_from_data.assert_called_once()
+    _, kwargs = mock_spray_loader.load_from_data.call_args
     assert kwargs.get("public_id") == "my-pub-id"
     assert result.exit_code == 0
 
@@ -991,11 +1018,11 @@ def test_scout_spray_load_errors_cause_exit_code_1(
     from src.gamechanger.crawlers import CrawlResult
 
     mock_crawler = MagicMock()
-    mock_crawler.scout_all.return_value = CrawlResult(files_written=2)
+    mock_crawler.scout_all_in_memory.return_value = [_mock_in_memory_crawl_result()]
     mock_spray_crawler = MagicMock()
-    mock_spray_crawler.crawl_all.return_value = _mock_spray_result()
+    mock_spray_crawler.crawl_team.return_value = _mock_spray_result()
     mock_spray_loader = MagicMock()
-    mock_spray_loader.load_all.return_value = _mock_spray_load_result(errors=1)
+    mock_spray_loader.load_from_data.return_value = _mock_spray_load_result(errors=1)
 
     db_path = tmp_path / "test.db"
     from migrations.apply_migrations import run_migrations
@@ -1005,7 +1032,7 @@ def test_scout_spray_load_errors_cause_exit_code_1(
         patch("src.gamechanger.client.GameChangerClient"),
         patch("src.gamechanger.crawlers.scouting.ScoutingCrawler", return_value=mock_crawler),
         patch("src.gamechanger.loaders.scouting_loader.ScoutingLoader"),
-        patch("src.cli.data._load_all_scouted", return_value=0),
+        patch("src.cli.data._load_scouted_team_in_memory", return_value=0),
         patch(
             "src.gamechanger.crawlers.scouting_spray.ScoutingSprayChartCrawler",
             return_value=mock_spray_crawler,
@@ -1031,11 +1058,11 @@ def test_scout_spray_load_exception_causes_exit_code_1(
     from src.gamechanger.crawlers import CrawlResult
 
     mock_crawler = MagicMock()
-    mock_crawler.scout_all.return_value = CrawlResult(files_written=2)
+    mock_crawler.scout_all_in_memory.return_value = [_mock_in_memory_crawl_result()]
     mock_spray_crawler = MagicMock()
-    mock_spray_crawler.crawl_all.return_value = _mock_spray_result()
+    mock_spray_crawler.crawl_team.return_value = _mock_spray_result()
     mock_spray_loader = MagicMock()
-    mock_spray_loader.load_all.side_effect = RuntimeError("db error")
+    mock_spray_loader.load_from_data.side_effect = RuntimeError("db error")
 
     db_path = tmp_path / "test.db"
     from migrations.apply_migrations import run_migrations
@@ -1045,7 +1072,7 @@ def test_scout_spray_load_exception_causes_exit_code_1(
         patch("src.gamechanger.client.GameChangerClient"),
         patch("src.gamechanger.crawlers.scouting.ScoutingCrawler", return_value=mock_crawler),
         patch("src.gamechanger.loaders.scouting_loader.ScoutingLoader"),
-        patch("src.cli.data._load_all_scouted", return_value=0),
+        patch("src.cli.data._load_scouted_team_in_memory", return_value=0),
         patch(
             "src.gamechanger.crawlers.scouting_spray.ScoutingSprayChartCrawler",
             return_value=mock_spray_crawler,

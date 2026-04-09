@@ -611,9 +611,18 @@ class TestScoutLiveResolverIntegration:
         call_order: list[str] = []
 
         # Mock _run_scout_pipeline to succeed.
+        from src.gamechanger.crawlers.scouting import ScoutingCrawlResult
+
         def fake_run_scout_pipeline(*args, **kwargs):
             call_order.append("scout_pipeline")
-            return 0
+            crawl_result = ScoutingCrawlResult(
+                team_id=1,
+                season_id="2025-spring-hs",
+                public_id="opp-x",
+                games=[{"id": "g1", "game_status": "completed"}],
+                games_crawled=1,
+            )
+            return 0, [crawl_result]
 
         # Mock _resolve_missing_gc_uuids to record call.
         def fake_resolve(conn, data_root, client, team_public_id=None):
@@ -630,7 +639,14 @@ class TestScoutLiveResolverIntegration:
 
             def crawl_team(self, *args, **kwargs):
                 call_order.append("spray_crawl")
-                return MagicMock(files_written=0, files_skipped=0, errors=0)
+                # return a SprayCrawlResult-shaped mock with the attributes
+                # the in-memory pipeline reads
+                m = MagicMock()
+                m.games_crawled = 0
+                m.games_skipped = 0
+                m.errors = 0
+                m.spray_data = {}
+                return m
 
         # Mock ScoutingSprayChartLoader.
         class FakeSprayLoader:
@@ -638,6 +654,10 @@ class TestScoutLiveResolverIntegration:
                 pass
 
             def load_all(self, *args, **kwargs):
+                call_order.append("spray_load")
+                return MagicMock(loaded=0, skipped=0, errors=0)
+
+            def load_from_data(self, *args, **kwargs):
                 call_order.append("spray_load")
                 return MagicMock(loaded=0, skipped=0, errors=0)
 

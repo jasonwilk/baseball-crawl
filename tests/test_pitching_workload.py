@@ -61,6 +61,7 @@ def _create_schema(db: sqlite3.Connection) -> None:
             game_id TEXT NOT NULL REFERENCES games(game_id),
             player_id TEXT NOT NULL REFERENCES players(player_id),
             team_id INTEGER NOT NULL REFERENCES teams(id),
+            perspective_team_id INTEGER NOT NULL REFERENCES teams(id),
             decision TEXT,
             stat_completeness TEXT NOT NULL DEFAULT 'boxscore_only',
             ip_outs INTEGER,
@@ -68,7 +69,7 @@ def _create_schema(db: sqlite3.Connection) -> None:
             wp INTEGER, hbp INTEGER,
             pitches INTEGER,
             total_strikes INTEGER, bf INTEGER,
-            UNIQUE(game_id, player_id)
+            UNIQUE(game_id, player_id, perspective_team_id)
         );
 
         INSERT INTO seasons (season_id, name, season_type, year)
@@ -110,8 +111,8 @@ def _insert_pitching(
     db.execute(
         """
         INSERT INTO player_game_pitching
-            (game_id, player_id, team_id, ip_outs, h, r, er, bb, so, pitches)
-        VALUES (?, ?, 1, 9, 3, 1, 1, 2, 5, ?)
+            (game_id, player_id, team_id, perspective_team_id, ip_outs, h, r, er, bb, so, pitches)
+        VALUES (?, ?, 1, 1, 9, 3, 1, 1, 2, 5, ?)
         """,
         (game_id, player_id, pitches),
     )
@@ -355,8 +356,8 @@ class TestTeamScoping:
         db.execute(
             """
             INSERT INTO player_game_pitching
-                (game_id, player_id, team_id, ip_outs, h, r, er, bb, so, pitches)
-            VALUES ('g1', 'p2', 2, 6, 2, 1, 1, 1, 3, 40)
+                (game_id, player_id, team_id, perspective_team_id, ip_outs, h, r, er, bb, so, pitches)
+            VALUES ('g1', 'p2', 2, 2, 6, 2, 1, 1, 1, 3, 40)
             """
         )
 

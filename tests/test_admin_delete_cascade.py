@@ -192,24 +192,24 @@ class TestCascadeDeletion:
 
         # Phase 1 targets: player_game_batting, player_game_pitching, spray_charts (game-linked)
         conn.execute(
-            "INSERT INTO player_game_batting (game_id, player_id, team_id) VALUES (?, ?, ?)",
-            (game_id, player_id, team_id),
+            "INSERT INTO player_game_batting (game_id, player_id, team_id, perspective_team_id) VALUES (?, ?, ?, ?)",
+            (game_id, player_id, team_id, team_id),
         )
         conn.execute(
-            "INSERT INTO player_game_batting (game_id, player_id, team_id) VALUES (?, ?, ?)",
-            (game_id, player2_id, opp_id),
+            "INSERT INTO player_game_batting (game_id, player_id, team_id, perspective_team_id) VALUES (?, ?, ?, ?)",
+            (game_id, player2_id, opp_id, team_id),
         )
         conn.execute(
-            "INSERT INTO player_game_pitching (game_id, player_id, team_id) VALUES (?, ?, ?)",
-            (game_id, player_id, team_id),
+            "INSERT INTO player_game_pitching (game_id, player_id, team_id, perspective_team_id) VALUES (?, ?, ?, ?)",
+            (game_id, player_id, team_id, team_id),
         )
         conn.execute(
-            "INSERT INTO player_game_pitching (game_id, player_id, team_id) VALUES (?, ?, ?)",
-            (game_id, player2_id, opp_id),
+            "INSERT INTO player_game_pitching (game_id, player_id, team_id, perspective_team_id) VALUES (?, ?, ?, ?)",
+            (game_id, player2_id, opp_id, team_id),
         )
         conn.execute(
-            "INSERT INTO spray_charts (game_id, team_id) VALUES (?, ?)",
-            (game_id, team_id),
+            "INSERT INTO spray_charts (game_id, team_id, perspective_team_id) VALUES (?, ?, ?)",
+            (game_id, team_id, team_id),
         )
 
         # Phase 3 targets: player_season_batting, player_season_pitching,
@@ -225,8 +225,8 @@ class TestCascadeDeletion:
             (player_id, team_id, season_id),
         )
         conn.execute(
-            "INSERT INTO spray_charts (team_id) VALUES (?)",
-            (team_id,),
+            "INSERT INTO spray_charts (team_id, perspective_team_id) VALUES (?, ?)",
+            (team_id, team_id),
         )
         conn.execute(
             "INSERT INTO team_rosters (team_id, player_id, season_id) VALUES (?, ?, ?)",
@@ -307,8 +307,8 @@ class TestCascadeDeletion:
         conn.execute("PRAGMA foreign_keys=ON;")
         # Opponent-side batting row -- should be deleted in Phase 1
         conn.execute(
-            "INSERT INTO player_game_batting (game_id, player_id, team_id) VALUES (?, ?, ?)",
-            (game_id, player_id, opp_id),
+            "INSERT INTO player_game_batting (game_id, player_id, team_id, perspective_team_id) VALUES (?, ?, ?, ?)",
+            (game_id, player_id, opp_id, team_id),
         )
         conn.commit()
         conn.close()
@@ -629,3 +629,390 @@ class TestConfirmDeleteRouteZeroData:
                 resp = client.get("/admin/teams/999999/delete")
 
         assert resp.status_code == 404
+
+
+
+# ---------------------------------------------------------------------------
+# E-220 proactive audit: admin cascade delete must handle new FK tables
+# ---------------------------------------------------------------------------
+
+
+class TestE220CascadeDeletion:
+    """E-220 proactive audit finding: _delete_team_cascade() was missing
+    plays, play_events, game_perspectives, and reconciliation_discrepancies
+    deletion.  These tables all have FKs to games or plays, so DELETE FROM
+    games would raise IntegrityError when any of them have rows.
+    """
+
+    def test_cascade_deletes_plays_and_children(self, db: Path) -> None:
+        """Cascade delete must remove plays, play_events, game_perspectives,
+        and reconciliation_discrepancies for games involving the team.
+
+        RED test: without the fix, DELETE FROM games raises
+        FOREIGN KEY constraint failed because the child tables still
+        reference the game rows.
+        """
+        admin_id = _insert_user(db, "admin@example.com")
+        token = _insert_session(db, admin_id)
+        season_id = _insert_season(db)
+        player_batter_id = _insert_player(db, "p-batter")
+        player_pitcher_id = _insert_player(db, "p-pitcher")
+
+        team_id = _insert_team(db, "Delete Me", membership_type="member")
+        opp_id = _insert_team(db, "Opponent", membership_type="tracked")
+        game_id = _insert_game(db, "game-plays-001", team_id, opp_id, season_id)
+
+        conn = sqlite3.connect(str(db))
+        conn.execute("PRAGMA foreign_keys=ON;")
+
+        # Seed plays data (with perspective_team_id, both team perspectives)
+        conn.execute(
+            "INSERT INTO plays "
+            "(game_id, play_order, inning, half, season_id, batting_team_id, "
+            "perspective_team_id, batter_id, pitcher_id) "
+            "VALUES (?, 1, 1, 'top', ?, ?, ?, ?, ?)",
+            (game_id, season_id, opp_id, team_id, player_batter_id, player_pitcher_id),
+        )
+        play_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+        # play_events row -- FK to plays.id
+        conn.execute(
+            "INSERT INTO play_events (play_id, event_order, event_type) "
+            "VALUES (?, 1, 'pitch')",
+            (play_id,),
+        )
+
+        # Seed game_perspectives -- FK to games.game_id
+        conn.execute(
+            "INSERT INTO game_perspectives (game_id, perspective_team_id) VALUES (?, ?)",
+            (game_id, team_id),
+        )
+        conn.execute(
+            "INSERT INTO game_perspectives (game_id, perspective_team_id) VALUES (?, ?)",
+            (game_id, opp_id),
+        )
+
+        # Seed reconciliation_discrepancies -- FK to games.game_id
+        conn.execute(
+            "INSERT INTO reconciliation_discrepancies "
+            "(game_id, run_id, perspective_team_id, team_id, player_id, signal_name, category, status) "
+            "VALUES (?, 'run-x', ?, ?, ?, 'pitcher_bf', 'pitching', 'MATCH')",
+            (game_id, team_id, team_id, player_pitcher_id),
+        )
+
+        # Also seed batting/pitching/spray data so the existing Phase 1 runs.
+        conn.execute(
+            "INSERT INTO player_game_batting "
+            "(game_id, player_id, team_id, perspective_team_id) "
+            "VALUES (?, ?, ?, ?)",
+            (game_id, player_batter_id, team_id, team_id),
+        )
+        conn.execute(
+            "INSERT INTO player_game_pitching "
+            "(game_id, player_id, team_id, perspective_team_id) "
+            "VALUES (?, ?, ?, ?)",
+            (game_id, player_pitcher_id, team_id, team_id),
+        )
+        conn.commit()
+        conn.close()
+
+        with patch.dict("os.environ", _admin_env(db)):
+            with TestClient(
+                app, follow_redirects=False, cookies={"session": token, "csrf_token": _CSRF}
+            ) as client:
+                resp = client.post(
+                    f"/admin/teams/{team_id}/delete", data={"csrf_token": _CSRF}
+                )
+
+        # Must not raise FK error -- status should be 303 redirect after successful delete
+        assert resp.status_code == 303, (
+            f"Expected 303 redirect, got {resp.status_code}. "
+            f"Response body: {resp.text[:500]}"
+        )
+
+        # Team row is gone
+        assert _count_rows(db, "teams", "id = ?", (team_id,)) == 0
+        # Phase 2: game is gone
+        assert _count_rows(db, "games", "game_id = ?", (game_id,)) == 0
+        # Phase 1 new tables: all children deleted
+        assert _count_rows(db, "plays", "game_id = ?", (game_id,)) == 0
+        assert _count_rows(db, "play_events", "play_id = ?", (play_id,)) == 0
+        assert _count_rows(db, "game_perspectives", "game_id = ?", (game_id,)) == 0
+        assert _count_rows(
+            db, "reconciliation_discrepancies", "game_id = ?", (game_id,)
+        ) == 0
+
+
+
+# ---------------------------------------------------------------------------
+# Round 6 Cluster 3: informed-consent cross-perspective delete (Option B)
+# ---------------------------------------------------------------------------
+
+
+class TestCrossPerspectiveOwnersPreview:
+    """Round 6 Cluster 3: preview reports cross_perspective_owners list."""
+
+    def test_delete_team_preview_reports_cross_perspective_owners(
+        self, db: Path
+    ) -> None:
+        """Team T has rows where team_id=T, perspective_team_id=O.  The
+        preview must list O with the correct row count.
+        """
+        from src.api.routes.admin import _get_delete_confirmation_data
+
+        admin_id = _insert_user(db, "admin@example.com")
+        _insert_session(db, admin_id)
+        season_id = _insert_season(db)
+        team_id = _insert_team(db, "Subject", membership_type="tracked")
+        owner_id = _insert_team(db, "Lincoln Varsity", membership_type="member")
+        owner2_id = _insert_team(db, "Lincoln JV", membership_type="member")
+        game_id = _insert_game(db, "g-cp1", team_id, owner_id, season_id)
+        player = _insert_player(db, "p-1")
+
+        conn = sqlite3.connect(str(db))
+        conn.execute("PRAGMA foreign_keys=ON;")
+        # team_id=subject, perspective_team_id=owner  (cross-perspective rows)
+        # Insert 3 from Lincoln Varsity, 2 from Lincoln JV.
+        for _ in range(3):
+            conn.execute(
+                "INSERT OR IGNORE INTO players (player_id, first_name, last_name) "
+                "VALUES (?, 'Lv', 'Player')",
+                (f"p-lv-{_}",),
+            )
+            conn.execute(
+                "INSERT INTO player_game_batting "
+                "(game_id, player_id, team_id, perspective_team_id) "
+                "VALUES (?, ?, ?, ?)",
+                (game_id, f"p-lv-{_}", team_id, owner_id),
+            )
+        for _ in range(2):
+            conn.execute(
+                "INSERT OR IGNORE INTO players (player_id, first_name, last_name) "
+                "VALUES (?, 'Lj', 'Player')",
+                (f"p-lj-{_}",),
+            )
+            conn.execute(
+                "INSERT INTO player_game_batting "
+                "(game_id, player_id, team_id, perspective_team_id) "
+                "VALUES (?, ?, ?, ?)",
+                (game_id, f"p-lj-{_}", team_id, owner2_id),
+            )
+        conn.commit()
+        conn.close()
+
+        with patch.dict("os.environ", _admin_env(db)):
+            preview = _get_delete_confirmation_data(team_id)
+
+        assert "cross_perspective_owners" in preview, (
+            "preview must expose cross_perspective_owners field"
+        )
+        owners = preview["cross_perspective_owners"]
+        assert len(owners) == 2, f"expected 2 owners, got {owners}"
+        # Ordered by row_count DESC per DE's sketch
+        assert owners[0]["name"] == "Lincoln Varsity"
+        assert owners[0]["row_count"] == 3
+        assert owners[0]["id"] == owner_id
+        assert owners[1]["name"] == "Lincoln JV"
+        assert owners[1]["row_count"] == 2
+        assert owners[1]["id"] == owner2_id
+
+    def test_delete_team_preview_empty_cross_perspective_for_clean_team(
+        self, db: Path
+    ) -> None:
+        """Team with only own-perspective rows produces empty owners list."""
+        from src.api.routes.admin import _get_delete_confirmation_data
+
+        admin_id = _insert_user(db, "admin@example.com")
+        _insert_session(db, admin_id)
+        season_id = _insert_season(db)
+        team_id = _insert_team(db, "Clean", membership_type="member")
+        other_id = _insert_team(db, "Opponent", membership_type="tracked")
+        game_id = _insert_game(db, "g-clean", team_id, other_id, season_id)
+        player = _insert_player(db, "p-c")
+
+        conn = sqlite3.connect(str(db))
+        conn.execute("PRAGMA foreign_keys=ON;")
+        # Only own-perspective rows
+        conn.execute(
+            "INSERT INTO player_game_batting "
+            "(game_id, player_id, team_id, perspective_team_id) "
+            "VALUES (?, ?, ?, ?)",
+            (game_id, player, team_id, team_id),
+        )
+        conn.commit()
+        conn.close()
+
+        with patch.dict("os.environ", _admin_env(db)):
+            preview = _get_delete_confirmation_data(team_id)
+
+        assert preview.get("cross_perspective_owners", []) == [], (
+            "clean team should have empty cross_perspective_owners list"
+        )
+
+
+class TestCrossPerspectiveDeleteConfirmation:
+    """Round 6 Cluster 3: route handler gates delete on named confirmation."""
+
+    def test_delete_team_blocks_when_cross_perspective_confirmation_missing(
+        self, db: Path
+    ) -> None:
+        """POST without confirm_cross_perspective when team has cross-persp
+        rows re-renders the confirmation page WITHOUT performing delete.
+        """
+        admin_id = _insert_user(db, "admin@example.com")
+        token = _insert_session(db, admin_id)
+        season_id = _insert_season(db)
+        team_id = _insert_team(db, "Subject", membership_type="tracked")
+        owner_id = _insert_team(db, "Lincoln Varsity", membership_type="member")
+        game_id = _insert_game(db, "g-block", team_id, owner_id, season_id)
+
+        conn = sqlite3.connect(str(db))
+        conn.execute("PRAGMA foreign_keys=ON;")
+        # Cross-perspective row: team_id=subject but perspective_team_id=owner
+        conn.execute(
+            "INSERT OR IGNORE INTO players (player_id, first_name, last_name) "
+            "VALUES ('p-cp', 'CP', 'Player')"
+        )
+        conn.execute(
+            "INSERT INTO player_game_batting "
+            "(game_id, player_id, team_id, perspective_team_id) "
+            "VALUES (?, ?, ?, ?)",
+            (game_id, "p-cp", team_id, owner_id),
+        )
+        conn.commit()
+        conn.close()
+
+        with patch.dict("os.environ", _admin_env(db)):
+            with TestClient(
+                app, follow_redirects=False,
+                cookies={"session": token, "csrf_token": _CSRF},
+            ) as client:
+                # POST WITHOUT confirm_cross_perspective
+                resp = client.post(
+                    f"/admin/teams/{team_id}/delete",
+                    data={"csrf_token": _CSRF},
+                )
+
+        # Re-renders the confirmation page (200 OK), not a 303 redirect
+        assert resp.status_code == 200, (
+            f"expected 200 re-render, got {resp.status_code}"
+        )
+        # Response body should mention the cross-perspective owner by name
+        assert "Lincoln Varsity" in resp.text, (
+            "response must name the specific owner team"
+        )
+        # The team row must still exist (not deleted)
+        assert _count_rows(db, "teams", "id = ?", (team_id,)) == 1, (
+            "team should NOT have been deleted"
+        )
+        # The cross-perspective rows must still exist
+        assert _count_rows(
+            db, "player_game_batting", "game_id = ?", (game_id,)
+        ) == 1
+
+    def test_delete_team_proceeds_with_cross_perspective_confirmation(
+        self, db: Path
+    ) -> None:
+        """POST with confirm_cross_perspective=1 completes the delete.
+        Both team_id=T rows and perspective_team_id=T rows are removed.
+        """
+        admin_id = _insert_user(db, "admin@example.com")
+        token = _insert_session(db, admin_id)
+        season_id = _insert_season(db)
+        team_id = _insert_team(db, "Subject", membership_type="tracked")
+        owner_id = _insert_team(db, "Lincoln Varsity", membership_type="member")
+        other_team = _insert_team(db, "Other Team", membership_type="tracked")
+        game1 = _insert_game(db, "g-proceed1", team_id, owner_id, season_id)
+        game2 = _insert_game(db, "g-proceed2", other_team, owner_id, season_id)
+
+        conn = sqlite3.connect(str(db))
+        conn.execute("PRAGMA foreign_keys=ON;")
+        conn.executemany(
+            "INSERT OR IGNORE INTO players (player_id, first_name, last_name) "
+            "VALUES (?, 'X', 'X')",
+            [("p-a",), ("p-b",)],
+        )
+        # Row 1: team_id=subject, perspective_team_id=owner (cross-persp "about" subject)
+        conn.execute(
+            "INSERT INTO player_game_batting "
+            "(game_id, player_id, team_id, perspective_team_id) "
+            "VALUES (?, ?, ?, ?)",
+            (game1, "p-a", team_id, owner_id),
+        )
+        # Row 2: team_id=other_team, perspective_team_id=subject
+        #        (subject's own-perspective data "about" other_team)
+        conn.execute(
+            "INSERT INTO player_game_batting "
+            "(game_id, player_id, team_id, perspective_team_id) "
+            "VALUES (?, ?, ?, ?)",
+            (game2, "p-b", other_team, team_id),
+        )
+        conn.commit()
+        conn.close()
+
+        with patch.dict("os.environ", _admin_env(db)):
+            with TestClient(
+                app, follow_redirects=False,
+                cookies={"session": token, "csrf_token": _CSRF},
+            ) as client:
+                resp = client.post(
+                    f"/admin/teams/{team_id}/delete",
+                    data={"csrf_token": _CSRF, "confirm_cross_perspective": "1"},
+                )
+
+        assert resp.status_code == 303, (
+            f"expected 303 redirect after successful delete, got {resp.status_code}"
+        )
+        # Subject team row gone
+        assert _count_rows(db, "teams", "id = ?", (team_id,)) == 0
+        # Row 1 (team_id=subject) is gone
+        assert _count_rows(
+            db, "player_game_batting", "game_id = ?", (game1,)
+        ) == 0
+        # Row 2 (perspective_team_id=subject) is gone -- its perspective FK
+        # is the subject team, which no longer exists
+        assert _count_rows(
+            db, "player_game_batting", "perspective_team_id = ?", (team_id,)
+        ) == 0
+
+    def test_delete_team_proceeds_without_flag_when_no_cross_perspective(
+        self, db: Path
+    ) -> None:
+        """Clean team (no cross-persp rows) deletes without the flag."""
+        admin_id = _insert_user(db, "admin@example.com")
+        token = _insert_session(db, admin_id)
+        season_id = _insert_season(db)
+        team_id = _insert_team(db, "Clean", membership_type="member")
+        opp_id = _insert_team(db, "Opp", membership_type="tracked")
+        game_id = _insert_game(db, "g-clean2", team_id, opp_id, season_id)
+
+        conn = sqlite3.connect(str(db))
+        conn.execute("PRAGMA foreign_keys=ON;")
+        conn.execute(
+            "INSERT OR IGNORE INTO players (player_id, first_name, last_name) "
+            "VALUES ('p-own', 'Own', 'Player')"
+        )
+        # Only own-perspective rows
+        conn.execute(
+            "INSERT INTO player_game_batting "
+            "(game_id, player_id, team_id, perspective_team_id) "
+            "VALUES (?, ?, ?, ?)",
+            (game_id, "p-own", team_id, team_id),
+        )
+        conn.commit()
+        conn.close()
+
+        with patch.dict("os.environ", _admin_env(db)):
+            with TestClient(
+                app, follow_redirects=False,
+                cookies={"session": token, "csrf_token": _CSRF},
+            ) as client:
+                resp = client.post(
+                    f"/admin/teams/{team_id}/delete",
+                    data={"csrf_token": _CSRF},  # no confirm flag
+                )
+
+        assert resp.status_code == 303, (
+            "clean team delete should proceed without the flag"
+        )
+        assert _count_rows(db, "teams", "id = ?", (team_id,)) == 0
+

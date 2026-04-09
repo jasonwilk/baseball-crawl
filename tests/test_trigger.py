@@ -33,6 +33,8 @@ if str(_PROJECT_ROOT) not in sys.path:
 
 from migrations.apply_migrations import run_migrations  # noqa: E402
 from src.gamechanger.crawlers import CrawlResult  # noqa: E402
+from src.gamechanger.crawlers.scouting import ScoutingCrawlResult  # noqa: E402
+from src.gamechanger.crawlers.scouting_spray import SprayCrawlResult  # noqa: E402
 from src.gamechanger.loaders import LoadResult  # noqa: E402
 from src.pipeline import trigger  # noqa: E402
 
@@ -218,7 +220,7 @@ class TestScoutingSync:
         job_id = _insert_crawl_job(db_path, 1, "scouting_crawl")
 
         mock_crawler = MagicMock()
-        mock_crawler.scout_team.return_value = CrawlResult(errors=1, files_written=0)
+        mock_crawler.scout_team.return_value = ScoutingCrawlResult(team_id=1, season_id="", errors=1)
 
         with (
             patch("src.pipeline.trigger.get_db_path", return_value=db_path),
@@ -242,7 +244,11 @@ class TestScoutingSync:
         scouting_dir.mkdir(parents=True)
 
         mock_crawler = MagicMock()
-        mock_crawler.scout_team.return_value = CrawlResult(files_written=3)
+        mock_crawler.scout_team.return_value = ScoutingCrawlResult(
+        team_id=1, season_id="2025-spring-hs",
+        games=[{"id": "g1", "game_status": "completed"}],
+        games_crawled=3,
+    )
         mock_loader = MagicMock()
         mock_loader.load_team.side_effect = RuntimeError("load crashed")
 
@@ -257,7 +263,7 @@ class TestScoutingSync:
 
         job = _get_crawl_job(db_path, job_id)
         assert job["status"] == "failed"
-        mock_crawler.update_run_load_status.assert_called_once_with(1, "2025", "failed")
+        mock_crawler.update_run_load_status.assert_called_once_with(1, "2025-spring-hs", "failed")
         assert _get_last_synced(db_path, 1) is None
 
     def test_success_marks_job_completed_updates_last_synced(
@@ -271,7 +277,11 @@ class TestScoutingSync:
         scouting_dir.mkdir(parents=True)
 
         mock_crawler = MagicMock()
-        mock_crawler.scout_team.return_value = CrawlResult(files_written=3)
+        mock_crawler.scout_team.return_value = ScoutingCrawlResult(
+        team_id=1, season_id="2025-spring-hs",
+        games=[{"id": "g1", "game_status": "completed"}],
+        games_crawled=3,
+    )
         mock_loader = MagicMock()
         mock_loader.load_team.return_value = LoadResult(loaded=5, errors=0)
 
@@ -289,7 +299,7 @@ class TestScoutingSync:
         assert job["status"] == "completed"
         assert job["completed_at"] is not None
         assert job["error_message"] is None
-        mock_crawler.update_run_load_status.assert_called_once_with(1, "2025", "completed")
+        mock_crawler.update_run_load_status.assert_called_once_with(1, "2025-spring-hs", "completed")
         assert _get_last_synced(db_path, 1) is not None
 
 
@@ -407,7 +417,11 @@ class TestScoutingSyncSeasonYearHeal:
         mock_profile = TeamProfile(public_id="test-slug", name="Test", sport="baseball", year=2026)
 
         mock_crawler = MagicMock()
-        mock_crawler.scout_team.return_value = CrawlResult(files_written=3)
+        mock_crawler.scout_team.return_value = ScoutingCrawlResult(
+        team_id=1, season_id="2025-spring-hs",
+        games=[{"id": "g1", "game_status": "completed"}],
+        games_crawled=3,
+    )
         mock_loader = MagicMock()
         mock_loader.load_team.return_value = LoadResult(loaded=5, errors=0)
 
@@ -436,7 +450,11 @@ class TestScoutingSyncSeasonYearHeal:
         _insert_scouting_run(db_path, 1)
 
         mock_crawler = MagicMock()
-        mock_crawler.scout_team.return_value = CrawlResult(files_written=3)
+        mock_crawler.scout_team.return_value = ScoutingCrawlResult(
+        team_id=1, season_id="2025-spring-hs",
+        games=[{"id": "g1", "game_status": "completed"}],
+        games_crawled=3,
+    )
         mock_loader = MagicMock()
         mock_loader.load_team.return_value = LoadResult(loaded=5, errors=0)
 
@@ -960,11 +978,15 @@ def _setup_scouting_success(
     scouting_dir.mkdir(parents=True)
 
     mock_crawler = MagicMock()
-    mock_crawler.scout_team.return_value = CrawlResult(files_written=3)
+    mock_crawler.scout_team.return_value = ScoutingCrawlResult(
+        team_id=1, season_id="2025-spring-hs",
+        games=[{"id": "g1", "game_status": "completed"}],
+        games_crawled=3,
+    )
     mock_loader = MagicMock()
     mock_loader.load_team.return_value = LoadResult(loaded=5, errors=0)
     mock_spray_crawler = MagicMock()
-    mock_spray_crawler.crawl_team.return_value = CrawlResult(files_written=2)
+    mock_spray_crawler.crawl_team.return_value = SprayCrawlResult(games_crawled=2)
     mock_spray_loader = MagicMock()
     mock_spray_loader.load_all.return_value = LoadResult(loaded=10, errors=0)
 
@@ -1041,9 +1063,11 @@ class TestScoutingSyncSprayStages:
         ):
             trigger.run_scouting_sync(1, "opp-slug", job_id)
 
-        mock_spray_crawler.crawl_team.assert_called_once_with(
-            "opp-slug", season_id="2025", gc_uuid="test-uuid"
-        )
+        mock_spray_crawler.crawl_team.assert_called_once()
+        call_args = mock_spray_crawler.crawl_team.call_args
+        assert call_args[0][0] == "opp-slug"
+        assert call_args[1]["gc_uuid"] == "test-uuid"
+        assert call_args[1].get("games_data")  # non-empty games_data passed
 
     def test_ac3_spray_loader_runs_after_spray_crawl(self, tmp_path: Path) -> None:
         """AC-3: Spray loader runs after spray crawl succeeds."""
@@ -1064,9 +1088,9 @@ class TestScoutingSyncSprayStages:
         ):
             trigger.run_scouting_sync(1, "opp-slug", job_id)
 
-        mock_spray_loader.load_all.assert_called_once()
-        call_args = mock_spray_loader.load_all.call_args
-        assert call_args[1].get("public_id") == "opp-slug" or call_args[0][1] == "opp-slug" if len(call_args[0]) > 1 else call_args[1].get("public_id") == "opp-slug"
+        mock_spray_loader.load_from_data.assert_called_once()
+        call_args = mock_spray_loader.load_from_data.call_args
+        assert call_args[1].get("public_id") == "opp-slug"
 
     def test_ac4_no_gc_uuid_skips_spray_job_still_completed(self, tmp_path: Path) -> None:
         """AC-4: No gc_uuid (resolution failed) -> spray skipped, job still completed."""
@@ -1093,7 +1117,7 @@ class TestScoutingSyncSprayStages:
         assert _get_last_synced(db_path, 1) is not None
         # Spray stages should not have been called.
         mock_spray_crawler.crawl_team.assert_not_called()
-        mock_spray_loader.load_all.assert_not_called()
+        mock_spray_loader.load_from_data.assert_not_called()
 
     def test_ac5_spray_crawl_failure_job_still_completed(self, tmp_path: Path) -> None:
         """AC-5: Spray crawl failure does not change job status from completed."""
@@ -1122,7 +1146,7 @@ class TestScoutingSyncSprayStages:
         assert job["error_message"] is None
         assert _get_last_synced(db_path, 1) is not None
         # Spray load should not be called after spray crawl failure.
-        mock_spray_loader.load_all.assert_not_called()
+        mock_spray_loader.load_from_data.assert_not_called()
 
     def test_ac5_spray_load_failure_job_still_completed(self, tmp_path: Path) -> None:
         """AC-5: Spray load failure does not change job status from completed."""
@@ -1167,7 +1191,7 @@ class TestScoutingSyncSprayStages:
 
         def _mock_spray_crawl(*args, **kwargs):
             call_order.append("spray_crawl")
-            return CrawlResult(files_written=1)
+            return SprayCrawlResult(games_crawled=1)
 
         mock_spray_crawler.crawl_team.side_effect = _mock_spray_crawl
 
@@ -1191,7 +1215,7 @@ class TestScoutingSyncSprayStages:
         job_id = _insert_crawl_job(db_path, 1, "scouting_crawl")
 
         mock_crawler = MagicMock()
-        mock_crawler.scout_team.return_value = CrawlResult(errors=1, files_written=0)
+        mock_crawler.scout_team.return_value = ScoutingCrawlResult(team_id=1, season_id="", errors=1)
         mock_spray_crawler = MagicMock()
         mock_spray_loader = MagicMock()
 
@@ -1210,7 +1234,7 @@ class TestScoutingSyncSprayStages:
         assert job["status"] == "failed"
         mock_resolve.assert_not_called()
         mock_spray_crawler.crawl_team.assert_not_called()
-        mock_spray_loader.load_all.assert_not_called()
+        mock_spray_loader.load_from_data.assert_not_called()
 
     def test_ac7_load_errors_skips_spray(self, tmp_path: Path) -> None:
         """AC-7: When load has errors, spray stages are skipped."""
@@ -1222,7 +1246,11 @@ class TestScoutingSyncSprayStages:
         scouting_dir.mkdir(parents=True)
 
         mock_crawler = MagicMock()
-        mock_crawler.scout_team.return_value = CrawlResult(files_written=3)
+        mock_crawler.scout_team.return_value = ScoutingCrawlResult(
+        team_id=1, season_id="2025-spring-hs",
+        games=[{"id": "g1", "game_status": "completed"}],
+        games_crawled=3,
+    )
         mock_loader = MagicMock()
         mock_loader.load_team.return_value = LoadResult(loaded=2, errors=3)
         mock_spray_crawler = MagicMock()
@@ -1244,7 +1272,7 @@ class TestScoutingSyncSprayStages:
         assert job["status"] == "failed"
         mock_resolve.assert_not_called()
         mock_spray_crawler.crawl_team.assert_not_called()
-        mock_spray_loader.load_all.assert_not_called()
+        mock_spray_loader.load_from_data.assert_not_called()
 
     def test_spray_crawl_errors_skip_spray_load(self, tmp_path: Path) -> None:
         """Spray crawl returns errors (no exception) -> spray load skipped (CLI parity)."""
@@ -1256,8 +1284,8 @@ class TestScoutingSyncSprayStages:
 
         # Spray crawl succeeds partially: some files written, but also errors.
         partial_spray_crawler = MagicMock()
-        partial_spray_crawler.crawl_team.return_value = CrawlResult(
-            files_written=2, errors=1
+        partial_spray_crawler.crawl_team.return_value = SprayCrawlResult(
+            games_crawled=2, errors=1
         )
 
         with (
@@ -1277,7 +1305,7 @@ class TestScoutingSyncSprayStages:
         # Spray crawl was called...
         partial_spray_crawler.crawl_team.assert_called_once()
         # ...but spray load was NOT called due to crawl errors.
-        mock_spray_loader.load_all.assert_not_called()
+        mock_spray_loader.load_from_data.assert_not_called()
 
     def test_spray_load_errors_logged_at_warning(self, tmp_path: Path) -> None:
         """Spray load returning errors (no exception) logs at WARNING level."""
@@ -1288,7 +1316,7 @@ class TestScoutingSyncSprayStages:
         )
 
         error_spray_loader = MagicMock()
-        error_spray_loader.load_all.return_value = LoadResult(loaded=5, errors=2)
+        error_spray_loader.load_from_data.return_value = LoadResult(loaded=5, errors=2)
 
         with (
             patch("src.pipeline.trigger.get_db_path", return_value=db_path),
@@ -1303,7 +1331,7 @@ class TestScoutingSyncSprayStages:
                 trigger.run_scouting_sync(1, "opp-slug", job_id)
 
             # Spray load was called and returned errors.
-            error_spray_loader.load_all.assert_called_once()
+            error_spray_loader.load_from_data.assert_called_once()
             # Verify WARNING was used for the error report.
             warning_calls = [
                 call for call in mock_logger.warning.call_args_list

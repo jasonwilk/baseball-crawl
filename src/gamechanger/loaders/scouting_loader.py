@@ -1,9 +1,10 @@
 """Scouting loader for the baseball-crawl ingestion pipeline.
 
-Reads raw scouting files written by ``ScoutingCrawler`` and loads them into
-the SQLite database.  Delegates per-game boxscore loading to the existing
-``GameLoader.load_file()`` (which handles all boxscore parsing, player stubs,
-game records, and batting/pitching stat upserts).
+Consumes in-memory crawl results from ``ScoutingCrawler.scout_team()``
+and loads them into the SQLite database.  Delegates per-game boxscore
+loading to the existing ``GameLoader.load_file()`` (which handles all
+boxscore parsing, player stubs, game records, and batting/pitching stat
+upserts).
 
 Additional responsibilities beyond ``GameLoader``:
 - Roster loading into ``players`` and ``team_rosters``.
@@ -12,26 +13,16 @@ Additional responsibilities beyond ``GameLoader``:
   ``player_game_batting`` and ``player_game_pitching``, then upserts into
   ``player_season_batting`` and ``player_season_pitching``.
 
-Expected raw file layout (written by ``ScoutingCrawler``)::
-
-    data/raw/{season_id}/scouting/{public_id}/games.json
-    data/raw/{season_id}/scouting/{public_id}/roster.json
-    data/raw/{season_id}/scouting/{public_id}/boxscores/{game_stream_id}.json
-
 Usage::
 
     import sqlite3
-    from pathlib import Path
     from src.gamechanger.loaders.scouting_loader import ScoutingLoader
+    from src.gamechanger.crawlers.scouting import ScoutingCrawlResult
 
     conn = sqlite3.connect("./data/app.db")
     conn.execute("PRAGMA foreign_keys=ON;")
     loader = ScoutingLoader(conn)
-    result = loader.load_team(
-        Path("data/raw/2025-spring-hs/scouting/8O8bTolVfb9A"),
-        team_id=42,
-        season_id="2025-spring-hs",
-    )
+    result = loader.load_team(crawl_result)
     print(result)
 """
 
@@ -40,6 +31,7 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -74,34 +66,107 @@ class ScoutingLoader:
 
     def load_team(
         self,
-        scouting_dir: Path,
-        team_id: int,
-        season_id: str,
+        crawl_result: Any,
+        team_id: int | None = None,
+        season_id: str | None = None,
     ) -> LoadResult:
-        """Load all scouting data for one opponent from a raw directory.
+        """Load all scouting data from an in-memory crawl result.
 
-        Reads ``games.json``, ``roster.json``, and all ``boxscores/*.json``
-        files.  Delegates boxscore loading to ``GameLoader.load_file()`` and
-        computes season aggregates from the loaded per-game rows.
+        Accepts a ``ScoutingCrawlResult`` from the crawler, loads roster
+        and boxscores from the in-memory data, and computes season aggregates.
 
         Args:
-            scouting_dir: Path to ``data/raw/{season_id}/scouting/{public_id}/``.
-            team_id: The opponent's INTEGER PK in the ``teams`` table.
-            season_id: Season slug used for **file path construction only**
-                (locating the scouting directory on disk).  The DB season_id
-                for loaded data is derived from team metadata via
-                ``derive_season_id_for_team()``.
+            crawl_result: ``ScoutingCrawlResult`` containing games, roster,
+                and boxscores data.  For backwards compatibility, also accepts
+                a ``Path`` (deprecated disk-based flow).
+            team_id: The opponent's INTEGER PK.  When ``None``, uses
+                ``crawl_result.team_id``.
+            season_id: Unused (kept for backwards compatibility).  DB season_id
+                is derived from team metadata.
 
         Returns:
             Aggregated ``LoadResult`` across roster and boxscore loading.
         """
+        # Backwards compatibility: if crawl_result is a Path, use old disk flow.
+        if isinstance(crawl_result, Path):
+            return self._load_team_from_disk(crawl_result, team_id, season_id)
+
+        # In-memory flow (E-220-05).
+        tid = team_id if team_id is not None else crawl_result.team_id
+
         # Derive the canonical DB season_id from team metadata (not the crawl path).
+        db_season_id, db_season_year = derive_season_id_for_team(self._db, tid)
+        ensure_season_row(self._db, db_season_id)
+
+        total = self._load_roster_from_data(crawl_result.roster, tid, db_season_id)
+
+        # Post-roster validation.
+        expected_count = sum(1 for p in crawl_result.roster if p.get("id"))
+        if expected_count:
+            self._validate_roster_count(tid, db_season_id, expected_count)
+
+        if not crawl_result.boxscores:
+            logger.info("No boxscores in crawl result for team_id=%d; nothing to load.", tid)
+            return total
+
+        # Build TeamRef for GameLoader by looking up gc_uuid and public_id.
+        team_ref = self._build_team_ref(tid)
+        game_loader = GameLoader(db=self._db, owned_team_ref=team_ref)
+        games_index = self._build_games_index_from_data(crawl_result.games)
+        opponent_name_index = self._build_opponent_name_index_from_data(crawl_result.games)
+        bs_result = self._load_boxscores_from_data(
+            game_loader, games_index, crawl_result.boxscores,
+            opponent_name_index=opponent_name_index,
+        )
+        total.loaded += bs_result.loaded
+        total.skipped += bs_result.skipped
+        total.errors += bs_result.errors
+
+        # Post-boxscore validation: check for duplicate game rows.
+        self._check_duplicate_games(tid, db_season_id)
+
+        # Hook 1: dedup sweep after boxscore loading, before aggregation.
+        try:
+            from src.db.player_dedup import dedup_team_players
+
+            dedup_team_players(
+                self._db, tid, db_season_id, manage_transaction=False
+            )
+        except Exception:  # noqa: BLE001
+            logger.error(
+                "Post-boxscore dedup sweep failed for team_id=%d season=%s; "
+                "continuing with aggregation",
+                tid,
+                db_season_id,
+                exc_info=True,
+            )
+
+        self._compute_season_aggregates(tid, db_season_id)
+        self._db.commit()
+        logger.info(
+            "Scouting load complete for team_id=%d season=%s: loaded=%d skipped=%d errors=%d",
+            tid, db_season_id, total.loaded, total.skipped, total.errors,
+        )
+        return total
+
+    def _load_team_from_disk(
+        self,
+        scouting_dir: Path,
+        team_id: int | None,
+        season_id: str | None,
+    ) -> LoadResult:
+        """Legacy disk-based load_team path (backwards compatibility).
+
+        Reads games.json, roster.json, and boxscores/*.json files from disk.
+        """
+        if team_id is None:
+            raise ValueError("team_id is required for disk-based load_team")
+
         db_season_id, db_season_year = derive_season_id_for_team(self._db, team_id)
         ensure_season_row(self._db, db_season_id)
 
         total = self._load_roster_section(scouting_dir, team_id, db_season_id)
 
-        # Post-roster validation: compare DB roster count to source file count.
         roster_path = scouting_dir / "roster.json"
         if roster_path.exists():
             expected_count = self._count_roster_entries(roster_path)
@@ -113,7 +178,6 @@ class ScoutingLoader:
             logger.info("No boxscores directory at %s; nothing to load.", boxscores_dir)
             return total
 
-        # Build TeamRef for GameLoader by looking up gc_uuid and public_id.
         team_ref = self._build_team_ref(team_id)
         game_loader = GameLoader(db=self._db, owned_team_ref=team_ref)
         games_path = scouting_dir / "games.json"
@@ -127,25 +191,15 @@ class ScoutingLoader:
         total.skipped += bs_result.skipped
         total.errors += bs_result.errors
 
-        # Post-boxscore validation: check for duplicate game rows.
         self._check_duplicate_games(team_id, db_season_id)
 
-        # Hook 1: dedup sweep after boxscore loading, before aggregation.
-        # Uses manage_transaction=False since the loader's connection may
-        # have an implicit transaction open.
         try:
             from src.db.player_dedup import dedup_team_players
-
-            dedup_team_players(
-                self._db, team_id, db_season_id, manage_transaction=False
-            )
+            dedup_team_players(self._db, team_id, db_season_id, manage_transaction=False)
         except Exception:  # noqa: BLE001
             logger.error(
-                "Post-boxscore dedup sweep failed for team_id=%d season=%s; "
-                "continuing with aggregation",
-                team_id,
-                db_season_id,
-                exc_info=True,
+                "Post-boxscore dedup sweep failed for team_id=%d season=%s; continuing with aggregation",
+                team_id, db_season_id, exc_info=True,
             )
 
         self._compute_season_aggregates(team_id, db_season_id)
@@ -310,6 +364,119 @@ class ScoutingLoader:
         return index
 
     # ------------------------------------------------------------------
+    # In-memory data methods (E-220-05)
+    # ------------------------------------------------------------------
+
+    def _build_games_index_from_data(
+        self, games_data: list[dict[str, Any]]
+    ) -> dict[str, GameSummaryEntry]:
+        """Build a ``game_stream_id -> GameSummaryEntry`` mapping from in-memory games list."""
+        index: dict[str, GameSummaryEntry] = {}
+        for game in games_data:
+            if game.get("game_status") != "completed":
+                continue
+            game_id = game.get("id")
+            if not game_id:
+                continue
+            score = game.get("score") or {}
+            start_ts = game.get("start_ts") or game.get("end_ts") or "1900-01-01T00:00:00Z"
+            entry = GameSummaryEntry(
+                event_id=str(game_id),
+                game_stream_id=str(game_id),
+                home_away=game.get("home_away"),
+                owning_team_score=int(score.get("team") or 0),
+                opponent_team_score=int(score.get("opponent_team") or 0),
+                opponent_id="",
+                last_scoring_update=str(start_ts),
+                start_time=game.get("start_ts"),
+                timezone=game.get("timezone"),
+            )
+            index[entry.game_stream_id] = entry
+        logger.info("Built games index from in-memory data: %d entries", len(index))
+        return index
+
+    def _build_opponent_name_index_from_data(
+        self, games_data: list[dict[str, Any]]
+    ) -> dict[str, str]:
+        """Build a ``game_stream_id -> opponent name`` mapping from in-memory games list."""
+        index: dict[str, str] = {}
+        for game in games_data:
+            game_id = game.get("id")
+            opponent_team = game.get("opponent_team") or {}
+            name = opponent_team.get("name")
+            if game_id and name:
+                index[str(game_id)] = name
+        return index
+
+    def _load_roster_from_data(
+        self, roster_data: list[dict[str, Any]], team_id: int, season_id: str
+    ) -> LoadResult:
+        """Load roster from in-memory data into players and team_rosters."""
+        if not roster_data:
+            logger.warning("Empty roster data for team_id=%d; skipping.", team_id)
+            return LoadResult()
+        result = LoadResult()
+        for player in roster_data:
+            player_id = player.get("id")
+            if not player_id:
+                logger.warning("Roster entry missing 'id'; skipping. entry=%r", player)
+                result.skipped += 1
+                continue
+            ok = self._upsert_roster_player(
+                player_id=player_id,
+                first_name=str(player.get("first_name") or ""),
+                last_name=str(player.get("last_name") or ""),
+                team_id=team_id,
+                season_id=season_id,
+                jersey_number=player.get("number") or None,
+            )
+            if ok:
+                result.loaded += 1
+            else:
+                result.errors += 1
+        self._db.commit()
+        logger.info("Roster loaded for team_id=%d: %d players, %d errors.", team_id, result.loaded, result.errors)
+        return result
+
+    def _load_boxscores_from_data(
+        self,
+        game_loader: GameLoader,
+        games_index: dict[str, GameSummaryEntry],
+        boxscores: dict[str, dict[str, Any]],
+        opponent_name_index: dict[str, str] | None = None,
+    ) -> LoadResult:
+        """Load boxscores from in-memory data via ``game_loader``.
+
+        GameLoader.load_file() requires a filesystem path.  We write each
+        boxscore to a temporary file, let GameLoader process it, then clean up.
+        """
+        name_index = opponent_name_index or {}
+        total = LoadResult()
+        # Single TemporaryDirectory wraps the loop -- per-iteration temp files
+        # are written inside it and cleaned up automatically when the context
+        # exits.  Mirrors the pattern in src/reports/generator.py
+        # _crawl_and_load_plays.
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_root = Path(tmp_dir)
+            for game_stream_id, boxscore_data in sorted(boxscores.items()):
+                summary = games_index.get(game_stream_id)
+                if summary is None:
+                    logger.warning(
+                        "No games entry for game_stream_id=%s; skipping boxscore",
+                        game_stream_id,
+                    )
+                    total.skipped += 1
+                    continue
+                opponent_name = name_index.get(game_stream_id)
+                tmp_path = tmp_root / f"{game_stream_id}.json"
+                tmp_path.write_text(json.dumps(boxscore_data), encoding="utf-8")
+                result = game_loader.load_file(tmp_path, summary, opponent_name=opponent_name)
+                total.loaded += result.loaded
+                total.skipped += result.skipped
+                total.errors += result.errors
+        return total
+
+    # ------------------------------------------------------------------
     # Roster loading
     # ------------------------------------------------------------------
 
@@ -472,7 +639,17 @@ class ScoutingLoader:
         )
 
     def _compute_batting_aggregates(self, team_id: int, season_id: str) -> int:
-        """Sum game batting rows into player_season_batting; return player count."""
+        """Sum game batting rows into player_season_batting; return player count.
+
+        Filters by ``perspective_team_id = team_id`` to prevent double-counting
+        when the same game has been loaded from multiple perspectives.  In the
+        scouting context, ``team_id == perspective_team_id`` (scouting loads
+        from the scouted team's perspective).
+
+        NOTE: Other query sites that aggregate per-game stat rows (e.g.
+        ``src/api/db.py``, ``src/db/player_dedup.py``) may also need
+        perspective filtering -- assess when those surfaces are updated.
+        """
         rows = self._db.execute(
             """
             SELECT
@@ -495,9 +672,10 @@ class ScoutingLoader:
             FROM player_game_batting pgb
             JOIN games g ON pgb.game_id = g.game_id
             WHERE pgb.team_id = ? AND g.season_id = ?
+              AND pgb.perspective_team_id = ?
             GROUP BY pgb.player_id
             """,
-            (team_id, season_id),
+            (team_id, season_id, team_id),
         ).fetchall()
         for (player_id, games_tracked,
              ab, h, doubles, triples, hr, rbi, r, bb, so, sb,
@@ -536,6 +714,9 @@ class ScoutingLoader:
     def _compute_pitching_aggregates(self, team_id: int, season_id: str) -> int:
         """Sum game pitching rows into player_season_pitching; return player count.
 
+        Filters by ``perspective_team_id = team_id`` to prevent double-counting
+        when the same game has been loaded from multiple perspectives.
+
         Note: ``hr`` is excluded -- ``player_game_pitching`` does not store HR
         allowed (not present in the boxscore pitching extras per the schema).
         """
@@ -561,9 +742,10 @@ class ScoutingLoader:
             FROM player_game_pitching pgp
             JOIN games g ON pgp.game_id = g.game_id
             WHERE pgp.team_id = ? AND g.season_id = ?
+              AND pgp.perspective_team_id = ?
             GROUP BY pgp.player_id
             """,
-            (team_id, season_id),
+            (team_id, season_id, team_id),
         ).fetchall()
         for (player_id, games_tracked,
              ip_outs, h, r, er, bb, so,

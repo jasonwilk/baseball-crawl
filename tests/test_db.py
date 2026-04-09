@@ -33,9 +33,7 @@ def _make_db() -> sqlite3.Connection:
     schema_sql = _SCHEMA_PATH.read_text()
     conn.executescript(schema_sql)
     # Migration 004: season_year column on teams (E-147-01).
-    conn.execute("ALTER TABLE teams ADD COLUMN season_year INTEGER")
     # Migration 015: appearance_order column on player_game_pitching (E-204-01).
-    conn.execute("ALTER TABLE player_game_pitching ADD COLUMN appearance_order INTEGER")
     conn.commit()
     return conn
 
@@ -559,21 +557,21 @@ class TestGetGameBoxScoreJerseyNumber:
 
         # Batting rows for both teams
         conn.execute(
-            "INSERT INTO player_game_batting (game_id, player_id, team_id, ab, h) VALUES (?, ?, ?, ?, ?)",
-            ("jrsy-game-1", "jrsy-h-001", home_id, 4, 2),
+            "INSERT INTO player_game_batting (game_id, player_id, team_id, perspective_team_id, ab, h) VALUES (?, ?, ?, ?, ?, ?)",
+            ("jrsy-game-1", "jrsy-h-001", home_id, home_id, 4, 2),
         )
         conn.execute(
-            "INSERT INTO player_game_batting (game_id, player_id, team_id, ab, h) VALUES (?, ?, ?, ?, ?)",
-            ("jrsy-game-1", "jrsy-a-001", away_id, 3, 1),
+            "INSERT INTO player_game_batting (game_id, player_id, team_id, perspective_team_id, ab, h) VALUES (?, ?, ?, ?, ?, ?)",
+            ("jrsy-game-1", "jrsy-a-001", away_id, home_id, 3, 1),
         )
         # Pitching rows for both teams
         conn.execute(
-            "INSERT INTO player_game_pitching (game_id, player_id, team_id, ip_outs, so) VALUES (?, ?, ?, ?, ?)",
-            ("jrsy-game-1", "jrsy-h-001", home_id, 9, 5),
+            "INSERT INTO player_game_pitching (game_id, player_id, team_id, perspective_team_id, ip_outs, so) VALUES (?, ?, ?, ?, ?, ?)",
+            ("jrsy-game-1", "jrsy-h-001", home_id, home_id, 9, 5),
         )
         conn.execute(
-            "INSERT INTO player_game_pitching (game_id, player_id, team_id, ip_outs, so) VALUES (?, ?, ?, ?, ?)",
-            ("jrsy-game-1", "jrsy-a-001", away_id, 6, 3),
+            "INSERT INTO player_game_pitching (game_id, player_id, team_id, perspective_team_id, ip_outs, so) VALUES (?, ?, ?, ?, ?, ?)",
+            ("jrsy-game-1", "jrsy-a-001", away_id, home_id, 6, 3),
         )
         conn.commit()
         return _db_env(tmp_path, conn), home_id, away_id
@@ -702,6 +700,107 @@ class TestGetGameBoxScoreJerseyNumber:
         away_batting = next(t["batting_lines"] for t in result["teams"] if t["id"] == away_id)
         assert home_batting[0]["jersey_number"] == "42"
         assert away_batting[0]["jersey_number"] == "99"
+
+    def test_c3_each_team_uses_its_own_perspective_when_both_present(
+        self, tmp_path: Path
+    ) -> None:
+        """E-220 C3: when both teams have own-perspective rows, each is shown
+        from its OWN perspective regardless of team_id ordering.
+
+        The pre-fix MIN(perspective_team_id) approach would show one team
+        from the wrong perspective when one team_id was numerically lower.
+        """
+        from importlib import reload
+        import src.api.db as db_module
+
+        conn = _make_db()
+        season_id = _insert_season(conn)
+        home_id = _insert_team(conn, "Member Home", membership_type="member")
+        away_id = _insert_team(conn, "Member Away", membership_type="member")
+        _insert_game(conn, "g-cross-persp", season_id, home_id, away_id, 7, 4)
+        _insert_player(conn, "p-h", "Home", "Player")
+        _insert_player(conn, "p-a", "Away", "Player")
+
+        # Each team has TWO rows for the same player: one from its own
+        # perspective and one from the other team's perspective.  The own
+        # perspective should always win.
+        # Home player: own row (perspective=home_id) has ab=4, opp row has ab=99
+        conn.execute(
+            "INSERT INTO player_game_batting (game_id, player_id, team_id, perspective_team_id, ab, h)"
+            " VALUES (?, ?, ?, ?, ?, ?)",
+            ("g-cross-persp", "p-h", home_id, home_id, 4, 2),
+        )
+        conn.execute(
+            "INSERT INTO player_game_batting (game_id, player_id, team_id, perspective_team_id, ab, h)"
+            " VALUES (?, ?, ?, ?, ?, ?)",
+            ("g-cross-persp", "p-h", home_id, away_id, 99, 99),
+        )
+        # Away player: own row (perspective=away_id) has ab=3, opp row has ab=88
+        conn.execute(
+            "INSERT INTO player_game_batting (game_id, player_id, team_id, perspective_team_id, ab, h)"
+            " VALUES (?, ?, ?, ?, ?, ?)",
+            ("g-cross-persp", "p-a", away_id, away_id, 3, 1),
+        )
+        conn.execute(
+            "INSERT INTO player_game_batting (game_id, player_id, team_id, perspective_team_id, ab, h)"
+            " VALUES (?, ?, ?, ?, ?, ?)",
+            ("g-cross-persp", "p-a", away_id, home_id, 88, 88),
+        )
+        conn.commit()
+
+        env = _db_env(tmp_path, conn)
+        with patch.dict(os.environ, env):
+            reload(db_module)
+            result = db_module.get_game_box_score("g-cross-persp")
+
+        home_batting = next(t["batting_lines"] for t in result["teams"] if t["id"] == home_id)
+        away_batting = next(t["batting_lines"] for t in result["teams"] if t["id"] == away_id)
+
+        assert len(home_batting) == 1
+        assert len(away_batting) == 1
+        # Each team displays from its OWN perspective: home=4, away=3 (not 99/88).
+        assert home_batting[0]["ab"] == 4, f"home should show own perspective ab=4, got {home_batting[0]['ab']}"
+        assert away_batting[0]["ab"] == 3, f"away should show own perspective ab=3, got {away_batting[0]['ab']}"
+
+    def test_c3_fallback_to_foreign_perspective_when_own_absent(
+        self, tmp_path: Path
+    ) -> None:
+        """E-220 C3: when only a foreign perspective exists for a team in the
+        game, the fallback returns that perspective's row (not empty).
+
+        This is the cross-perspective scouting case: the opponent loaded the
+        boxscore, so the only row for the home team is tagged with the
+        opponent's perspective.
+        """
+        from importlib import reload
+        import src.api.db as db_module
+
+        conn = _make_db()
+        season_id = _insert_season(conn)
+        home_id = _insert_team(conn, "Home Team", membership_type="member")
+        away_id = _insert_team(conn, "Away Team", membership_type="tracked")
+        _insert_game(conn, "g-foreign", season_id, home_id, away_id, 5, 3)
+        _insert_player(conn, "p-h", "Home", "Player")
+
+        # Only one row for the home team's player, tagged with the AWAY
+        # team's perspective (boxscore was loaded from the opponent).
+        conn.execute(
+            "INSERT INTO player_game_batting (game_id, player_id, team_id, perspective_team_id, ab, h)"
+            " VALUES (?, ?, ?, ?, ?, ?)",
+            ("g-foreign", "p-h", home_id, away_id, 4, 2),
+        )
+        conn.commit()
+
+        env = _db_env(tmp_path, conn)
+        with patch.dict(os.environ, env):
+            reload(db_module)
+            result = db_module.get_game_box_score("g-foreign")
+
+        home_batting = next(t["batting_lines"] for t in result["teams"] if t["id"] == home_id)
+        # Fallback selects the foreign perspective row.
+        assert len(home_batting) == 1
+        assert home_batting[0]["ab"] == 4
+        assert home_batting[0]["h"] == 2
 
 
 # ---------------------------------------------------------------------------
@@ -1774,9 +1873,9 @@ class TestGameBoxScoreNameCascade:
             (away_id, player_id, season_id),
         )
         conn.execute(
-            "INSERT INTO player_game_batting (game_id, player_id, team_id, ab, h)"
-            " VALUES (?, ?, ?, 3, 1)",
-            ("cascade-g1", player_id, away_id),
+            "INSERT INTO player_game_batting (game_id, player_id, team_id, perspective_team_id, ab, h)"
+            " VALUES (?, ?, ?, ?, 3, 1)",
+            ("cascade-g1", player_id, away_id, away_id),
         )
         conn.commit()
 
@@ -1804,9 +1903,9 @@ class TestGameBoxScoreNameCascade:
 
         player_id = _insert_player(conn, "cascade-stub-2", "Unknown", "Unknown")
         conn.execute(
-            "INSERT INTO player_game_pitching (game_id, player_id, team_id, ip_outs, h, er, bb, so)"
-            " VALUES (?, ?, ?, 9, 3, 2, 1, 5)",
-            ("cascade-g2", player_id, away_id),
+            "INSERT INTO player_game_pitching (game_id, player_id, team_id, perspective_team_id, ip_outs, h, er, bb, so)"
+            " VALUES (?, ?, ?, ?, 9, 3, 2, 1, 5)",
+            ("cascade-g2", player_id, away_id, away_id),
         )
         conn.commit()
 
@@ -1834,9 +1933,9 @@ class TestGameBoxScoreNameCascade:
 
         player_id = _insert_player(conn, "cascade-real-1", "Tyler", "Brown")
         conn.execute(
-            "INSERT INTO player_game_batting (game_id, player_id, team_id, ab, h)"
-            " VALUES (?, ?, ?, 4, 2)",
-            ("cascade-g3", player_id, home_id),
+            "INSERT INTO player_game_batting (game_id, player_id, team_id, perspective_team_id, ab, h)"
+            " VALUES (?, ?, ?, ?, 4, 2)",
+            ("cascade-g3", player_id, home_id, home_id),
         )
         conn.commit()
 

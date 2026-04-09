@@ -37,7 +37,7 @@ from src.gamechanger.loaders.spray_chart_loader import SprayChartLoader
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _MIGRATION_001 = _PROJECT_ROOT / "migrations" / "001_initial_schema.sql"
-_MIGRATION_006 = _PROJECT_ROOT / "migrations" / "006_spray_charts_indexes.sql"
+
 
 
 @pytest.fixture()
@@ -47,8 +47,6 @@ def db() -> sqlite3.Connection:
     conn.execute("PRAGMA foreign_keys=ON;")
     conn.commit()
     conn.executescript(_MIGRATION_001.read_text(encoding="utf-8"))
-    conn.execute("ALTER TABLE teams ADD COLUMN season_year INTEGER")
-    conn.executescript(_MIGRATION_006.read_text(encoding="utf-8"))
     conn.commit()
     yield conn
     conn.close()
@@ -723,3 +721,74 @@ def test_error_false_stored_as_0(
     ).fetchone()
     assert row is not None
     assert row[0] == 0
+
+
+# ---------------------------------------------------------------------------
+# E-220-04: Perspective tagging
+# ---------------------------------------------------------------------------
+
+
+def test_spray_rows_have_perspective_team_id(db: sqlite3.Connection, tmp_path: Path) -> None:
+    """AC-1: Every spray_charts row has perspective_team_id set to the crawling team's PK."""
+    own_id, _opp_id = _setup_game(db)
+    _seed_player(db, _PLAYER_A)
+    _seed_roster(db, own_id, _PLAYER_A)
+
+    event = _make_event(_EVENT_ID_1)
+    data = {"spray_chart_data": {"offense": {_PLAYER_A: [event]}, "defense": {}}}
+    spray_dir = _write_spray_file(tmp_path, _SEASON_ID, _OWN_GC_UUID, _GAME_ID, data)
+
+    SprayChartLoader(db).load_dir(spray_dir)
+
+    row = db.execute(
+        "SELECT perspective_team_id FROM spray_charts WHERE event_gc_id = ?",
+        (_EVENT_ID_1,),
+    ).fetchone()
+    assert row is not None
+    assert row[0] == own_id, f"Expected perspective_team_id={own_id}, got {row[0]}"
+
+
+def test_two_perspectives_coexist_spray(db: sqlite3.Connection, tmp_path: Path) -> None:
+    """AC-3: Same game's spray data from two perspectives coexists."""
+    own_id, opp_id = _setup_game(db)
+    _seed_player(db, _PLAYER_A)
+    _seed_roster(db, own_id, _PLAYER_A)
+
+    event = _make_event(_EVENT_ID_1)
+    data = {"spray_chart_data": {"offense": {_PLAYER_A: [event]}, "defense": {}}}
+
+    # Load from own team's perspective.
+    spray_dir_own = _write_spray_file(tmp_path, _SEASON_ID, _OWN_GC_UUID, _GAME_ID, data)
+    SprayChartLoader(db).load_dir(spray_dir_own)
+
+    # Load from opponent team's perspective (same event_gc_id, different perspective).
+    spray_dir_opp = _write_spray_file(tmp_path, _SEASON_ID, _OPP_GC_UUID, _GAME_ID, data)
+    SprayChartLoader(db).load_dir(spray_dir_opp)
+
+    rows = db.execute(
+        "SELECT perspective_team_id FROM spray_charts WHERE event_gc_id = ?",
+        (_EVENT_ID_1,),
+    ).fetchall()
+    assert len(rows) == 2, f"Expected 2 rows (two perspectives), got {len(rows)}"
+    assert {r[0] for r in rows} == {own_id, opp_id}
+
+
+def test_spray_idempotent_same_perspective(db: sqlite3.Connection, tmp_path: Path) -> None:
+    """AC-6: INSERT OR IGNORE with perspective_team_id -- same perspective is idempotent."""
+    own_id, _opp_id = _setup_game(db)
+    _seed_player(db, _PLAYER_A)
+    _seed_roster(db, own_id, _PLAYER_A)
+
+    event = _make_event(_EVENT_ID_1)
+    data = {"spray_chart_data": {"offense": {_PLAYER_A: [event]}, "defense": {}}}
+    spray_dir = _write_spray_file(tmp_path, _SEASON_ID, _OWN_GC_UUID, _GAME_ID, data)
+
+    result1 = SprayChartLoader(db).load_dir(spray_dir)
+    result2 = SprayChartLoader(db).load_dir(spray_dir)
+
+    assert result1.loaded == 1
+    assert result2.loaded == 0
+    assert result2.skipped == 1
+
+    count = db.execute("SELECT COUNT(*) FROM spray_charts WHERE event_gc_id = ?", (_EVENT_ID_1,)).fetchone()[0]
+    assert count == 1

@@ -1,14 +1,7 @@
--- E-220-01: Complete schema rewrite with perspective provenance.
+-- E-100-01: Complete schema rewrite (fresh-start authorized by user).
 --
--- This single file replaces all prior migrations (001-015).
--- Prior migrations archived in .project/archive/migrations-pre-E220/.
---
--- PERSPECTIVE PROVENANCE:
---   perspective_team_id on stat tables (player_game_batting, player_game_pitching,
---   spray_charts, plays) records which team's boxscore/data-source produced each row.
---   The same game loaded from two different team perspectives produces separate rows
---   with different perspective_team_id values.  NOT NULL with no DEFAULT -- every
---   INSERT must explicitly provide the value; contamination is a hard insertion error.
+-- This single file replaces all prior migrations (001, 003-008).
+-- Prior migrations archived in .project/archive/migrations-pre-E100/.
 --
 -- ID CONVENTION:
 --   teams.id is an internal INTEGER PRIMARY KEY AUTOINCREMENT.
@@ -53,7 +46,6 @@ CREATE TABLE IF NOT EXISTS programs (
 -- membership_type replaces the old is_owned boolean.
 -- classification replaces the old level column.
 -- source/is_active/last_synced preserve crawl configuration.
--- season_year: explicit season year mapping (from migration 004).
 CREATE TABLE IF NOT EXISTS teams (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     name            TEXT NOT NULL,
@@ -70,7 +62,6 @@ CREATE TABLE IF NOT EXISTS teams (
     source          TEXT NOT NULL DEFAULT 'gamechanger',
     is_active       INTEGER NOT NULL DEFAULT 1,
     last_synced     TEXT,
-    season_year     INTEGER,                      -- explicit season year (from 004)
     created_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -132,8 +123,6 @@ CREATE TABLE IF NOT EXISTS team_rosters (
 -- games
 -- ---------------------------------------------------------------------------
 -- game_stream_id: GC game-stream UUID; used to fetch boxscores and plays.
--- start_time: ISO 8601 datetime (from migration 014).
--- timezone: IANA timezone identifier (from migration 014).
 CREATE TABLE IF NOT EXISTS games (
     game_id        TEXT PRIMARY KEY,
     season_id      TEXT NOT NULL REFERENCES seasons(season_id),
@@ -144,28 +133,13 @@ CREATE TABLE IF NOT EXISTS games (
     away_score     INTEGER,
     status         TEXT NOT NULL DEFAULT 'scheduled',
     game_stream_id TEXT,
-    start_time     TEXT,                          -- ISO 8601 datetime (from 014)
-    timezone       TEXT,                          -- IANA timezone (from 014)
     created_at     TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
--- ---------------------------------------------------------------------------
--- game_perspectives
--- ---------------------------------------------------------------------------
--- Junction table tracking which team perspectives have been loaded per game.
--- Used to determine whether a game needs re-crawling from a different perspective.
-CREATE TABLE IF NOT EXISTS game_perspectives (
-    game_id             TEXT    NOT NULL REFERENCES games(game_id),
-    perspective_team_id INTEGER NOT NULL REFERENCES teams(id),
-    loaded_at           TEXT    NOT NULL DEFAULT (datetime('now')),
-    PRIMARY KEY (game_id, perspective_team_id)
 );
 
 -- ---------------------------------------------------------------------------
 -- player_game_batting
 -- ---------------------------------------------------------------------------
 -- Per-player per-game batting stats from the boxscore endpoint.
--- perspective_team_id: which team's boxscore produced this row (E-220).
 -- batting_order: 1-indexed position in lineup (implicit from list order).
 -- positions_played: text encoding, e.g., '(SS, P)'.
 -- is_primary: 0 for substitutes (is_primary=false in boxscore).
@@ -174,16 +148,15 @@ CREATE TABLE IF NOT EXISTS game_perspectives (
 -- Excluded: pa (computable as ab+bb+hbp+shf+shb+ci), singles/1B (computable),
 --   #P pitches seen, TS strikes seen (not in boxscore batting response).
 CREATE TABLE IF NOT EXISTS player_game_batting (
-    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
-    game_id             TEXT    NOT NULL REFERENCES games(game_id),
-    player_id           TEXT    NOT NULL REFERENCES players(player_id),
-    team_id             INTEGER NOT NULL REFERENCES teams(id),
-    perspective_team_id INTEGER NOT NULL REFERENCES teams(id),
-    batting_order       INTEGER,
-    positions_played    TEXT,
-    is_primary          INTEGER,
-    stat_completeness   TEXT NOT NULL DEFAULT 'boxscore_only'
-                        CHECK(stat_completeness IN ('full', 'supplemented', 'boxscore_only')),
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    game_id           TEXT NOT NULL REFERENCES games(game_id),
+    player_id         TEXT NOT NULL REFERENCES players(player_id),
+    team_id           INTEGER NOT NULL REFERENCES teams(id),
+    batting_order     INTEGER,
+    positions_played  TEXT,
+    is_primary        INTEGER,
+    stat_completeness TEXT NOT NULL DEFAULT 'boxscore_only'
+                      CHECK(stat_completeness IN ('full', 'supplemented', 'boxscore_only')),
     -- Main stats (always present per batter in boxscore)
     ab  INTEGER,
     r   INTEGER,
@@ -201,28 +174,24 @@ CREATE TABLE IF NOT EXISTS player_game_batting (
     sb      INTEGER,
     cs      INTEGER,
     e       INTEGER,
-    UNIQUE(game_id, player_id, perspective_team_id)
+    UNIQUE(game_id, player_id)
 );
 
 -- ---------------------------------------------------------------------------
 -- player_game_pitching
 -- ---------------------------------------------------------------------------
 -- Per-player per-game pitching stats from the boxscore endpoint.
--- perspective_team_id: which team's boxscore produced this row (E-220).
 -- decision: 'W', 'L', 'SV', or NULL (encoded in player_text in boxscore).
--- appearance_order: pitcher order within game (1=starter, 2+=relievers; from 015).
 -- Excluded: HR allowed (not present in boxscore pitching extras).
 -- r = runs allowed (total, not just earned runs).
 CREATE TABLE IF NOT EXISTS player_game_pitching (
-    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
-    game_id             TEXT    NOT NULL REFERENCES games(game_id),
-    player_id           TEXT    NOT NULL REFERENCES players(player_id),
-    team_id             INTEGER NOT NULL REFERENCES teams(id),
-    perspective_team_id INTEGER NOT NULL REFERENCES teams(id),
-    decision            TEXT CHECK(decision IN ('W', 'L', 'SV')),
-    appearance_order    INTEGER,                   -- 1=starter, 2+=relievers (from 015)
-    stat_completeness   TEXT NOT NULL DEFAULT 'boxscore_only'
-                        CHECK(stat_completeness IN ('full', 'supplemented', 'boxscore_only')),
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    game_id           TEXT NOT NULL REFERENCES games(game_id),
+    player_id         TEXT NOT NULL REFERENCES players(player_id),
+    team_id           INTEGER NOT NULL REFERENCES teams(id),
+    decision          TEXT CHECK(decision IN ('W', 'L', 'SV')),
+    stat_completeness TEXT NOT NULL DEFAULT 'boxscore_only'
+                      CHECK(stat_completeness IN ('full', 'supplemented', 'boxscore_only')),
     -- Main stats (always present per pitcher in boxscore)
     ip_outs INTEGER,  -- integer outs; see ip_outs convention in header
     h       INTEGER,
@@ -236,7 +205,7 @@ CREATE TABLE IF NOT EXISTS player_game_pitching (
     pitches       INTEGER,
     total_strikes INTEGER,
     bf            INTEGER,
-    UNIQUE(game_id, player_id, perspective_team_id)
+    UNIQUE(game_id, player_id)
 );
 
 -- ---------------------------------------------------------------------------
@@ -246,7 +215,6 @@ CREATE TABLE IF NOT EXISTS player_game_pitching (
 -- gp = games played (GC API field name).
 -- Advanced stats (qab, hard, weak, etc.) are countable only -- no rates stored.
 -- Split columns are nullable; null means insufficient data or not provided.
--- NOTE: No perspective_team_id here -- perspective filtering at computation time.
 CREATE TABLE IF NOT EXISTS player_season_batting (
     id                INTEGER PRIMARY KEY AUTOINCREMENT,
     player_id         TEXT NOT NULL REFERENCES players(player_id),
@@ -321,7 +289,6 @@ CREATE TABLE IF NOT EXISTS player_season_batting (
 -- total_strikes / total_balls: renamed from strikes/tb to avoid confusion.
 -- fb = fly balls (pitching); gb = ground balls (pitching).
 -- Split naming: vs_lhb/vs_rhb = vs left-/right-handed batter.
--- NOTE: No perspective_team_id here -- perspective filtering at computation time.
 CREATE TABLE IF NOT EXISTS player_season_pitching (
     id                INTEGER PRIMARY KEY AUTOINCREMENT,
     player_id         TEXT NOT NULL REFERENCES players(player_id),
@@ -392,29 +359,20 @@ CREATE TABLE IF NOT EXISTS player_season_pitching (
 -- spray_charts
 -- ---------------------------------------------------------------------------
 -- Ball-in-play events with coordinate data from the player-stats endpoint.
--- perspective_team_id: which team's data-source produced this row (E-220).
 -- pitcher_id: nullable FK for offensive charts (who threw the pitch).
--- event_gc_id: GC UUID per spray event (from migration 006).
--- created_at_ms: API createdAt as Unix milliseconds INTEGER (from 006).
--- season_id: full season slug from the file path (from 006).
 CREATE TABLE IF NOT EXISTS spray_charts (
-    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
-    game_id             TEXT REFERENCES games(game_id),
-    player_id           TEXT REFERENCES players(player_id),
-    team_id             INTEGER REFERENCES teams(id),
-    perspective_team_id INTEGER NOT NULL REFERENCES teams(id),
-    pitcher_id          TEXT REFERENCES players(player_id),  -- nullable
-    chart_type          TEXT CHECK(chart_type IN ('offensive', 'defensive')),
-    play_type           TEXT,
-    play_result         TEXT,
-    x                   REAL,
-    y                   REAL,
-    fielder_position    TEXT,
-    error               INTEGER DEFAULT 0,
-    event_gc_id         TEXT,                      -- GC UUID per event (from 006)
-    created_at_ms       INTEGER,                   -- API createdAt ms (from 006)
-    season_id           TEXT,                       -- season slug (from 006)
-    UNIQUE(event_gc_id, perspective_team_id)
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    game_id          TEXT REFERENCES games(game_id),
+    player_id        TEXT REFERENCES players(player_id),
+    team_id          INTEGER REFERENCES teams(id),
+    pitcher_id       TEXT REFERENCES players(player_id),  -- nullable
+    chart_type       TEXT CHECK(chart_type IN ('offensive', 'defensive')),
+    play_type        TEXT,
+    play_result      TEXT,
+    x                REAL,
+    y                REAL,
+    fielder_position TEXT,
+    error            INTEGER DEFAULT 0
 );
 
 -- ---------------------------------------------------------------------------
@@ -462,89 +420,14 @@ CREATE TABLE IF NOT EXISTS scouting_runs (
 );
 
 -- ---------------------------------------------------------------------------
--- plays
--- ---------------------------------------------------------------------------
--- One row per plate appearance.
--- perspective_team_id: which team's play-by-play data produced this row (E-220).
-CREATE TABLE IF NOT EXISTS plays (
-    id                    INTEGER PRIMARY KEY AUTOINCREMENT,
-    game_id               TEXT    NOT NULL REFERENCES games(game_id),
-    play_order            INTEGER NOT NULL,
-    inning                INTEGER NOT NULL,
-    half                  TEXT    NOT NULL CHECK(half IN ('top', 'bottom')),
-    season_id             TEXT    NOT NULL REFERENCES seasons(season_id),
-    batting_team_id       INTEGER NOT NULL REFERENCES teams(id),
-    perspective_team_id   INTEGER NOT NULL REFERENCES teams(id),
-    batter_id             TEXT    NOT NULL REFERENCES players(player_id),
-    pitcher_id            TEXT    REFERENCES players(player_id),
-    outcome               TEXT,
-    pitch_count           INTEGER NOT NULL DEFAULT 0,
-    is_first_pitch_strike INTEGER NOT NULL DEFAULT 0,
-    is_qab                INTEGER NOT NULL DEFAULT 0,
-    home_score            INTEGER,
-    away_score            INTEGER,
-    did_score_change      INTEGER,
-    outs_after            INTEGER,
-    did_outs_change       INTEGER,
-    UNIQUE(game_id, play_order, perspective_team_id)
-);
-
--- ---------------------------------------------------------------------------
--- play_events
--- ---------------------------------------------------------------------------
--- One row per event within a plate appearance.
--- No perspective_team_id: inherits perspective via parent plays row (FK on play_id).
-CREATE TABLE IF NOT EXISTS play_events (
-    id            INTEGER PRIMARY KEY AUTOINCREMENT,
-    play_id       INTEGER NOT NULL REFERENCES plays(id),
-    event_order   INTEGER NOT NULL,
-    event_type    TEXT    NOT NULL CHECK(event_type IN ('pitch', 'baserunner', 'substitution', 'other')),
-    pitch_result  TEXT    CHECK(pitch_result IS NULL OR pitch_result IN (
-                      'ball', 'strike_looking', 'strike_swinging', 'foul', 'foul_tip', 'in_play'
-                  )),
-    is_first_pitch INTEGER NOT NULL DEFAULT 0,
-    raw_template  TEXT,
-    UNIQUE(play_id, event_order)
-);
-
--- ---------------------------------------------------------------------------
--- reconciliation_discrepancies
--- ---------------------------------------------------------------------------
--- One row per signal per player per team per run (from migration 012).
--- Game-level signals use '__game__' as player_id sentinel.
-CREATE TABLE IF NOT EXISTS reconciliation_discrepancies (
-    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
-    game_id             TEXT    NOT NULL REFERENCES games(game_id),
-    run_id              TEXT    NOT NULL,
-    -- perspective_team_id: the team whose API call produced the data under
-    -- reconciliation.  Added in E-220 round 7 P1-2 so cross-perspective
-    -- discrepancies for the same game do not collide on UNIQUE.
-    perspective_team_id INTEGER NOT NULL REFERENCES teams(id),
-    -- team_id: the participant team (home or away) the discrepancy is
-    -- scoped to -- pitcher/batter/game-level signals are still reported
-    -- per participant within a perspective.
-    team_id             INTEGER NOT NULL REFERENCES teams(id),
-    player_id           TEXT    NOT NULL,
-    signal_name         TEXT    NOT NULL,
-    category            TEXT    NOT NULL,
-    boxscore_value      INTEGER,
-    plays_value         INTEGER,
-    delta               INTEGER,
-    status              TEXT    NOT NULL CHECK(status IN ('MATCH', 'CORRECTABLE', 'CORRECTED', 'AMBIGUOUS', 'UNCORRECTABLE')),
-    correction_detail   TEXT,
-    created_at          TEXT    NOT NULL DEFAULT (datetime('now')),
-    UNIQUE(run_id, game_id, perspective_team_id, team_id, player_id, signal_name)
-);
-
--- ---------------------------------------------------------------------------
 -- Auth tables
 -- ---------------------------------------------------------------------------
--- users: role column from migration 002.
+-- users: simplified -- no user_id alias, no display_name, no is_admin.
+-- E-100-02 migrates auth.py to use these new column names.
 CREATE TABLE IF NOT EXISTS users (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     email           TEXT UNIQUE NOT NULL,
     hashed_password TEXT,
-    role            TEXT NOT NULL DEFAULT 'user',  -- 'admin' or 'user' (from 002)
     created_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -571,6 +454,7 @@ CREATE TABLE IF NOT EXISTS passkey_credentials (
 );
 
 -- sessions: active user sessions.
+-- session_id replaces old session_token_hash column name.
 CREATE TABLE IF NOT EXISTS sessions (
     session_id TEXT PRIMARY KEY,
     user_id    INTEGER NOT NULL REFERENCES users(id),
@@ -578,43 +462,14 @@ CREATE TABLE IF NOT EXISTS sessions (
 );
 
 -- coaching_assignments: coach-to-team role assignments.
+-- No season_id column (removed from old schema; role is team-level, not season-level).
+-- UNIQUE(user_id, team_id): one role per user per team.
 CREATE TABLE IF NOT EXISTS coaching_assignments (
     id      INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL REFERENCES users(id),
     team_id INTEGER NOT NULL REFERENCES teams(id),
     role    TEXT NOT NULL DEFAULT 'assistant',
     UNIQUE(user_id, team_id)
-);
-
--- ---------------------------------------------------------------------------
--- crawl_jobs (from migration 003)
--- ---------------------------------------------------------------------------
--- Tracks per-team crawl execution status, timestamps, and outcomes.
-CREATE TABLE IF NOT EXISTS crawl_jobs (
-    id            INTEGER PRIMARY KEY AUTOINCREMENT,
-    team_id       INTEGER NOT NULL REFERENCES teams(id),
-    sync_type     TEXT    NOT NULL CHECK(sync_type IN ('member_crawl', 'scouting_crawl')),
-    status        TEXT    NOT NULL CHECK(status IN ('running', 'completed', 'failed')),
-    started_at    TEXT    NOT NULL DEFAULT (datetime('now')),
-    completed_at  TEXT,
-    error_message TEXT,
-    games_crawled INTEGER
-);
-
--- ---------------------------------------------------------------------------
--- reports (from migration 008)
--- ---------------------------------------------------------------------------
--- Tracks generated scouting report metadata.
-CREATE TABLE IF NOT EXISTS reports (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    slug TEXT UNIQUE NOT NULL,
-    team_id INTEGER NOT NULL REFERENCES teams(id),
-    title TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'generating',
-    generated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
-    expires_at TEXT NOT NULL,
-    report_path TEXT,
-    error_message TEXT
 );
 
 -- ---------------------------------------------------------------------------
@@ -626,10 +481,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_teams_gc_uuid
 CREATE UNIQUE INDEX IF NOT EXISTS idx_teams_public_id
     ON teams(public_id) WHERE public_id IS NOT NULL;
 
--- Case-insensitive name+season_year index (from migration 007).
-CREATE INDEX IF NOT EXISTS idx_teams_name_season_year
-    ON teams(name COLLATE NOCASE, season_year);
-
 -- Core query pattern indexes
 CREATE INDEX IF NOT EXISTS idx_team_rosters_team_season ON team_rosters(team_id, season_id);
 CREATE INDEX IF NOT EXISTS idx_team_rosters_player ON team_rosters(player_id);
@@ -637,65 +488,19 @@ CREATE INDEX IF NOT EXISTS idx_games_season_id ON games(season_id);
 CREATE INDEX IF NOT EXISTS idx_games_home_team_id ON games(home_team_id);
 CREATE INDEX IF NOT EXISTS idx_games_away_team_id ON games(away_team_id);
 CREATE INDEX IF NOT EXISTS idx_games_game_date ON games(game_date);
-
--- player_game_batting indexes
 CREATE INDEX IF NOT EXISTS idx_pgb_game_id ON player_game_batting(game_id);
 CREATE INDEX IF NOT EXISTS idx_pgb_player_id ON player_game_batting(player_id);
 CREATE INDEX IF NOT EXISTS idx_pgb_team_id ON player_game_batting(team_id);
--- Perspective-aware composite index: supports per-perspective game stat lookups (E-220).
-CREATE INDEX IF NOT EXISTS idx_pgb_perspective_game
-    ON player_game_batting(perspective_team_id, game_id);
-
--- player_game_pitching indexes
 CREATE INDEX IF NOT EXISTS idx_pgp_game_id ON player_game_pitching(game_id);
 CREATE INDEX IF NOT EXISTS idx_pgp_player_id ON player_game_pitching(player_id);
 CREATE INDEX IF NOT EXISTS idx_pgp_team_id ON player_game_pitching(team_id);
--- Perspective-aware composite index: supports per-perspective game stat lookups (E-220).
-CREATE INDEX IF NOT EXISTS idx_pgp_perspective_game
-    ON player_game_pitching(perspective_team_id, game_id);
-
--- Season aggregate indexes
 CREATE INDEX IF NOT EXISTS idx_psb_player_season ON player_season_batting(player_id, season_id);
 CREATE INDEX IF NOT EXISTS idx_psb_team_season ON player_season_batting(team_id, season_id);
 CREATE INDEX IF NOT EXISTS idx_psp_player_season ON player_season_pitching(player_id, season_id);
 CREATE INDEX IF NOT EXISTS idx_psp_team_season ON player_season_pitching(team_id, season_id);
-
--- Scouting run indexes
 CREATE INDEX IF NOT EXISTS idx_scouting_runs_team_season ON scouting_runs(team_id, season_id);
-
--- Coaching assignment indexes
 CREATE INDEX IF NOT EXISTS idx_coaching_assignments_user ON coaching_assignments(user_id);
 CREATE INDEX IF NOT EXISTS idx_coaching_assignments_team ON coaching_assignments(team_id);
-
--- Crawl job indexes (from migration 003)
-CREATE INDEX IF NOT EXISTS idx_crawl_jobs_team_id ON crawl_jobs(team_id, started_at DESC);
-
--- Report indexes (from migration 008)
-CREATE INDEX IF NOT EXISTS idx_reports_slug ON reports(slug);
-CREATE INDEX IF NOT EXISTS idx_reports_team_id ON reports(team_id);
-
--- Spray chart indexes (from migration 006)
-CREATE INDEX IF NOT EXISTS idx_spray_charts_player
-    ON spray_charts(player_id, team_id, season_id);
-CREATE INDEX IF NOT EXISTS idx_spray_charts_game
-    ON spray_charts(game_id);
-
--- Play indexes (from migration 009)
-CREATE INDEX IF NOT EXISTS idx_plays_game_id
-    ON plays(game_id);
-CREATE INDEX IF NOT EXISTS idx_plays_batter_id
-    ON plays(batter_id);
-CREATE INDEX IF NOT EXISTS idx_plays_pitcher_id
-    ON plays(pitcher_id);
--- Partial index for efficient FPS% queries (excludes HBP and IBB from denominator).
-CREATE INDEX IF NOT EXISTS idx_plays_fps
-    ON plays(pitcher_id, is_first_pitch_strike)
-    WHERE outcome NOT IN ('Hit By Pitch', 'Intentional Walk');
-
--- Reconciliation indexes (from migration 012)
-CREATE INDEX IF NOT EXISTS idx_recon_game_id ON reconciliation_discrepancies(game_id);
-CREATE INDEX IF NOT EXISTS idx_recon_run_id ON reconciliation_discrepancies(run_id);
-CREATE INDEX IF NOT EXISTS idx_recon_status ON reconciliation_discrepancies(status);
 
 -- ---------------------------------------------------------------------------
 -- Seed data

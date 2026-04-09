@@ -687,6 +687,72 @@ def merge_teams(
             (duplicate_id, canonical_id),
         )
 
+
+        # ---- E-220 stat-table collision resolution ----
+        # The 4 stat tables now carry perspective_team_id with 3-col UNIQUE
+        # constraints.  Two columns reference teams.id (team_id and
+        # perspective_team_id) and both may need rewriting.  Conflict-resolution
+        # passes mirror the canonical-wins pattern used above for season
+        # tables.  Order matters: resolve team_id collisions first, then run
+        # the team_id UPDATE in Step 4, then resolve perspective_team_id
+        # collisions, then run the perspective_team_id UPDATE.
+
+        # ---- (a) team_id collisions on player_game_batting ----
+        # UNIQUE(game_id, player_id, perspective_team_id) -- collision when
+        # canonical already has a row with the same (game_id, player_id, PT).
+        db.execute(
+            """
+            DELETE FROM player_game_batting
+            WHERE team_id = ?
+              AND EXISTS (
+                SELECT 1 FROM player_game_batting AS pgb2
+                WHERE pgb2.team_id = ?
+                  AND pgb2.game_id = player_game_batting.game_id
+                  AND pgb2.player_id = player_game_batting.player_id
+                  AND pgb2.perspective_team_id = player_game_batting.perspective_team_id
+              )
+            """,
+            (duplicate_id, canonical_id),
+        )
+
+        # ---- (b) team_id collisions on player_game_pitching ----
+        db.execute(
+            """
+            DELETE FROM player_game_pitching
+            WHERE team_id = ?
+              AND EXISTS (
+                SELECT 1 FROM player_game_pitching AS pgp2
+                WHERE pgp2.team_id = ?
+                  AND pgp2.game_id = player_game_pitching.game_id
+                  AND pgp2.player_id = player_game_pitching.player_id
+                  AND pgp2.perspective_team_id = player_game_pitching.perspective_team_id
+              )
+            """,
+            (duplicate_id, canonical_id),
+        )
+
+        # ---- (c) team_id collisions on spray_charts ----
+        # UNIQUE(event_gc_id, perspective_team_id) -- team_id is not part of
+        # the UNIQUE, but to keep semantics canonical-wins delete duplicate
+        # rows where canonical already owns the same (event_gc_id, PT) pair.
+        db.execute(
+            """
+            DELETE FROM spray_charts
+            WHERE team_id = ?
+              AND EXISTS (
+                SELECT 1 FROM spray_charts AS sc2
+                WHERE sc2.team_id = ?
+                  AND sc2.event_gc_id IS NOT NULL
+                  AND sc2.event_gc_id = spray_charts.event_gc_id
+                  AND sc2.perspective_team_id = spray_charts.perspective_team_id
+              )
+            """,
+            (duplicate_id, canonical_id),
+        )
+
+        # plays has no team_id column (only batting_team_id + perspective_team_id),
+        # so no team_id collision to resolve here.
+
         # ---------------------------------------------------------------
         # Step 4: Reassign all FK references from duplicate to canonical
         # ---------------------------------------------------------------
@@ -747,6 +813,13 @@ def merge_teams(
             (canonical_id, duplicate_id),
         )
 
+        # plays.batting_team_id (NOT NULL FK to teams.id, not part of any
+        # UNIQUE constraint -- no conflict resolution needed).
+        db.execute(
+            "UPDATE plays SET batting_team_id = ? WHERE batting_team_id = ?",
+            (canonical_id, duplicate_id),
+        )
+
         # opponent_links: both FK columns
         db.execute(
             "UPDATE opponent_links SET our_team_id = ? WHERE our_team_id = ?",
@@ -778,6 +851,131 @@ def merge_teams(
         # crawl_jobs
         db.execute(
             "UPDATE crawl_jobs SET team_id = ? WHERE team_id = ?",
+            (canonical_id, duplicate_id),
+        )
+
+
+        # ---------------------------------------------------------------
+        # Step 4b (E-220): Reassign perspective_team_id on the 4 stat tables
+        # plus the game_perspectives junction.  Same canonical-wins pattern:
+        # delete duplicate-perspective rows where canonical-perspective row
+        # already exists, then UPDATE the remaining duplicate-perspective rows.
+        # ---------------------------------------------------------------
+
+        # player_game_batting -- delete (game, player, PT=can) collisions, then UPDATE
+        db.execute(
+            """
+            DELETE FROM player_game_batting
+            WHERE perspective_team_id = ?
+              AND EXISTS (
+                SELECT 1 FROM player_game_batting AS pgb2
+                WHERE pgb2.perspective_team_id = ?
+                  AND pgb2.game_id = player_game_batting.game_id
+                  AND pgb2.player_id = player_game_batting.player_id
+              )
+            """,
+            (duplicate_id, canonical_id),
+        )
+        db.execute(
+            "UPDATE player_game_batting SET perspective_team_id = ? "
+            "WHERE perspective_team_id = ?",
+            (canonical_id, duplicate_id),
+        )
+
+        # player_game_pitching -- delete collisions, then UPDATE
+        db.execute(
+            """
+            DELETE FROM player_game_pitching
+            WHERE perspective_team_id = ?
+              AND EXISTS (
+                SELECT 1 FROM player_game_pitching AS pgp2
+                WHERE pgp2.perspective_team_id = ?
+                  AND pgp2.game_id = player_game_pitching.game_id
+                  AND pgp2.player_id = player_game_pitching.player_id
+              )
+            """,
+            (duplicate_id, canonical_id),
+        )
+        db.execute(
+            "UPDATE player_game_pitching SET perspective_team_id = ? "
+            "WHERE perspective_team_id = ?",
+            (canonical_id, duplicate_id),
+        )
+
+        # spray_charts -- UNIQUE(event_gc_id, perspective_team_id).  Only rows
+        # with non-NULL event_gc_id can collide; rows with NULL event_gc_id are
+        # always allowed by SQLite UNIQUE.
+        db.execute(
+            """
+            DELETE FROM spray_charts
+            WHERE perspective_team_id = ?
+              AND event_gc_id IS NOT NULL
+              AND EXISTS (
+                SELECT 1 FROM spray_charts AS sc2
+                WHERE sc2.perspective_team_id = ?
+                  AND sc2.event_gc_id = spray_charts.event_gc_id
+              )
+            """,
+            (duplicate_id, canonical_id),
+        )
+        db.execute(
+            "UPDATE spray_charts SET perspective_team_id = ? "
+            "WHERE perspective_team_id = ?",
+            (canonical_id, duplicate_id),
+        )
+
+        # plays -- UNIQUE(game_id, play_order, perspective_team_id).  Also
+        # collect the play_id values that will be deleted so play_events can
+        # be cleaned up first (FK references plays.id).
+        deleted_play_ids = [
+            row[0] for row in db.execute(
+                """
+                SELECT id FROM plays
+                WHERE perspective_team_id = ?
+                  AND EXISTS (
+                    SELECT 1 FROM plays AS p2
+                    WHERE p2.perspective_team_id = ?
+                      AND p2.game_id = plays.game_id
+                      AND p2.play_order = plays.play_order
+                  )
+                """,
+                (duplicate_id, canonical_id),
+            ).fetchall()
+        ]
+        if deleted_play_ids:
+            placeholders = ",".join("?" for _ in deleted_play_ids)
+            db.execute(
+                f"DELETE FROM play_events WHERE play_id IN ({placeholders})",
+                deleted_play_ids,
+            )
+            db.execute(
+                f"DELETE FROM plays WHERE id IN ({placeholders})",
+                deleted_play_ids,
+            )
+        db.execute(
+            "UPDATE plays SET perspective_team_id = ? "
+            "WHERE perspective_team_id = ?",
+            (canonical_id, duplicate_id),
+        )
+
+        # game_perspectives -- PRIMARY KEY(game_id, perspective_team_id).
+        # Delete duplicate-perspective rows where the canonical-perspective
+        # row already exists, then UPDATE the rest.
+        db.execute(
+            """
+            DELETE FROM game_perspectives
+            WHERE perspective_team_id = ?
+              AND EXISTS (
+                SELECT 1 FROM game_perspectives AS gp2
+                WHERE gp2.perspective_team_id = ?
+                  AND gp2.game_id = game_perspectives.game_id
+              )
+            """,
+            (duplicate_id, canonical_id),
+        )
+        db.execute(
+            "UPDATE game_perspectives SET perspective_team_id = ? "
+            "WHERE perspective_team_id = ?",
             (canonical_id, duplicate_id),
         )
 

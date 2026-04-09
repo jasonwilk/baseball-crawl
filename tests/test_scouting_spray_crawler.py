@@ -1,25 +1,22 @@
 """Tests for src/gamechanger/crawlers/scouting_spray.py.
 
-All HTTP calls are mocked -- no real network requests are made.
-Tests cover: happy path, skip-on-existing (idempotency), opponent without
-gc_uuid, CredentialExpiredError propagation, per-game API error tolerance,
-missing games.json, event_id-missing edge case, and crawl_all aggregation.
+E-220 C2-B/C2-C: All callers pass games_data in-memory; legacy disk-based
+crawl_all and games.json discovery have been removed.  All HTTP calls are
+mocked -- no real network requests.
 """
 
 from __future__ import annotations
 
-import json
 import logging
 import sqlite3
-from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 
 from src.gamechanger.client import CredentialExpiredError, GameChangerAPIError
-from src.gamechanger.crawlers import CrawlResult
 from src.gamechanger.crawlers.scouting_spray import (
     ScoutingSprayChartCrawler,
+    SprayCrawlResult,
     _PLAYER_STATS_ACCEPT,
 )
 
@@ -121,19 +118,6 @@ def _make_client(
     return client
 
 
-def _write_games_json(
-    tmp_path: Path,
-    season: str,
-    public_id: str,
-    games: list[dict],
-) -> Path:
-    """Write games.json to the scouting directory and return its path."""
-    dest = tmp_path / season / "scouting" / public_id / "games.json"
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    dest.write_text(json.dumps(games), encoding="utf-8")
-    return dest
-
-
 def _make_game(
     event_id: str = _EVENT_ID_1,
     game_status: str = "completed",
@@ -143,35 +127,34 @@ def _make_game(
 
 
 # ---------------------------------------------------------------------------
-# AC-1: Completed game → file written at correct path
+# crawl_team: in-memory happy path
 # ---------------------------------------------------------------------------
 
 
-def test_crawl_team_writes_spray_file_for_completed_game(tmp_path: Path) -> None:
-    """A completed game produces a spray file under spray/ subdirectory."""
-    _write_games_json(tmp_path, _SEASON, _PUBLIC_ID, [_make_game(_EVENT_ID_1)])
+def test_crawl_team_returns_spray_data_in_memory() -> None:
+    """A completed game produces in-memory spray data."""
     db = _make_db()
     client = _make_client()
-    crawler = ScoutingSprayChartCrawler(client, db, data_root=tmp_path)
+    crawler = ScoutingSprayChartCrawler(client, db)
 
-    result = crawler.crawl_team(_PUBLIC_ID)
+    result = crawler.crawl_team(
+        _PUBLIC_ID, games_data=[_make_game(_EVENT_ID_1)],
+    )
 
-    expected = tmp_path / _SEASON / "scouting" / _PUBLIC_ID / "spray" / f"{_EVENT_ID_1}.json"
-    assert expected.exists()
-    assert json.loads(expected.read_text()) == _SAMPLE_PLAYER_STATS
-    assert result.files_written == 1
-    assert result.files_skipped == 0
+    assert isinstance(result, SprayCrawlResult)
+    assert _EVENT_ID_1 in result.spray_data
+    assert result.spray_data[_EVENT_ID_1] == _SAMPLE_PLAYER_STATS
+    assert result.games_crawled == 1
     assert result.errors == 0
 
 
-def test_crawl_team_uses_correct_api_url(tmp_path: Path) -> None:
+def test_crawl_team_uses_correct_api_url() -> None:
     """API call uses /teams/{gc_uuid}/schedule/events/{event_id}/player-stats."""
-    _write_games_json(tmp_path, _SEASON, _PUBLIC_ID, [_make_game(_EVENT_ID_1)])
     db = _make_db()
     client = _make_client()
-    crawler = ScoutingSprayChartCrawler(client, db, data_root=tmp_path)
+    crawler = ScoutingSprayChartCrawler(client, db)
 
-    crawler.crawl_team(_PUBLIC_ID)
+    crawler.crawl_team(_PUBLIC_ID, games_data=[_make_game(_EVENT_ID_1)])
 
     client.get.assert_called_once_with(
         f"/teams/{_GC_UUID}/schedule/events/{_EVENT_ID_1}/player-stats",
@@ -179,167 +162,142 @@ def test_crawl_team_uses_correct_api_url(tmp_path: Path) -> None:
     )
 
 
-def test_correct_accept_header_used(tmp_path: Path) -> None:
-    """Player-stats request uses 'application/json, text/plain, */*' Accept header."""
-    _write_games_json(tmp_path, _SEASON, _PUBLIC_ID, [_make_game(_EVENT_ID_1)])
+def test_correct_accept_header_used() -> None:
+    """Player-stats request uses the player-stats Accept header."""
     db = _make_db()
     client = _make_client()
-    crawler = ScoutingSprayChartCrawler(client, db, data_root=tmp_path)
+    crawler = ScoutingSprayChartCrawler(client, db)
 
-    crawler.crawl_team(_PUBLIC_ID)
+    crawler.crawl_team(_PUBLIC_ID, games_data=[_make_game(_EVENT_ID_1)])
 
     _, kwargs = client.get.call_args
-    assert kwargs.get("accept") == "application/json, text/plain, */*"
+    assert kwargs.get("accept") == _PLAYER_STATS_ACCEPT
 
 
-def test_spray_file_path_includes_season_scouting_public_id(tmp_path: Path) -> None:
-    """File is written to data/raw/{season}/scouting/{public_id}/spray/{event_id}.json."""
-    _write_games_json(tmp_path, _SEASON, _PUBLIC_ID, [_make_game(_EVENT_ID_1)])
+def test_spray_data_keyed_by_event_id() -> None:
+    """In-memory result keys spray_data by event_id."""
     db = _make_db()
     client = _make_client()
-    crawler = ScoutingSprayChartCrawler(client, db, data_root=tmp_path)
+    crawler = ScoutingSprayChartCrawler(client, db)
 
-    crawler.crawl_team(_PUBLIC_ID)
+    result = crawler.crawl_team(_PUBLIC_ID, games_data=[_make_game(_EVENT_ID_1)])
 
-    dest = tmp_path / _SEASON / "scouting" / _PUBLIC_ID / "spray" / f"{_EVENT_ID_1}.json"
-    assert dest.exists()
+    assert _EVENT_ID_1 in result.spray_data
+
+
+def test_in_memory_crawl_fetches_all_completed_games() -> None:
+    """In-memory crawl fetches all completed games (no disk-based caching)."""
+    db = _make_db()
+    client = _make_client()
+    crawler = ScoutingSprayChartCrawler(client, db)
+
+    result = crawler.crawl_team(
+        _PUBLIC_ID,
+        games_data=[_make_game(_EVENT_ID_1), _make_game(_EVENT_ID_2)],
+    )
+
+    assert result.games_crawled == 2
+    assert len(result.spray_data) == 2
+    assert client.get.call_count == 2
+
+
+def test_null_spray_chart_data_is_stored_in_memory() -> None:
+    """Response with null spray_chart_data is stored (not skipped)."""
+    payload = {**_SAMPLE_PLAYER_STATS, "spray_chart_data": None}
+    db = _make_db()
+    client = _make_client(return_value=payload)
+    crawler = ScoutingSprayChartCrawler(client, db)
+
+    result = crawler.crawl_team(_PUBLIC_ID, games_data=[_make_game(_EVENT_ID_1)])
+
+    assert _EVENT_ID_1 in result.spray_data
+    assert result.games_crawled == 1
 
 
 # ---------------------------------------------------------------------------
-# AC-2: Opponent without gc_uuid is skipped
+# crawl_team: skip paths
 # ---------------------------------------------------------------------------
 
 
 def test_opponent_without_gc_uuid_is_skipped_with_info(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Opponent with NULL gc_uuid logs INFO and returns empty CrawlResult."""
-    _write_games_json(tmp_path, _SEASON, _PUBLIC_ID, [_make_game(_EVENT_ID_1)])
+    """Opponent with NULL gc_uuid logs INFO and returns empty result."""
     db = _make_db(gc_uuid=None)
     client = _make_client()
-    crawler = ScoutingSprayChartCrawler(client, db, data_root=tmp_path)
+    crawler = ScoutingSprayChartCrawler(client, db)
 
     with caplog.at_level(logging.INFO, logger="src.gamechanger.crawlers.scouting_spray"):
-        result = crawler.crawl_team(_PUBLIC_ID)
+        result = crawler.crawl_team(_PUBLIC_ID, games_data=[_make_game(_EVENT_ID_1)])
 
-    # No API calls attempted -- gc_uuid is required for the endpoint.
     client.get.assert_not_called()
-    assert result.files_written == 0
-    assert result.files_skipped == 0
+    assert result.games_crawled == 0
     assert result.errors == 0
     assert _PUBLIC_ID in caplog.text
     assert "No gc_uuid" in caplog.text
 
 
-def test_opponent_not_in_teams_table_is_skipped(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
-) -> None:
+def test_opponent_not_in_teams_table_is_skipped() -> None:
     """Opponent with no teams row (gc_uuid lookup returns None) is skipped."""
-    _write_games_json(tmp_path, _SEASON, _PUBLIC_ID, [_make_game(_EVENT_ID_1)])
     db = sqlite3.connect(":memory:")
     db.executescript(
         "CREATE TABLE teams (id INTEGER PRIMARY KEY, name TEXT, public_id TEXT UNIQUE, gc_uuid TEXT);"
         "CREATE TABLE opponent_links (id INTEGER PRIMARY KEY, public_id TEXT, is_hidden INTEGER DEFAULT 0);"
     )
     client = _make_client()
-    crawler = ScoutingSprayChartCrawler(client, db, data_root=tmp_path)
+    crawler = ScoutingSprayChartCrawler(client, db)
 
-    with caplog.at_level(logging.INFO, logger="src.gamechanger.crawlers.scouting_spray"):
-        result = crawler.crawl_team(_PUBLIC_ID)
+    result = crawler.crawl_team(_PUBLIC_ID, games_data=[_make_game(_EVENT_ID_1)])
 
     client.get.assert_not_called()
     assert result.errors == 0
 
 
-# ---------------------------------------------------------------------------
-# AC-3: Existence-only idempotency (skip if file exists)
-# ---------------------------------------------------------------------------
-
-
-def test_existing_spray_file_is_skipped(tmp_path: Path) -> None:
-    """A game whose spray file already exists is not re-fetched."""
-    _write_games_json(tmp_path, _SEASON, _PUBLIC_ID, [_make_game(_EVENT_ID_1)])
-    dest = tmp_path / _SEASON / "scouting" / _PUBLIC_ID / "spray" / f"{_EVENT_ID_1}.json"
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    dest.write_text(json.dumps({"cached": True}), encoding="utf-8")
-
+def test_non_completed_game_not_fetched() -> None:
+    """A game with game_status='scheduled' is not fetched."""
     db = _make_db()
     client = _make_client()
-    crawler = ScoutingSprayChartCrawler(client, db, data_root=tmp_path)
+    crawler = ScoutingSprayChartCrawler(client, db)
 
-    result = crawler.crawl_team(_PUBLIC_ID)
-
-    client.get.assert_not_called()
-    assert result.files_skipped == 1
-    assert result.files_written == 0
-    assert result.errors == 0
-
-
-def test_mix_of_cached_and_new_games(tmp_path: Path) -> None:
-    """Cached games are skipped; new games are fetched."""
-    _write_games_json(
-        tmp_path,
-        _SEASON,
+    result = crawler.crawl_team(
         _PUBLIC_ID,
-        [_make_game(_EVENT_ID_1), _make_game(_EVENT_ID_2)],
+        games_data=[_make_game(_EVENT_ID_1, game_status="scheduled")],
     )
-    cached = tmp_path / _SEASON / "scouting" / _PUBLIC_ID / "spray" / f"{_EVENT_ID_1}.json"
-    cached.parent.mkdir(parents=True, exist_ok=True)
-    cached.write_text("{}", encoding="utf-8")
 
+    client.get.assert_not_called()
+    assert result.games_crawled == 0
+
+
+def test_empty_games_data_returns_empty_result() -> None:
+    """Passing an empty games_data list returns an empty SprayCrawlResult."""
     db = _make_db()
     client = _make_client()
-    crawler = ScoutingSprayChartCrawler(client, db, data_root=tmp_path)
+    crawler = ScoutingSprayChartCrawler(client, db)
 
-    result = crawler.crawl_team(_PUBLIC_ID)
+    result = crawler.crawl_team(_PUBLIC_ID, games_data=[])
 
-    assert result.files_skipped == 1
-    assert result.files_written == 1
-    client.get.assert_called_once_with(
-        f"/teams/{_GC_UUID}/schedule/events/{_EVENT_ID_2}/player-stats",
-        accept=_PLAYER_STATS_ACCEPT,
-    )
-
-
-def test_null_spray_chart_data_is_written(tmp_path: Path) -> None:
-    """Response with null spray_chart_data is written (not skipped)."""
-    payload = {**_SAMPLE_PLAYER_STATS, "spray_chart_data": None}
-    _write_games_json(tmp_path, _SEASON, _PUBLIC_ID, [_make_game(_EVENT_ID_1)])
-    db = _make_db()
-    client = _make_client(return_value=payload)
-    crawler = ScoutingSprayChartCrawler(client, db, data_root=tmp_path)
-
-    result = crawler.crawl_team(_PUBLIC_ID)
-
-    dest = tmp_path / _SEASON / "scouting" / _PUBLIC_ID / "spray" / f"{_EVENT_ID_1}.json"
-    assert dest.exists()
-    assert result.files_written == 1
+    client.get.assert_not_called()
+    assert result.games_crawled == 0
+    assert result.errors == 0
 
 
 # ---------------------------------------------------------------------------
-# AC-4: Error handling
+# crawl_team: error handling
 # ---------------------------------------------------------------------------
 
 
-def test_credential_expired_error_propagates(tmp_path: Path) -> None:
+def test_credential_expired_error_propagates() -> None:
     """CredentialExpiredError raised during fetch propagates immediately."""
-    _write_games_json(tmp_path, _SEASON, _PUBLIC_ID, [_make_game(_EVENT_ID_1)])
     db = _make_db()
     client = _make_client(side_effect=CredentialExpiredError("Token expired"))
-    crawler = ScoutingSprayChartCrawler(client, db, data_root=tmp_path)
+    crawler = ScoutingSprayChartCrawler(client, db)
 
     with pytest.raises(CredentialExpiredError):
-        crawler.crawl_team(_PUBLIC_ID)
+        crawler.crawl_team(_PUBLIC_ID, games_data=[_make_game(_EVENT_ID_1)])
 
 
-def test_api_error_is_counted_and_crawl_continues(tmp_path: Path) -> None:
+def test_api_error_is_counted_and_crawl_continues() -> None:
     """A GameChangerAPIError on one game is caught; subsequent games continue."""
-    _write_games_json(
-        tmp_path,
-        _SEASON,
-        _PUBLIC_ID,
-        [_make_game(_EVENT_ID_1), _make_game(_EVENT_ID_2)],
-    )
     call_count = 0
 
     def side_effect(*args: object, **kwargs: object) -> dict:
@@ -352,461 +310,63 @@ def test_api_error_is_counted_and_crawl_continues(tmp_path: Path) -> None:
     db = _make_db()
     client = MagicMock()
     client.get.side_effect = side_effect
-    crawler = ScoutingSprayChartCrawler(client, db, data_root=tmp_path)
+    crawler = ScoutingSprayChartCrawler(client, db)
 
-    result = crawler.crawl_team(_PUBLIC_ID)
+    result = crawler.crawl_team(
+        _PUBLIC_ID,
+        games_data=[_make_game(_EVENT_ID_1), _make_game(_EVENT_ID_2)],
+    )
 
     assert result.errors == 1
-    assert result.files_written == 1
+    assert result.games_crawled == 1
 
 
 def test_api_error_log_includes_event_id(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Error log includes event_id and public_id of the failing game."""
-    _write_games_json(tmp_path, _SEASON, _PUBLIC_ID, [_make_game(_EVENT_ID_1)])
     db = _make_db()
     client = _make_client(side_effect=GameChangerAPIError("HTTP 500"))
-    crawler = ScoutingSprayChartCrawler(client, db, data_root=tmp_path)
+    crawler = ScoutingSprayChartCrawler(client, db)
 
     with caplog.at_level(logging.ERROR, logger="src.gamechanger.crawlers.scouting_spray"):
-        crawler.crawl_team(_PUBLIC_ID)
+        crawler.crawl_team(_PUBLIC_ID, games_data=[_make_game(_EVENT_ID_1)])
 
     assert _EVENT_ID_1 in caplog.text
 
 
-def test_credential_expired_propagates_through_crawl_all(tmp_path: Path) -> None:
-    """CredentialExpiredError from crawl_team propagates out of crawl_all."""
-    _write_games_json(tmp_path, _SEASON, _PUBLIC_ID, [_make_game(_EVENT_ID_1)])
-    db = _make_db()
-    client = _make_client(side_effect=CredentialExpiredError("expired"))
-    crawler = ScoutingSprayChartCrawler(client, db, data_root=tmp_path)
-
-    with pytest.raises(CredentialExpiredError):
-        crawler.crawl_all()
-
-
-# ---------------------------------------------------------------------------
-# Missing games.json
-# ---------------------------------------------------------------------------
-
-
-def test_no_games_json_is_skipped_gracefully(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
-) -> None:
-    """If no games.json exists for the opponent, crawl_team returns empty result."""
-    db = _make_db()
-    client = _make_client()
-    crawler = ScoutingSprayChartCrawler(client, db, data_root=tmp_path)
-
-    with caplog.at_level(logging.WARNING, logger="src.gamechanger.crawlers.scouting_spray"):
-        result = crawler.crawl_team(_PUBLIC_ID)
-
-    client.get.assert_not_called()
-    assert result.files_written == 0
-    assert result.files_skipped == 0
-    assert result.errors == 0
-    assert "No games.json" in caplog.text
-
-
-def test_non_completed_game_not_fetched(tmp_path: Path) -> None:
-    """A game with game_status='scheduled' is not fetched."""
-    _write_games_json(
-        tmp_path, _SEASON, _PUBLIC_ID, [_make_game(_EVENT_ID_1, game_status="scheduled")]
-    )
-    db = _make_db()
-    client = _make_client()
-    crawler = ScoutingSprayChartCrawler(client, db, data_root=tmp_path)
-
-    result = crawler.crawl_team(_PUBLIC_ID)
-
-    client.get.assert_not_called()
-    assert result.files_written == 0
-
-
-# ---------------------------------------------------------------------------
-# Edge case: game missing 'id' field
-# ---------------------------------------------------------------------------
-
-
-def test_game_missing_id_field_is_counted_as_error(tmp_path: Path) -> None:
+def test_game_missing_id_field_is_counted_as_error() -> None:
     """A completed game record with no 'id' field is counted as an error."""
     bad_game = {"game_status": "completed"}  # no 'id'
-    _write_games_json(tmp_path, _SEASON, _PUBLIC_ID, [bad_game])
     db = _make_db()
     client = _make_client()
-    crawler = ScoutingSprayChartCrawler(client, db, data_root=tmp_path)
+    crawler = ScoutingSprayChartCrawler(client, db)
 
-    result = crawler.crawl_team(_PUBLIC_ID)
+    result = crawler.crawl_team(_PUBLIC_ID, games_data=[bad_game])
 
     client.get.assert_not_called()
     assert result.errors == 1
 
 
 # ---------------------------------------------------------------------------
-# crawl_all aggregation
-# ---------------------------------------------------------------------------
-
-_PUBLIC_ID_2 = "opp-team-2"
-_GC_UUID_2 = "11112222-3333-4444-5555-666677778888"
-
-
-def _make_db_two_opponents(tmp_path: Path) -> sqlite3.Connection:
-    """Return an in-memory DB with two opponents, both with gc_uuid."""
-    conn = sqlite3.connect(":memory:")
-    conn.executescript(
-        """
-        CREATE TABLE teams (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            membership_type TEXT NOT NULL DEFAULT 'tracked',
-            public_id TEXT UNIQUE,
-            gc_uuid TEXT
-        );
-        CREATE TABLE opponent_links (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            public_id TEXT,
-            is_hidden INTEGER NOT NULL DEFAULT 0
-        );
-        """
-    )
-    conn.execute(
-        "INSERT INTO teams (name, public_id, gc_uuid) VALUES (?, ?, ?)",
-        (_PUBLIC_ID, _PUBLIC_ID, _GC_UUID),
-    )
-    conn.execute(
-        "INSERT INTO teams (name, public_id, gc_uuid) VALUES (?, ?, ?)",
-        (_PUBLIC_ID_2, _PUBLIC_ID_2, _GC_UUID_2),
-    )
-    conn.execute(
-        "INSERT INTO opponent_links (public_id, is_hidden) VALUES (?, 0)", (_PUBLIC_ID,)
-    )
-    conn.execute(
-        "INSERT INTO opponent_links (public_id, is_hidden) VALUES (?, 0)", (_PUBLIC_ID_2,)
-    )
-    conn.commit()
-    return conn
-
-
-def test_crawl_all_aggregates_across_opponents(tmp_path: Path) -> None:
-    """crawl_all aggregates files_written and files_skipped across opponents."""
-    _write_games_json(tmp_path, _SEASON, _PUBLIC_ID, [_make_game(_EVENT_ID_1)])
-    _write_games_json(tmp_path, _SEASON, _PUBLIC_ID_2, [_make_game(_EVENT_ID_2)])
-    db = _make_db_two_opponents(tmp_path)
-    client = _make_client()
-    crawler = ScoutingSprayChartCrawler(client, db, data_root=tmp_path)
-
-    result = crawler.crawl_all()
-
-    assert result.files_written == 2
-    assert result.errors == 0
-    assert client.get.call_count == 2
-
-
-def test_crawl_all_skips_hidden_opponents(tmp_path: Path) -> None:
-    """crawl_all ignores opponents with is_hidden=1 in opponent_links."""
-    _write_games_json(tmp_path, _SEASON, _PUBLIC_ID, [_make_game(_EVENT_ID_1)])
-    db = sqlite3.connect(":memory:")
-    db.executescript(
-        """
-        CREATE TABLE teams (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            membership_type TEXT NOT NULL DEFAULT 'tracked',
-            public_id TEXT UNIQUE,
-            gc_uuid TEXT
-        );
-        CREATE TABLE opponent_links (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            public_id TEXT,
-            is_hidden INTEGER NOT NULL DEFAULT 0
-        );
-        """
-    )
-    db.execute(
-        "INSERT INTO teams (name, public_id, gc_uuid) VALUES (?, ?, ?)",
-        (_PUBLIC_ID, _PUBLIC_ID, _GC_UUID),
-    )
-    db.execute(
-        "INSERT INTO opponent_links (public_id, is_hidden) VALUES (?, 1)",
-        (_PUBLIC_ID,),
-    )
-    client = _make_client()
-    crawler = ScoutingSprayChartCrawler(client, db, data_root=tmp_path)
-
-    result = crawler.crawl_all()
-
-    client.get.assert_not_called()
-    assert result.files_written == 0
-
-
-def test_crawl_all_returns_crawl_result_instance(tmp_path: Path) -> None:
-    """crawl_all always returns a CrawlResult instance."""
-    db = _make_db(add_opponent_link=False)
-    client = _make_client()
-    crawler = ScoutingSprayChartCrawler(client, db, data_root=tmp_path)
-
-    result = crawler.crawl_all()
-
-    assert isinstance(result, CrawlResult)
-
-
-def test_crawl_all_logs_summary(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
-) -> None:
-    """crawl_all logs a completion summary."""
-    _write_games_json(tmp_path, _SEASON, _PUBLIC_ID, [_make_game(_EVENT_ID_1)])
-    db = _make_db()
-    client = _make_client()
-    crawler = ScoutingSprayChartCrawler(client, db, data_root=tmp_path)
-
-    with caplog.at_level(logging.INFO, logger="src.gamechanger.crawlers.scouting_spray"):
-        crawler.crawl_all()
-
-    assert "ScoutingSprayChartCrawler complete" in caplog.text
-
-
-# ---------------------------------------------------------------------------
-# gc_uuid provided directly (bypass DB lookup)
+# crawl_team: explicit gc_uuid bypass
 # ---------------------------------------------------------------------------
 
 
-def test_crawl_team_with_explicit_gc_uuid_bypasses_db_lookup(tmp_path: Path) -> None:
+def test_crawl_team_with_explicit_gc_uuid_bypasses_db_lookup() -> None:
     """When gc_uuid is passed directly, no DB lookup is performed."""
-    _write_games_json(tmp_path, _SEASON, _PUBLIC_ID, [_make_game(_EVENT_ID_1)])
-    # DB has no gc_uuid for this team -- but we pass one explicitly.
-    db = _make_db(gc_uuid=None)
+    db = _make_db(gc_uuid=None)  # DB has no gc_uuid
     client = _make_client()
-    crawler = ScoutingSprayChartCrawler(client, db, data_root=tmp_path)
+    crawler = ScoutingSprayChartCrawler(client, db)
 
-    result = crawler.crawl_team(_PUBLIC_ID, gc_uuid=_GC_UUID)
+    result = crawler.crawl_team(
+        _PUBLIC_ID,
+        games_data=[_make_game(_EVENT_ID_1)],
+        gc_uuid=_GC_UUID,
+    )
 
-    assert result.files_written == 1
+    assert result.games_crawled == 1
     client.get.assert_called_once_with(
         f"/teams/{_GC_UUID}/schedule/events/{_EVENT_ID_1}/player-stats",
         accept=_PLAYER_STATS_ACCEPT,
     )
-
-
-# ---------------------------------------------------------------------------
-# Multi-season support: games.json files across multiple seasons
-# ---------------------------------------------------------------------------
-
-
-def test_crawl_team_handles_multiple_seasons(tmp_path: Path) -> None:
-    """crawl_team processes games.json from all seasons found on disk."""
-    season_a = "2024-spring-hs"
-    season_b = "2025-spring-hs"
-    event_a = "event-2024-001"
-    event_b = "event-2025-001"
-    _write_games_json(tmp_path, season_a, _PUBLIC_ID, [_make_game(event_a)])
-    _write_games_json(tmp_path, season_b, _PUBLIC_ID, [_make_game(event_b)])
-    db = _make_db()
-    client = _make_client()
-    crawler = ScoutingSprayChartCrawler(client, db, data_root=tmp_path)
-
-    result = crawler.crawl_team(_PUBLIC_ID)
-
-    assert result.files_written == 2
-    assert client.get.call_count == 2
-
-
-# ---------------------------------------------------------------------------
-# E-176-04: Direct-add team discovery in crawl_all
-# ---------------------------------------------------------------------------
-
-_DIRECT_ADD_PUBLIC_ID = "direct-add-team"
-_DIRECT_ADD_GC_UUID = "ddddaaaa-1111-2222-3333-444455556666"
-
-
-def _make_db_with_direct_add_team(
-    *,
-    has_opponent_link: bool = False,
-    is_hidden: bool = False,
-) -> sqlite3.Connection:
-    """Return a DB with a tracked team that has no opponent_links row (direct-add).
-
-    Optionally adds an opponent_links row for the team (to test dedup/hidden).
-    """
-    conn = sqlite3.connect(":memory:")
-    conn.executescript(
-        """
-        CREATE TABLE teams (
-            id              INTEGER PRIMARY KEY AUTOINCREMENT,
-            name            TEXT NOT NULL,
-            membership_type TEXT NOT NULL DEFAULT 'tracked',
-            public_id       TEXT UNIQUE,
-            gc_uuid         TEXT
-        );
-        CREATE TABLE opponent_links (
-            id         INTEGER PRIMARY KEY AUTOINCREMENT,
-            public_id  TEXT,
-            is_hidden  INTEGER NOT NULL DEFAULT 0
-        );
-        """
-    )
-    conn.execute(
-        "INSERT INTO teams (name, membership_type, public_id, gc_uuid) "
-        "VALUES (?, 'tracked', ?, ?)",
-        (_DIRECT_ADD_PUBLIC_ID, _DIRECT_ADD_PUBLIC_ID, _DIRECT_ADD_GC_UUID),
-    )
-    if has_opponent_link:
-        conn.execute(
-            "INSERT INTO opponent_links (public_id, is_hidden) VALUES (?, ?)",
-            (_DIRECT_ADD_PUBLIC_ID, 1 if is_hidden else 0),
-        )
-    conn.commit()
-    return conn
-
-
-def test_crawl_all_includes_direct_add_tracked_team(tmp_path: Path) -> None:
-    """AC-1: Tracked team with public_id but no opponent_links row is crawled."""
-    _write_games_json(
-        tmp_path, _SEASON, _DIRECT_ADD_PUBLIC_ID, [_make_game(_EVENT_ID_1)]
-    )
-    db = _make_db_with_direct_add_team(has_opponent_link=False)
-    client = _make_client()
-    crawler = ScoutingSprayChartCrawler(client, db, data_root=tmp_path)
-
-    result = crawler.crawl_all()
-
-    assert result.files_written == 1
-    assert result.errors == 0
-    client.get.assert_called_once()
-
-
-def test_crawl_all_excludes_hidden_opponent_with_direct_add_team(
-    tmp_path: Path,
-) -> None:
-    """AC-2: Tracked team with is_hidden=1 in opponent_links is excluded."""
-    _write_games_json(
-        tmp_path, _SEASON, _DIRECT_ADD_PUBLIC_ID, [_make_game(_EVENT_ID_1)]
-    )
-    db = _make_db_with_direct_add_team(has_opponent_link=True, is_hidden=True)
-    client = _make_client()
-    crawler = ScoutingSprayChartCrawler(client, db, data_root=tmp_path)
-
-    result = crawler.crawl_all()
-
-    client.get.assert_not_called()
-    assert result.files_written == 0
-
-
-def test_crawl_all_no_duplicate_for_team_in_both_sources(tmp_path: Path) -> None:
-    """AC-3: Team in both opponent_links and teams table is processed once."""
-    _write_games_json(
-        tmp_path, _SEASON, _DIRECT_ADD_PUBLIC_ID, [_make_game(_EVENT_ID_1)]
-    )
-    db = _make_db_with_direct_add_team(
-        has_opponent_link=True, is_hidden=False
-    )
-    client = _make_client()
-    crawler = ScoutingSprayChartCrawler(client, db, data_root=tmp_path)
-
-    result = crawler.crawl_all()
-
-    # Should be called exactly once despite team being in both sources.
-    assert result.files_written == 1
-    assert client.get.call_count == 1
-
-
-def test_crawl_all_existing_opponent_links_behavior_unchanged(
-    tmp_path: Path,
-) -> None:
-    """AC-5d: Existing opponent_links-only discovery still works."""
-    _write_games_json(tmp_path, _SEASON, _PUBLIC_ID, [_make_game(_EVENT_ID_1)])
-    # Standard DB: team in opponent_links with is_hidden=0.
-    db = _make_db()
-    client = _make_client()
-    crawler = ScoutingSprayChartCrawler(client, db, data_root=tmp_path)
-
-    result = crawler.crawl_all()
-
-    assert result.files_written == 1
-    assert result.errors == 0
-
-
-def test_crawl_all_member_team_not_included(tmp_path: Path) -> None:
-    """Member teams are never included in the direct-add branch."""
-    conn = sqlite3.connect(":memory:")
-    conn.executescript(
-        """
-        CREATE TABLE teams (
-            id              INTEGER PRIMARY KEY AUTOINCREMENT,
-            name            TEXT NOT NULL,
-            membership_type TEXT NOT NULL DEFAULT 'tracked',
-            public_id       TEXT UNIQUE,
-            gc_uuid         TEXT
-        );
-        CREATE TABLE opponent_links (
-            id         INTEGER PRIMARY KEY AUTOINCREMENT,
-            public_id  TEXT,
-            is_hidden  INTEGER NOT NULL DEFAULT 0
-        );
-        """
-    )
-    conn.execute(
-        "INSERT INTO teams (name, membership_type, public_id, gc_uuid) "
-        "VALUES ('Member Team', 'member', 'member-pub-id', ?)",
-        (_GC_UUID,),
-    )
-    conn.commit()
-    _write_games_json(tmp_path, _SEASON, "member-pub-id", [_make_game(_EVENT_ID_1)])
-    client = _make_client()
-    crawler = ScoutingSprayChartCrawler(client, conn, data_root=tmp_path)
-
-    result = crawler.crawl_all()
-
-    client.get.assert_not_called()
-    assert result.files_written == 0
-
-
-def test_crawl_all_mixed_opponent_links_and_direct_add(tmp_path: Path) -> None:
-    """Both opponent_links teams and direct-add teams are crawled together."""
-    # Team 1: in opponent_links only
-    # Team 2: direct-add (tracked, no opponent_links row)
-    conn = sqlite3.connect(":memory:")
-    conn.executescript(
-        """
-        CREATE TABLE teams (
-            id              INTEGER PRIMARY KEY AUTOINCREMENT,
-            name            TEXT NOT NULL,
-            membership_type TEXT NOT NULL DEFAULT 'tracked',
-            public_id       TEXT UNIQUE,
-            gc_uuid         TEXT
-        );
-        CREATE TABLE opponent_links (
-            id         INTEGER PRIMARY KEY AUTOINCREMENT,
-            public_id  TEXT,
-            is_hidden  INTEGER NOT NULL DEFAULT 0
-        );
-        """
-    )
-    conn.execute(
-        "INSERT INTO teams (name, membership_type, public_id, gc_uuid) "
-        "VALUES (?, 'tracked', ?, ?)",
-        (_PUBLIC_ID, _PUBLIC_ID, _GC_UUID),
-    )
-    conn.execute(
-        "INSERT INTO teams (name, membership_type, public_id, gc_uuid) "
-        "VALUES (?, 'tracked', ?, ?)",
-        (_DIRECT_ADD_PUBLIC_ID, _DIRECT_ADD_PUBLIC_ID, _DIRECT_ADD_GC_UUID),
-    )
-    conn.execute(
-        "INSERT INTO opponent_links (public_id, is_hidden) VALUES (?, 0)",
-        (_PUBLIC_ID,),
-    )
-    conn.commit()
-
-    _write_games_json(tmp_path, _SEASON, _PUBLIC_ID, [_make_game(_EVENT_ID_1)])
-    _write_games_json(
-        tmp_path, _SEASON, _DIRECT_ADD_PUBLIC_ID, [_make_game(_EVENT_ID_2)]
-    )
-    client = _make_client()
-    crawler = ScoutingSprayChartCrawler(client, conn, data_root=tmp_path)
-
-    result = crawler.crawl_all()
-
-    assert result.files_written == 2
-    assert client.get.call_count == 2
-    assert result.errors == 0

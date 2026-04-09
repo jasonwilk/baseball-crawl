@@ -764,6 +764,29 @@ def _get_delete_confirmation_data(team_id: int) -> dict[str, Any]:
             (team_id, team_id, team_id),
         ).fetchone()[0]
 
+        # E-220 proactive audit: count the four additional game-child tables
+        # that _delete_team_cascade now handles.
+        plays_count: int = conn.execute(
+            f"SELECT COUNT(*) FROM plays WHERE game_id IN ({_game_ids})",
+            (team_id, team_id),
+        ).fetchone()[0]
+
+        play_events_count: int = conn.execute(
+            f"SELECT COUNT(*) FROM play_events WHERE play_id IN "
+            f"(SELECT id FROM plays WHERE game_id IN ({_game_ids}))",
+            (team_id, team_id),
+        ).fetchone()[0]
+
+        gp_count: int = conn.execute(
+            f"SELECT COUNT(*) FROM game_perspectives WHERE game_id IN ({_game_ids})",
+            (team_id, team_id),
+        ).fetchone()[0]
+
+        recon_count: int = conn.execute(
+            f"SELECT COUNT(*) FROM reconciliation_discrepancies WHERE game_id IN ({_game_ids})",
+            (team_id, team_id),
+        ).fetchone()[0]
+
         tr_count: int = conn.execute(
             "SELECT COUNT(*) FROM team_rosters WHERE team_id = ?",
             (team_id,),
@@ -804,6 +827,46 @@ def _get_delete_confirmation_data(team_id: int) -> dict[str, Any]:
         ).fetchone()
         membership_type = team_row["membership_type"] if team_row else None
 
+        # E-220 round 6 cluster 3: cross-perspective owner breakdown.
+        # Lists each OTHER team whose perspective owns rows keyed to the
+        # team being deleted.  Used by the template to show a named impact
+        # panel and by the route handler to gate delete on explicit
+        # operator confirmation (confirm_cross_perspective flag).
+        cross_persp_rows = conn.execute(
+            """
+            SELECT t.name, t.id, SUM(row_count) AS row_count
+            FROM (
+                SELECT perspective_team_id, COUNT(*) AS row_count
+                FROM player_game_batting
+                WHERE team_id = ? AND perspective_team_id != ?
+                GROUP BY perspective_team_id
+                UNION ALL
+                SELECT perspective_team_id, COUNT(*) AS row_count
+                FROM player_game_pitching
+                WHERE team_id = ? AND perspective_team_id != ?
+                GROUP BY perspective_team_id
+                UNION ALL
+                SELECT perspective_team_id, COUNT(*) AS row_count
+                FROM spray_charts
+                WHERE team_id = ? AND perspective_team_id != ?
+                GROUP BY perspective_team_id
+                UNION ALL
+                SELECT perspective_team_id, COUNT(*) AS row_count
+                FROM plays
+                WHERE batting_team_id = ? AND perspective_team_id != ?
+                GROUP BY perspective_team_id
+            ) x
+            JOIN teams t ON t.id = x.perspective_team_id
+            GROUP BY t.id, t.name
+            ORDER BY row_count DESC, t.name
+            """,
+            (team_id, team_id) * 4,
+        ).fetchall()
+        cross_perspective_owners: list[dict[str, Any]] = [
+            {"id": row["id"], "name": row["name"], "row_count": row["row_count"]}
+            for row in cross_persp_rows
+        ]
+
         shared_member_teams: list[str] = []
         if membership_type == "tracked":
             shared_rows = conn.execute(
@@ -842,14 +905,20 @@ def _get_delete_confirmation_data(team_id: int) -> dict[str, Any]:
 
     total_count = (
         pgb_count + pgp_count + games_count + psb_count + psp_count
-        + sc_count + tr_count + sr_count + cj_count + uta_count + ca_count
+        + sc_count + plays_count + play_events_count + gp_count + recon_count
+        + tr_count + sr_count + cj_count + uta_count + ca_count
         + to_count + ol_count
     )
 
     return {
         "games": games_count,
+        "cross_perspective_owners": cross_perspective_owners,
         "player_game_batting": pgb_count,
         "player_game_pitching": pgp_count,
+        "plays": plays_count,
+        "play_events": play_events_count,
+        "game_perspectives": gp_count,
+        "reconciliation_discrepancies": recon_count,
         "player_season_batting": psb_count,
         "player_season_pitching": psp_count,
         "spray_charts": sc_count,
@@ -886,7 +955,23 @@ def _delete_team_cascade(team_id: int) -> None:
     _game_ids = "SELECT game_id FROM games WHERE home_team_id = ? OR away_team_id = ?"
 
     with closing(get_connection()) as conn:
-        # Phase 1 -- game-child rows
+        # Phase 1a -- game-child rows for games where the team is a participant
+        # (FK-safe order: grandchildren before children).  Covers rows keyed
+        # by game_id where home/away is the team being deleted.
+        conn.execute(
+            f"DELETE FROM play_events WHERE play_id IN ("
+            f"  SELECT id FROM plays WHERE game_id IN ({_game_ids})"
+            f")",
+            (team_id, team_id),
+        )
+        conn.execute(
+            f"DELETE FROM plays WHERE game_id IN ({_game_ids})",
+            (team_id, team_id),
+        )
+        conn.execute(
+            f"DELETE FROM reconciliation_discrepancies WHERE game_id IN ({_game_ids})",
+            (team_id, team_id),
+        )
         conn.execute(
             f"DELETE FROM player_game_batting WHERE game_id IN ({_game_ids})",
             (team_id, team_id),
@@ -898,6 +983,42 @@ def _delete_team_cascade(team_id: int) -> None:
         conn.execute(
             f"DELETE FROM spray_charts WHERE game_id IN ({_game_ids})",
             (team_id, team_id),
+        )
+        conn.execute(
+            f"DELETE FROM game_perspectives WHERE game_id IN ({_game_ids})",
+            (team_id, team_id),
+        )
+
+        # Phase 1b (E-220 round 6 cluster 3) -- rows where perspective_team_id = T
+        # but the team is NOT a participant in the game (cross-perspective scouting
+        # rows about other teams from T's perspective).  These must be deleted
+        # because the teams row is about to go away, and perspective_team_id has a
+        # NOT NULL FK.  Must precede the perspective_team_id = T rows for games
+        # the team IS a participant in (those were already cleaned by Phase 1a).
+        conn.execute(
+            "DELETE FROM play_events WHERE play_id IN ("
+            "  SELECT id FROM plays WHERE perspective_team_id = ?"
+            ")",
+            (team_id,),
+        )
+        conn.execute(
+            "DELETE FROM plays WHERE perspective_team_id = ?", (team_id,)
+        )
+        conn.execute(
+            "DELETE FROM player_game_batting WHERE perspective_team_id = ?",
+            (team_id,),
+        )
+        conn.execute(
+            "DELETE FROM player_game_pitching WHERE perspective_team_id = ?",
+            (team_id,),
+        )
+        conn.execute(
+            "DELETE FROM spray_charts WHERE perspective_team_id = ?",
+            (team_id,),
+        )
+        conn.execute(
+            "DELETE FROM game_perspectives WHERE perspective_team_id = ?",
+            (team_id,),
         )
 
         # Phase 2 -- games
@@ -2355,16 +2476,20 @@ async def confirm_delete_team(request: Request, id: int) -> Response:
 async def delete_team(request: Request, id: int) -> Response:
     """Permanently delete a team and all related data rows in a single transaction.
 
-    Performs the full 4-phase cascade deletion (TN-1). The is_active guard
-    is removed -- any team can be deleted regardless of active status. The
-    GET confirmation page provides the safety mechanism.
+    E-220 round 6 cluster 3 (Option B): when the team has cross-perspective
+    rows (i.e., its games have been scouted by other teams), the delete
+    requires explicit confirmation via the ``confirm_cross_perspective``
+    form field.  Without it, the confirmation page is re-rendered with the
+    named impact panel instead of 4xx-ing.  The clean-team path (no
+    cross-perspective rows) proceeds without the flag.
 
     Args:
         request: The incoming HTTP request.
         id: The team's INTEGER primary key from the URL path.
 
     Returns:
-        Redirect to /admin/teams with success flash message.
+        Redirect to /admin/teams on success, or 200 re-render of the
+        confirmation page when cross-perspective confirmation is required.
     """
     guard = await _require_admin(request)
     if isinstance(guard, Response):
@@ -2373,6 +2498,24 @@ async def delete_team(request: Request, id: int) -> Response:
     team = await run_in_threadpool(_get_team_by_integer_id, id)
     if not team:
         return HTMLResponse(content="Team not found", status_code=404)
+
+    form = await request.form()
+    confirm_cross_perspective = form.get("confirm_cross_perspective") == "1"
+
+    counts = await run_in_threadpool(_get_delete_confirmation_data, id)
+    has_cross_perspective = bool(counts.get("cross_perspective_owners"))
+
+    if has_cross_perspective and not confirm_cross_perspective:
+        # Re-render the confirmation page with the named impact panel.
+        return templates.TemplateResponse(
+            request,
+            "admin/confirm_delete.html",
+            {
+                "team": team,
+                "counts": counts,
+                "warning": "confirmation_required",
+            },
+        )
 
     team_name = team["name"]
     await run_in_threadpool(_delete_team_cascade, id)

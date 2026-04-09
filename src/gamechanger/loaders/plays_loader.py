@@ -143,10 +143,11 @@ class PlaysLoader:
 
         season_id, home_team_id, away_team_id = game_row
 
-        # AC-2: Whole-game idempotency -- skip if any plays row exists.
+        # AC-2: Whole-game idempotency -- skip if plays exist for this perspective.
+        perspective_team_id = self._team_ref.id
         existing = self._db.execute(
-            "SELECT 1 FROM plays WHERE game_id = ? LIMIT 1",
-            (game_id,),
+            "SELECT 1 FROM plays WHERE game_id = ? AND perspective_team_id = ? LIMIT 1",
+            (game_id, perspective_team_id),
         ).fetchone()
 
         if existing is not None:
@@ -182,7 +183,7 @@ class PlaysLoader:
 
         # AC-5: Per-game transaction -- all plays + events commit together.
         try:
-            plays_inserted = self._insert_game_plays(parsed_plays)
+            plays_inserted = self._insert_game_plays(parsed_plays, perspective_team_id)
             self._db.commit()
             return LoadResult(loaded=plays_inserted)
         except Exception as exc:  # noqa: BLE001 -- per-game error isolation (AC-4)
@@ -196,7 +197,7 @@ class PlaysLoader:
     # DB operations
     # ------------------------------------------------------------------
 
-    def _insert_game_plays(self, plays: list[ParsedPlay]) -> int:
+    def _insert_game_plays(self, plays: list[ParsedPlay], perspective_team_id: int) -> int:
         """Insert all plays and their events for a single game.
 
         Ensures stub player rows exist for any unknown batter/pitcher IDs
@@ -204,6 +205,8 @@ class PlaysLoader:
 
         Args:
             plays: List of ``ParsedPlay`` records from the parser.
+            perspective_team_id: INTEGER PK of the team whose API call produced
+                this play-by-play data.
 
         Returns:
             Count of plays inserted.
@@ -225,8 +228,9 @@ class PlaysLoader:
                     batter_id, pitcher_id, outcome,
                     pitch_count, is_first_pitch_strike, is_qab,
                     home_score, away_score, did_score_change,
-                    outs_after, did_outs_change
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    outs_after, did_outs_change,
+                    perspective_team_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     play.game_id,
@@ -246,6 +250,7 @@ class PlaysLoader:
                     play.did_score_change,
                     play.outs_after,
                     play.did_outs_change,
+                    perspective_team_id,
                 ),
             )
             play_id = cursor.lastrowid

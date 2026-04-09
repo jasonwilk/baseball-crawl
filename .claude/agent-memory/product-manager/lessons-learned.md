@@ -3,6 +3,26 @@
 
 Detailed notes on patterns and lessons from past epics. MEMORY.md links here.
 
+## E-220 Round-by-Round Remediation Pattern (2026-04-09)
+
+Eight rounds of post-dispatch Codex review on E-220 (Perspective-Aware Data Architecture) uncovered a class of problem that per-story code review is structurally unable to catch. Key lessons:
+
+**1. Per-story CR is insufficient for cross-cutting invariants.** When an epic introduces a NOT NULL column, a new FK dimension, or any invariant that every helper in the codebase must honor, reviewing each story's diff in isolation will miss the helpers in files the story did not touch. Round 1 through round 7 Codex reviews kept finding the same pattern: a helper that took `game_id`/`team_id` and was written before the perspective dimension existed. CR reviewed each story's diff against only the files that story modified and never saw the full surface area.
+
+**2. Proactive mechanical audits should be part of dispatch, not reactive code review.** The implement skill should grow a "post-last-story invariant audit" phase that runs a grep-based sweep against a rubric like `.claude/rules/perspective-provenance.md`. This is cheaper than chasing the same class of bug across 8 Codex rounds. The audit needs: (a) an explicit rubric as forcing function, (b) adversarial framing ("assume broken until proven otherwise"), (c) structured per-site output table. Round 5's false-negative "looks good" researcher was replaced in round 6 with a mechanical per-site researcher that found 19 FAILs -- the gap was not model capability, it was prompt engineering.
+
+**3. Test fixtures ARE part of the invariant.** E-220 established `perspective_team_id NOT NULL` in production schema. Tests passed because 7 test files used inline fixtures that defined columns as plain `INTEGER` without the NOT NULL REFERENCES constraint. The fixture drift was the enabling condition for the round-by-round discovery cascade -- each round's new test added by SE/PM was validated against fixtures that did not enforce the very invariant we were establishing. Architectural invariants must be enforced in BOTH production schema and test fixtures. If tests pass against a fixture that doesn't enforce the invariant, the test suite is silently betraying you.
+
+**4. Cross-perspective frequency ≠ rare.** PM's initial calibration that cross-perspective rows were "rare edge cases" was wrong -- they are the modal case for any LSB-adjacent tracked opponent. Product policy that depends on operational frequency (e.g., "show a confirmation banner in rare conflicts" vs "show informed-consent for the normal case") needs grounded input from DE/user/coach before locking. Getting this wrong once led to cluster 3's Option B rework mid-round.
+
+**5. Flag naming is load-bearing UX.** `confirm_cross_perspective` (normal path acknowledgment) vs `force_drop_cross_perspective` (escape-hatch override) -- same behavior, different operator mental model. The framing trains different assumptions about what the conflict means. PM should catch naming that implies "rare escape hatch" when the reality is "modal confirmation" during epic formation, not during round 6.
+
+**6. When a cluster fix introduces a new regression in adjacent code, STOP.** Round 6 cluster 2's "preserve games row when other perspective remains" introduced round 7's P1-1 (cascade_delete_team FK violation on the same preservation path). Fixing one face broke another. When this pattern appears mid-remediation, it is a structural signal that the cluster decomposition was wrong -- not a signal to keep grinding. PM's stop-gate for round 7 was "stop if another structural miss appears," but by round 8 it was clear that grinding past diminishing returns was risking new bugs for each fix landed. E-221 is the right landing when this pattern triggers.
+
+**7. Peer DM delivery is unreliable.** Twice in E-220 round 7-8, DE→PM and SE→PM SendMessage calls did not land in the receiving agent's conversation. Main-session relay worked as a workaround. For future multi-agent epics, either: (a) route all consultations through main session as the default pattern, or (b) investigate the platform delivery issue. Do not debug in-round.
+
+**8. Decision authority boundaries**: when PM proposed Option 1 (rename column) and DE initially agreed, then SE's implementation surfaced a wrinkle (game-level signals lose home/away distinction under collapse), DE reversed to Option 2 (dual-column). The reversal was correct. Lesson: when an expert gives a schema recommendation based on a quick read, that recommendation is provisional until the implementer has traced all construction sites and consumers. PM should explicitly build "SE verification step before schema change" into briefs for any epic touching a table that multiple modules read.
+
 ## Epic Authoring Patterns
 - A vague epic is worse than no epic. When scope is unclear, write an idea, not an epic.
 - E-002 and E-003 were written as DRAFT intentionally -- they depend on E-001-03 (API spec) before implementing agents can fill in real endpoint names.

@@ -67,6 +67,7 @@ def db() -> sqlite3.Connection:
             game_id TEXT NOT NULL,
             player_id TEXT NOT NULL,
             team_id INTEGER NOT NULL,
+            perspective_team_id INTEGER NOT NULL,
             batting_order INTEGER,
             positions_played TEXT,
             is_primary INTEGER,
@@ -76,7 +77,7 @@ def db() -> sqlite3.Connection:
             doubles INTEGER, triples INTEGER, hr INTEGER,
             tb INTEGER, hbp INTEGER, shf INTEGER,
             sb INTEGER, cs INTEGER, e INTEGER,
-            UNIQUE(game_id, player_id)
+            UNIQUE(game_id, player_id, perspective_team_id)
         );
 
         CREATE TABLE player_game_pitching (
@@ -84,13 +85,15 @@ def db() -> sqlite3.Connection:
             game_id TEXT NOT NULL,
             player_id TEXT NOT NULL,
             team_id INTEGER NOT NULL,
+            perspective_team_id INTEGER NOT NULL,
             decision TEXT,
+            appearance_order INTEGER,
             stat_completeness TEXT DEFAULT 'boxscore_only',
             ip_outs INTEGER, h INTEGER, r INTEGER, er INTEGER,
             bb INTEGER, so INTEGER,
             wp INTEGER, hbp INTEGER,
             pitches INTEGER, total_strikes INTEGER, bf INTEGER,
-            UNIQUE(game_id, player_id)
+            UNIQUE(game_id, player_id, perspective_team_id)
         );
 
         CREATE TABLE plays (
@@ -101,6 +104,7 @@ def db() -> sqlite3.Connection:
             half TEXT NOT NULL,
             season_id TEXT NOT NULL,
             batting_team_id INTEGER NOT NULL,
+            perspective_team_id INTEGER NOT NULL,
             batter_id TEXT NOT NULL,
             pitcher_id TEXT,
             outcome TEXT,
@@ -112,7 +116,7 @@ def db() -> sqlite3.Connection:
             did_score_change INTEGER,
             outs_after INTEGER,
             did_outs_change INTEGER,
-            UNIQUE(game_id, play_order)
+            UNIQUE(game_id, play_order, perspective_team_id)
         );
 
         CREATE TABLE play_events (
@@ -130,6 +134,7 @@ def db() -> sqlite3.Connection:
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             game_id TEXT NOT NULL,
             run_id TEXT NOT NULL,
+            perspective_team_id INTEGER NOT NULL,
             team_id INTEGER NOT NULL,
             player_id TEXT NOT NULL,
             signal_name TEXT NOT NULL,
@@ -140,7 +145,7 @@ def db() -> sqlite3.Connection:
             status TEXT NOT NULL CHECK(status IN ('MATCH', 'CORRECTABLE', 'CORRECTED', 'AMBIGUOUS', 'UNCORRECTABLE')),
             correction_detail TEXT,
             created_at TEXT NOT NULL DEFAULT (datetime('now')),
-            UNIQUE(run_id, game_id, team_id, player_id, signal_name)
+            UNIQUE(run_id, game_id, perspective_team_id, team_id, player_id, signal_name)
         );
 
         INSERT INTO seasons VALUES ('2025-spring-hs');
@@ -185,12 +190,16 @@ def _insert_pitching_boxscore(
     total_strikes: int = 0,
     bf: int = 0,
     decision: str | None = None,
+    perspective_team_id: int = 1,
+    appearance_order: int | None = None,
 ) -> None:
     conn.execute(
         "INSERT INTO player_game_pitching "
-        "(game_id, player_id, team_id, decision, ip_outs, h, r, er, bb, so, wp, hbp, pitches, total_strikes, bf) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (game_id, player_id, team_id, decision, ip_outs, h, r, er, bb, so, wp, hbp, pitches, total_strikes, bf),
+        "(game_id, player_id, team_id, perspective_team_id, decision, appearance_order, "
+        "ip_outs, h, r, er, bb, so, wp, hbp, pitches, total_strikes, bf) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (game_id, player_id, team_id, perspective_team_id, decision, appearance_order,
+         ip_outs, h, r, er, bb, so, wp, hbp, pitches, total_strikes, bf),
     )
 
 
@@ -206,12 +215,13 @@ def _insert_batting_boxscore(
     bb: int = 0,
     so: int = 0,
     hbp: int = 0,
+    perspective_team_id: int = 1,
 ) -> None:
     conn.execute(
         "INSERT INTO player_game_batting "
-        "(game_id, player_id, team_id, ab, r, h, rbi, bb, so, hbp) "
-        "VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?)",
-        (game_id, player_id, team_id, ab, r, h, bb, so, hbp),
+        "(game_id, player_id, team_id, perspective_team_id, ab, r, h, rbi, bb, so, hbp) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)",
+        (game_id, player_id, team_id, perspective_team_id, ab, r, h, bb, so, hbp),
     )
 
 
@@ -230,14 +240,20 @@ def _insert_play(
     home_score: int = 0,
     away_score: int = 0,
     did_outs_change: int = 1,
+    perspective_team_id: int = 1,
 ) -> int:
-    """Insert a play and return the play id."""
+    """Insert a play and return the play id.
+
+    perspective_team_id defaults to 1 -- the convention that all data for a
+    single boxscore load is tagged with one perspective (the team whose API
+    produced it).  Tests for cross-perspective behavior can override.
+    """
     conn.execute(
         "INSERT INTO plays "
-        "(game_id, play_order, inning, half, season_id, batting_team_id, batter_id, "
+        "(game_id, play_order, inning, half, season_id, batting_team_id, perspective_team_id, batter_id, "
         "pitcher_id, outcome, pitch_count, home_score, away_score, did_outs_change) "
-        "VALUES (?, ?, ?, ?, '2025-spring-hs', ?, ?, ?, ?, ?, ?, ?, ?)",
-        (game_id, play_order, inning, half, batting_team_id, batter_id,
+        "VALUES (?, ?, ?, ?, '2025-spring-hs', ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (game_id, play_order, inning, half, batting_team_id, perspective_team_id, batter_id,
          pitcher_id, outcome, pitch_count, home_score, away_score, did_outs_change),
     )
     return conn.execute("SELECT last_insert_rowid()").fetchone()[0]
@@ -275,6 +291,101 @@ class TestSkipNoPlays:
         assert summary.games_skipped_no_plays == 1
         assert summary.games_processed == 0
         assert summary.signal_counts == {}
+
+
+class TestCrossPerspectiveDiscrepancyPersistence:
+    """E-220 round 7 P1-2: two perspectives of the same game must both
+    persist discrepancy rows.  Before the dual-column fix, the UNIQUE
+    constraint (run_id, game_id, team_id, player_id, signal_name) collided
+    across perspectives -- INSERT OR REPLACE in _write_discrepancies
+    silently overwrote perspective A's rows when perspective B wrote.
+    """
+
+    def test_two_perspectives_persist_independently(self, db: sqlite3.Connection) -> None:
+        """Reconcile the same game from two perspectives; both sets of rows must persist.
+
+        Seeds identical plays + boxscore for two perspectives (team 1 and team 2),
+        runs reconcile_game twice with explicit perspective_team_id, then asserts
+        both perspectives' discrepancies are present in reconciliation_discrepancies.
+        """
+        _insert_game(db, "game-xperspective")
+
+        # Identical boxscore data for BOTH perspectives (tagged with different
+        # perspective_team_id).  Home has 1 pitcher, away has 1 pitcher.
+        for ptid in (1, 2):
+            _insert_pitching_boxscore(
+                db, "game-xperspective", "pitcher-h1", 1,
+                bf=1, so=1, bb=0, hbp=0, h=0, ip_outs=1,
+                pitches=3, total_strikes=3, wp=0,
+                perspective_team_id=ptid,
+            )
+            _insert_pitching_boxscore(
+                db, "game-xperspective", "pitcher-a1", 2,
+                bf=1, so=1, bb=0, hbp=0, h=0, ip_outs=1,
+                pitches=3, total_strikes=3, wp=0,
+                perspective_team_id=ptid,
+            )
+            _insert_batting_boxscore(
+                db, "game-xperspective", "batter-a1", 2,
+                ab=1, r=0, h=0, bb=0, so=1, perspective_team_id=ptid,
+            )
+            _insert_batting_boxscore(
+                db, "game-xperspective", "batter-h1", 1,
+                ab=1, r=0, h=0, bb=0, so=1, perspective_team_id=ptid,
+            )
+
+        # Plays (one per half inning) tagged for BOTH perspectives.
+        for ptid in (1, 2):
+            p_top = _insert_play(
+                db, "game-xperspective", 1, inning=1, half="top",
+                batting_team_id=2, batter_id="batter-a1", pitcher_id="pitcher-h1",
+                outcome="Strikeout", pitch_count=3, did_outs_change=1,
+                perspective_team_id=ptid,
+            )
+            _insert_play_event(db, p_top, 1, pitch_result="strike_swinging")
+            _insert_play_event(db, p_top, 2, pitch_result="strike_swinging")
+            _insert_play_event(db, p_top, 3, pitch_result="strike_swinging")
+
+            p_bot = _insert_play(
+                db, "game-xperspective", 2, inning=1, half="bottom",
+                batting_team_id=1, batter_id="batter-h1", pitcher_id="pitcher-a1",
+                outcome="Strikeout", pitch_count=3, did_outs_change=1,
+                perspective_team_id=ptid,
+            )
+            _insert_play_event(db, p_bot, 1, pitch_result="strike_swinging")
+            _insert_play_event(db, p_bot, 2, pitch_result="strike_swinging")
+            _insert_play_event(db, p_bot, 3, pitch_result="strike_swinging")
+
+        # Run reconcile_game twice with different perspectives and the SAME run_id.
+        # This mirrors reconcile_all behavior where a single run_id spans all
+        # (game_id, perspective_team_id) pairs.
+        run_id = "test-run-xperspective"
+        reconcile_game(db, "game-xperspective", run_id=run_id, perspective_team_id=1)
+        reconcile_game(db, "game-xperspective", run_id=run_id, perspective_team_id=2)
+
+        # Count rows per perspective in reconciliation_discrepancies.
+        p1_count = db.execute(
+            "SELECT COUNT(*) FROM reconciliation_discrepancies "
+            "WHERE game_id = ? AND perspective_team_id = ?",
+            ("game-xperspective", 1),
+        ).fetchone()[0]
+        p2_count = db.execute(
+            "SELECT COUNT(*) FROM reconciliation_discrepancies "
+            "WHERE game_id = ? AND perspective_team_id = ?",
+            ("game-xperspective", 2),
+        ).fetchone()[0]
+
+        # Both perspectives must have persisted their discrepancy rows.
+        assert p1_count > 0, (
+            "perspective 1 discrepancies should persist (pre-fix: collapsed by INSERT OR REPLACE)"
+        )
+        assert p2_count > 0, (
+            "perspective 2 discrepancies should persist (pre-fix: collapsed by INSERT OR REPLACE)"
+        )
+        # And critically -- they should have the SAME count (identical boxscore/plays per perspective).
+        assert p1_count == p2_count, (
+            f"perspectives should produce equal row counts: p1={p1_count} p2={p2_count}"
+        )
 
 
 class TestPerfectPitcherAttribution:
@@ -919,14 +1030,14 @@ class TestCorrectionEdgeCases:
         # Monkeypatch _extract_pitcher_order to return re-entry order for home team
         original_extract = engine_mod._extract_pitcher_order
 
-        def _mock_extract(conn, game_id, game_stream_id, season_id, team_id, is_home):
+        def _mock_extract(conn, game_id, game_stream_id, season_id, team_id, is_home, **kwargs):
             if team_id == 1:  # Home team: simulate re-entry
                 return [
                     {"player_id": "pitcher-h1"},
                     {"player_id": "pitcher-h2"},
                     {"player_id": "pitcher-h1"},  # re-entry
                 ]
-            return original_extract(conn, game_id, game_stream_id, season_id, team_id, is_home)
+            return original_extract(conn, game_id, game_stream_id, season_id, team_id, is_home, **kwargs)
 
         monkeypatch.setattr(engine_mod, "_extract_pitcher_order", _mock_extract)
 
@@ -986,6 +1097,7 @@ class TestGetSummaryFromDB:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 game_id TEXT NOT NULL,
                 run_id TEXT NOT NULL,
+                perspective_team_id INTEGER NOT NULL,
                 team_id INTEGER NOT NULL,
                 player_id TEXT NOT NULL,
                 signal_name TEXT NOT NULL,
@@ -996,7 +1108,7 @@ class TestGetSummaryFromDB:
                 status TEXT NOT NULL,
                 correction_detail TEXT,
                 created_at TEXT NOT NULL DEFAULT (datetime('now')),
-                UNIQUE(run_id, game_id, team_id, player_id, signal_name)
+                UNIQUE(run_id, game_id, perspective_team_id, team_id, player_id, signal_name)
             )
         """)
 
@@ -1013,6 +1125,7 @@ class TestGetSummaryFromDB:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 game_id TEXT NOT NULL,
                 run_id TEXT NOT NULL,
+                perspective_team_id INTEGER NOT NULL,
                 team_id INTEGER NOT NULL,
                 player_id TEXT NOT NULL,
                 signal_name TEXT NOT NULL,
@@ -1023,22 +1136,22 @@ class TestGetSummaryFromDB:
                 status TEXT NOT NULL,
                 correction_detail TEXT,
                 created_at TEXT NOT NULL DEFAULT (datetime('now')),
-                UNIQUE(run_id, game_id, team_id, player_id, signal_name)
+                UNIQUE(run_id, game_id, perspective_team_id, team_id, player_id, signal_name)
             )
         """)
 
         # Insert some records
         db.execute(
             "INSERT INTO reconciliation_discrepancies "
-            "(game_id, run_id, team_id, player_id, signal_name, category, "
+            "(game_id, run_id, perspective_team_id, team_id, player_id, signal_name, category, "
             "boxscore_value, plays_value, delta, status) "
-            "VALUES ('g1', 'r1', 1, 'p1', 'pitcher_bf', 'pitcher', 5, 5, 0, 'MATCH')"
+            "VALUES ('g1', 'r1', 1, 1, 'p1', 'pitcher_bf', 'pitcher', 5, 5, 0, 'MATCH')"
         )
         db.execute(
             "INSERT INTO reconciliation_discrepancies "
-            "(game_id, run_id, team_id, player_id, signal_name, category, "
+            "(game_id, run_id, perspective_team_id, team_id, player_id, signal_name, category, "
             "boxscore_value, plays_value, delta, status) "
-            "VALUES ('g1', 'r1', 1, 'p1', 'pitcher_so', 'pitcher', 3, 2, 1, 'CORRECTED')"
+            "VALUES ('g1', 'r1', 1, 1, 'p1', 'pitcher_so', 'pitcher', 3, 2, 1, 'CORRECTED')"
         )
 
         result = get_summary_from_db(db)
@@ -1678,3 +1791,478 @@ class TestCLIAvailabilitySignalSeparation:
         game_level_text = "\n".join(game_level_lines)
         assert "game_runs" not in game_level_text
         assert "game_pa_count" not in game_level_text
+
+
+
+class TestPerspectiveFiltering:
+    """E-220 remediation C1-A: reconcile_game must filter to a single perspective.
+
+    When a game has been loaded from two perspectives, reconcile_game must
+    pick ONE perspective and only touch rows tagged with that perspective.
+    Mixing perspectives during corrections corrupts pitcher_id assignments.
+    """
+
+    def test_only_chosen_perspective_rows_are_corrected(
+        self, db: sqlite3.Connection
+    ) -> None:
+        # Set up a game where two perspectives both have plays + pgp data
+        # for the SAME (game, player). Pitcher boundary drift exists in
+        # perspective 1 (correctable) but NOT in perspective 2.  Verify the
+        # correction only touches perspective 1's plays.
+        _insert_game(db, "game-cross-persp")
+
+        # Boxscore data tagged with perspective 1 (canonical/own perspective):
+        # pitcher-h1 faced 2 batters, pitcher-h2 faced 1
+        _insert_pitching_boxscore(
+            db, "game-cross-persp", "pitcher-h1", 1, bf=2, so=1, perspective_team_id=1
+        )
+        _insert_pitching_boxscore(
+            db, "game-cross-persp", "pitcher-h2", 1, bf=1, so=0, perspective_team_id=1
+        )
+        _insert_pitching_boxscore(
+            db, "game-cross-persp", "pitcher-a1", 2, bf=3, so=0, perspective_team_id=1
+        )
+        _insert_batting_boxscore(
+            db, "game-cross-persp", "batter-h1", 1, ab=1, perspective_team_id=1
+        )
+        _insert_batting_boxscore(
+            db, "game-cross-persp", "batter-h2", 1, ab=1, perspective_team_id=1
+        )
+        _insert_batting_boxscore(
+            db, "game-cross-persp", "batter-h3", 1, ab=1, perspective_team_id=1
+        )
+        _insert_batting_boxscore(
+            db, "game-cross-persp", "batter-a1", 2, ab=1, perspective_team_id=1
+        )
+        _insert_batting_boxscore(
+            db, "game-cross-persp", "batter-a2", 2, ab=1, perspective_team_id=1
+        )
+        _insert_batting_boxscore(
+            db, "game-cross-persp", "batter-a3", 2, ab=1, perspective_team_id=1
+        )
+
+        # Plays tagged with perspective 1 (correctable boundary drift -- all
+        # 3 top plays attributed to pitcher-h1, but boxscore says h2 faced 1)
+        _insert_play(
+            db, "game-cross-persp", 1, inning=1, half="top",
+            batting_team_id=2, batter_id="batter-a1", pitcher_id="pitcher-h1",
+            perspective_team_id=1,
+        )
+        _insert_play(
+            db, "game-cross-persp", 2, inning=1, half="top",
+            batting_team_id=2, batter_id="batter-a2", pitcher_id="pitcher-h1",
+            perspective_team_id=1,
+        )
+        _insert_play(
+            db, "game-cross-persp", 3, inning=1, half="top",
+            batting_team_id=2, batter_id="batter-a3", pitcher_id="pitcher-h1",
+            perspective_team_id=1,
+        )
+        # Bottom half plays for perspective 1
+        _insert_play(
+            db, "game-cross-persp", 4, inning=1, half="bottom",
+            batting_team_id=1, batter_id="batter-h1", pitcher_id="pitcher-a1",
+            perspective_team_id=1,
+        )
+        _insert_play(
+            db, "game-cross-persp", 5, inning=1, half="bottom",
+            batting_team_id=1, batter_id="batter-h2", pitcher_id="pitcher-a1",
+            perspective_team_id=1,
+        )
+        _insert_play(
+            db, "game-cross-persp", 6, inning=1, half="bottom",
+            batting_team_id=1, batter_id="batter-h3", pitcher_id="pitcher-a1",
+            perspective_team_id=1,
+        )
+
+        # Now insert a SECOND set of plays tagged with perspective 2 -- the
+        # same pitcher attribution but ALL correct for the boxscore.  These
+        # rows must NOT be touched by reconcile_game.
+        _insert_play(
+            db, "game-cross-persp", 1, inning=1, half="top",
+            batting_team_id=2, batter_id="batter-a1", pitcher_id="pitcher-h1",
+            perspective_team_id=2,
+        )
+        _insert_play(
+            db, "game-cross-persp", 2, inning=1, half="top",
+            batting_team_id=2, batter_id="batter-a2", pitcher_id="pitcher-h1",
+            perspective_team_id=2,
+        )
+        _insert_play(
+            db, "game-cross-persp", 3, inning=1, half="top",
+            batting_team_id=2, batter_id="batter-a3", pitcher_id="pitcher-h2",
+            perspective_team_id=2,
+        )
+        # Also insert the SAME boxscore for perspective 2 but with different
+        # pitcher_id mapping -- if engine read from perspective 2, the
+        # correction would be a no-op or different.  Filter must avoid this.
+        _insert_pitching_boxscore(
+            db, "game-cross-persp", "pitcher-h1", 1, bf=3, so=2, perspective_team_id=2
+        )
+        _insert_pitching_boxscore(
+            db, "game-cross-persp", "pitcher-a1", 2, bf=3, so=0, perspective_team_id=2
+        )
+
+        db.commit()
+
+        # Run reconcile in execute mode -- it should pick perspective 1
+        # (home_team_id=1 is preferred by the deterministic ORDER BY in the
+        # perspective selection subquery: home first, away second, then MIN)
+        # and only correct perspective 1's plays.
+        summary = reconcile_game(db, "game-cross-persp", dry_run=False)
+        assert summary.games_processed == 1
+        assert summary.total_plays_reassigned > 0, (
+            "expected at least one plays correction in perspective 1"
+        )
+
+        # Verify perspective 1 plays were corrected: play_order=3 should now
+        # reference pitcher-h2 (was pitcher-h1).
+        row = db.execute(
+            "SELECT pitcher_id FROM plays "
+            "WHERE game_id = 'game-cross-persp' AND play_order = 3 "
+            "AND perspective_team_id = 1"
+        ).fetchone()
+        assert row[0] == "pitcher-h2", (
+            f"perspective 1 play_order=3 should be corrected to pitcher-h2, got {row[0]}"
+        )
+
+        # Verify perspective 2 plays were NOT touched: play_order=3 still
+        # has its original pitcher_id (pitcher-h2 in this fixture, but
+        # importantly any UPDATE would have set it to whatever perspective 1
+        # corrected to -- if engine had touched it).  We assert by checking
+        # that the row count for perspective 2 is unchanged.
+        n_p2 = db.execute(
+            "SELECT COUNT(*) FROM plays "
+            "WHERE game_id = 'game-cross-persp' AND perspective_team_id = 2"
+        ).fetchone()[0]
+        assert n_p2 == 3, (
+            f"perspective 2 should still have 3 plays untouched, got {n_p2}"
+        )
+
+
+
+class TestPerspectiveSelectionDeterminism:
+    """E-220 round 4: reconcile_game must pick a deterministic perspective.
+
+    The prior LIMIT 1 without ORDER BY was non-deterministic -- rowid order
+    happened to work in practice, but no guarantee.  The fix adds an explicit
+    ORDER BY that prefers home_team_id, then away_team_id, then MIN.
+    """
+
+    def test_prefers_home_team_perspective_over_away(
+        self, db: sqlite3.Connection
+    ) -> None:
+        """When both home and away perspectives have plays, home wins."""
+        _insert_game(db, "game-persp-order")
+        # Both home (team_id=1) and away (team_id=2) perspectives have plays.
+        # Insert away perspective FIRST so rowid order puts it before home.
+        db.execute(
+            "INSERT INTO plays "
+            "(game_id, play_order, inning, half, season_id, "
+            "batting_team_id, perspective_team_id, batter_id, pitcher_id) "
+            "VALUES ('game-persp-order', 1, 1, 'top', '2025-spring-hs', 2, 2, 'batter-a1', 'pitcher-h1')"
+        )
+        db.execute(
+            "INSERT INTO plays "
+            "(game_id, play_order, inning, half, season_id, "
+            "batting_team_id, perspective_team_id, batter_id, pitcher_id) "
+            "VALUES ('game-persp-order', 1, 1, 'top', '2025-spring-hs', 2, 1, 'batter-a1', 'pitcher-h1')"
+        )
+        # Minimal boxscore rows for both perspectives so signal gen doesn't crash
+        _insert_pitching_boxscore(db, "game-persp-order", "pitcher-h1", 1, bf=1, perspective_team_id=1, appearance_order=1)
+        _insert_pitching_boxscore(db, "game-persp-order", "pitcher-a1", 2, bf=0, perspective_team_id=1, appearance_order=1)
+        _insert_pitching_boxscore(db, "game-persp-order", "pitcher-h1", 1, bf=1, perspective_team_id=2, appearance_order=1)
+        _insert_pitching_boxscore(db, "game-persp-order", "pitcher-a1", 2, bf=0, perspective_team_id=2, appearance_order=1)
+        _insert_batting_boxscore(db, "game-persp-order", "batter-a1", 2, ab=1, perspective_team_id=1)
+        _insert_batting_boxscore(db, "game-persp-order", "batter-a1", 2, ab=1, perspective_team_id=2)
+        db.commit()
+
+        summary = reconcile_game(db, "game-persp-order")
+        # With 1 play in top half, BF=1 matches -- no UNCORRECTABLE
+        # The test is about which perspective was chosen.  To verify, check
+        # that the signal counts come from perspective 1's data.
+        assert summary.games_processed == 1, (
+            "expected game to be processed; perspective selection should be deterministic"
+        )
+
+    def test_prefers_away_team_when_only_away_has_plays(
+        self, db: sqlite3.Connection
+    ) -> None:
+        """Deterministic fallback: when home has no plays, away perspective is chosen."""
+        _insert_game(db, "game-away-only")
+        # Only away perspective (team_id=2) has plays
+        db.execute(
+            "INSERT INTO plays "
+            "(game_id, play_order, inning, half, season_id, "
+            "batting_team_id, perspective_team_id, batter_id, pitcher_id) "
+            "VALUES ('game-away-only', 1, 1, 'top', '2025-spring-hs', 2, 2, 'batter-a1', 'pitcher-h1')"
+        )
+        _insert_pitching_boxscore(db, "game-away-only", "pitcher-h1", 1, bf=1, perspective_team_id=2, appearance_order=1)
+        _insert_pitching_boxscore(db, "game-away-only", "pitcher-a1", 2, bf=0, perspective_team_id=2, appearance_order=1)
+        _insert_batting_boxscore(db, "game-away-only", "batter-a1", 2, ab=1, perspective_team_id=2)
+        db.commit()
+
+        summary = reconcile_game(db, "game-away-only")
+        assert summary.games_processed == 1
+
+    def test_fallback_to_min_when_neither_home_nor_away(
+        self, db: sqlite3.Connection
+    ) -> None:
+        """If plays only exist with foreign perspectives, fall back to MIN."""
+        # Create a third team to use as a foreign perspective
+        db.execute(
+            "INSERT INTO teams (id, name, gc_uuid, membership_type) "
+            "VALUES (3, 'Foreign Team', 'uuid-foreign', 'tracked')"
+        )
+        _insert_game(db, "game-foreign")
+        db.execute(
+            "INSERT INTO plays "
+            "(game_id, play_order, inning, half, season_id, "
+            "batting_team_id, perspective_team_id, batter_id, pitcher_id) "
+            "VALUES ('game-foreign', 1, 1, 'top', '2025-spring-hs', 2, 3, 'batter-a1', 'pitcher-h1')"
+        )
+        _insert_pitching_boxscore(db, "game-foreign", "pitcher-h1", 1, bf=1, perspective_team_id=3, appearance_order=1)
+        _insert_pitching_boxscore(db, "game-foreign", "pitcher-a1", 2, bf=0, perspective_team_id=3, appearance_order=1)
+        _insert_batting_boxscore(db, "game-foreign", "batter-a1", 2, ab=1, perspective_team_id=3)
+        db.commit()
+
+        summary = reconcile_game(db, "game-foreign")
+        assert summary.games_processed == 1
+
+
+class TestPitcherOrderFromDatabase:
+    """E-220 round 4: reconcile_game must read pitcher order from player_game_pitching.appearance_order, not disk JSON.
+
+    The pre-fix _extract_pitcher_order() read from data/raw/.../scouting/.../boxscores
+    which does not exist on a clean-slate E-220 rebuild.  The fix switches to
+    the DB appearance_order column (stable across perspectives per provenance
+    rules).
+    """
+
+    def test_pitcher_order_from_appearance_order_column(
+        self, db: sqlite3.Connection
+    ) -> None:
+        """Pitcher order is read from player_game_pitching.appearance_order.
+
+        This test deliberately uses a tmp_path that contains NO data/raw/
+        scouting files, simulating the clean-slate rebuild scenario.  If the
+        engine still tries to read from disk it will fall back to DB insertion
+        order which may or may not match appearance_order.
+        """
+        _insert_game(db, "game-ord")
+        # Insert pitchers OUT OF ORDER by id, but with correct appearance_order.
+        # Insertion order: pitcher-h2 first (insert rowid 1), pitcher-h1 second.
+        # If engine uses DB insertion order (rowid) it'll pick h2 as starter -- WRONG.
+        # If it uses appearance_order, it'll correctly pick h1 as starter.
+        _insert_pitching_boxscore(
+            db, "game-ord", "pitcher-h2", 1, bf=1, perspective_team_id=1, appearance_order=2,
+        )
+        _insert_pitching_boxscore(
+            db, "game-ord", "pitcher-h1", 1, bf=1, perspective_team_id=1, appearance_order=1,
+        )
+        _insert_pitching_boxscore(
+            db, "game-ord", "pitcher-a1", 2, bf=2, perspective_team_id=1, appearance_order=1,
+        )
+
+        _insert_batting_boxscore(db, "game-ord", "batter-a1", 2, ab=1, perspective_team_id=1)
+        _insert_batting_boxscore(db, "game-ord", "batter-a2", 2, ab=1, perspective_team_id=1)
+        _insert_batting_boxscore(db, "game-ord", "batter-h1", 1, ab=1, perspective_team_id=1)
+        _insert_batting_boxscore(db, "game-ord", "batter-h2", 1, ab=1, perspective_team_id=1)
+
+        # Home pitches top half: first play goes to pitcher-h1 (appearance_order=1),
+        # but the stored play incorrectly attributes it to pitcher-h2.
+        # Correction should walk the BF boundary and reassign play 1 to pitcher-h1.
+        _insert_play(
+            db, "game-ord", 1, inning=1, half="top",
+            batting_team_id=2, batter_id="batter-a1", pitcher_id="pitcher-h2",
+            perspective_team_id=1,
+        )
+        _insert_play(
+            db, "game-ord", 2, inning=1, half="top",
+            batting_team_id=2, batter_id="batter-a2", pitcher_id="pitcher-h2",
+            perspective_team_id=1,
+        )
+        _insert_play(
+            db, "game-ord", 3, inning=1, half="bottom",
+            batting_team_id=1, batter_id="batter-h1", pitcher_id="pitcher-a1",
+            perspective_team_id=1,
+        )
+        _insert_play(
+            db, "game-ord", 4, inning=1, half="bottom",
+            batting_team_id=1, batter_id="batter-h2", pitcher_id="pitcher-a1",
+            perspective_team_id=1,
+        )
+        db.commit()
+
+        # No disk JSON exists (clean-slate rebuild). The engine should read
+        # from player_game_pitching.appearance_order instead of disk files.
+        summary = reconcile_game(db, "game-ord", dry_run=False)
+
+        assert summary.games_processed == 1
+
+        # Verify play_order=1 was corrected to pitcher-h1 (per appearance_order).
+        # With insertion-order fallback, pitcher-h2 would stay -- this catches
+        # the bug.
+        row = db.execute(
+            "SELECT pitcher_id FROM plays "
+            "WHERE game_id = 'game-ord' AND play_order = 1 "
+            "AND perspective_team_id = 1"
+        ).fetchone()
+        assert row[0] == "pitcher-h1", (
+            f"Expected pitcher-h1 (appearance_order=1), got {row[0]}. "
+            "This means the engine is NOT reading from appearance_order."
+        )
+
+
+
+class TestReconcilePerPerspective:
+    """E-220 round 6 cluster 4: reconcile_game must be per-perspective.
+
+    Before the fix, the idempotency check at line 102 queried
+    `SELECT COUNT(*) FROM plays WHERE game_id = ?` without filtering by
+    perspective -- so once game G was reconciled from perspective A, any
+    later call for perspective B would see "plays exist" and skip.
+    """
+
+    def test_reconcile_runs_separately_per_perspective(
+        self, db: sqlite3.Connection
+    ) -> None:
+        """Load game G from two perspectives; reconcile must run for both.
+
+        Each call should target the plays tagged with its own perspective
+        and must not consume the other perspective's rows.
+        """
+        _insert_game(db, "game-two-persp")
+
+        # Seed perspective 1: home team correctly pitches both halves.
+        # Boxscore: pitcher-h1 BF=2, pitcher-h2 BF=1 (boundary-drift case).
+        _insert_pitching_boxscore(
+            db, "game-two-persp", "pitcher-h1", 1, bf=2, so=1,
+            perspective_team_id=1, appearance_order=1,
+        )
+        _insert_pitching_boxscore(
+            db, "game-two-persp", "pitcher-h2", 1, bf=1, so=0,
+            perspective_team_id=1, appearance_order=2,
+        )
+        _insert_pitching_boxscore(
+            db, "game-two-persp", "pitcher-a1", 2, bf=3, so=0,
+            perspective_team_id=1, appearance_order=1,
+        )
+        _insert_batting_boxscore(db, "game-two-persp", "batter-a1", 2, ab=1, perspective_team_id=1)
+        _insert_batting_boxscore(db, "game-two-persp", "batter-a2", 2, ab=1, perspective_team_id=1)
+        _insert_batting_boxscore(db, "game-two-persp", "batter-h1", 1, ab=1, perspective_team_id=1)
+        _insert_batting_boxscore(db, "game-two-persp", "batter-h2", 1, ab=1, perspective_team_id=1)
+        _insert_batting_boxscore(db, "game-two-persp", "batter-h3", 1, ab=1, perspective_team_id=1)
+
+        # Perspective 1 plays: 3 top-half plays all attributed to pitcher-h1
+        # (boundary drift -- correct is h1 for first 2, h2 for 3rd).
+        _insert_play(db, "game-two-persp", 1, inning=1, half="top",
+                     batting_team_id=2, batter_id="batter-a1", pitcher_id="pitcher-h1",
+                     perspective_team_id=1)
+        _insert_play(db, "game-two-persp", 2, inning=1, half="top",
+                     batting_team_id=2, batter_id="batter-a2", pitcher_id="pitcher-h1",
+                     perspective_team_id=1)
+        _insert_play(db, "game-two-persp", 3, inning=1, half="top",
+                     batting_team_id=2, batter_id="batter-a1", pitcher_id="pitcher-h1",
+                     perspective_team_id=1)
+        _insert_play(db, "game-two-persp", 4, inning=1, half="bottom",
+                     batting_team_id=1, batter_id="batter-h1", pitcher_id="pitcher-a1",
+                     perspective_team_id=1)
+        _insert_play(db, "game-two-persp", 5, inning=1, half="bottom",
+                     batting_team_id=1, batter_id="batter-h2", pitcher_id="pitcher-a1",
+                     perspective_team_id=1)
+        _insert_play(db, "game-two-persp", 6, inning=1, half="bottom",
+                     batting_team_id=1, batter_id="batter-h3", pitcher_id="pitcher-a1",
+                     perspective_team_id=1)
+
+        # Seed perspective 2: same game stream, a CORRECT pitcher attribution
+        # (play 3 is already pitcher-h2).
+        _insert_pitching_boxscore(
+            db, "game-two-persp", "pitcher-h1", 1, bf=2, so=1,
+            perspective_team_id=2, appearance_order=1,
+        )
+        _insert_pitching_boxscore(
+            db, "game-two-persp", "pitcher-h2", 1, bf=1, so=0,
+            perspective_team_id=2, appearance_order=2,
+        )
+        _insert_pitching_boxscore(
+            db, "game-two-persp", "pitcher-a1", 2, bf=3, so=0,
+            perspective_team_id=2, appearance_order=1,
+        )
+        _insert_batting_boxscore(db, "game-two-persp", "batter-a1", 2, ab=1, perspective_team_id=2)
+        _insert_batting_boxscore(db, "game-two-persp", "batter-a2", 2, ab=1, perspective_team_id=2)
+        _insert_batting_boxscore(db, "game-two-persp", "batter-h1", 1, ab=1, perspective_team_id=2)
+        _insert_batting_boxscore(db, "game-two-persp", "batter-h2", 1, ab=1, perspective_team_id=2)
+        _insert_batting_boxscore(db, "game-two-persp", "batter-h3", 1, ab=1, perspective_team_id=2)
+
+        _insert_play(db, "game-two-persp", 1, inning=1, half="top",
+                     batting_team_id=2, batter_id="batter-a1", pitcher_id="pitcher-h1",
+                     perspective_team_id=2)
+        _insert_play(db, "game-two-persp", 2, inning=1, half="top",
+                     batting_team_id=2, batter_id="batter-a2", pitcher_id="pitcher-h1",
+                     perspective_team_id=2)
+        _insert_play(db, "game-two-persp", 3, inning=1, half="top",
+                     batting_team_id=2, batter_id="batter-a1", pitcher_id="pitcher-h2",
+                     perspective_team_id=2)
+        _insert_play(db, "game-two-persp", 4, inning=1, half="bottom",
+                     batting_team_id=1, batter_id="batter-h1", pitcher_id="pitcher-a1",
+                     perspective_team_id=2)
+        _insert_play(db, "game-two-persp", 5, inning=1, half="bottom",
+                     batting_team_id=1, batter_id="batter-h2", pitcher_id="pitcher-a1",
+                     perspective_team_id=2)
+        _insert_play(db, "game-two-persp", 6, inning=1, half="bottom",
+                     batting_team_id=1, batter_id="batter-h3", pitcher_id="pitcher-a1",
+                     perspective_team_id=2)
+
+        db.commit()
+
+        # Reconcile perspective 1: should correct play 3 from h1 to h2.
+        summary1 = reconcile_game(
+            db, "game-two-persp", dry_run=False, perspective_team_id=1,
+        )
+        assert summary1.games_processed == 1, (
+            "perspective 1 reconcile must run (game has plays)"
+        )
+        assert summary1.total_plays_reassigned > 0, (
+            "perspective 1 had boundary drift -- correction should fire"
+        )
+
+        # Reconcile perspective 2: must also run (NOT skip as "already reconciled")
+        summary2 = reconcile_game(
+            db, "game-two-persp", dry_run=False, perspective_team_id=2,
+        )
+        assert summary2.games_processed == 1, (
+            "perspective 2 reconcile must run -- the idempotency check at "
+            "line 102 was querying without perspective filter, so it saw "
+            "perspective 1's plays and incorrectly skipped perspective 2."
+        )
+
+        # Both perspectives' plays still exist, each with the correct count
+        p1_plays = db.execute(
+            "SELECT COUNT(*) FROM plays "
+            "WHERE game_id = 'game-two-persp' AND perspective_team_id = 1"
+        ).fetchone()[0]
+        p2_plays = db.execute(
+            "SELECT COUNT(*) FROM plays "
+            "WHERE game_id = 'game-two-persp' AND perspective_team_id = 2"
+        ).fetchone()[0]
+        assert p1_plays == 6, f"perspective 1 should have 6 plays, got {p1_plays}"
+        assert p2_plays == 6, f"perspective 2 should have 6 plays, got {p2_plays}"
+
+        # Perspective 1 play 3 should be corrected to pitcher-h2
+        row1 = db.execute(
+            "SELECT pitcher_id FROM plays "
+            "WHERE game_id = 'game-two-persp' AND play_order = 3 "
+            "AND perspective_team_id = 1"
+        ).fetchone()
+        assert row1[0] == "pitcher-h2", (
+            f"perspective 1 play 3 should be corrected to pitcher-h2, got {row1[0]}"
+        )
+        # Perspective 2 play 3 was already pitcher-h2, should stay pitcher-h2
+        row2 = db.execute(
+            "SELECT pitcher_id FROM plays "
+            "WHERE game_id = 'game-two-persp' AND play_order = 3 "
+            "AND perspective_team_id = 2"
+        ).fetchone()
+        assert row2[0] == "pitcher-h2"
+

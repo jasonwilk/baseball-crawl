@@ -41,10 +41,6 @@ def db() -> sqlite3.Connection:
     conn.execute("PRAGMA foreign_keys=ON;")
     conn.commit()
     conn.executescript(_MIGRATION_FILE.read_text(encoding="utf-8"))
-    conn.execute("ALTER TABLE teams ADD COLUMN season_year INTEGER")
-    conn.execute("ALTER TABLE player_game_pitching ADD COLUMN appearance_order INTEGER")
-    conn.execute("ALTER TABLE games ADD COLUMN start_time TEXT")
-    conn.execute("ALTER TABLE games ADD COLUMN timezone TEXT")
     conn.commit()
     yield conn
     conn.close()
@@ -475,10 +471,10 @@ def test_unknown_player_gets_stub_row(db: sqlite3.Connection, tmp_path: Path) ->
     assert row[1] == "Unknown"
 
 
-def test_unknown_player_logs_warning(
+def test_unknown_player_logs_debug(
     db: sqlite3.Connection, tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """AC-4: WARNING is logged when a stub player row is created."""
+    """AC-4: DEBUG is logged when a stub player row is created via ensure_player_row."""
     import logging
 
     unknown_player = "player-warn-test-yyy"
@@ -496,7 +492,7 @@ def test_unknown_player_logs_warning(
     team_dir = _write_team_dir(tmp_path, boxscores={_GAME_STREAM_ID: boxscore})
     loader = _make_loader(db)
 
-    with caplog.at_level(logging.WARNING, logger="src.gamechanger.loaders.game_loader"):
+    with caplog.at_level(logging.DEBUG, logger="src.db.players"):
         loader.load_all(team_dir)
 
     assert unknown_player in caplog.text
@@ -591,7 +587,8 @@ def test_opponent_uuid_key_detected_correctly(db: sqlite3.Connection, tmp_path: 
         "SELECT team_id FROM player_game_batting WHERE player_id = ?;", (_PLAYER_OPP_1,)
     ).fetchone()
     assert row is not None
-    opp_pk = db.execute("SELECT id FROM teams WHERE gc_uuid = ?", (_OPP_TEAM_ID,)).fetchone()[0]
+    # Opponent team row has gc_uuid=NULL (E-211); query by name (UUID used as fallback name).
+    opp_pk = db.execute("SELECT id FROM teams WHERE name = ?", (_OPP_TEAM_ID,)).fetchone()[0]
     assert row[0] == opp_pk
 
 
@@ -624,7 +621,7 @@ def test_home_away_home_sets_own_team_as_home(db: sqlite3.Connection, tmp_path: 
     ).fetchone()
     assert row is not None
     own_pk = db.execute("SELECT id FROM teams WHERE gc_uuid = ?", (_OWN_TEAM_ID,)).fetchone()[0]
-    opp_pk = db.execute("SELECT id FROM teams WHERE gc_uuid = ?", (_OPP_TEAM_ID,)).fetchone()[0]
+    opp_pk = db.execute("SELECT id FROM teams WHERE name = ?", (_OPP_TEAM_ID,)).fetchone()[0]
     assert row[0] == own_pk         # home
     assert row[1] == opp_pk         # away
     assert row[2] == 7              # home score
@@ -655,7 +652,7 @@ def test_home_away_away_sets_opponent_as_home(db: sqlite3.Connection, tmp_path: 
     ).fetchone()
     assert row is not None
     own_pk = db.execute("SELECT id FROM teams WHERE gc_uuid = ?", (_OWN_TEAM_ID,)).fetchone()[0]
-    opp_pk = db.execute("SELECT id FROM teams WHERE gc_uuid = ?", (_OPP_TEAM_ID,)).fetchone()[0]
+    opp_pk = db.execute("SELECT id FROM teams WHERE name = ?", (_OPP_TEAM_ID,)).fetchone()[0]
     assert row[0] == opp_pk         # home (opponent)
     assert row[1] == own_pk         # away (own team)
     assert row[2] == 9              # home score (opponent)
@@ -970,9 +967,9 @@ def test_gc_uuid_none_no_phantom_team_row(db: sqlite3.Connection, tmp_path: Path
     assert row is not None, "Own team batting row should exist"
     assert row[0] == pk, f"Expected team_id={pk} (own team), got {row[0]}"
 
-    # (c) Opponent team row created normally via _ensure_team_row
+    # (c) Opponent team row created normally via _ensure_team_row (gc_uuid=NULL, name=UUID fallback)
     opp_row = db.execute(
-        "SELECT id FROM teams WHERE gc_uuid = ?", (_OPP_TEAM_ID,)
+        "SELECT id FROM teams WHERE name = ?", (_OPP_TEAM_ID,)
     ).fetchone()
     assert opp_row is not None, "Opponent team row should be created via _ensure_team_row"
 
@@ -1561,8 +1558,9 @@ def test_load_all_creates_opponent_row_with_name_from_opponents_json(
 
     loader.load_all(team_dir)
 
+    # Opponent row has gc_uuid=NULL (E-211); find by name.
     row = db.execute(
-        "SELECT name FROM teams WHERE gc_uuid = ?", (_OPP_TEAM_ID,)
+        "SELECT name FROM teams WHERE name = ?", (_OPP_NAME,)
     ).fetchone()
     assert row is not None
     assert row[0] == _OPP_NAME, f"Expected '{_OPP_NAME}', got {row[0]!r}"
@@ -1588,8 +1586,9 @@ def test_load_all_creates_opponent_row_with_name_from_schedule_fallback(
 
     loader.load_all(team_dir)
 
+    # Opponent row has gc_uuid=NULL (E-211); find by name.
     row = db.execute(
-        "SELECT name FROM teams WHERE gc_uuid = ?", (_OPP_TEAM_ID,)
+        "SELECT name FROM teams WHERE name = ?", (_OPP_NAME,)
     ).fetchone()
     assert row is not None
     assert row[0] == _OPP_NAME
@@ -1606,41 +1605,50 @@ def test_load_all_falls_back_to_uuid_when_opponents_json_absent(
     result = loader.load_all(team_dir)
 
     assert result.errors == 0
+    # Opponent row has gc_uuid=NULL (E-211); UUID string is used as name fallback.
     row = db.execute(
-        "SELECT name FROM teams WHERE gc_uuid = ?", (_OPP_TEAM_ID,)
+        "SELECT name FROM teams WHERE name = ?", (_OPP_TEAM_ID,)
     ).fetchone()
     assert row is not None
     assert row[0] == _OPP_TEAM_ID  # UUID used as name (fallback)
 
 
-def test_load_all_self_heals_uuid_stub_on_reload(
+def test_load_all_with_opponents_json_creates_named_row(
     db: sqlite3.Connection, tmp_path: Path
 ) -> None:
-    """AC-4: Re-running load_all() with opponents.json updates existing UUID-stub names."""
-    # First load: no opponents.json → UUID-stub created.
+    """Re-running load_all() with opponents.json creates a named opponent row.
+
+    E-211: Since gc_uuid=None is passed for opponents, name-based dedup applies.
+    First load without opponents.json creates a row with UUID as name.
+    Second load with opponents.json creates a new row with the real name
+    (different name = different team row under name-based dedup).
+    """
+    # First load: no opponents.json → UUID-stub created (gc_uuid=NULL, name=UUID).
     boxscore = _make_boxscore()
     team_dir = _write_team_dir(tmp_path, boxscores={_GAME_STREAM_ID: boxscore})
     loader = _make_loader(db)
     loader.load_all(team_dir)
 
     stub_row = db.execute(
-        "SELECT id, name FROM teams WHERE gc_uuid = ?", (_OPP_TEAM_ID,)
+        "SELECT id, name FROM teams WHERE name = ?", (_OPP_TEAM_ID,)
     ).fetchone()
     assert stub_row is not None
     assert stub_row[1] == _OPP_TEAM_ID, "First load without opponents.json should create UUID-stub"
 
-    # Second load: with opponents.json → stub should be healed.
+    # Second load: with opponents.json → creates a new row with real name.
     _write_opponents_json(team_dir)
     loader.load_all(team_dir)
 
-    updated = db.execute(
-        "SELECT name FROM teams WHERE id = ?", (stub_row[0],)
+    named_row = db.execute(
+        "SELECT id, name FROM teams WHERE name = ?", (_OPP_NAME,)
     ).fetchone()
-    assert updated[0] == _OPP_NAME, f"Expected stub name to be updated to '{_OPP_NAME}', got {updated[0]!r}"
+    assert named_row is not None, f"Expected row with name '{_OPP_NAME}'"
+    assert named_row[0] != stub_row[0], "Named row should be distinct from UUID-stub row"
 
 
 def test_load_file_uses_opponent_name(db: sqlite3.Connection, tmp_path: Path) -> None:
     """load_file() accepts opponent_name and uses it for the team row."""
+    _ensure_season(db)
     loader = _make_loader(db)
     boxscore = _make_boxscore()
     bs_path = _write_boxscore(tmp_path, boxscore)
@@ -1648,8 +1656,9 @@ def test_load_file_uses_opponent_name(db: sqlite3.Connection, tmp_path: Path) ->
 
     loader.load_file(bs_path, summary, opponent_name="Provided Opponent Name")
 
+    # Opponent row has gc_uuid=NULL (E-211); find by name.
     row = db.execute(
-        "SELECT name FROM teams WHERE gc_uuid = ?", (_OPP_TEAM_ID,)
+        "SELECT name FROM teams WHERE name = ?", ("Provided Opponent Name",)
     ).fetchone()
     assert row is not None
     assert row[0] == "Provided Opponent Name"
@@ -2097,3 +2106,219 @@ def test_appearance_order_in_dataclass() -> None:
     # Default is None
     p_default = _PlayerPitching(player_id="test-player-2")
     assert p_default.appearance_order is None
+
+
+# ---------------------------------------------------------------------------
+# E-220-02: Perspective tagging
+# ---------------------------------------------------------------------------
+
+
+def test_batting_rows_have_perspective_team_id(db: sqlite3.Connection, tmp_path: Path) -> None:
+    """AC-1: Every batting row has perspective_team_id set to owned_team_ref.id."""
+    boxscore = _make_boxscore()
+    team_dir = _write_team_dir(tmp_path, boxscores={_GAME_STREAM_ID: boxscore})
+    loader = _make_loader(db)
+    own_pk = db.execute("SELECT id FROM teams WHERE gc_uuid = ?", (_OWN_TEAM_ID,)).fetchone()[0]
+
+    loader.load_all(team_dir)
+
+    rows = db.execute(
+        "SELECT perspective_team_id FROM player_game_batting WHERE game_id = ?",
+        (_EVENT_ID,),
+    ).fetchall()
+    assert len(rows) == 2  # own + opp batter
+    for row in rows:
+        assert row[0] == own_pk, f"Expected perspective_team_id={own_pk}, got {row[0]}"
+
+
+def test_pitching_rows_have_perspective_team_id(db: sqlite3.Connection, tmp_path: Path) -> None:
+    """AC-1: Every pitching row has perspective_team_id set to owned_team_ref.id."""
+    boxscore = _make_boxscore()
+    team_dir = _write_team_dir(tmp_path, boxscores={_GAME_STREAM_ID: boxscore})
+    loader = _make_loader(db)
+    own_pk = db.execute("SELECT id FROM teams WHERE gc_uuid = ?", (_OWN_TEAM_ID,)).fetchone()[0]
+
+    loader.load_all(team_dir)
+
+    rows = db.execute(
+        "SELECT perspective_team_id FROM player_game_pitching WHERE game_id = ?",
+        (_EVENT_ID,),
+    ).fetchall()
+    assert len(rows) == 2  # own + opp pitcher
+    for row in rows:
+        assert row[0] == own_pk, f"Expected perspective_team_id={own_pk}, got {row[0]}"
+
+
+def test_two_perspectives_create_separate_stat_rows(db: sqlite3.Connection, tmp_path: Path) -> None:
+    """AC-2: Same game from two perspectives creates separate batting/pitching rows."""
+    from src.gamechanger.types import TeamRef
+
+    _ensure_season(db)
+    boxscore = _make_boxscore()
+
+    # Team A loads the game
+    pk_a = _insert_own_team(db, gc_uuid="team-perspective-a", public_id="slug-a")
+    loader_a = GameLoader(
+        db, owned_team_ref=TeamRef(id=pk_a, gc_uuid="team-perspective-a", public_id="slug-a"),
+    )
+    bs_path = _write_boxscore(tmp_path, boxscore, game_stream_id="game-persp")
+    summary = _make_summary(game_stream_id="game-persp")
+    loader_a.load_file(bs_path, summary)
+
+    # Team B loads the same game
+    pk_b = _insert_own_team(db, gc_uuid="team-perspective-b", public_id="slug-b")
+    loader_b = GameLoader(
+        db, owned_team_ref=TeamRef(id=pk_b, gc_uuid="team-perspective-b", public_id="slug-b"),
+    )
+    loader_b.load_file(bs_path, summary)
+
+    # Should have 4 batting rows (2 per perspective) and 4 pitching rows
+    batting_count = db.execute(
+        "SELECT COUNT(*) FROM player_game_batting WHERE game_id = ?", (_EVENT_ID,)
+    ).fetchone()[0]
+    pitching_count = db.execute(
+        "SELECT COUNT(*) FROM player_game_pitching WHERE game_id = ?", (_EVENT_ID,)
+    ).fetchone()[0]
+    assert batting_count == 4, f"Expected 4 batting rows (2 perspectives x 2 players), got {batting_count}"
+    assert pitching_count == 4, f"Expected 4 pitching rows (2 perspectives x 2 players), got {pitching_count}"
+
+    # Verify different perspective_team_id values
+    perspectives = db.execute(
+        "SELECT DISTINCT perspective_team_id FROM player_game_batting WHERE game_id = ?",
+        (_EVENT_ID,),
+    ).fetchall()
+    assert len(perspectives) == 2
+    assert {r[0] for r in perspectives} == {pk_a, pk_b}
+
+
+def test_game_perspectives_row_inserted(db: sqlite3.Connection, tmp_path: Path) -> None:
+    """AC-3: game_perspectives row exists after loading a game."""
+    boxscore = _make_boxscore()
+    team_dir = _write_team_dir(tmp_path, boxscores={_GAME_STREAM_ID: boxscore})
+    loader = _make_loader(db)
+    own_pk = db.execute("SELECT id FROM teams WHERE gc_uuid = ?", (_OWN_TEAM_ID,)).fetchone()[0]
+
+    loader.load_all(team_dir)
+
+    row = db.execute(
+        "SELECT game_id, perspective_team_id FROM game_perspectives WHERE game_id = ? AND perspective_team_id = ?",
+        (_EVENT_ID, own_pk),
+    ).fetchone()
+    assert row is not None, "Expected game_perspectives row for this game and perspective"
+    assert row[0] == _EVENT_ID
+    assert row[1] == own_pk
+
+
+def test_opp_data_same_perspective_as_own_data(db: sqlite3.Connection, tmp_path: Path) -> None:
+    """AC-5: Both own_data and opp_data rows carry the same perspective_team_id."""
+    boxscore = _make_boxscore()
+    team_dir = _write_team_dir(tmp_path, boxscores={_GAME_STREAM_ID: boxscore})
+    loader = _make_loader(db)
+    own_pk = db.execute("SELECT id FROM teams WHERE gc_uuid = ?", (_OWN_TEAM_ID,)).fetchone()[0]
+
+    loader.load_all(team_dir)
+
+    own_persp = db.execute(
+        "SELECT perspective_team_id FROM player_game_batting WHERE player_id = ?",
+        (_PLAYER_OWN_1,),
+    ).fetchone()[0]
+    opp_persp = db.execute(
+        "SELECT perspective_team_id FROM player_game_batting WHERE player_id = ?",
+        (_PLAYER_OPP_1,),
+    ).fetchone()[0]
+    assert own_persp == own_pk
+    assert opp_persp == own_pk
+    assert own_persp == opp_persp, "Both sides should have the same perspective_team_id"
+
+
+def test_load_all_perspective_uses_member_team_pk(db: sqlite3.Connection, tmp_path: Path) -> None:
+    """AC-6: load_all() sets perspective_team_id to the member team's integer PK."""
+    boxscore = _make_boxscore()
+    team_dir = _write_team_dir(tmp_path, boxscores={_GAME_STREAM_ID: boxscore})
+    loader = _make_loader(db)
+    own_pk = db.execute("SELECT id FROM teams WHERE gc_uuid = ?", (_OWN_TEAM_ID,)).fetchone()[0]
+
+    loader.load_all(team_dir)
+
+    rows = db.execute(
+        "SELECT DISTINCT perspective_team_id FROM player_game_batting WHERE game_id = ?",
+        (_EVENT_ID,),
+    ).fetchall()
+    assert len(rows) == 1
+    assert rows[0][0] == own_pk
+
+
+def test_dedup_game_perspective_uses_canonical_id(db: sqlite3.Connection, tmp_path: Path) -> None:
+    """AC-7: When _find_duplicate_game redirects to canonical game_id,
+    game_perspectives uses the canonical game_id.
+
+    Simulates the same physical game loaded twice with different event_ids
+    from the same team perspective (e.g., crawled via schedule and then
+    via game-summaries with a different event_id).
+    """
+    _ensure_season(db)
+
+    loader = _make_loader(db)
+    own_pk = db.execute("SELECT id FROM teams WHERE gc_uuid = ?", (_OWN_TEAM_ID,)).fetchone()[0]
+
+    # First load: creates game with event_id "event-canonical"
+    summary_a = _make_summary(
+        event_id="event-canonical",
+        game_stream_id="stream-canon-a",
+    )
+    boxscore = _make_boxscore()
+    bs_path_a = _write_boxscore(tmp_path, boxscore, game_stream_id="stream-canon-a")
+    loader.load_file(bs_path_a, summary_a)
+
+    # Verify canonical game exists
+    game_row = db.execute(
+        "SELECT game_id FROM games WHERE game_id = ?", ("event-canonical",)
+    ).fetchone()
+    assert game_row is not None
+
+    # Second load: different event_id, same date/teams/score → dedup redirects to canonical
+    summary_b = _make_summary(
+        event_id="event-duplicate",
+        game_stream_id="stream-canon-b",
+    )
+    bs_path_b = _write_boxscore(tmp_path, boxscore, game_stream_id="stream-canon-b")
+    loader.load_file(bs_path_b, summary_b)
+
+    # game_perspectives should reference the canonical game_id
+    persp_rows = db.execute(
+        "SELECT game_id, perspective_team_id FROM game_perspectives WHERE perspective_team_id = ?",
+        (own_pk,),
+    ).fetchall()
+    assert len(persp_rows) == 1, f"Expected 1 game_perspectives row (idempotent), got {len(persp_rows)}"
+    assert persp_rows[0][0] == "event-canonical", (
+        f"Expected canonical game_id in game_perspectives, got {persp_rows[0][0]}"
+    )
+
+    # No game row should exist for the duplicate event_id
+    dup_game = db.execute(
+        "SELECT game_id FROM games WHERE game_id = ?", ("event-duplicate",)
+    ).fetchone()
+    assert dup_game is None, "Duplicate event_id should not create a separate game row"
+
+
+def test_on_conflict_uses_three_column_unique(db: sqlite3.Connection, tmp_path: Path) -> None:
+    """AC-8: ON CONFLICT clauses use (game_id, player_id, perspective_team_id).
+
+    Loading same data twice with same perspective is idempotent (no duplicates).
+    """
+    boxscore = _make_boxscore()
+    team_dir = _write_team_dir(tmp_path, boxscores={_GAME_STREAM_ID: boxscore})
+    loader = _make_loader(db)
+
+    loader.load_all(team_dir)
+    loader.load_all(team_dir)
+
+    batting_count = db.execute(
+        "SELECT COUNT(*) FROM player_game_batting WHERE game_id = ?", (_EVENT_ID,)
+    ).fetchone()[0]
+    pitching_count = db.execute(
+        "SELECT COUNT(*) FROM player_game_pitching WHERE game_id = ?", (_EVENT_ID,)
+    ).fetchone()[0]
+    # 2 batting (own + opp) and 2 pitching (own + opp) -- no duplicates
+    assert batting_count == 2
+    assert pitching_count == 2

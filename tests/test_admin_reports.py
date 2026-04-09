@@ -375,23 +375,23 @@ def _seed_full_team_data(db_path: Path, team_id: int) -> dict:
         (game_id, season_id, team_id, opp_id),
     )
     conn.execute(
-        "INSERT INTO player_game_batting (game_id, player_id, team_id) VALUES (?, 'player1', ?)",
-        (game_id, team_id),
+        "INSERT INTO player_game_batting (game_id, player_id, team_id, perspective_team_id) VALUES (?, 'player1', ?, ?)",
+        (game_id, team_id, team_id),
     )
     conn.execute(
-        "INSERT INTO player_game_pitching (game_id, player_id, team_id) VALUES (?, 'player1', ?)",
-        (game_id, team_id),
+        "INSERT INTO player_game_pitching (game_id, player_id, team_id, perspective_team_id) VALUES (?, 'player1', ?, ?)",
+        (game_id, team_id, team_id),
     )
     conn.execute(
-        "INSERT INTO spray_charts (game_id, team_id, player_id, season_id, chart_type, x, y) "
-        "VALUES (?, ?, 'player1', ?, 'offensive', 100, 200)",
-        (game_id, team_id, season_id),
+        "INSERT INTO spray_charts (game_id, team_id, player_id, season_id, chart_type, x, y, perspective_team_id) "
+        "VALUES (?, ?, 'player1', ?, 'offensive', 100, 200, ?)",
+        (game_id, team_id, season_id, team_id),
     )
 
     cursor = conn.execute(
         "INSERT INTO plays (game_id, play_order, inning, half, season_id, "
-        "batting_team_id, batter_id, pitcher_id) VALUES (?, 1, 1, 'top', ?, ?, 'player1', 'player1')",
-        (game_id, season_id, team_id),
+        "batting_team_id, perspective_team_id, batter_id, pitcher_id) VALUES (?, 1, 1, 'top', ?, ?, ?, 'player1', 'player1')",
+        (game_id, season_id, team_id, team_id),
     )
     play_id = cursor.lastrowid
     conn.execute(
@@ -400,9 +400,9 @@ def _seed_full_team_data(db_path: Path, team_id: int) -> dict:
     )
 
     conn.execute(
-        "INSERT INTO reconciliation_discrepancies (game_id, run_id, team_id, player_id, "
-        "signal_name, category, status) VALUES (?, 'run1', ?, 'player1', 'bf', 'pitching', 'MATCH')",
-        (game_id, team_id),
+        "INSERT INTO reconciliation_discrepancies (game_id, run_id, perspective_team_id, team_id, player_id, "
+        "signal_name, category, status) VALUES (?, 'run1', ?, ?, 'player1', 'bf', 'pitching', 'MATCH')",
+        (game_id, team_id, team_id),
     )
     conn.execute(
         "INSERT INTO scouting_runs (team_id, season_id, run_type, started_at, status) "

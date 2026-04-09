@@ -18,7 +18,9 @@ Subsystem-specific implementation details. For general architecture principles a
 
 ## Scouting Pipeline
 
-Five stages: (1) scouting crawl (`ScoutingCrawler` -- schedules, rosters, boxscores), (2) scouting load (`ScoutingLoader` -- aggregate boxscores into season stats), (3) gc_uuid resolution (resolve `public_id` → `gc_uuid` via `POST /search` for spray chart access), (4) spray crawl (`SprayChartCrawler`), (5) spray load (`SprayChartLoader`). Source files: `src/gamechanger/crawlers/scouting.py`, `src/gamechanger/loaders/scouting_loader.py`, `src/pipeline/trigger.py` (web), `src/cli/data.py` (CLI).
+Five stages: (1) scouting crawl (`ScoutingCrawler` -- schedules, rosters, boxscores), (2) scouting load (`ScoutingLoader` -- aggregate boxscores into season stats), (3) gc_uuid resolution (resolve `public_id` → `gc_uuid` via `POST /search` for spray chart access), (4) spray crawl (`ScoutingSprayChartCrawler`), (5) spray load (`ScoutingSprayChartLoader`). Source files: `src/gamechanger/crawlers/scouting.py`, `src/gamechanger/crawlers/scouting_spray.py`, `src/gamechanger/loaders/scouting_loader.py`, `src/gamechanger/loaders/scouting_spray_loader.py`, `src/pipeline/trigger.py` (web), `src/cli/data.py` (CLI).
+
+**In-memory crawl-to-load**: Scouting crawlers return data in-memory (dataclasses/dicts) directly to loaders -- no disk intermediary (`data/raw/` files) for the scouting or spray stages. Game IDs come from crawl results, not filesystem globs. This eliminates stale-file contamination across runs. The own-team (member) pipeline retains disk caching because its crawl and load are separate CLI invocations. See `.claude/rules/perspective-provenance.md` for the full perspective tagging invariant.
 
 ## Background Pipeline Trigger
 
@@ -61,6 +63,8 @@ The filesystem path (`data/raw/{season_slug}/teams/{uuid}/`) is for file organiz
 ## Reports Package
 
 `src/reports/` is a self-contained package for standalone report generation. `generator.py` orchestrates crawl→load→gc_uuid resolve→spray crawl→spray load→plays crawl→plays load→reconciliation→query→render→write; `renderer.py` produces self-contained HTML files written to `data/reports/`. The plays stage is non-fatal (auth expiry caught, per-game error isolation). The reports serving route (`/reports/{slug}`) requires no authentication and is separate from the dashboard.
+
+**In-memory crawl-to-load**: The report generator's scouting and spray stages use in-memory data flow (crawlers return data directly to loaders). Game discovery comes from crawl results, not filesystem globs or file-existence checks. This mirrors the scouting pipeline's in-memory pattern. See `.claude/rules/perspective-provenance.md`.
 
 **Standalone report JS conventions**: Reports are self-contained HTML files with embedded `<script>` blocks for client-side enhancements (e.g., relative date display). JS in reports uses `var` (not `let`/`const`), targets elements by CSS class, and degrades gracefully (static content remains readable if JS fails).
 

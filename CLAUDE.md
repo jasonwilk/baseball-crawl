@@ -116,6 +116,7 @@ After changing `src/`, `migrations/`, `Dockerfile`, `docker-compose.yml`, or `re
 - **Pipeline caller convention**: `crawl.run()` and `load.run()` default to `source="yaml"`. For per-team DB-backed filtering, callers MUST pass `source="db"` AND `team_ids=[team_id]`. Omitting either silently processes wrong teams.
 - **Shared query functions**: When both dashboard and reports need the same data, the query logic lives in a shared function in `src/api/db.py`. New cross-surface data needs should follow this pattern.
 - **Prevention over cleanup**: Prefer preventing bad data at insert time over building cleanup tools after the fact. Example: `GameLoader._find_duplicate_game()` deduplicates cross-perspective games using a natural key (`game_date` + unordered `{home_team_id, away_team_id}`) before insertion, avoiding the need for post-hoc dedup.
+- **Perspective provenance**: Every per-player stat INSERT must include `perspective_team_id` (the team whose API call produced the data). Scouting and reports pipelines use in-memory crawl-to-load (no disk intermediary). See `.claude/rules/perspective-provenance.md` for the full invariant, field classification, and code review checklist.
 - See `.claude/rules/architecture-subsystems.md` for subsystem implementation details (plays, spray, reconciliation, LLM, reports, charts, pipelines, two-tier enrichment).
 
 See `.claude/rules/scouting-data-flows.md` for opponent flow vs. reports flow comparison, naming conventions, and feature parity principle.

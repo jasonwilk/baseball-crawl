@@ -546,12 +546,13 @@ def _run_spray_stages(
     public_id: str,
     gc_uuid: str | None,
     season_id: str | None,
+    games_data: list[dict] | None,
 ) -> None:
     """Run spray chart crawl + load for a scouted team (non-fatal).
 
-    If gc_uuid is None, both stages are skipped with an INFO log.
-    Any exception is logged at WARNING and swallowed -- spray data is
-    additive enrichment that must not fail the overall scouting sync.
+    If gc_uuid is None or games_data is empty, both stages are skipped with
+    an INFO log.  Any exception is logged at WARNING and swallowed -- spray
+    data is additive enrichment that must not fail the overall scouting sync.
 
     Args:
         conn: Open SQLite connection.
@@ -560,24 +561,31 @@ def _run_spray_stages(
         public_id: The team's public_id slug.
         gc_uuid: The team's gc_uuid (may be None).
         season_id: Season to scope spray crawl/load (may be None).
+        games_data: In-memory games list from the parent scouting crawl.
+            REQUIRED -- E-220 C2-B removed the legacy disk fallback.
     """
     if not gc_uuid:
         logger.info(
             "Spray stages skipped for team_id=%d: no gc_uuid available.", team_id
         )
         return
+    if not games_data:
+        logger.info(
+            "Spray stages skipped for team_id=%d: no games_data provided.", team_id
+        )
+        return
 
-    # Spray crawl
+    # Spray crawl (in-memory -- E-220 C2-B)
     try:
-        spray_crawler = ScoutingSprayChartCrawler(client, conn, data_root=_DATA_ROOT)
+        spray_crawler = ScoutingSprayChartCrawler(client, conn)
         spray_result = spray_crawler.crawl_team(
-            public_id, season_id=season_id, gc_uuid=gc_uuid
+            public_id, games_data=games_data, season_id=season_id, gc_uuid=gc_uuid,
         )
         logger.info(
-            "Spray crawl done: team_id=%d written=%d skipped=%d errors=%d",
+            "Spray crawl done: team_id=%d crawled=%d skipped=%d errors=%d",
             team_id,
-            spray_result.files_written,
-            spray_result.files_skipped,
+            spray_result.games_crawled,
+            spray_result.games_skipped,
             spray_result.errors,
         )
     except Exception:  # noqa: BLE001
@@ -595,13 +603,12 @@ def _run_spray_stages(
         )
         return
 
-    # Spray load
+    # Spray load (in-memory -- E-220-10)
     try:
         spray_loader = ScoutingSprayChartLoader(conn)
-        spray_load_result = spray_loader.load_all(
-            _DATA_ROOT,
+        spray_load_result = spray_loader.load_from_data(
+            spray_result.spray_data,
             public_id=public_id,
-            season_id=season_id,
         )
         if spray_load_result.errors:
             logger.warning(
@@ -678,55 +685,32 @@ def run_scouting_sync(team_id: int, public_id: str, crawl_job_id: int) -> None:
             crawler = ScoutingCrawler(client, conn)
             loader = ScoutingLoader(conn)
 
-            # Crawl phase.
+            # Crawl phase (in-memory -- E-220-05).
             crawl_result = crawler.scout_team(public_id)
             logger.info(
-                "Scouting crawl done: public_id=%s files_written=%d files_skipped=%d errors=%d",
+                "Scouting crawl done: public_id=%s games_crawled=%d errors=%d",
                 public_id,
-                crawl_result.files_written,
-                crawl_result.files_skipped,
+                crawl_result.games_crawled,
                 crawl_result.errors,
             )
 
             # No completed games -- treat as a successful "nothing to do" sync.
-            if crawl_result.files_skipped > 0 and crawl_result.errors == 0 and crawl_result.files_written == 0:
+            if crawl_result.skipped and crawl_result.errors == 0:
                 _mark_job_terminal(conn, crawl_job_id, "completed", None)
                 _update_last_synced(conn, team_id)
                 logger.info("Scouting sync: no games to scout for public_id=%s; marked completed.", public_id)
                 return
 
-            # Crawl errors with no files written -- no scouting_run row created.
-            if crawl_result.errors > 0 and crawl_result.files_written == 0:
+            # Crawl errors with no data -- no scouting_run row created.
+            if crawl_result.errors > 0 and crawl_result.games_crawled == 0:
                 _mark_job_terminal(conn, crawl_job_id, "failed", "Crawl failed (schedule or roster unavailable)")
                 return
 
-            # Crawl succeeded -- find the scouting_run row the crawler created.
-            run_row = conn.execute(
-                "SELECT season_id FROM scouting_runs "
-                "WHERE team_id = ? AND status IN ('running', 'completed') AND last_checked >= ? "
-                "ORDER BY last_checked DESC LIMIT 1",
-                (team_id, started_at),
-            ).fetchone()
+            season_id: str = crawl_result.season_id
 
-            if run_row is None:
-                logger.warning(
-                    "No scouting_run found after crawl for team_id=%d; marking failed.", team_id
-                )
-                _mark_job_terminal(conn, crawl_job_id, "failed", "Scouting run not found after crawl")
-                return
-
-            season_id: str = run_row[0]
-            scouting_dir = _DATA_ROOT / season_id / "scouting" / public_id
-
-            if not scouting_dir.is_dir():
-                logger.warning("Scouting dir not found at %s; marking failed.", scouting_dir)
-                crawler.update_run_load_status(team_id, season_id, "failed")
-                _mark_job_terminal(conn, crawl_job_id, "failed", "Scouting directory not found")
-                return
-
-            # Load phase.
+            # Load phase (in-memory -- E-220-05).
             try:
-                load_result = loader.load_team(scouting_dir, team_id, season_id)
+                load_result = loader.load_team(crawl_result)
             except Exception as exc:  # noqa: BLE001
                 logger.error("Load failed for public_id=%s: %s", public_id, exc)
                 crawler.update_run_load_status(team_id, season_id, "failed")
@@ -746,7 +730,8 @@ def run_scouting_sync(team_id: int, public_id: str, crawl_job_id: int) -> None:
                 # 3. Spray chart enrichment (non-fatal; job stays "completed").
                 gc_uuid = _resolve_team_gc_uuid(conn, team_id, public_id, client)
                 _run_spray_stages(
-                    conn, client, team_id, public_id, gc_uuid, season_id
+                    conn, client, team_id, public_id, gc_uuid, season_id,
+                    games_data=crawl_result.games,
                 )
 
                 # 4. Post-spray dedup sweep (Hook 2).

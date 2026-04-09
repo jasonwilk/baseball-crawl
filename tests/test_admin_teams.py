@@ -1467,8 +1467,8 @@ def _insert_spray_chart_for_team(db_path: Path, team_id: int) -> None:
     conn = sqlite3.connect(str(db_path))
     conn.execute("PRAGMA foreign_keys=ON;")
     conn.execute(
-        "INSERT INTO spray_charts (team_id, chart_type) VALUES (?, ?)",
-        (team_id, "offensive"),
+        "INSERT INTO spray_charts (team_id, chart_type, perspective_team_id) VALUES (?, ?, ?)",
+        (team_id, "offensive", team_id),
     )
     conn.commit()
     conn.close()

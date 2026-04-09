@@ -174,4 +174,10 @@ assemble_prompt() {
 # ---------------------------------------------------------------------------
 # Run Codex spec review
 # ---------------------------------------------------------------------------
-assemble_prompt | codex exec --ephemeral -
+# On Ubuntu 24.04 devcontainers, bubblewrap sandboxing fails (AppArmor
+# restricts unprivileged user namespaces). Set CODEX_SANDBOX_OFF=1 to bypass.
+CODEX_SANDBOX_ARGS=()
+if [[ "${CODEX_SANDBOX_OFF:-}" == "1" ]]; then
+    CODEX_SANDBOX_ARGS=(--sandbox danger-full-access)
+fi
+assemble_prompt | codex exec --ephemeral "${CODEX_SANDBOX_ARGS[@]}" -

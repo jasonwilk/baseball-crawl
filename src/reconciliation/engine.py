@@ -12,13 +12,10 @@ import logging
 import sqlite3
 import uuid
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
-_PROJECT_ROOT = Path(__file__).resolve().parents[2]
-_DATA_ROOT = _PROJECT_ROOT / "data" / "raw"
 
 # Outcome sets used for plays-side derivation
 _HIT_OUTCOMES = frozenset({"Single", "Double", "Triple", "Home Run"})
@@ -64,9 +61,17 @@ class ReconciliationSummary:
 
 @dataclass
 class _Discrepancy:
-    """Internal representation of a single discrepancy row."""
+    """Internal representation of a single discrepancy row.
+
+    E-220 round 7 P1-2: ``perspective_team_id`` is the team whose API call
+    produced the data under reconciliation; ``team_id`` is the participant
+    team (home or away) the signal is scoped to.  Both are required so
+    cross-perspective discrepancies for the same game do not collide on
+    the UNIQUE key.
+    """
 
     game_id: str
+    perspective_team_id: int
     team_id: int
     player_id: str
     signal_name: str
@@ -83,6 +88,8 @@ def reconcile_game(
     game_id: str,
     dry_run: bool = True,
     run_id: str | None = None,
+    *,
+    perspective_team_id: int | None = None,
 ) -> ReconciliationSummary:
     """Run reconciliation detection for a single game.
 
@@ -91,6 +98,12 @@ def reconcile_game(
         game_id: The game to reconcile.
         dry_run: If True (default), only detect and log -- no corrections.
         run_id: UUID for this batch run.  Generated if not provided.
+        perspective_team_id: E-220 round 6 cluster 4.  When provided,
+            restricts reconciliation to the given perspective (target team
+            for report generation, or explicit operator selection).  The
+            idempotency check and perspective selection honor this value.
+            When ``None``, uses the deterministic home-first preference
+            for backwards compatibility with existing callers.
 
     Returns:
         ReconciliationSummary with signal match counts.
@@ -100,12 +113,25 @@ def reconcile_game(
 
     summary = ReconciliationSummary()
 
-    # Check if plays data exists for this game
-    plays_count = conn.execute(
-        "SELECT COUNT(*) FROM plays WHERE game_id = ?", (game_id,)
-    ).fetchone()[0]
+    # E-220 round 6 cluster 4: the idempotency check is per-perspective.
+    # Before the fix, this was `WHERE game_id = ?` only, so once any
+    # perspective of a game had plays, subsequent reconcile calls for
+    # OTHER perspectives skipped as if already processed.
+    if perspective_team_id is not None:
+        plays_count = conn.execute(
+            "SELECT COUNT(*) FROM plays WHERE game_id = ? AND perspective_team_id = ?",
+            (game_id, perspective_team_id),
+        ).fetchone()[0]
+    else:
+        plays_count = conn.execute(
+            "SELECT COUNT(*) FROM plays WHERE game_id = ?", (game_id,)
+        ).fetchone()[0]
     if plays_count == 0:
-        logger.warning("No plays data for game_id=%s; skipping reconciliation.", game_id)
+        logger.warning(
+            "No plays data for game_id=%s%s; skipping reconciliation.",
+            game_id,
+            f" perspective={perspective_team_id}" if perspective_team_id is not None else "",
+        )
         summary.games_skipped_no_plays = 1
         return summary
 
@@ -123,22 +149,61 @@ def reconcile_game(
 
     season_id, home_team_id, away_team_id, game_stream_id, game_home_score, game_away_score = game_row
 
+    # E-220: pick a single perspective for the entire reconciliation pass.
+    # Round 6 cluster 4: when perspective_team_id is provided, use it
+    # directly (report-path and operator-scoped reconcile).  Otherwise fall
+    # back to the home-first deterministic selection.
+    if perspective_team_id is not None:
+        # Verify the requested perspective actually has plays for this game.
+        perspective_row = conn.execute(
+            "SELECT perspective_team_id FROM plays "
+            "WHERE game_id = ? AND perspective_team_id = ? LIMIT 1",
+            (game_id, perspective_team_id),
+        ).fetchone()
+    else:
+        perspective_row = conn.execute(
+            """
+            SELECT COALESCE(
+                (SELECT perspective_team_id FROM plays
+                  WHERE game_id = ? AND perspective_team_id IN (?, ?)
+                  ORDER BY CASE perspective_team_id
+                      WHEN ? THEN 0
+                      WHEN ? THEN 1
+                      ELSE 2
+                  END, perspective_team_id
+                  LIMIT 1),
+                (SELECT MIN(perspective_team_id) FROM plays WHERE game_id = ?)
+            )
+            """,
+            (game_id, home_team_id, away_team_id,
+             home_team_id, away_team_id, game_id),
+        ).fetchone()
+    chosen_perspective_id = perspective_row[0] if perspective_row else None
+    if chosen_perspective_id is None:
+        logger.warning(
+            "No perspective found for game_id=%s; skipping reconciliation.",
+            game_id,
+        )
+        summary.games_skipped_no_plays = 1
+        return summary
+
     # Load plays and play_events
     plays_rows = conn.execute(
         "SELECT id, play_order, inning, half, batting_team_id, batter_id, "
         "pitcher_id, outcome, pitch_count, is_first_pitch_strike, "
         "home_score, away_score, did_outs_change "
-        "FROM plays WHERE game_id = ? ORDER BY play_order",
-        (game_id,),
+        "FROM plays WHERE game_id = ? AND perspective_team_id = ? "
+        "ORDER BY play_order",
+        (game_id, chosen_perspective_id),
     ).fetchall()
 
     play_events_rows = conn.execute(
         "SELECT pe.play_id, pe.event_order, pe.event_type, pe.pitch_result, pe.raw_template "
         "FROM play_events pe "
         "JOIN plays p ON pe.play_id = p.id "
-        "WHERE p.game_id = ? "
+        "WHERE p.game_id = ? AND p.perspective_team_id = ? "
         "ORDER BY pe.play_id, pe.event_order",
-        (game_id,),
+        (game_id, chosen_perspective_id),
     ).fetchall()
 
     # Index play_events by play_id
@@ -157,27 +222,29 @@ def reconcile_game(
         pitching_half = "top" if is_home else "bottom"
         batting_half = "bottom" if is_home else "top"
 
-        # Load boxscore pitching data for this team
+        # Load boxscore pitching data for this team (own perspective if available;
+        # otherwise the same chosen perspective the plays were loaded from)
         pitching_rows = conn.execute(
             "SELECT player_id, ip_outs, h, r, er, bb, so, wp, hbp, pitches, "
             "total_strikes, bf, decision "
             "FROM player_game_pitching "
-            "WHERE game_id = ? AND team_id = ? "
+            "WHERE game_id = ? AND team_id = ? AND perspective_team_id = ? "
             "ORDER BY id",
-            (game_id, team_id),
+            (game_id, team_id, chosen_perspective_id),
         ).fetchall()
 
         # Load boxscore batting data for this team
         batting_rows = conn.execute(
             "SELECT player_id, ab, r, h, bb, so, hbp "
             "FROM player_game_batting "
-            "WHERE game_id = ? AND team_id = ? ",
-            (game_id, team_id),
+            "WHERE game_id = ? AND team_id = ? AND perspective_team_id = ? ",
+            (game_id, team_id, chosen_perspective_id),
         ).fetchall()
 
         # Get pitcher order from cached boxscore JSON
         pitcher_order_from_json = _extract_pitcher_order(
-            conn, game_id, game_stream_id, season_id, team_id, is_home
+            conn, game_id, game_stream_id, season_id, team_id, is_home,
+            perspective_team_id=chosen_perspective_id,
         )
 
         # Team's plays when pitching (other team is batting)
@@ -192,21 +259,21 @@ def reconcile_game(
         # Run pitcher signal checks
         _check_pitcher_signals(
             pitching_rows, team_pitching_plays, events_by_play,
-            pitcher_order_from_json, game_id, team_id,
+            pitcher_order_from_json, game_id, chosen_perspective_id, team_id,
             discrepancies,
         )
 
         # Run batter signal checks
         _check_batter_signals(
-            batting_rows, team_batting_plays, game_id, team_id,
-            discrepancies,
+            batting_rows, team_batting_plays, game_id, chosen_perspective_id,
+            team_id, discrepancies,
         )
 
         # Run game-level sanity checks
         _check_game_level_signals(
             pitching_rows, batting_rows, team_pitching_plays,
             team_batting_plays, plays_rows,
-            game_id, team_id, is_home,
+            game_id, chosen_perspective_id, team_id, is_home,
             discrepancies,
             game_home_score=game_home_score,
             game_away_score=game_away_score,
@@ -233,17 +300,20 @@ def reconcile_game(
                 "SELECT player_id, ip_outs, h, r, er, bb, so, wp, hbp, pitches, "
                 "total_strikes, bf, decision "
                 "FROM player_game_pitching "
-                "WHERE game_id = ? AND team_id = ? ORDER BY id",
-                (game_id, team_id),
+                "WHERE game_id = ? AND team_id = ? AND perspective_team_id = ? "
+                "ORDER BY id",
+                (game_id, team_id, chosen_perspective_id),
             ).fetchall()
 
             pitcher_order_from_json = _extract_pitcher_order(
-                conn, game_id, game_stream_id, season_id, team_id, is_home
+                conn, game_id, game_stream_id, season_id, team_id, is_home,
+                perspective_team_id=chosen_perspective_id,
             )
 
             corrections = _correct_pitcher_attribution(
                 conn, game_id, team_id, pitching_half,
                 pitching_rows, pitcher_order_from_json,
+                chosen_perspective_id,
             )
             total_reassigned += len(corrections)
             all_corrections.extend(corrections)
@@ -256,15 +326,17 @@ def reconcile_game(
             "SELECT id, play_order, inning, half, batting_team_id, batter_id, "
             "pitcher_id, outcome, pitch_count, is_first_pitch_strike, "
             "home_score, away_score, did_outs_change "
-            "FROM plays WHERE game_id = ? ORDER BY play_order",
-            (game_id,),
+            "FROM plays WHERE game_id = ? AND perspective_team_id = ? "
+            "ORDER BY play_order",
+            (game_id, chosen_perspective_id),
         ).fetchall()
 
         play_events_rows = conn.execute(
             "SELECT pe.play_id, pe.event_order, pe.event_type, pe.pitch_result, pe.raw_template "
             "FROM play_events pe JOIN plays p ON pe.play_id = p.id "
-            "WHERE p.game_id = ? ORDER BY pe.play_id, pe.event_order",
-            (game_id,),
+            "WHERE p.game_id = ? AND p.perspective_team_id = ? "
+            "ORDER BY pe.play_id, pe.event_order",
+            (game_id, chosen_perspective_id),
         ).fetchall()
         events_by_play = {}
         for ev_row in play_events_rows:
@@ -278,16 +350,20 @@ def reconcile_game(
             pitching_rows = conn.execute(
                 "SELECT player_id, ip_outs, h, r, er, bb, so, wp, hbp, pitches, "
                 "total_strikes, bf, decision "
-                "FROM player_game_pitching WHERE game_id = ? AND team_id = ? ORDER BY id",
-                (game_id, team_id),
+                "FROM player_game_pitching "
+                "WHERE game_id = ? AND team_id = ? AND perspective_team_id = ? "
+                "ORDER BY id",
+                (game_id, team_id, chosen_perspective_id),
             ).fetchall()
             batting_rows = conn.execute(
                 "SELECT player_id, ab, r, h, bb, so, hbp "
-                "FROM player_game_batting WHERE game_id = ? AND team_id = ?",
-                (game_id, team_id),
+                "FROM player_game_batting "
+                "WHERE game_id = ? AND team_id = ? AND perspective_team_id = ?",
+                (game_id, team_id, chosen_perspective_id),
             ).fetchall()
             pitcher_order_from_json = _extract_pitcher_order(
-                conn, game_id, game_stream_id, season_id, team_id, is_home
+                conn, game_id, game_stream_id, season_id, team_id, is_home,
+                perspective_team_id=chosen_perspective_id,
             )
 
             team_pitching_plays = [p for p in plays_rows if p[3] == pitching_half]
@@ -295,14 +371,17 @@ def reconcile_game(
 
             _check_pitcher_signals(
                 pitching_rows, team_pitching_plays, events_by_play,
-                pitcher_order_from_json, game_id, team_id, discrepancies,
+                pitcher_order_from_json, game_id, chosen_perspective_id, team_id,
+                discrepancies,
             )
             _check_batter_signals(
-                batting_rows, team_batting_plays, game_id, team_id, discrepancies,
+                batting_rows, team_batting_plays, game_id, chosen_perspective_id,
+                team_id, discrepancies,
             )
             _check_game_level_signals(
                 pitching_rows, batting_rows, team_pitching_plays,
-                team_batting_plays, plays_rows, game_id, team_id, is_home,
+                team_batting_plays, plays_rows, game_id,
+                chosen_perspective_id, team_id, is_home,
                 discrepancies,
                 game_home_score=game_home_score,
                 game_away_score=game_away_score,
@@ -362,20 +441,29 @@ def reconcile_all(
 ) -> ReconciliationSummary:
     """Reconcile all games that have plays data.
 
+    E-220 round 6 cluster 4: iterates ``(game_id, perspective_team_id)``
+    pairs from the plays table.  Each perspective is reconciled
+    independently so cross-perspective loads both get processed.
+
     Returns:
-        Aggregated ReconciliationSummary across all games.
+        Aggregated ReconciliationSummary across all loaded perspectives.
     """
     run_id = str(uuid.uuid4())
     total_summary = ReconciliationSummary()
 
-    game_ids = [
-        row[0] for row in conn.execute(
-            "SELECT DISTINCT game_id FROM plays ORDER BY game_id"
+    # One reconcile pass per (game_id, perspective_team_id) pair.
+    game_perspective_pairs = [
+        (row[0], row[1]) for row in conn.execute(
+            "SELECT DISTINCT game_id, perspective_team_id FROM plays "
+            "ORDER BY game_id, perspective_team_id"
         ).fetchall()
     ]
 
-    for gid in game_ids:
-        game_summary = reconcile_game(conn, gid, dry_run=dry_run, run_id=run_id)
+    for gid, ptid in game_perspective_pairs:
+        game_summary = reconcile_game(
+            conn, gid, dry_run=dry_run, run_id=run_id,
+            perspective_team_id=ptid,
+        )
         total_summary.games_processed += game_summary.games_processed
         total_summary.games_skipped_no_plays += game_summary.games_skipped_no_plays
 
@@ -423,6 +511,7 @@ def _check_pitcher_signals(
     events_by_play: dict[int, list[tuple]],
     pitcher_order_json: list[dict[str, Any]] | None,
     game_id: str,
+    perspective_team_id: int,
     team_id: int,
     discrepancies: list[_Discrepancy],
 ) -> None:
@@ -542,6 +631,7 @@ def _check_pitcher_signals(
         is_match = box_starter == plays_starter
         discrepancies.append(_Discrepancy(
             game_id=game_id,
+            perspective_team_id=perspective_team_id,
             team_id=team_id,
             player_id=box_starter or plays_starter or GAME_LEVEL_PLAYER_ID,
             signal_name="pitcher_starter_id",
@@ -562,6 +652,7 @@ def _check_pitcher_signals(
     order_player_id = box_pitcher_order[0] if box_pitcher_order else GAME_LEVEL_PLAYER_ID
     discrepancies.append(_Discrepancy(
         game_id=game_id,
+        perspective_team_id=perspective_team_id,
         team_id=team_id,
         player_id=order_player_id,
         signal_name="pitcher_order",
@@ -588,7 +679,7 @@ def _check_pitcher_signals(
 
         # 1B. BF per pitcher
         _add_pitcher_signal(
-            discrepancies, game_id, team_id, pid,
+            discrepancies, game_id, perspective_team_id, team_id, pid,
             "pitcher_bf",
             box.get("bf", 0), plays.get("bf", 0),
             missing_box, missing_plays,
@@ -601,6 +692,7 @@ def _check_pitcher_signals(
         delta = box_outs - plays_outs
         discrepancies.append(_Discrepancy(
             game_id=game_id,
+            perspective_team_id=perspective_team_id,
             team_id=team_id,
             player_id=pid,
             signal_name="pitcher_ip_outs",
@@ -613,7 +705,7 @@ def _check_pitcher_signals(
 
         # 1D. SO per pitcher
         _add_pitcher_signal(
-            discrepancies, game_id, team_id, pid,
+            discrepancies, game_id, perspective_team_id, team_id, pid,
             "pitcher_so",
             box.get("so", 0), plays.get("so", 0),
             missing_box, missing_plays,
@@ -622,7 +714,7 @@ def _check_pitcher_signals(
 
         # 1E. BB per pitcher
         _add_pitcher_signal(
-            discrepancies, game_id, team_id, pid,
+            discrepancies, game_id, perspective_team_id, team_id, pid,
             "pitcher_bb",
             box.get("bb", 0), plays.get("bb", 0),
             missing_box, missing_plays,
@@ -631,7 +723,7 @@ def _check_pitcher_signals(
 
         # 1F. HBP per pitcher
         _add_pitcher_signal(
-            discrepancies, game_id, team_id, pid,
+            discrepancies, game_id, perspective_team_id, team_id, pid,
             "pitcher_hbp",
             box.get("hbp", 0), plays.get("hbp", 0),
             missing_box, missing_plays,
@@ -649,7 +741,7 @@ def _check_pitcher_signals(
                 "gate": "BF+SO+BB match",
             })
         _add_pitcher_signal(
-            discrepancies, game_id, team_id, pid,
+            discrepancies, game_id, perspective_team_id, team_id, pid,
             "pitcher_pitches",
             box.get("pitches", 0), plays.get("pitches", 0),
             missing_box, missing_plays,
@@ -667,7 +759,7 @@ def _check_pitcher_signals(
                 "gate": "BF+SO+BB match",
             })
         _add_pitcher_signal(
-            discrepancies, game_id, team_id, pid,
+            discrepancies, game_id, perspective_team_id, team_id, pid,
             "pitcher_total_strikes",
             box.get("total_strikes", 0), plays.get("total_strikes", 0),
             missing_box, missing_plays,
@@ -677,7 +769,7 @@ def _check_pitcher_signals(
 
         # 1I. Hits allowed per pitcher
         _add_pitcher_signal(
-            discrepancies, game_id, team_id, pid,
+            discrepancies, game_id, perspective_team_id, team_id, pid,
             "pitcher_h",
             box.get("h", 0), plays.get("h", 0),
             missing_box, missing_plays,
@@ -690,6 +782,7 @@ def _check_pitcher_signals(
         wp_delta = box_wp - plays_wp
         discrepancies.append(_Discrepancy(
             game_id=game_id,
+            perspective_team_id=perspective_team_id,
             team_id=team_id,
             player_id=pid,
             signal_name="pitcher_wp",
@@ -704,6 +797,7 @@ def _check_pitcher_signals(
 def _add_pitcher_signal(
     discrepancies: list[_Discrepancy],
     game_id: str,
+    perspective_team_id: int,
     team_id: int,
     player_id: str,
     signal_name: str,
@@ -727,6 +821,7 @@ def _add_pitcher_signal(
 
     discrepancies.append(_Discrepancy(
         game_id=game_id,
+        perspective_team_id=perspective_team_id,
         team_id=team_id,
         player_id=player_id,
         signal_name=signal_name,
@@ -748,6 +843,7 @@ def _check_batter_signals(
     batting_rows: list[tuple],
     batting_plays: list[tuple],
     game_id: str,
+    perspective_team_id: int,
     team_id: int,
     discrepancies: list[_Discrepancy],
 ) -> None:
@@ -806,6 +902,7 @@ def _check_batter_signals(
             delta = box_val - plays_val
             discrepancies.append(_Discrepancy(
                 game_id=game_id,
+                perspective_team_id=perspective_team_id,
                 team_id=team_id,
                 player_id=pid,
                 signal_name=signal,
@@ -829,6 +926,7 @@ def _check_game_level_signals(
     batting_plays: list[tuple],
     all_plays: list[tuple],
     game_id: str,
+    perspective_team_id: int,
     team_id: int,
     is_home: bool,
     discrepancies: list[_Discrepancy],
@@ -844,6 +942,7 @@ def _check_game_level_signals(
     if box_pa > 0:
         discrepancies.append(_Discrepancy(
             game_id=game_id,
+            perspective_team_id=perspective_team_id,
             team_id=team_id,
             player_id=GAME_LEVEL_PLAYER_ID,
             signal_name="game_pa_count",
@@ -860,6 +959,7 @@ def _check_game_level_signals(
     if game_home_score is not None and game_away_score is not None:
         discrepancies.append(_Discrepancy(
             game_id=game_id,
+            perspective_team_id=perspective_team_id,
             team_id=team_id,
             player_id=GAME_LEVEL_PLAYER_ID,
             signal_name="game_runs",
@@ -876,6 +976,7 @@ def _check_game_level_signals(
     hits_delta = box_hits - plays_hits
     discrepancies.append(_Discrepancy(
         game_id=game_id,
+        perspective_team_id=perspective_team_id,
         team_id=team_id,
         player_id=GAME_LEVEL_PLAYER_ID,
         signal_name="game_hits",
@@ -899,110 +1000,56 @@ def _extract_pitcher_order(
     season_id: str,
     team_id: int,
     is_home: bool,
+    perspective_team_id: int | None = None,
 ) -> list[dict[str, Any]] | None:
-    """Extract pitcher appearance order from cached boxscore JSON.
+    """Extract pitcher appearance order from the player_game_pitching table.
 
-    Returns a list of dicts with 'player_id' key in appearance order,
-    or None if the JSON file cannot be found.
+    Reads the ``appearance_order`` column (populated by the game loader from
+    boxscore JSON pitcher ordering).  Returns a list of dicts with
+    ``player_id`` key in appearance order, or ``None`` if no
+    ``appearance_order`` data exists.
+
+    E-220 round 4: replaced the disk-based JSON reading with a DB query.
+    The ``appearance_order`` column is stable across perspectives (boxscore
+    stat numbers are stable per the provenance rule).
+
+    Args:
+        conn: Open SQLite connection.
+        game_id: The game to look up.
+        game_stream_id: Unused (kept for call-site compatibility).
+        season_id: Unused (kept for call-site compatibility).
+        team_id: The team whose pitchers to look up.
+        is_home: Unused (kept for call-site compatibility).
+        perspective_team_id: When provided, filter to this perspective.
+            When ``None``, uses team_id as perspective (own perspective).
+
+    Returns:
+        List of ``{"player_id": pid}`` dicts ordered by appearance, or
+        ``None`` if ``appearance_order`` is not populated for any pitcher.
     """
-    # Look up team gc_uuid and public_id for path construction
-    team_row = conn.execute(
-        "SELECT gc_uuid, public_id, membership_type FROM teams WHERE id = ?",
-        (team_id,),
-    ).fetchone()
-    if team_row is None:
-        logger.warning("Team %d not found in teams table.", team_id)
+    ptid = perspective_team_id if perspective_team_id is not None else team_id
+    rows = conn.execute(
+        "SELECT player_id, appearance_order "
+        "FROM player_game_pitching "
+        "WHERE game_id = ? AND team_id = ? AND perspective_team_id = ? "
+        "ORDER BY appearance_order ASC NULLS LAST, id ASC",
+        (game_id, team_id, ptid),
+    ).fetchall()
+
+    if not rows:
         return None
 
-    gc_uuid, public_id, membership_type = team_row
-
-    json_data = None
-
-    # Try member team path first
-    if gc_uuid:
-        member_path = _DATA_ROOT / season_id / "teams" / gc_uuid / "games" / f"{game_id}.json"
-        if member_path.is_file():
-            json_data = _load_json_file(member_path)
-        elif game_stream_id:
-            alt_path = _DATA_ROOT / season_id / "teams" / gc_uuid / "games" / f"{game_stream_id}.json"
-            if alt_path.is_file():
-                json_data = _load_json_file(alt_path)
-
-    # Try scouting path
-    if json_data is None and public_id:
-        scouting_path = _DATA_ROOT / season_id / "scouting" / public_id / "boxscores"
-        if game_stream_id:
-            scout_file = scouting_path / f"{game_stream_id}.json"
-            if scout_file.is_file():
-                json_data = _load_json_file(scout_file)
-        # Also try game_id as filename in scouting path
-        scout_file2 = scouting_path / f"{game_id}.json"
-        if json_data is None and scout_file2.is_file():
-            json_data = _load_json_file(scout_file2)
-
-    if json_data is None:
-        logger.warning(
-            "Boxscore JSON not found for game_id=%s, team_id=%d; "
-            "falling back to DB insertion order for pitcher order.",
+    # If all appearance_order values are NULL, return None so the caller
+    # falls back to DB insertion order (the pre-E-220 behavior).
+    if all(row[1] is None for row in rows):
+        logger.debug(
+            "No appearance_order data for game_id=%s, team_id=%d; "
+            "falling back to DB insertion order.",
             game_id, team_id,
         )
         return None
 
-    # Parse the pitching stats array
-    return _parse_pitching_order(json_data, is_home)
-
-
-def _load_json_file(path: Path) -> dict | None:
-    """Load and parse a JSON file, returning None on error."""
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError) as exc:
-        logger.warning("Failed to load boxscore JSON at %s: %s", path, exc)
-        return None
-
-
-def _parse_pitching_order(
-    boxscore: dict,
-    is_home: bool,
-) -> list[dict[str, Any]] | None:
-    """Parse pitcher order from boxscore JSON structure.
-
-    The boxscore has groups for home and away teams. Each group has a
-    'pitching' section with a 'stats' array ordered by appearance.
-    """
-    try:
-        groups = boxscore.get("groups", [])
-        if not groups:
-            return None
-
-        # The boxscore groups: first group is away, second is home
-        # (standard GameChanger boxscore structure)
-        if len(groups) < 2:
-            return None
-
-        group = groups[1] if is_home else groups[0]
-
-        pitching = None
-        for section in group.get("sections", []):
-            if section.get("title", "").lower() == "pitching":
-                pitching = section
-                break
-
-        if pitching is None:
-            return None
-
-        stats_array = pitching.get("stats", [])
-        result = []
-        for entry in stats_array:
-            player_id = entry.get("player_id")
-            if player_id:
-                result.append({"player_id": player_id})
-
-        return result if result else None
-
-    except (KeyError, TypeError, IndexError) as exc:
-        logger.warning("Failed to parse pitcher order from boxscore JSON: %s", exc)
-        return None
+    return [{"player_id": row[0]} for row in rows]
 
 
 # ---------------------------------------------------------------------------
@@ -1017,6 +1064,7 @@ def _correct_pitcher_attribution(
     pitching_half: str,
     pitching_rows: list[tuple],
     pitcher_order_json: list[dict[str, Any]] | None,
+    perspective_team_id: int,
 ) -> list[dict[str, Any]]:
     """Apply BF-boundary pitcher attribution correction for one team.
 
@@ -1062,8 +1110,9 @@ def _correct_pitcher_attribution(
     total_box_bf = sum(box_bf.get(pid, 0) for pid in box_pitcher_order)
     pitching_plays = conn.execute(
         "SELECT id, play_order, pitcher_id FROM plays "
-        "WHERE game_id = ? AND half = ? ORDER BY play_order",
-        (game_id, pitching_half),
+        "WHERE game_id = ? AND half = ? AND perspective_team_id = ? "
+        "ORDER BY play_order",
+        (game_id, pitching_half, perspective_team_id),
     ).fetchall()
 
     if total_box_bf != len(pitching_plays):
@@ -1158,16 +1207,22 @@ def _write_discrepancies(
     run_id: str,
     discrepancies: list[_Discrepancy],
 ) -> None:
-    """Write discrepancy rows to the reconciliation_discrepancies table."""
+    """Write discrepancy rows to the reconciliation_discrepancies table.
+
+    E-220 round 7 P1-2: writes both ``perspective_team_id`` (the API-source
+    team) and ``team_id`` (the participant team) so cross-perspective
+    discrepancies for the same game persist independently.
+    """
     for d in discrepancies:
         conn.execute(
             "INSERT OR REPLACE INTO reconciliation_discrepancies "
-            "(run_id, game_id, team_id, player_id, signal_name, category, "
-            "boxscore_value, plays_value, delta, status, correction_detail) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "(run_id, game_id, perspective_team_id, team_id, player_id, "
+            "signal_name, category, boxscore_value, plays_value, delta, "
+            "status, correction_detail) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
-                run_id, d.game_id, d.team_id, d.player_id,
-                d.signal_name, d.category,
+                run_id, d.game_id, d.perspective_team_id, d.team_id,
+                d.player_id, d.signal_name, d.category,
                 d.boxscore_value, d.plays_value, d.delta,
                 d.status, d.correction_detail,
             ),

@@ -49,6 +49,7 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -58,6 +59,26 @@ from src.gamechanger.crawlers import CrawlResult
 logger = logging.getLogger(__name__)
 
 _PLAYER_STATS_ACCEPT = "application/json, text/plain, */*"
+
+
+@dataclass
+class SprayCrawlResult:
+    """In-memory result from a scouting spray crawl.
+
+    Contains the spray chart data (player-stats responses) keyed by event_id,
+    plus metadata about what was crawled.
+
+    Attributes:
+        spray_data: Dict mapping event_id to player-stats response dict.
+        games_crawled: Number of games successfully fetched.
+        games_skipped: Number of games skipped (already cached or no data).
+        errors: Number of errors encountered.
+    """
+
+    spray_data: dict[str, dict[str, Any]] = field(default_factory=dict)
+    games_crawled: int = 0
+    games_skipped: int = 0
+    errors: int = 0
 _DATA_ROOT = Path(__file__).resolve().parents[3] / "data" / "raw"
 _COMPLETED_STATUS = "completed"
 
@@ -88,108 +109,29 @@ class ScoutingSprayChartCrawler:
         self._db = db
         self._data_root = data_root
 
-    def crawl_all(self, season_id: str | None = None) -> CrawlResult:
-        """Crawl spray data for all opponents that have a public_id.
-
-        Discovers opponents from two sources via UNION:
-
-        1. ``opponent_links`` rows with ``is_hidden = 0`` and a non-NULL
-           ``public_id`` (opponents discovered via schedule seeding).
-        2. Tracked teams (``membership_type = 'tracked'``) with a non-NULL
-           ``public_id`` that have NO ``opponent_links`` row at all (teams
-           added directly via the admin "generate report" flow).
-
-        Teams with *only* ``is_hidden = 1`` rows in ``opponent_links`` are
-        excluded: branch 1 filters on ``is_hidden = 0``, and branch 2's
-        ``NOT EXISTS`` matches *any* ``opponent_links`` row regardless of
-        ``is_hidden``.  If a ``public_id`` has both hidden and visible rows
-        (possible when multiple member teams share an opponent), branch 1
-        still includes it via the visible row -- this is per-link visibility,
-        not global suppression.  UNION deduplicates teams that appear in
-        both sources.
-
-        ``CredentialExpiredError`` propagates immediately; other exceptions
-        per opponent are caught, logged, and counted.
-
-        Args:
-            season_id: When provided, only process the games.json file for
-                       this specific season.  When ``None``, process all
-                       seasons found on disk.
-
-        Returns:
-            Aggregated ``CrawlResult`` across all opponents.
-        """
-        rows = self._db.execute(
-            "SELECT DISTINCT public_id FROM opponent_links "
-            "WHERE public_id IS NOT NULL AND is_hidden = 0 "
-            "UNION "
-            "SELECT t.public_id FROM teams t "
-            "WHERE t.membership_type = 'tracked' "
-            "AND t.public_id IS NOT NULL "
-            "AND NOT EXISTS ("
-            "  SELECT 1 FROM opponent_links ol "
-            "  WHERE ol.public_id = t.public_id"
-            ")"
-        ).fetchall()
-
-        total = CrawlResult()
-        logger.info(
-            "ScoutingSprayChartCrawler: found %d opponents with a public_id.",
-            len(rows),
-        )
-
-        for (public_id,) in rows:
-            try:
-                result = self.crawl_team(public_id, season_id=season_id)
-            except CredentialExpiredError:
-                raise
-            except Exception as exc:  # noqa: BLE001
-                logger.warning(
-                    "Unexpected error crawling spray for public_id=%s: %s",
-                    public_id,
-                    exc,
-                )
-                total.errors += 1
-                continue
-
-            total.files_written += result.files_written
-            total.files_skipped += result.files_skipped
-            total.errors += result.errors
-
-        logger.info(
-            "ScoutingSprayChartCrawler complete: %d fetched, %d cached, %d errored.",
-            total.files_written,
-            total.files_skipped,
-            total.errors,
-        )
-        return total
-
     def crawl_team(
         self,
         public_id: str,
+        games_data: list[dict[str, Any]],
         season_id: str | None = None,
         gc_uuid: str | None = None,
-    ) -> CrawlResult:
-        """Crawl spray data for a single opponent.
+    ) -> SprayCrawlResult:
+        """Crawl spray data for a single opponent (in-memory, E-220 C2-B).
 
-        Looks up the opponent's ``gc_uuid`` from the database unless
-        ``gc_uuid`` is provided directly (bypasses the lookup).  When
-        ``gc_uuid`` is available, fetches player-stats using that UUID for
-        all completed games.  When ``gc_uuid`` is NULL, logs an INFO
-        message and returns an empty result -- the endpoint is team-scoped
-        and requires the scouted team's own UUID.
+        Returns a ``SprayCrawlResult`` with spray data in memory.  No files
+        are written to disk and no disk reads occur -- ``games_data`` is the
+        sole source of game discovery.
 
         Args:
             public_id: The opponent's ``public_id`` slug.
-            season_id: When provided, only process the games.json file for
-                       this specific season.  When ``None``, process all
-                       seasons found on disk.
-            gc_uuid: When provided, skip the database lookup and use this
-                     value directly.  Useful when the caller has already
-                     resolved the ``gc_uuid``.
+            games_data: In-memory games list (REQUIRED).  Pass
+                ``ScoutingCrawlResult.games`` from the parent scouting crawl.
+            season_id: Season slug (used only for logging).
+            gc_uuid: The opponent's ``gc_uuid``.  When ``None``, looked up
+                from the database.
 
         Returns:
-            ``CrawlResult`` for this opponent's games.
+            ``SprayCrawlResult`` with spray data keyed by event_id.
         """
         if gc_uuid is None:
             gc_uuid = self._lookup_gc_uuid(public_id)
@@ -199,96 +141,46 @@ class ScoutingSprayChartCrawler:
                 "No gc_uuid for opponent public_id=%s; skipping spray crawl.",
                 public_id,
             )
-            return CrawlResult()
+            return SprayCrawlResult()
 
-        if season_id is not None:
-            season_globs = [season_id]
-        else:
-            # Discover all seasons that have scouting data for this opponent.
-            season_dirs = sorted(
-                p.parent.parent.parent.name
-                for p in self._data_root.glob(f"*/scouting/{public_id}/games.json")
-            )
-            season_globs = season_dirs if season_dirs else []
-
-        if not season_globs:
-            logger.warning(
-                "No games.json found for public_id=%s in %s; skipping.",
+        completed = [g for g in games_data if g.get("game_status") == _COMPLETED_STATUS]
+        if not completed:
+            logger.info(
+                "No completed games for public_id=%s; skipping spray crawl.",
                 public_id,
-                self._data_root,
             )
-            return CrawlResult()
+            return SprayCrawlResult()
 
-        result = CrawlResult()
-        for sid in season_globs:
-            games_file = self._data_root / sid / "scouting" / public_id / "games.json"
-            if not games_file.exists():
-                continue
-            partial = self._crawl_team_season(public_id, gc_uuid, games_file, sid)
-            result.files_written += partial.files_written
-            result.files_skipped += partial.files_skipped
-            result.errors += partial.errors
-        return result
+        return self._fetch_spray_in_memory(public_id, gc_uuid, completed)
 
-    def _crawl_team_season(
+    def _fetch_spray_in_memory(
         self,
         public_id: str,
         gc_uuid: str,
-        games_file: Path,
-        season_id: str,
-    ) -> CrawlResult:
-        """Fetch spray data for one opponent in one season.
+        completed_games: list[dict[str, Any]],
+    ) -> SprayCrawlResult:
+        """Fetch spray chart data for completed games and return in-memory.
 
-        Reads ``games_file``, filters to completed games, and fetches
-        player-stats for any game whose spray file does not already exist.
-        ``CredentialExpiredError`` propagates immediately.  Other
-        ``GameChangerAPIError`` exceptions are caught, logged, and counted.
+        No files are written to disk.
 
         Args:
-            public_id: The opponent's ``public_id`` slug (used for file paths).
-            gc_uuid: The opponent's GameChanger UUID (used for the API call).
-            games_file: Path to the cached ``games.json`` file.
-            season_id: Season label extracted from the file path.
+            public_id: The opponent's ``public_id`` slug.
+            gc_uuid: The opponent's GameChanger UUID (for the API call).
+            completed_games: List of completed game dicts.
 
         Returns:
-            ``CrawlResult`` for this season's games.
+            ``SprayCrawlResult`` with spray data and counts.
         """
-        result = CrawlResult()
+        result = SprayCrawlResult()
 
-        games_data = self._load_games(games_file)
-        completed = [g for g in games_data if g.get("game_status") == _COMPLETED_STATUS]
-
-        if not completed:
-            logger.info(
-                "No completed games for public_id=%s season=%s; skipping.",
-                public_id,
-                season_id,
-            )
-            return result
-
-        spray_dir = self._data_root / season_id / "scouting" / public_id / "spray"
-
-        for game in completed:
-            # The public-endpoint 'id' field is the event_id used by the
-            # authenticated player-stats endpoint (confirmed by api-scout).
+        for game in completed_games:
             event_id = game.get("id")
             if not event_id:
                 logger.warning(
-                    "Game missing 'id' for public_id=%s season=%s; skipping.",
+                    "Game missing 'id' for public_id=%s; skipping.",
                     public_id,
-                    season_id,
                 )
                 result.errors += 1
-                continue
-
-            dest = spray_dir / f"{event_id}.json"
-
-            if dest.exists():
-                logger.debug(
-                    "Scouting spray file for game %s already cached; skipping.",
-                    event_id,
-                )
-                result.files_skipped += 1
                 continue
 
             try:
@@ -296,14 +188,8 @@ class ScoutingSprayChartCrawler:
                     f"/teams/{gc_uuid}/schedule/events/{event_id}/player-stats",
                     accept=_PLAYER_STATS_ACCEPT,
                 )
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                dest.write_text(json.dumps(data, indent=2), encoding="utf-8")
-                logger.info(
-                    "Wrote scouting spray chart event_id=%s -> %s.",
-                    event_id,
-                    dest,
-                )
-                result.files_written += 1
+                result.spray_data[str(event_id)] = data
+                result.games_crawled += 1
             except CredentialExpiredError:
                 raise
             except GameChangerAPIError as exc:
@@ -314,7 +200,7 @@ class ScoutingSprayChartCrawler:
                     exc,
                 )
                 result.errors += 1
-            except Exception as exc:  # noqa: BLE001 -- broad catch intentional; log and continue
+            except Exception as exc:  # noqa: BLE001
                 logger.error(
                     "Unexpected error fetching player-stats for event_id=%s public_id=%s: %s",
                     event_id,
@@ -324,25 +210,6 @@ class ScoutingSprayChartCrawler:
                 result.errors += 1
 
         return result
-
-    def _load_games(self, path: Path) -> list[dict[str, Any]]:
-        """Load and parse a ``games.json`` file.
-
-        Args:
-            path: Path to the ``games.json`` file.
-
-        Returns:
-            List of game records, or an empty list on parse failure.
-        """
-        raw = json.loads(path.read_text(encoding="utf-8"))
-        if not isinstance(raw, list):
-            logger.warning(
-                "games.json at %s is not a list (got %s); treating as empty.",
-                path,
-                type(raw).__name__,
-            )
-            return []
-        return raw
 
     def _lookup_gc_uuid(self, public_id: str) -> str | None:
         """Return the ``gc_uuid`` for an opponent by ``public_id``, or ``None``.

@@ -475,9 +475,9 @@ class TestStatCompletenessColumn:
 
         # Insert without specifying stat_completeness
         migrated_db.execute(
-            "INSERT INTO player_game_batting (game_id, player_id, team_id, ab, h) "
-            "VALUES (?, ?, ?, ?, ?)",
-            ("G-TEST-01", "P-TEST-01", team_id, 3, 1),
+            "INSERT INTO player_game_batting (game_id, player_id, team_id, perspective_team_id, ab, h) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            ("G-TEST-01", "P-TEST-01", team_id, team_id, 3, 1),
         )
         migrated_db.commit()
 
@@ -499,8 +499,8 @@ class TestStatCompletenessColumn:
         with pytest.raises(sqlite3.IntegrityError):
             migrated_db.execute(
                 "INSERT INTO player_game_batting "
-                "(game_id, player_id, team_id, ab, stat_completeness) VALUES (?, ?, ?, ?, ?)",
-                ("G-TEST-02", "P-TEST-02", team_id, 3, "invalid_value"),
+                "(game_id, player_id, team_id, perspective_team_id, ab, stat_completeness) VALUES (?, ?, ?, ?, ?, ?)",
+                ("G-TEST-02", "P-TEST-02", team_id, team_id, 3, "invalid_value"),
             )
             migrated_db.commit()
 
@@ -565,9 +565,9 @@ class TestSprayChartsTable:
 
         # Valid values should insert cleanly
         migrated_db.execute(
-            "INSERT INTO spray_charts (game_id, player_id, team_id, chart_type, x, y) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            ("G-SPRAY-01", "P-SPRAY-01", team_id, "offensive", 100.0, 200.0),
+            "INSERT INTO spray_charts (game_id, player_id, team_id, perspective_team_id, chart_type, x, y) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            ("G-SPRAY-01", "P-SPRAY-01", team_id, team_id, "offensive", 100.0, 200.0),
         )
         migrated_db.commit()
 
@@ -580,9 +580,9 @@ class TestSprayChartsTable:
 
         with pytest.raises(sqlite3.IntegrityError):
             migrated_db.execute(
-                "INSERT INTO spray_charts (game_id, player_id, team_id, chart_type, x, y) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
-                ("G-SPRAY-02", "P-SPRAY-02", team_id, "invalid_chart", 100.0, 200.0),
+                "INSERT INTO spray_charts (game_id, player_id, team_id, perspective_team_id, chart_type, x, y) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                ("G-SPRAY-02", "P-SPRAY-02", team_id, team_id, "invalid_chart", 100.0, 200.0),
             )
             migrated_db.commit()
 
@@ -672,17 +672,17 @@ class TestStatTableUniqueConstraints:
         _insert_game(migrated_db, "G-UNIQ-01", "2026-spring-hs", team_id, team_id)
 
         migrated_db.execute(
-            "INSERT INTO player_game_batting (game_id, player_id, team_id, ab) "
-            "VALUES (?, ?, ?, ?)",
-            ("G-UNIQ-01", "P-UNIQ-01", team_id, 3),
+            "INSERT INTO player_game_batting (game_id, player_id, team_id, perspective_team_id, ab) "
+            "VALUES (?, ?, ?, ?, ?)",
+            ("G-UNIQ-01", "P-UNIQ-01", team_id, team_id, 3),
         )
         migrated_db.commit()
 
         with pytest.raises(sqlite3.IntegrityError):
             migrated_db.execute(
-                "INSERT INTO player_game_batting (game_id, player_id, team_id, ab) "
-                "VALUES (?, ?, ?, ?)",
-                ("G-UNIQ-01", "P-UNIQ-01", team_id, 4),
+                "INSERT INTO player_game_batting (game_id, player_id, team_id, perspective_team_id, ab) "
+                "VALUES (?, ?, ?, ?, ?)",
+                ("G-UNIQ-01", "P-UNIQ-01", team_id, team_id, 4),
             )
             migrated_db.commit()
 
@@ -694,17 +694,17 @@ class TestStatTableUniqueConstraints:
         _insert_game(migrated_db, "G-UNIQ-02", "2026-spring-hs", team_id, team_id)
 
         migrated_db.execute(
-            "INSERT INTO player_game_pitching (game_id, player_id, team_id, ip_outs) "
-            "VALUES (?, ?, ?, ?)",
-            ("G-UNIQ-02", "P-UNIQ-02", team_id, 9),
+            "INSERT INTO player_game_pitching (game_id, player_id, team_id, perspective_team_id, ip_outs) "
+            "VALUES (?, ?, ?, ?, ?)",
+            ("G-UNIQ-02", "P-UNIQ-02", team_id, team_id, 9),
         )
         migrated_db.commit()
 
         with pytest.raises(sqlite3.IntegrityError):
             migrated_db.execute(
-                "INSERT INTO player_game_pitching (game_id, player_id, team_id, ip_outs) "
-                "VALUES (?, ?, ?, ?)",
-                ("G-UNIQ-02", "P-UNIQ-02", team_id, 12),
+                "INSERT INTO player_game_pitching (game_id, player_id, team_id, perspective_team_id, ip_outs) "
+                "VALUES (?, ?, ?, ?, ?)",
+                ("G-UNIQ-02", "P-UNIQ-02", team_id, team_id, 12),
             )
             migrated_db.commit()
 
@@ -788,9 +788,9 @@ def test_ip_outs_stores_as_integer(migrated_db: sqlite3.Connection) -> None:
 
     # 6.2 IP = 20 outs
     migrated_db.execute(
-        "INSERT INTO player_game_pitching (game_id, player_id, team_id, ip_outs) "
-        "VALUES (?, ?, ?, ?)",
-        ("G-IP-01", "P-IP-01", team_id, 20),
+        "INSERT INTO player_game_pitching (game_id, player_id, team_id, perspective_team_id, ip_outs) "
+        "VALUES (?, ?, ?, ?, ?)",
+        ("G-IP-01", "P-IP-01", team_id, team_id, 20),
     )
     migrated_db.commit()
 

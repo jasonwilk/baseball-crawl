@@ -178,6 +178,13 @@ generate_commit_diff() {
 # ---------------------------------------------------------------------------
 MODE="${1:-}"
 
+# On Ubuntu 24.04 devcontainers, bubblewrap sandboxing fails (AppArmor
+# restricts unprivileged user namespaces). Set CODEX_SANDBOX_OFF=1 to bypass.
+CODEX_SANDBOX_ARGS=()
+if [[ "${CODEX_SANDBOX_OFF:-}" == "1" ]]; then
+    CODEX_SANDBOX_ARGS=(--sandbox danger-full-access)
+fi
+
 case "${MODE}" in
     uncommitted)
         DIFF_CONTENT="$(generate_uncommitted_diff)"
@@ -189,7 +196,7 @@ case "${MODE}" in
         if [[ -n "${WORKDIR}" ]]; then
             MODE_LABEL="uncommitted (workdir: ${WORKDIR})"
         fi
-        assemble_review_prompt "${DIFF_CONTENT}" "${MODE_LABEL}" | codex exec --ephemeral -
+        assemble_review_prompt "${DIFF_CONTENT}" "${MODE_LABEL}" | codex exec --ephemeral "${CODEX_SANDBOX_ARGS[@]}" -
         ;;
     base)
         BRANCH="${2:-}"
@@ -202,7 +209,7 @@ case "${MODE}" in
             echo "No diff against '${BRANCH}' to review."
             exit 0
         fi
-        assemble_review_prompt "${DIFF_CONTENT}" "base ${BRANCH}" | codex exec --ephemeral -
+        assemble_review_prompt "${DIFF_CONTENT}" "base ${BRANCH}" | codex exec --ephemeral "${CODEX_SANDBOX_ARGS[@]}" -
         ;;
     commit)
         SHA="${2:-}"
@@ -215,7 +222,7 @@ case "${MODE}" in
             echo "Error: could not retrieve commit '${SHA}'." >&2
             exit 1
         fi
-        assemble_review_prompt "${DIFF_CONTENT}" "commit ${SHA}" | codex exec --ephemeral -
+        assemble_review_prompt "${DIFF_CONTENT}" "commit ${SHA}" | codex exec --ephemeral "${CODEX_SANDBOX_ARGS[@]}" -
         ;;
     *)
         if [[ -z "${MODE}" ]]; then

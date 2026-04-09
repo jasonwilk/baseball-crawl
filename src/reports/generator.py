@@ -49,7 +49,6 @@ from src.reports.renderer import render_report
 logger = logging.getLogger(__name__)
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_DATA_ROOT = _REPO_ROOT / "data" / "raw"
 _REPORTS_DIR = _REPO_ROOT / "data" / "reports"
 _EXPIRY_DAYS = 14
 _APP_URL_DEFAULT = "http://localhost:8001"
@@ -115,16 +114,6 @@ def _update_report_failed(
         (error_message, report_id),
     )
     conn.commit()
-
-
-def _query_season_id(conn: sqlite3.Connection, team_id: int) -> str | None:
-    """Find the most recent season_id for a team from scouting_runs."""
-    row = conn.execute(
-        "SELECT season_id FROM scouting_runs WHERE team_id = ? "
-        "ORDER BY started_at DESC LIMIT 1",
-        (team_id,),
-    ).fetchone()
-    return row[0] if row else None
 
 
 def _query_team_info(conn: sqlite3.Connection, team_id: int) -> dict:
@@ -407,8 +396,9 @@ def _query_spray_charts(
         SELECT player_id, x, y, play_result, play_type
         FROM spray_charts
         WHERE team_id = ? AND chart_type = 'offensive' AND season_id = ?
+          AND perspective_team_id = ?
         """,
-        (team_id, season_id),
+        (team_id, season_id, team_id),
     ).fetchall()
     result: dict[str, list[dict]] = {}
     for row in rows:
@@ -486,32 +476,36 @@ def _crawl_and_load_spray(
     public_id: str,
     season_id: str,
     gc_uuid: str | None = None,
+    games_data: list | None = None,
 ) -> None:
-    """Delegate spray chart crawl/load to the scouting spray pipeline.
-
-    Instantiates ``ScoutingSprayChartCrawler`` and ``ScoutingSprayChartLoader``
-    and runs them for a single opponent/season.  When ``gc_uuid`` is provided,
-    it is passed directly to the crawler (bypassing the DB lookup).
+    """Crawl and load spray chart data in-memory (E-220-06).
 
     ``CredentialExpiredError`` propagates to the caller. All other exceptions
-    are caught and logged as warnings -- spray failure is non-fatal and the
-    report renders without spray charts.
+    are caught and logged as warnings -- spray failure is non-fatal.
 
     Args:
         client: Authenticated ``GameChangerClient``.
         public_id: The scouted team's ``public_id`` slug.
         season_id: Season slug (e.g., ``"2026-spring-hs"``).
         gc_uuid: When provided, passed to the crawler to bypass DB lookup.
+        games_data: In-memory games list from the scouting crawl result.
     """
     try:
         with closing(get_connection()) as conn:
-            spray_crawler = ScoutingSprayChartCrawler(client, conn, data_root=_DATA_ROOT)
-            spray_crawler.crawl_team(public_id, season_id=season_id, gc_uuid=gc_uuid)
+            spray_crawler = ScoutingSprayChartCrawler(client, conn)
+            spray_result = spray_crawler.crawl_team(
+                public_id, season_id=season_id, gc_uuid=gc_uuid,
+                games_data=games_data,
+            )
+
+        if spray_result.errors and spray_result.games_crawled == 0:
+            logger.warning("Spray crawl failed for public_id=%s; no data.", public_id)
+            return
 
         with closing(get_connection()) as conn:
             spray_loader = ScoutingSprayChartLoader(conn)
-            spray_loader.load_all(
-                _DATA_ROOT, public_id=public_id, season_id=season_id
+            spray_loader.load_from_data(
+                spray_result.spray_data, public_id=public_id,
             )
     except CredentialExpiredError:
         raise
@@ -529,65 +523,42 @@ def _crawl_and_load_plays(
     public_id: str,
     team_id: int,
     season_id: str,
-    crawl_season_id: str,
+    game_ids: list[str] | None = None,
 ) -> list[str]:
-    """Crawl, load, and reconcile plays data for a scouted team's games.
+    """Crawl, load, and reconcile plays data in-memory (E-220-06).
 
-    Discovers game IDs from boxscore filenames on disk (not a DB query) to
-    ensure only games from this report's own crawl are processed -- games
-    loaded by other pipelines are excluded.  See E-211 TN-3.
-
-    Returns the list of game_ids that were processed, for use by downstream
-    plays query functions.
-
-    Failure handling is per-game: individual game failures are logged and
-    skipped.  ``CredentialExpiredError`` propagates as a stage-level failure.
-    All other stage-level exceptions are caught (non-fatal).
+    Game IDs come from crawl result boxscores (in-memory), not disk globs.
+    Plays are fetched in-memory and written to temp files for PlaysLoader.
 
     Args:
         client: Authenticated ``GameChangerClient``.
         public_id: The scouted team's ``public_id`` slug.
         team_id: The team's DB integer PK.
         season_id: Canonical DB season_id for query scoping.
-        crawl_season_id: File-discovery season slug for directory paths.
+        game_ids: List of game IDs from the crawl result boxscores.
 
     Returns:
-        List of game_id strings that were processed (crawled, loaded, or
-        already present).  Empty list if no games found.
+        List of game_id strings that were processed.
     """
+    import tempfile
+
+    if not game_ids:
+        logger.info("No game IDs for plays stage for public_id=%s; skipping.", public_id)
+        return []
+
     try:
-        scouting_dir = _DATA_ROOT / crawl_season_id / "scouting" / public_id
-        plays_dir = scouting_dir / "plays"
-        plays_dir.mkdir(parents=True, exist_ok=True)
-
-        # Discover games from boxscore filenames on disk (E-211: filesystem-only).
-        boxscores_dir = scouting_dir / "boxscores"
-        if not boxscores_dir.is_dir():
-            logger.info("No boxscores directory for public_id=%s; skipping plays stage.", public_id)
-            return []
-        game_ids = sorted(p.stem for p in boxscores_dir.glob("*.json"))
-
-        if not game_ids:
-            logger.info("No boxscore files for public_id=%s; skipping plays stage.", public_id)
-            return []
-
-        # Crawl: fetch plays for each game (per-game error isolation)
-        fetched_game_ids: list[str] = []
+        # Crawl: fetch plays for each game in-memory (per-game error isolation)
+        plays_data: dict[str, dict] = {}
         for game_id in game_ids:
-            # Check DB idempotency
+            # Check DB idempotency (perspective-aware)
             with closing(get_connection()) as conn:
                 existing = conn.execute(
-                    "SELECT 1 FROM plays WHERE game_id = ? LIMIT 1", (game_id,)
+                    "SELECT 1 FROM plays WHERE game_id = ? AND perspective_team_id = ? LIMIT 1",
+                    (game_id, team_id),
                 ).fetchone()
             if existing is not None:
-                logger.debug("Plays already loaded for game %s; skipping crawl.", game_id)
-                fetched_game_ids.append(game_id)  # still reconcile/query
-                continue
-
-            plays_file = plays_dir / f"{game_id}.json"
-            if plays_file.is_file():
-                logger.debug("Plays file exists for game %s; skipping fetch.", game_id)
-                fetched_game_ids.append(game_id)
+                logger.debug("Plays already loaded for game %s perspective %d; skipping.", game_id, team_id)
+                plays_data[game_id] = {}  # mark as processed for reconcile
                 continue
 
             try:
@@ -595,10 +566,7 @@ def _crawl_and_load_plays(
                     f"/game-stream-processing/{game_id}/plays",
                     accept=_PLAYS_ACCEPT,
                 )
-                plays_file.write_text(
-                    json.dumps(raw, indent=2), encoding="utf-8"
-                )
-                fetched_game_ids.append(game_id)
+                plays_data[game_id] = raw if isinstance(raw, dict) else {}
                 logger.debug("Fetched plays for game %s.", game_id)
             except CredentialExpiredError:
                 raise
@@ -609,24 +577,11 @@ def _crawl_and_load_plays(
                     exc_info=True,
                 )
 
-        if not fetched_game_ids:
+        if not plays_data:
             logger.info("No plays data fetched for team_id=%d.", team_id)
             return []
 
-        # Remove stale plays files not in the boxscore-derived game list.
-        # Pre-fix runs may have fetched plays for opponent-perspective games
-        # that are no longer in the boxscore inventory.  PlaysLoader loads
-        # every plays/*.json, so stale files would create stub player rows.
-        valid_game_id_set = set(game_ids)
-        for stale_file in plays_dir.glob("*.json"):
-            if stale_file.stem not in valid_game_id_set:
-                logger.info(
-                    "Removing stale plays file %s (not in boxscore inventory).",
-                    stale_file.name,
-                )
-                stale_file.unlink()
-
-        # Load: use PlaysLoader for all fetched games
+        # Load: write each game's plays to a temp dir, then use PlaysLoader
         with closing(get_connection()) as conn:
             row = conn.execute(
                 "SELECT gc_uuid, public_id FROM teams WHERE id = ?", (team_id,)
@@ -635,24 +590,41 @@ def _crawl_and_load_plays(
             team_public_id = row[1] if row else public_id
 
         team_ref = TeamRef(id=team_id, gc_uuid=gc_uuid, public_id=team_public_id)
-        with closing(get_connection()) as conn:
-            loader = PlaysLoader(conn, owned_team_ref=team_ref)
-            load_result = loader.load_all(scouting_dir)
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            plays_dir = Path(tmp_dir) / "plays"
+            plays_dir.mkdir()
+            for gid, data in plays_data.items():
+                if data:  # only write non-empty (skip already-loaded)
+                    (plays_dir / f"{gid}.json").write_text(
+                        json.dumps(data), encoding="utf-8"
+                    )
+
+            with closing(get_connection()) as conn:
+                loader = PlaysLoader(conn, owned_team_ref=team_ref)
+                load_result = loader.load_all(Path(tmp_dir))
+
         logger.info(
             "Plays load for team_id=%d: loaded=%d skipped=%d errors=%d",
             team_id, load_result.loaded, load_result.skipped, load_result.errors,
         )
 
-        # Reconcile: correct pitcher attribution for each game
+        # Reconcile: correct pitcher attribution for each game.  E-220 round
+        # 6 cluster 4: pass perspective_team_id=team_id so reconcile targets
+        # the report's team perspective.  Otherwise cross-perspective games
+        # where team_id != home_team_id would reconcile the wrong rows.
         for game_id in game_ids:
             try:
                 with closing(get_connection()) as conn:
-                    # Only reconcile games that have plays in DB
                     has_plays = conn.execute(
-                        "SELECT 1 FROM plays WHERE game_id = ? LIMIT 1", (game_id,)
+                        "SELECT 1 FROM plays WHERE game_id = ? AND perspective_team_id = ? LIMIT 1",
+                        (game_id, team_id),
                     ).fetchone()
                     if has_plays:
-                        reconcile_game(conn, game_id, dry_run=False)
+                        reconcile_game(
+                            conn, game_id, dry_run=False,
+                            perspective_team_id=team_id,
+                        )
             except Exception:  # noqa: BLE001
                 logger.warning(
                     "Reconciliation failed for game %s; plays data still usable.",
@@ -660,9 +632,6 @@ def _crawl_and_load_plays(
                     exc_info=True,
                 )
 
-        # Return the full boxscore-derived game list (not just newly fetched).
-        # Games from prior runs are already loaded and should be included in
-        # the downstream query scope.
         return game_ids
 
     except CredentialExpiredError:
@@ -704,10 +673,11 @@ def _query_plays_pitching_stats(
                 COUNT(*) AS total_bf
             FROM plays p
             WHERE p.game_id IN ({placeholders})
+              AND p.perspective_team_id = ?
               AND p.pitcher_id IS NOT NULL
             GROUP BY p.pitcher_id
             """,
-            game_ids,
+            [*game_ids, team_id],
         ).fetchall()
     else:
         rows = conn.execute(
@@ -722,10 +692,11 @@ def _query_plays_pitching_stats(
             JOIN games g ON g.game_id = p.game_id
             WHERE g.season_id = ?
               AND (g.home_team_id = ? OR g.away_team_id = ?)
+              AND p.perspective_team_id = ?
               AND p.pitcher_id IS NOT NULL
             GROUP BY p.pitcher_id
             """,
-            (season_id, team_id, team_id),
+            (season_id, team_id, team_id, team_id),
         ).fetchall()
 
     result: dict[str, dict] = {}
@@ -769,9 +740,10 @@ def _query_plays_batting_stats(
             FROM plays p
             WHERE p.game_id IN ({placeholders})
               AND p.batting_team_id = ?
+              AND p.perspective_team_id = ?
             GROUP BY p.batter_id
             """,
-            [*game_ids, team_id],
+            [*game_ids, team_id, team_id],
         ).fetchall()
     else:
         rows = conn.execute(
@@ -785,9 +757,10 @@ def _query_plays_batting_stats(
             JOIN games g ON g.game_id = p.game_id
             WHERE g.season_id = ?
               AND p.batting_team_id = ?
+              AND p.perspective_team_id = ?
             GROUP BY p.batter_id
             """,
-            (season_id, team_id),
+            (season_id, team_id, team_id),
         ).fetchall()
 
     result: dict[str, dict] = {}
@@ -832,8 +805,9 @@ def _query_plays_team_stats(
             SELECT COUNT(DISTINCT p.game_id)
             FROM plays p
             WHERE p.game_id IN ({placeholders})
+              AND p.perspective_team_id = ?
             """,
-            game_ids,
+            [*game_ids, team_id],
         ).fetchone()
     else:
         row = conn.execute(
@@ -843,8 +817,9 @@ def _query_plays_team_stats(
             JOIN games g ON g.game_id = p.game_id
             WHERE g.season_id = ?
               AND (g.home_team_id = ? OR g.away_team_id = ?)
+              AND p.perspective_team_id = ?
             """,
-            (season_id, team_id, team_id),
+            (season_id, team_id, team_id, team_id),
         ).fetchone()
     plays_game_count = row[0] if row else 0
     has_plays_data = plays_game_count > 0
@@ -869,9 +844,10 @@ def _query_plays_team_stats(
                 AND tr.team_id = ?
                 AND tr.season_id = ?
             WHERE p.game_id IN ({placeholders})
+              AND p.perspective_team_id = ?
               AND p.pitcher_id IS NOT NULL
             """,
-            [team_id, season_id, *game_ids],
+            [team_id, season_id, *game_ids, team_id],
         ).fetchone()
     else:
         fps_row = conn.execute(
@@ -886,9 +862,10 @@ def _query_plays_team_stats(
                 AND tr.season_id = ?
             WHERE g.season_id = ?
               AND (g.home_team_id = ? OR g.away_team_id = ?)
+              AND p.perspective_team_id = ?
               AND p.pitcher_id IS NOT NULL
             """,
-            (team_id, season_id, season_id, team_id, team_id),
+            (team_id, season_id, season_id, team_id, team_id, team_id),
         ).fetchone()
     fps_sum = fps_row[0] if fps_row and fps_row[0] else 0
     fps_denom = fps_row[1] if fps_row and fps_row[1] else 0
@@ -902,8 +879,9 @@ def _query_plays_team_stats(
             FROM plays p
             WHERE p.game_id IN ({placeholders})
               AND p.batting_team_id = ?
+              AND p.perspective_team_id = ?
             """,
-            [*game_ids, team_id],
+            [*game_ids, team_id, team_id],
         ).fetchone()
     else:
         ppa_row = conn.execute(
@@ -913,8 +891,9 @@ def _query_plays_team_stats(
             JOIN games g ON g.game_id = p.game_id
             WHERE g.season_id = ?
               AND p.batting_team_id = ?
+              AND p.perspective_team_id = ?
             """,
-            (season_id, team_id),
+            (season_id, team_id, team_id),
         ).fetchone()
     total_pitches = ppa_row[0] if ppa_row and ppa_row[0] else 0
     total_pa = ppa_row[1] if ppa_row and ppa_row[1] else 0
@@ -1028,44 +1007,27 @@ def generate_report(gc_url: str) -> GenerationResult:
     with closing(get_connection()) as conn:
         pre_team_ids = _snapshot_team_ids(conn)
 
-    # Step 4: Run scouting pipeline synchronously
+    # Step 4: Run scouting pipeline synchronously (in-memory -- E-220-06)
     try:
         client = GameChangerClient()
         with closing(get_connection()) as conn:
             crawler = ScoutingCrawler(client, conn)
             crawl_result = crawler.scout_team(public_id)
 
-        if crawl_result.errors > 0 and crawl_result.files_written == 0:
+        if crawl_result.errors > 0 and crawl_result.games_crawled == 0:
             _fail_report(report_id, "Scouting crawl failed — no data retrieved.")
             return GenerationResult(
                 success=False, slug=slug, error_message="Scouting crawl failed."
             )
 
-        # Find the crawl-path season_id from scouting_runs (file discovery only).
-        with closing(get_connection()) as conn:
-            crawl_season_id = _query_season_id(conn, team_id)
-
         # Derive the canonical DB season_id from team metadata.
         with closing(get_connection()) as conn:
             season_id, _ = derive_season_id_for_team(conn, team_id)
 
-        if not crawl_season_id:
-            # Use the team-derived season_id as a plausible crawl directory
-            # name so the report renders with "No data available" sections
-            # rather than hard-failing.
-            crawl_season_id = season_id
-            logger.warning(
-                "No scouting_runs season for team_id=%d; using fallback crawl_season_id=%s",
-                team_id, crawl_season_id,
-            )
-
-        # Run the loader (crawl_season_id locates files; loader derives DB season_id internally).
+        # Run the loader with in-memory crawl result.
         with closing(get_connection()) as conn:
             loader = ScoutingLoader(conn)
-            scouting_dir = _DATA_ROOT / crawl_season_id / "scouting" / public_id
-            load_result = loader.load_team(
-                scouting_dir, team_id=team_id, season_id=crawl_season_id
-            )
+            load_result = loader.load_team(crawl_result)
 
         if load_result.loaded == 0 and load_result.errors > 0:
             _fail_report(report_id, "Scouting load failed — no data loaded.")
@@ -1112,17 +1074,20 @@ def generate_report(gc_url: str) -> GenerationResult:
                     )
                     conn.commit()
 
-        # Step 4c: Spray chart crawl/load via scouting spray pipeline
-        # crawl_season_id locates files; loaders derive DB season_id internally.
-        _crawl_and_load_spray(client, public_id, crawl_season_id, gc_uuid=resolved_gc_uuid)
+        # Step 4c: Spray chart crawl/load (in-memory -- E-220-06)
+        _crawl_and_load_spray(
+            client, public_id, season_id,
+            gc_uuid=resolved_gc_uuid,
+            games_data=crawl_result.games,
+        )
 
-        # Step 4d: Plays crawl/load/reconcile (supplementary — auth expiry
-        # is non-fatal here, unlike the primary scouting crawl stage).
-        # Returns list of game_ids processed for scoped plays queries.
+        # Step 4d: Plays crawl/load/reconcile (in-memory -- E-220-06).
+        # Game IDs from crawl result boxscores, not disk globs.
         plays_game_ids: list[str] = []
         try:
             plays_game_ids = _crawl_and_load_plays(
-                client, public_id, team_id, season_id, crawl_season_id,
+                client, public_id, team_id, season_id,
+                game_ids=sorted(crawl_result.boxscores.keys()),
             )
         except CredentialExpiredError:
             logger.warning(
@@ -1338,30 +1303,91 @@ def _snapshot_team_ids(conn: sqlite3.Connection) -> set[int]:
     return {row[0] for row in conn.execute("SELECT id FROM teams")}
 
 
-def _delete_game_scoped_data(conn: sqlite3.Connection, game_ids: list[str]) -> None:
-    """Delete all game-scoped dependent rows for the given game IDs.
+def _delete_game_scoped_data_for_perspectives(
+    conn: sqlite3.Connection,
+    game_ids: list[str],
+    perspective_team_ids: list[int],
+) -> None:
+    """Delete game-scoped rows owned by the given perspectives only.
 
-    FK-safe order per TN-6 Phase 1: play_events → plays →
-    reconciliation_discrepancies → player_game_batting →
-    player_game_pitching → spray_charts → games.
+    E-220 round 6 cluster 2: scoped replacement for the prior
+    ``_delete_game_scoped_data()``.  Preserves rows belonging to OTHER
+    perspectives of the same games.  The ``games`` row itself is only
+    deleted when no other perspective remains in ``game_perspectives``;
+    otherwise the games row is preserved so the other perspective's data
+    still has a valid FK target.
+
+    FK-safe order: play_events -> plays -> reconciliation_discrepancies ->
+    player_game_batting -> player_game_pitching -> spray_charts ->
+    game_perspectives -> games.
+
+    Args:
+        conn: Open SQLite connection.
+        game_ids: The games whose dependent rows should be considered.
+        perspective_team_ids: Delete only rows tagged with these
+            perspectives.  Rows belonging to other perspectives are
+            preserved.
+
+    Note: ``reconciliation_discrepancies`` uses ``perspective_team_id``
+    directly for perspective-scoped deletion (E-220 round 7 P1-2).
     """
-    if not game_ids:
+    if not game_ids or not perspective_team_ids:
         return
     gp = ",".join("?" for _ in game_ids)
+    pp = ",".join("?" for _ in perspective_team_ids)
+    params = list(game_ids) + list(perspective_team_ids)
+
+    # play_events inherits perspective via parent plays (FK to plays.id)
     conn.execute(
-        f"DELETE FROM play_events WHERE play_id IN "
-        f"(SELECT id FROM plays WHERE game_id IN ({gp}))",
-        game_ids,
+        f"DELETE FROM play_events WHERE play_id IN ("
+        f"  SELECT id FROM plays "
+        f"  WHERE game_id IN ({gp}) AND perspective_team_id IN ({pp})"
+        f")",
+        params,
     )
-    conn.execute(f"DELETE FROM plays WHERE game_id IN ({gp})", game_ids)
     conn.execute(
-        f"DELETE FROM reconciliation_discrepancies WHERE game_id IN ({gp})",
-        game_ids,
+        f"DELETE FROM plays "
+        f"WHERE game_id IN ({gp}) AND perspective_team_id IN ({pp})",
+        params,
     )
-    conn.execute(f"DELETE FROM player_game_batting WHERE game_id IN ({gp})", game_ids)
-    conn.execute(f"DELETE FROM player_game_pitching WHERE game_id IN ({gp})", game_ids)
-    conn.execute(f"DELETE FROM spray_charts WHERE game_id IN ({gp})", game_ids)
-    conn.execute(f"DELETE FROM games WHERE game_id IN ({gp})", game_ids)
+    # reconciliation_discrepancies: scope by perspective_team_id so
+    # cross-perspective game-level rows for the opposite participant are
+    # not incorrectly preserved (E-220 round 7 P1-2 bonus bugfix).
+    conn.execute(
+        f"DELETE FROM reconciliation_discrepancies "
+        f"WHERE game_id IN ({gp}) AND perspective_team_id IN ({pp})",
+        params,
+    )
+    conn.execute(
+        f"DELETE FROM player_game_batting "
+        f"WHERE game_id IN ({gp}) AND perspective_team_id IN ({pp})",
+        params,
+    )
+    conn.execute(
+        f"DELETE FROM player_game_pitching "
+        f"WHERE game_id IN ({gp}) AND perspective_team_id IN ({pp})",
+        params,
+    )
+    conn.execute(
+        f"DELETE FROM spray_charts "
+        f"WHERE game_id IN ({gp}) AND perspective_team_id IN ({pp})",
+        params,
+    )
+    conn.execute(
+        f"DELETE FROM game_perspectives "
+        f"WHERE game_id IN ({gp}) AND perspective_team_id IN ({pp})",
+        params,
+    )
+    # Only delete the games row if no other perspective remains for that game.
+    conn.execute(
+        f"DELETE FROM games "
+        f"WHERE game_id IN ({gp}) "
+        f"  AND NOT EXISTS ("
+        f"    SELECT 1 FROM game_perspectives gp2 "
+        f"    WHERE gp2.game_id = games.game_id"
+        f"  )",
+        list(game_ids),
+    )
 
 
 def _delete_team_scoped_data(
@@ -1393,18 +1419,50 @@ def _delete_team_scoped_data(
 
 
 def cascade_delete_team(conn: sqlite3.Connection, team_id: int) -> None:
-    """Cascade-delete a single team and ALL its dependent data.
+    """Cascade-delete a single team and its dependent data.
 
     Used by the report-deletion path where the team is confirmed eligible
-    for cleanup (all guard conditions passed).  Deletes ALL games
-    involving this team (including shared games).
+    for cleanup (all guard conditions passed).  Deletes only rows owned
+    by this team's perspective; cross-perspective rows belonging to other
+    teams are preserved, as are games rows when another perspective
+    remains.  The team-scoped tables (rosters, season aggregates,
+    scouting_runs, etc.) are deleted unconditionally since they are keyed
+    on team_id alone.
+
+    FK-safe team-row deletion (round 7 P1-1): after data cleanup, the
+    ``teams`` row itself is only deleted when no ``games`` row still
+    FK-references the team.  A survivor occurs when another stub
+    perspective loaded the same game and its ``game_perspectives`` row
+    kept the ``games`` row alive.  In that case, the team-scoped data
+    is still cleaned, but the ``teams`` row is retained to preserve the
+    cross-perspective ``games`` FK target.  This mirrors the pattern
+    ``cleanup_orphan_teams`` uses.
     """
     game_rows = conn.execute(
         "SELECT game_id FROM games WHERE home_team_id = ? OR away_team_id = ?",
         (team_id, team_id),
     ).fetchall()
-    _delete_game_scoped_data(conn, [r[0] for r in game_rows])
-    _delete_team_scoped_data(conn, [team_id])
+    _delete_game_scoped_data_for_perspectives(
+        conn, [r[0] for r in game_rows], [team_id],
+    )
+    _delete_team_scoped_data(conn, [team_id], delete_team_rows=False)
+
+    # Only delete the teams row if no games row still FK-references it.
+    game_still_references_team = conn.execute(
+        "SELECT 1 FROM games WHERE home_team_id = ? OR away_team_id = ? LIMIT 1",
+        (team_id, team_id),
+    ).fetchone() is not None
+
+    if game_still_references_team:
+        conn.commit()
+        logger.info(
+            "Cascade-deleted data for team_id=%d; teams row retained "
+            "(cross-perspective games still reference it).",
+            team_id,
+        )
+        return
+
+    conn.execute("DELETE FROM teams WHERE id = ?", (team_id,))
     conn.commit()
     logger.info("Cascade-deleted team_id=%d and all dependent data.", team_id)
 
@@ -1426,13 +1484,17 @@ def cleanup_orphan_teams(
     placeholders = ",".join("?" for _ in orphan_ids)
     id_list = list(orphan_ids)
 
-    # Phase 1: delete games where BOTH participants are orphans
+    # Phase 1: delete games where BOTH participants are orphans.  Scope to
+    # orphan perspectives only -- non-orphan perspective rows for the same
+    # games (e.g., the report team's perspective) are preserved.
     game_rows = conn.execute(
         f"SELECT game_id FROM games WHERE home_team_id IN ({placeholders}) "
         f"AND away_team_id IN ({placeholders})",
         id_list + id_list,
     ).fetchall()
-    _delete_game_scoped_data(conn, [r[0] for r in game_rows])
+    _delete_game_scoped_data_for_perspectives(
+        conn, [r[0] for r in game_rows], id_list,
+    )
 
     # Determine which orphans still have remaining game FK references
     remaining_rows = conn.execute(

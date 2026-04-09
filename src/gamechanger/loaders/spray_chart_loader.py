@@ -211,7 +211,8 @@ class SprayChartLoader:
                 )
                 for event in events:
                     r = self._insert_event(
-                        event, game_id, player_uuid, team_id, chart_type, season_id
+                        event, game_id, player_uuid, team_id, chart_type, season_id,
+                        crawling_team_id,
                     )
                     result.loaded += r.loaded
                     result.skipped += r.skipped
@@ -283,6 +284,7 @@ class SprayChartLoader:
         team_id: int,
         chart_type: str,
         season_id: str,
+        perspective_team_id: int,
     ) -> LoadResult:
         """Insert a single spray chart event.
 
@@ -293,6 +295,8 @@ class SprayChartLoader:
             team_id: Resolved integer teams.id.
             chart_type: ``'offensive'`` or ``'defensive'``.
             season_id: Season slug from the file path.
+            perspective_team_id: INTEGER PK of the team whose API call produced
+                this data.
 
         Returns:
             ``LoadResult(loaded=1)`` on insert, ``LoadResult(skipped=1)`` on
@@ -345,8 +349,9 @@ class SprayChartLoader:
                 game_id, player_id, team_id, pitcher_id,
                 chart_type, play_type, play_result,
                 x, y, fielder_position, error,
-                event_gc_id, created_at_ms, season_id
-            ) VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                event_gc_id, created_at_ms, season_id,
+                perspective_team_id
+            ) VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 game_id,
@@ -362,6 +367,7 @@ class SprayChartLoader:
                 event_gc_id,
                 created_at_ms,
                 season_id,
+                perspective_team_id,
             ),
         )
         if cursor.rowcount == 1:

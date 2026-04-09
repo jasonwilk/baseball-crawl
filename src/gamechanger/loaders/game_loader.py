@@ -634,14 +634,31 @@ class GameLoader:
             logger.error("Failed to upsert game %s: %s", summary.event_id, exc)
             return LoadResult(errors=1)
 
+        # Record which perspective loaded this game.
+        perspective_team_id = self._team_ref.id
+        try:
+            self._db.execute(
+                """
+                INSERT OR IGNORE INTO game_perspectives
+                    (game_id, perspective_team_id)
+                VALUES (?, ?)
+                """,
+                (summary.event_id, perspective_team_id),
+            )
+        except sqlite3.Error as exc:
+            logger.error(
+                "Failed to insert game_perspectives for game %s perspective %s: %s",
+                summary.event_id, perspective_team_id, exc,
+            )
+
         result = LoadResult()
         if own_data:
-            r = self._load_team_stats(own_data, own_team_id, summary.event_id)
+            r = self._load_team_stats(own_data, own_team_id, summary.event_id, perspective_team_id)
             result.loaded += r.loaded
             result.skipped += r.skipped
             result.errors += r.errors
         if opp_data:
-            r = self._load_team_stats(opp_data, opp_team_id, summary.event_id)
+            r = self._load_team_stats(opp_data, opp_team_id, summary.event_id, perspective_team_id)
             result.loaded += r.loaded
             result.skipped += r.skipped
             result.errors += r.errors
@@ -694,7 +711,8 @@ class GameLoader:
         return own_key, opp_key
 
     def _load_team_stats(
-        self, team_data: dict, team_id: int, game_id: str
+        self, team_data: dict, team_id: int, game_id: str,
+        perspective_team_id: int,
     ) -> LoadResult:
         """Parse and load batting + pitching lines for one team in a boxscore.
 
@@ -707,6 +725,8 @@ class GameLoader:
                 ``players`` and ``groups``).
             team_id: INTEGER PK from the ``teams`` table for this side of the game.
             game_id: Canonical event_id (games.game_id FK).
+            perspective_team_id: INTEGER PK of the team whose API call produced
+                this boxscore data.
 
         Returns:
             ``LoadResult`` for this team's players.
@@ -724,9 +744,9 @@ class GameLoader:
         for group in groups:
             category = group.get("category")
             if category == "lineup":
-                r = self._load_batting_group(group, team_id, game_id, player_info)
+                r = self._load_batting_group(group, team_id, game_id, player_info, perspective_team_id)
             elif category == "pitching":
-                r = self._load_pitching_group(group, team_id, game_id, player_info)
+                r = self._load_pitching_group(group, team_id, game_id, player_info, perspective_team_id)
             else:
                 logger.debug("Unknown boxscore category %r for team %s; ignoring.", category, team_id)
                 continue
@@ -742,7 +762,8 @@ class GameLoader:
 
     def _load_batting_group(
         self, group: dict, team_id: int, game_id: str,
-        player_info: dict[str, dict] | None = None,
+        player_info: dict[str, dict] | None,
+        perspective_team_id: int,
     ) -> LoadResult:
         """Parse and upsert batting lines from a lineup group.
 
@@ -800,7 +821,7 @@ class GameLoader:
                 self._upsert_roster_jersey(
                     team_id, player_id, info.get("number"),
                 )
-                self._upsert_batting(batting, team_id, game_id)
+                self._upsert_batting(batting, team_id, game_id, perspective_team_id)
                 result.loaded += 1
             except sqlite3.Error as exc:
                 logger.error(
@@ -819,7 +840,8 @@ class GameLoader:
 
     def _load_pitching_group(
         self, group: dict, team_id: int, game_id: str,
-        player_info: dict[str, dict] | None = None,
+        player_info: dict[str, dict] | None,
+        perspective_team_id: int,
     ) -> LoadResult:
         """Parse and upsert pitching lines from a pitching group.
 
@@ -883,7 +905,7 @@ class GameLoader:
                 self._upsert_roster_jersey(
                     team_id, player_id, info.get("number"),
                 )
-                self._upsert_pitching(pitching, team_id, game_id)
+                self._upsert_pitching(pitching, team_id, game_id, perspective_team_id)
                 result.loaded += 1
             except sqlite3.Error as exc:
                 logger.error(
@@ -1103,7 +1125,8 @@ class GameLoader:
         )
 
     def _upsert_batting(
-        self, batting: _PlayerBatting, team_id: int, game_id: str
+        self, batting: _PlayerBatting, team_id: int, game_id: str,
+        perspective_team_id: int,
     ) -> None:
         """Upsert a batting line into ``player_game_batting``.
 
@@ -1111,14 +1134,17 @@ class GameLoader:
             batting: Parsed batting record.
             team_id: INTEGER PK from the ``teams`` table.
             game_id: Canonical event_id.
+            perspective_team_id: INTEGER PK of the team whose API call produced
+                this data.  REQUIRED -- no default per E-220 hard-error guarantee.
         """
         self._db.execute(
             """
             INSERT INTO player_game_batting
-                (game_id, player_id, team_id, ab, r, h, doubles, triples,
+                (game_id, player_id, team_id, perspective_team_id,
+                 ab, r, h, doubles, triples,
                  hr, rbi, bb, so, sb, tb, hbp, cs, shf, e)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(game_id, player_id) DO UPDATE SET
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(game_id, player_id, perspective_team_id) DO UPDATE SET
                 team_id = excluded.team_id,
                 ab      = excluded.ab,
                 r       = excluded.r,
@@ -1140,6 +1166,7 @@ class GameLoader:
                 game_id,
                 batting.player_id,
                 team_id,
+                perspective_team_id,
                 batting.ab,
                 batting.r,
                 batting.h,
@@ -1159,7 +1186,8 @@ class GameLoader:
         )
 
     def _upsert_pitching(
-        self, pitching: _PlayerPitching, team_id: int, game_id: str
+        self, pitching: _PlayerPitching, team_id: int, game_id: str,
+        perspective_team_id: int,
     ) -> None:
         """Upsert a pitching line into ``player_game_pitching``.
 
@@ -1167,14 +1195,17 @@ class GameLoader:
             pitching: Parsed pitching record.
             team_id: INTEGER PK from the ``teams`` table.
             game_id: Canonical event_id.
+            perspective_team_id: INTEGER PK of the team whose API call produced
+                this data.  REQUIRED -- no default per E-220 hard-error guarantee.
         """
         self._db.execute(
             """
             INSERT INTO player_game_pitching
-                (game_id, player_id, team_id, ip_outs, h, r, er, bb, so,
+                (game_id, player_id, team_id, perspective_team_id,
+                 ip_outs, h, r, er, bb, so,
                  wp, hbp, pitches, total_strikes, bf, appearance_order)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(game_id, player_id) DO UPDATE SET
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(game_id, player_id, perspective_team_id) DO UPDATE SET
                 team_id          = excluded.team_id,
                 ip_outs          = excluded.ip_outs,
                 h                = excluded.h,
@@ -1193,6 +1224,7 @@ class GameLoader:
                 game_id,
                 pitching.player_id,
                 team_id,
+                perspective_team_id,
                 pitching.ip_outs,
                 pitching.h,
                 pitching.r,

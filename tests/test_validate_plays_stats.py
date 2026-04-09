@@ -159,14 +159,14 @@ def _insert_play(
         """
         INSERT INTO plays (
             game_id, play_order, inning, half, season_id, batting_team_id,
-            batter_id, pitcher_id, outcome, pitch_count,
+            perspective_team_id, batter_id, pitcher_id, outcome, pitch_count,
             is_first_pitch_strike, is_qab,
             home_score, away_score, did_score_change, outs_after, did_outs_change
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 0, 0)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 0, 0)
         """,
         (
             game_id, play_order, inning, half, _SEASON_ID, batting_team_id,
-            batter_id, pitcher_id, outcome, pitch_count,
+            batting_team_id, batter_id, pitcher_id, outcome, pitch_count,
             is_fps, is_qab,
         ),
     )

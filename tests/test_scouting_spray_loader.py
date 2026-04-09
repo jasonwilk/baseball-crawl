@@ -35,7 +35,7 @@ from src.gamechanger.loaders.scouting_spray_loader import ScoutingSprayChartLoad
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
 _MIGRATION_001 = _PROJECT_ROOT / "migrations" / "001_initial_schema.sql"
-_MIGRATION_006 = _PROJECT_ROOT / "migrations" / "006_spray_charts_indexes.sql"
+
 
 
 @pytest.fixture()
@@ -45,8 +45,6 @@ def db() -> sqlite3.Connection:
     conn.execute("PRAGMA foreign_keys=ON;")
     conn.commit()
     conn.executescript(_MIGRATION_001.read_text(encoding="utf-8"))
-    conn.execute("ALTER TABLE teams ADD COLUMN season_year INTEGER")
-    conn.executescript(_MIGRATION_006.read_text(encoding="utf-8"))
     conn.commit()
     yield conn
     conn.close()
@@ -878,3 +876,70 @@ def test_mixed_resolvable_and_unresolvable_players(
     ]
     assert len(debug_lines) == 1
     assert _GAME_ID in debug_lines[0].message
+
+
+# ---------------------------------------------------------------------------
+# E-220-04: Perspective tagging
+# ---------------------------------------------------------------------------
+
+
+def test_scouting_spray_rows_have_perspective_team_id(
+    db: sqlite3.Connection, tmp_path: Path
+) -> None:
+    """AC-2: Every scouting spray row has perspective_team_id set to the scouted team's PK."""
+    _seed_season(db)
+    opp_id = _seed_team(db, public_id=_PUBLIC_ID, gc_uuid=_OPP_GC_UUID)
+    own_id = _seed_team(db, name="Own Team", gc_uuid=_OWN_GC_UUID, membership_type="member")
+    _seed_game(db, _GAME_ID, home_team_id=own_id, away_team_id=opp_id)
+    _seed_player(db, _PLAYER_A)
+    _seed_roster(db, _PLAYER_A, opp_id)
+
+    payload = _make_spray_json()
+    _write_spray_file(tmp_path, _CRAWL_SEASON_ID, _PUBLIC_ID, _GAME_ID, payload)
+
+    loader = ScoutingSprayChartLoader(db)
+    loader.load_dir(tmp_path / _CRAWL_SEASON_ID / "scouting" / _PUBLIC_ID / "spray")
+
+    row = db.execute(
+        "SELECT perspective_team_id FROM spray_charts WHERE event_gc_id = ?",
+        (_EVENT_GC_1,),
+    ).fetchone()
+    assert row is not None
+    assert row[0] == opp_id, f"Expected perspective_team_id={opp_id} (scouted team), got {row[0]}"
+
+
+def test_scouting_spray_two_perspectives_coexist(
+    db: sqlite3.Connection, tmp_path: Path
+) -> None:
+    """AC-3: Same event_gc_id from two different scouting perspectives coexists."""
+    _seed_season(db)
+    opp_id = _seed_team(db, public_id=_PUBLIC_ID, gc_uuid=_OPP_GC_UUID)
+    own_id = _seed_team(db, name="Own Team", gc_uuid=_OWN_GC_UUID, membership_type="member")
+    _seed_game(db, _GAME_ID, home_team_id=own_id, away_team_id=opp_id)
+    _seed_player(db, _PLAYER_A)
+    _seed_roster(db, _PLAYER_A, opp_id)
+    _seed_roster(db, _PLAYER_A, own_id)
+
+    payload = _make_spray_json()
+
+    # Load from scouted team perspective.
+    _write_spray_file(tmp_path, _CRAWL_SEASON_ID, _PUBLIC_ID, _GAME_ID, payload)
+    loader = ScoutingSprayChartLoader(db)
+    loader.load_dir(tmp_path / _CRAWL_SEASON_ID / "scouting" / _PUBLIC_ID / "spray")
+
+    # Create a second scouted team with a different public_id.
+    opp2_public_id = "opp-public-id-002"
+    opp2_id = _seed_team(db, name="Second Opponent", public_id=opp2_public_id)
+    _seed_roster(db, _PLAYER_A, opp2_id)
+    _seed_game(db, _GAME_ID + "-2", home_team_id=own_id, away_team_id=opp2_id)
+
+    payload2 = _make_spray_json()
+    _write_spray_file(tmp_path, _CRAWL_SEASON_ID, opp2_public_id, _GAME_ID + "-2", payload2)
+    loader.load_dir(tmp_path / _CRAWL_SEASON_ID / "scouting" / opp2_public_id / "spray")
+
+    rows = db.execute(
+        "SELECT DISTINCT perspective_team_id FROM spray_charts WHERE event_gc_id = ?",
+        (_EVENT_GC_1,),
+    ).fetchall()
+    assert len(rows) == 2, f"Expected 2 perspective rows, got {len(rows)}"
+    assert {r[0] for r in rows} == {opp_id, opp2_id}

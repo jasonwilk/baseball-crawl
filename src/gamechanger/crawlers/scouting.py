@@ -46,6 +46,7 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -60,6 +61,41 @@ from src.gamechanger.client import (
 from src.gamechanger.crawlers import CrawlResult
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# In-memory crawl result (E-220-05 / TN-12 / TN-14)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class ScoutingCrawlResult:
+    """In-memory result from a scouting crawl.
+
+    Replaces the disk-oriented ``CrawlResult`` for the scouting pipeline.
+    Contains actual data (games, roster, boxscores) that the loader consumes
+    directly without filesystem intermediation.
+
+    Attributes:
+        team_id: INTEGER PK of the scouted team in the ``teams`` table.
+        season_id: The crawl-derived season slug (e.g. ``"2025-spring-hs"``).
+        games: List of game dicts from the public games endpoint.
+        roster: List of player dicts from the public roster endpoint.
+        boxscores: Dict mapping game_stream_id to boxscore dict.
+        games_crawled: Count of boxscores successfully fetched.
+        errors: Count of errors encountered during crawl.
+        skipped: True if no completed games were found (nothing to do).
+    """
+
+    team_id: int
+    season_id: str
+    public_id: str = ""
+    games: list[dict[str, Any]] = field(default_factory=list)
+    roster: list[dict[str, Any]] = field(default_factory=list)
+    boxscores: dict[str, dict[str, Any]] = field(default_factory=dict)
+    games_crawled: int = 0
+    errors: int = 0
+    skipped: bool = False
 
 # ---------------------------------------------------------------------------
 # Accept headers
@@ -118,19 +154,27 @@ class ScoutingCrawler:
     # Public API
     # ------------------------------------------------------------------
 
-    def scout_team(self, public_id: str, season_id: str | None = None) -> CrawlResult:
-        """Fetch schedule, roster, and boxscores for one opponent team."""
+    def scout_team(self, public_id: str, season_id: str | None = None) -> ScoutingCrawlResult:
+        """Fetch schedule, roster, and boxscores for one opponent team.
+
+        Returns an in-memory ``ScoutingCrawlResult`` containing all crawled
+        data.  No files are written to disk.  DB side effects (teams, seasons,
+        scouting_runs) are preserved.
+        """
         logger.info("Scouting team public_id=%s", public_id)
         now_str = _utcnow_iso()
 
         games_data = self._fetch_schedule(public_id)
         if games_data is None:
-            return CrawlResult(errors=1)
+            # Need a team_id for the result -- ensure row exists.
+            team_id = self._ensure_team_row(public_id=public_id)
+            return ScoutingCrawlResult(team_id=team_id, season_id="", public_id=public_id, errors=1)
 
         completed_games = [g for g in games_data if g.get("game_status") == "completed"]
         if not completed_games:
             logger.info("No completed games for public_id=%s; skipping.", public_id)
-            return CrawlResult(files_skipped=1)
+            team_id = self._ensure_team_row(public_id=public_id)
+            return ScoutingCrawlResult(team_id=team_id, season_id="", public_id=public_id, skipped=True)
 
         if season_id is None:
             season_id = _derive_season_id(completed_games, self._season_suffix)
@@ -140,27 +184,30 @@ class ScoutingCrawler:
         self._ensure_season_row(season_id)
         self._upsert_run_start(team_id, season_id, now_str, len(completed_games))
 
-        scouting_dir = self._data_root / season_id / "scouting" / public_id
-        scouting_dir.mkdir(parents=True, exist_ok=True)
-        (scouting_dir / "games.json").write_text(
-            json.dumps(games_data, indent=2), encoding="utf-8"
-        )
-
-        roster_list = self._fetch_and_write_roster(public_id, scouting_dir)
+        roster_list = self._fetch_roster(public_id)
         if roster_list is None:
             self._upsert_run_end(team_id, season_id, "failed", len(completed_games), 0, None, "Roster fetch failed")
             self._db.commit()
-            return CrawlResult(errors=1)
+            return ScoutingCrawlResult(team_id=team_id, season_id=season_id, public_id=public_id, errors=1)
 
-        boxscores_dir = scouting_dir / "boxscores"
-        boxscores_dir.mkdir(parents=True, exist_ok=True)
-        games_crawled = self._fetch_boxscores(public_id, completed_games, boxscores_dir)
+        boxscores, games_crawled = self._fetch_boxscores_in_memory(public_id, completed_games)
 
-        return self._finalize_crawl_result(
+        result = self._finalize_crawl(
             team_id, season_id, completed_games, games_crawled, len(roster_list)
         )
 
-    def _finalize_crawl_result(
+        return ScoutingCrawlResult(
+            team_id=team_id,
+            season_id=season_id,
+            public_id=public_id,
+            games=games_data,
+            roster=roster_list,
+            boxscores=boxscores,
+            games_crawled=games_crawled,
+            errors=result.errors,
+        )
+
+    def _finalize_crawl(
         self,
         team_id: int,
         season_id: str,
@@ -201,10 +248,10 @@ class ScoutingCrawler:
             return None
         return games_data
 
-    def _fetch_and_write_roster(
-        self, public_id: str, scouting_dir: Path
+    def _fetch_roster(
+        self, public_id: str
     ) -> list[dict[str, Any]] | None:
-        """Fetch the roster and write ``roster.json``."""
+        """Fetch the roster in memory (no file write)."""
         try:
             roster_data = self._client.get(
                 f"/teams/public/{public_id}/players",
@@ -214,24 +261,23 @@ class ScoutingCrawler:
             logger.warning("Roster fetch failed for public_id=%s: %s", public_id, exc)
             return None
         roster_list: list[dict[str, Any]] = roster_data if isinstance(roster_data, list) else []
-        (scouting_dir / "roster.json").write_text(
-            json.dumps(roster_list, indent=2), encoding="utf-8"
-        )
-        logger.info("Wrote roster.json for public_id=%s (%d players).", public_id, len(roster_list))
+        logger.info("Fetched roster for public_id=%s (%d players).", public_id, len(roster_list))
         return roster_list
 
-    def _fetch_boxscores(
+    def _fetch_boxscores_in_memory(
         self,
         public_id: str,
         completed_games: list[dict[str, Any]],
-        boxscores_dir: Path,
-    ) -> int:
-        """Fetch and write a boxscore file for each completed game."""
+    ) -> tuple[dict[str, dict[str, Any]], int]:
+        """Fetch boxscores and return them in memory (no file write).
+
+        Returns:
+            Tuple of ``(boxscores_dict, games_crawled)`` where
+            ``boxscores_dict`` maps ``game_stream_id`` to boxscore dict.
+        """
+        boxscores: dict[str, dict[str, Any]] = {}
         games_crawled = 0
         for game in completed_games:
-            # game.get("id") is the public-endpoint equivalent of event_id in the
-            # authenticated flow (game-summaries).  Pass it directly to the boxscore
-            # endpoint -- no bridge call required (confirmed 2026-03-19).
             game_stream_id = game.get("id")
             if not game_stream_id:
                 logger.warning("Game missing 'id' for public_id=%s; skipping.", public_id)
@@ -241,7 +287,7 @@ class ScoutingCrawler:
                     f"/game-stream-processing/{game_stream_id}/boxscore",
                     accept=_BOXSCORE_ACCEPT,
                 )
-            except ForbiddenError as exc:  # ForbiddenError subclasses CredentialExpiredError; catch first
+            except ForbiddenError as exc:
                 logger.warning(
                     "Boxscore fetch failed game=%s public_id=%s: %s",
                     game_stream_id, public_id, exc,
@@ -258,15 +304,13 @@ class ScoutingCrawler:
             if not isinstance(boxscore, dict):
                 logger.warning("Unexpected boxscore type game=%s: %s", game_stream_id, type(boxscore).__name__)
                 continue
-            (boxscores_dir / f"{game_stream_id}.json").write_text(
-                json.dumps(boxscore, indent=2), encoding="utf-8"
-            )
+            boxscores[str(game_stream_id)] = boxscore
             games_crawled += 1
         logger.info(
             "Boxscores for public_id=%s: crawled=%d / found=%d.",
             public_id, games_crawled, len(completed_games),
         )
-        return games_crawled
+        return boxscores, games_crawled
 
     def update_run_load_status(
         self, team_id: int, season_id: str, status: str
@@ -336,11 +380,67 @@ class ScoutingCrawler:
                 total.errors += 1
                 continue
 
-            total.files_written += result.files_written
-            total.files_skipped += result.files_skipped
+            total.files_written += result.games_crawled
+            if result.skipped:
+                total.files_skipped += 1
             total.errors += result.errors
 
         return total
+
+    def scout_all_in_memory(
+        self, season_id: str | None = None
+    ) -> list[ScoutingCrawlResult]:
+        """Scout all opponents and return per-team in-memory results (E-220 C2-A).
+
+        Same opponent discovery as ``scout_all()``, but returns the rich
+        ``ScoutingCrawlResult`` for each team instead of aggregated counts.
+        Used by ``_run_scout_pipeline`` to pass per-team data directly to
+        ``ScoutingLoader.load_team()`` without disk intermediation.
+
+        Skipped (freshness-gated) teams are NOT included in the result list
+        because they have no fresh in-memory data to load -- their existing
+        DB rows are already current.
+
+        Args:
+            season_id: Optional season slug forwarded to ``scout_team``.
+
+        Returns:
+            List of ``ScoutingCrawlResult`` objects, one per scouted team.
+        """
+        rows = self._db.execute(
+            "SELECT DISTINCT public_id FROM opponent_links "
+            "WHERE public_id IS NOT NULL AND is_hidden = 0"
+        ).fetchall()
+
+        results: list[ScoutingCrawlResult] = []
+        logger.info("scout_all_in_memory: found %d opponents with a public_id.", len(rows))
+
+        for (pub_id,) in rows:
+            team_id = self._resolve_team_id(pub_id)
+            if self._is_scouted_recently(team_id, season_id=season_id):
+                logger.info(
+                    "Skipping public_id=%s: scouted within %dh.",
+                    pub_id, self._freshness_hours,
+                )
+                continue
+            try:
+                result = self.scout_team(pub_id, season_id)
+            except CredentialExpiredError:
+                raise
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Unexpected error scouting public_id=%s: %s", pub_id, exc)
+                # Synthesize a failed result so the caller can mark the run failed.
+                team_pk = self._resolve_team_id(pub_id) or 0
+                results.append(ScoutingCrawlResult(
+                    team_id=team_pk,
+                    season_id=season_id or "",
+                    public_id=pub_id,
+                    errors=1,
+                ))
+                continue
+            results.append(result)
+
+        return results
 
     # ------------------------------------------------------------------
     # DB helpers

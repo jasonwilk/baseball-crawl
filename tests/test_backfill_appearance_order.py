@@ -34,8 +34,6 @@ def db() -> sqlite3.Connection:
     conn.execute("PRAGMA foreign_keys=ON;")
     conn.commit()
     conn.executescript(_MIGRATION_FILE.read_text(encoding="utf-8"))
-    conn.execute("ALTER TABLE teams ADD COLUMN season_year INTEGER")
-    conn.execute("ALTER TABLE player_game_pitching ADD COLUMN appearance_order INTEGER")
     conn.commit()
     yield conn
     conn.close()
@@ -98,9 +96,9 @@ def _insert_player(db: sqlite3.Connection, player_id: str) -> None:
 def _insert_pitching_row(db: sqlite3.Connection, game_id: str, player_id: str, team_id: int, appearance_order: int | None = None) -> None:
     _insert_player(db, player_id)
     db.execute(
-        "INSERT INTO player_game_pitching (game_id, player_id, team_id, ip_outs, appearance_order) "
-        "VALUES (?, ?, ?, 9, ?)",
-        (game_id, player_id, team_id, appearance_order),
+        "INSERT INTO player_game_pitching (game_id, player_id, team_id, perspective_team_id, ip_outs, appearance_order) "
+        "VALUES (?, ?, ?, ?, 9, ?)",
+        (game_id, player_id, team_id, team_id, appearance_order),
     )
 
 
@@ -371,9 +369,9 @@ def test_backfill_opponent_rows_from_member_cached_boxscore(
     # Opponent team pitcher
     _insert_player(db, _OPP_PITCHER_1)
     db.execute(
-        "INSERT INTO player_game_pitching (game_id, player_id, team_id, ip_outs, appearance_order) "
-        "VALUES (?, ?, ?, 12, NULL)",
-        (_GAME_ID, _OPP_PITCHER_1, opp_id),
+        "INSERT INTO player_game_pitching (game_id, player_id, team_id, perspective_team_id, ip_outs, appearance_order) "
+        "VALUES (?, ?, ?, ?, 12, NULL)",
+        (_GAME_ID, _OPP_PITCHER_1, opp_id, opp_id),
     )
     db.commit()
 

@@ -75,6 +75,7 @@ def db() -> sqlite3.Connection:
             half TEXT NOT NULL,
             season_id TEXT NOT NULL,
             batting_team_id INTEGER NOT NULL REFERENCES teams(id),
+            perspective_team_id INTEGER NOT NULL REFERENCES teams(id),
             batter_id TEXT NOT NULL REFERENCES players(player_id),
             pitcher_id TEXT REFERENCES players(player_id),
             outcome TEXT,
@@ -86,7 +87,7 @@ def db() -> sqlite3.Connection:
             did_score_change INTEGER,
             outs_after INTEGER,
             did_outs_change INTEGER,
-            UNIQUE(game_id, play_order)
+            UNIQUE(game_id, play_order, perspective_team_id)
         );
     """)
     conn.commit()
@@ -143,16 +144,16 @@ def _seed_data(db: sqlite3.Connection) -> None:
     # Plays in own game
     db.execute(
         "INSERT INTO plays (game_id, play_order, inning, half, season_id, batting_team_id, "
-        "batter_id, pitcher_id, pitch_count, is_first_pitch_strike, is_qab) "
-        "VALUES (?, 1, 1, 'top', ?, ?, ?, ?, 4, 1, 1)",
-        (_OWN_GAME, _SEASON_ID, _TEAM_ID, _BATTER_1, _PITCHER_1),
+        "perspective_team_id, batter_id, pitcher_id, pitch_count, is_first_pitch_strike, is_qab) "
+        "VALUES (?, 1, 1, 'top', ?, ?, ?, ?, ?, 4, 1, 1)",
+        (_OWN_GAME, _SEASON_ID, _TEAM_ID, _TEAM_ID, _BATTER_1, _PITCHER_1),
     )
     # Plays in cross-pipeline game (should be excluded when game_ids is scoped)
     db.execute(
         "INSERT INTO plays (game_id, play_order, inning, half, season_id, batting_team_id, "
-        "batter_id, pitcher_id, pitch_count, is_first_pitch_strike, is_qab) "
-        "VALUES (?, 1, 1, 'top', ?, ?, ?, ?, 3, 0, 0)",
-        (_CROSS_GAME, _SEASON_ID, _TEAM_ID, _BATTER_1, _PITCHER_1),
+        "perspective_team_id, batter_id, pitcher_id, pitch_count, is_first_pitch_strike, is_qab) "
+        "VALUES (?, 1, 1, 'top', ?, ?, ?, ?, ?, 3, 0, 0)",
+        (_CROSS_GAME, _SEASON_ID, _TEAM_ID, _TEAM_ID, _BATTER_1, _PITCHER_1),
     )
     db.commit()
 
@@ -251,8 +252,8 @@ def test_pitching_stats_fallback_retains_team_scope(db: sqlite3.Connection) -> N
     )
     db.execute(
         "INSERT INTO plays (game_id, play_order, inning, half, season_id, batting_team_id, "
-        "batter_id, pitcher_id, pitch_count, is_first_pitch_strike, is_qab) "
-        "VALUES ('game-unrelated', 1, 1, 'top', ?, 99, 'p-unrelated', 'p-unrelated', 5, 1, 0)",
+        "perspective_team_id, batter_id, pitcher_id, pitch_count, is_first_pitch_strike, is_qab) "
+        "VALUES ('game-unrelated', 1, 1, 'top', ?, 99, 99, 'p-unrelated', 'p-unrelated', 5, 1, 0)",
         (_SEASON_ID,),
     )
     db.commit()
@@ -334,21 +335,14 @@ def test_member_team_uses_stored_gc_uuid() -> None:
 
 
 def test_crawl_and_load_plays_uses_filesystem_discovery() -> None:
-    """AC-2: _crawl_and_load_plays discovers games from boxscore filenames, not DB."""
+    """AC-2: _crawl_and_load_plays discovers games from crawl results, not DB (E-220-06: in-memory)."""
     import inspect
     from src.reports import generator
     source = inspect.getsource(generator._crawl_and_load_plays)
 
     # Should NOT contain the old DB query pattern
     assert "SELECT game_id FROM games" not in source, (
-        "_crawl_and_load_plays must not query games from DB (E-211: filesystem-only)"
-    )
-    # Should contain the filesystem discovery pattern
-    assert "boxscores" in source, (
-        "_crawl_and_load_plays must discover games from boxscores directory"
-    )
-    assert ".glob" in source, (
-        "_crawl_and_load_plays must use glob to discover boxscore files"
+        "_crawl_and_load_plays must not query games from DB"
     )
 
 

@@ -147,10 +147,42 @@
     {% endif %}
   </div>
 
+  <!-- E-220 round 6 cluster 3: cross-perspective impact panel -->
+  {% if counts.cross_perspective_owners %}
+  <div class="mt-4 p-4 bg-amber-50 border border-amber-300 rounded">
+    <h3 class="font-semibold text-amber-900 mb-2">Cross-perspective scouting data will be removed</h3>
+    <p class="text-sm text-amber-900 mb-3">
+      This team's games have been scouted by
+      {{ counts.cross_perspective_owners | length }}
+      other team{{ 's' if counts.cross_perspective_owners | length != 1 else '' }}.
+      Deleting this team will also remove the following cross-perspective
+      rows (they reference this team via <code>team_id</code> or
+      <code>perspective_team_id</code> and cannot be preserved after
+      deletion due to the foreign key constraint):
+    </p>
+    <ul class="text-sm text-amber-900 mb-3 list-disc ml-5">
+      {% for owner in counts.cross_perspective_owners %}
+        <li>{{ owner.name }}: {{ owner.row_count }} row{{ 's' if owner.row_count != 1 else '' }}</li>
+      {% endfor %}
+    </ul>
+    {% if warning == "confirmation_required" %}
+    <p class="text-sm text-red-800 font-semibold mb-2">
+      Confirmation required: check the box below to proceed.
+    </p>
+    {% endif %}
+  </div>
+  {% endif %}
+
   <!-- Action buttons -->
-  <div class="flex gap-3">
+  <div class="flex gap-3 mt-4">
     <form method="post" action="/admin/teams/{{ team.id }}/delete">
       <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+      {% if counts.cross_perspective_owners %}
+      <label class="block mb-3 text-sm">
+        <input type="checkbox" name="confirm_cross_perspective" value="1" class="mr-2">
+        I understand this will remove cross-perspective scouting data for these teams.
+      </label>
+      {% endif %}
       <button type="submit"
               class="bg-red-700 text-white px-4 py-2 rounded text-sm hover:bg-red-800 font-medium">
         Confirm Delete

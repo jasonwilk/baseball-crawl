@@ -1,7 +1,7 @@
 # E-220: Perspective-Aware Data Architecture
 
 ## Status
-`READY`
+`COMPLETED`
 
 ## Overview
 Make perspective provenance a first-class concept in the data model and pipeline. Every piece of player data records which team's API perspective produced it, pipeline runs cannot inherit stale cached files from previous runs, and cross-perspective contamination becomes structurally impossible. This replaces E-219 (own-side-only) with a more complete solution that preserves both perspectives rather than discarding one.
@@ -51,16 +51,16 @@ Expert consultations:
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-220-01 | Schema rewrite with perspective provenance | TODO | None | - |
-| E-220-02 | GameLoader perspective tagging | TODO | E-220-01 | - |
-| E-220-03 | PlaysLoader perspective tagging | TODO | E-220-01 | - |
-| E-220-04 | SprayChartLoader perspective tagging | TODO | E-220-01 | - |
-| E-220-05 | ScoutingLoader in-memory pipeline | TODO | E-220-02, E-220-04 | - |
-| E-220-06 | Report generator in-memory pipeline | TODO | E-220-05, E-220-10, E-220-03 | - |
-| E-220-07 | Season aggregate perspective filtering | TODO | E-220-05 | - |
-| E-220-08 | Perspective provenance context layer | TODO | E-220-05, E-220-07, E-220-10 | - |
-| E-220-09 | Clean-slate rebuild procedure | TODO | E-220-05, E-220-06, E-220-07, E-220-10 | - |
-| E-220-10 | Scouting spray in-memory pipeline | TODO | E-220-05, E-220-04 | - |
+| E-220-01 | Schema rewrite with perspective provenance | DONE | None | - |
+| E-220-02 | GameLoader perspective tagging | DONE | E-220-01 | - |
+| E-220-03 | PlaysLoader perspective tagging | DONE | E-220-01 | - |
+| E-220-04 | SprayChartLoader perspective tagging | DONE | E-220-01 | - |
+| E-220-05 | ScoutingLoader in-memory pipeline | DONE | E-220-02, E-220-04 | - |
+| E-220-06 | Report generator in-memory pipeline | DONE | E-220-05, E-220-10, E-220-03 | - |
+| E-220-07 | Season aggregate perspective filtering | DONE | E-220-05 | - |
+| E-220-08 | Perspective provenance context layer | DONE | E-220-05, E-220-07, E-220-10 | - |
+| E-220-09 | Clean-slate rebuild procedure | DONE | E-220-05, E-220-06, E-220-07, E-220-10 | - |
+| E-220-10 | Scouting spray in-memory pipeline | DONE | E-220-05, E-220-04 | - |
 
 ## Dispatch Team
 - software-engineer
@@ -166,8 +166,13 @@ The current `ScoutingCrawler.scout_team()` returns a `CrawlResult` dataclass wit
 - 2026-04-08: Codex spec review iteration 2. 5 findings (4 P1, 1 P2): 2 accepted, 3 dismissed (verified already fixed in iteration 1). E-220-06 dependency on E-220-10 added (report generator uses spray APIs). E-220-01 AC-5 now enumerates all 14 migration files by exact name.
 - 2026-04-08: Internal review iteration 2. 7 findings (6 minor + 1 CR HR2-1 spray CLI), all accepted. E-220-02 Blocks trimmed (E-220-08 removed). E-220-10 Blocks expanded (E-220-06, E-220-08, E-220-09). E-220-08 AC-5 scope widened (scouting + reports sections). Epic consultation summary corrected (game_stream_id stability moot). TN ordering fixed (TN-12 moved before TN-13). E-220-10 handoff note added (read post-E-220-05 code). E-220-10 AC-6 added (standalone spray CLI commands), Files list expanded (spray_chart.py, crawl.py).
 - 2026-04-08: READY after 5 review passes (60 findings: 51 accepted, 5 dismissed, 4 N/A).
+- 2026-04-08: ACTIVE -- dispatch begun.
+- 2026-04-08: COMPLETED -- all 10 stories DONE. Perspective provenance is now a first-class concept: `perspective_team_id` on all 4 stat tables, `game_perspectives` junction table, in-memory scouting/reports pipelines (no disk intermediary), perspective-filtered season aggregates, context-layer rule codified, clean-slate rebuild procedure documented.
+- 2026-04-09: Reverted from COMPLETED to ACTIVE. Post-dispatch integration review found read-side perspective filtering gaps in player_dedup.py, api/db.py, and reports/generator.py that violate the core invariant. Remediation in progress.
+- 2026-04-09: Eight rounds of post-dispatch Codex remediation. The core architectural contribution -- perspective_team_id as first-class NOT NULL on the four stat tables, game_perspectives junction, in-memory scouting/reports pipelines, consolidated single-migration schema with 14 prior migrations archived -- is intact and shipped. Rounds 1-7 closed 50+ integration gaps (helpers that took game_id/team_id without the perspective dimension) plus one round-6-induced regression (cluster 2's cascade_delete_team FK violation resolved in round 7). Round 7 also added perspective_team_id to reconciliation_discrepancies (dual-column with participant team_id, preserving home-vs-away distinction for cancellation detection) and fixed a latent round-6 over-preservation bug in the report cleanup helper as a side effect. Round 8 surfaced 3 remaining P1s (cluster 3 Phase 1a incompleteness in admin delete cascade, Phase 1b missing reconciliation_discrepancies cleanup, bb data reconcile --game-id not plumbing perspective) plus evidence that 7 test files use inline fixtures that do not enforce production FK constraints -- the enabling condition for the round-by-round discovery cascade. User chose to ship E-220 with residuals captured as E-221 rather than grind round 9; diminishing returns were clear by round 7, and round 6's own regression showed that continuing to patch was risking new bugs. Final test baseline: 72F/4254P/16E (same 72 pre-existing failures and 16 errors as E-220 pre-dispatch baseline; zero regression from the 8 rounds of remediation, +1 new passing test from the round 7 cross-perspective discrepancy test). Documentation assessment: no documentation impact -- all changes are invariant-layer and test infrastructure, not user-facing features or APIs. Context-layer assessment: (1) new convention/pattern = YES (perspective provenance invariant codified in .claude/rules/perspective-provenance.md during dispatch); (2) architectural decision with ongoing implications = YES (single-migration rewrite pattern reinforced as canonical, dual-column provenance+participant semantics for reconciliation_discrepancies); (3) footgun/failure mode = YES (per-story CR is insufficient for cross-cutting invariants, test fixtures are part of the invariant, executescript() PRAGMA pitfall for FK enforcement -- captured in .claude/rules/migrations.md); (4) agent behavior/routing change = NO; (5) domain knowledge = YES (cross-perspective rows are the MODAL case for LSB-adjacent tracked opponents, not rare -- policy decisions that depend on frequency need grounded input before locking); (6) new CLI/workflow = NO. CA assessment of per-trigger codification deferred to E-221 close or ad-hoc CA dispatch. Residuals captured in E-221 (round 8 P1-1/P1-2/P1-3 + full test fixture schema parity audit + CI guardrail).
+- 2026-04-09: COMPLETED with residuals -- see E-221 for the landing spot.
 
-### Review Scorecard
+### Planning Review Scorecard
 | Review Pass | Findings | Accepted | Dismissed |
 |---|---|---|---|
 | Internal iteration 1 (CR + DE + SE + CA + API Scout + PM) | 37 | 31 | 2 |
@@ -176,3 +181,18 @@ The current `ScoutingCrawler.scout_team()` returns a `CrawlResult` dataclass wit
 | Codex spec review iteration 2 | 5 | 2 | 3 |
 | Internal iteration 2 (CR + DE + SE + CA + API Scout + PM) | 7 | 7 | 0 |
 | **Total** | **60** | **51** | **5** |
+
+### Dispatch Review Scorecard
+| Review Pass | Findings | Accepted | Dismissed |
+|---|---|---|---|
+| Per-story CR -- E-220-01 | 17 | 17 | 0 |
+| Per-story CR -- E-220-02 | 1 | 1 | 0 |
+| Per-story CR -- E-220-03 | 0 | 0 | 0 |
+| Per-story CR -- E-220-04 | 0 | 0 | 0 |
+| Per-story CR -- E-220-05 | 3 | 3 | 0 |
+| Per-story CR -- E-220-06 | 0 | 0 | 0 |
+| Per-story CR -- E-220-07 | 0 | 0 | 0 |
+| Per-story CR -- E-220-10 | 2 | 2 | 0 |
+| **Total** | **23** | **23** | **0** |
+
+(E-220-08, E-220-09 were context-layer/docs-only -- no CR.)

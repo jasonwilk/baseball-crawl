@@ -509,29 +509,29 @@ def test_aggregate_isolated_per_season(
     # -- 2025 batting: 5 AB, 2 H; pitching: 9 ip_outs, 3 er ------------------
     db.execute(
         "INSERT INTO player_game_batting "
-        "(game_id, player_id, team_id, ab, h, doubles, triples, hr, rbi, bb, so, sb) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (game_a, _PLAYER_1, own_pk, 5, 2, 0, 0, 0, 0, 0, 1, 0),
+        "(game_id, player_id, team_id, perspective_team_id, ab, h, doubles, triples, hr, rbi, bb, so, sb) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (game_a, _PLAYER_1, own_pk, own_pk, 5, 2, 0, 0, 0, 0, 0, 1, 0),
     )
     db.execute(
         "INSERT INTO player_game_pitching "
-        "(game_id, player_id, team_id, ip_outs, h, er, bb, so) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        (game_a, _PLAYER_1, own_pk, 9, 3, 3, 1, 4),
+        "(game_id, player_id, team_id, perspective_team_id, ip_outs, h, er, bb, so) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (game_a, _PLAYER_1, own_pk, own_pk, 9, 3, 3, 1, 4),
     )
 
     # -- 2026 batting: 4 AB, 3 H; pitching: 6 ip_outs, 1 er ------------------
     db.execute(
         "INSERT INTO player_game_batting "
-        "(game_id, player_id, team_id, ab, h, doubles, triples, hr, rbi, bb, so, sb) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (game_b, _PLAYER_1, own_pk, 4, 3, 1, 0, 0, 0, 0, 0, 0),
+        "(game_id, player_id, team_id, perspective_team_id, ab, h, doubles, triples, hr, rbi, bb, so, sb) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (game_b, _PLAYER_1, own_pk, own_pk, 4, 3, 1, 0, 0, 0, 0, 0, 0),
     )
     db.execute(
         "INSERT INTO player_game_pitching "
-        "(game_id, player_id, team_id, ip_outs, h, er, bb, so) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        (game_b, _PLAYER_1, own_pk, 6, 2, 1, 0, 3),
+        "(game_id, player_id, team_id, perspective_team_id, ip_outs, h, er, bb, so) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (game_b, _PLAYER_1, own_pk, own_pk, 6, 2, 1, 0, 3),
     )
     db.commit()
 
@@ -625,29 +625,29 @@ def test_aggregate_isolated_per_team(
     # -- Own team (_PLAYER_1): ab=3, h=2; ip_outs=4, er=1 ---------------------
     db.execute(
         "INSERT INTO player_game_batting "
-        "(game_id, player_id, team_id, ab, h, doubles, triples, hr, rbi, bb, so, sb) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (game_id, _PLAYER_1, own_pk, 3, 2, 0, 0, 0, 0, 0, 0, 0),
+        "(game_id, player_id, team_id, perspective_team_id, ab, h, doubles, triples, hr, rbi, bb, so, sb) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (game_id, _PLAYER_1, own_pk, own_pk, 3, 2, 0, 0, 0, 0, 0, 0, 0),
     )
     db.execute(
         "INSERT INTO player_game_pitching "
-        "(game_id, player_id, team_id, ip_outs, h, er, bb, so) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        (game_id, _PLAYER_1, own_pk, 4, 1, 1, 0, 2),
+        "(game_id, player_id, team_id, perspective_team_id, ip_outs, h, er, bb, so) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (game_id, _PLAYER_1, own_pk, own_pk, 4, 1, 1, 0, 2),
     )
 
     # -- Opp team (_PLAYER_2): ab=5, h=1; ip_outs=8, er=3 --------------------
     db.execute(
         "INSERT INTO player_game_batting "
-        "(game_id, player_id, team_id, ab, h, doubles, triples, hr, rbi, bb, so, sb) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (game_id, _PLAYER_2, opp_pk, 5, 1, 0, 0, 0, 0, 0, 2, 0),
+        "(game_id, player_id, team_id, perspective_team_id, ab, h, doubles, triples, hr, rbi, bb, so, sb) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (game_id, _PLAYER_2, opp_pk, opp_pk, 5, 1, 0, 0, 0, 0, 0, 2, 0),
     )
     db.execute(
         "INSERT INTO player_game_pitching "
-        "(game_id, player_id, team_id, ip_outs, h, er, bb, so) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        (game_id, _PLAYER_2, opp_pk, 8, 4, 3, 1, 5),
+        "(game_id, player_id, team_id, perspective_team_id, ip_outs, h, er, bb, so) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (game_id, _PLAYER_2, opp_pk, opp_pk, 8, 4, 3, 1, 5),
     )
     db.commit()
 
@@ -771,16 +771,16 @@ def test_batting_aggregates_include_new_columns(
     # Game 1: r=2, tb=4, hbp=1, shf=NULL (absent), cs=1
     db.execute(
         "INSERT INTO player_game_batting "
-        "(game_id, player_id, team_id, ab, r, h, rbi, bb, so, tb, hbp, cs) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (game_1, _PLAYER_1, own_pk, 4, 2, 2, 1, 0, 0, 4, 1, 1),
+        "(game_id, player_id, team_id, perspective_team_id, ab, r, h, rbi, bb, so, tb, hbp, cs) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (game_1, _PLAYER_1, own_pk, own_pk, 4, 2, 2, 1, 0, 0, 4, 1, 1),
     )
     # Game 2: r=1, tb=2, hbp=0 (not HBP'd), shf=NULL, cs=0
     db.execute(
         "INSERT INTO player_game_batting "
-        "(game_id, player_id, team_id, ab, r, h, rbi, bb, so, tb, hbp, cs) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (game_2, _PLAYER_1, own_pk, 3, 1, 1, 0, 1, 1, 2, 0, 0),
+        "(game_id, player_id, team_id, perspective_team_id, ab, r, h, rbi, bb, so, tb, hbp, cs) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (game_2, _PLAYER_1, own_pk, own_pk, 3, 1, 1, 0, 1, 1, 2, 0, 0),
     )
     db.commit()
 
@@ -835,14 +835,14 @@ def test_batting_aggregate_shf_sums_when_present(
     # Game 1: shf=1
     db.execute(
         "INSERT INTO player_game_batting "
-        "(game_id, player_id, team_id, ab, h, shf) VALUES (?, ?, ?, ?, ?, ?)",
-        (game_1, _PLAYER_1, own_pk, 3, 1, 1),
+        "(game_id, player_id, team_id, perspective_team_id, ab, h, shf) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (game_1, _PLAYER_1, own_pk, own_pk, 3, 1, 1),
     )
     # Game 2: shf=NULL (SHF not recorded in this game's boxscore)
     db.execute(
         "INSERT INTO player_game_batting "
-        "(game_id, player_id, team_id, ab, h) VALUES (?, ?, ?, ?, ?)",
-        (game_2, _PLAYER_1, own_pk, 4, 2),
+        "(game_id, player_id, team_id, perspective_team_id, ab, h) VALUES (?, ?, ?, ?, ?, ?)",
+        (game_2, _PLAYER_1, own_pk, own_pk, 4, 2),
     )
     db.commit()
 
@@ -897,17 +897,17 @@ def test_pitching_aggregates_include_new_columns(
     # _PLAYER_1: all new extras populated (wp=1, hbp=1, pitches=87, total_strikes=57, bf=24)
     db.execute(
         "INSERT INTO player_game_pitching "
-        "(game_id, player_id, team_id, ip_outs, h, r, er, bb, so, "
+        "(game_id, player_id, team_id, perspective_team_id, ip_outs, h, r, er, bb, so, "
         " wp, hbp, pitches, total_strikes, bf) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (game_1, _PLAYER_1, own_pk, 18, 4, 2, 2, 1, 8, 1, 1, 87, 57, 24),
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (game_1, _PLAYER_1, own_pk, own_pk, 18, 4, 2, 2, 1, 8, 1, 1, 87, 57, 24),
     )
     # _PLAYER_2: wp is NOT set (NULL) -- all new pitching extras absent
     db.execute(
         "INSERT INTO player_game_pitching "
-        "(game_id, player_id, team_id, ip_outs, h, r, er, bb, so) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (game_1, _PLAYER_2, own_pk, 3, 2, 1, 1, 0, 1),
+        "(game_id, player_id, team_id, perspective_team_id, ip_outs, h, r, er, bb, so) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (game_1, _PLAYER_2, own_pk, own_pk, 3, 2, 1, 1, 0, 1),
     )
     db.commit()
 
@@ -979,15 +979,15 @@ def test_aggregate_idempotent_with_updated_game_data(
     # -- First load: initial game stats --
     db.execute(
         "INSERT INTO player_game_batting "
-        "(game_id, player_id, team_id, ab, r, h, tb, hbp) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        (game_id, _PLAYER_1, own_pk, 4, 1, 2, 3, 0),
+        "(game_id, player_id, team_id, perspective_team_id, ab, r, h, tb, hbp) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (game_id, _PLAYER_1, own_pk, own_pk, 4, 1, 2, 3, 0),
     )
     db.execute(
         "INSERT INTO player_game_pitching "
-        "(game_id, player_id, team_id, ip_outs, h, r, er, bb, so, wp, pitches, bf) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (game_id, _PLAYER_1, own_pk, 9, 3, 1, 1, 1, 5, 0, 80, 20),
+        "(game_id, player_id, team_id, perspective_team_id, ip_outs, h, r, er, bb, so, wp, pitches, bf) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (game_id, _PLAYER_1, own_pk, own_pk, 9, 3, 1, 1, 1, 5, 0, 80, 20),
     )
     db.commit()
 
@@ -1364,12 +1364,12 @@ def test_pitching_aggregates_compute_gs_from_appearance_order(
         ("gs-game-1", season_id, own_pk, own_pk),
     )
     db.execute(
-        "INSERT INTO player_game_pitching (game_id, player_id, team_id, ip_outs, appearance_order) VALUES (?, ?, ?, 15, 1)",
-        ("gs-game-1", _PLAYER_1, own_pk),
+        "INSERT INTO player_game_pitching (game_id, player_id, team_id, perspective_team_id, ip_outs, appearance_order) VALUES (?, ?, ?, ?, 15, 1)",
+        ("gs-game-1", _PLAYER_1, own_pk, own_pk),
     )
     db.execute(
-        "INSERT INTO player_game_pitching (game_id, player_id, team_id, ip_outs, appearance_order) VALUES (?, ?, ?, 6, 2)",
-        ("gs-game-1", _PLAYER_2, own_pk),
+        "INSERT INTO player_game_pitching (game_id, player_id, team_id, perspective_team_id, ip_outs, appearance_order) VALUES (?, ?, ?, ?, 6, 2)",
+        ("gs-game-1", _PLAYER_2, own_pk, own_pk),
     )
 
     # Game 2: PLAYER_1 starts again, PLAYER_2 relieves
@@ -1378,12 +1378,12 @@ def test_pitching_aggregates_compute_gs_from_appearance_order(
         ("gs-game-2", season_id, own_pk, own_pk),
     )
     db.execute(
-        "INSERT INTO player_game_pitching (game_id, player_id, team_id, ip_outs, appearance_order) VALUES (?, ?, ?, 18, 1)",
-        ("gs-game-2", _PLAYER_1, own_pk),
+        "INSERT INTO player_game_pitching (game_id, player_id, team_id, perspective_team_id, ip_outs, appearance_order) VALUES (?, ?, ?, ?, 18, 1)",
+        ("gs-game-2", _PLAYER_1, own_pk, own_pk),
     )
     db.execute(
-        "INSERT INTO player_game_pitching (game_id, player_id, team_id, ip_outs, appearance_order) VALUES (?, ?, ?, 3, 2)",
-        ("gs-game-2", _PLAYER_2, own_pk),
+        "INSERT INTO player_game_pitching (game_id, player_id, team_id, perspective_team_id, ip_outs, appearance_order) VALUES (?, ?, ?, ?, 3, 2)",
+        ("gs-game-2", _PLAYER_2, own_pk, own_pk),
     )
 
     # Game 3: PLAYER_2 starts, PLAYER_1 relieves
@@ -1392,12 +1392,12 @@ def test_pitching_aggregates_compute_gs_from_appearance_order(
         ("gs-game-3", season_id, own_pk, own_pk),
     )
     db.execute(
-        "INSERT INTO player_game_pitching (game_id, player_id, team_id, ip_outs, appearance_order) VALUES (?, ?, ?, 9, 2)",
-        ("gs-game-3", _PLAYER_1, own_pk),
+        "INSERT INTO player_game_pitching (game_id, player_id, team_id, perspective_team_id, ip_outs, appearance_order) VALUES (?, ?, ?, ?, 9, 2)",
+        ("gs-game-3", _PLAYER_1, own_pk, own_pk),
     )
     db.execute(
-        "INSERT INTO player_game_pitching (game_id, player_id, team_id, ip_outs, appearance_order) VALUES (?, ?, ?, 12, 1)",
-        ("gs-game-3", _PLAYER_2, own_pk),
+        "INSERT INTO player_game_pitching (game_id, player_id, team_id, perspective_team_id, ip_outs, appearance_order) VALUES (?, ?, ?, ?, 12, 1)",
+        ("gs-game-3", _PLAYER_2, own_pk, own_pk),
     )
     db.commit()
 
@@ -1449,9 +1449,9 @@ def test_pitching_aggregates_gs_null_when_all_appearance_order_null(
             (gid, season_id, f"2025-04-0{i}", own_pk, own_pk),
         )
         db.execute(
-            "INSERT INTO player_game_pitching (game_id, player_id, team_id, ip_outs, appearance_order) "
-            "VALUES (?, ?, ?, 15, NULL)",
-            (gid, _PLAYER_1, own_pk),
+            "INSERT INTO player_game_pitching (game_id, player_id, team_id, perspective_team_id, ip_outs, appearance_order) "
+            "VALUES (?, ?, ?, ?, 15, NULL)",
+            (gid, _PLAYER_1, own_pk, own_pk),
         )
     db.commit()
 
@@ -1465,3 +1465,115 @@ def test_pitching_aggregates_gs_null_when_all_appearance_order_null(
     assert row is not None, "Expected player_season_pitching row"
     assert row[0] is None, f"Expected gs=NULL when all appearance_order NULL, got {row[0]}"
     assert row[1] == 2, f"Expected gp_pitcher=2, got {row[1]}"
+
+
+# ---------------------------------------------------------------------------
+# E-220-07: Perspective filtering in season aggregates
+# ---------------------------------------------------------------------------
+
+
+def test_batting_aggregates_filter_by_perspective(
+    db: sqlite3.Connection,
+) -> None:
+    """AC-1/AC-2: Batting aggregates for team A sum only rows where perspective_team_id = A.
+
+    Player has 3 hits from perspective A and 3 from perspective B. Team A's
+    aggregate should show 3 hits (not 6).
+    """
+    season_id = "2025"
+    own_pk = _insert_team(db, public_id="team-a-slug", gc_uuid="team-a-uuid", name="Team A")
+    other_pk = _insert_team(db, public_id="team-b-slug", gc_uuid="team-b-uuid", name="Team B")
+
+    # Insert season and game prerequisites.
+    db.execute(
+        "INSERT OR IGNORE INTO seasons (season_id, name, season_type, year) VALUES (?, ?, 'unknown', 2025)",
+        (season_id, season_id),
+    )
+    db.execute(
+        "INSERT INTO games (game_id, season_id, game_date, home_team_id, away_team_id, status) "
+        "VALUES ('game-persp-001', ?, '2025-04-10', ?, ?, 'completed')",
+        (season_id, own_pk, other_pk),
+    )
+    db.execute(
+        "INSERT INTO players (player_id, first_name, last_name) VALUES (?, 'Test', 'Player')",
+        (_PLAYER_1,),
+    )
+
+    # Same player, same game, same team_id, but two different perspective_team_ids.
+    db.execute(
+        "INSERT INTO player_game_batting (game_id, player_id, team_id, perspective_team_id, ab, h) "
+        "VALUES ('game-persp-001', ?, ?, ?, 4, 3)",
+        (_PLAYER_1, own_pk, own_pk),
+    )
+    db.execute(
+        "INSERT INTO player_game_batting (game_id, player_id, team_id, perspective_team_id, ab, h) "
+        "VALUES ('game-persp-001', ?, ?, ?, 4, 3)",
+        (_PLAYER_1, own_pk, other_pk),
+    )
+    db.commit()
+
+    loader = ScoutingLoader(db)
+    loader._compute_batting_aggregates(own_pk, season_id)
+    db.commit()
+
+    row = db.execute(
+        "SELECT ab, h, games_tracked FROM player_season_batting "
+        "WHERE player_id = ? AND team_id = ? AND season_id = ?",
+        (_PLAYER_1, own_pk, season_id),
+    ).fetchone()
+    assert row is not None, "Expected player_season_batting row"
+    assert row[0] == 4, f"Expected ab=4 (single perspective), got {row[0]}"
+    assert row[1] == 3, f"Expected h=3 (single perspective), got {row[1]}"
+    assert row[2] == 1, f"Expected games_tracked=1 (single perspective), got {row[2]}"
+
+
+def test_pitching_aggregates_filter_by_perspective(
+    db: sqlite3.Connection,
+) -> None:
+    """AC-1/AC-2: Pitching aggregates for team A sum only rows where perspective_team_id = A."""
+    season_id = "2025"
+    own_pk = _insert_team(db, public_id="team-c-slug", gc_uuid="team-c-uuid", name="Team C")
+    other_pk = _insert_team(db, public_id="team-d-slug", gc_uuid="team-d-uuid", name="Team D")
+
+    db.execute(
+        "INSERT OR IGNORE INTO seasons (season_id, name, season_type, year) VALUES (?, ?, 'unknown', 2025)",
+        (season_id, season_id),
+    )
+    db.execute(
+        "INSERT INTO games (game_id, season_id, game_date, home_team_id, away_team_id, status) "
+        "VALUES ('game-persp-002', ?, '2025-04-10', ?, ?, 'completed')",
+        (season_id, own_pk, other_pk),
+    )
+    db.execute(
+        "INSERT INTO players (player_id, first_name, last_name) VALUES (?, 'Test', 'Pitcher')",
+        (_PLAYER_2,),
+    )
+
+    # Same pitcher, same game, two perspective_team_ids.
+    db.execute(
+        "INSERT INTO player_game_pitching (game_id, player_id, team_id, perspective_team_id, "
+        "ip_outs, h, r, er, bb, so) "
+        "VALUES ('game-persp-002', ?, ?, ?, 15, 4, 2, 2, 1, 7)",
+        (_PLAYER_2, own_pk, own_pk),
+    )
+    db.execute(
+        "INSERT INTO player_game_pitching (game_id, player_id, team_id, perspective_team_id, "
+        "ip_outs, h, r, er, bb, so) "
+        "VALUES ('game-persp-002', ?, ?, ?, 15, 4, 2, 2, 1, 7)",
+        (_PLAYER_2, own_pk, other_pk),
+    )
+    db.commit()
+
+    loader = ScoutingLoader(db)
+    loader._compute_pitching_aggregates(own_pk, season_id)
+    db.commit()
+
+    row = db.execute(
+        "SELECT ip_outs, so, games_tracked FROM player_season_pitching "
+        "WHERE player_id = ? AND team_id = ? AND season_id = ?",
+        (_PLAYER_2, own_pk, season_id),
+    ).fetchone()
+    assert row is not None, "Expected player_season_pitching row"
+    assert row[0] == 15, f"Expected ip_outs=15 (single perspective), got {row[0]}"
+    assert row[1] == 7, f"Expected so=7 (single perspective), got {row[1]}"
+    assert row[2] == 1, f"Expected games_tracked=1 (single perspective), got {row[2]}"

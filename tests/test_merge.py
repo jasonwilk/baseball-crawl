@@ -26,8 +26,6 @@ from src.db.merge import (
 # ---------------------------------------------------------------------------
 
 _SCHEMA_PATH = Path(__file__).resolve().parents[1] / "migrations" / "001_initial_schema.sql"
-_CRAWL_JOBS_PATH = Path(__file__).resolve().parents[1] / "migrations" / "003_add_crawl_jobs.sql"
-_SEASON_YEAR_PATH = Path(__file__).resolve().parents[1] / "migrations" / "004_add_team_season_year.sql"
 
 
 def _make_db() -> sqlite3.Connection:
@@ -35,8 +33,6 @@ def _make_db() -> sqlite3.Connection:
     conn = sqlite3.connect(":memory:")
     conn.execute("PRAGMA foreign_keys = ON")
     conn.executescript(_SCHEMA_PATH.read_text())
-    conn.executescript(_CRAWL_JOBS_PATH.read_text())
-    conn.executescript(_SEASON_YEAR_PATH.read_text())
     conn.commit()
     return conn
 
@@ -115,7 +111,7 @@ def _assert_team_gone(conn: sqlite3.Connection, team_id: int) -> None:
 
 
 def _assert_no_refs(conn: sqlite3.Connection, duplicate_id: int) -> None:
-    """Assert no row in any of the 13 referencing tables still points to duplicate_id."""
+    """Assert no row in any referencing table still points to duplicate_id."""
     checks = [
         ("team_opponents", "our_team_id"),
         ("team_opponents", "opponent_team_id"),
@@ -123,10 +119,16 @@ def _assert_no_refs(conn: sqlite3.Connection, duplicate_id: int) -> None:
         ("games", "home_team_id"),
         ("games", "away_team_id"),
         ("player_game_batting", "team_id"),
+        ("player_game_batting", "perspective_team_id"),
         ("player_game_pitching", "team_id"),
+        ("player_game_pitching", "perspective_team_id"),
         ("player_season_batting", "team_id"),
         ("player_season_pitching", "team_id"),
         ("spray_charts", "team_id"),
+        ("spray_charts", "perspective_team_id"),
+        ("plays", "batting_team_id"),
+        ("plays", "perspective_team_id"),
+        ("game_perspectives", "perspective_team_id"),
         ("opponent_links", "our_team_id"),
         ("opponent_links", "resolved_team_id"),
         ("scouting_runs", "team_id"),
@@ -400,8 +402,6 @@ def _make_failing_db() -> _FailOnCallN:
     conn = _FailOnCallN(":memory:")
     conn.execute("PRAGMA foreign_keys = ON")
     conn.executescript(_SCHEMA_PATH.read_text())
-    conn.executescript(_CRAWL_JOBS_PATH.read_text())
-    conn.executescript(_SEASON_YEAR_PATH.read_text())
     conn.commit()
     return conn
 
@@ -538,15 +538,15 @@ def test_full_merge_all_13_tables() -> None:
     # player_game_batting
     _game(conn, "g-pgb", home_team_id=dup, away_team_id=other_team, season_id=sid)
     conn.execute(
-        "INSERT INTO player_game_batting (game_id, player_id, team_id) VALUES ('g-pgb', ?, ?)",
-        (pid1, dup),
+        "INSERT INTO player_game_batting (game_id, player_id, team_id, perspective_team_id) VALUES ('g-pgb', ?, ?, ?)",
+        (pid1, dup, dup),
     )
 
     # player_game_pitching
     _game(conn, "g-pgp", home_team_id=dup, away_team_id=other_team, season_id=sid)
     conn.execute(
-        "INSERT INTO player_game_pitching (game_id, player_id, team_id, ip_outs) VALUES ('g-pgp', ?, ?, 9)",
-        (pid2, dup),
+        "INSERT INTO player_game_pitching (game_id, player_id, team_id, perspective_team_id, ip_outs) VALUES ('g-pgp', ?, ?, ?, 9)",
+        (pid2, dup, dup),
     )
 
     # player_season_batting (non-conflicting)
@@ -564,8 +564,8 @@ def test_full_merge_all_13_tables() -> None:
     # spray_charts
     _game(conn, "g-spray", home_team_id=dup, away_team_id=other_team, season_id=sid)
     conn.execute(
-        "INSERT INTO spray_charts (game_id, player_id, team_id, x, y) VALUES ('g-spray', ?, ?, 10.0, 20.0)",
-        (pid1, dup),
+        "INSERT INTO spray_charts (game_id, player_id, team_id, perspective_team_id, x, y) VALUES ('g-spray', ?, ?, ?, 10.0, 20.0)",
+        (pid1, dup, dup),
     )
 
     # opponent_links
@@ -1112,8 +1112,6 @@ def test_begin_immediate_failure_propagates_original_error() -> None:
 
     conn = _FailBeginDB(":memory:")
     conn.executescript(_SCHEMA_PATH.read_text())
-    conn.executescript(_CRAWL_JOBS_PATH.read_text())
-    conn.executescript(_SEASON_YEAR_PATH.read_text())
     # Insert teams via executescript to bypass the override entirely during setup
     conn.executescript(
         "INSERT INTO teams (name, membership_type) VALUES ('Canonical', 'tracked');"
@@ -1263,3 +1261,147 @@ def test_find_duplicates_exact_match_comes_before_cross_match() -> None:
     # Cross match second
     season_years = {t.season_year for t in groups[1]}
     assert None in season_years  # cross match has the NULL
+
+
+
+def test_merge_perspective_team_id_canonical_wins_resolution() -> None:
+    """E-220 remediation: perspective_team_id is rewritten with canonical-wins
+    conflict resolution.
+
+    Setup: dup and canonical both have stat rows for the same (game, player)
+    where one perspective collides with canonical's existing row and another
+    does not.  After merge, the canonical-perspective row survives, the
+    duplicate-perspective row is dropped, and the non-colliding row is
+    rewritten to canonical perspective.
+    """
+    conn = _make_db()
+    can = _team(conn, "Canonical")
+    dup = _team(conn, "Duplicate")
+    other = _team(conn, "Other")
+    sid = _season(conn)
+    p_collide = _player(conn, "p-collide")
+    p_clean = _player(conn, "p-clean")
+
+    # Game where both perspectives' batting rows exist for the SAME (game,
+    # player), forcing a UNIQUE collision when we rewrite duplicate -> canonical.
+    _game(conn, "g-collide", home_team_id=other, away_team_id=other, season_id=sid)
+    # Canonical perspective row -- should survive.
+    conn.execute(
+        "INSERT INTO player_game_batting "
+        "(game_id, player_id, team_id, perspective_team_id, ab, h) "
+        "VALUES ('g-collide', ?, ?, ?, 4, 2)",
+        (p_collide, other, can),
+    )
+    # Duplicate perspective row -- should be deleted (canonical wins).
+    conn.execute(
+        "INSERT INTO player_game_batting "
+        "(game_id, player_id, team_id, perspective_team_id, ab, h) "
+        "VALUES ('g-collide', ?, ?, ?, 3, 1)",
+        (p_collide, other, dup),
+    )
+
+    # Game where ONLY duplicate perspective exists for a (game, player) -- no
+    # collision, the row should be rewritten to canonical perspective.
+    _game(conn, "g-clean", home_team_id=other, away_team_id=other, season_id=sid)
+    conn.execute(
+        "INSERT INTO player_game_batting "
+        "(game_id, player_id, team_id, perspective_team_id, ab, h) "
+        "VALUES ('g-clean', ?, ?, ?, 5, 3)",
+        (p_clean, other, dup),
+    )
+
+    # game_perspectives: collide row for g-collide (canonical + duplicate)
+    conn.execute(
+        "INSERT INTO game_perspectives (game_id, perspective_team_id) VALUES (?, ?)",
+        ("g-collide", can),
+    )
+    conn.execute(
+        "INSERT INTO game_perspectives (game_id, perspective_team_id) VALUES (?, ?)",
+        ("g-collide", dup),
+    )
+    # And a non-colliding game_perspectives row for g-clean
+    conn.execute(
+        "INSERT INTO game_perspectives (game_id, perspective_team_id) VALUES (?, ?)",
+        ("g-clean", dup),
+    )
+
+    conn.commit()
+
+    # Run the merge -- must not raise IntegrityError.
+    merge_teams(can, dup, conn)
+
+    # Duplicate is gone, no stale references (helper now checks perspective_team_id).
+    _assert_team_gone(conn, dup)
+    _assert_no_refs(conn, dup)
+
+    # Canonical-wins: the colliding row's data came from the canonical
+    # perspective (ab=4, h=2), not the duplicate (ab=3, h=1).
+    row = conn.execute(
+        "SELECT ab, h FROM player_game_batting "
+        "WHERE game_id = 'g-collide' AND player_id = ? AND perspective_team_id = ?",
+        (p_collide, can),
+    ).fetchone()
+    assert row == (4, 2), f"canonical row should survive intact, got {row}"
+
+    # Exactly one row for the colliding (game, player).
+    n = conn.execute(
+        "SELECT COUNT(*) FROM player_game_batting "
+        "WHERE game_id = 'g-collide' AND player_id = ?",
+        (p_collide,),
+    ).fetchone()[0]
+    assert n == 1, f"colliding row pair should collapse to one, got {n}"
+
+    # The non-colliding row was rewritten to canonical perspective.
+    row = conn.execute(
+        "SELECT ab, h, perspective_team_id FROM player_game_batting "
+        "WHERE game_id = 'g-clean' AND player_id = ?",
+        (p_clean,),
+    ).fetchone()
+    assert row == (5, 3, can), f"clean row should be rewritten to canonical, got {row}"
+
+    # game_perspectives: g-collide collapses to one row at canonical, g-clean
+    # is rewritten to canonical.
+    rows = conn.execute(
+        "SELECT game_id, perspective_team_id FROM game_perspectives "
+        "ORDER BY game_id"
+    ).fetchall()
+    assert rows == [("g-clean", can), ("g-collide", can)], f"got {rows}"
+
+
+
+def test_merge_rewrites_plays_batting_team_id() -> None:
+    """E-220 remediation C1-B: plays.batting_team_id is rewritten on merge.
+
+    Pre-fix bug: merge_teams left plays.batting_team_id pointing at the
+    duplicate team_id, then DELETE FROM teams violated the NOT NULL FK.
+    """
+    conn = _make_db()
+    can = _team(conn, "Canonical")
+    dup = _team(conn, "Duplicate")
+    other = _team(conn, "Other")
+    sid = _season(conn)
+    pid_b = _player(conn, "p-batter")
+    pid_p = _player(conn, "p-pitcher")
+
+    _game(conn, "g-bat", home_team_id=other, away_team_id=dup, season_id=sid)
+    # plays row with batting_team_id = dup
+    conn.execute(
+        "INSERT INTO plays (game_id, play_order, inning, half, season_id, "
+        "batting_team_id, perspective_team_id, batter_id, pitcher_id) "
+        "VALUES (?, 1, 1, 'top', ?, ?, ?, ?, ?)",
+        ("g-bat", sid, dup, dup, pid_b, pid_p),
+    )
+    conn.commit()
+
+    # Should not raise IntegrityError
+    merge_teams(can, dup, conn)
+
+    _assert_team_gone(conn, dup)
+    _assert_no_refs(conn, dup)
+
+    # Verify the play row now references canonical
+    row = conn.execute(
+        "SELECT batting_team_id, perspective_team_id FROM plays WHERE game_id = 'g-bat'"
+    ).fetchone()
+    assert row == (can, can), f"expected ({can}, {can}), got {row}"
+

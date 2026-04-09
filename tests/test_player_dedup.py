@@ -66,6 +66,7 @@ def db() -> sqlite3.Connection:
             game_id           TEXT NOT NULL REFERENCES games(game_id),
             player_id         TEXT NOT NULL REFERENCES players(player_id),
             team_id           INTEGER NOT NULL REFERENCES teams(id),
+            perspective_team_id INTEGER NOT NULL REFERENCES teams(id),
             stat_completeness TEXT NOT NULL DEFAULT 'boxscore_only',
             ab  INTEGER,
             r   INTEGER,
@@ -82,7 +83,7 @@ def db() -> sqlite3.Connection:
             sb      INTEGER,
             cs      INTEGER,
             e       INTEGER,
-            UNIQUE(game_id, player_id)
+            UNIQUE(game_id, player_id, perspective_team_id)
         );
 
         CREATE TABLE player_game_pitching (
@@ -90,6 +91,7 @@ def db() -> sqlite3.Connection:
             game_id           TEXT NOT NULL REFERENCES games(game_id),
             player_id         TEXT NOT NULL REFERENCES players(player_id),
             team_id           INTEGER NOT NULL REFERENCES teams(id),
+            perspective_team_id INTEGER NOT NULL REFERENCES teams(id),
             stat_completeness TEXT NOT NULL DEFAULT 'boxscore_only',
             decision  TEXT,
             ip_outs   INTEGER,
@@ -103,7 +105,7 @@ def db() -> sqlite3.Connection:
             pitches   INTEGER,
             total_strikes INTEGER,
             bf        INTEGER,
-            UNIQUE(game_id, player_id)
+            UNIQUE(game_id, player_id, perspective_team_id)
         );
 
         CREATE TABLE player_season_batting (
@@ -162,6 +164,12 @@ def db() -> sqlite3.Connection:
         CREATE TABLE plays (
             id         INTEGER PRIMARY KEY AUTOINCREMENT,
             game_id    TEXT NOT NULL REFERENCES games(game_id),
+            play_order INTEGER NOT NULL,
+            inning     INTEGER NOT NULL DEFAULT 1,
+            half       TEXT NOT NULL DEFAULT 'top',
+            season_id  TEXT NOT NULL DEFAULT '',
+            batting_team_id INTEGER NOT NULL DEFAULT 0,
+            perspective_team_id INTEGER NOT NULL,
             batter_id  TEXT NOT NULL REFERENCES players(player_id),
             pitcher_id TEXT REFERENCES players(player_id)
         );
@@ -171,19 +179,21 @@ def db() -> sqlite3.Connection:
             game_id    TEXT REFERENCES games(game_id),
             player_id  TEXT REFERENCES players(player_id),
             team_id    INTEGER REFERENCES teams(id),
+            perspective_team_id INTEGER NOT NULL,
             pitcher_id TEXT REFERENCES players(player_id)
         );
 
         CREATE TABLE reconciliation_discrepancies (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            game_id     TEXT NOT NULL,
-            run_id      TEXT NOT NULL,
-            team_id     INTEGER NOT NULL,
-            player_id   TEXT NOT NULL,
-            signal_name TEXT NOT NULL,
-            category    TEXT NOT NULL DEFAULT 'test',
-            status      TEXT NOT NULL DEFAULT 'MATCH',
-            UNIQUE(run_id, game_id, team_id, player_id, signal_name)
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            game_id             TEXT NOT NULL,
+            run_id              TEXT NOT NULL,
+            perspective_team_id INTEGER NOT NULL,
+            team_id             INTEGER NOT NULL,
+            player_id           TEXT NOT NULL,
+            signal_name         TEXT NOT NULL,
+            category            TEXT NOT NULL DEFAULT 'test',
+            status              TEXT NOT NULL DEFAULT 'MATCH',
+            UNIQUE(run_id, game_id, perspective_team_id, team_id, player_id, signal_name)
         );
         """
     )
@@ -245,12 +255,14 @@ def _seed_game_batting(
     so: int = 0,
     hbp: int = 0,
     shf: int = 0,
+    perspective_team_id: int | None = None,
 ) -> None:
+    ptid = perspective_team_id if perspective_team_id is not None else team_id
     db.execute(
         "INSERT INTO player_game_batting "
-        "(game_id, player_id, team_id, stat_completeness, ab, h, bb, hr, r, rbi, so, hbp, shf) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (game_id, player_id, team_id, stat_completeness, ab, h, bb, hr, r, rbi, so, hbp, shf),
+        "(game_id, player_id, team_id, perspective_team_id, stat_completeness, ab, h, bb, hr, r, rbi, so, hbp, shf) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (game_id, player_id, team_id, ptid, stat_completeness, ab, h, bb, hr, r, rbi, so, hbp, shf),
     )
 
 
@@ -268,12 +280,14 @@ def _seed_game_pitching(
     so: int = 0,
     r: int = 0,
     decision: str | None = None,
+    perspective_team_id: int | None = None,
 ) -> None:
+    ptid = perspective_team_id if perspective_team_id is not None else team_id
     db.execute(
         "INSERT INTO player_game_pitching "
-        "(game_id, player_id, team_id, stat_completeness, ip_outs, h, r, er, bb, so, decision) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (game_id, player_id, team_id, stat_completeness, ip_outs, h, r, er, bb, so, decision),
+        "(game_id, player_id, team_id, perspective_team_id, stat_completeness, ip_outs, h, r, er, bb, so, decision) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (game_id, player_id, team_id, ptid, stat_completeness, ip_outs, h, r, er, bb, so, decision),
     )
 
 
@@ -624,32 +638,34 @@ class TestMergeIntegration:
 
         # 5. plays -- duplicate has rows as both batter and pitcher
         db.execute(
-            "INSERT INTO plays (game_id, batter_id, pitcher_id) VALUES ('game-1', 'p-dup', 'p-canonical')"
+            "INSERT INTO plays (game_id, play_order, inning, half, season_id, batting_team_id, perspective_team_id, batter_id, pitcher_id) "
+            "VALUES ('game-1', 1, 1, 'top', '2026', 1, 1, 'p-dup', 'p-canonical')"
         )
         db.execute(
-            "INSERT INTO plays (game_id, batter_id, pitcher_id) VALUES ('game-2', 'p-canonical', 'p-dup')"
+            "INSERT INTO plays (game_id, play_order, inning, half, season_id, batting_team_id, perspective_team_id, batter_id, pitcher_id) "
+            "VALUES ('game-2', 1, 1, 'top', '2026', 1, 1, 'p-canonical', 'p-dup')"
         )
 
         # 6. spray_charts -- duplicate as both player and pitcher
         db.execute(
-            "INSERT INTO spray_charts (game_id, player_id, team_id, pitcher_id) "
-            "VALUES ('game-1', 'p-dup', 1, 'p-canonical')"
+            "INSERT INTO spray_charts (game_id, player_id, team_id, perspective_team_id, pitcher_id) "
+            "VALUES ('game-1', 'p-dup', 1, 1, 'p-canonical')"
         )
         db.execute(
-            "INSERT INTO spray_charts (game_id, player_id, team_id, pitcher_id) "
-            "VALUES ('game-2', 'p-canonical', 1, 'p-dup')"
+            "INSERT INTO spray_charts (game_id, player_id, team_id, perspective_team_id, pitcher_id) "
+            "VALUES ('game-2', 'p-canonical', 1, 1, 'p-dup')"
         )
 
         # 7. reconciliation_discrepancies -- both have rows + a __game__ sentinel
         db.execute(
             "INSERT INTO reconciliation_discrepancies "
-            "(game_id, run_id, team_id, player_id, signal_name) "
-            "VALUES ('game-1', 'run-1', 1, 'p-dup', 'ab')"
+            "(game_id, run_id, perspective_team_id, team_id, player_id, signal_name) "
+            "VALUES ('game-1', 'run-1', 1, 1, 'p-dup', 'ab')"
         )
         db.execute(
             "INSERT INTO reconciliation_discrepancies "
-            "(game_id, run_id, team_id, player_id, signal_name) "
-            "VALUES ('game-1', 'run-1', 1, '__game__', 'total_r')"
+            "(game_id, run_id, perspective_team_id, team_id, player_id, signal_name) "
+            "VALUES ('game-1', 'run-1', 1, 1, '__game__', 'total_r')"
         )
 
         # --- Execute merge ---
@@ -810,8 +826,8 @@ class TestSimpleUpdateTables:
         _seed_roster(db, 1, "p-dup", "2026")
         _seed_game(db, "g1", "2026", 1)
 
-        db.execute("INSERT INTO plays (game_id, batter_id, pitcher_id) VALUES ('g1', 'p-dup', 'p-other')")
-        db.execute("INSERT INTO plays (game_id, batter_id, pitcher_id) VALUES ('g1', 'p-other', 'p-dup')")
+        db.execute("INSERT INTO plays (game_id, play_order, inning, half, season_id, batting_team_id, perspective_team_id, batter_id, pitcher_id) VALUES ('g1', 1, 1, 'top', '2026', 1, 1, 'p-dup', 'p-other')")
+        db.execute("INSERT INTO plays (game_id, play_order, inning, half, season_id, batting_team_id, perspective_team_id, batter_id, pitcher_id) VALUES ('g1', 2, 1, 'top', '2026', 1, 1, 'p-other', 'p-dup')")
 
         merge_player_pair(db, "p-can", "p-dup")
 
@@ -830,12 +846,12 @@ class TestSimpleUpdateTables:
         _seed_game(db, "g1", "2026", 1)
 
         db.execute(
-            "INSERT INTO spray_charts (game_id, player_id, team_id, pitcher_id) "
-            "VALUES ('g1', 'p-dup', 1, NULL)"
+            "INSERT INTO spray_charts (game_id, player_id, team_id, perspective_team_id, pitcher_id) "
+            "VALUES ('g1', 'p-dup', 1, 1, NULL)"
         )
         db.execute(
-            "INSERT INTO spray_charts (game_id, player_id, team_id, pitcher_id) "
-            "VALUES ('g1', 'p-can', 1, 'p-dup')"
+            "INSERT INTO spray_charts (game_id, player_id, team_id, perspective_team_id, pitcher_id) "
+            "VALUES ('g1', 'p-can', 1, 1, 'p-dup')"
         )
 
         merge_player_pair(db, "p-can", "p-dup")
@@ -1013,8 +1029,8 @@ class TestPreview:
 
         db.execute(
             "INSERT INTO reconciliation_discrepancies "
-            "(game_id, run_id, team_id, player_id, signal_name) "
-            "VALUES ('g1', 'run-1', 1, '__game__', 'total_r')"
+            "(game_id, run_id, perspective_team_id, team_id, player_id, signal_name) "
+            "VALUES ('g1', 'run-1', 1, 1, '__game__', 'total_r')"
         )
 
         preview = preview_player_merge(db, "p-can", "p-dup")
@@ -1227,3 +1243,289 @@ class TestDedupTeamPlayers:
         assert row is not None
         assert row[0] == 7  # 3 + 4
         assert row[1] == 3  # 1 + 2
+
+
+
+# ---------------------------------------------------------------------------
+# E-220 regression: cross-perspective season recompute must not double-count
+# ---------------------------------------------------------------------------
+
+
+class TestRecomputePerspectiveFiltering:
+    """Verify recompute_season_batting/pitching filter by perspective_team_id.
+
+    After E-220, the same (game_id, player_id, team_id) can have multiple
+    rows in player_game_batting/pitching distinguished by perspective_team_id
+    (one per perspective the game was loaded from).  The recompute helpers
+    must filter to the team's own perspective only, otherwise season totals
+    are inflated.
+    """
+
+    def test_batting_recompute_excludes_other_perspectives(
+        self, db: sqlite3.Connection
+    ) -> None:
+        _seed_team(db, 1, "LSB Varsity")
+        _seed_team(db, 2, "Opponent")
+        _seed_player(db, "p-x", "Xander", "Test")
+        _seed_roster(db, 1, "p-x", "2026")
+        _seed_game(db, "g-1", "2026", 1)
+
+        # Own perspective row (team_id == perspective_team_id)
+        db.execute(
+            "INSERT INTO player_game_batting "
+            "(game_id, player_id, team_id, perspective_team_id, ab, h, hr, rbi, r, bb, so) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("g-1", "p-x", 1, 1, 4, 2, 1, 3, 1, 0, 1),
+        )
+        # Cross-perspective row from opponent (same team_id, different perspective)
+        db.execute(
+            "INSERT INTO player_game_batting "
+            "(game_id, player_id, team_id, perspective_team_id, ab, h, hr, rbi, r, bb, so) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("g-1", "p-x", 1, 2, 4, 2, 1, 3, 1, 0, 1),
+        )
+
+        recompute_season_batting(db, "p-x", 1, "2026")
+
+        row = db.execute(
+            "SELECT games_tracked, ab, h, hr, rbi FROM player_season_batting "
+            "WHERE player_id = 'p-x' AND team_id = 1 AND season_id = '2026'"
+        ).fetchone()
+        assert row is not None, "season row should be created"
+        # Must reflect ONE perspective only -- not 2x.
+        assert row[0] == 1, f"games_tracked should be 1 (own perspective), got {row[0]}"
+        assert row[1] == 4, f"ab should be 4, got {row[1]}"
+        assert row[2] == 2, f"h should be 2, got {row[2]}"
+        assert row[3] == 1, f"hr should be 1, got {row[3]}"
+        assert row[4] == 3, f"rbi should be 3, got {row[4]}"
+
+    def test_pitching_recompute_excludes_other_perspectives(
+        self, db: sqlite3.Connection
+    ) -> None:
+        _seed_team(db, 1, "LSB Varsity")
+        _seed_team(db, 2, "Opponent")
+        _seed_player(db, "p-y", "Yancy", "Pitcher")
+        _seed_roster(db, 1, "p-y", "2026")
+        _seed_game(db, "g-2", "2026", 1)
+
+        db.execute(
+            "INSERT INTO player_game_pitching "
+            "(game_id, player_id, team_id, perspective_team_id, ip_outs, h, r, er, bb, so, pitches, total_strikes, bf) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("g-2", "p-y", 1, 1, 18, 4, 2, 2, 1, 6, 85, 55, 24),
+        )
+        db.execute(
+            "INSERT INTO player_game_pitching "
+            "(game_id, player_id, team_id, perspective_team_id, ip_outs, h, r, er, bb, so, pitches, total_strikes, bf) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("g-2", "p-y", 1, 2, 18, 4, 2, 2, 1, 6, 85, 55, 24),
+        )
+
+        recompute_season_pitching(db, "p-y", 1, "2026")
+
+        row = db.execute(
+            "SELECT games_tracked, ip_outs, pitches, so, bb FROM player_season_pitching "
+            "WHERE player_id = 'p-y' AND team_id = 1 AND season_id = '2026'"
+        ).fetchone()
+        assert row is not None
+        assert row[0] == 1, f"games_tracked should be 1, got {row[0]}"
+        assert row[1] == 18, f"ip_outs should be 18, got {row[1]}"
+        assert row[2] == 85, f"pitches should be 85, got {row[2]}"
+        assert row[3] == 6
+        assert row[4] == 1
+
+
+
+# ---------------------------------------------------------------------------
+# Round 6 Cluster 1: cross-perspective dedup safety
+# ---------------------------------------------------------------------------
+
+
+class TestCrossPerspectiveOverlapDetection:
+    """E-220 round 6: _check_game_overlaps must not treat cross-perspective
+    rows for DIFFERENT teams as overlapping.
+
+    Before the fix, the overlap subquery filters only by player_id (not team
+    or perspective), so two different-team players who happen to appear in
+    the same game_id register as "overlapping" even though they're on
+    different rosters and their data comes from different perspectives.
+    """
+
+    def test_cross_team_same_game_same_player_no_overlap(
+        self, db: sqlite3.Connection
+    ) -> None:
+        """Same game_id, same canonical name, but different teams must not
+        count as overlap just because the game_id string matches.
+        """
+        _seed_team(db, 1, "LSB Varsity")
+        _seed_team(db, 2, "Rival HS")
+        # Same prefix-match names on BOTH teams.  The detector only flags
+        # same-team pairs, so `find_duplicate_players` returns one pair per
+        # team.  We care that the team-1 pair's overlap check does NOT see
+        # the team-2 rows (different team) as overlapping.
+        _seed_player(db, "p-oliver-t1", "Oliver", "Holbein")
+        _seed_player(db, "p-o-t1", "O", "Holbein")
+        _seed_player(db, "p-oliver-t2", "Oliver", "Holbein")
+        _seed_player(db, "p-o-t2", "O", "Holbein")
+        _seed_roster(db, 1, "p-oliver-t1", "2026")
+        _seed_roster(db, 1, "p-o-t1", "2026")
+        _seed_roster(db, 2, "p-oliver-t2", "2026")
+        _seed_roster(db, 2, "p-o-t2", "2026")
+
+        # Team 1's Oliver plays in game-A ONLY (from team 1's perspective)
+        _seed_game(db, "game-A", "2026", 1)
+        _seed_game_batting(db, "game-A", "p-oliver-t1", 1, ab=4, perspective_team_id=1)
+
+        # Team 2's Oliver and O BOTH play in game-A (same game_id -- a shared
+        # game string) from TEAM 2's perspective.  These are different players
+        # (t2-scoped) but share the game_id.
+        _seed_game_batting(db, "game-A", "p-oliver-t2", 2, ab=4, perspective_team_id=2)
+        _seed_game_batting(db, "game-A", "p-o-t2", 2, ab=4, perspective_team_id=2)
+
+        pairs = find_duplicate_players(db)
+
+        # Find the team-1 pair (p-oliver-t1 vs p-o-t1)
+        team1_pair = next(
+            (p for p in pairs
+             if p.canonical_player_id == "p-oliver-t1"
+             and p.duplicate_player_id == "p-o-t1"),
+            None,
+        )
+        assert team1_pair is not None, (
+            "team 1 pair should be detected by name-prefix match"
+        )
+        # The team-1 pair should NOT show overlap: team 1 O never played in
+        # game-A.  Before the fix, the overlap query checked game_id only
+        # and would incorrectly see team-2's data as team-1 overlap.
+        assert team1_pair.has_overlapping_games is False, (
+            "team 1 pair should NOT show overlap -- team 1 O has no games. "
+            "Before the fix, cross-team rows in the same game_id were "
+            "incorrectly treated as overlapping."
+        )
+
+    def test_same_team_same_game_cross_perspective_own_perspective_only(
+        self, db: sqlite3.Connection
+    ) -> None:
+        """Overlap detection must use the team's OWN perspective only.
+
+        If team 1's own perspective shows O in game-A but Oliver has only
+        been loaded from team 2's perspective for game-A (foreign data),
+        they should NOT count as overlapping for team 1.
+        """
+        _seed_team(db, 1, "LSB Varsity")
+        _seed_team(db, 2, "Rival HS")
+        _seed_player(db, "p-oliver", "Oliver", "Holbein")
+        _seed_player(db, "p-o", "O", "Holbein")
+        _seed_roster(db, 1, "p-oliver", "2026")
+        _seed_roster(db, 1, "p-o", "2026")
+
+        _seed_game(db, "game-A", "2026", 1)
+        # p-o is in game-A from team 1's OWN perspective (own data).
+        _seed_game_batting(db, "game-A", "p-o", 1, ab=1, perspective_team_id=1)
+        # p-oliver is in game-A but ONLY from team 2's perspective (foreign).
+        _seed_game_batting(db, "game-A", "p-oliver", 1, ab=1, perspective_team_id=2)
+
+        pairs = find_duplicate_players(db)
+        assert len(pairs) == 1
+        # Overlap detection should only count rows from the team's own
+        # perspective.  p-oliver has NO own-perspective data for team 1 in
+        # game-A, so the overlap check should return False.
+        assert pairs[0].has_overlapping_games is False, (
+            "overlap detection should ignore cross-perspective foreign rows "
+            "when determining overlap for the team"
+        )
+
+
+class TestMergeCrossPerspectiveRowsPreserved:
+    """E-220 round 6 P1-2: merge_player_pair must treat the 3-column UNIQUE
+    correctly -- same game_id + same canonical player_id but DIFFERENT
+    perspective_team_id should NOT be treated as a conflict.
+    """
+
+    def test_merge_preserves_cross_perspective_rows(
+        self, db: sqlite3.Connection
+    ) -> None:
+        """Canonical has game-A from perspective 1; duplicate has game-A
+        from perspective 2.  After merge, BOTH rows should survive tagged
+        with canonical player_id.  Before the fix, the JOIN on
+        (c.game_id = d.game_id AND c.player_id = canonical) treats them as
+        collision and drops one.
+        """
+        _seed_team(db, 1, "LSB Varsity")
+        _seed_team(db, 2, "Opponent")
+        _seed_player(db, "p-canonical", "Oliver", "Holbein")
+        _seed_player(db, "p-duplicate", "O", "Holbein")
+        _seed_roster(db, 1, "p-canonical", "2026")
+        _seed_roster(db, 1, "p-duplicate", "2026")
+        _seed_game(db, "game-X", "2026", 1)
+
+        # Canonical has game-X from perspective 1 (own)
+        _seed_game_batting(
+            db, "game-X", "p-canonical", 1, ab=4, h=2,
+            perspective_team_id=1,
+        )
+        # Duplicate has game-X from perspective 2 (foreign).  These are
+        # legitimately different rows -- not a conflict -- because the
+        # UNIQUE constraint is (game_id, player_id, perspective_team_id).
+        _seed_game_batting(
+            db, "game-X", "p-duplicate", 1, ab=3, h=1,
+            perspective_team_id=2,
+        )
+
+        merge_player_pair(db, "p-canonical", "p-duplicate", manage_transaction=True)
+
+        # After merge, BOTH rows should exist (tagged with canonical player_id)
+        # and they should have their respective perspectives.
+        rows = db.execute(
+            "SELECT ab, h, perspective_team_id FROM player_game_batting "
+            "WHERE game_id = 'game-X' AND player_id = 'p-canonical' "
+            "ORDER BY perspective_team_id"
+        ).fetchall()
+        assert len(rows) == 2, (
+            f"expected 2 rows (one per perspective), got {len(rows)}: {rows}. "
+            "Before the fix, the JOIN treated cross-perspective as collision "
+            "and deleted one row."
+        )
+        # Perspective 1 row: original canonical data
+        assert rows[0] == (4, 2, 1), (
+            f"perspective 1 row should be canonical data (4, 2, 1), got {rows[0]}"
+        )
+        # Perspective 2 row: duplicate's row rewritten to canonical player_id
+        assert rows[1] == (3, 1, 2), (
+            f"perspective 2 row should be duplicate rewritten (3, 1, 2), got {rows[1]}"
+        )
+
+    def test_merge_resolves_same_perspective_collision(
+        self, db: sqlite3.Connection
+    ) -> None:
+        """Sanity check: same game_id + same perspective_team_id IS a
+        collision and should be resolved canonical-wins.
+        """
+        _seed_team(db, 1, "LSB Varsity")
+        _seed_player(db, "p-canonical", "Oliver", "Holbein")
+        _seed_player(db, "p-duplicate", "O", "Holbein")
+        _seed_roster(db, 1, "p-canonical", "2026")
+        _seed_roster(db, 1, "p-duplicate", "2026")
+        _seed_game(db, "game-Y", "2026", 1)
+
+        # Both players have rows in same game, same perspective -- collision.
+        _seed_game_batting(
+            db, "game-Y", "p-canonical", 1, ab=4, h=2,
+            perspective_team_id=1,
+        )
+        _seed_game_batting(
+            db, "game-Y", "p-duplicate", 1, ab=3, h=1,
+            perspective_team_id=1,
+        )
+
+        merge_player_pair(db, "p-canonical", "p-duplicate", manage_transaction=True)
+
+        # After merge, exactly ONE row should remain (canonical wins).
+        rows = db.execute(
+            "SELECT ab, h FROM player_game_batting "
+            "WHERE game_id = 'game-Y' AND player_id = 'p-canonical'"
+        ).fetchall()
+        assert len(rows) == 1, f"expected 1 row (canonical wins), got {len(rows)}"
+        # Canonical wins on tie: (4, 2)
+        assert rows[0] == (4, 2), f"expected canonical (4, 2), got {rows[0]}"
+

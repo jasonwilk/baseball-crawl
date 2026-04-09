@@ -208,130 +208,130 @@ INSERT INTO games (game_id, season_id, game_date, home_team_id, away_team_id, ho
 -- ---------------------------------------------------------------------------
 
 -- GAME_001 (spring-hs, home)
-INSERT INTO player_game_batting (game_id, player_id, team_id, ab, h, doubles, triples, hr, rbi, bb, so, sb) VALUES
-    ('GAME_001', 'PLAYER_VARSITY_01', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 3, 1, 0, 0, 0, 0, 0, 1, 0),
-    ('GAME_001', 'PLAYER_VARSITY_02', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 3, 1, 0, 0, 0, 1, 1, 0, 0),
-    ('GAME_001', 'PLAYER_VARSITY_03', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 3, 1, 0, 0, 0, 0, 0, 0, 0),
-    ('GAME_001', 'PLAYER_VARSITY_04', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 3, 1, 0, 0, 0, 1, 0, 0, 0),
-    ('GAME_001', 'PLAYER_VARSITY_05', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 1, 0, 0, 0, 0, 0, 0, 0),
-    ('GAME_001', 'PLAYER_VARSITY_06', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 1, 0, 0, 0, 0, 0, 0, 0),
-    ('GAME_001', 'PLAYER_VARSITY_07', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 1, 0, 0, 0, 0, 0, 0, 0),
-    ('GAME_001', 'PLAYER_VARSITY_08', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 1, 0, 0, 0, 1, 0, 0, 0),
-    ('GAME_001', 'PLAYER_VARSITY_09', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 0, 0),
-    ('GAME_001', 'PLAYER_VARSITY_10', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 0, 0),
-    ('GAME_001', 'PLAYER_VARSITY_11', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 0, 0),
-    ('GAME_001', 'PLAYER_VARSITY_12', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 0, 0),
-    ('GAME_001', 'PLAYER_VARSITY_13', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 1, 0),
-    ('GAME_001', 'PLAYER_VARSITY_14', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 1, 0),
-    ('GAME_001', 'PLAYER_VARSITY_15', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 1, 0);
+INSERT INTO player_game_batting (game_id, player_id, team_id, perspective_team_id, ab, h, doubles, triples, hr, rbi, bb, so, sb) VALUES
+    ('GAME_001', 'PLAYER_VARSITY_01', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 3, 1, 0, 0, 0, 0, 0, 1, 0),
+    ('GAME_001', 'PLAYER_VARSITY_02', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 3, 1, 0, 0, 0, 1, 1, 0, 0),
+    ('GAME_001', 'PLAYER_VARSITY_03', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 3, 1, 0, 0, 0, 0, 0, 0, 0),
+    ('GAME_001', 'PLAYER_VARSITY_04', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 3, 1, 0, 0, 0, 1, 0, 0, 0),
+    ('GAME_001', 'PLAYER_VARSITY_05', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 1, 0, 0, 0, 0, 0, 0, 0),
+    ('GAME_001', 'PLAYER_VARSITY_06', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 1, 0, 0, 0, 0, 0, 0, 0),
+    ('GAME_001', 'PLAYER_VARSITY_07', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 1, 0, 0, 0, 0, 0, 0, 0),
+    ('GAME_001', 'PLAYER_VARSITY_08', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 1, 0, 0, 0, 1, 0, 0, 0),
+    ('GAME_001', 'PLAYER_VARSITY_09', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 0, 0),
+    ('GAME_001', 'PLAYER_VARSITY_10', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 0, 0),
+    ('GAME_001', 'PLAYER_VARSITY_11', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 0, 0),
+    ('GAME_001', 'PLAYER_VARSITY_12', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 0, 0),
+    ('GAME_001', 'PLAYER_VARSITY_13', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 1, 0),
+    ('GAME_001', 'PLAYER_VARSITY_14', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 1, 0),
+    ('GAME_001', 'PLAYER_VARSITY_15', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 1, 0);
 
 -- GAME_002 (spring-hs, away)
-INSERT INTO player_game_batting (game_id, player_id, team_id, ab, h, doubles, triples, hr, rbi, bb, so, sb) VALUES
-    ('GAME_002', 'PLAYER_VARSITY_01', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 3, 1, 0, 0, 0, 0, 0, 1, 0),
-    ('GAME_002', 'PLAYER_VARSITY_02', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 3, 1, 0, 0, 0, 0, 1, 0, 0),
-    ('GAME_002', 'PLAYER_VARSITY_03', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 3, 1, 0, 0, 0, 0, 0, 0, 0),
-    ('GAME_002', 'PLAYER_VARSITY_04', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 3, 1, 0, 0, 0, 0, 0, 0, 0),
-    ('GAME_002', 'PLAYER_VARSITY_05', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 0, 0),
-    ('GAME_002', 'PLAYER_VARSITY_06', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 0, 0),
-    ('GAME_002', 'PLAYER_VARSITY_07', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 0, 0),
-    ('GAME_002', 'PLAYER_VARSITY_08', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 0, 0),
-    ('GAME_002', 'PLAYER_VARSITY_09', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 0, 0),
-    ('GAME_002', 'PLAYER_VARSITY_10', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 0, 0),
-    ('GAME_002', 'PLAYER_VARSITY_11', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 0, 0),
-    ('GAME_002', 'PLAYER_VARSITY_12', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 0, 0),
-    ('GAME_002', 'PLAYER_VARSITY_13', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 1, 0),
-    ('GAME_002', 'PLAYER_VARSITY_14', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 1, 0),
-    ('GAME_002', 'PLAYER_VARSITY_15', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 1, 0);
+INSERT INTO player_game_batting (game_id, player_id, team_id, perspective_team_id, ab, h, doubles, triples, hr, rbi, bb, so, sb) VALUES
+    ('GAME_002', 'PLAYER_VARSITY_01', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 3, 1, 0, 0, 0, 0, 0, 1, 0),
+    ('GAME_002', 'PLAYER_VARSITY_02', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 3, 1, 0, 0, 0, 0, 1, 0, 0),
+    ('GAME_002', 'PLAYER_VARSITY_03', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 3, 1, 0, 0, 0, 0, 0, 0, 0),
+    ('GAME_002', 'PLAYER_VARSITY_04', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 3, 1, 0, 0, 0, 0, 0, 0, 0),
+    ('GAME_002', 'PLAYER_VARSITY_05', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 0, 0),
+    ('GAME_002', 'PLAYER_VARSITY_06', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 0, 0),
+    ('GAME_002', 'PLAYER_VARSITY_07', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 0, 0),
+    ('GAME_002', 'PLAYER_VARSITY_08', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 0, 0),
+    ('GAME_002', 'PLAYER_VARSITY_09', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 0, 0),
+    ('GAME_002', 'PLAYER_VARSITY_10', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 0, 0),
+    ('GAME_002', 'PLAYER_VARSITY_11', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 0, 0),
+    ('GAME_002', 'PLAYER_VARSITY_12', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 0, 0),
+    ('GAME_002', 'PLAYER_VARSITY_13', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 1, 0),
+    ('GAME_002', 'PLAYER_VARSITY_14', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 1, 0),
+    ('GAME_002', 'PLAYER_VARSITY_15', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 1, 0);
 
 -- GAME_003 (spring-hs, home)
-INSERT INTO player_game_batting (game_id, player_id, team_id, ab, h, doubles, triples, hr, rbi, bb, so, sb) VALUES
-    ('GAME_003', 'PLAYER_VARSITY_01', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 3, 1, 0, 0, 0, 1, 1, 0, 0),
-    ('GAME_003', 'PLAYER_VARSITY_02', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 3, 2, 1, 0, 0, 2, 1, 0, 0),
-    ('GAME_003', 'PLAYER_VARSITY_03', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 3, 1, 0, 0, 0, 0, 1, 0, 0),
-    ('GAME_003', 'PLAYER_VARSITY_04', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 3, 1, 0, 0, 0, 1, 1, 0, 0),
-    ('GAME_003', 'PLAYER_VARSITY_05', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 1, 0, 0, 0, 0, 0, 0, 0),
-    ('GAME_003', 'PLAYER_VARSITY_06', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 1, 0, 0, 0, 0, 0, 0, 0),
-    ('GAME_003', 'PLAYER_VARSITY_07', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 1, 0, 0, 0, 0, 0, 0, 0),
-    ('GAME_003', 'PLAYER_VARSITY_08', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 1, 0, 0, 0, 1, 0, 0, 0),
-    ('GAME_003', 'PLAYER_VARSITY_09', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 1, 0, 0, 0, 0, 0, 0, 0),
-    ('GAME_003', 'PLAYER_VARSITY_10', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 0, 0),
-    ('GAME_003', 'PLAYER_VARSITY_11', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 0, 0),
-    ('GAME_003', 'PLAYER_VARSITY_12', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 0, 0),
-    ('GAME_003', 'PLAYER_VARSITY_13', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 0, 0),
-    ('GAME_003', 'PLAYER_VARSITY_14', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 0, 0),
-    ('GAME_003', 'PLAYER_VARSITY_15', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 0, 0);
+INSERT INTO player_game_batting (game_id, player_id, team_id, perspective_team_id, ab, h, doubles, triples, hr, rbi, bb, so, sb) VALUES
+    ('GAME_003', 'PLAYER_VARSITY_01', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 3, 1, 0, 0, 0, 1, 1, 0, 0),
+    ('GAME_003', 'PLAYER_VARSITY_02', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 3, 2, 1, 0, 0, 2, 1, 0, 0),
+    ('GAME_003', 'PLAYER_VARSITY_03', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 3, 1, 0, 0, 0, 0, 1, 0, 0),
+    ('GAME_003', 'PLAYER_VARSITY_04', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 3, 1, 0, 0, 0, 1, 1, 0, 0),
+    ('GAME_003', 'PLAYER_VARSITY_05', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 1, 0, 0, 0, 0, 0, 0, 0),
+    ('GAME_003', 'PLAYER_VARSITY_06', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 1, 0, 0, 0, 0, 0, 0, 0),
+    ('GAME_003', 'PLAYER_VARSITY_07', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 1, 0, 0, 0, 0, 0, 0, 0),
+    ('GAME_003', 'PLAYER_VARSITY_08', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 1, 0, 0, 0, 1, 0, 0, 0),
+    ('GAME_003', 'PLAYER_VARSITY_09', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 1, 0, 0, 0, 0, 0, 0, 0),
+    ('GAME_003', 'PLAYER_VARSITY_10', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 0, 0),
+    ('GAME_003', 'PLAYER_VARSITY_11', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 0, 0),
+    ('GAME_003', 'PLAYER_VARSITY_12', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 0, 0),
+    ('GAME_003', 'PLAYER_VARSITY_13', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 0, 0),
+    ('GAME_003', 'PLAYER_VARSITY_14', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 0, 0),
+    ('GAME_003', 'PLAYER_VARSITY_15', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 0, 0);
 
 -- GAME_004 (spring-hs, away)
-INSERT INTO player_game_batting (game_id, player_id, team_id, ab, h, doubles, triples, hr, rbi, bb, so, sb) VALUES
-    ('GAME_004', 'PLAYER_VARSITY_01', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 3, 1, 0, 0, 0, 1, 1, 0, 0),
-    ('GAME_004', 'PLAYER_VARSITY_02', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 3, 1, 0, 0, 0, 0, 1, 0, 0),
-    ('GAME_004', 'PLAYER_VARSITY_03', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 1, 0, 0, 0, 1, 0, 0, 0),
-    ('GAME_004', 'PLAYER_VARSITY_04', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 3, 1, 0, 0, 0, 0, 0, 0, 0),
-    ('GAME_004', 'PLAYER_VARSITY_05', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 1, 0, 0, 0, 0, 0, 0, 0),
-    ('GAME_004', 'PLAYER_VARSITY_06', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 1, 0, 0, 0, 1, 0, 0, 0),
-    ('GAME_004', 'PLAYER_VARSITY_07', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 1, 0, 0, 0, 0, 0, 0, 0),
-    ('GAME_004', 'PLAYER_VARSITY_08', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 0, 0),
-    ('GAME_004', 'PLAYER_VARSITY_09', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 0, 0),
-    ('GAME_004', 'PLAYER_VARSITY_10', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 0, 0),
-    ('GAME_004', 'PLAYER_VARSITY_11', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 0, 0),
-    ('GAME_004', 'PLAYER_VARSITY_12', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 0, 0),
-    ('GAME_004', 'PLAYER_VARSITY_13', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 0, 0),
-    ('GAME_004', 'PLAYER_VARSITY_14', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 0, 0),
-    ('GAME_004', 'PLAYER_VARSITY_15', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 0, 0);
+INSERT INTO player_game_batting (game_id, player_id, team_id, perspective_team_id, ab, h, doubles, triples, hr, rbi, bb, so, sb) VALUES
+    ('GAME_004', 'PLAYER_VARSITY_01', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 3, 1, 0, 0, 0, 1, 1, 0, 0),
+    ('GAME_004', 'PLAYER_VARSITY_02', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 3, 1, 0, 0, 0, 0, 1, 0, 0),
+    ('GAME_004', 'PLAYER_VARSITY_03', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 1, 0, 0, 0, 1, 0, 0, 0),
+    ('GAME_004', 'PLAYER_VARSITY_04', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 3, 1, 0, 0, 0, 0, 0, 0, 0),
+    ('GAME_004', 'PLAYER_VARSITY_05', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 1, 0, 0, 0, 0, 0, 0, 0),
+    ('GAME_004', 'PLAYER_VARSITY_06', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 1, 0, 0, 0, 1, 0, 0, 0),
+    ('GAME_004', 'PLAYER_VARSITY_07', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 1, 0, 0, 0, 0, 0, 0, 0),
+    ('GAME_004', 'PLAYER_VARSITY_08', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 0, 0),
+    ('GAME_004', 'PLAYER_VARSITY_09', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 0, 0),
+    ('GAME_004', 'PLAYER_VARSITY_10', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 0, 0),
+    ('GAME_004', 'PLAYER_VARSITY_11', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 0, 0),
+    ('GAME_004', 'PLAYER_VARSITY_12', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 0, 0),
+    ('GAME_004', 'PLAYER_VARSITY_13', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 0, 0),
+    ('GAME_004', 'PLAYER_VARSITY_14', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 0, 0),
+    ('GAME_004', 'PLAYER_VARSITY_15', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 0, 0);
 
 -- GAME_005 (spring-hs, home)
-INSERT INTO player_game_batting (game_id, player_id, team_id, ab, h, doubles, triples, hr, rbi, bb, so, sb) VALUES
-    ('GAME_005', 'PLAYER_VARSITY_01', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 3, 1, 0, 0, 0, 0, 0, 1, 0),
-    ('GAME_005', 'PLAYER_VARSITY_02', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 3, 1, 0, 0, 0, 0, 1, 0, 0),
-    ('GAME_005', 'PLAYER_VARSITY_03', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 1, 0),
-    ('GAME_005', 'PLAYER_VARSITY_04', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 3, 0, 0, 0, 0, 0, 1, 1, 0),
-    ('GAME_005', 'PLAYER_VARSITY_05', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 0, 0),
-    ('GAME_005', 'PLAYER_VARSITY_06', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 0, 0),
-    ('GAME_005', 'PLAYER_VARSITY_07', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 0, 0),
-    ('GAME_005', 'PLAYER_VARSITY_08', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 0, 0),
-    ('GAME_005', 'PLAYER_VARSITY_09', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 0, 0),
-    ('GAME_005', 'PLAYER_VARSITY_10', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 0, 0),
-    ('GAME_005', 'PLAYER_VARSITY_11', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 0, 0),
-    ('GAME_005', 'PLAYER_VARSITY_12', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 0, 0),
-    ('GAME_005', 'PLAYER_VARSITY_13', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 1, 0),
-    ('GAME_005', 'PLAYER_VARSITY_14', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 1, 0),
-    ('GAME_005', 'PLAYER_VARSITY_15', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 1, 0);
+INSERT INTO player_game_batting (game_id, player_id, team_id, perspective_team_id, ab, h, doubles, triples, hr, rbi, bb, so, sb) VALUES
+    ('GAME_005', 'PLAYER_VARSITY_01', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 3, 1, 0, 0, 0, 0, 0, 1, 0),
+    ('GAME_005', 'PLAYER_VARSITY_02', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 3, 1, 0, 0, 0, 0, 1, 0, 0),
+    ('GAME_005', 'PLAYER_VARSITY_03', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 1, 0),
+    ('GAME_005', 'PLAYER_VARSITY_04', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 3, 0, 0, 0, 0, 0, 1, 1, 0),
+    ('GAME_005', 'PLAYER_VARSITY_05', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 0, 0),
+    ('GAME_005', 'PLAYER_VARSITY_06', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 0, 0),
+    ('GAME_005', 'PLAYER_VARSITY_07', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 0, 0),
+    ('GAME_005', 'PLAYER_VARSITY_08', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 0, 0),
+    ('GAME_005', 'PLAYER_VARSITY_09', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 0, 0),
+    ('GAME_005', 'PLAYER_VARSITY_10', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 0, 0),
+    ('GAME_005', 'PLAYER_VARSITY_11', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 0, 0),
+    ('GAME_005', 'PLAYER_VARSITY_12', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 0, 0),
+    ('GAME_005', 'PLAYER_VARSITY_13', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 1, 0),
+    ('GAME_005', 'PLAYER_VARSITY_14', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 1, 0),
+    ('GAME_005', 'PLAYER_VARSITY_15', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 1, 0);
 
 -- GAME_006 (spring-hs, away)
-INSERT INTO player_game_batting (game_id, player_id, team_id, ab, h, doubles, triples, hr, rbi, bb, so, sb) VALUES
-    ('GAME_006', 'PLAYER_VARSITY_01', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 3, 1, 0, 0, 0, 1, 1, 0, 0),
-    ('GAME_006', 'PLAYER_VARSITY_02', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 3, 0, 0, 0, 0, 0, 0, 1, 0),
-    ('GAME_006', 'PLAYER_VARSITY_03', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 3, 1, 0, 0, 0, 1, 1, 0, 0),
-    ('GAME_006', 'PLAYER_VARSITY_04', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 3, 0, 0, 0, 0, 0, 0, 0, 0),
-    ('GAME_006', 'PLAYER_VARSITY_05', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 1, 0, 0, 0, 1, 0, 0, 0),
-    ('GAME_006', 'PLAYER_VARSITY_06', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 0, 0),
-    ('GAME_006', 'PLAYER_VARSITY_07', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 0, 0),
-    ('GAME_006', 'PLAYER_VARSITY_08', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 0, 0),
-    ('GAME_006', 'PLAYER_VARSITY_09', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 0, 0),
-    ('GAME_006', 'PLAYER_VARSITY_10', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 0, 0),
-    ('GAME_006', 'PLAYER_VARSITY_11', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 0, 0),
-    ('GAME_006', 'PLAYER_VARSITY_12', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 0, 0),
-    ('GAME_006', 'PLAYER_VARSITY_13', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 1, 0, 0, 0, 1, 0, 0, 0),
-    ('GAME_006', 'PLAYER_VARSITY_14', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 1, 0, 0, 0, 1, 0, 0, 0),
-    ('GAME_006', 'PLAYER_VARSITY_15', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 1, 0, 0, 0, 1, 0, 0, 0);
+INSERT INTO player_game_batting (game_id, player_id, team_id, perspective_team_id, ab, h, doubles, triples, hr, rbi, bb, so, sb) VALUES
+    ('GAME_006', 'PLAYER_VARSITY_01', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 3, 1, 0, 0, 0, 1, 1, 0, 0),
+    ('GAME_006', 'PLAYER_VARSITY_02', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 3, 0, 0, 0, 0, 0, 0, 1, 0),
+    ('GAME_006', 'PLAYER_VARSITY_03', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 3, 1, 0, 0, 0, 1, 1, 0, 0),
+    ('GAME_006', 'PLAYER_VARSITY_04', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 3, 0, 0, 0, 0, 0, 0, 0, 0),
+    ('GAME_006', 'PLAYER_VARSITY_05', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 1, 0, 0, 0, 1, 0, 0, 0),
+    ('GAME_006', 'PLAYER_VARSITY_06', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 0, 0),
+    ('GAME_006', 'PLAYER_VARSITY_07', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 0, 0),
+    ('GAME_006', 'PLAYER_VARSITY_08', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 0, 0),
+    ('GAME_006', 'PLAYER_VARSITY_09', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 0, 0),
+    ('GAME_006', 'PLAYER_VARSITY_10', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 0, 0),
+    ('GAME_006', 'PLAYER_VARSITY_11', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 0, 0),
+    ('GAME_006', 'PLAYER_VARSITY_12', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 0, 0, 0, 0, 0, 0, 0, 0),
+    ('GAME_006', 'PLAYER_VARSITY_13', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 1, 0, 0, 0, 1, 0, 0, 0),
+    ('GAME_006', 'PLAYER_VARSITY_14', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 1, 0, 0, 0, 1, 0, 0, 0),
+    ('GAME_006', 'PLAYER_VARSITY_15', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 1, 0, 0, 0, 1, 0, 0, 0);
 
 -- GAME_007 (spring-hs, home)
-INSERT INTO player_game_batting (game_id, player_id, team_id, ab, h, doubles, triples, hr, rbi, bb, so, sb) VALUES
-    ('GAME_007', 'PLAYER_VARSITY_01', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 1, 0, 0, 0, 1, 0, 1, 0),
-    ('GAME_007', 'PLAYER_VARSITY_02', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 3, 1, 0, 0, 0, 1, 0, 0, 0),
-    ('GAME_007', 'PLAYER_VARSITY_03', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 3, 1, 0, 0, 0, 0, 0, 0, 0),
-    ('GAME_007', 'PLAYER_VARSITY_04', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 3, 2, 0, 0, 0, 2, 0, 0, 0),
-    ('GAME_007', 'PLAYER_VARSITY_05', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 3, 1, 0, 0, 0, 1, 1, 0, 0),
-    ('GAME_007', 'PLAYER_VARSITY_06', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 3, 1, 0, 0, 0, 0, 0, 0, 0),
-    ('GAME_007', 'PLAYER_VARSITY_07', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 3, 1, 0, 0, 0, 1, 0, 0, 0),
-    ('GAME_007', 'PLAYER_VARSITY_08', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 3, 1, 0, 0, 0, 1, 0, 0, 0),
-    ('GAME_007', 'PLAYER_VARSITY_09', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 3, 1, 0, 0, 0, 0, 0, 0, 0),
-    ('GAME_007', 'PLAYER_VARSITY_10', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 3, 1, 0, 0, 0, 0, 0, 0, 0),
-    ('GAME_007', 'PLAYER_VARSITY_11', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 3, 1, 0, 0, 0, 0, 0, 0, 0),
-    ('GAME_007', 'PLAYER_VARSITY_12', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 3, 1, 0, 0, 0, 1, 0, 0, 0),
-    ('GAME_007', 'PLAYER_VARSITY_13', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 3, 1, 0, 0, 0, 0, 0, 0, 0),
-    ('GAME_007', 'PLAYER_VARSITY_14', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 3, 1, 0, 0, 0, 0, 0, 0, 0),
-    ('GAME_007', 'PLAYER_VARSITY_15', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 3, 1, 0, 0, 0, 0, 0, 0, 0);
+INSERT INTO player_game_batting (game_id, player_id, team_id, perspective_team_id, ab, h, doubles, triples, hr, rbi, bb, so, sb) VALUES
+    ('GAME_007', 'PLAYER_VARSITY_01', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 2, 1, 0, 0, 0, 1, 0, 1, 0),
+    ('GAME_007', 'PLAYER_VARSITY_02', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 3, 1, 0, 0, 0, 1, 0, 0, 0),
+    ('GAME_007', 'PLAYER_VARSITY_03', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 3, 1, 0, 0, 0, 0, 0, 0, 0),
+    ('GAME_007', 'PLAYER_VARSITY_04', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 3, 2, 0, 0, 0, 2, 0, 0, 0),
+    ('GAME_007', 'PLAYER_VARSITY_05', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 3, 1, 0, 0, 0, 1, 1, 0, 0),
+    ('GAME_007', 'PLAYER_VARSITY_06', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 3, 1, 0, 0, 0, 0, 0, 0, 0),
+    ('GAME_007', 'PLAYER_VARSITY_07', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 3, 1, 0, 0, 0, 1, 0, 0, 0),
+    ('GAME_007', 'PLAYER_VARSITY_08', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 3, 1, 0, 0, 0, 1, 0, 0, 0),
+    ('GAME_007', 'PLAYER_VARSITY_09', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 3, 1, 0, 0, 0, 0, 0, 0, 0),
+    ('GAME_007', 'PLAYER_VARSITY_10', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 3, 1, 0, 0, 0, 0, 0, 0, 0),
+    ('GAME_007', 'PLAYER_VARSITY_11', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 3, 1, 0, 0, 0, 0, 0, 0, 0),
+    ('GAME_007', 'PLAYER_VARSITY_12', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 3, 1, 0, 0, 0, 1, 0, 0, 0),
+    ('GAME_007', 'PLAYER_VARSITY_13', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 3, 1, 0, 0, 0, 0, 0, 0, 0),
+    ('GAME_007', 'PLAYER_VARSITY_14', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 3, 1, 0, 0, 0, 0, 0, 0, 0),
+    ('GAME_007', 'PLAYER_VARSITY_15', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 3, 1, 0, 0, 0, 0, 0, 0, 0);
 
 -- ---------------------------------------------------------------------------
 -- Player game pitching
@@ -343,36 +343,36 @@ INSERT INTO player_game_batting (game_id, player_id, team_id, ab, h, doubles, tr
 -- ---------------------------------------------------------------------------
 
 -- GAME_001 (home, V wins 5-3): PLAYER_VARSITY_01 starts (18 outs = 6 IP)
-INSERT INTO player_game_pitching (game_id, player_id, team_id, ip_outs, h, r, er, bb, so) VALUES
-    ('GAME_001', 'PLAYER_VARSITY_01', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 18, 5, 3, 3, 2, 7);
+INSERT INTO player_game_pitching (game_id, player_id, team_id, perspective_team_id, ip_outs, h, r, er, bb, so) VALUES
+    ('GAME_001', 'PLAYER_VARSITY_01', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 18, 5, 3, 3, 2, 7);
 
 -- GAME_002 (away, V loses 4-2): PLAYER_VARSITY_02 starts (15 outs = 5 IP)
-INSERT INTO player_game_pitching (game_id, player_id, team_id, ip_outs, h, r, er, bb, so) VALUES
-    ('GAME_002', 'PLAYER_VARSITY_02', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 15, 6, 4, 4, 2, 4);
+INSERT INTO player_game_pitching (game_id, player_id, team_id, perspective_team_id, ip_outs, h, r, er, bb, so) VALUES
+    ('GAME_002', 'PLAYER_VARSITY_02', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 15, 6, 4, 4, 2, 4);
 
 -- GAME_003 (home, V wins 6-1): PLAYER_VARSITY_01 starts CG (21 outs = 7 IP)
-INSERT INTO player_game_pitching (game_id, player_id, team_id, ip_outs, h, r, er, bb, so) VALUES
-    ('GAME_003', 'PLAYER_VARSITY_01', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 21, 3, 1, 1, 1, 8);
+INSERT INTO player_game_pitching (game_id, player_id, team_id, perspective_team_id, ip_outs, h, r, er, bb, so) VALUES
+    ('GAME_003', 'PLAYER_VARSITY_01', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 21, 3, 1, 1, 1, 8);
 
 -- GAME_004 (away, V wins 4-3): PLAYER_VARSITY_02 starts (12 outs = 4 IP),
 --           PLAYER_VARSITY_03 relieves (9 outs = 3 IP)
-INSERT INTO player_game_pitching (game_id, player_id, team_id, ip_outs, h, r, er, bb, so) VALUES
-    ('GAME_004', 'PLAYER_VARSITY_02', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 12, 5, 3, 3, 2, 5),
-    ('GAME_004', 'PLAYER_VARSITY_03', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'),  9, 2, 0, 0, 0, 3);
+INSERT INTO player_game_pitching (game_id, player_id, team_id, perspective_team_id, ip_outs, h, r, er, bb, so) VALUES
+    ('GAME_004', 'PLAYER_VARSITY_02', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 12, 5, 3, 3, 2, 5),
+    ('GAME_004', 'PLAYER_VARSITY_03', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 9, 2, 0, 0, 0, 3);
 
 -- GAME_005 (home, V loses 2-3): PLAYER_VARSITY_01 starts (15 outs = 5 IP)
-INSERT INTO player_game_pitching (game_id, player_id, team_id, ip_outs, h, r, er, bb, so) VALUES
-    ('GAME_005', 'PLAYER_VARSITY_01', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 15, 7, 3, 3, 3, 4);
+INSERT INTO player_game_pitching (game_id, player_id, team_id, perspective_team_id, ip_outs, h, r, er, bb, so) VALUES
+    ('GAME_005', 'PLAYER_VARSITY_01', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 15, 7, 3, 3, 3, 4);
 
 -- GAME_006 (away, V wins 5-1): PLAYER_VARSITY_02 starts (21 outs = 7 IP)
-INSERT INTO player_game_pitching (game_id, player_id, team_id, ip_outs, h, r, er, bb, so) VALUES
-    ('GAME_006', 'PLAYER_VARSITY_02', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 21, 4, 1, 1, 1, 5);
+INSERT INTO player_game_pitching (game_id, player_id, team_id, perspective_team_id, ip_outs, h, r, er, bb, so) VALUES
+    ('GAME_006', 'PLAYER_VARSITY_02', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 21, 4, 1, 1, 1, 5);
 
 -- GAME_007 (home, V wins 7-2): PLAYER_VARSITY_03 starts (9 outs = 3 IP),
 --           PLAYER_VARSITY_01 closes (15 outs = 5 IP)
-INSERT INTO player_game_pitching (game_id, player_id, team_id, ip_outs, h, r, er, bb, so) VALUES
-    ('GAME_007', 'PLAYER_VARSITY_03', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'),  9, 3, 2, 2, 2, 2),
-    ('GAME_007', 'PLAYER_VARSITY_01', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 15, 4, 3, 3, 1, 7);
+INSERT INTO player_game_pitching (game_id, player_id, team_id, perspective_team_id, ip_outs, h, r, er, bb, so) VALUES
+    ('GAME_007', 'PLAYER_VARSITY_03', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 9, 3, 2, 2, 2, 2),
+    ('GAME_007', 'PLAYER_VARSITY_01', (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY'), 15, 4, 3, 3, 1, 7);
 
 -- ---------------------------------------------------------------------------
 -- Player season batting (2026-spring-hs, all 15 Varsity players)

@@ -106,8 +106,8 @@ def _insert_player_game_batting(
     team_id: int,
 ) -> int:
     cur = conn.execute(
-        "INSERT INTO player_game_batting (game_id, player_id, team_id) VALUES (?, ?, ?)",
-        (game_id, player_id, team_id),
+        "INSERT INTO player_game_batting (game_id, player_id, team_id, perspective_team_id) VALUES (?, ?, ?, ?)",
+        (game_id, player_id, team_id, team_id),
     )
     return cur.lastrowid
 
@@ -510,8 +510,8 @@ class TestPitchingAndSprayReassignment:
         _insert_game(db, "game-001", home_team_id=our_id, away_team_id=stub_id)
         _insert_player(db, "p-001")
         db.execute(
-            "INSERT INTO player_game_pitching (game_id, player_id, team_id) VALUES (?, ?, ?)",
-            ("game-001", "p-001", stub_id),
+            "INSERT INTO player_game_pitching (game_id, player_id, team_id, perspective_team_id) VALUES (?, ?, ?, ?)",
+            ("game-001", "p-001", stub_id, stub_id),
         )
         db.commit()
 
@@ -551,18 +551,103 @@ class TestPitchingAndSprayReassignment:
         _insert_game(db, "game-001", home_team_id=our_id, away_team_id=stub_id)
         _insert_player(db, "p-001")
         db.execute(
-            "INSERT INTO spray_charts (game_id, player_id, team_id, chart_type, x, y) "
-            "VALUES (?, ?, ?, 'offensive', 0.5, 0.5)",
-            ("game-001", "p-001", stub_id),
+            "INSERT INTO spray_charts (game_id, player_id, team_id, perspective_team_id, chart_type, x, y) "
+            "VALUES (?, ?, ?, ?, 'offensive', 0.5, 0.5)",
+            ("game-001", "p-001", stub_id, stub_id),
+        )
+        db.commit()
+
+        finalize_opponent_resolution(db, our_id, resolved_id, "Rival HS")
+
+        # E-220 remediation: BOTH team_id and perspective_team_id must be rewritten.
+        row = db.execute(
+            "SELECT team_id, perspective_team_id FROM spray_charts "
+            "WHERE game_id = 'game-001' AND player_id = 'p-001'"
+        ).fetchone()
+        assert row[0] == resolved_id
+        assert row[1] == resolved_id, (
+            "spray_charts.perspective_team_id must be rewritten to resolved_id; "
+            f"stub_id={stub_id} still referenced leaves a dangling FK on team delete"
+        )
+
+    def test_plays_batting_team_id_reassigned(self, db: sqlite3.Connection) -> None:
+        """E-220 remediation: plays.batting_team_id must be rewritten stub -> resolved."""
+        our_id = _insert_team(db, "LSB Varsity", membership_type="member")
+        stub_id = _insert_team(db, "Rival HS", public_id=None)
+        resolved_id = _insert_team(db, "Rival HS", public_id="rival-slug")
+        _insert_team_opponents(db, our_id, stub_id)
+        _insert_season(db)
+        _insert_game(db, "game-001", home_team_id=our_id, away_team_id=stub_id)
+        _insert_player(db, "p-batter")
+        _insert_player(db, "p-pitcher")
+        db.execute(
+            "INSERT INTO plays "
+            "(game_id, play_order, inning, half, season_id, batting_team_id, "
+            "perspective_team_id, batter_id, pitcher_id) "
+            "VALUES (?, 1, 1, 'top', '2026-spring-hs', ?, ?, ?, ?)",
+            ("game-001", stub_id, our_id, "p-batter", "p-pitcher"),
         )
         db.commit()
 
         finalize_opponent_resolution(db, our_id, resolved_id, "Rival HS")
 
         row = db.execute(
-            "SELECT team_id FROM spray_charts WHERE game_id = 'game-001' AND player_id = 'p-001'"
+            "SELECT batting_team_id FROM plays WHERE game_id = 'game-001'"
         ).fetchone()
-        assert row[0] == resolved_id
+        assert row[0] == resolved_id, (
+            "plays.batting_team_id must be rewritten to resolved_id"
+        )
+
+    def test_plays_perspective_team_id_reassigned(self, db: sqlite3.Connection) -> None:
+        """E-220 remediation: plays.perspective_team_id must be rewritten stub -> resolved."""
+        our_id = _insert_team(db, "LSB Varsity", membership_type="member")
+        stub_id = _insert_team(db, "Rival HS", public_id=None)
+        resolved_id = _insert_team(db, "Rival HS", public_id="rival-slug")
+        _insert_team_opponents(db, our_id, stub_id)
+        _insert_season(db)
+        _insert_game(db, "game-001", home_team_id=our_id, away_team_id=stub_id)
+        _insert_player(db, "p-batter")
+        _insert_player(db, "p-pitcher")
+        db.execute(
+            "INSERT INTO plays "
+            "(game_id, play_order, inning, half, season_id, batting_team_id, "
+            "perspective_team_id, batter_id, pitcher_id) "
+            "VALUES (?, 1, 1, 'top', '2026-spring-hs', ?, ?, ?, ?)",
+            ("game-001", our_id, stub_id, "p-batter", "p-pitcher"),
+        )
+        db.commit()
+
+        finalize_opponent_resolution(db, our_id, resolved_id, "Rival HS")
+
+        row = db.execute(
+            "SELECT perspective_team_id FROM plays WHERE game_id = 'game-001'"
+        ).fetchone()
+        assert row[0] == resolved_id, (
+            "plays.perspective_team_id must be rewritten to resolved_id"
+        )
+
+    def test_game_perspectives_reassigned(self, db: sqlite3.Connection) -> None:
+        """E-220 remediation: game_perspectives.perspective_team_id must be rewritten."""
+        our_id = _insert_team(db, "LSB Varsity", membership_type="member")
+        stub_id = _insert_team(db, "Rival HS", public_id=None)
+        resolved_id = _insert_team(db, "Rival HS", public_id="rival-slug")
+        _insert_team_opponents(db, our_id, stub_id)
+        _insert_season(db)
+        _insert_game(db, "game-001", home_team_id=our_id, away_team_id=stub_id)
+        db.execute(
+            "INSERT INTO game_perspectives (game_id, perspective_team_id) VALUES (?, ?)",
+            ("game-001", stub_id),
+        )
+        db.commit()
+
+        finalize_opponent_resolution(db, our_id, resolved_id, "Rival HS")
+
+        row = db.execute(
+            "SELECT perspective_team_id FROM game_perspectives WHERE game_id = 'game-001'"
+        ).fetchone()
+        assert row[0] == resolved_id, (
+            "game_perspectives.perspective_team_id must be rewritten to resolved_id"
+        )
 
     def test_player_season_pitching_dedup(self, db: sqlite3.Connection) -> None:
         """Dedup guard: skip when resolved team already has matching (player_id, season_id)."""

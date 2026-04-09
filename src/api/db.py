@@ -256,6 +256,7 @@ def get_pitching_workload(
             FROM player_game_pitching pgp
             JOIN games g ON g.game_id = pgp.game_id
             WHERE pgp.team_id = :team_id
+              AND pgp.perspective_team_id = :team_id
               AND g.season_id = :season_id
         ),
         last_outing AS (
@@ -565,6 +566,22 @@ def get_game_box_score(game_id: str) -> dict[str, Any]:
             AND tr.team_id = pgb.team_id
             AND tr.season_id = ?
         WHERE pgb.game_id = ?
+          AND pgb.perspective_team_id = COALESCE(
+              -- Prefer the team's own perspective (perspective_team_id = team_id):
+              -- this is the row produced by that team's boxscore load.
+              (SELECT pgb2.perspective_team_id
+                 FROM player_game_batting pgb2
+                WHERE pgb2.game_id = pgb.game_id
+                  AND pgb2.team_id = pgb.team_id
+                  AND pgb2.perspective_team_id = pgb2.team_id
+                LIMIT 1),
+              -- Fallback: any perspective (e.g. opponent loaded the boxscore
+              -- and tagged the row with their perspective).
+              (SELECT MIN(pgb3.perspective_team_id)
+                 FROM player_game_batting pgb3
+                WHERE pgb3.game_id = pgb.game_id
+                  AND pgb3.team_id = pgb.team_id)
+          )
         ORDER BY pgb.team_id, p.last_name
     """
     pitching_query = """
@@ -587,6 +604,20 @@ def get_game_box_score(game_id: str) -> dict[str, Any]:
             AND tr.team_id = pgp.team_id
             AND tr.season_id = ?
         WHERE pgp.game_id = ?
+          AND pgp.perspective_team_id = COALESCE(
+              -- Prefer own perspective (perspective_team_id = team_id).
+              (SELECT pgp2.perspective_team_id
+                 FROM player_game_pitching pgp2
+                WHERE pgp2.game_id = pgp.game_id
+                  AND pgp2.team_id = pgp.team_id
+                  AND pgp2.perspective_team_id = pgp2.team_id
+                LIMIT 1),
+              -- Fallback: any perspective.
+              (SELECT MIN(pgp3.perspective_team_id)
+                 FROM player_game_pitching pgp3
+                WHERE pgp3.game_id = pgp.game_id
+                  AND pgp3.team_id = pgp.team_id)
+          )
         ORDER BY pgp.team_id, pgp.appearance_order ASC NULLS LAST, p.last_name
     """
     try:
@@ -1083,6 +1114,7 @@ def get_player_profile(player_id: str) -> dict[str, Any]:
         LEFT JOIN teams opp_away ON opp_away.id = g.away_team_id
         LEFT JOIN teams opp_home ON opp_home.id = g.home_team_id
         WHERE pgb.player_id = ?
+          AND pgb.perspective_team_id = pgb.team_id
 
         UNION
 
@@ -1107,6 +1139,7 @@ def get_player_profile(player_id: str) -> dict[str, Any]:
         LEFT JOIN teams opp_away ON opp_away.id = g.away_team_id
         LEFT JOIN teams opp_home ON opp_home.id = g.home_team_id
         WHERE pgp.player_id = ?
+          AND pgp.perspective_team_id = pgp.team_id
     """
     # All rows from both UNION arms are fetched in Python; we then take the 5 most recent
     # distinct games and return all rows for those games (including both batting and pitching
@@ -1608,25 +1641,27 @@ def _reassign_fk_references(
     )
     total_rows += cur.rowcount
 
-    # player_game_batting -- dedup on UNIQUE(game_id, player_id)
+    # player_game_batting -- dedup on UNIQUE(game_id, player_id, perspective_team_id)
     cur = conn.execute(
         "UPDATE player_game_batting SET team_id = ? "
         "WHERE team_id = ? AND NOT EXISTS ("
         "  SELECT 1 FROM player_game_batting pgb2 "
         "  WHERE pgb2.team_id = ? AND pgb2.game_id = player_game_batting.game_id "
-        "    AND pgb2.player_id = player_game_batting.player_id"
+        "    AND pgb2.player_id = player_game_batting.player_id "
+        "    AND pgb2.perspective_team_id = player_game_batting.perspective_team_id"
         ")",
         (new_team_id, old_team_id, new_team_id),
     )
     total_rows += cur.rowcount
 
-    # player_game_pitching -- dedup on UNIQUE(game_id, player_id)
+    # player_game_pitching -- dedup on UNIQUE(game_id, player_id, perspective_team_id)
     cur = conn.execute(
         "UPDATE player_game_pitching SET team_id = ? "
         "WHERE team_id = ? AND NOT EXISTS ("
         "  SELECT 1 FROM player_game_pitching pgp2 "
         "  WHERE pgp2.team_id = ? AND pgp2.game_id = player_game_pitching.game_id "
-        "    AND pgp2.player_id = player_game_pitching.player_id"
+        "    AND pgp2.player_id = player_game_pitching.player_id "
+        "    AND pgp2.perspective_team_id = player_game_pitching.perspective_team_id"
         ")",
         (new_team_id, old_team_id, new_team_id),
     )
@@ -1660,6 +1695,90 @@ def _reassign_fk_references(
     # spray_charts have game_stream_id + team_id as natural key)
     cur = conn.execute(
         "UPDATE spray_charts SET team_id = ? WHERE team_id = ?",
+        (new_team_id, old_team_id),
+    )
+    total_rows += cur.rowcount
+
+    # ---- E-220 remediation (P1-b): perspective_team_id rewrites ----
+    # These four columns were missed by the original resolver.  When a stub
+    # team is resolved to a real team, every reference to the stub -- not
+    # just team_id columns but also perspective_team_id and
+    # plays.batting_team_id -- must be rewritten or the subsequent team
+    # delete violates FK constraints.
+
+    # spray_charts.perspective_team_id -- UNIQUE(event_gc_id, perspective_team_id)
+    # needs canonical-wins conflict resolution.  Filter out NULL event_gc_id
+    # rows (SQLite UNIQUE allows multiple NULLs).
+    conn.execute(
+        "DELETE FROM spray_charts "
+        "WHERE perspective_team_id = ? "
+        "  AND event_gc_id IS NOT NULL "
+        "  AND EXISTS ("
+        "    SELECT 1 FROM spray_charts sc2 "
+        "    WHERE sc2.perspective_team_id = ? "
+        "      AND sc2.event_gc_id = spray_charts.event_gc_id"
+        "  )",
+        (old_team_id, new_team_id),
+    )
+    cur = conn.execute(
+        "UPDATE spray_charts SET perspective_team_id = ? WHERE perspective_team_id = ?",
+        (new_team_id, old_team_id),
+    )
+    total_rows += cur.rowcount
+
+    # plays.batting_team_id -- not in any UNIQUE constraint, simple UPDATE.
+    cur = conn.execute(
+        "UPDATE plays SET batting_team_id = ? WHERE batting_team_id = ?",
+        (new_team_id, old_team_id),
+    )
+    total_rows += cur.rowcount
+
+    # plays.perspective_team_id -- UNIQUE(game_id, play_order, perspective_team_id)
+    # needs canonical-wins conflict resolution.  Collect colliding plays.id
+    # values first so play_events can be cleaned up before the parent rows.
+    collision_play_ids = [
+        row[0] for row in conn.execute(
+            "SELECT id FROM plays "
+            "WHERE perspective_team_id = ? "
+            "  AND EXISTS ("
+            "    SELECT 1 FROM plays p2 "
+            "    WHERE p2.perspective_team_id = ? "
+            "      AND p2.game_id = plays.game_id "
+            "      AND p2.play_order = plays.play_order"
+            "  )",
+            (old_team_id, new_team_id),
+        ).fetchall()
+    ]
+    if collision_play_ids:
+        placeholders = ",".join("?" for _ in collision_play_ids)
+        conn.execute(
+            f"DELETE FROM play_events WHERE play_id IN ({placeholders})",
+            collision_play_ids,
+        )
+        conn.execute(
+            f"DELETE FROM plays WHERE id IN ({placeholders})",
+            collision_play_ids,
+        )
+    cur = conn.execute(
+        "UPDATE plays SET perspective_team_id = ? WHERE perspective_team_id = ?",
+        (new_team_id, old_team_id),
+    )
+    total_rows += cur.rowcount
+
+    # game_perspectives.perspective_team_id -- PRIMARY KEY column.  Delete
+    # colliding rows where canonical perspective already exists, then UPDATE.
+    conn.execute(
+        "DELETE FROM game_perspectives "
+        "WHERE perspective_team_id = ? "
+        "  AND EXISTS ("
+        "    SELECT 1 FROM game_perspectives gp2 "
+        "    WHERE gp2.perspective_team_id = ? "
+        "      AND gp2.game_id = game_perspectives.game_id"
+        "  )",
+        (old_team_id, new_team_id),
+    )
+    cur = conn.execute(
+        "UPDATE game_perspectives SET perspective_team_id = ? WHERE perspective_team_id = ?",
         (new_team_id, old_team_id),
     )
     total_rows += cur.rowcount
@@ -2270,7 +2389,8 @@ def get_team_spray_bip_count(team_id: int, season_id: str) -> int:
         with closing(get_connection()) as conn:
             row = conn.execute(
                 "SELECT COUNT(*) FROM spray_charts "
-                "WHERE team_id = ? AND chart_type = 'offensive' AND season_id = ?",
+                "WHERE team_id = ? AND chart_type = 'offensive' AND season_id = ? "
+                "AND perspective_team_id = team_id",
                 (team_id, season_id),
             ).fetchone()
         return row[0] if row else 0
@@ -2308,6 +2428,7 @@ def get_player_spray_bip_counts(
         f"SELECT player_id, COUNT(*) AS bip_count FROM spray_charts "
         f"WHERE player_id IN ({placeholders}) "
         f"AND chart_type = 'offensive' AND season_id = ? "
+        f"AND perspective_team_id = team_id "
         f"GROUP BY player_id"
     )
     try:
@@ -2337,7 +2458,8 @@ def get_player_spray_bip_count(player_id: str, season_id: str) -> int:
         with closing(get_connection()) as conn:
             row = conn.execute(
                 "SELECT COUNT(*) FROM spray_charts "
-                "WHERE player_id = ? AND chart_type = 'offensive' AND season_id = ?",
+                "WHERE player_id = ? AND chart_type = 'offensive' AND season_id = ? "
+                "AND perspective_team_id = team_id",
                 (player_id, season_id),
             ).fetchone()
         return row[0] if row else 0
@@ -2378,6 +2500,7 @@ def get_player_spray_events(
                 season_row = conn.execute(
                     "SELECT season_id FROM spray_charts "
                     "WHERE player_id = ? AND chart_type = 'offensive' "
+                    "AND perspective_team_id = team_id "
                     "ORDER BY season_id DESC LIMIT 1",
                     (player_id,),
                 ).fetchone()
@@ -2396,7 +2519,8 @@ def get_player_spray_events(
 
             rows = conn.execute(
                 "SELECT x, y, play_result, play_type FROM spray_charts "
-                "WHERE player_id = ? AND chart_type = 'offensive' AND season_id = ?",
+                "WHERE player_id = ? AND chart_type = 'offensive' AND season_id = ? "
+                "AND perspective_team_id = team_id",
                 (player_id, season_id),
             ).fetchall()
 
@@ -2427,6 +2551,7 @@ def get_players_spray_events_batch(
         f"SELECT player_id, x, y, play_type, play_result FROM spray_charts "
         f"WHERE player_id IN ({placeholders}) "
         f"AND chart_type = 'offensive' AND season_id = ? "
+        f"AND perspective_team_id = team_id "
         f"ORDER BY player_id"
     )
     try:
@@ -2477,6 +2602,7 @@ def get_team_spray_events(
                 season_row = conn.execute(
                     "SELECT season_id FROM spray_charts "
                     "WHERE team_id = ? AND chart_type = 'offensive' "
+                    "AND perspective_team_id = team_id "
                     "ORDER BY season_id DESC LIMIT 1",
                     (team_id,),
                 ).fetchone()
@@ -2492,7 +2618,8 @@ def get_team_spray_events(
 
             rows = conn.execute(
                 "SELECT x, y, play_result, play_type FROM spray_charts "
-                "WHERE team_id = ? AND chart_type = 'offensive' AND season_id = ?",
+                "WHERE team_id = ? AND chart_type = 'offensive' AND season_id = ? "
+                "AND perspective_team_id = team_id",
                 (team_id, season_id),
             ).fetchall()
 
@@ -2562,6 +2689,7 @@ def get_pitching_history(
            AND tr.player_id = pgp.player_id
            AND tr.season_id = :season_id
         WHERE pgp.team_id = :team_id
+          AND pgp.perspective_team_id = :team_id
           AND g.season_id = :season_id
           AND g.status = 'completed'
         ORDER BY g.game_date ASC,

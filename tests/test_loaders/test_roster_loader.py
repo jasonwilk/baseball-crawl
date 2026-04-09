@@ -50,7 +50,6 @@ def db() -> sqlite3.Connection:
 
     sql = _MIGRATION_FILE.read_text(encoding="utf-8")
     conn.executescript(sql)
-    conn.execute("ALTER TABLE teams ADD COLUMN season_year INTEGER")
     conn.commit()
 
     # Pre-seed the default team so derive_season_id_for_team returns "2025"

@@ -902,3 +902,125 @@ def test_batting_team_id_correct_for_top_and_bottom(
     assert top_row[0] == opponent_ref.id
     # Bottom half: home team is batting.
     assert bottom_row[0] == team_ref.id
+
+
+# ---------------------------------------------------------------------------
+# E-220-03: Perspective tagging
+# ---------------------------------------------------------------------------
+
+
+def test_plays_rows_have_perspective_team_id(
+    db: sqlite3.Connection,
+    loader: PlaysLoader,
+    team_ref: TeamRef,
+    opponent_ref: TeamRef,
+    tmp_path: Path,
+) -> None:
+    """AC-1: Every plays row has perspective_team_id set to owned_team_ref.id."""
+    _insert_season(db)
+    _insert_game(db, _GAME_ID_1, team_ref.id, opponent_ref.id)
+
+    team_dir = tmp_path / "team"
+    _write_plays_file(team_dir, _GAME_ID_1, _make_multi_play_json())
+
+    loader.load_all(team_dir)
+
+    rows = db.execute(
+        "SELECT perspective_team_id FROM plays WHERE game_id = ?",
+        (_GAME_ID_1,),
+    ).fetchall()
+    assert len(rows) == 2
+    for row in rows:
+        assert row[0] == team_ref.id, f"Expected perspective_team_id={team_ref.id}, got {row[0]}"
+
+
+def test_two_perspectives_coexist(
+    db: sqlite3.Connection,
+    team_ref: TeamRef,
+    opponent_ref: TeamRef,
+    tmp_path: Path,
+) -> None:
+    """AC-2: Same game's plays from two perspectives coexist in the database."""
+    _insert_season(db)
+    _insert_game(db, _GAME_ID_1, team_ref.id, opponent_ref.id)
+
+    team_dir = tmp_path / "team"
+    _write_plays_file(team_dir, _GAME_ID_1, _make_plays_json())
+
+    # Load from perspective A (team_ref).
+    loader_a = PlaysLoader(db, owned_team_ref=team_ref)
+    result_a = loader_a.load_all(team_dir)
+    assert result_a.loaded == 1
+
+    # Load from perspective B (opponent_ref).
+    loader_b = PlaysLoader(db, owned_team_ref=opponent_ref)
+    result_b = loader_b.load_all(team_dir)
+    assert result_b.loaded == 1
+
+    # Both sets should coexist.
+    total = db.execute(
+        "SELECT COUNT(*) FROM plays WHERE game_id = ?", (_GAME_ID_1,)
+    ).fetchone()[0]
+    assert total == 2, f"Expected 2 plays rows (1 per perspective), got {total}"
+
+    perspectives = db.execute(
+        "SELECT DISTINCT perspective_team_id FROM plays WHERE game_id = ?",
+        (_GAME_ID_1,),
+    ).fetchall()
+    assert len(perspectives) == 2
+    assert {r[0] for r in perspectives} == {team_ref.id, opponent_ref.id}
+
+
+def test_idempotency_check_includes_perspective(
+    db: sqlite3.Connection,
+    team_ref: TeamRef,
+    opponent_ref: TeamRef,
+    tmp_path: Path,
+) -> None:
+    """AC-3: Idempotency check is per-perspective -- loading from a new
+    perspective proceeds even if plays exist from another perspective."""
+    _insert_season(db)
+    _insert_game(db, _GAME_ID_1, team_ref.id, opponent_ref.id)
+
+    team_dir = tmp_path / "team"
+    _write_plays_file(team_dir, _GAME_ID_1, _make_plays_json())
+
+    # Load from perspective A.
+    loader_a = PlaysLoader(db, owned_team_ref=team_ref)
+    result_a = loader_a.load_all(team_dir)
+    assert result_a.loaded == 1
+
+    # Same perspective A again -- should be skipped (idempotent).
+    result_a2 = loader_a.load_all(team_dir)
+    assert result_a2.skipped == 1
+    assert result_a2.loaded == 0
+
+    # Different perspective B -- should load (not idempotent for B).
+    loader_b = PlaysLoader(db, owned_team_ref=opponent_ref)
+    result_b = loader_b.load_all(team_dir)
+    assert result_b.loaded == 1
+    assert result_b.skipped == 0
+
+
+def test_load_all_perspective_uses_member_team_pk(
+    db: sqlite3.Connection,
+    loader: PlaysLoader,
+    team_ref: TeamRef,
+    opponent_ref: TeamRef,
+    tmp_path: Path,
+) -> None:
+    """AC-5: load_all() sets perspective_team_id to the member team's integer PK."""
+    _insert_season(db)
+    _insert_game(db, _GAME_ID_1, team_ref.id, opponent_ref.id)
+
+    team_dir = tmp_path / "team"
+    _write_plays_file(team_dir, _GAME_ID_1, _make_plays_json())
+
+    loader.load_all(team_dir)
+
+    rows = db.execute(
+        "SELECT DISTINCT perspective_team_id FROM plays WHERE game_id = ?",
+        (_GAME_ID_1,),
+    ).fetchall()
+    assert len(rows) == 1
+    assert rows[0][0] == team_ref.id

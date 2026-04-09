@@ -203,20 +203,20 @@ def _insert_game_data(
     # Per-game batting for game-001 (lsb = home)
     conn.executemany(
         "INSERT OR IGNORE INTO player_game_batting"
-        " (game_id, player_id, team_id, ab, h, doubles, triples, hr, rbi, bb, so, sb)"
-        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        " (game_id, player_id, team_id, perspective_team_id, ab, h, doubles, triples, hr, rbi, bb, so, sb)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         [
-            ("game-001", "gc-p-001", lsb_team_id, 4, 2, 1, 0, 0, 2, 1, 1, 0),
-            ("game-001", "gc-p-002", lsb_team_id, 3, 1, 0, 0, 0, 0, 0, 1, 1),
+            ("game-001", "gc-p-001", lsb_team_id, lsb_team_id, 4, 2, 1, 0, 0, 2, 1, 1, 0),
+            ("game-001", "gc-p-002", lsb_team_id, lsb_team_id, 3, 1, 0, 0, 0, 0, 0, 1, 1),
         ],
     )
 
     # Per-game pitching for game-001
     conn.execute(
         "INSERT OR IGNORE INTO player_game_pitching"
-        " (game_id, player_id, team_id, ip_outs, h, er, bb, so)"
-        " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        ("game-001", "gc-p-001", lsb_team_id, 18, 3, 1, 2, 8),
+        " (game_id, player_id, team_id, perspective_team_id, ip_outs, h, er, bb, so)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        ("game-001", "gc-p-001", lsb_team_id, lsb_team_id, 18, 3, 1, 2, 8),
     )
 
     return opp_team_id, other_team_id1
@@ -329,20 +329,20 @@ def _insert_player_profile_data(
     # Per-game batting for gc-p-001
     conn.executemany(
         "INSERT OR IGNORE INTO player_game_batting"
-        " (game_id, player_id, team_id, ab, h, doubles, triples, hr, rbi, bb, so, sb)"
-        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        " (game_id, player_id, team_id, perspective_team_id, ab, h, doubles, triples, hr, rbi, bb, so, sb)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         [
-            ("game-001", "gc-p-001", lsb_team_id, 4, 2, 1, 0, 1, 2, 1, 1, 0),
-            ("game-002", "gc-p-001", lsb_team_id, 3, 1, 0, 0, 0, 0, 0, 1, 1),
+            ("game-001", "gc-p-001", lsb_team_id, lsb_team_id, 4, 2, 1, 0, 1, 2, 1, 1, 0),
+            ("game-002", "gc-p-001", lsb_team_id, lsb_team_id, 3, 1, 0, 0, 0, 0, 0, 1, 1),
         ],
     )
 
     # Per-game pitching for gc-p-001 in game-001 (two-way player)
     conn.execute(
         "INSERT OR IGNORE INTO player_game_pitching"
-        " (game_id, player_id, team_id, ip_outs, h, er, bb, so)"
-        " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        ("game-001", "gc-p-001", lsb_team_id, 9, 2, 0, 1, 5),
+        " (game_id, player_id, team_id, perspective_team_id, ip_outs, h, er, bb, so)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        ("game-001", "gc-p-001", lsb_team_id, lsb_team_id, 9, 2, 0, 1, 5),
     )
 
     # Player with no stats (just a roster entry)
@@ -2115,22 +2115,22 @@ class TestGameDetailJerseyNumber:
 
         # Batting rows
         conn.executemany(
-            "INSERT OR IGNORE INTO player_game_batting (game_id, player_id, team_id, ab, h)"
-            " VALUES (?, ?, ?, ?, ?)",
+            "INSERT OR IGNORE INTO player_game_batting (game_id, player_id, team_id, perspective_team_id, ab, h)"
+            " VALUES (?, ?, ?, ?, ?, ?)",
             [
-                ("gd-game-1", "gd-p-home", home_id, 4, 2),
-                ("gd-game-1", "gd-p-away-j", away_id, 3, 1),
-                ("gd-game-1", "gd-p-away-nj", away_id, 2, 0),
+                ("gd-game-1", "gd-p-home", home_id, home_id, 4, 2),
+                ("gd-game-1", "gd-p-away-j", away_id, away_id, 3, 1),
+                ("gd-game-1", "gd-p-away-nj", away_id, away_id, 2, 0),
             ],
         )
         # Pitching rows
         conn.executemany(
-            "INSERT OR IGNORE INTO player_game_pitching (game_id, player_id, team_id, ip_outs, so)"
-            " VALUES (?, ?, ?, ?, ?)",
+            "INSERT OR IGNORE INTO player_game_pitching (game_id, player_id, team_id, perspective_team_id, ip_outs, so)"
+            " VALUES (?, ?, ?, ?, ?, ?)",
             [
-                ("gd-game-1", "gd-p-home", home_id, 9, 5),
-                ("gd-game-1", "gd-p-away-j", away_id, 6, 3),
-                ("gd-game-1", "gd-p-away-nj", away_id, 3, 1),
+                ("gd-game-1", "gd-p-home", home_id, home_id, 9, 5),
+                ("gd-game-1", "gd-p-away-j", away_id, away_id, 6, 3),
+                ("gd-game-1", "gd-p-away-nj", away_id, away_id, 3, 1),
             ],
         )
 
@@ -2595,9 +2595,9 @@ def _insert_spray_chart_events(
     for i in range(count):
         conn.execute(
             "INSERT OR IGNORE INTO spray_charts "
-            "(player_id, team_id, chart_type, play_result, x, y, season_id, event_gc_id) "
-            "VALUES (?, ?, 'offensive', 'single', ?, ?, ?, ?)",
-            (player_id, team_id, 100.0 + i, 150.0 + i, season_id, f"evt-{player_id}-{i}"),
+            "(player_id, team_id, perspective_team_id, chart_type, play_result, x, y, season_id, event_gc_id) "
+            "VALUES (?, ?, ?, 'offensive', 'single', ?, ?, ?, ?)",
+            (player_id, team_id, team_id, 100.0 + i, 150.0 + i, season_id, f"evt-{player_id}-{i}"),
         )
 
 

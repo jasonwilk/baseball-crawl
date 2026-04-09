@@ -27,127 +27,20 @@ from src.gamechanger.types import TeamRef
 # ---------------------------------------------------------------------------
 
 
+_PROJECT_ROOT = Path(__file__).resolve().parents[1]
+_MIGRATION_FILE = _PROJECT_ROOT / "migrations" / "001_initial_schema.sql"
+
+
 def _create_schema(db: sqlite3.Connection) -> None:
-    """Create the minimal schema needed for game loader tests."""
+    """Create the full schema from the migration file and seed test data."""
+    db.executescript(_MIGRATION_FILE.read_text(encoding="utf-8"))
     db.executescript(
         """
-        CREATE TABLE IF NOT EXISTS programs (
-            program_id TEXT PRIMARY KEY,
-            name TEXT NOT NULL,
-            program_type TEXT
-        );
-        CREATE TABLE IF NOT EXISTS seasons (
-            season_id TEXT PRIMARY KEY,
-            name TEXT,
-            season_type TEXT,
-            year INTEGER
-        );
-        CREATE TABLE IF NOT EXISTS teams (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            gc_uuid TEXT UNIQUE,
-            public_id TEXT UNIQUE,
-            membership_type TEXT DEFAULT 'tracked',
-            is_active INTEGER DEFAULT 1,
-            season_year INTEGER,
-            program_id TEXT REFERENCES programs(program_id),
-            classification TEXT
-        );
-        CREATE TABLE IF NOT EXISTS games (
-            game_id TEXT PRIMARY KEY,
-            season_id TEXT REFERENCES seasons(season_id),
-            game_date TEXT,
-            home_team_id INTEGER REFERENCES teams(id),
-            away_team_id INTEGER REFERENCES teams(id),
-            home_score INTEGER,
-            away_score INTEGER,
-            status TEXT,
-            game_stream_id TEXT,
-            start_time TEXT,
-            timezone TEXT
-        );
-        CREATE TABLE IF NOT EXISTS players (
-            player_id TEXT PRIMARY KEY,
-            first_name TEXT,
-            last_name TEXT
-        );
-        CREATE TABLE IF NOT EXISTS team_rosters (
-            team_id INTEGER REFERENCES teams(id),
-            player_id TEXT REFERENCES players(player_id),
-            season_id TEXT,
-            jersey_number TEXT,
-            PRIMARY KEY (team_id, player_id, season_id)
-        );
-        CREATE TABLE IF NOT EXISTS player_game_batting (
-            player_id TEXT,
-            game_id TEXT,
-            team_id INTEGER,
-            ab INTEGER, r INTEGER, h INTEGER, rbi INTEGER, bb INTEGER, so INTEGER,
-            doubles INTEGER, triples INTEGER, hr INTEGER, sb INTEGER, tb INTEGER,
-            hbp INTEGER, cs INTEGER, shf INTEGER, e INTEGER,
-            batting_order INTEGER, positions_played TEXT, is_primary INTEGER,
-            PRIMARY KEY (player_id, game_id, team_id)
-        );
-        CREATE TABLE IF NOT EXISTS player_game_pitching (
-            player_id TEXT,
-            game_id TEXT,
-            team_id INTEGER,
-            ip_outs INTEGER, h INTEGER, r INTEGER, er INTEGER, bb INTEGER,
-            so INTEGER, wp INTEGER, hbp INTEGER, pitches INTEGER,
-            total_strikes INTEGER, bf INTEGER,
-            PRIMARY KEY (player_id, game_id, team_id)
-        );
-        CREATE TABLE IF NOT EXISTS player_season_batting (
-            player_id TEXT,
-            team_id INTEGER,
-            season_id TEXT,
-            gp INTEGER, games_tracked INTEGER, ab INTEGER, h INTEGER,
-            doubles INTEGER, triples INTEGER, hr INTEGER, rbi INTEGER,
-            r INTEGER, bb INTEGER, so INTEGER, sb INTEGER,
-            tb INTEGER, hbp INTEGER, shf INTEGER, cs INTEGER,
-            PRIMARY KEY (player_id, team_id, season_id)
-        );
-        CREATE TABLE IF NOT EXISTS player_season_pitching (
-            player_id TEXT,
-            team_id INTEGER,
-            season_id TEXT,
-            gp_pitcher INTEGER, games_tracked INTEGER, ip_outs INTEGER,
-            h INTEGER, r INTEGER, er INTEGER, bb INTEGER, so INTEGER,
-            wp INTEGER, hbp INTEGER, pitches INTEGER, total_strikes INTEGER,
-            bf INTEGER,
-            PRIMARY KEY (player_id, team_id, season_id)
-        );
-        CREATE TABLE IF NOT EXISTS team_opponents (
-            our_team_id INTEGER REFERENCES teams(id),
-            opponent_team_id INTEGER REFERENCES teams(id),
-            first_seen_year INTEGER,
-            is_hidden INTEGER DEFAULT 0,
-            PRIMARY KEY (our_team_id, opponent_team_id)
-        );
-        CREATE TABLE IF NOT EXISTS opponent_links (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            our_team_id INTEGER,
-            root_team_id TEXT,
-            resolved_team_id INTEGER,
-            UNIQUE(our_team_id, root_team_id)
-        );
-        CREATE TABLE IF NOT EXISTS scouting_runs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            team_id INTEGER,
-            season_id TEXT,
-            run_type TEXT,
-            status TEXT,
-            started_at TEXT,
-            completed_at TEXT,
-            games_loaded INTEGER,
-            errors INTEGER
-        );
-
-        INSERT INTO seasons (season_id, year) VALUES ('2025-spring-hs', 2025);
-        INSERT INTO programs (program_id, name, program_type) VALUES ('lsb-hs', 'LSB HS', 'hs');
-        INSERT INTO teams (id, name, gc_uuid, public_id, membership_type, season_year, program_id)
+        INSERT OR IGNORE INTO seasons (season_id, name, season_type, year) VALUES ('2025-spring-hs', 'Spring 2025', 'spring-hs', 2025);
+        INSERT OR IGNORE INTO programs (program_id, name, program_type) VALUES ('lsb-hs', 'LSB HS', 'hs');
+        INSERT OR IGNORE INTO teams (id, name, gc_uuid, public_id, membership_type, season_year, program_id)
             VALUES (1, 'Own Team', 'own-uuid-1234', 'OwnTeamSlug', 'member', 2025, 'lsb-hs');
-        INSERT INTO teams (id, name, gc_uuid, public_id, membership_type, season_year)
+        INSERT OR IGNORE INTO teams (id, name, gc_uuid, public_id, membership_type, season_year)
             VALUES (2, 'Opponent Team', 'opp-uuid-5678', NULL, 'tracked', 2025);
         """
     )
@@ -529,15 +422,12 @@ class TestGameLoaderPreservesStartTime:
 
 
 class TestMigrationFile:
-    """Migration 014 adds start_time and timezone columns."""
+    """Schema includes start_time and timezone columns (consolidated in 001)."""
 
     def test_migration_file_exists(self) -> None:
-        migration = Path(__file__).resolve().parents[1] / "migrations" / "014_add_game_start_time.sql"
-        assert migration.exists(), f"Migration file not found at {migration}"
+        assert _MIGRATION_FILE.exists(), f"Migration file not found at {_MIGRATION_FILE}"
 
-    def test_migration_adds_columns(self) -> None:
-        migration = Path(__file__).resolve().parents[1] / "migrations" / "014_add_game_start_time.sql"
-        content = migration.read_text(encoding="utf-8")
+    def test_migration_includes_start_time_columns(self) -> None:
+        content = _MIGRATION_FILE.read_text(encoding="utf-8")
         assert "start_time" in content
         assert "timezone" in content
-        assert "ALTER TABLE games" in content

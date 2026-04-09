@@ -7,8 +7,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from src.gamechanger.crawlers.scouting import ScoutingCrawlResult
 from src.reports.generator import (
     GenerationResult,
+    cascade_delete_team,
     cleanup_orphan_teams,
     _crawl_and_load_spray,
     _create_report_row,
@@ -95,12 +97,15 @@ def db(tmp_path):
         CREATE TABLE games (
             game_id TEXT PRIMARY KEY,
             season_id TEXT,
-            home_team_id INTEGER,
-            away_team_id INTEGER,
+            home_team_id INTEGER NOT NULL REFERENCES teams(id),
+            away_team_id INTEGER NOT NULL REFERENCES teams(id),
             home_score INTEGER,
             away_score INTEGER,
             game_date TEXT,
-            status TEXT DEFAULT 'completed'
+            status TEXT DEFAULT 'completed',
+            game_stream_id TEXT,
+            start_time TEXT,
+            timezone TEXT
         );
         CREATE TABLE player_season_batting (
             player_id TEXT,
@@ -149,17 +154,19 @@ def db(tmp_path):
             game_id TEXT NOT NULL REFERENCES games(game_id),
             player_id TEXT NOT NULL REFERENCES players(player_id),
             team_id INTEGER NOT NULL REFERENCES teams(id),
+            perspective_team_id INTEGER NOT NULL DEFAULT 0,
             ab INTEGER, r INTEGER, h INTEGER, rbi INTEGER,
             bb INTEGER, so INTEGER,
-            UNIQUE(game_id, player_id)
+            UNIQUE(game_id, player_id, perspective_team_id)
         );
         CREATE TABLE player_game_pitching (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             game_id TEXT NOT NULL REFERENCES games(game_id),
             player_id TEXT NOT NULL REFERENCES players(player_id),
             team_id INTEGER NOT NULL REFERENCES teams(id),
+            perspective_team_id INTEGER NOT NULL DEFAULT 0,
             ip_outs INTEGER, h INTEGER, er INTEGER, bb INTEGER, so INTEGER,
-            UNIQUE(game_id, player_id)
+            UNIQUE(game_id, player_id, perspective_team_id)
         );
         CREATE TABLE spray_charts (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -171,7 +178,8 @@ def db(tmp_path):
             x REAL,
             y REAL,
             play_result TEXT,
-            play_type TEXT
+            play_type TEXT,
+            perspective_team_id INTEGER NOT NULL DEFAULT 0
         );
         CREATE TABLE scouting_runs (
             team_id INTEGER,
@@ -200,6 +208,12 @@ def db(tmp_path):
         );
         CREATE INDEX idx_reports_slug ON reports(slug);
         CREATE INDEX idx_reports_team_id ON reports(team_id);
+        CREATE TABLE game_perspectives (
+            game_id             TEXT    NOT NULL REFERENCES games(game_id),
+            perspective_team_id INTEGER NOT NULL REFERENCES teams(id),
+            loaded_at           TEXT    NOT NULL DEFAULT (datetime('now')),
+            PRIMARY KEY (game_id, perspective_team_id)
+        );
         CREATE TABLE plays (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             game_id TEXT NOT NULL REFERENCES games(game_id),
@@ -219,7 +233,8 @@ def db(tmp_path):
             did_score_change INTEGER,
             outs_after INTEGER,
             did_outs_change INTEGER,
-            UNIQUE(game_id, play_order)
+            perspective_team_id INTEGER NOT NULL DEFAULT 0,
+            UNIQUE(game_id, play_order, perspective_team_id)
         );
         CREATE TABLE play_events (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -231,10 +246,16 @@ def db(tmp_path):
             raw_template TEXT,
             UNIQUE(play_id, event_order)
         );
+        -- NOTE: this inline fixture is severely drifted from the real schema
+        -- (missing boxscore_value, plays_value, delta, correction_detail, UNIQUE, FKs).
+        -- Broader cleanup deferred to E-221.  Added perspective_team_id in
+        -- E-220 round 7 P1-2 (minimum change) because the reports/generator.py
+        -- DELETE filter now references it.
         CREATE TABLE reconciliation_discrepancies (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             game_id TEXT NOT NULL REFERENCES games(game_id),
             run_id TEXT NOT NULL,
+            perspective_team_id INTEGER NOT NULL,
             team_id INTEGER NOT NULL,
             player_id TEXT NOT NULL,
             signal_name TEXT NOT NULL,
@@ -436,7 +457,7 @@ class TestGenerateReportE2E:
         mock_client_cls.return_value = mock_client
 
         mock_crawler = MagicMock()
-        mock_crawler.scout_team.return_value = CrawlResult(files_written=5)
+        mock_crawler.scout_team.return_value = ScoutingCrawlResult(team_id=1, season_id="2025-spring-hs", games_crawled=5, games=[], boxscores={})
         mock_loader = MagicMock()
         mock_loader.load_team.return_value = LoadResult(loaded=5)
 
@@ -514,7 +535,7 @@ class TestPlaysStageAuthExpiry:
         mock_client = MagicMock()
         mock_client_cls.return_value = mock_client
         mock_crawler = MagicMock()
-        mock_crawler.scout_team.return_value = CrawlResult(files_written=5)
+        mock_crawler.scout_team.return_value = ScoutingCrawlResult(team_id=1, season_id="2025-spring-hs", games_crawled=5, games=[], boxscores={})
         mock_loader = MagicMock()
         mock_loader.load_team.return_value = LoadResult(loaded=5)
 
@@ -708,19 +729,20 @@ class TestQueryHelpers:
 
     def test_query_record(self, db):
         team_id = _seed_team(db)
+        opp_id = _seed_team(db, name="Opponent", public_id="opp-x")
         _seed_season(db)
         # Add games: 2 wins, 1 loss
         db.execute(
             "INSERT INTO games (game_id, season_id, home_team_id, away_team_id, home_score, away_score, game_date) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            ("g1", "2026-spring-hs", team_id, 999, 5, 3, "2026-03-20"),
+            ("g1", "2026-spring-hs", team_id, opp_id, 5, 3, "2026-03-20"),
         )
         db.execute(
             "INSERT INTO games (game_id, season_id, home_team_id, away_team_id, home_score, away_score, game_date) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            ("g2", "2026-spring-hs", 999, team_id, 3, 7, "2026-03-21"),
+            ("g2", "2026-spring-hs", opp_id, team_id, 3, 7, "2026-03-21"),
         )
         db.execute(
             "INSERT INTO games (game_id, season_id, home_team_id, away_team_id, home_score, away_score, game_date) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            ("g3", "2026-spring-hs", team_id, 999, 2, 4, "2026-03-22"),
+            ("g3", "2026-spring-hs", team_id, opp_id, 2, 4, "2026-03-22"),
         )
         db.commit()
 
@@ -731,11 +753,12 @@ class TestQueryHelpers:
 
     def test_query_recent_games(self, db):
         team_id = _seed_team(db)
+        opp_id = _seed_team(db, name="Opponent", public_id="opp-x")
         _seed_season(db)
         for i in range(7):
             db.execute(
                 "INSERT INTO games (game_id, season_id, home_team_id, away_team_id, home_score, away_score, game_date) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (f"g{i}", "2026-spring-hs", team_id, 999, 5 + i, 3, f"2026-03-{20+i:02d}"),
+                (f"g{i}", "2026-spring-hs", team_id, opp_id, 5 + i, 3, f"2026-03-{20+i:02d}"),
             )
         db.commit()
 
@@ -745,10 +768,11 @@ class TestQueryHelpers:
 
     def test_query_freshness(self, db):
         team_id = _seed_team(db)
+        opp_id = _seed_team(db, name="Opponent", public_id="opp-x")
         _seed_season(db)
         db.execute(
             "INSERT INTO games (game_id, season_id, home_team_id, away_team_id, home_score, away_score, game_date) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            ("g1", "2026-spring-hs", team_id, 999, 5, 3, "2026-03-25"),
+            ("g1", "2026-spring-hs", team_id, opp_id, 5, 3, "2026-03-25"),
         )
         db.commit()
 
@@ -878,13 +902,12 @@ class TestCrawlAndLoadSpray:
         _crawl_and_load_spray(client, "abc123", "2026-spring-hs")
 
         mock_crawler.crawl_team.assert_called_once_with(
-            "abc123", season_id="2026-spring-hs", gc_uuid=None
+            "abc123", season_id="2026-spring-hs", gc_uuid=None,
+            games_data=None,
         )
-        mock_loader.load_all.assert_called_once()
-        # Verify load_all received public_id and season_id kwargs
-        call_kwargs = mock_loader.load_all.call_args
+        mock_loader.load_from_data.assert_called_once()
+        call_kwargs = mock_loader.load_from_data.call_args
         assert call_kwargs[1]["public_id"] == "abc123"
-        assert call_kwargs[1]["season_id"] == "2026-spring-hs"
 
     @patch("src.reports.generator.get_connection")
     @patch("src.reports.generator.ScoutingSprayChartCrawler")
@@ -975,7 +998,8 @@ class TestCrawlAndLoadSpray:
         _crawl_and_load_spray(client, "abc123", "2026-spring-hs", gc_uuid="resolved-uuid")
 
         mock_crawler.crawl_team.assert_called_once_with(
-            "abc123", season_id="2026-spring-hs", gc_uuid="resolved-uuid"
+            "abc123", season_id="2026-spring-hs", gc_uuid="resolved-uuid",
+            games_data=None,
         )
 
 
@@ -1201,7 +1225,8 @@ class TestResolveGcUuid:
                 game_id TEXT PRIMARY KEY, season_id TEXT,
                 home_team_id INTEGER, away_team_id INTEGER,
                 home_score INTEGER, away_score INTEGER,
-                game_date TEXT, status TEXT
+                game_date TEXT, status TEXT,
+                game_stream_id TEXT, start_time TEXT, timezone TEXT
             );
             CREATE TABLE IF NOT EXISTS players (
                 player_id TEXT PRIMARY KEY, first_name TEXT, last_name TEXT,
@@ -1224,7 +1249,7 @@ class TestResolveGcUuid:
                 er INTEGER DEFAULT 0, bb INTEGER DEFAULT 0, so INTEGER DEFAULT 0,
                 wp INTEGER DEFAULT 0, hbp INTEGER DEFAULT 0,
                 pitches INTEGER DEFAULT 0, total_strikes INTEGER DEFAULT 0,
-                bf INTEGER DEFAULT 0,
+                bf INTEGER DEFAULT 0, gs INTEGER,
                 PRIMARY KEY (player_id, team_id, season_id)
             );
             CREATE TABLE IF NOT EXISTS team_rosters (
@@ -1235,7 +1260,8 @@ class TestResolveGcUuid:
             CREATE TABLE IF NOT EXISTS spray_charts (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 team_id INTEGER, player_id TEXT, season_id TEXT,
-                chart_type TEXT, x REAL, y REAL, play_result TEXT, play_type TEXT
+                chart_type TEXT, x REAL, y REAL, play_result TEXT, play_type TEXT,
+                perspective_team_id INTEGER NOT NULL DEFAULT 0
             );
             CREATE TABLE IF NOT EXISTS plays (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1256,7 +1282,8 @@ class TestResolveGcUuid:
                 did_score_change INTEGER,
                 outs_after INTEGER,
                 did_outs_change INTEGER,
-                UNIQUE(game_id, play_order)
+                perspective_team_id INTEGER NOT NULL DEFAULT 0,
+                UNIQUE(game_id, play_order, perspective_team_id)
             );
             CREATE TABLE IF NOT EXISTS play_events (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1289,10 +1316,10 @@ class TestResolveGcUuid:
                 resolution_method TEXT, resolved_at TEXT
             );
         """)
-        # Seed team WITH gc_uuid already set
+        # Seed team WITH gc_uuid already set (member team -- existing gc_uuid used directly)
         conn_template.execute(
-            "INSERT INTO teams (name, public_id, gc_uuid, season_year) "
-            "VALUES ('Test Tigers', 'abc123', 'existing-uuid-999', 2026)"
+            "INSERT INTO teams (name, public_id, gc_uuid, season_year, membership_type) "
+            "VALUES ('Test Tigers', 'abc123', 'existing-uuid-999', 2026, 'member')"
         )
         conn_template.execute(
             "INSERT INTO scouting_runs (team_id, season_id, run_type, started_at, status) "
@@ -1313,7 +1340,7 @@ class TestResolveGcUuid:
 
         mock_client = MagicMock()
         mock_crawler = MagicMock()
-        mock_crawler.scout_team.return_value = CrawlResult(files_written=5)
+        mock_crawler.scout_team.return_value = ScoutingCrawlResult(team_id=1, season_id="2025-spring-hs", games_crawled=5, games=[], boxscores={})
         mock_loader = MagicMock()
         mock_loader.load_team.return_value = LoadResult(loaded=5)
 
@@ -1478,18 +1505,19 @@ class TestRunsAvg:
 
     def test_runs_avg_basic(self, db):
         team_id = _seed_team(db)
+        opp_id = _seed_team(db, name="Opponent", public_id="opp-x")
         _seed_season(db)
         # Game 1: home, scored 7, allowed 3
         db.execute(
             "INSERT INTO games (game_id, season_id, home_team_id, away_team_id, "
             "home_score, away_score, game_date) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            ("g1", "2026-spring-hs", team_id, 999, 7, 3, "2026-03-20"),
+            ("g1", "2026-spring-hs", team_id, opp_id, 7, 3, "2026-03-20"),
         )
         # Game 2: away, scored 5, allowed 2
         db.execute(
             "INSERT INTO games (game_id, season_id, home_team_id, away_team_id, "
             "home_score, away_score, game_date) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            ("g2", "2026-spring-hs", 999, team_id, 2, 5, "2026-03-21"),
+            ("g2", "2026-spring-hs", opp_id, team_id, 2, 5, "2026-03-21"),
         )
         db.commit()
         db.row_factory = sqlite3.Row
@@ -1509,6 +1537,7 @@ class TestRunsAvg:
         """Verify WHERE filters exclude other teams and seasons."""
         team_id = _seed_team(db, name="Target", public_id="target1")
         other_id = _seed_team(db, name="Other", public_id="other1")
+        opp_id = _seed_team(db, name="Opponent", public_id="opp-x")
         _seed_season(db, season_id="2026-spring-hs")
         db.execute(
             "INSERT INTO seasons (season_id, name, season_type, year) "
@@ -1519,19 +1548,19 @@ class TestRunsAvg:
         db.execute(
             "INSERT INTO games (game_id, season_id, home_team_id, away_team_id, "
             "home_score, away_score, game_date) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            ("g1", "2026-spring-hs", team_id, 999, 10, 2, "2026-03-20"),
+            ("g1", "2026-spring-hs", team_id, opp_id, 10, 2, "2026-03-20"),
         )
         # Other team, same season: scored 20, allowed 0 (should be excluded)
         db.execute(
             "INSERT INTO games (game_id, season_id, home_team_id, away_team_id, "
             "home_score, away_score, game_date) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            ("g2", "2026-spring-hs", other_id, 999, 20, 0, "2026-03-20"),
+            ("g2", "2026-spring-hs", other_id, opp_id, 20, 0, "2026-03-20"),
         )
         # Target team, wrong season: scored 30, allowed 1 (should be excluded)
         db.execute(
             "INSERT INTO games (game_id, season_id, home_team_id, away_team_id, "
             "home_score, away_score, game_date) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            ("g3", "2025-spring-hs", team_id, 999, 30, 1, "2025-03-20"),
+            ("g3", "2025-spring-hs", team_id, opp_id, 30, 1, "2025-03-20"),
         )
         db.commit()
         db.row_factory = sqlite3.Row
@@ -1599,7 +1628,7 @@ class TestResolveGcUuidIntegration:
         }
 
         mock_crawler = MagicMock()
-        mock_crawler.scout_team.return_value = CrawlResult(files_written=5)
+        mock_crawler.scout_team.return_value = ScoutingCrawlResult(team_id=1, season_id="2025-spring-hs", games_crawled=5, games=[], boxscores={})
         mock_loader = MagicMock()
         mock_loader.load_team.return_value = LoadResult(loaded=5)
 
@@ -1677,20 +1706,20 @@ class TestCleanupOrphanTeams:
 
         # Per-game batting for both teams (both reference game g1)
         db.execute(
-            "INSERT INTO player_game_batting (game_id, player_id, team_id, ab, h) "
-            "VALUES ('g1', 'p1', ?, 4, 2)",
-            (subject_id,),
+            "INSERT INTO player_game_batting (game_id, player_id, team_id, perspective_team_id, ab, h) "
+            "VALUES ('g1', 'p1', ?, ?, 4, 2)",
+            (subject_id, subject_id),
         )
         db.execute(
-            "INSERT INTO player_game_batting (game_id, player_id, team_id, ab, h) "
-            "VALUES ('g1', 'p2', ?, 3, 1)",
-            (orphan_id,),
+            "INSERT INTO player_game_batting (game_id, player_id, team_id, perspective_team_id, ab, h) "
+            "VALUES ('g1', 'p2', ?, ?, 3, 1)",
+            (orphan_id, subject_id),
         )
         # Spray chart for the game
         db.execute(
-            "INSERT INTO spray_charts (game_id, team_id, player_id, season_id, "
-            "chart_type, x, y) VALUES ('g1', ?, 'p2', '2026-spring-hs', 'offensive', 0.5, 0.5)",
-            (orphan_id,),
+            "INSERT INTO spray_charts (game_id, team_id, player_id, season_id, perspective_team_id, "
+            "chart_type, x, y) VALUES ('g1', ?, 'p2', '2026-spring-hs', ?, 'offensive', 0.5, 0.5)",
+            (orphan_id, subject_id),
         )
         # Roster and season stats for orphan
         db.execute(
@@ -1707,6 +1736,15 @@ class TestCleanupOrphanTeams:
             "INSERT INTO player_season_pitching (player_id, team_id, season_id, gp_pitcher, ip_outs) "
             "VALUES ('p2', ?, '2026-spring-hs', 2, 12)",
             (orphan_id,),
+        )
+        # E-220 remediation: seed a game_perspectives row for the shared game.
+        # When cleanup processes game-scoped data, game_perspectives must be
+        # deleted before games, otherwise FK check on games deletion fails.
+        # (This row persists since the shared game is retained, but if cleanup
+        # ever DOES delete the game the helper must handle it.)
+        db.execute(
+            "INSERT INTO game_perspectives (game_id, perspective_team_id) VALUES ('g1', ?)",
+            (subject_id,),
         )
         db.commit()
 
@@ -1787,20 +1825,50 @@ class TestCleanupOrphanTeams:
             ("g1", "2026-spring-hs", subject_id, orphan_id, 5, 3, "2026-03-20"),
         )
         db.execute(
-            "INSERT INTO player_game_batting (game_id, player_id, team_id, ab, h) "
-            "VALUES ('g1', 'p1', ?, 4, 2)",
-            (subject_id,),
+            "INSERT INTO player_game_batting (game_id, player_id, team_id, perspective_team_id, ab, h) "
+            "VALUES ('g1', 'p1', ?, ?, 4, 2)",
+            (subject_id, subject_id),
         )
         db.execute(
-            "INSERT INTO player_game_pitching (game_id, player_id, team_id, ip_outs, er) "
-            "VALUES ('g1', 'p2', ?, 9, 2)",
-            (orphan_id,),
+            "INSERT INTO player_game_pitching (game_id, player_id, team_id, perspective_team_id, ip_outs, er) "
+            "VALUES ('g1', 'p2', ?, ?, 9, 2)",
+            (orphan_id, subject_id),
+        )
+        # E-220 remediation: add a SECOND orphan team so we can create a
+        # second game between two orphans -- that game WILL be deleted in
+        # Phase 1, exercising the game_perspectives FK check.
+        cursor2 = db.execute(
+            "INSERT INTO teams (name, public_id, season_year) "
+            "VALUES ('Orphan2', 'orp2', 2026)"
+        )
+        orphan2_id = cursor2.lastrowid
+        db.execute(
+            "INSERT INTO games (game_id, season_id, home_team_id, away_team_id, "
+            "home_score, away_score, game_date) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            ("g-orphan-only", "2026-spring-hs", orphan_id, orphan2_id, 1, 2, "2026-03-21"),
+        )
+        db.execute(
+            "INSERT INTO game_perspectives (game_id, perspective_team_id) VALUES (?, ?)",
+            ("g-orphan-only", orphan_id),
+        )
+        db.execute(
+            "INSERT INTO game_perspectives (game_id, perspective_team_id) VALUES (?, ?)",
+            ("g-orphan-only", orphan2_id),
         )
         db.commit()
 
-        # Should not raise FK constraint error — orphan retained (shared game)
-        count = cleanup_orphan_teams(db, {orphan_id})
-        assert count == 0  # orphan team kept due to shared game FK
+        # Should not raise FK constraint error -- orphan-vs-orphan game deleted,
+        # its game_perspectives rows must be deleted first.
+        count = cleanup_orphan_teams(db, {orphan_id, orphan2_id})
+        # The orphan-vs-orphan game should be gone (and its game_perspectives rows).
+        assert db.execute(
+            "SELECT 1 FROM games WHERE game_id = 'g-orphan-only'"
+        ).fetchone() is None, "orphan-vs-orphan game should have been deleted"
+        assert db.execute(
+            "SELECT 1 FROM game_perspectives WHERE game_id = 'g-orphan-only'"
+        ).fetchone() is None, "game_perspectives for deleted game should be gone"
+        # orphan_id still retained due to shared game g1 (subject team participates)
+        assert db.execute("SELECT 1 FROM teams WHERE id = ?", (orphan_id,)).fetchone() is not None
 
     def test_preserves_shared_game_with_non_orphan(self, db):
         """Orphan cleanup preserves games where a non-orphan team participates."""
@@ -1830,8 +1898,8 @@ class TestCleanupOrphanTeams:
         # Plays for the shared game
         db.execute(
             "INSERT INTO plays (game_id, play_order, inning, half, season_id, "
-            "batting_team_id, batter_id, pitcher_id) VALUES ('g-shared', 1, 1, "
-            "'top', '2026-spring-hs', 1, 'p-shared', 'p-shared')"
+            "batting_team_id, perspective_team_id, batter_id, pitcher_id) VALUES ('g-shared', 1, 1, "
+            "'top', '2026-spring-hs', 1, 1, 'p-shared', 'p-shared')"
         )
         db.commit()
 
@@ -1851,6 +1919,315 @@ class TestCleanupOrphanTeams:
         assert db.execute(
             "SELECT 1 FROM plays WHERE game_id = 'g-shared'"
         ).fetchone() is not None
+
+
+
+
+class TestCrossPerspectiveScopedDelete:
+    """Round 6 Cluster 2: scoped game-scoped delete helper.
+
+    DE's reframing: _delete_game_scoped_data_for_perspectives must only
+    delete rows owned by the given perspectives, preserving other
+    perspectives' rows and the games row itself when those other
+    perspectives still exist.
+    """
+
+    def test_cleanup_orphan_teams_preserves_other_perspective_rows(self, db):
+        """Two teams share a game in different perspectives; cleanup one
+        must NOT delete the other's rows.
+        """
+        _seed_season(db)
+        _seed_player(db, "p-orphan", "Orphan", "Batter")
+        _seed_player(db, "p-other", "Other", "Batter")
+        _seed_team(db, "Report Team", "rpt")  # id=1 (non-orphan)
+
+        # Create an orphan team
+        cursor = db.execute(
+            "INSERT INTO teams (name, public_id, season_year) "
+            "VALUES ('Orphan', 'orph-x', 2026)"
+        )
+        orphan_id = cursor.lastrowid
+
+        # Game between orphan and a THIRD team (so it's orphan-vs-other, not shared
+        # with the report team).  Note: the cleanup only processes orphan-vs-orphan
+        # games; games where orphan vs non-orphan are preserved entirely.
+        # Use a scenario where BOTH participants are orphans so cleanup processes
+        # the game, but seed rows from a non-orphan perspective that must survive.
+        cursor = db.execute(
+            "INSERT INTO teams (name, public_id, season_year) "
+            "VALUES ('Orphan2', 'orph-y', 2026)"
+        )
+        orphan2_id = cursor.lastrowid
+        db.execute(
+            "INSERT INTO games (game_id, season_id, home_team_id, away_team_id, "
+            "home_score, away_score, game_date) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            ("g-cross", "2026-spring-hs", orphan_id, orphan2_id, 5, 3, "2026-04-01"),
+        )
+
+        # Orphan perspective rows (will be deleted)
+        db.execute(
+            "INSERT INTO player_game_batting "
+            "(game_id, player_id, team_id, perspective_team_id, ab, h) "
+            "VALUES (?, ?, ?, ?, 4, 2)",
+            ("g-cross", "p-orphan", orphan_id, orphan_id),
+        )
+        db.execute(
+            "INSERT INTO game_perspectives (game_id, perspective_team_id) VALUES (?, ?)",
+            ("g-cross", orphan_id),
+        )
+        # Report team (non-orphan) loaded the same game from ITS perspective.
+        # These rows must survive -- they are NOT in the orphan set.
+        db.execute(
+            "INSERT INTO player_game_batting "
+            "(game_id, player_id, team_id, perspective_team_id, ab, h) "
+            "VALUES (?, ?, ?, ?, 3, 1)",
+            ("g-cross", "p-other", orphan_id, 1),  # report-team perspective
+        )
+        db.execute(
+            "INSERT INTO game_perspectives (game_id, perspective_team_id) VALUES (?, ?)",
+            ("g-cross", 1),
+        )
+        db.commit()
+
+        # Cleanup only the orphans
+        cleanup_orphan_teams(db, {orphan_id, orphan2_id})
+
+        # Orphan-perspective rows deleted
+        orphan_rows = db.execute(
+            "SELECT COUNT(*) FROM player_game_batting "
+            "WHERE game_id = 'g-cross' AND perspective_team_id = ?",
+            (orphan_id,),
+        ).fetchone()[0]
+        assert orphan_rows == 0, (
+            "orphan-perspective rows should be deleted"
+        )
+        # Report-team-perspective rows preserved
+        other_rows = db.execute(
+            "SELECT COUNT(*) FROM player_game_batting "
+            "WHERE game_id = 'g-cross' AND perspective_team_id = 1"
+        ).fetchone()[0]
+        assert other_rows == 1, (
+            "non-orphan perspective rows must be preserved"
+        )
+        # game_perspectives: orphan row gone, report team row preserved
+        gp_orphan = db.execute(
+            "SELECT COUNT(*) FROM game_perspectives "
+            "WHERE game_id = 'g-cross' AND perspective_team_id = ?",
+            (orphan_id,),
+        ).fetchone()[0]
+        gp_other = db.execute(
+            "SELECT COUNT(*) FROM game_perspectives "
+            "WHERE game_id = 'g-cross' AND perspective_team_id = 1"
+        ).fetchone()[0]
+        assert gp_orphan == 0
+        assert gp_other == 1
+
+    def test_cascade_delete_team_preserves_other_perspective_rows(self, db):
+        """Stub team + tracked team share a game.  Cascade-delete stub;
+        tracked team's perspective rows for the shared game survive.
+        """
+        _seed_season(db)
+        _seed_player(db, "p-stub", "Stub", "Player")
+        _seed_player(db, "p-other", "Other", "Player")
+
+        # Stub team -- eligible for cleanup (no public_id, no gc_uuid, inactive)
+        cursor = db.execute(
+            "INSERT INTO teams (name, membership_type, is_active) "
+            "VALUES ('Stub', 'tracked', 0)"
+        )
+        stub_id = cursor.lastrowid
+        # Tracked opponent (separate, different perspective)
+        cursor = db.execute(
+            "INSERT INTO teams (name, membership_type, is_active) "
+            "VALUES ('Tracked', 'tracked', 1)"
+        )
+        tracked_id = cursor.lastrowid
+
+        db.execute(
+            "INSERT INTO games (game_id, season_id, home_team_id, away_team_id, "
+            "home_score, away_score, game_date) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            ("g-shared", "2026-spring-hs", stub_id, tracked_id, 5, 3, "2026-04-01"),
+        )
+
+        # Stub perspective rows
+        db.execute(
+            "INSERT INTO player_game_batting "
+            "(game_id, player_id, team_id, perspective_team_id, ab, h) "
+            "VALUES (?, ?, ?, ?, 4, 2)",
+            ("g-shared", "p-stub", stub_id, stub_id),
+        )
+        db.execute(
+            "INSERT INTO game_perspectives (game_id, perspective_team_id) VALUES (?, ?)",
+            ("g-shared", stub_id),
+        )
+        # Tracked team perspective rows (must survive)
+        db.execute(
+            "INSERT INTO player_game_batting "
+            "(game_id, player_id, team_id, perspective_team_id, ab, h) "
+            "VALUES (?, ?, ?, ?, 3, 1)",
+            ("g-shared", "p-other", tracked_id, tracked_id),
+        )
+        db.execute(
+            "INSERT INTO game_perspectives (game_id, perspective_team_id) VALUES (?, ?)",
+            ("g-shared", tracked_id),
+        )
+        db.commit()
+
+        cascade_delete_team(db, stub_id)
+
+        # Stub's rows are gone
+        assert db.execute(
+            "SELECT COUNT(*) FROM player_game_batting "
+            "WHERE perspective_team_id = ?", (stub_id,)
+        ).fetchone()[0] == 0
+        # Tracked team's rows survive
+        assert db.execute(
+            "SELECT COUNT(*) FROM player_game_batting "
+            "WHERE perspective_team_id = ?", (tracked_id,)
+        ).fetchone()[0] == 1, (
+            "tracked team's perspective rows must survive stub cascade delete"
+        )
+
+    def test_cascade_delete_team_preserves_games_row_when_other_perspective_remains(self, db):
+        """After stub cascade delete, the games row survives because tracked
+        team still has a perspective row in game_perspectives.
+        """
+        _seed_season(db)
+        cursor = db.execute(
+            "INSERT INTO teams (name, membership_type, is_active) "
+            "VALUES ('Stub', 'tracked', 0)"
+        )
+        stub_id = cursor.lastrowid
+        cursor = db.execute(
+            "INSERT INTO teams (name, membership_type, is_active) "
+            "VALUES ('Tracked', 'tracked', 1)"
+        )
+        tracked_id = cursor.lastrowid
+
+        db.execute(
+            "INSERT INTO games (game_id, season_id, home_team_id, away_team_id, "
+            "game_date) VALUES (?, ?, ?, ?, ?)",
+            ("g-survive", "2026-spring-hs", stub_id, tracked_id, "2026-04-01"),
+        )
+        db.execute(
+            "INSERT INTO game_perspectives (game_id, perspective_team_id) VALUES (?, ?)",
+            ("g-survive", stub_id),
+        )
+        db.execute(
+            "INSERT INTO game_perspectives (game_id, perspective_team_id) VALUES (?, ?)",
+            ("g-survive", tracked_id),
+        )
+        db.commit()
+
+        cascade_delete_team(db, stub_id)
+
+        # games row survives because tracked team still has a perspective row
+        assert db.execute(
+            "SELECT COUNT(*) FROM games WHERE game_id = 'g-survive'"
+        ).fetchone()[0] == 1, (
+            "games row must survive when another perspective remains"
+        )
+        # tracked team's game_perspectives row survives
+        assert db.execute(
+            "SELECT COUNT(*) FROM game_perspectives "
+            "WHERE game_id = 'g-survive' AND perspective_team_id = ?",
+            (tracked_id,),
+        ).fetchone()[0] == 1
+
+    def test_cascade_delete_team_drops_games_row_when_last_perspective(self, db):
+        """When stub is the SOLE perspective for a game, deleting the stub
+        removes the games row.
+        """
+        _seed_season(db)
+        cursor = db.execute(
+            "INSERT INTO teams (name, membership_type, is_active) "
+            "VALUES ('Stub', 'tracked', 0)"
+        )
+        stub_id = cursor.lastrowid
+
+        db.execute(
+            "INSERT INTO games (game_id, season_id, home_team_id, away_team_id, "
+            "game_date) VALUES (?, ?, ?, ?, ?)",
+            ("g-solo", "2026-spring-hs", stub_id, stub_id, "2026-04-01"),
+        )
+        db.execute(
+            "INSERT INTO game_perspectives (game_id, perspective_team_id) VALUES (?, ?)",
+            ("g-solo", stub_id),
+        )
+        db.commit()
+
+        cascade_delete_team(db, stub_id)
+
+        # games row gone -- no other perspective remained
+        assert db.execute(
+            "SELECT COUNT(*) FROM games WHERE game_id = 'g-solo'"
+        ).fetchone()[0] == 0, (
+            "games row should be deleted when last perspective is removed"
+        )
+
+    def test_cleanup_orphan_teams_handles_multi_orphan_perspective_list(self, db):
+        """Two orphans with rows from both perspectives.  Cleanup must
+        delete all orphan-perspective rows across both.
+        """
+        _seed_season(db)
+        _seed_player(db, "p-a", "A", "Player")
+        _seed_player(db, "p-b", "B", "Player")
+        cursor = db.execute(
+            "INSERT INTO teams (name, public_id, season_year) "
+            "VALUES ('Orphan A', 'oa', 2026)"
+        )
+        oa = cursor.lastrowid
+        cursor = db.execute(
+            "INSERT INTO teams (name, public_id, season_year) "
+            "VALUES ('Orphan B', 'ob', 2026)"
+        )
+        ob = cursor.lastrowid
+
+        db.execute(
+            "INSERT INTO games (game_id, season_id, home_team_id, away_team_id, "
+            "game_date) VALUES (?, ?, ?, ?, ?)",
+            ("g-multi", "2026-spring-hs", oa, ob, "2026-04-01"),
+        )
+        # Rows from both orphan perspectives
+        db.execute(
+            "INSERT INTO player_game_batting "
+            "(game_id, player_id, team_id, perspective_team_id, ab) "
+            "VALUES (?, ?, ?, ?, ?)",
+            ("g-multi", "p-a", oa, oa, 4),
+        )
+        db.execute(
+            "INSERT INTO player_game_batting "
+            "(game_id, player_id, team_id, perspective_team_id, ab) "
+            "VALUES (?, ?, ?, ?, ?)",
+            ("g-multi", "p-b", ob, ob, 3),
+        )
+        db.execute(
+            "INSERT INTO game_perspectives (game_id, perspective_team_id) VALUES (?, ?)",
+            ("g-multi", oa),
+        )
+        db.execute(
+            "INSERT INTO game_perspectives (game_id, perspective_team_id) VALUES (?, ?)",
+            ("g-multi", ob),
+        )
+        db.commit()
+
+        cleanup_orphan_teams(db, {oa, ob})
+
+        # All orphan-perspective rows gone
+        total = db.execute(
+            "SELECT COUNT(*) FROM player_game_batting WHERE game_id = 'g-multi'"
+        ).fetchone()[0]
+        assert total == 0, f"expected 0 rows across both orphan perspectives, got {total}"
+        # game_perspectives cleared
+        gp_total = db.execute(
+            "SELECT COUNT(*) FROM game_perspectives WHERE game_id = 'g-multi'"
+        ).fetchone()[0]
+        assert gp_total == 0
+        # games row deleted (no remaining perspective)
+        games_total = db.execute(
+            "SELECT COUNT(*) FROM games WHERE game_id = 'g-multi'"
+        ).fetchone()[0]
+        assert games_total == 0
 
 
 class TestCleanupNonFatal:
@@ -1898,11 +2275,11 @@ class TestCleanupNonFatal:
         mock_client = MagicMock()
         mock_client_cls.return_value = mock_client
         mock_crawler = MagicMock()
-        mock_crawler.scout_team.return_value = CrawlResult(files_written=5)
+        mock_crawler.scout_team.return_value = ScoutingCrawlResult(team_id=1, season_id="2025-spring-hs", games_crawled=5, games=[], boxscores={})
         mock_loader = MagicMock()
 
         # Make loader create an orphan team during load
-        def _load_side_effect(scouting_dir, team_id, season_id):
+        def _load_side_effect(crawl_result, **kwargs):
             conn = original_fresh()
             conn.execute(
                 "INSERT INTO teams (name, public_id, season_year) "
@@ -1974,13 +2351,13 @@ class TestQueryBeforeCleanup:
         mock_client = MagicMock()
         mock_client_cls.return_value = mock_client
         mock_crawler = MagicMock()
-        mock_crawler.scout_team.return_value = CrawlResult(files_written=5)
+        mock_crawler.scout_team.return_value = ScoutingCrawlResult(team_id=1, season_id="2025-spring-hs", games_crawled=5, games=[], boxscores={})
         mock_loader = MagicMock()
 
         # Loader creates orphan team + game so queries have data to find.
         # The DB season_id is derived from team metadata (season_year=2026,
         # no program) = "2026".
-        def _load_side_effect(scouting_dir, team_id, season_id):
+        def _load_side_effect(crawl_result, **kwargs):
             conn = _fresh_conn()
             cursor = conn.execute(
                 "INSERT INTO teams (name, public_id, season_year) "
@@ -2091,7 +2468,7 @@ class TestPublicIdBackfill:
         mock_client = MagicMock()
         mock_client_cls.return_value = mock_client
         mock_crawler = MagicMock()
-        mock_crawler.scout_team.return_value = CrawlResult(files_written=5)
+        mock_crawler.scout_team.return_value = ScoutingCrawlResult(team_id=1, season_id="2025-spring-hs", games_crawled=5, games=[], boxscores={})
         mock_loader = MagicMock()
         mock_loader.load_team.return_value = LoadResult(loaded=5)
 
@@ -2162,7 +2539,7 @@ class TestPublicIdBackfill:
         mock_client = MagicMock()
         mock_client_cls.return_value = mock_client
         mock_crawler = MagicMock()
-        mock_crawler.scout_team.return_value = CrawlResult(files_written=5)
+        mock_crawler.scout_team.return_value = ScoutingCrawlResult(team_id=1, season_id="2025-spring-hs", games_crawled=5, games=[], boxscores={})
         mock_loader = MagicMock()
         mock_loader.load_team.return_value = LoadResult(loaded=5)
 
@@ -2227,7 +2604,7 @@ class TestPublicIdBackfill:
         mock_client = MagicMock()
         mock_client_cls.return_value = mock_client
         mock_crawler = MagicMock()
-        mock_crawler.scout_team.return_value = CrawlResult(files_written=5)
+        mock_crawler.scout_team.return_value = ScoutingCrawlResult(team_id=1, season_id="2025-spring-hs", games_crawled=5, games=[], boxscores={})
         mock_loader = MagicMock()
         mock_loader.load_team.return_value = LoadResult(loaded=5)
 
@@ -2298,7 +2675,7 @@ class TestPublicIdBackfill:
         mock_client = MagicMock()
         mock_client_cls.return_value = mock_client
         mock_crawler = MagicMock()
-        mock_crawler.scout_team.return_value = CrawlResult(files_written=5)
+        mock_crawler.scout_team.return_value = ScoutingCrawlResult(team_id=1, season_id="2025-spring-hs", games_crawled=5, games=[], boxscores={})
         mock_loader = MagicMock()
         mock_loader.load_team.return_value = LoadResult(loaded=5)
 
@@ -2377,7 +2754,7 @@ class TestPublicIdBackfill:
         mock_client = MagicMock()
         mock_client_cls.return_value = mock_client
         mock_crawler = MagicMock()
-        mock_crawler.scout_team.return_value = CrawlResult(files_written=5)
+        mock_crawler.scout_team.return_value = ScoutingCrawlResult(team_id=1, season_id="2025-spring-hs", games_crawled=5, games=[], boxscores={})
         mock_loader = MagicMock()
         mock_loader.load_team.return_value = LoadResult(loaded=5)
 

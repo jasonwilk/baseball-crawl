@@ -148,8 +148,11 @@ def find_duplicate_players(
 
     stat_counts = _count_stat_rows(db, all_player_ids)
 
-    # Check for overlapping game appearances in bulk
-    pairs_to_check = [(row[0], row[3]) for row in rows]
+    # Check for overlapping game appearances in bulk.  E-220 round 6: the
+    # overlap check is now scoped by team_id so same-game cross-team matches
+    # do not false-positive, and by the team's own perspective so foreign
+    # cross-perspective rows are ignored.
+    pairs_to_check = [(row[0], row[3], row[6]) for row in rows]  # pid1, pid2, team_id
     overlap_map = _check_game_overlaps(db, pairs_to_check)
 
     # Build results with canonical selection, deduplicating across seasons
@@ -174,7 +177,7 @@ def find_duplicate_players(
         longer = canonical_fname
         reason = f"prefix match: {shorter!r} is prefix of {longer!r} (last_name={lname1!r})"
 
-        has_overlap = overlap_map.get((min(pid1, pid2), max(pid1, pid2)), False)
+        has_overlap = overlap_map.get((min(pid1, pid2), max(pid1, pid2), tid), False)
 
         results.append(
             DuplicatePlayerPair(
@@ -260,40 +263,60 @@ def _count_stat_rows(
 
 def _check_game_overlaps(
     db: sqlite3.Connection,
-    pairs: list[tuple[str, str]],
-) -> dict[tuple[str, str], bool]:
+    pairs: list[tuple[str, str, int]],
+) -> dict[tuple[str, str, int], bool]:
     """Check which player pairs have overlapping game appearances.
 
-    Returns a dict mapping (min_pid, max_pid) -> bool indicating whether
-    both players appear in stats for at least one common game_id.
+    E-220 round 6: Scoped by team_id and the team's own perspective.
+    Two players "overlap" only when both appear in the same game FROM THE
+    TEAM'S OWN PERSPECTIVE (``team_id = perspective_team_id``) on the same
+    team.  Cross-team coincidental game_id matches and cross-perspective
+    foreign rows do NOT count as overlap.
+
+    Args:
+        db: Open SQLite connection.
+        pairs: List of ``(pid1, pid2, team_id)`` tuples to check.
+
+    Returns:
+        Dict mapping ``(min_pid, max_pid, team_id)`` -> bool.
     """
     if not pairs:
         return {}
 
-    result: dict[tuple[str, str], bool] = {}
+    result: dict[tuple[str, str, int], bool] = {}
 
-    for pid1, pid2 in pairs:
-        key = (min(pid1, pid2), max(pid1, pid2))
+    for pid1, pid2, team_id in pairs:
+        key = (min(pid1, pid2), max(pid1, pid2), team_id)
         if key in result:
             continue
 
-        # Check if both players appear in any common game via batting or pitching
+        # Both players must appear in the same game on the SAME team and
+        # from the team's OWN perspective (team_id = perspective_team_id).
+        # Cross-perspective foreign rows are excluded.
         overlap = db.execute(
             """
             SELECT EXISTS(
                 SELECT 1 FROM (
-                    SELECT game_id FROM player_game_batting WHERE player_id = ?
+                    SELECT game_id FROM player_game_batting
+                        WHERE player_id = ? AND team_id = ?
+                          AND perspective_team_id = team_id
                     UNION
-                    SELECT game_id FROM player_game_pitching WHERE player_id = ?
+                    SELECT game_id FROM player_game_pitching
+                        WHERE player_id = ? AND team_id = ?
+                          AND perspective_team_id = team_id
                 ) g1
                 JOIN (
-                    SELECT game_id FROM player_game_batting WHERE player_id = ?
+                    SELECT game_id FROM player_game_batting
+                        WHERE player_id = ? AND team_id = ?
+                          AND perspective_team_id = team_id
                     UNION
-                    SELECT game_id FROM player_game_pitching WHERE player_id = ?
+                    SELECT game_id FROM player_game_pitching
+                        WHERE player_id = ? AND team_id = ?
+                          AND perspective_team_id = team_id
                 ) g2 ON g1.game_id = g2.game_id
             )
             """,
-            (pid1, pid1, pid2, pid2),
+            (pid1, team_id, pid1, team_id, pid2, team_id, pid2, team_id),
         ).fetchone()[0]
 
         result[key] = bool(overlap)
@@ -561,17 +584,26 @@ def _delete_or_update_game_stats(
     canonical_id: str,
     duplicate_id: str,
 ) -> None:
-    """Handle UNIQUE(game_id, player_id) conflict for game stat tables.
+    """Handle UNIQUE(game_id, player_id, perspective_team_id) conflict.
 
-    For same-game conflicts: keep the row with better stat_completeness.
-    If tied, keep the canonical row. Delete the loser.
+    E-220 round 6 P1-2: the UNIQUE constraint is 3-column now, so the
+    conflict detection JOIN must include ``perspective_team_id``.  Same
+    game_id with DIFFERENT perspective_team_id values are legitimately
+    distinct rows (one per perspective the game was loaded from) and must
+    NOT be collapsed.
+
+    For same-perspective conflicts: keep the row with better
+    stat_completeness.  If tied, keep the canonical row.  Delete the loser.
     For non-conflicting rows: UPDATE player_id to canonical.
     """
-    # Find conflicting game_ids
+    # Find conflicting rows within the same perspective.
     conflicts = db.execute(
         f"SELECT d.id, d.game_id, d.stat_completeness, c.id, c.stat_completeness "  # noqa: S608
         f"FROM {table} d "
-        f"JOIN {table} c ON c.game_id = d.game_id AND c.player_id = ? "
+        f"JOIN {table} c "
+        f"    ON c.game_id = d.game_id "
+        f"   AND c.perspective_team_id = d.perspective_team_id "
+        f"   AND c.player_id = ? "
         f"WHERE d.player_id = ?",
         (canonical_id, duplicate_id),
     ).fetchall()
@@ -605,7 +637,10 @@ def _delete_or_update_recon(
 ) -> None:
     """Handle reconciliation_discrepancies: delete-or-update with sentinel guard.
 
-    UNIQUE(run_id, game_id, team_id, player_id, signal_name).
+    UNIQUE(run_id, game_id, perspective_team_id, team_id, player_id, signal_name).
+    The perspective_team_id predicate is required so the self-JOIN only
+    identifies true conflicts within the same (perspective, participant)
+    tuple -- rows belonging to different perspectives are independent.
     Sentinel guard: only touch rows where player_id != '__game__'.
     """
     # Find conflicts
@@ -615,6 +650,7 @@ def _delete_or_update_recon(
         JOIN reconciliation_discrepancies c
             ON  c.run_id = d.run_id
             AND c.game_id = d.game_id
+            AND c.perspective_team_id = d.perspective_team_id
             AND c.team_id = d.team_id
             AND c.signal_name = d.signal_name
             AND c.player_id = ?
@@ -803,8 +839,9 @@ def recompute_season_batting(
         FROM player_game_batting pgb
         JOIN games g ON g.game_id = pgb.game_id
         WHERE pgb.player_id = ? AND pgb.team_id = ? AND g.season_id = ?
+          AND pgb.perspective_team_id = ?
         """,
-        (player_id, team_id, season_id),
+        (player_id, team_id, season_id, team_id),
     ).fetchone()
 
     if row is None or row[0] == 0:
@@ -875,8 +912,9 @@ def recompute_season_pitching(
         FROM player_game_pitching pgp
         JOIN games g ON g.game_id = pgp.game_id
         WHERE pgp.player_id = ? AND pgp.team_id = ? AND g.season_id = ?
+          AND pgp.perspective_team_id = ?
         """,
-        (player_id, team_id, season_id),
+        (player_id, team_id, season_id, team_id),
     ).fetchone()
 
     if row is None or row[0] == 0:

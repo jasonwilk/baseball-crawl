@@ -9,8 +9,8 @@ paths:
 
 - Sequential, zero-padded to 3 digits: `001`, `002`, `003`, etc.
 - Never reuse a migration number, even if a slot is unused.
-- Current sequence: `001` through `005`. `001` is the complete schema rewrite from E-100 (old migrations 001-008 archived in `.project/archive/migrations-pre-E100/`). Subsequent migrations: `002` (user role), `003` (crawl_jobs), `004` (team season_year), `005` (backfill teams public_id).
-- Next migration: `007` (after E-158-01 creates `006`).
+- Current sequence: `001` only. `001_initial_schema.sql` is the consolidated schema rewrite from E-220 (old migrations 001-015 archived in `.project/archive/migrations-pre-E220/`). The E-220 rewrite folded all prior migrations into a single initial-schema file with `perspective_team_id` as a first-class concept on stat tables.
+- Next migration: `002`.
 
 ## Naming Pattern
 

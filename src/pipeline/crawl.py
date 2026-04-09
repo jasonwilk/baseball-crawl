@@ -157,6 +157,18 @@ def run(
         if crawler_filter is None or name == crawler_filter
     ]
 
+    # Defensive guard (E-220 remediation): if the caller asked for a specific
+    # crawler name and none matched the registry, fail loudly.  Prevents
+    # silent no-ops when a CLI choice has been removed but a caller still
+    # uses the old name.
+    if crawler_filter is not None and not selected:
+        available = ", ".join(name for name, _ in all_crawlers)
+        logger.error(
+            "Unknown crawler %r. Available crawlers: %s",
+            crawler_filter, available,
+        )
+        return 1
+
     if dry_run:
         logger.info("Dry run -- no API calls will be made.")
         logger.info("Season: %s", config.season)

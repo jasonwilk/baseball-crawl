@@ -161,6 +161,134 @@ class ScoutingSprayChartLoader:
         )
         return combined
 
+    def load_from_data(
+        self,
+        spray_data: dict[str, dict],
+        public_id: str,
+    ) -> LoadResult:
+        """Load spray chart data from in-memory crawl results (E-220-10).
+
+        Args:
+            spray_data: Dict mapping ``event_id`` to player-stats response dict.
+            public_id: The opponent's ``public_id`` slug (for team resolution).
+
+        Returns:
+            Aggregated ``LoadResult`` across all games.
+        """
+        team_id = self._resolve_team_id_by_public_id(public_id)
+        if team_id is None:
+            logger.warning(
+                "Team public_id=%s not found in teams table; skipping spray load.",
+                public_id,
+            )
+            return LoadResult()
+
+        season_id, _ = derive_season_id_for_team(self._db, team_id)
+
+        combined = LoadResult()
+        for game_id, data in sorted(spray_data.items()):
+            try:
+                result = self._load_game_data(
+                    data, game_id, team_id, public_id, season_id
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.error(
+                    "Unexpected error loading scouting spray game %s: %s",
+                    game_id, exc,
+                )
+                self._db.rollback()
+                result = LoadResult(errors=1)
+            combined.loaded += result.loaded
+            combined.skipped += result.skipped
+            combined.errors += result.errors
+
+        logger.info(
+            "ScoutingSprayChartLoader.load_from_data: "
+            "loaded=%d skipped=%d errors=%d",
+            combined.loaded,
+            combined.skipped,
+            combined.errors,
+        )
+        return combined
+
+    def _load_game_data(
+        self,
+        data: dict,
+        game_id: str,
+        team_id: int,
+        public_id: str,
+        season_id: str,
+    ) -> LoadResult:
+        """Load one game's spray chart data from an in-memory dict.
+
+        Delegates to the same event insertion logic as ``_load_game_file``.
+        """
+        spray_data = data.get("spray_chart_data")
+        if spray_data is None:
+            logger.info(
+                "spray_chart_data is null for game %s public_id=%s; skipping.",
+                game_id, public_id,
+            )
+            return LoadResult()
+
+        game_row = self._db.execute(
+            "SELECT home_team_id, away_team_id FROM games WHERE game_id = ?",
+            (game_id,),
+        ).fetchone()
+        if game_row is None:
+            logger.debug(
+                "Game %s not found in games table for public_id=%s; skipping.",
+                game_id, public_id,
+            )
+            return LoadResult()
+
+        home_team_id, away_team_id = game_row
+
+        if team_id not in (home_team_id, away_team_id):
+            logger.warning(
+                "Scouted team public_id=%s (id=%d) is not home or away for "
+                "game %s; player team resolution may be unreliable.",
+                public_id, team_id, game_id,
+            )
+
+        result = LoadResult()
+        unresolvable_players = 0
+        unresolvable_events = 0
+        section_map = [("offense", "offensive"), ("defense", "defensive")]
+        for section_key, chart_type in section_map:
+            section = spray_data.get(section_key)
+            if not section:
+                continue
+            for player_uuid, events in section.items():
+                if not isinstance(events, list):
+                    result.skipped += 1
+                    continue
+                player_team_id = self._resolve_player_team_id(
+                    player_uuid, home_team_id, away_team_id, season_id,
+                )
+                if player_team_id is None:
+                    unresolvable_players += 1
+                    unresolvable_events += len(events)
+                    result.skipped += len(events)
+                    continue
+                for event in events:
+                    r = self._insert_event(
+                        event, game_id, player_uuid, player_team_id, chart_type,
+                        season_id, team_id,
+                    )
+                    result.loaded += r.loaded
+                    result.skipped += r.skipped
+                    result.errors += r.errors
+
+        if unresolvable_players > 0:
+            logger.debug(
+                "Game %s: skipped %d events for %d unresolvable players.",
+                game_id, unresolvable_events, unresolvable_players,
+            )
+
+        self._db.commit()
+        return result
+
     def load_dir(self, spray_dir: Path) -> LoadResult:
         """Load all spray chart JSON files from one opponent's spray directory.
 
@@ -312,7 +440,8 @@ class ScoutingSprayChartLoader:
                     continue
                 for event in events:
                     r = self._insert_event(
-                        event, game_id, player_uuid, player_team_id, chart_type, season_id
+                        event, game_id, player_uuid, player_team_id, chart_type, season_id,
+                        team_id,
                     )
                     result.loaded += r.loaded
                     result.skipped += r.skipped
@@ -385,6 +514,7 @@ class ScoutingSprayChartLoader:
         team_id: int,
         chart_type: str,
         season_id: str,
+        perspective_team_id: int,
     ) -> LoadResult:
         """Insert a single scouting spray chart event.
 
@@ -395,6 +525,8 @@ class ScoutingSprayChartLoader:
             team_id: Resolved integer ``teams.id``.
             chart_type: ``'offensive'`` or ``'defensive'``.
             season_id: Season slug from the file path.
+            perspective_team_id: INTEGER PK of the team whose API call produced
+                this data.
 
         Returns:
             ``LoadResult(loaded=1)`` on insert, ``LoadResult(skipped=1)`` on
@@ -446,8 +578,9 @@ class ScoutingSprayChartLoader:
                 game_id, player_id, team_id, pitcher_id,
                 chart_type, play_type, play_result,
                 x, y, fielder_position, error,
-                event_gc_id, created_at_ms, season_id
-            ) VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                event_gc_id, created_at_ms, season_id,
+                perspective_team_id
+            ) VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 game_id,
@@ -463,6 +596,7 @@ class ScoutingSprayChartLoader:
                 event_gc_id,
                 created_at_ms,
                 season_id,
+                perspective_team_id,
             ),
         )
         if cursor.rowcount == 1:

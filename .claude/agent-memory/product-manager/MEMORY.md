@@ -1,7 +1,7 @@
 # Product Manager -- Agent Memory
 
 ## Numbering State
-- Next available epic number: E-221
+- Next available epic number: E-222
 - Next available idea number: IDEA-068
 - Before assigning numbers: ALWAYS `ls /epics/` and `ls /.project/ideas/` to avoid collisions
 
@@ -25,7 +25,7 @@ For full details, read the epic file in `/epics/`. Only READY and ACTIVE epics a
 - **E-193** (READY): Browser Automation Infrastructure
 - **E-218** (READY): League/Level Detection for Pitch Rules
 - **E-219** (READY): Own-Side-Only Boxscore Loading (superseded by E-220; will be ABANDONED when E-220 dispatches)
-- **E-220** (READY): Perspective-Aware Data Architecture (10 stories, replaces E-219)
+- **E-221** (READY): Test Fixture Schema Parity Audit + Post-E-220 Perspective Residuals (7 stories; lands round 8 P1s + fixture audit + CI guardrail)
 
 ## Key Architectural Decisions
 - Storage: SQLite (WAL mode). Host-mounted at ./data/app.db. Simple file backup via scripts/backup_db.py (no Litestream).

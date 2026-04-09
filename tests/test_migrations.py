@@ -86,16 +86,12 @@ class TestMigrationFiles:
         files = collect_migration_files()
         names = [f.name for f in files]
         assert "001_initial_schema.sql" in names
-        assert "002_add_user_role.sql" in names
-        assert "003_add_crawl_jobs.sql" in names
-        # Archived migrations should not be present
+        # Archived migrations (002-015) should not be present
         archived = {
-            "003_auth.sql",
-            "004_coaching_assignments.sql",
-            "005_teams_public_id.sql",
-            "006_opponent_links.sql",
-            "007_scouting_runs.sql",
-            "008_teams_gc_uuid.sql",
+            "002_add_user_role.sql",
+            "003_add_crawl_jobs.sql",
+            "004_add_team_season_year.sql",
+            "005_backfill_teams_public_id.sql",
         }
         unexpected = archived & set(names)
         assert not unexpected, f"Archived migrations still in migrations/: {unexpected}"
@@ -267,13 +263,13 @@ class TestUserRoleMigration:
         assert row[0] == "user", f"Expected role='user', got role='{row[0]}'"
 
     def test_role_migration_recorded_in_tracking_table(self, fresh_db: Path) -> None:
-        """002_add_user_role.sql is recorded in _migrations after apply."""
+        """001_initial_schema.sql (which includes user role) is recorded in _migrations after apply."""
         run_migrations(db_path=fresh_db)
         conn = sqlite3.connect(str(fresh_db))
         applied = get_applied_migrations(conn)
         conn.close()
-        assert "002_add_user_role.sql" in applied, (
-            "002_add_user_role.sql not found in _migrations tracking table"
+        assert "001_initial_schema.sql" in applied, (
+            "001_initial_schema.sql not found in _migrations tracking table"
         )
 
 
@@ -370,11 +366,109 @@ class TestCrawlJobsMigration:
         assert not missing, f"crawl_jobs missing columns: {missing}"
 
     def test_crawl_jobs_migration_recorded(self, fresh_db: Path) -> None:
-        """003_add_crawl_jobs.sql is recorded in _migrations after apply."""
+        """001_initial_schema.sql (which includes crawl_jobs) is recorded in _migrations after apply."""
         run_migrations(db_path=fresh_db)
         conn = sqlite3.connect(str(fresh_db))
         applied = get_applied_migrations(conn)
         conn.close()
-        assert "003_add_crawl_jobs.sql" in applied, (
-            "003_add_crawl_jobs.sql not found in _migrations tracking table"
+        assert "001_initial_schema.sql" in applied, (
+            "001_initial_schema.sql not found in _migrations tracking table"
         )
+
+
+
+class TestE220UpgradeGuard:
+    """E-220 remediation: run_migrations must detect in-place upgrade mismatch.
+
+    The migration runner tracks by filename, so a DB populated with the old
+    (pre-E-220) 001_initial_schema.sql will appear "up to date" when the new
+    001 is on disk.  The guard must fail loudly in this case, pointing the
+    operator to the rebuild procedure.
+    """
+
+    def test_fresh_install_passes_guard(self, fresh_db: Path) -> None:
+        """Clean install (empty DB -> run migrations) must not raise."""
+        run_migrations(db_path=fresh_db)
+        # And idempotent second run also passes.
+        run_migrations(db_path=fresh_db)
+
+    def test_upgrade_without_wipe_raises_runtime_error(self, fresh_db: Path) -> None:
+        """Simulated upgrade: pre-E-220 schema + 001 marker -> guard fires."""
+        # Create the minimum pre-E-220 state: stat tables WITHOUT
+        # perspective_team_id column, plus the _migrations row claiming 001
+        # has been applied.
+        conn = sqlite3.connect(str(fresh_db))
+        conn.executescript(
+            """
+            CREATE TABLE _migrations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                filename TEXT NOT NULL UNIQUE,
+                applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+            -- Pre-E-220 stat tables: NO perspective_team_id column.
+            CREATE TABLE player_game_batting (
+                id INTEGER PRIMARY KEY,
+                game_id TEXT NOT NULL,
+                player_id TEXT NOT NULL,
+                team_id INTEGER NOT NULL
+            );
+            CREATE TABLE player_game_pitching (
+                id INTEGER PRIMARY KEY,
+                game_id TEXT NOT NULL,
+                player_id TEXT NOT NULL,
+                team_id INTEGER NOT NULL
+            );
+            CREATE TABLE spray_charts (
+                id INTEGER PRIMARY KEY,
+                game_id TEXT,
+                player_id TEXT,
+                team_id INTEGER
+            );
+            CREATE TABLE plays (
+                id INTEGER PRIMARY KEY,
+                game_id TEXT NOT NULL,
+                play_order INTEGER NOT NULL,
+                inning INTEGER NOT NULL,
+                half TEXT NOT NULL,
+                season_id TEXT NOT NULL,
+                batting_team_id INTEGER NOT NULL,
+                batter_id TEXT NOT NULL
+            );
+            INSERT INTO _migrations (filename) VALUES ('001_initial_schema.sql');
+            """
+        )
+        conn.commit()
+        conn.close()
+
+        # Running migrations on this state should raise -- 001 is marked
+        # applied so no new migrations will run, but the schema guard will
+        # detect the missing columns.
+        with pytest.raises(RuntimeError, match="E-220 schema mismatch"):
+            run_migrations(db_path=fresh_db)
+
+    def test_guard_error_message_points_to_rebuild_procedure(
+        self, fresh_db: Path
+    ) -> None:
+        """The error message must mention the rebuild procedure doc path."""
+        conn = sqlite3.connect(str(fresh_db))
+        conn.executescript(
+            """
+            CREATE TABLE _migrations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                filename TEXT NOT NULL UNIQUE,
+                applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+            CREATE TABLE player_game_batting (id INTEGER PRIMARY KEY, team_id INTEGER);
+            CREATE TABLE player_game_pitching (id INTEGER PRIMARY KEY, team_id INTEGER);
+            CREATE TABLE spray_charts (id INTEGER PRIMARY KEY, team_id INTEGER);
+            CREATE TABLE plays (id INTEGER PRIMARY KEY, team_id INTEGER);
+            INSERT INTO _migrations (filename) VALUES ('001_initial_schema.sql');
+            """
+        )
+        conn.commit()
+        conn.close()
+
+        with pytest.raises(RuntimeError) as exc_info:
+            run_migrations(db_path=fresh_db)
+        assert "rebuild-procedure.md" in str(exc_info.value)
+

@@ -1290,9 +1290,9 @@ def _insert_spray_event(
 ) -> None:
     conn.execute(
         "INSERT INTO spray_charts"
-        " (player_id, team_id, game_id, season_id, chart_type, x, y, play_type, play_result)"
-        " VALUES (?, ?, ?, ?, 'offensive', ?, ?, ?, ?)",
-        (player_id, team_id, game_id, season_id, x, y, play_type, play_result),
+        " (player_id, team_id, game_id, season_id, chart_type, x, y, play_type, play_result, perspective_team_id)"
+        " VALUES (?, ?, ?, ?, 'offensive', ?, ?, ?, ?, ?)",
+        (player_id, team_id, game_id, season_id, x, y, play_type, play_result, team_id),
     )
     conn.commit()
 

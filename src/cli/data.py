@@ -41,8 +41,8 @@ def _data_group(ctx: typer.Context) -> None:
         typer.echo(ctx.get_help())
         raise typer.Exit()
 
-_CRAWLER_CHOICES = ["roster", "schedule", "opponent", "player-stats", "game-stats", "spray-chart", "plays", "scouting-spray"]
-_LOADER_CHOICES = ["roster", "schedule", "game", "plays", "season-stats", "spray-chart", "scouting-spray"]
+_CRAWLER_CHOICES = ["roster", "schedule", "opponent", "player-stats", "game-stats", "spray-chart", "plays"]
+_LOADER_CHOICES = ["roster", "schedule", "game", "plays", "season-stats", "spray-chart"]
 
 
 class SourceOption(str, Enum):
@@ -109,15 +109,6 @@ def crawl(
         )
         raise SystemExit(1)
 
-    # scouting-spray is special-cased: it needs a DB connection to look up
-    # gc_uuid values and is NOT routed through the pipeline factory.
-    if crawler == "scouting-spray":
-        if dry_run:
-            typer.echo("Dry run: would crawl scouting spray charts (skipping).")
-            raise SystemExit(0)
-        _crawl_scouting_spray(profile=profile)
-        return  # _crawl_scouting_spray raises SystemExit; this line is unreachable
-
     raise SystemExit(
         crawl_module.run(
             dry_run=dry_run,
@@ -154,15 +145,6 @@ def load(
             err=True,
         )
         raise SystemExit(1)
-
-    # scouting-spray is special-cased: it needs a DB connection and scans the
-    # scouting data tree directly -- NOT routed through the pipeline factory.
-    if loader == "scouting-spray":
-        if dry_run:
-            typer.echo("Dry run: would load scouting spray charts (skipping).")
-            raise SystemExit(0)
-        _load_scouting_spray()
-        return  # _load_scouting_spray raises SystemExit; unreachable
 
     raise SystemExit(
         load_module.run(
@@ -250,72 +232,6 @@ def _scout_dry_run(
         typer.echo(f"Season override: {season}")
 
 
-def _crawl_scouting_spray(profile: str) -> None:
-    """Run the scouting spray chart crawl independently.
-
-    Creates a DB connection, instantiates ``ScoutingSprayChartCrawler``, and
-    calls ``crawl_all()``.  Raises ``SystemExit`` with exit code 0 on success
-    or 1 on error.
-    """
-    from src.gamechanger.client import GameChangerClient
-    from src.gamechanger.crawlers.scouting_spray import ScoutingSprayChartCrawler
-
-    db_path = _resolve_db_path()
-    data_root = _PROJECT_ROOT / "data" / "raw"
-    client = GameChangerClient(profile=profile)
-
-    with closing(sqlite3.connect(str(db_path))) as conn:
-        conn.execute("PRAGMA journal_mode=WAL;")
-        conn.execute("PRAGMA foreign_keys=ON;")
-        spray_crawler = ScoutingSprayChartCrawler(client, conn, data_root=data_root)
-        try:
-            result = spray_crawler.crawl_all()
-        except Exception as exc:
-            logger.error("Scouting spray crawl failed: %s", exc)
-            typer.echo(f"Error: {exc}", err=True)
-            raise SystemExit(1) from exc
-
-    typer.echo(
-        f"Scouting spray crawl complete: "
-        f"files_written={result.files_written} "
-        f"files_skipped={result.files_skipped} "
-        f"errors={result.errors}"
-    )
-    raise SystemExit(1 if result.errors else 0)
-
-
-def _load_scouting_spray() -> None:
-    """Run the scouting spray chart load independently.
-
-    Creates a DB connection, instantiates ``ScoutingSprayChartLoader``, and
-    calls ``load_all()``.  Raises ``SystemExit`` with exit code 0 on success
-    or 1 on error.
-    """
-    from src.gamechanger.loaders.scouting_spray_loader import ScoutingSprayChartLoader
-
-    db_path = _resolve_db_path()
-    data_root = _PROJECT_ROOT / "data" / "raw"
-
-    with closing(sqlite3.connect(str(db_path))) as conn:
-        conn.execute("PRAGMA journal_mode=WAL;")
-        conn.execute("PRAGMA foreign_keys=ON;")
-        spray_loader = ScoutingSprayChartLoader(conn)
-        try:
-            result = spray_loader.load_all(data_root)
-        except Exception as exc:
-            logger.error("Scouting spray load failed: %s", exc)
-            typer.echo(f"Error: {exc}", err=True)
-            raise SystemExit(1) from exc
-
-    typer.echo(
-        f"Scouting spray load complete: "
-        f"loaded={result.loaded} "
-        f"skipped={result.skipped} "
-        f"errors={result.errors}"
-    )
-    raise SystemExit(1 if result.errors else 0)
-
-
 def _heal_season_year_scouting(
     conn: sqlite3.Connection, team_id: int, public_id: str
 ) -> None:
@@ -374,8 +290,11 @@ def _scout_live(
         freshness_hours = 0 if force else 24
         crawler = ScoutingCrawler(client, conn, freshness_hours=freshness_hours)
         loader = _ScoutingLoader(conn)
+        crawl_results: list = []
         try:
-            exit_code = _run_scout_pipeline(conn, crawler, loader, data_root, team, season, started_at)
+            exit_code, crawl_results = _run_scout_pipeline(
+                conn, crawler, loader, data_root, team, season, started_at,
+            )
         except Exception as exc:
             logger.error("Scouting failed: %s", exc)
             typer.echo(f"Error: {exc}", err=True)
@@ -395,49 +314,62 @@ def _scout_live(
             # before spray crawl (which benefits from resolved gc_uuids).
             _resolve_missing_gc_uuids(conn, data_root, client, team)
 
-            # Step 2: scouting spray crawl (runs after main crawl+load).
-            spray_crawler = ScoutingSprayChartCrawler(client, conn, data_root=data_root)
-            try:
-                if team:
-                    spray_result = spray_crawler.crawl_team(team, season_id=season)
-                else:
-                    spray_result = spray_crawler.crawl_all(season_id=season)
-                typer.echo(
-                    f"Scouting spray crawl: "
-                    f"written={spray_result.files_written} "
-                    f"skipped={spray_result.files_skipped} "
-                    f"errors={spray_result.errors}"
-                )
-                if spray_result.errors:
-                    exit_code = 1
-            except Exception as exc:
-                logger.error("Scouting spray crawl failed: %s", exc)
-                typer.echo(f"Spray crawl error: {exc}", err=True)
-                exit_code = 1
-
-            if exit_code == 0:
-                # Step 3: scouting spray load (runs after spray crawl).
-                from src.gamechanger.loaders.scouting_spray_loader import ScoutingSprayChartLoader
-
-                spray_loader = ScoutingSprayChartLoader(conn)
+            # Step 2 + 3: scouting spray crawl + load PER TEAM (in-memory,
+            # E-220 C2-B).  Each team uses its own ScoutingCrawlResult.games
+            # so spray reads zero bytes from data/raw/.../scouting/.
+            from src.gamechanger.loaders.scouting_spray_loader import ScoutingSprayChartLoader
+            spray_crawler = ScoutingSprayChartCrawler(client, conn)
+            spray_loader = ScoutingSprayChartLoader(conn)
+            total_spray_crawled = 0
+            total_spray_loaded = 0
+            total_spray_errors = 0
+            for cr in crawl_results:
+                pub_id = getattr(cr, "public_id", "") or ""
+                if not pub_id or not getattr(cr, "games", None):
+                    continue
                 try:
-                    spray_load_result = spray_loader.load_all(
-                        data_root,
-                        public_id=team if team else None,
-                        season_id=season,
+                    spray_result = spray_crawler.crawl_team(
+                        pub_id,
+                        season_id=cr.season_id or season,
+                        games_data=cr.games,
                     )
-                    typer.echo(
-                        f"Scouting spray load: "
-                        f"loaded={spray_load_result.loaded} "
-                        f"skipped={spray_load_result.skipped} "
-                        f"errors={spray_load_result.errors}"
+                except CredentialExpiredError:
+                    raise
+                except Exception as exc:  # noqa: BLE001
+                    logger.error(
+                        "Scouting spray crawl failed for %s: %s", pub_id, exc,
                     )
-                    if spray_load_result.errors:
-                        exit_code = 1
-                except Exception as exc:
-                    logger.error("Scouting spray load failed: %s", exc)
-                    typer.echo(f"Spray load error: {exc}", err=True)
-                    exit_code = 1
+                    typer.echo(f"Spray crawl error for {pub_id}: {exc}", err=True)
+                    total_spray_errors += 1
+                    continue
+                total_spray_crawled += spray_result.games_crawled
+                total_spray_errors += spray_result.errors
+
+                if spray_result.errors:
+                    continue
+                try:
+                    spray_load_result = spray_loader.load_from_data(
+                        spray_result.spray_data,
+                        public_id=pub_id,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.error("Scouting spray load failed for %s: %s", pub_id, exc)
+                    typer.echo(f"Spray load error for {pub_id}: {exc}", err=True)
+                    total_spray_errors += 1
+                    continue
+                total_spray_loaded += spray_load_result.loaded
+                total_spray_errors += spray_load_result.errors
+
+            typer.echo(
+                f"Scouting spray crawl: crawled={total_spray_crawled} "
+                f"errors={total_spray_errors}"
+            )
+            typer.echo(
+                f"Scouting spray load: loaded={total_spray_loaded} "
+                f"errors={total_spray_errors}"
+            )
+            if total_spray_errors:
+                exit_code = 1
 
         # Step 4: post-spray dedup sweep (Hook 2).
         # Catches duplicate player stubs re-created by the spray loader.
@@ -604,26 +536,48 @@ def _run_scout_pipeline(
     team: Optional[str],
     season: Optional[str],
     started_at: str,
-) -> int:
-    """Run crawl + load for one team or all teams; return exit code."""
+) -> tuple[int, list]:
+    """Run crawl + load for one team or all teams.
+
+    E-220 C2-A: both branches now use in-memory ScoutingCrawlResults.  No
+    disk reads from data/raw/.../scouting/ in this code path.
+
+    Returns:
+        Tuple of ``(exit_code, crawl_results)`` where ``crawl_results`` is
+        the list of in-memory ``ScoutingCrawlResult`` objects (one per team).
+        Callers (e.g. ``_scout_live``) use the per-team results to drive the
+        spray pipeline without re-reading disk.
+    """
     if team:
         crawl_result = crawler.scout_team(team, season_id=season)
         typer.echo(
             f"Crawl complete for {team}: "
-            f"files_written={crawl_result.files_written} "
+            f"games_crawled={crawl_result.games_crawled} "
             f"errors={crawl_result.errors}"
         )
-        load_errors = _load_scouted_team(conn, crawler, loader, data_root, team, started_at)
+        load_errors = _load_scouted_team_in_memory(
+            conn, crawler, loader, team, crawl_result, started_at,
+        )
+        total_errors = crawl_result.errors
+        crawl_results = [crawl_result]
     else:
-        crawl_result = crawler.scout_all(season_id=season)
+        crawl_results = crawler.scout_all_in_memory(season_id=season)
+        total_games_crawled = sum(r.games_crawled for r in crawl_results)
+        total_errors = sum(r.errors for r in crawl_results)
         typer.echo(
             f"Crawl complete: "
-            f"files_written={crawl_result.files_written} "
-            f"files_skipped={crawl_result.files_skipped} "
-            f"errors={crawl_result.errors}"
+            f"teams_scouted={len(crawl_results)} "
+            f"games_crawled={total_games_crawled} "
+            f"errors={total_errors}"
         )
-        load_errors = _load_all_scouted(conn, crawler, loader, data_root, started_at)
-    return 1 if (crawl_result.errors or load_errors) else 0
+        load_errors = 0
+        for cr in crawl_results:
+            pub_id = getattr(cr, "public_id", "") or ""
+            load_errors += _load_scouted_team_in_memory(
+                conn, crawler, loader, pub_id, cr, started_at,
+            )
+    exit_code = 1 if (total_errors or load_errors) else 0
+    return exit_code, crawl_results
 
 
 def _find_scouting_run(
@@ -709,60 +663,57 @@ def _load_scouted_team(
     return 0
 
 
-def _load_all_scouted(
+def _load_scouted_team_in_memory(
     conn: sqlite3.Connection,
     crawler: ScoutingCrawler,
     loader: ScoutingLoader,
-    data_root: Path,
+    public_id: str,
+    crawl_result: object,
     started_at: str,
 ) -> int:
-    """Load all opponents scouted during this session.
-
-    Queries scouting_runs for crawled runs started since ``started_at`` and
-    calls the loader for each.
+    """Load scouting data from an in-memory crawl result (E-220-05).
 
     Returns:
-        Total number of load errors across all teams.
+        Number of load errors (0 on success).
     """
-    runs = conn.execute(
-        "SELECT sr.team_id, sr.season_id, t.public_id "
-        "FROM scouting_runs sr JOIN teams t ON sr.team_id = t.id "
-        "WHERE sr.status IN ('running', 'completed') AND sr.last_checked >= ?",
-        (started_at,),
-    ).fetchall()
+    season_id = getattr(crawl_result, "season_id", "")
+    team_id = getattr(crawl_result, "team_id", None)
 
-    total_errors = 0
-    for team_id, season_id, pub_id in runs:
-        if pub_id is None:
-            logger.warning(
-                "Team id=%s has no public_id; cannot determine scouting directory. Skipping load.",
-                team_id,
-            )
-            continue
-        scouting_dir = data_root / season_id / "scouting" / pub_id
-        if not scouting_dir.is_dir():
-            logger.warning("Scouting dir not found at %s; skipping load.", scouting_dir)
-            continue
-        try:
-            result = loader.load_team(scouting_dir, team_id, season_id)
-        except Exception as exc:
-            logger.error("Load failed for team_id=%s: %s", team_id, exc)
-            typer.echo(f"Load error for {pub_id}: {exc}", err=True)
+    if getattr(crawl_result, "errors", 0) > 0 and getattr(crawl_result, "games_crawled", 0) == 0:
+        # Crawl errored and produced nothing -- mark the run failed so it
+        # surfaces to operators (mirrors disk-based _load_scouted_team).
+        typer.echo(
+            f"Crawl failure for {public_id}: errors={crawl_result.errors}, no games crawled.",
+            err=True,
+        )
+        if team_id and season_id:
             crawler.update_run_load_status(team_id, season_id, "failed")
-            total_errors += 1
-            continue
+        return int(getattr(crawl_result, "errors", 1)) or 1
+    if getattr(crawl_result, "skipped", False):
+        return 0  # No completed games.
 
-        if result.errors:
-            typer.echo(
-                f"Load errors for {pub_id} (season={season_id}): {result.errors} error(s).",
-                err=True,
-            )
+    try:
+        result = loader.load_team(crawl_result)
+    except Exception as exc:
+        logger.error("Load failed for public_id=%s: %s", public_id, exc)
+        typer.echo(f"Load error for {public_id}: {exc}", err=True)
+        if team_id and season_id:
             crawler.update_run_load_status(team_id, season_id, "failed")
-            total_errors += result.errors
-        else:
-            crawler.update_run_load_status(team_id, season_id, "completed")
-            typer.echo(f"Load complete for {pub_id} (season={season_id}).")
-    return total_errors
+        return 1
+
+    if result.errors:
+        typer.echo(
+            f"Load errors for {public_id} (season={season_id}): {result.errors} error(s).",
+            err=True,
+        )
+        if team_id and season_id:
+            crawler.update_run_load_status(team_id, season_id, "failed")
+        return result.errors
+
+    if team_id and season_id:
+        crawler.update_run_load_status(team_id, season_id, "completed")
+    typer.echo(f"Load complete for {public_id} (season={season_id}).")
+    return 0
 
 
 def _echo_dry_run_config(config: object) -> None:

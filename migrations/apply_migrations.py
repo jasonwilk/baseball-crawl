@@ -176,15 +176,67 @@ def run_migrations(db_path: Path | None = None) -> None:
 
         if not pending:
             logger.info("No pending migrations. Database is up to date.")
-            return
+        else:
+            logger.info("%d pending migration(s) to apply.", len(pending))
+            for migration_file in pending:
+                apply_migration(conn, migration_file)
+            logger.info("All migrations applied successfully.")
 
-        logger.info("%d pending migration(s) to apply.", len(pending))
-        for migration_file in pending:
-            apply_migration(conn, migration_file)
-
-        logger.info("All migrations applied successfully.")
+        # E-220 upgrade guard: detect contradiction between "001 applied" and
+        # "perspective_team_id missing".  This can only arise from an in-place
+        # upgrade that left the pre-E-220 schema behind because the migration
+        # runner tracks by filename, not by content.  Runs on EVERY call --
+        # including when there are no pending migrations, which is the exact
+        # code path that reveals the bug.
+        _assert_e220_columns_present(conn)
     finally:
         conn.close()
+
+
+def _assert_e220_columns_present(conn: sqlite3.Connection) -> None:
+    """Verify E-220 columns exist on the four stat tables.
+
+    Only fails when ``_migrations`` claims ``001_initial_schema.sql`` has been
+    applied AND the ``perspective_team_id`` column is missing on any of the
+    four perspective-tagged tables.  Fresh installs (001 not yet applied) are
+    exempt so bootstrap paths continue to work.
+
+    Raises:
+        RuntimeError: If the contradiction is detected.
+    """
+    row = conn.execute(
+        "SELECT 1 FROM _migrations WHERE filename = '001_initial_schema.sql' LIMIT 1"
+    ).fetchone()
+    if row is None:
+        # 001 has not been applied yet (fresh install mid-bootstrap).  Nothing
+        # to check -- this guard only fires on the upgrade-without-wipe path.
+        return
+
+    tables = (
+        "player_game_batting",
+        "player_game_pitching",
+        "spray_charts",
+        "plays",
+    )
+    missing: list[str] = []
+    for table in tables:
+        cols = {
+            r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()  # noqa: S608
+        }
+        if "perspective_team_id" not in cols:
+            missing.append(table)
+
+    if missing:
+        raise RuntimeError(
+            "E-220 schema mismatch: 001_initial_schema.sql is recorded as "
+            "applied but the following table(s) are missing the "
+            "perspective_team_id column: "
+            + ", ".join(missing)
+            + ". This happens when the database was populated by a pre-E-220 "
+            "version of 001 and then upgraded in place.  E-220 is not an "
+            "in-place upgrade -- see docs/admin/rebuild-procedure.md for the "
+            "clean-slate rebuild procedure."
+        )
 
 
 # ---------------------------------------------------------------------------
