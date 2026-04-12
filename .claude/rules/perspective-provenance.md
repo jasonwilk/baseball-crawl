@@ -6,6 +6,9 @@ paths:
   - "src/pipeline/**"
   - "src/db/**"
   - "src/cli/**"
+  - "src/api/routes/**"
+  - "src/api/db.py"
+  - "src/reconciliation/**"
 ---
 
 # Perspective Provenance

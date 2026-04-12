@@ -732,6 +732,16 @@ When the user ran the Codex review externally (via a generated prompt) and paste
 
 ---
 
+## Fidelity Recovery
+
+When a planning agent's output drifts from the inputs it received, apply these rules instead of grinding through in-place corrections:
+
+1. **Respawn on content mismatch.** If an agent's output contradicts relay content that exists in the main-session inbox (e.g., PM writes "no expert input" when expert input was relayed, or PM's epic contradicts a constraint stated in the relay), respawn the agent with a fresh brief rather than re-prompting in place. Content mismatch is a structural signal that the original spawn did not load the relay -- it is not a typo to correct.
+2. **Circuit breaker: 2 failures, then escalate.** If a respawn or re-prompt fails to produce faithful output a second time, stop and escalate to the user. Do not attempt a third remediation round in the same loop.
+3. **Stop-gate on adjacent regressions.** If a fix for a review finding introduces a new regression in adjacent code (the fix breaks something that was not in the original finding), stop grinding and escalate to the user for a scope decision. Do not continue remediation through the regression.
+
+---
+
 ## Anti-Patterns
 
 1. **Do not skip expert consultation when the domain warrants it.** If the user's request involves coaching stats, database schema, or API behavior, the corresponding domain expert should be on the planning team. Suggest them in Phase 0 -- do not plan in a domain vacuum.

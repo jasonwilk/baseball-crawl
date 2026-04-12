@@ -16,6 +16,8 @@ paths:
 
 Both PM and code-reviewer must approve before the staging boundary advances. PM is authoritative on ACs -- see the implement skill for disagreement resolution.
 
+During planning, consultation, and multi-agent coordination, **main-session relay is the default channel for substantive content** (expert input, review findings, story handoffs); peer-to-peer SendMessage is reserved for lightweight acknowledgments only. Peer DM delivery has been observed to drop messages silently in prior epics, and main-session relay is the recovery path.
+
 ## Domain Work During Dispatch
 
 **Litmus test:** If you are inspecting what was built or assessing quality, you are doing domain work. Route it.

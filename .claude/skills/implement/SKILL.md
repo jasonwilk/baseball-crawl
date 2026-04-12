@@ -215,6 +215,8 @@ Use ABSOLUTE PATHS under this directory for ALL file operations.
 
 **Permitted**: `git status/diff/log` from worktree. `git diff` = your unstaged changes (this story). `git diff --cached main` = prior stories' staged changes. Edit files via Write/Edit tools with absolute worktree paths.
 
+**Expert recommendations are provisional until you trace scope.** When a story, spec, Technical Notes section, or relayed expert consultation names a specific file, function, signature, or schema change, treat that recommendation as a starting point -- not the final answer. Before committing the change, grep `src/`, `scripts/`, `tests/`, and `templates/` for all construction sites, callers, and consumers of the named entity, and verify the recommendation still holds across the actual surface area. Schema and structural recommendations made from a quick read often miss sites the expert did not see; the implementer is the one who finds them.
+
 **Completion**: Report with `## Files Changed` (absolute worktree paths, e.g., `[epic-worktree-path]/src/foo.py (modified)`), `## Test Results` (command, pass/fail, failures), and `## Behavioral Changes`. The Behavioral Changes section is ALWAYS present. List any function whose signature, return type, raised exceptions, or documented side effects changed. Internal refactors that preserve the function's contract are NOT behavioral changes. Format: `- \`function_name()\` in \`file.py\`: [what changed]`. Write "None" when no behavioral changes occurred -- this makes it explicit that you considered the question. This section supplements (does not replace) the code-reviewer's own caller audit -- CR still independently scans the diff for non-obvious behavioral changes. Do NOT run `git add -A` (main session manages staging). Do not modify story status files or epic tables.
 ```
 
@@ -412,6 +414,10 @@ When all stories are verified DONE (and the optional review chain is complete), 
 ### Step 1: Validate all work
 
 Confirm all stories are DONE. Per-story AC verification was performed by PM during Phase 3 (for all stories), and code quality was verified by the code-reviewer (for code stories). This step confirms completion status -- it is not a re-review.
+
+### Step 1a: Invariant audit (conditional)
+
+If the epic introduced a **cross-cutting invariant** -- a new NOT NULL column on a stat or core table, a new required FK dimension, a new pattern every helper or call site must honor -- spawn the code-reviewer for a single full-codebase invariant audit pass (see Invariant Audit Mode in `.claude/agents/code-reviewer.md`). Per-story CR cannot see helpers in files no story touched; this audit closes that gap. Triage findings using the same rules as Phase 3 Step 5 item 3, remediate valid findings via the Phase 4a Step 4 remediation spawn context, and stage with `git add -A`. The main session decides whether the epic introduced an invariant from epic scope (NOT NULL FK, new required field, structural pattern) -- if unsure, ask the user. Skip this step for epics that did not introduce a new invariant.
 
 ### Step 2: Update the epic completely
 

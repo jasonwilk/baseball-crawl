@@ -75,6 +75,10 @@ Read every file listed in the `## Files Changed` section. Evaluate against the r
 
 Output the findings in the format specified in the Structured Findings Format section.
 
+## Invariant Audit Mode
+
+When the main session assigns an **invariant audit pass** for an epic that introduced a cross-cutting invariant (a new NOT NULL column, a new required FK dimension, a new pattern every helper must honor), per-story diff review is structurally insufficient -- the relevant call sites live in files no individual story touched. In this mode, sweep the **full codebase** with grep for callers, helpers, and adjacent code that should honor the invariant, not just the epic diff. Report findings in the normal Structured Findings Format. The main session triggers this mode explicitly; do not self-initiate it.
+
 ## Review Rubric
 
 Evaluate findings in this priority order. Every finding must be classified as MUST FIX or SHOULD FIX.
