@@ -58,12 +58,10 @@ E-220's History records the full 7-round remediation arc and the structural miss
 | E-221-05 | R8-P1-1 Phase 1a perspective scoping | TODO | E-221-04 | - |
 | E-221-06 | R8-P1-2 Phase 1b reconciliation_discrepancies cleanup | TODO | E-221-02 | - |
 | E-221-07 | R8-P1-3 `bb data reconcile --game-id` perspective plumb | TODO | E-221-02 | - |
-| E-221-08 | CA context-layer codification for E-220 lessons | TODO | None | - |
 
 ## Dispatch Team
 - software-engineer
 - data-engineer
-- claude-architect
 
 ## Technical Notes
 
@@ -133,7 +131,6 @@ Stories execute serially during dispatch (one story at a time in the epic worktr
 - E-221-05 after 04 (fix lands after the RED test is in place)
 - E-221-06 and E-221-07 parallel-safe logically but still serial in dispatch; they depend on 02 for FK-enforced tests
 - E-221-06 and E-221-07 may run in either order after 05
-- E-221-08 is independent (context-layer only, no code dependency). It can run in parallel with any other story or as a dedicated final story — claude-architect's judgment on ordering during dispatch.
 
 ### TN-9: RED-test discipline per E-220 round 7 precedent
 Every bug-fix story (05, 06, 07) MUST add its RED test BEFORE the fix, run the suite to see it fail, then land the fix and see it pass. This is the round 7 pattern that proved the fix addresses the bug and not a symptom. Code-reviewer will verify the commit graph shows this sequence.
@@ -148,3 +145,4 @@ Pre-close E-220 baseline was 72F/4254P/16E. This epic's final run should be 72F/
 - 2026-04-09: Created. Scope absorbed from E-220 round 8 Codex findings (3 P1s) plus the test fixture drift problem that enabled the round-by-round discovery cascade. User chose to ship E-220 with residuals rather than grind a round 9; E-221 is the deliberate landing.
 - Expert consultations: none required for planning — all technical decisions already made during E-220 round 7-8 (DE on schema, SE on fixture strategy, Codex on bug surface). Any new decisions during dispatch (Option A vs B in TN-7) route to DE.
 - 2026-04-09: E-221-08 added per user direction at E-220 close. Scope: claude-architect codifies the 8 E-220 lessons-learned into durable context-layer artifacts. User explicitly required CA use `.claude/skills/context-fundamentals/SKILL.md` as the procedural guide. Story is independent of E-221-01 through E-221-07 (no implementation dependency) and may run in parallel or last. Dispatch Team updated to include claude-architect.
+- 2026-04-12: E-221-08 DROPPED from epic scope. The E-220 lessons-learned codification is being done as a direct claude-architect dispatch outside the epic — a single ~35-line atomic commit covering the four highest-leverage fixes (perspective-provenance.md frontmatter gap, PM echo-back requirement, CR Invariant Audit Mode, plan-skill fidelity-recovery runbook) plus two smaller fixes (implement-skill expert-recs-are-provisional step, dispatch-pattern main-session-default-relay note). The direct-dispatch path honors the project's "Simple first" principle and avoids the story-ceremony overhead that had no proportional benefit for context-layer-only work. Dispatch Team reverted to software-engineer + data-engineer (claude-architect removed — Phase 1 direct dispatch runs outside this epic). Story count: 7. Related: E-222 (meta-fidelity-fix) was ABANDONED the same day after scope spiral to 14 stories; its planning artifacts and the full recovery context are preserved in `.project/archive/E-222-meta-fidelity-fix-ABANDONED/`.
