@@ -2,7 +2,7 @@
 
 ## Numbering State
 - Next available epic number: E-223
-- Next available idea number: IDEA-068
+- Next available idea number: IDEA-070
 - Before assigning numbers: ALWAYS `ls /epics/` and `ls /.project/ideas/` to avoid collisions
 
 ## Project Context
