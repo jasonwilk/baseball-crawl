@@ -28,6 +28,7 @@ from src.reports.generator import (
     generate_report,
     list_reports,
 )
+from tests.conftest import load_real_schema
 
 # Verify removed functions are no longer importable (AC-1, AC-2)
 _REMOVED_NAMES = [
@@ -47,260 +48,14 @@ _REMOVED_NAMES = [
 
 @pytest.fixture()
 def db(tmp_path):
-    """Create an in-memory DB with the required schema for testing."""
+    """Create a disk-backed DB with the production schema for testing.
+
+    Uses load_real_schema so FK enforcement matches production -- tests that
+    insert into child tables must first seed the required parent rows.
+    """
     db_path = tmp_path / "test.db"
     conn = sqlite3.connect(str(db_path))
-    conn.execute("PRAGMA foreign_keys=ON;")
-
-    # Minimal schema for the tables we touch
-    conn.executescript("""
-        CREATE TABLE programs (
-            program_id TEXT PRIMARY KEY,
-            name TEXT NOT NULL,
-            program_type TEXT NOT NULL,
-            org_name TEXT,
-            created_at TEXT NOT NULL DEFAULT (datetime('now'))
-        );
-        CREATE TABLE teams (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT,
-            program_id TEXT REFERENCES programs(program_id),
-            gc_uuid TEXT UNIQUE,
-            public_id TEXT UNIQUE,
-            season_year INTEGER,
-            membership_type TEXT DEFAULT 'tracked',
-            classification TEXT,
-            active INTEGER DEFAULT 1,
-            is_active INTEGER NOT NULL DEFAULT 1
-        );
-        CREATE TABLE seasons (
-            season_id TEXT PRIMARY KEY,
-            name TEXT,
-            season_type TEXT,
-            year INTEGER
-        );
-        CREATE TABLE players (
-            player_id TEXT PRIMARY KEY,
-            first_name TEXT,
-            last_name TEXT,
-            bats TEXT,
-            throws TEXT
-        );
-        CREATE TABLE team_rosters (
-            team_id INTEGER,
-            player_id TEXT,
-            season_id TEXT,
-            jersey_number TEXT,
-            position TEXT,
-            PRIMARY KEY (team_id, player_id, season_id)
-        );
-        CREATE TABLE games (
-            game_id TEXT PRIMARY KEY,
-            season_id TEXT,
-            home_team_id INTEGER NOT NULL REFERENCES teams(id),
-            away_team_id INTEGER NOT NULL REFERENCES teams(id),
-            home_score INTEGER,
-            away_score INTEGER,
-            game_date TEXT,
-            status TEXT DEFAULT 'completed',
-            game_stream_id TEXT,
-            start_time TEXT,
-            timezone TEXT
-        );
-        CREATE TABLE player_season_batting (
-            player_id TEXT,
-            team_id INTEGER,
-            season_id TEXT,
-            gp INTEGER DEFAULT 0,
-            games_tracked INTEGER DEFAULT 0,
-            ab INTEGER DEFAULT 0,
-            h INTEGER DEFAULT 0,
-            doubles INTEGER DEFAULT 0,
-            triples INTEGER DEFAULT 0,
-            hr INTEGER DEFAULT 0,
-            rbi INTEGER DEFAULT 0,
-            r INTEGER DEFAULT 0,
-            bb INTEGER DEFAULT 0,
-            so INTEGER DEFAULT 0,
-            sb INTEGER DEFAULT 0,
-            tb INTEGER DEFAULT 0,
-            hbp INTEGER DEFAULT 0,
-            shf INTEGER DEFAULT 0,
-            cs INTEGER DEFAULT 0,
-            PRIMARY KEY (player_id, team_id, season_id)
-        );
-        CREATE TABLE player_season_pitching (
-            player_id TEXT,
-            team_id INTEGER,
-            season_id TEXT,
-            gp_pitcher INTEGER DEFAULT 0,
-            games_tracked INTEGER DEFAULT 0,
-            ip_outs INTEGER DEFAULT 0,
-            h INTEGER DEFAULT 0,
-            r INTEGER DEFAULT 0,
-            er INTEGER DEFAULT 0,
-            bb INTEGER DEFAULT 0,
-            so INTEGER DEFAULT 0,
-            wp INTEGER DEFAULT 0,
-            hbp INTEGER DEFAULT 0,
-            pitches INTEGER DEFAULT 0,
-            total_strikes INTEGER DEFAULT 0,
-            bf INTEGER DEFAULT 0,
-            gs INTEGER,
-            PRIMARY KEY (player_id, team_id, season_id)
-        );
-        CREATE TABLE player_game_batting (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            game_id TEXT NOT NULL REFERENCES games(game_id),
-            player_id TEXT NOT NULL REFERENCES players(player_id),
-            team_id INTEGER NOT NULL REFERENCES teams(id),
-            perspective_team_id INTEGER NOT NULL DEFAULT 0,
-            ab INTEGER, r INTEGER, h INTEGER, rbi INTEGER,
-            bb INTEGER, so INTEGER,
-            UNIQUE(game_id, player_id, perspective_team_id)
-        );
-        CREATE TABLE player_game_pitching (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            game_id TEXT NOT NULL REFERENCES games(game_id),
-            player_id TEXT NOT NULL REFERENCES players(player_id),
-            team_id INTEGER NOT NULL REFERENCES teams(id),
-            perspective_team_id INTEGER NOT NULL DEFAULT 0,
-            ip_outs INTEGER, h INTEGER, er INTEGER, bb INTEGER, so INTEGER,
-            UNIQUE(game_id, player_id, perspective_team_id)
-        );
-        CREATE TABLE spray_charts (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            game_id TEXT REFERENCES games(game_id),
-            team_id INTEGER,
-            player_id TEXT,
-            season_id TEXT,
-            chart_type TEXT,
-            x REAL,
-            y REAL,
-            play_result TEXT,
-            play_type TEXT,
-            perspective_team_id INTEGER NOT NULL DEFAULT 0
-        );
-        CREATE TABLE scouting_runs (
-            team_id INTEGER,
-            season_id TEXT,
-            run_type TEXT,
-            started_at TEXT,
-            completed_at TEXT,
-            status TEXT,
-            last_checked TEXT,
-            games_found INTEGER,
-            games_crawled INTEGER,
-            players_found INTEGER,
-            error_message TEXT,
-            PRIMARY KEY (team_id, season_id, run_type)
-        );
-        CREATE TABLE reports (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            slug TEXT UNIQUE NOT NULL,
-            team_id INTEGER NOT NULL REFERENCES teams(id),
-            title TEXT NOT NULL,
-            status TEXT NOT NULL DEFAULT 'generating',
-            generated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
-            expires_at TEXT NOT NULL,
-            report_path TEXT,
-            error_message TEXT
-        );
-        CREATE INDEX idx_reports_slug ON reports(slug);
-        CREATE INDEX idx_reports_team_id ON reports(team_id);
-        CREATE TABLE game_perspectives (
-            game_id             TEXT    NOT NULL REFERENCES games(game_id),
-            perspective_team_id INTEGER NOT NULL REFERENCES teams(id),
-            loaded_at           TEXT    NOT NULL DEFAULT (datetime('now')),
-            PRIMARY KEY (game_id, perspective_team_id)
-        );
-        CREATE TABLE plays (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            game_id TEXT NOT NULL REFERENCES games(game_id),
-            play_order INTEGER NOT NULL,
-            inning INTEGER NOT NULL,
-            half TEXT NOT NULL,
-            season_id TEXT NOT NULL,
-            batting_team_id INTEGER NOT NULL REFERENCES teams(id),
-            batter_id TEXT NOT NULL REFERENCES players(player_id),
-            pitcher_id TEXT REFERENCES players(player_id),
-            outcome TEXT,
-            pitch_count INTEGER NOT NULL DEFAULT 0,
-            is_first_pitch_strike INTEGER NOT NULL DEFAULT 0,
-            is_qab INTEGER NOT NULL DEFAULT 0,
-            home_score INTEGER,
-            away_score INTEGER,
-            did_score_change INTEGER,
-            outs_after INTEGER,
-            did_outs_change INTEGER,
-            perspective_team_id INTEGER NOT NULL DEFAULT 0,
-            UNIQUE(game_id, play_order, perspective_team_id)
-        );
-        CREATE TABLE play_events (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            play_id INTEGER NOT NULL REFERENCES plays(id),
-            event_order INTEGER NOT NULL,
-            event_type TEXT NOT NULL,
-            pitch_result TEXT,
-            is_first_pitch INTEGER NOT NULL DEFAULT 0,
-            raw_template TEXT,
-            UNIQUE(play_id, event_order)
-        );
-        -- NOTE: this inline fixture is severely drifted from the real schema
-        -- (missing boxscore_value, plays_value, delta, correction_detail, UNIQUE, FKs).
-        -- Broader cleanup deferred to E-221.  Added perspective_team_id in
-        -- E-220 round 7 P1-2 (minimum change) because the reports/generator.py
-        -- DELETE filter now references it.
-        CREATE TABLE reconciliation_discrepancies (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            game_id TEXT NOT NULL REFERENCES games(game_id),
-            run_id TEXT NOT NULL,
-            perspective_team_id INTEGER NOT NULL,
-            team_id INTEGER NOT NULL,
-            player_id TEXT NOT NULL,
-            signal_name TEXT NOT NULL,
-            category TEXT NOT NULL,
-            status TEXT NOT NULL,
-            created_at TEXT NOT NULL DEFAULT (datetime('now'))
-        );
-        CREATE TABLE crawl_jobs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            team_id INTEGER,
-            status TEXT
-        );
-        CREATE TABLE coaching_assignments (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER,
-            team_id INTEGER
-        );
-        CREATE TABLE users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            email TEXT UNIQUE,
-            role TEXT,
-            hashed_password TEXT
-        );
-        CREATE TABLE user_team_access (
-            user_id INTEGER,
-            team_id INTEGER,
-            UNIQUE(user_id, team_id)
-        );
-        CREATE TABLE team_opponents (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            our_team_id INTEGER,
-            opponent_team_id INTEGER,
-            UNIQUE(our_team_id, opponent_team_id)
-        );
-        CREATE TABLE opponent_links (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            our_team_id INTEGER,
-            root_team_id TEXT NOT NULL,
-            opponent_name TEXT NOT NULL,
-            resolved_team_id INTEGER,
-            resolution_method TEXT,
-            resolved_at TEXT,
-            is_hidden INTEGER NOT NULL DEFAULT 0
-        );
-    """)
+    load_real_schema(conn)
     conn.commit()
     yield conn
     conn.close()
@@ -309,7 +64,8 @@ def db(tmp_path):
 def _seed_team(db, name="Test Tigers", public_id="abc123"):
     """Insert a team and return its id."""
     cursor = db.execute(
-        "INSERT INTO teams (name, public_id, season_year) VALUES (?, ?, 2026)",
+        "INSERT INTO teams (name, public_id, season_year, membership_type) "
+        "VALUES (?, ?, 2026, 'tracked')",
         (name, public_id),
     )
     db.commit()
@@ -1180,146 +936,15 @@ class TestResolveGcUuid:
         """AC-7(c): Team with non-NULL gc_uuid skips the search call entirely."""
         db_path = str(tmp_path / "test.db")
         conn_template = sqlite3.connect(db_path)
-        conn_template.execute("PRAGMA foreign_keys=ON;")
-        conn_template.executescript("""
-            CREATE TABLE IF NOT EXISTS programs (
-                program_id TEXT PRIMARY KEY,
-                name TEXT NOT NULL,
-                program_type TEXT NOT NULL,
-                org_name TEXT,
-                created_at TEXT NOT NULL DEFAULT (datetime('now'))
-            );
-            CREATE TABLE IF NOT EXISTS teams (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT,
-                program_id TEXT REFERENCES programs(program_id),
-                gc_uuid TEXT UNIQUE,
-                public_id TEXT UNIQUE,
-                season_year INTEGER,
-                membership_type TEXT DEFAULT 'tracked',
-                classification TEXT,
-                active INTEGER DEFAULT 1
-            );
-            CREATE TABLE IF NOT EXISTS seasons (
-                season_id TEXT PRIMARY KEY, name TEXT, season_type TEXT, year INTEGER
-            );
-            CREATE TABLE IF NOT EXISTS scouting_runs (
-                team_id INTEGER, season_id TEXT, run_type TEXT,
-                started_at TEXT, completed_at TEXT, status TEXT,
-                last_checked TEXT, games_found INTEGER, games_crawled INTEGER,
-                players_found INTEGER, error_message TEXT,
-                PRIMARY KEY (team_id, season_id, run_type)
-            );
-            CREATE TABLE IF NOT EXISTS reports (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                slug TEXT UNIQUE NOT NULL,
-                team_id INTEGER NOT NULL,
-                title TEXT NOT NULL,
-                status TEXT NOT NULL DEFAULT 'generating',
-                generated_at TEXT,
-                expires_at TEXT,
-                report_path TEXT,
-                error_message TEXT
-            );
-            CREATE TABLE IF NOT EXISTS games (
-                game_id TEXT PRIMARY KEY, season_id TEXT,
-                home_team_id INTEGER, away_team_id INTEGER,
-                home_score INTEGER, away_score INTEGER,
-                game_date TEXT, status TEXT,
-                game_stream_id TEXT, start_time TEXT, timezone TEXT
-            );
-            CREATE TABLE IF NOT EXISTS players (
-                player_id TEXT PRIMARY KEY, first_name TEXT, last_name TEXT,
-                bats TEXT, throws TEXT
-            );
-            CREATE TABLE IF NOT EXISTS player_season_batting (
-                player_id TEXT, team_id INTEGER, season_id TEXT,
-                gp INTEGER DEFAULT 0, games_tracked INTEGER DEFAULT 0,
-                ab INTEGER DEFAULT 0, h INTEGER DEFAULT 0, doubles INTEGER DEFAULT 0,
-                triples INTEGER DEFAULT 0, hr INTEGER DEFAULT 0, rbi INTEGER DEFAULT 0,
-                r INTEGER DEFAULT 0, bb INTEGER DEFAULT 0, so INTEGER DEFAULT 0,
-                sb INTEGER DEFAULT 0, tb INTEGER DEFAULT 0, hbp INTEGER DEFAULT 0,
-                shf INTEGER DEFAULT 0, cs INTEGER DEFAULT 0,
-                PRIMARY KEY (player_id, team_id, season_id)
-            );
-            CREATE TABLE IF NOT EXISTS player_season_pitching (
-                player_id TEXT, team_id INTEGER, season_id TEXT,
-                gp_pitcher INTEGER DEFAULT 0, games_tracked INTEGER DEFAULT 0,
-                ip_outs INTEGER DEFAULT 0, h INTEGER DEFAULT 0, r INTEGER DEFAULT 0,
-                er INTEGER DEFAULT 0, bb INTEGER DEFAULT 0, so INTEGER DEFAULT 0,
-                wp INTEGER DEFAULT 0, hbp INTEGER DEFAULT 0,
-                pitches INTEGER DEFAULT 0, total_strikes INTEGER DEFAULT 0,
-                bf INTEGER DEFAULT 0, gs INTEGER,
-                PRIMARY KEY (player_id, team_id, season_id)
-            );
-            CREATE TABLE IF NOT EXISTS team_rosters (
-                team_id INTEGER, player_id TEXT, season_id TEXT,
-                jersey_number TEXT, position TEXT,
-                PRIMARY KEY (team_id, player_id, season_id)
-            );
-            CREATE TABLE IF NOT EXISTS spray_charts (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                team_id INTEGER, player_id TEXT, season_id TEXT,
-                chart_type TEXT, x REAL, y REAL, play_result TEXT, play_type TEXT,
-                perspective_team_id INTEGER NOT NULL DEFAULT 0
-            );
-            CREATE TABLE IF NOT EXISTS plays (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                game_id TEXT NOT NULL,
-                play_order INTEGER NOT NULL,
-                inning INTEGER NOT NULL,
-                half TEXT NOT NULL,
-                season_id TEXT NOT NULL,
-                batting_team_id INTEGER NOT NULL,
-                batter_id TEXT NOT NULL,
-                pitcher_id TEXT,
-                outcome TEXT,
-                pitch_count INTEGER NOT NULL DEFAULT 0,
-                is_first_pitch_strike INTEGER NOT NULL DEFAULT 0,
-                is_qab INTEGER NOT NULL DEFAULT 0,
-                home_score INTEGER,
-                away_score INTEGER,
-                did_score_change INTEGER,
-                outs_after INTEGER,
-                did_outs_change INTEGER,
-                perspective_team_id INTEGER NOT NULL DEFAULT 0,
-                UNIQUE(game_id, play_order, perspective_team_id)
-            );
-            CREATE TABLE IF NOT EXISTS play_events (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                play_id INTEGER NOT NULL,
-                event_order INTEGER NOT NULL,
-                event_type TEXT NOT NULL,
-                UNIQUE(play_id, event_order)
-            );
-            CREATE TABLE IF NOT EXISTS reconciliation_discrepancies (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                game_id TEXT NOT NULL, run_id TEXT NOT NULL,
-                team_id INTEGER NOT NULL, player_id TEXT NOT NULL,
-                signal_name TEXT NOT NULL, category TEXT NOT NULL,
-                status TEXT NOT NULL,
-                created_at TEXT NOT NULL DEFAULT (datetime('now'))
-            );
-            CREATE TABLE IF NOT EXISTS crawl_jobs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT, team_id INTEGER, status TEXT
-            );
-            CREATE TABLE IF NOT EXISTS coaching_assignments (
-                id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, team_id INTEGER
-            );
-            CREATE TABLE IF NOT EXISTS user_team_access (
-                user_id INTEGER, team_id INTEGER, UNIQUE(user_id, team_id)
-            );
-            CREATE TABLE IF NOT EXISTS opponent_links (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                our_team_id INTEGER, root_team_id TEXT NOT NULL,
-                opponent_name TEXT NOT NULL, resolved_team_id INTEGER,
-                resolution_method TEXT, resolved_at TEXT
-            );
-        """)
+        load_real_schema(conn_template)
         # Seed team WITH gc_uuid already set (member team -- existing gc_uuid used directly)
         conn_template.execute(
             "INSERT INTO teams (name, public_id, gc_uuid, season_year, membership_type) "
             "VALUES ('Test Tigers', 'abc123', 'existing-uuid-999', 2026, 'member')"
+        )
+        conn_template.execute(
+            "INSERT INTO seasons (season_id, name, season_type, year) "
+            "VALUES ('2026-spring-hs', '2026 Spring HS', 'spring-hs', 2026)"
         )
         conn_template.execute(
             "INSERT INTO scouting_runs (team_id, season_id, run_type, started_at, status) "
@@ -1480,11 +1105,17 @@ class TestRecentFormOpponentNames:
         assert games[0]["opponent_name"] == "Away Rival"
         assert games[0]["is_home"] is False
 
-    def test_null_opponent_name_fallback(self, db):
+    def test_empty_opponent_name_fallback(self, db):
+        """teams.name is NOT NULL under the real schema, but TEXT NOT NULL
+        permits empty strings. The `or "Unknown"` fallback at generator.py:308
+        treats empty-string names as falsy, so the function should substitute
+        "Unknown" in that case (the previous NULL-name test is unreachable
+        under FK + NOT NULL, per E-221-02)."""
         team_id = _seed_team(db, name="Us", public_id="us123")
-        # Insert opponent with NULL name
+        # Insert opponent with EMPTY name (NOT NULL allows empty string).
         cursor = db.execute(
-            "INSERT INTO teams (name, public_id, season_year) VALUES (NULL, 'unk999', 2026)"
+            "INSERT INTO teams (name, public_id, season_year, membership_type) "
+            "VALUES ('', 'unk999', 2026, 'tracked')"
         )
         opp_id = cursor.lastrowid
         db.commit()
@@ -1594,9 +1225,10 @@ class TestResolveGcUuidIntegration:
 
         # Seed team WITHOUT gc_uuid
         db.execute(
-            "INSERT INTO teams (name, public_id, season_year) "
-            "VALUES ('Test Tigers', 'abc123', 2026)"
+            "INSERT INTO teams (name, public_id, season_year, membership_type) "
+            "VALUES ('Test Tigers', 'abc123', 2026, 'tracked')"
         )
+        _seed_season(db)
         db.execute(
             "INSERT INTO scouting_runs (team_id, season_id, run_type, started_at, status) "
             "VALUES (1, '2026-spring-hs', 'full', '2026-03-28T00:00:00Z', 'completed')"
@@ -1688,8 +1320,8 @@ class TestCleanupOrphanTeams:
 
         # Orphan team
         cursor = db.execute(
-            "INSERT INTO teams (name, public_id, season_year) "
-            "VALUES ('Orphan Team', 'orphan1', 2026)"
+            "INSERT INTO teams (name, public_id, season_year, membership_type) "
+            "VALUES ('Orphan Team', 'orphan1', 2026, 'tracked')"
         )
         orphan_id = cursor.lastrowid
         db.commit()
@@ -1779,8 +1411,8 @@ class TestCleanupOrphanTeams:
         """AC-2: Only teams in orphan_ids are deleted; pre-existing teams untouched."""
         pre_existing_id = _seed_team(db, "Pre-existing", "pre1")
         cursor = db.execute(
-            "INSERT INTO teams (name, public_id, season_year) "
-            "VALUES ('Orphan', 'orphan2', 2026)"
+            "INSERT INTO teams (name, public_id, season_year, membership_type) "
+            "VALUES ('Orphan', 'orphan2', 2026, 'tracked')"
         )
         orphan_id = cursor.lastrowid
         db.commit()
@@ -1813,8 +1445,8 @@ class TestCleanupOrphanTeams:
         _seed_player(db, "p2", "B", "Player")
 
         cursor = db.execute(
-            "INSERT INTO teams (name, public_id, season_year) "
-            "VALUES ('Orphan', 'orp1', 2026)"
+            "INSERT INTO teams (name, public_id, season_year, membership_type) "
+            "VALUES ('Orphan', 'orp1', 2026, 'tracked')"
         )
         orphan_id = cursor.lastrowid
         db.commit()
@@ -1838,8 +1470,8 @@ class TestCleanupOrphanTeams:
         # second game between two orphans -- that game WILL be deleted in
         # Phase 1, exercising the game_perspectives FK check.
         cursor2 = db.execute(
-            "INSERT INTO teams (name, public_id, season_year) "
-            "VALUES ('Orphan2', 'orp2', 2026)"
+            "INSERT INTO teams (name, public_id, season_year, membership_type) "
+            "VALUES ('Orphan2', 'orp2', 2026, 'tracked')"
         )
         orphan2_id = cursor2.lastrowid
         db.execute(
@@ -1943,8 +1575,8 @@ class TestCrossPerspectiveScopedDelete:
 
         # Create an orphan team
         cursor = db.execute(
-            "INSERT INTO teams (name, public_id, season_year) "
-            "VALUES ('Orphan', 'orph-x', 2026)"
+            "INSERT INTO teams (name, public_id, season_year, membership_type) "
+            "VALUES ('Orphan', 'orph-x', 2026, 'tracked')"
         )
         orphan_id = cursor.lastrowid
 
@@ -1954,8 +1586,8 @@ class TestCrossPerspectiveScopedDelete:
         # Use a scenario where BOTH participants are orphans so cleanup processes
         # the game, but seed rows from a non-orphan perspective that must survive.
         cursor = db.execute(
-            "INSERT INTO teams (name, public_id, season_year) "
-            "VALUES ('Orphan2', 'orph-y', 2026)"
+            "INSERT INTO teams (name, public_id, season_year, membership_type) "
+            "VALUES ('Orphan2', 'orph-y', 2026, 'tracked')"
         )
         orphan2_id = cursor.lastrowid
         db.execute(
@@ -2173,13 +1805,13 @@ class TestCrossPerspectiveScopedDelete:
         _seed_player(db, "p-a", "A", "Player")
         _seed_player(db, "p-b", "B", "Player")
         cursor = db.execute(
-            "INSERT INTO teams (name, public_id, season_year) "
-            "VALUES ('Orphan A', 'oa', 2026)"
+            "INSERT INTO teams (name, public_id, season_year, membership_type) "
+            "VALUES ('Orphan A', 'oa', 2026, 'tracked')"
         )
         oa = cursor.lastrowid
         cursor = db.execute(
-            "INSERT INTO teams (name, public_id, season_year) "
-            "VALUES ('Orphan B', 'ob', 2026)"
+            "INSERT INTO teams (name, public_id, season_year, membership_type) "
+            "VALUES ('Orphan B', 'ob', 2026, 'tracked')"
         )
         ob = cursor.lastrowid
 
@@ -2282,8 +1914,8 @@ class TestCleanupNonFatal:
         def _load_side_effect(crawl_result, **kwargs):
             conn = original_fresh()
             conn.execute(
-                "INSERT INTO teams (name, public_id, season_year) "
-                "VALUES ('Orphan', 'orphan99', 2026)"
+                "INSERT INTO teams (name, public_id, season_year, membership_type) "
+                "VALUES ('Orphan', 'orphan99', 2026, 'tracked')"
             )
             conn.commit()
             conn.close()
@@ -2360,8 +1992,8 @@ class TestQueryBeforeCleanup:
         def _load_side_effect(crawl_result, **kwargs):
             conn = _fresh_conn()
             cursor = conn.execute(
-                "INSERT INTO teams (name, public_id, season_year) "
-                "VALUES ('Opponent', 'opp99', 2026)"
+                "INSERT INTO teams (name, public_id, season_year, membership_type) "
+                "VALUES ('Opponent', 'opp99', 2026, 'tracked')"
             )
             opp_id = cursor.lastrowid
             conn.execute(
@@ -2439,6 +2071,7 @@ class TestPublicIdBackfill:
             "INSERT INTO teams (name, season_year, membership_type) "
             "VALUES ('Waverly Vikings Varsity 2026', 2026, 'tracked')"
         )
+        _seed_season(db)
         db.execute(
             "INSERT INTO scouting_runs (team_id, season_id, run_type, started_at, status) "
             "VALUES (1, '2026-spring-hs', 'full', '2026-03-28T00:00:00Z', 'completed')"
@@ -2511,6 +2144,7 @@ class TestPublicIdBackfill:
             "INSERT INTO teams (name, public_id, season_year, membership_type) "
             "VALUES ('Waverly Vikings Varsity 2026', 'existing-slug', 2026, 'tracked')"
         )
+        _seed_season(db)
         db.execute(
             "INSERT INTO scouting_runs (team_id, season_id, run_type, started_at, status) "
             "VALUES (1, '2026-spring-hs', 'full', '2026-03-28T00:00:00Z', 'completed')"
@@ -2581,6 +2215,7 @@ class TestPublicIdBackfill:
             "INSERT INTO teams (name, season_year, membership_type) "
             "VALUES ('Waverly Vikings Varsity 2026', 2026, 'tracked')"
         )
+        _seed_season(db)
         db.execute(
             "INSERT INTO scouting_runs (team_id, season_id, run_type, started_at, status) "
             "VALUES (1, '2026-spring-hs', 'full', '2026-03-28T00:00:00Z', 'completed')"
@@ -2647,6 +2282,7 @@ class TestPublicIdBackfill:
             "INSERT INTO teams (name, public_id, season_year, membership_type) "
             "VALUES ('Old Name', 'existing-slug', 2025, 'tracked')"
         )
+        _seed_season(db)
         db.execute(
             "INSERT INTO scouting_runs (team_id, season_id, run_type, started_at, status) "
             "VALUES (1, '2026-spring-hs', 'full', '2026-03-28T00:00:00Z', 'completed')"
@@ -2726,6 +2362,7 @@ class TestPublicIdBackfill:
             "INSERT INTO teams (name, public_id, season_year, membership_type) "
             "VALUES ('Waverly Duplicate', 'Xj9LlYlJklcl', 2026, 'tracked')"
         )
+        _seed_season(db)
         db.execute(
             "INSERT INTO scouting_runs (team_id, season_id, run_type, started_at, status) "
             "VALUES (1, '2026-spring-hs', 'full', '2026-03-28T00:00:00Z', 'completed')"

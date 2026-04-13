@@ -14,6 +14,7 @@ from src.reconciliation.engine import (
     reconcile_all,
     reconcile_game,
 )
+from tests.conftest import load_real_schema
 
 
 # ---------------------------------------------------------------------------
@@ -23,143 +24,40 @@ from src.reconciliation.engine import (
 
 @pytest.fixture
 def db() -> sqlite3.Connection:
-    """Create an in-memory SQLite database with the required schema."""
+    """Create an in-memory SQLite database using the production schema.
+
+    FK enforcement is active via load_real_schema. Seeds two teams and a
+    small roster of players used throughout the reconciliation tests.
+    """
     conn = sqlite3.connect(":memory:")
-    conn.execute("PRAGMA foreign_keys = OFF")  # Simplify test setup
+    load_real_schema(conn)
 
-    # Minimal schema for reconciliation
-    conn.executescript("""
-        CREATE TABLE seasons (
-            season_id TEXT PRIMARY KEY
-        );
-
-        CREATE TABLE teams (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT,
-            gc_uuid TEXT,
-            public_id TEXT,
-            membership_type TEXT DEFAULT 'member',
-            is_active INTEGER DEFAULT 1,
-            season_year INTEGER
-        );
-
-        CREATE TABLE players (
-            player_id TEXT PRIMARY KEY,
-            first_name TEXT,
-            last_name TEXT,
-            team_id INTEGER
-        );
-
-        CREATE TABLE games (
-            game_id TEXT PRIMARY KEY,
-            season_id TEXT NOT NULL,
-            game_date TEXT NOT NULL,
-            home_team_id INTEGER NOT NULL,
-            away_team_id INTEGER NOT NULL,
-            home_score INTEGER,
-            away_score INTEGER,
-            status TEXT NOT NULL DEFAULT 'completed',
-            game_stream_id TEXT
-        );
-
-        CREATE TABLE player_game_batting (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            game_id TEXT NOT NULL,
-            player_id TEXT NOT NULL,
-            team_id INTEGER NOT NULL,
-            perspective_team_id INTEGER NOT NULL,
-            batting_order INTEGER,
-            positions_played TEXT,
-            is_primary INTEGER,
-            stat_completeness TEXT DEFAULT 'boxscore_only',
-            ab INTEGER, r INTEGER, h INTEGER, rbi INTEGER,
-            bb INTEGER, so INTEGER,
-            doubles INTEGER, triples INTEGER, hr INTEGER,
-            tb INTEGER, hbp INTEGER, shf INTEGER,
-            sb INTEGER, cs INTEGER, e INTEGER,
-            UNIQUE(game_id, player_id, perspective_team_id)
-        );
-
-        CREATE TABLE player_game_pitching (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            game_id TEXT NOT NULL,
-            player_id TEXT NOT NULL,
-            team_id INTEGER NOT NULL,
-            perspective_team_id INTEGER NOT NULL,
-            decision TEXT,
-            appearance_order INTEGER,
-            stat_completeness TEXT DEFAULT 'boxscore_only',
-            ip_outs INTEGER, h INTEGER, r INTEGER, er INTEGER,
-            bb INTEGER, so INTEGER,
-            wp INTEGER, hbp INTEGER,
-            pitches INTEGER, total_strikes INTEGER, bf INTEGER,
-            UNIQUE(game_id, player_id, perspective_team_id)
-        );
-
-        CREATE TABLE plays (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            game_id TEXT NOT NULL,
-            play_order INTEGER NOT NULL,
-            inning INTEGER NOT NULL,
-            half TEXT NOT NULL,
-            season_id TEXT NOT NULL,
-            batting_team_id INTEGER NOT NULL,
-            perspective_team_id INTEGER NOT NULL,
-            batter_id TEXT NOT NULL,
-            pitcher_id TEXT,
-            outcome TEXT,
-            pitch_count INTEGER NOT NULL DEFAULT 0,
-            is_first_pitch_strike INTEGER NOT NULL DEFAULT 0,
-            is_qab INTEGER NOT NULL DEFAULT 0,
-            home_score INTEGER,
-            away_score INTEGER,
-            did_score_change INTEGER,
-            outs_after INTEGER,
-            did_outs_change INTEGER,
-            UNIQUE(game_id, play_order, perspective_team_id)
-        );
-
-        CREATE TABLE play_events (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            play_id INTEGER NOT NULL,
-            event_order INTEGER NOT NULL,
-            event_type TEXT NOT NULL,
-            pitch_result TEXT,
-            is_first_pitch INTEGER NOT NULL DEFAULT 0,
-            raw_template TEXT,
-            UNIQUE(play_id, event_order)
-        );
-
-        CREATE TABLE reconciliation_discrepancies (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            game_id TEXT NOT NULL,
-            run_id TEXT NOT NULL,
-            perspective_team_id INTEGER NOT NULL,
-            team_id INTEGER NOT NULL,
-            player_id TEXT NOT NULL,
-            signal_name TEXT NOT NULL,
-            category TEXT NOT NULL,
-            boxscore_value INTEGER,
-            plays_value INTEGER,
-            delta INTEGER,
-            status TEXT NOT NULL CHECK(status IN ('MATCH', 'CORRECTABLE', 'CORRECTED', 'AMBIGUOUS', 'UNCORRECTABLE')),
-            correction_detail TEXT,
-            created_at TEXT NOT NULL DEFAULT (datetime('now')),
-            UNIQUE(run_id, game_id, perspective_team_id, team_id, player_id, signal_name)
-        );
-
-        INSERT INTO seasons VALUES ('2025-spring-hs');
-        INSERT INTO teams (id, name, gc_uuid, membership_type) VALUES (1, 'Home Team', 'uuid-home', 'member');
-        INSERT INTO teams (id, name, gc_uuid, membership_type) VALUES (2, 'Away Team', 'uuid-away', 'member');
-
-        INSERT INTO players VALUES ('pitcher-h1', 'Home', 'Pitcher1', 1);
-        INSERT INTO players VALUES ('pitcher-h2', 'Home', 'Pitcher2', 1);
-        INSERT INTO players VALUES ('pitcher-a1', 'Away', 'Pitcher1', 2);
-        INSERT INTO players VALUES ('batter-h1', 'Home', 'Batter1', 1);
-        INSERT INTO players VALUES ('batter-h2', 'Home', 'Batter2', 1);
-        INSERT INTO players VALUES ('batter-a1', 'Away', 'Batter1', 2);
-        INSERT INTO players VALUES ('batter-a2', 'Away', 'Batter2', 2);
-    """)
+    conn.execute(
+        "INSERT INTO seasons (season_id, name, season_type, year) "
+        "VALUES ('2025-spring-hs', '2025 Spring HS', 'spring-hs', 2025)"
+    )
+    conn.executemany(
+        "INSERT INTO teams (id, name, gc_uuid, membership_type) VALUES (?, ?, ?, ?)",
+        [
+            (1, "Home Team", "uuid-home", "member"),
+            (2, "Away Team", "uuid-away", "member"),
+        ],
+    )
+    conn.executemany(
+        "INSERT INTO players (player_id, first_name, last_name) VALUES (?, ?, ?)",
+        [
+            ("pitcher-h1", "Home", "Pitcher1"),
+            ("pitcher-h2", "Home", "Pitcher2"),
+            ("pitcher-a1", "Away", "Pitcher1"),
+            ("batter-h1", "Home", "Batter1"),
+            ("batter-h2", "Home", "Batter2"),
+            ("batter-h3", "Home", "Batter3"),
+            ("batter-a1", "Away", "Batter1"),
+            ("batter-a2", "Away", "Batter2"),
+            ("batter-a3", "Away", "Batter3"),
+        ],
+    )
+    conn.commit()
     return conn
 
 
@@ -1091,27 +989,7 @@ class TestGetSummaryFromDB:
         """No reconciliation records should produce zero counts."""
         from src.reconciliation.engine import get_summary_from_db
 
-        # Create the discrepancy table
-        db.execute("""
-            CREATE TABLE IF NOT EXISTS reconciliation_discrepancies (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                game_id TEXT NOT NULL,
-                run_id TEXT NOT NULL,
-                perspective_team_id INTEGER NOT NULL,
-                team_id INTEGER NOT NULL,
-                player_id TEXT NOT NULL,
-                signal_name TEXT NOT NULL,
-                category TEXT NOT NULL,
-                boxscore_value INTEGER,
-                plays_value INTEGER,
-                delta INTEGER,
-                status TEXT NOT NULL,
-                correction_detail TEXT,
-                created_at TEXT NOT NULL DEFAULT (datetime('now')),
-                UNIQUE(run_id, game_id, perspective_team_id, team_id, player_id, signal_name)
-            )
-        """)
-
+        # reconciliation_discrepancies is created by the real schema (load_real_schema)
         result = get_summary_from_db(db)
         assert result["total_records"] == 0
         assert result["total_corrected"] == 0
@@ -1120,26 +998,11 @@ class TestGetSummaryFromDB:
         """Summary reflects data across all runs."""
         from src.reconciliation.engine import get_summary_from_db
 
-        db.execute("""
-            CREATE TABLE IF NOT EXISTS reconciliation_discrepancies (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                game_id TEXT NOT NULL,
-                run_id TEXT NOT NULL,
-                perspective_team_id INTEGER NOT NULL,
-                team_id INTEGER NOT NULL,
-                player_id TEXT NOT NULL,
-                signal_name TEXT NOT NULL,
-                category TEXT NOT NULL,
-                boxscore_value INTEGER,
-                plays_value INTEGER,
-                delta INTEGER,
-                status TEXT NOT NULL,
-                correction_detail TEXT,
-                created_at TEXT NOT NULL DEFAULT (datetime('now')),
-                UNIQUE(run_id, game_id, perspective_team_id, team_id, player_id, signal_name)
-            )
-        """)
+        # reconciliation_discrepancies.game_id REFERENCES games(game_id) under the
+        # real schema, so seed a game row before inserting discrepancies.
+        _insert_game(db, "g1")
 
+        # reconciliation_discrepancies is created by the real schema (load_real_schema)
         # Insert some records
         db.execute(
             "INSERT INTO reconciliation_discrepancies "

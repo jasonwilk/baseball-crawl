@@ -19,6 +19,7 @@ from src.gamechanger.crawlers.scouting_spray import (
     SprayCrawlResult,
     _PLAYER_STATS_ACCEPT,
 )
+from tests.conftest import load_real_schema
 
 
 # ---------------------------------------------------------------------------
@@ -71,33 +72,31 @@ def _make_db(
     gc_uuid: str | None = _GC_UUID,
     add_opponent_link: bool = True,
 ) -> sqlite3.Connection:
-    """Return an in-memory SQLite connection with minimal scouting schema."""
+    """Return an in-memory SQLite connection with the production schema.
+
+    Seeds an owning team row + opponent_links row via the ensure_team_row
+    contract (membership_type, name, public_id, gc_uuid). opponent_links
+    requires our_team_id REFERENCES teams(id); we seed a member team first
+    and use its id as our_team_id for any non-hidden opponent link.
+    """
     conn = sqlite3.connect(":memory:")
-    conn.execute("PRAGMA foreign_keys=ON")
-    conn.executescript(
-        """
-        CREATE TABLE teams (
-            id              INTEGER PRIMARY KEY AUTOINCREMENT,
-            name            TEXT NOT NULL,
-            membership_type TEXT NOT NULL DEFAULT 'tracked',
-            public_id       TEXT UNIQUE,
-            gc_uuid         TEXT
-        );
-        CREATE TABLE opponent_links (
-            id         INTEGER PRIMARY KEY AUTOINCREMENT,
-            public_id  TEXT,
-            is_hidden  INTEGER NOT NULL DEFAULT 0
-        );
-        """
+    load_real_schema(conn)
+    # Seed our-team (member) so opponent_links.our_team_id FK is satisfied.
+    our_cursor = conn.execute(
+        "INSERT INTO teams (name, membership_type) VALUES ('Our Team', 'member')"
     )
+    our_team_id = our_cursor.lastrowid
+    # Seed the tracked opponent team.
     conn.execute(
-        "INSERT INTO teams (name, public_id, gc_uuid) VALUES (?, ?, ?)",
+        "INSERT INTO teams (name, membership_type, public_id, gc_uuid) "
+        "VALUES (?, 'tracked', ?, ?)",
         (public_id, public_id, gc_uuid),
     )
     if add_opponent_link:
         conn.execute(
-            "INSERT INTO opponent_links (public_id, is_hidden) VALUES (?, 0)",
-            (public_id,),
+            "INSERT INTO opponent_links (our_team_id, root_team_id, opponent_name, "
+            "public_id, is_hidden) VALUES (?, ?, ?, ?, 0)",
+            (our_team_id, f"root-{public_id}", public_id, public_id),
         )
     conn.commit()
     return conn
@@ -240,10 +239,9 @@ def test_opponent_without_gc_uuid_is_skipped_with_info(
 def test_opponent_not_in_teams_table_is_skipped() -> None:
     """Opponent with no teams row (gc_uuid lookup returns None) is skipped."""
     db = sqlite3.connect(":memory:")
-    db.executescript(
-        "CREATE TABLE teams (id INTEGER PRIMARY KEY, name TEXT, public_id TEXT UNIQUE, gc_uuid TEXT);"
-        "CREATE TABLE opponent_links (id INTEGER PRIMARY KEY, public_id TEXT, is_hidden INTEGER DEFAULT 0);"
-    )
+    load_real_schema(db)
+    # Intentionally no teams row for _PUBLIC_ID so the crawler's gc_uuid lookup
+    # returns None. Empty schema is sufficient for this negative-path test.
     client = _make_client()
     crawler = ScoutingSprayChartCrawler(client, db)
 

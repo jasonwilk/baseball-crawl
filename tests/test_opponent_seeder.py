@@ -21,6 +21,7 @@ import sqlite3
 import pytest
 
 from src.gamechanger.loaders.opponent_seeder import seed_schedule_opponents
+from tests.conftest import load_real_schema
 
 
 # ---------------------------------------------------------------------------
@@ -30,35 +31,12 @@ from src.gamechanger.loaders.opponent_seeder import seed_schedule_opponents
 
 @pytest.fixture()
 def db() -> sqlite3.Connection:
-    """In-memory SQLite DB with the minimum schema for opponent_links tests."""
+    """In-memory SQLite DB with the production schema (FK enforcement on)."""
     conn = sqlite3.connect(":memory:")
-    # Disable FK enforcement so test setup doesn't need a full schema.
-    conn.execute("PRAGMA foreign_keys=OFF;")
-    conn.execute("""
-        CREATE TABLE teams (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            membership_type TEXT NOT NULL DEFAULT 'member',
-            gc_uuid TEXT,
-            is_active INTEGER NOT NULL DEFAULT 1
-        )
-    """)
-    conn.execute("""
-        CREATE TABLE opponent_links (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            our_team_id INTEGER NOT NULL,
-            root_team_id TEXT NOT NULL,
-            opponent_name TEXT NOT NULL,
-            resolved_team_id INTEGER,
-            public_id TEXT,
-            resolution_method TEXT,
-            resolved_at TEXT,
-            is_hidden INTEGER NOT NULL DEFAULT 0,
-            created_at TEXT NOT NULL DEFAULT (datetime('now')),
-            UNIQUE(our_team_id, root_team_id)
-        )
-    """)
-    conn.execute("INSERT INTO teams (id, name, membership_type) VALUES (1, 'LSB Varsity', 'member')")
+    load_real_schema(conn)
+    conn.execute(
+        "INSERT INTO teams (id, name, membership_type) VALUES (1, 'LSB Varsity', 'member')"
+    )
     conn.commit()
     yield conn
     conn.close()
@@ -293,6 +271,10 @@ def test_ac5_opponent_id_stored_as_root_team_id(db, tmp_path):
 
 def test_ac6_updates_name_but_preserves_auto_resolution(db, tmp_path):
     """Second run updates opponent_name but leaves auto-resolved fields intact."""
+    # Seed the resolved team (opponent_links.resolved_team_id FK requires it).
+    db.execute(
+        "INSERT INTO teams (id, name, membership_type) VALUES (99, 'Resolved Opp', 'tracked')"
+    )
     # Pre-seed a resolved row (simulating OpponentResolver output)
     db.execute("""
         INSERT INTO opponent_links
@@ -321,6 +303,9 @@ def test_ac6_updates_name_but_preserves_auto_resolution(db, tmp_path):
 
 def test_ac6_manual_resolution_preserved(db, tmp_path):
     """Manual resolution is not overwritten by the seeder."""
+    db.execute(
+        "INSERT INTO teams (id, name, membership_type) VALUES (42, 'Manual Opp', 'tracked')"
+    )
     db.execute("""
         INSERT INTO opponent_links
             (our_team_id, root_team_id, opponent_name, resolved_team_id, resolution_method)

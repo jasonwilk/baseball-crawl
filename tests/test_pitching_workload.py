@@ -10,6 +10,7 @@ import sqlite3
 import pytest
 
 from src.api.db import get_pitching_workload
+from tests.conftest import load_real_schema
 
 
 # ---------------------------------------------------------------------------
@@ -17,78 +18,27 @@ from src.api.db import get_pitching_workload
 # ---------------------------------------------------------------------------
 
 
-def _create_schema(db: sqlite3.Connection) -> None:
-    """Create minimal schema for workload tests."""
-    db.executescript(
-        """
-        CREATE TABLE seasons (
-            season_id TEXT PRIMARY KEY,
-            name TEXT,
-            season_type TEXT,
-            year INTEGER
-        );
-        CREATE TABLE teams (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            gc_uuid TEXT UNIQUE,
-            public_id TEXT UNIQUE,
-            membership_type TEXT DEFAULT 'tracked',
-            is_active INTEGER DEFAULT 1,
-            season_year INTEGER,
-            program_id TEXT,
-            classification TEXT
-        );
-        CREATE TABLE players (
-            player_id TEXT PRIMARY KEY,
-            first_name TEXT,
-            last_name TEXT
-        );
-        CREATE TABLE games (
-            game_id TEXT PRIMARY KEY,
-            season_id TEXT REFERENCES seasons(season_id),
-            game_date TEXT,
-            home_team_id INTEGER REFERENCES teams(id),
-            away_team_id INTEGER REFERENCES teams(id),
-            home_score INTEGER,
-            away_score INTEGER,
-            status TEXT,
-            game_stream_id TEXT,
-            start_time TEXT,
-            timezone TEXT
-        );
-        CREATE TABLE player_game_pitching (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            game_id TEXT NOT NULL REFERENCES games(game_id),
-            player_id TEXT NOT NULL REFERENCES players(player_id),
-            team_id INTEGER NOT NULL REFERENCES teams(id),
-            perspective_team_id INTEGER NOT NULL REFERENCES teams(id),
-            decision TEXT,
-            stat_completeness TEXT NOT NULL DEFAULT 'boxscore_only',
-            ip_outs INTEGER,
-            h INTEGER, r INTEGER, er INTEGER, bb INTEGER, so INTEGER,
-            wp INTEGER, hbp INTEGER,
-            pitches INTEGER,
-            total_strikes INTEGER, bf INTEGER,
-            UNIQUE(game_id, player_id, perspective_team_id)
-        );
-
-        INSERT INTO seasons (season_id, name, season_type, year)
-            VALUES ('2025-spring-hs', '2025 Spring HS', 'spring-hs', 2025);
-        INSERT INTO teams (id, name) VALUES (1, 'Own Team');
-        INSERT INTO teams (id, name) VALUES (2, 'Opponent');
-
-        INSERT INTO players (player_id, first_name, last_name)
-            VALUES ('p1', 'Ace', 'Pitcher');
-        INSERT INTO players (player_id, first_name, last_name)
-            VALUES ('p2', 'Relief', 'Pitcher');
-        INSERT INTO players (player_id, first_name, last_name)
-            VALUES ('p3', 'Spot', 'Starter');
-        INSERT INTO players (player_id, first_name, last_name)
-            VALUES ('p4', 'Null', 'Counts');
-        INSERT INTO players (player_id, first_name, last_name)
-            VALUES ('p5', 'Mixed', 'Nulls');
-        """
+def _seed_reference_rows(db: sqlite3.Connection) -> None:
+    """Seed the minimal FK parents workload tests assume exist."""
+    db.execute(
+        "INSERT INTO seasons (season_id, name, season_type, year) "
+        "VALUES ('2025-spring-hs', '2025 Spring HS', 'spring-hs', 2025)"
     )
+    db.executemany(
+        "INSERT INTO teams (id, name, membership_type) VALUES (?, ?, ?)",
+        [(1, "Own Team", "member"), (2, "Opponent", "tracked")],
+    )
+    db.executemany(
+        "INSERT INTO players (player_id, first_name, last_name) VALUES (?, ?, ?)",
+        [
+            ("p1", "Ace", "Pitcher"),
+            ("p2", "Relief", "Pitcher"),
+            ("p3", "Spot", "Starter"),
+            ("p4", "Null", "Counts"),
+            ("p5", "Mixed", "Nulls"),
+        ],
+    )
+    db.commit()
 
 
 def _insert_game(db: sqlite3.Connection, game_id: str, game_date: str) -> None:
@@ -121,8 +71,8 @@ def _insert_pitching(
 @pytest.fixture()
 def db() -> sqlite3.Connection:
     conn = sqlite3.connect(":memory:")
-    conn.execute("PRAGMA foreign_keys=ON;")
-    _create_schema(conn)
+    load_real_schema(conn)
+    _seed_reference_rows(conn)
     return conn
 
 

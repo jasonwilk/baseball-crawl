@@ -11,6 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from src.api.main import app
+from tests.conftest import load_real_schema
 
 
 # ---------------------------------------------------------------------------
@@ -32,35 +33,13 @@ def _past_iso(days: int = 1) -> str:
 
 
 def _make_db(tmp_path: Path) -> Path:
-    """Create a minimal DB with reports + teams tables. Return db path."""
+    """Create a disk-backed DB with the production schema. Return db path."""
     db_path = tmp_path / "test.db"
     conn = sqlite3.connect(str(db_path))
-    conn.execute("PRAGMA foreign_keys=ON;")
-    conn.executescript("""
-        CREATE TABLE teams (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT,
-            gc_uuid TEXT UNIQUE,
-            public_id TEXT UNIQUE,
-            season_year INTEGER,
-            membership_type TEXT DEFAULT 'tracked',
-            classification TEXT,
-            active INTEGER DEFAULT 1
-        );
-        CREATE TABLE reports (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            slug TEXT UNIQUE NOT NULL,
-            team_id INTEGER NOT NULL REFERENCES teams(id),
-            title TEXT NOT NULL,
-            status TEXT NOT NULL DEFAULT 'generating',
-            generated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
-            expires_at TEXT NOT NULL,
-            report_path TEXT,
-            error_message TEXT
-        );
-        CREATE INDEX idx_reports_slug ON reports(slug);
-    """)
-    conn.execute("INSERT INTO teams (name) VALUES ('Test Team')")
+    load_real_schema(conn)
+    conn.execute(
+        "INSERT INTO teams (name, membership_type) VALUES ('Test Team', 'tracked')"
+    )
     conn.commit()
     conn.close()
     return db_path

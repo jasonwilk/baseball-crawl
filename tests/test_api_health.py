@@ -5,6 +5,15 @@ database.  The FastAPI app is tested via the ASGI test client.
 
 Run with:
     pytest tests/test_api_health.py
+
+# noqa: fixture-schema
+Fixture-schema rationale (E-221-03):
+The health-check test fixture creates a minimal `_migrations` table inline.
+`_migrations` is NOT part of `migrations/001_initial_schema.sql` -- it is
+created by `apply_migrations.py` at runtime to track which migration files
+have been applied. The health check under test verifies the health endpoint
+behavior against the presence/absence of that runtime-managed table, so the
+inline schema IS the subject under test, not drift from the real schema.
 """
 
 from __future__ import annotations

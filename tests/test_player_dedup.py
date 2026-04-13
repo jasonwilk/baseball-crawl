@@ -17,6 +17,7 @@ from src.db.player_dedup import (
     recompute_season_batting,
     recompute_season_pitching,
 )
+from tests.conftest import load_real_schema
 
 
 # ---------------------------------------------------------------------------
@@ -24,189 +25,37 @@ from src.db.player_dedup import (
 # ---------------------------------------------------------------------------
 
 
+# Placeholder team id used as away_team_id for dedup-test games. The dedup
+# tests only care about player rows and single-team stats; the away team
+# is a throwaway FK target that must exist so games.away_team_id FK passes.
+_AWAY_PLACEHOLDER_TEAM_ID = 9999
+
+
 @pytest.fixture()
 def db() -> sqlite3.Connection:
-    """In-memory database with the schema needed for detection and merge."""
+    """In-memory database using the production schema (FK enforcement on)."""
     conn = sqlite3.connect(":memory:", isolation_level=None)
-    conn.execute("PRAGMA foreign_keys = ON")
-
-    conn.executescript(
-        """
-        CREATE TABLE teams (
-            id   INTEGER PRIMARY KEY,
-            name TEXT NOT NULL
-        );
-
-        CREATE TABLE seasons (
-            season_id TEXT PRIMARY KEY
-        );
-
-        CREATE TABLE players (
-            player_id  TEXT PRIMARY KEY,
-            first_name TEXT NOT NULL,
-            last_name  TEXT NOT NULL
-        );
-
-        CREATE TABLE team_rosters (
-            team_id   INTEGER NOT NULL REFERENCES teams(id),
-            player_id TEXT NOT NULL REFERENCES players(player_id),
-            season_id TEXT NOT NULL REFERENCES seasons(season_id),
-            PRIMARY KEY (team_id, player_id, season_id)
-        );
-
-        CREATE TABLE games (
-            game_id   TEXT PRIMARY KEY,
-            season_id TEXT NOT NULL REFERENCES seasons(season_id),
-            home_team_id INTEGER REFERENCES teams(id),
-            away_team_id INTEGER REFERENCES teams(id)
-        );
-
-        CREATE TABLE player_game_batting (
-            id                INTEGER PRIMARY KEY AUTOINCREMENT,
-            game_id           TEXT NOT NULL REFERENCES games(game_id),
-            player_id         TEXT NOT NULL REFERENCES players(player_id),
-            team_id           INTEGER NOT NULL REFERENCES teams(id),
-            perspective_team_id INTEGER NOT NULL REFERENCES teams(id),
-            stat_completeness TEXT NOT NULL DEFAULT 'boxscore_only',
-            ab  INTEGER,
-            r   INTEGER,
-            h   INTEGER,
-            rbi INTEGER,
-            bb  INTEGER,
-            so  INTEGER,
-            doubles INTEGER,
-            triples INTEGER,
-            hr      INTEGER,
-            tb      INTEGER,
-            hbp     INTEGER,
-            shf     INTEGER,
-            sb      INTEGER,
-            cs      INTEGER,
-            e       INTEGER,
-            UNIQUE(game_id, player_id, perspective_team_id)
-        );
-
-        CREATE TABLE player_game_pitching (
-            id                INTEGER PRIMARY KEY AUTOINCREMENT,
-            game_id           TEXT NOT NULL REFERENCES games(game_id),
-            player_id         TEXT NOT NULL REFERENCES players(player_id),
-            team_id           INTEGER NOT NULL REFERENCES teams(id),
-            perspective_team_id INTEGER NOT NULL REFERENCES teams(id),
-            stat_completeness TEXT NOT NULL DEFAULT 'boxscore_only',
-            decision  TEXT,
-            ip_outs   INTEGER,
-            h         INTEGER,
-            r         INTEGER,
-            er        INTEGER,
-            bb        INTEGER,
-            so        INTEGER,
-            wp        INTEGER,
-            hbp       INTEGER,
-            pitches   INTEGER,
-            total_strikes INTEGER,
-            bf        INTEGER,
-            UNIQUE(game_id, player_id, perspective_team_id)
-        );
-
-        CREATE TABLE player_season_batting (
-            id                INTEGER PRIMARY KEY AUTOINCREMENT,
-            player_id         TEXT NOT NULL REFERENCES players(player_id),
-            team_id           INTEGER NOT NULL REFERENCES teams(id),
-            season_id         TEXT NOT NULL REFERENCES seasons(season_id),
-            stat_completeness TEXT NOT NULL DEFAULT 'boxscore_only',
-            games_tracked     INTEGER,
-            gp      INTEGER,
-            pa      INTEGER,
-            ab      INTEGER,
-            h       INTEGER,
-            singles INTEGER,
-            doubles INTEGER,
-            triples INTEGER,
-            hr      INTEGER,
-            rbi     INTEGER,
-            r       INTEGER,
-            bb      INTEGER,
-            so      INTEGER,
-            hbp     INTEGER,
-            shf     INTEGER,
-            sb      INTEGER,
-            cs      INTEGER,
-            tb      INTEGER,
-            xbh     INTEGER,
-            UNIQUE(player_id, team_id, season_id)
-        );
-
-        CREATE TABLE player_season_pitching (
-            id                INTEGER PRIMARY KEY AUTOINCREMENT,
-            player_id         TEXT NOT NULL REFERENCES players(player_id),
-            team_id           INTEGER NOT NULL REFERENCES teams(id),
-            season_id         TEXT NOT NULL REFERENCES seasons(season_id),
-            stat_completeness TEXT NOT NULL DEFAULT 'boxscore_only',
-            games_tracked     INTEGER,
-            gp_pitcher INTEGER,
-            ip_outs    INTEGER,
-            h          INTEGER,
-            r          INTEGER,
-            er         INTEGER,
-            bb         INTEGER,
-            so         INTEGER,
-            wp         INTEGER,
-            hbp        INTEGER,
-            pitches    INTEGER,
-            total_strikes INTEGER,
-            bf         INTEGER,
-            w          INTEGER,
-            l          INTEGER,
-            sv         INTEGER,
-            UNIQUE(player_id, team_id, season_id)
-        );
-
-        CREATE TABLE plays (
-            id         INTEGER PRIMARY KEY AUTOINCREMENT,
-            game_id    TEXT NOT NULL REFERENCES games(game_id),
-            play_order INTEGER NOT NULL,
-            inning     INTEGER NOT NULL DEFAULT 1,
-            half       TEXT NOT NULL DEFAULT 'top',
-            season_id  TEXT NOT NULL DEFAULT '',
-            batting_team_id INTEGER NOT NULL DEFAULT 0,
-            perspective_team_id INTEGER NOT NULL,
-            batter_id  TEXT NOT NULL REFERENCES players(player_id),
-            pitcher_id TEXT REFERENCES players(player_id)
-        );
-
-        CREATE TABLE spray_charts (
-            id         INTEGER PRIMARY KEY AUTOINCREMENT,
-            game_id    TEXT REFERENCES games(game_id),
-            player_id  TEXT REFERENCES players(player_id),
-            team_id    INTEGER REFERENCES teams(id),
-            perspective_team_id INTEGER NOT NULL,
-            pitcher_id TEXT REFERENCES players(player_id)
-        );
-
-        CREATE TABLE reconciliation_discrepancies (
-            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
-            game_id             TEXT NOT NULL,
-            run_id              TEXT NOT NULL,
-            perspective_team_id INTEGER NOT NULL,
-            team_id             INTEGER NOT NULL,
-            player_id           TEXT NOT NULL,
-            signal_name         TEXT NOT NULL,
-            category            TEXT NOT NULL DEFAULT 'test',
-            status              TEXT NOT NULL DEFAULT 'MATCH',
-            UNIQUE(run_id, game_id, perspective_team_id, team_id, player_id, signal_name)
-        );
-        """
+    load_real_schema(conn)
+    # Seed a placeholder away team so _seed_game can satisfy away_team_id FK.
+    conn.execute(
+        "INSERT INTO teams (id, name, membership_type) VALUES (?, 'Away Placeholder', 'tracked')",
+        (_AWAY_PLACEHOLDER_TEAM_ID,),
     )
     return conn
 
 
 def _seed_team(db: sqlite3.Connection, team_id: int, name: str) -> None:
-    db.execute("INSERT INTO teams (id, name) VALUES (?, ?)", (team_id, name))
+    db.execute(
+        "INSERT INTO teams (id, name, membership_type) VALUES (?, ?, 'member')",
+        (team_id, name),
+    )
 
 
 def _seed_season(db: sqlite3.Connection, season_id: str) -> None:
     db.execute(
-        "INSERT OR IGNORE INTO seasons (season_id) VALUES (?)", (season_id,)
+        "INSERT OR IGNORE INTO seasons (season_id, name, season_type, year) "
+        "VALUES (?, ?, 'spring-hs', 2026)",
+        (season_id, season_id),
     )
 
 
@@ -234,8 +83,9 @@ def _seed_game(
 ) -> None:
     _seed_season(db, season_id)
     db.execute(
-        "INSERT OR IGNORE INTO games (game_id, season_id, home_team_id) VALUES (?, ?, ?)",
-        (game_id, season_id, team_id),
+        "INSERT OR IGNORE INTO games (game_id, season_id, game_date, home_team_id, away_team_id) "
+        "VALUES (?, ?, '2026-04-01', ?, ?)",
+        (game_id, season_id, team_id, _AWAY_PLACEHOLDER_TEAM_ID),
     )
 
 
@@ -659,13 +509,13 @@ class TestMergeIntegration:
         # 7. reconciliation_discrepancies -- both have rows + a __game__ sentinel
         db.execute(
             "INSERT INTO reconciliation_discrepancies "
-            "(game_id, run_id, perspective_team_id, team_id, player_id, signal_name) "
-            "VALUES ('game-1', 'run-1', 1, 1, 'p-dup', 'ab')"
+            "(game_id, run_id, perspective_team_id, team_id, player_id, signal_name, category, status) "
+            "VALUES ('game-1', 'run-1', 1, 1, 'p-dup', 'ab', 'batter', 'MATCH')"
         )
         db.execute(
             "INSERT INTO reconciliation_discrepancies "
-            "(game_id, run_id, perspective_team_id, team_id, player_id, signal_name) "
-            "VALUES ('game-1', 'run-1', 1, 1, '__game__', 'total_r')"
+            "(game_id, run_id, perspective_team_id, team_id, player_id, signal_name, category, status) "
+            "VALUES ('game-1', 'run-1', 1, 1, '__game__', 'total_r', 'game', 'MATCH')"
         )
 
         # --- Execute merge ---
@@ -1027,10 +877,11 @@ class TestPreview:
         _seed_roster(db, 1, "p-can", "2026")
         _seed_roster(db, 1, "p-dup", "2026")
 
+        _seed_game(db, "g1", "2026", 1)
         db.execute(
             "INSERT INTO reconciliation_discrepancies "
-            "(game_id, run_id, perspective_team_id, team_id, player_id, signal_name) "
-            "VALUES ('g1', 'run-1', 1, 1, '__game__', 'total_r')"
+            "(game_id, run_id, perspective_team_id, team_id, player_id, signal_name, category, status) "
+            "VALUES ('g1', 'run-1', 1, 1, '__game__', 'total_r', 'game', 'MATCH')"
         )
 
         preview = preview_player_merge(db, "p-can", "p-dup")

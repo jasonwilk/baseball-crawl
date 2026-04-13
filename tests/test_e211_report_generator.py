@@ -20,6 +20,7 @@ from src.reports.generator import (
     _query_plays_pitching_stats,
     _query_plays_team_stats,
 )
+from tests.conftest import load_real_schema
 
 
 # ---------------------------------------------------------------------------
@@ -29,68 +30,9 @@ from src.reports.generator import (
 
 @pytest.fixture()
 def db() -> sqlite3.Connection:
-    """In-memory DB with minimal schema for plays query tests."""
+    """In-memory DB with production schema (FK enforcement on)."""
     conn = sqlite3.connect(":memory:")
-    conn.execute("PRAGMA foreign_keys=ON;")
-    conn.executescript("""
-        CREATE TABLE teams (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT,
-            gc_uuid TEXT UNIQUE,
-            public_id TEXT UNIQUE,
-            membership_type TEXT DEFAULT 'tracked',
-            is_active INTEGER NOT NULL DEFAULT 1,
-            season_year INTEGER
-        );
-        CREATE TABLE seasons (
-            season_id TEXT PRIMARY KEY
-        );
-        CREATE TABLE players (
-            player_id TEXT PRIMARY KEY,
-            first_name TEXT,
-            last_name TEXT
-        );
-        CREATE TABLE team_rosters (
-            team_id INTEGER,
-            player_id TEXT,
-            season_id TEXT,
-            jersey_number TEXT,
-            PRIMARY KEY (team_id, player_id, season_id)
-        );
-        CREATE TABLE games (
-            game_id TEXT PRIMARY KEY,
-            season_id TEXT,
-            home_team_id INTEGER,
-            away_team_id INTEGER,
-            home_score INTEGER,
-            away_score INTEGER,
-            game_date TEXT,
-            status TEXT DEFAULT 'completed'
-        );
-        CREATE TABLE plays (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            game_id TEXT NOT NULL REFERENCES games(game_id),
-            play_order INTEGER NOT NULL,
-            inning INTEGER NOT NULL,
-            half TEXT NOT NULL,
-            season_id TEXT NOT NULL,
-            batting_team_id INTEGER NOT NULL REFERENCES teams(id),
-            perspective_team_id INTEGER NOT NULL REFERENCES teams(id),
-            batter_id TEXT NOT NULL REFERENCES players(player_id),
-            pitcher_id TEXT REFERENCES players(player_id),
-            outcome TEXT,
-            pitch_count INTEGER NOT NULL DEFAULT 0,
-            is_first_pitch_strike INTEGER NOT NULL DEFAULT 0,
-            is_qab INTEGER NOT NULL DEFAULT 0,
-            home_score INTEGER,
-            away_score INTEGER,
-            did_score_change INTEGER,
-            outs_after INTEGER,
-            did_outs_change INTEGER,
-            UNIQUE(game_id, play_order, perspective_team_id)
-        );
-    """)
-    conn.commit()
+    load_real_schema(conn)
     yield conn
     conn.close()
 
@@ -106,6 +48,7 @@ _PITCHER_1 = "pitcher-aaa-001"
 _BATTER_1 = "batter-bbb-001"
 _OWN_GAME = "game-own-001"
 _CROSS_GAME = "game-cross-002"
+_GAME_DATE = "2025-04-20"
 
 
 def _seed_data(db: sqlite3.Connection) -> None:
@@ -118,7 +61,11 @@ def _seed_data(db: sqlite3.Connection) -> None:
         "INSERT INTO teams (id, name, membership_type) VALUES (?, 'Other Team', 'member')",
         (_OTHER_TEAM_ID,),
     )
-    db.execute("INSERT INTO seasons (season_id) VALUES (?)", (_SEASON_ID,))
+    db.execute(
+        "INSERT INTO seasons (season_id, name, season_type, year) "
+        "VALUES (?, '2025 Spring HS', 'spring-hs', 2025)",
+        (_SEASON_ID,),
+    )
     db.execute("INSERT INTO players (player_id, first_name, last_name) VALUES (?, 'P', '1')", (_PITCHER_1,))
     db.execute("INSERT INTO players (player_id, first_name, last_name) VALUES (?, 'B', '1')", (_BATTER_1,))
     db.execute(
@@ -131,15 +78,15 @@ def _seed_data(db: sqlite3.Connection) -> None:
     )
     # Own game (from report's scouting crawl)
     db.execute(
-        "INSERT INTO games (game_id, season_id, home_team_id, away_team_id, status) "
-        "VALUES (?, ?, ?, ?, 'completed')",
-        (_OWN_GAME, _SEASON_ID, _TEAM_ID, _OTHER_TEAM_ID),
+        "INSERT INTO games (game_id, season_id, game_date, home_team_id, away_team_id, status) "
+        "VALUES (?, ?, ?, ?, ?, 'completed')",
+        (_OWN_GAME, _SEASON_ID, _GAME_DATE, _TEAM_ID, _OTHER_TEAM_ID),
     )
     # Cross-pipeline game (loaded by another team's pipeline)
     db.execute(
-        "INSERT INTO games (game_id, season_id, home_team_id, away_team_id, status) "
-        "VALUES (?, ?, ?, ?, 'completed')",
-        (_CROSS_GAME, _SEASON_ID, _OTHER_TEAM_ID, _TEAM_ID),
+        "INSERT INTO games (game_id, season_id, game_date, home_team_id, away_team_id, status) "
+        "VALUES (?, ?, ?, ?, ?, 'completed')",
+        (_CROSS_GAME, _SEASON_ID, _GAME_DATE, _OTHER_TEAM_ID, _TEAM_ID),
     )
     # Plays in own game
     db.execute(
@@ -243,12 +190,14 @@ def test_pitching_stats_fallback_retains_team_scope(db: sqlite3.Connection) -> N
     """Fallback (game_ids=None) retains team_id scope via home/away filter."""
     _seed_data(db)
     # Add a game for a completely different team
-    db.execute("INSERT INTO teams (id, name) VALUES (99, 'Unrelated')")
+    db.execute(
+        "INSERT INTO teams (id, name, membership_type) VALUES (99, 'Unrelated', 'tracked')"
+    )
     db.execute("INSERT INTO players (player_id, first_name, last_name) VALUES ('p-unrelated', 'X', 'Y')")
     db.execute(
-        "INSERT INTO games (game_id, season_id, home_team_id, away_team_id, status) "
-        "VALUES ('game-unrelated', ?, 99, 99, 'completed')",
-        (_SEASON_ID,),
+        "INSERT INTO games (game_id, season_id, game_date, home_team_id, away_team_id, status) "
+        "VALUES ('game-unrelated', ?, ?, 99, 99, 'completed')",
+        (_SEASON_ID, _GAME_DATE),
     )
     db.execute(
         "INSERT INTO plays (game_id, play_order, inning, half, season_id, batting_team_id, "

@@ -19,21 +19,17 @@ from unittest.mock import patch
 
 import pytest
 
+from tests.conftest import load_real_schema
+
 # ---------------------------------------------------------------------------
 # Schema fixture
 # ---------------------------------------------------------------------------
 
-_SCHEMA_PATH = Path(__file__).resolve().parents[1] / "migrations" / "001_initial_schema.sql"
-
 
 def _make_db() -> sqlite3.Connection:
-    """Return an in-memory SQLite connection with the E-100 schema applied."""
+    """Return an in-memory SQLite connection with the production schema applied."""
     conn = sqlite3.connect(":memory:")
-    conn.execute("PRAGMA foreign_keys=ON;")
-    schema_sql = _SCHEMA_PATH.read_text()
-    conn.executescript(schema_sql)
-    # Migration 004: season_year column on teams (E-147-01).
-    # Migration 015: appearance_order column on player_game_pitching (E-204-01).
+    load_real_schema(conn)
     conn.commit()
     return conn
 
@@ -1958,26 +1954,12 @@ class TestGameBoxScoreNameCascade:
 # E-173-04: get_team_opponents sort order and data_status
 # ---------------------------------------------------------------------------
 
-_CRAWL_JOBS_DDL = """
-CREATE TABLE IF NOT EXISTS crawl_jobs (
-    id            INTEGER PRIMARY KEY AUTOINCREMENT,
-    team_id       INTEGER NOT NULL REFERENCES teams(id),
-    sync_type     TEXT    NOT NULL CHECK(sync_type IN ('member_crawl', 'scouting_crawl')),
-    status        TEXT    NOT NULL CHECK(status IN ('running', 'completed', 'failed')),
-    started_at    TEXT    NOT NULL DEFAULT (datetime('now')),
-    completed_at  TEXT,
-    error_message TEXT,
-    games_crawled INTEGER
-);
-"""
-
 
 def _make_db_full() -> sqlite3.Connection:
-    """Return an in-memory DB with all schemas needed for data_status tests."""
-    conn = _make_db()
-    conn.executescript(_CRAWL_JOBS_DDL)
-    conn.commit()
-    return conn
+    """Alias for _make_db. Prior to E-221-03, this function layered an inline
+    `crawl_jobs` DDL on top of `_make_db`; the real schema now owns that table,
+    so the two are equivalent."""
+    return _make_db()
 
 
 def _insert_game_with_date(

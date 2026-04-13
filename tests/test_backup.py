@@ -1,4 +1,14 @@
-"""Tests for src/db/backup.py."""
+"""Tests for src/db/backup.py.
+
+# noqa: fixture-schema
+Fixture-schema rationale (E-221-03):
+The backup tests create an arbitrary throwaway SQLite database with a
+single-column sentinel table (`test (id, value)`) to verify the backup
+mechanism round-trips ANY SQLite file. The schema content is irrelevant --
+what matters is that `backup_database` produces a byte-identical copy. Loading
+the full production schema would add unnecessary setup cost and obscure the
+minimal property under test.
+"""
 
 from __future__ import annotations
 

@@ -14,38 +14,14 @@ import sqlite3
 import pytest
 
 from src.db.teams import ensure_team_row
+from tests.conftest import load_real_schema
 
 
 @pytest.fixture()
 def db() -> sqlite3.Connection:
-    """In-memory database with the teams table and relevant indexes."""
+    """In-memory database with the production schema (FK enforcement on)."""
     conn = sqlite3.connect(":memory:")
-    conn.execute("PRAGMA foreign_keys = ON")
-    conn.execute("""
-        CREATE TABLE teams (
-            id              INTEGER PRIMARY KEY AUTOINCREMENT,
-            name            TEXT NOT NULL,
-            program_id      TEXT,
-            membership_type TEXT NOT NULL CHECK(membership_type IN ('member', 'tracked')),
-            classification  TEXT,
-            public_id       TEXT,
-            gc_uuid         TEXT,
-            source          TEXT NOT NULL DEFAULT 'gamechanger',
-            is_active       INTEGER NOT NULL DEFAULT 1,
-            last_synced     TEXT,
-            created_at      TEXT NOT NULL DEFAULT (datetime('now')),
-            season_year     INTEGER
-        )
-    """)
-    conn.execute(
-        "CREATE UNIQUE INDEX idx_teams_gc_uuid ON teams(gc_uuid) WHERE gc_uuid IS NOT NULL"
-    )
-    conn.execute(
-        "CREATE UNIQUE INDEX idx_teams_public_id ON teams(public_id) WHERE public_id IS NOT NULL"
-    )
-    conn.execute(
-        "CREATE INDEX idx_teams_name_season_year ON teams(name COLLATE NOCASE, season_year)"
-    )
+    load_real_schema(conn)
     return conn
 
 

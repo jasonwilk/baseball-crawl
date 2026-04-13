@@ -13,6 +13,15 @@ Uses an in-process seeded SQLite database via tmp_path; no Docker or network.
 
 Run with:
     pytest tests/test_auth.py -v
+
+# noqa: fixture-schema
+Fixture-schema rationale (E-221-03):
+The `_SCHEMA_SQL_NO_AUTH` constant deliberately builds a schema WITHOUT the
+auth-related tables (`users`, `sessions`, `magic_link_tokens`, etc.) so the
+"fail closed on missing auth tables" tests can verify that the auth module
+degrades gracefully instead of crashing. The intentional absence of specific
+tables IS the subject under test; loading the real schema (which includes
+those tables) would defeat the purpose of this test class.
 """
 
 from __future__ import annotations

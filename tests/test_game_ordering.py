@@ -16,27 +16,23 @@ import sqlite3
 
 import pytest
 
+from tests.conftest import load_real_schema
+
 
 @pytest.fixture()
 def db() -> sqlite3.Connection:
-    """In-memory database with games table and test data."""
+    """In-memory database with real schema plus minimal parent rows for FK integrity."""
     conn = sqlite3.connect(":memory:")
+    load_real_schema(conn)
+    # Seed the FK parents the games fixture needs: one season, two teams.
+    # The 'lsb-hs' program row is seeded by the migration itself.
     conn.execute(
-        """
-        CREATE TABLE games (
-            game_id TEXT PRIMARY KEY,
-            season_id TEXT,
-            game_date TEXT,
-            home_team_id INTEGER,
-            away_team_id INTEGER,
-            home_score INTEGER,
-            away_score INTEGER,
-            status TEXT,
-            game_stream_id TEXT,
-            start_time TEXT,
-            timezone TEXT
-        )
-        """
+        "INSERT INTO seasons (season_id, name, season_type, year) VALUES "
+        "('s1', '2025 Spring HS', 'spring-hs', 2025)"
+    )
+    conn.executemany(
+        "INSERT INTO teams (id, name, membership_type) VALUES (?, ?, ?)",
+        [(1, "Home Test Team", "member"), (2, "Away Test Team", "tracked")],
     )
     # Same-day games: tournament doubleheader on 2025-04-26
     conn.executemany(

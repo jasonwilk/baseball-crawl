@@ -10,6 +10,15 @@ verify DB state changes.
 
 Run with:
     pytest tests/test_trigger.py -v
+
+# noqa: fixture-schema
+Fixture-schema rationale (E-221-03):
+`test_pre_migration_db_degrades_gracefully` intentionally constructs a
+pre-migration `teams` schema WITHOUT the `season_year` column to verify the
+`_heal_season_year_cli` helper degrades gracefully (catches OperationalError
+instead of crashing) when running against a legacy DB. The intentionally
+incomplete inline schema IS the subject under test -- `load_real_schema`
+would always include `season_year` and would defeat the point.
 """
 
 from __future__ import annotations

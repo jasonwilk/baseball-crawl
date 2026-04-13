@@ -11,6 +11,7 @@ from typer.testing import CliRunner
 
 from src.cli import app
 from src.cli.data import _find_scouting_run
+from tests.conftest import load_real_schema
 
 runner = CliRunner()
 
@@ -488,36 +489,14 @@ def test_resolve_opponents_dry_run_skips_resolve_unlinked() -> None:
 
 
 def _make_scouting_db() -> sqlite3.Connection:
-    """Return an in-memory SQLite connection with the minimal schema for scouting tests."""
+    """Return an in-memory SQLite connection with the production schema for scouting tests."""
     conn = sqlite3.connect(":memory:")
-    conn.execute("PRAGMA foreign_keys=ON")
-    conn.executescript(
-        """
-        CREATE TABLE seasons (
-            season_id   TEXT PRIMARY KEY,
-            name        TEXT NOT NULL,
-            season_type TEXT NOT NULL,
-            year        INTEGER NOT NULL
-        );
-        CREATE TABLE teams (
-            id              INTEGER PRIMARY KEY AUTOINCREMENT,
-            name            TEXT NOT NULL,
-            membership_type TEXT NOT NULL,
-            public_id       TEXT
-        );
-        CREATE TABLE scouting_runs (
-            id            INTEGER PRIMARY KEY AUTOINCREMENT,
-            team_id       INTEGER NOT NULL REFERENCES teams(id),
-            season_id     TEXT NOT NULL REFERENCES seasons(season_id),
-            run_type      TEXT NOT NULL DEFAULT 'full',
-            status        TEXT NOT NULL DEFAULT 'pending',
-            last_checked  TEXT NOT NULL DEFAULT (datetime('now')),
-            UNIQUE(team_id, season_id, run_type)
-        );
-        INSERT INTO seasons(season_id, name, season_type, year)
-            VALUES ('2026-spring-hs', 'Spring 2026 HS', 'spring-hs', 2026);
-        """
+    load_real_schema(conn)
+    conn.execute(
+        "INSERT INTO seasons (season_id, name, season_type, year) "
+        "VALUES ('2026-spring-hs', 'Spring 2026 HS', 'spring-hs', 2026)"
     )
+    conn.commit()
     return conn
 
 

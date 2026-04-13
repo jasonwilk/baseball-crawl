@@ -14,36 +14,40 @@ from src.gamechanger.resolvers.gc_uuid_resolver import (
     _strip_classification_suffix,
     resolve_gc_uuid,
 )
+from tests.conftest import load_real_schema
 
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
 
+# Sentinel ids used by tests as "other team" placeholders for games that
+# do not involve the tracked team under test. Seeded as real rows so FK
+# constraints on games(home_team_id, away_team_id) are satisfied under the
+# production schema.
+_OTHER_TEAM_A_ID = 888
+_OTHER_TEAM_B_ID = 999
+_TEST_SEASON_ID = "test-season"
+_TEST_GAME_DATE = "2026-04-01"
+
+
 @pytest.fixture()
 def db() -> sqlite3.Connection:
-    """In-memory database with minimal schema for resolver tests."""
+    """In-memory database using the production schema with FK enforcement."""
     conn = sqlite3.connect(":memory:")
-    conn.execute("PRAGMA foreign_keys = OFF;")  # Simplify test setup
-    conn.executescript("""
-        CREATE TABLE teams (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            membership_type TEXT NOT NULL DEFAULT 'tracked',
-            gc_uuid TEXT,
-            public_id TEXT,
-            season_year INTEGER,
-            is_active INTEGER NOT NULL DEFAULT 1
-        );
-        CREATE TABLE games (
-            game_id TEXT PRIMARY KEY,
-            season_id TEXT NOT NULL DEFAULT 'test-season',
-            game_date TEXT NOT NULL DEFAULT '2026-04-01',
-            home_team_id INTEGER NOT NULL,
-            away_team_id INTEGER NOT NULL,
-            status TEXT NOT NULL DEFAULT 'final'
-        );
-    """)
+    load_real_schema(conn)
+    # Seed a season so games can reference it.
+    conn.execute(
+        "INSERT INTO seasons (season_id, name, season_type, year) VALUES "
+        "(?, '2026 Test Season', 'spring-hs', 2026)",
+        (_TEST_SEASON_ID,),
+    )
+    # Seed sentinel "other team" rows referenced by test games' home/away ids.
+    conn.executemany(
+        "INSERT INTO teams (id, name, membership_type) VALUES (?, ?, 'tracked')",
+        [(_OTHER_TEAM_A_ID, "Other Team A"), (_OTHER_TEAM_B_ID, "Other Team B")],
+    )
+    conn.commit()
     return conn
 
 
@@ -132,8 +136,9 @@ class TestTier1BoxscoreExtraction:
 
         # Create game row linking event to tracked team.
         db.execute(
-            "INSERT INTO games (game_id, home_team_id, away_team_id) VALUES (?, ?, ?)",
-            (event_id, tracked_id, 999),
+            "INSERT INTO games (game_id, season_id, game_date, home_team_id, away_team_id) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (event_id, _TEST_SEASON_ID, _TEST_GAME_DATE, tracked_id, _OTHER_TEAM_B_ID),
         )
         db.commit()
 
@@ -169,8 +174,9 @@ class TestTier1BoxscoreExtraction:
 
         # Game does NOT involve tracked_id.
         db.execute(
-            "INSERT INTO games (game_id, home_team_id, away_team_id) VALUES (?, ?, ?)",
-            (event_id, 888, 999),
+            "INSERT INTO games (game_id, season_id, game_date, home_team_id, away_team_id) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (event_id, _TEST_SEASON_ID, _TEST_GAME_DATE, _OTHER_TEAM_A_ID, _OTHER_TEAM_B_ID),
         )
         db.commit()
 
@@ -496,8 +502,9 @@ class TestCascadeBehavior:
 
         event_id = "game-existing"
         db.execute(
-            "INSERT INTO games (game_id, home_team_id, away_team_id) VALUES (?, ?, ?)",
-            (event_id, tracked_id, 999),
+            "INSERT INTO games (game_id, season_id, game_date, home_team_id, away_team_id) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (event_id, _TEST_SEASON_ID, _TEST_GAME_DATE, tracked_id, _OTHER_TEAM_B_ID),
         )
         db.commit()
 
@@ -534,8 +541,9 @@ class TestCascadeBehavior:
 
         event_id = "game-dual"
         db.execute(
-            "INSERT INTO games (game_id, home_team_id, away_team_id) VALUES (?, ?, ?)",
-            (event_id, 999, tracked_id),
+            "INSERT INTO games (game_id, season_id, game_date, home_team_id, away_team_id) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (event_id, _TEST_SEASON_ID, _TEST_GAME_DATE, _OTHER_TEAM_B_ID, tracked_id),
         )
         db.commit()
 

@@ -86,6 +86,8 @@ Review this list every 90 days, or when completing an epic. Ask:
 | [IDEA-065](IDEA-065-llm-eval-harness.md) | LLM Starter Prediction Evaluation Harness | CANDIDATE | 2026-07-03 |
 | [IDEA-066](IDEA-066-league-level-detection.md) | League/Level Detection for Pitch Rules | PROMOTED | 2026-07-06 | -> E-218 |
 | [IDEA-067](IDEA-067-catcher-pitcher-restriction.md) | Catcher-Pitcher Restriction (NSAA) | CANDIDATE | 2026-07-06 |
+| [IDEA-068](IDEA-068-evaluate-main-session-dispatch-behaviors.md) | Evaluate Main-Session Dispatch Behaviors for Codification | CANDIDATE | 2026-07-12 |
+| [IDEA-069](IDEA-069-consolidate-cascade-delete-logic.md) | Consolidate Cascade Delete Logic (admin + reports) | CANDIDATE | 2026-07-12 |
 
 ## Status Definitions
 

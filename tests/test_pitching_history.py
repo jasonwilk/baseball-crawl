@@ -7,92 +7,19 @@ import sqlite3
 import pytest
 
 from src.api.db import build_pitcher_profiles, get_pitching_history
-
-
-def _create_schema(conn: sqlite3.Connection) -> None:
-    """Create minimal schema needed for pitching history queries."""
-    conn.executescript("""
-        CREATE TABLE IF NOT EXISTS seasons (
-            season_id TEXT PRIMARY KEY
-        );
-        CREATE TABLE IF NOT EXISTS programs (
-            program_id TEXT PRIMARY KEY,
-            name TEXT NOT NULL,
-            program_type TEXT NOT NULL DEFAULT 'hs'
-        );
-        CREATE TABLE IF NOT EXISTS teams (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            gc_uuid TEXT UNIQUE,
-            public_id TEXT UNIQUE,
-            membership_type TEXT NOT NULL DEFAULT 'tracked',
-            season_year INTEGER,
-            is_active INTEGER NOT NULL DEFAULT 1,
-            program_id TEXT REFERENCES programs(program_id),
-            classification TEXT,
-            created_at TEXT NOT NULL DEFAULT (datetime('now'))
-        );
-        CREATE TABLE IF NOT EXISTS players (
-            player_id TEXT PRIMARY KEY,
-            first_name TEXT NOT NULL,
-            last_name TEXT NOT NULL,
-            bats TEXT,
-            throws TEXT,
-            gc_athlete_profile_id TEXT,
-            created_at TEXT NOT NULL DEFAULT (datetime('now'))
-        );
-        CREATE TABLE IF NOT EXISTS team_rosters (
-            team_id INTEGER NOT NULL REFERENCES teams(id),
-            player_id TEXT NOT NULL REFERENCES players(player_id),
-            season_id TEXT NOT NULL REFERENCES seasons(season_id),
-            jersey_number TEXT,
-            position TEXT,
-            PRIMARY KEY (team_id, player_id, season_id)
-        );
-        CREATE TABLE IF NOT EXISTS games (
-            game_id TEXT PRIMARY KEY,
-            season_id TEXT NOT NULL REFERENCES seasons(season_id),
-            game_date TEXT NOT NULL,
-            start_time TEXT,
-            home_team_id INTEGER NOT NULL REFERENCES teams(id),
-            away_team_id INTEGER NOT NULL REFERENCES teams(id),
-            home_score INTEGER,
-            away_score INTEGER,
-            status TEXT NOT NULL DEFAULT 'scheduled',
-            game_stream_id TEXT,
-            created_at TEXT NOT NULL DEFAULT (datetime('now'))
-        );
-        CREATE TABLE IF NOT EXISTS player_game_pitching (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            game_id TEXT NOT NULL REFERENCES games(game_id),
-            player_id TEXT NOT NULL REFERENCES players(player_id),
-            team_id INTEGER NOT NULL REFERENCES teams(id),
-            perspective_team_id INTEGER NOT NULL REFERENCES teams(id),
-            decision TEXT,
-            stat_completeness TEXT NOT NULL DEFAULT 'boxscore_only',
-            ip_outs INTEGER,
-            h INTEGER,
-            r INTEGER,
-            er INTEGER,
-            bb INTEGER,
-            so INTEGER,
-            wp INTEGER,
-            hbp INTEGER,
-            pitches INTEGER,
-            total_strikes INTEGER,
-            bf INTEGER,
-            appearance_order INTEGER,
-            UNIQUE(game_id, player_id, perspective_team_id)
-        );
-    """)
+from tests.conftest import load_real_schema
 
 
 def _seed_season_and_team(conn: sqlite3.Connection, *, team_id: int = 1,
                           season_id: str = "2026-spring-hs") -> tuple[int, str]:
     """Insert a season and team, return (team_id, season_id)."""
-    conn.execute("INSERT OR IGNORE INTO seasons VALUES (?)", (season_id,))
     conn.execute(
-        "INSERT OR IGNORE INTO teams (id, name) VALUES (?, ?)",
+        "INSERT OR IGNORE INTO seasons (season_id, name, season_type, year) "
+        "VALUES (?, ?, 'spring-hs', 2026)",
+        (season_id, season_id),
+    )
+    conn.execute(
+        "INSERT OR IGNORE INTO teams (id, name, membership_type) VALUES (?, ?, 'member')",
         (team_id, f"Team {team_id}"),
     )
     return team_id, season_id
@@ -119,15 +46,16 @@ def _insert_game(conn: sqlite3.Connection, game_id: str, game_date: str,
                  start_time: str | None = None,
                  status: str = "completed") -> None:
     """Insert a game with team as home team."""
+    # Ensure away team exists first (FK enforcement requires parent rows up front).
+    conn.execute(
+        "INSERT OR IGNORE INTO teams (id, name, membership_type) "
+        "VALUES (999, 'Opponent', 'tracked')"
+    )
     conn.execute(
         "INSERT OR IGNORE INTO games "
         "(game_id, season_id, game_date, start_time, home_team_id, away_team_id, status) "
         "VALUES (?, ?, ?, ?, ?, ?, ?)",
         (game_id, season_id, game_date, start_time, team_id, 999, status),
-    )
-    # Ensure away team exists
-    conn.execute(
-        "INSERT OR IGNORE INTO teams (id, name) VALUES (999, 'Opponent')"
     )
 
 
@@ -161,9 +89,9 @@ def _insert_pitching_line(
 
 @pytest.fixture
 def db():
-    """In-memory SQLite database with schema."""
+    """In-memory SQLite database with the production schema (FK enforcement on)."""
     conn = sqlite3.connect(":memory:")
-    _create_schema(conn)
+    load_real_schema(conn)
     yield conn
     conn.close()
 

@@ -10,24 +10,14 @@ import sqlite3
 import pytest
 
 from src.db.players import ensure_player_row
+from tests.conftest import load_real_schema
 
 
 @pytest.fixture()
 def db() -> sqlite3.Connection:
-    """Create an in-memory SQLite database with the players table."""
+    """In-memory SQLite database with the production schema (FK enforcement on)."""
     conn = sqlite3.connect(":memory:")
-    conn.execute("PRAGMA foreign_keys = ON")
-    conn.execute(
-        """
-        CREATE TABLE players (
-            player_id TEXT PRIMARY KEY,
-            first_name TEXT NOT NULL,
-            last_name TEXT NOT NULL,
-            bats TEXT,
-            throws TEXT
-        )
-        """
-    )
+    load_real_schema(conn)
     return conn
 
 

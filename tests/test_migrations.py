@@ -10,6 +10,15 @@ Tests use a temporary SQLite database; no Docker required.
 
 Run with:
     pytest tests/test_migrations.py
+
+# noqa: fixture-schema
+Fixture-schema rationale (E-221-03):
+This file tests the migration runner itself. Several tests deliberately
+construct pre-E-220 stale schemas (stat tables WITHOUT the
+perspective_team_id column that the real schema now owns) to verify the
+runner detects the drift and emits an actionable error pointing at the
+rebuild procedure. The intentionally-drifted inline schemas ARE the subject
+under test -- using `load_real_schema` would defeat the point.
 """
 
 from __future__ import annotations

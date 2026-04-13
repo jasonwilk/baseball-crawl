@@ -960,33 +960,33 @@ def _delete_team_cascade(team_id: int) -> None:
         # by game_id where home/away is the team being deleted.
         conn.execute(
             f"DELETE FROM play_events WHERE play_id IN ("
-            f"  SELECT id FROM plays WHERE game_id IN ({_game_ids})"
+            f"  SELECT id FROM plays WHERE perspective_team_id = ? AND game_id IN ({_game_ids})"
             f")",
-            (team_id, team_id),
+            (team_id, team_id, team_id),
         )
         conn.execute(
-            f"DELETE FROM plays WHERE game_id IN ({_game_ids})",
-            (team_id, team_id),
+            f"DELETE FROM plays WHERE perspective_team_id = ? AND game_id IN ({_game_ids})",
+            (team_id, team_id, team_id),
         )
         conn.execute(
-            f"DELETE FROM reconciliation_discrepancies WHERE game_id IN ({_game_ids})",
-            (team_id, team_id),
+            f"DELETE FROM reconciliation_discrepancies WHERE perspective_team_id = ? AND game_id IN ({_game_ids})",
+            (team_id, team_id, team_id),
         )
         conn.execute(
-            f"DELETE FROM player_game_batting WHERE game_id IN ({_game_ids})",
-            (team_id, team_id),
+            f"DELETE FROM player_game_batting WHERE perspective_team_id = ? AND game_id IN ({_game_ids})",
+            (team_id, team_id, team_id),
         )
         conn.execute(
-            f"DELETE FROM player_game_pitching WHERE game_id IN ({_game_ids})",
-            (team_id, team_id),
+            f"DELETE FROM player_game_pitching WHERE perspective_team_id = ? AND game_id IN ({_game_ids})",
+            (team_id, team_id, team_id),
         )
         conn.execute(
-            f"DELETE FROM spray_charts WHERE game_id IN ({_game_ids})",
-            (team_id, team_id),
+            f"DELETE FROM spray_charts WHERE perspective_team_id = ? AND game_id IN ({_game_ids})",
+            (team_id, team_id, team_id),
         )
         conn.execute(
-            f"DELETE FROM game_perspectives WHERE game_id IN ({_game_ids})",
-            (team_id, team_id),
+            f"DELETE FROM game_perspectives WHERE perspective_team_id = ? AND game_id IN ({_game_ids})",
+            (team_id, team_id, team_id),
         )
 
         # Phase 1b (E-220 round 6 cluster 3) -- rows where perspective_team_id = T
@@ -1021,9 +1021,12 @@ def _delete_team_cascade(team_id: int) -> None:
             (team_id,),
         )
 
-        # Phase 2 -- games
+        # Phase 2 -- games (only when no other perspective still owns the game)
         conn.execute(
-            "DELETE FROM games WHERE home_team_id = ? OR away_team_id = ?",
+            "DELETE FROM games WHERE (home_team_id = ? OR away_team_id = ?) "
+            "AND NOT EXISTS ("
+            "  SELECT 1 FROM game_perspectives gp2 WHERE gp2.game_id = games.game_id"
+            ")",
             (team_id, team_id),
         )
 

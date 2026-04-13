@@ -1016,3 +1016,245 @@ class TestCrossPerspectiveDeleteConfirmation:
         )
         assert _count_rows(db, "teams", "id = ?", (team_id,)) == 0
 
+
+# ---------------------------------------------------------------------------
+# E-221-04 (R8-P1-1): cross-perspective stat rows must survive admin cascade
+# ---------------------------------------------------------------------------
+
+
+class TestCascadePreservesOtherPerspectiveRows:
+    """E-221-04 / R8-P1-1: deleting team A must NOT wipe team B's perspective
+    rows for a game they both loaded.
+
+    E-220 round 8 discovered that ``_delete_team_cascade`` Phase 1a deletes
+    perspective-carrying stat rows by ``game_id IN (...)`` without any
+    ``perspective_team_id`` filter.  When two teams have both loaded the same
+    game from their own boxscores (producing separate rows with distinct
+    ``perspective_team_id`` values), deleting either team wipes BOTH
+    perspectives' rows.  The fix (Story E-221-05) scopes Phase 1a by
+    ``perspective_team_id = T`` on every affected DELETE.
+
+    This test is the RED half of the RED-GREEN sequence.  It FAILS against
+    the broken code E-221-04 is landing against and will PASS after E-221-05
+    lands the Phase 1a scoping fix.  See TN-4 / TN-5 in the E-221 epic.
+    """
+
+    def test_delete_team_cascade_preserves_other_perspective_rows(
+        self, db: Path
+    ) -> None:
+        """Given a game loaded from two perspectives, deleting team A must
+        leave team B's perspective stat rows in all 5 tables intact, and
+        must preserve the ``games`` row because team B still has an entry in
+        ``game_perspectives``.
+
+        Asserts:
+          - (AC-1) Team A's perspective rows are gone from all 5 tables.
+          - (AC-1) Team B's perspective rows are STILL PRESENT in:
+                plays, spray_charts, player_game_batting,
+                player_game_pitching, reconciliation_discrepancies
+          - (AC-2) The games row for the shared game_id is preserved.
+          - (AC-2) game_perspectives still has team B's entry for the game.
+
+        Pre-E-221-05, this test FAILS because Phase 1a's unscoped DELETEs
+        wipe team B's rows and Phase 2 unconditionally deletes the games row.
+        """
+        admin_id = _insert_user(db, "admin@example.com")
+        token = _insert_session(db, admin_id)
+        season_id = _insert_season(db)
+
+        # Team A is the delete target (member).  Team B is the peer that
+        # also loaded the same game from its own perspective (tracked).
+        team_a_id = _insert_team(db, "Lincoln Varsity", membership_type="member")
+        team_b_id = _insert_team(db, "Rival Varsity", membership_type="tracked")
+
+        # One shared game where team A is home, team B is away.
+        game_id = _insert_game(
+            db, "g-shared-xperspective", team_a_id, team_b_id, season_id,
+        )
+
+        # Distinct players for each perspective so UNIQUE(game_id, player_id,
+        # perspective_team_id) never collides.
+        batter_a = _insert_player(db, "p-batter-a")
+        batter_b = _insert_player(db, "p-batter-b")
+        pitcher_a = _insert_player(db, "p-pitcher-a")
+        pitcher_b = _insert_player(db, "p-pitcher-b")
+
+        conn = sqlite3.connect(str(db))
+        conn.execute("PRAGMA foreign_keys=ON;")
+
+        # --- Seed team A's perspective of the game ---
+        conn.execute(
+            "INSERT INTO plays "
+            "(game_id, play_order, inning, half, season_id, batting_team_id, "
+            "perspective_team_id, batter_id, pitcher_id) "
+            "VALUES (?, 1, 1, 'top', ?, ?, ?, ?, ?)",
+            (game_id, season_id, team_b_id, team_a_id, batter_b, pitcher_a),
+        )
+        play_id_a = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+        conn.execute(
+            "INSERT INTO play_events (play_id, event_order, event_type) "
+            "VALUES (?, 1, 'pitch')",
+            (play_id_a,),
+        )
+        conn.execute(
+            "INSERT INTO player_game_batting "
+            "(game_id, player_id, team_id, perspective_team_id) "
+            "VALUES (?, ?, ?, ?)",
+            (game_id, batter_b, team_b_id, team_a_id),
+        )
+        conn.execute(
+            "INSERT INTO player_game_pitching "
+            "(game_id, player_id, team_id, perspective_team_id) "
+            "VALUES (?, ?, ?, ?)",
+            (game_id, pitcher_a, team_a_id, team_a_id),
+        )
+        conn.execute(
+            "INSERT INTO spray_charts (game_id, team_id, perspective_team_id) "
+            "VALUES (?, ?, ?)",
+            (game_id, team_a_id, team_a_id),
+        )
+        conn.execute(
+            "INSERT INTO reconciliation_discrepancies "
+            "(game_id, run_id, perspective_team_id, team_id, player_id, "
+            "signal_name, category, status) "
+            "VALUES (?, 'run-a', ?, ?, ?, 'pitcher_bf', 'pitching', 'MATCH')",
+            (game_id, team_a_id, team_a_id, pitcher_a),
+        )
+        conn.execute(
+            "INSERT INTO game_perspectives (game_id, perspective_team_id) "
+            "VALUES (?, ?)",
+            (game_id, team_a_id),
+        )
+
+        # --- Seed team B's perspective of the same game ---
+        conn.execute(
+            "INSERT INTO plays "
+            "(game_id, play_order, inning, half, season_id, batting_team_id, "
+            "perspective_team_id, batter_id, pitcher_id) "
+            "VALUES (?, 1, 1, 'top', ?, ?, ?, ?, ?)",
+            (game_id, season_id, team_b_id, team_b_id, batter_a, pitcher_b),
+        )
+        play_id_b = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+        conn.execute(
+            "INSERT INTO play_events (play_id, event_order, event_type) "
+            "VALUES (?, 1, 'pitch')",
+            (play_id_b,),
+        )
+        # Team B's perspective rows anchor team_id to team B's directory
+        # (NOT team A's), even when describing players who bat for team A.
+        # Rationale: team_id is the FK to the "owning team" -- the directory
+        # from which the scouting record was produced. When team A is
+        # deleted, team B's records about team A's players/games must survive
+        # because their FK anchor (team B) is untouched. The cascade deletes
+        # by perspective_team_id = A, not by team_id = A.
+        conn.execute(
+            "INSERT INTO player_game_batting "
+            "(game_id, player_id, team_id, perspective_team_id) "
+            "VALUES (?, ?, ?, ?)",
+            (game_id, batter_a, team_b_id, team_b_id),
+        )
+        conn.execute(
+            "INSERT INTO player_game_pitching "
+            "(game_id, player_id, team_id, perspective_team_id) "
+            "VALUES (?, ?, ?, ?)",
+            (game_id, pitcher_b, team_b_id, team_b_id),
+        )
+        conn.execute(
+            "INSERT INTO spray_charts (game_id, team_id, perspective_team_id) "
+            "VALUES (?, ?, ?)",
+            (game_id, team_b_id, team_b_id),
+        )
+        conn.execute(
+            "INSERT INTO reconciliation_discrepancies "
+            "(game_id, run_id, perspective_team_id, team_id, player_id, "
+            "signal_name, category, status) "
+            "VALUES (?, 'run-b', ?, ?, ?, 'pitcher_bf', 'pitching', 'MATCH')",
+            (game_id, team_b_id, team_b_id, pitcher_b),
+        )
+        conn.execute(
+            "INSERT INTO game_perspectives (game_id, perspective_team_id) "
+            "VALUES (?, ?)",
+            (game_id, team_b_id),
+        )
+        conn.commit()
+        conn.close()
+
+        # Sanity check the fixture: each perspective-carrying table should
+        # have one row per perspective before the cascade runs.  If this
+        # fails, the fixture is broken and the test is meaningless.
+        for table in (
+            "plays", "player_game_batting", "player_game_pitching",
+            "spray_charts", "reconciliation_discrepancies",
+        ):
+            pre_a = _count_rows(
+                db, table, "perspective_team_id = ?", (team_a_id,),
+            )
+            pre_b = _count_rows(
+                db, table, "perspective_team_id = ?", (team_b_id,),
+            )
+            assert pre_a == 1, f"fixture: {table} missing team A's row"
+            assert pre_b == 1, f"fixture: {table} missing team B's row"
+
+        # --- Run the cascade via the HTTP route with explicit cross-persp
+        # confirmation (team A has cross-perspective rows from team B).
+        with patch.dict("os.environ", _admin_env(db)):
+            with TestClient(
+                app,
+                follow_redirects=False,
+                cookies={"session": token, "csrf_token": _CSRF},
+            ) as client:
+                resp = client.post(
+                    f"/admin/teams/{team_a_id}/delete",
+                    data={
+                        "csrf_token": _CSRF,
+                        "confirm_cross_perspective": "1",
+                    },
+                )
+
+        assert resp.status_code == 303, (
+            f"expected 303 redirect after delete; got {resp.status_code}. "
+            f"body: {resp.text[:500]}"
+        )
+
+        # --- AC-1: team A's perspective rows are GONE from all 5 tables ---
+        for table in (
+            "plays", "player_game_batting", "player_game_pitching",
+            "spray_charts", "reconciliation_discrepancies",
+        ):
+            assert _count_rows(
+                db, table, "perspective_team_id = ?", (team_a_id,),
+            ) == 0, f"team A's perspective rows should be deleted from {table}"
+
+        # --- AC-1 (the bug): team B's perspective rows MUST survive ---
+        for table in (
+            "plays", "player_game_batting", "player_game_pitching",
+            "spray_charts", "reconciliation_discrepancies",
+        ):
+            surviving = _count_rows(
+                db, table, "perspective_team_id = ?", (team_b_id,),
+            )
+            assert surviving == 1, (
+                f"R8-P1-1: team B's perspective row in {table} was wiped by "
+                f"the unscoped `game_id IN (...)` DELETE in Phase 1a. "
+                f"Expected 1 surviving row, got {surviving}."
+            )
+
+        # --- AC-2: the games row is preserved because team B still owns a
+        # game_perspectives entry.  Pre-E-221-05, Phase 2 unconditionally
+        # deletes games where team A is a participant, so this fails too.
+        assert _count_rows(db, "games", "game_id = ?", (game_id,)) == 1, (
+            "R8-P1-1 (AC-2): games row should be preserved because team B "
+            "still has a game_perspectives entry. Pre-fix, Phase 2's "
+            "`DELETE FROM games WHERE home_team_id = ? OR away_team_id = ?` "
+            "removes it unconditionally."
+        )
+        assert _count_rows(
+            db, "game_perspectives",
+            "game_id = ? AND perspective_team_id = ?",
+            (game_id, team_b_id),
+        ) == 1, (
+            "team B's game_perspectives entry should survive the cascade"
+        )
+        assert _count_rows(
+            db, "teams", "id = ?", (team_b_id,),
+        ) == 1, "team B row should be unaffected by deleting team A"

@@ -1,7 +1,7 @@
 # E-221: Test Fixture Schema Parity Audit + Post-E-220 Perspective Residuals
 
 ## Status
-`READY`
+`ACTIVE`
 
 ## Overview
 Land the three residual perspective-awareness fixes that Codex round 8 surfaced on E-220's dispatched work, then eliminate the test-infrastructure drift that allowed the whole round-by-round discovery cascade to happen in the first place. E-221 is the deliberate landing spot for "ship E-220 with known residuals" — it catches what we chose not to grind further on, and it hardens the test safety net so the next cross-cutting invariant epic does not repeat this pattern.
@@ -51,11 +51,11 @@ E-220's History records the full 7-round remediation arc and the structural miss
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-221-01 | Shared real-schema fixture helper | TODO | None | - |
-| E-221-02 | Migrate 7 inline-fixture test files to helper | TODO | E-221-01 | - |
-| E-221-03 | CI guardrail: forbid inline CREATE TABLE in tests/ | TODO | E-221-02 | - |
-| E-221-04 | Cross-perspective preservation test coverage | TODO | E-221-02 | - |
-| E-221-05 | R8-P1-1 Phase 1a perspective scoping | TODO | E-221-04 | - |
+| E-221-01 | Shared real-schema fixture helper | DONE | None | software-engineer |
+| E-221-02 | Migrate 7 inline-fixture test files to helper | DONE | E-221-01 | software-engineer |
+| E-221-03 | CI guardrail: forbid inline CREATE TABLE in tests/ | DONE | E-221-02 | software-engineer |
+| E-221-04 | Cross-perspective preservation test coverage | DONE | E-221-02 | software-engineer |
+| E-221-05 | R8-P1-1 Phase 1a perspective scoping + Phase 2 conditional games DELETE | IN_PROGRESS | E-221-04 | software-engineer |
 | E-221-06 | R8-P1-2 Phase 1b reconciliation_discrepancies cleanup | TODO | E-221-02 | - |
 | E-221-07 | R8-P1-3 `bb data reconcile --game-id` perspective plumb | TODO | E-221-02 | - |
 
@@ -146,3 +146,6 @@ Pre-close E-220 baseline was 72F/4254P/16E. This epic's final run should be 72F/
 - Expert consultations: none required for planning — all technical decisions already made during E-220 round 7-8 (DE on schema, SE on fixture strategy, Codex on bug surface). Any new decisions during dispatch (Option A vs B in TN-7) route to DE.
 - 2026-04-09: E-221-08 added per user direction at E-220 close. Scope: claude-architect codifies the 8 E-220 lessons-learned into durable context-layer artifacts. User explicitly required CA use `.claude/skills/context-fundamentals/SKILL.md` as the procedural guide. Story is independent of E-221-01 through E-221-07 (no implementation dependency) and may run in parallel or last. Dispatch Team updated to include claude-architect.
 - 2026-04-12: E-221-08 DROPPED from epic scope. The E-220 lessons-learned codification is being done as a direct claude-architect dispatch outside the epic — a single ~35-line atomic commit covering the four highest-leverage fixes (perspective-provenance.md frontmatter gap, PM echo-back requirement, CR Invariant Audit Mode, plan-skill fidelity-recovery runbook) plus two smaller fixes (implement-skill expert-recs-are-provisional step, dispatch-pattern main-session-default-relay note). The direct-dispatch path honors the project's "Simple first" principle and avoids the story-ceremony overhead that had no proportional benefit for context-layer-only work. Dispatch Team reverted to software-engineer + data-engineer (claude-architect removed — Phase 1 direct dispatch runs outside this epic). Story count: 7. Related: E-222 (meta-fidelity-fix) was ABANDONED the same day after scope spiral to 14 stories; its planning artifacts and the full recovery context are preserved in `.project/archive/E-222-meta-fidelity-fix-ABANDONED/`.
+- 2026-04-12: ACTIVE -- dispatch begun via implement skill with "and review" modifier. Team: software-engineer, data-engineer (implementers), product-manager (status/AC), code-reviewer (quality gate). Main session to route stories serially starting with E-221-01.
+- 2026-04-12: E-221-03 scope expanded during dispatch after PM enumeration discovered 15 pre-existing drift files in `tests/` beyond the 7 covered by E-221-02. AC-4 relaxed to allow documented exceptions with rationale; AC-6 added for per-file classification; Technical Approach updated. Expansion authorized by user directly during dispatch (Option A: inspect, classify, migrate-or-pragma per file). Scope growth kept inside E-221-03 rather than creating a follow-up epic.
+- 2026-04-12: E-221-05 scope expanded during dispatch after E-221-04's RED test exercised both Phase 1a and Phase 2 bugs in `src/api/routes/admin.py::_delete_team_cascade`. Original TN-5 conflated the admin cascade with `src/reports/generator.py::cascade_delete_team` (which has the correct `NOT EXISTS (game_perspectives)` guard) — the admin cascade lacks the guard and unconditionally deletes the shared games row. User chose Option C: apply the minimal fix in place (scope Phase 1a DELETEs + add NOT EXISTS guard to Phase 2 games DELETE), and capture the admin/generator cascade consolidation refactor as a follow-up idea (IDEA-069; IDEA-068 is the parallel main-session-behaviors capture) for a future dedicated cleanup. Scope growth kept inside E-221-05 rather than creating a follow-up epic.

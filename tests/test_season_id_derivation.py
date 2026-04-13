@@ -8,58 +8,23 @@ from unittest.mock import patch
 import pytest
 
 from src.gamechanger.loaders import derive_season_id_for_team, ensure_season_row
+from tests.conftest import load_real_schema
 
 
 @pytest.fixture()
 def db() -> sqlite3.Connection:
-    """In-memory database with programs and teams tables."""
+    """In-memory database with the production schema (FK enforcement on)."""
     conn = sqlite3.connect(":memory:")
+    load_real_schema(conn)
+    # Seed programs used by tests. 'lsb-hs' is already seeded by the migration,
+    # so use INSERT OR IGNORE for that one.
     conn.execute(
-        """
-        CREATE TABLE programs (
-            program_id   TEXT PRIMARY KEY,
-            name         TEXT NOT NULL,
-            program_type TEXT NOT NULL CHECK(program_type IN ('hs', 'usssa', 'legion')),
-            org_name     TEXT,
-            created_at   TEXT NOT NULL DEFAULT (datetime('now'))
-        )
-        """
+        "INSERT OR IGNORE INTO programs (program_id, name, program_type) "
+        "VALUES ('lsb-hs', 'Lincoln Standing Bear HS', 'hs')"
     )
-    conn.execute(
-        """
-        CREATE TABLE teams (
-            id              INTEGER PRIMARY KEY AUTOINCREMENT,
-            name            TEXT NOT NULL,
-            program_id      TEXT REFERENCES programs(program_id),
-            membership_type TEXT NOT NULL DEFAULT 'member',
-            public_id       TEXT,
-            gc_uuid         TEXT,
-            source          TEXT NOT NULL DEFAULT 'gamechanger',
-            is_active       INTEGER NOT NULL DEFAULT 1,
-            season_year     INTEGER,
-            created_at      TEXT NOT NULL DEFAULT (datetime('now'))
-        )
-        """
-    )
-    conn.execute(
-        """
-        CREATE TABLE seasons (
-            season_id   TEXT PRIMARY KEY,
-            name        TEXT NOT NULL,
-            season_type TEXT NOT NULL,
-            year        INTEGER NOT NULL,
-            program_id  TEXT REFERENCES programs(program_id),
-            start_date  TEXT,
-            end_date    TEXT,
-            created_at  TEXT NOT NULL DEFAULT (datetime('now'))
-        )
-        """
-    )
-    # Seed programs
     conn.executemany(
         "INSERT INTO programs (program_id, name, program_type) VALUES (?, ?, ?)",
         [
-            ("lsb-hs", "Lincoln Standing Bear HS", "hs"),
             ("rebels-usssa", "Lincoln Rebels", "usssa"),
             ("lsb-legion", "LSB Legion", "legion"),
         ],
@@ -76,7 +41,8 @@ class TestDeriveSeasonIdForTeam:
 
     def test_usssa_team(self, db: sqlite3.Connection) -> None:
         db.execute(
-            "INSERT INTO teams (name, program_id, season_year) VALUES ('Rebels 14U', 'rebels-usssa', 2025)"
+            "INSERT INTO teams (name, program_id, membership_type, season_year) "
+            "VALUES ('Rebels 14U', 'rebels-usssa', 'tracked', 2025)"
         )
         team_id = db.execute("SELECT last_insert_rowid()").fetchone()[0]
         season_id, season_year = derive_season_id_for_team(db, team_id)
@@ -85,7 +51,8 @@ class TestDeriveSeasonIdForTeam:
 
     def test_hs_team(self, db: sqlite3.Connection) -> None:
         db.execute(
-            "INSERT INTO teams (name, program_id, season_year) VALUES ('LSB Varsity', 'lsb-hs', 2026)"
+            "INSERT INTO teams (name, program_id, membership_type, season_year) "
+            "VALUES ('LSB Varsity', 'lsb-hs', 'member', 2026)"
         )
         team_id = db.execute("SELECT last_insert_rowid()").fetchone()[0]
         season_id, season_year = derive_season_id_for_team(db, team_id)
@@ -94,7 +61,8 @@ class TestDeriveSeasonIdForTeam:
 
     def test_legion_team(self, db: sqlite3.Connection) -> None:
         db.execute(
-            "INSERT INTO teams (name, program_id, season_year) VALUES ('LSB Legion', 'lsb-legion', 2025)"
+            "INSERT INTO teams (name, program_id, membership_type, season_year) "
+            "VALUES ('LSB Legion', 'lsb-legion', 'member', 2025)"
         )
         team_id = db.execute("SELECT last_insert_rowid()").fetchone()[0]
         season_id, season_year = derive_season_id_for_team(db, team_id)
@@ -104,7 +72,8 @@ class TestDeriveSeasonIdForTeam:
     def test_no_program(self, db: sqlite3.Connection) -> None:
         """Team with no program_id → year-only format."""
         db.execute(
-            "INSERT INTO teams (name, program_id, season_year) VALUES ('Opponent', NULL, 2026)"
+            "INSERT INTO teams (name, program_id, membership_type, season_year) "
+            "VALUES ('Opponent', NULL, 'tracked', 2026)"
         )
         team_id = db.execute("SELECT last_insert_rowid()").fetchone()[0]
         season_id, season_year = derive_season_id_for_team(db, team_id)
@@ -114,7 +83,8 @@ class TestDeriveSeasonIdForTeam:
     def test_null_season_year_with_program(self, db: sqlite3.Connection) -> None:
         """NULL season_year → falls back to current calendar year."""
         db.execute(
-            "INSERT INTO teams (name, program_id, season_year) VALUES ('LSB JV', 'lsb-hs', NULL)"
+            "INSERT INTO teams (name, program_id, membership_type, season_year) "
+            "VALUES ('LSB JV', 'lsb-hs', 'member', NULL)"
         )
         team_id = db.execute("SELECT last_insert_rowid()").fetchone()[0]
         with patch("src.gamechanger.loaders.datetime") as mock_dt:
@@ -126,7 +96,8 @@ class TestDeriveSeasonIdForTeam:
     def test_null_season_year_no_program(self, db: sqlite3.Connection) -> None:
         """Both NULL → current year, no suffix."""
         db.execute(
-            "INSERT INTO teams (name, program_id, season_year) VALUES ('Unknown', NULL, NULL)"
+            "INSERT INTO teams (name, program_id, membership_type, season_year) "
+            "VALUES ('Unknown', NULL, 'tracked', NULL)"
         )
         team_id = db.execute("SELECT last_insert_rowid()").fetchone()[0]
         with patch("src.gamechanger.loaders.datetime") as mock_dt:
@@ -141,15 +112,24 @@ class TestDeriveSeasonIdForTeam:
             derive_season_id_for_team(db, 9999)
 
     def test_program_row_missing_but_program_id_set(self, db: sqlite3.Connection) -> None:
-        """If program_id references a missing programs row, LEFT JOIN yields NULL program_type → year-only."""
-        # Insert with FK enforcement off (in-memory DB doesn't enforce by default)
-        db.execute(
-            "INSERT INTO teams (name, program_id, season_year) VALUES ('Orphan', 'nonexistent', 2025)"
-        )
-        team_id = db.execute("SELECT last_insert_rowid()").fetchone()[0]
-        season_id, season_year = derive_season_id_for_team(db, team_id)
-        assert season_id == "2025"
-        assert season_year == 2025
+        """If program_id references a missing programs row, LEFT JOIN yields NULL program_type → year-only.
+
+        The production schema enforces `teams.program_id REFERENCES programs(program_id)`,
+        so we must briefly disable FK enforcement to construct the degraded state
+        this test exercises (a team pointing at a program row that no longer exists).
+        """
+        db.execute("PRAGMA foreign_keys=OFF;")
+        try:
+            db.execute(
+                "INSERT INTO teams (name, program_id, membership_type, season_year) "
+                "VALUES ('Orphan', 'nonexistent', 'tracked', 2025)"
+            )
+            team_id = db.execute("SELECT last_insert_rowid()").fetchone()[0]
+            season_id, season_year = derive_season_id_for_team(db, team_id)
+            assert season_id == "2025"
+            assert season_year == 2025
+        finally:
+            db.execute("PRAGMA foreign_keys=ON;")
 
 
 # ── ensure_season_row ────────────────────────────────────────────────
