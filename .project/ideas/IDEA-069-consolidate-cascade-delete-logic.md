@@ -1,7 +1,10 @@
 # IDEA-069: Consolidate cascade delete logic between admin route and reports path
 
 ## Status
-`CANDIDATE`
+`PROMOTED`
+
+## Promotion Note
+Promoted to E-221-05 on 2026-04-13. Scope absorbed during dispatch after empirical discovery that the admin cascade bug required the consolidation refactor as load-bearing work. The prior in-place fix (Option C, 2026-04-12) proved insufficient: three tests failed in `tests/test_admin_delete_cascade.py`, rooted in missing teams-row retention and cross-perspective orphan cleanup in `admin.py::_delete_team_cascade`. Rather than continue patching the admin cascade in place, the user authorized Option 2 (refactor-delegate): replace the admin cascade's in-place cleanup phases with a delegation call to `src/reports/generator.py::cascade_delete_team` (the canonical helper). This creates a single source of truth for cascade delete logic and eliminates the drift risk class that caused R8-P1-1. See `/epics/E-221-perspective-residuals-and-fixture-audit/E-221-05.md` for the implementation scope and acceptance criteria, and the epic's 2026-04-13 History entry for the decision context.
 
 ## Summary
 `src/api/routes/admin.py::_delete_team_cascade` and `src/reports/generator.py::cascade_delete_team` both implement cross-perspective cascade delete logic for team removal. The generator.py version uses a canonical helper `_delete_game_scoped_data_for_perspectives` (lines 1306-1390) with a `NOT EXISTS (game_perspectives)` guard. The admin.py version currently duplicates (and drifted from) this pattern. E-221-05 fixes the admin cascade in place to match the canonical pattern, but leaves the duplication. This idea captures the refactor to delegate the admin cascade to the generator.py helper as a single source of truth.

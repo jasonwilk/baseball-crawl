@@ -645,12 +645,17 @@ class TestE220CascadeDeletion:
     """
 
     def test_cascade_deletes_plays_and_children(self, db: Path) -> None:
-        """Cascade delete must remove plays, play_events, game_perspectives,
-        and reconciliation_discrepancies for games involving the team.
+        """Cascade delete must remove the deleted team's perspective rows
+        from plays, play_events, game_perspectives, and
+        reconciliation_discrepancies without raising an FK error.
 
-        RED test: without the fix, DELETE FROM games raises
-        FOREIGN KEY constraint failed because the child tables still
-        reference the game rows.
+        Updated in E-221-05 for the perspective-aware semantics: when the
+        game is owned by MORE than one perspective (here: team_id and
+        opp_id both have game_perspectives entries), the games row is
+        preserved because another perspective still depends on it.  The
+        teams row is correspondingly retained because games.home_team_id
+        still FK-references it.  Only the deleted team's perspective-
+        scoped rows are cleaned; opp_id's perspective entry survives.
         """
         admin_id = _insert_user(db, "admin@example.com")
         token = _insert_session(db, admin_id)
@@ -665,7 +670,7 @@ class TestE220CascadeDeletion:
         conn = sqlite3.connect(str(db))
         conn.execute("PRAGMA foreign_keys=ON;")
 
-        # Seed plays data (with perspective_team_id, both team perspectives)
+        # Seed plays data tagged with team_id's perspective.
         conn.execute(
             "INSERT INTO plays "
             "(game_id, play_order, inning, half, season_id, batting_team_id, "
@@ -681,7 +686,10 @@ class TestE220CascadeDeletion:
             (play_id,),
         )
 
-        # Seed game_perspectives -- FK to games.game_id
+        # Seed game_perspectives for BOTH teams -- this is the cross-
+        # perspective preservation case: opp_id's entry survives the
+        # cascade and keeps the games row (and therefore the teams row)
+        # alive as an FK anchor.
         conn.execute(
             "INSERT INTO game_perspectives (game_id, perspective_team_id) VALUES (?, ?)",
             (game_id, team_id),
@@ -699,7 +707,7 @@ class TestE220CascadeDeletion:
             (game_id, team_id, team_id, player_pitcher_id),
         )
 
-        # Also seed batting/pitching/spray data so the existing Phase 1 runs.
+        # Also seed batting/pitching data so the existing Phase 1 runs.
         conn.execute(
             "INSERT INTO player_game_batting "
             "(game_id, player_id, team_id, perspective_team_id) "
@@ -729,17 +737,41 @@ class TestE220CascadeDeletion:
             f"Response body: {resp.text[:500]}"
         )
 
-        # Team row is gone
-        assert _count_rows(db, "teams", "id = ?", (team_id,)) == 0
-        # Phase 2: game is gone
-        assert _count_rows(db, "games", "game_id = ?", (game_id,)) == 0
-        # Phase 1 new tables: all children deleted
-        assert _count_rows(db, "plays", "game_id = ?", (game_id,)) == 0
-        assert _count_rows(db, "play_events", "play_id = ?", (play_id,)) == 0
-        assert _count_rows(db, "game_perspectives", "game_id = ?", (game_id,)) == 0
+        # Team row is RETAINED: the surviving games row still FK-references
+        # team_id via home_team_id, so the canonical cascade preserves the
+        # teams row as an FK anchor (E-221-05 consolidation).
+        assert _count_rows(db, "teams", "id = ?", (team_id,)) == 1
+        # Games row is PRESERVED: opp_id still owns a game_perspectives entry,
+        # so the NOT EXISTS guard in _delete_game_scoped_data_for_perspectives
+        # skips the DELETE FROM games.
+        assert _count_rows(db, "games", "game_id = ?", (game_id,)) == 1
+        # team_id's perspective rows are cleaned from all four new tables
+        # (this is what the original test was proving -- the E-220 proactive
+        # audit cleanup of plays/play_events/game_perspectives/
+        # reconciliation_discrepancies still works).
         assert _count_rows(
-            db, "reconciliation_discrepancies", "game_id = ?", (game_id,)
+            db, "plays",
+            "game_id = ? AND perspective_team_id = ?",
+            (game_id, team_id),
         ) == 0
+        assert _count_rows(db, "play_events", "play_id = ?", (play_id,)) == 0
+        assert _count_rows(
+            db, "game_perspectives",
+            "game_id = ? AND perspective_team_id = ?",
+            (game_id, team_id),
+        ) == 0
+        assert _count_rows(
+            db, "reconciliation_discrepancies",
+            "game_id = ? AND perspective_team_id = ?",
+            (game_id, team_id),
+        ) == 0
+        # opp_id's perspective entry in game_perspectives is preserved --
+        # it's what keeps the games row alive.
+        assert _count_rows(
+            db, "game_perspectives",
+            "game_id = ? AND perspective_team_id = ?",
+            (game_id, opp_id),
+        ) == 1
 
 
 
@@ -1258,3 +1290,531 @@ class TestCascadePreservesOtherPerspectiveRows:
         assert _count_rows(
             db, "teams", "id = ?", (team_b_id,),
         ) == 1, "team B row should be unaffected by deleting team A"
+
+
+# ---------------------------------------------------------------------------
+# E-221-06 (R8-P1-2): reconciliation_discrepancies cascade regression bulwark
+# ---------------------------------------------------------------------------
+
+
+class TestReconciliationDiscrepanciesCascade:
+    """E-221-06 / R8-P1-2: explicit regression gate for the
+    ``reconciliation_discrepancies`` cleanup paths in the canonical cascade.
+
+    The functional fix shipped in E-221-05 via the Option 2 refactor that
+    delegates ``src/api/routes/admin.py::_delete_team_cascade`` to
+    ``src/reports/generator.py::cascade_delete_team``.  The canonical helper's
+    ``_delete_team_anchor_and_orphan_data`` function cleans reconciliation
+    rows via two independent DELETE paths:
+
+      - Pass 1 (perspective, ``generator.py:1445-1448``):
+        ``DELETE FROM reconciliation_discrepancies WHERE perspective_team_id = ?``
+      - Pass 2 (anchor, ``generator.py:1476-1478``):
+        ``DELETE FROM reconciliation_discrepancies WHERE team_id = ?``
+
+    E-221-05's test coverage hits these transitively through the E-221-04 RED
+    test.  This class adds the explicit R8-P1-2 regression gate so a future
+    refactor that accidentally drops one of the two passes fails fast with a
+    named test rather than cascading into broader assertions.  Either pass
+    being dropped would cause the admin team delete to FK-violate at Phase 4;
+    these tests catch that.
+
+    FK enforcement (AC-2) comes through the existing ``db`` fixture: ``_make_db``
+    calls ``run_migrations`` which applies ``migrations/001_initial_schema.sql``
+    via ``apply_migrations.py:131`` using
+    ``executescript("PRAGMA foreign_keys=ON;\\n" + sql)`` -- byte-identical to
+    ``tests/conftest.py::load_real_schema(conn)`` for AC-2 purposes.  Both
+    tests also redundantly set ``PRAGMA foreign_keys=ON`` on every helper-
+    opened connection before seeding.
+    """
+
+    def test_perspective_pass_cleans_rows_owned_by_deleted_team(
+        self, db: Path
+    ) -> None:
+        """Pass 1 regression: a reconciliation row with
+        ``perspective_team_id = T AND team_id = T`` is deleted when team T
+        is deleted, the teams row is removed, and the HTTP handler returns
+        303.  No FK violation at any step.
+
+        Covers ``src/reports/generator.py:1445-1448`` (the perspective pass
+        DELETE on reconciliation_discrepancies).
+        """
+        admin_id = _insert_user(db, "admin@example.com")
+        token = _insert_session(db, admin_id)
+        season_id = _insert_season(db)
+        pitcher_id = _insert_player(db, "p-recon-p1")
+
+        team_id = _insert_team(db, "Lincoln Varsity", membership_type="member")
+        opp_id = _insert_team(db, "Opponent", membership_type="tracked")
+        game_id = _insert_game(
+            db, "g-recon-own", team_id, opp_id, season_id,
+        )
+
+        conn = sqlite3.connect(str(db))
+        conn.execute("PRAGMA foreign_keys=ON;")
+        # Own-perspective reconciliation row: team_id = T, perspective = T.
+        # This is the common path -- not cross-perspective, no confirm flag
+        # required.  If _delete_team_anchor_and_orphan_data's Pass 1 regresses
+        # (perspective DELETE on recon table removed), the Phase 4 teams row
+        # delete fires the team_id FK constraint.
+        conn.execute(
+            "INSERT INTO reconciliation_discrepancies "
+            "(game_id, run_id, perspective_team_id, team_id, player_id, "
+            "signal_name, category, status) "
+            "VALUES (?, 'run-own', ?, ?, ?, 'pitcher_bf', 'pitching', 'MATCH')",
+            (game_id, team_id, team_id, pitcher_id),
+        )
+        conn.commit()
+        conn.close()
+
+        # Fixture sanity check -- must have one recon row anchored to team T.
+        assert _count_rows(
+            db, "reconciliation_discrepancies",
+            "game_id = ? AND perspective_team_id = ?",
+            (game_id, team_id),
+        ) == 1
+
+        with patch.dict("os.environ", _admin_env(db)):
+            with TestClient(
+                app,
+                follow_redirects=False,
+                cookies={"session": token, "csrf_token": _CSRF},
+            ) as client:
+                resp = client.post(
+                    f"/admin/teams/{team_id}/delete",
+                    data={"csrf_token": _CSRF},
+                )
+
+        # AC-1(a): HTTP response 303 (delete succeeded, no FK violation).
+        assert resp.status_code == 303, (
+            f"expected 303 redirect after delete; got {resp.status_code}. "
+            f"body: {resp.text[:500]}"
+        )
+        # AC-1(b): the reconciliation row is gone.
+        assert _count_rows(
+            db, "reconciliation_discrepancies",
+            "perspective_team_id = ?",
+            (team_id,),
+        ) == 0, (
+            "R8-P1-2 Pass 1 regression: reconciliation_discrepancies row "
+            "with perspective_team_id = deleted team should be cleaned by "
+            "_delete_team_anchor_and_orphan_data Pass 1."
+        )
+        # AC-1(c): the teams row is gone.
+        assert _count_rows(
+            db, "teams", "id = ?", (team_id,),
+        ) == 0, (
+            "teams row for the deleted team should be gone post-cascade"
+        )
+
+    def test_anchor_pass_cleans_rows_about_deleted_team(
+        self, db: Path
+    ) -> None:
+        """Pass 2 regression: a reconciliation row with
+        ``team_id = T AND perspective_team_id = OTHER`` (another team's
+        scouting record ABOUT team T's player) is deleted when team T is
+        deleted.  The row is NOT caught by Pass 1 (wrong perspective); it
+        must be cleaned by Pass 2.  Covers
+        ``src/reports/generator.py:1476-1478`` (the anchor pass DELETE on
+        reconciliation_discrepancies).
+
+        Without Pass 2, the Phase 4 teams row delete fires the
+        ``reconciliation_discrepancies.team_id -> teams(id)`` FK constraint
+        and the cascade raises ``IntegrityError``.  A cross-perspective
+        ``player_game_batting`` row is also seeded so the cross-perspective
+        detector in ``_get_delete_confirmation_data`` (admin.py:835-864)
+        fires and the test exercises the ``confirm_cross_perspective=1``
+        code path, matching the realistic UX flow for this scenario.
+        """
+        admin_id = _insert_user(db, "admin@example.com")
+        token = _insert_session(db, admin_id)
+        season_id = _insert_season(db)
+        pitcher_id = _insert_player(db, "p-recon-p2")
+        batter_id = _insert_player(db, "p-recon-b2")
+
+        team_id = _insert_team(db, "Subject Team", membership_type="tracked")
+        other_id = _insert_team(db, "Owner Team", membership_type="member")
+        game_id = _insert_game(
+            db, "g-recon-xperspective", team_id, other_id, season_id,
+        )
+
+        conn = sqlite3.connect(str(db))
+        conn.execute("PRAGMA foreign_keys=ON;")
+        # Cross-perspective reconciliation row: anchored to team T (the one
+        # being deleted) but tagged with another team's perspective.  This
+        # is "owner team's scouting record about subject team's game".
+        conn.execute(
+            "INSERT INTO reconciliation_discrepancies "
+            "(game_id, run_id, perspective_team_id, team_id, player_id, "
+            "signal_name, category, status) "
+            "VALUES (?, 'run-xp', ?, ?, ?, 'pitcher_bf', 'pitching', 'MATCH')",
+            (game_id, other_id, team_id, pitcher_id),
+        )
+        # Cross-perspective batting row with the same anchor shape; this is
+        # what the cross-perspective detector (admin.py:835-864) looks at.
+        # Its presence ensures the confirm_cross_perspective flag path is
+        # exercised alongside the recon cleanup -- the detector does not
+        # currently inspect reconciliation_discrepancies directly.
+        conn.execute(
+            "INSERT INTO player_game_batting "
+            "(game_id, player_id, team_id, perspective_team_id) "
+            "VALUES (?, ?, ?, ?)",
+            (game_id, batter_id, team_id, other_id),
+        )
+        conn.commit()
+        conn.close()
+
+        # Fixture sanity check: one recon row anchored to T with foreign
+        # perspective; one cross-persp batting row to trigger the detector.
+        assert _count_rows(
+            db, "reconciliation_discrepancies",
+            "team_id = ? AND perspective_team_id = ?",
+            (team_id, other_id),
+        ) == 1
+        assert _count_rows(
+            db, "player_game_batting",
+            "team_id = ? AND perspective_team_id = ?",
+            (team_id, other_id),
+        ) == 1
+
+        with patch.dict("os.environ", _admin_env(db)):
+            with TestClient(
+                app,
+                follow_redirects=False,
+                cookies={"session": token, "csrf_token": _CSRF},
+            ) as client:
+                resp = client.post(
+                    f"/admin/teams/{team_id}/delete",
+                    data={
+                        "csrf_token": _CSRF,
+                        "confirm_cross_perspective": "1",
+                    },
+                )
+
+        # AC-3(a): HTTP response 303 (delete succeeded, no FK violation).
+        assert resp.status_code == 303, (
+            f"expected 303 redirect after delete; got {resp.status_code}. "
+            f"body: {resp.text[:500]}"
+        )
+        # AC-3(b): the cross-perspective reconciliation row anchored to T
+        # is gone.  Specifically the team_id filter -- Pass 2 is what
+        # cleans this.
+        assert _count_rows(
+            db, "reconciliation_discrepancies",
+            "team_id = ?",
+            (team_id,),
+        ) == 0, (
+            "R8-P1-2 Pass 2 regression: reconciliation_discrepancies row "
+            "with team_id = deleted team (but foreign perspective_team_id) "
+            "should be cleaned by _delete_team_anchor_and_orphan_data Pass 2."
+        )
+        # AC-3(c): the teams row is gone.
+        assert _count_rows(
+            db, "teams", "id = ?", (team_id,),
+        ) == 0, (
+            "teams row for the deleted team should be gone post-cascade"
+        )
+        # Sanity: the other team is untouched.
+        assert _count_rows(
+            db, "teams", "id = ?", (other_id,),
+        ) == 1, (
+            "the other team's row should be unaffected by deleting team T"
+        )
+
+
+# ---------------------------------------------------------------------------
+# E-221 Phase 4b remediation (Codex review findings 1 and 2)
+# ---------------------------------------------------------------------------
+
+
+class TestE221Phase4bRemediation:
+    """Phase 4b remediation tests for Codex-identified findings:
+
+    - Finding 1 (MUST FIX): The informed-consent gate at
+      ``_get_delete_confirmation_data`` did not inspect
+      ``reconciliation_discrepancies``, so a team with ONLY foreign-owned
+      reconciliation rows could silently bypass the confirmation screen and
+      have another team's perspective data deleted without explicit operator
+      consent.  Fix: add reconciliation_discrepancies to the
+      ``cross_perspective_owners`` UNION at ``admin.py:835-868``.
+
+    - Finding 2 (SHOULD FIX): After E-221-05's canonical cascade
+      consolidation, ``cascade_delete_team`` can retain the teams row when
+      cross-perspective games still reference it
+      (``src/reports/generator.py:1540-1558``).  The admin delete HTTP handler
+      previously flashed ``Team "X" deleted.`` unconditionally, which was a
+      lie in the retention case.  Fix: post-cascade probe of the teams row
+      and surface an accurate flash message.
+    """
+
+    def test_gate_detects_foreign_reconciliation_rows_only(
+        self, db: Path
+    ) -> None:
+        """Finding 1 regression: a team whose ONLY cross-perspective
+        footprint is in ``reconciliation_discrepancies`` must appear in
+        ``cross_perspective_owners`` and trigger the confirmation gate.
+
+        Pre-fix, a team with no cross-perspective batting/pitching/
+        spray/plays rows but with a foreign-owned reconciliation row would
+        see an empty ``cross_perspective_owners`` list and the
+        ``has_cross_perspective`` gate would be False, allowing the delete
+        to proceed without the ``confirm_cross_perspective`` flag.
+        """
+        from src.api.routes.admin import _get_delete_confirmation_data
+
+        admin_id = _insert_user(db, "admin@example.com")
+        _insert_session(db, admin_id)
+        season_id = _insert_season(db)
+        team_id = _insert_team(db, "Subject", membership_type="tracked")
+        owner_id = _insert_team(db, "Lincoln Varsity", membership_type="member")
+        game_id = _insert_game(db, "g-recon-gate", team_id, owner_id, season_id)
+        pitcher_id = _insert_player(db, "p-recon-only")
+
+        conn = sqlite3.connect(str(db))
+        conn.execute("PRAGMA foreign_keys=ON;")
+        # ONE cross-perspective reconciliation row; nothing in any other
+        # stat table.  Pre-fix, the gate query would find zero rows because
+        # the UNION only looked at 4 tables.
+        conn.execute(
+            "INSERT INTO reconciliation_discrepancies "
+            "(game_id, run_id, perspective_team_id, team_id, player_id, "
+            "signal_name, category, status) "
+            "VALUES (?, 'run-gate', ?, ?, ?, 'pitcher_bf', 'pitching', 'MATCH')",
+            (game_id, owner_id, team_id, pitcher_id),
+        )
+        conn.commit()
+        conn.close()
+
+        with patch.dict("os.environ", _admin_env(db)):
+            preview = _get_delete_confirmation_data(team_id)
+
+        owners = preview.get("cross_perspective_owners", [])
+        assert len(owners) == 1, (
+            f"Finding 1: gate must detect the foreign-owned reconciliation "
+            f"row. Expected 1 owner, got {owners}."
+        )
+        assert owners[0]["id"] == owner_id, (
+            f"owner id should be {owner_id}, got {owners[0]['id']}"
+        )
+        assert owners[0]["name"] == "Lincoln Varsity"
+        assert owners[0]["row_count"] == 1
+
+    def test_gate_blocks_delete_with_reconciliation_only_cross_perspective(
+        self, db: Path
+    ) -> None:
+        """Finding 1 end-to-end: the HTTP delete route must re-render the
+        confirmation page (not execute the cascade) when the team's only
+        cross-perspective footprint is foreign-owned reconciliation rows.
+
+        Pre-fix, the gate returned empty ``cross_perspective_owners``, the
+        ``has_cross_perspective`` check at ``admin.py:2416`` was False, and
+        the delete proceeded silently.  Post-fix, the gate detects the
+        reconciliation row and the route re-renders with
+        ``warning=confirmation_required``.
+        """
+        admin_id = _insert_user(db, "admin@example.com")
+        token = _insert_session(db, admin_id)
+        season_id = _insert_season(db)
+        team_id = _insert_team(db, "Subject", membership_type="tracked")
+        owner_id = _insert_team(db, "Lincoln Varsity", membership_type="member")
+        game_id = _insert_game(db, "g-recon-route", team_id, owner_id, season_id)
+        pitcher_id = _insert_player(db, "p-recon-route")
+
+        conn = sqlite3.connect(str(db))
+        conn.execute("PRAGMA foreign_keys=ON;")
+        conn.execute(
+            "INSERT INTO reconciliation_discrepancies "
+            "(game_id, run_id, perspective_team_id, team_id, player_id, "
+            "signal_name, category, status) "
+            "VALUES (?, 'run-route', ?, ?, ?, 'pitcher_bf', 'pitching', 'MATCH')",
+            (game_id, owner_id, team_id, pitcher_id),
+        )
+        conn.commit()
+        conn.close()
+
+        with patch.dict("os.environ", _admin_env(db)):
+            with TestClient(
+                app, follow_redirects=False,
+                cookies={"session": token, "csrf_token": _CSRF},
+            ) as client:
+                # POST WITHOUT confirm_cross_perspective -- pre-fix would
+                # silently delete; post-fix must re-render the gate page.
+                resp = client.post(
+                    f"/admin/teams/{team_id}/delete",
+                    data={"csrf_token": _CSRF},
+                )
+
+        assert resp.status_code == 200, (
+            f"Finding 1: expected 200 re-render (gate fires on foreign recon "
+            f"rows), got {resp.status_code}. body: {resp.text[:500]}"
+        )
+        # Response must name the specific owner team that owns the recon row.
+        assert "Lincoln Varsity" in resp.text, (
+            "confirmation page must name the cross-perspective owner"
+        )
+        # The team row must still exist (delete was blocked by the gate).
+        assert _count_rows(db, "teams", "id = ?", (team_id,)) == 1, (
+            "team should NOT have been deleted when gate fires"
+        )
+        # The reconciliation row must still exist.
+        assert _count_rows(
+            db, "reconciliation_discrepancies", "team_id = ?", (team_id,)
+        ) == 1, "foreign-owned reconciliation row should survive the gate"
+
+    def test_flash_message_reflects_team_row_retention(
+        self, db: Path
+    ) -> None:
+        """Finding 2: when the cascade retains the teams row (because a
+        surviving cross-perspective games row still FK-references it), the
+        admin delete route must emit an accurate flash message -- not a
+        blanket ``Team "X" deleted.`` lie.
+
+        This test seeds the same cross-perspective games shape as the
+        E-221-04 RED test, invokes the delete with
+        ``confirm_cross_perspective=1``, and asserts:
+          - HTTP 303 redirect to /admin/teams (delete succeeded)
+          - The redirect query string includes the retention message
+          - The teams row is still present (retention path active)
+          - The games row is still present (preservation path active)
+        """
+        from urllib.parse import unquote_plus
+
+        admin_id = _insert_user(db, "admin@example.com")
+        token = _insert_session(db, admin_id)
+        season_id = _insert_season(db)
+        team_a_id = _insert_team(db, "Lincoln Varsity", membership_type="member")
+        team_b_id = _insert_team(db, "Rival Varsity", membership_type="tracked")
+        game_id = _insert_game(
+            db, "g-retain-msg", team_a_id, team_b_id, season_id,
+        )
+        batter_b = _insert_player(db, "p-batter-b-f2")
+        pitcher_b = _insert_player(db, "p-pitcher-b-f2")
+
+        conn = sqlite3.connect(str(db))
+        conn.execute("PRAGMA foreign_keys=ON;")
+        # Seed minimal team B perspective data so cascade_delete_team
+        # preserves the game (team B's game_perspectives row survives).
+        # Team A gets a game_perspectives entry so the confirmation gate
+        # detects cross-perspective and requires the confirm flag.
+        conn.execute(
+            "INSERT INTO game_perspectives (game_id, perspective_team_id) "
+            "VALUES (?, ?)",
+            (game_id, team_a_id),
+        )
+        conn.execute(
+            "INSERT INTO game_perspectives (game_id, perspective_team_id) "
+            "VALUES (?, ?)",
+            (game_id, team_b_id),
+        )
+        # Team B cross-perspective batting row anchored to team A's directory
+        # -- triggers the gate's cross_perspective_owners detection and gives
+        # team B a reason to exist in the cascade context.
+        conn.execute(
+            "INSERT INTO player_game_batting "
+            "(game_id, player_id, team_id, perspective_team_id) "
+            "VALUES (?, ?, ?, ?)",
+            (game_id, batter_b, team_a_id, team_b_id),
+        )
+        # Team B own-perspective row so team B has stat coverage of its own.
+        conn.execute(
+            "INSERT INTO player_game_pitching "
+            "(game_id, player_id, team_id, perspective_team_id) "
+            "VALUES (?, ?, ?, ?)",
+            (game_id, pitcher_b, team_b_id, team_b_id),
+        )
+        conn.commit()
+        conn.close()
+
+        with patch.dict("os.environ", _admin_env(db)):
+            with TestClient(
+                app,
+                follow_redirects=False,
+                cookies={"session": token, "csrf_token": _CSRF},
+            ) as client:
+                resp = client.post(
+                    f"/admin/teams/{team_a_id}/delete",
+                    data={
+                        "csrf_token": _CSRF,
+                        "confirm_cross_perspective": "1",
+                    },
+                )
+
+        # Delete succeeded at the HTTP layer (303 redirect).
+        assert resp.status_code == 303, (
+            f"expected 303 redirect, got {resp.status_code}. "
+            f"body: {resp.text[:500]}"
+        )
+
+        # Retention path active: team A's row is still present because the
+        # preserved games row still FK-references it.
+        assert _count_rows(db, "teams", "id = ?", (team_a_id,)) == 1, (
+            "Finding 2 precondition: teams row should be retained because "
+            "a surviving games row still FK-references it"
+        )
+        # Preservation path active: the games row survives because team B
+        # still owns a game_perspectives entry.
+        assert _count_rows(db, "games", "game_id = ?", (game_id,)) == 1, (
+            "Finding 2 precondition: games row should be preserved when "
+            "another perspective still owns it"
+        )
+
+        # Flash message must reflect retention, not a blanket "deleted" lie.
+        location = resp.headers.get("location", "")
+        decoded_location = unquote_plus(location)
+        assert "retained" in decoded_location, (
+            f"Finding 2: flash message should mention retention, got: "
+            f"{decoded_location}"
+        )
+        # The old blanket "deleted." phrasing should NOT appear for this
+        # retention case.  (The word "deleted" may appear as part of
+        # "data removed" or similar, but not as the standalone past-tense
+        # team-row-deleted assertion.)
+        assert "Team \"Lincoln Varsity\" deleted." not in decoded_location, (
+            f"Finding 2: retention case must not use the blanket "
+            f"'Team \"X\" deleted.' flash message. Got: {decoded_location}"
+        )
+
+    def test_flash_message_reports_deleted_in_clean_path(
+        self, db: Path
+    ) -> None:
+        """Finding 2 AC-2 parallel: the common path (no retention) must
+        still emit the original ``Team "X" deleted.`` flash message.
+
+        Seeds a clean team with no cross-perspective footprint, invokes
+        delete, asserts the flash still says "deleted" and the team row is
+        actually gone.
+        """
+        from urllib.parse import unquote_plus
+
+        admin_id = _insert_user(db, "admin@example.com")
+        token = _insert_session(db, admin_id)
+        season_id = _insert_season(db)
+        team_id = _insert_team(db, "Solo Team", membership_type="member")
+        opp_id = _insert_team(db, "Opp Team", membership_type="tracked")
+        _insert_game(db, "g-solo", team_id, opp_id, season_id)
+
+        with patch.dict("os.environ", _admin_env(db)):
+            with TestClient(
+                app,
+                follow_redirects=False,
+                cookies={"session": token, "csrf_token": _CSRF},
+            ) as client:
+                resp = client.post(
+                    f"/admin/teams/{team_id}/delete",
+                    data={"csrf_token": _CSRF},
+                )
+
+        assert resp.status_code == 303, (
+            f"expected 303 redirect, got {resp.status_code}"
+        )
+        # Clean path: team row actually removed.
+        assert _count_rows(db, "teams", "id = ?", (team_id,)) == 0, (
+            "clean path: teams row should be gone"
+        )
+        # Flash message should still say "deleted" (no retention).
+        location = resp.headers.get("location", "")
+        decoded_location = unquote_plus(location)
+        assert 'Team "Solo Team" deleted.' in decoded_location, (
+            f"Finding 2 regression: clean-path flash must still say "
+            f"'Team \"X\" deleted.'. Got: {decoded_location}"
+        )

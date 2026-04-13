@@ -135,21 +135,31 @@ Both the crawl and load steps always run -- crawled data stays in `data/raw/` an
 
 ### Deleting a Team
 
-The **Delete** button appears only on rows where the team is **deactivated** (`is_active = 0`). Active teams do not show a delete option. Clicking Delete shows a browser confirmation dialog with the team name before submitting.
+The **Delete** button appears only on rows where the team is **deactivated** (`is_active = 0`). Active teams do not show a delete option. Clicking Delete opens a confirmation page (not a browser dialog) showing all associated data counts before submitting.
 
-`POST /admin/teams/{id}/delete` checks two preconditions before proceeding:
+`POST /admin/teams/{id}/delete` enforces two preconditions before proceeding:
 1. The team is deactivated.
-2. No associated data rows exist in: `games`, `player_game_batting`, `player_game_pitching`, `player_season_batting`, `player_season_pitching`, `scouting_runs`, `spray_charts`.
+2. The team has no data rows (the confirmation page shows counts across all tables; the delete button is disabled until the operator confirms).
 
-If either check fails, the page redirects to the teams list with an error flash explaining the team has associated data and cannot be deleted. Teams with historical game or stat data should remain deactivated, not deleted.
+**Cross-perspective informed-consent gate**: If any of five tables (`player_game_batting`, `player_game_pitching`, `spray_charts`, `plays`, `reconciliation_discrepancies`) contain rows where `team_id = T` but `perspective_team_id != T`, the confirmation page displays a warning listing the other teams whose scouting data would be affected. The POST must include `confirm_cross_perspective=1` (submitted via a checkbox) to proceed past this gate. Without it, the confirmation page is re-rendered with the named impact panel. Teams with no cross-perspective rows proceed without this gate.
 
-When deletion proceeds (both checks pass), the operation runs in a single transaction:
-1. Clears junction/access rows: `team_opponents`, `team_rosters`, `opponent_links`, `user_team_access`, `coaching_assignments`, `crawl_jobs`.
-2. Deletes the `teams` row.
+This gate is implemented in `_get_delete_confirmation_data` at `src/api/routes/admin.py:698`.
 
-After a successful deletion, the teams list shows a success flash confirming which team was removed.
+**Cascade and retention**: When deletion proceeds, `_delete_team_cascade` (`src/api/routes/admin.py:951`) delegates to `cascade_delete_team` in `src/reports/generator.py:1518` -- the canonical cleanup helper shared by the admin delete path and the report deletion path. The cascade runs three passes:
+1. Anchor-and-orphan pass: removes all game-level stat rows keyed to the deleted team regardless of perspective.
+2. Game-scoped perspective pass: removes remaining perspective-scoped rows (bounded by the team's participant games), with a NOT EXISTS guard that preserves `games` rows still referenced by other perspectives.
+3. Team-scoped pass: removes season-level tables, `team_opponents`, `opponent_links`, and access/metadata rows.
 
-**Use case**: Removing mis-entered or duplicate tracked teams before any data has been crawled for them. Once data exists, soft-deactivation (`is_active = 0`) is the only option.
+After the three passes, the cascade checks whether any `games` row still FK-references the team via `home_team_id` or `away_team_id`. If so, the `teams` row is **retained** as an FK anchor (the team's scouting data has been removed, but the row is preserved so cross-perspective game records remain valid). If not, the `teams` row is deleted.
+
+**Flash messages**: After the cascade, the handler at `src/api/routes/admin.py:2442-2462` probes whether the `teams` row still exists and emits:
+
+- Common case (no surviving cross-perspective games): `Team "X" deleted.`
+- Retention case (cross-perspective games still reference the row): `Team "X" data removed; team row retained because cross-perspective games still reference it.`
+
+In the retention case, the team still appears in the teams list because the row was kept. This is correct behavior -- the operator's scouting data has been removed, but the record is preserved for referential integrity.
+
+**Use case**: Removing mis-entered or duplicate tracked teams. Once a team has game or stat data, the cascade handles cleanup automatically -- the simple-delete path (no data) and the full-cascade path (data exists) share the same flow; row counts on the confirmation page make the scope visible before committing.
 
 ### Opponent Discovery (Automatic)
 
@@ -1115,4 +1125,4 @@ For the expected data volume (~30 games x 4 teams x a few seasons), the database
 
 ---
 
-*Last updated: 2026-04-03 | Source: E-199 (standalone reports section, cascade-delete behavior), E-198 (bb data reconcile, migration 012), E-195 (plays pipeline, migration 009, validate_plays_stats.py), E-173 (resolution write-through, auto-scout after linking, unified Find on GC resolve page, dashboard sort by next game date, terminology cleanup, bb data repair-opponents), E-167 (bb data dedup CLI, GC search-powered opponent resolution, skip/unhide workflow), E-163 (scouting spray pipeline, updated thresholds, bb data scout 4-step flow), E-158 (spray chart pipeline, migration 006, chart routes), E-156 (bb data scout --force flag), E-155 (duplicate team detection and merge UI), E-143 (programs, user roles, team delete, opponent mapping UX, crawl trigger UI), E-120-06 (bare UUID input documented), E-055 (unified CLI), E-115-01 (E-100 team management model), E-028-03 (original)*
+*Last updated: 2026-04-13 | Source: E-221 (team delete cross-perspective gate, cascade consolidation, retention flash message), E-199 (standalone reports section, cascade-delete behavior), E-198 (bb data reconcile, migration 012), E-195 (plays pipeline, migration 009, validate_plays_stats.py), E-173 (resolution write-through, auto-scout after linking, unified Find on GC resolve page, dashboard sort by next game date, terminology cleanup, bb data repair-opponents), E-167 (bb data dedup CLI, GC search-powered opponent resolution, skip/unhide workflow), E-163 (scouting spray pipeline, updated thresholds, bb data scout 4-step flow), E-158 (spray chart pipeline, migration 006, chart routes), E-156 (bb data scout --force flag), E-155 (duplicate team detection and merge UI), E-143 (programs, user roles, team delete, opponent mapping UX, crawl trigger UI), E-120-06 (bare UUID input documented), E-055 (unified CLI), E-115-01 (E-100 team management model), E-028-03 (original)*

@@ -1390,6 +1390,94 @@ def _delete_game_scoped_data_for_perspectives(
     )
 
 
+def _delete_team_anchor_and_orphan_data(
+    conn: sqlite3.Connection, team_id: int
+) -> None:
+    """Delete game-level stat rows anchored to or perspectived by the given team.
+
+    Two passes, both unbounded by the participant-games set:
+
+      1. Perspective pass: rows where ``perspective_team_id = team_id`` in any
+         game.  Mirrors the Phase 1b cleanup from the pre-refactor admin cascade
+         (``src/api/routes/admin.py``).  Necessary because
+         ``_delete_game_scoped_data_for_perspectives`` scopes its DELETEs to a
+         participant-games set, so cross-perspective scouting rows the team
+         produced about games it did not play in are missed.
+
+      2. Anchor pass: rows where ``team_id = team_id`` (and ``batting_team_id``
+         for ``plays``) in any game, regardless of which perspective owns them.
+         Necessary because ``team_id INTEGER NOT NULL REFERENCES teams(id)``
+         has no ``ON DELETE`` clause anywhere in the schema.  SQLite's default
+         is NO ACTION (RESTRICT on immediate), so deleting a team without first
+         removing its anchor rows raises ``IntegrityError`` at the
+         ``DELETE FROM teams`` step.
+
+    Pass order (perspective first, anchor second) matches the historical
+    admin.py Phase 1b / Phase 3 ordering and keeps the two WHERE-clause
+    families grepable.  Correctness does not depend on the order -- both
+    passes are idempotent DELETEs on overlapping tables with different
+    filters.  Within the anchor pass, ``play_events`` MUST be deleted before
+    its parent ``plays`` rows to respect the ``play_events.play_id -> plays.id``
+    FK.
+    """
+    # --- Pass 1: perspective_team_id = T (any game) --------------------------
+    conn.execute(
+        "DELETE FROM play_events WHERE play_id IN ("
+        "  SELECT id FROM plays WHERE perspective_team_id = ?"
+        ")",
+        (team_id,),
+    )
+    conn.execute(
+        "DELETE FROM plays WHERE perspective_team_id = ?", (team_id,)
+    )
+    conn.execute(
+        "DELETE FROM player_game_batting WHERE perspective_team_id = ?",
+        (team_id,),
+    )
+    conn.execute(
+        "DELETE FROM player_game_pitching WHERE perspective_team_id = ?",
+        (team_id,),
+    )
+    conn.execute(
+        "DELETE FROM spray_charts WHERE perspective_team_id = ?",
+        (team_id,),
+    )
+    conn.execute(
+        "DELETE FROM reconciliation_discrepancies WHERE perspective_team_id = ?",
+        (team_id,),
+    )
+    conn.execute(
+        "DELETE FROM game_perspectives WHERE perspective_team_id = ?",
+        (team_id,),
+    )
+
+    # --- Pass 2: team_id / batting_team_id = T (any game, any perspective) ---
+    # plays.batting_team_id and plays.perspective_team_id are independent FKs;
+    # the perspective pass already handled perspective_team_id = T, so we
+    # target batting_team_id = T here.  play_events must precede plays.
+    conn.execute(
+        "DELETE FROM play_events WHERE play_id IN ("
+        "  SELECT id FROM plays WHERE batting_team_id = ?"
+        ")",
+        (team_id,),
+    )
+    conn.execute(
+        "DELETE FROM plays WHERE batting_team_id = ?", (team_id,)
+    )
+    conn.execute(
+        "DELETE FROM player_game_batting WHERE team_id = ?", (team_id,)
+    )
+    conn.execute(
+        "DELETE FROM player_game_pitching WHERE team_id = ?", (team_id,)
+    )
+    conn.execute(
+        "DELETE FROM spray_charts WHERE team_id = ?", (team_id,)
+    )
+    conn.execute(
+        "DELETE FROM reconciliation_discrepancies WHERE team_id = ?", (team_id,)
+    )
+
+
 def _delete_team_scoped_data(
     conn: sqlite3.Connection, team_ids: list[int], *, delete_team_rows: bool = True
 ) -> None:
@@ -1409,6 +1497,15 @@ def _delete_team_scoped_data(
     conn.execute(f"DELETE FROM crawl_jobs WHERE team_id IN ({placeholders})", team_ids)
     conn.execute(f"DELETE FROM coaching_assignments WHERE team_id IN ({placeholders})", team_ids)
     conn.execute(f"DELETE FROM user_team_access WHERE team_id IN ({placeholders})", team_ids)
+    conn.execute(
+        f"DELETE FROM team_opponents WHERE our_team_id IN ({placeholders}) "
+        f"OR opponent_team_id IN ({placeholders})",
+        team_ids + team_ids,
+    )
+    conn.execute(
+        f"DELETE FROM opponent_links WHERE our_team_id IN ({placeholders})",
+        team_ids,
+    )
     conn.execute(
         f"UPDATE opponent_links SET resolved_team_id = NULL, resolution_method = NULL, "
         f"resolved_at = NULL WHERE resolved_team_id IN ({placeholders})",
@@ -1442,6 +1539,13 @@ def cascade_delete_team(conn: sqlite3.Connection, team_id: int) -> None:
         "SELECT game_id FROM games WHERE home_team_id = ? OR away_team_id = ?",
         (team_id, team_id),
     ).fetchall()
+    # Unbounded cleanup MUST run before _delete_game_scoped_data_for_perspectives,
+    # because the latter attempts to delete the games row inside its last DELETE
+    # and will FK-violate if anchor rows (team_id = T, any perspective) still
+    # reference the game.  The anchor pass clears those; the perspective-scoped
+    # helper then cleans remaining perspective-scoped rows and deletes the game
+    # row under the NOT EXISTS guard.
+    _delete_team_anchor_and_orphan_data(conn, team_id)
     _delete_game_scoped_data_for_perspectives(
         conn, [r[0] for r in game_rows], [team_id],
     )

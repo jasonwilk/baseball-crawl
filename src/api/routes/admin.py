@@ -832,6 +832,13 @@ def _get_delete_confirmation_data(team_id: int) -> dict[str, Any]:
         # team being deleted.  Used by the template to show a named impact
         # panel and by the route handler to gate delete on explicit
         # operator confirmation (confirm_cross_perspective flag).
+        #
+        # E-221 Phase 4b Finding 1: reconciliation_discrepancies added to the
+        # UNION so the gate matches what the canonical cleanup
+        # (_delete_team_anchor_and_orphan_data Pass 2 at
+        # src/reports/generator.py:1476-1478) actually deletes.  Without the
+        # 5th table here, a team with ONLY foreign-owned reconciliation rows
+        # silently bypassed the confirmation screen.
         cross_persp_rows = conn.execute(
             """
             SELECT t.name, t.id, SUM(row_count) AS row_count
@@ -855,12 +862,17 @@ def _get_delete_confirmation_data(team_id: int) -> dict[str, Any]:
                 FROM plays
                 WHERE batting_team_id = ? AND perspective_team_id != ?
                 GROUP BY perspective_team_id
+                UNION ALL
+                SELECT perspective_team_id, COUNT(*) AS row_count
+                FROM reconciliation_discrepancies
+                WHERE team_id = ? AND perspective_team_id != ?
+                GROUP BY perspective_team_id
             ) x
             JOIN teams t ON t.id = x.perspective_team_id
             GROUP BY t.id, t.name
             ORDER BY row_count DESC, t.name
             """,
-            (team_id, team_id) * 4,
+            (team_id, team_id) * 5,
         ).fetchall()
         cross_perspective_owners: list[dict[str, Any]] = [
             {"id": row["id"], "name": row["name"], "row_count": row["row_count"]}
@@ -939,118 +951,25 @@ def _get_delete_confirmation_data(team_id: int) -> dict[str, Any]:
 def _delete_team_cascade(team_id: int) -> None:
     """Delete a team and all related data rows in a single transaction.
 
-    Implements the 4-phase cascade deletion order from TN-1:
-      Phase 1 -- game-child rows (player_game_batting, player_game_pitching,
-                 spray_charts linked via game_id)
-      Phase 2 -- games (home_team_id=T OR away_team_id=T)
-      Phase 3 -- direct team_id FK rows (player_season_batting,
-                 player_season_pitching, spray_charts with game_id NULL,
-                 team_rosters, scouting_runs, crawl_jobs, user_team_access,
-                 coaching_assignments, team_opponents, opponent_links)
-      Phase 4 -- teams row
+    Thin wrapper that delegates to
+    ``src.reports.generator.cascade_delete_team``.  The canonical helper
+    handles FK-safe cleanup across all game-level and team-scoped tables,
+    preserves cross-perspective ``games`` rows owned by other perspectives,
+    and retains the ``teams`` row when a surviving ``games`` row still
+    FK-references it.
+
+    The cross-perspective confirmation gate (informed-consent UI) lives in
+    the HTTP handler (``delete_team``) -- by the time this function is
+    called, the admin has either confirmed or the team has no cross-
+    perspective rows.  This function performs the actual cleanup.
 
     Args:
         team_id: The team's INTEGER primary key.
     """
-    _game_ids = "SELECT game_id FROM games WHERE home_team_id = ? OR away_team_id = ?"
+    from src.reports.generator import cascade_delete_team
 
     with closing(get_connection()) as conn:
-        # Phase 1a -- game-child rows for games where the team is a participant
-        # (FK-safe order: grandchildren before children).  Covers rows keyed
-        # by game_id where home/away is the team being deleted.
-        conn.execute(
-            f"DELETE FROM play_events WHERE play_id IN ("
-            f"  SELECT id FROM plays WHERE perspective_team_id = ? AND game_id IN ({_game_ids})"
-            f")",
-            (team_id, team_id, team_id),
-        )
-        conn.execute(
-            f"DELETE FROM plays WHERE perspective_team_id = ? AND game_id IN ({_game_ids})",
-            (team_id, team_id, team_id),
-        )
-        conn.execute(
-            f"DELETE FROM reconciliation_discrepancies WHERE perspective_team_id = ? AND game_id IN ({_game_ids})",
-            (team_id, team_id, team_id),
-        )
-        conn.execute(
-            f"DELETE FROM player_game_batting WHERE perspective_team_id = ? AND game_id IN ({_game_ids})",
-            (team_id, team_id, team_id),
-        )
-        conn.execute(
-            f"DELETE FROM player_game_pitching WHERE perspective_team_id = ? AND game_id IN ({_game_ids})",
-            (team_id, team_id, team_id),
-        )
-        conn.execute(
-            f"DELETE FROM spray_charts WHERE perspective_team_id = ? AND game_id IN ({_game_ids})",
-            (team_id, team_id, team_id),
-        )
-        conn.execute(
-            f"DELETE FROM game_perspectives WHERE perspective_team_id = ? AND game_id IN ({_game_ids})",
-            (team_id, team_id, team_id),
-        )
-
-        # Phase 1b (E-220 round 6 cluster 3) -- rows where perspective_team_id = T
-        # but the team is NOT a participant in the game (cross-perspective scouting
-        # rows about other teams from T's perspective).  These must be deleted
-        # because the teams row is about to go away, and perspective_team_id has a
-        # NOT NULL FK.  Must precede the perspective_team_id = T rows for games
-        # the team IS a participant in (those were already cleaned by Phase 1a).
-        conn.execute(
-            "DELETE FROM play_events WHERE play_id IN ("
-            "  SELECT id FROM plays WHERE perspective_team_id = ?"
-            ")",
-            (team_id,),
-        )
-        conn.execute(
-            "DELETE FROM plays WHERE perspective_team_id = ?", (team_id,)
-        )
-        conn.execute(
-            "DELETE FROM player_game_batting WHERE perspective_team_id = ?",
-            (team_id,),
-        )
-        conn.execute(
-            "DELETE FROM player_game_pitching WHERE perspective_team_id = ?",
-            (team_id,),
-        )
-        conn.execute(
-            "DELETE FROM spray_charts WHERE perspective_team_id = ?",
-            (team_id,),
-        )
-        conn.execute(
-            "DELETE FROM game_perspectives WHERE perspective_team_id = ?",
-            (team_id,),
-        )
-
-        # Phase 2 -- games (only when no other perspective still owns the game)
-        conn.execute(
-            "DELETE FROM games WHERE (home_team_id = ? OR away_team_id = ?) "
-            "AND NOT EXISTS ("
-            "  SELECT 1 FROM game_perspectives gp2 WHERE gp2.game_id = games.game_id"
-            ")",
-            (team_id, team_id),
-        )
-
-        # Phase 3 -- direct team_id FKs
-        conn.execute("DELETE FROM player_season_batting WHERE team_id = ?", (team_id,))
-        conn.execute("DELETE FROM player_season_pitching WHERE team_id = ?", (team_id,))
-        conn.execute("DELETE FROM spray_charts WHERE team_id = ?", (team_id,))
-        conn.execute("DELETE FROM team_rosters WHERE team_id = ?", (team_id,))
-        conn.execute("DELETE FROM scouting_runs WHERE team_id = ?", (team_id,))
-        conn.execute("DELETE FROM crawl_jobs WHERE team_id = ?", (team_id,))
-        conn.execute("DELETE FROM user_team_access WHERE team_id = ?", (team_id,))
-        conn.execute("DELETE FROM coaching_assignments WHERE team_id = ?", (team_id,))
-        conn.execute(
-            "DELETE FROM team_opponents WHERE our_team_id = ? OR opponent_team_id = ?",
-            (team_id, team_id),
-        )
-        conn.execute(
-            "DELETE FROM opponent_links WHERE our_team_id = ? OR resolved_team_id = ?",
-            (team_id, team_id),
-        )
-
-        # Phase 4 -- team row
-        conn.execute("DELETE FROM teams WHERE id = ?", (team_id,))
-        conn.commit()
+        cascade_delete_team(conn, team_id)
 
 
 def _create_crawl_job(team_id: int, sync_type: str) -> int:
@@ -2523,8 +2442,22 @@ async def delete_team(request: Request, id: int) -> Response:
     team_name = team["name"]
     await run_in_threadpool(_delete_team_cascade, id)
 
+    # E-221 Phase 4b Finding 2: the canonical cascade
+    # (src/reports/generator.py::cascade_delete_team lines 1540-1558) retains
+    # the teams row when a surviving cross-perspective games row still
+    # FK-references it.  Probe the post-cascade state and surface an accurate
+    # flash message -- "deleted" is a lie when the row is still present.
+    team_still_exists = await run_in_threadpool(_get_team_by_integer_id, id)
+    if team_still_exists:
+        msg = (
+            f'Team "{team_name}" data removed; team row retained because '
+            f"cross-perspective games still reference it."
+        )
+    else:
+        msg = f'Team "{team_name}" deleted.'
+
     return RedirectResponse(
-        url=f"/admin/teams?msg={quote_plus(f'Team \"{team_name}\" deleted.')}",
+        url=f"/admin/teams?msg={quote_plus(msg)}",
         status_code=303,
     )
 

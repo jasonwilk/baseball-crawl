@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import os
 import sqlite3
+import uuid
 from contextlib import closing
 from enum import Enum
 from pathlib import Path
@@ -1158,13 +1159,73 @@ def reconcile(
             raise SystemExit(0)
 
         if game_id:
-            summary = reconcile_game(conn, game_id, dry_run=not execute)
-            if summary.games_skipped_no_plays:
-                typer.echo(f"Game {game_id}: no plays data found, skipped.")
+            # E-221-07 (R8-P1-3): iterate every perspective the game was
+            # loaded from, calling reconcile_game once per perspective.
+            # Mirrors reconcile_all's per-pair iteration (engine.py:454-466).
+            # Pre-fix, the CLI called reconcile_game without a
+            # perspective_team_id kwarg, which fell through to the home-
+            # first deterministic selection and silently dropped the other
+            # perspective's discrepancies for any cross-perspective game.
+            # Option A per DE consult (2026-04-13): unconditional iteration,
+            # no --perspective-team-id flag.  The canonical operator mental
+            # model for `bb data reconcile --game-id X` is "reconcile this
+            # game (all perspectives of it)".
+            ptids = [
+                row[0]
+                for row in conn.execute(
+                    "SELECT DISTINCT perspective_team_id FROM plays "
+                    "WHERE game_id = ? ORDER BY perspective_team_id",
+                    (game_id,),
+                ).fetchall()
+            ]
+
+            if not ptids:
+                # No plays at all -- fall through to the existing skip
+                # path so games_skipped_no_plays fires and the operator
+                # sees the "no plays data found" message.
+                summary = reconcile_game(conn, game_id, dry_run=not execute)
+                if summary.games_skipped_no_plays:
+                    typer.echo(
+                        f"Game {game_id}: no plays data found, skipped."
+                    )
+                    raise SystemExit(0)
+                # Unreachable today (no plays -> skipped above) but kept
+                # defensively in case future reconcile_game changes emit
+                # a summary without the skip flag.
+                mode = "correction" if execute else "detection"
+                typer.echo(f"Game {game_id}: {mode} complete.")
+                _print_verbose_summary(summary, execute=execute)
                 raise SystemExit(0)
+
+            # Shared run_id across the per-perspective calls so all
+            # reconciliation_discrepancies rows cluster under one run
+            # (matches reconcile_all's pattern at engine.py:451).
+            run_id = str(uuid.uuid4())
             mode = "correction" if execute else "detection"
-            typer.echo(f"Game {game_id}: {mode} complete.")
-            _print_verbose_summary(summary, execute=execute)
+            any_processed = False
+            for ptid in ptids:
+                summary = reconcile_game(
+                    conn, game_id, dry_run=not execute,
+                    run_id=run_id, perspective_team_id=ptid,
+                )
+                if summary.games_skipped_no_plays:
+                    # Shouldn't happen -- ptid came from the plays table --
+                    # but log and continue rather than failing the command.
+                    typer.echo(
+                        f"Game {game_id}, perspective {ptid}: no plays "
+                        f"(unexpected -- skipped)."
+                    )
+                    continue
+                any_processed = True
+                typer.echo(
+                    f"\nGame {game_id} (perspective={ptid}): {mode} complete."
+                )
+                _print_verbose_summary(summary, execute=execute)
+
+            if not any_processed:
+                typer.echo(
+                    f"Game {game_id}: no reconcilable perspectives found."
+                )
         else:
             summary = reconcile_all(conn, dry_run=not execute)
             _print_summary(summary, execute=execute)

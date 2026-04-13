@@ -2,7 +2,7 @@
 
 ## Numbering State
 - Next available epic number: E-223
-- Next available idea number: IDEA-070
+- Next available idea number: IDEA-071
 - Before assigning numbers: ALWAYS `ls /epics/` and `ls /.project/ideas/` to avoid collisions
 
 ## Project Context
@@ -25,7 +25,8 @@ For full details, read the epic file in `/epics/`. Only READY and ACTIVE epics a
 - **E-193** (READY): Browser Automation Infrastructure
 - **E-218** (READY): League/Level Detection for Pitch Rules
 - **E-219** (READY): Own-Side-Only Boxscore Loading (superseded by E-220; will be ABANDONED when E-220 dispatches)
-- **E-221** (READY): Test Fixture Schema Parity Audit + Post-E-220 Perspective Residuals (7 stories; lands round 8 P1s + fixture audit + CI guardrail)
+
+E-221 (Test Fixture Schema Parity Audit + Post-E-220 Perspective Residuals) COMPLETED 2026-04-13 -- archived at `.project/archive/E-221-perspective-residuals-and-fixture-audit/`. All three R8-P1 residuals closed; canonical cascade consolidation via `src/reports/generator.py::cascade_delete_team` (Option 2 refactor-delegate) established as the established pattern. Details in `archived-epics.md`.
 
 ## Key Architectural Decisions
 - Storage: SQLite (WAL mode). Host-mounted at ./data/app.db. Simple file backup via scripts/backup_db.py (no Litestream).

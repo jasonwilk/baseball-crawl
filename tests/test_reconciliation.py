@@ -744,6 +744,397 @@ class TestCLIErrorPath:
 
 
 # ---------------------------------------------------------------------------
+# E-221-07 (R8-P1-3): `bb data reconcile --game-id` perspective plumbing
+# ---------------------------------------------------------------------------
+
+
+def _seed_reconcile_cli_db(db_path: Path) -> None:
+    """Seed a tmp-file SQLite database with the standard teams/players/season
+    rows used by ``TestReconcileCLIGameIDPerspectives`` plus the cross-
+    perspective game fixture.  Mirrors the in-memory ``db`` fixture's seed
+    data but persists to disk so the typer CLI's ``sqlite3.connect(db_path)``
+    call can open it.
+    """
+    conn = sqlite3.connect(str(db_path))
+    load_real_schema(conn)
+    conn.execute(
+        "INSERT INTO seasons (season_id, name, season_type, year) "
+        "VALUES ('2025-spring-hs', '2025 Spring HS', 'spring-hs', 2025)"
+    )
+    conn.executemany(
+        "INSERT INTO teams (id, name, gc_uuid, membership_type) VALUES (?, ?, ?, ?)",
+        [
+            (1, "Home Team", "uuid-home", "member"),
+            (2, "Away Team", "uuid-away", "member"),
+        ],
+    )
+    conn.executemany(
+        "INSERT INTO players (player_id, first_name, last_name) VALUES (?, ?, ?)",
+        [
+            ("pitcher-h1", "Home", "Pitcher1"),
+            ("pitcher-a1", "Away", "Pitcher1"),
+            ("batter-h1", "Home", "Batter1"),
+            ("batter-a1", "Away", "Batter1"),
+        ],
+    )
+
+    # Seed a game loaded from TWO perspectives (team 1 and team 2).  Identical
+    # plays and boxscore for each perspective, tagged with distinct
+    # perspective_team_id values.  This mirrors the round 7 P1-2 fixture in
+    # ``TestCrossPerspectiveDiscrepancyPersistence`` but against a file path.
+    _insert_game(conn, "game-cli-xperspective")
+
+    for ptid in (1, 2):
+        _insert_pitching_boxscore(
+            conn, "game-cli-xperspective", "pitcher-h1", 1,
+            bf=1, so=1, bb=0, hbp=0, h=0, ip_outs=1,
+            pitches=3, total_strikes=3, wp=0,
+            perspective_team_id=ptid,
+        )
+        _insert_pitching_boxscore(
+            conn, "game-cli-xperspective", "pitcher-a1", 2,
+            bf=1, so=1, bb=0, hbp=0, h=0, ip_outs=1,
+            pitches=3, total_strikes=3, wp=0,
+            perspective_team_id=ptid,
+        )
+        _insert_batting_boxscore(
+            conn, "game-cli-xperspective", "batter-a1", 2,
+            ab=1, r=0, h=0, bb=0, so=1, perspective_team_id=ptid,
+        )
+        _insert_batting_boxscore(
+            conn, "game-cli-xperspective", "batter-h1", 1,
+            ab=1, r=0, h=0, bb=0, so=1, perspective_team_id=ptid,
+        )
+        p_top = _insert_play(
+            conn, "game-cli-xperspective", 1, inning=1, half="top",
+            batting_team_id=2, batter_id="batter-a1", pitcher_id="pitcher-h1",
+            outcome="Strikeout", pitch_count=3, did_outs_change=1,
+            perspective_team_id=ptid,
+        )
+        _insert_play_event(conn, p_top, 1, pitch_result="strike_swinging")
+        _insert_play_event(conn, p_top, 2, pitch_result="strike_swinging")
+        _insert_play_event(conn, p_top, 3, pitch_result="strike_swinging")
+        p_bot = _insert_play(
+            conn, "game-cli-xperspective", 2, inning=1, half="bottom",
+            batting_team_id=1, batter_id="batter-h1", pitcher_id="pitcher-a1",
+            outcome="Strikeout", pitch_count=3, did_outs_change=1,
+            perspective_team_id=ptid,
+        )
+        _insert_play_event(conn, p_bot, 1, pitch_result="strike_swinging")
+        _insert_play_event(conn, p_bot, 2, pitch_result="strike_swinging")
+        _insert_play_event(conn, p_bot, 3, pitch_result="strike_swinging")
+
+    conn.commit()
+    conn.close()
+
+
+class TestReconcileCLIGameIDPerspectives:
+    """E-221-07 / R8-P1-3: ``bb data reconcile --game-id X`` must process
+    every perspective the game was loaded from, not just the default (which
+    pre-fix was the home-first deterministic selection in ``reconcile_game``
+    and silently dropped other perspectives).
+
+    The CLI handler at ``src/cli/data.py:1160`` previously called
+    ``reconcile_game(conn, game_id, dry_run=...)`` without a
+    ``perspective_team_id`` kwarg.  For any cross-perspective game (the
+    modal case for LSB-adjacent tracked opponents loaded from two
+    boxscores), only one perspective's discrepancies landed in
+    ``reconciliation_discrepancies`` -- operators running the CLI had no
+    way to know.  The fix (E-221-07) iterates
+    ``SELECT DISTINCT perspective_team_id FROM plays WHERE game_id = ?``
+    inside the CLI handler and calls ``reconcile_game`` once per
+    perspective, mirroring ``reconcile_all`` at ``engine.py:454-466``.
+    """
+
+    def test_cli_game_id_processes_all_perspectives(
+        self, tmp_path: Path
+    ) -> None:
+        """Both perspectives' discrepancies land in
+        ``reconciliation_discrepancies`` after a single invocation of
+        ``bb data reconcile --game-id X``.
+
+        Pre-fix (current `src/cli/data.py:1160`): only perspective 1 (the
+        home-first deterministic default) persists rows; perspective 2 is
+        silently dropped.  The test asserts both perspectives have rows
+        post-invocation, which fails pre-fix and passes post-fix.
+        """
+        from typer.testing import CliRunner
+        from src.cli import app as bb_app
+
+        db_path = tmp_path / "test_reconcile_cli.db"
+        _seed_reconcile_cli_db(db_path)
+
+        runner = CliRunner()
+        result = runner.invoke(
+            bb_app,
+            [
+                "data", "reconcile",
+                "--game-id", "game-cli-xperspective",
+                "--db", str(db_path),
+            ],
+        )
+
+        assert result.exit_code == 0, (
+            f"bb data reconcile --game-id exited non-zero.\n"
+            f"stdout: {result.stdout}\n"
+            f"exception: {result.exception}"
+        )
+
+        # Verify both perspectives' discrepancies landed in the table.
+        conn = sqlite3.connect(str(db_path))
+        try:
+            p1_count = conn.execute(
+                "SELECT COUNT(*) FROM reconciliation_discrepancies "
+                "WHERE game_id = ? AND perspective_team_id = ?",
+                ("game-cli-xperspective", 1),
+            ).fetchone()[0]
+            p2_count = conn.execute(
+                "SELECT COUNT(*) FROM reconciliation_discrepancies "
+                "WHERE game_id = ? AND perspective_team_id = ?",
+                ("game-cli-xperspective", 2),
+            ).fetchone()[0]
+        finally:
+            conn.close()
+
+        assert p1_count > 0, (
+            "R8-P1-3 regression: perspective 1 should have discrepancy "
+            "rows after `bb data reconcile --game-id`. Got 0 rows."
+        )
+        assert p2_count > 0, (
+            "R8-P1-3 bug: perspective 2's discrepancies were dropped. "
+            "Pre-fix, the CLI called reconcile_game without a "
+            "perspective_team_id kwarg, which fell through to the home-"
+            "first deterministic selection and silently skipped "
+            "perspective 2. The fix iterates all perspectives from the "
+            f"plays table and reconciles each. Got p1={p1_count} p2={p2_count}."
+        )
+        # Both perspectives seeded identical data -- row counts should match.
+        assert p1_count == p2_count, (
+            f"perspectives seeded identical data should produce equal row "
+            f"counts: p1={p1_count} p2={p2_count}"
+        )
+
+    def test_cli_game_id_single_perspective_unchanged(
+        self, tmp_path: Path
+    ) -> None:
+        """AC-2: Given a game loaded from ONE perspective only, the CLI
+        behavior is unchanged from pre-fix -- one reconciliation pass runs
+        and its discrepancies persist.
+
+        This is the common case (games loaded from a single boxscore
+        perspective) and must not regress under the new iteration loop.
+        """
+        from typer.testing import CliRunner
+        from src.cli import app as bb_app
+
+        db_path = tmp_path / "test_reconcile_cli_single.db"
+        conn = sqlite3.connect(str(db_path))
+        load_real_schema(conn)
+        conn.execute(
+            "INSERT INTO seasons (season_id, name, season_type, year) "
+            "VALUES ('2025-spring-hs', '2025 Spring HS', 'spring-hs', 2025)"
+        )
+        conn.executemany(
+            "INSERT INTO teams (id, name, gc_uuid, membership_type) VALUES (?, ?, ?, ?)",
+            [
+                (1, "Home Team", "uuid-home", "member"),
+                (2, "Away Team", "uuid-away", "member"),
+            ],
+        )
+        conn.executemany(
+            "INSERT INTO players (player_id, first_name, last_name) VALUES (?, ?, ?)",
+            [
+                ("pitcher-h1", "Home", "Pitcher1"),
+                ("pitcher-a1", "Away", "Pitcher1"),
+                ("batter-h1", "Home", "Batter1"),
+                ("batter-a1", "Away", "Batter1"),
+            ],
+        )
+        _insert_game(conn, "game-cli-single")
+        _insert_pitching_boxscore(
+            conn, "game-cli-single", "pitcher-h1", 1,
+            bf=1, so=1, ip_outs=1, pitches=3, total_strikes=3,
+            perspective_team_id=1,
+        )
+        _insert_pitching_boxscore(
+            conn, "game-cli-single", "pitcher-a1", 2,
+            bf=1, so=1, ip_outs=1, pitches=3, total_strikes=3,
+            perspective_team_id=1,
+        )
+        _insert_batting_boxscore(
+            conn, "game-cli-single", "batter-a1", 2,
+            ab=1, so=1, perspective_team_id=1,
+        )
+        _insert_batting_boxscore(
+            conn, "game-cli-single", "batter-h1", 1,
+            ab=1, so=1, perspective_team_id=1,
+        )
+        p_top = _insert_play(
+            conn, "game-cli-single", 1, inning=1, half="top",
+            batting_team_id=2, batter_id="batter-a1", pitcher_id="pitcher-h1",
+            outcome="Strikeout", pitch_count=3, did_outs_change=1,
+            perspective_team_id=1,
+        )
+        _insert_play_event(conn, p_top, 1, pitch_result="strike_swinging")
+        _insert_play_event(conn, p_top, 2, pitch_result="strike_swinging")
+        _insert_play_event(conn, p_top, 3, pitch_result="strike_swinging")
+        p_bot = _insert_play(
+            conn, "game-cli-single", 2, inning=1, half="bottom",
+            batting_team_id=1, batter_id="batter-h1", pitcher_id="pitcher-a1",
+            outcome="Strikeout", pitch_count=3, did_outs_change=1,
+            perspective_team_id=1,
+        )
+        _insert_play_event(conn, p_bot, 1, pitch_result="strike_swinging")
+        _insert_play_event(conn, p_bot, 2, pitch_result="strike_swinging")
+        _insert_play_event(conn, p_bot, 3, pitch_result="strike_swinging")
+        conn.commit()
+        conn.close()
+
+        runner = CliRunner()
+        result = runner.invoke(
+            bb_app,
+            [
+                "data", "reconcile",
+                "--game-id", "game-cli-single",
+                "--db", str(db_path),
+            ],
+        )
+
+        assert result.exit_code == 0, (
+            f"bb data reconcile --game-id exited non-zero.\n"
+            f"stdout: {result.stdout}\n"
+            f"exception: {result.exception}"
+        )
+
+        conn = sqlite3.connect(str(db_path))
+        try:
+            p1_count = conn.execute(
+                "SELECT COUNT(*) FROM reconciliation_discrepancies "
+                "WHERE game_id = ? AND perspective_team_id = ?",
+                ("game-cli-single", 1),
+            ).fetchone()[0]
+            p2_count = conn.execute(
+                "SELECT COUNT(*) FROM reconciliation_discrepancies "
+                "WHERE game_id = ? AND perspective_team_id = ?",
+                ("game-cli-single", 2),
+            ).fetchone()[0]
+        finally:
+            conn.close()
+
+        assert p1_count > 0, (
+            "single-perspective game should still produce discrepancy "
+            "rows for the loaded perspective"
+        )
+        assert p2_count == 0, (
+            "single-perspective game must not spuriously produce rows for "
+            "a perspective that was never loaded"
+        )
+
+    def test_cli_game_id_execute_mode_processes_all_perspectives(
+        self, tmp_path: Path
+    ) -> None:
+        """E-221-07 AC-5 regression: the per-perspective iteration loop in
+        ``bb data reconcile --game-id X`` must work identically in
+        ``--execute`` mode (corrections applied) as in the default dry-run
+        mode.
+
+        The E-221-07 Phase 3 tests at ``test_cli_game_id_processes_all_
+        perspectives`` and ``test_cli_game_id_single_perspective_unchanged``
+        only exercise the dry-run path.  Codex review Finding 3 flagged
+        the gap: the shared ``run_id`` branch and per-perspective loop at
+        ``src/cli/data.py:1200-1228`` run the same code in both modes, but
+        an unexercised path can regress silently.
+
+        Asserts the execute path:
+          - HTTP/CLI exit code 0
+          - Both perspectives' discrepancy rows persist
+          - Shared ``run_id`` across the two perspectives (verifies the
+            ``run_id = str(uuid.uuid4())`` outside the loop at
+            ``src/cli/data.py:1201`` is reused for every perspective)
+          - Per-perspective output labels are emitted in execute mode
+            (the ``(perspective=N): correction complete.`` headers)
+        """
+        from typer.testing import CliRunner
+        from src.cli import app as bb_app
+
+        db_path = tmp_path / "test_reconcile_cli_execute.db"
+        _seed_reconcile_cli_db(db_path)
+
+        runner = CliRunner()
+        result = runner.invoke(
+            bb_app,
+            [
+                "data", "reconcile",
+                "--game-id", "game-cli-xperspective",
+                "--db", str(db_path),
+                "--execute",
+            ],
+        )
+
+        assert result.exit_code == 0, (
+            f"bb data reconcile --game-id --execute exited non-zero.\n"
+            f"stdout: {result.stdout}\n"
+            f"exception: {result.exception}"
+        )
+
+        conn = sqlite3.connect(str(db_path))
+        try:
+            p1_count = conn.execute(
+                "SELECT COUNT(*) FROM reconciliation_discrepancies "
+                "WHERE game_id = ? AND perspective_team_id = ?",
+                ("game-cli-xperspective", 1),
+            ).fetchone()[0]
+            p2_count = conn.execute(
+                "SELECT COUNT(*) FROM reconciliation_discrepancies "
+                "WHERE game_id = ? AND perspective_team_id = ?",
+                ("game-cli-xperspective", 2),
+            ).fetchone()[0]
+            # Shared run_id assertion: both perspectives' rows for this game
+            # must cluster under a single run_id (mirrors reconcile_all's
+            # pattern at engine.py:451, verified in CLI via the shared-scope
+            # run_id declared at src/cli/data.py:1201 outside the per-
+            # perspective loop).
+            run_id_count = conn.execute(
+                "SELECT COUNT(DISTINCT run_id) "
+                "FROM reconciliation_discrepancies "
+                "WHERE game_id = ?",
+                ("game-cli-xperspective",),
+            ).fetchone()[0]
+        finally:
+            conn.close()
+
+        assert p1_count > 0, (
+            "Finding 3: perspective 1 should have discrepancy rows after "
+            "`bb data reconcile --game-id --execute`"
+        )
+        assert p2_count > 0, (
+            "Finding 3 / AC-5: perspective 2's discrepancies must persist "
+            "in execute mode just as they do in dry-run mode. Got "
+            f"p1={p1_count} p2={p2_count}."
+        )
+        assert p1_count == p2_count, (
+            f"perspectives seeded identical data should produce equal row "
+            f"counts: p1={p1_count} p2={p2_count}"
+        )
+        assert run_id_count == 1, (
+            f"Finding 3 / AC-5: both perspectives must share a single "
+            f"run_id per CLI invocation (mirrors reconcile_all's pattern). "
+            f"Got {run_id_count} distinct run_ids."
+        )
+
+        # Per-perspective output labels are emitted in execute mode, with
+        # the "correction complete" label instead of "detection complete".
+        assert "(perspective=1): correction complete" in result.stdout, (
+            f"execute mode should emit per-perspective correction header "
+            f"for perspective 1. stdout:\n{result.stdout}"
+        )
+        assert "(perspective=2): correction complete" in result.stdout, (
+            f"execute mode should emit per-perspective correction header "
+            f"for perspective 2. stdout:\n{result.stdout}"
+        )
+
+
+# ---------------------------------------------------------------------------
 # E-198-02: Correction tests
 # ---------------------------------------------------------------------------
 

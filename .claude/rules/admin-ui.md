@@ -15,3 +15,13 @@ The admin UI (`/admin/`) is the **primary operational interface** for routine te
 - **Opponent resolution**: `/admin/opponents/{link_id}/resolve` provides a GC-search-powered workflow for connecting unresolved opponents to real GC teams. Resolution is a write-through operation via `finalize_opponent_resolution()` (see Architecture). Includes duplicate detection at confirm time (warns if selected team's `public_id` already exists). "No match" dismissal sets `is_hidden=1` (reversible via "Unhide"). Auto-scout triggers in the background when `public_id` is non-null.
 - **Dashboard opponent data states**: Opponent lists display three data states: `stats` (scouting stats loaded -- green), `syncing` (crawl job running -- yellow), `scoresheet` (only game data from own team's boxscores -- gray). Opponents are sorted by `next_game_date` ascending (NULLs last), then name.
 - **Shared admin subnav**: Admin templates use a `{% include "admin/_subnav.html" %}` partial with `{% with active_tab='...' %}` for consistent sub-navigation across pages.
+
+## Post-Cascade Probe for Retention UI
+
+When an admin route invokes a cascade helper whose contract permits conditional row retention (e.g., `cascade_delete_team` retains the `teams` row when surviving cross-perspective `games` rows still FK-reference it), the route MUST probe the post-cascade database state and emit an accurate flash message reflecting the actual outcome. NEVER assume the cascade performed a full deletion when the helper's contract permits retention.
+
+**Why**: A flash that says `Team "X" deleted.` after a retention-path cascade is a lie — the operator reads the flash, refreshes the teams list, and sees the team still present. This is an honesty failure even if the underlying cleanup is correct.
+
+**Concrete example**: `src/api/routes/admin.py::delete_team` calls `_delete_team_cascade(id)`, then re-queries via `_get_team_by_integer_id(id)`. If the row is still present, the handler flashes `Team "X" data removed; team row retained because cross-perspective games still reference it.` Otherwise it flashes `Team "X" deleted.` The probe uses the same `SELECT` the rest of the admin surface uses — the database is the ground truth, not a cached flag from the helper.
+
+**How to apply**: Prefer post-cascade probes (admin-layer concern) over contract changes that thread retention state through the data helper's return type (data-helper-layer concern). The admin UI is free to add or change flash wording without touching the canonical helper or its other callers.

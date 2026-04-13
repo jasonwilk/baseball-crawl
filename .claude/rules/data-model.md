@@ -5,6 +5,7 @@ paths:
   - "src/api/**"
   - "src/gamechanger/loaders/**"
   - "src/gamechanger/parsers/**"
+  - "src/reports/**"
 ---
 
 # Data Model
@@ -30,3 +31,13 @@ The schema is defined in `migrations/001_initial_schema.sql` (base) with increme
 - **`gc_athlete_profile_id`**: The `players` table has a `gc_athlete_profile_id` column but it is never populated by any loader. It awaits E-104 probe results (athlete profile endpoint). Agents must not assume this column contains data.
 - **Player dedup merge-every-run cycle**: The post-load dedup sweep in the scouting pipeline re-detects and re-merges duplicate player pairs on every run. Perspective tagging (E-220) reduces cross-perspective stub creation by isolating each perspective's data, but does not eliminate it entirely -- the plays loader still creates player stubs via `ensure_player_row()`. The dedup sweep remains necessary for both residual cross-perspective cleanup and genuine name-variant dedup (e.g., "O" vs "Oliver").
 - **Plays pipeline dedup gap**: The plays pipeline (`bb data crawl --crawler plays` + `bb data load --loader plays`) runs independently from `bb data scout` and is not wired into the post-load dedup sweep. Perspective-scoped idempotency (`WHERE game_id = ? AND perspective_team_id = ?`) prevents cross-perspective play collisions -- each perspective's plays are isolated. Cross-perspective player stubs introduced by plays data are cleaned up by the next `bb data scout` run or by manual `bb data dedup-players --execute`.
+
+## Cleanup-Detection Mirror Invariant
+
+When extending a cleanup helper's surface (adding a new table to a DELETE cascade, broadening a WHERE clause, adding a new row-deletion pass), you MUST audit every detection/gate query that mirrors the cleanup surface and update it in the same change. Detection queries include informed-consent gates, precondition checks, row-count probes, and any query that enumerates "what this delete will affect" to the operator.
+
+**Why**: A perspective-aware cleanup gap let foreign-owned data bypass the informed-consent gate and silently delete — the canonical cascade grew to cover a new table but the gate query didn't, so a team with only that table's cross-perspective footprint walked through an empty warning screen and wiped data belonging to other perspectives.
+
+**Concrete example**: `src/reports/generator.py::_delete_team_anchor_and_orphan_data` deletes five stat tables (`player_game_batting`, `player_game_pitching`, `spray_charts`, `plays`, `reconciliation_discrepancies`). The mirror query is `src/api/routes/admin.py::_get_delete_confirmation_data`'s `cross_persp_rows` UNION: it MUST enumerate the same five tables with the `team_id = T AND perspective_team_id != T` shape. When the cleanup adds a sixth table, the UNION must grow with it in the same commit.
+
+**How to apply**: Any PR that modifies a DELETE statement, a cascade helper, or a cleanup pass in `src/reports/`, `src/db/`, or `src/api/` must grep for mirror queries (look for `COUNT(*)` / `SELECT ... WHERE team_id` / UNION shapes referencing the same table) and update them in lock-step. Code review checklist item: "Did the cleanup surface change? If yes, were all mirror queries updated?"
