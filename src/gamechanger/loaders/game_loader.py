@@ -1018,6 +1018,7 @@ class GameLoader:
         if not rows:
             return None
 
+        incoming_perspective_team_id = self._team_ref.id
         incoming_total = (
             home_score + away_score
             if home_score is not None and away_score is not None
@@ -1029,21 +1030,92 @@ class GameLoader:
             existing_home_score = row[3]
             existing_away_score = row[4]
             existing_start_time = row[5]
+            existing_total = (
+                existing_home_score + existing_away_score
+                if existing_home_score is not None and existing_away_score is not None
+                else None
+            )
 
-            # If both have start_time, compare them for doubleheader detection.
+            # Provenance: which perspective(s) already loaded this candidate?
+            existing_perspective_ids = {
+                r[0] for r in self._db.execute(
+                    "SELECT perspective_team_id FROM game_perspectives WHERE game_id = ?",
+                    (existing_id,),
+                ).fetchall()
+            }
+
+            cross_perspective = (
+                bool(existing_perspective_ids)
+                and incoming_perspective_team_id not in existing_perspective_ids
+            )
+
+            if cross_perspective:
+                # Cross-perspective duplicate case: a different tracked team's
+                # scout already loaded this row. Scores are stable across
+                # perspectives; GC reports per-perspective start_times that
+                # can disagree for the same real game (observed ~30-minute
+                # offsets). Per-team score match is the authoritative signal.
+                # IMPORTANT: compare (home_score, away_score) pairwise, NOT
+                # the sum -- a real doubleheader can produce same-total
+                # different-scoreline games (e.g. 11-1 and 10-2 both total 12).
+                have_both_scores = (
+                    home_score is not None
+                    and away_score is not None
+                    and existing_home_score is not None
+                    and existing_away_score is not None
+                )
+                if have_both_scores:
+                    scores_match = (
+                        home_score == existing_home_score
+                        and away_score == existing_away_score
+                    )
+                    if scores_match:
+                        if (start_time is not None
+                            and existing_start_time is not None
+                            and start_time != existing_start_time):
+                            logger.warning(
+                                "Cross-perspective dedup: game %s (perspective %d) "
+                                "→ %s (perspectives %s). Start times disagree "
+                                "(%s vs %s); treating as duplicate because "
+                                "per-team scores match (%s-%s). GC reports "
+                                "per-perspective start_times for the same real game.",
+                                game_id, incoming_perspective_team_id, existing_id,
+                                sorted(existing_perspective_ids),
+                                start_time, existing_start_time,
+                                home_score, away_score,
+                            )
+                        return existing_id
+                    # Different per-team scores across perspectives → distinct
+                    # games (real doubleheader or a data-quality disagreement
+                    # worth surfacing as separate rows).
+                    continue
+
+                # Scores unavailable on one or both sides; fall back to
+                # start_time match as the only available signal.
+                if start_time is not None and existing_start_time is not None:
+                    if start_time == existing_start_time:
+                        return existing_id
+                    continue
+
+                logger.warning(
+                    "Cannot distinguish cross-perspective game %s from existing "
+                    "%s on %s (no scores, no start_time to compare); skipping "
+                    "candidate.",
+                    game_id, existing_id, game_date,
+                )
+                continue
+
+            # Same-perspective or no-provenance candidate: preserve the
+            # legacy tiebreaker (start_time first, score fallback). Same-
+            # perspective re-loads reach this branch when the whole-game
+            # idempotency check doesn't cover the path (e.g., different
+            # event_ids for the same real game from the same perspective).
             if start_time is not None and existing_start_time is not None:
                 if start_time != existing_start_time:
                     # Different start times → distinct games (doubleheader).
                     continue
                 # Same start time → duplicate.
                 return existing_id
-
-            # start_time is NULL on one or both sides; fall back to score.
-            existing_total = (
-                existing_home_score + existing_away_score
-                if existing_home_score is not None and existing_away_score is not None
-                else None
-            )
 
             if incoming_total is not None and existing_total is not None:
                 if incoming_total != existing_total:

@@ -476,3 +476,188 @@ def test_dedup_skips_ambiguous_finds_real_match(
     assert _EVENT_ID_1 in game_ids
     assert _EVENT_ID_2 in game_ids
     assert _EVENT_ID_3 not in game_ids
+
+
+# ---------------------------------------------------------------------------
+# Cross-perspective dedup via provenance
+# ---------------------------------------------------------------------------
+
+
+def test_cross_perspective_dedup_ignores_start_time_mismatch(
+    db: sqlite3.Connection, tmp_path: Path,
+) -> None:
+    """When two tracked teams' scouts load the same real game with identical
+    scores but different start_time values, the second load must dedup via
+    the provenance+score signals and ignore the start_time disagreement.
+
+    Regression for the 2026-04-06 Norris duplicate: GameChanger reported the
+    same real game with a 30-minute start_time gap between the two
+    perspectives (21:30Z vs 22:00Z). Pre-fix, ``_find_duplicate_game``'s
+    tiebreaker assumed "different start_time = doubleheader" and inserted a
+    duplicate row. Post-fix, the provenance check (``game_perspectives``
+    shows the existing row was loaded from a different team's perspective)
+    plus score match overrides the start_time signal.
+    """
+    loader_a = _make_loader(db)
+    _load_first_game(
+        db, loader_a, tmp_path,
+        start_time="2025-05-10T14:00:00.000Z",
+        owning_score=11,
+        opponent_score=1,
+    )
+
+    # The opponent team was implicitly created by _load_first_game.
+    # _ensure_team_row() deliberately inserts opponent rows with gc_uuid=NULL
+    # (anti-contamination) and puts the boxscore identifier in the name column.
+    # Query by name for the opponent; own team keeps its gc_uuid.
+    team_b_row = db.execute(
+        "SELECT id FROM teams WHERE name = ? AND membership_type = 'tracked'",
+        (_OPP_TEAM_UUID,),
+    ).fetchone()
+    assert team_b_row is not None, "Opponent team should exist after first load"
+    team_b_id = team_b_row[0]
+
+    # Confirm game_perspectives recorded team A's perspective on the first load.
+    team_a_id = db.execute(
+        "SELECT id FROM teams WHERE gc_uuid = ?",
+        (_OWN_TEAM_UUID,),
+    ).fetchone()[0]
+    persp_rows = db.execute(
+        "SELECT perspective_team_id FROM game_perspectives WHERE game_id = ?",
+        (_EVENT_ID_1,),
+    ).fetchall()
+    assert (team_a_id,) in persp_rows, (
+        "game_perspectives should have a row for team A after first load"
+    )
+
+    # Create a GameLoader with team B (the opponent) as the perspective.
+    loader_b = GameLoader(
+        db,
+        owned_team_ref=TeamRef(id=team_b_id, gc_uuid=_OPP_TEAM_UUID, public_id=None),
+    )
+
+    # Simulate team B's scout: same date, same teams, same final score,
+    # different start_time (30-minute offset -- the Norris failure shape).
+    game_row = db.execute(
+        "SELECT home_team_id, away_team_id, home_score, away_score "
+        "FROM games WHERE game_id = ?",
+        (_EVENT_ID_1,),
+    ).fetchone()
+    home_id, away_id, home_score, away_score = game_row
+
+    canonical_id = loader_b._find_duplicate_game(
+        game_id=_EVENT_ID_2,  # team B's scout produced a different GC event_id
+        game_date=_GAME_DATE,
+        home_team_id=home_id,
+        away_team_id=away_id,
+        home_score=home_score,
+        away_score=away_score,
+        start_time="2025-05-10T14:30:00.000Z",  # 30 min later than team A's row
+    )
+
+    assert canonical_id == _EVENT_ID_1, (
+        f"Cross-perspective dedup must return {_EVENT_ID_1} (team A's canonical "
+        f"game_id). Got {canonical_id}. Provenance shows team A loaded this row; "
+        f"we are team B with matching scores -- start_time mismatch is expected "
+        f"from per-perspective GC data and must not prevent dedup."
+    )
+
+
+def test_cross_perspective_no_dedup_when_scores_disagree(
+    db: sqlite3.Connection, tmp_path: Path,
+) -> None:
+    """Cross-perspective candidates with mismatched score totals are NOT
+    deduped. Score disagreement across perspectives is a data-quality signal
+    worth surfacing as distinct rows, not silently collapsed."""
+    loader_a = _make_loader(db)
+    _load_first_game(
+        db, loader_a, tmp_path,
+        start_time="2025-05-10T14:00:00.000Z",
+        owning_score=11,
+        opponent_score=1,
+    )
+
+    team_b_id = db.execute(
+        "SELECT id FROM teams WHERE name = ? AND membership_type = 'tracked'",
+        (_OPP_TEAM_UUID,),
+    ).fetchone()[0]
+    loader_b = GameLoader(
+        db,
+        owned_team_ref=TeamRef(id=team_b_id, gc_uuid=_OPP_TEAM_UUID, public_id=None),
+    )
+
+    game_row = db.execute(
+        "SELECT home_team_id, away_team_id FROM games WHERE game_id = ?",
+        (_EVENT_ID_1,),
+    ).fetchone()
+    home_id, away_id = game_row
+
+    # Team B reports a different score (10-1 instead of 11-1). That's a
+    # genuine data disagreement, not a cross-perspective duplicate.
+    canonical_id = loader_b._find_duplicate_game(
+        game_id=_EVENT_ID_2,
+        game_date=_GAME_DATE,
+        home_team_id=home_id,
+        away_team_id=away_id,
+        home_score=10,
+        away_score=1,
+        start_time="2025-05-10T14:00:00.000Z",  # same start_time this time
+    )
+
+    assert canonical_id is None, (
+        "Cross-perspective with different score totals must not dedup; "
+        f"got canonical_id={canonical_id}. A real doubleheader or a data "
+        "disagreement deserves a distinct row."
+    )
+
+
+def test_cross_perspective_no_dedup_when_scoreline_differs_but_total_matches(
+    db: sqlite3.Connection, tmp_path: Path,
+) -> None:
+    """A real doubleheader where two distinct games happen to have the same
+    total score (e.g. 11-1 and 10-2 both total 12) must NOT be collapsed.
+
+    Cross-perspective dedup must compare per-team scores pairwise, not the
+    sum. Using the sum would silently merge same-total-different-scoreline
+    doubleheaders. Regression guard for the Codex review finding on the
+    initial fix.
+    """
+    loader_a = _make_loader(db)
+    _load_first_game(
+        db, loader_a, tmp_path,
+        start_time="2025-05-10T14:00:00.000Z",
+        owning_score=11,
+        opponent_score=1,
+    )
+
+    team_b_id = db.execute(
+        "SELECT id FROM teams WHERE name = ? AND membership_type = 'tracked'",
+        (_OPP_TEAM_UUID,),
+    ).fetchone()[0]
+    loader_b = GameLoader(
+        db,
+        owned_team_ref=TeamRef(id=team_b_id, gc_uuid=_OPP_TEAM_UUID, public_id=None),
+    )
+
+    game_row = db.execute(
+        "SELECT home_team_id, away_team_id FROM games WHERE game_id = ?",
+        (_EVENT_ID_1,),
+    ).fetchone()
+    home_id, away_id = game_row
+
+    # Same total (12) but different scoreline: 10-2 vs existing 11-1.
+    canonical_id = loader_b._find_duplicate_game(
+        game_id=_EVENT_ID_2,
+        game_date=_GAME_DATE,
+        home_team_id=home_id,
+        away_team_id=away_id,
+        home_score=10,
+        away_score=2,
+        start_time="2025-05-10T18:00:00.000Z",  # second game of a doubleheader
+    )
+
+    assert canonical_id is None, (
+        "Cross-perspective with same total but different per-team scoreline "
+        f"must not dedup; got canonical_id={canonical_id}. 11-1 and 10-2 each "
+        "total 12, but they are distinct games (real doubleheader)."
+    )
