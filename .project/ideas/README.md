@@ -89,6 +89,7 @@ Review this list every 90 days, or when completing an epic. Ask:
 | [IDEA-068](IDEA-068-evaluate-main-session-dispatch-behaviors.md) | Evaluate Main-Session Dispatch Behaviors for Codification | CANDIDATE | 2026-07-12 |
 | [IDEA-069](IDEA-069-consolidate-cascade-delete-logic.md) | Consolidate Cascade Delete Logic (admin + reports) | PROMOTED | 2026-04-13 -- absorbed into E-221-05 |
 | [IDEA-070](IDEA-070-admin-ui-delete-path-reports-gap.md) | Admin-UI Delete-Team Path Does Not Clean `reports.team_id` | CANDIDATE | 2026-07-13 |
+| [IDEA-071](IDEA-071-e220-adopter-audit-fix-pre-provenance-code.md) | E-220 Adopter Audit — Fix Pre-Provenance Code Paths | PROMOTED | 2026-04-13 -- promoted to E-223 |
 
 ## Status Definitions
 
