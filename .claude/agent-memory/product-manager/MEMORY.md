@@ -1,7 +1,7 @@
 # Product Manager -- Agent Memory
 
 ## Numbering State
-- Next available epic number: E-224
+- Next available epic number: E-225
 - Next available idea number: IDEA-071
 - Before assigning numbers: ALWAYS `ls /epics/` and `ls /.project/ideas/` to avoid collisions
 
@@ -28,6 +28,8 @@ For full details, read the epic file in `/epics/`. Only READY and ACTIVE epics a
 E-221 (Test Fixture Schema Parity Audit + Post-E-220 Perspective Residuals) COMPLETED 2026-04-13 -- archived at `.project/archive/E-221-perspective-residuals-and-fixture-audit/`. All three R8-P1 residuals closed; canonical cascade consolidation via `src/reports/generator.py::cascade_delete_team` (Option 2 refactor-delegate) established as the established pattern. Details in `archived-epics.md`.
 
 E-223 (E-220 Adopter Audit -- Fix Pre-Provenance Code Paths) COMPLETED 2026-04-14 -- archived at `.project/archive/E-223-e220-adopter-audit/`. All four IDEA-071 findings resolved: admin delete confirmation counts mirror cascade two-pass surface, reconciliation summary deduplicates across perspectives/runs, spray loaders gate on game+perspective, backfill script deprecated. No doc or context-layer impact.
+
+E-224 (RTK/Pytest Interaction Guardrails) COMPLETED 2026-04-14 -- archived at `.project/archive/E-224-rtk-pytest-guardrails/`. Extended `.claude/rules/pytest-verbose.md` with `-x`/`--exitfirst` prohibition, summary verification guidance, and `rtk proxy` bypass. Added implement skill one-liner. Created `pytest-exitfirst-warn.sh` warn-only hook. No doc or context-layer impact (the context-layer codification was the deliverable itself).
 
 ## Key Architectural Decisions
 - Storage: SQLite (WAL mode). Host-mounted at ./data/app.db. Simple file backup via scripts/backup_db.py (no Litestream).
