@@ -1818,3 +1818,417 @@ class TestE221Phase4bRemediation:
             f"Finding 2 regression: clean-path flash must still say "
             f"'Team \"X\" deleted.'. Got: {decoded_location}"
         )
+
+
+# ---------------------------------------------------------------------------
+# E-223-01: Perspective-aware confirmation counts
+# ---------------------------------------------------------------------------
+
+
+class TestPerspectiveAwareConfirmationCounts:
+    """E-223-01 AC-6: confirmation counts mirror the cascade two-pass logic.
+
+    The cascade deletes via two passes:
+      Pass 1: WHERE perspective_team_id = T
+      Pass 2: WHERE team_id = T (or batting_team_id for plays)
+
+    Counts must use the union of both passes (deduplicated via OR).
+    Cross-perspective rows (perspective_team_id != T AND team_id != T)
+    must NOT be counted.  Scouting rows where perspective_team_id = T
+    but the team is not a game participant must be counted.
+    """
+
+    def test_excludes_cross_perspective_rows(self, db: Path) -> None:
+        """Rows where both perspective_team_id and team_id belong to OTHER
+        teams must not be counted in the deleted team's confirmation.
+
+        Pre-fix (game-subquery pattern): these rows were overcounted because
+        they happened to be in a game the deleted team participated in.
+        """
+        from src.api.routes.admin import _get_delete_confirmation_data
+
+        admin_id = _insert_user(db, "admin@example.com")
+        _insert_session(db, admin_id)
+        season_id = _insert_season(db)
+        team_t = _insert_team(db, "Team T", membership_type="member")
+        team_o = _insert_team(db, "Opponent", membership_type="tracked")
+        game_id = _insert_game(db, "g-cross-1", team_t, team_o, season_id)
+        player_t = _insert_player(db, "p-t-1")
+        player_o = _insert_player(db, "p-o-1")
+
+        conn = sqlite3.connect(str(db))
+        conn.execute("PRAGMA foreign_keys=ON;")
+        # Row owned by team T (own perspective, own anchor) -- should count
+        conn.execute(
+            "INSERT INTO player_game_batting "
+            "(game_id, player_id, team_id, perspective_team_id) "
+            "VALUES (?, ?, ?, ?)",
+            (game_id, player_t, team_t, team_t),
+        )
+        # Cross-perspective row: perspective=O, anchor=O.
+        # In the same game as team T, but NOT owned by T at all.
+        # Pre-fix: counted because game was in the subquery.
+        # Post-fix: correctly excluded.
+        conn.execute(
+            "INSERT INTO player_game_batting "
+            "(game_id, player_id, team_id, perspective_team_id) "
+            "VALUES (?, ?, ?, ?)",
+            (game_id, player_o, team_o, team_o),
+        )
+        conn.commit()
+        conn.close()
+
+        with patch.dict("os.environ", _admin_env(db)):
+            preview = _get_delete_confirmation_data(team_t)
+
+        assert preview["player_game_batting"] == 1, (
+            f"expected 1 (own row only), got {preview['player_game_batting']}. "
+            f"Cross-perspective row must not be counted."
+        )
+
+    def test_includes_scouting_rows_in_non_participant_games(
+        self, db: Path
+    ) -> None:
+        """Scouting rows where perspective_team_id = T but the team is NOT a
+        game participant must be counted.
+
+        Pre-fix (game-subquery pattern): these rows were undercounted because
+        the game's home/away teams did not include T.
+        Post-fix: counted via the perspective_team_id = T branch.
+        """
+        from src.api.routes.admin import _get_delete_confirmation_data
+
+        admin_id = _insert_user(db, "admin@example.com")
+        _insert_session(db, admin_id)
+        season_id = _insert_season(db)
+        team_t = _insert_team(db, "Scout Team", membership_type="member")
+        team_a = _insert_team(db, "Away Team", membership_type="tracked")
+        team_h = _insert_team(db, "Home Team", membership_type="tracked")
+        # Game between two OTHER teams -- team_t is not a participant
+        game_id = _insert_game(db, "g-scout-1", team_h, team_a, season_id)
+        player_a = _insert_player(db, "p-scouted")
+
+        conn = sqlite3.connect(str(db))
+        conn.execute("PRAGMA foreign_keys=ON;")
+        # Scouting row: team_t scouted a game it didn't play in.
+        # perspective_team_id = team_t, team_id = team_a
+        conn.execute(
+            "INSERT INTO player_game_batting "
+            "(game_id, player_id, team_id, perspective_team_id) "
+            "VALUES (?, ?, ?, ?)",
+            (game_id, player_a, team_a, team_t),
+        )
+        conn.commit()
+        conn.close()
+
+        with patch.dict("os.environ", _admin_env(db)):
+            preview = _get_delete_confirmation_data(team_t)
+
+        assert preview["player_game_batting"] == 1, (
+            f"expected 1 (scouting row from non-participant game), "
+            f"got {preview['player_game_batting']}. Scouting rows must be counted."
+        )
+
+    def test_no_double_counting_when_both_fks_match(self, db: Path) -> None:
+        """When perspective_team_id = T AND team_id = T on the same row, the
+        row must be counted exactly once (OR deduplicates naturally).
+        """
+        from src.api.routes.admin import _get_delete_confirmation_data
+
+        admin_id = _insert_user(db, "admin@example.com")
+        _insert_session(db, admin_id)
+        season_id = _insert_season(db)
+        team_t = _insert_team(db, "Both FK Team", membership_type="member")
+        team_o = _insert_team(db, "Opponent", membership_type="tracked")
+        game_id = _insert_game(db, "g-both-fk", team_t, team_o, season_id)
+        player = _insert_player(db, "p-both-fk")
+
+        conn = sqlite3.connect(str(db))
+        conn.execute("PRAGMA foreign_keys=ON;")
+        # Both FKs point to team_t -- must count as 1 row, not 2
+        conn.execute(
+            "INSERT INTO player_game_batting "
+            "(game_id, player_id, team_id, perspective_team_id) "
+            "VALUES (?, ?, ?, ?)",
+            (game_id, player, team_t, team_t),
+        )
+        conn.commit()
+        conn.close()
+
+        with patch.dict("os.environ", _admin_env(db)):
+            preview = _get_delete_confirmation_data(team_t)
+
+        assert preview["player_game_batting"] == 1, (
+            f"expected 1 (deduped), got {preview['player_game_batting']}. "
+            f"OR should not double-count rows where both FKs match."
+        )
+
+    def test_all_seven_tables_use_perspective_counts(self, db: Path) -> None:
+        """All seven stat tables use perspective-aware counts.  Seeds one
+        cross-perspective row per table (perspective=O, anchor=O) alongside
+        one own row (perspective=T, anchor=T) and verifies each table counts
+        exactly 1 (the own row), excluding the cross-perspective row.
+        """
+        from src.api.routes.admin import _get_delete_confirmation_data
+
+        admin_id = _insert_user(db, "admin@example.com")
+        _insert_session(db, admin_id)
+        season_id = _insert_season(db)
+        team_t = _insert_team(db, "Team T Full", membership_type="member")
+        team_o = _insert_team(db, "Opponent Full", membership_type="tracked")
+        game_id = _insert_game(db, "g-all-7", team_t, team_o, season_id)
+        player_t = _insert_player(db, "p-t-all7")
+        player_o = _insert_player(db, "p-o-all7")
+
+        conn = sqlite3.connect(str(db))
+        conn.execute("PRAGMA foreign_keys=ON;")
+
+        # player_game_batting: own + cross-perspective
+        conn.execute(
+            "INSERT INTO player_game_batting "
+            "(game_id, player_id, team_id, perspective_team_id) "
+            "VALUES (?, ?, ?, ?)",
+            (game_id, player_t, team_t, team_t),
+        )
+        conn.execute(
+            "INSERT INTO player_game_batting "
+            "(game_id, player_id, team_id, perspective_team_id) "
+            "VALUES (?, ?, ?, ?)",
+            (game_id, player_o, team_o, team_o),
+        )
+
+        # player_game_pitching: own + cross-perspective
+        conn.execute(
+            "INSERT INTO player_game_pitching "
+            "(game_id, player_id, team_id, perspective_team_id) "
+            "VALUES (?, ?, ?, ?)",
+            (game_id, player_t, team_t, team_t),
+        )
+        conn.execute(
+            "INSERT INTO player_game_pitching "
+            "(game_id, player_id, team_id, perspective_team_id) "
+            "VALUES (?, ?, ?, ?)",
+            (game_id, player_o, team_o, team_o),
+        )
+
+        # spray_charts: own + cross-perspective
+        conn.execute(
+            "INSERT INTO spray_charts "
+            "(game_id, player_id, team_id, perspective_team_id, "
+            "x, y, play_type, play_result) "
+            "VALUES (?, ?, ?, ?, 0.5, 0.5, 'GB', 'OUT')",
+            (game_id, player_t, team_t, team_t),
+        )
+        conn.execute(
+            "INSERT INTO spray_charts "
+            "(game_id, player_id, team_id, perspective_team_id, "
+            "x, y, play_type, play_result) "
+            "VALUES (?, ?, ?, ?, 0.5, 0.5, 'GB', 'OUT')",
+            (game_id, player_o, team_o, team_o),
+        )
+
+        # plays: own (perspective=T, batting=T) + cross-perspective
+        cur_own = conn.execute(
+            "INSERT INTO plays "
+            "(game_id, play_order, inning, half, season_id, "
+            "perspective_team_id, batting_team_id, batter_id) "
+            "VALUES (?, 1, 1, 'top', ?, ?, ?, ?)",
+            (game_id, season_id, team_t, team_t, player_t),
+        )
+        play_own_id = cur_own.lastrowid
+        cur_cross = conn.execute(
+            "INSERT INTO plays "
+            "(game_id, play_order, inning, half, season_id, "
+            "perspective_team_id, batting_team_id, batter_id) "
+            "VALUES (?, 2, 1, 'bottom', ?, ?, ?, ?)",
+            (game_id, season_id, team_o, team_o, player_o),
+        )
+        play_cross_id = cur_cross.lastrowid
+
+        # play_events: one under each play
+        conn.execute(
+            "INSERT INTO play_events "
+            "(play_id, event_order, event_type) "
+            "VALUES (?, 0, 'pitch')",
+            (play_own_id,),
+        )
+        conn.execute(
+            "INSERT INTO play_events "
+            "(play_id, event_order, event_type) "
+            "VALUES (?, 0, 'pitch')",
+            (play_cross_id,),
+        )
+
+        # game_perspectives: own + other
+        conn.execute(
+            "INSERT INTO game_perspectives (game_id, perspective_team_id) "
+            "VALUES (?, ?)",
+            (game_id, team_t),
+        )
+        conn.execute(
+            "INSERT INTO game_perspectives (game_id, perspective_team_id) "
+            "VALUES (?, ?)",
+            (game_id, team_o),
+        )
+
+        # reconciliation_discrepancies: own + cross-perspective
+        conn.execute(
+            "INSERT INTO reconciliation_discrepancies "
+            "(game_id, run_id, perspective_team_id, team_id, player_id, "
+            "signal_name, category, status) "
+            "VALUES (?, 'run-own', ?, ?, ?, 'pitcher_bf', 'pitching', 'MATCH')",
+            (game_id, team_t, team_t, player_t),
+        )
+        conn.execute(
+            "INSERT INTO reconciliation_discrepancies "
+            "(game_id, run_id, perspective_team_id, team_id, player_id, "
+            "signal_name, category, status) "
+            "VALUES (?, 'run-cross', ?, ?, ?, 'pitcher_bf', 'pitching', 'MATCH')",
+            (game_id, team_o, team_o, player_o),
+        )
+
+        conn.commit()
+        conn.close()
+
+        with patch.dict("os.environ", _admin_env(db)):
+            preview = _get_delete_confirmation_data(team_t)
+
+        # Each table should count exactly 1 (the own row)
+        assert preview["player_game_batting"] == 1, f"pgb: {preview['player_game_batting']}"
+        assert preview["player_game_pitching"] == 1, f"pgp: {preview['player_game_pitching']}"
+        assert preview["spray_charts"] == 1, f"sc: {preview['spray_charts']}"
+        assert preview["plays"] == 1, f"plays: {preview['plays']}"
+        assert preview["play_events"] == 1, (
+            f"play_events: {preview['play_events']}"
+        )
+        assert preview["game_perspectives"] == 1, f"gp: {preview['game_perspectives']}"
+        assert preview["reconciliation_discrepancies"] == 1, f"recon: {preview['reconciliation_discrepancies']}"
+
+    def test_games_count_unchanged(self, db: Path) -> None:
+        """AC-5: games_count uses team-participation, not perspective.
+        Remains unchanged by the perspective-aware refactor.
+        """
+        from src.api.routes.admin import _get_delete_confirmation_data
+
+        admin_id = _insert_user(db, "admin@example.com")
+        _insert_session(db, admin_id)
+        season_id = _insert_season(db)
+        team_t = _insert_team(db, "Games Team", membership_type="member")
+        team_o = _insert_team(db, "Opp", membership_type="tracked")
+        _insert_game(db, "g-gcount-1", team_t, team_o, season_id)
+        _insert_game(db, "g-gcount-2", team_o, team_t, season_id)
+
+        with patch.dict("os.environ", _admin_env(db)):
+            preview = _get_delete_confirmation_data(team_t)
+
+        assert preview["games"] == 2, (
+            f"games_count should count participation, got {preview['games']}"
+        )
+
+    def test_play_events_cascade_through_plays(self, db: Path) -> None:
+        """AC-3: play_events count cascades through plays using the same
+        two-FK union (perspective_team_id OR batting_team_id on plays).
+        """
+        from src.api.routes.admin import _get_delete_confirmation_data
+
+        admin_id = _insert_user(db, "admin@example.com")
+        _insert_session(db, admin_id)
+        season_id = _insert_season(db)
+        team_t = _insert_team(db, "PE Team", membership_type="member")
+        team_o = _insert_team(db, "PE Opp", membership_type="tracked")
+        game_id = _insert_game(db, "g-pe-casc", team_t, team_o, season_id)
+
+        player_t = _insert_player(db, "p-pe-t")
+        player_o = _insert_player(db, "p-pe-o")
+
+        conn = sqlite3.connect(str(db))
+        conn.execute("PRAGMA foreign_keys=ON;")
+        # Play owned by team_t via perspective
+        cur1 = conn.execute(
+            "INSERT INTO plays "
+            "(game_id, play_order, inning, half, season_id, "
+            "perspective_team_id, batting_team_id, batter_id) "
+            "VALUES (?, 1, 1, 'top', ?, ?, ?, ?)",
+            (game_id, season_id, team_t, team_o, player_o),
+        )
+        play_own_id = cur1.lastrowid
+        # Play owned by team_t via batting (but perspective is O)
+        cur2 = conn.execute(
+            "INSERT INTO plays "
+            "(game_id, play_order, inning, half, season_id, "
+            "perspective_team_id, batting_team_id, batter_id) "
+            "VALUES (?, 2, 2, 'top', ?, ?, ?, ?)",
+            (game_id, season_id, team_o, team_t, player_t),
+        )
+        play_bat_id = cur2.lastrowid
+        # Play not owned by team_t at all
+        cur3 = conn.execute(
+            "INSERT INTO plays "
+            "(game_id, play_order, inning, half, season_id, "
+            "perspective_team_id, batting_team_id, batter_id) "
+            "VALUES (?, 3, 3, 'top', ?, ?, ?, ?)",
+            (game_id, season_id, team_o, team_o, player_o),
+        )
+        play_none_id = cur3.lastrowid
+        # Events under each play (2 events per play)
+        for pid in (play_own_id, play_bat_id, play_none_id):
+            conn.execute(
+                "INSERT INTO play_events (play_id, event_order, event_type) "
+                "VALUES (?, 0, 'pitch')",
+                (pid,),
+            )
+            conn.execute(
+                "INSERT INTO play_events (play_id, event_order, event_type) "
+                "VALUES (?, 1, 'pitch')",
+                (pid,),
+            )
+        conn.commit()
+        conn.close()
+
+        with patch.dict("os.environ", _admin_env(db)):
+            preview = _get_delete_confirmation_data(team_t)
+
+        # 2 plays owned by T (perspective or batting), excluding the third
+        assert preview["plays"] == 2, (
+            f"expected 2 plays, got {preview['plays']}"
+        )
+        # 4 play_events (2 events per play * 2 owned plays)
+        assert preview["play_events"] == 4, (
+            f"expected 4 play_events, got {preview['play_events']}"
+        )
+
+    def test_game_perspectives_uses_perspective_only(self, db: Path) -> None:
+        """AC-4: game_perspectives count uses perspective_team_id only,
+        not any anchor FK.
+        """
+        from src.api.routes.admin import _get_delete_confirmation_data
+
+        admin_id = _insert_user(db, "admin@example.com")
+        _insert_session(db, admin_id)
+        season_id = _insert_season(db)
+        team_t = _insert_team(db, "GP Team", membership_type="member")
+        team_o = _insert_team(db, "GP Opp", membership_type="tracked")
+        game_id = _insert_game(db, "g-gp-only", team_t, team_o, season_id)
+
+        conn = sqlite3.connect(str(db))
+        conn.execute("PRAGMA foreign_keys=ON;")
+        conn.execute(
+            "INSERT INTO game_perspectives (game_id, perspective_team_id) "
+            "VALUES (?, ?)",
+            (game_id, team_t),
+        )
+        conn.execute(
+            "INSERT INTO game_perspectives (game_id, perspective_team_id) "
+            "VALUES (?, ?)",
+            (game_id, team_o),
+        )
+        conn.commit()
+        conn.close()
+
+        with patch.dict("os.environ", _admin_env(db)):
+            preview = _get_delete_confirmation_data(team_t)
+
+        # Only the team_t perspective row should be counted
+        assert preview["game_perspectives"] == 1, (
+            f"expected 1 (own perspective only), got {preview['game_perspectives']}"
+        )

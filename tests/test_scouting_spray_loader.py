@@ -943,3 +943,161 @@ def test_scouting_spray_two_perspectives_coexist(
     ).fetchall()
     assert len(rows) == 2, f"Expected 2 perspective rows, got {len(rows)}"
     assert {r[0] for r in rows} == {opp_id, opp2_id}
+
+
+# ---------------------------------------------------------------------------
+# E-223-03: Perspective gate tests
+# ---------------------------------------------------------------------------
+
+
+class TestScoutingSprayPerspectiveGate:
+    """E-223-03 AC-2/AC-3/AC-4: Whole-game perspective gate for scouting spray."""
+
+    def test_skips_already_loaded_perspective_via_load_dir(
+        self, db: sqlite3.Connection, tmp_path: Path
+    ) -> None:
+        """AC-2/AC-4: load_dir skips game when perspective already loaded."""
+        own_id = _seed_team(db, "Own Team", gc_uuid=_OWN_GC_UUID, membership_type="member")
+        opp_id = _seed_team(db, "Opponent", public_id=_PUBLIC_ID)
+        _seed_season(db)
+        _seed_game(db, _GAME_ID, own_id, opp_id)
+        _seed_player(db, _PLAYER_A)
+        _seed_roster(db, _PLAYER_A, opp_id)
+
+        event1 = _make_spray_event(_EVENT_GC_1)
+        event2 = _make_spray_event(_EVENT_GC_2)
+        payload = _make_spray_json(_PLAYER_A, events=[event1, event2])
+        spray_dir = tmp_path / _CRAWL_SEASON_ID / "scouting" / _PUBLIC_ID / "spray"
+        _write_spray_file(tmp_path, _CRAWL_SEASON_ID, _PUBLIC_ID, _GAME_ID, payload)
+
+        loader = ScoutingSprayChartLoader(db)
+        result1 = loader.load_dir(spray_dir)
+        assert result1.loaded == 2
+
+        # Second load: perspective gate should fire
+        result2 = loader.load_dir(spray_dir)
+        assert result2.skipped == 1, (
+            f"Expected game-level skip (1), got skipped={result2.skipped}"
+        )
+        assert result2.loaded == 0
+
+    def test_skips_already_loaded_perspective_via_load_from_data(
+        self, db: sqlite3.Connection
+    ) -> None:
+        """AC-2/AC-4: load_from_data skips game when perspective already loaded."""
+        own_id = _seed_team(db, "Own Team", gc_uuid=_OWN_GC_UUID, membership_type="member")
+        opp_id = _seed_team(db, "Opponent", public_id=_PUBLIC_ID)
+        _seed_season(db)
+        _seed_game(db, _GAME_ID, own_id, opp_id)
+        _seed_player(db, _PLAYER_A)
+        _seed_roster(db, _PLAYER_A, opp_id)
+
+        event = _make_spray_event(_EVENT_GC_1)
+        spray_data = {
+            _GAME_ID: {"spray_chart_data": {"offense": {_PLAYER_A: [event]}, "defense": {}}},
+        }
+
+        loader = ScoutingSprayChartLoader(db)
+        result1 = loader.load_from_data(spray_data, _PUBLIC_ID)
+        assert result1.loaded == 1
+
+        # Second load: perspective gate should fire
+        result2 = loader.load_from_data(spray_data, _PUBLIC_ID)
+        assert result2.skipped == 1, (
+            f"Expected game-level skip (1), got skipped={result2.skipped}"
+        )
+        assert result2.loaded == 0
+
+    def test_loads_new_perspective_for_same_game(
+        self, db: sqlite3.Connection
+    ) -> None:
+        """AC-4: New perspective for same game loads normally."""
+        own_id = _seed_team(db, "Own Team", gc_uuid=_OWN_GC_UUID, membership_type="member")
+        opp_id = _seed_team(db, "Opponent", public_id=_PUBLIC_ID)
+        opp2_public_id = "opp-public-id-002"
+        opp2_id = _seed_team(db, "Opponent 2", public_id=opp2_public_id)
+        _seed_season(db)
+        _seed_game(db, _GAME_ID, own_id, opp_id)
+        _seed_player(db, _PLAYER_A)
+        _seed_roster(db, _PLAYER_A, opp_id)
+        _seed_roster(db, _PLAYER_A, opp2_id)
+
+        event = _make_spray_event(_EVENT_GC_1)
+        spray_data = {
+            _GAME_ID: {"spray_chart_data": {"offense": {_PLAYER_A: [event]}, "defense": {}}},
+        }
+
+        loader = ScoutingSprayChartLoader(db)
+        # Load as opp_id perspective
+        result1 = loader.load_from_data(spray_data, _PUBLIC_ID)
+        assert result1.loaded == 1
+
+        # Load as opp2_id perspective -- should succeed (different perspective)
+        result2 = loader.load_from_data(spray_data, opp2_public_id)
+        assert result2.loaded == 1, (
+            f"New perspective should load normally, got loaded={result2.loaded}"
+        )
+
+    def test_partial_load_blocks_retry(self, db: sqlite3.Connection) -> None:
+        """Documented limitation: partial first pass blocks retries.
+
+        When the first load partially succeeds (some events loaded, some
+        skipped due to unresolvable players), the perspective gate treats
+        the game as fully loaded on subsequent runs. This is a known
+        trade-off of the game-level gate (performance optimization).
+
+        To recover from a partial load, the operator must first delete the
+        partial rows:
+            DELETE FROM spray_charts WHERE game_id=? AND perspective_team_id=?
+        then re-run the loader.
+        """
+        own_id = _seed_team(db, "Own Team", gc_uuid=_OWN_GC_UUID, membership_type="member")
+        opp_id = _seed_team(db, "Opponent", public_id=_PUBLIC_ID)
+        _seed_season(db)
+        _seed_game(db, _GAME_ID, own_id, opp_id)
+        # Only player A is in roster; player B (PLAYER_UNKNOWN) is not
+        _seed_player(db, _PLAYER_A)
+        _seed_roster(db, _PLAYER_A, opp_id)
+
+        event_a = _make_spray_event(_EVENT_GC_1)
+        event_b = _make_spray_event(_EVENT_GC_2)
+        spray_data = {
+            _GAME_ID: {
+                "spray_chart_data": {
+                    "offense": {
+                        _PLAYER_A: [event_a],
+                        _PLAYER_UNKNOWN: [event_b],  # unresolvable
+                    },
+                    "defense": {},
+                },
+            },
+        }
+
+        loader = ScoutingSprayChartLoader(db)
+        result1 = loader.load_from_data(spray_data, _PUBLIC_ID)
+        assert result1.loaded == 1, f"Player A's event should load: {result1}"
+        assert result1.skipped == 1, f"Player B's event should skip: {result1}"
+
+        # Now fix the roster (add player B)
+        _seed_player(db, _PLAYER_UNKNOWN)
+        _seed_roster(db, _PLAYER_UNKNOWN, opp_id)
+
+        # Retry: gate blocks because player A's row already exists
+        result2 = loader.load_from_data(spray_data, _PUBLIC_ID)
+        assert result2.skipped == 1, (
+            f"Gate should block retry (game-level skip): {result2}"
+        )
+        assert result2.loaded == 0, (
+            f"No new rows loaded through the gate: {result2}"
+        )
+
+        # Recovery: delete partial rows, then retry succeeds
+        db.execute(
+            "DELETE FROM spray_charts WHERE game_id = ? AND perspective_team_id = ?",
+            (_GAME_ID, opp_id),
+        )
+        db.commit()
+        result3 = loader.load_from_data(spray_data, _PUBLIC_ID)
+        assert result3.loaded == 2, (
+            f"After deleting partial rows, both events should load: {result3}"
+        )

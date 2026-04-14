@@ -1160,13 +1160,35 @@ def _correct_pitcher_attribution(
 
 
 def get_summary_from_db(conn: sqlite3.Connection) -> dict[str, Any]:
-    """Build aggregate statistics from ALL reconciliation_discrepancies records.
+    """Build aggregate statistics from reconciliation_discrepancies records.
+
+    Deduplicates on ``(game_id, team_id, player_id, signal_name)`` so each
+    discrepancy signal is counted once per reconciliation run family.  When
+    multiple rows exist for the same composite key with different statuses
+    (e.g., CORRECTABLE in run 1, CORRECTED in run 2), the most recent row
+    wins (``created_at DESC, rowid DESC``).
+
+    **Cross-perspective limitation**: ``player_id`` is perspective-specific
+    (the same human gets different UUIDs from different perspectives — see
+    ``data-model.md:30``).  Cross-perspective rows for the same real-world
+    signal will have different ``player_id`` values and are NOT collapsed by
+    this dedup.  Full cross-perspective dedup requires ``bb data dedup-players``
+    to have merged the perspective-specific stubs first.  This is acceptable
+    because the summary is a diagnostic tool and the standard pipeline runs
+    dedup-players before summary inspection.
 
     Returns a dict with per-signal match rates, correction counts, and gaps.
     """
     rows = conn.execute(
         "SELECT signal_name, category, status, COUNT(*) "
-        "FROM reconciliation_discrepancies "
+        "FROM ("
+        "  SELECT *, ROW_NUMBER() OVER ("
+        "    PARTITION BY game_id, team_id, player_id, signal_name "
+        "    ORDER BY created_at DESC, rowid DESC"
+        "  ) AS rn "
+        "  FROM reconciliation_discrepancies"
+        ") "
+        "WHERE rn = 1 "
         "GROUP BY signal_name, category, status "
         "ORDER BY category, signal_name, status"
     ).fetchall()

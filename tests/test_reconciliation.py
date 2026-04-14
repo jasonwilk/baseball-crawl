@@ -1420,6 +1420,140 @@ class TestGetSummaryFromDB:
 # ---------------------------------------------------------------------------
 
 
+class TestSummaryDeduplication:
+    """E-223-02: get_summary_from_db deduplicates across perspectives and runs."""
+
+    def test_cross_perspective_same_player_id_dedup(
+        self, db: sqlite3.Connection
+    ) -> None:
+        """Same signal, same player_id, two perspectives → deduplicated to 1.
+
+        When the same player_id appears in both perspectives (e.g., after
+        bb data dedup-players has merged stubs), the dedup key collapses them.
+        """
+        from src.reconciliation.engine import get_summary_from_db
+
+        _insert_game(db, "g-dedup")
+        db.execute(
+            "INSERT INTO reconciliation_discrepancies "
+            "(game_id, run_id, perspective_team_id, team_id, player_id, "
+            "signal_name, category, status) "
+            "VALUES ('g-dedup', 'r1', 1, 1, 'p1', 'pitcher_bf', 'pitcher', 'MATCH')"
+        )
+        db.execute(
+            "INSERT INTO reconciliation_discrepancies "
+            "(game_id, run_id, perspective_team_id, team_id, player_id, "
+            "signal_name, category, status) "
+            "VALUES ('g-dedup', 'r1', 2, 1, 'p1', 'pitcher_bf', 'pitcher', 'MATCH')"
+        )
+
+        result = get_summary_from_db(db)
+        assert result["total_records"] == 1, (
+            f"Same player_id dedup: expected 1, got {result['total_records']}"
+        )
+        assert result["pitcher_signals"]["pitcher_bf"]["MATCH"] == 1
+
+    def test_cross_perspective_different_player_ids_not_collapsed(
+        self, db: sqlite3.Connection
+    ) -> None:
+        """Same signal, different perspective-specific player_ids → counted
+        separately (documented limitation).
+
+        GameChanger returns different player_id UUIDs for the same human
+        from different perspectives (data-model.md:30). Until
+        bb data dedup-players merges the stubs, these are distinct rows
+        and the summary counts them separately. This is acceptable because
+        the standard pipeline runs dedup-players before summary inspection.
+        """
+        from src.reconciliation.engine import get_summary_from_db
+
+        _insert_game(db, "g-dedup-pid")
+        # Perspective 1: player UUID 'p1-persp-a'
+        db.execute(
+            "INSERT INTO reconciliation_discrepancies "
+            "(game_id, run_id, perspective_team_id, team_id, player_id, "
+            "signal_name, category, status) "
+            "VALUES ('g-dedup-pid', 'r1', 1, 1, 'p1-persp-a', 'pitcher_bf', "
+            "'pitcher', 'MATCH')"
+        )
+        # Perspective 2: same human, different UUID 'p1-persp-b'
+        db.execute(
+            "INSERT INTO reconciliation_discrepancies "
+            "(game_id, run_id, perspective_team_id, team_id, player_id, "
+            "signal_name, category, status) "
+            "VALUES ('g-dedup-pid', 'r1', 2, 1, 'p1-persp-b', 'pitcher_bf', "
+            "'pitcher', 'MATCH')"
+        )
+
+        result = get_summary_from_db(db)
+        # Not collapsed: different player_ids are distinct dedup keys.
+        # This is a documented limitation (see engine.py docstring).
+        assert result["total_records"] == 2, (
+            f"Different player_ids should NOT be collapsed: "
+            f"expected 2, got {result['total_records']}"
+        )
+        assert result["pitcher_signals"]["pitcher_bf"]["MATCH"] == 2
+
+    def test_cross_run_dedup_uses_latest_status(
+        self, db: sqlite3.Connection
+    ) -> None:
+        """AC-2(b): Same signal across runs uses most recent status."""
+        from src.reconciliation.engine import get_summary_from_db
+
+        _insert_game(db, "g-runs")
+        # Run 1: CORRECTABLE
+        db.execute(
+            "INSERT INTO reconciliation_discrepancies "
+            "(game_id, run_id, perspective_team_id, team_id, player_id, "
+            "signal_name, category, status, created_at) "
+            "VALUES ('g-runs', 'r1', 1, 1, 'p1', 'pitcher_so', 'pitcher', "
+            "'CORRECTABLE', '2026-01-01 00:00:00')"
+        )
+        # Run 2: CORRECTED (later)
+        db.execute(
+            "INSERT INTO reconciliation_discrepancies "
+            "(game_id, run_id, perspective_team_id, team_id, player_id, "
+            "signal_name, category, status, created_at) "
+            "VALUES ('g-runs', 'r2', 1, 1, 'p1', 'pitcher_so', 'pitcher', "
+            "'CORRECTED', '2026-01-02 00:00:00')"
+        )
+
+        result = get_summary_from_db(db)
+        assert result["total_records"] == 1, (
+            f"Cross-run dedup: expected 1, got {result['total_records']}"
+        )
+        assert result["total_corrected"] == 1
+        assert "CORRECTABLE" not in result["pitcher_signals"].get("pitcher_so", {}), (
+            "Old CORRECTABLE status should not appear"
+        )
+        assert result["pitcher_signals"]["pitcher_so"]["CORRECTED"] == 1
+
+    def test_different_signals_not_collapsed(
+        self, db: sqlite3.Connection
+    ) -> None:
+        """Different signal_name values for the same player/game are distinct."""
+        from src.reconciliation.engine import get_summary_from_db
+
+        _insert_game(db, "g-diff")
+        db.execute(
+            "INSERT INTO reconciliation_discrepancies "
+            "(game_id, run_id, perspective_team_id, team_id, player_id, "
+            "signal_name, category, status) "
+            "VALUES ('g-diff', 'r1', 1, 1, 'p1', 'pitcher_bf', 'pitcher', 'MATCH')"
+        )
+        db.execute(
+            "INSERT INTO reconciliation_discrepancies "
+            "(game_id, run_id, perspective_team_id, team_id, player_id, "
+            "signal_name, category, status) "
+            "VALUES ('g-diff', 'r1', 1, 1, 'p1', 'pitcher_so', 'pitcher', 'CORRECTABLE')"
+        )
+
+        result = get_summary_from_db(db)
+        assert result["total_records"] == 2
+        assert result["pitcher_signals"]["pitcher_bf"]["MATCH"] == 1
+        assert result["pitcher_signals"]["pitcher_so"]["CORRECTABLE"] == 1
+
+
 class TestBoxscoreSupplement:
     """Fix 1: Boxscore pitches/total_strikes supplement for high-confidence pitchers."""
 

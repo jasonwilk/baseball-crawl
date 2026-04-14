@@ -1,5 +1,14 @@
 """Backfill appearance_order for existing player_game_pitching rows.
 
+.. deprecated::
+    **One-time migration aid for E-204.** The ``appearance_order`` column is
+    now populated at INSERT time by the game loader
+    (``src/gamechanger/loaders/game_loader.py``). This script was needed only
+    to backfill historical rows that pre-dated E-204. It reads from
+    disk-cached boxscore JSON (``data/raw/``), which means it does not work
+    in the scouting pipeline's in-memory flow. It also does not include
+    perspective-aware filtering. No further maintenance is planned.
+
 Walks cached boxscore JSON files on disk and updates rows where
 appearance_order IS NULL. Idempotent and re-runnable.
 

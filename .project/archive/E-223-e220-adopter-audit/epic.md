@@ -1,7 +1,7 @@
 # E-223: E-220 Adopter Audit -- Fix Pre-Provenance Code Paths
 
 ## Status
-`READY`
+`COMPLETED`
 
 ## Overview
 E-220 introduced `perspective_team_id` as an architectural invariant, but nobody walked the graph of existing consumers to adopt it. A systematic audit found four code paths still operating on the pre-provenance model -- producing wrong counts, double-counted summaries, and unnecessary load work. This epic fixes all four findings.
@@ -35,9 +35,9 @@ Promoted from: [IDEA-071](/.project/ideas/IDEA-071-e220-adopter-audit-fix-pre-pr
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-223-01 | Fix admin delete confirmation counts to mirror cascade | TODO | None | - |
-| E-223-02 | Fix reconciliation summary perspective double-counting | TODO | None | - |
-| E-223-03 | Add perspective gate to spray loaders + deprecate backfill | TODO | None | - |
+| E-223-01 | Fix admin delete confirmation counts to mirror cascade | DONE | None | - |
+| E-223-02 | Fix reconciliation summary perspective double-counting | DONE | None | - |
+| E-223-03 | Add perspective gate to spray loaders + deprecate backfill | DONE | None | - |
 
 ## Dispatch Team
 - software-engineer
@@ -79,6 +79,30 @@ None -- all resolved during discovery.
 ## History
 - 2026-04-13: Created (promoted from IDEA-071). SE + DE consulted on F-1 design question and F-3 backfill lifecycle.
 - 2026-04-14: Set to READY after 3 internal review iterations + 1 Codex spec review.
+- 2026-04-14: Dispatch started.
+- 2026-04-14: All 3 stories DONE. COMPLETED. All four IDEA-071 findings resolved: admin delete confirmation counts now mirror the cascade two-pass surface, reconciliation summary deduplicates across perspectives and runs, both spray loaders gate on game+perspective before processing, backfill script marked deprecated.
+
+### Dispatch Review Scorecard
+| Review Pass | Findings | Accepted | Dismissed |
+|---|---|---|---|
+| Per-story CR — E-223-01 | 3 | 3 | 0 |
+| Per-story CR — E-223-02 | 0 | 0 | 0 |
+| Per-story CR — E-223-03 | 0 | 0 | 0 |
+| CR integration review | 0 | 0 | 0 |
+| Codex code review R1 | 4 | 4 | 0 |
+| Codex code review R2 | 2 | 1 | 1 |
+| **Total** | **9** | **8** | **1** |
+
+### Documentation Assessment
+No documentation impact. No new features, endpoints, schema changes, CLI commands, or deployment changes. All changes are internal query fixes and loader optimizations adopting the existing E-220 perspective provenance invariant.
+
+### Context-Layer Assessment
+- **T1 (New convention/pattern)**: No. The perspective gate pattern already exists in TN-3 (plays loader) and `.claude/rules/perspective-provenance.md`. Spray loaders adopted the existing pattern.
+- **T2 (Architectural decision)**: No. Fixes existing code to adopt the existing E-220 invariant. No new technology choices or structural decisions.
+- **T3 (Footgun/failure mode)**: No. The cross-perspective dedup key behavior and spray gate partial-load limitation are characteristics of the existing perspective provenance model, already documented. No new gotchas discovered.
+- **T4 (Agent behavior change)**: No.
+- **T5 (Domain knowledge)**: No. All findings are E-220 invariant adoption, not new domain insights.
+- **T6 (New CLI/workflow)**: No.
 
 ### Review Scorecard
 | Review Pass | Findings | Accepted | Dismissed |

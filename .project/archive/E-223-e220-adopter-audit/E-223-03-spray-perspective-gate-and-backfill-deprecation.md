@@ -4,7 +4,7 @@
 [E-223: E-220 Adopter Audit](./epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, both spray loaders will skip already-loaded game+perspective combinations at the game level (avoiding unnecessary per-row INSERT OR IGNORE attempts), and the backfill script will be marked as a deprecated one-time migration aid.

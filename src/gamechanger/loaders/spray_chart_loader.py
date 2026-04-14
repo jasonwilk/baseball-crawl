@@ -156,6 +156,24 @@ class SprayChartLoader:
             )
             return LoadResult()
 
+        # Whole-game perspective gate: skip if spray data already loaded
+        # for this game+perspective (mirrors plays_loader pattern, TN-3).
+        # Performance optimization -- INSERT OR IGNORE is still correct without
+        # this gate.  Limitation: if the first pass was partial (e.g., some
+        # events skipped due to unresolvable players), retries will hit this
+        # gate and skip the game.  To retry, delete the partial rows first:
+        #   DELETE FROM spray_charts WHERE game_id=? AND perspective_team_id=?
+        existing = self._db.execute(
+            "SELECT 1 FROM spray_charts WHERE game_id = ? AND perspective_team_id = ? LIMIT 1",
+            (game_id, crawling_team_id),
+        ).fetchone()
+        if existing is not None:
+            logger.debug(
+                "Spray data already loaded for game %s perspective %d; skipping.",
+                game_id, crawling_team_id,
+            )
+            return LoadResult(skipped=1)
+
         # Look up game to get home/away teams (TN-10 step 2).
         game_row = self._db.execute(
             "SELECT home_team_id, away_team_id FROM games WHERE game_id = ?",

@@ -698,10 +698,11 @@ def _toggle_team_active_integer(team_id: int) -> int:
 def _get_delete_confirmation_data(team_id: int) -> dict[str, Any]:
     """Gather row counts and relationship data for the delete confirmation page.
 
-    Queries row counts for all tables in the 4-phase cascade deletion order
-    (TN-1), shared-opponent linkages (TN-2), and orphaned-opponent detection.
-    The spray_charts count uses the combined condition (game_id IN subquery
-    OR team_id = T) to match what the cascade actually deletes.
+    Stat-table counts mirror the two-pass cascade in
+    ``_delete_team_anchor_and_orphan_data`` (src/reports/generator.py):
+    Pass 1 ``perspective_team_id = T``, Pass 2 ``team_id = T``
+    (``batting_team_id`` for plays).  The OR deduplicates naturally.
+    ``game_perspectives`` uses ``perspective_team_id`` only (no anchor FK).
 
     Args:
         team_id: The team's INTEGER primary key.
@@ -715,18 +716,23 @@ def _get_delete_confirmation_data(team_id: int) -> dict[str, Any]:
         linked from no member team after deletion -- non-empty only for
         member teams).
     """
-    _game_ids = "SELECT game_id FROM games WHERE home_team_id = ? OR away_team_id = ?"
-
     with closing(get_connection()) as conn:
         conn.row_factory = sqlite3.Row
 
+        # Perspective-aware counts mirroring the two-pass cascade in
+        # _delete_team_anchor_and_orphan_data (src/reports/generator.py).
+        # Pass 1: perspective_team_id = T, Pass 2: team_id = T (or
+        # batting_team_id for plays).  OR deduplicates naturally.
+
         pgb_count: int = conn.execute(
-            f"SELECT COUNT(*) FROM player_game_batting WHERE game_id IN ({_game_ids})",
+            "SELECT COUNT(*) FROM player_game_batting"
+            " WHERE perspective_team_id = ? OR team_id = ?",
             (team_id, team_id),
         ).fetchone()[0]
 
         pgp_count: int = conn.execute(
-            f"SELECT COUNT(*) FROM player_game_pitching WHERE game_id IN ({_game_ids})",
+            "SELECT COUNT(*) FROM player_game_pitching"
+            " WHERE perspective_team_id = ? OR team_id = ?",
             (team_id, team_id),
         ).fetchone()[0]
 
@@ -758,32 +764,35 @@ def _get_delete_confirmation_data(team_id: int) -> dict[str, Any]:
             (team_id,),
         ).fetchone()[0]
 
-        # Combined condition: game-linked rows (Phase 1) + direct team_id rows (Phase 3)
         sc_count: int = conn.execute(
-            f"SELECT COUNT(*) FROM spray_charts WHERE game_id IN ({_game_ids}) OR team_id = ?",
-            (team_id, team_id, team_id),
+            "SELECT COUNT(*) FROM spray_charts"
+            " WHERE perspective_team_id = ? OR team_id = ?",
+            (team_id, team_id),
         ).fetchone()[0]
 
-        # E-220 proactive audit: count the four additional game-child tables
-        # that _delete_team_cascade now handles.
         plays_count: int = conn.execute(
-            f"SELECT COUNT(*) FROM plays WHERE game_id IN ({_game_ids})",
+            "SELECT COUNT(*) FROM plays"
+            " WHERE perspective_team_id = ? OR batting_team_id = ?",
             (team_id, team_id),
         ).fetchone()[0]
 
         play_events_count: int = conn.execute(
-            f"SELECT COUNT(*) FROM play_events WHERE play_id IN "
-            f"(SELECT id FROM plays WHERE game_id IN ({_game_ids}))",
+            "SELECT COUNT(*) FROM play_events WHERE play_id IN ("
+            "  SELECT id FROM plays"
+            "  WHERE perspective_team_id = ? OR batting_team_id = ?"
+            ")",
             (team_id, team_id),
         ).fetchone()[0]
 
         gp_count: int = conn.execute(
-            f"SELECT COUNT(*) FROM game_perspectives WHERE game_id IN ({_game_ids})",
-            (team_id, team_id),
+            "SELECT COUNT(*) FROM game_perspectives"
+            " WHERE perspective_team_id = ?",
+            (team_id,),
         ).fetchone()[0]
 
         recon_count: int = conn.execute(
-            f"SELECT COUNT(*) FROM reconciliation_discrepancies WHERE game_id IN ({_game_ids})",
+            "SELECT COUNT(*) FROM reconciliation_discrepancies"
+            " WHERE perspective_team_id = ? OR team_id = ?",
             (team_id, team_id),
         ).fetchone()[0]
 

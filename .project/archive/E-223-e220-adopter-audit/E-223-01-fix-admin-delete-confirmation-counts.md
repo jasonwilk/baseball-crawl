@@ -4,7 +4,7 @@
 [E-223: E-220 Adopter Audit](./epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the admin delete confirmation page will display row counts that accurately reflect what `cascade_delete_team()` will actually delete. The current counts use a pre-E-220 game-subquery pattern that overcounts (includes other perspectives' rows) and undercounts (misses scouting rows from the team's perspective in games it didn't play in). The fix replaces the game-subquery pattern with perspective-aware counts mirroring the cascade's two-pass logic.

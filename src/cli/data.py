@@ -1124,7 +1124,7 @@ def reconcile(
     summary_flag: bool = typer.Option(
         False,
         "--summary",
-        help="Show aggregate statistics across ALL reconciliation records in the database.",
+        help="Show aggregate statistics from reconciliation records (deduplicated by signal).",
     ),
     db_path: Path = typer.Option(
         _DEFAULT_DB_PATH,
@@ -1357,10 +1357,10 @@ def _print_verbose_summary(
 
 
 def _print_db_summary(db_summary: dict) -> None:
-    """Print aggregate stats from all reconciliation records in the DB."""
+    """Print deduplicated aggregate stats from reconciliation records."""
     _AVAILABILITY_SIGNALS = frozenset({"game_runs", "game_pa_count"})
 
-    typer.echo("\nReconciliation Database Summary (all runs)")
+    typer.echo("\nReconciliation Database Summary (deduplicated)")
     typer.echo(f"  Total records: {db_summary['total_records']}")
     typer.echo(f"  Total corrected: {db_summary['total_corrected']}")
 

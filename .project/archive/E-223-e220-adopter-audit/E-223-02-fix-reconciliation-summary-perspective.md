@@ -4,7 +4,7 @@
 [E-223: E-220 Adopter Audit](./epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, `get_summary_from_db()` will not double-count discrepancy records when the same game has been reconciled from multiple perspectives. The current query aggregates all `reconciliation_discrepancies` rows without any perspective deduplication, inflating counts for cross-perspective games.

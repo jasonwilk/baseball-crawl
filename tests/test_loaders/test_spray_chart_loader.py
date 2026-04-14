@@ -792,3 +792,62 @@ def test_spray_idempotent_same_perspective(db: sqlite3.Connection, tmp_path: Pat
 
     count = db.execute("SELECT COUNT(*) FROM spray_charts WHERE event_gc_id = ?", (_EVENT_ID_1,)).fetchone()[0]
     assert count == 1
+
+
+# ---------------------------------------------------------------------------
+# E-223-03: Perspective gate tests
+# ---------------------------------------------------------------------------
+
+
+class TestSprayChartPerspectiveGate:
+    """E-223-03 AC-1/AC-3/AC-4: Whole-game perspective gate."""
+
+    def test_skips_already_loaded_perspective(
+        self, db: sqlite3.Connection, tmp_path: Path
+    ) -> None:
+        """AC-1/AC-4: A game with already-loaded perspective is skipped entirely
+        (no per-row INSERT attempts). LoadResult.skipped increments by 1.
+        """
+        own_id, opp_id = _setup_game(db)
+        _seed_player(db, _PLAYER_A)
+        _seed_roster(db, own_id, _PLAYER_A)
+
+        event1 = _make_event(_EVENT_ID_1)
+        event2 = _make_event(_EVENT_ID_2)
+        data = {"spray_chart_data": {"offense": {_PLAYER_A: [event1, event2]}, "defense": {}}}
+        spray_dir = _write_spray_file(tmp_path, _SEASON_ID, _OWN_GC_UUID, _GAME_ID, data)
+
+        result1 = SprayChartLoader(db).load_dir(spray_dir)
+        assert result1.loaded == 2
+
+        # Second load: perspective gate fires, skips entire game
+        result2 = SprayChartLoader(db).load_dir(spray_dir)
+        assert result2.skipped == 1, (
+            f"Expected game-level skip (1), got skipped={result2.skipped}"
+        )
+        assert result2.loaded == 0
+
+    def test_loads_new_perspective_for_same_game(
+        self, db: sqlite3.Connection, tmp_path: Path
+    ) -> None:
+        """AC-4: A game with a new perspective loads normally."""
+        own_id, opp_id = _setup_game(db)
+        _seed_player(db, _PLAYER_A)
+        _seed_roster(db, own_id, _PLAYER_A)
+
+        event = _make_event(_EVENT_ID_1)
+        data = {"spray_chart_data": {"offense": {_PLAYER_A: [event]}, "defense": {}}}
+        spray_dir = _write_spray_file(tmp_path, _SEASON_ID, _OWN_GC_UUID, _GAME_ID, data)
+
+        result1 = SprayChartLoader(db).load_dir(spray_dir)
+        assert result1.loaded == 1
+
+        # Now load as the opponent's perspective (different gc_uuid path)
+        opp_spray_dir = _write_spray_file(
+            tmp_path, _SEASON_ID, _OPP_GC_UUID, _GAME_ID,
+            {"spray_chart_data": {"offense": {_PLAYER_A: [_make_event("evt-opp-1")]}, "defense": {}}},
+        )
+        result2 = SprayChartLoader(db).load_dir(opp_spray_dir)
+        assert result2.loaded == 1, (
+            f"New perspective should load normally, got loaded={result2.loaded}"
+        )
