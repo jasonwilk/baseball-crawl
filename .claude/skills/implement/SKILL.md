@@ -366,7 +366,7 @@ Phase 4b is skipped if the "and review" modifier was not specified.
 Run the codex-review script with the epic worktree path via Bash:
 
 ```
-timeout 600 ./scripts/codex-review.sh --workdir <epic-worktree-path> uncommitted
+timeout 1200 ./scripts/codex-review.sh --workdir <epic-worktree-path> uncommitted
 ```
 
 Capture the exit code and output.
