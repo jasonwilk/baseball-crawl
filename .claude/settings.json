@@ -29,6 +29,12 @@
             "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/pytest-verbose.sh",
             "timeout": 5,
             "statusMessage": "Ensuring pytest verbose mode..."
+          },
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/pytest-exitfirst-warn.sh",
+            "timeout": 5,
+            "statusMessage": "Checking for -x/--exitfirst..."
           }
         ]
       },

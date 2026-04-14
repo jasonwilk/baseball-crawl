@@ -4,7 +4,7 @@
 [E-224: RTK/Pytest Interaction Guardrails](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the Epic Worktree Constraints section in `.claude/skills/implement/SKILL.md` will include a one-liner referencing the `-x`/`--exitfirst` prohibition. This ensures implementers spawned during dispatch see the constraint in their spawn prompt without duplicating the full rule content.

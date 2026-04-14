@@ -210,6 +210,7 @@ Use ABSOLUTE PATHS under this directory for ALL file operations.
 - Reading `.env` or `data/` (gitignored, do not exist in worktree)
 - `git commit`, `git merge`, `git rebase`, `git worktree remove`, `git branch -d/-D`
 - `cd /workspaces/baseball-crawl` -- stay in the epic worktree
+- `-x`/`--exitfirst` with pytest -- RTK compression hides suite truncation, masking skipped tests (see `.claude/rules/pytest-verbose.md`)
 
 **Pytest limitation**: pytest tests the **main checkout's** code (not worktree changes) due to the editable install's meta path finder. Run tests for verification but understand this. Report results in your completion message.
 

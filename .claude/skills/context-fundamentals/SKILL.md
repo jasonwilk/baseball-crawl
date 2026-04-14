@@ -71,16 +71,16 @@ When a session's context window approaches its limit, Claude Code automatically 
 
 ### Baseball-Crawl's Context Budget
 
-Every baseball-crawl agent session starts with approximately **680-950 lines of always-loaded ambient context** before any task-specific content is loaded:
+Every baseball-crawl agent session starts with approximately **704-974 lines of always-loaded ambient context** before any task-specific content is loaded:
 
 | Source | Approximate Size | Notes |
 |--------|-----------------|-------|
 | Root `CLAUDE.md` | ~156 lines | Project identity, stack, deployment, security, architecture (1-line invariants), commands |
-| Universal rules (8 files) | ~370 lines total | workflow-discipline (98), agent-team-compliance (52), dispatch-pattern (51), agent-routing (37), context-layer-guard (36), worktree-isolation (35), pytest-verbose (32), vision-signals (29) |
+| Universal rules (8 files) | ~394 lines total | workflow-discipline (98), agent-team-compliance (52), dispatch-pattern (51), agent-routing (37), context-layer-guard (36), worktree-isolation (35), pytest-verbose (56), vision-signals (29) |
 | Triggered rules (0-23 files) | ~0-400 lines | Scoped by `paths:` frontmatter; loads only when matching files are touched. Highest for `src/gamechanger/` edits (~200+ lines: http-discipline, testing, api-docs, key-metrics, architecture-subsystems), lowest for context-layer edits (~35 lines: context-layer-guard) |
 | Agent definition (`.claude/agents/<agent>.md`) | ~125-315 lines | Varies by agent; code-reviewer is largest (315), claude-architect smallest (125) |
 | Agent `MEMORY.md` (`.claude/agent-memory/<agent>/MEMORY.md`) | ~30-112 lines | Varies; ux-designer ~112, PM ~78, docs-writer ~30 |
-| **Total ambient** | **~680-950 lines** | Always-loaded context before any task begins |
+| **Total ambient** | **~704-974 lines** | Always-loaded context before any task begins |
 
 These are actuals measured post-E-213 (2026-04-05). Triggered rules add 0-400 lines on top depending on files touched. Check the actual files if precision matters for a specific decision.
 
@@ -152,11 +152,11 @@ Here is a worked example for a software-engineer story working on `src/gamechang
 ```
 Session start (always-loaded ambient):
   CLAUDE.md:                       ~156 lines
-  Universal rules (8 files):       ~370 lines
+  Universal rules (8 files):       ~394 lines
   software-engineer.md agent def:  ~188 lines
   software-engineer MEMORY.md:      ~50 lines
   ----------------------------------------
-  Ambient subtotal:                ~764 lines
+  Ambient subtotal:                ~788 lines
 
 Triggered rules (for src/gamechanger/ files):
   http-discipline.md:               ~61 lines
@@ -179,7 +179,7 @@ During task (demand-loaded):
   ----------------------------------------
   Demand subtotal:                 ~200 lines
 
-Total:                           ~1,782 lines (~28% of a 128k context window)
+Total:                           ~1,806 lines (~28% of a 128k context window)
 ```
 
 This is a healthy context load. The main win from E-213's domain extractions is that agents working outside `src/gamechanger/` (e.g., claude-architect on context-layer files) see only ~800 lines of ambient context instead of loading all domain detail universally. Domain-specific reference material (key metrics, data model, admin UI, scouting flows) only loads when agents touch relevant files.

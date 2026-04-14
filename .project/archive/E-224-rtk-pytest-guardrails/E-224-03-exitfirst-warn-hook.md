@@ -4,7 +4,7 @@
 [E-224: RTK/Pytest Interaction Guardrails](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, a new PreToolUse hook (`pytest-exitfirst-warn.sh`) will detect `-x`/`--exitfirst` in pytest commands and emit a warning message. The hook allows the command to proceed (warn, not block). It is registered in `.claude/settings.json` alongside the existing pytest-verbose hook.

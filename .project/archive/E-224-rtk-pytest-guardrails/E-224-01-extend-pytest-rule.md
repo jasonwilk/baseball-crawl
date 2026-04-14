@@ -4,7 +4,7 @@
 [E-224: RTK/Pytest Interaction Guardrails](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, `.claude/rules/pytest-verbose.md` will contain three additional guardrails beyond the existing `-v` requirement: a hard prohibition on `-x`/`--exitfirst`, guidance on verifying RTK-compressed summary lines, and a documented `rtk proxy` bypass path for when full output fidelity is required.

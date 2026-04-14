@@ -1,7 +1,7 @@
 # E-224: RTK/Pytest Interaction Guardrails
 
 ## Status
-`READY`
+`COMPLETED`
 <!-- Lifecycle: DRAFT -> READY -> ACTIVE -> COMPLETED (or BLOCKED / ABANDONED) -->
 
 ## Overview
@@ -44,9 +44,9 @@ The project already has guardrails for RTK's `-v` interaction (`.claude/rules/py
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-224-01 | Extend pytest rule with RTK guardrails | TODO | None | - |
-| E-224-02 | Add `-x` prohibition reference to implement skill | TODO | E-224-01 | - |
-| E-224-03 | Create warn-only `-x`/`--exitfirst` detection hook | TODO | None | - |
+| E-224-01 | Extend pytest rule with RTK guardrails | DONE | None | claude-architect |
+| E-224-02 | Add `-x` prohibition reference to implement skill | DONE | E-224-01 | claude-architect |
+| E-224-03 | Create warn-only `-x`/`--exitfirst` detection hook | DONE | None | claude-architect |
 
 ## Dispatch Team
 - claude-architect
@@ -92,3 +92,27 @@ No `updatedInput` — the command executes as-is. The warning is advisory.
 ## History
 - 2026-04-14: Created (discovery consultations with CA and SE completed)
 - 2026-04-14: Set to READY after Codex validation (2 iterations, 6 findings accepted, 1 dismissed)
+- 2026-04-14: All 3 stories DONE. Epic COMPLETED. All stories context-layer-only (CR skipped, PM verified ACs). Extended `.claude/rules/pytest-verbose.md` with `-x`/`--exitfirst` prohibition + summary verification + `rtk proxy` bypass. Added one-liner reference in implement skill worktree constraints. Created `pytest-exitfirst-warn.sh` warn-only hook registered in `settings.json`.
+
+### Review Scorecard
+| Review Pass | Findings | Accepted | Dismissed |
+|---|---|---|---|
+| Per-story CR -- E-224-01 | 0 | 0 | 0 |
+| Per-story CR -- E-224-02 | 0 | 0 | 0 |
+| Per-story CR -- E-224-03 | 0 | 0 | 0 |
+| CR integration review | 0 | 0 | 0 |
+| Codex code review | 1 | 0 | 1 |
+| **Total** | **1** | **0** | **1** |
+
+Per-story CR rows show 0 findings because all stories were context-layer-only (CR skipped, PM verified ACs alone). The single Codex finding was dismissed as a false positive — the hook correctly does NOT fire on `rtk proxy` commands because `rtk proxy` bypasses RTK compression, making the truncation warning irrelevant.
+
+### Documentation Assessment
+No documentation impact. This epic modifies only context-layer files (rules, hooks, settings, skills). No new features, endpoints, architecture changes, schema changes, or user-facing changes.
+
+### Context-Layer Assessment
+1. **New convention, pattern, or constraint established?** No — the `-x`/`--exitfirst` prohibition and summary verification guidance are already codified in the rule file (the deliverable itself). No additional context-layer codification needed.
+2. **Architectural decision with ongoing implications?** No — extends existing RTK/pytest guardrail pattern, no new architectural decisions.
+3. **Footgun, failure mode, or boundary discovered?** No — the footgun (RTK + `-x` truncation) was already known from E-173/E-220; this epic codifies the fix. The codification IS the deliverable.
+4. **Change to agent behavior, routing, or coordination?** No — the warn-only hook is advisory and does not change agent routing or coordination.
+5. **Domain knowledge discovered?** No — no new baseball domain or API behavior insights.
+6. **New CLI command, workflow, or operational procedure introduced?** No — no new `bb` subcommands, scripts, skills, or workflows.
