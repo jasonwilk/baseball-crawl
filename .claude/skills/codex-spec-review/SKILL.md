@@ -48,20 +48,20 @@ Before executing either path, verify:
 Run the spec review script via Bash in the foreground:
 
 ```
-timeout 600 ./scripts/codex-spec-review.sh <epic-dir>
+timeout 1200 ./scripts/codex-spec-review.sh <epic-dir>
 ```
 
 If the user provided additional context, pass it via `--note`:
 
 ```
-timeout 600 ./scripts/codex-spec-review.sh <epic-dir> --note "Focus on AC testability"
+timeout 1200 ./scripts/codex-spec-review.sh <epic-dir> --note "Focus on AC testability"
 ```
 
 Codex typically takes 1-2 minutes for a standard epic (3-7 story files). Larger epics may take up to 5 minutes.
 
 ### Step 2: Handle errors
 
-- **Exit code 124 (timeout)**: Codex timed out after 10 minutes. Report the timeout to the user and ask how to proceed. Do not retry automatically.
+- **Exit code 124 (timeout)**: Codex timed out after 20 minutes. Report the timeout to the user and ask how to proceed. Do not retry automatically.
 - **Other non-zero exit codes**: The script itself failed (codex not installed, invalid directory, missing rubric). Report the specific error message to the user and stop.
 
 ### Step 3: Evaluate output

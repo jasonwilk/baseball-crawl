@@ -357,7 +357,7 @@ Track the current Codex review iteration: `codex_review_iteration` (starts at 1,
 Run the spec review script directly via Bash. Do NOT load the codex-spec-review skill -- run the underlying script to avoid skill-nesting complexity:
 
 ```
-timeout 600 ./scripts/codex-spec-review.sh <epic-dir>
+timeout 1200 ./scripts/codex-spec-review.sh <epic-dir>
 ```
 
 Where `<epic-dir>` is the absolute path to the epic directory (e.g., `/workspaces/baseball-crawl/epics/E-140-planning-skill/`).
@@ -370,7 +370,7 @@ Capture the exit code and full output.
 
 - **Exit 0, output contains findings**: Present the full codex findings to the user. Proceed to Step 3 (triage).
 
-- **Exit 124 (timeout)**: Report to the user: "Codex review timed out after 10 minutes." Ask how to proceed:
+- **Exit 124 (timeout)**: Report to the user: "Codex review timed out after 20 minutes." Ask how to proceed:
   - (a) Generate a spec review prompt for async execution. Assemble the prompt using the prompt-generation format described in `.claude/skills/codex-spec-review/SKILL.md`. Present in a fenced code block. Pause and wait for the user to paste findings back -- if the pasted content contains "No findings" (case-insensitive), skip triage and proceed to Phase 5; otherwise enter Step 3 with the pasted content. The user may also say "skip" (proceed to Phase 5).
   - (b) Skip Codex review and proceed to Phase 5
   - (c) Retry (re-run the script)
@@ -656,7 +656,7 @@ Phase 3: Internal Review Cycle  <---------+
   |
   v
 Phase 4: Codex Validation Pass  <----------+
-  - Run: timeout 600 ./scripts/codex-spec-review.sh
+  - Run: timeout 1200 ./scripts/codex-spec-review.sh
   - Clean? --> skip to Phase 5              |
   - Findings? --> triage (ACCEPT/DISMISS)   |
   - Timeout/error? --> prompt fallback      |
@@ -713,7 +713,7 @@ If the codex-spec-review script fails because `codex` is not in PATH, the script
 - (b) Skip Codex review and proceed to Phase 5
 
 ### Codex timeout
-If the script times out (exit 124) after 10 minutes, report the timeout and offer the same options as "codex not installed" above, plus (c) retry.
+If the script times out (exit 124) after 20 minutes, report the timeout and offer the same options as "codex not installed" above, plus (c) retry.
 
 ### No findings on Codex review
 If the Codex spec review returns clean ("No findings"), skip refinement and proceed directly to Phase 5 (READY gate). Do not offer triage -- there is nothing to triage.

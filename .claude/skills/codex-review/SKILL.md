@@ -68,23 +68,23 @@ Run the code review script via Bash in the foreground. When an epic worktree pat
 
 **During "and review" chain (epic worktree available):**
 ```
-timeout 600 ./scripts/codex-review.sh --workdir <epic-worktree-path> <mode> [args]
+timeout 1200 ./scripts/codex-review.sh --workdir <epic-worktree-path> <mode> [args]
 ```
 
 **Standalone invocation (no epic worktree):**
 ```
-timeout 600 ./scripts/codex-review.sh <mode> [args]
+timeout 1200 ./scripts/codex-review.sh <mode> [args]
 ```
 
 Examples:
-- `timeout 600 ./scripts/codex-review.sh --workdir /tmp/.worktrees/baseball-crawl-E-137 uncommitted`
-- `timeout 600 ./scripts/codex-review.sh uncommitted`
-- `timeout 600 ./scripts/codex-review.sh base main`
-- `timeout 600 ./scripts/codex-review.sh commit abc1234`
+- `timeout 1200 ./scripts/codex-review.sh --workdir /tmp/.worktrees/baseball-crawl-E-137 uncommitted`
+- `timeout 1200 ./scripts/codex-review.sh uncommitted`
+- `timeout 1200 ./scripts/codex-review.sh base main`
+- `timeout 1200 ./scripts/codex-review.sh commit abc1234`
 
 ### Step 2: Handle errors
 
-- **Exit code 124 (timeout)**: Codex timed out after 10 minutes. Report the timeout to the user and ask how to proceed. Do not retry automatically.
+- **Exit code 124 (timeout)**: Codex timed out after 20 minutes. Report the timeout to the user and ask how to proceed. Do not retry automatically.
 - **Other non-zero exit codes**: The script itself failed (codex not installed, missing rubric). Report the specific error message to the user and stop.
 
 ### Step 3: Evaluate output
