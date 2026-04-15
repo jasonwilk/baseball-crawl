@@ -4,7 +4,7 @@
 [E-218: League/Level Detection for Pitch Rules](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, when the detection function identifies a team as American Legion, the starter prediction engine will apply Legion-specific pitch count rules (105-pitch max, Legion rest tiers) instead of showing a "rules not available" warning. This is the first non-NSAA rule set, validating the detection-to-dispatch pipeline end-to-end.

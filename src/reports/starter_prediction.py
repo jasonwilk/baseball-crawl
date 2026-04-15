@@ -13,8 +13,10 @@ effects.  It receives the pitcher profiles dict from
 from __future__ import annotations
 
 import datetime
+import json
 import logging
 import os
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -134,6 +136,192 @@ def format_nsaa_rest_table(rules: PitchCountRules) -> str:
     return "\n".join(lines)
 
 
+# ── NSAA Subvarsity Rules ─────────────────────────────────────────────
+
+NSAA_SUBVARSITY = PitchCountRules(
+    max_pitches=90,
+    rest_tiers=(
+        RestTier(1, 30, 0),
+        RestTier(31, 50, 1),
+        RestTier(51, 70, 2),
+        RestTier(71, 90, 3),
+    ),
+)
+
+
+def get_subvarsity_rules(_reference_date: datetime.date) -> PitchCountRules:
+    """Return the NSAA subvarsity rule set (90-pitch max year-round)."""
+    return NSAA_SUBVARSITY
+
+
+# ── Legion Rules ──────────────────────────────────────────────────────
+
+LEGION = PitchCountRules(
+    max_pitches=105,
+    rest_tiers=(
+        RestTier(1, 30, 0),
+        RestTier(31, 45, 1),
+        RestTier(46, 60, 2),
+        RestTier(61, 80, 3),
+        RestTier(81, 105, 4),
+    ),
+)
+
+
+# ── League/Level Detection ─────────────────────────────────────────────
+
+# NGB values mapped to league identifiers.
+_NGB_MAP: dict[str, str] = {
+    "nsaa": "nsaa",
+    "nfhs": "nsaa",
+    "american_legion": "legion",
+    "usssa": "usssa",
+    "perfect_game": "perfect_game",
+}
+
+# Priority order for multi-value ngb lists.
+_NGB_PRIORITY = ("nsaa", "nfhs", "american_legion", "usssa", "perfect_game")
+
+# Team name keyword patterns.  Order matters for first-match semantics.
+_NAME_KEYWORDS: list[tuple[re.Pattern[str], str]] = [
+    # NSAA level keywords -- more specific patterns before less specific
+    (re.compile(r"\bjunior\s+varsity\b|\bjv\b", re.IGNORECASE), "nsaa_subvarsity"),
+    (re.compile(r"\bfreshman\b|\bfrosh\b", re.IGNORECASE), "nsaa_subvarsity"),
+    (re.compile(r"\breserve\b", re.IGNORECASE), "nsaa_subvarsity"),
+    (re.compile(r"\bsophomore\b", re.IGNORECASE), "nsaa_subvarsity"),
+    (re.compile(r"\bvarsity\b", re.IGNORECASE), "nsaa_varsity"),
+    # Youth travel age pattern BEFORE seniors/juniors so "14U Juniors" → youth_travel
+    (re.compile(r"\b\d+U\b", re.IGNORECASE), "youth_travel"),
+    # Legion keywords -- "American Legion" before bare "Legion"
+    (re.compile(r"\bamerican\s+legion\b|\blegion\b", re.IGNORECASE), "legion"),
+    (re.compile(r"\bpost\s+\d+", re.IGNORECASE), "legion"),
+    (re.compile(r"\bseniors\b", re.IGNORECASE), "legion"),
+    (re.compile(r"\bjuniors\b", re.IGNORECASE), "legion"),
+]
+
+# Warning messages for unsupported leagues.
+_LEAGUE_WARNINGS: dict[str, str] = {
+    "usssa": "USSSA pitch rules not yet supported",
+    "perfect_game": "Perfect Game pitch rules not yet supported",
+    "youth_travel": "Youth travel league detected -- specific pitch rules not available",
+    "unknown": "League not detected -- pitch count rules cannot be applied",
+}
+
+
+def detect_league_level(
+    *,
+    program_type: str | None = None,
+    classification: str | None = None,
+    ngb: str | list[str] | None = None,
+    age_group: str | None = None,
+    team_name: str | None = None,
+) -> str:
+    """Detect league/level from cascading priority signals.
+
+    Args:
+        program_type: From DB ``programs.program_type`` (tracked teams).
+        classification: From DB ``teams.classification`` (tracked teams).
+        ngb: GC public API ``ngb`` field -- JSON string or already-parsed list.
+        age_group: GC public API ``age_group`` field.
+        team_name: Team name for keyword fallback.
+
+    Returns:
+        League/level identifier string: ``nsaa_varsity``, ``nsaa_subvarsity``,
+        ``legion``, ``usssa``, ``perfect_game``, ``youth_travel``, or ``unknown``.
+    """
+    # Priority 1: DB fields (tracked teams)
+    if program_type:
+        if program_type == "hs":
+            if classification in ("jv", "freshman", "reserve"):
+                return "nsaa_subvarsity"
+            # NULL or "varsity" → nsaa_varsity (default -- bounded risk)
+            return "nsaa_varsity"
+        if program_type == "legion":
+            return "legion"
+        if program_type == "usssa":
+            return "usssa"
+
+    # Priority 2: NGB + age_group (GC public API)
+    ngb_list = _parse_ngb(ngb)
+    if ngb_list:
+        # Check against priority order
+        for ngb_val in _NGB_PRIORITY:
+            if ngb_val in ngb_list:
+                league = _NGB_MAP[ngb_val]
+                if league == "nsaa":
+                    # Disambiguate varsity vs subvarsity via name keywords
+                    return _nsaa_level_from_name(team_name)
+                if league == "legion":
+                    return "legion"
+                if league == "usssa":
+                    return "usssa"
+                if league == "perfect_game":
+                    return "perfect_game"
+
+        # ngb has values but none recognized → unknown
+        return "unknown"
+
+    # ngb is empty -- check age_group
+    if age_group:
+        if re.search(r"\d+U\b", age_group, re.IGNORECASE):
+            return "youth_travel"
+        # age_group suggests HS (e.g., "High School") → fall through to name
+        # Other ambiguous age_group values also fall through
+
+    # Priority 3: Team name keywords
+    if team_name:
+        for pattern, league_id in _NAME_KEYWORDS:
+            if pattern.search(team_name):
+                return league_id
+
+    # Priority 4: Unknown
+    return "unknown"
+
+
+def _parse_ngb(ngb: str | list[str] | None) -> list[str]:
+    """Parse the ngb field into a list of strings.
+
+    The GC API returns ngb as a JSON-encoded string (e.g., ``'["usssa"]'``).
+    This function handles both pre-parsed lists and raw JSON strings.
+    """
+    if ngb is None:
+        return []
+    if isinstance(ngb, list):
+        return ngb
+    if isinstance(ngb, str):
+        try:
+            parsed = json.loads(ngb)
+            if isinstance(parsed, list):
+                return [str(v).lower() for v in parsed]
+        except (json.JSONDecodeError, TypeError):
+            pass
+    return []
+
+
+def _nsaa_level_from_name(team_name: str | None) -> str:
+    """Disambiguate NSAA varsity vs subvarsity from team name keywords."""
+    if not team_name:
+        return "nsaa_varsity"  # default when no name signal
+    name_lower = team_name.lower()
+    for keyword in ("jv", "junior varsity", "freshman", "frosh", "reserve", "sophomore"):
+        if keyword in name_lower:
+            return "nsaa_subvarsity"
+    return "nsaa_varsity"
+
+
+def get_rules_for_league(
+    league: str, reference_date: datetime.date,
+) -> PitchCountRules | None:
+    """Return the pitch count rule set for a league, or None if unsupported."""
+    if league == "nsaa_varsity":
+        return get_nsaa_rules(reference_date)
+    if league == "nsaa_subvarsity":
+        return get_subvarsity_rules(reference_date)
+    if league == "legion":
+        return LEGION
+    return None
+
+
 # ── Role classification ─────────────────────────────────────────────────
 
 
@@ -191,13 +379,21 @@ def _detect_rotation_pattern(
 # ── Rest / availability helpers ─────────────────────────────────────────
 
 
-def _is_nsaa_excluded(
-    profile: dict, reference_date: datetime.date,
+def _is_excluded(
+    profile: dict,
+    reference_date: datetime.date,
+    rules: PitchCountRules,
 ) -> tuple[bool, str | None]:
-    """Check NSAA pitch count rules and consecutive-days rule.
+    """Check pitch count rules and consecutive-days rule for any league.
 
-    Returns ``(excluded, reason)`` where *reason* is a human-readable
-    string explaining the exclusion, or ``None`` when not excluded.
+    Args:
+        profile: Pitcher profile dict with ``appearances`` list.
+        reference_date: Anchor date for rest calculations.
+        rules: The pitch count rule set to apply.
+
+    Returns:
+        ``(excluded, reason)`` where *reason* is a human-readable
+        string explaining the exclusion, or ``None`` when not excluded.
     """
     apps = profile.get("appearances", [])
     if not apps:
@@ -221,7 +417,7 @@ def _is_nsaa_excluded(
         a for a in apps if a.get("game_date") == last_date_str
     ]
 
-    # ── AC-9: Null pitch count on most recent game date ────────────
+    # ── Null pitch count on most recent game date ─────────────────
     if any(a.get("pitches") is None for a in last_day_apps):
         return True, "pitch count unavailable -- cannot verify eligibility"
 
@@ -229,15 +425,14 @@ def _is_nsaa_excluded(
     total_pitches = sum(a["pitches"] for a in last_day_apps)
 
     # ── Rest-tier compliance ───────────────────────────────────────
-    rules = get_nsaa_rules(reference_date)
     required_rest = 0
     for tier in rules.rest_tiers:
         if tier.min_pitches <= total_pitches <= tier.max_pitches:
             required_rest = tier.rest_days
             break
     else:
-        # Pitch count exceeds highest tier (e.g., 95 pitches pre-April
-        # when max is 90).  Apply the maximum rest requirement.
+        # Pitch count exceeds highest tier.  Apply the maximum rest
+        # requirement.
         if total_pitches > 0 and rules.rest_tiers:
             max_tier = rules.rest_tiers[-1]
             if total_pitches > max_tier.max_pitches:
@@ -268,6 +463,16 @@ def _is_nsaa_excluded(
         )
 
     return False, None
+
+
+def _is_nsaa_excluded(
+    profile: dict, reference_date: datetime.date,
+) -> tuple[bool, str | None]:
+    """Check NSAA pitch count rules and consecutive-days rule.
+
+    Convenience wrapper around ``_is_excluded()`` for backward compatibility.
+    """
+    return _is_excluded(profile, reference_date, get_nsaa_rules(reference_date))
 
 
 def _build_reasoning(
@@ -641,6 +846,7 @@ def compute_starter_prediction(
     pitching_history: list[dict],
     reference_date: datetime.date,
     workload: dict[str, dict] | None = None,
+    league: str = "nsaa_varsity",
 ) -> StarterPrediction:
     """Analyze pitching history and produce a starter prediction.
 
@@ -649,11 +855,28 @@ def compute_starter_prediction(
         pitching_history: Output from ``get_pitching_history()``.
         reference_date: Anchor date for rest/availability calculations.
         workload: Output from ``get_pitching_workload()`` (optional).
+        league: Detected league/level identifier from ``detect_league_level()``.
 
     Returns:
         ``StarterPrediction`` dataclass with prediction, rest table,
         rotation pattern, and confidence tier.
     """
+    # ── Unsupported league → suppress with warning ──────────────────
+    rules = get_rules_for_league(league, reference_date)
+    if rules is None:
+        # Build rest table with raw workload data but no availability
+        roles = {pid: _classify_role(p) for pid, p in pitcher_profiles.items()}
+        warning = _LEAGUE_WARNINGS.get(league, _LEAGUE_WARNINGS["unknown"])
+        return StarterPrediction(
+            confidence="suppress",
+            predicted_starter=None,
+            alternative=None,
+            top_candidates=[],
+            rest_table=_build_rest_table(pitcher_profiles, roles, workload),
+            bullpen_order=[],
+            data_note=warning,
+        )
+
     # Count unique completed games
     game_ids = sorted(set(r["game_id"] for r in pitching_history))
     total_team_games = len(game_ids)
@@ -671,10 +894,9 @@ def compute_starter_prediction(
                 "rest data accumulating"
             )
         roles = {pid: _classify_role(p) for pid, p in pitcher_profiles.items()}
-        # NSAA compliance is valid even with < 4 games
         suppress_excluded: dict[str, str] = {}
         for pid, profile in pitcher_profiles.items():
-            is_excl, reason = _is_nsaa_excluded(profile, reference_date)
+            is_excl, reason = _is_excluded(profile, reference_date, rules)
             if is_excl:
                 suppress_excluded[pid] = reason  # type: ignore[assignment]
         return StarterPrediction(
@@ -705,10 +927,10 @@ def compute_starter_prediction(
         pitcher_profiles, pitching_history, roles, reference_date
     )
 
-    # ── Apply NSAA exclusions (all pitchers, not just starters) ──────
+    # ── Apply pitch-count exclusions (all pitchers, not just starters) ──
     excluded: dict[str, str] = {}
     for pid, profile in pitcher_profiles.items():
-        is_excl, reason = _is_nsaa_excluded(profile, reference_date)
+        is_excl, reason = _is_excluded(profile, reference_date, rules)
         if is_excl:
             excluded[pid] = reason  # type: ignore[assignment]
 

@@ -1,7 +1,7 @@
 # E-218: League/Level Detection for Pitch Rules
 
 ## Status
-`READY`
+`COMPLETED`
 
 ## Overview
 Add league and level detection so the starter prediction engine selects the correct pitch count rule set instead of defaulting all teams to NSAA varsity. Detection must work for both tracked teams (DB fields available) and ad-hoc reports (only GC API metadata and team name available). This epic also implements Legion pitch count rules as the first non-NSAA rule set, validating the detection-to-dispatch pipeline end-to-end.
@@ -46,8 +46,8 @@ Reports serve any `public_id` -- including non-HS teams -- so detection is neede
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-218-01 | League/level detection function and wiring | TODO | E-217-01 | - |
-| E-218-02 | Legion pitch count rule set | TODO | E-218-01 | - |
+| E-218-01 | League/level detection function and wiring | DONE | E-217-01 | - |
+| E-218-02 | Legion pitch count rule set | DONE | E-218-01 | - |
 
 ## Dispatch Team
 - software-engineer
@@ -158,6 +158,8 @@ Consecutive-days rule: same as NSAA (max 2 appearances in 3-day period).
 
 ## History
 - 2026-04-07: Created. Promoted from IDEA-066. Expert consultations with baseball-coach and software-engineer completed.
+- 2026-04-15: COMPLETED. Both stories DONE. League/level detection function with cascading priority (DB fields → NGB+age_group → name keywords → unknown) wired into both dashboard and reports paths. Legion pitch count rules (105-pitch max, 5 rest tiers) implemented as first non-NSAA rule set. NSAA subvarsity rules (90-pitch max year-round) added. Unsupported leagues (USSSA, Perfect Game, youth travel, unknown) suppress predictions with league-specific warnings while preserving raw workload data. 73 new tests (49 detection + 24 Legion). 5 code review findings (3 accepted, 2 dismissed). Implementation review: 2 rounds on E-218-01 (1 MUST FIX: missing AC-13 end-to-end test, 1 SHOULD FIX: dead _SUPPORTED_LEAGUES code), clean pass on E-218-02 and integration review. Codex review: 1 accepted (juniors/seniors pattern ordering), 2 dismissed (generator prefetch fallback = beyond scope, generator integration test = verified by CR).
+- 2026-04-15: Set to ACTIVE. Dispatch begins.
 - 2026-04-08: Set to READY after 2 internal review iterations + 3 Codex spec review passes (34 findings total, 30 accepted, 4 dismissed). Key refinements: detection cascade restructured (ngb+age_group merged into unified interaction table), youth_travel identifier added, perfect_game ngb mapping, subvarsity rule set ownership moved to E-218-01 (E-217 only provides varsity), Warning Output Contract pinned (confidence=suppress, field shapes specified), consecutive-days window corrected (from E-217 review), dashboard path includes team_name fallback for tracked opponents lacking program_type, dependency narrowed to E-217-01. Two ideas promoted during E-217/E-218 planning: IDEA-066 (this epic), IDEA-067 (catcher-pitcher restriction). Dismissed findings: api-scout consultation (3x -- graceful cascade handles unknown ngb values), AC restatement cosmetic (1x).
 
 ### Review Scorecard
@@ -171,3 +173,23 @@ Consecutive-days rule: same as NSAA (max 2 appearances in 3-day period).
 | Codex iteration 2 | 5 | 4 | 1 |
 | Codex iteration 3 | 5 | 3 | 2 |
 | **Total** | **34** | **30** | **4** |
+
+### Dispatch Review Scorecard
+| Review Pass | Findings | Accepted | Dismissed |
+|---|---|---|---|
+| Per-story CR -- E-218-01 | 2 | 2 | 0 |
+| Per-story CR -- E-218-02 | 0 | 0 | 0 |
+| CR integration review | 0 | 0 | 0 |
+| Codex code review | 3 | 1 | 2 |
+| **Total** | **5** | **3** | **2** |
+
+### Documentation Assessment
+No documentation impact. E-218 added league detection and Legion rules to the starter prediction engine -- an internal code feature with no new endpoints, no schema changes, no deployment config changes, no new CLI commands, and no user-facing workflow changes. `docs/admin/` and `docs/coaching/` do not need updates.
+
+### Context-Layer Assessment
+1. **New agent capabilities or tools**: No -- no new agents, skills, or tools added.
+2. **New architectural patterns or conventions**: No -- used existing `PitchCountRules`/`RestTier` data model from E-217. Detection function follows existing single-consumer-in-file pattern.
+3. **New rules or constraints**: No -- no new rules files needed. Detection cascade is internal to `starter_prediction.py`.
+4. **Changes to CLAUDE.md-documented behavior**: No -- no changes to CLI commands, deployment, data model tables, or API endpoints documented in CLAUDE.md.
+5. **New external integrations or API endpoints**: No -- uses existing GC public API fields (`ngb`, `age_group`) already documented.
+6. **Lessons learned that should be codified**: No -- dispatch was clean (5 findings, 3 accepted, 2 dismissed). No process gaps or anti-patterns discovered.

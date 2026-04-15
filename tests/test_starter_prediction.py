@@ -12,9 +12,12 @@ import pytest
 
 from src.api.db import build_pitcher_profiles
 from src.reports.starter_prediction import (
+    LEGION,
     NSAA_POST_APRIL,
     NSAA_PRE_APRIL,
+    RestTier,
     StarterPrediction,
+    _is_excluded,
     _is_nsaa_excluded,
     compute_starter_prediction,
     get_nsaa_rules,
@@ -1453,3 +1456,219 @@ class TestBullpenAvailabilitySorting:
         closer = next(b for b in prediction.bullpen_order if "Closer" in b["name"])
         assert closer["available"] is False
         assert closer["unavailability_reason"] is not None
+
+
+# ── Legion pitch count rules ──────────────────────────────────────────
+
+
+class TestLegionConstants:
+    """AC-1, AC-5: Legion rule set constants."""
+
+    def test_legion_max_pitches(self):
+        assert LEGION.max_pitches == 105
+
+    def test_legion_rest_tiers(self):
+        tiers = LEGION.rest_tiers
+        assert len(tiers) == 5
+        assert tiers[0] == RestTier(1, 30, 0)
+        assert tiers[1] == RestTier(31, 45, 1)
+        assert tiers[2] == RestTier(46, 60, 2)
+        assert tiers[3] == RestTier(61, 80, 3)
+        assert tiers[4] == RestTier(81, 105, 4)
+
+
+class TestLegionExclusion:
+    """AC-2 through AC-6: Legion-specific availability checks via _is_excluded."""
+
+    def _make_profile(self, pitches: int, game_date: str) -> dict:
+        return {
+            "total_starts": 1,
+            "total_games": 1,
+            "appearances": [
+                {"game_date": game_date, "pitches": pitches},
+            ],
+        }
+
+    def _make_multi_day_profile(self, appearances: list[dict]) -> dict:
+        return {
+            "total_starts": len(appearances),
+            "total_games": len(appearances),
+            "appearances": appearances,
+        }
+
+    # ── AC-3: 48 pitches, 1 day rest → excluded under Legion ──────────
+
+    def test_48_pitches_1_day_excluded_legion(self):
+        """AC-3: 48 pitches, 1 day ago → excluded (46-60 tier = 2 days rest)."""
+        profile = self._make_profile(48, "2026-04-05")
+        excluded, reason = _is_excluded(profile, datetime.date(2026, 4, 6), LEGION)
+        assert excluded is True
+        assert "1d rest" in reason
+
+    def test_48_pitches_1_day_available_nsaa(self):
+        """AC-3 inverse: same pitcher available under NSAA (31-50 tier = 1 day)."""
+        profile = self._make_profile(48, "2026-04-05")
+        excluded, _reason = _is_nsaa_excluded(profile, datetime.date(2026, 4, 6))
+        assert excluded is False
+
+    def test_48_pitches_2_days_available_legion(self):
+        """48 pitches, 2 days ago → available under Legion (2 days met)."""
+        profile = self._make_profile(48, "2026-04-04")
+        excluded, _reason = _is_excluded(profile, datetime.date(2026, 4, 6), LEGION)
+        assert excluded is False
+
+    # ── AC-4: 82 pitches, 3 days rest → excluded under Legion ─────────
+
+    def test_82_pitches_3_days_excluded_legion(self):
+        """AC-4: 82 pitches, 3 days ago → excluded (81+ tier = 4 days rest)."""
+        profile = self._make_profile(82, "2026-04-03")
+        excluded, reason = _is_excluded(profile, datetime.date(2026, 4, 6), LEGION)
+        assert excluded is True
+        assert "3d rest" in reason
+
+    def test_82_pitches_3_days_available_nsaa(self):
+        """AC-4 inverse: same pitcher available under NSAA pre-April (71-90 = 3 days)."""
+        profile = self._make_profile(82, "2026-03-03")
+        excluded, _reason = _is_nsaa_excluded(profile, datetime.date(2026, 3, 6))
+        assert excluded is False
+
+    def test_82_pitches_4_days_available_legion(self):
+        """82 pitches, 4 days ago → available under Legion (4 days met)."""
+        profile = self._make_profile(82, "2026-04-02")
+        excluded, _reason = _is_excluded(profile, datetime.date(2026, 4, 6), LEGION)
+        assert excluded is False
+
+    # ── AC-6: Consecutive-days rule under Legion ──────────────────────
+
+    def test_consecutive_days_excluded_legion(self):
+        """AC-6: 2 appearances on prior 2 days → excluded (max 2 in 3-day window)."""
+        profile = self._make_multi_day_profile([
+            {"game_date": "2026-04-04", "pitches": 20},
+            {"game_date": "2026-04-05", "pitches": 15},
+        ])
+        excluded, reason = _is_excluded(profile, datetime.date(2026, 4, 6), LEGION)
+        assert excluded is True
+        assert "3-day period" in reason
+
+    # ── AC-8: Rest tier boundary edge cases ───────────────────────────
+
+    def test_boundary_30_pitches_no_rest(self):
+        """30 pitches → 0 days rest (top of tier 1)."""
+        profile = self._make_profile(30, "2026-04-05")
+        excluded, _reason = _is_excluded(profile, datetime.date(2026, 4, 6), LEGION)
+        assert excluded is False
+
+    def test_boundary_31_pitches_needs_1_day(self):
+        """31 pitches → 1 day rest (bottom of tier 2)."""
+        profile = self._make_profile(31, "2026-04-05")
+        # 1 day elapsed, 1 day required → available
+        excluded, _reason = _is_excluded(profile, datetime.date(2026, 4, 6), LEGION)
+        assert excluded is False
+
+    def test_boundary_31_pitches_0_days_excluded(self):
+        """31 pitches, same day → excluded (needs 1 day)."""
+        profile = self._make_profile(31, "2026-04-06")
+        excluded, reason = _is_excluded(profile, datetime.date(2026, 4, 6), LEGION)
+        assert excluded is True
+
+    def test_boundary_45_pitches_needs_1_day(self):
+        """45 pitches → 1 day rest (top of tier 2)."""
+        profile = self._make_profile(45, "2026-04-05")
+        excluded, _reason = _is_excluded(profile, datetime.date(2026, 4, 6), LEGION)
+        assert excluded is False
+
+    def test_boundary_46_pitches_needs_2_days(self):
+        """46 pitches → 2 days rest (bottom of tier 3)."""
+        profile = self._make_profile(46, "2026-04-05")
+        # 1 day elapsed, 2 required → excluded
+        excluded, _reason = _is_excluded(profile, datetime.date(2026, 4, 6), LEGION)
+        assert excluded is True
+
+    def test_boundary_60_pitches_needs_2_days(self):
+        """60 pitches → 2 days rest (top of tier 3)."""
+        profile = self._make_profile(60, "2026-04-04")
+        # 2 days elapsed, 2 required → available
+        excluded, _reason = _is_excluded(profile, datetime.date(2026, 4, 6), LEGION)
+        assert excluded is False
+
+    def test_boundary_61_pitches_needs_3_days(self):
+        """61 pitches → 3 days rest (bottom of tier 4)."""
+        profile = self._make_profile(61, "2026-04-04")
+        # 2 days elapsed, 3 required → excluded
+        excluded, _reason = _is_excluded(profile, datetime.date(2026, 4, 6), LEGION)
+        assert excluded is True
+
+    def test_boundary_80_pitches_needs_3_days(self):
+        """80 pitches → 3 days rest (top of tier 4)."""
+        profile = self._make_profile(80, "2026-04-03")
+        # 3 days elapsed, 3 required → available
+        excluded, _reason = _is_excluded(profile, datetime.date(2026, 4, 6), LEGION)
+        assert excluded is False
+
+    def test_boundary_81_pitches_needs_4_days(self):
+        """81 pitches → 4 days rest (bottom of tier 5)."""
+        profile = self._make_profile(81, "2026-04-03")
+        # 3 days elapsed, 4 required → excluded
+        excluded, _reason = _is_excluded(profile, datetime.date(2026, 4, 6), LEGION)
+        assert excluded is True
+
+    def test_boundary_105_pitches_needs_4_days(self):
+        """105 pitches → 4 days rest (max pitches)."""
+        profile = self._make_profile(105, "2026-04-02")
+        # 4 days elapsed, 4 required → available
+        excluded, _reason = _is_excluded(profile, datetime.date(2026, 4, 6), LEGION)
+        assert excluded is False
+
+    def test_over_105_applies_max_rest(self):
+        """Pitches exceeding max (e.g., 110) still apply 4-day max rest."""
+        profile = self._make_profile(110, "2026-04-03")
+        # 3 days elapsed, 4 required → excluded
+        excluded, _reason = _is_excluded(profile, datetime.date(2026, 4, 6), LEGION)
+        assert excluded is True
+
+
+class TestLegionEndToEnd:
+    """AC-2, AC-7: compute_starter_prediction with league='legion'."""
+
+    @pytest.fixture
+    def prediction(self):
+        """5-game rotation with one starter, Legion rules."""
+        history = []
+        dates = [
+            "2026-03-10", "2026-03-14", "2026-03-18",
+            "2026-03-22", "2026-03-26",
+        ]
+        for i, d in enumerate(dates):
+            gid = f"g{i + 1:02d}"
+            history.append(_make_appearance(
+                "ace", gid, d,
+                ip_outs=18, pitches=75, so=6, bb=2,
+                appearance_order=1,
+            ))
+            history.append(_make_appearance(
+                "reliever", gid, d,
+                ip_outs=3, pitches=15, so=1, bb=0,
+                appearance_order=2,
+            ))
+        profiles = build_pitcher_profiles(history)
+        return compute_starter_prediction(
+            profiles, history,
+            reference_date=datetime.date(2026, 4, 1),
+            league="legion",
+        )
+
+    def test_legion_applies_rules_not_warning(self, prediction):
+        """AC-7: Legion no longer shows 'rules not available' warning."""
+        assert prediction.confidence != "suppress" or (
+            prediction.data_note is not None
+            and "not yet supported" not in prediction.data_note
+            and "not detected" not in prediction.data_note
+        )
+
+    def test_legion_has_candidates(self, prediction):
+        """AC-2: Legion applies rules, producing candidates."""
+        assert len(prediction.top_candidates) > 0
+
+    def test_legion_has_bullpen(self, prediction):
+        """AC-2: Bullpen order populated under Legion rules."""
+        assert len(prediction.bullpen_order) > 0

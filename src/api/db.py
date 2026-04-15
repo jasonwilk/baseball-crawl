@@ -931,6 +931,37 @@ def get_opponent_scouting_report(
         return {}
 
 
+def get_team_league_info(team_id: int) -> dict[str, Any]:
+    """Return league-detection fields for a team.
+
+    Queries ``teams.classification``, ``teams.name``, and
+    ``programs.program_type`` (via JOIN on ``program_id``).
+
+    Returns:
+        Dict with keys ``program_type`` (str | None),
+        ``classification`` (str | None), ``team_name`` (str | None).
+        Returns empty-valued dict on error.
+    """
+    query = """
+        SELECT
+            p.program_type,
+            t.classification,
+            t.name AS team_name
+        FROM teams t
+        LEFT JOIN programs p ON p.program_id = t.program_id
+        WHERE t.id = ?
+    """
+    try:
+        with closing(get_connection()) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(query, (team_id,)).fetchone()
+            if row:
+                return dict(row)
+    except sqlite3.Error:
+        logger.exception("Failed to fetch team league info for %d", team_id)
+    return {"program_type": None, "classification": None, "team_name": None}
+
+
 def get_last_meeting(
     team_id: int,
     opponent_team_id: int,

@@ -4,7 +4,7 @@
 [E-218: League/Level Detection for Pitch Rules](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the starter prediction engine will receive the correct league/level identifier for any team, whether tracked (DB fields) or ad-hoc (GC API metadata). When the detected league has no implemented rule set (USSSA, Perfect Game) or detection fails entirely, the engine will suppress rest-tier availability and display a warning instead of silently applying wrong NSAA rules.

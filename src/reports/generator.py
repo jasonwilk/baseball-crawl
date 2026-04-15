@@ -937,6 +937,8 @@ def generate_report(gc_url: str) -> GenerationResult:
     # Step 1b: Fetch team name + season year from public API (no auth needed)
     team_name_from_api: str | None = None
     season_year_from_api: int | None = None
+    ngb_from_api: str | None = None
+    age_group_from_api: str | None = None
     try:
         from src.http.session import create_session
 
@@ -950,6 +952,8 @@ def generate_report(gc_url: str) -> GenerationResult:
             team_name_from_api = pub_data.get("name")
             ts = pub_data.get("team_season") or {}
             season_year_from_api = ts.get("year")
+            ngb_from_api = pub_data.get("ngb")
+            age_group_from_api = pub_data.get("age_group")
         session.close()
     except Exception:  # noqa: BLE001
         logger.warning("Could not fetch public team info for %s", public_id)
@@ -1154,6 +1158,13 @@ def generate_report(gc_url: str) -> GenerationResult:
                 if pitching_history_rows:
                     from src.reports.starter_prediction import (
                         compute_starter_prediction,
+                        detect_league_level,
+                    )
+
+                    league = detect_league_level(
+                        ngb=ngb_from_api,
+                        age_group=age_group_from_api,
+                        team_name=team_name_from_api,
                     )
 
                     pitcher_profiles = build_pitcher_profiles(
@@ -1163,6 +1174,7 @@ def generate_report(gc_url: str) -> GenerationResult:
                         pitcher_profiles, pitching_history_rows,
                         reference_date=date.fromisoformat(generated_at[:10]),
                         workload=pitching_workload,
+                        league=league,
                     )
 
                     # Tier 2: LLM enrichment (optional, non-fatal)

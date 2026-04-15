@@ -1640,13 +1640,26 @@ async def opponent_detail(request: Request, opponent_team_id: int) -> Response:
                 db.get_pitching_history, opponent_team_id, season_id,
             )
             if pitching_history_rows:
-                from src.reports.starter_prediction import compute_starter_prediction
+                from src.reports.starter_prediction import (
+                    compute_starter_prediction,
+                    detect_league_level,
+                )
+
+                league_info = await run_in_threadpool(
+                    db.get_team_league_info, opponent_team_id,
+                )
+                league = detect_league_level(
+                    program_type=league_info.get("program_type"),
+                    classification=league_info.get("classification"),
+                    team_name=league_info.get("team_name"),
+                )
 
                 pitcher_profiles = db.build_pitcher_profiles(pitching_history_rows)
                 starter_prediction = compute_starter_prediction(
                     pitcher_profiles, pitching_history_rows,
                     reference_date=datetime.date.today(),
                     workload=workload,
+                    league=league,
                 )
         except Exception:  # noqa: BLE001
             logger.warning(
@@ -1833,13 +1846,26 @@ async def opponent_print(request: Request, opponent_team_id: int) -> Response:
                 db.get_pitching_history, opponent_team_id, season_id,
             )
             if pitching_history_pr:
-                from src.reports.starter_prediction import compute_starter_prediction
+                from src.reports.starter_prediction import (
+                    compute_starter_prediction,
+                    detect_league_level,
+                )
+
+                league_info_pr = await run_in_threadpool(
+                    db.get_team_league_info, opponent_team_id,
+                )
+                league_pr = detect_league_level(
+                    program_type=league_info_pr.get("program_type"),
+                    classification=league_info_pr.get("classification"),
+                    team_name=league_info_pr.get("team_name"),
+                )
 
                 pitcher_profiles_pr = db.build_pitcher_profiles(pitching_history_pr)
                 starter_prediction_pr = compute_starter_prediction(
                     pitcher_profiles_pr, pitching_history_pr,
                     reference_date=datetime.date.today(),
                     workload=workload_pr,
+                    league=league_pr,
                 )
         except Exception:  # noqa: BLE001
             logger.warning(

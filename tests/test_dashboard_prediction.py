@@ -129,6 +129,9 @@ class TestOpponentDetailWithPrediction:
         mock_db.get_opponent_scouting_status.return_value = {"status": "full_stats", "link_id": 1}
         mock_db.get_pitching_workload.return_value = {}
         mock_db.get_pitching_history.return_value = _PITCHING_HISTORY
+        mock_db.get_team_league_info.return_value = {
+            "program_type": "hs", "classification": "varsity", "team_name": "Opponent Team",
+        }
         mock_db.build_pitcher_profiles.return_value = {
             "p1": {
                 "player_id": "p1",
@@ -246,6 +249,9 @@ class TestOpponentPrintWithPrediction:
         mock_db.get_opponent_scouting_status.return_value = {"status": "full_stats", "link_id": 1}
         mock_db.get_pitching_workload.return_value = {}
         mock_db.get_pitching_history.return_value = _PITCHING_HISTORY
+        mock_db.get_team_league_info.return_value = {
+            "program_type": "hs", "classification": "varsity", "team_name": "Opponent Team",
+        }
         mock_db.build_pitcher_profiles.return_value = {
             "p1": {
                 "player_id": "p1",
