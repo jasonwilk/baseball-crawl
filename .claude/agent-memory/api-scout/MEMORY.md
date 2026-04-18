@@ -35,3 +35,4 @@ As of 2026-03-12. See `docs/api/README.md` for full endpoint index.
 - [operational-notes.md](operational-notes.md) -- High-priority unexplored areas (POST /search schema, LSB HS credentials, import-summary), boxscore critical facts (game_stream.id, asymmetric keys, groups), JWT decode tips (exp-iat thresholds), security rules and PII hotspots.
 - [mobile-auth-notes.md](mobile-auth-notes.md) -- Mobile authentication specifics and credential capture workflow.
 - [client-id-rotation.md](client-id-rotation.md) -- GC client IDs rotate on web redeployments and iOS app updates; never assume permanence
+- [search-endpoint-notes.md](search-endpoint-notes.md) -- POST /search folds diacritics server-side; narrow-regex recommendation; 2026-04-16 punct-failure claim didn't fully reproduce 2026-04-17

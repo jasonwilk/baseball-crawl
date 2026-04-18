@@ -1,7 +1,7 @@
 # Product Manager -- Agent Memory
 
 ## Numbering State
-- Next available epic number: E-225
+- Next available epic number: E-226
 - Next available idea number: IDEA-071
 - Before assigning numbers: ALWAYS `ls /epics/` and `ls /.project/ideas/` to avoid collisions
 
@@ -24,6 +24,7 @@ For full details, read the epic file in `/epics/`. Only READY and ACTIVE epics a
 - **E-175** (READY): Fix `bb creds import` for POST /auth Curl Commands
 - **E-193** (READY): Browser Automation Infrastructure
 - **E-219** (READY): Own-Side-Only Boxscore Loading (superseded by E-220; will be ABANDONED when E-220 dispatches)
+- **E-225** (DRAFT): POST /search Slash-to-Space Fallback -- shared helper + 4-call-site migration. Fixes slash-named team resolution (Lincoln Northwest JV/Reserve Falcons produced reports with zero spray charts).
 E-218 (League/Level Detection for Pitch Rules) COMPLETED 2026-04-15 -- archived at `.project/archive/E-218-league-level-detection/`. League/level detection with cascading priority (DB fields → NGB+age_group → name keywords → unknown). Legion pitch count rules (105-pitch max, 5 rest tiers). NSAA subvarsity rules (90-pitch max year-round). Unsupported leagues suppress predictions with warnings. 73 new tests. No doc or context-layer impact.
 
 E-221 (Test Fixture Schema Parity Audit + Post-E-220 Perspective Residuals) COMPLETED 2026-04-13 -- archived at `.project/archive/E-221-perspective-residuals-and-fixture-audit/`. All three R8-P1 residuals closed; canonical cascade consolidation via `src/reports/generator.py::cascade_delete_team` (Option 2 refactor-delegate) established as the established pattern. Details in `archived-epics.md`.
