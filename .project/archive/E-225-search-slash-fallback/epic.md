@@ -1,7 +1,7 @@
 # E-225: POST /search Punctuation Normalization Fallback
 
 ## Status
-`READY`
+`COMPLETED`
 
 ## Overview
 GameChanger's `POST /search` backend returns zero hits for team names containing certain punctuation characters -- historically observed: `/`, straight apostrophe `'` (U+0027), `%`, and `#` -- even though the indexed name stores the character. Replacing punctuation (any `[^\w ]` character) with spaces recovers the correct match. This epic adds a shared punctuation-normalization fallback to every call site that searches by team name, so punctuation-named teams stop silently failing to resolve. The motivating user impact: standalone reports for "Lincoln Northwest JV/Reserve Falcons" generate with zero spray charts because `gc_uuid` cannot be resolved.
@@ -104,8 +104,8 @@ Trigger #3 of the context-layer assessment gate (footgun / failure mode / bounda
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-225-01 | Shared search helper with punctuation-normalization fallback | TODO | None | - |
-| E-225-02 | Migrate four call sites to shared helper | TODO | E-225-01 | - |
+| E-225-01 | Shared search helper with punctuation-normalization fallback | DONE | None | - |
+| E-225-02 | Migrate four call sites to shared helper | DONE | E-225-01 | - |
 
 ## Dispatch Team
 - software-engineer
@@ -237,3 +237,34 @@ None. Bug is fully diagnosed and fix shape is confirmed by api-scout's 14-charac
   | Consistency sweep | n/a | n/a | n/a | Spot-checked 2026-04-17 by replacement PM: Stories table (IDs, deps, status) aligns with both story files; TN-N references in Story 1 (TN-1/2/3/4/5/7/8/11) and Story 2 (TN-1/4/7/8/9/9a/10) all resolve to sections present in epic.md; no dangling references. |
 
   Counts are reconstructed from the incorporation record in earlier History entries. Exact per-round raise counts could not be reconstructed from the artifacts present and are marked approximate.
+
+- 2026-04-18: **COMPLETED.** Shared `search_teams_by_name()` helper in `src/gamechanger/search.py` replaces four duplicated `POST /search` by-team-name call sites (`src/reports/generator.py::_resolve_gc_uuid`, `src/gamechanger/resolvers/gc_uuid_resolver.py::_tier3_search`, `src/gamechanger/crawlers/opponent_resolver.py::_search_resolve_opponent`, `src/api/routes/admin.py::_gc_search_teams`). The helper transparently retries with a normalized name (`[^\w ]+` -> space, whitespace collapsed, `re.UNICODE`) when the first attempt returns zero hits AND the name contains at least one non-word non-space character. Duplicate `_SEARCH_CONTENT_TYPE` constants consolidated. `_resolve_gc_uuid` adds a caller-level short-circuit that bounds API cost at 2 calls per not-found paginated lookup (down from 10). Four trigger characters confirmed by api-scout probes (`/`, `'` U+0027, `%`, `#`); curly-vs-straight apostrophe trap covered with an explicit test. 17 new tests in `tests/test_gamechanger_search.py` plus per-call-site regression tests in `tests/test_report_generator.py`, `tests/test_gc_uuid_resolver.py`, and `tests/test_crawlers/test_opponent_resolver.py`. User-impact case resolved: standalone reports for "Lincoln Northwest JV/Reserve Falcons" (`public_id=yecaUcoSVpJa`) will now resolve `gc_uuid=ac053e2c-ee27-4f55-9b16-ed77c1bdfebb` and populate spray charts on the next regeneration.
+
+  Review Scorecard:
+
+  | Review Pass | Findings | Accepted | Dismissed |
+  |---|---|---|---|
+  | Per-story CR -- E-225-01 | 2 | 1 | 1 |
+  | Per-story CR -- E-225-02 | 2 | 0 | 2 |
+  | CR integration review | 2 | 0 | 2 |
+  | Codex code review | 1 | 0 | 1 |
+  | **Total** | **7** | **1** | **6** |
+
+  Review notes:
+  - E-225-01 round 1: 2 SHOULD FIX -- isinstance guard accepted/fixed; AC-7 parametrization dismissed. Round 2 verified clean.
+  - E-225-02 round 1: 2 SHOULD FIX -- AC-9 wording dismissed, regex duplication dismissed.
+  - CR integration review: same 2 SHOULD FIX repeated -- both dismissed.
+  - Codex: 1 finding (AC-9 wording) dismissed as spec-wording issue already addressed.
+
+  **Documentation assessment**: No documentation impact. This is an internal refactor (shared helper consolidation + defensive-fallback addition) with no changes to user-facing behavior, operator workflows, schema, or deployment. `docs/admin/` and `docs/coaching/` require no updates. The API behavior quirk (GC `POST /search` punctuation handling) belongs in `.claude/rules/gc-uuid-bridge.md` (agent-facing), not in `docs/` (human-facing) -- routed via the context-layer assessment below.
+
+  **Context-layer assessment** (per `.claude/rules/context-layer-assessment.md`):
+
+  1. New convention, pattern, or constraint established: **YES**. `search_teams_by_name()` is now the canonical entry point for `POST /search` by-team-name calls. Pattern matches existing canonical-function conventions in CLAUDE.md (`ensure_team_row()`, `ensure_player_row()`, `cascade_delete_team()`). New call sites MUST use this helper; direct `client.post_json("/search", ...)` calls by team name are prohibited.
+  2. Architectural decision with ongoing implications: **NO**. No technology choice or structural change beyond the canonical-helper pattern captured in Trigger 1.
+  3. Footgun, failure mode, or boundary discovered: **YES**. Two documented footguns: (a) GC's `POST /search` returns zero hits for certain punctuation (`/`, straight apostrophe U+0027, `%`, `#`) while the indexed name contains the character; (b) Unicode apostrophe trap -- canonical storage uses curly apostrophe U+2019, straight-apostrophe queries fail silently against curly-indexed names. Both visually identical in most fonts. `.claude/rules/gc-uuid-bridge.md` currently describes `POST /search` as a single simple call with no mention of the punctuation quirk or the shared helper; requires update.
+  4. Change to agent behavior, routing, or coordination: **NO**. No agent behavior or routing change.
+  5. Domain knowledge discovered that should influence agent decisions in future epics: **YES** (overlaps with Trigger 3). api-scout's 14-character + 27-query probes established: GC folds diacritics server-side (accented-letter names succeed on first attempt, no normalization needed), CJK tokenization works around non-Latin scripts, narrow Unicode-aware regex (`[^\w ]+` with `re.UNICODE`) is the correct normalization shape (ASCII-only regex is too aggressive). Future work on GC query construction should reference these behaviors.
+  6. New CLI command, workflow, or operational procedure introduced: **NO**. No new `bb` subcommand, script, skill, or workflow.
+
+  Triggers 1, 3, and 5 fire -- claude-architect will be dispatched to codify the canonical-helper convention and `POST /search` punctuation quirk in the context layer (primary target: `.claude/rules/gc-uuid-bridge.md`; secondary: add `search_teams_by_name()` to the canonical-functions list in CLAUDE.md architecture section) before archival.

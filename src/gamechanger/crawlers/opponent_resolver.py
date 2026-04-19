@@ -53,6 +53,7 @@ from src.gamechanger.client import (
     RateLimitError,
 )
 from src.gamechanger.config import CrawlConfig, TeamEntry
+from src.gamechanger.search import search_teams_by_name
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +63,6 @@ _DELAY_SECONDS = 1.5
 _FOLLOW_BRIDGE_DELAY_SECONDS = 2.0
 _ME_USER_ACCEPT = "application/vnd.gc.com.user+json; version=0.3.0"
 _BRIDGE_ACCEPT = "application/vnd.gc.com.team_public_profile_id+json; version=0.0.0"
-_SEARCH_CONTENT_TYPE = "application/vnd.gc.com.post_search+json; version=0.0.0"
 
 # SQL for the auto-resolved upsert with manual-link protection (TN-5).
 # Manual links (resolution_method='manual') preserve resolved_team_id, public_id,
@@ -571,14 +571,7 @@ class OpponentResolver:
             GameChangerAPIError: On 5xx (propagated to caller for logging).
             RateLimitError: On 429 (propagated to caller for logging).
         """
-        result = self._client.post_json(
-            "/search",
-            body={"name": opponent_name},
-            params={"start_at_page": 0, "search_source": "search"},
-            content_type=_SEARCH_CONTENT_TYPE,
-        )
-
-        hits = result.get("hits", []) if isinstance(result, dict) else []
+        hits = search_teams_by_name(self._client, opponent_name)
 
         # Filter: exact name match (case-insensitive) + season year match
         matches = []

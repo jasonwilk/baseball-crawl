@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from src.gamechanger.exceptions import CredentialExpiredError
+from src.gamechanger.search import search_teams_by_name
 
 if TYPE_CHECKING:
     from src.gamechanger.client import GameChangerClient
@@ -29,8 +30,6 @@ _UUID_RE = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
     re.IGNORECASE,
 )
-
-_SEARCH_CONTENT_TYPE = "application/vnd.gc.com.post_search+json; version=0.0.0"
 
 # Classification suffixes to strip iteratively (longest first to avoid partial).
 _CLASSIFICATION_SUFFIXES = [
@@ -252,14 +251,7 @@ def _tier3_search(
     """
     shortened = _strip_classification_suffix(team_name)
 
-    result = client.post_json(
-        "/search",
-        body={"name": shortened},
-        params={"start_at_page": 0, "search_source": "search"},
-        content_type=_SEARCH_CONTENT_TYPE,
-    )
-
-    hits = result.get("hits", []) if isinstance(result, dict) else []
+    hits = search_teams_by_name(client, shortened)
 
     # Preferred path: filter by public_id (exact match, unambiguous).
     if public_id:

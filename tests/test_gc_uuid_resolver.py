@@ -458,6 +458,60 @@ class TestTier3Search:
                 client=mock_client,
             )
 
+    def test_tier3_punctuation_name_resolves_via_normalized_fallback(
+        self, db: sqlite3.Connection, data_root: Path
+    ) -> None:
+        """E-225-02 AC-7: ``%``-containing mid-name resolves via helper fallback.
+
+        Uses ``%`` (not ``/``) so the classification-suffix stripper does not
+        mask the punctuation gate behavior. The shortened name retains the
+        ``%`` after suffix stripping; the helper's first attempt returns
+        empty, then the normalized fallback matches.
+        """
+        tracked_id = _seed_tracked_team(
+            db, name="Cornhusker%Squad Varsity", season_year=2026,
+        )
+
+        mock_client = MagicMock()
+        mock_client.post_json.side_effect = [
+            {"hits": []},
+            {
+                "hits": [
+                    {
+                        "result": {
+                            "id": "a1b2c3d4-e5f6-4a2b-abcd-ef12345678ab",
+                            "name": "Cornhusker Squad",
+                            "public_id": "cornhusker-pub",
+                            "season": {"year": 2026},
+                        }
+                    }
+                ],
+            },
+        ]
+
+        result = resolve_gc_uuid(
+            team_id=tracked_id,
+            public_id="cornhusker-pub",
+            team_name="Cornhusker%Squad Varsity",
+            season_year=2026,
+            conn=db,
+            data_root=data_root,
+            client=mock_client,
+        )
+
+        assert result == "a1b2c3d4-e5f6-4a2b-abcd-ef12345678ab"
+        assert mock_client.post_json.call_count == 2
+        # First attempt: shortened (suffix stripped) raw name with %
+        assert (
+            mock_client.post_json.call_args_list[0].kwargs["body"]["name"]
+            == "Cornhusker%Squad"
+        )
+        # Fallback attempt: % normalized to space
+        assert (
+            mock_client.post_json.call_args_list[1].kwargs["body"]["name"]
+            == "Cornhusker Squad"
+        )
+
 
 # ---------------------------------------------------------------------------
 # Cross-tier tests

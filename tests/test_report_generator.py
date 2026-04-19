@@ -112,15 +112,6 @@ class TestRemovedInlineSprayCode:
                 f"{name} should have been removed from generator.py"
             )
 
-    def test_no_re_import(self):
-        """AC-6: import re should be removed (was only used by _UUID_RE)."""
-        import src.reports.generator as gen_module
-        import inspect
-
-        source = inspect.getsource(gen_module)
-        # Check there is no 'import re' at module level
-        assert "\nimport re\n" not in source
-
 
 # ---------------------------------------------------------------------------
 # AC-9(a): Successful generation creates file and DB row
@@ -922,6 +913,62 @@ class TestResolveGcUuid:
         # Verify pages 0-4 were requested
         for i, call in enumerate(client.post_json.call_args_list):
             assert call[1]["params"]["start_at_page"] == i
+
+    # ---- E-225-02 regression tests ----
+
+    def test_e225_dirty_name_short_circuits_after_page_zero_fallback(self):
+        """E-225-02 AC-1a: dirty name + empty page-0 (raw + fallback) -> 2 calls."""
+        client = MagicMock()
+        client.post_json.return_value = {"hits": []}
+
+        result = _resolve_gc_uuid(
+            client,
+            "Lincoln Northwest JV/Reserve Falcons",
+            "yecaUcoSVpJa",
+        )
+
+        assert result is None
+        assert client.post_json.call_count == 2
+        assert (
+            client.post_json.call_args_list[0].kwargs["body"]["name"]
+            == "Lincoln Northwest JV/Reserve Falcons"
+        )
+        assert (
+            client.post_json.call_args_list[1].kwargs["body"]["name"]
+            == "Lincoln Northwest JV Reserve Falcons"
+        )
+
+    def test_e225_slash_name_resolves_via_fallback(self):
+        """E-225-02 AC-5: slash-name resolves to gc_uuid via normalized fallback."""
+        client = MagicMock()
+        canonical_hit = {
+            "result": {
+                "id": "ac053e2c-ee27-4f55-9b16-ed77c1bdfebb",
+                "public_id": "yecaUcoSVpJa",
+                "name": "Lincoln Northwest JV/Reserve Falcons",
+            }
+        }
+        client.post_json.side_effect = [
+            {"hits": []},
+            {"hits": [canonical_hit]},
+        ]
+
+        result = _resolve_gc_uuid(
+            client,
+            "Lincoln Northwest JV/Reserve Falcons",
+            "yecaUcoSVpJa",
+        )
+
+        assert result == "ac053e2c-ee27-4f55-9b16-ed77c1bdfebb"
+        assert client.post_json.call_count == 2
+        assert (
+            client.post_json.call_args_list[0].kwargs["body"]["name"]
+            == "Lincoln Northwest JV/Reserve Falcons"
+        )
+        assert (
+            client.post_json.call_args_list[1].kwargs["body"]["name"]
+            == "Lincoln Northwest JV Reserve Falcons"
+        )
 
     @patch("src.reports.generator.get_connection")
     @patch("src.reports.generator._crawl_and_load_spray")

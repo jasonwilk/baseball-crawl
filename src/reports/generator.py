@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import secrets
 import sqlite3
 from contextlib import closing
@@ -41,6 +42,7 @@ from src.gamechanger.loaders import derive_season_id_for_team
 from src.gamechanger.loaders.plays_loader import PlaysLoader
 from src.gamechanger.loaders.scouting_loader import ScoutingLoader
 from src.gamechanger.loaders.scouting_spray_loader import ScoutingSprayChartLoader
+from src.gamechanger.search import search_teams_by_name
 from src.gamechanger.types import TeamRef
 from src.gamechanger.url_parser import parse_team_url
 from src.reconciliation.engine import reconcile_game
@@ -52,8 +54,9 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 _REPORTS_DIR = _REPO_ROOT / "data" / "reports"
 _EXPIRY_DAYS = 14
 _APP_URL_DEFAULT = "http://localhost:8001"
-_SEARCH_CONTENT_TYPE = "application/vnd.gc.com.post_search+json; version=0.0.0"
 _PLAYS_ACCEPT = "application/vnd.gc.com.event_plays+json; version=0.0.0"
+
+_NAME_PUNCTUATION_RE = re.compile(r"[^\w ]")
 
 
 @dataclass
@@ -428,15 +431,10 @@ def _resolve_gc_uuid(
     ``CredentialExpiredError`` propagates.  All other exceptions are
     caught and logged as warnings (resolution failure is non-fatal).
     """
+    name_is_dirty = bool(_NAME_PUNCTUATION_RE.search(team_name))
     try:
         for page in range(_SEARCH_MAX_PAGES):
-            result = client.post_json(
-                "/search",
-                body={"name": team_name},
-                params={"start_at_page": page, "search_source": "search"},
-                content_type=_SEARCH_CONTENT_TYPE,
-            )
-            hits = result.get("hits", []) if isinstance(result, dict) else []
+            hits = search_teams_by_name(client, team_name, start_at_page=page)
             for hit in hits:
                 r = hit.get("result", {})
                 if r.get("public_id") == public_id:
@@ -450,6 +448,11 @@ def _resolve_gc_uuid(
                             page,
                         )
                         return gc_uuid
+            # AC-1a: Page-0 with a dirty name returning empty hits means the
+            # helper already exhausted both raw and normalized attempts;
+            # paginating further would just repeat the same lookups.
+            if page == 0 and not hits and name_is_dirty:
+                break
             # Short-circuit: partial page means no more results
             if len(hits) < _SEARCH_PAGE_SIZE:
                 break

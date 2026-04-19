@@ -17,16 +17,43 @@ When you have a team's `public_id` (the slug used in public endpoints) but need 
 
 ## API Call Sequence
 
-1. **Search by team name**:
+1. **Search by team name**: Call `search_teams_by_name(client, team_name, *, start_at_page=0)` from `src/gamechanger/search.py`. This is the canonical shared entry point for all `POST /search` by-team-name calls. It returns the `hits` list and transparently handles the punctuation quirk described below.
+
+   **Do NOT call `client.post_json("/search", body={"name": ...}, ...)` directly for team name searches.** The direct call will silently return zero hits for names containing certain punctuation. Use the helper instead.
+
+   Under the hood, the helper issues:
    ```
    POST /search
    Content-Type: application/vnd.gc.com.post_search+json; version=0.0.0
    Body: {"name": "<team_name>"}
+   Query: start_at_page=<N>&search_source=search
    ```
 
 2. **Filter results by `public_id`**: Each hit contains `result.id` (the `gc_uuid`) and `result.public_id`. Find the hit where `result.public_id` matches the known `public_id` exactly.
 
 3. **Extract `gc_uuid`**: `result.id` from the matching hit is the `gc_uuid` (also known as `progenitor_team_id`).
+
+## Punctuation Quirk and Apostrophe Trap
+
+`POST /search` has two silent-failure modes that the canonical helper absorbs:
+
+- **Punctuation zero-hit bug**: GC's search backend returns zero hits for team names containing `/`, straight apostrophe `'` (U+0027), `%`, or `#` -- even though the indexed canonical name contains that character. The indexed record exists; the query simply fails to match.
+- **Unicode apostrophe trap**: GC indexes canonical names with the curly apostrophe (U+2019, `'`). A query containing a straight apostrophe (U+0027, `'`) fails to match silently -- the two glyphs are visually identical in most fonts, so this failure mode is extremely easy to miss.
+- **Diacritics are fine**: Accented letters (`é`, `ñ`, etc.) work on the first attempt -- GC folds diacritics server-side. The normalization therefore preserves accented letters by using `re.UNICODE`.
+
+The helper's retry gate fires only when the first attempt returns zero hits AND the name contains at least one `[^\w ]` character. Clean-name zero-hit results are passed through unchanged.
+
+**Normalization shape** (implemented in `src/gamechanger/search.py::_normalize_team_name`):
+
+```python
+re.sub(r"[^\w ]+", " ", name, flags=re.UNICODE)   # non-word non-space → space
+re.sub(r"\s+", " ", ...)                          # collapse whitespace
+.strip()                                          # trim ends
+```
+
+This normalization is lossy (multiple distinct inputs can collapse to the same query) but is sufficient to recover the indexed record for the punctuation failure modes above. The zero-hits-vs-25-hits binary failure signature is distinctive and reliable -- partial matches from this quirk have not been observed.
+
+**When writing new GC query-construction code** that targets `POST /search` or a similar backend, assume the same quirk may apply and route through the shared helper rather than re-deriving normalization logic ad hoc.
 
 ## Storage Rule
 
@@ -62,4 +89,4 @@ Pattern verified 2026-03-29:
 - `POST /search` with team name returned hits including one where `result.public_id` matched exactly
 - `result.id` from that hit was the correct `gc_uuid`, confirmed by successful authenticated API calls
 
-Implementation: `src/gamechanger/resolvers/gc_uuid_resolver.py` (Tier 3 uses POST /search) and `src/reports/generator.py` (report generation uses the bridge pattern with `public_id` filtering).
+Implementation: `src/gamechanger/search.py` (canonical `search_teams_by_name()` helper with punctuation-normalization fallback), `src/gamechanger/resolvers/gc_uuid_resolver.py` (Tier 3 delegates to the helper), and `src/reports/generator.py` (report generation uses the bridge pattern with `public_id` filtering).

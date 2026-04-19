@@ -2809,21 +2809,13 @@ async def disconnect_opponent(request: Request, link_id: int) -> Response:
 # Opponent resolve / skip / unhide routes (E-167-04)
 # ---------------------------------------------------------------------------
 
-_SEARCH_CONTENT_TYPE = "application/vnd.gc.com.post_search+json; version=0.0.0"
-
-
 def _gc_search_teams(name: str) -> list[dict[str, Any]]:
     """Search GC teams via POST /search. Returns normalized flat dicts."""
     from src.gamechanger.client import GameChangerClient
+    from src.gamechanger.search import search_teams_by_name
 
     client = GameChangerClient()
-    result = client.post_json(
-        "/search",
-        body={"name": name},
-        params={"start_at_page": 0, "search_source": "search"},
-        content_type=_SEARCH_CONTENT_TYPE,
-    )
-    hits = result.get("hits", []) if isinstance(result, dict) else []
+    hits = search_teams_by_name(client, name)
     normalized: list[dict[str, Any]] = []
     for hit in hits:
         r = hit.get("result", {})

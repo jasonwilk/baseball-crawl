@@ -1889,6 +1889,71 @@ def test_search_fallback_rate_limit_continues(
 
 
 @patch("src.gamechanger.crawlers.opponent_resolver.time.sleep")
+def test_e225_punctuation_opponent_name_resolves_via_normalized_fallback(
+    mock_sleep: MagicMock, db: sqlite3.Connection
+) -> None:
+    """E-225-02 AC-6: ``#``-containing opponent name auto-resolves via fallback.
+
+    Asserts exactly 2 ``post_json`` calls with exact body strings. The
+    fallback hit's ``result.name`` matches the original (case-insensitive)
+    so the existing ``name.lower() == opponent_name.lower()`` filter
+    accepts the resolution.
+    """
+    cur = db.execute(
+        "INSERT INTO teams (gc_uuid, name, membership_type, is_active, season_year) "
+        "VALUES (?, ?, 'member', 1, 2026)",
+        (_OWN_TEAM_GC_UUID, _OWN_TEAM_NAME),
+    )
+    our_pk = cur.lastrowid
+    cur2 = db.execute(
+        "INSERT INTO opponent_links (our_team_id, root_team_id, opponent_name, is_hidden) "
+        "VALUES (?, 'root-bbb-099', 'Cornhusker #1 Varsity', 0)",
+        (our_pk,),
+    )
+    link_id = cur2.lastrowid
+    db.commit()
+
+    canonical_hit = {
+        "type": "team",
+        "result": {
+            "id": "fallback-uuid-1",
+            "public_id": "fallback-slug-1",
+            "name": "Cornhusker #1 Varsity",
+            "sport": "baseball",
+            "season": {"name": "spring", "year": 2026},
+        },
+    }
+    client = _make_client(paginated_return=[], get_return=_TEAM_DETAIL)
+    client.post_json.side_effect = [
+        {"total_count": 0, "hits": []},
+        {"total_count": 1, "hits": [canonical_hit]},
+    ]
+
+    config = _make_config([(_OWN_TEAM_GC_UUID, our_pk)])
+    resolver = OpponentResolver(client, config, db)
+    result = resolver.resolve()
+
+    assert result.search_resolved == 1
+    assert client.post_json.call_count == 2
+    assert (
+        client.post_json.call_args_list[0].kwargs["body"]["name"]
+        == "Cornhusker #1 Varsity"
+    )
+    assert (
+        client.post_json.call_args_list[1].kwargs["body"]["name"]
+        == "Cornhusker 1 Varsity"
+    )
+
+    row = db.execute(
+        "SELECT resolved_team_id, public_id, resolution_method "
+        "FROM opponent_links WHERE id = ?", (link_id,)
+    ).fetchone()
+    assert row[0] is not None
+    assert row[1] == "fallback-slug-1"
+    assert row[2] == "search"
+
+
+@patch("src.gamechanger.crawlers.opponent_resolver.time.sleep")
 def test_search_fallback_credential_expired_propagates(
     mock_sleep: MagicMock, db: sqlite3.Connection
 ) -> None:
