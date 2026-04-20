@@ -525,15 +525,19 @@ If either command produces output, report the unexpected changes to the user and
 3. `cd /workspaces/baseball-crawl && git apply --check --3way /tmp/E-NNN-epic.patch` (dry-run)
 4. If dry-run succeeds: `git apply --3way /tmp/E-NNN-epic.patch` (apply for real)
 5. PII scan (pre-commit hook covers this automatically)
-6. `git add -A`, present staged changes, ask for explicit user approval
-7. `git commit -m "feat(E-NNN): <epic title>"`
-8. `git worktree remove <epic-worktree-path> && git branch -D epic/E-NNN`
+6. `git add -A` (stage applied patch on main checkout)
+7. **Pause for explicit user approval.**
+
+   **Present staged changes**: Run `git diff --cached --stat main` and present the file count and insertion/deletion totals to the user.
+
+   **User approval**: Wait for the user to respond with exactly one of "yes", "commit", "approve", or "go ahead". Any other response -- including silence, questions, or ambiguous acknowledgments ("looks good", "ok", "sure", "👍") -- does NOT count as approval. Do not proceed to the `git commit` sub-step (sequence step 8) until an explicit approval word is received.
+
+   **User rejects**: Pause. Epic worktree preserved. User can: (a) 'commit' to resume, (b) inspect, or (c) 'abort' (worktree preserved for manual recovery). If PII scan catches issues, nothing is committed.
+
+8. `git commit -m "feat(E-NNN): <epic title>"`
+9. `git worktree remove <epic-worktree-path> && git branch -D epic/E-NNN`
 
 **Dry-run fails**: Present conflict report. User decides: (a) resolve manually and retry, or (b) abort (worktree preserved).
-
-**User must explicitly approve** before commit. Only "yes", "commit", "approve", "go ahead" proceed.
-
-**If the user rejects the commit**: Pause. Epic worktree preserved. User can: (a) 'commit' to resume, (b) inspect, or (c) 'abort' (worktree preserved for manual recovery). If PII scan catches issues, nothing is committed.
 
 ### Step 9: Archive the epic
 
@@ -545,7 +549,15 @@ PM moves epic from "Active Epics" to "Archived Epics" in `.claude/agent-memory/p
 
 ### Step 11: Archive commit
 
-`git add -A && git commit -m "chore(E-NNN): archive epic"`.
+No separate approval gate -- the archive commit is a mechanical follow-up to the approved closure commit (Step 8). The preflight check exists to catch unexpected files; it is not a blanket diff review.
+
+1. **Preflight**: Run `cd /workspaces/baseball-crawl && git status --porcelain`. Classify each record:
+   - **Rename records** (status code `R`, format `R  old_path -> new_path`): Treat as non-anomalous ONLY when BOTH sides match the epic-move pattern -- i.e., the source (old) path starts with `epics/E-NNN-slug/` AND the destination (new) path starts with `.project/archive/E-NNN-slug/`. These are the expected Step 9 `git mv` archive renames. Any rename record that fails either constraint (e.g., source not under `epics/E-NNN-slug/`, or destination not under `.project/archive/E-NNN-slug/`) is anomalous -- report the full `R  old -> new` line to the user and pause for direction.
+   - **Non-rename records**: Apply the path-prefix check to the single path. Treat as non-anomalous only when the path starts with `.project/archive/` or `.claude/agent-memory/product-manager/`.
+
+   Report any anomalous record to the user before proceeding. If any anomalies are reported, pause for user direction (do NOT proceed with `git add -A` on anomalous files).
+2. `git add -A` (stage archive changes).
+3. `git commit -m "chore(E-NNN): archive epic"`.
 
 ### Step 12: Shut down PM and delete team
 
@@ -578,7 +590,7 @@ Phase 4 (if "and review"): 4a CR integration review + 4b Codex code review (head
   v
 Phase 5: Validate -> PM completes epic -> doc + context-layer assessments -> summary
   -> shut down implementers + CR -> ancillary file sweep (stage session artifacts, user approval)
-  -> closure merge (patch -> dry-run -> apply -> single commit incl. ancillary files)
+  -> closure merge (patch -> dry-run -> apply -> approval gate -> single commit incl. ancillary files)
   -> archive -> PM memory -> archive commit -> shut down PM + delete team
 ```
 
@@ -601,7 +613,7 @@ Phase 5: Validate -> PM completes epic -> doc + context-layer assessments -> sum
 2. **Do not summarize context blocks.** Always send the full story file text and full Technical Notes verbatim.
 3. **Do not proceed to closure with unverified stories.** If any AC is unmet, send the implementer back.
 4. **Do not skip the documentation assessment.** The epic cannot be archived until documentation impact is evaluated.
-5. **Do not commit automatically.** The user must explicitly approve the closure commit.
+5. **Do not commit automatically.** The user must explicitly approve the closure commit. See the approval gate in Phase 5 Step 8's closure merge sequence (sequence step 7).
 6. **Do not skip PM spawning.** PM handles all status updates and AC verification during dispatch.
 7. **Do not skip the context-layer assessment.** The epic cannot be archived until context-layer impact is evaluated.
 8. **Do not defer findings to epic History.** Every finding must reach a terminal state (FIXED or DISMISSED) during the story. No deferral path exists.
