@@ -1,7 +1,7 @@
 # Product Manager -- Agent Memory
 
 ## Numbering State
-- Next available epic number: E-227
+- Next available epic number: E-228
 - Next available idea number: IDEA-071
 - Before assigning numbers: ALWAYS `ls /epics/` and `ls /.project/ideas/` to avoid collisions
 
@@ -23,9 +23,10 @@ For full details, read the epic file in `/epics/`. Only READY and ACTIVE epics a
 - **E-174** (READY): Fix Key Extractor to Search Asset Chunks
 - **E-175** (READY): Fix `bb creds import` for POST /auth Curl Commands
 - **E-193** (READY): Browser Automation Infrastructure
-- **E-219** (READY): Own-Side-Only Boxscore Loading (superseded by E-220; will be ABANDONED when E-220 dispatches)
-- **E-225** (DRAFT): POST /search Slash-to-Space Fallback -- shared helper + 4-call-site migration. Fixes slash-named team resolution (Lincoln Northwest JV/Reserve Falcons produced reports with zero spray charts).
-- **E-226** (READY): Closure Commit Approval Gate Enforcement -- restructure implement skill Phase 5 so closure + archive commit approval is a first-class numbered step (not prose aside). Prevents auto-commit violations like the one observed during E-225 dispatch.
+- **E-227** (READY): Closure Workflow Structural Remediation -- follow-up to E-226. Restructures implement skill Phase 5 to a single atomic commit (feat + archive mv + PM memory in one commit) to eliminate the `epic-archive-check.sh` vs. Step 8 cycle dependency; promotes worktree cleanup to a first-class Phase 5 step; adds a committed-plan check to implement skill Prerequisites so dispatch can't branch from a HEAD without plan files. 2 stories, context-layer-only, routed to claude-architect.
+
+E-226 (Closure Commit Approval Gate Enforcement) COMPLETED 2026-04-20 -- archived at `.project/archive/E-226-closure-commit-approval-gate/`. Restructured implement skill Phase 5: closure-commit approval gate is now a first-class numbered step (Step 7) parallel to the other numbered steps, naming the exact command (`git diff --cached --stat main`), the four required approval words ("yes", "commit", "approve", "go ahead"), and the explicit non-approval list. Step 11 archive commit unchained from `git add -A` with a preflight `git status --porcelain` anomaly check (allow-listed paths only: `.project/archive/`, `.claude/agent-memory/product-manager/`). Workflow Summary and Anti-Pattern #5 cross-references aligned. Single context-layer-only story; 17 review findings across CR integration + Codex (16 accepted, 1 dismissed as false positive). No doc impact; context-layer impact is the codification itself. **Follow-up observation now being addressed by E-227:** the pre-commit hook enforces archival before the closure commit, so Step 9's `git mv` is folded into Step 8's closure commit; Step 11's archive commit will often be empty (or contain only PM memory updates) in practice. E-227 restructures Phase 5 into an atomic single-commit sequence. Also: E-226's own closure exposed three closure-workflow failures (plan commit missing, hook vs. ordering conflict, worktree cleanup skipped) — E-227 remediates all three.
+
 E-218 (League/Level Detection for Pitch Rules) COMPLETED 2026-04-15 -- archived at `.project/archive/E-218-league-level-detection/`. League/level detection with cascading priority (DB fields → NGB+age_group → name keywords → unknown). Legion pitch count rules (105-pitch max, 5 rest tiers). NSAA subvarsity rules (90-pitch max year-round). Unsupported leagues suppress predictions with warnings. 73 new tests. No doc or context-layer impact.
 
 E-221 (Test Fixture Schema Parity Audit + Post-E-220 Perspective Residuals) COMPLETED 2026-04-13 -- archived at `.project/archive/E-221-perspective-residuals-and-fixture-audit/`. All three R8-P1 residuals closed; canonical cascade consolidation via `src/reports/generator.py::cascade_delete_team` (Option 2 refactor-delegate) established as the established pattern. Details in `archived-epics.md`.
