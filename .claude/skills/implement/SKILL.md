@@ -48,6 +48,17 @@ Before dispatch, verify:
    - If `ABANDONED`: refuse. Tell the user: "Epic E-NNN has been ABANDONED."
    - If `BLOCKED`: report the blocked status and any blocking details to the user. Do not proceed.
 
+3. **The epic's plan is committed.** Run `cd /workspaces/baseball-crawl && git status --porcelain -- epics/E-NNN-slug/`. If the output is non-empty, the plan has uncommitted changes and dispatching would create the epic worktree from a HEAD that lacks the plan files. Refuse dispatch with a message that:
+   - Lists each uncommitted file path from the `git status --porcelain` output, verbatim.
+   - Provides a concrete remediation command for the user to run before retrying, of the form:
+     ```
+     cd /workspaces/baseball-crawl && git add epics/E-NNN-slug/ && git commit -m "feat(E-NNN): plan <title> (READY)"
+     ```
+
+   This check does NOT auto-commit. User approval for the planning commit is preserved at plan skill Step 2a (`.claude/skills/plan/SKILL.md`), which is the sole owner of the planning commit path. Prerequisites refuses rather than auto-committing. The plan skill is not modified by this check -- the Prerequisites clause is a backstop, not a replacement.
+
+   **Handoff exception:** Skip this check when the implement skill was loaded via plan skill Phase 5 Step 3c handoff (the compound-trigger "plan and dispatch" path). On that path, plan skill Step 2a already owns the commit invariant -- the planning team committed (or skipped under Step 2a's documented skip behavior) before handing off, so the worktree HEAD already reflects the planning state. The check runs on the standalone "implement E-NNN" invocation path. The skip is determined by the trigger pattern that loaded this skill, not by an abstract flag -- it activates only when the load originated from a compound "plan and dispatch" trigger handed off via plan skill Phase 5 Step 3c.
+
 ---
 
 ## Phase 0: tmux Window Rename
@@ -507,59 +518,66 @@ Stage any main-checkout session artifacts before the closure merge. During dispa
 
 ### Step 8: Closure merge and commit
 
-Merge the epic worktree's accumulated changes into the main checkout and produce a single commit.
+Merge the epic worktree's accumulated changes into the main checkout and produce a single atomic commit that contains the applied patch, the archive rename, and the PM memory update.
 
-**Migration merge-time scan:** If the epic includes new migrations AND main has added migrations since the worktree branched, flag the numbering conflict to the user before proceeding.
+**Closure sequence:**
 
-**Clean-tree preflight:** Before starting the merge, verify the main checkout has no unstaged or untracked changes. Step 7a may have legitimately staged ancillary files, so check unstaged/untracked only:
-```
-cd /workspaces/baseball-crawl && git diff --name-only     # unstaged modifications
-cd /workspaces/baseball-crawl && git ls-files --others --exclude-standard  # untracked files
-```
-If either command produces output, report the unexpected changes to the user and wait for instructions before proceeding. Do NOT proceed with `git apply` on a dirty working tree -- it may silently merge unrelated changes into the epic commit. Staged files from Step 7a are expected and will be captured in the closure commit.
+1. **Migration merge-time scan:** If the epic includes new migrations AND main has added migrations since the worktree branched, flag the numbering conflict to the user before proceeding.
 
-**Closure merge sequence:**
+2. **Clean-tree preflight:** Verify the main checkout has no unstaged or untracked changes. Step 7a may have legitimately staged ancillary files, so check unstaged/untracked only:
+   ```
+   cd /workspaces/baseball-crawl && git diff --name-only     # unstaged modifications
+   cd /workspaces/baseball-crawl && git ls-files --others --exclude-standard  # untracked files
+   ```
+   If either command produces output, report the unexpected changes to the user and wait for instructions before proceeding. Do NOT proceed with `git apply` on a dirty working tree -- it may silently merge unrelated changes into the epic commit. Staged files from Step 7a are expected and will be captured in the closure commit.
 
-1. `cd <epic-worktree-path> && git add -A` (stage all accumulated changes)
-2. `cd <epic-worktree-path> && git diff --binary --cached main > /tmp/E-NNN-epic.patch`
-3. `cd /workspaces/baseball-crawl && git apply --check --3way /tmp/E-NNN-epic.patch` (dry-run)
-4. If dry-run succeeds: `git apply --3way /tmp/E-NNN-epic.patch` (apply for real)
-5. PII scan (pre-commit hook covers this automatically)
-6. `git add -A` (stage applied patch on main checkout)
-7. **Pause for explicit user approval.**
+3. **Stage and diff the epic worktree:** `cd <epic-worktree-path> && git add -A` (stage all accumulated changes), then `git diff --binary --cached main > /tmp/E-NNN-epic.patch`.
+
+4. **Dry-run then apply the patch on main:** `cd /workspaces/baseball-crawl && git apply --check --3way /tmp/E-NNN-epic.patch`. If the dry-run succeeds, run `git apply --3way /tmp/E-NNN-epic.patch` to apply for real.
+
+5. **Archive rename:** `git mv epics/E-NNN-slug/ .project/archive/E-NNN-slug/` in the main checkout. The rename happens on disk before staging so that `epics/*/epic.md` no longer contains a `COMPLETED` epic file at commit time -- this is what allows a single atomic commit to clear `.claude/hooks/epic-archive-check.sh`.
+
+6. **PM memory update:** PM moves the epic from "Active Epics" to "Archived Epics" in `.claude/agent-memory/product-manager/MEMORY.md`. PM writes to the main-checkout path; `.claude/hooks/worktree-guard.sh` exempts `.claude/agent-memory/*` from the dispatch-active denylist, so this Write/Edit passes the hook while the epic worktree still exists.
+
+7. **Stage on main:** `cd /workspaces/baseball-crawl && git add -A` (stage the applied patch, the archive rename, and the PM memory update together). The pre-commit PII scan runs automatically on the subsequent `git commit`.
+
+8. **Pause for explicit user approval.**
 
    **Present staged changes**: Run `git diff --cached --stat main` and present the file count and insertion/deletion totals to the user.
 
-   **User approval**: Wait for the user to respond with exactly one of "yes", "commit", "approve", or "go ahead". Any other response -- including silence, questions, or ambiguous acknowledgments ("looks good", "ok", "sure", "👍") -- does NOT count as approval. Do not proceed to the `git commit` sub-step (sequence step 8) until an explicit approval word is received.
+   **User approval**: Wait for the user to respond with exactly one of "yes", "commit", "approve", or "go ahead". Any other response -- including silence, questions, or ambiguous acknowledgments ("looks good", "ok", "sure", "👍") -- does NOT count as approval. Do not proceed to the `git commit` sub-step (sequence step 9) until an explicit approval word is received.
 
-   **User rejects**: Pause. Epic worktree preserved. User can: (a) 'commit' to resume, (b) inspect, or (c) 'abort' (worktree preserved for manual recovery). If PII scan catches issues, nothing is committed.
+   **User rejects**: The main checkout is half-closed at this point (the patch was applied in sub-step 4, the archive rename happened in sub-step 5, and the PM memory update happened in sub-step 6 -- all before the gate). Three reject paths:
 
-8. `git commit -m "feat(E-NNN): <epic title>"`
-9. `git worktree remove <epic-worktree-path> && git branch -D epic/E-NNN`
+   - (a) **'commit' to resume**: The user changed their mind. Proceed to sub-step 9 normally.
+   - (b) **inspect**: Hold the staged state and let the user review. Do not commit. When the user is ready, they can return to (a) or (c).
+   - (c) **'abort'**: Restore the main checkout to its pre-Step 8 state. The reset sequence:
+     ```
+     cd /workspaces/baseball-crawl && git reset HEAD                    # unstage everything
+     cd /workspaces/baseball-crawl && git mv .project/archive/E-NNN-slug/ epics/E-NNN-slug/  # undo the archive rename
+     cd /workspaces/baseball-crawl && git checkout -- .                 # revert the applied patch and PM memory edit
+     ```
+     After the reset, the main checkout is back to where it was before Step 8 ran. The epic worktree is preserved for manual recovery. Step 9 (worktree cleanup) is skipped on the abort path -- it only runs after a successful closure commit.
+
+   If the pre-commit PII scan catches issues during sub-step 9's `git commit`, nothing is committed (the hook blocks the commit before any state change), but the staged half-closed state remains; treat the same as (b) inspect or (c) abort.
+
+9. `git commit -m "feat(E-NNN): <epic title>"`. The single commit atomically contains the applied patch, the archive rename, and the PM memory update.
 
 **Dry-run fails**: Present conflict report. User decides: (a) resolve manually and retry, or (b) abort (worktree preserved).
 
-### Step 9: Archive the epic
+### Step 9: Worktree cleanup
 
-`git mv epics/E-NNN-slug/ .project/archive/E-NNN-slug/`. Verify fully staged via `git status --porcelain` (stage any unstaged archive-related changes before proceeding).
+After the closure commit succeeds, remove the epic worktree and its branch:
 
-### Step 10: Update PM memory
+```
+cd /workspaces/baseball-crawl && git worktree remove --force /tmp/.worktrees/baseball-crawl-E-NNN && git branch -D epic/E-NNN
+```
 
-PM moves epic from "Active Epics" to "Archived Epics" in `.claude/agent-memory/product-manager/MEMORY.md`.
+The `--force` flag is required because the epic worktree still has staged changes from the closure merge sequence (those changes were patched onto main in Step 8 sub-steps 4-7 but never committed back to the `epic/E-NNN` branch). Without `--force`, `git worktree remove` exits with "contains modified or untracked files, use --force to delete it." The forced removal is safe because the closure commit on main already captures the same content.
 
-### Step 11: Archive commit
+Verifiable: after this step, `ls /tmp/.worktrees/` does not include `baseball-crawl-E-NNN/` and `git branch --list 'epic/E-NNN'` is empty.
 
-No separate approval gate -- the archive commit is a mechanical follow-up to the approved closure commit (Step 8). The preflight check exists to catch unexpected files; it is not a blanket diff review.
-
-1. **Preflight**: Run `cd /workspaces/baseball-crawl && git status --porcelain`. Classify each record:
-   - **Rename records** (status code `R`, format `R  old_path -> new_path`): Treat as non-anomalous ONLY when BOTH sides match the epic-move pattern -- i.e., the source (old) path starts with `epics/E-NNN-slug/` AND the destination (new) path starts with `.project/archive/E-NNN-slug/`. These are the expected Step 9 `git mv` archive renames. Any rename record that fails either constraint (e.g., source not under `epics/E-NNN-slug/`, or destination not under `.project/archive/E-NNN-slug/`) is anomalous -- report the full `R  old -> new` line to the user and pause for direction.
-   - **Non-rename records**: Apply the path-prefix check to the single path. Treat as non-anomalous only when the path starts with `.project/archive/` or `.claude/agent-memory/product-manager/`.
-
-   Report any anomalous record to the user before proceeding. If any anomalies are reported, pause for user direction (do NOT proceed with `git add -A` on anomalous files).
-2. `git add -A` (stage archive changes).
-3. `git commit -m "chore(E-NNN): archive epic"`.
-
-### Step 12: Shut down PM and delete team
+### Step 10: Shut down PM and delete team
 
 Shutdown PM, wait for confirmation, delete team.
 
@@ -590,8 +608,8 @@ Phase 4 (if "and review"): 4a CR integration review + 4b Codex code review (head
   v
 Phase 5: Validate -> PM completes epic -> doc + context-layer assessments -> summary
   -> shut down implementers + CR -> ancillary file sweep (stage session artifacts, user approval)
-  -> closure merge (patch -> dry-run -> apply -> approval gate -> single commit incl. ancillary files)
-  -> archive -> PM memory -> archive commit -> shut down PM + delete team
+  -> closure merge and commit (patch -> dry-run -> apply -> archive mv -> PM memory -> approval gate -> single commit)
+  -> worktree cleanup -> shut down PM + delete team
 ```
 
 ---
@@ -613,7 +631,7 @@ Phase 5: Validate -> PM completes epic -> doc + context-layer assessments -> sum
 2. **Do not summarize context blocks.** Always send the full story file text and full Technical Notes verbatim.
 3. **Do not proceed to closure with unverified stories.** If any AC is unmet, send the implementer back.
 4. **Do not skip the documentation assessment.** The epic cannot be archived until documentation impact is evaluated.
-5. **Do not commit automatically.** The user must explicitly approve the closure commit. See the approval gate in Phase 5 Step 8's closure merge sequence (sequence step 7).
+5. **Do not commit automatically.** The user must explicitly approve the closure commit. See the approval gate in Phase 5 Step 8's closure sequence (sequence step 8).
 6. **Do not skip PM spawning.** PM handles all status updates and AC verification during dispatch.
 7. **Do not skip the context-layer assessment.** The epic cannot be archived until context-layer impact is evaluated.
 8. **Do not defer findings to epic History.** Every finding must reach a terminal state (FIXED or DISMISSED) during the story. No deferral path exists.

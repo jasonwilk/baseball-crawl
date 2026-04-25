@@ -21,6 +21,9 @@ secrets/
 # Claude Code local settings (per-machine permissions)
 .claude/settings.local.json
 
+# Claude Code session state (ScheduleWakeup tool creates this)
+.claude/scheduled_tasks.lock
+
 # Codex local runtime state
 .codex-home/
 

@@ -1,7 +1,7 @@
 # E-227: Closure Workflow Structural Remediation
 
 ## Status
-`READY`
+`COMPLETED`
 
 ## Overview
 Restructure the implement skill's Phase 5 closure sequence to produce a single atomic commit (feat changes + archive rename + PM memory update) — eliminating a cycle dependency with the `.claude/hooks/epic-archive-check.sh` pre-commit hook and the structural fragility exposed during E-226's own closure. Also add a committed-plan check to the implement skill's Prerequisites so dispatch cannot create an epic worktree from a HEAD that lacks the plan.
@@ -43,8 +43,8 @@ Root-cause classification:
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-227-01 | Phase 5 closure restructure (atomic single-commit) | TODO | None | - |
-| E-227-02 | Dispatch prerequisites: committed-plan check | TODO | None | - |
+| E-227-01 | Phase 5 closure restructure (atomic single-commit) | DONE | None | claude-architect |
+| E-227-02 | Dispatch prerequisites: committed-plan check | DONE | None | claude-architect |
 
 ## Dispatch Team
 - claude-architect
@@ -152,3 +152,32 @@ Anti-Pattern #5 currently reads: "Do not commit automatically. The user must exp
 ## History
 - 2026-04-20: Created after E-226 closure exposed structural Phase 5 failures. CA (claude-architect) diagnosed root causes and proposed the 2-story shape; PM framed ACs.
 - 2026-04-20: Set to READY after PM quality checklist passed and team-lead approved the plan summary. Two clarifications resolved before READY: PM memory timing (already covered by `.claude/hooks/worktree-guard.sh:57` exemption — only the *timing* of the write changes) and `handoff_from_plan` framing (narrative flag; Story 2 AC-3 framed in terms of the trigger pattern per TN-6). One additional Story 1 AC added for archive-directory happy-path verification (AC-10).
+
+- 2026-04-25: **COMPLETED.** Phase 5 closure restructure (E-227-01) and Prerequisites committed-plan check (E-227-02) both delivered. Phase 5 shrinks from 12 to 10 top-level steps; closure produces a single atomic `feat(E-NNN)` commit instead of two; worktree cleanup is now a first-class numbered step; the `.claude/hooks/epic-archive-check.sh` cycle dependency is eliminated structurally; the implement skill backstops the plan-commit invariant on the standalone path while preserving the plan-skill handoff exception. Two Codex Priority 1 findings remediated during closure: `git worktree remove --force` (cleanup couldn't succeed without the flag because the worktree retains staged changes after the closure commit) and a documented reject-restoration sequence (the gate now sits after `git mv` + PM memory update, so 'abort' must restore via `git reset HEAD`, `git mv` back, and `git checkout -- .`).
+
+  ### Dispatch process notes
+  This epic's dispatch was severely degraded — it was paused for 4 days, then resumed under broken-agent conditions: claude-architect spawn went into a corrupted state on Story 2 (dumping minified JS internals instead of executing edits), software-engineer fallback exhibited the same failure, and the product-manager agent stopped sending text replies after Story 1's AC verification. The user explicitly authorized "limp through this" and the main session made E-227-02's edit and the two Codex remediations directly as a one-time exception. AC verification for E-227-02 and the Phase 4a CR integration review were both performed by the main session for the same reason. This violates the standard agent-routing pattern (Anti-Pattern #1) but was the only way to ship the structural fixes that protect future epics from the same dispatch-time failures.
+
+  ### Review Scorecard
+  | Review Pass | Findings | Accepted | Dismissed |
+  |---|---|---|---|
+  | Per-story CR -- E-227-01 | 0 | 0 | 0 (context-layer only, skipped) |
+  | Per-story CR -- E-227-02 | 0 | 0 | 0 (context-layer only, skipped) |
+  | PM AC verification -- E-227-01 | 10 | 10 PASS | 0 |
+  | PM AC verification -- E-227-02 | 5 | 5 PASS | 0 (verified by main session due to agent failure) |
+  | CR integration review (Phase 4a) | 0 | 0 | 0 (skipped due to agent failure) |
+  | Codex code review (Phase 4b) | 2 | 2 | 0 |
+  | **Total** | **17** | **17** | **0** |
+
+  ### Documentation Assessment (2026-04-25)
+  No documentation impact. Internal dispatch workflow change. `docs/admin/` and `docs/coaching/` unaffected.
+
+  ### Context-Layer Assessment (2026-04-25)
+  1. New convention, pattern, or constraint established: **YES**. Phase 5 single-commit closure is the new convention; old two-commit (`feat` + `chore`) pattern is removed. Plan-commit invariant codified at Prerequisites level.
+  2. Architectural decision with ongoing implications: **YES**. Option A (archive-before-commit) over Option B (epic-aware hook parsing); aligns Phase 5 with the existing `.claude/hooks/epic-archive-check.sh` invariant rather than weakening it.
+  3. Footgun, failure mode, or boundary discovered: **YES**. The skill/hook cycle dependency was the discovered footgun. Codification IS the epic's deliverable.
+  4. Change to agent behavior, routing, or coordination: **NO**. Routing tables and agent definitions unchanged.
+  5. Domain knowledge discovered that should influence agent decisions in future epics: **NO** (process knowledge, not domain).
+  6. New CLI command, workflow, or operational procedure introduced: **NO**.
+
+  Triggers 1, 2, 3 fire — but the epic's deliverable IS the codification. No additional claude-architect dispatch needed (and CA was non-functional anyway).
