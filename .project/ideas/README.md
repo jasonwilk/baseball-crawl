@@ -90,6 +90,14 @@ Review this list every 90 days, or when completing an epic. Ask:
 | [IDEA-069](IDEA-069-consolidate-cascade-delete-logic.md) | Consolidate Cascade Delete Logic (admin + reports) | PROMOTED | 2026-04-13 -- absorbed into E-221-05 |
 | [IDEA-070](IDEA-070-admin-ui-delete-path-reports-gap.md) | Admin-UI Delete-Team Path Does Not Clean `reports.team_id` | CANDIDATE | 2026-07-13 |
 | [IDEA-071](IDEA-071-e220-adopter-audit-fix-pre-provenance-code.md) | E-220 Adopter Audit — Fix Pre-Provenance Code Paths | PROMOTED | 2026-04-13 -- promoted to E-223 |
+| [IDEA-072](IDEA-072-pitch-sequence-count-tendencies.md) | Pitch Sequence / Count-Based Tendencies | CANDIDATE | 2026-07-27 |
+| [IDEA-073](IDEA-073-pitcher-fatigue-proxy-bench-card.md) | Pitcher Fatigue Proxy — In-Game Pitch Count Reference Card | CANDIDATE | 2026-07-27 |
+| [IDEA-074](IDEA-074-live-in-game-hitter-lookup.md) | Live In-Game Opponent Hitter Lookup | CANDIDATE | 2026-07-27 |
+| [IDEA-075](IDEA-075-team-kb-bb-weekly-trend.md) | Team K% and BB% Weekly Trend Dashboard Card | CANDIDATE | 2026-07-27 |
+| [IDEA-076](IDEA-076-season-pitch-count-accumulator.md) | Individual Pitcher Season Pitch Count Accumulator | CANDIDATE | 2026-07-27 |
+| [IDEA-077](IDEA-077-lineup-result-comparison.md) | Lineup Result Comparison (A/B Lineup View) | CANDIDATE | 2026-07-27 |
+| [IDEA-078](IDEA-078-count-state-outcome-discipline.md) | Count-State Outcome Discipline (0-2 K% and Ahead/Behind Split) | CANDIDATE | 2026-07-27 |
+| [IDEA-079](IDEA-079-opponent-error-clustering.md) | Opponent Error Clustering by Position and Game Situation | CANDIDATE | 2026-07-27 |
 
 ## Status Definitions
 
