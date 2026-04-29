@@ -15,6 +15,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from src.gamechanger.pipelines import PlaysStageResult
 from src.reports.generator import (
     _query_plays_batting_stats,
     _query_plays_pitching_stats,
@@ -234,7 +235,13 @@ def test_gc_uuid_resolution_always_searches_for_tracked_teams() -> None:
         patch("src.reports.generator.ScoutingCrawler"),
         patch("src.reports.generator.ScoutingLoader"),
         patch("src.reports.generator._crawl_and_load_spray"),
-        patch("src.reports.generator._crawl_and_load_plays", return_value=[]),
+        patch(
+            "src.reports.generator.run_plays_stage",
+            return_value=PlaysStageResult(
+                attempted=0, loaded=0, skipped=0, errored=0,
+                reconcile_errors=0, auth_expired=False, deferred_game_ids=[],
+            ),
+        ),
         patch("src.reports.generator._query_team_info", return_value={"name": "Test Team", "season_year": 2025}),
         patch("src.reports.generator._snapshot_team_ids", return_value=[]),
     ):
@@ -279,28 +286,11 @@ def test_member_team_uses_stored_gc_uuid() -> None:
 
 
 # ---------------------------------------------------------------------------
-# AC-2/AC-3: Filesystem-only game discovery
+# AC-2/AC-3: in-memory plays orchestration is now in the shared helper.
 # ---------------------------------------------------------------------------
-
-
-def test_crawl_and_load_plays_uses_filesystem_discovery() -> None:
-    """AC-2: _crawl_and_load_plays discovers games from crawl results, not DB (E-220-06: in-memory)."""
-    import inspect
-    from src.reports import generator
-    source = inspect.getsource(generator._crawl_and_load_plays)
-
-    # Should NOT contain the old DB query pattern
-    assert "SELECT game_id FROM games" not in source, (
-        "_crawl_and_load_plays must not query games from DB"
-    )
-
-
-def test_crawl_and_load_plays_returns_game_ids() -> None:
-    """AC-2: _crawl_and_load_plays returns list of game_ids for downstream scoping."""
-    import inspect
-    from src.reports import generator
-    sig = inspect.signature(generator._crawl_and_load_plays)
-    # With `from __future__ import annotations`, annotation is a string.
-    assert "list[str]" in str(sig.return_annotation), (
-        "_crawl_and_load_plays must return list[str] of game_ids"
-    )
+#
+# Per E-229-04, plays orchestration moved out of the report generator into the
+# shared `run_plays_stage` helper at `src/gamechanger/pipelines/plays_stage.py`.
+# The in-memory invariant the deleted tests verified (no `SELECT game_id FROM
+# games` in plays orchestration) is now a property of the shared helper and
+# is exercised by `tests/test_plays_stage.py`.

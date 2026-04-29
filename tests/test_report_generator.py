@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from src.gamechanger.crawlers.scouting import ScoutingCrawlResult
+from src.gamechanger.pipelines import PlaysStageResult
 from src.reports.generator import (
     GenerationResult,
     cascade_delete_team,
@@ -38,7 +39,23 @@ _REMOVED_NAMES = [
     "_resolve_gc_uuid_via_search",
     "_UUID_RE",
     "_PLAYER_STATS_ACCEPT",
+    # E-229-04: report generator delegates plays loading to the shared helper.
+    "_crawl_and_load_plays",
+    "_PLAYS_ACCEPT",
 ]
+
+
+def _clean_plays_stage_result() -> PlaysStageResult:
+    """Build a fully-clean PlaysStageResult for `run_plays_stage` patches.
+
+    Most report-generator tests only need the helper to no-op cleanly; they
+    do not assert on per-counter values.  This helper centralises the clean
+    return so all patch sites stay short.
+    """
+    return PlaysStageResult(
+        attempted=0, loaded=0, skipped=0, errored=0,
+        reconcile_errors=0, auth_expired=False, deferred_game_ids=[],
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -213,7 +230,7 @@ class TestGenerateReportE2E:
             patch("src.reports.generator.ScoutingLoader", return_value=mock_loader),
             patch("src.reports.generator._REPO_ROOT", tmp_path),
             patch("src.reports.generator._REPORTS_DIR", tmp_path / "data" / "reports"),
-            patch("src.reports.generator._crawl_and_load_plays", return_value=[]),
+            patch("src.reports.generator.run_plays_stage", return_value=_clean_plays_stage_result()),
         ):
             result = generate_report("abc123")
 
@@ -245,19 +262,32 @@ class TestGenerateReportE2E:
 
 
 class TestPlaysStageAuthExpiry:
-    """AC-5: Auth expiry during plays stage does not fail the report."""
+    """AC-5: Auth expiry during plays stage does not fail the report.
+
+    Per E-229-04, the shared `run_plays_stage` helper catches
+    `CredentialExpiredError` internally and returns ``auth_expired=True``;
+    the report generator's caller no longer needs an explicit
+    ``except CredentialExpiredError`` block.  This test simulates that
+    contract by returning a `PlaysStageResult` with `auth_expired=True`.
+    """
 
     @patch("src.reports.generator.get_connection")
     @patch("src.reports.generator.GameChangerClient")
     @patch("src.reports.generator.ensure_team_row", return_value=1)
     @patch("src.reports.generator.render_report", return_value="<html>ok</html>")
     @patch("src.reports.generator._crawl_and_load_spray")
-    @patch("src.reports.generator._crawl_and_load_plays", return_value=[])
+    @patch(
+        "src.reports.generator.run_plays_stage",
+        return_value=PlaysStageResult(
+            attempted=2, loaded=0, skipped=0, errored=0,
+            reconcile_errors=0, auth_expired=True,
+            deferred_game_ids=["g1", "g2"],
+        ),
+    )
     def test_auth_expiry_in_plays_stage_yields_success(
         self, mock_plays, mock_spray, mock_render, mock_ensure,
         mock_client_cls, mock_get_conn, db, tmp_path,
     ):
-        from src.gamechanger.client import CredentialExpiredError
         from src.gamechanger.crawlers import CrawlResult
         from src.gamechanger.loaders import LoadResult
         from src.reports.generator import generate_report
@@ -286,8 +316,8 @@ class TestPlaysStageAuthExpiry:
         mock_loader = MagicMock()
         mock_loader.load_team.return_value = LoadResult(loaded=5)
 
-        # Plays stage raises CredentialExpiredError
-        mock_plays.side_effect = CredentialExpiredError("token expired")
+        # Plays stage simulates auth-expiry mid-stage by returning
+        # auth_expired=True (the helper's documented contract -- see decorator).
 
         with (
             patch("src.reports.generator.ScoutingCrawler", return_value=mock_crawler),
@@ -299,6 +329,81 @@ class TestPlaysStageAuthExpiry:
 
         assert result.success is True
         assert result.slug is not None
+
+
+class TestPlaysStageHelperInvocation:
+    """E-229-04 AC-6: report generator delegates plays loading to the shared helper.
+
+    Asserts the helper is invoked exactly once with the expected kwargs.
+    Plays-loading correctness is covered by tests/test_plays_stage.py.
+    """
+
+    @patch("src.reports.generator.get_connection")
+    @patch("src.reports.generator.GameChangerClient")
+    @patch("src.reports.generator.ensure_team_row", return_value=1)
+    @patch("src.reports.generator.render_report", return_value="<html>ok</html>")
+    @patch("src.reports.generator._crawl_and_load_spray")
+    @patch(
+        "src.reports.generator.run_plays_stage",
+        # Games-count semantics: loaded <= attempted is invariant.  Use a
+        # valid all-loaded shape (attempted == loaded == 2).
+        return_value=PlaysStageResult(
+            attempted=2, loaded=2, skipped=0, errored=0,
+            reconcile_errors=0, auth_expired=False, deferred_game_ids=[],
+        ),
+    )
+    def test_run_plays_stage_invoked_once_with_expected_kwargs(
+        self, mock_plays, mock_spray, mock_render, mock_ensure,
+        mock_client_cls, mock_get_conn, db, tmp_path,
+    ):
+        from src.gamechanger.loaders import LoadResult
+        from src.reports.generator import generate_report
+
+        _seed_team(db)
+        _seed_season(db)
+        db.execute(
+            "INSERT INTO scouting_runs (team_id, season_id, run_type, started_at, status) "
+            "VALUES (1, '2026-spring-hs', 'full', '2026-03-28T00:00:00Z', 'completed')"
+        )
+        db.commit()
+
+        db_path = str(tmp_path / "test.db")
+
+        def _fresh_conn():
+            conn = sqlite3.connect(db_path)
+            conn.execute("PRAGMA foreign_keys=ON;")
+            return conn
+
+        mock_get_conn.side_effect = lambda: _fresh_conn()
+
+        mock_client = MagicMock()
+        mock_client_cls.return_value = mock_client
+        mock_crawler = MagicMock()
+        # Unsorted boxscores keys to verify the call site sorts them.
+        mock_crawler.scout_team.return_value = ScoutingCrawlResult(
+            team_id=1,
+            season_id="2025-spring-hs",
+            games_crawled=2,
+            games=[],
+            boxscores={"game-b": {}, "game-a": {}},
+        )
+        mock_loader = MagicMock()
+        mock_loader.load_team.return_value = LoadResult(loaded=5)
+
+        with (
+            patch("src.reports.generator.ScoutingCrawler", return_value=mock_crawler),
+            patch("src.reports.generator.ScoutingLoader", return_value=mock_loader),
+            patch("src.reports.generator._REPO_ROOT", tmp_path),
+            patch("src.reports.generator._REPORTS_DIR", tmp_path / "data" / "reports"),
+        ):
+            result = generate_report("abc123")
+
+        assert result.success is True
+        assert mock_plays.call_count == 1
+        _, kwargs = mock_plays.call_args
+        assert kwargs["perspective_team_id"] == 1
+        assert kwargs["public_id"] == "abc123"
+        assert kwargs["game_ids"] == ["game-a", "game-b"]
 
 
 # ---------------------------------------------------------------------------
@@ -1024,7 +1129,7 @@ class TestResolveGcUuid:
             patch("src.reports.generator.ScoutingLoader", return_value=mock_loader),
             patch("src.reports.generator._REPO_ROOT", tmp_path),
             patch("src.reports.generator._REPORTS_DIR", tmp_path / "data" / "reports"),
-            patch("src.reports.generator._crawl_and_load_plays", return_value=[]),
+            patch("src.reports.generator.run_plays_stage", return_value=_clean_plays_stage_result()),
         ):
             result = generate_report("abc123")
 
@@ -1316,7 +1421,7 @@ class TestResolveGcUuidIntegration:
             patch("src.reports.generator.ScoutingLoader", return_value=mock_loader),
             patch("src.reports.generator._REPO_ROOT", tmp_path),
             patch("src.reports.generator._REPORTS_DIR", tmp_path / "data" / "reports"),
-            patch("src.reports.generator._crawl_and_load_plays", return_value=[]),
+            patch("src.reports.generator.run_plays_stage", return_value=_clean_plays_stage_result()),
         ):
             result = generate_report("abc123")
 
@@ -2157,7 +2262,7 @@ class TestPublicIdBackfill:
             patch("src.reports.generator.ScoutingLoader", return_value=mock_loader),
             patch("src.reports.generator._REPO_ROOT", tmp_path),
             patch("src.reports.generator._REPORTS_DIR", tmp_path / "data" / "reports"),
-            patch("src.reports.generator._crawl_and_load_plays", return_value=[]),
+            patch("src.reports.generator.run_plays_stage", return_value=_clean_plays_stage_result()),
         ):
             result = generate_report("Xj9LlYlJklcl")
 
@@ -2229,7 +2334,7 @@ class TestPublicIdBackfill:
             patch("src.reports.generator.ScoutingLoader", return_value=mock_loader),
             patch("src.reports.generator._REPO_ROOT", tmp_path),
             patch("src.reports.generator._REPORTS_DIR", tmp_path / "data" / "reports"),
-            patch("src.reports.generator._crawl_and_load_plays", return_value=[]),
+            patch("src.reports.generator.run_plays_stage", return_value=_clean_plays_stage_result()),
         ):
             result = generate_report("DiFfErEnTsLuG1")
 
@@ -2295,7 +2400,7 @@ class TestPublicIdBackfill:
             patch("src.reports.generator.ScoutingLoader", return_value=mock_loader),
             patch("src.reports.generator._REPO_ROOT", tmp_path),
             patch("src.reports.generator._REPORTS_DIR", tmp_path / "data" / "reports"),
-            patch("src.reports.generator._crawl_and_load_plays", return_value=[]),
+            patch("src.reports.generator.run_plays_stage", return_value=_clean_plays_stage_result()),
         ):
             result = generate_report("Xj9LlYlJklcl")
 
@@ -2367,7 +2472,7 @@ class TestPublicIdBackfill:
             patch("src.reports.generator.ScoutingLoader", return_value=mock_loader),
             patch("src.reports.generator._REPO_ROOT", tmp_path),
             patch("src.reports.generator._REPORTS_DIR", tmp_path / "data" / "reports"),
-            patch("src.reports.generator._crawl_and_load_plays", return_value=[]),
+            patch("src.reports.generator.run_plays_stage", return_value=_clean_plays_stage_result()),
         ):
             result = generate_report("DiFfErEnTsLuG1")
 
@@ -2447,7 +2552,7 @@ class TestPublicIdBackfill:
             patch("src.reports.generator.ScoutingLoader", return_value=mock_loader),
             patch("src.reports.generator._REPO_ROOT", tmp_path),
             patch("src.reports.generator._REPORTS_DIR", tmp_path / "data" / "reports"),
-            patch("src.reports.generator._crawl_and_load_plays", return_value=[]),
+            patch("src.reports.generator.run_plays_stage", return_value=_clean_plays_stage_result()),
         ):
             result = generate_report("Xj9LlYlJklcl")
 

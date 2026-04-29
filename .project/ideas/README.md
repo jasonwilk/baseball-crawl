@@ -98,6 +98,13 @@ Review this list every 90 days, or when completing an epic. Ask:
 | [IDEA-077](IDEA-077-lineup-result-comparison.md) | Lineup Result Comparison (A/B Lineup View) | CANDIDATE | 2026-07-27 |
 | [IDEA-078](IDEA-078-count-state-outcome-discipline.md) | Count-State Outcome Discipline (0-2 K% and Ahead/Behind Split) | CANDIDATE | 2026-07-27 |
 | [IDEA-079](IDEA-079-opponent-error-clustering.md) | Opponent Error Clustering by Position and Game Situation | CANDIDATE | 2026-07-27 |
+| [IDEA-080](IDEA-080-plays-loader-in-memory-refactor.md) | PlaysLoader In-Memory Refactor + LoadResult.skipped Semantic Split | CANDIDATE | 2026-07-28 |
+| [IDEA-081](IDEA-081-plays-loader-writes-game-perspectives.md) | PlaysLoader._load_game() Writes to game_perspectives | CANDIDATE | 2026-07-28 |
+| [IDEA-082](IDEA-082-reconciliation-discrepancies-run-id-clustering.md) | Optional run_id Clustering on reconciliation_discrepancies | CANDIDATE | 2026-07-28 |
+| [IDEA-083](IDEA-083-cli-scout-spray-auth-error-parity.md) | CLI _scout_live Catches and Reports CredentialExpiredError from Spray | CANDIDATE | 2026-07-28 |
+| [IDEA-084](IDEA-084-crawl-jobs-games-crawled-cleanup.md) | crawl_jobs.games_crawled Column Cleanup | CANDIDATE | 2026-07-28 |
+| [IDEA-085](IDEA-085-fix-crawl-jobs-completed-status-timing.md) | Fix crawl_jobs.status='completed' Timing in run_scouting_sync | CANDIDATE | 2026-07-28 |
+| [IDEA-086](IDEA-086-plays-rerun-re-reconciles.md) | Plays-Stage Rerun Re-Reconciles Already-Loaded Games | CANDIDATE | 2026-07-28 |
 
 ## Status Definitions
 

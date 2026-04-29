@@ -548,57 +548,265 @@ class TestTeamFpsInclusion:
 # ---------------------------------------------------------------------------
 
 
-class TestCrawlAndLoadPlaysFailureIsolation:
-    """Per-game crawl failure should not prevent other games from loading."""
+# E-229-04: TestCrawlAndLoadPlaysFailureIsolation removed.
+# The deleted `_crawl_and_load_plays` was migrated to the shared
+# `run_plays_stage` helper.  Per-game crawl-error isolation is now covered by
+# `tests/test_plays_stage.py::test_per_game_http_error_does_not_abort_remaining`.
 
-    def test_per_game_crawl_failure_does_not_block_others(
-        self, db: sqlite3.Connection, tmp_path: Path
-    ) -> None:
-        """When client.get() fails for one game, the function still returns without crashing.
 
-        E-220-06 changed _crawl_and_load_plays to an in-memory pipeline.
-        Per-game error isolation is tested by verifying the function completes
-        and returns a list even when one game's crawl fails.
-        """
-        from unittest.mock import MagicMock, patch
+# ---------------------------------------------------------------------------
+# Codex round-6 P2 remediation: report-path real-helper integration coverage.
+#
+# The other report-generator tests for E-229-04 (TestPlaysStageAuthExpiry,
+# TestPlaysStageHelperInvocation in tests/test_report_generator.py) stub
+# `run_plays_stage` and assert call signatures; they do not exercise the real
+# helper through the report call site.  This test mirrors the round-3 web-path
+# fix at
+# tests/test_pipeline_scouting_sync_plays.py::test_per_game_http_error_isolation_in_web_path
+# by running the real helper end-to-end with two seeded games -- one whose
+# plays HTTP fetch raises, one whose returns valid JSON -- and asserting that
+# the report renders successfully while plays/play_events rows are persisted
+# only for the surviving game.  Closes the integration-coverage gap left after
+# the behavior-oriented `_crawl_and_load_plays` test was removed at line 551.
+# ---------------------------------------------------------------------------
 
-        _seed_base(db)
 
-        mock_client = MagicMock()
-        fake_plays_response = {
-            "sport": "baseball",
-            "team_players": {},
-            "plays": [],
-        }
+import logging
+import sys
+from contextlib import closing
+from unittest.mock import MagicMock, patch
 
-        def mock_get(path: str, **kwargs):
-            if _GAME_ID_1 in path:
-                raise RuntimeError("Simulated network error")
-            return fake_plays_response
+_PROJECT_ROOT_E2E = Path(__file__).resolve().parent.parent
+if str(_PROJECT_ROOT_E2E) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT_E2E))
 
-        mock_client.get.side_effect = mock_get
 
-        db_path = str(tmp_path / "test.db")
-        file_conn = sqlite3.connect(db_path)
-        db.backup(file_conn)
-        file_conn.close()
+_E2E_GAME_ID_1 = "11111111-1111-1111-1111-111111111111"
+_E2E_GAME_ID_2 = "22222222-2222-2222-2222-222222222222"
+_E2E_PITCHER = "01000001-aaaa-bbbb-cccc-000000000001"
+_E2E_BATTER = "ba000001-aaaa-bbbb-cccc-000000000001"
 
-        def _fresh_conn():
-            c = sqlite3.connect(db_path)
-            c.execute("PRAGMA foreign_keys=ON;")
-            c.row_factory = sqlite3.Row
-            return c
 
-        from src.reports.generator import _crawl_and_load_plays
+def _seed_disk_db_for_report(db_path: Path) -> tuple[int, int, str]:
+    """Apply migrations + seed teams/players/games for a report-path E2E test.
 
-        with patch("src.reports.generator.get_connection", side_effect=_fresh_conn):
-            result = _crawl_and_load_plays(
-                mock_client,
-                public_id="test-team",
-                team_id=_TEAM_ID,
-                season_id=_SEASON_ID,
-                game_ids=[_GAME_ID_1, _GAME_ID_2],
+    Returns (team_id, away_team_id, season_id).  Uses ``derive_season_id_for_team``
+    semantics: the seeded team has ``season_year=2026`` and no ``program_id``,
+    so the report generator will derive ``season_id="2026"``.
+    """
+    from migrations.apply_migrations import run_migrations
+
+    run_migrations(db_path=db_path)
+    season_id = "2026"
+    with closing(sqlite3.connect(str(db_path))) as conn:
+        conn.execute("PRAGMA foreign_keys=ON;")
+        conn.execute(
+            "INSERT INTO teams (id, name, membership_type, public_id, season_year) "
+            "VALUES (1, 'Tracked Opp', 'tracked', 'TrackedOppE229', 2026)"
+        )
+        conn.execute(
+            "INSERT INTO teams (id, name, membership_type) "
+            "VALUES (2, 'Other Side', 'tracked')"
+        )
+        conn.execute(
+            "INSERT INTO seasons (season_id, name, season_type, year) "
+            "VALUES (?, '2026', 'default', 2026)",
+            (season_id,),
+        )
+        # Pre-seed players + a games row + boxscore stat rows for each game so
+        # the plays loader's foreign-key checks (and reconcile_game's joins)
+        # have what they need.  Mirrors the web-path
+        # `_seed_game_for_reconcile` shape.
+        for pid, first, last in [
+            (_E2E_PITCHER, "Pitcher", "One"),
+            (_E2E_BATTER, "Batter", "One"),
+        ]:
+            conn.execute(
+                "INSERT OR IGNORE INTO players (player_id, first_name, last_name) "
+                "VALUES (?, ?, ?)",
+                (pid, first, last),
             )
+        for game_id in (_E2E_GAME_ID_1, _E2E_GAME_ID_2):
+            conn.execute(
+                "INSERT INTO games "
+                "(game_id, season_id, game_date, home_team_id, away_team_id, status) "
+                "VALUES (?, ?, '2026-04-10', 1, 2, 'completed')",
+                (game_id, season_id),
+            )
+            # Mirror the upstream GameLoader._maybe_record_game_perspective
+            # write -- the E2E test mocks ScoutingLoader so the real GameLoader
+            # never runs; without this seed a missing perspective row would
+            # break perspective-provenance MUST #5.
+            conn.execute(
+                "INSERT OR IGNORE INTO game_perspectives "
+                "(game_id, perspective_team_id) VALUES (?, 1)",
+                (game_id,),
+            )
+            conn.execute(
+                "INSERT INTO player_game_pitching "
+                "(game_id, team_id, player_id, perspective_team_id, "
+                " appearance_order, ip_outs, h, r, er, bb, so, pitches, total_strikes, bf) "
+                "VALUES (?, 2, ?, 1, 1, 6, 0, 0, 0, 0, 0, 6, 4, 2)",
+                (game_id, _E2E_PITCHER),
+            )
+            conn.execute(
+                "INSERT INTO player_game_batting "
+                "(game_id, team_id, player_id, perspective_team_id, "
+                " ab, r, h, bb, so, hbp) "
+                "VALUES (?, 2, ?, 1, 2, 0, 2, 0, 0, 0)",
+                (game_id, _E2E_BATTER),
+            )
+        conn.commit()
+    return 1, 2, season_id
 
-        # Function should complete without raising despite game 1 failure
-        assert isinstance(result, list)
+
+def test_generate_report_per_game_http_error_isolation(
+    tmp_path: Path,
+    plays_json_factory,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Real-helper integration: per-game HTTP error isolates inside the report path.
+
+    Mirrors
+    ``tests/test_pipeline_scouting_sync_plays.py::test_per_game_http_error_isolation_in_web_path``
+    but exercises ``generate_report`` instead of ``run_scouting_sync``.  The
+    real ``run_plays_stage`` helper runs against a mocked
+    ``GameChangerClient.get`` that raises for game 1 and returns valid JSON for
+    game 2.  The report must render successfully, and plays/play_events rows
+    must be persisted for game 2 only.
+
+    Closes the round-6 integration-coverage gap for E-229-04 AC-4 / AC-5: the
+    other report-generator tests stub ``run_plays_stage``, so a regression in
+    the helper-to-callsite wiring would leave them green.
+    """
+    from src.gamechanger.crawlers.scouting import ScoutingCrawlResult
+    from src.gamechanger.loaders import LoadResult
+    from src.reports.generator import generate_report
+
+    db_path = tmp_path / "test.db"
+    team_id, away_id, _season_id = _seed_disk_db_for_report(db_path)
+
+    def _fresh_conn() -> sqlite3.Connection:
+        c = sqlite3.connect(str(db_path))
+        c.execute("PRAGMA foreign_keys=ON;")
+        return c
+
+    # Skip the public-team API fetch -- non-200 short-circuits cleanly and
+    # leaves team_name_from_api / season_year_from_api as None.
+    mock_session = MagicMock()
+    mock_resp = MagicMock()
+    mock_resp.status_code = 404
+    mock_session.get.return_value = mock_resp
+
+    crawl_result = ScoutingCrawlResult(
+        team_id=team_id,
+        season_id="2026",
+        public_id="TrackedOppE229",
+        games=[
+            {"id": _E2E_GAME_ID_1, "game_status": "completed"},
+            {"id": _E2E_GAME_ID_2, "game_status": "completed"},
+        ],
+        roster=[],
+        boxscores={_E2E_GAME_ID_1: {}, _E2E_GAME_ID_2: {}},
+        games_crawled=2,
+    )
+    mock_crawler = MagicMock()
+    mock_crawler.scout_team.return_value = crawl_result
+    mock_loader = MagicMock()
+    mock_loader.load_team.return_value = LoadResult(loaded=5)
+
+    game_2_plays_json = plays_json_factory(
+        _E2E_GAME_ID_2, _E2E_PITCHER, _E2E_BATTER, num_plays=2,
+    )
+
+    def _fake_get(path: str, *args, **kwargs):  # type: ignore[no-untyped-def]
+        if "plays" not in path:
+            return {}
+        if _E2E_GAME_ID_1 in path:
+            raise RuntimeError("simulated HTTP failure for game 1")
+        if _E2E_GAME_ID_2 in path:
+            return game_2_plays_json
+        return {}
+
+    mock_client = MagicMock()
+    mock_client.get.side_effect = _fake_get
+
+    caplog.set_level(logging.INFO, logger="src.reports.generator")
+
+    with (
+        patch("src.http.session.create_session", return_value=mock_session),
+        patch("src.reports.generator.get_connection", side_effect=_fresh_conn),
+        patch("src.reports.generator.GameChangerClient", return_value=mock_client),
+        patch(
+            "src.reports.generator.ensure_team_row", return_value=team_id,
+        ),
+        patch(
+            "src.reports.generator.render_report", return_value="<html>ok</html>",
+        ),
+        patch("src.reports.generator.ScoutingCrawler", return_value=mock_crawler),
+        patch("src.reports.generator.ScoutingLoader", return_value=mock_loader),
+        # Skip spray + gc_uuid resolution -- both make extra HTTP calls that
+        # would otherwise need their own mocked endpoints.  Plays-stage is
+        # the focus; spray has its own coverage.
+        patch("src.reports.generator._crawl_and_load_spray"),
+        patch("src.reports.generator._resolve_gc_uuid", return_value=None),
+        patch("src.reports.generator._REPO_ROOT", tmp_path),
+        patch("src.reports.generator._REPORTS_DIR", tmp_path / "data" / "reports"),
+    ):
+        result = generate_report("TrackedOppE229")
+
+    # Report rendered successfully despite per-game plays failure.
+    assert result.success is True, (
+        f"report failed: {result.error_message!r}"
+    )
+    assert result.url is not None
+    assert result.slug is not None
+    report_file = tmp_path / "data" / "reports" / f"{result.slug}.html"
+    assert report_file.exists()
+
+    # Plays + play_events rows: game 2 only.
+    with closing(sqlite3.connect(str(db_path))) as conn:
+        g1_plays = conn.execute(
+            "SELECT COUNT(*) FROM plays "
+            "WHERE game_id = ? AND perspective_team_id = ?",
+            (_E2E_GAME_ID_1, team_id),
+        ).fetchone()[0]
+        assert g1_plays == 0, (
+            "game 1 plays HTTP raised; no rows should have been written"
+        )
+        g1_events = conn.execute(
+            "SELECT COUNT(*) FROM play_events pe "
+            "JOIN plays p ON pe.play_id = p.id "
+            "WHERE p.game_id = ? AND p.perspective_team_id = ?",
+            (_E2E_GAME_ID_1, team_id),
+        ).fetchone()[0]
+        assert g1_events == 0
+
+        g2_plays = conn.execute(
+            "SELECT COUNT(*) FROM plays "
+            "WHERE game_id = ? AND perspective_team_id = ?",
+            (_E2E_GAME_ID_2, team_id),
+        ).fetchone()[0]
+        assert g2_plays == 2
+        g2_events = conn.execute(
+            "SELECT COUNT(*) FROM play_events pe "
+            "JOIN plays p ON pe.play_id = p.id "
+            "WHERE p.game_id = ? AND p.perspective_team_id = ?",
+            (_E2E_GAME_ID_2, team_id),
+        ).fetchone()[0]
+        assert g2_events > 0
+
+    # Plays-stage INFO log emitted by the report generator names the
+    # per-counter result -- loaded=1, errored=1.  Greppable token: the
+    # generator's structured "Plays stage for public_id=" prefix.
+    plays_log_records = [
+        r for r in caplog.records
+        if r.name == "src.reports.generator"
+        and "Plays stage for public_id=" in r.getMessage()
+    ]
+    assert plays_log_records, [
+        (r.name, r.levelname, r.getMessage()) for r in caplog.records
+    ]
+    msg = plays_log_records[0].getMessage()
+    assert "loaded=1" in msg, msg
+    assert "errored=1" in msg, msg

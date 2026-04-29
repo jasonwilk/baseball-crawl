@@ -17,7 +17,6 @@ Public API::
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import re
@@ -39,13 +38,11 @@ from src.gamechanger.client import CredentialExpiredError, GameChangerClient
 from src.gamechanger.crawlers.scouting import ScoutingCrawler
 from src.gamechanger.crawlers.scouting_spray import ScoutingSprayChartCrawler
 from src.gamechanger.loaders import derive_season_id_for_team
-from src.gamechanger.loaders.plays_loader import PlaysLoader
 from src.gamechanger.loaders.scouting_loader import ScoutingLoader
 from src.gamechanger.loaders.scouting_spray_loader import ScoutingSprayChartLoader
+from src.gamechanger.pipelines import run_plays_stage
 from src.gamechanger.search import search_teams_by_name
-from src.gamechanger.types import TeamRef
 from src.gamechanger.url_parser import parse_team_url
-from src.reconciliation.engine import reconcile_game
 from src.reports.renderer import render_report
 
 logger = logging.getLogger(__name__)
@@ -54,7 +51,6 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 _REPORTS_DIR = _REPO_ROOT / "data" / "reports"
 _EXPIRY_DAYS = 14
 _APP_URL_DEFAULT = "http://localhost:8001"
-_PLAYS_ACCEPT = "application/vnd.gc.com.event_plays+json; version=0.0.0"
 
 _NAME_PUNCTUATION_RE = re.compile(r"[^\w ]")
 
@@ -521,134 +517,6 @@ def _crawl_and_load_spray(
         )
 
 
-def _crawl_and_load_plays(
-    client: GameChangerClient,
-    public_id: str,
-    team_id: int,
-    season_id: str,
-    game_ids: list[str] | None = None,
-) -> list[str]:
-    """Crawl, load, and reconcile plays data in-memory (E-220-06).
-
-    Game IDs come from crawl result boxscores (in-memory), not disk globs.
-    Plays are fetched in-memory and written to temp files for PlaysLoader.
-
-    Args:
-        client: Authenticated ``GameChangerClient``.
-        public_id: The scouted team's ``public_id`` slug.
-        team_id: The team's DB integer PK.
-        season_id: Canonical DB season_id for query scoping.
-        game_ids: List of game IDs from the crawl result boxscores.
-
-    Returns:
-        List of game_id strings that were processed.
-    """
-    import tempfile
-
-    if not game_ids:
-        logger.info("No game IDs for plays stage for public_id=%s; skipping.", public_id)
-        return []
-
-    try:
-        # Crawl: fetch plays for each game in-memory (per-game error isolation)
-        plays_data: dict[str, dict] = {}
-        for game_id in game_ids:
-            # Check DB idempotency (perspective-aware)
-            with closing(get_connection()) as conn:
-                existing = conn.execute(
-                    "SELECT 1 FROM plays WHERE game_id = ? AND perspective_team_id = ? LIMIT 1",
-                    (game_id, team_id),
-                ).fetchone()
-            if existing is not None:
-                logger.debug("Plays already loaded for game %s perspective %d; skipping.", game_id, team_id)
-                plays_data[game_id] = {}  # mark as processed for reconcile
-                continue
-
-            try:
-                raw = client.get(
-                    f"/game-stream-processing/{game_id}/plays",
-                    accept=_PLAYS_ACCEPT,
-                )
-                plays_data[game_id] = raw if isinstance(raw, dict) else {}
-                logger.debug("Fetched plays for game %s.", game_id)
-            except CredentialExpiredError:
-                raise
-            except Exception:  # noqa: BLE001
-                logger.warning(
-                    "Failed to fetch plays for game %s; skipping.",
-                    game_id,
-                    exc_info=True,
-                )
-
-        if not plays_data:
-            logger.info("No plays data fetched for team_id=%d.", team_id)
-            return []
-
-        # Load: write each game's plays to a temp dir, then use PlaysLoader
-        with closing(get_connection()) as conn:
-            row = conn.execute(
-                "SELECT gc_uuid, public_id FROM teams WHERE id = ?", (team_id,)
-            ).fetchone()
-            gc_uuid = row[0] if row else None
-            team_public_id = row[1] if row else public_id
-
-        team_ref = TeamRef(id=team_id, gc_uuid=gc_uuid, public_id=team_public_id)
-
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            plays_dir = Path(tmp_dir) / "plays"
-            plays_dir.mkdir()
-            for gid, data in plays_data.items():
-                if data:  # only write non-empty (skip already-loaded)
-                    (plays_dir / f"{gid}.json").write_text(
-                        json.dumps(data), encoding="utf-8"
-                    )
-
-            with closing(get_connection()) as conn:
-                loader = PlaysLoader(conn, owned_team_ref=team_ref)
-                load_result = loader.load_all(Path(tmp_dir))
-
-        logger.info(
-            "Plays load for team_id=%d: loaded=%d skipped=%d errors=%d",
-            team_id, load_result.loaded, load_result.skipped, load_result.errors,
-        )
-
-        # Reconcile: correct pitcher attribution for each game.  E-220 round
-        # 6 cluster 4: pass perspective_team_id=team_id so reconcile targets
-        # the report's team perspective.  Otherwise cross-perspective games
-        # where team_id != home_team_id would reconcile the wrong rows.
-        for game_id in game_ids:
-            try:
-                with closing(get_connection()) as conn:
-                    has_plays = conn.execute(
-                        "SELECT 1 FROM plays WHERE game_id = ? AND perspective_team_id = ? LIMIT 1",
-                        (game_id, team_id),
-                    ).fetchone()
-                    if has_plays:
-                        reconcile_game(
-                            conn, game_id, dry_run=False,
-                            perspective_team_id=team_id,
-                        )
-            except Exception:  # noqa: BLE001
-                logger.warning(
-                    "Reconciliation failed for game %s; plays data still usable.",
-                    game_id,
-                    exc_info=True,
-                )
-
-        return game_ids
-
-    except CredentialExpiredError:
-        raise
-    except Exception:  # noqa: BLE001
-        logger.warning(
-            "Plays crawl/load/reconcile failed for public_id=%s; "
-            "continuing without plays data.",
-            public_id,
-            exc_info=True,
-        )
-        return []
-
-
 def _query_plays_pitching_stats(
     conn: sqlite3.Connection,
     team_id: int,
@@ -1088,26 +956,45 @@ def generate_report(gc_url: str) -> GenerationResult:
             games_data=crawl_result.games,
         )
 
-        # Step 4d: Plays crawl/load/reconcile (in-memory -- E-220-06).
-        # Game IDs from crawl result boxscores, not disk globs.
-        plays_game_ids: list[str] = []
+        # Step 4d: Plays crawl/load/reconcile via shared helper (E-229-04).
+        # Game IDs from crawl result boxscores, not disk globs.  The shared
+        # `run_plays_stage` catches `CredentialExpiredError` internally and
+        # returns `auth_expired=True`; if helper contract changes, this
+        # caller updates.  Defensive `except Exception` envelope keeps
+        # report rendering non-fatal on any unexpected helper failure (parity
+        # with how spray failures are handled above).
+        plays_game_ids: list[str] = sorted(crawl_result.boxscores.keys())
         try:
-            plays_game_ids = _crawl_and_load_plays(
-                client, public_id, team_id, season_id,
-                game_ids=sorted(crawl_result.boxscores.keys()),
-            )
-        except CredentialExpiredError:
-            logger.warning(
-                "Auth expired during plays stage for public_id=%s; "
-                "continuing without plays data.",
+            with closing(get_connection()) as conn:
+                conn.execute("PRAGMA foreign_keys=ON;")
+                plays_result = run_plays_stage(
+                    client,
+                    conn,
+                    perspective_team_id=team_id,
+                    public_id=public_id,
+                    game_ids=plays_game_ids,
+                )
+            logger.info(
+                "Plays stage for public_id=%s: attempted=%d loaded=%d "
+                "skipped=%d errored=%d reconcile_errors=%d auth_expired=%s "
+                "deferred=%d",
                 public_id,
+                plays_result.attempted,
+                plays_result.loaded,
+                plays_result.skipped,
+                plays_result.errored,
+                plays_result.reconcile_errors,
+                plays_result.auth_expired,
+                len(plays_result.deferred_game_ids),
             )
         except Exception:  # noqa: BLE001
             logger.warning(
-                "Plays stage failed for public_id=%s; continuing without plays data.",
+                "Plays stage failed for public_id=%s; "
+                "continuing without plays data.",
                 public_id,
                 exc_info=True,
             )
+            plays_game_ids = []
 
     except CredentialExpiredError:
         msg = "Authentication credentials expired — refresh with `bb creds setup web`"

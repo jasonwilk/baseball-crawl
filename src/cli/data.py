@@ -302,8 +302,12 @@ def _scout_live(
             exit_code = 1
 
         if exit_code != 0:
-            # Main scouting pipeline failed; skip spray stages because game and
-            # roster rows that the spray loader depends on may be missing.
+            # Main scouting pipeline failed (or partially failed in bulk mode);
+            # skip spray stages because game and roster rows that the spray
+            # loader depends on may be missing.  Plays stage runs unconditionally
+            # below -- it gates per-team on the presence of crawl_results
+            # entries with non-empty boxscores, which mirrors the per-team
+            # contract used by the web path (run_scouting_sync).
             logger.warning(
                 "Main scouting pipeline failed (exit_code=%d); "
                 "skipping spray crawl and load stages.",
@@ -380,6 +384,85 @@ def _scout_live(
             logger.error(
                 "Post-spray dedup sweep failed (non-fatal)", exc_info=True
             )
+
+        # Step 5: plays crawl/load/reconcile per scouted team (E-229-02).
+        # Slots after the post-spray dedup sweep so dedup commits are
+        # already settled before the plays loader's first per-game commit.
+        # Plays-stage failures are non-fatal: typer.echo summary, exit_code
+        # is unchanged.  CLI does not write to crawl_jobs.
+        #
+        # No aggregate gate: plays runs unconditionally and gates per-team
+        # on the per-iteration check below.  This mirrors the web path
+        # (run_scouting_sync), which is invoked once per team and gates
+        # plays per-team on `load_result.errors == 0` (only enters plays
+        # inside the `else: scout success` branch).  The CLI equivalent
+        # is the `cr.errors > 0` skip below: teams whose scout had errors
+        # may have partially-loaded boxscores, and running plays against
+        # that partial state corrupts downstream reconciliation.  Pure
+        # per-team gate -- one team's failure must not skip plays for
+        # other teams in the same bulk run.  If _run_scout_pipeline raised
+        # before populating crawl_results, the `crawl_results: list = []`
+        # initialization above keeps this loop safely iterating zero times.
+        from src.gamechanger.pipelines import run_plays_stage
+
+        for cr in crawl_results:
+            cr_public_id = getattr(cr, "public_id", "") or ""
+            cr_team_id = getattr(cr, "team_id", None)
+            cr_errors = getattr(cr, "errors", 0)
+            cr_boxscores = getattr(cr, "boxscores", None) or {}
+            if cr_errors > 0:
+                # Mirror web path: skip plays for teams whose scout had
+                # errors -- boxscore inputs may be incomplete for that team,
+                # plays would run against partially-loaded state.  Pure
+                # per-team gate; other teams in bulk mode still process
+                # normally.  Spray failures (which only set the aggregate
+                # exit_code, not cr.errors) do not corrupt boxscore inputs
+                # and so do NOT trigger this skip -- the plays loop sits
+                # outside the spray gating block on purpose.
+                logger.warning(
+                    "Skipping plays stage for %s: scout had %d error(s); "
+                    "plays would run against partially-loaded state.",
+                    cr_public_id or f"team_id={cr_team_id}",
+                    cr_errors,
+                )
+                continue
+            if not cr_public_id or cr_team_id is None or not cr_boxscores:
+                continue
+            game_ids = sorted(cr_boxscores.keys())
+            try:
+                plays_result = run_plays_stage(
+                    client,
+                    conn,
+                    perspective_team_id=cr_team_id,
+                    public_id=cr_public_id,
+                    game_ids=game_ids,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "PLAYS STAGE FAILED for %s: %s",
+                    cr_public_id,
+                    exc,
+                    exc_info=True,
+                )
+                typer.echo(
+                    f"Plays stage error for {cr_public_id}: {exc}",
+                    err=True,
+                )
+                continue
+            summary = (
+                f"Plays stage for {cr_public_id}: "
+                f"loaded={plays_result.loaded} "
+                f"skipped={plays_result.skipped} "
+                f"errored={plays_result.errored} "
+                f"reconcile_errors={plays_result.reconcile_errors} "
+                f"deferred={len(plays_result.deferred_game_ids)}"
+            )
+            if plays_result.auth_expired:
+                summary += (
+                    " -- run `bb creds setup web` to refresh credentials "
+                    "and re-run scout (re-running scout is idempotent)"
+                )
+            typer.echo(summary)
 
     raise SystemExit(exit_code)
 

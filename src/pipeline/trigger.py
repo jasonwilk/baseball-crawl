@@ -30,6 +30,7 @@ from src.gamechanger.crawlers.scouting_spray import ScoutingSprayChartCrawler
 from src.gamechanger.loaders.opponent_seeder import seed_schedule_opponents
 from src.gamechanger.loaders.scouting_loader import ScoutingLoader
 from src.gamechanger.loaders.scouting_spray_loader import ScoutingSprayChartLoader
+from src.gamechanger.pipelines import PlaysStageResult, run_plays_stage
 from src.gamechanger.resolvers.gc_uuid_resolver import resolve_gc_uuid
 from src.gamechanger.team_resolver import resolve_team
 from src.pipeline import crawl as crawl_module
@@ -629,6 +630,135 @@ def _run_spray_stages(
         )
 
 
+def _format_plays_error_message(result: PlaysStageResult) -> str | None:
+    """Format the structured plays-stage prefix per epic Tech Notes "Operator visibility".
+
+    Returns ``None`` when ``result`` is fully clean (zero errored, zero
+    reconcile_errors, zero deferred); the existing ``error_message=None`` set
+    by ``_mark_job_terminal('completed')`` stands.
+
+    Format: comma-joined fragments.  Base is always
+    ``"plays: {loaded}/{attempted} loaded"``.  Append in order: ``", {N}
+    errored"`` if errored > 0; ``", {N} reconcile errors"`` if
+    reconcile_errors > 0; ``", {N} deferred (auth)"`` if any deferred.
+    """
+    deferred_count = len(result.deferred_game_ids)
+    if (
+        result.errored == 0
+        and result.reconcile_errors == 0
+        and deferred_count == 0
+    ):
+        return None
+    parts = [f"plays: {result.loaded}/{result.attempted} loaded"]
+    if result.errored > 0:
+        parts.append(f"{result.errored} errored")
+    if result.reconcile_errors > 0:
+        parts.append(f"{result.reconcile_errors} reconcile errors")
+    if deferred_count > 0:
+        parts.append(f"{deferred_count} deferred (auth)")
+    return ", ".join(parts)
+
+
+def _run_plays_stage_for_sync(
+    conn: sqlite3.Connection,
+    client: GameChangerClient,
+    *,
+    team_id: int,
+    public_id: str,
+    crawl_job_id: int,
+    boxscores: dict | None,
+) -> None:
+    """Run the plays stage for the web scouting sync (non-fatal).
+
+    Wraps ``run_plays_stage`` with web-specific operator-visibility
+    handling: on partial failure (errored > 0, reconcile_errors > 0, or any
+    deferred game IDs), UPDATEs ``crawl_jobs.error_message`` directly.  The
+    job's ``status`` is unaffected -- the existing flow already wrote
+    ``status='completed'`` at the time of this call, and plays runs as
+    additive enrichment.
+
+    On unexpected helper exceptions, logs the literal ``PLAYS STAGE FAILED``
+    token at WARNING with ``exc_info=True`` and returns -- the job stays
+    ``completed``.
+
+    Args:
+        conn: Open SQLite connection (caller-owned).
+        client: Authenticated GameChangerClient.
+        team_id: Scouted team's ``teams.id``.
+        public_id: Scouted team's ``public_id`` slug.
+        crawl_job_id: ``crawl_jobs.id`` row to UPDATE on partial failure.
+        boxscores: ``crawl_result.boxscores`` -- dict keyed by ``game_id``.
+            If empty/None, the stage is skipped with an INFO log.
+    """
+    if not boxscores:
+        logger.info(
+            "Plays stage skipped for team_id=%d: no boxscores in crawl result.",
+            team_id,
+        )
+        return
+
+    game_ids = sorted(boxscores.keys())
+    try:
+        result = run_plays_stage(
+            client,
+            conn,
+            perspective_team_id=team_id,
+            public_id=public_id,
+            game_ids=game_ids,
+        )
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "PLAYS STAGE FAILED for team_id=%d public_id=%s (non-fatal); "
+            "job remains completed.",
+            team_id,
+            public_id,
+            exc_info=True,
+        )
+        return
+
+    logger.info(
+        "Plays stage for team_id=%d public_id=%s: "
+        "attempted=%d loaded=%d skipped=%d errored=%d "
+        "reconcile_errors=%d deferred=%d auth_expired=%s",
+        team_id,
+        public_id,
+        result.attempted,
+        result.loaded,
+        result.skipped,
+        result.errored,
+        result.reconcile_errors,
+        len(result.deferred_game_ids),
+        result.auth_expired,
+    )
+
+    if result.auth_expired:
+        logger.warning(
+            "PLAYS STAGE auth-expired for team_id=%d public_id=%s; "
+            "%d games deferred. Run `bb creds setup web` to refresh "
+            "credentials and re-trigger the sync (re-running scout is "
+            "idempotent).",
+            team_id,
+            public_id,
+            len(result.deferred_game_ids),
+        )
+
+    error_prefix = _format_plays_error_message(result)
+    if error_prefix is not None:
+        try:
+            conn.execute(
+                "UPDATE crawl_jobs SET error_message = ? WHERE id = ?",
+                (error_prefix, crawl_job_id),
+            )
+            conn.commit()
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Failed to UPDATE crawl_jobs.error_message after plays stage "
+                "for crawl_job_id=%d (non-fatal)",
+                crawl_job_id,
+                exc_info=True,
+            )
+
+
 # ---------------------------------------------------------------------------
 # Tracked team (scouting) sync
 # ---------------------------------------------------------------------------
@@ -748,6 +878,20 @@ def run_scouting_sync(team_id: int, public_id: str, crawl_job_id: int) -> None:
                         team_id,
                         exc_info=True,
                     )
+
+                # 5. Plays crawl/load/reconcile (E-229-03).
+                # Additive enrichment after dedup; non-fatal.  The terminal
+                # status was already written by `_mark_job_terminal('completed')`
+                # above; on partial failure the wrapper UPDATEs error_message
+                # directly, leaving status untouched.
+                _run_plays_stage_for_sync(
+                    conn,
+                    client,
+                    team_id=team_id,
+                    public_id=public_id,
+                    crawl_job_id=crawl_job_id,
+                    boxscores=crawl_result.boxscores,
+                )
 
             logger.info(
                 "Scouting sync complete: team_id=%d public_id=%s loaded=%d errors=%d",

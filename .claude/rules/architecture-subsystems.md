@@ -18,13 +18,13 @@ Subsystem-specific implementation details. For general architecture principles a
 
 ## Scouting Pipeline
 
-Five stages: (1) scouting crawl (`ScoutingCrawler` -- schedules, rosters, boxscores), (2) scouting load (`ScoutingLoader` -- aggregate boxscores into season stats), (3) gc_uuid resolution (resolve `public_id` → `gc_uuid` via `POST /search` for spray chart access), (4) spray crawl (`ScoutingSprayChartCrawler`), (5) spray load (`ScoutingSprayChartLoader`). Source files: `src/gamechanger/crawlers/scouting.py`, `src/gamechanger/crawlers/scouting_spray.py`, `src/gamechanger/loaders/scouting_loader.py`, `src/gamechanger/loaders/scouting_spray_loader.py`, `src/pipeline/trigger.py` (web), `src/cli/data.py` (CLI).
+Six stages: (1) scouting crawl (`ScoutingCrawler` -- schedules, rosters, boxscores), (2) scouting load (`ScoutingLoader` -- aggregate boxscores into season stats), (3) gc_uuid resolution (resolve `public_id` → `gc_uuid` via `POST /search` for spray chart access), (4) spray crawl (`ScoutingSprayChartCrawler`), (5) spray load (`ScoutingSprayChartLoader`), (6) plays (orchestrated via `run_plays_stage()` -- see Plays Stage section below). Source files: `src/gamechanger/crawlers/scouting.py`, `src/gamechanger/crawlers/scouting_spray.py`, `src/gamechanger/loaders/scouting_loader.py`, `src/gamechanger/loaders/scouting_spray_loader.py`, `src/gamechanger/pipelines/plays_stage.py`, `src/pipeline/trigger.py` (web), `src/cli/data.py` (CLI).
 
 **In-memory crawl-to-load**: Scouting crawlers return data in-memory (dataclasses/dicts) directly to loaders -- no disk intermediary (`data/raw/` files) for the scouting or spray stages. Game IDs come from crawl results, not filesystem globs. This eliminates stale-file contamination across runs. The own-team (member) pipeline retains disk caching because its crawl and load are separate CLI invocations. See `.claude/rules/perspective-provenance.md` for the full perspective tagging invariant.
 
 ## Background Pipeline Trigger
 
-`src/pipeline/trigger.py` provides fire-and-forget pipeline execution from HTTP routes (FastAPI `BackgroundTasks`). Each trigger function creates its own DB connection, refreshes auth eagerly, tracks status via `crawl_jobs` rows, and updates `teams.last_synced` on success. Two pipelines: `run_member_sync` (crawl+load+opponent discovery for owned teams) and `run_scouting_sync` (all five scouting stages for tracked teams -- see Scouting pipeline). `run_member_sync` includes automatic opponent discovery after crawl+load: the schedule seeder (`src/gamechanger/loaders/opponent_seeder.py`) seeds `opponent_links` from cached `schedule.json`/`opponents.json`, then `OpponentResolver.resolve()` upgrades linked rows via live API calls. Seeder failures are non-fatal; `CredentialExpiredError` from the resolver propagates. **Auto-scout after resolution**: When an opponent is resolved with a non-null `public_id`, scouting is triggered automatically. This pattern exists in three places: (1) admin manual connect (`/admin/opponents/{link_id}/resolve`), (2) admin GC search resolve, and (3) auto-resolver during `_discover_opponents()` in `run_member_sync`. Admin routes (manual connect, GC search) enqueue `run_scouting_sync` via FastAPI `BackgroundTasks`; the auto-resolver during `_discover_opponents()` calls `run_scouting_sync` directly (already executing inside a background job). No manual sync trigger needed. **Auto-sync resilience pattern**: Auto-sync triggers from admin actions (team add, merge) use a two-phase approach: `_prepare_auto_sync()` does DB-only work (running-job check, `crawl_jobs` creation) in a thread pool, then `_enqueue_from_prep()` calls `background_tasks.add_task()` from the async handler. Both phases are wrapped in try/except so auto-sync failures never prevent the primary operation from completing.
+`src/pipeline/trigger.py` provides fire-and-forget pipeline execution from HTTP routes (FastAPI `BackgroundTasks`). Each trigger function creates its own DB connection, refreshes auth eagerly, tracks status via `crawl_jobs` rows, and updates `teams.last_synced` on success. Two pipelines: `run_member_sync` (crawl+load+opponent discovery for owned teams) and `run_scouting_sync` (all six scouting stages for tracked teams -- see Scouting pipeline). `run_member_sync` includes automatic opponent discovery after crawl+load: the schedule seeder (`src/gamechanger/loaders/opponent_seeder.py`) seeds `opponent_links` from cached `schedule.json`/`opponents.json`, then `OpponentResolver.resolve()` upgrades linked rows via live API calls. Seeder failures are non-fatal; `CredentialExpiredError` from the resolver propagates. **Auto-scout after resolution**: When an opponent is resolved with a non-null `public_id`, scouting is triggered automatically. This pattern exists in three places: (1) admin manual connect (`/admin/opponents/{link_id}/resolve`), (2) admin GC search resolve, and (3) auto-resolver during `_discover_opponents()` in `run_member_sync`. Admin routes (manual connect, GC search) enqueue `run_scouting_sync` via FastAPI `BackgroundTasks`; the auto-resolver during `_discover_opponents()` calls `run_scouting_sync` directly (already executing inside a background job). No manual sync trigger needed. **Auto-sync resilience pattern**: Auto-sync triggers from admin actions (team add, merge) use a two-phase approach: `_prepare_auto_sync()` does DB-only work (running-job check, `crawl_jobs` creation) in a thread pool, then `_enqueue_from_prep()` calls `background_tasks.add_task()` from the async handler. Both phases are wrapped in try/except so auto-sync failures never prevent the primary operation from completing.
 
 ## Canonical Team Creation (Detail)
 
@@ -53,6 +53,38 @@ The filesystem path (`data/raw/{season_slug}/teams/{uuid}/`) is for file organiz
 ## Plays Pipeline
 
 `src/gamechanger/crawlers/plays.py` (crawler), `src/gamechanger/parsers/plays_parser.py` (pure parser, no DB dependency), `src/gamechanger/loaders/plays_loader.py` (thin DB writer). Parser/loader separation pattern: the parser is a pure function producing dataclasses from raw JSON, enabling unit testing without DB fixtures. The loader handles DB writes only. **Pitcher state tracking**: the parser maintains `current_pitcher_top` and `current_pitcher_bottom` state variables that persist across innings within the same half, updated on substitution events, with explicit pitcher references in `final_details` as ground truth override. **team_players asymmetric keys**: own team uses `public_id` slug, opponent uses UUID -- build a flat lookup dict across both. Entry points: `bb data crawl --crawler plays`, `bb data load --loader plays`. Cached data: `data/raw/{season}/teams/{gc_uuid}/plays/{event_id}.json`.
+
+## Plays Stage (Orchestration)
+
+`src/gamechanger/pipelines/plays_stage.py` is the canonical orchestration helper for the plays stage of the scouting pipeline. Contract:
+
+```python
+run_plays_stage(
+    client: GameChangerClient,
+    conn: sqlite3.Connection,
+    *,
+    perspective_team_id: int,
+    public_id: str,
+    game_ids: list[str],
+) -> PlaysStageResult
+```
+
+The helper does HTTP fetch (with pre-fetch DB skip per game), tempdir write, `PlaysLoader.load_all(...)`, and per-game `reconcile_game(...)` selection via post-load DB probe. `CredentialExpiredError` is caught internally; non-fatal in all caller paths.
+
+**Caller invariants** (also documented in the helper docstring):
+1. **`PRAGMA foreign_keys=ON` is the caller's responsibility.** The helper does NOT silently set it -- doing so would mask caller bugs.
+2. **The helper does NOT close the connection.** Caller owns the connection lifecycle. Spray-stage pattern is the precedent.
+3. **`game_perspectives` rows for every input `game_id` MUST already exist.** Populated by upstream boxscore load via `src/gamechanger/loaders/game_loader.py` (the only writer). The helper does NOT itself write to `game_perspectives`. Callers that bypass boxscore load will produce `plays` rows tagged with a perspective not yet recorded in `game_perspectives`, breaking perspective-provenance MUST #5.
+4. **Pass a clean connection.** The first per-game `PlaysLoader.commit()` will commit any uncommitted writes from earlier scout steps. Future callers that pass a dirty connection would have those writes silently committed.
+
+**Callers and operator-output surfaces**:
+- **CLI scout** (`_scout_live` in `src/cli/data.py`): `typer.echo` summary line per team (`Plays stage for {public_id}: loaded=... skipped=... errored=... reconcile_errors=... deferred=...`). On auth-expiry, append the actionable message naming `bb creds setup web` and confirming idempotent rerun.
+- **Web scout** (`run_scouting_sync` in `src/pipeline/trigger.py`): `logger.info` summary plus structured `crawl_jobs.error_message` UPDATE on partial failure. Format-string rule: comma-joined fragments with base `"plays: {loaded}/{attempted} loaded"`, optional `, {N} errored`, `, {N} reconcile errors`, `, {N} deferred (auth)` in that order.
+- **Report generator** (`src/reports/generator.py`): `logger.info` summary. Reports do not write to `crawl_jobs`.
+
+**Parity invariant**: both CLI scout and web scout MUST produce equivalent DB state on `plays`, `play_events`, and `reconciliation_discrepancies` for the same input. The parity test at `tests/test_scout_plays_parity.py` is the executable canary; it pins comparison column subsets against `migrations/001_initial_schema.sql` and uses per-test tmp_path SQLite files (NOT `:memory:`).
+
+**One mechanism, not three**: the framing collapses to a single helper invoked by three callers. There is no separate "report-time inline" path. If you find yourself wanting to write a new plays-stage orchestration -- a new caller, a new wrapper, a new inline patch -- invoke `run_plays_stage()` instead.
 
 ## Spray Chart Pipeline
 

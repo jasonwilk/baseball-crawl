@@ -1,7 +1,7 @@
 # E-229: Plays in `bb data scout` parity
 
 ## Status
-`READY`
+`COMPLETED`
 
 ## Overview
 Wire plays crawl + load + reconcile into `bb data scout` (CLI) and `run_scouting_sync` (web) so both paths produce equivalent data artifacts after their post-spray dedup sweep. Today, the standalone reports flow patches around this by running plays inline at report-generation time -- meaning dashboards see stats with plays-derived signals (FPS%, QAB%, pitches-per-PA -- all defined in `.claude/rules/key-metrics.md`) missing or stale. After this epic, scouting-pipeline-parity is restored as the canonical contract per CLAUDE.md, and the inline duplicate in `src/reports/generator.py` is deleted.
@@ -48,11 +48,11 @@ This epic was originally story **E-228-02** ("Wire plays into `bb data scout` --
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|--------------|----------|
-| E-229-01 | Implement `run_plays_stage` shared helper module | TODO | -- | software-engineer |
-| E-229-02 | Wire `run_plays_stage` into `_scout_live` (CLI) | TODO | E-229-01 | software-engineer |
-| E-229-03 | Wire `run_plays_stage` into `run_scouting_sync` (web) | TODO | E-229-01 | software-engineer |
-| E-229-04 | Migrate report generator to `run_plays_stage`; delete `_crawl_and_load_plays` | TODO | E-229-01 | software-engineer |
-| E-229-05 | Parity-invariant test `test_scout_plays_parity.py` | TODO | E-229-01, E-229-02, E-229-03 | software-engineer |
+| E-229-01 | Implement `run_plays_stage` shared helper module | DONE | -- | software-engineer |
+| E-229-02 | Wire `run_plays_stage` into `_scout_live` (CLI) | DONE | E-229-01 | software-engineer |
+| E-229-03 | Wire `run_plays_stage` into `run_scouting_sync` (web) | DONE | E-229-01 | software-engineer |
+| E-229-04 | Migrate report generator to `run_plays_stage`; delete `_crawl_and_load_plays` | DONE | E-229-01 | software-engineer |
+| E-229-05 | Parity-invariant test `test_scout_plays_parity.py` | DONE | E-229-01, E-229-02, E-229-03 | software-engineer |
 
 ## Dispatch Team
 - software-engineer
@@ -105,8 +105,8 @@ Internals:
 3. Catch any other `Exception` per game during HTTP fetch: log WARNING with `exc_info=True`, increment `errored`, continue.
 4. Write fetched JSON to `tempfile.TemporaryDirectory()` as `{game_id}.json`.
 5. Instantiate `PlaysLoader(conn, owned_team_ref=TeamRef(id=perspective_team_id, gc_uuid=None, public_id=public_id))` and call `loader.load_all(tmp_dir)`.
-6. **LoadResult mapping**: the loader returns aggregate `LoadResult(loaded, skipped, errors)`. Map `LoadResult.loaded` → `PlaysStageResult.loaded`, `LoadResult.skipped` → `PlaysStageResult.skipped`. Loader-reported errors (`LoadResult.errors`) are ADDED to `PlaysStageResult.errored` (which has already been incremented for HTTP-fetch failures in step 3). Loader errors and HTTP errors aggregate into the same field.
-7. **Reconcile selection (post-load DB probe)**: `LoadResult` is aggregate -- it does not expose per-game outcomes. To determine which games to reconcile, the helper performs a per-game DB probe AFTER `load_all()` returns: `SELECT 1 FROM plays WHERE game_id = ? AND perspective_team_id = ? LIMIT 1`. For each `game_id` where the probe returns a row, call `reconcile_game(conn, game_id, dry_run=False, perspective_team_id=perspective_team_id)`. Catch any reconcile exception per game; log WARNING; increment `reconcile_errors`. Continue. This pattern mirrors the existing inline implementation at `src/reports/generator.py:619-633`.
+6. **LoadResult mapping**: the loader returns aggregate `LoadResult(loaded, skipped, errors)`. `LoadResult.loaded` is a sum of plays inserted (record count) and is NOT mapped onto `PlaysStageResult.loaded` directly -- the helper computes its own `loaded` as a games count from a post-load DB probe (see step 7). `LoadResult.skipped` is added to `PlaysStageResult.skipped`, and pre-fetch-skipped games (already-loaded games detected before the HTTP call) are also folded into `PlaysStageResult.skipped`. Loader-reported errors (`LoadResult.errors`) are ADDED to `PlaysStageResult.errored` (which has already been incremented for HTTP-fetch failures in step 3). Loader errors and HTTP errors aggregate into the same field.
+7. **Loaded-games selection + reconcile selection (post-load DB probe)**: `LoadResult` is aggregate -- it does not expose per-game outcomes. After `load_all()` returns, the helper performs a per-game DB probe (`SELECT 1 FROM plays WHERE game_id = ? AND perspective_team_id = ? LIMIT 1`) over `plays_data.keys()` -- the games actually fetched this run, EXCLUDING pre-fetch-skipped games. The set of game_ids whose probe returns a row is the loaded set; `PlaysStageResult.loaded = len(loaded_game_ids)` (games count, matching the operator-facing format `"plays: {loaded}/{attempted} loaded"`). The helper then iterates the same loaded set and calls `reconcile_game(conn, game_id, dry_run=False, perspective_team_id=perspective_team_id)` per game. Catch any reconcile exception per game; log WARNING; increment `reconcile_errors`. Continue. Pre-fetch-skipped, deferred, and HTTP-errored games are already excluded from the loaded set because they never appear in `plays_data`.
 8. Return the populated `PlaysStageResult`. The helper does NOT write to `game_perspectives` -- see "`game_perspectives` upstream invariant" section below.
 
 ### Parameter naming
@@ -184,14 +184,14 @@ On auth-expiry, append: ` -- run `bb creds setup web` to refresh credentials and
 
 **Web (E-229-03)**: `logger.info` summary line after the helper returns. Plus, when `errored > 0` or `len(deferred_game_ids) > 0`, format a structured prefix per the rule below and execute `UPDATE crawl_jobs SET error_message = ? WHERE id = ?` directly. (The existing flow already wrote `error_message=None` via `_mark_job_terminal(... "completed", None)` at line 727 BEFORE plays ran -- per the Y2 retraction, that ordering is preserved; the wrapper's plays-failure surface is a follow-on `error_message` UPDATE, not a re-call of `_mark_job_terminal`.)
 
-**Format-string rule (applies to CLI auth-expiry append AND web error_message prefix)**: comma-joined fragments. The base fragment is always `"plays: {loaded}/{attempted} loaded"`. Append `, {errored} errored` if `errored > 0`. Append `, {reconcile_errors} reconcile errors` if `reconcile_errors > 0` (per Codex-F6 -- a reconcile-only failure means the boxscore vs plays didn't agree; coaching-value signal that operators should see). Append `, {N} deferred (auth)` if `len(deferred_game_ids) > 0`. Multiple fragments appear in this order: errored, reconcile_errors, deferred. Examples:
-- Clean: no prefix; `error_message=None` on web; no append on CLI.
+**Format-string rule (applies to web `crawl_jobs.error_message` prefix ONLY; CLI auth-expiry uses the literal append string above)**: comma-joined fragments. The base fragment is always `"plays: {loaded}/{attempted} loaded"`. Append `, {errored} errored` if `errored > 0`. Append `, {reconcile_errors} reconcile errors` if `reconcile_errors > 0` (per Codex-F6 -- a reconcile-only failure means the boxscore vs plays didn't agree; coaching-value signal that operators should see). Append `, {N} deferred (auth)` if `len(deferred_game_ids) > 0`. Multiple fragments appear in this order: errored, reconcile_errors, deferred. Examples:
+- Clean: no prefix; `error_message=None` on web.
 - Partial failure (load): `"plays: 12/14 loaded, 2 errored"`.
 - Reconcile-only failure: `"plays: 14/14 loaded, 3 reconcile errors"`.
 - Auth expiry: `"plays: 12/14 loaded, 2 deferred (auth)"`.
 - All three: `"plays: 8/14 loaded, 2 errored, 2 reconcile errors, 2 deferred (auth)"`.
 
-When the helper result is fully clean (all loaded, none deferred, none errored), the web wrapper issues no `error_message` UPDATE -- the existing `error_message=None` (set by `_mark_job_terminal` at line 727) stands. The CLI emits no auth-expiry append.
+**CLI vs. web format split**: the CLI's `typer.echo` summary line already surfaces every counter (`loaded`, `skipped`, `errored`, `reconcile_errors`, `deferred`) in `key=value` form, so the auth-expiry append does NOT re-emit a fragment body -- it appends only the actionable operator message (`bb creds setup web` + idempotency reassurance). The web wrapper has no equivalent verbose surface (logs are operator-readable but `crawl_jobs.error_message` is the durable record), so the fragment format is the durable summary on that path. When the helper result is fully clean (all loaded, none deferred, none errored), the web wrapper issues no `error_message` UPDATE -- the existing `error_message=None` (set by `_mark_job_terminal` at line 727) stands. The CLI emits no auth-expiry append.
 
 **Spray/dedup edge**: spray and post-spray dedup pre-existing silent-swallow behavior is unchanged -- those errors do NOT contribute to the `error_message`. Only the plays-stage portion is included in the structured prefix.
 
@@ -310,8 +310,14 @@ This epic is **immediately plannable**. No external trigger needs to clear:
 - 2026-04-29: SE follow-up post-iter-1 -- **Y2 status-timing fix RETRACTED**. SE's earlier Y2 push (move `_mark_job_terminal('completed')` + `_update_last_synced` from `src/pipeline/trigger.py:727-728` to AFTER all enrichment stages including plays) was retracted by SE on review. Quote: "PM's auth-error proposal is exactly right and I retract my earlier Y2 push... My earlier Y2 (move the status write to the end of all stages) was scope creep. PM's framing -- 'plays follows the additive-enrichment pattern that spray already established' -- keeps the change small. The pre-existing timing oddity (status marked before spray runs today) is not E-229's problem to fix." Team-lead authorized Option A (accept retraction). **Changes applied to revert Y2 incorporation**: removed "Y2 status-timing fix" Tech Notes subsection (replaced with "Web path sequencing (additive enrichment)"); removed Y2 references from epic Goals, Success Criteria, Background discovery decisions, and E-229-03 Description/AC-2/Notes/Files-to-Modify; renamed E-229-03 from "Wire `run_plays_stage` into `run_scouting_sync` (web) + status-timing fix" to "Wire `run_plays_stage` into `run_scouting_sync` (web)"; rewrote E-229-03 ACs to reflect that the web wrapper UPDATEs `crawl_jobs.error_message` directly after plays returns (rather than passing the prefix to `_mark_job_terminal`, which already ran at line 727 in the existing flow). The fix is preserved as follow-up idea #6 in epic Closure Tasks (per Codex-F1 split, idea filing moved out of E-229-05 AC-10 into the epic-level Closure Tasks section). Plus other SE follow-ups: explicit `tests/test_report_plays.py` reference added to E-229-04 AC-7 + Files-to-Modify; test file naming (`test_cli_data_scout_plays.py` vs `test_cli_scout_plays.py`) deferred to implementer per SE recommendation; F-FIELD-NAMING locked Option A (bare names) per SE confirmation, with explicit dataclass docstring requirement added to E-229-01 AC-1 to prevent future renames.
 
 - 2026-04-29: **Status set to READY**. Phase 4 Codex spec review complete; all incorporation deltas applied; consistency sweep clean. Epic ready for user authorization to dispatch.
+- 2026-04-29 (during dispatch, between E-229-02 and E-229-03): Tech Notes "Operator visibility" clarified. Original "Format-string rule (applies to CLI auth-expiry append AND web error_message prefix)" parenthetical contradicted the "On auth-expiry, append:" literal which named only the actionable operator message without comma-joined fragments. Code-reviewer flagged the ambiguity after E-229-02 implementation chose the literal reading (CR-approved). PM ruling: **Reading (a) -- format-string rule applies to web `crawl_jobs.error_message` ONLY**; CLI auth-expiry append uses the literal actionable string above. Rationale: the CLI's verbose `key=value` summary line already surfaces every counter the fragment body would name, so adding the fragment to the auth-expiry suffix would duplicate information; the web wrapper has no equivalent verbose surface, so the fragment format is the durable summary on that path. Tech Notes updated; no implementation changes required for E-229-02 (already aligned). E-229-03 inherits the unambiguous spec.
+- 2026-04-29: **Epic COMPLETED.** All five stories DONE. Final dispatch produced ~3,200 lines across 20 files (3,199 insertions). Deliverables: shared helper module `src/gamechanger/pipelines/plays_stage.py` with `PlaysStageResult` dataclass + four caller invariants documented; CLI scout (`_scout_live`) wired with bulk-mode iteration + verbose typer.echo summary including `reconcile_errors` (Codex-F6); web scout (`run_scouting_sync`) wired with structured `crawl_jobs.error_message` prefix + `_format_plays_error_message` helper + module-private `_run_plays_stage_for_sync` wrapper; report generator migrated -- `_crawl_and_load_plays` deleted (~120 lines), `_PLAYS_ACCEPT` constant removed, dead `except CredentialExpiredError` block deleted; parity-invariant test `tests/test_scout_plays_parity.py` encodes the CLAUDE.md scouting-pipeline-parity invariant for plays as an executable canary with column subsets pinned against `migrations/001_initial_schema.sql` and a diff-formatter helper. Four shared `tests/conftest.py` fixtures (`mock_gc_client_with_plays`, `seed_boxscore_for_plays`, `plays_json_factory`, `seed_scout_result_skeleton`) consumed by all five new test files.
+  - **Closure note (E-229-04 review)**: deletion of `_crawl_and_load_plays` slightly improves auth-expiry behavior in reports -- partial-loaded plays now appear in the report rather than being discarded via `plays_game_ids = []` in the deleted `except CredentialExpiredError` block. The shift is intentional; the contract is unchanged for the clean and full-failure cases. Benign behavioral improvement, not a regression. Flagged by code-reviewer as informational-only during E-229-04 review.
+  - **Closure note (out-of-spec change absorbed in E-229-04)**: SE applied a comment-only fix to `src/gamechanger/loaders/scouting_loader.py` to remove a dangling reference to the deleted `_crawl_and_load_plays`. PM approved as tightly-coupled cleanup forced by the deletion (same class as updating `_REMOVED_NAMES` in tests).
+  - **Closure note (Tech Notes clarification mid-dispatch)**: between E-229-02 and E-229-03, code-reviewer flagged a Tech Notes ambiguity in the format-string rule scope. PM ruled Reading (a) -- format-string rule applies to web `error_message` ONLY; CLI auth-expiry uses the literal actionable string. Tech Notes updated; no implementation revision required.
+  - Six follow-up ideas filed at closure per epic's "Closure Tasks (PM-owned)" section.
 
-### Review Scorecard
+### Review Scorecard (Planning)
 
 | Review Pass | Findings | Accepted | Dismissed |
 |---|---|---|---|
@@ -327,3 +333,22 @@ This epic is **immediately plannable**. No external trigger needs to clear:
 - One NO-OP/INFORMATIONAL: PM P3-1 (coaching-value gap check) -- documented in triage; no spec change.
 - Two material decisions reversed mid-incorporation: SE Y2 retraction (status-timing fix scope creep) and DE Q3 follow-up (helper does NOT write `game_perspectives`). Both captured as follow-up ideas in epic Closure Tasks.
 - Codex pass: 6 findings, 3 P1 + 3 P2, all ACCEPT. F1 routing-mismatch led to AC-10 split out of E-229-05 into epic-level Closure Tasks section (PM-owned).
+
+### Review Scorecard (Dispatch)
+
+| Review Pass | Findings | Accepted | Dismissed |
+|---|---|---|---|
+| Per-story CR -- E-229-01 | 3 | 2 | 1 |
+| Per-story CR -- E-229-02 | 3 | 2 | 1 |
+| Per-story CR -- E-229-03 | 3 | 3 | 0 |
+| Per-story CR -- E-229-04 | 1 | 0 | 1 |
+| Per-story CR -- E-229-05 | 3 | 0 | 3 |
+| Step 1a invariant audit | 0 | 0 | 0 |
+| **Total** | **13** | **7** | **6** |
+
+**Notes**:
+- The "and review" modifier was NOT specified at dispatch, so no Phase 4 (Codex post-dev review) rows.
+- Step 1a invariant audit returned **CLEAN** -- zero violations across all five grep audits (PlaysLoader instantiation, `_PLAYS_ACCEPT`, plays-endpoint HTTP, `reconcile_game` calls, `_crawl_and_load_plays` references). The "three callers, one orchestrator" invariant holds across the full codebase. Structural check, not finding-generating.
+- E-229-02 Round 1 finding #1 (Tech Notes spec ambiguity) was resolved at the spec layer (PM ruling Reading (a)) rather than in code -- counted as ACCEPT against the spec, not the implementation.
+- E-229-04's lone CR SHOULD FIX was framed by CR as "not a regression and not blocking" -- counted as DISMISS (informational only); the underlying behavioral note is captured in the closure entry above.
+- E-229-05's three CR SHOULD FIX items were interpretive/cosmetic and explicitly framed as non-blocking -- all dismissed.

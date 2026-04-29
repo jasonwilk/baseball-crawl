@@ -454,8 +454,8 @@ class ScoutingLoader:
         total = LoadResult()
         # Single TemporaryDirectory wraps the loop -- per-iteration temp files
         # are written inside it and cleaned up automatically when the context
-        # exits.  Mirrors the pattern in src/reports/generator.py
-        # _crawl_and_load_plays.
+        # exits.  Mirrors the pattern in src/gamechanger/pipelines/plays_stage.py
+        # `run_plays_stage`.
         with tempfile.TemporaryDirectory() as tmp_dir:
             tmp_root = Path(tmp_dir)
             for game_stream_id, boxscore_data in sorted(boxscores.items()):
