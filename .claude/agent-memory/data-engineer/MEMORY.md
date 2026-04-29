@@ -14,7 +14,7 @@
   - Three-digit prefix, underscore, descriptive slug, `.sql` extension
 - Migrations are append-only. Never edit an applied migration.
 - Track applied state in a `_migrations` metadata table
-- **Current state (verified 2026-03-26)**: `migrations/` contains 001–005 (`001_initial_schema.sql`, `002_add_user_role.sql`, `003_add_crawl_jobs.sql`, `004_add_team_season_year.sql`, `005_backfill_teams_public_id.sql`). Next migration: `006`.
+- **Current state (verified 2026-04-29)**: `migrations/` contains only `001_initial_schema.sql` — the consolidated schema rewrite from E-220 (old migrations 001–015 archived in `.project/archive/migrations-pre-E220/`). The E-220 rewrite folded all prior migrations into a single initial-schema file with `perspective_team_id` as a first-class concept on stat tables. Next migration: `002`.
 
 ## Schema Conventions
 
