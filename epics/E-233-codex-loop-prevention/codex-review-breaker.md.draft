@@ -1,0 +1,106 @@
+# Codex Review Breaker — Canonical Contract (PLANNING DRAFT)
+
+> **Status**: Planning draft. Story E-233-02 implementer formalizes this content into `.claude/rules/codex-review-breaker.md` by prepending a `paths:` frontmatter block (see Story 02 ACs for the exact frontmatter shape). Until that story executes, this file is NOT loaded into runtime context — it lives in the epic directory as a planning artifact only.
+
+## Purpose
+
+This rule is the single source of truth for the codex-review round counter and disposition log behavior. Both consumers — the codex-review skill's Re-run Circuit Breaker section and the implement skill's Phase 4b Step 1 mirror — follow this contract verbatim and reference it as the canonical definition. Drift between the two consumers MUST be resolved by aligning to this rule.
+
+The breaker exists to bound user-directly-invoked codex-review re-runs at 2 rounds per epic closure. The pattern this guards against (rounds 1-2 produce real findings; rounds 3+ drift toward stylistic regressions and may flip prior dispositions) is documented in the auto-memory file `feedback_iteration_diminishing_returns.md`.
+
+## State Files
+
+Two ephemeral skill-runtime state files live at the **epic worktree root**, NOT under `.claude/`:
+
+- `<epic-worktree-path>/.codex-review-rounds` — single integer, the codex round counter for this epic closure.
+- `<epic-worktree-path>/.codex-dispositions.jsonl` — append-only JSON-lines log, one entry per disposition.
+
+Both files are deliberately NOT in `.claude/` — they are skill-runtime state, not configuration, and they vanish with the worktree at closure.
+
+## Worktree-Path Resolution
+
+Both consumers MUST receive the epic-worktree path from the dispatch context provided by `implement/SKILL.md` Phase 2 Step 1. Neither consumer may glob-detect worktree directories on disk to discover one (an unrelated epic's worktree must not be picked up). If the dispatch context provides no path (standalone mode, no epic worktree), both consumers skip ALL counter and log behavior — see "Standalone Exemption" below.
+
+## Counter Scope
+
+The counter counts EVERY codex round invocation against this epic worktree, regardless of which call site triggered it:
+
+- An implement skill Phase 4b "and review" pass increments the counter by 1.
+- A user-direct `codex review` invocation (via the codex-review skill) increments the counter by 1.
+- Both share the same counter file. There is one counter per epic worktree, not per call site.
+
+Concretely: if a user runs "implement E-NNN and review" (round 1) and then runs `codex review` directly (round 2), the next direct `codex review` will be round 3 and hit the gate.
+
+## Increment Rules
+
+On entry to the codex-review skill's Headless Path Step 1, the codex-review skill's Prompt-Generation Path Step 1, OR the implement skill's Phase 4b Step 1 (precursor sub-step):
+
+1. Read counter file as `current_count` (default 0 if file does not exist).
+2. Compute `prospective_round = current_count + 1`.
+3. Gate-check: if `prospective_round >= 3` AND the user's invocation phrase does NOT contain the authorization phrase for this exact round value AND does NOT contain the reset phrase, hard-stop. **Do NOT write the counter on hard-stop** — leave the file at `current_count`.
+4. Otherwise, write `prospective_round` to the counter file. Skill proceeds.
+
+## Hard-Stop Message
+
+When the gate fires, present this message shape:
+
+> This is round N of codex review for E-NNN. The loop pattern (rounds 1-2 produce real findings, round 3+ tend toward stylistic regressions and may flip prior dispositions) is a known anti-pattern — see `feedback_iteration_diminishing_returns.md`. To proceed, the user must explicitly authorize: "authorize round N codex review" (with N matching this exact round number). To reset the counter to zero AND truncate the disposition log, say: "reset codex breaker". Otherwise stop.
+
+The message MUST include all of: the round number (substituted from `prospective_round`), the epic ID, a reference to the feedback memory file, both the authorization phrase verbatim, and the reset phrase verbatim.
+
+## Flow Control After Hard-Stop
+
+The main session presents the hard-stop message and ends the skill invocation. The user must re-invoke explicitly. Three re-invocation paths:
+
+1. **Authorization phrase** — User re-invokes with `authorize round N codex review` where N literally matches `prospective_round`: skill writes `prospective_round` to the counter file and proceeds. The authorization is one-time — round N+1 (the next invocation) will hit the gate again at `prospective_round = N+1`. If the user says "authorize round 5 codex review" while `prospective_round` is 3, the gate does NOT pass (mismatched N). The skill falls back to the hard-stop message naming the correct round number.
+2. **Reset phrase** — User re-invokes with `reset codex breaker`: skill zeroes the counter file AND truncates `.codex-dispositions.jsonl` (both state files reset together). Skill proceeds with `prospective_round = 1`.
+3. **Neither phrase** — Gate fires again, hard-stop again. The skill never advances on its own.
+
+## Disposition Log Writes
+
+Each line in `.codex-dispositions.jsonl` is a single JSON object:
+
+```
+{"round": 1, "finding_id": "R1-F1", "summary": "Routing mismatch on AC-10", "files": ["epics/E-229/E-229-05.md"], "disposition": "FIXED", "disposition_summary": "Moved to epic-level Closure Tasks"}
+```
+
+Field semantics:
+- `round`: integer, the codex round this finding was raised in (1-indexed). Sourced from the breaker counter value at the time the finding was first reported (not the disposition write time, in case rounds bump between).
+- `finding_id`: ALWAYS namespaced as `R{round}-{codex_id_or_ordinal}` — never the raw codex `F1`/`F2` directly. This guarantees globally unique finding IDs across rounds. The `{codex_id_or_ordinal}` part is the codex-assigned ID where present (e.g., codex's `F1` becomes `R1-F1` in round 1 and `R2-F1` in round 2). Where codex does not assign a stable ID, the skill substitutes `F{ordinal}` where ordinal is the 1-indexed position of the finding in the current round's codex output, counting ALL findings (assigned and unassigned).
+- `summary`: first line of the codex finding text, truncated to ~120 characters at a word boundary. Extracted from the codex output, NOT from PM's prose disposition.
+- `files`: array of FILE PATHS ONLY — line and column suffixes MUST be stripped at write time. If codex cites `src/foo.py:42` or `src/foo.py:42:7`, the writer strips the `:42` / `:42:7` suffix and stores `src/foo.py`. The stored value is a well-formed pathspec that downstream consumers (e.g., the diff-context resolution algorithm in TN-11 invoking `git -C ... diff main -- <files>`) can pass directly without further parsing. Stripping rule: if a token in the codex-cited path matches `<path>:<digits>(:<digits>)?$`, strip the trailing colon-digits group(s); otherwise preserve as-is. Deduplicate the resulting array (a single Codex finding may cite the same file at multiple line numbers — store the path once).
+- `disposition`: one of `FIXED`, `DISMISSED`, `FALSE POSITIVE`. Sourced from PM's disposition record.
+- `disposition_summary`: free-text reasoning for the disposition. Sourced from PM's prose disposition (the same text PM writes to epic History or the standalone remediation log).
+
+Write-timing by call site:
+- **Codex-review skill, Headless Path** (codex actually runs against a diff): at Step 6, after PM records dispositions, append one JSONL line per finding.
+- **Codex-review skill, Prompt-Generation Path** (no codex run, just assemble a prompt): increments counter on entry but writes NO disposition entries (no findings produced). This asymmetry is intentional — the counter measures user-driven invocation pressure regardless of whether the invocation runs codex headlessly or just generates a prompt for copy-paste.
+- **Implement Phase 4b mirror, headless-success path** (codex-review.sh ran successfully): writes disposition entries for findings produced by its own headless codex invocation, using the same Step-6-equivalent timing (after dispatch-team PM records dispositions in epic History).
+- **Implement Phase 4b mirror, prompt-gen-fallback path** (codex-review.sh timed out or failed → user pastes Codex output via the existing Phase 4b prompt-gen fallback): writes disposition entries for the pasted findings AFTER PM records dispositions on them, using the same TN-3 schema. The `disposition_summary` field captures the prompt-gen-fallback context where relevant (e.g., "Headless codex timed out at round N; finding entered via prompt-gen fallback"). The counter still advances on entry to Phase 4b regardless of which path executes — pasted findings are NOT a new round; they are the same round whose headless attempt failed.
+
+The log is append-only during a single epic closure. Truncation happens only on `reset codex breaker` (both the counter and the log are wiped together).
+
+## Reset Semantics
+
+`reset codex breaker` zeroes the counter file AND truncates `.codex-dispositions.jsonl`. Both state files reset together — the user explicitly wiped the slate, so prior dispositions are gone too. Skill proceeds with `prospective_round = 1`.
+
+## Resume Semantics
+
+When a dispatch is resumed in a reused worktree (per implement Phase 2 Step 1), the state files persist from the prior session. Behavior on resume: counter starts at the persisted value; new invocations increment from there. If the operator wants a clean slate, they invoke `reset codex breaker` before the next codex pass.
+
+## Standalone Exemption
+
+When the dispatch context provides no epic-worktree path (standalone codex-review invocations from the main checkout, no epic worktree to anchor state), both consumers skip ALL counter and log behavior. Standalone post-dev reviews are user-deliberate single-shot invocations, not closure-loop iterations — the failure mode the breaker guards against has only been observed during epic closure. If the loop pattern is observed in standalone mode in the future, this exemption can be revisited (the disposition log path for standalone would be `.project/research/codex-review-YYYY-MM-DD-dispositions.jsonl`).
+
+## Authorization and Reset Phrase Reference
+
+| Phrase | Effect |
+|--------|--------|
+| `authorize round N codex review` | N must literally match `prospective_round`. One-time bypass; counter advances and stays at N. Round N+1 hits the gate again. |
+| `reset codex breaker` | Zeros counter, truncates log. Skill proceeds with `prospective_round = 1`. |
+
+## Cross-References
+
+- `feedback_iteration_diminishing_returns.md` (auto-memory file) — codifies the pattern this rule enforces.
+- `.claude/skills/codex-review/SKILL.md` — Re-run Circuit Breaker section (consumer call site 1).
+- `.claude/skills/implement/SKILL.md` — Phase 4b Step 1 mirror (consumer call site 2).
