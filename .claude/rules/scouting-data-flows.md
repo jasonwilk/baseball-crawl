@@ -29,6 +29,7 @@ Two distinct flows produce scouting intelligence. Confusing them causes wrong au
 - Reports have no `team_opponents` dependency; generation takes any GC `public_id`
 - Reports are ephemeral: 14-day expiry, no versioning, no update-in-place
 - `src/reports/` is self-contained (`generator.py`, `renderer.py`); neither module is imported by the opponent flow
+- Reports may be LSB-perspective-aware via `reports.our_team_id` (nullable). When set, LSB-aware sections render (e.g., matchup strategy from E-228); when NULL, the report is opponent-only. See `.claude/rules/data-model.md` for column semantics and the int-only generator contract.
 
 **Routing note**: Stories modifying `src/reports/`, `src/api/routes/reports.py`, report handlers in `src/api/routes/admin.py`, or `src/api/templates/admin/reports.html` belong to the reports flow. Stories modifying opponent dashboard routes/templates or `src/gamechanger/loaders/scouting_loader.py` belong to the opponent flow.
 

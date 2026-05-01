@@ -26,6 +26,7 @@ from contextlib import closing
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 
 from src.api.db import (
     build_pitcher_profiles,
@@ -43,6 +44,7 @@ from src.gamechanger.loaders.scouting_spray_loader import ScoutingSprayChartLoad
 from src.gamechanger.pipelines import run_plays_stage
 from src.gamechanger.search import search_teams_by_name
 from src.gamechanger.url_parser import parse_team_url
+from src.reports.matchup import is_matchup_enabled
 from src.reports.renderer import render_report
 
 logger = logging.getLogger(__name__)
@@ -82,14 +84,22 @@ def _create_report_row(
     title: str,
     generated_at: str,
     expires_at: str,
+    *,
+    our_team_id: int | None = None,
 ) -> int:
-    """Insert a new reports row with status='generating'. Returns the row id."""
+    """Insert a new reports row with status='generating'. Returns the row id.
+
+    The ``our_team_id`` column (added in migration 002) is the LSB team whose
+    stats feed the matchup analysis section.  When None, the matchup section
+    is hidden and the report renders identically to pre-E-228 reports.
+    """
     cursor = conn.execute(
         """
-        INSERT INTO reports (slug, team_id, title, status, generated_at, expires_at)
-        VALUES (?, ?, ?, 'generating', ?, ?)
+        INSERT INTO reports
+            (slug, team_id, title, status, generated_at, expires_at, our_team_id)
+        VALUES (?, ?, ?, 'generating', ?, ?, ?)
         """,
-        (slug, team_id, title, generated_at, expires_at),
+        (slug, team_id, title, generated_at, expires_at, our_team_id),
     )
     conn.commit()
     return cursor.lastrowid
@@ -778,7 +788,11 @@ def _query_plays_team_stats(
     }
 
 
-def generate_report(gc_url: str) -> GenerationResult:
+def generate_report(
+    gc_url: str,
+    *,
+    our_team_id: int | None = None,
+) -> GenerationResult:
     """Generate a standalone scouting report for a GameChanger team.
 
     Executes the full pipeline per TN-3: parse URL, ensure team row, create
@@ -786,10 +800,38 @@ def generate_report(gc_url: str) -> GenerationResult:
 
     Args:
         gc_url: A GameChanger team URL, bare public_id, or bare UUID.
+        our_team_id: Optional LSB ``teams.id`` (INTEGER) whose stats feed the
+            matchup analysis section.  Must be a resolved integer -- callers
+            (CLI, admin POST handler) are responsible for resolving public_id
+            slugs or numeric strings to the integer id before invoking
+            ``generate_report``; this function does NOT accept strings.  When
+            None (the default), the matchup section is hidden entirely and
+            the report renders identically to pre-E-228 standalone scouting
+            reports (the v1 backward-compat guarantee -- see E-228-01 AC-4).
+
+    Feature flag:
+        ``FEATURE_MATCHUP_ANALYSIS`` (env var, see
+        :func:`src.reports.matchup.is_matchup_enabled`) gates the matchup
+        section.  When the flag is not enabled, ``our_team_id`` is silently
+        ignored (treated as None) regardless of what the caller passed; the
+        report row is persisted with ``our_team_id IS NULL`` and the
+        backward-compat path runs.
 
     Returns:
         A :class:`GenerationResult` with success/failure details.
     """
+    # Feature flag gate -- if the matchup feature is disabled, our_team_id is
+    # silently dropped per the documented contract above.  This keeps the
+    # report row's ``our_team_id`` column NULL and prevents downstream stories
+    # (matchup engine, renderer) from even seeing the value.
+    if our_team_id is not None and not is_matchup_enabled():
+        logger.info(
+            "FEATURE_MATCHUP_ANALYSIS disabled -- ignoring our_team_id=%d "
+            "and generating report without matchup section.",
+            our_team_id,
+        )
+        our_team_id = None
+
     # Step 1: Parse URL
     try:
         parsed = parse_team_url(gc_url)
@@ -876,6 +918,7 @@ def generate_report(gc_url: str) -> GenerationResult:
         report_id = _create_report_row(
             conn, slug, team_id, initial_title,
             generated_at, expires_at,
+            our_team_id=our_team_id,
         )
 
     # Snapshot team IDs before scouting load (for orphan cleanup)
@@ -1146,6 +1189,66 @@ def generate_report(gc_url: str) -> GenerationResult:
                     exc_info=True,
                 )
 
+        # ===== Matchup orchestration (E-228-14 AC-1) =====
+        # Runs AFTER reconciliation (the plays stage above). When
+        # ``our_team_id`` is set AND ``is_matchup_enabled()``, we build
+        # inputs, compute the deterministic engine output, and (non-fatally)
+        # attempt LLM enrichment. The renderer hides the section entirely
+        # when ``matchup_data`` is None (our_team_id None or suppress).
+        #
+        # Non-fatal LLM fallback: any exception from ``enrich_matchup`` is
+        # logged at WARNING and the renderer falls back to the bare
+        # ``MatchupAnalysis`` (degrade-by-hiding LLM-prose; deterministic
+        # fields render unchanged).  Suppress short-circuit: when
+        # ``compute_matchup`` returns ``confidence == "suppress"``, we
+        # do NOT call the LLM and pass ``matchup_data = None`` so the
+        # renderer hides the section entirely (AC-5).
+        matchup_data: Any = None
+        if our_team_id is not None and is_matchup_enabled():
+            try:
+                from src.reports.matchup import (
+                    build_matchup_inputs,
+                    compute_matchup,
+                )
+
+                with closing(get_connection()) as conn:
+                    matchup_inputs = build_matchup_inputs(
+                        conn,
+                        opponent_team_id=team_id,
+                        our_team_id=our_team_id,
+                        season_id=season_id,
+                        reference_date=date.fromisoformat(generated_at[:10]),
+                    )
+                matchup_analysis = compute_matchup(matchup_inputs)
+
+                if matchup_analysis.confidence != "suppress":
+                    matchup_data = matchup_analysis  # default: bare engine output
+                    from src.llm.openrouter import is_llm_available
+
+                    if is_llm_available():
+                        try:
+                            from src.reports.llm_matchup import enrich_matchup
+
+                            matchup_data = enrich_matchup(
+                                matchup_analysis, matchup_inputs,
+                            )
+                        except Exception:  # noqa: BLE001
+                            logger.warning(
+                                "Matchup LLM enrichment failed for "
+                                "public_id=%s; continuing with deterministic "
+                                "engine output only.",
+                                public_id,
+                                exc_info=True,
+                            )
+            except Exception:  # noqa: BLE001
+                logger.warning(
+                    "Matchup orchestration failed for public_id=%s; "
+                    "continuing without Game Plan section.",
+                    public_id,
+                    exc_info=True,
+                )
+                matchup_data = None
+
         # Render HTML
         team_info["record"] = record
         data = {
@@ -1170,6 +1273,7 @@ def generate_report(gc_url: str) -> GenerationResult:
             "starter_prediction": starter_prediction,
             "enriched_prediction": enriched_prediction,
             "show_predicted_starter": show_predicted_starter,
+            "matchup_data": matchup_data,
         }
         html = render_report(data)
 

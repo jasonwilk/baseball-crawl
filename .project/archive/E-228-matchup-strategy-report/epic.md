@@ -1,7 +1,7 @@
 # E-228: Matchup Strategy Report (v1)
 
 ## Status
-`READY`
+`COMPLETED`
 
 ## Overview
 Add a "Game Plan" section to standalone scouting reports when the operator selects an LSB "us" team. The section combines opponent scouting with LSB-aware context (top-3 opposing hitters with per-hitter pitch-attack cues, pull-tendency notes, stolen-base profile, first-inning scoring tendency, 3-bucket loss recipe, eligible opposing pitchers, eligible LSB pitchers). Uses the existing two-tier pattern (deterministic engine + Tier 2 LLM narrative) established by predicted-starter. Existing single-team scouting reports remain byte-identical when the matchup option is unselected.
@@ -67,10 +67,10 @@ This is **v1**. The original E-228 plan (5-reviewer consensus 2026-04-28) was ov
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-228-01 | Path C lift: schema + generator parameter + admin checkbox + CLI flag | TODO | None | - |
-| E-228-12 | Matchup engine + input builder: dataclasses, query helpers, `compute_matchup()`, `build_matchup_inputs()` | TODO | E-228-01 | - |
-| E-228-13 | LLM Tier 2 wrapper: `enrich_matchup()` with hallucination guardrail | TODO | E-228-12 | - |
-| E-228-14 | Generator orchestration + renderer + docs: wire matchup into `generate_report()`, single Game Plan section, coach + admin docs | TODO | E-228-01, E-228-12, E-228-13 | - |
+| E-228-01 | Path C lift: schema + generator parameter + admin checkbox + CLI flag | DONE | None | se |
+| E-228-12 | Matchup engine + input builder: dataclasses, query helpers, `compute_matchup()`, `build_matchup_inputs()` | DONE | E-228-01 | de |
+| E-228-13 | LLM Tier 2 wrapper: `enrich_matchup()` with hallucination guardrail | DONE | E-228-12 | se |
+| E-228-14 | Generator orchestration + renderer + docs: wire matchup into `generate_report()`, single Game Plan section, coach + admin docs | DONE | E-228-01, E-228-12, E-228-13 | se |
 
 ## Dispatch Team
 - software-engineer
@@ -130,3 +130,46 @@ Per `.claude/rules/context-layer-assessment.md` and `.claude/rules/documentation
 - 2026-04-28: Codex pass 8 fixes -- corrected stale sub-section numbering in E-228-14 AC-6 LLM-fallback bullets to match canonical 6-section order; specified data_notes rendering location for non-hitter sub-sections (italic gray line at bottom of corresponding sub-section per Option A; data_notes entries gain `subsection` field on MatchupAnalysis schema).
 - 2026-04-29: Status flipped to READY. The 2026-04-28 "returned to DRAFT pending re-spec-review" transition was resolved by Codex passes 2/4/5/7/8 on 2026-04-28; this entry closes the bookkeeping gap. Light-touch verification confirmed the active spec (epic + E-228-01/12/13/14) is internally consistent: section ordering pinned (Header → Exec summary → Game Plan → Predicted Starter → ...); suppress contract identical across epic Technical Notes / E-228-12 AC-13 / E-228-14 AC-5+T7 / E-228-13 AC-2 (`len(opponent_top_hitters) == 0 AND len(opponent_losses) == 0`); citation source-of-truth split consistent (LLM cites prose; renderer formats deterministic citations only for pull-tendency notes); `pull_tendency_prose` removed from LLM schema; Plays Dependency settled (E-229 NOT a blocker for v1). Codex pass 8 fixes verified applied across all 4 active spec files. Two stale CUT-stub assertions also corrected on 2026-04-29 (Path B alignment, no scope change): E-228-02 line 7 ("v1 of E-228 depends on E-229") replaced with current-state pointer to Codex pass 5 reversal; E-228-07 line 7 ("single coach-voice paragraph") replaced with multi-field JSON schema per Codex pass 7.
 - 2026-04-29: Review scorecard for E-228 (reconstructed from prior History entries). Pre-refinement Phase 3 holistic review (2026-04-27, line 122): 114 raw findings, 70 unique, 56 ACCEPT -- migration renumbering, routing-precedence fix, K/9→K/BB, bullpen_burn ≥4→≥3, per-day→last-N-games window, section placement verbatim ordering. Post-refinement Codex passes (all on 2026-04-28): pass 1 (line 125) -- 3 P1 + 2 P2 + 1 epic-level finding resolved (loss-recipe engine output narrowed to counts + grounding tuples; suppress trigger restated as in-engine condition; section order pinned; PullTendencyNote citation pattern uses raw fields; AC-T7 stale degraded branch removed; E-228-14 Agent Hint changed to software-engineer; multi-LSB-team disambiguation resolved; E-229 blocking justification added). Pass 2 (line 126) -- 3 propagation fixes localized to E-228-14 (AC-T7 trigger restated to match suppress contract; stale "Shift LF" + `supporting_stats: list[StatCitation]` example replaced with raw-field citation pattern; stale "docs-writer per Agent Hint" reference replaced with software-engineer text). Pass 4 (line 127) -- 3 fixes (E-229 blocking rationale corrected to sequencing-preferred; `opponent_roster_spray` field added to `MatchupInputs`; citation source-of-truth split codified). Pass 5 (line 128) -- 2 fixes (E-229 removed as blocker for v1; stale `pull_tendency_prose` removed from LLM output schema). Pass 7 (line 129) -- 4 fixes via comprehensive drift sweep (`game_plan_intro` rendering location + LLM-failure fallback for top-hitter rows; E-228-13 description rewritten to match multi-field LLM output schema; "early-vs-late game pattern" replaced with "first-inning scoring tendency" across active prose; description-paragraph staleness sweep across all 4 active spec files). Pass 8 (line 130) -- 3 fixes (stale sub-section numbering corrected in E-228-14 AC-6; `data_notes` rendering location specified for non-hitter sub-sections; `subsection` field added to MatchupAnalysis schema). Total post-refinement: 18 distinct findings resolved across 6 Codex passes; final state quiescent since pass 8.
+- 2026-04-30: Status flipped to ACTIVE. Dispatch started ("with review" modifier — Phase 4a CR integration review + Phase 4b Codex code review will run after all stories DONE).
+- 2026-04-30: Status flipped to COMPLETED. v1 ships an additive Game Plan section on standalone scouting reports when `our_team_id` is set. Six sub-sections in canonical order (top-3 hitters with one mental cue + full-roster pull-tendency notes / eligible opposing pitchers / stolen-base profile / first-inning scoring tendency / 3-bucket loss recipe / eligible LSB pitchers). End-to-end Path C delivered: migration `002_add_our_team_id_to_reports.sql` (single nullable column), `our_team_id` parameter on `generate_report()`, admin checkbox + dropdown, `--our-team` CLI flag, `FEATURE_MATCHUP_ANALYSIS` env gate. Two-tier engine (`src/reports/matchup.py` deterministic + `src/reports/llm_matchup.py` Tier 2 wrapper) mirrors predicted-starter; player-name round-trip hallucination guardrail in place. Suppress contract: section hidden with no placeholder when `our_team_id is None` OR engine returns `confidence="suppress"` (`len(opponent_top_hitters) == 0 AND len(opponent_losses) == 0`). 137 tests pass; pre-existing 49 `pitcher.gs` failures in `test_report_renderer.py` are unrelated to E-228 (flagged for separate cleanup). Closing review chain: per-story CR (4 stories, Round 1 + 2 each), Phase 4a integration review (Round 1 + 2 -- caught cross-story field-name drift that per-story tests had passed vacuously), Phase 4b Codex code review (4 findings, all remediated, no second round). Phase 4a fixes: 3 cross-story field-drift issues. Phase 4b fixes: 4 issues remediated.
+
+### Review Scorecard
+| Review Pass | Findings | Accepted | Dismissed |
+|---|---|---|---|
+| Per-story CR -- E-228-01 | 4 | 4 | 0 |
+| Per-story CR -- E-228-12 | 9 | 5 | 4 |
+| Per-story CR -- E-228-13 | 3 | 3 | 0 |
+| Per-story CR -- E-228-14 | 6 | 2 | 4 |
+| CR integration review (Phase 4a) | 12 | 9 | 3 |
+| Codex code review (Phase 4b) | 4 | 4 | 0 |
+| **Total** | **38** | **27** | **11** |
+
+### Documentation Assessment (per `.claude/rules/documentation.md`)
+- Trigger 1 (new feature/endpoint): YES -- matchup section.
+- Trigger 2 (architecture/deployment change): NO.
+- Trigger 3 (new/modified agent): NO.
+- Trigger 4 (database schema change): YES -- migration 002 (`reports.our_team_id`).
+- Trigger 5 (epic changes how system/users interact): YES -- new operator + coach surface.
+
+**Outcome: COVERED.** Documentation already shipped in story E-228-14 (`docs/coaching/matchup-report.md` for coaches, `docs/admin/matchup-report-generation.md` for operators). Phase 4a/4b remediations updated `matchup-report-generation.md` with `FEATURE_MATCHUP_STRICT` env section, admin form async correction, and first-inning denominator note. No additional docs-writer dispatch required.
+
+### Context-Layer Assessment (per `.claude/rules/context-layer-assessment.md`)
+- Trigger 1 (new convention/pattern/constraint): **YES**. The "Two-Tier Enrichment Pattern" now has TWO instances (predicted-starter from E-212 + matchup from E-228). `architecture-subsystems.md` already mentions the pattern; claude-architect should extend that section to list matchup as the second instance and codify the wrapper signature `(Analysis, Inputs)` together.
+- Trigger 2 (architectural decision with ongoing implications): **YES**. `reports.our_team_id` adds an "us-team-aware" surface to standalone reports -- the first non-opponent context plumbed through report generation. Should be noted in CLAUDE.md or `architecture-subsystems.md` so future report-extending epics know the column exists and the contract (nullable; admin checkbox / `--our-team` CLI feeds it; renderer hides matchup section when None).
+- Trigger 3 (footgun/failure mode/boundary discovered): **YES**. Phase 4a integration review caught cross-story field-name drift between E-228-12 (producing dataclass keys), E-228-14 (renderer template), and per-story tests (using consuming module's expectations rather than producing module's real keys). Per-story tests passed vacuously because fixtures and template both used the wrong keys. Worth codifying as a code-reviewer rubric guard: "When tests exercise a contract spanning multiple modules, verify fixture keys match the producing module's emitted shape, not the consuming module's expected shape."
+- Trigger 4 (agent behavior/routing/coordination change): NO.
+- Trigger 5 (domain knowledge discovered): NO -- coach asks captured in epic Background.
+- Trigger 6 (new CLI command/workflow/operational procedure): NO -- `--our-team` is a flag on existing `bb report generate`, not a new command or workflow.
+
+**Outcome: claude-architect dispatch REQUIRED before archive.** Three triggers fired (1, 2, 3). Scope: extend "Two-Tier Enrichment Pattern" in `architecture-subsystems.md` to list matchup; document the `our_team_id` report-context surface; codify the cross-module-contract test guard in code-reviewer rubric.
+
+### Ideas Backlog Review
+No PROMOTED-eligible CANDIDATEs unblocked specifically by E-228 closure. Follow-up observations recorded:
+- **Catcher CS-against keyword scan**: Currently derived from `raw_template` text. Could be replaced with a structured field once GC plays loader exposes catcher attribution. Low priority; not worth a new IDEA file yet.
+- **Multi-template TL;DR / 14-constant tuning / recent-form arrow / decision_unknown 6th bucket**: Already deferred to E-230 (DRAFT).
+- **Visual polish / print stylesheet / mobile responsive / AVOID inline sub-bullet typography**: Already deferred to E-231 (DRAFT).
+- **Dashboard parity (lighter matchup variant)**: Already deferred to E-232 (DRAFT).
+- **Pre-existing 49 `pitcher.gs` failures in `test_report_renderer.py`**: Unrelated to E-228; flag as separate cleanup item (no IDEA file created, but PM memory notes it for next backlog grooming).
+
+### Vision Signals
+Reviewed `docs/vision-signals.md`. The 2026-04-27 coach brainstorm signal (full menu of high-value coach deliverables) explicitly seeded several E-228-adjacent items now partially or fully delivered: stolen-base tendencies, first-inning scoring tendency, loss recipe (delivered in v1); recent-form overlay, head-to-head history, pitcher fatigue proxy (deferred to E-230 / future). No new signals to capture from closure. Recommend the user "curate the vision" at next pause to process the 32 unprocessed signals (last curation 2026-03-13).

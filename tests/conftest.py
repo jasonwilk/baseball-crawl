@@ -12,11 +12,17 @@ import pytest
 from src.gamechanger.client import GameChangerClient
 from src.gamechanger.crawlers.scouting import ScoutingCrawlResult
 
-_SCHEMA_PATH = Path(__file__).resolve().parents[1] / "migrations" / "001_initial_schema.sql"
+_MIGRATIONS_DIR = Path(__file__).resolve().parents[1] / "migrations"
+_SCHEMA_PATH = _MIGRATIONS_DIR / "001_initial_schema.sql"
 
 
 def load_real_schema(conn: sqlite3.Connection) -> None:
     """Load the production schema into ``conn`` with FK enforcement enabled.
+
+    Applies every ``NNN_*.sql`` migration file in numeric order so the loaded
+    schema mirrors what ``run_migrations`` would produce on a fresh DB.  The
+    helper does NOT touch the ``_migrations`` tracking table -- callers that
+    need migration provenance should use ``run_migrations`` instead.
 
     SQLite's ``executescript`` implicitly commits and resets connection state,
     so setting ``PRAGMA foreign_keys=ON`` on the connection beforehand has no
@@ -25,8 +31,10 @@ def load_real_schema(conn: sqlite3.Connection) -> None:
     migration. See ``.claude/rules/migrations.md`` ("executescript() and
     PRAGMAs") for the full rationale.
     """
-    sql = _SCHEMA_PATH.read_text()
-    conn.executescript("PRAGMA foreign_keys=ON;\n" + sql)
+    migration_files = sorted(_MIGRATIONS_DIR.glob("[0-9][0-9][0-9]_*.sql"))
+    for path in migration_files:
+        sql = path.read_text()
+        conn.executescript("PRAGMA foreign_keys=ON;\n" + sql)
 
 
 def pytest_configure(config):

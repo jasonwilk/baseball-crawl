@@ -2564,12 +2564,27 @@ def get_player_spray_events(
 def get_players_spray_events_batch(
     player_ids: list[str],
     season_id: str,
+    *,
+    perspective_team_id: int | None = None,
+    db: sqlite3.Connection | None = None,
 ) -> dict[str, list[dict[str, Any]]]:
     """Return raw offensive spray events for multiple players in a single query.
 
     Args:
         player_ids: List of GC player UUIDs.
         season_id:  Season slug to filter events.
+        perspective_team_id: When provided, restricts the query to spray
+            events captured under that team's perspective (i.e., crawled
+            from that team's API view).  Required to avoid cross-team
+            contamination when a player appears on multiple teams in the
+            same season -- without this, querying a single ``player_id``
+            returns events from every team that player batted for.  When
+            ``None`` (legacy/dashboard call sites that already restrict
+            via the ``perspective_team_id = team_id`` self-join), the
+            function falls back to the self-join behavior.
+        db: Optional pre-existing connection (used by the matchup
+            input builder which manages its own connection).  When
+            ``None``, opens a new connection via ``get_connection()``.
 
     Returns:
         Dict mapping player_id to list of event dicts (x, y, play_type, play_result).
@@ -2578,17 +2593,32 @@ def get_players_spray_events_batch(
     if not player_ids:
         return {}
     placeholders = ",".join("?" for _ in player_ids)
+    params: list[Any] = [*player_ids, season_id]
+    if perspective_team_id is not None:
+        perspective_clause = "AND perspective_team_id = ? "
+        params.append(perspective_team_id)
+    else:
+        # Legacy fallback: scope events to the team the player record
+        # belongs to (the original behavior before this parameter was
+        # added).  Callers that need strict cross-team isolation should
+        # pass ``perspective_team_id`` explicitly.
+        perspective_clause = "AND perspective_team_id = team_id "
     query = (
         f"SELECT player_id, x, y, play_type, play_result FROM spray_charts "
         f"WHERE player_id IN ({placeholders}) "
         f"AND chart_type = 'offensive' AND season_id = ? "
-        f"AND perspective_team_id = team_id "
+        f"{perspective_clause}"
         f"ORDER BY player_id"
     )
+    own_conn = db is None
     try:
-        with closing(get_connection()) as conn:
+        conn = db if db is not None else get_connection()
+        try:
             conn.row_factory = sqlite3.Row
-            rows = conn.execute(query, [*player_ids, season_id]).fetchall()
+            rows = conn.execute(query, params).fetchall()
+        finally:
+            if own_conn:
+                conn.close()
         result: dict[str, list[dict[str, Any]]] = {}
         for row in rows:
             pid = row["player_id"]
@@ -2845,3 +2875,665 @@ def check_connection() -> bool:
     except sqlite3.Error:
         logger.exception("Database health check failed")
         return False
+
+
+# ---------------------------------------------------------------------------
+# Matchup-section helpers (E-228-12)
+#
+# These helpers feed the deterministic matchup engine in
+# ``src/reports/matchup.py``.  ``build_matchup_inputs()`` is the single
+# input-builder that calls each helper and collects the results into a
+# ``MatchupInputs`` dataclass.  Existing helpers reused (no code change) by
+# the matchup input builder include: ``get_team_games``,
+# ``get_pitching_history``, ``build_pitcher_profiles``,
+# ``get_pitching_workload``, ``get_player_spray_events``, and
+# ``get_players_spray_events_batch``.  See the matchup story (E-228-12) for
+# the perspective-provenance contract that governs every per-player
+# query in this module.
+# ---------------------------------------------------------------------------
+
+
+def get_top_hitters(
+    team_id: int,
+    season_id: str,
+    *,
+    limit: int = 5,
+    min_pa: int = 10,
+    db: sqlite3.Connection | None = None,
+) -> list[dict[str, Any]]:
+    """Return the top-N hitters for a team/season ranked by OPS desc.
+
+    Joins ``player_season_batting`` (the GC season-stats aggregate; no
+    perspective_team_id column -- perspective is implicit via team_id since
+    the row is unique on ``(player_id, team_id, season_id)``) with
+    ``players`` and ``team_rosters`` to expose display name and jersey
+    number.  Computes OBP, SLG, and OPS in SQL with a zero-AB / zero-PA
+    guard.  Tie-breaker: higher PA wins (more sample) so the ordering is
+    deterministic.
+
+    Perspective: read against the team's own ``player_season_batting``
+    rows.  Suitable for both opponent and own-team queries -- the caller
+    chooses by passing the appropriate ``team_id``.
+
+    Reads from: ``player_season_batting`` (pa, ab, h, doubles, triples,
+    hr, bb, hbp, so, sb, tb), ``players`` (first_name, last_name),
+    ``team_rosters`` (jersey_number).
+
+    Args:
+        team_id: INTEGER PK of the team.
+        season_id: Season slug (e.g. ``"2026-spring-hs"``).
+        limit: Maximum number of hitters to return.  Default 5.
+        min_pa: Minimum plate appearances to qualify.  Default 10.
+        db: Optional pre-existing connection (used by the report
+            generator which manages its own connection).  When ``None``,
+            opens a new connection via ``get_connection()``.
+
+    Returns:
+        List of dicts with keys: ``player_id``, ``name``,
+        ``jersey_number``, ``pa``, ``ab``, ``h``, ``hr``, ``bb``, ``so``,
+        ``hbp``, ``sb``, ``cs`` (always 0 -- season batting cs is sourced
+        from the same table; absent values become 0), ``obp``, ``slg``,
+        ``ops`` (all rates as Python floats; 0.0 when undefined).  Sorted
+        by ops DESC, pa DESC, player_id ASC.  Returns an empty list on
+        DB error.
+    """
+    query = """
+        SELECT
+            psb.player_id,
+            p.first_name || ' ' || p.last_name AS name,
+            tr.jersey_number,
+            COALESCE(psb.pa, 0)      AS pa,
+            COALESCE(psb.ab, 0)      AS ab,
+            COALESCE(psb.h, 0)       AS h,
+            COALESCE(psb.doubles, 0) AS doubles,
+            COALESCE(psb.triples, 0) AS triples,
+            COALESCE(psb.hr, 0)      AS hr,
+            COALESCE(psb.bb, 0)      AS bb,
+            COALESCE(psb.hbp, 0)     AS hbp,
+            COALESCE(psb.so, 0)      AS so,
+            COALESCE(psb.sb, 0)      AS sb,
+            COALESCE(psb.tb, 0)      AS tb_stored,
+            -- Computed rates with zero guards.
+            CASE
+                WHEN COALESCE(psb.pa, 0) = 0 THEN 0.0
+                ELSE CAST(
+                    COALESCE(psb.h, 0) + COALESCE(psb.bb, 0)
+                    + COALESCE(psb.hbp, 0)
+                AS REAL) / psb.pa
+            END AS obp,
+            CASE
+                WHEN COALESCE(psb.ab, 0) = 0 THEN 0.0
+                ELSE CAST(
+                    COALESCE(
+                        psb.tb,
+                        COALESCE(psb.h, 0)
+                        - COALESCE(psb.doubles, 0)
+                        - COALESCE(psb.triples, 0)
+                        - COALESCE(psb.hr, 0)
+                        + COALESCE(psb.doubles, 0) * 2
+                        + COALESCE(psb.triples, 0) * 3
+                        + COALESCE(psb.hr, 0) * 4
+                    )
+                AS REAL) / psb.ab
+            END AS slg,
+            -- OPS = OBP + SLG.  Aliased so the ORDER BY does not have
+            -- to repeat the (sizable) OBP/SLG arithmetic.
+            (
+                CASE
+                    WHEN COALESCE(psb.pa, 0) = 0 THEN 0.0
+                    ELSE CAST(
+                        COALESCE(psb.h, 0) + COALESCE(psb.bb, 0)
+                        + COALESCE(psb.hbp, 0)
+                    AS REAL) / psb.pa
+                END
+                +
+                CASE
+                    WHEN COALESCE(psb.ab, 0) = 0 THEN 0.0
+                    ELSE CAST(
+                        COALESCE(
+                            psb.tb,
+                            COALESCE(psb.h, 0)
+                            - COALESCE(psb.doubles, 0)
+                            - COALESCE(psb.triples, 0)
+                            - COALESCE(psb.hr, 0)
+                            + COALESCE(psb.doubles, 0) * 2
+                            + COALESCE(psb.triples, 0) * 3
+                            + COALESCE(psb.hr, 0) * 4
+                        )
+                    AS REAL) / psb.ab
+                END
+            ) AS ops
+        FROM player_season_batting psb
+        JOIN players p ON p.player_id = psb.player_id
+        LEFT JOIN team_rosters tr
+            ON tr.player_id = psb.player_id
+            AND tr.team_id = psb.team_id
+            AND tr.season_id = psb.season_id
+        WHERE psb.team_id = :team_id
+          AND psb.season_id = :season_id
+          AND COALESCE(psb.pa, 0) >= :min_pa
+        ORDER BY ops DESC, pa DESC, psb.player_id ASC
+        LIMIT :limit
+    """
+    params = {
+        "team_id": team_id,
+        "season_id": season_id,
+        "min_pa": min_pa,
+        "limit": limit,
+    }
+    own_conn = db is None
+    try:
+        conn = db if db is not None else get_connection()
+        try:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(query, params).fetchall()
+        finally:
+            if own_conn:
+                conn.close()
+    except sqlite3.Error:
+        logger.exception(
+            "Failed to fetch top hitters for team %d season %s",
+            team_id,
+            season_id,
+        )
+        return []
+
+    result: list[dict[str, Any]] = []
+    for row in rows:
+        d = dict(row)
+        d.pop("tb_stored", None)
+        d["obp"] = float(d.get("obp") or 0.0)
+        d["slg"] = float(d.get("slg") or 0.0)
+        d["ops"] = float(d.get("ops") or 0.0)
+        result.append(d)
+    return result
+
+
+def get_hitter_pitch_tendencies(
+    player_id: str,
+    season_id: str,
+    perspective_team_id: int,
+    *,
+    db: sqlite3.Connection | None = None,
+) -> dict[str, Any]:
+    """Return per-batter pitch tendency aggregates from plays + play_events.
+
+    Aggregates pitch-level data from ``play_events`` joined to the parent
+    ``plays`` row to derive batter behaviour metrics: first-pitch swing
+    rate, swing rates by count bucket (0-0, 0-1, 1-0, two-strike, full
+    count), and an approximate chase rate (swings outside the strike
+    zone -- approximated as swings-and-miss + foul on non-strike events;
+    GC plays do not expose true zone data, so this is a heuristic
+    proxy).
+
+    Perspective: filters strictly by ``plays.perspective_team_id`` --
+    cross-perspective rows for the same play (a play also loaded under
+    the opponent's perspective) are NOT counted.  ``play_events`` rows
+    inherit perspective via FK to ``plays``.
+
+    Reads from: ``plays`` (id, batter_id, perspective_team_id,
+    season_id, is_first_pitch_strike), ``play_events`` (play_id,
+    pitch_result, is_first_pitch).
+
+    Args:
+        player_id: GC player UUID (the batter).
+        season_id: Season slug to scope the query.
+        perspective_team_id: INTEGER PK of the perspective team
+            (typically the batter's own team).  Required.
+        db: Optional pre-existing connection.
+
+    Returns:
+        Dict with keys: ``total_pa_with_plays``, ``fps_seen`` (count of
+        plays where first pitch was reached), ``fps_swing_count``
+        (first-pitch swings -- ``in_play``, ``foul``, ``foul_tip``,
+        ``strike_swinging``), ``two_strike_pa`` (count of plays whose
+        last pitch event before in_play/walk/strikeout reached
+        two strikes), ``full_count_pa`` (count of plays reaching 3-2),
+        ``chase_rate`` (float, 0.0-1.0; swing-and-miss + foul on pitches
+        outside-zone proxy), ``swing_rate_by_count`` (dict keyed by
+        ``"0-0"``, ``"0-1"``, ``"1-0"``, ``"two_strikes"``, ``"full"``;
+        each value a float in 0.0-1.0).  Returns the same dict shape
+        with zeros / empty sub-dict when no plays exist.
+    """
+    empty: dict[str, Any] = {
+        "total_pa_with_plays": 0,
+        "fps_seen": 0,
+        "fps_swing_count": 0,
+        "two_strike_pa": 0,
+        "full_count_pa": 0,
+        "chase_rate": 0.0,
+        "swing_rate_by_count": {},
+    }
+    own_conn = db is None
+    try:
+        conn = db if db is not None else get_connection()
+        try:
+            conn.row_factory = sqlite3.Row
+
+            # Fetch all plays for this batter under the requested
+            # perspective, with their pitch events ordered chronologically.
+            plays_rows = conn.execute(
+                """
+                SELECT id, is_first_pitch_strike
+                FROM plays
+                WHERE batter_id = ?
+                  AND season_id = ?
+                  AND perspective_team_id = ?
+                """,
+                (player_id, season_id, perspective_team_id),
+            ).fetchall()
+            if not plays_rows:
+                return empty
+
+            play_ids = [r["id"] for r in plays_rows]
+            placeholders = ",".join("?" for _ in play_ids)
+            events_rows = conn.execute(
+                f"""
+                SELECT play_id, event_order, pitch_result, is_first_pitch
+                FROM play_events
+                WHERE play_id IN ({placeholders})
+                  AND event_type = 'pitch'
+                ORDER BY play_id ASC, event_order ASC
+                """,
+                play_ids,
+            ).fetchall()
+        finally:
+            if own_conn:
+                conn.close()
+    except sqlite3.Error:
+        logger.exception(
+            "Failed to fetch hitter pitch tendencies for player %s",
+            player_id,
+        )
+        return empty
+
+    # Group pitch events per play in chronological order.
+    events_by_play: dict[int, list[sqlite3.Row]] = {}
+    for ev in events_rows:
+        events_by_play.setdefault(ev["play_id"], []).append(ev)
+
+    # Pitch results that count as a "swing" by the batter.
+    swing_results = {"strike_swinging", "foul", "foul_tip", "in_play"}
+    # Pitch results that count as strikes for the count progression.
+    strike_results = {"strike_looking", "strike_swinging", "foul", "foul_tip"}
+    # Pitch results that are pure balls.
+    ball_results = {"ball"}
+    # Pitch results that arguably indicate a swing on a non-zone pitch
+    # (proxy for chase): swing-and-miss + foul -- a contact attempt that
+    # didn't put the ball into a productive PA outcome.  This is a
+    # heuristic since GC plays do not expose zone data.
+    chase_swing_results = {"strike_swinging", "foul", "foul_tip"}
+
+    total_pa_with_plays = len(plays_rows)
+    fps_seen = 0
+    fps_swing_count = 0
+    two_strike_pa = 0
+    full_count_pa = 0
+    swings_by_count: dict[str, list[int]] = {
+        "0-0": [0, 0], "0-1": [0, 0], "1-0": [0, 0],
+        "two_strikes": [0, 0], "full": [0, 0],
+    }
+    # Chase: swings on non-strike-zone pitches.  We approximate "non-zone"
+    # by counting swings on events whose pitch_result is not ``in_play``
+    # (no productive contact) and not ``ball``.  Total chase
+    # opportunities = pitches the batter swung at.
+    chase_swings = 0
+    chase_misses = 0
+
+    for play_id, events in events_by_play.items():
+        balls = 0
+        strikes = 0
+        reached_two_strikes = False
+        reached_full = False
+        for ev in events:
+            pr = ev["pitch_result"]
+            count_key: str | None = None
+            if balls == 0 and strikes == 0:
+                count_key = "0-0"
+            elif balls == 1 and strikes == 0:
+                count_key = "1-0"
+            elif balls == 0 and strikes == 1:
+                count_key = "0-1"
+            elif strikes == 2 and balls == 3:
+                count_key = "full"
+            elif strikes == 2:
+                count_key = "two_strikes"
+
+            if count_key is not None:
+                swings_by_count[count_key][1] += 1
+                if pr in swing_results:
+                    swings_by_count[count_key][0] += 1
+
+            if ev["is_first_pitch"]:
+                fps_seen += 1
+                if pr in swing_results:
+                    fps_swing_count += 1
+
+            # Chase proxy: swings on non-in-play pitches that miss/foul.
+            if pr in chase_swing_results:
+                chase_swings += 1
+                if pr in {"strike_swinging", "foul_tip"}:
+                    chase_misses += 1
+
+            # Advance the count for the next pitch.
+            if pr in strike_results and strikes < 2:
+                strikes += 1
+            elif pr in strike_results and strikes == 2:
+                # Foul with two strikes: count stays.  Strike_looking /
+                # strike_swinging at two strikes means strikeout -- the
+                # PA ends; further events are not pitches.
+                pass
+            elif pr in ball_results:
+                balls += 1
+            # in_play, foul_tip etc. fall through without changing the
+            # count (PA usually ends on in_play; we keep iterating to
+            # let downstream events update PA-level flags).
+
+            if strikes >= 2:
+                reached_two_strikes = True
+            if strikes == 2 and balls == 3:
+                reached_full = True
+
+        if reached_two_strikes:
+            two_strike_pa += 1
+        if reached_full:
+            full_count_pa += 1
+
+    swing_rate_by_count: dict[str, float] = {}
+    for k, (sw, total) in swings_by_count.items():
+        if total > 0:
+            swing_rate_by_count[k] = round(sw / total, 4)
+
+    chase_rate = (chase_misses / chase_swings) if chase_swings > 0 else 0.0
+
+    return {
+        "total_pa_with_plays": total_pa_with_plays,
+        "fps_seen": fps_seen,
+        "fps_swing_count": fps_swing_count,
+        "two_strike_pa": two_strike_pa,
+        "full_count_pa": full_count_pa,
+        "chase_rate": round(chase_rate, 4),
+        "swing_rate_by_count": swing_rate_by_count,
+    }
+
+
+def get_sb_tendency(
+    team_id: int,
+    season_id: str,
+    *,
+    perspective_team_id: int,
+    db: sqlite3.Connection | None = None,
+) -> dict[str, Any]:
+    """Return stolen-base profile for a team and the team's catcher CS-against rate.
+
+    Aggregates SB attempts/successes from boxscore-derived
+    ``player_game_batting`` (offensive SB) and infers caught-stealing
+    events from ``play_events.raw_template`` strings ("caught stealing"
+    keyword) so the v1 helper can serve both signals from existing
+    tables.  The catcher's CS-against rate is derived from
+    ``player_game_pitching`` rows on the *opposing* team plus the
+    ``play_events`` caught-stealing markers on the team's defensive
+    plays -- i.e. plays where the team is NOT the batting team.
+
+    Perspective: filters all per-player tables by
+    ``perspective_team_id`` so cross-perspective rows for the same
+    real-world game (loaded under another team's perspective) do not
+    contaminate the count.
+
+    Reads from: ``player_game_batting`` (sb, cs), ``play_events``
+    (raw_template), ``plays`` (batting_team_id, perspective_team_id,
+    season_id), ``games`` (game_id, season_id).
+
+    Args:
+        team_id: INTEGER PK of the offensive team (whose SB% is computed).
+        season_id: Season slug to scope the query.
+        perspective_team_id: INTEGER PK of the perspective team for
+            both offensive and defensive aggregates.  For matchup v1
+            this is the same as ``team_id`` (the opposing team's own
+            perspective).  Required.
+        db: Optional pre-existing connection.
+
+    Returns:
+        Dict with keys:
+        - ``sb_attempts``: int -- offensive SB + CS attempts (current season).
+        - ``sb_successes``: int -- offensive successful steals.
+        - ``sb_success_rate``: float (0.0-1.0); 0.0 when no attempts.
+        - ``catcher_cs_against_attempts``: int -- baserunner steal
+          attempts faced by THIS team (defensive view).
+        - ``catcher_cs_against_count``: int -- successful caught-stealing
+          events recorded against opposing baserunners.
+        - ``catcher_cs_against_rate``: float (0.0-1.0); 0.0 when no
+          attempts.
+    """
+    own_conn = db is None
+    try:
+        conn = db if db is not None else get_connection()
+        try:
+            conn.row_factory = sqlite3.Row
+
+            # Offensive SB / CS attempts -- aggregated over per-game
+            # boxscore rows under the opponent's own perspective.
+            off_row = conn.execute(
+                """
+                SELECT
+                    COALESCE(SUM(sb), 0) AS sb,
+                    COALESCE(SUM(cs), 0) AS cs
+                FROM player_game_batting pgb
+                JOIN games g ON g.game_id = pgb.game_id
+                WHERE pgb.team_id = ?
+                  AND pgb.perspective_team_id = ?
+                  AND g.season_id = ?
+                """,
+                (team_id, perspective_team_id, season_id),
+            ).fetchone()
+            sb_successes = int(off_row["sb"] or 0) if off_row else 0
+            cs_offensive = int(off_row["cs"] or 0) if off_row else 0
+            sb_attempts = sb_successes + cs_offensive
+            sb_success_rate = (
+                sb_successes / sb_attempts if sb_attempts > 0 else 0.0
+            )
+
+            # Defensive catcher CS-against -- counted from
+            # ``play_events.raw_template`` strings on plays where
+            # ``plays.batting_team_id != team_id`` (this team is on
+            # defense).  ``"caught stealing"`` marks a successful CS;
+            # ``"steals"`` marks a successful steal against this team.
+            # We require ``plays.perspective_team_id = perspective_team_id``
+            # so cross-perspective duplicate rows do not contaminate.
+            def_rows = conn.execute(
+                """
+                SELECT pe.raw_template AS template
+                FROM play_events pe
+                JOIN plays p ON p.id = pe.play_id
+                JOIN games g ON g.game_id = p.game_id
+                WHERE p.season_id = ?
+                  AND p.perspective_team_id = ?
+                  AND p.batting_team_id != ?
+                  AND (
+                      g.home_team_id = ? OR g.away_team_id = ?
+                  )
+                  AND pe.event_type = 'baserunner'
+                """,
+                (
+                    season_id, perspective_team_id, team_id,
+                    team_id, team_id,
+                ),
+            ).fetchall()
+        finally:
+            if own_conn:
+                conn.close()
+    except sqlite3.Error:
+        logger.exception(
+            "Failed to fetch SB tendency for team %d season %s",
+            team_id,
+            season_id,
+        )
+        return {
+            "sb_attempts": 0,
+            "sb_successes": 0,
+            "sb_success_rate": 0.0,
+            "catcher_cs_against_attempts": 0,
+            "catcher_cs_against_count": 0,
+            "catcher_cs_against_rate": 0.0,
+        }
+
+    cs_against = 0
+    sb_against = 0
+    for r in def_rows:
+        tmpl = (r["template"] or "").lower()
+        if "caught stealing" in tmpl:
+            cs_against += 1
+        elif "steals" in tmpl:
+            sb_against += 1
+    cs_attempts = cs_against + sb_against
+    cs_rate = (cs_against / cs_attempts) if cs_attempts > 0 else 0.0
+
+    return {
+        "sb_attempts": sb_attempts,
+        "sb_successes": sb_successes,
+        "sb_success_rate": round(sb_success_rate, 4),
+        "catcher_cs_against_attempts": cs_attempts,
+        "catcher_cs_against_count": cs_against,
+        "catcher_cs_against_rate": round(cs_rate, 4),
+    }
+
+
+def get_first_inning_pattern(
+    team_id: int,
+    season_id: str,
+    *,
+    db: sqlite3.Connection | None = None,
+) -> dict[str, Any]:
+    """Return first-inning offensive and defensive run rates.
+
+    Counts games in which this team scored at least one run in the 1st
+    inning (offensively) and games in which the opponent scored at
+    least one 1st-inning run against this team (defensively).  Sourced
+    from the ``plays`` table -- specifically, ``inning = 1`` plays
+    whose ``did_score_change = 1`` (a run was scored on the play).
+
+    Perspective: this helper does NOT filter by ``perspective_team_id``
+    on its own.  ``plays`` rows under any perspective for a game count
+    once per (game_id, half) when ``did_score_change`` is true, so the
+    aggregate is stable across perspectives.  We deduplicate by
+    (game_id, half) so a play loaded twice (own + opponent perspective)
+    is not double-counted.
+
+    Reads from: ``plays`` (game_id, inning, half, batting_team_id,
+    did_score_change, season_id), ``games`` (game_id, home_team_id,
+    away_team_id, status).
+
+    Args:
+        team_id: INTEGER PK of the team.
+        season_id: Season slug to scope the query.
+        db: Optional pre-existing connection.
+
+    Returns:
+        Dict with keys:
+        - ``games_played``: int -- count of GAMES-WITH-PLAYS-LOADED for this
+          team and season.  Per Codex Phase 4b MUST FIX 2, the denominator
+          excludes completed games that have no rows in ``plays``.  This
+          prevents understating rates as "0 of N" when plays-stage failure
+          or incompleteness leaves some games without play-level data --
+          those games are "unknown", not "zero".
+        - ``games_with_first_inning_runs_scored``: int.
+        - ``games_with_first_inning_runs_allowed``: int.
+        - ``first_inning_scored_rate``: float (0.0-1.0).
+        - ``first_inning_allowed_rate``: float (0.0-1.0).
+    """
+    own_conn = db is None
+    try:
+        conn = db if db is not None else get_connection()
+        try:
+            conn.row_factory = sqlite3.Row
+
+            # Denominator: completed games for the team that ALSO have at
+            # least one row in ``plays`` (any inning, any half).  Without
+            # this restriction, games where plays-stage failed or never
+            # ran get counted as "0 of N" (a bug Codex flagged in Phase
+            # 4b: "unknown" silently became "no first-inning runs").
+            games_played_row = conn.execute(
+                """
+                SELECT COUNT(*) AS n
+                FROM games g
+                WHERE g.season_id = ?
+                  AND g.status = 'completed'
+                  AND (g.home_team_id = ? OR g.away_team_id = ?)
+                  AND EXISTS (
+                      SELECT 1 FROM plays p
+                      WHERE p.game_id = g.game_id
+                        AND p.season_id = ?
+                  )
+                """,
+                (season_id, team_id, team_id, season_id),
+            ).fetchone()
+            games_played = int(games_played_row["n"] or 0) if games_played_row else 0
+
+            # First-inning runs SCORED by this team: deduplicated
+            # (game_id, half) where the team batted and scored in the
+            # 1st inning.  De-duplicating by (game_id, half) handles
+            # cross-perspective duplicate rows.
+            scored_row = conn.execute(
+                """
+                SELECT COUNT(*) AS n FROM (
+                    SELECT DISTINCT p.game_id, p.half
+                    FROM plays p
+                    JOIN games g ON g.game_id = p.game_id
+                    WHERE p.season_id = ?
+                      AND p.inning = 1
+                      AND p.did_score_change = 1
+                      AND p.batting_team_id = ?
+                      AND g.status = 'completed'
+                      AND (g.home_team_id = ? OR g.away_team_id = ?)
+                )
+                """,
+                (season_id, team_id, team_id, team_id),
+            ).fetchone()
+            scored_games = int(scored_row["n"] or 0) if scored_row else 0
+
+            # First-inning runs ALLOWED by this team: same logic,
+            # opposing team is the batting team.
+            allowed_row = conn.execute(
+                """
+                SELECT COUNT(*) AS n FROM (
+                    SELECT DISTINCT p.game_id, p.half
+                    FROM plays p
+                    JOIN games g ON g.game_id = p.game_id
+                    WHERE p.season_id = ?
+                      AND p.inning = 1
+                      AND p.did_score_change = 1
+                      AND p.batting_team_id != ?
+                      AND g.status = 'completed'
+                      AND (g.home_team_id = ? OR g.away_team_id = ?)
+                )
+                """,
+                (season_id, team_id, team_id, team_id),
+            ).fetchone()
+            allowed_games = int(allowed_row["n"] or 0) if allowed_row else 0
+        finally:
+            if own_conn:
+                conn.close()
+    except sqlite3.Error:
+        logger.exception(
+            "Failed to fetch first-inning pattern for team %d season %s",
+            team_id,
+            season_id,
+        )
+        return {
+            "games_played": 0,
+            "games_with_first_inning_runs_scored": 0,
+            "games_with_first_inning_runs_allowed": 0,
+            "first_inning_scored_rate": 0.0,
+            "first_inning_allowed_rate": 0.0,
+        }
+
+    scored_rate = (scored_games / games_played) if games_played > 0 else 0.0
+    allowed_rate = (allowed_games / games_played) if games_played > 0 else 0.0
+
+    return {
+        "games_played": games_played,
+        "games_with_first_inning_runs_scored": scored_games,
+        "games_with_first_inning_runs_allowed": allowed_games,
+        "first_inning_scored_rate": round(scored_rate, 4),
+        "first_inning_allowed_rate": round(allowed_rate, 4),
+    }

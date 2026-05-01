@@ -1899,11 +1899,22 @@ async def opponent_print(request: Request, opponent_team_id: int) -> Response:
     today = datetime.date.today()
     print_date = f"{today.strftime('%B')} {today.day}, {today.year}"
 
-    # Per-player spray events for the Batter Tendencies grid.
+    # Per-player spray events for the Batter Tendencies grid.  Pass the
+    # opponent team id as the explicit perspective so a batter who also
+    # appeared on another team in the same season does not contribute
+    # cross-team events (Codex Phase 4b MUST FIX 1).
     batting_list_pr = scouting_report.get("batting", [])
     batting_player_ids_pr = [p["player_id"] for p in batting_list_pr]
+
+    def _fetch_player_spray_events_pr() -> dict[str, list[dict]]:
+        return db.get_players_spray_events_batch(
+            batting_player_ids_pr,
+            season_id,
+            perspective_team_id=opponent_team_id,
+        )
+
     player_spray_events_pr: dict[str, list[dict]] = await run_in_threadpool(
-        db.get_players_spray_events_batch, batting_player_ids_pr, season_id
+        _fetch_player_spray_events_pr
     )
 
     # Build per-player BIP counts (backward compat) and enriched spray stats.

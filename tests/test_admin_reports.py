@@ -200,7 +200,12 @@ class TestGenerateReport:
         assert "started" in loc or "generation" in loc
 
     def test_background_task_is_enqueued(self, setup):
-        """The generate_report function is called via background tasks."""
+        """The generate_report function is called via background tasks.
+
+        Per E-228-01, the admin POST handler now always passes
+        ``our_team_id`` as a keyword argument (None when the matchup
+        checkbox is unchecked).
+        """
         _db_path, client = setup
 
         with patch("src.reports.generator.generate_report") as mock_gen:
@@ -211,7 +216,7 @@ class TestGenerateReport:
             )
 
         # Background task runs synchronously in test client
-        mock_gen.assert_called_once_with("abc123")
+        mock_gen.assert_called_once_with("abc123", our_team_id=None)
 
 
 # ---------------------------------------------------------------------------

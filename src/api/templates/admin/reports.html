@@ -33,19 +33,55 @@
 <!-- Generate form -->
 <div class="mb-6 p-4 bg-gray-50 border border-gray-200 rounded">
   <h2 class="text-sm font-bold mb-2">Generate New Report</h2>
-  <form method="post" action="/admin/reports/generate" class="flex gap-2 items-end">
+  <form method="post" action="/admin/reports/generate" class="space-y-3">
     <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
-    <div class="flex-1">
-      <label for="gc_url" class="block text-xs text-gray-600 mb-1">GameChanger Team URL</label>
-      <input type="text" name="gc_url" id="gc_url"
-             placeholder="https://web.gc.com/teams/abc123/team-name"
-             class="w-full border border-gray-300 rounded px-3 py-2 text-sm"
-             required>
+    <div class="flex gap-2 items-end">
+      <div class="flex-1">
+        <label for="gc_url" class="block text-xs text-gray-600 mb-1">GameChanger Team URL</label>
+        <input type="text" name="gc_url" id="gc_url"
+               placeholder="https://web.gc.com/teams/abc123/team-name"
+               class="w-full border border-gray-300 rounded px-3 py-2 text-sm"
+               required>
+      </div>
+      <button type="submit"
+              class="bg-blue-900 text-white px-4 py-2 rounded text-sm font-medium hover:bg-blue-800">
+        Generate Report
+      </button>
     </div>
-    <button type="submit"
-            class="bg-blue-900 text-white px-4 py-2 rounded text-sm font-medium hover:bg-blue-800">
-      Generate Report
-    </button>
+
+    {% if feature_matchup_enabled %}
+    <div class="border-t border-gray-200 pt-3">
+      <label class="inline-flex items-center text-xs text-gray-700">
+        <input type="checkbox" name="enable_matchup" id="enable_matchup"
+               value="on"
+               class="mr-2"
+               {% if not has_member_teams %}disabled{% endif %}
+               onchange="document.getElementById('matchup_team_wrapper').style.display = this.checked ? 'block' : 'none';">
+        Include matchup section
+      </label>
+      {% if has_member_teams %}
+      <div id="matchup_team_wrapper" class="mt-2 ml-6" style="display:none;">
+        <label for="our_team_id" class="block text-xs text-gray-600 mb-1">
+          Our team
+        </label>
+        <select name="our_team_id" id="our_team_id"
+                class="border border-gray-300 rounded px-3 py-2 text-sm">
+          <option value="">-- choose a team --</option>
+          {% for team in member_teams %}
+          <option value="{{ team.id }}">{{ team.name }}</option>
+          {% endfor %}
+        </select>
+        <p class="text-xs text-gray-500 mt-1">
+          Stats from this team will be used to build the matchup section.
+        </p>
+      </div>
+      {% else %}
+      <p class="text-xs text-gray-500 mt-1 ml-6">
+        Add a member team in /admin/teams to enable matchup analysis.
+      </p>
+      {% endif %}
+    </div>
+    {% endif %}
   </form>
 </div>
 

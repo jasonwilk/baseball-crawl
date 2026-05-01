@@ -359,6 +359,47 @@
     .starter-narrative-text { font-size: 8.5pt; line-height: 1.5; color: #374151; }
     .starter-narrative-bullpen { font-size: 8.5pt; line-height: 1.5; color: #374151; margin-top: 4px; }
 
+    {# Matchup CSS is gated on `matchup` so AC-5 (suppress) leaves no trace. #}
+    {% if matchup %}
+    /* ---- Matchup strategy section (E-228-14) ---- */
+    .game-plan-section { margin-bottom: 10px; }
+    .game-plan-intro { font-size: 8.5pt; line-height: 1.5; color: #374151; margin: 4px 0 8px 0; }
+    .game-plan-subsection { margin: 8px 0; }
+    .game-plan-sub-header {
+      font-size: 8pt;
+      font-weight: bold;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: #1e3a5f;
+      margin-bottom: 4px;
+      border-bottom: 1px solid #e5e7eb;
+      padding-bottom: 2px;
+    }
+    .game-plan-hitter {
+      background: #f9fafb;
+      border: 1px solid #e5e7eb;
+      border-left: 3px solid #1e3a5f;
+      border-radius: 4px;
+      padding: 6px 10px;
+      margin: 4px 0;
+    }
+    .game-plan-hitter-name { font-weight: bold; font-size: 9pt; }
+    .game-plan-hitter-cue { font-size: 8.5pt; color: #374151; line-height: 1.4; margin-top: 2px; }
+    .game-plan-hitter-stats { font-size: 8pt; color: #6b7280; margin-top: 2px; }
+    .game-plan-pull-list { font-size: 8.5pt; color: #374151; margin-top: 4px; padding-left: 1em; }
+    .game-plan-pull-list li { margin: 2px 0; }
+    .game-plan-pitcher-row { font-size: 8pt; padding: 2px 0; color: #374151; }
+    .game-plan-summary-line { font-size: 8.5pt; color: #374151; margin: 2px 0; }
+    .game-plan-prose { font-size: 8.5pt; line-height: 1.5; color: #374151; margin-top: 4px; }
+    .game-plan-bucket-row { font-size: 8.5pt; color: #374151; padding: 2px 0; }
+    .game-plan-data-note {
+      font-size: 8pt;
+      font-style: italic;
+      color: #6b7280;
+      margin-top: 4px;
+    }
+    {% endif %}
+
     /* ---- Print rules ---- */
     @media print {
       body { padding: 0; }
@@ -487,6 +528,201 @@
   {% endif %}
 </div>
 {% endif %}
+
+{# ===== GAME PLAN (E-228-14) ===== #}
+{# Renders only when matchup orchestration produced a context (our_team_id #}
+{# is set, FEATURE_MATCHUP_ANALYSIS=1, AND confidence != "suppress").     #}
+{# When matchup is None, the Predicted Starter below renders in its       #}
+{# original position. When matchup renders, Predicted Starter shifts down #}
+{# by one slot (AC-2 pinned section order).                                #}
+{% if matchup %}
+<div class="game-plan-section">
+  <h2 class="section-header">Game Plan</h2>
+
+  {# Section opener -- omitted entirely on LLM-fallback (AC-3, AC-6). #}
+  {% if matchup.game_plan_intro %}
+  <div class="game-plan-intro">{{ matchup.game_plan_intro | e }}</div>
+  {% endif %}
+
+  {# ---- Sub-section 1: Top-3 dangerous hitters ---- #}
+  <div class="game-plan-subsection">
+    <div class="game-plan-sub-header">Top Hitters</div>
+    {% if matchup.threat_rows %}
+      {% for hitter in matchup.threat_rows %}
+      <div class="game-plan-hitter">
+        <div class="game-plan-hitter-name">
+          {{ hitter.name | e }}{% if hitter.jersey_number %} #{{ hitter.jersey_number }}{% endif %}
+          <span class="depth-badge">{{ hitter.pa }} PA</span>
+        </div>
+        {% if hitter.cue %}
+          {# LLM cue carries inline parenthetical citations verbatim (AC-4). #}
+          <div class="game-plan-hitter-cue">{{ hitter.cue | e }}</div>
+        {% else %}
+          {# AC-6 fallback: deterministic stats only, no synthesized cue. #}
+          {% if hitter.supporting_stats %}
+          <div class="game-plan-hitter-stats">{{ hitter.supporting_stats | join(' &middot; ') | safe }}</div>
+          {% endif %}
+        {% endif %}
+      </div>
+      {% endfor %}
+    {% else %}
+      <div class="game-plan-summary-line">No qualifying hitters this season.</div>
+    {% endif %}
+
+    {# Pull-tendency notes -- inline, deterministic citation (AC-4 exception). #}
+    {% if matchup.pull_tendency_notes %}
+    <ul class="game-plan-pull-list">
+      {% for note in matchup.pull_tendency_notes -%}
+      <li>Watch the pull from {{ note.name | e }}{% if note.jersey_number %} #{{ note.jersey_number }}{% endif %} ({{ note.pull_pct_display }} pull on {{ note.bip_count }} BIP).</li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+
+    {# data_notes for sub-section 1 (AC-3 Option A). #}
+    {% for note_msg in matchup.notes_by_subsection.top_hitters %}
+    <div class="game-plan-data-note">Note: {{ note_msg | e }}</div>
+    {% endfor %}
+  </div>
+
+  {# ---- Sub-section 2: Eligible opposing pitchers ---- #}
+  <div class="game-plan-subsection">
+    <div class="game-plan-sub-header">Eligible Opposing Pitchers</div>
+    {% if matchup.opposing_pitchers %}
+    <table class="starter-rest-table">
+      <thead><tr>
+        <th>Name</th>
+        <th class="mob-hide-extra">Last Outing</th>
+        <th>Days Rest</th>
+        <th class="mob-hide-extra">Last #P</th>
+        <th class="mob-hide-extra">7d Workload</th>
+      </tr></thead>
+      <tbody>
+      {% for p in matchup.opposing_pitchers %}
+      <tr>
+        <td>{{ p.name | e }}{% if p.jersey_number %} #{{ p.jersey_number }}{% endif %}</td>
+        <td class="mob-hide-extra" data-date="{{ p.last_outing_date or '' }}">{{ p.last_outing_date or "&mdash;" | safe }}</td>
+        <td>{{ p.days_rest if p.days_rest is not none else "&mdash;" | safe }}</td>
+        <td class="mob-hide-extra">{{ p.last_outing_pitches if p.last_outing_pitches is not none else "&mdash;" | safe }}</td>
+        <td class="mob-hide-extra">{{ p.workload_7d if p.workload_7d is not none else "&mdash;" | safe }}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="game-plan-summary-line">No eligible opposing pitchers.</div>
+    {% endif %}
+
+    {% for note_msg in matchup.notes_by_subsection.opposing_pitchers %}
+    <div class="game-plan-data-note">Note: {{ note_msg | e }}</div>
+    {% endfor %}
+  </div>
+
+  {# ---- Sub-section 3: Stolen-base profile ---- #}
+  <div class="game-plan-subsection">
+    <div class="game-plan-sub-header">Stolen-Base Profile</div>
+    {% set sb = matchup.sb_profile_summary %}
+    <div class="game-plan-summary-line">
+      {% if sb.sb_attempts %}
+        Stole {{ sb.sb_successes if sb.sb_successes is not none else 0 }} of {{ sb.sb_attempts }} attempt{{ "s" if sb.sb_attempts != 1 else "" }}
+        {% if sb.sb_success_rate is not none %} ({{ (sb.sb_success_rate * 100) | round | int }}% success){% endif %}.
+        {% if sb.catcher_cs_against_attempts %}
+          Threw out {{ sb.catcher_cs_against_count if sb.catcher_cs_against_count is not none else 0 }} of {{ sb.catcher_cs_against_attempts }} opposing attempt{{ "s" if sb.catcher_cs_against_attempts != 1 else "" }}
+          {% if sb.catcher_cs_against_rate is not none %} ({{ (sb.catcher_cs_against_rate * 100) | round | int }}% caught){% endif %}.
+        {% endif %}
+      {% else %}
+        Insufficient SB data this season.
+      {% endif %}
+    </div>
+    {% if matchup.sb_profile_prose %}
+    <div class="game-plan-prose">{{ matchup.sb_profile_prose | e }}</div>
+    {% endif %}
+
+    {% for note_msg in matchup.notes_by_subsection.sb_profile %}
+    <div class="game-plan-data-note">Note: {{ note_msg | e }}</div>
+    {% endfor %}
+  </div>
+
+  {# ---- Sub-section 4: First-inning scoring tendency ---- #}
+  <div class="game-plan-subsection">
+    <div class="game-plan-sub-header">First-Inning Tendency</div>
+    {% set fi = matchup.first_inning_summary %}
+    <div class="game-plan-summary-line">
+      {% if fi.games_played %}
+        Scored in 1st: {{ fi.games_with_first_inning_runs_scored if fi.games_with_first_inning_runs_scored is not none else 0 }} of {{ fi.games_played }}
+        {% if fi.first_inning_scored_rate is not none %} ({{ (fi.first_inning_scored_rate * 100) | round | int }}%){% endif %}.
+        Allowed in 1st: {{ fi.games_with_first_inning_runs_allowed if fi.games_with_first_inning_runs_allowed is not none else 0 }} of {{ fi.games_played }}
+        {% if fi.first_inning_allowed_rate is not none %} ({{ (fi.first_inning_allowed_rate * 100) | round | int }}%){% endif %}.
+      {% else %}
+        Insufficient first-inning data this season.
+      {% endif %}
+    </div>
+    {% if matchup.first_inning_prose %}
+    <div class="game-plan-prose">{{ matchup.first_inning_prose | e }}</div>
+    {% endif %}
+
+    {% for note_msg in matchup.notes_by_subsection.first_inning %}
+    <div class="game-plan-data-note">Note: {{ note_msg | e }}</div>
+    {% endfor %}
+  </div>
+
+  {# ---- Sub-section 5: 3-bucket loss recipe ---- #}
+  <div class="game-plan-subsection">
+    <div class="game-plan-sub-header">Loss Recipe ({{ matchup.loss_recipe.total_losses }} loss{{ "es" if matchup.loss_recipe.total_losses != 1 else "" }})</div>
+    {% if matchup.loss_recipe.total_losses %}
+    <div class="game-plan-bucket-row">Starter shelled early: <b>{{ matchup.loss_recipe.starter_shelled_count }}</b></div>
+    <div class="game-plan-bucket-row">Bullpen couldn't hold: <b>{{ matchup.loss_recipe.bullpen_couldnt_hold_count }}</b></div>
+    <div class="game-plan-bucket-row">Close game lost late: <b>{{ matchup.loss_recipe.close_game_lost_late_count }}</b></div>
+    {% if matchup.loss_recipe.uncategorized_count %}
+    <div class="game-plan-bucket-row" style="color:#6b7280">Uncategorized: {{ matchup.loss_recipe.uncategorized_count }}</div>
+    {% endif %}
+    {% else %}
+    <div class="game-plan-summary-line">No losses this season yet.</div>
+    {% endif %}
+    {% if matchup.loss_recipe_prose %}
+    <div class="game-plan-prose">{{ matchup.loss_recipe_prose | e }}</div>
+    {% endif %}
+
+    {% for note_msg in matchup.notes_by_subsection.loss_recipe %}
+    <div class="game-plan-data-note">Note: {{ note_msg | e }}</div>
+    {% endfor %}
+  </div>
+
+  {# ---- Sub-section 6: Eligible LSB pitchers (only when our_team_id set) ---- #}
+  {% if matchup.lsb_pitchers is not none %}
+  <div class="game-plan-subsection">
+    <div class="game-plan-sub-header">Eligible LSB Pitchers</div>
+    {% if matchup.lsb_pitchers %}
+    <table class="starter-rest-table">
+      <thead><tr>
+        <th>Name</th>
+        <th class="mob-hide-extra">Last Outing</th>
+        <th>Days Rest</th>
+        <th class="mob-hide-extra">Last #P</th>
+        <th class="mob-hide-extra">7d Workload</th>
+      </tr></thead>
+      <tbody>
+      {% for p in matchup.lsb_pitchers %}
+      <tr>
+        <td>{{ p.name | e }}{% if p.jersey_number %} #{{ p.jersey_number }}{% endif %}</td>
+        <td class="mob-hide-extra" data-date="{{ p.last_outing_date or '' }}">{{ p.last_outing_date or "&mdash;" | safe }}</td>
+        <td>{{ p.days_rest if p.days_rest is not none else "&mdash;" | safe }}</td>
+        <td class="mob-hide-extra">{{ p.last_outing_pitches if p.last_outing_pitches is not none else "&mdash;" | safe }}</td>
+        <td class="mob-hide-extra">{{ p.workload_7d if p.workload_7d is not none else "&mdash;" | safe }}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="game-plan-summary-line">No eligible LSB pitchers.</div>
+    {% endif %}
+
+    {% for note_msg in matchup.notes_by_subsection.lsb_pitchers %}
+    <div class="game-plan-data-note">Note: {{ note_msg | e }}</div>
+    {% endfor %}
+  </div>
+  {% endif %}
+</div>
+{% endif %}{# matchup #}
 
 {# ===== PREDICTED STARTER (E-212) ===== #}
 {% if show_predicted_starter %}

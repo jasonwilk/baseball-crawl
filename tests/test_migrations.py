@@ -402,10 +402,14 @@ class TestE220UpgradeGuard:
         run_migrations(db_path=fresh_db)
 
     def test_upgrade_without_wipe_raises_runtime_error(self, fresh_db: Path) -> None:
-        """Simulated upgrade: pre-E-220 schema + 001 marker -> guard fires."""
+        """Simulated upgrade: pre-E-220 schema + all-migrations marker -> guard fires."""
         # Create the minimum pre-E-220 state: stat tables WITHOUT
-        # perspective_team_id column, plus the _migrations row claiming 001
-        # has been applied.
+        # perspective_team_id column, plus _migrations rows claiming all
+        # migrations to date have been applied.  The guard fires AFTER the
+        # pending-migrations loop, so all real migration files must be
+        # marked applied for this test to exercise the guard exclusively
+        # (otherwise the missing reports table would short-circuit before
+        # the guard runs).
         conn = sqlite3.connect(str(fresh_db))
         conn.executescript(
             """
@@ -443,15 +447,23 @@ class TestE220UpgradeGuard:
                 batting_team_id INTEGER NOT NULL,
                 batter_id TEXT NOT NULL
             );
-            INSERT INTO _migrations (filename) VALUES ('001_initial_schema.sql');
             """
         )
+        # Mark every existing migration file as already applied so the guard
+        # is the only code path that can fail this test.  When new migrations
+        # are added in future stories, they get marked here automatically --
+        # no test edit required.
+        for migration_file in collect_migration_files():
+            conn.execute(
+                "INSERT INTO _migrations (filename) VALUES (?)",
+                (migration_file.name,),
+            )
         conn.commit()
         conn.close()
 
-        # Running migrations on this state should raise -- 001 is marked
-        # applied so no new migrations will run, but the schema guard will
-        # detect the missing columns.
+        # Running migrations on this state should raise -- all migrations are
+        # marked applied so no new migrations will run, but the schema guard
+        # will detect the missing columns.
         with pytest.raises(RuntimeError, match="E-220 schema mismatch"):
             run_migrations(db_path=fresh_db)
 
@@ -471,9 +483,15 @@ class TestE220UpgradeGuard:
             CREATE TABLE player_game_pitching (id INTEGER PRIMARY KEY, team_id INTEGER);
             CREATE TABLE spray_charts (id INTEGER PRIMARY KEY, team_id INTEGER);
             CREATE TABLE plays (id INTEGER PRIMARY KEY, team_id INTEGER);
-            INSERT INTO _migrations (filename) VALUES ('001_initial_schema.sql');
             """
         )
+        # Mark every existing migration file as already applied so the guard
+        # path is the only failure mode this test can exercise.
+        for migration_file in collect_migration_files():
+            conn.execute(
+                "INSERT INTO _migrations (filename) VALUES (?)",
+                (migration_file.name,),
+            )
         conn.commit()
         conn.close()
 

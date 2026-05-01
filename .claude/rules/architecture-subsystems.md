@@ -111,3 +111,32 @@ The helper does HTTP fetch (with pre-fetch DB skip per game), tempdir write, `Pl
 ## Two-Tier Enrichment Pattern
 
 Tier 1 (deterministic, pure Python, always runs) produces a typed dataclass. Tier 2 (optional LLM via OpenRouter, non-fatal) wraps the Tier 1 dataclass with narrative enrichment. Renderers select presentation path based on which dataclass they receive. New enrichment features should follow this pattern: deterministic first, LLM optional.
+
+**Established instances** (any future Tier 2 enrichment should follow the same shape):
+
+1. **Predicted starter** (E-212) -- engine `src/reports/predicted_starter.py`, wrapper `src/reports/llm_predicted_starter.py`.
+2. **Matchup strategy** (E-228) -- engine `src/reports/matchup.py`, wrapper `src/reports/llm_matchup.py`.
+
+**Canonical module shape**:
+
+- `src/reports/<feature>.py` -- pure dataclasses + `compute_<feature>()` deterministic engine + `build_<feature>_inputs()` query helper. No HTTP, no LLM, no env reads. Pure Python, always runs.
+- `src/reports/llm_<feature>.py` -- `enrich_<feature>(analysis, inputs, *, client=None)` Tier 2 wrapper. Owns the OpenRouter call params, JSON output schema, and hallucination guardrail. Non-fatal: a missing `OPENROUTER_API_KEY`, an HTTP error, or a guardrail rejection returns the Tier 1 analysis unchanged.
+
+**Suppress short-circuit contract**:
+
+- The Tier 1 engine MAY emit `confidence == "suppress"` (or an equivalent suppress signal) when the deterministic inputs are too thin to be useful (e.g., n < threshold, missing required dimension).
+- When the engine signals suppress, the Tier 2 wrapper MUST NOT call the LLM. The wrapper returns the Tier 1 analysis unchanged.
+- Renderers MUST hide the section entirely when the analysis is suppressed -- no placeholder text, no "data unavailable" stub, no empty card. The section simply does not render.
+
+**Citation source-of-truth split**:
+
+- **LLM-authored prose** (the narrative paragraph): owned by the LLM. Renderers preserve it verbatim with no post-hoc edits or template-side citation injection.
+- **Renderer-authored deterministic citations**: a single documented exception per feature, where a small renderer-side annotation references engine-computed numbers (e.g., pull-tendency notes for matchup). Each such exception MUST be documented in the feature module's docstring and called out in code review.
+- Mixing the two on the same span (renderer rewriting LLM prose, or LLM emitting deterministic-looking stat citations) is forbidden.
+
+**Hallucination guardrail policy**:
+
+- Every Tier 2 wrapper that names players, games, or other identifiable entities MUST round-trip the identifiers (e.g., `player_id`) through the LLM output and reject any response whose IDs are not present in the Tier 1 inputs.
+- Behavior under guardrail rejection is gated by `FEATURE_<feature>_STRICT` env var:
+  - **Strict mode** (`FEATURE_<feature>_STRICT=1`): raise -- fail loudly, fail the pipeline. Used in CI / local dev to surface guardrail bugs.
+  - **Graceful mode** (default): log a warning and return the Tier 1 analysis unchanged. The deterministic content still renders; only the LLM narrative is dropped. Used in production where a single bad LLM response should not break a report.

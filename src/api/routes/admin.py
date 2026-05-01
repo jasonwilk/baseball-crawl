@@ -80,6 +80,7 @@ from src.db.merge import (
 )
 from src.gamechanger.url_parser import parse_team_url
 from src.pipeline import trigger
+from src.reports.matchup import is_matchup_enabled
 
 logger = logging.getLogger(__name__)
 
@@ -3314,6 +3315,12 @@ async def list_reports(request: Request) -> Response:
 
     Shows a URL input form for generating new reports and a table of all
     existing reports with status badges, links, and delete actions.
+
+    When ``FEATURE_MATCHUP_ANALYSIS`` is enabled (E-228-01), the form also
+    includes an "Include matchup section" checkbox + a member-team dropdown.
+    The dropdown is sourced from ``_get_available_teams()`` (the same helper
+    used by the user assignment form) -- ``teams WHERE
+    membership_type='member' ORDER BY name``.
     """
     guard = await _require_admin(request)
     if isinstance(guard, Response):
@@ -3325,6 +3332,13 @@ async def list_reports(request: Request) -> Response:
     reports = await run_in_threadpool(_get_all_reports)
     has_generating = any(r["status"] == "generating" for r in reports)
 
+    feature_matchup_enabled = is_matchup_enabled()
+    member_teams: list[dict[str, Any]] = []
+    has_member_teams = False
+    if feature_matchup_enabled:
+        member_teams = await run_in_threadpool(_get_available_teams)
+        has_member_teams = bool(member_teams)
+
     return templates.TemplateResponse(
         request,
         "admin/reports.html",
@@ -3333,6 +3347,9 @@ async def list_reports(request: Request) -> Response:
             "msg": msg,
             "error": error,
             "has_generating": has_generating,
+            "feature_matchup_enabled": feature_matchup_enabled,
+            "member_teams": member_teams,
+            "has_member_teams": has_member_teams,
         },
     )
 
@@ -3342,11 +3359,26 @@ async def generate_report_admin(
     request: Request,
     background_tasks: BackgroundTasks,
     gc_url: str = Form(...),
+    enable_matchup: str | None = Form(None),
+    our_team_id: str | None = Form(None),
 ) -> Response:
     """Start report generation as a background task.
 
     Validates the URL, then enqueues ``generate_report()`` via FastAPI
     BackgroundTasks. Redirects to the reports list with a flash message.
+
+    When ``FEATURE_MATCHUP_ANALYSIS`` is enabled and the operator checks the
+    "Include matchup section" checkbox (``enable_matchup=on``), the
+    ``our_team_id`` form field MUST resolve to a row in ``teams`` with
+    ``membership_type='member'``.  Server-side validation re-renders the
+    form with an error flash on bad input.
+
+    Args:
+        gc_url: Required GameChanger team URL or public_id slug.
+        enable_matchup: Browser-submitted checkbox value -- present (typically
+            ``"on"``) when checked, absent/None when unchecked.
+        our_team_id: INTEGER ``teams.id`` from the matchup dropdown.  Sent as
+            a string by the browser; parsed and validated server-side.
     """
     guard = await _require_admin(request)
     if isinstance(guard, Response):
@@ -3376,8 +3408,48 @@ async def generate_report_admin(
             status_code=303,
         )
 
+    # Matchup section: resolve our_team_id when the checkbox is checked AND
+    # the feature flag is on.  When the flag is off the checkbox is hidden in
+    # the template, but a malicious/stale POST could still supply the field
+    # -- the feature flag check here gates the value defensively.
+    resolved_our_team_id: int | None = None
+    if enable_matchup and is_matchup_enabled():
+        # Server-side validation: must be present and must match a member team.
+        if not our_team_id:
+            return RedirectResponse(
+                url="/admin/reports?error=" + quote_plus(
+                    "Select a team for the matchup section, or uncheck "
+                    "'Include matchup section'."
+                ),
+                status_code=303,
+            )
+        try:
+            candidate_id = int(our_team_id)
+        except ValueError:
+            return RedirectResponse(
+                url="/admin/reports?error=" + quote_plus(
+                    "Invalid matchup team selection."
+                ),
+                status_code=303,
+            )
+        # Confirm the candidate id actually belongs to a member team -- the
+        # form's <select> options come from this set, so rejection here is a
+        # defensive check (tampered POST, stale UI, etc.).
+        member_teams = await run_in_threadpool(_get_available_teams)
+        valid_ids = {t["id"] for t in member_teams}
+        if candidate_id not in valid_ids:
+            return RedirectResponse(
+                url="/admin/reports?error=" + quote_plus(
+                    "Selected matchup team is not a member team."
+                ),
+                status_code=303,
+            )
+        resolved_our_team_id = candidate_id
+
     from src.reports.generator import generate_report
-    background_tasks.add_task(generate_report, gc_url)
+    background_tasks.add_task(
+        generate_report, gc_url, our_team_id=resolved_our_team_id,
+    )
 
     msg = f"Report generation started for {gc_url}. This may take a few minutes."
     return RedirectResponse(
