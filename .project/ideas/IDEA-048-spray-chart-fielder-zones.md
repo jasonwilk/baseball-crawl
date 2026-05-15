@@ -1,7 +1,7 @@
 # IDEA-048: Fielder Position Labels/Zones on Spray Charts
 
 ## Status
-`CANDIDATE`
+`PROMOTED` -- absorbed into E-228 (Defensive Positioning Pocket Cards), 2026-05-14
 
 ## Summary
 Show defensive position labels or zone overlays on spray chart images so coaches can see at a glance where balls are being fielded relative to standard defensive positions.
@@ -27,6 +27,7 @@ Spray charts currently show raw ball-in-play coordinates without positional cont
 - Related: IDEA-049 (pull/center/oppo), IDEA-050 (hot-cold zones), IDEA-051 (title stats)
 - Current renderer is in `src/charts/spray.py` using matplotlib + numpy
 - Spray data stored in `spray_charts` table with x/y coordinates, fielder position column already exists
+- **Promoted to E-228 (2026-05-14)**: The defensive-positioning brainstorm converged on a stronger artifact than chart overlays -- a per-position positioning call sheet + player cards driven by `classify_field_zone` zone classification. E-228 delivers the positional-context value this idea was after; it just delivers it as printable pocket cards rather than as labels on the chart image.
 
 ---
 Created: 2026-03-27

@@ -14,7 +14,8 @@
   - Three-digit prefix, underscore, descriptive slug, `.sql` extension
 - Migrations are append-only. Never edit an applied migration.
 - Track applied state in a `_migrations` metadata table
-- **Current state (verified 2026-03-26)**: `migrations/` contains 001–005 (`001_initial_schema.sql`, `002_add_user_role.sql`, `003_add_crawl_jobs.sql`, `004_add_team_season_year.sql`, `005_backfill_teams_public_id.sql`). Next migration: `006`.
+- **Current state (verified 2026-05-14)**: E-220 consolidated old migrations 001–015 into a single `001_initial_schema.sql` (pre-E220 originals archived in `.project/archive/migrations-pre-E220/`). `migrations/` now contains only `001_initial_schema.sql` (plus `apply_migrations.py`, `__init__.py`). Next migration: `002`.
+- **Schema lookup rule**: `001_initial_schema.sql` is the single source of truth for live column types/PKs/FKs. Always read it before specifying DDL — do not answer schema-shape questions from memory. Key PKs: `teams.id` INTEGER PK (NOT `team_id`); `players.player_id` TEXT PK; `seasons.season_id` TEXT PK (slug). Team-reference columns are INTEGER → `teams(id)`. `spray_charts.perspective_team_id` is INTEGER NOT NULL → `teams(id)`; `spray_charts.team_id` and `spray_charts.season_id` are both nullable.
 
 ## Schema Conventions
 

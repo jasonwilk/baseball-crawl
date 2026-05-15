@@ -66,8 +66,8 @@ Review this list every 90 days, or when completing an epic. Ask:
 | [IDEA-045](IDEA-045-worktree-divergence-detection.md) | Detect Main-Branch Divergence Before Epic Closure Patch | CANDIDATE | 2026-06-24 |
 | [IDEA-046](IDEA-046-resolver-duplicate-gc-uuid.md) | OpponentResolver Creates Duplicate gc_uuid Team Instead of Merging | PROMOTED | 2026-03-26 -- promoted to E-162 |
 | [IDEA-047](IDEA-047-worktree-diff-phantom-deletions.md) | Epic Worktree `git diff main` Shows Phantom File Deletions | CANDIDATE | 2026-06-24 |
-| [IDEA-048](IDEA-048-spray-chart-fielder-zones.md) | Fielder Position Labels/Zones on Spray Charts | CANDIDATE | 2026-06-25 |
-| [IDEA-049](IDEA-049-spray-chart-pull-center-oppo.md) | Pull/Center/Oppo Tendency Summary on Spray Charts | CANDIDATE | 2026-06-25 |
+| [IDEA-048](IDEA-048-spray-chart-fielder-zones.md) | Fielder Position Labels/Zones on Spray Charts | PROMOTED | 2026-05-14 -- absorbed into E-228 |
+| [IDEA-049](IDEA-049-spray-chart-pull-center-oppo.md) | Pull/Center/Oppo Tendency Summary on Spray Charts | PROMOTED | 2026-05-14 -- absorbed into E-228 |
 | [IDEA-050](IDEA-050-spray-chart-hot-cold-zones.md) | Count Overlay / Hot-Cold Zones on Spray Charts | CANDIDATE | 2026-06-25 |
 | [IDEA-051](IDEA-051-spray-chart-title-stats.md) | Title with Stats on Spray Charts | CANDIDATE | 2026-06-25 |
 | [IDEA-052](IDEA-052-familiar-faces-indicator.md) | Familiar Faces Indicator on Opponent Rosters | CANDIDATE | 2026-06-26 |
@@ -90,6 +90,9 @@ Review this list every 90 days, or when completing an epic. Ask:
 | [IDEA-069](IDEA-069-consolidate-cascade-delete-logic.md) | Consolidate Cascade Delete Logic (admin + reports) | PROMOTED | 2026-04-13 -- absorbed into E-221-05 |
 | [IDEA-070](IDEA-070-admin-ui-delete-path-reports-gap.md) | Admin-UI Delete-Team Path Does Not Clean `reports.team_id` | CANDIDATE | 2026-07-13 |
 | [IDEA-071](IDEA-071-e220-adopter-audit-fix-pre-provenance-code.md) | E-220 Adopter Audit — Fix Pre-Provenance Code Paths | PROMOTED | 2026-04-13 -- promoted to E-223 |
+| [IDEA-072](IDEA-072-clustering-derived-empirical-zones.md) | Clustering-Derived Empirical Fielding Zones | CANDIDATE | 2026-08-13 |
+| [IDEA-073](IDEA-073-team-wide-base-alignment.md) | Team-Wide Base Defensive Alignment | CANDIDATE | 2026-08-13 |
+| [IDEA-074](IDEA-074-borderline-case-flag-on-call-sheet.md) | Borderline-Case Flag on the Positioning Call Sheet | CANDIDATE | 2026-08-13 |
 
 ## Status Definitions
 

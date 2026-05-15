@@ -1,7 +1,7 @@
 # IDEA-049: Pull/Center/Oppo Tendency Summary on Spray Charts
 
 ## Status
-`CANDIDATE`
+`PROMOTED` -- absorbed into E-228 (Defensive Positioning Pocket Cards), 2026-05-14
 
 ## Summary
 Add a text summary to spray chart images showing directional tendency percentages (e.g., "Pull: 45% | Center: 30% | Oppo: 25%") so coaches can quickly assess a batter's hit distribution without counting dots.
@@ -27,6 +27,7 @@ Directional tendency is one of the most actionable pieces of scouting data for d
 - Related: IDEA-048 (fielder zones), IDEA-050 (hot-cold zones), IDEA-051 (title stats)
 - Batter handedness (`bats` column on players table) is schema-ready but not yet populated (see IDEA-029)
 - Could potentially derive handedness from spray distribution itself as a heuristic
+- **Promoted to E-228 (2026-05-14)**: E-228's two-knob positioning model uses exactly the pull/center/oppo directional classification this idea proposed (via `classify_field_zone`), plus a depth knob, quantized into named positioning states. The directional-tendency value this idea was after is delivered as the "direction knob" of the E-228 engine.
 
 ---
 Created: 2026-03-27
