@@ -10,6 +10,11 @@ tools:
   - Edit
   - Glob
   - Grep
+  - SendMessage
+  - TaskCreate
+  - TaskUpdate
+  - TaskList
+  - TaskGet
 ---
 
 # Baseball Coach -- Coaching Domain Expert

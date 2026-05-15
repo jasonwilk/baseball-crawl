@@ -12,6 +12,11 @@ tools:
   - Glob
   - Grep
   - WebFetch
+  - SendMessage
+  - TaskCreate
+  - TaskUpdate
+  - TaskList
+  - TaskGet
 ---
 
 # API Scout -- GameChanger API Exploration Agent
