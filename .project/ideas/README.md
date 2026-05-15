@@ -93,6 +93,7 @@ Review this list every 90 days, or when completing an epic. Ask:
 | [IDEA-072](IDEA-072-clustering-derived-empirical-zones.md) | Clustering-Derived Empirical Fielding Zones | CANDIDATE | 2026-08-13 |
 | [IDEA-073](IDEA-073-team-wide-base-alignment.md) | Team-Wide Base Defensive Alignment | CANDIDATE | 2026-08-13 |
 | [IDEA-074](IDEA-074-borderline-case-flag-on-call-sheet.md) | Borderline-Case Flag on the Positioning Call Sheet | CANDIDATE | 2026-08-13 |
+| [IDEA-075](IDEA-075-agent-team-relay-discipline.md) | Agent-Team Relay Discipline | CANDIDATE | 2026-08-13 |
 
 ## Status Definitions
 

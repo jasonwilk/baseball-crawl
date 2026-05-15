@@ -2,7 +2,7 @@
 
 ## Numbering State
 - Next available epic number: E-229
-- Next available idea number: IDEA-075
+- Next available idea number: IDEA-076
 - Before assigning numbers: ALWAYS `ls /epics/` and `ls /.project/ideas/` to avoid collisions
 - Next migration number: 002 (E-220 consolidated old 001-015 into 001_initial_schema.sql; archived in .project/archive/migrations-pre-E220/; only 001 exists in migrations/). Confirm against .claude/rules/migrations.md.
 
