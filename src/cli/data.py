@@ -22,6 +22,8 @@ from src.db.merge import DuplicateTeam
 from src.pipeline import bootstrap as bootstrap_module
 from src.pipeline import crawl as crawl_module
 from src.pipeline import load as load_module
+from src.reports.generator import generate_report
+from src.reports.positioning import compute_positioning
 
 logger = logging.getLogger(__name__)
 
@@ -381,6 +383,21 @@ def _scout_live(
                 "Post-spray dedup sweep failed (non-fatal)", exc_info=True
             )
 
+        # Step 5: Tier 1 positioning recompute + auto-generate report
+        # bundle for each team scouted in this run (E-228-06 AC-3 / AC-6).
+        # Mirrors `_post_spray_dedup`'s scouting_runs resolution. Both
+        # sub-steps are non-fatal per AC-2 / AC-6a -- the scout exit code
+        # is unchanged on failure.
+        try:
+            _post_spray_positioning_and_report(
+                conn, team, season, started_at,
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Post-spray positioning/report sweep failed (non-fatal)",
+                exc_info=True,
+            )
+
     raise SystemExit(exit_code)
 
 
@@ -433,6 +450,84 @@ def _post_spray_dedup(
                     sid,
                     exc_info=True,
                 )
+
+
+def _post_spray_positioning_and_report(
+    conn: sqlite3.Connection,
+    team_public_id: str | None,
+    season_filter: str | None,
+    started_at: str,
+) -> None:
+    """Run Tier 1 positioning recompute + auto-generate report for teams
+    scouted in this pipeline run (E-228-06 AC-3 / AC-6).
+
+    Mirrors :func:`_post_spray_dedup`'s scouting_runs-based resolution.
+    For each team:
+      1. ``compute_positioning(conn, team_id, season_id)`` — engine commits
+         its own writes (TN-6). Non-fatal: failure logged at WARNING and
+         the next team is processed (AC-2 / AC-6a contract).
+      2. ``generate_report(public_id)`` — produces the standalone bundle
+         that contains the positioning sections. Non-fatal: failure
+         logged at WARNING. (B) Pre-generate v1 scope per epic TN-7 so
+         the opponent-dashboard "Defensive Positioning" link resolves
+         to a real `ready` report.
+
+    Args:
+        conn: Open SQLite connection.
+        team_public_id: If given, scope to this single team's public_id.
+        season_filter: If given, scope to this season.
+        started_at: ISO timestamp marking the start of this pipeline run.
+    """
+    if team_public_id:
+        lookup = _find_scouting_run(conn, team_public_id, started_at)
+        if lookup is None:
+            return
+        team_id, season_id = lookup
+        teams_to_process: list[tuple[int, str, str | None]] = [
+            (team_id, season_id, team_public_id),
+        ]
+    else:
+        query = (
+            "SELECT DISTINCT sr.team_id, sr.season_id, t.public_id "
+            "FROM scouting_runs sr "
+            "JOIN teams t ON t.id = sr.team_id "
+            "WHERE sr.last_checked >= ?"
+        )
+        params: list[object] = [started_at]
+        if season_filter:
+            query += " AND sr.season_id = ?"
+            params.append(season_filter)
+        teams_to_process = [
+            (tid, sid, pub_id)
+            for tid, sid, pub_id in conn.execute(query, params).fetchall()
+        ]
+
+    for team_id, season_id, public_id in teams_to_process:
+        try:
+            compute_positioning(conn, team_id, season_id)
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Positioning recompute failed for team_id=%d season=%s "
+                "(non-fatal)",
+                team_id,
+                season_id,
+                exc_info=True,
+            )
+        if not public_id:
+            logger.warning(
+                "Auto-generate report skipped for team_id=%d -- "
+                "public_id is NULL",
+                team_id,
+            )
+            continue
+        try:
+            generate_report(public_id)
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Auto-generate report failed for public_id=%s (non-fatal)",
+                public_id,
+                exc_info=True,
+            )
 
 
 def _resolve_missing_gc_uuids(

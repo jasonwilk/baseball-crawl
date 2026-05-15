@@ -34,6 +34,7 @@ from src.api.db import (
     get_pitching_history,
     get_pitching_workload,
 )
+from src.db.player_dedup import dedup_team_players
 from src.db.teams import ensure_team_row
 from src.gamechanger.client import CredentialExpiredError, GameChangerClient
 from src.gamechanger.crawlers.scouting import ScoutingCrawler
@@ -45,7 +46,10 @@ from src.gamechanger.loaders.scouting_spray_loader import ScoutingSprayChartLoad
 from src.gamechanger.search import search_teams_by_name
 from src.gamechanger.types import TeamRef
 from src.gamechanger.url_parser import parse_team_url
+from src.llm.openrouter import is_llm_available
 from src.reconciliation.engine import reconcile_game
+from src.reports.positioning import compute_positioning
+from src.reports.positioning_llm import enrich_positioning
 from src.reports.renderer import render_report
 
 logger = logging.getLogger(__name__)
@@ -409,6 +413,56 @@ def _query_spray_charts(
         pid = r.pop("player_id")
         result.setdefault(pid, []).append(r)
     return result
+
+
+def _query_batter_positioning(
+    conn: sqlite3.Connection, team_id: int, season_id: str
+) -> list[dict]:
+    """Query Tier 1 positioning rows for a report team (E-228-05).
+
+    Reads ``batter_positioning`` joined to ``players`` and (left-joined to)
+    ``team_rosters`` for the standalone perspective (``perspective_team_id =
+    team_id``, matching the convention in :func:`_query_spray_charts`).
+    Returns one dict per ``(player_id, position)`` row -- the renderer
+    groups by ``player_id`` for the call sheet and by ``position`` for
+    the player cards.
+
+    Row ordering is ``player_id, position`` -- the renderer applies the
+    design-spec D5 row sort (non-TRUE ``team_state_call`` first, then
+    jersey ascending) in Python, not in SQL.
+    """
+    rows = conn.execute(
+        """
+        SELECT
+            bp.player_id,
+            bp.position,
+            bp.call_state,
+            bp.team_state_call,
+            bp.direction_shade,
+            bp.depth_shade,
+            bp.bip_count,
+            bp.hr_count,
+            bp.is_thin,
+            bp.zone_concentration,
+            bp.direction_deviation,
+            bp.depth_deviation,
+            p.first_name,
+            p.last_name,
+            tr.jersey_number
+        FROM batter_positioning bp
+        JOIN players p ON p.player_id = bp.player_id
+        LEFT JOIN team_rosters tr
+            ON  tr.player_id = bp.player_id
+            AND tr.team_id   = bp.team_id
+            AND tr.season_id = bp.season_id
+        WHERE bp.team_id = ?
+          AND bp.season_id = ?
+          AND bp.perspective_team_id = ?
+        ORDER BY bp.player_id, bp.position
+        """,
+        (team_id, season_id, team_id),
+    ).fetchall()
+    return [dict(r) for r in rows]
 
 
 _SEARCH_PAGE_SIZE = 25
@@ -1124,6 +1178,73 @@ def generate_report(gc_url: str) -> GenerationResult:
         post_team_ids = _snapshot_team_ids(conn)
     orphan_ids = post_team_ids - pre_team_ids - {team_id}
 
+    # Step 4e: Player-dedup sweep + Tier 1 positioning recompute (E-228-03).
+    #
+    # Closes the standalone-path dedup gap that E-228 TN-6 calls out: the
+    # standalone path previously ran scouting load -> spray load -> plays
+    # but no `dedup_team_players` call, so cross-perspective duplicate
+    # player stubs could fracture a high-BIP hitter into low-BIP stubs
+    # and misfire the positioning sample gates downstream. The recompute
+    # MUST run AFTER dedup for that reason. Both are non-fatal: failures
+    # are logged at WARNING and report generation continues, matching the
+    # spray/plays-stage error contract above. Because the positioning
+    # engine commits its own writes, a failed recompute leaves any prior
+    # `batter_positioning` state intact (the engine rolls back internally).
+    #
+    # `dedup_team_players` requires PRAGMA foreign_keys=ON per its
+    # docstring -- this block opens its own connection (every stage in
+    # `generate_report` does -- there is no long-lived shared `conn`).
+    positioning_rationales: dict[str, str] = {}
+    with closing(get_connection()) as conn:
+        conn.execute("PRAGMA foreign_keys=ON;")
+        try:
+            dedup_team_players(
+                conn, team_id, season_id, manage_transaction=True,
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Standalone player-dedup failed for team_id=%d (non-fatal)",
+                team_id,
+                exc_info=True,
+            )
+        positioning_results: list = []
+        try:
+            positioning_results = compute_positioning(conn, team_id, season_id)
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Positioning recompute failed for team_id=%d (non-fatal)",
+                team_id,
+                exc_info=True,
+            )
+
+        # Tier 2 LLM rationale enrichment (E-228-07). Optional, non-fatal --
+        # `enrich_positioning` returns None on LLM unavailable (INFO log) or
+        # LLMError (WARNING log). Per-batter try/except so one batter's
+        # failure does not take out the rest of the lineup.
+        if is_llm_available():
+            for result in positioning_results:
+                # Tier 2 only runs for batters with a non-TRUE team-state call;
+                # `enrich_positioning` enforces this internally too.
+                if result.team_state_call == "TRUE":
+                    continue
+                try:
+                    rationale = enrich_positioning(result)
+                except Exception:  # noqa: BLE001
+                    logger.warning(
+                        "Tier 2 LLM enrichment failed for player_id=%s "
+                        "(non-fatal); call sheet renders without rationale.",
+                        result.player_id, exc_info=True,
+                    )
+                    continue
+                if rationale:
+                    positioning_rationales[result.player_id] = rationale
+        else:
+            logger.info(
+                "Tier 2 LLM unavailable for public_id=%s -- positioning "
+                "call sheet will render without rationales.",
+                public_id,
+            )
+
     # Step 5: Query stats, render, save, and mark ready — all in one
     # failure-handling block so the report never gets stuck in 'generating'.
     try:
@@ -1137,6 +1258,9 @@ def generate_report(gc_url: str) -> GenerationResult:
             recent_form = _query_recent_games(conn, team_id, season_id)
             freshness_date, game_count = _query_freshness(conn, team_id, season_id)
             spray_charts = _query_spray_charts(conn, team_id, season_id)
+            positioning_rows = _query_batter_positioning(
+                conn, team_id, season_id
+            )
             runs_scored_avg, runs_allowed_avg = _query_runs_avg(
                 conn, team_id, season_id
             )
@@ -1180,9 +1304,9 @@ def generate_report(gc_url: str) -> GenerationResult:
                         league=league,
                     )
 
-                    # Tier 2: LLM enrichment (optional, non-fatal)
-                    from src.llm.openrouter import is_llm_available
-
+                    # Tier 2: LLM enrichment (optional, non-fatal). The
+                    # `is_llm_available` import was hoisted to module level
+                    # in E-228-07; this block uses the same module-level name.
                     if is_llm_available():
                         try:
                             from src.reports.llm_analysis import enrich_prediction
@@ -1271,6 +1395,8 @@ def generate_report(gc_url: str) -> GenerationResult:
             "pitching": pitching,
             "batting": batting,
             "spray_charts": spray_charts,
+            "positioning_rows": positioning_rows,
+            "positioning_rationales": positioning_rationales,
             "roster": roster,
             "runs_scored_avg": runs_scored_avg,
             "runs_allowed_avg": runs_allowed_avg,

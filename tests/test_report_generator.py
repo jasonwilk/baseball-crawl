@@ -2461,3 +2461,854 @@ class TestPublicIdBackfill:
         ).fetchone()
         verify_conn.close()
         assert row[0] is None
+
+
+# ---------------------------------------------------------------------------
+# E-228-03: Standalone path -- dedup-gap fix + positioning recompute
+# ---------------------------------------------------------------------------
+# `load_real_schema` (in tests/conftest.py) applies the
+# 002_batter_positioning.sql migration as part of the base schema setup
+# (E-228-05), so individual fixtures here do NOT need to re-apply it.
+
+
+def _seed_minimal_pipeline_inputs(
+    db: sqlite3.Connection,
+    *,
+    team_id: int = 1,
+    season_id: str = "2026-spring-hs",
+    public_id: str = "abc123",
+    team_name: str = "Test Tigers",
+) -> None:
+    """Seed the minimum rows needed for `generate_report` mock-paths to run.
+
+    Covers: programs (implicit -- not needed), seasons, teams, scouting_runs.
+    """
+    db.execute(
+        "INSERT INTO teams (id, name, public_id, season_year, membership_type) "
+        "VALUES (?, ?, ?, 2026, 'tracked')",
+        (team_id, team_name, public_id),
+    )
+    db.execute(
+        "INSERT INTO seasons (season_id, name, season_type, year) "
+        "VALUES (?, ?, 'spring-hs', 2026)",
+        (season_id, season_id),
+    )
+    db.execute(
+        "INSERT INTO scouting_runs (team_id, season_id, run_type, started_at, status) "
+        "VALUES (?, ?, 'full', '2026-03-28T00:00:00Z', 'completed')",
+        (team_id, season_id),
+    )
+    db.commit()
+
+
+class TestStandalonePositioningWiring:
+    """E-228-03: standalone path runs dedup-then-recompute after spray/plays."""
+
+    @pytest.fixture()
+    def db_path(self, tmp_path):
+        """Disk-backed DB with 001 base schema + 002 batter_positioning."""
+        path = tmp_path / "test.db"
+        conn = sqlite3.connect(str(path))
+        load_real_schema(conn)
+        conn.commit()
+        conn.close()
+        return path
+
+    def _fresh_conn_factory(self, db_path):
+        def _factory():
+            conn = sqlite3.connect(str(db_path))
+            conn.execute("PRAGMA foreign_keys=ON;")
+            return conn
+        return _factory
+
+    def _mock_pipeline(self, mock_client_cls):
+        from src.gamechanger.crawlers.scouting import ScoutingCrawlResult
+        from src.gamechanger.loaders import LoadResult
+
+        mock_client = MagicMock()
+        mock_client_cls.return_value = mock_client
+        mock_crawler = MagicMock()
+        mock_crawler.scout_team.return_value = ScoutingCrawlResult(
+            team_id=1, season_id="2026-spring-hs",
+            games_crawled=5, games=[], boxscores={},
+        )
+        mock_loader = MagicMock()
+        mock_loader.load_team.return_value = LoadResult(loaded=5)
+        return mock_crawler, mock_loader
+
+    @patch("src.reports.generator.get_connection")
+    @patch("src.reports.generator.GameChangerClient")
+    @patch("src.reports.generator.ensure_team_row", return_value=1)
+    @patch("src.reports.generator.render_report", return_value="<html>ok</html>")
+    @patch("src.reports.generator._crawl_and_load_spray")
+    @patch("src.reports.generator._crawl_and_load_plays", return_value=[])
+    @patch(
+        "src.reports.generator.derive_season_id_for_team",
+        return_value=("2026-spring-hs", 2026),
+    )
+    def test_dedup_called_before_compute_positioning(
+        self, mock_derive, mock_plays, mock_spray, mock_render, mock_ensure,
+        mock_client_cls, mock_get_conn, db_path, tmp_path,
+    ):
+        """AC-1+AC-2: dedup_team_players runs BEFORE compute_positioning,
+        both receive (conn, team_id, season_id)."""
+        conn = sqlite3.connect(str(db_path))
+        _seed_minimal_pipeline_inputs(conn)
+        conn.close()
+
+        mock_get_conn.side_effect = self._fresh_conn_factory(db_path)
+        mock_crawler, mock_loader = self._mock_pipeline(mock_client_cls)
+
+        # Track call order across both targets.
+        call_order: list[tuple[str, int, str]] = []
+
+        def _dedup_capture(_conn, team_id, season_id, *, manage_transaction=True):
+            assert manage_transaction is True, "AC-1: must use manage_transaction=True"
+            call_order.append(("dedup", team_id, season_id))
+            return 0
+
+        def _compute_capture(_conn, team_id, season_id):
+            call_order.append(("compute", team_id, season_id))
+            return []
+
+        with (
+            patch("src.reports.generator.ScoutingCrawler", return_value=mock_crawler),
+            patch("src.reports.generator.ScoutingLoader", return_value=mock_loader),
+            patch("src.reports.generator._REPO_ROOT", tmp_path),
+            patch("src.reports.generator._REPORTS_DIR", tmp_path / "data" / "reports"),
+            patch("src.reports.generator.dedup_team_players",
+                  side_effect=_dedup_capture) as _dedup_mock,
+            patch("src.reports.generator.compute_positioning",
+                  side_effect=_compute_capture) as _compute_mock,
+        ):
+            result = generate_report("abc123")
+
+        assert result.success is True
+
+        # AC-1: dedup called with (team_id, season_id) and manage_transaction=True.
+        assert _dedup_mock.call_count == 1
+        # AC-2: compute_positioning called with (conn, team_id, season_id).
+        assert _compute_mock.call_count == 1
+
+        # AC-1 ordering: dedup precedes compute_positioning.
+        assert call_order == [
+            ("dedup", 1, "2026-spring-hs"),
+            ("compute", 1, "2026-spring-hs"),
+        ]
+
+    @patch("src.reports.generator.get_connection")
+    @patch("src.reports.generator.GameChangerClient")
+    @patch("src.reports.generator.ensure_team_row", return_value=1)
+    @patch("src.reports.generator.render_report", return_value="<html>ok</html>")
+    @patch("src.reports.generator._crawl_and_load_spray")
+    @patch("src.reports.generator._crawl_and_load_plays", return_value=[])
+    @patch(
+        "src.reports.generator.derive_season_id_for_team",
+        return_value=("2026-spring-hs", 2026),
+    )
+    def test_compute_positioning_failure_is_non_fatal(
+        self, mock_derive, mock_plays, mock_spray, mock_render, mock_ensure,
+        mock_client_cls, mock_get_conn, db_path, tmp_path, caplog,
+    ):
+        """AC-3: a raise from compute_positioning is logged at WARNING and
+        report generation continues to success."""
+        import logging
+
+        conn = sqlite3.connect(str(db_path))
+        _seed_minimal_pipeline_inputs(conn)
+        conn.close()
+
+        mock_get_conn.side_effect = self._fresh_conn_factory(db_path)
+        mock_crawler, mock_loader = self._mock_pipeline(mock_client_cls)
+
+        caplog.set_level(logging.WARNING, logger="src.reports.generator")
+
+        with (
+            patch("src.reports.generator.ScoutingCrawler", return_value=mock_crawler),
+            patch("src.reports.generator.ScoutingLoader", return_value=mock_loader),
+            patch("src.reports.generator._REPO_ROOT", tmp_path),
+            patch("src.reports.generator._REPORTS_DIR", tmp_path / "data" / "reports"),
+            patch("src.reports.generator.dedup_team_players", return_value=0),
+            patch(
+                "src.reports.generator.compute_positioning",
+                side_effect=RuntimeError("synthetic engine failure"),
+            ),
+        ):
+            result = generate_report("abc123")
+
+        # AC-3: report still succeeds.
+        assert result.success is True
+        # AC-3: failure logged at WARNING.
+        warnings = [
+            rec for rec in caplog.records
+            if rec.levelno == logging.WARNING
+            and "Positioning recompute failed" in rec.getMessage()
+        ]
+        assert warnings, "expected WARNING log for non-fatal recompute failure"
+
+    @patch("src.reports.generator.get_connection")
+    @patch("src.reports.generator.GameChangerClient")
+    @patch("src.reports.generator.ensure_team_row", return_value=1)
+    @patch("src.reports.generator.render_report", return_value="<html>ok</html>")
+    @patch("src.reports.generator._crawl_and_load_spray")
+    @patch("src.reports.generator._crawl_and_load_plays", return_value=[])
+    @patch(
+        "src.reports.generator.derive_season_id_for_team",
+        return_value=("2026-spring-hs", 2026),
+    )
+    def test_dedup_failure_is_non_fatal_and_recompute_still_runs(
+        self, mock_derive, mock_plays, mock_spray, mock_render, mock_ensure,
+        mock_client_cls, mock_get_conn, db_path, tmp_path, caplog,
+    ):
+        """Dedup failure must not block the recompute (engine still runs).
+
+        Symmetric to the AC-3 non-fatal recompute contract for the dedup
+        sweep, matching the pattern in `run_scouting_sync`.
+        """
+        import logging
+
+        conn = sqlite3.connect(str(db_path))
+        _seed_minimal_pipeline_inputs(conn)
+        conn.close()
+
+        mock_get_conn.side_effect = self._fresh_conn_factory(db_path)
+        mock_crawler, mock_loader = self._mock_pipeline(mock_client_cls)
+
+        caplog.set_level(logging.WARNING, logger="src.reports.generator")
+        recompute_invoked = []
+
+        def _compute_capture(_conn, team_id, season_id):
+            recompute_invoked.append((team_id, season_id))
+            return []
+
+        with (
+            patch("src.reports.generator.ScoutingCrawler", return_value=mock_crawler),
+            patch("src.reports.generator.ScoutingLoader", return_value=mock_loader),
+            patch("src.reports.generator._REPO_ROOT", tmp_path),
+            patch("src.reports.generator._REPORTS_DIR", tmp_path / "data" / "reports"),
+            patch(
+                "src.reports.generator.dedup_team_players",
+                side_effect=RuntimeError("synthetic dedup failure"),
+            ),
+            patch(
+                "src.reports.generator.compute_positioning",
+                side_effect=_compute_capture,
+            ),
+        ):
+            result = generate_report("abc123")
+
+        assert result.success is True
+        # Recompute ran even though dedup raised.
+        assert recompute_invoked == [(1, "2026-spring-hs")]
+        warnings = [
+            rec for rec in caplog.records
+            if rec.levelno == logging.WARNING
+            and "Standalone player-dedup failed" in rec.getMessage()
+        ]
+        assert warnings, "expected WARNING log for non-fatal dedup failure"
+
+    @patch("src.reports.generator.get_connection")
+    @patch("src.reports.generator.GameChangerClient")
+    @patch("src.reports.generator.ensure_team_row", return_value=1)
+    @patch("src.reports.generator.render_report", return_value="<html>ok</html>")
+    @patch("src.reports.generator._crawl_and_load_spray")
+    @patch("src.reports.generator._crawl_and_load_plays", return_value=[])
+    @patch(
+        "src.reports.generator.derive_season_id_for_team",
+        return_value=("2026-spring-hs", 2026),
+    )
+    def test_positioning_rows_written_with_real_engine(
+        self, mock_derive, mock_plays, mock_spray, mock_render, mock_ensure,
+        mock_client_cls, mock_get_conn, db_path, tmp_path,
+    ):
+        """AC-2 end-to-end: real `compute_positioning` populates
+        `batter_positioning` for the report team."""
+        conn = sqlite3.connect(str(db_path))
+        _seed_minimal_pipeline_inputs(conn)
+        # Seed a player + roster and 15 left-outfield BIPs so the real engine
+        # produces at least one populated per-position row (LF takes the lean).
+        conn.execute(
+            "INSERT INTO players (player_id, first_name, last_name) "
+            "VALUES (?, 'Hank', 'Aaron')",
+            ("p1",),
+        )
+        conn.execute(
+            "INSERT INTO team_rosters (team_id, player_id, season_id) "
+            "VALUES (1, 'p1', '2026-spring-hs')",
+        )
+        for i in range(15):
+            conn.execute(
+                """
+                INSERT INTO spray_charts (
+                    player_id, team_id, perspective_team_id, chart_type,
+                    play_result, play_type, x, y, season_id, event_gc_id
+                ) VALUES ('p1', 1, 1, 'offensive', 'single', 'fly_ball',
+                          50.0, 100.0, '2026-spring-hs', ?)
+                """,
+                (f"evt-{i}",),
+            )
+        conn.commit()
+        conn.close()
+
+        mock_get_conn.side_effect = self._fresh_conn_factory(db_path)
+        mock_crawler, mock_loader = self._mock_pipeline(mock_client_cls)
+
+        with (
+            patch("src.reports.generator.ScoutingCrawler", return_value=mock_crawler),
+            patch("src.reports.generator.ScoutingLoader", return_value=mock_loader),
+            patch("src.reports.generator._REPO_ROOT", tmp_path),
+            patch("src.reports.generator._REPORTS_DIR", tmp_path / "data" / "reports"),
+            # No patch on dedup_team_players or compute_positioning -- real engine runs.
+        ):
+            result = generate_report("abc123")
+
+        assert result.success is True
+
+        # batter_positioning should be populated for player p1 (6 position rows).
+        verify_conn = self._fresh_conn_factory(db_path)()
+        verify_conn.row_factory = sqlite3.Row
+        rows = verify_conn.execute(
+            "SELECT position, call_state, bip_count "
+            "FROM batter_positioning "
+            "WHERE player_id = ? AND team_id = ? AND season_id = ?",
+            ("p1", 1, "2026-spring-hs"),
+        ).fetchall()
+        verify_conn.close()
+        assert len(rows) == 6
+        by_position = {r["position"]: r for r in rows}
+        # LF takes the direction lean (15 left-outfield BIPs in LF responsibility).
+        assert by_position["LF"]["call_state"] == "LEFT"
+        # Other positions land at TRUE.
+        for position in ("SS", "2B", "3B", "CF", "RF"):
+            assert by_position[position]["call_state"] == "TRUE"
+        # bip_count is per-batter (15), denormalized.
+        for r in rows:
+            assert r["bip_count"] == 15
+
+    @patch("src.reports.generator.get_connection")
+    @patch("src.reports.generator.GameChangerClient")
+    @patch("src.reports.generator.ensure_team_row", return_value=1)
+    @patch("src.reports.generator.render_report", return_value="<html>ok</html>")
+    @patch("src.reports.generator._crawl_and_load_spray")
+    @patch("src.reports.generator._crawl_and_load_plays", return_value=[])
+    @patch(
+        "src.reports.generator.derive_season_id_for_team",
+        return_value=("2026-spring-hs", 2026),
+    )
+    def test_duplicate_player_merged_before_recompute(
+        self, mock_derive, mock_plays, mock_spray, mock_render, mock_ensure,
+        mock_client_cls, mock_get_conn, db_path, tmp_path,
+    ):
+        """AC-4: a cross-perspective duplicate player is merged BEFORE the
+        recompute, and `batter_positioning` reflects the merged BIP count."""
+        conn = sqlite3.connect(str(db_path))
+        _seed_minimal_pipeline_inputs(conn)
+        # Seed two duplicate players on the same team's roster: canonical
+        # 'Johnny Smith' and duplicate 'John Smith' (prefix-match detection).
+        conn.execute(
+            "INSERT INTO players (player_id, first_name, last_name) "
+            "VALUES ('canonical', 'Johnny', 'Smith')"
+        )
+        conn.execute(
+            "INSERT INTO players (player_id, first_name, last_name) "
+            "VALUES ('duplicate', 'John', 'Smith')"
+        )
+        conn.execute(
+            "INSERT INTO team_rosters (team_id, player_id, season_id) "
+            "VALUES (1, 'canonical', '2026-spring-hs')"
+        )
+        conn.execute(
+            "INSERT INTO team_rosters (team_id, player_id, season_id) "
+            "VALUES (1, 'duplicate', '2026-spring-hs')"
+        )
+        # Seed 8 left-outfield BIPs for canonical + 8 for duplicate -- separately
+        # each is below the 10-BIP per-batter thin gate, but merged they are 16
+        # (passes the per-batter gate AND the LF subset's direction gate).
+        for i in range(8):
+            conn.execute(
+                """
+                INSERT INTO spray_charts (
+                    player_id, team_id, perspective_team_id, chart_type,
+                    play_result, play_type, x, y, season_id, event_gc_id
+                ) VALUES ('canonical', 1, 1, 'offensive', 'single', 'fly_ball',
+                          50.0, 100.0, '2026-spring-hs', ?)
+                """,
+                (f"evt-canon-{i}",),
+            )
+        for i in range(8):
+            conn.execute(
+                """
+                INSERT INTO spray_charts (
+                    player_id, team_id, perspective_team_id, chart_type,
+                    play_result, play_type, x, y, season_id, event_gc_id
+                ) VALUES ('duplicate', 1, 1, 'offensive', 'single', 'fly_ball',
+                          50.0, 100.0, '2026-spring-hs', ?)
+                """,
+                (f"evt-dup-{i}",),
+            )
+        conn.commit()
+        conn.close()
+
+        mock_get_conn.side_effect = self._fresh_conn_factory(db_path)
+        mock_crawler, mock_loader = self._mock_pipeline(mock_client_cls)
+
+        with (
+            patch("src.reports.generator.ScoutingCrawler", return_value=mock_crawler),
+            patch("src.reports.generator.ScoutingLoader", return_value=mock_loader),
+            patch("src.reports.generator._REPO_ROOT", tmp_path),
+            patch("src.reports.generator._REPORTS_DIR", tmp_path / "data" / "reports"),
+            # Real dedup_team_players AND compute_positioning -- no patches here.
+        ):
+            result = generate_report("abc123")
+
+        assert result.success is True
+
+        verify_conn = self._fresh_conn_factory(db_path)()
+        verify_conn.row_factory = sqlite3.Row
+        # The duplicate row should have been deleted (merged into canonical).
+        remaining_dups = verify_conn.execute(
+            "SELECT player_id FROM players WHERE player_id = 'duplicate'"
+        ).fetchall()
+        # batter_positioning should have rows only under the canonical player
+        # and bip_count should be 16 (8 canonical + 8 merged-in duplicate).
+        rows = verify_conn.execute(
+            "SELECT position, bip_count, call_state FROM batter_positioning "
+            "WHERE player_id = 'canonical' AND team_id = 1",
+        ).fetchall()
+        no_dup_rows = verify_conn.execute(
+            "SELECT COUNT(*) c FROM batter_positioning WHERE player_id = 'duplicate'"
+        ).fetchone()["c"]
+        verify_conn.close()
+
+        assert remaining_dups == [], "duplicate player should have been merged out"
+        assert len(rows) == 6, "canonical should have one batter_positioning row per position"
+        # bip_count is denormalized -- every row carries 16.
+        for r in rows:
+            assert r["bip_count"] == 16
+        # LF passes the per-position direction gate at 16 BIP -- the merge made
+        # this possible (each stub alone was below the per-batter thin gate).
+        lf_row = next(r for r in rows if r["position"] == "LF")
+        assert lf_row["call_state"] == "LEFT"
+        # Confirm: no orphan batter_positioning rows under the duplicate player_id.
+        assert no_dup_rows == 0
+
+
+# ---------------------------------------------------------------------------
+# E-228-05: _query_batter_positioning
+# ---------------------------------------------------------------------------
+
+
+class TestQueryBatterPositioning:
+    """E-228-05: the report query function that reads `batter_positioning`
+    JOIN players LEFT JOIN team_rosters for the standalone perspective."""
+
+    @pytest.fixture()
+    def conn(self, tmp_path):
+        path = tmp_path / "test.db"
+        conn = sqlite3.connect(str(path))
+        conn.row_factory = sqlite3.Row
+        load_real_schema(conn)
+        # Common seed: one team, one season, two players (with + without jersey).
+        conn.execute(
+            "INSERT INTO teams (id, name, public_id, season_year, membership_type) "
+            "VALUES (1, 'Eastlake Bears', 'eastlake', 2026, 'tracked')"
+        )
+        conn.execute(
+            "INSERT INTO seasons (season_id, name, season_type, year) "
+            "VALUES ('2026-spring-hs', '2026', 'spring-hs', 2026)"
+        )
+        conn.execute(
+            "INSERT INTO players (player_id, first_name, last_name) "
+            "VALUES ('p1', 'Hank', 'Ramirez')"
+        )
+        conn.execute(
+            "INSERT INTO players (player_id, first_name, last_name) "
+            "VALUES ('p2', 'Test', 'Thompson')"
+        )
+        conn.execute(
+            "INSERT INTO team_rosters (team_id, player_id, season_id, jersey_number) "
+            "VALUES (1, 'p1', '2026-spring-hs', '7')"
+        )
+        # p2 intentionally has no roster row -- left join should yield NULL jersey.
+        # Six batter_positioning rows for p1 (one per covered position).
+        positions = ("SS", "2B", "3B", "LF", "CF", "RF")
+        for position in positions:
+            conn.execute(
+                """
+                INSERT INTO batter_positioning (
+                    player_id, team_id, season_id, perspective_team_id, position,
+                    call_state, team_state_call, direction_shade, depth_shade,
+                    bip_count, hr_count, is_thin, zone_concentration
+                ) VALUES ('p1', 1, '2026-spring-hs', 1, ?, 'LEFT', 'LEFT',
+                          'left', NULL, 38, 2, 0, 0.65)
+                """,
+                (position,),
+            )
+        # Six rows for p2 (same team_id and perspective_team_id, different
+        # player -- both p1 and p2 surface in the standalone perspective
+        # result. Cross-perspective exclusion is tested separately in
+        # test_filters_by_perspective_team_id_matching_team_id below.
+        for position in positions:
+            conn.execute(
+                """
+                INSERT INTO batter_positioning (
+                    player_id, team_id, season_id, perspective_team_id, position,
+                    call_state, team_state_call, direction_shade, depth_shade,
+                    bip_count, hr_count, is_thin, zone_concentration
+                ) VALUES ('p2', 1, '2026-spring-hs', 1, ?, 'TRUE', 'TRUE',
+                          NULL, NULL, 27, 0, 0, NULL)
+                """,
+                (position,),
+            )
+        conn.commit()
+        yield conn
+        conn.close()
+
+    def test_returns_one_row_per_player_position(self, conn):
+        from src.reports.generator import _query_batter_positioning
+        rows = _query_batter_positioning(conn, 1, "2026-spring-hs")
+        # 2 players * 6 positions = 12 rows.
+        assert len(rows) == 12
+        assert {r["player_id"] for r in rows} == {"p1", "p2"}
+        assert {r["position"] for r in rows} == {"SS", "2B", "3B", "LF", "CF", "RF"}
+
+    def test_includes_player_name_and_jersey_columns(self, conn):
+        from src.reports.generator import _query_batter_positioning
+        rows = _query_batter_positioning(conn, 1, "2026-spring-hs")
+        p1 = [r for r in rows if r["player_id"] == "p1"][0]
+        assert p1["first_name"] == "Hank"
+        assert p1["last_name"] == "Ramirez"
+        assert p1["jersey_number"] == "7"
+        # p2 has no roster row -- jersey_number is NULL via LEFT JOIN.
+        p2 = [r for r in rows if r["player_id"] == "p2"][0]
+        assert p2["jersey_number"] is None
+        assert p2["last_name"] == "Thompson"
+
+    def test_returns_full_batter_positioning_column_set(self, conn):
+        """Query must surface every non-PK column the renderer/Tier 2 reads."""
+        from src.reports.generator import _query_batter_positioning
+        rows = _query_batter_positioning(conn, 1, "2026-spring-hs")
+        expected_keys = {
+            "player_id", "position", "call_state", "team_state_call",
+            "direction_shade", "depth_shade",
+            "bip_count", "hr_count", "is_thin", "zone_concentration",
+            "direction_deviation", "depth_deviation",
+            "first_name", "last_name", "jersey_number",
+        }
+        assert set(rows[0].keys()) == expected_keys
+
+    def test_filters_by_perspective_team_id_matching_team_id(self, conn):
+        """Standalone perspective: perspective_team_id == team_id."""
+        from src.reports.generator import _query_batter_positioning
+        # Add a row for a different perspective (e.g. a member team scouting).
+        conn.execute(
+            """
+            INSERT INTO teams (id, name, membership_type)
+            VALUES (99, 'Other LSB', 'member')
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO batter_positioning (
+                player_id, team_id, season_id, perspective_team_id, position,
+                call_state, team_state_call, direction_shade, depth_shade,
+                bip_count, hr_count, is_thin, zone_concentration
+            ) VALUES ('p1', 1, '2026-spring-hs', 99, 'SS', 'TRUE', 'TRUE',
+                      NULL, NULL, 30, 0, 0, NULL)
+            """
+        )
+        conn.commit()
+        rows = _query_batter_positioning(conn, 1, "2026-spring-hs")
+        # Still 12 rows -- the other-perspective row is excluded.
+        assert len(rows) == 12
+        # No row from perspective_team_id=99 surfaced.
+        # (Query doesn't return perspective_team_id, but the count guarantees it.)
+
+    def test_returns_empty_list_when_no_rows(self, conn):
+        from src.reports.generator import _query_batter_positioning
+        rows = _query_batter_positioning(conn, 1, "2027-fall")
+        assert rows == []
+
+
+# ---------------------------------------------------------------------------
+# E-228-07: Tier 2 LLM wiring in generate_report
+# ---------------------------------------------------------------------------
+
+
+class TestTier2LLMWiringInGenerateReport:
+    """E-228-07 wiring: `generate_report` calls `enrich_positioning` for
+    each flagged batter when `is_llm_available()` is True, and threads the
+    returned rationales into the render data dict. LLM unavailable -> Tier
+    2 skipped, INFO log, no rationale calls."""
+
+    @pytest.fixture()
+    def db_path(self, tmp_path):
+        """Disk-backed DB matching the E-228-03 fixture pattern."""
+        path = tmp_path / "test.db"
+        conn = sqlite3.connect(str(path))
+        load_real_schema(conn)
+        conn.commit()
+        conn.close()
+        return path
+
+    def _fresh_conn_factory(self, db_path):
+        def _factory():
+            conn = sqlite3.connect(str(db_path))
+            conn.execute("PRAGMA foreign_keys=ON;")
+            return conn
+        return _factory
+
+    def _mock_pipeline(self, mock_client_cls):
+        from src.gamechanger.crawlers.scouting import ScoutingCrawlResult
+        from src.gamechanger.loaders import LoadResult
+
+        mock_client = MagicMock()
+        mock_client_cls.return_value = mock_client
+        mock_crawler = MagicMock()
+        mock_crawler.scout_team.return_value = ScoutingCrawlResult(
+            team_id=1, season_id="2026-spring-hs",
+            games_crawled=5, games=[], boxscores={},
+        )
+        mock_loader = MagicMock()
+        mock_loader.load_team.return_value = LoadResult(loaded=5)
+        return mock_crawler, mock_loader
+
+    @patch("src.reports.generator.get_connection")
+    @patch("src.reports.generator.GameChangerClient")
+    @patch("src.reports.generator.ensure_team_row", return_value=1)
+    @patch("src.reports.generator.render_report", return_value="<html>ok</html>")
+    @patch("src.reports.generator._crawl_and_load_spray")
+    @patch("src.reports.generator._crawl_and_load_plays", return_value=[])
+    @patch(
+        "src.reports.generator.derive_season_id_for_team",
+        return_value=("2026-spring-hs", 2026),
+    )
+    def test_tier2_skipped_when_llm_unavailable(
+        self, mock_derive, mock_plays, mock_spray, mock_render, mock_ensure,
+        mock_client_cls, mock_get_conn, db_path, tmp_path, monkeypatch,
+    ):
+        """AC-2: `is_llm_available()` false -> Tier 2 skipped at the
+        generator level; `enrich_positioning` is never called."""
+        _seed_minimal_pipeline_inputs(
+            sqlite3.connect(str(db_path))
+        )
+
+        mock_get_conn.side_effect = self._fresh_conn_factory(db_path)
+        mock_crawler, mock_loader = self._mock_pipeline(mock_client_cls)
+
+        with (
+            patch("src.reports.generator.ScoutingCrawler", return_value=mock_crawler),
+            patch("src.reports.generator.ScoutingLoader", return_value=mock_loader),
+            patch("src.reports.generator._REPO_ROOT", tmp_path),
+            patch("src.reports.generator._REPORTS_DIR", tmp_path / "data" / "reports"),
+            patch("src.reports.generator.dedup_team_players", return_value=0),
+            # `compute_positioning` returns a synthetic result list with one
+            # flagged batter -- if Tier 2 wiring runs, it would be invoked.
+            patch(
+                "src.reports.generator.compute_positioning",
+                return_value=[_make_tier1_result_for_wiring_test()],
+            ),
+            patch(
+                "src.reports.generator.enrich_positioning",
+            ) as mock_enrich,
+            patch(
+                "src.reports.generator.is_llm_available", return_value=False,
+            ),
+        ):
+            result = generate_report("abc123")
+
+        assert result.success is True
+        # AC-2: Tier 2 not invoked at all when LLM is unavailable.
+        mock_enrich.assert_not_called()
+
+    @patch("src.reports.generator.get_connection")
+    @patch("src.reports.generator.GameChangerClient")
+    @patch("src.reports.generator.ensure_team_row", return_value=1)
+    @patch("src.reports.generator.render_report", return_value="<html>ok</html>")
+    @patch("src.reports.generator._crawl_and_load_spray")
+    @patch("src.reports.generator._crawl_and_load_plays", return_value=[])
+    @patch(
+        "src.reports.generator.derive_season_id_for_team",
+        return_value=("2026-spring-hs", 2026),
+    )
+    def test_tier2_invoked_for_flagged_batters_when_llm_available(
+        self, mock_derive, mock_plays, mock_spray, mock_render, mock_ensure,
+        mock_client_cls, mock_get_conn, db_path, tmp_path,
+    ):
+        """AC-3 wiring: when `is_llm_available()` is True, the generator
+        invokes `enrich_positioning` once per flagged (non-TRUE) batter
+        and threads the rationale into the data dict."""
+        _seed_minimal_pipeline_inputs(
+            sqlite3.connect(str(db_path))
+        )
+
+        mock_get_conn.side_effect = self._fresh_conn_factory(db_path)
+        mock_crawler, mock_loader = self._mock_pipeline(mock_client_cls)
+
+        flagged = _make_tier1_result_for_wiring_test(
+            player_id="flagged-p1", team_state_call="LEFT",
+        )
+        true_batter = _make_tier1_result_for_wiring_test(
+            player_id="true-p2", team_state_call="TRUE",
+        )
+
+        rendered_context: dict = {}
+
+        def _capture_render(data):
+            rendered_context.update(data)
+            return "<html>ok</html>"
+
+        with (
+            patch("src.reports.generator.ScoutingCrawler", return_value=mock_crawler),
+            patch("src.reports.generator.ScoutingLoader", return_value=mock_loader),
+            patch("src.reports.generator._REPO_ROOT", tmp_path),
+            patch("src.reports.generator._REPORTS_DIR", tmp_path / "data" / "reports"),
+            patch("src.reports.generator.dedup_team_players", return_value=0),
+            patch(
+                "src.reports.generator.compute_positioning",
+                return_value=[flagged, true_batter],
+            ),
+            patch(
+                "src.reports.generator.enrich_positioning",
+                return_value="A short, valid-looking rationale string.",
+            ) as mock_enrich,
+            patch(
+                "src.reports.generator.is_llm_available", return_value=True,
+            ),
+            patch("src.reports.generator.render_report",
+                  side_effect=_capture_render),
+        ):
+            result = generate_report("abc123")
+
+        assert result.success is True
+        # Tier 2 called ONCE -- only for the flagged batter, not the TRUE one.
+        assert mock_enrich.call_count == 1
+        called_with = mock_enrich.call_args[0][0]
+        assert called_with.player_id == "flagged-p1"
+        # Rationale threaded into the data dict for the renderer.
+        assert "positioning_rationales" in rendered_context
+        assert (
+            rendered_context["positioning_rationales"].get("flagged-p1")
+            == "A short, valid-looking rationale string."
+        )
+
+    @patch("src.reports.generator.get_connection")
+    @patch("src.reports.generator.GameChangerClient")
+    @patch("src.reports.generator.ensure_team_row", return_value=1)
+    @patch("src.reports.generator.render_report", return_value="<html>ok</html>")
+    @patch("src.reports.generator._crawl_and_load_spray")
+    @patch("src.reports.generator._crawl_and_load_plays", return_value=[])
+    @patch(
+        "src.reports.generator.derive_season_id_for_team",
+        return_value=("2026-spring-hs", 2026),
+    )
+    def test_tier2_per_batter_failure_non_fatal(
+        self, mock_derive, mock_plays, mock_spray, mock_render, mock_ensure,
+        mock_client_cls, mock_get_conn, db_path, tmp_path, caplog,
+    ):
+        """One batter's enrich_positioning raise must NOT prevent the
+        rest of the lineup from getting rationales (independent per-batter
+        try/except)."""
+        import logging
+        _seed_minimal_pipeline_inputs(
+            sqlite3.connect(str(db_path))
+        )
+
+        mock_get_conn.side_effect = self._fresh_conn_factory(db_path)
+        mock_crawler, mock_loader = self._mock_pipeline(mock_client_cls)
+
+        batter_a = _make_tier1_result_for_wiring_test(
+            player_id="bad-p1", team_state_call="LEFT",
+        )
+        batter_b = _make_tier1_result_for_wiring_test(
+            player_id="good-p2", team_state_call="RIGHT",
+        )
+
+        def _enrich_side_effect(result):
+            if result.player_id == "bad-p1":
+                raise RuntimeError("synthetic per-batter failure")
+            return "Valid rationale for the second batter."
+
+        rendered_context: dict = {}
+        def _capture_render(data):
+            rendered_context.update(data)
+            return "<html>ok</html>"
+
+        caplog.set_level(logging.WARNING, logger="src.reports.generator")
+
+        with (
+            patch("src.reports.generator.ScoutingCrawler", return_value=mock_crawler),
+            patch("src.reports.generator.ScoutingLoader", return_value=mock_loader),
+            patch("src.reports.generator._REPO_ROOT", tmp_path),
+            patch("src.reports.generator._REPORTS_DIR", tmp_path / "data" / "reports"),
+            patch("src.reports.generator.dedup_team_players", return_value=0),
+            patch(
+                "src.reports.generator.compute_positioning",
+                return_value=[batter_a, batter_b],
+            ),
+            patch(
+                "src.reports.generator.enrich_positioning",
+                side_effect=_enrich_side_effect,
+            ),
+            patch(
+                "src.reports.generator.is_llm_available", return_value=True,
+            ),
+            patch("src.reports.generator.render_report",
+                  side_effect=_capture_render),
+        ):
+            result = generate_report("abc123")
+
+        assert result.success is True
+        # Second batter's rationale survives the first's failure.
+        rationales = rendered_context["positioning_rationales"]
+        assert "bad-p1" not in rationales
+        assert rationales.get("good-p2") == "Valid rationale for the second batter."
+        # WARNING logged for the failed batter.
+        warnings = [
+            r for r in caplog.records
+            if r.levelno == logging.WARNING
+            and "Tier 2 LLM enrichment failed" in r.getMessage()
+        ]
+        assert warnings
+
+
+def _make_tier1_result_for_wiring_test(
+    *, player_id: str = "p-flagged", team_state_call: str = "LEFT",
+):
+    """Build a minimal `BatterPositioningResult` for generator wiring tests."""
+    from src.reports.positioning import (
+        BatterPositioningResult,
+        PerPositionRow,
+        PerZoneAggregation,
+    )
+
+    positions = ("LF", "CF", "RF", "3B", "SS", "2B")
+    rows = tuple(
+        PerPositionRow(
+            position=p,
+            call_state=("LEFT" if (p == "LF" and team_state_call != "TRUE") else "TRUE"),
+            team_state_call=team_state_call,
+            direction_shade=None,
+            depth_shade=None,
+            bip_count=20,
+            hr_count=1,
+            is_thin=0,
+            zone_concentration=None,
+            direction_deviation=None,
+            depth_deviation=None,
+        )
+        for p in positions
+    )
+    return BatterPositioningResult(
+        player_id=player_id,
+        team_id=1,
+        season_id="2026-spring-hs",
+        perspective_team_id=1,
+        per_position_rows=rows,
+        team_state_call=team_state_call,
+        zone_aggregation=PerZoneAggregation(
+            entries=(),
+            zone_totals={"left": 10, "center": 6, "right": 4},
+            contact_type_totals={"gb": 8, "ld": 8, "fb": 4},
+        ),
+    )

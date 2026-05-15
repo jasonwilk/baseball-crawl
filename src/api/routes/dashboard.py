@@ -1718,6 +1718,44 @@ async def opponent_detail(request: Request, opponent_team_id: int) -> Response:
             game_coverage["latest_game_date"], game_coverage["game_count"]
         )
 
+    # E-228-07 AC-4: Defensive Positioning card -- link target + empty state.
+    # Looks up the most-recent `ready` AND non-expired report for this
+    # opponent. Pure read -- never triggers generation. Under (B) Pre-generate
+    # from E-228-06 the scout pipeline produces the bundle, so for an
+    # actively-scouted opponent this resolves to a real artifact; otherwise
+    # the template renders a "cards will appear after the next scouting
+    # update" empty state.
+    positioning_report = await run_in_threadpool(
+        db.get_latest_ready_report, opponent_team_id,
+    )
+    positioning_report_context: dict[str, Any] | None = None
+    if positioning_report:
+        # E-228-04 §8.3(b): the freshness cue MUST reflect the displayed
+        # report's coverage, NOT the team's current coverage. If the latest
+        # scout failed mid-pipeline (E-228-06 AC-6a non-fatal path) the
+        # displayed report can be older than the team's current scout data,
+        # so reusing the live `coverage_text` would overstate what's in
+        # the linked report. We surface the report's own `generated_at`
+        # date as the cue instead (degraded format: no "N games" because
+        # the report row does not carry game_count metadata).
+        report_cue: str | None = None
+        report_gen = positioning_report.get("generated_at")
+        if report_gen:
+            try:
+                gen_dt = datetime.datetime.strptime(
+                    report_gen[:10], "%Y-%m-%d",
+                )
+                report_cue = (
+                    f"Through {gen_dt.strftime('%b')} {gen_dt.day}"
+                )
+            except (ValueError, TypeError):
+                report_cue = None
+        positioning_report_context = {
+            "slug": positioning_report["slug"],
+            "generated_at": positioning_report["generated_at"],
+            "coverage_text": report_cue,
+        }
+
     logger.debug(
         "Opponent detail: opponent=%s season_id=%s empty_state=%s bat_sort=%s pit_sort=%s",
         opponent_team_id, season_id, empty_state, bat_sort, pit_sort,
@@ -1752,6 +1790,7 @@ async def opponent_detail(request: Request, opponent_team_id: int) -> Response:
             "team_spray_contacts": team_spray_contacts,
             "coverage_text": coverage_text,
             "starter_prediction": starter_prediction,
+            "positioning_report": positioning_report_context,
         },
     )
 

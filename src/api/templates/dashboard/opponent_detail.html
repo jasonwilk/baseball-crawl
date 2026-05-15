@@ -463,6 +463,32 @@ Scout: {{ scouting_report.team_name if scouting_report else opponent_team_id }}
 <p class="text-gray-600 mb-6">No batting stats available.</p>
 {% endif %}
 
+{# E-228-07 AC-4: Defensive Positioning card.
+   Placed immediately before the Team Spray Chart per E-228-04 §8.1 / D7
+   (positioning is the downstream actionable artifact of the spray data;
+   adjacency reads naturally as "here's where they hit -> here are your
+   positioning cards"). Pure read -- a real link to an existing report
+   when one is ready, or a transitional empty state otherwise (TN-7 (B)
+   Pre-generate). NOT an on-click generate. #}
+<div class="mb-4 bg-white rounded shadow border border-gray-200 p-4">
+  <div class="flex items-baseline justify-between mb-2">
+    <h2 class="text-base font-bold text-blue-900">Defensive Positioning</h2>
+    {% if positioning_report and positioning_report.coverage_text %}
+    <span class="text-xs text-gray-500">{{ positioning_report.coverage_text }}</span>
+    {% endif %}
+  </div>
+  {% if positioning_report and positioning_report.slug %}
+  <a href="/reports/{{ positioning_report.slug }}"
+     class="inline-block bg-blue-900 text-white px-4 py-2 rounded text-sm hover:bg-blue-800">
+    Open positioning cards &rarr;
+  </a>
+  <p class="text-xs text-gray-500 mt-2">Print-ready: landscape call sheet + 6 player cards.</p>
+  {% else %}
+  <p class="text-sm text-gray-700">Positioning cards generate automatically with each scouting update.</p>
+  <p class="text-xs text-gray-500 mt-1">Cards will appear after the next scouting update.</p>
+  {% endif %}
+</div>
+
 {# Team Spray Chart card (TN-6, AC-1) #}
 <div class="mb-4 bg-white rounded shadow border border-gray-200 p-4">
   <h2 class="text-base font-bold text-blue-900 mb-1">Team Spray Chart</h2>

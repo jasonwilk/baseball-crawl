@@ -1650,3 +1650,325 @@ class TestE181EmptyStateUnlinked:
         assert resp.status_code == 200
         assert "Ask your admin to link this team." in resp.text
         assert "Link this team" not in resp.text
+
+
+# ---------------------------------------------------------------------------
+# E-228-07: Defensive Positioning dashboard card (AC-4)
+# ---------------------------------------------------------------------------
+
+
+class TestDefensivePositioningCard:
+    """E-228-07 AC-4: opponent dashboard surfaces a `Defensive Positioning`
+    card that links to the latest `ready` report, with a transitional
+    empty state when no ready report exists (epic TN-7 (B) Pre-generate)."""
+
+    def _insert_ready_report(
+        self, conn: sqlite3.Connection, team_id: int, slug: str,
+        generated_at: str = "2026-04-12T12:00:00Z",
+    ) -> None:
+        conn.execute(
+            "INSERT INTO reports (slug, team_id, title, status, generated_at, "
+            "expires_at, report_path) "
+            "VALUES (?, ?, 'Scouting Report', 'ready', ?, "
+            "'2099-12-31T00:00:00Z', ?)",
+            (slug, team_id, generated_at, f"reports/{slug}.html"),
+        )
+
+    def test_link_renders_when_ready_report_exists(self, tmp_path):
+        db_path, member_id, opp_id, _ = _make_full_db(tmp_path)
+        with sqlite3.connect(str(db_path)) as conn:
+            self._insert_ready_report(conn, opp_id, "test-positioning-slug")
+
+        env = {"DATABASE_PATH": str(db_path), "DEV_USER_EMAIL": _USER_EMAIL}
+        with patch.dict("os.environ", env):
+            with TestClient(app) as client:
+                resp = client.get(
+                    f"/dashboard/opponents/{opp_id}",
+                    params={"team_id": member_id, "season_id": _SEASON_ID},
+                )
+
+        assert resp.status_code == 200
+        body = resp.text
+        # Defensive Positioning heading present.
+        assert "Defensive Positioning" in body
+        # Link points at the report.
+        assert "/reports/test-positioning-slug" in body
+        # CTA text.
+        assert "Open positioning cards" in body
+        # Empty state should NOT appear when a ready report exists.
+        assert "Cards will appear after the next scouting update" not in body
+
+    def test_empty_state_renders_when_no_ready_report(self, tmp_path):
+        """AC-4: tracked team with no ready report shows the transitional
+        empty state (no positioning link)."""
+        db_path, member_id, opp_id, _ = _make_full_db(tmp_path)
+        # No report row inserted.
+        env = {"DATABASE_PATH": str(db_path), "DEV_USER_EMAIL": _USER_EMAIL}
+        with patch.dict("os.environ", env):
+            with TestClient(app) as client:
+                resp = client.get(
+                    f"/dashboard/opponents/{opp_id}",
+                    params={"team_id": member_id, "season_id": _SEASON_ID},
+                )
+
+        assert resp.status_code == 200
+        body = resp.text
+        # Defensive Positioning heading still present (card always renders).
+        assert "Defensive Positioning" in body
+        # Empty-state copy.
+        assert "Cards will appear after the next scouting update" in body
+        # No link.
+        assert "Open positioning cards" not in body
+
+    def test_latest_ready_report_wins_over_older_ready_report(self, tmp_path):
+        """When multiple ready reports exist, the link resolves to the
+        most-recently-generated one (E-228-07 AC-4 query contract)."""
+        db_path, member_id, opp_id, _ = _make_full_db(tmp_path)
+        with sqlite3.connect(str(db_path)) as conn:
+            self._insert_ready_report(
+                conn, opp_id, "older-slug",
+                generated_at="2026-04-01T12:00:00Z",
+            )
+            self._insert_ready_report(
+                conn, opp_id, "newer-slug",
+                generated_at="2026-04-12T12:00:00Z",
+            )
+
+        env = {"DATABASE_PATH": str(db_path), "DEV_USER_EMAIL": _USER_EMAIL}
+        with patch.dict("os.environ", env):
+            with TestClient(app) as client:
+                resp = client.get(
+                    f"/dashboard/opponents/{opp_id}",
+                    params={"team_id": member_id, "season_id": _SEASON_ID},
+                )
+
+        assert resp.status_code == 200
+        body = resp.text
+        assert "/reports/newer-slug" in body
+        assert "/reports/older-slug" not in body
+
+    def test_non_ready_status_excluded(self, tmp_path):
+        """Reports in `generating` or `failed` status must NOT be linked
+        (AC-4: only `ready` reports)."""
+        db_path, member_id, opp_id, _ = _make_full_db(tmp_path)
+        with sqlite3.connect(str(db_path)) as conn:
+            conn.execute(
+                "INSERT INTO reports (slug, team_id, title, status, "
+                "generated_at, expires_at) "
+                "VALUES ('generating-slug', ?, 'Report', 'generating', "
+                "'2026-04-12T12:00:00Z', '2099-12-31T00:00:00Z')",
+                (opp_id,),
+            )
+            conn.execute(
+                "INSERT INTO reports (slug, team_id, title, status, "
+                "generated_at, expires_at) "
+                "VALUES ('failed-slug', ?, 'Report', 'failed', "
+                "'2026-04-12T12:00:00Z', '2099-12-31T00:00:00Z')",
+                (opp_id,),
+            )
+
+        env = {"DATABASE_PATH": str(db_path), "DEV_USER_EMAIL": _USER_EMAIL}
+        with patch.dict("os.environ", env):
+            with TestClient(app) as client:
+                resp = client.get(
+                    f"/dashboard/opponents/{opp_id}",
+                    params={"team_id": member_id, "season_id": _SEASON_ID},
+                )
+
+        assert resp.status_code == 200
+        body = resp.text
+        # Neither generating nor failed-status report should be linked.
+        assert "/reports/generating-slug" not in body
+        assert "/reports/failed-slug" not in body
+        # Empty-state copy is present (no ready report).
+        assert "Cards will appear after the next scouting update" in body
+
+    def test_positioning_card_appears_before_team_spray_chart(self, tmp_path):
+        """E-228-04 §8.1 / D7: card placement immediately before the
+        Team Spray Chart card. Reads naturally as 'spray data -> cards'."""
+        db_path, member_id, opp_id, _ = _make_full_db(tmp_path)
+        env = {"DATABASE_PATH": str(db_path), "DEV_USER_EMAIL": _USER_EMAIL}
+        with patch.dict("os.environ", env):
+            with TestClient(app) as client:
+                resp = client.get(
+                    f"/dashboard/opponents/{opp_id}",
+                    params={"team_id": member_id, "season_id": _SEASON_ID},
+                )
+        assert resp.status_code == 200
+        body = resp.text
+        pos_idx = body.find("Defensive Positioning")
+        spray_idx = body.find("Team Spray Chart")
+        assert pos_idx != -1
+        assert spray_idx != -1
+        assert pos_idx < spray_idx, (
+            "Defensive Positioning card must render BEFORE Team Spray Chart"
+        )
+
+    def test_get_latest_ready_report_helper(self, tmp_path):
+        """Unit test of the `db.get_latest_ready_report` helper itself."""
+        db_path = _make_db(tmp_path)
+        with sqlite3.connect(str(db_path)) as conn:
+            conn.execute("PRAGMA foreign_keys=ON")
+            member_id = _insert_member_team(conn, "LSB Varsity")
+            opp_id = _insert_opponent_team(conn, "Lions")
+            conn.execute("INSERT INTO reports (slug, team_id, title, "
+                         "status, generated_at, expires_at) VALUES "
+                         "('old-ready', ?, 'X', 'ready', "
+                         "'2026-04-01T12:00:00Z', '2099-12-31T00:00:00Z')",
+                         (opp_id,))
+            conn.execute("INSERT INTO reports (slug, team_id, title, "
+                         "status, generated_at, expires_at) VALUES "
+                         "('new-ready', ?, 'X', 'ready', "
+                         "'2026-04-12T12:00:00Z', '2099-12-31T00:00:00Z')",
+                         (opp_id,))
+            conn.execute("INSERT INTO reports (slug, team_id, title, "
+                         "status, generated_at, expires_at) VALUES "
+                         "('generating', ?, 'X', 'generating', "
+                         "'2026-04-20T12:00:00Z', '2099-12-31T00:00:00Z')",
+                         (opp_id,))
+
+        env = {"DATABASE_PATH": str(db_path)}
+        with patch.dict("os.environ", env):
+            from src.api.db import get_latest_ready_report
+            result = get_latest_ready_report(opp_id)
+            assert result is not None
+            assert result["slug"] == "new-ready"
+            assert result["generated_at"] == "2026-04-12T12:00:00Z"
+            # Returns None for a team with no ready report.
+            assert get_latest_ready_report(member_id) is None
+
+    # -----------------------------------------------------------------
+    # Codex Phase 4b remediation tests
+    # -----------------------------------------------------------------
+
+    def test_expired_report_excluded_helper_returns_non_expired(
+        self, tmp_path,
+    ):
+        """Codex finding #2: when both an expired and a non-expired ready
+        report exist for a team, `get_latest_ready_report` returns the
+        non-expired one even when the expired one has a later
+        `generated_at`."""
+        db_path = _make_db(tmp_path)
+        with sqlite3.connect(str(db_path)) as conn:
+            conn.execute("PRAGMA foreign_keys=ON")
+            _ = _insert_member_team(conn, "LSB Varsity")
+            opp_id = _insert_opponent_team(conn, "Lions")
+            # An expired report with a later generated_at (would win on
+            # naive ORDER BY if expiry weren't filtered).
+            conn.execute(
+                "INSERT INTO reports (slug, team_id, title, status, "
+                "generated_at, expires_at) VALUES "
+                "('expired-newer', ?, 'X', 'ready', "
+                "'2026-04-20T12:00:00Z', '2026-04-21T00:00:00Z')",
+                (opp_id,),
+            )
+            # A non-expired report with an earlier generated_at -- the
+            # query MUST prefer this one because the expired row is excluded.
+            conn.execute(
+                "INSERT INTO reports (slug, team_id, title, status, "
+                "generated_at, expires_at) VALUES "
+                "('non-expired-older', ?, 'X', 'ready', "
+                "'2026-04-12T12:00:00Z', '2099-12-31T00:00:00Z')",
+                (opp_id,),
+            )
+
+        env = {"DATABASE_PATH": str(db_path)}
+        with patch.dict("os.environ", env):
+            from src.api.db import get_latest_ready_report
+            result = get_latest_ready_report(opp_id)
+        assert result is not None
+        assert result["slug"] == "non-expired-older"
+
+    def test_only_expired_report_returns_none(self, tmp_path):
+        """Codex finding #2: when the only ready report is expired,
+        `get_latest_ready_report` returns None (so the dashboard
+        renders the empty state, not a dead link)."""
+        db_path = _make_db(tmp_path)
+        with sqlite3.connect(str(db_path)) as conn:
+            conn.execute("PRAGMA foreign_keys=ON")
+            opp_id = _insert_opponent_team(conn, "Lions")
+            conn.execute(
+                "INSERT INTO reports (slug, team_id, title, status, "
+                "generated_at, expires_at) VALUES "
+                "('only-expired', ?, 'X', 'ready', "
+                "'2026-04-12T12:00:00Z', '2026-04-13T00:00:00Z')",
+                (opp_id,),
+            )
+
+        env = {"DATABASE_PATH": str(db_path)}
+        with patch.dict("os.environ", env):
+            from src.api.db import get_latest_ready_report
+            assert get_latest_ready_report(opp_id) is None
+
+    def test_dashboard_renders_empty_state_when_only_report_is_expired(
+        self, tmp_path,
+    ):
+        """Codex finding #2 end-to-end: an expired-only-report team must
+        render the empty-state copy, never an `/reports/...` link."""
+        db_path, member_id, opp_id, _ = _make_full_db(tmp_path)
+        with sqlite3.connect(str(db_path)) as conn:
+            conn.execute(
+                "INSERT INTO reports (slug, team_id, title, status, "
+                "generated_at, expires_at, report_path) VALUES "
+                "('expired-only-slug', ?, 'X', 'ready', "
+                "'2026-04-12T12:00:00Z', '2026-04-13T00:00:00Z', "
+                "'reports/expired-only-slug.html')",
+                (opp_id,),
+            )
+        env = {"DATABASE_PATH": str(db_path), "DEV_USER_EMAIL": _USER_EMAIL}
+        with patch.dict("os.environ", env):
+            with TestClient(app) as client:
+                resp = client.get(
+                    f"/dashboard/opponents/{opp_id}",
+                    params={"team_id": member_id, "season_id": _SEASON_ID},
+                )
+        assert resp.status_code == 200
+        body = resp.text
+        # No link to the expired report.
+        assert "/reports/expired-only-slug" not in body
+        assert "Open positioning cards" not in body
+        # Empty state present.
+        assert "Cards will appear after the next scouting update" in body
+
+    def test_freshness_cue_reflects_displayed_report_not_team_coverage(
+        self, tmp_path,
+    ):
+        """Codex finding #3: the dashboard's positioning-card freshness
+        cue MUST reflect the displayed report's date, NOT the team's
+        current live game coverage. Even when the team has fresher game
+        data than the linked report (E-228-06 AC-6a non-fatal generate),
+        the cue must read the report's own `generated_at`."""
+        db_path, member_id, opp_id, _ = _make_full_db(tmp_path)
+        # Insert a ready report with an older generated_at than the
+        # most-recent game in `_make_full_db`. The team has fresh games
+        # but the displayed report is from earlier.
+        with sqlite3.connect(str(db_path)) as conn:
+            conn.execute(
+                "INSERT INTO reports (slug, team_id, title, status, "
+                "generated_at, expires_at, report_path) VALUES "
+                "('older-displayed', ?, 'X', 'ready', "
+                "'2026-04-12T12:00:00Z', '2099-12-31T00:00:00Z', "
+                "'reports/older-displayed.html')",
+                (opp_id,),
+            )
+        env = {"DATABASE_PATH": str(db_path), "DEV_USER_EMAIL": _USER_EMAIL}
+        with patch.dict("os.environ", env):
+            with TestClient(app) as client:
+                resp = client.get(
+                    f"/dashboard/opponents/{opp_id}",
+                    params={"team_id": member_id, "season_id": _SEASON_ID},
+                )
+        assert resp.status_code == 200
+        body = resp.text
+        # The link IS rendered (the report is non-expired).
+        assert "/reports/older-displayed" in body
+        # The cue reflects the REPORT'S generated_at (Apr 12), formatted
+        # via the route's "Through {Mon Day}" pattern.
+        # We assert the report's date appears in the rendered body.
+        # The team's live coverage from _make_full_db uses a different
+        # auto-generated game date -- we assert the report's date wins.
+        # Defensive: at minimum, the report's month-and-day must surface
+        # somewhere in the page (the dashboard already shows many dates,
+        # but the specific cue we wrote into positioning_report.coverage_text
+        # is "Through Apr 12" -- assert that substring is present.)
+        assert "Through Apr 12" in body

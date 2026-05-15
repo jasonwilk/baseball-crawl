@@ -1050,6 +1050,51 @@ def get_game_coverage(team_id: int) -> dict[str, Any] | None:
         return None
 
 
+def get_latest_ready_report(team_id: int) -> dict[str, Any] | None:
+    """Return the most recent ``ready`` AND non-expired report for a team
+    (E-228-07 AC-4).
+
+    Queries ``reports`` for the team's most recent report in ``ready``
+    status whose ``expires_at`` is in the future. Used by the opponent
+    dashboard's "Defensive Positioning" card to resolve the link target
+    to a real, existing artifact (per epic TN-7 (B) Pre-generate).
+
+    The expiry filter mirrors the public report route's expiry check at
+    :func:`src.api.routes.reports.serve_report` (a 404 there would make
+    the dashboard link dead). SQLite's ``datetime()`` parses the stored
+    ISO timestamps (with or without the trailing ``Z``) and compares
+    them against UTC ``now``.
+
+    Args:
+        team_id: The team's INTEGER primary key.
+
+    Returns:
+        Dict with ``slug`` (str) and ``generated_at`` (str, ISO datetime),
+        or ``None`` if no ``ready`` non-expired report exists for the team.
+    """
+    query = """
+        SELECT slug, generated_at
+        FROM reports
+        WHERE team_id = ?
+          AND status = 'ready'
+          AND datetime(expires_at) > datetime('now')
+        ORDER BY generated_at DESC
+        LIMIT 1
+    """
+    try:
+        with closing(get_connection()) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(query, (team_id,)).fetchone()
+        if row is None:
+            return None
+        return {"slug": row["slug"], "generated_at": row["generated_at"]}
+    except sqlite3.Error:
+        logger.exception(
+            "Failed to fetch latest ready report for team_id=%s", team_id,
+        )
+        return None
+
+
 def get_player_profile(player_id: str) -> dict[str, Any]:
     """Return full career profile for a player: info, batting seasons, pitching seasons, recent games.
 

@@ -313,6 +313,206 @@ class TestScoutingSync:
 
 
 # ---------------------------------------------------------------------------
+# E-228-06: Scouting pipeline -- positioning recompute + auto-generate
+# ---------------------------------------------------------------------------
+
+
+class TestScoutingSyncPositioningWiring:
+    """E-228-06 AC-1/AC-2/AC-4/AC-6/AC-6a: ``run_scouting_sync`` rebuilds
+    ``batter_positioning`` after the existing dedup sweep and auto-generates
+    the report bundle. Both steps are non-fatal."""
+
+    def _success_path_mocks(self, mock_crawler, mock_loader):
+        """Shared mock plumbing for the success-path scenarios."""
+        mock_crawler.scout_team.return_value = ScoutingCrawlResult(
+            team_id=1, season_id="2025-spring-hs",
+            games=[{"id": "g1", "game_status": "completed"}],
+            games_crawled=3,
+        )
+        mock_loader.load_team.return_value = LoadResult(loaded=5, errors=0)
+
+    def test_compute_positioning_called_after_dedup(
+        self, tmp_path: Path
+    ) -> None:
+        """AC-1 / AC-4: positioning recompute runs after dedup with the
+        identical pipeline-agnostic function; uses (team_id, season_id)
+        already in scope (no re-derivation).
+        """
+        db_path = _make_db(tmp_path)
+        job_id = _insert_crawl_job(db_path, 1, "scouting_crawl")
+        _insert_scouting_run(db_path, team_id=1, season_id="2025-spring-hs")
+
+        mock_crawler = MagicMock()
+        mock_loader = MagicMock()
+        self._success_path_mocks(mock_crawler, mock_loader)
+
+        call_log: list[str] = []
+
+        def _dedup_capture(*_args, **_kwargs):
+            call_log.append("dedup")
+            return 0
+
+        def _compute_capture(_conn, team_id, season_id):
+            call_log.append(f"compute({team_id},{season_id})")
+            return []
+
+        def _generate_capture(public_id):
+            call_log.append(f"generate({public_id})")
+            from src.reports.generator import GenerationResult
+            return GenerationResult(success=True, slug="abc", url="/r/abc")
+
+        with (
+            patch("src.pipeline.trigger.get_db_path", return_value=db_path),
+            patch("src.pipeline.trigger._refresh_auth_token"),
+            patch("src.pipeline.trigger.ScoutingCrawler", return_value=mock_crawler),
+            patch("src.pipeline.trigger.ScoutingLoader", return_value=mock_loader),
+            patch("src.pipeline.trigger._DATA_ROOT", tmp_path / "raw"),
+            patch("src.pipeline.trigger.resolve_gc_uuid", return_value=None),
+            patch(
+                "src.db.player_dedup.dedup_team_players",
+                side_effect=_dedup_capture,
+            ),
+            patch(
+                "src.pipeline.trigger.compute_positioning",
+                side_effect=_compute_capture,
+            ),
+            patch(
+                "src.pipeline.trigger.generate_report",
+                side_effect=_generate_capture,
+            ),
+        ):
+            trigger.run_scouting_sync(1, "test-team-slug", job_id)
+
+        # AC-1 ordering: dedup -> compute -> generate.
+        assert call_log == [
+            "dedup",
+            "compute(1,2025-spring-hs)",
+            "generate(test-team-slug)",
+        ]
+
+        # AC-1: crawl_job remains 'completed' on the happy path.
+        job = _get_crawl_job(db_path, job_id)
+        assert job["status"] == "completed"
+
+    def test_compute_positioning_failure_is_non_fatal(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """AC-2: a raise from compute_positioning is logged at WARNING and
+        the crawl job stays 'completed'; generate_report still runs after."""
+        import logging
+
+        db_path = _make_db(tmp_path)
+        job_id = _insert_crawl_job(db_path, 1, "scouting_crawl")
+        _insert_scouting_run(db_path, team_id=1, season_id="2025-spring-hs")
+
+        mock_crawler = MagicMock()
+        mock_loader = MagicMock()
+        self._success_path_mocks(mock_crawler, mock_loader)
+
+        generate_called: list[str] = []
+
+        def _generate_capture(public_id):
+            generate_called.append(public_id)
+            from src.reports.generator import GenerationResult
+            return GenerationResult(success=True, slug="x", url="/r/x")
+
+        caplog.set_level(logging.WARNING, logger="src.pipeline.trigger")
+
+        with (
+            patch("src.pipeline.trigger.get_db_path", return_value=db_path),
+            patch("src.pipeline.trigger._refresh_auth_token"),
+            patch("src.pipeline.trigger.ScoutingCrawler", return_value=mock_crawler),
+            patch("src.pipeline.trigger.ScoutingLoader", return_value=mock_loader),
+            patch("src.pipeline.trigger._DATA_ROOT", tmp_path / "raw"),
+            patch("src.pipeline.trigger.resolve_gc_uuid", return_value=None),
+            patch(
+                "src.pipeline.trigger.compute_positioning",
+                side_effect=RuntimeError("synthetic engine failure"),
+            ),
+            patch(
+                "src.pipeline.trigger.generate_report",
+                side_effect=_generate_capture,
+            ),
+        ):
+            trigger.run_scouting_sync(1, "test-team-slug", job_id)
+
+        # AC-2: crawl_job still 'completed'.
+        job = _get_crawl_job(db_path, job_id)
+        assert job["status"] == "completed"
+        assert job["error_message"] is None
+
+        # AC-2: WARNING logged for the recompute failure.
+        warnings = [
+            rec for rec in caplog.records
+            if rec.levelno == logging.WARNING
+            and "Positioning recompute failed" in rec.getMessage()
+        ]
+        assert warnings, "expected WARNING log for non-fatal recompute failure"
+
+        # generate_report still invoked after the failed recompute.
+        assert generate_called == ["test-team-slug"]
+
+    def test_generate_report_failure_is_non_fatal_ac6a(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """AC-6a: a raise from generate_report is logged at WARNING and the
+        crawl job stays 'completed'."""
+        import logging
+
+        db_path = _make_db(tmp_path)
+        job_id = _insert_crawl_job(db_path, 1, "scouting_crawl")
+        _insert_scouting_run(db_path, team_id=1, season_id="2025-spring-hs")
+
+        mock_crawler = MagicMock()
+        mock_loader = MagicMock()
+        self._success_path_mocks(mock_crawler, mock_loader)
+
+        caplog.set_level(logging.WARNING, logger="src.pipeline.trigger")
+
+        with (
+            patch("src.pipeline.trigger.get_db_path", return_value=db_path),
+            patch("src.pipeline.trigger._refresh_auth_token"),
+            patch("src.pipeline.trigger.ScoutingCrawler", return_value=mock_crawler),
+            patch("src.pipeline.trigger.ScoutingLoader", return_value=mock_loader),
+            patch("src.pipeline.trigger._DATA_ROOT", tmp_path / "raw"),
+            patch("src.pipeline.trigger.resolve_gc_uuid", return_value=None),
+            patch(
+                "src.pipeline.trigger.compute_positioning", return_value=[],
+            ),
+            patch(
+                "src.pipeline.trigger.generate_report",
+                side_effect=RuntimeError("synthetic generate failure"),
+            ),
+        ):
+            trigger.run_scouting_sync(1, "test-team-slug", job_id)
+
+        # AC-6a: crawl_job still 'completed' (exit code semantics preserved).
+        job = _get_crawl_job(db_path, job_id)
+        assert job["status"] == "completed"
+        assert job["error_message"] is None
+
+        # AC-6a: WARNING logged for the auto-generate failure.
+        warnings = [
+            rec for rec in caplog.records
+            if rec.levelno == logging.WARNING
+            and "Auto-generate report failed" in rec.getMessage()
+        ]
+        assert warnings, "expected WARNING log for non-fatal auto-generate failure"
+
+    def test_ac4_import_only_no_duplicated_engine_logic(self) -> None:
+        """AC-4: both paths import-and-invoke the identical engine function;
+        no positioning decision logic is duplicated in `trigger.py`."""
+        import src.pipeline.trigger as trigger_mod
+        import src.reports.positioning as positioning_mod
+
+        # The trigger module pulls in the same object that positioning exports.
+        assert trigger_mod.compute_positioning is positioning_mod.compute_positioning
+        # generate_report is also imported from its canonical home.
+        import src.reports.generator as generator_mod
+        assert trigger_mod.generate_report is generator_mod.generate_report
+
+
+# ---------------------------------------------------------------------------
 # E-147-03: Self-healing season_year propagation
 # ---------------------------------------------------------------------------
 

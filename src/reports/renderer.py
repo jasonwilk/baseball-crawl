@@ -51,6 +51,68 @@ _KEY_PITCHER_MIN_OUTS = 18   # 6 IP
 _KEY_BATTER_MIN_PA = 5
 
 
+# ---------------------------------------------------------------------------
+# E-228-05 -- Positioning cards vocabulary constants block (AC-8)
+# ---------------------------------------------------------------------------
+# Per epic TN-5's ownership split, the configurable display vocabulary lives
+# here in the **render layer**, NOT in the engine module
+# (``src/reports/positioning.py``). The engine writes only stored absolute
+# enum keys to ``batter_positioning``; this block resolves them to the
+# coach-facing call-words E-228-04 AC-1e locked.
+#
+# The mapping is implemented **verbatim** from E-228-04 AC-1e (Decision D1:
+# "SHALLOW" not "IN"). E-228-05 AC-8 forbids inventing or changing display
+# words -- if the vocabulary needs to change, escalate; do not edit in place.
+
+POSITIONING_CALL_WORDS: dict[str, str] = {
+    "TRUE": "STRAIGHT UP",
+    "LEFT": "SHADE LEFT",
+    "LEFT_SHALLOW": "SHADE LEFT SHALLOW",
+    "LEFT_DEEP": "SHADE LEFT DEEP",
+    "RIGHT": "SHADE RIGHT",
+    "RIGHT_SHALLOW": "SHADE RIGHT SHALLOW",
+    "RIGHT_DEEP": "SHADE RIGHT DEEP",
+    "MIXED": "MIXED",
+}
+"""Display call-word for each stored ``call_state`` / ``team_state_call``
+enum key (E-228-04 AC-1e, D1). Coach-facing full-form vocabulary."""
+
+POSITIONING_CELL_SHORT_FORMS: dict[str, str] = {
+    # E-228-04 D6: compact glyphs for the per-position cells on the call sheet.
+    # The CALL column carries the full word; per-position cells carry the glyph.
+    "TRUE": "·",   # middle dot -- the silent-default cell
+    "LEFT": "L",
+    "LEFT_SHALLOW": "L Sh",
+    "LEFT_DEEP": "L Dp",
+    "RIGHT": "R",
+    "RIGHT_SHALLOW": "R Sh",
+    "RIGHT_DEEP": "R Dp",
+    # MIXED is only ever a team_state_call, never a per-position call_state
+    # (the engine's _compute_position_row never returns MIXED). We map it
+    # defensively to the middle dot in case future engine output ever does.
+    "MIXED": "·",
+}
+"""Compact per-position cell glyph for each ``call_state`` (E-228-04 D6)."""
+
+
+# Position-name expansion for the player-card headers (E-228-04 §4.2).
+POSITIONING_POSITION_LABELS: dict[str, str] = {
+    "LF": "LEFT FIELD",
+    "CF": "CENTERFIELD",
+    "RF": "RIGHT FIELD",
+    "3B": "THIRD BASE",
+    "SS": "SHORTSTOP",
+    "2B": "SECOND BASE",
+}
+
+# Position column order on the call sheet -- E-228-04 D2 (LF·CF·RF·3B·SS·2B).
+POSITIONING_COLUMN_ORDER: tuple[str, ...] = ("LF", "CF", "RF", "3B", "SS", "2B")
+
+# Soft cap on exceptions per player card (E-228-04 §4.3): render top N by
+# bip_count descending; overflow gets a "+N more" footer row.
+_POSITIONING_CARD_MAX_EXCEPTIONS = 6
+
+
 def _build_jinja_env() -> Environment:
     """Create a Jinja2 environment with the required filters."""
     env = Environment(
@@ -532,6 +594,187 @@ def _enrich_pitchers_workload(
             )
 
 
+def _jersey_sort_key(jersey: object) -> tuple[int, int, str]:
+    """Sort key for jersey numbers -- numeric ascending, NULL/non-numeric last.
+
+    Returns a tuple ``(missing_flag, parsed_int, raw_str)``:
+    * ``missing_flag = 0`` for resolvable numerics (sorts first),
+      ``1`` for NULL / non-numeric (sorts last).
+    * ``parsed_int`` orders numerics ascending.
+    * ``raw_str`` is a stable tiebreaker.
+    """
+    if jersey is None or jersey == "":
+        return (1, 0, "")
+    raw = str(jersey)
+    try:
+        return (0, int(raw), raw)
+    except ValueError:
+        return (1, 0, raw)
+
+
+def _build_positioning_context(
+    positioning_rows: list[dict],
+    positioning_rationales: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Group raw ``batter_positioning`` rows into the render-layer context
+    for the call sheet + player cards (E-228-05).
+
+    Input:
+    * ``positioning_rows`` -- the list returned by
+      :func:`src.reports.generator._query_batter_positioning` -- one dict
+      per ``(player_id, position)`` row with the 12 ``batter_positioning``
+      columns plus ``players.first_name`` / ``players.last_name`` /
+      ``team_rosters.jersey_number``.
+    * ``positioning_rationales`` -- E-228-07 Tier 2 LLM output, a
+      ``dict[player_id, rationale_str]``. Optional: when LLM is disabled or
+      empty, the call sheet's Note column renders blank for every row.
+
+    Output: a dict with two top-level keys:
+    * ``batters`` -- the call-sheet rows, one per ``player_id``, in D5 sort
+      order (non-TRUE ``team_state_call`` first, jersey ascending within
+      each group), with the 6 per-position cells in D2 column order
+      (LF·CF·RF·3B·SS·2B). Each batter carries a ``rationale`` field set
+      from the input dict (or ``None`` when absent).
+    * ``cards`` -- 6 player cards in the same D2 position order, each with
+      ``position_key`` / ``position_label`` and a list of ``exceptions``
+      (batters whose ``call_state`` for THIS position is not ``TRUE``),
+      capped per E-228-04 §4.3.
+    """
+    rationales = positioning_rationales or {}
+    # Group rows by player_id.
+    by_player: dict[str, list[dict]] = {}
+    for r in positioning_rows:
+        by_player.setdefault(r["player_id"], []).append(r)
+
+    batters: list[dict[str, Any]] = []
+    for player_id, rows in by_player.items():
+        # Find the team_state_call -- denormalized identically across all 6
+        # of a player's rows, so take it from the first row.
+        first = rows[0]
+        team_state_call_key = first["team_state_call"]
+        bip_count = first["bip_count"]
+        hr_count = first["hr_count"]
+        is_thin_flag = bool(first["is_thin"])
+        jersey = first["jersey_number"]
+        last_name = (first["last_name"] or "").upper()
+
+        # Build a position-keyed lookup of the 6 per-position rows.
+        rows_by_position = {r["position"]: r for r in rows}
+
+        # Per-position cells in D2 column order.
+        cells: list[dict[str, Any]] = []
+        for position in POSITIONING_COLUMN_ORDER:
+            row = rows_by_position.get(position)
+            if row is None:
+                # Defensive: a player missing a position row -- render as TRUE.
+                cell_key = "TRUE"
+            else:
+                cell_key = row["call_state"]
+            cells.append({
+                "position": position,
+                "call_state_key": cell_key,
+                "short": POSITIONING_CELL_SHORT_FORMS.get(cell_key, "·"),
+                "is_true": cell_key == "TRUE",
+            })
+
+        # Confidence string (E-228-04 §3.6): "{bip} BIP · {hr} HR[ · thin]".
+        confidence_parts = [f"{bip_count} BIP", f"{hr_count} HR"]
+        if is_thin_flag:
+            confidence_parts.append("thin")
+        confidence_text = " · ".join(confidence_parts)
+
+        # Display name fallback: when last_name is empty/Unknown, fall back to
+        # "#{jersey}" or "(unresolved)" in italic gray (per E-228-04 §3.2).
+        name_unresolved = not last_name or last_name.lower() in {"unknown", ""}
+        if name_unresolved:
+            display_name = f"#{jersey} (name not resolved)" if jersey else "(unresolved)"
+        else:
+            display_name = last_name
+
+        batters.append({
+            "player_id": player_id,
+            "jersey_number": jersey,
+            "name": display_name,
+            "last_name_upper": last_name,
+            "name_unresolved": name_unresolved,
+            "team_state_call_key": team_state_call_key,
+            "team_state_call_word": POSITIONING_CALL_WORDS.get(
+                team_state_call_key, team_state_call_key
+            ),
+            "per_position": cells,
+            "bip_count": bip_count,
+            "hr_count": hr_count,
+            "is_thin": is_thin_flag,
+            "confidence_text": confidence_text,
+            # E-228-07: Tier 2 LLM rationale, ``None`` when LLM disabled,
+            # unavailable, or the validation gate routed the response to
+            # WARNING-and-skip. The template's ``{% if batter.rationale %}``
+            # guard handles None cleanly.
+            "rationale": rationales.get(player_id),
+        })
+
+    # D5 row sort: non-TRUE team_state_call first, then jersey ascending.
+    batters.sort(key=lambda b: (
+        0 if b["team_state_call_key"] != "TRUE" else 1,
+        _jersey_sort_key(b["jersey_number"]),
+    ))
+
+    # Build the 6 player cards in D2 position order.
+    cards: list[dict[str, Any]] = []
+    for position in POSITIONING_COLUMN_ORDER:
+        # Exceptions: all batters whose THIS-position call_state is not TRUE.
+        exceptions: list[dict[str, Any]] = []
+        for batter in batters:
+            cell = next(
+                c for c in batter["per_position"] if c["position"] == position
+            )
+            if cell["call_state_key"] == "TRUE":
+                continue
+            cell_key = cell["call_state_key"]
+            exceptions.append({
+                "jersey_number": batter["jersey_number"],
+                "last_name": batter["last_name_upper"]
+                             or (f"#{batter['jersey_number']}"
+                                 if batter["jersey_number"] else "(unresolved)"),
+                "call_state_key": cell_key,
+                "call_full": POSITIONING_CALL_WORDS.get(cell_key, cell_key),
+                "is_mixed_batter": batter["team_state_call_key"] == "MIXED",
+                "bip_count": batter["bip_count"],
+            })
+
+        # E-228-04 §4.3: cap at 6 exceptions; if more, keep top by bip_count desc,
+        # then jersey ascending. Otherwise sort exceptions by jersey ascending.
+        truncated = 0
+        if len(exceptions) > _POSITIONING_CARD_MAX_EXCEPTIONS:
+            exceptions.sort(key=lambda e: (-e["bip_count"], _jersey_sort_key(e["jersey_number"])))
+            truncated = len(exceptions) - _POSITIONING_CARD_MAX_EXCEPTIONS
+            exceptions = exceptions[:_POSITIONING_CARD_MAX_EXCEPTIONS]
+            # After truncation, re-sort the kept ones by jersey for in-card flow.
+            exceptions.sort(key=lambda e: _jersey_sort_key(e["jersey_number"]))
+        else:
+            exceptions.sort(key=lambda e: _jersey_sort_key(e["jersey_number"]))
+
+        cards.append({
+            "position_key": position,
+            "position_label": POSITIONING_POSITION_LABELS[position],
+            "exceptions": exceptions,
+            "truncated_count": truncated,
+        })
+
+    return {
+        "batters": batters,
+        "cards": cards,
+        "has_data": bool(batters),
+        "column_order": list(POSITIONING_COLUMN_ORDER),
+        # Empty-state copy lives here too so the template doesn't hard-code it.
+        "empty_state_text": (
+            "No scouted batters yet. Cards will appear after the first "
+            "scouting pull."
+        ),
+        "no_exceptions_text": "No exceptions for this opponent.",
+    }
+
+
 def render_report(data: dict[str, Any]) -> str:
     """Render a standalone scouting report HTML string.
 
@@ -660,6 +903,13 @@ def render_report(data: dict[str, Any]) -> str:
     team_fps_pct = _format_pct(data.get("team_fps_pct"))
     team_pitches_per_pa = _format_rate(data.get("team_pitches_per_pa"))
 
+    # Positioning section context (E-228-05 base + E-228-07 rationales).
+    positioning_rows = data.get("positioning_rows") or []
+    positioning_rationales = data.get("positioning_rationales") or {}
+    positioning_context = _build_positioning_context(
+        positioning_rows, positioning_rationales=positioning_rationales,
+    )
+
     context = {
         "team": data.get("team") or {},
         "generated_at": data.get("generated_at", ""),
@@ -689,6 +939,7 @@ def render_report(data: dict[str, Any]) -> str:
         "starter_prediction": data.get("starter_prediction"),
         "enriched_prediction": data.get("enriched_prediction"),
         "show_predicted_starter": data.get("show_predicted_starter", True),
+        "positioning": positioning_context,
     }
 
     return template.render(**context)

@@ -1,0 +1,324 @@
+{# ============================================================
+   E-228-05: Defensive Positioning Cards section (partial)
+
+   Renders the two positioning artifacts inside the report bundle:
+   - the landscape call sheet (one row per opposing batter), AND
+   - the 2x3 portrait player cards (one card per covered position).
+
+   Included from src/api/templates/reports/scouting_report.html via
+   {% include "reports/positioning_cards.html" %} -- this partial is
+   self-contained (CSS is inlined here) so the parent template doesn't
+   need to know about positioning-specific styles.
+
+   Context provided by `_build_positioning_context()` in renderer.py:
+       positioning = {
+           has_data: bool,
+           batters: [ ... ],
+           cards: [ ... ],
+           column_order: ["LF","CF","RF","3B","SS","2B"],
+           empty_state_text: str,
+           no_exceptions_text: str,
+       }
+   ============================================================ #}
+
+<style>
+  /* ---- Named pages for mixed orientation (epic TN-7 print-CSS) ---- */
+  @page call-sheet {
+    size: landscape;
+    margin: 0.4in;
+  }
+  @page positioning-cards {
+    size: portrait;
+    margin: 0.3in;
+  }
+
+  /* ---- Call sheet ---- */
+  .positioning-call-sheet {
+    margin-top: 12px;
+  }
+  .positioning-call-sheet h2.section-header {
+    margin-bottom: 6px;
+  }
+  .positioning-call-sheet-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 9pt;
+    margin-bottom: 8px;
+  }
+  .positioning-call-sheet-table thead th {
+    font-size: 8pt;
+    font-weight: bold;
+    text-transform: uppercase;
+    color: #fff;
+    background: #1e3a5f;
+    border-bottom: 2px solid #111;
+    padding: 4px 5px;
+    text-align: center;
+    white-space: nowrap;
+  }
+  .positioning-call-sheet-table thead th.pos-col-left {
+    text-align: left;
+  }
+  .positioning-call-sheet-table tbody td {
+    padding: 5px 5px;
+    border-bottom: 1px solid #e5e7eb;
+    text-align: center;
+    vertical-align: middle;
+  }
+  .positioning-call-sheet-table tbody td.pos-col-jersey {
+    font-weight: bold;
+  }
+  .positioning-call-sheet-table tbody td.pos-col-name {
+    text-align: left;
+    font-weight: 500;
+    white-space: nowrap;
+  }
+  .positioning-call-sheet-table tbody td.pos-col-name.pos-name-unresolved {
+    color: #6b7280;
+    font-style: italic;
+    font-weight: 400;
+  }
+  .positioning-call-sheet-table tbody td.pos-col-call {
+    text-align: left;
+    font-weight: bold;
+    white-space: nowrap;
+  }
+  .positioning-call-sheet-table tbody td.pos-col-conf {
+    text-align: left;
+    font-size: 8.5pt;
+    color: #374151;
+    white-space: nowrap;
+  }
+  .positioning-call-sheet-table tbody td.pos-col-note {
+    text-align: left;
+    font-size: 8.5pt;
+    color: #374151;
+    font-style: italic;
+    max-width: 2.4in;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  /* Per-position cell rendering (E-228-04 D6) */
+  .pos-cell-true {
+    color: #9ca3af;
+    font-size: 0.85em;
+  }
+  .pos-cell-call {
+    font-weight: bold;
+    color: #111;
+  }
+  /* Group-divider row between non-TRUE and TRUE rows (D5) */
+  .pos-row-group-divider td {
+    border-bottom: 1px solid #9ca3af;
+    padding: 0;
+    height: 4px;
+  }
+  /* Empty call-sheet info row */
+  .pos-row-empty td {
+    padding: 12px 5px;
+    text-align: center;
+    color: #6b7280;
+    font-style: italic;
+    font-size: 9pt;
+  }
+
+  /* ---- Player cards sheet (portrait, 2x3 grid) ---- */
+  .positioning-cards-sheet {
+    margin-top: 12px;
+  }
+  .positioning-cards-sheet h2.section-header {
+    margin-bottom: 6px;
+  }
+  .positioning-cards-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    grid-template-rows: repeat(3, 1fr);
+    gap: 0.15in;
+    /* Screen preview approximates the portrait usable area. */
+    min-height: 9.6in;
+  }
+  .positioning-card {
+    border: 0.5pt solid #6b7280;
+    padding: 0.15in;
+    display: flex;
+    flex-direction: column;
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+  .positioning-card-header {
+    font-size: 14pt;
+    font-weight: bold;
+    letter-spacing: 0.02em;
+    border-bottom: 1px solid #d1d5db;
+    padding-bottom: 4px;
+    margin-bottom: 6px;
+    text-align: center;
+  }
+  /* Per spec §4.2: STRAIGHT UP default block at 36pt bold so it dominates. */
+  .positioning-card-default-block {
+    font-size: 36pt;
+    font-weight: 900;
+    text-align: center;
+    letter-spacing: 0.02em;
+    margin: 6px 0 8px 0;
+    line-height: 1.05;
+  }
+  .positioning-card-exceptions-label {
+    font-size: 8pt;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: #6b7280;
+    border-bottom: 1px solid #e5e7eb;
+    padding-bottom: 2px;
+    margin-bottom: 4px;
+  }
+  .positioning-card-exception-row {
+    display: grid;
+    grid-template-columns: 0.6in 1fr auto;
+    align-items: baseline;
+    gap: 6px;
+    padding: 2px 0;
+    font-size: 10pt;
+  }
+  /* Per spec §4.2: 11pt bold jersey, 10pt name, 11pt bold call (call ties
+     jersey as the largest type in the row -- actionable field at the top
+     of the visual hierarchy per the baseball-coach review reconciliation). */
+  .positioning-card-exception-jersey {
+    font-weight: bold;
+    font-size: 11pt;
+  }
+  .positioning-card-exception-name {
+    font-weight: 500;
+    font-size: 10pt;
+    letter-spacing: 0.02em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .positioning-card-exception-call {
+    font-weight: bold;
+    text-align: right;
+    font-size: 11pt;
+    white-space: nowrap;
+  }
+  .positioning-card-mixed-tag {
+    font-size: 7.5pt;
+    font-variant: small-caps;
+    color: #6b7280;
+    margin-left: 3px;
+  }
+  .positioning-card-no-exceptions {
+    font-style: italic;
+    color: #6b7280;
+    font-size: 9pt;
+    text-align: center;
+    margin-top: 6px;
+  }
+  .positioning-card-truncated {
+    font-style: italic;
+    color: #6b7280;
+    font-size: 7.5pt;
+    text-align: center;
+    margin-top: 4px;
+  }
+
+  /* ---- Print rules (epic TN-7 + spec §6.2) ---- */
+  @media print {
+    /* Landscape page for the call sheet; start fresh after the prior section. */
+    .positioning-call-sheet {
+      page: call-sheet;
+      break-before: page;
+    }
+    /* Portrait page for the multi-up player cards. */
+    .positioning-cards-sheet {
+      page: positioning-cards;
+      break-before: page;
+    }
+    .positioning-cards-grid {
+      height: 100%;
+    }
+    .positioning-call-sheet-table,
+    .positioning-call-sheet-table tr {
+      page-break-inside: avoid;
+    }
+  }
+</style>
+
+
+{# ===== CALL SHEET (landscape) ===== #}
+<div class="positioning-call-sheet">
+  <h2 class="section-header">Defensive Positioning — Call Sheet</h2>
+  <table class="positioning-call-sheet-table">
+    <thead>
+      <tr>
+        <th style="width: 0.5in;">#</th>
+        <th class="pos-col-left" style="width: 1.5in;">Name</th>
+        <th class="pos-col-left" style="width: 1.7in;">Call</th>
+        {% for position in positioning.column_order %}
+        <th style="width: 0.55in;">{{ position }}</th>
+        {% endfor %}
+        <th style="width: 1.3in;">Confidence</th>
+        <th class="pos-col-left" style="width: 2.4in;">Note</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% if not positioning.has_data %}
+      <tr class="pos-row-empty">
+        <td colspan="{{ 5 + positioning.column_order|length }}">
+          {{ positioning.empty_state_text }}
+        </td>
+      </tr>
+    {% else %}
+      {% set ns = namespace(prev_flagged=None) %}
+      {% for batter in positioning.batters %}
+        {% set is_flagged = batter.team_state_call_key != 'TRUE' %}
+        {# Group-divider row between non-TRUE (flagged) and TRUE groups (D5). #}
+        {% if ns.prev_flagged is not none and ns.prev_flagged and not is_flagged %}
+        <tr class="pos-row-group-divider"><td colspan="{{ 5 + positioning.column_order|length }}"></td></tr>
+        {% endif %}
+        {% set ns.prev_flagged = is_flagged %}
+        <tr>
+          <td class="pos-col-jersey">{% if batter.jersey_number %}{{ batter.jersey_number }}{% else %}&mdash;{% endif %}</td>
+          <td class="pos-col-name{% if batter.name_unresolved %} pos-name-unresolved{% endif %}">{{ batter.name }}</td>
+          <td class="pos-col-call">{{ batter.team_state_call_word }}</td>
+          {% for cell in batter.per_position %}
+          <td class="{% if cell.is_true %}pos-cell-true{% else %}pos-cell-call{% endif %}">{{ cell.short }}</td>
+          {% endfor %}
+          <td class="pos-col-conf">{{ batter.confidence_text }}</td>
+          <td class="pos-col-note">{% if batter.rationale %}{{ batter.rationale }}{% endif %}</td>
+        </tr>
+      {% endfor %}
+    {% endif %}
+    </tbody>
+  </table>
+</div>
+
+
+{# ===== PLAYER CARDS (portrait, 2x3 grid) ===== #}
+<div class="positioning-cards-sheet">
+  <h2 class="section-header">Defensive Positioning — Player Cards</h2>
+  <div class="positioning-cards-grid">
+    {% for card in positioning.cards %}
+    <div class="positioning-card" data-position="{{ card.position_key }}">
+      <div class="positioning-card-header">{{ card.position_label }}</div>
+      <div class="positioning-card-default-block">STRAIGHT UP</div>
+      <div class="positioning-card-exceptions-label">Exceptions</div>
+      {% if card.exceptions %}
+        {% for exc in card.exceptions %}
+        <div class="positioning-card-exception-row">
+          <span class="positioning-card-exception-jersey">{% if exc.jersey_number %}#{{ exc.jersey_number }}{% else %}&mdash;{% endif %}</span>
+          <span class="positioning-card-exception-name">{{ exc.last_name }}</span>
+          <span class="positioning-card-exception-call">{{ exc.call_full }}{% if exc.is_mixed_batter %} <span class="positioning-card-mixed-tag">(MIXED)</span>{% endif %}</span>
+        </div>
+        {% endfor %}
+        {% if card.truncated_count and card.truncated_count > 0 %}
+        <div class="positioning-card-truncated">+{{ card.truncated_count }} more &mdash; see call sheet</div>
+        {% endif %}
+      {% else %}
+        <div class="positioning-card-no-exceptions">{{ positioning.no_exceptions_text }}</div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+</div>

@@ -190,6 +190,95 @@ See the full guide: [Standalone Reports](standalone-reports.md)
 
 ---
 
+## Defensive Positioning Cards
+
+When scouting data is available for an upcoming opponent, the system automatically generates **Defensive Positioning Cards** -- two printable artifacts that turn the opposing lineup's spray-chart tendencies into a concrete fielding plan.
+
+- A **landscape call sheet**: one row per batter the system has data on, listing the call for each fielding position at a glance.
+- Six **portrait player cards**: one card per covered position (Left Field, Center Field, Right Field, Third Base, Shortstop, Second Base). Each card is written for the player who stands at that position -- not the coach.
+
+To access them, find the opponent's scouting page on the dashboard and look for the **Defensive Positioning** card. Tap it to open the full scouting report, which includes the call sheet and player cards alongside the regular pitching and batting sections. Print the report or save it as a PDF the night before the game.
+
+### Reading the Call Sheet
+
+The call sheet is organized as a table -- one row per batter -- sorted so the batters who need a positioning adjustment come first, then the rest in jersey-number order.
+
+**Columns**:
+
+| Column | What it shows |
+|--------|-------------|
+| **#** | Jersey number |
+| **Name** | Batter's name |
+| **CALL** | The single verbal call for this batter (see call words below) |
+| **LF, CF, RF, 3B, SS, 2B** | Each position's specific call in compact form |
+| **Confidence** | How much data underlies this call: BIP count, HR count, and a "thin" tag if under 10 balls in play |
+| **Note** | Plain-English rationale for the call (when the LLM layer is enabled) |
+
+**The CALL column** is what the coach yells during the game. There are 8 possible calls:
+
+| Call word | What it means |
+|-----------|-------------|
+| **STRAIGHT UP** | No adjustment needed -- play your standard position |
+| **SHADE LEFT** | Shift moderately toward left field |
+| **SHADE LEFT SHALLOW** | Shift toward left field and move in slightly |
+| **SHADE LEFT DEEP** | Shift toward left field and play deeper |
+| **SHADE RIGHT** | Shift moderately toward right field |
+| **SHADE RIGHT SHALLOW** | Shift toward right field and move in slightly |
+| **SHADE RIGHT DEEP** | Shift toward right field and play deeper |
+| **MIXED** | Each position gets a different call -- see the per-position columns |
+
+**The per-position columns** (LF, CF, RF, 3B, SS, 2B) use compact symbols:
+
+| Symbol | Meaning |
+|--------|---------|
+| `·` | Straight up (no adjustment) |
+| `L` | Shade left |
+| `L Sh` | Shade left shallow |
+| `L Dp` | Shade left deep |
+| `R` | Shade right |
+| `R Sh` | Shade right shallow |
+| `R Dp` | Shade right deep |
+
+For most batters, the CALL column and all the per-position cells agree. The per-position columns matter most on **MIXED rows** (see below).
+
+**The Confidence column** is intentional -- sample size matters. A batter with 8 balls in play is labeled **(8 BIP | thin)**. Treat thin-data calls as a gentle lean, not a strong signal. A batter with 25+ balls in play gives you a much more reliable picture.
+
+### Reading the Player Cards
+
+Each player card is written for one fielder at one position. The cards are portrait-orientation and print 6 to a sheet (one per covered position).
+
+**Layout**:
+- The top line says **STRAIGHT UP** -- the default for most batters. Most of the lineup gets no adjustment.
+- Below that is a short **exceptions list** keyed by jersey number: jersey + name + the call word. For example:
+  - `#23 Martinez — SHADE LEFT`
+  - `#7 Okonkwo — SHADE RIGHT DEEP`
+- At most 6 exception batters are listed per card. If more than 6 batters need an adjustment at this position, the top 6 by balls-in-play are shown, with a "+N more" note at the bottom.
+
+**How to use them**: hand the SS card to the shortstop before the game. During the game, when the coach calls out a name or number, the fielder finds it in the list and moves to that call. If a name isn't on the exceptions list, the default is STRAIGHT UP.
+
+### MIXED Rows
+
+A batter is **MIXED** when the system's recommendation differs by position. For example, the short-stop might shade left for this batter while left field stays straight up. In that case:
+
+- The CALL column shows **MIXED**.
+- The per-position cells (LF, CF, RF, 3B, SS, 2B) each show their individual call.
+- The player card for each position shows the position-specific call (e.g., the SS card shows `#23 SHADE LEFT DEEP`).
+
+When the coach calls a MIXED batter's name, each fielder looks at their own card, not the call sheet. The coach may also call the jersey number instead of the name -- the player card shows both.
+
+### Freshness and the "Through" Date
+
+The dashboard link shows a line like **Through May 10** near the positioning card. This is the date the displayed report was generated -- not when the most recent scout run happened.
+
+If a scout run completes successfully, a new report bundle is generated automatically and the date updates. If the auto-generate step fails (uncommon), the dashboard keeps showing the prior report until the next successful scout produces a new one. Ask Jason if the date seems significantly out of date before an important game.
+
+### What the Cards Do Not Cover
+
+- **Pitcher, catcher, and first base** are not included. Their positioning is driven by the game situation and their defensive role, not by an opposing batter's spray chart. v1 covers SS, 2B, 3B, LF, CF, RF only.
+- **Batter handedness** is not shown. The calls are expressed as absolute field direction (LEFT/RIGHT) rather than pull/opposite because handedness information isn't available through the data source the system uses for scouting. The calls are still actionable -- "SHADE LEFT" means move toward left field regardless of whether the batter bats left or right.
+
+---
+
 ## Reading Rate Stats
 
 A quick reference for stats shown throughout the dashboard:
@@ -206,4 +295,4 @@ A quick reference for stats shown throughout the dashboard:
 
 ---
 
-*Last updated: 2026-04-04 | Story references: E-163 (spray charts), E-153-03, E-153-04, E-159, E-183 (standalone reports), E-181-02 (game coverage indicator), E-181-03 (richer empty states, print page coverage indicator), E-196 (Rest and P (7d) pitching columns), E-212 (predicted starter section)*
+*Last updated: 2026-05-15 | Story references: E-228 (defensive positioning cards section), E-163 (spray charts), E-153-03, E-153-04, E-159, E-183 (standalone reports), E-181-02 (game coverage indicator), E-181-03 (richer empty states, print page coverage indicator), E-196 (Rest and P (7d) pitching columns), E-212 (predicted starter section)*

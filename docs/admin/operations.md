@@ -394,14 +394,16 @@ bb data scout --force
 bb data scout --dry-run
 ```
 
-**What `bb data scout` runs**: Four steps in order:
+**What `bb data scout` runs**: Six steps in order:
 
 1. **Scouting crawl** (`ScoutingCrawler`) — fetches schedule, roster, and boxscores for each opponent.
 2. **Scouting-spray crawl** (`ScoutingSprayCrawler`) — fetches spray chart data for each scouted opponent.
 3. **Scouting load** (`ScoutingLoader`) — aggregates boxscores into season stats and writes to the database.
 4. **Scouting-spray load** (`ScoutingSprayLoader`) — writes opponent spray chart coordinate data to the `spray_charts` table.
+5. **Positioning recompute** (`compute_positioning`) — recomputes `batter_positioning` rows for the scouted team from the updated `spray_charts` data. Non-fatal: a failure logs WARNING and the scout run completes. Must run after spray load and after the player-dedup sweep (which runs between steps 4 and 5) so dedup has already merged any fractured player stubs.
+6. **Auto-generate report bundle** (`generate_report`) — generates a self-contained scouting report for the scouted team, including the positioning call sheet and player cards. The opponent-dashboard "Defensive Positioning" link resolves to this report. Non-fatal: a failure logs WARNING and the scout run still completes. A prior report (from the last successful scout) remains visible if this step fails.
 
-All four steps run automatically when you run `bb data scout`. You can also run the spray steps individually (see [Scouting Spray Chart Pipeline](#scouting-spray-chart-pipeline-bb-data-crawl---crawler-scouting-spray--bb-data-load---loader-scouting-spray) below).
+All six steps run automatically when you run `bb data scout`. You can also run the spray steps individually (see [Scouting Spray Chart Pipeline](#scouting-spray-chart-pipeline-bb-data-crawl---crawler-scouting-spray--bb-data-load---loader-scouting-spray) below).
 
 **Freshness check**: By default, `bb data scout` skips any opponent scouted within the last 24 hours. Use `--force` to override this and re-scout all opponents unconditionally. The `--team` flag always scouts the specified opponent regardless of when it was last scouted -- `--force --team PUBLIC_ID` is valid but redundant.
 
@@ -809,6 +811,68 @@ This behavior is automatic -- no operator decision is required. The system appli
 
 ---
 
+## Defensive Positioning Cards
+
+Defensive positioning cards are printable artifacts bundled inside scouting reports. They turn opposing batters' spray-chart tendencies into a per-fielder positioning plan: a landscape **call sheet** listing every batter the system has data on, plus six portrait **player cards** (one per covered position: SS, 2B, 3B, LF, CF, RF). Both artifacts are generated automatically and are included in every report bundle.
+
+### Auto-Generate on Every Scout Run
+
+Every `bb data scout` run ends with a positioning recompute and a full report-bundle auto-generate for the scouted opponent. You do not need to run any separate command. The opponent-dashboard "Defensive Positioning" link resolves to the most recent ready report for that team.
+
+Both steps are **non-fatal**: if either the recompute or the auto-generate fails, the scout run completes and the prior report (from the last successful run) remains visible on the dashboard.
+
+### Standalone Report Path
+
+`bb report generate <public_id>` also produces positioning cards as part of the standard report bundle. The standalone path now runs a **player-dedup sweep before the positioning recompute** — this closes a pre-existing correctness gap where a high-BIP batter could fracture into multiple low-BIP stubs across perspective records, causing the sample gates to misfire. Both steps (dedup sweep and positioning recompute) are non-fatal.
+
+```bash
+bb report generate QTiLIb2Lui3b
+```
+
+### Tier 2 LLM Rationale (Optional)
+
+The call sheet can show a one-to-two sentence plain-English rationale next to each flagged batter explaining why the system made that call. This is written by an optional LLM layer (Tier 2).
+
+**Toggle**: Set `OPENROUTER_API_KEY` in `.env` to enable. If unset, the rationale column is simply absent from the call sheet — no error, no broken layout, just an INFO log per skipped batter.
+
+If the key is set but the LLM call fails for a specific batter, that failure is caught and logged at WARNING; the remaining batters still get rationale attempts, and the call sheet renders fully with or without rationale.
+
+```bash
+# .env example
+OPENROUTER_API_KEY=sk-or-v1-...
+```
+
+### Calibration Workflow
+
+The positioning engine ships with provisional constants. Before treating the cards as authoritative with coaching staff, run a calibration pass against your first real opponent dataset.
+
+**Procedure**:
+
+1. Generate cards for a real opponent: `bb report generate <public_id>`
+2. Open the rendered call sheet alongside the actual spray chart for each flagged batter.
+3. Compare the engine's call against what the spray data visually suggests. If calls seem too aggressive (shading when the batter is roughly centered) or too conservative (staying TRUE for a strong tendency), edit the `# RECALIBRATE`-annotated constants in `src/reports/positioning.py`.
+
+**The 12 recalibration constants** (all in `src/reports/positioning.py`, each marked `# RECALIBRATE after first opponent dataset`):
+
+| Constant | What it controls |
+|----------|-----------------|
+| `BIP_THIN_THRESHOLD` | BIP count below which a batter falls to TRUE ("not enough data"). Default: 10. |
+| `BIP_DEPTH_THRESHOLD` | BIP count below which depth shade is suppressed (direction-lean only). Default: 25. |
+| `ZONE_MIN_BIP` | Minimum BIP count in a zone for a direction shade to fire. Default: 4. |
+| `ZONE_MIN_CONCENTRATION` | Minimum fraction of placed BIP in a zone for a direction shade to fire. Default: 35%. |
+| `CONTACT_TYPE_MIN_COUNT` | Minimum count of a contact-type label for the depth knob to fire. Default: 4. |
+| `CONTACT_TYPE_MIN_CONCENTRATION` | Minimum fraction of contact-type-tagged BIP for the depth knob to fire. Default: 35%. |
+| `BASE_POSITIONS` | Textbook fielding positions (per-position SVG-space coordinates). |
+| `DIRECTION_DEVIATION_THRESHOLDS` | L-R axis quantization ladder (slight shade / significant shade cutoffs). |
+| `DEPTH_DEVIATION_THRESHOLDS` | In-out axis quantization ladder (slight shade / significant shade cutoffs). |
+| `MIXED_NON_ADJACENT_PAIRS_THRESHOLD` | How many non-adjacent per-position calls trigger a MIXED team-state call. |
+| `INFIELD_OUTFIELD_SVG_Y_THRESHOLD` | SVG-space y boundary separating infield and outfield depth bands. |
+| `POSITION_RESPONSIBILITY_SECTORS` | Per-position coverage sectors (which zone + depth-band cells each position owns). |
+
+**After calibration**, change the constant's comment from `# RECALIBRATE after first opponent dataset` to `# Calibrated <date> against <opponent>, N games`.
+
+---
+
 ## Programs Management
 
 Programs are umbrella entities that group teams under a shared organizational identity (e.g., `lsb-hs` = Lincoln Standing Bear High School). Navigate to the **Programs** tab (`/admin/programs`) in the admin sub-navigation.
@@ -1125,4 +1189,4 @@ For the expected data volume (~30 games x 4 teams x a few seasons), the database
 
 ---
 
-*Last updated: 2026-04-13 | Source: E-221 (team delete cross-perspective gate, cascade consolidation, retention flash message), E-199 (standalone reports section, cascade-delete behavior), E-198 (bb data reconcile, migration 012), E-195 (plays pipeline, migration 009, validate_plays_stats.py), E-173 (resolution write-through, auto-scout after linking, unified Find on GC resolve page, dashboard sort by next game date, terminology cleanup, bb data repair-opponents), E-167 (bb data dedup CLI, GC search-powered opponent resolution, skip/unhide workflow), E-163 (scouting spray pipeline, updated thresholds, bb data scout 4-step flow), E-158 (spray chart pipeline, migration 006, chart routes), E-156 (bb data scout --force flag), E-155 (duplicate team detection and merge UI), E-143 (programs, user roles, team delete, opponent mapping UX, crawl trigger UI), E-120-06 (bare UUID input documented), E-055 (unified CLI), E-115-01 (E-100 team management model), E-028-03 (original)*
+*Last updated: 2026-05-15 | Source: E-228 (defensive positioning cards, bb data scout 6-step flow, auto-generate report bundle, standalone dedup-gap fix, OPENROUTER_API_KEY toggle, calibration workflow), E-221 (team delete cross-perspective gate, cascade consolidation, retention flash message), E-199 (standalone reports section, cascade-delete behavior), E-198 (bb data reconcile, migration 012), E-195 (plays pipeline, migration 009, validate_plays_stats.py), E-173 (resolution write-through, auto-scout after linking, unified Find on GC resolve page, dashboard sort by next game date, terminology cleanup, bb data repair-opponents), E-167 (bb data dedup CLI, GC search-powered opponent resolution, skip/unhide workflow), E-163 (scouting spray pipeline, updated thresholds, bb data scout 4-step flow), E-158 (spray chart pipeline, migration 006, chart routes), E-156 (bb data scout --force flag), E-155 (duplicate team detection and merge UI), E-143 (programs, user roles, team delete, opponent mapping UX, crawl trigger UI), E-120-06 (bare UUID input documented), E-055 (unified CLI), E-115-01 (E-100 team management model), E-028-03 (original)*

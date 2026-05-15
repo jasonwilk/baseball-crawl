@@ -1,0 +1,914 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>E-228 Positioning Cards — Reference Mockup</title>
+  <style>
+    /* ---- Reset & base (matches scouting_report.html base) ---- */
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: Arial, Helvetica, sans-serif;
+      font-size: 9pt;
+      color: #111;
+      background: #f3f4f6;
+      padding: 0.5in;
+      line-height: 1.4;
+      print-color-adjust: exact;
+      -webkit-print-color-adjust: exact;
+    }
+
+    /* ---- Screen-only nav / explanation blocks ---- */
+    .screen-banner {
+      background: #1e3a5f;
+      color: #fff;
+      padding: 12px 16px;
+      border-radius: 6px;
+      margin-bottom: 16px;
+      max-width: 11in;
+    }
+    .screen-banner h1 { font-size: 14pt; margin-bottom: 4px; }
+    .screen-banner p { font-size: 10pt; line-height: 1.5; }
+    .screen-banner .print-btn {
+      display: inline-block;
+      margin-top: 8px;
+      padding: 6px 16px;
+      font-size: 10pt;
+      background: #fff;
+      color: #1e3a5f;
+      border-radius: 4px;
+      text-decoration: none;
+      font-weight: bold;
+      cursor: pointer;
+      border: none;
+    }
+    .screen-section-label {
+      font-size: 11pt;
+      font-weight: bold;
+      color: #6b7280;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin: 24px 0 8px 0;
+      padding-left: 8px;
+      border-left: 4px solid #1e3a5f;
+    }
+    .screen-section-note {
+      font-size: 9pt;
+      color: #6b7280;
+      margin-bottom: 8px;
+      max-width: 11in;
+    }
+
+    /* ---- Print sheet wrappers (white "paper") ---- */
+    .sheet {
+      background: #fff;
+      border: 1px solid #d1d5db;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+      padding: 0.4in;
+      margin: 0 auto 16px auto;
+    }
+    .sheet-landscape { width: 11in; min-height: 8.5in; }
+    .sheet-portrait { width: 8.5in; min-height: 11in; }
+
+    /* ---- Call sheet ---- */
+    .call-sheet-header {
+      border-bottom: 2px solid #111;
+      padding-bottom: 6px;
+      margin-bottom: 8px;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+    }
+    .call-sheet-title {
+      font-size: 16pt;
+      font-weight: bold;
+      line-height: 1.1;
+    }
+    .call-sheet-subtitle {
+      font-size: 9pt;
+      color: #444;
+      margin-top: 2px;
+    }
+    .call-sheet-meta {
+      font-size: 9pt;
+      color: #444;
+      text-align: right;
+    }
+
+    .call-sheet-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 9pt;
+    }
+    .call-sheet-table thead th {
+      font-size: 8pt;
+      font-weight: bold;
+      text-transform: uppercase;
+      color: #fff;
+      background: #1e3a5f;
+      border-bottom: 2px solid #111;
+      padding: 4px 5px;
+      text-align: center;
+      white-space: nowrap;
+    }
+    .call-sheet-table thead th.col-name,
+    .call-sheet-table thead th.col-call,
+    .call-sheet-table thead th.col-note {
+      text-align: left;
+    }
+    .call-sheet-table tbody td {
+      padding: 5px 5px;
+      border-bottom: 1px solid #e5e7eb;
+      text-align: center;
+      vertical-align: middle;
+    }
+    .call-sheet-table tbody td.col-jersey { font-weight: bold; }
+    .call-sheet-table tbody td.col-name { text-align: left; font-weight: 500; white-space: nowrap; }
+    .call-sheet-table tbody td.col-name.name-unresolved { color: #6b7280; font-style: italic; font-weight: 400; }
+    .call-sheet-table tbody td.col-call {
+      text-align: left;
+      font-weight: bold;
+      white-space: nowrap;
+    }
+    .call-sheet-table tbody td.col-pos { font-family: Arial, sans-serif; }
+    .call-sheet-table tbody td.col-conf {
+      text-align: left;
+      font-size: 8.5pt;
+      color: #374151;
+      white-space: nowrap;
+    }
+    .call-sheet-table tbody td.col-note {
+      text-align: left;
+      font-size: 8.5pt;
+      color: #374151;
+      font-style: italic;
+      max-width: 2.4in;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    /* Per-position cell rendering (D6) */
+    .cell-true {
+      color: #9ca3af;
+      font-size: 0.85em;
+    }
+    .cell-call {
+      font-weight: bold;
+      color: #111;
+    }
+
+    /* Group-divider row between non-TRUE and TRUE rows */
+    .row-group-divider td {
+      border-bottom: 1px solid #9ca3af;
+      padding: 0;
+      height: 4px;
+    }
+
+    /* Empty call-sheet info row */
+    .row-empty td {
+      padding: 12px 5px;
+      text-align: center;
+      color: #6b7280;
+      font-style: italic;
+      font-size: 9pt;
+    }
+
+    /* ---- Cards-sheet (multi-up portrait) ---- */
+    .cards-sheet-header {
+      border-bottom: 2px solid #111;
+      padding-bottom: 4px;
+      margin-bottom: 10px;
+    }
+    .cards-sheet-title { font-size: 13pt; font-weight: bold; }
+    .cards-sheet-subtitle { font-size: 8.5pt; color: #444; margin-top: 1px; }
+
+    .cards-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      grid-template-rows: repeat(3, 1fr);
+      gap: 0.15in;
+      /* Approximate the available portrait area after page margins so screen
+         preview reflects the print geometry. */
+      height: 9.6in;
+    }
+    .player-card {
+      border: 0.5pt solid #6b7280;
+      padding: 0.15in;
+      display: flex;
+      flex-direction: column;
+      page-break-inside: avoid;
+      break-inside: avoid;
+    }
+    .card-position-header {
+      font-size: 14pt;
+      font-weight: bold;
+      letter-spacing: 0.02em;
+      border-bottom: 1px solid #d1d5db;
+      padding-bottom: 4px;
+      margin-bottom: 6px;
+      text-align: center;
+    }
+    .card-default-block {
+      /* Bumped to 36pt to align with spec §4.2 — baseball-coach review reconciliation (A).
+         Legible at greater distance and in shadowed dugout conditions. */
+      font-size: 36pt;
+      font-weight: 900;
+      text-align: center;
+      letter-spacing: 0.02em;
+      margin: 6px 0 8px 0;
+      line-height: 1.05;
+    }
+    .card-exceptions-label {
+      font-size: 8pt;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: #6b7280;
+      border-bottom: 1px solid #e5e7eb;
+      padding-bottom: 2px;
+      margin-bottom: 4px;
+    }
+    .card-exception-row {
+      display: grid;
+      grid-template-columns: 0.6in 1fr auto;
+      align-items: baseline;
+      gap: 6px;
+      padding: 2px 0;
+      font-size: 10pt;
+    }
+    .card-exception-jersey {
+      font-weight: bold;
+      font-size: 11pt;
+    }
+    .card-exception-name {
+      font-weight: 500;
+      letter-spacing: 0.02em;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .card-exception-call {
+      /* Bumped to 11pt to fix row font hierarchy — baseball-coach review reconciliation (B).
+         Ties jersey number (11pt bold) as the largest type in the row so the actionable
+         field sits at the top of the visual hierarchy, not the bottom. */
+      font-weight: bold;
+      text-align: right;
+      font-size: 11pt;
+      white-space: nowrap;
+    }
+    .card-mixed-tag {
+      font-size: 7.5pt;
+      font-variant: small-caps;
+      color: #6b7280;
+      margin-left: 3px;
+    }
+    .card-no-exceptions {
+      font-style: italic;
+      color: #6b7280;
+      font-size: 9pt;
+      text-align: center;
+      margin-top: 6px;
+    }
+    .card-truncated {
+      font-style: italic;
+      color: #6b7280;
+      font-size: 7.5pt;
+      text-align: center;
+      margin-top: 4px;
+    }
+
+    /* ---- Utility card variant (split into two halves) ---- */
+    .utility-card .card-position-header {
+      display: flex;
+      justify-content: space-around;
+      gap: 8px;
+    }
+    .utility-card .card-position-header span {
+      flex: 1;
+    }
+    .utility-section-label {
+      font-size: 7.5pt;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #6b7280;
+      margin-top: 6px;
+      margin-bottom: 2px;
+    }
+
+    /* ---- Opponent dashboard link card (screen demo only) ---- */
+    .dashboard-mockup-wrapper {
+      max-width: 56rem;
+      margin: 0 auto 16px auto;
+      background: #f3f4f6;
+      padding: 16px;
+      border-radius: 6px;
+      border: 1px dashed #9ca3af;
+    }
+    .dashboard-mockup-label {
+      font-size: 9pt;
+      color: #6b7280;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 8px;
+    }
+    .dashboard-card {
+      margin-bottom: 12px;
+      background: #fff;
+      border-radius: 6px;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+      border: 1px solid #e5e7eb;
+      padding: 14px 16px;
+    }
+    .dashboard-card h2 {
+      font-size: 12pt;
+      font-weight: bold;
+      color: #1e3a5f;
+    }
+    .dashboard-card .coverage-cue {
+      font-size: 9pt;
+      color: #6b7280;
+    }
+    .dashboard-card .primary-action {
+      display: inline-block;
+      background: #1e3a5f;
+      color: #fff;
+      padding: 8px 16px;
+      border-radius: 4px;
+      font-size: 10pt;
+      text-decoration: none;
+      font-weight: 500;
+      margin-top: 6px;
+    }
+    .dashboard-card .secondary-line {
+      font-size: 9pt;
+      color: #6b7280;
+      margin-top: 8px;
+    }
+    .dashboard-card .empty-line-main {
+      font-size: 10pt;
+      color: #374151;
+      margin-top: 4px;
+    }
+    .dashboard-card .empty-line-sub {
+      font-size: 9pt;
+      color: #6b7280;
+      margin-top: 2px;
+    }
+
+    /* ---- Print rules — follows scouting_report.html precedent ---- */
+    @page call-sheet {
+      size: landscape;
+      margin: 0.4in;
+    }
+
+    @page positioning-cards {
+      size: portrait;
+      margin: 0.3in;
+    }
+
+    @media print {
+      body { padding: 0; background: #fff; }
+      .screen-banner,
+      .screen-section-label,
+      .screen-section-note,
+      .dashboard-mockup-wrapper { display: none !important; }
+
+      .sheet {
+        border: 0;
+        box-shadow: none;
+        padding: 0;
+        margin: 0;
+        width: 100%;
+        min-height: auto;
+      }
+
+      .call-sheet-section {
+        page: call-sheet;
+      }
+      .cards-sheet-section {
+        page: positioning-cards;
+        break-before: page;
+      }
+      .cards-grid {
+        height: 100%;
+      }
+
+      .call-sheet-table { page-break-inside: avoid; }
+      .call-sheet-table tr { page-break-inside: avoid; }
+
+      .player-card {
+        page-break-inside: avoid;
+        break-inside: avoid;
+      }
+    }
+  </style>
+</head>
+<body>
+
+<!-- =========================================================
+     SCREEN BANNER (hidden in print)
+     ========================================================= -->
+<div class="screen-banner">
+  <h1>E-228 Positioning Cards — Reference Mockup</h1>
+  <p>This is a design reference for E-228-04. It demonstrates the landscape <strong>call sheet</strong>, the multi-up portrait <strong>player cards</strong> (2 × 3 grid), the design-only <strong>utility card variant</strong>, and the opponent-dashboard <strong>link card</strong>. Use your browser's Print → "Save as PDF" with mixed orientation supported (Chrome/Edge) to verify print fidelity.</p>
+  <button class="print-btn" onclick="window.print()">Print / Save as PDF</button>
+</div>
+
+<!-- =========================================================
+     SECTION 1: CALL SHEET (LANDSCAPE)
+     ========================================================= -->
+<div class="screen-section-label">1. Coach call sheet (landscape, 1 page)</div>
+<div class="screen-section-note">
+  Demonstrates all five AC-5 edge states across the rows: normal full-data, MIXED, partial-data (10-24 BIP, direction-only),
+  thin (&lt;10 BIP), and an all-TRUE batter group. Rows are sorted flagged-first (non-TRUE team_state_call), then by jersey
+  number within each group. A 1px-gray separator between the two groups makes the boundary read as intentional.
+</div>
+
+<div class="sheet sheet-landscape">
+  <section class="call-sheet-section">
+
+    <div class="call-sheet-header">
+      <div>
+        <div class="call-sheet-title">Defensive Positioning — Call Sheet</div>
+        <div class="call-sheet-subtitle">Eastlake Bears (opponent) · vs. Lincoln Standing Bear · 2026 Spring HS</div>
+      </div>
+      <div class="call-sheet-meta">
+        Through Apr 12 (8 games)<br>
+        Generated 2026-04-13
+      </div>
+    </div>
+
+    <table class="call-sheet-table">
+      <thead>
+        <tr>
+          <th style="width: 0.5in;">#</th>
+          <th class="col-name" style="width: 1.5in;">Name</th>
+          <th class="col-call" style="width: 1.7in;">Call</th>
+          <th style="width: 0.55in;">LF</th>
+          <th style="width: 0.55in;">CF</th>
+          <th style="width: 0.55in;">RF</th>
+          <th style="width: 0.55in;">3B</th>
+          <th style="width: 0.55in;">SS</th>
+          <th style="width: 0.55in;">2B</th>
+          <th style="width: 1.3in;">Confidence</th>
+          <th class="col-note" style="width: 2.4in;">Note</th>
+        </tr>
+      </thead>
+      <tbody>
+        <!-- FLAGGED GROUP (non-TRUE team_state_call), sorted by jersey ascending -->
+
+        <!-- Row 1: Wright — full-data, direction + depth, shallow on the right side -->
+        <tr>
+          <td class="col-jersey">4</td>
+          <td class="col-name">WRIGHT</td>
+          <td class="col-call">SHADE RIGHT SHALLOW</td>
+          <td class="cell-true">·</td>
+          <td class="cell-true">·</td>
+          <td class="cell-call">R Sh</td>
+          <td class="cell-true">·</td>
+          <td class="cell-true">·</td>
+          <td class="cell-call">R Sh</td>
+          <td class="col-conf">33 BIP · 1 HR</td>
+          <td class="col-note">Slap hitter; beats out infield to right side</td>
+        </tr>
+
+        <!-- Row 2: Ramirez — full-data, left shade across most of the field -->
+        <tr>
+          <td class="col-jersey">7</td>
+          <td class="col-name">RAMIREZ</td>
+          <td class="col-call">SHADE LEFT</td>
+          <td class="cell-call">L</td>
+          <td class="cell-call">L</td>
+          <td class="cell-true">·</td>
+          <td class="cell-call">L</td>
+          <td class="cell-true">·</td>
+          <td class="cell-true">·</td>
+          <td class="col-conf">38 BIP · 2 HR</td>
+          <td class="col-note">Pulls grounders early in the count</td>
+        </tr>
+
+        <!-- Row 3: Davis — partial-data (18 BIP, direction-only, no depth) — AC-5 -->
+        <tr>
+          <td class="col-jersey">11</td>
+          <td class="col-name">DAVIS</td>
+          <td class="col-call">SHADE LEFT</td>
+          <td class="cell-call">L</td>
+          <td class="cell-true">·</td>
+          <td class="cell-true">·</td>
+          <td class="cell-call">L</td>
+          <td class="cell-true">·</td>
+          <td class="cell-true">·</td>
+          <td class="col-conf">18 BIP · 0 HR</td>
+          <td class="col-note">(no rationale this game)</td>
+        </tr>
+
+        <!-- Row 4: Thompson — MIXED, per-position cells diverge — AC-5 -->
+        <tr>
+          <td class="col-jersey">23</td>
+          <td class="col-name">THOMPSON</td>
+          <td class="col-call">MIXED</td>
+          <td class="cell-true">·</td>
+          <td class="cell-true">·</td>
+          <td class="cell-call">R Dp</td>
+          <td class="cell-call">L Dp</td>
+          <td class="cell-call">L</td>
+          <td class="cell-true">·</td>
+          <td class="col-conf">41 BIP · 4 HR</td>
+          <td class="col-note">Goes oppo on offspeed; pulls fastballs</td>
+        </tr>
+
+        <!-- Row 5: name-unresolved demo (rare but real — falls back to jersey-only matching) -->
+        <tr>
+          <td class="col-jersey">19</td>
+          <td class="col-name name-unresolved">#19 (name not resolved)</td>
+          <td class="col-call">SHADE RIGHT</td>
+          <td class="cell-true">·</td>
+          <td class="cell-true">·</td>
+          <td class="cell-call">R</td>
+          <td class="cell-true">·</td>
+          <td class="cell-true">·</td>
+          <td class="cell-call">R</td>
+          <td class="col-conf">26 BIP · 0 HR</td>
+          <td class="col-note">(no rationale this game)</td>
+        </tr>
+
+        <!-- Group divider: separates flagged batters from all-TRUE batters — D5, AC-5 -->
+        <tr class="row-group-divider"><td colspan="11"></td></tr>
+
+        <!-- ALL-TRUE GROUP (team_state_call=TRUE), sorted by jersey ascending — AC-5 -->
+
+        <tr>
+          <td class="col-jersey">3</td>
+          <td class="col-name">LOPEZ</td>
+          <td class="col-call">STRAIGHT UP</td>
+          <td class="cell-true">·</td>
+          <td class="cell-true">·</td>
+          <td class="cell-true">·</td>
+          <td class="cell-true">·</td>
+          <td class="cell-true">·</td>
+          <td class="cell-true">·</td>
+          <td class="col-conf">6 BIP · 0 HR · thin</td>
+          <td class="col-note"></td>
+        </tr>
+
+        <tr>
+          <td class="col-jersey">9</td>
+          <td class="col-name">NGUYEN</td>
+          <td class="col-call">STRAIGHT UP</td>
+          <td class="cell-true">·</td>
+          <td class="cell-true">·</td>
+          <td class="cell-true">·</td>
+          <td class="cell-true">·</td>
+          <td class="cell-true">·</td>
+          <td class="cell-true">·</td>
+          <td class="col-conf">27 BIP · 0 HR</td>
+          <td class="col-note"></td>
+        </tr>
+
+        <tr>
+          <td class="col-jersey">12</td>
+          <td class="col-name">JOHNSON</td>
+          <td class="col-call">STRAIGHT UP</td>
+          <td class="cell-true">·</td>
+          <td class="cell-true">·</td>
+          <td class="cell-true">·</td>
+          <td class="cell-true">·</td>
+          <td class="cell-true">·</td>
+          <td class="cell-true">·</td>
+          <td class="col-conf">22 BIP · 0 HR</td>
+          <td class="col-note"></td>
+        </tr>
+
+        <tr>
+          <td class="col-jersey">15</td>
+          <td class="col-name">KIM</td>
+          <td class="col-call">STRAIGHT UP</td>
+          <td class="cell-true">·</td>
+          <td class="cell-true">·</td>
+          <td class="cell-true">·</td>
+          <td class="cell-true">·</td>
+          <td class="cell-true">·</td>
+          <td class="cell-true">·</td>
+          <td class="col-conf">14 BIP · 0 HR</td>
+          <td class="col-note"></td>
+        </tr>
+
+        <tr>
+          <td class="col-jersey">21</td>
+          <td class="col-name">PATEL</td>
+          <td class="col-call">STRAIGHT UP</td>
+          <td class="cell-true">·</td>
+          <td class="cell-true">·</td>
+          <td class="cell-true">·</td>
+          <td class="cell-true">·</td>
+          <td class="cell-true">·</td>
+          <td class="cell-true">·</td>
+          <td class="col-conf">19 BIP · 0 HR</td>
+          <td class="col-note"></td>
+        </tr>
+
+      </tbody>
+    </table>
+  </section>
+</div>
+
+
+<!-- =========================================================
+     SECTION 2: ZERO-BATTER EDGE STATE (CALL SHEET)
+     ========================================================= -->
+<div class="screen-section-label">2. Zero-batter edge state (AC-5)</div>
+<div class="screen-section-note">
+  Demonstrates the &ldquo;zero scouted batters&rdquo; case. The call sheet renders with a labeled empty row so the coach knows the
+  feature exists and what comes next. The player-cards sheet (not shown here for brevity) renders each card with
+  STRAIGHT UP default + the &ldquo;No exceptions for this opponent.&rdquo; line.
+</div>
+
+<div class="sheet sheet-landscape" style="min-height: 3in;">
+  <section class="call-sheet-section">
+    <div class="call-sheet-header">
+      <div>
+        <div class="call-sheet-title">Defensive Positioning — Call Sheet</div>
+        <div class="call-sheet-subtitle">Northside Tigers (opponent) · vs. Lincoln Standing Bear · 2026 Spring HS</div>
+      </div>
+      <div class="call-sheet-meta">
+        No coverage yet<br>
+        Generated 2026-04-13
+      </div>
+    </div>
+
+    <table class="call-sheet-table">
+      <thead>
+        <tr>
+          <th style="width: 0.5in;">#</th>
+          <th class="col-name" style="width: 1.5in;">Name</th>
+          <th class="col-call" style="width: 1.7in;">Call</th>
+          <th style="width: 0.55in;">LF</th>
+          <th style="width: 0.55in;">CF</th>
+          <th style="width: 0.55in;">RF</th>
+          <th style="width: 0.55in;">3B</th>
+          <th style="width: 0.55in;">SS</th>
+          <th style="width: 0.55in;">2B</th>
+          <th style="width: 1.3in;">Confidence</th>
+          <th class="col-note" style="width: 2.4in;">Note</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr class="row-empty">
+          <td colspan="11">No scouted batters yet. Cards will appear after the first scouting pull.</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+</div>
+
+
+<!-- =========================================================
+     SECTION 3: PLAYER CARDS SHEET (PORTRAIT, 2x3 GRID)
+     ========================================================= -->
+<div class="screen-section-label">3. Player cards (portrait, 2 × 3 grid, 6 cards = 1 sheet)</div>
+<div class="screen-section-note">
+  One card per covered fielding position (D3). Each card has the position name, the STRAIGHT UP default block, and an
+  exceptions list keyed by opposing jersey number. The default block dominates each card visually so a glove-on player
+  reading at arm&rsquo;s length sees the most likely call instantly. MIXED batters carry a (MIXED) suffix on the call so
+  fielders can match a coach&rsquo;s &ldquo;#23 MIXED&rdquo; verbal call.
+</div>
+
+<div class="sheet sheet-portrait">
+  <section class="cards-sheet-section">
+
+    <div class="cards-sheet-header">
+      <div class="cards-sheet-title">Defensive Positioning — Player Cards</div>
+      <div class="cards-sheet-subtitle">Eastlake Bears · Through Apr 12 (8 games) · Cut along card edges.</div>
+    </div>
+
+    <div class="cards-grid">
+      <!-- LEFT FIELD card -->
+      <div class="player-card">
+        <div class="card-position-header">LEFT FIELD</div>
+        <div class="card-default-block">STRAIGHT UP</div>
+        <div class="card-exceptions-label">Exceptions</div>
+        <div class="card-exception-row">
+          <span class="card-exception-jersey">#7</span>
+          <span class="card-exception-name">RAMIREZ</span>
+          <span class="card-exception-call">SHADE LEFT</span>
+        </div>
+        <div class="card-exception-row">
+          <span class="card-exception-jersey">#11</span>
+          <span class="card-exception-name">DAVIS</span>
+          <span class="card-exception-call">SHADE LEFT</span>
+        </div>
+      </div>
+
+      <!-- CENTERFIELD card -->
+      <div class="player-card">
+        <div class="card-position-header">CENTERFIELD</div>
+        <div class="card-default-block">STRAIGHT UP</div>
+        <div class="card-exceptions-label">Exceptions</div>
+        <div class="card-exception-row">
+          <span class="card-exception-jersey">#7</span>
+          <span class="card-exception-name">RAMIREZ</span>
+          <span class="card-exception-call">SHADE LEFT</span>
+        </div>
+      </div>
+
+      <!-- RIGHT FIELD card — has MIXED exception + 3 rows -->
+      <div class="player-card">
+        <div class="card-position-header">RIGHT FIELD</div>
+        <div class="card-default-block">STRAIGHT UP</div>
+        <div class="card-exceptions-label">Exceptions</div>
+        <div class="card-exception-row">
+          <span class="card-exception-jersey">#4</span>
+          <span class="card-exception-name">WRIGHT</span>
+          <span class="card-exception-call">SHADE RIGHT SHALLOW</span>
+        </div>
+        <div class="card-exception-row">
+          <span class="card-exception-jersey">#19</span>
+          <span class="card-exception-name">#19</span>
+          <span class="card-exception-call">SHADE RIGHT</span>
+        </div>
+        <div class="card-exception-row">
+          <span class="card-exception-jersey">#23</span>
+          <span class="card-exception-name">THOMPSON</span>
+          <span class="card-exception-call">SHADE RIGHT DEEP <span class="card-mixed-tag">(MIXED)</span></span>
+        </div>
+      </div>
+
+      <!-- THIRD BASE card — has MIXED exception -->
+      <div class="player-card">
+        <div class="card-position-header">THIRD BASE</div>
+        <div class="card-default-block">STRAIGHT UP</div>
+        <div class="card-exceptions-label">Exceptions</div>
+        <div class="card-exception-row">
+          <span class="card-exception-jersey">#7</span>
+          <span class="card-exception-name">RAMIREZ</span>
+          <span class="card-exception-call">SHADE LEFT</span>
+        </div>
+        <div class="card-exception-row">
+          <span class="card-exception-jersey">#11</span>
+          <span class="card-exception-name">DAVIS</span>
+          <span class="card-exception-call">SHADE LEFT</span>
+        </div>
+        <div class="card-exception-row">
+          <span class="card-exception-jersey">#23</span>
+          <span class="card-exception-name">THOMPSON</span>
+          <span class="card-exception-call">SHADE LEFT DEEP <span class="card-mixed-tag">(MIXED)</span></span>
+        </div>
+      </div>
+
+      <!-- SHORTSTOP card — single MIXED exception -->
+      <div class="player-card">
+        <div class="card-position-header">SHORTSTOP</div>
+        <div class="card-default-block">STRAIGHT UP</div>
+        <div class="card-exceptions-label">Exceptions</div>
+        <div class="card-exception-row">
+          <span class="card-exception-jersey">#23</span>
+          <span class="card-exception-name">THOMPSON</span>
+          <span class="card-exception-call">SHADE LEFT <span class="card-mixed-tag">(MIXED)</span></span>
+        </div>
+      </div>
+
+      <!-- SECOND BASE card.
+           AC-5 STATE DEMONSTRATED IN THIS CARD: normal / exceptions-present case
+           (the 2B position has two flagged batters). The all-TRUE edge state for the
+           same position is demonstrated separately in Section 4 below; do NOT treat
+           this card as the canonical all-TRUE rendering. -->
+      <div class="player-card">
+        <div class="card-position-header">SECOND BASE</div>
+        <div class="card-default-block">STRAIGHT UP</div>
+        <div class="card-exceptions-label">Exceptions</div>
+        <div class="card-exception-row">
+          <span class="card-exception-jersey">#4</span>
+          <span class="card-exception-name">WRIGHT</span>
+          <span class="card-exception-call">SHADE RIGHT SHALLOW</span>
+        </div>
+        <div class="card-exception-row">
+          <span class="card-exception-jersey">#19</span>
+          <span class="card-exception-name">#19</span>
+          <span class="card-exception-call">SHADE RIGHT</span>
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
+
+
+<!-- =========================================================
+     SECTION 4: ALL-TRUE PLAYER CARD EDGE STATE
+     ========================================================= -->
+<div class="screen-section-label">4. All-TRUE player card (AC-5)</div>
+<div class="screen-section-note">
+  A position with zero exceptions. The card still carries a complete instruction — &ldquo;play straight up against everyone.&rdquo;
+  It does not read as broken; it reads as intentional.
+</div>
+
+<div class="sheet sheet-portrait" style="min-height: 5in;">
+  <section style="display: flex; align-items: flex-start; justify-content: center;">
+    <!-- SECOND BASE card.
+         AC-5 STATE DEMONSTRATED IN THIS CARD: all-TRUE edge state (zero exceptions
+         for this position against the current opponent). The normal/exceptions-present
+         rendering of the same position is in Section 3 above. THIS card is the
+         canonical all-TRUE template for E-228-05. -->
+    <div class="player-card" style="width: 3.95in; height: 3.37in;">
+      <div class="card-position-header">SECOND BASE</div>
+      <div class="card-default-block">STRAIGHT UP</div>
+      <div class="card-exceptions-label">Exceptions</div>
+      <div class="card-no-exceptions">No exceptions for this opponent.</div>
+    </div>
+  </section>
+</div>
+
+
+<!-- =========================================================
+     SECTION 5: UTILITY-VARIANT CARD (DESIGN ONLY)
+     ========================================================= -->
+<div class="screen-section-label">5. Utility-player card variant — design-for-future-use only (AC-2)</div>
+<div class="screen-section-note">
+  Two-position card for a utility player who plays e.g. SS and 3B in the same game. <strong>v1 does NOT render this</strong> —
+  per E-228-05 AC-2, v1 always generates one card per the 6 covered positions. Included here to lock the wireframe for a
+  future iteration.
+</div>
+
+<div class="sheet sheet-portrait" style="min-height: 5in;">
+  <section style="display: flex; align-items: flex-start; justify-content: center;">
+    <div class="player-card utility-card" style="width: 3.95in; height: 3.37in;">
+      <div class="card-position-header">
+        <span>SHORTSTOP</span>
+        <span>THIRD BASE</span>
+      </div>
+      <div class="card-default-block" style="font-size: 22pt;">STRAIGHT UP</div>
+      <div class="utility-section-label">Exceptions (SS)</div>
+      <div class="card-exception-row">
+        <span class="card-exception-jersey">#7</span>
+        <span class="card-exception-name">RAMIREZ</span>
+        <span class="card-exception-call">SHADE LEFT</span>
+      </div>
+      <div class="card-exception-row">
+        <span class="card-exception-jersey">#23</span>
+        <span class="card-exception-name">THOMPSON</span>
+        <span class="card-exception-call">SHADE LEFT <span class="card-mixed-tag">(MIXED)</span></span>
+      </div>
+
+      <div class="utility-section-label">Exceptions (3B)</div>
+      <div class="card-exception-row">
+        <span class="card-exception-jersey">#7</span>
+        <span class="card-exception-name">RAMIREZ</span>
+        <span class="card-exception-call">SHADE LEFT</span>
+      </div>
+      <div class="card-exception-row">
+        <span class="card-exception-jersey">#23</span>
+        <span class="card-exception-name">THOMPSON</span>
+        <span class="card-exception-call">SHADE LEFT DEEP <span class="card-mixed-tag">(MIXED)</span></span>
+      </div>
+    </div>
+  </section>
+</div>
+
+
+<!-- =========================================================
+     SECTION 6: OPPONENT DASHBOARD LINK CARD (AC-7)
+     ========================================================= -->
+<div class="screen-section-label">6. Opponent dashboard — &ldquo;Defensive Positioning&rdquo; card (AC-7)</div>
+<div class="screen-section-note">
+  Placement: a new card on <code>src/api/templates/dashboard/opponent_detail.html</code> immediately before the existing
+  Team Spray Chart card. Shows three states: <strong>READY</strong> (real link to <code>/reports/{slug}</code>), <strong>not-yet-scouted</strong>
+  (transitional), and <strong>generation-failed</strong> (transitional / failure-recovery). E-228-07 implements this.
+</div>
+
+<div class="dashboard-mockup-wrapper">
+
+  <!-- State A: READY -->
+  <div class="dashboard-mockup-label">State A — Ready report exists</div>
+  <div class="dashboard-card">
+    <div style="display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 6px;">
+      <h2>Defensive Positioning</h2>
+      <span class="coverage-cue">Through Apr 12 (8 games)</span>
+    </div>
+    <a class="primary-action" href="#">Open positioning cards &rarr;</a>
+    <p class="secondary-line">Print-ready: landscape call sheet + 6 player cards.</p>
+  </div>
+
+  <!-- State B: not yet scouted (transitional) -->
+  <div class="dashboard-mockup-label">State B — Tracked opponent, first scout hasn&rsquo;t run yet (transitional)</div>
+  <div class="dashboard-card">
+    <div style="display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 6px;">
+      <h2>Defensive Positioning</h2>
+    </div>
+    <p class="empty-line-main">Positioning cards generate automatically with each scouting update.</p>
+    <p class="empty-line-sub">Cards will appear after the first scouting pull.</p>
+  </div>
+
+  <!-- State C: generation failed (transitional / failure-recovery) -->
+  <div class="dashboard-mockup-label">State C — Last scout&rsquo;s report generation failed (transitional / failure-recovery)</div>
+  <div class="dashboard-card">
+    <div style="display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 6px;">
+      <h2>Defensive Positioning</h2>
+    </div>
+    <p class="empty-line-main">Card generation didn&rsquo;t complete on the last update.</p>
+    <p class="empty-line-sub">The next scouting update will retry automatically.</p>
+  </div>
+
+</div>
+
+</body>
+</html>

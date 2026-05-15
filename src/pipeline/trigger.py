@@ -34,6 +34,8 @@ from src.gamechanger.resolvers.gc_uuid_resolver import resolve_gc_uuid
 from src.gamechanger.team_resolver import resolve_team
 from src.pipeline import crawl as crawl_module
 from src.pipeline import load as load_module
+from src.reports.generator import generate_report
+from src.reports.positioning import compute_positioning
 
 logger = logging.getLogger(__name__)
 
@@ -746,6 +748,40 @@ def run_scouting_sync(team_id: int, public_id: str, crawl_job_id: int) -> None:
                     logger.error(
                         "Post-spray dedup failed for team_id=%d (non-fatal)",
                         team_id,
+                        exc_info=True,
+                    )
+
+                # 5. Tier 1 positioning recompute (E-228-06 AC-1).
+                # MUST run after the dedup above per epic TN-6 -- dedup-first
+                # prevents a high-BIP hitter fracturing into low-BIP stubs and
+                # misfiring the sample gates. Engine commits its own writes.
+                # Non-fatal (AC-2): a recompute that raises mid-write leaves
+                # the prior committed `batter_positioning` state intact and
+                # the scout run still completes.
+                try:
+                    compute_positioning(conn, team_id, season_id)
+                except Exception:  # noqa: BLE001
+                    logger.warning(
+                        "Positioning recompute failed for team_id=%d "
+                        "(non-fatal)",
+                        team_id,
+                        exc_info=True,
+                    )
+
+                # 6. Auto-generate report bundle (E-228-06 AC-6, (B) Pre-generate).
+                # The opponent-dashboard "Defensive Positioning" link resolves
+                # to the most recent `ready` report -- generating here keeps
+                # the link non-empty for actively-scouted opponents. Mirrors
+                # the Tier 2 LLM non-fatal pattern. `generate_report()` opens
+                # its own connections, so this call is safe inside the open
+                # `with` block here.
+                try:
+                    generate_report(public_id)
+                except Exception:  # noqa: BLE001
+                    logger.warning(
+                        "Auto-generate report failed for public_id=%s "
+                        "(non-fatal)",
+                        public_id,
                         exc_info=True,
                     )
 

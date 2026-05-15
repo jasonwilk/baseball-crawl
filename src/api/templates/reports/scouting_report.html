@@ -792,6 +792,12 @@
 
 </div>{# /.stats-content (first block: header through batting) #}
 
+{# ===== DEFENSIVE POSITIONING (E-228-05) =====
+   Renders the landscape call sheet + 2x3 portrait player cards. The
+   partial is self-contained (its own <style> block) so this parent
+   template doesn't need positioning-specific CSS. #}
+{% include "reports/positioning_cards.html" %}
+
 {# ===== SPRAY CHARTS (AC-10, TN-7, TN-10) ===== #}
 {% if has_spray or team_spray_uri %}
 <div class="spray-section">

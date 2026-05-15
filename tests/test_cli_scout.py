@@ -1086,3 +1086,309 @@ def test_scout_spray_load_exception_causes_exit_code_1(
         result = runner.invoke(app, ["data", "scout"])
 
     assert result.exit_code == 1
+
+
+# ---------------------------------------------------------------------------
+# E-228-06: bb data scout -- positioning recompute + auto-generate (AC-3, AC-6, AC-6a)
+# ---------------------------------------------------------------------------
+
+
+def _make_cli_scout_db(tmp_path: Path) -> Path:
+    """Run real migrations + seed a tracked team for the CLI scout path."""
+    db_path = tmp_path / "test.db"
+    from migrations.apply_migrations import run_migrations
+    run_migrations(db_path=db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute(
+            "INSERT INTO teams (id, name, public_id, season_year, "
+            "membership_type, is_active) "
+            "VALUES (1, 'Eastlake Bears', 'mypubid', 2026, 'tracked', 1)"
+        )
+        conn.execute(
+            "INSERT INTO seasons (season_id, name, season_type, year) "
+            "VALUES ('2026-spring-hs', '2026', 'spring-hs', 2026)"
+        )
+        # Pre-insert a scouting_runs row with far-future last_checked so
+        # the _post_spray_* sweeps' `last_checked >= started_at` filter matches.
+        conn.execute(
+            "INSERT INTO scouting_runs "
+            "(team_id, season_id, status, last_checked) "
+            "VALUES (1, '2026-spring-hs', 'completed', '2099-12-31T00:00:00Z')"
+        )
+        conn.commit()
+    return db_path
+
+
+def test_scout_team_calls_compute_positioning_and_generate_report(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """AC-3 / AC-6: `bb data scout --team` runs compute_positioning then
+    generate_report after the existing _post_spray_dedup call."""
+    _patch_credentials(monkeypatch)
+    _patch_token_manager(monkeypatch)
+
+    db_path = _make_cli_scout_db(tmp_path)
+
+    mock_crawler = MagicMock()
+    mock_crawler.scout_team.return_value = ScoutingCrawlResult(
+        team_id=1, season_id="2026-spring-hs", games_crawled=3, public_id="mypubid",
+    )
+
+    call_log: list[str] = []
+
+    def _compute_capture(_conn, team_id, season_id):
+        call_log.append(f"compute({team_id},{season_id})")
+        return []
+
+    def _generate_capture(public_id):
+        call_log.append(f"generate({public_id})")
+        from src.reports.generator import GenerationResult
+        return GenerationResult(success=True, slug="abc", url="/r/abc")
+
+    with (
+        patch("src.gamechanger.client.GameChangerClient"),
+        patch("src.gamechanger.crawlers.scouting.ScoutingCrawler", return_value=mock_crawler),
+        patch("src.gamechanger.loaders.scouting_loader.ScoutingLoader"),
+        patch("src.cli.data._load_scouted_team_in_memory", return_value=0),
+        patch("src.cli.data._resolve_db_path", return_value=db_path),
+        patch("src.cli.data.compute_positioning", side_effect=_compute_capture),
+        patch("src.cli.data.generate_report", side_effect=_generate_capture),
+    ):
+        result = runner.invoke(app, ["data", "scout", "--team", "mypubid"])
+
+    assert result.exit_code == 0
+    # Ordering: compute before generate; both invoked once.
+    assert call_log == [
+        "compute(1,2026-spring-hs)",
+        "generate(mypubid)",
+    ]
+
+
+def test_scout_team_compute_positioning_failure_is_non_fatal(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """AC-2 / AC-6a: compute_positioning raise does NOT change scout exit
+    code; the auto-generate step still runs after."""
+    _patch_credentials(monkeypatch)
+    _patch_token_manager(monkeypatch)
+
+    db_path = _make_cli_scout_db(tmp_path)
+
+    mock_crawler = MagicMock()
+    mock_crawler.scout_team.return_value = ScoutingCrawlResult(
+        team_id=1, season_id="2026-spring-hs", games_crawled=3, public_id="mypubid",
+    )
+
+    generate_called: list[str] = []
+
+    def _generate_capture(public_id):
+        generate_called.append(public_id)
+        from src.reports.generator import GenerationResult
+        return GenerationResult(success=True, slug="abc", url="/r/abc")
+
+    with (
+        patch("src.gamechanger.client.GameChangerClient"),
+        patch("src.gamechanger.crawlers.scouting.ScoutingCrawler", return_value=mock_crawler),
+        patch("src.gamechanger.loaders.scouting_loader.ScoutingLoader"),
+        patch("src.cli.data._load_scouted_team_in_memory", return_value=0),
+        patch("src.cli.data._resolve_db_path", return_value=db_path),
+        patch(
+            "src.cli.data.compute_positioning",
+            side_effect=RuntimeError("synthetic engine failure"),
+        ),
+        patch("src.cli.data.generate_report", side_effect=_generate_capture),
+    ):
+        result = runner.invoke(app, ["data", "scout", "--team", "mypubid"])
+
+    # AC-2 / AC-6a: exit code unchanged from success path.
+    assert result.exit_code == 0
+    # Auto-generate still ran despite the recompute failure.
+    assert generate_called == ["mypubid"]
+
+
+def test_scout_team_generate_report_failure_is_non_fatal(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """AC-6a: a raise from generate_report does NOT change the scout exit
+    code."""
+    _patch_credentials(monkeypatch)
+    _patch_token_manager(monkeypatch)
+
+    db_path = _make_cli_scout_db(tmp_path)
+
+    mock_crawler = MagicMock()
+    mock_crawler.scout_team.return_value = ScoutingCrawlResult(
+        team_id=1, season_id="2026-spring-hs", games_crawled=3, public_id="mypubid",
+    )
+
+    with (
+        patch("src.gamechanger.client.GameChangerClient"),
+        patch("src.gamechanger.crawlers.scouting.ScoutingCrawler", return_value=mock_crawler),
+        patch("src.gamechanger.loaders.scouting_loader.ScoutingLoader"),
+        patch("src.cli.data._load_scouted_team_in_memory", return_value=0),
+        patch("src.cli.data._resolve_db_path", return_value=db_path),
+        patch("src.cli.data.compute_positioning", return_value=[]),
+        patch(
+            "src.cli.data.generate_report",
+            side_effect=RuntimeError("synthetic generate failure"),
+        ),
+    ):
+        result = runner.invoke(app, ["data", "scout", "--team", "mypubid"])
+
+    # AC-6a: exit code unchanged from success path.
+    assert result.exit_code == 0
+
+
+def test_post_spray_positioning_and_report_single_team_resolution(
+    tmp_path: Path,
+) -> None:
+    """The new helper resolves (team_id, season_id) via _find_scouting_run
+    when called with a public_id; then invokes compute_positioning +
+    generate_report once each."""
+    db_path = _make_cli_scout_db(tmp_path)
+
+    compute_calls: list[tuple] = []
+    generate_calls: list[str] = []
+
+    def _compute_capture(_conn, team_id, season_id):
+        compute_calls.append((team_id, season_id))
+        return []
+
+    def _generate_capture(public_id):
+        generate_calls.append(public_id)
+        from src.reports.generator import GenerationResult
+        return GenerationResult(success=True, slug="x", url="/r/x")
+
+    with (
+        patch("src.cli.data.compute_positioning", side_effect=_compute_capture),
+        patch("src.cli.data.generate_report", side_effect=_generate_capture),
+    ):
+        from src.cli.data import _post_spray_positioning_and_report
+        with sqlite3.connect(str(db_path)) as conn:
+            conn.execute("PRAGMA foreign_keys=ON;")
+            _post_spray_positioning_and_report(
+                conn, "mypubid", None, "2026-01-01T00:00:00.000Z",
+            )
+
+    assert compute_calls == [(1, "2026-spring-hs")]
+    assert generate_calls == ["mypubid"]
+
+
+def test_post_spray_positioning_and_report_all_teams_mode(
+    tmp_path: Path,
+) -> None:
+    """All-teams mode (no team_public_id): the helper iterates every team
+    with a recent scouting run, invoking compute + generate per team."""
+    db_path = _make_cli_scout_db(tmp_path)
+    # Seed a second tracked team + a recent scouting run.
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute(
+            "INSERT INTO teams (id, name, public_id, season_year, "
+            "membership_type, is_active) "
+            "VALUES (2, 'Tigers', 'tigers-id', 2026, 'tracked', 1)"
+        )
+        conn.execute(
+            "INSERT INTO scouting_runs "
+            "(team_id, season_id, status, last_checked) "
+            "VALUES (2, '2026-spring-hs', 'completed', '2099-12-31T00:00:00Z')"
+        )
+        conn.commit()
+
+    compute_calls: list[tuple] = []
+    generate_calls: list[str] = []
+
+    def _compute_capture(_conn, team_id, season_id):
+        compute_calls.append((team_id, season_id))
+        return []
+
+    def _generate_capture(public_id):
+        generate_calls.append(public_id)
+        from src.reports.generator import GenerationResult
+        return GenerationResult(success=True, slug="x", url="/r/x")
+
+    with (
+        patch("src.cli.data.compute_positioning", side_effect=_compute_capture),
+        patch("src.cli.data.generate_report", side_effect=_generate_capture),
+    ):
+        from src.cli.data import _post_spray_positioning_and_report
+        with sqlite3.connect(str(db_path)) as conn:
+            conn.execute("PRAGMA foreign_keys=ON;")
+            _post_spray_positioning_and_report(
+                conn, None, None, "2026-01-01T00:00:00.000Z",
+            )
+
+    # Both teams processed (order may vary -- assert as sets).
+    assert set(compute_calls) == {(1, "2026-spring-hs"), (2, "2026-spring-hs")}
+    assert set(generate_calls) == {"mypubid", "tigers-id"}
+
+
+def test_post_spray_positioning_and_report_skips_team_without_public_id(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A team with NULL public_id: compute still runs, but auto-generate is
+    skipped (logged at WARNING) -- it needs a public_id to call
+    generate_report."""
+    import logging
+
+    db_path = _make_cli_scout_db(tmp_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        # Team 3: tracked but public_id is NULL (e.g. cross-perspective stub).
+        conn.execute(
+            "INSERT INTO teams (id, name, public_id, season_year, "
+            "membership_type, is_active) "
+            "VALUES (3, 'Mystery', NULL, 2026, 'tracked', 1)"
+        )
+        conn.execute(
+            "INSERT INTO scouting_runs "
+            "(team_id, season_id, status, last_checked) "
+            "VALUES (3, '2026-spring-hs', 'completed', '2099-12-31T00:00:00Z')"
+        )
+        conn.commit()
+
+    compute_calls: list[tuple] = []
+    generate_calls: list[str] = []
+
+    def _compute_capture(_conn, team_id, season_id):
+        compute_calls.append((team_id, season_id))
+        return []
+
+    def _generate_capture(public_id):
+        generate_calls.append(public_id)
+        from src.reports.generator import GenerationResult
+        return GenerationResult(success=True, slug="x", url="/r/x")
+
+    caplog.set_level(logging.WARNING, logger="src.cli.data")
+
+    with (
+        patch("src.cli.data.compute_positioning", side_effect=_compute_capture),
+        patch("src.cli.data.generate_report", side_effect=_generate_capture),
+    ):
+        from src.cli.data import _post_spray_positioning_and_report
+        with sqlite3.connect(str(db_path)) as conn:
+            conn.execute("PRAGMA foreign_keys=ON;")
+            _post_spray_positioning_and_report(
+                conn, None, None, "2026-01-01T00:00:00.000Z",
+            )
+
+    # compute_positioning called for team 3 (the NULL-public_id team) too.
+    assert (3, "2026-spring-hs") in compute_calls
+    # generate_report NOT called for team 3 (NULL public_id) -- only team 1.
+    assert generate_calls == ["mypubid"]
+    # WARNING logged for the NULL-public_id skip.
+    skip_warnings = [
+        rec for rec in caplog.records
+        if rec.levelno == logging.WARNING
+        and "public_id is NULL" in rec.getMessage()
+    ]
+    assert skip_warnings
+
+
+def test_ac4_cli_import_only_no_duplicated_engine_logic() -> None:
+    """AC-4: CLI imports the identical engine + generator functions; no
+    duplicated decision logic in `src/cli/data.py`."""
+    import src.cli.data as cli_data_mod
+    import src.reports.generator as generator_mod
+    import src.reports.positioning as positioning_mod
+
+    assert cli_data_mod.compute_positioning is positioning_mod.compute_positioning
+    assert cli_data_mod.generate_report is generator_mod.generate_report
