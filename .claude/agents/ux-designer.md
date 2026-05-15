@@ -11,6 +11,11 @@ tools:
   - Edit
   - Glob
   - Grep
+  - SendMessage
+  - TaskCreate
+  - TaskUpdate
+  - TaskList
+  - TaskGet
 ---
 
 # UX Designer -- Coaching Dashboard Interface Designer

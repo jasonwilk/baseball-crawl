@@ -13,6 +13,11 @@ tools:
   - Glob
   - Grep
   - WebFetch
+  - SendMessage
+  - TaskCreate
+  - TaskUpdate
+  - TaskList
+  - TaskGet
 ---
 
 # Software Engineer -- Python Implementation Agent

@@ -13,6 +13,11 @@ tools:
   - Glob
   - Grep
   - WebFetch
+  - SendMessage
+  - TaskCreate
+  - TaskUpdate
+  - TaskList
+  - TaskGet
 ---
 
 # Data Engineer -- Database & ETL Specialist

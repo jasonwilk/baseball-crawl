@@ -114,3 +114,19 @@ System prompt in markdown body...
 - Skills preloaded into subagents are fully injected (not on-demand)
 - Subagents don't inherit parent conversation history
 - Auto-compaction triggers at ~95% capacity for subagents too
+
+## Team-Communication Tools (Agent Teams)
+
+Every team-participating agent definition MUST list these five tools in `tools:` frontmatter:
+- `SendMessage` -- send messages to teammates and main session
+- `TaskCreate`, `TaskUpdate`, `TaskList`, `TaskGet` -- shared task list operations
+
+Without these tools, spawned teammates can do file work but cannot reply to assignments or report completion via SendMessage. The implement skill instructs agents to use SendMessage extensively for assignment and completion reporting -- the tools must be granted at the frontmatter level.
+
+**Discovered 2026-05-15 during E-228 dispatch**: all 5 teammates (PM, DE, SE, UXD, CR) silently failed a "reply ALIVE via SendMessage" diagnostic ping. Audit revealed none of the 9 agent definitions had any team-comms tools — they had never been present in any git revision. Fix: added the 5 tools to all 9 agent definitions.
+
+Spawner-only tools (NOT to be added to teammates):
+- `TeamCreate`, `TeamDelete` -- main session only
+- `Agent` (Task tool) -- main session only
+
+Any future new agent definition MUST include the 5 team-comms tools unless it is intentionally isolated from team dispatch.

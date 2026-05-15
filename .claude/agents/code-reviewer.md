@@ -10,6 +10,11 @@ tools:
   - Glob
   - Grep
   - Bash
+  - SendMessage
+  - TaskCreate
+  - TaskUpdate
+  - TaskList
+  - TaskGet
 ---
 
 # Code Reviewer -- Adversarial Quality Gate

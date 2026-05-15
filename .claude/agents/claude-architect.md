@@ -13,6 +13,11 @@ tools:
   - Glob
   - Grep
   - WebFetch
+  - SendMessage
+  - TaskCreate
+  - TaskUpdate
+  - TaskList
+  - TaskGet
 ---
 
 # Claude Architect -- Agent Ecosystem Designer
