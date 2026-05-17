@@ -144,10 +144,53 @@ ux-designer
 
 ## Notes
 
-*(To be filled in during the story by UXD)*
+### UXD legibility self-validation (per AC-11)
 
-- **UXD legibility self-validation** (per AC-11): TBD — UXD documents pass/fail per criterion (5 verdicts).
-- **Baseball-coach legibility review record** (per AC-12): TBD — coach's verdict, date, failure points if FAIL, no-failure-modes confirmation if PASS.
-- **Constants spec status transition**: TBD — record date and reason for PROVISIONAL v0 → LOCKED v1 flip on coach PASS verdict.
+Assessed at the documented typography sizes against the print geometry locked in §A–G of `.project/research/E-229-locked-layout-constants.md`. Caveat: UXD cannot physically print and view at arm's length in dugout conditions; this assessment is against the documented typography minimums (TN-16 ≥ 7 pt absolute floor; coach MN-2 pill jersey ≥ 7–8 pt; ≥ 7–8 pt compass letters) and the spatial relationships visible in browser preview at the absolute-inch geometry. Five verdicts:
+
+- (a) **Outlier pills legible (jersey + truncated last name) — PASS.** Pill text is 9 pt Arial bold (TN-16 minimum is 9 pt for this element). Pill height 14 px in viewBox (~0.20 in printed) gives 1 px headroom each side of the cap line. Format `#7 RAMIR` fits in ~0.5 in pill width with the auto-sizing rect. White fill + 0.5 pt black stroke gives contrast against both the 12% density bg and the 20%-opacity compass discs. Coach AC-12 confirmed PASS.
+
+- (b) **Compass letters distinguishable from pills / star — PASS.** Compass letters are 10 pt Arial bold inside circular discs (rect-vs-circle shape distinction from pills); star is a solid filled 10-point star (geometric-shape distinction from both letters and pills). Z-order (pills draw last) prevents any letter from obscuring an actionable pill. Coach AC-12 confirmed PASS — "compass letters (10 pt) leading the eye to pills, then sidebar confirming zone assignment, is the right two-step read."
+
+- (c) **Sidebar lookup readable without squinting — PASS.** 7.5 pt Arial proportional with `tabular-nums` on jersey + zone cells; CSS grid with explicit column widths (0.34 in / 1fr / 0.20 in) keeps columns aligned. 5 rows fit comfortably in the sidebar height with breathing room. 7.5 pt is above the TN-16 ≥ 7 pt floor. Coach AC-12 confirmed PASS.
+
+- (d) **Coverage cue + opponent name readable — PASS.** Opponent name is 11 pt Arial bold (well above any legibility floor). Coverage cue is 9 pt Arial regular at 70% grey, right-aligned. Format string "Through Apr 12 (8 games)" fits in ~1.4 in at 9 pt, leaving 2.5+ in for the opponent name without truncation. Coach AC-12 confirmed PASS.
+
+- (e) **Legend text legible — PASS (post-remediation).** Initial self-validation at 6.5 pt was flagged as "below TN-16 floor of 7 pt; may not survive coach review." Coach AC-12 confirmed the FAIL and pre-approved Option 1 (shortened legend text + 7 pt). Post-remediation: legend renders `★ default · ○ textbook · A-H outliers` at 7 pt 70% grey, fits one line at the 3.95 in card-inner width. Meets the TN-16 floor with margin. **The remediated legend was not re-reviewed by coach** — coach pre-approved Option 1 as the fix, so the LOCKED v1 flip is authorized by the AC-12 PASS verdict against the remediated form.
+
+Final: **5/5 PASS** at the LOCKED v1 typography sizes.
+
+### Baseball-coach legibility review record (per AC-12)
+
+**Verdict**: FAIL (partial — primary workflow PASSES; legend typography FAILS TN-16 minimum)
+**Date**: 2026-05-17
+**Review focus**: Dugout-glance-test legibility for a 15-year-old fielder in dugout shade between pitches, 4.25" × 5.5" quarter-letter card
+
+**Primary workflow — PASS.** Sidebar lookup → field diagram navigation is clean. Sidebar (jersey 7.5 pt bold, last names 7.5 pt weight-500, zone letters 7.5 pt bold), compass letter discs (10 pt bold, 0.18 in disc), outlier pills (#JERSEY LAST, 9 pt bold), and header (11 pt opponent / 10 pt position uppercase) all clear the dugout-glance bar comfortably. A 15-year-old fielder will navigate the primary path correctly in dugout shade. No failure modes.
+
+**Legend — FAIL.** 6.5 pt at 70% grey is below TN-16's 7 pt absolute minimum, and the grey ink compounds the legibility problem in shade. Acceptable for a briefed player mid-at-bat, but a freshman with cold cards or any player wanting a quick reminder will lean in and squint — violates dugout-glance standard.
+
+**Preferred fix: Option 1** — `★ default · ○ textbook · A-H outliers` at 7 pt.
+- Meets TN-16 minimum
+- "(see right)" parenthetical adds nothing — sidebar IS to the right, zone letter is already printed there
+- All three symbol types still present (star, circle, A–H)
+- Shortened content fits one line at 7 pt — solves the root cause (geometry constraint that forced UXD to drop to 6.5 pt), not fighting geometry
+- Option 2 (wrap) wastes vertical space and risks bleeding into body zone — unacceptable
+- Option 3 (drop textbook-dot reference) is defensible but removes a symbol that DOES appear on cards, leaving ○ unexplained — Option 1 is cleaner
+
+**Secondary observation (non-blocking)**: BIP-count star caption (`(142 BIP)` / `(~28 BIP)`) also renders at 6.5 pt. NOT in primary fielder read path — coach treats this as low-stakes from dugout-glance standpoint. UXD + PM judgment call: bump to 7 pt if it fits without geometry tradeoffs that hurt more important elements; otherwise 6.5 pt acceptable on BIP caption while holding the line on the legend.
+
+**Information hierarchy — correct.** Header → outlier pills on field → sidebar lookup → everything else matches fielder processing order under game pressure. Compass letters (10 pt) leading the eye to pills, then sidebar confirming zone assignment, is the right two-step read.
+
+**Coach summary**: "FAIL on 6.5 pt legend. Apply Option 1 — shorten to `★ default · ○ textbook · A-H outliers` at 7 pt. All other elements PASS the dugout-glance test. On that one fix, I'd sign off PASS and the constants spec can flip to LOCKED v1."
+
+### Remediation applied (2026-05-17, UXD; coach pre-approval per AC-12 above)
+
+- Prototype HTML (`.project/research/E-229-2b-quarter-letter-prototype.html`): legend CSS bumped 6.5 pt → 7 pt; all 9 legend occurrences updated to Option 1 text (`★ default · ○ textbook · A-H outliers`); all 8 SVG BIP-caption `font-size` values bumped 6.5 → 7 pt (explicit pt unit so the rendered size matches the spec).
+- Constants spec (`.project/research/E-229-locked-layout-constants.md`): §B BIP caption 6.5 → 7 pt; §B added "SVG font-size unit convention (normative)" subsection so SE generators target print pt explicitly; §C legend typography 6.5 → 7 pt with rationale; §E typography parity table bumped Card Star BIP caption + Card Legend to 7 pt; §F `COMPASS_LEGEND_SHORT` updated to Option 1 text + TN-3 amendment note added directly below the §F table (PM owns the routed amendment to epic TN-3); Decisions Log new entry "Legend text + typography" recording PROVISIONAL → 6.5 pt → coach FAIL → Option 1 path.
+
+### Constants spec status transition
+
+- 2026-05-17: PROVISIONAL v0 → LOCKED v1. Authorized by coach AC-12 PASS verdict (above) on the Option 1 remediation pre-approval. `produced_by: E-229-2b`. `calibration_history` empty (first-real-opponent calibration is the epic Rollout note, not this story).
 
 **Provenance**: this story spec was drafted by ux-designer during Phase 4 iteration 2 of E-229 planning (2026-05-17), per UXD's offer at end of round-2 consultation and PM's acceptance via team-lead relay. PM framed AC-12's documented-record gate shape (matches E-229-05 AC-8 precedent) and confirmed the soft-vs-hard E-229-02 dependency call. AC granularity (12 ACs) preserves per-section verifiability per UXD's recommendation; consolidation into fewer ACs with sub-checklists was considered and rejected. Pattern note: this is the second instance in E-229 of a domain expert drafting full story content (the first was UXD's round-1 expanded scope on the locked-constants artifact). Worth surfacing to claude-architect as a candidate skill / rule observation after E-229 completes.

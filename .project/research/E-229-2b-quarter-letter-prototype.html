@@ -1,0 +1,1203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>E-229-2b — Quarter-letter Positioning Card Feasibility Prototype</title>
+  <style>
+    /* =========================================================
+       E-229-2b — Quarter-letter Positioning Card Prototype
+       ---------------------------------------------------------
+       Validates layout constants for E-229 positioning cards
+       at exact 4.25"x5.5" portrait (quarter-letter, 4-up on
+       letter portrait). All dimensions are absolute inch values
+       so screen preview matches the printed result.
+
+       The companion spec at
+         .project/research/E-229-locked-layout-constants.md
+       is the single source of truth; this prototype is the
+       visual proof at print scale.
+       ========================================================= */
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      /* Shared design tokens — kept in :root so the Decisions Log
+         in the constants spec can reference the same names that
+         downstream templates will adopt. */
+      --font-stack: Arial, Helvetica, sans-serif;
+
+      /* Greyscale palette (§F) */
+      --grey-0:   #ffffff;   /*   0% — paper                          */
+      --grey-15:  #d9d9d9;   /*  15% — density bg dots, compass disc  */
+      --grey-30:  #b3b3b3;   /*  30% — empty-zone compass placeholder */
+      --grey-50:  #808080;   /*  50% — cut lines, rationale text      */
+      --grey-70:  #4d4d4d;   /*  70% — secondary copy                 */
+      --grey-100: #000000;   /* 100% — primary text, stars, lines     */
+
+      /* Compass disc background derived from greyscale-15 + alpha
+         to match TN-16 "0.18in diameter 20%-opacity grey circle" */
+      --compass-disc-fill: rgba(0,0,0,0.20);
+    }
+
+    html, body { background: #f3f4f6; }
+    body {
+      font-family: var(--font-stack);
+      font-size: 9pt;
+      line-height: 1.3;
+      color: var(--grey-100);
+      padding: 0.5in;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+
+    /* ----- Screen banner (hidden on print) ----- */
+    .screen-banner {
+      background: #1e3a5f;
+      color: #fff;
+      padding: 12px 16px;
+      border-radius: 6px;
+      margin-bottom: 16px;
+      max-width: 9.5in;
+    }
+    .screen-banner h1 { font-size: 13pt; margin-bottom: 4px; }
+    .screen-banner p  { font-size: 10pt; line-height: 1.45; margin-bottom: 6px; }
+    .screen-banner button {
+      display: inline-block;
+      padding: 6px 14px;
+      font-size: 10pt;
+      background: #fff;
+      color: #1e3a5f;
+      border: none;
+      border-radius: 4px;
+      font-weight: bold;
+      cursor: pointer;
+    }
+    .section-label {
+      font-size: 11pt;
+      font-weight: bold;
+      color: #6b7280;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin: 24px 0 6px 0;
+      padding-left: 8px;
+      border-left: 4px solid #1e3a5f;
+    }
+    .section-note {
+      font-size: 9pt;
+      color: #6b7280;
+      margin-bottom: 10px;
+      max-width: 9.5in;
+    }
+
+    /* =========================================================
+       CARD GEOMETRY — §A of constants spec
+       =========================================================
+       Outer 4.25 in x 5.5 in. Padding 0.15 in. Header 0.65 in.
+       Legend 0.25 in. Body inner area = 3.95 in x 4.30 in.
+       SVG / sidebar split = 64 / 36 of body inner width.
+    */
+    .card {
+      width: 4.25in;
+      height: 5.5in;
+      padding: 0.15in;
+      background: var(--grey-0);
+      border: 0.5pt solid var(--grey-50);
+      display: flex;
+      flex-direction: column;
+      page-break-inside: avoid;
+      break-inside: avoid;
+      color: var(--grey-100);
+    }
+
+    .card-header {
+      height: 0.65in;
+      border-bottom: 0.5pt solid var(--grey-30);
+      padding-bottom: 0.04in;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      grid-template-rows: auto auto;
+      column-gap: 0.10in;
+      row-gap: 0.02in;
+      align-items: baseline;
+    }
+    .card-header .opponent {
+      grid-column: 1;
+      grid-row: 1;
+      font-size: 11pt;
+      font-weight: bold;
+      line-height: 1.15;
+    }
+    .card-header .coverage-cue {
+      grid-column: 2;
+      grid-row: 1;
+      font-size: 9pt;
+      font-weight: normal;
+      text-align: right;
+      color: var(--grey-70);
+      white-space: nowrap;
+    }
+    .card-header .position-name {
+      grid-column: 1 / span 2;
+      grid-row: 2;
+      font-size: 10pt;
+      font-weight: bold;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--grey-100);
+    }
+
+    .card-body {
+      flex: 1;
+      display: grid;
+      grid-template-columns: 64% 36%;
+      column-gap: 0.08in;
+      padding-top: 0.06in;
+      overflow: hidden;
+    }
+
+    .card-svg-slot {
+      position: relative;
+      overflow: hidden;
+    }
+    .card-svg-slot svg {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+
+    /* ----- Sidebar (sidebar lookup table) ----- */
+    .card-sidebar {
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+    }
+    .card-sidebar .sidebar-title {
+      font-size: 7pt;
+      font-weight: bold;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--grey-70);
+      border-bottom: 0.5pt solid var(--grey-30);
+      padding-bottom: 0.02in;
+      margin-bottom: 0.03in;
+    }
+    .sidebar-rows {
+      flex: 1;
+      display: grid;
+      /* jersey | last-name | zone — explicit columns so column edges
+         align across rows regardless of name length. tabular-nums on
+         the jersey cell keeps single/double-digit numbers in column. */
+      grid-template-columns: 0.34in 1fr 0.20in;
+      column-gap: 0.04in;
+      row-gap: 0.02in;
+      align-content: start;
+      font-size: 7.5pt;
+      line-height: 1.20;
+    }
+    .sidebar-rows .jersey {
+      font-weight: bold;
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
+    .sidebar-rows .name {
+      font-weight: 500;
+      letter-spacing: 0.01em;
+      overflow: hidden;
+      text-overflow: clip;
+      white-space: nowrap;
+    }
+    .sidebar-rows .zone {
+      font-weight: bold;
+      text-align: center;
+      font-variant-numeric: tabular-nums;
+    }
+    .sidebar-banner {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      font-size: 7.5pt;
+      font-style: italic;
+      color: var(--grey-70);
+      padding: 0.05in;
+    }
+
+    .card-legend {
+      height: 0.25in;
+      padding-top: 0.04in;
+      border-top: 0.5pt solid var(--grey-30);
+      font-size: 7pt;
+      line-height: 1.2;
+      color: var(--grey-70);
+      text-align: center;
+    }
+
+    /* ----- Zero-coverage state ----- */
+    .card-zero-message {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 0.2in;
+      font-size: 11pt;
+      font-weight: 500;
+      color: var(--grey-100);
+      line-height: 1.35;
+    }
+
+    /* ----- Compass-key card variant ----- */
+    .card-compass-key .key-axes {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .card-compass-key .key-caption {
+      font-size: 7.5pt;
+      color: var(--grey-70);
+      text-align: center;
+      padding-top: 0.04in;
+      margin-bottom: 0.04in;
+    }
+
+    /* ----- Opponent-context card variant ----- */
+    .card-context .context-body {
+      flex: 1;
+      padding: 0.10in 0.04in;
+      display: flex;
+      flex-direction: column;
+      gap: 0.10in;
+    }
+    .card-context h2 {
+      font-size: 14pt;
+      font-weight: bold;
+      line-height: 1.15;
+      letter-spacing: 0.01em;
+    }
+    .card-context .context-record {
+      font-size: 9.5pt;
+      color: var(--grey-100);
+    }
+    .card-context .context-record dl {
+      display: grid;
+      grid-template-columns: auto auto;
+      row-gap: 0.04in;
+      column-gap: 0.12in;
+      font-size: 9pt;
+    }
+    .card-context .context-record dt { color: var(--grey-70); }
+    .card-context .context-record dd { font-weight: bold; text-align: right; }
+    .card-context .context-tier {
+      margin-top: auto;
+      font-size: 9pt;
+      color: var(--grey-70);
+      border-top: 0.5pt solid var(--grey-30);
+      padding-top: 0.06in;
+    }
+    .card-context .context-tier .tier-label {
+      font-weight: bold;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--grey-100);
+    }
+    .card-context .context-coverage {
+      color: var(--grey-70);
+      font-size: 9pt;
+      margin-top: 0.02in;
+    }
+
+    /* =========================================================
+       SHEET LAYOUT — 2x2 grid on letter portrait, 4-up
+       =========================================================
+       Letter portrait minus 0.30in page margins = 7.9 in x 10.4 in.
+       Two columns of 4.25 in cards (8.5 in) overflow slightly when
+       page margins are 0.30in; we set page margin to 0.125in so the
+       two 4.25in cards span 8.5in exactly. Vertical: two rows of
+       5.5in = 11in cards span the full sheet, with the cut line at
+       the exact midline.
+    */
+    .sheet {
+      background: var(--grey-0);
+      display: grid;
+      grid-template-columns: 4.25in 4.25in;
+      grid-template-rows:    5.5in  5.5in;
+      width: 8.5in;
+      height: 11in;
+      margin: 0 auto 24px auto;
+      position: relative;
+      border: 0.5pt solid var(--grey-30);   /* screen affordance; print suppresses */
+      box-shadow: 0 1px 3px rgba(0,0,0,0.10);
+    }
+    .sheet .card { border: 0; }
+
+    /* Cut lines — midline only, no corner crops, no full borders
+       (per §F cut-line spec). Rendered as absolutely-positioned
+       dashed lines so they don't depend on card borders. */
+    .sheet::before,
+    .sheet::after {
+      content: "";
+      position: absolute;
+      pointer-events: none;
+    }
+    .sheet::before {
+      /* horizontal midline */
+      left: 0; right: 0;
+      top: 5.5in;
+      border-top: 0.5pt dashed var(--grey-50);
+    }
+    .sheet::after {
+      /* vertical midline */
+      top: 0; bottom: 0;
+      left: 4.25in;
+      border-left: 0.5pt dashed var(--grey-50);
+    }
+
+    /* =========================================================
+       PRINT RULES
+       ========================================================= */
+    @page {
+      size: letter portrait;
+      margin: 0;
+    }
+    @media print {
+      body { padding: 0; background: var(--grey-0); }
+      .screen-banner,
+      .section-label,
+      .section-note { display: none !important; }
+
+      .sheet {
+        box-shadow: none;
+        border: 0;
+        page-break-after: always;
+        break-after: page;
+        margin: 0;
+      }
+      .card { page-break-inside: avoid; break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- =========================================================
+     SCREEN BANNER (hidden on print)
+     ========================================================= -->
+<div class="screen-banner">
+  <h1>E-229-2b — Quarter-letter Positioning Card Feasibility Prototype</h1>
+  <p>
+    Design reference for <strong>E-229-2b</strong> (no production code). Validates layout constants at
+    exact <strong>4.25" x 5.5"</strong> (quarter-letter, 4-up on letter portrait). Three card variants
+    follow individually for type-and-spacing study, then a complete 2x2 sheet shows the print geometry
+    end-to-end including the sheet-2 fill slots (compass key + opponent context card).
+  </p>
+  <p>
+    Companion spec is the canonical source of truth:
+    <code>.project/research/E-229-locked-layout-constants.md</code>.
+  </p>
+  <button onclick="window.print()">Print / Save as PDF</button>
+</div>
+
+<!-- =========================================================
+     SECTION 1 — FULL-DATA CARD VARIANT
+     ========================================================= -->
+<div class="section-label">1. Full-data card (50+ BIPs, 5 outliers, density bg, BIP-count caption)</div>
+<div class="section-note">
+  Eastlake Bears, LF position. Team has 142 BIPs (full tier). Star is solid filled with
+  "(142 BIP)" caption. Textbook reference dot offset from star. Density-bg dots scattered
+  across the field at ~12% opacity. Compass letters at fixed angular positions; populated
+  zones at full opacity, empty zones at 30% opacity placeholders. Five outlier pills
+  positioned at their per-batter centroids.
+</div>
+
+<div class="card" style="margin: 0 auto;">
+  <div class="card-header">
+    <div class="opponent">Eastlake Bears</div>
+    <div class="coverage-cue">Through Apr 12 (8 games)</div>
+    <div class="position-name">Left Field</div>
+  </div>
+  <div class="card-body">
+    <!-- ---- Field SVG ---- -->
+    <div class="card-svg-slot">
+      <!--
+        Simplified field outline. viewBox dims 200 x 320 (W/H = 0.625 ~= 0.6).
+        Coord convention per TN-15: y=0 at deep CF (top), x=0 at LF foul (left).
+        Home plate is at (100, 305).
+      -->
+      <svg viewBox="0 0 200 320" preserveAspectRatio="xMidYMid meet"
+           xmlns="http://www.w3.org/2000/svg"
+           font-family="Arial, Helvetica, sans-serif">
+
+        <!-- Outfield arc (deep CF curving down to foul corners). -->
+        <path d="M 10 80 Q 100 -10 190 80 L 190 90 Q 100 0 10 90 Z"
+              fill="none" stroke="#000" stroke-width="0.8"/>
+
+        <!-- Foul lines from home plate to outfield corners. -->
+        <line x1="100" y1="305" x2="10"  y2="80" stroke="#000" stroke-width="0.8"/>
+        <line x1="100" y1="305" x2="190" y2="80" stroke="#000" stroke-width="0.8"/>
+
+        <!-- Infield grass arc. -->
+        <path d="M 55 245 Q 100 200 145 245" fill="none" stroke="#000" stroke-width="0.5"/>
+
+        <!-- Infield bases (small open squares). -->
+        <rect x="97"  y="302" width="6" height="6" fill="#fff" stroke="#000" stroke-width="0.5"/>   <!-- Home  -->
+        <rect x="127" y="272" width="6" height="6" fill="#fff" stroke="#000" stroke-width="0.5"/>   <!-- 1B    -->
+        <rect x="97"  y="242" width="6" height="6" fill="#fff" stroke="#000" stroke-width="0.5"/>   <!-- 2B    -->
+        <rect x="67"  y="272" width="6" height="6" fill="#fff" stroke="#000" stroke-width="0.5"/>   <!-- 3B    -->
+
+        <!-- Density background — opponent BIP scatter (~12% opacity). Hidden
+             on thin/zero cards; rendered here per full-tier rule. -->
+        <g fill="#000" opacity="0.12">
+          <circle cx="62"  cy="110" r="1.8"/>
+          <circle cx="55"  cy="135" r="1.8"/>
+          <circle cx="78"  cy="100" r="1.8"/>
+          <circle cx="48"  cy="155" r="1.8"/>
+          <circle cx="42"  cy="180" r="1.8"/>
+          <circle cx="58"  cy="170" r="1.8"/>
+          <circle cx="92"  cy="120" r="1.8"/>
+          <circle cx="115" cy="130" r="1.8"/>
+          <circle cx="138" cy="115" r="1.8"/>
+          <circle cx="150" cy="145" r="1.8"/>
+          <circle cx="72"  cy="195" r="1.8"/>
+          <circle cx="105" cy="160" r="1.8"/>
+          <circle cx="125" cy="175" r="1.8"/>
+          <circle cx="160" cy="170" r="1.8"/>
+          <circle cx="65"  cy="220" r="1.8"/>
+          <circle cx="45"  cy="125" r="1.8"/>
+          <circle cx="83"  cy="145" r="1.8"/>
+          <circle cx="172" cy="125" r="1.8"/>
+          <circle cx="100" cy="135" r="1.8"/>
+          <circle cx="120" cy="105" r="1.8"/>
+          <circle cx="50"  cy="200" r="1.8"/>
+          <circle cx="78"  cy="220" r="1.8"/>
+          <circle cx="135" cy="195" r="1.8"/>
+          <circle cx="155" cy="215" r="1.8"/>
+        </g>
+
+        <!--
+          Textbook reference dot. LF base position roughly (60, 140).
+          Open outlined circle, no fill, smaller than star.
+        -->
+        <circle cx="60" cy="140" r="3.5" fill="none" stroke="#000"
+                stroke-width="0.6" opacity="0.45"/>
+
+        <!--
+          Star — team-aggregate position for this opponent. Shifted left + slightly
+          in from textbook to reflect this opponent's pull tendency. (50, 150)
+        -->
+        <g transform="translate(50, 150)">
+          <polygon points="0,-8 2.4,-2.6 8,-2.6 3.6,1.2 5.4,7 0,3.4 -5.4,7 -3.6,1.2 -8,-2.6 -2.4,-2.6"
+                   fill="#000" stroke="none"/>
+          <text x="0" y="18" font-size="7pt" text-anchor="middle" fill="#000">(142 BIP)</text>
+        </g>
+
+        <!--
+          Compass ring at ~80% of available radius. Star at (50,150).
+          Available radius ~50px to nearest field edge (left foul line).
+          Ring radius_x ~= 40, radius_y ~= 50 (asymmetric to honor field shape).
+
+          A = in+left  (-,-) -> star_x + (-1)*40, star_y + (-(-1))*50 = (10, 200) — clamp inside foul line
+          B = left     (-, 0) -> (10, 150)
+          C = deep+left(-,+) -> (10, 100)
+          D = in       (0,-)  -> (50, 200)
+          E = deep     (0,+)  -> (50, 100)
+          F = in+right (+,-)  -> (90, 200)
+          G = right    (+, 0) -> (90, 150)
+          H = deep+rt  (+,+)  -> (90, 100)
+        -->
+        <g font-size="10" font-weight="bold" text-anchor="middle"
+           dominant-baseline="central" font-family="Arial, Helvetica, sans-serif">
+
+          <!-- A populated (1 outlier here) -->
+          <circle cx="14" cy="200" r="6.5" fill="rgba(0,0,0,0.20)" stroke="none"/>
+          <text x="14" y="200" fill="#000">A</text>
+
+          <!-- B populated -->
+          <circle cx="14" cy="150" r="6.5" fill="rgba(0,0,0,0.20)" stroke="none"/>
+          <text x="14" y="150" fill="#000">B</text>
+
+          <!-- C populated -->
+          <circle cx="14" cy="100" r="6.5" fill="rgba(0,0,0,0.20)" stroke="none"/>
+          <text x="14" y="100" fill="#000">C</text>
+
+          <!-- D empty placeholder -->
+          <circle cx="50" cy="200" r="6.5" fill="rgba(0,0,0,0.20)" stroke="none" opacity="0.30"/>
+          <text x="50" y="200" fill="#000" opacity="0.30">D</text>
+
+          <!-- E populated -->
+          <circle cx="50" cy="100" r="6.5" fill="rgba(0,0,0,0.20)" stroke="none"/>
+          <text x="50" y="100" fill="#000">E</text>
+
+          <!-- F empty placeholder -->
+          <circle cx="90" cy="200" r="6.5" fill="rgba(0,0,0,0.20)" stroke="none" opacity="0.30"/>
+          <text x="90" y="200" fill="#000" opacity="0.30">F</text>
+
+          <!-- G populated (1 outlier here) -->
+          <circle cx="90" cy="150" r="6.5" fill="rgba(0,0,0,0.20)" stroke="none"/>
+          <text x="90" y="150" fill="#000">G</text>
+
+          <!-- H populated -->
+          <circle cx="90" cy="100" r="6.5" fill="rgba(0,0,0,0.20)" stroke="none"/>
+          <text x="90" y="100" fill="#000">H</text>
+        </g>
+
+        <!--
+          Outlier batter pills. Each pill = white fill, 0.5pt grey border,
+          ~9pt bold black text "#J LAST" (last name truncated). Pill width
+          auto-fits the text. Positioned at the per-batter centroid.
+
+          Layout positions chosen to occupy 5 different zones around the
+          star (50,150): A, B, C, E, G.
+        -->
+        <g font-family="Arial, Helvetica, sans-serif" font-weight="bold" font-size="9">
+          <!-- A zone (in+left) — RAMIREZ #7 — (28, 200) -->
+          <g transform="translate(28, 200)">
+            <rect x="-19" y="-7" width="38" height="14" rx="2" ry="2"
+                  fill="#fff" stroke="#000" stroke-width="0.5"/>
+            <text x="0" y="0" text-anchor="middle" dominant-baseline="central" fill="#000">#7 RAMIR</text>
+          </g>
+
+          <!-- B zone (left, mid-depth) — DAVIS #11 — (28, 150) -->
+          <g transform="translate(28, 150)">
+            <rect x="-18" y="-7" width="36" height="14" rx="2" ry="2"
+                  fill="#fff" stroke="#000" stroke-width="0.5"/>
+            <text x="0" y="0" text-anchor="middle" dominant-baseline="central" fill="#000">#11 DAVIS</text>
+          </g>
+
+          <!-- C zone (deep+left) — THOMPSON #23 — (32, 105) -->
+          <g transform="translate(32, 105)">
+            <rect x="-21" y="-7" width="42" height="14" rx="2" ry="2"
+                  fill="#fff" stroke="#000" stroke-width="0.5"/>
+            <text x="0" y="0" text-anchor="middle" dominant-baseline="central" fill="#000">#23 THOMP</text>
+          </g>
+
+          <!-- E zone (deep, center) — PATEL #21 — (60, 90) -->
+          <g transform="translate(60, 90)">
+            <rect x="-18" y="-7" width="36" height="14" rx="2" ry="2"
+                  fill="#fff" stroke="#000" stroke-width="0.5"/>
+            <text x="0" y="0" text-anchor="middle" dominant-baseline="central" fill="#000">#21 PATEL</text>
+          </g>
+
+          <!-- G zone (right) — WRIGHT #4 — (108, 152) -->
+          <g transform="translate(108, 152)">
+            <rect x="-19" y="-7" width="38" height="14" rx="2" ry="2"
+                  fill="#fff" stroke="#000" stroke-width="0.5"/>
+            <text x="0" y="0" text-anchor="middle" dominant-baseline="central" fill="#000">#4 WRIGH</text>
+          </g>
+        </g>
+      </svg>
+    </div>
+
+    <!-- ---- Sidebar lookup ---- -->
+    <div class="card-sidebar">
+      <div class="sidebar-title">Outliers (LF)</div>
+      <div class="sidebar-rows">
+        <span class="jersey">#4</span>  <span class="name">WRIGHT</span>   <span class="zone">G</span>
+        <span class="jersey">#7</span>  <span class="name">RAMIREZ</span>  <span class="zone">A</span>
+        <span class="jersey">#11</span> <span class="name">DAVIS</span>    <span class="zone">B</span>
+        <span class="jersey">#21</span> <span class="name">PATEL</span>    <span class="zone">E</span>
+        <span class="jersey">#23</span> <span class="name">THOMPSON</span> <span class="zone">C</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="card-legend">
+    &#9733; default &middot; &#9675; textbook &middot; A-H outliers
+  </div>
+</div>
+
+
+<!-- =========================================================
+     SECTION 2 — THIN-DATA CARD VARIANT
+     ========================================================= -->
+<div class="section-label">2. Thin-data card (15&ndash;49 BIPs, dashed-ring star, "(~N BIP)" caption, no density bg)</div>
+<div class="section-note">
+  Eastlake Bears, SS position. Team-from-this-perspective has 28 BIPs (thin tier). Star
+  carries a dashed ring AND a "(~28 BIP)" caption (we render both rather than choose; the
+  ring signals uncertainty at a glance and the caption is the literal count). Outliers
+  still render normally per TN-4. No density background.
+</div>
+
+<div class="card" style="margin: 0 auto;">
+  <div class="card-header">
+    <div class="opponent">Eastlake Bears</div>
+    <div class="coverage-cue">Through Apr 12 (8 games)</div>
+    <div class="position-name">Shortstop</div>
+  </div>
+  <div class="card-body">
+    <div class="card-svg-slot">
+      <svg viewBox="0 0 200 320" preserveAspectRatio="xMidYMid meet"
+           xmlns="http://www.w3.org/2000/svg"
+           font-family="Arial, Helvetica, sans-serif">
+        <!-- Field outline (same as full card; density bg omitted by spec). -->
+        <path d="M 10 80 Q 100 -10 190 80 L 190 90 Q 100 0 10 90 Z"
+              fill="none" stroke="#000" stroke-width="0.8"/>
+        <line x1="100" y1="305" x2="10"  y2="80" stroke="#000" stroke-width="0.8"/>
+        <line x1="100" y1="305" x2="190" y2="80" stroke="#000" stroke-width="0.8"/>
+        <path d="M 55 245 Q 100 200 145 245" fill="none" stroke="#000" stroke-width="0.5"/>
+        <rect x="97"  y="302" width="6" height="6" fill="#fff" stroke="#000" stroke-width="0.5"/>
+        <rect x="127" y="272" width="6" height="6" fill="#fff" stroke="#000" stroke-width="0.5"/>
+        <rect x="97"  y="242" width="6" height="6" fill="#fff" stroke="#000" stroke-width="0.5"/>
+        <rect x="67"  y="272" width="6" height="6" fill="#fff" stroke="#000" stroke-width="0.5"/>
+
+        <!-- Textbook SS reference dot at (85, 245). -->
+        <circle cx="85" cy="245" r="3.5" fill="none" stroke="#000"
+                stroke-width="0.6" opacity="0.45"/>
+
+        <!-- Star at team-aggregate SS (78, 240) with thin-data dashed ring AND caption. -->
+        <g transform="translate(78, 240)">
+          <circle r="10" fill="none" stroke="#000" stroke-width="0.6"
+                  stroke-dasharray="2 1.5" opacity="0.85"/>
+          <polygon points="0,-7 2.1,-2.3 7,-2.3 3.2,1.0 4.7,6 0,3 -4.7,6 -3.2,1.0 -7,-2.3 -2.1,-2.3"
+                   fill="#000" stroke="none"/>
+          <text x="0" y="18" font-size="7pt" text-anchor="middle" fill="#000">(~28 BIP)</text>
+        </g>
+
+        <!-- Compass ring (star at (78, 240); ring radii 36 x 36). -->
+        <g font-size="10" font-weight="bold" text-anchor="middle"
+           dominant-baseline="central" font-family="Arial, Helvetica, sans-serif">
+          <circle cx="42" cy="276" r="6.5" fill="rgba(0,0,0,0.20)" stroke="none" opacity="0.30"/>
+          <text x="42" y="276" fill="#000" opacity="0.30">A</text>
+
+          <circle cx="42" cy="240" r="6.5" fill="rgba(0,0,0,0.20)" stroke="none"/>
+          <text x="42" y="240" fill="#000">B</text>
+
+          <circle cx="42" cy="204" r="6.5" fill="rgba(0,0,0,0.20)" stroke="none" opacity="0.30"/>
+          <text x="42" y="204" fill="#000" opacity="0.30">C</text>
+
+          <circle cx="78" cy="276" r="6.5" fill="rgba(0,0,0,0.20)" stroke="none" opacity="0.30"/>
+          <text x="78" y="276" fill="#000" opacity="0.30">D</text>
+
+          <circle cx="78" cy="204" r="6.5" fill="rgba(0,0,0,0.20)" stroke="none" opacity="0.30"/>
+          <text x="78" y="204" fill="#000" opacity="0.30">E</text>
+
+          <circle cx="114" cy="276" r="6.5" fill="rgba(0,0,0,0.20)" stroke="none" opacity="0.30"/>
+          <text x="114" y="276" fill="#000" opacity="0.30">F</text>
+
+          <circle cx="114" cy="240" r="6.5" fill="rgba(0,0,0,0.20)" stroke="none"/>
+          <text x="114" y="240" fill="#000">G</text>
+
+          <circle cx="114" cy="204" r="6.5" fill="rgba(0,0,0,0.20)" stroke="none" opacity="0.30"/>
+          <text x="114" y="204" fill="#000" opacity="0.30">H</text>
+        </g>
+
+        <!-- 2 outlier pills (B and G). -->
+        <g font-family="Arial, Helvetica, sans-serif" font-weight="bold" font-size="9">
+          <g transform="translate(56, 240)">
+            <rect x="-18" y="-7" width="36" height="14" rx="2" ry="2"
+                  fill="#fff" stroke="#000" stroke-width="0.5"/>
+            <text x="0" y="0" text-anchor="middle" dominant-baseline="central" fill="#000">#7 RAMIR</text>
+          </g>
+          <g transform="translate(128, 242)">
+            <rect x="-19" y="-7" width="38" height="14" rx="2" ry="2"
+                  fill="#fff" stroke="#000" stroke-width="0.5"/>
+            <text x="0" y="0" text-anchor="middle" dominant-baseline="central" fill="#000">#4 WRIGH</text>
+          </g>
+        </g>
+      </svg>
+    </div>
+
+    <div class="card-sidebar">
+      <div class="sidebar-title">Outliers (SS)</div>
+      <div class="sidebar-rows">
+        <span class="jersey">#4</span> <span class="name">WRIGHT</span>  <span class="zone">G</span>
+        <span class="jersey">#7</span> <span class="name">RAMIREZ</span> <span class="zone">B</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="card-legend">
+    &#9733; default &middot; &#9675; textbook &middot; A-H outliers
+  </div>
+</div>
+
+
+<!-- =========================================================
+     SECTION 3 — ZERO-COVERAGE CARD VARIANT
+     ========================================================= -->
+<div class="section-label">3. Zero-coverage card (0&ndash;14 BIPs, "Not enough spray data" message)</div>
+<div class="section-note">
+  Northside Tigers, 2B position. Team has 8 BIPs (zero-coverage tier). No star, no
+  textbook dot, no compass letters, no pills, no density bg. Card carries a dominant
+  "Not enough spray data — play your standard alignment" message. Sidebar shows a
+  matching one-line "Not enough spray data this opponent" banner per UXD I-1 + IM-1
+  (sidebar always shows content, never visually empty).
+</div>
+
+<div class="card" style="margin: 0 auto;">
+  <div class="card-header">
+    <div class="opponent">Northside Tigers</div>
+    <div class="coverage-cue">Through Apr 5 (2 games)</div>
+    <div class="position-name">Second Base</div>
+  </div>
+  <div class="card-zero-message">
+    Not enough spray data &mdash; play your standard alignment.
+  </div>
+  <div class="card-legend">
+    &#9733; default &middot; &#9675; textbook &middot; A-H outliers
+  </div>
+</div>
+
+
+<!-- =========================================================
+     SECTION 4 — FULL 2x2 SHEET (LETTER PORTRAIT, 4-UP)
+     =========================================================
+     Includes both card sheets demonstrating the 4-page bundle
+     structure (TN-12). Sheet 1 = LF | CF / RF | 3B.
+     Sheet 2 = SS | 2B / compass-key | opponent-context.
+-->
+<div class="section-label">4. Full 2x2 sheet layout (letter portrait, 4-up)</div>
+<div class="section-note">
+  Two sheets demonstrating the print geometry end-to-end. Cut on the midlines (dashed
+  hairlines at 50% grey) yields 4 cards per sheet. Sheet 1 carries LF / CF / RF / 3B.
+  Sheet 2 carries SS / 2B / compass-key / opponent-context per TN-12 + E-229-05 AC-9.
+</div>
+
+<!-- ---- Sheet 1 ---- -->
+<div class="sheet">
+
+  <!-- LF (re-uses full-data variant content) -->
+  <div class="card">
+    <div class="card-header">
+      <div class="opponent">Eastlake Bears</div>
+      <div class="coverage-cue">Through Apr 12 (8 games)</div>
+      <div class="position-name">Left Field</div>
+    </div>
+    <div class="card-body">
+      <div class="card-svg-slot">
+        <svg viewBox="0 0 200 320" preserveAspectRatio="xMidYMid meet"
+             xmlns="http://www.w3.org/2000/svg" font-family="Arial, Helvetica, sans-serif">
+          <path d="M 10 80 Q 100 -10 190 80 L 190 90 Q 100 0 10 90 Z" fill="none" stroke="#000" stroke-width="0.8"/>
+          <line x1="100" y1="305" x2="10"  y2="80" stroke="#000" stroke-width="0.8"/>
+          <line x1="100" y1="305" x2="190" y2="80" stroke="#000" stroke-width="0.8"/>
+          <path d="M 55 245 Q 100 200 145 245" fill="none" stroke="#000" stroke-width="0.5"/>
+          <rect x="97"  y="302" width="6" height="6" fill="#fff" stroke="#000" stroke-width="0.5"/>
+          <rect x="127" y="272" width="6" height="6" fill="#fff" stroke="#000" stroke-width="0.5"/>
+          <rect x="97"  y="242" width="6" height="6" fill="#fff" stroke="#000" stroke-width="0.5"/>
+          <rect x="67"  y="272" width="6" height="6" fill="#fff" stroke="#000" stroke-width="0.5"/>
+          <g fill="#000" opacity="0.12">
+            <circle cx="62" cy="110" r="1.8"/><circle cx="55" cy="135" r="1.8"/>
+            <circle cx="78" cy="100" r="1.8"/><circle cx="48" cy="155" r="1.8"/>
+            <circle cx="42" cy="180" r="1.8"/><circle cx="58" cy="170" r="1.8"/>
+            <circle cx="92" cy="120" r="1.8"/><circle cx="115" cy="130" r="1.8"/>
+            <circle cx="138" cy="115" r="1.8"/><circle cx="150" cy="145" r="1.8"/>
+            <circle cx="72" cy="195" r="1.8"/><circle cx="105" cy="160" r="1.8"/>
+            <circle cx="125" cy="175" r="1.8"/><circle cx="160" cy="170" r="1.8"/>
+            <circle cx="65" cy="220" r="1.8"/><circle cx="45" cy="125" r="1.8"/>
+            <circle cx="83" cy="145" r="1.8"/><circle cx="172" cy="125" r="1.8"/>
+            <circle cx="100" cy="135" r="1.8"/><circle cx="120" cy="105" r="1.8"/>
+            <circle cx="50" cy="200" r="1.8"/><circle cx="78" cy="220" r="1.8"/>
+            <circle cx="135" cy="195" r="1.8"/><circle cx="155" cy="215" r="1.8"/>
+          </g>
+          <circle cx="60" cy="140" r="3.5" fill="none" stroke="#000" stroke-width="0.6" opacity="0.45"/>
+          <g transform="translate(50, 150)">
+            <polygon points="0,-8 2.4,-2.6 8,-2.6 3.6,1.2 5.4,7 0,3.4 -5.4,7 -3.6,1.2 -8,-2.6 -2.4,-2.6" fill="#000"/>
+            <text x="0" y="18" font-size="7pt" text-anchor="middle" fill="#000">(142 BIP)</text>
+          </g>
+          <g font-size="10" font-weight="bold" text-anchor="middle" dominant-baseline="central">
+            <circle cx="14" cy="200" r="6.5" fill="rgba(0,0,0,0.20)"/><text x="14" y="200" fill="#000">A</text>
+            <circle cx="14" cy="150" r="6.5" fill="rgba(0,0,0,0.20)"/><text x="14" y="150" fill="#000">B</text>
+            <circle cx="14" cy="100" r="6.5" fill="rgba(0,0,0,0.20)"/><text x="14" y="100" fill="#000">C</text>
+            <circle cx="50" cy="200" r="6.5" fill="rgba(0,0,0,0.20)" opacity="0.30"/><text x="50" y="200" fill="#000" opacity="0.30">D</text>
+            <circle cx="50" cy="100" r="6.5" fill="rgba(0,0,0,0.20)"/><text x="50" y="100" fill="#000">E</text>
+            <circle cx="90" cy="200" r="6.5" fill="rgba(0,0,0,0.20)" opacity="0.30"/><text x="90" y="200" fill="#000" opacity="0.30">F</text>
+            <circle cx="90" cy="150" r="6.5" fill="rgba(0,0,0,0.20)"/><text x="90" y="150" fill="#000">G</text>
+            <circle cx="90" cy="100" r="6.5" fill="rgba(0,0,0,0.20)"/><text x="90" y="100" fill="#000">H</text>
+          </g>
+          <g font-weight="bold" font-size="9">
+            <g transform="translate(28, 200)"><rect x="-19" y="-7" width="38" height="14" rx="2" fill="#fff" stroke="#000" stroke-width="0.5"/><text text-anchor="middle" dominant-baseline="central">#7 RAMIR</text></g>
+            <g transform="translate(28, 150)"><rect x="-18" y="-7" width="36" height="14" rx="2" fill="#fff" stroke="#000" stroke-width="0.5"/><text text-anchor="middle" dominant-baseline="central">#11 DAVIS</text></g>
+            <g transform="translate(32, 105)"><rect x="-21" y="-7" width="42" height="14" rx="2" fill="#fff" stroke="#000" stroke-width="0.5"/><text text-anchor="middle" dominant-baseline="central">#23 THOMP</text></g>
+            <g transform="translate(60, 90)"><rect x="-18" y="-7" width="36" height="14" rx="2" fill="#fff" stroke="#000" stroke-width="0.5"/><text text-anchor="middle" dominant-baseline="central">#21 PATEL</text></g>
+            <g transform="translate(108, 152)"><rect x="-19" y="-7" width="38" height="14" rx="2" fill="#fff" stroke="#000" stroke-width="0.5"/><text text-anchor="middle" dominant-baseline="central">#4 WRIGH</text></g>
+          </g>
+        </svg>
+      </div>
+      <div class="card-sidebar">
+        <div class="sidebar-title">Outliers (LF)</div>
+        <div class="sidebar-rows">
+          <span class="jersey">#4</span>  <span class="name">WRIGHT</span>   <span class="zone">G</span>
+          <span class="jersey">#7</span>  <span class="name">RAMIREZ</span>  <span class="zone">A</span>
+          <span class="jersey">#11</span> <span class="name">DAVIS</span>    <span class="zone">B</span>
+          <span class="jersey">#21</span> <span class="name">PATEL</span>    <span class="zone">E</span>
+          <span class="jersey">#23</span> <span class="name">THOMPSON</span> <span class="zone">C</span>
+        </div>
+      </div>
+    </div>
+    <div class="card-legend">
+      &#9733; default &middot; &#9675; textbook &middot; A-H outliers
+    </div>
+  </div>
+
+  <!-- CF (lower outlier count; representative real-card density) -->
+  <div class="card">
+    <div class="card-header">
+      <div class="opponent">Eastlake Bears</div>
+      <div class="coverage-cue">Through Apr 12 (8 games)</div>
+      <div class="position-name">Centerfield</div>
+    </div>
+    <div class="card-body">
+      <div class="card-svg-slot">
+        <svg viewBox="0 0 200 320" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg" font-family="Arial, Helvetica, sans-serif">
+          <path d="M 10 80 Q 100 -10 190 80 L 190 90 Q 100 0 10 90 Z" fill="none" stroke="#000" stroke-width="0.8"/>
+          <line x1="100" y1="305" x2="10"  y2="80" stroke="#000" stroke-width="0.8"/>
+          <line x1="100" y1="305" x2="190" y2="80" stroke="#000" stroke-width="0.8"/>
+          <path d="M 55 245 Q 100 200 145 245" fill="none" stroke="#000" stroke-width="0.5"/>
+          <rect x="97"  y="302" width="6" height="6" fill="#fff" stroke="#000" stroke-width="0.5"/>
+          <rect x="127" y="272" width="6" height="6" fill="#fff" stroke="#000" stroke-width="0.5"/>
+          <rect x="97"  y="242" width="6" height="6" fill="#fff" stroke="#000" stroke-width="0.5"/>
+          <rect x="67"  y="272" width="6" height="6" fill="#fff" stroke="#000" stroke-width="0.5"/>
+          <g fill="#000" opacity="0.12">
+            <circle cx="100" cy="80" r="1.8"/><circle cx="92" cy="105" r="1.8"/>
+            <circle cx="105" cy="125" r="1.8"/><circle cx="115" cy="95" r="1.8"/>
+            <circle cx="85" cy="115" r="1.8"/><circle cx="98" cy="145" r="1.8"/>
+            <circle cx="110" cy="160" r="1.8"/><circle cx="125" cy="120" r="1.8"/>
+            <circle cx="75" cy="90" r="1.8"/><circle cx="130" cy="100" r="1.8"/>
+            <circle cx="88" cy="155" r="1.8"/><circle cx="118" cy="140" r="1.8"/>
+            <circle cx="60" cy="120" r="1.8"/><circle cx="140" cy="135" r="1.8"/>
+            <circle cx="100" cy="180" r="1.8"/><circle cx="80" cy="180" r="1.8"/>
+            <circle cx="120" cy="170" r="1.8"/><circle cx="155" cy="180" r="1.8"/>
+            <circle cx="50" cy="160" r="1.8"/><circle cx="100" cy="200" r="1.8"/>
+          </g>
+          <circle cx="100" cy="105" r="3.5" fill="none" stroke="#000" stroke-width="0.6" opacity="0.45"/>
+          <g transform="translate(95, 115)">
+            <polygon points="0,-8 2.4,-2.6 8,-2.6 3.6,1.2 5.4,7 0,3.4 -5.4,7 -3.6,1.2 -8,-2.6 -2.4,-2.6" fill="#000"/>
+            <text x="0" y="18" font-size="7pt" text-anchor="middle" fill="#000">(142 BIP)</text>
+          </g>
+          <g font-size="10" font-weight="bold" text-anchor="middle" dominant-baseline="central">
+            <circle cx="59" cy="165" r="6.5" fill="rgba(0,0,0,0.20)"/><text x="59" y="165" fill="#000">A</text>
+            <circle cx="59" cy="115" r="6.5" fill="rgba(0,0,0,0.20)" opacity="0.30"/><text x="59" y="115" fill="#000" opacity="0.30">B</text>
+            <circle cx="59" cy="65"  r="6.5" fill="rgba(0,0,0,0.20)" opacity="0.30"/><text x="59" y="65"  fill="#000" opacity="0.30">C</text>
+            <circle cx="95" cy="165" r="6.5" fill="rgba(0,0,0,0.20)" opacity="0.30"/><text x="95" y="165" fill="#000" opacity="0.30">D</text>
+            <circle cx="95" cy="65"  r="6.5" fill="rgba(0,0,0,0.20)"/><text x="95" y="65"  fill="#000">E</text>
+            <circle cx="131" cy="165" r="6.5" fill="rgba(0,0,0,0.20)" opacity="0.30"/><text x="131" y="165" fill="#000" opacity="0.30">F</text>
+            <circle cx="131" cy="115" r="6.5" fill="rgba(0,0,0,0.20)" opacity="0.30"/><text x="131" y="115" fill="#000" opacity="0.30">G</text>
+            <circle cx="131" cy="65"  r="6.5" fill="rgba(0,0,0,0.20)" opacity="0.30"/><text x="131" y="65"  fill="#000" opacity="0.30">H</text>
+          </g>
+          <g font-weight="bold" font-size="9">
+            <g transform="translate(72, 170)"><rect x="-18" y="-7" width="36" height="14" rx="2" fill="#fff" stroke="#000" stroke-width="0.5"/><text text-anchor="middle" dominant-baseline="central">#11 DAVIS</text></g>
+            <g transform="translate(105, 60)"><rect x="-18" y="-7" width="36" height="14" rx="2" fill="#fff" stroke="#000" stroke-width="0.5"/><text text-anchor="middle" dominant-baseline="central">#21 PATEL</text></g>
+          </g>
+        </svg>
+      </div>
+      <div class="card-sidebar">
+        <div class="sidebar-title">Outliers (CF)</div>
+        <div class="sidebar-rows">
+          <span class="jersey">#11</span> <span class="name">DAVIS</span> <span class="zone">A</span>
+          <span class="jersey">#21</span> <span class="name">PATEL</span> <span class="zone">E</span>
+        </div>
+      </div>
+    </div>
+    <div class="card-legend">
+      &#9733; default &middot; &#9675; textbook &middot; A-H outliers
+    </div>
+  </div>
+
+  <!-- RF -->
+  <div class="card">
+    <div class="card-header">
+      <div class="opponent">Eastlake Bears</div>
+      <div class="coverage-cue">Through Apr 12 (8 games)</div>
+      <div class="position-name">Right Field</div>
+    </div>
+    <div class="card-body">
+      <div class="card-svg-slot">
+        <svg viewBox="0 0 200 320" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg" font-family="Arial, Helvetica, sans-serif">
+          <path d="M 10 80 Q 100 -10 190 80 L 190 90 Q 100 0 10 90 Z" fill="none" stroke="#000" stroke-width="0.8"/>
+          <line x1="100" y1="305" x2="10"  y2="80" stroke="#000" stroke-width="0.8"/>
+          <line x1="100" y1="305" x2="190" y2="80" stroke="#000" stroke-width="0.8"/>
+          <path d="M 55 245 Q 100 200 145 245" fill="none" stroke="#000" stroke-width="0.5"/>
+          <rect x="97"  y="302" width="6" height="6" fill="#fff" stroke="#000" stroke-width="0.5"/>
+          <rect x="127" y="272" width="6" height="6" fill="#fff" stroke="#000" stroke-width="0.5"/>
+          <rect x="97"  y="242" width="6" height="6" fill="#fff" stroke="#000" stroke-width="0.5"/>
+          <rect x="67"  y="272" width="6" height="6" fill="#fff" stroke="#000" stroke-width="0.5"/>
+          <g fill="#000" opacity="0.12">
+            <circle cx="140" cy="115" r="1.8"/><circle cx="155" cy="130" r="1.8"/>
+            <circle cx="170" cy="120" r="1.8"/><circle cx="135" cy="145" r="1.8"/>
+            <circle cx="160" cy="160" r="1.8"/><circle cx="120" cy="125" r="1.8"/>
+            <circle cx="148" cy="100" r="1.8"/><circle cx="175" cy="145" r="1.8"/>
+            <circle cx="115" cy="155" r="1.8"/><circle cx="142" cy="175" r="1.8"/>
+            <circle cx="158" cy="180" r="1.8"/><circle cx="168" cy="155" r="1.8"/>
+            <circle cx="125" cy="190" r="1.8"/><circle cx="145" cy="200" r="1.8"/>
+          </g>
+          <circle cx="140" cy="140" r="3.5" fill="none" stroke="#000" stroke-width="0.6" opacity="0.45"/>
+          <g transform="translate(150, 150)">
+            <polygon points="0,-8 2.4,-2.6 8,-2.6 3.6,1.2 5.4,7 0,3.4 -5.4,7 -3.6,1.2 -8,-2.6 -2.4,-2.6" fill="#000"/>
+            <text x="0" y="18" font-size="7pt" text-anchor="middle" fill="#000">(142 BIP)</text>
+          </g>
+          <g font-size="10" font-weight="bold" text-anchor="middle" dominant-baseline="central">
+            <circle cx="110" cy="200" r="6.5" fill="rgba(0,0,0,0.20)" opacity="0.30"/><text x="110" y="200" fill="#000" opacity="0.30">A</text>
+            <circle cx="110" cy="150" r="6.5" fill="rgba(0,0,0,0.20)" opacity="0.30"/><text x="110" y="150" fill="#000" opacity="0.30">B</text>
+            <circle cx="110" cy="100" r="6.5" fill="rgba(0,0,0,0.20)" opacity="0.30"/><text x="110" y="100" fill="#000" opacity="0.30">C</text>
+            <circle cx="150" cy="200" r="6.5" fill="rgba(0,0,0,0.20)"/><text x="150" y="200" fill="#000">D</text>
+            <circle cx="150" cy="100" r="6.5" fill="rgba(0,0,0,0.20)" opacity="0.30"/><text x="150" y="100" fill="#000" opacity="0.30">E</text>
+            <circle cx="186" cy="200" r="6.5" fill="rgba(0,0,0,0.20)"/><text x="186" y="200" fill="#000">F</text>
+            <circle cx="186" cy="150" r="6.5" fill="rgba(0,0,0,0.20)"/><text x="186" y="150" fill="#000">G</text>
+            <circle cx="186" cy="100" r="6.5" fill="rgba(0,0,0,0.20)" opacity="0.30"/><text x="186" y="100" fill="#000" opacity="0.30">H</text>
+          </g>
+          <g font-weight="bold" font-size="9">
+            <g transform="translate(170, 130)"><rect x="-19" y="-7" width="38" height="14" rx="2" fill="#fff" stroke="#000" stroke-width="0.5"/><text text-anchor="middle" dominant-baseline="central">#4 WRIGH</text></g>
+            <g transform="translate(175, 195)"><rect x="-19" y="-7" width="38" height="14" rx="2" fill="#fff" stroke="#000" stroke-width="0.5"/><text text-anchor="middle" dominant-baseline="central">#19 (LI)</text></g>
+            <g transform="translate(130, 195)"><rect x="-19" y="-7" width="38" height="14" rx="2" fill="#fff" stroke="#000" stroke-width="0.5"/><text text-anchor="middle" dominant-baseline="central">#23 THOMP</text></g>
+          </g>
+        </svg>
+      </div>
+      <div class="card-sidebar">
+        <div class="sidebar-title">Outliers (RF)</div>
+        <div class="sidebar-rows">
+          <span class="jersey">#4</span>  <span class="name">WRIGHT</span>   <span class="zone">G</span>
+          <span class="jersey">#19</span> <span class="name">(L. init)</span> <span class="zone">F</span>
+          <span class="jersey">#23</span> <span class="name">THOMPSON</span> <span class="zone">D</span>
+        </div>
+      </div>
+    </div>
+    <div class="card-legend">
+      &#9733; default &middot; &#9675; textbook &middot; A-H outliers
+    </div>
+  </div>
+
+  <!-- 3B -->
+  <div class="card">
+    <div class="card-header">
+      <div class="opponent">Eastlake Bears</div>
+      <div class="coverage-cue">Through Apr 12 (8 games)</div>
+      <div class="position-name">Third Base</div>
+    </div>
+    <div class="card-body">
+      <div class="card-svg-slot">
+        <svg viewBox="0 0 200 320" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg" font-family="Arial, Helvetica, sans-serif">
+          <path d="M 10 80 Q 100 -10 190 80 L 190 90 Q 100 0 10 90 Z" fill="none" stroke="#000" stroke-width="0.8"/>
+          <line x1="100" y1="305" x2="10"  y2="80" stroke="#000" stroke-width="0.8"/>
+          <line x1="100" y1="305" x2="190" y2="80" stroke="#000" stroke-width="0.8"/>
+          <path d="M 55 245 Q 100 200 145 245" fill="none" stroke="#000" stroke-width="0.5"/>
+          <rect x="97"  y="302" width="6" height="6" fill="#fff" stroke="#000" stroke-width="0.5"/>
+          <rect x="127" y="272" width="6" height="6" fill="#fff" stroke="#000" stroke-width="0.5"/>
+          <rect x="97"  y="242" width="6" height="6" fill="#fff" stroke="#000" stroke-width="0.5"/>
+          <rect x="67"  y="272" width="6" height="6" fill="#fff" stroke="#000" stroke-width="0.5"/>
+          <g fill="#000" opacity="0.12">
+            <circle cx="63" cy="265" r="1.8"/><circle cx="60" cy="280" r="1.8"/>
+            <circle cx="72" cy="258" r="1.8"/><circle cx="55" cy="295" r="1.8"/>
+            <circle cx="68" cy="290" r="1.8"/><circle cx="80" cy="270" r="1.8"/>
+            <circle cx="50" cy="270" r="1.8"/><circle cx="78" cy="285" r="1.8"/>
+          </g>
+          <circle cx="65" cy="270" r="3.5" fill="none" stroke="#000" stroke-width="0.6" opacity="0.45"/>
+          <g transform="translate(60, 275)">
+            <polygon points="0,-8 2.4,-2.6 8,-2.6 3.6,1.2 5.4,7 0,3.4 -5.4,7 -3.6,1.2 -8,-2.6 -2.4,-2.6" fill="#000"/>
+            <text x="0" y="18" font-size="7pt" text-anchor="middle" fill="#000">(142 BIP)</text>
+          </g>
+          <g font-size="10" font-weight="bold" text-anchor="middle" dominant-baseline="central">
+            <circle cx="32" cy="300" r="6.5" fill="rgba(0,0,0,0.20)" opacity="0.30"/><text x="32" y="300" fill="#000" opacity="0.30">A</text>
+            <circle cx="32" cy="275" r="6.5" fill="rgba(0,0,0,0.20)"/><text x="32" y="275" fill="#000">B</text>
+            <circle cx="32" cy="250" r="6.5" fill="rgba(0,0,0,0.20)"/><text x="32" y="250" fill="#000">C</text>
+            <circle cx="60" cy="300" r="6.5" fill="rgba(0,0,0,0.20)" opacity="0.30"/><text x="60" y="300" fill="#000" opacity="0.30">D</text>
+            <circle cx="60" cy="250" r="6.5" fill="rgba(0,0,0,0.20)" opacity="0.30"/><text x="60" y="250" fill="#000" opacity="0.30">E</text>
+            <circle cx="88" cy="300" r="6.5" fill="rgba(0,0,0,0.20)" opacity="0.30"/><text x="88" y="300" fill="#000" opacity="0.30">F</text>
+            <circle cx="88" cy="275" r="6.5" fill="rgba(0,0,0,0.20)" opacity="0.30"/><text x="88" y="275" fill="#000" opacity="0.30">G</text>
+            <circle cx="88" cy="250" r="6.5" fill="rgba(0,0,0,0.20)" opacity="0.30"/><text x="88" y="250" fill="#000" opacity="0.30">H</text>
+          </g>
+          <g font-weight="bold" font-size="9">
+            <g transform="translate(46, 275)"><rect x="-18" y="-7" width="36" height="14" rx="2" fill="#fff" stroke="#000" stroke-width="0.5"/><text text-anchor="middle" dominant-baseline="central">#7 RAMIR</text></g>
+            <g transform="translate(46, 250)"><rect x="-21" y="-7" width="42" height="14" rx="2" fill="#fff" stroke="#000" stroke-width="0.5"/><text text-anchor="middle" dominant-baseline="central">#23 THOMP</text></g>
+          </g>
+        </svg>
+      </div>
+      <div class="card-sidebar">
+        <div class="sidebar-title">Outliers (3B)</div>
+        <div class="sidebar-rows">
+          <span class="jersey">#7</span>  <span class="name">RAMIREZ</span>  <span class="zone">B</span>
+          <span class="jersey">#23</span> <span class="name">THOMPSON</span> <span class="zone">C</span>
+        </div>
+      </div>
+    </div>
+    <div class="card-legend">
+      &#9733; default &middot; &#9675; textbook &middot; A-H outliers
+    </div>
+  </div>
+</div>
+
+
+<!-- ---- Sheet 2 ---- -->
+<div class="sheet">
+
+  <!-- SS (re-uses thin-tier variant content) -->
+  <div class="card">
+    <div class="card-header">
+      <div class="opponent">Eastlake Bears</div>
+      <div class="coverage-cue">Through Apr 12 (8 games)</div>
+      <div class="position-name">Shortstop</div>
+    </div>
+    <div class="card-body">
+      <div class="card-svg-slot">
+        <svg viewBox="0 0 200 320" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg" font-family="Arial, Helvetica, sans-serif">
+          <path d="M 10 80 Q 100 -10 190 80 L 190 90 Q 100 0 10 90 Z" fill="none" stroke="#000" stroke-width="0.8"/>
+          <line x1="100" y1="305" x2="10"  y2="80" stroke="#000" stroke-width="0.8"/>
+          <line x1="100" y1="305" x2="190" y2="80" stroke="#000" stroke-width="0.8"/>
+          <path d="M 55 245 Q 100 200 145 245" fill="none" stroke="#000" stroke-width="0.5"/>
+          <rect x="97"  y="302" width="6" height="6" fill="#fff" stroke="#000" stroke-width="0.5"/>
+          <rect x="127" y="272" width="6" height="6" fill="#fff" stroke="#000" stroke-width="0.5"/>
+          <rect x="97"  y="242" width="6" height="6" fill="#fff" stroke="#000" stroke-width="0.5"/>
+          <rect x="67"  y="272" width="6" height="6" fill="#fff" stroke="#000" stroke-width="0.5"/>
+          <circle cx="85" cy="245" r="3.5" fill="none" stroke="#000" stroke-width="0.6" opacity="0.45"/>
+          <g transform="translate(78, 240)">
+            <circle r="10" fill="none" stroke="#000" stroke-width="0.6" stroke-dasharray="2 1.5" opacity="0.85"/>
+            <polygon points="0,-7 2.1,-2.3 7,-2.3 3.2,1.0 4.7,6 0,3 -4.7,6 -3.2,1.0 -7,-2.3 -2.1,-2.3" fill="#000"/>
+            <text x="0" y="18" font-size="7pt" text-anchor="middle" fill="#000">(~28 BIP)</text>
+          </g>
+          <g font-size="10" font-weight="bold" text-anchor="middle" dominant-baseline="central">
+            <circle cx="42" cy="276" r="6.5" fill="rgba(0,0,0,0.20)" opacity="0.30"/><text x="42" y="276" fill="#000" opacity="0.30">A</text>
+            <circle cx="42" cy="240" r="6.5" fill="rgba(0,0,0,0.20)"/><text x="42" y="240" fill="#000">B</text>
+            <circle cx="42" cy="204" r="6.5" fill="rgba(0,0,0,0.20)" opacity="0.30"/><text x="42" y="204" fill="#000" opacity="0.30">C</text>
+            <circle cx="78" cy="276" r="6.5" fill="rgba(0,0,0,0.20)" opacity="0.30"/><text x="78" y="276" fill="#000" opacity="0.30">D</text>
+            <circle cx="78" cy="204" r="6.5" fill="rgba(0,0,0,0.20)" opacity="0.30"/><text x="78" y="204" fill="#000" opacity="0.30">E</text>
+            <circle cx="114" cy="276" r="6.5" fill="rgba(0,0,0,0.20)" opacity="0.30"/><text x="114" y="276" fill="#000" opacity="0.30">F</text>
+            <circle cx="114" cy="240" r="6.5" fill="rgba(0,0,0,0.20)"/><text x="114" y="240" fill="#000">G</text>
+            <circle cx="114" cy="204" r="6.5" fill="rgba(0,0,0,0.20)" opacity="0.30"/><text x="114" y="204" fill="#000" opacity="0.30">H</text>
+          </g>
+          <g font-weight="bold" font-size="9">
+            <g transform="translate(56, 240)"><rect x="-18" y="-7" width="36" height="14" rx="2" fill="#fff" stroke="#000" stroke-width="0.5"/><text text-anchor="middle" dominant-baseline="central">#7 RAMIR</text></g>
+            <g transform="translate(128, 242)"><rect x="-19" y="-7" width="38" height="14" rx="2" fill="#fff" stroke="#000" stroke-width="0.5"/><text text-anchor="middle" dominant-baseline="central">#4 WRIGH</text></g>
+          </g>
+        </svg>
+      </div>
+      <div class="card-sidebar">
+        <div class="sidebar-title">Outliers (SS)</div>
+        <div class="sidebar-rows">
+          <span class="jersey">#4</span> <span class="name">WRIGHT</span>  <span class="zone">G</span>
+          <span class="jersey">#7</span> <span class="name">RAMIREZ</span> <span class="zone">B</span>
+        </div>
+      </div>
+    </div>
+    <div class="card-legend">
+      &#9733; default &middot; &#9675; textbook &middot; A-H outliers
+    </div>
+  </div>
+
+  <!-- 2B (no outliers / empty-banner state per UXD I-8 + IM-1) -->
+  <div class="card">
+    <div class="card-header">
+      <div class="opponent">Eastlake Bears</div>
+      <div class="coverage-cue">Through Apr 12 (8 games)</div>
+      <div class="position-name">Second Base</div>
+    </div>
+    <div class="card-body">
+      <div class="card-svg-slot">
+        <svg viewBox="0 0 200 320" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg" font-family="Arial, Helvetica, sans-serif">
+          <path d="M 10 80 Q 100 -10 190 80 L 190 90 Q 100 0 10 90 Z" fill="none" stroke="#000" stroke-width="0.8"/>
+          <line x1="100" y1="305" x2="10"  y2="80" stroke="#000" stroke-width="0.8"/>
+          <line x1="100" y1="305" x2="190" y2="80" stroke="#000" stroke-width="0.8"/>
+          <path d="M 55 245 Q 100 200 145 245" fill="none" stroke="#000" stroke-width="0.5"/>
+          <rect x="97"  y="302" width="6" height="6" fill="#fff" stroke="#000" stroke-width="0.5"/>
+          <rect x="127" y="272" width="6" height="6" fill="#fff" stroke="#000" stroke-width="0.5"/>
+          <rect x="97"  y="242" width="6" height="6" fill="#fff" stroke="#000" stroke-width="0.5"/>
+          <rect x="67"  y="272" width="6" height="6" fill="#fff" stroke="#000" stroke-width="0.5"/>
+          <circle cx="125" cy="245" r="3.5" fill="none" stroke="#000" stroke-width="0.6" opacity="0.45"/>
+          <g transform="translate(122, 248)">
+            <polygon points="0,-8 2.4,-2.6 8,-2.6 3.6,1.2 5.4,7 0,3.4 -5.4,7 -3.6,1.2 -8,-2.6 -2.4,-2.6" fill="#000"/>
+            <text x="0" y="18" font-size="7pt" text-anchor="middle" fill="#000">(142 BIP)</text>
+          </g>
+          <!-- No-outliers state: full 8 compass letters render but all at 30% opacity -->
+          <g font-size="10" font-weight="bold" text-anchor="middle" dominant-baseline="central" opacity="0.30">
+            <circle cx="86"  cy="284" r="6.5" fill="rgba(0,0,0,0.20)"/><text x="86"  y="284" fill="#000">A</text>
+            <circle cx="86"  cy="248" r="6.5" fill="rgba(0,0,0,0.20)"/><text x="86"  y="248" fill="#000">B</text>
+            <circle cx="86"  cy="212" r="6.5" fill="rgba(0,0,0,0.20)"/><text x="86"  y="212" fill="#000">C</text>
+            <circle cx="122" cy="284" r="6.5" fill="rgba(0,0,0,0.20)"/><text x="122" y="284" fill="#000">D</text>
+            <circle cx="122" cy="212" r="6.5" fill="rgba(0,0,0,0.20)"/><text x="122" y="212" fill="#000">E</text>
+            <circle cx="158" cy="284" r="6.5" fill="rgba(0,0,0,0.20)"/><text x="158" y="284" fill="#000">F</text>
+            <circle cx="158" cy="248" r="6.5" fill="rgba(0,0,0,0.20)"/><text x="158" y="248" fill="#000">G</text>
+            <circle cx="158" cy="212" r="6.5" fill="rgba(0,0,0,0.20)"/><text x="158" y="212" fill="#000">H</text>
+          </g>
+        </svg>
+      </div>
+      <div class="card-sidebar">
+        <div class="sidebar-title">Outliers (2B)</div>
+        <div class="sidebar-banner">
+          No outliers this opponent. Play team default.
+        </div>
+      </div>
+    </div>
+    <div class="card-legend">
+      &#9733; default &middot; &#9675; textbook &middot; A-H outliers
+    </div>
+  </div>
+
+  <!-- Compass key card (sheet 2 slot 3) -->
+  <div class="card card-compass-key">
+    <div class="card-header">
+      <div class="opponent">Compass Key</div>
+      <div class="coverage-cue">Reference card</div>
+      <div class="position-name">8-zone field compass</div>
+    </div>
+    <div class="key-caption">
+      Letters are stable across opponents. The team-default star moves; the labels do not.
+    </div>
+    <div class="key-axes">
+      <svg viewBox="0 0 200 320" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg" font-family="Arial, Helvetica, sans-serif">
+        <!-- Field outline -->
+        <path d="M 10 80 Q 100 -10 190 80 L 190 90 Q 100 0 10 90 Z" fill="none" stroke="#000" stroke-width="0.8"/>
+        <line x1="100" y1="305" x2="10"  y2="80" stroke="#000" stroke-width="0.8"/>
+        <line x1="100" y1="305" x2="190" y2="80" stroke="#000" stroke-width="0.8"/>
+        <path d="M 55 245 Q 100 200 145 245" fill="none" stroke="#000" stroke-width="0.5"/>
+        <rect x="97"  y="302" width="6" height="6" fill="#fff" stroke="#000" stroke-width="0.5"/>
+
+        <!-- Star centered for the key -->
+        <g transform="translate(100, 170)">
+          <polygon points="0,-8 2.4,-2.6 8,-2.6 3.6,1.2 5.4,7 0,3.4 -5.4,7 -3.6,1.2 -8,-2.6 -2.4,-2.6" fill="#000"/>
+        </g>
+
+        <!-- All 8 compass letters at full opacity for legibility-as-reference -->
+        <g font-size="11" font-weight="bold" text-anchor="middle" dominant-baseline="central">
+          <circle cx="46"  cy="220" r="7.5" fill="rgba(0,0,0,0.20)"/><text x="46"  y="220" fill="#000">A</text>
+          <circle cx="46"  cy="170" r="7.5" fill="rgba(0,0,0,0.20)"/><text x="46"  y="170" fill="#000">B</text>
+          <circle cx="46"  cy="120" r="7.5" fill="rgba(0,0,0,0.20)"/><text x="46"  y="120" fill="#000">C</text>
+          <circle cx="100" cy="220" r="7.5" fill="rgba(0,0,0,0.20)"/><text x="100" y="220" fill="#000">D</text>
+          <circle cx="100" cy="120" r="7.5" fill="rgba(0,0,0,0.20)"/><text x="100" y="120" fill="#000">E</text>
+          <circle cx="154" cy="220" r="7.5" fill="rgba(0,0,0,0.20)"/><text x="154" y="220" fill="#000">F</text>
+          <circle cx="154" cy="170" r="7.5" fill="rgba(0,0,0,0.20)"/><text x="154" y="170" fill="#000">G</text>
+          <circle cx="154" cy="120" r="7.5" fill="rgba(0,0,0,0.20)"/><text x="154" y="120" fill="#000">H</text>
+        </g>
+
+        <!-- Axis annotations -->
+        <g font-size="9" fill="#000" text-anchor="middle">
+          <text x="100" y="50">DEEP</text>
+          <text x="100" y="295">IN</text>
+          <text x="18"  y="50" transform="rotate(-90 18 50)">LEFT</text>
+          <text x="182" y="50" transform="rotate(90 182 50)">RIGHT</text>
+        </g>
+      </svg>
+    </div>
+    <div class="card-legend">
+      A in-left &middot; B left &middot; C deep-left &middot; D in &middot; E deep &middot; F in-right &middot; G right &middot; H deep-right
+    </div>
+  </div>
+
+  <!-- Opponent context card (sheet 2 slot 4) -->
+  <div class="card card-context">
+    <div class="card-header">
+      <div class="opponent">Eastlake Bears</div>
+      <div class="coverage-cue">Through Apr 12 (8 games)</div>
+      <div class="position-name">Opponent context</div>
+    </div>
+    <div class="context-body">
+      <h2>Eastlake Bears</h2>
+      <p class="context-coverage">2026 Spring HS &middot; 8 games &middot; vs. Lincoln Standing Bear Apr 14.</p>
+      <div class="context-record">
+        <dl>
+          <dt>Record</dt>            <dd>5&ndash;3</dd>
+          <dt>Runs / game</dt>        <dd>6.4</dd>
+          <dt>Runs allowed / game</dt><dd>3.8</dd>
+          <dt>Team BIPs</dt>          <dd>142</dd>
+        </dl>
+      </div>
+      <div class="context-tier">
+        Coverage tier: <span class="tier-label">Full</span> &mdash; outlier markers and density background render on all 6 position cards.
+      </div>
+    </div>
+    <div class="card-legend">
+      Coach reference &middot; cut and keep with the call sheet.
+    </div>
+  </div>
+</div>
+
+</body>
+</html>
