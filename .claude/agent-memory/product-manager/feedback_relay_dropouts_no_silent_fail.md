@@ -22,4 +22,6 @@ Peer-to-peer SendMessage between PM and team-lead drops messages on this team. T
 
 6. **When in doubt, ack and ask.** The cost of an extra status check is one message; the cost of a silent fail is hours of lost work on both sides.
 
+7. **PM-to-peer-expert consultations: send peer DM AND carbon-copy team-lead.** When PM sends a consultation to a domain expert (coach, uxd, de, se) during planning, the peer DM may drop silently — the expert never sees it, PM thinks it was delivered. **Always carbon-copy team-lead with `summary: "[to <agent>] <topic>"`** so the main session can detect the drop and relay if the expert doesn't respond. Format the carbon-copy with consultation content in `## Consultation to <agent>` headings (team-lead's preferred relay format). Established during E-229 Phase 1 on 2026-05-16, after all three consultations to coach/uxd/de dropped silently.
+
 This applies during any multi-iteration review cycle, not just E-228. The relay-reliability problem is structural to the team, not specific to one epic.
