@@ -48,8 +48,17 @@ from src.gamechanger.types import TeamRef
 from src.gamechanger.url_parser import parse_team_url
 from src.llm.openrouter import is_llm_available
 from src.reconciliation.engine import reconcile_game
-from src.reports.positioning import compute_positioning
-from src.reports.positioning_bundle import generate_positioning_bundle
+from src.reports.positioning import COVERED_POSITIONS, compute_positioning
+from src.reports.positioning_bundle import (
+    _build_opponent_context,
+    _choose_perspective_team_id,
+    generate_positioning_bundle,
+)
+from src.reports.positioning_card import (
+    format_coverage_cue,
+    render_compass_key_svg,
+    render_field_svg,
+)
 from src.reports.renderer import render_report
 
 logger = logging.getLogger(__name__)
@@ -1358,6 +1367,34 @@ def generate_report(gc_url: str) -> GenerationResult:
                     exc_info=True,
                 )
 
+        # E-229 post-dev-validation fix: populate the 6 positioning data
+        # keys consumed by `_build_positioning_context` in the renderer.
+        # Without this payload the scouting report's
+        # `positioning_cards.html` partial ships empty `<svg>` slots and
+        # a blank opponent-context body even when the parallel bundle
+        # (rendered below at `data/reports/{slug}/index.html`) renders
+        # correctly. Mirrors the construction in
+        # `generate_positioning_bundle`. Non-fatal: a failure inside the
+        # helper logs WARNING and the report still renders with empty
+        # positioning slots (matching prior degraded behavior).
+        positioning_payload: dict = {}
+        try:
+            positioning_payload = _build_scouting_report_positioning_payload(
+                public_id=public_id,
+                team_id=team_id,
+                season_id=season_id,
+                opponent_name=team_info.get("name") or "",
+                freshness_date=freshness_date,
+                game_count=game_count,
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Positioning payload build failed for public_id=%s "
+                "(non-fatal); scouting report renders with empty "
+                "positioning cards.",
+                public_id, exc_info=True,
+            )
+
         # Render HTML
         team_info["record"] = record
         data = {
@@ -1384,6 +1421,30 @@ def generate_report(gc_url: str) -> GenerationResult:
             "starter_prediction": starter_prediction,
             "enriched_prediction": enriched_prediction,
             "show_predicted_starter": show_predicted_starter,
+            # Positioning data keys -- consumed by the renderer's
+            # `_build_positioning_context` so the cards section renders
+            # field SVGs, compass key, and opponent-context body.
+            "positioning_card_svgs": positioning_payload.get(
+                "positioning_card_svgs", {},
+            ),
+            "positioning_compass_key_svg": positioning_payload.get(
+                "positioning_compass_key_svg", "",
+            ),
+            "positioning_coverage_cue": positioning_payload.get(
+                "positioning_coverage_cue", "",
+            ),
+            "positioning_opponent_context_coverage_line":
+                positioning_payload.get(
+                    "positioning_opponent_context_coverage_line", "",
+                ),
+            "positioning_opponent_context_stats":
+                positioning_payload.get(
+                    "positioning_opponent_context_stats", [],
+                ),
+            "positioning_opponent_context_tier_line":
+                positioning_payload.get(
+                    "positioning_opponent_context_tier_line", "",
+                ),
         }
         html = render_report(data)
 
@@ -1464,6 +1525,134 @@ def _format_through_date(freshness_date: str | None) -> str:
     except (ValueError, TypeError):
         return ""
     return f"{dt.strftime('%b')} {dt.day}"
+
+
+def _build_scouting_report_positioning_payload(
+    *,
+    public_id: str,
+    team_id: int,
+    season_id: str,
+    opponent_name: str,
+    freshness_date: str | None,
+    game_count: int,
+) -> dict:
+    """Build the 6 positioning data keys consumed by ``render_report``.
+
+    Mirrors the per-card SVG + opponent-context construction in
+    :func:`src.reports.positioning_bundle.generate_positioning_bundle`.
+    The scouting report's ``positioning_cards.html`` partial reads these
+    same keys via :func:`src.reports.renderer._build_positioning_context`;
+    without this payload the cards section renders empty SVG slots and
+    a blank opponent-context body even when the bundle (which lives at
+    ``data/reports/{slug}/index.html``) renders correctly.
+
+    Returns a dict with the six keys:
+      * ``positioning_card_svgs`` -- ``{position: svg_string}`` for the
+        6 covered positions (LF, CF, RF, 3B, SS, 2B). Per-card render
+        failures are non-fatal: the offending slot falls back to "".
+      * ``positioning_compass_key_svg`` -- the reference compass card.
+      * ``positioning_coverage_cue`` -- "Through {Mon Day} ({N} games)"
+        threaded into each card's header.
+      * ``positioning_opponent_context_coverage_line`` -- season label
+        + game count + "vs. {our_team} {next_game}" suffix.
+      * ``positioning_opponent_context_stats`` -- 4-row label/value list
+        (Record / Runs per game / Runs allowed per game / Team BIPs).
+      * ``positioning_opponent_context_tier_line`` -- "Coverage tier:
+        {tier} — {tier-copy}".
+
+    Opens its own connection (mirroring the per-stage pattern in
+    ``generate_report``); sets ``row_factory = sqlite3.Row`` so the
+    sibling helpers in ``positioning_bundle`` and ``positioning_card``
+    (which call ``dict(r)`` on query results) work correctly.
+
+    Returns ``{}`` for the opponent-context keys when no perspective is
+    available (zero-coverage opponent); the SVG keys are still populated
+    so the cards render their zero-coverage state.
+    """
+    through_date = _format_through_date(freshness_date)
+    coverage_cue = ""
+    if through_date and game_count > 0:
+        coverage_cue = format_coverage_cue(through_date, game_count)
+
+    payload: dict = {
+        "positioning_card_svgs": {},
+        "positioning_compass_key_svg": "",
+        "positioning_coverage_cue": coverage_cue,
+        "positioning_opponent_context_coverage_line": "",
+        "positioning_opponent_context_stats": [],
+        "positioning_opponent_context_tier_line": "",
+    }
+
+    with closing(get_connection()) as conn:
+        # Sibling helpers (`positioning_card`, `positioning_bundle`) call
+        # `dict(r)` on query results, which requires `sqlite3.Row`.
+        # Mirrors the row_factory set in `generate_positioning_bundle`.
+        conn.row_factory = sqlite3.Row
+
+        per_card_svgs: dict[str, str] = {}
+        for position in COVERED_POSITIONS:
+            try:
+                per_card_svgs[position] = render_field_svg(
+                    conn, public_id, position, season_id,
+                    opponent_name=opponent_name,
+                    through_date=through_date,
+                    game_count=game_count,
+                )
+            except Exception:  # noqa: BLE001
+                logger.warning(
+                    "Scouting report card SVG render failed for "
+                    "position=%s public_id=%s (non-fatal); slot "
+                    "renders empty.",
+                    position, public_id, exc_info=True,
+                )
+                per_card_svgs[position] = ""
+        payload["positioning_card_svgs"] = per_card_svgs
+
+        # Compass key is opponent-independent; if rendering fails we
+        # still want the per-card SVGs to ship.
+        try:
+            payload["positioning_compass_key_svg"] = render_compass_key_svg()
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Scouting report compass-key SVG render failed "
+                "(non-fatal).", exc_info=True,
+            )
+
+        # Opponent-context payload: requires a chosen perspective. When
+        # no perspective is available (zero-coverage opponent), the
+        # opponent-context keys stay empty -- the partial's
+        # `default('')` filters render bare strings, matching the
+        # bundle's degraded-state behavior.
+        chosen_perspective = _choose_perspective_team_id(
+            conn, team_id, season_id,
+        )
+        if chosen_perspective is not None:
+            try:
+                ctx = _build_opponent_context(
+                    conn,
+                    team_id=team_id,
+                    season_id=season_id,
+                    perspective_team_id=chosen_perspective,
+                    game_count=game_count,
+                )
+                payload["positioning_opponent_context_coverage_line"] = (
+                    ctx.get("opponent_context_coverage_line", "")
+                )
+                payload["positioning_opponent_context_stats"] = ctx.get(
+                    "opponent_context_stats", [],
+                )
+                payload["positioning_opponent_context_tier_line"] = (
+                    ctx.get("opponent_context_tier_line", "")
+                )
+            except Exception:  # noqa: BLE001
+                logger.warning(
+                    "Scouting report opponent-context payload failed "
+                    "for team_id=%d (non-fatal); cards section renders "
+                    "with empty context body.",
+                    team_id, exc_info=True,
+                )
+
+    return payload
 
 
 def _bundle_dir(slug: str) -> Path:

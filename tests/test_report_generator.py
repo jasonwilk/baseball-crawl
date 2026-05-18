@@ -3041,3 +3041,415 @@ class TestQueryBatterPositioning:
         assert rows == []
 
 
+# ---------------------------------------------------------------------------
+# E-229 dev-validation fix: scouting report ships the 6 positioning data
+# keys consumed by `_build_positioning_context`. Without the wiring, the
+# scouting report's positioning_cards.html partial renders empty <svg>
+# slots and a blank opponent-context body even though the parallel
+# 4-page bundle at data/reports/{slug}/index.html renders correctly.
+# ---------------------------------------------------------------------------
+
+
+def _seed_positioning_payload_inputs(
+    db: sqlite3.Connection,
+    *,
+    team_id: int = 1,
+    season_id: str = "2026-spring-hs",
+    public_id: str = "abc123",
+    team_name: str = "Test Tigers",
+) -> None:
+    """Seed enough rows for the positioning payload to populate.
+
+    Adds the minimum-pipeline rows PLUS one player with a roster row PLUS
+    a full team_position_aggregate set across the 6 covered positions
+    PLUS one outlier `batter_positioning` row so the cards have an
+    outlier sidebar entry.
+    """
+    _seed_minimal_pipeline_inputs(
+        db, team_id=team_id, season_id=season_id,
+        public_id=public_id, team_name=team_name,
+    )
+    db.execute(
+        "INSERT INTO players (player_id, first_name, last_name) "
+        "VALUES ('p1', 'Hank', 'Ramirez')"
+    )
+    db.execute(
+        "INSERT INTO team_rosters (team_id, player_id, season_id, jersey_number) "
+        "VALUES (?, 'p1', ?, '7')",
+        (team_id, season_id),
+    )
+    # Aggregates: bip_count=60 across all 6 positions yields "Full" tier.
+    from src.reports.positioning import COVERED_POSITIONS
+    for position in COVERED_POSITIONS:
+        db.execute(
+            """
+            INSERT INTO team_position_aggregate (
+                team_id, season_id, perspective_team_id, position,
+                star_x, star_y, bip_count, is_low_confidence
+            ) VALUES (?, ?, ?, ?, 160.0, 200.0, 60, 0)
+            """,
+            (team_id, season_id, team_id, position),
+        )
+    # One outlier batter row at LF zone A; default rows for the rest.
+    db.execute(
+        """
+        INSERT INTO batter_positioning (
+            player_id, team_id, season_id, perspective_team_id, position,
+            direction_deviation, depth_deviation, zone_id,
+            is_thin, bip_count, hr_count
+        ) VALUES ('p1', ?, ?, ?, 'LF', -1, -1, 'A', 0, 20, 0)
+        """,
+        (team_id, season_id, team_id),
+    )
+    for position in ("CF", "RF", "3B", "SS", "2B"):
+        db.execute(
+            """
+            INSERT INTO batter_positioning (
+                player_id, team_id, season_id, perspective_team_id, position,
+                direction_deviation, depth_deviation, zone_id,
+                is_thin, bip_count, hr_count
+            ) VALUES ('p1', ?, ?, ?, ?, 0, 0, NULL, 0, 20, 0)
+            """,
+            (team_id, season_id, team_id, position),
+        )
+    db.commit()
+
+
+class TestScoutingReportPositioningPayload:
+    """E-229 dev-validation fix: `generate_report` populates the 6
+    positioning data keys consumed by the renderer's
+    `_build_positioning_context`.
+
+    Before this fix, the scouting report's positioning_cards.html partial
+    fell back to empty defaults for `positioning_card_svgs`,
+    `positioning_compass_key_svg`, `positioning_coverage_cue`, and the
+    three `positioning_opponent_context_*` keys -- so the rendered HTML
+    shipped empty <svg> slots and a blank opponent-context body.
+    """
+
+    @pytest.fixture()
+    def db_path(self, tmp_path):
+        path = tmp_path / "test.db"
+        c = sqlite3.connect(str(path))
+        load_real_schema(c)
+        c.commit()
+        c.close()
+        return path
+
+    def _fresh_conn_factory(self, db_path):
+        def _factory():
+            c = sqlite3.connect(str(db_path))
+            c.execute("PRAGMA foreign_keys=ON;")
+            return c
+        return _factory
+
+    def _mock_pipeline(self, mock_client_cls):
+        mock_client = MagicMock()
+        mock_client_cls.return_value = mock_client
+        mock_crawler = MagicMock()
+        mock_crawler.scout_team.return_value = ScoutingCrawlResult(
+            team_id=1, season_id="2026-spring-hs",
+            games_crawled=5, games=[], boxscores={},
+        )
+        from src.gamechanger.loaders import LoadResult
+        mock_loader = MagicMock()
+        mock_loader.load_team.return_value = LoadResult(loaded=5)
+        return mock_crawler, mock_loader
+
+    # ------------------------------------------------------------------
+    # Test 1 -- caller-audit: the data dict passed to render_report
+    # must contain the 6 new positioning keys. Captures the dict via
+    # a MagicMock that wraps render_report.
+    # ------------------------------------------------------------------
+    @patch("src.reports.generator.get_connection")
+    @patch("src.reports.generator.GameChangerClient")
+    @patch("src.reports.generator.ensure_team_row", return_value=1)
+    @patch("src.reports.generator._crawl_and_load_spray")
+    @patch("src.reports.generator._crawl_and_load_plays", return_value=[])
+    @patch(
+        "src.reports.generator.derive_season_id_for_team",
+        return_value=("2026-spring-hs", 2026),
+    )
+    def test_data_dict_includes_six_positioning_keys(
+        self, mock_derive, mock_plays, mock_spray, mock_ensure,
+        mock_client_cls, mock_get_conn, db_path, tmp_path,
+    ):
+        """Caller-audit: every kwarg added to `_build_positioning_context`
+        in the renderer must be populated by `generate_report`. The
+        symmetric path (`generate_positioning_bundle`) already populates
+        these via F2; this test ensures the scouting report does too.
+        """
+        conn = sqlite3.connect(str(db_path))
+        _seed_positioning_payload_inputs(conn)
+        conn.close()
+
+        mock_get_conn.side_effect = self._fresh_conn_factory(db_path)
+        mock_crawler, mock_loader = self._mock_pipeline(mock_client_cls)
+
+        captured: dict[str, object] = {}
+
+        def _capture_render(data):
+            captured.update(data)
+            return "<html>captured</html>"
+
+        with (
+            patch("src.reports.generator.ScoutingCrawler",
+                  return_value=mock_crawler),
+            patch("src.reports.generator.ScoutingLoader",
+                  return_value=mock_loader),
+            patch("src.reports.generator._REPO_ROOT", tmp_path),
+            patch("src.reports.generator._REPORTS_DIR",
+                  tmp_path / "data" / "reports"),
+            patch("src.reports.generator.render_report",
+                  side_effect=_capture_render),
+            patch("src.reports.generator.dedup_team_players", return_value=0),
+            patch("src.reports.generator.compute_positioning", return_value=[]),
+        ):
+            result = generate_report("abc123")
+
+        assert result.success is True
+
+        # All 6 positioning data keys must be present.
+        required_keys = [
+            "positioning_card_svgs",
+            "positioning_compass_key_svg",
+            "positioning_coverage_cue",
+            "positioning_opponent_context_coverage_line",
+            "positioning_opponent_context_stats",
+            "positioning_opponent_context_tier_line",
+        ]
+        for key in required_keys:
+            assert key in captured, (
+                f"render_report data missing positioning key: {key}"
+            )
+
+        # Per-card SVGs: one entry per covered position. (Test fixture
+        # patches dedup/compute but leaves render_report's inputs as
+        # produced by the actual payload builder against seeded data.)
+        from src.reports.positioning import COVERED_POSITIONS
+        svgs = captured["positioning_card_svgs"]
+        assert isinstance(svgs, dict)
+        for position in COVERED_POSITIONS:
+            assert position in svgs, (
+                f"positioning_card_svgs missing position {position}"
+            )
+            assert svgs[position].startswith("<svg"), (
+                f"positioning_card_svgs[{position}] should be an SVG, "
+                f"got: {svgs[position][:60]!r}"
+            )
+
+        # Compass key must be a non-empty SVG.
+        assert captured["positioning_compass_key_svg"].startswith("<svg"), (
+            "positioning_compass_key_svg should be an inline SVG"
+        )
+
+        # Opponent-context stats: fixed 4-row order from `_build_opponent_context`.
+        stats = captured["positioning_opponent_context_stats"]
+        assert isinstance(stats, list)
+        labels = [s["label"] for s in stats]
+        assert labels == [
+            "Record",
+            "Runs / game",
+            "Runs allowed / game",
+            "Team BIPs",
+        ]
+
+        # Tier line should reference the "Full" tier given bip_count=60
+        # + is_low_confidence=0 in the fixture.
+        assert "Coverage tier:" in captured[
+            "positioning_opponent_context_tier_line"
+        ]
+        assert "Full" in captured[
+            "positioning_opponent_context_tier_line"
+        ]
+
+    # ------------------------------------------------------------------
+    # Test 2 -- smoke regression: full render pipeline against seeded
+    # data, asserting the rendered HTML contains real SVG markup at
+    # the 6 card slots AND the compass-key SVG AND the opponent-context
+    # stat rows. This is the test that would fail on the pre-fix code
+    # (the scouting report shipped empty SVGs and a blank context).
+    # ------------------------------------------------------------------
+    @patch("src.reports.generator.get_connection")
+    @patch("src.reports.generator.GameChangerClient")
+    @patch("src.reports.generator.ensure_team_row", return_value=1)
+    @patch("src.reports.generator._crawl_and_load_spray")
+    @patch("src.reports.generator._crawl_and_load_plays", return_value=[])
+    @patch(
+        "src.reports.generator.derive_season_id_for_team",
+        return_value=("2026-spring-hs", 2026),
+    )
+    def test_rendered_html_contains_positioning_svgs_and_context(
+        self, mock_derive, mock_plays, mock_spray, mock_ensure,
+        mock_client_cls, mock_get_conn, db_path, tmp_path,
+    ):
+        """Smoke regression: the rendered scouting report HTML must
+        contain (a) inline <svg> elements at each of the 6 card slots,
+        (b) the compass-key SVG's letters A-H, and (c) the four
+        opponent-context stat labels. This test would fail against the
+        pre-fix `generate_report` -- the SVG slots were empty and the
+        opponent-context body was blank.
+        """
+        conn = sqlite3.connect(str(db_path))
+        _seed_positioning_payload_inputs(conn)
+        # Add a few completed games so the opponent-context stats have
+        # numeric values to compute (Record / Runs per game). Two team
+        # IDs already seeded: opponent (1) + a member team (we insert
+        # one inline here).
+        conn.execute(
+            "INSERT INTO teams (id, name, membership_type) "
+            "VALUES (99, 'LSB Varsity', 'member')"
+        )
+        for idx, (home, away, hs, as_) in enumerate([
+            (1, 99, 8, 2),
+            (99, 1, 5, 6),
+            (1, 99, 7, 4),
+        ]):
+            conn.execute(
+                """
+                INSERT INTO games (
+                    game_id, season_id, home_team_id, away_team_id,
+                    home_score, away_score, game_date
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (f"g{idx}", "2026-spring-hs", home, away, hs, as_,
+                 f"2026-03-{idx + 1:02d}"),
+            )
+        conn.commit()
+        conn.close()
+
+        mock_get_conn.side_effect = self._fresh_conn_factory(db_path)
+        mock_crawler, mock_loader = self._mock_pipeline(mock_client_cls)
+
+        # Capture the rendered HTML by intercepting Path.write_text via
+        # the file-system write performed inside `generate_report`.
+        # Simpler: read the file from disk after the call completes.
+        with (
+            patch("src.reports.generator.ScoutingCrawler",
+                  return_value=mock_crawler),
+            patch("src.reports.generator.ScoutingLoader",
+                  return_value=mock_loader),
+            patch("src.reports.generator._REPO_ROOT", tmp_path),
+            patch("src.reports.generator._REPORTS_DIR",
+                  tmp_path / "data" / "reports"),
+            patch("src.reports.generator.dedup_team_players", return_value=0),
+            patch("src.reports.generator.compute_positioning", return_value=[]),
+            # Bundle render writes to disk; non-fatal failure is fine but
+            # we patch it to keep the test focused on the scouting
+            # report's render path (and to avoid weasyprint/PDF deps).
+            patch("src.reports.generator._write_positioning_bundle"),
+        ):
+            result = generate_report("abc123")
+
+        assert result.success is True
+        assert result.slug is not None
+
+        # Read the rendered scouting report file from disk.
+        report_path = tmp_path / "data" / "reports" / f"{result.slug}.html"
+        assert report_path.exists(), (
+            f"scouting report not written at {report_path}"
+        )
+        html = report_path.read_text(encoding="utf-8")
+
+        # ---- a) Inline <svg> bodies on the 6 position cards. The
+        # template wraps each field SVG in `<div class="positioning-card-svg-slot">`
+        # for cards 1-4 + 5-6, and emits `{{ card.svg | safe }}` inside.
+        # The compass-key slot uses `{{ positioning.compass_key_svg | safe }}`.
+        # Total expected <svg roots: 6 cards + 1 compass key = at least 7.
+        svg_open_count = html.count("<svg")
+        assert svg_open_count >= 7, (
+            f"expected >=7 <svg elements (6 cards + compass key), "
+            f"got {svg_open_count}"
+        )
+
+        # ---- b) Compass-key SVG body should contain letters A-H. Scope
+        # to the compass-key slot div so we don't accidentally match
+        # zone-letter cells elsewhere.
+        compass_start = html.find(
+            'class="positioning-card compass-key"',
+        )
+        assert compass_start > 0, "compass-key slot div not rendered"
+        compass_svg_start = html.find("<svg", compass_start)
+        compass_svg_end = html.find("</svg>", compass_svg_start) + len("</svg>")
+        compass_body = html[compass_svg_start:compass_svg_end]
+        for letter in "ABCDEFGH":
+            assert f">{letter}<" in compass_body, (
+                f"compass-key SVG missing letter {letter}"
+            )
+
+        # ---- c) Opponent-context stat labels (4 rows in fixed order).
+        for stat_label in (
+            "Record",
+            "Runs / game",
+            "Runs allowed / game",
+            "Team BIPs",
+        ):
+            assert stat_label in html, (
+                f"rendered HTML missing opponent-context stat: {stat_label}"
+            )
+
+        # ---- d) Coverage tier line.
+        assert "Coverage tier:" in html
+        assert "Full" in html
+
+    # ------------------------------------------------------------------
+    # Test 3 -- non-fatal payload failure must not break report
+    # generation. Confirms the wrapped try/except contract.
+    # ------------------------------------------------------------------
+    @patch("src.reports.generator.get_connection")
+    @patch("src.reports.generator.GameChangerClient")
+    @patch("src.reports.generator.ensure_team_row", return_value=1)
+    @patch("src.reports.generator.render_report", return_value="<html>ok</html>")
+    @patch("src.reports.generator._crawl_and_load_spray")
+    @patch("src.reports.generator._crawl_and_load_plays", return_value=[])
+    @patch(
+        "src.reports.generator.derive_season_id_for_team",
+        return_value=("2026-spring-hs", 2026),
+    )
+    def test_payload_failure_is_non_fatal(
+        self, mock_derive, mock_plays, mock_spray, mock_render, mock_ensure,
+        mock_client_cls, mock_get_conn, db_path, tmp_path, caplog,
+    ):
+        """If the positioning payload helper raises, the report still
+        succeeds with empty positioning slots (matching prior degraded
+        behavior). A WARNING is logged so the failure isn't silent.
+        """
+        import logging
+
+        conn = sqlite3.connect(str(db_path))
+        _seed_minimal_pipeline_inputs(conn)
+        conn.close()
+
+        mock_get_conn.side_effect = self._fresh_conn_factory(db_path)
+        mock_crawler, mock_loader = self._mock_pipeline(mock_client_cls)
+
+        caplog.set_level(logging.WARNING, logger="src.reports.generator")
+
+        with (
+            patch("src.reports.generator.ScoutingCrawler",
+                  return_value=mock_crawler),
+            patch("src.reports.generator.ScoutingLoader",
+                  return_value=mock_loader),
+            patch("src.reports.generator._REPO_ROOT", tmp_path),
+            patch("src.reports.generator._REPORTS_DIR",
+                  tmp_path / "data" / "reports"),
+            patch("src.reports.generator.dedup_team_players", return_value=0),
+            patch("src.reports.generator.compute_positioning", return_value=[]),
+            patch(
+                "src.reports.generator._build_scouting_report_positioning_payload",
+                side_effect=RuntimeError("synthetic payload failure"),
+            ),
+        ):
+            result = generate_report("abc123")
+
+        assert result.success is True
+        warnings = [
+            rec for rec in caplog.records
+            if rec.levelno == logging.WARNING
+            and "Positioning payload build failed" in rec.getMessage()
+        ]
+        assert warnings, (
+            "expected WARNING log for non-fatal payload failure"
+        )
+
+
