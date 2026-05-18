@@ -1166,6 +1166,117 @@ class TestOpponentContextPayload:
         assert "1 games" not in ctx["opponent_context_coverage_line"]
 
 
+class TestBundleRowFactoryRegression:
+    """Regression coverage for the dev-validation row_factory bug.
+
+    Production callers open the sqlite3 connection via
+    ``src.api.db.get_connection()``, which leaves ``row_factory`` at the
+    default (tuple) shape. This module and its siblings call
+    ``dict(r)`` on query results, which only works when ``row_factory``
+    is ``sqlite3.Row``. Before remediation, the bundle render failed
+    non-fatally in production with::
+
+        ValueError: dictionary update sequence element #0 has length 36;
+        2 is required
+
+    All test fixtures in this file set ``conn.row_factory =
+    sqlite3.Row`` explicitly, so the bug never surfaced in CI. This
+    test reproduces the production shape by NOT setting row_factory and
+    asserts the bundle still renders successfully -- the fix sets
+    row_factory locally at the bundle entry point so the change
+    propagates to all sibling render helpers via the shared conn.
+    """
+
+    def test_renders_with_default_tuple_row_factory(self, tmp_path):
+        # Open a brand-new connection WITHOUT setting row_factory --
+        # matches production's ``get_connection()`` shape exactly.
+        path = tmp_path / "regression.db"
+        c = sqlite3.connect(str(path))
+        # Intentionally do NOT set c.row_factory -- this is the bug
+        # repro shape. assert at runtime to make the test contract
+        # explicit.
+        assert c.row_factory is None or c.row_factory is not sqlite3.Row, (
+            "regression test requires the production row_factory shape "
+            "(default tuple, not sqlite3.Row)"
+        )
+        load_real_schema(c)
+        c.execute(
+            "INSERT INTO teams (id, name, public_id, season_year, "
+            "membership_type) VALUES (1, 'Opp Bears', 'opp-bears', 2026, "
+            "'tracked')"
+        )
+        c.execute(
+            "INSERT INTO teams (id, name, membership_type) "
+            "VALUES (99, 'LSB Varsity', 'member')"
+        )
+        c.execute(
+            "INSERT INTO seasons (season_id, name, season_type, year) "
+            "VALUES ('2026-spring-hs', '2026', 'spring-hs', 2026)"
+        )
+        # Minimal opponent: aggregates + one flagged batter so the LLM-
+        # rationale path (which contains the failing ``dict(r)`` site)
+        # is exercised. Use the same shape as ``_seed_full_opponent``.
+        for p in COVERED_POSITIONS:
+            c.execute(
+                """
+                INSERT INTO team_position_aggregate (
+                    team_id, season_id, perspective_team_id, position,
+                    star_x, star_y, bip_count, is_low_confidence
+                ) VALUES (1, '2026-spring-hs', 1, ?, 160.0, 200.0, 60, 0)
+                """,
+                (p,),
+            )
+        c.execute(
+            "INSERT OR IGNORE INTO players (player_id, first_name, "
+            "last_name) VALUES ('p1', 'Hank', 'Ramirez')"
+        )
+        c.execute(
+            "INSERT OR IGNORE INTO team_rosters "
+            "(team_id, player_id, season_id, jersey_number) "
+            "VALUES (1, 'p1', '2026-spring-hs', '7')"
+        )
+        # One flagged position (zone_id IS NOT NULL, is_thin = 0) so
+        # _query_flagged_batters_with_aggregate returns a row -- this
+        # is the function whose ``dict(r)`` site raised in production.
+        c.execute(
+            """
+            INSERT INTO batter_positioning (
+                player_id, team_id, season_id, perspective_team_id,
+                position, direction_deviation, depth_deviation, zone_id,
+                is_thin, bip_count, hr_count
+            ) VALUES ('p1', 1, '2026-spring-hs', 1, 'LF',
+                      -1, -1, 'A', 0, 20, 0)
+            """
+        )
+        for p in ("CF", "RF", "3B", "SS", "2B"):
+            c.execute(
+                """
+                INSERT INTO batter_positioning (
+                    player_id, team_id, season_id, perspective_team_id,
+                    position, direction_deviation, depth_deviation,
+                    zone_id, is_thin, bip_count, hr_count
+                ) VALUES ('p1', 1, '2026-spring-hs', 1, ?,
+                          0, 0, NULL, 0, 20, 0)
+                """,
+                (p,),
+            )
+        c.commit()
+
+        # The regression assertion: the bundle MUST render without
+        # raising ValueError. Before the fix this raised at
+        # positioning_bundle.py:139 with "dictionary update sequence
+        # element #0 has length 36; 2 is required".
+        html = generate_positioning_bundle(
+            c, "opp-bears", _SEASON,
+            opponent_name="Opp Bears",
+            through_date="Apr 12", game_count=12,
+        )
+        assert isinstance(html, str) and len(html) > 0
+        assert html.startswith("<!DOCTYPE html>")
+        assert "positioning-call-sheet" in html
+        c.close()
+
+
 class TestBundleThreadsCompassKeyAndOpponentContext:
     """F2 (c): the rendered bundle HTML includes the compass-key SVG
     body content AND the 4 opponent-context stat rows."""

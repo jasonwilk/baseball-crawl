@@ -678,6 +678,21 @@ def generate_positioning_bundle(
     Raises:
         ValueError: if no team is found for ``public_id``.
     """
+    # Production callers open the connection via
+    # ``src.api.db.get_connection()``, which does NOT set a row_factory
+    # -- rows come back as plain tuples. This module and its siblings
+    # (``positioning_card``, ``positioning_prep``) call ``dict(r)`` on
+    # query results, which requires ``sqlite3.Row``. Tests already set
+    # ``conn.row_factory = sqlite3.Row`` via fixtures; production did
+    # not, which raised ``ValueError: dictionary update sequence element
+    # #0 has length N; 2 is required`` during bundle render. Setting
+    # row_factory here propagates to all sibling render helpers because
+    # they share the same ``conn`` -- the bundle is their sole entry
+    # point. Scope is intentionally local to avoid the wider blast
+    # radius of changing ``get_connection()`` (other callers index by
+    # position, e.g., ``row[0]``).
+    conn.row_factory = sqlite3.Row
+
     # Resolve team_id once at the top so we can fail fast on bad
     # public_id and share the resolution with the LLM-rationale query.
     team_id = _query_team_id_from_public_id(conn, public_id)
