@@ -45,6 +45,9 @@ IMPORTANT -- This is the governing design principle for the entire project.
   - Implementers do NOT update story statuses or epic tables -- PM owns that
   - PM verifies acceptance criteria before marking DONE, cascades to unblocked stories
   - Encoded in: `dispatch-pattern.md` (rule), `product-manager.md` (Dispatch Mode), `CLAUDE.md` (Workflow Contract #5)
+- Vocabulary Ownership Split convention (E-228 TN-5): when stored enum keys map to user-facing display words, engine module owns the keys, render-layer module owns a display-word dict. Engine MUST NOT carry display words. Codified in `.claude/rules/architecture-subsystems.md` ("Vocabulary Ownership Split" section). Example: positioning `call_state` (engine) vs. `POSITIONING_CALL_WORDS` dict (renderer).
+- Delete-Then-Insert Scope rule (E-228 Phase 4b finding): materialization steps that recompute rows for a logical scope MUST scope the DELETE to the recompute scope, not to sub-partitions present in the current run. No early-return on empty input. Codified in `.claude/rules/architecture-subsystems.md` ("Delete-Then-Insert Scope" section). Origin: positioning engine's per-perspective DELETE left stale rows when a perspective dropped out between runs.
+- Scouting pipeline grew from 5 stages to 7 (E-228-06): added Tier 1 positioning recompute + report bundle auto-generation. Stage count appears in `CLAUDE.md` (Commands `bb data scout` line + Architecture "Scouting pipeline parity" line) and `.claude/rules/architecture-subsystems.md` (Scouting Pipeline section + Background Pipeline Trigger section). If stages are added/removed, update all four locations in lock-step.
 
 ## User Preferences (Jason)
 - "Simple first" is a guiding principle for FUTURE decisions, not a deletion tool
@@ -54,6 +57,17 @@ IMPORTANT -- This is the governing design principle for the entire project.
 
 ## Pending Context-Layer Updates
 - `review-cycle-reordering.md` -- Internal reviews (CR + team) before Codex in plan and implement skills; review scorecard pattern for epic History. Approved 2026-03-22, awaiting epic.
+
+## E-229 Closure Codifications (2026-05-18)
+- Render-Time Snapshot pattern (T1+T2+T3): bundle generators MUST persist render-time inputs to a sidecar at generation time; serving layer reads sidecar, never live recompute. Concrete: `bundle_snapshot.json` in `data/reports/{slug}/`, read by `src/api/routes/dashboard.py::_load_bundle_snapshot`. Origin: E-228 Phase 4b coverage-cue degradation; E-229-08 closed it. Codified in `.claude/rules/architecture-subsystems.md` "Render-Time Snapshot Pattern" section.
+- Atomic Dual-Table Write invariant (T2): `src/reports/positioning.py::compute_positioning()` is sole writer for `team_position_aggregate` + `batter_positioning`; single SQLite transaction; engine self-commits; callers MUST NOT wrap in outer transaction. Codified in `.claude/rules/architecture-subsystems.md` "Defensive Positioning Engine" section.
+- LLM Render-Time Threading (T2): Tier 2 LLM rationale is render-time-only — bundle assembler calls `generate_rationale()`, threads into template context; NO DB column, NO audit trail in v1; LLM failure returns None gracefully. Codified in `.claude/rules/architecture-subsystems.md` "Tier 2 LLM Render-Time Threading" section.
+- Prefer-Then-Fallback canonical pattern (T1): `ORDER BY CASE WHEN perspective_team_id = ? THEN 0 ELSE 1 END LIMIT 1` is canonical for read-side perspective choice; chosen value MUST thread through downstream queries in same render pass. Anti-pattern: hard-filter `perspective_team_id = team_id` (F3 bug). Sibling sites: `positioning_card.py`, `positioning_call_sheet.py`, `positioning_prep.py`, `positioning_bundle.py::_choose_perspective_team_id`. Codified in `.claude/rules/perspective-provenance.md` "Prefer-Then-Fallback" section.
+- Slot-Fill Content Assertions (T1+T3): multi-slot rendered artifacts (4-page bundles, dashboards with cards, PDFs with header/body/sidebar zones) MUST have body-content assertions, not just header-presence assertions. F2 escape root cause: bundle tests asserted slot HEADERS but never slot BODIES. Codified in `.claude/rules/testing.md` "Slot-Fill Content Assertions" section.
+- New scoped rule `.claude/rules/positioning-vocabulary.md` (T5): 8-zone compass vocab + sign table, SVG coord convention (y=0 at deep CF — inverted from screen coords), field-anchored coord rescaling formula, coverage tier semantics (15/50 BIP boundaries), in-vs-deep axis lock, E-228-retired vocabulary inventory. Scoped to positioning files only (loads when an agent opens positioning code). Render-layout numeric constants remain canonical in `.project/research/E-229-locked-layout-constants.md` v1.2; the rule covers the vocab + coord + tier semantics that need to be in head before opening any positioning file.
+- baseball-coach memory `positioning-domain.md` topic file (T5): coaching-facing knowledge for the defensive positioning bundle (3-artifact structure, compass meaning, coverage tiers, LLM rationale audience split, what was retired from E-228). Indexed from baseball-coach MEMORY.md.
+- T4 (agent behavior/routing): NO — no agent ecosystem changes.
+- T6 (new CLI command / workflow): NO — `bb data scout` stage 7 (report bundle auto-generation) was added in E-228 Phase 4b; E-229 only modified what gets rendered, not the pipeline shape. No workflow skill changes.
 
 ## Topic File Index
 - `claude-practices.md` -- CLAUDE.md design, context management

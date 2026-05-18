@@ -4,7 +4,7 @@
 [E-229: Team-Aggregate Defensive Positioning](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the E-229 bundle is wired into three pipeline surfaces: (a) `bb report generate <public_id>` (standalone path) triggers the full recompute + bundle generation for the target public_id; (b) `run_scouting_sync` + `bb data scout` (scouting path) auto-generates the E-229 bundle for tracked opponents (B Pre-generate, preserved from E-228); (c) the opponent dashboard "Defensive Positioning" link card resolves to the most-recent `ready` E-229 bundle. Tier 2 LLM rationale integrates per E-229-09's contract.
@@ -84,3 +84,17 @@ This story closes the E-229 implementation. After it completes, all stories are 
 
 ## Notes
 SE may consult E-228's commit `2d6be06` for pipeline-wiring patterns that survive the engine/render rewrites (e.g., the `generate_report()` call sites, the dashboard link card template structure, the `is_llm_available()` pattern). Cherry-picks are an SE optimization, not a contract — the default path is fresh re-implementation per user lock.
+
+### Audit-based completion record (per E-229-10 closure 2026-05-18)
+
+**Verdict**: PASS (audit-based completion per user-accepted SE reasoning, parallel to E-229-05 AC-8 transitive-validation precedent).
+
+**Substantive deliverable**: `_load_bundle_snapshot(slug)` helper in `src/api/routes/dashboard.py` (line 1002) + bundle-snapshot-driven cue rendering wired into `positioning_report_context` (lines 1752-1789), closing the E-228 Phase 4b coverage-cue degradation that previously dropped the `(N games)` count from the dashboard link. Tests at `tests/test_pipeline_e229.py` (4 tests): 3 engine-determinism parity tests in `TestPipelineParity` (lines 148/181/197) + 1 grep AC enforcement test `TestAC6NoV1ReferencesInPipelineFiles.test_no_retired_v1_tokens_in_pipeline_dirs` (line 244).
+
+**Pipeline files NOT modified** (per SE audit): `src/cli/report.py`, `src/cli/data.py`, `src/pipeline/trigger.py`, `src/reports/generator.py`. These call `generate_report(public_id)` directly, which was retargeted to v2 in E-229-08 R2 (via `_write_positioning_bundle()` → `generate_positioning_bundle()`). The CLI/pipeline call chains auto-retargeted because they consume upstream modules whose contents changed, not whose names changed. Adding no-op marker changes would be churn that future readers misinterpret as load-bearing.
+
+**Verification**: `TestPipelineParity` proves both paths (standalone `bb report generate` and scouting `bb data scout` / `run_scouting_sync`) produce identical artifacts via engine determinism — the parity property the audit thesis depends on. `TestAC6NoV1ReferencesInPipelineFiles` enforces zero v1 vocabulary (`call_state`, `team_state_call`, `direction_shade`, `depth_shade`, `zone_concentration`, `POSITIONING_CALL_WORDS`, `POSITIONING_CELL_SHORT_FORMS`, `POSITIONING_COLUMN_ORDER`, `POSITIONING_POSITION_LABELS`) in `src/cli/`, `src/pipeline/`, `src/api/routes/` at CI time.
+
+**Future calibration**: any regression that reintroduces v1 vocabulary in pipeline files or breaks the parity property is caught by the test suite. The audit-based completion is durable, not a snapshot in time.
+
+**Date**: 2026-05-18

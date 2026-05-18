@@ -72,6 +72,21 @@ def test_scout_command_surfaces_loader_failure(tmp_path, monkeypatch):
 
 Mock the fallible dependency to raise or return a failure indicator. Assert the caller's exit code and output reflect the failure.
 
+## Slot-Fill Content Assertions
+
+Any multi-slot rendered artifact (a 4-page bundle with named card slots, a dashboard composed of distinct cards, a PDF with header / body / sidebar zones, a report with multiple stat boxes) MUST be tested with **content-level** assertions, not just **label-presence** assertions. Asserting that the slot HEADER renders (`assert "Compass Key" in html`) without asserting the slot BODY renders (`assert "<svg" in compass_key_html and "A" in compass_key_html and "H" in compass_key_html`) lets empty-slot regressions ship unnoticed.
+
+**Origin**: E-229 pre-closure F2. The bundle assembler was missing the wiring that threaded the per-slot inputs (compass-key SVG, opponent-context payload) into the renderer call. Bundle tests asserted that slot HEADER strings ("Compass Key", "Opponent context") were present in the HTML, never asserted that any slot BODY content rendered. The bundle shipped with two empty slots and was caught only by the chained codex review.
+
+**How to apply**:
+- For every named slot in the artifact, write at least one assertion that targets a SPECIFIC piece of body content unique to that slot: a computed numeric value, an SVG path token, a roster name, a tier classification string, a coverage cue substring.
+- For SVG slots: assert at least one structural marker (`"<svg"`) AND at least one content marker (a letter, label, or computed coordinate that would only appear if the slot's data was threaded through).
+- For stat slots / tables: assert exact computed values, not just the presence of the row's label.
+- For tier-classified content (full / thin / zero), assert each tier's branch produces its tier-specific copy, not just that *some* tier copy renders.
+- Header-presence assertions remain useful as fast-fail tripwires — but they MUST be paired with body-content assertions for every slot they cover.
+
+**Scope**: applies to any test under `tests/` that exercises a rendered artifact composed of named slots. The strongest realization is bundle tests for `src/reports/positioning_bundle.py`, but the principle generalizes to dashboard route tests, report-generator tests, and any future rendered surface.
+
 ## Test-Validates-Spec
 
 When writing tests that mock external data (API responses, database query results, file contents), verify the mock data matches the **authoritative spec** -- not the implementation under test. Sources of truth:

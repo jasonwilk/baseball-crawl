@@ -103,3 +103,33 @@ When a materialization step recomputes rows for a logical scope, the DELETE clau
 **Why**: The bug only surfaces when a sub-partition drops out between runs -- a low-frequency event in normal operation but a real correctness gap that violates the delete-then-insert contract. Per-sub-partition DELETE narrowing (deriving the DELETE WHERE from the current run's keys) is non-obvious because the happy path (sub-partitions stable across runs) looks correct in code review and in tests that don't exercise sub-partition drop-out.
 
 **Origin**: E-228 Phase 4b Codex finding #1. The positioning engine's per-perspective DELETE left stale rows when a perspective dropped out between runs. Fix: widen the DELETE to the `(team_id, season_id)` recompute scope and remove the empty-input early return.
+
+## Render-Time Snapshot Pattern
+
+When a rendered artifact represents a point-in-time view (a coach's printed report, a generated PDF, any bundle that ships to a fielder's pocket), the inputs that shaped the render MUST be persisted at generation time. View-time recomputation from live data drifts as the underlying tables move on — the rendered HTML or PDF then carries a header/cue/badge that contradicts its own body.
+
+**Pattern**: write a sidecar file alongside the rendered artifact containing the exact render-time inputs. The dashboard / serving layer reads from the sidecar, not from a live recompute, when displaying any "what this report shows" metadata next to the link.
+
+**Concrete realization (E-229-08)**: every defensive positioning bundle writes `data/reports/{slug}/bundle_snapshot.json` carrying `through_date`, `game_count`, and any other render-time inputs. The dashboard's link-card cue uses `src/api/routes/dashboard.py::_load_bundle_snapshot(slug)` to read those inputs back; it does NOT requery `games` to recompute the count. Bundles generated before snapshots existed (E-228-era) return `None` from the loader and the cue degrades gracefully — never crashes the dashboard.
+
+**Why**: E-228 Phase 4b post-dev review found that the report's coverage cue mirrored live coverage instead of the displayed report's coverage. Mid-remediation degraded the format (count dropped, date format simplified). E-229 restored full fidelity by snapshotting render-time inputs at generation time. The principle generalizes to any future artifact that ships to print or PDF — assume the underlying tables WILL move between generation and view, and persist what the render saw.
+
+**How to apply**: any new bundle / report / standalone-artifact generator that uses live data to compute display metadata (coverage cues, badges, counts, "as of" lines) MUST persist those inputs to a sidecar at generation time. The serving layer reads the sidecar; recompute-from-live is the regression.
+
+## Defensive Positioning Engine (Atomic Dual-Table Write)
+
+`src/reports/positioning.py::compute_positioning()` is the SOLE writer for both `team_position_aggregate` (6 rows per opponent — LF/CF/RF/3B/SS/2B) and `batter_positioning` (one row per outlier candidate). The two tables MUST emerge consistent or neither updates — a partial state where the aggregate refreshes but per-batter rows do not (or vice versa) breaks the render invariant that outlier markers are measured against the current star.
+
+**Pattern**: DELETE-then-INSERT at the `(team_id, season_id)` recompute scope (per the Delete-Then-Insert Scope rule above) wrapped in a single SQLite transaction. The engine self-commits; callers MUST NOT wrap in an outer transaction. Same shape as E-228's engine self-commit invariant.
+
+**Why**: this is a single-writer-per-data-product invariant. The render layer (`positioning_card.py`, `positioning_call_sheet.py`, `positioning_prep.py`, `positioning_bundle.py`) and the Tier 2 LLM (`positioning_llm.py`) READ from these tables; they never recompute centroids or store deviations from a different baseline. Any future writer to `team_position_aggregate` or `batter_positioning` is a violation of single-source provenance — extend `compute_positioning()` instead, or add a new column with a clear ownership comment.
+
+## Tier 2 LLM Render-Time Threading (No DB Persistence)
+
+The Tier 2 positioning LLM rationale is **render-time-only**: `src/reports/positioning_llm.py::generate_rationale()` is invoked from the bundle assembler at render time, and its output is threaded directly into the Jinja template context. There is NO `rationale` column on `batter_positioning`; there is NO save-to-DB path; there is NO audit trail in v1.
+
+**Pattern**: bundle assembler iterates flagged batters, calls `generate_rationale()` per batter, builds a `{player_id: rationale_string}` dict, and passes the dict into the template context. LLM unavailable, network failure, or validation rejection → `generate_rationale()` returns `None` → bundle renders without the rationale line for that batter. Never a crashed bundle.
+
+**Why**: bundles are regeneratable on demand. The render-time threading shape avoids retrofitting a column into the migration when the audit-trail need has never been articulated. If audit-trail or rationale-caching becomes a real need later, that is a future epic — do NOT cache rationale on `batter_positioning` to "save" an LLM call in the meantime.
+
+**Where the principle reaches**: the same shape applies to any future Tier 2 enrichment that does NOT need to drive query/aggregation behavior. If the LLM output only ever feeds a render template, it lives in render-pass memory. The Two-Tier Enrichment Pattern above (deterministic first, LLM optional) names the architectural envelope; the render-time threading constraint pins down where the LLM output may NOT travel.

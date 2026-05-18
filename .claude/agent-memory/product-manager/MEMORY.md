@@ -2,7 +2,7 @@
 
 ## Numbering State
 - Next available epic number: E-230
-- Next available idea number: IDEA-078 (IDEA-076 + IDEA-077 both taken: IDEA-076 Coverage-Cue Full-Fidelity Restoration; IDEA-077 Season-Modal Batting Order from Boxscore Backfill, captured during E-229 Phase 3 iteration 1)
+- Next available idea number: IDEA-080 (IDEA-078 Extract Per-Team Scouting Query Helpers to `src/api/db.py` + IDEA-079 Narrow `_build_opponent_context` Exception Handler, both captured 2026-05-18 from E-229 codex pre-closure review non-blocking CR notes)
 - Before assigning numbers: ALWAYS `ls /epics/` and `ls /.project/ideas/` to avoid collisions
 - Next migration number: 002 (E-220 consolidated old 001-015 into 001_initial_schema.sql; archived in .project/archive/migrations-pre-E220/; only 001 exists in migrations/). Confirm against .claude/rules/migrations.md.
 

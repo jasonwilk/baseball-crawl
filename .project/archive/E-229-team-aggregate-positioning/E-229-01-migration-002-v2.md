@@ -4,7 +4,7 @@
 [E-229: Team-Aggregate Defensive Positioning](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, `migrations/002_batter_positioning.sql` will be rewritten end-to-end to the E-229 v2 schema: the `batter_positioning` table drops E-228's categorical columns and adds `zone_id` + confidence flags, and a new `team_position_aggregate` table is added with the four-tuple PK that DE locked. Both tables carry proper FK `REFERENCES` clauses, correct column types matching the live schema in `001_initial_schema.sql`, and idempotent DDL per `.claude/rules/migrations.md`. The conftest fixture builders no longer reference any retired columns. A fresh-db migration test verifies the v2 schema lands cleanly.

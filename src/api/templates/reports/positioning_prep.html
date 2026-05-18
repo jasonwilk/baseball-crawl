@@ -1,0 +1,241 @@
+{# ============================================================
+   E-229-06: Coach prep page (partial)
+
+   Renders the pre-game prep page inside the report bundle:
+   a single letter-landscape page with all 6 position stars +
+   all outlier batter pills overlaid on one full-field SVG,
+   with a faint spray-density background and a complete
+   jersey x position lookup sidebar.
+
+   Distinct from:
+     - the in-game call sheet (E-229-07; landscape, name-sorted)
+     - the per-position pocket cards (E-229-05; portrait, quarter-letter)
+
+   Context provided by `render_prep_page_context()` in
+   src/reports/positioning_prep.py.
+   ============================================================ #}
+
+<style>
+  /* Named print page for letter landscape (artifact + AC-6). */
+  @page prep-page {
+    size: letter landscape;
+    margin: 0.25in;
+  }
+
+  .positioning-prep-page {
+    page: prep-page;
+    break-inside: avoid;
+    page-break-after: always;
+    font-family: Arial, Helvetica, sans-serif;
+    color: #000;
+  }
+
+  .positioning-prep-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    border-bottom: 0.5pt solid #b3b3b3;
+    padding-bottom: 4pt;
+    margin-bottom: 8pt;
+  }
+  .positioning-prep-header .opponent-name {
+    font-size: 13pt;
+    font-weight: bold;
+  }
+  .positioning-prep-header .coverage-cue {
+    font-size: 9pt;
+    color: #4d4d4d;
+  }
+
+  .positioning-prep-body {
+    display: grid;
+    grid-template-columns: 1fr 2.6in;
+    gap: 0.2in;
+    align-items: start;
+  }
+
+  .positioning-prep-field {
+    width: 100%;
+    max-height: 6.5in;
+  }
+  .positioning-prep-field svg {
+    width: 100%;
+    height: auto;
+  }
+
+  .positioning-prep-sidebar {
+    font-size: 8.5pt;
+  }
+  .positioning-prep-sidebar table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+  .positioning-prep-sidebar thead th {
+    font-size: 7pt;
+    font-weight: bold;
+    text-transform: uppercase;
+    color: #4d4d4d;
+    letter-spacing: 0.04em;
+    border-bottom: 0.5pt solid #b3b3b3;
+    padding: 2pt 3pt;
+    text-align: left;
+    background: transparent;
+  }
+  .positioning-prep-sidebar thead th.pos-col {
+    text-align: center;
+    width: 0.30in;
+  }
+  .positioning-prep-sidebar thead th.jersey-col {
+    width: 0.34in;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+  }
+  .positioning-prep-sidebar thead th.name-col {
+    width: 0.95in;
+  }
+  .positioning-prep-sidebar tbody td {
+    padding: 1.5pt 3pt;
+    vertical-align: middle;
+  }
+  .positioning-prep-sidebar tbody td.jersey-cell {
+    font-weight: bold;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+  .positioning-prep-sidebar tbody td.zone-cell {
+    text-align: center;
+    font-weight: bold;
+    font-variant-numeric: tabular-nums;
+  }
+  .positioning-prep-sidebar tbody td.zone-cell.default {
+    color: #b3b3b3;
+    font-weight: normal;
+  }
+  .positioning-prep-sidebar tbody tr.partition-divider td {
+    border-top: 0.5pt solid #b3b3b3;
+    padding: 0;
+    line-height: 0;
+    font-size: 0;
+  }
+  .positioning-prep-sidebar tbody tr.rationale-row td {
+    padding-top: 0;
+    padding-bottom: 4pt;
+    font-style: italic;
+    font-size: 8pt;
+    color: #808080;
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    line-clamp: 2;
+  }
+
+  .positioning-prep-empty {
+    text-align: center;
+    margin-top: 1in;
+    padding: 0.4in;
+  }
+  .positioning-prep-empty .empty-headline {
+    font-size: 16pt;
+    font-weight: bold;
+  }
+  .positioning-prep-empty .empty-sub {
+    font-size: 11pt;
+    color: #4d4d4d;
+    margin-top: 4pt;
+  }
+
+  .positioning-prep-banner {
+    margin-top: 6pt;
+    padding: 6pt 8pt;
+    font-size: 9pt;
+    font-style: italic;
+    color: #4d4d4d;
+    border: 0.5pt dashed #b3b3b3;
+    text-align: center;
+  }
+
+  .positioning-prep-legend {
+    margin-top: 6pt;
+    font-size: 8pt;
+    color: #4d4d4d;
+    text-align: center;
+  }
+</style>
+
+<section class="positioning-prep-page">
+
+  <header class="positioning-prep-header">
+    <span class="opponent-name">{{ positioning_prep.header.opponent_name | e }}</span>
+    <span class="coverage-cue">{{ positioning_prep.header.coverage_cue | e }}</span>
+  </header>
+
+  {% if positioning_prep.state == 'zero_coverage' %}
+    <div class="positioning-prep-empty">
+      {# The SVG carries the centered message text per E-229-06 AC-7. #}
+      {{ positioning_prep.zero_coverage_svg | safe }}
+    </div>
+  {% else %}
+    <div class="positioning-prep-body">
+
+      <div class="positioning-prep-field">
+        {{ positioning_prep.svg | safe }}
+      </div>
+
+      <div class="positioning-prep-sidebar">
+        {% if positioning_prep.no_outliers_banner %}
+          <div class="positioning-prep-banner">
+            {{ positioning_prep.no_outliers_banner }}
+          </div>
+        {% else %}
+          <table>
+            <thead>
+              <tr>
+                <th class="jersey-col">#</th>
+                <th class="name-col">Name</th>
+                <th class="pos-col">LF</th>
+                <th class="pos-col">CF</th>
+                <th class="pos-col">RF</th>
+                <th class="pos-col">3B</th>
+                <th class="pos-col">SS</th>
+                <th class="pos-col">2B</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in positioning_prep.sidebar_rows %}
+                {% if loop.index0 == positioning_prep.partition_divider_index %}
+                  <tr class="partition-divider"><td colspan="8">&nbsp;</td></tr>
+                {% endif %}
+                <tr>
+                  <td class="jersey-cell">
+                    {%- if row.jersey_number -%}
+                      #{{ row.jersey_number | e }}
+                    {%- else -%}
+                      &mdash;
+                    {%- endif -%}
+                  </td>
+                  <td class="name-cell">{{ row.last_name | e }}</td>
+                  {% for cell in row.cells %}
+                    <td class="zone-cell{% if cell.zone_letter == '·' %} default{% endif %}">{{ cell.zone_letter }}</td>
+                  {% endfor %}
+                </tr>
+                {% if row.rationale %}
+                  <tr class="rationale-row">
+                    <td></td>
+                    <td colspan="7">{{ row.rationale | e }}</td>
+                  </tr>
+                {% endif %}
+              {% endfor %}
+            </tbody>
+          </table>
+        {% endif %}
+      </div>
+
+    </div>
+
+    <div class="positioning-prep-legend">
+      {{ positioning_prep.compass_legend | e }}
+    </div>
+  {% endif %}
+
+</section>

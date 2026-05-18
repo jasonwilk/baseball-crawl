@@ -1,324 +1,477 @@
 {# ============================================================
-   E-228-05: Defensive Positioning Cards section (partial)
+   E-229-05: Defensive Positioning Cards section (partial)
 
-   Renders the two positioning artifacts inside the report bundle:
-   - the landscape call sheet (one row per opposing batter), AND
-   - the 2x3 portrait player cards (one card per covered position).
+   Renders the player cards portion of the report bundle:
+   8 quarter-letter cards laid out 4-up across 2 letter-portrait
+   pages. Sheet 1 holds LF/CF/RF/3B; sheet 2 holds SS/2B in
+   slots 1-2, the visual compass key in slot 3, and the
+   opponent context card in slot 4.
 
-   Included from src/api/templates/reports/scouting_report.html via
-   {% include "reports/positioning_cards.html" %} -- this partial is
-   self-contained (CSS is inlined here) so the parent template doesn't
-   need to know about positioning-specific styles.
+   Distinct from:
+     - the in-game call sheet (E-229-07; landscape, separate
+       partial; this template owns ONLY the player cards)
+     - the prep page (E-229-06; landscape, single page;
+       separate partial)
 
    Context provided by `_build_positioning_context()` in renderer.py:
        positioning = {
            has_data: bool,
-           batters: [ ... ],
-           cards: [ ... ],
+           cards: [
+               {
+                   position_key: str,
+                   position_label: str,
+                   svg: str,                # rendered per-position SVG
+                   sidebar_rows: [ ... ],   # outlier batter rows
+                   truncated_count: int,
+                   state: "full" | "thin" | "no_outliers" | "zero_coverage",
+               },
+               ...
+           ],
            column_order: ["LF","CF","RF","3B","SS","2B"],
            empty_state_text: str,
-           no_exceptions_text: str,
+           no_outliers_text: str,
+           zero_coverage_text: str,
        }
+
+   Per-position SVGs are supplied by E-229-08's bundle assembler via
+   `data["positioning_card_svgs"]` (a dict mapping position -> SVG
+   string from `src.reports.positioning_card.render_field_svg`).
+   When SVGs are absent (e.g. unit tests of the template's
+   structural shape), the field slot renders empty -- the
+   template's structural assertions still hold.
    ============================================================ #}
 
 <style>
-  /* ---- Named pages for mixed orientation (epic TN-7 print-CSS) ---- */
-  @page call-sheet {
-    size: landscape;
-    margin: 0.4in;
-  }
+  /* ---- Named print page (artifact §A + epic TN-12) ----
+     Per locked-constants artifact §A "Print page margin: 0 in (all four
+     sides)" the printable area MUST equal the full 8.5"×11" letter
+     sheet. With any positive margin the 2×2 grid (4.25"×5.5" cards =
+     8.5"×11" total) overflows the printable box and browsers clip the
+     right + bottom edges -- triaged as F1 during pre-closure codex
+     review. The verified-against-coach prototype also uses `margin: 0`. */
   @page positioning-cards {
-    size: portrait;
-    margin: 0.3in;
+    size: letter portrait;
+    margin: 0;
   }
 
-  /* ---- Call sheet ---- */
-  .positioning-call-sheet {
-    margin-top: 12px;
-  }
-  .positioning-call-sheet h2.section-header {
-    margin-bottom: 6px;
-  }
-  .positioning-call-sheet-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 9pt;
-    margin-bottom: 8px;
-  }
-  .positioning-call-sheet-table thead th {
-    font-size: 8pt;
-    font-weight: bold;
-    text-transform: uppercase;
-    color: #fff;
-    background: #1e3a5f;
-    border-bottom: 2px solid #111;
-    padding: 4px 5px;
-    text-align: center;
-    white-space: nowrap;
-  }
-  .positioning-call-sheet-table thead th.pos-col-left {
-    text-align: left;
-  }
-  .positioning-call-sheet-table tbody td {
-    padding: 5px 5px;
-    border-bottom: 1px solid #e5e7eb;
-    text-align: center;
-    vertical-align: middle;
-  }
-  .positioning-call-sheet-table tbody td.pos-col-jersey {
-    font-weight: bold;
-  }
-  .positioning-call-sheet-table tbody td.pos-col-name {
-    text-align: left;
-    font-weight: 500;
-    white-space: nowrap;
-  }
-  .positioning-call-sheet-table tbody td.pos-col-name.pos-name-unresolved {
-    color: #6b7280;
-    font-style: italic;
-    font-weight: 400;
-  }
-  .positioning-call-sheet-table tbody td.pos-col-call {
-    text-align: left;
-    font-weight: bold;
-    white-space: nowrap;
-  }
-  .positioning-call-sheet-table tbody td.pos-col-conf {
-    text-align: left;
-    font-size: 8.5pt;
-    color: #374151;
-    white-space: nowrap;
-  }
-  .positioning-call-sheet-table tbody td.pos-col-note {
-    text-align: left;
-    font-size: 8.5pt;
-    color: #374151;
-    font-style: italic;
-    max-width: 2.4in;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  /* Per-position cell rendering (E-228-04 D6) */
-  .pos-cell-true {
-    color: #9ca3af;
-    font-size: 0.85em;
-  }
-  .pos-cell-call {
-    font-weight: bold;
-    color: #111;
-  }
-  /* Group-divider row between non-TRUE and TRUE rows (D5) */
-  .pos-row-group-divider td {
-    border-bottom: 1px solid #9ca3af;
-    padding: 0;
-    height: 4px;
-  }
-  /* Empty call-sheet info row */
-  .pos-row-empty td {
-    padding: 12px 5px;
-    text-align: center;
-    color: #6b7280;
-    font-style: italic;
-    font-size: 9pt;
-  }
-
-  /* ---- Player cards sheet (portrait, 2x3 grid) ---- */
   .positioning-cards-sheet {
-    margin-top: 12px;
+    page: positioning-cards;
+    break-before: page;
+    page-break-after: always;
+    font-family: Arial, Helvetica, sans-serif;
+    color: #000;
   }
-  .positioning-cards-sheet h2.section-header {
-    margin-bottom: 6px;
-  }
+
+  /* 2x2 quarter-letter grid per sheet (artifact §A 4-up sheet layout). */
   .positioning-cards-grid {
     display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    grid-template-rows: repeat(3, 1fr);
-    gap: 0.15in;
-    /* Screen preview approximates the portrait usable area. */
-    min-height: 9.6in;
-  }
-  .positioning-card {
-    border: 0.5pt solid #6b7280;
-    padding: 0.15in;
-    display: flex;
-    flex-direction: column;
-    page-break-inside: avoid;
-    break-inside: avoid;
-  }
-  .positioning-card-header {
-    font-size: 14pt;
-    font-weight: bold;
-    letter-spacing: 0.02em;
-    border-bottom: 1px solid #d1d5db;
-    padding-bottom: 4px;
-    margin-bottom: 6px;
-    text-align: center;
-  }
-  /* Per spec §4.2: STRAIGHT UP default block at 36pt bold so it dominates. */
-  .positioning-card-default-block {
-    font-size: 36pt;
-    font-weight: 900;
-    text-align: center;
-    letter-spacing: 0.02em;
-    margin: 6px 0 8px 0;
-    line-height: 1.05;
-  }
-  .positioning-card-exceptions-label {
-    font-size: 8pt;
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    color: #6b7280;
-    border-bottom: 1px solid #e5e7eb;
-    padding-bottom: 2px;
-    margin-bottom: 4px;
-  }
-  .positioning-card-exception-row {
-    display: grid;
-    grid-template-columns: 0.6in 1fr auto;
-    align-items: baseline;
-    gap: 6px;
-    padding: 2px 0;
-    font-size: 10pt;
-  }
-  /* Per spec §4.2: 11pt bold jersey, 10pt name, 11pt bold call (call ties
-     jersey as the largest type in the row -- actionable field at the top
-     of the visual hierarchy per the baseball-coach review reconciliation). */
-  .positioning-card-exception-jersey {
-    font-weight: bold;
-    font-size: 11pt;
-  }
-  .positioning-card-exception-name {
-    font-weight: 500;
-    font-size: 10pt;
-    letter-spacing: 0.02em;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .positioning-card-exception-call {
-    font-weight: bold;
-    text-align: right;
-    font-size: 11pt;
-    white-space: nowrap;
-  }
-  .positioning-card-mixed-tag {
-    font-size: 7.5pt;
-    font-variant: small-caps;
-    color: #6b7280;
-    margin-left: 3px;
-  }
-  .positioning-card-no-exceptions {
-    font-style: italic;
-    color: #6b7280;
-    font-size: 9pt;
-    text-align: center;
-    margin-top: 6px;
-  }
-  .positioning-card-truncated {
-    font-style: italic;
-    color: #6b7280;
-    font-size: 7.5pt;
-    text-align: center;
-    margin-top: 4px;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr 1fr;
+    gap: 0;          /* cards meet at midlines */
+    width: 8.5in;
+    height: 11in;
   }
 
-  /* ---- Print rules (epic TN-7 + spec §6.2) ---- */
-  @media print {
-    /* Landscape page for the call sheet; start fresh after the prior section. */
-    .positioning-call-sheet {
-      page: call-sheet;
-      break-before: page;
-    }
-    /* Portrait page for the multi-up player cards. */
-    .positioning-cards-sheet {
-      page: positioning-cards;
-      break-before: page;
-    }
+  /* Cut-line indicators: dashed hairlines on midlines only per
+     artifact §A "Cut-line spec" + UXD M-3 (no corner crop marks,
+     no full-card borders). */
+  .positioning-cards-grid::before,
+  .positioning-cards-grid::after {
+    content: "";
+    position: absolute;
+  }
+
+  .positioning-card {
+    width: 4.25in;
+    height: 5.5in;
+    padding: 0.15in;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    /* Cut lines on right + bottom edges of cards 1, 2, 3.
+       Card 4 sits at the sheet corner -- no cut on its right or
+       bottom (those are paper edges). */
+    border-right: 0.5pt dashed #808080;
+    border-bottom: 0.5pt dashed #808080;
+    /* Browser dashed-stroke heuristic: SVG-level 2pt-dash/2pt-gap
+       is approximated here via the browser's default dashed pattern.
+       Print engines (weasyprint) honor the dashed pattern. */
+  }
+  .positioning-card:nth-child(2n) {
+    /* Right column has no right cut line (sheet edge). */
+    border-right: none;
+  }
+  .positioning-card:nth-child(n+3) {
+    /* Bottom row has no bottom cut line (sheet edge). */
+    border-bottom: none;
+  }
+  .positioning-card.no-bottom-cut {
+    border-bottom: none;
+  }
+
+  /* ---- Card header (artifact §C, 0.65in) ---- */
+  .positioning-card-header {
+    height: 0.65in;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    grid-template-rows: auto auto;
+    grid-template-areas:
+      "opponent coverage"
+      "position position";
+    align-items: baseline;
+    column-gap: 0.06in;
+    border-bottom: 0.5pt solid #b3b3b3;
+    padding-bottom: 0.05in;
+  }
+  .positioning-card-header .opp {
+    grid-area: opponent;
+    font-size: 11pt;
+    font-weight: bold;
+    line-height: 1.15;
+  }
+  .positioning-card-header .coverage {
+    grid-area: coverage;
+    font-size: 9pt;
+    color: #4d4d4d;
+    text-align: right;
+    white-space: nowrap;
+  }
+  .positioning-card-header .position {
+    grid-area: position;
+    font-size: 10pt;
+    font-weight: bold;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding-top: 0.04in;
+  }
+
+  /* ---- Card body (3.95 x 4.30, artifact §C) ---- */
+  .positioning-card-body {
+    display: grid;
+    grid-template-columns: 64% 36%;
+    column-gap: 0.08in;
+    flex: 1;
+    padding-top: 0.06in;
+    overflow: hidden;
+  }
+  .positioning-card-svg-slot {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+  }
+  .positioning-card-svg-slot svg {
+    width: 100%;
+    height: 100%;
+  }
+
+  /* ---- Sidebar (artifact §C sidebar lookup) ---- */
+  .positioning-card-sidebar {
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 7.5pt;
+  }
+  .positioning-card-sidebar .sidebar-title {
+    font-size: 7pt;
+    font-weight: bold;
+    text-transform: uppercase;
+    color: #4d4d4d;
+    letter-spacing: 0.04em;
+    padding-bottom: 0.02in;
+    border-bottom: 0.5pt solid #b3b3b3;
+    margin-bottom: 0.04in;
+  }
+  .positioning-card-sidebar .sidebar-row {
+    display: grid;
+    grid-template-columns: 0.34in 1fr 0.20in;
+    column-gap: 0.04in;
+    row-gap: 0.02in;
+    line-height: 1.20;
+  }
+  .positioning-card-sidebar .sidebar-row .jersey {
+    font-weight: bold;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+  .positioning-card-sidebar .sidebar-row .name {
+    font-weight: 500;
+    letter-spacing: 0.01em;
+    overflow: hidden;
+  }
+  .positioning-card-sidebar .sidebar-row .zone {
+    font-weight: bold;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+  }
+  .positioning-card-sidebar .sidebar-banner {
+    /* Empty-state banner per artifact §C IM-1 / UXD M-4 -- never
+       structurally absent; the sidebar always shows content. */
+    text-align: center;
+    font-style: italic;
+    font-size: 7.5pt;
+    color: #4d4d4d;
+    padding: 0.1in 0.03in;
+  }
+  .positioning-card-sidebar .sidebar-truncated {
+    margin-top: 0.04in;
+    font-size: 6.5pt;
+    color: #808080;
+    text-align: center;
+  }
+
+  /* ---- Card legend (0.25in, artifact §C) ---- */
+  .positioning-card-legend {
+    height: 0.25in;
+    border-top: 0.5pt solid #b3b3b3;
+    padding-top: 0.04in;
+    font-size: 7pt;
+    color: #4d4d4d;
+    text-align: center;
+  }
+
+  /* ---- State variants ---- */
+  .positioning-card.zero-coverage .positioning-card-body {
+    grid-template-columns: 1fr;  /* full-width message; sidebar hidden */
+  }
+  .positioning-card.zero-coverage .positioning-card-sidebar {
+    visibility: hidden;
+  }
+  .positioning-card-zero-message {
+    text-align: center;
+    padding-top: 0.7in;
+  }
+  .positioning-card-zero-message .headline {
+    font-size: 11pt;
+    font-weight: bold;
+  }
+  .positioning-card-zero-message .sub {
+    font-size: 9pt;
+    color: #4d4d4d;
+    margin-top: 0.05in;
+  }
+
+  /* ---- Sheet-2 slot-3 visual compass key (artifact §D slot 3) ---- */
+  .positioning-card.compass-key .positioning-card-svg-slot svg {
+    /* Compass-key SVG uses the same field outline + a centered star
+       with all 8 letters at full opacity. Slot rendered larger than
+       the per-position cards' SVG. */
+  }
+  .positioning-card-caption {
+    font-size: 7.5pt;
+    color: #4d4d4d;
+    text-align: center;
+    padding: 0.04in 0;
+  }
+
+  /* ---- Sheet-2 slot-4 opponent context card (artifact §D slot 4) ---- */
+  .positioning-card.opponent-context .positioning-card-body {
+    display: block;        /* override the 64/36 SVG/sidebar split */
+    padding: 0.08in 0.04in;
+  }
+  .positioning-card.opponent-context .context-h2 {
+    font-size: 14pt;
+    font-weight: bold;
+    line-height: 1.15;
+    letter-spacing: 0.01em;
+  }
+  .positioning-card.opponent-context .context-coverage {
+    font-size: 9pt;
+    color: #4d4d4d;
+    margin-top: 0.04in;
+  }
+  .positioning-card.opponent-context .context-stat-list {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    column-gap: 0.08in;
+    row-gap: 0.05in;
+    margin-top: 0.15in;
+    font-size: 9pt;
+  }
+  .positioning-card.opponent-context .context-stat-list dt {
+    color: #4d4d4d;
+  }
+  .positioning-card.opponent-context .context-stat-list dd {
+    font-weight: bold;
+    text-align: right;
+  }
+
+  /* ---- Mobile / web responsive (artifact §G + UXD I-5, breakpoint sm:) ---- */
+  @media screen and (max-width: 640px) {
     .positioning-cards-grid {
-      height: 100%;
+      display: block;
+      width: 100%;
+      height: auto;
     }
-    .positioning-call-sheet-table,
-    .positioning-call-sheet-table tr {
-      page-break-inside: avoid;
+    .positioning-card {
+      width: 100%;
+      height: auto;
+      border: none;
+      border-bottom: 0.5pt solid #b3b3b3;
+      margin-bottom: 0.5in;
+    }
+    .positioning-card-body {
+      grid-template-columns: 1fr;
+    }
+    .positioning-card-svg-slot {
+      width: 100%;
+      height: auto;
+    }
+    .positioning-card-sidebar {
+      margin-top: 0.2in;
     }
   }
 </style>
 
 
-{# ===== CALL SHEET (landscape) ===== #}
-<div class="positioning-call-sheet">
-  <h2 class="section-header">Defensive Positioning — Call Sheet</h2>
-  <table class="positioning-call-sheet-table">
-    <thead>
-      <tr>
-        <th style="width: 0.5in;">#</th>
-        <th class="pos-col-left" style="width: 1.5in;">Name</th>
-        <th class="pos-col-left" style="width: 1.7in;">Call</th>
-        {% for position in positioning.column_order %}
-        <th style="width: 0.55in;">{{ position }}</th>
-        {% endfor %}
-        <th style="width: 1.3in;">Confidence</th>
-        <th class="pos-col-left" style="width: 2.4in;">Note</th>
-      </tr>
-    </thead>
-    <tbody>
-    {% if not positioning.has_data %}
-      <tr class="pos-row-empty">
-        <td colspan="{{ 5 + positioning.column_order|length }}">
-          {{ positioning.empty_state_text }}
-        </td>
-      </tr>
-    {% else %}
-      {% set ns = namespace(prev_flagged=None) %}
-      {% for batter in positioning.batters %}
-        {% set is_flagged = batter.team_state_call_key != 'TRUE' %}
-        {# Group-divider row between non-TRUE (flagged) and TRUE groups (D5). #}
-        {% if ns.prev_flagged is not none and ns.prev_flagged and not is_flagged %}
-        <tr class="pos-row-group-divider"><td colspan="{{ 5 + positioning.column_order|length }}"></td></tr>
-        {% endif %}
-        {% set ns.prev_flagged = is_flagged %}
-        <tr>
-          <td class="pos-col-jersey">{% if batter.jersey_number %}{{ batter.jersey_number }}{% else %}&mdash;{% endif %}</td>
-          <td class="pos-col-name{% if batter.name_unresolved %} pos-name-unresolved{% endif %}">{{ batter.name }}</td>
-          <td class="pos-col-call">{{ batter.team_state_call_word }}</td>
-          {% for cell in batter.per_position %}
-          <td class="{% if cell.is_true %}pos-cell-true{% else %}pos-cell-call{% endif %}">{{ cell.short }}</td>
-          {% endfor %}
-          <td class="pos-col-conf">{{ batter.confidence_text }}</td>
-          <td class="pos-col-note">{% if batter.rationale %}{{ batter.rationale }}{% endif %}</td>
-        </tr>
-      {% endfor %}
-    {% endif %}
-    </tbody>
-  </table>
-</div>
-
-
-{# ===== PLAYER CARDS (portrait, 2x3 grid) ===== #}
-<div class="positioning-cards-sheet">
-  <h2 class="section-header">Defensive Positioning — Player Cards</h2>
+{# ===== SHEET 1: LF / CF / RF / 3B ===== #}
+<section class="positioning-cards-sheet sheet-1">
   <div class="positioning-cards-grid">
-    {% for card in positioning.cards %}
-    <div class="positioning-card" data-position="{{ card.position_key }}">
-      <div class="positioning-card-header">{{ card.position_label }}</div>
-      <div class="positioning-card-default-block">STRAIGHT UP</div>
-      <div class="positioning-card-exceptions-label">Exceptions</div>
-      {% if card.exceptions %}
-        {% for exc in card.exceptions %}
-        <div class="positioning-card-exception-row">
-          <span class="positioning-card-exception-jersey">{% if exc.jersey_number %}#{{ exc.jersey_number }}{% else %}&mdash;{% endif %}</span>
-          <span class="positioning-card-exception-name">{{ exc.last_name }}</span>
-          <span class="positioning-card-exception-call">{{ exc.call_full }}{% if exc.is_mixed_batter %} <span class="positioning-card-mixed-tag">(MIXED)</span>{% endif %}</span>
+    {% for card in positioning.cards[:4] %}
+      <div class="positioning-card state-{{ card.state }} {% if card.state == 'zero_coverage' %}zero-coverage{% endif %}"
+           data-position="{{ card.position_key }}">
+        <div class="positioning-card-header">
+          <span class="opp">{{ positioning.opponent_name | default('') | e }}</span>
+          <span class="coverage">{{ positioning.coverage_cue | default('') | e }}</span>
+          <span class="position">{{ card.position_label }}</span>
         </div>
-        {% endfor %}
-        {% if card.truncated_count and card.truncated_count > 0 %}
-        <div class="positioning-card-truncated">+{{ card.truncated_count }} more &mdash; see call sheet</div>
-        {% endif %}
-      {% else %}
-        <div class="positioning-card-no-exceptions">{{ positioning.no_exceptions_text }}</div>
-      {% endif %}
-    </div>
+        <div class="positioning-card-body">
+          <div class="positioning-card-svg-slot">
+            {% if card.state == 'zero_coverage' %}
+              <div class="positioning-card-zero-message">
+                <div class="headline">Not enough spray data</div>
+                <div class="sub">— play your standard alignment</div>
+              </div>
+            {% else %}
+              {{ card.svg | safe }}
+            {% endif %}
+          </div>
+          <div class="positioning-card-sidebar">
+            <div class="sidebar-title">Outliers ({{ card.position_key }})</div>
+            {% if card.sidebar_rows %}
+              {% for row in card.sidebar_rows %}
+                <div class="sidebar-row">
+                  <span class="jersey">{% if row.jersey_number %}#{{ row.jersey_number | e }}{% else %}&mdash;{% endif %}</span>
+                  <span class="name">{{ row.last_name | e }}</span>
+                  <span class="zone">{{ row.zone_letter | e }}</span>
+                </div>
+              {% endfor %}
+              {% if card.truncated_count and card.truncated_count > 0 %}
+                <div class="sidebar-truncated">+{{ card.truncated_count }} more</div>
+              {% endif %}
+            {% else %}
+              <div class="sidebar-banner">
+                {% if card.state == 'zero_coverage' %}
+                  Not enough spray data. Play team default.
+                {% else %}
+                  No outliers this opponent. Play team default.
+                {% endif %}
+              </div>
+            {% endif %}
+          </div>
+        </div>
+        <div class="positioning-card-legend">
+          {{ positioning.compass_legend_short | default('★ default · ○ textbook · A-H outliers') | e }}
+        </div>
+      </div>
     {% endfor %}
   </div>
-</div>
+</section>
+
+
+{# ===== SHEET 2: SS / 2B + compass key + opponent context ===== #}
+<section class="positioning-cards-sheet sheet-2">
+  <div class="positioning-cards-grid">
+    {# Slots 1-2: SS and 2B player cards. #}
+    {% for card in positioning.cards[4:6] %}
+      <div class="positioning-card state-{{ card.state }} {% if card.state == 'zero_coverage' %}zero-coverage{% endif %}"
+           data-position="{{ card.position_key }}">
+        <div class="positioning-card-header">
+          <span class="opp">{{ positioning.opponent_name | default('') | e }}</span>
+          <span class="coverage">{{ positioning.coverage_cue | default('') | e }}</span>
+          <span class="position">{{ card.position_label }}</span>
+        </div>
+        <div class="positioning-card-body">
+          <div class="positioning-card-svg-slot">
+            {% if card.state == 'zero_coverage' %}
+              <div class="positioning-card-zero-message">
+                <div class="headline">Not enough spray data</div>
+                <div class="sub">— play your standard alignment</div>
+              </div>
+            {% else %}
+              {{ card.svg | safe }}
+            {% endif %}
+          </div>
+          <div class="positioning-card-sidebar">
+            <div class="sidebar-title">Outliers ({{ card.position_key }})</div>
+            {% if card.sidebar_rows %}
+              {% for row in card.sidebar_rows %}
+                <div class="sidebar-row">
+                  <span class="jersey">{% if row.jersey_number %}#{{ row.jersey_number | e }}{% else %}&mdash;{% endif %}</span>
+                  <span class="name">{{ row.last_name | e }}</span>
+                  <span class="zone">{{ row.zone_letter | e }}</span>
+                </div>
+              {% endfor %}
+              {% if card.truncated_count and card.truncated_count > 0 %}
+                <div class="sidebar-truncated">+{{ card.truncated_count }} more</div>
+              {% endif %}
+            {% else %}
+              <div class="sidebar-banner">
+                {% if card.state == 'zero_coverage' %}
+                  Not enough spray data. Play team default.
+                {% else %}
+                  No outliers this opponent. Play team default.
+                {% endif %}
+              </div>
+            {% endif %}
+          </div>
+        </div>
+        <div class="positioning-card-legend">
+          {{ positioning.compass_legend_short | default('★ default · ○ textbook · A-H outliers') | e }}
+        </div>
+      </div>
+    {% endfor %}
+
+    {# Slot 3: Visual compass key (artifact §D slot 3). #}
+    <div class="positioning-card compass-key" data-position="compass-key">
+      <div class="positioning-card-header">
+        <span class="opp">Compass Key</span>
+        <span class="coverage">Reference card</span>
+        <span class="position">8-zone field compass</span>
+      </div>
+      <div class="positioning-card-caption">
+        Letters are stable across opponents. The team-default star moves; the labels do not.
+      </div>
+      <div class="positioning-card-body">
+        <div class="positioning-card-svg-slot">
+          {{ positioning.compass_key_svg | default('') | safe }}
+        </div>
+      </div>
+      <div class="positioning-card-legend">
+        {{ positioning.compass_legend_long | default('') | e }}
+      </div>
+    </div>
+
+    {# Slot 4: Opponent context card (artifact §D slot 4). #}
+    <div class="positioning-card opponent-context" data-position="opponent-context">
+      <div class="positioning-card-header">
+        <span class="opp">{{ positioning.opponent_name | default('') | e }}</span>
+        <span class="coverage">{{ positioning.coverage_cue | default('') | e }}</span>
+        <span class="position">Opponent context</span>
+      </div>
+      <div class="positioning-card-body">
+        <h2 class="context-h2">{{ positioning.opponent_name | default('') | e }}</h2>
+        <div class="context-coverage">{{ positioning.opponent_context_coverage_line | default('') | e }}</div>
+        <dl class="context-stat-list">
+          {% for stat in (positioning.opponent_context_stats or []) %}
+            <dt>{{ stat.label | e }}</dt>
+            <dd>{{ stat.value | e }}</dd>
+          {% endfor %}
+        </dl>
+        {% if positioning.opponent_context_tier_line %}
+          <div class="context-coverage">{{ positioning.opponent_context_tier_line | e }}</div>
+        {% endif %}
+      </div>
+      <div class="positioning-card-legend">
+        Coach reference · cut and keep with the call sheet.
+      </div>
+    </div>
+  </div>
+</section>

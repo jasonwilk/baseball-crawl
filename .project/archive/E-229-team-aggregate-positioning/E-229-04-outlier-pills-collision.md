@@ -4,7 +4,7 @@
 [E-229: Team-Aggregate Defensive Positioning](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the card field SVG generator from E-229-03 renders numbered jersey pills for each outlier batter (`zone_id IS NOT NULL AND is_thin = 0`) at the batter's specific deviation-projected position relative to the star. Jersey numbers come from a `team_rosters` JOIN with a last-initial fallback when the jersey is NULL. When two pills land within ε of each other, the renderer applies deterministic radial jitter with stable angular order keyed on jersey number.

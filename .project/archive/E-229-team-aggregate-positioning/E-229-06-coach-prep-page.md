@@ -4,7 +4,7 @@
 [E-229: Team-Aggregate Defensive Positioning](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the report bundle includes a pre-game prep page: a single full-field SVG showing all 6 position stars + all outlier batter pills from all positions overlaid, with a faint spray-density background and a complete jersey×position lookup sidebar. The page is letter landscape and serves as the coach's analysis canvas before the game — distinct from the in-game call sheet (E-229-07) and the per-position cards (E-229-05).

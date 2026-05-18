@@ -1,20 +1,31 @@
-"""Tier 2 LLM enrichment for defensive positioning (E-228-07).
+"""Tier 2 LLM input contract for E-229 defensive positioning.
 
-Mirrors :mod:`src.reports.llm_analysis` exactly per epic TN-1: the
-deterministic engine decides, the LLM only narrates. The Tier 2 layer
-takes a finished :class:`BatterPositioningResult` from Tier 1
-(:mod:`src.reports.positioning`) and writes ONLY a one-line rationale
-sentence. It never sees raw x/y, never reads ``spray_charts``, and any
-LLM opinion on the positioning decision is discarded.
+Per epic TN-2 (single-source provenance): the deterministic engine
+(:mod:`src.reports.positioning`) decides; this module narrates. The
+Tier 2 layer takes one flagged batter's per-position row plus the
+matching team-aggregate row and emits a one-line rationale that
+references the zone vocabulary (A-H) or the underlying deviation
+signs.
 
-The call sheet must remain fully usable with the LLM layer disabled --
-this module returns ``None`` on every error and config-absent path.
+**No DB persistence** (per Phase 3 iteration 1 CR B1 lock):
+rationales are render-time in-memory only. There is no ``rationale``
+column on ``batter_positioning``; this module issues no
+``INSERT``/``UPDATE`` against ``batter_positioning`` or
+``team_position_aggregate``. The bundle assembler (E-229-08) calls
+:func:`generate_rationale` per flagged batter at render time and
+threads the result directly into the template context.
 
 Public API::
 
-    from src.reports.positioning_llm import enrich_positioning
+    from src.reports.positioning_llm import generate_rationale
 
-    rationale: str | None = enrich_positioning(per_batter_result)
+    rationale: str | None = generate_rationale(
+        batter_row, aggregate_row, batter_metadata,
+    )
+
+The bundle and call sheet must remain fully usable with the LLM
+layer disabled -- this module returns ``None`` on every error,
+config-absent, and validation-failure path.
 """
 
 from __future__ import annotations
@@ -23,203 +34,258 @@ import json
 import logging
 import os
 import re
-from typing import TYPE_CHECKING
+from typing import Any, Optional
 
 from src.llm.openrouter import LLMError, is_llm_available, query_openrouter
-
-if TYPE_CHECKING:
-    from src.reports.positioning import BatterPositioningResult
+from src.reports.positioning import PerPositionRow, TeamAggregateRow
 
 logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Validation thresholds (E-228-07 AC-1 observable contract)
+# Validation thresholds (AC-2 observable contract)
 # ---------------------------------------------------------------------------
 
 _MIN_WORDS: int = 10
-"""AC-1 (a) lower length bound -- a too-short rationale is treated as a parse
-failure and routes to WARNING-and-skip (AC-2a contract)."""
-
 _MAX_WORDS: int = 50
-"""AC-1 (a) upper length bound -- a too-long rationale is truncated at the
-first in-band sentence boundary."""
-
 _MAX_SENTENCES: int = 2
-"""AC-1 (a) sentence-count cap. Truncation prefers full sentences."""
 
 
-# Zone keywords -- AC-1 (b) structural citation. The render layer's
-# vocabulary (POSITIONING_CALL_WORDS) lives in renderer.py; this list
-# stays narrowly focused on the citation-evidence terms the prompt can
-# emit.
-_ZONE_KEYWORDS: frozenset[str] = frozenset({
-    "left", "center", "right",
-    # Also accept common analyst variants the prompt may surface.
-    "lf", "cf", "rf",
+# ---------------------------------------------------------------------------
+# Zone vocabulary (epic TN-3 sign-rule table)
+#
+# Each zone letter encodes the SIGN of (direction_deviation,
+# depth_deviation). The vertical band (D, E) has no left/right
+# component; the horizontal band (B, G) has no in/deep component.
+#
+# left_sign  = -1 for A/B/C (left), 0 for D/E (vertical), +1 for F/G/H
+# in_sign    = -1 for A/D/F (in), 0 for B/G (horizontal), +1 for C/E/H
+# ---------------------------------------------------------------------------
+
+_ZONE_HORIZONTAL_SIGN: dict[str, int] = {
+    "A": -1, "B": -1, "C": -1,  # left
+    "D":  0, "E":  0,            # vertical (no horizontal lean)
+    "F":  1, "G":  1, "H":  1,  # right
+}
+_ZONE_VERTICAL_SIGN: dict[str, int] = {
+    "A": -1, "D": -1, "F": -1,  # in
+    "B":  0, "G":  0,            # horizontal (no vertical lean)
+    "C":  1, "E":  1, "H":  1,  # deep
+}
+
+
+# ---------------------------------------------------------------------------
+# Structural-citation vocabulary (AC-2 b)
+# ---------------------------------------------------------------------------
+
+# Zone keywords -- any letter A-H, OR the long-form zone names ("in-left",
+# "deep", etc.). Case-insensitive. The regex matches "Zone B" / "zone b"
+# as a phrase and also accepts the long-form vocabulary that the
+# COMPASS_LEGEND_LONG legend exposes ("in-left", "deep-right", etc.).
+_ZONE_LETTER_PATTERN: re.Pattern[str] = re.compile(
+    r"\bzone\s+[A-H]\b", re.IGNORECASE,
+)
+_ZONE_LONGFORM_KEYWORDS: frozenset[str] = frozenset({
+    "in-left", "left", "deep-left",
+    "in", "deep",
+    "in-right", "right", "deep-right",
 })
 
-# Contact-type keywords -- AC-1 (b).
+# Contact-type / pitching-context keywords. Kept narrow -- the engine
+# input does not carry contact type, but the LLM may still reference
+# coaching-vocabulary phrases like "ground ball" if the operator wants
+# them in the prompt template.
 _CONTACT_TYPE_KEYWORDS: frozenset[str] = frozenset({
     "ground ball", "ground-ball", "grounder", "grounders",
     "line drive", "line-drive", "liner", "liners",
     "fly ball", "fly-ball", "flyball",
     "popup", "pop-up", "pop fly",
-    "gb", "ld", "fb",
 })
 
-# Adjacency lattice ordering of LEFT/RIGHT direction. AC-1 (c) decision
-# discipline: if the row is a LEFT* call_state, the rationale must not
-# contain "shade right" / "to right" direction-flip phrases (and vice
-# versa). Two patterns each side: bare "right"/"left" alone is too broad
-# (the citation list accepts "center", which can appear next to a
-# direction term), so we look for direction-action phrases.
-_LEFT_CONTRADICTION_PATTERNS: tuple[re.Pattern[str], ...] = (
+
+# ---------------------------------------------------------------------------
+# Decision-discipline patterns (AC-2 c)
+#
+# When the batter's zone_id is in the LEFT half (A/B/C) -- or when the
+# raw direction_deviation sign is negative -- the rationale must not
+# tell the coach to shade in the OPPOSITE direction. Symmetric for
+# right-half zones (F/G/H).
+#
+# Two patterns each side: bare "right"/"left" alone is too broad (the
+# citation list accepts "left" as a zone keyword and many coaching
+# phrases use the word in neutral senses, e.g. "left field" appears in
+# nearly every rationale). We look for direction-ACTION phrases.
+# ---------------------------------------------------------------------------
+
+_SHADE_RIGHT_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"\bshade\s+right\b", re.IGNORECASE),
-    re.compile(r"\bpulls?\s+right\b", re.IGNORECASE),
+    re.compile(r"\bshift\s+right\b", re.IGNORECASE),
+    re.compile(r"\bcheat\s+right\b", re.IGNORECASE),
     re.compile(r"\bto\s+right\s+field\b", re.IGNORECASE),
+    re.compile(r"\bpulls?\s+right\b", re.IGNORECASE),
+    re.compile(r"\bplay\s+(?:him\s+)?(?:to\s+the\s+)?right\b", re.IGNORECASE),
 )
-_RIGHT_CONTRADICTION_PATTERNS: tuple[re.Pattern[str], ...] = (
+_SHADE_LEFT_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"\bshade\s+left\b", re.IGNORECASE),
-    re.compile(r"\bpulls?\s+left\b", re.IGNORECASE),
+    re.compile(r"\bshift\s+left\b", re.IGNORECASE),
+    re.compile(r"\bcheat\s+left\b", re.IGNORECASE),
     re.compile(r"\bto\s+left\s+field\b", re.IGNORECASE),
+    re.compile(r"\bpulls?\s+left\b", re.IGNORECASE),
+    re.compile(r"\bplay\s+(?:him\s+)?(?:to\s+the\s+)?left\b", re.IGNORECASE),
 )
-_TRUE_CONTRADICTION_PATTERNS: tuple[re.Pattern[str], ...] = (
-    re.compile(r"\bshade\s+(?:left|right)\b", re.IGNORECASE),
+_SHADE_IN_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"\bplay\s+(?:him\s+)?(?:in|shallow)\b", re.IGNORECASE),
+    re.compile(r"\bshade\s+in\b", re.IGNORECASE),
+    re.compile(r"\bcheat\s+in\b", re.IGNORECASE),
+)
+_SHADE_DEEP_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"\bplay\s+(?:him\s+)?(?:deep|back)\b", re.IGNORECASE),
+    re.compile(r"\bshade\s+(?:deep|back)\b", re.IGNORECASE),
+    re.compile(r"\bcheat\s+(?:deep|back)\b", re.IGNORECASE),
 )
 
 
 # ---------------------------------------------------------------------------
-# Prompt construction
+# Prompt template
 # ---------------------------------------------------------------------------
 
 _SYSTEM_PROMPT = """\
 You are a high school baseball coaching analyst. You analyze ONE batter's \
-spray-chart tendencies and produce one short coach-facing rationale that \
-explains WHY the deterministic positioning call makes sense for this batter.
+team-aggregate spray-chart tendencies and produce one short coach-facing \
+rationale that explains WHY the deterministic positioning call makes sense \
+for this batter at this position.
 
 You will be given:
-1. The deterministic positioning call (already decided -- do not change it).
-2. The batter's per-zone batted-ball aggregation (counts per field zone \
-and contact type, plus BIP and HR totals).
+1. The deterministic positioning call for this batter at one position \
+(already decided -- do not change it). It includes the zone letter (A-H) \
+plus the underlying directional and depth deviation values relative to \
+the team default for the position.
+2. The team-aggregate context (per-position default location and BIP volume).
 
 Respond ONLY with a JSON object (no markdown, no code fences) of the form:
 {
   "rationale": "1-2 sentences, 10-50 words. Coach-facing prose explaining \
-why the call fits this batter's tendency."
+why this zone fits this batter's tendency."
 }
 
 Hard rules for the rationale:
 - 1-2 sentences. 10-50 words inclusive.
-- Reference the data: name a field zone ("left"/"center"/"right") or a \
-contact type ("ground ball"/"line drive"/"fly ball") or a specific count \
-from the aggregates (BIP total, HR total, or a per-zone count).
-- Do NOT contradict the deterministic call. If the call is SHADE LEFT, \
-do not say "shade right" or describe pulling to right field. If the call \
-is STRAIGHT UP, do not say "shade left" or "shade right".
-- No jargon the coach cannot use immediately. No baseball-statistics \
-abbreviations like "wOBA" or "ISO". Plain English.
-- Do not state the call (the render layer already shows it). Explain the \
-tendency.
+- Reference the data: name the zone (e.g. "Zone B" or "in-left") OR a \
+numeric figure from the input (BIP count, direction deviation, depth deviation).
+- Do NOT contradict the deterministic call. If the zone is on the LEFT \
+side (A/B/C), do not say "shade right" or "to right field." If the zone \
+is deep (C/E/H), do not say "play him in." Symmetric for opposite signs.
+- No baseball-statistics abbreviations like "wOBA" or "ISO". Plain English.
+- Do not restate the zone name (the matrix already shows it). Explain \
+the tendency.
 """
 
 
-def _build_user_prompt(result: "BatterPositioningResult") -> str:
-    """Build the user prompt with the finished Tier 1 call and aggregation.
+def _assemble_llm_input(
+    batter_row: PerPositionRow,
+    aggregate_row: TeamAggregateRow,
+    batter_metadata: dict[str, Any],
+) -> dict[str, Any]:
+    """Assemble the LLM input dict (AC-1 contract).
 
-    The LLM is fed:
-    * the batter's team-state call (full word) and per-position call set;
-    * the per-zone aggregation (BIP totals per direction zone and contact
-      type), plus ``bip_count`` and ``hr_count``.
+    Carries jersey, name, position, the per-position positioning row's
+    zone_id + deviation values + BIP count + thin flag, plus the
+    team-aggregate context for the same position. Opponent name and
+    coverage cue come from ``batter_metadata`` (the bundle assembler
+    threads them in once per render pass).
 
-    The LLM never sees raw x/y, never sees ``spray_charts`` -- per AC-3.
+    The output dict is the locked contract per AC-1. Keys: jersey,
+    name, position, zone_id, direction_deviation, depth_deviation,
+    bip_count, is_thin, team_star_x, team_star_y, team_bip_count,
+    team_is_low_confidence, opponent_name, coverage_cue.
     """
-    from src.reports.renderer import POSITIONING_CALL_WORDS
+    if batter_row.position != aggregate_row.position:
+        raise ValueError(
+            "Position mismatch between batter_row "
+            f"({batter_row.position}) and aggregate_row "
+            f"({aggregate_row.position}). Caller must pass the "
+            "team-aggregate row for the same position."
+        )
 
-    # Per-batter context (denormalized across the 6 rows -- pull from row 0).
-    first_row = result.per_position_rows[0]
-    bip_count = first_row.bip_count
-    hr_count = first_row.hr_count
-    team_state_word = POSITIONING_CALL_WORDS.get(
-        result.team_state_call, result.team_state_call,
-    )
+    jersey = batter_metadata.get("jersey_number")
+    first = batter_metadata.get("first_name") or ""
+    last = batter_metadata.get("last_name") or ""
+    name = (first + " " + last).strip() or batter_metadata.get("display_name") or ""
 
+    return {
+        "jersey": jersey,
+        "name": name,
+        "position": batter_row.position,
+        "zone_id": batter_row.zone_id,
+        "direction_deviation": batter_row.direction_deviation,
+        "depth_deviation": batter_row.depth_deviation,
+        "bip_count": batter_row.bip_count,
+        "is_thin": batter_row.is_thin,
+        "team_star_x": aggregate_row.star_x,
+        "team_star_y": aggregate_row.star_y,
+        "team_bip_count": aggregate_row.bip_count,
+        "team_is_low_confidence": aggregate_row.is_low_confidence,
+        "opponent_name": batter_metadata.get("opponent_name", ""),
+        "coverage_cue": batter_metadata.get("coverage_cue", ""),
+    }
+
+
+def _build_user_prompt(llm_input: dict[str, Any]) -> str:
+    """Render the user-prompt body from the assembled input contract."""
     parts: list[str] = []
     parts.append("# Defensive Positioning Rationale Request")
     parts.append("")
-    parts.append("## Deterministic positioning call (already decided)")
-    parts.append(f"Team-state call: {team_state_word}")
-    # Per-position calls -- show the per-position call state to ground the
-    # LLM in which positions the engine flagged.
-    per_position_lines: list[str] = []
-    for row in result.per_position_rows:
-        if row.call_state == "TRUE":
-            continue
-        call_word = POSITIONING_CALL_WORDS.get(row.call_state, row.call_state)
-        per_position_lines.append(f"  {row.position}: {call_word}")
-    if per_position_lines:
-        parts.append("Per-position flagged calls:")
-        parts.extend(per_position_lines)
+    parts.append(f"Opponent: {llm_input['opponent_name']}")
+    parts.append(f"Coverage: {llm_input['coverage_cue']}")
     parts.append("")
-    parts.append("## Batter aggregation")
-    parts.append(f"Total BIP: {bip_count}")
-    parts.append(f"Total HR: {hr_count}")
+    parts.append("## Batter")
+    jersey = llm_input["jersey"]
+    parts.append(f"  Jersey: #{jersey}" if jersey else "  Jersey: (none)")
+    parts.append(f"  Name:   {llm_input['name']}")
+    parts.append(f"  Position context: {llm_input['position']}")
+    parts.append(f"  BIP this season: {llm_input['bip_count']}")
+    parts.append(f"  Thin sample: {'yes' if llm_input['is_thin'] else 'no'}")
     parts.append("")
-    parts.append("### BIP per field zone")
-    zone_totals = result.zone_aggregation.zone_totals
-    parts.append(
-        f"  left:   {zone_totals.get('left', 0)}"
-    )
-    parts.append(
-        f"  center: {zone_totals.get('center', 0)}"
-    )
-    parts.append(
-        f"  right:  {zone_totals.get('right', 0)}"
-    )
+    parts.append("## Deterministic call (already decided)")
+    zone = llm_input["zone_id"]
+    parts.append(f"  Zone: {zone if zone else '(team default; no outlier)'}")
+    parts.append(f"  direction_deviation: {llm_input['direction_deviation']}")
+    parts.append(f"  depth_deviation: {llm_input['depth_deviation']}")
     parts.append("")
-    parts.append("### BIP per contact type")
-    ct_totals = result.zone_aggregation.contact_type_totals
+    parts.append("## Team-aggregate context")
+    parts.append(f"  Position: {llm_input['position']}")
     parts.append(
-        f"  ground ball: {ct_totals.get('gb', 0)}"
+        f"  Star location (SVG-space): "
+        f"({llm_input['team_star_x']:.1f}, {llm_input['team_star_y']:.1f})"
     )
+    parts.append(f"  Team BIP volume: {llm_input['team_bip_count']}")
     parts.append(
-        f"  line drive:  {ct_totals.get('ld', 0)}"
-    )
-    parts.append(
-        f"  fly ball:    {ct_totals.get('fb', 0)}"
-    )
-    parts.append(
-        f"  popup:       {ct_totals.get('pu', 0)}"
+        f"  Low confidence team coverage: "
+        f"{'yes' if llm_input['team_is_low_confidence'] else 'no'}"
     )
     return "\n".join(parts)
 
 
 # ---------------------------------------------------------------------------
-# Response validation (AC-1 observable contract)
+# Response validation (AC-2 / AC-4)
 # ---------------------------------------------------------------------------
 
 
 def _count_words(text: str) -> int:
-    """Word count -- whitespace tokenization, matches the prompt-side rule."""
     return len([w for w in re.split(r"\s+", text.strip()) if w])
 
 
 def _split_sentences(text: str) -> list[str]:
-    """Split on sentence-ending punctuation. Cheap heuristic, sufficient
-    for the 1-2-sentence cap."""
     parts = re.split(r"(?<=[.!?])\s+", text.strip())
     return [p.strip() for p in parts if p.strip()]
 
 
 def _truncate_to_in_band_sentence(text: str) -> str | None:
-    """If ``text`` is too long, return the longest prefix of full sentences
-    whose word count fits in [_MIN_WORDS, _MAX_WORDS]. Return None when no
-    such prefix exists (the caller treats this as discard-and-skip)."""
+    """Longest prefix of full sentences with word count in [_MIN_WORDS,
+    _MAX_WORDS]; None if no such prefix exists."""
     sentences = _split_sentences(text)
     if not sentences:
         return None
-    # Try 1-sentence prefix; if it fits AND is at least _MIN_WORDS, take it.
-    # Otherwise try 2-sentence prefix.
     for n in range(1, min(len(sentences), _MAX_SENTENCES) + 1):
         candidate = " ".join(sentences[:n])
         words = _count_words(candidate)
@@ -230,28 +296,26 @@ def _truncate_to_in_band_sentence(text: str) -> str | None:
 
 def _has_structural_citation(
     text: str,
-    result: "BatterPositioningResult",
+    batter_row: PerPositionRow,
 ) -> bool:
-    """AC-1 (b): the rationale must contain at least one concrete reference
-    drawn from the Tier 1 input (zone, contact-type, or a numeric count)."""
+    """AC-2 (b): the rationale must contain at least one concrete
+    reference drawn from the engine input -- a zone keyword (letter
+    or long-form name) OR a numeric figure from the row."""
     lowered = text.lower()
-    # Zone keywords.
-    for kw in _ZONE_KEYWORDS:
+    if _ZONE_LETTER_PATTERN.search(text):
+        return True
+    for kw in _ZONE_LONGFORM_KEYWORDS:
         if re.search(rf"\b{re.escape(kw)}\b", lowered):
             return True
-    # Contact-type keywords.
     for kw in _CONTACT_TYPE_KEYWORDS:
         if kw in lowered:
             return True
-    # Numeric figures from the aggregates: bip_count, hr_count, any per-zone
-    # or per-contact count.
-    first_row = result.per_position_rows[0]
-    candidate_numbers = {first_row.bip_count, first_row.hr_count}
-    for v in result.zone_aggregation.zone_totals.values():
-        candidate_numbers.add(v)
-    for v in result.zone_aggregation.contact_type_totals.values():
-        candidate_numbers.add(v)
-    # Drop 0 as a citation -- 0-counts are noise, not signal.
+    candidate_numbers = {
+        batter_row.bip_count,
+        batter_row.hr_count,
+        abs(batter_row.direction_deviation),
+        abs(batter_row.depth_deviation),
+    }
     candidate_numbers.discard(0)
     for n in candidate_numbers:
         if re.search(rf"\b{n}\b", lowered):
@@ -261,84 +325,109 @@ def _has_structural_citation(
 
 def _has_decision_contradiction(
     text: str,
-    team_state_call: str,
+    batter_row: PerPositionRow,
 ) -> bool:
-    """AC-1 (c): direction-action phrases contradicting the row's
-    ``team_state_call`` make the rationale invalid."""
-    if team_state_call.startswith("LEFT"):
-        return any(p.search(text) for p in _LEFT_CONTRADICTION_PATTERNS)
-    if team_state_call.startswith("RIGHT"):
-        return any(p.search(text) for p in _RIGHT_CONTRADICTION_PATTERNS)
-    if team_state_call == "TRUE":
-        return any(p.search(text) for p in _TRUE_CONTRADICTION_PATTERNS)
-    # MIXED has no single direction expectation -- no contradiction check.
+    """AC-2 (c): direction-action phrases contradicting the row's spatial
+    assignment make the rationale invalid.
+
+    The spatial assignment is derived from the row's zone_id (if set)
+    or from the sign of its deviation values otherwise.
+    """
+    if batter_row.zone_id is not None:
+        h_sign = _ZONE_HORIZONTAL_SIGN.get(batter_row.zone_id, 0)
+        v_sign = _ZONE_VERTICAL_SIGN.get(batter_row.zone_id, 0)
+    else:
+        h_sign = _sign(batter_row.direction_deviation)
+        v_sign = _sign(batter_row.depth_deviation)
+
+    if h_sign < 0:  # batter pulls/lines left -> "shade right" contradicts
+        if any(p.search(text) for p in _SHADE_RIGHT_PATTERNS):
+            return True
+    if h_sign > 0:  # batter pulls/lines right -> "shade left" contradicts
+        if any(p.search(text) for p in _SHADE_LEFT_PATTERNS):
+            return True
+    if v_sign < 0:  # batter lines in (shallow) -> "play deep" contradicts
+        if any(p.search(text) for p in _SHADE_DEEP_PATTERNS):
+            return True
+    if v_sign > 0:  # batter lines deep -> "play in" contradicts
+        if any(p.search(text) for p in _SHADE_IN_PATTERNS):
+            return True
     return False
 
 
-def _validate_rationale(
-    raw: str,
-    result: "BatterPositioningResult",
-) -> str | None:
-    """Apply the AC-1 (a/b/c) observable contract. Return the
-    (possibly truncated) rationale, or ``None`` when validation fails.
+def _sign(n: int) -> int:
+    if n < 0:
+        return -1
+    if n > 0:
+        return 1
+    return 0
 
-    Failure paths log at WARNING (per AC-2a treatment of malformed
-    output) so the operator can see why the rationale was skipped.
+
+def _validate_response(
+    raw: str,
+    batter_row: PerPositionRow,
+) -> str | None:
+    """Apply the AC-2 (a/b/c) observable contract. Return the (possibly
+    truncated) rationale, or ``None`` when validation fails.
+
+    Failure paths log at WARNING per AC-4 so the operator can audit
+    rationale drops during the calibration pass.
     """
     text = raw.strip()
     if not text:
-        logger.warning("Positioning rationale empty -- skipping.")
+        logger.warning("Positioning rationale empty -- dropping.")
         return None
 
-    # AC-1 (a): length gate.
+    # AC-2 (a): length gate.
     words = _count_words(text)
     if words < _MIN_WORDS:
         logger.warning(
-            "Positioning rationale too short (%d words; min %d) -- skipping. "
-            "team_state_call=%s",
-            words, _MIN_WORDS, result.team_state_call,
+            "Positioning rationale too short (%d words; min %d) -- dropping. "
+            "zone_id=%s",
+            words, _MIN_WORDS, batter_row.zone_id,
         )
         return None
     if words > _MAX_WORDS:
-        # Try to truncate at a sentence boundary.
         truncated = _truncate_to_in_band_sentence(text)
         if truncated is None:
             logger.warning(
                 "Positioning rationale too long (%d words; max %d) and no "
-                "in-band sentence prefix -- skipping. team_state_call=%s",
-                words, _MAX_WORDS, result.team_state_call,
+                "in-band sentence prefix -- dropping. zone_id=%s",
+                words, _MAX_WORDS, batter_row.zone_id,
             )
             return None
         text = truncated
     else:
-        # Also enforce the sentence cap on in-band output.
         sentences = _split_sentences(text)
         if len(sentences) > _MAX_SENTENCES:
             truncated = _truncate_to_in_band_sentence(text)
             if truncated is None:
                 logger.warning(
                     "Positioning rationale exceeds %d sentences with no "
-                    "in-band prefix -- skipping. team_state_call=%s",
-                    _MAX_SENTENCES, result.team_state_call,
+                    "in-band prefix -- dropping. zone_id=%s",
+                    _MAX_SENTENCES, batter_row.zone_id,
                 )
                 return None
             text = truncated
 
-    # AC-1 (c): decision discipline -- check BEFORE returning truncated text.
-    if _has_decision_contradiction(text, result.team_state_call):
+    # AC-2 (c): decision discipline -- check the (possibly truncated) text.
+    if _has_decision_contradiction(text, batter_row):
         logger.warning(
-            "Positioning rationale contradicts call_state %s -- skipping. "
-            "rationale=%r",
-            result.team_state_call, text,
+            "Positioning rationale contradicts zone_id=%s "
+            "(direction_dev=%d, depth_dev=%d) -- dropping. rationale=%r",
+            batter_row.zone_id,
+            batter_row.direction_deviation,
+            batter_row.depth_deviation,
+            text,
         )
         return None
 
-    # AC-1 (b): structural citation.
-    if not _has_structural_citation(text, result):
+    # AC-2 (b): structural citation.
+    if not _has_structural_citation(text, batter_row):
         logger.warning(
             "Positioning rationale lacks structural citation (no zone, "
-            "contact-type, or aggregate count) -- skipping. team_state_call=%s",
-            result.team_state_call,
+            "contact-type, or numeric figure) -- dropping. zone_id=%s",
+            batter_row.zone_id,
         )
         return None
 
@@ -346,48 +435,58 @@ def _validate_rationale(
 
 
 # ---------------------------------------------------------------------------
-# Public entry point
+# Public entry point (AC-5)
 # ---------------------------------------------------------------------------
 
 
-def enrich_positioning(
-    result: "BatterPositioningResult",
-) -> str | None:
-    """Tier 2 LLM-written rationale for a per-batter positioning result.
+def generate_rationale(
+    batter_row: PerPositionRow,
+    aggregate_row: TeamAggregateRow,
+    batter_metadata: dict[str, Any],
+) -> Optional[str]:
+    """Top-level entry: per-batter rationale or ``None`` on any failure.
 
-    Mirrors :func:`src.reports.llm_analysis.enrich_prediction`:
+    Per AC-3 (non-fatal contract preserved from E-228 CX-4):
 
-    * If :func:`src.llm.openrouter.is_llm_available` returns ``False``,
-      return ``None`` with an **INFO** log (AC-2). Expected config state,
-      not an error.
-    * If the LLM call raises :class:`src.llm.openrouter.LLMError` (or any
-      other exception) mid-request, return ``None`` with a **WARNING** log
-      (AC-2a). Non-fatal -- the call sheet must remain fully usable.
-    * The Tier 2 layer never sees raw x/y, never reads ``spray_charts``,
-      and discards any LLM opinion on the positioning decision (AC-3).
+    * :func:`is_llm_available` returns False -> Tier 2 skipped silently
+      with **INFO** log. Expected config state, not an error.
+    * The LLM call raises any exception -> caught with **WARNING** log;
+      bundle still renders without this batter's rationale line.
+
+    Per AC-4: a response that fails the three-part output contract
+    (length / citation / decision discipline) is logged at WARNING and
+    the rationale is dropped (return None). **No DB persistence.**
+    The bundle assembler (E-229-08) iterates flagged batters, calls
+    this function per batter, and threads the result directly into
+    the template context.
 
     Args:
-        result: The :class:`BatterPositioningResult` for one batter from
-            :func:`src.reports.positioning.compute_positioning`.
+        batter_row: The :class:`PerPositionRow` for this batter at the
+            position being rationalized.
+        aggregate_row: The :class:`TeamAggregateRow` for the same
+            position. Must match ``batter_row.position``.
+        batter_metadata: Dict with ``jersey_number``, ``first_name``,
+            ``last_name``, ``opponent_name``, ``coverage_cue``.
 
     Returns:
-        The validated rationale string (1-2 sentences, 10-50 words,
-        cites concrete Tier 1 input, does not contradict the call) when
-        the call succeeds and the response passes AC-1; otherwise
-        ``None``.
+        The validated rationale string on success; ``None`` on any
+        failure mode (LLM unavailable, exception, validation rejection).
     """
     if not is_llm_available():
         logger.info(
             "Tier 2 LLM unavailable (OPENROUTER_API_KEY not set) -- "
-            "positioning rationale skipped for player_id=%s.",
-            result.player_id,
+            "positioning rationale skipped for jersey=%s position=%s.",
+            batter_metadata.get("jersey_number"),
+            batter_row.position,
         )
         return None
 
-    # MIXED batters get a rationale too (they still need explanation), but
-    # TRUE batters do not need one -- the dot grid carries the message.
-    # The render layer simply ignores a None rationale.
-    if result.team_state_call == "TRUE":
+    try:
+        llm_input = _assemble_llm_input(batter_row, aggregate_row, batter_metadata)
+    except ValueError as exc:
+        logger.warning(
+            "Tier 2 LLM input assembly failed: %s. Dropping rationale.", exc,
+        )
         return None
 
     model = os.environ.get(
@@ -395,7 +494,7 @@ def enrich_positioning(
     )
     messages = [
         {"role": "system", "content": _SYSTEM_PROMPT},
-        {"role": "user", "content": _build_user_prompt(result)},
+        {"role": "user", "content": _build_user_prompt(llm_input)},
     ]
 
     try:
@@ -404,27 +503,34 @@ def enrich_positioning(
         )
     except LLMError as exc:
         logger.warning(
-            "Tier 2 LLM call failed for player_id=%s: %s. Continuing without rationale.",
-            result.player_id, exc, exc_info=True,
+            "Tier 2 LLM call failed for jersey=%s position=%s: %s. "
+            "Continuing without rationale.",
+            batter_metadata.get("jersey_number"),
+            batter_row.position,
+            exc,
+            exc_info=True,
         )
         return None
     except Exception as exc:  # noqa: BLE001
         logger.warning(
-            "Tier 2 LLM unexpected error for player_id=%s: %s. "
+            "Tier 2 LLM unexpected error for jersey=%s position=%s: %s. "
             "Continuing without rationale.",
-            result.player_id, exc, exc_info=True,
+            batter_metadata.get("jersey_number"),
+            batter_row.position,
+            exc,
+            exc_info=True,
         )
         return None
 
-    # Parse the response. Any parse failure routes to WARNING-and-skip
-    # (AC-2a) -- the LLM was reachable but returned something unusable.
     try:
         content = response["choices"][0]["message"]["content"]
     except (KeyError, IndexError, TypeError) as exc:
         logger.warning(
-            "Tier 2 LLM response structure unexpected for player_id=%s: %s. "
-            "Skipping rationale.",
-            result.player_id, exc,
+            "Tier 2 LLM response structure unexpected for jersey=%s "
+            "position=%s: %s. Dropping rationale.",
+            batter_metadata.get("jersey_number"),
+            batter_row.position,
+            exc,
         )
         return None
 
@@ -432,9 +538,11 @@ def enrich_positioning(
         parsed = json.loads(content)
     except (json.JSONDecodeError, TypeError) as exc:
         logger.warning(
-            "Tier 2 LLM response is not valid JSON for player_id=%s: %s. "
-            "Skipping rationale.",
-            result.player_id, exc,
+            "Tier 2 LLM response is not valid JSON for jersey=%s "
+            "position=%s: %s. Dropping rationale.",
+            batter_metadata.get("jersey_number"),
+            batter_row.position,
+            exc,
         )
         return None
 
@@ -442,14 +550,32 @@ def enrich_positioning(
     if not isinstance(raw, str):
         logger.warning(
             "Tier 2 LLM response missing/non-string 'rationale' for "
-            "player_id=%s. Skipping.",
-            result.player_id,
+            "jersey=%s position=%s. Dropping.",
+            batter_metadata.get("jersey_number"),
+            batter_row.position,
         )
         return None
 
-    # Any LLM opinion on the decision itself is discarded -- AC-3, mirrors
-    # `enrich_prediction`'s confidence_adjustment discard. The response
-    # schema does not even expose a decision-adjustment field; any extra
-    # fields parsed are simply not read.
+    return _validate_response(raw, batter_row)
 
-    return _validate_rationale(raw, result)
+
+# ---------------------------------------------------------------------------
+# Deprecated v1 shim -- removed by E-229-10 (pipeline wiring)
+# ---------------------------------------------------------------------------
+
+
+def enrich_positioning(*_args: Any, **_kwargs: Any) -> None:
+    """Deprecated v1 entry point retained for collection-time compatibility.
+
+    The v1 contract (categorical ``call_state`` / ``team_state_call`` /
+    direction / depth shades) is retired by E-229-02. The v2 entry
+    point is :func:`generate_rationale`. The v1 call site in
+    :mod:`src.reports.generator` will be excised by E-229-10 (pipeline
+    wiring); until then this shim returns ``None`` unconditionally so
+    the bundle continues to render without a rationale line.
+    """
+    logger.info(
+        "Tier 2 LLM v1 entry point invoked (deprecated; E-229-10 will "
+        "remove the call site). Returning None so the bundle still renders."
+    )
+    return None

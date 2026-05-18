@@ -4,7 +4,7 @@
 [E-229: Team-Aggregate Defensive Positioning](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, `generate_report(public_id)` produces a single 4-page mixed-orientation HTML report (page 1 call sheet landscape, page 2 prep page landscape, pages 3–4 cards portrait 4-up) for the opponent. Bundle output follows the existing slug-based URL pattern with `ready` / `expired` lifecycle from E-228. Print-to-PDF in the browser produces a back-pocket-printable artifact.

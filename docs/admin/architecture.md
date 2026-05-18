@@ -91,40 +91,56 @@ baseball-crawl/
 
 ## Schema Changes
 
-### E-228: Migration 002 -- `batter_positioning` Table
+### E-229: Migration 002 v2 -- `batter_positioning` (rewritten) + `team_position_aggregate` (new)
 
-`migrations/002_batter_positioning.sql` adds the `batter_positioning` table, which stores the Tier 1 deterministic defensive-positioning recommendation per batter, per fielding position, per season, per perspective.
+`migrations/002_batter_positioning.sql` was rewritten in place on the `epic/E-228-defensive-positioning-cards` branch by E-229. The v1 categorical schema (E-228) is superseded by the v2 deviation-based schema described here. For the canonical DDL, see `migrations/002_batter_positioning.sql` directly.
 
-**Purpose**: Pre-computed engine output consumed by the positioning call sheet and player cards in the scouting report bundle. The engine (E-228-02, `src/reports/positioning.py`) refreshes this table as a pipeline step on every scout run and every standalone-report generation.
+**Purpose**: Pre-computed engine output consumed by the positioning bundle (call sheet, prep page, per-position cards). The engine (`src/reports/positioning.py`) refreshes both tables atomically on every scout run and every standalone-report generation. `team_position_aggregate` stores the per-position team-aggregate star; `batter_positioning` stores per-batter deviation values and zone assignments relative to that star.
 
 **`batter_positioning`** -- one row per (batter × fielding position × season × perspective):
 
 | Column | Type | Notes |
 |--------|------|-------|
-| `player_id` | `TEXT PK` | FK to `players(player_id)` -- the opposing batter |
+| `player_id` | `TEXT PK` | FK to `players(player_id)` |
 | `team_id` | `INTEGER PK` | FK to `teams(id)` -- the batter's team (scouted opponent) |
-| `season_id` | `TEXT PK` | FK to `seasons(season_id)` -- season slug, e.g. `2026-spring-hs` |
-| `perspective_team_id` | `INTEGER PK` | FK to `teams(id)` -- whose API pull produced the `spray_charts` rows that fed the engine. Part of the PK per the perspective-provenance invariant: two LSB teams scouting the same opponent produce independent rows without collision. |
-| `position` | `TEXT PK` | One of `SS`, `2B`, `3B`, `LF`, `CF`, `RF`. P/C/1B are excluded (situation-driven, not spray-driven). |
-| `call_state` | `TEXT NOT NULL` | This position's own call: one of `TRUE`, `LEFT`, `LEFT_SHALLOW`, `LEFT_DEEP`, `RIGHT`, `RIGHT_SHALLOW`, `RIGHT_DEEP`, `MIXED`. |
-| `team_state_call` | `TEXT NOT NULL` | The batter's single team-wide call, derived from the six per-position `call_state` values (TN-4a MIXED rule). Denormalized identically onto all 6 of the batter's rows so the render path reads it directly rather than re-deriving the lattice in SQL. Never NULL. |
-| `direction_shade` | `TEXT` | `left`, `center`, or `right` (NULL when `call_state='TRUE'`). Absolute field direction -- not handedness-relative. |
-| `depth_shade` | `TEXT` | `in`, `normal`, or `deep` (NULL when BIP count is below the 25-BIP depth gate). |
-| `bip_count` | `INTEGER NOT NULL` | Balls in play for this batter. Over-the-fence HRs have NULL coordinates and are excluded from this count. |
-| `hr_count` | `INTEGER NOT NULL` | Over-the-fence HR count (tracked separately because HRs have no x/y and undercount fly-ball tendency). |
-| `is_thin` | `INTEGER NOT NULL` | 1 when `bip_count` is below the thin-data gate (< 10 BIP), 0 otherwise. Thin rows still have all 6 per-position rows written -- they are never skipped. |
-| `zone_concentration` | `REAL` | Fraction of the position-relevant BIP in the dominant zone (NULL when `call_state='TRUE'`). |
-| `direction_deviation` | `INTEGER` | Signed ordinal step bucket on the L-R axis: 0 = on base, ±1 = slight shade, ±2 = significant shade. Negative = toward LF, positive = toward RF. NULL when `call_state='TRUE'`. |
-| `depth_deviation` | `INTEGER` | Signed ordinal step bucket on the in-out axis: 0 = on base, ±1 = slight shade, ±2 = significant shade. Negative = shallower, positive = deeper. NULL when `depth_shade` is NULL. |
-| `computed_at` | `TEXT NOT NULL` | UTC timestamp of the last recompute (`datetime('now')`). |
+| `season_id` | `TEXT PK` | FK to `seasons(season_id)` |
+| `perspective_team_id` | `INTEGER PK` | FK to `teams(id)` -- whose API pull produced the spray data |
+| `position` | `TEXT PK` | One of `LF`, `CF`, `RF`, `3B`, `SS`, `2B`. CHECK constraint enforces this set. |
+| `direction_deviation` | `INTEGER` | Signed deviation on the L-R axis relative to the team-aggregate star. Negative = toward LF; positive = toward RF. NULL when the batter is not an outlier. |
+| `depth_deviation` | `INTEGER` | Signed deviation on the in-out axis relative to the star. Negative = in (toward home plate); positive = deep. NULL when not an outlier. |
+| `zone_id` | `TEXT` | Compass zone letter (`A`--`H`) derived from `(sign(direction_deviation), sign(depth_deviation))`. NULL when the batter plays the team default at this position. CHECK constraint enforces `A`--`H` or NULL. |
+| `is_thin` | `INTEGER NOT NULL` | 1 when `bip_count < 10`. Thin batters contribute to the team-aggregate star but do not earn per-batter outlier markers. |
+| `bip_count` | `INTEGER NOT NULL` | Balls in play for this batter. HRs (no x/y) are excluded. |
+| `hr_count` | `INTEGER NOT NULL` | Over-the-fence HR count. |
+| `computed_at` | `TEXT NOT NULL` | UTC timestamp of the last recompute. |
 
 **Primary key**: 5-part `(player_id, team_id, season_id, perspective_team_id, position)`.
 
-**Index**: `idx_batter_positioning_lookup` on `(team_id, season_id, perspective_team_id)` -- serves the report-bundle read pattern (fetch all rows for a given opponent/season/perspective, then group in application code by batter and position).
+**Index**: `idx_batter_positioning_lookup` on `(team_id, season_id, perspective_team_id)`.
 
-**Idempotency**: delete-then-insert within a single transaction scoped to `(team_id, season_id, perspective_team_id)`. `INSERT OR REPLACE` alone would not remove stale rows for batters who drop out of the lineup or below the minimum-BIP threshold between runs.
+**`team_position_aggregate`** -- one row per (opponent × season × perspective × fielding position):
 
-The migration is applied automatically on container startup. The table is populated solely by the positioning pipeline stage.
+| Column | Type | Notes |
+|--------|------|-------|
+| `team_id` | `INTEGER PK` | FK to `teams(id)` -- the scouted opponent |
+| `season_id` | `TEXT PK` | FK to `seasons(season_id)` |
+| `perspective_team_id` | `INTEGER PK` | FK to `teams(id)` -- whose data produced this aggregate |
+| `position` | `TEXT PK` | One of `LF`, `CF`, `RF`, `3B`, `SS`, `2B` |
+| `star_x` | `REAL NOT NULL` | SVG x-coordinate of the team-aggregate star for this position |
+| `star_y` | `REAL NOT NULL` | SVG y-coordinate (y=0 at deep CF, y increases toward home plate) |
+| `bip_count` | `INTEGER NOT NULL` | Total opponent BIPs that fed the aggregate |
+| `is_low_confidence` | `INTEGER NOT NULL` | 1 when `bip_count < 50` (thin or zero coverage tier); 0 when full coverage |
+| `computed_at` | `TEXT NOT NULL` | UTC timestamp of the last recompute |
+
+**Primary key**: 4-part `(team_id, season_id, perspective_team_id, position)`. The PK serves the per-bundle lookup directly; no additional index is needed.
+
+**Single-writer invariant**: the engine (`src/reports/positioning.py`) is the sole writer for both tables. Render layer and Tier 2 LLM read from these tables but never write to them.
+
+**Atomicity**: both tables are refreshed together in a single SQLite transaction scoped to `(team_id, season_id, perspective_team_id)`. A partial state (aggregate updated but per-batter rows not, or vice versa) would break the render invariants -- outlier markers are measured relative to the star in `team_position_aggregate`.
+
+**Lazy population**: `team_position_aggregate` rows are created on the first scout run or `bb report generate` after the migration applies. No backfill migration runs at deploy time.
+
+**Operator note**: the local `data/app.db` on the branch has E-228's v1 migration 002 applied. When E-229 lands, the runner sees "002 already applied" and skips, leaving the on-disk schema at v1. Drop and recreate: `rm data/app.db && docker compose up -d --build app`.
 
 ### E-196: Migration 014 -- Game Start Time and Timezone
 
@@ -282,55 +298,83 @@ Sub-navigation links Users, Teams, and Opponents pages across all admin views. T
 
 `team_resolver.py` uses the shared HTTP session factory (`src/http/session.py`) with a 10-second timeout. No authentication headers are sent -- these are public GameChanger API endpoints. `url_parser.py` is a pure string parser (imports only `re`, `dataclasses`, and `urllib.parse`) and makes no HTTP calls.
 
-## Defensive Positioning Engine (E-228)
+## Defensive Positioning Engine (E-229)
 
-The positioning engine converts `spray_charts` data into per-batter, per-fielding-position recommendations stored in `batter_positioning`. It has a deliberate two-tier split: **Tier 1 decides, Tier 2 narrates**.
+The positioning engine converts `spray_charts` data into per-batter, per-fielding-position spatial deviation values stored in `batter_positioning`, plus team-aggregate optimal positions stored in `team_position_aggregate`. It has a deliberate two-tier split: **Tier 1 decides, Tier 2 narrates**.
 
 ### Tier 1 / Tier 2 Split
 
 | Layer | Module | Role | Fatal? |
 |-------|--------|------|--------|
-| **Tier 1 (deterministic)** | `src/reports/positioning.py` | Reads `spray_charts`, applies sample gates, computes an optimal fielding point per batter per position, quantizes to a `call_state` enum key. Writes to `batter_positioning`. Always runs. | N/A -- always runs |
-| **Tier 2 (optional LLM)** | `src/reports/positioning_llm.py` | Reads the Tier 1 results and writes a 1-2 sentence plain-English rationale per flagged batter. Enabled only when `OPENROUTER_API_KEY` is set. Never touches `spray_charts`. Never sees raw x/y coordinates. Never influences the Tier 1 call. | Non-fatal -- per-batter failures log WARNING and are swallowed |
+| **Tier 1 (deterministic)** | `src/reports/positioning.py` | Reads `spray_charts`, computes the whole-spray centroid, projects it to a per-position team-aggregate star (position-scaled per TN-8), then computes `(direction_deviation, depth_deviation)` and `zone_id` per batter per position relative to that star. Writes to both `team_position_aggregate` and `batter_positioning` atomically. Always runs. | N/A -- always runs |
+| **Tier 2 (optional LLM)** | `src/reports/positioning_llm.py` | At bundle-render time, reads Tier 1 results and produces a 1-2 sentence plain-English rationale per flagged batter. Enabled only when `OPENROUTER_API_KEY` is set. Never touches `spray_charts`. Never writes to any table (rationale is render-time ephemeral, threaded into template context by the bundle assembler). Never influences the Tier 1 call. | Non-fatal -- per-batter failures log WARNING and are swallowed |
 
-**Guardrail**: the call sheet is fully usable with the LLM layer disabled. Every flagged batter still shows its named state, per-position cells, and confidence column; only the rationale sentence is absent.
+**Guardrail**: the bundle is fully usable with the LLM layer disabled. Every flagged batter still shows its zone letter and field position; only the NOTE column rationale is absent.
 
-**Why deterministic-decides, LLM-narrates**: the threshold cutoffs (sample gates, sector geometry) are irreducible -- an LLM would only obscure them in non-reproducible prose. The engine's calls must be reproducible and auditable for a pre-game card. The LLM's role is limited to framing the call in plain English for the coach.
+**Why deterministic-decides, LLM-narrates**: the positioning math (centroid projection, deviation quantization, sample gates) is reproducible and auditable -- a pre-game card must produce the same answer every time. The LLM's role is limited to framing the call in plain English for the coach.
 
-### Swappable Geometry Seam
+### Reference Frame: Team-Aggregate Star
 
-The zone-assignment and per-position filtering logic is isolated behind a swappable seam interface (`assign_zone` and `bips_for_position` in `src/reports/positioning.py`):
+The E-228 model used textbook `BASE_POSITIONS` (where a fielder stands in practice) as the reference frame, which caused every opponent to default to "straight up." E-229 replaces this:
 
-- **v1 geometry**: fixed angular-sector zones from the `atan2` pattern already in `src/charts/spray.py`, plus a simple SVG-y threshold (`INFIELD_OUTFIELD_SVG_Y_THRESHOLD`) separating infield and outfield depth bands.
-- **Future swap**: a clustering-derived zone set replaces only `assign_zone` and `POSITION_RESPONSIBILITY_SECTORS` without touching the engine's Stage C quantization or the `batter_positioning` schema.
+- The engine computes a **whole-spray centroid** from all of the opponent's batted-ball coordinates.
+- Each position's **star** = textbook `BASE_POSITION` for that position offset in the direction of the centroid, scaled by that position's range (outfielders cover more ground than infielders, so the same centroid displacement produces a larger physical adjustment for LF than for 2B). This is the **position-scaled projection**.
+- Per-batter deviations are measured from the star, not from the textbook. A batter who hits the ball exactly at the star contributes `zone_id = NULL` (team default). Only batters who consistently deviate from the star earn a zone letter.
 
-The seam contract: the engine consumes `ZoneAssignment.zone` (a string label). The engine never reaches past the seam into the underlying geometry implementation.
+### Zone Assignment
 
-### Per-Position Evaluation
+The zone letter is assigned from the sign of `(direction_deviation, depth_deviation)`:
 
-Each fielding position is evaluated independently against its **responsibility sector** -- the subset of the batter's balls in play (BIP) that fall within that position's coverage area. This means:
+| `sign(direction)` | `sign(depth)` | Zone |
+|-------------------|---------------|------|
+| negative | negative | A (in-left) |
+| negative | 0 | B (left) |
+| negative | positive | C (deep-left) |
+| 0 | negative | D (in) |
+| 0 | 0 | NULL (star -- no zone label) |
+| 0 | positive | E (deep) |
+| positive | negative | F (in-right) |
+| positive | 0 | G (right) |
+| positive | positive | H (deep-right) |
 
-- SS and 2B can land on different `call_state` values for the same batter.
-- `team_state_call = 'MIXED'` is the result when two or more qualifying positions land in non-adjacent states on the adjacency lattice (`LEFT_DEEP` … `TRUE` … `RIGHT_DEEP`).
+Sign convention: `direction_deviation` negative = toward LF; positive = toward RF. `depth_deviation` negative = in (toward home plate); positive = deep. Magnitude is NOT used for letter assignment -- the field-plot position on the card carries magnitude. The eight-zone compass is stable across all opponents: fielders learn it once and use it all season.
 
-Positions with a `call_state` of `TRUE` (thin data or no tendency) do not by themselves force a `MIXED` team-state call.
+### Sample-Size Gates
 
-### Stored vs. Display Vocabulary
+| Threshold | Effect |
+|-----------|--------|
+| `bip_count < 10` (`is_thin = 1`) | Batter contributes to the team-aggregate centroid but does NOT earn a per-batter outlier marker |
+| 10 to 49 BIPs total for opponent | Thin-data tier: star rendered with a badge; `is_low_confidence = 1`; spray-density background hidden |
+| 15 to 49 BIPs | Thin-data tier (lower bound) |
+| 50+ BIPs for opponent | Full-coverage tier: `is_low_confidence = 0`; star rendered solid with BIP count caption; spray-density background shown |
+| 0 to 14 BIPs for opponent | Zero-coverage: no star rendered; "Not enough spray data -- play your standard alignment" message on all artifacts |
 
-The `batter_positioning` table stores **absolute enum keys** (`TRUE`, `LEFT`, `LEFT_SHALLOW`, etc.). The **display call-words** a coach sees on the printed card are resolved at render time from a configurable constants dict in `src/reports/renderer.py` (`POSITIONING_CALL_WORDS`). The two layers are intentionally separate:
+Zero-coverage state does NOT fall back to textbook `BASE_POSITIONS` for the star. That would re-introduce the E-228 reference-frame bug for first-time opponents.
 
-| Stored key | Default display word |
-|-----------|---------------------|
-| `TRUE` | STRAIGHT UP |
-| `LEFT` | SHADE LEFT |
-| `LEFT_SHALLOW` | SHADE LEFT SHALLOW |
-| `LEFT_DEEP` | SHADE LEFT DEEP |
-| `RIGHT` | SHADE RIGHT |
-| `RIGHT_SHALLOW` | SHADE RIGHT SHALLOW |
-| `RIGHT_DEEP` | SHADE RIGHT DEEP |
-| `MIXED` | MIXED |
+### Bundle Structure
 
-To change the call-words, edit `POSITIONING_CALL_WORDS` in `src/reports/renderer.py`. The stored data does not change.
+The engine output drives a four-page mixed-orientation PDF bundle assembled by `src/reports/generator.py`:
+
+| Page | Template | Content |
+|------|----------|---------|
+| 1 | `positioning_call_sheet.html` | Letter landscape call sheet: jersey × position matrix, alphabetical sort, zone letters or center-dots |
+| 2 | `positioning_prep.html` | Letter landscape prep page: full-field overlay of all 6 stars + all outlier pills, flagged-first sidebar |
+| 3 | `positioning_cards.html` (sheet 1) | Portrait 4-up: LF / CF / RF / 3B player cards |
+| 4 | `positioning_cards.html` (sheet 2) | Portrait 4-up: SS / 2B / compass-key / opponent-context-card |
+
+The `regenerate_positioning_bundle(slug)` public function in `src/reports/generator.py` re-renders an existing bundle without re-running the engine.
+
+### Pipeline Surfaces
+
+The bundle is generated automatically by three paths:
+
+| Path | Entry point | Behavior |
+|------|-------------|----------|
+| Scouting auto-bundle | `bb data scout` / `run_scouting_sync` in `src/pipeline/trigger.py` | Runs after positioning recompute as step 7; non-fatal |
+| Standalone CLI | `bb report generate <public_id>` via `src/cli/report.py` | Runs dedup sweep + recompute + bundle generate for any public_id |
+| Dashboard link | Opponent dashboard in `src/api/routes/dashboard.py` | Reads most-recent `ready` bundle for the opponent; link resolves to `/reports/{slug}` |
+
+Both the scouting and standalone paths produce identical `batter_positioning` + `team_position_aggregate` rows for the same opponent (pipeline parity requirement).
 
 ## Cross-References
 
@@ -340,4 +384,4 @@ To change the call-words, edit `POSITIONING_CALL_WORDS` in `src/reports/renderer
 
 ---
 
-*Last updated: 2026-05-15 | Source: E-228 (migration 002 batter_positioning table, Tier 1/Tier 2 positioning engine, swappable geometry seam, stored vs. display vocabulary split), E-196 (migration 014 start_time/timezone, game ordering), E-195 (migration 009 plays/play_events tables), E-173 (unified resolve route, subnav badge, discover-opponents route removed), E-167 (migration 007 name+season_year index), E-158 (src/charts/ module, migration 006 spray chart additions), E-120-06 (opponent_links table, sub-nav Opponents, url_parser correction, port 8001, teams columns), E-115-02 (schema and admin sections rewritten for E-100 fresh-start schema), E-042 (admin team management, url_parser, team_resolver), E-003-02 (original)*
+*Last updated: 2026-05-18 | Source: E-229 (migration 002 v2 schema rewrite, team_position_aggregate table, team-aggregate engine rewrite, compass zone vocabulary, bundle structure, pipeline surfaces), E-228 (migration 002 original, bundle architecture), E-196 (migration 014 start_time/timezone, game ordering), E-195 (migration 009 plays/play_events tables), E-173 (unified resolve route, subnav badge, discover-opponents route removed), E-167 (migration 007 name+season_year index), E-158 (src/charts/ module, migration 006 spray chart additions), E-120-06 (opponent_links table, sub-nav Opponents, url_parser correction, port 8001, teams columns), E-115-02 (schema and admin sections rewritten for E-100 fresh-start schema), E-042 (admin team management, url_parser, team_resolver), E-003-02 (original)*

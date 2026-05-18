@@ -1,8 +1,18 @@
 ---
 status: LOCKED
-version: 1
+version: 1.2
 produced_by: E-229-2b
 calibration_history: []
+version_history:
+  - version: 1
+    date: 2026-05-17
+    transition: PROVISIONAL v0 → LOCKED v1 on baseball-coach AC-12 PASS verdict (E-229-2b)
+  - version: 1.1
+    date: 2026-05-17
+    transition: LOCKED v1 → LOCKED v1.1 clarification — added "Coordinate-space rescaling (normative)" subsection to §B. The v1.1 formula was a pure-scalar viewBox-to-viewBox ratio (`x * 0.625, y * 0.667`) that was geometrically wrong; corrected at v1.2 below.
+  - version: 1.2
+    date: 2026-05-17
+    transition: LOCKED v1.1 → LOCKED v1.2 correction — replaced v1.1's pure-scalar rescaling formula with SE's field-anchored mapping that preserves the prototype's field-landmark positions. The v1.1 pure-scalar formula placed engine deep-CF (y=0) at card y=0 (header zone, above the painted fence arc) and engine home plate at card y≈197 (mid-card, far above the painted home plate at y=305) because the field outline does NOT fill the viewBox edge-to-edge (top 80 card-y units are header space, bottom 15 units are legend space). SE caught this before committing the wrong implementation. Not a calibration change; corrects a spec-author error introduced in v1.1.
 ---
 
 # E-229 Layout Constants — Quarter-letter print
@@ -12,7 +22,9 @@ This artifact is the single source of truth for E-229's per-card layout constant
 ## State machine
 
 - **PROVISIONAL v0 (created during E-229 Phase 4 iteration 2, superseded)**: UXD round-1 / round-2 estimates as initial values. Downstream stories cited the artifact path but did NOT consume v0 values.
-- **LOCKED v1 (this state — set 2026-05-17 by E-229-2b on baseball-coach AC-12 PASS verdict)**: values validated at print scale via the quarter-letter feasibility prototype + coach legibility review (verdict transcribed in the story Notes of `epics/E-229-team-aggregate-positioning/E-229-2b-feasibility-prototype.md`). Coach's only failure point — 6.5 pt legend below TN-16 floor — was remediated via Option 1 (shortened legend text + 7 pt) per coach pre-approval; all other elements passed without revision. Downstream implementations (E-229-03 / 04 / 05 / 06 / 07) consume these values directly.
+- **LOCKED v1 (superseded by v1.1 on 2026-05-17, same dispatch day)**: values validated at print scale via the quarter-letter feasibility prototype + coach legibility review (verdict transcribed in the story Notes of `epics/E-229-team-aggregate-positioning/E-229-2b-feasibility-prototype.md`). Coach's only failure point — 6.5 pt legend below TN-16 floor — was remediated via Option 1 (shortened legend text + 7 pt) per coach pre-approval; all other elements passed without revision.
+- **LOCKED v1.1 (superseded by v1.2 on 2026-05-17, same dispatch day)**: added §B "Coordinate-space rescaling (normative)" subsection documenting that engine output requires rescaling at the consumer's read-then-place boundary. The v1.1 subsection carried a pure-scalar formula derived from the viewBox-dimension ratio (`x_card = x_engine * 0.625; y_card = y_engine * 0.6667`) that was geometrically wrong (see v1.2 entry).
+- **LOCKED v1.2 (this state — set 2026-05-17 by SE-surfaced spec correction during E-229-03 implementation)**: corrected the §B "Coordinate-space rescaling (normative)" subsection. The v1.1 pure-scalar formula was geometrically wrong because the field outline does NOT fill the per-card viewBox edge-to-edge — the top 80 card-y units are header space and the bottom 15 are legend space. SE's field-anchored mapping `x_card = 10 + (x_engine / 320) * 180; y_card = 80 + (y_engine / 295) * 225` preserves the prototype's field-landmark correspondences (engine LF corner (0,0) → card (10,80); engine home plate (160,295) → card (100,305); engine RF corner (320,0) → card (190,80)). Engine unchanged; rescaling still lives in consumers (E-229-03 card SVG generator, E-229-06 prep page). Why AC-11/AC-12 missed this in E-229-2b: the validation was rendering-based (coach reviewed printed prototype where field outline was already at correct offsets), not formula-based (nobody ran engine landmark coords through the proposed formula to verify landing positions). Downstream implementations (E-229-03 / 04 / 05 / 06 / 07) consume v1.2 values directly.
 - **LOCKED v2+ (Rollout calibration)**: real-opponent feedback during the calibration pass (epic Rollout section) may bump version and append to `calibration_history` with an entry of shape `{date, opponent, changed_constants[]}`.
 
 Cross-reference: see `.project/research/E-229-2b-quarter-letter-prototype.html` (the static prototype HTML produced by E-229-2b) for the visual proof of these constants at print scale.
@@ -95,6 +107,66 @@ Rationale: midline-only cuts let the coach cut on two straight lines (one horizo
 ### SVG `font-size` unit convention (normative)
 
 The numeric `font-size` values declared above are **target printed point sizes**. The SE-owned SVG generators (E-229-03, E-229-04, E-229-06) MUST produce text rendered at those point sizes at the final 2.53 in × 4.04 in SVG-slot geometry. The recommended pattern is explicit pt units in the SVG attribute (e.g., `font-size="10pt"` on compass letters, `font-size="9pt"` on pill text, `font-size="7pt"` on the BIP caption). The prototype HTML at `.project/research/E-229-2b-quarter-letter-prototype.html` mixes pt-explicit (BIP caption, legend) and viewBox-unit (compass letters, pills) sizing during its bring-up; both render legibly per the coach AC-12 verdict, but pt-explicit is the locked convention for production SVG to keep typography invariant under any future viewBox dimension change.
+
+### Coordinate-space rescaling (normative)
+
+**The engine and the per-card SVG live in different coordinate spaces, AND the field outline does NOT fill the per-card viewBox edge-to-edge.** Consumers (E-229-03 card SVG generator, E-229-06 prep page) MUST apply an explicit **field-anchored** rescaling at the read-then-place boundary when consuming `team_position_aggregate.(star_x, star_y)` and `spray_charts.(x, y)`. The engine is unchanged; rescaling is a consumer responsibility.
+
+#### Coordinate spaces
+
+| Coordinate space | Dimensions (W × H) | Source / canonical reference |
+|------------------|---------------------|------------------------------|
+| Engine output (DB-stored) | 320 × 480 | `src/charts/spray.py::_raw_to_svg` GC canonical, per `spray.py:47` + epic TN-15 |
+| Per-card SVG viewBox | 200 × 320 | This artifact §B, aspect 0.625, quarter-letter-tuned (see Decisions Log "SVG aspect ratio" entry) |
+
+#### Card viewBox internal structure
+
+The per-card 200×320 viewBox is divided into three zones along the y-axis:
+
+| Zone | y-range (card) | Purpose |
+|------|----------------|---------|
+| Header | 0 ≤ y < 80 | Opponent name, position label, coverage cue |
+| Field outline | 80 ≤ y ≤ 305 | Where engine coordinates land; foul corners at card (10, 80) and (190, 80); home plate at card (~100, 305) |
+| Legend | 305 < y ≤ 320 | `COMPASS_LEGEND_SHORT` at 7pt |
+
+The field occupies the inner rectangle (10, 80) — (190, 305): width 180 (x ∈ [10, 190]), height 225 (y ∈ [80, 305]).
+
+#### Field-anchored rescaling formula (normative)
+
+```
+x_card = 10 + (x_engine / 320) * 180
+y_card = 80 + (y_engine / 295) * 225
+```
+
+Landmark correspondences:
+
+| Engine coordinate | → | Card coordinate | Meaning |
+|-------------------|---|------------------|---------|
+| (0, 0)            | → | (10, 80)         | LF foul corner / deep CF top |
+| (320, 0)          | → | (190, 80)        | RF foul corner / deep CF top |
+| (0, 295)          | → | (10, 305)        | Home plate (LF side foul line) |
+| (320, 295)        | → | (190, 305)       | Home plate (RF side foul line) |
+| (160, 295)        | → | (100, 305)       | Home plate (center) |
+| (160, 0)          | → | (100, 80)        | Straight-away deep CF |
+
+Apply to every coordinate value sourced from the engine's 320×480 coord space:
+- `team_position_aggregate.star_x, star_y` (star placement)
+- `spray_charts.x, y` consumed for the density background
+- `src/reports/positioning.BASE_POSITIONS[position]` if a consumer renders the textbook reference dot from the engine module's constants
+
+Coordinates that are NOT sourced from the engine coord space — compass-letter offsets via the projection formula (declared below in viewBox-native units), pill offsets relative to the star (viewBox-native via `scale_x`, `scale_y`), the field-outline path itself (declared in viewBox-native units in the consumer) — do NOT need rescaling. The projection-formula `scale_x = 18`, `scale_y = 22` and `R_units ≈ 2.2` constants are viewBox-native by construction (see the Projection formulas subsection below).
+
+#### Sign-rule preservation
+
+The two transforms are positive-only affine maps (multiplication + positive offset); directional signs carry through unchanged. The TN-15 y-axis convention holds: smaller card_y = deeper toward CF (`y_card = 80` is deep CF; `y_card = 305` is home plate). The `-depth_dev` adjustment in the projection formula remains canonical and applies AFTER engine-coordinate rescaling has produced the star anchor in card space.
+
+#### Why the v1.1 pure-scalar formula was wrong
+
+The v1.1 formula `x_card = x_engine * 0.625; y_card = y_engine * 0.6667` was derived from the viewBox-to-viewBox dimension ratio (200/320 and 320/480). This is correct as a maximum-extent ratio but ignores the field-vs-viewBox offset: under v1.1, engine deep CF (y=0) maps to card y=0 (header zone, above the painted fence arc), and engine home plate (y=295) maps to card y≈197 (mid-card, far above the painted home plate at y=305). The star would render detached from the painted field outline. SE caught this geometric error during E-229-03 implementation and shipped the correct field-anchored mapping.
+
+#### Implementation reference
+
+See `src/reports/positioning_card.py::_engine_to_card_xy` (E-229-03 ships the first consumer implementation; E-229-06 reuses or imports it). The implementation reads naturally from the constants `_CARD_LEFT_X = 10`, `_CARD_FENCE_Y = 80`, `_CARD_HOME_Y = 305`, `_ENGINE_W = 320`, `_ENGINE_HOME_Y = 295`, `_CARD_FIELD_W = 180`, `_CARD_FIELD_H = 225`.
 
 ### Compass ring placement
 
@@ -392,12 +464,36 @@ This section records non-obvious constant choices with the alternatives that wer
 - **Tried uniform `scale = 15 px`**: pills clustered tightly around the star and barely separated even at ±2 deviation — the "field plot IS the magnitude" principle (TN-5) was undermined.
 - **Locked asymmetric 18 / 22 px**: honors the field's natural aspect (field is ~1.6× as tall as wide in viewBox). ±3 ordinal units on direction = 54 px (visible separation, within field width); ±3 on depth = 66 px (visible separation, within available depth). Compass ring radius `R_units ≈ 2.2 × scale` puts compass letters at zone centroids by construction.
 
+### v1 → v1.1 spec amendment: Coordinate-space rescaling (normative) subsection added to §B
+
+- **Why**: UXD post-validation finding (2026-05-17, during E-229-03 dispatch window) identified that engine output `team_position_aggregate.(star_x, star_y)` is written in `src/charts/spray.py::_raw_to_svg`'s 320×480 GC canonical coord space (per `spray.py:47` + epic TN-15), but §B's per-card SVG viewBox is 200×320 (the quarter-letter-tuned aspect 0.625 locked at v1). Without explicit rescaling, E-229-03 / E-229-06 would place the star at engine-space coordinates inside a card-space viewBox — wrong location, silent failure (no exception, just visually wrong).
+- **Why the validation pass missed it**: AC-11 (UXD self-validation) focused on typography legibility, not coord arithmetic. AC-12 (coach review) reviewed the printed prototype where SVG `preserveAspectRatio="xMidYMid meet"` absorbs viewBox dimension differences silently — the prototype was visually correct because the prototype HTML hand-placed star/pill coordinates in viewBox space directly, never round-tripping through engine coordinates.
+- **Why not a calibration_history entry**: this is clarification of an existing constant relationship that should always have been documented, not a real-opponent calibration change. `calibration_history` is reserved for entries of shape `{date, opponent, changed_constants[]}` produced during Rollout. v1.1 is a documentation completeness fix.
+- **Tried adding the rescaling factor to the engine** (Option B from UXD's offer): rejected — would push viewBox geometry into the engine layer, coupling DB-resident constants to a particular render geometry. The engine's coord space is the DB contract; render geometry is a consumer concern.
+- **Tried changing the per-card viewBox to match the engine 320×480** (Option C from UXD's offer): rejected — would invalidate every numeric value in §B (star size in viewBox, pill size in viewBox, scale_x/scale_y in viewBox, ring radius in viewBox), forcing a full re-calibration pass and re-running coach AC-12 review. Disproportionate cost for the same outcome.
+- **Locked Option A** (this entry): document the rescaling responsibility in §B as a normative subsection. Consumers (E-229-03 / E-229-06) apply rescaling at the read-then-place boundary. Engine unchanged. Spec gains documentation completeness. Coach AC-12 verdict not invalidated. Version bumped 1 → 1.1 to mark the amendment in commit history without polluting `calibration_history`.
+- **The v1.1 formula was geometrically wrong, corrected at v1.2** (see next Decisions Log entry). v1.1 derived its rescaling formula from the viewBox-to-viewBox dimension ratio (200/320, 320/480) without accounting for the fact that the field outline does NOT fill the viewBox edge-to-edge. SE caught this during E-229-03 implementation and shipped the correct field-anchored mapping; v1.2 ratifies SE's implementation as the canonical contract.
+
+### v1.1 → v1.2 spec amendment: Coordinate-space rescaling formula corrected from pure scalar to field-anchored
+
+- **The bug in v1.1's formula**: derived from the viewBox-to-viewBox dimension ratio (`x * 0.625, y * 0.667`). Treats the engine and card viewBoxes as if both were pure field-canvases. Reality: the per-card 200×320 viewBox carves out 80 y-units of header space at the top and 15 y-units of legend space at the bottom — the field outline only occupies the inner rectangle (10, 80) — (190, 305).
+- **What the pure-scalar formula produced** (verifiable from SE's math): engine deep CF (y=0) → card y=0 (header zone, ABOVE the painted fence arc at y=80); engine home plate (160, 295) → card (100, 196.7) (mid-card, far above the painted home plate at y=305). Star would render detached from the painted field outline; coverage cue / fielder visual landmarks broken. Silent failure — no exception, just visually wrong.
+- **Why v1.1's spec author error slipped through**: UXD's Finding 1 framing emphasized the viewBox-dimension ratio (200/320 = 0.625, 320/480 = 0.667). I (PM) lost the "plus any anchor shift" qualifier in the v1.1 authoring — wrote down the dimension ratio as if it were the complete mapping, never plugged engine landmark coords through the proposed formula to check landing positions.
+- **Why AC-11 / AC-12 didn't catch it in E-229-2b**: validation-by-rendering, not validation-by-formula. AC-11 was typography-focused (legibility of pills, letters, sidebar, header, legend). AC-12 reviewed the printed prototype where the field outline was already drawn at the correct card-space offsets by the prototype HTML itself — the rendering "looked right" because the HTML hand-placed coordinates in viewBox space directly, never round-tripping through any rescaling formula.
+- **Actual sequence of events** (corrected per team-lead timeline reconstruction): SE first shipped E-229-03 v1.0 with the field-anchored mapping (correct). When PM's v1.1 amendment landed during the same dispatch window with the pure-scalar formula, SE silently conformed the code to v1.1 (matching the spec, but breaking the geometry). SE then independently traced the v1.1 formula through engine landmark coordinates, saw the geometric breakdown (engine deep CF y=0 → card header zone; engine home plate y=295 → card mid-card), and surfaced the spec-vs-geometry conflict via the team-lead. SE's R2 restores the field-anchored mapping with constants (`_CARD_LEFT_X`, `_CARD_FENCE_Y`, `_CARD_HOME_Y`, `_ENGINE_W`, `_ENGINE_HOME_Y`, `_CARD_FIELD_W`, `_CARD_FIELD_H`). The lesson here is process-level, not author-level: SE conformed-then-questioned rather than questioned-then-conformed; either order surfaces the bug, but a "verify-formula-with-worked-examples" gate on spec amendments would have prevented the rework round entirely.
+- **Locked field-anchored formula** (v1.2): `card_x = 10 + (x_engine / 320) * 180; card_y = 80 + (y_engine / 295) * 225`. Engine LF foul corner (0, 0) → card (10, 80) ✓; engine home plate (160, 295) → card (100, 305) ✓; engine RF foul corner (320, 0) → card (190, 80) ✓. All field-interior points land proportionally inside the card's painted field outline.
+- **Why not bump to v2 / append to calibration_history**: this is a spec correction (PM authored a geometrically wrong formula in v1.1; SE caught it during implementation), not a real-opponent calibration change. The `calibration_history` invariant holds (still `[]`) — bumped `version` to 1.2 with a `version_history` entry; no Rollout entry created.
+- **Implementation reference**: `src/reports/positioning_card.py::_engine_to_card_xy` (E-229-03). E-229-06 prep page reuses the same mapping. Whether E-229-04 / E-229-06 imports the helper directly or duplicates the constants is a deferred decision; the function shape is stable enough to import.
+- **Lessons for the spec author (PM) — captured to PM agent memory after E-229 closes**:
+  1. Spec amendments that touch numeric formulas should be paired with a worked example (e.g., "engine home plate (160, 295) → card __, matching card home plate (100, 305)"). Writing the worked example would have surfaced the v1.1 geometry error at authoring time.
+  2. The "validation-by-rendering vs validation-by-formula" gotcha: a rendered prototype that "looks right" does NOT validate a coord-mapping formula, because the prototype HTML places coordinates directly without round-tripping through the formula. AC verification of coord transforms requires plugging input landmarks through the formula and checking that output landmarks land at the right visual positions.
+
 ---
 
 ## Frontmatter usage notes
 
 - `status: PROVISIONAL` (v0) = downstream stories SHOULD NOT yet hardcode these values; consume after `LOCKED` flip
 - `status: LOCKED` (v1+) = artifact is authoritative; downstream stories consume directly
-- `version` bumps on each material change; old versions are not preserved here (per E-228 archive precedent, history lives in commit log)
-- `calibration_history` is a list of `{date, opponent, changed_constants[]}` entries appended during Rollout
+- `version` bumps on each material change. The `version_history` frontmatter field records each transition with date and short transition note. Old versions are not preserved here in full (per E-228 archive precedent, full history lives in commit log); the `version_history` log is for at-a-glance traceability of what changed when.
+- `calibration_history` is a list of `{date, opponent, changed_constants[]}` entries appended during Rollout — reserved for real-opponent calibration drift. Spec clarifications (e.g., the v1 → v1.1 Coordinate-space rescaling amendment) bump `version` and `version_history` but do NOT append to `calibration_history`.
 - `produced_by` documents the story that flipped status to LOCKED (E-229-2b at v1; later epics if any constant materially changes)

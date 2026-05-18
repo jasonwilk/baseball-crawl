@@ -4,7 +4,7 @@
 [E-229: Team-Aggregate Defensive Positioning](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the card HTML/CSS template renders each per-position card at 4.25"×5.5" portrait geometry, with print CSS supporting a 4-up layout on letter portrait sheets. Each card carries header (opponent + position + coverage cue), field SVG + sidebar lookup side-by-side, and a one-line legend. Two extra layout variants render cleanly: a no-outliers state and a zero-coverage state. Baseball-coach reviews the final layout and signs off.
@@ -95,4 +95,16 @@ software-engineer
 ## Notes
 
 - **Two-blank-slots decision** (per AC-9): LOCKED during incorporation per UXD I-2 + user confirmation: slot 3 = visual compass key, slot 4 = opponent context card. Both render in the same card template family. Implementation details (the visual compass key's layout, the opponent context card's content list) are this story's design call.
-- **Baseball-coach design review record** (per AC-8): TBD — coach's verdict, date, failure points if FAIL, no-failure-modes confirmation if PASS. Coach reviews against the locked typography minimums (pills/letters ≥7–8pt, simple field outline) and the fold-line consideration.
+### Coach design review record (per AC-8)
+
+**Verdict**: PASS (transitive validation per user decision 2026-05-17)
+
+**Review medium**: Transitive validation via E-229-2b's LOCKED v1.2 constants (PASS'd by coach AC-12 on 2026-05-17 against the quarter-letter prototype HTML at `.project/research/E-229-2b-quarter-letter-prototype.html`). E-229-05's `src/api/templates/reports/positioning_cards.html` template implements those constants verbatim: card geometry per artifact §A (4.25"×5.5" outer, 0.15" padding, 4-up sheet), typography per §C and §E (≥7pt floor on legend; 9pt pill text; 10pt compass letters; 7.5pt sidebar), sheet-2 fill content per §D (visual compass key in slot 3 + opponent context card in slot 4), shared design tokens per §F (`COMPASS_LEGEND_SHORT`/`LONG` text, greyscale palette, font family `Arial, Helvetica, sans-serif`). No deviation from the validated visual.
+
+**Review path**: User accepted SE's transitive-validation reasoning rather than requiring a fresh print-ready sample at 4.25"×5.5" geometry. The locked constants ARE what coach reviewed and approved during E-229-2b AC-12; E-229-05's template implementation matches without deviation. SE's transitive argument (template implements LOCKED v1.2 constants verbatim → coach's E-229-2b verdict structurally carries forward) was accepted by the user as the AC-8 record.
+
+**Print-ready sample**: NOT produced for this story. The E-229-2b prototype HTML at `.project/research/E-229-2b-quarter-letter-prototype.html` is the reference print-ready artifact that locks the typography minimums (≥7pt floor) and dugout-glance legibility. E-229-05's template output renders the same visual at the same geometry.
+
+**Calibration follow-up**: if the first-real-opponent calibration pass (epic Rollout) surfaces visual issues the transitive validation didn't catch (e.g., legibility regression from template structure differences vs. the prototype HTML — render path divergence under the bundle PDF pipeline, font fallback drift on a different print server, etc.), the fix lives in E-229-05's template + optionally an artifact constants update at v1.3+. This is a Rollout-note item, not a shippability gate for E-229-05 closure.
+
+**Date**: 2026-05-17

@@ -394,16 +394,17 @@ bb data scout --force
 bb data scout --dry-run
 ```
 
-**What `bb data scout` runs**: Six steps in order:
+**What `bb data scout` runs**: Seven steps in order:
 
 1. **Scouting crawl** (`ScoutingCrawler`) — fetches schedule, roster, and boxscores for each opponent.
 2. **Scouting-spray crawl** (`ScoutingSprayCrawler`) — fetches spray chart data for each scouted opponent.
 3. **Scouting load** (`ScoutingLoader`) — aggregates boxscores into season stats and writes to the database.
 4. **Scouting-spray load** (`ScoutingSprayLoader`) — writes opponent spray chart coordinate data to the `spray_charts` table.
-5. **Positioning recompute** (`compute_positioning`) — recomputes `batter_positioning` rows for the scouted team from the updated `spray_charts` data. Non-fatal: a failure logs WARNING and the scout run completes. Must run after spray load and after the player-dedup sweep (which runs between steps 4 and 5) so dedup has already merged any fractured player stubs.
-6. **Auto-generate report bundle** (`generate_report`) — generates a self-contained scouting report for the scouted team, including the positioning call sheet and player cards. The opponent-dashboard "Defensive Positioning" link resolves to this report. Non-fatal: a failure logs WARNING and the scout run still completes. A prior report (from the last successful scout) remains visible if this step fails.
+5. **Player-dedup sweep** — detects and merges same-team duplicate player entries caused by cross-perspective UUID mismatch. Runs between spray load and positioning recompute so dedup has already merged any fractured player stubs before the engine reads BIP coordinates.
+6. **Positioning recompute** (`compute_positioning`) — refreshes `team_position_aggregate` (one star per position) and `batter_positioning` (per-batter zone assignments) in a single atomic transaction for the scouted team. Non-fatal: a failure logs WARNING and the scout run completes.
+7. **Auto-generate report bundle** (`generate_report`) — assembles the 4-page mixed-orientation positioning bundle for the scouted team. The opponent-dashboard "Defensive Positioning" link resolves to this report. Non-fatal: a failure logs WARNING and the scout run still completes. A prior bundle (from the last successful scout) remains visible if this step fails.
 
-All six steps run automatically when you run `bb data scout`. You can also run the spray steps individually (see [Scouting Spray Chart Pipeline](#scouting-spray-chart-pipeline-bb-data-crawl---crawler-scouting-spray--bb-data-load---loader-scouting-spray) below).
+All seven steps run automatically when you run `bb data scout`. You can also run the spray steps individually (see [Scouting Spray Chart Pipeline](#scouting-spray-chart-pipeline-bb-data-crawl---crawler-scouting-spray--bb-data-load---loader-scouting-spray) below).
 
 **Freshness check**: By default, `bb data scout` skips any opponent scouted within the last 24 hours. Use `--force` to override this and re-scout all opponents unconditionally. The `--team` flag always scouts the specified opponent regardless of when it was last scouted -- `--force --team PUBLIC_ID` is valid but redundant.
 
@@ -470,7 +471,7 @@ Load complete for {gc_uuid} (season={season_id}).
 
 ### Scouting Spray Chart Pipeline (`bb data crawl --crawler scouting-spray` / `bb data load --loader scouting-spray`)
 
-The scouting spray chart pipeline fetches and loads spray chart coordinate data for **opponent (tracked) teams**. It complements the own-team spray chart pipeline and is automatically included as steps 2 and 3 of `bb data scout`.
+The scouting spray chart pipeline fetches and loads spray chart coordinate data for **opponent (tracked) teams**. It complements the own-team spray chart pipeline and is automatically included as steps 2 and 4 of `bb data scout`.
 
 **Pipeline steps -- run in order:**
 
@@ -811,31 +812,51 @@ This behavior is automatic -- no operator decision is required. The system appli
 
 ---
 
-## Defensive Positioning Cards
+## Defensive Positioning Bundle
 
-Defensive positioning cards are printable artifacts bundled inside scouting reports. They turn opposing batters' spray-chart tendencies into a per-fielder positioning plan: a landscape **call sheet** listing every batter the system has data on, plus six portrait **player cards** (one per covered position: SS, 2B, 3B, LF, CF, RF). Both artifacts are generated automatically and are included in every report bundle.
+The positioning bundle is a four-page mixed-orientation PDF that turns opposing batters' spray-chart data into a concrete fielding plan. It is generated automatically on every scout run and on every standalone report generate. See the architecture docs for the engine model; this section covers operator-facing commands and workflows.
+
+### Bundle Contents
+
+| Page | Content | Orientation |
+|------|---------|-------------|
+| 1 | Coach call sheet: jersey × position matrix, zone letters or center-dots, alphabetical sort | Letter landscape |
+| 2 | Coach prep page: full-field overlay of all six position stars + all outlier pills, flagged-first sidebar | Letter landscape |
+| 3 | Player cards: LF / CF / RF / 3B (cut to four 4.25"×5.5" cards) | Letter portrait |
+| 4 | Player cards: SS / 2B / compass-key / opponent-context-card (cut to four 4.25"×5.5" cards) | Letter portrait |
 
 ### Auto-Generate on Every Scout Run
 
-Every `bb data scout` run ends with a positioning recompute and a full report-bundle auto-generate for the scouted opponent. You do not need to run any separate command. The opponent-dashboard "Defensive Positioning" link resolves to the most recent ready report for that team.
+Every `bb data scout` run ends with a positioning recompute and a full bundle auto-generate for the scouted opponent. You do not need to run any separate command. The opponent-dashboard "Defensive Positioning" link resolves to the most recent ready bundle for that team.
 
-Both steps are **non-fatal**: if either the recompute or the auto-generate fails, the scout run completes and the prior report (from the last successful run) remains visible on the dashboard.
+Both the recompute and the auto-generate are **non-fatal**: if either step fails, the scout run completes and the prior bundle (from the last successful scout) remains visible on the dashboard.
 
 ### Standalone Report Path
 
-`bb report generate <public_id>` also produces positioning cards as part of the standard report bundle. The standalone path now runs a **player-dedup sweep before the positioning recompute** — this closes a pre-existing correctness gap where a high-BIP batter could fracture into multiple low-BIP stubs across perspective records, causing the sample gates to misfire. Both steps (dedup sweep and positioning recompute) are non-fatal.
+`bb report generate <public_id>` also produces the full positioning bundle as part of the standard report. The standalone path runs a player-dedup sweep before the positioning recompute to prevent fractured low-BIP player stubs from causing sample gates to misfire.
 
 ```bash
 bb report generate QTiLIb2Lui3b
 ```
 
+### Re-Rendering an Existing Bundle
+
+To re-render a bundle without re-running the engine (for example, after a template change), use the public helper in `src/reports/generator.py`:
+
+```python
+from src.reports.generator import regenerate_positioning_bundle
+regenerate_positioning_bundle(slug)  # slug is the data/reports/{slug}/ directory name
+```
+
+This re-renders from existing `team_position_aggregate` and `batter_positioning` rows. It does NOT re-crawl or re-run the engine.
+
 ### Tier 2 LLM Rationale (Optional)
 
-The call sheet can show a one-to-two sentence plain-English rationale next to each flagged batter explaining why the system made that call. This is written by an optional LLM layer (Tier 2).
+The call sheet and prep page can show a one-to-two sentence plain-English rationale next to each flagged batter explaining the call. This is written by an optional LLM layer at bundle-render time (not persisted to the database).
 
-**Toggle**: Set `OPENROUTER_API_KEY` in `.env` to enable. If unset, the rationale column is simply absent from the call sheet — no error, no broken layout, just an INFO log per skipped batter.
+**Toggle**: Set `OPENROUTER_API_KEY` in `.env` to enable. If unset, the NOTE column on the call sheet and the rationale slot on the prep page are simply absent -- no error, no broken layout, just an INFO log per skipped batter.
 
-If the key is set but the LLM call fails for a specific batter, that failure is caught and logged at WARNING; the remaining batters still get rationale attempts, and the call sheet renders fully with or without rationale.
+If the key is set but the LLM call fails for a specific batter, that failure is caught and logged at WARNING; the remaining batters still get rationale attempts, and the bundle renders fully with or without rationale.
 
 ```bash
 # .env example
@@ -844,32 +865,27 @@ OPENROUTER_API_KEY=sk-or-v1-...
 
 ### Calibration Workflow
 
-The positioning engine ships with provisional constants. Before treating the cards as authoritative with coaching staff, run a calibration pass against your first real opponent dataset.
+The positioning engine ships with provisional constants. Before treating the bundle as authoritative with coaching staff, run a calibration pass against your first real opponent dataset.
 
 **Procedure**:
 
-1. Generate cards for a real opponent: `bb report generate <public_id>`
-2. Open the rendered call sheet alongside the actual spray chart for each flagged batter.
-3. Compare the engine's call against what the spray data visually suggests. If calls seem too aggressive (shading when the batter is roughly centered) or too conservative (staying TRUE for a strong tendency), edit the `# RECALIBRATE`-annotated constants in `src/reports/positioning.py`.
+1. Generate the bundle for a real opponent: `bb report generate <public_id>`
+2. Open the rendered prep page alongside the actual spray chart for each flagged batter.
+3. Compare the stars and pill positions against what the spray data shows visually. If stars seem off (star placed well away from the visual cluster center), edit the position-scaling constants. If too many or too few batters earn outlier pills, adjust the thin-gate and deviation thresholds.
 
-**The 12 recalibration constants** (all in `src/reports/positioning.py`, each marked `# RECALIBRATE after first opponent dataset`):
+**Recalibration constants** (all in `src/reports/positioning.py`, each marked `# RECALIBRATE after first opponent dataset`):
 
 | Constant | What it controls |
 |----------|-----------------|
-| `BIP_THIN_THRESHOLD` | BIP count below which a batter falls to TRUE ("not enough data"). Default: 10. |
-| `BIP_DEPTH_THRESHOLD` | BIP count below which depth shade is suppressed (direction-lean only). Default: 25. |
-| `ZONE_MIN_BIP` | Minimum BIP count in a zone for a direction shade to fire. Default: 4. |
-| `ZONE_MIN_CONCENTRATION` | Minimum fraction of placed BIP in a zone for a direction shade to fire. Default: 35%. |
-| `CONTACT_TYPE_MIN_COUNT` | Minimum count of a contact-type label for the depth knob to fire. Default: 4. |
-| `CONTACT_TYPE_MIN_CONCENTRATION` | Minimum fraction of contact-type-tagged BIP for the depth knob to fire. Default: 35%. |
-| `BASE_POSITIONS` | Textbook fielding positions (per-position SVG-space coordinates). |
-| `DIRECTION_DEVIATION_THRESHOLDS` | L-R axis quantization ladder (slight shade / significant shade cutoffs). |
-| `DEPTH_DEVIATION_THRESHOLDS` | In-out axis quantization ladder (slight shade / significant shade cutoffs). |
-| `MIXED_NON_ADJACENT_PAIRS_THRESHOLD` | How many non-adjacent per-position calls trigger a MIXED team-state call. |
-| `INFIELD_OUTFIELD_SVG_Y_THRESHOLD` | SVG-space y boundary separating infield and outfield depth bands. |
-| `POSITION_RESPONSIBILITY_SECTORS` | Per-position coverage sectors (which zone + depth-band cells each position owns). |
+| `BIP_THIN_THRESHOLD` | BIP count below which a batter is `is_thin = 1` (no outlier marker). Default: 10. |
+| `BASE_POSITIONS` | Textbook fielding positions (per-position SVG-space coordinates) used as the star offset origin. |
+| `POSITION_RANGE_SCALE` | Per-position scaling factors for the centroid displacement (outfielders vs. infielders). |
+| `DIRECTION_DEVIATION_THRESHOLDS` | L-R axis quantization ladder (non-zero deviation cutoffs). |
+| `DEPTH_DEVIATION_THRESHOLDS` | In-out axis quantization ladder (non-zero deviation cutoffs). |
 
 **After calibration**, change the constant's comment from `# RECALIBRATE after first opponent dataset` to `# Calibrated <date> against <opponent>, N games`.
+
+**Second calibration job**: After the first real-opponent calibration pass, assess whether per-batter centroids are tight enough to justify pulling `IDEA-072` (Clustering-Derived Empirical Fielding Zones) forward. If batter pills are consistently clustered within a zone, the current model is working; if they scatter widely, clustering may help.
 
 ---
 
@@ -1189,4 +1205,4 @@ For the expected data volume (~30 games x 4 teams x a few seasons), the database
 
 ---
 
-*Last updated: 2026-05-15 | Source: E-228 (defensive positioning cards, bb data scout 6-step flow, auto-generate report bundle, standalone dedup-gap fix, OPENROUTER_API_KEY toggle, calibration workflow), E-221 (team delete cross-perspective gate, cascade consolidation, retention flash message), E-199 (standalone reports section, cascade-delete behavior), E-198 (bb data reconcile, migration 012), E-195 (plays pipeline, migration 009, validate_plays_stats.py), E-173 (resolution write-through, auto-scout after linking, unified Find on GC resolve page, dashboard sort by next game date, terminology cleanup, bb data repair-opponents), E-167 (bb data dedup CLI, GC search-powered opponent resolution, skip/unhide workflow), E-163 (scouting spray pipeline, updated thresholds, bb data scout 4-step flow), E-158 (spray chart pipeline, migration 006, chart routes), E-156 (bb data scout --force flag), E-155 (duplicate team detection and merge UI), E-143 (programs, user roles, team delete, opponent mapping UX, crawl trigger UI), E-120-06 (bare UUID input documented), E-055 (unified CLI), E-115-01 (E-100 team management model), E-028-03 (original)*
+*Last updated: 2026-05-18 | Source: E-229 (positioning bundle section rewritten -- 4-page bundle contents, bb data scout 7-step flow, regenerate_positioning_bundle helper, updated calibration constants), E-228 (positioning bundle architecture, auto-generate pattern), E-221 (team delete cross-perspective gate, cascade consolidation, retention flash message), E-199 (standalone reports section, cascade-delete behavior), E-198 (bb data reconcile, migration 012), E-195 (plays pipeline, migration 009, validate_plays_stats.py), E-173 (resolution write-through, auto-scout after linking, unified Find on GC resolve page, dashboard sort by next game date, terminology cleanup, bb data repair-opponents), E-167 (bb data dedup CLI, GC search-powered opponent resolution, skip/unhide workflow), E-163 (scouting spray pipeline, updated thresholds, bb data scout 4-step flow), E-158 (spray chart pipeline, migration 006, chart routes), E-156 (bb data scout --force flag), E-155 (duplicate team detection and merge UI), E-143 (programs, user roles, team delete, opponent mapping UX, crawl trigger UI), E-120-06 (bare UUID input documented), E-055 (unified CLI), E-115-01 (E-100 team management model), E-028-03 (original)*

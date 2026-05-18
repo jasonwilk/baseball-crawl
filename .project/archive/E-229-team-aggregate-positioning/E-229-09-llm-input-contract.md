@@ -4,7 +4,7 @@
 [E-229: Team-Aggregate Defensive Positioning](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, `src/reports/positioning_llm.py` is updated to consume the E-229 engine output shape: per flagged batter, the input contract carries the batter's deviation values, the team-aggregate context, and the zone_id (instead of E-228's categorical `call_state`). **LLM rationale is render-time in-memory only — no DB persistence** (per Phase 3 iteration 1 CR B1 lock). The output contract (length, structural citation, decision discipline) and the non-fatal failure pattern (LLM unavailable → skip + INFO log; LLM fails mid-call → caught + WARNING log) are preserved from E-228 CX-4 / CX2-3.

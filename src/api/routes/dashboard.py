@@ -21,6 +21,7 @@ Routes:
 from __future__ import annotations
 
 import datetime
+import json
 import logging
 import os
 from pathlib import Path
@@ -993,6 +994,29 @@ def _format_coverage_text(latest_game_date: str, game_count: int) -> str:
     return f"Through {formatted_date} ({game_count} {game_word})"
 
 
+_BUNDLE_REPORTS_DIR = (
+    Path(__file__).resolve().parents[3] / "data" / "reports"
+)
+
+
+def _load_bundle_snapshot(slug: str) -> dict[str, object] | None:
+    """Read the E-229-08 bundle snapshot sidecar for a given report
+    slug.
+
+    The snapshot lives at ``data/reports/{slug}/bundle_snapshot.json``
+    and carries the coverage-cue inputs captured at generation time
+    (per E-229-08 AC-4a). Returns ``None`` when the sidecar does not
+    exist (legacy E-228 reports) or when the JSON is unreadable.
+    """
+    sidecar = _BUNDLE_REPORTS_DIR / slug / "bundle_snapshot.json"
+    if not sidecar.exists():
+        return None
+    try:
+        return json.loads(sidecar.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
 def _compute_opponent_pitching_rates(pitchers: list[dict]) -> list[dict]:
     """Compute ERA, K/9, BB/9, WHIP, K/BB, and usage stats for each pitcher.
 
@@ -1731,27 +1755,39 @@ async def opponent_detail(request: Request, opponent_team_id: int) -> Response:
     positioning_report_context: dict[str, Any] | None = None
     if positioning_report:
         # E-228-04 §8.3(b): the freshness cue MUST reflect the displayed
-        # report's coverage, NOT the team's current coverage. If the latest
-        # scout failed mid-pipeline (E-228-06 AC-6a non-fatal path) the
-        # displayed report can be older than the team's current scout data,
-        # so reusing the live `coverage_text` would overstate what's in
-        # the linked report. We surface the report's own `generated_at`
-        # date as the cue instead (degraded format: no "N games" because
-        # the report row does not carry game_count metadata).
+        # report's coverage, NOT the team's current coverage. Per E-229-08
+        # AC-4a, the bundle persists a snapshot sidecar at
+        # `data/reports/{slug}/bundle_snapshot.json` carrying the
+        # `through_date` + `game_count` captured at generation time. When
+        # the sidecar exists we render the full "Through Mon Day (N games)"
+        # cue from it; when it doesn't (legacy E-228 reports), we fall
+        # back to the degraded "Through Mon Day" format derived from
+        # `generated_at`.
         report_cue: str | None = None
-        report_gen = positioning_report.get("generated_at")
-        if report_gen:
-            try:
-                gen_dt = datetime.datetime.strptime(
-                    report_gen[:10], "%Y-%m-%d",
-                )
-                report_cue = (
-                    f"Through {gen_dt.strftime('%b')} {gen_dt.day}"
-                )
-            except (ValueError, TypeError):
-                report_cue = None
+        slug = positioning_report["slug"]
+        snapshot = _load_bundle_snapshot(slug)
+        if snapshot:
+            through_date = snapshot.get("through_date") or ""
+            game_count = snapshot.get("game_count") or 0
+            if through_date and game_count > 0:
+                from src.reports.positioning_card import format_coverage_cue
+                report_cue = format_coverage_cue(through_date, game_count)
+        if report_cue is None:
+            # Fallback: derive degraded cue from `generated_at` (legacy
+            # E-228 reports without a snapshot sidecar).
+            report_gen = positioning_report.get("generated_at")
+            if report_gen:
+                try:
+                    gen_dt = datetime.datetime.strptime(
+                        report_gen[:10], "%Y-%m-%d",
+                    )
+                    report_cue = (
+                        f"Through {gen_dt.strftime('%b')} {gen_dt.day}"
+                    )
+                except (ValueError, TypeError):
+                    report_cue = None
         positioning_report_context = {
-            "slug": positioning_report["slug"],
+            "slug": slug,
             "generated_at": positioning_report["generated_at"],
             "coverage_text": report_cue,
         }

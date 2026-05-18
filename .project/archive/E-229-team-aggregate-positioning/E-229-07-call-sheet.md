@@ -4,7 +4,7 @@
 [E-229: Team-Aggregate Defensive Positioning](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the report bundle includes an in-game call sheet: a compact text matrix with rows = batters sorted alphabetically by name and columns = jersey, name, LF, CF, RF, 3B, SS, 2B. Cells contain a single zone letter (A–H) for outlier-zone batters or a center-dot (`·`) for team-default batters at that position. Letter landscape, single page. A top-of-sheet legend defines the A–H vocabulary.

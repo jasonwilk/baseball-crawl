@@ -96,6 +96,8 @@ Review this list every 90 days, or when completing an epic. Ask:
 | [IDEA-075](IDEA-075-agent-team-relay-discipline.md) | Agent-Team Relay Discipline | CANDIDATE | 2026-08-13 |
 | [IDEA-076](IDEA-076-coverage-cue-full-fidelity-restoration.md) | Coverage-Cue Full-Fidelity Restoration (positioning dashboard) | CANDIDATE | 2026-08-15 |
 | [IDEA-077](IDEA-077-season-modal-batting-order-from-boxscore.md) | Season-Modal Batting Order from Boxscore Backfill | CANDIDATE | 2026-08-14 |
+| [IDEA-078](IDEA-078-extract-scouting-query-helpers-to-api-db.md) | Extract Per-Team Scouting Query Helpers from `positioning_bundle.py` + `generator.py` into `src/api/db.py` | CANDIDATE | 2026-08-16 |
+| [IDEA-079](IDEA-079-narrow-opponent-context-exception-handler.md) | Narrow `except Exception:` Around `_build_opponent_context` to Specific Failure Modes | CANDIDATE | 2026-08-16 |
 
 ## Status Definitions
 

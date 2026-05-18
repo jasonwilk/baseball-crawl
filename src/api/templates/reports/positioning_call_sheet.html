@@ -1,0 +1,214 @@
+{# ============================================================
+   E-229-07: Coach call sheet (partial)
+
+   Renders the in-game call sheet inside the report bundle:
+   a single letter-landscape page with a compact matrix.
+     * rows = batters, alphabetical by name (no flagged-first per
+       coach BC-1).
+     * columns = #, NAME, LF, CF, RF, 3B, SS, 2B, NOTE.
+
+   Distinct from:
+     - the prep page (E-229-06; landscape, full-field overlay)
+     - the per-position pocket cards (E-229-05; portrait,
+       quarter-letter 4-up)
+
+   Context provided by `render_call_sheet_context()` in
+   src/reports/positioning_call_sheet.py.
+   ============================================================ #}
+
+<style>
+  /* Named print page for letter landscape (artifact + AC-6). */
+  @page call-sheet {
+    size: letter landscape;
+    margin: 0.25in;
+  }
+
+  .positioning-call-sheet {
+    page: call-sheet;
+    break-inside: avoid;
+    page-break-after: always;
+    font-family: Arial, Helvetica, sans-serif;
+    color: #000;
+  }
+
+  /* ---- Header ---- */
+  .positioning-call-sheet-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    border-bottom: 0.5pt solid #b3b3b3;
+    padding-bottom: 4pt;
+    margin-bottom: 6pt;
+  }
+  .positioning-call-sheet-header .opponent-name {
+    font-size: 11pt;
+    font-weight: bold;
+  }
+  .positioning-call-sheet-header .coverage-cue {
+    font-size: 9pt;
+    color: #4d4d4d;
+    white-space: nowrap;
+  }
+
+  /* ---- Legend ---- */
+  .positioning-call-sheet-legend {
+    font-size: 9pt;
+    color: #4d4d4d;
+    text-align: center;
+    margin-bottom: 6pt;
+  }
+
+  /* ---- No-outliers banner ---- */
+  .positioning-call-sheet-banner {
+    margin: 6pt 0;
+    padding: 5pt 8pt;
+    font-size: 9pt;
+    font-style: italic;
+    color: #4d4d4d;
+    border: 0.5pt dashed #b3b3b3;
+    text-align: center;
+  }
+
+  /* ---- Matrix table ---- */
+  .positioning-call-sheet-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: Arial, Helvetica, sans-serif;
+    color: #000;
+  }
+  .positioning-call-sheet-table thead th {
+    font-size: 9pt;
+    font-weight: bold;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: #4d4d4d;
+    border-bottom: 0.5pt solid #b3b3b3;
+    padding: 3pt 4pt;
+    text-align: center;
+    white-space: nowrap;
+  }
+  .positioning-call-sheet-table thead th.col-jersey {
+    text-align: left;
+    width: 0.55in;
+  }
+  .positioning-call-sheet-table thead th.col-name {
+    text-align: left;
+    width: 1.6in;
+  }
+  .positioning-call-sheet-table thead th.col-position {
+    width: 0.5in;
+  }
+  .positioning-call-sheet-table thead th.col-note {
+    text-align: left;
+    width: 2.2in;
+  }
+  .positioning-call-sheet-table tbody td {
+    padding: 2.5pt 4pt;
+    vertical-align: middle;
+    border-bottom: 0.25pt solid #d9d9d9;
+  }
+  /* UXD I-7: make the jersey column visually prominent. */
+  .positioning-call-sheet-table tbody td.col-jersey {
+    font-size: 11pt;
+    font-weight: bold;
+    text-align: left;
+    font-variant-numeric: tabular-nums;
+    padding-left: 6pt;
+  }
+  .positioning-call-sheet-table tbody td.col-name {
+    font-size: 9pt;
+    text-align: left;
+  }
+  .positioning-call-sheet-table tbody td.col-position {
+    font-size: 9pt;
+    font-weight: bold;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+  }
+  .positioning-call-sheet-table tbody td.col-position.default {
+    color: #b3b3b3;
+    font-weight: normal;
+  }
+  /* Artifact §E "Rationale" subsection: italic 8pt 50% grey, 2-line clamp. */
+  .positioning-call-sheet-table tbody td.col-note {
+    font-style: italic;
+    font-size: 8pt;
+    color: #808080;
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    line-clamp: 2;
+  }
+
+  /* ---- Zero-coverage state ---- */
+  .positioning-call-sheet-empty {
+    text-align: center;
+    margin-top: 1in;
+    padding: 0.5in;
+  }
+  .positioning-call-sheet-empty .empty-headline {
+    font-size: 18pt;
+    font-weight: bold;
+  }
+  .positioning-call-sheet-empty .empty-sub {
+    font-size: 11pt;
+    color: #4d4d4d;
+    margin-top: 6pt;
+  }
+</style>
+
+
+<section class="positioning-call-sheet">
+
+  <header class="positioning-call-sheet-header">
+    <span class="opponent-name">{{ call_sheet.header.opponent_name | e }}</span>
+    <span class="coverage-cue">{{ call_sheet.header.coverage_cue | e }}</span>
+  </header>
+
+  {% if call_sheet.state == 'zero_coverage' %}
+    <div class="positioning-call-sheet-empty">
+      <div class="empty-headline">Not enough spray data</div>
+      <div class="empty-sub">— play your standard alignment</div>
+    </div>
+  {% else %}
+
+    <div class="positioning-call-sheet-legend">
+      {{ call_sheet.compass_legend | e }}
+    </div>
+
+    {% if call_sheet.no_outliers_banner %}
+      <div class="positioning-call-sheet-banner">
+        {{ call_sheet.no_outliers_banner }}
+      </div>
+    {% endif %}
+
+    <table class="positioning-call-sheet-table">
+      <thead>
+        <tr>
+          <th class="col-jersey">#</th>
+          <th class="col-name">Name</th>
+          {% for position in call_sheet.positions %}
+            <th class="col-position">{{ position }}</th>
+          {% endfor %}
+          <th class="col-note">NOTE</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in call_sheet.rows %}
+          <tr>
+            <td class="col-jersey">{% if row.jersey_number %}#{{ row.jersey_number | e }}{% else %}&mdash;{% endif %}</td>
+            <td class="col-name">{{ row.display_name | e }}</td>
+            {% for position in call_sheet.positions %}
+              {% set cell = row['cell_' ~ position] %}
+              <td class="col-position{% if cell == '·' %} default{% endif %}">{{ cell }}</td>
+            {% endfor %}
+            <td class="col-note">{% if row.rationale %}{{ row.rationale | e }}{% endif %}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+  {% endif %}
+
+</section>

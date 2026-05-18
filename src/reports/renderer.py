@@ -64,53 +64,14 @@ _KEY_BATTER_MIN_PA = 5
 # "SHALLOW" not "IN"). E-228-05 AC-8 forbids inventing or changing display
 # words -- if the vocabulary needs to change, escalate; do not edit in place.
 
-POSITIONING_CALL_WORDS: dict[str, str] = {
-    "TRUE": "STRAIGHT UP",
-    "LEFT": "SHADE LEFT",
-    "LEFT_SHALLOW": "SHADE LEFT SHALLOW",
-    "LEFT_DEEP": "SHADE LEFT DEEP",
-    "RIGHT": "SHADE RIGHT",
-    "RIGHT_SHALLOW": "SHADE RIGHT SHALLOW",
-    "RIGHT_DEEP": "SHADE RIGHT DEEP",
-    "MIXED": "MIXED",
-}
-"""Display call-word for each stored ``call_state`` / ``team_state_call``
-enum key (E-228-04 AC-1e, D1). Coach-facing full-form vocabulary."""
-
-POSITIONING_CELL_SHORT_FORMS: dict[str, str] = {
-    # E-228-04 D6: compact glyphs for the per-position cells on the call sheet.
-    # The CALL column carries the full word; per-position cells carry the glyph.
-    "TRUE": "·",   # middle dot -- the silent-default cell
-    "LEFT": "L",
-    "LEFT_SHALLOW": "L Sh",
-    "LEFT_DEEP": "L Dp",
-    "RIGHT": "R",
-    "RIGHT_SHALLOW": "R Sh",
-    "RIGHT_DEEP": "R Dp",
-    # MIXED is only ever a team_state_call, never a per-position call_state
-    # (the engine's _compute_position_row never returns MIXED). We map it
-    # defensively to the middle dot in case future engine output ever does.
-    "MIXED": "·",
-}
-"""Compact per-position cell glyph for each ``call_state`` (E-228-04 D6)."""
-
-
-# Position-name expansion for the player-card headers (E-228-04 §4.2).
-POSITIONING_POSITION_LABELS: dict[str, str] = {
-    "LF": "LEFT FIELD",
-    "CF": "CENTERFIELD",
-    "RF": "RIGHT FIELD",
-    "3B": "THIRD BASE",
-    "SS": "SHORTSTOP",
-    "2B": "SECOND BASE",
-}
-
-# Position column order on the call sheet -- E-228-04 D2 (LF·CF·RF·3B·SS·2B).
-POSITIONING_COLUMN_ORDER: tuple[str, ...] = ("LF", "CF", "RF", "3B", "SS", "2B")
-
-# Soft cap on exceptions per player card (E-228-04 §4.3): render top N by
-# bip_count descending; overflow gets a "+N more" footer row.
-_POSITIONING_CARD_MAX_EXCEPTIONS = 6
+# E-229-05 retired the v1 categorical-model vocabulary block per epic
+# TN-13 (four module-level dict/tuple constants that mapped retired
+# enum keys to display words). Position-label expansion and column
+# ordering for E-229's v2 render path live in
+# `src/reports/positioning_card.py` (the focused card-SVG module) and
+# `src/reports/positioning.py::COVERED_POSITIONS`. Card legend wording
+# is sourced from `COMPASS_LEGEND_SHORT` / `COMPASS_LEGEND_LONG` in
+# positioning_card.py per the locked-constants artifact.
 
 
 def _build_jinja_env() -> Environment:
@@ -612,167 +573,167 @@ def _jersey_sort_key(jersey: object) -> tuple[int, int, str]:
         return (1, 0, raw)
 
 
+# Position-name expansion (artifact §C card-header position label).
+# Local to this module -- the v1 module-level public constant for this
+# was retired in E-229-05 per epic TN-13.
+_POSITION_FULL_NAMES: dict[str, str] = {
+    "LF": "LEFT FIELD",
+    "CF": "CENTERFIELD",
+    "RF": "RIGHT FIELD",
+    "3B": "THIRD BASE",
+    "SS": "SHORTSTOP",
+    "2B": "SECOND BASE",
+}
+
+# v2 position column order (per epic TN-3). Same order as v1's
+# retired column-order constant; kept local rather than as a
+# module-public constant.
+_POSITION_ORDER: tuple[str, ...] = ("LF", "CF", "RF", "3B", "SS", "2B")
+
+# Sidebar lookup row cap per artifact §C "5 rows fit comfortably in
+# the sidebar height". When a position has more outliers than this,
+# the extras are dropped with a "+N more" footer.
+_CARD_SIDEBAR_MAX_ROWS = 5
+
+
 def _build_positioning_context(
     positioning_rows: list[dict],
     positioning_rationales: dict[str, str] | None = None,
+    per_card_svgs: dict[str, str] | None = None,
+    *,
+    opponent_name: str = "",
+    coverage_cue: str = "",
+    compass_key_svg: str = "",
+    opponent_context_coverage_line: str = "",
+    opponent_context_stats: list[dict] | None = None,
+    opponent_context_tier_line: str = "",
 ) -> dict[str, Any]:
-    """Group raw ``batter_positioning`` rows into the render-layer context
-    for the call sheet + player cards (E-228-05).
+    """Group v2 ``batter_positioning`` rows into the E-229 card context.
 
     Input:
-    * ``positioning_rows`` -- the list returned by
+    * ``positioning_rows`` -- the v2 row list returned by
       :func:`src.reports.generator._query_batter_positioning` -- one dict
-      per ``(player_id, position)`` row with the 12 ``batter_positioning``
-      columns plus ``players.first_name`` / ``players.last_name`` /
-      ``team_rosters.jersey_number``.
-    * ``positioning_rationales`` -- E-228-07 Tier 2 LLM output, a
-      ``dict[player_id, rationale_str]``. Optional: when LLM is disabled or
-      empty, the call sheet's Note column renders blank for every row.
+      per ``(player_id, position)`` row with the v2 column set
+      (``zone_id``, ``direction_deviation``, ``depth_deviation``,
+      ``is_thin``, ``bip_count``, ``hr_count``) plus ``players.first_name``
+      / ``players.last_name`` / ``team_rosters.jersey_number``.
+    * ``positioning_rationales`` -- E-229-09 Tier 2 LLM output (optional,
+      typically supplied by E-229-08's bundle assembler).
+    * ``per_card_svgs`` -- mapping ``{position: svg_string}`` produced by
+      :func:`src.reports.positioning_card.render_field_svg`. Supplied by
+      E-229-08's bundle assembler; for unit tests an empty/partial dict
+      is fine -- missing positions render an empty SVG placeholder.
 
-    Output: a dict with two top-level keys:
-    * ``batters`` -- the call-sheet rows, one per ``player_id``, in D5 sort
-      order (non-TRUE ``team_state_call`` first, jersey ascending within
-      each group), with the 6 per-position cells in D2 column order
-      (LF·CF·RF·3B·SS·2B). Each batter carries a ``rationale`` field set
-      from the input dict (or ``None`` when absent).
-    * ``cards`` -- 6 player cards in the same D2 position order, each with
-      ``position_key`` / ``position_label`` and a list of ``exceptions``
-      (batters whose ``call_state`` for THIS position is not ``TRUE``),
-      capped per E-228-04 §4.3.
+    Output: a dict consumed by the E-229-05 card template
+    ``positioning_cards.html``.
     """
     rationales = positioning_rationales or {}
-    # Group rows by player_id.
-    by_player: dict[str, list[dict]] = {}
+    svgs = per_card_svgs or {}
+
+    # Bucket rows by position so each card can pick its outliers + state.
+    rows_by_position: dict[str, list[dict]] = {p: [] for p in _POSITION_ORDER}
     for r in positioning_rows:
-        by_player.setdefault(r["player_id"], []).append(r)
+        position = r.get("position")
+        if position in rows_by_position:
+            rows_by_position[position].append(r)
 
-    batters: list[dict[str, Any]] = []
-    for player_id, rows in by_player.items():
-        # Find the team_state_call -- denormalized identically across all 6
-        # of a player's rows, so take it from the first row.
-        first = rows[0]
-        team_state_call_key = first["team_state_call"]
-        bip_count = first["bip_count"]
-        hr_count = first["hr_count"]
-        is_thin_flag = bool(first["is_thin"])
-        jersey = first["jersey_number"]
-        last_name = (first["last_name"] or "").upper()
-
-        # Build a position-keyed lookup of the 6 per-position rows.
-        rows_by_position = {r["position"]: r for r in rows}
-
-        # Per-position cells in D2 column order.
-        cells: list[dict[str, Any]] = []
-        for position in POSITIONING_COLUMN_ORDER:
-            row = rows_by_position.get(position)
-            if row is None:
-                # Defensive: a player missing a position row -- render as TRUE.
-                cell_key = "TRUE"
-            else:
-                cell_key = row["call_state"]
-            cells.append({
-                "position": position,
-                "call_state_key": cell_key,
-                "short": POSITIONING_CELL_SHORT_FORMS.get(cell_key, "·"),
-                "is_true": cell_key == "TRUE",
-            })
-
-        # Confidence string (E-228-04 §3.6): "{bip} BIP · {hr} HR[ · thin]".
-        confidence_parts = [f"{bip_count} BIP", f"{hr_count} HR"]
-        if is_thin_flag:
-            confidence_parts.append("thin")
-        confidence_text = " · ".join(confidence_parts)
-
-        # Display name fallback: when last_name is empty/Unknown, fall back to
-        # "#{jersey}" or "(unresolved)" in italic gray (per E-228-04 §3.2).
-        name_unresolved = not last_name or last_name.lower() in {"unknown", ""}
-        if name_unresolved:
-            display_name = f"#{jersey} (name not resolved)" if jersey else "(unresolved)"
-        else:
-            display_name = last_name
-
-        batters.append({
-            "player_id": player_id,
-            "jersey_number": jersey,
-            "name": display_name,
-            "last_name_upper": last_name,
-            "name_unresolved": name_unresolved,
-            "team_state_call_key": team_state_call_key,
-            "team_state_call_word": POSITIONING_CALL_WORDS.get(
-                team_state_call_key, team_state_call_key
-            ),
-            "per_position": cells,
-            "bip_count": bip_count,
-            "hr_count": hr_count,
-            "is_thin": is_thin_flag,
-            "confidence_text": confidence_text,
-            # E-228-07: Tier 2 LLM rationale, ``None`` when LLM disabled,
-            # unavailable, or the validation gate routed the response to
-            # WARNING-and-skip. The template's ``{% if batter.rationale %}``
-            # guard handles None cleanly.
-            "rationale": rationales.get(player_id),
-        })
-
-    # D5 row sort: non-TRUE team_state_call first, then jersey ascending.
-    batters.sort(key=lambda b: (
-        0 if b["team_state_call_key"] != "TRUE" else 1,
-        _jersey_sort_key(b["jersey_number"]),
-    ))
-
-    # Build the 6 player cards in D2 position order.
     cards: list[dict[str, Any]] = []
-    for position in POSITIONING_COLUMN_ORDER:
-        # Exceptions: all batters whose THIS-position call_state is not TRUE.
-        exceptions: list[dict[str, Any]] = []
-        for batter in batters:
-            cell = next(
-                c for c in batter["per_position"] if c["position"] == position
-            )
-            if cell["call_state_key"] == "TRUE":
-                continue
-            cell_key = cell["call_state_key"]
-            exceptions.append({
-                "jersey_number": batter["jersey_number"],
-                "last_name": batter["last_name_upper"]
-                             or (f"#{batter['jersey_number']}"
-                                 if batter["jersey_number"] else "(unresolved)"),
-                "call_state_key": cell_key,
-                "call_full": POSITIONING_CALL_WORDS.get(cell_key, cell_key),
-                "is_mixed_batter": batter["team_state_call_key"] == "MIXED",
-                "bip_count": batter["bip_count"],
+    for position in _POSITION_ORDER:
+        rows = rows_by_position[position]
+        outliers = [
+            r for r in rows
+            if r.get("zone_id") is not None and not (r.get("is_thin") or 0)
+        ]
+        # Sort outliers by jersey ascending (artifact §C sidebar
+        # convention; mirrors positioning_card.py jersey-sort).
+        outliers.sort(key=lambda r: _jersey_sort_key(r.get("jersey_number")))
+
+        sidebar_rows: list[dict[str, Any]] = []
+        truncated = 0
+        if len(outliers) > _CARD_SIDEBAR_MAX_ROWS:
+            truncated = len(outliers) - _CARD_SIDEBAR_MAX_ROWS
+            outliers = outliers[:_CARD_SIDEBAR_MAX_ROWS]
+        for o in outliers:
+            last = (o.get("last_name") or "").upper()
+            # Last-name truncation per artifact §C "≤7 chars".
+            last_truncated = last[:7]
+            sidebar_rows.append({
+                "jersey_number": o.get("jersey_number"),
+                "last_name": last_truncated,
+                "zone_letter": o.get("zone_id"),
+                "rationale": rationales.get(o.get("player_id")),
             })
 
-        # E-228-04 §4.3: cap at 6 exceptions; if more, keep top by bip_count desc,
-        # then jersey ascending. Otherwise sort exceptions by jersey ascending.
-        truncated = 0
-        if len(exceptions) > _POSITIONING_CARD_MAX_EXCEPTIONS:
-            exceptions.sort(key=lambda e: (-e["bip_count"], _jersey_sort_key(e["jersey_number"])))
-            truncated = len(exceptions) - _POSITIONING_CARD_MAX_EXCEPTIONS
-            exceptions = exceptions[:_POSITIONING_CARD_MAX_EXCEPTIONS]
-            # After truncation, re-sort the kept ones by jersey for in-card flow.
-            exceptions.sort(key=lambda e: _jersey_sort_key(e["jersey_number"]))
-        else:
-            exceptions.sort(key=lambda e: _jersey_sort_key(e["jersey_number"]))
+        # Card state per epic TN-4 confidence-tier semantics inferred
+        # from the per-position rows.
+        state = _infer_card_state(rows)
 
         cards.append({
             "position_key": position,
-            "position_label": POSITIONING_POSITION_LABELS[position],
-            "exceptions": exceptions,
+            "position_label": _POSITION_FULL_NAMES[position],
+            "svg": svgs.get(position, ""),
+            "sidebar_rows": sidebar_rows,
             "truncated_count": truncated,
+            "state": state,  # "full" | "thin" | "no_outliers" | "zero_coverage"
         })
 
+    # Import locked legend constants from positioning_card lazily to
+    # avoid a top-of-module circular-import path through positioning ->
+    # spray modules.
+    from src.reports.positioning_card import (
+        COMPASS_LEGEND_LONG,
+        COMPASS_LEGEND_SHORT,
+    )
+
     return {
-        "batters": batters,
+        "has_data": bool(positioning_rows),
         "cards": cards,
-        "has_data": bool(batters),
-        "column_order": list(POSITIONING_COLUMN_ORDER),
-        # Empty-state copy lives here too so the template doesn't hard-code it.
+        "column_order": list(_POSITION_ORDER),
+        "opponent_name": opponent_name,
+        "coverage_cue": coverage_cue,
+        "compass_legend_short": COMPASS_LEGEND_SHORT,
+        "compass_legend_long": COMPASS_LEGEND_LONG,
+        "compass_key_svg": compass_key_svg,
+        "opponent_context_coverage_line": opponent_context_coverage_line,
+        "opponent_context_stats": opponent_context_stats or [],
+        "opponent_context_tier_line": opponent_context_tier_line,
         "empty_state_text": (
             "No scouted batters yet. Cards will appear after the first "
             "scouting pull."
         ),
-        "no_exceptions_text": "No exceptions for this opponent.",
+        "no_outliers_text": "No outliers this opponent.",
+        "zero_coverage_text": (
+            "Not enough spray data — play your standard alignment"
+        ),
     }
+
+
+def _infer_card_state(per_position_rows: list[dict]) -> str:
+    """Infer a card's confidence-tier state from its per-position rows.
+
+    Returns one of ``"full"``, ``"thin"``, ``"no_outliers"``,
+    ``"zero_coverage"``. Used by the template to branch sidebar /
+    legend rendering. The state is inferred from the row set rather
+    than from a ``team_position_aggregate`` query so the renderer
+    stays decoupled from the conn (the engine output is sufficient
+    when bip_count is present on every row).
+    """
+    if not per_position_rows:
+        return "zero_coverage"
+    # bip_count is denormalized identically across a batter's rows;
+    # take the max across all rows as the opponent's effective count.
+    bip_max = max((r.get("bip_count") or 0) for r in per_position_rows)
+    if bip_max < 15:
+        return "zero_coverage"
+    has_outlier = any(
+        r.get("zone_id") is not None and not (r.get("is_thin") or 0)
+        for r in per_position_rows
+    )
+    if not has_outlier:
+        return "no_outliers"
+    if bip_max < 50:
+        return "thin"
+    return "full"
 
 
 def render_report(data: dict[str, Any]) -> str:
@@ -903,11 +864,32 @@ def render_report(data: dict[str, Any]) -> str:
     team_fps_pct = _format_pct(data.get("team_fps_pct"))
     team_pitches_per_pa = _format_rate(data.get("team_pitches_per_pa"))
 
-    # Positioning section context (E-228-05 base + E-228-07 rationales).
+    # Positioning section context (E-229-05 v2 + E-229-09 rationales).
+    # `positioning_card_svgs`: optional mapping {position: svg_string}
+    # produced by E-229-08's bundle assembler via
+    # src.reports.positioning_card.render_field_svg. Empty dict in
+    # contexts where SVGs aren't pre-rendered (e.g. unit tests of the
+    # template's structural shape).
     positioning_rows = data.get("positioning_rows") or []
     positioning_rationales = data.get("positioning_rationales") or {}
+    positioning_card_svgs = data.get("positioning_card_svgs") or {}
+    team = data.get("team") or {}
     positioning_context = _build_positioning_context(
-        positioning_rows, positioning_rationales=positioning_rationales,
+        positioning_rows,
+        positioning_rationales=positioning_rationales,
+        per_card_svgs=positioning_card_svgs,
+        opponent_name=team.get("name", ""),
+        coverage_cue=data.get("positioning_coverage_cue", ""),
+        compass_key_svg=data.get("positioning_compass_key_svg", ""),
+        opponent_context_coverage_line=data.get(
+            "positioning_opponent_context_coverage_line", "",
+        ),
+        opponent_context_stats=data.get(
+            "positioning_opponent_context_stats",
+        ),
+        opponent_context_tier_line=data.get(
+            "positioning_opponent_context_tier_line", "",
+        ),
     )
 
     context = {

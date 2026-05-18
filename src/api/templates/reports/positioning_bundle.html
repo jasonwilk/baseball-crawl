@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+{# ============================================================
+   E-229-08: Defensive positioning bundle (4-page mixed orientation).
+
+   Single HTML document assembled by
+   `src.reports.positioning_bundle.generate_positioning_bundle()`.
+   Browsers' print-to-PDF engines respect the per-section
+   `@page` directives declared by each partial:
+
+     * Page 1: positioning_call_sheet.html (@page call-sheet, landscape)
+     * Page 2: positioning_prep.html        (@page prep-page,  landscape)
+     * Pages 3-4: positioning_cards.html    (@page positioning-cards, portrait)
+
+   Each partial owns its own <style> block; this parent template
+   carries only document-shell scaffolding and a minimal global rule
+   set (default font + box-sizing) so the partials' rules win on
+   specificity ties without !important.
+
+   Per epic TN-12 + AC-1 the page order is fixed. Per AC-2 the print
+   CSS uses two landscape named pages (call-sheet + prep-page) and
+   one portrait named page (positioning-cards) so the mixed-
+   orientation render works without any compromise.
+
+   Per AC-4 / AC-4a the coverage cue is computed once by the
+   assembler from caller-supplied (`through_date`, `game_count`)
+   inputs and threaded into each partial's context — all four pages
+   render the same cue. The bundle is a self-contained snapshot:
+   re-rendering this HTML from disk reproduces the same cue
+   verbatim.
+   ============================================================ #}
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Defensive Positioning — {{ opponent_name | e or "Opponent" }}</title>
+  <style>
+    /* Document-shell defaults; partials' rules override per-section.
+       No @page declared here — each partial declares its own named
+       page (call-sheet, prep-page, positioning-cards). */
+    html, body {
+      margin: 0;
+      padding: 0;
+      font-family: Arial, Helvetica, sans-serif;
+      color: #000;
+      background: #fff;
+    }
+    * { box-sizing: border-box; }
+  </style>
+</head>
+<body class="positioning-bundle">
+
+  {# ===== Page 1: in-game call sheet (letter landscape) ===== #}
+  {% include "reports/positioning_call_sheet.html" %}
+
+  {# ===== Page 2: pre-game prep page (letter landscape) ===== #}
+  {% include "reports/positioning_prep.html" %}
+
+  {# ===== Pages 3-4: 4-up player cards (letter portrait) =====
+     Per E-229-05 the cards template renders TWO portrait sheets:
+       * sheet 1 holds LF/CF/RF/3B in slots 1-4
+       * sheet 2 holds SS/2B in slots 1-2 + compass-key + opponent
+         context card in slots 3-4 (per E-229-05 AC-9 + UXD I-2
+         lock; the prior draft's `blank | blank` was retired in
+         Phase 4 iteration 2 per Codex P2.4)
+     The included partial owns both sheets; no extra wrapper needed
+     here. The cards template iterates over `positioning.cards`
+     and renders sheet 2's slots 3-4 from `positioning.compass_key_svg`
+     / `positioning.opponent_context_*` keys. #}
+  {% include "reports/positioning_cards.html" %}
+
+</body>
+</html>

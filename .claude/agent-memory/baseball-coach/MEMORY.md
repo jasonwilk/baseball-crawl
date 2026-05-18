@@ -73,3 +73,4 @@ Players must be tracked across teams and seasons:
 - [endpoint-coaching-value.md](endpoint-coaching-value.md) -- Per-game stats, boxscore, and plays endpoint coaching value (MUST HAVE/SHOULD HAVE priorities, pipeline dependencies, endpoint comparisons)
 - [scouting-pipeline.md](scouting-pipeline.md) -- Schedule, team-detail, public endpoints, opponents, and roster coaching implications with full scouting pipeline steps
 - [coaching-decisions.md](coaching-decisions.md) -- The six core coaching decisions this system serves (lineup, pitching, scouting, development) plus data storage conventions (ip_outs, splits, FK-safe orphans, key entities)
+- [positioning-domain.md](positioning-domain.md) -- Defensive positioning bundle (E-228 + E-229): 4-page artifact structure, 8-zone compass vocab, coverage tiers, axis lock ("in/deep" not "shallow/deep"), what was retired from E-228

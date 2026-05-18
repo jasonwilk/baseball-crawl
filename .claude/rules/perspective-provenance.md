@@ -61,6 +61,32 @@ The member-team pipeline retains disk caching (`data/raw/`) because crawl and lo
 
 The plays loader uses whole-game idempotency (`SELECT 1 FROM plays WHERE game_id = ? AND perspective_team_id = ? LIMIT 1`). Combined with `GameLoader._find_duplicate_game()` collapsing cross-perspective games to a single `game_id`, the second load of the same perspective is skipped. Different perspectives of the same game each get their own plays rows.
 
+## Prefer-Then-Fallback (Canonical for Read-Side Perspective Choice)
+
+When a render-side query needs to pick a single perspective for an opponent's data (e.g., to choose which star to draw on a card, which row to surface in a call sheet), the canonical shape is **prefer-then-fallback**, NOT hard-filter:
+
+```sql
+SELECT <cols>, perspective_team_id
+FROM <table>
+WHERE team_id = ? AND season_id = ? AND <other-scope>
+ORDER BY CASE WHEN perspective_team_id = ? THEN 0 ELSE 1 END
+LIMIT 1
+```
+
+The first `team_id` parameter is the opponent; the trailing `team_id` parameter is the same value passed again as the "preferred perspective" — when an opponent was scouted standalone, its `perspective_team_id` equals its own `team_id`, so that row wins; when scouted only from a member team's perspective, no standalone row exists and the second perspective row wins by fallback.
+
+Once a query has derived a chosen `perspective_team_id` this way, that derived value MUST thread through every downstream query in the same render pass — otherwise the rendered artifact mixes data from different perspectives (a star drawn from perspective A with outlier pills from perspective B is meaningless).
+
+**Sibling sites (E-229)**:
+- `src/reports/positioning_card.py::_query_team_aggregate` (cards section star)
+- `src/reports/positioning_call_sheet.py::_query_any_aggregate_row` (call sheet ranking row)
+- `src/reports/positioning_prep.py::_query_all_aggregates` (prep page overlay)
+- `src/reports/positioning_bundle.py::_choose_perspective_team_id` (cards section + opponent context payload)
+
+**Anti-pattern**: hard-filtering `WHERE perspective_team_id = ?` with a single passed-in value. Works when standalone scouting happens to be the perspective the caller has on hand; silently empties the render for opponents scouted only from a different perspective. F3 in the E-229 pre-closure review was this exact bug — cards query hard-filtered while the three siblings used prefer-then-fallback; fix extracted `_choose_perspective_team_id()` as a shared helper for the bundle module.
+
+When adding a new query that reads `team_position_aggregate` or `batter_positioning` from the render side, mirror the prefer-then-fallback shape; do NOT inherit perspective from a caller-passed argument unless the caller has already chosen via the prefer-then-fallback rule.
+
 ## Code Review Checklist
 
 When reviewing code that touches stat tables or loaders:

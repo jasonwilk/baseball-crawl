@@ -4,7 +4,7 @@
 [E-229: Team-Aggregate Defensive Positioning](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, two artifacts exist that lock the design constants for every downstream visual story in E-229: (1) a static HTML prototype rendering representative positioning cards at exact quarter-letter geometry (4.25" × 5.5"), and (2) a markdown spec listing every layout, typography, and design-token value the prototype validates. The artifacts are signed off by baseball-coach (legibility) and UXD (design coherence). Every downstream visual story (E-229-03 SVG generator, E-229-04 pills, E-229-05 card template, E-229-06 prep page, E-229-07 call sheet) reads its design constants from the locked artifact instead of carrying them inline in ACs.

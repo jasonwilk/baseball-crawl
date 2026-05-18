@@ -190,92 +190,129 @@ See the full guide: [Standalone Reports](standalone-reports.md)
 
 ---
 
-## Defensive Positioning Cards
+## Defensive Positioning Bundle
 
-When scouting data is available for an upcoming opponent, the system automatically generates **Defensive Positioning Cards** -- two printable artifacts that turn the opposing lineup's spray-chart tendencies into a concrete fielding plan.
+When scouting data is available for an upcoming opponent, the system automatically generates a **Defensive Positioning Bundle** -- a four-page printable report that turns the opposing lineup's spray-chart data into a concrete fielding plan based on where this specific opponent's batted balls actually land.
 
-- A **landscape call sheet**: one row per batter the system has data on, listing the call for each fielding position at a glance.
-- Six **portrait player cards**: one card per covered position (Left Field, Center Field, Right Field, Third Base, Shortstop, Second Base). Each card is written for the player who stands at that position -- not the coach.
+To access it, find the opponent's scouting page on the dashboard and look for the **Defensive Positioning** card. Tap it to open the bundle. Print it or save it as a PDF the night before the game.
 
-To access them, find the opponent's scouting page on the dashboard and look for the **Defensive Positioning** card. Tap it to open the full scouting report, which includes the call sheet and player cards alongside the regular pitching and batting sections. Print the report or save it as a PDF the night before the game.
+### What's in the Bundle
 
-### Reading the Call Sheet
+The bundle prints as four pages in two orientations:
 
-The call sheet is organized as a table -- one row per batter -- sorted so the batters who need a positioning adjustment come first, then the rest in jersey-number order.
+| Page | What it is | Orientation |
+|------|-----------|-------------|
+| **Page 1** | Coach call sheet -- in-game reference, one row per batter | Landscape |
+| **Page 2** | Coach prep page -- pre-game analysis, full-field overlay of all six positions | Landscape |
+| **Page 3** | Player cards: Left Field / Center Field / Right Field / Third Base | Portrait, cut to four 4.25"x5.5" cards |
+| **Page 4** | Player cards: Shortstop / Second Base / compass key / opponent context | Portrait, cut to four 4.25"x5.5" cards |
 
-**Columns**:
+Cut the two portrait sheets along the printed midlines to produce eight cards. Give the six fielder cards (LF, CF, RF, 3B, SS, 2B) to your fielders before the game. Keep the compass key and opponent context cards for yourself.
+
+### The Positioning Idea: Team Default and Outliers
+
+Every card starts from a **team default** position -- a star symbol (★) on each card's field diagram. This is where the data says that fielder should stand against this specific opponent's overall hit distribution, not the textbook "straight up" position. The star moves for every opponent you face.
+
+Most batters in the lineup are not outliers -- they hit the ball in roughly the average direction for this opponent. Fielders play their star position for those batters.
+
+**Outlier batters** are individuals who consistently hit the ball in a noticeably different direction than the team default. They appear as numbered pills (jersey numbers) placed on the field diagram where that batter's contact tends to land. A pill in the upper-left of the diagram means that batter tends to go deep to left; a pill near the bottom means they hit it in (toward the infield).
+
+The field also shows a faint textbook reference dot (○) -- the standard practice position -- so you can see at a glance how much the star shifts from baseline.
+
+### The Compass Zone System
+
+To make in-game calls fast, each position on the field is divided into eight zones labeled **A through H**. The zones are arranged around the star like compass directions:
+
+| Zone | Direction | Depth |
+|------|-----------|-------|
+| A | Left | In |
+| B | Left | (middle) |
+| C | Left | Deep |
+| D | (center) | In |
+| E | (center) | Deep |
+| F | Right | In |
+| G | Right | (middle) |
+| H | Right | Deep |
+
+When a batter's contact tends to land in a zone, the system places their jersey number pill in that zone. The fielder sees the pill position on the field diagram and knows exactly where to shift.
+
+All eight letters appear on every card at their fixed positions. Letters with outlier batters appear at full ink; unused letters are faint placeholders. This means fielders learn the zone layout once from the compass key card and recognize it on every card all season -- the letters are always in the same place, only the pills change.
+
+The **legend line** at the bottom of each card reads: `★ default · ○ textbook · A-H outliers`
+
+### Reading the Call Sheet (Page 1)
+
+The call sheet is the coach's in-game lookup table. One row per batter in the system, sorted alphabetically by name. Columns:
 
 | Column | What it shows |
 |--------|-------------|
-| **#** | Jersey number |
+| **#** | Jersey number (shown prominently for fast jersey-lookup) |
 | **Name** | Batter's name |
-| **CALL** | The single verbal call for this batter (see call words below) |
-| **LF, CF, RF, 3B, SS, 2B** | Each position's specific call in compact form |
-| **Confidence** | How much data underlies this call: BIP count, HR count, and a "thin" tag if under 10 balls in play |
-| **Note** | Plain-English rationale for the call (when the LLM layer is enabled) |
+| **LF, CF, RF, 3B, SS, 2B** | Zone letter (A--H) if this batter is an outlier at that position, or a center dot (·) if they play the team default there |
+| **Note** | Plain-English reasoning for flagged batters (when AI analysis is enabled) |
 
-**The CALL column** is what the coach yells during the game. There are 8 possible calls:
+A center dot (·) in every cell means "play your star position for this batter." A zone letter in a cell means "shift to zone X at that position."
 
-| Call word | What it means |
-|-----------|-------------|
-| **STRAIGHT UP** | No adjustment needed -- play your standard position |
-| **SHADE LEFT** | Shift moderately toward left field |
-| **SHADE LEFT SHALLOW** | Shift toward left field and move in slightly |
-| **SHADE LEFT DEEP** | Shift toward left field and play deeper |
-| **SHADE RIGHT** | Shift moderately toward right field |
-| **SHADE RIGHT SHALLOW** | Shift toward right field and move in slightly |
-| **SHADE RIGHT DEEP** | Shift toward right field and play deeper |
-| **MIXED** | Each position gets a different call -- see the per-position columns |
+**Example call**: You're coaching a game. Batter #14 comes up. You scan the call sheet -- the LF cell shows **C** and the other cells show dots. You tell your left fielder "fourteen -- Zone C." They move to the deep-left area of the field.
 
-**The per-position columns** (LF, CF, RF, 3B, SS, 2B) use compact symbols:
+**Legend at the top of the sheet**: `A in-left · B left · C deep-left · D in · E deep · F in-right · G right · H deep-right · · = team default`
 
-| Symbol | Meaning |
-|--------|---------|
-| `·` | Straight up (no adjustment) |
-| `L` | Shade left |
-| `L Sh` | Shade left shallow |
-| `L Dp` | Shade left deep |
-| `R` | Shade right |
-| `R Sh` | Shade right shallow |
-| `R Dp` | Shade right deep |
+### Reading the Prep Page (Page 2)
 
-For most batters, the CALL column and all the per-position cells agree. The per-position columns matter most on **MIXED rows** (see below).
+The prep page is your pre-game analysis canvas. All six position stars appear on one large field diagram, with all outlier pills from all positions overlaid. Use it before the game to see the full picture of where this opponent hits the ball and whether multiple fielders are affected by the same batter.
 
-**The Confidence column** is intentional -- sample size matters. A batter with 8 balls in play is labeled **(8 BIP | thin)**. Treat thin-data calls as a gentle lean, not a strong signal. A batter with 25+ balls in play gives you a much more reliable picture.
+The sidebar on the prep page shows the same jersey × zone grid as the call sheet but with a different sort: outlier batters come first (alphabetical within the group), then non-outlier batters below a divider. This groups the players who need attention at the top when you're doing pre-game prep -- unlike the call sheet, which keeps alphabetical order for fast in-game lookup.
 
-### Reading the Player Cards
+### Reading the Player Cards (Pages 3 and 4)
 
-Each player card is written for one fielder at one position. The cards are portrait-orientation and print 6 to a sheet (one per covered position).
+Each fielder carries their own card. The card for their position shows:
 
-**Layout**:
-- The top line says **STRAIGHT UP** -- the default for most batters. Most of the lineup gets no adjustment.
-- Below that is a short **exceptions list** keyed by jersey number: jersey + name + the call word. For example:
-  - `#23 Martinez — SHADE LEFT`
-  - `#7 Okonkwo — SHADE RIGHT DEEP`
-- At most 6 exception batters are listed per card. If more than 6 batters need an adjustment at this position, the top 6 by balls-in-play are shown, with a "+N more" note at the bottom.
+- **Header**: opponent name, position name, and data coverage ("Through Mon Day (N games)")
+- **Field diagram**: the star (★) for this position, a faint textbook dot (○), the 8 compass zone letters, and numbered pills for any outlier batters
+- **Sidebar**: a compact table listing each outlier batter's jersey number and zone letter for this position
+- **Legend**: `★ default · ○ textbook · A-H outliers`
 
-**How to use them**: hand the SS card to the shortstop before the game. During the game, when the coach calls out a name or number, the fielder finds it in the list and moves to that call. If a name isn't on the exceptions list, the default is STRAIGHT UP.
+If there are no outlier batters for this position, the sidebar reads "No outliers this opponent" and the fielder plays the star position for all batters.
 
-### MIXED Rows
+**How to hand out cards**: give the LF card to the left fielder, the SS card to the shortstop, and so on. Before the game, each fielder finds their star position on their own field diagram and notes which jersey numbers have pills -- those are the batters they need to shift for. When you make a call, the fielder checks their pill, sees what zone it's in, and moves there.
 
-A batter is **MIXED** when the system's recommendation differs by position. For example, the short-stop might shade left for this batter while left field stays straight up. In that case:
+### Data Coverage and Confidence
 
-- The CALL column shows **MIXED**.
-- The per-position cells (LF, CF, RF, 3B, SS, 2B) each show their individual call.
-- The player card for each position shows the position-specific call (e.g., the SS card shows `#23 SHADE LEFT DEEP`).
+Each artifact shows a coverage line -- "Through Mon Day (N games)" -- which tells you how many of this opponent's games the positioning is based on. The system uses three confidence levels based on total balls in play for this opponent:
 
-When the coach calls a MIXED batter's name, each fielder looks at their own card, not the call sheet. The coach may also call the jersey number instead of the name -- the player card shows both.
+| Coverage | What you see | What it means |
+|----------|-------------|--------------|
+| **Full** (50+ balls in play) | Star at full opacity, small BIP count label, density background visible | Strong positioning signal -- use with confidence |
+| **Thin** (15-49 balls in play) | Star with a thin-data badge, outliers shown normally | Early-season data -- useful lean but some noise |
+| **Zero** (fewer than 15 balls in play) | "Not enough spray data -- play your standard alignment" message instead of a diagram | Cannot generate a reliable recommendation yet |
+
+The coverage shown on the bundle is locked at the moment Jason generates the report. If you open the bundle a day later, the "Through" date still reflects the data that was in the system when it was printed -- the coverage line does not update automatically. Ask Jason to regenerate the bundle if you want the latest data before an important game.
+
+### The Compass Key Card (Page 4, Slot 3)
+
+The third card on the second print sheet is a compass key -- a blank field diagram showing all eight zones labeled with A through H and the in/deep/left/right axes annotated. Keep this card yourself or post it in the dugout. Fielders can use it to learn the zone vocabulary during the first few games; after a few uses the layout becomes automatic.
+
+### The Opponent Context Card (Page 4, Slot 4)
+
+The fourth card on the second print sheet shows this opponent's team-level numbers:
+
+- Opponent name and coverage cue
+- Win-loss record
+- Runs per game (offensive output) and runs allowed per game (pitching/defense)
+- Total balls in play in our scouting data and the confidence tier (Full / Thin / Zero)
+
+This card gives you the quick team-context frame before you look at individual batters.
 
 ### Freshness and the "Through" Date
 
-The dashboard link shows a line like **Through May 10** near the positioning card. This is the date the displayed report was generated -- not when the most recent scout run happened.
+The dashboard card shows a line like **Through May 10 (8 games)** near the positioning link. This tells you how current the data behind the bundle is. The system regenerates the bundle automatically each time a scouting sync runs, so the date advances as new games are scouted.
 
-If a scout run completes successfully, a new report bundle is generated automatically and the date updates. If the auto-generate step fails (uncommon), the dashboard keeps showing the prior report until the next successful scout produces a new one. Ask Jason if the date seems significantly out of date before an important game.
+If the auto-generate step fails after a sync (uncommon), the dashboard shows the prior bundle until the next successful sync. Ask Jason if the date looks significantly stale before an important game.
 
-### What the Cards Do Not Cover
+### What the Bundle Does Not Cover
 
-- **Pitcher, catcher, and first base** are not included. Their positioning is driven by the game situation and their defensive role, not by an opposing batter's spray chart. v1 covers SS, 2B, 3B, LF, CF, RF only.
-- **Batter handedness** is not shown. The calls are expressed as absolute field direction (LEFT/RIGHT) rather than pull/opposite because handedness information isn't available through the data source the system uses for scouting. The calls are still actionable -- "SHADE LEFT" means move toward left field regardless of whether the batter bats left or right.
+- **Pitcher, catcher, and first base** are not included. Their positioning is situation-driven, not spray-chart-driven. The bundle covers SS, 2B, 3B, LF, CF, and RF only.
+- **Batter handedness** is not shown on the cards. The system does not have handedness data from the scouting source it uses for opponents. The zone letters are expressed as absolute field direction -- Zone B means "toward left field" regardless of whether the batter hits left or right. The spray data itself captures the actual direction of each batter's contact, so the call is still meaningful without knowing handedness explicitly.
 
 ---
 
@@ -295,4 +332,4 @@ A quick reference for stats shown throughout the dashboard:
 
 ---
 
-*Last updated: 2026-05-15 | Story references: E-228 (defensive positioning cards section), E-163 (spray charts), E-153-03, E-153-04, E-159, E-183 (standalone reports), E-181-02 (game coverage indicator), E-181-03 (richer empty states, print page coverage indicator), E-196 (Rest and P (7d) pitching columns), E-212 (predicted starter section)*
+*Last updated: 2026-05-18 | Source: E-229 (defensive positioning bundle -- compass zones, 4-page bundle, call sheet, prep page, player cards, compass key, opponent context card, coverage tiers), E-228 (positioning bundle architecture, freshness cue), E-163 (spray charts), E-153-03, E-153-04, E-159, E-183 (standalone reports), E-181-02 (game coverage indicator), E-181-03 (richer empty states, print page coverage indicator), E-196 (Rest and P (7d) pitching columns), E-212 (predicted starter section)*

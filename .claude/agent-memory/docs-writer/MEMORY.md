@@ -14,7 +14,7 @@
 
 ## Coaching Docs -- File Map
 - `docs/coaching/README.md` -- Entry point for coaching staff (dashboard is live; includes auto-sync and game coverage intro as of E-181)
-- `docs/coaching/scouting-reports.md` -- Dashboard layout, schedule/scouting views, game coverage indicator, empty states, spray charts, printing, reading rate stats
+- `docs/coaching/scouting-reports.md` -- Dashboard layout, schedule/scouting views, game coverage indicator, empty states, spray charts, printing, defensive positioning bundle (E-229 compass-zone model), reading rate stats
 - `docs/coaching/standalone-reports.md` -- Shareable scouting snapshots: when to use, how to use, 14-day expiry, comparison table vs. dashboard
 - `docs/coaching/understanding-stats.md` -- Plain-language stats glossary (OBP, SLG, K%, BB%, BABIP, K/9, BB/9, K/BB, FIP) with sample size guidance
 

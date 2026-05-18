@@ -49,7 +49,7 @@ from src.gamechanger.url_parser import parse_team_url
 from src.llm.openrouter import is_llm_available
 from src.reconciliation.engine import reconcile_game
 from src.reports.positioning import compute_positioning
-from src.reports.positioning_llm import enrich_positioning
+from src.reports.positioning_bundle import generate_positioning_bundle
 from src.reports.renderer import render_report
 
 logger = logging.getLogger(__name__)
@@ -418,34 +418,31 @@ def _query_spray_charts(
 def _query_batter_positioning(
     conn: sqlite3.Connection, team_id: int, season_id: str
 ) -> list[dict]:
-    """Query Tier 1 positioning rows for a report team (E-228-05).
+    """Query Tier 1 positioning rows for a report team (E-229 v2 schema).
 
     Reads ``batter_positioning`` joined to ``players`` and (left-joined to)
     ``team_rosters`` for the standalone perspective (``perspective_team_id =
     team_id``, matching the convention in :func:`_query_spray_charts`).
-    Returns one dict per ``(player_id, position)`` row -- the renderer
-    groups by ``player_id`` for the call sheet and by ``position`` for
-    the player cards.
+    Returns one dict per ``(player_id, position)`` row -- the render-layer
+    rewrite in E-229-03/04/05 consumes these v2-shape dicts.
 
-    Row ordering is ``player_id, position`` -- the renderer applies the
-    design-spec D5 row sort (non-TRUE ``team_state_call`` first, then
-    jersey ascending) in Python, not in SQL.
+    E-229-02 scope: SELECT scrubbed of retired-categorical columns
+    (call_state, team_state_call, direction_shade, depth_shade,
+    zone_concentration) to match the v2 schema. The render-layer
+    consumers in src/reports/renderer.py that still read those keys are
+    owned by E-229-05 (compact card template).
     """
     rows = conn.execute(
         """
         SELECT
             bp.player_id,
             bp.position,
-            bp.call_state,
-            bp.team_state_call,
-            bp.direction_shade,
-            bp.depth_shade,
+            bp.direction_deviation,
+            bp.depth_deviation,
+            bp.zone_id,
             bp.bip_count,
             bp.hr_count,
             bp.is_thin,
-            bp.zone_concentration,
-            bp.direction_deviation,
-            bp.depth_deviation,
             p.first_name,
             p.last_name,
             tr.jersey_number
@@ -1194,6 +1191,13 @@ def generate_report(gc_url: str) -> GenerationResult:
     # `dedup_team_players` requires PRAGMA foreign_keys=ON per its
     # docstring -- this block opens its own connection (every stage in
     # `generate_report` does -- there is no long-lived shared `conn`).
+    #
+    # Per E-229 CR B1 lock: Tier 2 LLM rationale generation moved out
+    # of this stage and into the E-229-08 bundle assembler. The
+    # rationale layer is render-time in-memory only -- no DB
+    # persistence, no `positioning_rationales` dict threaded through
+    # the scouting-report render. The new positioning bundle (rendered
+    # below) owns the rationale path end-to-end.
     positioning_rationales: dict[str, str] = {}
     with closing(get_connection()) as conn:
         conn.execute("PRAGMA foreign_keys=ON;")
@@ -1207,42 +1211,13 @@ def generate_report(gc_url: str) -> GenerationResult:
                 team_id,
                 exc_info=True,
             )
-        positioning_results: list = []
         try:
-            positioning_results = compute_positioning(conn, team_id, season_id)
+            compute_positioning(conn, team_id, season_id)
         except Exception:  # noqa: BLE001
             logger.warning(
                 "Positioning recompute failed for team_id=%d (non-fatal)",
                 team_id,
                 exc_info=True,
-            )
-
-        # Tier 2 LLM rationale enrichment (E-228-07). Optional, non-fatal --
-        # `enrich_positioning` returns None on LLM unavailable (INFO log) or
-        # LLMError (WARNING log). Per-batter try/except so one batter's
-        # failure does not take out the rest of the lineup.
-        if is_llm_available():
-            for result in positioning_results:
-                # Tier 2 only runs for batters with a non-TRUE team-state call;
-                # `enrich_positioning` enforces this internally too.
-                if result.team_state_call == "TRUE":
-                    continue
-                try:
-                    rationale = enrich_positioning(result)
-                except Exception:  # noqa: BLE001
-                    logger.warning(
-                        "Tier 2 LLM enrichment failed for player_id=%s "
-                        "(non-fatal); call sheet renders without rationale.",
-                        result.player_id, exc_info=True,
-                    )
-                    continue
-                if rationale:
-                    positioning_rationales[result.player_id] = rationale
-        else:
-            logger.info(
-                "Tier 2 LLM unavailable for public_id=%s -- positioning "
-                "call sheet will render without rationales.",
-                public_id,
             )
 
     # Step 5: Query stats, render, save, and mark ready — all in one
@@ -1418,6 +1393,32 @@ def generate_report(gc_url: str) -> GenerationResult:
         file_path = _REPO_ROOT / "data" / report_path
         file_path.write_text(html, encoding="utf-8")
 
+        # E-229-08: render the 4-page defensive-positioning bundle
+        # alongside the scouting report. The bundle lives at
+        # `data/reports/{slug}/index.html` (directory form per AC-1).
+        # Per AC-4a the coverage-cue inputs (through_date + game_count)
+        # are SNAPSHOTTED at this point in a sidecar JSON file
+        # (`bundle_snapshot.json`) so future re-renders reproduce the
+        # same cue regardless of later DB freshness changes. Non-fatal:
+        # a bundle render failure is logged but does not fail the
+        # primary scouting report.
+        try:
+            _write_positioning_bundle(
+                slug=slug,
+                team_id=team_id,
+                public_id=public_id,
+                season_id=season_id,
+                opponent_name=team_info.get("name") or "",
+                freshness_date=freshness_date,
+                game_count=game_count,
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Positioning bundle render failed for slug=%s (non-fatal); "
+                "scouting report still ready.",
+                slug, exc_info=True,
+            )
+
         # Update reports row to 'ready'
         with closing(get_connection()) as conn:
             _update_report_ready(conn, report_id, report_path)
@@ -1442,6 +1443,125 @@ def generate_report(gc_url: str) -> GenerationResult:
 def _snapshot_team_ids(conn: sqlite3.Connection) -> set[int]:
     """Return all current team IDs as a set."""
     return {row[0] for row in conn.execute("SELECT id FROM teams")}
+
+
+# ---------------------------------------------------------------------------
+# E-229-08: Defensive positioning bundle (snapshotted at generation time)
+# ---------------------------------------------------------------------------
+
+
+def _format_through_date(freshness_date: str | None) -> str:
+    """Convert an ISO YYYY-MM-DD freshness date to the "Mon Day"
+    coverage-cue shape (e.g. "2026-04-12" -> "Apr 12").
+
+    Returns "" when freshness_date is None or unparseable; the bundle
+    renderer treats an empty through_date as "no coverage cue".
+    """
+    if not freshness_date:
+        return ""
+    try:
+        dt = datetime.strptime(freshness_date[:10], "%Y-%m-%d")
+    except (ValueError, TypeError):
+        return ""
+    return f"{dt.strftime('%b')} {dt.day}"
+
+
+def _bundle_dir(slug: str) -> Path:
+    """Bundle is at `data/reports/{slug}/index.html` per AC-1."""
+    return _REPORTS_DIR / slug
+
+
+def _bundle_snapshot_path(slug: str) -> Path:
+    """Sidecar file capturing the coverage-cue inputs at generation
+    time per AC-4a. Re-renders read from this file so the cue is
+    invariant across regenerations.
+    """
+    return _bundle_dir(slug) / "bundle_snapshot.json"
+
+
+def _write_positioning_bundle(
+    *,
+    slug: str,
+    team_id: int,
+    public_id: str,
+    season_id: str,
+    opponent_name: str,
+    freshness_date: str | None,
+    game_count: int,
+) -> None:
+    """Render the 4-page positioning bundle and persist it + its
+    coverage-cue snapshot (AC-1 + AC-4a).
+
+    Writes:
+      * `data/reports/{slug}/index.html`  -- the rendered bundle
+      * `data/reports/{slug}/bundle_snapshot.json` -- AC-4a snapshot
+
+    The snapshot stores the exact inputs supplied to
+    :func:`src.reports.positioning_bundle.generate_positioning_bundle`
+    so :func:`regenerate_positioning_bundle` reproduces the same
+    coverage cue regardless of later DB freshness changes.
+    """
+    bundle_dir = _bundle_dir(slug)
+    bundle_dir.mkdir(parents=True, exist_ok=True)
+
+    through_date = _format_through_date(freshness_date)
+    snapshot = {
+        "public_id": public_id,
+        "season_id": season_id,
+        "opponent_name": opponent_name,
+        "through_date": through_date,
+        "game_count": game_count,
+    }
+
+    with closing(get_connection()) as conn:
+        html = generate_positioning_bundle(
+            conn, public_id, season_id,
+            opponent_name=opponent_name,
+            through_date=through_date,
+            game_count=game_count,
+        )
+
+    bundle_path = bundle_dir / "index.html"
+    bundle_path.write_text(html, encoding="utf-8")
+    _bundle_snapshot_path(slug).write_text(
+        json.dumps(snapshot, indent=2), encoding="utf-8",
+    )
+
+
+def regenerate_positioning_bundle(slug: str) -> str:
+    """Re-render the positioning bundle from its persisted snapshot
+    (AC-4a + AC-6(e) coverage-cue invariance).
+
+    Reads `data/reports/{slug}/bundle_snapshot.json`, re-invokes
+    :func:`generate_positioning_bundle` with the snapshot kwargs, and
+    re-writes `data/reports/{slug}/index.html`. The coverage cue is
+    invariant across regenerations even if the underlying DB
+    freshness has advanced.
+
+    Returns the path (string, relative to repo root) where the
+    re-rendered bundle was written.
+    """
+    snapshot_path = _bundle_snapshot_path(slug)
+    if not snapshot_path.exists():
+        raise FileNotFoundError(
+            f"No bundle snapshot at {snapshot_path}; "
+            f"bundle was never generated for slug={slug!r}.",
+        )
+    snapshot = json.loads(snapshot_path.read_text(encoding="utf-8"))
+
+    with closing(get_connection()) as conn:
+        html = generate_positioning_bundle(
+            conn,
+            snapshot["public_id"],
+            snapshot["season_id"],
+            opponent_name=snapshot.get("opponent_name", ""),
+            through_date=snapshot.get("through_date", ""),
+            game_count=snapshot.get("game_count", 0),
+        )
+
+    bundle_path = _bundle_dir(slug) / "index.html"
+    bundle_path.write_text(html, encoding="utf-8")
+    return str(bundle_path.relative_to(_REPO_ROOT))
 
 
 def _delete_game_scoped_data_for_perspectives(
