@@ -59,3 +59,25 @@ The internal-only sweep missed these because the drift wasn't word-level inside 
 The discipline scales beyond E-229: any epic that introduces a single-source-of-truth artifact (research doc, schema spec, shared API contract) needs the same cross-grep when the artifact is incorporated and again whenever the artifact or its consumers change.
 
 This methodology gap was caught by Codex iter-3 P1.3 in E-229 (2026-05-17). Two specific drifts found; both PM-owned (introduced when PM wrote the artifact stub during iter-2 incorporation).
+
+## Extension: when accepting a rename, grep every English variant of the OLD concept (E-230 Phase 4 CX4 lesson)
+
+When the consistency sweep follows a finding that retires an OLD concept and replaces it with a NEW concept (e.g., E-230 SE F4 retired "byte-equality" in favor of "content-level parity"), the grep targets must include **every plausible English variant of the OLD concept**, not just the literal phrase named in the finding.
+
+**Why**: During E-230 Phase 3 incorporation, PM accepted SE F4 (AC-9 reframed from byte-equality to content-level slot-fill) and swept for `byte-equality|byte equality` — clean. Codex iter-1 (P1 CX4) then found 4 surviving instances of `byte-identical` and `byte-for-byte identical` across the epic and Story 2. The sweep used the literal phrase from the SE finding rather than enumerating the variants of the retired concept. All 4 instances were genuine drift that contradicted the AC the sweep was supposed to protect.
+
+**How to apply**:
+
+1. **When accepting a rename finding, list every plausible English variant of the OLD concept before sweeping**. For "byte-equality" the variants include: `byte.equality`, `byte equality`, `byte.identical`, `byte-identical`, `byte.for.byte`, `byte-for-byte`. For "render_field_svg" the variants include: `render.field.svg`, `inline SVG`, `SVG renderer`. Cast wide.
+
+2. **Run a single grep with all variants OR-joined**. Use ripgrep's regex syntax: `byte.identical|byte.for.byte|byte.equality|byte equality`. If any returns occurrences in retired-context locations, fix in the same pass.
+
+3. **The high-risk surfaces for variant survival are** (same as the prose-drift list above):
+   - Epic Goals / Non-Goals (where the old concept was named as a guarantee)
+   - Success Criteria (where the old concept was a deliverable)
+   - Story Description / Context paragraphs (where the old concept was set up as a contract)
+   - Files-to-Modify notes (where the old concept named the test or file)
+
+4. **Rule of thumb**: a finding that names ONE phrasing of a retired concept means the concept's English variants are all suspect. Sweep for the variants before declaring the rename complete.
+
+This methodology gap was caught by Codex iter-1 CX4 in E-230 (2026-05-19). Four specific drifts found; all PM-owned (the original synthesis used multiple English variants of "byte-equality" and the Phase 3 sweep only matched two of them).

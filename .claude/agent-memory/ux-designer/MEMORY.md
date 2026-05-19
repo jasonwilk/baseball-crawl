@@ -102,6 +102,7 @@ See E-088 design advisory for full HTML/Tailwind markup.
 ## Feedback
 
 - [Coach async workflow reality](feedback_coach_async_workflow.md) -- Coaches trigger actions and come back later; design for "return" not "wait"
+- [Positioning vocabulary retired](feedback_positioning_vocab_retired.md) -- E-228 POSITIONING_CALL_WORDS / SHADE LEFT / call_state etc. retired in E-229; never cite or propose
 
 ## Key File Paths
 
