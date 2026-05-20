@@ -1,7 +1,7 @@
 # E-230: Positioning Section Refactor (Scouting Reports)
 
 ## Status
-`READY`
+`ACTIVE`
 
 ## Overview
 
@@ -51,8 +51,8 @@ This epic lands on top of `epic/E-228-defensive-positioning-cards` (which alread
 
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-230-01 | `src/charts/positioning.py` chart module + unit tests | TODO | None | - |
-| E-230-02 | Wire chart module into scouting report; reorder sections; pairing annotation | TODO | E-230-01 | - |
+| E-230-01 | `src/charts/positioning.py` chart module + unit tests | DONE | None | se |
+| E-230-02 | Wire chart module into scouting report; reorder sections; pairing annotation | DONE | E-230-01 | se |
 
 ## Dispatch Team
 
@@ -223,6 +223,7 @@ None blocking. One implementation-time judgment call flagged for SE during dispa
 - 2026-05-19: Phase 3 review incorporation. CR (1 finding), UXD (4 findings), SE (6 findings) reviewed DRAFT in parallel. 9 accepted as spec-defects, 2 dismissed (1 UXD self-acknowledged polish, 1 incorporation-defect that would have added preempt-CR-bloat TN). Edits: CR F1 (TN-8 AC-7→AC-8); UXD F-2 (Team alignment caption restored in story 2 AC-6+AC-11); UXD F-4 (epic Goals naming parenthetical); SE F1 (`_query_team_aggregate` signature correction in story 1 + TN-4 amendment); SE F2 (TN-2 BIP-count source = `team_position_aggregate.bip_count` for bundle/section consistency, no new COUNT query); SE F3 (TN-6 mandates context-dict-only for chart_mode); SE F4 (AC-9 reframed as content-level slot-fill, not byte-equality); SE F5 (story 1 steers import-from-spray for field-drawing primitives); SE F6 (TN-1 operator note trimmed). OQ-2 closed.
 - 2026-05-19: Phase 4 Codex spec review incorporation. Codex returned 4 findings (2 P1, 2 P2); all 4 accepted as spec-defects, 0 dismissed, 0 incorporation-defects. Edits: CX1 (story 2 AC-11 slot-fill extended to verify all 6 position-name labels); CX2 (story 2 AC-1 qualified with explicit zero-coverage short-circuit before threading); CX3 (TN-6 + AC-4 + Technical Approach steps 1+2 specify `chart_mode` lives INSIDE the nested `positioning` context object — `positioning.chart_mode` in partial, `cards_ctx["chart_mode"]` on bundle, `_build_positioning_context` adds it on scouting-report path); CX4 (consistency-sweep miss — all 4 instances of `byte-identical` / `byte-for-byte` wording replaced with content-level parity language across epic.md:35, :47, :174 and story 2:11, :61). Broader consistency sweep run with wider regex (`byte.identical|byte.for.byte|byte.equality|chart_mode|positioning\.chart_mode|AC-7|AC-8|AC-9|AC-10|AC-11|...`); clean.
 - 2026-05-19: **Status → READY.** Quality checklist passed: testable ACs, vertical-slice stories, file dependencies declared, expert consultations complete, scope ceiling held. Awaiting user authorization before dispatch per `.claude/rules/workflow-discipline.md` Dispatch Authorization Gate — planning and dispatch are separate actions; user reviews the READY epic before any worktree creation. Closure target per TN-1 is `epic/E-228-defensive-positioning-cards`, NOT main.
+- 2026-05-19: Status → ACTIVE. Dispatched from epic/E-228-defensive-positioning-cards branch per TN-1.
 
 ### Review Scorecard
 | Review Pass | Findings | Accepted | Dismissed |

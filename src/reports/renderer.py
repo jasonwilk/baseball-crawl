@@ -86,6 +86,20 @@ def _build_jinja_env() -> Environment:
     return env
 
 
+def _encode_png(png_bytes: bytes) -> str:
+    """Base64-encode PNG bytes as a ``data:image/png;base64,...`` URI.
+
+    Single encoding helper used by both the spray-chart caller
+    (``_encode_spray_chart``) and the E-230 positioning-chart payload
+    builder (``_build_scouting_report_positioning_payload``). The data
+    URI shape is the report-flow standard per epic TN-7: scouting
+    reports are self-contained HTML files on disk with no serving
+    runtime, so chart images are inlined as base64.
+    """
+    b64 = base64.b64encode(png_bytes).decode("ascii")
+    return f"data:image/png;base64,{b64}"
+
+
 def _encode_spray_chart(
     events: list[dict],
     title: str | None = None,
@@ -95,8 +109,7 @@ def _encode_spray_chart(
     from src.charts.spray import render_spray_chart
 
     png_bytes = render_spray_chart(events, title=title, figsize=figsize)
-    b64 = base64.b64encode(png_bytes).decode("ascii")
-    return f"data:image/png;base64,{b64}"
+    return _encode_png(png_bytes)
 
 
 def _compute_pa(player: dict) -> int:
@@ -607,6 +620,10 @@ def _build_positioning_context(
     opponent_context_coverage_line: str = "",
     opponent_context_stats: list[dict] | None = None,
     opponent_context_tier_line: str = "",
+    chart_mode: str = "svg",
+    team_chart_uri: str = "",
+    per_card_images: dict[str, str] | None = None,
+    has_coverage: bool = True,
 ) -> dict[str, Any]:
     """Group v2 ``batter_positioning`` rows into the E-229 card context.
 
@@ -629,6 +646,7 @@ def _build_positioning_context(
     """
     rationales = positioning_rationales or {}
     svgs = per_card_svgs or {}
+    images = per_card_images or {}
 
     # Bucket rows by position so each card can pick its outliers + state.
     rows_by_position: dict[str, list[dict]] = {p: [] for p in _POSITION_ORDER}
@@ -672,6 +690,7 @@ def _build_positioning_context(
             "position_key": position,
             "position_label": _POSITION_FULL_NAMES[position],
             "svg": svgs.get(position, ""),
+            "image_uri": images.get(position, ""),
             "sidebar_rows": sidebar_rows,
             "truncated_count": truncated,
             "state": state,  # "full" | "thin" | "no_outliers" | "zero_coverage"
@@ -697,6 +716,22 @@ def _build_positioning_context(
         "opponent_context_coverage_line": opponent_context_coverage_line,
         "opponent_context_stats": opponent_context_stats or [],
         "opponent_context_tier_line": opponent_context_tier_line,
+        # E-230: chart_mode flag (epic TN-6) lives INSIDE the
+        # positioning context object the partial reads from. Default
+        # 'svg' preserves the bundle path's prior behavior. The
+        # scouting-report path threads chart_mode='image' through this
+        # kwarg to switch the partial to PNG-image rendering and omit
+        # the per-card header / bundle-specific slots.
+        "chart_mode": chart_mode,
+        "team_chart_uri": team_chart_uri,
+        # E-230 TN-10: has_coverage is the partial's image-mode gate
+        # between the chart layout and the zero-coverage banner.
+        # Decoupled from `team_chart_uri` so partial-failure cases
+        # (e.g., per-position charts render but team chart fails)
+        # still surface the available cards rather than degrading to
+        # the banner. The bundle path (chart_mode='svg') ignores this
+        # field; it defaults to True so existing callers don't break.
+        "has_coverage": has_coverage,
         "empty_state_text": (
             "No scouted batters yet. Cards will appear after the first "
             "scouting pull."
@@ -865,14 +900,21 @@ def render_report(data: dict[str, Any]) -> str:
     team_pitches_per_pa = _format_rate(data.get("team_pitches_per_pa"))
 
     # Positioning section context (E-229-05 v2 + E-229-09 rationales).
-    # `positioning_card_svgs`: optional mapping {position: svg_string}
-    # produced by E-229-08's bundle assembler via
-    # src.reports.positioning_card.render_field_svg. Empty dict in
-    # contexts where SVGs aren't pre-rendered (e.g. unit tests of the
-    # template's structural shape).
+    # The scouting-report path (E-230) supplies image-mode keys
+    # (`positioning_team_chart_uri`, `positioning_card_images`,
+    # `positioning_chart_mode='image'`) and omits the SVG-shaped keys.
+    # The bundle path keeps the legacy SVG plumbing intact via its
+    # own context-build in `positioning_bundle.py::generate_positioning_bundle`.
     positioning_rows = data.get("positioning_rows") or []
     positioning_rationales = data.get("positioning_rationales") or {}
     positioning_card_svgs = data.get("positioning_card_svgs") or {}
+    positioning_card_images = data.get("positioning_card_images") or {}
+    positioning_chart_mode = data.get("positioning_chart_mode", "svg")
+    # In the bundle path (chart_mode='svg') has_coverage is unused and
+    # defaults to True. In the scouting-report path (chart_mode=
+    # 'image') has_coverage reflects whether `_choose_perspective_team_id`
+    # returned a non-None perspective for the opponent.
+    positioning_has_coverage = data.get("positioning_has_coverage", True)
     team = data.get("team") or {}
     positioning_context = _build_positioning_context(
         positioning_rows,
@@ -890,6 +932,10 @@ def render_report(data: dict[str, Any]) -> str:
         opponent_context_tier_line=data.get(
             "positioning_opponent_context_tier_line", "",
         ),
+        chart_mode=positioning_chart_mode,
+        team_chart_uri=data.get("positioning_team_chart_uri", ""),
+        per_card_images=positioning_card_images,
+        has_coverage=positioning_has_coverage,
     )
 
     context = {
@@ -897,6 +943,18 @@ def render_report(data: dict[str, Any]) -> str:
         "generated_at": data.get("generated_at", ""),
         "expires_at": data.get("expires_at", ""),
         "freshness_date": data.get("freshness_date"),
+        "freshness_date_human": data.get("freshness_date_human", ""),
+        "positioning_team_bip_count": data.get("positioning_team_bip_count", 0),
+        # E-230 Codex Finding 1 (TN-10): the Defensive Positioning
+        # section's annotation MUST read `0 games · 0 BIP` when the
+        # opponent has no positioning coverage, regardless of the
+        # report-level game_count. `generate_report` sets this to 0
+        # when `positioning_has_coverage=False` and to the actual
+        # game_count otherwise; the Spray section's annotation
+        # continues to use `game_count` directly.
+        "positioning_section_game_count": data.get(
+            "positioning_section_game_count", game_count,
+        ),
         "game_count": game_count,
         "recent_form": recent_form,
         "recent_form_str": recent_form_str,

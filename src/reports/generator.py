@@ -48,6 +48,10 @@ from src.gamechanger.types import TeamRef
 from src.gamechanger.url_parser import parse_team_url
 from src.llm.openrouter import is_llm_available
 from src.reconciliation.engine import reconcile_game
+from src.charts.positioning import (
+    render_position_chart,
+    render_team_position_chart,
+)
 from src.reports.positioning import COVERED_POSITIONS, compute_positioning
 from src.reports.positioning_bundle import (
     _build_opponent_context,
@@ -55,11 +59,12 @@ from src.reports.positioning_bundle import (
     generate_positioning_bundle,
 )
 from src.reports.positioning_card import (
+    _query_team_aggregate,
     format_coverage_cue,
     render_compass_key_svg,
     render_field_svg,
 )
-from src.reports.renderer import render_report
+from src.reports.renderer import _encode_png, render_report
 
 logger = logging.getLogger(__name__)
 
@@ -1377,6 +1382,19 @@ def generate_report(gc_url: str) -> GenerationResult:
         # `generate_positioning_bundle`. Non-fatal: a failure inside the
         # helper logs WARNING and the report still renders with empty
         # positioning slots (matching prior degraded behavior).
+        # E-230 Codex Finding 2: read team_bip_count + has_coverage
+        # independently of the positioning payload so the Spray section's
+        # annotation (which reads `positioning_team_bip_count`) survives
+        # positioning payload failures. If the payload helper raises
+        # (matplotlib render exception in the chart layer, etc.), the
+        # outer try/except collapses the payload to {} -- before this
+        # decoupling, that fallback caused the Spray annotation to
+        # misreport `0 BIP` even when spray charts themselves rendered.
+        (
+            team_bip_count_for_annotation,
+            positioning_has_coverage,
+        ) = _read_team_bip_count_and_coverage(team_id, season_id)
+
         positioning_payload: dict = {}
         try:
             positioning_payload = _build_scouting_report_positioning_payload(
@@ -1397,11 +1415,18 @@ def generate_report(gc_url: str) -> GenerationResult:
 
         # Render HTML
         team_info["record"] = record
+        # E-230 TN-2: format freshness_date to "Mon Day" form (e.g.
+        # "Apr 12") for the section-level coverage cue beneath the
+        # Spray and Defensive Positioning <h2>s. Empty string when
+        # freshness_date is None/unparseable -- the annotation degrades
+        # gracefully (template uses `default("")` filter on the field).
+        freshness_date_human = _format_through_date(freshness_date)
         data = {
             "team": team_info,
             "generated_at": generated_at,
             "expires_at": expires_at,
             "freshness_date": freshness_date,
+            "freshness_date_human": freshness_date_human,
             "game_count": game_count,
             "recent_form": recent_form,
             "pitching": pitching,
@@ -1421,30 +1446,36 @@ def generate_report(gc_url: str) -> GenerationResult:
             "starter_prediction": starter_prediction,
             "enriched_prediction": enriched_prediction,
             "show_predicted_starter": show_predicted_starter,
-            # Positioning data keys -- consumed by the renderer's
-            # `_build_positioning_context` so the cards section renders
-            # field SVGs, compass key, and opponent-context body.
-            "positioning_card_svgs": positioning_payload.get(
-                "positioning_card_svgs", {},
+            # E-230 image-mode positioning payload keys (TN-3 / TN-6 /
+            # TN-7). The scouting-report path renders matplotlib PNGs
+            # inlined as base64 data URIs; the partial's image-mode
+            # block reads `positioning.chart_mode`, `positioning.
+            # team_chart_uri`, and `card.image_uri` from these.
+            "positioning_chart_mode": positioning_payload.get(
+                "positioning_chart_mode", "image",
             ),
-            "positioning_compass_key_svg": positioning_payload.get(
-                "positioning_compass_key_svg", "",
+            "positioning_team_chart_uri": positioning_payload.get(
+                "positioning_team_chart_uri", "",
             ),
-            "positioning_coverage_cue": positioning_payload.get(
-                "positioning_coverage_cue", "",
+            "positioning_card_images": positioning_payload.get(
+                "positioning_card_images", {},
             ),
-            "positioning_opponent_context_coverage_line":
-                positioning_payload.get(
-                    "positioning_opponent_context_coverage_line", "",
-                ),
-            "positioning_opponent_context_stats":
-                positioning_payload.get(
-                    "positioning_opponent_context_stats", [],
-                ),
-            "positioning_opponent_context_tier_line":
-                positioning_payload.get(
-                    "positioning_opponent_context_tier_line", "",
-                ),
+            # E-230 Codex Finding 2: source these from the independent
+            # `_read_team_bip_count_and_coverage` helper (NOT from the
+            # positioning_payload dict) so they survive payload-helper
+            # exceptions. The payload helper's internally-computed copies
+            # are intentionally not used here.
+            "positioning_team_bip_count": team_bip_count_for_annotation,
+            "positioning_has_coverage": positioning_has_coverage,
+            # E-230 Codex Finding 1 (TN-10): when the opponent has no
+            # positioning coverage, the Defensive Positioning section's
+            # annotation MUST read `0 games · 0 BIP` regardless of the
+            # report-level game_count. The Spray annotation continues to
+            # use the actual game_count (it's about spray data, which
+            # may exist independently of positioning data).
+            "positioning_section_game_count": (
+                game_count if positioning_has_coverage else 0
+            ),
         }
         html = render_report(data)
 
@@ -1527,6 +1558,65 @@ def _format_through_date(freshness_date: str | None) -> str:
     return f"{dt.strftime('%b')} {dt.day}"
 
 
+def _read_team_bip_count_and_coverage(
+    team_id: int, season_id: str,
+) -> tuple[int, bool]:
+    """Return ``(team_bip_count, has_coverage)`` for the section-level
+    coverage cues.
+
+    Single source of truth for the canonical opponent BIP count (epic
+    TN-2) and the zero-coverage gate (epic TN-10). Decoupled from
+    :func:`_build_scouting_report_positioning_payload` per E-230
+    Codex Finding 2 so the Spray section's annotation survives
+    positioning payload failures (e.g., matplotlib render exceptions in
+    the chart layer would otherwise collapse the entire payload to
+    defaults and cause the Spray annotation to misreport ``0 BIP``).
+
+    Behavior:
+      * ``has_coverage`` is True iff ``_choose_perspective_team_id``
+        returns a non-None perspective for ``(team_id, season_id)``.
+      * ``team_bip_count`` comes from any one of the opponent's six
+        ``team_position_aggregate`` rows. The engine writes the SAME
+        ``bip_count`` value across all six positions per opponent per
+        TN-2; this helper reads from the first available row (preferring
+        CF, then iterating the covered positions).
+      * On any internal failure (DB unavailable, query error), returns
+        ``(0, False)`` and logs a WARNING. The caller can rely on the
+        return value being correct or zero-coverage -- never partially
+        populated.
+
+    The return tuple is shared between the Defensive Positioning
+    section (which uses both values) and the Spray section (which uses
+    only ``team_bip_count`` for its annotation).
+    """
+    try:
+        with closing(get_connection()) as conn:
+            conn.row_factory = sqlite3.Row
+            chosen = _choose_perspective_team_id(conn, team_id, season_id)
+            if chosen is None:
+                return 0, False
+            for pos in ("CF",) + tuple(p for p in COVERED_POSITIONS if p != "CF"):
+                try:
+                    row = _query_team_aggregate(
+                        conn, team_id, season_id, pos,
+                    )
+                except Exception:  # noqa: BLE001
+                    continue
+                if row is not None:
+                    return int(row.get("bip_count") or 0), True
+            # Perspective exists but no aggregate row resolved -- a
+            # transient/edge case; treat as has-coverage with zero BIP.
+            return 0, True
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "Team BIP count + coverage read failed for team_id=%d "
+            "season_id=%s (non-fatal); section annotations degrade to "
+            "zero-coverage state.",
+            team_id, season_id, exc_info=True,
+        )
+        return 0, False
+
+
 def _build_scouting_report_positioning_payload(
     *,
     public_id: str,
@@ -1536,121 +1626,152 @@ def _build_scouting_report_positioning_payload(
     freshness_date: str | None,
     game_count: int,
 ) -> dict:
-    """Build the 6 positioning data keys consumed by ``render_report``.
+    """Build the image-mode positioning payload for ``render_report``.
 
-    Mirrors the per-card SVG + opponent-context construction in
-    :func:`src.reports.positioning_bundle.generate_positioning_bundle`.
-    The scouting report's ``positioning_cards.html`` partial reads these
-    same keys via :func:`src.reports.renderer._build_positioning_context`;
-    without this payload the cards section renders empty SVG slots and
-    a blank opponent-context body even when the bundle (which lives at
-    ``data/reports/{slug}/index.html``) renders correctly.
+    E-230 rewrite: returns PNG data URIs (one team-level chart + six
+    per-position charts) instead of inline SVG. Charts are rendered via
+    :mod:`src.charts.positioning` (purpose-built for the embedded
+    scouting-report section per epic E-230 TN-3) and encoded as base64
+    data URIs via :func:`src.reports.renderer._encode_png`.
 
-    Returns a dict with the six keys:
-      * ``positioning_card_svgs`` -- ``{position: svg_string}`` for the
-        6 covered positions (LF, CF, RF, 3B, SS, 2B). Per-card render
-        failures are non-fatal: the offending slot falls back to "".
-      * ``positioning_compass_key_svg`` -- the reference compass card.
-      * ``positioning_coverage_cue`` -- "Through {Mon Day} ({N} games)"
-        threaded into each card's header.
-      * ``positioning_opponent_context_coverage_line`` -- season label
-        + game count + "vs. {our_team} {next_game}" suffix.
-      * ``positioning_opponent_context_stats`` -- 4-row label/value list
-        (Record / Runs per game / Runs allowed per game / Team BIPs).
-      * ``positioning_opponent_context_tier_line`` -- "Coverage tier:
-        {tier} — {tier-copy}".
+    Returned dict shape (consumed by ``generate_report`` → ``data``
+    dict → ``render_report`` → ``_build_positioning_context``):
+
+      * ``positioning_chart_mode`` -- always ``"image"``. Threaded into
+        the partial via the nested ``positioning.chart_mode`` flag per
+        epic TN-6; the partial's image-mode block reads this to render
+        ``<img src="...">`` slots and omit the bundle's per-card
+        header / compass-key / opponent-context slots.
+      * ``positioning_team_chart_uri`` -- ``data:image/png;base64,...``
+        for the full-field team chart (1 chart, 6 stars, density
+        background). Empty string in the zero-coverage degraded state.
+      * ``positioning_card_images`` -- ``{position: data_uri}`` for the
+        six covered positions (LF, CF, RF, 3B, SS, 2B). Per-chart
+        render failures are non-fatal: the offending slot falls back to
+        ``""``. Empty dict in the zero-coverage degraded state.
+      * ``positioning_team_bip_count`` -- canonical opponent BIP count
+        from ``team_position_aggregate.bip_count`` per epic TN-2 (read
+        from one row; the engine writes the same value to all 6).
+        ``0`` in the zero-coverage degraded state.
+
+    Perspective threading (epic TN-4): ``perspective_team_id`` is
+    derived ONCE here via :func:`_choose_perspective_team_id` and
+    passed as the same value into all seven chart calls (1 team-level
+    + 6 per-position). The render layer never re-derives perspective.
+
+    Zero-coverage degradation (epic TN-10): when no perspective is
+    available, this helper SHORT-CIRCUITS and returns a payload with
+    empty chart URIs, empty card images, and ``team_bip_count = 0``.
+    No charts are rendered (no exception risk from the chart layer).
+    The scouting-report template's image-mode block renders the
+    "Not enough spray data" banner from this empty state.
 
     Opens its own connection (mirroring the per-stage pattern in
     ``generate_report``); sets ``row_factory = sqlite3.Row`` so the
-    sibling helpers in ``positioning_bundle`` and ``positioning_card``
-    (which call ``dict(r)`` on query results) work correctly.
-
-    Returns ``{}`` for the opponent-context keys when no perspective is
-    available (zero-coverage opponent); the SVG keys are still populated
-    so the cards render their zero-coverage state.
+    chart-module's helper-imports (which call ``dict(r)`` on query
+    results) work correctly.
     """
-    through_date = _format_through_date(freshness_date)
-    coverage_cue = ""
-    if through_date and game_count > 0:
-        coverage_cue = format_coverage_cue(through_date, game_count)
-
     payload: dict = {
-        "positioning_card_svgs": {},
-        "positioning_compass_key_svg": "",
-        "positioning_coverage_cue": coverage_cue,
-        "positioning_opponent_context_coverage_line": "",
-        "positioning_opponent_context_stats": [],
-        "positioning_opponent_context_tier_line": "",
+        "positioning_chart_mode": "image",
+        "positioning_team_chart_uri": "",
+        "positioning_card_images": {},
+        "positioning_team_bip_count": 0,
+        # has_coverage = True iff `_choose_perspective_team_id`
+        # returned a non-None perspective. The partial reads this to
+        # decide between rendering the chart layout vs the zero-
+        # coverage banner. This decouples the banner gate from a
+        # specific chart's success (e.g., partial-failure cases where
+        # the team chart raises but per-position charts succeed -- we
+        # still want to show what we have, not fall back to the
+        # banner).
+        "positioning_has_coverage": False,
     }
 
     with closing(get_connection()) as conn:
-        # Sibling helpers (`positioning_card`, `positioning_bundle`) call
-        # `dict(r)` on query results, which requires `sqlite3.Row`.
-        # Mirrors the row_factory set in `generate_positioning_bundle`.
+        # Sibling helpers (`positioning_card`, `positioning_bundle`,
+        # `src.charts.positioning`) call `dict(r)` on query results,
+        # which requires `sqlite3.Row`. Mirrors the row_factory set in
+        # `generate_positioning_bundle`.
         conn.row_factory = sqlite3.Row
 
-        per_card_svgs: dict[str, str] = {}
-        for position in COVERED_POSITIONS:
-            try:
-                per_card_svgs[position] = render_field_svg(
-                    conn, public_id, position, season_id,
-                    opponent_name=opponent_name,
-                    through_date=through_date,
-                    game_count=game_count,
-                )
-            except Exception:  # noqa: BLE001
-                logger.warning(
-                    "Scouting report card SVG render failed for "
-                    "position=%s public_id=%s (non-fatal); slot "
-                    "renders empty.",
-                    position, public_id, exc_info=True,
-                )
-                per_card_svgs[position] = ""
-        payload["positioning_card_svgs"] = per_card_svgs
-
-        # Compass key is opponent-independent; if rendering fails we
-        # still want the per-card SVGs to ship.
-        try:
-            payload["positioning_compass_key_svg"] = render_compass_key_svg()
-        except Exception:  # noqa: BLE001
-            logger.warning(
-                "Scouting report compass-key SVG render failed "
-                "(non-fatal).", exc_info=True,
-            )
-
-        # Opponent-context payload: requires a chosen perspective. When
-        # no perspective is available (zero-coverage opponent), the
-        # opponent-context keys stay empty -- the partial's
-        # `default('')` filters render bare strings, matching the
-        # bundle's degraded-state behavior.
+        # Derive perspective ONCE per epic TN-4. None → zero-coverage
+        # opponent: short-circuit per epic TN-10 (AC-1, AC-10). No
+        # chart functions are called when perspective is None.
         chosen_perspective = _choose_perspective_team_id(
             conn, team_id, season_id,
         )
-        if chosen_perspective is not None:
+        if chosen_perspective is None:
+            return payload
+        payload["positioning_has_coverage"] = True
+
+        # team_bip_count comes from the canonical engine-written
+        # field on `team_position_aggregate` (epic TN-2). Read it
+        # from any one of the 6 rows for the chosen perspective; the
+        # engine writes the SAME value to all 6 positions per
+        # opponent. We do NOT compute a fresh COUNT(*) over
+        # spray_charts -- that would diverge from the bundle's
+        # persisted snapshot when the density-query filters drop
+        # null-coordinate BIPs.
+        try:
+            anchor_row = _query_team_aggregate(
+                conn, team_id, season_id, "CF",
+            )
+            if anchor_row is None:
+                # Fallback: try each position until we find a row.
+                # _choose_perspective_team_id returned a non-None
+                # perspective, so at least one row exists.
+                for pos in COVERED_POSITIONS:
+                    anchor_row = _query_team_aggregate(
+                        conn, team_id, season_id, pos,
+                    )
+                    if anchor_row is not None:
+                        break
+            if anchor_row is not None:
+                payload["positioning_team_bip_count"] = int(
+                    anchor_row.get("bip_count") or 0
+                )
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Scouting report team_bip_count read failed for "
+                "team_id=%d (non-fatal); annotation will show 0 BIP.",
+                team_id, exc_info=True,
+            )
+
+        # Team-level chart (1 PNG covering the full engine field).
+        try:
+            team_png = render_team_position_chart(
+                conn, public_id, season_id,
+                perspective_team_id=chosen_perspective,
+            )
+            payload["positioning_team_chart_uri"] = _encode_png(team_png)
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Scouting report team-level positioning chart render "
+                "failed for public_id=%s (non-fatal); team-chart slot "
+                "renders empty.",
+                public_id, exc_info=True,
+            )
+
+        # Per-position charts (6 PNGs). Each receives the same
+        # perspective_team_id derived above (epic TN-4); the render
+        # layer never re-derives perspective.
+        per_card_images: dict[str, str] = {}
+        for position in COVERED_POSITIONS:
             try:
-                ctx = _build_opponent_context(
-                    conn,
-                    team_id=team_id,
-                    season_id=season_id,
+                position_png = render_position_chart(
+                    conn, public_id, season_id, position,
                     perspective_team_id=chosen_perspective,
-                    game_count=game_count,
                 )
-                payload["positioning_opponent_context_coverage_line"] = (
-                    ctx.get("opponent_context_coverage_line", "")
-                )
-                payload["positioning_opponent_context_stats"] = ctx.get(
-                    "opponent_context_stats", [],
-                )
-                payload["positioning_opponent_context_tier_line"] = (
-                    ctx.get("opponent_context_tier_line", "")
-                )
+                per_card_images[position] = _encode_png(position_png)
             except Exception:  # noqa: BLE001
                 logger.warning(
-                    "Scouting report opponent-context payload failed "
-                    "for team_id=%d (non-fatal); cards section renders "
-                    "with empty context body.",
-                    team_id, exc_info=True,
+                    "Scouting report per-position positioning chart "
+                    "render failed for position=%s public_id=%s "
+                    "(non-fatal); slot renders empty.",
+                    position, public_id, exc_info=True,
                 )
+                per_card_images[position] = ""
+        payload["positioning_card_images"] = per_card_images
 
     return payload
 

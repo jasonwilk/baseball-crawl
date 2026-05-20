@@ -4,7 +4,7 @@
 [E-230: Positioning Section Refactor (Scouting Reports)](./epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 

@@ -812,6 +812,15 @@ def generate_positioning_bundle(
         opponent_context_tier_line=f2_context.get(
             "opponent_context_tier_line", "",
         ),
+        # E-230 TN-6: explicit chart_mode flag inside the positioning
+        # context dict. The bundle path renders inline SVG (unchanged
+        # from E-229); the partial's `{% if positioning.chart_mode ==
+        # 'image' %}` branch is for the scouting-report path only. We
+        # set 'svg' explicitly here (rather than relying on the
+        # function's default) so the bundle's flag is grep-visible at
+        # the call site -- callers reading this code learn the contract
+        # without chasing through the helper.
+        chart_mode="svg",
     )
 
     # ------------------------------------------------------------------

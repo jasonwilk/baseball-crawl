@@ -792,16 +792,19 @@
 
 </div>{# /.stats-content (first block: header through batting) #}
 
-{# ===== DEFENSIVE POSITIONING (E-228-05) =====
-   Renders the landscape call sheet + 2x3 portrait player cards. The
-   partial is self-contained (its own <style> block) so this parent
-   template doesn't need positioning-specific CSS. #}
-{% include "reports/positioning_cards.html" %}
-
-{# ===== SPRAY CHARTS (AC-10, TN-7, TN-10) ===== #}
+{# ===== SPRAY CHARTS (E-230 AC-5, reordered to render BEFORE Defensive
+   Positioning so the coaching narrative reads observation -> prescription
+   per epic TN-2 pairing rationale) ===== #}
 {% if has_spray or team_spray_uri %}
 <div class="spray-section">
   <h2 class="section-header">Batter Tendencies</h2>
+  {# E-230 AC-7: symmetric coverage cue beneath the Spray section
+     <h2>. Same `Through {date} · {N} games · {M} BIP` format used by
+     the Defensive Positioning section below per TN-2. `team_bip_count`
+     is read from `team_position_aggregate.bip_count` (NOT a fresh
+     COUNT over spray_charts) so both annotations match the bundle's
+     persisted snapshot. #}
+  <div class="sort-annotation">Through {{ freshness_date_human | default('') | e }} · {{ game_count }} games · {{ positioning_team_bip_count }} BIP</div>
 
   {# Team spray chart -- full width (AC-10) #}
   {% if team_spray_uri %}
@@ -832,6 +835,26 @@
   {% endif %}
 </div>
 {% endif %}
+
+{# ===== DEFENSIVE POSITIONING (E-230) =====
+   Image-mode rendering of the embedded section. The H2 + coverage
+   cue live HERE in the parent so the chart pixels carry no text
+   (epic TN-3 / TN-6). The `positioning_cards.html` partial reads
+   `positioning.chart_mode` from the nested context object (NOT a
+   top-level template var per TN-6) and renders the team chart +
+   3x2 per-position grid when `chart_mode == 'image'`.
+
+   E-230 Codex Finding 1 (TN-10): the section annotation uses
+   `positioning_section_game_count` -- which degrades to 0 when the
+   opponent has no positioning coverage -- so the zero-coverage
+   annotation reads `0 games · 0 BIP` rather than `N games · 0 BIP`.
+   The Spray section's annotation above uses `game_count` directly
+   because spray data may exist independently of positioning data. #}
+<div class="positioning-section">
+  <h2 class="section-header">Defensive Positioning</h2>
+  <div class="sort-annotation">Through {{ freshness_date_human | default('') | e }} · {{ positioning_section_game_count }} games · {{ positioning_team_bip_count }} BIP</div>
+  {% include "reports/positioning_cards.html" %}
+</div>
 
 <div class="stats-content">{# second block: roster + footer #}
 {# ===== ROSTER (AC-14) ===== #}

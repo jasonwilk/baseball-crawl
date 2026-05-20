@@ -3116,15 +3116,41 @@ def _seed_positioning_payload_inputs(
 
 
 class TestScoutingReportPositioningPayload:
-    """E-229 dev-validation fix: `generate_report` populates the 6
-    positioning data keys consumed by the renderer's
-    `_build_positioning_context`.
+    """E-230 image-mode positioning payload contract for `generate_report`.
 
-    Before this fix, the scouting report's positioning_cards.html partial
-    fell back to empty defaults for `positioning_card_svgs`,
-    `positioning_compass_key_svg`, `positioning_coverage_cue`, and the
-    three `positioning_opponent_context_*` keys -- so the rendered HTML
-    shipped empty <svg> slots and a blank opponent-context body.
+    `_build_scouting_report_positioning_payload` populates five
+    image-mode keys consumed by the partial's `chart_mode='image'`
+    branch via `_build_positioning_context`:
+
+      * ``positioning_chart_mode``      -- always ``"image"`` for this path
+      * ``positioning_team_chart_uri``  -- base64 PNG data URI (team chart)
+      * ``positioning_card_images``     -- {position: base64 PNG data URI}
+      * ``positioning_team_bip_count``  -- canonical opponent BIP count
+                                          from ``team_position_aggregate``
+      * ``positioning_has_coverage``    -- gates the zero-coverage banner
+
+    `freshness_date_human` is set on the `data` dict by `generate_report`
+    (sibling of `freshness_date`) so the section-level coverage cue
+    can render the "Mon Day" form below each section <h2> per TN-2.
+
+    Tests in this class assert the full payload + render pipeline:
+      - `test_data_dict_includes_six_positioning_keys` -- payload shape
+        + values (PNG data URI prefix; per-position dict; bip_count).
+      - `test_rendered_html_contains_positioning_image_uris_and_section_chrome`
+        -- AC-11 slot-fill on the rendered HTML (7+ PNG URIs, all 6
+        per-position labels in reading order, section <h2> + sort-
+        annotation, Team alignment caption).
+      - `test_payload_failure_is_non_fatal` -- E-229's invariant
+        preserved through E-230's rewrite: payload helper raising does
+        NOT fail report generation; a WARNING is logged.
+      - `test_spray_section_carries_symmetric_coverage_cue` -- AC-7
+        symmetric annotation appears under BOTH section <h2>s.
+      - `test_zero_coverage_short_circuits_chart_render` -- AC-10
+        zero-coverage path: no chart functions called; banner shown.
+
+    (Updated for E-230. Prior incarnation of this class asserted the
+    E-229 SVG-mode payload keys; those were removed when image-mode
+    became the scouting-report path's payload contract per AC-2.)
     """
 
     @pytest.fixture()
@@ -3209,59 +3235,47 @@ class TestScoutingReportPositioningPayload:
 
         assert result.success is True
 
-        # All 6 positioning data keys must be present.
+        # E-230 AC-2: image-mode payload keys (replaces the legacy
+        # SVG-shaped keys in the scouting-report path; the bundle's
+        # separate payload still produces inline SVG).
         required_keys = [
-            "positioning_card_svgs",
-            "positioning_compass_key_svg",
-            "positioning_coverage_cue",
-            "positioning_opponent_context_coverage_line",
-            "positioning_opponent_context_stats",
-            "positioning_opponent_context_tier_line",
+            "positioning_chart_mode",
+            "positioning_team_chart_uri",
+            "positioning_card_images",
+            "positioning_team_bip_count",
+            "freshness_date_human",
         ]
         for key in required_keys:
             assert key in captured, (
                 f"render_report data missing positioning key: {key}"
             )
 
-        # Per-card SVGs: one entry per covered position. (Test fixture
-        # patches dedup/compute but leaves render_report's inputs as
-        # produced by the actual payload builder against seeded data.)
-        from src.reports.positioning import COVERED_POSITIONS
-        svgs = captured["positioning_card_svgs"]
-        assert isinstance(svgs, dict)
-        for position in COVERED_POSITIONS:
-            assert position in svgs, (
-                f"positioning_card_svgs missing position {position}"
-            )
-            assert svgs[position].startswith("<svg"), (
-                f"positioning_card_svgs[{position}] should be an SVG, "
-                f"got: {svgs[position][:60]!r}"
-            )
+        # chart_mode is the partial-gating flag (epic TN-6).
+        assert captured["positioning_chart_mode"] == "image"
 
-        # Compass key must be a non-empty SVG.
-        assert captured["positioning_compass_key_svg"].startswith("<svg"), (
-            "positioning_compass_key_svg should be an inline SVG"
+        # Team-level chart URI: base64 PNG data URI.
+        team_uri = captured["positioning_team_chart_uri"]
+        assert team_uri.startswith("data:image/png;base64,"), (
+            f"positioning_team_chart_uri should be a PNG data URI, "
+            f"got: {team_uri[:60]!r}"
         )
 
-        # Opponent-context stats: fixed 4-row order from `_build_opponent_context`.
-        stats = captured["positioning_opponent_context_stats"]
-        assert isinstance(stats, list)
-        labels = [s["label"] for s in stats]
-        assert labels == [
-            "Record",
-            "Runs / game",
-            "Runs allowed / game",
-            "Team BIPs",
-        ]
+        # Per-position images: one entry per covered position.
+        from src.reports.positioning import COVERED_POSITIONS
+        images = captured["positioning_card_images"]
+        assert isinstance(images, dict)
+        for position in COVERED_POSITIONS:
+            assert position in images, (
+                f"positioning_card_images missing position {position}"
+            )
+            assert images[position].startswith("data:image/png;base64,"), (
+                f"positioning_card_images[{position}] should be a PNG data "
+                f"URI, got: {images[position][:60]!r}"
+            )
 
-        # Tier line should reference the "Full" tier given bip_count=60
-        # + is_low_confidence=0 in the fixture.
-        assert "Coverage tier:" in captured[
-            "positioning_opponent_context_tier_line"
-        ]
-        assert "Full" in captured[
-            "positioning_opponent_context_tier_line"
-        ]
+        # team_bip_count comes from team_position_aggregate.bip_count.
+        # Fixture seeds bip_count=60 across all 6 rows.
+        assert captured["positioning_team_bip_count"] == 60
 
     # ------------------------------------------------------------------
     # Test 2 -- smoke regression: full render pipeline against seeded
@@ -3279,16 +3293,30 @@ class TestScoutingReportPositioningPayload:
         "src.reports.generator.derive_season_id_for_team",
         return_value=("2026-spring-hs", 2026),
     )
-    def test_rendered_html_contains_positioning_svgs_and_context(
+    def test_rendered_html_contains_positioning_image_uris_and_section_chrome(
         self, mock_derive, mock_plays, mock_spray, mock_ensure,
         mock_client_cls, mock_get_conn, db_path, tmp_path,
     ):
-        """Smoke regression: the rendered scouting report HTML must
-        contain (a) inline <svg> elements at each of the 6 card slots,
-        (b) the compass-key SVG's letters A-H, and (c) the four
-        opponent-context stat labels. This test would fail against the
-        pre-fix `generate_report` -- the SVG slots were empty and the
-        opponent-context body was blank.
+        """E-230 AC-11 slot-fill on the rendered scouting report HTML.
+
+        With aggregates + outliers seeded, the rendered HTML must:
+          (a) contain 7+ ``data:image/png;base64,`` PNG data URIs
+              (1 team chart + 6 per-position charts);
+          (b) contain each of the six per-position labels
+              (LF/CF/RF/3B/SS/2B) inside the image-mode grid;
+          (c) emit the per-position labels in reading order
+              (LF/CF/RF top row, 3B/SS/2B bottom row);
+          (d) contain ``<h2 class="section-header">Defensive
+              Positioning</h2>``;
+          (e) carry a matching ``Through ... · N games · M BIP``
+              annotation under the Defensive Positioning <h2>;
+          (f) carry the "Team alignment" caption between the
+              section <h2> and the team chart.
+
+        Section-order verification (Spray BEFORE Defensive Positioning)
+        is split out into
+        ``test_spray_section_carries_symmetric_coverage_cue`` -- which
+        also seeds spray data so the Spray section renders.
         """
         conn = sqlite3.connect(str(db_path))
         _seed_positioning_payload_inputs(conn)
@@ -3351,46 +3379,95 @@ class TestScoutingReportPositioningPayload:
         )
         html = report_path.read_text(encoding="utf-8")
 
-        # ---- a) Inline <svg> bodies on the 6 position cards. The
-        # template wraps each field SVG in `<div class="positioning-card-svg-slot">`
-        # for cards 1-4 + 5-6, and emits `{{ card.svg | safe }}` inside.
-        # The compass-key slot uses `{{ positioning.compass_key_svg | safe }}`.
-        # Total expected <svg roots: 6 cards + 1 compass key = at least 7.
-        svg_open_count = html.count("<svg")
-        assert svg_open_count >= 7, (
-            f"expected >=7 <svg elements (6 cards + compass key), "
-            f"got {svg_open_count}"
+        # E-230 AC-11 slot-fill on the rendered HTML:
+        #   - 7 distinct PNG data URIs (1 team chart + 6 per-position)
+        #   - 6 per-position labels (LF/CF/RF/3B/SS/2B)
+        #   - "Defensive Positioning" inside an <h2>
+        #   - .sort-annotation under both Spray and Defensive Positioning
+        #   - "Team alignment" caption above the team chart
+        #   - Section order: Spray (Batter Tendencies) → Defensive Positioning
+
+        # ---- a) 7 PNG data URIs in total (1 team + 6 per-position).
+        # The test fixture seeds aggregates + outliers, so the image-
+        # mode block renders the team chart and all 6 cards.
+        png_uri_count = html.count("data:image/png;base64,")
+        assert png_uri_count >= 7, (
+            f"expected ≥7 PNG data URIs (1 team chart + 6 per-position), "
+            f"got {png_uri_count}"
         )
 
-        # ---- b) Compass-key SVG body should contain letters A-H. Scope
-        # to the compass-key slot div so we don't accidentally match
-        # zone-letter cells elsewhere.
-        compass_start = html.find(
-            'class="positioning-card compass-key"',
+        # ---- b) Per-position labels in the image-mode grid.
+        from src.reports.positioning import COVERED_POSITIONS
+        # Scope to the image-mode grid so we don't false-positive on
+        # the same letters appearing elsewhere (e.g., compass discs,
+        # roster positions). The grid is wrapped in `.positioning-
+        # card-grid-image`.
+        grid_start = html.find('class="positioning-card-grid-image"')
+        assert grid_start > 0, "positioning image-mode grid not rendered"
+        grid_end = html.find("</div>", grid_start + html[grid_start:].find("</div></div>"))
+        # The label markup is `<div class="positioning-card-image-label">LF</div>`.
+        for position in COVERED_POSITIONS:
+            label_marker = (
+                f'class="positioning-card-image-label">{position}</div>'
+            )
+            assert label_marker in html, (
+                f"image-mode grid missing label for position {position}"
+            )
+
+        # ---- c) Per-position grid reading order: LF/CF/RF top row,
+        # 3B/SS/2B bottom row.
+        order = ["LF", "CF", "RF", "3B", "SS", "2B"]
+        label_positions = [
+            html.find(
+                f'class="positioning-card-image-label">{p}</div>'
+            )
+            for p in order
+        ]
+        for i in range(1, len(label_positions)):
+            assert label_positions[i] > label_positions[i - 1], (
+                f"position labels out of expected reading order: "
+                f"{order[i - 1]} should appear before {order[i]}"
+            )
+
+        # ---- d) Defensive Positioning <h2>.
+        assert "<h2 class=\"section-header\">Defensive Positioning</h2>" in html
+
+        # ---- e) sort-annotation under the Defensive Positioning <h2>.
+        # team_bip_count=60 is from the fixture (aggregates seeded with
+        # bip_count=60); 3 games seeded in this test.
+        # NOTE: this fixture seeds positioning data but no spray data,
+        # so the Spray section is gated off (`{% if has_spray or
+        # team_spray_uri %}`) and its annotation does NOT render. The
+        # symmetric Spray annotation is verified by a dedicated test
+        # (`test_spray_section_carries_symmetric_coverage_cue` below).
+        expected_annotation = "Through Mar 3 · 3 games · 60 BIP"
+        assert html.count(expected_annotation) >= 1, (
+            f"expected the coverage cue {expected_annotation!r} to "
+            f"appear under the Defensive Positioning <h2>; found "
+            f"{html.count(expected_annotation)} occurrence(s)"
         )
-        assert compass_start > 0, "compass-key slot div not rendered"
-        compass_svg_start = html.find("<svg", compass_start)
-        compass_svg_end = html.find("</svg>", compass_svg_start) + len("</svg>")
-        compass_body = html[compass_svg_start:compass_svg_end]
-        for letter in "ABCDEFGH":
-            assert f">{letter}<" in compass_body, (
-                f"compass-key SVG missing letter {letter}"
-            )
 
-        # ---- c) Opponent-context stat labels (4 rows in fixed order).
-        for stat_label in (
-            "Record",
-            "Runs / game",
-            "Runs allowed / game",
-            "Team BIPs",
-        ):
-            assert stat_label in html, (
-                f"rendered HTML missing opponent-context stat: {stat_label}"
-            )
+        # ---- f) "Team alignment" caption between annotation and chart.
+        team_caption_idx = html.find("Team alignment")
+        assert team_caption_idx > 0, "Team alignment caption not rendered"
 
-        # ---- d) Coverage tier line.
-        assert "Coverage tier:" in html
-        assert "Full" in html
+        # ---- g) Team-alignment caption sits between the Defensive
+        # Positioning <h2> and the team chart.
+        # NOTE: this fixture seeds NO spray data, so the Spray section
+        # is gated off. Section ORDER (Spray BEFORE Defensive
+        # Positioning) is verified by
+        # `test_spray_section_carries_symmetric_coverage_cue` below,
+        # which seeds both sections.
+        positioning_h2_idx = html.find(
+            "<h2 class=\"section-header\">Defensive Positioning</h2>",
+        )
+        assert positioning_h2_idx > 0, (
+            "Defensive Positioning <h2> not rendered"
+        )
+        assert positioning_h2_idx < team_caption_idx, (
+            "Team alignment caption must follow the Defensive "
+            "Positioning <h2>"
+        )
 
     # ------------------------------------------------------------------
     # Test 3 -- non-fatal payload failure must not break report
@@ -3450,6 +3527,442 @@ class TestScoutingReportPositioningPayload:
         ]
         assert warnings, (
             "expected WARNING log for non-fatal payload failure"
+        )
+
+    # ------------------------------------------------------------------
+    # E-230 AC-7: symmetric coverage cue beneath the Spray section
+    # ------------------------------------------------------------------
+    @patch("src.reports.generator.get_connection")
+    @patch("src.reports.generator.GameChangerClient")
+    @patch("src.reports.generator.ensure_team_row", return_value=1)
+    @patch("src.reports.generator._crawl_and_load_spray")
+    @patch("src.reports.generator._crawl_and_load_plays", return_value=[])
+    @patch(
+        "src.reports.generator.derive_season_id_for_team",
+        return_value=("2026-spring-hs", 2026),
+    )
+    def test_spray_section_carries_symmetric_coverage_cue(
+        self, mock_derive, mock_plays, mock_spray, mock_ensure,
+        mock_client_cls, mock_get_conn, db_path, tmp_path,
+    ):
+        """AC-7: when the Spray section renders (has_spray or
+        team_spray_uri is truthy), it carries the same
+        `Through {date} · {N} games · {M} BIP` annotation as the
+        Defensive Positioning section. The format symmetry is the
+        pairing-rationale carrier per TN-2.
+
+        AC-11 (partial): also confirms section order — Spray BEFORE
+        Defensive Positioning.
+        """
+        conn = sqlite3.connect(str(db_path))
+        _seed_positioning_payload_inputs(conn)
+        # Add a member team + completed games so the report computes
+        # game_count.
+        conn.execute(
+            "INSERT INTO teams (id, name, membership_type) "
+            "VALUES (99, 'LSB Varsity', 'member')"
+        )
+        for idx, (home, away, hs, as_) in enumerate([
+            (1, 99, 8, 2),
+            (99, 1, 5, 6),
+            (1, 99, 7, 4),
+        ]):
+            conn.execute(
+                """
+                INSERT INTO games (
+                    game_id, season_id, home_team_id, away_team_id,
+                    home_score, away_score, game_date
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (f"g{idx}", "2026-spring-hs", home, away, hs, as_,
+                 f"2026-03-{idx + 1:02d}"),
+            )
+        conn.commit()
+        conn.close()
+
+        mock_get_conn.side_effect = self._fresh_conn_factory(db_path)
+        mock_crawler, mock_loader = self._mock_pipeline(mock_client_cls)
+
+        # Inject a non-empty team spray URI so the Spray section gate
+        # `{% if has_spray or team_spray_uri %}` opens. We patch
+        # `_encode_spray_chart` to return a deterministic data URI.
+        # `compute_positioning` is patched to a no-op (positioning data
+        # is seeded directly above).
+        with (
+            patch("src.reports.generator.ScoutingCrawler",
+                  return_value=mock_crawler),
+            patch("src.reports.generator.ScoutingLoader",
+                  return_value=mock_loader),
+            patch("src.reports.generator._REPO_ROOT", tmp_path),
+            patch("src.reports.generator._REPORTS_DIR",
+                  tmp_path / "data" / "reports"),
+            patch("src.reports.generator.dedup_team_players", return_value=0),
+            patch("src.reports.generator.compute_positioning", return_value=[]),
+            patch("src.reports.generator._write_positioning_bundle"),
+            # Force Spray section to render by injecting a team spray
+            # URI directly (the test fixture has no spray_charts rows;
+            # patching the encoder alone is insufficient because
+            # `_build_team_spray_uri` short-circuits to None when the
+            # raw events list is empty).
+            patch(
+                "src.reports.renderer._build_team_spray_uri",
+                return_value="data:image/png;base64,FAKE",
+            ),
+        ):
+            result = generate_report("abc123")
+
+        assert result.success is True
+        report_path = tmp_path / "data" / "reports" / f"{result.slug}.html"
+        html = report_path.read_text(encoding="utf-8")
+
+        # Both <h2>s are present:
+        spray_h2_idx = html.find(
+            '<h2 class="section-header">Batter Tendencies</h2>',
+        )
+        positioning_h2_idx = html.find(
+            '<h2 class="section-header">Defensive Positioning</h2>',
+        )
+        assert spray_h2_idx > 0, "Batter Tendencies <h2> missing"
+        assert positioning_h2_idx > 0, "Defensive Positioning <h2> missing"
+
+        # Section order (AC-5 + AC-11): Spray comes first.
+        assert spray_h2_idx < positioning_h2_idx
+
+        # Symmetric coverage cue (AC-7 + TN-2): same annotation under
+        # both <h2>s. team_bip_count=60 (from fixture aggregates).
+        expected_annotation = "Through Mar 3 · 3 games · 60 BIP"
+        assert html.count(expected_annotation) >= 2, (
+            f"expected the symmetric coverage cue {expected_annotation!r} "
+            f"under BOTH section <h2>s; found "
+            f"{html.count(expected_annotation)} occurrence(s)"
+        )
+
+    # ------------------------------------------------------------------
+    # E-230 AC-10: zero-coverage degradation
+    # ------------------------------------------------------------------
+    @patch("src.reports.generator.get_connection")
+    @patch("src.reports.generator.GameChangerClient")
+    @patch("src.reports.generator.ensure_team_row", return_value=1)
+    @patch("src.reports.generator._crawl_and_load_spray")
+    @patch("src.reports.generator._crawl_and_load_plays", return_value=[])
+    @patch(
+        "src.reports.generator.derive_season_id_for_team",
+        return_value=("2026-spring-hs", 2026),
+    )
+    def test_zero_coverage_short_circuits_chart_render(
+        self, mock_derive, mock_plays, mock_spray, mock_ensure,
+        mock_client_cls, mock_get_conn, db_path, tmp_path,
+    ):
+        """AC-10: when no perspective is available (no
+        ``team_position_aggregate`` rows for the opponent), the
+        positioning payload short-circuits BEFORE calling any chart
+        function. The Defensive Positioning section renders with
+        `0 games · 0 BIP` and no chart slots.
+        """
+        conn = sqlite3.connect(str(db_path))
+        _seed_minimal_pipeline_inputs(conn)
+        conn.close()
+
+        mock_get_conn.side_effect = self._fresh_conn_factory(db_path)
+        mock_crawler, mock_loader = self._mock_pipeline(mock_client_cls)
+
+        # Mock both chart functions so we can assert they were NOT
+        # called (zero-coverage short-circuit).
+        with (
+            patch("src.reports.generator.ScoutingCrawler",
+                  return_value=mock_crawler),
+            patch("src.reports.generator.ScoutingLoader",
+                  return_value=mock_loader),
+            patch("src.reports.generator._REPO_ROOT", tmp_path),
+            patch("src.reports.generator._REPORTS_DIR",
+                  tmp_path / "data" / "reports"),
+            patch("src.reports.generator.dedup_team_players", return_value=0),
+            patch("src.reports.generator.compute_positioning", return_value=[]),
+            patch("src.reports.generator._write_positioning_bundle"),
+            patch(
+                "src.reports.generator.render_team_position_chart",
+            ) as mock_team_chart,
+            patch(
+                "src.reports.generator.render_position_chart",
+            ) as mock_position_chart,
+        ):
+            result = generate_report("abc123")
+
+        assert result.success is True
+        # Neither chart function should have been called.
+        assert not mock_team_chart.called, (
+            "AC-10 violated: render_team_position_chart called even "
+            "though no perspective is available (zero-coverage)"
+        )
+        assert not mock_position_chart.called, (
+            "AC-10 violated: render_position_chart called even "
+            "though no perspective is available (zero-coverage)"
+        )
+
+        # The rendered HTML still has the section <h2> + annotation.
+        report_path = tmp_path / "data" / "reports" / f"{result.slug}.html"
+        html = report_path.read_text(encoding="utf-8")
+        assert '<h2 class="section-header">Defensive Positioning</h2>' in html
+        # game_count is 0 (no games seeded); team_bip_count is 0 (no
+        # aggregates). Annotation degrades gracefully.
+        assert "0 games · 0 BIP" in html
+        # Zero-coverage banner renders in the image-mode block.
+        assert "play your standard alignment" in html
+
+    # ------------------------------------------------------------------
+    # E-230 Codex Finding 1 (TN-10): zero-coverage annotation MUST read
+    # `0 games · 0 BIP` even when the opponent has games. The report-
+    # level game_count is reused by the Spray annotation but the
+    # Defensive Positioning annotation degrades to 0 games when no
+    # positioning coverage exists.
+    # ------------------------------------------------------------------
+    @patch("src.reports.generator.get_connection")
+    @patch("src.reports.generator.GameChangerClient")
+    @patch("src.reports.generator.ensure_team_row", return_value=1)
+    @patch("src.reports.generator._crawl_and_load_spray")
+    @patch("src.reports.generator._crawl_and_load_plays", return_value=[])
+    @patch(
+        "src.reports.generator.derive_season_id_for_team",
+        return_value=("2026-spring-hs", 2026),
+    )
+    def test_zero_coverage_with_games_annotation_shows_zero_games(
+        self, mock_derive, mock_plays, mock_spray, mock_ensure,
+        mock_client_cls, mock_get_conn, db_path, tmp_path,
+    ):
+        """Finding 1 reproduction: with games seeded but NO
+        team_position_aggregate rows, the Defensive Positioning
+        annotation MUST read `0 games · 0 BIP` per TN-10 -- not
+        `N games · 0 BIP` (which would expose the report-level game
+        count under the positioning section header even though no
+        positioning data exists for the opponent).
+
+        The Spray annotation in this fixture is gated off (no spray
+        data seeded), so this test focuses solely on the Defensive
+        Positioning section's zero-coverage annotation behavior.
+        """
+        conn = sqlite3.connect(str(db_path))
+        _seed_minimal_pipeline_inputs(conn)
+        # Seed a member team + 3 games so game_count > 0 at the
+        # report level. NO `team_position_aggregate` rows seeded ->
+        # `_choose_perspective_team_id` returns None ->
+        # positioning_has_coverage = False.
+        conn.execute(
+            "INSERT INTO teams (id, name, membership_type) "
+            "VALUES (99, 'LSB Varsity', 'member')"
+        )
+        for idx, (home, away, hs, as_) in enumerate([
+            (1, 99, 8, 2),
+            (99, 1, 5, 6),
+            (1, 99, 7, 4),
+        ]):
+            conn.execute(
+                """
+                INSERT INTO games (
+                    game_id, season_id, home_team_id, away_team_id,
+                    home_score, away_score, game_date
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (f"g{idx}", "2026-spring-hs", home, away, hs, as_,
+                 f"2026-03-{idx + 1:02d}"),
+            )
+        conn.commit()
+        conn.close()
+
+        mock_get_conn.side_effect = self._fresh_conn_factory(db_path)
+        mock_crawler, mock_loader = self._mock_pipeline(mock_client_cls)
+
+        with (
+            patch("src.reports.generator.ScoutingCrawler",
+                  return_value=mock_crawler),
+            patch("src.reports.generator.ScoutingLoader",
+                  return_value=mock_loader),
+            patch("src.reports.generator._REPO_ROOT", tmp_path),
+            patch("src.reports.generator._REPORTS_DIR",
+                  tmp_path / "data" / "reports"),
+            patch("src.reports.generator.dedup_team_players", return_value=0),
+            patch("src.reports.generator.compute_positioning", return_value=[]),
+            patch("src.reports.generator._write_positioning_bundle"),
+        ):
+            result = generate_report("abc123")
+
+        assert result.success is True
+        report_path = tmp_path / "data" / "reports" / f"{result.slug}.html"
+        html = report_path.read_text(encoding="utf-8")
+
+        # The Defensive Positioning annotation MUST degrade to `0 games`
+        # even though the report-level game_count is 3.
+        positioning_idx = html.find(
+            '<h2 class="section-header">Defensive Positioning</h2>',
+        )
+        assert positioning_idx > 0, (
+            "Defensive Positioning <h2> missing from rendered HTML"
+        )
+        # Scope to the Defensive Positioning section: the next
+        # sort-annotation div after the <h2>.
+        positioning_section = html[positioning_idx:positioning_idx + 1000]
+        assert "0 games · 0 BIP" in positioning_section, (
+            "Finding 1 regression: Defensive Positioning annotation "
+            "did not degrade to `0 games · 0 BIP` when "
+            "positioning_has_coverage=False; saw:\n"
+            f"{positioning_section[:400]!r}"
+        )
+        # And specifically: NOT `3 games` (the report-level count
+        # leaking through).
+        # (Restrict the search to the annotation div, since `3 games`
+        # could legitimately appear elsewhere in the report -- e.g.,
+        # roster snippets or batting-section narrative.)
+        annotation_start = positioning_section.find(
+            'class="sort-annotation">'
+        )
+        annotation_end = positioning_section.find(
+            "</div>", annotation_start,
+        )
+        annotation_text = positioning_section[annotation_start:annotation_end]
+        assert "3 games" not in annotation_text, (
+            "Finding 1 regression: Defensive Positioning annotation "
+            f"leaks report-level game count; annotation={annotation_text!r}"
+        )
+
+    # ------------------------------------------------------------------
+    # E-230 Codex Finding 2: Spray section's annotation must NOT
+    # misreport `0 BIP` when the positioning payload helper raises a
+    # non-fatal exception. `team_bip_count` is sourced from a separate
+    # query path (`_read_team_bip_count_and_coverage`) so the value
+    # survives positioning-payload failures.
+    # ------------------------------------------------------------------
+    @patch("src.reports.generator.get_connection")
+    @patch("src.reports.generator.GameChangerClient")
+    @patch("src.reports.generator.ensure_team_row", return_value=1)
+    @patch("src.reports.generator._crawl_and_load_spray")
+    @patch("src.reports.generator._crawl_and_load_plays", return_value=[])
+    @patch(
+        "src.reports.generator.derive_season_id_for_team",
+        return_value=("2026-spring-hs", 2026),
+    )
+    def test_spray_annotation_survives_positioning_payload_failure(
+        self, mock_derive, mock_plays, mock_spray, mock_ensure,
+        mock_client_cls, mock_get_conn, db_path, tmp_path,
+    ):
+        """Finding 2 reproduction: when the positioning payload helper
+        raises (non-fatal), the Spray section's annotation must show
+        the canonical `team_position_aggregate.bip_count` -- NOT 0.
+
+        Fixture seeds aggregates with bip_count=60 + a member team +
+        games + a non-empty spray URI so the Spray section renders.
+        We force `_build_scouting_report_positioning_payload` to raise.
+        Expectation:
+          * Report still succeeds (non-fatal contract).
+          * Spray annotation reads `60 BIP` (from the independent helper).
+          * The Defensive Positioning section's annotation also reads
+            `60 BIP` because the independent helper is the source of
+            truth for BOTH sections.
+        """
+        conn = sqlite3.connect(str(db_path))
+        _seed_positioning_payload_inputs(conn)
+        # Add a member team + games so freshness_date + game_count
+        # resolve to non-zero values.
+        conn.execute(
+            "INSERT INTO teams (id, name, membership_type) "
+            "VALUES (99, 'LSB Varsity', 'member')"
+        )
+        for idx, (home, away, hs, as_) in enumerate([
+            (1, 99, 8, 2),
+            (99, 1, 5, 6),
+            (1, 99, 7, 4),
+        ]):
+            conn.execute(
+                """
+                INSERT INTO games (
+                    game_id, season_id, home_team_id, away_team_id,
+                    home_score, away_score, game_date
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (f"g{idx}", "2026-spring-hs", home, away, hs, as_,
+                 f"2026-03-{idx + 1:02d}"),
+            )
+        conn.commit()
+        conn.close()
+
+        mock_get_conn.side_effect = self._fresh_conn_factory(db_path)
+        mock_crawler, mock_loader = self._mock_pipeline(mock_client_cls)
+
+        with (
+            patch("src.reports.generator.ScoutingCrawler",
+                  return_value=mock_crawler),
+            patch("src.reports.generator.ScoutingLoader",
+                  return_value=mock_loader),
+            patch("src.reports.generator._REPO_ROOT", tmp_path),
+            patch("src.reports.generator._REPORTS_DIR",
+                  tmp_path / "data" / "reports"),
+            patch("src.reports.generator.dedup_team_players", return_value=0),
+            patch("src.reports.generator.compute_positioning", return_value=[]),
+            patch("src.reports.generator._write_positioning_bundle"),
+            # Force Spray section to render.
+            patch(
+                "src.reports.renderer._build_team_spray_uri",
+                return_value="data:image/png;base64,FAKE",
+            ),
+            # Force the positioning payload helper to raise the
+            # non-fatal exception path.
+            patch(
+                "src.reports.generator._build_scouting_report_positioning_payload",
+                side_effect=RuntimeError("synthetic payload failure"),
+            ),
+        ):
+            result = generate_report("abc123")
+
+        assert result.success is True
+        report_path = tmp_path / "data" / "reports" / f"{result.slug}.html"
+        html = report_path.read_text(encoding="utf-8")
+
+        # Spray annotation must show 60 BIP (from team_position_aggregate).
+        spray_idx = html.find(
+            '<h2 class="section-header">Batter Tendencies</h2>',
+        )
+        assert spray_idx > 0, "Spray section <h2> missing"
+        # Restrict to the annotation div immediately following the H2.
+        spray_section = html[spray_idx:spray_idx + 600]
+        spray_annotation_start = spray_section.find(
+            'class="sort-annotation">',
+        )
+        spray_annotation_end = spray_section.find(
+            "</div>", spray_annotation_start,
+        )
+        spray_annotation = spray_section[
+            spray_annotation_start:spray_annotation_end
+        ]
+        # Use the separator-anchored form to distinguish `60 BIP` from
+        # the substring `0 BIP` that would match inside `60 BIP`.
+        assert "· 60 BIP" in spray_annotation, (
+            "Finding 2 regression: Spray annotation misreports BIP "
+            "count when positioning payload raises; annotation="
+            f"{spray_annotation!r}"
+        )
+        assert "· 0 BIP" not in spray_annotation, (
+            "Finding 2 regression: Spray annotation shows `· 0 BIP` "
+            "(the positioning-payload-fallback value) when payload "
+            f"raises; annotation={spray_annotation!r}"
+        )
+
+        # Also: the Defensive Positioning annotation should match.
+        positioning_idx = html.find(
+            '<h2 class="section-header">Defensive Positioning</h2>',
+        )
+        assert positioning_idx > 0, "Defensive Positioning <h2> missing"
+        positioning_section = html[positioning_idx:positioning_idx + 1000]
+        positioning_annotation_start = positioning_section.find(
+            'class="sort-annotation">',
+        )
+        positioning_annotation_end = positioning_section.find(
+            "</div>", positioning_annotation_start,
+        )
+        positioning_annotation = positioning_section[
+            positioning_annotation_start:positioning_annotation_end
+        ]
+        assert "· 60 BIP" in positioning_annotation, (
+            "Defensive Positioning annotation should also reflect the "
+            "canonical bip_count when positioning payload raises; "
+            f"annotation={positioning_annotation!r}"
         )
 
 

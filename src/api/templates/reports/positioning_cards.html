@@ -1,27 +1,39 @@
 {# ============================================================
-   E-229-05: Defensive Positioning Cards section (partial)
+   Defensive Positioning Cards section (partial)
 
-   Renders the player cards portion of the report bundle:
-   8 quarter-letter cards laid out 4-up across 2 letter-portrait
-   pages. Sheet 1 holds LF/CF/RF/3B; sheet 2 holds SS/2B in
-   slots 1-2, the visual compass key in slot 3, and the
-   opponent context card in slot 4.
+   Serves TWO callers via the nested `positioning.chart_mode` flag
+   (epic E-230 TN-6). Both callers thread `chart_mode` INSIDE the
+   `positioning` context object the partial receives (NOT as a
+   top-level template var, NOT via `{% include with %}`).
 
-   Distinct from:
-     - the in-game call sheet (E-229-07; landscape, separate
-       partial; this template owns ONLY the player cards)
-     - the prep page (E-229-06; landscape, single page;
-       separate partial)
+   * chart_mode='svg' (default; bundle path) — renders the 4-up
+     quarter-letter print layout used by the standalone bundle at
+     `data/reports/{slug}/index.html` (E-229). Two letter-portrait
+     sheets: sheet 1 = LF/CF/RF/3B; sheet 2 = SS/2B + visual
+     compass key + opponent context card.
+     Source of `card.svg`: `src.reports.positioning_card.render_field_svg`.
+
+   * chart_mode='image' (E-230 scouting-report path) — renders the
+     embedded scouting-report layout: a single team-level chart
+     captioned "Team alignment", followed by a 3-per-row grid of
+     per-position charts (LF/CF/RF top row, 3B/SS/2B bottom row).
+     Chart pixels carry no text; the per-card label is the position
+     name only.
+     Source of `card.image_uri` / `positioning.team_chart_uri`:
+     base64 data URIs from `src.charts.positioning`.
 
    Context provided by `_build_positioning_context()` in renderer.py:
        positioning = {
            has_data: bool,
+           chart_mode: 'svg' | 'image',
+           team_chart_uri: str,      # image-mode only (data: URI)
            cards: [
                {
                    position_key: str,
                    position_label: str,
-                   svg: str,                # rendered per-position SVG
-                   sidebar_rows: [ ... ],   # outlier batter rows
+                   svg: str,                # svg-mode field SVG
+                   image_uri: str,          # image-mode per-card PNG data URI
+                   sidebar_rows: [ ... ],   # svg-mode outlier batter rows
                    truncated_count: int,
                    state: "full" | "thin" | "no_outliers" | "zero_coverage",
                },
@@ -33,12 +45,11 @@
            zero_coverage_text: str,
        }
 
-   Per-position SVGs are supplied by E-229-08's bundle assembler via
-   `data["positioning_card_svgs"]` (a dict mapping position -> SVG
-   string from `src.reports.positioning_card.render_field_svg`).
-   When SVGs are absent (e.g. unit tests of the template's
-   structural shape), the field slot renders empty -- the
-   template's structural assertions still hold.
+   Distinct from:
+     - the in-game call sheet (E-229-07; landscape, separate
+       partial; this template owns ONLY the player cards)
+     - the prep page (E-229-06; landscape, single page;
+       separate partial)
    ============================================================ #}
 
 <style>
@@ -318,10 +329,106 @@
       margin-top: 0.2in;
     }
   }
+
+  /* =============================================================
+     E-230 image-mode layout: embedded scouting-report section.
+     Greyscale-only palette per artifact §F (same constraint as the
+     bundle layout above; pinned by
+     tests/test_positioning_card_template.py).
+     ============================================================= */
+  .positioning-image-section {
+    font-family: Arial, Helvetica, sans-serif;
+    color: #000;
+    margin-top: 8px;
+  }
+  .positioning-team-block {
+    text-align: center;
+    margin-bottom: 12px;
+  }
+  .positioning-team-caption {
+    font-size: 9pt;
+    color: #4d4d4d;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    margin-bottom: 4px;
+  }
+  .positioning-team-chart img {
+    max-width: 100%;
+    height: auto;
+    display: inline-block;
+  }
+  .positioning-card-grid-image {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    grid-template-rows: auto auto;
+    gap: 8px;
+    margin-top: 4px;
+  }
+  .positioning-card-image {
+    text-align: center;
+    background: #fff;
+  }
+  .positioning-card-image img {
+    width: 100%;
+    height: auto;
+    display: block;
+  }
+  .positioning-card-image-label {
+    font-size: 9pt;
+    font-weight: bold;
+    margin-top: 2px;
+    color: #000;
+    letter-spacing: 0.04em;
+  }
+  .positioning-zero-banner {
+    padding: 16px 12px;
+    margin: 8px 0 16px;
+    border: 1px solid #bbb;
+    background: #fafafa;
+    color: #4d4d4d;
+    font-size: 10pt;
+    font-style: italic;
+    text-align: center;
+  }
+  @media screen and (max-width: 640px) {
+    .positioning-card-grid-image {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
 </style>
 
 
-{# ===== SHEET 1: LF / CF / RF / 3B ===== #}
+{% if positioning.chart_mode | default('svg') == 'image' %}
+{# ===== E-230 IMAGE MODE: embedded scouting-report section ===== #}
+<div class="positioning-image-section">
+  {% if positioning.has_coverage %}
+    {% if positioning.team_chart_uri %}
+      <div class="positioning-team-block">
+        <div class="positioning-team-caption">Team alignment</div>
+        <div class="positioning-team-chart">
+          <img src="{{ positioning.team_chart_uri }}" alt="Team defensive positioning chart">
+        </div>
+      </div>
+    {% endif %}
+    <div class="positioning-card-grid-image">
+      {% for card in positioning.cards %}
+        <div class="positioning-card-image" data-position="{{ card.position_key }}">
+          {% if card.image_uri %}
+            <img src="{{ card.image_uri }}" alt="{{ card.position_key }} defensive positioning chart">
+          {% endif %}
+          <div class="positioning-card-image-label">{{ card.position_key }}</div>
+        </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="positioning-zero-banner">
+      Not enough spray data — play your standard alignment.
+    </div>
+  {% endif %}
+</div>
+{% else %}
+{# ===== SHEET 1: LF / CF / RF / 3B (bundle path, chart_mode='svg') ===== #}
 <section class="positioning-cards-sheet sheet-1">
   <div class="positioning-cards-grid">
     {% for card in positioning.cards[:4] %}
@@ -475,3 +582,4 @@
     </div>
   </div>
 </section>
+{% endif %}
