@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Drop and recreate the development database, then load seed data.
+"""Drop and recreate the development database (empty schema).
 
 Thin wrapper around ``src.db.reset``.  Business logic lives in the src
 package; this script provides the CLI interface.
@@ -53,7 +53,7 @@ logger = logging.getLogger(__name__)
 def _parse_args() -> argparse.Namespace:
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(
-        description="Drop and recreate the development database with seed data.",
+        description="Drop and recreate the development database (empty schema).",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "Examples:\n"
@@ -82,12 +82,9 @@ if __name__ == "__main__":
     db_path = Path(args.db_path).resolve() if args.db_path else None
 
     try:
-        tables, rows = reset_database(db_path=db_path, force=args.force)
-    except FileNotFoundError as exc:
-        logger.error("Seed file error: %s", exc)
-        sys.exit(1)
+        tables, _ = reset_database(db_path=db_path, force=args.force)
     except Exception as exc:
         logger.error("Reset failed: %s", exc)
         sys.exit(1)
 
-    print(f"Database reset. {tables} tables created. {rows} rows inserted.")
+    print(f"Database reset to empty schema. {tables} tables created.")

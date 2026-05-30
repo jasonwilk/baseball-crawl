@@ -4,7 +4,7 @@
 [E-228: Make `bb db reset` Produce a Useful Dev Environment](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, any admin user will see every team on the coaching dashboard without needing per-team `user_team_access` grants. This restores the operator's dashboard access immediately after `bb db reset` -- with zero manual SQL -- because the operator is an admin and their real data is entirely tracked teams (which no provisioning path grants today). Non-admin dashboard gating is unchanged -- non-admins remain gated by `user_team_access`, preserving the future multi-coach access model. The one narrow non-admin change: the dev-bypass empty-permitted backfill is removed, so a non-admin dev-bypass user no longer gains member teams on a later backfill request (option A; see Technical Notes TN-4). The change applies in both dev and production.

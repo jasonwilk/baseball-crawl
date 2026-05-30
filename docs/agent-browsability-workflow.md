@@ -41,12 +41,7 @@ curl -s -H "Host: baseball.localhost" http://localhost:8000/health
 # Expected: {"status":"ok","db":"connected"}
 ```
 
-If the database has no data, seed it:
-
-```bash
-# Run from the project root (not inside the container -- scripts/ is host-only)
-DATABASE_PATH=./data/app.db python3 scripts/seed_dev.py
-```
+If the database has no data, add teams via the admin UI and run a crawl (`bb data crawl --source db && bb data load --source db`) before reviewing the dashboard.
 
 **Note on the Host header**: Traefik routes requests by hostname. All curl commands must
 include `-H "Host: baseball.localhost"` or you will receive a 404 from Traefik's catch-all
@@ -153,6 +148,6 @@ on container stop. Use `docker compose down -v` only if you want to reset volume
 | Symptom | Cause | Fix |
 |---------|-------|-----|
 | `404 page not found` from curl | Missing `Host` header | Add `-H "Host: baseball.localhost"` to your curl command |
-| `{"status":"ok","db":"connected"}` but table shows "No stats available" | Database not seeded | Run `DATABASE_PATH=./data/app.db python3 scripts/seed_dev.py` |
+| `{"status":"ok","db":"connected"}` but table shows "No stats available" | No data loaded | Add teams via `/admin/teams` and run `bb data crawl --source db && bb data load --source db` |
 | App container not healthy | Startup still in progress | Wait 15-20 seconds, retry `docker compose ps` |
 | Cloudflared service restarting | No `CLOUDFLARE_TUNNEL_TOKEN` in `.env` | Expected in local dev; ignore for dashboard review |

@@ -32,6 +32,7 @@ from starlette.concurrency import run_in_threadpool
 from starlette.responses import Response
 
 from src.api import db
+from src.api.auth import user_is_admin
 from src.api.helpers import format_avg, format_date, ip_display
 from src.charts.spray import render_spray_chart
 
@@ -1172,8 +1173,9 @@ def _compute_team_batting(batting: list[dict]) -> dict:
 def _is_admin_user(user: dict) -> bool:
     """Return True if *user* has admin access (ADMIN_EMAIL match or DB role).
 
-    Mirrors the logic in ``admin.py::_require_admin`` without raising
-    HTTP exceptions -- used for soft admin checks in dashboard routes.
+    Delegates to the canonical predicate in ``auth.py`` so exactly one copy of
+    this security check exists.  Used for soft admin checks in dashboard routes
+    (does not raise HTTP exceptions).
 
     Args:
         user: The user dict from ``request.state.user``.
@@ -1181,26 +1183,7 @@ def _is_admin_user(user: dict) -> bool:
     Returns:
         True if the user has admin access, False otherwise.
     """
-    import sqlite3 as _sqlite3
-    from contextlib import closing as _closing
-
-    if not user:
-        return False
-    admin_email = os.environ.get("ADMIN_EMAIL", "")
-    if admin_email and user.get("email") == admin_email:
-        return True
-    user_id = user.get("id")
-    if not user_id:
-        return False
-    try:
-        with _closing(db.get_connection()) as conn:
-            row = conn.execute(
-                "SELECT role FROM users WHERE id = ?", (user_id,)
-            ).fetchone()
-        return row is not None and row[0] == "admin"
-    except _sqlite3.Error:
-        logger.exception("Failed to check admin role for user %s", user_id)
-        return False
+    return user_is_admin(user)
 
 
 def _pick_key_players(

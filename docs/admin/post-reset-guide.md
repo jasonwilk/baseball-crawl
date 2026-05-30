@@ -10,7 +10,7 @@ This guide covers the end-to-end workflow for going from a fresh `bb db reset` t
 bb db reset
 ```
 
-This drops and recreates the database, applies all migrations, and seeds placeholder data. The app needs to restart after a reset.
+This drops and recreates the database and applies all migrations. The resulting database is empty (no teams, no players, no game data -- only the `programs` bootstrap row for Lincoln Standing Bear HS). The app needs to restart after a reset.
 
 ```bash
 docker compose up -d --build app
@@ -114,16 +114,16 @@ Repeat for each member team.
 
 ---
 
-## Step 4: Verify Dev User Access
+## Step 4: Verify Admin Dashboard Access
 
-The dev user is automatically assigned to all member teams on the first request to the dashboard -- no manual SQL required.
+Admin users see all teams in the database automatically -- no per-team access grants are needed. A user is an admin if their email matches the `ADMIN_EMAIL` environment variable or if their `users.role` is set to `admin`.
 
 To verify:
 
 1. Navigate to `http://localhost:8000/` (or any team dashboard page).
-2. The first request triggers auto-assignment. The dashboard should display batting stats for your team. (If you have multiple member teams, a team selector will also appear.)
+2. The dashboard should immediately display stats for all teams you added in step 3. (If you have multiple member teams, a team selector will appear.)
 
-If member teams don't appear, check that they were added with **Membership: Member** (not Tracked) in step 3. You can correct this via the Edit link on the teams list.
+If no teams appear, confirm that teams were added successfully in step 3 (check `/admin/teams`) and that the crawl in step 5 has been run. Data is populated by the crawl, not by the reset.
 
 ---
 
@@ -156,11 +156,11 @@ bb data sync
 
 ### "No teams configured" / empty crawl
 
-Make sure teams were added via the admin UI with **Membership: Member** and that the app has been restarted after the reset (`docker compose up -d --build app`).
+Make sure teams were added via the admin UI and that the app has been restarted after the reset (`docker compose up -d --build app`).
 
-### Dev user still not seeing teams after step 4
+### Dashboard is empty after step 4
 
-Confirm member teams show `membership_type = member` in the admin list at `/admin/teams`. If they show as Tracked, edit each team and change the membership radio to Member.
+The database starts empty after a reset -- there is no pre-loaded data. Run the crawl in step 5 to populate it. If the dashboard is still empty after crawling, check `bb status` for crawl errors and confirm credentials are valid (`bb creds check --profile web`).
 
 ### Credential errors during crawl
 
@@ -181,4 +181,4 @@ Check container logs: `docker compose logs app`. The most common cause is a migr
 
 ---
 
-*Last updated: 2026-03-19 | Story: E-127-05*
+*Last updated: 2026-05-30 | Source: E-228 (empty reset, admin-sees-all), E-127-05 (original)*

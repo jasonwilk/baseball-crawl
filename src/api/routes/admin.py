@@ -61,6 +61,7 @@ from src.api.db import (
     is_member_team_public_id,
     save_manual_opponent_link,
 )
+from src.api.auth import user_is_admin
 from src.gamechanger.bridge import (
     BridgeForbiddenError,
     resolve_public_id_to_uuid,
@@ -142,7 +143,8 @@ async def _require_admin(request: Request) -> dict[str, Any] | Response:
     - The user has ``role = 'admin'`` in the database.
 
     If ``ADMIN_EMAIL`` is unset AND the user does not have ``role = 'admin'``,
-    access is denied (403).
+    access is denied (403).  The admin check delegates to the canonical
+    predicate in ``auth.py`` so exactly one copy of this security check exists.
 
     Args:
         request: The incoming HTTP request.
@@ -154,14 +156,7 @@ async def _require_admin(request: Request) -> dict[str, Any] | Response:
     if not user:
         return RedirectResponse(url="/auth/login", status_code=302)
 
-    # Bootstrap/fallback: ADMIN_EMAIL env var grants admin access.
-    admin_email = os.environ.get("ADMIN_EMAIL", "")
-    if admin_email and user.get("email") == admin_email:
-        return user
-
-    # Primary path: database role check.
-    user_role = await run_in_threadpool(_get_user_role_by_id, user["id"])
-    if user_role == "admin":
+    if await run_in_threadpool(user_is_admin, user):
         return user
 
     return _forbidden_response(request)
@@ -234,22 +229,6 @@ def _get_user_by_id(user_id: int) -> dict[str, Any] | None:
             (user_id,),
         ).fetchone()
         return dict(row) if row else None
-
-
-def _get_user_role_by_id(user_id: int) -> str:
-    """Fetch the role value for a user by id.
-
-    Args:
-        user_id: The user's primary key.
-
-    Returns:
-        Role string ('admin' or 'user'); defaults to 'user' if not found.
-    """
-    with closing(get_connection()) as conn:
-        row = conn.execute(
-            "SELECT role FROM users WHERE id = ?", (user_id,)
-        ).fetchone()
-        return row[0] if row else "user"
 
 
 def _get_user_team_ids(user_id: int) -> list[int]:

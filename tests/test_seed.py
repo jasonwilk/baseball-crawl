@@ -1,11 +1,12 @@
-"""Tests for reset_dev_db.py and seed_dev.sql (E-009-05 AC-8).
+"""Tests for reset_dev_db.py and reset_database() (E-228-01).
 
 Verifies that:
-- reset_database() creates a seeded database at a given path.
+- reset_database() creates a database at a given path with the migrated schema.
+- The reset produces an EMPTY schema: every user data table has zero rows,
+  while the migration-inserted ``programs`` bootstrap row is present.
 - All core tables exist after reset.
-- Row counts meet the minimums required by AC-2.
 - The production guard prevents accidental resets when APP_ENV=production.
-- Running reset_database() twice (idempotent reset) produces consistent counts.
+- Running reset_database() twice (idempotent reset) succeeds.
 
 Tests use a temporary SQLite database; no Docker required, no network calls.
 
@@ -26,7 +27,6 @@ from src.db.reset import (
     check_production_guard,
     delete_database,
     get_db_path,
-    load_seed,
     reset_database,
 )
 
@@ -34,23 +34,7 @@ from src.db.reset import (
 # Constants
 # ---------------------------------------------------------------------------
 
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent
-_SEED_FILE = _PROJECT_ROOT / "data" / "seeds" / "seed_dev.sql"
-
-# Expected minimum row counts per AC-2.
-# These must match or exceed what seed_dev.sql inserts.
-_MIN_ROW_COUNTS: dict[str, int] = {
-    "seasons": 1,               # AC-2: at least 1 season
-    "teams": 2,                 # AC-2: at least 2 teams (1 Lincoln + 1 opponent)
-    "players": 10,              # AC-2: at least 10 players
-    "games": 5,                 # AC-2: at least 5 games
-    "player_game_batting": 5,   # AC-2: batting rows for games
-    "player_game_pitching": 2,  # AC-2: pitching rows (1-2 pitchers per game)
-    "player_season_batting": 5, # AC-2: season aggregates for Lincoln players
-    "player_season_pitching": 1, # AC-2: pitching season aggregates
-}
-
-# All core tables that must exist after migration + seed.
+# All core tables that must exist after migration.
 _CORE_TABLES = {
     "seasons",
     "players",
@@ -85,8 +69,8 @@ def fresh_db(tmp_path: Path) -> Path:
 
 
 @pytest.fixture()
-def seeded_db(fresh_db: Path) -> Path:
-    """Return a path to a freshly reset and seeded database.
+def reset_db(fresh_db: Path) -> Path:
+    """Return a path to a freshly reset (empty-schema) database.
 
     Runs reset_database() once so subsequent tests can query it directly.
 
@@ -94,7 +78,7 @@ def seeded_db(fresh_db: Path) -> Path:
         fresh_db: Path to the non-existent database file.
 
     Returns:
-        Path to the seeded database (file now exists).
+        Path to the reset database (file now exists).
     """
     reset_database(db_path=fresh_db, force=False)
     return fresh_db
@@ -103,23 +87,6 @@ def seeded_db(fresh_db: Path) -> Path:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def _row_count(db_path: Path, table: str) -> int:
-    """Return the row count for a table in the given database.
-
-    Args:
-        db_path: Path to the SQLite database.
-        table: Table name to count.
-
-    Returns:
-        Integer row count.
-    """
-    conn = sqlite3.connect(str(db_path))
-    try:
-        return conn.execute(f"SELECT COUNT(*) FROM {table};").fetchone()[0]
-    finally:
-        conn.close()
 
 
 def _table_names(db_path: Path) -> set[str]:
@@ -149,7 +116,7 @@ def _table_names(db_path: Path) -> set[str]:
 
 
 class TestResetDatabase:
-    """Verify reset_database() creates a correctly seeded database."""
+    """Verify reset_database() creates an empty-schema database."""
 
     def test_creates_database_file(self, fresh_db: Path) -> None:
         """reset_database() creates the .db file when it does not exist."""
@@ -164,10 +131,10 @@ class TestResetDatabase:
             f"Expected at least {len(_CORE_TABLES)} tables, got {tables}"
         )
 
-    def test_returns_positive_row_count(self, fresh_db: Path) -> None:
-        """reset_database() returns a positive total row count."""
+    def test_returns_zero_row_count(self, fresh_db: Path) -> None:
+        """reset_database() returns 0 as the second tuple element (no seed)."""
         _, rows = reset_database(db_path=fresh_db)
-        assert rows > 0, "Expected seed data to insert at least one row"
+        assert rows == 0, "Reset must not load any seed rows"
 
     def test_overwrites_existing_database(self, fresh_db: Path) -> None:
         """reset_database() replaces an existing database cleanly."""
@@ -177,11 +144,11 @@ class TestResetDatabase:
         # Reset again -- should not raise and should overwrite.
         tables2, rows2 = reset_database(db_path=fresh_db)
         assert tables2 >= len(_CORE_TABLES)
-        assert rows2 > 0
+        assert rows2 == 0
 
-    def test_wal_mode_preserved(self, seeded_db: Path) -> None:
+    def test_wal_mode_preserved(self, reset_db: Path) -> None:
         """WAL mode is enabled after reset."""
-        conn = sqlite3.connect(str(seeded_db))
+        conn = sqlite3.connect(str(reset_db))
         try:
             mode = conn.execute("PRAGMA journal_mode;").fetchone()[0]
         finally:
@@ -197,15 +164,15 @@ class TestResetDatabase:
 class TestCoreTables:
     """Verify all core tables are present after reset."""
 
-    def test_all_core_tables_exist(self, seeded_db: Path) -> None:
-        """All core schema tables are present in the seeded database."""
-        actual = _table_names(seeded_db)
+    def test_all_core_tables_exist(self, reset_db: Path) -> None:
+        """All core schema tables are present in the reset database."""
+        actual = _table_names(reset_db)
         missing = _CORE_TABLES - actual
         assert not missing, f"Missing tables after reset: {missing}"
 
-    def test_migrations_table_exists(self, seeded_db: Path) -> None:
+    def test_migrations_table_exists(self, reset_db: Path) -> None:
         """The _migrations tracking table is present."""
-        conn = sqlite3.connect(str(seeded_db))
+        conn = sqlite3.connect(str(reset_db))
         try:
             result = conn.execute(
                 "SELECT name FROM sqlite_master WHERE type='table' AND name='_migrations';"
@@ -216,103 +183,63 @@ class TestCoreTables:
 
 
 # ---------------------------------------------------------------------------
-# Tests: row counts meet AC-2 minimums
+# Tests: empty schema (TN-1 inverse assertion)
 # ---------------------------------------------------------------------------
 
 
-class TestSeedRowCounts:
-    """Verify seed data meets the row count minimums specified by AC-2."""
+class TestEmptySchema:
+    """Verify a reset produces an empty schema (no seed data).
 
-    @pytest.mark.parametrize("table,minimum", list(_MIN_ROW_COUNTS.items()))
-    def test_minimum_row_count(
-        self, seeded_db: Path, table: str, minimum: int
-    ) -> None:
-        """Each core table has at least the required minimum row count.
+    "Empty" per TN-1 means: every table the migrations create has zero rows,
+    EXCEPT the migration-tracking table (``_migrations``) and ``programs``.
+    The ``programs`` table must contain exactly the one ``lsb-hs`` bootstrap
+    row inserted by migration 001.
+    """
 
-        Args:
-            seeded_db: Path to the seeded database fixture.
-            table: Name of the table to check.
-            minimum: Minimum expected row count.
+    def test_all_user_tables_empty(self, reset_db: Path) -> None:
+        """Every user data table has zero rows after reset.
+
+        Tables are enumerated dynamically from sqlite_master so a newly added
+        table cannot silently escape the assertion.  ``_migrations`` and
+        ``programs`` are excluded (they hold migration/bootstrap state).
         """
-        actual = _row_count(seeded_db, table)
-        assert actual >= minimum, (
-            f"Table '{table}': expected >= {minimum} rows, got {actual}"
-        )
-
-    def test_teams_includes_lincoln_team(self, seeded_db: Path) -> None:
-        """At least one team is a member (Lincoln) team."""
-        conn = sqlite3.connect(str(seeded_db))
+        conn = sqlite3.connect(str(reset_db))
         try:
-            count = conn.execute(
-                "SELECT COUNT(*) FROM teams WHERE membership_type = 'member';"
+            # Exclude the migration-tracking table, the programs bootstrap
+            # table, and SQLite's internal bookkeeping tables (e.g.
+            # sqlite_sequence, which tracks AUTOINCREMENT counters).
+            cursor = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' "
+                "AND name NOT IN ('_migrations', 'programs') "
+                "AND name NOT LIKE 'sqlite_%';"
+            )
+            table_names = [row[0] for row in cursor.fetchall()]
+            assert table_names, "No user tables found -- schema not migrated?"
+
+            non_empty: dict[str, int] = {}
+            for table in table_names:
+                count: int = conn.execute(
+                    f"SELECT COUNT(*) FROM {table};"  # noqa: S608 -- names from schema
+                ).fetchone()[0]
+                if count != 0:
+                    non_empty[table] = count
+        finally:
+            conn.close()
+
+        assert not non_empty, f"Expected empty tables, found rows in: {non_empty}"
+
+    def test_programs_bootstrap_row_present(self, reset_db: Path) -> None:
+        """The programs table contains exactly the one lsb-hs bootstrap row."""
+        conn = sqlite3.connect(str(reset_db))
+        try:
+            total = conn.execute("SELECT COUNT(*) FROM programs;").fetchone()[0]
+            lsb = conn.execute(
+                "SELECT COUNT(*) FROM programs WHERE program_id = 'lsb-hs';"
             ).fetchone()[0]
         finally:
             conn.close()
-        assert count >= 1, "No member (Lincoln) teams found in seed data"
-
-    def test_teams_includes_opponent(self, seeded_db: Path) -> None:
-        """At least one team is a tracked opponent."""
-        conn = sqlite3.connect(str(seeded_db))
-        try:
-            count = conn.execute(
-                "SELECT COUNT(*) FROM teams WHERE membership_type = 'tracked';"
-            ).fetchone()[0]
-        finally:
-            conn.close()
-        assert count >= 1, "No tracked opponent teams found in seed data"
-
-    def test_player_game_batting_references_valid_games(
-        self, seeded_db: Path
-    ) -> None:
-        """All player_game_batting rows reference a valid game_id."""
-        conn = sqlite3.connect(str(seeded_db))
-        try:
-            orphans = conn.execute(
-                """
-                SELECT COUNT(*) FROM player_game_batting pgb
-                WHERE NOT EXISTS (
-                    SELECT 1 FROM games g WHERE g.game_id = pgb.game_id
-                );
-                """
-            ).fetchone()[0]
-        finally:
-            conn.close()
-        assert orphans == 0, f"{orphans} batting rows reference non-existent games"
-
-    def test_player_game_pitching_references_valid_games(
-        self, seeded_db: Path
-    ) -> None:
-        """All player_game_pitching rows reference a valid game_id."""
-        conn = sqlite3.connect(str(seeded_db))
-        try:
-            orphans = conn.execute(
-                """
-                SELECT COUNT(*) FROM player_game_pitching pgp
-                WHERE NOT EXISTS (
-                    SELECT 1 FROM games g WHERE g.game_id = pgp.game_id
-                );
-                """
-            ).fetchone()[0]
-        finally:
-            conn.close()
-        assert orphans == 0, f"{orphans} pitching rows reference non-existent games"
-
-    def test_season_batting_for_lincoln_players(self, seeded_db: Path) -> None:
-        """Season batting aggregates exist for all Lincoln Varsity players."""
-        conn = sqlite3.connect(str(seeded_db))
-        try:
-            count = conn.execute(
-                """
-                SELECT COUNT(*) FROM player_season_batting psb
-                JOIN teams t ON t.id = psb.team_id
-                WHERE t.membership_type = 'member';
-                """
-            ).fetchone()[0]
-        finally:
-            conn.close()
-        assert count >= 5, (
-            f"Expected >= 5 season batting rows for Lincoln players, got {count}"
-        )
+        assert total == 1, f"Expected exactly 1 programs row, got {total}"
+        assert lsb == 1, "Expected the 'lsb-hs' bootstrap row to be present"
 
 
 # ---------------------------------------------------------------------------
@@ -335,14 +262,14 @@ class TestProductionGuard:
         with patch.dict(os.environ, {"APP_ENV": "production"}):
             tables, rows = reset_database(db_path=fresh_db, force=True)
         assert tables >= len(_CORE_TABLES)
-        assert rows > 0
+        assert rows == 0
 
     def test_development_without_force_proceeds(self, fresh_db: Path) -> None:
         """reset_database() proceeds normally in development without --force."""
         with patch.dict(os.environ, {"APP_ENV": "development"}):
             tables, rows = reset_database(db_path=fresh_db, force=False)
         assert tables >= len(_CORE_TABLES)
-        assert rows > 0
+        assert rows == 0
 
 
 # ---------------------------------------------------------------------------
@@ -413,26 +340,3 @@ class TestGetDbPath:
         with patch.dict(os.environ, env_without_db_path, clear=True):
             result = get_db_path()
         assert result.name == "app.db"
-
-
-# ---------------------------------------------------------------------------
-# Tests: seed file exists and is non-empty
-# ---------------------------------------------------------------------------
-
-
-class TestSeedFile:
-    """Verify the seed file itself is present and valid."""
-
-    def test_seed_file_exists(self) -> None:
-        """data/seeds/seed_dev.sql exists in the repository."""
-        assert _SEED_FILE.exists(), f"Seed file not found: {_SEED_FILE}"
-
-    def test_seed_file_non_empty(self) -> None:
-        """data/seeds/seed_dev.sql contains SQL content."""
-        content = _SEED_FILE.read_text(encoding="utf-8")
-        assert len(content.strip()) > 0, "Seed file is empty"
-
-    def test_seed_file_contains_insert_statements(self) -> None:
-        """data/seeds/seed_dev.sql contains INSERT statements."""
-        content = _SEED_FILE.read_text(encoding="utf-8").upper()
-        assert "INSERT" in content, "Seed file contains no INSERT statements"

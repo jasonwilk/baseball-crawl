@@ -83,12 +83,8 @@ def reset(
             abort=True,
         )
 
-    try:
-        tables, rows = reset_database(db_path=db_path, force=force, _skip_guard=True)
-    except FileNotFoundError as exc:
-        err_console.print(f"[red]Seed file error: {exc}[/red]")
-        raise typer.Exit(code=1) from exc
+    tables, _ = reset_database(db_path=db_path, force=force, _skip_guard=True)
 
     console.print(
-        f"[green]Database reset. {tables} tables created. {rows} rows inserted.[/green]"
+        f"[green]Database reset to empty schema. {tables} tables created.[/green]"
     )

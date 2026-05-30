@@ -580,7 +580,13 @@ def _get_member_team_ids(db_path: Path) -> list[int]:
 
 
 class TestDevUserAutoAssignment:
-    """Dev bypass auto-assigns member teams (E-127-03)."""
+    """Dev bypass auto-assigns member teams on create (E-127-03).
+
+    E-228-02 removed the empty-permitted backfill (option A): a non-admin dev
+    user with zero grants is no longer backfilled, while admins resolve to all
+    teams via the ``_get_permitted_teams`` widening.  ``_create_dev_user``'s
+    initial member-team assignment is unchanged.
+    """
 
     def test_new_dev_user_gets_all_member_team_assignments(self, tmp_path: Path) -> None:
         """New dev user is auto-assigned to all member teams on creation (AC-1)."""
@@ -623,32 +629,93 @@ class TestDevUserAutoAssignment:
         # Only member teams assigned -- tracked team excluded
         assert assigned == member_ids
 
-    def test_existing_dev_user_with_no_assignments_gets_backfilled(
+    def test_existing_nonadmin_dev_user_with_no_assignments_not_backfilled(
         self, tmp_path: Path
     ) -> None:
-        """Existing dev user with zero user_team_access rows is backfilled (AC-2)."""
+        """Non-admin dev user with 0 grants is NOT backfilled (E-228-02, option A).
+
+        The empty-permitted backfill in ``_handle_dev_bypass`` was removed.  A
+        pre-existing non-admin dev-bypass user with zero ``user_team_access``
+        rows must NOT gain member teams on a later request -- their grants stay
+        empty (admin-sees-all is the path for operators; this user is a
+        non-admin).
+        """
         db_path = _make_two_team_db(tmp_path)
-        member_ids = _get_member_team_ids(db_path)
         dev_email = "olddev@example.com"
 
-        # Insert user with no team assignments
+        # Insert a NON-admin user (default role='user') with no team assignments.
         conn = sqlite3.connect(str(db_path))
         cursor = conn.execute("INSERT INTO users (email) VALUES (?)", (dev_email,))
         user_id = cursor.lastrowid
         conn.commit()
         conn.close()
 
-        # Verify no assignments before the request
+        # Verify no assignments before the request.
         assert _get_team_access_rows(db_path, user_id) == []
 
-        env = {"DATABASE_PATH": str(db_path), "DEV_USER_EMAIL": dev_email}
+        # Ensure ADMIN_EMAIL does not accidentally make this user an admin.
+        env = {
+            "DATABASE_PATH": str(db_path),
+            "DEV_USER_EMAIL": dev_email,
+            "ADMIN_EMAIL": "",
+        }
         with patch.dict("os.environ", env):
             with TestClient(app) as client:
                 response = client.get("/dashboard")
 
+        # The request still succeeds (no-assignments page renders at 200).
         assert response.status_code == 200
-        assigned = _get_team_access_rows(db_path, user_id)
-        assert assigned == member_ids
+        # Behavior pinned: NO member teams were backfilled.
+        assert _get_team_access_rows(db_path, user_id) == []
+
+    def test_admin_dev_user_with_no_assignments_sees_all_teams(
+        self, tmp_path: Path
+    ) -> None:
+        """Admin dev user w/ 0 grants resolves to ALL teams via widening (AC-8).
+
+        An admin (via ``role='admin'``) dev-bypass user with zero
+        ``user_team_access`` rows is granted no rows in ``user_team_access`` but
+        ``_get_permitted_teams`` widens to every team id, so the dashboard
+        renders real data instead of the no-assignments page.
+        """
+        db_path = _make_two_team_db(tmp_path)
+        dev_email = "admindev@example.com"
+
+        # Insert an ADMIN user with no team assignments.
+        conn = sqlite3.connect(str(db_path))
+        cursor = conn.execute(
+            "INSERT INTO users (email, role) VALUES (?, 'admin')", (dev_email,)
+        )
+        user_id = cursor.lastrowid
+        all_team_ids = sorted(
+            row[0] for row in conn.execute("SELECT id FROM teams").fetchall()
+        )
+        conn.commit()
+        conn.close()
+
+        assert len(all_team_ids) >= 2  # multi-value fixture obligation
+
+        # Verify no user_team_access grants exist before the request.
+        assert _get_team_access_rows(db_path, user_id) == []
+
+        env = {
+            "DATABASE_PATH": str(db_path),
+            "DEV_USER_EMAIL": dev_email,
+            "ADMIN_EMAIL": "",
+        }
+        with patch.dict("os.environ", env):
+            from importlib import reload
+
+            import src.api.auth as auth_module
+
+            reload(auth_module)
+            state = auth_module._handle_dev_bypass(dev_email)
+
+        assert state is not None
+        # Widened: admin resolves to ALL team ids (member + tracked).
+        assert sorted(state["permitted_teams"]) == all_team_ids
+        # And the widening does NOT write user_team_access rows.
+        assert _get_team_access_rows(db_path, user_id) == []
 
     def test_existing_dev_user_with_assignments_has_no_duplicates(
         self, tmp_path: Path

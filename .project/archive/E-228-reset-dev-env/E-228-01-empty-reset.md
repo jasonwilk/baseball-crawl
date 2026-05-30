@@ -4,7 +4,7 @@
 [E-228: Make `bb db reset` Produce a Useful Dev Environment](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, `bb db reset` will produce a database containing only the migrated schema and the migration's `programs` bootstrap row -- no fake demo teams, games, players, or stats. The dev seed file and its now-dead loading code are removed, the reset CLI output accurately reflects an empty schema, and the test suite asserts the empty-reset outcome.

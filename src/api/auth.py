@@ -159,10 +159,68 @@ def _create_dev_user(conn: sqlite3.Connection, email: str) -> dict[str, Any]:
     }
 
 
+def _user_is_admin(conn: sqlite3.Connection, user: dict[str, Any] | None) -> bool:
+    """Return True if *user* has admin access (connection-injected form).
+
+    This is the canonical admin predicate.  Admin access is granted if EITHER:
+    - the user's email matches the ``ADMIN_EMAIL`` env var (bootstrap/fallback), OR
+    - the user has ``role = 'admin'`` in the ``users`` table.
+
+    Reuses the caller's open connection so the middleware widening incurs no
+    extra connection.  Route modules should call the ``user_is_admin`` wrapper
+    instead (it opens its own connection).
+
+    Args:
+        conn: Open SQLite connection.
+        user: User dict with at least ``id`` (and optionally ``email``); may be
+            None.
+
+    Returns:
+        True if the user has admin access, False otherwise.
+    """
+    if not user:
+        return False
+    admin_email = os.environ.get("ADMIN_EMAIL", "")
+    if admin_email and user.get("email") == admin_email:
+        return True
+    user_id = user.get("id")
+    if not user_id:
+        return False
+    row = conn.execute(
+        "SELECT role FROM users WHERE id = ?", (user_id,)
+    ).fetchone()
+    return row is not None and row[0] == "admin"
+
+
+def user_is_admin(user: dict[str, Any] | None) -> bool:
+    """Return True if *user* has admin access (own-connection wrapper).
+
+    Thin wrapper around :func:`_user_is_admin` that opens its own connection.
+    Used by route modules, which hold no open connection at the call site.
+
+    Args:
+        user: User dict with at least ``id`` (and optionally ``email``); may be
+            None.
+
+    Returns:
+        True if the user has admin access, False otherwise.
+    """
+    if not user:
+        return False
+    try:
+        with closing(get_connection()) as conn:
+            return _user_is_admin(conn, user)
+    except sqlite3.Error:
+        logger.exception("Failed to check admin role for user %s", user.get("id"))
+        return False
+
+
 def _get_permitted_teams(conn: sqlite3.Connection, user: dict[str, Any]) -> list[int]:
     """Return the list of permitted INTEGER team ids for the user.
 
-    All users receive team ids from user_team_access.
+    Admins resolve to ALL team ids (every row in ``teams``); the admin check
+    runs first so an admin never falls into the empty-permitted branch.
+    Non-admins resolve to their ``user_team_access`` grants.
 
     Args:
         conn: Open SQLite connection.
@@ -171,6 +229,10 @@ def _get_permitted_teams(conn: sqlite3.Connection, user: dict[str, Any]) -> list
     Returns:
         List of INTEGER team ids.
     """
+    if _user_is_admin(conn, user):
+        cursor = conn.execute("SELECT id FROM teams")
+        return [row[0] for row in cursor.fetchall()]
+
     cursor = conn.execute(
         "SELECT team_id FROM user_team_access WHERE user_id = ?",
         (user["id"],),
@@ -245,12 +307,6 @@ def _handle_dev_bypass(email: str) -> dict[str, Any] | None:
             if not user:
                 user = _create_dev_user(conn, email)
             permitted_teams = _get_permitted_teams(conn, user)
-            if not permitted_teams:
-                # Backfill: user exists but has zero team assignments.
-                # Covers the "bb db reset but .env preserved" scenario.
-                _assign_member_teams(conn, user["id"])
-                conn.commit()
-                permitted_teams = _get_permitted_teams(conn, user)
             return {"user": user, "permitted_teams": permitted_teams}
     except sqlite3.OperationalError:
         # Let OperationalError propagate so dispatch() can handle schema errors

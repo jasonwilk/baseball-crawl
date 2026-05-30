@@ -88,35 +88,26 @@ The admin UI calls the public GameChanger API (no credentials required) to resol
 
 ---
 
-## Seed the Development Database
+## Populate the Development Database
 
-The database is created empty by migrations. To load sample data for development:
+`bb db reset` (or `python scripts/reset_dev_db.py`) drops and recreates the database and applies all migrations. After a reset the database is empty -- no sample data is loaded. The operator populates it with real GameChanger data:
 
-```bash
-python scripts/seed_dev.py
-```
-
-This executes `data/seeds/seed_dev.sql`, which uses `INSERT OR IGNORE` so it can be run multiple times safely.
-
-Alternatively, use the reset script to drop the database, re-run migrations, and load seed data in one step:
+1. Set up credentials (see [Credential Management](#credential-management) below).
+2. Add teams via the admin UI at `http://localhost:8001/admin/teams`.
+3. Crawl real data:
 
 ```bash
-python scripts/reset_dev_db.py
+bb data crawl --source db
+bb data load --source db
 ```
 
-Also available as `bb db reset`.
+`--source db` reads active member teams directly from the database.
 
-After seeding, visit `http://localhost:8001/dashboard` to see the batting stats dashboard with sample data.
-
-**Note**: If the app is running in Docker, you may need to restart it after seeding so it picks up the new data:
-
-```bash
-docker compose restart app
-```
+See the [Post-Reset Onboarding Guide](post-reset-guide.md) for the complete step-by-step workflow.
 
 ## Verify the Dashboard
 
-Open `http://localhost:8001/dashboard` in a browser. You should see a table of batting statistics. If you see an empty table, confirm the database was seeded (see above).
+Open `http://localhost:8001/dashboard` in a browser. After crawling real data you should see a table of batting statistics. If you see an empty table, confirm that teams have been added and crawled (see above).
 
 ## Run Tests
 
@@ -212,4 +203,4 @@ Key variables in `.env`:
 
 ---
 
-*Last updated: 2026-03-10 | Source: E-086 (mobile credentials), E-055 (unified CLI), E-042 (team onboarding via admin UI), E-028-03 (original)*
+*Last updated: 2026-05-30 | Source: E-228 (empty reset, admin-sees-all), E-086 (mobile credentials), E-055 (unified CLI), E-042 (team onboarding via admin UI), E-028-03 (original)*

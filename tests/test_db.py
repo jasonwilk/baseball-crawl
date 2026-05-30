@@ -1304,6 +1304,93 @@ class TestGetPermittedTeams:
         assert sorted(result) == sorted([tid1, tid2, tid3])
         assert all(isinstance(t, int) for t in result)
 
+    def test_nonadmin_with_partial_grants_no_leak(self, tmp_path: Path) -> None:
+        """AC-3: non-admin granted team A but not team B → exactly [A], no leak."""
+        conn = _make_db()
+        cursor = conn.execute("INSERT INTO users (email) VALUES ('partial@test.com')")
+        conn.commit()
+        user_id: int = cursor.lastrowid  # type: ignore[assignment]
+
+        team_a = _insert_team(conn, "Granted Team A")
+        team_b = _insert_team(conn, "Ungranted Team B")  # exists but not granted
+
+        conn.execute(
+            "INSERT INTO user_team_access (user_id, team_id) VALUES (?, ?)",
+            (user_id, team_a),
+        )
+        conn.commit()
+
+        env = _db_env(tmp_path, conn)
+        with patch.dict(os.environ, {**env, "ADMIN_EMAIL": ""}):
+            from importlib import reload
+
+            import src.api.auth as auth_module
+
+            reload(auth_module)
+            with closing(auth_module.get_connection()) as db_conn:
+                db_conn.row_factory = sqlite3.Row
+                result = auth_module._get_permitted_teams(
+                    db_conn, {"id": user_id, "email": "partial@test.com"}
+                )
+
+        assert result == [team_a]
+        assert team_b not in result
+
+    def test_admin_via_admin_email_sees_all_teams(self, tmp_path: Path) -> None:
+        """AC-1: admin via ADMIN_EMAIL match, 0 grants → ALL team ids."""
+        conn = _make_db()
+        cursor = conn.execute("INSERT INTO users (email) VALUES ('boss@test.com')")
+        conn.commit()
+        user_id: int = cursor.lastrowid  # type: ignore[assignment]
+
+        # 2+ teams; the admin has NO user_team_access rows on any of them.
+        tid1 = _insert_team(conn, "Admin Team 1")
+        tid2 = _insert_team(conn, "Admin Team 2", membership_type="tracked")
+
+        env = _db_env(tmp_path, conn)
+        with patch.dict(os.environ, {**env, "ADMIN_EMAIL": "boss@test.com"}):
+            from importlib import reload
+
+            import src.api.auth as auth_module
+
+            reload(auth_module)
+            with closing(auth_module.get_connection()) as db_conn:
+                db_conn.row_factory = sqlite3.Row
+                result = auth_module._get_permitted_teams(
+                    db_conn, {"id": user_id, "email": "boss@test.com"}
+                )
+
+        assert sorted(result) == sorted([tid1, tid2])
+        assert all(isinstance(t, int) for t in result)
+
+    def test_admin_via_db_role_sees_all_teams(self, tmp_path: Path) -> None:
+        """AC-2: admin via users.role='admin' (ADMIN_EMAIL unset) → ALL team ids."""
+        conn = _make_db()
+        cursor = conn.execute(
+            "INSERT INTO users (email, role) VALUES ('roleadmin@test.com', 'admin')"
+        )
+        conn.commit()
+        user_id: int = cursor.lastrowid  # type: ignore[assignment]
+
+        tid1 = _insert_team(conn, "Role Admin Team 1")
+        tid2 = _insert_team(conn, "Role Admin Team 2", membership_type="tracked")
+
+        env = _db_env(tmp_path, conn)
+        # ADMIN_EMAIL explicitly unset so only the DB role branch can match.
+        with patch.dict(os.environ, {**env, "ADMIN_EMAIL": ""}):
+            from importlib import reload
+
+            import src.api.auth as auth_module
+
+            reload(auth_module)
+            with closing(auth_module.get_connection()) as db_conn:
+                db_conn.row_factory = sqlite3.Row
+                result = auth_module._get_permitted_teams(
+                    db_conn, {"id": user_id, "email": "roleadmin@test.com"}
+                )
+
+        assert sorted(result) == sorted([tid1, tid2])
+
 
 # ---------------------------------------------------------------------------
 # get_db_path -- default path resolution (E-116-02)

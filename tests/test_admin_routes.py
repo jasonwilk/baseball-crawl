@@ -342,3 +342,77 @@ class TestAdminSubNav:
         assert 'href="/admin/users"' in html
         assert 'href="/admin/teams"' in html
         assert 'href="/admin/opponents"' in html
+
+
+# ---------------------------------------------------------------------------
+# E-228-02: _require_admin delegation -- role='admin' branch at route level
+# ---------------------------------------------------------------------------
+
+
+class TestRequireAdminRoleBranch:
+    """Pin the role='admin' branch of the ``_require_admin`` delegation.
+
+    The other admin-route tests authenticate via ADMIN_EMAIL.  After E-228-02,
+    ``_require_admin`` delegates to the canonical ``user_is_admin`` predicate,
+    whose second branch is the DB role.  This verifies a user with
+    ``users.role='admin'`` and ADMIN_EMAIL UNSET can reach /admin/* (200, not
+    403).
+    """
+
+    def test_db_role_admin_with_admin_email_unset_reaches_admin_route(
+        self, tmp_path: Path
+    ) -> None:
+        """role='admin' (ADMIN_EMAIL unset) reaches /admin/teams via dev-bypass."""
+        db_path = _make_db(tmp_path)
+        dev_email = "role-admin@example.com"
+
+        # Pre-insert the dev user with role='admin' so the dev-bypass path
+        # resolves an existing admin (not a default-role auto-created user).
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("PRAGMA foreign_keys=ON;")
+        conn.execute(
+            "INSERT INTO users (email, role) VALUES (?, 'admin')", (dev_email,)
+        )
+        conn.commit()
+        conn.close()
+
+        env = {
+            "DATABASE_PATH": str(db_path),
+            "DEV_USER_EMAIL": dev_email,
+            # ADMIN_EMAIL unset so admin access comes SOLELY from the DB role.
+            "ADMIN_EMAIL": "",
+        }
+        with patch.dict("os.environ", env):
+            with TestClient(app, follow_redirects=False) as client:
+                resp = client.get("/admin/teams")
+
+        assert resp.status_code == 200, (
+            f"role='admin' user should reach /admin/teams, got {resp.status_code}"
+        )
+
+    def test_non_admin_dev_user_forbidden_on_admin_route(
+        self, tmp_path: Path
+    ) -> None:
+        """Negative control: a default-role dev user is 403 on /admin/* (ADMIN_EMAIL unset)."""
+        db_path = _make_db(tmp_path)
+        dev_email = "plain-user@example.com"
+
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("PRAGMA foreign_keys=ON;")
+        # Default role ('user') -- not admin.
+        conn.execute("INSERT INTO users (email) VALUES (?)", (dev_email,))
+        conn.commit()
+        conn.close()
+
+        env = {
+            "DATABASE_PATH": str(db_path),
+            "DEV_USER_EMAIL": dev_email,
+            "ADMIN_EMAIL": "",
+        }
+        with patch.dict("os.environ", env):
+            with TestClient(app, follow_redirects=False) as client:
+                resp = client.get("/admin/teams")
+
+        assert resp.status_code == 403, (
+            f"non-admin user should be 403 on /admin/teams, got {resp.status_code}"
+        )

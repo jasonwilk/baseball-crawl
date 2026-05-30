@@ -220,12 +220,11 @@ def test_ac7_skip_guard_true_bypasses_internal_guard(
     with (
         patch("src.db.reset.delete_database"),
         patch("src.db.reset._run_migrations_and_count", return_value=3),
-        patch("src.db.reset.load_seed", return_value=10),
         caplog.at_level(logging.ERROR, logger="src.db.reset"),
     ):
         tables, rows = reset_database(db_path=Path("/tmp/test.db"), force=False, _skip_guard=True)
     assert tables == 3
-    assert rows == 10
+    assert rows == 0
     # No ERROR log should have been emitted (guard was skipped).
     error_records = [r for r in caplog.records if r.levelno == logging.ERROR]
     assert len(error_records) == 0, (

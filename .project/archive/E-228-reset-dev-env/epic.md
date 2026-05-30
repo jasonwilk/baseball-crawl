@@ -1,7 +1,7 @@
 # E-228: Make `bb db reset` Produce a Useful Dev Environment
 
 ## Status
-`READY`
+`COMPLETED`
 <!-- Lifecycle: DRAFT → READY → ACTIVE → COMPLETED (or BLOCKED / ABANDONED) -->
 <!-- PM sets READY explicitly after: expert consultation done, all stories have testable ACs, quality checklist passed. -->
 <!-- Only READY and ACTIVE epics can be dispatched. -->
@@ -50,8 +50,8 @@ Problem 1 (empty reset) is independent of Problem 2. The two problems map to two
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-228-01 | Make `bb db reset` produce an empty schema (remove dev seed) | TODO | None | - |
-| E-228-02 | Admin sees all teams (restore operator dashboard access after reset) | TODO | None | - |
+| E-228-01 | Make `bb db reset` produce an empty schema (remove dev seed) | DONE | None | software-engineer |
+| E-228-02 | Admin sees all teams (restore operator dashboard access after reset) | DONE | None | software-engineer |
 
 ## Dispatch Team
 - software-engineer
@@ -176,3 +176,27 @@ Removing the seed step leaves stale code artifacts in three files that the story
 | **Total** | **17** | **15** | **2** |
 
 CR (8): accepted MF-1, MF-2, MF-3, SF-1, SF-2, SF-3, SF-5; dismissed SF-4 (self-confirmed clean). Holistic (5): accepted DE-1, DE-2, SE-2, SE-3; dismissed SE-1 (duplicate story file -- already removed pre-review). Codex (4): accepted all (1 P1 + 3 P2), including the consequential B→A reversal. Note: SE-2 is the same finding as CR's MF-3 (no-connection route callers); counted once under each pass per the scorecard structure, incorporated once.
+
+- 2026-05-30: COMPLETED. Both stories DONE; full dispatch review chain clean. **Accomplished:** (1) E-228-01 -- `bb db reset` now produces an EMPTY schema (migrated tables + the migration-001 `programs`=`lsb-hs` bootstrap row, nothing else). Removed `data/seeds/seed_dev.sql`, `load_seed()`/`_SEED_FILE` in `src/db/reset.py`, and `scripts/seed_dev.py`; cleaned dead seed-error handling and stale "rows inserted" messaging across `src/cli/db.py`, `src/db/reset.py`, and `scripts/reset_dev_db.py`; updated the three test files (TN-7) including the collection-time import fallout and `patch()` targets, and added the TN-1 dynamic-enumeration empty-schema inverse assertion. (2) E-228-02 -- admin-sees-all dashboard: an admin (via `ADMIN_EMAIL` match OR `users.role='admin'`) now resolves to ALL team ids with zero `user_team_access` grants and zero manual SQL, restoring the operator's dashboard immediately after reset. **Root cause (confirmed by live runtime data, two earlier hypotheses refuted):** the coaching dashboard hard-gated on `user_team_access` with no admin bypass, while every provisioning path granted only `member` teams -- the operator's 27 tracked / 0 member teams left the dashboard permanently dark. **Fix:** single widening of `_get_permitted_teams` at the shared chokepoint (covers dev + production), plus a two-entry-point canonical admin predicate (`_user_is_admin(conn,user)` injected + `user_is_admin(user)` own-connection wrapper) that `dashboard.py` and `admin.py` now delegate to (one copy of the security check). **Option A** backfill removal: removed ONLY the `_handle_dev_bypass` empty-permitted backfill; `_create_dev_user`'s `_assign_member_teams` call and the helper itself stay (not dead code), keeping "non-admin unchanged" honest. Non-admin dashboard gating and the `DEV_USER_EMAIL`/`APP_ENV=production` guard are unchanged.
+
+### Review Scorecard (dispatch phase)
+| Review Pass | Findings | Accepted | Dismissed |
+|---|---|---|---|
+| Per-story CR -- E-228-01 | 2 | 2 | 0 |
+| Per-story CR -- E-228-02 | 2 | 0 | 2 |
+| CR integration review | 0 | 0 | 0 |
+| Codex code review | 2 | 2 | 0 |
+| **Total** | **6** | **4** | **2** |
+
+E-228-01 CR (2): 0 MUST FIX, 2 SHOULD FIX = stale-doc fallout, accepted -> handled by the closure documentation-assessment gate. E-228-02 CR (2): 0 MUST FIX, 2 SHOULD FIX = pre-existing test-infra defects (coverage-indicator + `_make_client` fixture bug), dismissed as out-of-scope/pre-existing (independently confirmed pre-existing by CR). CR integration review: clean, no findings. Codex (2): 2 missing-test findings, both accepted and remediated by SE. (This dispatch-phase scorecard is separate from the planning-phase spec-review scorecard above.)
+
+### Closure Assessments
+- **Documentation assessment: FIRES.** Per TN-8, docs-writer dispatched to update `docs/admin/getting-started.md` (the "Seed the Development Database" section, now obsolete), `docs/agent-browsability-workflow.md` (`scripts/seed_dev.py` setup/troubleshooting references), and `docs/admin/post-reset-guide.md` (the member-team auto-assignment model in "Step 4: Verify Dev User Access" and its troubleshooting, now superseded by admin-sees-all + empty-reset starting state) before archival.
+- **Context-layer assessment (6 triggers, explicit verdicts):**
+  - #1 New convention/pattern: **YES** -- admin-sees-all access model + canonical admin-predicate delegation (route copies delegate to one `auth.py` predicate).
+  - #2 Architectural decision with ongoing implications: **YES** -- admins bypass `user_team_access` (in dev AND production); non-admins remain gated, preserving the future multi-coach model.
+  - #3 Footgun / boundary: **YES** -- the member-only-grant dark-dashboard trap for tracked-only admins; the empty-reset starting state (reset no longer seeds demo data).
+  - #4 Agent behavior / routing: **NO.**
+  - #5 Domain knowledge for future epics: **NO.**
+  - #6 New CLI / workflow / operational procedure: **YES** -- `bb db reset` now yields an empty DB; post-reset operator onboarding changed (admin sees all teams immediately, no member-team assignment step).
+  - Verdict: context-layer gate **FIRES** -> claude-architect dispatched to codify before archival.

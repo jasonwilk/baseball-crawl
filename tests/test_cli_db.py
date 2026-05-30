@@ -84,16 +84,16 @@ class TestDbReset:
         mock_fn.assert_called_once_with(db_path=None, force=True, _skip_guard=True)
 
     def test_reset_prints_summary_on_success(self) -> None:
-        """Output contains tables created and rows inserted counts."""
-        with patch("src.cli.db.reset_database", return_value=(5, 42)):
+        """Output reports the table count and an empty-schema message."""
+        with patch("src.cli.db.reset_database", return_value=(5, 0)):
             result = runner.invoke(app, ["db", "reset", "--force"])
         assert "5" in result.output
-        assert "42" in result.output
+        assert "empty schema" in result.output.lower()
 
     def test_reset_db_path_flag_passed_through(self, tmp_path: Path) -> None:
         """--db-path flag is forwarded to reset_database."""
         db_file = tmp_path / "custom.db"
-        with patch("src.cli.db.reset_database", return_value=(3, 10)) as mock_fn:
+        with patch("src.cli.db.reset_database", return_value=(3, 0)) as mock_fn:
             result = runner.invoke(app, ["db", "reset", "--force", "--db-path", str(db_file)])
         assert result.exit_code == 0
         mock_fn.assert_called_once_with(db_path=db_file, force=True, _skip_guard=True)
@@ -147,15 +147,6 @@ class TestDbReset:
             result = runner.invoke(app, ["db", "reset", "--force"])
         assert result.exit_code == 0
         mock_fn.assert_called_once_with(db_path=None, force=True, _skip_guard=True)
-
-    def test_reset_file_not_found_exits_1(self) -> None:
-        """FileNotFoundError (missing seed file) exits 1."""
-        with patch(
-            "src.cli.db.reset_database",
-            side_effect=FileNotFoundError("Seed file not found: /data/seeds/seed_dev.sql"),
-        ):
-            result = runner.invoke(app, ["db", "reset", "--force"])
-        assert result.exit_code == 1
 
     def test_reset_system_exit_propagated(self) -> None:
         """SystemExit raised by reset_database is converted to a non-zero Typer exit."""

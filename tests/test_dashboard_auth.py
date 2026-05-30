@@ -174,6 +174,69 @@ def multi_team_client(tmp_path: Path, db_info: tuple[Path, int, int]):
 
 
 @pytest.fixture()
+def admin_client(tmp_path: Path, db_info: tuple[Path, int, int]):
+    """Client for an ADMIN dev-bypass user with ZERO user_team_access grants.
+
+    Exercises the E-228-02 admin-sees-all widening: the admin has no
+    ``user_team_access`` rows, so under the old gating the dashboard would show
+    the no-assignments page and team-scoped requests would 403.  With the
+    widening, the admin's ``permitted_teams`` resolves to ALL team ids.
+    """
+    db_path, team_alpha_id, team_beta_id = db_info
+    conn = sqlite3.connect(str(db_path))
+    conn.execute("PRAGMA foreign_keys=ON;")
+    conn.execute(
+        "INSERT OR IGNORE INTO users (email, role) VALUES (?, 'admin')",
+        ("admin-dev@example.com",),
+    )
+    conn.commit()
+    conn.close()
+
+    env_overrides = {
+        "DATABASE_PATH": str(db_path),
+        "DEV_USER_EMAIL": "admin-dev@example.com",
+        # ADMIN_EMAIL unset so admin status comes solely from the DB role.
+        "ADMIN_EMAIL": "",
+    }
+    with patch.dict("os.environ", env_overrides):
+        with TestClient(app, follow_redirects=False) as client:
+            yield client, team_alpha_id, team_beta_id
+
+
+@pytest.fixture()
+def admin_email_client(tmp_path: Path, db_info: tuple[Path, int, int]):
+    """Client for an admin-via-ADMIN_EMAIL dev-bypass user with ZERO grants.
+
+    Exercises the operator's REAL flow: ``DEV_USER_EMAIL == ADMIN_EMAIL``.  The
+    user has the DEFAULT (non-admin) DB role, so admin status comes solely from
+    the ADMIN_EMAIL match.  With the E-228-02 widening, the admin's
+    ``permitted_teams`` resolves to ALL team ids end-to-end through the request
+    path, even with no ``user_team_access`` rows.
+    """
+    db_path, team_alpha_id, team_beta_id = db_info
+    operator_email = "operator@example.com"
+    conn = sqlite3.connect(str(db_path))
+    conn.execute("PRAGMA foreign_keys=ON;")
+    # Default role ('user') -- NOT role='admin'; admin status is via ADMIN_EMAIL.
+    conn.execute(
+        "INSERT OR IGNORE INTO users (email) VALUES (?)",
+        (operator_email,),
+    )
+    conn.commit()
+    conn.close()
+
+    env_overrides = {
+        "DATABASE_PATH": str(db_path),
+        "DEV_USER_EMAIL": operator_email,
+        # The operator's real flow: dev-bypass email matches ADMIN_EMAIL.
+        "ADMIN_EMAIL": operator_email,
+    }
+    with patch.dict("os.environ", env_overrides):
+        with TestClient(app, follow_redirects=False) as client:
+            yield client, team_alpha_id, team_beta_id
+
+
+@pytest.fixture()
 def no_teams_client(tmp_path: Path, db_info: tuple[Path, int, int]):
     """Client for a session-authenticated user with no team assignments.
 
@@ -353,6 +416,70 @@ class TestNoAssignments:
         assert response.status_code == 200
         # Stats table should not be present
         assert "<table" not in response.text
+
+
+# ---------------------------------------------------------------------------
+# E-228-02: admin sees all teams (AC-1, AC-5 admin branch)
+# ---------------------------------------------------------------------------
+
+
+class TestAdminSeesAllTeams:
+    """Verify the admin-sees-all widening (E-228-02 AC-1, AC-5)."""
+
+    def test_admin_with_zero_grants_renders_real_data(self, admin_client) -> None:
+        """AC-1: admin w/ 0 user_team_access sees real data, not no-assignments."""
+        client, _, _ = admin_client
+        response = client.get("/dashboard/batting")
+        assert response.status_code == 200
+        html = response.text
+        # Real data renders (a permitted team appears); not the no-assignments page.
+        assert "no team assignments" not in html.lower()
+        assert "Alpha Team" in html
+
+    def test_admin_can_view_any_team_no_403(self, admin_client) -> None:
+        """AC-5 (admin branch): team-scoped 403 does NOT fire for an admin.
+
+        The admin has no explicit grant to either team, yet can view both.
+        """
+        client, team_alpha_id, team_beta_id = admin_client
+        for team_id in (team_alpha_id, team_beta_id):
+            response = client.get(f"/dashboard?team_id={team_id}")
+            assert response.status_code == 200, (
+                f"admin should access team {team_id}, got {response.status_code}"
+            )
+
+    def test_admin_email_with_zero_grants_renders_real_data(
+        self, admin_email_client
+    ) -> None:
+        """AC-1 (ADMIN_EMAIL branch, end-to-end): operator's real flow.
+
+        DEV_USER_EMAIL == ADMIN_EMAIL, 0 grants, 2+ teams → dashboard renders
+        real team data instead of the no-assignments page.  This drives the
+        ADMIN_EMAIL branch of the widening through the full request path
+        (the role='admin' branch is covered separately by admin_client).
+        """
+        client, _, _ = admin_email_client
+        response = client.get("/dashboard/batting")
+        assert response.status_code == 200
+        html = response.text
+        assert "no team assignments" not in html.lower()
+        assert "Alpha Team" in html
+
+    def test_admin_email_can_view_ungranted_team_no_403(
+        self, admin_email_client
+    ) -> None:
+        """AC-5 (ADMIN_EMAIL branch): no team-scoped 403 for an ADMIN_EMAIL admin.
+
+        The operator has no explicit grant to either team, yet can view both
+        via the ADMIN_EMAIL match through the full request path.
+        """
+        client, team_alpha_id, team_beta_id = admin_email_client
+        for team_id in (team_alpha_id, team_beta_id):
+            response = client.get(f"/dashboard?team_id={team_id}")
+            assert response.status_code == 200, (
+                f"ADMIN_EMAIL admin should access team {team_id}, "
+                f"got {response.status_code}"
+            )
 
 
 # ---------------------------------------------------------------------------

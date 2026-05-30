@@ -1,8 +1,7 @@
 """Database reset logic.
 
 Provides ``reset_database()`` and helpers for dropping and recreating the
-SQLite database from migrations and seed data.  Used by the ``bb db reset``
-command.
+SQLite database from migrations.  Used by the ``bb db reset`` command.
 """
 
 from __future__ import annotations
@@ -19,7 +18,6 @@ logger = logging.getLogger(__name__)
 # Repo root: src/db/reset.py is 3 levels deep, so .parents[2] is the repo root.
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _DEFAULT_DB_PATH = _PROJECT_ROOT / "data" / "app.db"
-_SEED_FILE = _PROJECT_ROOT / "data" / "seeds" / "seed_dev.sql"
 
 
 def get_db_path(override: str | Path | None = None) -> Path:
@@ -104,61 +102,16 @@ def _run_migrations_and_count(db_path: Path) -> int:
     return table_count
 
 
-def load_seed(db_path: Path, seed_file: Path) -> int:
-    """Execute the seed SQL file and return the total rows inserted.
-
-    Args:
-        db_path: Path to the already-migrated SQLite database.
-        seed_file: Path to the SQL seed file.
-
-    Returns:
-        Total rows inserted across all seeded tables.
-
-    Raises:
-        FileNotFoundError: If the seed file does not exist.
-        sqlite3.Error: If any SQL statement fails.
-    """
-    if not seed_file.exists():
-        raise FileNotFoundError(f"Seed file not found: {seed_file}")
-
-    sql = seed_file.read_text(encoding="utf-8")
-    logger.info("Loading seed data from %s", seed_file)
-
-    conn = sqlite3.connect(str(db_path))
-    try:
-        # executescript() resets connection state, so FK pragma must be inline.
-        conn.executescript("PRAGMA foreign_keys=ON;\n" + sql)
-        conn.commit()
-
-        # Count total rows across all user tables (excluding _migrations).
-        cursor = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name != '_migrations';"
-        )
-        table_names = [row[0] for row in cursor.fetchall()]
-
-        total_rows = 0
-        for table in table_names:
-            count: int = conn.execute(
-                f"SELECT COUNT(*) FROM {table};"  # noqa: S608  -- table names from schema, not user input
-            ).fetchone()[0]
-            total_rows += count
-            logger.info("  %s: %d rows", table, count)
-    except sqlite3.Error:
-        conn.rollback()
-        logger.exception("Failed to load seed data.")
-        raise
-    finally:
-        conn.close()
-
-    return total_rows
-
-
 def reset_database(
     db_path: Path | None = None,
     force: bool = False,
     _skip_guard: bool = False,
 ) -> tuple[int, int]:
-    """Orchestrate a full database reset: delete, migrate, seed.
+    """Orchestrate a full database reset: delete, migrate.
+
+    Produces a database containing only the migrated schema (and any rows the
+    migrations themselves insert, e.g. the ``programs`` bootstrap row).  No
+    demo/seed data is loaded.
 
     This is the public entry point for programmatic use (e.g., from the CLI).
     The production guard runs internally unless ``_skip_guard=True`` is passed.
@@ -175,11 +128,12 @@ def reset_database(
             ``check_production_guard()`` call is skipped.  Default False.
 
     Returns:
-        Tuple of (tables_created, rows_inserted).
+        Tuple of (tables_created, 0).  The second element is always 0: no seed
+        rows are loaded.  It is retained for backward compatibility with the
+        2-tuple return shape.
 
     Raises:
         SystemExit: If APP_ENV=production, force is False, and _skip_guard is False.
-        FileNotFoundError: If the seed file is missing.
     """
     if db_path is None:
         db_path = get_db_path()
@@ -191,6 +145,5 @@ def reset_database(
 
     delete_database(db_path)
     table_count = _run_migrations_and_count(db_path)
-    row_count = load_seed(db_path, seed_file=_SEED_FILE)
 
-    return table_count, row_count
+    return table_count, 0
