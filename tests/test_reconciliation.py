@@ -660,10 +660,23 @@ class TestCLISmokeTest:
     """Verify the reconcile command is registered and callable."""
 
     def test_reconcile_command_exists(self) -> None:
-        """Verify the reconcile command is registered in the data app."""
+        """Verify the reconcile command is registered in the data app.
+
+        Commands registered with a bare ``@app.command()`` (the project's
+        convention for commands whose invocation name matches the function
+        name -- e.g. ``crawl``, ``load``, ``scout``, ``dedup``) leave
+        ``cmd.name`` as ``None``; Typer derives the invocation name from the
+        callback function name at app-build time.  Asserting on the callback
+        name therefore matches how the rest of the suite identifies these
+        commands, rather than special-casing ``reconcile`` with an explicit
+        ``name=`` just to satisfy the test.
+        """
         from src.cli.data import app
 
-        command_names = [cmd.name for cmd in app.registered_commands]
+        command_names = [
+            cmd.name if cmd.name is not None else cmd.callback.__name__
+            for cmd in app.registered_commands
+        ]
         assert "reconcile" in command_names
 
 

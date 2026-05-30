@@ -20,6 +20,8 @@ from __future__ import annotations
 import datetime
 import sqlite3
 import sys
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
 
@@ -198,11 +200,26 @@ def _insert_opponent_link(
     return cur.lastrowid  # type: ignore[return-value]
 
 
-def _make_client(db_path: Path, user_email: str = _USER_EMAIL) -> TestClient:
-    """Create a TestClient using DEV_USER_EMAIL bypass."""
+@contextmanager
+def _make_client(db_path: Path, user_email: str = _USER_EMAIL) -> Iterator[TestClient]:
+    """Yield a TestClient using DEV_USER_EMAIL bypass.
+
+    This is a context manager so the patched environment (DATABASE_PATH +
+    DEV_USER_EMAIL) stays active for the LIFETIME of the client -- i.e. while
+    requests are issued.  An earlier version returned the client after the
+    ``patch.dict`` block had already exited, so by request time DATABASE_PATH
+    was unset and the dev-bypass middleware fell to the cookie-less branch,
+    making get_connection() fail (or, in the main checkout, silently use the
+    default DB).  Mirrors the proven ``with patch.dict(...): with TestClient(...)``
+    idiom used elsewhere in this suite.  Usage::
+
+        with _make_client(self.db_path) as client:
+            resp = client.get(...)
+    """
     env = {"DATABASE_PATH": str(db_path), "DEV_USER_EMAIL": user_email}
     with patch.dict("os.environ", env):
-        return TestClient(app)
+        with TestClient(app) as client:
+            yield client
 
 
 # ---------------------------------------------------------------------------
@@ -1481,10 +1498,10 @@ class TestOpponentDetailPABadges:
 
     def test_ac1_batting_pa_badge_in_html(self):
         """AC-1: Batting rows show PA badge instead of GP."""
-        client = _make_client(self.db_path)
-        resp = client.get(
-            f"/dashboard/opponents/{self.opp_id}?team_id={self.member_id}&season_id={_SEASON_ID}"
-        )
+        with _make_client(self.db_path) as client:
+            resp = client.get(
+                f"/dashboard/opponents/{self.opp_id}?team_id={self.member_id}&season_id={_SEASON_ID}"
+            )
         assert resp.status_code == 200
         html = resp.text
         # PA = 20 + 3 + 1 + 0 = 24
@@ -1494,10 +1511,10 @@ class TestOpponentDetailPABadges:
 
     def test_ac2_pitching_ip_badge_in_html(self):
         """AC-2: Pitching rows show IP badge instead of GP."""
-        client = _make_client(self.db_path)
-        resp = client.get(
-            f"/dashboard/opponents/{self.opp_id}?team_id={self.member_id}&season_id={_SEASON_ID}"
-        )
+        with _make_client(self.db_path) as client:
+            resp = client.get(
+                f"/dashboard/opponents/{self.opp_id}?team_id={self.member_id}&season_id={_SEASON_ID}"
+            )
         assert resp.status_code == 200
         html = resp.text
         # ip_outs=21 -> 7.0 IP
@@ -1505,50 +1522,50 @@ class TestOpponentDetailPABadges:
 
     def test_ac5_top_pitchers_card_ip_badge(self):
         """AC-5: Their Pitchers card shows IP badge, not GP."""
-        client = _make_client(self.db_path)
-        resp = client.get(
-            f"/dashboard/opponents/{self.opp_id}?team_id={self.member_id}&season_id={_SEASON_ID}"
-        )
+        with _make_client(self.db_path) as client:
+            resp = client.get(
+                f"/dashboard/opponents/{self.opp_id}?team_id={self.member_id}&season_id={_SEASON_ID}"
+            )
         html = resp.text
         # The top pitchers card should contain IP badge.
         assert "7.0 IP</span>" in html
 
     def test_ac3_heat_css_classes_present(self):
         """AC-3: Heat-map CSS classes are present in the HTML."""
-        client = _make_client(self.db_path)
-        resp = client.get(
-            f"/dashboard/opponents/{self.opp_id}?team_id={self.member_id}&season_id={_SEASON_ID}"
-        )
+        with _make_client(self.db_path) as client:
+            resp = client.get(
+                f"/dashboard/opponents/{self.opp_id}?team_id={self.member_id}&season_id={_SEASON_ID}"
+            )
         html = resp.text
         # Heat-0 should appear (since < 3 qualified batters -> all heat-0).
         assert "heat-0" in html
 
     def test_ac6_print_view_pa_badge(self):
         """AC-6: Print view has PA badge."""
-        client = _make_client(self.db_path)
-        resp = client.get(
-            f"/dashboard/opponents/{self.opp_id}/print?team_id={self.member_id}&season_id={_SEASON_ID}"
-        )
+        with _make_client(self.db_path) as client:
+            resp = client.get(
+                f"/dashboard/opponents/{self.opp_id}/print?team_id={self.member_id}&season_id={_SEASON_ID}"
+            )
         assert resp.status_code == 200
         html = resp.text
         assert "24 PA" in html
 
     def test_ac6_print_view_ip_badge(self):
         """AC-6: Print view has IP badge on pitching rate stats."""
-        client = _make_client(self.db_path)
-        resp = client.get(
-            f"/dashboard/opponents/{self.opp_id}/print?team_id={self.member_id}&season_id={_SEASON_ID}"
-        )
+        with _make_client(self.db_path) as client:
+            resp = client.get(
+                f"/dashboard/opponents/{self.opp_id}/print?team_id={self.member_id}&season_id={_SEASON_ID}"
+            )
         assert resp.status_code == 200
         html = resp.text
         assert "7.0 IP" in html
 
     def test_ac6_print_view_no_heat_classes(self):
         """AC-6: Print view does NOT have heat-map CSS classes."""
-        client = _make_client(self.db_path)
-        resp = client.get(
-            f"/dashboard/opponents/{self.opp_id}/print?team_id={self.member_id}&season_id={_SEASON_ID}"
-        )
+        with _make_client(self.db_path) as client:
+            resp = client.get(
+                f"/dashboard/opponents/{self.opp_id}/print?team_id={self.member_id}&season_id={_SEASON_ID}"
+            )
         html = resp.text
         assert "heat-1" not in html
         assert "heat-2" not in html
