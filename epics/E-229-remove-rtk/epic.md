@@ -105,6 +105,41 @@ This tree-wide grep is the integrative backstop. The primary proof is per-touchp
 
 This grep MUST return hits in **exactly two FILES** (six lines total), all the `rtkn` JWT refresh-token field (false positive -- the field name contains the substring `rtk`): `docs/api/auth.md` (3 lines) and `docs/api/endpoints/post-auth.md` (3 lines). These files must NOT be modified.
 
+## Closure Obligations
+
+This MUST be completed before the epic is archived. It is deliberately NOT covered
+by the closing grep above (which excludes `.claude/agent-memory/`), so it will not
+fail any automated gate -- the closure step below is its enforcement.
+
+- [ ] **PM sweeps the RTK reference from its own memory.** Remove or reword the one
+  real RTK reference in `.claude/agent-memory/product-manager/MEMORY.md` -- the line
+  beginning `E-224 (RTK/Pytest Interaction Guardrails)...`, which mentions
+  `rtk proxy` and the pytest-verbose machinery this epic deletes -- so no live RTK
+  reference remains. This is PM-owned (each agent owns its own memory *content*) and
+  is done at closure, not by an implementer story.
+  **Verify**: `grep -ni 'rtk' .claude/agent-memory/product-manager/MEMORY.md`
+  returns only the harmless `remove-rtk` epic-slug substring in the numbering line
+  (no `E-224` / `rtk proxy` line).
+
+## Implementation Notes
+
+### Verify against ground truth, not a single grep
+
+This epic's acceptance is grep-driven (the epic-level closing grep plus each
+story's "owned files are RTK-free" AC). During planning, the Grep/Read tooling
+intermittently returned **empty or stale results that looked authoritative** but
+were wrong (e.g., it reported `docs/E-221-HANDOFF.md` as having zero `rtk` matches
+when it has two). A false negative is indistinguishable from a real zero, so a
+single clean grep is not proof.
+
+When verifying RTK removal for any story or the closing gate:
+- Do not treat one grep's "no matches" as done. Re-run, and corroborate with a
+  second view (e.g. `git grep` vs `grep -rn` vs opening the file).
+- If a verification result is surprising or convenient, double-check it before
+  marking an AC satisfied.
+- This caveat is scoped to E-229 and travels with the epic to the archive on
+  closure -- it is not a standing project rule.
+
 ## Technical Notes
 
 ### Authoritative scope inventory

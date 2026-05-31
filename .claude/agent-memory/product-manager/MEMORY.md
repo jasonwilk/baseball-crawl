@@ -1,8 +1,8 @@
 # Product Manager -- Agent Memory
 
 ## Numbering State
-- Next available epic number: E-229
-- Next available idea number: IDEA-071
+- Next available epic number: E-230 (E-229=remove-rtk active)
+- Next available idea number: IDEA-073 (IDEA-072=rtk-compression-retrospective-audit taken by E-229)
 - Before assigning numbers: ALWAYS `ls /epics/` and `ls /.project/ideas/` to avoid collisions
 
 ## Project Context
