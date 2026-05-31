@@ -100,3 +100,7 @@ mock_response = {"season_year": 2026}
 ```
 
 Before writing a mock, open the authoritative spec and copy the field structure from there. If the spec and the implementation disagree, the test should fail -- that disagreement is the bug.
+
+### Inverse direction: when you change a production contract, stale tests are MUST-FIX
+
+The same principle runs the other way. When you deliberately **change a production contract** -- add or rename a query column, change a template variable, alter a figure's dimensions, change a function's return shape -- every fixture, mock, or assertion that still encodes the *old* shape is now a stale test, and updating it is a **MUST-FIX** part of the same change, not optional cleanup. A test that asserts the old contract will either fail (caught) or, worse, pass vacuously against an outdated fixture and give false confidence that nothing broke. When you change a contract, grep `tests/` for every fixture and assertion that encodes the old shape and bring them to the new contract in the same change. Leaving the suite red (or green-but-stale) is a regression, not a follow-up.

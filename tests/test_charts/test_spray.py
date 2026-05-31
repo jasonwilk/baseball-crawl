@@ -195,13 +195,18 @@ def test_render_without_title() -> None:
 # figsize tests (E-194 AC-1)
 # ---------------------------------------------------------------------------
 
-def test_render_uses_3x4_figsize() -> None:
-    """render_spray_chart creates figure with figsize=(3, 4)."""
+def test_render_uses_3x3_figsize() -> None:
+    """render_spray_chart creates figure with figsize=(3, 3).
+
+    The redesign in commit a8d6ac6 ("redesign scouting report print layout")
+    deliberately switched to a square (3, 3) figure (the "3x4" in the prior
+    name/commit referred to the 12-card page grid, not the figure aspect ratio).
+    """
     with patch("src.charts.spray.plt.subplots", return_value=(MagicMock(), MagicMock())) as mock_sub:
         mock_sub.return_value[0].get_facecolor.return_value = "#FFFFFF"
         mock_sub.return_value[0].savefig.side_effect = lambda buf, **kw: buf.write(b"\x89PNG\r\n\x1a\n" + b"\x00" * 100)
         render_spray_chart(_sample_events())
-        mock_sub.assert_called_once_with(figsize=(3, 4))
+        mock_sub.assert_called_once_with(figsize=(3, 3))
 
 
 # ---------------------------------------------------------------------------
@@ -348,7 +353,7 @@ def test_legend_play_type_row_has_five_entries() -> None:
 
 
 # ---------------------------------------------------------------------------
-# PNG dimension sanity check (3x4 inches at 150 DPI = 450x600 pixels)
+# PNG dimension sanity check (square 3x3 inches at 150 DPI, cropped tight)
 # ---------------------------------------------------------------------------
 
 def _png_dimensions(png_bytes: bytes) -> tuple[int, int]:
@@ -359,20 +364,34 @@ def _png_dimensions(png_bytes: bytes) -> tuple[int, int]:
     return width, height
 
 
-def test_render_png_dimensions_approx_3x4_at_150dpi() -> None:
-    """Output PNG dimensions should be in the right ballpark for a 3×4 @ 150 DPI figure.
+def test_render_png_dimensions_near_square_at_150dpi() -> None:
+    """Output PNG dimensions should be near-square for the redesigned 3×3 @ 150 DPI figure.
 
-    ``bbox_inches='tight'`` trims figure whitespace (particularly with equal-aspect
-    axes), so the actual pixel size is smaller than the nominal 450×600.  We verify
-    the image is substantively sized rather than a thumbnail.
+    Commit a8d6ac6 switched the figure to a square ``figsize=(3, 3)`` and cropped the
+    axes (``set_xlim(-4, 324)`` / ``set_ylim(365, 8)``) at ``dpi=150`` with
+    ``bbox_inches='tight'``, producing a near-square image rather than the old portrait
+    layout. Measured output during E-230-02 dispatch was a deterministic 387×376 px
+    (width×height), stable across repeated renders and across sample/single/empty inputs
+    (aspect h/w ≈ 0.97).
+
+    Rather than pin brittle exact pixels (matplotlib output can drift slightly across
+    versions), assert the image is substantively sized and near-square within a
+    tolerance band that comfortably covers the measured 387×376 while still rejecting
+    the old markedly-taller-than-wide portrait layout.
     """
     result = render_spray_chart(_sample_events())
     width, height = _png_dimensions(result)
-    # Minimum threshold: at least 200×300 (roughly half of nominal 450×600)
-    assert width >= 200, f"Width {width} too small (expected >= 200)"
+    # Substantively sized (not a thumbnail); both dimensions in the measured ballpark.
+    assert width >= 300, f"Width {width} too small (expected >= 300)"
     assert height >= 300, f"Height {height} too small (expected >= 300)"
-    # Height should exceed width (portrait orientation)
-    assert height > width, f"Expected portrait PNG but got width={width}, height={height}"
+    # Near-square: redesigned (3,3) figure. Measured 387×376 (h/w ≈ 0.97); allow a
+    # generous band for cross-version pixel drift while still rejecting the old
+    # portrait layout (which was markedly taller than wide).
+    aspect = height / width
+    assert 0.85 <= aspect <= 1.18, (
+        f"Expected near-square PNG (redesigned 3x3) but got "
+        f"width={width}, height={height} (h/w={aspect:.3f})"
+    )
 
 
 # ---------------------------------------------------------------------------

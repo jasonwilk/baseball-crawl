@@ -3237,15 +3237,16 @@ class TestGameCoverageIndicator:
     def test_opponent_detail_shows_coverage_indicator(self, opponent_client) -> None:
         """AC-1, AC-3, AC-7: Opponent detail shows 'Through [date] ([N] games)'.
 
-        The opponent_client fixture seeds 3 completed games involving opp_team_id:
-        game-001 (2026-03-01), game-002 (2026-02-20), game-2025 (2025-03-15).
-        Expected: 'Through Mar 1 (3 games)'.
+        The opponent_client fixture seeds 4 completed games involving opp_team_id:
+        game-001 (2026-03-01), game-002 (2026-02-20), game-2025 (2025-03-15),
+        game-opp-2025 (2025-03-10). Latest is 2026-03-01.
+        Expected: 'Through Mar 1 (4 games)'.
         """
         client, _, opp_team_id, _ = opponent_client
         response = client.get(f"/dashboard/opponents/{opp_team_id}")
         assert response.status_code == 200
         html = response.text
-        assert "Through Mar 1 (3 games)" in html
+        assert "Through Mar 1 (4 games)" in html
 
     def test_opponent_detail_no_coverage_when_no_completed_games(
         self, coverage_no_games_client
@@ -3263,7 +3264,7 @@ class TestGameCoverageIndicator:
         response = client.get(f"/dashboard/opponents/{opp_team_id}/print")
         assert response.status_code == 200
         html = response.text
-        assert "Through Mar 1 (3 games)" in html
+        assert "Through Mar 1 (4 games)" in html
 
     def test_opponent_print_no_coverage_when_no_completed_games(
         self, coverage_no_games_client

@@ -228,6 +228,7 @@ class TestTemplateRendering:
             "jersey_number": "21",
             "throws": "R",
             "games": 5,
+            "gs": 2,
             "ip_outs": 30,
             "h": 10,
             "er": 4,

@@ -1,7 +1,7 @@
 # E-230: Fix the 56 Post-RTK Test-Suite Failures
 
 ## Status
-`READY`
+`COMPLETED`
 <!-- Lifecycle: DRAFT → READY → ACTIVE → COMPLETED (or BLOCKED / ABANDONED) -->
 
 ## Overview
@@ -42,10 +42,10 @@ A fourth story (Story 04, claude-architect) adds lightweight regression preventi
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-230-01 | Populate `gs` in pitcher fixtures + harden `gs` template guard (all 4 templates) | TODO | None | - |
-| E-230-02 | Realign spray-chart geometry tests to square (3,3) cropped output | TODO | None | - |
-| E-230-03 | Fix game-coverage indicator assertions to "(4 games)" | TODO | None | - |
-| E-230-04 | Executable full-suite-green closure gate + CR closure pass (regression prevention) | TODO | None | - |
+| E-230-01 | Populate `gs` in pitcher fixtures + harden `gs` template guard (all 4 templates) | DONE | None | software-engineer |
+| E-230-02 | Realign spray-chart geometry tests to square (3,3) cropped output | DONE | None | software-engineer |
+| E-230-03 | Fix game-coverage indicator assertions to "(4 games)" | DONE | None | software-engineer |
+| E-230-04 | Executable full-suite-green closure gate + CR closure pass (regression prevention) | DONE | None | claude-architect |
 
 ## Dispatch Team
 - software-engineer (01, 02, 03)
@@ -98,6 +98,24 @@ The four stories touch disjoint files (Story 01 = the 3 pitcher-fixture helpers 
 2. **`gs` template-guard hardening — RESOLVED.** The user chose to **harden all four `gs` templates** (in addition to the required fixture fix). Story 01 now carries the hardening as required ACs (AC-3/AC-4), not opt-in.
 
 ## History
+- 2026-05-31: **Closure assessments (Phase 5 Step 3 / 3a).**
+  - **Documentation assessment: No documentation impact.** Reviewed against the doc update triggers (`.claude/rules/documentation.md`): no new feature/endpoint, no architecture/deployment change, no agent created/materially modified in the user-facing sense, no DB schema/migration change, and nothing that changes how coaching staff or operators interact with the system. The work is test-maintenance plus an internal dispatch-process gate. No `docs/admin/` or `docs/coaching/` update needed; docs-writer not dispatched.
+  - **Context-layer assessment (6 triggers, per-trigger verdict):**
+    1. New convention/pattern/constraint — **YES**: the testing.md "Inverse direction: when you change a production contract, stale tests are MUST-FIX" rule (a new testing convention). **Codified in-epic by E-230-04** (claude-architect as the story implementer).
+    2. Architectural decision with ongoing implications — **NO**: no technology choice or structural decision (test-maintenance + a process gate, not architecture).
+    3. Footgun/failure mode/boundary discovered — **YES**: the editable-install meta-path-finder making worktree/pre-merge pytest test main's pre-epic code (why the closure gate must run in main post-`git apply`). **Codified in-epic by E-230-04** (SKILL.md sub-step 5 + code-reviewer.md Test Execution Constraint scoping + workflow-discipline.md gate section).
+    4. Change to agent behavior/routing/coordination/closure — **YES**: the new unconditional Phase 5 Step 1b full-suite-green closure gate + the COMPLETED-flip deferral to Step 8 sub-step 5 — a standing change to how every future epic closes. **Codified in-epic by E-230-04.**
+    5. Domain knowledge for future agent decisions — **NO**: no baseball/API/data-model domain insight surfaced (the `gs` display contract was already settled in `key-metrics.md`/`display-philosophy.md`).
+    6. New CLI/workflow/operational procedure — **NO**: no new `bb` subcommand, script, or skill; the closure-gate change is internal to the existing implement skill, not a new operator workflow.
+  - **Result**: triggers 1, 3, 4 fired, but all three were codified IN-EPIC by claude-architect as the E-230-04 implementer — no separate claude-architect codification pass required. Both assessment gates satisfied; epic ready to archive after the Step 8 green gate + COMPLETED flip.
+- 2026-05-31: **Dispatch complete — all 4 stories DONE; Phase 4 review done; closure bookkeeping (COMPLETED flip deferred to the Step 8 green gate per E-230-04 option-(a)).** Outcome: full suite green at 4472 passed / 0 failed (from 56 failed / 4397 passed at discovery). All fixes were test-maintenance; zero product bugs, consistent with the discovery net finding. Story summary: 01 = populated `gs` in 3 pitcher-fixture helpers + hardened the `gs` guard (`pitcher.gs is undefined or pitcher.gs is none`) across all 4 templates + new `tests/test_template_gs_guard.py` rendering each real template's gs cell through Jinja; 02 = realigned the 2 spray-geometry tests to the confirmed-square `(3,3)` cropped output (near-square aspect band, `src/charts/spray.py` untouched); 03 = corrected the 2 game-coverage assertions + docstring to "(4 games)" (`get_game_coverage()` untouched); 04 = added the executable Phase 5 Step 1b full-suite-green closure gate + scoped the per-story pytest ban + new `## Full-Suite-Green Closure Gate` section in workflow-discipline.md + inverse-direction append to testing.md's Test-Validates-Spec.
+  - **Baseline restated 56 → 58**: the AC-7 micro-cluster — 2 stale last-outing assertions in `tests/test_report_workload.py` surfaced during E-230-01 dispatch inside AC-5's named-command surface; folded into E-230-01 as AC-7 (see the scope-decision entry below). All 58 were test-maintenance, zero product bugs.
+  - **Story-01 em-dash-assertion honesty fix (during per-story review)**: the initial guard test's em-dash assertion was dead under autoescape; corrected to an exact `&mdash;` match (autoescape=False mirroring the real `render_report` env) with exact-match `0/5`/`3/5` cell values — strictly strengthened the test.
+  - **Story-03 "(6 games) leak" = FALSE ALARM, investigated and disproven**: a reported full-suite-order test-isolation leak (detail test rendering "(6 games)") was checked first-hand and disproven — the test DB is per-test `tmp_path`-isolated, `get_game_coverage()` deterministically returns 4, two consecutive full-suite runs are identically green. The only real finding was the stale 3→4 assertion + docstring, exactly as discovery scoped. Recorded so the record shows it was checked, not skipped.
+  - **E-230-04 footprint variance (~30 lines vs the ~15-18 DoD estimate)**: superseded by the AC-1 design ruling, NOT scope creep. Codex iter-1's P1 + the dispatch-time AC-1 internal-contradiction resolution required real Step-8 enforcement mechanics (the gate runs authoritatively in main post-`git apply`, before the closure commit, because the editable-install meta-path-finder makes worktree/pre-merge pytest test main's pre-epic code). The honest hybrid → option-(a) deferral (COMPLETED flip moved from Step 2 to Step 8 sub-step 5, set only on a green suite) is the enforcement half the ruling required. DoD line reads superseded-by-ruling, not failed.
+  - **Phase 4b Codex caught 4 valid findings that per-story + Phase-4a integration review missed** (4/4 accepted, 0 dismissed, all remediated + PM-re-verified by literal read): F1 (SKILL.md sub-step 5 red-suite rollback pointed at the archive-undo `git mv` that hasn't run yet → fixed to a minimal `git reset HEAD && git checkout -- .`); F2 (COMPLETED-timing dishonesty: prose claimed reject-path resets revert COMPLETED but they don't → fixed via option-(a) deferral, consistent across SKILL.md :441/:451/:549/:550 + workflow-discipline.md:92-94); F3 (2 AC-7 last-outing assertions were bare substrings satisfied by the inline JS selector token → element-pinned `<th class="last-outing-header mob-hide-extra">` / `<td class="last-outing-cell mob-hide-extra" data-date=...>`, teeth-proven); F4 (the render_report None test asserted `&mdash;` document-wide, vacuous because the report header carries `&mdash;` → scoped to the GS cell via `_GSGR_CELL_RE`, teeth-proven). F3/F4 were the same masked-pass class the epic exists to kill — caught and fixed, not waved.
+  - **`test_js_snippet_present` :242-243 — partial-teeth note (left as-is)**: during the F3 remediation-completeness sweep, sibling bare-substring asserts (`assert "last-outing-cell" in html` / `"last-outing-header"`) were examined. Settled by the objective teeth test as a `<script>`-presence SMOKE check (the test also asserts `"<script>" in html`; it makes no element-class contract claim), so it is NOT the AC-7 false-confidence inversion and NOT a MUST-FIX instance of the new testing.md inverse-rule. Partial teeth = hygiene, not a defect; left as-is. Hardening (assert the `querySelectorAll('.last-outing-*')` call inside the extracted `<script>` block) capturable as a small follow-up if desired. `:280` (compound two-class string) also left — already has teeth.
+- 2026-05-31: **Dispatch scope decision (PM, story-scope domain) — 4th micro-cluster folded into E-230-01.** During E-230-01 dispatch, the AC-5 named command surfaced 2 additional failures in `tests/test_report_workload.py` (`TestReportHTMLOutput::test_last_outing_header_class`, `::test_last_outing_cell_class_and_data_date`) NOT in the documented 56-failure baseline. SE verified first-hand (revert `gs` edit + re-run on pristine HEAD) they pre-exist this story and are not `gs`-related — discovery's count missed them (they fail identically on clean HEAD; the same RTK-masking the epic exists to fix explains why they were uncounted). Same decision-framework verdict as the rest of the epic: **template correct, assertion stale → fix the test** (template now emits `class="last-outing-header mob-hide-extra"`; assertions stale-match the whole `class="..."` attribute; fix = assert the class token). PM authorized SE to fix them within E-230-01 (added as AC-7) rather than deferring to a new story, because: (a) they live in `tests/test_report_workload.py`, already inside AC-5's 0-failed surface; (b) the epic Goal + Success Criteria + Story-04 unconditional closure gate all require full-suite 0-failed, so they must clear for the epic to close regardless; (c) same file, same theme, two-token fix — routing elsewhere is pure churn; (d) "no pre-existing excuse" favors fixing. Baseline restated: 58 total stale-test failures (56 documented + this 2-failure micro-cluster), all test-maintenance, zero product bugs.
 - 2026-05-31: Created (DRAFT). Discovery completed via first-hand SE (code trace + `git log`/`git show`) and DE (data-layer review) consultations relayed through the main session.
 - 2026-05-31: Reframed Cluster 1 per refined SE+DE follow-up. Corrected from "fix both layers (template + fixtures)" to **"fix the fixtures (required); the template guard is correct and load-bearing — keep it; template hardening is optional opt-in hygiene."** DE+SE traced every production pitcher-dict path and confirmed all supply `gs`; NULL `gs` is a normal production state the guard rightly renders as em-dash. Net finding recorded: **zero confirmed product bugs — all 56 failures are test-maintenance**, each proven via the decision framework. Added Open Question 2 (template-hardening opt-in) and restructured Story 01 to make the fixture fix the required core and the hardening a conditional sub-section. baseball-coach not needed (the GS-unknown display contract is already settled by `key-metrics.md` + `display-philosophy.md`).
 - 2026-05-31: Both Open Questions resolved by the user; one prevention story added. **(1) Spray geometry → square confirmed**: user pointed to the live production report `https://bbstats.ai/reports/zoVS7ElENReB4Kkr` (near-square = current code output); Story 02 collapsed to test-fix only (portrait code-fix branch retired; tests renamed off "3x4"; dimension assertion to be measured at dispatch). **(2) `gs` hardening → KEEP all 4 templates**: Story 01 reverted from opt-in to required hardening (AC-3/AC-4). **(3) Prevention → added as Story E-230-04** (claude-architect): widen CR Step 1 to full-suite on cross-cutting-contract changes or last-story-of-epic; full-suite-green closure gate in workflow-discipline.md; inverse-direction append to the existing Test-Validates-Spec line in testing.md — < 12 lines, no new hook/CI/rule, no pytest-verbose/exitfirst reintroduction. Epic now 4 stories / 2 domains (software-engineer 01-03, claude-architect 04). The rejected-as-too-heavy GitHub Actions CI gate captured as CANDIDATE IDEA-073.
@@ -107,10 +125,25 @@ The four stories touch disjoint files (Story 01 = the 3 pitcher-fixture helpers 
 - 2026-05-31: Set to **READY** (user-authorized after the iteration-2 circuit-breaker decision: fix + READY). Planning stops here — the user said "plan an epic," not "plan and dispatch," so dispatch is a separate authorization (`implement E-230`). The one user-facing standing change surfaced at the gate: E-230-04's UNCONDITIONAL full-suite-green closure gate means every future epic closure runs `python -m pytest tests/` in the main checkout before the epic is marked COMPLETED (~90s/closure).
 
 ## Review Scorecard
+
+### Planning reviews (pre-dispatch)
 | Review Pass | Findings | Accepted | Dismissed |
 |---|---|---|---|
 | Internal iteration 1 — CR spec audit (F4/F5/F6; F6 CR+CA converged) | 3 | 3 | 0 |
 | Internal iteration 1 — Holistic team SE/DE/CA (F1/F2/F3) | 3 | 3 | 0 |
 | Codex iteration 1 (P1 propagation / P2 overlap / P2 status-model) | 3 | 3 | 0 |
 | Codex iteration 2 (G1 Phase-5 prose / G2 command coverage / G3 docstring) | 3 | 3 | 0 |
-| **Total** | **12** | **12** | **0** |
+| **Planning subtotal** | **12** | **12** | **0** |
+
+### Dispatch reviews
+| Review Pass | Findings | Accepted | Dismissed |
+|---|---|---|---|
+| Per-story CR — E-230-01 (round-1 SHOULD FIX: em-dash assertion dead under autoescape) | 1 | 1 | 0 |
+| Per-story CR — E-230-02 | 0 | 0 | 0 |
+| Per-story CR — E-230-03 | 0 | 0 | 0 |
+| E-230-04 (context-layer-only — PM-only AC verification, no per-story CR) | 0 | 0 | 0 |
+| Phase 4a — CR integration review | 0 | 0 | 0 |
+| Phase 4b — Codex code review (F1/F2 SKILL.md gate-logic; F3/F4 test-teeth) | 4 | 4 | 0 |
+| **Dispatch subtotal** | **5** | **5** | **0** |
+
+| **Grand total (planning + dispatch)** | **17** | **17** | **0** |

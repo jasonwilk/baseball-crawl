@@ -41,6 +41,7 @@ def _make_pitcher(
         "k9": "9.0",
         "whip": "1.10",
         "games": 8,
+        "gs": 2,
         "ip_outs": ip_outs,
         "h": 20,
         "er": 5,

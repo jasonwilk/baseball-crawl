@@ -151,6 +151,7 @@ class TestReportHTMLOutput:
             "name": name,
             "jersey_number": "21",
             "games": 5,
+            "gs": 2,
             "ip_outs": 30,
             "h": 10,
             "er": 4,
@@ -180,7 +181,13 @@ class TestReportHTMLOutput:
         }
         html = render_report(_minimal_report_data([pitcher], workload))
 
-        assert 'class="last-outing-header"' in html
+        # Pin the actual rendered <th> element class attribute, not a bare
+        # "last-outing-header" substring -- that token also appears inside the
+        # inline JS selector (querySelectorAll('.last-outing-header')), so a
+        # substring check would pass even if the <th> markup class were removed.
+        # The template renders the header with an extra responsive class
+        # (``mob-hide-extra``); assert that exact element class string.
+        assert '<th class="last-outing-header mob-hide-extra">' in html
 
     def test_last_outing_cell_class_and_data_date(self) -> None:
         pitcher = self._make_pitcher()
@@ -195,8 +202,14 @@ class TestReportHTMLOutput:
         }
         html = render_report(_minimal_report_data([pitcher], workload))
 
-        assert 'class="last-outing-cell"' in html
-        assert 'data-date="2025-04-24"' in html
+        # Pin the actual rendered <td> element class attribute, not a bare
+        # "last-outing-cell" substring -- that token also appears inside the
+        # inline JS selector (querySelectorAll('.last-outing-cell')), so a
+        # substring check would pass even if the <td> markup class were removed.
+        # The template renders the cell with an extra responsive class
+        # (``mob-hide-extra``) plus the data-date attribute; assert that exact
+        # element opening tag.
+        assert '<td class="last-outing-cell mob-hide-extra" data-date="2025-04-24">' in html
 
     def test_p7d_column_present(self) -> None:
         pitcher = self._make_pitcher()

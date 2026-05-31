@@ -1,0 +1,14 @@
+---
+name: feedback-dont-rationalize-weak-assertions
+description: During AC verification apply the teeth test to weak assertions; distinguish a false-confidence inversion (defect) from a partial-teeth smoke check (acceptable)
+metadata:
+  type: feedback
+---
+
+During AC verification, when a test assertion looks weak (bare substring, document-wide `in html`, vacuous match), don't settle it by a "correct-by-intent" story OR by reflexively calling it a defect. Apply the objective, framing-independent teeth test: **"if I delete/regress the behavior this test claims to verify, does the assertion fail?"** Then classify what you find:
+- **False-confidence INVERSION = real defect, fix it.** The test claims to verify behavior X but its assertion is satisfied by unrelated thing Y. (E-230 AC-7: tests claimed to verify the ELEMENT class but passed on the JS selector token — must be element-pinned.)
+- **Partial-teeth SMOKE check = acceptable, leave it.** The test makes a weaker presence claim and the assertion does catch the gross failure of that claim. (E-230 `test_js_snippet_present`: also asserts `"<script>" in html`, so "script block + class tokens present" is a real smoke check; it catches the script being dropped. Strengthening to assert `querySelectorAll('.foo')` inside the extracted `<script>` block is hygiene, not a defect-class fix.)
+
+**Why:** During E-230 Phase 4b (2026-05-31) I whipsawed on the same two lines (test_report_workload.py:242-243): first PASS-by-rationalization ("correct-by-intent"), then FAIL-by-over-correction (called it the AC-7 defect, scoped a fix), then settled on LEAVE after applying the teeth test properly. The teeth test cut through it: those lines are a partial-teeth smoke check, NOT the AC-7 false-confidence inversion, and NOT the shape E-230-04's own testing.md inverse-rule forbids (that rule targets stale-contract / specific-behavior false confidence). Both my extremes were wrong; the classification is what matters. (The real AC-7 defect Codex named at :187/:205 WAS an inversion and was correctly fixed.)
+
+**How to apply:** Run the teeth test on weak assertions, then classify inversion-vs-smoke before ruling. Don't expand epic scope on a hygiene-grade partial-teeth nuance after the dust has settled — but don't silently wave it either: note it in History (and optionally a follow-up idea) so it's on record. Reserve the in-epic fix for true inversions and instances the project's own rules forbid. This is distinct from [[feedback-clean-reread-before-defect]] (misreading the file) — this is correctly reading a real weakness and classifying it right. See [[feedback_fix_real_findings]], [[feedback_acceptance_command_surface_scope]].

@@ -708,7 +708,7 @@
       <td class="heat-{{ pitcher._heat.k9 }}">{{ pitcher.k9 }}</td>
       <td class="heat-{{ pitcher._heat.whip }} mob-hide-extra">{{ pitcher.whip }}</td>
       <td class="col-sep">{{ pitcher.games }}</td>
-      <td class="mob-hide-extra">{% if pitcher.gs is none %}&mdash;{% else %}{{ pitcher.gs }}/{{ pitcher.games - pitcher.gs }}{% endif %}</td>
+      <td class="mob-hide-extra">{% if pitcher.gs is undefined or pitcher.gs is none %}&mdash;{% else %}{{ pitcher.gs }}/{{ pitcher.games - pitcher.gs }}{% endif %}</td>
       <td>{{ pitcher.ip_outs | ip_display }}</td>
       <td class="col-sep mob-hide">{{ pitcher.h }}</td>
       <td class="mob-hide">{{ pitcher.er }}</td>

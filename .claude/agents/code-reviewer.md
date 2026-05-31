@@ -59,6 +59,8 @@ Run tests as the first action before reading any changed files. Test failures ar
 
 **Cross-reference**: The test scope discovery pattern is defined in `.claude/rules/testing.md`. This step applies the same pattern from the reviewer's perspective -- verifying what the implementer should have already done.
 
+**Per-story default vs. closure gate**: Targeted test discovery (above) is the **per-story default** -- run only the tests that import from the changed modules, and only when assigned a per-story review (note the Worktree Review Test Execution Constraint: no worktree pytest for per-story review). The **full** `python -m pytest tests/` runs at exactly one point: the **Phase 5 Step 1b full-suite-green closure gate** (`.claude/skills/implement/SKILL.md`), executed against the **main checkout**, when the main session assigns that closure pass. Do not run the full suite during per-story review and do not self-initiate the closure pass.
+
 ### Step 2: Load context
 
 Read these files to establish the review baseline:
@@ -277,11 +279,13 @@ The review assignment will include worktree-absolute paths in the `## Files Chan
 
 ### Test Execution Constraint
 
-Do NOT run `pytest` from the epic worktree. The project uses an editable install whose meta path finder hardcodes the main checkout's `src/` path -- pytest from the worktree tests main's code, not the worktree's changes. Instead:
+Do NOT run `pytest` from the epic worktree for **per-story review**. The project uses an editable install whose meta path finder hardcodes the main checkout's `src/` path -- pytest from the worktree tests main's code, not the worktree's changes. Instead:
 
 - The implementer runs tests during implementation and reports results.
 - You verify AC compliance primarily through **file inspection** (reading changed source and test files).
 - If the implementer's reported test results are absent or incomplete, flag it as a MUST FIX finding ("test results not provided").
+
+**Closure-gate exception**: There is exactly one place you run the full `python -m pytest tests/` yourself -- the **Phase 5 Step 1b full-suite-green closure gate** (`.claude/skills/implement/SKILL.md`), which runs against the **main checkout** (where the epic's changes are authoritative at closure), not the worktree. The main session assigns that pass explicitly; do not self-initiate it.
 
 ## Anti-Patterns
 
