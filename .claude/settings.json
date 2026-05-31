@@ -23,18 +23,6 @@
             "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/epic-archive-check.sh",
             "timeout": 10,
             "statusMessage": "Checking for unarchived completed epics..."
-          },
-          {
-            "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/pytest-verbose.sh",
-            "timeout": 5,
-            "statusMessage": "Ensuring pytest verbose mode..."
-          },
-          {
-            "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/pytest-exitfirst-warn.sh",
-            "timeout": 5,
-            "statusMessage": "Checking for -x/--exitfirst..."
           }
         ]
       },

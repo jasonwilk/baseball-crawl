@@ -1,6 +1,6 @@
 # E-229: Remove RTK (Rust Token Killer) from baseball-crawl
 
-**Status**: READY
+**Status**: COMPLETED
 **Owner**: product-manager
 **Created**: 2026-05-30
 
@@ -52,9 +52,9 @@ output distortion.
 
 | ID | Title | Status | Agent Hint | Depends On |
 |----|-------|--------|-----------|-----------|
-| E-229-01 | Remove RTK provisioning lanes + delete smoke-check script/test | TODO | software-engineer | -- |
-| E-229-02 | Scrub RTK from context layer + drop pytest machinery (atomic) | TODO | claude-architect | -- |
-| E-229-03 | Remove RTK Integration section from codex-guide doc | TODO | docs-writer | -- |
+| E-229-01 | Remove RTK provisioning lanes + delete smoke-check script/test | DONE | software-engineer | -- |
+| E-229-02 | Scrub RTK from context layer + drop pytest machinery (atomic) | DONE | claude-architect | -- |
+| E-229-03 | Remove RTK Integration section from codex-guide doc | DONE | docs-writer | -- |
 
 Story files:
 - `E-229-01-provisioning-and-deletes.md`
@@ -345,6 +345,72 @@ provisioning and docs stories respectively.
   to exactly `docs/api/auth.md` + `docs/api/endpoints/post-auth.md` after the 3
   stories scrub their touchpoints, with the agent-memory/epics/.project/E-221-HANDOFF
   exclusions in place).
+- 2026-05-31: COMPLETED. All three stories DONE. Removed every in-repo RTK trace
+  across both install lanes (Claude-lane `devcontainer.json` clause + Codex-lane
+  `post-create-env.sh` block), the context layer (`.codex/config.toml`, `AGENTS.md`,
+  the claude-context-bridge skill, the implement skill bullet), and the operator
+  doc (`docs/admin/codex-guide.md` RTK Integration section). Deleted the
+  `check_codex_rtk.py` smoke-check + its test and cleaned `.gitignore`. Dropped the
+  pytest-verbose machinery as a FULL DROP (the `pytest-verbose.md` rule + both hooks
+  `pytest-verbose.sh`/`pytest-exitfirst-warn.sh` + their `settings.json`
+  deregistration, atomically in story 02) -- no replacement tooling added, per the
+  Open Questions decision. Recomputed `context-fundamentals/SKILL.md` context-budget
+  figures; during E-229-02 a user-authorized deviation beyond the original AC-10
+  reclassified `context-layer-guard` from universal->triggered (it is path-scoped,
+  not loaded every session), yielding the corrected 6-universal-file/303-line basis
+  (ambient ~614-886; worked-example Ambient 697 / Total 1,715). The epic-level
+  closing-grep gate PASSED: tree resolves to exactly two files / six lines, all the
+  `rtkn` JWT refresh-token field false positive (`docs/api/auth.md` 15/39/463,
+  `docs/api/endpoints/post-auth.md` 80/84/316), neither file modified.
+  PM closure-memory obligation executed: the E-224 archival note in
+  `product-manager/MEMORY.md` was reworded into an E-224->E-229 supersession note
+  carrying no live `rtk`/`pytest-verbose`/`rtk proxy` substring (verified: `rtk`
+  grep returns only the harmless `remove-rtk` epic-slug; `pytest-verbose` grep
+  returns zero).
+
+  **Documentation assessment**: does NOT fire. docs-writer scanned all
+  `docs/admin/` (12 files) + `docs/coaching/` (4 files) -- zero hits for
+  `rtk`/`check_codex_rtk`/`pytest-verbose`/`.tools/`. The only affected human-facing
+  doc, `docs/admin/codex-guide.md`, was handled by E-229-03. No additional doc
+  updates.
+
+  **Context-layer assessment** (per-trigger verdicts, main session evaluated):
+  - T1 (new convention/pattern/constraint): NO -- the epic REMOVED the pytest
+    `-v`/`-x` enforcement; Open Questions declined re-anchoring it.
+  - T2 (architectural decision w/ ongoing implications): NO additional codification
+    -- decisions are captured in the epic + the edited context-layer files.
+  - T3 (footgun/failure mode/boundary): NO standing rule -- the "don't trust a
+    single grep" caveat is intentionally E-229-scoped and archives with the epic;
+    the settings.json self-modification permission gate was a one-off harness
+    behavior only.
+  - T4 (change to agent behavior/routing/coordination): YES -- two PreToolUse Bash
+    hooks deregistered -- but fully codified WITHIN the epic by claude-architect
+    (story 02) and verified by the CR integration review; no additional
+    claude-architect dispatch required.
+  - T5 (domain knowledge for future epics): NO.
+  - T6 (new CLI command/workflow/procedure): NO -- nothing added; no workflow skill
+    added/renamed/retired, so no `/workflow-help` or CLAUDE.md Workflows change.
+  Net: the lone "yes" (T4) was self-codified by the epic; context-layer gate
+  satisfied, no extra dispatch.
+
+  **Codex Phase-4b finding + disposition**: Codex (exit 0, no higher-priority
+  bugs) flagged that `.claude/agent-memory/product-manager/MEMORY.md:39` still
+  referenced `pytest-verbose`/`rtk` via the E-224 note. Disposition: RESOLVED via
+  the PM closure-memory sweep above (covering BOTH tokens). This was the intentional
+  agent-memory carve-out the epic deferred to PM closure -- NOT a story-02
+  implementer defect (story 02 correctly made no agent-memory edits).
+
+### Dispatch Review Scorecard
+| Review Pass | Findings | Accepted | Dismissed |
+|---|---|---|---|
+| Per-story CR E-229-01 (round 1) | 0 | 0 | 0 |
+| Per-story CR E-229-02 (context-layer-guard double-count; user-authorized fix; round-2 APPROVED) | 1 | 1 | 0 |
+| Per-story CR E-229-03 (header `rtk` substring / AC-5; round-2 APPROVED) | 1 | 1 | 0 |
+| CR integration review (Phase 4a) | 0 | 0 | 0 |
+| Codex code review (Phase 4b; Priority-5, resolved at closure via memory sweep) | 1 | 1 | 0 |
+| **Total** | **3** | **3** | **0** |
+
+(The planning-phase Review Scorecard below reflects the 14 spec-review findings incorporated before dispatch; this Dispatch Review Scorecard covers the implementation/review phase.)
 
 ### Review Scorecard
 | Review Pass | Findings | Accepted | Dismissed |

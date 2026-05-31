@@ -1,7 +1,7 @@
 # E-229-03: Remove RTK Integration section from codex-guide doc
 
 ## Status
-`TODO`
+`DONE`
 
 ## Epic
 E-229

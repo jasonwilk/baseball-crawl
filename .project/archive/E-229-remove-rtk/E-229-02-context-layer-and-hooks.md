@@ -1,7 +1,7 @@
 # E-229-02: Scrub RTK from context layer + drop pytest machinery (atomic)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Epic
 E-229

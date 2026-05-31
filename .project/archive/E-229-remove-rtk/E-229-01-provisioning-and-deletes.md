@@ -1,7 +1,7 @@
 # E-229-01: Remove RTK provisioning lanes + delete smoke-check script/test
 
 ## Status
-`TODO`
+`DONE`
 
 ## Epic
 E-229

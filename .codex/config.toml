@@ -3,7 +3,3 @@
 
 model = "gpt-5.4"
 model_reasoning_effort = "xhigh"
-
-# RTK (Rust Token Killer) -- project-local binary for token-optimized shell output.
-# Binary lives at .tools/rtk/rtk (gitignored, installed by post-create-env.sh).
-# See AGENTS.md "RTK Usage" section for when and how to use it.
