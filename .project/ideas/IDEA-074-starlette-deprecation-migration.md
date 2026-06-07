@@ -1,7 +1,9 @@
 # IDEA-074: Migrate Starlette Deprecations Before a Framework Upgrade Breaks Them
 
 ## Status
-`CANDIDATE`
+`PROMOTED`
+
+Promoted to E-232 (2026-06-07). SE's AST-verified discovery audit corrected this idea's sketch: the real surface is 3 warning families (not 2) — the `TemplateResponse` arg-order half is only 2 call sites in `src/api/main.py` (not 3, and not in route modules), the per-request `cookies=` half is only 4 call sites in `tests/test_admin_merge.py` (not 11), plus a third pytest-asyncio loop-scope config nit. No Starlette/FastAPI version bump required.
 
 ## Summary
 One-line: Migrate the soon-to-be-removed Starlette APIs the test suite currently warns about (`TemplateResponse` arg order; per-request test-client `cookies=`) so a future Starlette upgrade does not break the app.
