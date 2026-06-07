@@ -18,6 +18,8 @@ Both PM and code-reviewer must approve before the staging boundary advances. PM 
 
 During planning, consultation, and multi-agent coordination, **main-session relay is the default channel for substantive content** (expert input, review findings, story handoffs); peer-to-peer SendMessage is reserved for lightweight acknowledgments only. Peer DM delivery has been observed to drop messages silently in prior epics, and main-session relay is the recovery path.
 
+**Concurrency under load (advisory).** When the harness emits load/capacity notices during dispatch, prefer serializing agent activity (fewer simultaneously-active agents) until the notices clear -- this is the output-integrity cross-check/retry/escalate discipline applied to dispatch concurrency, not a numeric cap or a config setting.
+
 ## Domain Work During Dispatch
 
 **Litmus test:** If you are inspecting what was built or assessing quality, you are doing domain work. Route it.
