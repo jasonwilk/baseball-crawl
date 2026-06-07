@@ -4,7 +4,7 @@
 [E-231: Harness Output-Reliability -- Detect, Defend, and Report](../E-231-harness-output-reliability/epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, `.claude/rules/dispatch-pattern.md` will carry a no-relay-of-unread-content rule: before relaying review findings -- or any tool-derived claim -- the relayer MUST have read the persisted source to completion, and MUST NOT relay content composed from output that was empty, truncated, or garbled. The rule is peer-checkable (a teammate receiving a relay may require the relayer to confirm the read) and is cross-pointed from the two skill triage-relay steps. This closes the orchestrator-relay failure class that no in-skill triage gate or always-loaded assert-unseen prohibition currently covers.

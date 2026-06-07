@@ -237,6 +237,8 @@ Use ABSOLUTE PATHS under this directory for ALL file operations.
 
 > **Boundary reminder:** If you are about to read source files, run `git log`, `grep`, or inspect the implementation to "quickly check" something -- stop. That is domain work regardless of size, and it must be routed to the appropriate agent. Route it through the review/verification sequence below (see Domain Work During Dispatch in `dispatch-pattern.md`).
 
+> **Relay integrity:** when relaying review findings (CR or Codex) between the reviewer and implementer, relay only findings you have read from the persisted source to completion -- never content composed from empty/truncated/garbled output (no-relay-of-unread-content rule, `.claude/rules/dispatch-pattern.md`).
+
 When the implementer reports completion (with `## Files Changed`):
 
 **Post-story path verification**: Check every file path in the implementer's `## Files Changed` section. Every path MUST start with the epic worktree pattern (`/tmp/.worktrees/baseball-crawl-E-NNN/`). If any path starts with `/workspaces/baseball-crawl/` (main checkout) or any other unexpected prefix, STOP and escalate to the user before proceeding. This catches agents that accidentally worked in the wrong directory.
@@ -398,6 +400,8 @@ Capture the exit code and output.
 #### Step 3: Triage and remediation (headless findings)
 
 When headless codex succeeds with findings:
+
+> **Relay integrity:** before presenting or relaying these findings, you MUST have read the persisted codex output to completion -- never relay content composed from empty/truncated/garbled output (no-relay-of-unread-content rule, `.claude/rules/dispatch-pattern.md`).
 
 1. Present the full codex findings to the user.
 2. Classify each finding as **valid** or **invalid** using the same triage rules as Phase 3 Step 5 item 3.

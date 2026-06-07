@@ -4,7 +4,7 @@
 [E-231: Harness Output-Reliability -- Detect, Defend, and Report](../E-231-harness-output-reliability/epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, every agent and the main session will load an always-on discipline rule that defines the tool-output failure taxonomy (empty / truncated / garbled), prescribes how to detect and respond to it (independent-channel cross-check, retry, escalate), and prohibits the two behaviors that turned channel flakiness into thrash during E-230: asserting/relaying unseen content, and co-batching a report with the same-batch command whose output it reports.

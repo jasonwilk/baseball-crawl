@@ -1,7 +1,7 @@
 # E-231: Harness Output-Reliability -- Detect, Defend, and Report
 
 ## Status
-`READY`
+`COMPLETED`
 <!-- Lifecycle: DRAFT → READY → ACTIVE → COMPLETED (or BLOCKED / ABANDONED) -->
 <!-- PM sets READY explicitly after: expert consultation done, all stories have testable ACs, quality checklist passed. -->
 <!-- Only READY and ACTIVE epics can be dispatched. -->
@@ -38,11 +38,11 @@ This very planning session reproduced the bug severely (intermittent empty Reads
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-231-01 | Output-integrity discipline rule | TODO | None | - |
-| E-231-02 | PostToolUse Edit/Write verification hook (anchor) | TODO | None | - |
-| E-231-03 | Force-read-findings-before-triage gate | TODO | None | - |
-| E-231-04 | Upstream harness bug-report artifact | TODO | None | - |
-| E-231-05 | Relay-integrity rule (no relay of unread content) | TODO | None | - |
+| E-231-01 | Output-integrity discipline rule | DONE | None | claude-architect |
+| E-231-02 | PostToolUse Edit/Write verification hook (anchor) | DONE | None | claude-architect |
+| E-231-03 | Force-read-findings-before-triage gate | DONE | None | claude-architect |
+| E-231-04 | Upstream harness bug-report artifact | DONE | None | claude-architect |
+| E-231-05 | Relay-integrity rule (no relay of unread content) | DONE | None | claude-architect |
 
 ## Dispatch Team
 - claude-architect (owner -- implements all five stories)
@@ -101,6 +101,9 @@ The discipline rule (E-231-01) and the triage gate (E-231-03) cross-reference th
 - 2026-06-01: Set READY. Post-incorporation consistency sweep clean (no OLD-value drift; all NEW values present; committed cross-ref target `feedback_clean_reread_before_defect.md` confirmed to exist). Quality checklist passed: 4 vertical-slice stories, testable ACs, disjoint files (no parallel conflicts), all stories independent (any-order), expert consultation done (CA design pass + SE advisory on the E-231-02 predicate).
 - 2026-06-01: Added E-231-05 (relay-integrity rule) post-READY, growing the epic 4→5 stories. Closes the orchestrator-relay fabrication gap surfaced during this very planning session (review findings composed from unread output relayed as if from Codex, twice) -- a failure class not covered by E-231-03 (in-skill triage gate) or E-231-01 (always-loaded assert-unseen prohibition). CA-designed, PM-framed ACs; user-approved. Reconciled story-count references (Overview, Dispatch Team, Story independence) and added a 5th Success Criteria bullet; consistency sweep clean. E-231-05 did NOT go through the original Codex spec-review pass -- the scorecard's Codex row is left at the original four-story pass to stay honest. Epic stays READY. (Companion decision: the concurrency-cap addition was approved as a separate live advisory load-notice line in `dispatch-pattern.md`, implemented directly by CA outside this epic -- not an E-231 story.)
 - 2026-06-07: Codex re-review (5-story) found 3 findings (1 P1, 1 P2, 1 P3), all accepted and fixed: F1 E-231-04 AC-1 reworded to story-local outcome; F2 E-231-05 AC-6 two-vs-three cross-pointer ambiguity resolved; F3 E-231-04 Context 'three'->'four' stories. Epic stays READY.
+- 2026-06-07: COMPLETED. All five stories implemented by claude-architect and AC-verified by PM. Delivered the detect-and-defend layer for the harness output-reliability failure: (01) an always-loaded `paths:"**"` output-integrity discipline rule (`.claude/rules/tool-output-integrity.md`) naming the empty/truncated/garbled taxonomy with cross-check/retry/escalate protocol and the assert-unseen + co-batch prohibitions; (02 anchor) the project's first PostToolUse hook (`.claude/hooks/edit-verify.sh` + `settings.json` `Edit|Write` registration) that re-reads each edit target, distinguishes transient flakiness (retry-then-warn, never hard-fail) from real-absent (top-level `decision:"block"` detect-and-signal, no rollback), and fails open-but-announced on missing jq; (03) a required pre-triage read-receipt gate in both review skills (`codex-review`, `codex-spec-review`); (05) a relay-integrity rule in `dispatch-pattern.md` plus three skill cross-pointers closing the orchestrator-relay fabrication surface; and (04) an honest upstream bug-report artifact (`.project/research/E-231-harness-repro/`) for the non-fixable transport root cause, using this very session as primary evidence. Review outcomes: CR integration review (Phase 4a) clean (0 findings); Codex code review (Phase 4b) 2 findings — P1 ACCEPTED (Write-path predicate hardened from substring to whole-file equality so a failed Write leaving stale surrounding bytes now blocks; Edit keeps substring; + `TestWriteEquality` regression tests), P2 DISMISSED (empty-VALUE no-op out of new_string/content-presence scope; trailing-newline-count mismatch a documented accepted limitation to preserve AC-8 no-false-alarm). All dispatch findings accepted/dismissed are reflected in the Dispatch Review Scorecard below.
+- 2026-06-07: Documentation assessment (Step 3) — **No documentation impact** (docs/admin, docs/coaching). E-231 is an agent-infrastructure / context-layer epic; it changes no operator setup/deployment (docs/admin) and no coaching workflow (docs/coaching). The hook, rules, and skill gates are self-documenting context-layer files owned by claude-architect, not docs-writer surfaces. Triggers (new feature/endpoint, architecture/deploy change, agent created/modified, DB schema change, user-interaction change to docs surfaces): all NO.
+- 2026-06-07: Context-layer assessment (Step 3a) — six triggers with explicit verdicts: (1) New convention/pattern/constraint? **YES** — output-integrity discipline, relay-integrity convention, read-receipt triage gate, and the first PostToolUse verification-hook pattern; codified by the epic's own stories (claude-architect authored tool-output-integrity.md, the dispatch-pattern.md relay paragraph, the two skill gates, and the hook); no residual uncodified work. (2) Architectural decision with ongoing implications? **YES** — first PostToolUse hook in the project (detect-and-signal-only; top-level `decision` JSON; fail-open-announced); captured in epic Technical Notes + the hook's header comments, which serve as the reference for future PostToolUse hooks; no residual work. (3) Footgun/failure mode/boundary discovered? **YES** — harness transport-layer output flakiness (empty/truncated/garbled); codified as the always-loaded tool-output-integrity.md rule + the upstream bug-report artifact; no residual work. (4) Change to agent behavior/routing/coordination? **YES** — relay-integrity rule on the orchestrator relay surface, read-receipt triage gate, and an always-loaded discipline binding every agent each session; codified in the delivered files; no residual work. (5) Domain knowledge for future epics? **NO** (no baseball/API/data-model knowledge surfaced). (6) New CLI command/workflow/operational procedure? **NO** (no new bb command; the two review skills were modified, not added/renamed/retired, so no /workflow-help or CLAUDE.md Workflows change needed). **Conclusion:** Triggers 1–4 fire, but in every case the codification IS the epic's own delivered context-layer files — claude-architect authored them as the five stories. This is expected for a context-layer epic whose deliverables are themselves the codifications. **No residual claude-architect codification is required before archival.**
 
 ### Review Scorecard
 | Review Pass | Findings | Accepted | Dismissed |
@@ -110,3 +113,17 @@ The discipline rule (E-231-01) and the triage gate (E-231-03) cross-reference th
 | **Total** | **8** | **8** | **0** |
 
 Notes: Only one review pass ran this session. No internal CR spec-audit pass ran -- CA's design pass and the main session's cross-channel verification substituted. Both READY blockers were P1 Codex findings (F1, F2), both fixed.
+
+### Dispatch Review Scorecard
+| Review Pass | Findings | Accepted | Dismissed |
+|---|---|---|---|
+| Per-story CR — E-231-01 | 0 | 0 | 0 |
+| Per-story CR — E-231-02 | 1 | 1 | 0 |
+| Per-story CR — E-231-03 | 0 | 0 | 0 |
+| Per-story CR — E-231-04 | 1 | 1 | 0 |
+| Per-story CR — E-231-05 | 0 | 0 | 0 |
+| CR integration review (Phase 4a) | 0 | 0 | 0 |
+| Codex code review (Phase 4b) | 2 | 1 | 1 |
+| **Total** | **4** | **3** | **1** |
+
+Notes: E-231-01/03/05 were PM-only context-layer prose stories (no CR per the context-layer CR-skip). E-231-02 (executable hook) and E-231-04 (research artifact) received CR. Per-story CR findings: E-231-02 = SE-surfaced transient-read gap (transient retry now wraps the exact content read the presence test consumes; accepted+fixed, CR APPROVED rounds 1 & 2); E-231-04 = CR SHOULD-FIX SE-attribution correction (accepted+fixed, APPROVED round 2). Phase 4a CR integration review over the full epic diff was clean. Phase 4b Codex: P1 ACCEPTED (Write-path substring→whole-file-equality hardening + TestWriteEquality regression tests), P2 DISMISSED (empty-VALUE no-op out of scope; trailing-newline-count a documented accepted limitation to preserve AC-8 no-false-alarm).

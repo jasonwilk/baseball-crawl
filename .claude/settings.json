@@ -48,6 +48,19 @@
           }
         ]
       }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/edit-verify.sh",
+            "timeout": 5,
+            "statusMessage": "Verifying edit landed..."
+          }
+        ]
+      }
     ]
   }
 }

@@ -4,7 +4,7 @@
 [E-231: Harness Output-Reliability -- Detect, Defend, and Report](../E-231-harness-output-reliability/epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, both review skills (`codex-review` and `codex-spec-review`) will carry a required pre-triage read-receipt gate: before any triage tool or action runs against a review result, the agent must persist the large review output to a file and confirm it read the FULL file (not a preview). This converts the read-findings-before-triage lesson into a structural gate.

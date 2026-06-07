@@ -4,7 +4,7 @@
 [E-231: Harness Output-Reliability -- Detect, Defend, and Report](../E-231-harness-output-reliability/epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, a PostToolUse hook will re-read the target of every Edit/Write and confirm the change actually landed -- catching the silent partial-edit-success class, the one failure mode with no behavioral workaround. The hook distinguishes transient flakiness (re-read empty while the file should exist -> retry once, then warn) from a genuinely-absent edit (file readable but the new content missing -> loud detect-and-signal failure), so legitimate edits are not falsely flagged under channel flakiness. PostToolUse fires after the write is already on disk; the hook detects and signals -- it does not and cannot prevent or roll back the write (see epic Technical Notes, PostToolUse capability).

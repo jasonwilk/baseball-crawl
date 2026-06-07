@@ -381,7 +381,11 @@ Capture the exit code and full output.
 
 ### Step 3: Triage findings
 
-Route the findings to PM and domain experts on the team for triage. Send the findings to PM via `SendMessage`:
+Route the findings to PM and domain experts on the team for triage.
+
+> **Relay integrity:** before relaying these findings, you MUST have read the persisted review output to completion -- never relay content composed from empty/truncated/garbled output (no-relay-of-unread-content rule, `.claude/rules/dispatch-pattern.md`).
+
+Send the findings to PM via `SendMessage`:
 
 ```
 Codex spec review findings for triage (Codex iteration [N] of 2):

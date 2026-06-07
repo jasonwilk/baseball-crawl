@@ -95,7 +95,17 @@ Examples:
 
 ### Step 4: Offer advisory triage
 
-After presenting findings, offer the user an advisory triage session:
+**Read-receipt gate — REQUIRED. Triage MUST NOT proceed until this is satisfied.**
+
+The headless script streams Codex's output to the Bash tool result, which is truncated to a *preview* when the result is large. Triaging off that preview is the motivating failure mode: in the E-230 dispatch a triage question was fired off a ~2KB preview of a ~373KB persisted Codex result, mischaracterizing four valid findings as "2 LOW already-adjudicated." Before ANY triage tool or action runs against the review result you MUST:
+
+1. **Persist** the full review output to a file (re-run the script redirecting stdout to e.g. `/tmp/codex-review-<epic-or-date>.txt`, or save the captured result there). Do NOT rely on the inline Bash preview.
+2. **Read the file to completion** and produce a complete digest of every finding (id/priority/file:line/the actual claim). Completeness of findings is the objective — account for EVERY finding, not a head/tail sample. You need not hold the raw bytes in context (a very large result would blow the red-zone budget — see `.claude/skills/context-fundamentals/SKILL.md`), but you must process every finding.
+3. **Emit a read-receipt derived from the actual file** — its line count (`wc -l <file>`) and its last line (`tail -n 1 <file>`) — before triage begins.
+
+The receipt is a deliberate speed-bump / discipline aid, NOT a cryptographic guarantee (it can in principle be produced without reading the middle), so the binding obligation is the complete finding digest in step 2; the receipt is the forcing function. This gate structurally enforces the always-loaded output-integrity rule (`.claude/rules/tool-output-integrity.md` — never assert or triage content not seen cleanly) and the clean-reread-before-defect discipline (`.claude/agent-memory/product-manager/feedback_clean_reread_before_defect.md`); it is the structural form of the read-findings-before-triage lesson.
+
+After the receipt and complete digest are satisfied, offer the user an advisory triage session:
 
 1. Read the Codex findings and identify which domains they touch (schema, implementation, API, coaching, documentation, agent infrastructure, UX).
 2. Map those domains to agents from CLAUDE.md's Agent Ecosystem table (ambient context at runtime -- do NOT use a hardcoded roster).

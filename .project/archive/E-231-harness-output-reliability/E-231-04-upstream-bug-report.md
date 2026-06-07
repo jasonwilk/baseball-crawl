@@ -4,7 +4,7 @@
 [E-231: Harness Output-Reliability -- Detect, Defend, and Report](../E-231-harness-output-reliability/epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the repository will contain an artifact capturing a clean reproduction of the harness output-reliability failure, framed for filing with Anthropic / Claude Code. Because the transport bug is Anthropic-internal and not fixable from this repo, this report is the honest disposition for the part we cannot fix.
