@@ -93,6 +93,7 @@ Review this list every 90 days, or when completing an epic. Ask:
 | [IDEA-072](IDEA-072-rtk-compression-retrospective-audit.md) | RTK Compression Retrospective Audit | CANDIDATE | 2026-08-28 |
 | [IDEA-073](IDEA-073-full-suite-ci-gate.md) | Full-Suite CI Gate (GitHub Actions or Equivalent) | CANDIDATE | 2026-08-29 |
 | [IDEA-074](IDEA-074-starlette-deprecation-migration.md) | Migrate Starlette Deprecations Before a Framework Upgrade Breaks Them | CANDIDATE | 2026-08-29 |
+| [IDEA-075](IDEA-075-harness-output-reliability.md) | Harness Output-Reliability Fix (stop the garble/drop/silent-edit thrash) → E-231 | PROMOTED | 2026-08-29 |
 
 ## Status Definitions
 
