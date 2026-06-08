@@ -4,7 +4,7 @@
 [E-233: LLM JSON Hardening (Reports Tier-2 Enrichment)](../E-233-llm-json-hardening/epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, `enrich_prediction` will parse the LLM response through the E-233-01 defensive helper instead of a bare `json.loads`, retry exactly once on a parse failure, and stop re-defaulting the model. The result: fenced/prose-wrapped responses that previously dropped Tier-2 now succeed, genuinely-bad responses still degrade cleanly to Tier-1, and the default-model literal lives in exactly one place.

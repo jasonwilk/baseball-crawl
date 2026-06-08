@@ -4,7 +4,7 @@
 [E-233: LLM JSON Hardening (Reports Tier-2 Enrichment)](../E-233-llm-json-hardening/epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, `src/llm/` will contain a pure, HTTP-free helper that extracts a JSON object (`dict`) from a raw LLM `content` string, recovering JSON from the real-world response shapes capable models emit (bare, fenced, prose-wrapped). This is the model-agnostic baseline defense against the silent Tier-2 loss documented in the epic; it is the foundation E-233-02 wires into `enrich_prediction`.

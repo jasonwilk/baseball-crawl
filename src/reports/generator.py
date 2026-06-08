@@ -27,6 +27,7 @@ from contextlib import closing
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from src.api.db import (
     build_pitcher_profiles,
@@ -910,6 +911,79 @@ def _query_plays_team_stats(
     }
 
 
+# ── Tier-2 enrichment status (operator observability, E-233-04) ──────────
+#
+# Structured statuses distinguishing the three Tier-2 outcomes so an operator
+# can detect when AI analysis was dropped rather than it vanishing silently.
+# Medium observability: log/operator-level only -- no coach-visible label.
+TIER2_SUCCESS = "success"
+TIER2_UNAVAILABLE_NO_KEY = "unavailable-no-key"
+TIER2_FAILED = "failed"
+
+if TYPE_CHECKING:
+    from src.reports.llm_analysis import EnrichedPrediction
+    from src.reports.starter_prediction import StarterPrediction
+
+
+def _run_tier2_enrichment(
+    starter_prediction: StarterPrediction | None,
+    pitching_history_rows: list[dict],
+    *,
+    team_record: str | None,
+    reference_date: date | None,
+    public_id: str,
+) -> tuple[EnrichedPrediction | None, str]:
+    """Run optional Tier-2 LLM enrichment, returning ``(prediction, status)``.
+
+    ``status`` is one of :data:`TIER2_SUCCESS`,
+    :data:`TIER2_UNAVAILABLE_NO_KEY`, or :data:`TIER2_FAILED`.  The ``failed``
+    status is **cause-agnostic** (TN-4): it is read from the ``except`` branch,
+    NOT from the exception type, so a parse failure after the retry, an
+    HTTP/transport error, or a ``response_format``-400 all map to the same
+    status.  The preserved WARNING carries the specific cause via ``exc_info``
+    for log triage.
+
+    Non-fatal contract (TN-2): on failure this returns ``(None, TIER2_FAILED)``
+    so the caller still renders the Tier-1 deterministic prediction.
+    """
+    from src.llm.openrouter import is_llm_available
+
+    if not is_llm_available():
+        logger.info(
+            "Tier-2 LLM enrichment unavailable (no API key) for "
+            "public_id=%s; rendering Tier-1 only. status=%s",
+            public_id,
+            TIER2_UNAVAILABLE_NO_KEY,
+        )
+        return None, TIER2_UNAVAILABLE_NO_KEY
+
+    try:
+        from src.reports.llm_analysis import enrich_prediction
+
+        enriched = enrich_prediction(
+            starter_prediction,
+            pitching_history_rows,
+            team_record=team_record,
+            reference_date=reference_date,
+        )
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "Tier-2 LLM enrichment failed for public_id=%s; "
+            "continuing with Tier 1 only. status=%s",
+            public_id,
+            TIER2_FAILED,
+            exc_info=True,
+        )
+        return None, TIER2_FAILED
+
+    logger.info(
+        "Tier-2 LLM enrichment succeeded for public_id=%s. status=%s",
+        public_id,
+        TIER2_SUCCESS,
+    )
+    return enriched, TIER2_SUCCESS
+
+
 def generate_report(gc_url: str) -> GenerationResult:
     """Generate a standalone scouting report for a GameChanger team.
 
@@ -1180,33 +1254,22 @@ def generate_report(gc_url: str) -> GenerationResult:
                         league=league,
                     )
 
-                    # Tier 2: LLM enrichment (optional, non-fatal)
-                    from src.llm.openrouter import is_llm_available
-
-                    if is_llm_available():
-                        try:
-                            from src.reports.llm_analysis import enrich_prediction
-
-                            team_record_str = None
-                            if record:
-                                team_record_str = (
-                                    f"{record['wins']}-{record['losses']}"
-                                )
-                            enriched_prediction = enrich_prediction(
-                                starter_prediction,
-                                pitching_history_rows,
-                                team_record=team_record_str,
-                                reference_date=date.fromisoformat(
-                                    generated_at[:10],
-                                ),
-                            )
-                        except Exception:  # noqa: BLE001
-                            logger.warning(
-                                "LLM enrichment failed for public_id=%s; "
-                                "continuing with Tier 1 only.",
-                                public_id,
-                                exc_info=True,
-                            )
+                    # Tier 2: LLM enrichment (optional, non-fatal).  The helper
+                    # emits an operator-detectable status for each of the three
+                    # outcomes (success / unavailable-no-key / failed) and
+                    # preserves the non-fatal contract (TN-2).
+                    team_record_str = None
+                    if record:
+                        team_record_str = (
+                            f"{record['wins']}-{record['losses']}"
+                        )
+                    enriched_prediction, _tier2_status = _run_tier2_enrichment(
+                        starter_prediction,
+                        pitching_history_rows,
+                        team_record=team_record_str,
+                        reference_date=date.fromisoformat(generated_at[:10]),
+                        public_id=public_id,
+                    )
 
             # Plays-derived stats
             plays_pitching = _query_plays_pitching_stats(

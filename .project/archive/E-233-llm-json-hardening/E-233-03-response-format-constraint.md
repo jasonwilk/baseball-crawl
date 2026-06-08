@@ -4,7 +4,7 @@
 [E-233: LLM JSON Hardening (Reports Tier-2 Enrichment)](../E-233-llm-json-hardening/epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, `query_openrouter` will accept an additive, optional `response_format` parameter that callers can use to request constrained JSON output, `enrich_prediction` will opt into it, and the code-default model slug in `openrouter.py` will use OpenRouter's canonical form. This is the belt-and-suspenders request-side defense layered on top of the E-233-01/02 parser baseline.

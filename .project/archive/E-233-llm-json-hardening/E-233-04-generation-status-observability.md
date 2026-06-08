@@ -4,7 +4,7 @@
 [E-233: LLM JSON Hardening (Reports Tier-2 Enrichment)](../E-233-llm-json-hardening/epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, report generation will emit a structured status distinguishing the three Tier-2 outcomes — `success`, `unavailable-no-key`, and `failed` — so an operator can detect when AI analysis was dropped rather than it vanishing silently. This addresses the "worse half" of the bug: today, silent Tier-2 loss is invisible.

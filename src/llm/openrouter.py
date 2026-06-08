@@ -9,7 +9,7 @@ Environment variables:
                          by ``is_llm_available()`` so callers can skip
                          Tier 2 silently.
     OPENROUTER_MODEL     Optional model override.  Defaults to
-                         ``anthropic/claude-haiku-4-5-20251001``.
+                         ``anthropic/claude-haiku-4.5``.
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ import httpx
 logger = logging.getLogger(__name__)
 
 _OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-_DEFAULT_MODEL = "anthropic/claude-haiku-4-5-20251001"
+_DEFAULT_MODEL = "anthropic/claude-haiku-4.5"
 _TIMEOUT_SECONDS = 30
 
 
@@ -41,6 +41,7 @@ def query_openrouter(
     model: str | None = None,
     max_tokens: int = 1024,
     temperature: float = 0.3,
+    response_format: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Send a chat completion request to OpenRouter.
 
@@ -48,9 +49,14 @@ def query_openrouter(
         messages: Chat messages in OpenAI format
             (``[{"role": "system", "content": "..."}, ...]``).
         model: Model identifier.  Defaults to ``OPENROUTER_MODEL`` env var,
-            then ``anthropic/claude-haiku-4-5-20251001``.
+            then ``anthropic/claude-haiku-4.5``.
         max_tokens: Maximum tokens in the response.
         temperature: Sampling temperature.
+        response_format: Optional OpenRouter ``response_format`` constraint
+            (e.g. ``{"type": "json_object"}``).  When ``None`` (the default),
+            the key is OMITTED from the request body entirely, so callers that
+            do not pass it produce the exact same body as before.  Support is
+            model-dependent and additive -- never assumed sufficient.
 
     Returns:
         Parsed JSON response body from OpenRouter.
@@ -74,6 +80,8 @@ def query_openrouter(
         "max_tokens": max_tokens,
         "temperature": temperature,
     }
+    if response_format is not None:
+        body["response_format"] = response_format
 
     try:
         with httpx.Client(timeout=_TIMEOUT_SECONDS) as client:

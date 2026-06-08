@@ -2461,3 +2461,103 @@ class TestPublicIdBackfill:
         ).fetchone()
         verify_conn.close()
         assert row[0] is None
+
+
+# ── Tier-2 enrichment status observability (E-233-04) ────────────────────
+
+
+class TestTier2EnrichmentStatus:
+    """The three TN-4 outcomes are distinguishable and operator-detectable."""
+
+    def _args(self):
+        # The helper does not inspect these; the patched enrich_prediction /
+        # is_llm_available drive the outcome.
+        return (object(), [{"game_id": "g1"}])
+
+    def test_unavailable_no_key_status(self):
+        """is_llm_available() False → (None, unavailable-no-key); not a failure."""
+        from src.reports.generator import (
+            TIER2_UNAVAILABLE_NO_KEY,
+            _run_tier2_enrichment,
+        )
+
+        pred, history = self._args()
+        with patch("src.llm.openrouter.is_llm_available", return_value=False):
+            result, status = _run_tier2_enrichment(
+                pred, history,
+                team_record="10-2", reference_date=None, public_id="abc123",
+            )
+
+        assert result is None
+        assert status == TIER2_UNAVAILABLE_NO_KEY
+
+    def test_success_status(self):
+        """enrich_prediction returns → (EnrichedPrediction, success)."""
+        from src.reports.generator import TIER2_SUCCESS, _run_tier2_enrichment
+
+        pred, history = self._args()
+        sentinel = object()  # helper returns enrich_prediction's result verbatim
+        with (
+            patch("src.llm.openrouter.is_llm_available", return_value=True),
+            patch(
+                "src.reports.llm_analysis.enrich_prediction",
+                return_value=sentinel,
+            ) as mock_enrich,
+        ):
+            result, status = _run_tier2_enrichment(
+                pred, history,
+                team_record="10-2", reference_date=None, public_id="abc123",
+            )
+
+        assert result is sentinel
+        assert status == TIER2_SUCCESS
+        mock_enrich.assert_called_once()
+
+    def test_failed_status_on_llmerror(self, caplog):
+        """enrich_prediction raises LLMError → (None, failed); WARNING + exc_info (AC-2)."""
+        import logging
+
+        from src.llm.openrouter import LLMError
+        from src.reports.generator import TIER2_FAILED, _run_tier2_enrichment
+
+        pred, history = self._args()
+        with (
+            patch("src.llm.openrouter.is_llm_available", return_value=True),
+            patch(
+                "src.reports.llm_analysis.enrich_prediction",
+                side_effect=LLMError("unparseable after retry"),
+            ),
+            caplog.at_level(logging.WARNING, logger="src.reports.generator"),
+        ):
+            result, status = _run_tier2_enrichment(
+                pred, history,
+                team_record="10-2", reference_date=None, public_id="abc123",
+            )
+
+        # AC-5: non-fatal — caller still renders Tier-1 (prediction is None).
+        assert result is None
+        assert status == TIER2_FAILED
+        # AC-2: WARNING preserved with exc_info carrying the specific cause.
+        warnings = [r for r in caplog.records if r.levelname == "WARNING"]
+        assert len(warnings) == 1
+        assert warnings[0].exc_info is not None
+
+    def test_failed_status_is_cause_agnostic(self):
+        """A non-LLMError exception ALSO maps to failed (read from except, not type)."""
+        from src.reports.generator import TIER2_FAILED, _run_tier2_enrichment
+
+        pred, history = self._args()
+        with (
+            patch("src.llm.openrouter.is_llm_available", return_value=True),
+            patch(
+                "src.reports.llm_analysis.enrich_prediction",
+                side_effect=RuntimeError("unexpected boom"),
+            ),
+        ):
+            result, status = _run_tier2_enrichment(
+                pred, history,
+                team_record="10-2", reference_date=None, public_id="abc123",
+            )
+
+        assert result is None
+        assert status == TIER2_FAILED

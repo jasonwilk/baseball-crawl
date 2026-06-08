@@ -1,7 +1,7 @@
 # E-233: LLM JSON Hardening (Reports Tier-2 Enrichment)
 
 ## Status
-`READY`
+`COMPLETED`
 
 ## Overview
 Standalone report generation intermittently loses its Tier-2 LLM "predicted starter" narrative because the JSON parser does a bare `json.loads` that cannot tolerate the markdown code fences or surrounding prose that capable models occasionally emit even when instructed not to. Failures degrade silently to the Tier-1 deterministic prediction with no operator-visible signal. This epic hardens the parser (model-agnostic), constrains the request, adds a single retry, and makes the silent degradation operator-detectable — so coaches stop getting inconsistent reports for invisible reasons.
@@ -45,10 +45,10 @@ Scope confirmed with the user: reports flow only; observability is operator/log-
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-233-01 | Pure model-agnostic JSON-extraction helper in `src/llm/` | TODO | None | - |
-| E-233-02 | Harden `enrich_prediction`: defensive parse + one retry + dedup default model | TODO | E-233-01 | - |
-| E-233-03 | Constrain the request: `response_format` pass-through + canonical code-default slug | TODO | E-233-02 | - |
-| E-233-04 | Operator-detectable Tier-2 generation status (Medium observability) | TODO | E-233-02 | - |
+| E-233-01 | Pure model-agnostic JSON-extraction helper in `src/llm/` | DONE | None | software-engineer |
+| E-233-02 | Harden `enrich_prediction`: defensive parse + one retry + dedup default model | DONE | E-233-01 | software-engineer |
+| E-233-03 | Constrain the request: `response_format` pass-through + canonical code-default slug | DONE | E-233-02 | software-engineer |
+| E-233-04 | Operator-detectable Tier-2 generation status (Medium observability) | DONE | E-233-02 | software-engineer |
 
 ## Dispatch Team
 - software-engineer
@@ -124,7 +124,14 @@ api-scout confirmed (live `GET /api/v1/models`): `anthropic/*` models honor `res
 - 2026-06-08: Phase 4 Codex spec review (5 findings) — ALL 5 ACCEPTED and incorporated. C1 (P1, SE-confirmed): failure-status taxonomy collapsed to cause-agnostic `{success, unavailable-no-key, failed}` — `failed` = `enrich_prediction` raised `LLMError` for any reason, read from the generator `except` branch (cause in WARNING `exc_info`, not the status); S4 stays blocked-by-S2-only with no S3 ordering dependency (TN-3/TN-4/TN-8, S4 AC-1/AC-2). C2 (P1): purged stale live-verify/escape-hatch slug language from Background/Open Questions/S3 Notes (History append-only, superseded) — earlier "sweep clean" claim was wrong; corrected via literal re-read per the clean-reread discipline. C3 (P2): S3 AC-1 "unchanged" narrowed to the response_format-key presence, with the `_DEFAULT_MODEL`/test-fallback change called out. C4 (P2): S1 AC-7 adds the mid-object fixture. C5 (P3): TN-6 patch-target reference corrected (httpx in test_openrouter.py; query_openrouter in test_llm_analysis.py). Final consistency sweep clean.
 - 2026-06-08: Phase 3 internal review complete (CR + SE + api-scout, 8 deduplicated findings). ALL 8 ACCEPTED and incorporated: F-A (`model_used` from `response["model"]`, not the constant — TN-5/S2 AC-5); F-B (slug fixed to verified literal `anthropic/claude-haiku-4.5`, live-verify AC replaced — the dated default was a broken string — TN-5/S3 AC-4); F-C (response_format rides initial+retry via a single invocation point — TN-3/S2 AC-8/S3 AC-3); F-D (remove now-unused `import os`/`import json` — S2); F-E (extract `_run_tier2_enrichment` helper for testability — S4); F-F (lock `extract_json_object(content: str) -> dict` + `LLMError`; string-aware brace extraction + None/brace fixtures — TN-1/TN-6/S1); F-G (non-empty narrative flagged deliberate — S2 Notes); F-H (AC-6 reworded to "remove the 512 override"; default already 1024 — S2). Post-incorporation consistency sweep clean. Refinement complete. (Note: this Phase-3 entry precedes the Phase-4 entry above it chronologically; both are same-day 2026-06-08.)
 - 2026-06-08: Phase 4 Codex iteration 2 (final/circuit-breaker) — 2 emergent P2 findings, both ACCEPTED. D2: the C5 test-seam correction had not propagated — aligned S2 AC-4/AC-7 (patch `query_openrouter`), S3 AC-2 (explicitly patch httpx for the wire-format assertion), and the epic Success Criterion (L42, layered seam) with TN-6; S1 stays pure/no-HTTP. D1: baseball-coach consulted on the two coach-facing changes (empty-narrative→Tier-1 fallback; operator-only/no-coach-label) — coach CONCURRED, NO AC changes; consulted-experts list updated (Background), and coach's forward-looking trust-erosion flag captured as a vision signal in `docs/vision-signals.md`. Final consistency sweep clean. Epic FINAL.
-- 2026-06-08: Set to **READY** (user-approved). All review rounds closed; review scorecard below.
+- 2026-06-08: Set to **READY** (user-approved). All review rounds closed; planning review scorecard below.
+- 2026-06-08: Dispatch executed. Stories 01→02→(03→04) implemented serially by software-engineer; all four passed per-story PM AC verification + code-reviewer review. Per-story dispositions: E-233-01 CR APPROVED (json5 note = no change); E-233-02 CR APPROVED after a comment-only cleanup (a "per AC-6" mislabel on the pre-existing confidence_adjustment discard, PM-flagged during AC verification); E-233-03 CR APPROVED incl. an `.env.example` doc fix that rode in; E-233-04 CR APPROVED at round 2 (a type-hint MUST FIX resolved).
+- 2026-06-08: Phase 4 dispatch review ("and review" chain). **4a CR integration review over the full epic diff: 0 findings (clean).** **4b Codex review: 3 findings, ALL ACCEPTED (user-approved triage):** P1 — parser drops the prose-with-braces leading shape → SE remediating (`src/llm/json_extract.py` + test); P2 — retry gate over-broad (retried malformed response envelopes, not just unparseable content) → SE remediating (`src/reports/llm_analysis.py` + test); P3 — `.claude/rules/architecture-subsystems.md:77` stale LLM Package note (old slug, no helper/`response_format` mention) → routed to claude-architect as part of the Step 3a context-layer assessment at closure (context-layer file, not SE-owned). Remediation + re-confirm in progress; closure assessments and COMPLETED flip pending.
+- 2026-06-08: Phase 4 remediation complete (P1+P2 by SE, CR APPROVED; PM re-verified both against E-233-01/E-233-02 ACs — no AC regression). All four stories DONE; epic Stories table + story files all DONE.
+- 2026-06-08: **Documentation assessment (Step 3): No documentation impact.** The only coach-facing reference (`docs/coaching/standalone-reports.md:53`, the "Scouting Analysis" narrative block) remains accurate — coach-facing report behavior is unchanged per the epic Non-Goal (no coach-visible label); the empty-narrative→Tier-1-fallback change (F-G) is already covered by the doc's "when not present, only the narrative is missing" wording. No existing `docs/admin/` operations/troubleshooting doc documents LLM/OpenRouter/Tier-2/report-generation (grep confirmed), so nothing is rendered stale; the new operator-detectable generation status is log/operator-level only (Medium) — an internal log signal, not a documented procedure. The default-slug + `.env.example` change rode in-epic (E-233-03) and is config, not docs.
+- 2026-06-08: **Context-layer assessment (Step 3a) — six-trigger verdicts:** (1) New convention/pattern — **YES** (reusable `extract_json_object` helper in `src/llm/`; extraction-vs-domain-validation separation). (2) Architectural decision — **YES** (`response_format` json_object baseline; single-source canonical default slug `anthropic/claude-haiku-4.5`). (3) Footgun/failure mode — **YES** (fenced-JSON silent Tier-2 loss; dated slug not a live id; now operator-detectable via generation status). (4) Agent behavior/routing — **NO**. (5) Domain knowledge for future agents — **NO** (api-scout `response_format` findings already in epic record / `docs/api`). (6) New CLI/workflow/procedure — **NO**. Triggers 1–3 fire → claude-architect updating `.claude/rules/architecture-subsystems.md` (and evaluating `http-discipline.md`) in the worktree; Codex P3 is subsumed here.
+- 2026-06-08: claude-architect context-layer edits landed — `.claude/rules/architecture-subsystems.md` updated (LLM Package note: reusable `extract_json_object` helper, extraction-vs-domain-validation separation, `response_format` json_object baseline, canonical default slug `anthropic/claude-haiku-4.5`, operator-detectable Tier-2 generation status); `http-discipline.md` evaluated, no change needed.
+- 2026-06-08: **COMPLETED.** All 4 stories DONE; the Tier-2 LLM JSON parse is now model-agnostic (5 real-world shapes + prose-with-braces recover; clean-fail otherwise), constrained by `response_format` json_object on initial + retry, with a single retry and an operator-detectable generation status (success/unavailable-no-key/failed). Single-source canonical default slug. 15 planning + 6 dispatch findings, all accepted. No documentation impact; context-layer triggers 1–3 codified. Pending: full-suite green gate at closure, then archive.
 
 ### Review Scorecard
 | Review Pass | Findings | Accepted | Dismissed |
@@ -135,6 +142,15 @@ api-scout confirmed (live `GET /api/v1/models`): `anthropic/*` models honor `res
 | (Phase 3 deduplicated total) | 8 | 8 | 0 |
 | Codex iteration 1 | 5 | 5 | 0 |
 | Codex iteration 2 | 2 | 2 | 0 |
-| **Total** | **15** | **15** | **0** |
+| **Planning total** | **15** | **15** | **0** |
+| Dispatch — per-story CR E-233-01 | 0 | 0 | 0 |
+| Dispatch — per-story CR E-233-02 | 1 | 1 | 0 |
+| Dispatch — per-story CR E-233-03 | 1 | 1 | 0 |
+| Dispatch — per-story CR E-233-04 | 1 | 1 | 0 |
+| Dispatch — Phase 4a CR integration | 0 | 0 | 0 |
+| Dispatch — Phase 4b Codex | 3 | 3 | 0 |
+| **Dispatch total** | **6** | **6** | **0** |
+
+Per-story CR dispositions: E-233-01 clean (json5 note = no change). E-233-02 = 1 comment-only cleanup (a "per AC-6" mislabel on the pre-existing `confidence_adjustment` discard, PM-flagged at AC verification), accepted. E-233-03 = 1 SHOULD FIX (`.env.example` doc fix), accepted. E-233-04 = 1 MUST FIX (type hints), accepted, resolved round 2. Phase 4b Codex = P1 (parser prose-with-braces), P2 (retry-gate over-broad), P3 (`architecture-subsystems.md:77` stale LLM note) — all accepted; P1/P2 remediated by SE (re-verified by PM, no AC regression to the DONE stories 01/02), P3 codified by claude-architect under the context-layer assessment.
 
 Phase 3 operative total is the deduplicated count of 8 unified findings (F-A…F-H); the raw per-reviewer counts (CR=5 + SE=7 + api-scout=0) deduplicated to those 8. Total = 8 (Phase 3 dedup) + 5 (Codex iter 1) + 2 (Codex iter 2) = 15, all accepted, none dismissed.

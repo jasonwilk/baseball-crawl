@@ -9,12 +9,11 @@ availability via ``is_llm_available()`` and handle ``LLMError`` as non-fatal.
 from __future__ import annotations
 
 import datetime
-import json
 import logging
-import os
 from dataclasses import dataclass
 from typing import Any
 
+from src.llm.json_extract import extract_json_object
 from src.llm.openrouter import LLMError, query_openrouter
 from src.reports.starter_prediction import (
     StarterPrediction,
@@ -227,8 +226,6 @@ def enrich_prediction(
     Raises:
         LLMError: On API failures or malformed responses.
     """
-    model = os.environ.get("OPENROUTER_MODEL", "anthropic/claude-haiku-4-5-20251001")
-
     if reference_date is None:
         reference_date = datetime.date.today()
 
@@ -246,38 +243,79 @@ def enrich_prediction(
         {"role": "user", "content": user_prompt},
     ]
 
-    response = query_openrouter(messages, model=model, max_tokens=512, temperature=0.3)
+    def _invoke(temperature: float) -> dict[str, Any]:
+        """Single OpenRouter invocation point for the initial call and retry.
 
-    # Extract content from OpenRouter response
+        Both the initial call and the TN-3 retry route through here so they
+        share identical kwargs, varying only ``temperature``.  The
+        ``response_format={"type": "json_object"}`` constraint (TN-7) is
+        applied here so it rides every invocation, including the retry (F-C).
+        It is additive/model-dependent -- never assumed sufficient -- so the
+        E-233-01 parser and the TN-3 retry remain the model-agnostic baseline;
+        the system prompt's JSON instruction is also retained (json_object
+        guarantees valid JSON, not the prompt's intended shape).  No ``model``
+        kwarg is passed: ``query_openrouter`` owns default-model resolution
+        (TN-5), and ``max_tokens`` is left at its 1024 default (F-H).
+        """
+        return query_openrouter(
+            messages,
+            temperature=temperature,
+            response_format={"type": "json_object"},
+        )
+
+    def _content_of(resp: dict[str, Any]) -> str:
+        """Pull the message ``content`` string out of an OpenRouter envelope.
+
+        Raises ``LLMError`` on a malformed envelope.  This is NOT a JSON parse
+        failure, so -- like a transport error -- it must NOT trigger the TN-3
+        retry; only ``extract_json_object`` failures are retried.
+        """
+        try:
+            return resp["choices"][0]["message"]["content"]
+        except (KeyError, IndexError, TypeError) as exc:
+            raise LLMError(f"Unexpected response structure: {exc}") from exc
+
+    # Initial call, then exactly one retry scoped to JSON *extraction* failure
+    # (TN-3).  HTTP/transport errors (from ``_invoke``) and malformed-envelope
+    # errors (from ``_content_of``) propagate WITHOUT a retry -- only
+    # ``extract_json_object`` failures are retried.
+    response = _invoke(0.3)
+    content = _content_of(response)
     try:
-        content = response["choices"][0]["message"]["content"]
-    except (KeyError, IndexError, TypeError) as exc:
-        raise LLMError(f"Unexpected response structure: {exc}") from exc
+        parsed = extract_json_object(content)
+    except LLMError:
+        response = _invoke(0.0)
+        content = _content_of(response)
+        parsed = extract_json_object(content)  # re-raises if still unparseable
 
-    # Parse JSON from content
-    try:
-        parsed = json.loads(content)
-    except (json.JSONDecodeError, TypeError) as exc:
-        raise LLMError(f"LLM response is not valid JSON: {exc}") from exc
-
-    # Validate required fields
+    # Domain validation stays here (out of src/llm extraction scope).
     if "narrative" not in parsed:
         raise LLMError(
             "LLM response missing required 'narrative' field"
         )
-    if not isinstance(parsed["narrative"], str):
-        raise LLMError("LLM 'narrative' field is not a string")
-
     narrative = parsed["narrative"]
+    if not isinstance(narrative, str):
+        raise LLMError("LLM 'narrative' field is not a string")
+    if not narrative.strip():
+        raise LLMError("LLM 'narrative' field is empty")
+
     bullpen_sequence = parsed.get("bullpen_sequence")
     if bullpen_sequence is not None and not isinstance(bullpen_sequence, str):
         bullpen_sequence = str(bullpen_sequence)
 
-    # confidence_adjustment is intentionally discarded per AC-6
+    # confidence_adjustment is intentionally discarded
+
+    # model_used reflects the model the API actually used (F-A): read from the
+    # response body, not env or the shared constant.  Safe fallback if absent.
+    model_used = "unknown"
+    if isinstance(response, dict):
+        model_value = response.get("model")
+        if isinstance(model_value, str) and model_value:
+            model_used = model_value
 
     return EnrichedPrediction(
         base=prediction,
         narrative=narrative,
         bullpen_sequence=bullpen_sequence,
-        model_used=model,
+        model_used=model_used,
     )

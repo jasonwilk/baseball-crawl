@@ -106,7 +106,41 @@ class TestQueryOpenrouterHeaders:
         with patch.object(httpx.Client, "post", mock_post):
             query_openrouter(_MESSAGES)
 
-        assert captured["json"]["model"] == "anthropic/claude-haiku-4-5-20251001"
+        assert captured["json"]["model"] == "anthropic/claude-haiku-4.5"
+
+    def test_response_format_included_when_provided(self, monkeypatch):
+        """response_format appears in the request body when supplied (AC-2)."""
+        monkeypatch.setenv("OPENROUTER_API_KEY", "sk-test-key")
+        monkeypatch.delenv("OPENROUTER_MODEL", raising=False)
+
+        captured = {}
+
+        def mock_post(self, url, **kwargs):
+            captured["json"] = kwargs.get("json", {})
+            return httpx.Response(200, json=_VALID_RESPONSE)
+
+        with patch.object(httpx.Client, "post", mock_post):
+            query_openrouter(
+                _MESSAGES, response_format={"type": "json_object"}
+            )
+
+        assert captured["json"]["response_format"] == {"type": "json_object"}
+
+    def test_response_format_omitted_when_not_provided(self, monkeypatch):
+        """response_format key is absent from the body when not supplied (AC-2)."""
+        monkeypatch.setenv("OPENROUTER_API_KEY", "sk-test-key")
+        monkeypatch.delenv("OPENROUTER_MODEL", raising=False)
+
+        captured = {}
+
+        def mock_post(self, url, **kwargs):
+            captured["json"] = kwargs.get("json", {})
+            return httpx.Response(200, json=_VALID_RESPONSE)
+
+        with patch.object(httpx.Client, "post", mock_post):
+            query_openrouter(_MESSAGES)
+
+        assert "response_format" not in captured["json"]
 
     def test_posts_to_correct_url(self, monkeypatch):
         monkeypatch.setenv("OPENROUTER_API_KEY", "sk-test-key")
