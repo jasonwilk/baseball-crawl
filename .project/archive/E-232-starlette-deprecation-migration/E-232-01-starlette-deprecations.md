@@ -4,7 +4,7 @@
 [E-232: Clear the Test-Suite Deprecation Warning Surface (Starlette + pytest-asyncio)](../E-232-starlette-deprecation-migration/epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the app's two error-handler render calls in `src/api/main.py` use the request-first `TemplateResponse` signature instead of the deprecated name-first form, and the four deprecated per-request `cookies=` calls in `tests/test_admin_merge.py` set their CSRF cookie on the test-client instance instead. The two Starlette deprecation-warning families are eliminated without any framework version change.

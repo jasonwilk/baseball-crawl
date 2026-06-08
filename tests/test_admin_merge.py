@@ -383,10 +383,10 @@ class TestMergePost:
                     csrf = get_resp2.cookies.get("csrf_token", "")
                 # Step 2: POST with the token
                 post_data = {**data, "csrf_token": csrf}
+                c.cookies.set("csrf_token", csrf)
                 resp = c.post(
                     "/admin/teams/merge",
                     data=post_data,
-                    cookies={"csrf_token": csrf},
                     follow_redirects=False,
                 )
         return resp
@@ -479,10 +479,10 @@ class TestMergePost:
                     "csrf_token": csrf,
                 }
                 # POST returns 303 redirect to merge page with error in URL
+                c.cookies.set("csrf_token", csrf)
                 post_resp = c.post(
                     "/admin/teams/merge",
                     data=post_data,
-                    cookies={"csrf_token": csrf},
                     follow_redirects=False,
                 )
                 assert post_resp.status_code == 303
@@ -651,10 +651,10 @@ class TestAutoSyncAfterMerge:
                 get_resp = c.get("/admin/teams", follow_redirects=True)
                 csrf = get_resp.cookies.get("csrf_token", "")
                 post_data = {**data, "csrf_token": csrf}
+                c.cookies.set("csrf_token", csrf)
                 resp = c.post(
                     "/admin/teams/merge",
                     data=post_data,
-                    cookies={"csrf_token": csrf},
                     follow_redirects=False,
                 )
             # Stash mocks on response for inspection
@@ -804,10 +804,10 @@ class TestAutoSyncAfterMerge:
                     "team_ids_str": f"{id1},{id2}",
                     "csrf_token": csrf,
                 }
+                c.cookies.set("csrf_token", csrf)
                 resp = c.post(
                     "/admin/teams/merge",
                     data=post_data,
-                    cookies={"csrf_token": csrf},
                     follow_redirects=False,
                 )
 

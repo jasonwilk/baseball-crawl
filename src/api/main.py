@@ -113,7 +113,7 @@ _templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
 async def not_found_handler(request: Request, exc: Exception) -> HTMLResponse:
     """Render the 404 error page."""
     return _templates.TemplateResponse(
-        "errors/404.html", {"request": request}, status_code=404
+        request, "errors/404.html", status_code=404
     )
 
 
@@ -121,7 +121,7 @@ async def not_found_handler(request: Request, exc: Exception) -> HTMLResponse:
 async def server_error_handler(request: Request, exc: Exception) -> HTMLResponse:
     """Render the 500 error page."""
     return _templates.TemplateResponse(
-        "errors/500.html", {"request": request}, status_code=500
+        request, "errors/500.html", status_code=500
     )
 
 

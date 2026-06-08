@@ -1,7 +1,7 @@
 # E-232: Clear the Test-Suite Deprecation Warning Surface (Starlette + pytest-asyncio)
 
 ## Status
-`READY`
+`COMPLETED`
 
 ## Overview
 Migrate the small set of soon-to-be-removed framework APIs the pytest suite currently warns about — the legacy `TemplateResponse(name, {...})` arg order in the app's error handlers and the deprecated per-request `cookies=` form in one test file — and silence the unrelated pytest-asyncio loop-scope deprecation with a one-line config. This is maintenance hygiene that future-proofs the app against a forced scramble when Starlette (or pytest-asyncio) eventually removes these APIs.
@@ -42,8 +42,8 @@ Already clean (no work needed): `@app.on_event` is not used — `main.py` alread
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-232-01 | Migrate Starlette deprecations (TemplateResponse arg order + per-request cookies) | TODO | None | - |
-| E-232-02 | Silence pytest-asyncio loop-scope deprecation via config | TODO | None | - |
+| E-232-01 | Migrate Starlette deprecations (TemplateResponse arg order + per-request cookies) | DONE | None | software-engineer |
+| E-232-02 | Silence pytest-asyncio loop-scope deprecation via config | DONE | None | software-engineer |
 
 ## Dispatch Team
 - software-engineer
@@ -93,3 +93,19 @@ The Full-Suite-Green Closure Gate applies: `python -m pytest tests/` must report
   | Internal iter 1 — Holistic team (SE) | 3 | 1 (MUST-FIX AC-3) | 2 (MINOR-1, MINOR-2 — confirmations) | SE MUST-FIX is the SAME finding as CR S-1 (AC-3 vacuous-pass), empirically verified. |
   | Codex iter 1 | 5 | 5 (P1 per-story full-suite; P2 AC-3 escape-hatch; P2 asyncio best-effort-AC; P3 DoD boilerplate; P2 Success-Criteria mismatch) | 0 | Exit 0. Findings P2/P3/P2 were fallout from the iter-1 AC-3 split. |
   | **Total** | **8 distinct** (AC-3 counted once across CR+SE convergence) | **7 distinct fixes** | **3 no-change** (A-1, SE MINOR-1, SE MINOR-2) | Raw raised = 11; dedup of the 1 CR↔SE convergent finding → 8 distinct; 7 distinct fixes applied (2 internal + 5 Codex). |
+
+- 2026-06-08: Dispatched and completed. E-232-01 migrated 2 TemplateResponse error-handler call sites in `src/api/main.py` to request-first form (status_code preserved) and 4 per-request `cookies=` POSTs in `tests/test_admin_merge.py` to client-instance cookie delivery; E-232-02 added `asyncio_default_fixture_loop_scope = "function"` under `[tool.pytest.ini_options]`. No version/dependency change. All ACs verified PASS. Full suite 4483 passed/0 failed (SE worktree run); authoritative full-suite-green gate runs at closure against main.
+
+  ### Review Scorecard (dispatch)
+
+  | Review Pass | Findings | Accepted | Dismissed |
+  |---|---|---|---|
+  | Per-story CR — E-232-01 | 0 | 0 | 0 |
+  | Per-story CR — E-232-02 | 0 | 0 | 0 |
+  | CR integration review | 0 | 0 | 0 |
+  | Codex code review | 0 | 0 | 0 |
+  | **Total** | **0** | **0** | **0** |
+
+  **Documentation assessment**: No documentation impact (no trigger fires — internal maintenance hygiene; no feature/endpoint/arch/agent/schema change).
+
+  **Context-layer assessment** (six triggers, all NO): (1) New convention/pattern/constraint — NO; (2) Architectural decision — NO; (3) Footgun/failure mode/boundary — NO (module-scoped `-W` filter detail captured in epic Technical Notes, niche, not a reusable rule); (4) Agent behavior/routing/coordination — NO; (5) Domain knowledge for future agents — NO; (6) New CLI command/workflow/procedure — NO.

@@ -4,7 +4,7 @@
 [E-232: Clear the Test-Suite Deprecation Warning Surface (Starlette + pytest-asyncio)](../E-232-starlette-deprecation-migration/epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, `pyproject.toml` declares an explicit `asyncio_default_fixture_loop_scope` under `[tool.pytest.ini_options]`, silencing the pytest-asyncio `PytestDeprecationWarning` about that option being unset. This is a config-only, single-line change with no behavior impact.
