@@ -1,7 +1,7 @@
 # Product Manager -- Agent Memory
 
 ## Numbering State
-- Next available epic number: E-233 (E-232=starlette-deprecation-migration READY 2026-06-07; E-231=harness-output-reliability COMPLETED + archived 2026-06-07; E-230=test-suite-fix COMPLETED + archived 2026-05-31)
+- Next available epic number: E-234 (E-233=llm-json-hardening READY 2026-06-08, reports Tier-2 JSON-fence parser fix, 4 SE stories, 15/15 review findings accepted; E-232=starlette-deprecation-migration READY 2026-06-07; E-231=harness-output-reliability COMPLETED + archived 2026-06-07; E-230=test-suite-fix COMPLETED + archived 2026-05-31)
 - Next available idea number: IDEA-076 (IDEA-075=harness-output-reliability PROMOTED to E-231, COMPLETED+archived 2026-06-07; IDEA-074=starlette-deprecation-migration PROMOTED to E-232 2026-06-07; IDEA-073 = full-suite CI gate, deferred-from-E-230; IDEA-072 = token-proxy compression retrospective-audit)
 - Before assigning numbers: ALWAYS `ls /epics/` and `ls /.project/ideas/` to avoid collisions
 
