@@ -52,3 +52,7 @@ Rotated refresh tokens and generated device IDs are persisted via `atomic_merge_
 - The client key (`GAMECHANGER_CLIENT_KEY_*`) is a shared HMAC-SHA256 secret -- treat as equivalent to a private key.
 - JWT payloads may contain PII (email, user ID) -- do not log decoded token contents.
 - Signature timestamps use `int(time.time())` -- clock skew causes HTTP 400 (not 401).
+
+## False-403 Misdiagnosis Trap
+
+A 403 is not always an auth/permission failure. Some versioned endpoints return a **FALSE 403** when the `Accept` header carries a stale API version -- easily misread as token expiry during credential debugging. Verified case: `GET /me/teams` requires `Accept: ...team:list+json; version=0.10.0`; an older version string returns 403 despite valid credentials. When a 403 appears unexpectedly on a request that should succeed, check the `Accept` version against the endpoint doc before concluding the credential is expired or the resource is forbidden.

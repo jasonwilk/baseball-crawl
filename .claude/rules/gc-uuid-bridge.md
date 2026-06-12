@@ -33,6 +33,22 @@ When you have a team's `public_id` (the slug used in public endpoints) but need 
 
 3. **Extract `gc_uuid`**: `result.id` from the matching hit is the `gc_uuid` (also known as `progenitor_team_id`).
 
+## Reverse Bridge (gc_uuid → public_id)
+
+The bridge also runs in reverse. When you have a team's `gc_uuid` (UUID) but need its `public_id` (for public endpoints or report generation):
+
+- **Use `GET /teams/{gc_uuid}`** -- it returns the `public_id` directly. Verified 2026-06-12 to work for **non-managed** teams (you need only follow/fan access, not management).
+- **Do NOT use `GET /teams/{team_id}/public-team-profile-id`** for non-managed teams -- it returns **403** unless you manage the team. It is the wrong tool for opponent resolution.
+
+This reverse path is the rung-(a) auto-resolution mechanism in the opponent-scouting and (future) scheduled-report flows: an authenticated opponents-list entry carrying a `progenitor_team_id` (its `gc_uuid`) resolves to a `public_id` via `GET /teams/{progenitor_team_id}`, which then feeds the public scouting pipeline.
+
+## Search Cannot Find Unindexed Teams (Name-Source Warning)
+
+`POST /search` (the forward bridge above) only finds teams **GameChanger has indexed**. Two failure modes are invariant-level and easy to misdiagnose as transient:
+
+- **Indexed name ≠ URL slug**: Searching a URL-slug-derived string returns **0 hits** -- the indexed name differs from the slug. Always source the search term from a real name field (`name` from `GET /public/teams/{public_id}` or an opponents-list entry), never from slug text.
+- **Unindexed teams are unfindable**: Many teams are simply absent from GC's searchable index -- notably opponents a coach **typed manually** rather than added via team lookup (e.g., HS varsity programs). Search will never recover these; the resolution path for them is operator-pasted GC team URL (the same input `bb report generate` accepts), not search. A zero-hit search is therefore ambiguous: punctuation quirk (recoverable via the helper's normalization) **or** genuinely unindexed (not recoverable).
+
 ## Punctuation Quirk and Apostrophe Trap
 
 `POST /search` has two silent-failure modes that the canonical helper absorbs:

@@ -166,7 +166,7 @@ These endpoints use `public_id` slugs and require **no** gc-token or gc-device-i
 |--------|------|--------|------|-------------|
 | GET | [/public/game-stream-processing/{game_stream_id}/details](endpoints/get-public-game-stream-processing-game_stream_id-details.md) | CONFIRMED | none | Inning-by-inning line score and R/H/E totals for a game |
 | GET | [/public/teams/{public_id}](endpoints/get-public-teams-public_id.md) | CONFIRMED | none | Team profile: name, location, record, staff, avatar |
-| GET | [/public/teams/{public_id}/games](endpoints/get-public-teams-public_id-games.md) | CONFIRMED | none | Game schedule with final scores and opponent names |
+| GET | [/public/teams/{public_id}/games](endpoints/get-public-teams-public_id-games.md) | CONFIRMED | none | Game schedule (completed + upcoming) with scores and opponent names only -- NO opponent ID/public_id |
 | GET | [/public/teams/{public_id}/games/preview](endpoints/get-public-teams-public_id-games-preview.md) | CONFIRMED | none | Near-duplicate of /games (uses event_id; prefer /games) |
 
 ### Auth-Required Endpoints Under `/teams/public/` Path

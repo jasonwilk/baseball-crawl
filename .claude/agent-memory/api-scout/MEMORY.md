@@ -36,3 +36,4 @@ As of 2026-03-12. See `docs/api/README.md` for full endpoint index.
 - [mobile-auth-notes.md](mobile-auth-notes.md) -- Mobile authentication specifics and credential capture workflow.
 - [client-id-rotation.md](client-id-rotation.md) -- GC client IDs rotate on web redeployments and iOS app updates; never assume permanence
 - [search-endpoint-notes.md](search-endpoint-notes.md) -- POST /search folds diacritics server-side; narrow-regex recommendation; 2026-04-16 punct-failure claim didn't fully reproduce 2026-04-17
+- [public-games-opponent-identity.md](public-games-opponent-identity.md) -- /public/.../games opponent_team is NAME-only (no public_id/root/progenitor); now returns upcoming games too; refutes scheduler auto-resolve assumption (verified 2026-06-12)
