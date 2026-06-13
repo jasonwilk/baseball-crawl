@@ -62,3 +62,4 @@
 
 - [endpoint-schema-notes.md](endpoint-schema-notes.md) -- Detailed schema implications for all discovered GameChanger API endpoints (team-detail, /me/teams, player-stats, schedule, public endpoints, opponents, boxscore, plays, roster, bridge endpoints). Response shapes, field types, join keys, normalization guidance, raw sample paths.
 - [etl-patterns.md](etl-patterns.md) -- Token lifetime and ETL scheduling (14-day window), raw-to-processed pipeline, idempotent ingestion, pagination patterns (cursor-based, x-next-page), project file paths for migrations/DB/API spec/stat glossary.
+- [fixture_seed_not_rollup_consistent.md](fixture_seed_not_rollup_consistent.md) -- `tests/fixtures/seed.sql` season aggregates are NOT a literal SUM of its per-game rows; aggregate-parity/recompute tests need a dedicated rollup-consistent fixture (discovered E-234 review).

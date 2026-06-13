@@ -11,6 +11,29 @@ review of rev 1 (8 findings, all accepted — see §5 epic deltas and §3 correc
 
 ---
 
+## 0. Roadmap Tracking
+
+Maps each roadmap slice (§5) to its epic and current status, so the roadmap evolves
+as epics land. **Convention**: this table is updated at two moments — at an epic's
+**planning commit** (slice → epic ID, status `PLANNING`) and at **epic closure**
+(status `COMPLETED`). Each roadmap-derived epic also carries an explicit
+`## Roadmap` reference back to the relevant §5 slice.
+
+| Slice | Title | Epic | Status |
+|-------|-------|------|--------|
+| A | Regression guards for the reports flow | E-234 | READY |
+| B | Report run records + trust signals + quality gates | — | NOT STARTED |
+| C | Payload-first loaders + aggregate integrity | — | NOT STARTED |
+| D1 | Quarantine + navigation retarget + passkey fix | — | NOT STARTED |
+| D2 | Decouple imports, then remove unused surfaces | — | NOT STARTED |
+| E | Morning-of-game scheduled reports | — | NOT STARTED |
+
+Status values: `NOT STARTED` → `PLANNING` (epic DRAFT) → `READY` (epic refined,
+awaiting dispatch authorization) → `IN PROGRESS` (epic ACTIVE) → `COMPLETED` (epic
+archived). A slice may span more than one epic; add rows as needed.
+
+---
+
 ## 1. The Reframe
 
 The product, as actually used, is: **log in → generate a one-off scouting report for any
@@ -46,8 +69,10 @@ more reliable, or easier to deliver?*
   to a complete one. Fine when an operator watches; fatal for unattended scheduled runs.
 - **Ready-but-empty reports** (verified): `generate_report()` fails only on `errors > 0`.
   A team with zero completed games and zero errors (early season, wrong team) renders an
-  empty report marked "ready" (`generator.py:1098-1102` gate does not cover the
-  skipped/no-games case).
+  empty report marked "ready". The `generator.py:1098-1102` gate does not cover this case
+  — it is the crawl-FAILURE guard (`errors > 0 AND games_crawled == 0`); the
+  zero-games/zero-errors path skips it and the empty "ready" report is emitted downstream
+  at post-load render.
 - **Orphan-cleanup concurrency race** (verified): `cleanup_orphan_teams()` deletes teams
   discovered after a pre-run snapshot (`generator.py:1652`) — two concurrent generations
   can delete each other's freshly created teams. Matters once scheduled runs generate
