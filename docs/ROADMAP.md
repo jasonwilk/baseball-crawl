@@ -368,6 +368,57 @@ resolution + delivery + status), not the rev-1 "~150-300 LOC".
 why Epic B precedes it. Sequential generation (rate limits); a missed morning run must
 page the operator, not vanish.
 
+#### Operator-session design decisions (2026-06-13)
+Settled in conversation with the operator; bind the Epic E planning session. They keep
+the forward feature **admin-free** — no team-management or opponent-registry UI (consistent
+with the §7 non-goal on tracked-opponent surfaces).
+
+1. **Team list = inline in the crontab (no admin, no config file).** The morning run is a
+   single invocation that takes the operator's own teams as args and iterates them
+   **sequentially**:
+   ```
+   0 6 * * *  bb report morning-run <varsity-url> <jv-url> <fresh-url> <reserve-url>
+   ```
+   The crontab line *is* the config — zero new storage, edited once a season. **Never
+   multiple concurrent invocations (one per team)**: that re-introduces the
+   `cleanup_orphan_teams()` race the Epic B concurrency lock closes, duplicates credential
+   refreshes, and breaks rate-limit coordination. One process, sequential generation. (Move
+   to a small text/YAML team file only if editing the crontab becomes a burden — a new file,
+   not a reuse of the quarantined `teams.yaml`.)
+
+2. **Opponent mapping = a CLI command keyed on `root_team_id`, not the typed name.** The
+   unresolved opponent has no `public_id` yet (finding it is the task), and its free-text
+   name is the least reliable field in the system — coaches type opponent names by hand with
+   no GC lookup (the documented duplicate-opponent root cause), so "Bellevue West" vs
+   "Bellevue West HS" vs a typo would each be a different key and silently miss an existing
+   mapping. Key the mapping on the schedule's stable registry identifier instead:
+   ```
+   bb report morning-run --dry-run
+     → Varsity vs "Bellevue West"  [opponent_id: a1b2c3…]  UNRESOLVED
+   bb report map-opponent a1b2c3… <public_id | GC team URL>
+     → stored: root_team_id a1b2c3… → public_id; auto-resolves every future game.
+   ```
+   Both values are copy-paste (the `opponent_id` off the dry-run line, the target from GC) —
+   no quoting, no name-matching. The **target** accepts a bare `public_id` or a full team URL
+   (the URL is just `.../teams/<public_id>`). The name still *displays* for confirmation but
+   is not the key. **Storage**: a dedicated `root_team_id → public_id` lookup table.
+   `root_team_id` is a separate namespace from `gc_uuid` — it is a fine mapping key but MUST
+   NOT land in a `gc_uuid` column (CLAUDE.md "Opponent entry duality").
+
+3. **Three-way outcome — never a silent skip.** Every scheduled opponent resolves to exactly
+   one of:
+   - **auto-resolved** — rungs (a)–(c) of the §5 item-3 ladder; report generated.
+   - **unresolved-but-mappable** — on GC but not auto-matched (typical for HS varsity absent
+     from GC search); surfaced in `--dry-run` and the Epic B run record for one-time
+     `map-opponent`. Resolved once, cached forever; the queue shrinks across a season.
+   - **no GC presence** — no `public_id` exists, a report is impossible; marked "no report
+     possible" on that game so the absence is explained, never silently dropped.
+
+4. **Admin-free surfacing.** Unresolved opponents appear in `--dry-run` output and the Epic B
+   run record (shown on the existing `/admin/reports` page). The only thing that would push
+   this back toward a management UI is letting coaches (not the operator) resolve names —
+   out of scope.
+
 ### Deliberately dropped from the old roadmap
 - ~~Shared scouting runner unifying trigger.py/cli scout~~ — both copies serve the
   quarantined opponent flow; retirement beats unification.
