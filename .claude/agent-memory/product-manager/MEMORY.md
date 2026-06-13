@@ -1,7 +1,7 @@
 # Product Manager -- Agent Memory
 
 ## Numbering State
-- Next available epic number: E-235 (E-234=report-regression-guards COMPLETED + archived 2026-06-13 — roadmap Epic A; E-233=llm-json-hardening COMPLETED + archived 2026-06-08; E-232=starlette-deprecation-migration COMPLETED + archived 2026-06-08; E-231=harness-output-reliability COMPLETED + archived 2026-06-07; E-230=test-suite-fix COMPLETED + archived 2026-05-31)
+- Next available epic number: E-236 (E-235=report-run-records READY 2026-06-13 — roadmap Epic B, ROADMAP §0 slice B→E-235/PLANNING, awaiting user dispatch auth; E-234=report-regression-guards COMPLETED + archived 2026-06-13 — roadmap Epic A; E-233=llm-json-hardening COMPLETED + archived 2026-06-08; E-232=starlette-deprecation-migration COMPLETED + archived 2026-06-08; E-231=harness-output-reliability COMPLETED + archived 2026-06-07; E-230=test-suite-fix COMPLETED + archived 2026-05-31)
 - Next available idea number: IDEA-077 (IDEA-076=spray-value-regression-guard CANDIDATE, captured by E-234 — Epic A E2E value-guards plays not spray; IDEA-075=harness-output-reliability PROMOTED to E-231, COMPLETED+archived 2026-06-07; IDEA-074=starlette-deprecation-migration PROMOTED to E-232 2026-06-07; IDEA-073 = full-suite CI gate, deferred-from-E-230; IDEA-072 = token-proxy compression retrospective-audit)
 - Before assigning numbers: ALWAYS `ls /epics/` and `ls /.project/ideas/` to avoid collisions
 
