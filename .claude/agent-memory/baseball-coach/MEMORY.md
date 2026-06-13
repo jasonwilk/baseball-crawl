@@ -13,6 +13,7 @@ Lincoln Standing Bear High School baseball program:
 ## Epic Consultations
 
 - [E-100 coaching review (2026-03-14)](e100_coaching_review.md) -- Schema gaps, domain corrections, and cleared items from E-100 team model overhaul review
+- [E-235 trust block design + review (2026-06-13)](e235_trust_block_review.md) -- Signal set, severity tiers, operator/coach split, no-games message, and AC-2 defect found in holistic review
 
 ## Key Reference Documents
 
