@@ -1,0 +1,2178 @@
+{
+  "team_players": {
+    "ExampleTm001": [
+      {
+        "id": "00000000-0000-4000-8000-00000000000e",
+        "first_name": "Player",
+        "last_name": "Ten",
+        "number": "10"
+      },
+      {
+        "id": "00000000-0000-4000-8000-00000000000c",
+        "first_name": "Player",
+        "last_name": "Eight",
+        "number": "5"
+      },
+      {
+        "id": "00000000-0000-4000-8000-000000000014",
+        "first_name": "Player",
+        "last_name": "Sixteen",
+        "number": "11"
+      },
+      {
+        "id": "00000000-0000-4000-8000-00000000000a",
+        "first_name": "Player",
+        "last_name": "Six",
+        "number": "3"
+      },
+      {
+        "id": "00000000-0000-4000-8000-00000000000b",
+        "first_name": "Player",
+        "last_name": "Seven",
+        "number": "1"
+      },
+      {
+        "id": "00000000-0000-4000-8000-000000000008",
+        "first_name": "Player",
+        "last_name": "Four",
+        "number": "13"
+      },
+      {
+        "id": "00000000-0000-4000-8000-000000000010",
+        "first_name": "Player",
+        "last_name": "Twelve",
+        "number": "2"
+      },
+      {
+        "id": "00000000-0000-4000-8000-000000000011",
+        "first_name": "Player",
+        "last_name": "Thirteen",
+        "number": "4"
+      },
+      {
+        "id": "00000000-0000-4000-8000-00000000000f",
+        "first_name": "Player",
+        "last_name": "Eleven",
+        "number": "7"
+      },
+      {
+        "id": "00000000-0000-4000-8000-000000000015",
+        "first_name": "Player",
+        "last_name": "Seventeen",
+        "number": "8"
+      },
+      {
+        "id": "00000000-0000-4000-8000-000000000009",
+        "first_name": "Player",
+        "last_name": "Five",
+        "number": "9"
+      },
+      {
+        "id": "00000000-0000-4000-8000-000000000013",
+        "first_name": "Player",
+        "last_name": "Fifteen",
+        "number": "12"
+      },
+      {
+        "id": "00000000-0000-4000-8000-000000000006",
+        "first_name": "Player",
+        "last_name": "Two",
+        "number": "14"
+      },
+      {
+        "id": "00000000-0000-4000-8000-000000000012",
+        "first_name": "Player",
+        "last_name": "Fourteen",
+        "number": "15"
+      },
+      {
+        "id": "00000000-0000-4000-8000-00000000000d",
+        "first_name": "Player",
+        "last_name": "Nine",
+        "number": "16"
+      },
+      {
+        "id": "00000000-0000-4000-8000-000000000005",
+        "first_name": "Player",
+        "last_name": "One",
+        "number": "17"
+      },
+      {
+        "id": "00000000-0000-4000-8000-000000000007",
+        "first_name": "Player",
+        "last_name": "Three",
+        "number": "18"
+      }
+    ],
+    "00000000-0000-4000-8000-000000000025": [
+      {
+        "id": "00000000-0000-4000-8000-000000000026",
+        "first_name": "Player",
+        "last_name": "ThirtyTwo",
+        "number": "1"
+      },
+      {
+        "id": "00000000-0000-4000-8000-000000000027",
+        "first_name": "Player",
+        "last_name": "ThirtyThree",
+        "number": "2"
+      },
+      {
+        "id": "00000000-0000-4000-8000-000000000028",
+        "first_name": "Player",
+        "last_name": "ThirtyFour",
+        "number": "3"
+      },
+      {
+        "id": "00000000-0000-4000-8000-000000000029",
+        "first_name": "Player",
+        "last_name": "ThirtyFive",
+        "number": "5"
+      },
+      {
+        "id": "00000000-0000-4000-8000-00000000002a",
+        "first_name": "Player",
+        "last_name": "ThirtySix",
+        "number": "6"
+      },
+      {
+        "id": "00000000-0000-4000-8000-00000000002b",
+        "first_name": "Player",
+        "last_name": "ThirtySeven",
+        "number": "7"
+      },
+      {
+        "id": "00000000-0000-4000-8000-00000000002c",
+        "first_name": "Player",
+        "last_name": "ThirtyEight",
+        "number": "8"
+      },
+      {
+        "id": "00000000-0000-4000-8000-00000000002d",
+        "first_name": "Player",
+        "last_name": "ThirtyNine",
+        "number": "9"
+      },
+      {
+        "id": "00000000-0000-4000-8000-00000000002e",
+        "first_name": "Player",
+        "last_name": "Forty",
+        "number": "10"
+      },
+      {
+        "id": "00000000-0000-4000-8000-00000000002f",
+        "first_name": "Player",
+        "last_name": "Num41",
+        "number": "11"
+      },
+      {
+        "id": "00000000-0000-4000-8000-000000000030",
+        "first_name": "Player",
+        "last_name": "Num42",
+        "number": "12"
+      },
+      {
+        "id": "00000000-0000-4000-8000-000000000031",
+        "first_name": "Player",
+        "last_name": "Num43",
+        "number": "13"
+      },
+      {
+        "id": "00000000-0000-4000-8000-000000000032",
+        "first_name": "Player",
+        "last_name": "Num44",
+        "number": "15"
+      },
+      {
+        "id": "00000000-0000-4000-8000-000000000033",
+        "first_name": "Player",
+        "last_name": "Num45",
+        "number": "16"
+      },
+      {
+        "id": "00000000-0000-4000-8000-000000000034",
+        "first_name": "Player",
+        "last_name": "Num46",
+        "number": "19"
+      },
+      {
+        "id": "00000000-0000-4000-8000-000000000035",
+        "first_name": "Player",
+        "last_name": "Num47",
+        "number": "21"
+      },
+      {
+        "id": "00000000-0000-4000-8000-000000000036",
+        "first_name": "Player",
+        "last_name": "Num48",
+        "number": "25"
+      },
+      {
+        "id": "00000000-0000-4000-8000-000000000037",
+        "first_name": "Player",
+        "last_name": "Num49",
+        "number": "32"
+      },
+      {
+        "id": "00000000-0000-4000-8000-000000000038",
+        "first_name": "Player",
+        "last_name": "Num50",
+        "number": "34"
+      },
+      {
+        "id": "00000000-0000-4000-8000-000000000039",
+        "first_name": "Player",
+        "last_name": "Num51",
+        "number": "35"
+      }
+    ]
+  },
+  "sport": "baseball",
+  "plays": [
+    {
+      "order": 0,
+      "inning": 1,
+      "half": "top",
+      "name_template": {
+        "template": "Ground Out"
+      },
+      "home_score": 0,
+      "away_score": 0,
+      "did_score_change": false,
+      "outs": 1,
+      "did_outs_change": true,
+      "at_plate_details": [
+        {
+          "template": "Lineup changed: ${00000000-0000-4000-8000-000000000029} in at pitcher"
+        },
+        {
+          "template": "In play"
+        }
+      ],
+      "final_details": [
+        {
+          "template": "${00000000-0000-4000-8000-000000000010} grounds out to first baseman ${00000000-0000-4000-8000-000000000033}"
+        }
+      ],
+      "messages": []
+    },
+    {
+      "order": 1,
+      "inning": 1,
+      "half": "top",
+      "name_template": {
+        "template": "Strikeout"
+      },
+      "home_score": 0,
+      "away_score": 0,
+      "did_score_change": false,
+      "outs": 2,
+      "did_outs_change": true,
+      "at_plate_details": [
+        {
+          "template": "Strike 1 looking"
+        },
+        {
+          "template": "Strike 2 swinging"
+        },
+        {
+          "template": "Ball 1"
+        },
+        {
+          "template": "Strike 3 looking"
+        }
+      ],
+      "final_details": [
+        {
+          "template": "${00000000-0000-4000-8000-000000000015} strikes out looking, ${00000000-0000-4000-8000-000000000029} pitching"
+        }
+      ],
+      "messages": []
+    },
+    {
+      "order": 2,
+      "inning": 1,
+      "half": "top",
+      "name_template": {
+        "template": "Single"
+      },
+      "home_score": 0,
+      "away_score": 0,
+      "did_score_change": false,
+      "outs": 2,
+      "did_outs_change": false,
+      "at_plate_details": [
+        {
+          "template": "Ball 1"
+        },
+        {
+          "template": "Strike 1 looking"
+        },
+        {
+          "template": "Ball 2"
+        },
+        {
+          "template": "In play"
+        }
+      ],
+      "final_details": [
+        {
+          "template": "${00000000-0000-4000-8000-00000000000f} singles on a line drive to center fielder ${00000000-0000-4000-8000-000000000028}"
+        }
+      ],
+      "messages": []
+    },
+    {
+      "order": 3,
+      "inning": 1,
+      "half": "top",
+      "name_template": {
+        "template": "Line Out"
+      },
+      "home_score": 0,
+      "away_score": 0,
+      "did_score_change": false,
+      "outs": 3,
+      "did_outs_change": true,
+      "at_plate_details": [
+        {
+          "template": "Strike 1 looking"
+        },
+        {
+          "template": "Strike 2 looking"
+        },
+        {
+          "template": "In play"
+        }
+      ],
+      "final_details": [
+        {
+          "template": "${00000000-0000-4000-8000-00000000000d} lines out to right fielder ${00000000-0000-4000-8000-000000000030}"
+        }
+      ],
+      "messages": []
+    },
+    {
+      "order": 4,
+      "inning": 1,
+      "half": "bottom",
+      "name_template": {
+        "template": "Walk"
+      },
+      "home_score": 0,
+      "away_score": 0,
+      "did_score_change": false,
+      "outs": 0,
+      "did_outs_change": false,
+      "at_plate_details": [
+        {
+          "template": "Ball 1"
+        },
+        {
+          "template": "Ball 2"
+        },
+        {
+          "template": "Ball 3"
+        },
+        {
+          "template": "Ball 4"
+        }
+      ],
+      "final_details": [
+        {
+          "template": "${00000000-0000-4000-8000-00000000002e} walks, ${00000000-0000-4000-8000-00000000000d} pitching"
+        }
+      ],
+      "messages": []
+    },
+    {
+      "order": 5,
+      "inning": 1,
+      "half": "bottom",
+      "name_template": {
+        "template": "Pop Out"
+      },
+      "home_score": 0,
+      "away_score": 0,
+      "did_score_change": false,
+      "outs": 1,
+      "did_outs_change": true,
+      "at_plate_details": [
+        {
+          "template": "Ball 1"
+        },
+        {
+          "template": "Ball 2"
+        },
+        {
+          "template": "${00000000-0000-4000-8000-00000000002e} steals 2nd"
+        },
+        {
+          "template": "Strike 1 looking"
+        },
+        {
+          "template": "Foul"
+        },
+        {
+          "template": "In play"
+        }
+      ],
+      "final_details": [
+        {
+          "template": "${00000000-0000-4000-8000-000000000028} pops out to center fielder ${00000000-0000-4000-8000-000000000010}"
+        },
+        {
+          "template": "${00000000-0000-4000-8000-00000000002e} remains at 2nd"
+        }
+      ],
+      "messages": []
+    },
+    {
+      "order": 6,
+      "inning": 1,
+      "half": "bottom",
+      "name_template": {
+        "template": "Ground Out"
+      },
+      "home_score": 0,
+      "away_score": 0,
+      "did_score_change": false,
+      "outs": 2,
+      "did_outs_change": true,
+      "at_plate_details": [
+        {
+          "template": "Strike 1 looking"
+        },
+        {
+          "template": "Ball 1"
+        },
+        {
+          "template": "Ball 2"
+        },
+        {
+          "template": "Strike 2 looking"
+        },
+        {
+          "template": "Foul"
+        },
+        {
+          "template": "In play"
+        }
+      ],
+      "final_details": [
+        {
+          "template": "${00000000-0000-4000-8000-000000000033} grounds out, second baseman ${00000000-0000-4000-8000-00000000000f} to first baseman ${00000000-0000-4000-8000-000000000015}"
+        },
+        {
+          "template": "${00000000-0000-4000-8000-00000000002e} advances to 3rd"
+        }
+      ],
+      "messages": []
+    },
+    {
+      "order": 7,
+      "inning": 1,
+      "half": "bottom",
+      "name_template": {
+        "template": "Fly Out"
+      },
+      "home_score": 0,
+      "away_score": 0,
+      "did_score_change": false,
+      "outs": 3,
+      "did_outs_change": true,
+      "at_plate_details": [
+        {
+          "template": "In play"
+        }
+      ],
+      "final_details": [
+        {
+          "template": "${00000000-0000-4000-8000-000000000035} flies out to center fielder ${00000000-0000-4000-8000-000000000010}"
+        }
+      ],
+      "messages": []
+    },
+    {
+      "order": 8,
+      "inning": 2,
+      "half": "top",
+      "name_template": {
+        "template": "Ground Out"
+      },
+      "home_score": 0,
+      "away_score": 0,
+      "did_score_change": false,
+      "outs": 1,
+      "did_outs_change": true,
+      "at_plate_details": [
+        {
+          "template": "In play"
+        }
+      ],
+      "final_details": [
+        {
+          "template": "${00000000-0000-4000-8000-00000000000e} grounds out, shortstop ${00000000-0000-4000-8000-00000000002e} to first baseman ${00000000-0000-4000-8000-000000000033}"
+        }
+      ],
+      "messages": []
+    },
+    {
+      "order": 9,
+      "inning": 2,
+      "half": "top",
+      "name_template": {
+        "template": "Strikeout"
+      },
+      "home_score": 0,
+      "away_score": 0,
+      "did_score_change": false,
+      "outs": 2,
+      "did_outs_change": true,
+      "at_plate_details": [
+        {
+          "template": "Strike 1 swinging"
+        },
+        {
+          "template": "Strike 2 swinging"
+        },
+        {
+          "template": "Ball 1"
+        },
+        {
+          "template": "Strike 3 swinging"
+        }
+      ],
+      "final_details": [
+        {
+          "template": "${00000000-0000-4000-8000-00000000000c} strikes out swinging, ${00000000-0000-4000-8000-000000000029} pitching"
+        }
+      ],
+      "messages": []
+    },
+    {
+      "order": 10,
+      "inning": 2,
+      "half": "top",
+      "name_template": {
+        "template": "Walk"
+      },
+      "home_score": 0,
+      "away_score": 0,
+      "did_score_change": false,
+      "outs": 2,
+      "did_outs_change": false,
+      "at_plate_details": [
+        {
+          "template": "Ball 1"
+        },
+        {
+          "template": "Ball 2"
+        },
+        {
+          "template": "Ball 3"
+        },
+        {
+          "template": "Strike 1 looking"
+        },
+        {
+          "template": "Strike 2 looking"
+        },
+        {
+          "template": "Ball 4"
+        }
+      ],
+      "final_details": [
+        {
+          "template": "${00000000-0000-4000-8000-000000000009} walks, ${00000000-0000-4000-8000-000000000029} pitching"
+        }
+      ],
+      "messages": []
+    },
+    {
+      "order": 11,
+      "inning": 2,
+      "half": "top",
+      "name_template": {
+        "template": "Error"
+      },
+      "home_score": 0,
+      "away_score": 1,
+      "did_score_change": true,
+      "outs": 2,
+      "did_outs_change": false,
+      "at_plate_details": [
+        {
+          "template": "Ball 1"
+        },
+        {
+          "template": "${00000000-0000-4000-8000-000000000009} advances to 2nd on wild pitch"
+        },
+        {
+          "template": "Strike 1 looking"
+        },
+        {
+          "template": "Ball 2"
+        },
+        {
+          "template": "${00000000-0000-4000-8000-000000000009} steals 3rd"
+        },
+        {
+          "template": "Ball 3"
+        },
+        {
+          "template": "In play"
+        }
+      ],
+      "final_details": [
+        {
+          "template": "${00000000-0000-4000-8000-00000000000a} hits a hard ground ball and reaches on an error by third baseman ${00000000-0000-4000-8000-000000000032}"
+        },
+        {
+          "template": "${00000000-0000-4000-8000-000000000009} scores"
+        }
+      ],
+      "messages": []
+    },
+    {
+      "order": 12,
+      "inning": 2,
+      "half": "top",
+      "name_template": {
+        "template": "Error"
+      },
+      "home_score": 0,
+      "away_score": 1,
+      "did_score_change": false,
+      "outs": 2,
+      "did_outs_change": false,
+      "at_plate_details": [
+        {
+          "template": "In play"
+        }
+      ],
+      "final_details": [
+        {
+          "template": "${00000000-0000-4000-8000-000000000014} hits a hard ground ball and reaches on an error by third baseman ${00000000-0000-4000-8000-000000000032}"
+        },
+        {
+          "template": "${00000000-0000-4000-8000-00000000000a} advances to 3rd"
+        },
+        {
+          "template": "${00000000-0000-4000-8000-000000000014} advances to 2nd on the same error"
+        }
+      ],
+      "messages": []
+    },
+    {
+      "order": 13,
+      "inning": 2,
+      "half": "top",
+      "name_template": {
+        "template": "Error"
+      },
+      "home_score": 0,
+      "away_score": 3,
+      "did_score_change": true,
+      "outs": 2,
+      "did_outs_change": false,
+      "at_plate_details": [
+        {
+          "template": "Lineup changed: Pinch runner ${00000000-0000-4000-8000-00000000000b} in for catcher ${00000000-0000-4000-8000-00000000000a}"
+        },
+        {
+          "template": "Ball 1"
+        },
+        {
+          "template": "Ball 2"
+        },
+        {
+          "template": "Strike 1 swinging"
+        },
+        {
+          "template": "In play"
+        }
+      ],
+      "final_details": [
+        {
+          "template": "${00000000-0000-4000-8000-000000000010} hits a ground ball and reaches on an error by shortstop ${00000000-0000-4000-8000-00000000002e}"
+        },
+        {
+          "template": "${00000000-0000-4000-8000-000000000014} scores"
+        },
+        {
+          "template": "${00000000-0000-4000-8000-00000000000b} scores"
+        }
+      ],
+      "messages": []
+    },
+    {
+      "order": 14,
+      "inning": 2,
+      "half": "top",
+      "name_template": {
+        "template": "Runner Out"
+      },
+      "home_score": 0,
+      "away_score": 3,
+      "did_score_change": false,
+      "outs": 3,
+      "did_outs_change": true,
+      "at_plate_details": [
+        {
+          "template": "Strike 1 looking"
+        },
+        {
+          "template": "Ball 1"
+        },
+        {
+          "template": "Strike 2 looking"
+        },
+        {
+          "template": "Ball 2"
+        },
+        {
+          "template": "${00000000-0000-4000-8000-000000000010} caught stealing 2nd, second baseman ${00000000-0000-4000-8000-000000000026}"
+        }
+      ],
+      "final_details": [
+        {
+          "template": "Half-inning ended by out on the base paths"
+        }
+      ],
+      "messages": []
+    },
+    {
+      "order": 15,
+      "inning": 2,
+      "half": "bottom",
+      "name_template": {
+        "template": "Pop Out"
+      },
+      "home_score": 0,
+      "away_score": 3,
+      "did_score_change": false,
+      "outs": 1,
+      "did_outs_change": true,
+      "at_plate_details": [
+        {
+          "template": "Ball 1"
+        },
+        {
+          "template": "Ball 2"
+        },
+        {
+          "template": "Strike 1 swinging"
+        },
+        {
+          "template": "Ball 3"
+        },
+        {
+          "template": "In play"
+        }
+      ],
+      "final_details": [
+        {
+          "template": "${00000000-0000-4000-8000-00000000002b} pops out to right fielder ${00000000-0000-4000-8000-00000000000c}"
+        }
+      ],
+      "messages": []
+    },
+    {
+      "order": 16,
+      "inning": 2,
+      "half": "bottom",
+      "name_template": {
+        "template": "Single"
+      },
+      "home_score": 0,
+      "away_score": 3,
+      "did_score_change": false,
+      "outs": 1,
+      "did_outs_change": false,
+      "at_plate_details": [
+        {
+          "template": "Strike 1 looking"
+        },
+        {
+          "template": "Strike 2 swinging"
+        },
+        {
+          "template": "Foul"
+        },
+        {
+          "template": "Ball 1"
+        },
+        {
+          "template": "Foul"
+        },
+        {
+          "template": "In play"
+        }
+      ],
+      "final_details": [
+        {
+          "template": "${00000000-0000-4000-8000-000000000032} singles on a ground ball to second baseman ${00000000-0000-4000-8000-00000000000f}"
+        }
+      ],
+      "messages": []
+    },
+    {
+      "order": 17,
+      "inning": 2,
+      "half": "bottom",
+      "name_template": {
+        "template": "Pop Out"
+      },
+      "home_score": 0,
+      "away_score": 3,
+      "did_score_change": false,
+      "outs": 2,
+      "did_outs_change": true,
+      "at_plate_details": [
+        {
+          "template": "Ball 1"
+        },
+        {
+          "template": "Ball 2"
+        },
+        {
+          "template": "Foul"
+        },
+        {
+          "template": "Balk by pitcher ${00000000-0000-4000-8000-00000000000d}"
+        },
+        {
+          "template": "${00000000-0000-4000-8000-000000000032} advances to 2nd"
+        },
+        {
+          "template": "Strike 2 looking"
+        },
+        {
+          "template": "Ball 3"
+        },
+        {
+          "template": "Foul"
+        },
+        {
+          "template": "In play"
+        }
+      ],
+      "final_details": [
+        {
+          "template": "${00000000-0000-4000-8000-000000000026} pops out to left fielder ${00000000-0000-4000-8000-000000000014}"
+        },
+        {
+          "template": "${00000000-0000-4000-8000-000000000032} remains at 2nd"
+        }
+      ],
+      "messages": []
+    },
+    {
+      "order": 18,
+      "inning": 2,
+      "half": "bottom",
+      "name_template": {
+        "template": "Error"
+      },
+      "home_score": 0,
+      "away_score": 3,
+      "did_score_change": false,
+      "outs": 2,
+      "did_outs_change": false,
+      "at_plate_details": [
+        {
+          "template": "Strike 1 looking"
+        },
+        {
+          "template": "In play"
+        }
+      ],
+      "final_details": [
+        {
+          "template": "${00000000-0000-4000-8000-000000000030} hits a ground ball and reaches on an error by third baseman ${00000000-0000-4000-8000-00000000000e}"
+        },
+        {
+          "template": "${00000000-0000-4000-8000-000000000032} advances to 3rd"
+        }
+      ],
+      "messages": []
+    },
+    {
+      "order": 19,
+      "inning": 2,
+      "half": "bottom",
+      "name_template": {
+        "template": "Error"
+      },
+      "home_score": 2,
+      "away_score": 3,
+      "did_score_change": true,
+      "outs": 2,
+      "did_outs_change": false,
+      "at_plate_details": [
+        {
+          "template": "Strike 1 looking"
+        },
+        {
+          "template": "Foul"
+        },
+        {
+          "template": "Ball 1"
+        },
+        {
+          "template": "${00000000-0000-4000-8000-000000000030} steals 2nd"
+        },
+        {
+          "template": "${00000000-0000-4000-8000-000000000032} scores"
+        },
+        {
+          "template": "In play"
+        }
+      ],
+      "final_details": [
+        {
+          "template": "${00000000-0000-4000-8000-00000000002d} hits a ground ball and reaches on an error by shortstop ${00000000-0000-4000-8000-000000000009}"
+        },
+        {
+          "template": "${00000000-0000-4000-8000-000000000030} scores"
+        }
+      ],
+      "messages": []
+    },
+    {
+      "order": 20,
+      "inning": 2,
+      "half": "bottom",
+      "name_template": {
+        "template": "Double"
+      },
+      "home_score": 3,
+      "away_score": 3,
+      "did_score_change": true,
+      "outs": 2,
+      "did_outs_change": false,
+      "at_plate_details": [
+        {
+          "template": "Ball 1"
+        },
+        {
+          "template": "Strike 1 swinging"
+        },
+        {
+          "template": "In play"
+        }
+      ],
+      "final_details": [
+        {
+          "template": "${00000000-0000-4000-8000-00000000002e} doubles on a line drive to right fielder ${00000000-0000-4000-8000-00000000000c}"
+        },
+        {
+          "template": "${00000000-0000-4000-8000-00000000002d} scores"
+        }
+      ],
+      "messages": []
+    },
+    {
+      "order": 21,
+      "inning": 2,
+      "half": "bottom",
+      "name_template": {
+        "template": "Line Out"
+      },
+      "home_score": 3,
+      "away_score": 3,
+      "did_score_change": false,
+      "outs": 3,
+      "did_outs_change": true,
+      "at_plate_details": [
+        {
+          "template": "Strike 1 looking"
+        },
+        {
+          "template": "In play"
+        }
+      ],
+      "final_details": [
+        {
+          "template": "${00000000-0000-4000-8000-000000000028} lines out to left fielder ${00000000-0000-4000-8000-000000000014}"
+        }
+      ],
+      "messages": []
+    },
+    {
+      "order": 22,
+      "inning": 3,
+      "half": "top",
+      "name_template": {
+        "template": "Pop Out"
+      },
+      "home_score": 3,
+      "away_score": 3,
+      "did_score_change": false,
+      "outs": 1,
+      "did_outs_change": true,
+      "at_plate_details": [
+        {
+          "template": "Ball 1"
+        },
+        {
+          "template": "Strike 1 swinging"
+        },
+        {
+          "template": "Foul"
+        },
+        {
+          "template": "Ball 2"
+        },
+        {
+          "template": "Ball 3"
+        },
+        {
+          "template": "In play"
+        }
+      ],
+      "final_details": [
+        {
+          "template": "${00000000-0000-4000-8000-000000000015} pops out to shortstop ${00000000-0000-4000-8000-00000000002e}"
+        }
+      ],
+      "messages": []
+    },
+    {
+      "order": 23,
+      "inning": 3,
+      "half": "top",
+      "name_template": {
+        "template": "Hit By Pitch"
+      },
+      "home_score": 3,
+      "away_score": 3,
+      "did_score_change": false,
+      "outs": 1,
+      "did_outs_change": false,
+      "at_plate_details": [
+        {
+          "template": "Ball 1"
+        }
+      ],
+      "final_details": [
+        {
+          "template": "${00000000-0000-4000-8000-00000000000f} is hit by pitch, ${00000000-0000-4000-8000-000000000029} pitching"
+        }
+      ],
+      "messages": []
+    },
+    {
+      "order": 24,
+      "inning": 3,
+      "half": "top",
+      "name_template": {
+        "template": "Ground Out"
+      },
+      "home_score": 3,
+      "away_score": 3,
+      "did_score_change": false,
+      "outs": 2,
+      "did_outs_change": true,
+      "at_plate_details": [
+        {
+          "template": "Ball 1"
+        },
+        {
+          "template": "Strike 1 looking"
+        },
+        {
+          "template": "Strike 2 swinging"
+        },
+        {
+          "template": "${00000000-0000-4000-8000-00000000000f} steals 2nd"
+        },
+        {
+          "template": "In play"
+        }
+      ],
+      "final_details": [
+        {
+          "template": "${00000000-0000-4000-8000-00000000000d} grounds out, shortstop ${00000000-0000-4000-8000-00000000002e} to first baseman ${00000000-0000-4000-8000-000000000033}"
+        },
+        {
+          "template": "${00000000-0000-4000-8000-00000000000f} held up at 2nd"
+        }
+      ],
+      "messages": []
+    },
+    {
+      "order": 25,
+      "inning": 3,
+      "half": "top",
+      "name_template": {
+        "template": "Strikeout"
+      },
+      "home_score": 3,
+      "away_score": 3,
+      "did_score_change": false,
+      "outs": 3,
+      "did_outs_change": true,
+      "at_plate_details": [
+        {
+          "template": "Strike 1 swinging"
+        },
+        {
+          "template": "Strike 2 swinging"
+        },
+        {
+          "template": "Ball 1"
+        },
+        {
+          "template": "Strike 3 looking"
+        }
+      ],
+      "final_details": [
+        {
+          "template": "${00000000-0000-4000-8000-00000000000e} strikes out looking, ${00000000-0000-4000-8000-000000000029} pitching"
+        }
+      ],
+      "messages": []
+    },
+    {
+      "order": 26,
+      "inning": 3,
+      "half": "bottom",
+      "name_template": {
+        "template": "Pop Out"
+      },
+      "home_score": 3,
+      "away_score": 3,
+      "did_score_change": false,
+      "outs": 1,
+      "did_outs_change": true,
+      "at_plate_details": [
+        {
+          "template": "Ball 1"
+        },
+        {
+          "template": "Ball 2"
+        },
+        {
+          "template": "Strike 1 looking"
+        },
+        {
+          "template": "In play"
+        }
+      ],
+      "final_details": [
+        {
+          "template": "${00000000-0000-4000-8000-000000000033} pops out in foul territory to third baseman ${00000000-0000-4000-8000-00000000000e}"
+        }
+      ],
+      "messages": []
+    },
+    {
+      "order": 27,
+      "inning": 3,
+      "half": "bottom",
+      "name_template": {
+        "template": "Single"
+      },
+      "home_score": 3,
+      "away_score": 3,
+      "did_score_change": false,
+      "outs": 1,
+      "did_outs_change": false,
+      "at_plate_details": [
+        {
+          "template": "In play"
+        }
+      ],
+      "final_details": [
+        {
+          "template": "${00000000-0000-4000-8000-000000000035} singles on a ground ball to shortstop ${00000000-0000-4000-8000-000000000009}"
+        }
+      ],
+      "messages": []
+    },
+    {
+      "order": 28,
+      "inning": 3,
+      "half": "bottom",
+      "name_template": {
+        "template": "Ground Out"
+      },
+      "home_score": 3,
+      "away_score": 3,
+      "did_score_change": false,
+      "outs": 2,
+      "did_outs_change": true,
+      "at_plate_details": [
+        {
+          "template": "Courtesy runner ${00000000-0000-4000-8000-00000000002a} in for ${00000000-0000-4000-8000-000000000035}"
+        },
+        {
+          "template": "Strike 1 swinging"
+        },
+        {
+          "template": "Ball 1"
+        },
+        {
+          "template": "${00000000-0000-4000-8000-00000000002a} steals 2nd"
+        },
+        {
+          "template": "In play"
+        }
+      ],
+      "final_details": [
+        {
+          "template": "${00000000-0000-4000-8000-00000000002b} grounds out, second baseman ${00000000-0000-4000-8000-00000000000f} to first baseman ${00000000-0000-4000-8000-000000000012}"
+        },
+        {
+          "template": "${00000000-0000-4000-8000-00000000002a} advances to 3rd"
+        }
+      ],
+      "messages": []
+    },
+    {
+      "order": 29,
+      "inning": 3,
+      "half": "bottom",
+      "name_template": {
+        "template": "Single"
+      },
+      "home_score": 4,
+      "away_score": 3,
+      "did_score_change": true,
+      "outs": 2,
+      "did_outs_change": false,
+      "at_plate_details": [
+        {
+          "template": "Ball 1"
+        },
+        {
+          "template": "In play"
+        }
+      ],
+      "final_details": [
+        {
+          "template": "${00000000-0000-4000-8000-000000000032} singles on a pop fly to left fielder ${00000000-0000-4000-8000-000000000014}"
+        },
+        {
+          "template": "${00000000-0000-4000-8000-00000000002a} scores"
+        }
+      ],
+      "messages": []
+    },
+    {
+      "order": 30,
+      "inning": 3,
+      "half": "bottom",
+      "name_template": {
+        "template": "Hit By Pitch"
+      },
+      "home_score": 4,
+      "away_score": 3,
+      "did_score_change": false,
+      "outs": 2,
+      "did_outs_change": false,
+      "at_plate_details": [
+        {
+          "template": "Ball 1"
+        },
+        {
+          "template": "${00000000-0000-4000-8000-000000000032} steals 2nd"
+        },
+        {
+          "template": "Ball 2"
+        }
+      ],
+      "final_details": [
+        {
+          "template": "${00000000-0000-4000-8000-000000000026} is hit by pitch, ${00000000-0000-4000-8000-00000000000d} pitching"
+        },
+        {
+          "template": "${00000000-0000-4000-8000-000000000032} remains at 2nd"
+        }
+      ],
+      "messages": []
+    },
+    {
+      "order": 31,
+      "inning": 3,
+      "half": "bottom",
+      "name_template": {
+        "template": "Double"
+      },
+      "home_score": 5,
+      "away_score": 3,
+      "did_score_change": true,
+      "outs": 2,
+      "did_outs_change": false,
+      "at_plate_details": [
+        {
+          "template": "In play"
+        }
+      ],
+      "final_details": [
+        {
+          "template": "${00000000-0000-4000-8000-000000000030} doubles on a hard ground ball to left fielder ${00000000-0000-4000-8000-000000000014}"
+        },
+        {
+          "template": "${00000000-0000-4000-8000-000000000032} scores"
+        },
+        {
+          "template": "${00000000-0000-4000-8000-000000000026} advances to 3rd"
+        }
+      ],
+      "messages": []
+    },
+    {
+      "order": 32,
+      "inning": 3,
+      "half": "bottom",
+      "name_template": {
+        "template": "Single"
+      },
+      "home_score": 7,
+      "away_score": 3,
+      "did_score_change": true,
+      "outs": 2,
+      "did_outs_change": false,
+      "at_plate_details": [
+        {
+          "template": "Strike 1 swinging"
+        },
+        {
+          "template": "Strike 2 looking"
+        },
+        {
+          "template": "Foul"
+        },
+        {
+          "template": "In play"
+        }
+      ],
+      "final_details": [
+        {
+          "template": "${00000000-0000-4000-8000-00000000002d} singles on a hard ground ball to center fielder ${00000000-0000-4000-8000-000000000010}"
+        },
+        {
+          "template": "${00000000-0000-4000-8000-000000000030} scores"
+        },
+        {
+          "template": "${00000000-0000-4000-8000-000000000026} scores"
+        }
+      ],
+      "messages": []
+    },
+    {
+      "order": 33,
+      "inning": 3,
+      "half": "bottom",
+      "name_template": {
+        "template": "Single"
+      },
+      "home_score": 8,
+      "away_score": 3,
+      "did_score_change": true,
+      "outs": 2,
+      "did_outs_change": false,
+      "at_plate_details": [
+        {
+          "template": "Strike 1 swinging"
+        },
+        {
+          "template": "${00000000-0000-4000-8000-00000000002d} steals 2nd"
+        },
+        {
+          "template": "In play"
+        }
+      ],
+      "final_details": [
+        {
+          "template": "${00000000-0000-4000-8000-00000000002e} singles on a hard ground ball to right fielder ${00000000-0000-4000-8000-00000000000c}"
+        },
+        {
+          "template": "${00000000-0000-4000-8000-00000000002d} scores"
+        }
+      ],
+      "messages": []
+    },
+    {
+      "order": 34,
+      "inning": 3,
+      "half": "bottom",
+      "name_template": {
+        "template": "Walk"
+      },
+      "home_score": 8,
+      "away_score": 3,
+      "did_score_change": false,
+      "outs": 2,
+      "did_outs_change": false,
+      "at_plate_details": [
+        {
+          "template": "Pickoff attempt at 1st"
+        },
+        {
+          "template": "${00000000-0000-4000-8000-00000000002e} advances to 3rd"
+        },
+        {
+          "template": "Ball 1"
+        },
+        {
+          "template": "Ball 2"
+        },
+        {
+          "template": "Foul"
+        },
+        {
+          "template": "Ball 3"
+        },
+        {
+          "template": "Ball 4"
+        }
+      ],
+      "final_details": [
+        {
+          "template": "${00000000-0000-4000-8000-000000000028} walks, ${00000000-0000-4000-8000-000000000011} pitching"
+        },
+        {
+          "template": "${00000000-0000-4000-8000-00000000002e} remains at 3rd"
+        }
+      ],
+      "messages": []
+    },
+    {
+      "order": 35,
+      "inning": 3,
+      "half": "bottom",
+      "name_template": {
+        "template": "Home Run"
+      },
+      "home_score": 11,
+      "away_score": 3,
+      "did_score_change": true,
+      "outs": 2,
+      "did_outs_change": false,
+      "at_plate_details": [
+        {
+          "template": "Ball 1"
+        },
+        {
+          "template": "${00000000-0000-4000-8000-000000000028} steals 2nd"
+        },
+        {
+          "template": "Foul"
+        },
+        {
+          "template": "Strike 2 looking"
+        },
+        {
+          "template": "In play"
+        }
+      ],
+      "final_details": [
+        {
+          "template": "${00000000-0000-4000-8000-000000000033} homers on a line drive to center field"
+        },
+        {
+          "template": "${00000000-0000-4000-8000-00000000002e} scores"
+        },
+        {
+          "template": "${00000000-0000-4000-8000-000000000028} scores"
+        }
+      ],
+      "messages": []
+    },
+    {
+      "order": 36,
+      "inning": 3,
+      "half": "bottom",
+      "name_template": {
+        "template": "Single"
+      },
+      "home_score": 11,
+      "away_score": 3,
+      "did_score_change": false,
+      "outs": 2,
+      "did_outs_change": false,
+      "at_plate_details": [
+        {
+          "template": "Ball 1"
+        },
+        {
+          "template": "Strike 1 looking"
+        },
+        {
+          "template": "Ball 2"
+        },
+        {
+          "template": "Strike 2 looking"
+        },
+        {
+          "template": "In play"
+        }
+      ],
+      "final_details": [
+        {
+          "template": "${00000000-0000-4000-8000-000000000035} singles on a hard ground ball to left fielder ${00000000-0000-4000-8000-000000000014}"
+        }
+      ],
+      "messages": []
+    },
+    {
+      "order": 37,
+      "inning": 3,
+      "half": "bottom",
+      "name_template": {
+        "template": "Pop Out"
+      },
+      "home_score": 11,
+      "away_score": 3,
+      "did_score_change": false,
+      "outs": 3,
+      "did_outs_change": true,
+      "at_plate_details": [
+        {
+          "template": "Courtesy runner ${00000000-0000-4000-8000-00000000002a} in for ${00000000-0000-4000-8000-000000000035}"
+        },
+        {
+          "template": "In play"
+        }
+      ],
+      "final_details": [
+        {
+          "template": "${00000000-0000-4000-8000-00000000002b} pops out to center fielder ${00000000-0000-4000-8000-000000000010}"
+        }
+      ],
+      "messages": []
+    },
+    {
+      "order": 38,
+      "inning": 4,
+      "half": "top",
+      "name_template": {
+        "template": "Strikeout"
+      },
+      "home_score": 11,
+      "away_score": 3,
+      "did_score_change": false,
+      "outs": 1,
+      "did_outs_change": true,
+      "at_plate_details": [
+        {
+          "template": "Foul"
+        },
+        {
+          "template": "Foul"
+        },
+        {
+          "template": "Ball 1"
+        },
+        {
+          "template": "Strike 3 looking"
+        }
+      ],
+      "final_details": [
+        {
+          "template": "${00000000-0000-4000-8000-00000000000c} strikes out looking, ${00000000-0000-4000-8000-000000000029} pitching"
+        }
+      ],
+      "messages": []
+    },
+    {
+      "order": 39,
+      "inning": 4,
+      "half": "top",
+      "name_template": {
+        "template": "Strikeout"
+      },
+      "home_score": 11,
+      "away_score": 3,
+      "did_score_change": false,
+      "outs": 2,
+      "did_outs_change": true,
+      "at_plate_details": [
+        {
+          "template": "Strike 1 looking"
+        },
+        {
+          "template": "Strike 2 looking"
+        },
+        {
+          "template": "Ball 1"
+        },
+        {
+          "template": "Ball 2"
+        },
+        {
+          "template": "Strike 3 looking"
+        }
+      ],
+      "final_details": [
+        {
+          "template": "${00000000-0000-4000-8000-000000000009} strikes out looking, ${00000000-0000-4000-8000-000000000029} pitching"
+        }
+      ],
+      "messages": []
+    },
+    {
+      "order": 40,
+      "inning": 4,
+      "half": "top",
+      "name_template": {
+        "template": "Single"
+      },
+      "home_score": 11,
+      "away_score": 3,
+      "did_score_change": false,
+      "outs": 2,
+      "did_outs_change": false,
+      "at_plate_details": [
+        {
+          "template": "Strike 1 looking"
+        },
+        {
+          "template": "Ball 1"
+        },
+        {
+          "template": "Lineup changed: ${00000000-0000-4000-8000-00000000000a} in for batter ${00000000-0000-4000-8000-00000000000b}"
+        },
+        {
+          "template": "In play"
+        }
+      ],
+      "final_details": [
+        {
+          "template": "${00000000-0000-4000-8000-00000000000a} singles on a line drive to left fielder ${00000000-0000-4000-8000-00000000002b}"
+        }
+      ],
+      "messages": []
+    },
+    {
+      "order": 41,
+      "inning": 4,
+      "half": "top",
+      "name_template": {
+        "template": "Double"
+      },
+      "home_score": 11,
+      "away_score": 4,
+      "did_score_change": true,
+      "outs": 2,
+      "did_outs_change": false,
+      "at_plate_details": [
+        {
+          "template": "Courtesy runner ${00000000-0000-4000-8000-00000000000b} in for ${00000000-0000-4000-8000-00000000000a}"
+        },
+        {
+          "template": "Ball 1"
+        },
+        {
+          "template": "${00000000-0000-4000-8000-00000000000b} advances to 2nd on passed ball"
+        },
+        {
+          "template": "Ball 2"
+        },
+        {
+          "template": "In play"
+        }
+      ],
+      "final_details": [
+        {
+          "template": "${00000000-0000-4000-8000-000000000014} doubles on a fly ball to left fielder ${00000000-0000-4000-8000-00000000002b}"
+        },
+        {
+          "template": "${00000000-0000-4000-8000-00000000000b} scores"
+        }
+      ],
+      "messages": []
+    },
+    {
+      "order": 42,
+      "inning": 4,
+      "half": "top",
+      "name_template": {
+        "template": "Ground Out"
+      },
+      "home_score": 11,
+      "away_score": 4,
+      "did_score_change": false,
+      "outs": 3,
+      "did_outs_change": true,
+      "at_plate_details": [
+        {
+          "template": "In play"
+        }
+      ],
+      "final_details": [
+        {
+          "template": "${00000000-0000-4000-8000-000000000010} grounds out, pitcher ${00000000-0000-4000-8000-000000000029} to first baseman ${00000000-0000-4000-8000-000000000033}"
+        }
+      ],
+      "messages": []
+    },
+    {
+      "order": 43,
+      "inning": 4,
+      "half": "bottom",
+      "name_template": {
+        "template": "Single"
+      },
+      "home_score": 11,
+      "away_score": 4,
+      "did_score_change": false,
+      "outs": 0,
+      "did_outs_change": false,
+      "at_plate_details": [
+        {
+          "template": "Strike 1 looking"
+        },
+        {
+          "template": "Ball 1"
+        },
+        {
+          "template": "Ball 2"
+        },
+        {
+          "template": "Ball 3"
+        },
+        {
+          "template": "In play"
+        }
+      ],
+      "final_details": [
+        {
+          "template": "${00000000-0000-4000-8000-000000000032} singles on a line drive to center fielder ${00000000-0000-4000-8000-000000000010}"
+        }
+      ],
+      "messages": []
+    },
+    {
+      "order": 44,
+      "inning": 4,
+      "half": "bottom",
+      "name_template": {
+        "template": "Home Run"
+      },
+      "home_score": 13,
+      "away_score": 4,
+      "did_score_change": true,
+      "outs": 0,
+      "did_outs_change": false,
+      "at_plate_details": [
+        {
+          "template": "Ball 1"
+        },
+        {
+          "template": "Ball 2"
+        },
+        {
+          "template": "In play"
+        }
+      ],
+      "final_details": [
+        {
+          "template": "${00000000-0000-4000-8000-000000000026} homers on a line drive to left field"
+        },
+        {
+          "template": "${00000000-0000-4000-8000-000000000032} scores"
+        }
+      ],
+      "messages": []
+    },
+    {
+      "order": 45,
+      "inning": 4,
+      "half": "bottom",
+      "name_template": {
+        "template": "Fly Out"
+      },
+      "home_score": 13,
+      "away_score": 4,
+      "did_score_change": false,
+      "outs": 1,
+      "did_outs_change": true,
+      "at_plate_details": [
+        {
+          "template": "Strike 1 looking"
+        },
+        {
+          "template": "Strike 2 looking"
+        },
+        {
+          "template": "Ball 1"
+        },
+        {
+          "template": "Foul"
+        },
+        {
+          "template": "Ball 2"
+        },
+        {
+          "template": "In play"
+        }
+      ],
+      "final_details": [
+        {
+          "template": "${00000000-0000-4000-8000-000000000030} flies out to right fielder ${00000000-0000-4000-8000-00000000000c}"
+        }
+      ],
+      "messages": []
+    },
+    {
+      "order": 46,
+      "inning": 4,
+      "half": "bottom",
+      "name_template": {
+        "template": "Ground Out"
+      },
+      "home_score": 13,
+      "away_score": 4,
+      "did_score_change": false,
+      "outs": 2,
+      "did_outs_change": true,
+      "at_plate_details": [
+        {
+          "template": "In play"
+        }
+      ],
+      "final_details": [
+        {
+          "template": "${00000000-0000-4000-8000-00000000002d} grounds out to first baseman ${00000000-0000-4000-8000-00000000000d}"
+        }
+      ],
+      "messages": []
+    },
+    {
+      "order": 47,
+      "inning": 4,
+      "half": "bottom",
+      "name_template": {
+        "template": "Walk"
+      },
+      "home_score": 13,
+      "away_score": 4,
+      "did_score_change": false,
+      "outs": 2,
+      "did_outs_change": false,
+      "at_plate_details": [
+        {
+          "template": "Ball 1"
+        },
+        {
+          "template": "Foul"
+        },
+        {
+          "template": "Ball 2"
+        },
+        {
+          "template": "Ball 3"
+        },
+        {
+          "template": "Ball 4"
+        }
+      ],
+      "final_details": [
+        {
+          "template": "${00000000-0000-4000-8000-00000000002e} walks, ${00000000-0000-4000-8000-000000000011} pitching"
+        }
+      ],
+      "messages": []
+    },
+    {
+      "order": 48,
+      "inning": 4,
+      "half": "bottom",
+      "name_template": {
+        "template": "Single"
+      },
+      "home_score": 13,
+      "away_score": 4,
+      "did_score_change": false,
+      "outs": 2,
+      "did_outs_change": false,
+      "at_plate_details": [
+        {
+          "template": "In play"
+        }
+      ],
+      "final_details": [
+        {
+          "template": "${00000000-0000-4000-8000-000000000028} singles on a ground ball to left fielder ${00000000-0000-4000-8000-000000000014}"
+        },
+        {
+          "template": "${00000000-0000-4000-8000-00000000002e} advances to 2nd"
+        }
+      ],
+      "messages": []
+    },
+    {
+      "order": 49,
+      "inning": 4,
+      "half": "bottom",
+      "name_template": {
+        "template": "Fly Out"
+      },
+      "home_score": 13,
+      "away_score": 4,
+      "did_score_change": false,
+      "outs": 3,
+      "did_outs_change": true,
+      "at_plate_details": [
+        {
+          "template": "Ball 1"
+        },
+        {
+          "template": "Ball 2"
+        },
+        {
+          "template": "In play"
+        }
+      ],
+      "final_details": [
+        {
+          "template": "${00000000-0000-4000-8000-000000000033} flies out to center fielder ${00000000-0000-4000-8000-000000000010}"
+        }
+      ],
+      "messages": []
+    },
+    {
+      "order": 50,
+      "inning": 5,
+      "half": "top",
+      "name_template": {
+        "template": "Ground Out"
+      },
+      "home_score": 13,
+      "away_score": 4,
+      "did_score_change": false,
+      "outs": 1,
+      "did_outs_change": true,
+      "at_plate_details": [
+        {
+          "template": "${00000000-0000-4000-8000-00000000002a} in for pitcher ${00000000-0000-4000-8000-000000000029}"
+        },
+        {
+          "template": "Ball 1"
+        },
+        {
+          "template": "Strike 1 looking"
+        },
+        {
+          "template": "In play"
+        }
+      ],
+      "final_details": [
+        {
+          "template": "${00000000-0000-4000-8000-000000000011} bunts out, catcher ${00000000-0000-4000-8000-000000000035} to first baseman ${00000000-0000-4000-8000-000000000033}"
+        }
+      ],
+      "messages": []
+    },
+    {
+      "order": 51,
+      "inning": 5,
+      "half": "top",
+      "name_template": {
+        "template": "Ground Out"
+      },
+      "home_score": 13,
+      "away_score": 4,
+      "did_score_change": false,
+      "outs": 2,
+      "did_outs_change": true,
+      "at_plate_details": [
+        {
+          "template": "Foul"
+        },
+        {
+          "template": "In play"
+        }
+      ],
+      "final_details": [
+        {
+          "template": "${00000000-0000-4000-8000-00000000000f} grounds out, pitcher ${00000000-0000-4000-8000-00000000002a} to first baseman ${00000000-0000-4000-8000-000000000033} to pitcher ${00000000-0000-4000-8000-00000000002a}"
+        }
+      ],
+      "messages": []
+    },
+    {
+      "order": 52,
+      "inning": 5,
+      "half": "top",
+      "name_template": {
+        "template": "Pop Out"
+      },
+      "home_score": 13,
+      "away_score": 4,
+      "did_score_change": false,
+      "outs": 3,
+      "did_outs_change": true,
+      "at_plate_details": [
+        {
+          "template": "Ball 1"
+        },
+        {
+          "template": "Strike 1 looking"
+        },
+        {
+          "template": "Strike 2 looking"
+        },
+        {
+          "template": "Ball 2"
+        },
+        {
+          "template": "In play"
+        }
+      ],
+      "final_details": [
+        {
+          "template": "${00000000-0000-4000-8000-00000000000d} pops out to shortstop ${00000000-0000-4000-8000-00000000002e}"
+        }
+      ],
+      "messages": []
+    },
+    {
+      "order": 53,
+      "inning": 5,
+      "half": "bottom",
+      "name_template": {
+        "template": "Fly Out"
+      },
+      "home_score": 13,
+      "away_score": 4,
+      "did_score_change": false,
+      "outs": 1,
+      "did_outs_change": true,
+      "at_plate_details": [
+        {
+          "template": "${00000000-0000-4000-8000-000000000008} in for pitcher ${00000000-0000-4000-8000-000000000011}"
+        },
+        {
+          "template": "Strike 1 swinging"
+        },
+        {
+          "template": "Ball 1"
+        },
+        {
+          "template": "Ball 2"
+        },
+        {
+          "template": "Ball 3"
+        },
+        {
+          "template": "In play"
+        }
+      ],
+      "final_details": [
+        {
+          "template": "${00000000-0000-4000-8000-000000000035} flies out to center fielder ${00000000-0000-4000-8000-000000000010}"
+        }
+      ],
+      "messages": []
+    },
+    {
+      "order": 54,
+      "inning": 5,
+      "half": "bottom",
+      "name_template": {
+        "template": "Walk"
+      },
+      "home_score": 13,
+      "away_score": 4,
+      "did_score_change": false,
+      "outs": 1,
+      "did_outs_change": false,
+      "at_plate_details": [
+        {
+          "template": "Ball 1"
+        },
+        {
+          "template": "Ball 2"
+        },
+        {
+          "template": "Foul"
+        },
+        {
+          "template": "Ball 3"
+        },
+        {
+          "template": "Foul"
+        },
+        {
+          "template": "Ball 4"
+        }
+      ],
+      "final_details": [
+        {
+          "template": "${00000000-0000-4000-8000-00000000002b} walks, ${00000000-0000-4000-8000-000000000008} pitching"
+        }
+      ],
+      "messages": []
+    },
+    {
+      "order": 55,
+      "inning": 5,
+      "half": "bottom",
+      "name_template": {
+        "template": "Fielder's Choice"
+      },
+      "home_score": 14,
+      "away_score": 4,
+      "did_score_change": true,
+      "outs": 1,
+      "did_outs_change": false,
+      "at_plate_details": [
+        {
+          "template": "Ball 1"
+        },
+        {
+          "template": "Strike 1 looking"
+        },
+        {
+          "template": "${00000000-0000-4000-8000-00000000002b} advances to 3rd on error by pitcher ${00000000-0000-4000-8000-000000000008}"
+        },
+        {
+          "template": "Foul"
+        },
+        {
+          "template": "Ball 2"
+        },
+        {
+          "template": "Ball 3"
+        },
+        {
+          "template": "In play"
+        }
+      ],
+      "final_details": [
+        {
+          "template": "${00000000-0000-4000-8000-000000000032} grounds into fielder's choice, shortstop ${00000000-0000-4000-8000-000000000009} to catcher ${00000000-0000-4000-8000-00000000000a} to third baseman ${00000000-0000-4000-8000-00000000000e}"
+        },
+        {
+          "template": "${00000000-0000-4000-8000-00000000002b} held up at 3rd"
+        },
+        {
+          "template": "${00000000-0000-4000-8000-00000000002b} scores on error by third baseman ${00000000-0000-4000-8000-00000000000e}"
+        }
+      ],
+      "messages": []
+    },
+    {
+      "order": 56,
+      "inning": 5,
+      "half": "bottom",
+      "name_template": {
+        "template": "${00000000-0000-4000-8000-000000000026} at bat"
+      },
+      "home_score": 0,
+      "away_score": 0,
+      "did_score_change": false,
+      "outs": 1,
+      "did_outs_change": false,
+      "at_plate_details": [],
+      "final_details": [],
+      "messages": []
+    }
+  ]
+}

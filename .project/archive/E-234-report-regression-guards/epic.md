@@ -1,7 +1,7 @@
 # E-234: Report Regression Guards
 
 ## Status
-`READY`
+`COMPLETED`
 <!-- Lifecycle: DRAFT → READY → ACTIVE → COMPLETED (or BLOCKED / ABANDONED) -->
 
 ## Roadmap
@@ -47,11 +47,11 @@ Two domain consultations grounded the plan:
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-234-01 | Golden stat tables for the report query surface | TODO | None | - |
-| E-234-02 | Aggregate parity module + `bb report verify-aggregates` | TODO | None | - |
-| E-234-03 | `bb report` subprocess smoke tests | TODO | None | - |
-| E-234-04 | Report-generation negative-path characterization tests | TODO | None | - |
-| E-234-05 | (Stretch) E2E fixture-driven report generation from recorded payloads | TODO | None | - |
+| E-234-01 | Golden stat tables for the report query surface | DONE | None | software-engineer |
+| E-234-02 | Aggregate parity module + `bb report verify-aggregates` | DONE | None | data-engineer |
+| E-234-03 | `bb report` subprocess smoke tests | DONE | None | software-engineer |
+| E-234-04 | Report-generation negative-path characterization tests | DONE | None | software-engineer |
+| E-234-05 | (Stretch) E2E fixture-driven report generation from recorded payloads | DONE | None | software-engineer |
 
 ## Dispatch Team
 - software-engineer
@@ -72,12 +72,17 @@ Two domain consultations grounded the plan:
 ### TN-2: Aggregate parity (story 02) — data-engineer semantics
 Home (SE+DE aligned): reusable logic in `src/reports/aggregate_parity.py` (the import-boundary rule forbids `src/` importing `scripts/`, so logic must live in `src/`); operator entry point `bb report verify-aggregates` in `src/cli/report.py` (`bb report` is a KEEP surface; `bb data` is quarantined under the reframe). The test imports the `src/reports/aggregate_parity.py` function directly.
 - **Row scope**: diff only rows with `stat_completeness = 'boxscore_only'` (confirmed `NOT NULL DEFAULT 'boxscore_only'` on `player_season_batting`/`player_season_pitching` in `migrations/001_initial_schema.sql`). ScoutingLoader rows take that default; member season-stats-loader rows (`full`/`supplemented`) come straight from the API, are not summed from game rows, and must be excluded.
+- **Scope set — UNION, with missing-aggregate detection (added during E-234-02 Codex P1 remediation).** `_check_table` must NOT drive iteration solely from the `(team_id, season_id)` scopes already present in stored `boxscore_only` rows — doing so means a scope with game rows but a genuinely-absent stored aggregate (the staleness signature) is never examined and slips through green (Codex P1: `cells_compared > 0` does NOT catch this, because *other* scopes still contribute cells). Instead, check the **UNION** of:
+  1. **stored `boxscore_only` scopes** (as before), AND
+  2. **recompute-source scopes** (`player_game_*` JOIN `games`, `perspective_team_id = team_id`) that are **NOT member-loaded** (see member-exclusion) and have no stored `boxscore_only` row in this table → flagged as all-columns `stored=None` mismatches (catches a genuinely-missing `boxscore_only` aggregate).
+  - **Member-exclusion — PROVENANCE-based and CROSS-TABLE (refined during E-234-02 Codex P1 Round-2 remediation):** a `(team, season)` is treated as member-loaded — and excluded from missing-aggregate flagging in **BOTH** stat tables — if it has a `full`/`supplemented` row in **EITHER** season table (`_member_scopes` unions both tables). **Do NOT use the Round-1 per-table test** ("zero stored of ANY completeness *in this table*"): that is unsafe. Rationale: member season-stats rows (`season_stats_loader`, written independently per player — batting when `has_offense`, pitching when `has_defense AND _is_pitcher`) and per-game boxscore rows (a DIFFERENT loader, `GameLoader`) are written by **independent loaders**, so a member scope can be **asymmetric** across batting/pitching — e.g. `player_game_pitching` rows exist (perspective=team) but ZERO `player_season_pitching` rows of any completeness. Single-table presence is therefore NOT safe evidence; the verify-first check confirmed this invariant does NOT hold. Member-loaded aggregates legitimately diverge from a game-row recompute and must never false-positive.
+  - **Genuine detection preserved:** a scouting scope with NO `full`/`supplemented` row anywhere and a deleted/missing `boxscore_only` aggregate IS still flagged.
 - **Column set**: diff only the SUM-computed subset that `ScoutingLoader._compute_*_aggregates` writes.
   - Batting (16): `gp`, `games_tracked`, `ab`, `h`, `doubles`, `triples`, `hr`, `rbi`, `r`, `bb`, `so`, `sb`, `tb`, `hbp`, `shf`, `cs` (`gp == games_tracked == COUNT(*)`).
   - Pitching (14): `gp_pitcher`, `games_tracked`, `ip_outs`, `h`, `r`, `er`, `bb`, `so`, `wp`, `hbp`, `pitches`, `total_strikes`, `bf`, `gs` (`gp_pitcher == games_tracked`). **Pitching `hr` is deliberately NOT stored — do not diff it.**
   - **Exclude** all member-season-stats-only columns (`pa`, `singles`, splits, qab/hard/weak/ps/sw, home/away + vs-LHP/RHP). The exclusion reason is **provenance, NOT NULL-ness**: these columns are not part of the ScoutingLoader SUM subset (they are written by the member season-stats loader or carry split provenance), so they are out of scope whether NULL or populated. (seed.sql actually populates some split columns on `boxscore_only`-default rows — a further reason not to use seed.sql for this guard; see the fixture spec below.) Rate stats (AVG/OBP/ERA/WHIP) are not stored — nothing to diff.
 - **Recompute query**: mirror `_compute_*_aggregates` EXACTLY — `WHERE pgX.team_id = ? AND g.season_id = ? AND pgX.perspective_team_id = team_id`, `JOIN games g ON game_id`, `GROUP BY player_id`. Replicate the `gs` NULL-safe CASE verbatim (`MAX(appearance_order) IS NULL → NULL`, else `SUM(appearance_order = 1)`). Treat `NULL == NULL` as a match; `NULL` vs non-`NULL` is a mismatch.
-- **Reporting shape**: per `(player_id, team_id, season_id, column)` with `(stored, recomputed)` values; **exact integer equality, no tolerance**; empty mismatch list = clean. The function also returns a `cells_compared` count (rows compared × diffed columns) so the test can assert it examined `> 0` cells — guarding against a vacuous green if the row-scope filter or the join matches zero rows.
+- **Reporting shape**: per `(player_id, team_id, season_id, column)` with `(stored, recomputed)` values; **exact integer equality, no tolerance**; empty mismatch list = clean. The function also returns a `cells_compared` count (rows compared × diffed columns) so the test can assert it examined `> 0` cells — guarding against a vacuous green if the row-scope filter or the join matches zero rows. **Note (Codex P1):** `cells_compared > 0` proves *overall* non-vacuity, NOT *per-scope* — a single missing scope can still slip through a positive count. The per-scope guarantee comes from the UNION scope-set rule above (missing-aggregate detection), not from `cells_compared`.
 - **Green-path fixture — independent oracle (story 02 uses its OWN fixture, NOT seed.sql)**: the clean-green case runs against a purpose-built `tests/fixtures/parity_consistent.sql` whose stored `player_season_*` rows are the EXACT perspective-filtered SUM of its `player_game_*` rows. Those expected values are **hand-authored independently of the recompute code** (per testing.md test-validates-spec), so the green path verifies the recompute query is actually correct — not merely that two copies of the same SUM agree. (A loader-built fixture was rejected: it would make the "stored" side a near-copy of the recompute logic, passing by construction even if that shared logic — gs CASE, perspective filter, a dropped column — were wrong.)
 - **Epic C anchor**: this module IS the Epic C cutover gate, and Epic C refactors ScoutingLoader/GameLoader internals. The static SQL fixture is a fixed anchor that must survive Epic C untouched — a guard for a loader refactor must be independent of loader internals. seed.sql is NOT used and is NOT mutated (it is shared by story 01's golden and existing OBP/K-9 query tests).
 - **Lock-step maintenance invariant (review-enforced, NOT test-enforced)**: the parity test never runs ScoutingLoader, so it cannot detect loader-semantic drift on its own (that is the job of story 01's golden and story 05's e2e, which exercise real output). Therefore, on any change to `_compute_*_aggregates` that alters the aggregate CONTRACT (a SUM-subset column added/removed, or the `gs` definition), update BOTH the recompute query AND `parity_consistent.sql`'s expected values in lock-step — and the updated fixture values MUST be hand-recomputed independently from the game rows, NEVER regenerated by dumping loader output (which would silently convert this into the rejected loader-built approach and lose the independent-oracle property). This is a manual invariant enforced by code review.
@@ -89,17 +94,24 @@ Home (SE+DE aligned): reusable logic in `src/reports/aggregate_parity.py` (the i
   - PB_02: PG_1 = 4,0,1,0,0,0,0,0,2,0,1,0,0,0; PG_2 = 3,1,1,1,0,0,1,1,1,0,2,0,0,0; PG_3 = 4,1,2,0,0,0,1,0,1,1,2,1,0,0.
 - Batting expected season rollup (gp = games_tracked = 3):
   - PB_01: ab11 h4 doubles1 triples1 hr1 rbi3 r3 bb3 so3 sb2 tb10 hbp1 shf1 cs1.
-  - PB_02: ab11 h4 doubles1 triples0 hr0 rbi2 r2 bb2 so4 sb1 tb5 hbp1 shf0 cs0.
+  - PB_02: ab11 h4 doubles1 triples0 hr0 rbi2 r2 bb1 so4 sb1 tb5 hbp1 shf0 cs0. *(bb corrected 2→1 during E-234-02 dispatch: the game rows sum to 0+1+0=1; game rows are primary per the lock-step invariant.)*
 - Pitching game rows (appearance_order, ip_outs, h, r, er, bb, so, wp, hbp, pitches, total_strikes, bf):
   - PP_01 (start+relief): PG_1 = 1,18,5,3,2,2,7,1,1,85,55,24; PG_3 = 2,6,1,0,0,0,3,0,0,28,20,7.
   - PP_02 (two starts): PG_2 = 1,21,4,1,1,1,5,0,0,92,60,26; PG_3 = 1,15,7,4,4,3,4,2,1,78,48,23.
   - PP_03 (gs-NULL branch): PG_1 = NULL,12,4,2,2,1,3,0,0,50,32,15.
 - Pitching expected season rollup (gp_pitcher = games_tracked = appearance count):
   - PP_01: gp_pitcher2 ip_outs24 h6 r3 er2 bb2 so10 wp1 hbp1 pitches113 total_strikes75 bf31 **gs=1** (one appearance_order=1).
-  - PP_02: gp_pitcher2 ip_outs36 h11 r5 er5 bb4 so8 wp2 hbp1 pitches170 total_strikes108 bf49 **gs=2** (two appearance_order=1).
+  - PP_02: gp_pitcher2 ip_outs36 h11 r5 er5 bb4 so9 wp2 hbp1 pitches170 total_strikes108 bf49 **gs=2** (two appearance_order=1). *(so corrected 8→9 during E-234-02 dispatch: the game rows sum to 5+4=9; game rows are primary per the lock-step invariant.)*
   - PP_03: gp_pitcher1 ip_outs12 h4 r2 er2 bb1 so3 wp0 hbp0 pitches50 total_strikes32 bf15 **gs=NULL** (its only appearance has appearance_order NULL → MAX IS NULL → gs NULL).
 - PP_01 is the key row (games_tracked=2 but gs=1 — proves gs counts STARTS not appearances and exercises the non-NULL CASE branch); PP_03 covers the NULL branch.
 - **Injected-divergence (AC-5)**: mutate PP_01 stored `gs` 1→5 and assert exactly one mismatch `(PP_01, gs, stored=5, recomputed=1)`.
+- **Out-of-scope rows (added during E-234-02 round-1 CR remediation — prove the three scope filters are load-bearing).** The single-scope fixture above could not prove that the recompute's `team_id` / `season_id` / `perspective_team_id` filters actually EXCLUDE out-of-scope rows — a dropped filter would still pass exact-green. So the fixture also seeds out-of-scope game rows that MUST NOT leak into the diff: if any filter were dropped, these would sum in and break BOTH the empty-mismatch and the `cells_compared == 74` assertions. The stored `player_season_*` rows are NOT extended, so `cells_compared` stays **74**.
+  - New scaffolding: season `2025-summer-legion` ("Summer 2025 Legion", 2025); player POPP_01 (team OPP, appears only on cross-team rows); game OG_SEASON (season `2025-summer-legion`, home=T, away=OPP, completed).
+  - Out-of-scope `player_game_batting` rows (all 14 stat cols = 9): (1) `(PG_1, PB_01, team=T, perspective_team_id=OPP)` — cross-perspective; (2) `(OG_SEASON, PB_01, team=T, perspective_team_id=T)` — cross-season; (3) `(PG_1, POPP_01, team=OPP, perspective_team_id=T)` — cross-team.
+  - Out-of-scope `player_game_pitching` rows (`appearance_order=1`, all other stat cols = 99): (1) `(PG_1, PP_01, team=T, perspective_team_id=OPP)` — cross-perspective; (2) `(OG_SEASON, PP_01, team=T, perspective_team_id=T)` — cross-season; (3) `(PG_1, POPP_01, team=OPP, perspective_team_id=T)` — cross-team.
+  - The cross-perspective rows are the most important: the `perspective_team_id` filter guards the documented cross-perspective duplicate-stat bug class, and this module is the Epic C cutover gate.
+- **Member-loaded cross-season scope (added during E-234-02 Codex P1 remediation — the case-(b) false-positive guard).** The cross-season probe scope `(T, 2025-summer-legion)` is now MEMBER-LOADED: `full`-completeness stored rows were added for PB_01 (`player_season_batting`) and PP_01 (`player_season_pitching`) with values deliberately **≠** the game-row sums. This single change does triple duty: (a) keeps the clean green path exact, (b) still probes the `season_id` filter via the cross-season game rows above, and (c) serves as the **case-(b) member-exclusion guard** — the scope has game rows + `full` stored rows but zero `boxscore_only`, so the union rule must NOT flag it despite the stored≠recompute divergence. `cells_compared` stays **74** on the clean path (the `full` rows are not `boxscore_only`, so they add no checked cells).
+- **New tests (total now 8):** `test_missing_stored_aggregate_scope_is_flagged` (case a — a scope with game rows and no stored row of any completeness surfaces as all-columns `stored=None` mismatches); `test_member_loaded_scope_not_flagged` (case b — the member-loaded `(T, 2025-summer-legion)` scope is correctly NOT flagged); and `test_asymmetric_member_scope_not_flagged` (case b' — deletes the pitching member row leaving only the batting `full` row, asserting the CROSS-TABLE member-exclusion still suppresses flagging despite the now-asymmetric stored presence). These strengthen AC-3's anti-vacuous intent (a per-scope, not merely overall, non-vacuity guarantee). The `parity_consistent.sql` fixture is UNCHANGED this round — the existing symmetric member scope supports the in-test asymmetric deletion, so no new fixture rows and `cells_compared` stays **74**.
 
 ### TN-3: Subprocess smoke (story 03) — software-engineer
 `generate_report()` hits the network immediately, so the smoke MUST NOT call real generation. Two credential-free, network-free layers added to the existing subprocess pattern in `tests/test_cli.py` (the `_bb_installed` skipif block, ~lines 256-320):
@@ -134,6 +146,24 @@ Per the user's roadmap-tying requirement and the lead's direction, the tracking 
 ## History
 - 2026-06-12: Created (DRAFT). Discovery + se/de consultations complete; incorporated into Technical Notes.
 - 2026-06-12: Reviewed (internal iteration 1: CR spec audit + holistic self/SE/DE; then Codex iteration 1). Combined triage: all findings ACCEPT, 0 DISMISS; incorporated in two one-pass edits, each followed by a consistency sweep (the second caught and fixed 1 drift). Set **READY**.
+- 2026-06-13: **Dispatched + all 5 stories DONE.** Delivered all five regression guards: (01) golden stat tables for the report query surface; (02) aggregate parity module + `bb report verify-aggregates`; (03) `bb report` subprocess smoke; (04) report-generation negative-path characterization; (05) transport-only E2E from recorded payloads. Phase 4 review chain run (CR integration + Codex); see the Dispatch Review Scorecard below. **IDEA-076** (Spray-Value Regression Guard) captured for the consciously-accepted spray-value-coverage gap (story 05 value-guards plays, not spray). During dispatch: two TN-2 fixture-typo corrections (PB_02 `bb` 2→1, PP_02 `so` 8→9 — game rows primary per the lock-step invariant) and the Codex-P1 cross-table member-exclusion refinement landed (both documented in TN-2).
+- 2026-06-13: **Documentation assessment — TRIGGERED.** New operator CLI command `bb report verify-aggregates` shipped → docs-writer dispatched (operator note in `docs/admin`).
+- 2026-06-13: **Context-layer assessment — 6 triggers, explicit per-trigger verdicts:** (1) New convention/pattern/constraint — **YES** (roadmap-tracking convention, TN-6 deferred its codification to this gate; golden-file committed+regen-script pattern); (2) Architectural decision with ongoing implications — **NO** (the guard layer is epic-local; the ongoing piece is the roadmap convention, counted under #1); (3) Footgun/failure mode/boundary discovered — **YES** (`cells_compared > 0` proves *overall*-not-*per-scope* non-vacuity; member-load asymmetry across independent loaders; `data/raw` absent-in-worktree fixture-authoring boundary); (4) Agent behavior/routing/coordination change — **NO**; (5) Domain knowledge for future epics — **YES** (member-load asymmetry + parity provenance distinction `boxscore_only` vs `full`/`supplemented`, relevant to Epic C); (6) New CLI command/workflow/procedure — **YES** (`bb report verify-aggregates`). → claude-architect codified (worktree, rides closure patch): (a) `CLAUDE.md` Commands — added `bb report verify-aggregates` [#6]; (b) `CLAUDE.md` Project Management — new "Roadmap-Derived Epics" pointer note binding roadmap-sequence epics to carry a `## Roadmap` §5 ref + update the ROADMAP §0 tracking table at planning-commit/closure, pointing to ROADMAP §0 as authoritative (TN-6 satisfied) [#1]; (c) `.claude/rules/data-model.md` — new "Season-Aggregate Parity" subsection covering the provenance distinction, member-load asymmetry, and the `cells_compared > 0` footgun [#3/#5]. Documentation: docs-writer added a "Verifying Scouting Aggregate Integrity (`bb report verify-aggregates`)" subsection to `docs/admin/operations.md` (footer 2026-06-13 | Source: E-234).
+
+### Dispatch Review Scorecard (Phases 3–4)
+| Review Pass | Findings | Accepted | Dismissed |
+|---|---|---|---|
+| Per-story CR — E-234-01 | 0 | 0 | 0 |
+| Per-story CR — E-234-02 | 2 | 2 | 0 |
+| Per-story CR — E-234-03 | 0 | 0 | 0 |
+| Per-story CR — E-234-04 | 0 | 0 | 0 |
+| Per-story CR — E-234-05 | 0 | 0 | 0 |
+| CR integration review (Phase 4a) | 2 | 1 | 1 |
+| Codex code review (Phase 4b) | 2 | 2 | 0 |
+| CR re-review of P1 remediation (Phase 4b) | 1 | 1 | 0 |
+| **Total (dispatch)** | **7** | **6** | **1** |
+
+Dispatch notes: E-234-02 CR = 1 MUST FIX (multi-scope fixture gap) + 1 SHOULD FIX (read-only snapshot), Round 2 APPROVED. Phase 4a dismissal = seed-helper duplication (out-of-epic scope — clean fix would require editing the pre-existing `test_report_generator.py`); accepted = schema-load idiom (`test_aggregate_parity.py` → `conftest.load_real_schema`). Codex Phase 4b: P1 = parity false-green (fixed via cross-table member-exclusion / missing-aggregate detection) + P2 = E2E `/search` request-contract tightening; both accepted. P1 re-review SHOULD FIX = per-table member discriminator edge → refined to cross-table provenance (CR Round 2 APPROVED; circuit breaker did not fire). IDEA-076 captured is a backlog idea, not a finding.
 
 ### Review Scorecard
 | Review Pass | Findings | Accepted | Dismissed |

@@ -4,7 +4,7 @@
 [E-234: Report Regression Guards](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the suite contains one end-to-end report-generation test that mocks only the HTTP transport (feeding recorded GameChanger payloads per-URL) and drives `generate_report()` through its full crawl→load→query→render path. This is the only guard that catches GC payload-shape drift; existing tests mock the crawler/loader and cannot.

@@ -4,7 +4,7 @@
 [E-234: Report Regression Guards](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the suite contains credential-free subprocess smoke tests for `bb report generate` that catch packaging and import-time breaks the in-process CliRunner masks. These run `bb report generate` as the real installed console script without any network call.

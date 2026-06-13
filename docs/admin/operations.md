@@ -807,6 +807,26 @@ This behavior is automatic -- no operator decision is required. The system appli
 
 **Typical use case**: A report generated for a tournament team that is not on your schedule will usually satisfy all four conditions. Deleting the report cleans up the team data completely. A report generated for an opponent who is also tracked on the dashboard (linked via `team_opponents`) will only remove the report file -- the scouting data stays.
 
+### Verifying Scouting Aggregate Integrity (`bb report verify-aggregates`)
+
+`bb report verify-aggregates` is a read-only diagnostic that checks whether stored scouting season aggregates are consistent with the underlying per-game data. It recomputes each team/season's `boxscore_only` aggregates from the `player_game_batting` and `player_game_pitching` rows, then diffs them against the corresponding `player_season_batting` and `player_season_pitching` rows. Mismatches are reported per player, team, season, and column.
+
+```bash
+bb report verify-aggregates
+```
+
+**When to run**:
+- As an ad-hoc data-integrity diagnostic after a scouting pipeline run you suspect may have produced inconsistent aggregates.
+- Before the Epic C payload-first-loader cutover: run against a copy of the production database to confirm aggregate consistency before the pipeline changes are applied.
+
+**Reading the output**:
+- **Empty mismatch list + clean success message + exit 0**: aggregates are consistent. No action needed.
+- **Non-empty mismatch list + exit 1**: each flagged row shows the player, team, season, column name, stored value, and recomputed value. Re-running `bb data scout` for the affected team(s) will refresh the stored aggregates.
+
+**Scope**: Covers `boxscore_only` (scouting) aggregates only -- those derived from per-game boxscore data. Season rows loaded from the GameChanger season-stats endpoint (`full` and `supplemented` membership types) are intentionally excluded; they are not derived from per-game data and cannot be verified by recomputation.
+
+**Read-only**: This command never writes to `player_season_*` tables. It is safe to run against production at any time.
+
 ---
 
 ## Programs Management
@@ -1125,4 +1145,4 @@ For the expected data volume (~30 games x 4 teams x a few seasons), the database
 
 ---
 
-*Last updated: 2026-04-13 | Source: E-221 (team delete cross-perspective gate, cascade consolidation, retention flash message), E-199 (standalone reports section, cascade-delete behavior), E-198 (bb data reconcile, migration 012), E-195 (plays pipeline, migration 009, validate_plays_stats.py), E-173 (resolution write-through, auto-scout after linking, unified Find on GC resolve page, dashboard sort by next game date, terminology cleanup, bb data repair-opponents), E-167 (bb data dedup CLI, GC search-powered opponent resolution, skip/unhide workflow), E-163 (scouting spray pipeline, updated thresholds, bb data scout 4-step flow), E-158 (spray chart pipeline, migration 006, chart routes), E-156 (bb data scout --force flag), E-155 (duplicate team detection and merge UI), E-143 (programs, user roles, team delete, opponent mapping UX, crawl trigger UI), E-120-06 (bare UUID input documented), E-055 (unified CLI), E-115-01 (E-100 team management model), E-028-03 (original)*
+*Last updated: 2026-06-13 | Source: E-234 (bb report verify-aggregates), E-221 (team delete cross-perspective gate, cascade consolidation, retention flash message), E-199 (standalone reports section, cascade-delete behavior), E-198 (bb data reconcile, migration 012), E-195 (plays pipeline, migration 009, validate_plays_stats.py), E-173 (resolution write-through, auto-scout after linking, unified Find on GC resolve page, dashboard sort by next game date, terminology cleanup, bb data repair-opponents), E-167 (bb data dedup CLI, GC search-powered opponent resolution, skip/unhide workflow), E-163 (scouting spray pipeline, updated thresholds, bb data scout 4-step flow), E-158 (spray chart pipeline, migration 006, chart routes), E-156 (bb data scout --force flag), E-155 (duplicate team detection and merge UI), E-143 (programs, user roles, team delete, opponent mapping UX, crawl trigger UI), E-120-06 (bare UUID input documented), E-055 (unified CLI), E-115-01 (E-100 team management model), E-028-03 (original)*

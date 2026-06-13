@@ -1,0 +1,40 @@
+[
+  {
+    "id": "00000000-0000-4000-8000-000000000002",
+    "opponent_team": {
+      "name": "Example Opponent One",
+      "avatar_url": ""
+    },
+    "is_full_day": false,
+    "start_ts": "2026-03-19T21:30:00.000Z",
+    "end_ts": "2026-03-19T22:30:00.000Z",
+    "timezone": "America/Chicago",
+    "home_away": "home",
+    "score": {
+      "team": 11,
+      "opponent_team": 1
+    },
+    "game_status": "completed",
+    "has_videos_available": true,
+    "has_live_stream": false
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000004",
+    "opponent_team": {
+      "name": "Example Opponent Two",
+      "avatar_url": ""
+    },
+    "is_full_day": false,
+    "start_ts": "2026-03-27T17:30:00.000Z",
+    "end_ts": "2026-03-27T18:30:00.000Z",
+    "timezone": "America/Chicago",
+    "home_away": "away",
+    "score": {
+      "team": 4,
+      "opponent_team": 14
+    },
+    "game_status": "completed",
+    "has_videos_available": true,
+    "has_live_stream": false
+  }
+]

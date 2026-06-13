@@ -1,0 +1,121 @@
+[
+  {
+    "id": "00000000-0000-4000-8000-000000000005",
+    "first_name": "Player",
+    "last_name": "One",
+    "number": "17",
+    "avatar_url": ""
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000006",
+    "first_name": "Player",
+    "last_name": "Two",
+    "number": "14",
+    "avatar_url": ""
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000007",
+    "first_name": "Player",
+    "last_name": "Three",
+    "number": "18",
+    "avatar_url": ""
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000008",
+    "first_name": "Player",
+    "last_name": "Four",
+    "number": "13",
+    "avatar_url": ""
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000009",
+    "first_name": "Player",
+    "last_name": "Five",
+    "number": "9",
+    "avatar_url": ""
+  },
+  {
+    "id": "00000000-0000-4000-8000-00000000000a",
+    "first_name": "Player",
+    "last_name": "Six",
+    "number": "3",
+    "avatar_url": ""
+  },
+  {
+    "id": "00000000-0000-4000-8000-00000000000b",
+    "first_name": "Player",
+    "last_name": "Seven",
+    "number": "1",
+    "avatar_url": ""
+  },
+  {
+    "id": "00000000-0000-4000-8000-00000000000c",
+    "first_name": "Player",
+    "last_name": "Eight",
+    "number": "5",
+    "avatar_url": ""
+  },
+  {
+    "id": "00000000-0000-4000-8000-00000000000d",
+    "first_name": "Player",
+    "last_name": "Nine",
+    "number": "16",
+    "avatar_url": ""
+  },
+  {
+    "id": "00000000-0000-4000-8000-00000000000e",
+    "first_name": "Player",
+    "last_name": "Ten",
+    "number": "10",
+    "avatar_url": ""
+  },
+  {
+    "id": "00000000-0000-4000-8000-00000000000f",
+    "first_name": "Player",
+    "last_name": "Eleven",
+    "number": "7",
+    "avatar_url": ""
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000010",
+    "first_name": "Player",
+    "last_name": "Twelve",
+    "number": "2",
+    "avatar_url": ""
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000011",
+    "first_name": "Player",
+    "last_name": "Thirteen",
+    "number": "4",
+    "avatar_url": ""
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000012",
+    "first_name": "Player",
+    "last_name": "Fourteen",
+    "number": "15",
+    "avatar_url": ""
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000013",
+    "first_name": "Player",
+    "last_name": "Fifteen",
+    "number": "12",
+    "avatar_url": ""
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000014",
+    "first_name": "Player",
+    "last_name": "Sixteen",
+    "number": "11",
+    "avatar_url": ""
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000015",
+    "first_name": "Player",
+    "last_name": "Seventeen",
+    "number": "8",
+    "avatar_url": ""
+  }
+]

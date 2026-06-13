@@ -21,7 +21,7 @@ as epics land. **Convention**: this table is updated at two moments — at an ep
 
 | Slice | Title | Epic | Status |
 |-------|-------|------|--------|
-| A | Regression guards for the reports flow | E-234 | READY |
+| A | Regression guards for the reports flow | E-234 | COMPLETED |
 | B | Report run records + trust signals + quality gates | — | NOT STARTED |
 | C | Payload-first loaders + aggregate integrity | — | NOT STARTED |
 | D1 | Quarantine + navigation retarget + passkey fix | — | NOT STARTED |

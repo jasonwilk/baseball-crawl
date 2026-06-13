@@ -4,7 +4,7 @@
 [E-234: Report Regression Guards](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, a reusable parity function in `src/reports/aggregate_parity.py` diffs stored `player_season_*` aggregate rows against a perspective-filtered recompute from `player_game_*`, an operator command `bb report verify-aggregates` invokes it, and a test asserts it returns an empty mismatch list on a purpose-built rollup-consistent fixture (`tests/fixtures/parity_consistent.sql`). This module doubles as the Epic C cutover gate.

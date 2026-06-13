@@ -1,0 +1,609 @@
+{
+ "stream_id": "00000000-0000-4000-8000-000000000059",
+ "team_id": "00000000-0000-4000-8000-00000000003b",
+ "event_id": "00000000-0000-4000-8000-000000000004",
+ "cumulative_player_stats": {},
+ "player_stats": {
+  "stats": {},
+  "players": {}
+ },
+ "spray_chart_data": {
+  "offense": {
+   "00000000-0000-4000-8000-000000000010": [
+    {
+     "code": "ball_in_play",
+     "id": "00000000-0000-4000-8000-00000000005a",
+     "compactorAttributes": {
+      "stream": "main"
+     },
+     "attributes": {
+      "playResult": "batter_out_advance_runners",
+      "defenders": [
+       {
+        "error": false,
+        "position": "1B",
+        "location": {
+         "x": 241.14716981132077,
+         "y": 207.13522012578616
+        }
+       }
+      ],
+      "playType": "ground_ball"
+     },
+     "createdAt": 1774633033022
+    }
+   ],
+   "00000000-0000-4000-8000-00000000000f": [
+    {
+     "code": "ball_in_play",
+     "id": "00000000-0000-4000-8000-00000000005d",
+     "compactorAttributes": {
+      "stream": "main"
+     },
+     "attributes": {
+      "playResult": "single",
+      "defenders": [
+       {
+        "error": false,
+        "position": "CF",
+        "location": {
+         "y": 63.45125786163524,
+         "x": 117.73584905660377
+        }
+       }
+      ],
+      "playType": "line_drive"
+     },
+     "createdAt": 1774633064717
+    }
+   ],
+   "00000000-0000-4000-8000-00000000000d": [
+    {
+     "code": "ball_in_play",
+     "id": "00000000-0000-4000-8000-00000000005f",
+     "compactorAttributes": {
+      "stream": "main"
+     },
+     "attributes": {
+      "playResult": "batter_out",
+      "defenders": [
+       {
+        "error": false,
+        "position": "RF",
+        "location": {
+         "y": 112.50000000000003,
+         "x": 291.3207547169811
+        }
+       }
+      ],
+      "playType": "line_drive"
+     },
+     "createdAt": 1774633079304
+    }
+   ],
+   "00000000-0000-4000-8000-00000000000e": [
+    {
+     "code": "ball_in_play",
+     "id": "00000000-0000-4000-8000-000000000062",
+     "compactorAttributes": {
+      "stream": "main"
+     },
+     "attributes": {
+      "playResult": "batter_out_advance_runners",
+      "defenders": [
+       {
+        "error": false,
+        "position": "SS",
+        "location": {
+         "x": 96,
+         "y": 130.85000000000002
+        }
+       },
+       {
+        "error": false,
+        "position": "1B",
+        "location": {
+         "x": 247.18490566037735,
+         "y": 226.17767295597486
+        }
+       }
+      ],
+      "playType": "ground_ball"
+     },
+     "createdAt": 1774633632298
+    }
+   ],
+   "00000000-0000-4000-8000-00000000000a": [
+    {
+     "code": "ball_in_play",
+     "id": "00000000-0000-4000-8000-000000000063",
+     "compactorAttributes": {
+      "stream": "main"
+     },
+     "attributes": {
+      "playResult": "error",
+      "defenders": [
+       {
+        "error": true,
+        "position": "3B",
+        "location": {
+         "x": 72.211320754717,
+         "y": 189.24685534591197
+        }
+       },
+       {
+        "error": false,
+        "position": "1B",
+        "location": {
+         "y": 186.07311320754718,
+         "x": 270.1283018867924
+        }
+       }
+      ],
+      "playType": "hard_ground_ball"
+     },
+     "createdAt": 1774633940469
+    }
+   ],
+   "00000000-0000-4000-8000-000000000014": [
+    {
+     "code": "ball_in_play",
+     "id": "00000000-0000-4000-8000-000000000065",
+     "compactorAttributes": {
+      "stream": "main"
+     },
+     "attributes": {
+      "playResult": "error",
+      "defenders": [
+       {
+        "error": true,
+        "position": "3B",
+        "location": {
+         "y": 198.4795597484277,
+         "x": 68.2867924528302
+        }
+       },
+       {
+        "error": false,
+        "position": "1B",
+        "location": {
+         "y": 227.90880503144655,
+         "x": 261.6754716981132
+        }
+       }
+      ],
+      "playType": "hard_ground_ball"
+     },
+     "createdAt": 1774634000020
+    }
+   ],
+   "00000000-0000-4000-8000-000000000015": [
+    {
+     "code": "ball_in_play",
+     "id": "00000000-0000-4000-8000-000000000067",
+     "compactorAttributes": {
+      "stream": "main"
+     },
+     "attributes": {
+      "playResult": "batter_out",
+      "defenders": [
+       {
+        "error": false,
+        "position": "SS",
+        "location": {
+         "x": 99.9245283018868,
+         "y": 95.36179245283022
+        }
+       }
+      ],
+      "playType": "pop_fly"
+     },
+     "createdAt": 1774635316736
+    }
+   ],
+   "00000000-0000-4000-8000-000000000011": [
+    {
+     "code": "ball_in_play",
+     "id": "00000000-0000-4000-8000-000000000068",
+     "compactorAttributes": {
+      "stream": "main"
+     },
+     "attributes": {
+      "playResult": "batter_out_advance_runners",
+      "defenders": [
+       {
+        "error": false,
+        "position": "C",
+        "location": {
+         "x": 124.37735849056604,
+         "y": 284.0551886792453
+        }
+       },
+       {
+        "error": false,
+        "position": "1B",
+        "location": {
+         "y": 227.3317610062893,
+         "x": 244.16603773584905
+        }
+       }
+      ],
+      "playType": "bunt"
+     },
+     "createdAt": 1774637980422
+    }
+   ],
+   "00000000-0000-4000-8000-000000000032": [
+    {
+     "code": "ball_in_play",
+     "id": "00000000-0000-4000-8000-000000000069",
+     "compactorAttributes": {
+      "stream": "main"
+     },
+     "attributes": {
+      "playResult": "single",
+      "defenders": [
+       {
+        "error": false,
+        "position": "2B",
+        "location": {
+         "y": 116.71242138364784,
+         "x": 187.77358490566039
+        }
+       }
+      ],
+      "playType": "ground_ball"
+     },
+     "createdAt": 1774634436470
+    }
+   ],
+   "00000000-0000-4000-8000-000000000028": [
+    {
+     "code": "ball_in_play",
+     "id": "00000000-0000-4000-8000-00000000006d",
+     "compactorAttributes": {
+      "stream": "main"
+     },
+     "attributes": {
+      "playResult": "batter_out",
+      "defenders": [
+       {
+        "error": false,
+        "position": "CF",
+        "location": {
+         "x": 139.47169811320754,
+         "y": 53.064465408805056
+        }
+       }
+      ],
+      "playType": "pop_fly"
+     },
+     "createdAt": 1774633281121
+    }
+   ],
+   "00000000-0000-4000-8000-00000000002e": [
+    {
+     "code": "ball_in_play",
+     "id": "00000000-0000-4000-8000-000000000070",
+     "compactorAttributes": {
+      "stream": "main"
+     },
+     "attributes": {
+      "playResult": "double",
+      "defenders": [
+       {
+        "error": false,
+        "position": "RF",
+        "location": {
+         "x": 294.9433962264151,
+         "y": 36.3301886792453
+        }
+       }
+      ],
+      "playType": "line_drive"
+     },
+     "createdAt": 1774635030802
+    }
+   ],
+   "00000000-0000-4000-8000-00000000002d": [
+    {
+     "code": "ball_in_play",
+     "id": "00000000-0000-4000-8000-000000000072",
+     "compactorAttributes": {
+      "stream": "main"
+     },
+     "attributes": {
+      "playResult": "error",
+      "defenders": [
+       {
+        "error": true,
+        "position": "SS",
+        "location": {
+         "x": 89.66037735849056,
+         "y": 139.5056603773585
+        }
+       },
+       {
+        "error": false,
+        "position": "1B",
+        "location": {
+         "x": 243.26037735849056,
+         "y": 238.0070754716981
+        }
+       }
+      ],
+      "playType": "ground_ball"
+     },
+     "createdAt": 1774634959941
+    }
+   ],
+   "00000000-0000-4000-8000-000000000026": [
+    {
+     "code": "ball_in_play",
+     "id": "00000000-0000-4000-8000-000000000075",
+     "compactorAttributes": {
+      "stream": "main"
+     },
+     "attributes": {
+      "playResult": "batter_out",
+      "defenders": [
+       {
+        "error": false,
+        "position": "LF",
+        "location": {
+         "y": 104.70990566037739,
+         "x": 67.62264150943396
+        }
+       }
+      ],
+      "playType": "pop_fly"
+     },
+     "createdAt": 1774634734869
+    }
+   ],
+   "00000000-0000-4000-8000-000000000030": [
+    {
+     "code": "ball_in_play",
+     "id": "00000000-0000-4000-8000-000000000077",
+     "compactorAttributes": {
+      "stream": "main"
+     },
+     "attributes": {
+      "playResult": "error",
+      "defenders": [
+       {
+        "error": true,
+        "position": "3B",
+        "location": {
+         "x": 71.60754716981134,
+         "y": 193.2861635220126
+        }
+       },
+       {
+        "error": false,
+        "position": "1B",
+        "location": {
+         "y": 226.17767295597486,
+         "x": 247.18490566037735
+        }
+       }
+      ],
+      "playType": "ground_ball"
+     },
+     "createdAt": 1774634818610
+    }
+   ],
+   "00000000-0000-4000-8000-000000000033": [
+    {
+     "code": "ball_in_play",
+     "id": "00000000-0000-4000-8000-00000000007a",
+     "compactorAttributes": {
+      "stream": "main"
+     },
+     "attributes": {
+      "playResult": "batter_out_advance_runners",
+      "defenders": [
+       {
+        "error": false,
+        "position": "2B",
+        "location": {
+         "x": 201.66037735849056,
+         "y": 145.85314465408808
+        }
+       },
+       {
+        "error": false,
+        "position": "1B",
+        "location": {
+         "x": 251.71320754716982,
+         "y": 224.44654088050314
+        }
+       }
+      ],
+      "playType": "hard_ground_ball"
+     },
+     "createdAt": 1774633450626
+    }
+   ],
+   "00000000-0000-4000-8000-00000000002b": [
+    {
+     "code": "ball_in_play",
+     "id": "00000000-0000-4000-8000-00000000007e",
+     "compactorAttributes": {
+      "stream": "main"
+     },
+     "attributes": {
+      "playResult": "batter_out",
+      "defenders": [
+       {
+        "error": false,
+        "position": "RF",
+        "location": {
+         "y": 139.90959119496858,
+         "x": 308.8301886792453
+        }
+       }
+      ],
+      "playType": "pop_fly"
+     },
+     "createdAt": 1774634345232
+    }
+   ],
+   "00000000-0000-4000-8000-000000000035": [
+    {
+     "code": "ball_in_play",
+     "id": "00000000-0000-4000-8000-000000000081",
+     "compactorAttributes": {
+      "stream": "main"
+     },
+     "attributes": {
+      "playResult": "batter_out",
+      "defenders": [
+       {
+        "error": false,
+        "position": "CF",
+        "location": {
+         "x": 135.54716981132074,
+         "y": 58.54638364779876
+        }
+       }
+      ],
+      "playType": "fly_ball"
+     },
+     "createdAt": 1774633485019
+    }
+   ]
+  },
+  "defense": {
+   "00000000-0000-4000-8000-00000000000d": [
+    {
+     "code": "ball_in_play",
+     "id": "00000000-0000-4000-8000-00000000006d",
+     "compactorAttributes": {
+      "stream": "main"
+     },
+     "attributes": {
+      "playResult": "batter_out",
+      "defenders": [
+       {
+        "error": false,
+        "position": "CF",
+        "location": {
+         "x": 139.47169811320754,
+         "y": 53.064465408805056
+        }
+       }
+      ],
+      "playType": "pop_fly"
+     },
+     "createdAt": 1774633281121
+    }
+   ],
+   "00000000-0000-4000-8000-000000000011": [
+    {
+     "code": "ball_in_play",
+     "id": "00000000-0000-4000-8000-000000000071",
+     "compactorAttributes": {
+      "stream": "main"
+     },
+     "attributes": {
+      "playResult": "single",
+      "defenders": [
+       {
+        "error": false,
+        "position": "RF",
+        "location": {
+         "y": 104.13286163522015,
+         "x": 292.8301886792453
+        }
+       }
+      ],
+      "playType": "hard_ground_ball"
+     },
+     "createdAt": 1774636351557
+    }
+   ],
+   "00000000-0000-4000-8000-000000000008": [
+    {
+     "code": "ball_in_play",
+     "id": "00000000-0000-4000-8000-000000000084",
+     "compactorAttributes": {
+      "stream": "main"
+     },
+     "attributes": {
+      "playResult": "batter_out",
+      "defenders": [
+       {
+        "error": false,
+        "position": "CF",
+        "location": {
+         "x": 160,
+         "y": 61.43160377358493
+        }
+       }
+      ],
+      "playType": "fly_ball"
+     },
+     "createdAt": 1774638291445
+    }
+   ],
+   "00000000-0000-4000-8000-000000000029": [
+    {
+     "code": "ball_in_play",
+     "id": "00000000-0000-4000-8000-00000000005a",
+     "compactorAttributes": {
+      "stream": "main"
+     },
+     "attributes": {
+      "playResult": "batter_out_advance_runners",
+      "defenders": [
+       {
+        "error": false,
+        "position": "1B",
+        "location": {
+         "x": 241.14716981132077,
+         "y": 207.13522012578616
+        }
+       }
+      ],
+      "playType": "ground_ball"
+     },
+     "createdAt": 1774633033022
+    }
+   ],
+   "00000000-0000-4000-8000-00000000002a": [
+    {
+     "code": "ball_in_play",
+     "id": "00000000-0000-4000-8000-000000000068",
+     "compactorAttributes": {
+      "stream": "main"
+     },
+     "attributes": {
+      "playResult": "batter_out_advance_runners",
+      "defenders": [
+       {
+        "error": false,
+        "position": "C",
+        "location": {
+         "x": 124.37735849056604,
+         "y": 284.0551886792453
+        }
+       },
+       {
+        "error": false,
+        "position": "1B",
+        "location": {
+         "y": 227.3317610062893,
+         "x": 244.16603773584905
+        }
+       }
+      ],
+      "playType": "bunt"
+     },
+     "createdAt": 1774637980422
+    }
+   ]
+  }
+ },
+ "_note": "Trimmed for E-234-05 e2e: 1 spray event/player kept; player_stats/cumulative_player_stats emptied (loader reads only spray_chart_data). Non-oracle, non-fatal."
+}

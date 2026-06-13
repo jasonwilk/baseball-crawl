@@ -320,3 +320,56 @@ def test_bb_data_help_subprocess() -> None:
         f"stdout: {result.stdout}\n"
         f"stderr: {result.stderr}"
     )
+
+
+@_bb_installed
+def test_bb_report_generate_help_subprocess() -> None:
+    """bb report generate --help works as a console script (E-234-03 AC-1).
+
+    Packaging/import canary: catches import-time breaks in the
+    ``src.reports.generator`` chain that the in-process CliRunner masks
+    (CliRunner inherits pytest's sys.path; the real console script does not).
+    Runs no network call -- ``--help`` short-circuits before any generation.
+    """
+    result = subprocess.run(
+        ["bb", "report", "generate", "--help"],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, (
+        f"bb report generate --help failed with exit code {result.returncode}\n"
+        f"stdout: {result.stdout}\n"
+        f"stderr: {result.stderr}"
+    )
+    combined = result.stdout + result.stderr
+    assert "Generate" in combined or "gc_url" in combined, (
+        "bb report generate --help missing expected substring\n"
+        f"stdout: {result.stdout}\nstderr: {result.stderr}"
+    )
+
+
+@_bb_installed
+def test_bb_report_generate_invalid_url_subprocess() -> None:
+    """bb report generate with an invalid URL exits non-zero (E-234-03 AC-2).
+
+    Verifies the parse-time failure path is wired through the real entry
+    point BEFORE any network call: ``parse_team_url()`` raises ``ValueError``
+    for a malformed identifier, ``generate_report()`` returns a failure
+    result, and the CLI exits with code 1 and prints the error. No mocks are
+    injected into the child process and no credentials/network are required.
+    """
+    result = subprocess.run(
+        ["bb", "report", "generate", "not-a-valid-url-@@@"],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0, (
+        "bb report generate with an invalid URL should exit non-zero "
+        f"but exited {result.returncode}\n"
+        f"stdout: {result.stdout}\nstderr: {result.stderr}"
+    )
+    combined = (result.stdout + result.stderr).lower()
+    assert "fail" in combined or "error" in combined, (
+        "bb report generate invalid-URL run produced no error output\n"
+        f"stdout: {result.stdout}\nstderr: {result.stderr}"
+    )

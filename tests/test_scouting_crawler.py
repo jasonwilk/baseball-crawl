@@ -24,7 +24,11 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from migrations.apply_migrations import run_migrations
-from src.gamechanger.client import CredentialExpiredError, ForbiddenError
+from src.gamechanger.client import (
+    CredentialExpiredError,
+    ForbiddenError,
+    GameChangerAPIError,
+)
 from src.gamechanger.crawlers.scouting import (
     ScoutingCrawler,
     ScoutingCrawlResult,
@@ -263,6 +267,49 @@ def test_no_completed_games_returns_skipped(
     result = crawler.scout_team(_PUBLIC_ID, season_id="2025-spring-hs")
     assert result.skipped is True
     assert result.games_crawled == 0
+
+
+# ---------------------------------------------------------------------------
+# E-234-04 AC-4: roster-fetch failure resilience (crawler layer)
+# ---------------------------------------------------------------------------
+
+
+def test_roster_fetch_failure_is_resilient(
+    crawler: ScoutingCrawler, mock_client: MagicMock, db: sqlite3.Connection
+) -> None:
+    """A roster-fetch failure is handled gracefully at the crawler layer.
+
+    When the roster endpoint raises a handled API error, ``_fetch_roster``
+    returns ``None`` and ``scout_team`` short-circuits: it writes a 'failed'
+    scouting_run and returns a result with ``errors == 1`` and zero boxscores
+    -- WITHOUT crashing and WITHOUT attempting any boxscore fetch. This pins
+    the crawler-level resilience contract (one layer below the report
+    generator, where E-234-04 AC-1/AC-2/AC-3 live).
+    """
+    mock_client.get_public.return_value = _GAMES_RESPONSE  # one completed game
+    # First (and only) authenticated GET is the roster fetch -> make it fail.
+    mock_client.get.side_effect = GameChangerAPIError("roster endpoint 500")
+
+    result = crawler.scout_team(_PUBLIC_ID, season_id="2025-spring-hs")
+
+    # Resilience: no exception, terminal result flags the error.
+    assert isinstance(result, ScoutingCrawlResult)
+    assert result.errors == 1
+    assert result.games_crawled == 0
+    assert result.boxscores == {}
+    assert result.roster == []
+
+    # Boxscore fetching never started -- only the roster GET was attempted.
+    assert mock_client.get.call_count == 1
+    roster_call = mock_client.get.call_args_list[0]
+    assert f"/teams/public/{_PUBLIC_ID}/players" in roster_call.args[0]
+
+    # The scouting_run is recorded as 'failed' (not left running).
+    row = db.execute(
+        "SELECT status FROM scouting_runs ORDER BY id DESC LIMIT 1"
+    ).fetchone()
+    assert row is not None
+    assert row[0] == "failed"
 
 
 # ---------------------------------------------------------------------------

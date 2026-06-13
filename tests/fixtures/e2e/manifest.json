@@ -1,0 +1,101 @@
+{
+  "description": "E2E report-generation fixture for E-234-05. One team, two completed games. Real GameChanger payload SHAPES, fully anonymized. Drive generate_report() against a transport-only (respx-style) mock keyed by the URLs below.",
+  "team": {
+    "public_id": "ExampleTm001",
+    "gc_uuid": "00000000-0000-4000-8000-00000000003b",
+    "name": "Example Team Varsity",
+    "season": "spring 2026",
+    "source_note": "Anonymized from a real Nebraska HS varsity team / 2026 spring season cache (data/raw/2026-spring-hs/scouting/). Real identifiers removed."
+  },
+  "games": [
+    {
+      "game_id": "00000000-0000-4000-8000-000000000002",
+      "date": "2026-03-19",
+      "home_away": "home",
+      "team_score": 11,
+      "opponent_score": 1,
+      "result": "W",
+      "opponent": "Example Opponent One"
+    },
+    {
+      "game_id": "00000000-0000-4000-8000-000000000004",
+      "date": "2026-03-27",
+      "home_away": "away",
+      "team_score": 4,
+      "opponent_score": 14,
+      "result": "L",
+      "opponent": "Example Opponent Two"
+    }
+  ],
+  "requests": [
+    {
+      "method": "GET",
+      "url": "https://api.team-manager.gc.com/public/teams/ExampleTm001",
+      "file": "public_team_profile.json",
+      "note": "Step 1b team name/season/age_group/ngb. No auth."
+    },
+    {
+      "method": "GET",
+      "url": "https://api.team-manager.gc.com/public/teams/ExampleTm001/games",
+      "file": "public_team_games.json",
+      "note": "Schedule. 2 completed games. No auth."
+    },
+    {
+      "method": "GET",
+      "url": "https://api.team-manager.gc.com/teams/public/ExampleTm001/players",
+      "file": "roster_players.json",
+      "note": "Roster (note inverted /teams/public/ path). gc-token."
+    },
+    {
+      "method": "POST",
+      "url": "https://api.team-manager.gc.com/search",
+      "request_body": {
+        "name": "Example Team Varsity"
+      },
+      "query": "start_at_page=0&search_source=search",
+      "file": "search_response.json",
+      "note": "gc_uuid resolution. Single hit: result.public_id==public_id, result.id==gc_uuid. Generator filters hits by public_id."
+    },
+    {
+      "method": "GET",
+      "url": "https://api.team-manager.gc.com/game-stream-processing/00000000-0000-4000-8000-000000000002/boxscore",
+      "file": "boxscore_00000000-0000-4000-8000-000000000002.json",
+      "note": "Game 1 boxscore. gc-token."
+    },
+    {
+      "method": "GET",
+      "url": "https://api.team-manager.gc.com/game-stream-processing/00000000-0000-4000-8000-000000000004/boxscore",
+      "file": "boxscore_00000000-0000-4000-8000-000000000004.json",
+      "note": "Game 2 boxscore. gc-token."
+    },
+    {
+      "method": "GET",
+      "url": "https://api.team-manager.gc.com/game-stream-processing/00000000-0000-4000-8000-000000000002/plays",
+      "file": "plays_00000000-0000-4000-8000-000000000002.json",
+      "note": "Game 1 plays (FPS%/QAB source)."
+    },
+    {
+      "method": "GET",
+      "url": "https://api.team-manager.gc.com/game-stream-processing/00000000-0000-4000-8000-000000000004/plays",
+      "file": "plays_00000000-0000-4000-8000-000000000004.json",
+      "note": "Game 2 plays."
+    },
+    {
+      "method": "GET",
+      "url": "https://api.team-manager.gc.com/teams/00000000-0000-4000-8000-00000000003b/schedule/events/00000000-0000-4000-8000-000000000002/player-stats",
+      "file": "spray_00000000-0000-4000-8000-000000000002.json",
+      "note": "Game 1 spray. URL uses gc_uuid (from search) + game_id."
+    },
+    {
+      "method": "GET",
+      "url": "https://api.team-manager.gc.com/teams/00000000-0000-4000-8000-00000000003b/schedule/events/00000000-0000-4000-8000-000000000004/player-stats",
+      "file": "spray_00000000-0000-4000-8000-000000000004.json",
+      "note": "Game 2 spray."
+    }
+  ],
+  "notes": [
+    "Boxscore/plays top-level keys: own team = public_id slug 'ExampleTm001' (no dashes); opponent = a UUID (with dashes). The generator detects own-team key as the non-UUID key.",
+    "All UUIDs are fake (00000000-0000-4000-8000-NNNNNNNNNNNN). Cross-file references (player_id joins, ${uuid} template refs, spray team_id, search result.id, game ids) are consistent across every file.",
+    "Spray payloads are large (real shape). If size matters they can be trimmed/stubbed without affecting the named oracle (spray is non-fatal in the generator and not part of the oracle)."
+  ]
+}

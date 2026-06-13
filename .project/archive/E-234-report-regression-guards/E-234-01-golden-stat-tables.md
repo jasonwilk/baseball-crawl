@@ -4,7 +4,7 @@
 [E-234: Report Regression Guards](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the test suite contains a golden-stat-table test that seeds a fixture DB, runs the full report query surface, and deep-equals the result against a committed golden JSON file. Any future change that alters a report stat value, a computed formula (ERA/WHIP/K9/OBP), or a heat level fails this test. This is the primary "did we regress the numbers" guard for every later roadmap epic.

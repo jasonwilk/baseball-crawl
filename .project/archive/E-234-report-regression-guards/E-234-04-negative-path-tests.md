@@ -4,7 +4,7 @@
 [E-234: Report Regression Guards](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the suite pins the current behavior of `generate_report()` under failure and degraded-data conditions — no completed games, public-profile fetch failure, auth expiry mid-run — plus a crawler-level roster-fetch-failure test. These characterize present behavior (including the known ready-but-empty case) so Epic B's quality gates have a verified before-anchor.
