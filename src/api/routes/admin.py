@@ -59,6 +59,7 @@ from src.api.db import (
     get_opponent_links,
     get_unresolved_opponent_count,
     is_member_team_public_id,
+    list_reports_with_runs,
     save_manual_opponent_link,
 )
 from src.api.auth import user_is_admin
@@ -827,6 +828,18 @@ def _get_delete_confirmation_data(team_id: int) -> dict[str, Any]:
         # src/reports/generator.py:1476-1478) actually deletes.  Without the
         # 5th table here, a team with ONLY foreign-owned reconciliation rows
         # silently bypassed the confirmation screen.
+        #
+        # E-235-05 (TN-5 / AC-3) audit conclusion: report_generation_runs is
+        # DELIBERATELY EXCLUDED from this UNION. The UNION detects per-player
+        # stat rows that a DIFFERENT team's perspective owns (team_id = T,
+        # perspective_team_id != T) so the team-delete cascade surfaces them for
+        # confirmation. report_generation_runs is report-scoped telemetry: it
+        # FK-references reports(id) and has NO team_id / perspective_team_id
+        # column, so it can never be cross-perspective-owned. It is also never
+        # touched by the team-delete cascade (cascade_delete_team never deletes a
+        # reports row; reports.team_id is NOT NULL with no ON DELETE CASCADE, so
+        # a team with reports cannot be deleted in the first place). Its only
+        # delete path is _delete_report, where the FK cascade above handles it.
         cross_persp_rows = conn.execute(
             """
             SELECT t.name, t.id, SUM(row_count) AS row_count
@@ -3211,22 +3224,24 @@ async def create_program(
 
 
 def _get_all_reports() -> list[dict[str, Any]]:
-    """Return all reports sorted by generated_at descending."""
+    """Return all reports (joined to their run record) sorted by generated_at desc.
+
+    Uses the shared ``list_reports_with_runs`` join (src/api/db.py) so this admin
+    surface and the CLI ``list_reports()`` read the same 1:1 LEFT JOIN
+    (E-235-06 / TN-6). Each dict gains the per-stage ``report_generation_runs``
+    columns and the operator-only trust flags (``season_fallback``,
+    ``identity_match_method``); ``error_message`` was already selected here.
+    Run columns are NULL for legacy reports with no run row (LEFT join).
+    """
     from datetime import datetime, timezone
+
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     base_url = os.environ.get("APP_URL", "http://localhost:8001").rstrip("/")
     with closing(get_connection()) as conn:
-        conn.row_factory = sqlite3.Row
-        rows = conn.execute(
-            "SELECT id, slug, title, status, generated_at, expires_at, "
-            "report_path, error_message FROM reports ORDER BY generated_at DESC"
-        ).fetchall()
-    result = []
-    for row in rows:
-        r = dict(row)
+        result = list_reports_with_runs(conn)
+    for r in result:
         r["url"] = f"{base_url}/reports/{r['slug']}"
         r["is_expired"] = r["expires_at"] < now
-        result.append(r)
     return result
 
 
@@ -3266,7 +3281,15 @@ def _delete_report(report_id: int) -> None:
         # exclude this report_id from the count)
         eligible = is_team_eligible_for_cleanup(conn, team_id, report_id)
 
-        # Delete the report row
+        # Delete the report row. report_generation_runs FK-references reports(id)
+        # with ON DELETE CASCADE (migration 002), so this DELETE also removes the
+        # report's run record -- satisfying the cleanup-detection mirror invariant
+        # (E-235-05 / TN-5). The cascade fires because get_connection() sets
+        # PRAGMA foreign_keys=ON (src/api/db.py:55) on THIS connection (conn1),
+        # the one that deletes the reports row. No explicit
+        # `DELETE FROM report_generation_runs` is needed; were the pragma ever
+        # off here, the cascade (and every other FK on this path) would silently
+        # not fire -- the AC-1 test asserts the run row is gone after this call.
         conn.execute("DELETE FROM reports WHERE id = ?", (report_id,))
         conn.commit()
 

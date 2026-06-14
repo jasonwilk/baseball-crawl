@@ -4,7 +4,7 @@
 [E-235: Report Run Records, Trust Signals & Quality Gates](../E-235-report-run-records/epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, every code path that deletes a `reports` row (or a `teams` row whose reports are removed) also removes the associated `report_generation_runs` rows, so the new run table never orphans rows or blocks a delete. The cleanup-detection mirror invariant is satisfied for the new table.

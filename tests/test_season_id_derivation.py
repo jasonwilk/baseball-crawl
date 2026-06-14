@@ -7,7 +7,11 @@ from unittest.mock import patch
 
 import pytest
 
-from src.gamechanger.loaders import derive_season_id_for_team, ensure_season_row
+from src.gamechanger.loaders import (
+    derive_season_id_for_team,
+    derive_season_id_for_team_with_fallback,
+    ensure_season_row,
+)
 from tests.conftest import load_real_schema
 
 
@@ -130,6 +134,61 @@ class TestDeriveSeasonIdForTeam:
             assert season_year == 2025
         finally:
             db.execute("PRAGMA foreign_keys=ON;")
+
+
+# ── derive_season_id_for_team_with_fallback (E-235-03 gate (b)) ───────
+
+
+class TestDeriveSeasonIdFallbackSignal:
+    """E-235-03 gate (b) / AC-7: the fallback-aware variant is the single
+    source of truth for ``season_fallback``; the legacy tuple wrapper still
+    returns ``(season_id, season_year)`` unchanged."""
+
+    def test_full_metadata_no_fallback(self, db: sqlite3.Connection) -> None:
+        """Concrete season_year + mapped program suffix → fallback_used False."""
+        db.execute(
+            "INSERT INTO teams (name, program_id, membership_type, season_year) "
+            "VALUES ('LSB Varsity', 'lsb-hs', 'member', 2026)"
+        )
+        team_id = db.execute("SELECT last_insert_rowid()").fetchone()[0]
+        d = derive_season_id_for_team_with_fallback(db, team_id)
+        assert d.season_id == "2026-spring-hs"
+        assert d.season_year == 2026
+        assert d.fallback_used is False
+
+    def test_no_program_is_fallback(self, db: sqlite3.Connection) -> None:
+        """season_year present but no program suffix → year-only fallback."""
+        db.execute(
+            "INSERT INTO teams (name, program_id, membership_type, season_year) "
+            "VALUES ('Opponent', NULL, 'tracked', 2026)"
+        )
+        team_id = db.execute("SELECT last_insert_rowid()").fetchone()[0]
+        d = derive_season_id_for_team_with_fallback(db, team_id)
+        assert d.season_id == "2026"
+        assert d.fallback_used is True
+
+    def test_null_season_year_is_fallback(self, db: sqlite3.Connection) -> None:
+        """NULL season_year (even with a program) → current-year fallback."""
+        db.execute(
+            "INSERT INTO teams (name, program_id, membership_type, season_year) "
+            "VALUES ('LSB JV', 'lsb-hs', 'member', NULL)"
+        )
+        team_id = db.execute("SELECT last_insert_rowid()").fetchone()[0]
+        with patch("src.gamechanger.loaders.datetime") as mock_dt:
+            mock_dt.now.return_value.year = 2026
+            d = derive_season_id_for_team_with_fallback(db, team_id)
+        assert d.season_id == "2026-spring-hs"
+        assert d.season_year is None
+        assert d.fallback_used is True
+
+    def test_wrapper_return_unchanged(self, db: sqlite3.Connection) -> None:
+        """The legacy 2-tuple wrapper is unchanged (existing callers safe)."""
+        db.execute(
+            "INSERT INTO teams (name, program_id, membership_type, season_year) "
+            "VALUES ('LSB Varsity', 'lsb-hs', 'member', 2026)"
+        )
+        team_id = db.execute("SELECT last_insert_rowid()").fetchone()[0]
+        assert derive_season_id_for_team(db, team_id) == ("2026-spring-hs", 2026)
 
 
 # ── ensure_season_row ────────────────────────────────────────────────

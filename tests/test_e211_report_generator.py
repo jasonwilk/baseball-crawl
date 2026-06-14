@@ -236,7 +236,6 @@ def test_gc_uuid_resolution_always_searches_for_tracked_teams() -> None:
         patch("src.reports.generator._crawl_and_load_spray"),
         patch("src.reports.generator._crawl_and_load_plays", return_value=[]),
         patch("src.reports.generator._query_team_info", return_value={"name": "Test Team", "season_year": 2025}),
-        patch("src.reports.generator._snapshot_team_ids", return_value=[]),
     ):
         mock_parse.return_value = MagicMock(public_id="test-slug", is_uuid=False)
         mock_create_report.return_value = (1, "test-slug")
@@ -263,15 +262,17 @@ def test_member_team_uses_stored_gc_uuid() -> None:
     """AC-1: Member teams use stored gc_uuid (not search-resolved)."""
     # Verify the code path: when membership_type == 'member' and existing_gc_uuid
     # is non-null, _resolve_gc_uuid should NOT be called.
-    # This is a structural assertion -- the code at line ~977 checks:
+    # This is a structural assertion -- the gc_uuid resolution stage checks:
     #   if membership_type == "member" and existing_gc_uuid:
-    #       resolved_gc_uuid = existing_gc_uuid
-    # We verify via import/code inspection that the branch exists.
+    #       self.resolved_gc_uuid = existing_gc_uuid
+    # We verify via import/code inspection that the branch exists. The branch
+    # lives in _ReportGeneration._resolve_gc_uuid_stage after the E-235-02
+    # restructure (generate_report is now a thin wrapper).
     import inspect
     from src.reports import generator
-    source = inspect.getsource(generator.generate_report)
+    source = inspect.getsource(generator._ReportGeneration._resolve_gc_uuid_stage)
     assert 'membership_type == "member"' in source, (
-        "generate_report must check membership_type to decide gc_uuid resolution path"
+        "gc_uuid resolution must check membership_type to decide the resolution path"
     )
     assert "membership_type = 'tracked'" in source, (
         "UPDATE gc_uuid must be guarded by membership_type = 'tracked'"

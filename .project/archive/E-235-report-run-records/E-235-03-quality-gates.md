@@ -4,7 +4,7 @@
 [E-235: Report Run Records, Trust Signals & Quality Gates](../E-235-report-run-records/epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, a generation with zero completed games produces an explicit named outcome instead of a silent empty "ready" report; a report whose season was derived via the current-year fallback is flagged in the run record; and a report whose team was matched by name only (no GC anchor) is flagged in the run record. These are the only behavior changes Epic B introduces to the pipeline.

@@ -7,9 +7,11 @@ from unittest.mock import patch, MagicMock
 import pytest
 
 from src.reports.renderer import (
+    render_no_games_page,
     render_report,
     _BATTING_HEAT_TIERS,
     _PITCHING_HEAT_TIERS,
+    _build_trust_block,
     _compute_batting_enrichments,
     _compute_batting_heat,
     _compute_key_players,
@@ -119,6 +121,25 @@ def _make_full_data(**overrides) -> dict:
 # ---------------------------------------------------------------------------
 # AC-9(a): Renderer produces valid HTML containing expected sections
 # ---------------------------------------------------------------------------
+
+
+class TestNoGamesPage:
+    """E-235-03 gate (a): the minimal no-completed-games page (TN-7)."""
+
+    def test_contains_coach_message_and_team_name(self):
+        html = render_no_games_page("Rival Varsity")
+        assert "<!DOCTYPE html>" in html
+        assert "No completed games found for Rival Varsity this season" in html
+        assert "verify the team URL and try again" in html
+
+    def test_escapes_team_name(self):
+        html = render_no_games_page("<script>alert(1)</script>")
+        assert "<script>alert(1)</script>" not in html
+        assert "&lt;script&gt;" in html
+
+    def test_handles_empty_team_name(self):
+        html = render_no_games_page("")
+        assert "No completed games found for this team this season" in html
 
 
 class TestCompleteReport:
@@ -1457,3 +1478,148 @@ class TestRenderReportPlaysIntegration:
         html = render_report(data)
         assert "Basic Team" in html
         assert "FPS%" in html  # column header still present
+
+
+def _trust_data(**overrides) -> dict:
+    """_make_full_data plus the story-03-threaded footer trust inputs."""
+    base = _make_full_data()
+    base.update(
+        {
+            "completed_games": 10,             # M
+            "completed_games_with_data": 9,    # N
+            "plays_game_count": 4,             # K
+            "spray_available": True,
+            "generation_date": "2026-03-28",
+            "degraded_confidence": False,
+        }
+    )
+    base.update(overrides)
+    return base
+
+
+class TestBuildTrustBlock:
+    """E-235-07 / TN-7: coverage-severity + degraded-confidence derivation."""
+
+    def test_quiet_at_and_above_80pct(self):
+        assert _build_trust_block(
+            {"completed_games": 10, "completed_games_with_data": 8}
+        )["severity"] == "quiet"
+        assert _build_trust_block(
+            {"completed_games": 10, "completed_games_with_data": 10}
+        )["severity"] == "quiet"
+
+    def test_flagged_between_50_and_79pct(self):
+        assert _build_trust_block(
+            {"completed_games": 10, "completed_games_with_data": 7}
+        )["severity"] == "flagged"
+        # 50% is the lower bound of flagged (inclusive).
+        assert _build_trust_block(
+            {"completed_games": 10, "completed_games_with_data": 5}
+        )["severity"] == "flagged"
+
+    def test_loud_below_50pct(self):
+        assert _build_trust_block(
+            {"completed_games": 10, "completed_games_with_data": 4}
+        )["severity"] == "loud"
+
+    def test_m_null_coverage_unknown_defaults_quiet(self):
+        tb = _build_trust_block(
+            {"completed_games": None, "completed_games_with_data": 4}
+        )
+        assert tb["coverage_known"] is False
+        assert tb["coverage_pct"] is None
+        assert tb["severity"] == "quiet"
+
+    def test_k_zero_has_no_pitch_detail(self):
+        tb = _build_trust_block({"plays_game_count": 0})
+        assert tb["has_pitch_detail"] is False
+        tb2 = _build_trust_block({"plays_game_count": 3})
+        assert tb2["has_pitch_detail"] is True
+
+    def test_degraded_line_present_iff_flag(self):
+        assert _build_trust_block({"degraded_confidence": True})["degraded_line"]
+        assert _build_trust_block({"degraded_confidence": False})["degraded_line"] is None
+
+
+class TestFooterTrustBlock:
+    """E-235-07 / TN-7: the rendered footer trust block."""
+
+    def test_signal_set_rendered(self):
+        """AC-1: Through {date} (N of M games) · Pitch detail for {K} games ·
+        spray {available} · Generated: {date}."""
+        html = render_report(_trust_data())
+        assert "Through Mar 25" in html          # freshness date, "through"
+        assert "9 of 10 games" in html           # N of M
+        assert "Pitch detail for 4 games" in html
+        assert "spray available" in html
+        assert "Generated:" in html              # separate from "Through"
+
+    def test_quiet_state_class(self):
+        """AC-2: >=80% coverage renders the quiet tier."""
+        html = render_report(_trust_data(completed_games=10, completed_games_with_data=9))
+        assert "trust-quiet" in html
+
+    def test_flagged_state_class(self):
+        """AC-2: 50-79% coverage renders the flagged tier."""
+        html = render_report(_trust_data(completed_games=10, completed_games_with_data=6))
+        assert "trust-flagged" in html
+
+    def test_loud_state_class(self):
+        """AC-2: <50% coverage renders the loud tier."""
+        html = render_report(_trust_data(completed_games=10, completed_games_with_data=3))
+        assert "trust-loud" in html
+
+    def test_degraded_line_shown_in_quiet_state(self):
+        """AC-3: the degraded line shows even at high coverage (independent)."""
+        html = render_report(
+            _trust_data(
+                completed_games=10, completed_games_with_data=10,  # quiet
+                degraded_confidence=True,
+            )
+        )
+        assert "trust-quiet" in html
+        assert "Data accuracy may be limited" in html
+        assert "Contact your operator to verify before the game" in html
+
+    def test_degraded_line_shown_in_loud_state(self):
+        """AC-3: the degraded line shows at low coverage too."""
+        html = render_report(
+            _trust_data(
+                completed_games=10, completed_games_with_data=2,  # loud
+                degraded_confidence=True,
+            )
+        )
+        assert "trust-loud" in html
+        assert "Data accuracy may be limited" in html
+
+    def test_degraded_line_absent_and_no_flag_leak_when_clean(self):
+        """AC-3: no degraded line when not degraded, and the SPECIFIC operator
+        flags never appear in the coach-facing report."""
+        html = render_report(_trust_data(degraded_confidence=False))
+        assert "Data accuracy may be limited" not in html
+        # Operator-only flags must not leak to the coach surface.
+        assert "season fallback" not in html
+        assert "season_fallback" not in html
+        assert "name-only" not in html
+        assert "name_only" not in html
+
+    def test_k_zero_wording(self):
+        """AC-1 / COACH-2: K=0 renders 'No pitch-detail data', not 'for 0 games'."""
+        html = render_report(_trust_data(plays_game_count=0))
+        assert "No pitch-detail data" in html
+        assert "Pitch detail for 0 games" not in html
+
+    def test_spray_unavailable_wording(self):
+        html = render_report(_trust_data(spray_available=False))
+        assert "spray unavailable" in html
+
+    def test_m_null_degrades_without_broken_ratio(self):
+        """AC-4: M unavailable -> no broken N-of-M ratio; falls back to
+        N-with-data + the freshness date."""
+        html = render_report(
+            _trust_data(completed_games=None, completed_games_with_data=4)
+        )
+        assert "of None" not in html
+        assert "4 games with data" in html
+        assert "Through Mar 25" in html
+        assert "trust-quiet" in html  # unknown coverage -> neutral state

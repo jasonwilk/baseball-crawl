@@ -56,6 +56,54 @@ def get_connection() -> sqlite3.Connection:
     return conn
 
 
+def list_reports_with_runs(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+    """Return all reports LEFT JOINed to their 1:1 ``report_generation_runs`` row.
+
+    Shared by the two report-listing surfaces -- the CLI ``list_reports()`` in
+    ``src/reports/generator.py`` (``bb report list``) and the admin
+    ``_get_all_reports()`` (``/admin/reports``) -- per the shared-query-functions
+    convention (CLAUDE.md): both need the identical 1:1 join, so the SQL lives
+    here once rather than being copied into two files (E-235-06 / TN-6, SE-F7).
+
+    The join is LEFT so a report with no run row (legacy / pre-migration-002)
+    still appears, with all ``run.*`` columns NULL -- callers and templates must
+    stay NULL-safe. The run record's ``error_message`` is aliased
+    ``run_error_message`` to avoid colliding with ``reports.error_message`` (the
+    report-level message the admin list already renders).
+
+    Callers decorate the returned dicts with ``url`` / ``is_expired`` using their
+    own base URL (the two surfaces source it differently), so this helper does
+    NOT add them.
+
+    Args:
+        conn: An open connection. ``row_factory`` is set to ``sqlite3.Row`` here.
+
+    Returns:
+        One dict per report, ordered by ``generated_at`` descending, carrying the
+        ``reports`` columns plus the joined ``report_generation_runs`` columns.
+    """
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute(
+        """
+        SELECT
+            r.id, r.slug, r.title, r.status, r.generated_at, r.expires_at,
+            r.report_path, r.error_message,
+            run.overall_status, run.crawl_status, run.load_status,
+            run.gc_uuid_status, run.spray_status, run.plays_status,
+            run.reconciliation_status, run.enrichment_status,
+            run.completed_games, run.completed_games_with_data, run.spray_games,
+            run.plays_games_expected, run.plays_games_covered,
+            run.discrepancies_found, run.discrepancies_corrected,
+            run.season_id_used, run.season_fallback, run.identity_match_method,
+            run.error_stage, run.error_message AS run_error_message
+        FROM reports r
+        LEFT JOIN report_generation_runs run ON run.report_id = r.id
+        ORDER BY r.generated_at DESC
+        """
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
 def get_team_batting_stats(
     team_id: int,
     season_id: str | None = None,

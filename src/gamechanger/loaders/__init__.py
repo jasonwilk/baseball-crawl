@@ -37,21 +37,62 @@ class LoadResult:
     errors: int = field(default=0)
 
 
+@dataclass
+class SeasonDerivation:
+    """Result of :func:`derive_season_id_for_team_with_fallback`.
+
+    Attributes:
+        season_id: The canonical season_id (e.g. ``'2026-spring-hs'`` or
+            ``'2026'``).
+        season_year: The raw ``teams.season_year`` value (may be ``None``).
+        fallback_used: ``True`` when the season was resolved via a fallback
+            rather than full team metadata -- either the current-year fallback
+            (``season_year IS None``) or the year-only fallback (no mappable
+            ``program_type``, so no season suffix). Feeds E-235's
+            ``season_fallback`` run-record flag (gate (b)). ``False`` only when
+            BOTH a concrete ``season_year`` and a mapped program suffix exist.
+    """
+
+    season_id: str
+    season_year: int | None
+    fallback_used: bool
+
+
 def derive_season_id_for_team(
     db: sqlite3.Connection, team_id: int
 ) -> tuple[str, int | None]:
     """Derive the canonical season_id for a team from its metadata.
 
-    Algorithm:
-        1. Look up ``teams.season_year`` and ``programs.program_type``
-           (via ``teams.program_id``).
-        2. Map ``program_type`` to a season suffix (e.g. ``hs`` → ``spring-hs``).
-        3. Return ``('{year}-{suffix}', season_year)`` or ``('{year}', season_year)``
-           when no program.
+    Thin wrapper over :func:`derive_season_id_for_team_with_fallback` for the
+    many callers that only need ``(season_id, season_year)``; the derivation
+    logic lives in the fallback-aware form (single source of truth).
 
     Returns:
         Tuple of ``(season_id, season_year)``.  ``season_year`` is the raw
         ``teams.season_year`` value (may be ``None``).
+
+    Raises:
+        ValueError: If *team_id* does not exist in the ``teams`` table.
+    """
+    d = derive_season_id_for_team_with_fallback(db, team_id)
+    return d.season_id, d.season_year
+
+
+def derive_season_id_for_team_with_fallback(
+    db: sqlite3.Connection, team_id: int
+) -> SeasonDerivation:
+    """Derive the canonical season_id, reporting whether a fallback fired.
+
+    Algorithm:
+        1. Look up ``teams.season_year`` and ``programs.program_type``
+           (via ``teams.program_id``).
+        2. Map ``program_type`` to a season suffix (e.g. ``hs`` → ``spring-hs``).
+        3. Return ``'{year}-{suffix}'`` or ``'{year}'`` (when no program suffix).
+
+    ``fallback_used`` is the single source of truth for E-235 gate (b): it is
+    ``True`` when ``season_year`` was absent (current-year fallback) OR no
+    season suffix could be derived (year-only fallback). Callers needing the
+    flag MUST read it here rather than re-deriving the rule (which would drift).
 
     Raises:
         ValueError: If *team_id* does not exist in the ``teams`` table.
@@ -73,9 +114,12 @@ def derive_season_id_for_team(
     year = season_year if season_year is not None else datetime.now().year
 
     suffix = _PROGRAM_TYPE_SUFFIX.get(program_type) if program_type else None
+    # Fallback fired when either metadata input was missing: no concrete
+    # season_year (→ current-year) or no mappable program suffix (→ year-only).
+    fallback_used = season_year is None or suffix is None
     if suffix:
-        return f"{year}-{suffix}", season_year
-    return str(year), season_year
+        return SeasonDerivation(f"{year}-{suffix}", season_year, fallback_used)
+    return SeasonDerivation(str(year), season_year, fallback_used)
 
 
 def ensure_season_row(db: sqlite3.Connection, season_id: str) -> None:

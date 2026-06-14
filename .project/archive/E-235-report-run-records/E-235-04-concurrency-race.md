@@ -4,7 +4,7 @@
 [E-235: Report Run Records, Trust Signals & Quality Gates](../E-235-report-run-records/epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, two report generations running at the same time can no longer delete each other's freshly-created teams. The orphan-cleanup step deletes only teams attributable to the current run, not teams identified by a global before/after snapshot diff that cannot distinguish concurrent runs.

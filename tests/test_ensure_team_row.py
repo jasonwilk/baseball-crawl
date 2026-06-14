@@ -10,7 +10,11 @@ import sqlite3
 
 import pytest
 
-from src.db.teams import ensure_team_row
+from src.db.teams import (
+    EnsureTeamResult,
+    ensure_team_row,
+    ensure_team_row_with_provenance,
+)
 from tests.conftest import load_real_schema
 
 
@@ -413,3 +417,193 @@ class TestEdgeCases:
         result = ensure_team_row(db, season_year=2026, gc_uuid="uuid-only")
         team = _get_team(db, result)
         assert team["name"] == "uuid-only"  # fallback name
+
+
+# ===========================================================================
+# ensure_team_row_with_provenance: identity match_method + insert-vs-match
+# (E-235-03 gate (c) + E-235-04 created-set signal)
+# ===========================================================================
+
+
+class TestEnsureTeamRowProvenance:
+    """The provenance variant reports match_method ('anchor'/'name_only') and
+    whether the row was newly INSERTed. The legacy int wrapper is unchanged."""
+
+    def test_gc_uuid_match_is_anchor_not_inserted(self, db: sqlite3.Connection) -> None:
+        existing = _insert_team(db, name="Rival", gc_uuid="uuid-1")
+        r = ensure_team_row_with_provenance(db, gc_uuid="uuid-1", name="Rival")
+        assert r == EnsureTeamResult(existing, "anchor", False)
+
+    def test_public_id_match_is_anchor_not_inserted(self, db: sqlite3.Connection) -> None:
+        existing = _insert_team(db, name="Rival", public_id="rival-slug")
+        r = ensure_team_row_with_provenance(db, public_id="rival-slug", name="Rival")
+        assert r.team_id == existing
+        assert r.match_method == "anchor"
+        assert r.inserted is False
+
+    def test_name_match_is_name_only_not_inserted(self, db: sqlite3.Connection) -> None:
+        existing = _insert_team(db, name="Rival HS", season_year=2026)
+        r = ensure_team_row_with_provenance(db, name="Rival HS", season_year=2026)
+        assert r.team_id == existing
+        assert r.match_method == "name_only"
+        assert r.inserted is False
+
+    def test_insert_with_public_id_is_anchor_inserted(self, db: sqlite3.Connection) -> None:
+        r = ensure_team_row_with_provenance(
+            db, name="Brand New", public_id="new-slug", season_year=2026,
+        )
+        assert r.match_method == "anchor"
+        assert r.inserted is True
+        # The row really was created with the anchor.
+        assert _get_team(db, r.team_id)["public_id"] == "new-slug"
+
+    def test_insert_name_only_is_name_only_inserted(self, db: sqlite3.Connection) -> None:
+        r = ensure_team_row_with_provenance(db, name="Nameless Opponent")
+        assert r.match_method == "name_only"
+        assert r.inserted is True
+
+    def test_wrapper_returns_int_unchanged(self, db: sqlite3.Connection) -> None:
+        """ensure_team_row still returns the bare int PK (existing callers)."""
+        existing = _insert_team(db, name="Rival", gc_uuid="uuid-1")
+        assert ensure_team_row(db, gc_uuid="uuid-1") == existing
+
+
+class _RacingConnection:
+    """Wraps a real connection and, just before the step-4 ``INSERT INTO teams``,
+    lets a *concurrent* process commit the same anchor first.
+
+    Forces the exact cross-process window E-235-04's DE forward note flags:
+    this call's cascade SELECT (steps 1-2) missed, but a racing process commits
+    the same gc_uuid/public_id before this INSERT lands, tripping the partial
+    UNIQUE index. Used to verify the INSERT degrades to a match, not a crash.
+    """
+
+    def __init__(self, real, racer) -> None:
+        self._real = real
+        self._racer = racer
+        self._raced = False
+
+    def execute(self, sql, params=()):
+        if not self._raced and sql.strip().upper().startswith("INSERT INTO TEAMS"):
+            self._racer()  # concurrent process wins the INSERT
+            self._raced = True
+        return self._real.execute(sql, params)
+
+    def __getattr__(self, name):
+        return getattr(self._real, name)
+
+
+class TestInsertRaceRecovery:
+    """E-235-04 (DE forward note): a concurrent gc_uuid/public_id INSERT that
+    trips the partial UNIQUE index degrades to a MATCH of the racing row,
+    rather than crashing the generation with IntegrityError.
+    """
+
+    def test_public_id_insert_race_degrades_to_match(self, tmp_path) -> None:
+        db_path = str(tmp_path / "race.db")
+        setup = sqlite3.connect(db_path)
+        load_real_schema(setup)
+        setup.commit()
+        setup.close()
+
+        conn_a = sqlite3.connect(db_path)
+        conn_a.execute("PRAGMA foreign_keys=ON")
+        conn_b = sqlite3.connect(db_path)
+        conn_b.execute("PRAGMA foreign_keys=ON")
+
+        def _racer() -> None:
+            ensure_team_row_with_provenance(
+                conn_b, public_id="shared-x", name="Shared X", season_year=2026,
+            )
+            conn_b.commit()
+
+        wrapped = _RacingConnection(conn_a, _racer)
+        # A's cascade SELECT misses (row not yet committed), then its INSERT
+        # collides with B's freshly-committed row -> recovery matches it.
+        result = ensure_team_row_with_provenance(
+            wrapped, public_id="shared-x", name="Shared X", season_year=2026,
+        )
+        conn_a.commit()
+
+        assert result.inserted is False  # degraded to a match, did not crash
+        assert result.match_method == "anchor"
+        # Exactly one row exists for the shared anchor (no duplicate).
+        count = conn_a.execute(
+            "SELECT COUNT(*) FROM teams WHERE public_id = 'shared-x'"
+        ).fetchone()[0]
+        assert count == 1
+        # Both runs resolve to the SAME team id.
+        assert result.team_id == conn_b.execute(
+            "SELECT id FROM teams WHERE public_id = 'shared-x'"
+        ).fetchone()[0]
+        conn_a.close()
+        conn_b.close()
+
+    def test_gc_uuid_insert_race_degrades_to_match(self, tmp_path) -> None:
+        db_path = str(tmp_path / "race.db")
+        setup = sqlite3.connect(db_path)
+        load_real_schema(setup)
+        setup.commit()
+        setup.close()
+
+        conn_a = sqlite3.connect(db_path)
+        conn_a.execute("PRAGMA foreign_keys=ON")
+        conn_b = sqlite3.connect(db_path)
+        conn_b.execute("PRAGMA foreign_keys=ON")
+
+        def _racer() -> None:
+            ensure_team_row_with_provenance(
+                conn_b, gc_uuid="uuid-shared", name="Shared U", season_year=2026,
+            )
+            conn_b.commit()
+
+        wrapped = _RacingConnection(conn_a, _racer)
+        result = ensure_team_row_with_provenance(
+            wrapped, gc_uuid="uuid-shared", name="Shared U", season_year=2026,
+        )
+        conn_a.commit()
+
+        assert result.inserted is False
+        assert result.match_method == "anchor"
+        count = conn_a.execute(
+            "SELECT COUNT(*) FROM teams WHERE gc_uuid = 'uuid-shared'"
+        ).fetchone()[0]
+        assert count == 1
+        conn_a.close()
+        conn_b.close()
+
+    def test_insert_race_recovery_backfills_winner_row(self, tmp_path) -> None:
+        """MEDIUM-1: the recovery re-runs the normal match path, so it applies
+        the SAME backfills a match would (here: season_year onto a winner row
+        that was committed without one) -- not a bare id lookup."""
+        db_path = str(tmp_path / "race.db")
+        setup = sqlite3.connect(db_path)
+        load_real_schema(setup)
+        setup.commit()
+        setup.close()
+
+        conn_a = sqlite3.connect(db_path)
+        conn_a.execute("PRAGMA foreign_keys=ON")
+        conn_b = sqlite3.connect(db_path)
+        conn_b.execute("PRAGMA foreign_keys=ON")
+
+        def _racer() -> None:
+            # Winner commits with public_id but NO season_year.
+            ensure_team_row_with_provenance(conn_b, public_id="shared-z", name="Shared Z")
+            conn_b.commit()
+
+        wrapped = _RacingConnection(conn_a, _racer)
+        # Loser provides season_year=2026 -> INSERT collides -> recovery
+        # re-matches via step-2 (public_id) and backfills season_year (was NULL).
+        result = ensure_team_row_with_provenance(
+            wrapped, public_id="shared-z", name="Shared Z", season_year=2026,
+        )
+        conn_a.commit()
+
+        assert result.inserted is False
+        row = conn_a.execute(
+            "SELECT season_year FROM teams WHERE public_id = 'shared-z'"
+        ).fetchone()
+        assert row[0] == 2026, "recovery must backfill season_year like a normal match"
+        conn_a.close()
+        conn_b.close()

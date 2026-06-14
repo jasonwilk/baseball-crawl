@@ -291,6 +291,22 @@
       color: #555;
     }
 
+    /* ---- Footer trust block (E-235-07 / TN-7) ---- */
+    /* Coverage severity (N/M) drives the background tier; the degraded line is
+       shown independently whenever data accuracy may be limited. */
+    .trust-block {
+      margin-top: 14px;
+      padding: 8px 10px;
+      border-radius: 4px;
+      font-size: 8.5pt;
+      line-height: 1.45;
+    }
+    .trust-block .trust-coverage { font-weight: 600; }
+    .trust-quiet   { background: #f1f5f9; color: #475569; border: 1px solid #e2e8f0; }
+    .trust-flagged { background: #fef9c3; color: #854d0e; border: 1px solid #fde68a; }
+    .trust-loud    { background: #fee2e2; color: #991b1b; border: 1px solid #fecaca; }
+    .trust-degraded { margin-top: 5px; font-weight: 600; }
+
     /* ---- Screen-only elements ---- */
     .screen-only { margin-bottom: 10px; }
     .print-btn {
@@ -839,6 +855,34 @@
     {% if player.position %}<span class="roster-pos">({{ player.position }})</span>{% endif %}
   </div>
   {% endfor %}
+</div>
+{% endif %}
+
+{# ===== FOOTER TRUST BLOCK (E-235-07, TN-7) — coach-facing data-completeness signal.
+   Severity (quiet/flagged/loud) is keyed off coverage % (N/M) ALONE; the
+   degraded-confidence line is shown independently in every severity state and
+   never names the specific operator flags (those stay on the admin list). ===== #}
+{% if trust_block %}
+<div class="trust-block trust-{{ trust_block.severity }}">
+  <div class="trust-coverage">
+    {% if trust_block.coverage_known %}
+      Through {{ freshness_date | format_date if freshness_date else "—" }} ({{ trust_block.n }} of {{ trust_block.m }} games)
+    {% elif trust_block.n is not none %}
+      Through {{ freshness_date | format_date if freshness_date else "—" }} ({{ trust_block.n }} game{{ "s" if trust_block.n != 1 else "" }} with data)
+    {% elif freshness_date %}
+      Through {{ freshness_date | format_date }}
+    {% endif %}
+    {% if trust_block.has_pitch_detail %}
+      &middot; Pitch detail for {{ trust_block.k }} game{{ "s" if trust_block.k != 1 else "" }}
+    {% else %}
+      &middot; No pitch-detail data
+    {% endif %}
+    &middot; spray {{ "available" if trust_block.spray_available else "unavailable" }}
+    &middot; Generated: {{ generation_date | format_date if generation_date else (generated_at[:10] if generated_at else "") }}
+  </div>
+  {% if trust_block.degraded_confidence %}
+  <div class="trust-degraded">{{ trust_block.degraded_line }}</div>
+  {% endif %}
 </div>
 {% endif %}
 

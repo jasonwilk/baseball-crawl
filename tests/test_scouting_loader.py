@@ -215,7 +215,9 @@ def test_boxscore_loading_delegates_to_game_loader(
 
         expected_team_ref = TeamRef(id=team_pk, gc_uuid=_GC_UUID, public_id=_PUBLIC_ID)
         MockGameLoader.assert_called_once_with(
-            db=loader._db, owned_team_ref=expected_team_ref
+            db=loader._db,
+            owned_team_ref=expected_team_ref,
+            created_team_ids=loader._created_team_ids,
         )
         mock_gl.load_file.assert_called_once()
         # First arg should be the boxscore path.

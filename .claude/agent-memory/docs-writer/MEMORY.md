@@ -22,9 +22,11 @@
 - **Last updated line format**: `*Last updated: YYYY-MM-DD | Source: E-NNN (description), E-NNN-SS (description)*`
 - Pipeline commands documented in operations.md under the Admin Team Management section (CLI subsections follow the UI section)
 - Schema changes go in architecture.md under `## Schema Changes`, newest first
+- Standalone report run-record / trust-flag operator docs live in operations.md under `### Report Generation Run Records` (inside Standalone Reports section, after verify-aggregates)
 - Coaching explanations should not mention technical details (routes, SQL, Python modules)
 - Coaching docs use plain prose and "what it means in practice" examples, not formulas
 - Audience: coaching docs assume zero technical knowledge; admin docs assume Python/Docker/SQL competence
+- **N vs M (report coverage)**: N = `completed_games_with_data` (games with stat rows loaded); M = `completed_games` (games with final score). N ≤ M. Always document as "N of M games with data", never conflate with score-only coverage.
 
 ## Topic File Index
 - [Conventions file](conventions.md) -- (this MEMORY.md serves as the index; no separate topic files yet)

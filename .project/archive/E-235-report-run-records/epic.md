@@ -1,7 +1,7 @@
 # E-235: Report Run Records, Trust Signals & Quality Gates
 
 ## Status
-`READY`
+`COMPLETED`
 <!-- Lifecycle: DRAFT → READY → ACTIVE → COMPLETED (or BLOCKED / ABANDONED) -->
 <!-- PM set READY 2026-06-13 after: SE/DE/coach consultation, internal iteration 1 (20 findings) + Codex iteration 1 (3 findings) all accepted + swept, quality checklist passed. Awaiting user dispatch authorization. -->
 <!-- Only READY and ACTIVE epics can be dispatched. -->
@@ -55,13 +55,13 @@ Three domain consultations grounded the plan (all via main-session relay):
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-235-01 | Migration 002: `report_generation_runs` table | TODO | None | data-engineer |
-| E-235-02 | Restructure `generate_report()` into named stage methods writing the run record | TODO | E-235-01 | software-engineer |
-| E-235-03 | Three quality gates (no-games abort, season-fallback flag, identity flag) | TODO | E-235-02 | software-engineer |
-| E-235-04 | Close the concurrent-generation team-deletion race | TODO | E-235-03 | software-engineer |
-| E-235-05 | Cleanup-mirror: wire `report_generation_runs` into report/team delete paths | TODO | E-235-01, E-235-04 | software-engineer |
-| E-235-06 | Surface run records + trust flags in the admin reports list | TODO | E-235-03, E-235-05 | software-engineer |
-| E-235-07 | Report footer trust block (three severity states) | TODO | E-235-03 | software-engineer |
+| E-235-01 | Migration 002: `report_generation_runs` table | DONE | None | data-engineer |
+| E-235-02 | Restructure `generate_report()` into named stage methods writing the run record | DONE | E-235-01 | software-engineer |
+| E-235-03 | Three quality gates (no-games abort, season-fallback flag, identity flag) | DONE | E-235-02 | software-engineer |
+| E-235-04 | Close the concurrent-generation team-deletion race | DONE | E-235-03 | software-engineer |
+| E-235-05 | Cleanup-mirror: wire `report_generation_runs` into report/team delete paths | DONE | E-235-01, E-235-04 | software-engineer |
+| E-235-06 | Surface run records + trust flags in the admin reports list | DONE | E-235-03, E-235-05 | software-engineer |
+| E-235-07 | Report footer trust block (three severity states) | DONE | E-235-03 | software-engineer |
 
 ## Dispatch Team
 - data-engineer
@@ -173,6 +173,8 @@ Builds on story 02's restructured stages + run-record writing. Each gate writes 
 - 2026-06-13: Internal review iteration 1 (CR spec audit + SE + DE + coach). 20 findings, ALL ACCEPTED, 0 dismissed. Key incorporations: CR-F1 made the generator.py chain truly linear (04←03); SE-F1/DE-2 resolved the gate-flag/created-set signals to a shared `ensure_team_row` extension (story 03 introduces, 04 consumes); DE-1 refined the concurrency fix to an in-memory per-run created-set (no migration); SE-F2 corrected N to distinct-completed-games (not `load_result.loaded`); SE-F3 deferred the identity flag write to run-row creation; SE-F4 resolved M availability; CR-F4/SE-F6 surfaced the two-connection cleanup-mirror trap; COACH-1 made the degraded-confidence line orthogonal to coverage severity (shown in all three states). File scopes corrected in stories 03 (`teams.py`, `loaders/__init__.py`) and 04 (`scouting_loader.py`); migration dropped from story 04.
 - 2026-06-13: Phase 4 Codex spec review. 3 findings (1 P1, 2 P2), ALL ACCEPTED, 0 dismissed. P1: pinned the no-games terminal state (`reports.status = 'no_games'` + minimal shareable page) and removed the identity local-derivation hedge (the `ensure_team_row` extension is committed because story 04 needs insert-vs-match regardless). P2: reframed story 06 `error_message` (the admin web path already surfaces it — confirmed at admin.py:3222 / reports.html:71; only the CLI `list_reports()` lacks it). P2 (DE schema call): REMOVED the redundant `completed_game_count` column and LOCKED the M/N names for READY — `games_expected → completed_games`, `games_loaded → completed_games_with_data` (the rename closes the `games_loaded`↔`load_result.loaded` ambiguity and makes N ≤ M self-evident). Propagated across TN-1/2/3/7 + stories 02/03; consistency sweep verified zero stragglers.
 - 2026-06-13: **Set READY.** Final quality checklist passed; both review rounds incorporated + swept; no open items (two dispatch-prep items remain — see below). Awaiting user dispatch authorization (planning and dispatch do not chain — `.claude/rules/workflow-discipline.md` Dispatch Authorization Gate).
+- 2026-06-14: **Dispatched + all 7 stories DONE** (serial 01→02→03→04→05→06→07; SE rotated to SE2 after 03 for context). Each story PM-AC-verified PASS + CR-approved at the staging boundary. Story 04 took a CR-Round-2 SHOULD-FIX (concurrent gc_uuid/public_id INSERT race: `teams.py` Step-4 INSERT now catches `IntegrityError` → re-matches via `_match_existing_anchor` → returns `inserted=False`; unmatched errors re-raise — reinforces the inserted-not-matched created-set semantic).
+- 2026-06-14: **Phase 4b Codex review — scope refinement (PM-owned decision).** Codex surfaced **HIGH-1** (DE-confirmed, real + modal): N (`completed_games_with_data`) was sourced from `_query_freshness`, which counted SCORED games (`home/away_score NOT NULL`) with NO join to stat tables. Because `GameLoader` writes the games row + scores unconditionally but loads player stats only conditionally, a scored game with no GC scorebook (common for scouted opponents) had a games row but zero stat rows → N overstated footer coverage AND the no_games gate (N==0) could not fire when every game was scored-but-empty, defeating two of the epic's three gates. **PM decision (option (a), coach-authoritative semantic):** N = distinct completed games with ≥1 player stat row (EXISTS on `player_game_batting`/`player_game_pitching` for the perspective team); M stays the scored-games-on-schedule denominator. Per **baseball-coach** (authoritative on footer-N): ONE consistent data-bearing count everywhere ("two different numbers erode trust under pre-game pressure"), AND the **"Through {date}" date must also be data-bearing** (anchored to the last game with PLAYER DATA, not the last scored game) — the same bug, fixed together. This expanded story 07's footer from count-only to count+date data-bearing and corrected the no_games gate. Implemented at source in `_query_freshness` (count + MAX date both EXISTS-scoped), feeding both the new footer AND the pre-existing freshness display (one value everywhere). **NO E-234 golden moved** — the golden/e2e fixtures use real boxscore data (every scored game has stat rows there, so data-bearing == scored on the goldens, which validates the coupling); the clean path, so the PM golden-correction-with-documentation conditions did not trigger. Three other Codex fixes in the same round: **HIGH-2** plays/reconciliation record `failed` honestly on a swallowed failure (was silently `completed`), still non-fatal; **MEDIUM-1** race-recovery backfills the winner row via a bounded single re-entry through the normal match path; **MEDIUM-2** the no_games page is now shareable from `/admin/reports` + `bb report list`. Full suite 4610 passed. **PM AC re-verify:** the corrected behavior satisfies and BETTER fulfills the affected ACs — story 03 gate (a) now fires on the scored-but-empty modal case (AC-1) with an honest footer-producer N (AC-5); story 07 footer N-of-M + "Through {date}" are now data-bearing (AC-1/AC-2); story 02 plays telemetry (AC-7) is now honest while preserving the non-fatal contract (AC-3); no other story's AC regresses.
 
 ### Review Scorecard (Phases 3–4)
 | Review Pass | Findings | Accepted | Dismissed |
@@ -183,3 +185,30 @@ Builds on story 02's restructured stages + run-record writing. Each gate writes 
 | **Total** | **23** | **23** | **0** |
 
 Notes: CR spec audit = F1 MUST (dependency-chain serialization) + F2–F4 SHOULD + F5–F7 NOTE. Holistic team: SE-F1/F5 MUST (gate flag-source + ScoutingLoader scope), SE-F2/F3/F6/F7 SHOULD/CONFIRM, SE-F4 CONFIRM; DE-1/DE-2 SHOULD (in-memory created-set, insert-vs-match), DE-3 affirm, DE-4 naming; COACH-1 DEFECT (degraded line orthogonal to coverage), COACH-2 advisory. Codex: 1 P1 (pin deferred decisions) + 2 P2 (error_message framing, completed_game_count schema). Zero dismissals across all passes. The two dispatch-prep items (SE+DE mechanism-shape alignment for the `ensure_team_row`/`derive_season_id_for_team` extensions + created-set threading; DE final column-type confirmation) are dispatch-time, not READY blockers.
+
+### Dispatch + Phase 4 Code-Review Scorecard (implementation)
+| Review Pass | Findings | Accepted/Fixed | Dismissed |
+|---|---|---|---|
+| Per-story CR — E-235-01 | 0 | 0 | 0 |
+| Per-story CR — E-235-02 | 2 | 2 | 0 |
+| Per-story CR — E-235-03 | 1 | 1 | 0 |
+| Per-story CR — E-235-04 | 1 | 1 | 0 |
+| Per-story CR — E-235-05 | 0 | 0 | 0 |
+| Per-story CR — E-235-06 | 0 | 0 | 0 |
+| Per-story CR — E-235-07 | 0 | 0 | 0 |
+| Phase 4a — CR holistic integration | 0 | 0 | 0 |
+| Phase 4b — Codex code review | 4 | 4 | 0 |
+| **Total** | **8** | **8** | **0** |
+
+Notes: Per-story CR findings were all SHOULD FIX resolved in Round 2 — 02 (2 nits), 03 (orphan-cleanup symmetry on the no-games abort path), 04 (concurrent gc_uuid/public_id INSERT `IntegrityError` recovery → re-match → `inserted=False`). Phase 4a integration was clean. Phase 4b Codex: HIGH-1 (data-bearing N + date — the scored-but-empty gate defeat, PM scope decision option (a), NO golden moved), HIGH-2 (honest plays/recon `failed` telemetry, still non-fatal), MEDIUM-1 (race-recovery winner-row backfill), MEDIUM-2 (no_games shareable from the list surfaces). Zero dismissals across all implementation passes.
+
+### Context-Layer Six-Trigger Assessment (main-session verdicts)
+Per `.claude/rules/context-layer-assessment.md`, recorded at closure:
+- **Trigger 1 — new convention/pattern/constraint: YES.** (a) the `report_generation_runs` per-run audit-record pattern (one wide row, mirrors `scouting_runs`); (b) the canonical-function additive-extension pattern (`ensure_team_row_with_provenance` / `derive_season_id_for_team_with_fallback`: variant returns a result object, legacy wrapper delegates, zero caller churn); (c) the in-memory per-run created-set concurrency pattern (replaces the global snapshot diff, closes the cross-process race with no lock).
+- **Trigger 2 — architectural decision with ongoing implications: YES.** The run record as the standard generation audit trail (Epic E builds on it); data-bearing coverage (N = games-with-stat-rows) as the canonical freshness semantic.
+- **Trigger 3 — footgun/failure mode: YES.** The scored-game-without-stat-rows trap (`_query_freshness` must be data-bearing, not score-based); the concurrent-INSERT `IntegrityError`-on-partial-unique recovery. (The two-connection cleanup-mirror trap is already in `data-model.md`.)
+- **Trigger 4 — agent behavior/routing/coordination: NO.**
+- **Trigger 5 — domain knowledge for future agents: YES.** Scored-but-empty opponent games are the MODAL scouting case; trust/coverage signals must be data-bearing; coach's "one honest count + honest date, two numbers erode trust" principle.
+- **Trigger 6 — new CLI command/workflow: NO.** (`bb report list` gained columns but no new subcommand/workflow.)
+
+Triggers 1, 2, 3, 5 fire → claude-architect dispatched at closure to codify (likely `.claude/rules/architecture-subsystems.md` + `.claude/rules/data-model.md` + agent memory), working in the worktree so the changes ride the closure patch.

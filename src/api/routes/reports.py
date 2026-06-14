@@ -31,8 +31,11 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[3]
 async def serve_report(slug: str) -> Response:
     """Serve a generated scouting report by its slug.
 
-    Returns the self-contained HTML file for ready, non-expired reports.
-    Returns 404 for unknown slugs, expired reports, and non-ready statuses.
+    Returns the self-contained HTML file for serveable, non-expired reports.
+    A report is serveable when its status is ``ready`` (a full report) or
+    ``no_games`` (the E-235-03 minimal explanatory page -- a shareable honest
+    "no completed games" outcome, NOT a 404). Returns 404 for unknown slugs,
+    expired reports, and any other status (e.g. ``generating``/``failed``).
     The 404 response is identical regardless of the reason to avoid
     information leakage about report existence or expiration.
     """
@@ -52,7 +55,7 @@ async def serve_report(slug: str) -> Response:
 
     report = dict(row)
 
-    if report["status"] != "ready":
+    if report["status"] not in ("ready", "no_games"):
         return Response(status_code=404)
 
     # Check expiration

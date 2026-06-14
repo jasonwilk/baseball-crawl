@@ -4,7 +4,7 @@
 [E-235: Report Run Records, Trust Signals & Quality Gates](../E-235-report-run-records/epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the admin reports list shows each report's per-stage detail and counts, the operator-only trust flags (season fallback, name-only identity), and the existing `error_message`, replacing the binary ready/failed view. The operator can tell a degraded report from a complete one at a glance.

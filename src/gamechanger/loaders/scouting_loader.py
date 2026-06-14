@@ -55,10 +55,21 @@ class ScoutingLoader:
     Args:
         db: Open ``sqlite3.Connection`` with ``PRAGMA foreign_keys=ON`` set.
             The caller owns the connection lifecycle.
+        created_team_ids: Optional in-memory set recording opponent team ids
+            this loader INSERTs (threaded into ``GameLoader``). The report
+            generator passes its per-run created-set here so orphan cleanup
+            deletes only teams THIS run created, closing the cross-process
+            team-deletion race (E-235-04). ``None`` (the default) disables
+            recording.
     """
 
-    def __init__(self, db: sqlite3.Connection) -> None:
+    def __init__(
+        self,
+        db: sqlite3.Connection,
+        created_team_ids: set[int] | None = None,
+    ) -> None:
         self._db = db
+        self._created_team_ids = created_team_ids
 
     # ------------------------------------------------------------------
     # Public API
@@ -111,7 +122,11 @@ class ScoutingLoader:
 
         # Build TeamRef for GameLoader by looking up gc_uuid and public_id.
         team_ref = self._build_team_ref(tid)
-        game_loader = GameLoader(db=self._db, owned_team_ref=team_ref)
+        game_loader = GameLoader(
+            db=self._db,
+            owned_team_ref=team_ref,
+            created_team_ids=self._created_team_ids,
+        )
         games_index = self._build_games_index_from_data(crawl_result.games)
         opponent_name_index = self._build_opponent_name_index_from_data(crawl_result.games)
         bs_result = self._load_boxscores_from_data(
@@ -179,7 +194,11 @@ class ScoutingLoader:
             return total
 
         team_ref = self._build_team_ref(team_id)
-        game_loader = GameLoader(db=self._db, owned_team_ref=team_ref)
+        game_loader = GameLoader(
+            db=self._db,
+            owned_team_ref=team_ref,
+            created_team_ids=self._created_team_ids,
+        )
         games_path = scouting_dir / "games.json"
         games_index = self._build_games_index(games_path)
         opponent_name_index = self._build_opponent_name_index(games_path)

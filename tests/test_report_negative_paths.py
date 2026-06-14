@@ -31,6 +31,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from src.db.teams import EnsureTeamResult
 from src.gamechanger.client import CredentialExpiredError
 from src.gamechanger.crawlers.scouting import ScoutingCrawlResult
 from src.gamechanger.loaders import LoadResult
@@ -103,34 +104,32 @@ def _session_that_fails():
 
 
 # ---------------------------------------------------------------------------
-# AC-1: ready-but-empty (KNOWN BUG -- Epic B before-anchor)
+# AC-1: no-completed-games -> explicit no-games outcome (E-235-03 gate (a))
 # ---------------------------------------------------------------------------
-class TestNoCompletedGamesReadyButEmpty:
-    """Characterize the ready-but-empty outcome of a zero-games crawl."""
+class TestNoCompletedGamesExplicitOutcome:
+    """The zero-completed-games crawl now produces an explicit no-games
+    outcome (E-235-03 gate (a)) -- the AFTER-anchor for what was previously the
+    ready-but-empty before-anchor.
+    """
 
     @patch("src.http.session.create_session")
     @patch("src.reports.generator.get_connection")
     @patch("src.reports.generator.GameChangerClient")
-    @patch("src.reports.generator.ensure_team_row", return_value=1)
+    @patch("src.reports.generator.ensure_team_row_with_provenance",
+           return_value=EnsureTeamResult(1, "anchor", False))
     @patch("src.reports.generator.render_report", return_value="<html>empty</html>")
     @patch("src.reports.generator._crawl_and_load_spray")
     @patch("src.reports.generator._crawl_and_load_plays", return_value=[])
-    def test_zero_games_zero_errors_yields_ready_but_empty(
+    def test_zero_games_yields_explicit_no_games_outcome(
         self, mock_plays, mock_spray, mock_render, mock_ensure,
         mock_client_cls, mock_get_conn, mock_create_session, db, tmp_path,
     ):
-        """KNOWN BUG / Epic B before-anchor: a crawl returning zero completed
-        games with **zero errors**, plus a load of zero rows with zero errors,
-        passes BOTH error-gated guards (crawl-failure guard fires only on
-        ``errors > 0 AND games_crawled == 0`` at generator.py:1098; load guard
-        only on ``errors > 0`` at generator.py:1113). Generation therefore
-        proceeds to the post-load render step and emits a status='ready' but
-        EMPTY report.
-
-        This asserts CURRENT behavior, NOT desired behavior. Epic B's
-        no-completed-games quality gate is expected to change this outcome
-        (e.g. to a 'failed'/'empty' terminal state); when it does, THIS test is
-        the visible before-anchor that should be updated in the same change.
+        """AFTER-anchor (E-235-03 gate (a)): a crawl returning zero completed
+        games with zero errors, plus a load of zero rows, now produces the
+        EXPLICIT no-games terminal outcome -- ``reports.status = 'no_games'``
+        with a minimal shareable explanatory page -- instead of a silent
+        ready-but-empty report. This is the ONE intended negative-path behavior
+        change in Epic B (ROADMAP §6: gates are the only new behavior).
         """
         _seed_team(db)
         _seed_season(db)
@@ -141,7 +140,7 @@ class TestNoCompletedGamesReadyButEmpty:
         mock_client_cls.return_value = MagicMock()
 
         mock_crawler = MagicMock()
-        # Zero completed games, zero errors -- the ready-but-empty trigger.
+        # Zero completed games, zero errors -- the no-games trigger.
         mock_crawler.scout_team.return_value = ScoutingCrawlResult(
             team_id=1, season_id="2026-spring-hs",
             games_crawled=0, errors=0, games=[], boxscores={},
@@ -157,26 +156,162 @@ class TestNoCompletedGamesReadyButEmpty:
         ):
             result = generate_report("abc123")
 
-        # CURRENT behavior: success + a 'ready' report row despite zero data.
-        assert result.success is True, (
-            "Before-anchor: zero-games crawl currently yields success=True "
-            "(ready-but-empty). If this changed, Epic B's gate likely landed."
+        # AFTER behavior: explicit no-games outcome (NOT a ready report).
+        assert result.success is False, (
+            "no-games is an explicit terminal outcome, not a successful report"
         )
         assert result.slug is not None
+        assert result.error_message is not None
+        assert "No completed games found" in result.error_message
 
         verify_conn = _fresh_conn_factory(str(tmp_path / "test.db"))()
         row = verify_conn.execute(
-            "SELECT status, error_message FROM reports WHERE slug = ?",
+            "SELECT status, report_path FROM reports WHERE slug = ?",
             (result.slug,),
         ).fetchone()
         verify_conn.close()
-        assert row[0] == "ready", (
-            "Before-anchor: empty report currently persists status='ready'."
+        assert row[0] == "no_games", (
+            "gate (a): empty report now persists status='no_games', not 'ready'."
         )
-        assert row[1] is None
+        # A shareable explanatory page was written to disk (not a 404).
+        assert row[1] == f"reports/{result.slug}.html"
+        page = (tmp_path / "data" / row[1]).read_text(encoding="utf-8")
+        assert "No completed games found" in page
 
-        # The render stage ran even though there was no data to render.
-        mock_render.assert_called_once()
+        # The full report render stage did NOT run (minimal page written instead).
+        mock_render.assert_not_called()
+
+    @patch("src.http.session.create_session")
+    @patch("src.reports.generator.get_connection")
+    @patch("src.reports.generator.GameChangerClient")
+    @patch("src.reports.generator.ensure_team_row_with_provenance",
+           return_value=EnsureTeamResult(1, "anchor", False))
+    @patch("src.reports.generator.render_report", return_value="<html>empty</html>")
+    @patch("src.reports.generator._crawl_and_load_spray")
+    @patch("src.reports.generator._crawl_and_load_plays", return_value=[])
+    def test_no_games_run_record_distinguishes_m0_from_n0(
+        self, mock_plays, mock_spray, mock_render, mock_ensure,
+        mock_client_cls, mock_get_conn, mock_create_session, db, tmp_path,
+    ):
+        """AC-1: the run record captures completed_games (M) vs
+        completed_games_with_data (N) so the operator can tell "no games played
+        yet" (M=0) from "games played, none loaded" (M>0, N=0)."""
+        _seed_team(db)
+        _seed_season(db)
+        _seed_scouting_run(db)
+
+        mock_get_conn.side_effect = _fresh_conn_factory(str(tmp_path / "test.db"))
+        mock_create_session.return_value = _session_that_fails()
+        mock_client_cls.return_value = MagicMock()
+
+        mock_crawler = MagicMock()
+        # M = 2 completed games on the schedule, but zero loaded with data (N=0).
+        mock_crawler.scout_team.return_value = ScoutingCrawlResult(
+            team_id=1, season_id="2026-spring-hs",
+            games_crawled=2, errors=0,
+            games=[{"game_status": "completed"}, {"game_status": "completed"}],
+            boxscores={},
+        )
+        mock_loader = MagicMock()
+        mock_loader.load_team.return_value = LoadResult(loaded=0)
+
+        with (
+            patch("src.reports.generator.ScoutingCrawler", return_value=mock_crawler),
+            patch("src.reports.generator.ScoutingLoader", return_value=mock_loader),
+            patch("src.reports.generator._REPO_ROOT", tmp_path),
+            patch("src.reports.generator._REPORTS_DIR", tmp_path / "data" / "reports"),
+        ):
+            result = generate_report("abc123")
+
+        assert result.success is False
+        verify_conn = _fresh_conn_factory(str(tmp_path / "test.db"))()
+        verify_conn.row_factory = sqlite3.Row
+        run = verify_conn.execute(
+            "SELECT rgr.* FROM report_generation_runs rgr "
+            "JOIN reports r ON r.id = rgr.report_id WHERE r.slug = ?",
+            (result.slug,),
+        ).fetchone()
+        verify_conn.close()
+        assert run is not None
+        # M > 0 but N == 0 -> "games played, none loaded" sub-case.
+        assert run["completed_games"] == 2
+        assert run["completed_games_with_data"] == 0
+        assert run["overall_status"] == "completed"
+
+    @patch("src.reports.generator.cleanup_orphan_teams")
+    @patch("src.http.session.create_session")
+    @patch("src.reports.generator.get_connection")
+    @patch("src.reports.generator.GameChangerClient")
+    @patch("src.reports.generator.ensure_team_row_with_provenance",
+           return_value=EnsureTeamResult(1, "anchor", False))
+    @patch("src.reports.generator.render_report", return_value="<html>x</html>")
+    @patch("src.reports.generator._crawl_and_load_spray")
+    @patch("src.reports.generator._crawl_and_load_plays", return_value=[])
+    def test_no_games_abort_path_runs_orphan_cleanup(
+        self, mock_plays, mock_spray, mock_render, mock_ensure,
+        mock_client_cls, mock_get_conn, mock_create_session, mock_cleanup,
+        db, tmp_path,
+    ):
+        """Path-symmetry: the no-games abort path still computes orphans and
+        invokes cleanup (mirroring the normal render path), so a team a run
+        created is not leaked just because the run produced no games."""
+        _seed_team(db)
+        _seed_season(db)
+        _seed_scouting_run(db)
+
+        db_path = str(tmp_path / "test.db")
+        mock_get_conn.side_effect = _fresh_conn_factory(db_path)
+        mock_create_session.return_value = _session_that_fails()
+        mock_client_cls.return_value = MagicMock()
+
+        mock_crawler = MagicMock()
+        # Zero completed games with data -> the no-games gate fires.
+        mock_crawler.scout_team.return_value = ScoutingCrawlResult(
+            team_id=1, season_id="2026-spring-hs",
+            games_crawled=0, errors=0, games=[], boxscores={},
+        )
+
+        # The real ScoutingLoader records opponent stubs it INSERTs into the
+        # per-run created-set (E-235-04). Capture the set the generator passes
+        # to the loader constructor so the mock can record into it.
+        captured: dict = {}
+
+        # Loader creates an orphan team (id=2) during the load, as the real
+        # scouting load does for opponent stubs.
+        def _load_side_effect(crawl_result, **kwargs):
+            conn = _fresh_conn_factory(db_path)()
+            cursor = conn.execute(
+                "INSERT INTO teams (name, public_id, season_year, membership_type) "
+                "VALUES ('Orphan', 'orph9', 2026, 'tracked')"
+            )
+            opp_id = cursor.lastrowid
+            conn.commit()
+            conn.close()
+            if captured.get("set") is not None:
+                captured["set"].add(opp_id)
+            return LoadResult(loaded=0)
+
+        mock_loader = MagicMock()
+        mock_loader.load_team.side_effect = _load_side_effect
+
+        def _make_loader(conn, created_team_ids=None):
+            captured["set"] = created_team_ids
+            return mock_loader
+
+        with (
+            patch("src.reports.generator.ScoutingCrawler", return_value=mock_crawler),
+            patch("src.reports.generator.ScoutingLoader", side_effect=_make_loader),
+            patch("src.reports.generator._REPO_ROOT", tmp_path),
+            patch("src.reports.generator._REPORTS_DIR", tmp_path / "data" / "reports"),
+        ):
+            result = generate_report("abc123")
+
+        # No-games terminal outcome, AND orphan cleanup was invoked with the
+        # loader-created orphan (id=2) -- the abort path is symmetric.
+        assert result.success is False
+        assert mock_cleanup.called, "abort path must still run orphan cleanup"
+        cleaned_ids = mock_cleanup.call_args[0][1]
+        assert 2 in cleaned_ids
 
 
 # ---------------------------------------------------------------------------
@@ -195,7 +330,8 @@ class TestPublicProfileFetchFailure:
     @patch("src.http.session.create_session")
     @patch("src.reports.generator.get_connection")
     @patch("src.reports.generator.GameChangerClient")
-    @patch("src.reports.generator.ensure_team_row", return_value=1)
+    @patch("src.reports.generator.ensure_team_row_with_provenance",
+           return_value=EnsureTeamResult(1, "anchor", False))
     @patch("src.reports.generator.render_report", return_value="<html>ok</html>")
     @patch("src.reports.generator._crawl_and_load_spray")
     @patch("src.reports.generator._crawl_and_load_plays", return_value=[])
@@ -207,6 +343,30 @@ class TestPublicProfileFetchFailure:
         _seed_team(db, name=db_name)
         _seed_season(db)
         _seed_scouting_run(db)
+        # A completed game WITH per-game stat data in the derived season ('2026',
+        # from season_year=2026 with no program) so the no-games gate (a) does
+        # not fire -- this test exercises the ready / name-fallback path. Post
+        # E-235 Phase 4b HIGH-1, N requires a player_game_batting/pitching row,
+        # so a bare games row alone is NOT "with data".
+        db.execute(
+            "INSERT INTO seasons (season_id, name, season_type, year) "
+            "VALUES ('2026', '2026', 'default', 2026) ON CONFLICT(season_id) DO NOTHING"
+        )
+        db.execute(
+            "INSERT INTO games (game_id, season_id, home_team_id, away_team_id, "
+            "home_score, away_score, game_date) "
+            "VALUES ('np-seed-g1', '2026', 1, 1, 5, 3, '2026-04-01')"
+        )
+        db.execute(
+            "INSERT OR IGNORE INTO players (player_id, first_name, last_name) "
+            "VALUES ('np-seed-p1', 'Seed', 'Player')"
+        )
+        db.execute(
+            "INSERT INTO player_game_batting "
+            "(game_id, player_id, team_id, perspective_team_id, ab, h) "
+            "VALUES ('np-seed-g1', 'np-seed-p1', 1, 1, 3, 1)"
+        )
+        db.commit()
 
         mock_get_conn.side_effect = _fresh_conn_factory(str(tmp_path / "test.db"))
         # Public profile fetch FAILS -> team_name_from_api stays None.
@@ -256,7 +416,8 @@ class TestAuthExpiryStageExecution:
     @patch("src.http.session.create_session")
     @patch("src.reports.generator.get_connection")
     @patch("src.reports.generator.GameChangerClient")
-    @patch("src.reports.generator.ensure_team_row", return_value=1)
+    @patch("src.reports.generator.ensure_team_row_with_provenance",
+           return_value=EnsureTeamResult(1, "anchor", False))
     @patch("src.reports.generator.render_report", return_value="<html>x</html>")
     @patch("src.reports.generator._crawl_and_load_spray")
     @patch("src.reports.generator._crawl_and_load_plays", return_value=[])

@@ -4,7 +4,7 @@
 [E-235: Report Run Records, Trust Signals & Quality Gates](../E-235-report-run-records/epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, every generated scouting report carries a footer trust block telling the coach how complete the data is — game coverage (N of M games played), pitch-detail and spray availability, and the generation date — rendered in one of three severity states (quiet / flagged / loud) with a generic degraded-confidence line when an operator data-integrity flag is set.

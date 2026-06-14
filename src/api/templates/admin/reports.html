@@ -71,6 +71,40 @@
           {% if report.status == 'failed' and report.error_message %}
           <span class="ml-1 cursor-help text-red-600" title="{{ report.error_message }}">&#9432;</span>
           {% endif %}
+          {# E-235-06 (AC-1/AC-2): operator-only per-stage detail + trust flags
+             from the run record. Rendered only when a run row exists (LEFT join
+             -> run.* is NULL for legacy/pre-migration reports). These are the
+             OPERATOR surface; coach-facing footer signals live in story 07. #}
+          {% if report.overall_status %}
+          <div class="mt-1 font-normal text-[11px] text-gray-500 leading-tight">
+            <span class="font-medium text-gray-600">Pipeline:</span>
+            crawl {{ report.crawl_status or '–' }}
+            · load {{ report.load_status or '–' }}
+            · gc_uuid {{ report.gc_uuid_status or '–' }}
+            · spray {{ report.spray_status or '–' }}{% if report.spray_games is not none %} ({{ report.spray_games }}){% endif %}
+            · plays {{ report.plays_status or '–' }}{% if report.plays_games_covered is not none %} ({{ report.plays_games_covered }}/{{ report.plays_games_expected or 0 }}){% endif %}
+            · recon {{ report.reconciliation_status or '–' }}{% if report.discrepancies_found is not none %} ({{ report.discrepancies_corrected or 0 }}/{{ report.discrepancies_found }}){% endif %}
+            {% if report.enrichment_status %}· enrich {{ report.enrichment_status }}{% endif %}
+            <br>
+            <span class="font-medium text-gray-600">Games:</span>
+            {{ report.completed_games_with_data if report.completed_games_with_data is not none else '–' }}
+            of {{ report.completed_games if report.completed_games is not none else '–' }} with data
+            {% if report.season_id_used %}· season {{ report.season_id_used }}{% endif %}
+          </div>
+          {% endif %}
+          {% if report.season_fallback %}
+          <span class="inline-block mt-1 px-1.5 py-0.5 rounded font-normal text-[10px] bg-orange-100 text-orange-800"
+                title="Season resolved via current-year / year-only fallback, not team metadata (possible wrong-season risk)">season fallback</span>
+          {% endif %}
+          {% if report.identity_match_method == 'name_only' %}
+          <span class="inline-block mt-1 px-1.5 py-0.5 rounded font-normal text-[10px] bg-orange-100 text-orange-800"
+                title="Team matched by name only — no gc_uuid/public_id anchor (possible wrong-team risk)">name-only match</span>
+          {% endif %}
+          {% if report.run_error_message %}
+          <div class="mt-1 font-normal text-[11px] text-red-600" title="{{ report.run_error_message }}">
+            stage error ({{ report.error_stage or 'pipeline' }})
+          </div>
+          {% endif %}
         </td>
         <td class="py-2 px-3 text-center">
           {% if report.is_expired %}
@@ -81,6 +115,9 @@
           <span class="inline-block px-2 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800">Generating...</span>
           {% elif report.status == 'failed' %}
           <span class="inline-block px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800">Failed</span>
+          {% elif report.status == 'no_games' %}
+          {# E-235-03/06: explicit no-completed-games terminal state (not a bare failure) #}
+          <span class="inline-block px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-800" title="No completed games with data found for this team">No games</span>
           {% else %}
           <span class="inline-block px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600">{{ report.status }}</span>
           {% endif %}
@@ -88,7 +125,11 @@
         <td class="py-2 px-3 text-center text-gray-600">{{ report.generated_at[:10] }}</td>
         <td class="py-2 px-3 text-center text-gray-600">{{ report.expires_at[:10] }}</td>
         <td class="py-2 px-3 text-center">
-          {% if report.status == 'ready' and not report.is_expired %}
+          {# E-235 Phase 4b MEDIUM-2: no_games is a real shareable page (the
+             serve route renders it like ready), so the operator gets the
+             view/copy link for it too -- not just for 'ready'. generating /
+             failed stay unlinked. #}
+          {% if report.status in ['ready', 'no_games'] and not report.is_expired %}
           <span class="inline-flex items-center justify-center gap-1.5">
             <a href="{{ report.url }}" target="_blank" rel="noopener noreferrer"
                class="text-xs text-blue-900 underline hover:text-blue-700">View</a>

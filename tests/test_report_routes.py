@@ -209,6 +209,47 @@ class TestNonReadyStatus:
 
 
 # ---------------------------------------------------------------------------
+# E-235-03 AC-2: no_games reports are SERVED (shareable), not 404
+# ---------------------------------------------------------------------------
+
+
+class TestNoGamesStatusServed:
+    """The E-235-03 gate (a) no-games page is shareable -- the serve route
+    renders its file (200), it does not 404 like generating/failed."""
+
+    def test_200_for_no_games_status(self, setup):
+        db_path, reports_dir, client = setup
+        (reports_dir / "ng-slug.html").write_text(
+            "<html><body>No completed games found for Test Team this season."
+            "</body></html>",
+            encoding="utf-8",
+        )
+        _insert_report(
+            db_path, "ng-slug", status="no_games",
+            report_path="reports/ng-slug.html",
+        )
+
+        response = client.get("/reports/ng-slug")
+
+        assert response.status_code == 200
+        assert "No completed games found" in response.text
+
+    def test_no_games_still_respects_expiry(self, setup):
+        """A no_games report still 404s once expired (same as ready)."""
+        db_path, reports_dir, client = setup
+        (reports_dir / "ng-exp.html").write_text("<html></html>", encoding="utf-8")
+        _insert_report(
+            db_path, "ng-exp", status="no_games",
+            expires_at=_past_iso(1),
+            report_path="reports/ng-exp.html",
+        )
+
+        response = client.get("/reports/ng-exp")
+
+        assert response.status_code == 404
+
+
+# ---------------------------------------------------------------------------
 # No auth required
 # ---------------------------------------------------------------------------
 

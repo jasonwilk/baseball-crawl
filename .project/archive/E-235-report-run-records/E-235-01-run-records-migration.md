@@ -4,7 +4,7 @@
 [E-235: Report Run Records, Trust Signals & Quality Gates](../E-235-report-run-records/epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the database has a `report_generation_runs` table — one wide row per report generation — that records per-stage status, per-stage counts, and report-level trust flags, FK-linked to `reports`. This is the storage layer every other story in the epic reads from or writes to.

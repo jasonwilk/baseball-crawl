@@ -14,7 +14,7 @@
   - Three-digit prefix, underscore, descriptive slug, `.sql` extension
 - Migrations are append-only. Never edit an applied migration.
 - Track applied state in a `_migrations` metadata table
-- **Current state (verified 2026-06-13)**: schema was SQUASHED during E-220 into a single `001_initial_schema.sql` (704 lines; old migrations 001–015 archived in `.project/archive/migrations-pre-E220/`). The file folds all prior migrations and adds `perspective_team_id` as a first-class concept on stat tables. Inline comments cite original migration provenance (e.g., "from migration 008"). `migrations/` now contains ONLY `001_initial_schema.sql`. **Next migration: `002`.** Authoritative source: `.claude/rules/migrations.md`.
+- **Current state (verified 2026-06-14)**: E-220 SQUASHED the schema into `001_initial_schema.sql` (704 lines; old migrations 001–015 archived in `.project/archive/migrations-pre-E220/`), folding all prior migrations and adding `perspective_team_id` as a first-class concept on stat tables. **E-235 added `002_report_generation_runs.sql`** (one wide telemetry row per report generation; FK→reports ON DELETE CASCADE; UNIQUE(report_id)). So `migrations/` now holds `001_*` + `002_*`. **Next migration: `003`.** Authoritative source: `.claude/rules/migrations.md` (and ALWAYS glob the live dir before assigning a number).
   - (Prior 2026-03-26 note claimed 001–005 as separate files — that was pre-squash and is now stale/wrong.)
 
 ## Schema Conventions
@@ -64,3 +64,4 @@
 - [endpoint-schema-notes.md](endpoint-schema-notes.md) -- Detailed schema implications for all discovered GameChanger API endpoints (team-detail, /me/teams, player-stats, schedule, public endpoints, opponents, boxscore, plays, roster, bridge endpoints). Response shapes, field types, join keys, normalization guidance, raw sample paths.
 - [etl-patterns.md](etl-patterns.md) -- Token lifetime and ETL scheduling (14-day window), raw-to-processed pipeline, idempotent ingestion, pagination patterns (cursor-based, x-next-page), project file paths for migrations/DB/API spec/stat glossary.
 - [fixture_seed_not_rollup_consistent.md](fixture_seed_not_rollup_consistent.md) -- `tests/fixtures/seed.sql` season aggregates are NOT a literal SUM of its per-game rows; aggregate-parity/recompute tests need a dedicated rollup-consistent fixture (discovered E-234 review).
+- [games_row_vs_stat_rows_coupling.md](games_row_vs_stat_rows_coupling.md) -- A completed `games` row can exist with ZERO player stat rows (loose loader coupling); "games-with-data" counts MUST EXISTS-filter on a perspective-scoped stat row, not COUNT bare completed games (E-235 Codex HIGH).

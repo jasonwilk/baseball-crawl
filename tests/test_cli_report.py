@@ -101,6 +101,36 @@ class TestListCommand:
         assert result.exit_code == 0
         assert "No reports found" in result.output
 
+    def test_no_games_report_shows_shareable_url(self):
+        """Phase 4b MEDIUM-2: a no_games report exposes its URL (shareable
+        page), while a failed report does not. A wide console avoids Rich
+        truncating the URL cell."""
+        from rich.console import Console
+
+        mock_reports = [
+            {
+                "slug": "ng1", "title": "No Games Report", "status": "no_games",
+                "generated_at": "2026-03-28T12:00:00Z",
+                "expires_at": "2026-04-11T12:00:00Z",
+                "url": "https://bbstats.ai/reports/ng1", "is_expired": False,
+            },
+            {
+                "slug": "f1", "title": "Failed Report", "status": "failed",
+                "generated_at": "2026-03-28T12:00:00Z",
+                "expires_at": "2026-04-11T12:00:00Z",
+                "url": "https://bbstats.ai/reports/f1", "is_expired": False,
+            },
+        ]
+        with (
+            patch("src.cli.report.list_reports", return_value=mock_reports),
+            patch("src.cli.report.console", Console(width=200)),
+        ):
+            result = runner.invoke(app, ["list"])
+
+        assert result.exit_code == 0
+        assert "reports/ng1" in result.output  # no_games link shown
+        assert "reports/f1" not in result.output  # failed stays unlinked
+
     def test_help_text(self):
         result = runner.invoke(app, ["--help"])
         assert result.exit_code == 0

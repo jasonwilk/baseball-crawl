@@ -19,8 +19,34 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
+
+# Identity match-method vocabulary (E-235-03 gate (c), TN-1/TN-3).
+MATCH_ANCHOR = "anchor"  # matched/created with a gc_uuid or public_id anchor
+MATCH_NAME_ONLY = "name_only"  # matched/created by name only (lower trust)
+
+
+@dataclass
+class EnsureTeamResult:
+    """Provenance of an :func:`ensure_team_row_with_provenance` resolution.
+
+    Attributes:
+        team_id: The ``teams.id`` (integer PK) of the matched or created row.
+        match_method: ``'anchor'`` when matched/created via a gc_uuid or
+            public_id anchor (reliable); ``'name_only'`` when matched/created by
+            name+season with no external-id anchor (the silent-wrong-team risk).
+            Feeds E-235's ``identity_match_method`` run-record flag (gate (c)).
+        inserted: ``True`` when this call INSERTed a brand-new row; ``False``
+            when it matched an existing row (including the dedup/self-tracking
+            guards). Consumed by E-235-04's in-memory created-set (insert-vs-
+            match), which must record only teams a run truly inserted.
+    """
+
+    team_id: int
+    match_method: str
+    inserted: bool
 
 
 def ensure_team_row(
@@ -35,6 +61,9 @@ def ensure_team_row(
     """Find or create a team row using a deterministic dedup cascade.
 
     All identifier parameters are optional -- callers pass what they have.
+    Thin wrapper over :func:`ensure_team_row_with_provenance` for the many
+    callers that only need the integer PK; the cascade logic lives in the
+    provenance form (single source of truth).
 
     Args:
         db: An open sqlite3.Connection.
@@ -46,6 +75,46 @@ def ensure_team_row(
 
     Returns:
         The ``teams.id`` (integer PK) of the matched or newly created row.
+    """
+    return ensure_team_row_with_provenance(
+        db,
+        name=name,
+        gc_uuid=gc_uuid,
+        public_id=public_id,
+        season_year=season_year,
+        source=source,
+    ).team_id
+
+
+def ensure_team_row_with_provenance(
+    db: sqlite3.Connection,
+    *,
+    name: str | None = None,
+    gc_uuid: str | None = None,
+    public_id: str | None = None,
+    season_year: int | None = None,
+    source: str | None = None,
+    _insert_retry: bool = False,
+) -> EnsureTeamResult:
+    """Find or create a team row, returning resolution provenance.
+
+    Same deterministic dedup cascade as :func:`ensure_team_row` (which delegates
+    here) but additionally reports HOW the row was resolved -- the identity
+    ``match_method`` (E-235-03 gate (c)) and whether the row was newly INSERTed
+    (``inserted``, consumed by E-235-04). The cascade order is unchanged:
+    gc_uuid match → public_id match → name+season match → self-tracking guards
+    → INSERT.
+
+    ``_insert_retry`` is internal: on a cross-process INSERT race (a concurrent
+    process commits the same gc_uuid/public_id between this call's cascade SELECT
+    and its INSERT, tripping a partial UNIQUE index), the function re-enters ONCE
+    with this flag set so the now-committed racing row is resolved through the
+    normal match path (steps 1-2) -- applying the SAME backfills a match would,
+    not a bare id lookup (E-235 Phase 4b MEDIUM-1). The flag bounds the retry to
+    a single re-entry (no infinite recursion if the row vanishes again).
+
+    Returns:
+        An :class:`EnsureTeamResult`.
     """
     # Step 1: gc_uuid match
     if gc_uuid is not None:
@@ -64,7 +133,7 @@ def ensure_team_row(
             )
             _backfill_name(db, existing_id, existing_name, name, gc_uuid)
             _backfill_season_year(db, existing_id, existing_sy, season_year)
-            return existing_id
+            return EnsureTeamResult(existing_id, MATCH_ANCHOR, False)
 
     # Step 2: public_id match (no gc_uuid IS NULL filter)
     if public_id is not None:
@@ -83,7 +152,7 @@ def ensure_team_row(
             )
             _backfill_name(db, existing_id, existing_name, name, gc_uuid)
             _backfill_season_year(db, existing_id, existing_sy, season_year)
-            return existing_id
+            return EnsureTeamResult(existing_id, MATCH_ANCHOR, False)
 
     # Step 3: name + season_year + tracked match
     if name is not None:
@@ -104,7 +173,7 @@ def ensure_team_row(
             # Conservative back-fill: NO gc_uuid/public_id on name matches
             _backfill_name(db, existing_id, existing_name, name, gc_uuid)
             _backfill_season_year(db, existing_id, existing_sy, season_year)
-            return existing_id
+            return EnsureTeamResult(existing_id, MATCH_NAME_ONLY, False)
 
     # Self-tracking guard: don't create a tracked duplicate of a member team
     if gc_uuid is not None:
@@ -117,7 +186,7 @@ def ensure_team_row(
                 "ensure_team_row: self-tracking guard (gc_uuid) -> member id=%d",
                 member[0],
             )
-            return member[0]
+            return EnsureTeamResult(member[0], MATCH_ANCHOR, False)
 
     if public_id is not None:
         member = db.execute(
@@ -129,7 +198,7 @@ def ensure_team_row(
                 "ensure_team_row: self-tracking guard (public_id) -> member id=%d",
                 member[0],
             )
-            return member[0]
+            return EnsureTeamResult(member[0], MATCH_ANCHOR, False)
 
     # Name-only self-tracking guard (for callers with no gc_uuid/public_id)
     if gc_uuid is None and public_id is None and name is not None:
@@ -144,23 +213,50 @@ def ensure_team_row(
                 "ensure_team_row: self-tracking guard (name) -> member id=%d",
                 member[0],
             )
-            return member[0]
+            return EnsureTeamResult(member[0], MATCH_NAME_ONLY, False)
 
     # Step 4: INSERT new tracked row
     insert_name = name if name is not None else (gc_uuid or "Unknown")
     insert_source = source if source is not None else "gamechanger"
-    cursor = db.execute(
-        "INSERT INTO teams (name, gc_uuid, public_id, season_year, "
-        "membership_type, source, is_active) VALUES (?, ?, ?, ?, 'tracked', ?, 0)",
-        (insert_name, gc_uuid, public_id, season_year, insert_source),
-    )
+    try:
+        cursor = db.execute(
+            "INSERT INTO teams (name, gc_uuid, public_id, season_year, "
+            "membership_type, source, is_active) VALUES (?, ?, ?, ?, 'tracked', ?, 0)",
+            (insert_name, gc_uuid, public_id, season_year, insert_source),
+        )
+    except sqlite3.IntegrityError:
+        # Cross-process INSERT race (E-235-04): a concurrent process committed a
+        # row with the same gc_uuid/public_id between this call's cascade SELECT
+        # (steps 1-2) and this INSERT, tripping a partial UNIQUE index. Re-run the
+        # cascade ONCE: the racing row now exists, so steps 1-2 MATCH it AND apply
+        # the same gc_uuid/public_id/name/season backfills the normal match path
+        # does -- not a bare id lookup (E-235 Phase 4b MEDIUM-1). Degrades to a
+        # match (inserted=False) without crashing the generation. Name-only
+        # inserts have no UNIQUE index on name and never reach here.
+        if not _insert_retry:
+            logger.info(
+                "ensure_team_row: lost INSERT race on gc_uuid=%r/public_id=%r; "
+                "re-matching the concurrently-created row with backfill",
+                gc_uuid, public_id,
+            )
+            return ensure_team_row_with_provenance(
+                db, name=name, gc_uuid=gc_uuid, public_id=public_id,
+                season_year=season_year, source=source, _insert_retry=True,
+            )
+        # Already retried once and STILL colliding without a match (the racing
+        # row vanished then reappeared -- pathological). Re-raise rather than
+        # loop; nothing is masked.
+        raise
     new_id = cursor.lastrowid
     logger.info(
         "ensure_team_row: INSERT new tracked team id=%d name=%r gc_uuid=%r "
         "public_id=%r season_year=%r source=%r",
         new_id, insert_name, gc_uuid, public_id, season_year, insert_source,
     )
-    return new_id
+    # A fresh insert carrying any external id (gc_uuid/public_id) is anchored;
+    # an insert from name alone is name_only (lower trust).
+    insert_method = MATCH_ANCHOR if (gc_uuid or public_id) else MATCH_NAME_ONLY
+    return EnsureTeamResult(new_id, insert_method, True)
 
 
 def _backfill_identifier(

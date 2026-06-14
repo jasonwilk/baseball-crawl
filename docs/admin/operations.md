@@ -827,6 +827,90 @@ bb report verify-aggregates
 
 **Read-only**: This command never writes to `player_season_*` tables. It is safe to run against production at any time.
 
+### Report Generation Run Records
+
+Every standalone report generation writes a companion row to `report_generation_runs` (Migration 002). This row gives per-stage visibility into what happened: which stages ran, which succeeded or failed, how many games were covered, and whether any data-quality trust flags fired.
+
+#### The `report_generation_runs` table
+
+One row per generation, linked 1:1 to `reports(id)` with `ON DELETE CASCADE` (deleting a report removes its run record automatically).
+
+| Column | What it records |
+|--------|----------------|
+| `overall_status` | Lifecycle status of the generation: `running` (in flight) → `completed` or `failed` |
+| `crawl_status` / `load_status` | Status of the scouting crawl and load stages |
+| `gc_uuid_status` | UUID resolution result: `resolved` (spray charts available) or `unavailable` |
+| `spray_status` / `spray_games` | Spray chart stage status and count of distinct games with spray data loaded |
+| `plays_status` / `plays_games_expected` / `plays_games_covered` | Plays/pitch-detail stage status and coverage (covered/expected) |
+| `reconciliation_status` / `discrepancies_found` / `discrepancies_corrected` | Pitcher-attribution reconciliation pass result |
+| `enrichment_status` | Tier-2 LLM enrichment result: `success`, `unavailable-no-key`, or `failed` |
+| `completed_games` (M) | Distinct completed games on the fetched schedule -- games with a final score played to date |
+| `completed_games_with_data` (N) | Distinct completed games for which at least one player stat row was loaded; N ≤ M |
+| `season_id_used` | The canonical season slug (`seasons` FK) used for this generation |
+| `season_fallback` | `1` when season was resolved via current-year / year-only fallback rather than team metadata |
+| `identity_match_method` | `anchor` (team matched by gc_uuid or public_id) or `name_only` (matched by name+season only) |
+| `error_stage` / `error_message` | Stage name and error message when the generation failed |
+
+**N vs M -- why they differ**: M counts games with a final score on the schedule. N counts only games from which player stat rows were actually loaded for this team. A scouted opponent often has a public final score (M ≥ 1) but no GC scorebook (N = 0). The report footer's "Through {date} (N of M games)" and freshness date both anchor to N, not M, so "N of M games" literally means "games with scouting data out of games played."
+
+#### `/admin/reports` -- per-stage detail and trust badges
+
+Each report row in the admin Reports page shows the full run record inline when a run record exists (legacy reports before Migration 002 show no pipeline detail).
+
+**Pipeline detail line** (rendered in small gray text below the report title):
+
+```
+Pipeline: crawl {status} · load {status} · gc_uuid {status} · spray {status} ({games}) · plays {status} ({covered}/{expected}) · recon {status} ({corrected}/{found}) · enrich {status}
+Games: {N} of {M} with data · season {season_id}
+```
+
+**Operator-only trust-flag badges** (orange, below the pipeline line):
+
+| Badge | What triggered it | Tooltip text |
+|-------|------------------|-------------|
+| `season fallback` | `season_fallback = 1` — season resolved via current-year / year-only fallback, not team metadata | "Season resolved via current-year / year-only fallback, not team metadata (possible wrong-season risk)" |
+| `name-only match` | `identity_match_method = 'name_only'` — team matched by name + season with no gc_uuid/public_id anchor | "Team matched by name only — no gc_uuid/public_id anchor (possible wrong-team risk)" |
+
+**Status column badges**:
+
+| Badge | Meaning |
+|-------|---------|
+| Ready (green) | Generation completed; report is shareable |
+| Generating... (yellow) | Pipeline still running |
+| Failed (red) | Pipeline encountered a fatal error |
+| No games (amber) | Generation completed but found N = 0 games with data (see below) |
+| Expired (gray) | Past the 14-day expiry window |
+
+#### `bb report list` -- run columns in CLI output
+
+`bb report list` uses the same `list_reports_with_runs` join as the admin UI. Each entry now includes the full `report_generation_runs` column set (all NULL for pre-Migration-002 reports) plus `error_message` from the `reports` table itself. Per-stage status, trust flags, and error details are all accessible in CLI output.
+
+#### The `no_games` terminal outcome
+
+When a generation completes the crawl and load stages successfully but finds N = 0 (zero completed games with player stat data), it produces a **`no_games`** outcome instead of a silent empty report or a pipeline failure:
+
+- `reports.status` is set to `no_games`.
+- A minimal, self-contained HTML page is written with the coach-facing message: "No completed games found for {team} this season. If this looks wrong, verify the team URL and try again."
+- The run record's `overall_status` is `completed` (not `failed`) — the pipeline ran correctly.
+- The **View** and **Copy link** actions in `/admin/reports` are active for `no_games` reports — the link is shareable and coaches can open it without getting a 404.
+
+This situation is normal for early-season teams, teams with a public schedule but no GC scorebook, or an incorrect team URL. It is not a bug.
+
+#### Coach-footer ↔ operator linkage
+
+The coach-facing report footer (visible to anyone with the report link) shows a generic degraded-confidence line when either operator trust flag is set:
+
+> ⚠️ Data accuracy may be limited. Contact your operator to verify before the game.
+
+This line appears when `season_fallback = 1` **or** `identity_match_method = 'name_only'`. The footer never names the specific flag — coaches see only the generic warning and are directed to contact the operator.
+
+The **operator** sees the specific flag(s) as orange badges in `/admin/reports`. When a coach reaches out citing the degraded-confidence warning, check the report row in the admin UI to see which badge(s) are shown, then investigate using the table below:
+
+| Operator flag | Root cause | How to investigate |
+|--------------|-----------|-------------------|
+| **season fallback** | `derive_season_id_for_team_with_fallback()` could not find season metadata on the team row and fell back to the current calendar year or a year-only match. This happens when the public API did not return a season year and the team has no prior data. | Check the team's `season_year` in the database: `sqlite3 data/app.db "SELECT id, name, season_year, public_id FROM teams WHERE public_id = '<public_id>'"`. If the season year is wrong, correct it and re-generate the report. |
+| **name-only match** | `ensure_team_row_with_provenance()` matched the team to an existing DB row by name + season year only, with no gc_uuid or public_id anchor. The wrong team could be matched if two teams share a name in the same season. | Check whether `public_id` on the matched team row matches the URL you generated the report for: `sqlite3 data/app.db "SELECT id, name, season_year, public_id, gc_uuid FROM teams WHERE id = <team_id>"`. If the public_id is wrong or missing, the report may have used a different team's row. |
+
 ---
 
 ## Programs Management
@@ -1145,4 +1229,4 @@ For the expected data volume (~30 games x 4 teams x a few seasons), the database
 
 ---
 
-*Last updated: 2026-06-13 | Source: E-234 (bb report verify-aggregates), E-221 (team delete cross-perspective gate, cascade consolidation, retention flash message), E-199 (standalone reports section, cascade-delete behavior), E-198 (bb data reconcile, migration 012), E-195 (plays pipeline, migration 009, validate_plays_stats.py), E-173 (resolution write-through, auto-scout after linking, unified Find on GC resolve page, dashboard sort by next game date, terminology cleanup, bb data repair-opponents), E-167 (bb data dedup CLI, GC search-powered opponent resolution, skip/unhide workflow), E-163 (scouting spray pipeline, updated thresholds, bb data scout 4-step flow), E-158 (spray chart pipeline, migration 006, chart routes), E-156 (bb data scout --force flag), E-155 (duplicate team detection and merge UI), E-143 (programs, user roles, team delete, opponent mapping UX, crawl trigger UI), E-120-06 (bare UUID input documented), E-055 (unified CLI), E-115-01 (E-100 team management model), E-028-03 (original)*
+*Last updated: 2026-06-14 | Source: E-235 (report generation run records, no_games outcome, trust-flag badges, coach-footer operator linkage), E-234 (bb report verify-aggregates), E-221 (team delete cross-perspective gate, cascade consolidation, retention flash message), E-199 (standalone reports section, cascade-delete behavior), E-198 (bb data reconcile, migration 012), E-195 (plays pipeline, migration 009, validate_plays_stats.py), E-173 (resolution write-through, auto-scout after linking, unified Find on GC resolve page, dashboard sort by next game date, terminology cleanup, bb data repair-opponents), E-167 (bb data dedup CLI, GC search-powered opponent resolution, skip/unhide workflow), E-163 (scouting spray pipeline, updated thresholds, bb data scout 4-step flow), E-158 (spray chart pipeline, migration 006, chart routes), E-156 (bb data scout --force flag), E-155 (duplicate team detection and merge UI), E-143 (programs, user roles, team delete, opponent mapping UX, crawl trigger UI), E-120-06 (bare UUID input documented), E-055 (unified CLI), E-115-01 (E-100 team management model), E-028-03 (original)*

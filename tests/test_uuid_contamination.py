@@ -86,9 +86,14 @@ def _make_summary(opponent_id: str = _OPP_BOXSCORE_KEY) -> GameSummaryEntry:
 
 def test_ensure_team_row_passes_gc_uuid_none(db: sqlite3.Connection) -> None:
     """_ensure_team_row calls shared ensure_team_row with gc_uuid=None."""
+    from src.db.teams import EnsureTeamResult
+
     loader = _make_loader(db)
-    with patch("src.gamechanger.loaders.game_loader.ensure_team_row", wraps=None) as mock_etr:
-        mock_etr.return_value = 99
+    with patch(
+        "src.gamechanger.loaders.game_loader.ensure_team_row_with_provenance",
+        wraps=None,
+    ) as mock_etr:
+        mock_etr.return_value = EnsureTeamResult(99, "name_only", True)
         loader._ensure_team_row(_OPP_BOXSCORE_KEY, opponent_name="Opponent Team")
         mock_etr.assert_called_once()
         call_kwargs = mock_etr.call_args

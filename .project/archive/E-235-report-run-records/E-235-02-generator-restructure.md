@@ -4,7 +4,7 @@
 [E-235: Report Run Records, Trust Signals & Quality Gates](../E-235-report-run-records/epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, `generate_report()` is organized into named stage methods (crawl, load, gc_uuid, spray, plays, reconciliation, enrichment), each writing its status and counts to a `report_generation_runs` row that is created at the start of generation and finalized at the end. The pipeline's externally-observable behavior is unchanged except for the new run record.

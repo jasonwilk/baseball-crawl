@@ -7,9 +7,13 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from src.db.teams import EnsureTeamResult
 from src.gamechanger.crawlers.scouting import ScoutingCrawlResult
+from src.gamechanger.loaders.game_loader import GameLoader
+from src.gamechanger.types import TeamRef
 from src.reports.generator import (
     GenerationResult,
+    _SprayOutcome,
     cascade_delete_team,
     cleanup_orphan_teams,
     _crawl_and_load_spray,
@@ -22,7 +26,6 @@ from src.reports.generator import (
     _query_roster,
     _query_runs_avg,
     _resolve_gc_uuid,
-    _snapshot_team_ids,
     _update_report_failed,
     _update_report_ready,
     generate_report,
@@ -38,6 +41,9 @@ _REMOVED_NAMES = [
     "_resolve_gc_uuid_via_search",
     "_UUID_RE",
     "_PLAYER_STATS_ACCEPT",
+    # E-235-04: the global pre/post team-id snapshot diff was replaced by an
+    # in-memory per-run created-set; the snapshot helper no longer exists.
+    "_snapshot_team_ids",
 ]
 
 
@@ -92,6 +98,46 @@ def _seed_roster(db, team_id, player_id="p1", season_id="2026-spring-hs", jersey
     db.execute(
         "INSERT INTO team_rosters (team_id, player_id, season_id, jersey_number) VALUES (?, ?, ?, ?)",
         (team_id, player_id, season_id, jersey),
+    )
+    db.commit()
+
+
+def _seed_completed_game(db, season_id="2026", team_id=1, game_id="seed-g1"):
+    """Seed one completed game WITH per-game stat data in the team's DERIVED season.
+
+    The E-235-03 no-completed-games gate (a) aborts when ``_query_freshness``
+    counts zero completed games with data (N=0). Pipeline tests that mock the
+    loader insert no real game rows, so without this the gate would fire. The
+    derived season for the default seeded team (season_year=2026, no program)
+    is the year-only ``'2026'``. ``home``/``away`` both reference the subject
+    team.
+
+    A bare ``games`` row is NOT "with data": after E-235 Phase 4b HIGH-1,
+    ``_query_freshness`` requires a ``player_game_batting``/``player_game_pitching``
+    row for the team (a completed games row can exist with zero stat rows). So
+    this helper also seeds one real batting line, making N>0 honest.
+    """
+    db.execute(
+        "INSERT INTO seasons (season_id, name, season_type, year) "
+        "VALUES (?, ?, 'default', 2026) ON CONFLICT(season_id) DO NOTHING",
+        (season_id, season_id),
+    )
+    db.execute(
+        "INSERT INTO games (game_id, season_id, home_team_id, away_team_id, "
+        "home_score, away_score, game_date) VALUES (?, ?, ?, ?, 5, 3, '2026-04-01')",
+        (game_id, season_id, team_id, team_id),
+    )
+    player_id = f"{game_id}-p1"
+    db.execute(
+        "INSERT OR IGNORE INTO players (player_id, first_name, last_name) "
+        "VALUES (?, 'Seed', 'Player')",
+        (player_id,),
+    )
+    db.execute(
+        "INSERT INTO player_game_batting "
+        "(game_id, player_id, team_id, perspective_team_id, ab, h) "
+        "VALUES (?, ?, ?, ?, 3, 1)",
+        (game_id, player_id, team_id, team_id),
     )
     db.commit()
 
@@ -171,7 +217,8 @@ class TestGenerateReportE2E:
 
     @patch("src.reports.generator.get_connection")
     @patch("src.reports.generator.GameChangerClient")
-    @patch("src.reports.generator.ensure_team_row", return_value=1)
+    @patch("src.reports.generator.ensure_team_row_with_provenance",
+           return_value=EnsureTeamResult(1, "anchor", False))
     @patch("src.reports.generator.render_report", return_value="<html>test</html>")
     @patch("src.reports.generator._crawl_and_load_spray")
     def test_success_creates_file_and_ready_row(
@@ -190,6 +237,7 @@ class TestGenerateReportE2E:
             "VALUES (1, '2026-spring-hs', 'full', '2026-03-28T00:00:00Z', 'completed')"
         )
         db.commit()
+        _seed_completed_game(db)  # N>0 so the no-games gate does not fire
 
         db_path = str(tmp_path / "test.db")
         def _fresh_conn():
@@ -240,6 +288,275 @@ class TestGenerateReportE2E:
 
 
 # ---------------------------------------------------------------------------
+# E-235-02: report_generation_runs population (AC-1, AC-5, AC-7)
+# ---------------------------------------------------------------------------
+
+
+def _read_run_record(db_path: str, slug: str) -> dict | None:
+    """Return the report_generation_runs row for ``slug`` as a dict (or None)."""
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    try:
+        row = conn.execute(
+            """
+            SELECT rgr.* FROM report_generation_runs rgr
+            JOIN reports r ON r.id = rgr.report_id
+            WHERE r.slug = ?
+            """,
+            (slug,),
+        ).fetchone()
+    finally:
+        conn.close()
+    return dict(row) if row else None
+
+
+class TestRunRecordPopulation:
+    """AC-7: the run record is populated for successful and degraded runs."""
+
+    @staticmethod
+    def _setup(db, tmp_path, *, seed_game=True):
+        _seed_team(db)
+        _seed_season(db)
+        db.execute(
+            "INSERT INTO scouting_runs (team_id, season_id, run_type, started_at, status) "
+            "VALUES (1, '2026-spring-hs', 'full', '2026-03-28T00:00:00Z', 'completed')"
+        )
+        db.commit()
+        # A completed game in the derived season ('2026') keeps the no-games
+        # gate from firing for the non-no-games scenarios.
+        if seed_game:
+            _seed_completed_game(db)
+
+    @patch("src.reports.generator.get_connection")
+    @patch("src.reports.generator.GameChangerClient")
+    @patch("src.reports.generator.ensure_team_row_with_provenance",
+           return_value=EnsureTeamResult(1, "anchor", False))
+    @patch("src.reports.generator.render_report", return_value="<html>test</html>")
+    @patch("src.reports.generator._crawl_and_load_spray")
+    def test_successful_run_record_is_complete(
+        self, mock_spray, mock_render, mock_ensure, mock_client_cls, mock_get_conn,
+        db, tmp_path,
+    ):
+        """AC-1/AC-5: a successful generation finalizes the run with per-stage
+        statuses + per-game counts (M from the schedule, spray games)."""
+        from src.gamechanger.loaders import LoadResult
+
+        self._setup(db, tmp_path)
+        db_path = str(tmp_path / "test.db")
+
+        def _fresh_conn():
+            conn = sqlite3.connect(db_path)
+            conn.execute("PRAGMA foreign_keys=ON;")
+            return conn
+
+        mock_get_conn.side_effect = lambda: _fresh_conn()
+        mock_client_cls.return_value = MagicMock()
+        # M = 2 completed games on the schedule (3rd is scheduled, not counted).
+        mock_crawler = MagicMock()
+        mock_crawler.scout_team.return_value = ScoutingCrawlResult(
+            team_id=1, season_id="2026-spring-hs", games_crawled=2,
+            games=[
+                {"game_status": "completed"},
+                {"game_status": "completed"},
+                {"game_status": "scheduled"},
+            ],
+            boxscores={"g1": {}, "g2": {}},
+        )
+        mock_loader = MagicMock()
+        mock_loader.load_team.return_value = LoadResult(loaded=10)
+        # Spray succeeds with 4 games of spray data.
+        mock_spray.return_value = _SprayOutcome(status="completed", games_crawled=4)
+
+        with (
+            patch("src.reports.generator.ScoutingCrawler", return_value=mock_crawler),
+            patch("src.reports.generator.ScoutingLoader", return_value=mock_loader),
+            patch("src.reports.generator._REPO_ROOT", tmp_path),
+            patch("src.reports.generator._REPORTS_DIR", tmp_path / "data" / "reports"),
+            patch("src.reports.generator._crawl_and_load_plays", return_value=[]),
+        ):
+            result = generate_report("abc123")
+
+        assert result.success is True
+        run = _read_run_record(db_path, result.slug)
+        assert run is not None, "no report_generation_runs row was written"
+        assert run["overall_status"] == "completed"
+        assert run["started_at"] is not None
+        assert run["completed_at"] is not None
+        assert run["error_stage"] is None
+        assert run["error_message"] is None
+        # Per-stage statuses.
+        assert run["crawl_status"] == "completed"
+        assert run["load_status"] == "completed"
+        assert run["plays_status"] == "completed"
+        assert run["reconciliation_status"] == "completed"
+        assert run["spray_status"] == "completed"
+        # Per-game counts (M from the schedule; N is an int >= 0).
+        assert run["completed_games"] == 2
+        assert run["spray_games"] == 4
+        assert run["plays_games_expected"] == 2
+        assert isinstance(run["completed_games_with_data"], int)
+        assert isinstance(run["plays_games_covered"], int)
+
+    @patch("src.reports.generator.get_connection")
+    @patch("src.reports.generator.GameChangerClient")
+    @patch("src.reports.generator.ensure_team_row_with_provenance",
+           return_value=EnsureTeamResult(1, "anchor", False))
+    @patch("src.reports.generator.render_report", return_value="<html>test</html>")
+    @patch("src.reports.generator._crawl_and_load_spray")
+    def test_spray_failure_is_degraded_not_fatal(
+        self, mock_spray, mock_render, mock_ensure, mock_client_cls, mock_get_conn,
+        db, tmp_path,
+    ):
+        """AC-7: a spray failure records spray_status='failed' but the
+        generation still completes (overall_status='completed')."""
+        from src.gamechanger.loaders import LoadResult
+
+        self._setup(db, tmp_path)
+        db_path = str(tmp_path / "test.db")
+
+        def _fresh_conn():
+            conn = sqlite3.connect(db_path)
+            conn.execute("PRAGMA foreign_keys=ON;")
+            return conn
+
+        mock_get_conn.side_effect = lambda: _fresh_conn()
+        mock_client_cls.return_value = MagicMock()
+        mock_crawler = MagicMock()
+        mock_crawler.scout_team.return_value = ScoutingCrawlResult(
+            team_id=1, season_id="2026-spring-hs", games_crawled=2,
+            games=[{"game_status": "completed"}], boxscores={},
+        )
+        mock_loader = MagicMock()
+        mock_loader.load_team.return_value = LoadResult(loaded=5)
+        # Spray FAILS (non-fatal).
+        mock_spray.return_value = _SprayOutcome(status="failed", games_crawled=0)
+
+        with (
+            patch("src.reports.generator.ScoutingCrawler", return_value=mock_crawler),
+            patch("src.reports.generator.ScoutingLoader", return_value=mock_loader),
+            patch("src.reports.generator._REPO_ROOT", tmp_path),
+            patch("src.reports.generator._REPORTS_DIR", tmp_path / "data" / "reports"),
+            patch("src.reports.generator._crawl_and_load_plays", return_value=[]),
+        ):
+            result = generate_report("abc123")
+
+        assert result.success is True, "spray failure must not fail the generation"
+        run = _read_run_record(db_path, result.slug)
+        assert run is not None
+        assert run["overall_status"] == "completed"
+        assert run["spray_status"] == "failed"
+        assert run["spray_games"] == 0
+        # The earlier stages still completed.
+        assert run["crawl_status"] == "completed"
+        assert run["load_status"] == "completed"
+
+    @patch("src.reports.generator.get_connection")
+    @patch("src.reports.generator.GameChangerClient")
+    @patch("src.reports.generator.ensure_team_row_with_provenance",
+           return_value=EnsureTeamResult(1, "anchor", False))
+    @patch("src.reports.generator.render_report", return_value="<html>test</html>")
+    @patch("src.reports.generator._crawl_and_load_spray")
+    @patch("src.reports.generator._crawl_and_load_plays")
+    def test_plays_failure_is_degraded_not_fatal(
+        self, mock_plays, mock_spray, mock_render, mock_ensure,
+        mock_client_cls, mock_get_conn, db, tmp_path,
+    ):
+        """HIGH-2: a SWALLOWED plays/reconcile failure (recon_out.failed set, []
+        returned) records plays_status='failed' + reconciliation_status='failed'
+        -- NOT 'completed' -- while the generation still completes."""
+        from src.gamechanger.loaders import LoadResult
+
+        self._setup(db, tmp_path)
+        db_path = str(tmp_path / "test.db")
+
+        def _fresh_conn():
+            conn = sqlite3.connect(db_path)
+            conn.execute("PRAGMA foreign_keys=ON;")
+            return conn
+
+        mock_get_conn.side_effect = lambda: _fresh_conn()
+        mock_client_cls.return_value = MagicMock()
+        mock_crawler = MagicMock()
+        mock_crawler.scout_team.return_value = ScoutingCrawlResult(
+            team_id=1, season_id="2026-spring-hs", games_crawled=2,
+            games=[{"game_status": "completed"}], boxscores={"g1": {}},
+        )
+        mock_loader = MagicMock()
+        mock_loader.load_team.return_value = LoadResult(loaded=5)
+        mock_spray.return_value = _SprayOutcome(status="completed", games_crawled=2)
+
+        # Simulate _crawl_and_load_plays swallowing a real failure: it flags the
+        # out-param and returns [] (exactly the HIGH-2 internal contract).
+        def _plays_fail(*_args, recon_out=None, **_kwargs):
+            if recon_out is not None:
+                recon_out.failed = True
+            return []
+
+        mock_plays.side_effect = _plays_fail
+
+        with (
+            patch("src.reports.generator.ScoutingCrawler", return_value=mock_crawler),
+            patch("src.reports.generator.ScoutingLoader", return_value=mock_loader),
+            patch("src.reports.generator._REPO_ROOT", tmp_path),
+            patch("src.reports.generator._REPORTS_DIR", tmp_path / "data" / "reports"),
+        ):
+            result = generate_report("abc123")
+
+        assert result.success is True, "plays failure must not fail the generation"
+        run = _read_run_record(db_path, result.slug)
+        assert run is not None
+        assert run["overall_status"] == "completed"
+        assert run["plays_status"] == "failed"
+        assert run["reconciliation_status"] == "failed"
+        # Earlier stages still completed.
+        assert run["crawl_status"] == "completed"
+        assert run["load_status"] == "completed"
+
+    @patch("src.reports.generator.get_connection")
+    @patch("src.reports.generator.GameChangerClient")
+    @patch("src.reports.generator.ensure_team_row_with_provenance",
+           return_value=EnsureTeamResult(1, "anchor", False))
+    def test_fatal_crawl_marks_run_failed(
+        self, mock_ensure, mock_client_cls, mock_get_conn, db, tmp_path,
+    ):
+        """AC-1/AC-3: a fatal crawl (errors>0 AND games_crawled==0) finalizes
+        the run as failed with error_stage='crawl'."""
+        self._setup(db, tmp_path)
+        db_path = str(tmp_path / "test.db")
+
+        def _fresh_conn():
+            conn = sqlite3.connect(db_path)
+            conn.execute("PRAGMA foreign_keys=ON;")
+            return conn
+
+        mock_get_conn.side_effect = lambda: _fresh_conn()
+        mock_client_cls.return_value = MagicMock()
+        mock_crawler = MagicMock()
+        # Fatal: errors > 0 AND games_crawled == 0.
+        mock_crawler.scout_team.return_value = ScoutingCrawlResult(
+            team_id=1, season_id="2026-spring-hs", games_crawled=0, errors=1,
+            games=[], boxscores={},
+        )
+
+        with (
+            patch("src.reports.generator.ScoutingCrawler", return_value=mock_crawler),
+            patch("src.reports.generator._REPO_ROOT", tmp_path),
+            patch("src.reports.generator._REPORTS_DIR", tmp_path / "data" / "reports"),
+        ):
+            result = generate_report("abc123")
+
+        assert result.success is False
+        run = _read_run_record(db_path, result.slug)
+        assert run is not None
+        assert run["overall_status"] == "failed"
+        assert run["crawl_status"] == "failed"
+        assert run["error_stage"] == "crawl"
+        assert run["completed_at"] is not None
+        # M is recorded even on the fatal path (0 completed games here).
+        assert run["completed_games"] == 0
+
+
+# ---------------------------------------------------------------------------
 # E-199: Plays-stage auth expiry is non-fatal
 # ---------------------------------------------------------------------------
 
@@ -249,7 +566,8 @@ class TestPlaysStageAuthExpiry:
 
     @patch("src.reports.generator.get_connection")
     @patch("src.reports.generator.GameChangerClient")
-    @patch("src.reports.generator.ensure_team_row", return_value=1)
+    @patch("src.reports.generator.ensure_team_row_with_provenance",
+           return_value=EnsureTeamResult(1, "anchor", False))
     @patch("src.reports.generator.render_report", return_value="<html>ok</html>")
     @patch("src.reports.generator._crawl_and_load_spray")
     @patch("src.reports.generator._crawl_and_load_plays", return_value=[])
@@ -288,6 +606,7 @@ class TestPlaysStageAuthExpiry:
 
         # Plays stage raises CredentialExpiredError
         mock_plays.side_effect = CredentialExpiredError("token expired")
+        _seed_completed_game(db)  # N>0 so the no-games gate does not fire
 
         with (
             patch("src.reports.generator.ScoutingCrawler", return_value=mock_crawler),
@@ -321,7 +640,8 @@ class TestGenerateReportFailures:
 
     @patch("src.reports.generator.get_connection")
     @patch("src.reports.generator.GameChangerClient")
-    @patch("src.reports.generator.ensure_team_row", return_value=1)
+    @patch("src.reports.generator.ensure_team_row_with_provenance",
+           return_value=EnsureTeamResult(1, "anchor", False))
     def test_credential_expired_sets_failed(
         self, mock_ensure, mock_client_cls, mock_get_conn, db, tmp_path
     ):
@@ -466,6 +786,120 @@ class TestListReports:
         assert "No reports found" in result.output
 
 
+def _seed_report_row(db, team_id, *, slug="rep-x", status="ready", error_message=None):
+    cur = db.execute(
+        "INSERT INTO reports (slug, team_id, title, status, generated_at, "
+        "expires_at, report_path, error_message) VALUES "
+        "(?, ?, 'Rep', ?, '2026-03-28T12:00:00Z', '2999-01-01T00:00:00Z', NULL, ?)",
+        (slug, team_id, status, error_message),
+    )
+    db.commit()
+    return cur.lastrowid
+
+
+def _seed_run_row(db, report_id, **cols):
+    keys = ["report_id", *cols.keys()]
+    placeholders = ",".join("?" for _ in keys)
+    db.execute(
+        f"INSERT INTO report_generation_runs ({','.join(keys)}) VALUES ({placeholders})",
+        [report_id, *cols.values()],
+    )
+    db.commit()
+
+
+class TestListReportsWithRunsJoin:
+    """E-235-06 / TN-6: the shared list_reports_with_runs join and the CLI
+    list_reports() wrapper surface run-record columns + the report-level
+    error_message, and stay NULL-safe for legacy reports with no run row."""
+
+    def test_join_surfaces_run_columns_and_flags(self, db):
+        from src.api.db import list_reports_with_runs
+
+        team_id = _seed_team(db)
+        _seed_season(db)  # season_id_used FK-references seasons(season_id)
+        rid = _seed_report_row(db, team_id, slug="complete", status="ready")
+        _seed_run_row(
+            db, rid,
+            overall_status="completed", crawl_status="completed",
+            load_status="completed", spray_status="completed", spray_games=5,
+            plays_status="completed", plays_games_expected=10,
+            plays_games_covered=8, reconciliation_status="completed",
+            discrepancies_found=3, discrepancies_corrected=2,
+            completed_games=12, completed_games_with_data=11,
+            season_id_used="2026-spring-hs", season_fallback=1,
+            identity_match_method="name_only",
+            error_stage="load", error_message="run-level msg",
+        )
+
+        rows = list_reports_with_runs(db)
+        assert len(rows) == 1
+        r = rows[0]
+        assert r["overall_status"] == "completed"
+        assert r["completed_games"] == 12
+        assert r["completed_games_with_data"] == 11
+        assert r["spray_games"] == 5
+        assert r["plays_games_covered"] == 8
+        assert r["discrepancies_corrected"] == 2
+        assert r["season_fallback"] == 1
+        assert r["identity_match_method"] == "name_only"
+        # Report-level error_message is distinct from the aliased run message.
+        assert "error_message" in r
+        assert r["run_error_message"] == "run-level msg"
+        assert r["error_stage"] == "load"
+
+    def test_join_null_safe_for_report_without_run(self, db):
+        from src.api.db import list_reports_with_runs
+
+        team_id = _seed_team(db)
+        _seed_report_row(db, team_id, slug="legacy", status="ready")
+
+        rows = list_reports_with_runs(db)
+        assert len(rows) == 1
+        r = rows[0]
+        # LEFT join -> every run column is NULL, no crash.
+        assert r["overall_status"] is None
+        assert r["season_fallback"] is None
+        assert r["completed_games"] is None
+        assert r["identity_match_method"] is None
+        assert r["run_error_message"] is None
+
+    def test_cli_list_reports_gains_error_message_and_run_cols(self, tmp_path, monkeypatch):
+        """AC-3: the CLI list_reports() now returns error_message + the joined
+        run columns (it selected neither before), decorated with url/is_expired."""
+        import sqlite3 as _sqlite3
+
+        import src.reports.generator as gen
+        from tests.conftest import load_real_schema
+
+        db_path = tmp_path / "cli_list.db"
+        seed = _sqlite3.connect(str(db_path))
+        load_real_schema(seed)
+        team_id = _seed_team(seed)
+        rid = _seed_report_row(
+            seed, team_id, slug="failed-1", status="failed", error_message="boom"
+        )
+        _seed_run_row(
+            seed, rid, overall_status="failed", error_stage="load",
+            error_message="load failed",
+        )
+        seed.close()
+
+        def _open():
+            c = _sqlite3.connect(str(db_path))
+            c.execute("PRAGMA foreign_keys=ON")
+            return c
+
+        monkeypatch.setattr(gen, "get_connection", _open)
+
+        result = gen.list_reports()
+        assert len(result) == 1
+        r = result[0]
+        assert r["error_message"] == "boom"        # report-level, newly returned
+        assert r["overall_status"] == "failed"      # joined run column
+        assert r["run_error_message"] == "load failed"
+        assert "url" in r and "is_expired" in r      # CLI decoration preserved
+
+
 # ---------------------------------------------------------------------------
 # DB query helpers
 # ---------------------------------------------------------------------------
@@ -517,6 +951,35 @@ class TestQueryHelpers:
         team_id = _seed_team(db)
         opp_id = _seed_team(db, name="Opponent", public_id="opp-x")
         _seed_season(db)
+        _seed_player(db, "p1", "Jane", "Doe")
+        # g1: completed AND has a per-game stat row -> counted.
+        db.execute(
+            "INSERT INTO games (game_id, season_id, home_team_id, away_team_id, home_score, away_score, game_date) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            ("g1", "2026-spring-hs", team_id, opp_id, 5, 3, "2026-03-25"),
+        )
+        db.execute(
+            "INSERT INTO player_game_batting (game_id, player_id, team_id, perspective_team_id, ab, h) "
+            "VALUES ('g1', 'p1', ?, ?, 3, 1)",
+            (team_id, team_id),
+        )
+        # g2: completed but NO stat rows (scores from schedule, empty boxscore)
+        # -> must NOT count toward N, and must not advance the freshness date,
+        # even though it is later (E-235 Phase 4b HIGH-1).
+        db.execute(
+            "INSERT INTO games (game_id, season_id, home_team_id, away_team_id, home_score, away_score, game_date) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            ("g2", "2026-spring-hs", team_id, opp_id, 7, 2, "2026-03-28"),
+        )
+        db.commit()
+
+        date, count = _query_freshness(db, team_id, "2026-spring-hs")
+        assert count == 1  # only g1 has stat data
+        assert date == "2026-03-25"  # g2 (statless, later) excluded from MAX
+
+    def test_query_freshness_zero_when_games_have_no_stats(self, db):
+        """HIGH-1: completed games with no stat rows -> N=0 (gate-(a) fires)."""
+        team_id = _seed_team(db)
+        opp_id = _seed_team(db, name="Opponent", public_id="opp-y")
+        _seed_season(db)
         db.execute(
             "INSERT INTO games (game_id, season_id, home_team_id, away_team_id, home_score, away_score, game_date) VALUES (?, ?, ?, ?, ?, ?, ?)",
             ("g1", "2026-spring-hs", team_id, opp_id, 5, 3, "2026-03-25"),
@@ -524,8 +987,8 @@ class TestQueryHelpers:
         db.commit()
 
         date, count = _query_freshness(db, team_id, "2026-spring-hs")
-        assert date == "2026-03-25"
-        assert count == 1
+        assert count == 0
+        assert date is None
 
     def test_query_batting(self, db):
         team_id = _seed_team(db)
@@ -998,6 +1461,7 @@ class TestResolveGcUuid:
             "VALUES (1, '2026-spring-hs', 'full', '2026-03-28T00:00:00Z', 'completed')"
         )
         conn_template.commit()
+        _seed_completed_game(conn_template)  # N>0 so the no-games gate does not fire
         conn_template.close()
 
         def _fresh_conn():
@@ -1018,7 +1482,8 @@ class TestResolveGcUuid:
 
         with (
             patch("src.reports.generator.GameChangerClient", return_value=mock_client),
-            patch("src.reports.generator.ensure_team_row", return_value=1),
+            patch("src.reports.generator.ensure_team_row_with_provenance",
+                  return_value=EnsureTeamResult(1, "anchor", False)),
             patch("src.reports.generator.render_report", return_value="<html>test</html>"),
             patch("src.reports.generator.ScoutingCrawler", return_value=mock_crawler),
             patch("src.reports.generator.ScoutingLoader", return_value=mock_loader),
@@ -1258,7 +1723,8 @@ class TestResolveGcUuidIntegration:
     @patch("src.http.session.create_session")
     @patch("src.reports.generator.get_connection")
     @patch("src.reports.generator.GameChangerClient")
-    @patch("src.reports.generator.ensure_team_row", return_value=1)
+    @patch("src.reports.generator.ensure_team_row_with_provenance",
+           return_value=EnsureTeamResult(1, "anchor", False))
     @patch("src.reports.generator.render_report", return_value="<html>test</html>")
     @patch("src.reports.generator._crawl_and_load_spray")
     def test_resolved_gc_uuid_persisted_and_passed_to_spray(
@@ -1281,6 +1747,7 @@ class TestResolveGcUuidIntegration:
             "VALUES (1, '2026-spring-hs', 'full', '2026-03-28T00:00:00Z', 'completed')"
         )
         db.commit()
+        _seed_completed_game(db)  # N>0 so the no-games gate does not fire
 
         db_path = str(tmp_path / "test.db")
 
@@ -1341,18 +1808,150 @@ class TestResolveGcUuidIntegration:
 # ===========================================================================
 
 
-class TestSnapshotTeamIds:
-    """Test _snapshot_team_ids helper."""
+class TestConcurrentGenerationCreatedSet:
+    """E-235-04 / TN-4: orphan cleanup uses a per-run in-memory created-set.
 
-    def test_returns_all_team_ids(self, db):
-        _seed_team(db, "Team A", "a1")
-        _seed_team(db, "Team B", "b2")
-        ids = _snapshot_team_ids(db)
-        assert len(ids) == 2
+    The old orphan determination snapshotted every team id before the run and
+    diffed against a post-run snapshot, so any team another generation created
+    in the meantime was wrongly attributed to this run and deleted. The
+    created-set records only the teams THIS run INSERTed, threaded through
+    ``ScoutingLoader`` -> ``GameLoader`` -> ``ensure_team_row_with_provenance``,
+    closing the (cross-process) race.
+    """
 
-    def test_empty_table(self, db):
-        ids = _snapshot_team_ids(db)
-        assert ids == set()
+    def test_concurrent_runs_do_not_delete_each_others_created_teams(self, db):
+        """AC-1 (defining outcome): two generations interleaved at the
+        orphan-determination boundary must NOT delete each other's
+        freshly-created teams.
+
+        Drives the real threading path (``GameLoader._ensure_team_row`` ->
+        created-set) for two simultaneous runs, then runs run A's orphan
+        cleanup and asserts run B's just-created team survives. Under the old
+        global snapshot diff, run A's post-snapshot would have included run B's
+        team and deleted it.
+        """
+        # Each run scouts its own anchor (report) team -- both pre-exist.
+        report_a = _seed_team(db, "Report Team A", "rpt-a")
+        report_b = _seed_team(db, "Report Team B", "rpt-b")
+        db.commit()
+
+        set_a: set[int] = set()
+        set_b: set[int] = set()
+        loader_a = GameLoader(
+            db,
+            owned_team_ref=TeamRef(id=report_a, gc_uuid=None, public_id="rpt-a"),
+            created_team_ids=set_a,
+        )
+        loader_b = GameLoader(
+            db,
+            owned_team_ref=TeamRef(id=report_b, gc_uuid=None, public_id="rpt-b"),
+            created_team_ids=set_b,
+        )
+
+        # --- Interleave at the orphan-determination window ---
+        # Run A's scouting load inserts an opponent stub.
+        opp_a = loader_a._ensure_team_row("opp-a-id", opponent_name="Opp A")
+        # Run B inserts ITS opponent stub before run A reaches cleanup -- the
+        # exact window the old pre/post snapshot diff captured and misattributed.
+        opp_b = loader_b._ensure_team_row("opp-b-id", opponent_name="Opp B")
+        db.commit()
+
+        # Each run recorded only the team it actually INSERTed.
+        assert set_a == {opp_a}
+        assert set_b == {opp_b}
+        assert opp_a != opp_b
+
+        # Run A determines orphans from its OWN created-set (minus its anchor)
+        # and cleans up. Run B's team is not in run A's set.
+        orphans_a = set_a - {report_a}
+        cleanup_orphan_teams(db, orphans_a)
+
+        remaining = {row[0] for row in db.execute("SELECT id FROM teams")}
+        assert opp_a not in remaining          # run A cleans up its own stub
+        assert opp_b in remaining              # run B's team SURVIVES (AC-1)
+        assert report_a in remaining
+        assert report_b in remaining
+
+    def test_created_set_records_inserts_not_matches(self, db):
+        """AC-3 / DE-2: the created-set captures INSERTed teams only, never
+        MATCHED ones -- so two runs referencing the same pre-existing opponent
+        do not both claim (and risk deleting) it.
+        """
+        report = _seed_team(db, "Report Team", "rpt")
+        # A pre-existing tracked opponent (season_year 2026, matching the seed
+        # default) that the scouting load will reference, not create.
+        shared_opp = _seed_team(db, "Shared Opp", "shared-opp")
+        db.commit()
+
+        created: set[int] = set()
+        loader = GameLoader(
+            db,
+            owned_team_ref=TeamRef(id=report, gc_uuid=None, public_id="rpt"),
+            created_team_ids=created,
+        )
+
+        # name+season_year+tracked match -> existing id returned, NOT inserted.
+        matched = loader._ensure_team_row("shared-opp", opponent_name="Shared Opp")
+        assert matched == shared_opp
+        assert created == set()
+
+        # A genuinely new opponent IS recorded.
+        new_opp = loader._ensure_team_row("new-opp-id", opponent_name="Brand New Opp")
+        assert created == {new_opp}
+
+    def test_created_set_none_disables_recording(self, db):
+        """A GameLoader built without a created-set (the default for all
+        non-report callers) inserts teams normally and records nothing.
+        """
+        report = _seed_team(db, "Report Team", "rpt")
+        db.commit()
+
+        loader = GameLoader(
+            db, owned_team_ref=TeamRef(id=report, gc_uuid=None, public_id="rpt"),
+        )
+        assert loader._created_team_ids is None
+        # Insert still works (return is a valid team id) -- no crash.
+        opp = loader._ensure_team_row("opp-id", opponent_name="Some Opp")
+        assert isinstance(opp, int)
+
+
+class TestScoutingLoaderCreatedSetThreading:
+    """E-235-04 / TN-4 (SE-F5): the created-set threads ScoutingLoader ->
+    GameLoader so opponent stubs created during the in-memory scouting load are
+    recorded for run-scoped orphan cleanup."""
+
+    def test_scouting_loader_threads_created_set_to_game_loader(self, db):
+        """The set passed to ``ScoutingLoader`` is handed to the ``GameLoader``
+        it builds, so stub inserts during boxscore loading are recorded."""
+        from src.gamechanger.loaders.scouting_loader import ScoutingLoader
+
+        report = _seed_team(db, "Report Team", "rpt")
+        db.commit()
+
+        created: set[int] = set()
+        loader = ScoutingLoader(db, created_team_ids=created)
+        # The loader stores the set and (when it builds a GameLoader) passes it
+        # through. Verify the wiring: a GameLoader built with this set records
+        # an insert into the SAME set object the ScoutingLoader holds.
+        assert loader._created_team_ids is created
+        game_loader = GameLoader(
+            db,
+            owned_team_ref=TeamRef(id=report, gc_uuid=None, public_id="rpt"),
+            created_team_ids=loader._created_team_ids,
+        )
+        opp = game_loader._ensure_team_row("opp-id", opponent_name="Threaded Opp")
+        assert created == {opp}
+
+    def test_compute_orphans_uses_created_set_excluding_report_team(self):
+        """``_ReportGeneration._compute_orphans`` derives orphans from the
+        per-run created-set (minus the report team) -- no global snapshot."""
+        from src.reports.generator import _ReportGeneration
+
+        gen = _ReportGeneration("some-public-id")
+        gen.team_id = 5
+        gen.created_team_ids = {5, 10, 11}  # 5 == report team
+        gen._compute_orphans()
+        assert gen.orphan_ids == {10, 11}
 
 
 class TestCleanupOrphanTeams:
@@ -1914,7 +2513,8 @@ class TestCleanupNonFatal:
 
     @patch("src.reports.generator.get_connection")
     @patch("src.reports.generator.GameChangerClient")
-    @patch("src.reports.generator.ensure_team_row", return_value=1)
+    @patch("src.reports.generator.ensure_team_row_with_provenance",
+           return_value=EnsureTeamResult(1, "anchor", False))
     @patch("src.reports.generator.render_report", return_value="<html>ok</html>")
     @patch("src.reports.generator._crawl_and_load_spray")
     def test_cleanup_error_does_not_fail_report(
@@ -1932,6 +2532,7 @@ class TestCleanupNonFatal:
             "VALUES (1, '2026-spring-hs', 'full', '2026-03-28T00:00:00Z', 'completed')"
         )
         db.commit()
+        _seed_completed_game(db)  # N>0 so the no-games gate does not fire
 
         db_path = str(tmp_path / "test.db")
 
@@ -1998,7 +2599,8 @@ class TestQueryBeforeCleanup:
 
     @patch("src.reports.generator.get_connection")
     @patch("src.reports.generator.GameChangerClient")
-    @patch("src.reports.generator.ensure_team_row", return_value=1)
+    @patch("src.reports.generator.ensure_team_row_with_provenance",
+           return_value=EnsureTeamResult(1, "anchor", False))
     @patch("src.reports.generator.render_report", return_value="<html>ok</html>")
     @patch("src.reports.generator._crawl_and_load_spray")
     def test_queries_run_before_cleanup(
@@ -2033,6 +2635,16 @@ class TestQueryBeforeCleanup:
         mock_crawler.scout_team.return_value = ScoutingCrawlResult(team_id=1, season_id="2025-spring-hs", games_crawled=5, games=[], boxscores={})
         mock_loader = MagicMock()
 
+        # The real ScoutingLoader records every opponent stub it INSERTs into
+        # the per-run created-set (E-235-04). Capture the set the generator
+        # passes to the loader constructor so the mock can record into it,
+        # faithfully reproducing that contract.
+        captured: dict = {}
+
+        def _make_loader(conn, created_team_ids=None):
+            captured["set"] = created_team_ids
+            return mock_loader
+
         # Loader creates orphan team + game so queries have data to find.
         # The DB season_id is derived from team metadata (season_year=2026,
         # no program) = "2026".
@@ -2052,8 +2664,20 @@ class TestQueryBeforeCleanup:
                 "home_score, away_score, game_date) VALUES (?, ?, ?, ?, ?, ?, ?)",
                 ("g1", "2026", 1, opp_id, 7, 3, "2026-03-20"),
             )
+            # A real loader writes per-game stat rows alongside the games row;
+            # seed one so the game counts as "with data" (N>0) post-HIGH-1 and
+            # the no-games gate does not fire on this AC-6 query/cleanup test.
+            conn.execute(
+                "INSERT INTO player_game_batting "
+                "(game_id, player_id, team_id, perspective_team_id, ab, h) "
+                "VALUES ('g1', 'p1', 1, 1, 3, 1)",
+            )
             conn.commit()
             conn.close()
+            # As the real loader would: record the INSERTed stub for run-scoped
+            # orphan cleanup.
+            if captured.get("set") is not None:
+                captured["set"].add(opp_id)
             return LoadResult(loaded=5)
 
         mock_loader.load_team.side_effect = _load_side_effect
@@ -2067,7 +2691,7 @@ class TestQueryBeforeCleanup:
 
         with (
             patch("src.reports.generator.ScoutingCrawler", return_value=mock_crawler),
-            patch("src.reports.generator.ScoutingLoader", return_value=mock_loader),
+            patch("src.reports.generator.ScoutingLoader", side_effect=_make_loader),
             patch("src.reports.generator._REPO_ROOT", tmp_path),
             patch("src.reports.generator._REPORTS_DIR", tmp_path / "data" / "reports"),
             patch(
@@ -2101,7 +2725,8 @@ class TestPublicIdBackfill:
     @patch("src.http.session.create_session")
     @patch("src.reports.generator.get_connection")
     @patch("src.reports.generator.GameChangerClient")
-    @patch("src.reports.generator.ensure_team_row", return_value=1)
+    @patch("src.reports.generator.ensure_team_row_with_provenance",
+           return_value=EnsureTeamResult(1, "anchor", False))
     @patch("src.reports.generator.render_report", return_value="<html>test</html>")
     @patch("src.reports.generator._crawl_and_load_spray")
     def test_ac1_backfills_public_id_when_null(
@@ -2124,6 +2749,7 @@ class TestPublicIdBackfill:
             "VALUES (1, '2026-spring-hs', 'full', '2026-03-28T00:00:00Z', 'completed')"
         )
         db.commit()
+        _seed_completed_game(db)  # N>0 so the no-games gate does not fire
 
         db_path = str(tmp_path / "test.db")
 
@@ -2174,7 +2800,8 @@ class TestPublicIdBackfill:
     @patch("src.http.session.create_session")
     @patch("src.reports.generator.get_connection")
     @patch("src.reports.generator.GameChangerClient")
-    @patch("src.reports.generator.ensure_team_row", return_value=1)
+    @patch("src.reports.generator.ensure_team_row_with_provenance",
+           return_value=EnsureTeamResult(1, "anchor", False))
     @patch("src.reports.generator.render_report", return_value="<html>test</html>")
     @patch("src.reports.generator._crawl_and_load_spray")
     def test_ac2_does_not_overwrite_existing_public_id(
@@ -2197,6 +2824,7 @@ class TestPublicIdBackfill:
             "VALUES (1, '2026-spring-hs', 'full', '2026-03-28T00:00:00Z', 'completed')"
         )
         db.commit()
+        _seed_completed_game(db)  # N>0 so the no-games gate does not fire
 
         db_path = str(tmp_path / "test.db")
 
@@ -2246,7 +2874,8 @@ class TestPublicIdBackfill:
     @patch("src.http.session.create_session")
     @patch("src.reports.generator.get_connection")
     @patch("src.reports.generator.GameChangerClient")
-    @patch("src.reports.generator.ensure_team_row", return_value=1)
+    @patch("src.reports.generator.ensure_team_row_with_provenance",
+           return_value=EnsureTeamResult(1, "anchor", False))
     @patch("src.reports.generator.render_report", return_value="<html>test</html>")
     @patch("src.reports.generator._crawl_and_load_spray")
     def test_ac3_no_backfill_when_api_fails(
@@ -2268,6 +2897,7 @@ class TestPublicIdBackfill:
             "VALUES (1, '2026-spring-hs', 'full', '2026-03-28T00:00:00Z', 'completed')"
         )
         db.commit()
+        _seed_completed_game(db)  # N>0 so the no-games gate does not fire
 
         db_path = str(tmp_path / "test.db")
 
@@ -2312,7 +2942,8 @@ class TestPublicIdBackfill:
     @patch("src.http.session.create_session")
     @patch("src.reports.generator.get_connection")
     @patch("src.reports.generator.GameChangerClient")
-    @patch("src.reports.generator.ensure_team_row", return_value=1)
+    @patch("src.reports.generator.ensure_team_row_with_provenance",
+           return_value=EnsureTeamResult(1, "anchor", False))
     @patch("src.reports.generator.render_report", return_value="<html>test</html>")
     @patch("src.reports.generator._crawl_and_load_spray")
     def test_ac6_name_season_year_updated_regardless_of_public_id(
@@ -2335,6 +2966,8 @@ class TestPublicIdBackfill:
             "VALUES (1, '2026-spring-hs', 'full', '2026-03-28T00:00:00Z', 'completed')"
         )
         db.commit()
+        # Public API updates season_year to 2026 -> derived season '2026'.
+        _seed_completed_game(db)  # N>0 so the no-games gate does not fire
 
         db_path = str(tmp_path / "test.db")
 
@@ -2386,7 +3019,8 @@ class TestPublicIdBackfill:
     @patch("src.http.session.create_session")
     @patch("src.reports.generator.get_connection")
     @patch("src.reports.generator.GameChangerClient")
-    @patch("src.reports.generator.ensure_team_row", return_value=1)
+    @patch("src.reports.generator.ensure_team_row_with_provenance",
+           return_value=EnsureTeamResult(1, "anchor", False))
     @patch("src.reports.generator.render_report", return_value="<html>test</html>")
     @patch("src.reports.generator._crawl_and_load_spray")
     def test_unique_collision_does_not_abort_report(
@@ -2415,6 +3049,7 @@ class TestPublicIdBackfill:
             "VALUES (1, '2026-spring-hs', 'full', '2026-03-28T00:00:00Z', 'completed')"
         )
         db.commit()
+        _seed_completed_game(db)  # N>0 so the no-games gate does not fire
 
         db_path = str(tmp_path / "test.db")
 
@@ -2561,3 +3196,119 @@ class TestTier2EnrichmentStatus:
 
         assert result is None
         assert status == TIER2_FAILED
+
+
+# ---------------------------------------------------------------------------
+# E-235-03: quality gates (b) season-fallback, (c) identity, footer data
+# ---------------------------------------------------------------------------
+
+
+class TestQualityGatesFlags:
+    """AC-3/AC-4/AC-5: gate (b)/(c) run-record flags + footer render inputs."""
+
+    @staticmethod
+    def _run(db, tmp_path, mock_get_conn, mock_client_cls, *, capture=None):
+        """Drive a successful generation (N>0 via a seeded game). Returns the
+        GenerationResult. ``capture`` (if given) records the render data dict."""
+        _seed_team(db)
+        _seed_season(db)
+        db.execute(
+            "INSERT INTO scouting_runs (team_id, season_id, run_type, started_at, status) "
+            "VALUES (1, '2026-spring-hs', 'full', '2026-03-28T00:00:00Z', 'completed')"
+        )
+        db.commit()
+        _seed_completed_game(db)
+
+        db_path = str(tmp_path / "test.db")
+
+        def _fresh_conn():
+            conn = sqlite3.connect(db_path)
+            conn.execute("PRAGMA foreign_keys=ON;")
+            return conn
+
+        mock_get_conn.side_effect = lambda: _fresh_conn()
+        mock_client_cls.return_value = MagicMock()
+        mock_crawler = MagicMock()
+        mock_crawler.scout_team.return_value = ScoutingCrawlResult(
+            team_id=1, season_id="2026-spring-hs", games_crawled=1,
+            games=[{"game_status": "completed"}], boxscores={},
+        )
+        from src.gamechanger.loaders import LoadResult
+        mock_loader = MagicMock()
+        mock_loader.load_team.return_value = LoadResult(loaded=5)
+
+        render_patch = (
+            patch("src.reports.generator.render_report", side_effect=capture)
+            if capture is not None
+            else patch("src.reports.generator.render_report", return_value="<html>ok</html>")
+        )
+        with (
+            render_patch,
+            patch("src.reports.generator.ScoutingCrawler", return_value=mock_crawler),
+            patch("src.reports.generator.ScoutingLoader", return_value=mock_loader),
+            patch("src.reports.generator._crawl_and_load_spray",
+                  return_value=_SprayOutcome("completed", 1)),
+            patch("src.reports.generator._REPO_ROOT", tmp_path),
+            patch("src.reports.generator._REPORTS_DIR", tmp_path / "data" / "reports"),
+            patch("src.reports.generator._crawl_and_load_plays", return_value=[]),
+        ):
+            return generate_report("abc123")
+
+    @patch("src.reports.generator.get_connection")
+    @patch("src.reports.generator.GameChangerClient")
+    @patch("src.reports.generator.ensure_team_row_with_provenance",
+           return_value=EnsureTeamResult(1, "anchor", False))
+    def test_gate_b_season_fallback_flagged(
+        self, mock_ensure, mock_client_cls, mock_get_conn, db, tmp_path,
+    ):
+        """AC-3: the default team (season_year set, no program) resolves via the
+        year-only fallback -> season_fallback=1 and season_id_used recorded."""
+        result = self._run(db, tmp_path, mock_get_conn, mock_client_cls)
+        assert result.success is True
+        run = _read_run_record(str(tmp_path / "test.db"), result.slug)
+        assert run["season_fallback"] == 1
+        assert run["season_id_used"] == "2026"
+
+    @patch("src.reports.generator.get_connection")
+    @patch("src.reports.generator.GameChangerClient")
+    @patch("src.reports.generator.ensure_team_row_with_provenance",
+           return_value=EnsureTeamResult(1, "name_only", False))
+    def test_gate_c_name_only_identity_flagged(
+        self, mock_ensure, mock_client_cls, mock_get_conn, db, tmp_path,
+    ):
+        """AC-4: a name-only team match records identity_match_method='name_only'
+        (stashed at ensure_team_row, written when the run row is created)."""
+        result = self._run(db, tmp_path, mock_get_conn, mock_client_cls)
+        assert result.success is True
+        run = _read_run_record(str(tmp_path / "test.db"), result.slug)
+        assert run["identity_match_method"] == "name_only"
+
+    @patch("src.reports.generator.get_connection")
+    @patch("src.reports.generator.GameChangerClient")
+    @patch("src.reports.generator.ensure_team_row_with_provenance",
+           return_value=EnsureTeamResult(1, "anchor", False))
+    def test_footer_inputs_threaded_into_render_data(
+        self, mock_ensure, mock_client_cls, mock_get_conn, db, tmp_path,
+    ):
+        """AC-5: the render data dict carries M/N/K, spray availability, and the
+        derived degraded_confidence boolean for story 07's footer."""
+        captured: dict = {}
+
+        def _capture(data):
+            captured["data"] = data
+            return "<html>ok</html>"
+
+        result = self._run(
+            db, tmp_path, mock_get_conn, mock_client_cls, capture=_capture,
+        )
+        assert result.success is True
+        data = captured["data"]
+        assert data["completed_games"] == 1  # M
+        assert data["completed_games_with_data"] == 1  # N (the seeded game)
+        assert "plays_game_count" in data  # K
+        # spray_available reflects spray rows actually loaded (none in this
+        # mocked run) -- it is a bool keyed off the queried spray_charts.
+        assert data["spray_available"] is False
+        # Default team -> season fallback -> degraded confidence true even at
+        # high coverage (the flag is orthogonal to coverage severity).
+        assert data["degraded_confidence"] is True

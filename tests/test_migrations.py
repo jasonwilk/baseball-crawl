@@ -66,6 +66,37 @@ def fresh_db(tmp_path: Path) -> Path:
 
 
 # ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+_report_fixture_counter = 0
+
+
+def _insert_report_fixture(conn: sqlite3.Connection) -> int:
+    """Insert a minimal team + report and return the new reports.id.
+
+    Each call mints a unique slug so reports.slug's UNIQUE constraint never
+    collides across the multiple inserts a single test makes. Uses the seeded
+    'lsb-hs' program so the team FK is satisfied.
+    """
+    global _report_fixture_counter
+    _report_fixture_counter += 1
+    n = _report_fixture_counter
+    team_id = conn.execute(
+        "INSERT INTO teams (name, program_id, membership_type, source, is_active) "
+        "VALUES (?, 'lsb-hs', 'tracked', 'manual', 1);",
+        (f"Fixture Team {n}",),
+    ).lastrowid
+    report_id = conn.execute(
+        "INSERT INTO reports (slug, team_id, title, expires_at) "
+        "VALUES (?, ?, ?, ?);",
+        (f"fixture-report-{n}", team_id, f"Fixture Report {n}", "2099-01-01T00:00:00Z"),
+    ).lastrowid
+    conn.commit()
+    return report_id
+
+
+# ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
 
@@ -384,6 +415,239 @@ class TestCrawlJobsMigration:
             "001_initial_schema.sql not found in _migrations tracking table"
         )
 
+
+
+class TestReportGenerationRunsMigration:
+    """Verify migration 002_report_generation_runs.sql (E-235-01).
+
+    Asserts the table exists with the documented column set and that the
+    CHECK constraints and the UNIQUE(report_id) 1:1 index from epic E-235
+    Technical Notes TN-1 are present and enforced.
+    """
+
+    def test_table_exists(self, fresh_db: Path) -> None:
+        """After migrations, report_generation_runs table exists."""
+        run_migrations(db_path=fresh_db)
+        conn = sqlite3.connect(str(fresh_db))
+        row = conn.execute(
+            "SELECT name FROM sqlite_master "
+            "WHERE type='table' AND name='report_generation_runs';"
+        ).fetchone()
+        conn.close()
+        assert row is not None, "report_generation_runs table not found"
+
+    def test_has_documented_columns(self, fresh_db: Path) -> None:
+        """Column set matches TN-1 exactly (no extra/missing columns)."""
+        run_migrations(db_path=fresh_db)
+        conn = sqlite3.connect(str(fresh_db))
+        cursor = conn.execute("PRAGMA table_info(report_generation_runs);")
+        columns = {row[1] for row in cursor.fetchall()}
+        conn.close()
+        expected = {
+            # identity / lifecycle
+            "id",
+            "report_id",
+            "started_at",
+            "completed_at",
+            "overall_status",
+            # per-stage status
+            "crawl_status",
+            "load_status",
+            "gc_uuid_status",
+            "spray_status",
+            "plays_status",
+            "reconciliation_status",
+            "enrichment_status",
+            # per-stage counts
+            "completed_games",
+            "completed_games_with_data",
+            "spray_games",
+            "plays_games_expected",
+            "plays_games_covered",
+            "discrepancies_found",
+            "discrepancies_corrected",
+            # trust flags
+            "season_id_used",
+            "season_fallback",
+            "identity_match_method",
+            # failure
+            "error_stage",
+            "error_message",
+        }
+        assert columns == expected, (
+            f"Column set drift. Missing: {expected - columns}; "
+            f"Unexpected: {columns - expected}"
+        )
+
+    def test_no_generic_count_columns(self, fresh_db: Path) -> None:
+        """Counts are named -- no generic count_a/count_b (wide-row convention)."""
+        run_migrations(db_path=fresh_db)
+        conn = sqlite3.connect(str(fresh_db))
+        cursor = conn.execute("PRAGMA table_info(report_generation_runs);")
+        columns = {row[1] for row in cursor.fetchall()}
+        conn.close()
+        assert not any(c.startswith("count_") for c in columns), (
+            f"Generic count_* columns found: "
+            f"{[c for c in columns if c.startswith('count_')]}"
+        )
+
+    def test_unique_report_id_index_present(self, fresh_db: Path) -> None:
+        """A UNIQUE index exists on report_id (1:1 enforcer + join index)."""
+        run_migrations(db_path=fresh_db)
+        conn = sqlite3.connect(str(fresh_db))
+        # index_list returns (seq, name, unique, origin, partial)
+        indexes = conn.execute(
+            "PRAGMA index_list(report_generation_runs);"
+        ).fetchall()
+        unique_on_report_id = False
+        for _seq, name, unique, *_rest in indexes:
+            if not unique:
+                continue
+            cols = [
+                r[2] for r in conn.execute(f"PRAGMA index_info({name!r});").fetchall()
+            ]
+            if cols == ["report_id"]:
+                unique_on_report_id = True
+                break
+        conn.close()
+        assert unique_on_report_id, "No UNIQUE index on report_generation_runs(report_id)"
+
+    def test_report_id_uniqueness_enforced(self, fresh_db: Path) -> None:
+        """Two run rows for the same report_id violate the UNIQUE index."""
+        run_migrations(db_path=fresh_db)
+        conn = sqlite3.connect(str(fresh_db))
+        conn.execute("PRAGMA foreign_keys = ON;")
+        report_id = _insert_report_fixture(conn)
+        conn.execute(
+            "INSERT INTO report_generation_runs (report_id, overall_status) "
+            "VALUES (?, 'running');",
+            (report_id,),
+        )
+        conn.commit()
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                "INSERT INTO report_generation_runs (report_id, overall_status) "
+                "VALUES (?, 'running');",
+                (report_id,),
+            )
+        conn.close()
+
+    def test_fk_cascade_delete_removes_run_row(self, fresh_db: Path) -> None:
+        """Deleting the parent report cascades to its run row."""
+        run_migrations(db_path=fresh_db)
+        conn = sqlite3.connect(str(fresh_db))
+        conn.execute("PRAGMA foreign_keys = ON;")
+        report_id = _insert_report_fixture(conn)
+        conn.execute(
+            "INSERT INTO report_generation_runs (report_id, overall_status) "
+            "VALUES (?, 'running');",
+            (report_id,),
+        )
+        conn.commit()
+        conn.execute("DELETE FROM reports WHERE id = ?;", (report_id,))
+        conn.commit()
+        remaining = conn.execute(
+            "SELECT COUNT(*) FROM report_generation_runs WHERE report_id = ?;",
+            (report_id,),
+        ).fetchone()[0]
+        conn.close()
+        assert remaining == 0, "Run row not cascade-deleted with its report"
+
+    def test_overall_status_check_rejects_bad_value(self, fresh_db: Path) -> None:
+        """overall_status CHECK rejects values outside running/completed/failed."""
+        run_migrations(db_path=fresh_db)
+        conn = sqlite3.connect(str(fresh_db))
+        conn.execute("PRAGMA foreign_keys = ON;")
+        report_id = _insert_report_fixture(conn)
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                "INSERT INTO report_generation_runs (report_id, overall_status) "
+                "VALUES (?, 'bogus');",
+                (report_id,),
+            )
+        conn.close()
+
+    def test_enrichment_status_check_accepts_tier2_vocab(self, fresh_db: Path) -> None:
+        """enrichment_status accepts the canonical Tier-2 vocabulary and NULL."""
+        run_migrations(db_path=fresh_db)
+        conn = sqlite3.connect(str(fresh_db))
+        conn.execute("PRAGMA foreign_keys = ON;")
+        for value in ("success", "unavailable-no-key", "failed", None):
+            report_id = _insert_report_fixture(conn)
+            conn.execute(
+                "INSERT INTO report_generation_runs "
+                "(report_id, overall_status, enrichment_status) VALUES (?, 'running', ?);",
+                (report_id, value),
+            )
+        conn.commit()
+        conn.close()
+
+    def test_enrichment_status_check_rejects_invented_enum(self, fresh_db: Path) -> None:
+        """enrichment_status CHECK rejects values outside the Tier-2 vocabulary."""
+        run_migrations(db_path=fresh_db)
+        conn = sqlite3.connect(str(fresh_db))
+        conn.execute("PRAGMA foreign_keys = ON;")
+        report_id = _insert_report_fixture(conn)
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                "INSERT INTO report_generation_runs "
+                "(report_id, overall_status, enrichment_status) VALUES (?, 'running', 'ok');",
+                (report_id,),
+            )
+        conn.close()
+
+    def test_identity_match_method_check(self, fresh_db: Path) -> None:
+        """identity_match_method accepts anchor/name_only/NULL, rejects others."""
+        run_migrations(db_path=fresh_db)
+        conn = sqlite3.connect(str(fresh_db))
+        conn.execute("PRAGMA foreign_keys = ON;")
+        for value in ("anchor", "name_only", None):
+            report_id = _insert_report_fixture(conn)
+            conn.execute(
+                "INSERT INTO report_generation_runs "
+                "(report_id, overall_status, identity_match_method) "
+                "VALUES (?, 'running', ?);",
+                (report_id, value),
+            )
+        conn.commit()
+        bad_report_id = _insert_report_fixture(conn)
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                "INSERT INTO report_generation_runs "
+                "(report_id, overall_status, identity_match_method) "
+                "VALUES (?, 'running', 'fuzzy');",
+                (bad_report_id,),
+            )
+        conn.close()
+
+    def test_season_fallback_defaults_to_zero(self, fresh_db: Path) -> None:
+        """season_fallback is an INTEGER boolean defaulting to 0."""
+        run_migrations(db_path=fresh_db)
+        conn = sqlite3.connect(str(fresh_db))
+        conn.execute("PRAGMA foreign_keys = ON;")
+        report_id = _insert_report_fixture(conn)
+        conn.execute(
+            "INSERT INTO report_generation_runs (report_id, overall_status) "
+            "VALUES (?, 'running');",
+            (report_id,),
+        )
+        conn.commit()
+        value = conn.execute(
+            "SELECT season_fallback FROM report_generation_runs WHERE report_id = ?;",
+            (report_id,),
+        ).fetchone()[0]
+        conn.close()
+        assert value == 0, f"Expected season_fallback default 0, got {value!r}"
+
+    def test_table_empty_after_reset(self, fresh_db: Path) -> None:
+        """A fresh migrated DB has the table present with zero seed rows (AC-5)."""
+        run_migrations(db_path=fresh_db)
+        conn = sqlite3.connect(str(fresh_db))
+        count = conn.execute(
+            "SELECT COUNT(*) FROM report_generation_runs;"
+        ).fetchone()[0]
+        conn.close()
+        assert count == 0, "report_generation_runs should be empty on a fresh DB"
 
 
 class TestE220UpgradeGuard:

@@ -53,7 +53,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from src.db.players import ensure_player_row
-from src.db.teams import ensure_team_row
+from src.db.teams import ensure_team_row_with_provenance
 from src.gamechanger.loaders import LoadResult, derive_season_id_for_team, ensure_season_row
 from src.gamechanger.types import TeamRef
 
@@ -213,15 +213,23 @@ class GameLoader:
             Used to identify which boxscore key belongs to the owned team vs.
             the opponent.  ``gc_uuid`` is used for boxscore key detection;
             ``id`` is used for FK inserts.
+        created_team_ids: Optional in-memory set the loader records into when it
+            INSERTs a brand-new opponent team row (E-235-04). Used by the report
+            generator's per-run created-set so orphan cleanup deletes only teams
+            THIS run inserted -- closing the cross-process team-deletion race
+            without a global pre/post snapshot diff. ``None`` (the default)
+            disables recording for all other callers.
     """
 
     def __init__(
         self,
         db: sqlite3.Connection,
         owned_team_ref: TeamRef,
+        created_team_ids: set[int] | None = None,
     ) -> None:
         self._db = db
         self._team_ref = owned_team_ref
+        self._created_team_ids = created_team_ids
         self._season_id, self._season_year = derive_season_id_for_team(
             db, owned_team_ref.id
         )
@@ -1360,6 +1368,11 @@ class GameLoader:
         ``gc_uuid=None`` to prevent boxscore-derived opponent-perspective
         identifiers from contaminating the ``gc_uuid`` column.
 
+        When a ``created_team_ids`` set was supplied (E-235-04) and this call
+        INSERTs a brand-new row (provenance ``inserted=True``), the new team id
+        is recorded into it. MATCHED rows are never recorded -- two concurrent
+        runs referencing the same pre-existing opponent must not both claim it.
+
         Args:
             identifier: Boxscore key or opponent_id string.  Used only as a
                 name fallback when ``opponent_name`` is ``None``.
@@ -1369,10 +1382,13 @@ class GameLoader:
         Returns:
             The ``teams.id`` INTEGER PK for the row.
         """
-        return ensure_team_row(
+        result = ensure_team_row_with_provenance(
             self._db,
             gc_uuid=None,
             name=opponent_name or identifier,
             season_year=self._season_year,
             source="game_loader",
         )
+        if result.inserted and self._created_team_ids is not None:
+            self._created_team_ids.add(result.team_id)
+        return result.team_id

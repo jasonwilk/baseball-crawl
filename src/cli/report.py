@@ -94,12 +94,15 @@ def list_cmd() -> None:
         else:
             status_display = f"[yellow]{status}[/yellow]"
 
+        # E-235 Phase 4b MEDIUM-2: no_games is a shareable page (served like
+        # ready), so expose its link too -- not just for 'ready'.
+        linkable = status in ("ready", "no_games") and not r["is_expired"]
         table.add_row(
             r["title"],
             status_display,
             r["generated_at"][:10],
             r["expires_at"][:10],
-            r["url"] if status == "ready" and not r["is_expired"] else "[dim]-[/dim]",
+            r["url"] if linkable else "[dim]-[/dim]",
         )
 
     console.print(table)

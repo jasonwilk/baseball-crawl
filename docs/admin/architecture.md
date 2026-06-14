@@ -91,6 +91,22 @@ baseball-crawl/
 
 ## Schema Changes
 
+### E-235: Migration 002 -- Report Generation Run Records
+
+`migrations/002_report_generation_runs.sql` adds a single wide telemetry table:
+
+**Table: `report_generation_runs`** (one row per standalone report generation, FK 1:1 to `reports(id)`)
+
+| Column group | Columns | Notes |
+|-------------|---------|-------|
+| Identity / lifecycle | `id`, `report_id`, `started_at`, `completed_at`, `overall_status` | `ON DELETE CASCADE` — deleting a report removes its run row. `overall_status`: `running` → `completed` or `failed`. |
+| Per-stage status | `crawl_status`, `load_status`, `gc_uuid_status`, `spray_status`, `plays_status`, `reconciliation_status`, `enrichment_status` | NULL means the stage did not run. `enrichment_status` is constrained to `success`, `unavailable-no-key`, `failed` (canonical Tier-2 vocabulary from E-233). |
+| Per-stage counts | `completed_games` (M), `completed_games_with_data` (N), `spray_games`, `plays_games_expected`, `plays_games_covered`, `discrepancies_found`, `discrepancies_corrected` | N ≤ M: M counts scored games on the schedule; N counts games with actual player stat rows loaded — a game with a public final score but no GC scorebook contributes to M but not N. N is the data-bearing coverage value used by the report footer's "N of M games" line. |
+| Trust flags | `season_id_used`, `season_fallback`, `identity_match_method` | `season_fallback = 1` when season resolved via current-year fallback (not team metadata). `identity_match_method`: `anchor` (matched by gc_uuid/public_id) or `name_only` (name+season only, lower trust). |
+| Failure | `error_stage`, `error_message` | Stage name and message on pipeline failure. |
+
+A UNIQUE index on `report_id` enforces the 1:1 relationship and serves as the admin-list join index.
+
 ### E-196: Migration 014 -- Game Start Time and Timezone
 
 `migrations/014_games_start_time_timezone.sql` adds two columns to the `games` table:
@@ -255,4 +271,4 @@ Sub-navigation links Users, Teams, and Opponents pages across all admin views. T
 
 ---
 
-*Last updated: 2026-04-03 | Source: E-196 (migration 014 start_time/timezone, game ordering), E-195 (migration 009 plays/play_events tables), E-173 (unified resolve route, subnav badge, discover-opponents route removed), E-167 (migration 007 name+season_year index), E-158 (src/charts/ module, migration 006 spray chart additions), E-120-06 (opponent_links table, sub-nav Opponents, url_parser correction, port 8001, teams columns), E-115-02 (schema and admin sections rewritten for E-100 fresh-start schema), E-042 (admin team management, url_parser, team_resolver), E-003-02 (original)*
+*Last updated: 2026-06-14 | Source: E-235 (migration 002 report_generation_runs, N vs M coverage semantics), E-196 (migration 014 start_time/timezone, game ordering), E-195 (migration 009 plays/play_events tables), E-173 (unified resolve route, subnav badge, discover-opponents route removed), E-167 (migration 007 name+season_year index), E-158 (src/charts/ module, migration 006 spray chart additions), E-120-06 (opponent_links table, sub-nav Opponents, url_parser correction, port 8001, teams columns), E-115-02 (schema and admin sections rewritten for E-100 fresh-start schema), E-042 (admin team management, url_parser, team_resolver), E-003-02 (original)*

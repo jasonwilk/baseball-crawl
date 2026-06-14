@@ -579,3 +579,219 @@ class TestCascadeDeleteOnReportDeletion:
         assert ol[0] is None
         assert ol[1] is None
         assert ol[2] is None
+
+
+# ===========================================================================
+# E-235-05: Cleanup-mirror -- report_generation_runs follows the report it
+# describes through every delete path (TN-5).
+# ===========================================================================
+
+
+def _insert_run_row(
+    db_path: Path, report_id: int, overall_status: str = "completed"
+) -> int:
+    conn = _get_conn(db_path)
+    cursor = conn.execute(
+        "INSERT INTO report_generation_runs (report_id, overall_status) VALUES (?, ?)",
+        (report_id, overall_status),
+    )
+    conn.commit()
+    run_id = cursor.lastrowid
+    conn.close()
+    return run_id
+
+
+class TestRunRecordCleanupMirror:
+    """E-235-05 / TN-5: deleting a report removes its report_generation_runs
+    row, satisfying the cleanup-detection mirror invariant for the new table.
+
+    The mechanism is the FK ``ON DELETE CASCADE`` (migration 002) firing on the
+    FK-ON connection ``_delete_report`` uses (``get_connection()`` sets
+    ``PRAGMA foreign_keys=ON``). These tests run the real delete route, so they
+    exercise that connection rather than a bare ``sqlite3.connect()`` (which has
+    FKs OFF and would give a false result).
+    """
+
+    def test_ac1_delete_report_cascades_run_record(self, setup):
+        """AC-1: deleting a report removes its run record. The team is kept
+        INELIGIBLE for cleanup (is_active=1), so the run-row removal is
+        attributable to the report->run cascade, not the team cascade."""
+        db_path, client = setup
+        team_id = _insert_team_for_cascade(db_path, is_active=1)  # ineligible
+        report_id = _insert_report(
+            db_path, team_id, slug="run-cascade-1", report_path=None
+        )
+        _insert_run_row(db_path, report_id)
+        assert _count_rows(
+            db_path, "report_generation_runs", "report_id = ?", (report_id,)
+        ) == 1
+
+        response = client.post(
+            f"/admin/reports/{report_id}/delete",
+            data={"csrf_token": _CSRF},
+            follow_redirects=False,
+        )
+        assert response.status_code == 303
+
+        assert _count_rows(db_path, "reports", "id = ?", (report_id,)) == 0
+        assert _count_rows(
+            db_path, "report_generation_runs", "report_id = ?", (report_id,)
+        ) == 0
+        # Ineligible team retained: confirms the cascade came from the report
+        # delete (conn1), not the team-delete cascade (conn2).
+        assert _count_rows(db_path, "teams", "id = ?", (team_id,)) == 1
+
+    def test_ac4_eligible_team_cascade_with_run_row_no_integrity_error(self, setup):
+        """AC-4: report deletion followed by the team-delete cascade, with a
+        populated run row present, completes with no FK integrity error.
+
+        303 (not 500 -- the client uses raise_server_exceptions=False) plus the
+        team/report/run rows all gone proves both cascades ran cleanly."""
+        db_path, client = setup
+        team_id = _insert_team_for_cascade(db_path, is_active=0)  # eligible
+        data = _seed_full_team_data(db_path, team_id)
+        report_id = _insert_report(
+            db_path, team_id, slug="run-cascade-2", report_path=None
+        )
+        _insert_run_row(db_path, report_id)
+
+        response = client.post(
+            f"/admin/reports/{report_id}/delete",
+            data={"csrf_token": _CSRF},
+            follow_redirects=False,
+        )
+        assert response.status_code == 303
+
+        assert _count_rows(db_path, "reports", "id = ?", (report_id,)) == 0
+        assert _count_rows(
+            db_path, "report_generation_runs", "report_id = ?", (report_id,)
+        ) == 0
+        assert _count_rows(db_path, "teams", "id = ?", (team_id,)) == 0
+        assert _count_rows(db_path, "games", "game_id = ?", (data["game_id"],)) == 0
+
+
+# ===========================================================================
+# E-235-06: Surface run records + trust flags in the admin reports list (TN-6)
+# ===========================================================================
+
+
+def _insert_full_run_row(db_path: Path, report_id: int, **cols) -> None:
+    """Insert a report_generation_runs row with caller-specified columns."""
+    keys = ["report_id", *cols.keys()]
+    placeholders = ",".join("?" for _ in keys)
+    conn = _get_conn(db_path)
+    conn.execute(
+        f"INSERT INTO report_generation_runs ({','.join(keys)}) VALUES ({placeholders})",
+        [report_id, *cols.values()],
+    )
+    conn.commit()
+    conn.close()
+
+
+class TestRunRecordSurfacing:
+    """E-235-06 / TN-6: /admin/reports surfaces per-stage detail + operator-only
+    trust flags from report_generation_runs, handles the no_games status, and
+    stays NULL-safe for legacy reports with no run row."""
+
+    def test_per_stage_detail_and_operator_flags_rendered(self, setup):
+        """AC-1/AC-2: per-stage detail, counts, and operator flags appear."""
+        db_path, client = setup
+        team_id = _insert_team(db_path)
+        # season_id_used FK-references seasons(season_id).
+        _conn = _get_conn(db_path)
+        _conn.execute(
+            "INSERT OR IGNORE INTO seasons (season_id, name, season_type, year) "
+            "VALUES ('2026-spring-hs', 'Spring 2026 HS', 'spring-hs', 2026)"
+        )
+        _conn.commit()
+        _conn.close()
+        report_id = _insert_report(db_path, team_id, slug="surf-1", status="ready")
+        _insert_full_run_row(
+            db_path, report_id,
+            overall_status="completed", crawl_status="completed",
+            load_status="completed", spray_status="completed", spray_games=5,
+            plays_status="completed", plays_games_expected=10,
+            plays_games_covered=8, reconciliation_status="completed",
+            discrepancies_found=3, discrepancies_corrected=2,
+            completed_games=12, completed_games_with_data=11,
+            season_id_used="2026-spring-hs", season_fallback=1,
+            identity_match_method="name_only",
+        )
+
+        html = client.get("/admin/reports").text
+        assert "Pipeline:" in html        # per-stage detail block
+        assert "Games:" in html           # N-of-M counts
+        assert "season fallback" in html  # operator flag 1
+        assert "name-only match" in html  # operator flag 2
+
+    def test_no_games_status_badge(self, setup):
+        """AC-1: the no_games terminal status gets its own badge."""
+        db_path, client = setup
+        team_id = _insert_team(db_path)
+        report_id = _insert_report(db_path, team_id, slug="ng-1", status="no_games")
+        _insert_full_run_row(
+            db_path, report_id, overall_status="completed",
+            completed_games=4, completed_games_with_data=0,
+        )
+
+        html = client.get("/admin/reports").text
+        assert "No games" in html
+
+    def test_report_without_run_row_renders_null_safe(self, setup):
+        """AC-3: a legacy report with no run row renders without error and shows
+        no per-stage block (LEFT join -> run columns NULL)."""
+        db_path, client = setup
+        team_id = _insert_team(db_path)
+        _insert_report(db_path, team_id, slug="legacy-1", status="ready")
+
+        response = client.get("/admin/reports")
+        assert response.status_code == 200
+        assert "Pipeline:" not in response.text
+
+    def test_clean_run_has_no_operator_flags(self, setup):
+        """A fully-anchored, no-fallback run shows neither operator flag."""
+        db_path, client = setup
+        team_id = _insert_team(db_path)
+        report_id = _insert_report(db_path, team_id, slug="clean-1", status="ready")
+        _insert_full_run_row(
+            db_path, report_id, overall_status="completed",
+            season_fallback=0, identity_match_method="anchor",
+            completed_games=10, completed_games_with_data=10,
+        )
+
+        html = client.get("/admin/reports").text
+        assert "Pipeline:" in html
+        assert "season fallback" not in html
+        assert "name-only match" not in html
+
+    def test_failed_report_error_message_surfaced(self, setup):
+        """AC-2: the report-level error_message (already selected) is rendered."""
+        db_path, client = setup
+        team_id = _insert_team(db_path)
+        _insert_report(
+            db_path, team_id, slug="fail-1", status="failed",
+            error_message="kaboom-error-detail",
+        )
+
+        html = client.get("/admin/reports").text
+        assert "kaboom-error-detail" in html
+
+    def test_no_games_report_exposes_shareable_link(self, setup):
+        """Phase 4b MEDIUM-2: a no_games report exposes its view/copy link in
+        the admin list (it is a real shareable page, not a 404)."""
+        db_path, client = setup
+        team_id = _insert_team(db_path)
+        _insert_report(db_path, team_id, slug="ng-link-1", status="no_games")
+
+        html = client.get("/admin/reports").text
+        assert "/reports/ng-link-1" in html  # the shareable URL is linked
+        assert ">View</a>" in html
+
+    def test_failed_report_has_no_shareable_link(self, setup):
+        """A failed report stays unlinked (no shareable page)."""
+        db_path, client = setup
+        team_id = _insert_team(db_path)
+        _insert_report(db_path, team_id, slug="fail-link", status="failed")
+
+        html = client.get("/admin/reports").text
+        assert "/reports/fail-link" not in html

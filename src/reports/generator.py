@@ -34,12 +34,16 @@ from src.api.db import (
     get_connection,
     get_pitching_history,
     get_pitching_workload,
+    list_reports_with_runs,
 )
-from src.db.teams import ensure_team_row
+from src.db.teams import ensure_team_row_with_provenance
 from src.gamechanger.client import CredentialExpiredError, GameChangerClient
 from src.gamechanger.crawlers.scouting import ScoutingCrawler
 from src.gamechanger.crawlers.scouting_spray import ScoutingSprayChartCrawler
-from src.gamechanger.loaders import derive_season_id_for_team
+from src.gamechanger.loaders import (
+    derive_season_id_for_team_with_fallback,
+    ensure_season_row,
+)
 from src.gamechanger.loaders.plays_loader import PlaysLoader
 from src.gamechanger.loaders.scouting_loader import ScoutingLoader
 from src.gamechanger.loaders.scouting_spray_loader import ScoutingSprayChartLoader
@@ -47,7 +51,7 @@ from src.gamechanger.search import search_teams_by_name
 from src.gamechanger.types import TeamRef
 from src.gamechanger.url_parser import parse_team_url
 from src.reconciliation.engine import reconcile_game
-from src.reports.renderer import render_report
+from src.reports.renderer import render_no_games_page, render_report
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +73,98 @@ class GenerationResult:
     title: str | None = None
     url: str | None = None
     error_message: str | None = None
+
+
+@dataclass
+class _SprayOutcome:
+    """Outcome of the spray-chart crawl/load stage.
+
+    ``status`` is a per-stage status string (``completed``/``failed``);
+    ``games_crawled`` is the distinct-game count the run record records as
+    ``spray_games``.
+    """
+
+    status: str
+    games_crawled: int = 0
+
+
+@dataclass
+class _ReconCounts:
+    """Mutable accumulator for reconciliation-pass counts (TN-2).
+
+    Threaded into :func:`_crawl_and_load_plays` as an out-parameter so the
+    plays helper can keep its pinned ``list[str]`` return type (E-211 contract
+    test) while still surfacing reconciliation telemetry to the run record.
+    """
+
+    discrepancies_found: int = 0
+    discrepancies_corrected: int = 0
+    games_reconciled: int = 0
+    # True when the plays crawl/load/reconcile actually FAILED (vs. legitimately
+    # finding no plays). _crawl_and_load_plays swallows its errors and returns []
+    # to keep the stage non-fatal + preserve its pinned list[str] return (E-211),
+    # so this flag is how _plays_stage distinguishes failure from empty and
+    # records plays_status="failed" instead of "completed" (E-235 Phase 4b HIGH-2).
+    failed: bool = False
+
+
+def _coerce_int(value: object) -> int | None:
+    """Return ``value`` if it is a real int, else ``None``.
+
+    None-safe coercion before binding a count to an INTEGER run-record column:
+    a stage may surface an absent/typeless count (e.g. an outcome attribute
+    that was never populated), and writing ``None`` records "stage produced no
+    count" rather than failing the bind. ``bool`` is intentionally excluded so
+    a stray flag never lands in a count column.
+    """
+    if isinstance(value, bool):
+        return None
+    return value if isinstance(value, int) else None
+
+
+def _coerce_status(value: object) -> str | None:
+    """Return ``value`` if it is a real str, else ``None``.
+
+    None-safe coercion before binding a status to a TEXT run-record column;
+    a non-string status resolves to NULL ("stage did not report a status")
+    rather than persisting an unexpected value (see :func:`_coerce_int`).
+    """
+    return value if isinstance(value, str) else None
+
+
+def _count_completed_games(games: list | None) -> int:
+    """Count distinct completed games on the fetched schedule (M, per TN-2).
+
+    Sourced from ``crawl_result.games`` -- the crawler carries the full
+    schedule and marks each event's ``game_status``. Returns 0 (not NULL) for
+    an empty/early-season schedule; that is a real M=0, not "unknown".
+    """
+    if not games:
+        return 0
+    return sum(
+        1 for g in games if isinstance(g, dict) and g.get("game_status") == "completed"
+    )
+
+
+def _accumulate_recon_counts(out: _ReconCounts, summary: object) -> None:
+    """Fold one game's :class:`ReconciliationSummary` into ``out`` (TN-2).
+
+    ``discrepancies_found`` = non-MATCH signals detected pre-correction;
+    ``discrepancies_corrected`` = plays reassigned by the correction pass.
+    Reads defensively so a non-summary value (e.g. a test mock) is a no-op.
+    """
+    reassigned = getattr(summary, "total_plays_reassigned", None)
+    if isinstance(reassigned, int):
+        out.discrepancies_corrected += reassigned
+    pre_counts = getattr(summary, "pre_correction_signal_counts", None)
+    if isinstance(pre_counts, dict):
+        for status_counts in pre_counts.values():
+            if not isinstance(status_counts, dict):
+                continue
+            for status, count in status_counts.items():
+                if status != "MATCH" and isinstance(count, int):
+                    out.discrepancies_found += count
+    out.games_reconciled += 1
 
 
 def _get_base_url() -> str:
@@ -118,6 +214,96 @@ def _update_report_failed(
         (error_message, report_id),
     )
     conn.commit()
+
+
+# ---------------------------------------------------------------------------
+# report_generation_runs (per-generation run record) -- E-235-02 / TN-2
+# ---------------------------------------------------------------------------
+# Whitelist of writable run-record columns. _update_run_record() interpolates
+# column names into the UPDATE SET clause, so the set of accepted keys MUST be
+# closed (the values are always bound as parameters; only these literal column
+# names are ever interpolated).
+_RUN_RECORD_COLUMNS = frozenset({
+    "started_at", "completed_at", "overall_status",
+    "crawl_status", "load_status", "gc_uuid_status", "spray_status",
+    "plays_status", "reconciliation_status", "enrichment_status",
+    "completed_games", "completed_games_with_data", "spray_games",
+    "plays_games_expected", "plays_games_covered",
+    "discrepancies_found", "discrepancies_corrected",
+    "season_id_used", "season_fallback", "identity_match_method",
+    "error_stage", "error_message",
+})
+
+
+def _create_run_record(
+    conn: sqlite3.Connection,
+    report_id: int,
+    started_at: str,
+    *,
+    identity_match_method: str | None = None,
+) -> int:
+    """Insert the ``report_generation_runs`` row for ``report_id`` (TN-2).
+
+    Created immediately after the reports row exists (the FK requires it) with
+    ``overall_status='running'``. Signals determined before this point (e.g.
+    ``identity_match_method`` stashed at the ``ensure_team_row`` site) are
+    written here. Returns the new run row id.
+    """
+    cursor = conn.execute(
+        """
+        INSERT INTO report_generation_runs
+            (report_id, started_at, overall_status, identity_match_method)
+        VALUES (?, ?, 'running', ?)
+        """,
+        (report_id, started_at, identity_match_method),
+    )
+    conn.commit()
+    return cursor.lastrowid
+
+
+def _update_run_record(report_id: int, **fields: object) -> None:
+    """Update the run record for ``report_id`` with the given column values.
+
+    Opens its own connection (the pipeline uses fresh connections per stage).
+    Failure to write telemetry must NOT break generation, so SQLite errors are
+    logged and swallowed. Unknown column names are rejected defensively.
+    """
+    fields = {k: v for k, v in fields.items() if k in _RUN_RECORD_COLUMNS}
+    if not fields:
+        return
+    assignments = ", ".join(f"{col} = ?" for col in fields)
+    values = [*fields.values(), report_id]
+    try:
+        with closing(get_connection()) as conn:
+            conn.execute(
+                f"UPDATE report_generation_runs SET {assignments} WHERE report_id = ?",
+                values,
+            )
+            conn.commit()
+    except sqlite3.Error:
+        logger.exception(
+            "Failed to update report_generation_runs for report_id=%s", report_id
+        )
+
+
+def _finalize_run_record(
+    report_id: int,
+    overall_status: str,
+    *,
+    error_stage: str | None = None,
+    error_message: str | None = None,
+) -> None:
+    """Finalize the run record: set ``overall_status`` + ``completed_at`` (TN-2).
+
+    On failure, also records ``error_stage``/``error_message``.
+    """
+    _update_run_record(
+        report_id,
+        overall_status=overall_status,
+        completed_at=_utcnow_iso(),
+        error_stage=error_stage,
+        error_message=error_message,
+    )
 
 
 def _query_team_info(conn: sqlite3.Connection, team_id: int) -> dict:
@@ -352,16 +538,46 @@ def _query_runs_avg(
 def _query_freshness(
     conn: sqlite3.Connection, team_id: int, season_id: str
 ) -> tuple[str | None, int]:
-    """Return (most_recent_game_date, game_count) for the team/season."""
+    """Return (most_recent_game_date, game_count) for completed games the team
+    actually has per-game STAT data for (N -- ``completed_games_with_data``).
+
+    N counts completed games for which at least one ``player_game_batting`` or
+    ``player_game_pitching`` row was loaded from THIS team's perspective
+    (``perspective_team_id = team_id`` -- the perspective the report's crawl
+    produced, per the perspective-provenance invariant) -- NOT bare ``games``
+    rows. A completed ``games`` row can exist with ZERO stat rows: the game's
+    scores come from the schedule summary (``GameLoader._resolve_home_away``
+    reads ``summary.owning_team_score``/``opponent_team_score``), while stat rows
+    load only when the boxscore carries lineup/pitching groups
+    (``_upsert_game_and_stats`` loads stats conditionally on ``own_data``/
+    ``opp_data``) -- e.g. an opponent with a public final score but no GC
+    scorebook. Counting bare games rows would overstate the footer's N-of-M
+    coverage AND let the no-completed-games gate (N==0) miss a report whose games
+    have scores but no stats -- the exact silent-empty-report this epic exists to
+    prevent (E-235 Phase 4b HIGH-1). The freshness date (MAX) is likewise scoped
+    to games-with-data so "Through {date}" reflects the last game we have PLAYER
+    DATA for, not a later scored-but-empty one -- one consistent data-bearing
+    value across the pre-existing freshness display and the story-07 footer.
+    """
     row = conn.execute(
         """
-        SELECT MAX(game_date) AS latest, COUNT(*) AS cnt
-        FROM games
-        WHERE season_id = ?
-          AND (home_team_id = ? OR away_team_id = ?)
-          AND home_score IS NOT NULL AND away_score IS NOT NULL
+        SELECT MAX(g.game_date) AS latest, COUNT(*) AS cnt
+        FROM games g
+        WHERE g.season_id = ?
+          AND (g.home_team_id = ? OR g.away_team_id = ?)
+          AND g.home_score IS NOT NULL AND g.away_score IS NOT NULL
+          AND (
+            EXISTS (
+                SELECT 1 FROM player_game_batting b
+                WHERE b.game_id = g.game_id AND b.perspective_team_id = ?
+            )
+            OR EXISTS (
+                SELECT 1 FROM player_game_pitching p
+                WHERE p.game_id = g.game_id AND p.perspective_team_id = ?
+            )
+          )
         """,
-        (season_id, team_id, team_id),
+        (season_id, team_id, team_id, team_id, team_id),
     ).fetchone()
     if row and row[1] > 0:
         return row[0], row[1]
@@ -481,7 +697,7 @@ def _crawl_and_load_spray(
     season_id: str,
     gc_uuid: str | None = None,
     games_data: list | None = None,
-) -> None:
+) -> _SprayOutcome:
     """Crawl and load spray chart data in-memory (E-220-06).
 
     ``CredentialExpiredError`` propagates to the caller. All other exceptions
@@ -493,6 +709,10 @@ def _crawl_and_load_spray(
         season_id: Season slug (e.g., ``"2026-spring-hs"``).
         gc_uuid: When provided, passed to the crawler to bypass DB lookup.
         games_data: In-memory games list from the scouting crawl result.
+
+    Returns:
+        A :class:`_SprayOutcome` recording the stage status and the distinct
+        games crawled (for the run record's ``spray_games``).
     """
     try:
         with closing(get_connection()) as conn:
@@ -504,13 +724,16 @@ def _crawl_and_load_spray(
 
         if spray_result.errors and spray_result.games_crawled == 0:
             logger.warning("Spray crawl failed for public_id=%s; no data.", public_id)
-            return
+            return _SprayOutcome(status="failed", games_crawled=0)
 
         with closing(get_connection()) as conn:
             spray_loader = ScoutingSprayChartLoader(conn)
             spray_loader.load_from_data(
                 spray_result.spray_data, public_id=public_id,
             )
+        return _SprayOutcome(
+            status="completed", games_crawled=spray_result.games_crawled,
+        )
     except CredentialExpiredError:
         raise
     except Exception:  # noqa: BLE001
@@ -520,6 +743,7 @@ def _crawl_and_load_spray(
             public_id,
             exc_info=True,
         )
+        return _SprayOutcome(status="failed", games_crawled=0)
 
 
 def _crawl_and_load_plays(
@@ -528,6 +752,7 @@ def _crawl_and_load_plays(
     team_id: int,
     season_id: str,
     game_ids: list[str] | None = None,
+    recon_out: _ReconCounts | None = None,
 ) -> list[str]:
     """Crawl, load, and reconcile plays data in-memory (E-220-06).
 
@@ -540,6 +765,11 @@ def _crawl_and_load_plays(
         team_id: The team's DB integer PK.
         season_id: Canonical DB season_id for query scoping.
         game_ids: List of game IDs from the crawl result boxscores.
+        recon_out: Optional mutable accumulator (E-235-02 / TN-2). When
+            provided, the reconciliation pass populates it with per-generation
+            ``discrepancies_found`` / ``discrepancies_corrected`` /
+            ``games_reconciled`` for the run record. The return value stays
+            ``list[str]`` (the E-211 contract) regardless.
 
     Returns:
         List of game_id strings that were processed.
@@ -625,10 +855,12 @@ def _crawl_and_load_plays(
                         (game_id, team_id),
                     ).fetchone()
                     if has_plays:
-                        reconcile_game(
+                        summary = reconcile_game(
                             conn, game_id, dry_run=False,
                             perspective_team_id=team_id,
                         )
+                        if recon_out is not None:
+                            _accumulate_recon_counts(recon_out, summary)
             except Exception:  # noqa: BLE001
                 logger.warning(
                     "Reconciliation failed for game %s; plays data still usable.",
@@ -641,6 +873,12 @@ def _crawl_and_load_plays(
     except CredentialExpiredError:
         raise
     except Exception:  # noqa: BLE001
+        # Real failure (not "no plays found"). Signal it via recon_out so the
+        # caller records plays_status="failed" rather than treating the []
+        # return as success (E-235 Phase 4b HIGH-2). Still non-fatal: generation
+        # continues without plays data.
+        if recon_out is not None:
+            recon_out.failed = True
         logger.warning(
             "Plays crawl/load/reconcile failed for public_id=%s; "
             "continuing without plays data.",
@@ -987,8 +1225,14 @@ def _run_tier2_enrichment(
 def generate_report(gc_url: str) -> GenerationResult:
     """Generate a standalone scouting report for a GameChanger team.
 
-    Executes the full pipeline per TN-3: parse URL, ensure team row, create
-    reports row, run scouting crawl/load, query stats, render HTML, save file.
+    Executes the full pipeline: parse URL, ensure team row, create reports row
+    + run record, run scouting crawl/load, resolve gc_uuid, spray, plays /
+    reconcile, query stats, render HTML, save file. Each stage writes its status
+    and counts to the ``report_generation_runs`` row (E-235-02 / TN-2).
+
+    Thin wrapper over :class:`_ReportGeneration`, which carries the cross-stage
+    state and the run-record handle. Behavior is unchanged from the prior
+    monolithic implementation except for the new run record.
 
     Args:
         gc_url: A GameChanger team URL, bare public_id, or bare UUID.
@@ -996,389 +1240,771 @@ def generate_report(gc_url: str) -> GenerationResult:
     Returns:
         A :class:`GenerationResult` with success/failure details.
     """
-    # Step 1: Parse URL
-    try:
-        parsed = parse_team_url(gc_url)
-    except ValueError as exc:
-        return GenerationResult(success=False, error_message=str(exc))
+    return _ReportGeneration(gc_url).run()
 
-    if parsed.is_uuid:
-        return GenerationResult(
-            success=False,
-            error_message="UUID-based URLs are not supported for report generation. "
-            "Please use a public team URL (with a public_id slug).",
-        )
 
-    public_id = parsed.value
+class _ReportGeneration:
+    """One report-generation pipeline run.
 
-    # Step 1b: Fetch team name + season year from public API (no auth needed)
-    team_name_from_api: str | None = None
-    season_year_from_api: int | None = None
-    ngb_from_api: str | None = None
-    age_group_from_api: str | None = None
-    try:
-        from src.http.session import create_session
+    Carries cross-stage state (public-API team metadata, ``team_id``,
+    ``crawl_result``, ``season_id``, resolved gc_uuid, plays game ids, the
+    pre-run team-id snapshot) and the run-record handle (``report_id``) across
+    the named stage methods. ``run()`` orchestrates the stages in the SAME
+    order as the prior monolithic ``generate_report`` and preserves its exact
+    control flow -- the two-tier crawl/load fail contract, the non-fatal
+    spray/plays/reconciliation semantics, and the snapshot boundary -- adding
+    only the per-stage run-record writes (TN-2).
+    """
 
-        session = create_session()
-        resp = session.get(
-            f"https://api.team-manager.gc.com/public/teams/{public_id}",
-            timeout=15,
-        )
-        if resp.status_code == 200:
-            pub_data = resp.json()
-            team_name_from_api = pub_data.get("name")
-            ts = pub_data.get("team_season") or {}
-            season_year_from_api = ts.get("year")
-            ngb_from_api = pub_data.get("ngb")
-            age_group_from_api = pub_data.get("age_group")
-        session.close()
-    except Exception:  # noqa: BLE001
-        logger.warning("Could not fetch public team info for %s", public_id)
+    def __init__(self, gc_url: str) -> None:
+        self.gc_url = gc_url
+        # Public-API team metadata (step 1b).
+        self.public_id: str | None = None
+        self.team_name_from_api: str | None = None
+        self.season_year_from_api: int | None = None
+        self.ngb_from_api: str | None = None
+        self.age_group_from_api: str | None = None
+        # Identity (step 2). identity_match_method is stashed here and written
+        # when the run row is created (TN-2 run-row-creation timing); story 03
+        # populates the actual value from the extended ensure_team_row return.
+        self.team_id: int | None = None
+        self.identity_match_method: str | None = None
+        # Report + run record (step 3).
+        self.slug: str | None = None
+        self.generated_at: str | None = None
+        self.expires_at: str | None = None
+        self.report_id: int | None = None
+        # Pipeline state (step 4).
+        self.client: GameChangerClient | None = None
+        self.crawl_result = None
+        self.season_id: str | None = None
+        self.load_result = None
+        self.resolved_gc_uuid: str | None = None
+        self.plays_game_ids: list[str] = []
+        self.completed_games: int = 0
+        self.spray_games: int | None = None
+        # Gate (b) season-fallback flag (TN-3), determined at season derivation.
+        self.season_fallback: bool = False
+        # Orphan determination (post-pipeline). The in-memory per-run
+        # created-set (E-235-04 / TN-4) records the team ids THIS run INSERTed
+        # during the scouting load (threaded through ScoutingLoader -> GameLoader
+        # -> ensure_team_row_with_provenance). Replacing the old global pre/post
+        # snapshot diff with this set closes the cross-process team-deletion race:
+        # each generate_report() call deletes only the stubs it created, never a
+        # concurrent run's freshly-created (and possibly shared) teams.
+        self.created_team_ids: set[int] = set()
+        self.orphan_ids: set[int] = set()
+        # Render outputs.
+        self.title: str | None = None
+        self.team_info: dict | None = None
 
-    # Step 2: Ensure team row
-    with closing(get_connection()) as conn:
-        team_id = ensure_team_row(
-            conn,
-            public_id=public_id,
-            name=team_name_from_api,
-            season_year=season_year_from_api,
-            source="report_generator",
-        )
-        # ensure_team_row doesn't overwrite existing names (conservative backfill).
-        # Force-update name/season_year from the public API when available, since
-        # earlier failed attempts may have left the row with placeholder values.
-        if team_name_from_api:
-            conn.execute(
-                "UPDATE teams SET name = ?, season_year = COALESCE(?, season_year) "
-                "WHERE id = ?",
-                (team_name_from_api, season_year_from_api, team_id),
-            )
-            # Backfill public_id when ensure_team_row matched by name+season_year
-            # (step 3) and left public_id NULL. Safe: AND public_id IS NULL guard
-            # prevents overwriting a value set through a more authoritative path.
-            try:
-                result = conn.execute(
-                    "UPDATE teams SET public_id = ? WHERE id = ? AND public_id IS NULL",
-                    (public_id, team_id),
-                )
-                if result.rowcount > 0:
-                    logger.info("Backfilled public_id=%s on team_id=%d", public_id, team_id)
-            except sqlite3.IntegrityError:
-                logger.warning(
-                    "Could not backfill public_id=%s on team_id=%d — "
-                    "another team already has this public_id",
-                    public_id, team_id,
-                )
-        conn.commit()
+    # ------------------------------------------------------------------
+    # Orchestration
+    # ------------------------------------------------------------------
+    def run(self) -> GenerationResult:
+        # Step 1: Parse URL
+        parse_error = self._parse_url()
+        if parse_error is not None:
+            return parse_error
 
-    # Step 3: Create reports row (placeholder title — updated after crawl)
-    slug = secrets.token_urlsafe(12)
-    generated_at = _utcnow_iso()
-    expires_dt = datetime.now(timezone.utc) + timedelta(days=_EXPIRY_DAYS)
-    expires_at = expires_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+        # Step 1b: public team info (no auth)
+        self._fetch_public_team_info()
 
-    with closing(get_connection()) as conn:
-        initial_title = f"Scouting Report — {team_name_from_api or public_id}"
-        report_id = _create_report_row(
-            conn, slug, team_id, initial_title,
-            generated_at, expires_at,
-        )
+        # Step 2: ensure team row
+        self._ensure_team_row()
 
-    # Snapshot team IDs before scouting load (for orphan cleanup)
-    with closing(get_connection()) as conn:
-        pre_team_ids = _snapshot_team_ids(conn)
+        # Step 3: create the reports row + run record
+        self._create_report_and_run_record()
 
-    # Step 4: Run scouting pipeline synchronously (in-memory -- E-220-06)
-    try:
-        client = GameChangerClient()
-        with closing(get_connection()) as conn:
-            crawler = ScoutingCrawler(client, conn)
-            crawl_result = crawler.scout_team(public_id)
+        # Step 4: scouting crawl/load/spray/plays pipeline. The scouting load
+        # records every opponent stub it INSERTs into self.created_team_ids
+        # (TN-4), so no pre-load team-id snapshot is taken.
+        pipeline_error = self._run_pipeline()
+        if pipeline_error is not None:
+            return pipeline_error
 
-        if crawl_result.errors > 0 and crawl_result.games_crawled == 0:
-            _fail_report(report_id, "Scouting crawl failed — no data retrieved.")
+        # Orphan determination from the per-run created-set (TN-4) -- only teams
+        # THIS run inserted, never a concurrent run's teams.
+        self._compute_orphans()
+
+        # Step 5: query, render, save, finalize
+        return self._query_render_save()
+
+    # ------------------------------------------------------------------
+    # Stage methods
+    # ------------------------------------------------------------------
+    def _parse_url(self) -> GenerationResult | None:
+        """Step 1: parse the GC URL. Returns a failure result on bad input."""
+        try:
+            parsed = parse_team_url(self.gc_url)
+        except ValueError as exc:
+            return GenerationResult(success=False, error_message=str(exc))
+
+        if parsed.is_uuid:
             return GenerationResult(
-                success=False, slug=slug, error_message="Scouting crawl failed."
+                success=False,
+                error_message="UUID-based URLs are not supported for report generation. "
+                "Please use a public team URL (with a public_id slug).",
             )
 
-        # Derive the canonical DB season_id from team metadata.
-        with closing(get_connection()) as conn:
-            season_id, _ = derive_season_id_for_team(conn, team_id)
+        self.public_id = parsed.value
+        return None
 
-        # Run the loader with in-memory crawl result.
-        with closing(get_connection()) as conn:
-            loader = ScoutingLoader(conn)
-            load_result = loader.load_team(crawl_result)
+    def _fetch_public_team_info(self) -> None:
+        """Step 1b: fetch team name + season year from the public API (no auth)."""
+        try:
+            from src.http.session import create_session
 
-        if load_result.loaded == 0 and load_result.errors > 0:
-            _fail_report(report_id, "Scouting load failed — no data loaded.")
-            return GenerationResult(
-                success=False, slug=slug, error_message="Scouting load failed."
+            session = create_session()
+            resp = session.get(
+                f"https://api.team-manager.gc.com/public/teams/{self.public_id}",
+                timeout=15,
+            )
+            if resp.status_code == 200:
+                pub_data = resp.json()
+                self.team_name_from_api = pub_data.get("name")
+                ts = pub_data.get("team_season") or {}
+                self.season_year_from_api = ts.get("year")
+                self.ngb_from_api = pub_data.get("ngb")
+                self.age_group_from_api = pub_data.get("age_group")
+            session.close()
+        except Exception:  # noqa: BLE001
+            logger.warning("Could not fetch public team info for %s", self.public_id)
+
+    def _ensure_team_row(self) -> None:
+        """Step 2: ensure the team row exists; backfill name/season/public_id.
+
+        Captures the identity ``match_method`` (gate (c), TN-3) from the
+        provenance-returning variant and stashes it on the context; it is
+        written to the run record when that row is created (the run row does
+        not exist yet here -- deferred write, SE-F3).
+        """
+        with closing(get_connection()) as conn:
+            ensure_result = ensure_team_row_with_provenance(
+                conn,
+                public_id=self.public_id,
+                name=self.team_name_from_api,
+                season_year=self.season_year_from_api,
+                source="report_generator",
+            )
+            self.team_id = ensure_result.team_id
+            # Stash for deferred write at run-row creation (gate (c)).
+            self.identity_match_method = ensure_result.match_method
+            # ensure_team_row doesn't overwrite existing names (conservative
+            # backfill). Force-update name/season_year from the public API when
+            # available, since earlier failed attempts may have left the row
+            # with placeholder values.
+            if self.team_name_from_api:
+                conn.execute(
+                    "UPDATE teams SET name = ?, season_year = COALESCE(?, season_year) "
+                    "WHERE id = ?",
+                    (self.team_name_from_api, self.season_year_from_api, self.team_id),
+                )
+                # Backfill public_id when ensure_team_row matched by
+                # name+season_year and left public_id NULL. Safe: AND public_id
+                # IS NULL guard prevents overwriting a more-authoritative value.
+                try:
+                    result = conn.execute(
+                        "UPDATE teams SET public_id = ? WHERE id = ? AND public_id IS NULL",
+                        (self.public_id, self.team_id),
+                    )
+                    if result.rowcount > 0:
+                        logger.info(
+                            "Backfilled public_id=%s on team_id=%d",
+                            self.public_id, self.team_id,
+                        )
+                except sqlite3.IntegrityError:
+                    logger.warning(
+                        "Could not backfill public_id=%s on team_id=%d — "
+                        "another team already has this public_id",
+                        self.public_id, self.team_id,
+                    )
+            conn.commit()
+
+    def _create_report_and_run_record(self) -> None:
+        """Step 3: create the reports row, then its run record (FK order)."""
+        self.slug = secrets.token_urlsafe(12)
+        self.generated_at = _utcnow_iso()
+        expires_dt = datetime.now(timezone.utc) + timedelta(days=_EXPIRY_DAYS)
+        self.expires_at = expires_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        with closing(get_connection()) as conn:
+            initial_title = (
+                f"Scouting Report — {self.team_name_from_api or self.public_id}"
+            )
+            self.report_id = _create_report_row(
+                conn, self.slug, self.team_id, initial_title,
+                self.generated_at, self.expires_at,
+            )
+            # The run row FK-references the reports row, which now exists +
+            # is committed. Stashed pre-run signals (identity_match_method)
+            # are written here (TN-2).
+            _create_run_record(
+                conn, self.report_id, self.generated_at,
+                identity_match_method=self.identity_match_method,
             )
 
-        # Re-read team_info AFTER crawl/load so name is populated from schedule
+    def _run_pipeline(self) -> GenerationResult | None:
+        """Step 4: crawl/load/gc_uuid/spray/plays. Returns a failure result on
+        a fatal (two-tier) error, else ``None`` to continue."""
+        try:
+            self.client = GameChangerClient()
+            with closing(get_connection()) as conn:
+                crawler = ScoutingCrawler(self.client, conn)
+                self.crawl_result = crawler.scout_team(self.public_id)
+
+            # M = distinct completed games on the fetched schedule (TN-2 SE-F4).
+            self.completed_games = _count_completed_games(self.crawl_result.games)
+
+            # Two-tier fail contract (tier 1): crawl errors AND zero games = fatal.
+            if self.crawl_result.errors > 0 and self.crawl_result.games_crawled == 0:
+                _update_run_record(
+                    self.report_id, crawl_status="failed",
+                    completed_games=self.completed_games,
+                )
+                _finalize_run_record(
+                    self.report_id, "failed", error_stage="crawl",
+                    error_message="Scouting crawl failed — no data retrieved.",
+                )
+                _fail_report(self.report_id, "Scouting crawl failed — no data retrieved.")
+                return GenerationResult(
+                    success=False, slug=self.slug, error_message="Scouting crawl failed."
+                )
+
+            _update_run_record(
+                self.report_id, crawl_status="completed",
+                completed_games=self.completed_games,
+            )
+
+            # Derive the canonical DB season_id from team metadata, capturing
+            # the gate (b) season-fallback signal (TN-3, single source of truth).
+            with closing(get_connection()) as conn:
+                derivation = derive_season_id_for_team_with_fallback(
+                    conn, self.team_id,
+                )
+            self.season_id = derivation.season_id
+            self.season_fallback = derivation.fallback_used
+            # Guarantee the season row exists so season_id_used (FK) is safe to
+            # write even when the loader early-returns without committing (the
+            # no-games path). Idempotent.
+            with closing(get_connection()) as conn:
+                ensure_season_row(conn, self.season_id)
+                conn.commit()
+            # Gate (b): record the season used + whether a fallback fired.
+            _update_run_record(
+                self.report_id,
+                season_id_used=self.season_id,
+                season_fallback=int(self.season_fallback),
+            )
+
+            # Run the loader with the in-memory crawl result. Pass the per-run
+            # created-set so opponent stubs INSERTed during the load are recorded
+            # for run-scoped orphan cleanup (TN-4) instead of a snapshot diff.
+            with closing(get_connection()) as conn:
+                loader = ScoutingLoader(conn, created_team_ids=self.created_team_ids)
+                self.load_result = loader.load_team(self.crawl_result)
+
+            # Two-tier fail contract (tier 2): load guard fires only on
+            # errors > 0 AND loaded == 0.
+            if self.load_result.loaded == 0 and self.load_result.errors > 0:
+                _update_run_record(self.report_id, load_status="failed")
+                _finalize_run_record(
+                    self.report_id, "failed", error_stage="load",
+                    error_message="Scouting load failed — no data loaded.",
+                )
+                _fail_report(self.report_id, "Scouting load failed — no data loaded.")
+                return GenerationResult(
+                    success=False, slug=self.slug, error_message="Scouting load failed."
+                )
+
+            _update_run_record(self.report_id, load_status="completed")
+
+            # Re-read team_info AFTER crawl/load so name is populated from schedule.
+            with closing(get_connection()) as conn:
+                self.team_info = _query_team_info(conn, self.team_id)
+
+            self.title = f"Scouting Report — {self.team_info['name']}"
+
+            # Update the placeholder title with the real team name.
+            with closing(get_connection()) as conn:
+                conn.execute(
+                    "UPDATE reports SET title = ? WHERE id = ?",
+                    (self.title, self.report_id),
+                )
+                conn.commit()
+
+            # Gate (a): no-completed-games -- ABORT to an explicit, shareable
+            # no-games outcome instead of a silent empty "ready" report (TN-3).
+            no_games_result = self._no_games_gate()
+            if no_games_result is not None:
+                return no_games_result
+
+            # Step 4b: gc_uuid resolution.
+            self._resolve_gc_uuid_stage()
+
+            # Step 4c: spray chart crawl/load (in-memory -- E-220-06).
+            self._spray_stage()
+
+            # Step 4d: plays crawl/load/reconcile (in-memory -- E-220-06).
+            self._plays_stage()
+
+        except CredentialExpiredError:
+            msg = "Authentication credentials expired — refresh with `bb creds setup web`"
+            _finalize_run_record(
+                self.report_id, "failed", error_stage="pipeline", error_message=msg,
+            )
+            _fail_report(self.report_id, msg)
+            return GenerationResult(success=False, slug=self.slug, error_message=msg)
+        except Exception as exc:  # noqa: BLE001
+            msg = f"Pipeline error: {exc}"
+            logger.exception("Report generation pipeline failed")
+            _finalize_run_record(
+                self.report_id, "failed", error_stage="pipeline", error_message=msg,
+            )
+            _fail_report(self.report_id, msg)
+            return GenerationResult(success=False, slug=self.slug, error_message=msg)
+
+        return None
+
+    def _no_games_gate(self) -> GenerationResult | None:
+        """Gate (a): the no-completed-games quality gate (TN-3).
+
+        N (``completed_games_with_data``) is the ``_query_freshness`` count of
+        distinct completed games we actually have stat data for. When N == 0 the
+        report would be empty, so instead of rendering a silent empty "ready"
+        report we produce an explicit, shareable no-games outcome:
+        ``reports.status = 'no_games'`` + a minimal explanatory page on disk.
+
+        The run record captures the M=0 vs N=0 distinction via
+        ``completed_games`` (M, already written at the crawl stage) and
+        ``completed_games_with_data`` (N, written here).
+
+        Returns:
+            A terminal :class:`GenerationResult` when the gate fires, else
+            ``None`` to continue the pipeline.
+        """
         with closing(get_connection()) as conn:
-            team_info = _query_team_info(conn, team_id)
+            _freshness_date, game_count = _query_freshness(
+                conn, self.team_id, self.season_id,
+            )
 
-        title = f"Scouting Report — {team_info['name']}"
+        if game_count > 0:
+            # Has data -- record N and continue. (The render stage also records
+            # N; writing it here keeps the run record correct even though the
+            # gate did not fire.)
+            _update_run_record(
+                self.report_id, completed_games_with_data=game_count,
+            )
+            return None
 
-        # Update the placeholder title with the real team name
+        # Zero completed games with data -> explicit no-games terminal outcome.
+        team_name = (
+            (self.team_info or {}).get("name")
+            or self.team_name_from_api
+            or self.public_id
+        )
+        _update_run_record(self.report_id, completed_games_with_data=0)
+
+        # Write the minimal shareable page and flip reports.status to 'no_games'
+        # (free-text TEXT column -- no migration). The public serve route serves
+        # 'no_games' like 'ready', so the shared link renders the message.
+        _REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+        report_path = f"reports/{self.slug}.html"
+        file_path = _REPO_ROOT / "data" / report_path
+        file_path.write_text(render_no_games_page(team_name), encoding="utf-8")
         with closing(get_connection()) as conn:
             conn.execute(
-                "UPDATE reports SET title = ? WHERE id = ?", (title, report_id)
+                "UPDATE reports SET status = 'no_games', report_path = ? WHERE id = ?",
+                (report_path, self.report_id),
             )
             conn.commit()
 
-        # Step 4b: Resolve gc_uuid for spray chart access.
-        # Tracked teams always search-resolve (stored gc_uuid may be
-        # contaminated by opponent-perspective boxscore keys -- see E-211).
-        # Member teams use stored gc_uuid (from authenticated API).
-        resolved_gc_uuid: str | None = None
+        # Orphan cleanup on the abort path too, so it stays symmetric with the
+        # normal render path (a true no-op here -- the N==0 firing condition
+        # created no opponent stubs). Story 04 reworks orphan handling and
+        # inherits this symmetric structure.
+        self._compute_orphans()
+        self._cleanup_orphans()
+
+        _finalize_run_record(self.report_id, "completed")
+        logger.info(
+            "No completed games with data for public_id=%s (M=%d, N=0); "
+            "wrote no-games page slug=%s",
+            self.public_id, self.completed_games, self.slug,
+        )
+
+        msg = (
+            f"No completed games found for {team_name} this season. "
+            "If this looks wrong, verify the team URL and try again."
+        )
+        url = f"{_get_base_url()}/reports/{self.slug}"
+        return GenerationResult(
+            success=False, slug=self.slug, title=self.title, url=url,
+            error_message=msg,
+        )
+
+    def _resolve_gc_uuid_stage(self) -> None:
+        """Step 4b: resolve gc_uuid for spray-chart access.
+
+        Tracked teams always search-resolve (stored gc_uuid may be contaminated
+        by opponent-perspective boxscore keys -- see E-211). Member teams use
+        the stored gc_uuid (from the authenticated API).
+        """
+        self.resolved_gc_uuid = None
         with closing(get_connection()) as conn:
             row = conn.execute(
                 "SELECT gc_uuid, membership_type FROM teams WHERE id = ?",
-                (team_id,),
+                (self.team_id,),
             ).fetchone()
             existing_gc_uuid = row[0] if row else None
             membership_type = row[1] if row else "tracked"
 
         if membership_type == "member" and existing_gc_uuid:
-            resolved_gc_uuid = existing_gc_uuid
-        elif team_info.get("name"):
-            resolved_gc_uuid = _resolve_gc_uuid(client, team_info["name"], public_id)
-            if resolved_gc_uuid:
+            self.resolved_gc_uuid = existing_gc_uuid
+        elif self.team_info.get("name"):
+            self.resolved_gc_uuid = _resolve_gc_uuid(
+                self.client, self.team_info["name"], self.public_id,
+            )
+            if self.resolved_gc_uuid:
                 with closing(get_connection()) as conn:
                     conn.execute(
                         "UPDATE teams SET gc_uuid = ? WHERE id = ? "
                         "AND membership_type = 'tracked'",
-                        (resolved_gc_uuid, team_id),
+                        (self.resolved_gc_uuid, self.team_id),
                     )
                     conn.commit()
 
-        # Step 4c: Spray chart crawl/load (in-memory -- E-220-06)
-        _crawl_and_load_spray(
-            client, public_id, season_id,
-            gc_uuid=resolved_gc_uuid,
-            games_data=crawl_result.games,
+        _update_run_record(
+            self.report_id,
+            gc_uuid_status="resolved" if self.resolved_gc_uuid else "unavailable",
         )
 
-        # Step 4d: Plays crawl/load/reconcile (in-memory -- E-220-06).
-        # Game IDs from crawl result boxscores, not disk globs.
-        plays_game_ids: list[str] = []
+    def _spray_stage(self) -> None:
+        """Step 4c: spray crawl/load (non-fatal). Records spray status + games."""
+        spray_outcome = _crawl_and_load_spray(
+            self.client, self.public_id, self.season_id,
+            gc_uuid=self.resolved_gc_uuid,
+            games_data=self.crawl_result.games,
+        )
+        self.spray_games = _coerce_int(getattr(spray_outcome, "games_crawled", None))
+        _update_run_record(
+            self.report_id,
+            spray_status=_coerce_status(getattr(spray_outcome, "status", None)),
+            spray_games=self.spray_games,
+        )
+
+    def _plays_stage(self) -> None:
+        """Step 4d: plays crawl/load/reconcile (non-fatal). Records plays +
+        reconciliation status and counts.
+
+        ``CredentialExpiredError`` here is non-fatal (caught locally, matching
+        the prior behavior) -- it must NOT bubble to the pipeline-level handler.
+        """
+        self.plays_game_ids = []
+        plays_games_expected = len(self.crawl_result.boxscores)
+        recon = _ReconCounts()
         try:
-            plays_game_ids = _crawl_and_load_plays(
-                client, public_id, team_id, season_id,
-                game_ids=sorted(crawl_result.boxscores.keys()),
+            self.plays_game_ids = _crawl_and_load_plays(
+                self.client, self.public_id, self.team_id, self.season_id,
+                game_ids=sorted(self.crawl_result.boxscores.keys()),
+                recon_out=recon,
             )
+            if recon.failed:
+                # _crawl_and_load_plays swallowed a real failure and returned []
+                # (HIGH-2). Record the failure honestly -- NOT "completed" with
+                # zero counts -- while keeping the stage non-fatal (no raise).
+                _update_run_record(
+                    self.report_id,
+                    plays_status="failed",
+                    plays_games_expected=plays_games_expected,
+                    reconciliation_status="failed",
+                )
+                logger.warning(
+                    "Plays stage failed for public_id=%s (swallowed error); "
+                    "continuing without plays data.",
+                    self.public_id,
+                )
+            else:
+                _update_run_record(
+                    self.report_id,
+                    plays_status="completed",
+                    plays_games_expected=plays_games_expected,
+                    reconciliation_status="completed",
+                    discrepancies_found=recon.discrepancies_found,
+                    discrepancies_corrected=recon.discrepancies_corrected,
+                )
         except CredentialExpiredError:
+            _update_run_record(
+                self.report_id, plays_status="failed",
+                plays_games_expected=plays_games_expected,
+            )
             logger.warning(
                 "Auth expired during plays stage for public_id=%s; "
                 "continuing without plays data.",
-                public_id,
+                self.public_id,
             )
         except Exception:  # noqa: BLE001
+            _update_run_record(
+                self.report_id, plays_status="failed",
+                plays_games_expected=plays_games_expected,
+            )
             logger.warning(
                 "Plays stage failed for public_id=%s; continuing without plays data.",
-                public_id,
+                self.public_id,
                 exc_info=True,
             )
 
-    except CredentialExpiredError:
-        msg = "Authentication credentials expired — refresh with `bb creds setup web`"
-        _fail_report(report_id, msg)
-        return GenerationResult(success=False, slug=slug, error_message=msg)
-    except Exception as exc:  # noqa: BLE001
-        msg = f"Pipeline error: {exc}"
-        logger.exception("Report generation pipeline failed")
-        _fail_report(report_id, msg)
-        return GenerationResult(success=False, slug=slug, error_message=msg)
+    def _compute_orphans(self) -> None:
+        """Compute orphan team IDs from the per-run created-set (TN-4).
 
-    # Compute orphan team IDs created during the scouting load
-    with closing(get_connection()) as conn:
-        post_team_ids = _snapshot_team_ids(conn)
-    orphan_ids = post_team_ids - pre_team_ids - {team_id}
+        Orphans are exactly the teams THIS run INSERTed during the scouting load
+        (``created_team_ids``), excluding the report team itself. Using the
+        in-memory created-set instead of a global pre/post snapshot diff closes
+        the cross-process race: a concurrent run's freshly-created teams are
+        never in this run's set, so they can never be deleted here.
+        """
+        self.orphan_ids = self.created_team_ids - {self.team_id}
 
-    # Step 5: Query stats, render, save, and mark ready — all in one
-    # failure-handling block so the report never gets stuck in 'generating'.
-    try:
-        # Query BEFORE cleanup -- game-dependent queries need game rows
-        with closing(get_connection()) as conn:
-            conn.row_factory = sqlite3.Row
-            batting = _query_batting(conn, team_id, season_id)
-            pitching = _query_pitching(conn, team_id, season_id)
-            roster = _query_roster(conn, team_id, season_id)
-            record = _query_record(conn, team_id, season_id)
-            recent_form = _query_recent_games(conn, team_id, season_id)
-            freshness_date, game_count = _query_freshness(conn, team_id, season_id)
-            spray_charts = _query_spray_charts(conn, team_id, season_id)
-            runs_scored_avg, runs_allowed_avg = _query_runs_avg(
-                conn, team_id, season_id
-            )
+    def _cleanup_orphans(self) -> None:
+        """Delete orphan teams created during this run (non-fatal).
 
-            # Pitching workload (uses generation date as reference)
-            generation_date = generated_at[:10]
-            pitching_workload = get_pitching_workload(
-                team_id, season_id, generation_date, db=conn,
-            )
-
-            # Predicted starter (Tier 1)
-            starter_prediction = None
-            enriched_prediction = None
-            from src.reports.starter_prediction import (
-                is_predicted_starter_enabled,
-            )
-            show_predicted_starter = is_predicted_starter_enabled()
-            if show_predicted_starter:
-                pitching_history_rows = get_pitching_history(
-                    team_id, season_id, db=conn,
-                )
-                if pitching_history_rows:
-                    from src.reports.starter_prediction import (
-                        compute_starter_prediction,
-                        detect_league_level,
-                    )
-
-                    league = detect_league_level(
-                        ngb=ngb_from_api,
-                        age_group=age_group_from_api,
-                        team_name=team_name_from_api,
-                    )
-
-                    pitcher_profiles = build_pitcher_profiles(
-                        pitching_history_rows,
-                    )
-                    starter_prediction = compute_starter_prediction(
-                        pitcher_profiles, pitching_history_rows,
-                        reference_date=date.fromisoformat(generated_at[:10]),
-                        workload=pitching_workload,
-                        league=league,
-                    )
-
-                    # Tier 2: LLM enrichment (optional, non-fatal).  The helper
-                    # emits an operator-detectable status for each of the three
-                    # outcomes (success / unavailable-no-key / failed) and
-                    # preserves the non-fatal contract (TN-2).
-                    team_record_str = None
-                    if record:
-                        team_record_str = (
-                            f"{record['wins']}-{record['losses']}"
-                        )
-                    enriched_prediction, _tier2_status = _run_tier2_enrichment(
-                        starter_prediction,
-                        pitching_history_rows,
-                        team_record=team_record_str,
-                        reference_date=date.fromisoformat(generated_at[:10]),
-                        public_id=public_id,
-                    )
-
-            # Plays-derived stats
-            plays_pitching = _query_plays_pitching_stats(
-                conn, team_id, season_id, game_ids=plays_game_ids,
-            )
-            plays_batting = _query_plays_batting_stats(
-                conn, team_id, season_id, game_ids=plays_game_ids,
-            )
-            plays_team = _query_plays_team_stats(
-                conn, team_id, season_id, game_ids=plays_game_ids,
-            )
-
-        # Build roster set for pitcher matching (pitching query returns all
-        # pitchers in games involving this team; filter to team's own roster)
-        with closing(get_connection()) as conn:
-            roster_pids = {
-                row[0] for row in conn.execute(
-                    "SELECT player_id FROM team_rosters WHERE team_id = ? AND season_id = ?",
-                    (team_id, season_id),
-                ).fetchall()
-            }
-        for p in pitching:
-            pid = p.get("player_id")
-            if pid and pid in plays_pitching and pid in roster_pids:
-                p["fps_pct"] = plays_pitching[pid]["fps_pct"]
-                p["pitches_per_bf"] = plays_pitching[pid]["pitches_per_bf"]
-            else:
-                p["fps_pct"] = None
-                p["pitches_per_bf"] = None
-
-        # Merge plays stats into batter dicts
-        for b in batting:
-            pid = b.get("player_id")
-            if pid and pid in plays_batting:
-                b["qab_pct"] = plays_batting[pid]["qab_pct"]
-                b["pitches_per_pa"] = plays_batting[pid]["pitches_per_pa"]
-            else:
-                b["qab_pct"] = None
-                b["pitches_per_pa"] = None
-
-        # Orphan cleanup -- after queries, before render (non-fatal)
-        if orphan_ids:
+        Shared by the normal render path and the no-games abort path so both
+        run the same post-pipeline cleanup (path symmetry). A true no-op when
+        ``orphan_ids`` is empty -- e.g. the N==0 no-games firing condition,
+        where no opponent stubs were created.
+        """
+        if self.orphan_ids:
             try:
                 with closing(get_connection()) as conn:
-                    cleanup_orphan_teams(conn, orphan_ids)
+                    cleanup_orphan_teams(conn, self.orphan_ids)
             except Exception:  # noqa: BLE001
                 logger.warning(
                     "Orphan cleanup failed for %d team(s); report continues.",
-                    len(orphan_ids),
+                    len(self.orphan_ids),
                     exc_info=True,
                 )
 
-        # Render HTML
-        team_info["record"] = record
-        data = {
-            "team": team_info,
-            "generated_at": generated_at,
-            "expires_at": expires_at,
-            "freshness_date": freshness_date,
-            "game_count": game_count,
-            "recent_form": recent_form,
-            "pitching": pitching,
-            "batting": batting,
-            "spray_charts": spray_charts,
-            "roster": roster,
-            "runs_scored_avg": runs_scored_avg,
-            "runs_allowed_avg": runs_allowed_avg,
-            "team_fps_pct": plays_team["team_fps_pct"],
-            "team_pitches_per_pa": plays_team["team_pitches_per_pa"],
-            "has_plays_data": plays_team["has_plays_data"],
-            "plays_game_count": plays_team["plays_game_count"],
-            "pitching_workload": pitching_workload,
-            "generation_date": generation_date,
-            "starter_prediction": starter_prediction,
-            "enriched_prediction": enriched_prediction,
-            "show_predicted_starter": show_predicted_starter,
-        }
-        html = render_report(data)
+    def _query_render_save(self) -> GenerationResult:
+        """Step 5: query stats, render, save, mark ready, finalize the run.
 
-        # Save HTML to disk
-        _REPORTS_DIR.mkdir(parents=True, exist_ok=True)
-        report_path = f"reports/{slug}.html"
-        file_path = _REPO_ROOT / "data" / report_path
-        file_path.write_text(html, encoding="utf-8")
+        All in one failure-handling block so the report never gets stuck in
+        'generating'. On success, writes N / plays-covered / enrichment-status
+        counts and finalizes the run record as ``completed``.
+        """
+        team_id = self.team_id
+        season_id = self.season_id
+        report_id = self.report_id
+        slug = self.slug
+        generated_at = self.generated_at
 
-        # Update reports row to 'ready'
-        with closing(get_connection()) as conn:
-            _update_report_ready(conn, report_id, report_path)
+        # Run-record counts captured during this stage (TN-2).
+        completed_games_with_data: int | None = None
+        plays_games_covered: int | None = None
+        enrichment_status: str | None = None
 
-    except Exception as exc:  # noqa: BLE001
-        msg = f"Post-pipeline error: {exc}"
-        logger.exception("Failed to query/render/save report")
-        _fail_report(report_id, msg)
-        return GenerationResult(success=False, slug=slug, error_message=msg)
+        try:
+            # Query BEFORE cleanup -- game-dependent queries need game rows
+            with closing(get_connection()) as conn:
+                conn.row_factory = sqlite3.Row
+                batting = _query_batting(conn, team_id, season_id)
+                pitching = _query_pitching(conn, team_id, season_id)
+                roster = _query_roster(conn, team_id, season_id)
+                record = _query_record(conn, team_id, season_id)
+                recent_form = _query_recent_games(conn, team_id, season_id)
+                freshness_date, game_count = _query_freshness(conn, team_id, season_id)
+                # N = distinct completed games we actually have stat data for
+                # (TN-2 SE-F2): the _query_freshness count, NOT load_result.loaded.
+                completed_games_with_data = game_count
+                spray_charts = _query_spray_charts(conn, team_id, season_id)
+                runs_scored_avg, runs_allowed_avg = _query_runs_avg(
+                    conn, team_id, season_id
+                )
 
-    url = f"{_get_base_url()}/reports/{slug}"
-    logger.info("Report generated: slug=%s team=%s url=%s", slug, team_info["name"], url)
+                # Pitching workload (uses generation date as reference)
+                generation_date = generated_at[:10]
+                pitching_workload = get_pitching_workload(
+                    team_id, season_id, generation_date, db=conn,
+                )
 
-    return GenerationResult(
-        success=True,
-        slug=slug,
-        title=title,
-        url=url,
-    )
+                # Predicted starter (Tier 1)
+                starter_prediction = None
+                enriched_prediction = None
+                from src.reports.starter_prediction import (
+                    is_predicted_starter_enabled,
+                )
+                show_predicted_starter = is_predicted_starter_enabled()
+                if show_predicted_starter:
+                    pitching_history_rows = get_pitching_history(
+                        team_id, season_id, db=conn,
+                    )
+                    if pitching_history_rows:
+                        from src.reports.starter_prediction import (
+                            compute_starter_prediction,
+                            detect_league_level,
+                        )
 
+                        league = detect_league_level(
+                            ngb=self.ngb_from_api,
+                            age_group=self.age_group_from_api,
+                            team_name=self.team_name_from_api,
+                        )
 
-def _snapshot_team_ids(conn: sqlite3.Connection) -> set[int]:
-    """Return all current team IDs as a set."""
-    return {row[0] for row in conn.execute("SELECT id FROM teams")}
+                        pitcher_profiles = build_pitcher_profiles(
+                            pitching_history_rows,
+                        )
+                        starter_prediction = compute_starter_prediction(
+                            pitcher_profiles, pitching_history_rows,
+                            reference_date=date.fromisoformat(generated_at[:10]),
+                            workload=pitching_workload,
+                            league=league,
+                        )
+
+                        # Tier 2: LLM enrichment (optional, non-fatal). The
+                        # helper emits an operator-detectable status for each of
+                        # the three outcomes (success / unavailable-no-key /
+                        # failed) and preserves the non-fatal contract (TN-2).
+                        # enrichment_status IS the run record's enrichment_status.
+                        team_record_str = None
+                        if record:
+                            team_record_str = (
+                                f"{record['wins']}-{record['losses']}"
+                            )
+                        enriched_prediction, enrichment_status = _run_tier2_enrichment(
+                            starter_prediction,
+                            pitching_history_rows,
+                            team_record=team_record_str,
+                            reference_date=date.fromisoformat(generated_at[:10]),
+                            public_id=self.public_id,
+                        )
+
+                # Plays-derived stats
+                plays_pitching = _query_plays_pitching_stats(
+                    conn, team_id, season_id, game_ids=self.plays_game_ids,
+                )
+                plays_batting = _query_plays_batting_stats(
+                    conn, team_id, season_id, game_ids=self.plays_game_ids,
+                )
+                plays_team = _query_plays_team_stats(
+                    conn, team_id, season_id, game_ids=self.plays_game_ids,
+                )
+                # K = distinct games with plays/pitch-detail data (run record's
+                # plays_games_covered; the footer's K).
+                plays_games_covered = plays_team["plays_game_count"]
+
+            # Build roster set for pitcher matching (pitching query returns all
+            # pitchers in games involving this team; filter to team's own roster)
+            with closing(get_connection()) as conn:
+                roster_pids = {
+                    row[0] for row in conn.execute(
+                        "SELECT player_id FROM team_rosters WHERE team_id = ? AND season_id = ?",
+                        (team_id, season_id),
+                    ).fetchall()
+                }
+            for p in pitching:
+                pid = p.get("player_id")
+                if pid and pid in plays_pitching and pid in roster_pids:
+                    p["fps_pct"] = plays_pitching[pid]["fps_pct"]
+                    p["pitches_per_bf"] = plays_pitching[pid]["pitches_per_bf"]
+                else:
+                    p["fps_pct"] = None
+                    p["pitches_per_bf"] = None
+
+            # Merge plays stats into batter dicts
+            for b in batting:
+                pid = b.get("player_id")
+                if pid and pid in plays_batting:
+                    b["qab_pct"] = plays_batting[pid]["qab_pct"]
+                    b["pitches_per_pa"] = plays_batting[pid]["pitches_per_pa"]
+                else:
+                    b["qab_pct"] = None
+                    b["pitches_per_pa"] = None
+
+            # Orphan cleanup -- after queries, before render (non-fatal)
+            self._cleanup_orphans()
+
+            # Footer trust-block inputs (AC-5 / TN-3 / TN-6) -- story 07
+            # consumes these from the render data; this is the only generator
+            # change the footer needs. degraded_confidence is the single derived
+            # boolean (season fallback OR name-only identity); the SPECIFIC
+            # flags stay operator-only (admin list, story 06).
+            degraded_confidence = bool(
+                self.season_fallback
+                or self.identity_match_method == "name_only"
+            )
+
+            # Render HTML
+            self.team_info["record"] = record
+            data = {
+                "team": self.team_info,
+                "generated_at": generated_at,
+                "expires_at": self.expires_at,
+                "freshness_date": freshness_date,
+                "game_count": game_count,
+                "recent_form": recent_form,
+                "pitching": pitching,
+                "batting": batting,
+                "spray_charts": spray_charts,
+                "roster": roster,
+                "runs_scored_avg": runs_scored_avg,
+                "runs_allowed_avg": runs_allowed_avg,
+                "team_fps_pct": plays_team["team_fps_pct"],
+                "team_pitches_per_pa": plays_team["team_pitches_per_pa"],
+                "has_plays_data": plays_team["has_plays_data"],
+                "plays_game_count": plays_team["plays_game_count"],
+                "pitching_workload": pitching_workload,
+                "generation_date": generation_date,
+                "starter_prediction": starter_prediction,
+                "enriched_prediction": enriched_prediction,
+                "show_predicted_starter": show_predicted_starter,
+                # Footer trust-block inputs (story 07):
+                "completed_games": self.completed_games,  # M
+                "completed_games_with_data": completed_games_with_data,  # N
+                # K (plays_game_count) is already provided above.
+                "spray_available": bool(spray_charts),
+                "degraded_confidence": degraded_confidence,
+            }
+            html = render_report(data)
+
+            # Save HTML to disk
+            _REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+            report_path = f"reports/{slug}.html"
+            file_path = _REPO_ROOT / "data" / report_path
+            file_path.write_text(html, encoding="utf-8")
+
+            # Update reports row to 'ready'
+            with closing(get_connection()) as conn:
+                _update_report_ready(conn, report_id, report_path)
+
+            # Run record: write the render-stage counts and finalize completed.
+            _update_run_record(
+                report_id,
+                completed_games_with_data=_coerce_int(completed_games_with_data),
+                plays_games_covered=_coerce_int(plays_games_covered),
+                enrichment_status=_coerce_status(enrichment_status),
+            )
+            _finalize_run_record(report_id, "completed")
+
+        except Exception as exc:  # noqa: BLE001
+            msg = f"Post-pipeline error: {exc}"
+            logger.exception("Failed to query/render/save report")
+            _finalize_run_record(
+                report_id, "failed", error_stage="render", error_message=msg,
+            )
+            _fail_report(report_id, msg)
+            return GenerationResult(success=False, slug=slug, error_message=msg)
+
+        url = f"{_get_base_url()}/reports/{slug}"
+        logger.info(
+            "Report generated: slug=%s team=%s url=%s",
+            slug, self.team_info["name"], url,
+        )
+
+        return GenerationResult(
+            success=True,
+            slug=slug,
+            title=self.title,
+            url=url,
+        )
 
 
 def _delete_game_scoped_data_for_perspectives(
@@ -1783,29 +2409,28 @@ def _fail_report(report_id: int, error_message: str) -> None:
 
 
 def list_reports() -> list[dict]:
-    """Return all reports sorted by generated_at descending.
+    """Return all reports (joined to their run record) sorted by generated_at desc.
+
+    Uses the shared ``list_reports_with_runs`` join (src/api/db.py) so the CLI
+    (``bb report list``) and the admin list (``/admin/reports``) read the same
+    1:1 LEFT JOIN (E-235-06 / TN-6). Each dict now carries the reports columns
+    -- including the report-level ``error_message`` (newly returned here) -- the
+    joined ``report_generation_runs`` columns (NULL for legacy rows with no run),
+    and the derived ``url`` / ``is_expired``.
 
     Returns:
-        List of report dicts with keys: slug, title, status, generated_at,
-        expires_at, url, is_expired.
+        List of report dicts. Empty list on a DB error (logged).
     """
     base_url = _get_base_url()
     now = _utcnow_iso()
     try:
         with closing(get_connection()) as conn:
-            conn.row_factory = sqlite3.Row
-            rows = conn.execute(
-                "SELECT slug, title, status, generated_at, expires_at "
-                "FROM reports ORDER BY generated_at DESC"
-            ).fetchall()
+            result = list_reports_with_runs(conn)
     except sqlite3.Error:
         logger.exception("Failed to list reports")
         return []
 
-    result = []
-    for row in rows:
-        r = dict(row)
+    for r in result:
         r["url"] = f"{base_url}/reports/{r['slug']}"
         r["is_expired"] = r["expires_at"] < now
-        result.append(r)
     return result

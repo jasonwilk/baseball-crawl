@@ -17,6 +17,7 @@ The ``data`` dict shape is documented in :func:`render_report`.
 from __future__ import annotations
 
 import base64
+import html
 import logging
 from pathlib import Path
 from typing import Any
@@ -49,6 +50,21 @@ _PITCHING_HEAT_TIERS = [(6, 4), (4, 3), (3, 2), (2, 1)]  # 0-1: max=0
 # Key-player thresholds
 _KEY_PITCHER_MIN_OUTS = 18   # 6 IP
 _KEY_BATTER_MIN_PA = 5
+
+# Footer trust-block coverage-severity thresholds (E-235-07 / TN-7, COACH-1).
+# Severity is keyed off coverage % (N/M) ALONE: quiet >= 80%, flagged 50-79%,
+# loud < 50%. Independent of the degraded-confidence signal.
+_COVERAGE_QUIET_MIN = 0.80
+_COVERAGE_FLAGGED_MIN = 0.50
+
+# The generic, coach-facing degraded-confidence line (TN-7, COACH-1). Verbatim
+# per the baseball-coach; the SPECIFIC operator flags (season fallback /
+# name-only match) are NOT exposed to the coach -- only the fact of degraded
+# confidence. Operator flags live on the admin list (story 06).
+_DEGRADED_CONFIDENCE_LINE = (
+    "⚠️ Data accuracy may be limited. "
+    "Contact your operator to verify before the game."
+)
 
 
 def _build_jinja_env() -> Environment:
@@ -532,6 +548,61 @@ def _enrich_pitchers_workload(
             )
 
 
+def _build_trust_block(data: dict[str, Any]) -> dict[str, Any]:
+    """Build the footer trust-block context (E-235-07 / TN-7).
+
+    Consumes the inputs story 03 threaded into the render ``data`` dict (M, N,
+    K, spray availability, generated date, ``degraded_confidence``) and derives
+    the coach-facing footer fields:
+
+    - ``m`` / ``n``: games played to date (M) and games we have data for (N).
+    - ``k`` / ``has_pitch_detail``: pitch-detail game count and a K>0 flag
+      (when K==0 the template shows "No pitch-detail data", not "for 0 games"
+      -- COACH-2).
+    - ``coverage_pct`` / ``coverage_known``: N/M ratio, ``None`` when M is
+      unavailable (the footer then degrades to N + the freshness date with no
+      broken ratio -- AC-4 / Open Questions).
+    - ``severity``: ``quiet`` (>=80%), ``flagged`` (50-79%), ``loud`` (<50%),
+      keyed off coverage % ALONE (COACH-1). Defaults to ``quiet`` when coverage
+      is unknown (no alarming state without the data to justify it).
+    - ``degraded_confidence`` / ``degraded_line``: the generic warning, shown
+      in ALL severity states whenever the flag is set, INDEPENDENT of coverage
+      (COACH-1). Never names the specific operator flags.
+
+    Coverage severity and degraded confidence are deliberately INDEPENDENT
+    signals -- the template must render the degraded line in quiet/flagged/loud
+    alike.
+    """
+    m = data.get("completed_games")            # M -- games played to date
+    n = data.get("completed_games_with_data")  # N -- games we have data for
+    k = data.get("plays_game_count") or 0      # K -- pitch-detail game count
+
+    coverage_pct: float | None = None
+    severity = "quiet"
+    if m is not None and m > 0 and n is not None:
+        coverage_pct = n / m
+        if coverage_pct >= _COVERAGE_QUIET_MIN:
+            severity = "quiet"
+        elif coverage_pct >= _COVERAGE_FLAGGED_MIN:
+            severity = "flagged"
+        else:
+            severity = "loud"
+
+    degraded_confidence = bool(data.get("degraded_confidence"))
+    return {
+        "m": m,
+        "n": n,
+        "k": k,
+        "has_pitch_detail": k > 0,
+        "spray_available": bool(data.get("spray_available")),
+        "coverage_pct": coverage_pct,
+        "coverage_known": coverage_pct is not None,
+        "severity": severity,
+        "degraded_confidence": degraded_confidence,
+        "degraded_line": _DEGRADED_CONFIDENCE_LINE if degraded_confidence else None,
+    }
+
+
 def render_report(data: dict[str, Any]) -> str:
     """Render a standalone scouting report HTML string.
 
@@ -689,6 +760,57 @@ def render_report(data: dict[str, Any]) -> str:
         "starter_prediction": data.get("starter_prediction"),
         "enriched_prediction": data.get("enriched_prediction"),
         "show_predicted_starter": data.get("show_predicted_starter", True),
+        # Footer trust block (E-235-07 / TN-7).
+        "trust_block": _build_trust_block(data),
     }
 
     return template.render(**context)
+
+
+def render_no_games_page(team_name: str) -> str:
+    """Render the minimal no-completed-games page (E-235-03 gate (a), TN-7).
+
+    Produced when a generation finds zero completed games WITH data. It is a
+    self-contained, shareable HTML page carrying the coach-facing message --
+    NOT a 404 and NOT a silent empty "ready" report. The public serve route
+    serves it like any other report file (for ``reports.status = 'no_games'``).
+
+    Args:
+        team_name: The team's display name (interpolated into the message,
+            HTML-escaped).
+
+    Returns:
+        Complete HTML string ready to be written to a file.
+    """
+    safe_name = html.escape(team_name or "this team")
+    # Coach wording is authoritative (TN-7); keep it verbatim.
+    message = (
+        f"No completed games found for {safe_name} this season. "
+        "If this looks wrong, verify the team URL and try again."
+    )
+    return (
+        "<!DOCTYPE html>\n"
+        '<html lang="en">\n'
+        "<head>\n"
+        '<meta charset="utf-8">\n'
+        '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
+        f"<title>No completed games — {safe_name}</title>\n"
+        "<style>\n"
+        "  body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;\n"
+        "         background: #f8fafc; color: #1e293b; margin: 0; padding: 2rem; }\n"
+        "  .card { max-width: 32rem; margin: 4rem auto; background: #fff;\n"
+        "          border: 1px solid #e2e8f0; border-radius: 0.75rem;\n"
+        "          padding: 2rem; text-align: center;\n"
+        "          box-shadow: 0 1px 3px rgba(0,0,0,0.06); }\n"
+        "  h1 { font-size: 1.25rem; margin: 0 0 0.75rem; }\n"
+        "  p { font-size: 1rem; line-height: 1.5; margin: 0; color: #475569; }\n"
+        "</style>\n"
+        "</head>\n"
+        "<body>\n"
+        '<div class="card">\n'
+        f"<h1>No completed games — {safe_name}</h1>\n"
+        f"<p>{message}</p>\n"
+        "</div>\n"
+        "</body>\n"
+        "</html>\n"
+    )
