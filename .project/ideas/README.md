@@ -95,6 +95,7 @@ Review this list every 90 days, or when completing an epic. Ask:
 | [IDEA-074](IDEA-074-starlette-deprecation-migration.md) | Migrate Starlette Deprecations Before a Framework Upgrade Breaks Them | PROMOTED | 2026-06-07 -- promoted to E-232 |
 | [IDEA-075](IDEA-075-harness-output-reliability.md) | Harness Output-Reliability Fix (stop the garble/drop/silent-edit thrash) → E-231 | PROMOTED | 2026-08-29 |
 | [IDEA-076](IDEA-076-spray-value-regression-guard.md) | Spray-Value Regression Guard (E-234-05 left spray shape-only) | CANDIDATE | 2026-09-11 |
+| [IDEA-077](IDEA-077-reevaluate-season-fallback-trust-flag.md) | Re-evaluate season_fallback Trust Flag — DECIDED Option A (drop coach-visible line; keep column as telemetry); impl is a small follow-up | CANDIDATE | 2026-09-12 |
 
 ## Status Definitions
 

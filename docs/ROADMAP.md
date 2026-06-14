@@ -22,7 +22,7 @@ as epics land. **Convention**: this table is updated at two moments — at an ep
 | Slice | Title | Epic | Status |
 |-------|-------|------|--------|
 | A | Regression guards for the reports flow | E-234 | COMPLETED |
-| B | Report run records + trust signals + quality gates | E-235 | PLANNING |
+| B | Report run records + trust signals + quality gates | E-235 | COMPLETED |
 | C | Payload-first loaders + aggregate integrity | — | NOT STARTED |
 | D1 | Quarantine + navigation retarget + passkey fix | — | NOT STARTED |
 | D2 | Decouple imports, then remove unused surfaces | — | NOT STARTED |
@@ -81,7 +81,13 @@ more reliable, or easier to deliver?*
   incomplete team metadata (`src/gamechanger/loaders/__init__.py:72`) — a transient
   public-profile failure can silently scope a report to the wrong season. Team identity
   falls back to name+season matching (`src/db/teams.py`) — can attach data to the wrong
-  common-name team.
+  common-name team. (Note: the *current-year fallback itself* is usually benign in
+  report-only mode — year-only scoping is the expected window for a single-season team;
+  it is the E-235 trust-flag's coach-visible *interpretation* of that fallback as
+  "degraded" that was under re-scope, per §4 and IDEA-077 — now **DECIDED (baseball-coach,
+  2026-06-14, Option A): the coach-visible `season_fallback` degraded line is dropped**;
+  the column stays as operator-only telemetry. The genuine risk here is the
+  transient-failure path scoping to the wrong year, and the name-match identity fallback.)
 - **Stored season aggregates** (`player_season_batting/_pitching`) are computed at load
   time and can go stale within a generation run (player merges happen after aggregation
   in some paths) — and silently diverge after any post-load mutation.
@@ -141,7 +147,16 @@ the reports admin surface. D2's decoupling story (below) exists for exactly this
 **Shared infrastructure**
 - `GameChangerClient`, token manager, credential parser, HTTP session/rate limiting
 - `ensure_team_row()`, `ensure_player_row()`, `derive_season_id_for_team()`,
-  `ensure_season_row()`
+  `ensure_season_row()` — **but only the year-only/current-season slice of season
+  derivation is protected.** A report is one team's *current* body of work; a `season_id`
+  in report-only mode is just a within-report game filter ("which of this team's games
+  belong in this one shared report"). The multi-season *machinery* layered on top —
+  cross-season partitioning, season selection/comparison, longitudinal rollups, and the
+  E-235 `season_fallback` *trust-flag interpretation* (treating year-only scoping as
+  "degraded") — is NOT protected and is a removal/re-scope candidate (§4, §7, IDEA-077).
+  Year-only scoping is the *correct, complete* window for the common single-season travel
+  team, not a degraded condition. **(DECIDED 2026-06-14, baseball-coach: drop the
+  coach-visible `season_fallback` degraded line entirely — Option A; see §4.)**
 - `search_teams_by_name()` (gc_uuid bridge), `parse_team_url()`
 - `cascade_delete_team()` / `cleanup_orphan_teams()` + the admin delete-confirmation
   mirror query (cleanup-detection mirror invariant)
@@ -187,6 +202,8 @@ after regression guards are green. Never drop tables in the same epic that remov
 | `bb data dedup`, `repair-opponents`, `bb data sync/crawl/load` | **QUARANTINE** | Member/opponent-flow maintenance commands. |
 | `bb data backfill-appearance-order` | **QUARANTINE, deletion-guarded** | It is a report-quality recovery path: `appearance_order` feeds pitcher GS aggregation (`scouting_loader.py:739`) and reports read `psp.gs`. Do not delete until production GS provenance is known clean or recomputed from fresh runs. |
 | `gc_athlete_profile_id`, E-104, cross-team/multi-season identity work | **DE-SCOPE** | Explicit non-goal now (§7). Close the idea/epic; leave the column inert. |
+| Season-scoping / multi-season machinery (cross-season partitioning, season selection/comparison, longitudinal rollups) layered above year-only derivation | **DE-SCOPE → re-scope candidate** | The cross-season/rollup non-goals (§7) trace down to this machinery — it was load-bearing only for those now-dropped features. Report-only needs a season concept only as a *within-report game filter* (year-only/current scope). Name it as a removal candidate in the D-slice sweep; preserve only the year-only derivation the reports flow actually reads. See §3 protected-core note and IDEA-077. |
+| E-235 `season_fallback` *trust-flag interpretation* (year-only scoping treated as coach-visible "degraded confidence") | **DECIDED: Option A (baseball-coach, 2026-06-14)** | **DROP the coach-visible `season_fallback` contribution to the footer degraded-confidence line; KEEP the `report_generation_runs.season_fallback` column as operator-only run-record telemetry** (still shown on `/admin/reports` — it just shouldn't drive anything coach-visible). Coach verdict: a single GC `public_id` does NOT blend multiple programs/levels within a calendar year (one GC team entity = one continuous program; HS-spring vs. summer-legion are separate teams with separate public_ids; travel orgs register each squad separately), so year-only scoping is essentially always correct and the `no program_type` trigger has *zero* correlation with real data-quality problems — it fires on the cleanest data (the 48/48 travel report) and would NOT fire on genuinely dirty data. The coach-visible "⚠️ Data accuracy may be limited" line is therefore harmful noise (erodes pre-game trust, generates unresolvable operator pings, costs the coach's pre-game cognitive budget). Option B (a real blend-detector) was explicitly REJECTED: "solves a problem that does not exist in the field — engineering effort for zero coaching value." Code implication (for whoever implements later): `degraded_confidence` drops the `season_fallback` term and keeps ONLY `identity_match_method == 'name_only'`; coverage severity stays its own separate N/M signal. Small follow-up — fold into Epic D or a small dedicated epic; tracked in IDEA-077. |
 | Tables `opponent_links`, `scouting_runs`, `crawl_jobs`, `user_team_access`, `team_opponents` | **QUARANTINE** | Inert tables are cheap; dropping requires cascade-logic rewrites. Revisit in the removal epic. |
 
 **Estimated eventual reduction**: 15-18k LOC (~25-30%), plus ~5k LOC of tests, plus the
@@ -236,6 +253,17 @@ degraded or empty outcomes are explicit, never silent.
      explicit "no games yet" outcome, not a ready-but-empty report.
    - **Season-scope gate**: flag (in the run record and report footer) any report whose
      season was derived via the current-year fallback rather than team metadata.
+     **DECIDED post-E-235 — Option A (baseball-coach, 2026-06-14; IDEA-077)**: in
+     report-only mode year-only scoping is the correct, complete window, so this gate
+     over-fires on the whole travel/USSSA class (no `program_type`) and was decided to be
+     harmful noise on the coach-visible line. **Drop the coach-visible `season_fallback`
+     degraded-confidence contribution; keep the `report_generation_runs.season_fallback`
+     column as operator-only telemetry.** Coach confirmed a single GC `public_id` does not
+     blend programs within a calendar year, so the flag is uncorrelated with real
+     data-quality problems (a blend-detector, Option B, was rejected as zero coaching
+     value). Code implication: `degraded_confidence` keeps ONLY
+     `identity_match_method == 'name_only'`; coverage severity stays its own separate N/M
+     signal. Small follow-up — tracked in §4 and IDEA-077.
    - **Identity gate**: flag any report whose team row was matched by name+season only
      (no public_id/gc_uuid anchor).
 5. **Generation concurrency lock** (new in rev 2): one generation at a time, or
@@ -290,7 +318,13 @@ audit AND decoupling: split the reports admin routes out of `src/api/routes/admi
 startup (`admin.py:83 → trigger.py:35` chain, verified). THEN: delete dashboard
 routes/templates/tests; delete member-sync orchestration + member-only crawlers/loaders
 + their CLI commands + `teams.yaml`; trim admin to login + reports + the delete cascade.
-Tables stay (inert) unless trivially droppable. `backfill-appearance-order` survives
+**Also in scope for D2: the cross-season / multi-season scoping machinery** (cross-season
+`season_id` partitioning, season selection/comparison, longitudinal rollup code — §4, §7),
+keeping only the year-only/current-season derivation the reports flow reads
+(`derive_season_id_for_team()`'s year-only path). This is the season-scoping half of the
+"trace the non-goal down to the machinery" item; scope the exact removable surface in the
+D2 planning session (it is not yet inventoried at the file/function level). Tables stay
+(inert) unless trivially droppable. `backfill-appearance-order` survives
 until GS provenance is clean (§4). Other verified shared seams to guard:
 `src/api/helpers.py` (report filters), `src/charts/spray.py` (serves both surfaces),
 report-delete cascade's reuse of admin team-deletion helpers.
@@ -453,9 +487,20 @@ with the §7 non-goal on tracked-opponent surfaces).
 ## 7. Explicit Non-Goals (so future sessions don't rebuild them)
 
 - **Cross-team player identity** (athlete_profile_id population, player tracking across
-  programs). Per-team, per-season identity is sufficient for scouting reports.
-- **Multi-season rollups / multi-year longitudinal analytics.** Each report is one team,
-  one season, generated fresh.
+  programs, cross-program blending of one player's record). Per-team identity is
+  sufficient for scouting reports.
+- **Cross-season / multi-season / longitudinal anything.** No multi-season rollups, no
+  multi-year analytics, no season-over-season comparison, no longitudinal player or team
+  tracking, no recency-tapering across seasons. Each report is one team's *current* body
+  of work, generated fresh. **This non-goal applies all the way down to the machinery,
+  not just the user-facing feature**: cross-season `season_id` partitioning, season
+  selection/comparison logic, and multi-season rollup code are removal candidates (§4),
+  because `season_id` was the load-bearing partition key for exactly these now-dropped
+  capabilities. Report-only needs season only as a within-report game filter — year-only
+  / current scope is sufficient and is the *expected, complete* window for a single-season
+  team, never a "degraded" one. (Surprised this wasn't caught at the 2026-06-12 reframe:
+  the non-goals were declared at the feature level but never traced down to the
+  season-scoping machinery or the E-235 `season_fallback` trust flag — IDEA-077.)
 - **Member-team season-management product** (dashboard browsing, roster/season stat
   pages, schedule UI). The schedule *data* need is met by the authenticated schedule
   endpoint (public games endpoint as fallback).
