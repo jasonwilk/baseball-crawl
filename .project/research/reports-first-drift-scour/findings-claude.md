@@ -70,3 +70,21 @@ This set feeds ROADMAP §4/§7 + IDEA files + Epic D2 scope. **Default dispositi
 2. **L1 parity principle** — confirm it's a genuine un-named remnant vs. already-subsumed by §4:212's general direction.
 3. **Cluster D LIVE/INERT relabels** — validate the reports-path write/delete couplings.
 4. **Citation error** — confirm the cross-season-merge guard location.
+
+---
+
+## Reconciliation with Codex 5.5-xhigh pass (2026-06-15)
+
+Codex run by operator; reconciled by main session (claims verified against code).
+
+**Overlap (both passes → high confidence):** season_fallback machinery (Cluster C / IDEA-077), dashboard+member-sync boot coupling & /dashboard redirects (Clusters A/E → D1/D2; Codex added the specific auth.py redirect sites 244/455/704/886 + main.py:133), gc_athlete_profile_id (F → §4:205), teams.yaml member-sync (D → §4:201), VISION.md drift (G → curate-the-vision), context-layer parity/longitudinal rules (my L1/L2 = Codex already-tracked → D1; labeling differed, both route to D1).
+
+**Codex-only — NEW, verified real (my scour MISSED):**
+- **coaching_assignments (LIVE) — the headline.** Dead multi-user-permissions table (migrations/001:580), `DELETE FROM coaching_assignments` at generator.py:2202 inside the kept reports-admin delete cascade (`_delete_team_scoped_data`). **NOT in §4:208's dead-table inventory** (verified: §4:208 lists opponent_links/scouting_runs/crawl_jobs/user_team_access/team_opponents only). Violates §7 "multi-user team-scoped permissions" non-goal. Disposition: add to §4:208 inventory for D2's cascade sweep.
+- **coaching docs staleness (INERT).** docs/coaching/README.md + docs/coaching/scouting-reports.md still sell a dashboard-first / longitudinal product ("The dashboard is the main tool"). Roadmap parks VISION.md for curation but does NOT call out docs/coaching/. Disposition: new IDEA or bounded docs cleanup (not an epic).
+
+**Mine-only:** crawl_jobs (I1) — COLLAPSES to already-tracked (§4:208 lists it; my caveat confirmed). Cluster D LIVE/INERT relabels + the cli/data.py:904 citation correction stand (Codex didn't contradict).
+
+**Cross-cutting action (the real one):** §4:208's dead-table inventory should be reconciled against the actual `_delete_team_scoped_data` DELETE list (generator.py:2197-2210) — the cascade deletes 9 tables; §4:208 names 5. coaching_assignments is the one currently missed; audit for others when D2's cascade-rewrite story is written.
+
+**Net new actionable items from the full reconciliation:** (1) coaching_assignments → §4:208 / D2; (2) coaching-docs staleness → IDEA; (3) §4:208-vs-cascade inventory audit → D2 note. No new epic.
