@@ -160,6 +160,9 @@ class TestNoCompletedGamesExplicitOutcome:
         assert result.success is False, (
             "no-games is an explicit terminal outcome, not a successful report"
         )
+        # E-236-05 AC-5: the new outcome contract -- success stays False, the
+        # finer-grained signal is "no_games".
+        assert result.outcome == "no_games"
         assert result.slug is not None
         assert result.error_message is not None
         assert "No completed games found" in result.error_message
@@ -176,7 +179,9 @@ class TestNoCompletedGamesExplicitOutcome:
         # A shareable explanatory page was written to disk (not a 404).
         assert row[1] == f"reports/{result.slug}.html"
         page = (tmp_path / "data" / row[1]).read_text(encoding="utf-8")
-        assert "No completed games found" in page
+        # E-236-05 AC-2: M=0 (games=[], games_crawled=0) -> "no games on record".
+        assert "No games on record" in page
+        assert "check back later" not in page.lower()  # AC-3 negative
 
         # The full report render stage did NOT run (minimal page written instead).
         mock_render.assert_not_called()
@@ -224,6 +229,7 @@ class TestNoCompletedGamesExplicitOutcome:
             result = generate_report("abc123")
 
         assert result.success is False
+        assert result.outcome == "no_games"  # E-236-05 AC-5
         verify_conn = _fresh_conn_factory(str(tmp_path / "test.db"))()
         verify_conn.row_factory = sqlite3.Row
         run = verify_conn.execute(
@@ -237,6 +243,19 @@ class TestNoCompletedGamesExplicitOutcome:
         assert run["completed_games"] == 2
         assert run["completed_games_with_data"] == 0
         assert run["overall_status"] == "completed"
+
+        # E-236-05 AC-2: the M>0/N=0 page interpolates M (games played = 2),
+        # NOT N (0), and tells the coach box score data is unavailable.
+        page_conn = _fresh_conn_factory(str(tmp_path / "test.db"))()
+        prow = page_conn.execute(
+            "SELECT report_path FROM reports WHERE slug = ?", (result.slug,),
+        ).fetchone()
+        page_conn.close()
+        page = (tmp_path / "data" / prow[0]).read_text(encoding="utf-8")
+        assert "has played 2 games this season" in page
+        assert "no box score data is available in GameChanger" in page
+        assert "has played 0 games" not in page  # must not interpolate N
+        assert "check back later" not in page.lower()  # AC-3 negative
 
     @patch("src.reports.generator.cleanup_orphan_teams")
     @patch("src.http.session.create_session")

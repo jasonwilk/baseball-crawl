@@ -4,7 +4,7 @@
 [E-236: Report Self-Reporting Integrity Hardening](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the coach-visible "Data accuracy may be limited" line will fire ONLY on name-only identity matches, not on `season_fallback`. A clean modal team (program_type NULL + good season_year, which triggers `season_fallback`) will no longer show a false degraded-confidence warning. `report_generation_runs.season_fallback` remains as operator-only telemetry. This closes finding #4.

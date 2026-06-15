@@ -27,7 +27,7 @@ from contextlib import closing
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from src.api.db import (
     build_pitcher_profiles,
@@ -52,6 +52,11 @@ from src.gamechanger.types import TeamRef
 from src.gamechanger.url_parser import parse_team_url
 from src.reconciliation.engine import reconcile_game
 from src.reports.renderer import render_no_games_page, render_report
+from src.reports.run_status import (
+    STATUS_COMPLETED,
+    STATUS_FAILED,
+    classify_stage_status,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -73,19 +78,43 @@ class GenerationResult:
     title: str | None = None
     url: str | None = None
     error_message: str | None = None
+    # Additive finer-grained outcome (E-236 TN-5). ``success`` is UNCHANGED
+    # (no_games stays success=False); ``outcome`` is purely additive. Defined
+    # here with default "failed" so the all-blocked failed return (story 03)
+    # inherits the default without an inter-story ordering edge -- story 05 SETS
+    # "ready"/"no_games". This story sets NO values and changes NO behavior.
+    outcome: Literal["ready", "no_games", "failed"] = "failed"
+    # M / N counts carried out for the CLI no_games branch (Phase 4b MEDIUM):
+    # so ``bb report generate`` can print an honest operator message
+    # distinguishing M=0 ("no games on record") from M>0/N=0 ("played M games,
+    # no box score data"). Set only on the no_games return; None elsewhere.
+    completed_games: int | None = None
+    completed_games_with_data: int | None = None
 
 
 @dataclass
 class _SprayOutcome:
     """Outcome of the spray-chart crawl/load stage.
 
-    ``status`` is a per-stage status string (``completed``/``failed``);
+    ``status`` is the stage's OWN explicit failure signal (``completed`` on a
+    healthy crawl/load, ``failed`` on a total crawl failure or an unexpected
+    exception). ``_spray_stage`` maps ``status == "failed"`` to a failed run
+    record BEFORE the classifier (E-236 TN-1 precedence).
+
     ``games_crawled`` is the distinct-game count the run record records as
-    ``spray_games``.
+    ``spray_games`` (API fetch successes -- a null spray_chart_data response
+    still increments it). ``errors`` is the crawl + load error count that drives
+    the ERROR-driven ``spray_status`` (E-236-04 / TN-7); spray is NOT
+    coverage-driven, so a null-chart coverage shortfall (zero errors) stays
+    "completed". ``spray_games_with_data`` is the INFORMATIONAL coverage count
+    (distinct games with spray ROWS actually loaded for this perspective) and
+    NEVER drives ``spray_status`` (DE F1 / TN-2).
     """
 
     status: str
     games_crawled: int = 0
+    errors: int = 0
+    spray_games_with_data: int = 0
 
 
 @dataclass
@@ -106,6 +135,19 @@ class _ReconCounts:
     # so this flag is how _plays_stage distinguishes failure from empty and
     # records plays_status="failed" instead of "completed" (E-235 Phase 4b HIGH-2).
     failed: bool = False
+    # ERROR-driven plays-stage classifier inputs (E-236-02 / TN-7). The plays
+    # helper keeps its pinned list[str] return, so these out-parameter counts are
+    # how _plays_stage derives an honest plays_status without a coverage-driven
+    # signal. plays_fetched_ok = games whose plays fetch did NOT raise (includes
+    # idempotency-skipped games); plays_fetch_failures = per-game fetch failures
+    # (the swallowed except at the crawl loop); plays_load_errors = folded
+    # PlaysLoader load_result.errors. Classifier inputs at _plays_stage:
+    # loaded = plays_fetched_ok; errors = plays_fetch_failures + plays_load_errors;
+    # expected = plays_fetched_ok + plays_fetch_failures (games ATTEMPTED, NOT the
+    # informational plays_games_expected / plays_games_covered coverage numbers).
+    plays_fetched_ok: int = 0
+    plays_fetch_failures: int = 0
+    plays_load_errors: int = 0
 
 
 def _coerce_int(value: object) -> int | None:
@@ -228,7 +270,8 @@ _RUN_RECORD_COLUMNS = frozenset({
     "crawl_status", "load_status", "gc_uuid_status", "spray_status",
     "plays_status", "reconciliation_status", "enrichment_status",
     "completed_games", "completed_games_with_data", "spray_games",
-    "plays_games_expected", "plays_games_covered",
+    "spray_games_with_data", "boxscores_fetched", "load_errors",
+    "plays_games_expected", "plays_games_covered", "plays_errors",
     "discrepancies_found", "discrepancies_corrected",
     "season_id_used", "season_fallback", "identity_match_method",
     "error_stage", "error_message",
@@ -697,6 +740,7 @@ def _crawl_and_load_spray(
     season_id: str,
     gc_uuid: str | None = None,
     games_data: list | None = None,
+    team_id: int | None = None,
 ) -> _SprayOutcome:
     """Crawl and load spray chart data in-memory (E-220-06).
 
@@ -709,10 +753,16 @@ def _crawl_and_load_spray(
         season_id: Season slug (e.g., ``"2026-spring-hs"``).
         gc_uuid: When provided, passed to the crawler to bypass DB lookup.
         games_data: In-memory games list from the scouting crawl result.
+        team_id: This report's team DB id (E-236-04 / AC-6). When provided, the
+            INFORMATIONAL ``spray_games_with_data`` coverage count is computed
+            via a perspective-filtered ``COUNT(DISTINCT game_id)`` so
+            cross-perspective spray rows are not miscounted.
 
     Returns:
-        A :class:`_SprayOutcome` recording the stage status and the distinct
-        games crawled (for the run record's ``spray_games``).
+        A :class:`_SprayOutcome` recording the stage status, the distinct games
+        crawled (run-record ``spray_games``), the crawl+load error count
+        (drives the ERROR-driven ``spray_status``), and the informational
+        ``spray_games_with_data`` coverage count.
     """
     try:
         with closing(get_connection()) as conn:
@@ -724,15 +774,47 @@ def _crawl_and_load_spray(
 
         if spray_result.errors and spray_result.games_crawled == 0:
             logger.warning("Spray crawl failed for public_id=%s; no data.", public_id)
-            return _SprayOutcome(status="failed", games_crawled=0)
+            return _SprayOutcome(
+                status=STATUS_FAILED, games_crawled=0, errors=spray_result.errors,
+            )
 
         with closing(get_connection()) as conn:
             spray_loader = ScoutingSprayChartLoader(conn)
-            spray_loader.load_from_data(
+            load_result = spray_loader.load_from_data(
                 spray_result.spray_data, public_id=public_id,
             )
+
+        # INFORMATIONAL coverage (TN-2 / AC-1): distinct games with spray ROWS
+        # actually present for THIS report's perspective. The predicate MUST
+        # mirror _query_spray_charts (the query that builds the rendered
+        # offensive spray line) -- same team_id + season_id + perspective +
+        # chart_type='offensive' -- so the (with_data / spray_games) coverage
+        # figure is coherent with what the report actually renders. Without the
+        # season_id + chart_type='offensive' filters the count inflated by
+        # counting cross-season and defensive-chart rows the spray line never
+        # shows (Phase 4b MEDIUM). NEVER drives spray_status (DE F1) -- a
+        # null-chart shortfall is the normal scorekeeper-didn't-chart case.
+        # NOTE: this numerator is DB-state-scoped while the denominator
+        # (spray_games = games_crawled) is this-run; they align under the
+        # fresh-team-per-generation flow.
+        spray_games_with_data = 0
+        if team_id is not None:
+            with closing(get_connection()) as conn:
+                row = conn.execute(
+                    "SELECT COUNT(DISTINCT game_id) FROM spray_charts "
+                    "WHERE team_id = ? AND season_id = ? "
+                    "AND chart_type = 'offensive' AND perspective_team_id = ?",
+                    (team_id, season_id, team_id),
+                ).fetchone()
+                spray_games_with_data = row[0] if row else 0
+
         return _SprayOutcome(
-            status="completed", games_crawled=spray_result.games_crawled,
+            status=STATUS_COMPLETED,
+            games_crawled=spray_result.games_crawled,
+            # ERROR-driven signal (AC-2): crawl errors + load errors. A healthy
+            # stage with null charts has errors==0 -> stays "completed".
+            errors=spray_result.errors + load_result.errors,
+            spray_games_with_data=spray_games_with_data,
         )
     except CredentialExpiredError:
         raise
@@ -743,7 +825,7 @@ def _crawl_and_load_spray(
             public_id,
             exc_info=True,
         )
-        return _SprayOutcome(status="failed", games_crawled=0)
+        return _SprayOutcome(status=STATUS_FAILED, games_crawled=0, errors=1)
 
 
 def _crawl_and_load_plays(
@@ -793,6 +875,10 @@ def _crawl_and_load_plays(
             if existing is not None:
                 logger.debug("Plays already loaded for game %s perspective %d; skipping.", game_id, team_id)
                 plays_data[game_id] = {}  # mark as processed for reconcile
+                # Idempotency skip is a non-error outcome -- the game's plays
+                # fetch did NOT raise, so it counts as fetched_ok (TN-7).
+                if recon_out is not None:
+                    recon_out.plays_fetched_ok += 1
                 continue
 
             try:
@@ -802,9 +888,16 @@ def _crawl_and_load_plays(
                 )
                 plays_data[game_id] = raw if isinstance(raw, dict) else {}
                 logger.debug("Fetched plays for game %s.", game_id)
+                if recon_out is not None:
+                    recon_out.plays_fetched_ok += 1
             except CredentialExpiredError:
                 raise
             except Exception:  # noqa: BLE001
+                # Per-game fetch failure (E-236-02 / TN-7): swallowed to keep the
+                # stage non-fatal, but threaded into recon_out so _plays_stage can
+                # classify the stage as "partial"/"failed" instead of "completed".
+                if recon_out is not None:
+                    recon_out.plays_fetch_failures += 1
                 logger.warning(
                     "Failed to fetch plays for game %s; skipping.",
                     game_id,
@@ -842,6 +935,11 @@ def _crawl_and_load_plays(
             "Plays load for team_id=%d: loaded=%d skipped=%d errors=%d",
             team_id, load_result.loaded, load_result.skipped, load_result.errors,
         )
+        # Fold PlaysLoader errors into the plays-stage error count (E-236-02 /
+        # TN-7). load_result.errors is non-fatal here (the loader logged + kept
+        # going), but it makes the stage "partial", not "completed".
+        if recon_out is not None:
+            recon_out.plays_load_errors += load_result.errors
 
         # Reconcile: correct pitcher attribution for each game.  E-220 round
         # 6 cluster 4: pass perspective_team_id=team_id so reconcile targets
@@ -1455,12 +1553,30 @@ class _ReportGeneration:
 
             # M = distinct completed games on the fetched schedule (TN-2 SE-F4).
             self.completed_games = _count_completed_games(self.crawl_result.games)
+            # boxscores_fetched (TN-2) = boxscores successfully fetched. For the
+            # boxscore crawl, games_crawled < M only happens via a fetch error
+            # (empty-but-fetched bodies still increment games_crawled), so a
+            # coverage shortfall here IS an honest error signal (TN-1/TN-7) --
+            # unlike plays/spray, where shortfall is routine.
+            boxscores_fetched = self.crawl_result.games_crawled
 
-            # Two-tier fail contract (tier 1): crawl errors AND zero games = fatal.
-            if self.crawl_result.errors > 0 and self.crawl_result.games_crawled == 0:
+            # Two-tier fail contract (tier 1) -- repaired per SQ1 / TN-6 (FINAL,
+            # Jason signed off 2026-06-14). An ALL-BLOCKED crawl (M>0 completed
+            # games on the schedule but ZERO boxscores fetched) means every
+            # fetch was blocked (403 / auth-expiry / transient mass-failure),
+            # NOT that no data exists -- so fail HARD (no shareable page) instead
+            # of slipping silently to a misleading no_games outcome. The
+            # count-based ``completed_games > 0`` disjunct is the SQ1 repair; the
+            # ``errors > 0`` disjunct preserves the pre-existing total-failure
+            # cases (schedule / roster fetch failure -> M==0 but errors==1, which
+            # must stay fatal rather than degrade to no_games).
+            if boxscores_fetched == 0 and (
+                self.crawl_result.errors > 0 or self.completed_games > 0
+            ):
                 _update_run_record(
-                    self.report_id, crawl_status="failed",
+                    self.report_id, crawl_status=STATUS_FAILED,
                     completed_games=self.completed_games,
+                    boxscores_fetched=boxscores_fetched,
                 )
                 _finalize_run_record(
                     self.report_id, "failed", error_stage="crawl",
@@ -1468,12 +1584,22 @@ class _ReportGeneration:
                 )
                 _fail_report(self.report_id, "Scouting crawl failed — no data retrieved.")
                 return GenerationResult(
-                    success=False, slug=self.slug, error_message="Scouting crawl failed."
+                    success=False, slug=self.slug,
+                    error_message="Scouting crawl failed.", outcome="failed",
                 )
 
+            # Honest crawl status (AC-1/2/4 / TN-7): derive completed vs partial
+            # from boxscores_fetched vs M via the shared classifier. errors=0
+            # because the coverage shortfall IS the boxscore-crawl error signal
+            # (passing crawl_result.errors would double-count); the all-blocked
+            # failed case is already intercepted by the fatal gate above.
+            crawl_status = classify_stage_status(
+                loaded=boxscores_fetched, errors=0, expected=self.completed_games,
+            )
             _update_run_record(
-                self.report_id, crawl_status="completed",
+                self.report_id, crawl_status=crawl_status,
                 completed_games=self.completed_games,
+                boxscores_fetched=boxscores_fetched,
             )
 
             # Derive the canonical DB season_id from team metadata, capturing
@@ -1504,10 +1630,21 @@ class _ReportGeneration:
                 loader = ScoutingLoader(conn, created_team_ids=self.created_team_ids)
                 self.load_result = loader.load_team(self.crawl_result)
 
+            # load_errors is the RECORD-level error tally (LoadResult.errors;
+            # +1 per failed game upsert OR per failed player stat row) written
+            # for operator drill-down (E-236-09 AC-1 / TN-2).
+            load_errors = self.load_result.errors
+
             # Two-tier fail contract (tier 2): load guard fires only on
-            # errors > 0 AND loaded == 0.
+            # errors > 0 AND loaded == 0. This is the load stage's OWN explicit
+            # total-failure signal -> map to "failed" BEFORE the classifier
+            # (TN-1 precedence; mirrors stories 02/03). Covers the keyless /
+            # unreadable-boxscore degenerate case (DE sub-case B, defensive).
             if self.load_result.loaded == 0 and self.load_result.errors > 0:
-                _update_run_record(self.report_id, load_status="failed")
+                _update_run_record(
+                    self.report_id, load_status=STATUS_FAILED,
+                    load_errors=load_errors,
+                )
                 _finalize_run_record(
                     self.report_id, "failed", error_stage="load",
                     error_message="Scouting load failed — no data loaded.",
@@ -1517,7 +1654,28 @@ class _ReportGeneration:
                     success=False, slug=self.slug, error_message="Scouting load failed."
                 )
 
-            _update_run_record(self.report_id, load_status="completed")
+            # ERROR-driven status via the shared classifier (AC-2 / TN-1
+            # guardrail + DE CAUTION 1). The total-failure case is already
+            # handled above (precedence), so here some rows loaded (or nothing
+            # was attempted): classify(1, load_errors, 1) -> errors == 0 ->
+            # completed; errors > 0 (loaded == expected == 1) -> partial. The
+            # realistic scored-but-empty boxscore (DE sub-case A: team keys
+            # present, stat groups empty) takes the error-free branch ->
+            # errors == 0 -> completed, so it is NOT falsely marked partial
+            # (AC-4 false-alarm guard, same class as plays/spray).
+            #
+            # DE CAUTION 1: the loaded=1/expected=1 below is DEGENERATE
+            # single-unit coverage (the load is treated as ONE unit of work) --
+            # it is NOT LoadResult.loaded, which is a RECORD count (+1 per game
+            # AND +1 per player row, dimensionally incoherent as a coverage
+            # numerator: a scored-but-empty game has loaded=1, a normal game
+            # 1+N). Do NOT "fix" these literals to LoadResult.loaded.
+            load_status = classify_stage_status(
+                loaded=1, errors=load_errors, expected=1,
+            )
+            _update_run_record(
+                self.report_id, load_status=load_status, load_errors=load_errors,
+            )
 
             # Re-read team_info AFTER crawl/load so name is populated from schedule.
             with closing(get_connection()) as conn:
@@ -1611,7 +1769,13 @@ class _ReportGeneration:
         _REPORTS_DIR.mkdir(parents=True, exist_ok=True)
         report_path = f"reports/{self.slug}.html"
         file_path = _REPO_ROOT / "data" / report_path
-        file_path.write_text(render_no_games_page(team_name), encoding="utf-8")
+        # M = games played to date (already counted at the crawl stage); N = 0
+        # here by construction (this branch only runs when game_count == 0). The
+        # renderer branches the copy on M vs N (TN-5).
+        file_path.write_text(
+            render_no_games_page(team_name, self.completed_games, 0),
+            encoding="utf-8",
+        )
         with closing(get_connection()) as conn:
             conn.execute(
                 "UPDATE reports SET status = 'no_games', report_path = ? WHERE id = ?",
@@ -1640,7 +1804,11 @@ class _ReportGeneration:
         url = f"{_get_base_url()}/reports/{self.slug}"
         return GenerationResult(
             success=False, slug=self.slug, title=self.title, url=url,
-            error_message=msg,
+            error_message=msg, outcome="no_games",
+            # M / N for the CLI to print an honest M-vs-N message (Phase 4b
+            # MEDIUM). N is 0 here by construction (this gate fires on N==0).
+            completed_games=self.completed_games,
+            completed_games_with_data=0,
         )
 
     def _resolve_gc_uuid_stage(self) -> None:
@@ -1680,17 +1848,45 @@ class _ReportGeneration:
         )
 
     def _spray_stage(self) -> None:
-        """Step 4c: spray crawl/load (non-fatal). Records spray status + games."""
+        """Step 4c: spray crawl/load (non-fatal). Records spray status + games.
+
+        ``spray_status`` is ERROR-driven, NOT coverage-driven (E-236-04 / TN-7):
+        spray is scorekeeper-dependent, so a coverage shortfall
+        (``spray_games_with_data < spray_games``) is the NORMAL multi-game case
+        and must NEVER register as "partial". Status flips off "completed" only
+        on a real crawl/load error.
+        """
         spray_outcome = _crawl_and_load_spray(
             self.client, self.public_id, self.season_id,
             gc_uuid=self.resolved_gc_uuid,
             games_data=self.crawl_result.games,
+            team_id=self.team_id,
         )
         self.spray_games = _coerce_int(getattr(spray_outcome, "games_crawled", None))
+        spray_games_with_data = _coerce_int(
+            getattr(spray_outcome, "spray_games_with_data", None)
+        )
+        spray_errors = _coerce_int(getattr(spray_outcome, "errors", None)) or 0
+        attempted = self.spray_games or 0
+
+        # TN-1 precedence: map the stage's OWN explicit failure signal to
+        # "failed" BEFORE the classifier, so the expected==0 -> completed branch
+        # cannot mask a real total crawl failure (AC-4, mirrors story 02 AC-4).
+        if getattr(spray_outcome, "status", None) == STATUS_FAILED:
+            spray_status = STATUS_FAILED
+        else:
+            # ERROR-driven (AC-2/AC-3): loaded == expected == games attempted, so
+            # only a non-zero error count flips status off "completed". The
+            # informational coverage count is deliberately NOT an input here.
+            spray_status = classify_stage_status(
+                loaded=attempted, errors=spray_errors, expected=attempted,
+            )
+
         _update_run_record(
             self.report_id,
-            spray_status=_coerce_status(getattr(spray_outcome, "status", None)),
+            spray_status=spray_status,
             spray_games=self.spray_games,
+            spray_games_with_data=spray_games_with_data,
         )
 
     def _plays_stage(self) -> None:
@@ -1709,14 +1905,20 @@ class _ReportGeneration:
                 game_ids=sorted(self.crawl_result.boxscores.keys()),
                 recon_out=recon,
             )
+            # Sum the ERROR-driven count the run record records as plays_errors
+            # (TN-2): per-game fetch failures + folded PlaysLoader load errors.
+            plays_errors = recon.plays_fetch_failures + recon.plays_load_errors
             if recon.failed:
-                # _crawl_and_load_plays swallowed a real failure and returned []
-                # (HIGH-2). Record the failure honestly -- NOT "completed" with
+                # _crawl_and_load_plays swallowed a real (total) failure and
+                # returned [] (HIGH-2). Per TN-1 precedence, a stage carrying its
+                # OWN explicit failure signal maps to "failed" BEFORE the
+                # classifier. Record the failure honestly -- NOT "completed" with
                 # zero counts -- while keeping the stage non-fatal (no raise).
                 _update_run_record(
                     self.report_id,
-                    plays_status="failed",
+                    plays_status=STATUS_FAILED,
                     plays_games_expected=plays_games_expected,
+                    plays_errors=plays_errors,
                     reconciliation_status="failed",
                 )
                 logger.warning(
@@ -1725,17 +1927,29 @@ class _ReportGeneration:
                     self.public_id,
                 )
             else:
+                # ERROR-driven classifier inputs (AC-2 / TN-7). loaded = games
+                # whose fetch did NOT raise; errors = fetch failures + load
+                # errors; expected = games ATTEMPTED (fetched_ok + fetch
+                # failures). K (plays_games_covered, games with plays rows) is a
+                # SEPARATE informational coverage number computed later in
+                # _query_render_save -- it is NEVER the classifier's loaded.
+                plays_status = classify_stage_status(
+                    loaded=recon.plays_fetched_ok,
+                    errors=plays_errors,
+                    expected=recon.plays_fetched_ok + recon.plays_fetch_failures,
+                )
                 _update_run_record(
                     self.report_id,
-                    plays_status="completed",
+                    plays_status=plays_status,
                     plays_games_expected=plays_games_expected,
+                    plays_errors=plays_errors,
                     reconciliation_status="completed",
                     discrepancies_found=recon.discrepancies_found,
                     discrepancies_corrected=recon.discrepancies_corrected,
                 )
         except CredentialExpiredError:
             _update_run_record(
-                self.report_id, plays_status="failed",
+                self.report_id, plays_status=STATUS_FAILED,
                 plays_games_expected=plays_games_expected,
             )
             logger.warning(
@@ -1745,7 +1959,7 @@ class _ReportGeneration:
             )
         except Exception:  # noqa: BLE001
             _update_run_record(
-                self.report_id, plays_status="failed",
+                self.report_id, plays_status=STATUS_FAILED,
                 plays_games_expected=plays_games_expected,
             )
             logger.warning(
@@ -1925,11 +2139,14 @@ class _ReportGeneration:
             # Footer trust-block inputs (AC-5 / TN-3 / TN-6) -- story 07
             # consumes these from the render data; this is the only generator
             # change the footer needs. degraded_confidence is the single derived
-            # boolean (season fallback OR name-only identity); the SPECIFIC
-            # flags stay operator-only (admin list, story 06).
+            # boolean: it fires ONLY on a name-only identity match (E-236-06 /
+            # TN-4 / coach C2). season_fallback was dropped from this term --
+            # it fires on clean modal data (program_type NULL + good
+            # season_year) and produced a false coach-facing warning. It stays
+            # as operator-only telemetry in report_generation_runs.season_fallback
+            # (surfaced on /admin/reports).
             degraded_confidence = bool(
-                self.season_fallback
-                or self.identity_match_method == "name_only"
+                self.identity_match_method == "name_only"
             )
 
             # Render HTML
@@ -2004,6 +2221,7 @@ class _ReportGeneration:
             slug=slug,
             title=self.title,
             url=url,
+            outcome="ready",
         )
 
 

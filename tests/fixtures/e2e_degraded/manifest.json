@@ -1,0 +1,93 @@
+{
+  "description": "E-236-08 DEGRADED-opponent acceptance E2E fixture. Sibling to tests/fixtures/e2e/ (the golden oracle) — that set is NOT modified. Same team identity (ExampleTm001) but a deliberately-degraded MIX of games so a full report still RENDERS (N>0) while being degraded (N<M, plays-failing, spray-less). Drives the real generate_report() against a transport-only respx mock; the test (tests/test_report_e2e_degraded.py) registers plays as HTTP 500 and spray as a null-chart payload programmatically (those are degradations, not recorded successes).",
+  "team": {
+    "public_id": "ExampleTm001",
+    "gc_uuid": "00000000-0000-4000-8000-00000000003b",
+    "name": "Example Team Varsity",
+    "season": "spring 2026"
+  },
+  "scenario": {
+    "M_completed_games": 3,
+    "N_games_with_data": 1,
+    "charted_games": ["00000000-0000-4000-8000-000000000002"],
+    "scored_but_empty_games": [
+      "00000000-0000-4000-8000-000000000004",
+      "00000000-0000-4000-8000-000000000006"
+    ],
+    "degradations": {
+      "plays": "ALL /plays -> HTTP 500 -> plays_status=failed, K (plays_games_covered)=0",
+      "spray": "ALL /player-stats -> spray_chart_data:null -> spray_status=completed (null != error), spray_games_with_data=0",
+      "scored_but_empty": "sub-case A boxscore (api-scout confirmed 2026-06-14): own=slug/no-dashes + opp=UUID/with-dashes, groups present per-category with EMPTY stats arrays -> games row + score written, 0 stat rows, LoadResult.errors=0 -> load_status=completed, crawl_status=completed. SAME shape as story 09's sub-case-A unit test."
+    },
+    "expected_run_record": {
+      "crawl_status": "completed",
+      "load_status": "completed",
+      "plays_status": "failed",
+      "spray_status": "completed",
+      "overall_status": "completed",
+      "completed_games_M": 3,
+      "completed_games_with_data_N": 1,
+      "plays_games_covered_K": 0,
+      "spray_games_with_data": 0,
+      "operator_degraded_derived": true
+    }
+  },
+  "requests": [
+    {
+      "method": "GET",
+      "url": "https://api.team-manager.gc.com/public/teams/ExampleTm001",
+      "file": "public_team_profile.json",
+      "note": "Team name/season/age_group. No auth."
+    },
+    {
+      "method": "GET",
+      "url": "https://api.team-manager.gc.com/public/teams/ExampleTm001/games",
+      "file": "public_team_games.json",
+      "note": "Schedule. 3 completed games."
+    },
+    {
+      "method": "GET",
+      "url": "https://api.team-manager.gc.com/teams/public/ExampleTm001/players",
+      "file": "roster_players.json",
+      "note": "Roster (inverted /teams/public/ path)."
+    },
+    {
+      "method": "POST",
+      "url": "https://api.team-manager.gc.com/search",
+      "request_body": { "name": "Example Team Varsity" },
+      "query": "start_at_page=0&search_source=search",
+      "file": "search_response.json",
+      "note": "gc_uuid resolution."
+    },
+    {
+      "method": "GET",
+      "url": "https://api.team-manager.gc.com/game-stream-processing/00000000-0000-4000-8000-000000000002/boxscore",
+      "file": "boxscore_charted.json",
+      "note": "Game 1: FULL/charted boxscore -> contributes to N."
+    },
+    {
+      "method": "GET",
+      "url": "https://api.team-manager.gc.com/game-stream-processing/00000000-0000-4000-8000-000000000004/boxscore",
+      "file": "boxscore_empty.json",
+      "note": "Game 2: sub-case A scored-but-empty -> counts toward M, NOT N."
+    },
+    {
+      "method": "GET",
+      "url": "https://api.team-manager.gc.com/game-stream-processing/00000000-0000-4000-8000-000000000006/boxscore",
+      "file": "boxscore_empty.json",
+      "note": "Game 3: sub-case A scored-but-empty (same empty shape) -> counts toward M, NOT N."
+    },
+    {
+      "method": "GET",
+      "url_pattern": ".*/game-stream-processing/[^/]+/plays$",
+      "status": 500,
+      "note": "ALL plays fetches FAIL with HTTP 500 (registered by the test, no fixture file) -> plays_status=failed."
+    },
+    {
+      "method": "GET",
+      "url_pattern": ".*/schedule/events/[^/]+/player-stats$",
+      "file": "spray_null.json",
+      "note": "ALL spray fetches return a null-chart 200 (registered by the test) -> spray_status=completed, spray_games_with_data=0."
+    }
+  ]
+}

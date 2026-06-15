@@ -466,6 +466,11 @@ class TestReportGenerationRunsMigration:
             "plays_games_covered",
             "discrepancies_found",
             "discrepancies_corrected",
+            # additive count columns (migration 003, E-236-01 TN-2)
+            "boxscores_fetched",
+            "load_errors",
+            "plays_errors",
+            "spray_games_with_data",
             # trust flags
             "season_id_used",
             "season_fallback",
@@ -648,6 +653,94 @@ class TestReportGenerationRunsMigration:
         ).fetchone()[0]
         conn.close()
         assert count == 0, "report_generation_runs should be empty on a fresh DB"
+
+
+class TestReportRunCountColumnsMigration:
+    """Verify migration 003_report_run_count_columns.sql (E-236-01, TN-2).
+
+    The migration adds four nullable INTEGER count columns to
+    report_generation_runs. NULL means "stage didn't run". These tests assert
+    the columns exist and round-trip both INTEGER and NULL values.
+    """
+
+    _NEW_COLUMNS = {
+        "boxscores_fetched",
+        "load_errors",
+        "plays_errors",
+        "spray_games_with_data",
+    }
+
+    def test_new_count_columns_exist(self, fresh_db: Path) -> None:
+        """All four additive count columns are present after migration."""
+        run_migrations(db_path=fresh_db)
+        conn = sqlite3.connect(str(fresh_db))
+        cursor = conn.execute("PRAGMA table_info(report_generation_runs);")
+        columns = {row[1] for row in cursor.fetchall()}
+        conn.close()
+        missing = self._NEW_COLUMNS - columns
+        assert not missing, f"Migration 003 columns missing: {missing}"
+
+    def test_new_count_columns_are_nullable_integer(self, fresh_db: Path) -> None:
+        """Each new column is INTEGER-typed and nullable (no NOT NULL/DEFAULT)."""
+        run_migrations(db_path=fresh_db)
+        conn = sqlite3.connect(str(fresh_db))
+        # table_info: (cid, name, type, notnull, dflt_value, pk)
+        info = {
+            row[1]: row
+            for row in conn.execute(
+                "PRAGMA table_info(report_generation_runs);"
+            ).fetchall()
+        }
+        conn.close()
+        for col in self._NEW_COLUMNS:
+            assert col in info, f"{col} not found"
+            _cid, _name, col_type, notnull, dflt, _pk = info[col]
+            assert col_type == "INTEGER", f"{col} type is {col_type!r}, want INTEGER"
+            assert notnull == 0, f"{col} is NOT NULL; should be nullable"
+            assert dflt is None, f"{col} has a DEFAULT {dflt!r}; should have none"
+
+    def test_count_columns_round_trip_integer_and_null(
+        self, fresh_db: Path
+    ) -> None:
+        """The new columns accept INTEGER values and NULL, and read them back."""
+        run_migrations(db_path=fresh_db)
+        conn = sqlite3.connect(str(fresh_db))
+        conn.execute("PRAGMA foreign_keys = ON;")
+
+        # Row 1: explicit INTEGER values.
+        report_id_int = _insert_report_fixture(conn)
+        conn.execute(
+            "INSERT INTO report_generation_runs "
+            "(report_id, overall_status, boxscores_fetched, load_errors, "
+            "plays_errors, spray_games_with_data) "
+            "VALUES (?, 'running', ?, ?, ?, ?);",
+            (report_id_int, 12, 3, 1, 7),
+        )
+        # Row 2: omit the new columns -> they must read back NULL.
+        report_id_null = _insert_report_fixture(conn)
+        conn.execute(
+            "INSERT INTO report_generation_runs (report_id, overall_status) "
+            "VALUES (?, 'running');",
+            (report_id_null,),
+        )
+        conn.commit()
+
+        int_row = conn.execute(
+            "SELECT boxscores_fetched, load_errors, plays_errors, "
+            "spray_games_with_data FROM report_generation_runs WHERE report_id = ?;",
+            (report_id_int,),
+        ).fetchone()
+        null_row = conn.execute(
+            "SELECT boxscores_fetched, load_errors, plays_errors, "
+            "spray_games_with_data FROM report_generation_runs WHERE report_id = ?;",
+            (report_id_null,),
+        ).fetchone()
+        conn.close()
+
+        assert int_row == (12, 3, 1, 7), f"INTEGER round-trip mismatch: {int_row}"
+        assert null_row == (None, None, None, None), (
+            f"Omitted columns should read back NULL: {null_row}"
+        )
 
 
 class TestE220UpgradeGuard:

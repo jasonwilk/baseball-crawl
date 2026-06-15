@@ -1,0 +1,89 @@
+{
+  "ExampleTm001": {
+    "players": [],
+    "groups": [
+      {
+        "category": "lineup",
+        "team_stats": {
+          "AB": 0,
+          "R": 0,
+          "H": 0,
+          "RBI": 0,
+          "BB": 0,
+          "SO": 0
+        },
+        "extra": [],
+        "stats": []
+      },
+      {
+        "category": "pitching",
+        "team_stats": {
+          "IP": 0,
+          "H": 0,
+          "R": 0,
+          "ER": 0,
+          "BB": 0,
+          "SO": 0
+        },
+        "extra": [],
+        "stats": []
+      }
+    ]
+  },
+  "00000000-0000-4000-8000-000000000018": {
+    "players": [
+      {
+        "id": "00000000-0000-4000-8000-000000000025",
+        "first_name": "Player",
+        "last_name": "ThirtyTwo",
+        "number": "2"
+      },
+      {
+        "id": "00000000-0000-4000-8000-000000000026",
+        "first_name": "Player",
+        "last_name": "ThirtyThree",
+        "number": "7"
+      },
+      {
+        "id": "00000000-0000-4000-8000-000000000027",
+        "first_name": "Player",
+        "last_name": "ThirtyFour",
+        "number": "11"
+      },
+      {
+        "id": "00000000-0000-4000-8000-000000000028",
+        "first_name": "Player",
+        "last_name": "ThirtyFive",
+        "number": "4"
+      }
+    ],
+    "groups": [
+      {
+        "category": "lineup",
+        "team_stats": {
+          "AB": 0,
+          "R": 0,
+          "H": 0,
+          "RBI": 0,
+          "BB": 0,
+          "SO": 0
+        },
+        "extra": [],
+        "stats": []
+      },
+      {
+        "category": "pitching",
+        "team_stats": {
+          "IP": 0,
+          "H": 0,
+          "R": 0,
+          "ER": 0,
+          "BB": 0,
+          "SO": 0
+        },
+        "extra": [],
+        "stats": []
+      }
+    ]
+  }
+}

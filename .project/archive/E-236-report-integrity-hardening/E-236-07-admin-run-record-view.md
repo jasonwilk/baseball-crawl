@@ -4,7 +4,7 @@
 [E-236: Report Self-Reporting Integrity Hardening](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the operator's `/admin/reports` view (and the shared listing query) will surface the new honest per-stage statuses (`partial`/`failed`), the new count columns, and a derived "degraded" badge — making the run-record telemetry that stories 02-04 write actually legible to the operator. This is the operator surface for the epic; it is OPERATOR-ONLY (no coach-facing change).

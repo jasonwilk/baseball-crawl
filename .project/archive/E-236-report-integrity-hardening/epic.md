@@ -1,7 +1,7 @@
 # E-236: Report Self-Reporting Integrity Hardening
 
 ## Status
-`READY`
+`COMPLETED`
 
 ## Roadmap
 Implements slice **B2 — Report self-reporting integrity hardening** in `docs/ROADMAP.md` §5, sequenced AFTER Epic B (E-235) and BEFORE Epic C. Per the roadmap-tracking convention (`docs/ROADMAP.md` §0, authoritative) and Technical Notes TN-10: the §0 "Roadmap Tracking" table carries the B2 → E-236 row (set at the planning commit; status reflects the epic's state — `READY` at the planning commit since the epic was refined to READY before commit), and the §0 row is flipped to `COMPLETED` at closure.
@@ -48,15 +48,15 @@ Expert consultation completed (DE, SE, baseball-coach during discovery; api-scou
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-236-01 | Migration 003 + shared stage-status classifier | TODO | None | - |
-| E-236-02 | Plays-stage honesty: thread fetch/load errors into the run record (#1) | TODO | E-236-01 | - |
-| E-236-03 | Boxscore-crawl honesty + all-blocked failed outcome (#2 + SQ1) | TODO | E-236-01, E-236-02 | - |
-| E-236-04 | Spray-stage honesty: spray_games_with_data (informational) + error-driven status (#3) | TODO | E-236-01, E-236-03 | - |
-| E-236-05 | no_games outcome signal + two-case copy + CLI branch (#5) | TODO | E-236-01, E-236-04 | - |
-| E-236-06 | Coach footer Option A: drop season_fallback from degraded line (#4) | TODO | E-236-05 | - |
-| E-236-07 | Admin run-record view: surface partial/failed + derived operator-degraded | TODO | E-236-01, E-236-02, E-236-03, E-236-04, E-236-09 | - |
-| E-236-08 | Degraded-opponent acceptance & negative-path E2E (both surfaces) | TODO | E-236-01, E-236-02, E-236-03, E-236-04, E-236-05, E-236-06, E-236-07, E-236-09 | - |
-| E-236-09 | Load-stage honesty: write load_errors + classify load_status (#6) | TODO | E-236-01, E-236-06 | - |
+| E-236-01 | Migration 003 + shared stage-status classifier | DONE | None | - |
+| E-236-02 | Plays-stage honesty: thread fetch/load errors into the run record (#1) | DONE | E-236-01 | - |
+| E-236-03 | Boxscore-crawl honesty + all-blocked failed outcome (#2 + SQ1) | DONE | E-236-01, E-236-02 | - |
+| E-236-04 | Spray-stage honesty: spray_games_with_data (informational) + error-driven status (#3) | DONE | E-236-01, E-236-03 | - |
+| E-236-05 | no_games outcome signal + two-case copy + CLI branch (#5) | DONE | E-236-01, E-236-04 | - |
+| E-236-06 | Coach footer Option A: drop season_fallback from degraded line (#4) | DONE | E-236-05 | - |
+| E-236-07 | Admin run-record view: surface partial/failed + derived operator-degraded | DONE | E-236-01, E-236-02, E-236-03, E-236-04, E-236-09 | - |
+| E-236-08 | Degraded-opponent acceptance & negative-path E2E (both surfaces) | DONE | E-236-01, E-236-02, E-236-03, E-236-04, E-236-05, E-236-06, E-236-07, E-236-09 | - |
+| E-236-09 | Load-stage honesty: write load_errors + classify load_status (#6) | DONE | E-236-01, E-236-06 | - |
 
 ## Dispatch Team
 - data-engineer
@@ -156,3 +156,32 @@ Seven stories edit `src/reports/generator.py` (01, 02, 03, 04, 05, 06, 09). To s
 - 2026-06-14: Load-binding RESOLVED (DE+SE consensus, code-cited): `LoadResult.errors` is error-driven, safe against the scored-but-empty false alarm; DE CAUTION 1 (don't bind classifier `loaded` to `LoadResult.loaded`) folded into story 09. Codex Phase-4 spec review triaged (3 P1 + 2 P2, all incorporated): P1-a explicit generator.py serialization chain + TN-12; P1-b 03 AC-5 narrowed self-contained; P1-c 09 AC-4 finalized; P2-a/P2-b api-scout confirmed sub-case A → story 08 pinned (crawl/load `completed`), 08 scenario corrected to N>0 partial-coverage so the footer renders, 08/09 share the fixture, SQ2 closed.
 - 2026-06-14: Consolidated consistency sweep clean (dependency graph complete + bidirectional, sub-case A consistent across 08/09/TN-9/TN-11/SQ2, no stale framing). Quality checklist passed. Epic set **READY** (9 stories). Awaiting user dispatch authorization.
 - 2026-06-14: api-scout live capture (byte-level) folded — story 08 fixture skeleton pinned to the real shape (`groups` is categories-present-empty-stats, never `[]`; own `players:[]`, opp full roster); story 09 sub-case B reframed as defensive (GC's real missing-game is a 404 crawler-skip). SQ1 403-vs-404 nuance RESOLVED document-only (api-scout + coach converged): no-scorebook opponents surface as M=0→no_games (game_status gates it), 0/130 403s observed, so the failed gate's only real trigger is auth-expiry/transient mass-failure — TN-6 limitation note added; distinguishing 403/404 explicitly OUT of scope. Re-swept clean. Final landing — ROADMAP §0/§5/§8 + epic ready for the planning-commit git step.
+- 2026-06-15: Dispatched all 9 stories serially (execution order 01, 02, 03, 04, 05, 06, 09, 07, 08 per TN-12). Every story passed PM AC verification + code-review (no MUST FIX at per-story review). No stat-value changes — Epic A goldens + aggregate parity stayed green throughout (TN-8).
+- 2026-06-15: **Story-03 spec-vs-code note (no behavior compromise).** SE flagged the story Context premise ("tier-1 fatal gate dormant because `errors` is always 0") as inaccurate — `_finalize_crawl` has returned `errors=1` on the all-blocked path since E-220, so the old gate would already fire. SE implemented the count-based gate (`games_crawled == 0 AND completed_games > 0`) per TN-6/TN-7 anyway (robust, the intended SQ1 repair) and changed nothing to paper over the premise. AC behavior met either way.
+- 2026-06-15: **Cred-expiry NULL `plays_errors` — consciously deferred (PM ruling).** Story-02 CR flagged that the plays cred-expiry path writes `plays_status="failed"` without persisting a `plays_errors` tally (leaves it NULL). PM ruled this NOT a new story-07 AC: it is covered by 07's NULL-safe rendering (NULL renders as "—"), and the `failed` badge already conveys the operator signal — a missing error *count* on a hard auth-failure is accurate, not misleading. No scope expansion.
+- 2026-06-15: **Story-09 Success-Criteria ruling (PM, Success-Criteria owner).** SE's load-stage status used an error-driven ternary (no helper call). PM ruled the load success path must literally call `classify_stage_status(loaded=1, errors=load_errors, expected=1)` to satisfy Success Criteria bullet 1 (which names `load` in-scope for the helper and exempts only `gc_uuid_status`/`enrichment_status`). The literal `1/1` is degenerate single-unit coverage — explicitly NOT `LoadResult.loaded` (DE CAUTION 1 honored, with a "do NOT fix to LoadResult.loaded" code comment). Provably equivalent to the ternary; tests unchanged. SE applied + CR re-confirmed.
+- 2026-06-15: **`operator_degraded` inline-duplication note (History, not an idea).** The story-08 degraded E2E re-implements `/admin/reports`'s `operator_degraded` predicate inline because `admin.py` computes it inline (not a reusable helper) → drift risk between route and test. PM ruling: History note, NOT a standalone idea — the admin/dashboard surface is slated for Epic D quarantine-then-removal (reports-first roadmap), so a shared-helper refactor has uncertain longevity. Promote to an idea only if the admin surface survives Epic D.
+- 2026-06-15: **SE rotation after story 04.** The original software-engineer hit repeated flakiness and a tool-output-integrity miss (`pytest | tail` reporting tail's RC=0, masking pytest's real exit / a test deadlock from `db.backup()` onto the same on-disk path). Per the user's direction, a fresh software-engineer (software-engineer-2) took stories 05/06/09/07/08. All subsequent reports used real (un-piped) exit codes. No production-code impact — the original's stories (02/03/04) had already passed both gates.
+- 2026-06-15: **Phase 4 review.** 4a CR holistic integration review over the full epic diff: APPROVED, 0 findings. 4b Codex code review: 3 findings (0 High, 2 Medium, 1 Low), all triaged VALID and remediated as post-review remediation under the review session's authority (no story reopening), CR re-confirmed APPROVED:
+  - **MEDIUM-1** (telemetry honesty): `spray_games_with_data` COUNT was scoped by `perspective_team_id` only, while the rendered spray line (`_query_spray_charts`) scopes by `team_id + season_id + chart_type='offensive'` — so cross-season and defensive-only rows inflated the operator `(with_data/spray_games)` figure. Fixed: COUNT now scoped `team_id + season_id + chart_type='offensive' + perspective_team_id` (coherent with the report's spray line; still satisfies story-04 AC-1 "this team's perspective" + AC-6 perspective-provenance).
+  - **MEDIUM-2** (CLI no_games conflation — PM ruled IN SCOPE, tightly bounded): story 05 fixed the no-games PAGE copy but the CLI still printed the conflated `error_message` verbatim — leaving finding #5 half-fixed on the `bb report generate` operator surface, which is the Epic E unattended forward path (TN-5). Fixed: CLI `no_games` branch now distinguishes M=0 ("No games on record") from M>0/N=0 ("Played M games this season, but no box score data…") via `GenerationResult.completed_games` (added + set at the no_games return). Operator-message honesty only — no coach-facing content (Non-Goal intact). PM revisited story 05's narrow "leave error_message alone" sub-decision specifically on the Epic-E-forward-path grounds Codex surfaced.
+  - **LOW** (admin NULL-safe contract): `admin/reports.html` coerced a NULL `spray_games_with_data` to `0` (false `0/N` on legacy/partial-migration rows), violating story-07 AC-1/AC-6. Fixed: renders "—" for NULL, matching the other NULL-safe cells.
+- 2026-06-15: **Documentation assessment (PM).** Triggers 4 (DB schema — migration 003 adds 4 columns to `report_generation_runs`) and 5 (epic changes how the system works / operator interacts — new `partial` per-stage status, count columns, derived operator-degraded badge on `/admin/reports`, two-case `no_games` + all-blocked `failed` outcomes, CLI `no_games` now exit-0 + two-case message, coach footer degraded line no longer fires on `season_fallback`) FIRE. Triggers 1/2/3 do not fire (behavior refinements to existing surfaces, no new endpoint/agent/deployment change). → docs-writer dispatched to update `docs/admin/operations.md` (the E-235 run-records section, 832-907): new count columns, the `partial` status value, the operator-degraded badge, the two-case no_games + failed outcomes, the `bb report generate` no_games exit-0 behavior, and the corrected coach-footer degraded-line trigger (name-only only).
+- 2026-06-15: **Context-layer assessment** evaluated by the main session (6 triggers) — preliminary: triggers 1 (the `classify_stage_status` convention) and 3 (the `_RUN_RECORD_COLUMNS` allowlist footgun + the `pytest | tail` RC-masking / `db.backup()` testing footguns) fire → claude-architect codification. Per-trigger verdicts recorded by the main session at closure.
+- 2026-06-15: ROADMAP §0 B2→E-236 row flipped to **COMPLETED** in the worktree `docs/ROADMAP.md` (TN-10; rides the closure patch into main).
+
+## Review Scorecard
+| Review pass | Findings | Accepted/Fixed | Dismissed |
+|-------------|----------|----------------|-----------|
+| Per-story CR — E-236-01 | 0 | 0 | 0 |
+| Per-story CR — E-236-02 | 1 SHOULD FIX (cred-expiry NULL plays_errors; consciously deferred to 07 → ruled no-change) | 0 fixed (deferred) | 0 |
+| Per-story CR — E-236-03 | 0 (2 spec-vs-code questions independently confirmed) | 0 | 0 |
+| Per-story CR — E-236-04 | 1 SHOULD FIX (status bare-literals → STATUS_* constants) + test-deadlock fix re-confirm | 1 | 0 |
+| Per-story CR — E-236-05 | 0 | 0 | 0 |
+| Per-story CR — E-236-06 | 0 | 0 | 0 |
+| Per-story CR — E-236-09 | 0 + PM Success-Criteria ruling re-confirm (ternary → classify_stage_status) | 1 (ruling) | 0 |
+| Per-story CR — E-236-07 | 0 | 0 | 0 |
+| Per-story CR — E-236-08 | 0 (1 minor observation: operator_degraded inline-duplication → History note) | 0 | 0 |
+| Phase 4a — CR holistic integration | 0 | 0 | 0 |
+| Phase 4b — Codex code review | 3 (2 Med, 1 Low) | 3 | 0 |
+| **Total** | **6 findings + 2 PM rulings + 1 observation** | **5 fixed / 1 deferred (ruled)** | **0** |

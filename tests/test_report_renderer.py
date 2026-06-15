@@ -124,22 +124,41 @@ def _make_full_data(**overrides) -> dict:
 
 
 class TestNoGamesPage:
-    """E-235-03 gate (a): the minimal no-completed-games page (TN-7)."""
+    """E-236-05 (TN-5 / coach C1): two-case no-games page copy branching on
+    M (completed_games) vs N (completed_games_with_data)."""
 
-    def test_contains_coach_message_and_team_name(self):
-        html = render_no_games_page("Rival Varsity")
+    def test_m_zero_says_no_games_on_record(self):
+        # M=0: no games on record yet.
+        html = render_no_games_page("Rival Varsity", 0, 0)
         assert "<!DOCTYPE html>" in html
-        assert "No completed games found for Rival Varsity this season" in html
-        assert "verify the team URL and try again" in html
+        assert "No games on record for Rival Varsity this season." in html
+
+    def test_m_positive_n_zero_says_no_box_score_data(self):
+        # M>0, N=0: the modal scouting case -- games played, no scorebook data.
+        # The copy interpolates M (games played), not N (0).
+        html = render_no_games_page("Rival Varsity", 12, 0)
+        assert (
+            "Rival Varsity has played 12 games this season, "
+            "but no box score data is available in GameChanger." in html
+        )
+        assert "12" in html
+        # Must NOT interpolate N as the played-games count.
+        assert "has played 0 games" not in html
+
+    def test_copy_never_says_check_back_later(self):
+        # Negative AC (coach C1): "later" is irrelevant at pre-game.
+        for m in (0, 5):
+            html = render_no_games_page("Rival Varsity", m, 0)
+            assert "check back later" not in html.lower()
 
     def test_escapes_team_name(self):
-        html = render_no_games_page("<script>alert(1)</script>")
+        html = render_no_games_page("<script>alert(1)</script>", 0, 0)
         assert "<script>alert(1)</script>" not in html
         assert "&lt;script&gt;" in html
 
     def test_handles_empty_team_name(self):
-        html = render_no_games_page("")
-        assert "No completed games found for this team this season" in html
+        html = render_no_games_page("", 0, 0)
+        assert "No games on record for this team this season." in html
 
 
 class TestCompleteReport:

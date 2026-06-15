@@ -1,0 +1,29 @@
+{
+  "total_count": 1,
+  "hits": [
+    {
+      "type": "team",
+      "result": {
+        "id": "00000000-0000-4000-8000-00000000003b",
+        "public_id": "ExampleTm001",
+        "name": "Example Team Varsity",
+        "sport": "baseball",
+        "location": {
+          "city": "Anytown",
+          "country": "United States",
+          "state": "XX"
+        },
+        "season": {
+          "name": "spring",
+          "year": 2026
+        },
+        "number_of_players": 21,
+        "staff": [
+          "Coach One",
+          "Coach Two"
+        ]
+      }
+    }
+  ],
+  "next_page": null
+}

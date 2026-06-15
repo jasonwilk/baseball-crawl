@@ -4,7 +4,7 @@
 [E-236: Report Self-Reporting Integrity Hardening](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, `GenerationResult` will carry an explicit `outcome` signal, the no-games page will distinguish "no games on record" (M=0) from "games played but no scorebook data" (M>0/N=0) with coach-authored copy, and the CLI will treat a shareable `no_games` outcome as success (exit 0 + URL) instead of branding it a hard failure. This closes finding #5.

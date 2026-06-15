@@ -193,6 +193,7 @@ def test_generate_report_e2e_matches_committed_oracle(
 
     # ---- Pipeline reached a successful terminal state --------------------
     assert result.success is True, f"generation failed: {result.error_message}"
+    assert result.outcome == "ready"  # E-236-05: success return sets outcome
     assert "data" in captured, "render_report was never called -- pipeline aborted"
     data = captured["data"]
 

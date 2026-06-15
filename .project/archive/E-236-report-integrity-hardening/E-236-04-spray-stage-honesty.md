@@ -4,7 +4,7 @@
 [E-236: Report Self-Reporting Integrity Hardening](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the run record will carry `spray_games_with_data` (distinct games with spray ROWS actually loaded) alongside the existing `spray_games` (API fetch successes) as an INFORMATIONAL coverage column, and `spray_status` will be ERROR-driven (failed only on a real spray crawl/load failure), NOT coverage-driven. This closes finding #3 (operator-telemetry only — the coach footer spray line is already honest) WITHOUT introducing a false "partial" alarm on the modal scorekeeper-didn't-chart case.

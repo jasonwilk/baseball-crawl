@@ -1,11 +1,15 @@
 # IDEA-077: Re-evaluate the season_fallback Trust Flag (and Season Scoping) in the Report-Only Direction
 
 ## Status
-`CANDIDATE` — **direction DECIDED (coach-authoritative, 2026-06-14): Option A.** Status stays
-CANDIDATE because the implementation has not been scheduled, but the *what* is settled: drop
-the coach-visible `season_fallback` degraded-confidence line; keep the column as operator-only
-telemetry. The implementation is a small follow-up — fold into Epic D or a small dedicated
-epic. Option B (blend-detector) is REJECTED — do not revive.
+`PROMOTED` — **Option A DELIVERED by E-236-06 (2026-06-15).** The coach-visible degraded-confidence
+line no longer fires on `season_fallback` (`degraded_confidence` now keys ONLY on
+`identity_match_method == 'name_only'`); the `report_generation_runs.season_fallback` column is
+kept as operator-only telemetry, still surfaced on `/admin/reports`. Exactly the Option A
+resolution decided 2026-06-14. **Residual (still open, NOT delivered here):** the deeper
+`season_fallback` / multi-season *machinery* removal — the `fallback_used` computation in
+`src/gamechanger/loaders/__init__.py` and the cross-season partitioning — was explicitly OUT of
+E-236 scope (E-236 Non-Goals) and tracks to **ROADMAP D2 + the vestigial-old-vision-remnant
+scour**, not this idea. Option B (blend-detector) remains REJECTED — do not revive.
 
 ## Decision (2026-06-14, baseball-coach, authoritative)
 **Option A chosen, decisively.** Coach verdict: a single GameChanger `public_id` does NOT blend
@@ -67,5 +71,5 @@ E-235 added a `season_fallback` operator trust flag that drives a coach-visible 
 
 ---
 Created: 2026-06-14
-Last reviewed: 2026-06-14 (direction decided — Option A, baseball-coach authoritative)
+Last reviewed: 2026-06-15 (Option A coach-visible line DELIVERED by E-236-06; status → PROMOTED; machinery-removal residual tracks to ROADMAP D2)
 Review by: 2026-09-12 (90 days from created)

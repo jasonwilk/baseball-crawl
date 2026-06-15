@@ -17,6 +17,13 @@ paths:
 - Include edge cases: empty data, malformed input, missing fields
 - **Subprocess smoke tests for console script entry points**: Entry points like `bb` must have at least one test that invokes the command via `subprocess.run()` (e.g., `subprocess.run(["bb", "--help"], ...)`). In-process test runners (`typer.testing.CliRunner`, pytest) add the project root to `sys.path`, which masks packaging and import errors that only surface when the entry point runs as an installed console script. Subprocess tests catch these real-world failures.
 
+## Trustworthy pytest results (execution gotchas)
+
+Two project-specific traps that have caused real "tests pass" misreports:
+
+- **Never trust a piped pytest exit code.** `python -m pytest ... | tail` (or any pipe) reports the PIPE's exit code (≈always 0), NOT pytest's — a failing or hung run looks like "exit 0". In E-236 a `pytest | tail` run reported "passed, exit 0" when the real RC was 124 (a timeout/hang). Capture pytest's OWN return code with no pipe: `python -m pytest ... > /tmp/out.txt 2>&1; echo "RC=$?" >> /tmp/out.txt`, then read the file for the RC and the `N passed`/`N failed` line. The harness "background command completed (exit code 0)" reflects the whole compound command's last stage, not pytest — don't rely on it either. This is the pytest-surface form of `.claude/rules/tool-output-integrity.md`.
+- **The disk-backed `db` fixture deadlocks on self-`backup()`.** The `db` fixture backing differs per report test file. `tests/test_report_generator.py`'s `db` is disk-backed at `tmp_path/test.db` (via `load_real_schema`); calling `db.backup(file_conn)` where `file_conn` opens that SAME path DEADLOCKS SQLite (the run hangs). Fresh connections already see committed rows directly — no backup needed there. Only use `db.backup()` when the source `db` is `:memory:` and a function under test opens its own connections (e.g. `tests/test_report_plays.py`). Full detail: `.claude/agent-memory/software-engineer/testing-gotchas.md`.
+
 ## Test Scope Discovery
 
 When you modify a function in an existing source module, you MUST discover and run all test files that import from that module -- not just the tests named in the story's "Files to Create or Modify."

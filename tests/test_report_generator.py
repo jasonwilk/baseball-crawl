@@ -11,6 +11,7 @@ from src.db.teams import EnsureTeamResult
 from src.gamechanger.crawlers.scouting import ScoutingCrawlResult
 from src.gamechanger.loaders.game_loader import GameLoader
 from src.gamechanger.types import TeamRef
+import src.reports.generator as _gen
 from src.reports.generator import (
     GenerationResult,
     _SprayOutcome,
@@ -387,6 +388,7 @@ class TestRunRecordPopulation:
         # Per-stage statuses.
         assert run["crawl_status"] == "completed"
         assert run["load_status"] == "completed"
+        assert run["load_errors"] == 0  # E-236-09 AC-1: clean load -> 0 errors
         assert run["plays_status"] == "completed"
         assert run["reconciliation_status"] == "completed"
         assert run["spray_status"] == "completed"
@@ -516,6 +518,167 @@ class TestRunRecordPopulation:
     @patch("src.reports.generator.GameChangerClient")
     @patch("src.reports.generator.ensure_team_row_with_provenance",
            return_value=EnsureTeamResult(1, "anchor", False))
+    @patch("src.reports.generator.render_report", return_value="<html>test</html>")
+    @patch("src.reports.generator._crawl_and_load_spray")
+    @patch("src.reports.generator._crawl_and_load_plays", return_value=[])
+    def test_partial_load_records_partial_not_completed(
+        self, mock_plays, mock_spray, mock_render, mock_ensure,
+        mock_client_cls, mock_get_conn, db, tmp_path,
+    ):
+        """E-236-09 AC-3/AC-6 (error-path): a load that processed rows but
+        reported errors > 0 (e.g. a per-player sqlite3.Error) records
+        load_status='partial' + load_errors>0 -- NOT the old hardcoded
+        'completed' that overstated success. Same bug class as #1, one stage
+        over."""
+        from src.gamechanger.loaders import LoadResult
+
+        self._setup(db, tmp_path)
+        db_path = str(tmp_path / "test.db")
+
+        def _fresh_conn():
+            conn = sqlite3.connect(db_path)
+            conn.execute("PRAGMA foreign_keys=ON;")
+            return conn
+
+        mock_get_conn.side_effect = lambda: _fresh_conn()
+        mock_client_cls.return_value = MagicMock()
+        mock_crawler = MagicMock()
+        mock_crawler.scout_team.return_value = ScoutingCrawlResult(
+            team_id=1, season_id="2026-spring-hs", games_crawled=2,
+            games=[{"game_status": "completed"}], boxscores={"g1": {}},
+        )
+        # Some rows loaded AND errors > 0 -> PARTIAL (not total failure).
+        mock_loader = MagicMock()
+        mock_loader.load_team.return_value = LoadResult(loaded=5, errors=2)
+        mock_spray.return_value = _SprayOutcome(status="completed", games_crawled=2)
+
+        with (
+            patch("src.reports.generator.ScoutingCrawler", return_value=mock_crawler),
+            patch("src.reports.generator.ScoutingLoader", return_value=mock_loader),
+            patch("src.reports.generator._REPO_ROOT", tmp_path),
+            patch("src.reports.generator._REPORTS_DIR", tmp_path / "data" / "reports"),
+        ):
+            result = generate_report("abc123")
+
+        # Partial load is non-fatal -- generation still completes.
+        assert result.success is True
+        run = _read_run_record(db_path, result.slug)
+        assert run is not None
+        assert run["load_status"] == "partial"
+        assert run["load_errors"] == 2
+
+    @patch("src.reports.generator.get_connection")
+    @patch("src.reports.generator.GameChangerClient")
+    @patch("src.reports.generator.ensure_team_row_with_provenance",
+           return_value=EnsureTeamResult(1, "anchor", False))
+    @patch("src.reports.generator.render_report", return_value="<html>test</html>")
+    @patch("src.reports.generator._crawl_and_load_spray")
+    @patch("src.reports.generator._crawl_and_load_plays", return_value=[])
+    def test_scored_but_empty_clean_load_records_completed(
+        self, mock_plays, mock_spray, mock_render, mock_ensure,
+        mock_client_cls, mock_get_conn, db, tmp_path,
+    ):
+        """E-236-09 AC-4/AC-6 (false-alarm guard): the realistic scored-but-empty
+        boxscore (DE sub-case A: team keys present, stat groups empty -> game
+        counted, errors=0) records load_status='completed', NOT 'partial'.
+        LoadResult.errors does NOT increment for sub-case A (DE+SE consensus),
+        so the error-driven status is safe against the plays/spray false-alarm
+        class. loaded=1 here is the bare scored-but-empty GAMES ROW (no player
+        rows); status MUST derive from the error signal, never from that count."""
+        from src.gamechanger.loaders import LoadResult
+
+        self._setup(db, tmp_path)
+        db_path = str(tmp_path / "test.db")
+
+        def _fresh_conn():
+            conn = sqlite3.connect(db_path)
+            conn.execute("PRAGMA foreign_keys=ON;")
+            return conn
+
+        mock_get_conn.side_effect = lambda: _fresh_conn()
+        mock_client_cls.return_value = MagicMock()
+        mock_crawler = MagicMock()
+        mock_crawler.scout_team.return_value = ScoutingCrawlResult(
+            team_id=1, season_id="2026-spring-hs", games_crawled=1,
+            games=[{"game_status": "completed"}], boxscores={"g1": {}},
+        )
+        # Sub-case A: just the game row counted, zero player rows, zero errors.
+        mock_loader = MagicMock()
+        mock_loader.load_team.return_value = LoadResult(loaded=1, errors=0)
+        mock_spray.return_value = _SprayOutcome(status="completed", games_crawled=1)
+
+        with (
+            patch("src.reports.generator.ScoutingCrawler", return_value=mock_crawler),
+            patch("src.reports.generator.ScoutingLoader", return_value=mock_loader),
+            patch("src.reports.generator._REPO_ROOT", tmp_path),
+            patch("src.reports.generator._REPORTS_DIR", tmp_path / "data" / "reports"),
+        ):
+            result = generate_report("abc123")
+
+        assert result.success is True
+        run = _read_run_record(db_path, result.slug)
+        assert run is not None
+        assert run["load_status"] == "completed"  # NOT falsely 'partial'
+        assert run["load_errors"] == 0
+
+    @patch("src.reports.generator.get_connection")
+    @patch("src.reports.generator.GameChangerClient")
+    @patch("src.reports.generator.ensure_team_row_with_provenance",
+           return_value=EnsureTeamResult(1, "anchor", False))
+    @patch("src.reports.generator._crawl_and_load_spray")
+    def test_total_load_failure_records_failed(
+        self, mock_spray, mock_ensure, mock_client_cls, mock_get_conn,
+        db, tmp_path,
+    ):
+        """E-236-09 AC-5 (defensive): a total load failure (loaded==0 AND
+        errors>0 -- DE sub-case B, a degenerate keyless/unreadable boxscore)
+        maps to load_status='failed' via the explicit total-failure signal
+        BEFORE the classifier (TN-1 precedence), and the run finalizes failed.
+        Defensive: api-scout confirmed GC's real 'missing game' is an HTTP 404
+        the crawler skips, so this keyless-body path is correct-but-unreached."""
+        from src.gamechanger.loaders import LoadResult
+
+        self._setup(db, tmp_path)
+        db_path = str(tmp_path / "test.db")
+
+        def _fresh_conn():
+            conn = sqlite3.connect(db_path)
+            conn.execute("PRAGMA foreign_keys=ON;")
+            return conn
+
+        mock_get_conn.side_effect = lambda: _fresh_conn()
+        mock_client_cls.return_value = MagicMock()
+        mock_crawler = MagicMock()
+        mock_crawler.scout_team.return_value = ScoutingCrawlResult(
+            team_id=1, season_id="2026-spring-hs", games_crawled=1,
+            games=[{"game_status": "completed"}], boxscores={"g1": {}},
+        )
+        # Zero loaded AND errors>0 -> the load stage's OWN total-failure signal.
+        mock_loader = MagicMock()
+        mock_loader.load_team.return_value = LoadResult(loaded=0, errors=1)
+        mock_spray.return_value = _SprayOutcome(status="completed", games_crawled=0)
+
+        with (
+            patch("src.reports.generator.ScoutingCrawler", return_value=mock_crawler),
+            patch("src.reports.generator.ScoutingLoader", return_value=mock_loader),
+            patch("src.reports.generator._REPO_ROOT", tmp_path),
+            patch("src.reports.generator._REPORTS_DIR", tmp_path / "data" / "reports"),
+            patch("src.reports.generator._crawl_and_load_plays", return_value=[]),
+        ):
+            result = generate_report("abc123")
+
+        assert result.success is False
+        run = _read_run_record(db_path, result.slug)
+        assert run is not None
+        assert run["load_status"] == "failed"
+        assert run["load_errors"] == 1
+        assert run["overall_status"] == "failed"
+        assert run["error_stage"] == "load"
+
+    @patch("src.reports.generator.get_connection")
+    @patch("src.reports.generator.GameChangerClient")
+    @patch("src.reports.generator.ensure_team_row_with_provenance",
+           return_value=EnsureTeamResult(1, "anchor", False))
     def test_fatal_crawl_marks_run_failed(
         self, mock_ensure, mock_client_cls, mock_get_conn, db, tmp_path,
     ):
@@ -554,6 +717,178 @@ class TestRunRecordPopulation:
         assert run["completed_at"] is not None
         # M is recorded even on the fatal path (0 completed games here).
         assert run["completed_games"] == 0
+
+    @patch("src.reports.generator.get_connection")
+    @patch("src.reports.generator.GameChangerClient")
+    @patch("src.reports.generator.ensure_team_row_with_provenance",
+           return_value=EnsureTeamResult(1, "anchor", False))
+    @patch("src.reports.generator.render_report", return_value="<html>test</html>")
+    @patch("src.reports.generator._crawl_and_load_spray")
+    def test_partial_crawl_records_partial_status(
+        self, mock_spray, mock_render, mock_ensure, mock_client_cls, mock_get_conn,
+        db, tmp_path,
+    ):
+        """E-236-03 AC-1/AC-2: a partial boxscore crawl (M>0,
+        0 < boxscores_fetched < M) records crawl_status='partial' and the
+        boxscores_fetched count -- NOT 'completed' as it was before this story.
+        """
+        from src.gamechanger.loaders import LoadResult
+
+        self._setup(db, tmp_path)
+        db_path = str(tmp_path / "test.db")
+
+        def _fresh_conn():
+            conn = sqlite3.connect(db_path)
+            conn.execute("PRAGMA foreign_keys=ON;")
+            return conn
+
+        mock_get_conn.side_effect = lambda: _fresh_conn()
+        mock_client_cls.return_value = MagicMock()
+        mock_crawler = MagicMock()
+        # M = 2 completed games on the schedule, but only 1 boxscore fetched.
+        mock_crawler.scout_team.return_value = ScoutingCrawlResult(
+            team_id=1, season_id="2026-spring-hs", games_crawled=1, errors=0,
+            games=[{"game_status": "completed"}, {"game_status": "completed"}],
+            boxscores={"g1": {}},
+        )
+        mock_loader = MagicMock()
+        mock_loader.load_team.return_value = LoadResult(loaded=5)
+        mock_spray.return_value = _SprayOutcome(status="completed", games_crawled=1)
+
+        with (
+            patch("src.reports.generator.ScoutingCrawler", return_value=mock_crawler),
+            patch("src.reports.generator.ScoutingLoader", return_value=mock_loader),
+            patch("src.reports.generator._REPO_ROOT", tmp_path),
+            patch("src.reports.generator._REPORTS_DIR", tmp_path / "data" / "reports"),
+            patch("src.reports.generator._crawl_and_load_plays", return_value=[]),
+        ):
+            result = generate_report("abc123")
+
+        run = _read_run_record(db_path, result.slug)
+        assert run is not None
+        # AC-2: partial, not "completed".
+        assert run["crawl_status"] == "partial"
+        # AC-1: boxscores_fetched written + lands (real-schema round-trip,
+        # proves it is in the _RUN_RECORD_COLUMNS allowlist).
+        assert run["boxscores_fetched"] == 1
+        assert run["completed_games"] == 2
+
+    @patch("src.reports.generator.get_connection")
+    @patch("src.reports.generator.GameChangerClient")
+    @patch("src.reports.generator.ensure_team_row_with_provenance",
+           return_value=EnsureTeamResult(1, "anchor", False))
+    @patch("src.reports.generator.render_report", return_value="<html>test</html>")
+    @patch("src.reports.generator._crawl_and_load_spray")
+    def test_full_crawl_records_completed_and_boxscores_fetched(
+        self, mock_spray, mock_render, mock_ensure, mock_client_cls, mock_get_conn,
+        db, tmp_path,
+    ):
+        """E-236-03 AC-1/AC-4: a fully-fetched crawl (boxscores_fetched == M,
+        M>0) records crawl_status='completed' and boxscores_fetched == M."""
+        from src.gamechanger.loaders import LoadResult
+
+        self._setup(db, tmp_path)
+        db_path = str(tmp_path / "test.db")
+
+        def _fresh_conn():
+            conn = sqlite3.connect(db_path)
+            conn.execute("PRAGMA foreign_keys=ON;")
+            return conn
+
+        mock_get_conn.side_effect = lambda: _fresh_conn()
+        mock_client_cls.return_value = MagicMock()
+        mock_crawler = MagicMock()
+        mock_crawler.scout_team.return_value = ScoutingCrawlResult(
+            team_id=1, season_id="2026-spring-hs", games_crawled=2, errors=0,
+            games=[{"game_status": "completed"}, {"game_status": "completed"}],
+            boxscores={"g1": {}, "g2": {}},
+        )
+        mock_loader = MagicMock()
+        mock_loader.load_team.return_value = LoadResult(loaded=10)
+        mock_spray.return_value = _SprayOutcome(status="completed", games_crawled=2)
+
+        with (
+            patch("src.reports.generator.ScoutingCrawler", return_value=mock_crawler),
+            patch("src.reports.generator.ScoutingLoader", return_value=mock_loader),
+            patch("src.reports.generator._REPO_ROOT", tmp_path),
+            patch("src.reports.generator._REPORTS_DIR", tmp_path / "data" / "reports"),
+            patch("src.reports.generator._crawl_and_load_plays", return_value=[]),
+        ):
+            result = generate_report("abc123")
+
+        run = _read_run_record(db_path, result.slug)
+        assert run is not None
+        assert run["crawl_status"] == "completed"
+        assert run["boxscores_fetched"] == 2
+        assert run["completed_games"] == 2
+
+    @patch("src.reports.generator.get_connection")
+    @patch("src.reports.generator.GameChangerClient")
+    @patch("src.reports.generator.ensure_team_row_with_provenance",
+           return_value=EnsureTeamResult(1, "anchor", False))
+    @patch("src.reports.generator.render_report", return_value="<html>test</html>")
+    def test_all_blocked_crawl_fails_not_no_games(
+        self, mock_render, mock_ensure, mock_client_cls, mock_get_conn,
+        db, tmp_path,
+    ):
+        """E-236-03 AC-3/AC-5/AC-6 (SQ1, FINAL): an all-blocked crawl (M>0,
+        boxscores_fetched == 0) with ZERO crawl errors surfaces as a HARD
+        FAILURE -- crawl_status='failed', overall_status='failed',
+        outcome='failed', reports.status='failed' (the FAILED branch, NOT
+        no_games), no shareable page rendered -- instead of slipping silently to
+        a misleading no_games outcome.
+
+        errors=0 is deliberate: it proves the count-based gate
+        (boxscores_fetched == 0 AND completed_games > 0) fires on its own, not
+        via the pre-existing errors>0 disjunct.
+        """
+        self._setup(db, tmp_path)
+        db_path = str(tmp_path / "test.db")
+
+        def _fresh_conn():
+            conn = sqlite3.connect(db_path)
+            conn.execute("PRAGMA foreign_keys=ON;")
+            return conn
+
+        mock_get_conn.side_effect = lambda: _fresh_conn()
+        mock_client_cls.return_value = MagicMock()
+        mock_crawler = MagicMock()
+        # All-blocked: M = 2 completed games, but every boxscore fetch blocked
+        # (games_crawled == 0) and NO crawl-level error flag set (errors == 0).
+        mock_crawler.scout_team.return_value = ScoutingCrawlResult(
+            team_id=1, season_id="2026-spring-hs", games_crawled=0, errors=0,
+            games=[{"game_status": "completed"}, {"game_status": "completed"}],
+            boxscores={},
+        )
+
+        with (
+            patch("src.reports.generator.ScoutingCrawler", return_value=mock_crawler),
+            patch("src.reports.generator._REPO_ROOT", tmp_path),
+            patch("src.reports.generator._REPORTS_DIR", tmp_path / "data" / "reports"),
+        ):
+            result = generate_report("abc123")
+
+        # AC-3/AC-5: the failure branch is taken.
+        assert result.success is False
+        assert result.outcome == "failed"
+        run = _read_run_record(db_path, result.slug)
+        assert run is not None
+        assert run["crawl_status"] == "failed"
+        assert run["overall_status"] == "failed"
+        assert run["error_stage"] == "crawl"
+        assert run["boxscores_fetched"] == 0
+        assert run["completed_games"] == 2
+
+        # AC-6: the report row is FAILED (not no_games) and no shareable page
+        # was rendered -- the full render stage never ran.
+        verify_conn = _fresh_conn()
+        row = verify_conn.execute(
+            "SELECT status, report_path FROM reports WHERE slug = ?",
+            (result.slug,),
+        ).fetchone()
+        verify_conn.close()
+        assert row[0] == "failed", "all-blocked must persist 'failed', NOT 'no_games'"
+        mock_render.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -707,6 +1042,7 @@ class TestCLIOutput:
             slug="test-slug-123",
             title="Scouting Report — Test Team",
             url="https://bbstats.ai/reports/test-slug-123",
+            outcome="ready",  # E-236-05: CLI generate branches on outcome
         )
         with patch("src.cli.report.generate_report", return_value=mock_result):
             result = runner.invoke(app, ["generate", "https://web.gc.com/teams/abc/test"])
@@ -1211,6 +1547,287 @@ class TestCrawlAndLoadSpray:
             "abc123", season_id="2026-spring-hs", gc_uuid="resolved-uuid",
             games_data=None,
         )
+
+
+# ---------------------------------------------------------------------------
+# E-236-04: spray-stage honesty -- spray_games_with_data + error-driven status
+# ---------------------------------------------------------------------------
+
+
+def _make_spray_gen():
+    """Build a minimal _ReportGeneration carrying only what _spray_stage reads."""
+    gen = _gen._ReportGeneration.__new__(_gen._ReportGeneration)
+    gen.report_id = 123
+    gen.client = object()
+    gen.public_id = "abc123"
+    gen.season_id = "2026-spring-hs"
+    gen.resolved_gc_uuid = None
+    gen.team_id = 1
+
+    class _CR:
+        games = []
+
+    gen.crawl_result = _CR()
+    gen.spray_games = None
+    return gen
+
+
+def _run_spray_stage(outcome):
+    """Run _spray_stage with _crawl_and_load_spray faked to return ``outcome``.
+
+    Returns the merged dict of fields written to the run record.
+    """
+    gen = _make_spray_gen()
+    captured: dict = {}
+
+    def fake_update(report_id, **fields):
+        captured.update(fields)
+
+    with patch.object(_gen, "_update_run_record", fake_update), patch.object(
+        _gen, "_crawl_and_load_spray", return_value=outcome
+    ):
+        gen._spray_stage()
+    return captured
+
+
+class TestSprayStageHonesty:
+    """spray_status is ERROR-driven, NOT coverage-driven (AC-2..AC-4)."""
+
+    def test_completed_when_null_charts_zero_errors(self):
+        """AC-1/AC-3 (key false-alarm guard): a coverage shortfall
+        (spray_games_with_data < spray_games) with ZERO errors -- the modal
+        scorekeeper-didn't-chart case -- stays "completed", NOT "partial".
+        """
+        outcome = _SprayOutcome(
+            status="completed", games_crawled=5, errors=0,
+            spray_games_with_data=1,
+        )
+        captured = _run_spray_stage(outcome)
+        assert captured["spray_status"] == "completed"
+        # AC-1: informational coverage recorded, distinct from spray_games.
+        assert captured["spray_games"] == 5
+        assert captured["spray_games_with_data"] == 1
+
+    def test_completed_when_zero_coverage_zero_errors(self):
+        """AC-3 extreme: NO games charted at all (spray_games_with_data == 0)
+        but no error -> still "completed"."""
+        outcome = _SprayOutcome(
+            status="completed", games_crawled=3, errors=0,
+            spray_games_with_data=0,
+        )
+        captured = _run_spray_stage(outcome)
+        assert captured["spray_status"] == "completed"
+        assert captured["spray_games_with_data"] == 0
+
+    def test_failed_on_total_crawl_failure(self):
+        """AC-4: an existing spray CRAWL failure (status=='failed',
+        spray_games==0) maps to "failed" BEFORE the classifier (TN-1
+        precedence), so expected==0 -> completed does NOT mask it."""
+        outcome = _SprayOutcome(status="failed", games_crawled=0, errors=1)
+        captured = _run_spray_stage(outcome)
+        assert captured["spray_status"] == "failed"
+        assert captured["spray_games"] == 0
+
+    def test_partial_on_load_error_not_coverage(self):
+        """AC-2: status flips off "completed" only on a real error signal. A
+        crawl with games but a non-zero error count -> "partial" (errors>0),
+        proving status is error-driven (coverage alone never does this)."""
+        outcome = _SprayOutcome(
+            status="completed", games_crawled=4, errors=2,
+            spray_games_with_data=4,
+        )
+        captured = _run_spray_stage(outcome)
+        assert captured["spray_status"] == "partial"
+
+
+class TestSprayInformationalCount:
+    """_crawl_and_load_spray computes a perspective-filtered coverage count."""
+
+    @staticmethod
+    def _seed_spray_row(db, *, game_id, perspective_team_id, player_id,
+                        team_id=None, season_id="2026-spring-hs",
+                        chart_type="offensive"):
+        # team_id defaults to perspective_team_id (the own-perspective case).
+        # season_id + chart_type are now part of the count predicate (Phase 4b
+        # MEDIUM: the count must mirror _query_spray_charts), so the seed must
+        # set them; callers override to exercise the cross-season / defensive
+        # exclusions.
+        db.execute(
+            "INSERT INTO spray_charts (game_id, player_id, team_id, "
+            "perspective_team_id, season_id, chart_type, play_result) "
+            "VALUES (?, ?, ?, ?, ?, ?, 'Single')",
+            (game_id, player_id,
+             team_id if team_id is not None else perspective_team_id,
+             perspective_team_id, season_id, chart_type),
+        )
+        db.commit()
+
+    def _setup_two_perspectives(self, db):
+        """Seed spray rows: team 1 has 2 distinct games, team 2 has 1."""
+        _seed_team(db, name="Our Team", public_id="abc123")   # id 1
+        _seed_team(db, name="Other Team", public_id="xyz789")  # id 2
+        _seed_season(db)
+        for pid in ("p1", "p2", "p3"):
+            _seed_player(db, player_id=pid)
+        for gid in ("g1", "g2", "g3"):
+            db.execute(
+                "INSERT INTO games (game_id, season_id, home_team_id, "
+                "away_team_id, game_date) VALUES (?, '2026-spring-hs', 1, 2, "
+                "'2026-04-01')",
+                (gid,),
+            )
+        db.commit()
+        # Perspective 1: rows for g1 (two rows) and g2 -> 2 distinct games.
+        self._seed_spray_row(db, game_id="g1", perspective_team_id=1, player_id="p1")
+        self._seed_spray_row(db, game_id="g1", perspective_team_id=1, player_id="p2")
+        self._seed_spray_row(db, game_id="g2", perspective_team_id=1, player_id="p1")
+        # Perspective 2: rows for g3 -> 1 distinct game (must NOT be counted).
+        self._seed_spray_row(db, game_id="g3", perspective_team_id=2, player_id="p3")
+
+    @patch("src.reports.generator.get_connection")
+    @patch("src.reports.generator.ScoutingSprayChartCrawler")
+    @patch("src.reports.generator.ScoutingSprayChartLoader")
+    def test_count_is_perspective_filtered(
+        self, mock_loader_cls, mock_crawler_cls, mock_get_conn, db, tmp_path,
+    ):
+        """AC-1/AC-6: spray_games_with_data counts distinct games with spray rows
+        for THIS team's perspective only -- cross-perspective rows excluded."""
+        from src.gamechanger.loaders import LoadResult
+
+        # The ``db`` fixture is already disk-backed at tmp_path/test.db and the
+        # seed helpers commit, so the rows are on disk -- point fresh connections
+        # at the SAME file. (Do NOT db.backup() onto the same path: that
+        # deadlocks SQLite.)
+        self._setup_two_perspectives(db)
+        db_path = str(tmp_path / "test.db")
+
+        def _fresh_conn():
+            c = sqlite3.connect(db_path)
+            c.execute("PRAGMA foreign_keys=ON;")
+            return c
+
+        mock_get_conn.side_effect = lambda: _fresh_conn()
+        # Crawl "succeeds" (no error, some games) and load reports no errors.
+        mock_crawler = MagicMock()
+        mock_crawler.crawl_team.return_value = MagicMock(
+            errors=0, games_crawled=3, spray_data={},
+        )
+        mock_crawler_cls.return_value = mock_crawler
+        mock_loader = MagicMock()
+        mock_loader.load_from_data.return_value = LoadResult(loaded=0, errors=0)
+        mock_loader_cls.return_value = mock_loader
+
+        outcome = _crawl_and_load_spray(
+            MagicMock(), "abc123", "2026-spring-hs", team_id=1,
+        )
+
+        assert outcome.status == "completed"
+        assert outcome.errors == 0
+        # Only perspective 1's 2 distinct games -- NOT perspective 2's g3.
+        assert outcome.spray_games_with_data == 2
+
+    @patch("src.reports.generator.get_connection")
+    @patch("src.reports.generator.ScoutingSprayChartCrawler")
+    @patch("src.reports.generator.ScoutingSprayChartLoader")
+    def test_count_excludes_cross_season_and_defensive_rows(
+        self, mock_loader_cls, mock_crawler_cls, mock_get_conn, db, tmp_path,
+    ):
+        """Phase 4b MEDIUM: the count predicate must mirror _query_spray_charts
+        (team_id + season_id + chart_type='offensive' + perspective). Rows that
+        the rendered offensive spray line would NOT show -- a DEFENSIVE chart in
+        the report's season, and an OFFENSIVE chart in a DIFFERENT season -- must
+        be EXCLUDED from the coverage count. This is the Codex-reproduced bug;
+        before the fix the count inflated past the 2 truly-rendered games."""
+        from src.gamechanger.loaders import LoadResult
+
+        self._setup_two_perspectives(db)  # team 1 / persp 1: g1, g2 offensive 2026
+        db_path = str(tmp_path / "test.db")
+
+        # Extra games for the exclusion rows (game_id FKs to games).
+        for gid in ("g4", "g5"):
+            db.execute(
+                "INSERT INTO games (game_id, season_id, home_team_id, "
+                "away_team_id, game_date) VALUES (?, '2026-spring-hs', 1, 2, "
+                "'2026-04-02')",
+                (gid,),
+            )
+        db.commit()
+        # g4: own team/perspective, current season, but DEFENSIVE chart -> excluded.
+        self._seed_spray_row(
+            db, game_id="g4", perspective_team_id=1, player_id="p1",
+            chart_type="defensive",
+        )
+        # g5: own team/perspective, OFFENSIVE, but a DIFFERENT season -> excluded.
+        self._seed_spray_row(
+            db, game_id="g5", perspective_team_id=1, player_id="p1",
+            season_id="2025-spring-hs",
+        )
+
+        def _fresh_conn():
+            c = sqlite3.connect(db_path)
+            c.execute("PRAGMA foreign_keys=ON;")
+            return c
+
+        mock_get_conn.side_effect = lambda: _fresh_conn()
+        mock_crawler = MagicMock()
+        mock_crawler.crawl_team.return_value = MagicMock(
+            errors=0, games_crawled=4, spray_data={},
+        )
+        mock_crawler_cls.return_value = mock_crawler
+        mock_loader = MagicMock()
+        mock_loader.load_from_data.return_value = LoadResult(loaded=0, errors=0)
+        mock_loader_cls.return_value = mock_loader
+
+        outcome = _crawl_and_load_spray(
+            MagicMock(), "abc123", "2026-spring-hs", team_id=1,
+        )
+
+        # Still exactly 2 -- the defensive row (g4) and the cross-season row (g5)
+        # are NOT counted, matching what the offensive spray line renders.
+        assert outcome.spray_games_with_data == 2
+
+    def test_spray_games_with_data_write_lands(self, tmp_path):
+        """CR carry-forward: spray_games_with_data must be in
+        _RUN_RECORD_COLUMNS or _update_run_record silently drops it. Round-trip
+        through the real schema to prove the write lands."""
+        assert "spray_games_with_data" in _gen._RUN_RECORD_COLUMNS
+
+        db_path = str(tmp_path / "rr.db")
+        conn = sqlite3.connect(db_path)
+        load_real_schema(conn)
+        conn.execute(
+            "INSERT INTO teams (id, name, membership_type) VALUES (1, 'T', 'tracked')"
+        )
+        conn.execute(
+            "INSERT INTO reports (id, slug, team_id, title, status, "
+            "generated_at, expires_at) VALUES "
+            "(1, 's', 1, 't', 'generating', "
+            "'2026-01-01T00:00:00Z', '2026-02-01T00:00:00Z')"
+        )
+        conn.execute(
+            "INSERT INTO report_generation_runs (report_id, started_at, "
+            "overall_status) VALUES (1, '2026-01-01T00:00:00Z', 'running')"
+        )
+        conn.commit()
+        conn.close()
+
+        def _fresh():
+            c = sqlite3.connect(db_path)
+            c.execute("PRAGMA foreign_keys=ON;")
+            return c
+
+        with patch.object(_gen, "get_connection", side_effect=_fresh):
+            _gen._update_run_record(
+                1, spray_status="completed", spray_games_with_data=2,
+            )
+
+        conn = sqlite3.connect(db_path)
+        row = conn.execute(
+            "SELECT spray_status, spray_games_with_data FROM "
+            "report_generation_runs WHERE report_id = 1"
+        ).fetchone()
+        conn.close()
+        assert row == ("completed", 2)
 
 
 # ===========================================================================
@@ -3309,6 +3926,34 @@ class TestQualityGatesFlags:
         # spray_available reflects spray rows actually loaded (none in this
         # mocked run) -- it is a bool keyed off the queried spray_charts.
         assert data["spray_available"] is False
-        # Default team -> season fallback -> degraded confidence true even at
-        # high coverage (the flag is orthogonal to coverage severity).
-        assert data["degraded_confidence"] is True
+        # E-236-06 AC-2: clean modal data (default team -> season_fallback=True,
+        # but identity_match_method="anchor", NOT name-only) NO LONGER trips the
+        # coach-facing degraded line. season_fallback was dropped from the
+        # degraded_confidence term (Option A / coach C2); it remains operator-
+        # only telemetry. Only a name-only identity match degrades confidence.
+        assert data["degraded_confidence"] is False
+        # The operator telemetry is still written (AC-4): season_fallback fired.
+        run = _read_run_record(str(tmp_path / "test.db"), result.slug)
+        assert run["season_fallback"] == 1
+
+    @patch("src.reports.generator.get_connection")
+    @patch("src.reports.generator.GameChangerClient")
+    @patch("src.reports.generator.ensure_team_row_with_provenance",
+           return_value=EnsureTeamResult(1, "name_only", False))
+    def test_name_only_identity_degrades_confidence(
+        self, mock_ensure, mock_client_cls, mock_get_conn, db, tmp_path,
+    ):
+        """E-236-06 AC-3: a name-only identity match still trips the coach-
+        facing degraded-confidence line (behavior preserved after dropping the
+        season_fallback term)."""
+        captured: dict = {}
+
+        def _capture(data):
+            captured["data"] = data
+            return "<html>ok</html>"
+
+        result = self._run(
+            db, tmp_path, mock_get_conn, mock_client_cls, capture=_capture,
+        )
+        assert result.success is True
+        assert captured["data"]["degraded_confidence"] is True

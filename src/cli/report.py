@@ -57,9 +57,29 @@ def generate(
 
     result = generate_report(gc_url)
 
-    if result.success:
+    # Branch on the finer-grained outcome (E-236 TN-5), not just success:
+    #   ready    -> success output, exit 0
+    #   no_games -> shareable page exists; print the URL and exit 0 (NOT a
+    #               hard failure -- the link renders the coach-facing message)
+    #   failed   -> hard failure, exit 1
+    if result.outcome == "ready":
         console.print(f"\n[green]Report generated successfully![/green]")
         console.print(f"  Title: {result.title}")
+        console.print(f"  URL:   {result.url}")
+    elif result.outcome == "no_games":
+        # Distinguish M=0 ("no games on record") from M>0/N=0 ("games were
+        # played, but no box score data") so the operator message is honest --
+        # mirrors the coach page's two-case copy (Phase 4b MEDIUM). N is 0 in
+        # both no_games cases; M (completed_games) is the discriminator.
+        console.print(f"\n[yellow]No games to report yet.[/yellow]")
+        m = result.completed_games
+        if m:  # M > 0: games played, box-score data missing.
+            console.print(
+                f"  Played {m} games this season, but no box score data is "
+                "available in GameChanger."
+            )
+        else:  # M == 0 (or unknown): no games on record yet.
+            console.print("  No games on record for this team this season.")
         console.print(f"  URL:   {result.url}")
     else:
         err_console.print(f"\n[red]Report generation failed.[/red]")

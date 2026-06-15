@@ -3242,6 +3242,23 @@ def _get_all_reports() -> list[dict[str, Any]]:
     for r in result:
         r["url"] = f"{base_url}/reports/{r['slug']}"
         r["is_expired"] = r["expires_at"] < now
+        # E-236-07 AC-3 / TN-3: derived operator-"degraded" flag, computed at
+        # READ time (no schema column). True when the run finished
+        # (overall_status == 'completed') yet some stage degraded to 'partial'
+        # or 'failed' -- the run "succeeded" overall but a stage is not clean,
+        # so the operator should drill in. OPERATOR-ONLY (coach C3): this flag
+        # never reaches the coach footer.
+        r["operator_degraded"] = (
+            r.get("overall_status") == "completed"
+            and any(
+                r.get(col) in ("partial", "failed")
+                for col in (
+                    "crawl_status", "load_status", "gc_uuid_status",
+                    "spray_status", "plays_status", "reconciliation_status",
+                    "enrichment_status",
+                )
+            )
+        )
     return result
 
 

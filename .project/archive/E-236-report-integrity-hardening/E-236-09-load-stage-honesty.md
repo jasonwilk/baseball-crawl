@@ -4,7 +4,7 @@
 [E-236: Report Self-Reporting Integrity Hardening](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the scouting-LOAD stage will record an honest `load_status` (`completed`/`partial`/`failed`) and write the `load_errors` count, instead of hardcoding `load_status="completed"` even when the loader reported errors. This closes the 6th self-reporting gap (#6), surfaced during the internal review — the same bug class as #1, one stage over.

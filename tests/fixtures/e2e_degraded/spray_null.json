@@ -1,0 +1,12 @@
+{
+  "stream_id": "",
+  "team_id": "00000000-0000-4000-8000-00000000003b",
+  "event_id": "",
+  "cumulative_player_stats": {},
+  "player_stats": {
+    "stats": {},
+    "players": {}
+  },
+  "spray_chart_data": null,
+  "_note": "Sub-case spray-less: a valid HTTP 200 player-stats response whose spray_chart_data is null (the scorekeeper did not chart). Per ScoutingSprayChartCrawler this is a fetch SUCCESS (games_crawled+1, errors=0); the loader skips it gracefully (0 rows). Served for ALL games in the degraded scenario, so spray_status='completed' (null != error, TN-1/TN-7) and spray_games_with_data=0."
+}

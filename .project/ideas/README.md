@@ -95,7 +95,7 @@ Review this list every 90 days, or when completing an epic. Ask:
 | [IDEA-074](IDEA-074-starlette-deprecation-migration.md) | Migrate Starlette Deprecations Before a Framework Upgrade Breaks Them | PROMOTED | 2026-06-07 -- promoted to E-232 |
 | [IDEA-075](IDEA-075-harness-output-reliability.md) | Harness Output-Reliability Fix (stop the garble/drop/silent-edit thrash) → E-231 | PROMOTED | 2026-08-29 |
 | [IDEA-076](IDEA-076-spray-value-regression-guard.md) | Spray-Value Regression Guard (E-234-05 left spray shape-only) | CANDIDATE | 2026-09-11 |
-| [IDEA-077](IDEA-077-reevaluate-season-fallback-trust-flag.md) | Re-evaluate season_fallback Trust Flag — DECIDED Option A (drop coach-visible line; keep column as telemetry); impl is a small follow-up | CANDIDATE | 2026-09-12 |
+| [IDEA-077](IDEA-077-reevaluate-season-fallback-trust-flag.md) | Re-evaluate season_fallback Trust Flag — Option A coach-visible line DELIVERED by E-236-06; machinery removal residual → ROADMAP D2 | PROMOTED | 2026-06-15 -- Option A delivered by E-236-06 |
 | [IDEA-078](IDEA-078-coaching-docs-dashboard-staleness.md) | Coaching docs still sell a dashboard-first / longitudinal product — reports-first rewrite (bounded docs cleanup; surfaced by drift scour) | CANDIDATE | 2026-09-13 |
 
 ## Status Definitions

@@ -1,5 +1,20 @@
 {% extends "base.html" %}
 
+{# E-236-07 (AC-2 / TN-1): render a per-stage status value, giving the NEW
+   'partial' value (and 'failed') a distinct, CHECKABLE treatment -- a
+   stage-specific CSS class + color -- so the operator can spot a degraded
+   stage at a glance and a test can assert on the class. 'completed' and other
+   values render as plain text (unchanged from the prior pipeline line). #}
+{% macro stage_status(value) -%}
+{%- if value == 'partial' -%}
+<span class="pipeline-status pipeline-status-partial text-amber-700 font-medium">partial</span>
+{%- elif value == 'failed' -%}
+<span class="pipeline-status pipeline-status-failed text-red-700 font-medium">failed</span>
+{%- else -%}
+{{ value or '–' }}
+{%- endif -%}
+{%- endmacro %}
+
 {% block title %}Admin -- Reports{% endblock %}
 
 {% block header_extras %}
@@ -78,19 +93,27 @@
           {% if report.overall_status %}
           <div class="mt-1 font-normal text-[11px] text-gray-500 leading-tight">
             <span class="font-medium text-gray-600">Pipeline:</span>
-            crawl {{ report.crawl_status or '–' }}
-            · load {{ report.load_status or '–' }}
-            · gc_uuid {{ report.gc_uuid_status or '–' }}
-            · spray {{ report.spray_status or '–' }}{% if report.spray_games is not none %} ({{ report.spray_games }}){% endif %}
-            · plays {{ report.plays_status or '–' }}{% if report.plays_games_covered is not none %} ({{ report.plays_games_covered }}/{{ report.plays_games_expected or 0 }}){% endif %}
-            · recon {{ report.reconciliation_status or '–' }}{% if report.discrepancies_found is not none %} ({{ report.discrepancies_corrected or 0 }}/{{ report.discrepancies_found }}){% endif %}
-            {% if report.enrichment_status %}· enrich {{ report.enrichment_status }}{% endif %}
+            crawl {{ stage_status(report.crawl_status) }}
+            · load {{ stage_status(report.load_status) }}{% if report.load_errors %} ({{ report.load_errors }} err){% endif %}
+            · gc_uuid {{ stage_status(report.gc_uuid_status) }}
+            · spray {{ stage_status(report.spray_status) }}{% if report.spray_games is not none %} ({{ report.spray_games_with_data if report.spray_games_with_data is not none else '–' }}/{{ report.spray_games }}){% endif %}
+            · plays {{ stage_status(report.plays_status) }}{% if report.plays_games_covered is not none %} ({{ report.plays_games_covered }}/{{ report.plays_games_expected or 0 }}){% endif %}{% if report.plays_errors %} ({{ report.plays_errors }} err){% endif %}
+            · recon {{ stage_status(report.reconciliation_status) }}{% if report.discrepancies_found is not none %} ({{ report.discrepancies_corrected or 0 }}/{{ report.discrepancies_found }}){% endif %}
+            {% if report.enrichment_status %}· enrich {{ stage_status(report.enrichment_status) }}{% endif %}
             <br>
             <span class="font-medium text-gray-600">Games:</span>
             {{ report.completed_games_with_data if report.completed_games_with_data is not none else '–' }}
             of {{ report.completed_games if report.completed_games is not none else '–' }} with data
+            {% if report.boxscores_fetched is not none %}· {{ report.boxscores_fetched }} boxscores fetched{% endif %}
             {% if report.season_id_used %}· season {{ report.season_id_used }}{% endif %}
           </div>
+          {% endif %}
+          {# E-236-07 (AC-3 / TN-3): derived operator-"degraded" badge -- the run
+             completed overall but a stage degraded to partial/failed. Computed
+             at read time in the route (no schema column). OPERATOR-ONLY. #}
+          {% if report.operator_degraded %}
+          <span class="operator-degraded inline-block mt-1 px-1.5 py-0.5 rounded font-normal text-[10px] bg-yellow-100 text-yellow-800"
+                title="Run completed but a pipeline stage degraded (partial/failed) — drill into the Pipeline line above">degraded</span>
           {% endif %}
           {% if report.season_fallback %}
           <span class="inline-block mt-1 px-1.5 py-0.5 rounded font-normal text-[10px] bg-orange-100 text-orange-800"

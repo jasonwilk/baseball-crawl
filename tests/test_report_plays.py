@@ -12,14 +12,17 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
+from src.reports import generator as _gen
 from src.reports.generator import (
     _query_plays_batting_stats,
     _query_plays_pitching_stats,
     _query_plays_team_stats,
 )
+from tests.conftest import load_real_schema
 
 # ---------------------------------------------------------------------------
 # Schema fixture
@@ -602,3 +605,264 @@ class TestCrawlAndLoadPlaysFailureIsolation:
 
         # Function should complete without raising despite game 1 failure
         assert isinstance(result, list)
+
+    def test_recon_out_threads_fetch_failure_and_fetched_ok(
+        self, db: sqlite3.Connection, tmp_path: Path
+    ) -> None:
+        """AC-1: per-game fetch failures and successes thread into _ReconCounts.
+
+        game 1's fetch raises (counts as plays_fetch_failures); game 2 fetches a
+        valid empty-plays response and loads cleanly (counts as plays_fetched_ok,
+        zero load errors). The function's list[str] return type is unchanged.
+        """
+        from unittest.mock import MagicMock
+
+        _seed_base(db)
+
+        mock_client = MagicMock()
+        fake_plays_response = {
+            "sport": "baseball",
+            "team_players": {},
+            "plays": [],
+        }
+
+        def mock_get(path: str, **kwargs):
+            if _GAME_ID_1 in path:
+                raise RuntimeError("Simulated network error")
+            return fake_plays_response
+
+        mock_client.get.side_effect = mock_get
+
+        db_path = str(tmp_path / "test.db")
+        file_conn = sqlite3.connect(db_path)
+        db.backup(file_conn)
+        file_conn.close()
+
+        def _fresh_conn():
+            c = sqlite3.connect(db_path)
+            c.execute("PRAGMA foreign_keys=ON;")
+            c.row_factory = sqlite3.Row
+            return c
+
+        from src.reports.generator import _ReconCounts, _crawl_and_load_plays
+
+        recon = _ReconCounts()
+        with patch("src.reports.generator.get_connection", side_effect=_fresh_conn):
+            result = _crawl_and_load_plays(
+                mock_client,
+                public_id="test-team",
+                team_id=_TEAM_ID,
+                season_id=_SEASON_ID,
+                game_ids=[_GAME_ID_1, _GAME_ID_2],
+                recon_out=recon,
+            )
+
+        # Pinned return type (E-211) is unchanged.
+        assert isinstance(result, list)
+        # One fetch raised, one succeeded.
+        assert recon.plays_fetch_failures == 1
+        assert recon.plays_fetched_ok == 1
+        # The empty-plays load produced no loader errors.
+        assert recon.plays_load_errors == 0
+
+
+# ---------------------------------------------------------------------------
+# Tests: _plays_stage honesty -- ERROR-driven plays_status (E-236-02)
+# ---------------------------------------------------------------------------
+
+
+class _FakeCrawlResult:
+    """Minimal stand-in for ScoutingCrawlResult exposing only ``boxscores``."""
+
+    def __init__(self, game_ids: list[str]) -> None:
+        self.boxscores = {gid: {} for gid in game_ids}
+
+
+def _make_plays_gen(game_ids: list[str]) -> "_gen._ReportGeneration":
+    """Build a minimal _ReportGeneration carrying only what _plays_stage reads."""
+    gen = _gen._ReportGeneration.__new__(_gen._ReportGeneration)
+    gen.report_id = 123
+    gen.client = object()
+    gen.public_id = "test-team"
+    gen.team_id = _TEAM_ID
+    gen.season_id = _SEASON_ID
+    gen.plays_game_ids = []
+    gen.crawl_result = _FakeCrawlResult(game_ids)
+    return gen
+
+
+def _run_plays_stage(game_ids, populate, *, return_value=None):
+    """Run _plays_stage with a faked _crawl_and_load_plays.
+
+    ``populate(recon)`` sets the _ReconCounts scenario on the out-parameter the
+    way the real helper would. Returns the merged dict of fields written to the
+    run record via _update_run_record.
+    """
+    gen = _make_plays_gen(game_ids)
+    captured: dict = {}
+
+    def fake_update(report_id, **fields):
+        captured.update(fields)
+
+    def fake_crawl(*args, **kwargs):
+        recon = kwargs["recon_out"]
+        populate(recon)
+        return list(game_ids) if return_value is None else return_value
+
+    with patch.object(_gen, "_update_run_record", fake_update), patch.object(
+        _gen, "_crawl_and_load_plays", fake_crawl
+    ):
+        gen._plays_stage()
+    return captured
+
+
+class TestPlaysStageHonesty:
+    """_plays_stage derives an ERROR-driven plays_status (AC-2..AC-5)."""
+
+    def test_completed_when_fetched_but_empty_zero_errors(self) -> None:
+        """AC-5 (key assertion): games fetched 200 with NO plays and ZERO errors
+        (the modal no-scorebook case) stays "completed" -- not partial/failed.
+        """
+
+        def populate(recon):
+            recon.plays_fetched_ok = 3  # all attempted games fetched, no raise
+
+        captured = _run_plays_stage(["g1", "g2", "g3"], populate)
+        assert captured["plays_status"] == "completed"
+        assert captured["plays_errors"] == 0
+
+    def test_partial_on_per_game_fetch_failure(self) -> None:
+        """AC-3: some games fetch OK, at least one ERRORS -> partial, errors>0."""
+
+        def populate(recon):
+            recon.plays_fetched_ok = 2
+            recon.plays_fetch_failures = 1
+
+        captured = _run_plays_stage(["g1", "g2", "g3"], populate)
+        assert captured["plays_status"] == "partial"
+        assert captured["plays_errors"] == 1
+
+    def test_partial_on_load_errors(self) -> None:
+        """AC-3: fetches all succeed but PlaysLoader reports errors -> partial."""
+
+        def populate(recon):
+            recon.plays_fetched_ok = 3
+            recon.plays_load_errors = 2
+
+        captured = _run_plays_stage(["g1", "g2", "g3"], populate)
+        assert captured["plays_status"] == "partial"
+        assert captured["plays_errors"] == 2
+
+    def test_partial_sums_fetch_and_load_errors(self) -> None:
+        """AC-2 / TN-2: plays_errors is fetch failures + load errors summed."""
+
+        def populate(recon):
+            recon.plays_fetched_ok = 2
+            recon.plays_fetch_failures = 1
+            recon.plays_load_errors = 3
+
+        captured = _run_plays_stage(["g1", "g2", "g3"], populate)
+        assert captured["plays_status"] == "partial"
+        assert captured["plays_errors"] == 4
+
+    def test_failed_when_all_fetches_error(self) -> None:
+        """AC-2 classifier: zero fetched_ok of a non-zero attempted set -> failed."""
+
+        def populate(recon):
+            recon.plays_fetch_failures = 3  # all attempted games failed
+
+        captured = _run_plays_stage(["g1", "g2", "g3"], populate)
+        assert captured["plays_status"] == "failed"
+        assert captured["plays_errors"] == 3
+
+    def test_failed_when_recon_failed_total_failure(self) -> None:
+        """AC-4: the existing recon.failed total-failure signal maps to "failed"
+        BEFORE the classifier (TN-1 precedence) -- behavior preserved.
+        """
+
+        def populate(recon):
+            recon.failed = True
+
+        captured = _run_plays_stage(["g1", "g2", "g3"], populate, return_value=[])
+        assert captured["plays_status"] == "failed"
+        assert captured["reconciliation_status"] == "failed"
+
+    def test_completed_when_nothing_attempted(self) -> None:
+        """AC-2 / TN-1: expected == 0 (no games attempted) -> completed."""
+
+        def populate(recon):
+            pass  # no games attempted -> all counts stay 0
+
+        captured = _run_plays_stage([], populate, return_value=[])
+        assert captured["plays_status"] == "completed"
+        assert captured["plays_errors"] == 0
+
+    def test_stage_stays_non_fatal_on_cred_expiry(self) -> None:
+        """AC-6: CredentialExpiredError is caught locally; report generation
+        continues and the stage records plays_status="failed" without raising.
+        """
+        gen = _make_plays_gen(["g1", "g2"])
+        captured: dict = {}
+
+        def fake_update(report_id, **fields):
+            captured.update(fields)
+
+        def fake_crawl(*args, **kwargs):
+            raise _gen.CredentialExpiredError("expired")
+
+        with patch.object(_gen, "_update_run_record", fake_update), patch.object(
+            _gen, "_crawl_and_load_plays", fake_crawl
+        ):
+            # Must NOT raise -- the stage swallows CredentialExpiredError.
+            gen._plays_stage()
+
+        assert captured["plays_status"] == "failed"
+
+
+class TestPlaysErrorsColumnWrite:
+    """The plays_errors write actually lands (allowlist gate, story-01 carry-fwd)."""
+
+    def test_plays_errors_persists_to_run_record_column(
+        self, tmp_path: Path
+    ) -> None:
+        """plays_errors must be in _RUN_RECORD_COLUMNS or _update_run_record
+        silently drops it. Round-trip through the real schema to prove it lands.
+        """
+        # plays_errors is gated by the allowlist frozenset.
+        assert "plays_errors" in _gen._RUN_RECORD_COLUMNS
+
+        db_path = str(tmp_path / "rr.db")
+        conn = sqlite3.connect(db_path)
+        load_real_schema(conn)
+        conn.execute(
+            "INSERT INTO teams (id, name, membership_type, is_active) "
+            "VALUES (1, 'T', 'tracked', 1)"
+        )
+        conn.execute(
+            "INSERT INTO reports (id, slug, team_id, title, status, "
+            "generated_at, expires_at) VALUES "
+            "(1, 's', 1, 't', 'generating', "
+            "'2026-01-01T00:00:00Z', '2026-02-01T00:00:00Z')"
+        )
+        conn.execute(
+            "INSERT INTO report_generation_runs (report_id, started_at, "
+            "overall_status) VALUES (1, '2026-01-01T00:00:00Z', 'running')"
+        )
+        conn.commit()
+        conn.close()
+
+        def _fresh():
+            c = sqlite3.connect(db_path)
+            c.execute("PRAGMA foreign_keys=ON;")
+            return c
+
+        with patch.object(_gen, "get_connection", side_effect=_fresh):
+            _gen._update_run_record(1, plays_status="partial", plays_errors=4)
+
+        conn = sqlite3.connect(db_path)
+        row = conn.execute(
+            "SELECT plays_status, plays_errors FROM report_generation_runs "
+            "WHERE report_id = 1"
+        ).fetchone()
+        conn.close()
+        assert row == ("partial", 4)

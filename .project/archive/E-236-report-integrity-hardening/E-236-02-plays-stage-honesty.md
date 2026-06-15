@@ -4,7 +4,7 @@
 [E-236: Report Self-Reporting Integrity Hardening](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, a partial plays load (some games fetched or loaded successfully, others failed) will be recorded as `plays_status="partial"` with a non-NULL `plays_errors` count — not `"completed"` as it is today. Total failure stays `"failed"`; a genuinely-empty plays result stays `"completed"`. This closes finding #1 (HIGH).

@@ -767,7 +767,8 @@ def render_report(data: dict[str, Any]) -> str:
     return template.render(**context)
 
 
-def render_no_games_page(team_name: str) -> str:
+def render_no_games_page(team_name: str, completed_games: int = 0,
+                         completed_games_with_data: int = 0) -> str:
     """Render the minimal no-completed-games page (E-235-03 gate (a), TN-7).
 
     Produced when a generation finds zero completed games WITH data. It is a
@@ -775,26 +776,44 @@ def render_no_games_page(team_name: str) -> str:
     NOT a 404 and NOT a silent empty "ready" report. The public serve route
     serves it like any other report file (for ``reports.status = 'no_games'``).
 
+    The coach-facing copy branches on M (``completed_games``, games played to
+    date) vs N (``completed_games_with_data``, games we have box score data for;
+    always 0 when this page is produced) per E-236 TN-5 / coach C1:
+
+    - M == 0: no games on record yet for the team this season.
+    - M > 0, N == 0: games were played, but no box score data is available --
+      the modal pre-game scouting case (opponent has scheduled/played games but
+      no scorebook). The copy interpolates M (games played), NOT N (0).
+
     Args:
         team_name: The team's display name (interpolated into the message,
             HTML-escaped).
+        completed_games: M -- completed games played to date.
+        completed_games_with_data: N -- completed games with box score data
+            (0 by construction when this page is produced).
 
     Returns:
         Complete HTML string ready to be written to a file.
     """
     safe_name = html.escape(team_name or "this team")
-    # Coach wording is authoritative (TN-7); keep it verbatim.
-    message = (
-        f"No completed games found for {safe_name} this season. "
-        "If this looks wrong, verify the team URL and try again."
-    )
+    # Coach wording is authoritative (TN-5 / C1); keep it verbatim. The copy
+    # MUST NOT say "check back later" (at pre-game, "later" is irrelevant).
+    if completed_games > 0 and completed_games_with_data == 0:
+        heading = "No box score data"
+        message = (
+            f"{safe_name} has played {completed_games} games this season, "
+            "but no box score data is available in GameChanger."
+        )
+    else:
+        heading = "No games on record"
+        message = f"No games on record for {safe_name} this season."
     return (
         "<!DOCTYPE html>\n"
         '<html lang="en">\n'
         "<head>\n"
         '<meta charset="utf-8">\n'
         '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
-        f"<title>No completed games — {safe_name}</title>\n"
+        f"<title>{heading} — {safe_name}</title>\n"
         "<style>\n"
         "  body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;\n"
         "         background: #f8fafc; color: #1e293b; margin: 0; padding: 2rem; }\n"
@@ -808,7 +827,7 @@ def render_no_games_page(team_name: str) -> str:
         "</head>\n"
         "<body>\n"
         '<div class="card">\n'
-        f"<h1>No completed games — {safe_name}</h1>\n"
+        f"<h1>{heading} — {safe_name}</h1>\n"
         f"<p>{message}</p>\n"
         "</div>\n"
         "</body>\n"

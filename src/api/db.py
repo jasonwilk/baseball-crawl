@@ -93,6 +93,8 @@ def list_reports_with_runs(conn: sqlite3.Connection) -> list[dict[str, Any]]:
             run.reconciliation_status, run.enrichment_status,
             run.completed_games, run.completed_games_with_data, run.spray_games,
             run.plays_games_expected, run.plays_games_covered,
+            run.boxscores_fetched, run.load_errors, run.plays_errors,
+            run.spray_games_with_data,
             run.discrepancies_found, run.discrepancies_corrected,
             run.season_id_used, run.season_fallback, run.identity_match_method,
             run.error_stage, run.error_message AS run_error_message

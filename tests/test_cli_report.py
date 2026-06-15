@@ -21,6 +21,7 @@ class TestGenerateCommand:
             slug="abc123def456",
             title="Scouting Report — Test Tigers",
             url="https://bbstats.ai/reports/abc123def456",
+            outcome="ready",
         )
         with patch("src.cli.report.generate_report", return_value=mock_result):
             result = runner.invoke(app, ["generate", "https://web.gc.com/teams/test/tigers"])
@@ -34,12 +35,65 @@ class TestGenerateCommand:
         mock_result = GenerationResult(
             success=False,
             error_message="Scouting crawl failed.",
+            outcome="failed",
         )
         with patch("src.cli.report.generate_report", return_value=mock_result):
             result = runner.invoke(app, ["generate", "abc123"])
 
         assert result.exit_code == 1
         assert "Scouting crawl failed" in result.output
+
+    def test_no_games_m_zero_exits_zero_and_prints_url(self):
+        """E-236-05 AC-4/AC-6 + Phase 4b MEDIUM: a no_games outcome is a
+        shareable page, so the CLI exits 0 and prints the URL. M=0 (no games on
+        record) reads as such."""
+        mock_result = GenerationResult(
+            success=False,
+            slug="ng123",
+            title="Scouting Report — Rival Varsity",
+            url="https://bbstats.ai/reports/ng123",
+            error_message=(
+                "No completed games found for Rival Varsity this season. "
+                "If this looks wrong, verify the team URL and try again."
+            ),
+            outcome="no_games",
+            completed_games=0,
+            completed_games_with_data=0,
+        )
+        with patch("src.cli.report.generate_report", return_value=mock_result):
+            result = runner.invoke(app, ["generate", "abc123"])
+
+        assert result.exit_code == 0
+        assert "https://bbstats.ai/reports/ng123" in result.output
+        assert "No games on record" in result.output
+
+    def test_no_games_m_positive_says_no_box_score_data(self):
+        """Phase 4b MEDIUM: the modal M>0/N=0 case (games WERE played, box-score
+        data missing) must NOT print the misleading 'No completed games found'
+        line; it must convey games played + no box score data, exit 0 + URL."""
+        mock_result = GenerationResult(
+            success=False,
+            slug="ng456",
+            title="Scouting Report — Rival Varsity",
+            url="https://bbstats.ai/reports/ng456",
+            error_message=(
+                "No completed games found for Rival Varsity this season. "
+                "If this looks wrong, verify the team URL and try again."
+            ),
+            outcome="no_games",
+            completed_games=8,
+            completed_games_with_data=0,
+        )
+        with patch("src.cli.report.generate_report", return_value=mock_result):
+            result = runner.invoke(app, ["generate", "abc123"])
+
+        assert result.exit_code == 0
+        assert "https://bbstats.ai/reports/ng456" in result.output
+        # Honest M-vs-N message: games played, box-score data missing.
+        assert "Played 8 games this season" in result.output
+        assert "no box score data" in result.output
+        # Must NOT print the misleading "no completed games found" for M>0.
+        assert "No completed games found" not in result.output
 
     def test_credential_error_prints_refresh_hint(self):
         mock_result = GenerationResult(

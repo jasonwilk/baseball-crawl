@@ -1,0 +1,29 @@
+{
+  "id": "ExampleTm001",
+  "name": "Example Team Varsity",
+  "sport": "baseball",
+  "ngb": "[]",
+  "location": {
+    "city": "Anytown",
+    "state": "XX",
+    "country": "United States"
+  },
+  "age_group": "high_varsity",
+  "team_season": {
+    "season": "spring",
+    "year": 2026,
+    "record": {
+      "win": 12,
+      "loss": 8,
+      "tie": 0
+    }
+  },
+  "avatar_url": "",
+  "staff": [
+    "Coach One",
+    "Coach Two",
+    "Coach Three",
+    "Coach Four"
+  ],
+  "player_count": 21
+}

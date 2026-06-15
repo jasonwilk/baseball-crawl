@@ -1,0 +1,51 @@
+-- ===========================================================================
+-- Migration 003: report_generation_runs additive count columns
+-- ===========================================================================
+-- Epic E-236 (story E-236-01), Technical Notes TN-2.
+--
+-- WHAT: Adds four nullable INTEGER count columns to report_generation_runs:
+--       boxscores_fetched, load_errors, plays_errors, spray_games_with_data.
+--       NULL means "this stage did not run" (matching the per-stage-status
+--       NULL convention established in migration 002).
+--
+-- WHY:  E-236 makes a degraded report legible to an unattended monitor (the
+--       morning-of-game scheduled runs). The shared classify_stage_status
+--       helper maps (loaded, errors, expected) to completed/partial/failed;
+--       these columns persist the error/coverage counts that feed and explain
+--       that classification:
+--         - boxscores_fetched      = ScoutingCrawlResult.games_crawled. The
+--                                    boxscore-crawl count; crawl status is
+--                                    derived from this vs completed_games (M).
+--                                    WRITTEN by story 03.
+--         - load_errors            = ScoutingLoader.LoadResult.errors, the
+--                                    scouting-load error count. WRITTEN by
+--                                    story 09.
+--         - plays_errors           = plays-stage error count (fetch failures +
+--                                    load errors, summed). WRITTEN by story 02.
+--         - spray_games_with_data  = distinct games with spray ROWS actually
+--                                    loaded. INFORMATIONAL coverage column
+--                                    only -- does NOT drive spray_status (TN-1
+--                                    error-driven-not-coverage-driven rule).
+--                                    WRITTEN by story 04.
+--
+-- DESIGN (TN-2): additive ALTER TABLE ... ADD COLUMN on the existing telemetry
+--   table. The columns are unused at the end of this story -- stories 02/03/04/09
+--   wire the writes. All four are nullable with no DEFAULT, so existing rows and
+--   any INSERT that omits them read back NULL ("stage didn't run").
+--
+-- INVARIANT (DE D4): every INSERT INTO report_generation_runs uses an explicit
+--   column list (verified across src/ and tests/ for this story). ADD COLUMN is
+--   backward-compatible ONLY while no positional inserts exist -- this migration
+--   does not introduce any, and does not add these columns to any existing
+--   insert. tests/test_migrations.py adds a round-trip assertion (AC-5).
+--
+-- IDEMPOTENCY: SQLite has no "ADD COLUMN IF NOT EXISTS", but the migration
+--   runner (apply_migrations.py) tracks applied migrations by filename and
+--   applies each exactly once, so an ADD COLUMN never re-runs. The FK/target
+--   table report_generation_runs already exists (migration 002).
+-- ---------------------------------------------------------------------------
+
+ALTER TABLE report_generation_runs ADD COLUMN boxscores_fetched INTEGER;
+ALTER TABLE report_generation_runs ADD COLUMN load_errors INTEGER;
+ALTER TABLE report_generation_runs ADD COLUMN plays_errors INTEGER;
+ALTER TABLE report_generation_runs ADD COLUMN spray_games_with_data INTEGER;

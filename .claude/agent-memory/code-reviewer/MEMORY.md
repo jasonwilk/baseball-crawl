@@ -34,6 +34,12 @@ and output does not falsely claim success. Happy-path tests only are MUST FIX.
 
 ## Recurring Patterns Found in Reviews
 
+### Allowlist-gated DB writes need real-schema round-trip proof
+See [allowlist-gated DB writes](feedback_allowlist_gated_db_writes.md) — when a write helper filters
+columns through an allowlist (e.g. `_update_run_record` + `_RUN_RECORD_COLUMNS`), a new column is
+silently dropped if not added to the allowlist. Require the allowlist add AND a real-schema round-trip
+test (not a mock). E-236 used this pattern correctly across 4 count columns.
+
 ### Test/Implementation Alignment on Behavior Changes
 When an implementer changes behavior for correctness (e.g., making PII-safe fallbacks instead of email exposure),
 existing tests written against the old behavior will break. Always run the full related test suite, not just

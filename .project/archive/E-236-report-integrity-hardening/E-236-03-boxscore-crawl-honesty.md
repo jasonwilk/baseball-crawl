@@ -4,7 +4,7 @@
 [E-236: Report Self-Reporting Integrity Hardening](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the run record will carry `boxscores_fetched` and an honest `crawl_status` (`completed`/`partial`/`failed`) derived from boxscores-fetched vs completed-games (M), and the all-boxscores-blocked case (M>0, zero fetched) will produce a hard `failed` outcome instead of silently slipping to `no_games`. This closes finding #2 and the SQ1 product gap.

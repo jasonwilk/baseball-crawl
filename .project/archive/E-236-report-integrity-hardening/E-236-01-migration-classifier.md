@@ -4,7 +4,7 @@
 [E-236: Report Self-Reporting Integrity Hardening](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, `report_generation_runs` will carry four new additive count columns and the reports package will have a single shared `classify_stage_status` helper that every stage will call to map its outcome to an honest status string. This is the foundation the per-stage honesty stories (02-04) and the operator-surface story (07) build on.

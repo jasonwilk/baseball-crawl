@@ -764,6 +764,93 @@ class TestRunRecordSurfacing:
         assert "season fallback" not in html
         assert "name-only match" not in html
 
+    def test_partial_stage_distinct_and_counts_and_degraded_badge(self, setup):
+        """E-236-07 AC-2/AC-3/AC-4: a 'partial' stage renders with a distinct,
+        CHECKABLE CSS class; the four new count columns are surfaced for
+        drill-down; and because the run completed overall WITH a degraded stage,
+        the derived operator-degraded badge appears."""
+        db_path, client = setup
+        team_id = _insert_team(db_path)
+        report_id = _insert_report(
+            db_path, team_id, slug="partial-1", status="ready",
+        )
+        _insert_full_run_row(
+            db_path, report_id,
+            overall_status="completed", crawl_status="completed",
+            load_status="partial", load_errors=2,
+            spray_status="completed", spray_games=6, spray_games_with_data=4,
+            plays_status="partial", plays_games_expected=10,
+            plays_games_covered=8, plays_errors=3,
+            reconciliation_status="completed", boxscores_fetched=9,
+            completed_games=12, completed_games_with_data=11,
+        )
+
+        html = client.get("/admin/reports").text
+        # AC-2: the NEW 'partial' value gets a distinct, assertable CSS class.
+        assert "pipeline-status-partial" in html
+        # AC-4: the four new count columns are surfaced.
+        assert "2 err" in html               # load_errors
+        assert "3 err" in html               # plays_errors
+        assert "9 boxscores fetched" in html  # boxscores_fetched
+        assert "(4/6)" in html               # spray_games_with_data / spray_games
+        # AC-3: derived operator-degraded badge (completed overall + partial stage).
+        assert "operator-degraded" in html
+
+    def test_clean_run_has_no_operator_degraded_badge(self, setup):
+        """E-236-07 AC-3 (negative): a run where every stage completed shows NO
+        operator-degraded badge."""
+        db_path, client = setup
+        team_id = _insert_team(db_path)
+        report_id = _insert_report(db_path, team_id, slug="clean-deg", status="ready")
+        _insert_full_run_row(
+            db_path, report_id,
+            overall_status="completed", crawl_status="completed",
+            load_status="completed", spray_status="completed",
+            plays_status="completed", reconciliation_status="completed",
+            completed_games=10, completed_games_with_data=10,
+        )
+
+        html = client.get("/admin/reports").text
+        assert "operator-degraded" not in html
+
+    def test_overall_failed_run_is_not_operator_degraded(self, setup):
+        """E-236-07 AC-3 / TN-3 (orthogonality): a hard failure (overall_status
+        == 'failed') is NOT 'degraded' -- degraded is specifically the
+        completed-overall-but-a-stage-slipped case. The failed badge already
+        communicates the hard failure."""
+        db_path, client = setup
+        team_id = _insert_team(db_path)
+        report_id = _insert_report(db_path, team_id, slug="failed-deg", status="failed")
+        _insert_full_run_row(
+            db_path, report_id,
+            overall_status="failed", crawl_status="completed",
+            load_status="failed", load_errors=1, error_stage="load",
+        )
+
+        html = client.get("/admin/reports").text
+        assert "operator-degraded" not in html
+
+    def test_null_spray_games_with_data_renders_null_safe(self, setup):
+        """Phase 4b LOW: a run row with spray_games present but
+        spray_games_with_data NULL (legacy / pre-migration) must render the
+        NULL-safe '–' (unknown/not recorded), NOT a false '(0/N)'. Honors the
+        db.py LEFT-JOIN NULL-safe contract."""
+        db_path, client = setup
+        team_id = _insert_team(db_path)
+        report_id = _insert_report(db_path, team_id, slug="nullspray", status="ready")
+        _insert_full_run_row(
+            db_path, report_id,
+            overall_status="completed", crawl_status="completed",
+            load_status="completed", spray_status="completed",
+            spray_games=5,  # spray_games_with_data intentionally NOT set -> NULL
+        )
+
+        html = client.get("/admin/reports").text
+        # NULL with_data must NOT be coerced to a false 0.
+        assert "(0/5)" not in html
+        # The NULL-safe en-dash treatment is shown instead.
+        assert "(–/5)" in html
+
     def test_failed_report_error_message_surfaced(self, setup):
         """AC-2: the report-level error_message (already selected) is rendered."""
         db_path, client = setup

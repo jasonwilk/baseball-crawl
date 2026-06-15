@@ -4,7 +4,7 @@
 [E-236: Report Self-Reporting Integrity Hardening](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, a single end-to-end test will generate a report against a deliberately-degraded opponent — a MIX of games so a real report still RENDERS (some games charted → N>0) while being degraded (at least one scored-but-empty game → N<M; all plays-fetches failing; spray-less) — and assert that BOTH integrity surfaces tell the truth: the run record shows honest per-stage statuses/counts, the coach footer shows honest coverage severity, and there is NO false alarm on the clean parts. This is the strong test that proves the epic's unifying invariant.
