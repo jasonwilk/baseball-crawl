@@ -37,3 +37,4 @@ As of 2026-03-12. See `docs/api/README.md` for full endpoint index.
 - [client-id-rotation.md](client-id-rotation.md) -- GC client IDs rotate on web redeployments and iOS app updates; never assume permanence
 - [search-endpoint-notes.md](search-endpoint-notes.md) -- POST /search folds diacritics server-side; narrow-regex recommendation; 2026-04-16 punct-failure claim didn't fully reproduce 2026-04-17
 - [public-games-opponent-identity.md](public-games-opponent-identity.md) -- /public/.../games opponent_team is NAME-only (no public_id/root/progenitor); now returns upcoming games too; refutes scheduler auto-resolve assumption (verified 2026-06-12)
+- [boxscore-empty-shape.md](boxscore-empty-shape.md) -- scored-but-empty boxscore = sub-case A (team-key envelope present, per-player stats empty) → loader errors=0/completed; sub-case B (no keys) is a different failure event (E-236 SQ2)

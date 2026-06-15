@@ -23,6 +23,7 @@ as epics land. **Convention**: this table is updated at two moments — at an ep
 |-------|-------|------|--------|
 | A | Regression guards for the reports flow | E-234 | COMPLETED |
 | B | Report run records + trust signals + quality gates | E-235 | COMPLETED |
+| B2 | Report self-reporting integrity hardening | E-236 | READY |
 | C | Payload-first loaders + aggregate integrity | — | NOT STARTED |
 | D1 | Quarantine + navigation retarget + passkey fix | — | NOT STARTED |
 | D2 | Decouple imports, then remove unused surfaces | — | NOT STARTED |
@@ -277,6 +278,34 @@ guards must be green; stage semantics must be preserved exactly and asserted in 
 **Why before cleanup**: scheduled runs (Epic E) and safe refactors both need this
 visibility.
 
+### Epic B2 — Report self-reporting integrity hardening *(reliability; post-B, before C)*
+**Goal**: The report never overstates its own completeness on the two surfaces that become
+the SOLE trust signal once Epic E runs reports unattended — the operator run record and the
+coach footer/no-games page. Epic B added those surfaces; this makes them HONEST.
+**Scope** (implemented by E-236):
+1. A unifying invariant + one shared `classify_stage_status` helper: no stage records
+   "completed" when it had failures OR loaded zero of an expected non-zero set. Per-stage
+   statuses gain a `partial` value; **plays/spray status is ERROR-driven, not
+   coverage-driven** — a no-scorebook/no-chart game is the NORMAL case, not a degradation
+   (this is the false-alarm class the §4/IDEA-077 `season_fallback` decision also targets).
+2. Migration 003 adds per-stage count columns (`boxscores_fetched`, `load_errors`,
+   `plays_errors`, `spray_games_with_data`) to `report_generation_runs` (extends Epic B's
+   run record; additive, no stat tables touched).
+3. Six self-reporting gaps closed: plays partial/loader failures (#1), partial boxscore
+   crawl (#2), spray rows-vs-fetches (#3), the `season_fallback` coach-line (#4 — Option A
+   per §4/IDEA-077), no_games M=0-vs-N=0 copy + CLI exit (#5), and the load-stage hardcoded
+   status (#6).
+4. All-boxscores-blocked → a hard `failed` outcome (no shareable page; operator alert),
+   distinct from the benign `no_games` page ("we were blocked" ≠ "no data exists").
+5. Admin run-record view surfaces partial/failed + a derived operator-"degraded" flag
+   (operator-only; the coach footer is unchanged beyond #4/#5).
+6. A degraded-opponent acceptance E2E asserts BOTH surfaces are honest in one test.
+**Risk**: low-medium — telemetry/copy/status only, **NO stat-value changes**; touches the
+protected core (`generator.py`), so Epic A goldens + aggregate parity must stay green
+(asserted in the spec).
+**Why here (post-B, before C)**: it builds on B's run record and makes the trust signals
+honest before Epic E removes the human backstop; C/D/E inherit the corrected telemetry.
+
 ### Epic C — Payload-first loaders + aggregate integrity *(accuracy)*
 **Goal**: Remove the temp-file bridges and the stale-aggregate class inside the
 protected core.
@@ -523,11 +552,11 @@ is the signal; VISION.md is deliberately untouched.*
 ## 8. Suggested Order of Operations
 
 ```
-A (guards)  →  B (run records + gates + lock)  →  C (payload-first + aggregates)
-                     ↓                                      ↓
+A (guards)  →  B (run records + gates + lock)  →  B2 (self-reporting integrity)  →  C (payload-first + aggregates)
+                     ↓                                                                       ↓
               D1 (quarantine + redirects + passkey)  →  D2 (decouple imports, then remove)
                      ↓
-              E (scheduled morning reports)   ← needs B; benefits from C/D
+              E (scheduled morning reports)   ← needs B (+ B2 honesty); benefits from C/D
 ```
 
 A is a half-day-to-day epic. B is the keystone — it serves stability today, trust
