@@ -14,6 +14,7 @@ Lincoln Standing Bear High School baseball program:
 
 - [E-100 coaching review (2026-03-14)](e100_coaching_review.md) -- Schema gaps, domain corrections, and cleared items from E-100 team model overhaul review
 - [E-235 trust block design + review (2026-06-13)](e235_trust_block_review.md) -- Signal set, severity tiers, operator/coach split, no-games message, and AC-2 defect found in holistic review
+- [E-236 integrity hardening review (2026-06-14/15)](e236_integrity_hardening_review.md) -- no_games two-case copy, Option A confirm, partial-stage operator-only, SQ1 hard failure, 403/404 reconciliation (M=0 filter already handles no-scorebook teams)
 
 ## Key Reference Documents
 
