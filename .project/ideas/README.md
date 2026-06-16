@@ -97,6 +97,7 @@ Review this list every 90 days, or when completing an epic. Ask:
 | [IDEA-076](IDEA-076-spray-value-regression-guard.md) | Spray-Value Regression Guard (E-234-05 left spray shape-only) | CANDIDATE | 2026-09-11 |
 | [IDEA-077](IDEA-077-reevaluate-season-fallback-trust-flag.md) | Re-evaluate season_fallback Trust Flag — Option A coach-visible line DELIVERED by E-236-06; machinery removal residual → ROADMAP D2 | PROMOTED | 2026-06-15 -- Option A delivered by E-236-06 |
 | [IDEA-078](IDEA-078-coaching-docs-dashboard-staleness.md) | Coaching docs still sell a dashboard-first / longitudinal product — reports-first rewrite (bounded docs cleanup; surfaced by drift scour) | CANDIDATE | 2026-09-13 |
+| [IDEA-079](IDEA-079-rich-starter-narrative.md) | Reliably Rich Predicted-Starter & Bullpen Narrative — pin-vs-stabilize the HEAD-vs-prod richness gap (diff prompt across tag range first) | CANDIDATE | 2026-09-14 |
 
 ## Status Definitions
 
