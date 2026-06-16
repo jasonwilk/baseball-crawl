@@ -1,5 +1,8 @@
 # Code Reviewer Agent Memory
 
+## Invariant Audit Patterns
+- [Sibling writers can defeat a provenance guard](invariant_audit_sibling_writer.md) — when an epic guards ONE writer, sweep sibling DELETE+rederive paths that delete the protected row first (E-237 merge_player_pair).
+
 ## Mandatory Review Checks (added after E-097 post-dev failures)
 
 ### SQL Dimension Audit (Bugs, Priority 2)
