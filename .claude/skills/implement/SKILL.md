@@ -601,6 +601,16 @@ Verifiable: after this step, `ls /tmp/.worktrees/` does not include `baseball-cr
 
 Shutdown PM, wait for confirmation, delete team.
 
+### Step 11: Post-shutdown reconciliation sweep
+
+PM writes `.claude/agent-memory/**` during closure (its Active→Archived `MEMORY.md` update is sub-step 7, captured by the closure commit), but a final memory flush can land *after* the Step 8 closure commit -- as PM spins down at Step 10. After PM is shut down and the team is deleted, re-run `cd /workspaces/baseball-crawl && git status --porcelain`:
+
+- **Tree clean**: done.
+- **Only `.claude/agent-memory/**` stragglers remain** (files written by agents that ran in this dispatch): fold them into the closure commit with `cd /workspaces/baseball-crawl && git commit --amend --no-edit` (safe while unpushed), then confirm the tree is clean.
+- **Any remaining change is outside `.claude/agent-memory/**`** (a new, unrecognized, or non-memory file): do NOT amend silently -- report it to the user and wait for instructions per the Step 8 sub-step 9 approval gate.
+
+**Narrow carve-out, not a loophole**: identical scope to the plan skill's Step 2b -- a deliberate exception to the "do not commit automatically / require user approval" gate (Anti-Pattern 5 and Step 8 sub-step 9), limited to a late flush of the *same pre-approved artifact class* (`.claude/agent-memory/**`) completing the *same logical unit* already inside the approved closure commit. The root cause is a timing race (async memory flush vs. the staging snapshot), so this is a post-shutdown reconciliation sweep, not a replacement for the approval gate. New or unrecognized files still require the user-approval pause.
+
 ---
 
 ## Workflow Summary
@@ -630,6 +640,7 @@ Phase 5: Validate -> Step 1a invariant audit (if any) -> Step 1b full-suite-gree
   -> shut down implementers + CR -> ancillary file sweep (stage session artifacts, user approval)
   -> closure merge and commit (patch -> dry-run -> apply -> archive mv -> PM memory -> approval gate -> single commit)
   -> worktree cleanup -> shut down PM + delete team
+  -> post-shutdown reconciliation sweep (fold late `.claude/agent-memory/**` stragglers via --amend; narrow carve-out)
 ```
 
 ---
@@ -651,7 +662,7 @@ Phase 5: Validate -> Step 1a invariant audit (if any) -> Step 1b full-suite-gree
 2. **Do not summarize context blocks.** Always send the full story file text and full Technical Notes verbatim.
 3. **Do not proceed to closure with unverified stories.** If any AC is unmet, send the implementer back.
 4. **Do not skip the documentation assessment.** The epic cannot be archived until documentation impact is evaluated.
-5. **Do not commit automatically.** The user must explicitly approve the closure commit. See the approval gate in Phase 5 Step 8's closure sequence (sequence step 8).
+5. **Do not commit automatically.** The user must explicitly approve the closure commit. See the approval gate in Phase 5 Step 8's closure sequence (sequence step 8). The Step 11 post-shutdown reconciliation sweep is the sole, narrow exception: it folds *only* late `.claude/agent-memory/**` flushes (the same pre-approved artifact class, already inside the approved commit) via `--amend`. It does not authorize committing new, unrecognized, or non-memory files without approval.
 6. **Do not skip PM spawning.** PM handles all status updates and AC verification during dispatch.
 7. **Do not skip the context-layer assessment.** The epic cannot be archived until context-layer impact is evaluated.
 8. **Do not defer findings to epic History.** Every finding must reach a terminal state (FIXED or DISMISSED) during the story. No deferral path exists.

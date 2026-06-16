@@ -540,6 +540,18 @@ Commit all session artifacts produced during planning. This step is the main ses
 
 **Ordering with compound dispatch**: For compound triggers, this commit step runs BEFORE Step 3b (worktree creation), ensuring the epic worktree branches from committed state. The step's position between Step 2 and Step 3 naturally satisfies this -- Step 3b is inside the handoff sequence.
 
+### Step 2b: Post-commit reconciliation sweep
+
+Spawned agents write `.claude/agent-memory/**` asynchronously. The most common case: PM flushes its numbering-state `MEMORY.md` as part of setting READY in Step 1, and that write can land *after* the Step 2a staging snapshot -- leaving an uncommitted agent-memory straggler the user would otherwise have to notice and ask about after the commit was already made (this happened on the E-238 planning commit).
+
+After the Step 2a commit succeeds **and the planning team has quiesced** -- for a standard trigger, after the team is shut down at the end of Step 3; for a compound trigger, immediately before worktree creation (Step 3b) so the worktree branches from the reconciled commit -- re-run `cd /workspaces/baseball-crawl && git status --porcelain`:
+
+- **Tree clean**: do nothing.
+- **Only `.claude/agent-memory/**` stragglers remain** (files written by agents that ran in this workflow): fold them into the just-made commit with `cd /workspaces/baseball-crawl && git commit --amend --no-edit` (safe while the commit is unpushed), then confirm the tree is clean.
+- **Any remaining change is outside `.claude/agent-memory/**`** (a new, unrecognized, or non-memory file): do NOT amend silently -- report it to the user and wait for instructions per the Step 2a approval gate.
+
+**Why this is a narrow carve-out, not a loophole**: This is a deliberate exception to the "require user approval before committing" gate in Step 2a, scoped to exactly one situation -- a late flush of the *same pre-approved artifact class* (`.claude/agent-memory/**`) completing the *same logical unit* already inside the approved commit. The root cause is a timing race (async memory flush vs. the staging snapshot), so this is a post-shutdown reconciliation sweep, not a replacement for the approval gate. It does NOT make the substantive diff silent, and it does NOT cover new or unrecognized files -- those still require the user-approval pause. Do not over-generalize this into "auto-commit everything."
+
 ### Step 3: Dispatch decision
 
 - **If `compound_dispatch = false`** (standard planning trigger): **STOP.** Report to the user: "Epic E-NNN is READY. To dispatch, say 'implement E-NNN'." The dispatch authorization gate per `workflow-discipline.md` is preserved -- planning and dispatch are separate actions.
@@ -680,6 +692,8 @@ Phase 5: READY Gate
   - Atomic planning commit (session artifacts, user approval)
     - Skip silently if no changes
     - Rejection with compound trigger --> downgrade to non-compound
+  - Post-commit reconciliation sweep (after team quiesces)
+    - Fold late `.claude/agent-memory/**` stragglers via --amend (narrow carve-out)
   |
   +---> compound_dispatch = false?
   |       "Epic is READY. Say 'implement E-NNN' to dispatch."
