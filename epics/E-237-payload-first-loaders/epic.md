@@ -1,0 +1,161 @@
+# E-237: Payload-First Loaders + Aggregate Integrity
+
+## Status
+`READY`
+
+## Roadmap
+Implements `docs/ROADMAP.md` §5 **Epic C — Payload-first loaders + aggregate integrity** (sequence A–E; A=E-234, B=E-235, B2=E-236 all COMPLETED). Per the §0 tracking convention, the §0 table is updated to slice C → E-237 / `PLANNING` at this planning commit, and to `COMPLETED` at closure.
+
+## Overview
+Remove the two temp-file bridges that sit inside the reports protected core, and collapse the divergent boxscore-derived season-aggregate writers into a single deterministic recompute — without changing any report stat value. Both bridges write in-memory data to disk only so a path-only loader can read it back; both are pure plumbing the in-memory reports/scouting flow should not need. The aggregate work removes a latent non-determinism (which season-aggregate columns get populated depends on whether a player merge happened) and makes correctness independent of stage ordering.
+
+## Background & Context
+The product is reports-first (`docs/ROADMAP.md` §1). Epics A/B/B2 made the reports flow verifiable, auditable, and honest. Epic C is the accuracy slice: it cleans two structural weaknesses in the protected core (`docs/ROADMAP.md` §2) without behavior change to report values.
+
+**Two temp-file bridges (SE-verified live locations; the roadmap's §2 line numbers are stale after E-235/E-236 growth):**
+- **Plays bridge** — `src/reports/generator.py::_crawl_and_load_plays` holds `plays_data: dict[game_id -> raw dict]` in memory, writes each game's JSON into a `tempfile.TemporaryDirectory()` (block at `generator.py:921-932`), solely so `PlaysLoader.load_all(Path)` can glob it back off disk. The generator is the only caller using this tempdir BRIDGE; the member pipeline (`src/pipeline/load.py:199`, loader constructed at `:193`) also calls `PlaysLoader.load_all` over real `data/raw/` and must keep working unchanged (per TN-3). All other call sites are tests.
+- **Boxscore bridge** — `src/gamechanger/loaders/scouting_loader.py::_load_boxscores_from_data` (`460-496`) holds `boxscores: dict[game_stream_id -> dict]` in memory, writes each to a temp file (`:491`) so the path-only `GameLoader.load_file` (`game_loader.py:299`) can read it. The member pipeline (`GameLoader.load_all(team_dir)` over `data/raw/`) and ~all loader tests still legitimately use the path methods.
+
+In both loaders the ONLY file-coupling is a single `_read_json` call (`plays_loader.py:161`, `game_loader.py:491`); all real work (`_find_duplicate_game` dedup, `_detect_team_keys`, `_upsert_game_and_stats`, perspective tagging) already operates on the parsed dict. So each bridge removal is a clean read/delegate split: add a payload method that takes the parsed dict, and reduce the relevant path method to a thin file-reading wrapper over it — **`PlaysLoader.load_all`** (story 01) and **`GameLoader.load_file`** (story 02). **`GameLoader.load_all`** (member pipeline) is NOT refactored: it keeps iterating `data/raw/` files → `load_file`, which is now the wrapper.
+
+**Aggregate integrity (DE-verified):** Three writers touch boxscore-derived season aggregates; two of them are in the reports flow and disagree. In `ScoutingLoader.load_team`, the post-load player-dedup sweep recompute (`src/db/player_dedup.py::recompute_*`, DELETE+INSERT, batting adds pa/singles/xbh, pitching writes w/l/sv but OMITS `gs`) runs, then `ScoutingLoader._compute_*_aggregates` (ON CONFLICT DO UPDATE of its own 16-batting / 14-pitching-incl-`gs` subset) runs. A *merged* player ends with a HYBRID row; a *non-merged* player has the dedup-only columns NULL. Whether pa/singles/xbh/w/l/sv get populated is non-deterministic w.r.t. whether a merge happened. The reports aggregates are NOT stale today (load→dedup→aggregate is committed atomically with dedup; no post-load stage mutates `player_game_*`), so this is an unenforced-ordering-contract + divergent-writer fragility, not an active bug. Epic C collapses the two boxscore_only writers into one deterministic recompute (a SUPERSET of both writers' columns — see TN-5) owning only `boxscore_only` rows.
+
+**Stat-value de-risk (PM audit + DE grep, CONVERGED — see Technical Notes TN-5):** no live surface (reports, dashboard, or profiles) reads the dedup-only columns (pa/singles/xbh/w/l/sv); the report read path reads ScoutingLoader's subset + `gs`, and the renderer derives `_pa`/`_xbh` from base columns. The canonical recompute (Option B, chosen for the dedup-test contract) populates the SUPERSET of both writers' columns for every player — deterministic, hybrid-row eliminated, and reader-invisible on every surface, so goldens and the parity fixture (which checks only ScoutingLoader's subset) stay unchanged.
+
+## Goals
+- Remove the plays tempdir bridge: `PlaysLoader` gains a payload entry point; the generator passes its in-memory plays dict directly; no temp files written.
+- Remove the boxscore temp-file bridge: `GameLoader` gains a payload entry point; `ScoutingLoader` passes its in-memory boxscore dicts directly; no temp files written.
+- The refactored path methods survive as behavior-identical thin file-reading wrappers — `PlaysLoader.load_all` (story 01) and `GameLoader.load_file` (story 02); `GameLoader.load_all` is unchanged (still iterates `data/raw/` → `load_file`). Member pipeline + existing tests unaffected.
+- Collapse the two divergent boxscore_only season-aggregate writers into one canonical, perspective-scoped, deterministic recompute (a superset of both writers' columns) that runs as the final step of the load, committed atomically with the dedup sweep, owning only `boxscore_only` rows.
+- Epic A golden stat tables and `bb report verify-aggregates` parity stay green; no report stat value changes.
+
+## Non-Goals
+- **No DB schema change, no migrations, no table drops.** `player_season_*` tables stay (read by ≥5 query families in `src/api/db.py`). The replace-with-views option for aggregates is DEFERRED until after roadmap slice D2 (`docs/ROADMAP.md` §5-C).
+- **No member-flow / SeasonStatsLoader change.** Member `full`/`supplemented` season rows come straight from the API, are out of the recompute's ownership, and are untouched.
+- **Not removing the inert `'supplemented'` provenance value.** It is defined and ranked (`player_dedup.py:331`; parity member-scope exclusion `aggregate_parity.py:348`) but never written by any loader. The canonical recompute will never produce it AND treats BOTH `full` AND `supplemented` rows as member-owned (never touches them). Removing the enum/CHECK would ripple into the rank + parity-exclusion for zero benefit — it is a trivial separate cleanup (D2 territory), out of scope here (no-schema-change constraint).
+- **No new schema columns, no change to which columns the report reads or displays.** The canonical recompute writes the union of both current writers' existing columns (superset); all columns already exist in the schema, and the newly-populated dedup-derived columns on the ScoutingLoader path are reader-invisible (TN-5).
+- **No change to the quarantined member-sync / `bb data dedup-players` product surfaces** beyond the shared-recompute consolidation they inherit; their tests must stay green.
+
+## Success Criteria
+- No `tempfile`/`TemporaryDirectory` usage remains in `src/reports/generator.py::_crawl_and_load_plays` or `src/gamechanger/loaders/scouting_loader.py::_load_boxscores_from_data` (the two bridges are gone). [Stories 01, 02]
+- `PlaysLoader` and `GameLoader` each expose a `load_payload` method taking already-parsed data; the refactored path methods (`PlaysLoader.load_all`, `GameLoader.load_file`) are thin wrappers that read JSON then delegate, with unchanged behavior; `GameLoader.load_all` is unchanged (still iterates files → `load_file`). Existing path-method tests pass unmodified. [Stories 01, 02]
+- Each loader story adds a focused test that calls `load_payload` directly with an in-memory dict and asserts identical `LoadResult` + DB rows versus the file path (per TN-6). [Stories 01, 02]
+- Exactly one canonical boxscore_only season-aggregate recompute exists; both the scouting load path and the player-dedup path route through it; a *merged* and a *non-merged* player produce the same deterministic column population for the same per-game rows (the hybrid-row non-determinism is gone). [Story 03]
+- `bb report verify-aggregates` returns no mismatches on the seeded parity fixture; `tests/fixtures/parity_consistent.sql` is unchanged (the canonical superset's parity-checked subset == ScoutingLoader's current set; parity diffs only that subset, per TN-5/TN-7). [Story 03]
+- The full pytest suite passes (closure full-suite-green gate); Epic A goldens (`tests/test_report_golden.py`) and aggregate parity (`tests/test_aggregate_parity.py` / equivalent) are green. [all stories]
+- **Operator pre-merge verification gates (user-run, TN-8) pass**: a real report generated against production data is eyeballed against prior output with no value change, and `bb report verify-aggregates` on a production DB copy has every pre-existing mismatch resolved or explicitly explained.
+
+## Stories
+| ID | Title | Status | Dependencies | Assignee |
+|----|-------|--------|-------------|----------|
+| E-237-01 | Payload-first PlaysLoader: remove the plays tempdir bridge | TODO | None | - |
+| E-237-02 | Payload-first GameLoader: remove the boxscore temp-file bridge | TODO | None | - |
+| E-237-03 | Consolidate boxscore_only season-aggregate recompute (deterministic, ordering-independent) | TODO | E-237-02 | - |
+
+## Dispatch Team
+- software-engineer
+- data-engineer
+
+## Technical Notes
+
+### TN-1 — Payload-method shape (asymmetric by design; SE-recommended)
+The two loaders get different payload shapes because their call sites differ; there is intentionally **no shared base class or helper** (two call sites, simple-first):
+- **Plays = BATCH**: `PlaysLoader.load_payload(plays_by_game: dict[str, dict]) -> LoadResult`. The generator already holds the whole batch. The method iterates the entries (in a deterministic order mirroring the current `sorted` glob), skips falsy/empty entries (mirroring the generator's existing `if data:` skip), and applies the existing per-game logic. `load_all` reads the directory and delegates to the same per-game logic.
+- **Boxscore = PER-CALL**: `GameLoader.load_payload(raw: dict, summary, opponent_name=None) -> LoadResult`. The scouting loop already iterates game-by-game; the method mirrors `load_file`'s per-call commit boundary.
+
+The method name `load_payload` is standardized across both loaders.
+
+### TN-2 — Behavior that MUST be preserved exactly (both bridges)
+- **Per-game error isolation**: the existing per-game try/except + `LoadResult` (loaded/skipped/errors) tallying is reused verbatim inside the payload path; non-fatal semantics unchanged.
+- **Dedup**: `GameLoader._find_duplicate_game` stays inside the payload path untouched.
+- **Perspective provenance** (`.claude/rules/perspective-provenance.md`): plays uses `self._team_ref.id`; boxscore perspective is threaded at `GameLoader` construction (`scouting_loader.py:125`). Neither payload path changes tagging — every stat INSERT still carries `perspective_team_id`.
+- **Commit cadence**: the boxscore commit boundary is the subject of an explicit cross-story decision — see **TN-10** (it intersects Story 02's wrapper design and Story 03's atomicity requirement). The plays path keeps its per-game commit. No new deadlock surface (same data, no disk in between). See `.claude/rules/testing.md` "disk-backed `db` fixture deadlocks on self-`backup()`" for the report-test fixture trap.
+- **Ordering / empty-skip**: payload iteration order matches the current sorted file iteration; empty/`{}` entries are skipped exactly as today.
+
+### TN-3 — Wrapper survival (member pipeline + tests)
+The path methods are NOT removed. `PlaysLoader.load_all` (story 01) and `GameLoader.load_file` (story 02) become thin file-reading wrappers (read JSON, delegate to the payload logic); `GameLoader.load_all` is UNCHANGED — it still iterates `data/raw/` files calling `load_file` (now the wrapper). This preserves the member pipeline disk callers (`src/pipeline/load.py`) and the large existing path-method test surface (`tests/test_plays_loader.py`, `tests/test_loaders/test_game_loader.py`, `tests/test_loaders/test_game_dedup.py`, `tests/test_scouting_loader.py`, `tests/test_report_plays.py`, `tests/test_report_generator.py`, `tests/test_report_negative_paths.py`), which continue to pass unmodified and prove the payload methods transitively.
+
+### TN-4 — Aggregate consolidation target (Story 03)
+Today the reports flow runs two divergent boxscore_only recomputes in `ScoutingLoader.load_team`: the player-dedup sweep recompute (`src/db/player_dedup.py::recompute_*`, DELETE+INSERT, divergent column set) then `ScoutingLoader._compute_*_aggregates` (ON CONFLICT DO UPDATE of its subset). Story 03 collapses these into ONE canonical recompute with these properties (DE-recommended):
+- **Perspective-scoped** (filters `perspective_team_id = team_id`, joins `games` on `season_id`, `GROUP BY player_id`) — identical aggregation semantics to the current ScoutingLoader queries.
+- **Scope = `(team_id, season_id)`** (DE Finding 4): DELETE all `boxscore_only` rows for the team+season, then INSERT all players. The dedup path invokes it once per distinct affected `(team_id, season_id)` tuple, NOT per-player — preventing a per-player-vs-per-team implementation mismatch.
+- **Superset column contract (Option B; TN-5)**: writes the union of both writers' columns so both paths' outputs are preserved and every player (merged or not) gets the same full set — the hybrid-row non-determinism is gone.
+- **DELETE-boxscore_only-for-scope + INSERT** (not partial ON CONFLICT) so no stale columns from a prior writer survive.
+- **Owns ONLY `boxscore_only` rows**: never UPDATE/DELETE a `full` OR `supplemented` row (provenance guard). This also FIXES a latent data-loss bug: today's unconditional dedup DELETE+INSERT (`player_dedup.py:798-944`) would delete a member team's authoritative `full` row and replace it with a `boxscore_only` row when deduping a member-provenance player (see Story 03's member-row-survival test).
+- **Atomic with the dedup sweep** (commit-boundary DECIDED — see TN-10): the canonical recompute is the final step of `load_team` and is committed in the SAME transaction as the dedup sweep at `scouting_loader.py:160`. It is NOT all-or-nothing with the per-game boxscore writes (those commit per call UPSTREAM, status quo — Story 02 preserves that); the bounded crash-window (game rows committed, recompute not yet run) self-heals on the next load and is explicitly out of scope.
+- **BOTH `load_team` paths route through it (CR M2)**: the in-memory path (aggregate call `scouting_loader.py:159`, dedup `:147`) AND the disk path `_load_team_from_disk` (aggregate `:224`, dedup `:217`) must both yield the canonical rowset — do not leave the disk path on the old divergent implementation.
+- **No double-run; precise call-site wiring is DE-confirmed in TN-11** (embedded dedup suppresses its own recompute via an explicit `recompute_aggregates=False` param; the canonical runs exactly once per load at each of the two in-load paths; thin signature-preserving wrapper for `_compute_season_aggregates`).
+- **Standalone dedup callers preserved (CR S1)**: the standalone `dedup_team_players` / `recompute_affected_seasons` callers (CLI `bb data dedup-players` in `src/cli/data.py`; member-sync Hook-2 in `src/pipeline/trigger.py:742`) keep the default recompute behavior (signature/behavior preserved; tests stay green). **The Hook-2 caller (`trigger.py:742`) MUST still recompute** — see the correctness note in TN-11.
+- **Module placement (advisory, DE; not pinned)**: the canonical function takes a `sqlite3.Connection` and is called from both `scouting_loader.py` and `player_dedup.py`, so it likely belongs in `src/db/` (e.g. a small `src/db/season_aggregates.py`, or alongside the existing recompute in `player_dedup.py`) to avoid an import cycle — final placement is the implementer's call.
+
+### TN-5 — Canonical column set (Option B superset) and the stat-value safety argument (PM audit + DE grep, CONVERGED)
+**Decision (PM, work-definition): Option B — the canonical recompute writes the SUPERSET of both writers' columns.** Option A (drop the dedup-only columns to ScoutingLoader's subset) was rejected because it would break the `bb data dedup-players` test contract (`tests/test_player_dedup.py:781,793` assert `pa == 8`; `:809,820` assert `w == 1`) and force a Non-Goal rewrite. Option B preserves both paths' outputs, breaks no test, achieves determinism (every player gets the full set; the hybrid row is gone), and is reader-invisible.
+
+**Canonical superset columns:**
+- **Parity-checked subset** = ScoutingLoader's exact current set — batting (16): {gp, games_tracked, ab, h, doubles, triples, hr, rbi, r, bb, so, sb, **tb**, hbp, shf, cs}; pitching (14, gs included): {gp_pitcher, games_tracked, ip_outs, h, r, er, bb, so, wp, hbp, pitches, total_strikes, bf, **gs** (NULL-safe CASE)}. `aggregate_parity._BATTING_COLUMNS`/`_PITCHING_COLUMNS` diff ONLY this subset.
+- **Dedup-derived extras** (the superset additions): batting {pa = ab+bb+hbp+shf, singles = h−doubles−triples−hr, xbh = doubles+triples+hr}; pitching {w, l, sv from the per-game `decision` field}. Under Option B these are now populated for EVERY boxscore_only player (merged or not), where today they are populated only on merged players via the dedup path.
+
+**Stat-value safety is CLEARED airtight from two independent angles (PM renderer trace + DE full-`src/` read-surface grep agree):**
+- **Cutover is number-neutral across ALL live surfaces** — reports (`generator.py:_query_batting:400-413`, `_query_pitching:442-452`) AND dashboard/profiles (`src/api/db.py:147,239,912,939,1147,1168`). The complete set of season-table columns read by ANY live surface is a STRICT SUBSET of ScoutingLoader's set: batting reads also include `tb` (`api/db.py:911`, which ScoutingLoader already writes ✓); pitching reads include `hr` (dashboard, COALESCEd NULL→0).
+- **None of pa/singles/xbh/w/l/sv is read by ANY live surface** (reports, dashboard, or profiles) — the only `singles`/`xbh`/`w`/`l`/`sv` occurrences in `src/` are WRITERS (`season_stats_loader.py` for member `full` rows; `player_dedup.py`), never readers. So populating them on the ScoutingLoader path (Option B) is invisible to every reader.
+- **PA/XBH are presentation-derived, not stored-read**: "PA and XBH are presentation-derived in the renderer from canonical columns (`renderer.py:_compute_pa` :95-102 = ab+bb+hbp+shf; `:164-169` `_xbh` = doubles+triples+hr); the schema's stored `pa`/`xbh` columns are member-API-only (`full` rows) and are NOT part of the boxscore_only contract." The template `scouting_report.html:765,768` DOES display "PA"/"XBH" columns, but both are Python-derived, not read from stored columns.
+
+**Pitching `hr` nuance**: ScoutingLoader deliberately does NOT write pitching `hr` (boxscore pitching has no HR-allowed; `scouting_loader.py:733-740`), and the dedup path does not either, so it is NOT in the superset. Dashboard reads `psp.hr` but COALESCEs NULL→0, and boxscore_only cannot populate it anyway (member `full` rows populate it from the API). Keeping pitching `hr` absent is consistent and safe.
+
+Because the canonical superset's parity-checked subset equals ScoutingLoader's current set, goldens and the parity fixture (which diff only that subset) stay unchanged (TN-7). **Safety Rule 4 (residual belt-and-suspenders)**: still assert Epic A goldens green; and IF the implementer changes any parity-checked column, adds pitching `hr`, or changes the `gs` definition, that is a report-visible change and MUST be flagged loudly, verified against goldens, and accompanied by a lockstep parity-script + hand-recomputed fixture update.
+
+### TN-6 — Direct-payload tests (both loader stories)
+Beyond transitive coverage via the unchanged wrappers (TN-3), each loader story adds a focused test that constructs the loader, calls `load_payload` with an in-memory dict, and asserts the resulting `LoadResult` and the written DB rows are identical to loading the same data via the file path. This proves the new entry point directly, not only transitively.
+
+### TN-7 — Parity script + fixture lockstep (Story 03)
+`src/reports/aggregate_parity.py` (`verify_aggregates`) and `tests/fixtures/parity_consistent.sql` model ScoutingLoader's CURRENT column set and cannot self-detect loader-contract drift (the module's own maintenance invariant, `aggregate_parity.py:38-48`). With the canonical set == ScoutingLoader's current set (TN-5), **no parity-script or fixture change is expected**. IF Story 03 changes any parity-checked column or the `gs` definition, the parity script AND the fixture's expected values MUST be updated in lockstep, with fixture values hand-recomputed from the game rows (never dumped from loader output).
+
+### TN-8 — Operator pre-merge verification gates (user-run; cannot run in the worktree)
+Two safety gates from `docs/ROADMAP.md` §6 require real credentials/data and therefore CANNOT run in the epic worktree (no `.env`/`data/`, proxy-boundary). They are user-run gates the PM surfaces before the closure merge:
+1. **Manual real-data report (Safety Rule 1)**: generate a report against production data and eyeball it against prior output — no stat value may change.
+2. **Real-data parity gate (Safety Rule 3 + §5-C)**: run `bb report verify-aggregates` on a production DB copy. Do NOT gate on "zero mismatches before cutover" (stale rows may pre-exist); gate on "every pre-existing mismatch is resolved or explicitly explained after cutover" — each is either a bug the recompute fixes or a documented semantic gap (member-provenance / unmodeled column).
+These are recorded in Story 03's ACs as required pre-DONE operator confirmations and re-surfaced by PM at dispatch authorization and before the closure commit. The OUTCOMES — the report-eyeball result (no value change) and the parity diff with each pre-existing mismatch's resolution/explanation — are written as a verification entry in this epic's History at closure (the auditable completion artifact; Story 03 AC-7).
+
+### TN-9 — Story sequencing / file overlap
+- Story 01 touches `src/reports/generator.py` + `src/gamechanger/loaders/plays_loader.py`.
+- Story 02 touches `src/gamechanger/loaders/scouting_loader.py` + `src/gamechanger/loaders/game_loader.py`.
+- Story 03 touches `src/gamechanger/loaders/scouting_loader.py` (both `load_team` and `_load_team_from_disk` aggregate call sites) + `src/db/player_dedup.py` + possibly a new canonical-recompute module (e.g. `src/db/season_aggregates.py`, TN-4 advisory) (+ `src/reports/aggregate_parity.py` / fixture only if TN-7 fires).
+Stories 02 and 03 both modify `scouting_loader.py`, so **Story 03 is blocked by Story 02** (per the same-file dependency rule). Story 01 has no file overlap with 02/03 and is order-independent. Stories execute serially in dispatch; the staging boundary isolates each.
+
+### TN-10 — Commit boundary & atomicity (DECIDED: option (b), SE+DE converged)
+DE confirmed (Q4) there is NO within-run aggregate staleness today: every post-load stage is non-mutating to `player_game_*` (gc_uuid resolve only `UPDATE teams SET gc_uuid` at `generator.py:1837-1840`; spray writes `spray_charts`; plays+reconcile write only `plays.pitcher_id` at `engine.py:1137` + `reconciliation_discrepancies` at `:1240`), and the end-of-`load_team` recompute is committed atomically with the dedup sweep at the single `scouting_loader.py:160` commit.
+
+**DECIDED — option (b).** SE and DE independently converged: the per-game boxscore writes commit per call inside `GameLoader.load_file` (`game_loader.py:321`) and run UPSTREAM of the dedup→recompute→commit(`:160`) segment, which reads already-committed, stable `player_game_*` rows. The whole load was NEVER one transaction (per-game commits always broke it), so widening it (the earlier "option (a)" of making `load_payload` non-committing) is unnecessary AND would conflict with Story 02's preserved per-call commit. **Resolution: keep per-call commits (Story 02 unchanged); the canonical recompute is atomic WITH THE DEDUP SWEEP only (committed together at `:160`); the bounded crash-window (per-game rows committed, recompute not yet run) self-heals on the next load and is explicitly OUT OF SCOPE.** This supersedes the roadmap's loose "recompute-atomically" phrasing, which is satisfied by the dedup→recompute→commit segment that already exists.
+
+**Precise framing for ACs (Story 02 AC-2/AC-3, Story 03 AC-3(d), TN-4)**: "atomic with the dedup sweep (deterministic recompute committed in the same transaction at `:160`); NOT all-or-nothing with the per-game writes, which Story 02 commits per call upstream and unchanged; the crash-window self-heals on the next load and is out of scope." This stops an implementer from wrongly widening the transaction.
+
+### TN-11 — Canonical recompute call-site wiring (DE-confirmed; A/B-orthogonal)
+This settles the SE double-run, CR M2's second in-load call site, and the Finding-4 scope in one design. The wiring is IDENTICAL under Option A or B (TN-5) — the column-set choice changes only WHICH columns the canonical computes, not the topology/transaction/scope.
+- **One end-of-load canonical call per load path; canonical runs EXACTLY ONCE per load.**
+  - `load_team`: embedded dedup (`:147`) runs WITHOUT recompute → canonical recompute REPLACES the `:159` call → single commit `:160`.
+  - `_load_team_from_disk`: embedded dedup (`:217`) runs WITHOUT recompute → canonical recompute REPLACES the `:224` call → single commit `:225`.
+- **Embedded suppression via an explicit `recompute_aggregates: bool = True` param** on the dedup entry point (DE: do NOT overload `manage_transaction` — transaction-ownership ≠ recompute-ownership; they align only coincidentally today). Default `True` preserves every standalone caller; ONLY the two embedded load-path dedup calls pass `recompute_aggregates=False`.
+- **CORRECTNESS NOTE — Hook-2 post-spray dedup MUST still recompute**: `src/pipeline/trigger.py:742` is the member-sync Hook-2 dedup that runs AFTER the end-of-load recompute and re-points rows (the genuine post-load-merge staleness path the roadmap flags). It uses the default `recompute_aggregates=True` and MUST keep recomputing — the embedded suppression must NOT reach it. (Member-sync is quarantined but must stay correct.)
+- **M2 resolution = thin signature-preserving wrapper (option i)**: `ScoutingLoader._compute_season_aggregates(self, team_id, season_id)` keeps its name + signature as a 1-line delegate to a module-level `canonical_recompute(conn, team_id, season_id)` (minimal churn at `:159`/`:224`; existing method-referencing tests keep working). The wrapper is ScoutingLoader-only; the `player_dedup.py` path calls the module-level function DIRECTLY (it cannot call a ScoutingLoader method). Both routes converge on the same module-level function.
+- **Scope = `(team_id, season_id)`**: DELETE all `boxscore_only` for the team+season, INSERT all players (GROUP BY player_id) — identical to today's `_compute_*` semantics except DELETE-first instead of ON CONFLICT. Standalone `recompute_affected_seasons` shifts from per-`(player,team,season)` to per-distinct-`(team,season)` — slightly broader but idempotent and beneficial (heals the whole scope). Provenance guard leaves `full`/`supplemented` untouched.
+
+## Open Questions
+- None. The canonical column-set choice (Option B superset, TN-5), the commit-boundary (option (b), TN-10), and the call-site wiring + double-run collapse (TN-11) are all DECIDED. The `'supplemented'` handling is a Non-Goal. Only the exact recompute SQL and the canonical-function module placement (TN-4 advisory) are left to the data-engineer as implementation decisions within the pinned constraints.
+
+## History
+- 2026-06-16: Created (DRAFT). Discovery + SE loader findings (Q1–Q3) + DE aggregate findings (Q4–Q6) incorporated; PM stat-value de-risk audit recorded in TN-5. Roadmap §0 updated slice C → E-237 / PLANNING.
+- 2026-06-16: Internal-review iteration 1 incorporated (CR + DE + SE). Decisions: canonical column set = **Option B superset** (TN-5, preserves dedup-test contract); commit boundary = **option (b)** atomic-with-dedup, per-call writes upstream (TN-10). MUST-FIX: corrected false "only production caller" (member `load.py:199` added, M1); Story 03 now routes BOTH `load_team` and `_load_team_from_disk` aggregate/dedup call sites + collapses the double-run (M2); pitching column count corrected to 14-incl-gs (M3). SHOULD-FIX: scope pinned `(team_id, season_id)` (DE4); standalone dedup callers (`cli/data.py:1095`, `pipeline/trigger.py:742`) preserved (S1); Story 02 AC-2 gains iteration-order preservation (S2); AC wording nits (SE). Added member-`full`-row-survival test (latent data-loss guard, DE bonus). DE call-site wiring confirmation folded into new **TN-11** (one end-of-load canonical call per load path; explicit `recompute_aggregates` param not `manage_transaction`; Hook-2 `trigger.py:742` must-still-recompute correctness note; thin signature-preserving wrapper for `_compute_season_aggregates`; scope `(team_id, season_id)`; A/B-orthogonal). Pending: Codex spec review.
+- 2026-06-16: Codex spec review iteration 1 incorporated (4 findings, all P2/P3, no P1; routing/deps/file-overlap/consultation/repo-reality cleared). F1 (AC-7 artifact — outcomes recorded in epic History at closure) ACCEPT; F2 (Story-03 AC-1↔Approach mandated-vs-delegated contradiction — topology mandated via TN-11, only SQL+module-placement delegated) ACCEPT; F3 (epic overstated `GameLoader.load_all` as a wrapper — normalized per-loader: `PlaysLoader.load_all` + `GameLoader.load_file` are wrappers, `GameLoader.load_all` unchanged) ACCEPT; F4 (AC over-stuffing) ACCEPT-LITE — trimmed Story-03 AC-1/AC-3 + Story-02 AC-2 to outcomes + TN references; **AC-4 column lists kept deliberately** as the de-risk verification anchor (partial-dismiss with rationale).
+- 2026-06-16: Codex spec review iteration 2 (user-requested second pass) — **CLEAN, 0 findings** ("No findings. This epic is ready to mark READY."). Repo-reality checks behind the live-path / dependency / routing / aggregate-contract claims passed; the only residual noted is the user-run production-data verification, which is explicitly specified with owner/timing/closure-artifact (AC-7/TN-8). **Epic set to READY.** Stops here — dispatch requires separate user authorization (do not chain into implementation).
+
+### Review Scorecard
+
+| Review Pass | Findings | Accepted | Dismissed |
+|-------------|----------|----------|-----------|
+| Internal iteration 1 — CR spec audit | 5 | 5 | 0 |
+| Internal iteration 1 — Holistic team (DE + SE) | 10 | 10 | 0 |
+| Codex spec review — iteration 1 | 4 | 4 | 0 |
+| Codex spec review — iteration 2 | 0 | 0 | 0 |
+| **Total** | **19** | **19** | **0** |
+
+CR spec audit: MUST-FIX M1 (false "only production caller" → `load.py:199`), M2 (second in-load aggregate/dedup site `_load_team_from_disk`), M3 (pitching column count → 14-incl-gs); SHOULD-FIX S1 (standalone recompute callers preserved), S2 (Story-02 iteration-order AC). Holistic team — DE: A/B column-set contradiction (→ Option B), atomicity wording, column-count, scope `(team_id,season_id)`, module-placement advisory, member-`full`-row-survival bonus test; SE: commit-boundary precision (→ option (b)), 2 AC wording nits, double-run note. Codex iter 1: F1/F2/F3 accepted, F4 accept-lite (AC-4 column lists deliberately retained as the de-risk anchor — partial-dismiss with rationale, counted as accepted at the finding level). Codex iter 2: clean. No finding was fully dismissed across any pass.
