@@ -12,6 +12,12 @@ Designed to be called once per member team *before* ``OpponentResolver.resolve()
 so that every opponent seen in the schedule is present in ``opponent_links``
 before the API resolution pass begins.
 
+QUARANTINED (D1): The opponent-discovery surface is deprecated and unmaintained
+in the reports-first product. Stop maintaining it -- do NOT invest in fixes,
+refactors, or polish here -- but do NOT delete it: deletion + import decoupling
+is D2, a separate deliberate step. This banner is NOT a delete-license. See
+.claude/rules/quarantine.md for the canonical policy.
+
 Usage::
 
     import sqlite3

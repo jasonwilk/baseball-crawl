@@ -92,6 +92,19 @@ class GenerationResult:
 
 
 @dataclass
+class CleanupResult:
+    """Result of an expired-report file-cleanup sweep (E-238-07).
+
+    ``files_removed`` counts HTML files actually unlinked from disk;
+    ``errors`` counts rows whose cleanup raised (per-file error isolation --
+    one unremovable file does not abort the sweep).
+    """
+
+    files_removed: int = 0
+    errors: int = 0
+
+
+@dataclass
 class _SprayOutcome:
     """Outcome of the spray-chart crawl/load stage.
 
@@ -1311,6 +1324,66 @@ def _run_tier2_enrichment(
     return enriched, TIER2_SUCCESS
 
 
+def cleanup_expired_reports() -> CleanupResult:
+    """Remove on-disk HTML files for expired reports; KEEP the DB rows.
+
+    Selects ``reports`` rows whose ``expires_at`` is strictly in the past
+    (``expires_at < now``) and that still have a non-NULL ``report_path``,
+    unlinks each HTML file, and NULLs ``report_path`` -- but KEEPS the row so
+    the report still appears as expired in ``bb report list`` / ``/admin/reports``
+    and serving it keeps the existing 404 behavior.
+
+    File removal mirrors the ``_delete_report`` admin path: canonical
+    ``_REPO_ROOT`` resolution plus an ``.is_file()`` guard. Each row's cleanup
+    is wrapped in per-row error isolation so one unremovable file (e.g. a
+    permission error) does not abort the whole sweep; a failing row keeps its
+    ``report_path`` so a later sweep can retry.
+
+    Reachable both opportunistically at the start of :func:`generate_report`
+    and via the ``bb report cleanup`` CLI command.
+
+    Returns:
+        A :class:`CleanupResult` with ``files_removed`` and ``errors`` counts.
+    """
+    result = CleanupResult()
+    now_iso = _utcnow_iso()
+    with closing(get_connection()) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            "SELECT id, report_path FROM reports "
+            "WHERE report_path IS NOT NULL AND expires_at < ?",
+            (now_iso,),
+        ).fetchall()
+
+        for row in rows:
+            report_id = row["id"]
+            report_path = row["report_path"]
+            try:
+                # Canonical resolution + is_file() guard (the _delete_report model).
+                file_path = _REPO_ROOT / "data" / report_path
+                if file_path.is_file():
+                    file_path.unlink()
+                    logger.info("Removed expired report file: %s", file_path)
+                    result.files_removed += 1
+                # NULL report_path but KEEP the row (so the list still shows the
+                # report as expired). Done whether or not the file was present,
+                # because either way the on-disk artifact is now gone.
+                conn.execute(
+                    "UPDATE reports SET report_path = NULL WHERE id = ?",
+                    (report_id,),
+                )
+            except Exception as exc:  # noqa: BLE001 -- per-file error isolation
+                logger.warning(
+                    "Failed to clean up expired report file for report_id=%s: %s",
+                    report_id, exc,
+                )
+                result.errors += 1
+                continue
+        conn.commit()
+
+    return result
+
+
 def generate_report(gc_url: str) -> GenerationResult:
     """Generate a standalone scouting report for a GameChanger team.
 
@@ -1329,6 +1402,16 @@ def generate_report(gc_url: str) -> GenerationResult:
     Returns:
         A :class:`GenerationResult` with success/failure details.
     """
+    # Opportunistic expired-report file cleanup (E-238-07). A cleanup failure
+    # must NEVER block or fail generation (AC-3), so swallow everything.
+    try:
+        cleanup_expired_reports()
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "Opportunistic expired-report cleanup failed; continuing generation",
+            exc_info=True,
+        )
+
     return _ReportGeneration(gc_url).run()
 
 

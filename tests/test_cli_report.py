@@ -7,7 +7,7 @@ from unittest.mock import patch
 from typer.testing import CliRunner
 
 from src.cli.report import app
-from src.reports.generator import GenerationResult
+from src.reports.generator import CleanupResult, GenerationResult
 
 runner = CliRunner()
 
@@ -189,3 +189,64 @@ class TestListCommand:
         result = runner.invoke(app, ["--help"])
         assert result.exit_code == 0
         assert "report" in result.output.lower()
+
+
+class TestCleanupCommand:
+    """Test bb report cleanup CLI command (E-238-07)."""
+
+    def test_cleanup_reports_files_removed(self):
+        """AC-4: the command invokes the helper and reports the file count."""
+        with patch(
+            "src.cli.report.cleanup_expired_reports",
+            return_value=CleanupResult(files_removed=3, errors=0),
+        ) as mock_cleanup:
+            result = runner.invoke(app, ["cleanup"])
+
+        mock_cleanup.assert_called_once()
+        assert result.exit_code == 0
+        assert "3" in result.output
+        assert "removed" in result.output.lower()
+
+    def test_cleanup_reports_zero(self):
+        """A no-op sweep (nothing expired) still exits 0 and reports 0."""
+        with patch(
+            "src.cli.report.cleanup_expired_reports",
+            return_value=CleanupResult(files_removed=0, errors=0),
+        ):
+            result = runner.invoke(app, ["cleanup"])
+
+        assert result.exit_code == 0
+        assert "0" in result.output
+
+    def test_cleanup_reports_errors(self):
+        """Per-file errors are surfaced (without failing the command)."""
+        with patch(
+            "src.cli.report.cleanup_expired_reports",
+            return_value=CleanupResult(files_removed=1, errors=2),
+        ):
+            result = runner.invoke(app, ["cleanup"])
+
+        assert result.exit_code == 0
+        assert "1" in result.output
+        assert "2" in result.output
+
+    def test_cleanup_helper_failure_surfaces_nonzero_exit(self):
+        """Error path: if the helper raises, the command exits non-zero.
+
+        ``bb report cleanup`` is an explicit operator action (unlike the
+        opportunistic call), so a hard failure should not be silently
+        swallowed -- the operator must see it.
+        """
+        with patch(
+            "src.cli.report.cleanup_expired_reports",
+            side_effect=RuntimeError("db unavailable"),
+        ):
+            result = runner.invoke(app, ["cleanup"])
+
+        assert result.exit_code != 0
+        assert result.exception is not None
+
+    def test_cleanup_help(self):
+        result = runner.invoke(app, ["cleanup", "--help"])
+        assert result.exit_code == 0
+        assert "expired" in result.output.lower()

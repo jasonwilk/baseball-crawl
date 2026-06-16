@@ -9,8 +9,8 @@ paths:
 
 - Sequential, zero-padded to 3 digits: `001`, `002`, `003`, etc.
 - Never reuse a migration number, even if a slot is unused.
-- Current sequence: `001` only. `001_initial_schema.sql` is the consolidated schema rewrite from E-220 (old migrations 001-015 archived in `.project/archive/migrations-pre-E220/`). The E-220 rewrite folded all prior migrations into a single initial-schema file with `perspective_team_id` as a first-class concept on stat tables.
-- Next migration: `002`.
+- **The `migrations/` directory is authoritative for the live sequence** -- always `ls migrations/*.sql` to find the highest-numbered file rather than trusting a number written here (this list rots). `001_initial_schema.sql` is the consolidated schema rewrite from E-220 (old migrations 001-015 archived in `.project/archive/migrations-pre-E220/`); the E-220 rewrite folded all prior migrations into a single initial-schema file with `perspective_team_id` as a first-class concept on stat tables. Incremental migrations have landed on top of it -- as of E-238 the latest is `004_webauthn_challenge_store.sql` (the TTL'd `webauthn_challenges` SQLite store for passkey login/registration challenges; 002/003 added report-generation run tracking).
+- Next migration: the highest number in `migrations/` plus one (currently `005`).
 
 ## Naming Pattern
 

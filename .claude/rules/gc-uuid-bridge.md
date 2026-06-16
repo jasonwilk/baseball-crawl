@@ -42,6 +42,18 @@ The bridge also runs in reverse. When you have a team's `gc_uuid` (UUID) but nee
 
 This reverse path is the rung-(a) auto-resolution mechanism in the opponent-scouting and (future) scheduled-report flows: an authenticated opponents-list entry carrying a `progenitor_team_id` (its `gc_uuid`) resolves to a `public_id` via `GET /teams/{progenitor_team_id}`, which then feeds the public scouting pipeline.
 
+## BANNED PATH: `resolve_unlinked()` follow → bridge → unfollow
+
+**Do NOT use or extend `resolve_unlinked()` / `_follow_bridge_unfollow()`** in `src/gamechanger/crawlers/opponent_resolver.py`. This is the **highest-priority quarantine ban** (see `.claude/rules/quarantine.md`).
+
+Why it is banned:
+
+- **Wrong identifier namespace**: it issues `POST /teams/{root_team_id}/follow` against `root_team_id`, which is NOT a `gc_uuid`. `root_team_id` is a separate namespace (the local opponent-registry key from manually-typed opponents) -- consistent with the CLAUDE.md "Opponent entry duality" guidance, `root_team_id` must NEVER be treated as, or stored in, `gc_uuid`. Following/bridging against it is operating on the wrong identifier.
+- **Mutates external GameChanger state**: unlike every other bridge path in this file (which is read-only `GET`/`POST /search`), this path *writes* to GC -- it follows a team, hits the bridge endpoint, then issues two best-effort unfollow `DELETE`s. A failed or interrupted cycle can leave the authenticated account following teams it never intended to.
+- **Unverified by its own admission**: the function's docstring states the flow is experimental and that whether `root_team_id` works with the follow/bridge endpoints is unverified.
+
+The correct opponent-resolution mechanisms are the read-only paths documented above (the forward `POST /search` bridge and the rung-(a) reverse `GET /teams/{gc_uuid}` bridge) plus operator-pasted GC team URLs for unindexed teams. New work MUST NOT call into or extend the follow → bridge → unfollow path; route any such need to PM per the quarantine rule. Its in-code deprecation banner is added in the code-side quarantine story.
+
 ## Search Cannot Find Unindexed Teams (Name-Source Warning)
 
 `POST /search` (the forward bridge above) only finds teams **GameChanger has indexed**. Two failure modes are invariant-level and easy to misdiagnose as transient:

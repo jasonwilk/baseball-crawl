@@ -1,3 +1,7 @@
+{# QUARANTINED (D1): deprecated, unmaintained dashboard template in the
+   reports-first product. Stop maintaining it, but do NOT delete it --
+   deletion + import decoupling is D2. NOT a delete-license.
+   See .claude/rules/quarantine.md. #}
 {% macro team_selector(permitted_team_infos, active_team_id, base_url, current_sort=None, current_dir=None, active_year=None, available_years=None, current_year=None) %}
 {%- set _multi_team = permitted_team_infos|length > 1 -%}
 {%- set _multi_year = available_years and available_years|length > 1 -%}

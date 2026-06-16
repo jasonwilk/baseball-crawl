@@ -18,6 +18,12 @@ Routes:
     GET /dashboard/charts/spray/team/{team_id}.png     -- Team aggregate offensive spray chart PNG.
 """
 
+# QUARANTINED (D1): The dashboard is a deprecated, unmaintained surface in the
+# reports-first product. Stop maintaining it -- do NOT invest in fixes,
+# refactors, or polish here -- but do NOT delete it: deletion + import
+# decoupling is D2, a separate deliberate step. This banner is NOT a
+# delete-license. See .claude/rules/quarantine.md for the canonical policy.
+
 from __future__ import annotations
 
 import datetime

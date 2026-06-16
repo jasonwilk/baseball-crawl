@@ -12,6 +12,8 @@ paths:
 
 # Scouting Data Flows
 
+> **QUARANTINE (2026-06-12)**: The Opponent Flow (dashboard) surface described below is **quarantined and parity-excluded** -- see `.claude/rules/quarantine.md`. The reports flow is the sole forward scouting/delivery surface. The comparison table and conventions below are retained as a description of how the surviving code behaves; they are NOT a forward mandate to keep the dashboard in feature parity with reports.
+
 Two distinct flows produce scouting intelligence. Confusing them causes wrong auth, wrong data source, or wrong lifecycle assumptions.
 
 | | Opponent Flow (dashboard) | Reports Flow (standalone) |
@@ -32,4 +34,4 @@ Two distinct flows produce scouting intelligence. Confusing them causes wrong au
 
 **Routing note**: Stories modifying `src/reports/`, `src/api/routes/reports.py`, report handlers in `src/api/routes/admin.py`, or `src/api/templates/admin/reports.html` belong to the reports flow. Stories modifying opponent dashboard routes/templates or `src/gamechanger/loaders/scouting_loader.py` belong to the opponent flow.
 
-**Feature parity principle**: When a new data feature (stat, callout, visualization) is added to either scouting surface, it should be considered for both. This is a planning-time consideration, not a dispatch-time gate -- the surfaces have different constraints (reports are frozen HTML with LLM access; dashboard is live with latency limits), so not every feature will appear on both. But scoping to one surface should be a deliberate decision, not an oversight. In practice: design queries and engines as shared-first (reusable modules in `src/api/db.py` or dedicated packages), then adapt presentation per surface. The PM should evaluate both surfaces during epic formation for any scouting-related feature.
+**Feature parity principle (QUARANTINE -- reports is the SOLE forward surface)**: The dashboard/opponent-flow surface is quarantined (see `.claude/rules/quarantine.md`), so there is no longer a two-surface parity obligation. New scouting data features (stat, callout, visualization) target the **reports flow only** -- do NOT scope new work to the dashboard, and do NOT treat the dashboard as a parity target during epic formation. The shared-first design discipline still applies for the protected-core seams that survive in `src/api/db.py` (e.g. `get_pitching_workload`), but only because the reports flow consumes them -- not to keep two surfaces in step. The historical two-surface parity is frozen, not forward.

@@ -312,8 +312,12 @@ class TestNonAdminForbidden:
         assert "text/html" in response.headers.get("content-type", "")
         assert "permission" in response.text.lower()
 
-    def test_non_admin_forbidden_page_has_dashboard_link(self, admin_db: Path) -> None:
-        """Forbidden page includes a link back to the dashboard."""
+    def test_non_admin_forbidden_page_has_reports_link(self, admin_db: Path) -> None:
+        """Forbidden page includes a link back to the reports page.
+
+        E-238-05 retargeted the forbidden page's "Back to ..." link off the
+        (quarantined) /dashboard to /admin/reports; this assertion tracks that.
+        """
         user_id = _insert_user(admin_db, "dashlink@example.com")
         raw_token = _insert_session(admin_db, user_id)
 
@@ -326,7 +330,7 @@ class TestNonAdminForbidden:
         ):
             with TestClient(app, cookies={"session": raw_token, "csrf_token": _CSRF}) as client:
                 response = client.get("/admin/users")
-        assert "/dashboard" in response.text
+        assert "/admin/reports" in response.text
 
 
 # ---------------------------------------------------------------------------

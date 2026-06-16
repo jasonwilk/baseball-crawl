@@ -35,6 +35,14 @@ Usage::
     print(result)
 """
 
+# QUARANTINED (D1): The opponent-discovery surface is deprecated and
+# unmaintained in the reports-first product. Stop maintaining it -- do NOT
+# invest in fixes, refactors, or polish here -- but do NOT delete it: deletion
+# + import decoupling is D2, a separate deliberate step. This banner is NOT a
+# delete-license. See .claude/rules/quarantine.md for the canonical policy.
+# NOTE: resolve_unlinked() / _follow_bridge_unfollow() below carry the
+# HIGHEST-PRIORITY quarantine ban (DO NOT USE / DO NOT EXTEND).
+
 from __future__ import annotations
 
 import logging
@@ -665,8 +673,20 @@ class OpponentResolver:
     # Experimental: follow→bridge→unfollow resolution
     # ------------------------------------------------------------------
 
+    # =========================================================================
+    # QUARANTINED (D1) -- HIGHEST-PRIORITY BAN: DO NOT USE / DO NOT EXTEND.
+    # The resolve_unlinked() follow->bridge->unfollow path is the single
+    # highest-priority quarantine ban in the codebase. New code MUST NOT call
+    # into or extend this path. Stop maintaining it -- but do NOT delete it:
+    # deletion + import decoupling is D2. This banner is NOT a delete-license.
+    # See .claude/rules/quarantine.md and .claude/rules/gc-uuid-bridge.md.
+    # =========================================================================
     def resolve_unlinked(self) -> ResolveResult:
         """Attempt auto-resolution of null-progenitor opponents via follow→bridge→unfollow.
+
+        QUARANTINED (D1) -- DO NOT USE / DO NOT EXTEND. Highest-priority
+        quarantine ban (follow->bridge->unfollow). Stop maintaining, do NOT
+        delete (deletion is D2). See .claude/rules/quarantine.md.
 
         For each distinct ``root_team_id`` in ``opponent_links`` with no
         ``public_id`` and no ``resolution_method``, this method:
@@ -716,6 +736,14 @@ class OpponentResolver:
         )
         return result
 
+    # =========================================================================
+    # QUARANTINED (D1) -- HIGHEST-PRIORITY BAN: DO NOT USE / DO NOT EXTEND.
+    # The follow->bridge->unfollow path is the single highest-priority
+    # quarantine ban in the codebase. New code MUST NOT call into or extend
+    # this path. Stop maintaining it -- but do NOT delete it: deletion + import
+    # decoupling is D2. This banner is NOT a delete-license.
+    # See .claude/rules/quarantine.md and .claude/rules/gc-uuid-bridge.md.
+    # =========================================================================
     def _follow_bridge_unfollow(
         self,
         root_team_id: str,
@@ -723,6 +751,10 @@ class OpponentResolver:
         result: ResolveResult,
     ) -> None:
         """Execute the follow→bridge→unfollow cycle for one root_team_id.
+
+        QUARANTINED (D1) -- DO NOT USE / DO NOT EXTEND. Highest-priority
+        quarantine ban (follow->bridge->unfollow). Stop maintaining, do NOT
+        delete (deletion is D2). See .claude/rules/quarantine.md.
 
         Args:
             root_team_id: The team UUID to follow, query, and unfollow.

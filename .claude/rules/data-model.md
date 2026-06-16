@@ -10,7 +10,7 @@ paths:
 
 # Data Model
 
-The schema is defined in `migrations/001_initial_schema.sql` (base) with incremental migrations (`004_add_team_season_year.sql`, etc.). Key design decisions:
+The schema is defined in `migrations/001_initial_schema.sql` (base) with incremental migrations layered on top (run `ls migrations/*.sql` for the live set; see `.claude/rules/migrations.md` for numbering). Key design decisions:
 
 - **Programs**: Umbrella entity grouping teams under an organizational program (e.g., `lsb-hs` = Lincoln Standing Bear HS). Types: `hs`, `usssa`, `legion`.
 - **Teams**: INTEGER PRIMARY KEY AUTOINCREMENT (`teams.id`). External GC identifiers live in dedicated UNIQUE columns: `gc_uuid` (authenticated API) and `public_id` (public URL slug). All FK references to teams use `teams(id)`. INTEGER PK applies to `teams` only -- programs, seasons, and players keep TEXT PKs.
@@ -64,3 +64,9 @@ Any "coverage / freshness / how-many-games-do-we-have" signal MUST be **data-bea
 ## Concurrent Team INSERT Recovery
 
 `teams` has partial UNIQUE indexes on `gc_uuid` / `public_id` (`WHERE ... NOT NULL`) but NONE on `name`. Under the cross-process boundary (admin-UI + CLI + future cron on one SQLite file), a concurrent process can commit the same anchor between this call's cascade SELECT and its INSERT, tripping the partial UNIQUE index with an `IntegrityError`. The canonical insert path (`ensure_team_row_with_provenance`, `src/db/teams.py`) catches it and re-enters the cascade ONCE (`_insert_retry` flag) so the now-committed racing row resolves through the normal MATCH path — applying the same gc_uuid/public_id/name/season backfills a match would, not a bare id lookup — and returns `inserted=False`. The single-retry flag bounds re-entry (no infinite loop if the racing row vanishes again; a second collision without a match re-raises). Name-only inserts have no UNIQUE index on name and never reach this branch. New team-INSERT paths that bypass the canonical helper would lose this recovery.
+
+## Single-Use Token Consume (DELETE-is-the-arbiter)
+
+A DB-backed single-use token/nonce (passkey challenge in `webauthn_challenges`, magic-link token, session) is **NOT replay-proof if you read-then-verify-then-delete as separate steps and ignore the DELETE's rowcount**. Under the same cross-process boundary (multiple uvicorn workers + CLI on one SQLite file), two workers can both pass the non-atomic read/verify gate inside the TOCTOU window and both proceed -- a replay.
+
+The fix is to make the **DELETE the atomic arbiter**: the consume helper returns `cursor.rowcount`, and the caller gates the privileged action (e.g. session creation) on `rowcount == 1`, treating `0` as "already consumed -> reject". SQLite's single-writer WAL serializes the racing DELETEs, so exactly one commits with rowcount 1 and the loser matches no row and gets 0. The earlier read (`get_challenge`'s live-row gate) is therefore only advisory -- the DELETE is the real gate. Canonical implementation: `consume_challenge()` in `src/api/passkey_challenges.py` (the login verify path in `src/api/routes/auth.py` gates on its return; E-238-06). New DB-backed single-use-token paths MUST gate on the consume rowcount, not on a prior read.

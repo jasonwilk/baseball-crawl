@@ -255,7 +255,7 @@ class TestLoginPageRenders:
         assert 'method="post"' in response.text.lower()
 
     def test_login_page_redirects_if_valid_session(self, db: Path) -> None:
-        """GET /auth/login redirects to /dashboard if a valid session cookie exists."""
+        """GET /auth/login redirects to /admin/reports if a valid session cookie exists."""
         user_id = _insert_user(db, "loggedin@example.com")
         raw_token = _insert_session(db, user_id)
 
@@ -267,7 +267,9 @@ class TestLoginPageRenders:
             ) as client:
                 response = client.get("/auth/login")
         assert response.status_code == 302
-        assert "/dashboard" in response.headers["location"]
+        # E-238-05: retargeted off the quarantined /dashboard to /admin/reports.
+        assert "/admin/reports" in response.headers["location"]
+        assert "/dashboard" not in response.headers["location"]
 
 
 # ---------------------------------------------------------------------------
@@ -385,7 +387,7 @@ class TestVerifyToken:
         """Valid token verification creates session and redirects (AC-17d).
 
         A user with no passkeys is redirected to the passkey prompt interstitial;
-        a user with passkeys is redirected directly to /dashboard.
+        a user with passkeys is redirected directly to /admin/reports.
         """
         user_id = _insert_user(db, "verify@example.com")
         raw_token = _insert_magic_token(db, user_id)
@@ -396,8 +398,10 @@ class TestVerifyToken:
 
         assert response.status_code == 302
         location = response.headers["location"]
-        # New user (no passkeys) -> passkey prompt; user with passkeys -> /dashboard
-        assert "/dashboard" in location or "/auth/passkey/prompt" in location
+        # New user (no passkeys) -> passkey prompt; user with passkeys -> /admin/reports
+        # (E-238-05: retargeted off the quarantined /dashboard).
+        assert "/admin/reports" in location or "/auth/passkey/prompt" in location
+        assert "/dashboard" not in location
 
     def test_valid_token_sets_session_cookie(self, db: Path) -> None:
         """Valid token sets the session cookie on the response (AC-17d)."""
@@ -728,7 +732,9 @@ class TestStaleMagicLinkInvalidation:
 
         assert response.status_code == 302
         location = response.headers["location"]
-        assert "/dashboard" in location or "/auth/passkey/prompt" in location
+        # E-238-05: retargeted off the quarantined /dashboard to /admin/reports.
+        assert "/admin/reports" in location or "/auth/passkey/prompt" in location
+        assert "/dashboard" not in location
 
     def test_issue_token_a_then_b_verify_a_fails_b_succeeds(self, db: Path) -> None:
         """AC-4: Issue token A, issue token B; verify A fails, verify B succeeds."""
@@ -931,3 +937,93 @@ class TestMagicLinkRateLimiting:
                     client.post("/auth/login", data={"email": email, "csrf_token": _CSRF})
 
         mock_send.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# E-238-05: Navigation retarget canary
+#
+# The /dashboard surface is quarantined (see .claude/rules/quarantine.md).
+# Every auth-success / already-authenticated redirect must now land on
+# /admin/reports (the live reports flow), never on /dashboard. These tests
+# are the testable half of the AC-8 canary: each retargeted redirect's
+# Location contains no /dashboard, and no redirect loop occurs.
+# ---------------------------------------------------------------------------
+
+
+def _insert_passkey_credential(db_path: Path, user_id: int) -> None:
+    """Insert a minimal passkey credential row so the user 'has passkeys'."""
+    conn = sqlite3.connect(str(db_path))
+    conn.execute(
+        """
+        INSERT INTO passkey_credentials (user_id, credential_id, public_key, sign_count)
+        VALUES (?, ?, ?, 0)
+        """,
+        (user_id, secrets.token_bytes(32), secrets.token_bytes(64)),
+    )
+    conn.commit()
+    conn.close()
+
+
+class TestNavRetargetCanaryE238:
+    """E-238-05: auth redirects retarget off the quarantined /dashboard."""
+
+    def test_root_redirect_targets_reports_not_dashboard(self, db: Path) -> None:
+        """GET / redirects to /admin/reports, never /dashboard (AC-2)."""
+        with patch.dict("os.environ", {"DATABASE_PATH": str(db)}):
+            with TestClient(app, follow_redirects=False) as client:
+                response = client.get("/")
+        assert response.status_code == 302
+        assert response.headers["location"] == "/admin/reports"
+        assert "/dashboard" not in response.headers["location"]
+
+    def test_login_when_already_authenticated_redirects_to_reports(self, db: Path) -> None:
+        """GET /auth/login with a valid session redirects to /admin/reports (AC-1)."""
+        user_id = _insert_user(db, "already@example.com")
+        raw_token = _insert_session(db, user_id)
+        with patch.dict("os.environ", {"DATABASE_PATH": str(db)}):
+            with TestClient(
+                app,
+                follow_redirects=False,
+                cookies={"session": raw_token, "csrf_token": _CSRF},
+            ) as client:
+                response = client.get("/auth/login")
+        assert response.status_code == 302
+        assert response.headers["location"] == "/admin/reports"
+        assert "/dashboard" not in response.headers["location"]
+
+    def test_verify_with_passkeys_redirects_to_reports(self, db: Path) -> None:
+        """GET /verify for a user WITH passkeys redirects to /admin/reports (AC-1).
+
+        This exercises the magic-link success ``has_passkeys`` branch in
+        auth.py (the FIVE-site inventory) -- the branch that previously sent
+        the operator to the quarantined /dashboard.
+        """
+        user_id = _insert_user(db, "haspk@example.com")
+        _insert_passkey_credential(db, user_id)
+        raw_token = _insert_magic_token(db, user_id)
+        with patch.dict("os.environ", {"DATABASE_PATH": str(db)}):
+            with TestClient(app, follow_redirects=False, cookies=_CSRF_COOKIES) as client:
+                response = client.get(f"/auth/verify?token={raw_token}")
+        assert response.status_code == 302
+        location = response.headers["location"]
+        assert location == "/admin/reports"
+        assert "/dashboard" not in location
+
+    def test_no_redirect_loop_root_to_reports_to_login(self, db: Path) -> None:
+        """Unauthenticated GET / terminates at /auth/login with no loop, no /dashboard.
+
+        The hop chain is / -> /admin/reports -> /auth/login (the reports page
+        requires auth; the middleware redirects unauthenticated callers to
+        login). The chain must terminate (no infinite loop) and no hop may
+        target the quarantined /dashboard.
+        """
+        with patch.dict("os.environ", {"DATABASE_PATH": str(db)}):
+            with TestClient(app, follow_redirects=True) as client:
+                # TestClient raises on excessive redirects; completing proves
+                # there is no loop.
+                response = client.get("/")
+        assert response.status_code == 200
+        assert response.url.path == "/auth/login"
+        # No hop in the redirect chain targeted /dashboard.
+        for hop in response.history:
+            assert "/dashboard" not in hop.headers.get("location", "")

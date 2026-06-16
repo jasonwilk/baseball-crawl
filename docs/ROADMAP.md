@@ -25,7 +25,7 @@ as epics land. **Convention**: this table is updated at two moments — at an ep
 | B | Report run records + trust signals + quality gates | E-235 | COMPLETED |
 | B2 | Report self-reporting integrity hardening | E-236 | COMPLETED |
 | C | Payload-first loaders + aggregate integrity | E-237 | COMPLETED |
-| D1 | Quarantine + navigation retarget + passkey fix | E-238 | PLANNING |
+| D1 | Quarantine + navigation retarget + passkey fix | E-238 | COMPLETED |
 | D2 | Decouple imports, then remove unused surfaces | — | NOT STARTED |
 | E | Morning-of-game scheduled reports | — | NOT STARTED |
 

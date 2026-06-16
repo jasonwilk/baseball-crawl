@@ -655,6 +655,40 @@ class TestAuthSchema:
         assert "team_id" in cols
         assert "user_id" in cols
 
+    def test_webauthn_challenges_table_exists(self, migrated_db: sqlite3.Connection) -> None:
+        """webauthn_challenges table exists (migration 004, E-238-06)."""
+        assert "webauthn_challenges" in _tables(migrated_db)
+
+    def test_webauthn_challenges_columns(self, migrated_db: sqlite3.Connection) -> None:
+        """webauthn_challenges has the documented column set."""
+        cols = _columns(migrated_db, "webauthn_challenges")
+        assert cols == {"kind", "lookup_key", "challenge", "expires_at", "created_at"}
+
+    def test_webauthn_challenges_expires_at_index(self, migrated_db: sqlite3.Connection) -> None:
+        """The expires_at index is created for the sweep-on-write."""
+        assert "idx_webauthn_challenges_expires_at" in _indexes(migrated_db)
+
+    def test_webauthn_challenges_composite_pk(self, migrated_db: sqlite3.Connection) -> None:
+        """(kind, lookup_key) is the composite PK -- duplicate inserts rejected."""
+        migrated_db.execute(
+            "INSERT INTO webauthn_challenges (kind, lookup_key, challenge) "
+            "VALUES ('login', 'k', 'c1')"
+        )
+        migrated_db.commit()
+        with pytest.raises(sqlite3.IntegrityError):
+            migrated_db.execute(
+                "INSERT INTO webauthn_challenges (kind, lookup_key, challenge) "
+                "VALUES ('login', 'k', 'c2')"
+            )
+
+    def test_webauthn_challenges_kind_check(self, migrated_db: sqlite3.Connection) -> None:
+        """kind is constrained to 'login' / 'registration'."""
+        with pytest.raises(sqlite3.IntegrityError):
+            migrated_db.execute(
+                "INSERT INTO webauthn_challenges (kind, lookup_key, challenge) "
+                "VALUES ('bogus', 'k', 'c')"
+            )
+
 
 # ---------------------------------------------------------------------------
 # (k) AC-20: UNIQUE constraints on stat tables

@@ -12,7 +12,11 @@ from rich.console import Console
 from rich.table import Table
 
 from src.reports.aggregate_parity import verify_aggregates
-from src.reports.generator import generate_report, list_reports
+from src.reports.generator import (
+    cleanup_expired_reports,
+    generate_report,
+    list_reports,
+)
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _DEFAULT_DB_PATH = _PROJECT_ROOT / "data" / "app.db"
@@ -126,6 +130,27 @@ def list_cmd() -> None:
         )
 
     console.print(table)
+
+
+@app.command(name="cleanup")
+def cleanup_cmd() -> None:
+    """Remove on-disk HTML files for expired reports (keeps the report rows).
+
+    Expired reports already 404 on serving; their HTML files, however, are
+    never unlinked and accumulate on disk. This sweep deletes those files and
+    NULLs ``report_path`` while KEEPING the ``reports`` row, so each report
+    still shows as expired in ``bb report list`` / ``/admin/reports``.
+    """
+    result = cleanup_expired_reports()
+    console.print(
+        f"[green]Cleanup complete[/green] — removed {result.files_removed} "
+        f"expired report file(s)."
+    )
+    if result.errors:
+        err_console.print(
+            f"[yellow]{result.errors} file(s) could not be removed[/yellow] "
+            "(left in place for a later sweep; see logs)."
+        )
 
 
 @app.command(name="verify-aggregates")

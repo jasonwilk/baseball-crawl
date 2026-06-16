@@ -410,8 +410,16 @@ def _discover_opponents(
 # ---------------------------------------------------------------------------
 
 
+# QUARANTINED (D1): run_member_sync drives the member-team sync pipeline, a
+# deprecated, unmaintained surface in the reports-first product. Stop
+# maintaining it -- do NOT invest in fixes, refactors, or polish here -- but do
+# NOT delete it: deletion + import decoupling is D2, a separate deliberate
+# step. This banner is NOT a delete-license. See .claude/rules/quarantine.md.
 def run_member_sync(team_id: int, team_name: str, crawl_job_id: int) -> None:
     """Run the full crawl+load pipeline for an owned (member) team.
+
+    QUARANTINED (D1): member-sync surface -- deprecated/unmaintained. Stop
+    maintaining, do NOT delete (deletion is D2). See .claude/rules/quarantine.md.
 
     Invokes ``crawl.run(source="db", team_ids=[team_id])`` then
     ``load.run(source="db", team_ids=[team_id])``, updates the
@@ -634,8 +642,19 @@ def _run_spray_stages(
 # ---------------------------------------------------------------------------
 
 
+# QUARANTINED (D1): run_scouting_sync drives the opponent-discovery / tracked-
+# opponent surface, deprecated and unmaintained in the reports-first product.
+# Stop maintaining it -- do NOT invest in fixes, refactors, or polish here --
+# but do NOT delete it: deletion + import decoupling is D2, a separate
+# deliberate step. This banner is NOT a delete-license. The ScoutingCrawler /
+# ScoutingLoader it invokes are protected-core (NOT quarantined) -- only this
+# tracked-opponent entry point is. See .claude/rules/quarantine.md.
 def run_scouting_sync(team_id: int, public_id: str, crawl_job_id: int) -> None:
     """Run the scouting crawl+load pipeline for a tracked opponent team.
+
+    QUARANTINED (D1): tracked-opponent entry point -- deprecated/unmaintained.
+    Stop maintaining, do NOT delete (deletion is D2). The ScoutingCrawler /
+    ScoutingLoader it invokes are protected-core. See .claude/rules/quarantine.md.
 
     Mirrors the CLI's ``_run_scout_pipeline`` behavior without importing from
     ``src/cli/``.  Preserves the ``scouting_runs`` status-update behavior that

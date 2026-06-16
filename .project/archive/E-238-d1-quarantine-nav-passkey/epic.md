@@ -1,7 +1,7 @@
 # E-238: D1 — Quarantine + Navigation Retarget + Passkey Fix
 
 ## Status
-`READY`
+`COMPLETED`
 <!-- Lifecycle: DRAFT → READY → ACTIVE → COMPLETED (or BLOCKED / ABANDONED) -->
 
 ## Overview
@@ -88,13 +88,13 @@ governed by §3 (Protected Core), §4 (Cruft verdicts), §6 (Safety Rules), and 
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-238-01 | Create the central quarantine rule + context-layer pointers | TODO | None | - |
-| E-238-02 | Amend surface/delivery parity rules for quarantine | TODO | E-238-01 | - |
-| E-238-03 | Add the `resolve_unlinked()` context-layer ban | TODO | E-238-01 | - |
-| E-238-04 | Add code deprecation banners to quarantined surfaces | TODO | E-238-01 | - |
-| E-238-05 | Retarget all navigation off `/dashboard` | TODO | None | - |
-| E-238-06 | Move passkey challenges to a TTL'd SQLite table | TODO | E-238-05 | - |
-| E-238-07 | Expired-report file cleanup | TODO | None | - |
+| E-238-01 | Create the central quarantine rule + context-layer pointers | DONE | None | - |
+| E-238-02 | Amend surface/delivery parity rules for quarantine | DONE | E-238-01 | - |
+| E-238-03 | Add the `resolve_unlinked()` context-layer ban | DONE | E-238-01 | - |
+| E-238-04 | Add code deprecation banners to quarantined surfaces | DONE | E-238-01 | - |
+| E-238-05 | Retarget all navigation off `/dashboard` | DONE | None | - |
+| E-238-06 | Move passkey challenges to a TTL'd SQLite table | DONE | E-238-05 | - |
+| E-238-07 | Expired-report file cleanup | DONE | None | - |
 
 **Dependency notes**: 02 depends on 01 because both edit `CLAUDE.md` (01 adds the pointer line,
 02 amends parity sections — serial ordering avoids a staging-boundary collision). 06 depends on
@@ -263,14 +263,76 @@ planning-artifact edit authored by PM during the closure staging so it rides the
 - 2026-06-16: Refined through one internal review iteration + one Codex spec-review pass; all
   findings accepted and incorporated; two formal consistency sweeps clean. Set to READY after
   user authorization.
+- 2026-06-16: Dispatched and executed. All 7 stories DONE (serial: 01→02/03/04 context-layer,
+  05→06 auth.py, 07 reports). Delivered D1 quarantine (central rule + context-layer pointers +
+  resolve_unlinked ban + code/template deprecation banners across the dashboard, member-sync,
+  and opponent-discovery surfaces), navigation retarget off the quarantined `/dashboard` onto
+  `/admin/reports` (5 auth redirects + root + passkey/error templates + `is_admin_page`
+  bottom-nav suppression), the passkey/magic-link challenge store moved to migration-004's TTL'd
+  `webauthn_challenges` SQLite table (multi-worker + restart-safe, byte-identical login
+  lookup-key, DELETE-on-consume replay protection), and expired-report HTML file cleanup
+  (`cleanup_expired_reports()` opportunistic + `bb report cleanup`, row kept / path nulled).
+  Phase-4b Codex returned 2 findings: F1 (P1 — passkey replay protection not atomic under
+  concurrent multi-worker; the read-verify-delete TOCTOU window let two workers both consume one
+  challenge) ACCEPTED as an in-scope AC-2 correctness defect and fixed within E-238-06
+  (`consume_challenge` returns rowcount as the atomic replay arbiter; login verify gates on
+  rowcount==1 else 401/no-session/no-sign_count-bump; 3 concurrency regression tests added). F2
+  (P5 — `/admin/reports`→`/admin/users`→`/dashboard` reachable via `users.html` header link)
+  DISMISSED: story 05 AC-7 + Technical Notes explicitly defer the six admin-template header links
+  to D2, and the epic Success Criteria enumerates the in-scope nav surfaces (the admin subnav and
+  `users.html` are not among them) — a documented scope decision, not a defect. Full suite green
+  at 4725 passed / 0 failed.
+- 2026-06-16: Closure assessments completed.
+  - **Documentation assessment** (`.claude/rules/documentation.md`): ONE trigger fired — the new
+    `bb report cleanup` CLI command was missing from `docs/admin/operations.md`'s `bb report`
+    reference; docs-writer added a `cleanup` subsection (modeled on `verify-aggregates`). No
+    trigger for the login-landing change (no doc claimed a post-login `/dashboard` landing; the
+    surface is quarantined, not removed) or migration 004 (internal auth table, not operator-doc'd).
+  - **Context-layer assessment** (`.claude/rules/context-layer-assessment.md`) — six per-trigger
+    verdicts (claude-architect dispatched to codify the firing triggers; files changed: `CLAUDE.md`,
+    `.claude/rules/migrations.md`, `.claude/rules/data-model.md`):
+    1. New convention/pattern — **YES**: quarantine self-codified by stories 01-03; the stale
+       `migrations.md` "next migration" pointer was corrected this closure.
+    2. Architectural decision — **YES**: the quarantine reframe + passkey-store-to-SQLite are
+       codified by the epic's own deliverables; CA grepped the context layer for stale
+       `_PASSKEY`/in-memory-dict references and found zero, so no further pointer was needed.
+    3. Footgun/boundary — **YES**: the multi-worker single-use-token TOCTOU replay window is
+       codified as a "Single-Use Token Consume (DELETE-is-the-arbiter)" section in
+       `.claude/rules/data-model.md`.
+    4. Agent behavior/routing — **NO**.
+    5. Domain knowledge — **NO**.
+    6. New CLI command/workflow — **YES**: `bb report cleanup` added to `CLAUDE.md` Commands.
+  - **Non-target verification (story 02 AC-5 / Non-Goal)**: confirmed CA's closure edit to
+    `data-model.md` did NOT alter the "Season-Aggregate Parity" section — it remains pure
+    aggregate-integrity content (provenance, member-load asymmetry, `cells_compared` footgun, E-237
+    mixed-provenance invariant), with CA's two additions (Single-Use Token section + header example
+    reword) demonstrably elsewhere in the file. PASS.
+  - **Memory maintenance**: the `feedback_delivery_parity.md` auto-memory was annotated
+    "SUPERSEDED IN PART (E-238/D1)" — dashboard quarantined/parity-excluded, reports is the sole
+    forward delivery surface.
 
-### Review Scorecard
+### Review Scorecard — Planning
 | Review Pass | Findings | Accepted | Dismissed |
 |---|---|---|---|
 | Internal iteration 1 — CR spec audit | 5 | 5 | 0 |
 | Internal iteration 1 — Holistic team (SE/DE/CA) | 8 | 8 | 0 |
 | Codex iteration 1 | 5 | 5 | 0 |
 | **Total** | **18** | **18** | **0** |
+
+### Review Scorecard — Dispatch & Post-Dev
+| Review Pass | Findings | Accepted | Dismissed |
+|---|---|---|---|
+| Per-story CR — E-238-01/02/03 | N/A | — | — |
+| Per-story CR — E-238-04 | 0 | 0 | 0 |
+| Per-story CR — E-238-05 | 0 | 0 | 0 |
+| Per-story CR — E-238-06 | 0 | 0 | 0 |
+| Per-story CR — E-238-07 | 0 | 0 | 0 |
+| CR integration review (Phase 4a) | 0 | 0 | 0 |
+| Codex code review (Phase 4b) | 2 | 1 | 1 |
+| **Total** | **2** | **1** | **1** |
+
+E-238-01/02/03 were context-layer-only (PM-only AC verification; per-story code review skipped
+per the context-layer-only skip condition). F1 accepted+fixed; F2 dismissed (D2 scope).
 - **Memory-maintenance flag (for PM/main, handled separately — not edited here)**: the
   `feedback_delivery_parity.md` auto-memory ("update BOTH delivery paths") is partially
   superseded for quarantined surfaces and should be annotated once D1 lands.

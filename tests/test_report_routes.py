@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import secrets
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -10,6 +11,7 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
+from src.api.auth import hash_token
 from src.api.main import app
 from tests.conftest import load_real_schema
 
@@ -297,3 +299,92 @@ class TestEdgeCases:
         response = client.get("/reports/null-path")
 
         assert response.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# E-238-05: Navigation retarget canary
+#
+# AC-8 (testable half): the reports flow is the live product surface. A
+# seeded report's share link must still serve via the public serve route,
+# and the admin reports page (the post-login landing) must NOT render the
+# quarantined /dashboard bottom-nav links or the removed Dashboard header
+# link. /admin/reports requires admin (auth-scope shift, epic Risks), so the
+# canary uses an admin-authenticated client.
+# ---------------------------------------------------------------------------
+
+
+class TestShareLinkStillServes:
+    """E-238-05 AC-8: a seeded report's public share link still serves."""
+
+    def test_seeded_report_share_link_serves(self, setup):
+        """The public /reports/{slug} share link serves the report (no auth)."""
+        db_path, reports_dir, client = setup
+        (reports_dir / "share-canary.html").write_text(
+            "<html><body>Scouting report</body></html>", encoding="utf-8"
+        )
+        _insert_report(
+            db_path, "share-canary", report_path="reports/share-canary.html"
+        )
+
+        response = client.get("/reports/share-canary", follow_redirects=False)
+
+        assert response.status_code == 200
+        assert "Scouting report" in response.text
+        # The share link is the live surface -- it must not bounce to /dashboard.
+        assert response.status_code != 302
+
+
+def _make_admin_db(tmp_path: Path) -> tuple[Path, str, str]:
+    """Create a real-schema DB with an admin user + session.
+
+    Returns (db_path, admin_email, raw_session_token).
+    """
+    db_path = tmp_path / "admin.db"
+    conn = sqlite3.connect(str(db_path))
+    load_real_schema(conn)
+    email = "operator@example.com"
+    user_id = conn.execute(
+        "INSERT INTO users (email) VALUES (?) RETURNING id", (email,)
+    ).fetchone()[0]
+    raw_token = secrets.token_hex(32)
+    conn.execute(
+        "INSERT INTO sessions (session_id, user_id, expires_at) "
+        "VALUES (?, ?, datetime('now', '+7 days'))",
+        (hash_token(raw_token), user_id),
+    )
+    conn.commit()
+    conn.close()
+    return db_path, email, raw_token
+
+
+class TestAdminReportsSuppressesDashboardNav:
+    """E-238-05 AC-4/AC-5: /admin/reports hides the quarantined dashboard nav."""
+
+    def test_admin_reports_has_no_dashboard_nav(self, tmp_path: Path) -> None:
+        """GET /admin/reports renders without bottom dashboard nav or header link.
+
+        is_admin_page=True on the list_reports context (AC-5) suppresses
+        base.html's bottom fixed nav (the 3 /dashboard* links), and AC-4
+        removed the page's own Dashboard header link.
+        """
+        db_path, email, raw_token = _make_admin_db(tmp_path)
+        with patch.dict(
+            "os.environ",
+            {"DATABASE_PATH": str(db_path), "ADMIN_EMAIL": email},
+        ):
+            with TestClient(
+                app, cookies={"session": raw_token, "csrf_token": "test-csrf-token"}
+            ) as client:
+                response = client.get("/admin/reports")
+
+        assert response.status_code == 200
+        html = response.text
+        assert "Reports" in html
+        # Bottom fixed nav (suppressed by is_admin_page) -- its /dashboard* links
+        # and labels must be absent.
+        assert "/dashboard/batting" not in html
+        assert "/dashboard/pitching" not in html
+        assert ">Batting<" not in html
+        assert ">Pitching<" not in html
+        # AC-4: the page's own Dashboard header link was removed.
+        assert 'href="/dashboard"' not in html

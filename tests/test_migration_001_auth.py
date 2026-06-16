@@ -402,3 +402,57 @@ class TestSessionsUnique:
         db_with_team.commit()
         cursor = db_with_team.execute("SELECT COUNT(*) FROM sessions;")
         assert cursor.fetchone()[0] == 2
+
+
+class TestWebauthnChallengesTable:
+    """Verify the webauthn_challenges table (migration 004, E-238-06).
+
+    The passkey challenge store moved from in-process dicts to this TTL'd
+    table. ``migrated_db`` applies all migrations, so a clean apply here is
+    also the post-migration app-health check for the auth schema.
+    """
+
+    def test_table_created(self, migrated_db: sqlite3.Connection) -> None:
+        """webauthn_challenges table exists after migration."""
+        assert "webauthn_challenges" in _get_tables(migrated_db)
+
+    def test_columns(self, migrated_db: sqlite3.Connection) -> None:
+        """Column set and the composite (kind, lookup_key) PK match the schema."""
+        cols = _get_columns(migrated_db, "webauthn_challenges")
+        assert set(cols) == {"kind", "lookup_key", "challenge", "expires_at", "created_at"}
+        assert cols["kind"]["pk"] > 0
+        assert cols["lookup_key"]["pk"] > 0
+        assert cols["challenge"]["pk"] == 0
+        # expires_at is NOT NULL with a datetime default (no epoch floats).
+        assert cols["expires_at"]["notnull"] == 1
+        assert "datetime" in (cols["expires_at"]["default"] or "")
+
+    def test_expires_at_index_present(self, migrated_db: sqlite3.Connection) -> None:
+        """The expires_at index is created for the sweep-on-write."""
+        idx = {
+            row[0]
+            for row in migrated_db.execute(
+                "SELECT name FROM sqlite_master WHERE type='index';"
+            )
+        }
+        assert "idx_webauthn_challenges_expires_at" in idx
+
+    def test_kind_check_constraint(self, migrated_db: sqlite3.Connection) -> None:
+        """kind is constrained to 'login' / 'registration'."""
+        with pytest.raises(sqlite3.IntegrityError):
+            migrated_db.execute(
+                "INSERT INTO webauthn_challenges (kind, lookup_key, challenge) "
+                "VALUES ('bogus', 'k', 'c');"
+            )
+
+    def test_default_expires_at_is_future(self, migrated_db: sqlite3.Connection) -> None:
+        """The DEFAULT (datetime('now','+5 minutes')) yields a live row."""
+        migrated_db.execute(
+            "INSERT INTO webauthn_challenges (kind, lookup_key, challenge) "
+            "VALUES ('login', 'k', 'c');"
+        )
+        migrated_db.commit()
+        live = migrated_db.execute(
+            "SELECT expires_at > datetime('now') FROM webauthn_challenges WHERE lookup_key='k';"
+        ).fetchone()[0]
+        assert live == 1

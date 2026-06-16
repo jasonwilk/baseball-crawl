@@ -6,7 +6,7 @@ It is the entrypoint referenced by the Dockerfile:
     uvicorn src.api.main:app --host 0.0.0.0 --port 8000
 
 Route structure (current):
-    GET  /               -- Root redirect to /dashboard
+    GET  /               -- Root redirect to /admin/reports
     GET  /health         -- Database and API health check (see routes/health.py)
     GET  /dashboard      -- Team batting stats dashboard (see routes/dashboard.py)
     GET  /auth/login     -- Login page (see routes/auth.py)
@@ -132,13 +132,13 @@ async def server_error_handler(request: Request, exc: Exception) -> HTMLResponse
 
 @app.get("/")
 async def root_redirect() -> RedirectResponse:
-    """Redirect root URL to the dashboard.
+    """Redirect root URL to the reports page.
 
-    Coaches who bookmark the app expect to land on the dashboard.
-    The auth middleware handles the unauthenticated case by redirecting
-    to /auth/login.
+    The reports flow is the live product surface; the dashboard is
+    quarantined (see .claude/rules/quarantine.md).  The auth middleware
+    handles the unauthenticated case by redirecting to /auth/login.
     """
-    return RedirectResponse(url="/dashboard", status_code=302)
+    return RedirectResponse(url="/admin/reports", status_code=302)
 
 
 app.include_router(health_router)

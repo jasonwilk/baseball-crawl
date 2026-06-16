@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -29,6 +30,8 @@ from src.reports.generator import (
     _resolve_gc_uuid,
     _update_report_failed,
     _update_report_ready,
+    CleanupResult,
+    cleanup_expired_reports,
     generate_report,
     list_reports,
 )
@@ -3957,3 +3960,189 @@ class TestQualityGatesFlags:
         )
         assert result.success is True
         assert captured["data"]["degraded_confidence"] is True
+
+
+# ---------------------------------------------------------------------------
+# E-238-07: expired-report file cleanup
+# ---------------------------------------------------------------------------
+
+
+def _iso_offset_days(days: int) -> str:
+    """Return an ISO-8601 UTC timestamp ``days`` from now (negative = past)."""
+    from datetime import datetime, timedelta, timezone
+
+    dt = datetime.now(timezone.utc) + timedelta(days=days)
+    return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _insert_report_row(
+    conn,
+    slug: str,
+    team_id: int,
+    expires_at: str,
+    report_path: str | None,
+    status: str = "ready",
+) -> None:
+    """Insert a reports row with the given expiry and path."""
+    conn.execute(
+        "INSERT INTO reports (slug, team_id, title, status, generated_at, expires_at, report_path) "
+        "VALUES (?, ?, 'Test Report', ?, ?, ?, ?)",
+        (slug, team_id, status, _iso_offset_days(-30), expires_at, report_path),
+    )
+    conn.commit()
+
+
+def _write_report_file(tmp_path, slug: str) -> Path:
+    """Create data/reports/{slug}.html under tmp_path and return its Path."""
+    reports_dir = tmp_path / "data" / "reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    file_path = reports_dir / f"{slug}.html"
+    file_path.write_text("<html><body>report</body></html>", encoding="utf-8")
+    return file_path
+
+
+class TestCleanupExpiredReports:
+    """E-238-07: cleanup_expired_reports() unlinks expired files, keeps rows."""
+
+    def _fresh_conn_factory(self, tmp_path):
+        db_path = str(tmp_path / "test.db")
+
+        def _fresh_conn():
+            conn = sqlite3.connect(db_path)
+            conn.execute("PRAGMA foreign_keys=ON;")
+            return conn
+
+        return _fresh_conn
+
+    def test_expired_file_removed_row_kept_path_nulled(self, db, tmp_path):
+        """AC-1/AC-5: expired file unlinked, row KEPT, report_path NULLed."""
+        team_id = _seed_team(db)
+        file_path = _write_report_file(tmp_path, "exp1")
+        _insert_report_row(
+            db, "exp1", team_id, _iso_offset_days(-1), "reports/exp1.html"
+        )
+
+        with (
+            patch("src.reports.generator.get_connection",
+                  side_effect=self._fresh_conn_factory(tmp_path)),
+            patch("src.reports.generator._REPO_ROOT", tmp_path),
+        ):
+            result = cleanup_expired_reports()
+
+        assert isinstance(result, CleanupResult)
+        assert result.files_removed == 1
+        assert result.errors == 0
+        # File is gone from disk.
+        assert not file_path.exists()
+        # Row is KEPT, but report_path is NULLed (still shows as expired).
+        verify = self._fresh_conn_factory(tmp_path)()
+        row = verify.execute(
+            "SELECT status, report_path FROM reports WHERE slug = ?", ("exp1",)
+        ).fetchone()
+        verify.close()
+        assert row is not None  # row kept
+        assert row[1] is None  # report_path nulled
+
+    def test_not_yet_expired_untouched(self, db, tmp_path):
+        """AC-2/AC-6: a not-yet-expired report's file and path are preserved
+        (so its share link still serves)."""
+        team_id = _seed_team(db)
+        file_path = _write_report_file(tmp_path, "live1")
+        _insert_report_row(
+            db, "live1", team_id, _iso_offset_days(+7), "reports/live1.html"
+        )
+
+        with (
+            patch("src.reports.generator.get_connection",
+                  side_effect=self._fresh_conn_factory(tmp_path)),
+            patch("src.reports.generator._REPO_ROOT", tmp_path),
+        ):
+            result = cleanup_expired_reports()
+
+        assert result.files_removed == 0
+        assert result.errors == 0
+        # Live report's file remains on disk.
+        assert file_path.exists()
+        # report_path preserved -> share link still serves.
+        verify = self._fresh_conn_factory(tmp_path)()
+        row = verify.execute(
+            "SELECT report_path FROM reports WHERE slug = ?", ("live1",)
+        ).fetchone()
+        verify.close()
+        assert row[0] == "reports/live1.html"
+
+    def test_per_file_error_isolation(self, db, tmp_path):
+        """AC-1/Technical Approach: one unremovable file does not abort the sweep.
+
+        Two expired reports A and B. A's unlink raises; B's succeeds (real
+        unlink). The sweep must process BOTH: A is counted as an error and
+        keeps its report_path (retry later); B is removed and its path nulled.
+        """
+        team_id = _seed_team(db)
+        file_a = _write_report_file(tmp_path, "errA")
+        file_b = _write_report_file(tmp_path, "okB")
+        _insert_report_row(db, "errA", team_id, _iso_offset_days(-2), "reports/errA.html")
+        _insert_report_row(db, "okB", team_id, _iso_offset_days(-2), "reports/okB.html")
+
+        real_unlink = Path.unlink
+
+        def flaky_unlink(self, *args, **kwargs):
+            if self.name == "errA.html":
+                raise OSError("file is locked")
+            return real_unlink(self, *args, **kwargs)
+
+        with (
+            patch("src.reports.generator.get_connection",
+                  side_effect=self._fresh_conn_factory(tmp_path)),
+            patch("src.reports.generator._REPO_ROOT", tmp_path),
+            patch.object(Path, "unlink", flaky_unlink),
+        ):
+            result = cleanup_expired_reports()
+
+        # Sweep completed over BOTH rows despite A raising.
+        assert result.errors == 1
+        assert result.files_removed == 1
+        # A's file remains (unlink raised); B's file is really gone.
+        assert file_a.exists()
+        assert not file_b.exists()
+        # A keeps its report_path (retry later); B's path is nulled.
+        verify = self._fresh_conn_factory(tmp_path)()
+        rows = dict(
+            verify.execute(
+                "SELECT slug, report_path FROM reports WHERE slug IN ('errA', 'okB')"
+            ).fetchall()
+        )
+        verify.close()
+        assert rows["errA"] == "reports/errA.html"  # kept for retry
+        assert rows["okB"] is None  # nulled
+
+    def test_null_report_path_rows_ignored(self, db, tmp_path):
+        """AC-1: rows with NULL report_path are not selected (nothing to unlink)."""
+        team_id = _seed_team(db)
+        _insert_report_row(db, "nopath", team_id, _iso_offset_days(-5), None)
+
+        with (
+            patch("src.reports.generator.get_connection",
+                  side_effect=self._fresh_conn_factory(tmp_path)),
+            patch("src.reports.generator._REPO_ROOT", tmp_path),
+        ):
+            result = cleanup_expired_reports()
+
+        assert result.files_removed == 0
+        assert result.errors == 0
+
+    def test_opportunistic_cleanup_failure_does_not_block_generation(self, tmp_path):
+        """AC-3/AC-6: a cleanup failure at generate_report() start is swallowed
+        and generation proceeds (here, to a normal parse-stage failure result)."""
+        with patch(
+            "src.reports.generator.cleanup_expired_reports",
+            side_effect=RuntimeError("cleanup boom"),
+        ):
+            # A bare UUID fails fast at the parse stage -- but only if the
+            # opportunistic cleanup exception was swallowed first (AC-3).
+            result = generate_report("123e4567-e89b-12d3-a456-426614174000")
+
+        assert isinstance(result, GenerationResult)
+        assert result.success is False
+        # Proves generation ran past the swallowed cleanup error to the parser.
+        assert "UUID" in (result.error_message or "")

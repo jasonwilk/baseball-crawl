@@ -509,3 +509,72 @@ class TestIndexes:
         """
         actual = _index_names(schema_db)
         assert index_name in actual, f"Index '{index_name}' not found in schema"
+
+
+# ---------------------------------------------------------------------------
+# Tests: webauthn_challenges (migration 004, E-238-06)
+# ---------------------------------------------------------------------------
+#
+# The `schema_db` fixture above applies ONLY 001_initial_schema.sql, so it does
+# not contain migration 004's table. This fixture applies EVERY numbered
+# migration (mirroring conftest.load_real_schema and the production runner's
+# glob) so the full, current schema -- including webauthn_challenges -- is
+# under test.
+
+
+@pytest.fixture()
+def full_schema_db() -> sqlite3.Connection:
+    """In-memory connection with ALL numbered migrations applied.
+
+    Yields:
+        Open sqlite3.Connection with the complete migrated schema, FKs enabled.
+    """
+    migrations_dir = _PROJECT_ROOT / "migrations"
+    sql_files = sorted(migrations_dir.glob("[0-9][0-9][0-9]_*.sql"))
+    combined = "\n".join(path.read_text(encoding="utf-8") for path in sql_files)
+    conn = sqlite3.connect(":memory:")
+    conn.executescript("PRAGMA foreign_keys=ON;\n" + combined)
+    yield conn
+    conn.close()
+
+
+class TestWebauthnChallengesSchema:
+    """The webauthn_challenges table matches migration 004 (E-238-06)."""
+
+    def test_table_exists(self, full_schema_db: sqlite3.Connection) -> None:
+        """webauthn_challenges is present in the full migrated schema."""
+        assert "webauthn_challenges" in _table_names(full_schema_db)
+
+    def test_columns(self, full_schema_db: sqlite3.Connection) -> None:
+        """Column set matches the epic schema exactly."""
+        columns = {
+            row[1]
+            for row in full_schema_db.execute("PRAGMA table_info(webauthn_challenges);")
+        }
+        assert columns == {"kind", "lookup_key", "challenge", "expires_at", "created_at"}
+
+    def test_expires_at_index_present(self, full_schema_db: sqlite3.Connection) -> None:
+        """The expires_at index exists (sweep-on-write performance)."""
+        assert "idx_webauthn_challenges_expires_at" in _index_names(full_schema_db)
+
+    def test_kind_check_constraint(self, full_schema_db: sqlite3.Connection) -> None:
+        """kind is constrained to 'login' / 'registration'."""
+        with pytest.raises(sqlite3.IntegrityError):
+            full_schema_db.execute(
+                "INSERT INTO webauthn_challenges (kind, lookup_key, challenge) "
+                "VALUES ('bogus', 'k', 'c');"
+            )
+
+    def test_composite_pk_blocks_duplicate(
+        self, full_schema_db: sqlite3.Connection
+    ) -> None:
+        """(kind, lookup_key) is the PK -- a duplicate insert is rejected."""
+        full_schema_db.execute(
+            "INSERT INTO webauthn_challenges (kind, lookup_key, challenge) "
+            "VALUES ('login', 'dup', 'c1');"
+        )
+        with pytest.raises(sqlite3.IntegrityError):
+            full_schema_db.execute(
+                "INSERT INTO webauthn_challenges (kind, lookup_key, challenge) "
+                "VALUES ('login', 'dup', 'c2');"
+            )

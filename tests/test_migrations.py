@@ -838,3 +838,107 @@ class TestE220UpgradeGuard:
             run_migrations(db_path=fresh_db)
         assert "rebuild-procedure.md" in str(exc_info.value)
 
+
+class TestWebauthnChallengesMigration:
+    """Verify migration 004_webauthn_challenge_store.sql (E-238-06).
+
+    The migration adds the TTL'd webauthn_challenges table that replaces the
+    in-process passkey challenge dicts. These tests double as the
+    post-migration app-health check: run_migrations is exactly what the app
+    runs at startup, so a clean apply here proves the app boots its schema.
+    """
+
+    def test_table_exists_after_migration(self, fresh_db: Path) -> None:
+        """run_migrations (the app's startup path) creates webauthn_challenges."""
+        run_migrations(db_path=fresh_db)
+        conn = sqlite3.connect(str(fresh_db))
+        row = conn.execute(
+            "SELECT name FROM sqlite_master "
+            "WHERE type='table' AND name='webauthn_challenges';"
+        ).fetchone()
+        conn.close()
+        assert row is not None, "webauthn_challenges table not found"
+
+    def test_has_documented_columns(self, fresh_db: Path) -> None:
+        """Column set matches the epic schema exactly."""
+        run_migrations(db_path=fresh_db)
+        conn = sqlite3.connect(str(fresh_db))
+        columns = {
+            row[1] for row in conn.execute("PRAGMA table_info(webauthn_challenges);")
+        }
+        conn.close()
+        assert columns == {"kind", "lookup_key", "challenge", "expires_at", "created_at"}
+
+    def test_composite_primary_key(self, fresh_db: Path) -> None:
+        """(kind, lookup_key) is the composite primary key."""
+        run_migrations(db_path=fresh_db)
+        conn = sqlite3.connect(str(fresh_db))
+        # table_info: (cid, name, type, notnull, dflt_value, pk)
+        pk_cols = {
+            row[1]: row[5]
+            for row in conn.execute("PRAGMA table_info(webauthn_challenges);")
+        }
+        conn.close()
+        assert pk_cols["kind"] > 0 and pk_cols["lookup_key"] > 0
+        assert pk_cols["challenge"] == 0
+
+    def test_expires_at_index_present(self, fresh_db: Path) -> None:
+        """The expires_at index (for the sweep-on-write) is created."""
+        run_migrations(db_path=fresh_db)
+        conn = sqlite3.connect(str(fresh_db))
+        row = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='index' "
+            "AND name='idx_webauthn_challenges_expires_at';"
+        ).fetchone()
+        conn.close()
+        assert row is not None, "expires_at index not found"
+
+    def test_expires_at_default_is_future_datetime(self, fresh_db: Path) -> None:
+        """The expires_at default is a SQLite datetime in the future (no epoch float)."""
+        run_migrations(db_path=fresh_db)
+        conn = sqlite3.connect(str(fresh_db))
+        conn.execute(
+            "INSERT INTO webauthn_challenges (kind, lookup_key, challenge) "
+            "VALUES ('login', 'k', 'c');"
+        )
+        conn.commit()
+        live, raw = conn.execute(
+            "SELECT expires_at > datetime('now'), expires_at "
+            "FROM webauthn_challenges WHERE lookup_key='k';"
+        ).fetchone()
+        conn.close()
+        assert live == 1
+        # Datetime text 'YYYY-MM-DD HH:MM:SS' (space, no T/Z) -- not an epoch float.
+        assert " " in raw and "T" not in raw
+
+    def test_kind_check_constraint_enforced(self, fresh_db: Path) -> None:
+        """kind is constrained to 'login' / 'registration'."""
+        run_migrations(db_path=fresh_db)
+        conn = sqlite3.connect(str(fresh_db))
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                "INSERT INTO webauthn_challenges (kind, lookup_key, challenge) "
+                "VALUES ('bogus', 'k', 'c');"
+            )
+        conn.close()
+
+    def test_table_empty_on_fresh_db(self, fresh_db: Path) -> None:
+        """A freshly migrated DB has the table present with zero rows."""
+        run_migrations(db_path=fresh_db)
+        conn = sqlite3.connect(str(fresh_db))
+        count = conn.execute("SELECT COUNT(*) FROM webauthn_challenges;").fetchone()[0]
+        conn.close()
+        assert count == 0
+
+    def test_migration_idempotent_second_run(self, fresh_db: Path) -> None:
+        """A second run_migrations leaves the table intact (IF NOT EXISTS)."""
+        run_migrations(db_path=fresh_db)
+        run_migrations(db_path=fresh_db)
+        conn = sqlite3.connect(str(fresh_db))
+        row = conn.execute(
+            "SELECT name FROM sqlite_master "
+            "WHERE type='table' AND name='webauthn_challenges';"
+        ).fetchone()
+        conn.close()
+        assert row is not None
+

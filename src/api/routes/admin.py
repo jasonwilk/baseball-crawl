@@ -3352,6 +3352,9 @@ async def list_reports(request: Request) -> Response:
             "msg": msg,
             "error": error,
             "has_generating": has_generating,
+            # Suppress base.html's bottom fixed nav (the quarantined /dashboard*
+            # links) on /admin/reports -- this is the post-login landing page.
+            "is_admin_page": True,
         },
     )
 

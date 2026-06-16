@@ -827,6 +827,26 @@ bb report verify-aggregates
 
 **Read-only**: This command never writes to `player_season_*` tables. It is safe to run against production at any time.
 
+### Cleaning Up Expired Report Files (`bb report cleanup`)
+
+`bb report cleanup` removes the on-disk HTML files for expired reports -- those whose `expires_at` timestamp is in the past. It is a targeted disk-reclamation sweep: the HTML file is unlinked and `report_path` is nulled on the database row, but the row itself is kept. After cleanup, expired reports still appear in `bb report list` and `/admin/reports` with `Expired` status, and any coach who opens a stale link still gets the existing 404 page.
+
+```bash
+bb report cleanup
+```
+
+**When to run**:
+- After a period of high report volume to reclaim disk space in `data/reports/`.
+- As a manual sweep if disk usage grows unexpectedly -- check with `du -sh data/reports/` first.
+- There is no urgency: the same cleanup runs opportunistically at the start of every `bb report generate` invocation (failure-swallowed -- it never delays or blocks generation).
+
+**Reading the output**:
+- **"Cleanup complete — removed N expired report file(s)."**: Always printed, including the zero case (`N = 0` means nothing to clean up). N > 0 confirms files were unlinked.
+- **"N file(s) could not be removed (left in place for a later sweep; see logs)."**: Printed to stderr when one or more files could not be unlinked. Per-file detail goes to the application log, not stdout. The sweep continues and the command still exits 0. Investigate if the same file persists across runs.
+- **Non-zero exit**: Only if `cleanup_expired_reports()` itself raises an unexpected exception. Treat as a bug and report.
+
+**Row retention**: Database rows are never deleted by this command. `reports.report_path` is set to NULL for each cleaned row. The row, its run record, and all status/expiry metadata remain intact. To remove a report row entirely, use the **Delete** action in `/admin/reports` or see [Deleting a Report](#deleting-a-report) above.
+
 ### Report Generation Run Records
 
 Every standalone report generation writes a companion row to `report_generation_runs` (Migration 002). This row gives per-stage visibility into what happened: which stages ran, which succeeded or failed, how many games were covered, and whether any data-quality trust flags fired.
@@ -1247,4 +1267,4 @@ For the expected data volume (~30 games x 4 teams x a few seasons), the database
 
 ---
 
-*Last updated: 2026-06-15 | Source: E-236 (partial per-stage status, boxscores_fetched/load_errors/plays_errors/spray_games_with_data columns, degraded badge, all-boxscores-blocked hard-fail, two-case no_games page, bb report generate exit-0 for no_games, coach-footer season_fallback correction), E-235 (report generation run records, no_games outcome, trust-flag badges, coach-footer operator linkage), E-234 (bb report verify-aggregates), E-221 (team delete cross-perspective gate, cascade consolidation, retention flash message), E-199 (standalone reports section, cascade-delete behavior), E-198 (bb data reconcile, migration 012), E-195 (plays pipeline, migration 009, validate_plays_stats.py), E-173 (resolution write-through, auto-scout after linking, unified Find on GC resolve page, dashboard sort by next game date, terminology cleanup, bb data repair-opponents), E-167 (bb data dedup CLI, GC search-powered opponent resolution, skip/unhide workflow), E-163 (scouting spray pipeline, updated thresholds, bb data scout 4-step flow), E-158 (spray chart pipeline, migration 006, chart routes), E-156 (bb data scout --force flag), E-155 (duplicate team detection and merge UI), E-143 (programs, user roles, team delete, opponent mapping UX, crawl trigger UI), E-120-06 (bare UUID input documented), E-055 (unified CLI), E-115-01 (E-100 team management model), E-028-03 (original)*
+*Last updated: 2026-06-16 | Source: E-238 (bb report cleanup subsection), E-236 (partial per-stage status, boxscores_fetched/load_errors/plays_errors/spray_games_with_data columns, degraded badge, all-boxscores-blocked hard-fail, two-case no_games page, bb report generate exit-0 for no_games, coach-footer season_fallback correction), E-235 (report generation run records, no_games outcome, trust-flag badges, coach-footer operator linkage), E-234 (bb report verify-aggregates), E-221 (team delete cross-perspective gate, cascade consolidation, retention flash message), E-199 (standalone reports section, cascade-delete behavior), E-198 (bb data reconcile, migration 012), E-195 (plays pipeline, migration 009, validate_plays_stats.py), E-173 (resolution write-through, auto-scout after linking, unified Find on GC resolve page, dashboard sort by next game date, terminology cleanup, bb data repair-opponents), E-167 (bb data dedup CLI, GC search-powered opponent resolution, skip/unhide workflow), E-163 (scouting spray pipeline, updated thresholds, bb data scout 4-step flow), E-158 (spray chart pipeline, migration 006, chart routes), E-156 (bb data scout --force flag), E-155 (duplicate team detection and merge UI), E-143 (programs, user roles, team delete, opponent mapping UX, crawl trigger UI), E-120-06 (bare UUID input documented), E-055 (unified CLI), E-115-01 (E-100 team management model), E-028-03 (original)*
