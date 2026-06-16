@@ -526,19 +526,20 @@ def merge_player_pair(
         )
 
         # ---------------------------------------------------------------
-        # TN-6 Step 6: player_season_batting -- delete for recomputation
+        # TN-6 Step 6: player_season_batting -- delete boxscore_only (rederived
+        # by the recompute) but PRESERVE + re-point member full/supplemented
+        # rows (E-237-03 AC-8: member rows are API-authoritative, not
+        # rederivable from game rows -- they must survive the merge).
         # ---------------------------------------------------------------
-        db.execute(
-            "DELETE FROM player_season_batting WHERE player_id IN (?, ?)",
-            (canonical_id, duplicate_id),
+        _delete_or_repoint_season_rows(
+            db, "player_season_batting", canonical_id, duplicate_id
         )
 
         # ---------------------------------------------------------------
-        # TN-6 Step 7: player_season_pitching -- delete for recomputation
+        # TN-6 Step 7: player_season_pitching -- same provenance-aware handling.
         # ---------------------------------------------------------------
-        db.execute(
-            "DELETE FROM player_season_pitching WHERE player_id IN (?, ?)",
-            (canonical_id, duplicate_id),
+        _delete_or_repoint_season_rows(
+            db, "player_season_pitching", canonical_id, duplicate_id
         )
 
         # ---------------------------------------------------------------
@@ -709,6 +710,68 @@ def _delete_or_update_rosters(
     )
 
 
+def _delete_or_repoint_season_rows(
+    db: sqlite3.Connection,
+    table: str,
+    canonical_id: str,
+    duplicate_id: str,
+) -> None:
+    """Merge season-aggregate rows from a duplicate into the canonical player.
+
+    Provenance-aware (E-237-03 AC-8 -- closes the merge-path re-opening of the
+    member data-loss bug that the canonical recompute's NOT EXISTS guard closes
+    for non-merged players):
+
+    * ``boxscore_only`` rows are derivable from the per-game rows by the
+      canonical recompute that runs after the merge, so they are DELETED for
+      BOTH players here and rebuilt under the canonical id later.
+    * ``full`` / ``supplemented`` rows are member-authoritative -- they come
+      straight from the season-stats API and are NOT rederivable from game
+      rows.  They must MOVE to the canonical id, never be deleted or downgraded
+      to a boxscore sum.
+
+    Collision (PK ``UNIQUE(player_id, team_id, season_id)``): if the canonical
+    player ALSO owns a member row for the SAME ``(team_id, season_id)`` as a
+    duplicate member row, re-pointing the duplicate's would violate the unique
+    constraint.  Resolution is deterministic -- the canonical's row WINS (the
+    duplicate's member row is dropped) -- matching the canonical-preference
+    convention used elsewhere in the merge (``_delete_or_update_*``).  Both
+    rows are member-authoritative for the same scope, so keeping one is correct
+    and keeping the canonical's is the consistent choice.
+    """
+    # boxscore_only rows: drop for both players; the post-merge canonical
+    # recompute rebuilds them under the canonical id from the per-game rows.
+    db.execute(
+        f"DELETE FROM {table} "  # noqa: S608
+        f"WHERE player_id IN (?, ?) AND stat_completeness = 'boxscore_only'",
+        (canonical_id, duplicate_id),
+    )
+
+    # Collision resolution: drop the duplicate's member rows whose
+    # (team_id, season_id) the canonical already owns a (member) row for.
+    conflicts = db.execute(
+        f"SELECT d.team_id, d.season_id FROM {table} d "  # noqa: S608
+        f"JOIN {table} c "
+        f"  ON  c.team_id = d.team_id "
+        f"  AND c.season_id = d.season_id "
+        f"  AND c.player_id = ? "
+        f"WHERE d.player_id = ?",
+        (canonical_id, duplicate_id),
+    ).fetchall()
+    for team_id, season_id in conflicts:
+        db.execute(
+            f"DELETE FROM {table} "  # noqa: S608
+            f"WHERE player_id = ? AND team_id = ? AND season_id = ?",
+            (duplicate_id, team_id, season_id),
+        )
+
+    # Re-point the remaining (non-colliding) duplicate member rows to canonical.
+    db.execute(
+        f"UPDATE {table} SET player_id = ? WHERE player_id = ?",  # noqa: S608
+        (canonical_id, duplicate_id),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Season aggregate recomputation (TN-5)
 # ---------------------------------------------------------------------------
@@ -720,6 +783,7 @@ def dedup_team_players(
     season_id: str,
     *,
     manage_transaction: bool = True,
+    recompute_aggregates: bool = True,
 ) -> int:
     """Detect and merge same-team duplicate players for one (team, season).
 
@@ -738,6 +802,15 @@ def dedup_team_players(
             Use ``False`` when the caller already has an open transaction
             (Hook 1 inside ScoutingLoader), ``True`` when the caller owns
             the connection (Hook 2 in orchestrators).
+        recompute_aggregates: When ``True`` (default -- every standalone
+            caller: the ``bb data dedup-players`` CLI and the member-sync
+            Hook-2 post-spray dedup), recompute season aggregates for the
+            affected scopes after merging.  The two embedded load-path dedup
+            calls (ScoutingLoader Hook 1) pass ``False`` because the canonical
+            recompute runs once at end-of-load -- suppressing the redundant
+            in-dedup recompute (E-237-03, TN-11).  This is deliberately a
+            separate flag from ``manage_transaction``: transaction-ownership is
+            not the same concern as recompute-ownership.
 
     Returns:
         Number of pairs successfully merged.
@@ -782,8 +855,9 @@ def dedup_team_players(
                 exc_info=True,
             )
 
-    # Recompute season aggregates for all affected tuples
-    if all_affected:
+    # Recompute season aggregates for all affected tuples (unless suppressed
+    # because a canonical end-of-load recompute will run -- TN-11).
+    if all_affected and recompute_aggregates:
         recompute_affected_seasons(db, all_affected)
 
     logger.info(
@@ -795,158 +869,26 @@ def dedup_team_players(
     return merged
 
 
-def recompute_season_batting(
-    db: sqlite3.Connection,
-    player_id: str,
-    team_id: int,
-    season_id: str,
-) -> None:
-    """Recompute player_season_batting from player_game_batting rows.
-
-    Deletes any existing season row and rebuilds from game-level data.
-    If no game-level data exists, no season row is created.
-    """
-    # Delete existing
-    db.execute(
-        "DELETE FROM player_season_batting "
-        "WHERE player_id = ? AND team_id = ? AND season_id = ?",
-        (player_id, team_id, season_id),
-    )
-
-    # Aggregate from game-level data (join to games to filter by season)
-    row = db.execute(
-        """
-        SELECT
-            COUNT(*)            AS games_tracked,
-            COUNT(*)            AS gp,
-            COALESCE(SUM(ab), 0) + COALESCE(SUM(bb), 0)
-                + COALESCE(SUM(hbp), 0) + COALESCE(SUM(shf), 0) AS pa,
-            COALESCE(SUM(pgb.ab), 0),
-            COALESCE(SUM(pgb.h), 0),
-            COALESCE(SUM(pgb.doubles), 0),
-            COALESCE(SUM(pgb.triples), 0),
-            COALESCE(SUM(pgb.hr), 0),
-            COALESCE(SUM(pgb.rbi), 0),
-            COALESCE(SUM(pgb.r), 0),
-            COALESCE(SUM(pgb.bb), 0),
-            COALESCE(SUM(pgb.so), 0),
-            COALESCE(SUM(pgb.hbp), 0),
-            COALESCE(SUM(pgb.shf), 0),
-            COALESCE(SUM(pgb.sb), 0),
-            COALESCE(SUM(pgb.cs), 0),
-            COALESCE(SUM(pgb.tb), 0),
-            COALESCE(SUM(pgb.e), 0)
-        FROM player_game_batting pgb
-        JOIN games g ON g.game_id = pgb.game_id
-        WHERE pgb.player_id = ? AND pgb.team_id = ? AND g.season_id = ?
-          AND pgb.perspective_team_id = ?
-        """,
-        (player_id, team_id, season_id, team_id),
-    ).fetchone()
-
-    if row is None or row[0] == 0:
-        return
-
-    (
-        games_tracked, gp, pa, ab, h, doubles, triples, hr, rbi, r,
-        bb, so, hbp, shf, sb, cs, tb, e,
-    ) = row
-
-    singles = h - doubles - triples - hr
-    xbh = doubles + triples + hr
-
-    db.execute(
-        """
-        INSERT INTO player_season_batting (
-            player_id, team_id, season_id, stat_completeness, games_tracked,
-            gp, pa, ab, h, singles, doubles, triples, hr, rbi, r,
-            bb, so, hbp, shf, sb, cs, tb, xbh
-        ) VALUES (?, ?, ?, 'boxscore_only', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                  ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            player_id, team_id, season_id, games_tracked,
-            gp, pa, ab, h, singles, doubles, triples, hr, rbi, r,
-            bb, so, hbp, shf, sb, cs, tb, xbh,
-        ),
-    )
-
-
-def recompute_season_pitching(
-    db: sqlite3.Connection,
-    player_id: str,
-    team_id: int,
-    season_id: str,
-) -> None:
-    """Recompute player_season_pitching from player_game_pitching rows.
-
-    Deletes any existing season row and rebuilds from game-level data.
-    If no game-level data exists, no season row is created.
-    """
-    # Delete existing
-    db.execute(
-        "DELETE FROM player_season_pitching "
-        "WHERE player_id = ? AND team_id = ? AND season_id = ?",
-        (player_id, team_id, season_id),
-    )
-
-    row = db.execute(
-        """
-        SELECT
-            COUNT(*)                        AS games_tracked,
-            COUNT(*)                        AS gp_pitcher,
-            COALESCE(SUM(pgp.ip_outs), 0),
-            COALESCE(SUM(pgp.h), 0),
-            COALESCE(SUM(pgp.r), 0),
-            COALESCE(SUM(pgp.er), 0),
-            COALESCE(SUM(pgp.bb), 0),
-            COALESCE(SUM(pgp.so), 0),
-            COALESCE(SUM(pgp.wp), 0),
-            COALESCE(SUM(pgp.hbp), 0),
-            COALESCE(SUM(pgp.pitches), 0),
-            COALESCE(SUM(pgp.total_strikes), 0),
-            COALESCE(SUM(pgp.bf), 0),
-            SUM(CASE WHEN pgp.decision = 'W' THEN 1 ELSE 0 END),
-            SUM(CASE WHEN pgp.decision = 'L' THEN 1 ELSE 0 END),
-            SUM(CASE WHEN pgp.decision = 'SV' THEN 1 ELSE 0 END)
-        FROM player_game_pitching pgp
-        JOIN games g ON g.game_id = pgp.game_id
-        WHERE pgp.player_id = ? AND pgp.team_id = ? AND g.season_id = ?
-          AND pgp.perspective_team_id = ?
-        """,
-        (player_id, team_id, season_id, team_id),
-    ).fetchone()
-
-    if row is None or row[0] == 0:
-        return
-
-    (
-        games_tracked, gp_pitcher, ip_outs, h, r, er, bb, so,
-        wp, hbp, pitches, total_strikes, bf, w, l, sv,
-    ) = row
-
-    db.execute(
-        """
-        INSERT INTO player_season_pitching (
-            player_id, team_id, season_id, stat_completeness, games_tracked,
-            gp_pitcher, ip_outs, h, r, er, bb, so, wp, hbp,
-            pitches, total_strikes, bf, w, l, sv
-        ) VALUES (?, ?, ?, 'boxscore_only', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                  ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            player_id, team_id, season_id, games_tracked,
-            gp_pitcher, ip_outs, h, r, er, bb, so, wp, hbp,
-            pitches, total_strikes, bf, w, l, sv,
-        ),
-    )
-
-
 def recompute_affected_seasons(
     db: sqlite3.Connection,
     affected: set[tuple[str, int, str]],
 ) -> None:
-    """Recompute season aggregates for all affected (player_id, team_id, season_id) tuples."""
-    for player_id, team_id, season_id in affected:
-        recompute_season_batting(db, player_id, team_id, season_id)
-        recompute_season_pitching(db, player_id, team_id, season_id)
+    """Recompute season aggregates for the scopes touched by a set of merges.
+
+    E-237-03 (TN-11): the per-player ``recompute_season_batting`` /
+    ``recompute_season_pitching`` writers have been consolidated away into the
+    single canonical recompute in ``src.db.season_aggregates``.  This function
+    keeps its signature for standalone callers (the ``bb data dedup-players``
+    CLI and the member-sync Hook-2 post-spray dedup) but now reduces the
+    affected ``(player_id, team_id, season_id)`` tuples to their distinct
+    ``(team_id, season_id)`` scopes and runs the scope-level canonical
+    recompute once per scope.  Slightly broader than the prior per-player
+    recompute (it rebuilds every boxscore_only player in the scope), but
+    idempotent and beneficial -- the merged and non-merged players in a scope
+    now get the identical deterministic superset column set.
+    """
+    from src.db.season_aggregates import canonical_recompute
+
+    scopes = {(team_id, season_id) for _player_id, team_id, season_id in affected}
+    for team_id, season_id in scopes:
+        canonical_recompute(db, team_id, season_id)

@@ -321,6 +321,33 @@ class GameLoader:
         self._db.commit()
         return result
 
+    def load_payload(
+        self,
+        raw: dict,
+        summary: GameSummaryEntry,
+        opponent_name: str | None = None,
+    ) -> LoadResult:
+        """Load a single in-memory boxscore dict (payload-first entry point).
+
+        Per-call counterpart to :meth:`load_file`: applies the identical
+        dict-processing logic (team-key detection, ID resolution,
+        ``_find_duplicate_game`` dedup, per-player stat upsert) to an
+        already-parsed boxscore dict without any disk round-trip, then commits
+        per call (TN-10 option (b)).
+
+        Args:
+            raw: Parsed boxscore response dict.
+            summary: Resolved game-summaries entry for this game.
+            opponent_name: Human-readable opponent team name.  When provided,
+                used as the ``teams.name`` value instead of the UUID placeholder.
+
+        Returns:
+            ``LoadResult`` for this single game.
+        """
+        result = self._load_boxscore_data(raw, summary, opponent_name=opponent_name)
+        self._db.commit()
+        return result
+
     # ------------------------------------------------------------------
     # Index building
     # ------------------------------------------------------------------
@@ -482,6 +509,11 @@ class GameLoader:
     ) -> LoadResult:
         """Parse and load a single boxscore JSON file.
 
+        This is a thin file-reading wrapper: it reads the JSON, guards the
+        ``None``/non-dict cases, and delegates to the shared
+        :meth:`_load_boxscore_data` payload logic.  It does NOT commit --
+        ``load_all`` commits once at the end and ``load_file`` commits per call.
+
         Args:
             path: Path to the boxscore JSON file.
             summary: Resolved game-summaries entry for this game.
@@ -492,16 +524,45 @@ class GameLoader:
         if raw is None:
             return LoadResult(errors=1)
 
+        return self._load_boxscore_data(
+            raw, summary, opponent_name=opponent_name, source=path,
+        )
+
+    def _load_boxscore_data(
+        self,
+        raw: dict | list,
+        summary: GameSummaryEntry,
+        opponent_name: str | None = None,
+        source: Path | None = None,
+    ) -> LoadResult:
+        """Process a single parsed boxscore payload into games + stat rows.
+
+        Shared core for both :meth:`load_file` (file path -- ``source`` is the
+        path) and :meth:`load_payload` (in-memory -- ``source`` is ``None``).
+        Performs the non-dict guard, team-key detection, ID resolution,
+        ``_find_duplicate_game`` dedup, and per-player stat upsert.  Does NOT
+        commit -- the public entry points (and ``load_all``) own the commit
+        boundary.
+
+        Args:
+            raw: Parsed boxscore payload (expected to be a dict).
+            summary: Resolved game-summaries entry for this game.
+            opponent_name: Human-readable opponent team name.
+            source: Originating file path for log context, or ``None`` for
+                in-memory payloads.
+        """
+        log_source = source if source is not None else "payload"
+
         if not isinstance(raw, dict):
             logger.error(
-                "Expected JSON object in %s, got %s", path, type(raw).__name__
+                "Expected JSON object in %s, got %s", log_source, type(raw).__name__
             )
             return LoadResult(errors=1)
 
         # Detect which key is own team and which is opponent.
         own_key, opp_key = self._detect_team_keys(raw)
         if own_key is None and opp_key is None:
-            logger.error("Could not identify team keys in boxscore %s", path)
+            logger.error("Could not identify team keys in boxscore %s", log_source)
             return LoadResult(errors=1)
 
         own_data = raw.get(own_key) if own_key else None

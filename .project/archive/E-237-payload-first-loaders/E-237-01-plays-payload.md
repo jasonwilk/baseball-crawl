@@ -4,7 +4,7 @@
 [E-237: Payload-First Loaders + Aggregate Integrity](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the report generator passes its in-memory plays data directly to `PlaysLoader` with no temp files. `PlaysLoader` exposes a batch `load_payload(plays_by_game)` entry point; `load_all(Path)` survives as a thin file-reading wrapper over the same per-game logic. No report stat value changes.

@@ -270,6 +270,70 @@ class TestMissingScopeDetection:
         assert result.mismatches == []
 
 
+class TestMixedProvenanceScope:
+    """E-237-03 Phase 4b P1: a MIXED-provenance scope -- one player preserved as
+    ``full`` alongside recomputed ``boxscore_only`` players in the SAME
+    (team_id, season_id) table+scope -- must not surface the preserved ``full``
+    player as a synthetic ``stored=None`` mismatch.
+
+    The canonical recompute (``src.db.season_aggregates.canonical_recompute``)
+    preserves member ``full``/``supplemented`` rows and only INSERTs
+    boxscore_only rows for the remaining players, so a member scope can now hold
+    BOTH a ``full`` row and ``boxscore_only`` rows.  ``verify_aggregates`` must
+    apply the same per-player provenance exclusion as the recompute's NOT EXISTS
+    guard.
+    """
+
+    def test_full_player_in_mixed_scope_not_flagged(
+        self, parity_db: sqlite3.Connection
+    ) -> None:
+        """Inject a ``full`` batter (ab=99) WITH per-game rows into the in-scope
+        (T, 2026-spring-hs) scope that already holds boxscore_only batters.
+
+        Codex's repro: without the per-player provenance exclusion the preserved
+        ``full`` player -- who has player_game_batting rows but no stored
+        boxscore_only row -- surfaces as bogus (stored=None) mismatches across
+        the diffed batting columns.  With the fix, that player is excluded and
+        the in-scope green path stays empty.
+        """
+        t_id = parity_db.execute(
+            "SELECT id FROM teams WHERE gc_uuid = 'TEAM_T'"
+        ).fetchone()[0]
+
+        parity_db.execute(
+            "INSERT INTO players (player_id, first_name, last_name) "
+            "VALUES ('MEMBER_BAT', 'Member', 'Batter')"
+        )
+        # Authoritative member 'full' batting row (from the season-stats API),
+        # with distinctive values the per-game recompute would NOT reproduce.
+        parity_db.execute(
+            "INSERT INTO player_season_batting "
+            "(player_id, team_id, season_id, stat_completeness, gp, games_tracked, ab, h) "
+            "VALUES ('MEMBER_BAT', ?, '2026-spring-hs', 'full', 30, 30, 99, 40)",
+            (t_id,),
+        )
+        # The SAME player also has an in-scope per-game boxscore row (perspective
+        # = team) -- this is what would make the recompute include them.
+        parity_db.execute(
+            "INSERT INTO player_game_batting "
+            "(game_id, player_id, team_id, perspective_team_id, ab, h) "
+            "VALUES ('PG_1', 'MEMBER_BAT', ?, ?, 3, 1)",
+            (t_id, t_id),
+        )
+        parity_db.commit()
+
+        result = verify_aggregates(parity_db)
+
+        # The preserved full player produces NO mismatch ...
+        assert all(
+            m.player_id != "MEMBER_BAT" for m in result.mismatches
+        ), f"full player in mixed scope flagged: {result.mismatches}"
+        # ... and the in-scope green path is otherwise undisturbed.
+        assert result.mismatches == [], (
+            f"mixed-provenance scope broke the green path: {result.mismatches}"
+        )
+
+
 class TestInjectedDivergence:
     """AC-5(c): an injected stored/recompute divergence is reported exactly."""
 

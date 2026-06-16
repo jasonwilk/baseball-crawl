@@ -97,7 +97,7 @@ class PlaysLoader:
         total = LoadResult()
         for plays_path in sorted(plays_dir.glob("*.json")):
             game_id = plays_path.stem
-            result = self._load_game(plays_path, game_id)
+            result = self._load_game(game_id, plays_path=plays_path)
             total.loaded += result.loaded
             total.skipped += result.skipped
             total.errors += result.errors
@@ -111,25 +111,80 @@ class PlaysLoader:
         )
         return total
 
+    def load_payload(self, plays_by_game: dict[str, dict]) -> LoadResult:
+        """Load a batch of in-memory plays payloads, keyed by game_id.
+
+        Payload-first counterpart to :meth:`load_all`: applies the identical
+        per-game logic (FK guard, whole-game idempotency, parse, per-game
+        transaction, error isolation) to each already-fetched plays dict
+        without any disk round-trip.
+
+        Entries are iterated in sorted ``game_id`` order to mirror the
+        deterministic ``sorted(glob)`` iteration of :meth:`load_all`.
+        Falsy/empty entries (e.g. ``{}`` markers for games skipped upstream)
+        are skipped, mirroring the generator's existing ``if data:`` guard.
+
+        Args:
+            plays_by_game: Mapping of ``game_id`` -> raw plays response dict.
+
+        Returns:
+            ``LoadResult`` with ``loaded`` = plays inserted,
+            ``skipped`` = games skipped (idempotent or missing FK),
+            ``errors`` = games with parse/insert errors.
+        """
+        total = LoadResult()
+        for game_id in sorted(plays_by_game):
+            raw_json = plays_by_game[game_id]
+            if not raw_json:
+                # Empty/{} entry -- nothing to load (mirrors load_all having
+                # no file written for already-loaded/skipped games).
+                continue
+            result = self._load_game(game_id, raw_json=raw_json)
+            total.loaded += result.loaded
+            total.skipped += result.skipped
+            total.errors += result.errors
+
+        logger.info(
+            "Plays payload load complete: loaded=%d skipped=%d errors=%d",
+            total.loaded,
+            total.skipped,
+            total.errors,
+        )
+        return total
+
     # ------------------------------------------------------------------
     # Per-game loading
     # ------------------------------------------------------------------
 
-    def _load_game(self, plays_path: Path, game_id: str) -> LoadResult:
-        """Load plays for a single game file.
+    def _load_game(
+        self,
+        game_id: str,
+        *,
+        raw_json: dict[str, Any] | None = None,
+        plays_path: Path | None = None,
+    ) -> LoadResult:
+        """Load plays for a single game from an in-memory dict or a file.
 
-        Performs FK guard, idempotency check, parsing, and DB insertion
-        within a per-game transaction.  Parse or insert errors are caught
-        and logged (error isolation -- AC-4).
+        Shared per-game core for both :meth:`load_all` (file path -- pass
+        ``plays_path``) and :meth:`load_payload` (in-memory -- pass
+        ``raw_json``).  Performs FK guard, idempotency check, parsing, and DB
+        insertion within a per-game transaction.  Parse or insert errors are
+        caught and logged (per-game error isolation).
+
+        Exactly one of ``raw_json`` or ``plays_path`` must be provided.  When
+        ``plays_path`` is given, the file is read lazily inside the parse
+        try-block (after the FK guard and idempotency checks) so that read
+        failures are isolated exactly as before.
 
         Args:
-            plays_path: Path to the plays JSON file.
             game_id: The ``event_id`` (= ``games.game_id``).
+            raw_json: Pre-fetched raw plays response dict (payload path).
+            plays_path: Path to the plays JSON file (directory path).
 
         Returns:
             ``LoadResult`` for this game.
         """
-        # AC-7: Game FK guard -- verify game exists in games table.
+        # Game FK guard -- verify game exists in games table.
         game_row = self._db.execute(
             "SELECT season_id, home_team_id, away_team_id FROM games WHERE game_id = ?",
             (game_id,),
@@ -143,7 +198,7 @@ class PlaysLoader:
 
         season_id, home_team_id, away_team_id = game_row
 
-        # AC-2: Whole-game idempotency -- skip if plays exist for this perspective.
+        # Whole-game idempotency -- skip if plays exist for this perspective.
         perspective_team_id = self._team_ref.id
         existing = self._db.execute(
             "SELECT 1 FROM plays WHERE game_id = ? AND perspective_team_id = ? LIMIT 1",
@@ -156,9 +211,10 @@ class PlaysLoader:
             )
             return LoadResult(skipped=1)
 
-        # Read and parse the JSON file.
+        # Read (file path only) and parse the plays payload.
         try:
-            raw_json = self._read_json(plays_path)
+            if raw_json is None:
+                raw_json = self._read_json(plays_path)
             parsed_plays = PlaysParser.parse_game(
                 raw_json=raw_json,
                 game_id=game_id,
@@ -166,11 +222,11 @@ class PlaysLoader:
                 home_team_id=home_team_id,
                 away_team_id=away_team_id,
             )
-        except Exception as exc:  # noqa: BLE001 -- per-game error isolation (AC-4)
+        except Exception as exc:  # noqa: BLE001 -- per-game error isolation
             logger.error(
                 "Parse error for game %s (%s): %s",
                 game_id,
-                plays_path,
+                plays_path if plays_path is not None else "payload",
                 exc,
             )
             return LoadResult(errors=1)
@@ -181,12 +237,12 @@ class PlaysLoader:
             )
             return LoadResult(skipped=1)
 
-        # AC-5: Per-game transaction -- all plays + events commit together.
+        # Per-game transaction -- all plays + events commit together.
         try:
             plays_inserted = self._insert_game_plays(parsed_plays, perspective_team_id)
             self._db.commit()
             return LoadResult(loaded=plays_inserted)
-        except Exception as exc:  # noqa: BLE001 -- per-game error isolation (AC-4)
+        except Exception as exc:  # noqa: BLE001 -- per-game error isolation
             logger.error(
                 "Insert error for game %s: %s", game_id, exc,
             )
@@ -214,7 +270,7 @@ class PlaysLoader:
         plays_inserted = 0
 
         for play in plays:
-            # AC-3: Ensure stub player rows for batter and pitcher.
+            # Ensure stub player rows for batter and pitcher.
             ensure_player_row(self._db, play.batter_id, "Unknown", "Unknown")
             if play.pitcher_id is not None:
                 ensure_player_row(self._db, play.pitcher_id, "Unknown", "Unknown")

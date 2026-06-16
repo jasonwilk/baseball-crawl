@@ -1,8 +1,58 @@
 ---
 name: season-aggregate-writers
-description: THREE divergent writers compute player_season_batting/_pitching boxscore_only rows with disagreeing column sets; the gs-vs-w/l/sv footgun and the renderer-derived PA/XBH trap (E-237/Epic C discovery)
+description: ONE canonical boxscore_only recompute since E-237-03 (src/db/season_aggregates.py); history of the prior THREE divergent writers, the gs-vs-w/l/sv hybrid-row footgun it fixed, and the renderer-derived PA/XBH trap
 metadata:
   type: project
+---
+
+# UPDATE (E-237-03 DONE, 2026-06-16): boxscore_only recompute is now CONSOLIDATED
+
+The two divergent `boxscore_only` writers (#1 ScoutingLoader + #2 player_dedup) below
+were collapsed into ONE canonical module-level function:
+**`src/db/season_aggregates.py::canonical_recompute(conn, team_id, season_id)`**.
+
+- Scope = `(team_id, season_id)`: DELETE all `boxscore_only` rows for the scope, then INSERT
+  every player (GROUP BY player_id). Perspective-filtered (`perspective_team_id = team_id`).
+- Writes the **Option B superset** = ScoutingLoader's parity-checked subset (batting 16; pitching
+  14 incl `gs`) PLUS the dedup-derived extras (batting pa/singles/xbh; pitching w/l/sv) for EVERY
+  player → hybrid-row non-determinism is gone.
+- **Provenance guard**: only `boxscore_only` rows are deleted/written. A player that already owns a
+  `full`/`supplemented` row for the scope is EXCLUDED from the INSERT (NOT EXISTS guard) → member
+  rows survive intact. This also fixed the latent dedup DELETE+INSERT data-loss bug.
+- Wiring (TN-11): `ScoutingLoader._compute_season_aggregates` is now a 1-line delegate to it;
+  the two embedded load-path dedup calls pass `recompute_aggregates=False` (new kwarg on
+  `dedup_team_players`) so the canonical recompute runs EXACTLY ONCE per load, committed with the
+  dedup sweep. Standalone `recompute_affected_seasons` (CLI `bb data dedup-players`, member-sync
+  Hook-2 `trigger.py`) keeps its signature but now reduces affected tuples to distinct
+  `(team_id, season_id)` scopes and calls `canonical_recompute`. The per-player
+  `recompute_season_batting`/`recompute_season_pitching` functions were REMOVED.
+- Parity guard column set + `parity_consistent.sql` fixture UNCHANGED (TN-7 did not fire —
+  superset's parity-checked subset == ScoutingLoader's old set). Stale doc comments repointed.
+- **COUPLING (Codex P1, fixed E-237-03 round 1):** the provenance guard means a member
+  `(team_id, season_id)` scope can now legitimately hold BOTH a `full` row (member player) AND
+  `boxscore_only` rows (other players) — a *mixed* scope that did not exist before. `verify_aggregates`
+  (`aggregate_parity.py::_check_table`) recomputes EVERY player in a scope from per-game rows, so it
+  MUST mirror the canonical NOT EXISTS guard with a **per-player** exclusion: drop players who own a
+  `full`/`supplemented` row in THAT table+scope from the recompute comparison, else the preserved
+  member player (per-game rows present, no boxscore_only stored row) surfaces as a synthetic
+  `stored=None` mismatch. The pre-existing `member_scopes` exclusion only handled WHOLE-scope
+  (zero-boxscore_only) member scopes — insufficient for mixed. Invariant: any change to
+  `canonical_recompute`'s provenance/player-set selection must be mirrored in `_check_table`.
+- **MERGE-path AC-8 (Phase 5 invariant audit, fixed E-237-03):** `merge_player_pair`
+  (`player_dedup.py` TN-6 Step 6/7) USED to unconditionally `DELETE FROM player_season_* WHERE
+  player_id IN (canonical, duplicate)` — deleting a merged player's member `full`/`supplemented`
+  row BEFORE the recompute, so the canonical NOT EXISTS guard no longer saw it and rebuilt the
+  player as boxscore_only → silent downgrade of authoritative member stats. Fixed via new helper
+  `_delete_or_repoint_season_rows(db, table, canonical, duplicate)`: (1) DELETE only `boxscore_only`
+  rows (rederivable); (2) re-point surviving `full`/`supplemented` rows duplicate→canonical (member
+  rows are API-authoritative, must MOVE not recompute); (3) PK-collision (both own a member row for
+  same team+season) → canonical's row WINS, duplicate's dropped (matches canonical-preference in the
+  other `_delete_or_update_*` merge helpers). Invariant: member full/supplemented season rows must
+  never be deleted/downgraded by ANY path — recompute guard (non-merged) + merge re-point (merged)
+  are the two closures.
+
+The rest of this file is the PRE-consolidation history (kept for context on WHY).
+
 ---
 
 # player_season_* aggregate writers (verified 2026-06-16, E-237 Epic C planning)

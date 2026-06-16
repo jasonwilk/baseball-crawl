@@ -22,7 +22,7 @@ from pathlib import Path
 
 import pytest
 
-from src.gamechanger.loaders import LoadResult
+from src.gamechanger.loaders import LoadResult, ensure_season_row
 from src.gamechanger.loaders.game_loader import GameLoader, GameSummaryEntry as _GameSummaryEntry
 
 # ---------------------------------------------------------------------------
@@ -2322,3 +2322,118 @@ def test_on_conflict_uses_three_column_unique(db: sqlite3.Connection, tmp_path: 
     # 2 batting (own + opp) and 2 pitching (own + opp) -- no duplicates
     assert batting_count == 2
     assert pitching_count == 2
+
+
+# ---------------------------------------------------------------------------
+# E-237-02: Direct load_payload entry point (AC-5)
+# ---------------------------------------------------------------------------
+
+
+def _fresh_db() -> sqlite3.Connection:
+    """Build an independent in-memory DB with schema + FK enforcement."""
+    conn = sqlite3.connect(":memory:")
+    conn.execute("PRAGMA journal_mode=WAL;")
+    conn.execute("PRAGMA foreign_keys=ON;")
+    conn.commit()
+    conn.executescript(_MIGRATION_FILE.read_text(encoding="utf-8"))
+    conn.commit()
+    return conn
+
+
+def _dump_games(conn: sqlite3.Connection) -> list[tuple]:
+    """Dump content-bearing games columns (excludes created_at), ordered."""
+    return conn.execute(
+        "SELECT game_id, season_id, game_date, home_team_id, away_team_id, "
+        "home_score, away_score, status, game_stream_id, start_time, timezone "
+        "FROM games ORDER BY game_id"
+    ).fetchall()
+
+
+def _dump_batting(conn: sqlite3.Connection) -> list[tuple]:
+    """Dump per-player batting rows (excludes surrogate id), ordered."""
+    return conn.execute(
+        "SELECT game_id, player_id, team_id, perspective_team_id, batting_order, "
+        "positions_played, is_primary, stat_completeness, ab, r, h, rbi, bb, so, "
+        "doubles, triples, hr, tb, hbp, shf, sb, cs, e "
+        "FROM player_game_batting ORDER BY player_id"
+    ).fetchall()
+
+
+def _dump_pitching(conn: sqlite3.Connection) -> list[tuple]:
+    """Dump per-player pitching rows (excludes surrogate id), ordered."""
+    return conn.execute(
+        "SELECT game_id, player_id, team_id, perspective_team_id, decision, "
+        "appearance_order, stat_completeness, ip_outs, h, r, er, bb, so, wp, hbp, "
+        "pitches, total_strikes, bf "
+        "FROM player_game_pitching ORDER BY player_id"
+    ).fetchall()
+
+
+def test_load_payload_matches_file_path(tmp_path: Path) -> None:
+    """AC-5: load_payload produces identical LoadResult + DB rows vs load_file.
+
+    Loads the same boxscore through both entry points into two independent
+    databases and asserts the LoadResult tallies and the written games /
+    player_game_batting / player_game_pitching rows are identical.
+    """
+    boxscore = _make_boxscore()
+    summary = _make_summary()
+    opponent_name = "Rival High"
+
+    # File path via load_file.  Caller ensures the season row exactly as
+    # ScoutingLoader / load_all do (load_file/load_payload do not).
+    db_file = _fresh_db()
+    loader_file = _make_loader(db_file)
+    ensure_season_row(db_file, loader_file._season_id)
+    box_path = _write_boxscore(tmp_path, boxscore)
+    result_file = loader_file.load_file(box_path, summary, opponent_name=opponent_name)
+
+    # Payload path via load_payload (same in-memory dict).
+    db_pl = _fresh_db()
+    loader_pl = _make_loader(db_pl)
+    ensure_season_row(db_pl, loader_pl._season_id)
+    result_pl = loader_pl.load_payload(boxscore, summary, opponent_name=opponent_name)
+
+    # Identical LoadResult tallies.
+    assert (result_pl.loaded, result_pl.skipped, result_pl.errors) == (
+        result_file.loaded,
+        result_file.skipped,
+        result_file.errors,
+    )
+    assert result_file.loaded > 0
+    assert result_file.errors == 0
+
+    # Identical games + per-player stat rows.
+    assert _dump_games(db_pl) == _dump_games(db_file)
+    assert _dump_batting(db_pl) == _dump_batting(db_file)
+    assert _dump_pitching(db_pl) == _dump_pitching(db_file)
+
+    # AC-4: every stat row carries perspective_team_id = the owned team PK.
+    own_pk = db_pl.execute(
+        "SELECT id FROM teams WHERE gc_uuid = ?", (_OWN_TEAM_ID,)
+    ).fetchone()[0]
+    perspectives = db_pl.execute(
+        "SELECT DISTINCT perspective_team_id FROM player_game_batting "
+        "UNION "
+        "SELECT DISTINCT perspective_team_id FROM player_game_pitching"
+    ).fetchall()
+    assert perspectives == [(own_pk,)]
+
+    db_file.close()
+    db_pl.close()
+
+
+def test_load_payload_commits_per_call() -> None:
+    """AC-3/TN-10: load_payload commits per call (no open transaction after)."""
+    boxscore = _make_boxscore()
+    summary = _make_summary()
+
+    db = _fresh_db()
+    loader = _make_loader(db)
+    ensure_season_row(db, loader._season_id)
+    result = loader.load_payload(boxscore, summary, opponent_name="Rival High")
+    assert result.loaded > 0
+
+    # After a per-call commit the connection has no pending transaction.
+    assert db.in_transaction is False
+    db.close()

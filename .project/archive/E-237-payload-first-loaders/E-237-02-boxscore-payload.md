@@ -4,7 +4,7 @@
 [E-237: Payload-First Loaders + Aggregate Integrity](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, `ScoutingLoader` passes its in-memory boxscore dicts directly to `GameLoader` with no temp files. `GameLoader` exposes a per-call `load_payload(raw, summary, opponent_name=None)` entry point; `load_file(Path, ...)` survives as a thin file-reading wrapper. The member pipeline and all existing loader tests are unaffected; no report stat value changes.

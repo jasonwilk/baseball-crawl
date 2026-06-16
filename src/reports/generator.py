@@ -17,7 +17,6 @@ Public API::
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import re
@@ -839,7 +838,8 @@ def _crawl_and_load_plays(
     """Crawl, load, and reconcile plays data in-memory (E-220-06).
 
     Game IDs come from crawl result boxscores (in-memory), not disk globs.
-    Plays are fetched in-memory and written to temp files for PlaysLoader.
+    Plays are fetched in-memory and passed directly to PlaysLoader via its
+    payload entry point (no disk round-trip).
 
     Args:
         client: Authenticated ``GameChangerClient``.
@@ -856,8 +856,6 @@ def _crawl_and_load_plays(
     Returns:
         List of game_id strings that were processed.
     """
-    import tempfile
-
     if not game_ids:
         logger.info("No game IDs for plays stage for public_id=%s; skipping.", public_id)
         return []
@@ -908,7 +906,9 @@ def _crawl_and_load_plays(
             logger.info("No plays data fetched for team_id=%d.", team_id)
             return []
 
-        # Load: write each game's plays to a temp dir, then use PlaysLoader
+        # Load: pass the in-memory plays payloads directly to PlaysLoader
+        # (no temp files). load_payload skips empty/{} entries (already-loaded
+        # games) exactly as the old tempdir bridge skipped non-empty writes.
         with closing(get_connection()) as conn:
             row = conn.execute(
                 "SELECT gc_uuid, public_id FROM teams WHERE id = ?", (team_id,)
@@ -918,18 +918,9 @@ def _crawl_and_load_plays(
 
         team_ref = TeamRef(id=team_id, gc_uuid=gc_uuid, public_id=team_public_id)
 
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            plays_dir = Path(tmp_dir) / "plays"
-            plays_dir.mkdir()
-            for gid, data in plays_data.items():
-                if data:  # only write non-empty (skip already-loaded)
-                    (plays_dir / f"{gid}.json").write_text(
-                        json.dumps(data), encoding="utf-8"
-                    )
-
-            with closing(get_connection()) as conn:
-                loader = PlaysLoader(conn, owned_team_ref=team_ref)
-                load_result = loader.load_all(Path(tmp_dir))
+        with closing(get_connection()) as conn:
+            loader = PlaysLoader(conn, owned_team_ref=team_ref)
+            load_result = loader.load_payload(plays_data)
 
         logger.info(
             "Plays load for team_id=%d: loaded=%d skipped=%d errors=%d",

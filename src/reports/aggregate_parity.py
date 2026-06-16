@@ -10,23 +10,26 @@ produce this (ROADMAP Section 2):
 * any other post-load mutation of the per-game rows.
 
 This module recomputes the season aggregates from the per-game rows -- mirroring
-``ScoutingLoader._compute_batting_aggregates`` / ``_compute_pitching_aggregates``
-*exactly* (perspective filter, ``JOIN games`` on ``season_id``,
-``GROUP BY player_id``, and the verbatim ``gs`` NULL-safe CASE) -- and diffs the
-result against the stored rows.  Any difference is a real finding, not a false
-positive: on a freshly-loaded DB with no post-load mutation the diff is empty.
+the canonical recompute (``src.db.season_aggregates.canonical_recompute``)
+parity-checked subset *exactly* (perspective filter, ``JOIN games`` on
+``season_id``, ``GROUP BY player_id``, and the verbatim ``gs`` NULL-safe CASE)
+-- and diffs the result against the stored rows.  Any difference is a real
+finding, not a false positive: on a freshly-loaded DB with no post-load
+mutation the diff is empty.
 
 Scope:
 
 * Only ``stat_completeness = 'boxscore_only'`` season rows are checked.  Member
   season-stats-loader rows (``full`` / ``supplemented``) come straight from the
   API, are not summed from game rows, and would produce spurious mismatches.
-* Only the SUM-computed column subset the ScoutingLoader writes is diffed
-  (see ``_BATTING_COLUMNS`` / ``_PITCHING_COLUMNS``).  Member-only columns
-  (``pa``, ``singles``, splits, qab/hard/weak/ps/sw, home/away, vs-LHP/RHP) are
-  out of scope on provenance grounds -- not NULL-ness -- whether NULL or
-  populated.  Pitching ``hr`` is deliberately not stored by the loader, so it
-  is not diffed.
+* Only the parity-checked SUM-computed subset is diffed
+  (see ``_BATTING_COLUMNS`` / ``_PITCHING_COLUMNS``).  The canonical recompute's
+  superset extras (boxscore_only ``pa``/``singles``/``xbh`` and ``w``/``l``/``sv``)
+  and the member-only columns (splits, qab/hard/weak/ps/sw, home/away,
+  vs-LHP/RHP) are out of scope -- the former are renderer-derived / not read by
+  any live surface, the latter are member-provenance and not summed from game
+  rows; diffing either would produce spurious mismatches whether NULL or
+  populated.  Pitching ``hr`` is deliberately not stored, so it is not diffed.
 
 The recompute is strictly read-only; this module never writes to
 ``player_season_*``.  It is also the Epic C cutover gate: a stable
@@ -97,9 +100,10 @@ _PITCHING_COLUMNS: tuple[tuple[str, str], ...] = (
     ("gs", "gs"),
 )
 
-# Recompute SELECT -- mirrors ScoutingLoader._compute_batting_aggregates EXACTLY
-# (minus the INSERT): perspective filter, JOIN games on game_id, GROUP BY
-# player_id.  The trailing key order matches ``_BATTING_RECOMPUTE_KEYS``.
+# Recompute SELECT -- mirrors the canonical recompute's batting parity-checked
+# subset EXACTLY (src.db.season_aggregates._recompute_batting, minus the
+# INSERT): perspective filter, JOIN games on game_id, GROUP BY player_id.
+# The trailing key order matches ``_BATTING_RECOMPUTE_KEYS``.
 _BATTING_RECOMPUTE_SQL = """
     SELECT
         pgb.player_id,
@@ -141,8 +145,9 @@ _BATTING_SOURCE_SCOPE_SQL = """
     WHERE pgb.perspective_team_id = pgb.team_id
 """
 
-# Recompute SELECT -- mirrors ScoutingLoader._compute_pitching_aggregates EXACTLY
-# (minus the INSERT), including the verbatim ``gs`` NULL-safe CASE:
+# Recompute SELECT -- mirrors the canonical recompute's pitching parity-checked
+# subset EXACTLY (src.db.season_aggregates._recompute_pitching, minus the
+# INSERT), including the verbatim ``gs`` NULL-safe CASE:
 # MAX(appearance_order) IS NULL -> NULL, else SUM(appearance_order = 1).
 _PITCHING_RECOMPUTE_SQL = """
     SELECT
@@ -286,6 +291,25 @@ def _check_table(
         values = dict(zip(stored_columns, row[3:]))
         stored.setdefault((team_id, season_id), {})[player_id] = values
 
+    # Per-player provenance guard (mirrors canonical_recompute's NOT EXISTS in
+    # src/db/season_aggregates.py).  A player that owns a full/supplemented row
+    # in THIS table+scope is member-provenance: the canonical recompute
+    # preserves that row and never writes a boxscore_only row for the player, so
+    # a *mixed* scope (a preserved full player alongside recomputed
+    # boxscore_only players) is now legitimate.  Exclude those players from the
+    # per-game recompute comparison below, otherwise the preserved full player
+    # -- who has player_game_* rows but no stored boxscore_only row -- would
+    # surface as a synthetic (stored=None) mismatch.  This extends the
+    # whole-scope member exclusion (``member_scopes`` / set 2) to the per-player
+    # level for mixed scopes that ARE in ``stored`` (set 1).
+    member_player_rows = conn.execute(
+        f"SELECT team_id, season_id, player_id FROM {season_table} "
+        f"WHERE stat_completeness IN ('full', 'supplemented')"
+    ).fetchall()
+    member_players: dict[tuple[int, str], set[str]] = {}
+    for m_team, m_season, m_player in member_player_rows:
+        member_players.setdefault((m_team, m_season), set()).add(m_player)
+
     # Scopes present in the recompute source (game rows, perspective=team).
     source_scopes = {
         (row[0], row[1]) for row in conn.execute(source_scope_sql).fetchall()
@@ -302,12 +326,16 @@ def _check_table(
     scopes = set(stored.keys()) | missing_scopes
     for (team_id, season_id) in scopes:
         stored_players = stored.get((team_id, season_id), {})
+        scope_member_players = member_players.get((team_id, season_id), set())
         recomputed_rows = conn.execute(
             recompute_sql, (team_id, season_id, team_id)
         ).fetchall()
+        # Drop member-provenance players (full/supplemented in this table+scope)
+        # -- the canonical recompute never produces a boxscore_only row for them.
         recomputed: dict[str, dict[str, object]] = {
             row[0]: dict(zip(recompute_keys[1:], row[1:]))
             for row in recomputed_rows
+            if row[0] not in scope_member_players
         }
 
         player_ids = sorted(set(stored_players) | set(recomputed))

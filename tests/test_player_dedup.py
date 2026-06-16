@@ -14,8 +14,6 @@ from src.db.player_dedup import (
     merge_player_pair,
     preview_player_merge,
     recompute_affected_seasons,
-    recompute_season_batting,
-    recompute_season_pitching,
 )
 from tests.conftest import load_real_schema
 
@@ -775,7 +773,7 @@ class TestSeasonRecomputation:
         _seed_game_batting(db, "g1", "p-can", 1, ab=4, h=2, bb=1, hr=1, r=1, rbi=2)
         _seed_game_batting(db, "g2", "p-can", 1, ab=3, h=1, bb=0, hr=0, r=0, rbi=0)
 
-        recompute_season_batting(db, "p-can", 1, "2026")
+        recompute_affected_seasons(db, {("p-can", 1, "2026")})
 
         row = db.execute(
             "SELECT games_tracked, gp, pa, ab, h, hr, rbi, bb FROM player_season_batting "
@@ -802,7 +800,7 @@ class TestSeasonRecomputation:
         _seed_game_pitching(db, "g1", "p-can", 1, ip_outs=9, h=3, er=1, bb=1, so=5, r=2)
         _seed_game_pitching(db, "g2", "p-can", 1, ip_outs=6, h=2, er=0, bb=0, so=3, r=0, decision="W")
 
-        recompute_season_pitching(db, "p-can", 1, "2026")
+        recompute_affected_seasons(db, {("p-can", 1, "2026")})
 
         row = db.execute(
             "SELECT games_tracked, gp_pitcher, ip_outs, h, er, bb, so, w "
@@ -825,7 +823,7 @@ class TestSeasonRecomputation:
         _seed_player(db, "p-can", "Oliver", "Test")
         _seed_season(db, "2026")
 
-        recompute_season_batting(db, "p-can", 1, "2026")
+        recompute_affected_seasons(db, {("p-can", 1, "2026")})
         assert _count(db, "player_season_batting", "player_id", "p-can") == 0
 
     def test_recompute_affected_seasons(self, db: sqlite3.Connection) -> None:
@@ -1103,11 +1101,11 @@ class TestDedupTeamPlayers:
 
 
 class TestRecomputePerspectiveFiltering:
-    """Verify recompute_season_batting/pitching filter by perspective_team_id.
+    """Verify recompute_affected_seasons filters by perspective_team_id.
 
     After E-220, the same (game_id, player_id, team_id) can have multiple
     rows in player_game_batting/pitching distinguished by perspective_team_id
-    (one per perspective the game was loaded from).  The recompute helpers
+    (one per perspective the game was loaded from).  The canonical recompute
     must filter to the team's own perspective only, otherwise season totals
     are inflated.
     """
@@ -1136,7 +1134,7 @@ class TestRecomputePerspectiveFiltering:
             ("g-1", "p-x", 1, 2, 4, 2, 1, 3, 1, 0, 1),
         )
 
-        recompute_season_batting(db, "p-x", 1, "2026")
+        recompute_affected_seasons(db, {("p-x", 1, "2026")})
 
         row = db.execute(
             "SELECT games_tracked, ab, h, hr, rbi FROM player_season_batting "
@@ -1172,7 +1170,7 @@ class TestRecomputePerspectiveFiltering:
             ("g-2", "p-y", 1, 2, 18, 4, 2, 2, 1, 6, 85, 55, 24),
         )
 
-        recompute_season_pitching(db, "p-y", 1, "2026")
+        recompute_affected_seasons(db, {("p-y", 1, "2026")})
 
         row = db.execute(
             "SELECT games_tracked, ip_outs, pitches, so, bb FROM player_season_pitching "
@@ -1185,6 +1183,238 @@ class TestRecomputePerspectiveFiltering:
         assert row[3] == 6
         assert row[4] == 1
 
+
+# ---------------------------------------------------------------------------
+# E-237-03: canonical recompute -- determinism + member-row provenance guard
+# ---------------------------------------------------------------------------
+
+
+class TestCanonicalRecomputeConsolidation:
+    """E-237-03: one canonical boxscore_only recompute (Option B superset).
+
+    Pins the two behaviours the consolidation guarantees:
+    * AC-2 -- a *merged* player and a *non-merged* player in the same scope get
+      the IDENTICAL deterministic superset column population (no hybrid row).
+    * AC-8 -- a member-provenance ``full`` season row SURVIVES a dedup/recompute
+      on its scope (neither deleted nor overwritten), fixing the latent
+      data-loss the prior unconditional dedup DELETE+INSERT had.
+    """
+
+    def test_merged_and_unmerged_get_same_superset_columns(
+        self, db: sqlite3.Connection
+    ) -> None:
+        """AC-2: superset columns are populated identically for merged + non-merged.
+
+        Player ``p-oliver`` absorbs a merged duplicate (``p-o``); player
+        ``p-zach`` is never merged.  After dedup runs the canonical recompute
+        for the whole (team, season) scope, BOTH players' rows must carry the
+        dedup-derived extras (batting pa/singles/xbh; pitching w/l/sv) AND the
+        ScoutingLoader subset (gs) -- no NULL hybrid row for either.
+        """
+        from src.db.player_dedup import dedup_team_players
+
+        _seed_team(db, 1, "LSB Varsity")
+        _seed_player(db, "p-oliver", "Oliver", "Test")
+        _seed_player(db, "p-o", "O", "Test")  # prefix duplicate -> merges
+        _seed_player(db, "p-zach", "Zach", "Test")  # no duplicate -> not merged
+        for pid in ("p-oliver", "p-o", "p-zach"):
+            _seed_roster(db, 1, pid, "2026")
+        _seed_game(db, "g1", "2026", 1)
+        _seed_game(db, "g2", "2026", 1)
+
+        # Merged player: batting + a 'W' start across two games.
+        _seed_game_batting(db, "g1", "p-oliver", 1, ab=3, h=2, bb=1)
+        _seed_game_batting(db, "g2", "p-o", 1, ab=2, h=1)
+        db.execute(
+            "INSERT INTO player_game_pitching "
+            "(game_id, player_id, team_id, perspective_team_id, ip_outs, decision, appearance_order) "
+            "VALUES ('g1', 'p-oliver', 1, 1, 15, 'W', 1)"
+        )
+        # Non-merged player: batting + an 'L' start.
+        _seed_game_batting(db, "g1", "p-zach", 1, ab=4, h=1, bb=0)
+        db.execute(
+            "INSERT INTO player_game_pitching "
+            "(game_id, player_id, team_id, perspective_team_id, ip_outs, decision, appearance_order) "
+            "VALUES ('g1', 'p-zach', 1, 1, 18, 'L', 1)"
+        )
+        db.commit()
+
+        # Default recompute_aggregates=True -> routes through canonical recompute.
+        dedup_team_players(db, 1, "2026", manage_transaction=True)
+
+        # Both batting rows carry the superset extras (NOT NULL).
+        for pid, exp_ab, exp_h in (("p-oliver", 5, 3), ("p-zach", 4, 1)):
+            row = db.execute(
+                "SELECT ab, h, pa, singles, xbh FROM player_season_batting "
+                "WHERE player_id = ? AND team_id = 1 AND season_id = '2026'",
+                (pid,),
+            ).fetchone()
+            assert row is not None, f"expected batting row for {pid}"
+            assert row[0] == exp_ab, f"{pid} ab"
+            assert row[1] == exp_h, f"{pid} h"
+            assert row[2] is not None, f"{pid} pa must be populated (superset)"
+            assert row[3] is not None, f"{pid} singles must be populated (superset)"
+            assert row[4] is not None, f"{pid} xbh must be populated (superset)"
+
+        # p-oliver: pa = ab(5) + bb(1) + hbp(0) + shf(0) = 6.
+        olv = db.execute(
+            "SELECT pa, singles, xbh FROM player_season_batting "
+            "WHERE player_id = 'p-oliver' AND team_id = 1 AND season_id = '2026'"
+        ).fetchone()
+        assert olv == (6, 3, 0), f"p-oliver (pa, singles, xbh) wrong: {olv}"
+
+        # Both pitching rows carry w/l/sv (never NULL) AND gs (the ScoutingLoader
+        # subset column the old dedup writer omitted).
+        for pid, exp_w, exp_l in (("p-oliver", 1, 0), ("p-zach", 0, 1)):
+            row = db.execute(
+                "SELECT w, l, sv, gs FROM player_season_pitching "
+                "WHERE player_id = ? AND team_id = 1 AND season_id = '2026'",
+                (pid,),
+            ).fetchone()
+            assert row is not None, f"expected pitching row for {pid}"
+            assert row[0] == exp_w, f"{pid} w"
+            assert row[1] == exp_l, f"{pid} l"
+            assert row[2] == 0, f"{pid} sv"
+            assert row[3] == 1, f"{pid} gs (1 start)"
+
+    def test_member_full_row_survives_recompute(
+        self, db: sqlite3.Connection
+    ) -> None:
+        """AC-8: a member 'full' season row survives a scope dedup/recompute.
+
+        The provenance guard means the canonical recompute only owns
+        boxscore_only rows: the member 'full' row is neither deleted nor
+        overwritten, and no duplicate boxscore_only row is created for that
+        player -- even though the player has per-game rows in scope.
+        """
+        from src.db.season_aggregates import canonical_recompute
+
+        _seed_team(db, 1, "LSB Varsity")
+        _seed_player(db, "p-member", "Member", "Player")
+        _seed_roster(db, 1, "p-member", "2026")
+        _seed_game(db, "g1", "2026", 1)
+
+        # Authoritative member 'full' season row (from the season-stats endpoint)
+        # with a distinctive ab value the recompute would NOT reproduce.
+        db.execute(
+            "INSERT INTO player_season_batting "
+            "(player_id, team_id, season_id, stat_completeness, gp, games_tracked, ab, h) "
+            "VALUES ('p-member', 1, '2026', 'full', 30, 30, 99, 40)"
+        )
+        # The same player ALSO has a per-game boxscore row in scope (perspective=team).
+        _seed_game_batting(db, "g1", "p-member", 1, ab=3, h=1)
+        db.commit()
+
+        canonical_recompute(db, 1, "2026")
+
+        rows = db.execute(
+            "SELECT stat_completeness, ab, h FROM player_season_batting "
+            "WHERE player_id = 'p-member' AND team_id = 1 AND season_id = '2026' "
+            "ORDER BY stat_completeness"
+        ).fetchall()
+        # Exactly one row: the surviving 'full' row, untouched. No boxscore_only
+        # duplicate was inserted for the member player.
+        assert rows == [("full", 99, 40)], f"member full row not preserved intact: {rows}"
+
+
+class TestMergePreservesMemberRows:
+    """E-237-03 Phase 5 invariant audit: merge_player_pair must NOT downgrade a
+    member ``full``/``supplemented`` season row.
+
+    The canonical recompute's NOT EXISTS guard closes the AC-8 data-loss class
+    for NON-merged players; this pins the MERGE-path closure -- a merged
+    player's authoritative member row must SURVIVE the merge, be attributed to
+    the canonical id, and never be rebuilt as a boxscore sum.
+    """
+
+    def test_member_full_row_survives_and_repoints_on_merge(
+        self, db: sqlite3.Connection
+    ) -> None:
+        """Duplicate owns a 'full' row (+ per-game rows) -> after merge+recompute
+        the full row survives under the CANONICAL id, not downgraded."""
+        from src.db.player_dedup import dedup_team_players
+
+        _seed_team(db, 1, "LSB Varsity")
+        _seed_player(db, "p-oliver", "Oliver", "Test")  # canonical (longer name)
+        _seed_player(db, "p-o", "O", "Test")            # duplicate
+        _seed_roster(db, 1, "p-oliver", "2026")
+        _seed_roster(db, 1, "p-o", "2026")
+        _seed_game(db, "g1", "2026", 1)
+
+        # Duplicate owns an authoritative member 'full' batting row (ab=99) AND
+        # a per-game boxscore row (ab=3) the recompute could downgrade it to.
+        db.execute(
+            "INSERT INTO player_season_batting "
+            "(player_id, team_id, season_id, stat_completeness, gp, games_tracked, ab, h) "
+            "VALUES ('p-o', 1, '2026', 'full', 30, 30, 99, 40)"
+        )
+        # And a member 'full' pitching row, to cover both tables.
+        db.execute(
+            "INSERT INTO player_season_pitching "
+            "(player_id, team_id, season_id, stat_completeness, gp_pitcher, games_tracked, ip_outs, so) "
+            "VALUES ('p-o', 1, '2026', 'full', 12, 12, 220, 95)"
+        )
+        _seed_game_batting(db, "g1", "p-o", 1, ab=3, h=1)
+        _seed_game_pitching(db, "g1", "p-o", 1, ip_outs=9, so=4)
+        db.commit()
+
+        dedup_team_players(db, 1, "2026", manage_transaction=True)
+
+        # The duplicate is gone; the full batting row survives under canonical
+        # with its authoritative ab=99 (NOT the boxscore sum of 3).
+        assert db.execute(
+            "SELECT COUNT(*) FROM players WHERE player_id = 'p-o'"
+        ).fetchone()[0] == 0
+        bat = db.execute(
+            "SELECT stat_completeness, ab, h FROM player_season_batting "
+            "WHERE team_id = 1 AND season_id = '2026'"
+        ).fetchall()
+        assert bat == [("full", 99, 40)], f"batting full row downgraded/lost: {bat}"
+        pit = db.execute(
+            "SELECT player_id, stat_completeness, ip_outs, so FROM player_season_pitching "
+            "WHERE team_id = 1 AND season_id = '2026'"
+        ).fetchall()
+        assert pit == [("p-oliver", "full", 220, 95)], (
+            f"pitching full row downgraded/lost or not re-pointed: {pit}"
+        )
+
+    def test_both_own_full_row_collision_canonical_wins(
+        self, db: sqlite3.Connection
+    ) -> None:
+        """Both canonical and duplicate own a 'full' row for the SAME scope ->
+        re-pointing would collide on the PK; canonical's row wins, duplicate's
+        is dropped, exactly one full row remains under canonical."""
+        from src.db.player_dedup import dedup_team_players
+
+        _seed_team(db, 1, "LSB Varsity")
+        _seed_player(db, "p-oliver", "Oliver", "Test")  # canonical
+        _seed_player(db, "p-o", "O", "Test")            # duplicate
+        _seed_roster(db, 1, "p-oliver", "2026")
+        _seed_roster(db, 1, "p-o", "2026")
+
+        # Both own a 'full' batting row for (1, 2026): canonical ab=99, dup ab=55.
+        db.execute(
+            "INSERT INTO player_season_batting "
+            "(player_id, team_id, season_id, stat_completeness, gp, games_tracked, ab, h) "
+            "VALUES ('p-oliver', 1, '2026', 'full', 30, 30, 99, 40)"
+        )
+        db.execute(
+            "INSERT INTO player_season_batting "
+            "(player_id, team_id, season_id, stat_completeness, gp, games_tracked, ab, h) "
+            "VALUES ('p-o', 1, '2026', 'full', 20, 20, 55, 22)"
+        )
+        db.commit()
+
+        dedup_team_players(db, 1, "2026", manage_transaction=True)
+
+        rows = db.execute(
+            "SELECT player_id, stat_completeness, ab, h FROM player_season_batting "
+            "WHERE team_id = 1 AND season_id = '2026'"
+        ).fetchall()
+        # Exactly one surviving row: the canonical's authoritative values.
+        assert rows == [("p-oliver", "full", 99, 40)], (
+            f"collision not resolved to canonical-wins: {rows}"
+        )
 
 
 # ---------------------------------------------------------------------------

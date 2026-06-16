@@ -31,7 +31,6 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
-import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -145,7 +144,8 @@ class ScoutingLoader:
             from src.db.player_dedup import dedup_team_players
 
             dedup_team_players(
-                self._db, tid, db_season_id, manage_transaction=False
+                self._db, tid, db_season_id,
+                manage_transaction=False, recompute_aggregates=False,
             )
         except Exception:  # noqa: BLE001
             logger.error(
@@ -156,6 +156,9 @@ class ScoutingLoader:
                 exc_info=True,
             )
 
+        # Canonical recompute runs exactly once per load (the embedded dedup
+        # above suppresses its own recompute via recompute_aggregates=False),
+        # committed atomically with the dedup sweep below.
         self._compute_season_aggregates(tid, db_season_id)
         self._db.commit()
         logger.info(
@@ -214,13 +217,18 @@ class ScoutingLoader:
 
         try:
             from src.db.player_dedup import dedup_team_players
-            dedup_team_players(self._db, team_id, db_season_id, manage_transaction=False)
+            dedup_team_players(
+                self._db, team_id, db_season_id,
+                manage_transaction=False, recompute_aggregates=False,
+            )
         except Exception:  # noqa: BLE001
             logger.error(
                 "Post-boxscore dedup sweep failed for team_id=%d season=%s; continuing with aggregation",
                 team_id, db_season_id, exc_info=True,
             )
 
+        # Canonical recompute runs exactly once per load (the embedded dedup
+        # above suppresses its own recompute via recompute_aggregates=False).
         self._compute_season_aggregates(team_id, db_season_id)
         self._db.commit()
         logger.info(
@@ -466,33 +474,26 @@ class ScoutingLoader:
     ) -> LoadResult:
         """Load boxscores from in-memory data via ``game_loader``.
 
-        GameLoader.load_file() requires a filesystem path.  We write each
-        boxscore to a temporary file, let GameLoader process it, then clean up.
+        Each in-memory boxscore dict is passed directly to
+        ``GameLoader.load_payload`` (no temp files); ``load_payload`` commits
+        per call exactly as ``load_file`` did.
         """
         name_index = opponent_name_index or {}
         total = LoadResult()
-        # Single TemporaryDirectory wraps the loop -- per-iteration temp files
-        # are written inside it and cleaned up automatically when the context
-        # exits.  Mirrors the pattern in src/reports/generator.py
-        # _crawl_and_load_plays.
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            tmp_root = Path(tmp_dir)
-            for game_stream_id, boxscore_data in sorted(boxscores.items()):
-                summary = games_index.get(game_stream_id)
-                if summary is None:
-                    logger.warning(
-                        "No games entry for game_stream_id=%s; skipping boxscore",
-                        game_stream_id,
-                    )
-                    total.skipped += 1
-                    continue
-                opponent_name = name_index.get(game_stream_id)
-                tmp_path = tmp_root / f"{game_stream_id}.json"
-                tmp_path.write_text(json.dumps(boxscore_data), encoding="utf-8")
-                result = game_loader.load_file(tmp_path, summary, opponent_name=opponent_name)
-                total.loaded += result.loaded
-                total.skipped += result.skipped
-                total.errors += result.errors
+        for game_stream_id, boxscore_data in sorted(boxscores.items()):
+            summary = games_index.get(game_stream_id)
+            if summary is None:
+                logger.warning(
+                    "No games entry for game_stream_id=%s; skipping boxscore",
+                    game_stream_id,
+                )
+                total.skipped += 1
+                continue
+            opponent_name = name_index.get(game_stream_id)
+            result = game_loader.load_payload(boxscore_data, summary, opponent_name=opponent_name)
+            total.loaded += result.loaded
+            total.skipped += result.skipped
+            total.errors += result.errors
         return total
 
     # ------------------------------------------------------------------
@@ -641,162 +642,19 @@ class ScoutingLoader:
     # ------------------------------------------------------------------
 
     def _compute_season_aggregates(self, team_id: int, season_id: str) -> None:
-        """Compute and upsert season aggregate stats from per-game rows.
+        """Recompute season aggregate stats from per-game rows.
 
-        Delegates to batting and pitching sub-methods.  Rate stats (AVG, OBP,
-        ERA, WHIP) are NOT stored -- they are computed at display time.
+        Thin signature-preserving delegate (E-237-03, TN-11) to the module-level
+        canonical recompute in ``src.db.season_aggregates``.  Rate stats (AVG,
+        OBP, ERA, WHIP) are NOT stored -- they are computed at display time.
 
         Args:
             team_id: INTEGER PK of the scouted team.
             season_id: Season slug.
         """
-        n_batting = self._compute_batting_aggregates(team_id, season_id)
-        n_pitching = self._compute_pitching_aggregates(team_id, season_id)
-        logger.info(
-            "Season aggregates computed: %d batting, %d pitching rows for team=%d season=%s.",
-            n_batting, n_pitching, team_id, season_id,
-        )
+        from src.db.season_aggregates import canonical_recompute
 
-    def _compute_batting_aggregates(self, team_id: int, season_id: str) -> int:
-        """Sum game batting rows into player_season_batting; return player count.
-
-        Filters by ``perspective_team_id = team_id`` to prevent double-counting
-        when the same game has been loaded from multiple perspectives.  In the
-        scouting context, ``team_id == perspective_team_id`` (scouting loads
-        from the scouted team's perspective).
-
-        NOTE: Other query sites that aggregate per-game stat rows (e.g.
-        ``src/api/db.py``, ``src/db/player_dedup.py``) may also need
-        perspective filtering -- assess when those surfaces are updated.
-        """
-        rows = self._db.execute(
-            """
-            SELECT
-                pgb.player_id,
-                COUNT(*)         AS games_tracked,
-                SUM(pgb.ab)      AS ab,
-                SUM(pgb.h)       AS h,
-                SUM(pgb.doubles) AS doubles,
-                SUM(pgb.triples) AS triples,
-                SUM(pgb.hr)      AS hr,
-                SUM(pgb.rbi)     AS rbi,
-                SUM(pgb.r)       AS r,
-                SUM(pgb.bb)      AS bb,
-                SUM(pgb.so)      AS so,
-                SUM(pgb.sb)      AS sb,
-                SUM(pgb.tb)      AS tb,
-                SUM(pgb.hbp)     AS hbp,
-                SUM(pgb.shf)     AS shf,
-                SUM(pgb.cs)      AS cs
-            FROM player_game_batting pgb
-            JOIN games g ON pgb.game_id = g.game_id
-            WHERE pgb.team_id = ? AND g.season_id = ?
-              AND pgb.perspective_team_id = ?
-            GROUP BY pgb.player_id
-            """,
-            (team_id, season_id, team_id),
-        ).fetchall()
-        for (player_id, games_tracked,
-             ab, h, doubles, triples, hr, rbi, r, bb, so, sb,
-             tb, hbp, shf, cs) in rows:
-            self._db.execute(
-                """
-                INSERT INTO player_season_batting
-                    (player_id, team_id, season_id,
-                     gp, games_tracked, ab, h, doubles, triples, hr, rbi, r, bb, so, sb,
-                     tb, hbp, shf, cs)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(player_id, team_id, season_id) DO UPDATE SET
-                    gp            = excluded.gp,
-                    games_tracked = excluded.games_tracked,
-                    ab            = excluded.ab,
-                    h             = excluded.h,
-                    doubles       = excluded.doubles,
-                    triples       = excluded.triples,
-                    hr            = excluded.hr,
-                    rbi           = excluded.rbi,
-                    r             = excluded.r,
-                    bb            = excluded.bb,
-                    so            = excluded.so,
-                    sb            = excluded.sb,
-                    tb            = excluded.tb,
-                    hbp           = excluded.hbp,
-                    shf           = excluded.shf,
-                    cs            = excluded.cs
-                """,
-                (player_id, team_id, season_id, games_tracked, games_tracked,
-                 ab, h, doubles, triples, hr, rbi, r, bb, so, sb,
-                 tb, hbp, shf, cs),
-            )
-        return len(rows)
-
-    def _compute_pitching_aggregates(self, team_id: int, season_id: str) -> int:
-        """Sum game pitching rows into player_season_pitching; return player count.
-
-        Filters by ``perspective_team_id = team_id`` to prevent double-counting
-        when the same game has been loaded from multiple perspectives.
-
-        Note: ``hr`` is excluded -- ``player_game_pitching`` does not store HR
-        allowed (not present in the boxscore pitching extras per the schema).
-        """
-        rows = self._db.execute(
-            """
-            SELECT
-                pgp.player_id,
-                COUNT(*)              AS games_tracked,
-                SUM(pgp.ip_outs)      AS ip_outs,
-                SUM(pgp.h)            AS h,
-                SUM(pgp.r)            AS r,
-                SUM(pgp.er)           AS er,
-                SUM(pgp.bb)           AS bb,
-                SUM(pgp.so)           AS so,
-                SUM(pgp.wp)           AS wp,
-                SUM(pgp.hbp)          AS hbp,
-                SUM(pgp.pitches)      AS pitches,
-                SUM(pgp.total_strikes) AS total_strikes,
-                SUM(pgp.bf)           AS bf,
-                CASE WHEN MAX(pgp.appearance_order) IS NULL THEN NULL
-                     ELSE SUM(CASE WHEN pgp.appearance_order = 1 THEN 1 ELSE 0 END)
-                END AS gs
-            FROM player_game_pitching pgp
-            JOIN games g ON pgp.game_id = g.game_id
-            WHERE pgp.team_id = ? AND g.season_id = ?
-              AND pgp.perspective_team_id = ?
-            GROUP BY pgp.player_id
-            """,
-            (team_id, season_id, team_id),
-        ).fetchall()
-        for (player_id, games_tracked,
-             ip_outs, h, r, er, bb, so,
-             wp, hbp, pitches, total_strikes, bf, gs) in rows:
-            self._db.execute(
-                """
-                INSERT INTO player_season_pitching
-                    (player_id, team_id, season_id,
-                     gp_pitcher, games_tracked, ip_outs, h, r, er, bb, so,
-                     wp, hbp, pitches, total_strikes, bf, gs)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(player_id, team_id, season_id) DO UPDATE SET
-                    gp_pitcher    = excluded.gp_pitcher,
-                    games_tracked = excluded.games_tracked,
-                    ip_outs       = excluded.ip_outs,
-                    h             = excluded.h,
-                    r             = excluded.r,
-                    er            = excluded.er,
-                    bb            = excluded.bb,
-                    so            = excluded.so,
-                    wp            = excluded.wp,
-                    hbp           = excluded.hbp,
-                    pitches       = excluded.pitches,
-                    total_strikes = excluded.total_strikes,
-                    bf            = excluded.bf,
-                    gs            = excluded.gs
-                """,
-                (player_id, team_id, season_id, games_tracked, games_tracked,
-                 ip_outs, h, r, er, bb, so,
-                 wp, hbp, pitches, total_strikes, bf, gs),
-            )
-        return len(rows)
+        canonical_recompute(self._db, team_id, season_id)
 
     # ------------------------------------------------------------------
     # FK prerequisite helpers

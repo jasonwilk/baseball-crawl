@@ -1002,6 +1002,143 @@ def test_idempotency_check_includes_perspective(
     assert result_b.skipped == 0
 
 
+# ---------------------------------------------------------------------------
+# E-237-01: Direct load_payload entry point (AC-5)
+# ---------------------------------------------------------------------------
+
+
+def _setup_independent_db(
+    tmp_path: Path, name: str
+) -> tuple[sqlite3.Connection, TeamRef, TeamRef]:
+    """Create a fresh migrated DB with member + opponent teams and two games.
+
+    Insertion order matches the ``team_ref`` / ``opponent_ref`` fixtures so the
+    member team is id 1 and the opponent id 2 in every independent DB, making
+    cross-DB row comparison meaningful.
+    """
+    db_path = tmp_path / f"{name}.db"
+    run_migrations(db_path=db_path)
+    conn = sqlite3.connect(str(db_path))
+    conn.execute("PRAGMA foreign_keys=ON;")
+
+    conn.execute(
+        "INSERT INTO teams (name, membership_type, gc_uuid, public_id, is_active) "
+        "VALUES (?, 'member', ?, ?, 1)",
+        ("LSB Varsity", _GC_UUID, _PUBLIC_ID),
+    )
+    member_id = conn.execute(
+        "SELECT id FROM teams WHERE gc_uuid = ?", (_GC_UUID,)
+    ).fetchone()[0]
+    conn.execute(
+        "INSERT INTO teams (name, membership_type, is_active) "
+        "VALUES (?, 'tracked', 1)",
+        ("Opponent Wolves",),
+    )
+    opp_id = conn.execute(
+        "SELECT id FROM teams WHERE name = ?", ("Opponent Wolves",)
+    ).fetchone()[0]
+    conn.commit()
+
+    member_ref = TeamRef(id=member_id, gc_uuid=_GC_UUID, public_id=_PUBLIC_ID)
+    opp_ref = TeamRef(id=opp_id)
+
+    _insert_season(conn)
+    _insert_game(conn, _GAME_ID_1, member_ref.id, opp_ref.id)
+    _insert_game(conn, _GAME_ID_2, member_ref.id, opp_ref.id)
+    return conn, member_ref, opp_ref
+
+
+def _dump_plays(conn: sqlite3.Connection) -> list[tuple]:
+    """Dump content-bearing plays columns (excluding surrogate id), ordered."""
+    return conn.execute(
+        """
+        SELECT game_id, play_order, inning, half, season_id, batting_team_id,
+               batter_id, pitcher_id, outcome, pitch_count,
+               is_first_pitch_strike, is_qab, home_score, away_score,
+               did_score_change, outs_after, did_outs_change, perspective_team_id
+        FROM plays
+        ORDER BY game_id, play_order
+        """
+    ).fetchall()
+
+
+def _dump_events(conn: sqlite3.Connection) -> list[tuple]:
+    """Dump play_events joined to their game/play_order, ordered deterministically."""
+    return conn.execute(
+        """
+        SELECT p.game_id, p.play_order, pe.event_order, pe.event_type,
+               pe.pitch_result, pe.is_first_pitch, pe.raw_template
+        FROM play_events pe
+        JOIN plays p ON pe.play_id = p.id
+        ORDER BY p.game_id, p.play_order, pe.event_order
+        """
+    ).fetchall()
+
+
+def test_load_payload_matches_file_path(tmp_path: Path) -> None:
+    """AC-5: load_payload produces identical LoadResult + DB rows vs load_all.
+
+    Loads the same plays data through both entry points into two independent
+    databases and asserts the LoadResult tallies and the written plays /
+    play_events rows are identical.  Also exercises the empty-entry skip.
+    """
+    plays_a = _make_plays_json()
+    plays_b = _make_multi_play_json()
+
+    # File path via load_all.
+    conn_file, ref_file, _ = _setup_independent_db(tmp_path, "file")
+    team_dir = tmp_path / "file_team"
+    _write_plays_file(team_dir, _GAME_ID_1, plays_a)
+    _write_plays_file(team_dir, _GAME_ID_2, plays_b)
+    result_file = PlaysLoader(conn_file, owned_team_ref=ref_file).load_all(team_dir)
+
+    # Payload path via load_payload (with an extra empty entry to skip).
+    conn_pl, ref_pl, _ = _setup_independent_db(tmp_path, "payload")
+    payload = {
+        _GAME_ID_1: plays_a,
+        _GAME_ID_2: plays_b,
+        "game-empty-entry-skip": {},  # falsy -> skipped, no file equivalent
+    }
+    result_pl = PlaysLoader(conn_pl, owned_team_ref=ref_pl).load_payload(payload)
+
+    # Identical LoadResult tallies.
+    assert (result_pl.loaded, result_pl.skipped, result_pl.errors) == (
+        result_file.loaded,
+        result_file.skipped,
+        result_file.errors,
+    )
+    assert result_file.loaded == 3  # 1 play (game 1) + 2 plays (game 2)
+    assert result_file.errors == 0
+
+    # Identical plays + play_events rows.
+    assert _dump_plays(conn_pl) == _dump_plays(conn_file)
+    assert _dump_events(conn_pl) == _dump_events(conn_file)
+
+    # AC-4: every payload-written plays row carries perspective_team_id = ref.id.
+    perspectives = conn_pl.execute(
+        "SELECT DISTINCT perspective_team_id FROM plays"
+    ).fetchall()
+    assert perspectives == [(ref_pl.id,)]
+
+    conn_file.close()
+    conn_pl.close()
+
+
+def test_load_payload_iteration_order_is_sorted(tmp_path: Path) -> None:
+    """AC-2: load_payload iterates entries in sorted game_id order."""
+    conn, ref, _ = _setup_independent_db(tmp_path, "order")
+    # Provide entries in reverse key order; sorted iteration must still load both.
+    payload = {
+        _GAME_ID_2: _make_plays_json(batter_id=_BATTER_2),
+        _GAME_ID_1: _make_plays_json(),
+    }
+    result = PlaysLoader(conn, owned_team_ref=ref).load_payload(payload)
+    assert result.loaded == 2
+    assert result.skipped == 0
+    assert result.errors == 0
+    conn.close()
+
+
 def test_load_all_perspective_uses_member_team_pk(
     db: sqlite3.Connection,
     loader: PlaysLoader,

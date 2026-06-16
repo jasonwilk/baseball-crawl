@@ -4,7 +4,7 @@
 [E-237: Payload-First Loaders + Aggregate Integrity](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, exactly one canonical boxscore_only season-aggregate recompute exists. Both `load_team` aggregate call sites (in-memory and disk) and the player-dedup path route through it, so a merged player and a non-merged player produce the same deterministic **superset** column population for the same per-game rows — the hybrid-row non-determinism is gone. No report stat value changes; goldens and the parity fixture are unchanged (parity checks only ScoutingLoader's subset, which the superset preserves).

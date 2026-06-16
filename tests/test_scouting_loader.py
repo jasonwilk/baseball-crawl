@@ -538,8 +538,7 @@ def test_aggregate_isolated_per_season(
     db.commit()
 
     # -- Run aggregation for 2026-spring only (INTEGER PK) --------------------
-    loader._compute_batting_aggregates(own_pk, season_b)
-    loader._compute_pitching_aggregates(own_pk, season_b)
+    loader._compute_season_aggregates(own_pk, season_b)
     db.commit()
 
     # -- AC-1: batting aggregate for 2026-spring contains only 2026 game data --
@@ -654,8 +653,7 @@ def test_aggregate_isolated_per_team(
     db.commit()
 
     # -- Run aggregation for own team only ------------------------------------
-    loader._compute_batting_aggregates(own_pk, season_id)
-    loader._compute_pitching_aggregates(own_pk, season_id)
+    loader._compute_season_aggregates(own_pk, season_id)
     db.commit()
 
     # -- Own team batting: should reflect _PLAYER_1 only (ab=3, h=2) ----------
@@ -786,7 +784,7 @@ def test_batting_aggregates_include_new_columns(
     )
     db.commit()
 
-    loader._compute_batting_aggregates(own_pk, season_id)
+    loader._compute_season_aggregates(own_pk, season_id)
     db.commit()
 
     row = db.execute(
@@ -848,7 +846,7 @@ def test_batting_aggregate_shf_sums_when_present(
     )
     db.commit()
 
-    loader._compute_batting_aggregates(own_pk, season_id)
+    loader._compute_season_aggregates(own_pk, season_id)
     db.commit()
 
     row = db.execute(
@@ -913,7 +911,7 @@ def test_pitching_aggregates_include_new_columns(
     )
     db.commit()
 
-    loader._compute_pitching_aggregates(own_pk, season_id)
+    loader._compute_season_aggregates(own_pk, season_id)
     db.commit()
 
     # _PLAYER_1 row: all new extras should be populated
@@ -993,8 +991,7 @@ def test_aggregate_idempotent_with_updated_game_data(
     )
     db.commit()
 
-    loader._compute_batting_aggregates(own_pk, season_id)
-    loader._compute_pitching_aggregates(own_pk, season_id)
+    loader._compute_season_aggregates(own_pk, season_id)
     db.commit()
 
     # Verify first-run values.
@@ -1026,8 +1023,7 @@ def test_aggregate_idempotent_with_updated_game_data(
     db.commit()
 
     # -- Second run: aggregates should reflect updated values --
-    loader._compute_batting_aggregates(own_pk, season_id)
-    loader._compute_pitching_aggregates(own_pk, season_id)
+    loader._compute_season_aggregates(own_pk, season_id)
     db.commit()
 
     bat_v2 = db.execute(
@@ -1341,7 +1337,7 @@ def test_usssa_team_gets_correct_db_season_id(
 def test_pitching_aggregates_compute_gs_from_appearance_order(
     loader: ScoutingLoader, db: sqlite3.Connection,
 ) -> None:
-    """AC-1: _compute_pitching_aggregates counts appearance_order=1 as GS."""
+    """AC-1: _compute_season_aggregates counts appearance_order=1 as GS."""
     season_id = "2025-gs-test"
     db.execute(
         "INSERT OR IGNORE INTO seasons (season_id, name, season_type, year) VALUES (?, ?, ?, ?)",
@@ -1403,7 +1399,7 @@ def test_pitching_aggregates_compute_gs_from_appearance_order(
     )
     db.commit()
 
-    loader._compute_pitching_aggregates(own_pk, season_id)
+    loader._compute_season_aggregates(own_pk, season_id)
     db.commit()
 
     # PLAYER_1: started 2 games, relieved 1 → gs=2
@@ -1457,7 +1453,7 @@ def test_pitching_aggregates_gs_null_when_all_appearance_order_null(
         )
     db.commit()
 
-    loader._compute_pitching_aggregates(own_pk, season_id)
+    loader._compute_season_aggregates(own_pk, season_id)
     db.commit()
 
     row = db.execute(
@@ -1515,7 +1511,7 @@ def test_batting_aggregates_filter_by_perspective(
     db.commit()
 
     loader = ScoutingLoader(db)
-    loader._compute_batting_aggregates(own_pk, season_id)
+    loader._compute_season_aggregates(own_pk, season_id)
     db.commit()
 
     row = db.execute(
@@ -1567,7 +1563,7 @@ def test_pitching_aggregates_filter_by_perspective(
     db.commit()
 
     loader = ScoutingLoader(db)
-    loader._compute_pitching_aggregates(own_pk, season_id)
+    loader._compute_season_aggregates(own_pk, season_id)
     db.commit()
 
     row = db.execute(
