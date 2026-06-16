@@ -1,7 +1,9 @@
 # IDEA-035: Opponent Page Redesign
 
 ## Status
-`CANDIDATE`
+`DISCARDED`
+
+**DISCARDED (2026-06-16):** Redesigns the `/admin/opponents` management page around the team_opponents/membership model — i.e., the tracked-opponent management surface and the opponent-discovery flow, both now wound down. `docs/ROADMAP.md` §7 de-scopes "tracked/followed opponent management as a product surface" (no standing opponent registry UI); opponent discovery is quarantined (`.claude/rules/quarantine.md`). Reports are generated on demand for any public_id — no opponent registry UI needed. No residual reports-first value.
 
 ## Summary
 Redesign the `/admin/opponents` page for the new team model. E-100 kept the opponent page as-is, only adding opponent counts with filtered links to the team list.

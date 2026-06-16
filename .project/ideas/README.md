@@ -51,16 +51,16 @@ Review this list every 90 days, or when completing an epic. Ask:
 | [IDEA-030](IDEA-030-fielding-catcher-pitch-type-tables.md) | Fielding, Catcher, and Pitch Type Tables | CANDIDATE | 2026-06-14 |
 | [IDEA-031](IDEA-031-stat-blending-logic.md) | Stat Blending Logic | CANDIDATE | 2026-06-14 |
 | [IDEA-032](IDEA-032-multi-credential-per-program.md) | Multi-Credential per Program | CANDIDATE | 2026-06-14 |
-| [IDEA-033](IDEA-033-bulk-team-import.md) | Bulk Team Import from /me/teams | CANDIDATE | 2026-06-14 |
+| [IDEA-033](IDEA-033-bulk-team-import.md) | Bulk Team Import from /me/teams | DISCARDED | 2026-06-16 -- member-team sync quarantined + member-team season-management product de-scoped (reports-first reframe) |
 | [IDEA-034](IDEA-034-program-crud-admin.md) | Program CRUD Admin Page | CANDIDATE | 2026-06-14 |
-| [IDEA-035](IDEA-035-opponent-page-redesign.md) | Opponent Page Redesign | CANDIDATE | 2026-06-14 |
-| [IDEA-036](IDEA-036-dashboard-program-awareness.md) | Dashboard Program Awareness | CANDIDATE | 2026-06-14 |
+| [IDEA-035](IDEA-035-opponent-page-redesign.md) | Opponent Page Redesign | DISCARDED | 2026-06-16 -- opponent discovery quarantined + tracked-opponent registry de-scoped (reports-first reframe) |
+| [IDEA-036](IDEA-036-dashboard-program-awareness.md) | Dashboard Program Awareness | DISCARDED | 2026-06-16 -- dashboard quarantined + multi-program de-scoped (reports-first reframe) |
 | [IDEA-037](IDEA-037-scouting-report-redesign.md) | Scouting Report Redesign | CANDIDATE | 2026-06-14 |
 | [IDEA-038](IDEA-038-query-time-splits-and-streaks.md) | Query-Time Splits and Streaks | CANDIDATE | 2026-06-14 |
 | [IDEA-039](IDEA-039-game-metadata-enrichment.md) | Game Metadata Enrichment | CANDIDATE | 2026-06-14 |
 | [IDEA-040](IDEA-040-optimistic-pitching-column-audit.md) | Optimistic Pitching Column API Audit | CANDIDATE | 2026-06-14 |
 | [IDEA-041](IDEA-041-play-by-play-stat-compilation.md) | Play-by-Play Stat Compilation Pipeline | CANDIDATE | 2026-06-14 |
-| [IDEA-042](IDEA-042-bulk-create-opponents-missing-links.md) | bulk_create_opponents Should Create team_opponents Links | CANDIDATE | 2026-06-15 |
+| [IDEA-042](IDEA-042-bulk-create-opponents-missing-links.md) | bulk_create_opponents Should Create team_opponents Links | DISCARDED | 2026-06-16 -- opponent discovery + dashboard quarantined; reports need no team_opponents link |
 | [IDEA-043](IDEA-043-fuzzy-duplicate-detection.md) | Fuzzy Duplicate Team Detection | CANDIDATE | 2026-06-23 |
 | [IDEA-044](IDEA-044-prevent-duplicate-team-creation.md) | Prevent Duplicate Team Creation | PROMOTED | 2026-03-27 -- promoted to E-167 |
 | [IDEA-045](IDEA-045-worktree-divergence-detection.md) | Detect Main-Branch Divergence Before Epic Closure Patch | CANDIDATE | 2026-06-24 |
@@ -70,7 +70,7 @@ Review this list every 90 days, or when completing an epic. Ask:
 | [IDEA-049](IDEA-049-spray-chart-pull-center-oppo.md) | Pull/Center/Oppo Tendency Summary on Spray Charts | CANDIDATE | 2026-06-25 |
 | [IDEA-050](IDEA-050-spray-chart-hot-cold-zones.md) | Count Overlay / Hot-Cold Zones on Spray Charts | CANDIDATE | 2026-06-25 |
 | [IDEA-051](IDEA-051-spray-chart-title-stats.md) | Title with Stats on Spray Charts | CANDIDATE | 2026-06-25 |
-| [IDEA-052](IDEA-052-familiar-faces-indicator.md) | Familiar Faces Indicator on Opponent Rosters | CANDIDATE | 2026-06-26 |
+| [IDEA-052](IDEA-052-familiar-faces-indicator.md) | Familiar Faces Indicator on Opponent Rosters | DISCARDED | 2026-06-16 -- depends on cross-team player identity + longitudinal tracking (permanent §7 non-goals) |
 | [IDEA-053](IDEA-053-opponent-workflow-fix.md) | Fix Opponent Scouting Workflow End-to-End | PROMOTED | 2026-03-28 -- delivered by E-173 |
 | [IDEA-054](IDEA-054-worktree-guard-cross-contamination.md) | Worktree Guard Should Prevent Cross-Epic Contamination | CANDIDATE | 2026-06-26 |
 | [IDEA-055](IDEA-055-auto-sync-and-experience-polish.md) | Auto-Sync and Experience Polish | PROMOTED | 2026-06-27 |
@@ -82,7 +82,7 @@ Review this list every 90 days, or when completing an epic. Ask:
 | [IDEA-061](IDEA-061-season-id-from-team-context.md) | Derive season_id from Team Context, Not Filesystem Path | PROMOTED | 2026-06-30 | → E-197 |
 | [IDEA-062](IDEA-062-plays-boxscore-reconciliation.md) | Plays-vs-Boxscore Reconciliation Engine | PROMOTED | 2026-04-01 |
 | [IDEA-063](IDEA-063-dump-game-skill.md) | /dump-game Diagnostic Skill | CANDIDATE | 2026-04-02 |
-| [IDEA-064](IDEA-064-dashboard-report-parity.md) | Dashboard-Report Feature Parity | CANDIDATE | 2026-07-03 |
+| [IDEA-064](IDEA-064-dashboard-report-parity.md) | Dashboard-Report Feature Parity | DISCARDED | 2026-06-16 -- dashboard quarantined; reports are the sole forward scouting surface |
 | [IDEA-065](IDEA-065-llm-eval-harness.md) | LLM Starter Prediction Evaluation Harness | CANDIDATE | 2026-07-03 |
 | [IDEA-066](IDEA-066-league-level-detection.md) | League/Level Detection for Pitch Rules | PROMOTED | 2026-07-06 | -> E-218 |
 | [IDEA-067](IDEA-067-catcher-pitcher-restriction.md) | Catcher-Pitcher Restriction (NSAA) | CANDIDATE | 2026-07-06 |

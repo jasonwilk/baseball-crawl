@@ -1,7 +1,9 @@
 # IDEA-036: Dashboard Program Awareness
 
 ## Status
-`CANDIDATE`
+`DISCARDED`
+
+**DISCARDED (2026-06-16):** Adds program-based navigation/filtering to the coaching dashboard — a quarantined surface (see `.claude/rules/quarantine.md`). Also depends on multi-program team management, which the reports-first reframe de-scopes (`docs/ROADMAP.md` §7: member-team season-management product de-scoped; product is LSB reports-first). No residual reports-first value.
 
 ## Summary
 Add program-based navigation or filtering to the coaching dashboard. E-100 updated the dashboard for INTEGER PK compatibility but did not add program awareness — the dashboard shows teams without program context.

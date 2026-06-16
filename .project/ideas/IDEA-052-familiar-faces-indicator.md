@@ -1,7 +1,9 @@
 # IDEA-052: Familiar Faces Indicator on Opponent Rosters
 
 ## Status
-`CANDIDATE`
+`DISCARDED`
+
+**DISCARDED (2026-06-16):** Core value depends entirely on cross-team player identity (`athlete_profile_id`/E-104) and longitudinal/cross-season player tracking — the #1 and #2 permanently de-scoped non-goals in `docs/ROADMAP.md` §7 (cross-team player identity; cross-season/multi-season/longitudinal anything). Also depends on the quarantined opponent-scouting flow. No residual reports-first value.
 
 ## Summary
 Show a "familiar faces" indicator on opponent scouting pages when an opponent roster includes players the coach has seen before -- either from prior seasons on other teams or from earlier matchups this season. Coaches naturally track players they've faced; surfacing this digitally saves pre-game prep time.

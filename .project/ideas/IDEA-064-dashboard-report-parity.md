@@ -1,7 +1,9 @@
 # IDEA-064: Dashboard-Report Feature Parity
 
 ## Status
-`CANDIDATE`
+`DISCARDED`
+
+**DISCARDED (2026-06-16):** Core value is making the dashboard a self-sufficient scouting surface by porting report data into it. The dashboard is now a quarantined surface (deprecated/unmaintained/parity-excluded/closed to new feature work — see `.claude/rules/quarantine.md`) and the reports-first reframe makes reports the sole forward scouting surface. The data already lives in the reports flow; there is no residual reports-first value in wiring it into a surface slated for removal. See `docs/ROADMAP.md` §7 (member-team season-management product de-scoped).
 
 ## Summary
 The dashboard opponent detail page is missing several data points that standalone reports already display. A feature parity audit (2026-04-04) identified 7 gaps where reports have data the dashboard lacks. The most significant gaps are plays-derived pitching and batting stats (FPS%, QAB%, P/BF, P/PA) -- FPS% is explicitly called out as a coaching priority ("first stat coaches look at").

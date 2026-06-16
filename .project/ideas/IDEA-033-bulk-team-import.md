@@ -1,7 +1,9 @@
 # IDEA-033: Bulk Team Import from /me/teams
 
 ## Status
-`CANDIDATE`
+`DISCARDED`
+
+**DISCARDED (2026-06-16):** Batch-onboards the operator's followed/managed teams into the system as members — the entire value depends on member-team sync (quarantined, `.claude/rules/quarantine.md`) and the member-team season-management product (`docs/ROADMAP.md` §7 non-goal). The reports-first product never onboards or tracks teams; `bb report generate` takes a public_id URL on demand. No residual reports-first value.
 
 ## Summary
 Batch-onboard all teams from the authenticated user's GC account via the `/me/teams` endpoint. Currently teams are added one at a time through the admin UI's add-team flow (paste URL → confirm).
