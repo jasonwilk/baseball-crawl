@@ -1,8 +1,22 @@
 # API Exploration Findings
 
-Last updated: 2026-03-16
+Last updated: 2026-06-17
 
 Detailed findings from proxy sessions and API exploration beyond the core credential and endpoint basics.
+
+## 2026-06-17 — Authenticated schedule: FAN-level access + future games CONFIRMED (E-240 probe)
+
+Read-only `GET /teams/{gc_uuid}/schedule`, Accept `event:list+json; version=0.2.0`, against MBA Top Dogg Gold 14U (`b793fbd1-6f5a-4433-8dd7-b5878babcd77`) — a team the operator FOLLOWS but does NOT manage. **HTTP 200** (not 403): fan/follower-level access to the authenticated schedule endpoint is confirmed — previously only manager-level was proven (all prior captures were own/admin teams).
+
+- 251 schedule items, 62 game events, **6 future-dated games** (after 2026-06-17, out to 2026-07-02) — the endpoint carries forward-looking games, not just historical-scheduled. Status dist: 56 scheduled / 6 canceled.
+- All 62/62 games carry `pregame_data`; on all 6 future games `opponent_id` + `opponent_name` are non-null, `home_away` null. Key set: `['game_id','home_away','id','lineup_id','opponent_id','opponent_name']`.
+- **`progenitor_team_id` is NOT a `pregame_data` key** (absent on all future games) → the `opponent_id (root_team_id) → opponents-registry → progenitor_team_id` join is mandatory; the schedule cannot shortcut to a canonical UUID. Validates the E-240 resolution-ladder design.
+- Single-call sample (one team) — strong positive but below my 3-call "stable" bar; the E-240 implementation run will be the 2nd/3rd confirmation. **Doc update still pending**: `docs/api/endpoints/get-teams-team_id-schedule.md` needs an Access Level section + future-games note + `last_confirmed` bump (recommended as E-240 story scope, not yet made).
+
+### F4 follow-up (same day): opponents registry INCLUDES scheduled-but-unplayed opponents
+Cross-referenced the 6 future-game `opponent_id`s against the same team's `GET /teams/{gc_uuid}/opponents` (paginated, `opponent_team:list+json; version=0.0.0`, 59 records, one page). **6/6 future opponents PRESENT as `root_team_id` in the registry, 0 absent.** Corrects the endpoint doc's "has played against" phrasing — GC populates `root_team_id` at SCHEDULING time, so the registry join (rung a of the E-240 resolution ladder) reliably has a target for UPCOMING games, not just historical ones. Of the 6: 3 carried `progenitor_team_id` (rung-a auto-resolvable), 3 key-absent (manual entry). Rung (a) hit rate 3/6 ≈ consistent with the roadmap's 64% aggregate — the estimate does NOT collapse for upcoming opponents.
+- **Rung-(b) gap surfaced**: 2 of the 3 manual entries were tournament/event names ("Slumpbuster", "Prep Basebal KC Challenge") that the placeholder pattern set (`TBD|TBA|Winner|Loser|Seed|Game \d|Pool|Bracket|Tournament|Invitational|Classic|Showcase`) does NOT catch → they fall to search (0 hits, unindexed) → operator queue. Tournament-heavy travel schedules push more opponents to the queue than the progenitor-present rate alone implies — correct behavior (unknown bracket opponent), but worth acknowledging in operator-burden framing. Typos in registry names ("Prep Basebal**l**", lowercased "braves") corroborate the gc-uuid-bridge warning that typed `opponent_name` is the least-reliable field.
+- `GET /teams/{id}` reverse-bridge (rung a) Accept pin confirmed: `application/vnd.gc.com.team+json; version=0.10.0` (distinct media type from `/me/teams`' `team:list+json; version=0.10.0`). E-240 TN-4's pin list omitted this — flagged as review finding F5.
 
 ## 2026-03-12 Key Findings (session 2026-03-12_034919, MOBILE)
 
