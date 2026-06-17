@@ -240,6 +240,8 @@ Count the total lines in the assembled diff content:
 | 5,000 to 10,000 | Warn: "The diff is approximately N lines. This is large for a single Codex review -- results may be less focused. Proceeding with assembly." Then proceed |
 | Over 10,000 | Refuse: "The diff is approximately N lines, which exceeds the 10,000-line limit for a single review prompt. Suggestions: narrow the scope to specific directories or files, review a single commit instead of the full diff, or split changes across multiple review prompts." Stop |
 
+**Large removal/refactor epics**: when the size comes from many DELETED files (a removal epic), re-scope the diff to added/copied/modified/renamed files only (`git diff main --diff-filter=ACMR`) — pure deletions have no content to review and can dominate the byte/line count (E-239: a ~2.57M-char full diff dropped to ~445K under ACMR, clearing Codex's input limit). This is a per-run remedy for oversized removal diffs; do not change the script's default `git diff main`, which keeps deletion signal for normal reviews.
+
 ### Step 3: Assemble the lean prompt
 
 Build the prompt matching the format used by `scripts/codex-review.sh`. The rubric content is **embedded directly** in the prompt (not referenced by path) so that codex in ephemeral mode can access it without repository file access:

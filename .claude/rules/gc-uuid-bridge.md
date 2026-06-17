@@ -40,19 +40,19 @@ The bridge also runs in reverse. When you have a team's `gc_uuid` (UUID) but nee
 - **Use `GET /teams/{gc_uuid}`** -- it returns the `public_id` directly. Verified 2026-06-12 to work for **non-managed** teams (you need only follow/fan access, not management).
 - **Do NOT use `GET /teams/{team_id}/public-team-profile-id`** for non-managed teams -- it returns **403** unless you manage the team. It is the wrong tool for opponent resolution.
 
-This reverse path is the rung-(a) auto-resolution mechanism in the opponent-scouting and (future) scheduled-report flows: an authenticated opponents-list entry carrying a `progenitor_team_id` (its `gc_uuid`) resolves to a `public_id` via `GET /teams/{progenitor_team_id}`, which then feeds the public scouting pipeline.
+This reverse path is the rung-(a) auto-resolution mechanism in the report-generation and (future) scheduled-report flows: an authenticated opponents-list entry carrying a `progenitor_team_id` (its `gc_uuid`) resolves to a `public_id` via `GET /teams/{progenitor_team_id}`, which then feeds the public scouting pipeline.
 
-## BANNED PATH: `resolve_unlinked()` follow → bridge → unfollow
+## BANNED PATH: the follow → bridge → unfollow resolution pattern
 
-**Do NOT use or extend `resolve_unlinked()` / `_follow_bridge_unfollow()`** in `src/gamechanger/crawlers/opponent_resolver.py`. This is the **highest-priority quarantine ban** (see `.claude/rules/quarantine.md`).
+**Do NOT reintroduce the follow → bridge → unfollow resolution pattern** (the former `resolve_unlinked()` / `_follow_bridge_unfollow()` approach, deleted in E-239). It issued `POST /teams/{root_team_id}/follow`, hit the bridge endpoint, then unfollowed.
 
 Why it is banned:
 
-- **Wrong identifier namespace**: it issues `POST /teams/{root_team_id}/follow` against `root_team_id`, which is NOT a `gc_uuid`. `root_team_id` is a separate namespace (the local opponent-registry key from manually-typed opponents) -- consistent with the CLAUDE.md "Opponent entry duality" guidance, `root_team_id` must NEVER be treated as, or stored in, `gc_uuid`. Following/bridging against it is operating on the wrong identifier.
+- **Wrong identifier namespace**: it follows against `root_team_id`, which is NOT a `gc_uuid`. `root_team_id` is a separate namespace (the local opponent-registry key from manually-typed opponents) -- consistent with the CLAUDE.md "Opponent entry duality" guidance, `root_team_id` must NEVER be treated as, or stored in, `gc_uuid`. Following/bridging against it is operating on the wrong identifier.
 - **Mutates external GameChanger state**: unlike every other bridge path in this file (which is read-only `GET`/`POST /search`), this path *writes* to GC -- it follows a team, hits the bridge endpoint, then issues two best-effort unfollow `DELETE`s. A failed or interrupted cycle can leave the authenticated account following teams it never intended to.
-- **Unverified by its own admission**: the function's docstring states the flow is experimental and that whether `root_team_id` works with the follow/bridge endpoints is unverified.
+- **Unverified**: the original implementation's own docstring noted the flow was experimental and that whether `root_team_id` works with the follow/bridge endpoints was unverified.
 
-The correct opponent-resolution mechanisms are the read-only paths documented above (the forward `POST /search` bridge and the rung-(a) reverse `GET /teams/{gc_uuid}` bridge) plus operator-pasted GC team URLs for unindexed teams. New work MUST NOT call into or extend the follow → bridge → unfollow path; route any such need to PM per the quarantine rule. Its in-code deprecation banner is added in the code-side quarantine story.
+The correct opponent-resolution mechanisms are the read-only paths documented above (the forward `POST /search` bridge and the rung-(a) reverse `GET /teams/{gc_uuid}` bridge) plus operator-pasted GC team URLs for unindexed teams. New work MUST NOT reintroduce the follow → bridge → unfollow path; route any such need to PM.
 
 ## Search Cannot Find Unindexed Teams (Name-Source Warning)
 

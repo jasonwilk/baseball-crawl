@@ -942,7 +942,7 @@ class TestMagicLinkRateLimiting:
 # ---------------------------------------------------------------------------
 # E-238-05: Navigation retarget canary
 #
-# The /dashboard surface is quarantined (see .claude/rules/quarantine.md).
+# The /dashboard surface was removed in E-239.
 # Every auth-success / already-authenticated redirect must now land on
 # /admin/reports (the live reports flow), never on /dashboard. These tests
 # are the testable half of the AC-8 canary: each retargeted redirect's

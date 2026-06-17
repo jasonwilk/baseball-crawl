@@ -74,14 +74,14 @@ Scan the user's request for domain keywords and match against the suggestion tab
 | Domain Signal | Keywords / Patterns | Suggested Team |
 |--------------|-------------------|----------------|
 | Database / schema / ETL / migration | "schema", "migration", "ETL", "database", "table", "column" | PM + data-engineer |
-| Dashboard / UI / display | "dashboard", "page", "column", "display", "UI", "template" | PM + software-engineer + baseball-coach |
+| Reports / UI / display | "report", "page", "column", "display", "UI", "template" | PM + software-engineer + baseball-coach |
 | API / endpoints / crawling | "API", "endpoint", "crawl", "fetch", "GameChanger" | PM + api-scout |
 | Agent infra / rules / skills | "agent", "rule", "skill", "hook", "CLAUDE.md", "context layer" | PM + claude-architect |
 | Coaching / stats / scouting | "coach", "stat", "scouting", "lineup", "report" | PM + baseball-coach |
 | Security / auth / credentials | "auth", "credential", "security", "token", "login" | PM + software-engineer |
 | Multi-domain or unclear | No clear single domain | PM + ask user which experts to include |
 
-Keyword matching is case-insensitive. If the request matches multiple domains, combine the suggested agents (e.g., "dashboard with new schema columns" matches Dashboard + Database -> PM + software-engineer + baseball-coach + data-engineer). PM is always included.
+Keyword matching is case-insensitive. If the request matches multiple domains, combine the suggested agents (e.g., "report with new schema columns" matches Reports + Database -> PM + software-engineer + baseball-coach + data-engineer). PM is always included.
 
 If no domain signal matches and the request is not multi-domain, this is the "unclear" row -- ask the user which experts to include rather than guessing.
 

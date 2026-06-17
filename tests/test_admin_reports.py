@@ -90,7 +90,7 @@ def setup(tmp_path):
         return c
 
     env = {"DATABASE_PATH": str(db_path), "DEV_USER_EMAIL": "user@example.com"}
-    with patch("src.api.routes.admin.get_connection", side_effect=_mock_get_conn), \
+    with patch("src.api.routes.reports_admin.get_connection", side_effect=_mock_get_conn), \
          patch("src.api.db.get_connection", side_effect=_mock_get_conn), \
          patch("src.reports.generator.get_connection", side_effect=_mock_get_conn), \
          patch.dict("os.environ", env, clear=False):
@@ -133,10 +133,10 @@ class TestReportsPage:
         assert response.status_code == 200
         assert 'href="/admin/reports"' in response.text
 
-    def test_reports_nav_on_teams_page(self, setup):
+    def test_reports_nav_on_users_page(self, setup):
         """AC-8: Reports link appears in admin nav on other pages."""
         _db_path, client = setup
-        response = client.get("/admin/teams")
+        response = client.get("/admin/users")
 
         assert response.status_code == 200
         assert 'href="/admin/reports"' in response.text

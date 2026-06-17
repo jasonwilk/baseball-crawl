@@ -2,15 +2,15 @@
 
 ## System Overview
 
-Baseball-crawl is a coaching analytics platform for the Lincoln Standing Bear (LSB) High School baseball program. It extracts game data from the GameChanger API, stores it in a SQLite database, and serves a web dashboard for coaching staff to review batting stats, scouting reports, and opponent analysis.
+Baseball-crawl is a coaching analytics platform for the Lincoln Standing Bear (LSB) High School baseball program. It extracts game data from the GameChanger API, stores it in a SQLite database, and generates on-demand scouting reports for coaching staff.
 
-The system is designed for a small-scale deployment: 4 teams (Freshman, JV, Varsity, Reserve), roughly 12--15 players per team, and approximately 30 games per team per season. The primary users are Jason (system operator) and the LSB coaching staff (dashboard consumers).
+The system is designed for a small-scale deployment: 4 teams (Freshman, JV, Varsity, Reserve), roughly 12--15 players per team, and approximately 30 games per team per season. The primary users are Jason (system operator) and the LSB coaching staff (report consumers).
 
 ## Components
 
 | Component | Technology | Purpose |
 |-----------|-----------|---------|
-| **FastAPI app** | Python 3.13, FastAPI 0.115, Uvicorn | Serves the web dashboard (Jinja2 templates) and a JSON health endpoint. Runs inside a Docker container on port 8000. |
+| **FastAPI app** | Python 3.13, FastAPI 0.115, Uvicorn | Serves scouting reports, admin pages (reports management, user management), and a JSON health endpoint. Runs inside a Docker container on port 8000. |
 | **SQLite database** | SQLite with WAL mode | Stores players, teams, rosters, games, per-game/per-season batting and pitching stats, and coaching assignments. Located at `data/app.db` (host-mounted volume). |
 | **Docker Compose stack** | Docker Compose | Orchestrates three services: the FastAPI app, Traefik (reverse proxy), and cloudflared (Cloudflare Tunnel). |
 | **Traefik** | Traefik v3 | Reverse proxy that routes requests by `Host` header. In development, accessible at `http://localhost:8000`. The app container is also directly accessible at `http://localhost:8001` (bypasses Traefik; useful for health checks from the devcontainer shell). Waits for the app health check before accepting traffic. |
@@ -41,14 +41,14 @@ SQLite database (data/app.db)
 FastAPI + Jinja2 templates
        |
        v
-Dashboard (browser)  <--  Traefik  <--  Cloudflare Tunnel  <--  Internet
+Standalone reports / admin pages (browser)  <--  Traefik  <--  Cloudflare Tunnel  <--  Internet
 ```
 
 1. **Credential capture**: Copy a GameChanger API request as a cURL command from browser DevTools. Run `scripts/refresh_credentials.py` (or `bb creds import`) to extract auth tokens into `.env`.
 2. **Data extraction**: The `src/gamechanger/client.py` module calls the GameChanger API using credentials from `.env`. All HTTP requests go through the shared session factory (`src/http/session.py`) which handles browser-like headers, rate limiting, and cookie persistence.
 3. **Storage**: Parsed data is inserted into the SQLite database via SQL. Migrations are managed by `migrations/apply_migrations.py`.
-4. **Serving**: The FastAPI app reads from SQLite and renders Jinja2 templates for the dashboard. The health endpoint (`GET /health`) checks database connectivity.
-5. **Access**: In production, Cloudflare Tunnel routes internet traffic through Traefik to the app. Cloudflare Zero Trust Access policies control who can reach the dashboard and API.
+4. **Serving**: The FastAPI app reads from SQLite and renders Jinja2 templates for standalone reports and admin pages. The health endpoint (`GET /health`) checks database connectivity.
+5. **Access**: In production, Cloudflare Tunnel routes internet traffic through Traefik to the app. Cloudflare Zero Trust Access policies control who can reach the admin pages and API.
 
 ## Directory Structure
 
@@ -83,7 +83,7 @@ baseball-crawl/
 | **HTTP client** | httpx 0.28 | Async-capable, supports cookie jars and custom transports. Used for all GameChanger API calls. |
 | **Web framework** | FastAPI 0.115 + Uvicorn 0.34 | Lightweight async framework. Serves both JSON endpoints and server-rendered HTML via Jinja2. |
 | **Database** | SQLite (WAL mode) | Simple, zero-configuration, file-based. Sufficient for the data volume (~30 games x 4 teams). WAL mode enables concurrent reads during writes. |
-| **Templating** | Jinja2 3.1 | Server-side HTML rendering for the dashboard. No client-side JavaScript framework. |
+| **Templating** | Jinja2 3.1 | Server-side HTML rendering for reports and admin pages. No client-side JavaScript framework. |
 | **Testing** | pytest 8.3 + pytest-asyncio | All tests mock HTTP at the transport layer. No real network calls in the test suite. |
 | **Reverse proxy** | Traefik v3 | Docker-native, label-based routing. No config files needed beyond `docker-compose.yml`. |
 | **Tunnel** | Cloudflare Tunnel (cloudflared) | Secure exposure without opening ports. Handles SSL and integrates with Zero Trust access policies. |
@@ -140,7 +140,7 @@ The migration is applied automatically on container startup. Existing rows recei
 |----------|-------|
 | `play_events` table | Individual pitch, baserunner, substitution, and other events. Columns: `play_id` (FK to `plays.id`), `event_order`, `event_type`, `pitch_result`, `is_first_pitch`, `raw_template`. UNIQUE on `(play_id, event_order)`. |
 
-Populated by the plays pipeline (`bb data crawl --crawler plays` + `bb data load --loader plays`). See [operations.md](operations.md) for the full pipeline reference.
+Populated by the plays pipeline (removed in E-239). These tables remain in the schema; existing rows are still readable but no new plays data is ingested.
 
 ### E-167: Migration 007 -- Case-Insensitive Name+Season Year Index
 
@@ -233,33 +233,29 @@ A UNIQUE constraint on `(our_team_id, root_team_id)` prevents duplicate entries.
 
 ## Admin Interface
 
-### Team Management Routes (E-100)
+### Admin Routes (E-239)
 
-All routes are under `/admin/` and require an active session. Team routes use INTEGER `{id}` path parameters matching `teams.id`.
+All routes are under `/admin/` and require an active session. Defined in `src/api/routes/reports_admin.py`.
 
 | Route | Method | Description |
 |-------|--------|-------------|
-| `/admin/teams` | GET | Flat team list with Phase 1 add-team form |
-| `/admin/teams` | POST | Phase 1 submit: resolve URL or identifier, redirect to confirm |
-| `/admin/teams/confirm` | GET | Phase 2 confirm page: shows resolved team info, membership radio, program/division dropdowns |
-| `/admin/teams/confirm` | POST | Phase 2 save: create team record |
-| `/admin/teams/{id}/edit` | GET | Edit form: name, program, division (classification), membership type |
-| `/admin/teams/{id}/edit` | POST | Save team edits |
-| `/admin/teams/{id}/toggle-active` | POST | Toggle `is_active` between 0 and 1 |
-| `/admin/opponents/{link_id}/resolve` | GET/POST | Unified "Find on GameChanger" page -- search by name or paste URL to link an opponent; triggers auto-scout on confirm |
+| `/admin/reports` | GET | Reports list: all generated reports with status, expiry, and per-stage pipeline detail |
+| `/admin/reports/generate` | POST | Generate a new report from a GameChanger public URL or public ID slug |
+| `/admin/reports/{report_id}/delete` | POST | Delete a report (full cascade or report-only depending on guard conditions) |
+| `/admin/users` | GET | User list |
+| `/admin/users` | POST | Add a new user |
+| `/admin/users/{user_id}/edit` | GET | Edit user form |
+| `/admin/users/{user_id}/edit` | POST | Save user edits (name, role) |
+| `/admin/users/{user_id}/delete` | POST | Delete a user |
 
-The team list is a flat table showing all teams (no Lincoln/Opponents split). Columns: name, program, division (classification), membership badge (member/tracked), active/inactive status, opponent count, and an edit link.
-
-The add-team flow is two-phase: Phase 1 accepts a GameChanger team URL or bare identifier. Phase 2 shows the resolved team information and lets the operator set membership type (default: `tracked`), program, and division before saving.
-
-Sub-navigation links Users, Teams, and Opponents pages across all admin views. The Opponents tab shows a badge with the count of opponents that need linking.
+Sub-navigation links the Reports and Users pages across all admin views.
 
 ### Supporting Modules
 
 | Module | Purpose |
 |--------|---------|
-| `src/gamechanger/url_parser.py` | Extracts a team identifier from a GameChanger URL, bare public_id slug, or bare UUID. Returns a `TeamIdResult` with the extracted `value` and its `id_type` (`"public_id"` or `"uuid"`). Accepts any URL containing a `/teams/{id}` segment, including mobile share links. Note: while the parser accepts bare UUIDs, the admin add-team route rejects `uuid` id_type with an error directing users to provide a URL or public_id slug instead. |
-| `src/gamechanger/team_resolver.py` | Calls `GET /public/teams/{public_id}` (no auth) to resolve a team's name, location, record, and staff into a `TeamProfile` dataclass. Also provides `discover_opponents()` which calls `GET /public/teams/{public_id}/games` and returns a deduplicated list of `DiscoveredOpponent` instances by name. |
+| `src/gamechanger/url_parser.py` | Extracts a team identifier from a GameChanger URL, bare public_id slug, or bare UUID. Returns a `TeamIdResult` with the extracted `value` and its `id_type` (`"public_id"` or `"uuid"`). Accepts any URL containing a `/teams/{id}` segment, including mobile share links. Used by the report generation route to parse the operator-supplied GameChanger URL before calling the reports pipeline. |
+| `src/gamechanger/team_resolver.py` | Calls `GET /public/teams/{public_id}` (no auth) to resolve a team's name, location, record, and staff into a `TeamProfile` dataclass. Used by the reports pipeline (`src/reports/generator.py`) to look up team metadata during report generation. |
 
 `team_resolver.py` uses the shared HTTP session factory (`src/http/session.py`) with a 10-second timeout. No authentication headers are sent -- these are public GameChanger API endpoints. `url_parser.py` is a pure string parser (imports only `re`, `dataclasses`, and `urllib.parse`) and makes no HTTP calls.
 
@@ -271,4 +267,4 @@ Sub-navigation links Users, Teams, and Opponents pages across all admin views. T
 
 ---
 
-*Last updated: 2026-06-14 | Source: E-235 (migration 002 report_generation_runs, N vs M coverage semantics), E-196 (migration 014 start_time/timezone, game ordering), E-195 (migration 009 plays/play_events tables), E-173 (unified resolve route, subnav badge, discover-opponents route removed), E-167 (migration 007 name+season_year index), E-158 (src/charts/ module, migration 006 spray chart additions), E-120-06 (opponent_links table, sub-nav Opponents, url_parser correction, port 8001, teams columns), E-115-02 (schema and admin sections rewritten for E-100 fresh-start schema), E-042 (admin team management, url_parser, team_resolver), E-003-02 (original)*
+*Last updated: 2026-06-17 | Source: E-235 (migration 002 report_generation_runs, N vs M coverage semantics), E-196 (migration 014 start_time/timezone, game ordering), E-195 (migration 009 plays/play_events tables), E-173 (unified resolve route, subnav badge, discover-opponents route removed), E-167 (migration 007 name+season_year index), E-158 (src/charts/ module, migration 006 spray chart additions), E-120-06 (opponent_links table, sub-nav Opponents, url_parser correction, port 8001, teams columns), E-115-02 (schema and admin sections rewritten for E-100 fresh-start schema), E-042 (admin team management, url_parser, team_resolver), E-003-02 (original), E-239 (reports-first reframe: removed dashboard surface references, plays pipeline note)*

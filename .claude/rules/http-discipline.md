@@ -2,10 +2,7 @@
 paths:
   - "src/http/**"
   - "src/gamechanger/**"
-  - "src/pipeline/**"
   - "src/llm/**"
-  - "scripts/*crawl*"
-  - "scripts/*fetch*"
 ---
 
 # HTTP Request Discipline

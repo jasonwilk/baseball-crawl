@@ -59,8 +59,8 @@ This query targets exactly the misattributed rows (players not in
 ``team_rosters`` for either game team) and is idempotent.  No reload is
 required -- the loader's ``INSERT OR IGNORE`` will skip correctly-loaded rows
 on any subsequent run.  To load rows for players that are now resolvable (e.g.
-after roster data improves), delete the relevant rows and re-run
-``bb data load --loader scouting-spray``.
+after roster data improves), delete the relevant rows and regenerate the
+affected report (the reports generator re-runs the scouting spray load).
 
 Usage::
 

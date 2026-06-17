@@ -1,8 +1,8 @@
-"""Integration tests for E-167 dedup prevention across pipeline paths.
+"""Integration tests for E-167 dedup prevention.
 
-Verifies that running different pipeline INSERT paths (schedule_loader,
-opponent_resolver, game_loader, scouting) for the same opponent through
-different paths does not create duplicate rows.
+Verifies that the canonical team-insert path (``ensure_team_row``) does not
+create duplicate ``teams`` rows when the same opponent is inserted through
+different code paths for the same name/public_id.
 
 Uses an in-memory SQLite database with the teams table schema.
 """

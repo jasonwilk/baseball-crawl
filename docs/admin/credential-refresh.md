@@ -200,12 +200,6 @@ If the app container is running, restart it to pick up the new `.env` values:
 docker compose restart app
 ```
 
-To run a full data pipeline after refreshing:
-
-```bash
-bb data sync
-```
-
 ---
 
 ## What Each Credential Is
@@ -249,5 +243,7 @@ This is the stale-key false alarm. `bb creds check` will show the refresh token 
 Recapture via proxy. Mobile tokens can't be refreshed programmatically. See Path D.
 
 ---
+
+*Last updated: 2026-06-17 | Source: E-239 (removed bb data sync reference)*
 
 *See also: [Bootstrap Guide](bootstrap-guide.md) | [Operations](operations.md) | [Auth Architecture](../api/auth.md) | [mitmproxy Guide](mitmproxy-guide.md)*

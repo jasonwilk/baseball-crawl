@@ -264,7 +264,7 @@ An intentional walk, dropped third strike, or catcher's interference does **not*
 
 **Why it matters:** Rest directly affects a pitcher's availability. A pitcher who threw 80 pitches two days ago is not the same threat as one who has been off five days. Before a game, check Rest alongside P (7d) to know who in their bullpen they can actually use.
 
-**Display note:** In the live dashboard and browser view of a standalone report, Rest shows as days elapsed (e.g., "2d"). In a **printed or PDF** version of a scouting report, it shows the actual date of the last outing (e.g., "Mar 28") so the information stays accurate even if the printed copy is read a few days later.
+**Display note:** In the browser view of a standalone report, Rest shows as days elapsed (e.g., "2d"). In a **printed or PDF** version of a scouting report, it shows the actual date of the last outing (e.g., "Mar 28") so the information stays accurate even if the printed copy is read a few days later.
 
 ---
 
@@ -359,4 +359,4 @@ Splits break down a player's stats by specific situations. The two most useful s
 
 ---
 
-*Last updated: 2026-04-03 | Source: E-028-04 (initial glossary), E-199 (FPS%, P/BF, QAB%, P/PA), E-196 (Rest, P (7d)), E-204 (GS/GR)*
+*Last updated: 2026-06-17 | Source: E-028-04 (initial glossary), E-199 (FPS%, P/BF, QAB%, P/PA), E-196 (Rest, P (7d)), E-204 (GS/GR), E-239 (removed "live dashboard" reference from Rest display note)*

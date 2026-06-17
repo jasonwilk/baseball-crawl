@@ -1,6 +1,6 @@
 # Standalone Reports
 
-*Last updated: 2026-04-04 | Source: E-183 (standalone reports coaching docs), E-199 (FPS%, P/BF, QAB%, P/PA columns), E-196 (Rest and P (7d) columns), E-204 (GS/GR column), E-212 (predicted starter section, scouting analysis narrative)*
+*Last updated: 2026-06-17 | Source: E-183 (standalone reports coaching docs), E-199 (FPS%, P/BF, QAB%, P/PA columns), E-196 (Rest and P (7d) columns), E-204 (GS/GR column), E-212 (predicted starter section, scouting analysis narrative), E-239 (removed dashboard comparison table and references; standalone reports is now the primary coaching surface)*
 
 ---
 
@@ -16,8 +16,8 @@ Think of it as a one-time scouting sheet: the data is captured at the moment Jas
 
 Ask Jason for a standalone report when:
 
-- You want to scout a team that isn't on your schedule yet -- you can't find them in the dashboard
-- You want to send a quick opponent summary to an assistant coach who doesn't have dashboard access
+- You want to scout any upcoming opponent
+- You want to send a quick opponent summary to an assistant coach
 - You need to share scouting information with someone outside the program (a parent volunteer, a scout, a borrowed coach for tournament play)
 
 ---
@@ -26,7 +26,7 @@ Ask Jason for a standalone report when:
 
 Jason will send you a link. Open it in any web browser on your phone, tablet, or laptop -- no login required.
 
-The report shows similar pitching and batting stats as the dashboard opponent view, but in a self-contained format. You'll see:
+The report shows pitching and batting stats in a self-contained format. You'll see:
 
 **Executive summary** — Team-level numbers at a glance: OBP, strikeout rate, walk rate, plus FPS% (first-pitch strike percentage) and P/PA (pitches per plate appearance) when pitch data is available. The summary also shows how many games have pitch-by-pitch data, so you know whether those columns are based on the whole season or a subset of games.
 
@@ -68,17 +68,6 @@ If the link stops working, ask Jason to generate a fresh one.
 
 ---
 
-## Standalone Reports vs. the Dashboard
+## What If the Report Shows No Data?
 
-| | Standalone Report | Dashboard Opponent View |
-|---|---|---|
-| **Access** | Anyone with the link -- no login | Requires dashboard login |
-| **Data** | Frozen at the time Jason generated it | Live, updates when Jason runs a scouting sync |
-| **Expiry** | 14 days | Never expires |
-| **Best for** | Sharing outside the program, scouting teams off your schedule | Pre-game prep for scheduled opponents |
-
-If you need the most up-to-date data for an upcoming opponent, use the dashboard. If you need to share a scouting summary with someone who doesn't have dashboard access, ask Jason for a standalone report.
-
----
-
-*See also: [Coaching Dashboard](scouting-reports.md) for the full dashboard guide.*
+If a report shows "No completed games found" or "No box score data available," it means GameChanger does not have scorebook data loaded for this team yet. This is common early in the season or for teams that keep score on paper rather than in GameChanger. Let Jason know -- he can check whether a more recent generation would find data, or advise on alternatives.

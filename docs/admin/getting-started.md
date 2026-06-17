@@ -73,41 +73,32 @@ Expected response:
 
 If the health check fails, see [Operations: Troubleshooting](operations.md#troubleshooting).
 
-## Add Teams
+## Generate a Report
 
-Teams are configured through the admin UI, not by editing configuration files directly.
+The primary way to use the system in development is to generate a standalone scouting report:
 
-1. Start the stack and visit `http://localhost:8001/admin/teams`.
-2. Paste a GameChanger team URL for each LSB team (Freshman, JV, Varsity, Reserve) and select **Lincoln Program** as the team type.
-3. Click **Sync** on each Lincoln team. This crawls the schedule, loads game data, and automatically discovers opponents from the schedule (no separate Discover step needed).
-4. Visit the **Opponents** tab to see which opponents were auto-linked and which still need to be found on GameChanger.
+```bash
+bb report generate <public_id>
+```
 
-The admin UI calls the public GameChanger API (no credentials required) to resolve the team name and location from the URL.
+Replace `<public_id>` with a GameChanger team's public URL slug (e.g., `a1GFM9Ku0BbF`). The command crawls the team's schedule and stats, renders a report, and prints a shareable link. See [Operations: Standalone Reports](operations.md#standalone-reports) for the full reference.
 
-**Note on `config/teams.yaml`**: The YAML file remains available as a bootstrap mechanism, but it is no longer the primary team configuration path. The admin UI and the `--source db` flag on `scripts/crawl.py` / `scripts/load.py` are the recommended workflow for ongoing operation. See [Operations: Admin Team Management](operations.md#admin-team-management) for the full workflow.
+The admin reports page at `http://localhost:8001/admin/reports` shows all generated reports with status and expiry.
 
 ---
 
 ## Populate the Development Database
 
-`bb db reset` (or `python scripts/reset_dev_db.py`) drops and recreates the database and applies all migrations. After a reset the database is empty -- no sample data is loaded. The operator populates it with real GameChanger data:
+`bb db reset` (or `python scripts/reset_dev_db.py`) drops and recreates the database and applies all migrations. After a reset the database is empty -- no sample data is loaded. The operator populates it by generating scouting reports:
 
 1. Set up credentials (see [Credential Management](#credential-management) below).
-2. Add teams via the admin UI at `http://localhost:8001/admin/teams`.
-3. Crawl real data:
+2. Generate a report:
 
 ```bash
-bb data crawl --source db
-bb data load --source db
+bb report generate <public_id>
 ```
 
-`--source db` reads active member teams directly from the database.
-
 See the [Post-Reset Onboarding Guide](post-reset-guide.md) for the complete step-by-step workflow.
-
-## Verify the Dashboard
-
-Open `http://localhost:8001/dashboard` in a browser. After crawling real data you should see a table of batting statistics. If you see an empty table, confirm that teams have been added and crawled (see above).
 
 ## Run Tests
 
@@ -120,7 +111,6 @@ All tests mock HTTP requests at the transport layer -- no network calls are made
 - API health endpoint (`test_api_health.py`)
 - GameChanger client (`test_client.py`)
 - Credential parser (`test_credential_parser.py`)
-- Dashboard routes (`test_dashboard.py`)
 - HTTP session and headers (`test_http_session.py`, `test_http_headers.py`, `test_http_discipline.py`)
 - Database migrations (`test_migrations.py`)
 - Seed data loading (`test_seed.py`)
@@ -203,4 +193,4 @@ Key variables in `.env`:
 
 ---
 
-*Last updated: 2026-05-30 | Source: E-228 (empty reset, admin-sees-all), E-086 (mobile credentials), E-055 (unified CLI), E-042 (team onboarding via admin UI), E-028-03 (original)*
+*Last updated: 2026-06-17 | Source: E-228 (empty reset, admin-sees-all), E-086 (mobile credentials), E-055 (unified CLI), E-042 (team onboarding via admin UI), E-028-03 (original), E-239 (reports-first reframe: removed dashboard and member-sync references)*

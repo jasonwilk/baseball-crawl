@@ -3,9 +3,6 @@ paths:
   - "src/reports/starter_prediction.py"
   - "src/reports/llm_analysis.py"
   - "src/api/db.py"
-  - "src/api/routes/dashboard.py"
-  - "src/api/templates/dashboard/opponent_detail.html"
-  - "src/api/templates/dashboard/opponent_print.html"
   - "src/api/templates/reports/**"
 ---
 

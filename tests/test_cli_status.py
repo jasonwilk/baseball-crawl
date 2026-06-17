@@ -163,10 +163,10 @@ class TestDatabaseDisplay:
         assert "data/app.db (2.4 MB)" in result.output
 
     def test_db_absent_shows_warning(self) -> None:
-        """When DB absent, shows 'not found -> run: bb data sync'."""
+        """When DB absent, shows 'not found -> initialize the database first'."""
         result = _invoke_status(db_exists=False, db_display="")
         assert result.exit_code == 0  # missing DB is NOT an error exit
-        assert "not found -> run: bb data sync" in result.output
+        assert "not found -> initialize the database first" in result.output
 
     def test_db_absent_does_not_cause_exit_1_when_creds_valid(self) -> None:
         """Missing database alone should not cause exit 1 (AC-7)."""

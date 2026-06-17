@@ -27,8 +27,6 @@ paths:
 
 When a decision arises during any workflow (planning, dispatch, consultation, or ad-hoc work), route it to the owning agent. Advisory consultants may be invoked for additional perspective but the owner has final authority in their domain.
 
-**Quarantined surfaces are closed to new feature work**: a request that would route new feature work into a quarantined surface (dashboard, member-sync, opponent discovery -- see `.claude/rules/quarantine.md`) must NOT target that surface; route it to PM to decide placement.
-
 | Decision Domain | Owner | Advisory Consultants |
 |----------------|-------|---------------------|
 | Work definition, priority, acceptance criteria, story scope | **product-manager** | baseball-coach (coaching value), claude-architect (feasibility) |

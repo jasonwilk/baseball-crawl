@@ -1,6 +1,6 @@
-"""Shared helper functions for the baseball-crawl dashboard.
+"""Shared helper functions for the baseball-crawl reports surface.
 
-These helpers are used both as Jinja2 filters (registered in routes/dashboard.py)
+These helpers are used both as Jinja2 filters (registered in src/reports/renderer.py)
 and as importable Python functions for use in DB query functions.
 """
 

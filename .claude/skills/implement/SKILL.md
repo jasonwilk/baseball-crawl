@@ -257,9 +257,9 @@ Review via `cd [epic-worktree-path] && git diff` (unstaged = this story). Do NOT
 Implementer files changed: [Files Changed section]
 Implementer test results: [Test Results section]
 [If applicable] ## API Endpoints Touched
-[List of docs/api/endpoints/*.md files -- include when Files Changed or Files to Create or Modify contains paths under src/gamechanger/crawlers/, src/gamechanger/loaders/, src/gamechanger/client.py, or src/pipeline/. Derive specific endpoint docs from the story description/Technical Approach. If specific endpoints cannot be determined, include all docs/api/endpoints/*.md files. Omit this section entirely when no API-touching files are involved. See TN-4a heuristics.]
+[List of docs/api/endpoints/*.md files -- include when Files Changed or Files to Create or Modify contains paths under src/gamechanger/crawlers/, src/gamechanger/loaders/, or src/gamechanger/client.py. Derive specific endpoint docs from the story description/Technical Approach. If specific endpoints cannot be determined, include all docs/api/endpoints/*.md files. Omit this section entirely when no API-touching files are involved. See TN-4a heuristics.]
 [If applicable] ## Migration Files
-[List of migrations/*.sql files -- include when Files Changed or Files to Create or Modify contains paths under src/api/, src/gamechanger/loaders/, src/db/, src/pipeline/, migrations/, or templates referencing database columns. Omit this section entirely when no database code is involved. See TN-4a heuristics.]
+[List of migrations/*.sql files -- include when Files Changed or Files to Create or Modify contains paths under src/api/, src/gamechanger/loaders/, src/db/, migrations/, or templates referencing database columns. Omit this section entirely when no database code is involved. See TN-4a heuristics.]
 [If applicable] ## Behavioral Changes
 [From implementer's completion report. List of functions whose signature, return type, or observable behavior changed. This supplements CR's own caller audit -- CR still independently scans the diff for non-obvious behavioral changes the implementer may not have recognized. Omit this section when the implementer declared "None."]
 Review round: 1 of 2 (circuit breaker)
@@ -268,8 +268,8 @@ Review against all ACs and the review rubric. Cross-reference Files Changed agai
 
 **Derivation heuristics for structured context fields** (TN-4a): The main session uses these rules to decide which optional context sections to include in the CR assignment. Check both the story's "Files to Create or Modify" and the implementer's Files Changed list:
 
-- **API Endpoints Touched**: Include when any file is under `src/gamechanger/crawlers/`, `src/gamechanger/loaders/`, `src/gamechanger/client.py`, or `src/pipeline/` (modules that parse API responses, make HTTP calls, or orchestrate API-dependent pipelines). `src/gamechanger/config.py`, `src/gamechanger/types.py`, and similar utility modules do NOT trigger this field. Derive specific endpoint docs from the story's Technical Approach or description (e.g., if the story mentions "public team endpoint," include `docs/api/endpoints/get-public-teams-public_id.md`). If specific endpoints cannot be determined, include all files matching `docs/api/endpoints/*.md`.
-- **Migration Files**: Include when any file is under `src/api/`, `src/gamechanger/loaders/`, `src/db/`, `src/pipeline/`, `migrations/`, or templates referencing database columns.
+- **API Endpoints Touched**: Include when any file is under `src/gamechanger/crawlers/`, `src/gamechanger/loaders/`, or `src/gamechanger/client.py` (modules that parse API responses or make HTTP calls). `src/gamechanger/types.py` and similar utility modules do NOT trigger this field. Derive specific endpoint docs from the story's Technical Approach or description (e.g., if the story mentions "public team endpoint," include `docs/api/endpoints/get-public-teams-public_id.md`). If specific endpoints cannot be determined, include all files matching `docs/api/endpoints/*.md`.
+- **Migration Files**: Include when any file is under `src/api/`, `src/gamechanger/loaders/`, `src/db/`, `migrations/`, or templates referencing database columns.
 - **Behavioral Changes**: Include when the implementer's completion report contains a `## Behavioral Changes` section with content other than "None." Omit when the implementer declared "None."
 
 3. **Triage ALL findings.** Before any routing decision, the main session classifies every finding (MUST FIX and SHOULD FIX) as **valid** or **invalid**:
@@ -327,6 +327,8 @@ If the user specified the "and review" modifier (e.g., "implement E-NNN and revi
 ### Phase 4a: Code-Reviewer Integration Review
 
 After all stories are verified DONE, Phase 4a runs a holistic code-reviewer pass over the full epic diff. Per-story CR (Phase 3) reviews changes in isolation; the integration review catches cross-story interactions, naming inconsistencies, import conflicts, and architectural issues that only appear when stories are combined.
+
+**Surface-removal epics**: when the epic DELETES a route, surface, or widely-used symbol, the integration review MUST repo-wide grep each removed route/symbol across ALL tests (not just story-touched files) — removed surfaces commonly leave generic usages in untouched test files (e.g. a deleted route used as an authenticated-200 probe) that per-story review cannot see, and that otherwise surface only at the full-suite-green gate.
 
 Phase 4a is skipped if the "and review" modifier was not specified.
 

@@ -2,7 +2,7 @@
 
 Verifies that GET / returns a 302 redirect to /admin/reports through the real
 middleware (/ is an excluded path so auth middleware passes it through).
-E-238-05 retargeted the root redirect off the quarantined /dashboard to the
+E-238-05 retargeted the root redirect off the removed /dashboard to the
 reports flow (the live product surface).
 
 Run with:
@@ -33,7 +33,7 @@ def test_root_redirects_to_reports() -> None:
     / is excluded from auth checks so the route handler responds directly
     with a redirect to /admin/reports, which the middleware then handles
     normally on the next request (redirect to login if unauthenticated).
-    E-238-05: retargeted off the quarantined /dashboard.
+    E-238-05: retargeted off the removed /dashboard.
     """
     with TestClient(app, follow_redirects=False) as client:
         response = client.get("/")

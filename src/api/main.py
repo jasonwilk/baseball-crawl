@@ -8,13 +8,13 @@ It is the entrypoint referenced by the Dockerfile:
 Route structure (current):
     GET  /               -- Root redirect to /admin/reports
     GET  /health         -- Database and API health check (see routes/health.py)
-    GET  /dashboard      -- Team batting stats dashboard (see routes/dashboard.py)
     GET  /auth/login     -- Login page (see routes/auth.py)
     POST /auth/login     -- Magic link issuance (see routes/auth.py)
     GET  /auth/verify    -- Magic link verification (see routes/auth.py)
     POST /auth/logout    -- Session logout (see routes/auth.py)
-    GET  /admin/users    -- Admin user list (see routes/admin.py)
-    POST /admin/users    -- Create user (see routes/admin.py)
+    GET  /admin/users    -- Admin user list (see routes/reports_admin.py)
+    POST /admin/users    -- Create user (see routes/reports_admin.py)
+    GET  /admin/reports  -- Reports management (see routes/reports_admin.py)
 """
 
 from __future__ import annotations
@@ -32,11 +32,10 @@ from fastapi.templating import Jinja2Templates
 
 from src.api.auth import SessionMiddleware
 from src.api.csrf import CSRFMiddleware
-from src.api.routes.admin import router as admin_router
 from src.api.routes.auth import router as auth_router
 from src.api.routes.health import router as health_router
-from src.api.routes.dashboard import router as dashboard_router
 from src.api.routes.reports import router as reports_router
+from src.api.routes.reports_admin import router as reports_admin_router
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -134,15 +133,14 @@ async def server_error_handler(request: Request, exc: Exception) -> HTMLResponse
 async def root_redirect() -> RedirectResponse:
     """Redirect root URL to the reports page.
 
-    The reports flow is the live product surface; the dashboard is
-    quarantined (see .claude/rules/quarantine.md).  The auth middleware
-    handles the unauthenticated case by redirecting to /auth/login.
+    The reports flow is the live product surface (the dashboard surface was
+    removed in E-239).  The auth middleware handles the unauthenticated case
+    by redirecting to /auth/login.
     """
     return RedirectResponse(url="/admin/reports", status_code=302)
 
 
 app.include_router(health_router)
 app.include_router(auth_router)
-app.include_router(dashboard_router)
-app.include_router(admin_router)
+app.include_router(reports_admin_router)
 app.include_router(reports_router)

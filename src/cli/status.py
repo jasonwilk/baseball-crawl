@@ -230,7 +230,7 @@ def run() -> None:
         console.print(f"  {label:<{label_width}} {db_display}")
     else:
         console.print(
-            f"  {label:<{label_width}} [yellow]not found -> run: bb data sync[/yellow]"
+            f"  {label:<{label_width}} [yellow]not found -> initialize the database first[/yellow]"
         )
 
     # --- Proxy sessions ---

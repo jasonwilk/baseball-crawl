@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{% block title %}Baseball Dashboard{% endblock %}</title>
+  <title>{% block title %}Baseball Reports{% endblock %}</title>
   <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-gray-50 text-gray-900">
@@ -11,7 +11,7 @@
     <div class="max-w-4xl mx-auto flex items-center">
       <span class="font-bold text-lg">Baseball Stats</span>
       <div class="ml-auto flex items-center gap-4 text-sm">
-        <a href="/admin/teams" class="text-blue-200 hover:text-white">Admin</a>
+        <a href="/admin/reports" class="text-blue-200 hover:text-white">Admin</a>
         {% block header_extras %}{% endblock %}
       </div>
     </div>
@@ -19,33 +19,6 @@
   <main class="p-4 max-w-4xl mx-auto pb-16">
     {% block content %}{% endblock %}
   </main>
-  {% if not is_admin_page %}
-  <!-- Bottom fixed navigation bar -->
-  {# Build query string from active_team_id, active_year, and season_id context vars #}
-  {%- set _qs = "" -%}
-  {%- if active_team_id %}{% set _qs = "team_id=" ~ active_team_id %}{% endif -%}
-  {%- if active_year %}{% if _qs %}{% set _qs = _qs ~ "&year=" ~ active_year %}{% else %}{% set _qs = "year=" ~ active_year %}{% endif %}{% endif -%}
-  {%- if season_id %}{% if _qs %}{% set _qs = _qs ~ "&season_id=" ~ season_id %}{% else %}{% set _qs = "season_id=" ~ season_id %}{% endif %}{% endif -%}
-  <nav class="fixed bottom-0 w-full bg-white border-t border-gray-200 z-10">
-    <div class="flex justify-around">
-      <a
-        href="/dashboard{% if _qs %}?{{ _qs }}{% endif %}"
-        class="flex-1 flex flex-col items-center justify-center py-3 text-xs font-medium
-          {% if active_nav == 'schedule' %}text-blue-900 font-bold{% else %}text-gray-600 hover:text-blue-900{% endif %}"
-      >Schedule</a>
-      <a
-        href="/dashboard/batting{% if _qs %}?{{ _qs }}{% endif %}"
-        class="flex-1 flex flex-col items-center justify-center py-3 text-xs font-medium
-          {% if active_nav == 'batting' %}text-blue-900 font-bold{% else %}text-gray-600 hover:text-blue-900{% endif %}"
-      >Batting</a>
-      <a
-        href="/dashboard/pitching{% if _qs %}?{{ _qs }}{% endif %}"
-        class="flex-1 flex flex-col items-center justify-center py-3 text-xs font-medium
-          {% if active_nav == 'pitching' %}text-blue-900 font-bold{% else %}text-gray-600 hover:text-blue-900{% endif %}"
-      >Pitching</a>
-    </div>
-  </nav>
-  {% endif %}
   {% block scripts %}{% endblock %}
 </body>
 </html>

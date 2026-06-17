@@ -3,7 +3,6 @@ paths:
   - "src/reports/**"
   - "src/api/templates/**"
   - "src/charts/**"
-  - "src/api/routes/dashboard.py"
 ---
 
 # Display Philosophy and Season-Length Calibration

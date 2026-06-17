@@ -1,6 +1,6 @@
 # Clean-Slate Rebuild Procedure (E-220)
 
-This guide covers wiping and rebuilding the database under the perspective-aware architecture introduced in E-220. After this procedure, every stat row carries `perspective_team_id` and the scouting pipeline operates fully in-memory (no files in `data/raw/{season}/scouting/`).
+This guide covers wiping and rebuilding the database under the perspective-aware architecture introduced in E-220. After this procedure, every stat row carries `perspective_team_id` and reports are generated on demand from the `bb report generate` pipeline.
 
 **This is a manual procedure. No automation script is provided.**
 
@@ -21,11 +21,8 @@ This guide covers wiping and rebuilding the database under the perspective-aware
 | Target | Wiped? | Notes |
 |--------|--------|-------|
 | `data/app.db` (SQLite database) | Yes | Full schema rebuild via migrations |
-| `data/raw/{season}/scouting/` | Yes | Stale disk-cached scouting files |
-| `data/raw/{season}/teams/` | **No** | Own-team crawl cache is retained |
+| `data/raw/{season}/scouting/` | Yes | Stale disk-cached scouting files from pre-E-239 runs |
 | `data/reports/` | Yes | Reports regenerated from fresh data |
-
-**Important**: Own-team data in `data/raw/{season}/teams/` is NOT wiped. This directory contains member-team boxscores, game summaries, and other crawled data that is expensive to re-fetch. The member-team pipeline reads from these files and they remain valid under the new schema.
 
 ---
 
@@ -49,24 +46,17 @@ This drops `data/app.db`, recreates it, applies all migrations (including E-220'
 
 ---
 
-## Step 3: Wipe the Scouting Cache
+## Step 3: Wipe Legacy Cache and Reports
 
-Remove disk-cached scouting files. The in-memory pipeline (E-220-05/E-220-10) no longer writes to these directories, but stale files from pre-E-220 runs must be cleaned.
+Remove any stale disk-cached files from pre-E-239 pipeline runs, and clear generated reports so they can be regenerated on demand.
 
 ```bash
-# Remove scouting directories (games.json, roster.json, boxscores/, spray/)
+# Remove stale scouting directories (legacy pipeline artifacts)
 find data/raw/*/scouting -mindepth 1 -delete 2>/dev/null
 rmdir data/raw/*/scouting 2>/dev/null
 
-# Remove generated reports (will be regenerated)
+# Remove generated reports (regenerated on demand after rebuild)
 rm -rf data/reports/*
-```
-
-Verify own-team data is intact:
-
-```bash
-ls data/raw/*/teams/
-# Should list team UUID directories with games/, spray/, etc.
 ```
 
 ---
@@ -87,46 +77,15 @@ Expected: `{"status": "ok", "db": "connected"}`.
 
 ---
 
-## Step 5: Sync Member Teams
+## Step 5: Regenerate Reports
 
-Load own-team data from the retained disk cache:
-
-```bash
-bb data crawl
-bb data load
-```
-
-This populates games, batting, pitching, plays, and spray charts for member teams. All rows will have `perspective_team_id` set to the member team's integer PK.
-
----
-
-## Step 6: Scout Tracked Opponents
-
-Run the full scouting pipeline for all tracked opponents:
-
-```bash
-bb data scout
-```
-
-This runs the in-memory scouting pipeline (E-220-05): crawl schedule + roster + boxscores, then load -- all without writing files to `data/raw/`. Spray charts are crawled and loaded in-memory (E-220-10). Season aggregates are computed with perspective filtering (E-220-07).
-
-For a single opponent:
-
-```bash
-bb data scout --team <public_id>
-```
-
----
-
-## Step 7: Regenerate Reports
-
-Regenerate scouting reports for tracked opponents:
+Regenerate scouting reports as needed:
 
 ```bash
 bb report generate <public_id>
 ```
 
-Reports use the in-memory pipeline (E-220-06) and produce perspective-aware stat rows.
+Each generation crawls the team's schedule and boxscores and produces perspective-aware stat rows.
 
 ---
 
@@ -211,6 +170,9 @@ Expected: no rows returned (aggregates match per-perspective game counts).
 
 ## Troubleshooting
 
-- **Credentials expired during scout**: Run `bb creds setup web` to refresh, then re-run `bb data scout`.
-- **Missing member-team data**: If `data/raw/{season}/teams/` was accidentally deleted, re-crawl with `bb data crawl`.
-- **Reports show "No data available"**: Verify scouting completed successfully with `bb status` before regenerating reports.
+- **Credentials expired during report generation**: Run `bb creds setup web` to refresh, then re-run `bb report generate <public_id>`.
+- **Reports show "No data available"**: Verify credentials are valid (`bb creds check`) and that the `public_id` is correct before regenerating reports.
+
+---
+
+*Last updated: 2026-06-17 | Source: E-220 (original), E-239 (removed Steps 5/6 member-sync and scout, updated to reports-first)*

@@ -26,7 +26,7 @@ as epics land. **Convention**: this table is updated at two moments — at an ep
 | B2 | Report self-reporting integrity hardening | E-236 | COMPLETED |
 | C | Payload-first loaders + aggregate integrity | E-237 | COMPLETED |
 | D1 | Quarantine + navigation retarget + passkey fix | E-238 | COMPLETED |
-| D2 | Decouple imports, then remove unused surfaces | E-239 | PLANNING |
+| D2 | Decouple imports, then remove unused surfaces | E-239 | COMPLETED |
 | E | Morning-of-game scheduled reports | — | NOT STARTED |
 
 Status values: `NOT STARTED` → `PLANNING` (epic DRAFT) → `READY` (epic refined,

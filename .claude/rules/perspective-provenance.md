@@ -3,7 +3,6 @@ paths:
   - "src/gamechanger/loaders/**"
   - "src/gamechanger/parsers/**"
   - "src/reports/**"
-  - "src/pipeline/**"
   - "src/db/**"
   - "src/cli/**"
   - "src/api/routes/**"
@@ -25,7 +24,7 @@ GameChanger returns different player UUIDs, player names (initials vs. full), an
 
 ## MUST Constraints
 
-1. **Every stat INSERT includes `perspective_team_id`**. The value is always the team whose credentials or `public_id` were used to fetch the data from the API. For member-team pipelines, this is the member team's `teams.id`. For scouting pipelines, this is the scouted team's `teams.id`.
+1. **Every stat INSERT includes `perspective_team_id`**. The value is always the team whose credentials or `public_id` were used to fetch the data from the API -- for the scouting/reports pipeline, the scouted team's `teams.id`.
 
 2. **UNIQUE constraints include `perspective_team_id`**. The same `(game_id, player_id)` pair can legitimately appear twice with different perspectives. ON CONFLICT clauses must reference the full constraint including `perspective_team_id`.
 
@@ -52,10 +51,6 @@ When assessing a new endpoint or data source, classify each field against this t
 ### Scouting and Reports Pipelines (In-Memory)
 
 The scouting pipeline and report generator use in-memory crawl-to-load with no disk intermediary. Crawlers return data structures directly to loaders, eliminating stale-file contamination. Game IDs come from crawl results, not filesystem globs.
-
-### Own-Team Pipeline (Disk Cache)
-
-The member-team pipeline retains disk caching (`data/raw/`) because crawl and load are separate CLI invocations. Perspective tagging on every INSERT prevents contamination even when files from different runs coexist on disk.
 
 ### Plays Pipeline
 

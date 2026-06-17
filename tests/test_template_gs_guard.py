@@ -1,14 +1,16 @@
 """Template-level guard tests for the GS/GR pitcher cell (E-230-01).
 
-The four templates below all render the pitcher "Games Started / Games
-Relieved" cell with the same guarded expression::
+The scouting report template renders the pitcher "Games Started / Games
+Relieved" cell with the guarded expression::
 
     {% if pitcher.gs is undefined or pitcher.gs is none %}&mdash;
     {% else %}{{ pitcher.gs }}/{{ pitcher.games - pitcher.gs }}{% endif %}
 
-This file pins the four rendered outcomes of that guard for **each of the four
-real ``.html`` templates** so a future edit that breaks any one of them fails
-the suite (the failure mode this epic exists to kill):
+This file pins the four rendered outcomes of that guard for the surviving
+real ``.html`` template (``reports/scouting_report.html``) so a future edit
+that breaks it fails the suite (the failure mode this epic exists to kill).
+E-239-02 deleted the three dashboard templates that previously carried the
+same guard, leaving the scouting report as the sole carrier:
 
 * missing ``gs`` key   -> em-dash, NO UndefinedError   (AC-3 / AC-6)
 * present ``gs = None`` -> em-dash                       (AC-4, preserved)
@@ -44,14 +46,14 @@ _TEMPLATES_DIR = Path(__file__).resolve().parents[1] / "src" / "api" / "template
 # The em-dash HTML entity the guard emits for an unknown/missing gs.
 _EM_DASH = "&mdash;"
 
-# The four real templates that carry the GS/GR guard, relative to the
-# templates dir. Each test renders the guard line pulled from these actual
-# files, so a regression in any one of them fails here.
+# The real template that carries the GS/GR guard, relative to the templates
+# dir. Each test renders the guard line pulled from this actual file, so a
+# regression in it fails here. E-239-02 deleted the three dashboard templates
+# (dashboard/opponent_print.html, dashboard/opponent_detail.html,
+# dashboard/team_pitching.html) that previously also carried this guard,
+# leaving the scouting report as the sole surviving carrier.
 _GS_TEMPLATES = [
     "reports/scouting_report.html",
-    "dashboard/opponent_print.html",
-    "dashboard/opponent_detail.html",
-    "dashboard/team_pitching.html",
 ]
 
 
@@ -116,7 +118,7 @@ def test_missing_gs_key_renders_em_dash(template_rel_path: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# AC-4: present-None / zero / positive-int outcomes preserved (all 4 templates)
+# AC-4: present-None / zero / positive-int outcomes preserved (surviving template)
 # ---------------------------------------------------------------------------
 
 

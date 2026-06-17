@@ -221,14 +221,6 @@ def test_proxy_refresh_headers_help_includes_examples() -> None:
     assert "--apply" in result.output
 
 
-def test_data_scout_help_includes_examples() -> None:
-    """bb data scout --help includes an Examples block (AC-2)."""
-    result = runner.invoke(app, ["data", "scout", "--help"])
-    assert result.exit_code == 0
-    assert "Examples:" in result.output
-    assert "--dry-run" in result.output
-
-
 # ---------------------------------------------------------------------------
 # AC-8 and AC-9: deep --help shows boolean flag options (regression check)
 # ---------------------------------------------------------------------------

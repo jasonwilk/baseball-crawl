@@ -5,7 +5,7 @@ Fallback: python -m src.cli
 
 Sub-command groups:
   bb creds   -- credential management (import, check)
-  bb data    -- data crawl, load, sync
+  bb data    -- reconcile, dedup-players, backfill-appearance-order
   bb proxy   -- proxy report, endpoints, refresh-headers, review
   bb db      -- database backup, reset
   bb status  -- system health check (top-level command)

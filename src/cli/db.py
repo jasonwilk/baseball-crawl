@@ -43,7 +43,7 @@ def backup(
         result = backup_database(db_path=db_path)
     except FileNotFoundError as exc:
         err_console.print(
-            f"[red]{exc}. Run `bb data sync` first.[/red]"
+            f"[red]{exc}. Initialize the database first.[/red]"
         )
         raise typer.Exit(code=1) from exc
 

@@ -1,5 +1,5 @@
 # synthetic-test-data
-"""Tests for admin routes (src/api/routes/admin.py) -- E-100-04.
+"""Tests for the surviving admin routes (src/api/routes/reports_admin.py) -- E-100-04.
 
 Tests cover:
 - Admin routes require session matching ADMIN_EMAIL (or any session in dev mode)
@@ -1035,156 +1035,6 @@ class TestRoleEnforcement:
 
 
 # ---------------------------------------------------------------------------
-# AC-3/AC-4: membership_type validation and already-resolved link guard
-# ---------------------------------------------------------------------------
-
-
-def _insert_opponent_link(
-    db_path: Path,
-    our_team_id: int,
-    opponent_name: str,
-    public_id: str | None = None,
-) -> int:
-    """Insert an opponent_links row and return its id."""
-    conn = sqlite3.connect(str(db_path))
-    cursor = conn.execute(
-        "INSERT INTO opponent_links (our_team_id, root_team_id, opponent_name, public_id)"
-        " VALUES (?, ?, ?, ?)",
-        (our_team_id, f"root-{opponent_name}", opponent_name, public_id),
-    )
-    conn.commit()
-    link_id = cursor.lastrowid
-    conn.close()
-    return link_id
-
-
-class TestMembershipTypeValidation:
-    """Invalid membership_type values are rejected with 400."""
-
-    def test_confirm_team_submit_rejects_invalid_membership_type(
-        self, admin_db: Path
-    ) -> None:
-        """POST /admin/teams/confirm with an invalid membership_type returns 400."""
-        admin_id = _insert_user(admin_db, "mtadmin@example.com")
-        raw_token = _insert_session(admin_db, admin_id)
-
-        with patch.dict(
-            "os.environ",
-            {"DATABASE_PATH": str(admin_db), "ADMIN_EMAIL": "mtadmin@example.com"},
-        ):
-            with TestClient(
-                app, follow_redirects=False, cookies={"session": raw_token, "csrf_token": _CSRF}
-            ) as client:
-                response = client.post(
-                    "/admin/teams/confirm",
-                    data={
-                        "public_id": "some-team-slug",
-                        "team_name": "Some Team",
-                        "membership_type": "superadmin",
-                        "csrf_token": _CSRF,
-                    },
-                )
-        assert response.status_code == 400
-
-
-class TestConfirmTeamInsertIntegrityError:
-    """Concurrent insert raising IntegrityError returns a redirect, not a 500."""
-
-    def test_confirm_team_submit_integrity_error_returns_redirect(
-        self, admin_db: Path
-    ) -> None:
-        """POST /admin/teams/confirm redirects with error when _insert_team_new raises IntegrityError."""
-        admin_id = _insert_user(admin_db, "ierr@example.com")
-        raw_token = _insert_session(admin_db, admin_id)
-
-        with patch.dict(
-            "os.environ",
-            {"DATABASE_PATH": str(admin_db), "ADMIN_EMAIL": "ierr@example.com"},
-        ):
-            with patch(
-                "src.api.routes.admin._insert_team_new",
-                side_effect=sqlite3.IntegrityError("UNIQUE constraint failed: teams.public_id"),
-            ):
-                with TestClient(
-                    app, follow_redirects=False, cookies={"session": raw_token, "csrf_token": _CSRF}
-                ) as client:
-                    response = client.post(
-                        "/admin/teams/confirm",
-                        data={
-                            "public_id": "some-team-slug",
-                            "team_name": "Some Team",
-                            "membership_type": "tracked",
-                            "csrf_token": _CSRF,
-                        },
-                    )
-        assert response.status_code != 500
-        assert response.status_code == 303
-
-
-class TestAlreadyResolvedLinkGuard:
-    """GET connect/confirm returns 400 when the link already has a public_id."""
-
-    def test_connect_opponent_confirm_get_returns_400_for_resolved_link(
-        self, admin_db: Path
-    ) -> None:
-        """GET /admin/opponents/{link_id}/connect/confirm returns 400 when already resolved."""
-        admin_id = _insert_user(admin_db, "rladmin@example.com")
-        raw_token = _insert_session(admin_db, admin_id)
-
-        our_team_id = _get_team_id(admin_db, "LSB Varsity 2026")
-        link_id = _insert_opponent_link(
-            admin_db, our_team_id, "Resolved Opponent", public_id="already-linked-slug"
-        )
-
-        with patch.dict(
-            "os.environ",
-            {"DATABASE_PATH": str(admin_db), "ADMIN_EMAIL": "rladmin@example.com"},
-        ):
-            with TestClient(
-                app, follow_redirects=False, cookies={"session": raw_token, "csrf_token": _CSRF}
-            ) as client:
-                response = client.get(
-                    f"/admin/opponents/{link_id}/connect/confirm"
-                )
-        assert response.status_code == 400
-
-
-# ---------------------------------------------------------------------------
-# AC-1: opponent_count excludes hidden links
-# ---------------------------------------------------------------------------
-
-
-class TestOpponentCountExcludesHidden:
-    """Team list opponent_count only counts non-hidden opponent_links rows."""
-
-    def test_opponent_count_excludes_hidden_links(self, admin_db: Path) -> None:
-        """_get_all_teams_flat returns opponent_count that excludes hidden rows."""
-        from src.api.routes.admin import _get_all_teams_flat
-
-        our_team_id = _get_team_id(admin_db, "LSB Varsity 2026")
-
-        conn = sqlite3.connect(str(admin_db))
-        conn.execute(
-            "INSERT INTO opponent_links (our_team_id, root_team_id, opponent_name, is_hidden)"
-            " VALUES (?, 'root-visible', 'Visible Opponent', 0)",
-            (our_team_id,),
-        )
-        conn.execute(
-            "INSERT INTO opponent_links (our_team_id, root_team_id, opponent_name, is_hidden)"
-            " VALUES (?, 'root-hidden', 'Hidden Opponent', 1)",
-            (our_team_id,),
-        )
-        conn.commit()
-        conn.close()
-
-        with patch.dict("os.environ", {"DATABASE_PATH": str(admin_db)}):
-            teams = _get_all_teams_flat()
-
-        varsity = next(t for t in teams if t["name"] == "LSB Varsity 2026")
-        assert varsity["opponent_count"] == 1
-
-
-# ---------------------------------------------------------------------------
 # XSS escaping regression: query parameters are HTML-escaped in responses
 # ---------------------------------------------------------------------------
 
@@ -1192,8 +1042,8 @@ class TestOpponentCountExcludesHidden:
 class TestXSSEscaping:
     """User-controlled query parameters are HTML-escaped in admin templates."""
 
-    def test_msg_param_is_escaped_in_team_list(self, admin_db: Path) -> None:
-        """GET /admin/teams?msg=<script>alert(1)</script> escapes the payload."""
+    def test_msg_param_is_escaped_in_reports_list(self, admin_db: Path) -> None:
+        """GET /admin/reports?msg=<script>alert(1)</script> escapes the payload."""
         admin_id = _insert_user(admin_db, "xssadmin@example.com")
         raw_token = _insert_session(admin_db, admin_id)
 
@@ -1204,7 +1054,7 @@ class TestXSSEscaping:
             {"DATABASE_PATH": str(admin_db), "ADMIN_EMAIL": "xssadmin@example.com"},
         ):
             with TestClient(app, cookies={"session": raw_token, "csrf_token": _CSRF}) as client:
-                response = client.get(f"/admin/teams?msg={payload}")
+                response = client.get(f"/admin/reports?msg={payload}")
 
         assert response.status_code == 200
         assert payload not in response.text

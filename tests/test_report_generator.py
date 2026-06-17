@@ -1369,6 +1369,10 @@ class TestQueryHelpers:
         assert "strike_pct" in pitching[0]
         # ERA = (8 * 27) / 45 = 4.80
         assert pitching[0]["era"] == "4.80"
+        # strike_pct = (total_strikes / pitches) * 100 = (180 / 300) * 100 = 60.0%
+        # (preserves the value-level strike_pct coverage formerly in the deleted
+        #  dashboard-side tests/test_strike_pct.py -- E-239-02 AC-6b)
+        assert pitching[0]["strike_pct"] == "60.0%"
 
     def test_query_roster(self, db):
         team_id = _seed_team(db)

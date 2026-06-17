@@ -57,14 +57,14 @@ class TestDbBackup:
             result = runner.invoke(app, ["db", "backup"])
         assert result.exit_code == 1
 
-    def test_backup_file_not_found_message_hints_sync(self) -> None:
-        """Error output mentions the actual path and running ``bb data sync``."""
+    def test_backup_file_not_found_message_hints_init(self) -> None:
+        """Error output mentions the actual path and how to initialize the DB."""
         with patch(
             "src.cli.db.backup_database",
             side_effect=FileNotFoundError("Database not found: /data/app.db"),
         ):
             result = runner.invoke(app, ["db", "backup"])
-        assert "bb data sync" in result.output
+        assert "Initialize the database first" in result.output
         assert "Database not found: /data/app.db" in result.output
 
 

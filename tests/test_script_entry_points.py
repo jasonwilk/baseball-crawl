@@ -28,51 +28,6 @@ def _run_help(script_name: str) -> subprocess.CompletedProcess[str]:
 
 
 # ---------------------------------------------------------------------------
-# AC-1: scripts/bootstrap.py --help
-# ---------------------------------------------------------------------------
-
-
-def test_bootstrap_help_exits_0() -> None:
-    """scripts/bootstrap.py --help exits 0 (no import errors, --help handled)."""
-    result = _run_help("bootstrap.py")
-    assert result.returncode == 0, (
-        f"bootstrap.py --help failed with exit code {result.returncode}\n"
-        f"stdout: {result.stdout}\n"
-        f"stderr: {result.stderr}"
-    )
-
-
-# ---------------------------------------------------------------------------
-# AC-2: scripts/crawl.py --help
-# ---------------------------------------------------------------------------
-
-
-def test_crawl_help_exits_0() -> None:
-    """scripts/crawl.py --help exits 0 (no import errors, --help handled)."""
-    result = _run_help("crawl.py")
-    assert result.returncode == 0, (
-        f"crawl.py --help failed with exit code {result.returncode}\n"
-        f"stdout: {result.stdout}\n"
-        f"stderr: {result.stderr}"
-    )
-
-
-# ---------------------------------------------------------------------------
-# AC-3: scripts/load.py --help
-# ---------------------------------------------------------------------------
-
-
-def test_load_help_exits_0() -> None:
-    """scripts/load.py --help exits 0 (no import errors, --help handled)."""
-    result = _run_help("load.py")
-    assert result.returncode == 0, (
-        f"load.py --help failed with exit code {result.returncode}\n"
-        f"stdout: {result.stdout}\n"
-        f"stderr: {result.stderr}"
-    )
-
-
-# ---------------------------------------------------------------------------
 # AC-4: scripts/check_credentials.py --help
 # ---------------------------------------------------------------------------
 

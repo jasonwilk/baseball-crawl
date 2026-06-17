@@ -13,14 +13,13 @@
 - `docs/admin/agent-guide.md` -- Agent ecosystem overview and workflow guide
 
 ## Coaching Docs -- File Map
-- `docs/coaching/README.md` -- Entry point for coaching staff (dashboard is live; includes auto-sync and game coverage intro as of E-181)
-- `docs/coaching/scouting-reports.md` -- Dashboard layout, schedule/scouting views, game coverage indicator, empty states, spray charts, printing, reading rate stats
-- `docs/coaching/standalone-reports.md` -- Shareable scouting snapshots: when to use, how to use, 14-day expiry, comparison table vs. dashboard
+- `docs/coaching/README.md` -- Entry point for coaching staff (reports-first; links to standalone-reports.md and understanding-stats.md as of E-239)
+- `docs/coaching/standalone-reports.md` -- Shareable scouting snapshots: when to use, how to use, 14-day expiry, no-data guidance (scouting-reports.md removed in E-239)
 - `docs/coaching/understanding-stats.md` -- Plain-language stats glossary (OBP, SLG, K%, BB%, BABIP, K/9, BB/9, K/BB, FIP) with sample size guidance
 
 ## Conventions
 - **Last updated line format**: `*Last updated: YYYY-MM-DD | Source: E-NNN (description), E-NNN-SS (description)*`
-- Pipeline commands documented in operations.md under the Admin Team Management section (CLI subsections follow the UI section)
+- Pipeline commands documented in operations.md under `## Data Maintenance` (Admin Team Management section removed in E-239)
 - Schema changes go in architecture.md under `## Schema Changes`, newest first
 - Standalone report run-record / trust-flag operator docs live in operations.md under `### Report Generation Run Records` (inside Standalone Reports section, after verify-aggregates)
 - Coaching explanations should not mention technical details (routes, SQL, Python modules)

@@ -802,9 +802,8 @@ def dedup_team_players(
             Use ``False`` when the caller already has an open transaction
             (Hook 1 inside ScoutingLoader), ``True`` when the caller owns
             the connection (Hook 2 in orchestrators).
-        recompute_aggregates: When ``True`` (default -- every standalone
-            caller: the ``bb data dedup-players`` CLI and the member-sync
-            Hook-2 post-spray dedup), recompute season aggregates for the
+        recompute_aggregates: When ``True`` (default -- the standalone
+            ``bb data dedup-players`` CLI caller), recompute season aggregates for the
             affected scopes after merging.  The two embedded load-path dedup
             calls (ScoutingLoader Hook 1) pass ``False`` because the canonical
             recompute runs once at end-of-load -- suppressing the redundant
@@ -878,8 +877,8 @@ def recompute_affected_seasons(
     E-237-03 (TN-11): the per-player ``recompute_season_batting`` /
     ``recompute_season_pitching`` writers have been consolidated away into the
     single canonical recompute in ``src.db.season_aggregates``.  This function
-    keeps its signature for standalone callers (the ``bb data dedup-players``
-    CLI and the member-sync Hook-2 post-spray dedup) but now reduces the
+    keeps its signature for the standalone ``bb data dedup-players``
+    CLI caller but now reduces the
     affected ``(player_id, team_id, season_id)`` tuples to their distinct
     ``(team_id, season_id)`` scopes and runs the scope-level canonical
     recompute once per scope.  Slightly broader than the prior per-player

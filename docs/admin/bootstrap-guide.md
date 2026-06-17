@@ -1,37 +1,19 @@
 # Operator Bootstrap Guide
 
-This guide walks you through getting the baseball-crawl system from zero to data in the database. It covers both credential capture paths, the bootstrap command, and common troubleshooting scenarios.
+This guide covers capturing GameChanger credentials from scratch. For the full first-run workflow (credentials through generating your first report), see [Post-Reset Onboarding Guide](post-reset-guide.md).
 
 ---
 
 ## Quick Start
 
-Three steps to get data flowing:
+Capture credentials -- primary path:
 
-**1. Capture credentials** -- Primary path:
-
-- **Web (email + password)**: Run `bb creds setup web`. This performs the full login flow using your GameChanger email and password, auto-generates a device ID, and writes all web credentials to `.env`.
+**Web (email + password)**: Run `bb creds setup web`. This performs the full login flow using your GameChanger email and password, auto-generates a device ID, and writes all web credentials to `.env`.
 
 Fallback alternatives (if `bb creds setup web` is unavailable):
 
 - **Proxy (iPhone)**: Start mitmproxy on your Mac, configure your iPhone to use it, open GameChanger on the phone. Credentials are written to `.env` automatically. See [Credential Capture: Proxy](#credential-capture-proxy) below.
 - **Curl (browser)**: Copy a request from Chrome DevTools, save it to `secrets/gamechanger-curl.txt`, and run `bb creds import`. See [Credential Capture: Curl](#credential-capture-curl) below.
-
-**2. Run the bootstrap command**:
-
-```bash
-python scripts/bootstrap.py
-```
-
-Also available as `bb data sync`.
-
-This validates credentials, checks team configuration, crawls data from the GameChanger API, and loads it into the database.
-
-**3. Check the dashboard**:
-
-```bash
-open http://localhost:8001/dashboard
-```
 
 ---
 
@@ -119,68 +101,6 @@ This reads `secrets/gamechanger-curl.txt`, extracts the `gc-token` and `gc-devic
 
 ---
 
-## Bootstrap Command
-
-`python scripts/bootstrap.py` (also available as `bb data sync`) runs four stages in order:
-
-1. **Credential check** -- validates `.env` credentials against the API (`GET /me/user`)
-2. **Team config check** -- verifies `config/teams.yaml` has at least one real team ID
-3. **Crawl** -- fetches data from the GameChanger API
-4. **Load** -- writes crawled data into the SQLite database
-
-If either pre-flight check fails, the pipeline exits early with a clear message. Crawl failures are non-fatal -- any partial data that was fetched is still loaded.
-
-### Flags
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| _(none)_ | -- | Full pipeline: validate + crawl + load |
-| `--check-only` | off | Run credential and team config checks only. Skip crawl and load. Useful for verifying credentials before a scheduled run. |
-| `--profile web` | `web` | Use web browser headers for API requests. Use this when credentials were captured from a browser via DevTools curl. |
-| `--profile mobile` | -- | Use iOS mobile app headers for API requests. Use this when credentials were captured from the iPhone via the proxy. |
-| `--dry-run` | off | Preview mode: no real API calls, no database writes. Passed through to both crawl and load stages. |
-
-### Examples
-
-```bash
-# Validate only -- confirm credentials and team config before crawling
-python scripts/bootstrap.py --check-only
-# also: bb data sync --check-only
-
-# Full pipeline with browser credentials (default)
-python scripts/bootstrap.py
-# also: bb data sync
-
-# Full pipeline with credentials captured from iPhone
-python scripts/bootstrap.py --profile mobile
-# also: bb data sync --profile mobile
-
-# Preview what would run without making any real calls or writes
-python scripts/bootstrap.py --dry-run
-# also: bb data sync --dry-run
-```
-
-### Reading the Output
-
-The bootstrap script prints stage-by-stage status and a summary at the end:
-
-```
-Checking credentials...
-  Credentials valid -- logged in as Jason Smith
-Checking team configuration...
-  3 team(s) configured: LSB Varsity, LSB JV, LSB Freshman
-Crawling data...
-Loading data...
-
---- Bootstrap summary ---
-  credentials: valid
-  teams: 3 team(s) configured: LSB Varsity, LSB JV, LSB Freshman
-  crawl: success
-  load: success
-```
-
----
-
 ## Credential Lifecycle
 
 ### Token Architecture
@@ -217,11 +137,9 @@ Credentials expired -- refresh via proxy capture        # exit code 1, recapture
 Missing required credential(s): GAMECHANGER_REFRESH_TOKEN_WEB  # exit code 2, never captured
 ```
 
-### What Happens When Credentials Expire Mid-Crawl
+### What Happens When Credentials Expire Mid-Operation
 
-If credentials expire while a crawl is in progress, crawlers report a `CredentialExpiredError` and stop making API calls. Any data that was already fetched and written to disk is still loaded into the database in the load stage. The bootstrap summary will show `crawl: warning (errors)` and `load: success`.
-
-After recapturing credentials, re-run the full bootstrap (`python scripts/bootstrap.py` or `bb data sync`) to fill in any data that was missed.
+If credentials expire while a report is being generated, the generator reports a `CredentialExpiredError` and stops making API calls. After recapturing credentials, re-run `bb report generate <public_id>` to produce the report.
 
 ---
 
@@ -237,19 +155,6 @@ No credentials have been captured yet, or the `.env` file is missing required ke
 ### "Credentials expired"
 
 The stored refresh token has passed its 14-day lifetime (or the access token has expired and programmatic refresh is failing). Recapture using either path above. The proxy path is faster (automated extraction); the curl path works without the proxy running.
-
-### "No teams configured"
-
-`config/teams.yaml` still contains placeholder team IDs (`REPLACE_WITH_*`). You need to add real GameChanger team IDs before crawling. Two options:
-
-- Edit `config/teams.yaml` directly and replace placeholder IDs with your actual team UUIDs from GameChanger
-- Use the admin UI at `/admin/teams` once it is available (E-042)
-
-### "Crawl failed but load succeeded"
-
-This is expected behavior when the crawl encounters errors partway through. The load stage runs regardless of crawl exit code, and any data fetched before the error was loaded successfully. The summary will show `crawl: warning (errors)`.
-
-To get the missed data: recapture credentials if they expired, then re-run `python scripts/bootstrap.py`. The crawl is designed to be idempotent -- re-running it does not duplicate data.
 
 ### "Cannot reach GameChanger API"
 
@@ -271,7 +176,8 @@ Check:
 - [docs/admin/mitmproxy-guide.md](mitmproxy-guide.md) -- Full proxy setup, iPhone and browser configuration, certificate management, and proxy troubleshooting
 - [docs/admin/operations.md](operations.md) -- General operations: deployment, database backup, credential rotation, monitoring
 - [docs/admin/getting-started.md](getting-started.md) -- Initial development environment setup from a fresh clone
+- [docs/admin/post-reset-guide.md](post-reset-guide.md) -- End-to-end workflow from reset to first report
 
 ---
 
-*Last updated: 2026-03-10 | Story: E-086 (mobile credentials), E-055 (unified CLI), E-050-04*
+*Last updated: 2026-06-17 | Source: E-086 (mobile credentials), E-055 (unified CLI), E-050-04 (original), E-239 (trimmed to credential setup only; removed bootstrap/sync sections)*

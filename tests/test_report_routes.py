@@ -307,7 +307,7 @@ class TestEdgeCases:
 # AC-8 (testable half): the reports flow is the live product surface. A
 # seeded report's share link must still serve via the public serve route,
 # and the admin reports page (the post-login landing) must NOT render the
-# quarantined /dashboard bottom-nav links or the removed Dashboard header
+# removed /dashboard bottom-nav links or the removed Dashboard header
 # link. /admin/reports requires admin (auth-scope shift, epic Risks), so the
 # canary uses an admin-authenticated client.
 # ---------------------------------------------------------------------------
@@ -358,14 +358,14 @@ def _make_admin_db(tmp_path: Path) -> tuple[Path, str, str]:
 
 
 class TestAdminReportsSuppressesDashboardNav:
-    """E-238-05 AC-4/AC-5: /admin/reports hides the quarantined dashboard nav."""
+    """E-239: /admin/reports renders without the removed dashboard nav."""
 
     def test_admin_reports_has_no_dashboard_nav(self, tmp_path: Path) -> None:
         """GET /admin/reports renders without bottom dashboard nav or header link.
 
-        is_admin_page=True on the list_reports context (AC-5) suppresses
-        base.html's bottom fixed nav (the 3 /dashboard* links), and AC-4
-        removed the page's own Dashboard header link.
+        E-239 removed base.html's bottom fixed nav (the 3 /dashboard* links)
+        and the page's own Dashboard header link; this canary asserts no
+        /dashboard links remain.
         """
         db_path, email, raw_token = _make_admin_db(tmp_path)
         with patch.dict(
@@ -380,8 +380,8 @@ class TestAdminReportsSuppressesDashboardNav:
         assert response.status_code == 200
         html = response.text
         assert "Reports" in html
-        # Bottom fixed nav (suppressed by is_admin_page) -- its /dashboard* links
-        # and labels must be absent.
+        # The bottom dashboard nav was removed from base.html (E-239) -- its
+        # /dashboard* links and labels must be absent.
         assert "/dashboard/batting" not in html
         assert "/dashboard/pitching" not in html
         assert ">Batting<" not in html

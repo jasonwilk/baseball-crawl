@@ -1,6 +1,6 @@
 # Post-Reset Onboarding Guide
 
-This guide covers the end-to-end workflow for going from a fresh `bb db reset` to a working local environment with real GameChanger data.
+This guide covers the end-to-end workflow for going from a fresh `bb db reset` to a working local environment with live scouting data.
 
 ---
 
@@ -28,7 +28,7 @@ Expected: `{"status": "ok", "db": "connected"}`.
 
 ## Step 2: Set Up Credentials
 
-Credentials must be in `.env` before crawling. Two parts: the client key and the API tokens.
+Credentials must be in `.env` before generating reports. Two parts: the client key and the API tokens.
 
 ### 2a. Extract or verify the client key
 
@@ -46,8 +46,6 @@ To apply an updated key:
 bb creds extract-key --apply
 ```
 
-`bb creds extract-key` handles multiple `EDEN_AUTH_CLIENT_KEY` candidates automatically, selecting the correct one by matching against `GAMECHANGER_CLIENT_ID_WEB`.
-
 ### 2b. Import API credentials
 
 If you don't have a refresh token yet (fresh reset with no `.env`), capture credentials from your browser:
@@ -59,12 +57,6 @@ If you don't have a refresh token yet (fresh reset with no `.env`), capture cred
 
 ```bash
 bb creds import
-```
-
-`bb creds import` accepts curl commands, raw JSON token payloads, and bare JWT strings -- paste any of these into `secrets/gamechanger-curl.txt` before running, or pass inline:
-
-```bash
-bb creds import --curl 'curl ...'
 ```
 
 ### 2c. Refresh tokens
@@ -85,84 +77,36 @@ All sections should show `[OK]`. If `[XX]` appears anywhere, see [docs/admin/cre
 
 ---
 
-## Step 3: Add Teams via Admin UI
+## Step 3: Generate a Report
 
-The admin UI at `/admin/teams` is the primary path for adding real teams to the database.
-
-**1. Open the teams page:**
-
-Navigate to `http://localhost:8000/admin/teams`. The Admin link is in the top navigation bar.
-
-**2. Click Add Team** and paste a GameChanger team URL:
-
-```
-https://web.gc.com/teams/XXXXXX/schedule
-```
-
-The URL parser also accepts any URL containing `/teams/{id}` or a bare public ID slug.
-
-**3. Review the confirm page:**
-
-The system resolves the team name, public ID, and GameChanger UUID automatically. On the confirm page:
-
-- Set **Membership** to **Member** for your own teams (LSB Varsity, JV, Freshman, Reserve), or **Tracked** for opponents.
-- Optionally assign a **Program** (e.g., Lincoln Standing Bear HS) and **Division** (e.g., varsity, jv).
-
-**4. Click Add Team** to save.
-
-Repeat for each member team.
-
----
-
-## Step 4: Verify Admin Dashboard Access
-
-Admin users see all teams in the database automatically -- no per-team access grants are needed. A user is an admin if their email matches the `ADMIN_EMAIL` environment variable or if their `users.role` is set to `admin`.
-
-To verify:
-
-1. Navigate to `http://localhost:8000/` (or any team dashboard page).
-2. The dashboard should immediately display stats for all teams you added in step 3. (If you have multiple member teams, a team selector will appear.)
-
-If no teams appear, confirm that teams were added successfully in step 3 (check `/admin/teams`) and that the crawl in step 5 has been run. Data is populated by the crawl, not by the reset.
-
----
-
-## Step 5: Run the Initial Crawl
-
-With teams in the database, pull real data:
+With credentials in place, generate your first scouting report:
 
 ```bash
-bb data crawl --source db
-bb data load --source db
+bb report generate <public_id>
 ```
 
-`--source db` reads active member teams directly from the database (the teams you added in step 3).
+Replace `<public_id>` with a GameChanger team's public URL slug (find it in the team's GameChanger URL, e.g., `https://web.gc.com/teams/a1GFM9Ku0BbF/schedule` → slug is `a1GFM9Ku0BbF`).
 
-Check the results:
+The command crawls the team's schedule and stats, renders a self-contained HTML report, and prints a shareable link. The report is accessible from `/admin/reports`.
 
-```bash
-bb status
-```
-
-Alternatively, the full pipeline in one command:
+Check the reports list:
 
 ```bash
-bb data sync
+bb report list
 ```
 
 ---
 
 ## Troubleshooting
 
-### "No teams configured" / empty crawl
+### "Missing required credential(s)"
 
-Make sure teams were added via the admin UI and that the app has been restarted after the reset (`docker compose up -d --build app`).
+No credentials have been captured yet, or the `.env` file is missing required keys. Run one of the credential capture paths:
 
-### Dashboard is empty after step 4
+- Proxy path: see [Bootstrap Guide](bootstrap-guide.md#credential-capture-proxy)
+- Curl path: see [Bootstrap Guide](bootstrap-guide.md#credential-capture-curl)
 
-The database starts empty after a reset -- there is no pre-loaded data. Run the crawl in step 5 to populate it. If the dashboard is still empty after crawling, check `bb status` for crawl errors and confirm credentials are valid (`bb creds check --profile web`).
-
-### Credential errors during crawl
+### Credential errors during report generation
 
 Run `bb creds check --profile web` and follow the Decision Tree in [docs/admin/credential-refresh.md](credential-refresh.md).
 
@@ -176,9 +120,9 @@ Check container logs: `docker compose logs app`. The most common cause is a migr
 
 - [Bootstrap Guide](bootstrap-guide.md) -- Full credential capture paths (proxy, curl, mobile)
 - [Credential Refresh](credential-refresh.md) -- Start here when auth fails
-- [Operations](operations.md) -- Team management, database backup, and monitoring
+- [Operations](operations.md) -- Standalone reports reference, database backup, and monitoring
 - [Getting Started](getting-started.md) -- First-time dev environment setup from a fresh clone
 
 ---
 
-*Last updated: 2026-05-30 | Source: E-228 (empty reset, admin-sees-all), E-127-05 (original)*
+*Last updated: 2026-06-17 | Source: E-228 (empty reset, admin-sees-all), E-127-05 (original), E-239 (rewritten to reports-first: removed dashboard step, member-sync step)*

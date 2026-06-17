@@ -1,4 +1,4 @@
-"""Spray chart rendering module for the baseball-crawl dashboard.
+"""Spray chart rendering module for baseball-crawl reports.
 
 Generates a PNG spray chart image from a list of ball-in-play events,
 replicating GameChanger's exact field geometry, coordinate transforms,
@@ -468,7 +468,7 @@ def render_spray_chart(
             - ``play_result`` (str | None): e.g. ``"single"``, ``"batter_out"``
             - ``play_type`` (str | None): e.g. ``"ground_ball"``, ``"fly_ball"``
         title: Optional chart title rendered above the image.  When ``None``
-            no title is drawn (dashboard routes use the HTML card heading).
+            no title is drawn (the report card supplies the heading).
 
     Returns:
         PNG image as raw bytes.
