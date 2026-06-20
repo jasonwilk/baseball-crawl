@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
-from unittest.mock import patch
+import sqlite3
+from pathlib import Path
+from unittest.mock import MagicMock, patch
 
+import pytest
 from typer.testing import CliRunner
 
-from src.cli.report import app
+from src.cli.report import _apply_opponent_mapping, app
+from src.gamechanger.team_resolver import TeamProfile
 from src.reports.generator import CleanupResult, GenerationResult
+from tests.conftest import load_real_schema
 
 runner = CliRunner()
 
@@ -250,3 +255,356 @@ class TestCleanupCommand:
         result = runner.invoke(app, ["cleanup", "--help"])
         assert result.exit_code == 0
         assert "expired" in result.output.lower()
+
+
+# ---------------------------------------------------------------------------
+# bb report map-opponent (E-240-05)
+# ---------------------------------------------------------------------------
+
+_ROOT = "root-aaaa-0000"
+_PUBLIC_ID = "dD9PtF0YbKad"
+
+
+def _seed_db_with_pending(
+    db_path: Path, *, team_ids: tuple[int, ...] = (1,), root_team_id: str = _ROOT
+) -> None:
+    """Create a disk DB with the real schema + a pending opponent_links row per team."""
+    conn = sqlite3.connect(str(db_path))
+    try:
+        load_real_schema(conn)
+        for tid in team_ids:
+            conn.execute(
+                "INSERT INTO teams (id, name, membership_type) "
+                "VALUES (?, ?, 'member')",
+                (tid, f"LSB Team {tid}"),
+            )
+            conn.execute(
+                "INSERT INTO opponent_links (our_team_id, root_team_id, opponent_name) "
+                "VALUES (?, ?, ?)",
+                (tid, root_team_id, "Typed Opp Name"),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _link_rows(db_path: Path, root_team_id: str = _ROOT) -> list[sqlite3.Row]:
+    conn = sqlite3.connect(str(db_path))
+    conn.row_factory = sqlite3.Row
+    try:
+        return conn.execute(
+            "SELECT * FROM opponent_links WHERE root_team_id = ? ORDER BY our_team_id",
+            (root_team_id,),
+        ).fetchall()
+    finally:
+        conn.close()
+
+
+@pytest.fixture()
+def mapped_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """A disk DB with one pending opponent_links row, wired via DATABASE_PATH."""
+    db_path = tmp_path / "app.db"
+    _seed_db_with_pending(db_path)
+    monkeypatch.setenv("DATABASE_PATH", str(db_path))
+    return db_path
+
+
+def _profile(name: str = "Resolved Opp HS") -> TeamProfile:
+    return TeamProfile(public_id=_PUBLIC_ID, name=name, sport="baseball")
+
+
+class TestApplyOpponentMappingHelper:
+    """Direct tests of the pure DB helper (in-memory, no CLI)."""
+
+    def _conn(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(":memory:")
+        load_real_schema(conn)
+        conn.execute(
+            "INSERT INTO teams (id, name, membership_type) VALUES (1, 'LSB', 'member')"
+        )
+        conn.execute(
+            "INSERT INTO opponent_links (our_team_id, root_team_id, opponent_name) "
+            "VALUES (1, ?, 'Typed')",
+            (_ROOT,),
+        )
+        conn.commit()
+        return conn
+
+    def test_positive_update_sets_public_id_method_resolved_at(self):
+        conn = self._conn()
+        n = _apply_opponent_mapping(
+            conn, _ROOT, public_id=_PUBLIC_ID, method="operator"
+        )
+        assert n == 1
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT * FROM opponent_links WHERE root_team_id = ?", (_ROOT,)
+        ).fetchone()
+        assert row["public_id"] == _PUBLIC_ID
+        assert row["resolution_method"] == "operator"
+        assert row["resolved_at"] is not None
+        # root_team_id is preserved as-is and never written into a gc_uuid column
+        # (opponent_links has no gc_uuid column; this asserts namespace safety).
+        assert row["root_team_id"] == _ROOT
+
+    def test_no_presence_update_nulls_public_id_sets_method(self):
+        conn = self._conn()
+        n = _apply_opponent_mapping(
+            conn, _ROOT, public_id=None, method="no_presence"
+        )
+        assert n == 1
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT * FROM opponent_links WHERE root_team_id = ?", (_ROOT,)
+        ).fetchone()
+        assert row["public_id"] is None
+        assert row["resolution_method"] == "no_presence"
+        assert row["resolved_at"] is not None
+
+    def test_no_pending_row_returns_zero_and_writes_nothing(self):
+        conn = self._conn()
+        n = _apply_opponent_mapping(
+            conn, "different-root", public_id=_PUBLIC_ID, method="operator"
+        )
+        assert n == 0
+        # The seeded row for _ROOT is untouched.
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT * FROM opponent_links WHERE root_team_id = ?", (_ROOT,)
+        ).fetchone()
+        assert row["resolution_method"] is None
+
+    def test_already_resolved_row_not_clobbered(self):
+        conn = self._conn()
+        # First resolve positively.
+        _apply_opponent_mapping(conn, _ROOT, public_id=_PUBLIC_ID, method="operator")
+        # A second call finds no PENDING row (method is no longer NULL) -> 0.
+        n = _apply_opponent_mapping(
+            conn, _ROOT, public_id="other-slug", method="operator"
+        )
+        assert n == 0
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT * FROM opponent_links WHERE root_team_id = ?", (_ROOT,)
+        ).fetchone()
+        assert row["public_id"] == _PUBLIC_ID  # unchanged
+
+
+class TestMapOpponentCommand:
+    """CLI-level tests for bb report map-opponent."""
+
+    def test_positive_bare_public_id_updates_and_shows_name(self, mapped_db: Path):
+        with patch("src.cli.report.resolve_team", return_value=_profile()):
+            result = runner.invoke(app, ["map-opponent", _ROOT, _PUBLIC_ID])
+
+        assert result.exit_code == 0
+        assert "Resolved Opp HS" in result.output  # AC-5 name display
+        rows = _link_rows(mapped_db)
+        assert rows[0]["public_id"] == _PUBLIC_ID
+        assert rows[0]["resolution_method"] == "operator"
+        assert rows[0]["resolved_at"] is not None
+
+    def test_positive_full_url_target_parsed(self, mapped_db: Path):
+        url = f"https://web.gc.com/teams/{_PUBLIC_ID}/2026-some-slug"
+        with patch("src.cli.report.resolve_team", return_value=_profile()):
+            result = runner.invoke(app, ["map-opponent", _ROOT, url])
+
+        assert result.exit_code == 0
+        rows = _link_rows(mapped_db)
+        assert rows[0]["public_id"] == _PUBLIC_ID  # AC-4: URL -> public_id
+
+    def test_uuid_target_rejected(self, mapped_db: Path):
+        uuid = "72bb77d8-54ca-42d2-8547-9da4880d0cb4"
+        result = runner.invoke(app, ["map-opponent", _ROOT, uuid])
+
+        assert result.exit_code == 2
+        assert "UUID" in result.output
+        # No write occurred.
+        rows = _link_rows(mapped_db)
+        assert rows[0]["resolution_method"] is None
+
+    def test_multi_team_updates_all_rows(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        db_path = tmp_path / "app.db"
+        _seed_db_with_pending(db_path, team_ids=(1, 2, 3))
+        monkeypatch.setenv("DATABASE_PATH", str(db_path))
+
+        with patch("src.cli.report.resolve_team", return_value=_profile()):
+            result = runner.invoke(app, ["map-opponent", _ROOT, _PUBLIC_ID])
+
+        assert result.exit_code == 0
+        assert "3 team(s)" in result.output  # AC-2
+        rows = _link_rows(db_path)
+        assert len(rows) == 3
+        assert all(r["public_id"] == _PUBLIC_ID for r in rows)
+        assert all(r["resolution_method"] == "operator" for r in rows)
+
+    def test_no_presence_form_sets_no_presence_state(self, mapped_db: Path):
+        result = runner.invoke(app, ["map-opponent", _ROOT, "--no-presence"])
+
+        assert result.exit_code == 0
+        assert "no GameChanger presence" in result.output
+        rows = _link_rows(mapped_db)
+        assert rows[0]["public_id"] is None
+        assert rows[0]["resolution_method"] == "no_presence"
+        assert rows[0]["resolved_at"] is not None
+
+    def test_no_presence_with_target_errors(self, mapped_db: Path):
+        result = runner.invoke(
+            app, ["map-opponent", _ROOT, _PUBLIC_ID, "--no-presence"]
+        )
+        assert result.exit_code == 2
+        assert "no <target>" in result.output
+        rows = _link_rows(mapped_db)
+        assert rows[0]["resolution_method"] is None  # no write
+
+    def test_missing_target_without_no_presence_errors(self, mapped_db: Path):
+        result = runner.invoke(app, ["map-opponent", _ROOT])
+        assert result.exit_code == 2
+        assert "Missing <target>" in result.output
+        rows = _link_rows(mapped_db)
+        assert rows[0]["resolution_method"] is None
+
+    def test_no_pending_row_positive_errors_and_no_write(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        db_path = tmp_path / "app.db"
+        _seed_db_with_pending(db_path)  # pending row exists for _ROOT only
+        monkeypatch.setenv("DATABASE_PATH", str(db_path))
+
+        with patch("src.cli.report.resolve_team", return_value=_profile()):
+            result = runner.invoke(
+                app, ["map-opponent", "unknown-root", _PUBLIC_ID]
+            )
+
+        assert result.exit_code == 1
+        assert "No pending opponent" in result.output
+        # The real pending row is untouched.
+        rows = _link_rows(db_path)
+        assert rows[0]["resolution_method"] is None
+
+    def test_no_pending_row_no_presence_errors(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        db_path = tmp_path / "app.db"
+        _seed_db_with_pending(db_path)
+        monkeypatch.setenv("DATABASE_PATH", str(db_path))
+
+        result = runner.invoke(
+            app, ["map-opponent", "unknown-root", "--no-presence"]
+        )
+        assert result.exit_code == 1
+        assert "No pending opponent" in result.output
+
+    def test_name_lookup_failure_still_applies_mapping(self, mapped_db: Path):
+        """AC-5: a failed display-name lookup warns but does not abort."""
+        from src.gamechanger.exceptions import TeamNotFoundError
+
+        with patch(
+            "src.cli.report.resolve_team",
+            side_effect=TeamNotFoundError("404"),
+        ):
+            result = runner.invoke(app, ["map-opponent", _ROOT, _PUBLIC_ID])
+
+        assert result.exit_code == 0
+        assert "Warning" in result.output
+        rows = _link_rows(mapped_db)
+        assert rows[0]["public_id"] == _PUBLIC_ID
+        assert rows[0]["resolution_method"] == "operator"
+
+    def test_help(self):
+        result = runner.invoke(app, ["map-opponent", "--help"])
+        assert result.exit_code == 0
+        assert "root_team_id" in result.output.lower()
+
+
+class TestMapOpponentLadderTerminality:
+    """AC-7: a subsequent ladder run reuses the operator mapping (both forms)."""
+
+    def _conn_with_team(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(":memory:")
+        load_real_schema(conn)
+        conn.execute(
+            "INSERT INTO teams (id, name, membership_type) VALUES (1, 'LSB', 'member')"
+        )
+        conn.execute(
+            "INSERT INTO opponent_links (our_team_id, root_team_id, opponent_name) "
+            "VALUES (1, ?, 'Typed')",
+            (_ROOT,),
+        )
+        conn.commit()
+        return conn
+
+    def test_operator_positive_mapping_auto_resolves_on_next_run(self):
+        from src.gamechanger.crawlers.opponents import OpponentRecord
+        from src.gamechanger.opponent_ladder import (
+            ResolutionOutcome,
+            resolve_opponent,
+        )
+
+        conn = self._conn_with_team()
+        _apply_opponent_mapping(conn, _ROOT, public_id=_PUBLIC_ID, method="operator")
+
+        client = MagicMock()  # must NOT be called
+        registry = [
+            OpponentRecord(
+                root_team_id=_ROOT,
+                name="Typed",
+                progenitor_team_id="prog-x",
+                has_progenitor=True,
+                owning_team_id="own",
+                is_hidden=False,
+            )
+        ]
+        result = resolve_opponent(
+            conn=conn,
+            client=client,
+            our_team_id=1,
+            opponent_id=_ROOT,
+            opponent_name="Typed",
+            registry=registry,
+        )
+
+        assert result.outcome is ResolutionOutcome.RESOLVED
+        assert result.public_id == _PUBLIC_ID
+        assert result.method == "operator"
+        assert result.from_cache is True
+        client.get.assert_not_called()
+
+    def test_no_presence_mapping_is_terminal_not_reattempted(self):
+        from src.gamechanger.crawlers.opponents import OpponentRecord
+        from src.gamechanger.opponent_ladder import (
+            ResolutionOutcome,
+            resolve_opponent,
+        )
+
+        conn = self._conn_with_team()
+        _apply_opponent_mapping(conn, _ROOT, public_id=None, method="no_presence")
+
+        client = MagicMock()  # must NOT be called (resurrection-bug guard)
+        registry = [
+            OpponentRecord(
+                root_team_id=_ROOT,
+                name="Typed",
+                progenitor_team_id="prog-x",
+                has_progenitor=True,
+                owning_team_id="own",
+                is_hidden=False,
+            )
+        ]
+        result = resolve_opponent(
+            conn=conn,
+            client=client,
+            our_team_id=1,
+            opponent_id=_ROOT,
+            opponent_name="Typed",
+            registry=registry,
+        )
+
+        # no_presence is terminal: NOT re-attempted.
+        client.get.assert_not_called()
+        client.post_json.assert_not_called()
+        assert result.from_cache is True
+        assert result.method == "no_presence"
+        assert result.outcome is ResolutionOutcome.UNRESOLVED_MAPPABLE

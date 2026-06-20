@@ -942,3 +942,246 @@ class TestWebauthnChallengesMigration:
         conn.close()
         assert row is not None
 
+
+class TestScheduledReportRunsMigration:
+    """Verify migration 005_scheduled_report_runs.sql (E-240-03, TN-6).
+
+    Asserts the new audit table exists with the documented column set, that
+    both CHECK vocabularies (`resolution_outcome` and `delivery_status`) and
+    the `UNIQUE(own_team_id, opponent_root_team_id, game_date)` idempotency
+    index are present and enforced, and that `report_id` is ON DELETE SET NULL
+    (NOT cascade -- the audit-survival invariant). Schema tests follow
+    Test-Validates-Spec against the migration file.
+    """
+
+    @staticmethod
+    def _insert_slot_fixture(
+        conn: sqlite3.Connection, **cols: object
+    ) -> tuple[int, str]:
+        """Insert a minimal team + scheduled_report_runs row.
+
+        Returns (own_team_id, game_date). Extra columns override/extend the
+        minimal NOT-NULL set so individual CHECK/UNIQUE tests stay terse.
+        """
+        team_id = conn.execute(
+            "INSERT INTO teams (name, membership_type, source, is_active) "
+            "VALUES ('Sched Fixture', 'tracked', 'manual', 1);"
+        ).lastrowid
+        row = {
+            "game_date": "2026-06-20",
+            "own_team_id": team_id,
+            "opponent_root_team_id": "root-xyz",
+            "resolution_outcome": "auto_resolved",
+        }
+        row.update(cols)
+        keys = list(row.keys())
+        placeholders = ",".join("?" for _ in keys)
+        conn.execute(
+            f"INSERT INTO scheduled_report_runs ({','.join(keys)}) "
+            f"VALUES ({placeholders});",
+            [row[k] for k in keys],
+        )
+        return team_id, str(row["game_date"])
+
+    def test_table_exists(self, fresh_db: Path) -> None:
+        """After migrations, scheduled_report_runs table exists."""
+        run_migrations(db_path=fresh_db)
+        conn = sqlite3.connect(str(fresh_db))
+        row = conn.execute(
+            "SELECT name FROM sqlite_master "
+            "WHERE type='table' AND name='scheduled_report_runs';"
+        ).fetchone()
+        conn.close()
+        assert row is not None, "scheduled_report_runs table not found"
+
+    def test_has_documented_columns(self, fresh_db: Path) -> None:
+        """Column set matches TN-6 exactly (no extra/missing columns)."""
+        run_migrations(db_path=fresh_db)
+        conn = sqlite3.connect(str(fresh_db))
+        columns = {
+            row[1]
+            for row in conn.execute("PRAGMA table_info(scheduled_report_runs);")
+        }
+        conn.close()
+        expected = {
+            "id",
+            "game_date",
+            "own_team_id",
+            "opponent_root_team_id",
+            "opponent_name",
+            "resolution_outcome",
+            "resolved_public_id",
+            "report_id",
+            "report_slug",
+            "delivery_status",
+            "error_message",
+            "created_at",
+            "updated_at",
+        }
+        assert columns == expected, (
+            f"Column set drift. Missing: {expected - columns}; "
+            f"Unexpected: {columns - expected}"
+        )
+
+    def test_unique_slot_index_present(self, fresh_db: Path) -> None:
+        """A UNIQUE index exists on (own_team_id, opponent_root_team_id, game_date)."""
+        run_migrations(db_path=fresh_db)
+        conn = sqlite3.connect(str(fresh_db))
+        indexes = conn.execute(
+            "PRAGMA index_list(scheduled_report_runs);"
+        ).fetchall()
+        found = False
+        for _seq, name, unique, *_rest in indexes:
+            if not unique:
+                continue
+            cols = [
+                r[2] for r in conn.execute(f"PRAGMA index_info({name!r});").fetchall()
+            ]
+            if cols == ["own_team_id", "opponent_root_team_id", "game_date"]:
+                found = True
+                break
+        conn.close()
+        assert found, (
+            "No UNIQUE index on "
+            "scheduled_report_runs(own_team_id, opponent_root_team_id, game_date)"
+        )
+
+    def test_slot_uniqueness_enforced(self, fresh_db: Path) -> None:
+        """Two rows with the same (team, opponent, date) violate the UNIQUE index."""
+        run_migrations(db_path=fresh_db)
+        conn = sqlite3.connect(str(fresh_db))
+        conn.execute("PRAGMA foreign_keys = ON;")
+        team_id, game_date = self._insert_slot_fixture(conn)
+        conn.commit()
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                "INSERT INTO scheduled_report_runs "
+                "(game_date, own_team_id, opponent_root_team_id, resolution_outcome) "
+                "VALUES (?, ?, 'root-xyz', 'auto_resolved');",
+                (game_date, team_id),
+            )
+        conn.close()
+
+    def test_resolution_outcome_check_accepts_vocabulary(self, fresh_db: Path) -> None:
+        """resolution_outcome accepts the full TN-11 four-state vocabulary."""
+        run_migrations(db_path=fresh_db)
+        conn = sqlite3.connect(str(fresh_db))
+        conn.execute("PRAGMA foreign_keys = ON;")
+        for i, value in enumerate(
+            (
+                "auto_resolved",
+                "unresolved_mappable",
+                "no_gc_presence",
+                "deferred_placeholder",
+            )
+        ):
+            # Distinct opponent token per row keeps the UNIQUE index from firing.
+            self._insert_slot_fixture(
+                conn, opponent_root_team_id=f"root-{i}", resolution_outcome=value
+            )
+        conn.commit()
+        conn.close()
+
+    def test_resolution_outcome_check_rejects_bad_value(self, fresh_db: Path) -> None:
+        """resolution_outcome CHECK rejects values outside the four-state set."""
+        run_migrations(db_path=fresh_db)
+        conn = sqlite3.connect(str(fresh_db))
+        conn.execute("PRAGMA foreign_keys = ON;")
+        with pytest.raises(sqlite3.IntegrityError):
+            self._insert_slot_fixture(conn, resolution_outcome="bogus")
+        conn.close()
+
+    def test_delivery_status_check_accepts_vocabulary_and_null(
+        self, fresh_db: Path
+    ) -> None:
+        """delivery_status accepts generated/no_games/failed/skipped and NULL."""
+        run_migrations(db_path=fresh_db)
+        conn = sqlite3.connect(str(fresh_db))
+        conn.execute("PRAGMA foreign_keys = ON;")
+        for i, value in enumerate(
+            ("generated", "no_games", "failed", "skipped", None)
+        ):
+            self._insert_slot_fixture(
+                conn, opponent_root_team_id=f"root-d{i}", delivery_status=value
+            )
+        conn.commit()
+        conn.close()
+
+    def test_delivery_status_check_rejects_bad_value(self, fresh_db: Path) -> None:
+        """delivery_status CHECK rejects values outside the four-state set."""
+        run_migrations(db_path=fresh_db)
+        conn = sqlite3.connect(str(fresh_db))
+        conn.execute("PRAGMA foreign_keys = ON;")
+        with pytest.raises(sqlite3.IntegrityError):
+            self._insert_slot_fixture(conn, delivery_status="delivered")
+        conn.close()
+
+    def test_report_id_on_delete_set_null_not_cascade(self, fresh_db: Path) -> None:
+        """AUDIT SURVIVAL: deleting the report NULLs report_id; the row SURVIVES.
+
+        The deliberate mirror-image of report_generation_runs' ON DELETE
+        CASCADE -- a scheduled_report_runs row is an audit record that must
+        outlive report cleanup. Run on an FK-ON connection so the FK action
+        fires.
+        """
+        run_migrations(db_path=fresh_db)
+        conn = sqlite3.connect(str(fresh_db))
+        conn.execute("PRAGMA foreign_keys = ON;")
+        report_id = _insert_report_fixture(conn)
+        team_id, game_date = self._insert_slot_fixture(
+            conn, report_id=report_id, delivery_status="generated"
+        )
+        conn.commit()
+
+        conn.execute("DELETE FROM reports WHERE id = ?;", (report_id,))
+        conn.commit()
+
+        row = conn.execute(
+            "SELECT report_id FROM scheduled_report_runs "
+            "WHERE own_team_id = ? AND game_date = ?;",
+            (team_id, game_date),
+        ).fetchone()
+        conn.close()
+        assert row is not None, "audit row was cascade-deleted with the report"
+        assert row[0] is None, "report_id should be NULLed by ON DELETE SET NULL"
+
+    def test_timestamp_defaults_are_sqlite_datetime(self, fresh_db: Path) -> None:
+        """created_at / updated_at default to SQLite datetime text (no T/Z)."""
+        run_migrations(db_path=fresh_db)
+        conn = sqlite3.connect(str(fresh_db))
+        conn.execute("PRAGMA foreign_keys = ON;")
+        team_id, game_date = self._insert_slot_fixture(conn)
+        conn.commit()
+        created, updated = conn.execute(
+            "SELECT created_at, updated_at FROM scheduled_report_runs "
+            "WHERE own_team_id = ? AND game_date = ?;",
+            (team_id, game_date),
+        ).fetchone()
+        conn.close()
+        for ts in (created, updated):
+            assert ts is not None and " " in ts and "T" not in ts and "Z" not in ts, (
+                f"timestamp default is not SQLite datetime text: {ts!r}"
+            )
+
+    def test_table_empty_on_fresh_db(self, fresh_db: Path) -> None:
+        """A freshly migrated DB has the table present with zero rows."""
+        run_migrations(db_path=fresh_db)
+        conn = sqlite3.connect(str(fresh_db))
+        count = conn.execute(
+            "SELECT COUNT(*) FROM scheduled_report_runs;"
+        ).fetchone()[0]
+        conn.close()
+        assert count == 0
+
+    def test_migration_idempotent_second_run(self, fresh_db: Path) -> None:
+        """A second run_migrations leaves the table intact (IF NOT EXISTS)."""
+        run_migrations(db_path=fresh_db)
+        run_migrations(db_path=fresh_db)
+        conn = sqlite3.connect(str(fresh_db))
+        row = conn.execute(
+            "SELECT name FROM sqlite_master "
+            "WHERE type='table' AND name='scheduled_report_runs';"
+        ).fetchone()
+        conn.close()
+        assert row is not None
+

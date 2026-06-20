@@ -1,7 +1,7 @@
 # E-240: Morning-of-Game Scheduled Reports
 
 ## Status
-`READY`
+`COMPLETED`
 <!-- Lifecycle: DRAFT → READY → ACTIVE → COMPLETED (or BLOCKED / ABANDONED) -->
 
 ## Overview
@@ -146,13 +146,13 @@ cannot be scouted. The TN-10 runbook note sets this expectation for the operator
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-240-01 | Authenticated list-crawlers (schedule + opponents-registry) + probe-confirmation tests | TODO | None | - |
-| E-240-02 | Schedule endpoint doc + opponent-resolution flow-doc refresh | TODO | None | - |
-| E-240-03 | Migration 005: `scheduled_report_runs` + cascade line; revive `opponent_links` as mapping store | TODO | None | - |
-| E-240-04 | Opponent resolution ladder (rungs a–d) | TODO | E-240-01, E-240-03 | - |
-| E-240-05 | `bb report map-opponent` CLI command | TODO | E-240-03, E-240-04 | - |
-| E-240-06 | Generic Mailgun sender extraction + operator alerts | TODO | None | - |
-| E-240-07 | `bb report morning-run` orchestration | TODO | E-240-01, E-240-03, E-240-04, E-240-05, E-240-06 | - |
+| E-240-01 | Authenticated list-crawlers (schedule + opponents-registry) + probe-confirmation tests | DONE | None | software-engineer |
+| E-240-02 | Schedule endpoint doc + opponent-resolution flow-doc refresh | DONE | None | api-scout |
+| E-240-03 | Migration 005: `scheduled_report_runs` + cascade line; revive `opponent_links` as mapping store | DONE | None | data-engineer |
+| E-240-04 | Opponent resolution ladder (rungs a–d) | DONE | E-240-01, E-240-03 | software-engineer |
+| E-240-05 | `bb report map-opponent` CLI command | DONE | E-240-03, E-240-04 | software-engineer |
+| E-240-06 | Generic Mailgun sender extraction + operator alerts | DONE | None | software-engineer |
+| E-240-07 | `bb report morning-run` orchestration | DONE | E-240-01, E-240-03, E-240-04, E-240-05, E-240-06 | software-engineer |
 
 ## Dispatch Team
 - api-scout
@@ -508,3 +508,43 @@ decisions).
   Awaiting dispatch authorization (separate from READY). Closure obligation
   (TN-10): main session flips `docs/ROADMAP.md` §0 slice E → `E-240 / PLANNING` at
   the planning commit, and → `COMPLETED` at epic closure.
+- 2026-06-20: **Dispatch complete.** All 7 stories implemented, per-story
+  code-reviewed, and PM-AC-verified (every story PASS on first AC pass). Stories
+  ran serially in the epic worktree (01 → 02 → 03 → 04 → 05 → 06 → 07), honoring
+  the dependency order and the shared-`src/cli/report.py` serialization
+  (07 ← 05). The E-240-04 → E-240-07 binding tightening held: E-240-07's
+  `map_outcome_to_vocabulary` keys on `LadderResult.method` (`method=='no_presence'`
+  → `no_gc_presence`), with the `test_cached_no_presence_persists_no_gc_presence_and_not_requeued`
+  regression test asserting BOTH the persisted `no_gc_presence` outcome and the
+  not-re-queued behavior (closing the run-record-layer resurrection bug). Phase 4a
+  CR integration review over the full epic diff: 1 SHOULD FIX (a shared
+  `no_presence`/`operator` resolution-method constant, deduplicated) — fixed.
+  Phase 4b Codex code review: 2 P1 bugs fixed — (1) the E-240-07 exception-path
+  slot was misclassified as `unresolved_mappable`/`failed` when it should be an
+  honest `auto_resolved`/`failed` (a generation that was attempted and threw is
+  NOT unresolved), and (2) the own-team `public_id → gc_uuid` search resolver
+  fetched a single page where the sibling crawler pages — now paginates
+  consistently — plus 2 regression tests. **TN-1 held throughout:** the ONLY
+  change to `src/reports/generator.py` across the whole epic is E-240-03's 8-line
+  additive team-deletion cascade DELETE (`scheduled_report_runs`); no generator
+  stage or `generate_report()` logic was modified, and Epic A golden stat tables +
+  `bb report verify-aggregates` parity are unchanged.
+
+### Review Scorecard (Dispatch)
+| Review Pass | Findings | Accepted | Dismissed |
+|---|---|---|---|
+| Per-story CR — E-240-01 | 1 | 1 | 0 |
+| Per-story CR — E-240-02 | 1 | 0 | 1 |
+| Per-story CR — E-240-03 | 0 | 0 | 0 |
+| Per-story CR — E-240-04 | 0 | 0 | 0 |
+| Per-story CR — E-240-05 | 0 | 0 | 0 |
+| Per-story CR — E-240-06 | 1 | 1 | 0 |
+| Per-story CR — E-240-07 | 1 | 1 | 0 |
+| CR integration review | 1 | 1 | 0 |
+| Codex code review | 4 | 4 | 0 |
+| **Total** | **9** | **8** | **1** |
+
+The single dismissal is E-240-02's `'auto'`→`'progenitor'` resolution-method
+rename, dismissed as already-correct: `'progenitor'` is the TN-11 / E-240-04 AC-2
+mandated value, so there was no drift to fix. (This dispatch scorecard is separate
+from the planning-phase 26/26/0 scorecard recorded in the 2026-06-17 READY entry.)

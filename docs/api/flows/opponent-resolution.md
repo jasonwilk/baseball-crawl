@@ -1,8 +1,20 @@
 # Opponent Resolution Flow
 
-> **Last updated:** 2026-03-28 | **Source:** E-168-03
+> **Last updated:** 2026-06-17 | **Source:** E-240-02
 
 How to resolve an opponent from the authenticated API into identifiers usable across both authenticated and public endpoints.
+
+> **Scope note (2026-06-17, E-240-02):** This doc describes the *reusable*
+> resolution mechanism only -- **Pass 1** (the `opponents` registry →
+> `GET /teams/{progenitor_team_id}` progenitor chain) plus the **`POST /search`
+> name fallback**. The deleted machinery that older revisions described -- the
+> admin resolve UI (`/admin/opponents/{link_id}/resolve`), the two-pass
+> `opponent_resolver.py` / `opponent_seeder.py` modules, and the
+> `bb data resolve-opponents` command -- was **removed in E-239** and is gone
+> from the repo. The follow→bridge→unfollow path is **BANNED**, not "legacy"
+> (`.claude/rules/gc-uuid-bridge.md`). The morning-run scheduled-report flow
+> (E-240) consumes exactly this Pass 1 + search mechanism as its rung-(a) /
+> rung-(c) resolution ladder.
 
 ## The Resolution Chain
 
@@ -52,7 +64,7 @@ All three conditions must be true for automatic resolution:
 2. **Season year match**: `result.season.year` matches the member team's `season_year`
 3. **Single result**: Exactly one result remains after both filters
 
-If 0 or 2+ results match after filtering, the opponent is left unlinked for manual resolution via the admin UI.
+If 0 or 2+ results match after filtering, the opponent is left unlinked for one-time operator mapping via `bb report map-opponent` (the deleted admin UI's replacement).
 
 #### What POST /search Returns
 
@@ -65,13 +77,19 @@ This means search-resolved opponents skip the progenitor chain entirely -- a sin
 
 #### Resolution Method
 
-Search-resolved opponents are recorded with `resolution_method='search'`, distinguishing them from progenitor-chain resolutions (`'auto'`). Both the automated search fallback and admin resolve use `resolution_method='search'` (see TN-7). Legacy pre-E-168 admin links may carry `resolution_method='manual'`.
+Search-resolved opponents are recorded with `resolution_method='search'`,
+distinguishing them from progenitor-chain resolutions (`'progenitor'`).
 
-## Admin Resolve Workflow
-
-The admin UI (`/admin/opponents/{link_id}/resolve`) provides a manual resolution path for opponents that neither the progenitor chain nor the search fallback could resolve. The admin resolve workflow uses [`POST /search`](../endpoints/post-search.md) to search the GameChanger team database by name.
-
-The admin enters a search query, reviews the results (which include team name, location, season, staff, and player count), and selects the correct match. The selected team's `id` (gc_uuid) and `public_id` are stored, and the opponent is marked with `resolution_method='search'`.
+> **Removed (E-239):** Earlier revisions described an **admin resolve UI**
+> (`/admin/opponents/{link_id}/resolve`) as the manual path for opponents that
+> neither the progenitor chain nor the search fallback could resolve. That UI and
+> its route were **deleted in E-239** along with the rest of the
+> opponent-management surface; there is no admin resolve workflow in the repo.
+> The replacement operator path in the scheduled-report flow (E-240) is the
+> `bb report map-opponent <root_team_id> <public_id|GC team URL>` CLI command,
+> which UPDATEs the pending `opponent_links` row with an operator-supplied
+> mapping (or marks it `--no-presence`). The `resolution_method='operator'` value
+> records an operator mapping.
 
 ## WARNING: Bridge Endpoints Restricted to "Followed" Teams Only
 
@@ -88,22 +106,40 @@ Both bridges only work for **teams the authenticated user follows** (operator-re
 
 ## Null-Progenitor Fallback
 
-~14% of opponents have `progenitor_team_id: null`. The two-pass resolution architecture addresses this:
+~14% of opponents have `progenitor_team_id: null` (the key is omitted on
+manually-typed opponents). Two resolution paths apply, in order:
 
-1. **POST /search fallback (automated)**: After the progenitor chain completes, the resolver runs POST /search for each unlinked opponent, applying the auto-accept criteria (exact name + season year + single result). This is the primary automated fallback.
-2. **Admin resolve (manual)**: Opponents that the search fallback cannot resolve (0 or 2+ matches) are surfaced in the admin UI for manual resolution via POST /search.
-3. **Legacy experimental path**: `resolve_unlinked()` in `bb data resolve-opponents` attempts a follow→bridge→unfollow flow for null-progenitor opponents. This is experimental and may not work for all opponents.
+1. **POST /search fallback (automated)**: After the progenitor chain completes,
+   run `POST /search` (via `search_teams_by_name()`) for each unlinked opponent,
+   auto-accepting only on an unambiguous single match. This is the primary
+   automated fallback.
+2. **Operator mapping (manual)**: Opponents the search fallback cannot resolve
+   (0 or 2+ matches, or genuinely unindexed teams) are surfaced to the operator
+   and mapped once via `bb report map-opponent <root_team_id> <public_id|GC team URL>`
+   (E-240). This replaces the deleted admin resolve UI.
+
+> **BANNED path -- do NOT use.** The **follow → bridge → unfollow** pattern
+> (former `resolve_unlinked()` / `_follow_bridge_unfollow()`, run via
+> `bb data resolve-opponents`) is **deleted and banned**, not "legacy" or
+> "experimental." It followed against `root_team_id` (the WRONG namespace --
+> `root_team_id` is not a `gc_uuid`) and *mutated external GameChanger follow
+> state* (a `POST /follow`, the bridge call, then best-effort unfollow `DELETE`s),
+> so a failed cycle could leave the account following teams it never intended to.
+> The module and command were removed in E-239. New work MUST NOT reintroduce
+> this path -- see `.claude/rules/gc-uuid-bridge.md` ("BANNED PATH") and route any
+> such need to PM. The correct fallbacks are the read-only `POST /search` bridge
+> and operator-pasted GC team URLs for unindexed teams.
 
 ## Resolution Statistics
 
-The two-pass architecture resolves opponents through three methods:
+Opponents resolve through these methods:
 
 | Category | Method | Resolution Method Value |
 |----------|--------|------------------------|
-| Progenitor chain (pass 1) | Automated via `progenitor_team_id` → team metadata | `'auto'` |
-| POST /search fallback (pass 2) | Automated via exact name + season year match | `'search'` |
-| Admin resolve | Manual selection via admin UI search | `'search'` |
-| Unresolved | No match found; awaiting manual resolution | (none) |
+| Progenitor chain (Pass 1) | Automated via `progenitor_team_id` → team metadata | `'progenitor'` |
+| POST /search fallback (Pass 2) | Automated via unambiguous single name match | `'search'` |
+| Operator mapping | Manual via `bb report map-opponent` (replaces deleted admin UI) | `'operator'` |
+| Unresolved | No match found; awaiting operator mapping | (none) |
 
 Historical baseline (single team, 70 opponents):
 
@@ -112,7 +148,7 @@ Historical baseline (single team, 70 opponents):
 | Auto-resolved (progenitor_team_id present) | ~60/70 | ~86% |
 | Null progenitor (candidates for search fallback) | ~10/70 | ~14% |
 
-The search fallback is expected to resolve a significant portion of the ~14% null-progenitor opponents, leaving only ambiguous cases (0 or 2+ matches) for manual resolution.
+The search fallback is expected to resolve a significant portion of the ~14% null-progenitor opponents, leaving only ambiguous cases (0 or 2+ matches) and genuinely unindexed teams for one-time operator mapping via `bb report map-opponent`.
 
 ## Three ID Types Summary
 
@@ -125,4 +161,5 @@ The search fallback is expected to resolve a significant portion of the ~14% nul
 ## See Also
 
 - [opponent-scouting.md](opponent-scouting.md) -- How to use `public_id` to retrieve game schedules, player rosters, per-game boxscores, and compute season aggregates
-- [`POST /search`](../endpoints/post-search.md) -- Endpoint spec for the team search used in both automated fallback and admin resolve
+- [`POST /search`](../endpoints/post-search.md) -- Endpoint spec for the team search used in the automated name fallback (Pass 2)
+- [`.claude/rules/gc-uuid-bridge.md`](../../../.claude/rules/gc-uuid-bridge.md) -- The bridge pattern, the reverse `GET /teams/{gc_uuid}` rung-(a) bridge, and the BANNED follow→bridge→unfollow path

@@ -2493,6 +2493,14 @@ def _delete_team_scoped_data(
     conn.execute(f"DELETE FROM crawl_jobs WHERE team_id IN ({placeholders})", team_ids)
     conn.execute(f"DELETE FROM coaching_assignments WHERE team_id IN ({placeholders})", team_ids)
     conn.execute(f"DELETE FROM user_team_access WHERE team_id IN ({placeholders})", team_ids)
+    # E-240-03: scheduled_report_runs slots belong to the team whose schedule
+    # produced them; remove them when the team is deleted (Cleanup-Detection
+    # Mirror Invariant). Distinct from report deletion, which only NULLs
+    # report_id (ON DELETE SET NULL) -- the audit row outlives the report.
+    conn.execute(
+        f"DELETE FROM scheduled_report_runs WHERE own_team_id IN ({placeholders})",
+        team_ids,
+    )
     conn.execute(
         f"DELETE FROM team_opponents WHERE our_team_id IN ({placeholders}) "
         f"OR opponent_team_id IN ({placeholders})",

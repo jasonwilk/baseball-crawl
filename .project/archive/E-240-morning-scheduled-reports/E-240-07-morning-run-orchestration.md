@@ -4,7 +4,7 @@
 [E-240: Morning-of-Game Scheduled Reports](../E-240-morning-scheduled-reports/epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, `bb report morning-run [--date YYYY-MM-DD]

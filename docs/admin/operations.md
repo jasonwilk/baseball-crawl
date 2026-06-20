@@ -159,7 +159,162 @@ Shows corrected/unchanged/remaining-ambiguity counts and total plays reassigned,
 
 **Idempotency**: Each run is identified by a `run_id` UUID. Results are upserted into `reconciliation_discrepancies` using the UNIQUE constraint on `(run_id, game_id, team_id, player_id, signal_name)`. Re-running on the same games produces a new `run_id` and new rows.
 
-## Database Schema Reference
+## Morning-Run Scheduled Reports
+
+*Last updated: 2026-06-20 | Source: E-240 (morning-run scheduled reports)*
+
+`bb report morning-run` is a cron-invoked command that runs each morning and generates a fresh scouting report for every LSB team's game scheduled on that date. It is the forward operational surface of the system: the crontab is the config, the operator's job is to keep opponent mappings current, and the end-of-run summary email is the heartbeat.
+
+### What morning-run does
+
+For each team URL passed as an argument, the command:
+
+1. Verifies credentials once (preflight check) before touching any team data.
+2. Reads the team's GameChanger schedule and opponent registry.
+3. Filters to games whose LOCAL date matches the target date (today by default).
+4. For each upcoming opponent on that date, runs the resolution ladder to find the opponent's `public_id`.
+5. For auto-resolved opponents, calls the existing `generate_report` pipeline -- the same pipeline as `bb report generate`.
+6. Records each slot's outcome to `scheduled_report_runs` and sends operator alerts.
+
+Execution is strictly sequential -- one process, a plain loop over teams then opponents. One opponent's failure does not abort the rest of the run.
+
+### Crontab configuration
+
+The variadic team URLs are the only per-season configuration. Edit the crontab once at the start of each season to add or change the team URLs.
+
+**Example crontab line** (6 AM server time, Monday--Saturday):
+
+```cron
+0 6 * * 1-6 bb report morning-run \
+  https://web.gc.com/teams/lsb-varsity-2026 \
+  https://web.gc.com/teams/lsb-jv-2026 \
+  https://web.gc.com/teams/lsb-freshman-2026
+```
+
+A 6 AM default is appropriate for most weekday high school and Legion games (4--7 PM starts): the reports are ready hours before game time. Adjust the time zone on the server if the cron daemon runs in UTC.
+
+### --date override for early-start games
+
+Tournaments with 9 AM or earlier starts may need reports the night before. Use `--date` to run for a specific date:
+
+```bash
+bb report morning-run --date 2026-06-21 \
+  https://web.gc.com/teams/lsb-varsity-2026 \
+  https://web.gc.com/teams/lsb-jv-2026
+```
+
+The `--date` flag accepts `YYYY-MM-DD`. Run this manually the evening before an early-start tournament day.
+
+### --dry-run: eyeball verification before trusting a new mapping
+
+`--dry-run` resolves opponents and prints per-slot results but generates **no reports** and writes **no run records**. Use it to verify that the resolution ladder is finding the right teams, especially after running `bb report map-opponent` for a new opponent.
+
+```bash
+bb report morning-run --dry-run \
+  https://web.gc.com/teams/lsb-varsity-2026
+```
+
+**Example dry-run output:**
+
+```
+RESOLVED Lincoln Southeast (opponent_id=abc123) -> Lincoln Southeast HS [public_id: lincoln-southeast-hs-2026] — record 8-4
+UNRESOLVED Slumpbuster Tournament (opponent_id=def456) — needs `bb report map-opponent def456 <PASTE-GC-TEAM-URL>`
+deferred_placeholder BYE (opponent_id=ghi789)
+
+Morning run complete (1 team(s)): 0 generated, 0 failed, 1 unresolved, 1 deferred, 0 skipped, 0 denied (403).
+```
+
+**What to eyeball on a RESOLVED line**: confirm that the resolved team name and W-L record look right for the opponent you expect. If the mapping resolved to the wrong team, use `bb report map-opponent` to correct it (the ladder's auto-resolution may have matched a name-alike team).
+
+### Operator resolution queue (map-opponent)
+
+When an opponent cannot be auto-resolved, it enters the operator queue. The `bb report map-opponent` command resolves it.
+
+**How an opponent becomes unresolved-but-mappable**: the opponent was entered in GameChanger via team lookup (so a `root_team_id` is available as a stable key), but the resolution ladder could not find a `public_id` match automatically. This is the expected path for opponents the system has never seen before.
+
+**When the operator gets notified**: at runtime, the CLI prints a prominent UNRESOLVED line with a template command. For non-dry-run runs, an email alert is also sent to `ADMIN_EMAIL` carrying the same template.
+
+**Positive mapping** (opponent is on GameChanger -- the normal case):
+
+1. Look up the team on [web.gc.com](https://web.gc.com) and copy the team URL from the browser.
+2. Run:
+
+```bash
+bb report map-opponent <root_team_id> <PASTE-GC-TEAM-URL>
+```
+
+The `root_team_id` is pre-filled in the CLI output and the email alert -- copy it from there. The URL may be a full GameChanger team URL or a bare `public_id` slug; both are accepted.
+
+**Negative mapping** (opponent is genuinely not on GameChanger -- no report possible):
+
+```bash
+bb report map-opponent <root_team_id> --no-presence
+```
+
+This records an operator-declared "no presence" for the opponent. On future runs the ladder will recognize this and skip report generation without prompting again.
+
+**How many rows get updated**: `opponent_links` is keyed on `(our_team_id, root_team_id)` -- one row per LSB team that faces the opponent. A single `bb report map-opponent` call updates **all pending rows** for that `root_team_id` at once, across every LSB team. You do not need to run it separately per team.
+
+**Re-run after mapping**: the mapping takes effect on the next run. For same-day resolution, run `bb report morning-run` (without `--dry-run`) after mapping, or use `bb report generate <public_id>` to generate the report directly.
+
+### Expected operator queue size
+
+The operator map queue is larger than auto-resolution alone implies, for two reasons that are correct by design:
+
+**Per-team-opponent pairing.** `opponent_links` is keyed on `(our_team_id, root_team_id)`. One real opponent that faces multiple LSB teams (e.g. both Varsity and JV play Lincoln Northeast) must be mapped once per LSB team. The mapping command resolves all pending rows for that `root_team_id` in one call, but each pairing produces its own initial unresolved entry.
+
+**Tournament and bracket names.** Bracket entries (e.g. "Slumpbuster", "Pool A Challenge") that do not match the `BYE` / `TBD` placeholder pattern fall through to the operator queue by design. An unknown bracket opponent genuinely cannot be scouted -- there is no team to look up. Use `--no-presence` for these so the system stops prompting for them.
+
+These are expected conditions, not defects.
+
+### Reading the end-of-run summary email
+
+The end-of-run summary is **always sent** at the end of every non-aborted morning run (when `ADMIN_EMAIL` is configured in `.env`). Its **absence** is the missed-run signal -- if no email arrived by mid-morning on a game day, the cron job did not run.
+
+**Email subject line:**
+
+```
+[morning-run] Summary: N generated, N failed, N unresolved
+```
+
+**Email body fields:**
+
+| Field | What it means |
+|-------|--------------|
+| `Reports generated` | Opponents fully resolved and reports successfully built |
+| `Generation failures` | Resolved opponents for which report generation failed (auth, network, etc.) |
+| `Unresolved (need mapping)` | Genuine unresolved-but-mappable opponents that need `bb report map-opponent` |
+
+The body also includes per-opponent detail lines and, when any team returned a 403, a `denied` line. When **every** team was denied (403), the detail line escalates to a prominent warning:
+
+```
+WARNING: ALL N team(s) were denied (403) — likely a systematic auth/version-pin problem,
+NOT 'no games today'. Check credentials and the crawler Accept version pins.
+```
+
+This warning means the preflight check passed (credentials were valid at startup) but the team-data crawlers failed on every team. This is the FALSE-403 pattern: a misconfigured crawler version pin that passes the preflight `/me/user` check but fails the team-data endpoints. It is **not** the same as "no games today." Investigate the crawler `Accept` version pins or refresh credentials.
+
+**When ADMIN_EMAIL is not set**: operator alerts (including the end-of-run summary and unresolved-opponent alerts) are skipped with a log warning. Email is a side channel -- its absence does not abort or affect the run. Set `ADMIN_EMAIL` in `.env` to receive alerts.
+
+### Credential failure (preflight check)
+
+Before touching any team data, `morning-run` verifies that GameChanger credentials are live by calling a lightweight authenticated endpoint. If this preflight check fails -- token refresh and login fallback both exhausted -- the run aborts immediately and sends a preflight-failure alert to `ADMIN_EMAIL`:
+
+```
+[morning-run] Preflight credential check FAILED — run aborted
+```
+
+**Action**: refresh credentials (`bb creds import` or `bb creds setup web`) and re-run manually, or wait for the next scheduled run after credentials are restored.
+
+A per-team 403 (ForbiddenError) is distinct from a preflight failure and is not treated as an auth expiry: the team is skipped and counted in the `denied` tally, but the run continues for other teams.
+
+### Idempotency
+
+Re-running `morning-run` on the same date is safe. For each `(own_team_id, opponent_root_team_id, game_date)` slot, if a prior run already generated a non-expired report, the re-run skips regeneration (`delivery_status = skipped`). A slot is only regenerated when its prior report has expired or was never generated successfully.
+
+---
+
+
 
 ### Migration 015: Appearance Order Column
 
@@ -672,4 +827,4 @@ For the expected data volume (~30 games x 4 teams x a few seasons), the database
 
 ---
 
-*Last updated: 2026-06-17 | Source: E-238 (bb report cleanup subsection), E-236 (partial per-stage status, boxscores_fetched/load_errors/plays_errors/spray_games_with_data columns, degraded badge, all-boxscores-blocked hard-fail, two-case no_games page, bb report generate exit-0 for no_games, coach-footer season_fallback correction), E-235 (report generation run records, no_games outcome, trust-flag badges, coach-footer operator linkage), E-234 (bb report verify-aggregates), E-221 (team delete cross-perspective gate, cascade consolidation, retention flash message), E-199 (standalone reports section, cascade-delete behavior), E-198 (bb data reconcile, migration 012), E-195 (plays pipeline, migration 009, validate_plays_stats.py), E-173 (resolution write-through, auto-scout after linking, unified Find on GC resolve page), E-155 (duplicate team detection and merge UI), E-055 (unified CLI), E-028-03 (original), E-239 (removed dashboard, member-sync, opponent-discovery, programs management, opponent mapping, spray chart pipeline, plays pipeline, bb data scout/dedup/repair-opponents sections; reports-first reframe)*
+*Last updated: 2026-06-20 | Source: E-240 (morning-run scheduled reports section), E-238 (bb report cleanup subsection), E-236 (partial per-stage status, boxscores_fetched/load_errors/plays_errors/spray_games_with_data columns, degraded badge, all-boxscores-blocked hard-fail, two-case no_games page, bb report generate exit-0 for no_games, coach-footer season_fallback correction), E-235 (report generation run records, no_games outcome, trust-flag badges, coach-footer operator linkage), E-234 (bb report verify-aggregates), E-221 (team delete cross-perspective gate, cascade consolidation, retention flash message), E-199 (standalone reports section, cascade-delete behavior), E-198 (bb data reconcile, migration 012), E-195 (plays pipeline, migration 009, validate_plays_stats.py), E-173 (resolution write-through, auto-scout after linking, unified Find on GC resolve page), E-155 (duplicate team detection and merge UI), E-055 (unified CLI), E-028-03 (original), E-239 (removed dashboard, member-sync, opponent-discovery, programs management, opponent mapping, spray chart pipeline, plays pipeline, bb data scout/dedup/repair-opponents sections; reports-first reframe)*

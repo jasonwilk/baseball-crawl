@@ -26,7 +26,7 @@ response_shape: array
 response_sample: data/raw/schedule-sample.json
 raw_sample_size: "228 events, 134 KB"
 discovered: "2026-02-28"
-last_confirmed: "2026-03-04"
+last_confirmed: "2026-06-17"
 tags: [schedule, events, team, games]
 related_schemas: []
 see_also:
@@ -42,13 +42,41 @@ see_also:
 
 # GET /teams/{team_id}/schedule
 
-**Status:** CONFIRMED LIVE -- 228 total records (103 games, 90 practices, 35 other events) fully retrieved. Last verified: 2026-03-04.
+**Status:** CONFIRMED LIVE -- 228 total records (103 games, 90 practices, 35 other events) fully retrieved. Last verified: 2026-06-17.
 
 Returns the full event schedule for a team, including all event types (games, practices, other), with optional venue enrichment when `fetch_place_details=true`. The response is a bare JSON array. No pagination observed -- all 228 events returned in one response.
 
 ```
 GET https://api.team-manager.gc.com/teams/{team_id}/schedule?fetch_place_details=true
 ```
+
+## Access Level
+
+**Fan/follower-level access is sufficient -- verified 2026-06-17.** A live probe
+called this endpoint for a team the authenticated user **follows but does not
+manage** and received HTTP 200 with the full schedule array. Team management is
+NOT required; the operator only needs to FOLLOW a team to read its schedule. The
+version pin used for the confirmed call is `event:list+json; version=0.2.0` (the
+full `Accept` value is `application/vnd.gc.com.event:list+json; version=0.2.0` --
+see Headers below). A wrong `Accept` version yields a FALSE 403, so pin this
+version exactly when an unattended run depends on the call.
+
+This makes the endpoint usable for the scheduled-report flow (E-240), where the
+operator follows each LSB team but manages none of them.
+
+## Future-Dated (Upcoming) Games
+
+**Confirmed 2026-06-17:** the endpoint returns **future-dated (upcoming) game
+events**, not only completed ones. Each upcoming game event carries a
+`pregame_data` object with non-null `opponent_id` and `opponent_name`, so the
+opponent of a scheduled-but-not-yet-played game is readable directly from the
+schedule. `opponent_id` is in the `root_team_id` namespace (see the
+`pregame_data` field table and Known Limitations below) -- join it against the
+authenticated opponents registry to reach `progenitor_team_id` for resolution.
+
+This confirmation is from a single-team probe (2026-06-17); it is strengthened by
+E-240-01's crawler run over the LSB teams (a regression-test confirmation, not a
+separate spike).
 
 ## Path Parameters
 

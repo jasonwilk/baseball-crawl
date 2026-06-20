@@ -1,0 +1,565 @@
+"""Morning-run orchestration for scheduled scouting reports (E-240-07).
+
+The cron-invoked ``bb report morning-run`` reads each LSB team's GameChanger
+schedule, filters to the target LOCAL date, resolves each upcoming opponent via
+the resolution ladder, and -- for auto-resolved opponents -- calls the existing,
+UNTOUCHED ``generate_report(public_id)``. Every scheduled slot's outcome is
+recorded to ``scheduled_report_runs`` and an end-of-run operator summary is sent.
+
+This module is the orchestration SHELL (TN-1): it composes reused seams and
+NEVER enters the generator's internals --
+
+* E-240-01: :func:`resolve_own_team_gc_uuid`, :func:`fetch_schedule`,
+  :func:`fetch_opponents`
+* E-240-04: :func:`resolve_opponent` (the resolution ladder)
+* E-240-03: the ``scheduled_report_runs`` + ``opponent_links`` tables
+* E-240-06: the operator-alert sync wrappers
+* the untouched ``generate_report(public_id)``
+
+Execution is strictly SEQUENTIAL (TN-2): one process iterates teams and
+opponents with a plain loop -- never concurrent. Per-opponent failures are
+isolated (TN-9): one opponent's exception is recorded and the loop continues.
+"""
+
+from __future__ import annotations
+
+import logging
+import sqlite3
+from dataclasses import dataclass, field
+from datetime import date, datetime, timezone
+from typing import Callable
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+from src.db.teams import ensure_team_row
+from src.gamechanger.client import GameChangerClient
+from src.gamechanger.crawlers.opponents import fetch_opponents, resolve_own_team_gc_uuid
+from src.gamechanger.crawlers.schedule import ScheduledGame, fetch_schedule
+from src.gamechanger.exceptions import CredentialExpiredError, ForbiddenError
+from src.gamechanger.opponent_ladder import (
+    METHOD_NO_PRESENCE,
+    LadderResult,
+    ResolutionOutcome,
+    resolve_opponent,
+)
+from src.gamechanger.team_resolver import TeamProfile, resolve_team
+from src.gamechanger.url_parser import parse_team_url
+from src.reports.generator import GenerationResult, generate_report
+
+logger = logging.getLogger(__name__)
+
+# A lightweight authenticated endpoint used for the preflight liveness check
+# (forces the lazy token refresh). Same endpoint/pin `bb creds check` uses.
+_ME_USER_ENDPOINT = "/me/user"
+_ME_USER_ACCEPT = "application/vnd.gc.com.user+json; version=0.3.0"
+
+# Type alias for the injectable report generator (tests substitute a fake).
+GenerateFn = Callable[[str], GenerationResult]
+
+
+class PreflightError(Exception):
+    """Raised when the preflight credential liveness check cannot recover."""
+
+
+@dataclass
+class SlotResult:
+    """One scheduled-slot outcome (one upcoming opponent on one team's schedule)."""
+
+    own_team_id: int
+    opponent_root_team_id: str
+    opponent_name: str | None
+    game_date: str
+    resolution_outcome: str
+    resolved_public_id: str | None = None
+    report_slug: str | None = None
+    delivery_status: str | None = None
+    error_message: str | None = None
+    # Display context for --dry-run / the summary (not persisted).
+    resolved_team_name: str | None = None
+    resolved_record: str | None = None
+
+
+@dataclass
+class MorningRunResult:
+    """Aggregate outcome of a morning run (counts + per-slot detail)."""
+
+    generated: int = 0
+    failed: int = 0
+    unresolved: int = 0
+    deferred: int = 0
+    no_games: int = 0
+    skipped: int = 0
+    teams_processed: int = 0
+    # Teams skipped because an authenticated crawler call returned 403
+    # (ForbiddenError) -- a per-team denial OR, when denied == teams_processed,
+    # the FALSE-403 signature of a misconfigured CRAWLER version pin (the
+    # crawlers use different pins than the preflight /me/user check, so a pin
+    # error passes preflight but 403s every team). Surfaced in the summary so
+    # this is never an invisible silent skip (TN-4 FALSE-403 concern).
+    denied: int = 0
+    slots: list[SlotResult] = field(default_factory=list)
+
+    @property
+    def detail_lines(self) -> str:
+        """Multi-line per-slot detail + the 403-denial line for the summary."""
+        lines = [self._format_slot(s) for s in self.slots]
+        denied_line = self.denied_detail
+        if denied_line:
+            lines.append(denied_line)
+        return "\n".join(lines)
+
+    @property
+    def denied_detail(self) -> str:
+        """A summary line describing 403-denied teams, or '' when none.
+
+        When EVERY processed team was denied (``denied == teams_processed`` and
+        at least one team), this is the FALSE-403 / check-credentials-or-pins
+        signal the operator must see -- a 0-generated/0-unresolved summary would
+        otherwise look identical to "no games scheduled today".
+        """
+        if self.denied <= 0:
+            return ""
+        if self.denied == self.teams_processed:
+            return (
+                f"WARNING: ALL {self.denied} team(s) were denied (403) — likely a "
+                "systematic auth/version-pin problem, NOT 'no games today'. "
+                "Check credentials and the crawler Accept version pins."
+            )
+        return f"{self.denied} team(s) skipped: access denied (403)."
+
+    @staticmethod
+    def _format_slot(slot: SlotResult) -> str:
+        base = (
+            f"[{slot.game_date}] {slot.opponent_name or '(unnamed)'} "
+            f"(opponent_id={slot.opponent_root_team_id}) -> "
+            f"{slot.resolution_outcome}"
+        )
+        if slot.resolved_public_id and slot.resolved_team_name:
+            base += (
+                f"\n    RESOLVED: {slot.resolved_team_name} "
+                f"[public_id: {slot.resolved_public_id}]"
+            )
+            if slot.resolved_record:
+                base += f" — record {slot.resolved_record}"
+        if slot.delivery_status:
+            base += f"  (delivery: {slot.delivery_status})"
+        if slot.error_message:
+            base += f"\n    ERROR: {slot.error_message}"
+        return base
+
+
+def derive_local_date(start_datetime: str | None, tz_name: str | None) -> str | None:
+    """Derive a game's LOCAL calendar date from its UTC start + IANA timezone.
+
+    A UTC-"today" filter would miss late-evening games that roll past UTC
+    midnight (TN-9 / B3), so the same-day comparison MUST use the local date.
+
+    Args:
+        start_datetime: ISO-8601 UTC datetime string (e.g.
+            ``"2026-06-20T23:00:00.000Z"``), or ``None`` (full-day events).
+        tz_name: IANA timezone string (e.g. ``"America/Chicago"``), or ``None``.
+
+    Returns:
+        The local date as ``"YYYY-MM-DD"``, or ``None`` when ``start_datetime``
+        is absent (the caller falls back to the event's raw ``game_date``).
+    """
+    if not start_datetime:
+        return None
+    iso = start_datetime.replace("Z", "+00:00")
+    try:
+        dt = datetime.fromisoformat(iso)
+    except ValueError:
+        logger.warning("Unparseable start_datetime %r; cannot derive local date", start_datetime)
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    if tz_name:
+        try:
+            dt = dt.astimezone(ZoneInfo(tz_name))
+        except (ZoneInfoNotFoundError, ValueError):
+            logger.warning(
+                "Unknown timezone %r; using UTC date for the local-date filter",
+                tz_name,
+            )
+    return dt.date().isoformat()
+
+
+def _game_local_date(game: ScheduledGame) -> str | None:
+    """The game's LOCAL date for the --date filter (falls back to game_date)."""
+    return derive_local_date(game.start_datetime, game.timezone) or game.game_date
+
+
+def preflight_credential_check(client: GameChangerClient) -> None:
+    """Force a token refresh by hitting a lightweight authenticated endpoint.
+
+    Runs ONCE at the top of the run (TN-9). On an unrecoverable auth failure
+    (the client's refresh + login fallback both fail) this raises
+    :class:`PreflightError` so the caller sends the preflight-failure operator
+    alert and aborts early/visibly. A 403 (version-pin / legitimate denial) is
+    NOT collapsed into auth-expiry (TN-4): it raises PreflightError with a
+    distinct message.
+
+    Args:
+        client: The SHARED authenticated client the crawlers/ladder also use --
+            so the preflight-refreshed token feeds the same session (AC-7).
+
+    Raises:
+        PreflightError: On an unrecoverable auth failure or a 403.
+    """
+    try:
+        client.get(_ME_USER_ENDPOINT, accept=_ME_USER_ACCEPT)
+    except ForbiddenError as exc:
+        raise PreflightError(
+            f"Preflight check got 403 (access denied / version-pin), not a token "
+            f"expiry: {exc}"
+        ) from exc
+    except CredentialExpiredError as exc:
+        raise PreflightError(
+            f"Preflight credential check failed -- token refresh + login fallback "
+            f"could not recover: {exc}"
+        ) from exc
+
+
+def _resolved_record(profile: TeamProfile) -> str | None:
+    """Format a W-L record string from a TeamProfile, or None."""
+    w, l = profile.record_wins, profile.record_losses
+    if w is None and l is None:
+        return None
+    return f"{w or 0}-{l or 0}"
+
+
+def map_outcome_to_vocabulary(result: LadderResult) -> str:
+    """Map a ladder :class:`LadderResult` to a ``resolution_outcome`` (TN-11).
+
+    The ladder never returns ``no_gc_presence``; an operator-declared
+    ``no_presence`` link row surfaces as ``UNRESOLVED_MAPPABLE`` with
+    ``method='no_presence'`` (from_cache) -- which maps to the
+    ``no_gc_presence`` run outcome here. All other unresolved-mappables map to
+    ``unresolved_mappable``.
+    """
+    if result.outcome is ResolutionOutcome.RESOLVED:
+        return "auto_resolved"
+    if result.outcome is ResolutionOutcome.DEFERRED_PLACEHOLDER:
+        return "deferred_placeholder"
+    # UNRESOLVED_MAPPABLE: distinguish operator-declared no_presence (TN-11).
+    if result.method == METHOD_NO_PRESENCE:
+        return "no_gc_presence"
+    return "unresolved_mappable"
+
+
+def _prior_success(
+    conn: sqlite3.Connection,
+    own_team_id: int,
+    root_team_id: str,
+    game_date: str,
+) -> bool:
+    """True when a prior SUCCESS slot exists for this (team, opponent, date).
+
+    The idempotency skip predicate (TN-9): a row with
+    ``resolution_outcome='auto_resolved'`` AND a non-NULL, non-expired
+    ``report_id``. A re-run treats this as a skip (``delivery_status='skipped'``)
+    rather than regenerating.
+    """
+    row = conn.execute(
+        "SELECT s.report_id, r.expires_at "
+        "FROM scheduled_report_runs s "
+        "LEFT JOIN reports r ON r.id = s.report_id "
+        "WHERE s.own_team_id = ? AND s.opponent_root_team_id = ? "
+        "AND s.game_date = ? AND s.resolution_outcome = 'auto_resolved' "
+        "AND s.report_id IS NOT NULL",
+        (own_team_id, root_team_id, game_date),
+    ).fetchone()
+    if row is None:
+        return False
+    expires_at = row[1]
+    if expires_at is None:
+        return False
+    # Non-expired => the prior report is still serveable; skip regeneration.
+    return expires_at > datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _upsert_slot(conn: sqlite3.Connection, slot: SlotResult) -> None:
+    """UPSERT one scheduled_report_runs row, idempotent per the slot key (TN-6).
+
+    The UNIQUE key is ``(own_team_id, opponent_root_team_id, game_date)``. SQLite
+    treats NULLs as DISTINCT in a UNIQUE index, so the caller MUST guarantee a
+    non-NULL key on all three columns (the loader falls back to the opponent_id
+    token for a null root_team_id) -- otherwise idempotency silently breaks.
+    """
+    report_id = _lookup_report_id(conn, slot.report_slug)
+    conn.execute(
+        "INSERT INTO scheduled_report_runs "
+        "(game_date, own_team_id, opponent_root_team_id, opponent_name, "
+        " resolution_outcome, resolved_public_id, report_id, report_slug, "
+        " delivery_status, error_message, updated_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now')) "
+        "ON CONFLICT(own_team_id, opponent_root_team_id, game_date) DO UPDATE SET "
+        "opponent_name = excluded.opponent_name, "
+        "resolution_outcome = excluded.resolution_outcome, "
+        "resolved_public_id = excluded.resolved_public_id, "
+        "report_id = excluded.report_id, "
+        "report_slug = excluded.report_slug, "
+        "delivery_status = excluded.delivery_status, "
+        "error_message = excluded.error_message, "
+        "updated_at = datetime('now')",
+        (
+            slot.game_date,
+            slot.own_team_id,
+            slot.opponent_root_team_id,
+            slot.opponent_name,
+            slot.resolution_outcome,
+            slot.resolved_public_id,
+            report_id,
+            slot.report_slug,
+            slot.delivery_status,
+            slot.error_message,
+        ),
+    )
+    conn.commit()
+
+
+def _lookup_report_id(conn: sqlite3.Connection, slug: str | None) -> int | None:
+    """Resolve a report slug to its reports.id (for the FK), or None."""
+    if not slug:
+        return None
+    row = conn.execute("SELECT id FROM reports WHERE slug = ?", (slug,)).fetchone()
+    return row[0] if row else None
+
+
+def _process_opponent(
+    *,
+    conn: sqlite3.Connection,
+    client: GameChangerClient,
+    own_team_id: int,
+    game: ScheduledGame,
+    game_date: str,
+    registry: list,
+    dry_run: bool,
+    generate_fn: GenerateFn,
+) -> SlotResult:
+    """Resolve one upcoming opponent and (non-dry-run) generate its report.
+
+    The per-opponent body. Errors here are caught by the caller's try/except so
+    one opponent's failure does not abort the run (TN-9).
+    """
+    # The slot key MUST be non-NULL on all three columns; fall back to the
+    # opponent_id token when root_team_id would be null (TN-6 NULL footgun).
+    root_team_id = game.opponent_id or f"unknown-{game.event_id}"
+
+    ladder = resolve_opponent(
+        conn=conn,
+        client=client,
+        our_team_id=own_team_id,
+        opponent_id=root_team_id,
+        opponent_name=game.opponent_name,
+        registry=registry,
+    )
+    outcome = map_outcome_to_vocabulary(ladder)
+
+    slot = SlotResult(
+        own_team_id=own_team_id,
+        opponent_root_team_id=root_team_id,
+        opponent_name=game.opponent_name,
+        game_date=game_date,
+        resolution_outcome=outcome,
+        resolved_public_id=ladder.public_id,
+    )
+
+    # For a resolved opponent, fetch the display name + record (the dry-run
+    # eyeball line; TN-5). Same resolve_team helper as own-team resolution (C3).
+    if ladder.public_id:
+        try:
+            profile = resolve_team(ladder.public_id)
+            slot.resolved_team_name = profile.name
+            slot.resolved_record = _resolved_record(profile)
+        except Exception:  # noqa: BLE001 -- display enrichment is best-effort
+            logger.warning(
+                "Could not fetch display profile for public_id=%s", ladder.public_id,
+                exc_info=True,
+            )
+
+    # Non-auto-resolved outcomes attempt no generation; delivery_status stays
+    # NULL and resolution_outcome carries the reason (TN-11).
+    if outcome != "auto_resolved" or dry_run or ladder.public_id is None:
+        return slot
+
+    # Idempotency: a prior non-expired SUCCESS is a skip, not a regenerate (TN-9).
+    if _prior_success(conn, own_team_id, root_team_id, game_date):
+        slot.delivery_status = "skipped"
+        return slot
+
+    # Generate via the untouched generate_report() (TN-1). A generation failure
+    # here -- whether generate_fn returns a failed GenerationResult OR raises --
+    # is a failure of an ALREADY-RESOLVED opponent: the slot stays
+    # resolution_outcome='auto_resolved' with delivery_status='failed' (TN-11),
+    # NOT unresolved_mappable. Misclassifying it would tell the operator to
+    # `map-opponent` a team that is already resolved (the wrong action).
+    try:
+        gen: GenerationResult = generate_fn(ladder.public_id)
+    except Exception as exc:  # noqa: BLE001 -- a resolved opponent whose gen blew up
+        logger.exception(
+            "generate_report raised for resolved opponent public_id=%s",
+            ladder.public_id,
+        )
+        slot.delivery_status = "failed"
+        slot.error_message = str(exc)
+        return slot
+
+    slot.report_slug = gen.slug
+    if gen.outcome == "ready":
+        slot.delivery_status = "generated"
+    elif gen.outcome == "no_games":
+        slot.delivery_status = "no_games"
+    else:  # "failed"
+        slot.delivery_status = "failed"
+        slot.error_message = gen.error_message
+    return slot
+
+
+def run_morning(
+    team_urls: list[str],
+    *,
+    conn: sqlite3.Connection,
+    client: GameChangerClient,
+    target_date: date | None = None,
+    dry_run: bool = False,
+    generate_fn: GenerateFn = generate_report,
+) -> MorningRunResult:
+    """Run the morning scheduled-report orchestration for the given teams.
+
+    SEQUENTIAL (TN-2): one process, a plain loop over teams and opponents, never
+    concurrent. Per-opponent failures are isolated (TN-9).
+
+    Args:
+        team_urls: GameChanger team URLs / public_id slugs (the crontab config).
+        conn: Open SQLite connection (run records + opponent_links).
+        client: The SHARED preflight-refreshed authenticated client.
+        target_date: The LOCAL date to filter games to (default: today).
+        dry_run: When True, generate NO reports -- only resolve + record-less
+            preview.
+        generate_fn: Injectable report generator (defaults to the real
+            ``generate_report``); tests substitute a fake.
+
+    Returns:
+        A :class:`MorningRunResult` with counts + per-slot detail.
+    """
+    if target_date is None:
+        target_date = date.today()
+    target_iso = target_date.isoformat()
+
+    result = MorningRunResult()
+
+    for url in team_urls:
+        result.teams_processed += 1
+        try:
+            parsed = parse_team_url(url)
+        except ValueError:
+            logger.warning("Skipping unparseable team URL %r", url)
+            continue
+        public_id = parsed.value
+
+        # CredentialExpiredError (a true token death mid-run) is run-fatal and
+        # must surface -- it affects EVERY team, so we do NOT swallow it; it
+        # propagates to the CLI. A ForbiddenError (legitimate per-team denial)
+        # is its subclass, so we catch that FIRST and isolate it to this team
+        # (AC-12: a real auth failure is distinguished from a legitimate denial,
+        # never collapsed into a single "auth expired" meaning).
+        try:
+            gc_uuid = resolve_own_team_gc_uuid(client, public_id)
+            if not gc_uuid:
+                logger.warning(
+                    "Could not resolve gc_uuid for team %s; skipping its schedule",
+                    public_id,
+                )
+                continue
+
+            # Own-team row (FK target for scheduled_report_runs.own_team_id).
+            own_team_id = ensure_team_row(
+                conn, public_id=public_id, gc_uuid=gc_uuid, source="morning_run"
+            )
+
+            schedule = fetch_schedule(client, gc_uuid)
+            registry = fetch_opponents(client, gc_uuid)
+        except ForbiddenError:
+            # Per-team denial (e.g. a team the operator does not follow): skip
+            # this team, keep processing the rest. Distinct from a 401. Counted
+            # so the end-of-run summary surfaces it -- otherwise an all-teams
+            # FALSE-403 (a misconfigured crawler pin) would be an invisible
+            # silent skip indistinguishable from "no games today" (TN-4).
+            result.denied += 1
+            logger.warning(
+                "Access denied (403) for team %s; skipping it and continuing",
+                public_id,
+                exc_info=True,
+            )
+            continue
+
+        for game in schedule:
+            local_date = _game_local_date(game)
+            if local_date != target_iso:
+                continue
+
+            try:
+                slot = _process_opponent(
+                    conn=conn,
+                    client=client,
+                    own_team_id=own_team_id,
+                    game=game,
+                    game_date=local_date,
+                    registry=registry,
+                    dry_run=dry_run,
+                    generate_fn=generate_fn,
+                )
+            except Exception as exc:  # noqa: BLE001 -- per-game isolation (TN-9)
+                # Reaching here means the RESOLUTION phase itself raised (the
+                # ladder, or the display-profile fetch) -- a post-resolution
+                # generation failure is already caught inside _process_opponent
+                # and classified auto_resolved/failed. This slot has NO public_id,
+                # so it is recorded as a failure WITH an error_message; the
+                # error_message is the discriminator that suppresses the
+                # unresolved-mappable operator prompt/alert + the `unresolved`
+                # tally (a crash is NOT a mappable opponent -- the operator must
+                # not be told to `map-opponent` it). The CHECK set has no "error"
+                # bucket; unresolved_mappable is the least-bad valid value and is
+                # rendered inert for the operator by the error_message gate.
+                logger.exception(
+                    "Opponent RESOLUTION failed for team=%s opponent_id=%s",
+                    public_id, game.opponent_id,
+                )
+                slot = SlotResult(
+                    own_team_id=own_team_id,
+                    opponent_root_team_id=game.opponent_id or f"unknown-{game.event_id}",
+                    opponent_name=game.opponent_name,
+                    game_date=local_date,
+                    resolution_outcome="unresolved_mappable",
+                    delivery_status="failed",
+                    error_message=str(exc),
+                )
+
+            if not dry_run:
+                _upsert_slot(conn, slot)
+            result.slots.append(slot)
+            _tally(result, slot)
+
+    return result
+
+
+def _tally(result: MorningRunResult, slot: SlotResult) -> None:
+    """Update the aggregate counters from one slot's outcome."""
+    if slot.delivery_status == "generated":
+        result.generated += 1
+    elif slot.delivery_status == "failed":
+        result.failed += 1
+    elif slot.delivery_status == "no_games":
+        result.no_games += 1
+    elif slot.delivery_status == "skipped":
+        result.skipped += 1
+
+    # A GENUINE unresolved-mappable opponent (no error) counts as unresolved and
+    # is surfaced to the operator. A resolution-CRASH slot carries the same
+    # outcome value but an error_message + delivery_status='failed' -- it is a
+    # failure, NOT a mappable opponent, so it is excluded here (and from the
+    # operator prompt/alert) by the error_message gate.
+    if slot.resolution_outcome == "unresolved_mappable" and slot.error_message is None:
+        result.unresolved += 1
+    elif slot.resolution_outcome == "deferred_placeholder":
+        result.deferred += 1

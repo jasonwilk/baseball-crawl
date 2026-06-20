@@ -671,6 +671,126 @@ class TestRunRecordCleanupMirror:
 
 
 # ===========================================================================
+# E-240-03: scheduled_report_runs cascade + audit-survival (TN-6).
+#   * Team deletion REMOVES the slot rows (own_team_id cascade).
+#   * Report deletion only NULLs report_id (ON DELETE SET NULL) -- the audit
+#     row SURVIVES. This is the deliberate mirror-image of E-235's "run row
+#     gone after report delete", guarding against an implementer copying the
+#     CASCADE pattern and destroying the audit trail.
+# ===========================================================================
+
+
+def _insert_scheduled_run_row(
+    db_path: Path,
+    own_team_id: int,
+    *,
+    opponent_root_team_id: str = "root-sched",
+    game_date: str = "2026-06-20",
+    resolution_outcome: str = "auto_resolved",
+    report_id: int | None = None,
+    delivery_status: str | None = None,
+) -> int:
+    conn = _get_conn(db_path)
+    cursor = conn.execute(
+        "INSERT INTO scheduled_report_runs "
+        "(game_date, own_team_id, opponent_root_team_id, resolution_outcome, "
+        "report_id, delivery_status) VALUES (?, ?, ?, ?, ?, ?)",
+        (
+            game_date,
+            own_team_id,
+            opponent_root_team_id,
+            resolution_outcome,
+            report_id,
+            delivery_status,
+        ),
+    )
+    conn.commit()
+    row_id = cursor.lastrowid
+    conn.close()
+    return row_id
+
+
+class TestScheduledRunCascadeOnTeamDeletion:
+    """AC-5: the team-deletion cascade removes scheduled_report_runs rows.
+
+    The slots belong to the team whose schedule produced them, so deleting an
+    eligible (cleanup-eligible) team via the report-delete cascade must remove
+    its scheduled_report_runs rows.
+    """
+
+    def test_team_delete_cascade_removes_scheduled_runs(self, setup):
+        db_path, client = setup
+        team_id = _insert_team_for_cascade(db_path, is_active=0)  # eligible
+        report_id = _insert_report(db_path, team_id, slug="sched-cascade-1")
+        # A scheduled slot NOT linked to the deleted report (report_id NULL),
+        # so its removal is attributable to the team cascade, not a report FK.
+        _insert_scheduled_run_row(db_path, team_id, resolution_outcome="unresolved_mappable")
+        assert _count_rows(
+            db_path, "scheduled_report_runs", "own_team_id = ?", (team_id,)
+        ) == 1
+
+        response = client.post(
+            f"/admin/reports/{report_id}/delete",
+            data={"csrf_token": _CSRF},
+            follow_redirects=False,
+        )
+        assert response.status_code == 303
+
+        assert _count_rows(db_path, "teams", "id = ?", (team_id,)) == 0
+        assert _count_rows(
+            db_path, "scheduled_report_runs", "own_team_id = ?", (team_id,)
+        ) == 0
+
+
+class TestScheduledRunAuditSurvival:
+    """AC-6: a scheduled_report_runs row SURVIVES report deletion with its
+    report_id NULLed (ON DELETE SET NULL) -- it is NOT cascade-deleted.
+
+    The deliberate mirror-image of TestRunRecordCleanupMirror. The team is kept
+    INELIGIBLE for cleanup (is_active=1) so the row's survival is attributable
+    to the report->run FK behavior, not a (missing) team cascade.
+    """
+
+    def test_audit_row_survives_report_delete_with_report_id_nulled(self, setup):
+        db_path, client = setup
+        team_id = _insert_team_for_cascade(db_path, is_active=1)  # ineligible
+        report_id = _insert_report(
+            db_path, team_id, slug="sched-survive-1", report_path=None
+        )
+        row_id = _insert_scheduled_run_row(
+            db_path,
+            team_id,
+            report_id=report_id,
+            delivery_status="generated",
+        )
+        assert _count_rows(
+            db_path, "scheduled_report_runs", "report_id = ?", (report_id,)
+        ) == 1
+
+        response = client.post(
+            f"/admin/reports/{report_id}/delete",
+            data={"csrf_token": _CSRF},
+            follow_redirects=False,
+        )
+        assert response.status_code == 303
+
+        # Report gone, but the audit row survives with report_id NULLed.
+        assert _count_rows(db_path, "reports", "id = ?", (report_id,)) == 0
+        conn = _get_conn(db_path)
+        row = conn.execute(
+            "SELECT report_id, delivery_status FROM scheduled_report_runs WHERE id = ?",
+            (row_id,),
+        ).fetchone()
+        conn.close()
+        assert row is not None, "audit row was cascade-deleted with the report"
+        assert row[0] is None, "report_id should be NULLed (ON DELETE SET NULL)"
+        assert row[1] == "generated", "the audit row's other columns are unchanged"
+        # Ineligible team retained: confirms survival came from the report FK
+        # behavior, not a team-delete cascade.
+        assert _count_rows(db_path, "teams", "id = ?", (team_id,)) == 1
+
+
+# ===========================================================================
 # E-235-06: Surface run records + trust flags in the admin reports list (TN-6)
 # ===========================================================================
 
