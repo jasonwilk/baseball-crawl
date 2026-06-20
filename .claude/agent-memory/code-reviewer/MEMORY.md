@@ -2,6 +2,7 @@
 
 ## Invariant Audit Patterns
 - [Sibling writers can defeat a provenance guard](invariant_audit_sibling_writer.md) — when an epic guards ONE writer, sweep sibling DELETE+rederive paths that delete the protected row first (E-237 merge_player_pair).
+- [Spec audit: distrust "sole/canonical producer" claims](spec_audit_sibling_producer.md) — grep src/ for literal output forms + sibling `_derive_*`/`_ensure_*` helpers before trusting an epic's enumerated producer set (E-241: crawler `_derive_season_id` falsified "no code path produces YYYY-suffix" + broke migration durability).
 
 ## Removal-Epic Review Patterns
 - [Asset deletion: sweep ALL test reference mechanisms](route_deletion_test_sweep.md) — deleting a route/module/template breaks tests that import it, `client.get()` it (assert 200), OR read it by literal path in a parametrize list (FileNotFoundError); import sweeps miss forms 2+3. Never `| head` a completeness grep (E-239: Codex caught form 2 in 4b, Phase 5 gate caught form 3).
