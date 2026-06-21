@@ -268,7 +268,7 @@ def test_degraded_opponent_both_surfaces_tell_the_truth(
     # clean, anchored identity (identity_match_method is NOT 'name_only').
     assert data.get("degraded_confidence") is False, (
         "degraded_confidence must be False on a clean anchored identity "
-        "(season_fallback was dropped in E-236-06; only name-only degrades)"
+        "(only a name-only identity match degrades confidence)"
     )
     # Target the RENDERED degraded div (and the line text), NOT the bare
     # 'trust-degraded' CSS rule that is always present in the <style> block.

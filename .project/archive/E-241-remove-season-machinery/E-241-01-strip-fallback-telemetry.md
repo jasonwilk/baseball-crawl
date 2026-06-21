@@ -4,7 +4,7 @@
 [E-241: Remove the cross-season machinery residue from the core](epic.md)
 
 ## Status
-`TODO`
+`DONE`
 
 ## Description
 After this story is complete, the `season_fallback` telemetry no longer exists

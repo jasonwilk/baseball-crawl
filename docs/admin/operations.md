@@ -413,7 +413,7 @@ Migration `migrations/006_spray_charts_indexes.sql` adds three columns and three
 |----------|------|---------|
 | `event_gc_id` column | `TEXT` | GC UUID per ball-in-play event. UNIQUE -- enables `INSERT OR IGNORE` idempotency. |
 | `created_at_ms` column | `INTEGER` | API's `createdAt` timestamp in Unix milliseconds. |
-| `season_id` column | `TEXT` | Season slug from the file path (e.g., `2026-spring-hs`). Enables per-season filtering per the fresh-start philosophy. |
+| `season_id` column | `TEXT` | Season identifier (e.g., `2026`). Enables per-season filtering per the fresh-start philosophy. |
 | `idx_spray_charts_event_gc_id` index | UNIQUE | On `event_gc_id`. Enforces idempotency at the DB level. |
 | `idx_spray_charts_player` index | | On `(player_id, team_id, season_id)`. Serves player profile and per-player chart queries. |
 | `idx_spray_charts_game` index | | On `game_id`. Serves game-level spray queries. |
@@ -528,7 +528,6 @@ One row per generation, linked 1:1 to `reports(id)` with `ON DELETE CASCADE` (de
 | `completed_games` (M) | Distinct completed games on the fetched schedule -- games with a final score played to date |
 | `completed_games_with_data` (N) | Distinct completed games for which at least one player stat row was loaded; N ≤ M |
 | `season_id_used` | The canonical season slug (`seasons` FK) used for this generation |
-| `season_fallback` | `1` when season was resolved via current-year / year-only fallback rather than team metadata (operator telemetry only -- does not trigger the coach warning footer) |
 | `identity_match_method` | `anchor` (team matched by gc_uuid or public_id) or `name_only` (matched by name+season only) |
 | `error_stage` / `error_message` | Stage name and error message when the generation failed |
 
@@ -551,7 +550,6 @@ The four new count columns (`boxscores_fetched`, `load_errors`, `plays_errors`, 
 
 | Badge | What triggered it | Tooltip text |
 |-------|------------------|-------------|
-| `season fallback` | `season_fallback = 1` — season resolved via current-year / year-only fallback, not team metadata | "Season resolved via current-year / year-only fallback, not team metadata (possible wrong-season risk)" |
 | `name-only match` | `identity_match_method = 'name_only'` — team matched by name + season with no gc_uuid/public_id anchor | "Team matched by name only — no gc_uuid/public_id anchor (possible wrong-team risk)" |
 
 **Operator "degraded" indicator** (orange, shown alongside the status badge when `overall_status = 'completed'` but one or more per-stage statuses are `partial` or `failed`):
@@ -598,13 +596,12 @@ The coach-facing report footer (visible to anyone with the report link) shows a 
 
 > ⚠️ Data accuracy may be limited. Contact your operator to verify before the game.
 
-This line appears **only** when `identity_match_method = 'name_only'`. The `season_fallback` flag is operator telemetry only — it does **not** trigger the coach footer as of E-236. The footer never names the specific flag — coaches see only the generic warning and are directed to contact the operator.
+This line appears **only** when `identity_match_method = 'name_only'`. The footer never names the specific flag — coaches see only the generic warning and are directed to contact the operator.
 
 The **operator** sees the specific flag(s) as orange badges in `/admin/reports`. When a coach reaches out citing the degraded-confidence warning, check the report row in the admin UI to see which badge(s) are shown, then investigate using the table below:
 
 | Operator flag | Root cause | How to investigate |
 |--------------|-----------|-------------------|
-| **season fallback** | `derive_season_id_for_team_with_fallback()` could not find season metadata on the team row and fell back to the current calendar year or a year-only match. This happens when the public API did not return a season year and the team has no prior data. | Check the team's `season_year` in the database: `sqlite3 data/app.db "SELECT id, name, season_year, public_id FROM teams WHERE public_id = '<public_id>'"`. If the season year is wrong, correct it and re-generate the report. |
 | **name-only match** | `ensure_team_row_with_provenance()` matched the team to an existing DB row by name + season year only, with no gc_uuid or public_id anchor. The wrong team could be matched if two teams share a name in the same season. | Check whether `public_id` on the matched team row matches the URL you generated the report for: `sqlite3 data/app.db "SELECT id, name, season_year, public_id, gc_uuid FROM teams WHERE id = <team_id>"`. If the public_id is wrong or missing, the report may have used a different team's row. |
 
 ---
@@ -827,4 +824,4 @@ For the expected data volume (~30 games x 4 teams x a few seasons), the database
 
 ---
 
-*Last updated: 2026-06-20 | Source: E-240 (morning-run scheduled reports section), E-238 (bb report cleanup subsection), E-236 (partial per-stage status, boxscores_fetched/load_errors/plays_errors/spray_games_with_data columns, degraded badge, all-boxscores-blocked hard-fail, two-case no_games page, bb report generate exit-0 for no_games, coach-footer season_fallback correction), E-235 (report generation run records, no_games outcome, trust-flag badges, coach-footer operator linkage), E-234 (bb report verify-aggregates), E-221 (team delete cross-perspective gate, cascade consolidation, retention flash message), E-199 (standalone reports section, cascade-delete behavior), E-198 (bb data reconcile, migration 012), E-195 (plays pipeline, migration 009, validate_plays_stats.py), E-173 (resolution write-through, auto-scout after linking, unified Find on GC resolve page), E-155 (duplicate team detection and merge UI), E-055 (unified CLI), E-028-03 (original), E-239 (removed dashboard, member-sync, opponent-discovery, programs management, opponent mapping, spray chart pipeline, plays pipeline, bb data scout/dedup/repair-opponents sections; reports-first reframe)*
+*Last updated: 2026-06-21 | Source: E-241-05 (removed season_fallback run-record row, badge, coach-footer mention, and operator investigation row; removed derive_season_id_for_team_with_fallback() from operator table; updated season_id examples to year-only), E-240 (morning-run scheduled reports section), E-238 (bb report cleanup subsection), E-236 (partial per-stage status, boxscores_fetched/load_errors/plays_errors/spray_games_with_data columns, degraded badge, all-boxscores-blocked hard-fail, two-case no_games page, bb report generate exit-0 for no_games), E-235 (report generation run records, no_games outcome, trust-flag badges, coach-footer operator linkage), E-234 (bb report verify-aggregates), E-221 (team delete cross-perspective gate, cascade consolidation, retention flash message), E-199 (standalone reports section, cascade-delete behavior), E-198 (bb data reconcile, migration 012), E-195 (plays pipeline, migration 009, validate_plays_stats.py), E-173 (resolution write-through, auto-scout after linking, unified Find on GC resolve page), E-155 (duplicate team detection and merge UI), E-055 (unified CLI), E-028-03 (original), E-239 (removed dashboard, member-sync, opponent-discovery, programs management, opponent mapping, spray chart pipeline, plays pipeline, bb data scout/dedup/repair-opponents sections; reports-first reframe)*

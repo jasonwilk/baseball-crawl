@@ -1617,8 +1617,6 @@ class TestFooterTrustBlock:
         html = render_report(_trust_data(degraded_confidence=False))
         assert "Data accuracy may be limited" not in html
         # Operator-only flags must not leak to the coach surface.
-        assert "season fallback" not in html
-        assert "season_fallback" not in html
         assert "name-only" not in html
         assert "name_only" not in html
 

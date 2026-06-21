@@ -1,7 +1,7 @@
 # E-241: Remove the cross-season machinery residue from the core
 
 ## Status
-`READY`
+`COMPLETED`
 
 ## Overview
 Remove the cross-season / multi-season *residue* that survives in the codebase as
@@ -107,12 +107,12 @@ Technical Notes for the consolidated findings.
 ## Stories
 | ID | Title | Status | Dependencies | Assignee |
 |----|-------|--------|-------------|----------|
-| E-241-01 | Strip the season_fallback telemetry chain (generator / db / admin) | TODO | None | - |
-| E-241-02 | Migration 006: drop `report_generation_runs.season_fallback` + season_id fragmentation safety | TODO | E-241-01, E-241-06 | - |
-| E-241-03 | Migrate the two shared fixtures to year-only slugs; delete the dead compound-season test class | TODO | None | - |
-| E-241-04 | Rewrite the season-machinery sections of `architecture-subsystems.md` | TODO | E-241-06 | - |
-| E-241-05 | Update `architecture.md` + `operations.md` season_fallback documentation | TODO | E-241-01, E-241-02, E-241-06 | - |
-| E-241-06 | Collapse season derivation to year-only — loaders + scouting crawler (delete the fallback variant + suffix taxonomy) | TODO | E-241-01 | - |
+| E-241-01 | Strip the season_fallback telemetry chain (generator / db / admin) | DONE | None | - |
+| E-241-02 | Migration 006: drop `report_generation_runs.season_fallback` + season_id fragmentation safety | DONE | E-241-01, E-241-06 | - |
+| E-241-03 | Migrate the two shared fixtures to year-only slugs; delete the dead compound-season test class | DONE | None | - |
+| E-241-04 | Rewrite the season-machinery sections of `architecture-subsystems.md` | DONE | E-241-06 | - |
+| E-241-05 | Update `architecture.md` + `operations.md` season_fallback documentation | DONE | E-241-01, E-241-02, E-241-06 | - |
+| E-241-06 | Collapse season derivation to year-only — loaders + scouting crawler (delete the fallback variant + suffix taxonomy) | DONE | E-241-01 | - |
 
 **Story-order note**: numbers are identifiers, not execution order — dependencies
 define order. The dependency-enforced order of the code stories is
@@ -396,6 +396,48 @@ READY summary so the scope choice is visible.)
   Option-1 scope decision (TN-12: drop the param + delete two provably-dead E-239-orphan
   batch methods, keeping the Success Criterion honestly absolute). Zero production
   stat-value change throughout (TN-3). All review findings accepted; see the scorecard.
+- 2026-06-21: COMPLETED. All 6 stories DONE. **Delivered** — season derivation now
+  emits a year-only `season_id` from both producers (loaders `derive_season_id_for_team`
+  + scouting crawler `_derive_season_id`); the `season_fallback` concept is removed
+  end-to-end (the `fallback_used` computation, the `SeasonDerivation` dataclass, the
+  `derive_season_id_for_team_with_fallback` variant, the `report_generation_runs.season_fallback`
+  column via migration 006, the generator write, the `/admin/reports` badge, and the
+  admin docs); `_PROGRAM_TYPE_SUFFIX` is deleted; the two named shared fixtures + their
+  coupled tests carry year-only slugs and the dead compound-season test class is gone;
+  the context-layer + admin docs describe year-only derivation. Zero production stat-value
+  change (Epic-A goldens + aggregate parity green and unchanged; golden JSON byte-identical,
+  not regenerated). `programs.program_type` column + `.claude/rules/pitch-rules.md` left
+  intact (TN-6). The TN-12 Option-1 deletions landed (the `season_id` override param +
+  `scout_all`/`scout_all_in_memory`); the further-orphaned freshness-gating cluster was
+  deliberately DEFERRED-WHOLE to a follow-up sweep IDEA (see Ideas note below) rather than
+  half-removed. **Pre-closure full suite GREEN: 3355 passed, 0 failed** (count dropped from
+  prior epics' baseline ∵ dead-code + compound-fixture tests removed). **Two honest notes:**
+  (a) E-241-02 made a FORCED cross-story edit to `tests/test_report_generator.py` (changed
+  `run["season_fallback"] == 0` → `"season_fallback" not in run`) — a file outside 02's
+  listed "Files to Modify" set, but the mechanical and unavoidable consequence of the column
+  drop (`_read_run_record`'s `SELECT rgr.*` stops carrying the key, so the old assertion
+  would KeyError). 02 was the only active story at the time, so there was no file contention;
+  the edit was ruled acceptable (PM) as the same shape as the E-239 importer-gate pattern and
+  required by the full-suite-green gate. (b) E-241-06's AC-6 "test set COMPLETE" recon claim
+  was one file short: `tests/test_game_start_time.py` seeded a non-format-invariant compound
+  slug (`2025-spring-hs`) that the grep-based recon missed and that grep-based per-story AC
+  verification structurally cannot catch (only running the full suite surfaces a runtime
+  regression in an un-enumerated file). It was caught by the Phase-4b Codex pass + the
+  full-suite-green gate (exactly the designed backstop) and fixed in remediation (fixture →
+  year-only `2025`). **Documentation assessment** — the doc-update trigger fired (schema +
+  behavior change) but was satisfied IN-EPIC by E-241-05 (`docs/admin/architecture.md` +
+  `operations.md` updated to year-only / post-006); no further docs-writer dispatch needed.
+  **Context-layer assessment** — all six triggers evaluated: (1) YES, (2) YES, (3) YES,
+  (4) NO, (5) YES, (6) NO. The fired triggers were codified by claude-architect at closure
+  (`architecture-subsystems.md` was E-241-04; the TN-11 agent-memory refresh of the dead
+  `derive_season_id_for_team_with_fallback`/`SeasonDerivation` additive-extension "durable
+  pattern" reference in claude-architect's + the PM's MEMORY.md; plus the two new footguns).
+  **Ideas** — a "post-E-241 dead-code + stale-example sweep" IDEA was filed at closure
+  covering: the `scout_all`-orphaned freshness-gating cluster, the dead
+  `format_season_display` helper, and the stale compound-slug example comments (incl. the
+  DO-NOT-EDIT frozen migration 001:81). **Vision** — the 2026-06-14 signal (vision-signals.md
+  L42) that this epic answers is left in place per TN-10 for the next "curate the vision"
+  session.
 
 ### Review Scorecard
 | Review Pass | Findings | Accepted | Dismissed |
@@ -411,3 +453,28 @@ spec-audit row counts F1/F2/F3 (= dupes of A1/A3/A5, not double-counted); the ho
 row counts the remaining A2/A4/A6/A7 (arch OBS-1 = the A7 closure obligation; arch OBS-2
 and the baseball-coach holistic were clean / no-action). Codex iter-1 = C1–C4; Codex
 iter-2 = D1–D3. Every finding was ACCEPTED; none dismissed.
+
+### Dispatch & Review Scorecard
+| Review Pass | Findings | Accepted | Dismissed |
+|---|---|---|---|
+| Per-story CR — 01 | 0 | 0 | 0 |
+| Per-story CR — 06 | 1 | 1 | 0 |
+| Per-story CR — 02 | 0 | 0 | 0 |
+| Per-story CR — 03 | 0 | 0 | 0 |
+| Per-story CR — 05 | 0 | 0 | 0 |
+| CR integration review (Phase 4a) | 2 | 2 | 0 |
+| Codex code review (Phase 4b) | 2 | 2 | 0 |
+| **Total** | **5** | **5** | **0** |
+
+Dispatch scorecard notes: Story 04 was context-layer-only (`.claude/rules/architecture-subsystems.md`)
+→ code-reviewer SKIPPED, PM-alone AC verification (no CR row). Story 06's single per-story
+CR finding was the SHOULD-FIX that the orphaned dead-code surface is larger than SE flagged
+(the whole `scout_all` freshness-gating cluster); disposition = ACCEPTED-AS-VALID but
+DEFERRED-WHOLE to the closure sweep IDEA (PM work-definition ruling — not a code change in 06;
+the in-flight `_resolve_team_id` deletion was reverted so 06 landed exactly at its spec'd scope).
+Story 02's cross-story `test_report_generator.py` edit was a PM AC-verify judgment (forced
+mechanical consequence of the column drop), not a CR finding. Phase 4a = 2 stale compound-slug
+docstring examples (scouting.py:79, generator.py:765) → year-only. Phase 4b = (1) crawler
+`_ensure_season_row` season_type 'unknown'→'default' to honor the E-241 contract, (2) the
+`test_game_start_time.py` compound-seed regression (the AC-6 gap). All accepted/fixed; none
+dismissed.

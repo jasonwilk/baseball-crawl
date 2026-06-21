@@ -834,15 +834,14 @@ class TestRunRecordSurfacing:
             plays_games_covered=8, reconciliation_status="completed",
             discrepancies_found=3, discrepancies_corrected=2,
             completed_games=12, completed_games_with_data=11,
-            season_id_used="2026-spring-hs", season_fallback=1,
+            season_id_used="2026-spring-hs",
             identity_match_method="name_only",
         )
 
         html = client.get("/admin/reports").text
         assert "Pipeline:" in html        # per-stage detail block
         assert "Games:" in html           # N-of-M counts
-        assert "season fallback" in html  # operator flag 1
-        assert "name-only match" in html  # operator flag 2
+        assert "name-only match" in html  # operator flag
 
     def test_no_games_status_badge(self, setup):
         """AC-1: the no_games terminal status gets its own badge."""
@@ -869,19 +868,18 @@ class TestRunRecordSurfacing:
         assert "Pipeline:" not in response.text
 
     def test_clean_run_has_no_operator_flags(self, setup):
-        """A fully-anchored, no-fallback run shows neither operator flag."""
+        """A fully-anchored run shows no operator flag."""
         db_path, client = setup
         team_id = _insert_team(db_path)
         report_id = _insert_report(db_path, team_id, slug="clean-1", status="ready")
         _insert_full_run_row(
             db_path, report_id, overall_status="completed",
-            season_fallback=0, identity_match_method="anchor",
+            identity_match_method="anchor",
             completed_games=10, completed_games_with_data=10,
         )
 
         html = client.get("/admin/reports").text
         assert "Pipeline:" in html
-        assert "season fallback" not in html
         assert "name-only match" not in html
 
     def test_partial_stage_distinct_and_counts_and_degraded_badge(self, setup):

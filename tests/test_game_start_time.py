@@ -35,7 +35,7 @@ def _create_schema(db: sqlite3.Connection) -> None:
     db.executescript(_MIGRATION_FILE.read_text(encoding="utf-8"))
     db.executescript(
         """
-        INSERT OR IGNORE INTO seasons (season_id, name, season_type, year) VALUES ('2025-spring-hs', 'Spring 2025', 'spring-hs', 2025);
+        INSERT OR IGNORE INTO seasons (season_id, name, season_type, year) VALUES ('2025', 'Spring 2025', 'default', 2025);
         INSERT OR IGNORE INTO programs (program_id, name, program_type) VALUES ('lsb-hs', 'LSB HS', 'hs');
         INSERT OR IGNORE INTO teams (id, name, gc_uuid, public_id, membership_type, season_year, program_id)
             VALUES (1, 'Own Team', 'own-uuid-1234', 'OwnTeamSlug', 'member', 2025, 'lsb-hs');
@@ -135,7 +135,7 @@ class TestGameLoaderPreservesStartTime:
             """
             INSERT INTO games (game_id, season_id, game_date, home_team_id,
                                away_team_id, status, start_time, timezone)
-            VALUES ('game-100', '2025-spring-hs', '2025-04-26', 1, 2,
+            VALUES ('game-100', '2025', '2025-04-26', 1, 2,
                     'scheduled', '2025-04-26T16:00:00.000Z', 'America/Chicago')
             """
         )
@@ -178,7 +178,7 @@ class TestGameLoaderPreservesStartTime:
             """
             INSERT INTO games (game_id, season_id, game_date, home_team_id,
                                away_team_id, status, start_time, timezone)
-            VALUES ('game-200', '2025-spring-hs', '2025-04-26', 1, 2,
+            VALUES ('game-200', '2025', '2025-04-26', 1, 2,
                     'completed', NULL, NULL)
             """
         )

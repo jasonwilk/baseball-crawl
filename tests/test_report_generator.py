@@ -1165,7 +1165,7 @@ class TestListReportsWithRunsJoin:
             plays_games_covered=8, reconciliation_status="completed",
             discrepancies_found=3, discrepancies_corrected=2,
             completed_games=12, completed_games_with_data=11,
-            season_id_used="2026-spring-hs", season_fallback=1,
+            season_id_used="2026-spring-hs",
             identity_match_method="name_only",
             error_stage="load", error_message="run-level msg",
         )
@@ -1179,7 +1179,6 @@ class TestListReportsWithRunsJoin:
         assert r["spray_games"] == 5
         assert r["plays_games_covered"] == 8
         assert r["discrepancies_corrected"] == 2
-        assert r["season_fallback"] == 1
         assert r["identity_match_method"] == "name_only"
         # Report-level error_message is distinct from the aliased run message.
         assert "error_message" in r
@@ -1197,7 +1196,6 @@ class TestListReportsWithRunsJoin:
         r = rows[0]
         # LEFT join -> every run column is NULL, no crash.
         assert r["overall_status"] is None
-        assert r["season_fallback"] is None
         assert r["completed_games"] is None
         assert r["identity_match_method"] is None
         assert r["run_error_message"] is None
@@ -3882,16 +3880,20 @@ class TestQualityGatesFlags:
     @patch("src.reports.generator.GameChangerClient")
     @patch("src.reports.generator.ensure_team_row_with_provenance",
            return_value=EnsureTeamResult(1, "anchor", False))
-    def test_gate_b_season_fallback_flagged(
+    def test_season_id_used_recorded_without_fallback_telemetry(
         self, mock_ensure, mock_client_cls, mock_get_conn, db, tmp_path,
     ):
-        """AC-3: the default team (season_year set, no program) resolves via the
-        year-only fallback -> season_fallback=1 and season_id_used recorded."""
+        """E-241-01: the default team (season_year set, no program) resolves to
+        the year-only season_id "2026" and records season_id_used; the
+        season_fallback telemetry is no longer captured (E-241-02 dropped the
+        column entirely via migration 006)."""
         result = self._run(db, tmp_path, mock_get_conn, mock_client_cls)
         assert result.success is True
         run = _read_run_record(str(tmp_path / "test.db"), result.slug)
-        assert run["season_fallback"] == 1
         assert run["season_id_used"] == "2026"
+        # season_fallback column dropped by migration 006 (E-241-02): it is no
+        # longer part of the run record at all.
+        assert "season_fallback" not in run
 
     @patch("src.reports.generator.get_connection")
     @patch("src.reports.generator.GameChangerClient")
@@ -3933,15 +3935,12 @@ class TestQualityGatesFlags:
         # spray_available reflects spray rows actually loaded (none in this
         # mocked run) -- it is a bool keyed off the queried spray_charts.
         assert data["spray_available"] is False
-        # E-236-06 AC-2: clean modal data (default team -> season_fallback=True,
-        # but identity_match_method="anchor", NOT name-only) NO LONGER trips the
-        # coach-facing degraded line. season_fallback was dropped from the
-        # degraded_confidence term (Option A / coach C2); it remains operator-
-        # only telemetry. Only a name-only identity match degrades confidence.
+        # E-236-06 AC-2 / E-241-01: clean modal data (default team ->
+        # identity_match_method="anchor", NOT name-only) does NOT trip the
+        # coach-facing degraded line. The season-fallback signal was never part
+        # of the degraded_confidence term, and its operator telemetry is now
+        # removed entirely. Only a name-only identity match degrades confidence.
         assert data["degraded_confidence"] is False
-        # The operator telemetry is still written (AC-4): season_fallback fired.
-        run = _read_run_record(str(tmp_path / "test.db"), result.slug)
-        assert run["season_fallback"] == 1
 
     @patch("src.reports.generator.get_connection")
     @patch("src.reports.generator.GameChangerClient")

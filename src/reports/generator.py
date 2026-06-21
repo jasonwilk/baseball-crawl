@@ -40,7 +40,7 @@ from src.gamechanger.client import CredentialExpiredError, GameChangerClient
 from src.gamechanger.crawlers.scouting import ScoutingCrawler
 from src.gamechanger.crawlers.scouting_spray import ScoutingSprayChartCrawler
 from src.gamechanger.loaders import (
-    derive_season_id_for_team_with_fallback,
+    derive_season_id_for_team,
     ensure_season_row,
 )
 from src.gamechanger.loaders.plays_loader import PlaysLoader
@@ -285,7 +285,7 @@ _RUN_RECORD_COLUMNS = frozenset({
     "spray_games_with_data", "boxscores_fetched", "load_errors",
     "plays_games_expected", "plays_games_covered", "plays_errors",
     "discrepancies_found", "discrepancies_corrected",
-    "season_id_used", "season_fallback", "identity_match_method",
+    "season_id_used", "identity_match_method",
     "error_stage", "error_message",
 })
 
@@ -762,7 +762,7 @@ def _crawl_and_load_spray(
     Args:
         client: Authenticated ``GameChangerClient``.
         public_id: The scouted team's ``public_id`` slug.
-        season_id: Season slug (e.g., ``"2026-spring-hs"``).
+        season_id: Year-only season_id (e.g., ``"2026"``).
         gc_uuid: When provided, passed to the crawler to bypass DB lookup.
         games_data: In-memory games list from the scouting crawl result.
         team_id: This report's team DB id (E-236-04 / AC-6). When provided, the
@@ -1455,8 +1455,6 @@ class _ReportGeneration:
         self.plays_game_ids: list[str] = []
         self.completed_games: int = 0
         self.spray_games: int | None = None
-        # Gate (b) season-fallback flag (TN-3), determined at season derivation.
-        self.season_fallback: bool = False
         # Orphan determination (post-pipeline). The in-memory per-run
         # created-set (E-235-04 / TN-4) records the team ids THIS run INSERTed
         # during the scouting load (threaded through ScoutingLoader -> GameLoader
@@ -1676,25 +1674,21 @@ class _ReportGeneration:
                 boxscores_fetched=boxscores_fetched,
             )
 
-            # Derive the canonical DB season_id from team metadata, capturing
-            # the gate (b) season-fallback signal (TN-3, single source of truth).
+            # Derive the canonical DB season_id from team metadata.
             with closing(get_connection()) as conn:
-                derivation = derive_season_id_for_team_with_fallback(
+                self.season_id, _ = derive_season_id_for_team(
                     conn, self.team_id,
                 )
-            self.season_id = derivation.season_id
-            self.season_fallback = derivation.fallback_used
             # Guarantee the season row exists so season_id_used (FK) is safe to
             # write even when the loader early-returns without committing (the
             # no-games path). Idempotent.
             with closing(get_connection()) as conn:
                 ensure_season_row(conn, self.season_id)
                 conn.commit()
-            # Gate (b): record the season used + whether a fallback fired.
+            # Record the season used for this run.
             _update_run_record(
                 self.report_id,
                 season_id_used=self.season_id,
-                season_fallback=int(self.season_fallback),
             )
 
             # Run the loader with the in-memory crawl result. Pass the per-run
@@ -2214,11 +2208,10 @@ class _ReportGeneration:
             # consumes these from the render data; this is the only generator
             # change the footer needs. degraded_confidence is the single derived
             # boolean: it fires ONLY on a name-only identity match (E-236-06 /
-            # TN-4 / coach C2). season_fallback was dropped from this term --
-            # it fires on clean modal data (program_type NULL + good
-            # season_year) and produced a false coach-facing warning. It stays
-            # as operator-only telemetry in report_generation_runs.season_fallback
-            # (surfaced on /admin/reports).
+            # TN-4 / coach C2). The season-fallback signal was never part of
+            # this term -- it fired on clean modal data (program_type NULL +
+            # good season_year) and would have produced a false coach-facing
+            # warning.
             degraded_confidence = bool(
                 self.identity_match_method == "name_only"
             )

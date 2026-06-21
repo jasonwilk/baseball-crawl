@@ -55,7 +55,7 @@ GOLDEN_PATH = _FIXTURES_DIR / "golden" / "report_stats.json"
 
 # The fixture's TEAM_VARSITY plays its primary season here.
 TEAM_GC_UUID = "TEAM_VARSITY"
-PRIMARY_SEASON_ID = "2026-spring-hs"
+PRIMARY_SEASON_ID = "2026"
 # Anchored to the fixture's last game (GAME_007, 2026-04-21) so workload-derived
 # integer stats are deterministic. NEVER use the default today (TN-1).
 WORKLOAD_REFERENCE_DATE = "2026-04-21"

@@ -166,7 +166,7 @@ class TestPlayerBattingStats:
             CAST(so AS REAL) / ab                       AS k_rate
         FROM player_season_batting
         WHERE player_id = 'PLAYER_VARSITY_01'
-          AND season_id  = '2026-spring-hs';
+          AND season_id  = '2026';
     """
 
     def test_batting_average(self, seeded_db: sqlite3.Connection) -> None:
@@ -207,7 +207,7 @@ class TestPlayerBattingStats:
 class TestTeamRosterByOBP:
     """AC-6: given team_id + season_id, return roster sorted by OBP descending."""
 
-    # Expected OBP order for TEAM_VARSITY in 2026-spring-hs:
+    # Expected OBP order for TEAM_VARSITY in 2026:
     #   PLAYER_VARSITY_02: 11/22 = 0.500
     #   PLAYER_VARSITY_01: 10/23 ≈ 0.43478
     #   PLAYER_VARSITY_03:  7/18 ≈ 0.38889
@@ -224,7 +224,7 @@ class TestTeamRosterByOBP:
          AND tr.team_id   = psb.team_id
          AND tr.season_id = psb.season_id
         WHERE psb.team_id  = (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY')
-          AND psb.season_id = '2026-spring-hs'
+          AND psb.season_id = '2026'
         ORDER BY obp DESC;
     """
 
@@ -286,7 +286,7 @@ class TestTeamRosterByOBP:
 class TestTeamWinLossRecord:
     """AC-7: given team_id + season_id, return their W-L record."""
 
-    # TEAM_VARSITY in 2026-spring-hs: 5 wins, 2 losses (see seed.sql header)
+    # TEAM_VARSITY in 2026: 5 wins, 2 losses (see seed.sql header)
 
     _QUERY = """
         SELECT
@@ -305,7 +305,7 @@ class TestTeamWinLossRecord:
                 ELSE 0
             END) AS losses
         FROM games
-        WHERE season_id = '2026-spring-hs'
+        WHERE season_id = '2026'
           AND (
             home_team_id = (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY')
             OR away_team_id = (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY')
@@ -313,13 +313,13 @@ class TestTeamWinLossRecord:
     """
 
     def test_win_count(self, seeded_db: sqlite3.Connection) -> None:
-        """TEAM_VARSITY has exactly 5 wins in 2026-spring-hs."""
+        """TEAM_VARSITY has exactly 5 wins in 2026."""
         row = seeded_db.execute(self._QUERY).fetchone()
         assert row is not None
         assert row[0] == 5, f"Expected 5 wins, got {row[0]}"
 
     def test_loss_count(self, seeded_db: sqlite3.Connection) -> None:
-        """TEAM_VARSITY has exactly 2 losses in 2026-spring-hs."""
+        """TEAM_VARSITY has exactly 2 losses in 2026."""
         row = seeded_db.execute(self._QUERY).fetchone()
         assert row is not None
         assert row[1] == 2, f"Expected 2 losses, got {row[1]}"
@@ -360,7 +360,7 @@ class TestHomeAwaySplitBattingAverage:
             CAST(away_h AS REAL) / away_ab AS away_ba
         FROM player_season_batting
         WHERE player_id = 'PLAYER_VARSITY_01'
-          AND season_id  = '2026-spring-hs';
+          AND season_id  = '2026';
     """
 
     def test_home_batting_average(self, seeded_db: sqlite3.Connection) -> None:
@@ -401,7 +401,7 @@ class TestHomeAwaySplitBattingAverage:
 class TestPitcherLeaderboardByK9:
     """AC-9: given team_id + season_id, return pitchers sorted by K/9 descending."""
 
-    # Expected order for TEAM_VARSITY in 2026-spring-hs:
+    # Expected order for TEAM_VARSITY in 2026:
     #   PLAYER_VARSITY_01: ip_outs=54, so=22  K/9 = 22*27.0/54 = 11.000  (rank 1)
     #   PLAYER_VARSITY_02: ip_outs=36, so=12  K/9 = 12*27.0/36 =  9.000  (rank 2)
     #   PLAYER_VARSITY_03: ip_outs=18, so=5   K/9 =  5*27.0/18 =  7.500  (rank 3)
@@ -412,13 +412,13 @@ class TestPitcherLeaderboardByK9:
             so * 27.0 / ip_outs AS k9
         FROM player_season_pitching
         WHERE team_id  = (SELECT id FROM teams WHERE gc_uuid = 'TEAM_VARSITY')
-          AND season_id = '2026-spring-hs'
+          AND season_id = '2026'
           AND ip_outs > 0
         ORDER BY k9 DESC;
     """
 
     def test_returns_three_pitchers(self, seeded_db: sqlite3.Connection) -> None:
-        """Exactly 3 pitchers appear for TEAM_VARSITY in 2026-spring-hs."""
+        """Exactly 3 pitchers appear for TEAM_VARSITY in 2026."""
         rows = seeded_db.execute(self._QUERY).fetchall()
         assert len(rows) == 3, f"Expected 3 pitchers, got {len(rows)}"
 
@@ -522,25 +522,16 @@ class TestCrawlConfigQuery:
 
 
 # ---------------------------------------------------------------------------
-# AC-11: Seasons by type ordered by year
+# Seasons ordered by year (the two-season fixture structure guard)
 # ---------------------------------------------------------------------------
 
 
-class TestSeasonsByType:
-    """AC-11: given a season_type, return seasons of that type ordered by year."""
+class TestSeasonsOrderedByYear:
+    """Given the two-season fixture, return both seasons ordered by year.
 
-    _QUERY_SPRING = """
-        SELECT season_id, year
-        FROM seasons
-        WHERE season_type = 'spring-hs'
-        ORDER BY year;
-    """
-
-    _QUERY_LEGION = """
-        SELECT season_id, year
-        FROM seasons
-        WHERE season_type = 'summer-legion'
-        ORDER BY year;
+    E-241: the compound season_type taxonomy was removed; both fixture seasons
+    are now ``season_type='default'`` with year-only season_ids, so the prior
+    season-type-filtering tests are gone.
     """
 
     _QUERY_ALL_ORDERED = """
@@ -548,30 +539,6 @@ class TestSeasonsByType:
         FROM seasons
         ORDER BY year;
     """
-
-    def test_spring_hs_season_found(self, seeded_db: sqlite3.Connection) -> None:
-        """The spring-hs season query returns exactly one row."""
-        rows = seeded_db.execute(self._QUERY_SPRING).fetchall()
-        assert len(rows) == 1, f"Expected 1 spring-hs season, got {len(rows)}"
-
-    def test_spring_hs_season_id(self, seeded_db: sqlite3.Connection) -> None:
-        """The spring-hs season has the correct season_id."""
-        rows = seeded_db.execute(self._QUERY_SPRING).fetchall()
-        assert rows[0][0] == "2026-spring-hs", (
-            f"Expected season_id '2026-spring-hs', got {rows[0][0]}"
-        )
-
-    def test_summer_legion_season_found(self, seeded_db: sqlite3.Connection) -> None:
-        """The summer-legion season query returns exactly one row."""
-        rows = seeded_db.execute(self._QUERY_LEGION).fetchall()
-        assert len(rows) == 1, f"Expected 1 summer-legion season, got {len(rows)}"
-
-    def test_summer_legion_season_id(self, seeded_db: sqlite3.Connection) -> None:
-        """The summer-legion season has the correct season_id."""
-        rows = seeded_db.execute(self._QUERY_LEGION).fetchall()
-        assert rows[0][0] == "2025-summer-legion", (
-            f"Expected season_id '2025-summer-legion', got {rows[0][0]}"
-        )
 
     def test_all_seasons_ordered_by_year(self, seeded_db: sqlite3.Connection) -> None:
         """All seasons returned in year-ascending order: 2025, 2026."""
@@ -581,10 +548,12 @@ class TestSeasonsByType:
         assert years == sorted(years), f"Seasons not in year order: {years}"
         assert years[0] == 2025
         assert years[1] == 2026
+        assert rows[0][0] == "2025"
+        assert rows[1][0] == "2026"
 
     def test_query_performance(self, seeded_db: sqlite3.Connection) -> None:
-        """AC-12: seasons-by-type query completes in under 100ms."""
+        """AC-12: seasons query completes in under 100ms."""
         start = time.perf_counter()
-        seeded_db.execute(self._QUERY_SPRING).fetchall()
+        seeded_db.execute(self._QUERY_ALL_ORDERED).fetchall()
         elapsed_ms = (time.perf_counter() - start) * 1000
         assert elapsed_ms < 100, f"Query took {elapsed_ms:.1f}ms (limit 100ms)"

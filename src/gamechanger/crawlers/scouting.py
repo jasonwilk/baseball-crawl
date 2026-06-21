@@ -24,8 +24,6 @@ Raw responses are written to::
     data/raw/{season_id}/scouting/{public_id}/boxscores/{game_stream_id}.json
 
 The ``scouting_runs`` table tracks each run's status, counts, and timestamps.
-Freshness checks in ``scout_all()`` skip opponents scouted within the
-configured threshold.
 
 Usage::
 
@@ -78,7 +76,7 @@ class ScoutingCrawlResult:
 
     Attributes:
         team_id: INTEGER PK of the scouted team in the ``teams`` table.
-        season_id: The crawl-derived season slug (e.g. ``"2025-spring-hs"``).
+        season_id: The crawl-derived, year-only season_id (e.g. ``"2025"``).
         games: List of game dicts from the public games endpoint.
         roster: List of player dicts from the public roster endpoint.
         boxscores: Dict mapping game_stream_id to boxscore dict.
@@ -128,12 +126,9 @@ class ScoutingCrawler:
         db: Open ``sqlite3.Connection`` with ``PRAGMA foreign_keys=ON`` set.
             The caller owns the connection lifecycle.
         freshness_hours: How many hours a completed scouting run is considered
-            fresh.  Opponents scouted within this threshold are skipped by
-            ``scout_all()``.  Defaults to 24.
+            fresh.  Defaults to 24.
         data_root: Root directory for raw data output.  Defaults to
             ``data/raw/`` relative to the project root.
-        season_suffix: Suffix used when deriving season IDs from game timestamps.
-            Defaults to ``"spring-hs"``.
     """
 
     def __init__(
@@ -142,19 +137,17 @@ class ScoutingCrawler:
         db: sqlite3.Connection,
         freshness_hours: int = 24,
         data_root: Path = _DATA_ROOT,
-        season_suffix: str = "spring-hs",
     ) -> None:
         self._client = client
         self._db = db
         self._freshness_hours = freshness_hours
         self._data_root = data_root
-        self._season_suffix = season_suffix
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
 
-    def scout_team(self, public_id: str, season_id: str | None = None) -> ScoutingCrawlResult:
+    def scout_team(self, public_id: str) -> ScoutingCrawlResult:
         """Fetch schedule, roster, and boxscores for one opponent team.
 
         Returns an in-memory ``ScoutingCrawlResult`` containing all crawled
@@ -176,9 +169,8 @@ class ScoutingCrawler:
             team_id = self._ensure_team_row(public_id=public_id)
             return ScoutingCrawlResult(team_id=team_id, season_id="", public_id=public_id, skipped=True)
 
-        if season_id is None:
-            season_id = _derive_season_id(completed_games, self._season_suffix)
-            logger.info("Derived season_id=%s for public_id=%s", season_id, public_id)
+        season_id = _derive_season_id(completed_games)
+        logger.info("Derived season_id=%s for public_id=%s", season_id, public_id)
 
         team_id = self._ensure_team_row(public_id=public_id)
         self._ensure_season_row(season_id)
@@ -339,109 +331,6 @@ class ScoutingCrawler:
         )
         self._db.commit()
 
-    def scout_all(self, season_id: str | None = None) -> CrawlResult:
-        """Scout all opponents with a ``public_id`` that are not recently scouted.
-
-        Queries ``opponent_links`` for all visible opponents with a ``public_id``
-        and calls ``scout_team()`` for each one that has no completed scouting
-        run within the freshness threshold.
-
-        Args:
-            season_id: Optional season slug override forwarded to
-                ``scout_team()``.  When ``None``, each opponent derives its
-                own season from its schedule.
-
-        Returns:
-            Aggregated ``CrawlResult`` across all opponents.
-        """
-        rows = self._db.execute(
-            "SELECT DISTINCT public_id FROM opponent_links "
-            "WHERE public_id IS NOT NULL AND is_hidden = 0"
-        ).fetchall()
-
-        total = CrawlResult()
-        logger.info("scout_all: found %d opponents with a public_id.", len(rows))
-
-        for (pub_id,) in rows:
-            team_id = self._resolve_team_id(pub_id)
-            if self._is_scouted_recently(team_id, season_id=season_id):
-                logger.info(
-                    "Skipping public_id=%s: scouted within %dh.", pub_id, self._freshness_hours
-                )
-                total.files_skipped += 1
-                continue
-
-            try:
-                result = self.scout_team(pub_id, season_id)
-            except CredentialExpiredError:
-                raise
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("Unexpected error scouting public_id=%s: %s", pub_id, exc)
-                total.errors += 1
-                continue
-
-            total.files_written += result.games_crawled
-            if result.skipped:
-                total.files_skipped += 1
-            total.errors += result.errors
-
-        return total
-
-    def scout_all_in_memory(
-        self, season_id: str | None = None
-    ) -> list[ScoutingCrawlResult]:
-        """Scout all opponents and return per-team in-memory results (E-220 C2-A).
-
-        Same opponent discovery as ``scout_all()``, but returns the rich
-        ``ScoutingCrawlResult`` for each team instead of aggregated counts.
-        Used by ``_run_scout_pipeline`` to pass per-team data directly to
-        ``ScoutingLoader.load_team()`` without disk intermediation.
-
-        Skipped (freshness-gated) teams are NOT included in the result list
-        because they have no fresh in-memory data to load -- their existing
-        DB rows are already current.
-
-        Args:
-            season_id: Optional season slug forwarded to ``scout_team``.
-
-        Returns:
-            List of ``ScoutingCrawlResult`` objects, one per scouted team.
-        """
-        rows = self._db.execute(
-            "SELECT DISTINCT public_id FROM opponent_links "
-            "WHERE public_id IS NOT NULL AND is_hidden = 0"
-        ).fetchall()
-
-        results: list[ScoutingCrawlResult] = []
-        logger.info("scout_all_in_memory: found %d opponents with a public_id.", len(rows))
-
-        for (pub_id,) in rows:
-            team_id = self._resolve_team_id(pub_id)
-            if self._is_scouted_recently(team_id, season_id=season_id):
-                logger.info(
-                    "Skipping public_id=%s: scouted within %dh.",
-                    pub_id, self._freshness_hours,
-                )
-                continue
-            try:
-                result = self.scout_team(pub_id, season_id)
-            except CredentialExpiredError:
-                raise
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("Unexpected error scouting public_id=%s: %s", pub_id, exc)
-                # Synthesize a failed result so the caller can mark the run failed.
-                team_pk = self._resolve_team_id(pub_id) or 0
-                results.append(ScoutingCrawlResult(
-                    team_id=team_pk,
-                    season_id=season_id or "",
-                    public_id=pub_id,
-                    errors=1,
-                ))
-                continue
-            results.append(result)
-
-        return results
-
     # ------------------------------------------------------------------
     # DB helpers
     # ------------------------------------------------------------------
@@ -492,17 +381,20 @@ class ScoutingCrawler:
         )
 
     def _ensure_season_row(self, season_id: str) -> None:
-        """Ensure a ``seasons`` row exists for ``season_id``."""
-        parts = season_id.split("-")
-        year = 0
-        for part in parts:
-            if part.isdigit() and len(part) == 4:
-                year = int(part)
-                break
+        """Ensure a ``seasons`` row exists for the year-only ``season_id``.
+
+        Writes ``season_type='default'`` to match the canonical
+        ``ensure_season_row`` (src/gamechanger/loaders/__init__.py). The live
+        report path runs ``scout_team()`` (this writer) BEFORE the canonical
+        helper, and both use ``ON CONFLICT(season_id) DO NOTHING``, so whichever
+        runs first wins -- they MUST agree on ``season_type`` or the persisted
+        metadata drifts from the year-only ``'default'`` contract.
+        """
+        year = int(season_id) if season_id.isdigit() else 0
         self._db.execute(
             """
             INSERT INTO seasons (season_id, name, season_type, year)
-            VALUES (?, ?, 'unknown', ?)
+            VALUES (?, ?, 'default', ?)
             ON CONFLICT(season_id) DO NOTHING
             """,
             (season_id, season_id, year),
@@ -601,22 +493,17 @@ class ScoutingCrawler:
 # ---------------------------------------------------------------------------
 
 
-def _derive_season_id(
-    games: list[dict[str, Any]],
-    season_suffix: str = "spring-hs",
-) -> str:
-    """Derive a season_id from the earliest game's start timestamp.
+def _derive_season_id(games: list[dict[str, Any]]) -> str:
+    """Derive a year-only season_id from the earliest game's start timestamp.
 
-    Extracts the year from each game's ``start_ts`` field and returns
-    ``"{year}-{season_suffix}"``.  Falls back to the current year if no valid
-    timestamp is found.
+    Extracts the year from each game's ``start_ts`` field and returns it as a
+    string.  Falls back to the current year if no valid timestamp is found.
 
     Args:
         games: List of completed game dicts from the public games endpoint.
-        season_suffix: Suffix appended to the year (default ``"spring-hs"``).
 
     Returns:
-        Season slug (e.g. ``"2025-spring-hs"``).
+        Year-only season slug (e.g. ``"2025"``).
     """
     years: list[int] = []
     for game in games:
@@ -624,10 +511,10 @@ def _derive_season_id(
         if ts and len(ts) >= 4 and ts[:4].isdigit():
             years.append(int(ts[:4]))
     if years:
-        return f"{min(years)}-{season_suffix}"
+        return str(min(years))
     fallback_year = datetime.now(timezone.utc).year
     logger.warning("No valid start_ts found in games; falling back to year=%d.", fallback_year)
-    return f"{fallback_year}-{season_suffix}"
+    return str(fallback_year)
 
 
 def _utcnow_iso() -> str:

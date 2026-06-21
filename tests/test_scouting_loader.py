@@ -1278,11 +1278,11 @@ def test_uuid_only_boxscore_does_not_store_gc_uuid(
 def test_usssa_team_gets_correct_db_season_id(
     loader: ScoutingLoader, db: sqlite3.Connection, tmp_path: Path
 ) -> None:
-    """A USSSA team crawled under an HS directory gets '2025-summer-usssa' in the DB.
+    """A team crawled under a compound crawl-path gets the year-only '2025' in the DB.
 
     Demonstrates the path-vs-DB decoupling: files live under the crawl-path
     season_id (``2025-spring-hs``) but DB inserts use the team-derived
-    season_id (``2025-summer-usssa``).
+    year-only season_id (``2025``).
     """
     # Set up a USSSA program and team
     db.execute(
@@ -1315,8 +1315,8 @@ def test_usssa_team_gets_correct_db_season_id(
         "SELECT season_id FROM team_rosters WHERE team_id = ?", (usssa_pk,)
     ).fetchone()
     assert roster_row is not None, "Expected a team_rosters row"
-    assert roster_row[0] == "2025-summer-usssa", (
-        f"Expected DB season_id='2025-summer-usssa', got '{roster_row[0]}'"
+    assert roster_row[0] == "2025", (
+        f"Expected DB season_id='2025', got '{roster_row[0]}'"
     )
 
     # Season aggregates should also use the team-derived season_id.
@@ -1324,8 +1324,8 @@ def test_usssa_team_gets_correct_db_season_id(
         "SELECT season_id FROM player_season_batting WHERE team_id = ?", (usssa_pk,)
     ).fetchone()
     assert bat_row is not None, "Expected a player_season_batting row"
-    assert bat_row[0] == "2025-summer-usssa", (
-        f"Expected DB season_id='2025-summer-usssa', got '{bat_row[0]}'"
+    assert bat_row[0] == "2025", (
+        f"Expected DB season_id='2025', got '{bat_row[0]}'"
     )
 
 

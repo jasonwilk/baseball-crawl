@@ -473,7 +473,7 @@ class TestReportGenerationRunsMigration:
             "spray_games_with_data",
             # trust flags
             "season_id_used",
-            "season_fallback",
+            # season_fallback dropped by migration 006 (E-241-02)
             "identity_match_method",
             # failure
             "error_stage",
@@ -625,24 +625,23 @@ class TestReportGenerationRunsMigration:
             )
         conn.close()
 
-    def test_season_fallback_defaults_to_zero(self, fresh_db: Path) -> None:
-        """season_fallback is an INTEGER boolean defaulting to 0."""
+    def test_season_fallback_column_absent(self, fresh_db: Path) -> None:
+        """season_fallback is dropped by migration 006 (E-241-02).
+
+        The full migration chain applies cleanly and report_generation_runs no
+        longer carries a season_fallback column. (Pre-006 this test asserted the
+        column existed and defaulted to 0; E-241 removed the season-derivation
+        suffix taxonomy, so the fallback telemetry no longer has a signal.)
+        """
         run_migrations(db_path=fresh_db)
         conn = sqlite3.connect(str(fresh_db))
-        conn.execute("PRAGMA foreign_keys = ON;")
-        report_id = _insert_report_fixture(conn)
-        conn.execute(
-            "INSERT INTO report_generation_runs (report_id, overall_status) "
-            "VALUES (?, 'running');",
-            (report_id,),
-        )
-        conn.commit()
-        value = conn.execute(
-            "SELECT season_fallback FROM report_generation_runs WHERE report_id = ?;",
-            (report_id,),
-        ).fetchone()[0]
+        cursor = conn.execute("PRAGMA table_info(report_generation_runs);")
+        columns = {row[1] for row in cursor.fetchall()}
         conn.close()
-        assert value == 0, f"Expected season_fallback default 0, got {value!r}"
+        assert "season_fallback" not in columns, (
+            "season_fallback should be dropped by migration 006; "
+            f"still present in {sorted(columns)}"
+        )
 
     def test_table_empty_after_reset(self, fresh_db: Path) -> None:
         """A fresh migrated DB has the table present with zero seed rows (AC-5)."""

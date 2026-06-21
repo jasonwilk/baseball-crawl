@@ -89,7 +89,7 @@ class TestCleanGreenPath:
 class TestFilterExclusion:
     """MUST-FIX: the out-of-scope rows make all three recompute filters
     (team_id, season_id, perspective_team_id) load-bearing.  These rows would
-    leak into the (T, 2026-spring-hs, persp=T) recompute if the corresponding
+    leak into the (T, 2026, persp=T) recompute if the corresponding
     filter were dropped -- breaking the green-path empty / cells_compared==74
     assertions above.  This test locks their presence so a future fixture edit
     cannot silently remove the exclusion proof."""
@@ -97,7 +97,7 @@ class TestFilterExclusion:
     def test_out_of_scope_rows_present(self, parity_db: sqlite3.Connection) -> None:
         """The fixture carries cross-perspective, cross-season, and cross-team
         rows in BOTH stat tables (the two recompute queries hold separate filter
-        copies), while no stored season row exists outside T / 2026-spring-hs."""
+        copies), while no stored season row exists outside T / 2026."""
         t_id = parity_db.execute(
             "SELECT id FROM teams WHERE gc_uuid = 'TEAM_T'"
         ).fetchone()[0]
@@ -112,10 +112,10 @@ class TestFilterExclusion:
                 "WHERE team_id = ? AND perspective_team_id != ?",
                 (t_id, t_id),
             ).fetchone()[0] >= 1, f"{table}: missing cross-perspective row"
-            # cross-season: a 2025-summer-legion game row
+            # cross-season: a 2025 game row
             assert parity_db.execute(
                 f"SELECT COUNT(*) FROM {table} pg JOIN games g ON pg.game_id = g.game_id "
-                "WHERE g.season_id = '2025-summer-legion'"
+                "WHERE g.season_id = '2025'"
             ).fetchone()[0] >= 1, f"{table}: missing cross-season row"
             # cross-team: team != T
             assert parity_db.execute(
@@ -123,15 +123,15 @@ class TestFilterExclusion:
                 (opp_id,),
             ).fetchone()[0] >= 1, f"{table}: missing cross-team row"
 
-        # Stored BOXSCORE_ONLY aggregates remain scoped to T / 2026-spring-hs
-        # only.  (Member-loaded 'full' rows for T / 2025-summer-legion exist by
+        # Stored BOXSCORE_ONLY aggregates remain scoped to T / 2026
+        # only.  (Member-loaded 'full' rows for T / 2025 exist by
         # design -- see TestMissingScopeDetection -- and are intentionally out
         # of the boxscore_only validated scope.)
         for table in ("player_season_batting", "player_season_pitching"):
             assert parity_db.execute(
                 f"SELECT COUNT(*) FROM {table} "
                 "WHERE stat_completeness = 'boxscore_only' "
-                "AND (team_id != ? OR season_id != '2026-spring-hs')",
+                "AND (team_id != ? OR season_id != '2026')",
                 (t_id,),
             ).fetchone()[0] == 0, f"{table}: boxscore_only row leaked out of scope"
 
@@ -156,7 +156,7 @@ class TestMissingScopeDetection:
         parity_db.execute(
             "DELETE FROM player_season_pitching "
             "WHERE stat_completeness = 'boxscore_only' "
-            "AND season_id = '2026-spring-hs'"
+            "AND season_id = '2026'"
         )
         parity_db.commit()
 
@@ -165,7 +165,7 @@ class TestMissingScopeDetection:
         flagged = {
             (m.player_id, m.column): m
             for m in result.mismatches
-            if m.season_id == "2026-spring-hs"
+            if m.season_id == "2026"
         }
         # The deleted pitchers are detected as missing (stored=None).
         assert ("PP_01", "ip_outs") in flagged
@@ -176,7 +176,7 @@ class TestMissingScopeDetection:
         # No mismatch leaks from the member-loaded or cross-team out-of-scope
         # rows.
         assert all(
-            m.season_id != "2025-summer-legion" for m in result.mismatches
+            m.season_id != "2025" for m in result.mismatches
         ), "member-loaded scope must not be flagged"
         assert all(
             m.player_id != "POPP_01" for m in result.mismatches
@@ -185,7 +185,7 @@ class TestMissingScopeDetection:
     def test_member_loaded_scope_not_flagged(
         self, parity_db: sqlite3.Connection
     ) -> None:
-        """The member-loaded scope (T, 2025-summer-legion) -- game rows present,
+        """The member-loaded scope (T, 2025) -- game rows present,
         only 'full' stored rows, zero boxscore_only -- is excluded from the
         gate, so the clean fixture stays green despite its stored values not
         equalling the game-row sums."""
@@ -199,7 +199,7 @@ class TestMissingScopeDetection:
                 r[0]
                 for r in parity_db.execute(
                     f"SELECT DISTINCT stat_completeness FROM {table} "
-                    "WHERE team_id = ? AND season_id = '2025-summer-legion'",
+                    "WHERE team_id = ? AND season_id = '2025'",
                     (t_id,),
                 ).fetchall()
             }
@@ -210,7 +210,7 @@ class TestMissingScopeDetection:
 
         result = verify_aggregates(parity_db)
         assert all(
-            m.season_id != "2025-summer-legion" for m in result.mismatches
+            m.season_id != "2025" for m in result.mismatches
         )
         assert result.mismatches == []
 
@@ -230,10 +230,10 @@ class TestMissingScopeDetection:
         discriminator excludes it.
         """
         # Delete the pitching member row, leaving only the batting 'full' row
-        # for (T, 2025-summer-legion) -> asymmetric member provenance.
+        # for (T, 2025) -> asymmetric member provenance.
         parity_db.execute(
             "DELETE FROM player_season_pitching "
-            "WHERE season_id = '2025-summer-legion'"
+            "WHERE season_id = '2025'"
         )
         parity_db.commit()
 
@@ -246,25 +246,25 @@ class TestMissingScopeDetection:
             "SELECT COUNT(*) FROM player_game_pitching pg "
             "JOIN games g ON pg.game_id = g.game_id "
             "WHERE pg.team_id = ? AND pg.perspective_team_id = ? "
-            "AND g.season_id = '2025-summer-legion'",
+            "AND g.season_id = '2025'",
             (t_id, t_id),
         ).fetchone()[0] >= 1
         assert parity_db.execute(
             "SELECT COUNT(*) FROM player_season_pitching "
-            "WHERE team_id = ? AND season_id = '2025-summer-legion'",
+            "WHERE team_id = ? AND season_id = '2025'",
             (t_id,),
         ).fetchone()[0] == 0
         # Member provenance survives in the OTHER (batting) table.
         assert parity_db.execute(
             "SELECT COUNT(*) FROM player_season_batting "
-            "WHERE team_id = ? AND season_id = '2025-summer-legion' "
+            "WHERE team_id = ? AND season_id = '2025' "
             "AND stat_completeness = 'full'",
             (t_id,),
         ).fetchone()[0] >= 1
 
         result = verify_aggregates(parity_db)
         assert all(
-            m.season_id != "2025-summer-legion" for m in result.mismatches
+            m.season_id != "2025" for m in result.mismatches
         ), "asymmetric member scope must not be flagged"
         # In-scope green path is undisturbed.
         assert result.mismatches == []
@@ -288,7 +288,7 @@ class TestMixedProvenanceScope:
         self, parity_db: sqlite3.Connection
     ) -> None:
         """Inject a ``full`` batter (ab=99) WITH per-game rows into the in-scope
-        (T, 2026-spring-hs) scope that already holds boxscore_only batters.
+        (T, 2026) scope that already holds boxscore_only batters.
 
         Codex's repro: without the per-player provenance exclusion the preserved
         ``full`` player -- who has player_game_batting rows but no stored
@@ -309,7 +309,7 @@ class TestMixedProvenanceScope:
         parity_db.execute(
             "INSERT INTO player_season_batting "
             "(player_id, team_id, season_id, stat_completeness, gp, games_tracked, ab, h) "
-            "VALUES ('MEMBER_BAT', ?, '2026-spring-hs', 'full', 30, 30, 99, 40)",
+            "VALUES ('MEMBER_BAT', ?, '2026', 'full', 30, 30, 99, 40)",
             (t_id,),
         )
         # The SAME player also has an in-scope per-game boxscore row (perspective

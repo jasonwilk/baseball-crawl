@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -135,21 +135,6 @@ def _insert_team_with_public_id(conn: sqlite3.Connection, public_id: str) -> int
     return row[0]
 
 
-def _insert_member_team(conn: sqlite3.Connection, name: str, gc_uuid: str) -> int:
-    """Insert a member team row and return its INTEGER PK."""
-    cursor = conn.execute(
-        "INSERT OR IGNORE INTO teams (name, membership_type, gc_uuid, is_active) "
-        "VALUES (?, 'member', ?, 1)",
-        (name, gc_uuid),
-    )
-    if cursor.lastrowid:
-        conn.commit()
-        return cursor.lastrowid
-    row = conn.execute("SELECT id FROM teams WHERE gc_uuid = ?", (gc_uuid,)).fetchone()
-    conn.commit()
-    return row[0]
-
-
 def _insert_season(conn: sqlite3.Connection, season_id: str) -> None:
     """Ensure a seasons row exists."""
     conn.execute(
@@ -194,10 +179,9 @@ def test_scouting_crawler_constructor(mock_client: MagicMock, db: sqlite3.Connec
     assert crawler is not None
 
 
-def test_scout_team_and_scout_all_exist(crawler: ScoutingCrawler) -> None:
-    """ScoutingCrawler exposes scout_team() and scout_all() methods."""
+def test_scout_team_exists(crawler: ScoutingCrawler) -> None:
+    """ScoutingCrawler exposes the scout_team() method."""
     assert callable(crawler.scout_team)
-    assert callable(crawler.scout_all)
 
 
 # ---------------------------------------------------------------------------
@@ -210,7 +194,7 @@ def test_scout_team_calls_public_endpoint_for_games(
 ) -> None:
     """scout_team() fetches game schedule via get_public() (no auth)."""
     _setup_client_happy_path(mock_client)
-    crawler.scout_team(_PUBLIC_ID, season_id="2025-spring-hs")
+    crawler.scout_team(_PUBLIC_ID)
 
     mock_client.get_public.assert_called_once_with(
         f"/public/teams/{_PUBLIC_ID}/games",
@@ -223,7 +207,7 @@ def test_scout_team_fetches_roster_with_inverted_url(
 ) -> None:
     """scout_team() fetches roster via GET /teams/public/{public_id}/players."""
     _setup_client_happy_path(mock_client)
-    crawler.scout_team(_PUBLIC_ID, season_id="2025-spring-hs")
+    crawler.scout_team(_PUBLIC_ID)
 
     calls = mock_client.get.call_args_list
     roster_call = calls[0]
@@ -235,7 +219,7 @@ def test_scout_team_fetches_boxscore_per_completed_game(
 ) -> None:
     """scout_team() fetches boxscore for each completed game only."""
     _setup_client_happy_path(mock_client)
-    crawler.scout_team(_PUBLIC_ID, season_id="2025-spring-hs")
+    crawler.scout_team(_PUBLIC_ID)
 
     calls = mock_client.get.call_args_list
     boxscore_calls = [c for c in calls if "boxscore" in str(c.args)]
@@ -253,7 +237,7 @@ def test_only_completed_games_are_scouted(
 ) -> None:
     """Only games with game_status='completed' result in boxscore fetches."""
     _setup_client_happy_path(mock_client)
-    crawler.scout_team(_PUBLIC_ID, season_id="2025-spring-hs")
+    crawler.scout_team(_PUBLIC_ID)
 
     # Roster + 1 boxscore (only the completed game).
     assert mock_client.get.call_count == 2
@@ -264,7 +248,7 @@ def test_no_completed_games_returns_skipped(
 ) -> None:
     """When no completed games exist, scout_team returns skipped=True."""
     mock_client.get_public.return_value = [_SCHEDULED_GAME]
-    result = crawler.scout_team(_PUBLIC_ID, season_id="2025-spring-hs")
+    result = crawler.scout_team(_PUBLIC_ID)
     assert result.skipped is True
     assert result.games_crawled == 0
 
@@ -290,7 +274,7 @@ def test_roster_fetch_failure_is_resilient(
     # First (and only) authenticated GET is the roster fetch -> make it fail.
     mock_client.get.side_effect = GameChangerAPIError("roster endpoint 500")
 
-    result = crawler.scout_team(_PUBLIC_ID, season_id="2025-spring-hs")
+    result = crawler.scout_team(_PUBLIC_ID)
 
     # Resilience: no exception, terminal result flags the error.
     assert isinstance(result, ScoutingCrawlResult)
@@ -322,7 +306,7 @@ def test_in_memory_data_returned(
 ) -> None:
     """scout_team() returns in-memory games, roster, and boxscores (no disk files)."""
     _setup_client_happy_path(mock_client)
-    result = crawler.scout_team(_PUBLIC_ID, season_id="2025-spring-hs")
+    result = crawler.scout_team(_PUBLIC_ID)
 
     assert isinstance(result, ScoutingCrawlResult)
     assert len(result.games) > 0
@@ -346,7 +330,7 @@ def test_scouting_run_created_with_completed_status(
 ) -> None:
     """After a successful scout_team(), scouting_runs has a 'completed' row."""
     _setup_client_happy_path(mock_client)
-    crawler.scout_team(_PUBLIC_ID, season_id="2025-spring-hs")
+    crawler.scout_team(_PUBLIC_ID)
 
     row = db.execute(
         "SELECT status, games_found, games_crawled, players_found "
@@ -360,12 +344,35 @@ def test_scouting_run_created_with_completed_status(
     assert players_found == 2  # two players in _ROSTER_RESPONSE
 
 
+def test_scout_team_writes_year_only_default_season_row(
+    crawler: ScoutingCrawler, mock_client: MagicMock, db: sqlite3.Connection
+) -> None:
+    """E-241: the crawler creates the year-only season row with season_type
+    'default', matching the canonical ensure_season_row contract.
+
+    The live report path runs scout_team() (this writer) BEFORE the canonical
+    ensure_season_row, and both use ON CONFLICT DO NOTHING, so the crawler's
+    season_type is the one that persists for a scouted opponent. It must be
+    'default' (not 'unknown') or the persisted metadata drifts from the
+    year-only contract.
+    """
+    _setup_client_happy_path(mock_client)
+    crawler.scout_team(_PUBLIC_ID)
+
+    # The completed game in _GAMES_RESPONSE is in 2025 -> year-only "2025".
+    row = db.execute(
+        "SELECT season_type FROM seasons WHERE season_id = '2025'"
+    ).fetchone()
+    assert row is not None, "Crawler should create the year-only '2025' season row"
+    assert row[0] == "default", f"Expected season_type 'default', got {row[0]!r}"
+
+
 def test_scouting_run_has_integer_team_id(
     crawler: ScoutingCrawler, mock_client: MagicMock, db: sqlite3.Connection
 ) -> None:
     """scouting_runs.team_id is an INTEGER PK referencing teams.id."""
     _setup_client_happy_path(mock_client)
-    crawler.scout_team(_PUBLIC_ID, season_id="2025-spring-hs")
+    crawler.scout_team(_PUBLIC_ID)
 
     row = db.execute(
         "SELECT sr.team_id, t.id FROM scouting_runs sr JOIN teams t ON sr.team_id = t.id LIMIT 1"
@@ -380,7 +387,7 @@ def test_first_fetched_preserved_on_rerun(
     """Re-running scout_team() preserves first_fetched while updating last_checked."""
     mock_client.get_public.return_value = _GAMES_RESPONSE
     mock_client.get.side_effect = [_ROSTER_RESPONSE, _BOXSCORE_RESPONSE]
-    crawler.scout_team(_PUBLIC_ID, season_id="2025-spring-hs")
+    crawler.scout_team(_PUBLIC_ID)
 
     first = db.execute(
         "SELECT first_fetched, last_checked FROM scouting_runs LIMIT 1"
@@ -392,7 +399,7 @@ def test_first_fetched_preserved_on_rerun(
     time.sleep(0.01)  # ensure different timestamp
     mock_client.get_public.return_value = _GAMES_RESPONSE
     mock_client.get.side_effect = [_ROSTER_RESPONSE, _BOXSCORE_RESPONSE]
-    crawler.scout_team(_PUBLIC_ID, season_id="2025-spring-hs")
+    crawler.scout_team(_PUBLIC_ID)
 
     second = db.execute(
         "SELECT first_fetched, last_checked FROM scouting_runs LIMIT 1"
@@ -413,7 +420,7 @@ def test_credential_error_on_schedule_logs_and_returns_error(
 ) -> None:
     """CredentialExpiredError on schedule fetch is caught; returns CrawlResult(errors=1)."""
     mock_client.get_public.side_effect = CredentialExpiredError("token expired")
-    result = crawler.scout_team(_PUBLIC_ID, season_id="2025-spring-hs")
+    result = crawler.scout_team(_PUBLIC_ID)
     assert result.errors == 1
     assert result.games_crawled == 0
 
@@ -423,7 +430,7 @@ def test_forbidden_error_on_schedule_logs_and_returns_error(
 ) -> None:
     """ForbiddenError on schedule fetch is caught; returns CrawlResult(errors=1)."""
     mock_client.get_public.side_effect = ForbiddenError("403 forbidden")
-    result = crawler.scout_team(_PUBLIC_ID, season_id="2025-spring-hs")
+    result = crawler.scout_team(_PUBLIC_ID)
     assert result.errors == 1
 
 
@@ -433,7 +440,7 @@ def test_credential_error_on_roster_marks_run_failed(
     """CredentialExpiredError on roster fetch marks scouting_run as failed and commits it."""
     mock_client.get_public.return_value = _GAMES_RESPONSE
     mock_client.get.side_effect = CredentialExpiredError("token expired")
-    result = crawler.scout_team(_PUBLIC_ID, season_id="2025-spring-hs")
+    result = crawler.scout_team(_PUBLIC_ID)
     assert result.errors == 1
 
     # Use a fresh connection to verify the 'failed' status was actually committed.
@@ -452,7 +459,7 @@ def test_boxscore_error_skips_game_continues_run(
     """ForbiddenError on one boxscore skips that game but the run is marked 'failed' (zero crawled)."""
     mock_client.get_public.return_value = _GAMES_RESPONSE
     mock_client.get.side_effect = [_ROSTER_RESPONSE, ForbiddenError("403")]
-    result = crawler.scout_team(_PUBLIC_ID, season_id="2025-spring-hs")
+    result = crawler.scout_team(_PUBLIC_ID)
     # All boxscores failed → total failure → errors=1 and status='failed'.
     assert result.errors == 1
     row = db.execute("SELECT status, games_crawled FROM scouting_runs LIMIT 1").fetchone()
@@ -462,74 +469,17 @@ def test_boxscore_error_skips_game_continues_run(
 
 
 # ---------------------------------------------------------------------------
-# AC-3: scout_all freshness skip
-# ---------------------------------------------------------------------------
-
-
-def test_scout_all_skips_recently_scouted(
-    crawler: ScoutingCrawler, mock_client: MagicMock, db: sqlite3.Connection, tmp_path: Path
-) -> None:
-    """scout_all() skips opponents with a recent completed scouting run."""
-    # Insert an owned member team.
-    owned_id = _insert_member_team(db, "My Team", "owned-team-gc-uuid")
-    # Insert the opponent team with public_id.
-    opp_id = _insert_team_with_public_id(db, _PUBLIC_ID)
-    # Insert opponent_link.
-    db.execute(
-        "INSERT INTO opponent_links (our_team_id, root_team_id, opponent_name, public_id) "
-        "VALUES (?, ?, ?, ?)",
-        (owned_id, "root-001", "Test Opponent", _PUBLIC_ID),
-    )
-    _insert_season(db, "2025-spring-hs")
-    # Insert a recent completed scouting run.
-    recent_ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
-    _insert_scouting_run(db, opp_id, "2025-spring-hs", "completed", recent_ts)
-
-    result = crawler.scout_all(season_id="2025-spring-hs")
-    # Should skip (no API calls).
-    mock_client.get_public.assert_not_called()
-    assert result.files_skipped == 1
-
-
-def test_scout_all_scouts_stale_opponents(
-    crawler: ScoutingCrawler, mock_client: MagicMock, db: sqlite3.Connection
-) -> None:
-    """scout_all() scouts opponents whose last_checked is older than freshness_hours."""
-    owned_id = _insert_member_team(db, "My Team", "owned-team-gc-uuid")
-    opp_id = _insert_team_with_public_id(db, _PUBLIC_ID)
-    db.execute(
-        "INSERT INTO opponent_links (our_team_id, root_team_id, opponent_name, public_id) "
-        "VALUES (?, ?, ?, ?)",
-        (owned_id, "root-001", "Test Opponent", _PUBLIC_ID),
-    )
-    _insert_season(db, "2025-spring-hs")
-
-    # Set up a stale scouting run (25 hours ago).
-    stale_ts = (datetime.now(timezone.utc) - timedelta(hours=25)).strftime(
-        "%Y-%m-%dT%H:%M:%S.000Z"
-    )
-    _insert_scouting_run(db, opp_id, "2025-spring-hs", "completed", stale_ts)
-
-    mock_client.get_public.return_value = _GAMES_RESPONSE
-    mock_client.get.side_effect = [_ROSTER_RESPONSE, _BOXSCORE_RESPONSE]
-
-    result = crawler.scout_all(season_id="2025-spring-hs")
-    mock_client.get_public.assert_called_once()
-    assert result.files_written > 0
-
-
-# ---------------------------------------------------------------------------
 # Helper: _derive_season_id
 # ---------------------------------------------------------------------------
 
 
 def test_derive_season_id_extracts_year() -> None:
-    """_derive_season_id returns {year}-spring-hs from earliest game start_ts."""
+    """_derive_season_id returns the year-only slug from earliest game start_ts."""
     games = [
         {"id": "g1", "start_ts": "2025-05-01T18:00:00Z"},
         {"id": "g2", "start_ts": "2025-04-10T18:00:00Z"},
     ]
-    assert _derive_season_id(games) == "2025-spring-hs"
+    assert _derive_season_id(games) == "2025"
 
 
 def test_derive_season_id_uses_earliest_year() -> None:
@@ -538,7 +488,7 @@ def test_derive_season_id_uses_earliest_year() -> None:
         {"id": "g1", "start_ts": "2026-01-01T00:00:00Z"},
         {"id": "g2", "start_ts": "2025-12-15T00:00:00Z"},
     ]
-    assert _derive_season_id(games) == "2025-spring-hs"
+    assert _derive_season_id(games) == "2025"
 
 
 def test_derive_season_id_fallback_on_missing_ts() -> None:
@@ -547,13 +497,7 @@ def test_derive_season_id_fallback_on_missing_ts() -> None:
     games = [{"id": "g1"}]
     result = _derive_season_id(games)
     current_year = dt.datetime.now(dt.timezone.utc).year
-    assert result == f"{current_year}-spring-hs"
-
-
-def test_derive_season_id_uses_season_suffix() -> None:
-    """_derive_season_id uses the season_suffix parameter."""
-    games = [{"id": "g1", "start_ts": "2025-04-10T18:00:00Z"}]
-    assert _derive_season_id(games, season_suffix="fall-legion") == "2025-fall-legion"
+    assert result == f"{current_year}"
 
 
 # ---------------------------------------------------------------------------
@@ -568,24 +512,7 @@ def test_credential_expired_on_boxscore_propagates_from_scout_team(
     mock_client.get_public.return_value = _GAMES_RESPONSE
     mock_client.get.side_effect = [_ROSTER_RESPONSE, CredentialExpiredError("token expired")]
     with pytest.raises(CredentialExpiredError):
-        crawler.scout_team(_PUBLIC_ID, season_id="2025-spring-hs")
-
-
-def test_credential_expired_on_boxscore_propagates_through_scout_all(
-    crawler: ScoutingCrawler, mock_client: MagicMock, db: sqlite3.Connection
-) -> None:
-    """CredentialExpiredError during boxscore fetch propagates out of scout_all()."""
-    owned_id = _insert_member_team(db, "My Team", "owned-team-gc-uuid")
-    _insert_team_with_public_id(db, _PUBLIC_ID)
-    db.execute(
-        "INSERT INTO opponent_links (our_team_id, root_team_id, opponent_name, public_id) "
-        "VALUES (?, ?, ?, ?)",
-        (owned_id, "root-001", "Test Opponent", _PUBLIC_ID),
-    )
-    mock_client.get_public.return_value = _GAMES_RESPONSE
-    mock_client.get.side_effect = [_ROSTER_RESPONSE, CredentialExpiredError("token expired")]
-    with pytest.raises(CredentialExpiredError):
-        crawler.scout_all(season_id="2025-spring-hs")
+        crawler.scout_team(_PUBLIC_ID)
 
 
 def test_forbidden_on_boxscore_does_not_propagate(
@@ -595,7 +522,7 @@ def test_forbidden_on_boxscore_does_not_propagate(
     mock_client.get_public.return_value = _GAMES_RESPONSE
     mock_client.get.side_effect = [_ROSTER_RESPONSE, ForbiddenError("403")]
     # Should not raise -- ForbiddenError is caught per-game
-    result = crawler.scout_team(_PUBLIC_ID, season_id="2025-spring-hs")
+    result = crawler.scout_team(_PUBLIC_ID)
     assert result.errors >= 1  # all boxscores failed → run failed
 
 
@@ -675,31 +602,6 @@ def test_failed_scouting_run_does_not_trigger_freshness_gate(
     assert not crawler._is_scouted_recently(opp_id, season_id="2025-spring-hs")
 
 
-def test_scout_all_retries_team_with_failed_run(
-    crawler: ScoutingCrawler, mock_client: MagicMock, db: sqlite3.Connection
-) -> None:
-    """AC-3: scout_all() re-scouts a team whose most recent run is 'failed'."""
-    owned_id = _insert_member_team(db, "My Team", "owned-team-gc-uuid")
-    _insert_team_with_public_id(db, _PUBLIC_ID)
-    db.execute(
-        "INSERT INTO opponent_links (our_team_id, root_team_id, opponent_name, public_id) "
-        "VALUES (?, ?, ?, ?)",
-        (owned_id, "root-001", "Test Opponent", _PUBLIC_ID),
-    )
-    _insert_season(db, "2025-spring-hs")
-    recent_ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
-    opp_id = db.execute("SELECT id FROM teams WHERE public_id = ?", (_PUBLIC_ID,)).fetchone()[0]
-    _insert_scouting_run(db, opp_id, "2025-spring-hs", "failed", recent_ts)
-
-    mock_client.get_public.return_value = _GAMES_RESPONSE
-    mock_client.get.side_effect = [_ROSTER_RESPONSE, _BOXSCORE_RESPONSE]
-
-    result = crawler.scout_all(season_id="2025-spring-hs")
-    # Team should have been scouted (not skipped).
-    mock_client.get_public.assert_called_once()
-    assert result.files_written > 0
-
-
 # ---------------------------------------------------------------------------
 # AC-1/AC-7c: Crawler writes 'completed' after successful crawl phase (E-123-06)
 # ---------------------------------------------------------------------------
@@ -710,7 +612,7 @@ def test_scout_team_writes_completed_status_after_crawl(
 ) -> None:
     """AC-1: scout_team() sets scouting_runs.status='completed' after a successful crawl."""
     _setup_client_happy_path(mock_client)
-    crawler.scout_team(_PUBLIC_ID, season_id="2025-spring-hs")
+    crawler.scout_team(_PUBLIC_ID)
 
     row = db.execute("SELECT status FROM scouting_runs LIMIT 1").fetchone()
     assert row is not None
@@ -722,47 +624,12 @@ def test_scout_team_completed_status_has_completed_at_set(
 ) -> None:
     """AC-1: 'completed' rows must have completed_at set (not NULL)."""
     _setup_client_happy_path(mock_client)
-    crawler.scout_team(_PUBLIC_ID, season_id="2025-spring-hs")
+    crawler.scout_team(_PUBLIC_ID)
 
     row = db.execute("SELECT status, completed_at FROM scouting_runs LIMIT 1").fetchone()
     assert row is not None
     assert row[0] == "completed"
     assert row[1] is not None, "Expected completed_at to be set for 'completed' row"
-
-
-# ---------------------------------------------------------------------------
-# AC-4: Freshness gating skips team after successful scout_team() run (E-123-06)
-# ---------------------------------------------------------------------------
-
-
-def test_scout_all_skips_team_after_successful_scout_team(
-    crawler: ScoutingCrawler, mock_client: MagicMock, db: sqlite3.Connection
-) -> None:
-    """AC-4: A team scouted via scout_team() is skipped by scout_all() within freshness window."""
-    owned_id = _insert_member_team(db, "My Team", "owned-team-gc-uuid")
-    _insert_team_with_public_id(db, _PUBLIC_ID)
-    db.execute(
-        "INSERT INTO opponent_links (our_team_id, root_team_id, opponent_name, public_id) "
-        "VALUES (?, ?, ?, ?)",
-        (owned_id, "root-001", "Test Opponent", _PUBLIC_ID),
-    )
-
-    # First run: scout_team() should write 'completed'.
-    mock_client.get_public.return_value = _GAMES_RESPONSE
-    mock_client.get.side_effect = [_ROSTER_RESPONSE, _BOXSCORE_RESPONSE]
-    result = crawler.scout_team(_PUBLIC_ID, season_id="2025-spring-hs")
-    assert result.errors == 0
-
-    # Confirm the run is 'completed'.
-    row = db.execute("SELECT status FROM scouting_runs LIMIT 1").fetchone()
-    assert row is not None
-    assert row[0] == "completed"
-
-    # Second run via scout_all() should skip the team (freshness gate engaged).
-    mock_client.reset_mock()
-    result2 = crawler.scout_all(season_id="2025-spring-hs")
-    mock_client.get_public.assert_not_called()
-    assert result2.files_skipped == 1
 
 
 # ---------------------------------------------------------------------------
@@ -778,7 +645,7 @@ def test_zero_boxscores_marks_run_failed_and_returns_error(
     # Roster succeeds; boxscore raises for the one completed game.
     mock_client.get.side_effect = [_ROSTER_RESPONSE, ForbiddenError("403")]
 
-    result = crawler.scout_team(_PUBLIC_ID, season_id="2025-spring-hs")
+    result = crawler.scout_team(_PUBLIC_ID)
 
     assert result.errors >= 1
 

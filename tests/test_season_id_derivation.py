@@ -9,7 +9,6 @@ import pytest
 
 from src.gamechanger.loaders import (
     derive_season_id_for_team,
-    derive_season_id_for_team_with_fallback,
     ensure_season_row,
 )
 from tests.conftest import load_real_schema
@@ -50,7 +49,7 @@ class TestDeriveSeasonIdForTeam:
         )
         team_id = db.execute("SELECT last_insert_rowid()").fetchone()[0]
         season_id, season_year = derive_season_id_for_team(db, team_id)
-        assert season_id == "2025-summer-usssa"
+        assert season_id == "2025"
         assert season_year == 2025
 
     def test_hs_team(self, db: sqlite3.Connection) -> None:
@@ -60,7 +59,7 @@ class TestDeriveSeasonIdForTeam:
         )
         team_id = db.execute("SELECT last_insert_rowid()").fetchone()[0]
         season_id, season_year = derive_season_id_for_team(db, team_id)
-        assert season_id == "2026-spring-hs"
+        assert season_id == "2026"
         assert season_year == 2026
 
     def test_legion_team(self, db: sqlite3.Connection) -> None:
@@ -70,7 +69,7 @@ class TestDeriveSeasonIdForTeam:
         )
         team_id = db.execute("SELECT last_insert_rowid()").fetchone()[0]
         season_id, season_year = derive_season_id_for_team(db, team_id)
-        assert season_id == "2025-summer-legion"
+        assert season_id == "2025"
         assert season_year == 2025
 
     def test_no_program(self, db: sqlite3.Connection) -> None:
@@ -85,7 +84,7 @@ class TestDeriveSeasonIdForTeam:
         assert season_year == 2026
 
     def test_null_season_year_with_program(self, db: sqlite3.Connection) -> None:
-        """NULL season_year → falls back to current calendar year."""
+        """NULL season_year → falls back to current calendar year (year-only)."""
         db.execute(
             "INSERT INTO teams (name, program_id, membership_type, season_year) "
             "VALUES ('LSB JV', 'lsb-hs', 'member', NULL)"
@@ -94,7 +93,7 @@ class TestDeriveSeasonIdForTeam:
         with patch("src.gamechanger.loaders.datetime") as mock_dt:
             mock_dt.now.return_value.year = 2026
             season_id, season_year = derive_season_id_for_team(db, team_id)
-        assert season_id == "2026-spring-hs"
+        assert season_id == "2026"
         assert season_year is None
 
     def test_null_season_year_no_program(self, db: sqlite3.Connection) -> None:
@@ -116,7 +115,8 @@ class TestDeriveSeasonIdForTeam:
             derive_season_id_for_team(db, 9999)
 
     def test_program_row_missing_but_program_id_set(self, db: sqlite3.Connection) -> None:
-        """If program_id references a missing programs row, LEFT JOIN yields NULL program_type → year-only.
+        """A team's program metadata no longer affects derivation: the year-only
+        season_id comes from season_year regardless of program_id.
 
         The production schema enforces `teams.program_id REFERENCES programs(program_id)`,
         so we must briefly disable FK enforcement to construct the degraded state
@@ -136,74 +136,12 @@ class TestDeriveSeasonIdForTeam:
             db.execute("PRAGMA foreign_keys=ON;")
 
 
-# ── derive_season_id_for_team_with_fallback (E-235-03 gate (b)) ───────
-
-
-class TestDeriveSeasonIdFallbackSignal:
-    """E-235-03 gate (b) / AC-7: the fallback-aware variant is the single
-    source of truth for ``season_fallback``; the legacy tuple wrapper still
-    returns ``(season_id, season_year)`` unchanged."""
-
-    def test_full_metadata_no_fallback(self, db: sqlite3.Connection) -> None:
-        """Concrete season_year + mapped program suffix → fallback_used False."""
-        db.execute(
-            "INSERT INTO teams (name, program_id, membership_type, season_year) "
-            "VALUES ('LSB Varsity', 'lsb-hs', 'member', 2026)"
-        )
-        team_id = db.execute("SELECT last_insert_rowid()").fetchone()[0]
-        d = derive_season_id_for_team_with_fallback(db, team_id)
-        assert d.season_id == "2026-spring-hs"
-        assert d.season_year == 2026
-        assert d.fallback_used is False
-
-    def test_no_program_is_fallback(self, db: sqlite3.Connection) -> None:
-        """season_year present but no program suffix → year-only fallback."""
-        db.execute(
-            "INSERT INTO teams (name, program_id, membership_type, season_year) "
-            "VALUES ('Opponent', NULL, 'tracked', 2026)"
-        )
-        team_id = db.execute("SELECT last_insert_rowid()").fetchone()[0]
-        d = derive_season_id_for_team_with_fallback(db, team_id)
-        assert d.season_id == "2026"
-        assert d.fallback_used is True
-
-    def test_null_season_year_is_fallback(self, db: sqlite3.Connection) -> None:
-        """NULL season_year (even with a program) → current-year fallback."""
-        db.execute(
-            "INSERT INTO teams (name, program_id, membership_type, season_year) "
-            "VALUES ('LSB JV', 'lsb-hs', 'member', NULL)"
-        )
-        team_id = db.execute("SELECT last_insert_rowid()").fetchone()[0]
-        with patch("src.gamechanger.loaders.datetime") as mock_dt:
-            mock_dt.now.return_value.year = 2026
-            d = derive_season_id_for_team_with_fallback(db, team_id)
-        assert d.season_id == "2026-spring-hs"
-        assert d.season_year is None
-        assert d.fallback_used is True
-
-    def test_wrapper_return_unchanged(self, db: sqlite3.Connection) -> None:
-        """The legacy 2-tuple wrapper is unchanged (existing callers safe)."""
-        db.execute(
-            "INSERT INTO teams (name, program_id, membership_type, season_year) "
-            "VALUES ('LSB Varsity', 'lsb-hs', 'member', 2026)"
-        )
-        team_id = db.execute("SELECT last_insert_rowid()").fetchone()[0]
-        assert derive_season_id_for_team(db, team_id) == ("2026-spring-hs", 2026)
-
-
 # ── ensure_season_row ────────────────────────────────────────────────
 
 
 class TestEnsureSeasonRow:
-    """AC-2 and AC-7: ensure_season_row for both formats."""
-
-    def test_year_suffix_format(self, db: sqlite3.Connection) -> None:
-        ensure_season_row(db, "2025-summer-usssa")
-        row = db.execute(
-            "SELECT season_id, name, season_type, year FROM seasons WHERE season_id = ?",
-            ("2025-summer-usssa",),
-        ).fetchone()
-        assert row == ("2025-summer-usssa", "2025-summer-usssa", "summer-usssa", 2025)
+    """AC-2: ensure_season_row writes a year-only season row (season_type
+    always ``'default'``)."""
 
     def test_year_only_format(self, db: sqlite3.Connection) -> None:
         ensure_season_row(db, "2026")
@@ -213,29 +151,22 @@ class TestEnsureSeasonRow:
         ).fetchone()
         assert row == ("2026", "2026", "default", 2026)
 
-    def test_spring_hs_format(self, db: sqlite3.Connection) -> None:
-        ensure_season_row(db, "2026-spring-hs")
-        row = db.execute(
-            "SELECT season_type, year FROM seasons WHERE season_id = '2026-spring-hs'"
-        ).fetchone()
-        assert row == ("spring-hs", 2026)
-
     def test_idempotent(self, db: sqlite3.Connection) -> None:
         """Calling twice does not raise or duplicate."""
-        ensure_season_row(db, "2025-summer-usssa")
-        ensure_season_row(db, "2025-summer-usssa")
+        ensure_season_row(db, "2026")
+        ensure_season_row(db, "2026")
         count = db.execute(
-            "SELECT COUNT(*) FROM seasons WHERE season_id = '2025-summer-usssa'"
+            "SELECT COUNT(*) FROM seasons WHERE season_id = '2026'"
         ).fetchone()[0]
         assert count == 1
 
     def test_does_not_overwrite_existing(self, db: sqlite3.Connection) -> None:
         """INSERT OR IGNORE preserves the original row."""
         db.execute(
-            "INSERT INTO seasons (season_id, name, season_type, year) VALUES ('2025-summer-usssa', 'Custom Name', 'custom', 2025)"
+            "INSERT INTO seasons (season_id, name, season_type, year) VALUES ('2026', 'Custom Name', 'custom', 2026)"
         )
-        ensure_season_row(db, "2025-summer-usssa")
+        ensure_season_row(db, "2026")
         row = db.execute(
-            "SELECT name, season_type FROM seasons WHERE season_id = '2025-summer-usssa'"
+            "SELECT name, season_type FROM seasons WHERE season_id = '2026'"
         ).fetchone()
         assert row == ("Custom Name", "custom")

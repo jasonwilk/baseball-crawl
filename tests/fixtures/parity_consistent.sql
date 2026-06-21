@@ -31,7 +31,7 @@
 --   All other values match TN-2 exactly.  Per the lock-step invariant the game
 --   rows are primary and the season values are their genuine sum.
 --
--- Scaffolding: 1 team T, season 2026-spring-hs, 3 games PG_1/PG_2/PG_3,
+-- Scaffolding: 1 team T, season 2026, 3 games PG_1/PG_2/PG_3,
 --   batters PB_01/PB_02, pitchers PP_01/PP_02/PP_03.
 --   Every IN-SCOPE game stat row: perspective_team_id = team_id = T.
 --   Season rows leave stat_completeness unset (-> default 'boxscore_only') and
@@ -42,7 +42,7 @@
 --   cross-team out-of-scope rows below.
 --
 -- FILTER-EXCLUSION PROOF (out-of-scope rows -- see the "Out-of-scope" section):
---   The recompute filters on team_id = T AND season_id = 2026-spring-hs AND
+--   The recompute filters on team_id = T AND season_id = 2026 AND
 --   perspective_team_id = T (mirrored in BOTH the batting and pitching queries
 --   of src/reports/aggregate_parity.py).  With a single-scope fixture, a
 --   recompute that silently DROPPED any one of those three filters would
@@ -51,14 +51,14 @@
 --   perspective filter specifically guards the cross-perspective duplicate-stat
 --   bug class -- see CLAUDE.md "Perspective provenance").  To make each filter
 --   load-bearing, the fixture seeds rows that are EXCLUDED by exactly one
---   filter and would leak into the (T, 2026-spring-hs, persp=T) recompute if
+--   filter and would leak into the (T, 2026, persp=T) recompute if
 --   that filter were removed -- breaking the empty-mismatch / cells_compared=74
 --   assertions.  All such rows live OUTSIDE the diffed scope, so on the correct
 --   recompute they change nothing.  Both batting and pitching get all three
 --   (the two queries hold separate copies of the filter):
 --     * cross-perspective: (PG_1, PB_01/PP_01, team=T, persp=OPP) -- excluded
 --       by the perspective filter; leaks if it is dropped.
---     * cross-season: (OG_SEASON in 2025-summer-legion, PB_01/PP_01, team=T,
+--     * cross-season: (OG_SEASON in 2025, PB_01/PP_01, team=T,
 --       persp=T) -- excluded by the season filter; leaks if it is dropped.
 --       (This scope is also made member-loaded -- see the MEMBER-LOADED section
 --       -- so the missing-aggregate detection does not flag it on the green
@@ -67,18 +67,18 @@
 --       team_id filter; leaks (as a new unstored player) if it is dropped.
 --   Out-of-scope stat values are deliberately uniform sentinels (batting 9s,
 --   pitching 99s) so any leak is obvious.  No stored player_season_* row exists
---   for OPP, POPP_01, or 2025-summer-legion -- stored stays scoped to
---   T / 2026-spring-hs so the green path is exact-empty.
+--   for OPP, POPP_01, or 2025 -- stored stays scoped to
+--   T / 2026 so the green path is exact-empty.
 
 PRAGMA foreign_keys = ON;
 
 -- ---------------------------------------------------------------------------
--- Seasons (2026-spring-hs is in-scope; 2025-summer-legion carries the
+-- Seasons (2026 is in-scope; 2025 carries the
 -- cross-season out-of-scope rows)
 -- ---------------------------------------------------------------------------
 INSERT INTO seasons (season_id, name, season_type, year) VALUES
-    ('2026-spring-hs',     'Spring 2026 High School', 'spring-hs',     2026),
-    ('2025-summer-legion', 'Summer 2025 Legion',      'summer-legion', 2025);
+    ('2026', 'Spring 2026 High School', 'default', 2026),
+    ('2025', 'Summer 2025 Legion',      'default', 2025);
 
 -- ---------------------------------------------------------------------------
 -- Teams (gc_uuid acts as a stable symbolic name for FK subquery lookups)
@@ -100,21 +100,21 @@ INSERT INTO players (player_id, first_name, last_name) VALUES
     ('POPP_01', 'Opp',   'Player');
 
 -- ---------------------------------------------------------------------------
--- Games (all 2026-spring-hs; T home, OPP away -- home/away irrelevant to the
+-- Games (all 2026; T home, OPP away -- home/away irrelevant to the
 -- recompute, which joins games only for season_id)
 -- ---------------------------------------------------------------------------
 INSERT INTO games (game_id, season_id, game_date, home_team_id, away_team_id, status) VALUES
-    ('PG_1', '2026-spring-hs', '2026-03-10',
+    ('PG_1', '2026', '2026-03-10',
      (SELECT id FROM teams WHERE gc_uuid = 'TEAM_T'),
      (SELECT id FROM teams WHERE gc_uuid = 'TEAM_OPP'), 'completed'),
-    ('PG_2', '2026-spring-hs', '2026-03-17',
+    ('PG_2', '2026', '2026-03-17',
      (SELECT id FROM teams WHERE gc_uuid = 'TEAM_T'),
      (SELECT id FROM teams WHERE gc_uuid = 'TEAM_OPP'), 'completed'),
-    ('PG_3', '2026-spring-hs', '2026-03-24',
+    ('PG_3', '2026', '2026-03-24',
      (SELECT id FROM teams WHERE gc_uuid = 'TEAM_T'),
      (SELECT id FROM teams WHERE gc_uuid = 'TEAM_OPP'), 'completed'),
     -- Out-of-scope game in a SECOND season (cross-season exclusion proof).
-    ('OG_SEASON', '2025-summer-legion', '2025-07-01',
+    ('OG_SEASON', '2025', '2025-07-01',
      (SELECT id FROM teams WHERE gc_uuid = 'TEAM_T'),
      (SELECT id FROM teams WHERE gc_uuid = 'TEAM_OPP'), 'completed');
 
@@ -164,7 +164,7 @@ INSERT INTO player_game_pitching
 -- ---------------------------------------------------------------------------
 -- OUT-OF-SCOPE rows (filter-exclusion proof -- see header).  Each is excluded
 -- by exactly one of the three recompute filters and would leak into the
--- (T, 2026-spring-hs, persp=T) recompute if that filter were dropped, breaking
+-- (T, 2026, persp=T) recompute if that filter were dropped, breaking
 -- the empty-mismatch / cells_compared=74 assertions.  Sentinel values: batting
 -- all-9s, pitching all-99s.  On the CORRECT recompute these change nothing.
 -- ---------------------------------------------------------------------------
@@ -174,7 +174,7 @@ INSERT INTO player_game_batting
     -- cross-perspective: PB_01, team=T but persp=OPP (excluded by persp filter)
     ('PG_1', 'PB_01', (SELECT id FROM teams WHERE gc_uuid='TEAM_T'), (SELECT id FROM teams WHERE gc_uuid='TEAM_OPP'),
      9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9),
-    -- cross-season: PB_01, team=T persp=T but game in 2025-summer-legion
+    -- cross-season: PB_01, team=T persp=T but game in 2025
     ('OG_SEASON', 'PB_01', (SELECT id FROM teams WHERE gc_uuid='TEAM_T'), (SELECT id FROM teams WHERE gc_uuid='TEAM_T'),
      9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9),
     -- cross-team: POPP_01, team=OPP but persp=T (excluded by team_id filter)
@@ -187,7 +187,7 @@ INSERT INTO player_game_pitching
     -- cross-perspective: PP_01, team=T but persp=OPP (excluded by persp filter)
     ('PG_1', 'PP_01', (SELECT id FROM teams WHERE gc_uuid='TEAM_T'), (SELECT id FROM teams WHERE gc_uuid='TEAM_OPP'),
      1, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99),
-    -- cross-season: PP_01, team=T persp=T but game in 2025-summer-legion
+    -- cross-season: PP_01, team=T persp=T but game in 2025
     ('OG_SEASON', 'PP_01', (SELECT id FROM teams WHERE gc_uuid='TEAM_T'), (SELECT id FROM teams WHERE gc_uuid='TEAM_T'),
      1, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99),
     -- cross-team: POPP_01, team=OPP but persp=T (excluded by team_id filter)
@@ -204,9 +204,9 @@ INSERT INTO player_game_pitching
 INSERT INTO player_season_batting
     (player_id, team_id, season_id, gp, games_tracked,
      ab, h, doubles, triples, hr, rbi, r, bb, so, sb, tb, hbp, shf, cs) VALUES
-    ('PB_01', (SELECT id FROM teams WHERE gc_uuid='TEAM_T'), '2026-spring-hs', 3, 3,
+    ('PB_01', (SELECT id FROM teams WHERE gc_uuid='TEAM_T'), '2026', 3, 3,
      11, 4, 1, 1, 1, 3, 3, 3, 3, 2, 10, 1, 1, 1),
-    ('PB_02', (SELECT id FROM teams WHERE gc_uuid='TEAM_T'), '2026-spring-hs', 3, 3,
+    ('PB_02', (SELECT id FROM teams WHERE gc_uuid='TEAM_T'), '2026', 3, 3,
      11, 4, 1, 0, 0, 2, 2, 1, 4, 1, 5, 1, 0, 0);
 
 -- ---------------------------------------------------------------------------
@@ -222,15 +222,15 @@ INSERT INTO player_season_batting
 INSERT INTO player_season_pitching
     (player_id, team_id, season_id, gp_pitcher, games_tracked,
      ip_outs, h, r, er, bb, so, wp, hbp, pitches, total_strikes, bf, gs) VALUES
-    ('PP_01', (SELECT id FROM teams WHERE gc_uuid='TEAM_T'), '2026-spring-hs', 2, 2,
+    ('PP_01', (SELECT id FROM teams WHERE gc_uuid='TEAM_T'), '2026', 2, 2,
      24, 6, 3, 2, 2, 10, 1, 1, 113, 75, 31, 1),
-    ('PP_02', (SELECT id FROM teams WHERE gc_uuid='TEAM_T'), '2026-spring-hs', 2, 2,
+    ('PP_02', (SELECT id FROM teams WHERE gc_uuid='TEAM_T'), '2026', 2, 2,
      36, 11, 5, 5, 4, 9, 2, 1, 170, 108, 49, 2),
-    ('PP_03', (SELECT id FROM teams WHERE gc_uuid='TEAM_T'), '2026-spring-hs', 1, 1,
+    ('PP_03', (SELECT id FROM teams WHERE gc_uuid='TEAM_T'), '2026', 1, 1,
      12, 4, 2, 2, 1, 3, 0, 0, 50, 32, 15, NULL);
 
 -- ---------------------------------------------------------------------------
--- MEMBER-LOADED scope (T, 2025-summer-legion): false-positive guard (case b).
+-- MEMBER-LOADED scope (T, 2025): false-positive guard (case b).
 -- This scope has cross-season game rows (PB_01 / PP_01 in OG_SEASON, persp=T)
 -- AND stored rows of completeness 'full' -- modelling a team loaded via the
 -- member season-stats loader, whose season rows come straight from the API and
@@ -248,11 +248,11 @@ INSERT INTO player_season_pitching
 INSERT INTO player_season_batting
     (player_id, team_id, season_id, stat_completeness, gp, games_tracked,
      ab, h, doubles, triples, hr, rbi, r, bb, so, sb, tb, hbp, shf, cs) VALUES
-    ('PB_01', (SELECT id FROM teams WHERE gc_uuid='TEAM_T'), '2025-summer-legion', 'full',
+    ('PB_01', (SELECT id FROM teams WHERE gc_uuid='TEAM_T'), '2025', 'full',
      7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7);
 
 INSERT INTO player_season_pitching
     (player_id, team_id, season_id, stat_completeness, gp_pitcher, games_tracked,
      ip_outs, h, r, er, bb, so, wp, hbp, pitches, total_strikes, bf, gs) VALUES
-    ('PP_01', (SELECT id FROM teams WHERE gc_uuid='TEAM_T'), '2025-summer-legion', 'full',
+    ('PP_01', (SELECT id FROM teams WHERE gc_uuid='TEAM_T'), '2025', 'full',
      7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7);

@@ -1903,7 +1903,7 @@ def test_player_without_name_in_players_array_gets_stub(db: sqlite3.Connection, 
 
 
 def test_usssa_team_produces_correct_season_id(db: sqlite3.Connection, tmp_path: Path) -> None:
-    """AC-9: A USSSA team with season_year=2025 produces season_id='2025-summer-usssa' in the DB."""
+    """A team with season_year=2025 produces the year-only season_id='2025' in the DB."""
     # Set up a USSSA program and team
     db.execute(
         "INSERT OR IGNORE INTO programs (program_id, name, program_type) "
@@ -1935,8 +1935,8 @@ def test_usssa_team_produces_correct_season_id(db: sqlite3.Connection, tmp_path:
         "SELECT season_id FROM games WHERE game_id = ?", (_EVENT_ID,)
     ).fetchone()
     assert row is not None
-    assert row[0] == "2025-summer-usssa", (
-        f"Expected USSSA team to produce season_id='2025-summer-usssa', got '{row[0]}'"
+    assert row[0] == "2025", (
+        f"Expected team to produce year-only season_id='2025', got '{row[0]}'"
     )
 
 

@@ -102,7 +102,7 @@ baseball-crawl/
 | Identity / lifecycle | `id`, `report_id`, `started_at`, `completed_at`, `overall_status` | `ON DELETE CASCADE` — deleting a report removes its run row. `overall_status`: `running` → `completed` or `failed`. |
 | Per-stage status | `crawl_status`, `load_status`, `gc_uuid_status`, `spray_status`, `plays_status`, `reconciliation_status`, `enrichment_status` | NULL means the stage did not run. `enrichment_status` is constrained to `success`, `unavailable-no-key`, `failed` (canonical Tier-2 vocabulary from E-233). |
 | Per-stage counts | `completed_games` (M), `completed_games_with_data` (N), `spray_games`, `plays_games_expected`, `plays_games_covered`, `discrepancies_found`, `discrepancies_corrected` | N ≤ M: M counts scored games on the schedule; N counts games with actual player stat rows loaded — a game with a public final score but no GC scorebook contributes to M but not N. N is the data-bearing coverage value used by the report footer's "N of M games" line. |
-| Trust flags | `season_id_used`, `season_fallback`, `identity_match_method` | `season_fallback = 1` when season resolved via current-year fallback (not team metadata). `identity_match_method`: `anchor` (matched by gc_uuid/public_id) or `name_only` (name+season only, lower trust). |
+| Trust flags | `season_id_used`, `identity_match_method` | `identity_match_method`: `anchor` (matched by gc_uuid/public_id) or `name_only` (name+season only, lower trust). |
 | Failure | `error_stage`, `error_message` | Stage name and message on pipeline failure. |
 
 A UNIQUE index on `report_id` enforces the 1:1 relationship and serves as the admin-list join index.
@@ -160,7 +160,7 @@ The migration is applied automatically on container startup. No column additions
 |----------|-------|
 | `event_gc_id TEXT` column | GC UUID per ball-in-play event. UNIQUE index enforces idempotent ingestion. |
 | `created_at_ms INTEGER` column | API's `createdAt` timestamp in Unix milliseconds. |
-| `season_id TEXT` column | Season slug (e.g., `2026-spring-hs`) for per-season filtering. |
+| `season_id TEXT` column | Season identifier (e.g., `2026`) for per-season filtering. |
 | `idx_spray_charts_event_gc_id` UNIQUE index | Enforces the `event_gc_id` uniqueness constraint used by `INSERT OR IGNORE`. |
 | `idx_spray_charts_player` index | On `(player_id, team_id, season_id)`. Serves player and team chart queries. |
 | `idx_spray_charts_game` index | On `game_id`. Serves game-level spray queries. |
@@ -177,7 +177,7 @@ An umbrella entity that groups teams under an organizational program. The seed r
 |--------|------|-------|
 | `program_id` | TEXT PK | Slug, e.g. `'lsb-hs'` |
 | `name` | TEXT | Display name |
-| `program_type` | TEXT | One of `'hs'`, `'usssa'`, `'legion'` |
+| `program_type` | TEXT | One of `'hs'`, `'usssa'`, `'legion'`. Selects the pitch-count rule set for the program. |
 | `org_name` | TEXT | Org display name (nullable) |
 
 #### teams
@@ -267,4 +267,4 @@ Sub-navigation links the Reports and Users pages across all admin views.
 
 ---
 
-*Last updated: 2026-06-17 | Source: E-235 (migration 002 report_generation_runs, N vs M coverage semantics), E-196 (migration 014 start_time/timezone, game ordering), E-195 (migration 009 plays/play_events tables), E-173 (unified resolve route, subnav badge, discover-opponents route removed), E-167 (migration 007 name+season_year index), E-158 (src/charts/ module, migration 006 spray chart additions), E-120-06 (opponent_links table, sub-nav Opponents, url_parser correction, port 8001, teams columns), E-115-02 (schema and admin sections rewritten for E-100 fresh-start schema), E-042 (admin team management, url_parser, team_resolver), E-003-02 (original), E-239 (reports-first reframe: removed dashboard surface references, plays pipeline note)*
+*Last updated: 2026-06-21 | Source: E-241-05 (removed season_fallback from trust-flags table, updated program_type notes to pitch-rule role, updated season_id examples to year-only), E-235 (migration 002 report_generation_runs, N vs M coverage semantics), E-196 (migration 014 start_time/timezone, game ordering), E-195 (migration 009 plays/play_events tables), E-173 (unified resolve route, subnav badge, discover-opponents route removed), E-167 (migration 007 name+season_year index), E-158 (src/charts/ module, migration 006 spray chart additions), E-120-06 (opponent_links table, sub-nav Opponents, url_parser correction, port 8001, teams columns), E-115-02 (schema and admin sections rewritten for E-100 fresh-start schema), E-042 (admin team management, url_parser, team_resolver), E-003-02 (original), E-239 (reports-first reframe: removed dashboard surface references, plays pipeline note)*

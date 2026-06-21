@@ -533,8 +533,8 @@ def _get_all_reports() -> list[dict[str, Any]]:
     Uses the shared ``list_reports_with_runs`` join (src/api/db.py) so this admin
     surface and the CLI ``list_reports()`` read the same 1:1 LEFT JOIN
     (E-235-06 / TN-6). Each dict gains the per-stage ``report_generation_runs``
-    columns and the operator-only trust flags (``season_fallback``,
-    ``identity_match_method``); ``error_message`` was already selected here.
+    columns and the operator-only trust flag (``identity_match_method``);
+    ``error_message`` was already selected here.
     Run columns are NULL for legacy reports with no run row (LEFT join).
     """
     from datetime import datetime, timezone

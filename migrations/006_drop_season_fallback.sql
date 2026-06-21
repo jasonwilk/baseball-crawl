@@ -1,0 +1,58 @@
+-- ===========================================================================
+-- Migration 006: drop report_generation_runs.season_fallback
+-- ===========================================================================
+-- Epic E-241 (story E-241-02), Technical Notes TN-7.
+--
+-- WHAT: Removes the now-unreferenced `season_fallback` column from
+--       `report_generation_runs`.
+--
+-- WHY:  E-241 collapses cross-season machinery from the core. The
+--       season-derivation suffix taxonomy is gone (E-241-06), so the
+--       "did derivation fall back to a year-only season_id?" telemetry that
+--       `season_fallback` recorded no longer has a signal to carry --
+--       derivation now ALWAYS emits a year-only id. E-241-01 stripped every
+--       code reference (write path removed; the generator no longer touches
+--       the column) but left the column physically present so its own staging
+--       boundary stayed green. This migration drops it. The drop must land
+--       only AFTER the code strip (E-241-01) because `apply_migrations` runs
+--       at startup -- a read of the column would break the instant it
+--       disappeared. Sequencing: blocked by BOTH E-241-01 and E-241-06.
+--
+-- MECHANISM: a direct `ALTER TABLE ... DROP COLUMN`. The column is a plain
+--   `INTEGER NOT NULL DEFAULT 0` (002:86) with NO index, FK, generated-column,
+--   or view dependency (verified by grep across migrations/), so SQLite's
+--   3.35+ direct DROP COLUMN applies -- not a 12-step table rebuild. The
+--   target SQLite (3.45.1) is well past 3.35.
+--
+-- SEASON_ID FRAGMENTATION SAFETY (TN-7) -- chosen mechanism: NO-OP DEFAULT.
+--   `season_id` is an FK target and join/group key. If derivation begins
+--   emitting year-only `2026` while a persisted DB still holds a compound
+--   `2026-spring-hs` season_id, that team's season would fragment into two
+--   partitions and the single-season report query would silently miss half
+--   the data. This migration deliberately does NO season_id rewrite, and that
+--   is the CORRECT and durable choice here, because:
+--     (a) live data is already year-only -- the dev DB holds exactly the
+--         year-only "2026" season, and production is reports-first and
+--         reset-friendly (compound slugs were fixtures-only); and
+--     (b) E-241-06 collapsed BOTH compound-slug producers (the loaders and
+--         the scouting crawler) to year-only, so no new compound slug can be
+--         created after this point -- the no-op default cannot be re-broken by
+--         the next report run.
+--   A season_id normalization is therefore intentionally NOT performed. It
+--   would be required ONLY if persisted compound `season_id` values were
+--   actually found; none exist in live data, and a deterministic migration
+--   that is correct regardless of DB state is the safe default for a worktree
+--   with no `data/` access. For the record, the correct normalization (were
+--   one ever needed) is NOT a plain `UPDATE` -- `seasons.season_id` is a TEXT
+--   PK referenced by SEVEN child columns, none with `ON UPDATE CASCADE`, under
+--   `foreign_keys=ON` -- but insert-year-only-parent -> repoint-all-7-FK-
+--   children (including this table's `season_id_used`) -> delete-old-parent,
+--   with detect-and-fail collision handling. That path is out of scope here.
+--
+-- IDEMPOTENCY: the migration runner applies each file exactly once (tracked by
+--   filename in `_migrations`), so a bare `DROP COLUMN` is sufficient. SQLite
+--   has no `DROP COLUMN IF EXISTS`; re-running this file is prevented by the
+--   runner, not by the SQL.
+-- ---------------------------------------------------------------------------
+
+ALTER TABLE report_generation_runs DROP COLUMN season_fallback;

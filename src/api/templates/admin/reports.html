@@ -114,10 +114,6 @@
           <span class="operator-degraded inline-block mt-1 px-1.5 py-0.5 rounded font-normal text-[10px] bg-yellow-100 text-yellow-800"
                 title="Run completed but a pipeline stage degraded (partial/failed) — drill into the Pipeline line above">degraded</span>
           {% endif %}
-          {% if report.season_fallback %}
-          <span class="inline-block mt-1 px-1.5 py-0.5 rounded font-normal text-[10px] bg-orange-100 text-orange-800"
-                title="Season resolved via current-year / year-only fallback, not team metadata (possible wrong-season risk)">season fallback</span>
-          {% endif %}
           {% if report.identity_match_method == 'name_only' %}
           <span class="inline-block mt-1 px-1.5 py-0.5 rounded font-normal text-[10px] bg-orange-100 text-orange-800"
                 title="Team matched by name only — no gc_uuid/public_id anchor (possible wrong-team risk)">name-only match</span>
