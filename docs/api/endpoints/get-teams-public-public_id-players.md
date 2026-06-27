@@ -7,8 +7,11 @@ profiles:
   web:
     status: confirmed
     notes: >
-      Captured with gc-token present. Auth may not be required -- endpoint uses
-      /teams/public/ path pattern. Unauthenticated access not yet tested.
+      AUTH REQUIRED (resolved 2026-06-21): direct A/B test -- request WITHOUT
+      gc-token returns 401; same request WITH gc-token returns 200. Despite the
+      /teams/public/ path, this endpoint is NOT unauthenticated. Reachable for
+      non-managed (tracked) teams when authenticated. Returns only `active`
+      players (excludes `status: "removed"` records -- see GET /players/{id}).
   mobile:
     status: unverified
     notes: Not captured from mobile profile.
@@ -29,10 +32,9 @@ caveats:
     uses the inverted order. Both path structures coexist in the API and have
     different auth behaviors.
   - >
-    AUTH UNVERIFIED: Frontmatter says `auth: required` because the confirmed capture
-    used gc-token, but unauthenticated access has NOT been tested. The `/teams/public/`
-    path pattern suggests auth may not be required. Until a no-auth test is done,
-    treat auth as assumed, not confirmed.
+    AUTH CONFIRMED REQUIRED (2026-06-21): direct A/B test -- no gc-token returns
+    401, gc-token returns 200. The `/teams/public/` path does NOT imply
+    unauthenticated access; auth is required despite the path shape.
 related_schemas: []
 see_also:
   - path: /teams/{team_id}/players
@@ -71,7 +73,7 @@ Accept: application/vnd.gc.com.public_player:list+json; version=0.0.0
 User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36
 ```
 
-Auth requirement uncertain -- captured with gc-token but may work without it.
+Auth REQUIRED -- confirmed 2026-06-21 (401 without gc-token, 200 with).
 
 ## Response
 
@@ -87,7 +89,8 @@ Bare JSON array of player objects. 20 players returned in single response (no pa
 
 ## Known Limitations
 
-- Auth requirement is unconfirmed. Captured with gc-token. Whether it works without auth is unknown.
+- Auth is REQUIRED (confirmed 2026-06-21: 401 without gc-token, 200 with). The `/teams/public/` path does not imply unauthenticated access.
+- Returns only `active` player records. `status: "removed"` players (visible in historical boxscores) are excluded -- this is why the roster count can be lower than the distinct player count in boxscore identity tables. See `GET /players/{player_id}` (`status` field).
 - `avatar_url` is an empty string `""` when unset (not null). Same normalization needed as authenticated roster endpoint.
 - `number` is NOT unique within a team (two players sharing #15 observed).
 - The URL pattern (`/teams/public/`) is the INVERSE of other public endpoints (`/public/teams/`). This is critical -- do not assume auth rules apply consistently based on the presence of "public" in the path.
