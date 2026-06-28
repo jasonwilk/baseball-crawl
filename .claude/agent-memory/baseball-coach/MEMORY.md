@@ -71,6 +71,11 @@ Players must be tracked across teams and seasons:
 - Longitudinal tracking enables: development trajectories, regression detection, promotion readiness
 - The data model must support this from day one -- retrofitting cross-team identity is painful
 
+## Scouting Model
+
+- [probable-starter-model.md](probable-starter-model.md) -- Deterministic probable-starter prediction model: ranked signals, NSAA/Legion rest thresholds by league+level+phase, role classification rules, committee handling, report output shape, backtesting scoring
+- [league-pitch-rules.md](league-pitch-rules.md) -- Per-league pitch count rules: gate keyed by league x level x phase; NSAA breakpoints (30/50/70/90/110) differ from Legion/Pitch Smart (30/45/60/80/105); Sub-Varsity +1 day stricter; implementation gap in starter_prediction.py
+
 ## Topic File Index
 
 - [endpoint-coaching-value.md](endpoint-coaching-value.md) -- Per-game stats, boxscore, and plays endpoint coaching value (MUST HAVE/SHOULD HAVE priorities, pipeline dependencies, endpoint comparisons)

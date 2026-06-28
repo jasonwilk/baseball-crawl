@@ -101,6 +101,8 @@ Review this list every 90 days, or when completing an epic. Ask:
 | [IDEA-080](IDEA-080-coach-facing-scheduled-report-delivery.md) | Coach-Facing Scheduled Report Delivery — email links to coaches the morning of the game (deferred from E-240; carries coach email-content MUST-HAVEs + the stable-URL/extended-expiry option) | CANDIDATE | 2026-09-15 |
 | [IDEA-081](IDEA-081-post-e241-dead-code-stale-example-sweep.md) | Post-E-241 dead-code + stale-example sweep (scout_all-orphaned freshness-gating cluster + dead format_season_display + stale compound-slug example comments; deferred-whole from E-241) | CANDIDATE | 2026-09-19 |
 | [IDEA-082](IDEA-082-twin-athlete-uuid-resolution.md) | GameChanger active/removed athlete-UUID "twin" resolution (one human split across two UUIDs fragments opponent stats; deterministic status-gated merge, re-base detection off team_rosters; blockers: re-validate blast-radius on clean DB + DE ratifies X-vs-Y) | CANDIDATE | 2026-09-25 |
+| [IDEA-083](IDEA-083-per-arm-estimate-marker.md) | Per-arm estimate marker for IP-proxied arms in non-estimate probable-starter sections (deferred from E-243 by UXD "section-level estimate suffices, Simple first"; promote if proxied-arm-in-varsity proves common or a coach is misled) | CANDIDATE | 2026-09-25 |
+| [IDEA-084](IDEA-084-scouting-coverage-fill.md) | Scouting-coverage fill to lift probable-starter accuracy (lever A: report-time opponent completed-schedule fill via existing no-auth public pipeline; ~40%→50-55% top-2, bounded by committee entropy; memo `.project/research/scout-coverage-lever.md`; open: report-time vs scheduled backfill + fetch budget; lever C cross-season is project non-goal) | CANDIDATE | 2026-09-26 |
 
 ## Status Definitions
 

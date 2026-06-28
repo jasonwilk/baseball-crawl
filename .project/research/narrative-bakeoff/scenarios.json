@@ -1,0 +1,285 @@
+[
+  {
+    "key": "committee",
+    "team_id": 147,
+    "season_id": "2026",
+    "label": "Standing Bear Freshman",
+    "game_date": "2026-03-26",
+    "league": "nsaa_varsity",
+    "is_estimate": false,
+    "rotation_pattern": "committee",
+    "confidence": "low",
+    "total_team_games": 4,
+    "team_record": "2-2",
+    "ranked_arms": [
+      {
+        "name": "Liam Beiermann",
+        "jersey_number": "3",
+        "games_started": 1,
+        "start_share": 0.25,
+        "days_rest": 7,
+        "last_outing_pitches": 27,
+        "ip_outs_last": 3,
+        "eligibility": "available",
+        "likelihood": 1.0,
+        "reasoning": "Committee candidate, 7 days rest, 27 pitches last outing, spot starter -- recent start is anomalous, low pitch count last outing"
+      },
+      {
+        "name": "Jace Stanczyk",
+        "jersey_number": "0",
+        "games_started": 1,
+        "start_share": 0.25,
+        "days_rest": 5,
+        "last_outing_pitches": 42,
+        "ip_outs_last": 8,
+        "eligibility": "available",
+        "likelihood": 0.249,
+        "reasoning": "Committee candidate, 5 days rest, 42 pitches last outing, spot starter -- recent start is anomalous, low pitch count last outing"
+      },
+      {
+        "name": "Thomas Saddler",
+        "jersey_number": "7",
+        "games_started": 2,
+        "start_share": 0.5,
+        "days_rest": 2,
+        "last_outing_pitches": 37,
+        "ip_outs_last": 6,
+        "eligibility": "discounted",
+        "likelihood": 0.121,
+        "reasoning": "Committee candidate, 2 days rest, 37 pitches last outing, low pitch count last outing"
+      }
+    ],
+    "unavailable_arms": [],
+    "data_note": null
+  },
+  {
+    "key": "tired_arm",
+    "team_id": 227,
+    "season_id": "2024",
+    "label": "Cornhusker LSW JV 2024",
+    "game_date": "2024-06-05",
+    "league": "nsaa_varsity",
+    "is_estimate": false,
+    "rotation_pattern": "committee",
+    "confidence": "low",
+    "total_team_games": 12,
+    "team_record": "8-4",
+    "ranked_arms": [
+      {
+        "name": "Ian Draus",
+        "jersey_number": "12",
+        "games_started": 2,
+        "start_share": 0.167,
+        "days_rest": 7,
+        "last_outing_pitches": 105,
+        "ip_outs_last": 19,
+        "eligibility": "available",
+        "likelihood": 0.312,
+        "reasoning": "Committee candidate, 7 days rest, 105 pitches last outing, high pitch count last outing"
+      },
+      {
+        "name": "Zach Hirschbrunner",
+        "jersey_number": "9",
+        "games_started": 1,
+        "start_share": 0.083,
+        "days_rest": 8,
+        "last_outing_pitches": 57,
+        "ip_outs_last": 12,
+        "eligibility": "available",
+        "likelihood": 0.312,
+        "reasoning": "Committee candidate, 8 days rest, 57 pitches last outing, spot starter -- recent start is anomalous"
+      },
+      {
+        "name": "Jaxon Pieper",
+        "jersey_number": "4",
+        "games_started": 2,
+        "start_share": 0.167,
+        "days_rest": 3,
+        "last_outing_pitches": 90,
+        "ip_outs_last": 13,
+        "eligibility": "discounted",
+        "likelihood": 0.829,
+        "reasoning": "Committee candidate, 3 days rest, 90 pitches last outing, high pitch count last outing"
+      }
+    ],
+    "unavailable_arms": [
+      {
+        "name": "Nicolas Luciani",
+        "jersey_number": "13",
+        "reason": "1d rest -- needs 2 (threw 63 pitches on 2024-06-04)",
+        "days_since": 1,
+        "pitches": 63,
+        "ip_outs": 9,
+        "days_short": 1
+      }
+    ],
+    "data_note": null
+  },
+  {
+    "key": "youth_estimate",
+    "team_id": 126,
+    "season_id": "2026",
+    "label": "Grand Island Home Federal Bank 18U",
+    "game_date": "2026-06-26",
+    "league": "legion",
+    "is_estimate": true,
+    "rotation_pattern": "committee",
+    "confidence": "low",
+    "total_team_games": 23,
+    "team_record": "16-7",
+    "ranked_arms": [
+      {
+        "name": "Blake Caspar",
+        "jersey_number": "8",
+        "games_started": 3,
+        "start_share": 0.13,
+        "days_rest": 7,
+        "last_outing_pitches": 35,
+        "ip_outs_last": 7,
+        "eligibility": "available",
+        "likelihood": 1.0,
+        "reasoning": "Committee candidate, 7 days rest, 35 pitches last outing, low pitch count last outing"
+      },
+      {
+        "name": "Miles Nelson",
+        "jersey_number": "11",
+        "games_started": 3,
+        "start_share": 0.13,
+        "days_rest": 7,
+        "last_outing_pitches": 60,
+        "ip_outs_last": 9,
+        "eligibility": "available",
+        "likelihood": 0.309,
+        "reasoning": "Committee candidate, 7 days rest, 20 pitches last outing, spot starter -- recent start is anomalous, low pitch count last outing"
+      },
+      {
+        "name": "Kingston Loften",
+        "jersey_number": "6",
+        "games_started": 4,
+        "start_share": 0.174,
+        "days_rest": 9,
+        "last_outing_pitches": 59,
+        "ip_outs_last": 5,
+        "eligibility": "available",
+        "likelihood": 0.309,
+        "reasoning": "Committee candidate, 9 days rest, 59 pitches last outing, high pitch count last outing"
+      }
+    ],
+    "unavailable_arms": [
+      {
+        "name": "Grayson Sack",
+        "jersey_number": "7",
+        "reason": "2d rest -- needs 3 (threw 67 pitches on 2026-06-24)",
+        "days_since": 2,
+        "pitches": 67,
+        "ip_outs": 15,
+        "days_short": 1
+      }
+    ],
+    "data_note": null
+  },
+  {
+    "key": "clear_rotation",
+    "team_id": 160,
+    "season_id": "2026",
+    "label": "Standing Bear Varsity",
+    "game_date": "2026-03-31",
+    "league": "nsaa_varsity",
+    "is_estimate": false,
+    "rotation_pattern": "2-man rotation",
+    "confidence": "high",
+    "total_team_games": 6,
+    "team_record": "2-4",
+    "ranked_arms": [
+      {
+        "name": "Renton LaHolt",
+        "jersey_number": "25",
+        "games_started": 2,
+        "start_share": 0.333,
+        "days_rest": 5,
+        "last_outing_pitches": 80,
+        "ip_outs_last": 20,
+        "eligibility": "available",
+        "likelihood": 0.914,
+        "reasoning": "Next in 2-man rotation, 5 days rest, 80 pitches last outing, high pitch count last outing"
+      },
+      {
+        "name": "Jaxson Minzel",
+        "jersey_number": "2",
+        "games_started": 2,
+        "start_share": 0.333,
+        "days_rest": 4,
+        "last_outing_pitches": 57,
+        "ip_outs_last": 6,
+        "eligibility": "available",
+        "likelihood": 0.195,
+        "reasoning": "Next in 2-man rotation, 4 days rest, 57 pitches last outing, high pitch count last outing"
+      },
+      {
+        "name": "Drake Von Seggern",
+        "jersey_number": "9",
+        "games_started": 1,
+        "start_share": 0.167,
+        "days_rest": 4,
+        "last_outing_pitches": 9,
+        "ip_outs_last": 3,
+        "eligibility": "available",
+        "likelihood": 0.195,
+        "reasoning": "Next in 2-man rotation, 4 days rest, 9 pitches last outing, spot starter -- recent start is anomalous, low pitch count last outing"
+      }
+    ],
+    "unavailable_arms": [],
+    "data_note": null
+  },
+  {
+    "key": "low_data",
+    "team_id": 91,
+    "season_id": "2026",
+    "label": "PrimeTime Westview Reserve",
+    "game_date": "2026-05-29",
+    "league": "nsaa_varsity",
+    "is_estimate": false,
+    "rotation_pattern": "committee",
+    "confidence": "low",
+    "total_team_games": 4,
+    "team_record": "3-1",
+    "ranked_arms": [
+      {
+        "name": "Ollie Fenceroy",
+        "jersey_number": "2",
+        "games_started": 1,
+        "start_share": 0.25,
+        "days_rest": 5,
+        "last_outing_pitches": 73,
+        "ip_outs_last": 12,
+        "eligibility": "available",
+        "likelihood": 0.914,
+        "reasoning": "Committee candidate, 5 days rest, 73 pitches last outing, spot starter -- recent start is anomalous"
+      },
+      {
+        "name": "Kaleb Christ",
+        "jersey_number": "10",
+        "games_started": 1,
+        "start_share": 0.25,
+        "days_rest": 3,
+        "last_outing_pitches": 48,
+        "ip_outs_last": 6,
+        "eligibility": "discounted",
+        "likelihood": 0.164,
+        "reasoning": "Committee candidate, 3 days rest, 48 pitches last outing, spot starter -- recent start is anomalous, low pitch count last outing"
+      }
+    ],
+    "unavailable_arms": [
+      {
+        "name": "Bennett Chan",
+        "jersey_number": "9",
+        "reason": "2d rest -- needs 4 (threw 99 pitches on 2026-05-27)",
+        "days_since": 2,
+        "pitches": 99,
+        "ip_outs": 21,
+        "days_short": 2
+      }
+    ],
+    "data_note": null
+  }
+]

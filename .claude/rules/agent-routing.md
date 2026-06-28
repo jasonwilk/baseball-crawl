@@ -21,7 +21,7 @@ paths:
 
 **Agent Hint**: Stories may carry an optional `## Agent Hint` field that declares which agent type should implement the story. When an Agent Hint is present, the main session should prefer it over file-path inference from the routing table above. The hint is advisory -- the main session may override it based on team composition, agent availability, or other factors.
 
-**Routing Precedence**: If a story's "Files to Create or Modify" includes any context-layer path listed above, route to `claude-architect` regardless of the story's primary domain or Agent Hint value. The only exception is PM updating its own memory files (`.claude/agent-memory/product-manager/`) during normal closure work.
+**Routing Precedence**: If a story's "Files to Create or Modify" includes any context-layer path listed above, route to `claude-architect` regardless of the story's primary domain or Agent Hint value. The sole exception is an agent editing files within its OWN agent-memory directory (`.claude/agent-memory/<agent-name>/`): each agent owns its own learned-knowledge directory, so such edits stay with that agent rather than routing to `claude-architect` (e.g., PM updating `.claude/agent-memory/product-manager/` during closure, or baseball-coach correcting a model doc in `.claude/agent-memory/baseball-coach/`). This carve-out covers an agent's OWN directory only -- a story touching a different agent's memory, or any non-memory context-layer path, still routes to `claude-architect`. It mirrors the own-memory carve-out already in `.claude/rules/workflow-discipline.md` (Consultation Mode Constraint).
 
 ## Decision Routing
 
